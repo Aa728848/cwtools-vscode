@@ -19,9 +19,9 @@ const vscodeStub = {
 function loadPromptBudgetModules() {
     const moduleLoader = require('module') as { _load: (...args: unknown[]) => unknown };
     const originalLoad = moduleLoader._load;
-    moduleLoader._load = function (this: unknown, request: string, ...args: unknown[]) {
-        if (request === 'vscode') return vscodeStub;
-        return originalLoad.apply(this, [request, ...args]);
+    moduleLoader._load = function (this: unknown, ...args: unknown[]) {
+        if (args[0] === 'vscode') return vscodeStub;
+        return originalLoad.apply(this, args);
     };
     try {
         return {

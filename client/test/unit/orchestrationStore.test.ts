@@ -89,6 +89,7 @@ describe('orchestrationStore', () => {
                 writtenFiles: [],
                 stepCount: 3,
                 handoff: {
+                    version: 1,
                     summary: 'n1 handoff summary',
                     verification: ['verified a'],
                     unresolved: [],
@@ -120,7 +121,7 @@ describe('orchestrationStore', () => {
             version: 1,
             authorAgentId: 'n1',
             timestamp: 1,
-        }]], timestamp: 2 };
+        }] as [string, import('../../extension/ai/orchestrator/types').BlackboardEntry]], timestamp: 2 };
 
         const saved = await store.saveOrchestration({
             topicId,

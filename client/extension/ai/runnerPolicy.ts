@@ -201,6 +201,10 @@ export function isSelectableStageSupportTool(
 /**
  * Add support schemas to the pool used by select_tools. Passing `loaded`
  * produces the smaller model-visible pool after a selection has succeeded.
+ * Tools explicitly loaded via select_tools (or the runtime auto-disclosure)
+ * must stay visible even when their current stage pool does not contain them;
+ * otherwise a write-authorized run cannot continue after select_tools loads
+ * a deferred write tool such as edit_file at the discovery stage.
  */
 export function extendStageToolPoolWithSupport(
     stageTools: readonly ToolDefinition[],
@@ -212,9 +216,12 @@ export function extendStageToolPoolWithSupport(
     const merged = new Map(stageTools.map(tool => [tool.function.name, tool]));
     for (const tool of eligibleTools) {
         const name = tool.function.name;
-        if (!merged.has(name)
-            && isSelectableStageSupportTool(name, mode, stage)
-            && (loaded === undefined || loaded.has(name))) {
+        if (merged.has(name)) continue;
+        if (loaded !== undefined && loaded.has(name)) {
+            merged.set(name, tool);
+            continue;
+        }
+        if (isSelectableStageSupportTool(name, mode, stage)) {
             merged.set(name, tool);
         }
     }
@@ -357,6 +364,21 @@ export function isExecutionActionTool(toolName: string): boolean {
         || effect === 'git'
         || effect === 'media'
         || effect === 'process';
+}
+
+/**
+ * Detect a final answer where the model stops because it misread truncated
+ * tool results (large diff previews, diagnostic lists) as partial application.
+ * Only meaningful for write-authorized writable runs, where the loop can push
+ * a bounded recovery instead of accepting the stop.
+ */
+export function isTruncationInducedStop(content: string): boolean {
+    const text = content.trim();
+    if (!text || text.includes(':::question')) return false;
+    const tail = text.slice(-2_000);
+    if (!/(?:截断|truncat)/i.test(tail)) return false;
+    return /(?:不能|无法|不应|不会|难以|风险|不再|停止|中止)[^。！？\n]{0,40}(?:继续|批量|替换|修改|写入|修复|执行|安全)/.test(tail)
+        || /\b(?:cannot|can'?t|unable|not\s+safe|risks?)\b[\s\S]{0,80}\b(?:continue|proceed|batch|apply|safely|modif|writ)/i.test(tail);
 }
 
 const STAGE_GUIDANCE: Record<AgentToolStage, string> = {

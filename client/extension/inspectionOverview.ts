@@ -1,4 +1,5 @@
 import * as vs from 'vscode';
+import { localize } from './panelI18n';
 
 export interface InspectionDiagnosticInput {
 	relativePath: string;
@@ -17,13 +18,7 @@ const SEVERITY_ORDER = [
 	vs.DiagnosticSeverity.Hint,
 ];
 
-function isChineseLocale(): boolean {
-	return vs.env.language.toLowerCase().startsWith('zh');
-}
 
-function localize(en: string, zh: string): string {
-	return isChineseLocale() ? zh : en;
-}
 
 function severityLabel(severity: vs.DiagnosticSeverity): string {
 	switch (severity) {

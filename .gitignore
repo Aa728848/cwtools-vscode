@@ -30,3 +30,4 @@ cwtools.local.props
 .tmp-test
 .tmp
 /.reasonix
+coverage/

@@ -64,11 +64,12 @@ Run the smallest check that covers your change, then broaden when the change cro
 
 | Change | Minimum useful check |
 | --- | --- |
-| Extension Host or Webview TypeScript | `npm run compile`, then targeted unit tests |
+| Extension Host or Webview TypeScript | `npm run compile`, `npm run typecheck:test` (strict over the whole `client/` tree including tests), then targeted unit tests |
 | AI runner or tools | Targeted tests, then `npm run test:unit` |
 | Documentation | `npm run build:docs` and `npm run check:release -- --skip-compile --skip-test` |
 | F# LSP layer | `dotnet build src/LSP/` |
 | F# server or CWTools integration | `dotnet build src/Main/` |
+| F# regression scripts | `dotnet fsi` each `src/**/*.Tests.fsx` from its directory |
 | CWT rules sync | `npm run test:rules-sync` plus the relevant scan/check/report command |
 | MCP contracts | Generate the schema, then build and test inside `submodules/cwtools-mcp` |
 | Broad release-sensitive change | `npm run verify` |
@@ -78,6 +79,7 @@ Common commands:
 ```bash
 npm run lint
 npm run compile
+npm run typecheck:test
 npm run test:unit
 npm run test
 npm run verify
@@ -262,11 +264,12 @@ git submodule update --init --recursive
 
 | 修改范围 | 最小有效检查 |
 | --- | --- |
-| Extension Host 或 Webview TypeScript | `npm run compile`，再运行相关单元测试 |
+| Extension Host 或 Webview TypeScript | `npm run compile`、`npm run typecheck:test`（对包含测试的整个 `client/` 严格检查），再运行相关单元测试 |
 | AI runner 或工具 | 相关测试，然后 `npm run test:unit` |
 | 文档 | `npm run build:docs` 和 `npm run check:release -- --skip-compile --skip-test` |
 | F# LSP 层 | `dotnet build src/LSP/` |
 | F# 服务端或 CWTools 集成 | `dotnet build src/Main/` |
+| F# 回归脚本 | 在各自目录用 `dotnet fsi` 运行每个 `src/**/*.Tests.fsx` |
 | CWT 规则同步 | `npm run test:rules-sync`，再运行相关 scan/check/report 命令 |
 | MCP 契约 | 生成 schema，再进入 `submodules/cwtools-mcp` 构建和测试 |
 | 影响发布的较大修改 | `npm run verify` |
@@ -276,6 +279,7 @@ git submodule update --init --recursive
 ```bash
 npm run lint
 npm run compile
+npm run typecheck:test
 npm run test:unit
 npm run test
 npm run verify

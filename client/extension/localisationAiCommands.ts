@@ -1,4 +1,5 @@
 import * as vs from 'vscode';
+import { localize } from './panelI18n';
 
 type SendProgrammaticMessage = (message: string) => Promise<void>;
 
@@ -14,13 +15,7 @@ export interface LocalisationSnippet {
 
 const MAX_SNIPPET_CHARS = 20000;
 
-function isChineseLocale(): boolean {
-	return vs.env.language.toLowerCase().startsWith('zh');
-}
 
-function localize(en: string, zh: string): string {
-	return isChineseLocale() ? zh : en;
-}
 
 function trimSnippet(text: string): string {
 	if (text.length <= MAX_SNIPPET_CHARS) return text;

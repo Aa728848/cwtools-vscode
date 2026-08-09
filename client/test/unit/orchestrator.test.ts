@@ -889,7 +889,7 @@ describe('approved blueprint dispatch', () => {
             } as any) as any;
             expect(result.success).to.equal(true);
             expect(capturedGraph?.metadata.featureManifest?.objective).to.equal('Build approved event');
-            expect(capturedGraph?.nodes.get('build_event')?.produces?.[0].id).to.equal('approved.1');
+            expect(capturedGraph?.nodes.get('build_event')?.produces?.[0]!.id).to.equal('approved.1');
             expect(parentUsage).to.include({
                 total: 130,
                 input: 108,

@@ -83,7 +83,7 @@ describe('tool definitions', () => {
     });
 
     it('registers provider-neutral navigation and guarded rename tools for both domains', () => {
-        for (const name of ['go_to_definition', 'find_references', 'hover_symbol', 'rename_symbol']) {
+        for (const name of ['go_to_definition', 'find_references', 'hover_symbol', 'rename_symbol'] as const) {
             expect(TOOL_DEFINITIONS.some(def => def.function.name === name), name).to.equal(true);
             expect(TOOL_REGISTRY.get(name)?.domain, name).to.equal('shared');
         }

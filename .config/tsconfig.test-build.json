@@ -1,0 +1,12 @@
+{
+	"extends": "../tsconfig.json",
+	"include": [
+		"../client/test/suite/**/*.ts",
+		"../client/test/utils.ts",
+		"../client/test/lspErrorMonitor.ts"
+	],
+	"exclude": [
+		"../client/test/unit/**",
+		"../client/webview/**"
+	]
+}

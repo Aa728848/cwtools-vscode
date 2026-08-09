@@ -15,36 +15,12 @@ planet_event = {
 	show_sound = event_conversation
 
 	immediate = {
-		# Save the scope, mark that interface screen is opened
-		save_global_event_target_as = "ui_interface_planet" # ui dummy
-		set_planet_flag = "ui_management_open"
-		# RUN DATA PARSINGS
-		sector = {
-			# Generate sector name
-			# I hope, pdx will fix issues with sector.Getname in localization			
-			owner = {
-				create_leader = { name = random type = ruler }
-				last_created_leader = { set_name = "ui_sector_getName" save_event_target_as = "ui_title_dummy" }
-			}
-
-			# Infrastructure Balance
-			sector_estimate_inf_size = yes
-			# Development Stats
-			sector_estimate_dev_idx = yes
-			sector_estimate_dev_idx_100 = yes
-			sector_estimate_systems = yes
-			# Demography & Politics
-			sector_estimate_species = yes
-			sector_estimate_regionalism = yes
-			sector_estimate_regionalism_percent = yes
-			sector_estimate_unrest = yes
-			# Sector Warfare
-			sector_estimate_armies = yes
-		}
+		# Legacy sector data parsing removed; the UI remains available.
 	}
 
 	# CLOSE
 	option = {
+		name = "ui_sector_close"
 		custom_gui = "irm_window_close"
 		allow = {
 			nor = {
@@ -241,6 +217,7 @@ planet_event = {
 
 		# Custom close button
 		option = {
+			name = "edict_sector_food_cost"
 			custom_gui = "irm_opt_window_close"
 			hidden_effect = {
 				remove_planet_flag = "ui_development_opened"
@@ -356,26 +333,13 @@ planet_event = {
 			sector = {
 				sector_estimate_regionalism_attraction = yes
 			}
-
-			# Parse faction data
-			owner = {
-				if = {
-					limit = { not = { has_ethic = "ethic_gestalt_consciousness" } }
-						random_pop_faction = {
-							limit = {
-								is_pop_faction_type = "regionalist"
-								check_pop_faction_parameter = { which = sector value = root.sector }
-							}
-							faction_get_leader = yes
-						}					
-				}
-			}
 		}
 
 		# EDICTS COST
 
 		# Custom close button
 		option = {
+			name = "edict_sector_food_cost"
 			custom_gui = "irm_opt_window_close_pol"
 			hidden_effect = {
 				# Clean flags
@@ -439,96 +403,8 @@ country_event = {
 			limit = {
 				leader_class = governor
 				leader_has_edicts = yes
-				owner = {
-					not = {
-						any_sector = {
-							is_core_sector = no
-							exists = leader
-							leader = { is_same_value = prevprevprev }
-						}
-					}
-				}
 			}
 			leader_remove_edicts = yes	
-		}
-		# Track edicts actuality for sector leaders
-		every_sector = {
-			limit = {
-				is_core_sector = no
-				exists = leader
-			}
-			# Check sector capital existance before edicts solving
-			if = {
-				limit = { any_planet = { is_sector_capital = yes } }
-					# Begin checking process from sector capital
-					random_planet = {
-						limit = { is_sector_capital = yes }
-						# Edict Food
-						if = {
-							limit = { check_variable = { which = left_edict_food value > 0 } }
-								sector.leader = { if = { limit = { not = { has_trait = "trait_edict_food" } } add_trait = "trait_edict_food" } }
-							else = { sector.leader = { remove_trait = "trait_edict_food" } }
-						}
-						# Edict Energy
-						if = {
-							limit = { check_variable = { which = left_edict_energy value > 0 } }
-								sector.leader = { if = { limit = { not = { has_trait = "trait_edict_energy" } } add_trait = "trait_edict_energy" } }
-							else = { sector.leader = { remove_trait = "trait_edict_energy" } }
-						}
-						# Edict Minerals
-						if = {
-							limit = { check_variable = { which = left_edict_minerals value > 0 } }
-								sector.leader = { if = { limit = { not = { has_trait = "trait_edict_minerals" } } add_trait = "trait_edict_minerals" } }
-							else = { sector.leader = { remove_trait = "trait_edict_minerals" } }
-						}
-						# Edict Research
-						if = {
-							limit = { check_variable = { which = left_edict_research value > 0 } }
-								sector.leader = { if = { limit = { not = { has_trait = "trait_edict_research" } } add_trait = "trait_edict_research" } }
-							else = { sector.leader = { remove_trait = "trait_edict_research" } }
-						}
-						# Edict Infrastructure
-						if = {
-							limit = { check_variable = { which = left_edict_infrastructure value > 0 } }
-								sector.leader = { if = { limit = { not = { has_trait = "trait_edict_infrastructure" } } add_trait = "trait_edict_infrastructure" } }
-							else = { sector.leader = { remove_trait = "trait_edict_infrastructure" } }
-						}
-						# Edict Happiness
-						if = {
-							limit = { check_variable = { which = left_edict_happiness value > 0 } }
-								sector.leader = { if = { limit = { not = { has_trait = "trait_edict_happiness" } } add_trait = "trait_edict_happiness" } }
-							else = { sector.leader = { remove_trait = "trait_edict_happiness" } }
-						}
-						# Edict Migration
-						if = {
-							limit = { check_variable = { which = left_edict_migration value > 0 } }
-								sector.leader = { if = { limit = { not = { has_trait = "trait_edict_migration" } } add_trait = "trait_edict_migration" } }
-							else = { sector.leader = { remove_trait = "trait_edict_migration" } }
-						}
-						# Edict Ethics
-						if = {
-							limit = { check_variable = { which = left_edict_ethics value > 0 } }
-								sector.leader = { if = { limit = { not = { has_trait = "trait_edict_ethics" } } add_trait = "trait_edict_ethics" } }
-							else = { sector.leader = { remove_trait = "trait_edict_ethics" } }
-						}						
-						# Edict Growth
-						if = {
-							limit = { check_variable = { which = left_edict_growth value > 0 } }
-								sector.leader = { if = { limit = { not = { has_trait = "trait_edict_growth" } } add_trait = "trait_edict_growth" } }
-							else = { sector.leader = { remove_trait = "trait_edict_growth" } }
-						}							
-						# Edict Regionalism
-						if = {
-							limit = { check_variable = { which = left_edict_regionalism value > 0 } }
-								sector.leader = { if = { limit = { not = { has_trait = "trait_edict_regionalism" } } add_trait = "trait_edict_regionalism" } }
-							else = { sector.leader = { remove_trait = "trait_edict_regionalism" } }
-						}																																									
-					}				
-				# If there is no capital, just remove all edict traits
-				else = {
-					leader = { leader_remove_edicts = yes }
-				}
-			}		
 		}
 	}
 }
@@ -589,7 +465,6 @@ country_event = {
 			every_owned_planet = {
 				limit = {
 					has_sector_edict_time = yes
-					sector_controlled = no
 				}
 				planet_remove_timers = yes
 			}
@@ -606,13 +481,6 @@ country_event = {
 
 		immediate = {
 			# For every non-core sector with established capital
-			every_sector = {
-				limit = { is_core_sector = no any_planet = { is_sector_capital = yes } }
-				random_planet = {
-					limit = { is_sector_capital = yes }
-						###
-				}
-			}
 		}
 
 	}
@@ -637,7 +505,6 @@ country_event = {
 			every_owned_planet = {
 				limit = {
 					has_sector_policy_cooldown = yes
-					sector_controlled = no
 				}
 				planet_remove_cooldowns = yes
 			}
@@ -694,61 +561,3 @@ country_event = {
 		}
 
 	}
-
-	# This = Country
-	# Solve duplicated capitals per sector
-	country_event = {
-		id = irm_sector.202
-		hide_window = yes
-		is_triggered_only = yes
-
-		immediate = {
-			every_sector = {
-				limit = {
-					is_core_sector = no
-					any_planet = {
-						is_sector_planet = yes
-						has_modifier = "sector_capital"
-						sector = {
-							any_planet = {
-								is_sector_planet = yes
-								has_modifier = "sector_capital"
-								not = { is_same_value = prevprev }
-							}
-						}
-					}
-				}
-				# Select planet with other faction members or without members of this sector
-				random_planet = {
-					limit = {
-						is_sector_capital = yes
-						or = {
-							count_owned_pops = {
-								limit = {
-									exists = pop_faction
-									pop_faction = {
-										is_pop_faction_type = "regionalist"
-										not = { check_pop_faction_parameter = { which = sector value = prev.sector } }
-									}
-								}
-								count > 2
-							}
-							count_owned_pops = {
-								limit = {
-									exists = pop_faction
-									pop_faction = {
-										is_pop_faction_type = "regionalist"
-										check_pop_faction_parameter = { which = sector value = prev.sector }
-									}
-								}
-								count < 1
-							}														
-						}
-					}
-					# Clean up capital status
-					planet_event = { id = irm_sector.105 }
-				}
-			}
-		}
-
-	}	

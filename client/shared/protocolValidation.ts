@@ -15,6 +15,14 @@ export const isArray: ValueValidator = Array.isArray;
 export const isObject: ValueValidator = isRecord;
 export const isStringArray: ValueValidator = value => Array.isArray(value) && value.every(item => typeof item === 'string');
 
+/** Accepts any present value (for required fields whose payload is `unknown`). */
+export const isPresent: ValueValidator = () => true;
+
+/** Integer bounded to `[min, max]` (inclusive). */
+export function isIntegerInRange(min: number, max: number): ValueValidator {
+    return value => typeof value === 'number' && Number.isInteger(value) && value >= min && value <= max;
+}
+
 export function isOneOf<const T extends readonly unknown[]>(values: T): ValueValidator {
     return value => values.includes(value);
 }

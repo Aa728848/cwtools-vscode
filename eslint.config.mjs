@@ -44,4 +44,20 @@ export default tseslint.config(
 			'@typescript-eslint/no-floating-promises': 'off',
 		},
 	},
-);
+	// Protocol, storage-recovery, and wire-format boundary files: forbid new `any`.
+	// Keep these files strict so untrusted payloads stay `unknown` at the edge.
+	// (runLedger is exempt: its event envelope intentionally keeps `any` — see the
+	// comment on AgentRunEvent.payload.)
+	{
+		files: [
+			'client/shared/protocolValidation.ts',
+			'client/extension/ai/chat/webviewProtocol.ts',
+			'client/extension/ai/durableStorage.ts',
+			'client/extension/ai/orchestrationStore.ts',
+			'client/extension/ai/runner/agentHandoff.ts',
+		],
+		rules: {
+			'@typescript-eslint/no-explicit-any': 'error',
+		},
+	},
+);

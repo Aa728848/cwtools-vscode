@@ -3,6 +3,7 @@
  * Follows the same architecture as GuiPanel and SolarSystemPanel.
  */
 import * as vscode from 'vscode';
+import { panelText } from './panelI18n';
 import * as path from 'path';
 import * as fs from 'fs';
 import { buildEntityGraph, parseAssetFile, type EntityDefinition, type EntityGraph } from './entityAssetParser';
@@ -15,11 +16,24 @@ import {
     updateLocatorTransformBlock,
 } from './entityLocatorEditing';
 import { matchesExt } from './fileExtensions';
+import { walkFiles } from './fileWalker';
 import { resolveCaseInsensitivePath } from './fsCaseInsensitive';
 import { isPathInsideOrEqual } from './pathScope';
 import { resolveNamedParticleResources } from './particleResourceResolver';
 import { normalizedPdxMeshAnchorNames } from './pdxMeshAnchors';
 import { loadEnvironmentPresets } from './worldgfxPresets';
+import {
+    fields,
+    isArrayOf,
+    isBoolean,
+    isFiniteNumber,
+    isIntegerInRange,
+    isOneOf,
+    isRecord,
+    isString,
+    optional,
+    type MessageValidator,
+} from '../shared/protocolValidation';
 
 type LocatorTransformUpdate = {
     locatorName: string;
@@ -41,9 +55,6 @@ interface EntityDraftDocument {
     redoStack: string[];
 }
 
-function panelText(en: string, zh: string): string {
-    return vscode.env.language.toLowerCase().startsWith('zh') ? zh : en;
-}
 
 // ── WebView message types ──────────────────────────────────────────────────────
 type EntityPanelMessage =
@@ -69,11 +80,85 @@ type EntityPanelMessage =
     | { command: 'screenshot'; data: string }
     | { command: 'log'; text: string; level?: 'info' | 'warn' | 'error' };
 
+// ── WebView message validation ─────────────────────────────────────────────────
+
+/** One-based document line number (upper bound is a sanity cap, not a real limit). */
+const isDocumentLine = isIntegerInRange(1, 100_000_000);
+const isEntityIndex = isIntegerInRange(0, 100_000_000);
+const isLogLevel = isOneOf(['info', 'warn', 'error'] as const);
+/** Base64 screenshot payload cap (~16 MiB decoded). */
+const MAX_SCREENSHOT_BASE64_LENGTH = 16 * 1024 * 1024 * 4 / 3 + 4;
+
+function isVec3(value: unknown): value is [number, number, number] {
+    return Array.isArray(value)
+        && value.length === 3
+        && value.every(item => typeof item === 'number' && Number.isFinite(item));
+}
+
+function isLocatorTransformUpdate(value: unknown): value is LocatorTransformUpdate {
+    return isRecord(value)
+        && typeof value.locatorName === 'string'
+        && isVec3(value.position)
+        && isVec3(value.rotation)
+        && isFiniteNumber(value.scale);
+}
+
+const isNamedLocator: (value: unknown) => boolean = value =>
+    isRecord(value)
+    && typeof value.locatorName === 'string'
+    && isVec3(value.position)
+    && isVec3(value.rotation)
+    && (value.attachEntity === undefined || typeof value.attachEntity === 'string');
+
+function isEntityPanelMessage(input: unknown): input is EntityPanelMessage {
+    if (!isRecord(input) || typeof input.command !== 'string') return false;
+    const validators: Record<string, MessageValidator> = {
+        goToLine: fields({ line: isDocumentLine }),
+        selectState: fields({ stateName: isString }),
+        selectEntity: fields({ index: isEntityIndex }),
+        openFile: fields(),
+        updateLocator: fields({
+            locatorName: isString,
+            position: isVec3,
+            rotation: isVec3,
+            scale: isFiniteNumber,
+        }),
+        updateLocators: fields({ locators: isArrayOf(isLocatorTransformUpdate) }),
+        renameLocator: fields({ oldName: isString, newName: isString }),
+        addLocator: fields(
+            { locatorName: isString, position: isVec3, rotation: isVec3 },
+            { attachEntity: optional(isString) },
+        ),
+        duplicateLocators: fields({ locators: isArrayOf(isNamedLocator) }),
+        deleteLocators: fields({ locatorNames: isArrayOf(isString) }),
+        updateAttach: fields(
+            { locatorName: isString, entityName: isString },
+            { targetEntity: optional(isString) },
+        ),
+        requestEntityNames: fields(),
+        requestEnvironments: fields(),
+        setEditMode: fields({ editMode: isBoolean }),
+        undo: fields(),
+        redo: fields(),
+        saveDocument: fields(),
+        discardDrafts: fields(),
+        openEntityDefinition: fields({ entityName: isString }),
+        screenshot: fields({
+            data: value => typeof value === 'string' && value.length <= MAX_SCREENSHOT_BASE64_LENGTH,
+        }),
+        log: fields({ text: isString }, { level: optional(isLogLevel) }),
+    };
+    const validator = validators[input.command];
+    return validator ? validator(input) : false;
+}
+
 export class EntityPanel {
     public static currentPanel: EntityPanel | undefined;
     private static readonly viewType = 'cwtools-entity-preview';
     private readonly _panel: vscode.WebviewPanel;
     private _disposables: vscode.Disposable[] = [];
+    /** Aborts any in-flight workspace scan when the panel is disposed. */
+    private _scanAbortController = new AbortController();
     private readonly _webviewRootPath: string;
     private _document: vscode.TextDocument | undefined;
     private _searchRoots: string[] = [];
@@ -205,8 +290,9 @@ export class EntityPanel {
         this._disposables.push(this._panel.onDidChangeViewState(() => this._updateKeybindingContext()));
         this._updateKeybindingContext();
         this._disposables.push(
-            this._panel.webview.onDidReceiveMessage(async (msg: EntityPanelMessage) => {
-                if (!msg?.command) return;
+            this._panel.webview.onDidReceiveMessage(async (raw: unknown) => {
+                if (!isEntityPanelMessage(raw)) return;
+                const msg = raw;
                 switch (msg.command) {
                     case 'goToLine': {
                         if (!this._document) break;
@@ -1969,8 +2055,11 @@ export class EntityPanel {
         for (const root of searchRoots) {
             const gfxDir = path.join(root, 'gfx');
             try { await fs.promises.access(gfxDir); } catch { continue; }
-            await this._findFiles(gfxDir, '.asset', assetFiles, maxFiles);
-            await this._findFiles(gfxDir, '.gfx', gfxFiles, maxFiles);
+            const signal = this._scanAbortController.signal;
+            const assets = await walkFiles(gfxDir, { ext: '.asset', maxFiles, signal });
+            const gfx = await walkFiles(gfxDir, { ext: '.gfx', maxFiles, signal });
+            for (const file of assets) assetFiles.push({ path: file.path, content: file.content });
+            for (const file of gfx) gfxFiles.push({ path: file.path, content: file.content });
         }
 
         // Overlay in-memory cross-file drafts so previews and cycle diagnostics
@@ -1993,30 +2082,6 @@ export class EntityPanel {
         }
 
         return buildEntityGraph(assetFiles, gfxFiles);
-    }
-
-    private async _findFiles(
-        dir: string,
-        ext: string,
-        result: Array<{ path: string; content: string }>,
-        maxFiles: number,
-    ) {
-        if (result.length >= maxFiles) return;
-        try {
-            const entries = await fs.promises.readdir(dir, { withFileTypes: true });
-            await Promise.all(entries.map(async (entry) => {
-                if (result.length >= maxFiles) return;
-                const full = path.join(dir, entry.name);
-                if (entry.isDirectory()) {
-                    await this._findFiles(full, ext, result, maxFiles);
-                } else if (matchesExt(entry.name, ext)) {
-                    try {
-                        const content = await fs.promises.readFile(full, 'utf-8');
-                        result.push({ path: full, content });
-                    } catch { /* skip unreadable */ }
-                }
-            }));
-        } catch { /* skip inaccessible */ }
     }
 
     private async _handlePanelClosed(): Promise<void> {
@@ -2068,6 +2133,7 @@ export class EntityPanel {
     }
 
     public dispose(): void {
+        this._scanAbortController.abort();
         this._finalizeDispose(true);
     }
 

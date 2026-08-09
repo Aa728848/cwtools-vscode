@@ -13,7 +13,6 @@ country_event = {
 	trigger = {
 		from = {
 			leader_class = governor
-			leader_of_faction = yes
 			has_leader_flag = "faction_leader"
 			exists = pop_faction
 		}
@@ -23,7 +22,6 @@ country_event = {
 	immediate = { 
 		from = {
 			pop_faction = {
-				faction_set_leader = yes
 			}
 		}
 	}
@@ -79,22 +77,7 @@ country_event = {
 	hide_window = yes
 	is_triggered_only = yes
 
-	immediate = { 
-		every_pop_faction = {
-			limit = { has_modifier = "suppressed_faction" }
-				random_owned_pop = {
-					limit = { is_faction_pop = yes planet = { exists = sector sector = { is_core_sector = yes }}}
-						random = {
-							chance = 75
-							# Add modifier
-							if = {
-								limit = { not = { has_modifier = "pop_suppressed" } }
-									add_modifier = { modifier = "pop_suppressed" days = 3600 }
-							}
-							# Suppress pop
-							pop_suppress = yes
-						}
-				}		}
+	immediate = {
 	}
 
 }
@@ -106,19 +89,7 @@ country_event = {
 	hide_window = yes
 	is_triggered_only = yes
 
-	immediate = { 
-		every_sector = {
-			limit = { is_core_sector = no }
-				owner = {
-					random_pop_faction = {
-						limit = {
-							is_pop_faction_type = "regionalist"
-							check_pop_faction_parameter = { which = sector value = prevprev }
-						}
-						set_name = "pft_regionalist_rename"
-					}
-				}
-		}
+	immediate = {
 	}
 
-}	
+}

@@ -1,4 +1,5 @@
 import * as fs from 'fs';
+import { localize } from './panelI18n';
 import * as path from 'path';
 import { promisify } from 'util';
 import { execFile } from 'child_process';
@@ -14,13 +15,7 @@ import {
 const execFileAsync = promisify(execFile);
 const IMAGE_EXTS = new Set(['.dds', '.tga', '.png', '.jpg', '.jpeg', '.bmp']);
 
-function isChineseLocale(): boolean {
-	return vs.env.language.toLowerCase().startsWith('zh');
-}
 
-function localize(en: string, zh: string): string {
-	return isChineseLocale() ? zh : en;
-}
 
 function imageMagickBin(): string {
 	return vs.workspace.getConfiguration('stellarisLanguageServices.ai').get<string>('imageMagickPath')?.trim() || 'magick';

@@ -5367,9 +5367,16 @@ type Server(client: ILanguageClient) =
                     match activeGame with
                     | STL ->
                         cleanupOldGame()
-                        let game = loadSTL serverSettings
-                        stlGameObj <- Some(game :> IGame<STLComputedData>)
-                        game :> IGame
+                        if hasStellarisVanillaData serverSettings then
+                            let game = loadSTL serverSettings
+                            stlGameObj <- Some(game :> IGame<STLComputedData>)
+                            game :> IGame
+                        else
+                            logInfo "No Stellaris vanilla data (game path or cache); using the generic game instead"
+                            activeGame <- Custom
+                            let game = loadCustom serverSettings
+                            customGameObj <- Some(game :> IGame<JominiComputedData>)
+                            game :> IGame
                     | HOI4 ->
                         cleanupOldGame()
                         let game = loadHOI4 serverSettings

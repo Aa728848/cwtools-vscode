@@ -5,6 +5,7 @@
 'use strict';
 
 import * as path from 'path';
+import { localize, isChineseLocale } from './panelI18n';
 import * as os from 'os';
 import * as fs from 'fs';
 import * as vs from 'vscode';
@@ -257,13 +258,7 @@ interface InstallHealthOptions {
 
 let setupPanel: vs.WebviewPanel | undefined;
 
-function isChineseLocale(): boolean {
-	return vs.env.language.toLowerCase().startsWith('zh');
-}
 
-function localize(en: string, zh: string): string {
-	return isChineseLocale() ? zh : en;
-}
 
 function rulesSourceLabel(source: RulesSourceName): string {
 	if (!isChineseLocale()) return source;

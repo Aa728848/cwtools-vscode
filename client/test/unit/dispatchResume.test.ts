@@ -277,6 +277,7 @@ describe('merge_results durable store layer', () => {
                 writtenFiles: ['common/events/evt.txt'],
                 stepCount: 4,
                 handoff: {
+                    version: 1,
                     summary: 'n1 handoff',
                     verification: ['v1'],
                     unresolved: [],

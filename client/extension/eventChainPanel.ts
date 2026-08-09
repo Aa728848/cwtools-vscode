@@ -11,8 +11,10 @@
  */
 
 import * as vscode from 'vscode';
+import { panelText } from './panelI18n';
 import * as path from 'path';
 import { ErrorReporter } from './ai/errorReporter';
+import { isPathInsideOrEqual } from './pathScope';
 import {
     parseEventFile,
     parseCommonFile,
@@ -37,9 +39,6 @@ function getNonce(): string {
     return result;
 }
 
-function panelText(en: string, zh: string): string {
-    return vscode.env.language.toLowerCase().startsWith('zh') ? zh : en;
-}
 
 interface EventGraphBuildResult {
     graph: EventGraph;
@@ -47,6 +46,34 @@ interface EventGraphBuildResult {
 }
 
 const EVENT_CHAIN_NODE_LIMIT = 1_000;
+
+// ─── Webview message validation ──────────────────────────────────────────────
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+    return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/** Max characters for a workspace-relative path coming from the webview. */
+const MAX_RELATIVE_PATH_LENGTH = 512;
+
+function isEventChainPanelMessage(
+    input: unknown,
+): input is { command: 'ready' } | { command: 'goToEvent'; file: string; line: number } {
+    if (!isRecord(input) || typeof input.command !== 'string') return false;
+    switch (input.command) {
+        case 'ready':
+            return true;
+        case 'goToEvent':
+            return typeof input.file === 'string'
+                && input.file.length > 0
+                && input.file.length <= MAX_RELATIVE_PATH_LENGTH
+                && typeof input.line === 'number'
+                && Number.isInteger(input.line)
+                && input.line >= 1;
+        default:
+            return false;
+    }
+}
 
 // ─── Panel ───────────────────────────────────────────────────────────────────
 
@@ -109,16 +136,17 @@ export class EventChainPanel {
 
         this._panel.onDidDispose(() => this.dispose(), null, this._disposables);
 
-        // Handle messages from webview
+        // Handle messages from webview. The webview is a browser context, so the
+        // payload is validated at the boundary before any file is opened.
         this._disposables.push(
-            this._panel.webview.onDidReceiveMessage(async msg => {
-                if (!msg?.command) return;
-                switch (msg.command) {
+            this._panel.webview.onDidReceiveMessage((raw: unknown) => {
+                if (!isEventChainPanelMessage(raw)) return;
+                switch (raw.command) {
                     case 'ready':
-                        await this._scanAndRender();
+                        void this._scanAndRender();
                         break;
                     case 'goToEvent':
-                        await this._goToEvent(msg.file, msg.line);
+                        void this._goToEvent(raw.file, raw.line);
                         break;
                 }
             }, null, this._disposables),
@@ -310,7 +338,19 @@ private async _findSemanticFiles(
         const workspaceFolders = vscode.workspace.workspaceFolders;
         if (!workspaceFolders) return;
 
-        const fileUri = vscode.Uri.joinPath(workspaceFolders[0]!.uri, file);
+        // Resolve the webview-supplied path against the workspace root and refuse
+        // anything that escapes it (absolute paths or `..` segments).
+        const workspaceRoot = workspaceFolders[0]!.uri.fsPath;
+        const resolvedPath = path.resolve(workspaceRoot, file);
+        if (!isPathInsideOrEqual(resolvedPath, workspaceRoot)) {
+            vscode.window.showWarningMessage(panelText(
+                'Cannot open files outside the workspace.',
+                '无法打开工作区之外的文件。',
+            ));
+            return;
+        }
+
+        const fileUri = vscode.Uri.file(resolvedPath);
         try {
             const doc = await vscode.workspace.openTextDocument(fileUri);
             const editor = await vscode.window.showTextDocument(doc, vscode.ViewColumn.One);

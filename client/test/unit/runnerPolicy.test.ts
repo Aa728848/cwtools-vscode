@@ -14,6 +14,7 @@ import {
     shouldAutoDiscloseExecutionTools,
     shouldContinueAuthorizedExecution,
     finalResponseRequiresUserInput,
+    isTruncationInducedStop,
     shouldRenewIterationLimit,
     SLIM_SUB_AGENT_MAX_OUTPUT_TOKENS,
     TOP_LEVEL_ITERATION_SAFETY_CAP,
@@ -500,5 +501,39 @@ describe('runnerPolicy', () => {
             consecutiveErrors: 1,
             blockingValidationIssues: 0,
         })).to.equal(false);
+    });
+
+    it('keeps explicitly loaded tools visible even when their stage pool omits them', () => {
+        // A write-authorized continuation starts at discovery; after select_tools
+        // loads edit_file, the visible pool must include it even though the
+        // discovery stage pool does not.
+        const buildTools = filterToolDefinitionsForMode(registeredTools, 'build', { domain: 'general' });
+        const discoveryBase = filterToolDefinitionsForStage(buildTools, 'build', 'discovery');
+        expect(discoveryBase.map(tool => tool.function.name)).to.not.include('edit_file');
+
+        const loaded = new Set(['edit_file', 'replace_lines']);
+        const visible = extendStageToolPoolWithSupport(discoveryBase, buildTools, 'build', 'discovery', loaded)
+            .map(tool => tool.function.name);
+        expect(visible).to.include('edit_file');
+        expect(visible).to.include('replace_lines');
+    });
+
+    it('detects truncation-induced stops without flagging ordinary prose or questions', () => {
+        // 问题 3 的实际案例:模型把展示截断误读为部分应用而中止。
+        expect(isTruncationInducedStop(
+            '由于本轮工具调用在大型差异预览和诊断结果上发生截断，不能安全继续批量替换，否则可能破坏整个脚本文件。',
+        )).to.equal(true);
+        expect(isTruncationInducedStop(
+            '由于当前剩余诊断被工具截断，继续盲目批量删除会有破坏脚本行为和括号结构的风险；本轮已完成所有能被明确验证并安全修复的核心问题。',
+        )).to.equal(true);
+        expect(isTruncationInducedStop(
+            'The remaining diagnostics were truncated, so I cannot safely continue batch replacements without risking the script file.',
+        )).to.equal(true);
+
+        // 普通散文、问题卡片、无截断词的文本不得触发。
+        expect(isTruncationInducedStop('计划已分析完成，需要你确认目标范围后才能继续。')).to.equal(false);
+        expect(isTruncationInducedStop(':::question 需要确认错误文件清单后才能继续')).to.equal(false);
+        expect(isTruncationInducedStop('已完成全部修复并通过验证。')).to.equal(false);
+        expect(isTruncationInducedStop('')).to.equal(false);
     });
 });

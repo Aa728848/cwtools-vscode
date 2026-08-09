@@ -1,6 +1,6 @@
 # COUNTRY
 suppressed_regionalism = {
-	country_resource_influence_add = -1
+	#country_resource_influence_add = -1
 }
 
 # PLANET

@@ -97,7 +97,7 @@ Inline interpreter payloads and sensitive commands require approval. Do not comm
 export function buildGeneralPlanSystemPrompt(isSlim: boolean = false): string {
     const boundary = isSlim
         ? 'Return the self-contained plan or `BLOCKED_FOR_ORCHESTRATOR`; do not question or wait for the user.'
-        : 'If a missing product or architecture decision materially changes the plan and cannot be derived from repository evidence, ask the user and stop.';
+        : 'Conclude every turn with either the complete plan plus the `cwtools-plan` block, or a structured `:::question` clarification card. Never stop with plain prose requesting input. Resolve unknowns with explicit assumptions unless the answer changes file layout or architecture and no reasonable default exists. After the user answers a clarification, deliver the complete plan in the same continuation turn — do not switch to execution.';
     return `You are Eddy Code in **General Planning Mode**, a read-only software-engineering planner.
 ${generalRules(isSlim)}
 
@@ -258,7 +258,7 @@ export function buildPlanModeSystemPrompt(gameKnowledge: string, gameName: strin
         : `${LANGUAGE_MIRRORING_RULE}\n${PROCESS_VISIBILITY_RULE}\n${ANALYSIS_COMPLIANCE_RULE}\n${ARCHITECTURE_VISUALIZATION_RULE}`;
     const approvalContract = isSlim
         ? 'Return the verified blueprint or `BLOCKED_FOR_ORCHESTRATOR`; never question or wait for the user.'
-        : '**After delivering the complete Implementation Plan and any required blueprint, STOP and wait for user approval to enter Write/Execute directly. Do not defer any design work until after approval.**';
+        : 'Conclude every Plan Mode turn with exactly one of: (1) the complete self-contained Implementation Plan plus exactly one valid `cwtools-plan` block, then STOP and wait for user approval to enter Write/Execute directly; or (2) a structured `:::question` clarification card. Plain prose such as "I cannot produce the plan yet" is not an acceptable conclusion — resolve every unknown with an explicit assumption, or ask a structured question when the answer changes file layout or architecture and no reasonable default exists. After the user answers a clarification, deliver the complete plan in the same continuation turn; never switch to execution. Do not defer any design work until after approval.';
 
     return `You are Eddy CWTool Code in **Plan Mode** — a read-only planning agent for the current workspace.
 ${rules}
@@ -275,8 +275,10 @@ Plan Mode is active. Do not implement or mutate project files. The only writes a
    - For Paradox files only, query active CWT/LSP, project indexes, and bounded real examples. Treat model memory and fuzzy matches as unverified game facts.
 
 2. **Informed clarification**
-   - **Clarification BEFORE Planning Phase**: clarify only choices whose answers materially change the architecture.
+   - **Clarification BEFORE Planning Phase**: clarify only choices whose answers materially change the architecture and have no reasonable default; resolve every other unknown with an explicit assumption recorded in the plan.
    - Ask only decisions that materially change architecture and are not already answered. Present the preliminary topology first.
+   - When a question is genuinely required, emit it as a structured \`:::question\` card. Never end a turn with plain prose that requests input.
+   - After the user answers a clarification, deliver the complete plan in the same continuation turn; do not switch to execution and do not ask again unless the answer still leaves a blocking choice.
    - Main agents stop for required answers; slim agents report the exact blocker to the orchestrator.
 
 2a. **Adaptive planning fan-out**

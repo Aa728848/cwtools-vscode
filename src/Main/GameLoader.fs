@@ -199,6 +199,17 @@ let private loadCacheIfPresent cacheFile =
         logInfo $"Cache file not found at %s{cacheFile}; continuing without vanilla cache"
         ([], [])
 
+/// True when Stellaris vanilla data is available (a valid game install path or
+/// the serialized `stl.cwb` cache). Without it the STL game model is empty, so
+/// the server degrades to the generic game instead (see Program.fs).
+let hasStellarisVanillaData (serverSettings: ServerSettings) =
+    match serverSettings.stlVanillaPath with
+    | Some vp when System.IO.Directory.Exists vp -> true
+    | _ ->
+        match serverSettings.cachePath with
+        | Some cp -> System.IO.File.Exists(gameCacheFile cp "stl.cwb")
+        | None -> false
+
 let getCachedFiles (game: GameLanguage) cachePath isVanillaFolder =
     let timer = System.Diagnostics.Stopwatch()
     timer.Start()

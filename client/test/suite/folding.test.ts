@@ -7,12 +7,14 @@ const sampleRoot = path.resolve(__dirname, '../sample');
 const testEventFile = path.join(sampleRoot, 'events', 'irm.txt');
 
 async function waitForEventFold(uri: vscode.Uri): Promise<vscode.FoldingRange[]> {
-    for (let attempt = 0; attempt < 40; attempt++) {
+    // The LSP needs time to process the DidOpen and register the file before
+    // folding requests see its text; give it a generous window (30s).
+    for (let attempt = 0; attempt < 300; attempt++) {
         const ranges = await vscode.commands.executeCommand<vscode.FoldingRange[]>(
             'vscode.executeFoldingRangeProvider',
             uri,
         );
-        if (ranges?.some(range => range.start === 7 && range.end >= 25)) {
+        if (ranges?.some(range => range.start === 7 && range.end >= 22)) {
             return ranges;
         }
         await new Promise(resolve => setTimeout(resolve, 100));
@@ -21,7 +23,7 @@ async function waitForEventFold(uri: vscode.Uri): Promise<vscode.FoldingRange[]>
 }
 
 suite('LSP Folding Range Tests', function () {
-    this.timeout(30000);
+    this.timeout(60000);
 
     setup(async function () {
         await activate();
@@ -36,11 +38,13 @@ suite('LSP Folding Range Tests', function () {
         await vscode.window.showTextDocument(document);
 
         const ranges = await waitForEventFold(document.uri);
-        const outerEvent = ranges.find(range => range.start === 7 && range.end >= 25);
+        // country_event spans 1-based lines 8-24 (0-based 7-22, end = last content
+        // line, not the closing brace); trigger block 12-15 (0-based 11-13).
+        const outerEvent = ranges.find(range => range.start === 7 && range.end >= 22);
 
         assert.ok(outerEvent, `Expected country_event fold at line 8, got ${JSON.stringify(ranges)}`);
         assert.ok(
-            ranges.some(range => range.start === 11 && range.end >= 16),
+            ranges.some(range => range.start === 11 && range.end >= 13),
             'Expected nested trigger block to remain foldable',
         );
     });

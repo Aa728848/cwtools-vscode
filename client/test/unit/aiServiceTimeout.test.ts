@@ -793,8 +793,8 @@ describe('AIService OpenAI Chat Completions compatibility', () => {
             new AbortController(),
         );
 
-        expect(calls[0].url).to.equal('https://relay.example/v1/chat/completions');
-        expect(calls[0].body).to.not.have.property('stream_options');
+        expect(calls[0]!.url).to.equal('https://relay.example/v1/chat/completions');
+        expect(calls[0]!.body).to.not.have.property('stream_options');
         expect(response.choices[0].message.content).to.equal('ok');
     });
 
@@ -990,10 +990,10 @@ describe('AIService Gemini generateContent compatibility', () => {
             new AbortController(),
         );
 
-        expect(calls[0].url).to.equal('https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent');
-        expect(calls[0].url).to.not.include('key=');
-        expect(calls[0].headers['x-goog-api-key']).to.equal('google-key');
-        expect(calls[0].headers).to.not.have.property('Authorization');
+        expect(calls[0]!.url).to.equal('https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent');
+        expect(calls[0]!.url).to.not.include('key=');
+        expect(calls[0]!.headers['x-goog-api-key']).to.equal('google-key');
+        expect(calls[0]!.headers).to.not.have.property('Authorization');
         expect(response.choices[0].message.tool_calls![0]!.thoughtSignature).to.equal('sig-1');
     });
 
@@ -1163,10 +1163,10 @@ describe('AIService Anthropic Messages compatibility', () => {
         );
 
         expect(calls).to.have.length(3);
-        expect(calls[1].headers.Authorization).to.equal('Bearer test-key');
-        expect(calls[2].headers.Authorization).to.equal('Bearer test-key');
-        expect(calls[1].body).to.have.property('output_config');
-        expect(calls[2].body).to.not.have.property('output_config');
+        expect(calls[1]!.headers.Authorization).to.equal('Bearer test-key');
+        expect(calls[2]!.headers.Authorization).to.equal('Bearer test-key');
+        expect(calls[1]!.body).to.have.property('output_config');
+        expect(calls[2]!.body).to.not.have.property('output_config');
     });
 
     it('preserves streamed thinking signatures even when event and data cross chunks', async () => {

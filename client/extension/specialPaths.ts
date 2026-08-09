@@ -1,4 +1,5 @@
 import * as fs from 'fs';
+import { localize } from './panelI18n';
 import * as os from 'os';
 import * as path from 'path';
 import * as vs from 'vscode';
@@ -18,13 +19,7 @@ interface SpecialPathItem extends vs.QuickPickItem {
 	canCreate?: boolean;
 }
 
-function isChineseLocale(): boolean {
-	return vs.env.language.toLowerCase().startsWith('zh');
-}
 
-function localize(en: string, zh: string): string {
-	return isChineseLocale() ? zh : en;
-}
 
 function firstWorkspaceFolder(): string | undefined {
 	return vs.workspace.workspaceFolders?.[0]?.uri.fsPath;

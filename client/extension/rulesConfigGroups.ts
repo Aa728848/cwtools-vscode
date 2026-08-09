@@ -1,4 +1,5 @@
 import * as fs from 'fs';
+import { localize, isChineseLocale } from './panelI18n';
 import * as path from 'path';
 import * as vs from 'vscode';
 
@@ -38,13 +39,7 @@ interface RulesQuickPickItem extends vs.QuickPickItem {
 	action?: () => Promise<void>;
 }
 
-function isChineseLocale(): boolean {
-	return vs.env.language.toLowerCase().startsWith('zh');
-}
 
-function localize(en: string, zh: string): string {
-	return isChineseLocale() ? zh : en;
-}
 
 function inspectRuleSource(sourcePath?: string): RuleInventory {
 	if (!sourcePath || !fs.existsSync(sourcePath)) return { count: 0, unit: 'files' };

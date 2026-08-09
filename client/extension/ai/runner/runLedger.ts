@@ -6,10 +6,13 @@ import { ErrorReporter } from '../errorReporter';
 import {
     AgentRunRecord,
     type AdmissionDecision,
+    type AgentRunPhase,
+    type AgentRunStatus,
     type AgentSchedulingState,
     type ChatMessage,
 } from '../types';
 import { isPathInsideOrEqual } from '../../pathScope';
+import { isRecord } from '../../../shared/protocolValidation';
 import { atomicWriteJson, atomicWriteText, readJsonWithBackup, sha256Text } from './durableStorage';
 import { getHistoryPolicy } from './historyPolicy';
 import { schedulingStateFromAdmission } from './scheduling';
@@ -120,6 +123,9 @@ export interface AgentRunEvent {
     status?: 'pending' | 'running' | 'done' | 'failed' | 'cancelled';
     invocationId?: string;
     agentId?: string;
+    /** Event payloads have many shapes (step/toolArgs/result/diff/…); consumers
+     * narrow each field. Converting this to `unknown` would force ~90 call-site
+     * casts, so the envelope keeps `any` — validate at the consumer boundary. */
     payload: any;
 }
 
@@ -293,12 +299,14 @@ export class RunLedger {
 
         const timestamp = Date.now();
         run.updatedAt = timestamp;
-        const storedPayload = this.compactPayloadForLedger(type, payload);
+        const storedPayload = this.compactPayloadForLedger(type, payload) as Record<string, unknown>;
 
         // Apply event to state
         if (type === 'status_changed') {
-            run.status = storedPayload.status;
-        } else if (type === 'file_change' && storedPayload.filePath) {
+            if (typeof storedPayload.status === 'string') {
+                run.status = storedPayload.status as AgentRunStatus;
+            }
+        } else if (type === 'file_change' && typeof storedPayload.filePath === 'string') {
             if (!run.writtenFiles.includes(storedPayload.filePath)) {
                 run.writtenFiles.push(storedPayload.filePath);
             }
@@ -314,12 +322,12 @@ export class RunLedger {
                     run.writtenFiles.push(filePath);
                 }
             }
-        } else if (type === 'metrics_updated') {
+        } else if (type === 'metrics_updated' && isRecord(storedPayload.metrics)) {
             run.metrics = { ...run.metrics, ...storedPayload.metrics };
         } else if (type === 'phase_changed' && run.schedulingState && typeof storedPayload?.to === 'string') {
             run.schedulingState = {
                 ...run.schedulingState,
-                phase: storedPayload.to,
+                phase: storedPayload.to as AgentRunPhase,
                 phaseReason: typeof storedPayload.reason === 'string' ? storedPayload.reason : run.schedulingState.phaseReason,
                 revision: typeof storedPayload.revision === 'number'
                     ? storedPayload.revision
@@ -402,7 +410,7 @@ export class RunLedger {
         this.emitter.emit('change', runId);
     }
 
-    private shouldSkipPersistedEvent(type: AgentRunEventType, _payload: any): boolean {
+    private shouldSkipPersistedEvent(type: AgentRunEventType, _payload: unknown): boolean {
         if (type === 'model_call_delta' || type === 'tool_output_delta') return true;
         return type === 'step_appended';
     }
@@ -426,35 +434,37 @@ export class RunLedger {
         return { _truncated: true, preview: this.clipText(raw, maxChars) };
     }
 
-    private compactStep(step: any): any | undefined {
+    private compactStep(step: unknown): unknown | undefined {
         if (!step || typeof step !== 'object') return step;
-        const type = String(step.type || '');
+        const obj = step as Record<string, unknown>;
+        const type = String(obj.type || '');
         if (type === 'text_delta' || type === 'thinking_content') return undefined;
-        if (type === 'orchestrator_progress' && /waiting|等待模型返回/i.test(String(step.content || ''))) return undefined;
-        const copy: any = { ...step };
+        if (type === 'orchestrator_progress' && /waiting|等待模型返回/i.test(String(obj.content || ''))) return undefined;
+        const copy: Record<string, unknown> = { ...obj };
         if (typeof copy.content === 'string') copy.content = this.clipText(copy.content);
         if (copy.toolArgs !== undefined) copy.toolArgs = this.compactUnknown(copy.toolArgs);
         if (copy.toolResult !== undefined) copy.toolResult = this.compactUnknown(copy.toolResult);
         return copy;
     }
 
-    private compactPayloadForLedger(type: AgentRunEventType, payload: any): any {
+    private compactPayloadForLedger(type: AgentRunEventType, payload: unknown): unknown {
         if (!payload || typeof payload !== 'object') return this.compactUnknown(payload);
+        const obj = payload as Record<string, unknown>;
         if (type === 'step_appended') {
-            return { ...payload, step: this.compactStep(payload.step) };
+            return { ...obj, step: this.compactStep(obj.step) };
         }
         if (type === 'tool_call_created' || type === 'tool_call_start') {
-            const args = this.compactUnknown(payload.toolArgs ?? payload.args ?? payload.arguments);
-            return { ...payload, toolArgs: args, args, arguments: args };
+            const args = this.compactUnknown(obj.toolArgs ?? obj.args ?? obj.arguments);
+            return { ...obj, toolArgs: args, args, arguments: args };
         }
         if (type === 'tool_call_end') {
-            return { ...payload, result: this.compactUnknown(payload.result) };
+            return { ...obj, result: this.compactUnknown(obj.result) };
         }
-        if (type === 'file_change' && payload.diff) {
-            return { ...payload, diff: this.clipText(payload.diff) };
+        if (type === 'file_change' && obj.diff) {
+            return { ...obj, diff: this.clipText(obj.diff) };
         }
-        if (type === 'compaction_end' && payload.summary) {
-            return { ...payload, summary: this.compactUnknown(payload.summary) };
+        if (type === 'compaction_end' && obj.summary) {
+            return { ...obj, summary: this.compactUnknown(obj.summary) };
         }
         return this.compactUnknown(payload);
     }

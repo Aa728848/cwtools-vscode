@@ -1,4 +1,5 @@
 import * as vs from 'vscode';
+import { localize } from './panelI18n';
 import type { AIService } from './ai/aiService';
 import { getEffectiveEndpoint, getEffectiveModel } from './ai/providers';
 import type { AIUserConfig, ChatMessage } from './ai/types';
@@ -66,13 +67,7 @@ interface StoredTranslationPreview {
 
 const translationCache = new Map<string, TranslationCacheEntry>();
 
-function isChineseLocale(): boolean {
-	return vs.env.language.toLowerCase().startsWith('zh');
-}
 
-function localize(en: string, zh: string): string {
-	return isChineseLocale() ? zh : en;
-}
 
 function hashString(value: string): string {
 	let hash = 2166136261;

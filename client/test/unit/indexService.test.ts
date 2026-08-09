@@ -401,11 +401,11 @@ describe('IndexService workspaceSymbolTypeSummary', () => {
             const service = new IndexService() as any;
             service._locIndex = new Map<string, LocEntry[]>([
                 ['shared', [
-                    { key: 'shared', value: 'Shared', file: 'en.yml', line: 2, language: 'l_english' },
-                    { key: 'shared', value: '共享', file: 'zh.yml', line: 2, language: 'l_simp_chinese' },
+                    { key: 'shared', value: 'Shared', file: 'en.yml', line: 2, language: 'l_english', valueHash: 'aaaaaaaa', hasBom: false, encoding: 'utf8', header: 'l_english' },
+                    { key: 'shared', value: '共享', file: 'zh.yml', line: 2, language: 'l_simp_chinese', valueHash: 'bbbbbbbb', hasBom: false, encoding: 'utf8', header: 'l_simp_chinese' },
                 ]],
-                ['english_only', [{ key: 'english_only', value: 'Only', file: 'en.yml', line: 3, language: 'l_english' }]],
-                ['chinese_only', [{ key: 'chinese_only', value: '仅有', file: 'zh.yml', line: 3, language: 'l_simp_chinese' }]],
+                ['english_only', [{ key: 'english_only', value: 'Only', file: 'en.yml', line: 3, language: 'l_english', valueHash: 'cccccccc', hasBom: false, encoding: 'utf8', header: 'l_english' }]],
+                ['chinese_only', [{ key: 'chinese_only', value: '仅有', file: 'zh.yml', line: 3, language: 'l_simp_chinese', valueHash: 'dddddddd', hasBom: false, encoding: 'utf8', header: 'l_simp_chinese' }]],
             ]);
 
             const comparison = service.locLanguageDifferences({}, 'l_english', 1);
@@ -425,12 +425,12 @@ describe('IndexService workspaceSymbolTypeSummary', () => {
             const service = new IndexService() as any;
             service._locIndex = new Map<string, LocEntry[]>([
                 ['shared', [
-                    { key: 'shared', value: 'Shared', file: 'en.yml', line: 2, language: 'l_english' },
-                    { key: 'shared', value: '共享', file: 'zh.yml', line: 2, language: 'l_simp_chinese' },
+                    { key: 'shared', value: 'Shared', file: 'en.yml', line: 2, language: 'l_english', valueHash: 'aaaaaaaa', hasBom: false, encoding: 'utf8', header: 'l_english' },
+                    { key: 'shared', value: '共享', file: 'zh.yml', line: 2, language: 'l_simp_chinese', valueHash: 'bbbbbbbb', hasBom: false, encoding: 'utf8', header: 'l_simp_chinese' },
                 ]],
                 ['duplicate', [
-                    { key: 'duplicate', value: 'One', file: 'en-a.yml', line: 2, language: 'l_english' },
-                    { key: 'duplicate', value: 'Two', file: 'en-b.yml', line: 4, language: 'l_english' },
+                    { key: 'duplicate', value: 'One', file: 'en-a.yml', line: 2, language: 'l_english', valueHash: 'eeeeeeee', hasBom: false, encoding: 'utf8', header: 'l_english' },
+                    { key: 'duplicate', value: 'Two', file: 'en-b.yml', line: 4, language: 'l_english', valueHash: 'ffffffff', hasBom: false, encoding: 'utf8', header: 'l_english' },
                 ]],
             ]);
             const groups = service.locDuplicateGroups(10);

@@ -22,6 +22,19 @@ export interface ToolDisclosureContext {
     loaded: Set<string>;
 }
 
+export interface ToolSelectionOptions {
+    /**
+     * When true, tools that exist in the registry, are allowed for the current
+     * mode and domain, but are hidden only by the stage pool are loaded on
+     * demand instead of reported as `unavailable`. The stage system is a model
+     * guidance mechanism, not an execution gate (the tool executor does not
+     * enforce stages), so write-authorized runs must be able to load deferred
+     * write tools at any stage — otherwise a continuation turn that starts at
+     * discovery misreads `unavailable` as "the host never exposed this tool".
+     */
+    deferStageGating?: boolean;
+}
+
 export class ToolDisclosureService {
     initialTools(tools: readonly ToolDefinition[], context: ToolDisclosureContext): ToolDefinition[] {
         if (!context.dynamicSupported) return [...tools];
@@ -35,6 +48,7 @@ export class ToolDisclosureService {
         request: ToolSelectionRequest,
         pool: readonly ToolDefinition[],
         context: ToolDisclosureContext,
+        options?: ToolSelectionOptions,
     ): ToolSelectionResult {
         const result: ToolSelectionResult = {
             loaded: [],
@@ -71,7 +85,7 @@ export class ToolDisclosureService {
                 result.denied.push(name);
             } else if (!entry.allowedModes.has(context.mode)) {
                 result.denied.push(name);
-            } else if (!poolByName.has(name)) {
+            } else if (!poolByName.has(name) && options?.deferStageGating !== true) {
                 result.unavailable.push(name);
             } else {
                 context.loaded.add(name);

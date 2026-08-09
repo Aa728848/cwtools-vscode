@@ -1,4 +1,5 @@
 import * as vs from 'vscode';
+import { localize } from './panelI18n';
 import * as path from 'path';
 import type { IndexService, LocEntry, WorkspaceSymbolEntry } from './indexing/indexService';
 import {
@@ -20,13 +21,7 @@ interface ImagePick extends vs.QuickPickItem {
 	uri: vs.Uri;
 }
 
-function isChineseLocale(): boolean {
-	return vs.env.language.toLowerCase().startsWith('zh');
-}
 
-function localize(en: string, zh: string): string {
-	return isChineseLocale() ? zh : en;
-}
 
 export function extractRelatedResourceToken(document: vs.TextDocument, selection: vs.Selection): string | undefined {
 	const selected = document.getText(selection).trim().replace(/^["'$]+|["'$]+$/g, '');

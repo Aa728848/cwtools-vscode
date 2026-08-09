@@ -49,6 +49,7 @@ import { repairToolArgs } from './tools/argRepair';
 import { budgetToolResult as _budgetToolResult, getToolResultBudget } from './contextBudget';
 import type { CompactMessagesOptions } from './contextBudget';
 import { AGENT, SOURCE, aiText } from './messages';
+import { describeImagesWithMinimaxCli } from './visionAdapter';
 import { ErrorReporter } from './errorReporter';
 import { createBestEffortReporter } from './runner/bestEffortDiagnostics';
 import { MemoryParser } from './memoryParser';
@@ -68,6 +69,7 @@ import {
     shouldAutoDiscloseExecutionTools,
     shouldContinueAuthorizedExecution,
     finalResponseRequiresUserInput,
+    isTruncationInducedStop,
     shouldRenewIterationLimit,
     SLIM_SUB_AGENT_OUTPUT_BUDGET_RECOVERY_LIMIT,
     SLIM_SUB_AGENT_THINKING_CHAR_LIMIT,
@@ -148,6 +150,9 @@ const MAX_VALIDATION_RETRIES = 2;
 const VALIDATION_DIAGNOSTIC_FRESHNESS_RECHECK_DELAYS_MS = [500, 1500, 3000];
 const MAX_OUTPUT_REPETITION_RECOVERIES = 1;
 const MAX_TOP_LEVEL_LENGTH_RECOVERIES = 1;
+// Bounded recoveries for final answers that stop because the model misread
+// display-only tool-result truncation as partial application.
+const MAX_TRUNCATION_STOP_RECOVERIES = 2;
 const reportBestEffortFailure = createBestEffortReporter((message, error) => {
     ErrorReporter.debug(SOURCE.AGENT_RUNNER, message, error);
 });
@@ -493,8 +498,6 @@ export class AgentRunner {
         agentId?: string,
     ): Promise<void> {
         try {
-            const fs = await import('fs');
-            const pathModule = await import('path');
             const wsRoot = getProjectWorkspaceRoot();
 
             const checkpointDir = getPrivateTopicStorageDir(topicId || 'default', wsRoot);
@@ -516,7 +519,7 @@ export class AgentRunner {
             };
 
             fs.writeFileSync(
-                pathModule.join(checkpointDir, 'checkpoint.json'),
+                path.join(checkpointDir, 'checkpoint.json'),
                 JSON.stringify(checkpoint, null, 2),
                 'utf-8'
             );
@@ -537,12 +540,10 @@ export class AgentRunner {
      */
     async loadCheckpoint(topicId: string): Promise<import('./types').AgentCheckpoint | null> {
         try {
-            const fs = await import('fs');
-            const pathModule = await import('path');
             const wsRoot = getProjectWorkspaceRoot();
 
             const checkpointPath = getPrivateTopicStorageDirCandidates(topicId, wsRoot)
-                .map(dir => pathModule.join(dir, 'checkpoint.json'))
+                .map(dir => path.join(dir, 'checkpoint.json'))
                 .find(candidate => fs.existsSync(candidate));
             if (!checkpointPath) return null;
 
@@ -594,11 +595,9 @@ export class AgentRunner {
     public async clearResumeState(topicId: string): Promise<void> {
         if (!topicId) return;
         try {
-            const fs = await import('fs');
-            const pathModule = await import('path');
             const wsRoot = getProjectWorkspaceRoot();
             for (const resumeDir of getPrivateTopicStorageDirCandidates(topicId, wsRoot)) {
-                const resumePath = pathModule.join(resumeDir, 'resume_state.json');
+                const resumePath = path.join(resumeDir, 'resume_state.json');
                 if (fs.existsSync(resumePath)) {
                     fs.unlinkSync(resumePath);
                 }
@@ -781,6 +780,16 @@ export class AgentRunner {
         } else {
             parentAbortSignal?.addEventListener('abort', forwardParentAbort, { once: true });
         }
+
+        // Resources owned by this run (abort listener, active-turn registry entry,
+        // active event-sink/input-queue maps, run record) are registered before the
+        // main try block, so an exception in resume loading, turn admission, vision
+        // processing, or prompt assembly must still reach the cleanup below. The
+        // `''` runId sentinel keeps type narrowing simple; cleanup skips it.
+        let runId = '';
+        let runRecordPromise: Promise<import('./types').AgentRunRecord> | undefined;
+        let unregisterActiveTurn: (() => void) | undefined;
+        try {
         const restoredResumeState = options?.resumeFromState && context.topicId
             ? await this.loadResumeState(context.topicId)
             : null;
@@ -819,13 +828,14 @@ export class AgentRunner {
             turnId,
             schedulingState,
         });
-        const runRecordPromise = turnRuntimePromise.then(runtime => runtime.run);
+        runRecordPromise = turnRuntimePromise.then(runtime => runtime.run);
         this.activeRunRecordPromise = runRecordPromise;
 
         const emitStep = (step: AgentStep) => {
             steps.push(step);
             options?.onStep?.(step);
-            runRecordPromise.then(r => {
+            // runRecordPromise is assigned just before this closure is defined.
+            runRecordPromise!.then(r => {
                 runLedger.appendEvent(r.runId, 'step_appended', { step }).catch(error => {
                     reportBestEffortFailure('ledger.append_step', { runId: r.runId, stepType: step.type }, error);
                 });
@@ -834,7 +844,7 @@ export class AgentRunner {
             });
         };
         const updateRunStatus = (status: import('./types').AgentRunStatus) => {
-            runRecordPromise.then(async r => {
+            runRecordPromise!.then(async r => {
                 const currentSchedulingState = options?.schedulingState;
                 if (status === 'completed' && currentSchedulingState && currentSchedulingState.phase !== 'finalize') {
                     const previousPhase = currentSchedulingState.phase;
@@ -946,75 +956,15 @@ export class AgentRunner {
         if (effectiveImages && !visionSupported) {
             let minimaxCliUsed = false;
             if (_providerIdVision.startsWith('minimax')) {
-                try {
-                    const cp = await import('child_process');
-                    const util = await import('util');
-                    const os = await import('os');
-                    const execAsync = util.promisify(cp.exec);
-
-                    // Check if mmx is installed
-                    await execAsync('mmx --version');
-
-                    emitStep({
-                        type: 'thinking',
-                        content: 'Using MiniMax CLI to process images...',
-                        timestamp: Date.now(),
-                    });
-
-                    let visionText = '\n\n[System Notice: The user attached image(s) to this message. Since you do not have native vision capabilities, the images were automatically analyzed by an external Vision AI. Below is the textual description of what the image contains. You MUST use this description to answer the user\'s prompt. Do NOT use file-system tools (like list_directory) to answer questions about the image unless specifically asked to correlate them.]\n';
-                    
-                    for (let i = 0; i < effectiveImages.length; i++) {
-                        const img = effectiveImages[i];
-                        if (!img) continue;
-                        
-                        const base64Index = img.indexOf('base64,');
-                        if (base64Index > -1) {
-                            const header = img.substring(0, base64Index);
-                            const extMatch = header.match(/^data:image\/([^;]+)/);
-                            const rawExt = extMatch && extMatch[1] ? extMatch[1] : 'jpg';
-                            const ext = rawExt === 'jpeg' ? 'jpg' : rawExt.replace(/[^a-zA-Z0-9]/g, '');
-                            
-                            const base64Data = img.substring(base64Index + 7);
-                            const tempFilePath = path.join(os.tmpdir(), `mmx_img_${Date.now()}_${i}.${ext}`);
-                            
-                            try {
-                                await fs.promises.writeFile(tempFilePath, Buffer.from(base64Data, 'base64'));
-                                const { stdout } = await execAsync(`mmx vision describe --image "${tempFilePath}" --non-interactive --no-color`, { timeout: 60000 });
-                                const vlmResult = stdout.trim();
-                                visionText += `\nImage ${i + 1}:\n${vlmResult}\n`;
-                                emitStep({
-                                    type: 'thinking',
-                                    content: `[VLM Image ${i + 1}]: ${vlmResult}`,
-                                    timestamp: Date.now(),
-                                });
-                            } catch (err) {
-                                const errMsg = err instanceof Error ? err.message : String(err);
-                                visionText += `\nImage ${i + 1}: Failed to analyze (${errMsg})\n`;
-                                emitStep({
-                                    type: 'thinking',
-                                    content: `[VLM Image ${i + 1} Failed]: ${errMsg}`,
-                                    timestamp: Date.now(),
-                                });
-                            } finally {
-                                if (fs.existsSync(tempFilePath)) {
-                                    await fs.promises.unlink(tempFilePath).catch(() => {});
-                                }
-                            }
-                        } else {
-                            visionText += `\nImage ${i + 1}: Invalid image data format.\n`;
-                            emitStep({
-                                type: 'thinking',
-                                content: `[VLM Image ${i + 1}]: Invalid format`,
-                                timestamp: Date.now(),
-                            });
-                        }
-                    }
-                    visionText += '\n[End of Image Descriptions]\n';
-                    effectiveUserMessage += visionText;
+                const visionResult = await describeImagesWithMinimaxCli({
+                    images: effectiveImages,
+                    signal: turnAbortController.signal,
+                    onStep: emitStep,
+                });
+                if (visionResult && visionResult.describedCount > 0) {
+                    effectiveUserMessage += visionResult.visionText;
                     minimaxCliUsed = true;
                     effectiveImages = undefined;
-                } catch {
-                    // mmx not installed or error, fall through to default unsupported message
                 }
             }
 
@@ -1048,7 +998,7 @@ export class AgentRunner {
 
         const turnRuntime = await turnRuntimePromise;
         const runRecord = turnRuntime.run;
-        const runId = runRecord.runId;
+        runId = runRecord.runId;
         if (mode === 'script' || mode === 'orchestrator') {
             this.toolExecutor.clearOrchestratorValidation(runId);
         }
@@ -1079,7 +1029,7 @@ export class AgentRunner {
         });
         this.activeRunEventSinks.set(runId, turnRuntime.eventSink);
         this.activeInputQueues.set(runId, turnRuntime.inputQueue);
-        const unregisterActiveTurn = activeTurnRegistry.register({
+        unregisterActiveTurn = activeTurnRegistry.register({
             runId,
             threadId: options.threadId,
             turnId: options.turnId,
@@ -1590,17 +1540,23 @@ export class AgentRunner {
                 tokenUsage: tokenAccumulator.total > 0 ? tokenAccumulator : undefined,
                 runMetrics,
             };
+        }
         } finally {
-            this.toolExecutor.clearSkillPolicyForRun(runId);
+            // Cleanup runs for the whole run() scope: entries registered before the
+            // main try block (abort listener, active-turn registry, active maps) are
+            // released here too, with guards for runs that failed during setup.
+            if (runId) this.toolExecutor.clearSkillPolicyForRun(runId);
             if (options?.agentId) this.toolExecutor.clearTodos(options.agentId);
             await this.tokenCalibration?.flush();
-            this.retainedResumeRuns.delete(runId);
-            unregisterActiveTurn();
+            if (runId) this.retainedResumeRuns.delete(runId);
+            unregisterActiveTurn?.();
             parentAbortSignal?.removeEventListener('abort', forwardParentAbort);
-            this.activeRunEventSinks.delete(runId);
-            this.activeInputQueues.delete(runId);
-            if (this.activeRunRecordPromise === runRecordPromise) {
-                this.activeRunRecordPromise = undefined;
+            if (runId) {
+                this.activeRunEventSinks.delete(runId);
+                this.activeInputQueues.delete(runId);
+                if (this.activeRunRecordPromise === runRecordPromise) {
+                    this.activeRunRecordPromise = undefined;
+                }
             }
         }
     }
@@ -1775,19 +1731,18 @@ export class AgentRunner {
         }
 
         try {
-            const pathModule = await import('path');
             const wsRoot = getProjectWorkspaceRoot();
-            const runDir = pathModule.join(getPrivateTopicStorageDir(topicId, wsRoot), 'runs', runId, 'large_results');
+            const runDir = path.join(getPrivateTopicStorageDir(topicId, wsRoot), 'runs', runId, 'large_results');
 
             const archivedResult = typeof result === 'string' ? result : JSON.stringify(result, null, 2);
             const resultSha256 = sha256Text(archivedResult);
             const artifactName = `${resultSha256}.json`;
-            const filePath = pathModule.join(runDir, artifactName);
+            const filePath = path.join(runDir, artifactName);
             if (!fs.existsSync(filePath)) {
                 await atomicWriteText(filePath, archivedResult);
             }
 
-            const relativeDiskPath = pathModule.posix.join('runs', runId, 'large_results', artifactName);
+            const relativeDiskPath = path.posix.join('runs', runId, 'large_results', artifactName);
             const preview = strContent.substring(0, 1000);
             await runLedger.appendEvent(
                 runId,
@@ -2003,6 +1958,7 @@ export class AgentRunner {
         let contextOverflowRecoveries = 0;
         let topLevelLengthRecoveries = 0;
         let prematureExecutionFinalRecoveries = 0;
+        let truncationStopRecoveries = 0;
         let executionActionObserved = false;
         let interactivePlanApprovalPending = false;
         let ineffectiveCompactionCount = 0;
@@ -3173,6 +3129,50 @@ export class AgentRunner {
                         mode,
                         approvedPlanExecution: options?.approvedPlanExecution,
                     });
+                // The input queue is drained only at the top of each iteration,
+                // so a steering message that arrives while the model is producing
+                // its final answer would otherwise never be injected — the run
+                // ends and the intervention is silently lost. Drain and inject it
+                // here, then continue one more iteration so the model can respond
+                // to the user's intervention. Interactive plan submissions stay a
+                // strict approval boundary and still end the turn.
+                if (!interactivePlanApprovalPending
+                    && !shouldPauseForInteractivePlan(finalContent, {
+                        mode,
+                        approvedPlanExecution: options?.approvedPlanExecution,
+                    })) {
+                    const lateInputs = options?.inputQueue?.drain() ?? [];
+                    if (lateInputs.length > 0) {
+                        for (const input of lateInputs) {
+                            const steerContent: ChatMessage['content'] = input.images && input.images.length > 0
+                                ? [
+                                    { type: 'text' as const, text: `[User steering input queued during run]\n${input.message}` },
+                                    ...input.images.map(url => ({
+                                        type: 'image_url' as const,
+                                        image_url: { url, detail: 'auto' as const },
+                                    })),
+                                ]
+                                : `[User steering input queued during run]\n${input.message}`;
+                            messages.push({ role: 'user', content: steerContent });
+                            options?.runEventSink?.appendSoon('input_injected', {
+                                inputId: input.id,
+                                clientUserMessageId: input.clientUserMessageId,
+                                size: input.message.length,
+                                imageCount: input.images?.length ?? 0,
+                                preview: input.message.slice(0, 240),
+                            }, { status: 'done' });
+                        }
+                        emitStep({
+                            type: 'thinking',
+                            content: aiText(
+                                `Injected ${lateInputs.length} queued user input message(s) into the next model step.`,
+                                `已将 ${lateInputs.length} 条排队用户输入注入下一次模型步骤。`,
+                            ),
+                            timestamp: Date.now(),
+                        });
+                        continue;
+                    }
+                }
                 if (!requiresUserInput
                     && prematureExecutionFinalRecoveries < 3
                     && shouldContinueAuthorizedExecution(
@@ -3193,6 +3193,26 @@ export class AgentRunner {
                     ErrorReporter.debug(
                         SOURCE.AGENT_RUNNER,
                         `Authorized execution recovery ${prematureExecutionFinalRecoveries}/3 from ${toolStage ?? 'full'} stage.`,
+                    );
+                    continue;
+                }
+                if (!requiresUserInput
+                    && truncationStopRecoveries < MAX_TRUNCATION_STOP_RECOVERIES
+                    && schedulingState.authorization === 'workspace_write'
+                    && isTruncationInducedStop(finalContent)) {
+                    // The model stopped because it misread display-only tool-result
+                    // truncation as partial application. Tool results are always
+                    // fully applied; only the response text is shortened. Push one
+                    // bounded recovery so the task continues instead of stalling.
+                    truncationStopRecoveries++;
+                    messages.push({
+                        role: 'user',
+                        content: `<system-reminder>Truncation markers in tool results ("truncated" / "已截断") are display-only: every tool completed and its result was fully applied; nothing is partial or unsafe. `
+                            + `Continue the remaining work in smaller batches: re-query diagnostics per file with a filtered get_diagnostics, re-read exact line ranges when you need details, and keep editing until the requested result is complete and verified.</system-reminder>`,
+                    });
+                    ErrorReporter.debug(
+                        SOURCE.AGENT_RUNNER,
+                        `Truncation-stop recovery ${truncationStopRecoveries}/${MAX_TRUNCATION_STOP_RECOVERIES}.`,
                     );
                     continue;
                 }
@@ -3296,7 +3316,14 @@ export class AgentRunner {
                         ? selectionArgs.groups.filter((value): value is string => typeof value === 'string')
                         : undefined,
                     reason: typeof selectionArgs.reason === 'string' ? selectionArgs.reason : '',
-                }, selectionPool, disclosureContext);
+                }, selectionPool, disclosureContext, {
+                    // Write-authorized runs may load stage-hidden deferred tools
+                    // (edit_file/replace_lines/write_file/...) on demand. Without
+                    // this, a continuation turn that starts at the discovery
+                    // stage reports them as "unavailable" and the model concludes
+                    // the host never exposed them.
+                    deferStageGating: schedulingState.authorization === 'workspace_write',
+                });
                 selectionArgs._selectionResult = selection;
                 toolCall.function.arguments = JSON.stringify(selectionArgs);
                 const visibleStagePool = extendStageToolPoolWithSupport(
@@ -3474,9 +3501,6 @@ export class AgentRunner {
                     { invocationId: ci.invocationId }
                 );
             }
-
-            // Fetch fs module lazily if we need it for snapshots
-            let fsModule: typeof import('fs') | undefined;
 
             for (let i = 0; i < parsedCalls.length; i++) {
                 options?.abortSignal?.throwIfAborted();
@@ -3732,8 +3756,7 @@ export class AgentRunner {
                             
                             // Sub-agent snapshot isolate hook
                             if (onFileWrite && primaryFilePath) {
-                                if (!fsModule) fsModule = await import('fs');
-                                const prev = fsModule.existsSync(primaryFilePath) ? fsModule.readFileSync(primaryFilePath, 'utf8') : null;
+                                const prev = fs.existsSync(primaryFilePath) ? fs.readFileSync(primaryFilePath, 'utf8') : null;
                                 onFileWrite(primaryFilePath, prev);
                             }
 

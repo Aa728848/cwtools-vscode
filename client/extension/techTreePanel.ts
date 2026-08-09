@@ -10,6 +10,7 @@
  */
 
 import * as vscode from 'vscode';
+import { panelText } from './panelI18n';
 import * as path from 'path';
 import * as fs from 'fs';
 import { ErrorReporter } from './ai/errorReporter';
@@ -40,9 +41,6 @@ function getNonce(): string {
     return result;
 }
 
-function panelText(en: string, zh: string): string {
-    return vscode.env.language.toLowerCase().startsWith('zh') ? zh : en;
-}
 
 function isUnknownRecord(value: unknown): value is Record<string, unknown> {
     return typeof value === 'object' && value !== null && !Array.isArray(value);

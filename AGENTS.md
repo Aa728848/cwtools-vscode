@@ -154,11 +154,25 @@ Run the narrowest useful checks, then broaden according to risk:
 
 - Docs: `npm run build:docs` and
   `npm run check:release -- --skip-compile --skip-test`.
-- Extension TypeScript or Webview: `npm run compile`, then targeted unit tests.
+- Extension TypeScript or Webview: `npm run compile` and `npm run typecheck:test`
+  (strict check over the whole `client/` tree including tests), then targeted
+  unit tests.
 - AI runtime/tools: targeted unit tests, then `npm run test:unit`.
+- Extension Host integration suites: `npm test` (compiles the suite JS via
+  `tsconfig.test-build.json`, copies `client/test/sample` fixtures, and runs the
+  completion/hover/folding/extension suites; the shader contract suite is run
+  separately via `npm run test:shader-lsp`). Fixture workspace settings are
+  created by `tools/copy-test-fixtures.js` with Stellaris language associations
+  (`*.txt/gui/gfx/asset/cwt -> stellaris`) and the vendored
+  `submodules/cwtools-stellaris-config/config` rules. The Stellaris game model
+  needs vanilla data (game install or `stl.cwb` cache) and takes ~20s to build;
+  when neither exists the server degrades to the generic game (see
+  `hasStellarisVanillaData` in `src/Main/GameLoader.fs`).
 - MCP: `npm run generate:mcp-schema`, then inside `submodules/cwtools-mcp`:
   `npm run build` and `npm run test:contracts`.
-- F# backend: `dotnet build src/LSP/` and/or `dotnet build src/Main/`.
+- F# backend: `dotnet build src/LSP/` and/or `dotnet build src/Main/`, plus the
+  `src/**/*.Tests.fsx` regression scripts via `dotnet fsi` (run from each
+  script's directory).
 - Broad pre-release gate: `npm run verify`.
 
 If a relevant check cannot run, report that explicitly instead of silently

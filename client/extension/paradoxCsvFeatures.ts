@@ -1,4 +1,5 @@
 import * as vs from 'vscode';
+import { localize } from './panelI18n';
 import {
 	adjustParadoxCsvColumnCount,
 	analyzeParadoxCsvRows,
@@ -12,13 +13,7 @@ import {
 
 const LANGUAGE_ID = 'paradox-csv';
 
-function isChineseLocale(): boolean {
-	return vs.env.language.toLowerCase().startsWith('zh');
-}
 
-function localize(en: string, zh: string): string {
-	return isChineseLocale() ? zh : en;
-}
 
 function isCsvDocument(document: vs.TextDocument): boolean {
 	return document.languageId === LANGUAGE_ID || document.fileName.toLowerCase().endsWith('.csv');

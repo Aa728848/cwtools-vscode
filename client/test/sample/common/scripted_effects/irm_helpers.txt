@@ -13,7 +13,7 @@ get_random_6 = {
 	# Set values for certain signs
 	get_random_value = yes
 	set_variable = { which = "var_1" value = "var_rand" }
-	multiply_variable = { which = "var_5" value = 1 }
+	multiply_variable = { which = "var_1" value = 1 }
 	
 	get_random_value = yes
 	set_variable = { which = "var_2" value = "var_rand" }

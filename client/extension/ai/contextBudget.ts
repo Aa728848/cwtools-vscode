@@ -22,6 +22,15 @@ export function getToolResultBudget(maxContextTokens?: number): number {
 export const TOOL_RESULT_BUDGET_BASE = 12000;
 export const TOOL_RESULT_BUDGET_HARD_STUB = 60000;
 
+/**
+ * Reserved characters for the truncation suffix appended after a budgeted
+ * result. The suffix must explain that truncation is display-only (the tool
+ * completed in full); models that misread a shortened display as partial
+ * application stop mid-task. Reserving space keeps the total output within
+ * maxChars instead of growing it by the whole suffix.
+ */
+export const TRUNCATION_SUFFIX_RESERVE = 300;
+
 export interface CompactMessagesOptions {
     preserveTailBytes?: boolean;
     preserveReasoningContentForToolCalls?: boolean;
@@ -41,7 +50,8 @@ export function budgetToolResult(result: unknown, maxChars: number = TOOL_RESULT
     if (result === null) return 'null';
     if (typeof result === 'string') {
         if (result.length <= maxChars) return result;
-        return result.substring(0, maxChars) + `\n\n${BUDGET.TRUNCATED(result.length)}`;
+        return result.substring(0, Math.max(0, maxChars - TRUNCATION_SUFFIX_RESERVE))
+            + `\n\n${BUDGET.TRUNCATED(result.length)}`;
     }
 
     const raw = JSON.stringify(result, null, 2) || '';
@@ -51,7 +61,7 @@ export function budgetToolResult(result: unknown, maxChars: number = TOOL_RESULT
     if (typeof result === 'object' && result !== null && 'content' in result && 'totalLines' in result) {
         const readResult = result as { content: string; totalLines: number; truncated?: boolean; _hint?: string };
         const lines = readResult.content.split('\n');
-        const contentBudget = maxChars - 200;
+        const contentBudget = Math.max(0, maxChars - TRUNCATION_SUFFIX_RESERVE);
         let charCount = 0;
         let kept = 0;
         for (const line of lines) {
@@ -85,7 +95,7 @@ export function budgetToolResult(result: unknown, maxChars: number = TOOL_RESULT
     }
 
     // Strategy 3: Generic truncation with structure hint
-    return raw.substring(0, maxChars) +
+    return raw.substring(0, Math.max(0, maxChars - TRUNCATION_SUFFIX_RESERVE)) +
         `\n\n${BUDGET.TRUNCATED_GENERIC(raw.length)}`;
 }
 

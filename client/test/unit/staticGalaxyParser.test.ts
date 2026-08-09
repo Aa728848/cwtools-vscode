@@ -15,6 +15,14 @@ function firstScenario(text: string): ParsedScenario {
     return result.scenarios[0]!;
 }
 
+/** Resolved (fixed/range) axis center; fails loudly on an unresolved axis. */
+function resolvedAxisCenter(axis: import('../../shared/staticGalaxyProtocol').StaticGalaxyAxis): number {
+    if (axis.kind === 'unresolved') {
+        throw new Error(`Unexpected unresolved axis: ${axis.reason}`);
+    }
+    return axis.center;
+}
+
 describe('staticGalaxyParser', () => {
     it('parses fixed x/y/z coordinates', () => {
         const scenario = firstScenario(`
@@ -110,13 +118,13 @@ static_galaxy_scenario = {
         // x: add 100 then mul 2 -> eff = raw * 2 + 200; y: sub 50.
         const view = toScenarioView(scenario);
         const v1 = view.systems[0]!;
-        expect(v1.effectivePosition.x.center).to.equal(10 * 2 + 200);
-        expect(v1.effectivePosition.y.center).to.equal(100 - 50);
-        expect(v1.rawPosition.x.center).to.equal(10);
+        expect(resolvedAxisCenter(v1.effectivePosition.x)).to.equal(10 * 2 + 200);
+        expect(resolvedAxisCenter(v1.effectivePosition.y)).to.equal(100 - 50);
+        expect(resolvedAxisCenter(v1.rawPosition.x)).to.equal(10);
         // Second transform adds 1000 more to x: eff = raw * 2 + 1200.
         const v2 = view.systems[1]!;
-        expect(v2.effectivePosition.x.center).to.equal(1 * 2 + 1200);
-        expect(v2.effectivePosition.y.center).to.equal(1 - 50);
+        expect(resolvedAxisCenter(v2.effectivePosition.x)).to.equal(1 * 2 + 1200);
+        expect(resolvedAxisCenter(v2.effectivePosition.y)).to.equal(1 - 50);
         // mul = 0 makes the third system non-editable.
         expect(sys3!.editable).to.equal(false);
         expect(sys3!.editBlockedReason).to.include('not invertible');
@@ -224,7 +232,7 @@ static_galaxy_scenario = {
         // Preview still renders the other axis.
         const view = toScenarioView(scenario);
         const v = view.systems.find(s => s.id === '13')!;
-        expect(v.effectivePosition.y.center).to.equal(8);
+        expect(resolvedAxisCenter(v.effectivePosition.y)).to.equal(8);
         expect(v.effectivePosition.x.kind).to.equal('unresolved');
     });
 
@@ -253,7 +261,7 @@ static_galaxy_scenario = {
         expect(sys.x!.spans).to.equal(undefined);
         expect(sys.editable).to.equal(false);
         const view = toScenarioView(scenario);
-        expect(view.systems[0]!.effectivePosition.x.center).to.equal(123);
+        expect(resolvedAxisCenter(view.systems[0]!.effectivePosition.x)).to.equal(123);
     });
 
     it('returns a parse failure when no scenario exists', () => {

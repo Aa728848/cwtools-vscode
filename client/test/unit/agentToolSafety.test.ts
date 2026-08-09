@@ -1070,10 +1070,11 @@ describe('agent sprite candidate tool contract', () => {
             throw new Error('explore_pdx_project tool definition is missing');
         }
         expect(definition.function.description).to.include('Primary semantic exploration');
-        expect(definition.function.parameters.properties).to.have.property('depth');
-        expect(definition.function.parameters.properties.depth.maximum).to.equal(3);
-        expect(definition.function.parameters.properties.maxNodes.maximum).to.equal(100);
-        expect(definition.function.parameters.properties.maxEdges.maximum).to.equal(300);
+        const properties = definition.function.parameters.properties as Record<string, { maximum?: number }> | undefined;
+        expect(properties).to.have.property('depth');
+        expect(properties?.depth?.maximum).to.equal(3);
+        expect(properties?.maxNodes?.maximum).to.equal(100);
+        expect(properties?.maxEdges?.maximum).to.equal(300);
     });
 
     it('registers query_project_profile as a first-class read-only tool', () => {
@@ -1296,7 +1297,8 @@ describe('agent sprite candidate tool contract', () => {
         const originalExecuteCommand = vscodeStub.commands.executeCommand;
         let ensureArgs: any;
         let indexQuery: any;
-        vscodeStub.commands.executeCommand = async (command: string) => {
+        vscodeStub.commands.executeCommand = async (...args: unknown[]) => {
+            const command = args[0] as string;
             if (command === 'vscode.executeWorkspaceSymbolProvider') {
                 throw new Error('provider timed out');
             }

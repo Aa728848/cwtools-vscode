@@ -5,16 +5,15 @@ administrative_system = {
 	}
 
 	option = {
-		name = "federal"
+		name = "corporate"
 		
 		policy_flags = {
 			federal_system
 		}
 
 		valid = {
-			has_authority = auth_democratic
-			sectors > 0
-		}		
+			has_authority = auth_dictatorial
+		}
 
 		modifier = {
 			#country_core_sector_system_cap = 1
@@ -28,12 +27,9 @@ administrative_system = {
 		policy_flags = {
 			corporate_system
 		}
-		
 		valid = {
-			has_authority = auth_oligarchic
-			sectors > 0
+			has_authority = auth_dictatorial
 		}
-
 	}
 
 	option = {
@@ -42,7 +38,9 @@ administrative_system = {
 		policy_flags = {
 			unitary_system
 		}
-		
+		valid = {
+			has_authority = auth_dictatorial
+		}
 	}
 
 	option = {
@@ -54,7 +52,6 @@ administrative_system = {
 		
 		valid = {
 			has_authority = auth_dictatorial
-			sectors > 0
 		}
 		
 	}
@@ -68,7 +65,6 @@ administrative_system = {
 		
 		valid = {
 			has_authority = auth_imperial
-			sectors > 0
 		}
 
 	}

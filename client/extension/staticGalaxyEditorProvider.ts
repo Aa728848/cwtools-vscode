@@ -9,6 +9,7 @@
  *   source offsets or replacement text.
  */
 import * as fs from 'fs';
+import { panelText } from './panelI18n';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import { ErrorReporter } from './ai/errorReporter';
@@ -769,6 +770,3 @@ function escapeHtml(value: string): string {
     });
 }
 
-function panelText(en: string, zh: string): string {
-    return vscode.env.language.toLowerCase().startsWith('zh') ? zh : en;
-}

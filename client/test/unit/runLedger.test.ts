@@ -551,7 +551,7 @@ describe('RunLedger Unit Tests', () => {
         const privateRoot = path.join(workspaceRoot, '.private-agent-state');
         workspacePaths.configurePrivateAgentStorage(privateRoot);
         try {
-            const ledger = new (RunLedger as any)() as InstanceType<typeof RunLedger>;
+            const ledger = new (RunLedger as any)();
             const run = await ledger.createRun('topic_private', 'build', 'private prompt', undefined, 'private prompt');
             expect(fs.existsSync(path.join(privateRoot, 'topics', 'topic_private', 'runs', run.runId, 'run_state.json'))).to.equal(true);
             expect(fs.existsSync(path.join(workspaceRoot, '.cwtools', 'topic_private', 'runs', run.runId))).to.equal(false);

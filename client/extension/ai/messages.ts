@@ -225,38 +225,46 @@ export const ORCHESTRATOR_MSG = {
 
 const BUDGET_TEXT = {
     en: {
-        TRUNCATED: (originalLen: number) => `[... truncated - original length: ${originalLen} characters.]`,
+        // Truncation markers must state that the tool completed in full; without
+        // that statement models misread a shortened display as partial application
+        // and stop mid-task instead of continuing. budgetToolResult reserves
+        // TRUNCATION_SUFFIX_RESERVE characters for these suffixes, so keep each
+        // under that limit.
+        TRUNCATED: (originalLen: number) => `[... truncated - original length: ${originalLen} characters. Display-only truncation: the tool completed and its result was fully applied. Continue your work; re-read or query precisely when you need the exact details.]`,
         TRUNCATED_LINES: (keptLines: number) =>
-            `Truncated to ${keptLines} lines because the result exceeded the budget. Use startLine and endLine for a precise read.`,
+            `Truncated to ${keptLines} lines because the result exceeded the budget. The read itself completed and the file is unchanged. Use startLine and endLine for a precise read.`,
         TRUNCATED_GENERIC: (originalLen: number) =>
-            `[... truncated - original length: ${originalLen} characters. Query specific items separately if needed.]`,
+            `[... truncated - original length: ${originalLen} characters. Display-only truncation: the operation completed in full. Continue your work; query specific items separately if needed.]`,
         BUDGET_EXCEEDED: '[... budget exceeded; truncated]',
         COMPACTED_READ_FILE: (totalLines: string) =>
             `[Compacted read_file tool result] Successfully read the file, ${totalLines} lines total.`,
         COMPACTED_PREFIX: 'compacted',
         COMPACTED_ASSISTANT: '\n[... compacted]',
         ARRAY_BUDGET_NOTE: (total: number, shown: number) =>
-            `Showing ${shown} of ${total} items after deduping/splitting to save context. Use a filtered query to find a specific file.`,
+            `Showing ${shown} of ${total} items after deduping/splitting to save context. The operation completed in full; use a filtered query per file to get the complete list.`,
         ARRAY_GENERIC_NOTE: (total: number, shown: number) =>
-            `Showing ${shown} of ${total} items. Use a targeted query to find a specific item.`,
+            `Showing ${shown} of ${total} items. The operation completed in full; use a targeted query to find a specific item.`,
         GAP: (count: number) => `... omitted ${count} ${plural(count, 'item')} ...`,
         GAP_TAIL: '... continues to end ...',
     },
     'zh-cn': {
-        TRUNCATED: (originalLen: number) => `[... 已截断 - 原始长度：${originalLen} 字符。]`,
+        // 截断标记必须说明工具已完整执行；否则模型会把“展示被缩短”误读为
+        // “结果被部分应用”而在任务中途自行中止。budgetToolResult 为这些后缀
+        // 预留了 TRUNCATION_SUFFIX_RESERVE 字符，保持每个后缀在该上限内。
+        TRUNCATED: (originalLen: number) => `[... 已截断 - 原始长度：${originalLen} 字符。仅展示截断——工具已完整执行且结果全部生效。请继续工作；需要精确细节时再定向读取或查询。]`,
         TRUNCATED_LINES: (keptLines: number) =>
-            `由于长度超出预算已截断至 ${keptLines} 行。进行精确读取请使用 startLine 和 endLine 参数。`,
+            `由于长度超出预算已截断至 ${keptLines} 行。读取本身已完成，文件未被修改。进行精确读取请使用 startLine 和 endLine 参数。`,
         TRUNCATED_GENERIC: (originalLen: number) =>
-            `[... 已截断 - 原始长度：${originalLen} 字符。如需具体项请单独查询。]`,
+            `[... 已截断 - 原始长度：${originalLen} 字符。仅展示截断——操作已完整执行。请继续工作；如需具体项请单独查询。]`,
         BUDGET_EXCEEDED: '[... 超限已截断]',
         COMPACTED_READ_FILE: (totalLines: string) =>
             `[已压缩的 read_file 工具结果] 成功读取文件，共 ${totalLines} 行。`,
         COMPACTED_PREFIX: '已压缩',
         COMPACTED_ASSISTANT: '\n[... 已压缩]',
         ARRAY_BUDGET_NOTE: (total: number, shown: number) =>
-            `显示了 ${total} 项中的 ${shown} 项（为节省上下文已去重/分段）。请使用带 filter 的查询以查找特定文件。`,
+            `显示了 ${total} 项中的 ${shown} 项（为节省上下文已去重/分段）。操作已完整执行；需要完整列表请按文件使用带 filter 的查询。`,
         ARRAY_GENERIC_NOTE: (total: number, shown: number) =>
-            `显示了 ${total} 项中的 ${shown} 项。请使用针对性的查询以查找特定项。`,
+            `显示了 ${total} 项中的 ${shown} 项。操作已完整执行；请使用针对性的查询以查找特定项。`,
         GAP: (count: number) => `... 省略了 ${count} 项 ...`,
         GAP_TAIL: '... 延续至结尾 ...',
     },

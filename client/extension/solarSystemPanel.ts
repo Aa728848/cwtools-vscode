@@ -2,12 +2,25 @@
  * Solar System Preview Panel - manages the webview for solar system visualization.
  */
 import * as vscode from 'vscode';
+import { panelText } from './panelI18n';
 import * as path from 'path';
 import * as fs from 'fs';
 import { parseSolarSystemFile, resolveValue, toRelativeOrbitAngle, type SolarSystem, type CelestialBody } from './solarSystemParser';
 import { decodeDds, decodeTga } from './ddsDecoder';
 import { buildSpriteIndex, type SpriteInfo } from './guiParser';
 import { matchesExt, matchesAnyExt } from './fileExtensions';
+import { walkFiles } from './fileWalker';
+import {
+    fields,
+    isBoolean,
+    isFiniteNumber,
+    isIntegerInRange,
+    isOneOf,
+    isRecord,
+    isString,
+    optional,
+    type MessageValidator,
+} from '../shared/protocolValidation';
 
 // Stellaris hard limit: no body may exist beyond this orbit distance from the system center.
 // Webview clamps first; these are defense-in-depth checks on the document-editing side.
@@ -33,6 +46,70 @@ type SolarPanelMessage =
     | { command: 'vscodeRedo' }
     | { command: 'saveDocument' };
 
+// ── WebView message validation ─────────────────────────────────────────────────
+
+/** One-based document line number (upper bound is a sanity cap, not a real limit). */
+const isDocumentLine = isIntegerInRange(1, 100_000_000);
+const isOrbitValue: (value: unknown) => boolean = value =>
+    typeof value === 'string' || isFiniteNumber(value);
+const isValueType = isOneOf(['fixed', 'range', 'random'] as const);
+
+function isSolarPanelMessage(input: unknown): input is SolarPanelMessage {
+    if (!isRecord(input) || typeof input.command !== 'string') return false;
+    const validators: Record<string, MessageValidator> = {
+        goToLine: fields({ line: isDocumentLine }),
+        updateProperty: fields(
+            { line: isDocumentLine, property: isString, value: isOrbitValue },
+            { valueType: optional(isValueType) },
+        ),
+        updateOrbit: fields({ line: isDocumentLine, orbitDistance: isFiniteNumber, orbitAngle: isFiniteNumber }),
+        movePlanetOrbit: fields(
+            { bodyLine: isDocumentLine, bodyEndLine: isDocumentLine, targetResolvedOrbit: isFiniteNumber, targetOrbitAngle: isFiniteNumber },
+            { isLockedOrbit: optional(isBoolean), isRingWorld: optional(isBoolean) },
+        ),
+        addPlanet: fields({
+            systemEndLine: isDocumentLine,
+            planetClass: isString,
+            orbitDistance: isFiniteNumber,
+            orbitAngle: isFiniteNumber,
+            size: isFiniteNumber,
+        }),
+        addStar: fields({
+            systemLine: isDocumentLine,
+            systemEndLine: isDocumentLine,
+            firstBodyLine: isDocumentLine,
+            planetClass: isString,
+            size: isFiniteNumber,
+        }),
+        addMoon: fields({
+            parentLine: isDocumentLine,
+            parentEndLine: isDocumentLine,
+            planetClass: isString,
+            size: isFiniteNumber,
+            orbitDistance: isFiniteNumber,
+            orbitAngle: isFiniteNumber,
+        }),
+        addRingWorld: fields(
+            { systemEndLine: isDocumentLine, orbitDistance: isFiniteNumber, segmentCount: isIntegerInRange(1, 100_000), segmentAngle: isFiniteNumber },
+            { parentLine: optional(isDocumentLine), parentEndLine: optional(isDocumentLine) },
+        ),
+        addSibling: fields({
+            siblingLine: isDocumentLine,
+            siblingEndLine: isDocumentLine,
+            bodyType: isString,
+            planetClass: isString,
+            size: isFiniteNumber,
+            orbitAngle: isFiniteNumber,
+        }),
+        deletePlanet: fields({ line: isDocumentLine }),
+        vscodeUndo: fields(),
+        vscodeRedo: fields(),
+        saveDocument: fields(),
+    };
+    const validator = validators[input.command];
+    return validator ? validator(input) : false;
+}
+
 type SolarDocumentState = 'applying' | 'modified' | 'saved' | 'error';
 
 export class SolarSystemPanel {
@@ -47,6 +124,8 @@ export class SolarSystemPanel {
     }
     private readonly _panel: vscode.WebviewPanel;
     private _disposables: vscode.Disposable[] = [];
+    /** Aborts any in-flight workspace scan when the panel is disposed. */
+    private _scanAbortController = new AbortController();
     private readonly _webviewRootPath: string;
     private _document: vscode.TextDocument | undefined;
     private _skipNextReload = false;
@@ -146,8 +225,9 @@ export class SolarSystemPanel {
         this._panel.webview.html = this._getHtml();
         this._panel.onDidDispose(() => this.dispose(), null, this._disposables);
         this._disposables.push(
-            this._panel.webview.onDidReceiveMessage(async (msg: SolarPanelMessage) => {
-                if (!msg?.command) return;
+            this._panel.webview.onDidReceiveMessage(async (raw: unknown) => {
+                if (!isSolarPanelMessage(raw)) return;
+                const msg = raw;
                 switch (msg.command) {
                     case 'goToLine': {
                         const ed = await vscode.window.showTextDocument(document.uri, { viewColumn: vscode.ViewColumn.One });
@@ -241,9 +321,9 @@ export class SolarSystemPanel {
     }
 
     private async _buildSpriteIndex(searchRoots: string[]): Promise<Map<string, SpriteInfo>> {
-        const gfxContents: Array<{ path: string; content: string }> = [];
         const maxGfxFiles = 2000;
 
+        const gfxContents: Array<{ path: string; content: string }> = [];
         for (const root of searchRoots) {
             if (gfxContents.length >= maxGfxFiles) break;
             const searchDirs = [
@@ -254,28 +334,17 @@ export class SolarSystemPanel {
             for (const dir of searchDirs) {
                 if (gfxContents.length >= maxGfxFiles) break;
                 try { await fs.promises.access(dir); } catch { continue; }
-                await this._findGfxFiles(dir, gfxContents, maxGfxFiles);
+                const found = await walkFiles(dir, {
+                    ext: '.gfx',
+                    maxFiles: maxGfxFiles - gfxContents.length,
+                    signal: this._scanAbortController.signal,
+                });
+                for (const file of found) {
+                    gfxContents.push({ path: file.path, content: file.content });
+                }
             }
         }
         return buildSpriteIndex(gfxContents);
-    }
-
-    private async _findGfxFiles(dir: string, result: Array<{ path: string; content: string }>, maxFiles: number) {
-        try {
-            if (result.length >= maxFiles) return;
-            const entries = await fs.promises.readdir(dir, { withFileTypes: true });
-            await Promise.all(entries.map(async (entry) => {
-                const full = path.join(dir, entry.name);
-                if (entry.isDirectory()) {
-                    await this._findGfxFiles(full, result, maxFiles);
-                } else if (matchesExt(entry.name, '.gfx')) {
-                    try {
-                        const content = await fs.promises.readFile(full, 'utf-8');
-                        result.push({ path: full, content });
-                    } catch { /* skip unreadable */ }
-                }
-            }));
-        } catch { /* skip inaccessible dirs */ }
     }
 
     private async _collectCelestialClasses(searchRoots: string[]) {
@@ -638,6 +707,7 @@ export class SolarSystemPanel {
 
     public dispose() {
         SolarSystemPanel.currentPanel = undefined;
+        this._scanAbortController.abort();
         this._document = undefined;
         this._panel.dispose();
         while (this._disposables.length) {
@@ -1638,6 +1708,3 @@ function getNonce(): string {
     return t;
 }
 
-function panelText(en: string, zh: string): string {
-    return vscode.env.language.toLowerCase().startsWith('zh') ? zh : en;
-}

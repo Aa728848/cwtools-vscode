@@ -1,4 +1,5 @@
 import * as fs from 'fs';
+import { panelText } from './panelI18n';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import { decodeDds, decodeTga } from './ddsDecoder';
@@ -8,6 +9,19 @@ import { isPathInsideOrEqual } from './pathScope';
 import { parseParticleFile } from './particleAssetParser';
 import { serializeEffect } from './particleAssetSerializer';
 import { loadEnvironmentPresets } from './worldgfxPresets';
+import {
+    fields,
+    isArrayOf,
+    isBoolean,
+    isFiniteNumber,
+    isInteger,
+    isIntegerInRange,
+    isOneOf,
+    isRecord,
+    isString,
+    optional,
+    type MessageValidator,
+} from '../shared/protocolValidation';
 import type {
     ParticleEffect,
     ParticleRenderPayload,
@@ -19,9 +33,6 @@ import type {
 
 const TEXTURE_CANDIDATE_LIMIT = 3000;
 
-function panelText(en: string, zh: string): string {
-    return vscode.env.language.toLowerCase().startsWith('zh') ? zh : en;
-}
 
 type ParticlePanelMessage =
     | { command: 'selectEffect'; index: number }
@@ -33,6 +44,47 @@ type ParticlePanelMessage =
     | { command: 'requestEnvironments' }
     | { command: 'screenshot'; data: string }
     | { command: 'log'; text: string; level?: 'info' | 'warn' | 'error' };
+
+// ── WebView message validation ─────────────────────────────────────────────────
+
+/** Base64 screenshot payload cap (~16 MiB decoded). */
+const MAX_SCREENSHOT_BASE64_LENGTH = 16 * 1024 * 1024 * 4 / 3 + 4;
+const isEffectIndex = isIntegerInRange(0, 100_000_000);
+const isLogLevel = isOneOf(['info', 'warn', 'error'] as const);
+
+/** Shallow structural check — the serializer/editor re-validates deeper fields. */
+function isParticleEffect(value: unknown): value is ParticleEffect {
+    return isRecord(value)
+        && typeof value.name === 'string'
+        && (value.scale === undefined || isFiniteNumber(value.scale))
+        && Array.isArray(value.subsystems)
+        && value.subsystems.every(isRecord)
+        && Array.isArray(value.animations)
+        && value.animations.every(isRecord)
+        && Array.isArray(value.forces)
+        && value.forces.every(isRecord);
+}
+
+function isParticlePanelMessage(input: unknown): input is ParticlePanelMessage {
+    if (!isRecord(input) || typeof input.command !== 'string') return false;
+    const validators: Record<string, MessageValidator> = {
+        selectEffect: fields({ index: isEffectIndex }),
+        dirtyState: fields({ dirty: isBoolean }),
+        previewEffects: fields({ requestId: isInteger, effects: isArrayOf(isParticleEffect) }),
+        saveEffects: fields(
+            { selectedEffectIndex: isEffectIndex, effects: isArrayOf(isParticleEffect), dirtyEffectIndices: isArrayOf(isInteger) },
+        ),
+        openFile: fields(),
+        close: fields(),
+        requestEnvironments: fields(),
+        screenshot: fields({
+            data: value => typeof value === 'string' && value.length <= MAX_SCREENSHOT_BASE64_LENGTH,
+        }),
+        log: fields({ text: isString }, { level: optional(isLogLevel) }),
+    };
+    const validator = validators[input.command];
+    return validator ? validator(input) : false;
+}
 
 interface TextureCacheEntry {
     mtimeMs: number;
@@ -82,7 +134,10 @@ export class ParticlePanel {
         this._panel.webview.html = this._getHtml();
         this._panel.onDidDispose(() => this.dispose(), null, this._disposables);
         this._disposables.push(
-            this._panel.webview.onDidReceiveMessage(msg => this._handleMessage(msg as ParticlePanelMessage), null, this._disposables),
+            this._panel.webview.onDidReceiveMessage((raw: unknown) => {
+                if (!isParticlePanelMessage(raw)) return;
+                void this._handleMessage(raw);
+            }, null, this._disposables),
             vscode.workspace.onDidSaveTextDocument(async savedDoc => {
                 if (this._document && savedDoc.uri.fsPath === this._document.uri.fsPath) {
                     if (this._pendingProgrammaticSaves > 0) {

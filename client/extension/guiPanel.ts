@@ -2,11 +2,22 @@
  * GUI Preview Panel - manages the webview for GUI visualization.
  */
 import * as vscode from 'vscode';
+import { panelText } from './panelI18n';
 import * as path from 'path';
 import * as fs from 'fs';
 import { parseGuiFile, buildSpriteIndex, serializePosition, serializeSize, serializeProperty, serializeNewElement, type GuiElement } from './guiParser';
 import { decodeDds, decodeTga, type DdsResult } from './ddsDecoder';
-import { matchesExt } from './fileExtensions';
+import { walkFiles } from './fileWalker';
+import {
+    fields,
+    isFiniteNumber,
+    isIntegerInRange,
+    isPresent,
+    isRecord,
+    isString,
+    optional,
+    type MessageValidator,
+} from '../shared/protocolValidation';
 
 // ── WebView message types ──────────────────────────────────────────────────────
 type GuiPanelMessage =
@@ -21,6 +32,45 @@ type GuiPanelMessage =
     | { command: 'vscodeUndo' }
     | { command: 'saveDocument' };
 
+// ── WebView message validation ─────────────────────────────────────────────────
+
+/** One-based document line number (upper bound is a sanity cap, not a real limit). */
+const isDocumentLine = isIntegerInRange(1, 100_000_000);
+const isPositionAdjust: (value: unknown) => boolean = value =>
+    isRecord(value) && isFiniteNumber(value.dx) && isFiniteNumber(value.dy);
+
+function isGuiPanelMessage(input: unknown): input is GuiPanelMessage {
+    if (!isRecord(input) || typeof input.command !== 'string') return false;
+    const validators: Record<string, MessageValidator> = {
+        goToLine: fields({ line: isDocumentLine }),
+        updateProperty: fields({ line: isDocumentLine, property: isString, value: isPresent }, { propertyLine: optional(isDocumentLine) }),
+        addElement: fields({
+            parentEndLine: isDocumentLine,
+            type: isString,
+            name: isString,
+            x: isFiniteNumber,
+            y: isFiniteNumber,
+            w: isFiniteNumber,
+            h: isFiniteNumber,
+        }),
+        duplicateElement: fields({ startLine: isDocumentLine, endLine: isDocumentLine, newName: isString }),
+        removePropertyLine: fields({ line: isDocumentLine, property: isString }),
+        addBackground: fields({ parentEndLine: isDocumentLine }, { sprite: optional(isString) }),
+        reparentElement: fields(
+            { startLine: isDocumentLine, endLine: isDocumentLine, newParentEndLine: isDocumentLine },
+            { positionAdjust: optional(isPositionAdjust) },
+        ),
+        unparentElement: fields(
+            { startLine: isDocumentLine, endLine: isDocumentLine, parentEndLine: isDocumentLine },
+            { positionAdjust: optional(isPositionAdjust) },
+        ),
+        vscodeUndo: fields(),
+        saveDocument: fields(),
+    };
+    const validator = validators[input.command];
+    return validator ? validator(input) : false;
+}
+
 export class GuiPanel {
     public static currentPanel: GuiPanel | undefined;
     private static readonly viewType = 'cwtools-gui-preview';
@@ -33,6 +83,8 @@ export class GuiPanel {
     private _document: vscode.TextDocument | undefined;
     private _searchRoots: string[] = [];
     private _skipNextReload = false;   // skip reload after programmatic edit
+    /** Aborts any in-flight workspace scan when the panel is disposed. */
+    private _scanAbortController = new AbortController();
     private _contentSnapshots: string[] = [];  // content snapshots for structural undo
     private _lastSnapshotTime = 0;  // debounce: only save one snapshot per 500ms batch
     private static readonly MAX_SNAPSHOTS = 20;
@@ -94,8 +146,9 @@ export class GuiPanel {
         this._panel.webview.html = this._getHtml();
         this._panel.onDidDispose(() => this.dispose(), null, this._disposables);
         this._disposables.push(
-            this._panel.webview.onDidReceiveMessage(async (msg: GuiPanelMessage) => {
-                if (!msg?.command) return;
+            this._panel.webview.onDidReceiveMessage(async (raw: unknown) => {
+                if (!isGuiPanelMessage(raw)) return;
+                const msg = raw;
                 switch (msg.command) {
                     case 'goToLine': {
                         const ed = await vscode.window.showTextDocument(document.uri, { viewColumn: vscode.ViewColumn.One });
@@ -264,9 +317,9 @@ export class GuiPanel {
     }
 
     private async _buildSpriteIndex(searchRoots: string[]): Promise<Map<string, import('./guiParser').SpriteInfo>> {
-        const gfxContents: Array<{ path: string; content: string }> = [];
         const maxGfxFiles = 500;
 
+        const gfxContents: Array<{ path: string; content: string }> = [];
         for (const root of searchRoots) {
             if (gfxContents.length >= maxGfxFiles) break;
             const searchDirs = [
@@ -277,29 +330,18 @@ export class GuiPanel {
             for (const dir of searchDirs) {
                 if (gfxContents.length >= maxGfxFiles) break;
                 try { await fs.promises.access(dir); } catch { continue; }
-                await this._findGfxFiles(dir, gfxContents, maxGfxFiles);
+                const found = await walkFiles(dir, {
+                    ext: '.gfx',
+                    maxFiles: maxGfxFiles - gfxContents.length,
+                    signal: this._scanAbortController.signal,
+                });
+                for (const file of found) {
+                    gfxContents.push({ path: file.path, content: file.content });
+                }
             }
         }
 
         return buildSpriteIndex(gfxContents);
-    }
-
-    private async _findGfxFiles(dir: string, result: Array<{ path: string; content: string }>, maxFiles: number) {
-        try {
-            if (result.length >= maxFiles) return;
-            const entries = await fs.promises.readdir(dir, { withFileTypes: true });
-            await Promise.all(entries.map(async (entry) => {
-                const full = path.join(dir, entry.name);
-                if (entry.isDirectory()) {
-                    await this._findGfxFiles(full, result, maxFiles);
-                } else if (matchesExt(entry.name, '.gfx')) {
-                    try {
-                        const content = await fs.promises.readFile(full, 'utf-8');
-                        result.push({ path: full, content });
-                    } catch { /* skip unreadable */ }
-                }
-            }));
-        } catch { /* skip inaccessible dirs */ }
     }
 
     /**
@@ -310,22 +352,19 @@ export class GuiPanel {
         const names = new Set<string>();
         for (const root of searchRoots) {
             const dir = path.join(root, 'common', 'button_effects');
-            try {
-                const entries = await fs.promises.readdir(dir, { withFileTypes: true });
-                await Promise.all(entries.map(async (entry) => {
-                    if (!entry.isFile() || !matchesExt(entry.name, '.txt')) return;
-                    try {
-                        const content = await fs.promises.readFile(path.join(dir, entry.name), 'utf-8');
-                        // Match only top-level keys: no leading whitespace
-                        const regex = /^([a-zA-Z_][a-zA-Z0-9_]*)\s*=\s*\{/gm;
-                        let m;
-                        while ((m = regex.exec(content)) !== null) {
-                             
-                            names.add(m[1]!);
-                        }
-                    } catch { /* skip unreadable */ }
-                }));
-            } catch { /* skip inaccessible dir */ }
+            const files = await walkFiles(dir, {
+                ext: '.txt',
+                recursive: false,
+                signal: this._scanAbortController.signal,
+            });
+            for (const file of files) {
+                // Match only top-level keys: no leading whitespace
+                const regex = /^([a-zA-Z_][a-zA-Z0-9_]*)\s*=\s*\{/gm;
+                let m;
+                while ((m = regex.exec(file.content)) !== null) {
+                    names.add(m[1]!);
+                }
+            }
         }
         return Array.from(names).sort();
     }
@@ -426,6 +465,7 @@ export class GuiPanel {
 
     public dispose() {
         GuiPanel.currentPanel = undefined;
+        this._scanAbortController.abort();
         // Release texture cache memory
         this._textureCache.clear();
         this._textureCacheBytes = 0;
@@ -1084,6 +1124,3 @@ function getNonce(): string {
     return t;
 }
 
-function panelText(en: string, zh: string): string {
-    return vscode.env.language.toLowerCase().startsWith('zh') ? zh : en;
-}

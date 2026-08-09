@@ -12,9 +12,6 @@ country_event = {
 	trigger = {
 		is_ai = no
 		is_country_type = default
-        solar_system = {
-            is_homeworld = yes
-       }
 	}
 
 	immediate = {
@@ -38,7 +35,6 @@ event = {
 			limit = { is_ai = no is_country_type = default }
 				country_event = { id = irm_sector.103 } 			# sector regular estimations
 				country_event = { id = irm_sector.201 } 			# clean up all vars for former sector capitals
-				country_event = { id = irm_sector.202 } 			# clean up duplicated capitals
 				country_event = { id = irm_faction.201 } 			# some xp for faction leaders
 				country_event = { id = irm_faction.203 } 			# refresh faction name
 		}
@@ -63,24 +59,4 @@ event = {
 
 
 
-# TMP
-
-planet_event = {
-	id = irm.100
-	hide_window = yes
-	is_triggered_only = yes
-
-	immediate = {
-		owner = {
-			random_pop_faction = {
-				limit = {
-					is_pop_faction_type = "regionalist"
-					check_pop_faction_parameter = { which = sector value = root.sector }
-				}
-				leader = {
-					kill_leader = { show_notification = yes }
-				}
-			}
-		}
-	}
-}
+# Temporary faction test event removed: it referenced an undefined pop faction type.

@@ -13,6 +13,7 @@ import * as vs from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
 import { sha256Text } from './runner/durableStorage';
+import { activeTurnRegistry } from './runner/activeTurnRegistry';
 import type { DurableAgentGoal } from './runner/goalStore';
 import type { AgentTaskRecord } from './runner/taskManager';
 import type { ConversationUndoRuntimeState } from './runner/agentRuntime';
@@ -706,12 +707,15 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         if (!this.topicManager.currentTopic) return false;
 
         const runId = await this.resolveActiveRunId();
-        if (!runId) {
-            this.postMessage({
-                type: 'generationError',
-                error: aiText('No active AI run is available to receive queued input.', '当前没有可接收排队输入的 AI 任务。'),
-            });
-            return false;
+        if (!runId || !activeTurnRegistry.get(runId)) {
+            // The run already finished while `_isGenerating` was still true (the
+            // flag resets only after UI teardown awaits). Steering would lose the
+            // message and leave the conversation without any update — submit it as
+            // a normal turn instead so the UI keeps working ("继续" right after a
+            // finished task must not require reopening the panel).
+            if (this._isGenerating) this._isGenerating = false;
+            await this.handleUserMessage(text, images, undefined, true, false, false, displayText, contexts);
+            return true;
         }
 
         const steeringText = hasText
@@ -813,7 +817,11 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         await this.handleUserMessage(text, payload.images, payload.attachedFiles);
     }
 
-    private async resolveTurnAgentProfile(text: string, showRoutingStatus = true): Promise<ResolvedAgentProfile> {
+    private async resolveTurnAgentProfile(
+        text: string,
+        showRoutingStatus = true,
+        extra: { planContinuationPending?: boolean } = {},
+    ): Promise<ResolvedAgentProfile> {
         const activeFile = vs.window.activeTextEditor?.document.uri.fsPath;
         const hasTopicContext = (this.topicManager.currentTopic?.messages.length ?? 0) > 0;
         const previousDomain = this.session.lastResolvedProfile?.domain
@@ -830,8 +838,19 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             .filter(message => message.role === 'user')
             .map(message => message.content);
         const hints = { activeFile, previousDomain, previousUserRequests };
-        const fallback = resolveAgentProfile(text, this.agentProfile, hints);
         const selection = normalizeAgentProfile(this.agentProfile);
+        // The previous turn ran in Plan Mode and never delivered the plan
+        // artifact: an answer to its clarification must continue planning so
+        // the planner can hand over the full Implementation Plan. Routing it as
+        // "execute" is what used to skip the plan blueprint entirely.
+        if (extra.planContinuationPending === true) {
+            const continued = resolveAgentProfile(text, { ...selection, intent: 'plan' }, hints);
+            if (showRoutingStatus) {
+                this.postMessageToSurface('chat', { type: 'agentRoutingStatus', phase: 'resolved', profile: continued });
+            }
+            return continued;
+        }
+        const fallback = resolveAgentProfile(text, this.agentProfile, hints);
         if (!shouldUseSemanticAgentRouting(selection)) return fallback;
         if (showRoutingStatus) {
             this.postMessageToSurface('chat', { type: 'agentRoutingStatus', phase: 'classifying' });
@@ -904,6 +923,27 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         }
     }
 
+    /**
+     * True when the previous turn ran in Plan Mode and never delivered the plan
+     * artifact: an answer to its clarification must continue planning instead
+     * of being re-routed straight into execute mode (which used to skip the
+     * plan blueprint and approval card entirely).
+     */
+    private isPendingPlanContinuation(text: string): boolean {
+        if (this.approvedPlanExecutionPending) return false;
+        if (this.session.currentMode !== 'plan') return false;
+        const lower = text.trim().toLowerCase();
+        if (!lower) return false;
+        // Explicit mode overrides and "execute now" phrasing opt out of planning.
+        if (/(?:^|\s)\/mode:|\/plan\b|不用计划|不做计划|不要计划|取消计划|跳过计划|别计划|别规划|放弃计划|不再计划|直接执行|立即执行|马上执行|直接开始|开始执行|继续执行/.test(lower)) return false;
+        const topicId = this.topicManager.currentTopic?.id;
+        if (!topicId) return false;
+        // A plan artifact for the topic means planning already delivered its
+        // blueprint; only the plan-less state needs a plan continuation.
+        const candidates = getPrivateTopicFileCandidates(topicId, 'Implementation_Plan.md', getProjectWorkspaceRoot());
+        return !candidates.some(candidate => fs.existsSync(candidate));
+    }
+
     public async handleUserMessage(text: string, images?: string[], _attachedFiles?: string[], _skipAutoModeSwitch = false, isBackground = false, resumeFromState = false, displayText?: string, contexts?: import('./types').ContextItem[]): Promise<void> {
         if (!text.trim() && (!images || images.length === 0)) return;
 
@@ -944,7 +984,9 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             : this.agentProfile.domain;
         let resolvedProfile: ResolvedAgentProfile | undefined;
         if (!_skipAutoModeSwitch && text.trim() && !this.currentWorkflowId) {
-            resolvedProfile = await this.resolveTurnAgentProfile(text, !isBackground);
+            resolvedProfile = await this.resolveTurnAgentProfile(text, !isBackground, {
+                planContinuationPending: this.isPendingPlanContinuation(text),
+            });
             turnMode = resolvedProfile.mode;
             turnDomain = resolvedProfile.domain;
             this.session.lastResolvedProfile = resolvedProfile;
@@ -1013,6 +1055,33 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             if (this.topicManager.currentTopic?.id) {
                 await this.agentRunner.clearResumeState(this.topicManager.currentTopic.id);
             }
+        } else {
+            // Resumed runs still need the full UI start signal: without it the
+            // panel never shows the user message, never marks generating, and
+            // drops every live step (currentAssistantDiv stays null), so the
+            // conversation appears frozen until the panel is reopened.
+            if (!isBackground) {
+                this.postMessage({
+                    type: 'addUserMessage',
+                    text: visibleUserText,
+                    messageIndex,
+                    images: images?.length ? images : undefined,
+                    contexts,
+                    resolvedAgentProfile: resolvedProfile,
+                });
+            } else {
+                this.postMessage({ type: 'startBackgroundGeneration' });
+            }
+            this.topicManager.addHistoryMessage({
+                role: 'user',
+                content: text,
+                displayContent: displayText,
+                contexts,
+                timestamp: Date.now(),
+                images: images?.length ? images : undefined,
+                isHidden: isBackground,
+                resolvedAgentProfile: resolvedProfile,
+            });
         }
 
         // Get current editor context
@@ -2749,7 +2818,24 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                 const objective = budgetMatch?.[2]?.trim() || value;
                 const tokenBudget = budgetMatch?.[1] ? Number(budgetMatch[1]) : undefined;
                 await this.agentRuntime.setGoal(topicId, topicId, objective, tokenBudget);
-                this.emitSlashCommandResult(raw, 'success', aiText('Durable goal saved for this topic.', '已为当前话题保存持久目标。'));
+                this.emitSlashCommandResult(
+                    raw,
+                    'success',
+                    aiText(
+                        'Durable goal saved; the Agent starts working on it now.',
+                        '已保存持久目标，Agent 现在开始执行该目标。',
+                    ),
+                );
+                // Kick off goal pursuit immediately so the Agent starts working
+                // on the objective; the durable-goal continuation machinery then
+                // keeps it running across turns until completion, a blocker, or
+                // an exhausted budget. Previously /goal only persisted the goal
+                // and never submitted any turn, so the Agent never acted on it.
+                if (objective && !this._isGenerating) {
+                    void this.handleUserMessage(objective).catch(error => {
+                        ErrorReporter.warn(SOURCE.CHAT_PANEL, `Goal kickoff turn failed for '${objective.slice(0, 80)}'.`, error);
+                    });
+                }
                 return;
             }
             case 'workflowOff':

@@ -33,8 +33,8 @@ describe('localisation language preference', () => {
 
 	it('sorts indexed localisation entries using configured language order', () => {
 		const entries: LocEntry[] = [
-			{ key: 'ship_name', value: 'Ship', file: '/loc/en.yml', line: 2, language: 'l_english' },
-			{ key: 'ship_name', value: 'ZH Ship', file: '/loc/zh.yml', line: 2, language: 'l_simp_chinese' },
+			{ key: 'ship_name', value: 'Ship', file: '/loc/en.yml', line: 2, language: 'l_english', valueHash: 'aaaaaaaa', hasBom: false, encoding: 'utf8', header: 'l_english' },
+			{ key: 'ship_name', value: 'ZH Ship', file: '/loc/zh.yml', line: 2, language: 'l_simp_chinese', valueHash: 'bbbbbbbb', hasBom: false, encoding: 'utf8', header: 'l_simp_chinese' },
 		];
 
 		const sorted = sortLocalisationEntriesByLanguagePreference(

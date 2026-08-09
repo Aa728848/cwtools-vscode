@@ -141,18 +141,19 @@ describe('SemanticVerifier', () => {
         expect(result.acceptanceFailures).to.deep.equal([]);
     });
 
-    it('proves a declared event-to-scripted-effect edge in the repository sample mod corpus', async () => {
+    it('verifies the checked-in sample mod definitions without stale scripted-effect edges', async () => {
         const sampleRoot = path.resolve(__dirname, '..', 'sample');
         const eventFile = path.join(sampleRoot, 'events', 'irm_faction.txt');
         const effectFile = path.join(sampleRoot, 'common', 'scripted_effects', 'irm_scripted_effects.txt');
-        const graph = TaskGraphEngine.createGraph('verify IRM faction leader chain', {
-            objective: 'Verify the checked-in sample mod event calls its scripted effect',
-            requiredEdges: [
-                { from: 'irm_faction.2', relation: 'call', to: 'faction_set_leader' },
-            ],
+        const graph = TaskGraphEngine.createGraph('verify IRM sample corpus', {
+            objective: 'Verify the checked-in sample mod event and scripted effect definitions',
+            // The sample no longer calls faction_set_leader from irm_faction.2
+            // (the call and the regionalist faction definition were removed), so
+            // no call edge is declared and none may be fabricated.
+            requiredEdges: [],
             acceptanceCriteria: [
                 { id: 'sample_event_exists', description: 'Sample event exists', type: 'entity_exists', subject: 'irm_faction.2' },
-                { id: 'sample_effect_referenced', description: 'Sample scripted effect is called', type: 'entity_referenced', subject: 'faction_set_leader' },
+                { id: 'sample_effect_defined', description: 'Sample scripted effect is defined', type: 'entity_exists', subject: 'faction_set_leader' },
             ],
         });
 
@@ -176,7 +177,9 @@ describe('SemanticVerifier', () => {
 
         expect(edgeEvidence.some(item => item.id === 'irm_faction.2' && item.operation === 'define')).to.equal(true);
         expect(edgeEvidence.some(item => item.id === 'faction_set_leader' && item.operation === 'define')).to.equal(true);
-        expect(edgeEvidence.some(item => item.id === 'faction_set_leader' && item.operation === 'call')).to.equal(true);
+        // The sample removed the event's call to faction_set_leader; the verifier
+        // must not invent a call edge that no longer exists in the corpus.
+        expect(edgeEvidence.some(item => item.id === 'faction_set_leader' && item.operation === 'call')).to.equal(false);
         expect(result.issues.some(issue => issue.code === 'missing_required_edge')).to.equal(false, result.report);
         expect(result.acceptanceFailures).to.deep.equal([]);
     });

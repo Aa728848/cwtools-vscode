@@ -85,6 +85,15 @@ body {
     accent-color: var(--ep-accent);
 }
 
+#toolbar .flag-color-control {
+    gap: 6px;
+    white-space: nowrap;
+}
+
+#toolbar .flag-color-control select {
+    min-width: 68px;
+}
+
 .toolbar-separator {
     width: 1px;
     height: 20px;

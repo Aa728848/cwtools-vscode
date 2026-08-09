@@ -2189,6 +2189,20 @@ export class EntityPanel {
             <div class="icon-btn-content"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="m12 3 9 17H3L12 3Z"/><circle cx="12" cy="3" r="2.2" fill="currentColor" stroke="none"/><circle cx="3" cy="20" r="2.2" fill="currentColor" stroke="none"/><circle cx="21" cy="20" r="2.2" fill="currentColor" stroke="none"/></svg></div>
         </label>
         <span class="toolbar-separator"></span>
+        <label class="flag-color-control" title="${locale.startsWith('zh') ? '使用 Specular 贴图红色通道作为旗帜色遮罩；黑色区域不受影响' : 'Use Specular map red channel as the flag-color mask; black areas are unchanged'}">
+            <span>${locale.startsWith('zh') ? '旗帜色' : 'Flag color'}</span>
+            <select id="sel-flag-color" aria-label="${locale.startsWith('zh') ? '旗帜色' : 'Flag color'}">
+                <option value="red" selected>${locale.startsWith('zh') ? '红色' : 'Red'}</option>
+                <option value="green">${locale.startsWith('zh') ? '绿色' : 'Green'}</option>
+                <option value="blue">${locale.startsWith('zh') ? '蓝色' : 'Blue'}</option>
+                <option value="yellow">${locale.startsWith('zh') ? '黄色' : 'Yellow'}</option>
+                <option value="orange">${locale.startsWith('zh') ? '橙色' : 'Orange'}</option>
+                <option value="purple">${locale.startsWith('zh') ? '紫色' : 'Purple'}</option>
+                <option value="cyan">${locale.startsWith('zh') ? '青色' : 'Cyan'}</option>
+                <option value="white">${locale.startsWith('zh') ? '白色' : 'White'}</option>
+            </select>
+        </label>
+        <span class="toolbar-separator"></span>
         <label class="toolbar-checkbox-btn" data-i18n-title="wireframe">
             <input type="checkbox" id="chk-wireframe">
             <div class="icon-btn-content"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/><line x1="12" y1="22" x2="12" y2="12"/></svg></div>

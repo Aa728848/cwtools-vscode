@@ -10,7 +10,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { TransformControls } from 'three/examples/jsm/controls/TransformControls.js';
 import { parsePdxMesh, parsePdxAnim, type ParsedMeshFile, type ParsedSubMesh, type ParsedAnimation, type ParsedLocator } from './pdxMeshParser';
-import { pdxHelperFunctions, pdxNormalFragmentMaps, pdxRoughnessFragment, pdxMetalnessFragment, pdxEmissiveFragment } from './pdxShaders';
+import { pdxHelperFunctions, pdxNormalFragmentMaps, pdxRoughnessFragment, pdxMetalnessFragment, pdxFlagColorLightingFragment, pdxEmissiveFragment } from './pdxShaders';
 import { Icons } from './svgIcons';
 import {
     applyLocatorTransformDelta,
@@ -196,6 +196,25 @@ const multiRotationModeSelect = document.getElementById('sel-multi-rotation-mode
 const vertexSnapToggle = document.getElementById('chk-vertex-snap') as HTMLInputElement;
 const normalToggle = document.getElementById('chk-normals') as HTMLInputElement;
 const bonesToggle = document.getElementById('chk-bones') as HTMLInputElement;
+const flagColorSelect = document.getElementById('sel-flag-color') as HTMLSelectElement;
+
+const FLAG_COLOR_PRESETS = {
+    red: 0xff4d4d,
+    green: 0x4dff70,
+    blue: 0x4d7dff,
+    yellow: 0xffd84d,
+    orange: 0xff8a3d,
+    purple: 0xb05cff,
+    cyan: 0x38d9e6,
+    white: 0xffffff,
+} as const;
+type FlagColorPreset = keyof typeof FLAG_COLOR_PRESETS;
+const DEFAULT_FLAG_COLOR: FlagColorPreset = 'red';
+const flagColorUniform = { value: new THREE.Color(FLAG_COLOR_PRESETS[DEFAULT_FLAG_COLOR]) };
+
+function isFlagColorPreset(value: string): value is FlagColorPreset {
+    return Object.prototype.hasOwnProperty.call(FLAG_COLOR_PRESETS, value);
+}
 
 // Property inputs
 const propPx = document.getElementById('prop-px') as HTMLInputElement;
@@ -2702,6 +2721,8 @@ async function upgradeSubmeshMaterial(mesh: THREE.Mesh | THREE.SkinnedMesh, text
             const hasSpecAtCompile = !!mat.roughnessMap;
 
             // Inject PDX GLSL shader fragment (imported from pdxShaders.ts)
+            shader.uniforms.pdxFlagColor = flagColorUniform;
+            shader.fragmentShader = 'uniform vec3 pdxFlagColor;\n' + shader.fragmentShader;
             shader.fragmentShader = pdxHelperFunctions + shader.fragmentShader;
 
             if (hasNormalAtCompile) {
@@ -2717,6 +2738,9 @@ async function upgradeSubmeshMaterial(mesh: THREE.Mesh | THREE.SkinnedMesh, text
             if (hasSpecAtCompile) {
                 shader.fragmentShader = shader.fragmentShader.replace(
                     '#include <metalnessmap_fragment>', pdxMetalnessFragment);
+
+                shader.fragmentShader = shader.fragmentShader.replace(
+                    '#include <lights_fragment_end>', pdxFlagColorLightingFragment);
             }
 
             if (hasNormalAtCompile) {
@@ -4073,6 +4097,14 @@ bonesToggle.addEventListener('change', () => {
     if (skeletonHelper) skeletonHelper.visible = bonesToggle.checked;
 });
 
+flagColorSelect.addEventListener('change', () => {
+    const preset = isFlagColorPreset(flagColorSelect.value)
+        ? flagColorSelect.value
+        : DEFAULT_FLAG_COLOR;
+    flagColorSelect.value = preset;
+    flagColorUniform.value.setHex(FLAG_COLOR_PRESETS[preset]);
+});
+
 // Focus button — reframe camera to fit model (like Maya's F key)
 const focusBtn = document.getElementById('btn-focus');
 focusBtn?.addEventListener('click', () => {
@@ -5057,4 +5089,3 @@ window.addEventListener('message', handleWindowMessage);
 initThree();
 setWorkspaceMode('preview');
 renderDocumentState(true);
-

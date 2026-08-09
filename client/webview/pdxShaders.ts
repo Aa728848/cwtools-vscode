@@ -62,6 +62,22 @@ float metalnessFactor = metalness;
 #endif
 `;
 
+// ── Flag color replacement fragment (replaces #include <lights_fragment_end>) ────────────────────
+export const pdxFlagColorLightingFragment = `
+#include <lights_fragment_end>
+#ifdef USE_ROUGHNESSMAP
+    // Stellaris uses SpecularMap.R as the faction/flag-color mask. A black
+    // channel produces a neutral multiplier, while grayscale values blend
+    // smoothly toward the selected flag color.
+    float pdxFlagMask = texture2D(roughnessMap, vRoughnessMapUv).r;
+    vec3 pdxFlagMultiplier = mix(vec3(1.0), pdxFlagColor, pdxFlagMask);
+    reflectedLight.directDiffuse *= pdxFlagMultiplier;
+    reflectedLight.indirectDiffuse *= pdxFlagMultiplier;
+    reflectedLight.directSpecular *= pdxFlagMultiplier;
+    reflectedLight.indirectSpecular *= pdxFlagMultiplier;
+#endif
+`;
+
 // ── Emissive replacement fragment (replaces #include <emissivemap_fragment>) ────────────────────
 export const pdxEmissiveFragment = `
 // PDX self-illumination: normal map B channel as mask

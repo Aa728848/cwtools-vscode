@@ -3,11 +3,16 @@
  * (GUI, Entity, Solar System).
  *
  * Guarantees over the ad-hoc `readdir + Promise.all` loops it replaces:
- * - directory entries are sorted, so results are deterministic per workspace;
- * - recursion and reads are bounded by a concurrency limit;
- * - the file-count and total-bytes caps are enforced at push time (synchronous
- *   check + push), so limits are never exceeded by racing branches;
- * - an AbortSignal cancels the walk between directory visits / file reads.
+ * - results are deterministic: the discovery pass walks directories in sorted
+ *   entry order, and file contents are placed back in discovery order;
+ * - file reads are bounded by a fixed worker pool (concurrency limit);
+ * - the file-count and total-bytes caps are enforced during discovery, before
+ *   any read starts, so the limits are never exceeded by racing branches;
+ * - an AbortSignal cancels both passes.
+ *
+ * Directory recursion is deliberately sequential (not parallel): `readdir` is
+ * cheap, and a slotted parallel recursion chain could exhaust the concurrency
+ * limit while every `visit` waits on queued leaf tasks — a deadlock.
  */
 import * as fs from 'fs';
 import * as path from 'path';
@@ -25,11 +30,11 @@ export interface WalkFilesOptions {
     predicate?: (filePath: string, entryName: string) => boolean;
     /** Maximum number of files collected (default: unlimited). */
     maxFiles?: number;
-    /** Maximum total characters of collected contents (default: unlimited). */
+    /** Maximum total bytes of collected file sizes (default: unlimited). */
     maxBytes?: number;
     /** Recurse into subdirectories (default: true). */
     recursive?: boolean;
-    /** Concurrent directory visits (default: 8). */
+    /** Concurrent file reads (default: 8). */
     concurrency?: number;
     /** Cancel the walk; already-started reads may still finish. */
     signal?: AbortSignal;
@@ -37,55 +42,26 @@ export interface WalkFilesOptions {
 
 const DEFAULT_CONCURRENCY = 8;
 
-class Semaphore {
-    private active = 0;
-    private readonly waiters: Array<() => void> = [];
-
-    constructor(private readonly limit: number) {}
-
-    async acquire(): Promise<void> {
-        if (this.active < this.limit) {
-            this.active++;
-            return;
-        }
-        await new Promise<void>(resolve => this.waiters.push(resolve));
-        this.active++;
-    }
-
-    release(): void {
-        this.active--;
-        const next = this.waiters.shift();
-        if (next) next();
-    }
-}
-
 /**
- * Recursively collects files under `root` matching the options, sorted by
- * directory-entry name. Never throws: unreadable directories/files are skipped
- * and a cancelled walk returns whatever was collected so far.
+ * Recursively collects files under `root` matching the options. Never throws:
+ * unreadable directories/files are skipped and a cancelled walk returns
+ * whatever was discovered so far.
  */
 export async function walkFiles(root: string, options: WalkFilesOptions = {}): Promise<WalkedFile[]> {
     const maxFiles = options.maxFiles ?? Number.POSITIVE_INFINITY;
     const maxBytes = options.maxBytes ?? Number.POSITIVE_INFINITY;
     const recursive = options.recursive ?? true;
     const signal = options.signal;
-    const semaphore = new Semaphore(options.concurrency ?? DEFAULT_CONCURRENCY);
-    const result: WalkedFile[] = [];
+
+    // ── Discovery pass: deterministic, no file reads ──────────────────────────
+    // Walks directories in sorted entry order, recording matching files in
+    // order. Sequential recursion keeps the result order stable and avoids
+    // the slotted-recursion deadlock.
+    const discovered: Array<{ full: string }> = [];
     let totalBytes = 0;
 
-    const isFull = (): boolean => result.length >= maxFiles || totalBytes >= maxBytes;
-
-    const runBounded = async <T>(fn: () => Promise<T>): Promise<T> => {
-        await semaphore.acquire();
-        try {
-            return await fn();
-        } finally {
-            semaphore.release();
-        }
-    };
-
     const visit = async (dir: string): Promise<void> => {
-        if (signal?.aborted || isFull()) return;
+        if (signal?.aborted || discovered.length >= maxFiles || totalBytes >= maxBytes) return;
         let entries: fs.Dirent[];
         try {
             entries = (await fs.promises.readdir(dir, { withFileTypes: true }))
@@ -94,36 +70,50 @@ export async function walkFiles(root: string, options: WalkFilesOptions = {}): P
             return; // skip inaccessible directories
         }
 
-        const tasks: Array<Promise<void>> = [];
         for (const entry of entries) {
-            if (signal?.aborted || isFull()) break;
+            if (signal?.aborted || discovered.length >= maxFiles || totalBytes >= maxBytes) break;
             const full = path.join(dir, entry.name);
             if (entry.isDirectory()) {
                 if (recursive) {
-                    tasks.push(runBounded(() => visit(full)));
+                    await visit(full);
                 }
             } else if (entry.isFile() && matchesExt(entry.name, options.ext ?? '')) {
                 if (options.predicate && !options.predicate(full, entry.name)) continue;
-                tasks.push(runBounded(async () => {
-                    if (signal?.aborted || isFull()) return;
-                    try {
-                        const stat = await fs.promises.stat(full);
-                        if (isFull() || totalBytes + stat.size > maxBytes) return;
-                        const content = await fs.promises.readFile(full, 'utf-8');
-                        // Re-check after the read: other branches may have filled
-                        // the budget while this file was being read.
-                        if (isFull() || totalBytes + content.length > maxBytes) return;
-                        result.push({ path: full, content });
-                        totalBytes += content.length;
-                    } catch {
-                        // skip unreadable files
-                    }
-                }));
+                try {
+                    const size = (await fs.promises.stat(full)).size;
+                    if (totalBytes + size > maxBytes) continue;
+                    discovered.push({ full });
+                    totalBytes += size;
+                } catch {
+                    // skip unreadable files
+                }
             }
         }
-        await Promise.all(tasks);
     };
 
     await visit(root);
-    return result;
+
+    // ── Read pass: bounded concurrency, results in discovery order ───────────
+    const results = new Array<WalkedFile | undefined>(discovered.length);
+    const workerCount = Math.min(options.concurrency ?? DEFAULT_CONCURRENCY, discovered.length);
+    let nextIndex = 0;
+
+    const reader = async (): Promise<void> => {
+        for (;;) {
+            if (signal?.aborted) return;
+            const index = nextIndex++;
+            if (index >= discovered.length) return;
+            const full = discovered[index]!.full;
+            try {
+                const content = await fs.promises.readFile(full, 'utf-8');
+                results[index] = { path: full, content };
+            } catch {
+                // skip unreadable files
+            }
+        }
+    };
+
+    const workers = Array.from({ length: workerCount }, () => reader());
+    await Promise.all(workers);
+    return results.filter((file): file is WalkedFile => file !== undefined);
 }

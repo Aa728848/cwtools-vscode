@@ -210,15 +210,16 @@ suite('LSP Hover Tests', function () {
     });
 
     suite('Localization Hover', function () {
-        // Skipped: the LSP game's References().Localisation is empty in the test
-        // workspace (CWTools loads no localisation keys at startup here, while the
-        // extension-side IndexService does index the same files), so every
-        // localisation hover falls back to the path-override hover. Needs a
-        // CWTools-side localisation-loading fix before this assertion can pass.
-        test.skip('should provide localization information in hover', async function () {
+        // Regression: the LSP game parsed zero localisation keys when no
+        // `localisation.languages` configuration had arrived (or when the
+        // loaded game differed from the configured one), so localisation
+        // hovers fell back to the path-override hover. The server now derives
+        // the language set from the raw config for the game that actually
+        // loads; this test locks that behavior in.
+        test('should provide localization information in hover', async function () {
             const uri = vscode.Uri.file(testEffectsFile);
             testDocument = await vscode.workspace.openTextDocument(uri);
-            const doc = await vscode.window.showTextDocument(testDocument);
+            await vscode.window.showTextDocument(testDocument);
             // Wait on a position inside a trigger block (line 37, `limit = { prevprevprevprev = { has_pop_faction_flag = ... } }`)
             // so the readiness check sees real completions.
             await waitForLSP(vscode.Uri.file(testEffectsFile), 120, 500, new vscode.Position(36, 25));
@@ -232,16 +233,10 @@ suite('LSP Hover Tests', function () {
                 position
             );
 
-            console.log(doc.document.getText(new vscode.Range(new vscode.Position(35,0) ,new vscode.Position(36,0))));
-
-
-
-             
             const hover = hovers[0]!;
             assert.ok(hover.contents.length > 0, 'Hover should contain content');
 
             // Check if the hover content is meaningful
-             
             const content = hover.contents[0]!;
             if (content instanceof vscode.MarkdownString) {
                 assert.ok(content.value.length > 0, 'Hover content should not be empty');

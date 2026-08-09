@@ -3,6 +3,7 @@ module Main.Lang.GameLoader
 open LSP.Types
 open System
 open CWTools.Games
+open CWTools.Common
 open System.IO
 open CWTools.Games.Files
 open Main.Serialize
@@ -632,3 +633,34 @@ let loadCustom serverSettings =
 
     let game = CWTools.Games.Custom.CustomGame(stlsettings, "custom")
     game
+
+let (|TrySuccess|TryFailure|) tryResult =
+    match tryResult with
+    | true, value -> TrySuccess value
+    | _ -> TryFailure
+
+/// Language-name -> Lang parser and default language set per game. The parsed
+/// set must always be derived for the game that actually loads: CWTools parses
+/// zero localisation keys when the Lang tags do not match the loaded game
+/// (e.g. Stellaris configuration with the generic-game fallback).
+let langConfigMap =
+    [ GameLanguage.STL,  (fun (s: string) -> match STLLang.TryParse<STLLang> s with TrySuccess v -> Lang.STL v | _ -> Lang.STL STLLang.English), (fun () -> [| Lang.STL STLLang.English |])
+      GameLanguage.EU4,  (fun s -> match EU4Lang.TryParse<EU4Lang> s with TrySuccess v -> Lang.EU4 v | _ -> Lang.EU4 EU4Lang.English), (fun () -> [| Lang.EU4 EU4Lang.English |])
+      GameLanguage.HOI4, (fun s -> match HOI4Lang.TryParse<HOI4Lang> s with TrySuccess v -> Lang.HOI4 v | _ -> Lang.HOI4 HOI4Lang.English), (fun () -> [| Lang.HOI4 HOI4Lang.English |])
+      GameLanguage.CK2,  (fun s -> match CK2Lang.TryParse<CK2Lang> s with TrySuccess v -> Lang.CK2 v | _ -> Lang.CK2 CK2Lang.English), (fun () -> [| Lang.CK2 CK2Lang.English |])
+      GameLanguage.IR,   (fun s -> match IRLang.TryParse<IRLang> s with TrySuccess v -> Lang.IR v | _ -> Lang.IR IRLang.English), (fun () -> [| Lang.IR IRLang.English |])
+      GameLanguage.VIC2, (fun s -> match VIC2Lang.TryParse<VIC2Lang> s with TrySuccess v -> Lang.VIC2 v | _ -> Lang.VIC2 VIC2Lang.English), (fun () -> [| Lang.VIC2 VIC2Lang.English |])
+      GameLanguage.CK3,  (fun s -> match CK3Lang.TryParse<CK3Lang> s with TrySuccess v -> Lang.CK3 v | _ -> Lang.CK3 CK3Lang.English), (fun () -> [| Lang.CK3 CK3Lang.English |])
+      GameLanguage.VIC3, (fun s -> match VIC3Lang.TryParse<VIC3Lang> s with TrySuccess v -> Lang.VIC3 v | _ -> Lang.VIC3 VIC3Lang.English), (fun () -> [| Lang.VIC3 VIC3Lang.English |])
+      GameLanguage.EU5,  (fun s -> match EU5Lang.TryParse<EU5Lang> s with TrySuccess v -> Lang.EU5 v | _ -> Lang.EU5 EU5Lang.English), (fun () -> [| Lang.EU5 EU5Lang.English |])
+      GameLanguage.Custom, (fun s -> match CustomLang.TryParse<CustomLang> s with TrySuccess v -> Lang.Custom v | _ -> Lang.Custom CustomLang.English), (fun () -> [| Lang.Custom CustomLang.English |]) ]
+
+/// Derive the parsed Lang set for a game from raw config language names.
+/// An empty set means "no explicit preference" and falls back to the game's
+/// default language; with an empty (or mismatched) Lang set the game parses
+/// zero localisation keys, breaking localisation hovers.
+let parseLanguagesForGame game (raw: string array) =
+    match langConfigMap |> List.tryFind (fun (g, _, _) -> g = game) with
+    | Some (_, parse, defaultFn) ->
+        if Array.isEmpty raw then defaultFn () else raw |> Array.map parse
+    | None -> [| Lang.Custom CustomLang.English |]

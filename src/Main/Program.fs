@@ -1830,6 +1830,11 @@ type Server(client: ILanguageClient) =
           (fun () -> customGameObj <- None) ]
 
     let mutable languages: Lang array = [||]
+    /// Raw language names from the client config (game-independent). The parsed
+    /// `languages` array is derived from these for the game that actually loads,
+    /// because CWTools parses zero localisation keys when the Lang tags do not
+    /// match the loaded game (e.g. Stellaris config + generic-game fallback).
+    let mutable rawLanguages: string array = [||]
     let mutable rootUri: Uri option = None
     let mutable workspaceFolders: WorkspaceFolder list = []
     let mutable cachePath: string option = None
@@ -2595,24 +2600,13 @@ type Server(client: ILanguageClient) =
 
             task.Start()
 
-    let (|TrySuccess|TryFailure|) tryResult =
-        match tryResult with
-        | true, value -> TrySuccess value
-        | _ -> TryFailure
-
-    /// Data-driven mapping for language parsing in DidChangeConfiguration.
-    /// Each entry: (GameType, parser (string -> Lang), default (unit -> Lang array))
-    let langConfigMap =
-        [ STL,  (fun (s: string) -> match STLLang.TryParse<STLLang> s with TrySuccess v -> Lang.STL v | _ -> Lang.STL STLLang.English), (fun () -> [| Lang.STL STLLang.English |])
-          EU4,  (fun s -> match EU4Lang.TryParse<EU4Lang> s with TrySuccess v -> Lang.EU4 v | _ -> Lang.EU4 EU4Lang.English), (fun () -> [| Lang.EU4 EU4Lang.English |])
-          HOI4, (fun s -> match HOI4Lang.TryParse<HOI4Lang> s with TrySuccess v -> Lang.HOI4 v | _ -> Lang.HOI4 HOI4Lang.English), (fun () -> [| Lang.HOI4 HOI4Lang.English |])
-          CK2,  (fun s -> match CK2Lang.TryParse<CK2Lang> s with TrySuccess v -> Lang.CK2 v | _ -> Lang.CK2 CK2Lang.English), (fun () -> [| Lang.CK2 CK2Lang.English |])
-          IR,   (fun s -> match IRLang.TryParse<IRLang> s with TrySuccess v -> Lang.IR v | _ -> Lang.IR IRLang.English), (fun () -> [| Lang.IR IRLang.English |])
-          VIC2, (fun s -> match VIC2Lang.TryParse<VIC2Lang> s with TrySuccess v -> Lang.VIC2 v | _ -> Lang.VIC2 VIC2Lang.English), (fun () -> [| Lang.VIC2 VIC2Lang.English |])
-          CK3,  (fun s -> match CK3Lang.TryParse<CK3Lang> s with TrySuccess v -> Lang.CK3 v | _ -> Lang.CK3 CK3Lang.English), (fun () -> [| Lang.CK3 CK3Lang.English |])
-          VIC3, (fun s -> match VIC3Lang.TryParse<VIC3Lang> s with TrySuccess v -> Lang.VIC3 v | _ -> Lang.VIC3 VIC3Lang.English), (fun () -> [| Lang.VIC3 VIC3Lang.English |])
-          EU5,  (fun s -> match EU5Lang.TryParse<EU5Lang> s with TrySuccess v -> Lang.EU5 v | _ -> Lang.EU5 EU5Lang.English), (fun () -> [| Lang.EU5 EU5Lang.English |])
-          Custom, (fun s -> match CustomLang.TryParse<CustomLang> s with TrySuccess v -> Lang.Custom v | _ -> Lang.Custom CustomLang.English), (fun () -> [| Lang.Custom CustomLang.English |]) ]
+    /// Raw language names from a `stellarisLanguageServices.localisation.languages`
+    /// config value; non-string entries are ignored.
+    let rawLanguagesFromConfig (config: JsonValue) =
+        match config with
+        | JsonValue.Array o ->
+            o |> Array.choose (function JsonValue.String s -> Some s | _ -> None)
+        | _ -> [||]
 
     let sevToDiagSev =
         function
@@ -5321,6 +5315,15 @@ type Server(client: ILanguageClient) =
                     lastError = None })
 
             try
+                // Derive the language set for the game that will actually load.
+                // The client may never send workspace/didChangeConfiguration
+                // (languages would stay empty), and the loaded game can differ
+                // from the configured one (Stellaris without vanilla data
+                // degrades to the generic game below). An empty or mismatched
+                // Lang set makes CWTools parse zero localisation keys, so
+                // re-derive from the raw config names here.
+                languages <- parseLanguagesForGame activeGame rawLanguages
+
                 let serverSettings =
                     { cachePath = cachePath
                       bundledRulesPath = bundledRulesPath
@@ -5374,7 +5377,8 @@ type Server(client: ILanguageClient) =
                         else
                             logInfo "No Stellaris vanilla data (game path or cache); using the generic game instead"
                             activeGame <- Custom
-                            let game = loadCustom serverSettings
+                            languages <- parseLanguagesForGame Custom rawLanguages
+                            let game = loadCustom { serverSettings with languages = languages }
                             customGameObj <- Some(game :> IGame<JominiComputedData>)
                             game :> IGame
                     | HOI4 ->
@@ -6003,16 +6007,10 @@ type Server(client: ILanguageClient) =
                         | None -> None)
                     |> Option.defaultValue JsonValue.Null
 
-                let newLanguages =
-                    match langConfigMap |> List.tryFind (fun (g, _, _) -> g = activeGame) with
-                    | Some (_, parse, defaultFn) ->
-                        match configValue ["localisation"; "languages"] with
-                        | JsonValue.Array o ->
-                            o
-                            |> Array.choose (function JsonValue.String s -> Some (parse s) | _ -> None)
-                            |> fun l -> if Array.isEmpty l then defaultFn() else l
-                        | _ -> defaultFn()
-                    | None -> [| Lang.Custom CustomLang.English |]
+                let rawConfigLanguages = rawLanguagesFromConfig (configValue ["localisation"; "languages"])
+                rawLanguages <- rawConfigLanguages
+
+                let newLanguages = parseLanguagesForGame activeGame rawConfigLanguages
 
                 let mutable requiresReload = false
                 let updateIfChanged current newVal =

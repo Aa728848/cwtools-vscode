@@ -382,7 +382,7 @@ describe('Codex activity view model', () => {
         expect(html.match(/class="codex-activity-status"/g)).to.have.lengthOf(2);
     });
 
-    it('renders assistant turns with a collapsible status control', () => {
+    it('renders assistant turns with a collapsible status control, collapsed by default', () => {
         const i18n = getChatI18n('en');
         const html = renderAssistantTurnCodex('Done', [
             { type: 'tool_call', toolName: 'run_command', invocationId: '1', toolArgs: { command: 'npm run compile' }, timestamp: 1000 },
@@ -393,11 +393,29 @@ describe('Codex activity view model', () => {
         });
 
         expect(html).to.include('data-codex-turn-toggle');
-        expect(html).to.include('aria-expanded="true"');
+        // Completed turns default to collapsed: the process stays hidden until
+        // expanded, while the final answer remains visible.
+        expect(html).to.include('codex-turn-collapsed');
+        expect(html).to.include('aria-expanded="false"');
         expect(html).to.include('codex-assistant-body');
         expect(html).to.include('codex-auto-progress');
         expect(html).to.include('I am running a command to verify the current state');
         expect(html).to.include('codex-final-answer');
+    });
+
+    it('keeps live turns expanded while streaming', () => {
+        const i18n = getChatI18n('en');
+        const html = renderAssistantTurnCodex('', [
+            { type: 'tool_call', toolName: 'read_file', invocationId: '1', toolArgs: { file: 'a.txt' }, timestamp: 1000 },
+        ], {
+            i18n,
+            live: true,
+            renderMarkdown: content => content,
+        });
+
+        expect(html).to.not.include('codex-turn-collapsed');
+        expect(html).to.include('aria-expanded="true"');
+        expect(html).to.include('codex-turn-live');
     });
 
     it('uses Chinese labels for summary and tool groups', () => {

@@ -1,5 +1,15 @@
 # Changelog
 
+## [2.11.1] - 2026-08-09
+
+### 新功能 / New Features
+- **[新增] 本地化诊断过滤设置**：`errors.localisationFilter` 可隐藏本地化诊断——`off` 不过滤，`problems` 仅从问题面板隐藏（AI 与服务器诊断查询仍可用），`all` 完全过滤。
+  English: [New] Localisation diagnostic filtering — `errors.localisationFilter` hides localisation diagnostics: `off` keeps them, `problems` hides them only from the Problems panel (server and AI queries still see them), `all` suppresses them completely.
+
+### 修复 / Fixes
+- **[修复] 延迟动态重验证无限循环导致内存持续增长**：两个稳定的真实错误组会不断把对方重新排队，批次交替验证并每次分配数 GB 临时数据。现在携带动态诊断的文件与请求文件折叠进同一有界批次，一次验证完成，循环消除。
+  English: [Fix] Deferred dynamic revalidation could loop forever and grow memory — two stable groups of real errors kept requeuing each other, so batches alternated and allocated gigabytes per pass. Files carrying dynamic diagnostics now fold into the same bounded batch as requested files and are validated in one pass.
+
 ## [2.11.0] - 2026-08-09
 
 ### 新功能 / New Features

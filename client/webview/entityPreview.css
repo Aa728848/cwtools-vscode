@@ -568,6 +568,86 @@ body.edit-mode .edit-only {
     height: 100% !important;
 }
 
+#view-controls-help {
+    position: absolute;
+    top: 12px;
+    left: 12px;
+    z-index: 40;
+}
+
+#view-controls-help summary {
+    display: flex;
+    width: 28px;
+    height: 28px;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid color-mix(in srgb, var(--ep-border) 82%, transparent);
+    border-radius: 50%;
+    color: var(--vscode-descriptionForeground, var(--ep-fg));
+    background: color-mix(in srgb, var(--ep-toolbar-bg) 82%, transparent);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.24);
+    cursor: pointer;
+    font-weight: 700;
+    list-style: none;
+    user-select: none;
+}
+
+#view-controls-help summary::-webkit-details-marker {
+    display: none;
+}
+
+#view-controls-help summary:hover,
+#view-controls-help[open] summary {
+    color: var(--ep-fg);
+    border-color: var(--ep-accent);
+    background: var(--ep-hover-bg);
+}
+
+#view-controls-help summary:focus-visible {
+    outline: 1px solid var(--ep-accent);
+    outline-offset: 2px;
+}
+
+.view-controls-card {
+    width: 220px;
+    margin-top: 6px;
+    padding: 10px 12px;
+    border: 1px solid var(--ep-border);
+    border-radius: 6px;
+    background: var(--ep-toolbar-bg);
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+    font-size: 12px;
+}
+
+.view-controls-card strong {
+    display: block;
+    margin-bottom: 7px;
+}
+
+.view-controls-card div {
+    display: flex;
+    min-height: 23px;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.view-controls-card div span {
+    color: var(--vscode-descriptionForeground, var(--ep-fg));
+}
+
+.view-controls-card .view-control-input {
+    color: var(--ep-fg);
+}
+
+.view-controls-card kbd {
+    padding: 1px 4px;
+    border: 1px solid var(--ep-border);
+    border-radius: 3px;
+    background: var(--ep-input-bg);
+    font: inherit;
+}
+
 /* ── Loading Overlay ──────────────────────────────────────────────────────── */
 
 #loading-overlay {

@@ -143,6 +143,22 @@ describe('entity preview locator drafts', () => {
         expect(webview).to.include('updateOrientationGizmo();');
     });
 
+    it('documents the non-default view controls inside the preview', () => {
+        expect(host).to.include('id="view-controls-help"');
+        expect(host).to.include('<kbd>Alt</kbd> +');
+        expect(host).to.include("'左键拖动' : 'left drag'");
+        expect(host).to.include("'中键拖动' : 'Middle drag'");
+        expect(host).to.include("'滚轮' : 'Mouse wheel'");
+        expect(css).to.include('#view-controls-help');
+    });
+
+    it('preserves the selected entity by name when a saved asset reloads', () => {
+        expect(host).to.include(
+            'await this._loadAndRender(savedDoc, this._currentEntityIndex, this._currentEntityName);',
+        );
+        expect(host).to.include('resolveEntitySelectionIndex(');
+    });
+
     it('keeps model locators and bones transform-read-only on both boundaries', () => {
         expect(webview).to.include("obj.userData?.source === 'script'");
         expect(webview).to.include("mesh: 'Model locator · read-only transform'");

@@ -9,6 +9,7 @@ import * as fs from 'fs';
 import { buildEntityGraph, parseAssetFile, type EntityDefinition, type EntityGraph } from './entityAssetParser';
 import { getNewAttachCycle } from './entityAttachDiagnostics';
 import { applyDraftTextEdits } from './entityDraftEditing';
+import { resolveEntitySelectionIndex } from './entitySelection';
 import {
     findLocatorTextBlock,
     renameLocatorBlock,
@@ -491,7 +492,7 @@ export class EntityPanel {
                         return;
                     }
                     this._entityGraph = null; // invalidate cache
-                    await this._loadAndRender(savedDoc);
+                    await this._loadAndRender(savedDoc, this._currentEntityIndex, this._currentEntityName);
                     this._postDocumentState(false, true);
                 }
             }),
@@ -1452,7 +1453,11 @@ export class EntityPanel {
         return dir;
     }
 
-    private async _loadAndRender(document: vscode.TextDocument, entityIndex = 0) {
+    private async _loadAndRender(
+        document: vscode.TextDocument,
+        entityIndex = 0,
+        preferredEntityName?: string,
+    ) {
         const content = this._getDraftText(document);
         this._currentModelAnchorNames.clear();
         const docDir = path.dirname(document.uri.fsPath);
@@ -1483,16 +1488,22 @@ export class EntityPanel {
             return;
         }
 
+        const selectedEntityIndex = resolveEntitySelectionIndex(
+            currentEntities.map(entity => entity.name),
+            preferredEntityName,
+            entityIndex,
+        );
+
         // Send entity list so the webview can show a selector
         await this._panel.webview.postMessage({
             command: 'entityList',
             entities: currentEntities.map((e, i) => ({ name: e.name, index: i })),
-            selectedIndex: entityIndex,
+            selectedIndex: selectedEntityIndex,
         });
 
-        const entity = currentEntities[Math.min(entityIndex, currentEntities.length - 1)]!;
+        const entity = currentEntities[selectedEntityIndex]!;
         this._currentEntityName = entity.name;
-        this._currentEntityIndex = entityIndex;
+        this._currentEntityIndex = selectedEntityIndex;
 
         // Resolve mesh file path
         let meshBuffer: ArrayBuffer | undefined;
@@ -2229,6 +2240,16 @@ export class EntityPanel {
         <div id="entity-tree"></div>
         <div id="sidebar-resize"></div>
         <div id="canvas-container">
+            <details id="view-controls-help">
+                <summary title="${locale.startsWith('zh') ? '视角操作' : 'View controls'}" aria-label="${locale.startsWith('zh') ? '显示视角操作说明' : 'Show view controls'}">?</summary>
+                <div class="view-controls-card">
+                    <strong>${locale.startsWith('zh') ? '视角操作' : 'View controls'}</strong>
+                    <div><span class="view-control-input"><kbd>Alt</kbd> + ${locale.startsWith('zh') ? '左键拖动' : 'left drag'}</span><span>${locale.startsWith('zh') ? '旋转' : 'Orbit'}</span></div>
+                    <div><span class="view-control-input">${locale.startsWith('zh') ? '中键拖动' : 'Middle drag'}</span><span>${locale.startsWith('zh') ? '平移' : 'Pan'}</span></div>
+                    <div><span class="view-control-input">${locale.startsWith('zh') ? '滚轮' : 'Mouse wheel'}</span><span>${locale.startsWith('zh') ? '缩放' : 'Zoom'}</span></div>
+                    <div><span class="view-control-input"><kbd>F</kbd></span><span>${locale.startsWith('zh') ? '聚焦模型' : 'Frame model'}</span></div>
+                </div>
+            </details>
             <div id="loading-overlay">
                 <div class="spinner"></div>
                 <div class="progress-text" data-i18n="loading">Loading...</div>

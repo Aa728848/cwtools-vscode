@@ -1,5 +1,19 @@
 # Changelog
 
+## [2.11.2] - 2026-08-10
+
+### 新功能 / New Features
+- **[新增] 实体预览视角操作提示**：画布右上角新增"?"帮助卡片，展示旋转/平移/缩放/聚焦的快捷键（中英双语）。
+  English: [New] Entity preview view-control help — a "?" card in the canvas corner shows the orbit/pan/zoom/frame shortcuts.
+- **[优化] 实体预览选择持久化**：编辑保存并重新渲染后，保持之前选中的实体（按名称恢复，不再因排序变化跳回第一个）。
+  English: [Improvement] Entity selection persists across re-render — after saving an edit the previously selected entity is restored by name instead of resetting to the first one.
+
+### 稳定性与工程 / Stability & Engineering
+- **[更新] CWT 规则与 MCP 子模块**：捆绑的 Stellaris 规则随 cwtools-stellaris-config 更新并重新打包；cwtools-mcp 指针同步。
+  English: [Updated] CWT rules and MCP submodules — bundled Stellaris rules refreshed from cwtools-stellaris-config; cwtools-mcp pointer bumped.
+- **[清理] 移除误提交的调试日志**：`docs/message.txt`（内存诊断日志）不再随仓库分发。
+  English: [Cleanup] Removed the accidentally committed debug log (`docs/message.txt`) from the repository.
+
 ## [2.11.1] - 2026-08-09
 
 ### 新功能 / New Features

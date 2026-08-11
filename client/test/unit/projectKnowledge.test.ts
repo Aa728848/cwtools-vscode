@@ -901,6 +901,76 @@ describe('project knowledge current SQLite schema', () => {
         expect(progressCalls).to.have.length(1);
     });
 
+    it('bounds readiness polling after an indentation-only save and recovers on the next change', async () => {
+        const profile = { schemaVersion: 1, game: { id: 'stellaris' } } as unknown as import('../../extension/ai/types').ProjectProfile;
+        nextSnapshot = {
+            ok: true,
+            status: 'ready',
+            game: 'stellaris',
+            generatedAtUnixMs: Date.now(),
+            projectRoots: [workspaceRoot],
+            generationMode: 'full',
+            domains: [{ id: 'event' }],
+            counts: { definitions: 1, workspaceDefinitions: 1, vanillaDefinitions: 0, definitionStacks: 0, topologyFiles: 1, topologyEdges: 0 },
+            warnings: [],
+        };
+        await projectKnowledge.generateProjectKnowledge(workspaceRoot, profile);
+        fs.mkdirSync(path.join(workspaceRoot, '.cwtools', 'project'), { recursive: true });
+        fs.writeFileSync(path.join(workspaceRoot, '.cwtools', 'project', 'profile.json'), JSON.stringify(profile), 'utf8');
+        commandCalls = [];
+
+        const changedFile = path.join(workspaceRoot, 'events', 'indentation.txt');
+        let documentText = 'event = {\nowner = {\nadd_relic = "r_sh_book"\n}\n}\n';
+        const document: TextDocumentStub = {
+            uri: { fsPath: changedFile, scheme: 'file' },
+            getText: () => documentText,
+        };
+        vscodeStub.workspace.textDocuments = [document];
+        validationStatus = {
+            ok: true,
+            inProgress: false,
+            pendingGlobalKinds: ['types'],
+            modelReadyForKnowledgeExport: false,
+            loading: { inProgress: false },
+        };
+        const context = {
+            globalStorageUri: { fsPath: path.join(workspaceRoot, 'global-storage') },
+            subscriptions: [] as Array<{ dispose(): void }>,
+        };
+        projectKnowledge.registerProjectKnowledgeWatcher(context as any);
+
+        const clock = sinon.useFakeTimers();
+        try {
+            documentText = 'event = {\n    owner = {\n        add_relic = "r_sh_book"\n    }\n}\n';
+            saveDocumentListener?.(document);
+            await clock.runAllAsync();
+
+            const readinessCalls = commandCalls.filter(call => call.command === 'cwtools.ai.getValidationStatus');
+            expect(readinessCalls).to.have.length(12);
+            expect(commandCalls.filter(call => call.command === 'cwtools.ai.exportProjectKnowledge')).to.have.length(0);
+            expect(progressCalls).to.have.length(0);
+            expect(clock.countTimers()).to.equal(0);
+            expect(projectKnowledge.readProjectKnowledgeManifest(workspaceRoot)?.status).to.equal('stale');
+
+            validationStatus = {
+                ok: true,
+                inProgress: false,
+                pendingGlobalKinds: [],
+                modelReadyForKnowledgeExport: true,
+                loading: { inProgress: false },
+            };
+            documentText = documentText.replace('add_relic', 'add_resource');
+            saveDocumentListener?.(document);
+            await clock.runAllAsync();
+        } finally {
+            clock.restore();
+            for (const disposable of context.subscriptions.reverse()) disposable.dispose();
+        }
+
+        expect(commandCalls.filter(call => call.command === 'cwtools.ai.exportProjectKnowledge')).to.have.length(1);
+        expect(projectKnowledge.readProjectKnowledgeManifest(workspaceRoot)?.status).to.equal('ready');
+    });
+
     it('routes secondary-root changes into one primary incremental export', async () => {
         const secondRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'cwtools-project-knowledge-combined-'));
         const profile = { schemaVersion: 1, game: { id: 'stellaris' } } as unknown as import('../../extension/ai/types').ProjectProfile;

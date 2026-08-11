@@ -140,6 +140,7 @@ interface PendingRootRefresh {
     changedFiles: Set<string>;
     staleReasons: Set<string>;
     fullRefresh: boolean;
+    modelReadyRetryCount: number;
     timer?: ReturnType<typeof setTimeout>;
     inFlight?: Promise<void>;
 }
@@ -162,6 +163,7 @@ function pendingRootRefresh(workspaceRoot: string): PendingRootRefresh {
             changedFiles: new Set<string>(),
             staleReasons: new Set<string>(),
             fullRefresh: false,
+            modelReadyRetryCount: 0,
         };
         pendingRootRefreshes.set(key, state);
     }
@@ -761,6 +763,12 @@ async function withProjectKnowledgeRefreshProgress<T>(
 const INCREMENTAL_REFRESH_DEBOUNCE_MS = 150;
 const INCREMENTAL_FOLLOW_UP_DELAY_MS = 50;
 const MODEL_READY_POLL_INITIAL_MS = 100;
+const MODEL_READY_POLL_MAX_MS = 5_000;
+const MODEL_READY_POLL_MAX_ATTEMPTS = 12;
+
+function modelReadyPollDelay(attempt: number): number {
+    return Math.min(MODEL_READY_POLL_INITIAL_MS * (2 ** Math.max(0, attempt - 1)), MODEL_READY_POLL_MAX_MS);
+}
 
 function recordValue(value: unknown): Record<string, unknown> | undefined {
     return value !== null && typeof value === 'object' && !Array.isArray(value)
@@ -857,6 +865,7 @@ async function refreshFromWatcher(workspaceRoot: string, indexService?: IndexSer
                     complete: manifest.completeExport === true || manifest.status === 'unavailable',
                     requireReady: true,
                 });
+                state.modelReadyRetryCount = 0;
             } catch (error) {
                 if (error instanceof ProjectKnowledgeModelNotReadyError) {
                     for (const file of files) state.changedFiles.add(file);
@@ -886,11 +895,24 @@ async function refreshFromWatcher(workspaceRoot: string, indexService?: IndexSer
         const stateKey = workspaceRootKey(state.workspaceRoot);
         if (pendingRootRefreshes.get(stateKey) !== state) return;
         if (needsAutomaticFollowUp) {
-            scheduleRootRefresh(
-                state.workspaceRoot,
-                indexService,
-                retryAfterModelReady ? MODEL_READY_POLL_INITIAL_MS : INCREMENTAL_FOLLOW_UP_DELAY_MS,
-            );
+            if (retryAfterModelReady) {
+                state.modelReadyRetryCount++;
+                if (state.modelReadyRetryCount < MODEL_READY_POLL_MAX_ATTEMPTS) {
+                    scheduleRootRefresh(
+                        state.workspaceRoot,
+                        indexService,
+                        modelReadyPollDelay(state.modelReadyRetryCount),
+                    );
+                } else {
+                    ErrorReporter.warn(
+                        'ProjectKnowledge',
+                        `Stopped automatic knowledge refresh readiness polling after ${MODEL_READY_POLL_MAX_ATTEMPTS} attempts; queued changes remain stale until the next workspace change.`,
+                    );
+                }
+            } else {
+                state.modelReadyRetryCount = 0;
+                scheduleRootRefresh(state.workspaceRoot, indexService, INCREMENTAL_FOLLOW_UP_DELAY_MS);
+            }
         } else if (!state.timer) {
             pendingRootRefreshes.delete(stateKey);
         }
@@ -942,6 +964,10 @@ export function registerProjectKnowledgeWatcher(context: vs.ExtensionContext, in
             : ['workspace_files_changed']);
         if (graphWideChange) return;
         const state = pendingRootRefresh(ownerRoot);
+        // A real filesystem change starts a fresh bounded readiness window.
+        // Automatic follow-ups do not reset this counter, so a model that stays
+        // stale cannot create an endless polling loop.
+        state.modelReadyRetryCount = 0;
         state.changedFiles.add(path.resolve(uri.fsPath));
         state.staleReasons.add('workspace_files_changed');
         scheduleRootRefresh(ownerRoot, indexService);

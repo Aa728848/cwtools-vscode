@@ -407,7 +407,9 @@ try
         insert "INSERT INTO inline_templates VALUES ($id,$logical,$file,1,$hash)"
             [ "$id", box "samplemod/generate_event"; "$logical", box "common/inline_scripts/samplemod/generate_event.txt"; "$file", box "common/inline_scripts/samplemod/generate_event.txt"; "$hash", box "abc" ]
         insert "INSERT INTO inline_parameters VALUES ($template,$name,$kind,$kinds,$type,1,2)"
-            [ "$template", box "samplemod/generate_event"; "$name", box "ID"; "$kind", box "identifier"; "$kinds", box "[\"identifier\"]"; "$type", box "identifier" ]
+            [ "$template", box "samplemod/generate_event"; "$name", box "ID"; "$kind", box "generic_fragment"; "$kinds", box "generic_fragment|identifier"; "$type", box "incompatible" ]
+        insert "INSERT INTO inline_parameters VALUES ($template,$name,$kind,$kinds,$type,1,2)"
+            [ "$template", box "samplemod/generate_event"; "$name", box "JSON_KIND"; "$kind", box "identifier"; "$kinds", box "[\"identifier\"]"; "$type", box "identifier" ]
         insert "INSERT INTO inline_invocations VALUES ($id,$file,42,$template,$enclosing)"
             [ "$id", box "inv-samplemod-42"; "$file", box "events/samplemod_caller.txt"; "$template", box "samplemod/generate_event"; "$enclosing", box "samplemod.1" ]
         insert "INSERT INTO inline_arguments VALUES ($inv,$name,$raw,$resolved,$kind)"
@@ -452,6 +454,15 @@ try
         (inlineGraph.Item("expansions").AsArray() |> Seq.exists (fun item -> item.Item("expandedSymbolId").AsString() = "samplemod.42"))
     assertTrue "knowledge query returns the caller and arguments for an expanded id"
         (inlineGraph.Item("invocations").AsArray().Length = 1 && inlineGraph.Item("arguments").AsArray().Length = 1)
+    let inlineParameters = inlineGraph.Item("parameters").AsArray()
+    let usageKindsFor name =
+        inlineParameters
+        |> Array.find (fun item -> item.Item("name").AsString() = name)
+        |> fun item -> item.Item("usageKinds").AsArray() |> Array.map _.AsString()
+    assertTrue "knowledge query reads exported pipe-delimited inline usage kinds"
+        (usageKindsFor "ID" = [| "generic_fragment"; "identifier" |])
+    assertTrue "knowledge query remains compatible with JSON inline usage kinds"
+        (usageKindsFor "JSON_KIND" = [| "identifier" |])
     // Synthetic bounded-query performance budget. This is deliberately a
     // generous CI guard, not a machine benchmark; the measured p95 is emitted
     // so regressions remain visible in logs.

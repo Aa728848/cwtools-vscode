@@ -387,6 +387,27 @@ let private domainFor (entityType: string) (logicalPath: string) =
 let private jsonStringArray values =
     values |> Seq.map JsonValue.String |> Seq.toArray |> JsonValue.Array
 
+let private parseStoredStringArray (value: string) =
+    let parsePipeDelimited () =
+        value.Split([| '|' |], StringSplitOptions.RemoveEmptyEntries)
+        |> Seq.map _.Trim()
+        |> Seq.filter (String.IsNullOrWhiteSpace >> not)
+        |> jsonStringArray
+    if value.TrimStart().StartsWith("[", StringComparison.Ordinal) then
+        try
+            match JsonValue.Parse value with
+            | JsonValue.Array values ->
+                values
+                |> Seq.choose (function
+                    | JsonValue.String item when not (String.IsNullOrWhiteSpace item) -> Some item
+                    | _ -> None)
+                |> jsonStringArray
+            | _ -> parsePipeDelimited ()
+        with _ ->
+            parsePipeDelimited ()
+    else
+        parsePipeDelimited ()
+
 let private jsonRecord fields =
     fields |> List.choose id |> List.toArray |> JsonValue.Record
 
@@ -2791,7 +2812,7 @@ let private queryCurrentProjectKnowledgeDatabase (options: QueryOptions) =
                         [ Some("templateId", JsonValue.String(reader.GetString 0))
                           Some("name", JsonValue.String(reader.GetString 1))
                           Some("usageKind", JsonValue.String(reader.GetString 2))
-                          Some("usageKinds", JsonValue.Parse(reader.GetString 3))
+                          Some("usageKinds", parseStoredStringArray (reader.GetString 3))
                           Some("inferredType", JsonValue.String(reader.GetString 4))
                           Some("required", JsonValue.Boolean(reader.GetInt64 5 <> 0L))
                           Some("occurrences", JsonValue.Number(decimal (reader.GetInt64 6))) ])

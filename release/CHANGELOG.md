@@ -1,5 +1,27 @@
 # Changelog
 
+## [2.12.0] - 2026-08-12
+
+### 新功能 / New Features
+- **[新增] AI 结构化澄清提问**：当 AI 需要你做出无法从仓库推断的决定时，运行会暂停并弹出结构化问题卡片（最多 3 问、每题 2–4 个选项 + 自定义输入，支持多选与取消），作答后同一轮自动继续。
+  English: [New] Structured clarification questions — when the AI needs a decision it cannot infer from the repository, the run pauses and shows a structured question card (up to 3 questions, 2–4 options each plus custom input, multi-select and cancel supported); the run resumes automatically after you answer.
+
+### 优化 / Improvements
+- **[优化] AI 提问机制重做**：旧的 `:::question` 文本卡片机制移除，提问统一走结构化工具与专用向导卡片，回答通过交互协议返回、不再混入聊天文本流。
+  English: [Improvement] Clarification cards were replaced by a structured question wizard — the old `:::question` text-card mechanism is gone, and answers travel through the interaction protocol instead of the chat text stream.
+- **[优化] AI 提问更克制**：Build/Plan 模式提示词重写，AI 先查仓库证据，只问真正阻塞的用户决策。
+  English: [Improvement] The AI now asks fewer questions — Build/Plan prompts were rewritten so the model checks repository evidence first and only asks about decisions it genuinely cannot make.
+
+### 修复 / Fixes
+- **[修复] 项目知识就绪轮询加上限**：语言服务器模型未就绪时，知识刷新改为指数退避轮询（最多 12 次、约 36 秒），不再无限轮询占用 CPU。
+  English: [Fix] Project-knowledge readiness polling is now bounded — when the language server model is not ready, refresh polls with exponential backoff (at most 12 attempts, ~36s) instead of polling forever.
+- **[修复] 兼容管道分隔的 inline usageKinds**：内联脚本参数知识的新导出格式（如 `generic_fragment|identifier`）现在可正常解析，相关查询不再报错。
+  English: [Fix] Pipe-delimited inline `usageKinds` are now parsed — knowledge data exported in the new format (e.g. `generic_fragment|identifier`) reads correctly instead of failing to parse.
+
+### 稳定性与工程 / Stability & Engineering
+- **[更新] CWT 规则与 MCP 子模块**：捆绑的 Stellaris 规则随 cwtools-stellaris-config 更新并重新打包；cwtools-mcp 指针同步。
+  English: [Updated] CWT rules and MCP submodules — bundled Stellaris rules refreshed from cwtools-stellaris-config; cwtools-mcp pointer bumped.
+
 ## [2.11.2] - 2026-08-10
 
 ### 新功能 / New Features

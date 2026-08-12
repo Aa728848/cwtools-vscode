@@ -100,6 +100,58 @@ describe('enforced central tool policy', () => {
         cleanupWorkspace(workspaceRoot);
     });
 
+    it('routes structured user questions through the host callback and preserves answers', async () => {
+        const executor = new AgentToolExecutor({} as any, workspaceRoot);
+        let received: any;
+        const result = await executor.execute('ask_user_question', {
+            questions: [{
+                id: 'scope',
+                header: 'Scope',
+                question: 'Which scope should be changed?',
+                options: [
+                    { label: 'Workspace (Recommended)', description: 'Apply the change consistently.' },
+                    { label: 'Active file', description: 'Keep the change narrowly scoped.' },
+                ],
+            }],
+        }, {
+            runnerOptions: { mode: 'build', threadId: 'thread-1', turnId: 'turn-1' },
+            scopeId: 'run-1',
+            onUserQuestion: async (request: any, context: any) => {
+                received = { request, context };
+                return { success: true, answers: { scope: 'Workspace (Recommended)' } };
+            },
+        } as any) as any;
+
+        expect(received.request.questions).to.have.length(1);
+        expect(received.context).to.deep.equal({ runId: 'run-1', threadId: 'thread-1', turnId: 'turn-1' });
+        expect(result).to.deep.equal({ success: true, answers: { scope: 'Workspace (Recommended)' } });
+    });
+
+    it('rejects malformed structured questions before invoking the host', async () => {
+        const executor = new AgentToolExecutor({} as any, workspaceRoot);
+        let callbackCalled = false;
+        const result = await executor.execute('ask_user_question', {
+            questions: [{
+                id: 'scope',
+                question: 'Which scope?',
+                options: [
+                    { label: 'Same', description: 'First.' },
+                    { label: 'Same', description: 'Duplicate.' },
+                ],
+            }],
+        }, {
+            runnerOptions: { mode: 'build' },
+            onUserQuestion: async () => {
+                callbackCalled = true;
+                return { success: true, answers: {} };
+            },
+        } as any) as any;
+
+        expect(result.success).to.equal(false);
+        expect(result.error).to.include('uniquely identified');
+        expect(callbackCalled).to.equal(false);
+    });
+
     it('blocks workspace writes when the effective policy preset is read-only', async () => {
         stubConfigOverrides['policy.preset'] = 'read-only';
         const executor = new AgentToolExecutor({} as any, workspaceRoot);

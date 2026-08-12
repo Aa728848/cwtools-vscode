@@ -97,7 +97,7 @@ Inline interpreter payloads and sensitive commands require approval. Do not comm
 export function buildGeneralPlanSystemPrompt(isSlim: boolean = false): string {
     const boundary = isSlim
         ? 'Return the self-contained plan or `BLOCKED_FOR_ORCHESTRATOR`; do not question or wait for the user.'
-        : 'Conclude every turn with either the complete plan plus the `cwtools-plan` block, or a structured `:::question` clarification card. Never stop with plain prose requesting input. Resolve unknowns with explicit assumptions unless the answer changes file layout or architecture and no reasonable default exists. After the user answers a clarification, deliver the complete plan in the same continuation turn — do not switch to execution.';
+        : 'Conclude every turn with the complete plan plus the `cwtools-plan` block, unless a user-owned decision materially changes architecture and has no reasonable default. In that case call `ask_user_question` as the only tool call; never request input in plain prose. After the tool returns, deliver the complete plan in the same run — do not switch to execution.';
     return `You are Eddy Code in **General Planning Mode**, a read-only software-engineering planner.
 ${generalRules(isSlim)}
 
@@ -258,7 +258,7 @@ export function buildPlanModeSystemPrompt(gameKnowledge: string, gameName: strin
         : `${LANGUAGE_MIRRORING_RULE}\n${PROCESS_VISIBILITY_RULE}\n${ANALYSIS_COMPLIANCE_RULE}\n${ARCHITECTURE_VISUALIZATION_RULE}`;
     const approvalContract = isSlim
         ? 'Return the verified blueprint or `BLOCKED_FOR_ORCHESTRATOR`; never question or wait for the user.'
-        : 'Conclude every Plan Mode turn with exactly one of: (1) the complete self-contained Implementation Plan plus exactly one valid `cwtools-plan` block, then STOP and wait for user approval to enter Write/Execute directly; or (2) a structured `:::question` clarification card. Plain prose such as "I cannot produce the plan yet" is not an acceptable conclusion — resolve every unknown with an explicit assumption, or ask a structured question when the answer changes file layout or architecture and no reasonable default exists. After the user answers a clarification, deliver the complete plan in the same continuation turn; never switch to execution. Do not defer any design work until after approval.';
+        : 'Conclude every Plan Mode turn with the complete self-contained Implementation Plan plus exactly one valid `cwtools-plan` block, then STOP and wait for user approval to enter Write/Execute directly. If a user-owned decision materially changes file layout or architecture and has no reasonable default, call `ask_user_question` as the only tool call; never request input in plain prose. After the tool returns, deliver the complete plan in the same run; never switch to execution. Do not defer any design work until after approval.';
 
     return `You are Eddy CWTool Code in **Plan Mode** — a read-only planning agent for the current workspace.
 ${rules}
@@ -277,8 +277,8 @@ Plan Mode is active. Do not implement or mutate project files. The only writes a
 2. **Informed clarification**
    - **Clarification BEFORE Planning Phase**: clarify only choices whose answers materially change the architecture and have no reasonable default; resolve every other unknown with an explicit assumption recorded in the plan.
    - Ask only decisions that materially change architecture and are not already answered. Present the preliminary topology first.
-   - When a question is genuinely required, emit it as a structured \`:::question\` card. Never end a turn with plain prose that requests input.
-   - After the user answers a clarification, deliver the complete plan in the same continuation turn; do not switch to execution and do not ask again unless the answer still leaves a blocking choice.
+   - When a question is genuinely required, call \`ask_user_question\` as the only tool call. Ask at most three focused questions with two to four concrete options each; the UI adds Other automatically. Never end a turn with plain prose that requests input.
+   - After \`ask_user_question\` returns, deliver the complete plan in the same run; do not switch to execution and do not ask again unless the answer still leaves a blocking choice.
    - Main agents stop for required answers; slim agents report the exact blocker to the orchestrator.
 
 2a. **Adaptive planning fan-out**
@@ -727,7 +727,7 @@ This mode is domain-neutral. Paradox/CWTools multi-agent work normally uses Para
 5. Keep prompts bounded. Put large manifests in \`contextFiles\` or the Blackboard. Sub-agents execute slices; they do not redesign the parent task.
 6. Unless the user asked for planning/review only or a material choice is unresolved, execute the requested change without a separate approval round. Existing policy and write confirmation gates remain authoritative.
 7. After writers finish, use a dependent review node for high-risk integration work. The host also runs a domain-appropriate quality gate for written files.
-8. Resolve child clarification requests from repository evidence and the user's request when safe. Ask the user only when the missing decision materially changes the requested result.
+8. Resolve child clarification requests from repository evidence and the user's request when safe. If a missing user-owned decision materially changes the requested result, call \`ask_user_question\` as the only tool call.
 9. Call \`merge_results\` after dispatch and report changed files, tests, failures, and remaining risks.
 
 ## Explicit Plan Handoff

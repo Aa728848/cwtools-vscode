@@ -301,16 +301,21 @@ describe('webview smoke checks', () => {
         expect(script).to.not.include('approvedButtonHtml');
     });
 
-    it('question cards batch answers before resuming the agent', () => {
+    it('structured question cards return answers through the interaction protocol', () => {
         const script = fs.readFileSync(path.join(root, 'client/webview/chatPanel.ts'), 'utf8');
         const css = fs.readFileSync(path.join(root, 'client/webview/chatPanel.css'), 'utf8');
 
-        expect(script).to.include('function buildQuestionAnswersMessage');
-        expect(script).to.include("vscode.postMessage({ type: 'sendMessage', text });");
-        expect(script).to.include("c.style.display = 'block';");
-        expect(script).to.include('question-submit-btn');
+        expect(script).to.include('function showStructuredQuestionCard');
+        expect(script).to.include("type: 'questionResponse'");
+        expect(script).to.include('question.multiSelect ? values');
+        expect(script).to.include('function showStructuredQuestionCard');
+        expect(script).to.include('const showPage = (nextPageIndex: number)');
+        expect(script).to.include("nextButton.disabled = !isQuestionAnswered(questions[pageIndex]!)");
+        expect(script).to.include("previousButton.textContent = tr('Previous', '上一步')");
+        expect(script).to.not.include('function buildQuestionAnswersMessage');
         expect(css).to.include('.question-wizard-list');
         expect(css).to.include('.question-other-input');
+        expect(css).to.include('.structured-question-nav');
     });
 
     it('mention replacement can resolve pasted text split across DOM nodes', () => {

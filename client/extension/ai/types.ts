@@ -1365,6 +1365,30 @@ export interface TodoWriteResult {
     todoCount: number;
 }
 
+export interface AskUserQuestionOption {
+    label: string;
+    description: string;
+}
+
+export interface AskUserQuestionItem {
+    id: string;
+    header?: string;
+    question: string;
+    options: AskUserQuestionOption[];
+    multiSelect?: boolean;
+}
+
+export interface AskUserQuestionArgs {
+    questions: AskUserQuestionItem[];
+}
+
+export interface AskUserQuestionResult {
+    success: boolean;
+    answers?: Record<string, string | string[]>;
+    cancelled?: boolean;
+    error?: string;
+}
+
 export interface TodoUpdateScope {
     agentId?: string;
     threadId?: string;
@@ -1454,6 +1478,7 @@ export interface AgentToolContext {
     tokenAccumulator?: TokenUsage;
     onStep?: (step: AgentStep) => void;
     onPermissionRequest?: (id: string, tool: string, description: string, command?: string, context?: any) => Promise<boolean>;
+    onUserQuestion?: (request: AskUserQuestionArgs, context?: { runId?: string; threadId?: string; turnId?: string }) => Promise<AskUserQuestionResult>;
     onBeforeFileWrite?: (filePath: string, previousContent: string | null) => void;
     /**
      * Async semantic preflight invoked after a PDX tool has resolved its path
@@ -1504,6 +1529,7 @@ export type ToolArgs =
     | WorkspaceSymbolsArgs
     | VerifyPdxIdentifierArgs
     | TodoWriteArgs
+    | AskUserQuestionArgs
     | ReadFileArgs
     | WriteFileArgs
     | EditFileArgs
@@ -1554,6 +1580,7 @@ export type ToolResult =
     | GrepResult;
 
 export type AgentToolName =
+    | 'ask_user_question'
     | 'query_scope'
     | 'query_types'
     | 'query_localisation_index'
@@ -2568,6 +2595,7 @@ export type WebViewMessage =
     | { type: 'quickChangeWriteMode'; mode: 'confirm' | 'auto' | 'auto_review' | 'full' }
     | { type: 'slashCommand'; command: string }
     | { type: 'permissionResponse'; permissionId: string; decision?: PermissionDecision; allowed?: boolean; alwaysAllow?: boolean }
+    | { type: 'questionResponse'; questionId: string; answers?: Record<string, string | string[]>; cancelled?: boolean }
     /** Submit inline annotations collected in the webview back to AI for revision */
     | { type: 'submitPlanAnnotations'; annotations: Array<{ section: string; note: string }> }
     | { type: 'revisePlanWithAnnotations'; annotations: Array<{ section: string; note: string }> }
@@ -2645,7 +2673,9 @@ export type HostMessage =
     | { type: 'topicForked'; newTopicId: string; title: string }
     | { type: 'permissionRequest'; permissionId: string; itemId: string; threadId?: string; turnId?: string; tool: string; description: string; command?: string; allowAlways?: boolean; availableDecisions: PermissionDecision[]; proposedRule?: { commandPrefix: string[]; cwdScope: string; riskMax: number; scope: 'session' }; preflight?: PermissionRequestPreflight }
     | { type: 'permissionResolved'; permissionId: string; itemId: string; threadId?: string; turnId?: string; decision: PermissionDecision; reviewer: 'user' | 'auto_review' | 'policy' }
-    | { type: 'floatingCardResolved'; card: 'permission' | 'write' | 'transaction' | 'plan' | 'walkthrough' | 'blueprint'; id?: string }
+    | { type: 'questionRequest'; questionId: string; threadId?: string; turnId?: string; questions: AskUserQuestionItem[] }
+    | { type: 'questionResolved'; questionId: string; cancelled?: boolean }
+    | { type: 'floatingCardResolved'; card: 'permission' | 'question' | 'write' | 'transaction' | 'plan' | 'walkthrough' | 'blueprint'; id?: string }
     /** Restore mode state after webview rebuild (panel visibility change) */
     | { type: 'setMode'; mode: AgentMode }
     | { type: 'setAgentProfile'; profile: AgentProfileSelection; resolved?: ResolvedAgentProfile }

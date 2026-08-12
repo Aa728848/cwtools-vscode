@@ -453,10 +453,6 @@ export class Orchestrator {
         const text = output.trim();
         if (!text) return undefined;
 
-        if (text.includes(':::question')) {
-            return { clarification: normalizeClarificationText(text), options: parseClarificationOptions(text) };
-        }
-
         const markerIndex = text.toUpperCase().indexOf(CLARIFICATION_PREFIX);
         if (markerIndex >= 0) {
             const raw = text.slice(markerIndex + CLARIFICATION_PREFIX.length).replace(/^[:：]\s*/, '');

@@ -301,6 +301,7 @@ export function filterToolDefinitionsForStage(
     if (!allowed) return [];
     return tools.filter(tool =>
         tool.function.name === 'select_tools'
+        || tool.function.name === 'ask_user_question'
         || workflowSupportTools?.has(tool.function.name) === true
         || allowed.has(tool.function.name)
         || (allowed.has('mcp_call') && tool.function.name.startsWith('mcp_')));
@@ -335,15 +336,10 @@ export function shouldContinueAuthorizedExecution(
     return normalizedStage ? normalizedStage !== 'finalize' : !executionActionObserved;
 }
 
-/**
- * Accept ordinary-language clarification responses even when a provider fails
- * to emit the structured question-card syntax. Without this guard, writable
- * runs can replay the same clarification as a premature-final recovery.
- */
+/** Detect an unsupported plain-text clarification so execution recovery does not loop. */
 export function finalResponseRequiresUserInput(content: string): boolean {
     const text = content.trim();
     if (!text) return false;
-    if (text.includes(':::question')) return true;
 
     // The decision normally appears at the end of a longer analysis. Keeping
     // this bounded avoids treating an earlier discussion of missing inputs as
@@ -374,7 +370,7 @@ export function isExecutionActionTool(toolName: string): boolean {
  */
 export function isTruncationInducedStop(content: string): boolean {
     const text = content.trim();
-    if (!text || text.includes(':::question')) return false;
+    if (!text) return false;
     const tail = text.slice(-2_000);
     if (!/(?:截断|truncat)/i.test(tail)) return false;
     return /(?:不能|无法|不应|不会|难以|风险|不再|停止|中止)[^。！？\n]{0,40}(?:继续|批量|替换|修改|写入|修复|执行|安全)/.test(tail)

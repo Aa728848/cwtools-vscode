@@ -345,7 +345,7 @@ describe('chat markdown and mention helpers', () => {
         expect(html).to.include('&lt; b');
     });
 
-    it('renders question cards and media links with escaped labels', () => {
+    it('does not interpret retired question syntax and still renders media links', () => {
         const html = renderMarkdown([
             ':::question Pick <one>',
             '[Option: Safe] Use this',
@@ -355,9 +355,9 @@ describe('chat markdown and mention helpers', () => {
             '[clip](demo.mp4)',
         ].join('\n'), { waitingForChoice: 'wait' });
 
-        expect(html).to.include('question-card');
-        expect(html).to.include('Pick &lt;one&gt;');
-        expect(html).to.include('data-suggest="Safe"');
+        expect(html).to.not.include('question-card');
+        expect(html).to.include(':::question Pick &lt;one&gt;');
+        expect(html).to.not.include('data-suggest="Safe"');
         expect(html).to.include('<video src="demo.mp4"');
     });
 

@@ -5,21 +5,18 @@ import {
 } from '../../extension/ai/prompt/sections/modePrompts';
 
 describe('plan mode prompts', () => {
-    it('requires a plan or a structured question as the only acceptable conclusion', () => {
+    it('uses the structured question tool for blocking plan decisions', () => {
         const paradox = buildPlanModeSystemPrompt('', 'Stellaris');
-        expect(paradox).to.include('Conclude every Plan Mode turn with exactly one of');
-        expect(paradox).to.include(':::question');
-        expect(paradox).to.include('Plain prose such as "I cannot produce the plan yet" is not an acceptable conclusion');
-        // 澄清答复后必须同一延续轮交付完整计划,禁止转入执行。
+        expect(paradox).to.include('call `ask_user_question` as the only tool call');
+        expect(paradox).to.include('the UI adds Other automatically');
+        expect(paradox).to.not.include(':::question');
         expect(paradox).to.include('never switch to execution');
     });
 
-    it('keeps the general plan boundary on the same plan-or-question contract', () => {
+    it('keeps the general plan boundary on the same structured-tool contract', () => {
         const general = buildGeneralPlanSystemPrompt(false);
-        expect(general).to.include('Conclude every turn with either the complete plan plus the `cwtools-plan` block');
-        expect(general).to.include(':::question');
-        expect(general).to.include('After the user answers a clarification, deliver the complete plan in the same continuation turn');
-        // 旧的“ask the user and stop”散文收尾许可已被移除。
-        expect(general).to.not.include('ask the user and stop');
+        expect(general).to.include('call `ask_user_question` as the only tool call');
+        expect(general).to.include('After the tool returns, deliver the complete plan in the same run');
+        expect(general).to.not.include(':::question');
     });
 });

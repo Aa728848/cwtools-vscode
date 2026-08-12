@@ -3,6 +3,17 @@ import { TOOL_DEFINITIONS } from '../../extension/ai/tools/definitions';
 import { TOOL_REGISTRY } from '../../extension/ai/tools/registry';
 
 describe('tool definitions', () => {
+    it('registers structured user questions as a host interaction', () => {
+        const tool = TOOL_DEFINITIONS.find(definition => definition.function.name === 'ask_user_question');
+        const registry = TOOL_REGISTRY.get('ask_user_question');
+        expect(tool).to.not.equal(undefined);
+        expect(registry?.effect).to.equal('none');
+        expect(registry?.riskLevel).to.equal(0);
+        expect(registry?.concurrencyClass).to.equal('interactive');
+        expect(registry?.allowSubAgent).to.equal(false);
+        expect(registry?.idempotency).to.equal('none');
+    });
+
     it('exposes the unified web toolset with explicit network effects', () => {
         const names = TOOL_DEFINITIONS.map(definition => definition.function.name);
         expect(names).to.include.members(['web_search', 'web_open', 'web_find']);

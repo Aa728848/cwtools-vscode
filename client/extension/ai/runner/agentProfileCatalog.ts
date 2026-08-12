@@ -70,7 +70,7 @@ const BUILTIN_PROFILES: RuntimeAgentProfile[] = [
         name: 'explore',
         description: 'Read-only repository and semantic exploration.',
         authorizationCeiling: 'read_only',
-        tools: ['select_tools', 'read_file', 'list_directory', 'glob_files', 'grep', 'query_*', 'search_*', 'get_*', 'web_*'],
+        tools: ['ask_user_question', 'select_tools', 'read_file', 'list_directory', 'glob_files', 'grep', 'query_*', 'search_*', 'get_*', 'web_*'],
         disallowedTools: ['write_*', 'edit_file', 'replace_lines', 'run_command', 'git_ops', 'dispatch_agents'],
         summaryPolicy: {
             minCharacters: 160,
@@ -82,7 +82,7 @@ const BUILTIN_PROFILES: RuntimeAgentProfile[] = [
         name: 'reviewer',
         description: 'Read-only verification and review Agent.',
         authorizationCeiling: 'read_only',
-        tools: ['select_tools', 'read_file', 'glob_files', 'grep', 'query_*', 'get_*', 'validate_*', 'compare_*', 'git_ops'],
+        tools: ['ask_user_question', 'select_tools', 'read_file', 'glob_files', 'grep', 'query_*', 'get_*', 'validate_*', 'compare_*', 'git_ops'],
         disallowedTools: ['write_*', 'edit_file', 'replace_lines', 'dispatch_agents'],
         summaryPolicy: {
             minCharacters: 200,

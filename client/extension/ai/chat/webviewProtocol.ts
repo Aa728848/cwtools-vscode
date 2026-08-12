@@ -82,6 +82,9 @@ const isAnnotations = isArrayOf(value => isRecord(value)
     && typeof value.section === 'string'
     && typeof value.note === 'string');
 const isContexts = isArrayOf(isContextItem);
+const isQuestionAnswers = (value: unknown): boolean => isRecord(value)
+    && Object.values(value).every(answer => typeof answer === 'string'
+        || (Array.isArray(answer) && answer.every(item => typeof item === 'string')));
 const isOptionalStringArray = optional(isStringArray);
 const noFields = fields();
 
@@ -133,6 +136,10 @@ const validators: Record<WebViewMessage['type'], MessageValidator> = {
         decision: optional(isPermissionDecision),
         allowed: optional(isBoolean),
         alwaysAllow: optional(isBoolean),
+    }),
+    questionResponse: fields({ questionId: isString }, {
+        answers: optional(isQuestionAnswers),
+        cancelled: optional(isBoolean),
     }),
     submitPlanAnnotations: fields({ annotations: isAnnotations }),
     revisePlanWithAnnotations: fields({ annotations: isAnnotations }),

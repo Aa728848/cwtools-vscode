@@ -24,6 +24,8 @@ import type {
     AgentStep,
     AgentMode,
     PermissionDecision,
+    AskUserQuestionArgs,
+    AskUserQuestionResult,
     AgentArtifact,
     AgentArtifactKind,
     DiffArtifactData,
@@ -118,6 +120,7 @@ export function getPendingInteractions(): string[] {
 
 type PendingWriteCardMessage = Extract<HostMessage, { type: 'pendingWriteFile' }>;
 type PendingPermissionCardMessage = Extract<HostMessage, { type: 'permissionRequest' }>;
+type PendingQuestionCardMessage = Extract<HostMessage, { type: 'questionRequest' }>;
 type FileSnapshot = {
     filePath: string;
     previousContent: string | null;
@@ -395,6 +398,9 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             send(card);
         }
         for (const card of this.pendingPermissionCards.values()) {
+            send(card);
+        }
+        for (const card of this.pendingQuestionCards.values()) {
             send(card);
         }
     }
@@ -1165,6 +1171,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                     // Permission callback for run_command tool (OpenCode strategy)
                     onPermissionRequest: (id: string, tool: string, description: string, command?: string, ctx?: any) =>
                         this.requestPermission(id, tool, description, command, ctx),
+                    onUserQuestion: (request, questionContext) => this.requestUserQuestion(request, questionContext),
                     onTodoUpdate: (todos, scope) => this.sendTodoUpdate(todos, scope),
                     resumeFromState,
                     workflowId: this.currentWorkflowId ?? undefined,
@@ -1211,10 +1218,6 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             this.conversationMessages.push({ role: 'assistant', content: assistantContent });
 
             // ── Plan/multi-Agent mode: suppress explanation in chat, auto-open annotation panel ──
-            // If the AI is just asking clarification questions (indicated by :::question syntax
-            // or heuristic question detection), it shouldn't lock into an Implementation Plan yet.
-            // Treat it as a conversational turn.
-            const isJustAskingQuestions = this.detectClarificationPhase(result);
             const uiSteps = compactStepsForUi(result.steps);
             const uiResult = { ...result, steps: uiSteps };
             const durableRunId = result.runId ?? this.currentRunId;
@@ -1249,7 +1252,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
 
             if (hasInteractivePlan
                 && interactivePlanText
-                && !isJustAskingQuestions) {
+            ) {
                 // Chat shows only tool-call steps (no full plan text)
                 this.postMessage({ type: 'generationComplete', result: { ...uiResult, explanation: '', code: '' } });
                 this.topicManager.addHistoryMessage({
@@ -1937,40 +1940,6 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
     }
 
 
-    /** 
-* Check whether the AI's reply in Plan or multi-Agent mode belongs to the "clarification/question stage".
-* 
-* Only use deterministic signal judgment, no heuristic guessing: 
-* - Plan document already exists → Revision phase (not clarification) 
-* - write_file writes the plan → planning phase (non-clarification) 
-* - contains :::question syntax → clarification phase 
-*/
-    private detectClarificationPhase(result: { explanation: string; steps: any[] }): boolean {
-        if (!result.explanation) return false;
-
-        // If Implementation_Plan.md already exists under the current topic,
-        // This indicates that the user has already commented on the plan and the AI is revising it, so it should not be judged to be in the clarification stage.
-        const topicId = this.topicManager.currentTopic?.id;
-        if (topicId) {
-            const candidates = getPrivateTopicFileCandidates(topicId, 'Implementation_Plan.md', getProjectWorkspaceRoot());
-            const planExists = candidates.some(c => fs.existsSync(c));
-            if (planExists) return false;
-        }
-
-        // If AI writes the plan file through the write_file tool → planning phase
-        const wroteImplementationPlan = result.steps.some(
-            (s: any) => (s.toolName === 'write_file') &&
-            typeof s.toolArgs?.file === 'string' &&
-            /implementation_plan|plan\.md/i.test(s.toolArgs.file)
-        );
-        if (wroteImplementationPlan) return false;
-
-        // Contains :::question syntax → explicitly for question phase
-        if (result.explanation.includes(':::question')) return true;
-
-        return false;
-    }
-
     /** Display path for topic artifacts; they may live in private storage outside the workspace. */
     private toArtifactDisplayPath(filePath: string): string {
         const workspaceRoot = getProjectWorkspaceRoot();
@@ -2573,6 +2542,23 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         this.pendingPermissionDetails.clear();
         this.pendingPermissionCards.clear();
 
+        for (const [questionId, resolver] of this.pendingQuestionResolvers.entries()) {
+            const card = this.pendingQuestionCards.get(questionId);
+            const topicId = this.topicManager.currentTopic?.id ?? 'default';
+            this.agentRuntime.resolveInteraction(
+                questionId,
+                topicId,
+                card?.threadId ?? topicId,
+                { reason: 'generation_cancelled' },
+                true,
+            );
+            activePendingInteractions.delete(questionId);
+            this.postMessage({ type: 'questionResolved', questionId, cancelled: true });
+            resolver({ success: false, cancelled: true, error: 'Question cancelled with the active generation.' });
+        }
+        this.pendingQuestionResolvers.clear();
+        this.pendingQuestionCards.clear();
+
         // Clean up any pending file write confirmations resolver
         for (const resolver of this.pendingWriteResolvers.values()) {
             resolver(false);
@@ -2976,6 +2962,72 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
     private pendingPermissionModes = new Map<string, AgentMode>();
     private pendingPermissionDetails = new Map<string, { command?: string, cwd?: string, preflight?: any, runId?: string, threadId?: string, turnId?: string, itemId: string }>();
     private pendingPermissionCards = new Map<string, PendingPermissionCardMessage>();
+    private pendingQuestionResolvers = new Map<string, (result: AskUserQuestionResult) => void>();
+    private pendingQuestionCards = new Map<string, PendingQuestionCardMessage>();
+
+    private requestUserQuestion(
+        request: AskUserQuestionArgs,
+        context?: { runId?: string; threadId?: string; turnId?: string },
+    ): Promise<AskUserQuestionResult> {
+        const topicId = this.topicManager.currentTopic?.id ?? 'default';
+        const threadId = context?.threadId ?? topicId;
+        const questionId = `question_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+        const card: PendingQuestionCardMessage = {
+            type: 'questionRequest',
+            questionId,
+            threadId,
+            turnId: context?.turnId,
+            questions: request.questions,
+        };
+        this.agentRuntime.beginInteraction({
+            id: questionId,
+            topicId,
+            threadId,
+            turnId: context?.turnId,
+            runId: context?.runId,
+            kind: 'question',
+            title: request.questions[0]?.question ?? 'Clarification required',
+            detail: JSON.stringify(request.questions),
+        });
+        this.pendingQuestionCards.set(questionId, card);
+        activePendingInteractions.set(questionId, request.questions[0]?.question ?? 'Clarification required');
+        this.postMessage(card);
+        return new Promise(resolve => this.pendingQuestionResolvers.set(questionId, resolve));
+    }
+
+    public resolveUserQuestion(
+        questionId: string,
+        answers: Record<string, string | string[]> | undefined,
+        cancelled: boolean,
+    ): void {
+        const resolver = this.pendingQuestionResolvers.get(questionId);
+        const card = this.pendingQuestionCards.get(questionId);
+        if (!resolver || !card) return;
+        const topicId = this.topicManager.currentTopic?.id ?? 'default';
+        const validAnswers = !cancelled && !!answers && card.questions.every(question => {
+            const answer = answers[question.id];
+            return question.multiSelect
+                ? Array.isArray(answer) && answer.length > 0 && answer.every(item => item.trim().length > 0)
+                : typeof answer === 'string' && answer.trim().length > 0;
+        });
+        const result: AskUserQuestionResult = cancelled
+            ? { success: false, cancelled: true, error: 'The user cancelled the question.' }
+            : validAnswers
+                ? { success: true, answers }
+                : { success: false, error: 'The structured question response was incomplete or malformed.' };
+        this.agentRuntime.resolveInteraction(
+            questionId,
+            topicId,
+            card.threadId ?? topicId,
+            result,
+            cancelled || !validAnswers,
+        );
+        activePendingInteractions.delete(questionId);
+        this.pendingQuestionResolvers.delete(questionId);
+        this.pendingQuestionCards.delete(questionId);
+        this.postMessage({ type: 'questionResolved', questionId, cancelled: cancelled || !validAnswers });
+        resolver(result);
+    }
 
     /**
      * Request permission from the user (for run_command tool).

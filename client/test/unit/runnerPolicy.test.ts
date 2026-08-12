@@ -74,6 +74,18 @@ describe('runnerPolicy', () => {
         expect(filterToolDefinitionsForStage(toolDefinitions, 'build', stage, true)).to.have.lengthOf(toolDefinitions.length);
     });
 
+    it('keeps structured user questions available during discovery and evidence', () => {
+        const buildTools = filterToolDefinitionsForMode(registeredTools, 'build', { domain: 'paradox' });
+        for (const stage of ['discovery', 'evidence'] as const) {
+            const names = filterToolDefinitionsForStage(buildTools, 'build', stage).map(tool => tool.function.name);
+            expect(names, stage).to.include('ask_user_question');
+        }
+
+        const planTools = filterToolDefinitionsForMode(registeredTools, 'plan', { domain: 'paradox' });
+        expect(filterToolDefinitionsForStage(planTools, 'plan', 'discovery').map(tool => tool.function.name))
+            .to.include('ask_user_question');
+    });
+
     it('keeps deferred-tool selection reachable throughout every valid staged mode', () => {
         const stagesByMode = {
             build: ['discovery', 'evidence', 'validation', 'write', 'finalize'],
@@ -218,7 +230,7 @@ describe('runnerPolicy', () => {
     });
 
     it('recognizes plain-language clarification finals so writable runs do not replay them', () => {
-        expect(finalResponseRequiresUserInput(':::question\nWhat should be changed?')).to.equal(true);
+        expect(finalResponseRequiresUserInput('What should be changed?')).to.equal(false);
         expect(finalResponseRequiresUserInput(
             '当前没有具体的修改目标或代码变更要求。请说明你希望执行的具体操作。',
         )).to.equal(true);
@@ -530,9 +542,9 @@ describe('runnerPolicy', () => {
             'The remaining diagnostics were truncated, so I cannot safely continue batch replacements without risking the script file.',
         )).to.equal(true);
 
-        // 普通散文、问题卡片、无截断词的文本不得触发。
+        // 普通散文和无截断词的文本不得触发。
         expect(isTruncationInducedStop('计划已分析完成，需要你确认目标范围后才能继续。')).to.equal(false);
-        expect(isTruncationInducedStop(':::question 需要确认错误文件清单后才能继续')).to.equal(false);
+        expect(isTruncationInducedStop('需要确认错误文件清单后才能继续')).to.equal(false);
         expect(isTruncationInducedStop('已完成全部修复并通过验证。')).to.equal(false);
         expect(isTruncationInducedStop('')).to.equal(false);
     });

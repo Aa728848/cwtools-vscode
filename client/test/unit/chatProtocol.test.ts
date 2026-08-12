@@ -25,6 +25,11 @@ describe('AI chat protocol boundaries', () => {
             permissionId: 'permission-1',
             decision: 'acceptForSession',
         })).to.not.equal(null);
+        expect(parseWebviewMessage({
+            type: 'questionResponse',
+            questionId: 'question-1',
+            answers: { scope: 'workspace', checks: ['compile', 'test'] },
+        })).to.not.equal(null);
     });
 
     it('rejects unknown or malformed Webview messages', () => {
@@ -36,6 +41,11 @@ describe('AI chat protocol boundaries', () => {
         expect(parseWebviewMessage({
             type: 'submitPlanAnnotations',
             annotations: [{ section: 'one', note: 1 }],
+        })).to.equal(null);
+        expect(parseWebviewMessage({
+            type: 'questionResponse',
+            questionId: 'question-1',
+            answers: { scope: 42 },
         })).to.equal(null);
     });
 
@@ -89,6 +99,23 @@ describe('AI chat protocol boundaries', () => {
             description: 'write',
             availableDecisions: ['accept', 'decline'],
         })).to.not.equal(null);
+        expect(parseHostMessage({
+            type: 'questionRequest',
+            questionId: 'q1',
+            questions: [{
+                id: 'scope',
+                question: 'Which scope?',
+                options: [
+                    { label: 'Workspace', description: 'Use the full workspace.' },
+                    { label: 'File', description: 'Use the active file.' },
+                ],
+            }],
+        })).to.not.equal(null);
+        expect(parseHostMessage({
+            type: 'questionRequest',
+            questionId: 'q1',
+            questions: [{ id: 'scope', question: 'Which scope?', options: [] }],
+        })).to.equal(null);
 
         expect(parseHostMessage('clearChat')).to.equal(null);
         expect(parseHostMessage({ type: 'agentStep', step: 'not-an-object' })).to.equal(null);

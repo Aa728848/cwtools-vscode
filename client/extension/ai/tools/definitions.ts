@@ -2030,6 +2030,47 @@ const RUNTIME_CONTROL_TOOLS: ToolDefinition[] = [
     {
         type: 'function',
         function: {
+            name: 'ask_user_question',
+            description: 'Pause and ask the user for structured input only when their choice materially affects the result and cannot be inferred safely from repository evidence or a conservative default. This call must be the only tool call in the model response.',
+            parameters: {
+                type: 'object',
+                properties: {
+                    questions: {
+                        type: 'array',
+                        minItems: 1,
+                        maxItems: 3,
+                        items: {
+                            type: 'object',
+                            properties: {
+                                id: { type: 'string', description: 'Stable short identifier unique within this call.' },
+                                header: { type: 'string', description: 'Short UI label, at most 12 characters.' },
+                                question: { type: 'string', description: 'Specific decision the user must make.' },
+                                options: {
+                                    type: 'array',
+                                    minItems: 2,
+                                    maxItems: 4,
+                                    items: {
+                                        type: 'object',
+                                        properties: {
+                                            label: { type: 'string', description: 'Concise option label. Mark the recommended option with （推荐） or (Recommended).' },
+                                            description: { type: 'string', description: 'One sentence explaining the impact or tradeoff.' },
+                                        },
+                                        required: ['label', 'description'],
+                                    },
+                                },
+                                multiSelect: { type: 'boolean', description: 'Allow multiple selections. Defaults to false.' },
+                            },
+                            required: ['id', 'question', 'options'],
+                        },
+                    },
+                },
+                required: ['questions'],
+            },
+        },
+    },
+    {
+        type: 'function',
+        function: {
             name: 'select_tools',
             description: 'Load deferred tool schemas needed for the current task. Loading never grants permission and cannot cross the active domain or mode.',
             parameters: {

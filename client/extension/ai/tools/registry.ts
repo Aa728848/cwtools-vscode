@@ -3,7 +3,7 @@ import { TOOL_DEFINITIONS as SCHEMA_DEFINITIONS } from './definitions';
 import { analyzeSchema, flattenSchema } from './schemaFlatten';
 
 export type AgentToolName =
-    | 'select_tools' | 'create_goal' | 'get_goal' | 'update_goal' | 'set_goal_budget'
+    | 'ask_user_question' | 'select_tools' | 'create_goal' | 'get_goal' | 'update_goal' | 'set_goal_budget'
     | 'query_scope' | 'query_types' | 'query_rules' | 'query_cwt_schema' | 'query_override_modes' | 'search_rule_capabilities' | 'explain_scope' | 'parse_pdx_fragment' | 'remove_ignored_diagnostic'
     | 'query_localisation_index' | 'query_workspace_index' | 'explore_pdx_project' | 'query_inline_instantiation' | 'analyze_pdx_flow' | 'compare_definition_with_vanilla' | 'query_project_profile' | 'query_project_knowledge' | 'query_interface_knowledge' | 'run_skill' | 'get_ignored_diagnostics' | 'get_pdx_block' | 'query_references'
     | 'get_file_context' | 'search_mod_files' | 'find_sprite_candidates' | 'find_sound_candidates'
@@ -78,6 +78,7 @@ export const TOOL_REGISTRY = new Map<AgentToolName, ToolRegistryEntry>();
  * deciding whether General Coding may receive it is a compile error.
  */
 const TOOL_DOMAINS = {
+    ask_user_question: 'shared',
     select_tools: 'shared',
     create_goal: 'shared',
     get_goal: 'shared',
@@ -301,9 +302,11 @@ const UTILITY: AgentToolName[] = ['run_command', 'list_processes', 'read_process
 const MEDIA: AgentToolName[] = ['convert_image_to_dds', 'convert_audio', 'deploy_mod_asset'];
 const _MCP: AgentToolName[] = ['mcp_call'];
 const ORCHESTRATION: AgentToolName[] = ['dispatch_agents', 'query_blackboard', 'merge_results', 'cancel_dispatch'];
+const INTERACTION: AgentToolName[] = ['ask_user_question'];
 
 const WRITE_TOOLS_SET = new Set<string>([...EDIT, 'deploy_mod_asset', 'git_ops']);
 const SUB_AGENT_EXCLUDES_SET = new Set<string>([
+    'ask_user_question',
     'web_search', 'web_open', 'web_find',
     'run_command', 'list_processes', 'read_process', 'write_process_stdin', 'terminate_process',
     'git_ops', 'save_workflow',
@@ -347,23 +350,23 @@ const STORM_EXEMPT_TOOLS_SET = new Set<string>([
     'query_blackboard',
 ]);
 
-const PLAN_MODES = new Set([...BASE_READ, ...NETWORK, ..._MCP, ...ORCHESTRATION, 'todo_write', 'write_file', 'edit_file', 'replace_lines', 'write_design_blueprint', 'save_workflow', 'set_memory', 'get_memory', 'search_memory', 'git_ops']);
-const EXPLORE_MODES = new Set([...BASE_READ, ...NETWORK, ..._MCP, ...ORCHESTRATION, 'git_ops', 'save_workflow']);
-const REVIEW_MODES = new Set([...BASE_READ, ...NETWORK, ..._MCP, 'git_ops', 'save_workflow']);
-const BUILD_MODES = new Set([...BASE_READ, ...EDIT, ...MEMORY, ...NETWORK, ...UTILITY, ...MEDIA, ..._MCP, ...ORCHESTRATION]);
+const PLAN_MODES = new Set([...BASE_READ, ...INTERACTION, ...NETWORK, ..._MCP, ...ORCHESTRATION, 'todo_write', 'write_file', 'edit_file', 'replace_lines', 'write_design_blueprint', 'save_workflow', 'set_memory', 'get_memory', 'search_memory', 'git_ops']);
+const EXPLORE_MODES = new Set([...BASE_READ, ...INTERACTION, ...NETWORK, ..._MCP, ...ORCHESTRATION, 'git_ops', 'save_workflow']);
+const REVIEW_MODES = new Set([...BASE_READ, ...INTERACTION, ...NETWORK, ..._MCP, 'git_ops', 'save_workflow']);
+const BUILD_MODES = new Set([...BASE_READ, ...INTERACTION, ...EDIT, ...MEMORY, ...NETWORK, ...UTILITY, ...MEDIA, ..._MCP, ...ORCHESTRATION]);
 const LOC_MODES = new Set([
     'select_tools', 'read_file', 'write_file',
     'list_directory', 'glob_files', 'search_mod_files', 'find_sprite_candidates', 'find_sound_candidates', 'grep',
     'workspace_symbols', 'document_symbols', 'verify_pdx_identifier', 'get_file_context', 'get_lsp_status', 'get_diagnostics',
     'query_types', 'query_rules', 'query_cwt_schema', 'query_override_modes', 'search_rule_capabilities', 'explain_scope', 'parse_pdx_fragment', 'query_references', 'todo_write', 'write_localisation', 'git_ops',
-    'analyze_diagnostic_error', 'save_workflow'
+    'analyze_diagnostic_error', 'save_workflow', ...INTERACTION
 ]);
-const ORCHESTRATOR_MODES = new Set([...BASE_READ, ...NETWORK, ..._MCP, 'set_memory', 'get_memory', 'search_memory', 'todo_write', 'write_file', 'write_design_blueprint', ...ORCHESTRATION, 'git_ops', 'analyze_diagnostic_error', 'save_workflow']);
-const SCRIPT_MODES = new Set([...BASE_READ, ...NETWORK, ..._MCP, 'set_memory', 'get_memory', 'search_memory', 'todo_write', 'write_file', 'write_design_blueprint', ...ORCHESTRATION, 'git_ops', 'analyze_diagnostic_error', 'save_workflow']);
+const ORCHESTRATOR_MODES = new Set([...BASE_READ, ...INTERACTION, ...NETWORK, ..._MCP, 'set_memory', 'get_memory', 'search_memory', 'todo_write', 'write_file', 'write_design_blueprint', ...ORCHESTRATION, 'git_ops', 'analyze_diagnostic_error', 'save_workflow']);
+const SCRIPT_MODES = new Set([...BASE_READ, ...INTERACTION, ...NETWORK, ..._MCP, 'set_memory', 'get_memory', 'search_memory', 'todo_write', 'write_file', 'write_design_blueprint', ...ORCHESTRATION, 'git_ops', 'analyze_diagnostic_error', 'save_workflow']);
 // Legacy General mode is intentionally read-only. Writable general coding work
 // belongs to Utility mode, whose staged surface and policy gates are explicit.
-const GENERAL_MODES = new Set([...BASE_READ, ...NETWORK]);
-const UTILITY_MODES = new Set([...BASE_READ, ...EDIT, ...MEMORY, ...NETWORK, ...UTILITY, ...MEDIA, ...ORCHESTRATION, 'mcp_call']);
+const GENERAL_MODES = new Set([...BASE_READ, ...INTERACTION, ...NETWORK]);
+const UTILITY_MODES = new Set([...BASE_READ, ...INTERACTION, ...EDIT, ...MEMORY, ...NETWORK, ...UTILITY, ...MEDIA, ...ORCHESTRATION, 'mcp_call']);
 
 for (const schema of SCHEMA_DEFINITIONS) {
     const name = schema.function.name as AgentToolName;
@@ -439,6 +442,10 @@ for (const schema of SCHEMA_DEFINITIONS) {
         effect = 'none';
         riskLevel = 0;
         concurrencyClass = 'parallel';
+    } else if (name === 'ask_user_question') {
+        effect = 'none';
+        riskLevel = 0;
+        concurrencyClass = 'interactive';
     } else {
         effect = 'none';
         riskLevel = 2;
@@ -457,10 +464,10 @@ for (const schema of SCHEMA_DEFINITIONS) {
         }
     }
 
-    const isReadOnly = effect === 'workspace_read'
+    const isReadOnly = name !== 'ask_user_question' && (effect === 'workspace_read'
         || effect === 'network'
-        || (effect === 'none' && !mutating && !ORCHESTRATION.includes(name));
-    const disclosure = ['todo_write', 'read_file', 'grep', 'get_goal', 'select_tools'].includes(name)
+        || (effect === 'none' && !mutating && !ORCHESTRATION.includes(name)));
+    const disclosure = ['ask_user_question', 'todo_write', 'read_file', 'grep', 'get_goal', 'select_tools'].includes(name)
         ? 'always'
         : (['write_file', 'edit_file', 'replace_lines', 'run_command', 'git_ops', 'mcp_call', 'dispatch_agents'].includes(name)
             ? 'deferred'
@@ -501,7 +508,9 @@ for (const schema of SCHEMA_DEFINITIONS) {
         group,
         providerCapability: disclosure === 'deferred' ? 'dynamic_tools' : undefined,
         estimatedSchemaTokens: Math.ceil(JSON.stringify(flatSchema ?? schema).length / 4),
-        idempotency: isReadOnly && effect !== 'network'
+        idempotency: name === 'ask_user_question'
+            ? 'none'
+            : isReadOnly && effect !== 'network'
             ? 'read'
             : effect === 'none' && !mutating
                 ? 'deterministic'

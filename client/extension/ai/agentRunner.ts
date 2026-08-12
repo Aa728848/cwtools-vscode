@@ -221,6 +221,8 @@ export interface AgentRunnerOptions {
      * Resolve with true=allow, false=deny.
      */
     onPermissionRequest?: (id: string, tool: string, description: string, command?: string, context?: any) => Promise<boolean>;
+    /** Structured blocking clarification supplied by the active host UI. */
+    onUserQuestion?: import('./types').AgentToolContext['onUserQuestion'];
     /** If provided, file mutations are written to this memory overlay instead of disk. */
     vfsOverlay?: Map<string, string>;
     /** Parent durable run when this run is a child agent/replay/fix turn. */
@@ -939,6 +941,7 @@ export class AgentRunner {
             tokenAccumulator: tokenAccumulator,
             onStep: emitStep,
             onPermissionRequest: options?.onPermissionRequest,
+            onUserQuestion: options?.onUserQuestion,
             onBeforeFileWrite: options?.onBeforeFileWrite,
             onTodoUpdate: options?.onTodoUpdate
         };
@@ -2068,14 +2071,14 @@ export class AgentRunner {
         const activeWorkflow = options?.workflowId ? getWorkflow(options.workflowId) : undefined;
         if (activeWorkflow) {
             const policy = activeWorkflow.toolPolicy;
-            const workflowReadOnlySupportTools = new Set<string>(['run_skill']);
+            const workflowRuntimeSupportTools = new Set<string>(['ask_user_question', 'run_skill']);
             if (policy.strategy === 'allowlist') {
                 const allowed = new Set<string>(policy.tools);
-                availableTools = availableTools.filter(t => allowed.has(t.function.name) || workflowReadOnlySupportTools.has(t.function.name));
+                availableTools = availableTools.filter(t => allowed.has(t.function.name) || workflowRuntimeSupportTools.has(t.function.name));
             } else {
                 // blocklist
                 const blocked = new Set<string>(policy.tools);
-                availableTools = availableTools.filter(t => !blocked.has(t.function.name));
+                availableTools = availableTools.filter(t => !blocked.has(t.function.name) || workflowRuntimeSupportTools.has(t.function.name));
             }
             ErrorReporter.debug('AgentRunner', `Workflow "${activeWorkflow.id}" tool policy applied: ${availableTools.length} tools available`);
         }
@@ -3188,7 +3191,7 @@ export class AgentRunner {
                             + `${toolStage ? `The current ${toolStage} stage is an internal execution checkpoint, not a user approval boundary. ` : ''}`
                             + `Do not ask the user to say "execute", do not return manual edit instructions, and do not stop at evidence collection. `
                             + `Continue now with the available tools until the requested execution and verification are complete. `
-                            + `Only ask a structured :::question when progress requires information that only the user can provide.</system-reminder>`,
+                            + `Only call ask_user_question when progress requires a user-owned decision that cannot be discovered or safely defaulted.</system-reminder>`,
                     });
                     ErrorReporter.debug(
                         SOURCE.AGENT_RUNNER,
@@ -3227,22 +3230,6 @@ export class AgentRunner {
                     content: thinkContent.trim(),
                     timestamp: Date.now(),
                 });
-            }
-
-            // ── Question Card Halt: stop loop when AI asks user questions ──
-            // If the assistant's text contains :::question blocks, the user needs
-            // to answer before the AI should proceed. Force-stop the loop.
-            const assistantText = contentToString(assistantMessage.content);
-            if (assistantText.includes(':::question')) {
-                emitStep({
-                    type: 'validation',
-                    content: aiText(
-                        'Question card detected - waiting for your answer before continuing',
-                        '检测到问题卡片 — 等待用户回答后再继续',
-                    ),
-                    timestamp: Date.now(),
-                });
-                return this.cleanFinalContent(assistantText);
             }
 
             // ── Two-phase doom-loop detection: phase 1 (pre-exec) ──
@@ -3485,6 +3472,7 @@ export class AgentRunner {
             }
 
             const toolResults: any[] = new Array(parsedCalls.length);
+            const questionCallIndex = parsedCalls.findIndex(call => call.toolName === 'ask_user_question');
             const submittedPlanIndex = options?.approvedPlanExecution
                 ? -1
                 : parsedCalls.findIndex(call => isCompleteImplementationPlanWrite(
@@ -3534,6 +3522,18 @@ export class AgentRunner {
                     }
                 }
                 const { toolName, toolArgs } = ci;
+
+                if (questionCallIndex >= 0 && parsedCalls.length > 1) {
+                    const reason = 'ask_user_question must be the only tool call in a model response. Retry with only the structured question call.';
+                    toolResults[i] = { success: false, error: reason };
+                    await runLedger.appendEvent(
+                        runRecord.runId,
+                        'tool_call_end',
+                        toolResults[i],
+                        { invocationId: ci.invocationId, status: 'failed' },
+                    );
+                    continue;
+                }
 
                 if (submittedPlanIndex >= 0
                     && parsedCalls[submittedPlanIndex]?.invocationId !== ci.invocationId

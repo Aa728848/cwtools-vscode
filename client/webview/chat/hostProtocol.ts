@@ -7,6 +7,7 @@ import {
     isInteger,
     isObject,
     isOneOf,
+    isRecord,
     isString,
     isStringArray,
     optional,
@@ -20,6 +21,24 @@ const isMode = isOneOf([
     'script_reviewer', 'loc_translator', 'loc_writer', 'orchestrator', 'script',
 ] as const);
 const isRecordArray = isArrayOf(isObject);
+const isQuestionOption = (value: unknown): boolean => {
+    if (!isRecord(value)) return false;
+    return typeof value.label === 'string' && typeof value.description === 'string';
+};
+const isQuestionItems = (value: unknown): boolean => Array.isArray(value)
+    && value.length >= 1
+    && value.length <= 3
+    && value.every(item => {
+        if (!isRecord(item)) return false;
+        return typeof item.id === 'string'
+            && typeof item.question === 'string'
+            && (item.header === undefined || typeof item.header === 'string')
+            && (item.multiSelect === undefined || typeof item.multiSelect === 'boolean')
+            && Array.isArray(item.options)
+            && item.options.length >= 2
+            && item.options.length <= 4
+            && item.options.every(isQuestionOption);
+    });
 const isAny = () => true;
 const noFields = fields();
 
@@ -71,6 +90,10 @@ const validators = {
     permissionResolved: fields({ permissionId: isString, itemId: isString, decision: isString, reviewer: isString }, {
         threadId: optional(isString), turnId: optional(isString),
     }),
+    questionRequest: fields({ questionId: isString, questions: isQuestionItems }, {
+        threadId: optional(isString), turnId: optional(isString),
+    }),
+    questionResolved: fields({ questionId: isString }, { cancelled: optional(isBoolean) }),
     floatingCardResolved: fields({ card: isString }, { id: optional(isString) }),
     setMode: fields({ mode: isMode }),
     setAgentProfile: fields({ profile: isObject }, { resolved: optional(isObject) }),

@@ -168,6 +168,9 @@ export async function routeWebviewMessage(
                 msg.decision ?? (msg.alwaysAllow && msg.allowed === true ? 'acceptForSession' : msg.allowed === true ? 'accept' : 'decline'),
             );
             break;
+        case 'questionResponse':
+            provider.resolveUserQuestion(msg.questionId, msg.answers, msg.cancelled === true);
+            break;
         case 'openPlanFile': {
             const planPath = provider.resolveArtifactFilePath(msg.filePath);
             if (planPath) {

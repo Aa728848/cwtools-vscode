@@ -2056,6 +2056,60 @@ export class AgentToolExecutor {
                 result = this.externalHandler.webFind(args as any); break;
             case 'todo_write':
                 result = await this.externalHandler.todoWrite(args as any, context); break;
+            case 'ask_user_question': {
+                if (context?.runnerOptions?.useSlimPrompt) {
+                    result = { success: false, error: 'Sub-agents must report blocking ambiguity to the parent Agent.' };
+                    break;
+                }
+                const callback = context?.onUserQuestion;
+                if (!callback) {
+                    result = { success: false, error: 'The active host does not support interactive questions. Report the blocked user-owned decision without inventing an answer.' };
+                    break;
+                }
+                const rawQuestions = Array.isArray(args.questions) ? args.questions : [];
+                const questions: import('./types').AskUserQuestionItem[] = [];
+                const ids = new Set<string>();
+                for (const raw of rawQuestions.slice(0, 3)) {
+                    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) continue;
+                    const item = raw as Record<string, unknown>;
+                    const id = typeof item.id === 'string' ? item.id.trim().slice(0, 80) : '';
+                    const question = typeof item.question === 'string' ? item.question.trim().slice(0, 1_000) : '';
+                    const rawOptions = Array.isArray(item.options) ? item.options : [];
+                    if (rawOptions.length < 2 || rawOptions.length > 4) continue;
+                    const options = rawOptions.slice(0, 4).flatMap(option => {
+                        if (!option || typeof option !== 'object' || Array.isArray(option)) return [];
+                        const record = option as Record<string, unknown>;
+                        const label = typeof record.label === 'string' ? record.label.trim().slice(0, 100) : '';
+                        const description = typeof record.description === 'string' ? record.description.trim().slice(0, 500) : '';
+                        return label && description ? [{ label, description }] : [];
+                    });
+                    if (!id || ids.has(id) || !question || options.length !== rawOptions.length
+                        || new Set(options.map(option => option.label)).size !== options.length) continue;
+                    ids.add(id);
+                    questions.push({
+                        id,
+                        question,
+                        options,
+                        ...(typeof item.header === 'string' && item.header.trim()
+                            ? { header: item.header.trim().slice(0, 12) }
+                            : {}),
+                        ...(item.multiSelect === true ? { multiSelect: true } : {}),
+                    });
+                }
+                if (questions.length === 0 || questions.length !== rawQuestions.length) {
+                    result = {
+                        success: false,
+                        error: 'questions must contain 1-3 valid uniquely identified items, each with a non-empty question and 2-4 labelled options with descriptions.',
+                    };
+                    break;
+                }
+                result = await callback({ questions }, {
+                    runId: context?.scopeId,
+                    threadId: context?.runnerOptions?.threadId,
+                    turnId: context?.runnerOptions?.turnId,
+                });
+                break;
+            }
             case 'select_tools':
                 result = args._selectionResult && typeof args._selectionResult === 'object'
                     ? {

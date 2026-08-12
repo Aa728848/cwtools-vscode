@@ -1,5 +1,15 @@
 # Changelog
 
+## [2.12.2] - 2026-08-12
+
+### 修复 / Fixes
+- **[修复] LSP 本地化解析启动崩溃（根治）**：`YAMLLocalisationParser` 改用常规 FParsec 组合子实现，不再依赖仅限编译期内联的 `Inline.Many`。此前该 API 在 FSI/动态调用环境下会抛 `Dynamic invocation of Many is not supported`，导致语言服务器启动崩溃、补全/悬停等编辑功能不可用；`2.12.1` 中的 `PSeq→Seq` 调整只是收敛了崩溃形态，本版本彻底移除该隐患。
+  English: [Fix] Localisation parsing startup crash (root cause) — `YAMLLocalisationParser` now uses a regular FParsec combinator instead of the inline-only `Inline.Many` API, which threw `Dynamic invocation of Many is not supported` under FSI/dynamic contexts and crashed the language server at startup, leaving completion/hover editing features unavailable. The `PSeq→Seq` change in 2.12.1 only narrowed the crash shape; this release removes the hazard entirely.
+
+### 稳定性与工程 / Stability & Engineering
+- **[更新] CWTools 子模块**：随上修复同步更新 cwtools 库。
+  English: [Updated] CWTools submodule — bumped to include the localisation-parser fix above.
+
 ## [2.12.1] - 2026-08-12
 
 ### 修复 / Fixes

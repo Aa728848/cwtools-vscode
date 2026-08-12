@@ -1,5 +1,17 @@
 # Changelog
 
+## [2.12.1] - 2026-08-12
+
+### 修复 / Fixes
+- **[修复] LSP 本地化启动崩溃**：本地化文件解析改为确定性顺序处理，不再并行枚举；修复了特定平台上语言服务器启动时 `YAMLLocalisationParser` 初始化崩溃、导致编辑功能（补全/悬停/诊断）不可用的问题。
+  English: [Fix] Deterministic localisation startup — localisation files are now parsed sequentially instead of in parallel, fixing a language-server startup crash (`YAMLLocalisationParser` type-initializer failure on some platforms) that left editing features (completion/hover/diagnostics) unavailable.
+- **[修复] 聊天 Markdown 渲染小修**：代码块提取变量改为不可变声明，消除 lint 告警。
+  English: [Fix] Chat markdown rendering tidy-up — the code-block extraction variable is now immutable, clearing the lint warning.
+
+### 稳定性与工程 / Stability & Engineering
+- **[更新] CWTools 子模块**：cwtools 库更新（本地化启动确定性修复，见上）。
+  English: [Updated] CWTools submodule — library refreshed with the deterministic localisation startup fix above.
+
 ## [2.12.0] - 2026-08-12
 
 ### 新功能 / New Features

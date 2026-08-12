@@ -46,7 +46,8 @@ describe('PromptBuilder 快照与稳定性测试', () => {
 
         // 验证系统提示词中包含核心规则，防止重构时遗漏
         expect(prompt).to.include('Eddy CWTool Code');
-        expect(prompt).to.include('Anti-Rush & Clarification');
+        expect(prompt).to.include('Clarification and execution');
+        expect(prompt).to.include('ask_user_question');
         expect(prompt).to.include('Strict Rule Compliance in Code Generation');
         expect(prompt).to.include('Least Privilege Check');
         expect(prompt).to.include('ZERO-ERROR DELIVERY GATE');

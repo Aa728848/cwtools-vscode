@@ -57,10 +57,11 @@ describe('AI static prompt budgets', () => {
         for (const buildStage of ['discovery', 'evidence', 'validation', 'write', 'finalize'] as const) {
             const modeTools = runnerPolicy.filterToolDefinitionsForMode(TOOL_DEFINITIONS, 'build');
             const tools = runnerPolicy.filterToolDefinitionsForStage(modeTools, 'build', buildStage);
-            expect(tools.length, `${buildStage} tool count`).to.be.within(8, 15);
-            // 8_500: dispatch_agents gained resume/append/clarification
-            // parameters and merge_results gained durable-graph lookups.
-            expect(measure(buildStage, false), `${buildStage} main system + tools`).to.be.at.most(8_500);
+            // The always-visible structured question tool occupies one runtime-control slot.
+            expect(tools.length, `${buildStage} tool count`).to.be.within(8, 16);
+            // 9_000: includes the always-visible structured question schema plus
+            // dispatch resume/append/clarification and durable-graph lookups.
+            expect(measure(buildStage, false), `${buildStage} main system + tools`).to.be.at.most(9_000);
             expect(measure(buildStage, true), `${buildStage} slim system + tools`).to.be.at.most(4_000);
         }
     });
@@ -81,13 +82,13 @@ describe('AI static prompt budgets', () => {
             for (const stage of stages[mode]) {
                 const tools = runnerPolicy.filterToolDefinitionsForStage(modeTools, mode, stage);
                 const total = promptTokens + estimateTokenCount(JSON.stringify(tools));
-                // Plan and Explore intentionally reserve three slots for bounded
-                // read-only fan-out: dispatch, blackboard query, and result merge.
-                const maxToolCount = mode === 'plan' || mode === 'explore' ? 18 : 15;
+                // Plan and Explore reserve three bounded fan-out slots; all modes
+                // also expose one structured question slot to the main agent.
+                const maxToolCount = mode === 'plan' || mode === 'explore' ? 19 : 16;
                 expect(tools.length, `${mode}/${stage} tool count`).to.be.within(8, maxToolCount);
-                // 8_500: dispatch_agents gained resume/append/clarification
-                // parameters and merge_results gained durable-graph lookups.
-                expect(total, `${mode}/${stage} system + tools`).to.be.at.most(8_500);
+                // 9_000: includes the always-visible structured question schema plus
+                // dispatch resume/append/clarification and durable-graph lookups.
+                expect(total, `${mode}/${stage} system + tools`).to.be.at.most(9_000);
                 expect(tools.some(tool => projectWriteTools.has(tool.function.name)), `${mode}/${stage} project writes`).to.equal(false);
             }
         }

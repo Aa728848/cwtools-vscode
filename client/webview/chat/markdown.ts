@@ -24,7 +24,7 @@ export function renderMarkdown(rawText: string, labels: MarkdownLabels = {}): st
     if (!rawText) return '';
 
     const blocks: MarkdownBlock[] = [];
-    let text = rawText.replace(/```([^\n]*)\n([\s\S]*?)```/g, (_, lang, code) => {
+    const text = rawText.replace(/```([^\n]*)\n([\s\S]*?)```/g, (_, lang, code) => {
         const i = blocks.length;
         blocks.push({ lang: String(lang).trim(), code: String(code) });
         return '\n\x00BLOCK' + i + '\x00\n';

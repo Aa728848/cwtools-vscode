@@ -2,6 +2,7 @@ import type { ChatMessage, AgentStep, TokenUsage } from '../types';
 import type { AgentRunnerOptions } from '../agentRunner';
 import { contentToString } from '../types';
 import { getModelContextTokens, getProvider } from '../providers';
+import { isDeepSeekModelOrProvider } from '../providers/models/capabilities';
 import { getCacheDiscountFactor, getModelPricing } from '../pricing';
 import { AGENT } from '../messages';
 import type { AIService } from '../aiService';
@@ -122,6 +123,63 @@ export function resolveCompactionContextLimit(
     const resolvedModel = model || provider.defaultModel;
     const modelLimit = getModelContextTokens(resolvedModel, providerId);
     return modelLimit > 0 ? modelLimit : (provider.maxContextTokens || DEFAULT_CONTEXT_LIMIT);
+}
+
+export interface CompactionRatios {
+    /** High watermark for automatic/paid compaction as a fraction of the window. */
+    thresholdRatio: number;
+    /** Low watermark the compacted tail must fit under. */
+    targetRatio: number;
+    /** Mid-loop/emergency maintenance threshold fraction. */
+    midLoopRatio: number;
+}
+
+/**
+ * Per-provider/model compaction watermarks. DeepSeek's large windows can run
+ * closer to the boundary before paid compaction, which keeps summarizer calls
+ * (billed) off the hot path. Every other provider/model keeps the exact
+ * pre-model-aware defaults. `midLoopRatio` feeds both the periodic mid-loop
+ * trigger default (via resolveMidLoopBlockRatio) and the emergency ladder.
+ */
+export function resolveCompactionRatios(providerId?: string, model?: string): CompactionRatios {
+    if (isDeepSeekModelOrProvider(providerId, model)) {
+        return { thresholdRatio: 0.85, targetRatio: 0.65, midLoopRatio: 0.80 };
+    }
+    return {
+        thresholdRatio: COMPACTION_THRESHOLD_RATIO,
+        targetRatio: COMPACTION_TARGET_RATIO,
+        midLoopRatio: MID_LOOP_COMPACTION_RATIO,
+    };
+}
+
+/**
+ * Clamped default for the periodic mid-loop trigger. The user-configured
+ * `compactionBlockRatio` still wins; this default makes the per-model
+ * `midLoopRatio` watermark actually drive the periodic trigger instead of
+ * being masked by a global floor.
+ */
+export function resolveMidLoopBlockRatio(providerId?: string, model?: string): number {
+    return Math.max(0.55, Math.min(0.98, resolveCompactionRatios(providerId, model).midLoopRatio));
+}
+
+/** Structured semantic reads keep a larger preview before archiving. */
+const STRUCTURED_READ_ARCHIVE_TOOLS: ReadonlySet<string> = new Set([
+    'query_cwt_schema',
+    'query_rules',
+    'query_types',
+    'query_override_modes',
+    'search_rule_capabilities',
+    'explore_pdx_project',
+]);
+
+/**
+ * Character limit before a tool result is archived off-model. DeepSeek models
+ * tolerate double the default payload because their window is far larger and
+ * their prefix cache makes large in-context results cheaper on later turns.
+ */
+export function resolveToolResultArchiveLimit(toolName: string, providerId?: string, model?: string): number {
+    const base = STRUCTURED_READ_ARCHIVE_TOOLS.has(toolName) ? 60_000 : 16_000;
+    return isDeepSeekModelOrProvider(providerId, model) ? base * 2 : base;
 }
 
 function renderMessageForCompaction(message: ChatMessage): string {
@@ -309,9 +367,9 @@ export async function maybeCompactHistory(
 
     try {
         // Low-watermark target: shrink the retained tail until the projected
-        // post-compaction request fits under COMPACTION_TARGET_RATIO, so the
+        // post-compaction request fits under the per-model target ratio, so the
         // high watermark is not re-armed immediately after compacting.
-        const targetRequestTokens = Math.floor(modelLimit * COMPACTION_TARGET_RATIO);
+        const targetRequestTokens = Math.floor(modelLimit * resolveCompactionRatios(providerId, model).targetRatio);
         const projectRequestTokens = (candidate: CompactionTranscriptSplit): number =>
             Math.max(0, budgetOptions.reservedTokens ?? 0)
             + estimateMessagesTokens(candidate.persistentSystemMessages)

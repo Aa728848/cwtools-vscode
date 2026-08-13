@@ -68,6 +68,16 @@ export interface AdmissionDecision {
  */
 export type ReasoningEffort = 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
 
+export const REASONING_EFFORT_VALUES: readonly ReasoningEffort[] = [
+    'none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max',
+] as const;
+
+/** Narrow an untrusted value to the shared ReasoningEffort union. */
+export function isReasoningEffort(value: unknown): value is ReasoningEffort {
+    return typeof value === 'string'
+        && (REASONING_EFFORT_VALUES as readonly string[]).includes(value);
+}
+
 export type ModelReasoningControlKind = 'none' | 'fixed' | 'toggle' | 'budget' | 'effort';
 
 /** Model-specific choices used by both request shaping and the Webview. */
@@ -1491,6 +1501,27 @@ export interface AgentToolContext {
         content: string;
     }) => Promise<{ allowed: boolean; message?: string }>;
     onTodoUpdate?: TodoUpdateCallback;
+    /**
+     * Execute another tool through the full runner pipeline (policy, plan
+     * guard, scheduler, write queue). Set by AgentRunner for run_code steps;
+     * run_code is rejected wherever this hook is absent. The optional signal
+     * is the fan-out-level AbortSignal: the runner propagates it into the
+     * nested call so a timed-out fan-out stops the step (and later steps).
+     * `writeQueueWaitTimeoutMs` bounds the nested write's lock-acquisition
+     * wait to the fan-out's remaining budget.
+     */
+    runNestedTool?: (
+        toolName: string,
+        args: Record<string, unknown>,
+        signal?: AbortSignal,
+        writeQueueWaitTimeoutMs?: number,
+    ) => Promise<unknown>;
+    /**
+     * Model-visible toolset provider for the current run (mode/domain/stage
+     * filtered at call time); the authoritative allowlist for run_code steps.
+     * Supplied alongside runNestedTool by AgentRunner.
+     */
+    runCodeAllowedStepNames?: () => ReadonlySet<string>;
     /** Host-recorded workspace revision observed by a successful authoritative read in this run. */
     authoritativeProjectRevision?: string;
     escalation?: boolean;

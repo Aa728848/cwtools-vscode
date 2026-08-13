@@ -1840,6 +1840,9 @@ const RAW_TOOL_DEFINITIONS: ToolDefinition[] = [
                                 },
                                 priority: { type: 'string', enum: ['critical', 'normal', 'low'], description: 'Task priority (default: normal)' },
                                 maxIterations: { type: 'integer', minimum: 1, maximum: 100, description: 'Optional per-agent reasoning-loop cap. Leave unset to use the role default.' },
+                                model: { type: 'string', description: 'Optional model id for this sub-agent only. Leave unset to inherit the coordinator model. Prefer a cheaper model (e.g. deepseek-v4-flash) for read-only evidence tasks.' },
+                                provider: { type: 'string', description: 'Optional provider id paired with model. Must name a configured built-in provider. Leave unset to inherit the coordinator provider.' },
+                                reasoningEffort: { type: 'string', enum: ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'], description: 'Optional reasoning level for this sub-agent only. Leave unset to inherit the coordinator level. Use low/minimal for mechanical evidence tasks.' },
                             },
                             required: ['id', 'agentType', 'prompt'],
                         },
@@ -2137,6 +2140,32 @@ const RUNTIME_CONTROL_TOOLS: ToolDefinition[] = [
                     wallClockMs: { type: 'number' },
                 },
                 required: [],
+            },
+        },
+    },
+    {
+        type: 'function',
+        function: {
+            name: 'run_code',
+            description: 'Execute a bounded sequence of tool steps in ONE call instead of one call per round trip. Each step runs through the same permission, plan-mode, and safety checks as a direct tool call. Prefer this for planned multi-step sequences (read → edit → verify) to save round trips, especially on long-output models. Do not nest run_code or interactive/orchestration tools; a failed step does not stop later steps.',
+            parameters: {
+                type: 'object',
+                properties: {
+                    steps: {
+                        type: 'array',
+                        minItems: 1,
+                        maxItems: 32,
+                        items: {
+                            type: 'object',
+                            properties: {
+                                tool: { type: 'string', description: 'Exact tool name from the current catalog.' },
+                                args: { type: 'object', description: 'Arguments for that tool.' },
+                            },
+                            required: ['tool', 'args'],
+                        },
+                    },
+                },
+                required: ['steps'],
             },
         },
     },

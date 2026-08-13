@@ -20,7 +20,7 @@ export type AgentToolName =
     | 'write_localisation' | 'write_design_blueprint' | 'save_workflow' | 'git_ops' | 'dispatch_agents'
     | 'query_blackboard' | 'merge_results' | 'cancel_dispatch' | 'get_design_blueprint_contract'
     | 'query_shader_symbol' | 'query_shader_compile_unit' | 'query_shader_platform_variants' | 'query_shader_callers'
-    | 'explain_shader_reachability' | 'validate_shader' | 'compare_shader_with_vanilla';
+    | 'explain_shader_reachability' | 'validate_shader' | 'compare_shader_with_vanilla' | 'run_code';
 
 export type ToolEffect =
     | 'none'
@@ -175,6 +175,7 @@ const TOOL_DOMAINS = {
     explain_shader_reachability: 'paradox',
     validate_shader: 'paradox',
     compare_shader_with_vanilla: 'paradox',
+    run_code: 'shared',
 } satisfies Record<AgentToolName, ToolDomain>;
 
 const GENERAL_DISPATCH_SCHEMA: ToolDefinition = {
@@ -216,6 +217,9 @@ const GENERAL_DISPATCH_SCHEMA: ToolDefinition = {
                             },
                             priority: { type: 'string', enum: ['critical', 'normal', 'low'] },
                             maxIterations: { type: 'integer', minimum: 1, maximum: 100 },
+                            model: { type: 'string', description: 'Optional model id for this sub-task only; unset inherits the coordinator model.' },
+                            provider: { type: 'string', description: 'Optional configured built-in provider id paired with model.' },
+                            reasoningEffort: { type: 'string', enum: ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'], description: 'Optional per-task reasoning level.' },
                         },
                         required: ['id', 'agentType', 'prompt'],
                     },
@@ -304,13 +308,14 @@ const _MCP: AgentToolName[] = ['mcp_call'];
 const ORCHESTRATION: AgentToolName[] = ['dispatch_agents', 'query_blackboard', 'merge_results', 'cancel_dispatch'];
 const INTERACTION: AgentToolName[] = ['ask_user_question'];
 
-const WRITE_TOOLS_SET = new Set<string>([...EDIT, 'deploy_mod_asset', 'git_ops']);
+const WRITE_TOOLS_SET = new Set<string>([...EDIT, 'deploy_mod_asset', 'git_ops', 'run_code']);
 const SUB_AGENT_EXCLUDES_SET = new Set<string>([
     'ask_user_question',
     'web_search', 'web_open', 'web_find',
     'run_command', 'list_processes', 'read_process', 'write_process_stdin', 'terminate_process',
     'git_ops', 'save_workflow',
     'rename_symbol',
+    'run_code',
     ...MEDIA,
     ...ORCHESTRATION,
 ]);
@@ -330,6 +335,7 @@ const MUTATING_TOOLS_SET = new Set<string>([
     ...EDIT,
     'deploy_mod_asset',
     'git_ops',
+    'run_code',
     'set_memory',
     'save_memory',
     'forget_memory',
@@ -353,7 +359,7 @@ const STORM_EXEMPT_TOOLS_SET = new Set<string>([
 const PLAN_MODES = new Set([...BASE_READ, ...INTERACTION, ...NETWORK, ..._MCP, ...ORCHESTRATION, 'todo_write', 'write_file', 'edit_file', 'replace_lines', 'write_design_blueprint', 'save_workflow', 'set_memory', 'get_memory', 'search_memory', 'git_ops']);
 const EXPLORE_MODES = new Set([...BASE_READ, ...INTERACTION, ...NETWORK, ..._MCP, ...ORCHESTRATION, 'git_ops', 'save_workflow']);
 const REVIEW_MODES = new Set([...BASE_READ, ...INTERACTION, ...NETWORK, ..._MCP, 'git_ops', 'save_workflow']);
-const BUILD_MODES = new Set([...BASE_READ, ...INTERACTION, ...EDIT, ...MEMORY, ...NETWORK, ...UTILITY, ...MEDIA, ..._MCP, ...ORCHESTRATION]);
+const BUILD_MODES = new Set([...BASE_READ, ...INTERACTION, ...EDIT, ...MEMORY, ...NETWORK, ...UTILITY, ...MEDIA, ..._MCP, ...ORCHESTRATION, 'run_code']);
 const LOC_MODES = new Set([
     'select_tools', 'read_file', 'write_file',
     'list_directory', 'glob_files', 'search_mod_files', 'find_sprite_candidates', 'find_sound_candidates', 'grep',
@@ -366,7 +372,7 @@ const SCRIPT_MODES = new Set([...BASE_READ, ...INTERACTION, ...NETWORK, ..._MCP,
 // Legacy General mode is intentionally read-only. Writable general coding work
 // belongs to Utility mode, whose staged surface and policy gates are explicit.
 const GENERAL_MODES = new Set([...BASE_READ, ...INTERACTION, ...NETWORK]);
-const UTILITY_MODES = new Set([...BASE_READ, ...INTERACTION, ...EDIT, ...MEMORY, ...NETWORK, ...UTILITY, ...MEDIA, ...ORCHESTRATION, 'mcp_call']);
+const UTILITY_MODES = new Set([...BASE_READ, ...INTERACTION, ...EDIT, ...MEMORY, ...NETWORK, ...UTILITY, ...MEDIA, ...ORCHESTRATION, 'mcp_call', 'run_code']);
 
 for (const schema of SCHEMA_DEFINITIONS) {
     const name = schema.function.name as AgentToolName;
@@ -446,6 +452,12 @@ for (const schema of SCHEMA_DEFINITIONS) {
         effect = 'none';
         riskLevel = 0;
         concurrencyClass = 'interactive';
+    } else if (name === 'run_code') {
+        // Meta tool: worst-case effect of its steps; the global-exclusive
+        // scheduler class serializes the whole script against sibling calls.
+        effect = 'workspace_write';
+        riskLevel = 2;
+        concurrencyClass = 'global-exclusive';
     } else {
         effect = 'none';
         riskLevel = 2;
@@ -455,7 +467,7 @@ for (const schema of SCHEMA_DEFINITIONS) {
     const mutating = MUTATING_TOOLS_SET.has(name);
     const stormExempt = STORM_EXEMPT_TOOLS_SET.has(name);
 
-    const noFlatten = ['dispatch_agents', 'merge_results', 'query_blackboard', 'todo_write'].includes(name);
+    const noFlatten = ['dispatch_agents', 'merge_results', 'query_blackboard', 'todo_write', 'run_code'].includes(name);
     let flatSchema: ToolDefinition | undefined = undefined;
     if (!noFlatten) {
         const analysis = analyzeSchema(schema);
@@ -469,7 +481,7 @@ for (const schema of SCHEMA_DEFINITIONS) {
         || (effect === 'none' && !mutating && !ORCHESTRATION.includes(name)));
     const disclosure = ['ask_user_question', 'todo_write', 'read_file', 'grep', 'get_goal', 'select_tools'].includes(name)
         ? 'always'
-        : (['write_file', 'edit_file', 'replace_lines', 'run_command', 'git_ops', 'mcp_call', 'dispatch_agents'].includes(name)
+        : (['write_file', 'edit_file', 'replace_lines', 'run_command', 'git_ops', 'mcp_call', 'dispatch_agents', 'run_code'].includes(name)
             ? 'deferred'
             : 'stage');
     const group = effect === 'workspace_write' ? 'file_write'

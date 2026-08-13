@@ -46,6 +46,12 @@ import { aiText, EVIDENCE_GATE_MSG } from './messages';
 import { getPrivateAiStorageRoot, getPrivateTopicStorageDirCandidates } from './workspacePaths';
 import { isPathInsideOrEqual } from '../pathScope';
 import { TOOL_REGISTRY, WRITE_TOOLS } from './tools/registry';
+import {
+    validateRunCodeStepPlan,
+    executeRunCodeSteps,
+    RUN_CODE_FANOUT_TIMEOUT_MS,
+} from './tools/runCode';
+import { BUILTIN_PROVIDERS } from './providers/models/defaults';
 import { runAgentHooks } from './runner/hookRunner';
 import { getAgentToolTargetFiles } from './runner/toolScheduler';
 import { buildProfile, resolvePolicy, subjectForEffect, type PolicyPresetId, type PolicyRule } from './runner/policyEngine';
@@ -246,6 +252,9 @@ const TOOL_TIMEOUTS: Record<string, number> = {
     save_workflow: 30_000,
     todo_write: 5_000,
     run_skill: 30_000,
+    // run_code owns its bounded fan-out lifetime: nested steps receive the
+    // fan-out AbortSignal and remaining steps stop on timeout (see executeRunCode).
+    run_code: 0,
     // Child activity/idle guards and run budgets own orchestration lifetime.
     // A fixed tool timeout would kill healthy long-running child graphs.
     dispatch_agents: 0,
@@ -2040,6 +2049,8 @@ export class AgentToolExecutor {
             // - External / agent tools -
             case 'web_open':
                 result = await this.externalHandler.webOpen(args as any, context); break;
+            case 'run_code':
+                result = await this.executeRunCode(args, context); break;
             case 'run_command':
                 result = await this.externalHandler.runCommand(args as any, context); break;
             case 'list_processes':
@@ -3216,6 +3227,64 @@ export class AgentToolExecutor {
         pendingOnly?: boolean;
     }>();
 
+    /**
+     * run_code: fan out a bounded step plan through the runner's nested-tool
+     * pipeline. Shape validation happens here; permission/domain authority
+     * stays in the runner hook, which rejects any tool outside the
+     * model-visible catalog for the current mode/domain. A failed step does
+     * not stop later steps. The fan-out owns its bounded lifetime: the
+     * per-fan-out AbortSignal reaches every nested step and stops remaining
+     * steps once the wall-clock budget expires.
+     */
+    private async executeRunCode(args: Record<string, unknown>, context?: import('./types').AgentToolContext): Promise<unknown> {
+        const runNestedTool = context?.runNestedTool;
+        if (!runNestedTool) {
+            return {
+                success: false,
+                error: 'run_code is only available when the runner provides the nested-tool pipeline.',
+            };
+        }
+        const allowedStepNames = context?.runCodeAllowedStepNames?.();
+        if (!allowedStepNames) {
+            return {
+                success: false,
+                error: 'run_code is unavailable: the runner did not publish the model-visible toolset for this run.',
+            };
+        }
+        const validated = validateRunCodeStepPlan(args.steps, allowedStepNames);
+        if (!validated.ok) return { success: false, error: validated.error };
+
+        const controller = new AbortController();
+        const parentSignal = context?.runnerOptions?.abortSignal;
+        const onParentAbort = () => controller.abort(parentSignal?.reason);
+        if (parentSignal) {
+            if (parentSignal.aborted) {
+                controller.abort(parentSignal.reason);
+            } else {
+                parentSignal.addEventListener('abort', onParentAbort, { once: true });
+            }
+        }
+        const timeoutId = setTimeout(() => {
+            controller.abort(new Error(`run_code fan-out exceeded the ${RUN_CODE_FANOUT_TIMEOUT_MS / 1000}s budget.`));
+        }, RUN_CODE_FANOUT_TIMEOUT_MS);
+        const deadline = Date.now() + RUN_CODE_FANOUT_TIMEOUT_MS;
+        try {
+            return await executeRunCodeSteps(
+                validated.steps,
+                (tool, stepArgs) => runNestedTool(
+                    tool,
+                    stepArgs,
+                    controller.signal,
+                    Math.max(1, deadline - Date.now()),
+                ),
+                controller.signal,
+            );
+        } finally {
+            clearTimeout(timeoutId);
+            if (parentSignal) parentSignal.removeEventListener('abort', onParentAbort);
+        }
+    }
+
     /** 
 * Execute the dispatch_agents tool: convert the task array built by AI into TaskGraph, 
 * Then trigger true multi-Agent parallel execution through Orchestrator.execute(). 
@@ -3233,8 +3302,11 @@ export class AgentToolExecutor {
             acceptanceChecks?: import('./orchestrator/types').AcceptanceCheck[];
             dependencies?: string[];
             maxIterations?: number;
-            modelOverride?: string;
-            providerOverride?: string;
+            model?: unknown;
+            provider?: unknown;
+            reasoningEffort?: unknown;
+            modelOverride?: unknown;
+            providerOverride?: unknown;
         }> | undefined;
 
         // Resume/append/clarification contract (Phase 2): a later dispatch may
@@ -3372,6 +3444,24 @@ export class AgentToolExecutor {
             };
         }
         const normalizedTasks = (tasks ?? []).map(task => normalizeDispatchTaskForLocalisationYml(task));
+        // Per-task model selection is model-visible untrusted input: validate
+        // and normalize before any value reaches TaskNode/AgentRunnerOptions.
+        const builtinProviderIds = new Set<string>(Object.keys(BUILTIN_PROVIDERS));
+        const taskModelSelections = new Map<string, {
+            model?: string;
+            provider?: string;
+            reasoningEffort?: import('./types').ReasoningEffort;
+        }>();
+        {
+            const { validateNodeModelSelection, mapTaskModelSelection } = await import('./orchestrator/taskGraphEngine');
+            for (const task of normalizedTasks) {
+                const selection = validateNodeModelSelection(mapTaskModelSelection(task), builtinProviderIds);
+                if (!selection.ok) {
+                    return { success: false, error: `Task '${task.id}': ${selection.error}` };
+                }
+                taskModelSelections.set(task.id, selection);
+            }
+        }
         if (resumeRecord) {
             const existingIds = new Set(resumeRecord.graph.nodes.map(node => node.id));
             const duplicate = normalizedTasks.find(task => existingIds.has(task.id));
@@ -3620,7 +3710,7 @@ export class AgentToolExecutor {
         try {
             //Dynamic import avoids circular dependencies
             const { Orchestrator } = await import('./orchestrator/orchestrator');
-            const { TaskGraphEngine } = await import('./orchestrator/taskGraphEngine');
+            const { TaskGraphEngine, validateNodeModelSelection } = await import('./orchestrator/taskGraphEngine');
             const { applyUserModelOverrides } = await import('./orchestrator/agentRegistry');            //Apply user's child Agent model configuration (read from VS Code settings)
             const cfg = vs.workspace.getConfiguration('stellarisLanguageServices.ai');
             const agentModels = cfg.get<Record<string, { provider: string; model: string }>>('orchestrator.agentModels');
@@ -3653,6 +3743,7 @@ export class AgentToolExecutor {
             }
 
             for (const task of normalizedTasks) {
+                const modelSelection = taskModelSelections.get(task.id);
                 TaskGraphEngine.addNode(
                     graph,
                     task.id,
@@ -3667,8 +3758,9 @@ export class AgentToolExecutor {
                         acceptanceChecks: task.acceptanceChecks,
                         dependencies: task.dependencies || [],
                         maxIterations: task.maxIterations,
-                        modelOverride: task.modelOverride,
-                        providerOverride: task.providerOverride,
+                        modelOverride: modelSelection?.model,
+                        providerOverride: modelSelection?.provider,
+                        reasoningEffort: modelSelection?.reasoningEffort,
                     },
                 );
             }

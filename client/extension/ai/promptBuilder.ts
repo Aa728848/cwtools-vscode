@@ -191,6 +191,22 @@ const OPENAI_SUPPLEMENT = `
 When multiple independent pieces of information are needed, batch your tool calls in a single step for maximum efficiency.
 </system-reminder>`;
 
+/** DeepSeek: use the long output window — batch edits and chain scripted steps */
+const DEEPSEEK_SUPPLEMENT = `
+<system-reminder>
+You are using DeepSeek. Use the long output window: when several edits are independent and their targets are known, emit them in a single response as parallel edit_file calls instead of splitting them across turns. When a multi-step read → edit → verify sequence is planned in advance and run_code is available in your tool catalog, chain the steps through one run_code call to save round trips. Keep reasoning between tool calls concise.
+</system-reminder>`;
+
+/** Resolve the per-provider model supplement; exported for direct unit testing. */
+export function modelSupplementForProvider(providerId?: string): string {
+    if (!providerId) return '';
+    const id = providerId.toLowerCase();
+    if (id === 'deepseek') return DEEPSEEK_SUPPLEMENT;
+    if (id === 'claude' || id.includes('anthropic')) return ANTHROPIC_SUPPLEMENT;
+    if (id === 'gemini' || id.includes('google')) return GEMINI_SUPPLEMENT;
+    return OPENAI_SUPPLEMENT;
+}
+
 // ─── Prompt Builder ───────────────────────────────────────────────────────────
 export class PromptBuilder {
     private memoryParser: MemoryParser;
@@ -1033,11 +1049,7 @@ ${trimmed}
     }
 
     private getModelSupplement(providerId?: string): string {
-        if (!providerId) return '';
-        const id = providerId.toLowerCase();
-        if (id === 'claude' || id.includes('anthropic')) return ANTHROPIC_SUPPLEMENT;
-        if (id === 'gemini' || id.includes('google')) return GEMINI_SUPPLEMENT;
-        return OPENAI_SUPPLEMENT;
+        return modelSupplementForProvider(providerId);
     }
 
     /**

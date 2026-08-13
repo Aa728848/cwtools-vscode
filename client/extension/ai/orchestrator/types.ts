@@ -113,6 +113,8 @@ export interface TaskNode {
     modelOverride?: string;
     /** Override supplier selection (leave blank to inherit user configuration) */
     providerOverride?: string;
+    /** Per-node reasoning level; falls back to the orchestrator-level effort. */
+    reasoningEffort?: ReasoningEffort;
     /** Explicit absolute maximum number of inference loop iterations. */
     maxIterations?: number;
     /** Retry count */

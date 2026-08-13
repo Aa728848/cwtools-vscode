@@ -37,12 +37,12 @@ const BUILD_STAGE_TOOLS: Partial<Record<AgentToolStage, ReadonlySet<string>>> = 
         'get_diagnostics', 'read_file', 'get_file_context', 'get_pdx_block',
         'write_file', 'edit_file', 'replace_lines',
         'rename_symbol',
-        'write_localisation', 'todo_write',
+        'write_localisation', 'todo_write', 'run_code',
     ]),
     finalize: new Set([
         'get_diagnostics', 'analyze_diagnostic_error', 'query_references',
         'verify_pdx_identifier', 'read_file', 'get_file_context', 'get_pdx_block',
-        'write_file', 'edit_file', 'replace_lines', 'todo_write',
+        'write_file', 'edit_file', 'replace_lines', 'todo_write', 'run_code',
     ]),
 };
 
@@ -147,7 +147,7 @@ const UTILITY_STAGE_TOOLS: Partial<Record<AgentToolStage, ReadonlySet<string>>> 
         'write_file', 'edit_file', 'replace_lines', 'rename_symbol',
         'run_command', 'list_processes', 'read_process',
         'write_process_stdin', 'terminate_process', 'git_ops', 'todo_write',
-        'mcp_call', 'run_skill',
+        'mcp_call', 'run_skill', 'run_code',
         'dispatch_agents', 'query_blackboard', 'merge_results',
     ]),
     finalize: new Set([
@@ -157,7 +157,7 @@ const UTILITY_STAGE_TOOLS: Partial<Record<AgentToolStage, ReadonlySet<string>>> 
         'rename_symbol',
         'run_command', 'list_processes', 'read_process', 'write_process_stdin',
         'terminate_process', 'git_ops', 'todo_write',
-        'mcp_call', 'run_skill',
+        'mcp_call', 'run_skill', 'run_code',
         'dispatch_agents', 'query_blackboard', 'merge_results',
     ]),
 };

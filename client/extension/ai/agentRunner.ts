@@ -76,11 +76,12 @@ import {
 } from './runnerPolicy';
 import { getWorkflow } from './workflowRegistry';
 import { TOOL_REGISTRY, WRITE_TOOLS, READ_ONLY_TOOLS } from './tools/registry';
+import { computeRunCodeAllowedStepNames } from './tools/runCode';
 import { PartitionedWriteQueue } from './runner/writeCoordinator';
 import { runLedger } from './runner/runLedger';
 import { atomicWriteText, sha256Text } from './runner/durableStorage';
 import { loadResumeState, hasResumeState, saveResumeState as saveCheckpointResumeState } from './runner/checkpoint';
-import { maybeCompactHistory as _maybeCompactHistory, COMPACTION_THRESHOLD_RATIO, MID_LOOP_COMPACTION_INTERVAL, MID_LOOP_COMPACTION_RATIO, DEFAULT_CONTEXT_LIMIT, AUTO_COMPACTION_MIN_INTERVAL_MS, resolveCompactionContextLimit, type CompactionBudgetOptions, type AutoCompactionThrottle } from './runner/compaction';
+import { maybeCompactHistory as _maybeCompactHistory, MID_LOOP_COMPACTION_INTERVAL, DEFAULT_CONTEXT_LIMIT, AUTO_COMPACTION_MIN_INTERVAL_MS, resolveCompactionContextLimit, resolveCompactionRatios, resolveMidLoopBlockRatio, resolveToolResultArchiveLimit, type CompactionBudgetOptions, type AutoCompactionThrottle } from './runner/compaction';
 import { refreshLiveVsCodeContext } from './runner/liveContext';
 import { runContextMaintenance } from './runner/contextMaintenance';
 import { TokenCalibrationTable, buildCalibrationKey } from './runner/tokenCalibration';
@@ -618,6 +619,64 @@ export class AgentRunner {
     private isFallbackEligibleError(error: unknown): boolean {
         return isFallbackEligibleApiError(error)
             || this.runtimeServices.retryPolicy.decide(error, 1).retry;
+    }
+
+    /**
+     * One run_code step through the same gates as a direct model tool call:
+     * the model-visible catalog decides the allowlist (domain isolation),
+     * writes take the partitioned per-file queue, and execution goes through
+     * the shared pipeline (policy, plan guard, git guard, scheduler). The
+     * fan-out signal replaces the run-level signal for this nested call so a
+     * timed-out fan-out aborts the step instead of leaking background work.
+     */
+    private async runNestedToolStep(
+        toolName: string,
+        args: Record<string, unknown>,
+        context: import('./types').AgentToolContext,
+        onFileWrite: ((filePath: string, previousContent: string | null) => void) | undefined,
+        modelVisibleTools: readonly import('./types').ToolDefinition[],
+        signal?: AbortSignal,
+        writeQueueWaitTimeoutMs?: number,
+    ): Promise<unknown> {
+        if (!computeRunCodeAllowedStepNames(modelVisibleTools).has(toolName)) {
+            return {
+                success: false,
+                stepBlocked: true,
+                error: `Tool '${toolName}' is not available to run_code in the current mode/domain.`,
+            };
+        }
+        const nestedContext: import('./types').AgentToolContext = signal
+            ? {
+                ...context,
+                runnerOptions: {
+                    ...(context.runnerOptions ?? {}),
+                    abortSignal: signal,
+                } as import('./types').AgentToolContext['runnerOptions'],
+            }
+            : context;
+        const workspaceRoot = this.toolExecutor.workspaceRoot;
+        const filePaths = getAgentToolTargetFiles(toolName, args, workspaceRoot, nestedContext?.runnerOptions?.topicId);
+        const primaryFilePath = filePaths[0] ?? '';
+        if (WRITE_TOOLS.has(toolName)) {
+            if (onFileWrite && primaryFilePath) {
+                const prev = fs.existsSync(primaryFilePath) ? fs.readFileSync(primaryFilePath, 'utf8') : null;
+                onFileWrite(primaryFilePath, prev);
+            }
+            const lockPaths = (filePaths.length > 0 ? filePaths : ['__global__'])
+                .map(p => p === '__global__' ? p : canonicalPathKey(p, workspaceRoot));
+            // The lock wait itself must not outlive the fan-out budget: bound
+            // acquisition to the remaining budget so a long-held file lock
+            // fails this step instead of hanging the whole run_code call.
+            return await this.writeQueue.enqueue(
+                lockPaths,
+                () => this.executeToolPipeline(toolName, args, nestedContext),
+                {
+                    waitTimeoutMs: writeQueueWaitTimeoutMs,
+                    timeoutMessage: 'run_code step timed out waiting for the file write queue.',
+                },
+            );
+        }
+        return await this.executeToolPipeline(toolName, args, nestedContext);
     }
 
     private async executeToolPipeline(
@@ -1230,7 +1289,7 @@ export class AgentRunner {
                 resolveCompactionContextLimit(admissionProviderId, admissionModel, options?.maxContextTokens ?? admissionConfig.maxContextTokens)
                 * Math.max(0.5, Math.min(0.95, vs.workspace
                     .getConfiguration('stellarisLanguageServices.ai.performance')
-                    .get<number>('compactionTriggerRatio', COMPACTION_THRESHOLD_RATIO)))),
+                    .get<number>('compactionTriggerRatio', resolveCompactionRatios(admissionProviderId, admissionModel).thresholdRatio)))),
         });
         if (admissionMaintenance.action === 'pruned-below-threshold') {
             refreshLiveVsCodeContext(conversationHistory);
@@ -1618,7 +1677,7 @@ export class AgentRunner {
             tokenAccumulator,
             Math.max(0.5, Math.min(0.95, vs.workspace
                 .getConfiguration('stellarisLanguageServices.ai.performance')
-                .get<number>('compactionTriggerRatio', COMPACTION_THRESHOLD_RATIO))),
+                .get<number>('compactionTriggerRatio', resolveCompactionRatios(options?.providerId, options?.model).thresholdRatio))),
             {
                 ...budgetOptions,
                 // Cancel in-flight compaction with the turn so a cancelled run
@@ -1698,7 +1757,7 @@ export class AgentRunner {
      *
      * Mid-loop compaction: every MID_LOOP_COMPACTION_INTERVAL iterations, the loop
      * estimates cumulative message size and compacts older tool results in-place
-     * if they exceed MID_LOOP_COMPACTION_RATIO of the context window.
+     * if they exceed the per-model mid-loop ratio of the context window.
      */
     /**
      * Process tool result to detect and automatically truncate massive payloads,
@@ -1709,13 +1768,15 @@ export class AgentRunner {
         invocationId: string,
         runId: string,
         topicId: string,
-        result: any
+        result: any,
+        providerId?: string,
+        model?: string,
     ): Promise<any> {
         if (!result) return result;
 
         const strContent = this.serializeToolResult(result);
 
-        const LIMIT = this.getToolResultArchiveLimit(toolName);
+        const LIMIT = this.getToolResultArchiveLimit(toolName, providerId, model);
         if (strContent.length <= LIMIT) {
             await runLedger.appendEvent(
                 runId,
@@ -1810,16 +1871,8 @@ export class AgentRunner {
         }
     }
 
-    private getToolResultArchiveLimit(toolName: string): number {
-        const structuredReadTools = new Set([
-            'query_cwt_schema',
-            'query_rules',
-            'query_types',
-            'query_override_modes',
-            'search_rule_capabilities',
-            'explore_pdx_project',
-        ]);
-        return structuredReadTools.has(toolName) ? 60000 : 16000;
+    private getToolResultArchiveLimit(toolName: string, providerId?: string, model?: string): number {
+        return resolveToolResultArchiveLimit(toolName, providerId, model);
     }
 
     private serializeToolResult(result: any): string {
@@ -1947,7 +2000,30 @@ export class AgentRunner {
             // executor, so each run contributes only its own scoped signatures.
             scopeId: runRecord.runId,
             onBeforeFileWrite: onFileWrite,
-            onTodoUpdate: options?.onTodoUpdate
+            onTodoUpdate: options?.onTodoUpdate,
+            // run_code fan-out: every step goes through the same pipeline as a
+            // direct tool call; `availableTools` is assigned below and read
+            // lazily so stage disclosure stays current.
+            runCodeAllowedStepNames: () => computeRunCodeAllowedStepNames(availableTools),
+            runNestedTool: async (toolName, args, signal, writeQueueWaitTimeoutMs) => {
+                const result = await this.runNestedToolStep(
+                    toolName,
+                    args,
+                    agentToolContext,
+                    onFileWrite,
+                    availableTools,
+                    signal,
+                    writeQueueWaitTimeoutMs,
+                );
+                const files = getAgentToolTargetFiles(toolName, args, this.toolExecutor.workspaceRoot, options?.topicId);
+                if (WRITE_TOOLS.has(toolName) && files[0]) {
+                    const record = result as Record<string, unknown> | undefined;
+                    if (record && (record.success === true || record.confirmed === true)) {
+                        confirmedWrittenFiles.add(files[0]);
+                    }
+                }
+                return result;
+            },
         };
 
         // Two-phase doom-loop detection (T1.2a — state encapsulated in DoomLoopState):
@@ -2145,7 +2221,7 @@ export class AgentRunner {
         
         const configuredBlockRatio = Math.max(0.55, Math.min(0.98,
             vs.workspace.getConfiguration('stellarisLanguageServices.ai.performance')
-                .get<number>('compactionBlockRatio', Math.max(MID_LOOP_COMPACTION_RATIO, 0.90))));
+                .get<number>('compactionBlockRatio', resolveMidLoopBlockRatio(_providerId0, options?.model ?? _config0.model))));
         const configuredReservedTokens = Math.max(0,
             vs.workspace.getConfiguration('stellarisLanguageServices.ai.performance')
                 .get<number>('compactionReservedTokens', 4_096));
@@ -3644,7 +3720,9 @@ export class AgentRunner {
                                     callInfo.invocationId,
                                     runRecord.runId,
                                     options?.topicId || 'default',
-                                    rawRes
+                                    rawRes,
+                                    options?.providerId,
+                                    options?.model,
                                 );
                                 await runLedger.appendEvent(runRecord.runId, 'tool_call_end', this.summarizeToolResultForLedger(callInfo.toolName, processed), { invocationId: callInfo.invocationId });
                                 return processed;
@@ -3721,7 +3799,9 @@ export class AgentRunner {
                                 ci.invocationId,
                                 runRecord.runId,
                                 options?.topicId || 'default',
-                                rawRes
+                                rawRes,
+                                options?.providerId,
+                                options?.model,
                             );
                             await runLedger.appendEvent(runRecord.runId, 'tool_call_end', this.summarizeToolResultForLedger(ci.toolName, toolResults[i]), { invocationId: ci.invocationId });
                         } catch (e: any) {
@@ -3783,7 +3863,9 @@ export class AgentRunner {
                                     ci.invocationId,
                                     runRecord.runId,
                                     options?.topicId || 'default',
-                                    rawRes
+                                    rawRes,
+                                    options?.providerId,
+                                    options?.model,
                                 );
                                 const r = toolResults[i] as Record<string, unknown>;
                                 if (r && (r.success || r.confirmed) && primaryFilePath) confirmedWrittenFiles.add(primaryFilePath);
@@ -3794,7 +3876,9 @@ export class AgentRunner {
                                     ci.invocationId,
                                     runRecord.runId,
                                     options?.topicId || 'default',
-                                    rawRes
+                                    rawRes,
+                                    options?.providerId,
+                                    options?.model,
                                 );
                             } else {
                                 const rawRes = await this.executeToolPipeline(toolName, toolArgs, agentToolContext);
@@ -3803,7 +3887,9 @@ export class AgentRunner {
                                     ci.invocationId,
                                     runRecord.runId,
                                     options?.topicId || 'default',
-                                    rawRes
+                                    rawRes,
+                                    options?.providerId,
+                                    options?.model,
                                 );
                                 if (WRITE_TOOLS.has(toolName) && primaryFilePath) {
                                     const r = toolResults[i] as Record<string, unknown>;
@@ -4135,7 +4221,8 @@ export class AgentRunner {
                         compactionOptions,
                         extraTokens: activeToolSchemaTokens,
                         calibrateEstimate: calibrateLoopEstimate,
-                        summarizeThreshold: contextLimit * MID_LOOP_COMPACTION_RATIO,
+                        summarizeThreshold: Math.floor(contextLimit
+                            * resolveCompactionRatios(_providerId0, options?.model ?? _config0.model).midLoopRatio),
                     });
                     refreshLiveVsCodeContext(messages);
                     let afterEmergencyTokens = emergencyMaintenance.afterTokens;

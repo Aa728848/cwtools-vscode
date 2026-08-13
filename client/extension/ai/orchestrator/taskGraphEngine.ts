@@ -13,6 +13,7 @@ import type {
     TaskNode,
     TaskPriority,
 } from './types';
+import { isReasoningEffort } from '../types';
 
 /** 
 * DAG task graph engine. 
@@ -308,6 +309,7 @@ export class TaskGraphEngine {
             maxRetries?: number;
             modelOverride?: string;
             providerOverride?: string;
+            reasoningEffort?: import('../types').ReasoningEffort;
         },
     ): TaskNode {
         const contractEntities = (options?.produces ?? []).map(contract => `${contract.kind}:${contract.id}`);
@@ -329,6 +331,7 @@ export class TaskGraphEngine {
             maxRetries: options?.maxRetries ?? 2,
             modelOverride: options?.modelOverride,
             providerOverride: options?.providerOverride,
+            reasoningEffort: options?.reasoningEffort,
         };
         graph.nodes.set(id, node);
         return node;
@@ -342,4 +345,65 @@ function priorityWeight(priority: TaskPriority): number {
         case 'normal': return 2;
         case 'low': return 1;
     }
+}
+
+/**
+ * Map the model-visible dispatch task fields onto the internal selection
+ * vocabulary. The model-facing schema exposes `model`/`provider`; persisted
+ * blueprints and host-side callers may still carry `modelOverride` /
+ * `providerOverride`, so both spellings are accepted with the schema names
+ * winning. Without this boundary mapping the schema values would be silently
+ * ignored downstream.
+ */
+export function mapTaskModelSelection(task: {
+    model?: unknown;
+    modelOverride?: unknown;
+    provider?: unknown;
+    providerOverride?: unknown;
+    reasoningEffort?: unknown;
+}): { model?: unknown; provider?: unknown; reasoningEffort?: unknown } {
+    return {
+        model: task.model ?? task.modelOverride,
+        provider: task.provider ?? task.providerOverride,
+        reasoningEffort: task.reasoningEffort,
+    };
+}
+
+/**
+ * Validate the model-visible per-task model selection fields before they
+ * reach TaskNode. Provider must name a configured built-in provider so a
+ * typo cannot silently fall back to a different vendor mid-graph. On success
+ * the normalized values are returned for direct node construction.
+ */
+export function validateNodeModelSelection(input: {
+    model?: unknown;
+    provider?: unknown;
+    reasoningEffort?: unknown;
+}, knownProviderIds: ReadonlySet<string>):
+    | { ok: true; model?: string; provider?: string; reasoningEffort?: import('../types').ReasoningEffort }
+    | { ok: false; error: string } {
+    const result: { model?: string; provider?: string; reasoningEffort?: import('../types').ReasoningEffort } = {};
+    if (input.model !== undefined) {
+        if (typeof input.model !== 'string' || input.model.trim().length === 0 || input.model.trim().length > 120) {
+            return { ok: false, error: 'Task model must be a non-empty model id of at most 120 characters.' };
+        }
+        result.model = input.model.trim();
+    }
+    if (input.provider !== undefined) {
+        if (typeof input.provider !== 'string' || input.provider.trim().length === 0 || input.provider.trim().length > 64) {
+            return { ok: false, error: 'Task provider must be a non-empty provider id of at most 64 characters.' };
+        }
+        const trimmed = input.provider.trim();
+        if (!knownProviderIds.has(trimmed)) {
+            return { ok: false, error: `Task provider '${trimmed}' is not a configured built-in provider.` };
+        }
+        result.provider = trimmed;
+    }
+    if (input.reasoningEffort !== undefined) {
+        if (!isReasoningEffort(input.reasoningEffort)) {
+            return { ok: false, error: 'Task reasoningEffort must be one of none, minimal, low, medium, high, xhigh, max.' };
+        }
+        result.reasoningEffort = input.reasoningEffort;
+    }
+    return { ok: true, ...result };
 }

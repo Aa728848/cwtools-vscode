@@ -525,7 +525,7 @@ export class Orchestrator {
             sandbox,
             providerId,
             model,
-            reasoningEffort: orchestratorOptions.reasoningEffort,
+            reasoningEffort: taskNode.reasoningEffort ?? orchestratorOptions.reasoningEffort,
             mode: profile.mode,
             // The parent already approved and decomposed this Execute task.
             // Staged writer roles start with write tools visible and never reopen

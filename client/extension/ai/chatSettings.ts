@@ -12,6 +12,7 @@ import * as fs from 'fs';
 import * as cp from 'child_process';
 import { promisify } from 'util';
 import type { ConnectionTestSettings, PanelSettings, HostMessage, CustomApiFormat, ModelReasoningCapability, ReasoningEffort } from './types';
+import { isReasoningEffort } from './types';
 import type { AIService } from './aiService';
 import { aiText } from './messages';
 import { getProjectWorkspaceRoot } from './workspacePaths';
@@ -34,12 +35,6 @@ const execAsync = promisify(cp.exec);
 
 type PostMessageFn = (msg: HostMessage) => void;
 const DEFAULT_CUSTOM_API_FORMAT: CustomApiFormat = 'openai-chat-completions';
-const REASONING_EFFORTS = new Set<ReasoningEffort>(['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max']);
-
-function isReasoningEffort(value: unknown): value is ReasoningEffort {
-    return typeof value === 'string' && REASONING_EFFORTS.has(value as ReasoningEffort);
-}
-
 function reasoningCapabilityKey(providerId: string, model: string): string {
     return `${providerId}:${model}`;
 }

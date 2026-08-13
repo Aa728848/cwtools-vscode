@@ -19,7 +19,7 @@ import type {
     SerializedBlackboard,
 } from './types';
 import type { UserExecutionPolicy } from './userExecutionPolicy';
-import type { AgentRuntimeDomain, TokenUsage, FeatureManifest } from '../types';
+import type { AgentRuntimeDomain, TokenUsage, FeatureManifest, ReasoningEffort } from '../types';
 import type { AgentHandoff } from '../runner/agentHandoff';
 import { atomicWriteJson, readJsonWithBackup } from '../runner/durableStorage';
 import { getPrivateTopicStorageDir, getPrivateTopicStorageDirCandidates } from '../workspacePaths';
@@ -51,6 +51,7 @@ export interface StoredTaskNode {
     maxIterations?: number;
     modelOverride?: string;
     providerOverride?: string;
+    reasoningEffort?: ReasoningEffort;
     retryCount: number;
     maxRetries: number;
     startedAt?: number;
@@ -154,6 +155,7 @@ function serializeGraph(graph: TaskGraph): StoredGraph {
             maxIterations: node.maxIterations,
             modelOverride: node.modelOverride,
             providerOverride: node.providerOverride,
+            reasoningEffort: node.reasoningEffort,
             retryCount: node.retryCount,
             maxRetries: node.maxRetries,
             startedAt: node.startedAt,
@@ -194,6 +196,7 @@ export function deserializeGraph(stored: StoredGraph): TaskGraph {
             maxIterations: node.maxIterations,
             modelOverride: node.modelOverride,
             providerOverride: node.providerOverride,
+            reasoningEffort: node.reasoningEffort,
             retryCount: node.retryCount,
             maxRetries: node.maxRetries,
             startedAt: node.startedAt,

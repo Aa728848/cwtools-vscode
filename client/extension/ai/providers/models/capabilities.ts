@@ -119,6 +119,17 @@ export function isModelVisionCapable(model: string): boolean {
 }
 
 /**
+ * True when the effective provider or model identifies a DeepSeek model.
+ * Relay providers (OpenRouter, SiliconFlow, Together, DeepInfra, ...) are
+ * recognized by model id, so relay-hosted DeepSeek keeps its tuning.
+ */
+export function isDeepSeekModelOrProvider(providerId?: string, model?: string): boolean {
+    const provider = providerId?.toLowerCase() ?? '';
+    if (provider === 'deepseek') return true;
+    return (model?.toLowerCase() ?? '').includes('deepseek');
+}
+
+/**
  * Model-level FIM (Fill-in-the-Middle) capability map.
  */
 export const FIM_CAPABLE_MODELS: Record<string, boolean> = {

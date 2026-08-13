@@ -443,17 +443,17 @@ let complete (p: CompletionParams) (docs: DocumentStore) : CompletionList option
     | Some text ->
         let position = Main.PosHelper.fromZ p.position.line p.position.character
 
-        let projectSymbols =
+        let projectSymbols, projectArguments =
             match latestSnapshot () with
             | Some snapshot ->
-                snapshot.documents
-                |> Map.toSeq
-                |> Seq.collect (fun (_, doc) -> doc.symbols)
-                |> Seq.toList
-            | None -> []
+                let documents = snapshot.documents |> Map.toSeq |> Seq.map snd |> Seq.toList
+                (documents |> List.collect (fun doc -> doc.symbols),
+                 documents |> List.collect (fun doc -> doc.completionArguments))
+            | None -> [], []
 
         let items =
-            CwtLanguageService.completeAtWithProject filePath text position (Some projectSymbols)
+            CwtLanguageService.completeAtWithProjectContext
+                filePath text position (Some projectSymbols) (Some projectArguments)
             |> List.map (fun item ->
                 { defaultCompletionItem with
                     label = item.label
@@ -466,8 +466,14 @@ let complete (p: CompletionParams) (docs: DocumentStore) : CompletionList option
                     filterText = Some item.label
                     // textEdit must be present: the client reads its range and
                     // crashes on a serialized `null` textEdit.
+                    insertTextFormat =
+                        item.insertText
+                        |> Option.bind (fun insertText ->
+                            if insertText.Contains("${", System.StringComparison.Ordinal) then Some InsertTextFormat.Snippet
+                            else None)
                     textEdit =
-                        Some(completionEdit text p.position.line p.position.character item.kind item.label) })
+                        let newText = item.insertText |> Option.defaultValue item.label
+                        Some(completionEdit text p.position.line p.position.character item.kind newText) })
 
         Some { isIncomplete = false; items = items }
 
@@ -476,9 +482,11 @@ let complete (p: CompletionParams) (docs: DocumentStore) : CompletionList option
 let private rebuildLock = obj()
 let mutable private pendingRebuild: CancellationTokenSource option = None
 
-/// Debounced, versioned snapshot rebuild. A new request cancels the pending
-/// delay, and publication still checks the latest requested version to guard
-/// against a build that was already running when cancellation arrived.
+/// Debounced, versioned snapshot rebuild. Cancellation is observed as state,
+/// not thrown through a fire-and-forget async: a stale rebuild is normal flow
+/// and must never become an unhandled OperationCanceledException. Publication
+/// still checks the latest requested version to guard a build that was already
+/// running when cancellation arrived.
 let requestSnapshotRebuild (root: string) (docs: DocumentStore) (debounceMs: int) =
     let version = nextSnapshotVersion ()
     let cancellation = new CancellationTokenSource()
@@ -491,19 +499,20 @@ let requestSnapshotRebuild (root: string) (docs: DocumentStore) (debounceMs: int
         async {
             try
                 do! Async.Sleep(debounceMs)
-                cancellation.Token.ThrowIfCancellationRequested()
-                let files = enumerateCwtFiles root docs CwtProjectIndex.defaultMaxFiles
-                cancellation.Token.ThrowIfCancellationRequested()
-                let snapshot =
-                    CwtProjectIndex.buildSnapshot
-                        version
-                        CwtProjectIndex.defaultMaxFiles
-                        CwtProjectIndex.defaultMaxFileSizeBytes
-                        root
-                        files
+                if not cancellation.IsCancellationRequested then
+                    let files = enumerateCwtFiles root docs CwtProjectIndex.defaultMaxFiles
 
-                if publishSnapshot snapshot then
-                    maybeRequestActivation root snapshot files
+                    if not cancellation.IsCancellationRequested then
+                        let snapshot =
+                            CwtProjectIndex.buildSnapshot
+                                version
+                                CwtProjectIndex.defaultMaxFiles
+                                CwtProjectIndex.defaultMaxFileSizeBytes
+                                root
+                                files
+
+                        if publishSnapshot snapshot then
+                            maybeRequestActivation root snapshot files
             finally
                 lock rebuildLock (fun () ->
                     match pendingRebuild with
@@ -512,4 +521,7 @@ let requestSnapshotRebuild (root: string) (docs: DocumentStore) (debounceMs: int
                 cancellation.Dispose()
         }
 
-    Async.Start(rebuild, cancellationToken = cancellation.Token)
+    // Do not pass the per-rebuild token to Async.Start. Async.Start's default
+    // cancellation continuation rethrows cancellation on the thread pool; the
+    // explicit state checks above make stale work exit quietly instead.
+    Async.Start(rebuild)

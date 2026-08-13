@@ -106,6 +106,17 @@ check "a newer rebuild cancels the pending activation request"
     (waitUntil 2000 (fun () -> lock activationLock (fun () -> activationVersions.Count = 1))
      && (Thread.Sleep(350); lock activationLock (fun () -> activationVersions.Count = 1)))
 
+// Rapid editor changes repeatedly supersede queued rebuilds. Cancellation is
+// expected control flow and must leave the background scheduler alive.
+let beforeStorm = lock activationLock (fun () -> activationVersions.Count)
+for delay in 25 .. -1 .. 1 do
+    CwtLanguageFeatures.requestSnapshotRebuild rebuildRoot docs delay
+CwtLanguageFeatures.requestSnapshotRebuild rebuildRoot docs 0
+
+check "rapid rebuild cancellation publishes only the latest request without crashing"
+    (waitUntil 2000 (fun () -> lock activationLock (fun () -> activationVersions.Count = beforeStorm + 1))
+     && (Thread.Sleep(100); lock activationLock (fun () -> activationVersions.Count = beforeStorm + 1)))
+
 let rejectionRoot = Path.Combine(tmpRoot, "rejection")
 Directory.CreateDirectory(rejectionRoot) |> ignore
 let rejectionRule = Path.Combine(rejectionRoot, "bad-cardinality.cwt")

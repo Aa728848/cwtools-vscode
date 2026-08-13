@@ -50,6 +50,11 @@ let fieldTable =
     [ "bool", "known"
       "int", "known"
       "value_field", "known"
+      "value_field[0..inf]", "known"
+      "int_value_field[0..inf]", "known"
+      "variable_field[-10..10]", "known"
+      "int_variable_field_32[0..inf]", "known"
+      "int_value_field[1...inf]", "malformed:int_value_field"
       "localisation", "known"
       "int[0..100]", "known"
       "int[-1..inf]", "known"
@@ -150,6 +155,17 @@ check "## required accepted" (codesOf requiredOption "r.cwt" |> Set.isEmpty)
 let proseComment = "##Checks if the target is at war\nenabled = bool\n"
 check "## prose not flagged" (codesOf proseComment "p.cwt" |> Set.isEmpty)
 
+// CKParser removes the first source '#': only source `##` is a directive;
+// source `#` is an ordinary comment and source `###` is documentation.
+let commentLevels =
+    "# bogus_option = 1\n### capacity = documentation only\nenabled = bool\n"
+check "single-hash and triple-hash comments are not directives" (codesOf commentLevels "comments.cwt" |> Set.isEmpty)
+
+// Real Stellaris patterns from country_types.cwt and districts.cwt.
+let realRulePatterns =
+    "country_type = {\n\tmult = int_value_field[0..inf]\n\tmodifiers = {\n\t\t\"$planet$_build_speed_mult\" = Planets\n\t}\n}\n"
+check "bounded dynamic field and quoted dollar key are valid" (codesOf realRulePatterns "real.cwt" |> Set.isEmpty)
+
 // --- symbols ------------------------------------------------------------------
 
 let symbolNames (text: string) kind =
@@ -207,6 +223,35 @@ let bracketText =
 let typeBracketLabels = labelsAt bracketText 4 8
 check "type[ bracket offers planet_class" (typeBracketLabels |> List.contains "planet_class")
 
+let completionContextText =
+    rootBlocksText
+    + "\nusage = {\n\tmult = value[variable]\n\tflag = value_set[country_flag]\n}\n"
+
+let completionContext = CwtLanguageService.analyzeDocument "context.cwt" completionContextText
+let contextSymbols, contextArguments =
+    match completionContext.document with
+    | Some document -> document.symbols, document.completionArguments
+    | None -> [], []
+
+let projectLabelsAt (text: string) (line: int) (column: int) =
+    CwtLanguageService.completeAtWithProjectContext
+        "edit.cwt" text (mkPos line column) (Some contextSymbols) (Some contextArguments)
+    |> List.map (fun item -> item.label)
+
+let enumReferenceLabels = projectLabelsAt "kind = en\n" 1 9
+check "enum completion uses declared enum names" (enumReferenceLabels |> List.contains "enum[species_archetype]")
+
+let typeReferenceLabels = projectLabelsAt "target = <\n" 1 10
+check "type completion uses declared type names" (typeReferenceLabels |> List.contains "<planet_class>")
+
+let dynamicReferenceLabels = projectLabelsAt "mult = val\n" 1 10
+check "dynamic completion uses observed value namespace" (dynamicReferenceLabels |> List.contains "value[variable]")
+check "dynamic completion uses observed value-set namespace" (dynamicReferenceLabels |> List.contains "value_set[country_flag]")
+check "dynamic completion does not expose literal x placeholder" (dynamicReferenceLabels |> List.contains "value[x]" |> not)
+
+let aliasReferenceLabels = projectLabelsAt "condition = alias_\n" 1 18
+check "alias completion uses declared alias group" (aliasReferenceLabels |> List.contains "alias_name[trigger]")
+
 // Incomplete current line: completion still works (recovery contract).
 let incompleteText = "enabled = bool\ncount = int[0..10\n\n"
 check "recovery: root completion after incomplete line" (labelsAt incompleteText 3 0 |> List.contains "types")
@@ -214,6 +259,33 @@ check "recovery: root completion after incomplete line" (labelsAt incompleteText
 // Missing close brace: root completion still works at the file start.
 let brokenText = "types = {\n\ttype[a] = {\n\t\tpath = \"x\"\n"
 check "recovery: root completion with missing brace" (labelsAt brokenText 1 0 |> List.contains "types")
+
+// The canonical Stellaris rule repository is the compatibility corpus for the
+// shared CWT dialect. Per-document diagnostics here indicate a language-model
+// false positive (project-level undefined/duplicate checks are intentionally
+// outside this assertion).
+let stellarisConfigRoot =
+    Path.GetFullPath(Path.Combine(__SOURCE_DIRECTORY__, "..", "..", "submodules", "cwtools-stellaris-config", "config"))
+
+if Directory.Exists stellarisConfigRoot then
+    let corpusDiagnostics =
+        Directory.GetFiles(stellarisConfigRoot, "*.cwt", SearchOption.AllDirectories)
+        |> Array.sort
+        |> Array.collect (fun file ->
+            CwtLanguageService.analyzeDocument file (File.ReadAllText file)
+            |> fun result -> result.diagnostics |> List.map (fun diagnostic -> file, diagnostic) |> List.toArray)
+
+    for file, diagnostic in corpusDiagnostics |> Array.truncate 100 do
+        printfn "CORPUS DIAGNOSTIC %s:%d %s %A" (Path.GetRelativePath(stellarisConfigRoot, file)) diagnostic.range.StartLine diagnostic.code diagnostic.messageArgs
+
+    let isKnownRuleSourceIssue (_, diagnostic: CwtDiagnostic) =
+        match diagnostic.code, diagnostic.messageArgs with
+        | "CWT201", [ "int_value_field"; "int_value_field[1...inf]" ] -> true
+        | "CWT200", [ "value[federation_flag]." ] -> true
+        | _ -> false
+
+    let unexpectedCorpusDiagnostics = corpusDiagnostics |> Array.filter (isKnownRuleSourceIssue >> not)
+    check "canonical Stellaris CWT corpus has no unexpected single-document diagnostics" (unexpectedCorpusDiagnostics.Length = 0)
 
 // --- rules-parser detailed API -------------------------------------------------
 

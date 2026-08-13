@@ -233,6 +233,36 @@ suite('CWT-only language support', function () {
         );
     });
 
+    test('stays connected when rapid edits supersede pending CWT index rebuilds', async function () {
+        const extension = await activate();
+        const client = getClient(extension as CwtoolsExtensionApi);
+        const doc = await vscode.workspace.openTextDocument(sampleUri);
+        await vscode.window.showTextDocument(doc);
+        const original = doc.getText();
+
+        try {
+            for (let i = 0; i < 20; i += 1) {
+                const edit = new vscode.WorkspaceEdit();
+                edit.replace(sampleUri, new vscode.Range(0, 0, doc.lineCount, 0), `${original}\n# rebuild ${i}\n`);
+                assert.ok(await vscode.workspace.applyEdit(edit), `failed to apply rebuild edit ${i}`);
+            }
+        } finally {
+            const restore = new vscode.WorkspaceEdit();
+            restore.replace(sampleUri, new vscode.Range(0, 0, doc.lineCount, 0), original);
+            assert.ok(await vscode.workspace.applyEdit(restore), 'failed to restore the CWT fixture');
+        }
+
+        // Let the debounce window close, then use a direct protocol request so
+        // an exited server cannot be masked by VS Code word suggestions.
+        await new Promise(resolve => setTimeout(resolve, 1_000));
+        const result = await client.sendRequest<{ items?: Array<{ label?: string }> }>('textDocument/completion', {
+            textDocument: { uri: sampleUri.toString() },
+            position: { line: 12, character: 0 },
+        });
+        const labels = result?.items?.map(item => item.label) ?? [];
+        assert.ok(labels.includes('on_actions'), 'language server stopped responding after rebuild cancellation');
+    });
+
     test('serves cross-file completion and navigation through the project index', async function () {
         const defsUri = workspaceFile('config/defs.cwt');
         // Opening defs.cwt triggers a project-index rebuild.
@@ -255,12 +285,28 @@ suite('CWT-only language support', function () {
         }
         assert.ok(sawGadget, 'cross-file completion did not offer type[gadget] from defs.cwt');
 
-        // Definition navigation: `<gadget>` in semantic-error.cwt jumps to
-        // the type[gadget] declaration in defs.cwt.
         const errorDoc = await vscode.workspace.openTextDocument(semanticErrorUri());
         await vscode.window.showTextDocument(errorDoc);
         const gadgetLine = errorDoc.getText().split('\n').findIndex(line => line.includes('working = <gadget>'));
         assert.ok(gadgetLine >= 0, 'semantic-error.cwt should reference <gadget>');
+
+        // Reference completion uses the concrete declaration, not the
+        // meta-schema placeholder `<type>`.
+        const gadgetLineText = errorDoc.lineAt(gadgetLine).text;
+        const partialTypeEnd = gadgetLineText.indexOf('<gadget>') + '<ga'.length;
+        const typeReferenceItems = await vscode.commands.executeCommand<vscode.CompletionList>(
+            'vscode.executeCompletionItemProvider',
+            errorDoc.uri,
+            new vscode.Position(gadgetLine, partialTypeEnd),
+        );
+        const typeReferenceLabels = typeReferenceItems?.items.map(item => item.label) ?? [];
+        assert.ok(
+            typeReferenceLabels.some(label => label === '<gadget>'),
+            `expected concrete <gadget> reference completion, got ${JSON.stringify(typeReferenceLabels.slice(0, 10))}`,
+        );
+
+        // Definition navigation: `<gadget>` in semantic-error.cwt jumps to
+        // the type[gadget] declaration in defs.cwt.
         const navigationDeadline = Date.now() + 60_000;
         let locations: vscode.Location[] | undefined;
         while (Date.now() < navigationDeadline) {

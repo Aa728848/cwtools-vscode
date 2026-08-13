@@ -192,6 +192,11 @@ Rule options are `##` comments attached to the following rule.
 | `## error_if_only_match` | `## error_if_only_match = use x instead` | Report a custom error when only this rule matches. | Shared |
 | `## type_prefix_from` | `## type_prefix_from = key` | Derive type prefix context from another field. | Advanced |
 | `## type_suffix_pattern(s)` | `## type_suffix_patterns = { _desc _tooltip }` | Add suffix-derived type completion candidates. | Shared |
+| `## type_key_filter` / `## type_key_regex` / `## starts_with` | `## starts_with = prefix_` | Restrict the keys discovered for a type or subtype. | Shared |
+| `## display_name` / `## abbreviation` | `## abbreviation = CE` | Supply display metadata for a type or subtype. | Shared |
+| `## root_completion` / `## graph_related_types` | `## root_completion = subtypes` | Configure root completion and graph relationships for a type. | Shared |
+| `## supported_scopes` | `## supported_scopes = country` | Restrict an alias or modifier rule to supported scopes. | Shared |
+| `## required` / `## optional` / `## primary` | `## required` | Configure localisation-field presence and the primary display field. | Shared |
 | `## file_extensions` | `## file_extensions = { dds png }` | Restrict file completion extensions. | Shared |
 | `## color_type` | `## color_type = hsv360` | Adjust generated `colour_field` / `color_field` rules. | Shared |
 | `## inject` | `## inject = common/foo.cwt@type/path` | Inject child rules from another rule file. | Advanced |
@@ -806,8 +811,11 @@ language id). What the CWTools extension provides while editing rules:
   `CWT9xx`. Structure errors must be fixed first; parser recovery can make
   follow-up diagnostics incomplete.
 - **Completion**: root blocks at file top level, `##` directive names, field
-  expression families after `=`, and symbol names inside declaration
-  brackets (`type[`, `enum[`, `scope[`, ...) merged with project symbols.
+  expression families after `=`, and concrete project candidates for type,
+  enum, dynamic-value, alias and scope references. Bracket completion
+  (`type[`, `enum[`, `scope[`, ...) is merged across indexed rule files;
+  open-ended dynamic namespaces are learned from their project usages rather
+  than displayed as literal `x` placeholders.
 - **Navigation**: definition and references resolve through the project
   index across files.
 - **Safe rule activation**: when the active rules come from a manual rules
@@ -1024,6 +1032,11 @@ subtype[!planet] = {
 | `## error_if_only_match` | `## error_if_only_match = use x instead` | 当只有此规则匹配时报自定义错误。 | Shared |
 | `## type_prefix_from` | `## type_prefix_from = key` | 从另一个字段推导类型前缀上下文。 | Advanced |
 | `## type_suffix_pattern(s)` | `## type_suffix_patterns = { _desc _tooltip }` | 为类型补全添加后缀候选。 | Shared |
+| `## type_key_filter` / `## type_key_regex` / `## starts_with` | `## starts_with = prefix_` | 限制 type 或 subtype 发现的键。 | Shared |
+| `## display_name` / `## abbreviation` | `## abbreviation = CE` | 提供 type 或 subtype 的显示元数据。 | Shared |
+| `## root_completion` / `## graph_related_types` | `## root_completion = subtypes` | 配置 type 的根补全来源和图关系。 | Shared |
+| `## supported_scopes` | `## supported_scopes = country` | 限制 alias 或 modifier 规则支持的作用域。 | Shared |
+| `## required` / `## optional` / `## primary` | `## required` | 配置本地化字段是否必需及主要显示字段。 | Shared |
 | `## file_extensions` | `## file_extensions = { dds png }` | 限制文件补全扩展名。 | Shared |
 | `## color_type` | `## color_type = hsv360` | 调整 `colour_field` / `color_field` 生成规则。 | Shared |
 | `## inject` | `## inject = common/foo.cwt@type/path` | 从另一个规则文件注入子规则。 | Advanced |
@@ -1635,8 +1648,10 @@ npm run verify
   `CWT0xx`、根块与指令校验 `CWT1xx`、字段表达式 `CWT2xx`、项目级未定义
   引用与重复类型 `CWT3xx`、inject 循环 `CWT4xx`、激活状态 `CWT9xx`。
   先修结构错误;解析恢复期间后续诊断可能不完整。
-- **补全**:文件顶层的根块、`##` 指令名、`=` 后的字段表达式族、声明括号内
-  (`type[`、`enum[`、`scope[` 等)的符号名(与项目符号合并)。
+- **补全**:文件顶层的根块、`##` 指令名、`=` 后的字段表达式族,以及 type、
+  enum、动态值、alias 和 scope 引用的项目真实候选。括号补全(`type[`、
+  `enum[`、`scope[` 等)会合并所有已索引规则文件;开放式动态命名空间从
+  项目用法中提取,不会再把字面量 `x` 当成真实候选。
 - **跳转**:定义与引用通过项目索引跨文件解析。
 - **安全规则激活**:当活动规则来自手动规则目录时,验证通过的编辑自动热替换
   进游戏模型;损坏的候选保留 last-known-good(`CWT900`/`CWT901`),下一个

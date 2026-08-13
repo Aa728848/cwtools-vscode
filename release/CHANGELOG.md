@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [2.13.0] - 2026-08-13
 
 ### 新增 / Added
 - **[新增] `.cwt` 规则文件独立语言支持**：引入独立的 `cwt` language id，`.cwt` 不再归属于任何游戏语言。纯规则仓库以 CWT-only 模式启动语言服务（无需游戏安装），游戏工作区保持 full mode 并原地升级。

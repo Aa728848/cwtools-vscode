@@ -1,5 +1,11 @@
 # Changelog
 
+## [2.12.3] - 2026-08-13
+
+### 修复 / Fixes
+- **[修复] Codex 上下文窗口钳制到服务实际上限**：ChatGPT Codex（OAuth）提供商不再沿用同名模型在公开 API 上的更大上下文窗口。保存设置时 `maxContextTokens` 会按服务目录声明的实际窗口钳制，设置面板同步显示生效值，避免因超出服务端上限导致请求失败。
+  English: [Fix] Clamp Codex context limits to the service model windows — the ChatGPT Codex (OAuth) provider no longer inherits the larger public-API context window for the same model ID. Saving settings now clamps `maxContextTokens` to the service catalog's actual window (the settings panel shows the effective value), preventing request failures caused by exceeding the service-side limit.
+
 ## [2.12.2] - 2026-08-12
 
 ### 修复 / Fixes

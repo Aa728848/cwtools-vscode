@@ -26,6 +26,7 @@ import {
     OPENCODE_GO_MODEL_LIMITS,
     MODEL_CONTEXT_TOKENS,
     getModelContextTokens,
+    clampConfiguredContextTokens,
     getModelOutputTokens,
     getAnthropicModelFeatures
 } from './providers/models/capabilities';
@@ -42,6 +43,7 @@ export {
     OPENCODE_GO_MODEL_LIMITS,
     MODEL_CONTEXT_TOKENS,
     getModelContextTokens,
+    clampConfiguredContextTokens,
     getModelOutputTokens,
     getAnthropicModelFeatures
 };

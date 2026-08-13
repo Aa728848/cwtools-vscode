@@ -18,6 +18,9 @@ export const CODEX_CHATGPT_MODELS = [
     'gpt-5.2',
 ] as const;
 
+/** Active context window advertised by the ChatGPT Codex model catalog. */
+export const CODEX_CHATGPT_CONTEXT_TOKENS = 272_000;
+
 export const CODEX_CHATGPT_API_BASE = 'https://chatgpt.com/backend-api/codex';
 export const CODEX_CHATGPT_USAGE_URL = 'https://chatgpt.com/backend-api/wham/usage';
 export const CHATGPT_OAUTH_ISSUER = 'https://auth.openai.com';

@@ -3,7 +3,11 @@
  */
 
 import type { AIProviderConfig } from '../../types';
-import { CODEX_CHATGPT_API_BASE, CODEX_CHATGPT_MODELS } from '../../codex/oauthService';
+import {
+    CODEX_CHATGPT_API_BASE,
+    CODEX_CHATGPT_CONTEXT_TOKENS,
+    CODEX_CHATGPT_MODELS,
+} from '../../codex/oauthService';
 
 export const BUILTIN_PROVIDERS: Record<string, AIProviderConfig> = {
     'codex-chatgpt': {
@@ -15,7 +19,7 @@ export const BUILTIN_PROVIDERS: Record<string, AIProviderConfig> = {
         supportsToolUse: true,
         requiresApiKey: false,
         supportsStreaming: true,
-        maxContextTokens: 400000,
+        maxContextTokens: CODEX_CHATGPT_CONTEXT_TOKENS,
         isOpenAICompatible: true,
         toolCallStyle: 'openai',
         supportsFIM: false,

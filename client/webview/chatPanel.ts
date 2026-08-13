@@ -37,7 +37,11 @@ import {
     hasVisibleLiveContent,
     latestLiveToolName,
 } from './chat/liveSteps';
-import { applySettingsOverview, buildSettingsOverviewModel } from './chat/settingsOverview';
+import {
+    applySettingsOverview,
+    buildSettingsOverviewModel,
+    resolveSettingsModelContextTokens,
+} from './chat/settingsOverview';
 import {
     renderTopicSearchResults as renderTopicSearchResultsView,
     renderTopics as renderTopicsView,
@@ -7724,21 +7728,13 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
 
     /** Look up per-model context size with fallback to provider level */
     function autoFillContextForModel(model: string, providerId: string) {
-        if (!model) return 0;
-        // 1. Exact match
-        if (settingsModelContextTokens[model]) return settingsModelContextTokens[model];
-        // 2. Prefix match
-        const keys = Object.keys(settingsModelContextTokens).sort((a, b) => b.length - a.length);
-        for (const key of keys) {
-            if (model.startsWith(key)) return settingsModelContextTokens[key];
-        }
-        // 3. Substring match
-        for (const key of keys) {
-            if (model.includes(key)) return settingsModelContextTokens[key];
-        }
-        // 4. Provider-level fallback
         const provider = settingsProviders.find(p => p.id === providerId);
-        return (provider && provider.maxContextTokens) ? provider.maxContextTokens : 0;
+        return resolveSettingsModelContextTokens(
+            model,
+            providerId,
+            settingsModelContextTokens,
+            provider?.maxContextTokens || 0,
+        );
     }
 
     function closeSettings() {
@@ -7909,7 +7905,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         /** Auto-fill settingsCtx when a model is chosen */
         function onModelSelected(model: string) {
             const ctx = autoFillContextForModel(model, providerId);
-            if (ctx > 0) (document.getElementById('settingsCtx') as HTMLInputElement).value = ctx;
+            if (ctx > 0) (document.getElementById('settingsCtx') as HTMLInputElement).value = String(ctx);
             const reasoningSelect = document.getElementById('settingsReasoningEffort') as HTMLSelectElement | null;
             updateSettingsReasoningControls(
                 providerId,

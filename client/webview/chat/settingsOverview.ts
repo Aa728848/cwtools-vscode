@@ -30,6 +30,41 @@ export interface SettingsOverviewModel {
     chipsHtml: string;
 }
 
+function findModelContextTokens(
+    model: string,
+    entries: Array<readonly [string, number]>,
+): number {
+    const exact = entries.find(([key]) => key === model)?.[1];
+    if (exact) return exact;
+    const sorted = [...entries].sort(([left], [right]) => right.length - left.length);
+    for (const [key, tokens] of sorted) {
+        if (model.startsWith(key)) return tokens;
+    }
+    for (const [key, tokens] of sorted) {
+        if (model.includes(key)) return tokens;
+    }
+    return 0;
+}
+
+/** Resolve settings context with provider-scoped metadata taking precedence. */
+export function resolveSettingsModelContextTokens(
+    model: string,
+    providerId: string,
+    modelContextTokens: Readonly<Record<string, number>>,
+    providerFallback = 0,
+): number {
+    if (!model) return 0;
+    const providerPrefix = `${providerId}:`;
+    const entries = Object.entries(modelContextTokens);
+    const providerEntries = entries
+        .filter(([key]) => key.startsWith(providerPrefix))
+        .map(([key, tokens]) => [key.slice(providerPrefix.length), tokens] as const);
+    const providerMatch = findModelContextTokens(model, providerEntries);
+    if (providerMatch > 0) return providerMatch;
+    const genericEntries = entries.filter(([key]) => !key.includes(':'));
+    return findModelContextTokens(model, genericEntries) || providerFallback;
+}
+
 export function buildSettingsOverviewModel(input: SettingsOverviewInput, i18n: ChatI18nText = getChatI18n('zh-cn')): SettingsOverviewModel {
     const labels = i18n.settings;
     const provider = input.providers.find(providerView => providerView.id === input.providerId);

@@ -3,6 +3,7 @@
  */
 
 import { BUILTIN_PROVIDERS } from './defaults';
+import { CODEX_CHATGPT_CONTEXT_TOKENS, CODEX_CHATGPT_MODELS } from '../../codex/oauthService';
 
 /**
  * Model-level vision capability map.
@@ -249,6 +250,13 @@ export const OPENCODE_GO_MODEL_LIMITS: Record<string, { context: number; output:
  * Per-model context window sizes (tokens).
  */
 export const MODEL_CONTEXT_TOKENS: Record<string, number> = {
+    // ChatGPT OAuth uses the Codex service catalog, whose active windows can
+    // differ from the same model IDs exposed through the public API.
+    'codex-chatgpt:gpt-5.6': CODEX_CHATGPT_CONTEXT_TOKENS,
+    ...Object.fromEntries(CODEX_CHATGPT_MODELS.map(model => [
+        `codex-chatgpt:${model}`,
+        CODEX_CHATGPT_CONTEXT_TOKENS,
+    ])),
     'gpt-5.6': 1050000,
     'gpt-5.6-sol': 1050000,
     'gpt-5.6-terra': 1050000,
@@ -469,6 +477,23 @@ export function getModelContextTokens(model: string, providerId?: string): numbe
         if (provider) return provider.maxContextTokens;
     }
     return 0;
+}
+
+/**
+ * Normalize a user-configured context limit and prevent the fixed ChatGPT
+ * Codex service from inheriting a larger public-API limit for the same model.
+ */
+export function clampConfiguredContextTokens(
+    providerId: string,
+    model: string,
+    configuredLimit: number | undefined,
+): number {
+    const normalized = typeof configuredLimit === 'number' && Number.isFinite(configuredLimit) && configuredLimit > 0
+        ? Math.floor(configuredLimit)
+        : 0;
+    if (normalized === 0 || providerId !== 'codex-chatgpt') return normalized;
+    const serviceLimit = getModelContextTokens(model, providerId);
+    return serviceLimit > 0 ? Math.min(normalized, serviceLimit) : normalized;
 }
 
 /**

@@ -19,7 +19,7 @@ import {
     type TopicPanelItem,
 } from '../../webview/chat/topics';
 import { buildSubagentCardHtml, buildSubagentMetaHtml, hasVisibleLiveContent, latestLiveToolName } from '../../webview/chat/liveSteps';
-import { buildSettingsOverviewModel } from '../../webview/chat/settingsOverview';
+import { buildSettingsOverviewModel, resolveSettingsModelContextTokens } from '../../webview/chat/settingsOverview';
 import { getChatI18n } from '../../webview/chat/i18n';
 import { applyModeUi } from '../../webview/chat/modes';
 import { renderMarkdown } from '../../webview/chat/markdown';
@@ -58,6 +58,27 @@ describe('long user message presentation', () => {
         expect(presentation.isLong).to.equal(true);
         expect(presentation.lineCount).to.equal(LONG_USER_MESSAGE_LINE_THRESHOLD);
         expect(presentation.preview).to.equal('line 1\nline 2\nline 3\nline 4\nline 5\n…');
+    });
+});
+
+describe('settings model context resolution', () => {
+    const contexts = {
+        'gpt-5.6-sol': 1050000,
+        'codex-chatgpt:gpt-5.6-sol': 272000,
+    };
+
+    it('prefers provider-scoped Codex metadata over the public API value', () => {
+        expect(resolveSettingsModelContextTokens('gpt-5.6-sol', 'codex-chatgpt', contexts, 272000))
+            .to.equal(272000);
+        expect(resolveSettingsModelContextTokens('gpt-5.6-sol', 'openai', contexts, 1050000))
+            .to.equal(1050000);
+    });
+
+    it('supports provider-scoped prefix matching and provider fallback', () => {
+        expect(resolveSettingsModelContextTokens('gpt-5.6-sol-preview', 'codex-chatgpt', contexts, 272000))
+            .to.equal(272000);
+        expect(resolveSettingsModelContextTokens('unknown-model', 'codex-chatgpt', contexts, 272000))
+            .to.equal(272000);
     });
 });
 

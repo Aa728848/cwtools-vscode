@@ -25,6 +25,8 @@ import {
     toClaudeRequest,
     fetchOllamaModels,
     BUILTIN_PROVIDERS,
+    clampConfiguredContextTokens,
+    getModelContextTokens,
     getModelOutputTokens,
     getReducedThinkingParams,
     getThinkingParams,
@@ -311,20 +313,25 @@ export class AIService {
         const cfg = vs.workspace.getConfiguration('stellarisLanguageServices.ai');
         const provider = cfg.get<string>('provider', 'openai');
         const providerEndpoints = cfg.get<Record<string, string>>('providerEndpoints', {}) || {};
+        const model = this.modelOverride ?? cfg.get<string>('model', '');
         // Per-provider endpoint wins; legacy global endpoint only ever applies to the
         const endpoint = (providerEndpoints[provider] || cfg.get<string>('endpoint', '') || '').trim();
         return {
             enabled: cfg.get<boolean>('enabled', false),
             provider,
             // In-memory override wins over persisted setting (avoids LS restart on quick-switch)
-            model: this.modelOverride ?? cfg.get<string>('model', ''),
+            model,
             endpoint,
             providerEndpoints,
             apiKey: '',
             customApiFormat: normalizeCustomApiFormat(cfg.get<string>('customApiFormat', DEFAULT_CUSTOM_API_FORMAT)),
             maxRetries: Math.max(1, cfg.get<number>('maxRetries') || 3),
             requestTimeoutMs: normalizeChatCompletionTimeoutMs(cfg.get<number>('requestTimeoutMs')),
-            maxContextTokens: cfg.get<number>('maxContextTokens', 0),
+            maxContextTokens: clampConfiguredContextTokens(
+                provider,
+                model || getProvider(provider).defaultModel,
+                cfg.get<number>('maxContextTokens', 0),
+            ),
             agentFileWriteMode: cfg.get<'confirm' | 'auto'>('agentFileWriteMode', 'auto'),
             reasoningEffort: this.reasoningEffortOverride
                 ?? normalizeConfiguredReasoningEffort(cfg.get<unknown>('reasoningEffort', 'high')),
@@ -2804,13 +2811,9 @@ export class AIService {
      * P1 Fix: shared helper for applying model selection —
      * sets the model config, infers maxContextTokens, and shows confirmation.
      */
-    private async applyModelSelection(modelName: string, provider: { maxContextTokens: number }): Promise<void> {
+    private async applyModelSelection(modelName: string, provider: { id: string; maxContextTokens: number }): Promise<void> {
         await vs.workspace.getConfiguration('stellarisLanguageServices.ai').update('model', modelName, vs.ConfigurationTarget.Global);
-        const { MODEL_CONTEXT_TOKENS } = await import('./providers');
-        let foundCtx = 0;
-        for (const [key, val] of Object.entries(MODEL_CONTEXT_TOKENS)) {
-            if (modelName.includes(key)) { foundCtx = val as number; break; }
-        }
+        const foundCtx = getModelContextTokens(modelName, provider.id);
         if (foundCtx > 0 || provider.maxContextTokens) {
             await vs.workspace.getConfiguration('stellarisLanguageServices.ai').update('maxContextTokens', foundCtx || provider.maxContextTokens, vs.ConfigurationTarget.Global);
         }

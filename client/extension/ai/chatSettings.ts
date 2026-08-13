@@ -477,7 +477,12 @@ export class ChatSettingsManager {
 
     async saveSettings(settings: PanelSettings, targetSurface?: 'chat' | 'manager'): Promise<void> {
         const cfg = vs.workspace.getConfiguration('stellarisLanguageServices.ai');
-        const { BUILTIN_PROVIDERS } = await import('./providers');
+        const { BUILTIN_PROVIDERS, clampConfiguredContextTokens } = await import('./providers');
+        const effectiveMaxContextTokens = clampConfiguredContextTokens(
+            settings.provider,
+            settings.model,
+            settings.maxContextTokens,
+        );
 
         const handleDynamicModel = async (providerId: string, modelId: string, contextTokens: number) => {
             const provider = BUILTIN_PROVIDERS[providerId];
@@ -502,7 +507,7 @@ export class ChatSettingsManager {
         };
 
         if (settings.model) {
-            await handleDynamicModel(settings.provider, settings.model, settings.maxContextTokens || 0);
+            await handleDynamicModel(settings.provider, settings.model, effectiveMaxContextTokens);
         }
         if (settings.inlineCompletion && settings.inlineCompletion.model) {
             await handleDynamicModel(settings.inlineCompletion.provider, settings.inlineCompletion.model, 0);
@@ -552,7 +557,7 @@ export class ChatSettingsManager {
             await cfg.update('providerEndpoints', map, vs.ConfigurationTarget.Global);
             await cfg.update('endpoint', undefined, vs.ConfigurationTarget.Global);
         }
-        await cfg.update('maxContextTokens', settings.maxContextTokens, vs.ConfigurationTarget.Global);
+        await cfg.update('maxContextTokens', effectiveMaxContextTokens, vs.ConfigurationTarget.Global);
         await cfg.update('agentFileWriteMode', settings.agentFileWriteMode, vs.ConfigurationTarget.Global);
         if (settings.approvals?.reviewer) {
             await cfg.update('approvals.reviewer', settings.approvals.reviewer, vs.ConfigurationTarget.Global);

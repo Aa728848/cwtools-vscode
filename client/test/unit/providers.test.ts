@@ -2,6 +2,7 @@ import { expect } from 'chai';
 import {
     isModelVisionCapable,
     isModelFIMCapable,
+    clampConfiguredContextTokens,
     getModelContextTokens,
     getModelOutputTokens,
     getProvider,
@@ -146,6 +147,14 @@ describe('getModelContextTokens', () => {
     it('uses provider-specific context override when available', () => {
         expect(getModelContextTokens('google/gemini-3.1-pro-preview', 'openrouter')).to.equal(1048576);
         expect(getModelContextTokens('gemini-3.1-pro', 'google')).to.equal(2097152);
+    });
+
+    it('keeps ChatGPT Codex context separate from the public API model limit', () => {
+        expect(getModelContextTokens('gpt-5.6-sol', 'codex-chatgpt')).to.equal(272000);
+        expect(getModelContextTokens('gpt-5.6-sol', 'openai')).to.equal(1050000);
+        expect(clampConfiguredContextTokens('codex-chatgpt', 'gpt-5.6-sol', 1050000)).to.equal(272000);
+        expect(clampConfiguredContextTokens('codex-chatgpt', 'gpt-5.6-sol', 200000)).to.equal(200000);
+        expect(clampConfiguredContextTokens('openai', 'gpt-5.6-sol', 1050000)).to.equal(1050000);
     });
 
     it('uses current GLM and Kimi context windows', () => {
@@ -805,6 +814,10 @@ describe('BUILTIN_PROVIDERS', () => {
         expect(codex.requiresApiKey).to.equal(false);
         expect(codex.supportsFIM).to.equal(false);
         expect(codex.supportsUtilityCalls).to.equal(false);
+        expect(codex.maxContextTokens).to.equal(272000);
+        for (const model of codex.models) {
+            expect(getModelContextTokens(model, codex.id), model).to.equal(272000);
+        }
         expect(getProviderApiFormat(codex.id, codex.defaultModel)).to.equal('openai-responses');
     });
 

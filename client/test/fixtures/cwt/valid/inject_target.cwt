@@ -1,0 +1,7 @@
+# Cross-file injection source: `injected_group` is referenced by inject.cwt
+# via `## inject = inject_target.cwt@injected_group/*`.
+
+injected_group = {
+	injected1 = 1
+	injected2 = 2
+}

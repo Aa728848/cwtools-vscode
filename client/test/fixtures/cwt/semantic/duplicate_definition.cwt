@@ -1,0 +1,11 @@
+# Syntactically valid, semantically broken: the same type is defined twice
+# in one file. Must parse; Phase 3 adds the duplicate-definition diagnostic.
+
+types = {
+	type[dup] = {
+		path = "game/common/dup"
+	}
+	type[dup] = {
+		path = "game/common/dup"
+	}
+}

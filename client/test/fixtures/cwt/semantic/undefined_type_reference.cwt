@@ -1,0 +1,5 @@
+# Syntactically valid, semantically broken: references a type that is never
+# defined anywhere in the project. Must parse; Phase 3 adds the
+# undefined-reference diagnostic.
+
+icon = <undefined_type>

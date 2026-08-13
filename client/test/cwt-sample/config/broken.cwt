@@ -1,0 +1,6 @@
+# Structurally broken CWT: the `types` block is never closed.
+# Expected: CWT001-family parser diagnostics (missing close brace).
+
+types = {
+	type[planet_class] = {
+		name_field = "name"

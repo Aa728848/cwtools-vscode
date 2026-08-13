@@ -1,0 +1,8 @@
+# An illegal `## cardinality` option value. Comments are not part of the
+# syntax, so this file still parses; whether the option is accepted or
+# ignored is part of the Phase 0 baseline record.
+
+potential = {
+	## cardinality = banana
+	alias_name[trigger] = alias_match_left[trigger]
+}

@@ -1,0 +1,5 @@
+# An ordinary maintainer comment.
+### A documentation comment shown in completion/hover.
+## A rule option comment (here with nothing following it, so it is inert).
+
+# The file contains only comments and must still parse as an empty model.

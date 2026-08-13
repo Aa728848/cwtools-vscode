@@ -1,0 +1,10 @@
+# Legacy/Clausewitz constructs: localisation commands.
+# Derived from localisation.cwt in cwtools-stellaris-config.
+
+localisation_commands = {
+	GetAdj = { country fleet galactic_object planet colony species system }
+	GetAdjective = country
+	GetAllianceName = country
+	GetName = any
+	GetRulerName = { country species leader army fleet }
+}

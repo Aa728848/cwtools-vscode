@@ -29,6 +29,7 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="PosHelper.fs" />
+    <Compile Include="CwtLanguageFeatures.fs" />
     <Compile Include="Serialize.fs" />
     <Compile Include="Git.fs" />
     <Compile Include="LanguageServerFeatures.fs" />

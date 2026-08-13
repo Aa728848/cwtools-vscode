@@ -1,0 +1,15 @@
+# Cross-file definitions for the Phase 3 smoke test: type[gadget] and
+# enum[widget] are referenced from sample.cwt and semantic-error.cwt.
+
+types = {
+	type[gadget] = {
+		path = "game/common/gadgets"
+	}
+}
+
+enums = {
+	enum[widget] = {
+		BASIC
+		ADVANCED
+	}
+}

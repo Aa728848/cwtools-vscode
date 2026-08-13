@@ -1,0 +1,4 @@
+# Trailing incomplete line: the cursor sits mid-expression at EOF.
+
+enabled = bool
+count = int[0..10

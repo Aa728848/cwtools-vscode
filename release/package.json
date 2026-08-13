@@ -69,6 +69,11 @@
                 "language": "paradox-csv",
                 "scopeName": "source.paradox-csv",
                 "path": "./syntaxes/paradox-csv.tmLanguage.json"
+            },
+            {
+                "language": "cwt",
+                "scopeName": "source.mod",
+                "path": "./syntaxes/paradox.tmLanguage.json"
             }
         ],
         "views": {
@@ -1950,6 +1955,17 @@
                 "configuration": "./language-configuration-paradox-csv.json"
             },
             {
+                "id": "cwt",
+                "aliases": [
+                    "CWT Rules",
+                    "CWT"
+                ],
+                "extensions": [
+                    "cwt"
+                ],
+                "configuration": "./language-configuration.json"
+            },
+            {
                 "id": "stellaris",
                 "aliases": [
                     "",
@@ -1960,8 +1976,7 @@
                     "txt",
                     "gui",
                     "gfx",
-                    "asset",
-                    "cwt"
+                    "asset"
                 ],
                 "configuration": "./language-configuration.json",
                 "filenamePatterns": [
@@ -1994,8 +2009,7 @@
                     "txt",
                     "gui",
                     "gfx",
-                    "asset",
-                    "cwt"
+                    "asset"
                 ],
                 "configuration": "./language-configuration.json",
                 "filenamePatterns": [
@@ -2016,8 +2030,7 @@
                     "txt",
                     "gui",
                     "gfx",
-                    "asset",
-                    "cwt"
+                    "asset"
                 ],
                 "configuration": "./language-configuration.json",
                 "filenamePatterns": [
@@ -2039,8 +2052,7 @@
                     "gui",
                     "gfx",
                     "sfx",
-                    "asset",
-                    "cwt"
+                    "asset"
                 ],
                 "configuration": "./language-configuration.json",
                 "filenamePatterns": [
@@ -2062,8 +2074,7 @@
                     "txt",
                     "gui",
                     "gfx",
-                    "asset",
-                    "cwt"
+                    "asset"
                 ],
                 "configuration": "./language-configuration.json",
                 "filenamePatterns": [
@@ -2087,7 +2098,6 @@
                     "gfx",
                     "sfx",
                     "asset",
-                    "cwt",
                     "map"
                 ],
                 "configuration": "./language-configuration.json",
@@ -2111,8 +2121,7 @@
                     "txt",
                     "gui",
                     "gfx",
-                    "asset",
-                    "cwt"
+                    "asset"
                 ],
                 "configuration": "./language-configuration.json",
                 "filenamePatterns": [
@@ -2134,8 +2143,7 @@
                     "txt",
                     "gui",
                     "gfx",
-                    "asset",
-                    "cwt"
+                    "asset"
                 ],
                 "configuration": "./language-configuration.json",
                 "filenamePatterns": [
@@ -2157,8 +2165,7 @@
                     "txt",
                     "gui",
                     "gfx",
-                    "asset",
-                    "cwt"
+                    "asset"
                 ],
                 "configuration": "./language-configuration.json",
                 "filenamePatterns": [
@@ -2185,8 +2192,7 @@
                     "gui",
                     "gfx",
                     "sfx",
-                    "asset",
-                    "cwt"
+                    "asset"
                 ]
             }
         ],
@@ -2346,6 +2352,18 @@
                 }
             },
             "[paradox]": {
+                "editor.formatOnPaste": true
+            },
+            "[cwt]": {
+                "files.autoGuessEncoding": true,
+                "editor.quickSuggestions": {
+                    "other": true,
+                    "comments": false,
+                    "strings": true
+                },
+                "editor.insertSpaces": false,
+                "editor.acceptSuggestionOnEnter": "off",
+                "editor.suggest.insertMode": "replace",
                 "editor.formatOnPaste": true
             },
             "editor.rename.enablePreview": true,

@@ -1,0 +1,5 @@
+technology = {
+	my_tech = {
+		area =
+	}
+}

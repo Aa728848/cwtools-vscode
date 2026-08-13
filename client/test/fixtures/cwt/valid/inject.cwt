@@ -1,0 +1,8 @@
+# Demonstrates `## inject`: pulls child rules from another rule file.
+# The member path `injected_group/*` resolves to every child of the
+# `injected_group` root rule in inject_target.cwt.
+
+## inject = inject_target.cwt@injected_group/*
+target_block = {
+	existing = 0
+}

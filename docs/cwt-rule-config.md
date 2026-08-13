@@ -794,6 +794,33 @@ npm run verify
 | colour | `colour_field` / `color_field` | manual repeated float rules |
 | effect/trigger list | `alias_name[...] = alias_match_left[...]` | copying every alias into each block |
 
+### Editor Support
+
+`.cwt` rule files are a first-class editor language (independent `cwt`
+language id). What the CWTools extension provides while editing rules:
+
+- **Diagnostics** by family (see [diagnostic-codes.md](diagnostic-codes.md)):
+  parser/structure `CWT0xx`, root-block and directive validation `CWT1xx`,
+  field expressions `CWT2xx`, project-level undefined references and
+  duplicate types `CWT3xx`, inject cycles `CWT4xx`, activation status
+  `CWT9xx`. Structure errors must be fixed first; parser recovery can make
+  follow-up diagnostics incomplete.
+- **Completion**: root blocks at file top level, `##` directive names, field
+  expression families after `=`, and symbol names inside declaration
+  brackets (`type[`, `enum[`, `scope[`, ...) merged with project symbols.
+- **Navigation**: definition and references resolve through the project
+  index across files.
+- **Safe rule activation**: when the active rules come from a manual rules
+  folder, validated edits hot-swap into the game model automatically; a
+  broken candidate keeps the last-known-good rules (`CWT900`/`CWT901`) and
+  retries on the next valid candidate. `Reload Rules` (`reloadrulesconfig`)
+  remains the manual fallback.
+- **Modes**: a rules-only repository opens in CWT-only mode (no game install
+  needed); a game workspace keeps full mode and upgrades in place.
+
+The editor validates rules against the built-in CWT meta-model, never by
+running the rules being edited.
+
 ### Implementation Checklist
 
 When adding a field expression or changing field semantics, check:
@@ -1598,6 +1625,26 @@ npm run verify
 | 文件路径 | `filepath[...]` | `scalar` |
 | 颜色 | `colour_field` / `color_field` | 手写重复 float 规则 |
 | effect/trigger 列表 | `alias_name[...] = alias_match_left[...]` | 在每个块复制所有 alias |
+
+### 编辑器支持
+
+`.cwt` 规则文件是一等编辑器语言(独立 `cwt` language id)。CWTools 扩展在
+编辑规则时提供:
+
+- **诊断**(按族划分,见 [diagnostic-codes.md](diagnostic-codes.md)):解析/结构
+  `CWT0xx`、根块与指令校验 `CWT1xx`、字段表达式 `CWT2xx`、项目级未定义
+  引用与重复类型 `CWT3xx`、inject 循环 `CWT4xx`、激活状态 `CWT9xx`。
+  先修结构错误;解析恢复期间后续诊断可能不完整。
+- **补全**:文件顶层的根块、`##` 指令名、`=` 后的字段表达式族、声明括号内
+  (`type[`、`enum[`、`scope[` 等)的符号名(与项目符号合并)。
+- **跳转**:定义与引用通过项目索引跨文件解析。
+- **安全规则激活**:当活动规则来自手动规则目录时,验证通过的编辑自动热替换
+  进游戏模型;损坏的候选保留 last-known-good(`CWT900`/`CWT901`),下一个
+  有效候选自动重试。`重新加载规则`(`reloadrulesconfig`)仍是手动兜底。
+- **模式**:纯规则仓库以 CWT-only 模式打开(无需游戏安装);游戏工作区保持
+  full mode 并在原地升级。
+
+编辑器使用内置 CWT 元模型校验规则,绝不用正在编辑的规则自我验证。
 
 ### 实现检查清单
 

@@ -1,0 +1,8 @@
+# Missing closing brace: a typical mid-edit state. The whole block is open
+# at EOF and the parser must report a structure error.
+
+types = {
+	type[planet_class] = {
+		name_field = "name"
+		subtype[habitable] = {
+			planet_class = yes

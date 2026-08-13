@@ -124,6 +124,71 @@ Read requests may run concurrently while model-changing operations require exclu
 
 Incremental refresh must have a guarded full-refresh fallback. For changes that affect scripted types or localisation dependencies, compare incremental results with a full rebuild.
 
+### CWT document pipeline
+
+`.cwt` rule files are an independent editor language (`cwt` language id), not
+game script. They never enter `game.Complete`/`game.ValidateFile`; their
+diagnostics use the `CWT0xx` family (see
+[docs/diagnostic-codes.md](docs/diagnostic-codes.md)) and are served by the
+built-in CWT meta-model, not by the rules being edited.
+
+Two server modes exist:
+
+- **Full game mode** — the workspace has game evidence (vanilla folder, mod
+  descriptor, known game language id). A game model is built as before; `.cwt`
+  documents still route to the CWT pipeline.
+- **CWT-only mode** — a rules repository or an opened `.cwt` file without game
+  evidence. The server starts (`language: "cwt"` → `GameLanguage.CWT`) without
+  building a game model; lint publishes parser/structure diagnostics only.
+  Upgrading to full mode restarts the single server process in place
+  (`cwtools.reloadExtension`), never a second competing process.
+
+CWT-only mode must not trigger game guessing, vanilla cache creation, or rules
+source setup; `checkOrSetGameCache` and `setupRulesCaches` skip it. Startup
+mode is decided by the pure `determineServerStartMode` in
+`client/extension/languageSelectors.ts`. See
+[docs/cwt-language-support-handoff.md](docs/cwt-language-support-handoff.md)
+for the phased plan (project index, cross-file semantics, and candidate rule
+activation land in later phases).
+
+Single-file semantics live in `submodules/cwtools/CWTools/Rules/`
+(`CwtLanguageTypes.fs` / `CwtLanguageSchema.fs` / `CwtLanguageService.fs`,
+namespace `CWTools.CwtLanguage`): a versioned meta-model of root blocks,
+`##` directives and field-expression families drives structure/expression
+diagnostics (`CWT1xx`/`CWT2xx`), local symbols, and context completion.
+The LSP adapter (`src/Main/CwtLanguageFeatures.fs`) converts domain types to
+diagnostics and completion items; `.cwt` completion never enters
+`game.Complete`, and `.cwt` lint output is the parser diagnostics plus the
+service's semantic diagnostics. `RulesParser.parseConfigWithMetadataDetailed`
+reports structured parse errors, and the user-input `failwith` paths in
+`RulesParser` degrade to controlled fallbacks.
+
+Cross-file semantics run on an immutable, versioned project snapshot
+(`CWTools/Rules/CwtProjectIndex.fs`): `CwtProjectIndex.buildSnapshot`
+aggregates per-file documents into a symbol index and produces project
+diagnostics (`CWT301` undefined reference, `CWT302` duplicate type, `CWT401`
+inject cycle) with deterministic ordering and bounded file/size limits.
+`src/Main/CwtLanguageFeatures.fs` owns the lifecycle: overlay-merged file
+enumeration (open documents win over disk, `.git`/`node_modules`/build dirs
+skipped), cancellable debounced rebuilds where only the latest requested
+version can publish or activate, and LSP wiring so `.cwt` completion merges project symbols,
+definition/references navigate through the index, and lint attaches project
+diagnostics only when the snapshot is current. `## inject` source paths are
+containment-checked against the rule root (absolute paths and `..` traversal
+rejected, file/directory links resolved, and real-directory cycles suppressed).
+
+Candidate-rule activation (`CWTools/Rules/CwtActivation.fs` + the write-locked
+handler in `src/Main/Program.fs`) hot-swaps validated rule files into the game
+model only for the currently configured manual rules root. CWT-only workspaces
+index their workspace without activating a game model. A candidate is usable
+only when every rule file parses and no Error-level (or explicitly promoted)
+diagnostic exists; a content
+hash + generation tracks the active rules, the swap happens atomically under
+the game-state write lock, the rules/model epochs bump, and failures publish
+`CWT901` while keeping last-known-good. Rejected candidates never replace the
+active model (`CWT900`), and the next valid candidate retries automatically;
+`reloadrulesconfig` remains the manual fallback.
+
 ### Shader subsystem
 
 `.shader` and `.fxh` share the CWTools Shader parser and feature layer. Analysis is compile-unit aware: includes, file precedence, platform conditions, and renderer contracts affect what a symbol means.
@@ -346,6 +411,57 @@ flowchart LR
 只读请求可以并发，修改模型的操作需要独占协调。改动锁、取消、增量刷新或文档快照时，应在编辑和读取同时发生的场景中测试。
 
 增量刷新必须保留受保护的全量刷新兜底。涉及 scripted type 或本地化依赖时，要把增量结果与全量重建对比。
+
+### CWT 文档管线
+
+`.cwt` 规则文件是一门独立的编辑器语言(`cwt` language id),不是游戏脚本。
+它们永不进入 `game.Complete`/`game.ValidateFile`;诊断使用 `CWT0xx` 族
+(见 [docs/diagnostic-codes.md](docs/diagnostic-codes.md)),由内置 CWT 元模型
+提供,而不是用正在编辑的规则自我验证。
+
+两种服务端模式:
+
+- **Full game mode**——工作区存在游戏证据(vanilla 目录、mod descriptor、
+  已知游戏 language id)。按原方式构建游戏模型;`.cwt` 文档仍走 CWT 管线。
+- **CWT-only mode**——规则仓库或单独打开的 `.cwt` 文件,无游戏证据。
+  服务端以 `language: "cwt"`(`GameLanguage.CWT`)启动,不构建游戏模型;
+  lint 只发布解析/结构诊断。升级到 full mode 时在同一进程内重启
+  (`cwtools.reloadExtension`),绝不启动第二个竞争进程。
+
+CWT-only 不得触发游戏猜测、vanilla 缓存生成或规则源配置;
+`checkOrSetGameCache` 与 `setupRulesCaches` 均跳过。启动模式由
+`client/extension/languageSelectors.ts` 中的纯函数 `determineServerStartMode`
+决定。分阶段计划见
+[docs/cwt-language-support-handoff.md](docs/cwt-language-support-handoff.md)
+(项目索引、跨文件语义与候选规则激活已落地;完整 Phase 3 仍有增强项)。
+
+单文件语义位于 `submodules/cwtools/CWTools/Rules/`
+(`CwtLanguageTypes.fs` / `CwtLanguageSchema.fs` / `CwtLanguageService.fs`,
+命名空间 `CWTools.CwtLanguage`):版本化的根块、`##` 指令与字段表达式族
+元模型驱动结构/表达式诊断(`CWT1xx`/`CWT2xx`)、局部符号与上下文补全。
+LSP 适配器(`src/Main/CwtLanguageFeatures.fs`)将领域类型转换为诊断与补全项;
+`.cwt` 补全永不进入 `game.Complete`,`.cwt` 的 lint 输出为解析器诊断加
+服务的语义诊断。`RulesParser.parseConfigWithMetadataDetailed` 返回结构化
+解析错误,`RulesParser` 中由用户输入触发的 `failwith` 路径降级为受控回退。
+
+跨文件语义基于不可变、版本化的项目快照(`CWTools/Rules/CwtProjectIndex.fs`):
+`CwtProjectIndex.buildSnapshot` 将各文件文档聚合成符号索引并产出项目诊断
+(`CWT301` 未定义引用、`CWT302` 重复 type、`CWT401` inject 循环),输出确定
+有序并设有文件数/大小上限。`src/Main/CwtLanguageFeatures.fs` 负责生命周期:
+overlay 合并的文件枚举(未保存文档优先于磁盘,跳过 `.git`/`node_modules`/
+构建目录)、可取消防抖重建(只有最新请求版本可发布或激活)、以及 LSP 接线——`.cwt`
+补全合并项目符号、definition/references 走索引跳转、lint 仅在快照就绪时
+附加项目诊断。`## inject` 源路径对规则根做包含性校验(拒绝绝对路径与 `..`
+穿越,解析文件/目录链接,并用真实目录集合阻止链接循环)。
+
+候选规则激活(`CWTools/Rules/CwtActivation.fs` + `src/Main/Program.fs` 中持写锁
+的处理器)只把当前配置的手动规则根中验证通过的规则文件热替换进游戏模型;
+CWT-only 工作区只索引当前工作区,不激活游戏模型。候选可用要求每个规则文件
+可解析且不存在 Error 级诊断(或被显式提升为阻断项的诊断);
+内容 hash + generation 追踪活动规则,替换在游戏状态写锁内原子完成,规则/
+模型 epoch 递增,失败发布 `CWT901` 并保留 last-known-good。被拒绝的候选
+绝不替换活动模型(`CWT900`),下一个有效候选自动重试;`reloadrulesconfig`
+仍是手动兜底。
 
 ### Shader 子系统
 

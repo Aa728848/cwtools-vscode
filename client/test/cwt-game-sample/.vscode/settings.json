@@ -1,0 +1,7 @@
+{
+	"files.associations": {
+		"*.txt": "stellaris",
+		"*.cwt": "cwt"
+	},
+	"stellarisLanguageServices.rules_version": "manual"
+}

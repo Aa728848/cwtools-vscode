@@ -186,6 +186,7 @@ type GameLanguage =
     | CK3
     | VIC3
     | EU5
+    | CWT
     | Custom
 
 let private gameCacheFile (cp: string) (fileName: string) =

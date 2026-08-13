@@ -27,7 +27,7 @@ let settings = {
         '*.gui': 'stellaris',
         '*.gfx': 'stellaris',
         '*.asset': 'stellaris',
-        '*.cwt': 'stellaris',
+        '*.cwt': 'cwt',
         '*.mesh': 'plaintext',
     },
 };
@@ -43,7 +43,8 @@ settings['files.associations']['*.txt'] = 'stellaris';
 settings['files.associations']['*.gui'] = 'stellaris';
 settings['files.associations']['*.gfx'] = 'stellaris';
 settings['files.associations']['*.asset'] = 'stellaris';
-settings['files.associations']['*.cwt'] = 'stellaris';
+// `.cwt` belongs to the independent cwt language, never to a game id.
+settings['files.associations']['*.cwt'] = 'cwt';
 settings['stellarisLanguageServices.rules_version'] = 'manual';
 settings['stellarisLanguageServices.rules_folder'] = rulesRoot;
 fs.mkdirSync(path.dirname(settingsPath), { recursive: true });

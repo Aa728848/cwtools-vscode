@@ -1,5 +1,17 @@
 # Changelog
 
+## [Unreleased]
+
+### 新增 / Added
+- **[新增] `.cwt` 规则文件独立语言支持**：引入独立的 `cwt` language id，`.cwt` 不再归属于任何游戏语言。纯规则仓库以 CWT-only 模式启动语言服务（无需游戏安装），游戏工作区保持 full mode 并原地升级。
+  English: [Added] First-class `.cwt` rule-file editing — a dedicated `cwt` language id; `.cwt` no longer belongs to any game language. Rules-only repositories start the language server in CWT-only mode (no game install required); game workspaces keep full mode and upgrade in place.
+- **[新增] CWT 单文件与项目级诊断**：解析/结构 `CWT0xx`，根块与指令校验 `CWT1xx`，字段表达式 `CWT2xx`，未定义引用与重复类型 `CWT3xx`，inject 循环 `CWT4xx`；诊断消息支持中文。
+  English: [Added] CWT single-file and project diagnostics — parser/structure `CWT0xx`, root-block and directive validation `CWT1xx`, field expressions `CWT2xx`, undefined references and duplicate types `CWT3xx`, inject cycles `CWT4xx`; messages localize to Chinese.
+- **[新增] CWT 补全与导航**：根块、`##` 指令、字段表达式、声明括号内符号的上下文补全（合并项目符号），跨文件定义与引用跳转。
+  English: [Added] CWT completion and navigation — root blocks, `##` directives, field expressions, and declaration-bracket symbols (merged with project symbols); cross-file definition and reference navigation.
+- **[新增] 安全规则激活**：只有当前配置的手动规则目录会参与游戏模型热替换；候选中的任意 Error 都会阻止写锁内原子替换，损坏候选保留 last-known-good（`CWT900`/`CWT901`）并在修复后自动重试。CWT-only 规则工作区仅索引和验证，不激活游戏模型。
+  English: [Added] Safe rule activation — only the currently configured manual rules root can hot-swap into the game model; any Error diagnostic blocks the atomic write-locked swap, broken candidates keep last-known-good (`CWT900`/`CWT901`) and retry after repair, and CWT-only rules workspaces index and validate without activating a game model.
+
 ## [2.12.3] - 2026-08-13
 
 ### 修复 / Fixes

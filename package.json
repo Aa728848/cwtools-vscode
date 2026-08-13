@@ -16,9 +16,9 @@
         "rules:stellaris:update": "node tools/rules-sync/stellaris-rules-sync.js update",
         "rules:stellaris:report": "node tools/rules-sync/stellaris-rules-sync.js report",
         "rules:stellaris:contracts": "node tools/rules-sync/stellaris-rules-sync.js contracts",
-        "test": "npm run compile && tsc -p ./.config/tsconfig.test-build.json && node tools/copy-test-fixtures.js && vscode-test -c ./.vscode-test.js",
-        "test:shader-lsp": "npm run compile && tsc -p ./.config/tsconfig.shader-test.json && vscode-test --config ./.vscode-test.shader.js",
-        "test:watch": "tsc -w -p . & vscode-test -c ./.vscode-test.js -w",
+        "test": "npm run compile && tsc -p ./.config/tsconfig.test-build.json && node tools/copy-test-fixtures.js && vscode-test --config ./.config/vscode-test.js",
+        "test:shader-lsp": "npm run compile && tsc -p ./.config/tsconfig.shader-test.json && vscode-test --config ./.config/vscode-test.shader.js",
+        "test:watch": "tsc -w -p . & vscode-test --config ./.config/vscode-test.js -w",
         "test:unit": "npx ts-mocha -p tsconfig.json \"client/test/unit/**/*.test.ts\" && npm run test:rules-sync",
         "test:rules-sync": "ts-mocha -p tools/rules-sync/tsconfig.test.json \"tools/rules-sync/**/*.test.ts\"",
         "test:coverage": "c8 npm run test:unit",
@@ -26,7 +26,9 @@
         "baseline:ai-context": "node tools/perf/ai-context-baseline.mjs",
         "lint": "eslint client/",
         "check:release": "node tools/check-release.js",
-        "verify": "npm run lint && npm run compile && npm run typecheck:test && npm run test:unit && npm run check:release -- --skip-compile --skip-test"
+        "verify": "npm run lint && npm run compile && npm run typecheck:test && npm run test:unit && npm run check:release -- --skip-compile --skip-test",
+        "test:cwt-lsp": "npm run compile && tsc -p ./.config/tsconfig.cwt-test.json && vscode-test --config ./.config/vscode-test.cwt.js",
+        "test:cwt-game-lsp": "npm run compile && tsc -p ./.config/tsconfig.cwt-test.json && vscode-test --config ./.config/vscode-test.cwt-game.js"
     },
     "dependencies": {
         "google-translate-api-x": "^10.7.2",

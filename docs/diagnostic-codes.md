@@ -808,3 +808,136 @@ script).
 
 通用验证错误,按报错原文处理。常见形式如 `Unknown type referenced X`
 通常是 CWT 规则文件的问题而非脚本本身。
+
+---
+
+## CWT001
+
+**CWT syntax / parse error (E)** — a `.cwt` rule file could not be parsed.
+Variants mirror the script codes: `CWT001_MISSING_CLOSE_BRACE`,
+`CWT001_UNMATCHED_CLOSE_BRACE`, `CWT001_RECOVERY_SKIPPED_BLOCK` /
+`CWT001_STRUCTURAL_RECOVERY`. Fix the syntax error first; parser recovery can
+make follow-up diagnostics incomplete.
+
+CWT 规则文件语法/解析错误。变体与脚本诊断对应:
+`CWT001_MISSING_CLOSE_BRACE`(漏写 `}`)、`CWT001_UNMATCHED_CLOSE_BRACE`(多写 `}`)、
+`CWT001_RECOVERY_SKIPPED_BLOCK` / `CWT001_STRUCTURAL_RECOVERY`(解析恢复跳过损坏的
+顶层块)。先修复语法错误;恢复期间其余诊断可能不完整。
+
+## CWT101
+
+**Unknown CWT directive (W)** — a `## name = value` comment whose name is not
+a known rule option. Free-form prose comments (e.g. `##Checks if ...`) are not
+flagged; only the structured `name = value` form is validated.
+
+未知的 CWT 指令(`## name = value` 形式)。自由文本注释(如 `##Checks if ...`)
+不会被标记;只校验结构化的 `名称 = 值` 形式。
+
+## CWT102
+
+**Illegal directive value (E)** — a known directive carries an invalid value,
+e.g. `## cardinality = banana` (bounds must be numbers or `inf`) or an illegal
+`## severity`. Variant `CWT104` fires when a no-value option (like `## required`)
+receives a value, or a value-requiring option is bare.
+
+已知指令携带非法值,如 `## cardinality = banana`(边界必须是数字或 `inf`)或
+非法的 `## severity`。变体 `CWT104` 在无值选项(如 `## required`)被赋值或
+需要值的选项缺少值时触发。
+
+## CWT110 / CWT111 / CWT112
+
+**Invalid declaration inside a root block (W)** — `types` may only contain
+`type[...]` declarations (`CWT110`), `enums` only `enum[...]` /
+`complex_enum[...]` (`CWT111`), `values` only `value[...]` (`CWT112`).
+
+根块内的非法声明:`types` 只允许 `type[...]`(`CWT110`)、`enums` 只允许
+`enum[...]`/`complex_enum[...]`(`CWT111`)、`values` 只允许 `value[...]`(`CWT112`)。
+
+## CWT113
+
+**Empty declaration name (E)** — a declaration like `type[]` has no name.
+
+声明名称为空,如 `type[]`。
+
+## CWT200
+
+**Unknown field expression (W)** — a token that looks like a field expression
+(bracketed form, `$...`, `<...>`) is not a known expression family.
+
+形似字段表达式(方括号形式、`$...`、`<...>`)但不在已知表达式族中。
+
+## CWT201
+
+**Malformed field expression (E)** — a known expression family has invalid
+arguments, e.g. `int[0..banana]` (bounds must be numbers or `inf`).
+
+已知表达式族的参数非法,如 `int[0..banana]`(边界必须是数字或 `inf`)。
+
+## CWT301
+
+**Undefined reference (W)** — a field expression references a symbol that the
+project never defines (`enum[x]`, `scope[x]`, `scope_group[x]`, `<type>`,
+`<type.subtype>`). Only reported for symbol kinds the project itself defines,
+so built-in game-side symbols (scripted enums, flag value sets, external
+types) stay silent; the report appears only after the project index is ready.
+
+字段表达式引用了项目从未定义的符号(`enum[x]`、`scope[x]`、`scope_group[x]`、
+`<type>`、`<type.subtype>`)。只对项目自身定义过的符号类别报告,因此游戏侧
+内置符号(脚本化 enum、flag value set、外部类型)保持静默;且只在项目索引
+就绪后发布。
+
+## CWT302
+
+**Duplicate type declaration (E)** — the same `type[x]` is declared twice in
+one file. Duplicate enums, aliases and subtypes are legitimate multi-rule
+patterns in CWT and are not reported; cross-file type overrides are a modding
+pattern and are not reported either.
+
+同一文件内重复声明 `type[x]`。CWT 中重复的 enum/alias/subtype 是合法的多规则
+写法,不报告;跨文件 type 覆盖是 mod 常规做法,同样不报告。
+
+## CWT401
+
+**Inject cycle (E)** — `## inject` chains form a loop (`a.cwt` injects
+`b.cwt`, which injects `a.cwt`). Fix one of the inject targets.
+
+`## inject` 链形成循环(`a.cwt` 注入 `b.cwt`,`b.cwt` 又注入 `a.cwt`)。
+修复其中一个注入目标。
+
+## CWT900
+
+**Candidate rules rejected (I)** — the edited rule files cannot produce a
+usable rules model (parse failure or blocking diagnostic), so the active game
+rules are kept (last-known-good). Fix the reported `CWT0xx`/`CWT1xx`/`CWT2xx`
+diagnostics to retry; activation is automatic on the next valid candidate.
+
+编辑中的规则文件无法生成可用的规则模型(解析失败或存在阻止诊断),因此
+保留当前生效的游戏规则(last-known-good)。修复报告的 `CWT0xx`/`CWT1xx`/
+`CWT2xx` 诊断后自动重试激活。
+
+## CWT901
+
+**Rule activation failed (E)** — the validated candidate could not be swapped
+into the game model (an exception during the hot swap). The previous rules
+remain active; the message carries the rules generation and the failure
+reason. Retry happens automatically on the next candidate rebuild.
+
+已验证的候选规则无法热替换进游戏模型(热替换过程抛出异常)。之前的规则
+保持生效;消息包含规则 generation 与失败原因。下一次候选重建会自动重试。
+
+## Reserved CWT ranges / CWT 预留码段
+
+The CWT document pipeline reserves the following ranges. Codes are published
+here before release and stay stable (handoff doc
+[`cwt-language-support-handoff.md`](cwt-language-support-handoff.md) §6.1).
+
+CWT 文档管线预留以下码段,发布前写入本文并保持稳定:
+
+| Range / 码段 | Purpose / 用途 | Examples / 示例 |
+| --- | --- | --- |
+| `CWT001`–`CWT099` | Parser / structure recovery / 解析与结构恢复 | `CWT001`(已发布) |
+| `CWT100`–`CWT199` | Root blocks and directives / 根块与指令 | unknown root block, illegal `## cardinality` |
+| `CWT200`–`CWT299` | Field expressions / 字段表达式 | unknown expression, illegal argument range |
+| `CWT300`–`CWT399` | Project symbols and references / 项目符号与引用 | undefined enum/type/alias, duplicate definition |
+| `CWT400`–`CWT499` | Cross-file consistency / 跨文件一致性 | inject cycle, scope inheritance cycle |
+| `CWT900`–`CWT999` | Activation and degradation / 激活与降级 | candidate rules rejected, last-known-good retained |

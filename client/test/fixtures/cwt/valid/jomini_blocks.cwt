@@ -1,0 +1,56 @@
+# Jomini/Modern metadata blocks. These are consumed as extended config
+# metadata and produce no rules of their own.
+
+priorities = {
+	"common/defines" = LIOS
+	"common/technology" = FIOS
+}
+
+override_modes_info = {
+	LIOS = {
+		name = "Load If Overwritten Strategy"
+		## Load order wins; later files overwrite earlier ones.
+	}
+	DUPL = {
+		name = "Duplicate strategy"
+	}
+}
+
+system_scopes = {
+	This = {
+		base_id = this
+		name = "this"
+	}
+	Root = {
+		base_id = root
+		name = "root"
+	}
+}
+
+locales = {
+	english = {
+		codes = { en }
+		supports = yes
+	}
+	simplified_chinese = {
+		codes = { zh-cn }
+	}
+}
+
+database_object_types = {
+	character = {
+		type = "character"
+		localisation = "character_"
+	}
+}
+
+on_actions = {
+	on_game_start = {
+		## event_type = on_action
+		## hint = Fires when a new game starts
+	}
+	on_planet_colonize = {
+		## event_type = on_action
+		## replace_scopes = { this = planet root = country }
+	}
+}

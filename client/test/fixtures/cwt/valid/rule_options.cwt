@@ -1,0 +1,32 @@
+# Rule options (`##` comments) attached to the following rule.
+# Derived from crisis.cwt / buildings.cwt / 00_small_types_consolidated.cwt.
+
+## push_scope = country
+## replace_scopes = { this = country root = country from = planet }
+crisis_block = {
+	## cardinality = 1..1
+	level = int[1..5]
+}
+
+## severity = warning
+## scope = planet
+colony_type = {
+	type[colony_type]
+}
+
+allowed_archetypes = {
+	## cardinality = 0..100
+	enum[species_archetype]
+}
+
+## completion_type = modifier
+static_modifier = value_field
+
+## file_extensions = { dds png }
+portrait_file = filepath[gfx/interface]
+
+## color_type = hsv360
+flag_colour = colour_field
+
+## type_prefix_from = key
+prefixed = value_field

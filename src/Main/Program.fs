@@ -14,6 +14,7 @@ open System.Reflection
 open System.Runtime.InteropServices
 open FSharp.Data
 open CWTools.Rules
+open CWTools.CwtLanguage
 open CWTools.Utilities.Position
 open Languages
 open Main.Serialize
@@ -3185,7 +3186,10 @@ type Server(client: ILanguageClient) =
     //-Lightweight bracket scanner -
     // Provide precise bracket error location when parser fails
     // O(n) single pass, skipping line comments (#) and double-quoted strings
-    let scanBraceIssues (text: string) (filePath: string) =
+    let isCwtFilePath (value: string) =
+        value.EndsWith(".cwt", StringComparison.OrdinalIgnoreCase)
+
+    let scanBraceIssuesWithPrefix (prefix: string) (text: string) (filePath: string) =
         let lines = text.Split('\n')
         let stack = System.Collections.Generic.Stack<int * int>()  // (lineIdx, col)
         let issues = ResizeArray<string * Severity * string * string * range * int * (CWRelatedError list) option>()
@@ -3207,7 +3211,7 @@ type Server(client: ILanguageClient) =
                 | '}' when not inString ->
                     if stack.Count = 0 then
                         let pos = mkRange filePath (mkPos (lineIdx + 1) col) (mkPos (lineIdx + 1) (col + 1))
-                        issues.Add("CW001_UNMATCHED_CLOSE_BRACE", Severity.Error, filePath,
+                        issues.Add($"{prefix}_UNMATCHED_CLOSE_BRACE", Severity.Error, filePath,
                             sprintf "Unmatched '}' - no matching '{' found", pos, 1, None)
                     else
                         stack.Pop() |> ignore
@@ -3218,10 +3222,13 @@ type Server(client: ILanguageClient) =
         while stack.Count > 0 do
             let openLine, openCol = stack.Pop()
             let pos = mkRange filePath (mkPos (openLine + 1) openCol) (mkPos (openLine + 1) (openCol + 1))
-            issues.Add("CW001_MISSING_CLOSE_BRACE", Severity.Error, filePath,
+            issues.Add($"{prefix}_MISSING_CLOSE_BRACE", Severity.Error, filePath,
                 sprintf "Missing '}' for '{' opened at line %d col %d" (openLine + 1) (openCol + 1),
                 pos, 1, None)
         issues |> Seq.toList
+
+    let scanBraceIssues (text: string) (filePath: string) =
+        scanBraceIssuesWithPrefix "CW001" text filePath
 
     let splitTopLevelFragments (text: string) =
         let lines = text.Split('\n')
@@ -3258,27 +3265,127 @@ type Server(client: ILanguageClient) =
                 fragments.Add(startLine + 1, lines.Length, fragmentText)
         fragments |> Seq.toList
 
-    let scanRecoveryIssues (text: string) (filePath: string) =
+    let scanRecoveryIssuesWithPrefix (prefix: string) (text: string) (filePath: string) =
         let fragments = splitTopLevelFragments text
         let mutable parsedHealthy = 0
         let issues = ResizeArray<string * Severity * string * string * range * int * (CWRelatedError list) option>()
         for (startLine, endLine, fragmentText) in fragments do
-            if scanBraceIssues fragmentText filePath |> List.isEmpty then
+            if scanBraceIssuesWithPrefix prefix fragmentText filePath |> List.isEmpty then
                 match CKParser.parseString fragmentText filePath with
                 | Success _ -> parsedHealthy <- parsedHealthy + 1
                 | Failure(msg, p, _) ->
                     let line = startLine + int p.Position.Line - 1
                     let col = int p.Position.Column
                     let pos = mkRange filePath (mkPos line col) (mkPos line (col + 1))
-                    issues.Add("CW001_RECOVERY_SKIPPED_BLOCK", Severity.Warning, filePath,
+                    issues.Add($"{prefix}_RECOVERY_SKIPPED_BLOCK", Severity.Warning, filePath,
                         sprintf "Skipped structurally invalid top-level block around lines %d-%d: %s" startLine endLine msg,
                         pos, 1, None)
         if parsedHealthy > 0 then
             let pos = mkRange filePath (mkPos 1 0) (mkPos 1 1)
-            issues.Add("CW001_STRUCTURAL_RECOVERY", Severity.Information, filePath,
+            issues.Add($"{prefix}_STRUCTURAL_RECOVERY", Severity.Information, filePath,
                 sprintf "Parser recovery parsed %d healthy top-level block(s); rule diagnostics may be stale until the syntax error is fixed." parsedHealthy,
                 pos, 1, None)
         issues |> Seq.toList
+
+    let scanRecoveryIssues (text: string) (filePath: string) =
+        scanRecoveryIssuesWithPrefix "CW001" text filePath
+
+    let workspaceCwtRoot () =
+        match workspaceFolders with
+        | wd :: _ when wd.uri.LocalPath <> "" -> wd.uri.LocalPath
+        | _ -> rootUri |> Option.map (fun u -> u.LocalPath) |> Option.defaultValue ""
+
+    /// CWT-only workspaces index their workspace. A game workspace indexes a
+    /// rule project only when that folder is the configured manual rule source.
+    let cwtRuleRoot () =
+        Main.Lang.CwtLanguageFeatures.selectRuleRoot
+            (activeGame = CWT)
+            useManualRules
+            manualRulesFolder
+            (workspaceCwtRoot ())
+        |> Option.defaultValue ""
+
+    let cwtActivationAllowed (ruleRoot: string) =
+        Main.Lang.CwtLanguageFeatures.isManualActivationRoot
+            (activeGame = CWT)
+            useManualRules
+            manualRulesFolder
+            ruleRoot
+        && gameObj.IsSome
+
+    /// Debounced, versioned CWT project-index rebuild for .cwt changes.
+    let maybeRebuildCwtIndex (path: string) =
+        if isCwtFilePath path then
+            let root = cwtRuleRoot ()
+            let pathIsInRuleRoot =
+                try
+                    root <> ""
+                    && CwtProjectIndex.isPathWithin (Path.GetFullPath(root)) (Path.GetFullPath(path))
+                with _ -> false
+            if pathIsInRuleRoot then
+                Main.Lang.CwtLanguageFeatures.requestSnapshotRebuild root docs 150
+
+    /// Phase 4: write-locked, atomic hot-swap of the active game rules from a
+    /// validated candidate snapshot. Failures keep last-known-good and are
+    /// reported with CWT9xx; the next candidate rebuild retries automatically.
+    let cwtActivationHandler (req: Main.Lang.CwtLanguageFeatures.CwtActivationRequest) =
+        match gameObj, cwtActivationAllowed req.ruleRoot with
+        | Some game, true ->
+            let ruleFiles = req.ruleFiles
+            let generation = int req.snapshot.version
+            let hash = CwtActivation.contentHash ruleFiles
+            try
+                enterGameStateWriteLock ()
+                try
+                    game.ReplaceConfigRules ruleFiles
+                    bumpRulesModelEpoch ()
+                    bumpGameModelEpoch ()
+                    fileDiagnosticStates.Keys
+                    |> Seq.toArray
+                    |> Array.iter markFilePendingGlobalRevalidation
+                    Main.Lang.CwtLanguageFeatures.recordActivation generation hash
+                    logInfo $"CWT rules activated generation={generation} files={ruleFiles.Length} hash={hash}"
+                finally
+                    exitGameStateWriteLock ()
+            with e ->
+                logError $"CWT rules activation failed generation={generation}: {e.Message}"
+                // Report the failure on the first rule file (deterministic
+                // order) with the generation and an actionable reason.
+                let target =
+                    req.snapshot.documents
+                    |> Map.toSeq
+                    |> Seq.map fst
+                    |> Seq.sort
+                    |> Seq.tryHead
+                match target with
+                | Some filePath ->
+                    let uri = filePathToUri filePath
+                    // Built directly instead of reusing parserErrorToDiagnostics
+                    // to keep the CWT9xx payload under our control.
+                    let convertedDiagnostics: LSP.Types.Diagnostic list =
+                        [ { range = { start = { line = 0; character = 0 }
+                                      ``end`` = { line = 0; character = 1 } }
+                            severity = Some LSP.Types.DiagnosticSeverity.Error
+                            code = Some "CWT901"
+                            codeDescription = None
+                            source = Some "CWTools"
+                            message = $"CWT rules activation failed (generation %d{generation}): %s{e.Message}; the previous rules remain active. Fix the reported rule diagnostics to retry."
+                            tags = None
+                            data = None
+                            relatedInformation = [] } ]
+                    client.PublishDiagnostics
+                        { uri = uri
+                          diagnostics = convertedDiagnostics }
+                | None -> ()
+        | _ ->
+            logInfo $"Skipped CWT rules activation for an inactive or stale manual rules root: {req.ruleRoot}"
+
+    let registerCwtActivationHandler () =
+        Main.Lang.CwtLanguageFeatures.canActivateRulesFromRoot <- Some cwtActivationAllowed
+        Main.Lang.CwtLanguageFeatures.onActivationReady <- Some cwtActivationHandler
+        Main.Lang.CwtLanguageFeatures.onActivationReady
+
+    do registerCwtActivationHandler () |> ignore
 
     /// isEditAction: true for DidChange/DidSave (content changed), false for DidOpen/DidFocus (content unchanged).
     let lint (doc: Uri) (shallowAnalyze: bool) (forceDisk: bool) (isEditAction: bool) (validateCachedOnly: bool) (fastDefinitionIndex: bool) (requestStillCurrent: unit -> bool) : Async<bool> =
@@ -3374,12 +3481,21 @@ type Server(client: ILanguageClient) =
                     | x, _ when isCurrentGameLocalisationFile x -> []
                     | _, Success _ -> []
                     | _, Failure(msg, p, _) ->
-                        let parserDiag =
-                            [ ("CW001", Severity.Error, name, msg, (getRange p.Position p.Position), 0, None) ]
-                        // Run the bracket scanner when Parser fails to provide more precise diagnostics
-                        let braceIssues = scanBraceIssues t name
-                        let recoveryIssues = scanRecoveryIssues t name
-                        parserDiag @ braceIssues @ recoveryIssues
+                        if isCwtFilePath name then
+                            // CWT documents use their own diagnostic family
+                            // (CWT001-CWT099 for parser/structure recovery).
+                            let parserDiag =
+                                [ ("CWT001", Severity.Error, name, msg, (getRange p.Position p.Position), 0, None) ]
+                            parserDiag
+                            @ scanBraceIssuesWithPrefix "CWT001" t name
+                            @ scanRecoveryIssuesWithPrefix "CWT001" t name
+                        else
+                            let parserDiag =
+                                [ ("CW001", Severity.Error, name, msg, (getRange p.Position p.Position), 0, None) ]
+                            // Run the bracket scanner when Parser fails to provide more precise diagnostics
+                            let braceIssues = scanBraceIssues t name
+                            let recoveryIssues = scanRecoveryIssues t name
+                            parserDiag @ braceIssues @ recoveryIssues
 
             let locErrors =
                 match locCache.TryGetValue(doc.LocalPath) with
@@ -3395,9 +3511,27 @@ type Server(client: ILanguageClient) =
             let mutable validationModelEpochAtComputation: ValidationModelEpoch option = None
             let applicableCachedLocErrors = if isEditAction then [] else locErrors
 
+            let cwtSemanticErrors =
+                if isCwtFilePath name then
+                    match filetext with
+                    | Some t -> Main.Lang.CwtLanguageFeatures.semanticDiagnostics name t
+                    | None -> []
+                else
+                    []
+
+            // Project diagnostics (CWT3xx/CWT4xx) publish only when the index
+            // snapshot is current; while pending they stay silent.
+            let cwtProjectErrors =
+                if isCwtFilePath name then Main.Lang.CwtLanguageFeatures.projectErrorsForFile name
+                else []
+
             let errors =
                 match gameObj with
-                | None -> parserErrors @ applicableCachedLocErrors
+                | None -> parserErrors @ cwtSemanticErrors @ cwtProjectErrors @ applicableCachedLocErrors
+                // CWT documents never enter the game script validation path:
+                // the game model has no entities for them and rule semantics
+                // are served by the CWT pipeline (handoff doc §1).
+                | Some _ when isCwtFilePath name -> parserErrors @ cwtSemanticErrors @ cwtProjectErrors
                 | Some game when validateCachedOnly ->
                     let allocBeforeValidate = GC.GetTotalAllocatedBytes(false)
                     let updateErrors =
@@ -5150,6 +5284,7 @@ type Server(client: ILanguageClient) =
                 lastCacheStatus = "checking"
                 lastError = None })
         match (cachePath, isVanillaFolder, activeGame) with
+        | _, _, CWT -> cacheStatus <- "skipped_cwt_only"
         | _, _, Custom -> cacheStatus <- "skipped_custom_game"
         | Some cp, false, _ ->
             // L7 Fix: use Directory.GetParent() instead of string `+ "/../"` which
@@ -5172,6 +5307,7 @@ type Server(client: ILanguageClient) =
                 | CK3  -> Some ("ck3",  serializeCK3,  ck3VanillaPath,  "ck3")
                 | VIC3 -> Some ("vic3", serializeVIC3, vic3VanillaPath, "vic3")
                 | EU5  -> Some ("eu5",  serializeEU5,  eu5VanillaPath,  "eu5")
+                | CWT -> None
                 | Custom -> None
 
             match gameConfig with
@@ -5358,182 +5494,199 @@ type Server(client: ILanguageClient) =
 
                 let game =
                     match activeGame with
+                    | CWT ->
+                        // CWT-only mode: no game model is built. The CWT
+                        // document pipeline serves lint/completion from the
+                        // built-in meta-model instead (handoff doc §8.2).
+                        cleanupOldGame()
+                        gameObj <- None
+                        None
                     | STL ->
                         cleanupOldGame()
                         if hasStellarisVanillaData serverSettings then
                             let game = loadSTL serverSettings
                             stlGameObj <- Some(game :> IGame<STLComputedData>)
-                            game :> IGame
+                            Some (game :> IGame)
                         else
                             logInfo "No Stellaris vanilla data (game path or cache); using the generic game instead"
                             activeGame <- Custom
                             languages <- parseLanguagesForGame Custom rawLanguages
                             let game = loadCustom { serverSettings with languages = languages }
                             customGameObj <- Some(game :> IGame<JominiComputedData>)
-                            game :> IGame
+                            Some (game :> IGame)
                     | HOI4 ->
                         cleanupOldGame()
                         let game = loadHOI4 serverSettings
                         hoi4GameObj <- Some(game :> IGame<HOI4ComputedData>)
-                        game :> IGame
+                        Some (game :> IGame)
                     | EU4 ->
                         cleanupOldGame()
                         let game = loadEU4 serverSettings
                         eu4GameObj <- Some(game :> IGame<EU4ComputedData>)
-                        game :> IGame
+                        Some (game :> IGame)
                     | CK2 ->
                         cleanupOldGame()
                         let game = loadCK2 serverSettings
                         ck2GameObj <- Some(game :> IGame<CK2ComputedData>)
-                        game :> IGame
+                        Some (game :> IGame)
                     | IR ->
                         cleanupOldGame()
                         let game = loadIR serverSettings
                         irGameObj <- Some(game :> IGame<IRComputedData>)
-                        game :> IGame
+                        Some (game :> IGame)
                     | VIC2 ->
                         cleanupOldGame()
                         let game = loadVIC2 serverSettings
                         vic2GameObj <- Some(game :> IGame<VIC2ComputedData>)
-                        game :> IGame
+                        Some (game :> IGame)
                     | CK3 ->
                         cleanupOldGame()
                         let game = loadCK3 serverSettings
                         ck3GameObj <- Some(game :> IGame<CK3ComputedData>)
-                        game :> IGame
+                        Some (game :> IGame)
                     | VIC3 ->
                         cleanupOldGame()
                         let game = loadVIC3 serverSettings
                         vic3GameObj <- Some(game :> IGame<VIC3ComputedData>)
-                        game :> IGame
+                        Some (game :> IGame)
                     | EU5 ->
                         cleanupOldGame()
                         let game = loadEU5 serverSettings
                         eu5GameObj <- Some(game :> IGame<EU5ComputedData>)
-                        game :> IGame
+                        Some (game :> IGame)
                     | Custom ->
                         cleanupOldGame()
                         let game = loadCustom serverSettings
                         customGameObj <- Some(game :> IGame<JominiComputedData>)
-                        game :> IGame
+                        Some (game :> IGame)
 
-                gameObj <- Some game
+                match game with
+                | None ->
+                    // CWT-only mode has no game entities and no game validation
+                    // pass; the CWT pipeline publishes its own diagnostics.
+                    loadedFileCount <- 0
+                    parserErrorCount <- 0
+                    validationErrorCount <- 0
+                    localisationErrorCount <- 0
+                    client.CustomNotification("updateFileList", JsonValue.Record [| "fileList", JsonValue.Array [||] |])
+                | Some game ->
+                    gameObj <- Some game
 
-                let getRange (start: Position) (endp: Position) =
-                    mkRange
-                        start.StreamName
-                        (mkPos (int start.Line) (int start.Column))
-                        (mkPos (int endp.Line) (int endp.Column))
+                    let getRange (start: Position) (endp: Position) =
+                        mkRange
+                            start.StreamName
+                            (mkPos (int start.Line) (int start.Column))
+                            (mkPos (int endp.Line) (int endp.Column))
 
-                let parserErrors =
-                    game.ParserErrors()
-                    |> List.map (fun (n, e, p) -> "CW001", Severity.Error, n, e, (getRange p p), 0, None)
-                parserErrorCount <- parserErrors.Length
+                    let parserErrors =
+                        game.ParserErrors()
+                        |> List.map (fun (n, e, p) -> "CW001", Severity.Error, n, e, (getRange p p), 0, None)
+                    parserErrorCount <- parserErrors.Length
 
-                let mapResourceToFilePath =
-                    function
-                    | EntityResource(f, r) -> r.scope, f, r.logicalpath
-                    | FileResource(f, r) -> r.scope, f, r.logicalpath
-                    | FileWithContentResource(f, r) -> r.scope, f, r.logicalpath
+                    let mapResourceToFilePath =
+                        function
+                        | EntityResource(f, r) -> r.scope, f, r.logicalpath
+                        | FileResource(f, r) -> r.scope, f, r.logicalpath
+                        | FileWithContentResource(f, r) -> r.scope, f, r.logicalpath
 
-                let fileEntries =
-                    game.AllFiles()
-                    |> List.choose (fun resource ->
-                        let scope, fileUri, logicalPath = mapResourceToFilePath resource
+                    let fileEntries =
+                        game.AllFiles()
+                        |> List.choose (fun resource ->
+                            let scope, fileUri, logicalPath = mapResourceToFilePath resource
 
-                        match Uri.TryCreate(fileUri, UriKind.Absolute) with
-                        | TrySuccess url -> Some(scope, url, logicalPath)
-                        | TryFailure -> None)
+                            match Uri.TryCreate(fileUri, UriKind.Absolute) with
+                            | TrySuccess url -> Some(scope, url, logicalPath)
+                            | TryFailure -> None)
 
-                let loadedFilePaths =
-                    fileEntries
-                    |> List.map (fun (_, uri, _) -> getPathFromDoc uri)
-                    |> List.distinctBy normaliseCachePath
+                    let loadedFilePaths =
+                        fileEntries
+                        |> List.map (fun (_, uri, _) -> getPathFromDoc uri)
+                        |> List.distinctBy normaliseCachePath
 
-                let fileList =
-                    fileEntries
-                    |> List.map (fun (s, uri, l) ->
+                    let fileList =
+                        fileEntries
+                        |> List.map (fun (s, uri, l) ->
+                            JsonValue.Record
+                                [| "scope", JsonValue.String s
+                                   "uri", uri.AbsoluteUri |> JsonValue.String
+                                   "logicalpath", JsonValue.String l |])
+                        |> Array.ofList
+                    loadedFileCount <- fileList.Length
+
+                    client.CustomNotification("updateFileList", JsonValue.Record [| "fileList", JsonValue.Array fileList |])
+
+                    client.CustomNotification(
+                        "loadingBar",
                         JsonValue.Record
-                            [| "scope", JsonValue.String s
-                               "uri", uri.AbsoluteUri |> JsonValue.String
-                               "logicalpath", JsonValue.String l |])
-                    |> Array.ofList
-                loadedFileCount <- fileList.Length
+                            [| "value", JsonValue.String(LangResources.loadingBar_ValidatingFiles)
+                               "enable", JsonValue.Boolean(true) |]
+                    )
 
-                client.CustomNotification("updateFileList", JsonValue.Record [| "fileList", JsonValue.Array fileList |])
+                    (try
+                        let preflightSw = Stopwatch.StartNew()
+                        let forced =
+                            game.ForceDynamicParameterData(dynamicPreflightTimeoutMs, dynamicPreflightMaxEntities)
+                        preflightSw.Stop()
+                        logDiag
+                            $"Dynamic parameter preflight forced {forced} entities in {preflightSw.ElapsedMilliseconds}ms (timeout {dynamicPreflightTimeoutMs}ms, cap {dynamicPreflightMaxEntities})"
+                     with e -> logDiag $"Dynamic parameter preflight error: {e.Message}")
 
-                client.CustomNotification(
-                    "loadingBar",
-                    JsonValue.Record
-                        [| "value", JsonValue.String(LangResources.loadingBar_ValidatingFiles)
-                           "enable", JsonValue.Boolean(true) |]
-                )
+                    let valErrorRaw =
+                        game.ValidationErrors()
+                        |> correctDynamicParameterValidationErrors "initial" game
+                    let valErrors =
+                        valErrorRaw
+                        |> List.map (fun e ->
+                            (e.code, e.severity, e.range.FileName, e.message, e.range, e.keyLength, e.relatedErrors))
 
-                (try
-                    let preflightSw = Stopwatch.StartNew()
-                    let forced =
-                        game.ForceDynamicParameterData(dynamicPreflightTimeoutMs, dynamicPreflightMaxEntities)
-                    preflightSw.Stop()
-                    logDiag
-                        $"Dynamic parameter preflight forced {forced} entities in {preflightSw.ElapsedMilliseconds}ms (timeout {dynamicPreflightTimeoutMs}ms, cap {dynamicPreflightMaxEntities})"
-                 with e -> logDiag $"Dynamic parameter preflight error: {e.Message}")
+                    validationErrorCount <- valErrorRaw.Length
 
-                let valErrorRaw =
-                    game.ValidationErrors()
-                    |> correctDynamicParameterValidationErrors "initial" game
-                let valErrors =
-                    valErrorRaw
-                    |> List.map (fun e ->
-                        (e.code, e.severity, e.range.FileName, e.message, e.range, e.keyLength, e.relatedErrors))
+                    let locRaw = game.LocalisationErrors(true, true)
+                    localisationErrorCount <- locRaw.Length
+                    clearLocalisationDiagnosticCache ()
+                    cachedLocMap <- None
+                    cachedLocMapCount <- 0
+                    for fileName, errors in locRaw |> List.groupBy _.range.FileName do
+                        cachePut locCache fileName errors
 
-                validationErrorCount <- valErrorRaw.Length
+                    let locErrors =
+                        locRaw
+                        |> List.map (fun e ->
+                            (e.code, e.severity, e.range.FileName, e.message, e.range, e.keyLength, e.relatedErrors))
 
-                let locRaw = game.LocalisationErrors(true, true)
-                localisationErrorCount <- locRaw.Length
-                clearLocalisationDiagnosticCache ()
-                cachedLocMap <- None
-                cachedLocMapCount <- 0
-                for fileName, errors in locRaw |> List.groupBy _.range.FileName do
-                    cachePut locCache fileName errors
+                    let visibleInitialDiagnostics =
+                        parserErrors @ valErrors @ locErrors
+                        |> List.map parserErrorToDiagnostics
+                        |> List.filter diagnosticFilter
 
-                let locErrors =
-                    locRaw
-                    |> List.map (fun e ->
-                        (e.code, e.severity, e.range.FileName, e.message, e.range, e.keyLength, e.relatedErrors))
+                    visibleInitialDiagnostics |> sendDiagnostics
 
-                let visibleInitialDiagnostics =
-                    parserErrors @ valErrors @ locErrors
-                    |> List.map parserErrorToDiagnostics
-                    |> List.filter diagnosticFilter
+                    let diagnosticsByFile =
+                        visibleInitialDiagnostics
+                        |> List.groupBy (fun (filePath, _) -> normaliseCachePath filePath)
+                        |> Map.ofList
 
-                visibleInitialDiagnostics |> sendDiagnostics
+                    let loadedNormalised = loadedFilePaths |> List.map normaliseCachePath |> Set.ofList
+                    let loadEpoch = nextDiagnosticEpoch ()
 
-                let diagnosticsByFile =
-                    visibleInitialDiagnostics
-                    |> List.groupBy (fun (filePath, _) -> normaliseCachePath filePath)
-                    |> Map.ofList
+                    for filePath in loadedFilePaths do
+                        let diagnostics =
+                            diagnosticsByFile
+                            |> Map.tryFind (normaliseCachePath filePath)
+                            |> Option.map (List.map snd)
+                            |> Option.defaultValue []
+                        setFileDiagnosticStateWithEpoch filePath loadEpoch Fresh [] diagnostics
 
-                let loadedNormalised = loadedFilePaths |> List.map normaliseCachePath |> Set.ofList
-                let loadEpoch = nextDiagnosticEpoch ()
+                    diagnosticsByFile
+                    |> Map.toSeq
+                    |> Seq.iter (fun (_, entries) ->
+                        match entries with
+                        | (filePath, _) :: _ when not (loadedNormalised.Contains(normaliseCachePath filePath)) ->
+                            setFileDiagnosticStateWithEpoch filePath loadEpoch Fresh [] (entries |> List.map snd)
+                        | _ -> ())
 
-                for filePath in loadedFilePaths do
-                    let diagnostics =
-                        diagnosticsByFile
-                        |> Map.tryFind (normaliseCachePath filePath)
-                        |> Option.map (List.map snd)
-                        |> Option.defaultValue []
-                    setFileDiagnosticStateWithEpoch filePath loadEpoch Fresh [] diagnostics
-
-                diagnosticsByFile
-                |> Map.toSeq
-                |> Seq.iter (fun (_, entries) ->
-                    match entries with
-                    | (filePath, _) :: _ when not (loadedNormalised.Contains(normaliseCachePath filePath)) ->
-                        setFileDiagnosticStateWithEpoch filePath loadEpoch Fresh [] (entries |> List.map snd)
-                    | _ -> ())
-
-                // L6 Fix: non-blocking optimised GC avoids a 100ms freeze on load
-                maybeCollectGarbage ()
+                    // L6 Fix: non-blocking optimised GC avoids a 100ms freeze on load
+                    maybeCollectGarbage ()
             with e ->
                 loadError <- Some e.Message
                 eprintfn $"%A{e}"
@@ -5546,6 +5699,8 @@ type Server(client: ILanguageClient) =
             | Some _, _, _ -> "load_project_error"
             | None, None, _ -> "no_workspace"
             | None, Some _, Some _ -> "ready"
+            // CWT-only mode is ready without a game model.
+            | None, Some _, None when activeGame = CWT -> "ready"
             | None, Some _, None -> "not_loaded"
         updateLoadingRuntime (fun state ->
             { state with
@@ -5800,6 +5955,7 @@ type Server(client: ILanguageClient) =
                     | JsonValue.String "ck3" -> activeGame <- CK3
                     | JsonValue.String "vic3" -> activeGame <- VIC3
                     | JsonValue.String "eu5" -> activeGame <- EU5
+                    | JsonValue.String "cwt" -> activeGame <- CWT
                     | JsonValue.String "paradox" -> activeGame <- Custom
                     | _ -> ()
 
@@ -6175,14 +6331,22 @@ type Server(client: ILanguageClient) =
                             let initWriteHoldSw = Stopwatch.StartNew()
                             let rulesUpdate =
                                 try
-                                    let snapshot = setupRulesCaches ()
-                                    checkOrSetGameCache false
-                                    bumpGameModelEpoch ()
-                                    bumpRulesModelEpoch ()
-                                    bumpTypesModelEpoch ()
-                                    bumpLocalisationModelEpoch ()
-                                    processWorkspace rootUri
-                                    snapshot
+                                    if activeGame = CWT then
+                                        // CWT-only mode has no rules source or
+                                        // vanilla cache to manage; rebuild the
+                                        // workspace (document pipeline) only.
+                                        processWorkspace rootUri
+                                        let generation = System.Threading.Interlocked.Increment(&rulesUpdateGeneration)
+                                        generation, cachePath, remoteRepoPath, useManualRules, rulesChannel, activeGame
+                                    else
+                                        let snapshot = setupRulesCaches ()
+                                        checkOrSetGameCache false
+                                        bumpGameModelEpoch ()
+                                        bumpRulesModelEpoch ()
+                                        bumpTypesModelEpoch ()
+                                        bumpLocalisationModelEpoch ()
+                                        processWorkspace rootUri
+                                        snapshot
                                 finally
                                     exitGameStateWriteLock ()
                                     initWriteHoldSw.Stop()
@@ -6198,6 +6362,8 @@ type Server(client: ILanguageClient) =
         member this.DidOpenTextDocument(p: DidOpenTextDocumentParams) =
             async {
                 docs.Open p
+
+                maybeRebuildCwtIndex (getPathFromDoc p.textDocument.uri)
 
                 lintAgent.Post(
                     OpenRequest(
@@ -6219,6 +6385,7 @@ type Server(client: ILanguageClient) =
             async {
                 docs.Change p
                 let path = getPathFromDoc p.textDocument.uri
+                maybeRebuildCwtIndex path
                 advanceLintGeneration path |> ignore
                 dirtyDocumentPaths.[normaliseCachePath path] <- 0uy
                 if isCompletionHeavyEditPath path then
@@ -6260,6 +6427,7 @@ type Server(client: ILanguageClient) =
         member this.DidSaveTextDocument(p: DidSaveTextDocumentParams) =
             async {
                 let path = getPathFromDoc p.textDocument.uri
+                maybeRebuildCwtIndex path
                 let wasDirty, _ = dirtyDocumentPaths.TryRemove(normaliseCachePath path)
                 if wasDirty then
                     advanceLintGeneration path |> ignore
@@ -6284,6 +6452,7 @@ type Server(client: ILanguageClient) =
         member this.DidCloseTextDocument(p: DidCloseTextDocumentParams) = async { 
             docs.Close p 
             let localPath = p.textDocument.uri.LocalPath
+            maybeRebuildCwtIndex localPath
             let fullPath = try FileInfo(localPath).FullName with _ -> localPath
             committedTypeIndexVersions.TryRemove(normaliseCachePath localPath) |> ignore
             committedTypeIndexVersions.TryRemove(normaliseCachePath fullPath) |> ignore
@@ -6326,6 +6495,7 @@ type Server(client: ILanguageClient) =
                             // event would parse and refresh the same file a second time.
                             logDiag $"Skip open-document watched-file save echo: {path}"
                         else
+                            maybeRebuildCwtIndex path
                             advanceLintGeneration path |> ignore
                             forgetFileCaches path
                             match gameObj with
@@ -6339,6 +6509,7 @@ type Server(client: ILanguageClient) =
                     | FileChangeType.Deleted ->
                         refreshFileList <- true
                         let path = getPathFromDoc change.uri
+                        maybeRebuildCwtIndex path
                         committedTypeIndexVersions.TryRemove(normaliseCachePath path) |> ignore
                         if isCurrentGameLocalisationFile path then
                             match gameObj with
@@ -6662,14 +6833,22 @@ type Server(client: ILanguageClient) =
             async {
                 let sw = Stopwatch.StartNew()
                 let allocBefore = GC.GetTotalAllocatedBytes(false)
+                let path = getPathFromDoc p.textDocument.uri
+                let fileContent =
+                    docs.GetText(FileInfo(path))
+                    |> Option.defaultValue (try File.ReadAllText path with _ -> "")
+
                 let result =
                     match gameObj with
+                    | Some _ when isCwtFilePath path ->
+                        // CWT navigation goes through the project index.
+                        Main.Lang.CwtLanguageFeatures.definitionLocations path p.position.line p.position.character fileContent
+                    | None when isCwtFilePath path ->
+                        // CWT-only mode has no game model; the project index
+                        // still serves definition navigation.
+                        Main.Lang.CwtLanguageFeatures.definitionLocations path p.position.line p.position.character fileContent
                     | Some game ->
                         let position = PosHelper.fromZ p.position.line p.position.character
-                        let path = getPathFromDoc p.textDocument.uri
-                        let fileContent =
-                            docs.GetText(FileInfo(path))
-                            |> Option.defaultValue (try File.ReadAllText path with _ -> "")
 
                         let gototype =
                             game.GoToType
@@ -6710,6 +6889,14 @@ type Server(client: ILanguageClient) =
             async {
                 return
                     match gameObj with
+                    | Some _ when isCwtFilePath (getPathFromDoc p.textDocument.uri) ->
+                        let path = getPathFromDoc p.textDocument.uri
+                        let text = docs.GetText(FileInfo(p.textDocument.uri.LocalPath)) |> Option.defaultValue ""
+                        Main.Lang.CwtLanguageFeatures.referenceLocations path p.position.line p.position.character text
+                    | None when isCwtFilePath (getPathFromDoc p.textDocument.uri) ->
+                        let path = getPathFromDoc p.textDocument.uri
+                        let text = docs.GetText(FileInfo(p.textDocument.uri.LocalPath)) |> Option.defaultValue ""
+                        Main.Lang.CwtLanguageFeatures.referenceLocations path p.position.line p.position.character text
                     | Some game ->
                         let position = PosHelper.fromZ p.position.line p.position.character
                         let path = getPathFromDoc p.textDocument.uri
@@ -10817,6 +11004,7 @@ type Server(client: ILanguageClient) =
                                 | IR -> "imperator"
                                 | VIC2 -> "vic2"
                                 | VIC3 -> "vic3"
+                                | CWT -> "cwt"
                                 | Custom -> "paradox"
                             // Incremental export only reads the coherent game model and uses a
                             // per-database gate, so the protocol may run it alongside editor reads.
@@ -10915,6 +11103,7 @@ type Server(client: ILanguageClient) =
                                 | IR -> "imperator"
                                 | VIC2 -> "vic2"
                                 | VIC3 -> "vic3"
+                                | CWT -> "cwt"
                                 | Custom -> "paradox"
                             let visitor =
                                 { new IGameVisitor<JsonValue> with

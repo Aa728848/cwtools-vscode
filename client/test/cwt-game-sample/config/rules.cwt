@@ -1,0 +1,12 @@
+enums = {
+	enum[widget] = {
+		A
+	}
+}
+
+types = {
+	type[technology] = {
+		path = "game/common/technology"
+		area = enum[widget]
+	}
+}

@@ -1089,6 +1089,10 @@ let completion
     (supportsInsertReplaceEdit: bool)
     =
     match gameObj with
+    // CWT rule files are completed by the CWT pipeline, never by the game
+    // script completion service (handoff doc §4.2).
+    | Some _ when p.textDocument.uri.LocalPath.EndsWith(".cwt", System.StringComparison.OrdinalIgnoreCase) ->
+        Main.Lang.CwtLanguageFeatures.complete p docs
     | Some game ->
         let position = PosHelper.fromZ p.position.line p.position.character // |> (fun p -> Pos.fromZ)
 
@@ -1237,4 +1241,7 @@ let completion
     //     let variables = game.References.ScriptVariableNames |> List.map (fun v -> {defaultCompletionItem with label = v; kind = Some CompletionItemKind.Variable })
     //     let items = names |> List.map (fun n -> {defaultCompletionItem with label = n})
     //     Some {isIncomplete = false; items = items @ variables}
+    | None when p.textDocument.uri.LocalPath.EndsWith(".cwt", System.StringComparison.OrdinalIgnoreCase) ->
+        // CWT-only mode has no game model; the CWT pipeline still completes.
+        Main.Lang.CwtLanguageFeatures.complete p docs
     | None -> None

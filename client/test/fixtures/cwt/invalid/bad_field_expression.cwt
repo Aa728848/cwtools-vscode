@@ -1,0 +1,5 @@
+# An illegal field expression: `int[0..banana]` has a non-numeric bound.
+# Whether the whole file parse fails or the rule is skipped is part of the
+# Phase 0 baseline record (handoff doc §3.3).
+
+count = int[0..banana]

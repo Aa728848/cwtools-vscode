@@ -1,0 +1,10 @@
+# A syntax the parser cannot recover from: an unclosed quoted string at EOF.
+
+enums = {
+	enum[species_archetype] = {
+		BIOLOGICAL
+		ROBOT
+	}
+}
+
+key = "unclosed string

@@ -1,0 +1,10 @@
+# Illegal field expression: `int[0..banana]` has a non-numeric bound.
+# Expected: CWT2xx semantic diagnostic (CWT201) — the file parses fine.
+
+count = int[0..banana]
+
+# <missing_gadget> is not defined anywhere: CWT301 once the index is ready.
+# <gadget> IS defined in defs.cwt: no diagnostic, and definition navigation
+# from here must jump to defs.cwt.
+icon = <missing_gadget>
+working = <gadget>

@@ -65,6 +65,13 @@ describe('diagnostic i18n enrichment', () => {
                 .to.include('sprite');
         });
 
+        it('translates CWT activation rejection and failure diagnostics', () => {
+            expect(zh('Candidate rules rejected (CWT102); the previous rules remain active. Fix the reported errors to retry.', 'CWT900'))
+                .to.include('CWT102');
+            expect(zh('CWT rules activation failed (generation 42): boom; the previous rules remain active. Fix the reported rule diagnostics to retry.', 'CWT901'))
+                .to.include('42').and.to.include('boom');
+        });
+
         it('translates did-you-mean suggestion variants', () => {
             const unexpected = zh("costt is unexpected in tech_lasers_1 (did you mean 'cost'?)", 'CW262');
             expect(unexpected).to.include('costt').and.to.include('tech_lasers_1');

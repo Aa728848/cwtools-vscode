@@ -1,0 +1,22 @@
+# Minimal rules repository fixture for the CWT-only smoke test.
+# No game descriptor, no vanilla data: opening this file must start the
+# language server in CWT-only mode with parser diagnostics only.
+
+types = {
+	type[planet_class] = {
+		name_field = "name"
+		subtype[habitable] = {
+			planet_class = yes
+		}
+	}
+}
+
+enums = {
+	enum[species_archetype] = {
+		BIOLOGICAL
+		ROBOT
+	}
+}
+
+# Cursor inside `type[ga` offers the cross-file type[gadget] from defs.cwt.
+type[ga

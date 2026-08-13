@@ -65,8 +65,13 @@ import { LspPerformanceStats, type ValidationDiagnosticCounts } from './lspPerfo
 import { DirectoryCompletionCommand } from './directoryCompletionCommand';
 import { LanguageServerProcessController, ManagedLanguageClient } from './languageServerProcess';
 import {
+	CWT_LANGUAGE_ID,
+	determineServerStartMode,
 	getLanguageClientDocumentSelector,
+	isCwtDocument,
+	isCwtFilePath,
 	shouldRequestLanguageServerSemanticTokens,
+	type ServerStartMode,
 } from './languageSelectors';
 
 export let defaultClient: LanguageClient;
@@ -1669,7 +1674,7 @@ export async function activate(context: ExtensionContext) {
 	registerVanillaCompare(context);
 	registerPdxIndentFormatter(context);
 
-	const init = async function (language: string, isVanillaFolder: boolean) {
+	const init = async function (language: string, isVanillaFolder: boolean, mode: ServerStartMode = 'full') {
 		vs.languages.setLanguageConfiguration(language, {
 			wordPattern: /"?([^\s.]+)"?/,
 			indentationRules: {
@@ -1722,22 +1727,29 @@ export async function activate(context: ExtensionContext) {
 			getSteamLibraryPaths,
 		}));
 
-		const activeProfile = getProfileByLanguageId(language);
-		const globAlternatives = (values: string[]) => values.length === 1 ? values[0]! : `{${values.join(',')}}`;
-		const scriptDirectories = globAlternatives(Array.from(new Set(activeProfile.folders.scriptDirs)).sort());
-		const guiDirectories = globAlternatives(Array.from(new Set(activeProfile.folders.guiDirs)).sort());
-		const gfxDirectories = globAlternatives(Array.from(new Set(activeProfile.folders.gfxDirs)).sort());
-		const localisationDirectories = globAlternatives(Array.from(new Set(activeProfile.localisation.directories)).sort());
-		const localisationExtensions = globAlternatives(Array.from(new Set(activeProfile.localisation.fileExtensions)).sort());
-		const fileEvents = [
-			workspace.createFileSystemWatcher(`**/${scriptDirectories}/**/*.txt`),
-			workspace.createFileSystemWatcher(`**/${guiDirectories}/**/*.gui`),
-			workspace.createFileSystemWatcher(`**/${gfxDirectories}/**/*.gfx`),
-			workspace.createFileSystemWatcher("**/gfx/**/*.{shader,fxh}"),
-			workspace.createFileSystemWatcher("**/{interface}/**/*.sfx"),
-			workspace.createFileSystemWatcher("**/{interface,gfx,fonts,music,sound}/**/*.asset"),
-			workspace.createFileSystemWatcher(`**/${localisationDirectories}/**/*.${localisationExtensions}`)
-		]
+		const cwtOnly = mode === 'cwt-only';
+		// Game-specific watchers (script/gfx/localisation) only make sense in
+		// full mode; CWT-only watches rule files for the Phase 3 project index.
+		const fileEvents = cwtOnly
+			? [workspace.createFileSystemWatcher('**/*.cwt')]
+			: (() => {
+				const activeProfile = getProfileByLanguageId(language);
+				const globAlternatives = (values: string[]) => values.length === 1 ? values[0]! : `{${values.join(',')}}`;
+				const scriptDirectories = globAlternatives(Array.from(new Set(activeProfile.folders.scriptDirs)).sort());
+				const guiDirectories = globAlternatives(Array.from(new Set(activeProfile.folders.guiDirs)).sort());
+				const gfxDirectories = globAlternatives(Array.from(new Set(activeProfile.folders.gfxDirs)).sort());
+				const localisationDirectories = globAlternatives(Array.from(new Set(activeProfile.localisation.directories)).sort());
+				const localisationExtensions = globAlternatives(Array.from(new Set(activeProfile.localisation.fileExtensions)).sort());
+				return [
+					workspace.createFileSystemWatcher(`**/${scriptDirectories}/**/*.txt`),
+					workspace.createFileSystemWatcher(`**/${guiDirectories}/**/*.gui`),
+					workspace.createFileSystemWatcher(`**/${gfxDirectories}/**/*.gfx`),
+					workspace.createFileSystemWatcher("**/gfx/**/*.{shader,fxh}"),
+					workspace.createFileSystemWatcher("**/{interface}/**/*.sfx"),
+					workspace.createFileSystemWatcher("**/{interface,gfx,fonts,music,sound}/**/*.asset"),
+					workspace.createFileSystemWatcher(`**/${localisationDirectories}/**/*.${localisationExtensions}`),
+				];
+			})();
 		const editorFeaturePriority = new LspFeaturePriorityGate();
 		const monitorLogChannel = window.createOutputChannel('MemDiag');
 		const monitorLogLanguage = memDiagLanguageForLocale(vs.env.language);
@@ -1941,7 +1953,8 @@ export async function activate(context: ExtensionContext) {
 				if (languageId == "paradox" && editor.document.languageId == "plaintext") {
 					await vs.languages.setTextDocumentLanguage(editor.document, "paradox")
 				}
-				if (editor.document.languageId == language) {
+				if (editor.document.languageId == language
+					|| (language == CWT_LANGUAGE_ID && isCwtFilePath(editor.document.fileName))) {
 					await client.sendNotification(didFocusFile, { uri: path });
 				}
 			}
@@ -2145,6 +2158,24 @@ export async function activate(context: ExtensionContext) {
 
 		const rulesStatusBar = window.createStatusBarItem(vs.StatusBarAlignment.Left, 90);
 		rulesStatusBar.command = 'cwtools.openSetup';
+		// The rules-source status bar is game-mode only; CWT-only mode does not
+		// load game rules and must not report them as "missing".
+		if (!cwtOnly) {
+			context.subscriptions.push(rulesStatusBar);
+			context.subscriptions.push(workspace.onDidChangeConfiguration(e => {
+				const profile = getKnownProfileByLanguageId(language);
+				if (
+					e.affectsConfiguration('stellarisLanguageServices.rules_version') ||
+					e.affectsConfiguration('stellarisLanguageServices.rules_folder') ||
+					e.affectsConfiguration('stellarisLanguageServices.rules_remote_url') ||
+					(profile ? e.affectsConfiguration(profile.cacheSettingKey) : false)
+				) {
+					updateRulesStatusBar();
+				}
+			}));
+		} else {
+			rulesStatusBar.dispose();
+		}
 		const updateRulesStatusBar = () => {
 			const rules = getRulesSourceStatus(language, cacheDir, bundledRulesPath);
 			const source = rulesSourceLabel(rules.source);
@@ -2159,18 +2190,6 @@ export async function activate(context: ExtensionContext) {
 				);
 			rulesStatusBar.show();
 		};
-		context.subscriptions.push(rulesStatusBar);
-		context.subscriptions.push(workspace.onDidChangeConfiguration(e => {
-			const profile = getKnownProfileByLanguageId(language);
-			if (
-				e.affectsConfiguration('stellarisLanguageServices.rules_version') ||
-				e.affectsConfiguration('stellarisLanguageServices.rules_folder') ||
-				e.affectsConfiguration('stellarisLanguageServices.rules_remote_url') ||
-				(profile ? e.affectsConfiguration(profile.cacheSettingKey) : false)
-			) {
-				updateRulesStatusBar();
-			}
-		}));
 		client.onNotification(createVirtualFile, async (param: CreateVirtualFile) => {
 			const uri = Uri.parse(param.uri);
 			const doc = await workspace.openTextDocument(uri);
@@ -2415,8 +2434,10 @@ export async function activate(context: ExtensionContext) {
 				client.diagnostics?.set(uri, filterLocalisationDiagnostics(diagnostics));
 			});
 		}));
-		updateRulesStatusBar();
-		void maybeShowFirstRunExperience(healthOptions());
+		if (!cwtOnly) {
+			updateRulesStatusBar();
+			void maybeShowFirstRunExperience(healthOptions());
+		}
 	}
 
 	let languageId: string;
@@ -2590,36 +2611,60 @@ export async function activate(context: ExtensionContext) {
 	}
 
 	// ── Gate the language server on actual Paradox evidence ──
-	// `!workspaceRootPath` keeps legacy behavior for single-file windows.
-	const looksLikeParadoxWorkspace =
-		isVanillaFolder || hasModDescriptor || isKnownGameLanguageId(languageId) || !workspaceRootPath;
-	ErrorReporter.debug('Extension', `Startup gate: start=${looksLikeParadoxWorkspace} vanilla=${isVanillaFolder} descriptor=${hasModDescriptor} language=${languageId}`);
-	if (looksLikeParadoxWorkspace) {
+	// `determineServerStartMode` is the single pure decision point: vanilla
+	// folders, mod descriptors and known game ids start full mode; `.cwt`
+	// documents start CWT-only mode; otherwise startup is deferred.
+	const activeDocumentForMode = window.activeTextEditor?.document;
+	const startMode = determineServerStartMode({
+		workspaceRootPath,
+		isVanillaFolder,
+		hasModDescriptor,
+		languageId,
+		activeDocument: activeDocumentForMode
+			? { languageId: activeDocumentForMode.languageId, fileName: activeDocumentForMode.fileName }
+			: undefined,
+	});
+	ErrorReporter.debug('Extension', `Startup gate: mode=${startMode} vanilla=${isVanillaFolder} descriptor=${hasModDescriptor} language=${languageId}`);
+	if (startMode === 'full') {
 		await init(languageId, isVanillaFolder);
 		return extensionApi;
 	}
+	if (startMode === 'cwt-only') {
+		await init(CWT_LANGUAGE_ID, isVanillaFolder, 'cwt-only');
+		// Upgrade to full game mode in place (single server process, no second
+		// client) when a game document becomes active later.
+		context.subscriptions.push(window.onDidChangeActiveTextEditor(editor => {
+			const doc = editor?.document;
+			if (!doc || doc.uri.scheme !== 'file') return;
+			if (isKnownGameLanguageId(doc.languageId) || doc.languageId === 'pdx-shader') {
+				void commands.executeCommand('cwtools.reloadExtension');
+			}
+		}));
+		return extensionApi;
+	}
 
-	ErrorReporter.debug('Extension', 'No Paradox project detected in this workspace; deferring CWTools language server start');
+	ErrorReporter.debug('Extension', 'No Paradox or CWT evidence in this workspace; deferring CWTools language server start');
 	let lazyStartPromise: Promise<void> | undefined;
 	const lazyListeners: Disposable[] = [];
-	const startLazily = (language: string): Promise<void> => {
+	const startLazily = (language: string, mode: ServerStartMode): Promise<void> => {
 		lazyStartPromise ??= (async () => {
 			for (const listener of lazyListeners) {
 				try { listener.dispose(); } catch { /* ignore */ }
 			}
-			await init(language, isVanillaFolder);
+			await init(language, isVanillaFolder, mode);
 		})();
 		return lazyStartPromise;
 	};
 	const maybeStartForEditor = (editor: vs.TextEditor | undefined) => {
 		const doc = editor?.document;
 		if (!doc || doc.uri.scheme !== 'file') return;
-		// CWT rule files are not evidence of a game workspace.
-		if (doc.uri.fsPath.toLowerCase().endsWith('.cwt')) return;
-		if (isKnownGameLanguageId(doc.languageId)) {
-			void startLazily(doc.languageId);
+		// CWT rule files are evidence of a CWT-only workspace, not of a game.
+		if (isCwtDocument(doc)) {
+			void startLazily(CWT_LANGUAGE_ID, 'cwt-only');
+		} else if (isKnownGameLanguageId(doc.languageId)) {
+			void startLazily(doc.languageId, 'full');
 		} else if (doc.languageId === 'pdx-shader') {
-			void startLazily(languageId);
+			void startLazily(languageId, 'full');
 		}
 	};
 	lazyListeners.push(window.onDidChangeActiveTextEditor(maybeStartForEditor));
@@ -2629,7 +2674,7 @@ export async function activate(context: ExtensionContext) {
 	// handler registered by init.
 	for (const commandId of ['cwtools.openSetup', 'cwtools.runInstallationDoctor', 'cwtools.selectGameFolder']) {
 		safeRegisterCommand(context, commandId, async () => {
-			await startLazily(languageId);
+			await startLazily(languageId, 'full');
 			await commands.executeCommand(commandId);
 		});
 	}

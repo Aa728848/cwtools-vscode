@@ -25,7 +25,7 @@
     "request": "launch",
     "preLaunchTask": "UpdateBuild",
     // "runtimeExecutable": "${execPath}",
-    "testConfiguration": "${workspaceFolder}/.vscode-test.js",
+    "testConfiguration": "${workspaceFolder}/.config/vscode-test.js",
     // "args": [
         // "--extensionDevelopmentPath=${workspaceFolder}/release",
         // "--extensionTestsPath=${workspaceFolder}/release/bin/client/test/suite/index"

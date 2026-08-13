@@ -1,0 +1,11 @@
+{
+	"extends": "../tsconfig.json",
+	"include": [
+		"../client/test/suite/cwtLanguage.test.ts",
+		"../client/test/suite/cwtGameActivation.test.ts"
+	],
+	"exclude": [
+		"../client/test/unit/**",
+		"../client/webview/**"
+	]
+}

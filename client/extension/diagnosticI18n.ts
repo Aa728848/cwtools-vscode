@@ -36,6 +36,61 @@ interface DiagnosticRule {
 
 // Ordered: more specific patterns must come before generic ones.
 const RULES: DiagnosticRule[] = [
+    // ---- CWT rule-file editing (CWT0xx-CWT9xx) ----
+    {
+        codes: ['CWT900'],
+        pattern: /^Candidate rules rejected \((.*)\); the previous rules remain active\./,
+        zh: m => `候选规则因 ${m[1]} 被拒绝；继续使用上一份有效规则。修复已报告的错误后会自动重试。`,
+        en: () => 'Fix the reported CWT errors; the last-known-good rules remain active until the next valid snapshot.',
+    },
+    {
+        codes: ['CWT901'],
+        pattern: /^CWT rules activation failed \(generation (\d+)\): (.*); the previous rules remain active\./,
+        zh: m => `CWT 规则激活失败（generation ${m[1]}）：${m[2]}；继续使用上一份有效规则。修复问题后重新保存规则以重试。`,
+        en: () => 'The validated swap failed; the last-known-good rules remain active. Save after fixing the reported cause to retry.',
+    },
+    {
+        codes: ['CWT102'],
+        pattern: /^Illegal value '(.*)' for directive '## (.*)'\.$/,
+        zh: m => `指令 '## ${m[2]}' 的值 '${m[1]}' 非法。例如 ## cardinality 需要 "N..M" 或 "N..inf" 形式的边界。`,
+        en: () => 'Check the directive value shape: cardinality bounds must be numbers or inf.',
+    },
+    {
+        codes: ['CWT101'],
+        pattern: /^Unknown CWT directive '## (.*)'\./,
+        zh: m => `未知的 CWT 指令 '## ${m[1]}'。已知指令列表见规则指南。`,
+        en: () => 'The directive name is not a known CWT rule option; see the rule guide for the list.',
+    },
+    {
+        codes: ['CWT201'],
+        pattern: /^Malformed '(.*)' field expression: '(.*)'\.$/,
+        zh: m => `字段表达式 '${m[2]}' 格式错误:参数不合法(如 int[0..banana] 的边界必须是数字或 inf)。`,
+        en: () => 'Fix the field expression arguments; numeric bounds must be numbers or inf.',
+    },
+    {
+        codes: ['CWT200'],
+        pattern: /^Unknown field expression '(.*)'\.$/,
+        zh: m => `未知的字段表达式 '${m[1]}'。检查拼写,或参考规则指南中的字段表达式清单。`,
+        en: () => 'Unknown field expression; check the spelling against the expression reference.',
+    },
+    {
+        codes: ['CWT301'],
+        pattern: /^Reference to undefined symbol '(.*)'\./,
+        zh: m => `引用了未定义的符号 '${m[1]}'。在规则文件中定义它,或检查拼写。`,
+        en: () => 'Define the referenced symbol in a rule file, or check the spelling.',
+    },
+    {
+        codes: ['CWT302'],
+        pattern: /^Type '(.*)' is declared more than once/,
+        zh: m => `类型 '${m[1]}' 在本文件中声明了多次;后面的声明会覆盖前面的。`,
+        en: () => 'Remove the duplicate type declaration in this file.',
+    },
+    {
+        codes: ['CWT401'],
+        pattern: /^## inject forms a cycle through '(.*)'\./,
+        zh: m => `## inject 通过 '${m[1]}' 形成循环。删除其中一个注入以打破循环。`,
+        en: () => 'Break the inject cycle by removing one of the inject targets.',
+    },
     // ---- Stellaris custom validators (CW999) ----
     {
         codes: ['CW999'],

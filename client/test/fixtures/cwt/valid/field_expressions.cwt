@@ -1,0 +1,37 @@
+# Shared field-expression families used in property rules and leaf value rules.
+# Every line here must parse and produce a rule.
+
+name = localisation
+description = localisation
+enabled = bool
+attack = bool
+count = int[0..100]
+max_trait_points = int[0..inf]
+levels = int[-1..100]
+chance = float
+start_date = date_field
+percentage = percentage_field
+target_type = enum[species_archetype]
+category = enum[leader_classes]
+icon = icon[gfx/interface/icons/buildings]
+portrait = <sprite>
+prerequisites = single_alias_right[technology_prerequisite]
+flag = prefix_field[country_flag]
+cost_mult = value[variable]
+archetype_flags = value_set[astral_rift_flag]
+days = value_field
+random = value_field
+home_scope = scope[country]
+target = scope_group[celestial_body]
+event_target_ref = event_target[country]
+colour = colour_field
+trigger_block = {
+	alias_name[trigger] = alias_match_left[trigger]
+}
+
+allowed_archetypes = {
+	## cardinality = 0..100
+	enum[species_archetype]
+}
+
+texture = filename[dds]

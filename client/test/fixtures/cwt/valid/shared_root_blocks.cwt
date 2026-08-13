@@ -1,0 +1,58 @@
+# Minimal shared root blocks: one declaration per supported root block.
+# Derived from scopes.cwt / enums.cwt / links.cwt / modifier_categories.cwt /
+# 00_small_types_consolidated.cwt in cwtools-stellaris-config.
+
+types = {
+	type[planet_class] = {
+		name_field = "name"
+		path = "game/common/planet_classes"
+		subtype[habitable] = {
+			planet_class = yes
+		}
+	}
+}
+
+enums = {
+	enum[species_archetype] = {
+		BIOLOGICAL
+		ROBOT
+		MACHINE
+	}
+	complex_enum[building_sets] = {
+		root = "building_"
+	}
+}
+
+aliases = {
+	alias[trigger:has_country_flag] = value_field
+	alias[effect:set_country_flag] = value_field
+}
+
+scopes = {
+	Country = {
+		aliases = { country }
+	}
+	"Pop Group" = {
+		aliases = { pop_group }
+	}
+}
+
+scope_groups = {
+	scope_group[celestial_body] = {
+		planet
+		moon
+	}
+}
+
+links = {
+	owner = {
+		input_scopes = { country }
+		output_scope = Country
+	}
+}
+
+modifier_categories = {
+	Countries = {
+		supported_scopes = { country }
+	}
+}

@@ -1,0 +1,22 @@
+# Subtype rules: `subtype[x]` active when the current definition matches
+# subtype x, `subtype[!x]` active when it does not.
+# Derived from 00_small_types_consolidated.cwt.
+
+types = {
+	type[building] = {
+		name_field = "name"
+		subtype[power_plant] = {
+			power = value_field
+		}
+		subtype[!power_plant] = {
+			## severity = warning
+			not_power = bool
+		}
+	}
+	type[precursor] = {
+		path = "game/common/precursors"
+		subtype[cybrex] = {
+			home_system = localisation
+		}
+	}
+}

@@ -5,8 +5,8 @@
 ### 修复 / Fixes
 - **[修复] 健康片段不再被误判为无效**：括号扫描与语法恢复诊断仅在完整 CKParser 解析失败后才运行；此前每个健康的多根片段都会因 `CW001_STRUCTURAL_RECOVERY` 信息级诊断被标记为 `valid=false`。
   English: [Fix] Healthy fragments no longer report `valid=false` — bracket-scan and syntax-recovery diagnostics now run only after the complete CKParser parse fails; previously every healthy multi-root fragment was flagged invalid by the `CW001_STRUCTURAL_RECOVERY` info diagnostic.
-- **[修复] 写入后校验信任最新全量诊断**：当全量文件诊断为 fresh 且无错误时，可覆盖证据门禁中过期的片段级 `syntax_shape` 冲突声明，避免触发无谓的 repair 循环。
-  English: [Fix] Post-write validation trusts fresh full-file diagnostics — when full-file diagnostics are fresh and clean, they supersede stale fragment-only `syntax_shape` conflict claims from the evidence gate, avoiding spurious repair loops.
+- **[修复] 写入后校验信任最新全量诊断**：当全量文件诊断为 fresh 且无错误时，可覆盖证据门禁中过期的冲突声明（`syntax_shape`、`scope_compatibility`、`symbol_exists`、`reference_exists`），避免触发无谓的 repair 循环。
+  English: [Fix] Post-write validation trusts fresh full-file diagnostics — when full-file diagnostics are fresh and clean, they supersede stale evidence conflicts (`syntax_shape`, `scope_compatibility`, `symbol_exists`, `reference_exists`) from the evidence gate, avoiding spurious repair loops.
 
 ### 优化 / Improvements
 - **[优化] AI 实时步骤载荷受限**：Extension Host 先压缩再传输实时步骤、抑制噪声进度事件并保持回放缓冲同步；Webview 合并相邻文本/思考增量、裁剪超长流内容、固定卡片类步骤并限制 160 步窗口，避免长时间运行的 DOM 渲染输入与桥接消息无界增长。

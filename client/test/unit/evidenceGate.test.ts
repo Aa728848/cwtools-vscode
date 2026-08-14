@@ -46,6 +46,8 @@ import {
 import {
     isEvidenceGateDecision,
     normalizeEvidenceGateMode,
+    type EvidenceClaimKind,
+    type EvidenceGateDecision,
     type EvidenceGatePhase,
 } from '../../extension/ai/evidence/evidenceTypes';
 import { reducePolicyActivity } from '../../extension/ai/runner/runReducers';
@@ -1082,6 +1084,59 @@ describe('AgentToolExecutor evidence gate wiring', () => {
                 : async () => permissionAnswer,
         } as any;
     }
+
+    function makePostWriteDecision(kind: EvidenceClaimKind): EvidenceGateDecision {
+        return {
+            version: 1,
+            decisionId: `decision-${kind}`,
+            tool: 'write_file',
+            target: path.join(workspaceRoot, 'events', 'classified.txt'),
+            mode: 'shadow',
+            phase: 'post_write',
+            verdict: 'block',
+            claims: [{
+                kind,
+                claim: `${kind} conflict`,
+                status: 'conflict',
+                blocking: true,
+                sources: [],
+            }],
+            missingEvidence: [],
+            evaluatedAt: '2026-08-14T00:00:00.000Z',
+            durationMs: 1,
+        };
+    }
+
+    it('lets fresh zero-error diagnostics supersede diagnostic-covered evidence conflicts', () => {
+        const { classifyPostWriteValidation } = loadExecutorModule();
+        const result = classifyPostWriteValidation(makePostWriteDecision('symbol_exists'), {
+            diagnostics: [],
+            freshness: 'fresh',
+        });
+
+        expect(result).to.deep.include({
+            verdict: 'allow',
+            evidencePassed: true,
+            diagnosticsPassed: true,
+            diagnosticsSupersededEvidenceConflicts: true,
+        });
+        expect(result.diagnosticsSupersededConflictKinds).to.deep.equal(['symbol_exists']);
+    });
+
+    it('does not let diagnostics supersede impact evidence conflicts', () => {
+        const { classifyPostWriteValidation } = loadExecutorModule();
+        const result = classifyPostWriteValidation(makePostWriteDecision('call_chain'), {
+            diagnostics: [],
+            freshness: 'fresh',
+        });
+
+        expect(result).to.deep.include({
+            verdict: 'repair',
+            evidencePassed: false,
+            diagnosticsPassed: true,
+        });
+        expect(result.diagnosticsSupersededEvidenceConflicts).to.equal(undefined);
+    });
 
     it('shadow mode records the decision but never blocks the write', async () => {
         const lsp = makeFakeLspClient({ parseValid: false });

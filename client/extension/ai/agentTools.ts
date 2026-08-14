@@ -69,7 +69,7 @@ import {
 } from './orchestrator/orchestrationStore';
 import { backgroundOrchestrators } from './orchestrator/backgroundOrchestrators';
 import { BLACKBOARD_KEY_PREFIXES } from './orchestrator/blackboardSchema';
-import { normalizeEvidenceGateMode, type EvidenceGateDecision, type EvidenceGateMode, type EvidenceGatePhase } from './evidence/evidenceTypes';
+import { normalizeEvidenceGateMode, type EvidenceClaimKind, type EvidenceGateDecision, type EvidenceGateMode, type EvidenceGatePhase } from './evidence/evidenceTypes';
 import { isPdxScriptTarget } from './evidence/claimExtractor';
 import { runLedger } from './runner/runLedger';
 import { ErrorReporter } from './errorReporter';
@@ -139,8 +139,11 @@ export interface PostWriteValidationClassification {
     verdict: PostWriteValidationVerdict;
     evidencePassed: boolean;
     diagnosticsPassed: boolean;
-    /** Fresh full-file diagnostics superseded a contradictory fragment-only syntax claim. */
+    /** Fresh full-file diagnostics superseded contradictory evidence claims diagnostics can authoritatively cover. */
+    diagnosticsSupersededEvidenceConflicts?: boolean;
+    /** Back-compat flag for callers that only understood fragment-only syntax conflicts. */
     diagnosticsSupersededSyntaxConflict?: boolean;
+    diagnosticsSupersededConflictKinds?: EvidenceClaimKind[];
     diagnosticErrorCount?: number;
     diagnosticsFreshness?: 'fresh' | 'pending' | 'stale';
 }
@@ -153,6 +156,19 @@ export interface FinalPdxEvidenceValidation {
     /** Pending only because bounded extraction needs a full-file fresh diagnostic pass. */
     coveragePendingFiles: string[];
     report: string;
+}
+
+const DIAGNOSTIC_SUPERSEDABLE_EVIDENCE_KINDS: ReadonlySet<EvidenceClaimKind> = new Set([
+    'syntax_shape',
+    'scope_compatibility',
+    'symbol_exists',
+    'reference_exists',
+]);
+
+function diagnosticsCanSupersedeEvidenceConflict(claim: EvidenceGateDecision['claims'][number]): boolean {
+    return claim.status === 'conflict'
+        && claim.blocking === true
+        && DIAGNOSTIC_SUPERSEDABLE_EVIDENCE_KINDS.has(claim.kind);
 }
 
 /** Classify a completed PDX write without treating "not disproved" as verified. */
@@ -175,23 +191,29 @@ export function classifyPostWriteValidation(
     const diagnosticsPassed = diagnosticErrors !== undefined
         && diagnosticErrors.length === 0
         && freshness === 'fresh';
-    const syntaxConflicts = blockingClaims.filter(claim =>
-        claim.kind === 'syntax_shape' && claim.status === 'conflict');
-    const diagnosticsSupersededSyntaxConflict = diagnosticsPassed && syntaxConflicts.length > 0;
+    const supersededConflicts = diagnosticsPassed
+        ? blockingClaims.filter(diagnosticsCanSupersedeEvidenceConflict)
+        : [];
+    const supersededConflictSet = new Set(supersededConflicts);
+    const diagnosticsSupersededEvidenceConflicts = supersededConflicts.length > 0;
+    const supersededConflictKinds = Array.from(new Set(supersededConflicts.map(claim => claim.kind))).sort();
+    const diagnosticsSupersededSyntaxConflict = supersededConflictKinds.includes('syntax_shape');
     const hasConflict = blockingClaims.some(claim =>
         claim.status === 'conflict'
-        && !(diagnosticsSupersededSyntaxConflict && claim.kind === 'syntax_shape'));
+        && !supersededConflictSet.has(claim));
     const evidencePassed = decision !== undefined
         && decision.degraded !== true
         && blockingClaims.every(claim => claim.status === 'verified'
-            || (diagnosticsSupersededSyntaxConflict && claim.kind === 'syntax_shape'));
-    const repair = hasConflict || (diagnosticErrors?.length ?? 0) > 0;
+            || supersededConflictSet.has(claim));
+    const repair = hasConflict || ((diagnosticErrors?.length ?? 0) > 0 && freshness === 'fresh');
     const pending = evidenceUnavailable || !evidencePassed || !diagnosticsPassed;
     return {
         verdict: repair ? 'repair' : pending ? 'pending' : 'allow',
         evidencePassed,
         diagnosticsPassed,
+        diagnosticsSupersededEvidenceConflicts: diagnosticsSupersededEvidenceConflicts || undefined,
         diagnosticsSupersededSyntaxConflict: diagnosticsSupersededSyntaxConflict || undefined,
+        diagnosticsSupersededConflictKinds: supersededConflictKinds.length > 0 ? supersededConflictKinds : undefined,
         diagnosticErrorCount: diagnosticErrors?.length,
         diagnosticsFreshness: freshness,
     };

@@ -89,5 +89,13 @@ describe('planModeGuard', () => {
 });
 
 function loadPlanModeGuardModule() {
+    // Bind planModeGuard to the same workspacePaths instance this suite
+    // configures. Earlier suites may evict workspacePaths from the module
+    // cache (e.g. shaderTools), leaving the cached planModeGuard bound to a
+    // stale copy and splitting configurePrivateAgentStorage from the guard.
+    const workspacePathsPath = require.resolve('../../extension/ai/workspacePaths');
+    const planModeGuardPath = require.resolve('../../extension/ai/planModeGuard');
+    delete require.cache[workspacePathsPath];
+    delete require.cache[planModeGuardPath];
     return require('../../extension/ai/planModeGuard') as typeof import('../../extension/ai/planModeGuard');
 }

@@ -10,6 +10,47 @@ export interface AgentStreamStateLike {
     isComplete: boolean;
 }
 
+export const WEBVIEW_LIVE_STEP_LIMIT = 160;
+const WEBVIEW_STREAM_CONTENT_LIMIT = 16_000;
+const PINNED_LIVE_STEP_TYPES = new Set(['plan_card', 'walkthrough_card', 'blueprint_card']);
+
+function isStreamDelta(step: { type?: unknown }): boolean {
+    return step.type === 'text_delta' || step.type === 'thinking_content';
+}
+
+function clipStreamContent(content: string): string {
+    if (content.length <= WEBVIEW_STREAM_CONTENT_LIMIT) return content;
+    const head = content.slice(0, 5_000);
+    const tail = content.slice(-10_000);
+    return `${head}\n\n...\n\n${tail}`;
+}
+
+/**
+ * Append a live Webview step without allowing a long run to grow an unbounded
+ * DOM-render input. Adjacent stream deltas are merged and old non-card steps
+ * are evicted first; replay uses the same 160-step window.
+ *
+ * @returns true when the new delta was merged into the previous step.
+ */
+export function pushBoundedWebviewLiveStep(
+    steps: Array<Record<string, unknown>>,
+    step: Record<string, unknown>,
+    maxSteps = WEBVIEW_LIVE_STEP_LIMIT,
+): boolean {
+    const last = steps[steps.length - 1];
+    if (last && isStreamDelta(last) && last.type === step.type && last.agentId === step.agentId) {
+        last.content = clipStreamContent(String(last.content ?? '') + String(step.content ?? ''));
+        return true;
+    }
+
+    steps.push(step);
+    while (steps.length > Math.max(1, maxSteps)) {
+        const removable = steps.findIndex(candidate => !PINNED_LIVE_STEP_TYPES.has(String(candidate?.type ?? '')));
+        steps.splice(removable >= 0 ? removable : 0, 1);
+    }
+    return false;
+}
+
 export function latestLiveToolName(
     steps: Array<{ type?: string; toolName?: string }>,
     fallback = getChatI18n('zh-cn').live.waitingForOutput

@@ -94,7 +94,7 @@ import {
     compactStepsForUi,
     compactToolArgsForUi,
     compactToolResultForUi,
-    pushLiveStepForReplay,
+    prepareLiveStepForUi,
     UI_TOOL_RESULT_BUDGET,
 } from './chat/uiStepCompaction';
 import { hasImplementationPlanArtifact, shouldRenderInteractivePlan } from './executePlanHandoff';
@@ -1160,11 +1160,8 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                     streaming: true,  // Enable typewriter text effect
                     topicId: this.topicManager.currentTopic?.id,
                     onStep: (step) => {
-                        const replayStep = compactStepForUi(step);
-                        if (replayStep) {
-                            pushLiveStepForReplay(this._liveSteps, replayStep, UI_REPLAY_STEP_LIMIT * 2);
-                        }
-                        this.postMessage({ type: 'agentStep', step });
+                        const uiStep = prepareLiveStepForUi(this._liveSteps, step, UI_REPLAY_STEP_LIMIT * 2);
+                        if (uiStep) this.postMessage({ type: 'agentStep', step: uiStep });
                     },
                     onRunStarted: runId => { this.currentRunId = runId; },
                     abortSignal: this.abortController!.signal,

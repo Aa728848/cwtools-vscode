@@ -36,6 +36,7 @@ import {
     buildThinkingSummaryHtml,
     hasVisibleLiveContent,
     latestLiveToolName,
+    pushBoundedWebviewLiveStep,
 } from './chat/liveSteps';
 import {
     applySettingsOverview,
@@ -4382,9 +4383,8 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         return state.liveProcessBody?.querySelector('.process-stack') as HTMLElement | null ?? state.liveProcessBody;
     }
 
-    function ensureLiveSummary(state: AgentStreamState, step?: any, coalesced = false) {
+    function ensureLiveSummary(state: AgentStreamState, step?: any) {
         if (!state.container) return;
-        if (step && !coalesced) state.liveSteps.push(step);
         if (!state.liveSummary) {
             state.liveSummary = document.createElement('div');
             state.liveSummary.className = 'live-run-summary-anchor';
@@ -4522,8 +4522,13 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         if (key) {
             if (state.liveStepKeys.has(key)) return;
             state.liveStepKeys.add(key);
+            while (state.liveStepKeys.size > 320) {
+                const oldest = state.liveStepKeys.values().next().value as string | undefined;
+                if (oldest === undefined) break;
+                state.liveStepKeys.delete(oldest);
+            }
         }
-        state.liveSteps.push(step);
+        pushBoundedWebviewLiveStep(state.liveSteps, step);
         state.lastStepAt = Date.now();
         scheduleCodexLiveTurnRender(state);
     }
@@ -4636,7 +4641,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
 
         if (state.container?.querySelector(':scope > .codex-live-host')) {
             const coalesced = coalesceLiveStep(state, s);
-            if (!coalesced) state.liveSteps.push(s);
+            if (!coalesced) pushBoundedWebviewLiveStep(state.liveSteps, s);
             state.lastStepAt = Date.now();
             if (s.type === 'subtask_complete') {
                 state.isComplete = true;
@@ -4652,7 +4657,8 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
             return;
         }
         const coalesced = coalesceLiveStep(state, s);
-        ensureLiveSummary(state, s, coalesced);
+        if (!coalesced) pushBoundedWebviewLiveStep(state.liveSteps, s);
+        ensureLiveSummary(state, s);
         state.lastStepAt = Date.now();
         updateSubagentCard(state);
 

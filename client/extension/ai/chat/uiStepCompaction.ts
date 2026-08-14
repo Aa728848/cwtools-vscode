@@ -45,9 +45,17 @@ export function compactObjectForUi(value: unknown, maxChars: number, keepKeys: s
         const source = value as Record<string, unknown>;
         for (const key of keepKeys) {
             if (source[key] === undefined) continue;
-            kept[key] = typeof source[key] === 'string'
-                ? clipUiText(source[key], Math.min(1200, maxChars))
-                : source[key];
+            const retainedValue = source[key];
+            const retainedBudget = Math.min(1200, maxChars);
+            if (typeof retainedValue === 'string') {
+                kept[key] = clipUiText(retainedValue, retainedBudget);
+                continue;
+            }
+            let retainedRaw = '';
+            try { retainedRaw = JSON.stringify(retainedValue); } catch { /* budget fallback below */ }
+            kept[key] = retainedRaw.length <= retainedBudget
+                ? retainedValue
+                : budgetToolResult(retainedValue, retainedBudget);
         }
     }
     return kept;
@@ -164,4 +172,16 @@ export function pushLiveStepForReplay(liveSteps: any[], step: any, maxSteps: num
     if (liveSteps.length > maxSteps) {
         liveSteps.splice(0, liveSteps.length - maxSteps);
     }
+}
+
+/**
+ * Prepare one live step for transport and keep the visibility-replay buffer in
+ * sync with that exact compact payload. Returning undefined suppresses noisy
+ * progress events before they can congest the Extension Host/Webview bridge.
+ */
+export function prepareLiveStepForUi(liveSteps: any[], step: any, maxSteps: number): any | undefined {
+    const compact = compactStepForUi(step);
+    if (!compact) return undefined;
+    pushLiveStepForReplay(liveSteps, compact, maxSteps);
+    return compact;
 }

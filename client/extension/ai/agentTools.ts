@@ -139,6 +139,8 @@ export interface PostWriteValidationClassification {
     verdict: PostWriteValidationVerdict;
     evidencePassed: boolean;
     diagnosticsPassed: boolean;
+    /** Fresh full-file diagnostics superseded a contradictory fragment-only syntax claim. */
+    diagnosticsSupersededSyntaxConflict?: boolean;
     diagnosticErrorCount?: number;
     diagnosticsFreshness?: 'fresh' | 'pending' | 'stale';
 }
@@ -170,19 +172,26 @@ export function classifyPostWriteValidation(
         ? result.freshness
         : undefined;
     const blockingClaims = decision?.claims.filter(claim => claim.blocking) ?? [];
-    const hasConflict = blockingClaims.some(claim => claim.status === 'conflict');
-    const evidencePassed = decision !== undefined
-        && decision.degraded !== true
-        && blockingClaims.every(claim => claim.status === 'verified');
     const diagnosticsPassed = diagnosticErrors !== undefined
         && diagnosticErrors.length === 0
         && freshness === 'fresh';
+    const syntaxConflicts = blockingClaims.filter(claim =>
+        claim.kind === 'syntax_shape' && claim.status === 'conflict');
+    const diagnosticsSupersededSyntaxConflict = diagnosticsPassed && syntaxConflicts.length > 0;
+    const hasConflict = blockingClaims.some(claim =>
+        claim.status === 'conflict'
+        && !(diagnosticsSupersededSyntaxConflict && claim.kind === 'syntax_shape'));
+    const evidencePassed = decision !== undefined
+        && decision.degraded !== true
+        && blockingClaims.every(claim => claim.status === 'verified'
+            || (diagnosticsSupersededSyntaxConflict && claim.kind === 'syntax_shape'));
     const repair = hasConflict || (diagnosticErrors?.length ?? 0) > 0;
     const pending = evidenceUnavailable || !evidencePassed || !diagnosticsPassed;
     return {
         verdict: repair ? 'repair' : pending ? 'pending' : 'allow',
         evidencePassed,
         diagnosticsPassed,
+        diagnosticsSupersededSyntaxConflict: diagnosticsSupersededSyntaxConflict || undefined,
         diagnosticErrorCount: diagnosticErrors?.length,
         diagnosticsFreshness: freshness,
     };

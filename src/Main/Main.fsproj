@@ -48,6 +48,7 @@
     <Compile Include="LocalisationPreview.fs" />
     <Compile Include="SemanticDelta.fs" />
     <Compile Include="SemanticDirectoryCatalog.fs" />
+    <Compile Include="PdxFragmentValidation.fs" />
     <Compile Include="Program.fs" />
   </ItemGroup>
   <ItemGroup>

@@ -26,6 +26,7 @@ open Main.Completion
 open Main.SemanticGraph
 open Main.SemanticDelta
 open Main.SemanticDirectoryCatalog
+open Main.PdxFragmentValidation
 open CWTools.Utilities.Utils
 open CWTools.Localisation
 open LSP.LanguageServer   // brings gameStateLock into scope
@@ -11802,31 +11803,35 @@ type Server(client: ILanguageClient) =
                             let code = codeArg.AsString()
                             let virtualPath = "fragment://virtual.txt"
 
-                            // 1. Try CKParser parsing
+                            // 1. Try CKParser parsing. Recovery diagnostics are
+                            // meaningful only after the complete parse fails;
+                            // running them for a healthy multi-root file emits
+                            // CW001_STRUCTURAL_RECOVERY information and used to
+                            // make every such fragment report valid=false.
                             let parsed = CKParser.parseString code virtualPath
-                            let parserErrors =
+                            let parseSucceeded, parserErrors =
                                 match parsed with
-                                | Success _ -> []
+                                | Success _ -> true, []
                                 | Failure(msg, p, _) ->
+                                    false,
                                     [ {| line = int p.Position.Line
                                          col = int p.Position.Column
                                          message = msg |} ]
-
-                            // 2. Bracket scanning
-                            let braceIssues = scanBraceIssues code virtualPath
-                            let braceErrors =
-                                braceIssues
-                                |> List.map (fun (_, _, _, msg, rng, _, _) ->
-                                    {| line = int rng.StartLine
-                                       col = int rng.StartColumn
-                                       message = msg |})
-                            let recoveryIssues = scanRecoveryIssues code virtualPath
-                            let recoveryErrors =
-                                recoveryIssues
-                                |> List.map (fun (code, _, _, msg, rng, _, _) ->
-                                    {| line = int rng.StartLine
-                                       col = int rng.StartColumn
-                                       message = sprintf "%s: %s" code msg |})
+                            let braceErrors, recoveryErrors =
+                                collectWhenParseFails parseSucceeded ([], []) (fun () ->
+                                    let braceErrors =
+                                        scanBraceIssues code virtualPath
+                                        |> List.map (fun (_, _, _, msg, rng, _, _) ->
+                                            {| line = int rng.StartLine
+                                               col = int rng.StartColumn
+                                               message = msg |})
+                                    let recoveryErrors =
+                                        scanRecoveryIssues code virtualPath
+                                        |> List.map (fun (code, _, _, msg, rng, _, _) ->
+                                            {| line = int rng.StartLine
+                                               col = int rng.StartColumn
+                                               message = sprintf "%s: %s" code msg |})
+                                    braceErrors, recoveryErrors)
 
                             let allErrors = parserErrors @ braceErrors @ recoveryErrors
                             let fragments = splitTopLevelFragments code

@@ -1105,11 +1105,12 @@ describe('AgentToolExecutor evidence gate wiring', () => {
         expect(gateEvents[0]!.payload.mode).to.equal('shadow');
         expect(gateEvents[0]!.payload.verdict).to.equal('block');
         expect(gateEvents[0]!.payload.counts.conflict).to.be.greaterThan(0);
-        expect(result.postWriteValidationPassed).to.equal(false);
+        expect(result.postWriteValidationPassed).to.equal(true);
         expect(result.postWriteValidation).to.deep.include({
-            verdict: 'repair',
-            evidencePassed: false,
+            verdict: 'allow',
+            evidencePassed: true,
             diagnosticsPassed: true,
+            diagnosticsSupersededSyntaxConflict: true,
             diagnosticErrorCount: 0,
         });
     });
@@ -1178,8 +1179,12 @@ describe('AgentToolExecutor evidence gate wiring', () => {
         expect(gateEvents.length).to.be.greaterThan(0);
         const preWriteEvents = gateEvents.filter(e => e.payload.phase === 'pre_write');
         expect(preWriteEvents[preWriteEvents.length - 1]!.payload.verdict).to.equal('override');
-        expect(result.postWriteValidationPassed).to.equal(false);
-        expect(result.requiresRepair).to.equal(true);
+        expect(result.postWriteValidationPassed).to.equal(true);
+        expect(result.postWriteValidation).to.deep.include({
+            verdict: 'allow',
+            diagnosticsSupersededSyntaxConflict: true,
+        });
+        expect(result.requiresRepair).to.not.equal(true);
     });
 
     it('denying the override keeps the write blocked', async () => {

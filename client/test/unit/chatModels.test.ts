@@ -18,7 +18,7 @@ import {
     shortenText,
     type TopicPanelItem,
 } from '../../webview/chat/topics';
-import { buildSubagentCardHtml, buildSubagentMetaHtml, hasVisibleLiveContent, latestLiveToolName } from '../../webview/chat/liveSteps';
+import { buildSubagentCardHtml, buildSubagentMetaHtml, hasVisibleLiveContent, latestLiveToolName, pushBoundedWebviewLiveStep } from '../../webview/chat/liveSteps';
 import { buildSettingsOverviewModel, resolveSettingsModelContextTokens } from '../../webview/chat/settingsOverview';
 import { getChatI18n } from '../../webview/chat/i18n';
 import { applyModeUi } from '../../webview/chat/modes';
@@ -42,6 +42,18 @@ describe('long user message presentation', () => {
             characterCount: 13,
             preview: 'short\nmessage',
         });
+    });
+
+    it('bounds long-running live Webview steps and merges adjacent stream deltas', () => {
+        const steps: Array<Record<string, unknown>> = [];
+        pushBoundedWebviewLiveStep(steps, { type: 'thinking_content', content: 'a', agentId: 'child' }, 4);
+        expect(pushBoundedWebviewLiveStep(steps, { type: 'thinking_content', content: 'b', agentId: 'child' }, 4)).to.equal(true);
+        expect(steps[0]!.content).to.equal('ab');
+        for (let i = 0; i < 10; i++) {
+            pushBoundedWebviewLiveStep(steps, { type: 'tool_call', toolName: 'read_file', invocationId: `call-${i}` }, 4);
+        }
+        expect(steps).to.have.length(4);
+        expect(steps.map(step => step.invocationId)).to.deep.equal(['call-6', 'call-7', 'call-8', 'call-9']);
     });
 
     it('collapses long single-paragraph input and bounds its preview', () => {

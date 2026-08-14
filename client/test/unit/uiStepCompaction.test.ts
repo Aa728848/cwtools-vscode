@@ -3,6 +3,7 @@ import {
     aggregateStreamStepsForUi,
     compactMessagesForWebview,
     compactStepsForUi,
+    prepareLiveStepForUi,
     pushLiveStepForReplay,
     UI_STREAM_CONTENT_LIMIT,
 } from '../../extension/ai/chat/uiStepCompaction';
@@ -105,5 +106,33 @@ describe('uiStepCompaction', () => {
         }
         expect(liveSteps).to.have.length(4);
         expect(liveSteps[0].content).to.equal('c6');
+    });
+
+    it('prepares the same compact bounded payload for live transport and replay', () => {
+        const liveSteps: any[] = [];
+        const transported = prepareLiveStepForUi(liveSteps, {
+            type: 'tool_result',
+            toolName: 'read_file',
+            toolResult: { content: 'x'.repeat(20_000) },
+            timestamp: 1,
+        }, 4);
+        expect(transported).to.equal(liveSteps[0]);
+        expect(JSON.stringify(transported.toolResult).length).to.be.lessThan(7_000);
+
+        const arrayPayload = prepareLiveStepForUi(liveSteps, {
+            type: 'tool_result',
+            toolName: 'search_mod_files',
+            toolResult: { files: Array.from({ length: 2_000 }, (_, index) => ({ file: `common/test_${index}.txt` })) },
+            timestamp: 2,
+        }, 4);
+        expect(JSON.stringify(arrayPayload.toolResult).length).to.be.lessThan(8_000);
+
+        const suppressed = prepareLiveStepForUi(liveSteps, {
+            type: 'orchestrator_progress',
+            content: 'waiting for model response',
+            timestamp: 3,
+        }, 4);
+        expect(suppressed).to.equal(undefined);
+        expect(liveSteps).to.have.length(2);
     });
 });

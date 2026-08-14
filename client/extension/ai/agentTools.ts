@@ -39,11 +39,11 @@ import { queryProjectKnowledge } from './projectKnowledge';
 import { queryInterfaceKnowledge } from './interfaceKnowledge';
 import { validateOffCanvasGuiPreservation } from '../guiSafety';
 import { loadSkill } from './skills';
-import { validateGitOpsForMode, validatePlanModeToolUse } from './planModeGuard';
+import { isPlanModeCardArtifactFile, validateGitOpsForMode, validatePlanModeToolUse } from './planModeGuard';
 import { saveProjectWorkflow } from './workflowRegistry';
 import { budgetToolResult, TOOL_RESULT_BUDGET_HARD_STUB } from './contextBudget';
 import { aiText, EVIDENCE_GATE_MSG } from './messages';
-import { getPrivateAiStorageRoot, getPrivateTopicStorageDirCandidates } from './workspacePaths';
+import { getPrivateAiStorageRoot, getPrivateTopicStorageDir, getPrivateTopicStorageDirCandidates } from './workspacePaths';
 import { isPathInsideOrEqual } from '../pathScope';
 import { TOOL_REGISTRY, WRITE_TOOLS } from './tools/registry';
 import {
@@ -729,8 +729,18 @@ export class AgentToolExecutor {
         if (subject === 'edit' && effectiveWriteMode === 'auto' && preset !== 'read-only') {
             profileRules.push({ id: 'effective-auto-write', subject: 'edit', pathGlob: '**', action: 'allow', riskMax: 2, scope: 'session' });
         }
-        const profile = buildProfile(preset, this.workspaceRoot, profileRules);
         const targets = getAgentToolTargetFiles(toolName, args, this.workspaceRoot, context?.runnerOptions?.topicId);
+        const profile = buildProfile(preset, this.workspaceRoot, profileRules);
+        const topicId = context?.runnerOptions?.topicId;
+        if (subject === 'edit' && topicId && targets.length > 0) {
+            const topicRoot = path.resolve(getPrivateTopicStorageDir(topicId, this.workspaceRoot));
+            const targetsCurrentPrivateTopic = targets.every(target => isPathInsideOrEqual(path.resolve(target), topicRoot));
+            const targetsAreWorkflowArtifacts = targets.every(target =>
+                isPlanModeCardArtifactFile(target, this.workspaceRoot, topicId));
+            if (targetsCurrentPrivateTopic && targetsAreWorkflowArtifacts) {
+                profile.writableRoots.push(topicRoot);
+            }
+        }
         const command = typeof args.command === 'string' ? args.command : undefined;
         const commandRules = cfg.get<ConfiguredCommandPolicyRule[]>('shell.commandRules', []);
         const commandPreflight = command ? preflightCommand(command, commandRules) : undefined;

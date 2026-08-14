@@ -28,6 +28,8 @@ import {
 import { diagnosticMetadata } from './diagnosticMetadata';
 import { diagnosticCodeString } from '../../diagnosticI18n';
 import { getPrivateTopicStorageDir, canonicalPathKey } from '../workspacePaths';
+import { isPlanModeCardArtifactFile } from '../planModeGuard';
+import { isPathInsideOrEqual } from '../../pathScope';
 import {
     isSecuritySandboxDisabled,
     resolveWorkspacePathInput,
@@ -266,11 +268,24 @@ export class FileToolHandler {
         return resolveWorkspacePathInput(normalizedInput, this.ctx.workspaceRoot, { preferExistingAiPath });
     }
 
+    private resolveCurrentTopicArtifact(filePath: string, context?: import('../types').AgentToolContext): string | undefined {
+        const topicId = context?.runnerOptions?.topicId;
+        if (!topicId) return undefined;
+        const resolved = path.isAbsolute(filePath)
+            ? path.resolve(filePath)
+            : path.resolve(this.ctx.workspaceRoot, filePath);
+        const topicRoot = path.resolve(getPrivateTopicStorageDir(topicId, this.ctx.workspaceRoot));
+        if (!isPathInsideOrEqual(resolved, topicRoot)) return undefined;
+        return isPlanModeCardArtifactFile(resolved, this.ctx.workspaceRoot, topicId) ? resolved : undefined;
+    }
+
     private resolveAndAssertInWorkspace(filePath: string, context?: import('../types').AgentToolContext): string {
         const resolution = this.resolveWorkspacePath(filePath, true, context);
         if (isSecuritySandboxDisabled() || resolution.isWithinAnyWorkspace) {
             return resolution.resolved;
         }
+        const topicArtifact = this.resolveCurrentTopicArtifact(filePath, context);
+        if (topicArtifact) return topicArtifact;
         throw new Error(`Access denied: Path '${filePath}' is outside the workspace root.`);
     }
 
@@ -356,6 +371,8 @@ export class FileToolHandler {
         const resolution = this.resolveWorkspacePath(this.normalizeAgentWorkspaceWritePath(filePath, context), false, context);
         if (!isSecuritySandboxDisabled()) {
             if (!resolution.isWithinAnyWorkspace) {
+                const topicArtifact = this.resolveCurrentTopicArtifact(filePath, context);
+                if (topicArtifact) return topicArtifact;
                 throw new Error(`Access denied: Path '${filePath}' is outside the workspace root.`);
             }
             if (resolution.scope === 'workspace') {

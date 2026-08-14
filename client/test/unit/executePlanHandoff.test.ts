@@ -127,6 +127,37 @@ describe('Execute-to-Plan handoff', () => {
         })).missing).to.include('operation file ownership');
     });
 
+    it('renders approval for plans with a verification-only operation', () => {
+        const plan = completePlan({
+            operations: [
+                {
+                    id: 'runtime',
+                    description: 'Update runtime approval handling.',
+                    files: ['client/extension/ai/executePlanHandoff.ts'],
+                    dependsOn: [],
+                },
+                {
+                    id: 'tests',
+                    description: 'Add the approval regression test.',
+                    files: ['client/test/unit/executePlanHandoff.test.ts'],
+                    dependsOn: ['runtime'],
+                },
+                {
+                    id: 'review',
+                    description: 'Run the acceptance checks without writing another file.',
+                    files: [],
+                    dependsOn: ['runtime', 'tests'],
+                },
+            ],
+        });
+
+        expect(validateImplementationPlan(plan).complete).to.equal(true);
+        expect(shouldRenderInteractivePlan({ explanation: plan, steps: [] }, {
+            mode: 'plan',
+            planText: plan,
+        })).to.equal(true);
+    });
+
     it('rejects operation dependencies that are missing or cyclic', () => {
         const missingDependency = completePlan({
             operations: [{

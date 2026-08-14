@@ -2,6 +2,7 @@ import * as path from 'path';
 import { getAgentToolTargetFiles } from './runner/toolScheduler';
 import { WRITE_TOOLS } from './tools/registry';
 import type { AgentMode } from './types';
+import { getPrivateTopicStorageDirCandidates } from './workspacePaths';
 
 export interface PlanModeGuardResult {
     allowed: boolean;
@@ -66,18 +67,27 @@ export function isImplementationPlanFile(filePath: string, workspaceRoot: string
     return false;
 }
 
-function getAiRelativeSegments(filePath: string, workspaceRoot: string): string[] | undefined {
+function getAiRelativeSegments(filePath: string, workspaceRoot: string, topicId?: string): string[] | undefined {
     const resolved = path.resolve(filePath);
     const workspace = path.resolve(workspaceRoot);
     const aiRoot = path.join(workspace, '.cwtools');
     const aiRootLegacy = path.join(workspace, '.cwtools-ai');
 
     let relative = '';
-    if (isInside(resolved, aiRoot)) {
+    if (topicId) {
+        const safeTopicId = topicId.replace(/[^a-zA-Z0-9_.-]/g, '_');
+        const currentTopicDir = getPrivateTopicStorageDirCandidates(topicId, workspaceRoot)
+            .map(candidate => path.resolve(candidate))
+            .find(candidate => isInside(resolved, candidate));
+        if (currentTopicDir) {
+            relative = path.join(safeTopicId, path.relative(currentTopicDir, resolved));
+        }
+    }
+    if (!relative && isInside(resolved, aiRoot)) {
         relative = path.relative(aiRoot, resolved);
-    } else if (isInside(resolved, aiRootLegacy)) {
+    } else if (!relative && isInside(resolved, aiRootLegacy)) {
         relative = path.relative(aiRootLegacy, resolved);
-    } else {
+    } else if (!relative) {
         const workspaceName = path.basename(workspace).toLowerCase();
         if ((workspaceName === '.cwtools' || workspaceName === '.cwtools-ai') && isInside(resolved, workspace)) {
             relative = path.relative(workspace, resolved);
@@ -98,9 +108,9 @@ function getAiRelativeSegments(filePath: string, workspaceRoot: string): string[
     return segments.length > 0 ? segments : undefined;
 }
 
-export function isPlanModeCardArtifactFile(filePath: string, workspaceRoot: string): boolean {
+export function isPlanModeCardArtifactFile(filePath: string, workspaceRoot: string, topicId?: string): boolean {
     if (!filePath) return false;
-    const segments = getAiRelativeSegments(filePath, workspaceRoot);
+    const segments = getAiRelativeSegments(filePath, workspaceRoot, topicId);
     if (!segments) return false;
 
     const base = path.basename(filePath);
@@ -116,7 +126,7 @@ export function isPlanModeCardArtifactFile(filePath: string, workspaceRoot: stri
 
 function isCurrentTopicImplementationPlan(filePath: string, workspaceRoot: string, topicId: string | undefined): boolean {
     if (!topicId || !EXACT_HANDOFF_PLAN_FILE_RE.test(path.basename(filePath))) return false;
-    const segments = getAiRelativeSegments(filePath, workspaceRoot);
+    const segments = getAiRelativeSegments(filePath, workspaceRoot, topicId);
     if (!segments || segments.length < 2) return false;
     const safeTopicId = topicId.replace(/[^a-zA-Z0-9_.-]/g, '_').toLowerCase();
     return segments[0]!.toLowerCase() === safeTopicId;
@@ -152,7 +162,7 @@ export function validatePlanModeToolUse(
 
     const planFileWriteTools = new Set(['write_file', 'edit_file', 'replace_lines']);
     const allowedArtifactTargets = mode === 'plan'
-        ? targets.every(target => isPlanModeCardArtifactFile(target, workspaceRoot))
+        ? targets.every(target => isPlanModeCardArtifactFile(target, workspaceRoot, topicId))
         : toolName === 'write_file'
             && targets.every(target => isCurrentTopicImplementationPlan(target, workspaceRoot, topicId));
     if (planFileWriteTools.has(toolName) && targets.length > 0 && allowedArtifactTargets) {

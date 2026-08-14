@@ -55,7 +55,7 @@ The host renders an approval card only when this contract is present and valid. 
 export const IMPLEMENTATION_PLAN_AUTHORING_GUIDANCE = `Plan authoring guidance — keep the contract strict while adapting the prose to the task:
 - Scale the plan to the real work. A cohesive one-file change may have one concise operation; cross-file work should split only at meaningful ownership or dependency boundaries. Do not pad a small task or force every plan into the same large-task template.
 - Make the human-readable body execution-ready without relying on earlier chat. Organize it into multiple meaningful Markdown sections so objective/context, concrete operations and data flow, and verification/acceptance/risks/rollback are easy to find. Section names and depth should follow the task.
-- Build the contract from verified evidence before writing the artifact. targetFiles is the canonical manifest: use exact project file paths, no globs or placeholders, and make it equal the union of operation files with every file owned exactly once.
+- Build the contract from verified evidence before writing the artifact. targetFiles is the canonical manifest: use exact project file paths, no globs or placeholders, and make it equal the union of operation files with every file owned exactly once. A verification-only operation may use an empty files array.
 - Give every operation a unique stable ID. dependsOn may reference only existing operation IDs and must contain no self-reference or cycle. Use an empty dependency list when no dependency exists.
 - Keep verification, acceptanceCriteria, risks with mitigations, and rollback concrete and non-empty. For a small change these may be brief, but they must still describe an observable check, a realistic regression risk, and a practical recovery action.
 - unresolvedCritical may be empty only after every decision that could change files, architecture, behavior, or acceptance has been resolved. If such a decision remains, ask the user or report the blocker; do not write a ready plan or emit the handoff block.
@@ -113,6 +113,10 @@ function isNonEmptyString(value: unknown): value is string {
 
 function isNonEmptyStringArray(value: unknown): value is string[] {
     return Array.isArray(value) && value.length > 0 && value.every(isNonEmptyString);
+}
+
+function isStringArray(value: unknown): value is string[] {
+    return Array.isArray(value) && value.every(isNonEmptyString);
 }
 
 function parsePlanHandoff(planText: string): { blockCount: number; value?: unknown } {
@@ -196,7 +200,7 @@ export function validateImplementationPlan(planText: string): ImplementationPlan
         const operation = rawOperation as Record<string, unknown>;
         if (!isNonEmptyString(operation.id)
             || !isNonEmptyString(operation.description)
-            || !isNonEmptyStringArray(operation.files)
+            || !isStringArray(operation.files)
             || !operation.files.every(isExactFilePath)
             || new Set(operation.files.map(file => file.trim())).size !== operation.files.length
             || !Array.isArray(operation.dependsOn)

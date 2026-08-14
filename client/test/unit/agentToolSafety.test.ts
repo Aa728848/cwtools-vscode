@@ -72,13 +72,14 @@ function loadToolModules() {
             agentRunner: require('../../extension/ai/agentRunner') as typeof import('../../extension/ai/agentRunner'),
             permissionPolicy: require('../../extension/ai/runner/permissionPolicy') as typeof import('../../extension/ai/runner/permissionPolicy'),
             processRegistry: require('../../extension/ai/runner/processRegistry') as typeof import('../../extension/ai/runner/processRegistry'),
+            workspacePaths: require('../../extension/ai/workspacePaths') as typeof import('../../extension/ai/workspacePaths'),
         };
     } finally {
         moduleLoader._load = originalLoad;
     }
 }
 
-const { fileTools, externalTools, agentTools, agentRunner, permissionPolicy, processRegistry: processRegistryModule } = loadToolModules();
+const { fileTools, externalTools, agentTools, agentRunner, permissionPolicy, processRegistry: processRegistryModule, workspacePaths } = loadToolModules();
 const { FileToolHandler } = fileTools;
 const { ExternalToolHandler, HeadTailTextBuffer } = externalTools;
 const { AgentToolExecutor, TOOL_DEFINITIONS } = agentTools;
@@ -312,6 +313,65 @@ describe('enforced central tool policy', () => {
         }, context) as any;
         expect(allowed.success).to.equal(true);
         expect(fs.readFileSync(artifactTarget, 'utf8')).to.equal('# Complete plan');
+    });
+
+    it('allows only current-topic plan artifacts in private extension storage', async () => {
+        const privateRoot = path.join(TEMP_BASE, 'private-agent-storage');
+        workspacePaths.configurePrivateAgentStorage(privateRoot);
+        try {
+            stubConfigOverrides['policy.preset'] = 'workspace-auto';
+            const executor = new AgentToolExecutor({} as any, workspaceRoot);
+            executor.fileWriteMode = 'auto';
+            const context = { runnerOptions: { mode: 'plan', domain: 'paradox', topicId: 'private-topic' } } as any;
+            const planPath = path.join(privateRoot, 'topics', 'private-topic', 'Implementation_Plan.md');
+
+            const planResult = await executor.execute('write_file', {
+                file: planPath,
+                content: '# Complete plan',
+            }, context) as any;
+            expect(planResult.success).to.equal(true);
+            expect(fs.readFileSync(planPath, 'utf8')).to.equal('# Complete plan');
+            const readBack = await executor.execute('read_file', { file: planPath }, {
+                runnerOptions: { mode: 'build', domain: 'paradox', topicId: 'private-topic' },
+            } as any) as any;
+            expect(readBack.content).to.include('# Complete plan');
+
+            const walkthroughPath = path.join(privateRoot, 'topics', 'private-topic', 'walkthrough.md');
+            const walkthroughResult = await executor.execute('write_file', {
+                file: walkthroughPath,
+                content: '# Walkthrough',
+            }, {
+                runnerOptions: { mode: 'build', domain: 'paradox', topicId: 'private-topic' },
+            } as any) as any;
+            expect(walkthroughResult.success).to.equal(true);
+            expect(fs.readFileSync(walkthroughPath, 'utf8')).to.equal('# Walkthrough');
+            const otherWalkthrough = path.join(privateRoot, 'topics', 'other-topic', 'walkthrough.md');
+            const blockedWalkthrough = await executor.execute('write_file', {
+                file: otherWalkthrough,
+                content: '# Wrong walkthrough',
+            }, {
+                runnerOptions: { mode: 'build', domain: 'paradox', topicId: 'private-topic' },
+            } as any) as any;
+            expect(blockedWalkthrough.policyDenied).to.equal(true);
+            expect(fs.existsSync(otherWalkthrough)).to.equal(false);
+
+            const blueprintResult = await executor.execute('write_design_blueprint', {
+                blueprint: { title: 'Incomplete blueprint' },
+            }, context) as any;
+            expect(blueprintResult.policyDenied).to.equal(undefined);
+            expect(blueprintResult.message).to.include('missing required planning section');
+
+            const otherTopic = path.join(privateRoot, 'topics', 'other-topic', 'Implementation_Plan.md');
+            const blocked = await executor.execute('write_file', {
+                file: otherTopic,
+                content: '# Wrong topic',
+            }, context) as any;
+            expect(blocked.planModeBlocked).to.equal(true);
+            expect(fs.existsSync(otherTopic)).to.equal(false);
+        } finally {
+            workspacePaths.configurePrivateAgentStorage(undefined);
+            fs.rmSync(privateRoot, { recursive: true, force: true });
+        }
     });
 });
 

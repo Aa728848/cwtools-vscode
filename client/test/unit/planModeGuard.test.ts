@@ -17,6 +17,7 @@ describe('planModeGuard', () => {
 
     it('lets plan mode write topic card artifacts but blocks project file edits', () => {
         const { validatePlanModeToolUse } = loadPlanModeGuardModule();
+        const { configurePrivateAgentStorage } = require('../../extension/ai/workspacePaths') as typeof import('../../extension/ai/workspacePaths');
         const workspaceRoot = path.join(process.cwd(), '.tmp-plan-mode-workspace');
 
         const artifact = validatePlanModeToolUse(
@@ -32,6 +33,26 @@ describe('planModeGuard', () => {
             workspaceRoot
         );
         expect(projectEdit.allowed).to.equal(false);
+
+        const privateRoot = path.join(process.cwd(), '.tmp-private-agent-storage');
+        configurePrivateAgentStorage(privateRoot);
+        try {
+            const privateArtifact = path.join(privateRoot, 'topics', 'topic-123', 'design_blueprint.md');
+            expect(validatePlanModeToolUse(
+                'write_file',
+                { file: privateArtifact },
+                workspaceRoot,
+                'topic-123',
+            ).allowed).to.equal(true);
+            expect(validatePlanModeToolUse(
+                'write_file',
+                { file: path.join(privateRoot, 'topics', 'other-topic', 'design_blueprint.md') },
+                workspaceRoot,
+                'topic-123',
+            ).allowed).to.equal(false);
+        } finally {
+            configurePrivateAgentStorage(undefined);
+        }
     });
 
     it('lets coordinators write only the current topic Implementation_Plan.md', () => {

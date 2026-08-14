@@ -1,5 +1,23 @@
 # Changelog
 
+## [2.14.0] - 2026-08-14
+
+### 新功能 / New Features
+- **[新增] 多 Agent 任务图引擎**：`dispatch_agents` 的子任务以 DAG 任务图编排——拓扑分层、就绪节点调度、完成/失败状态流转与下游级联取消、循环依赖检测；`produces`/`consumes` 实体契约自动推导数据流依赖。每个子任务可单独指定模型、提供商与推理强度（`reasoningEffort`），并支持优先级（`critical`/`normal`/`low`）。
+  English: [New] Multi-agent task graph engine — `dispatch_agents` subtasks are orchestrated as a DAG with topological layering, ready-node scheduling, completion/failure transitions with cascading cancellation, and cycle detection; `produces`/`consumes` entity contracts derive data-flow dependencies automatically. Each subtask can override model, provider, and reasoning effort, and carries a priority (`critical`/`normal`/`low`).
+- **[新增] `run_code` 批量工具步骤**：模型可在一次往返内串联执行一批普通工具步骤（最多 32 步），每步仍走与直接调用完全相同的权限、Plan 模式与安全检查，单步失败不中断后续步骤。面向长输出窗口模型（如 DeepSeek V4）显著减少轮次与输入重传。
+  English: [New] `run_code` batched tool steps — a model chains a bounded sequence of ordinary tool steps (up to 32) in one round trip; every step passes the same permission, plan-mode, and safety checks as a direct call, and a failed step does not stop later steps. Built for long-output windows (e.g. DeepSeek V4), it cuts round trips and input resends.
+
+### 优化 / Improvements
+- **[优化] DeepSeek 模型感知的上下文管理**：DeepSeek 模型/提供商（含通过中继提供商托管的 DeepSeek，按模型 id 识别）使用更高的压缩水位（阈值 0.85 / 目标 0.65 / 中继 0.80）与翻倍的工具结果归档上限，减少计费的摘要调用与热路径归档。
+  English: [Improvement] DeepSeek-aware context management — DeepSeek models/providers (including relay-hosted DeepSeek, recognized by model id) use higher compaction watermarks (threshold 0.85 / target 0.65 / mid-loop 0.80) and doubled tool-result archive limits, cutting billed summarizer calls and hot-path archiving.
+- **[优化] Plan 模式产物写入当前主题私有存储**：当前主题的 Plan 卡片产物允许写入该主题的私有存储目录；仅做验证用途的操作允许空文件清单。
+  English: [Improvement] Current-topic plan artifacts in private storage — plan-card artifacts for the active topic may be written into that topic's private storage; verification-only operations may carry an empty files list.
+
+### 稳定性与工程 / Stability & Engineering
+- **[更新] 清理未使用的配置与模块**：移除未使用的配置文件及相关资产、未使用的模块及其源文件（同步更新 `cwtools-stellaris-config` 与 `cwtools-mcp` 子模块指针）。
+  English: [Updated] Removed unused configuration and modules — unused config files/assets and an unused module with its sources were dropped (submodule pointers bumped for `cwtools-stellaris-config` and `cwtools-mcp`).
+
 ## [2.13.0] - 2026-08-13
 
 ### 新增 / Added

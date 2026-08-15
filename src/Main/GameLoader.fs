@@ -80,25 +80,27 @@ let private getRuleFilesFromFolder folder =
     else
         []
 
-let private getRuleFilesFromZip (zipPath: string) : (string * string) list =
-    if not (File.Exists zipPath) then
-        []
-    else
-        try
-            use archive = System.IO.Compression.ZipFile.OpenRead(zipPath)
-            archive.Entries
-            |> Seq.filter (fun entry ->
-                let ext = Path.GetExtension(entry.FullName)
-                (ext = ".cwt" || ext = ".log") && entry.Length > 0L)
-            |> Seq.map (fun entry ->
-                use stream = entry.Open()
-                use reader = new System.IO.StreamReader(stream)
-                let content = reader.ReadToEnd()
-                entry.FullName, content)
-            |> List.ofSeq
-        with e ->
-            logInfo $"Failed to read bundled rules ZIP %s{zipPath}: %A{e}"
-            []
+let private extractBundledRulesZip (zipPath: string) : string option =
+    try
+        let stamp = File.GetLastWriteTimeUtc(zipPath).Ticks
+        let size = FileInfo(zipPath).Length
+        let key = sprintf "%s-%x-%x" (Path.GetFileNameWithoutExtension zipPath) stamp size
+        let target = Path.Combine(Path.GetTempPath(), "cwtools-bundled-rules", key)
+        if Directory.Exists target then
+            Some target
+        else
+            let staging = target + ".tmp-" + Guid.NewGuid().ToString("N")
+            Directory.CreateDirectory(staging) |> ignore
+            System.IO.Compression.ZipFile.ExtractToDirectory(zipPath, staging)
+            try
+                Directory.Move(staging, target)
+            with _ ->
+                // Another process materialized the same package first.
+                try Directory.Delete(staging, true) with _ -> ()
+            Some target
+    with e ->
+        logInfo $"Failed to extract bundled rules ZIP %s{zipPath}: %A{e}"
+        None
 
 let private readConfigFiles configFiles =
     configFiles |> List.map (fun f -> f, File.ReadAllText(f))
@@ -117,7 +119,9 @@ let private resolveConfigFiles cachePath useManualRules manualRulesFolder bundle
     let bundledConfigFiles : (string * string) list =
         match bundledRulesFolder, useManualRules with
         | Some (path: string), false when path.EndsWith(".zip", System.StringComparison.OrdinalIgnoreCase) ->
-            getRuleFilesFromZip path
+            extractBundledRulesZip path
+            |> Option.map (fun dir -> readConfigFiles (getRuleFilesFromFolder dir))
+            |> Option.defaultValue []
         | Some path, false -> readConfigFiles (getRuleFilesFromFolder path)
         | _ -> []
 

@@ -61,6 +61,13 @@ try
     Directory.Delete(bundled, true)
     Directory.Delete(cache, true)
     assertSelection "bundled" (Some cache) false None (Some bundledZip) true
+    
+    let zipConfigs =
+        getConfigFiles (Some cache) false None (Some bundledZip) true
+    if zipConfigs.IsEmpty then
+        failwith "Bundled ZIP rules were selected without loading any rules."
+    if zipConfigs |> List.exists (fun (path, _) -> not (File.Exists path)) then
+        failwith "Bundled ZIP rules must be materialized to real files on disk."
 
     Directory.CreateDirectory(gameCacheDirectory) |> ignore
     let missingResources, missingFiles = getCachedFiles STL (Some gameCacheDirectory) false

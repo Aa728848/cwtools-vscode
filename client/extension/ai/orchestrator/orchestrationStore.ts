@@ -82,6 +82,8 @@ export interface StoredSubAgentResult {
     needsClarification?: boolean;
     clarification?: string;
     clarificationOptions?: string[];
+    validationPending?: boolean;
+    preservedAfterFailure?: boolean;
     handoff?: AgentHandoff;
 }
 
@@ -246,6 +248,8 @@ export function serializeAgentResults(agentResults: Map<string, SubAgentResult>)
                         ? option.slice(0, MAX_CLARIFICATION_OPTION_CHARS)
                         : option)
                 : undefined,
+            validationPending: result.validationPending,
+            preservedAfterFailure: result.preservedAfterFailure,
             handoff: result.handoff,
         };
     }
@@ -267,6 +271,8 @@ export function deserializeAgentResults(stored: Record<string, StoredSubAgentRes
             needsClarification: entry.needsClarification,
             clarification: entry.clarification,
             clarificationOptions: entry.clarificationOptions,
+            validationPending: entry.validationPending,
+            preservedAfterFailure: entry.preservedAfterFailure,
             handoff: entry.handoff,
         });
     }

@@ -199,6 +199,10 @@ export interface SubAgentResult {
     clarification?: string;
     /** Optional preset answers (2-4) the parent agent/user can choose from. */
     clarificationOptions?: string[];
+    /** Files were written, but deterministic validation was still pending/stale. */
+    validationPending?: boolean;
+    /** The sub-Agent failed after touching files; changes were intentionally preserved for parent repair/inspection. */
+    preservedAfterFailure?: boolean;
     /** Validated, structured parent-facing handoff. */
     handoff?: import('../runner/agentHandoff').AgentHandoff;
 }

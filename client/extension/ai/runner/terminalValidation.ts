@@ -39,6 +39,9 @@ export function updateTerminalValidationState(
     const allow = verdict === 'allow' || record.postWriteValidationPassed === true;
 
     const diagnostics = Array.isArray(record.diagnostics) ? record.diagnostics : undefined;
+    const freshness = record.freshness === 'fresh' || record.freshness === 'pending' || record.freshness === 'stale'
+        ? record.freshness
+        : undefined;
     if (diagnostics) {
         const hasErrors = diagnostics.some(item => {
             if (!item || typeof item !== 'object' || Array.isArray(item)) return false;
@@ -46,14 +49,17 @@ export function updateTerminalValidationState(
             return severity === 'error' || severity === 0;
         });
         for (const target of targetKeys) {
-            if (hasErrors) {
+            if (freshness === 'fresh' && hasErrors) {
                 state.diagnosticErrorTargets.add(target);
-            } else if (record.freshness === 'fresh') {
+            } else if (freshness === 'fresh') {
                 state.diagnosticErrorTargets.delete(target);
                 if (state.coveragePendingTargets.has(target)) {
                     state.coveragePendingTargets.delete(target);
                     state.pendingTargets.delete(target);
                 }
+            } else if (freshness === 'pending' || freshness === 'stale') {
+                state.diagnosticErrorTargets.delete(target);
+                state.pendingTargets.add(target);
             }
         }
     }

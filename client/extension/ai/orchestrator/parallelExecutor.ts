@@ -473,6 +473,20 @@ export class ParallelExecutor {
                             content: `Node ${node.id} needs parent-agent clarification; downstream nodes paused${cancelled.length ? `: ${cancelled.join(', ')}` : ''}`,
                             timestamp: Date.now(),
                         });
+                    } else if (result.preservedAfterFailure) {
+                        const cancelled = this.graphEngine.markFailed(
+                            graph,
+                            node.id,
+                            result.error ?? 'Sub-task failed after writing files; changes were preserved for parent repair'
+                        );
+                        options.onStep?.({
+                            type: 'error',
+                            content: aiText(
+                                `Node ${node.id} failed after writing files; changes were preserved and automatic retries stopped${cancelled.length ? `; downstream nodes cancelled: ${cancelled.join(', ')}` : ''}`,
+                                `节点 ${node.id} 在写入文件后失败；已保留改动并停止自动重试${cancelled.length ? `；已取消下游节点: ${cancelled.join(', ')}` : ''}`,
+                            ),
+                            timestamp: Date.now(),
+                        });
                     } else if (isProviderRateLimit(result.error) && node.retryCount < node.maxRetries) {
                         this.requeueRateLimitedNode(node, result.error);
                     } else if (isTimeoutLikeError(result.error)) {

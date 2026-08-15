@@ -102,8 +102,9 @@ describe('orchestrationStore', () => {
                 output: 'failed early',
                 error: 'provider timeout',
                 tokenUsage: { total: 4, input: 2, output: 2, estimatedCostCny: 0 },
-                writtenFiles: [],
+                writtenFiles: ['events/preserved.txt'],
                 stepCount: 1,
+                preservedAfterFailure: true,
             }],
         ]);
     }
@@ -162,6 +163,8 @@ describe('orchestrationStore', () => {
         expect(restoredResults.size).to.equal(2);
         expect(restoredResults.get('n1')!.handoff?.summary).to.equal('n1 handoff summary');
         expect(restoredResults.get('n2')!.error).to.equal('provider timeout');
+        expect(restoredResults.get('n2')!.preservedAfterFailure).to.equal(true);
+        expect(restoredResults.get('n2')!.writtenFiles).to.deep.equal(['events/preserved.txt']);
     });
 
     it('skips corrupted files and domain mismatches', async () => {

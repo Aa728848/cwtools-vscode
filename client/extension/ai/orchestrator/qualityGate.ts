@@ -491,6 +491,7 @@ export class QualityGate {
             forwardStep({
                 type: 'subtask_complete',
                 content: aiText('Review complete', '审查完成'),
+                subtaskStatus: 'completed',
                 timestamp: Date.now(),
             });
         } catch (error) {
@@ -499,6 +500,7 @@ export class QualityGate {
             forwardStep({
                 type: 'subtask_complete',
                 content: aiText('Review stopped after timeout or error', '审查因超时或异常终止'),
+                subtaskStatus: 'failed',
                 timestamp: Date.now(),
             });
             const acceptanceFailures = [...new Set([

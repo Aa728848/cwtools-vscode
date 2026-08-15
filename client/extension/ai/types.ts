@@ -2341,6 +2341,8 @@ export interface AgentStep {
     permissionId?: string;
     /** For subtask steps: the sub-agent type */
     subagentType?: string;
+    /** For subtask_complete: terminal state for UI/history. */
+    subtaskStatus?: 'completed' | 'failed' | 'cancelled' | 'needs_clarification' | 'pending_validation';
     transactionCard?: {
         id: string;
         filesRequested: string[];

@@ -1411,18 +1411,26 @@ export class AgentRuntime {
         }
 
         if (step.type === 'subtask_start' || step.type === 'subtask_complete') {
+            const taskState = step.type === 'subtask_start'
+                ? 'running'
+                : step.subtaskStatus === 'failed' || step.subtaskStatus === 'cancelled'
+                    ? 'failed'
+                    : step.subtaskStatus === 'needs_clarification' || step.subtaskStatus === 'pending_validation'
+                        ? 'pending'
+                        : 'completed';
             return this.appendTranscriptOperations(topicId, threadId, [{
                 op: 'entity.upsert',
                 entity: {
                     id: `task:${turnId}:${step.agentId ?? step.invocationId ?? step.stepIndex ?? ordinal}`,
                     kind: 'task',
                     anchorTurnId: turnId,
-                    state: step.type === 'subtask_start' ? 'running' : 'completed',
+                    state: taskState,
                     value: {
                         content: step.content,
                         agentId: step.agentId,
                         invocationId: step.invocationId,
                         subagentType: step.subagentType,
+                        subtaskStatus: step.subtaskStatus,
                     },
                     updatedAt: step.timestamp,
                 },

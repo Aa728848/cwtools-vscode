@@ -1015,6 +1015,39 @@ describe('Orchestrator runtime safety', () => {
         expect(result.failedNodes).to.deep.equal(['A']);
     });
 
+    it('executeGraph: does not retry failures after preserving written files', async () => {
+        const executor = new ParallelExecutor({ maxConcurrency: 1 });
+        const graph = TaskGraphEngine.createGraph('preserved failure');
+        TaskGraphEngine.addNode(graph, 'A', 'build', 'build', { maxRetries: 2 });
+        const steps: any[] = [];
+        let calls = 0;
+
+        const result = await executor.executeGraph(
+            graph,
+            new Blackboard(),
+            async () => {
+                calls++;
+                return {
+                    nodeId: 'A',
+                    success: false,
+                    output: 'validation failed',
+                    error: 'Subtask failed after writing files',
+                    tokenUsage: { total: 1, input: 1, output: 0, estimatedCostCny: 0 },
+                    writtenFiles: ['events/preserved.txt'],
+                    stepCount: 1,
+                    preservedAfterFailure: true,
+                };
+            },
+            { onStep: step => steps.push(step) },
+        );
+
+        expect(calls).to.equal(1);
+        expect(result.success).to.equal(false);
+        expect(result.failedNodes).to.deep.equal(['A']);
+        expect(graph.nodes.get('A')?.retryCount).to.equal(0);
+        expect(steps.some(step => String(step.content).includes('automatic retries stopped'))).to.equal(true);
+    });
+
     it('executeGraph: serializes ready nodes that declare the same planned file', async () => {
         const executor = new ParallelExecutor({ maxConcurrency: 2 });
         const graph = TaskGraphEngine.createGraph('file conflict');
@@ -1387,6 +1420,170 @@ describe('Orchestrator runtime safety', () => {
         expect(result.writtenFiles).to.deep.equal([
             require('path').resolve(workspaceRoot, 'events/subagent_target.txt'),
         ]);
+    });
+
+    it('executeSubAgent: preserves written files when only final validation is pending', async () => {
+        const fs = require('fs') as typeof import('fs');
+        const os = require('os') as typeof import('os');
+        const root = fs.mkdtempSync(path.join(os.tmpdir(), 'cwtools-subagent-pending-'));
+        const target = path.join(root, 'events', 'pending_target.txt');
+        const steps: any[] = [];
+        const runner = {
+            toolExecutor: { workspaceRoot: root },
+            run: async (_prompt: string, _context: any, _history: any[], options: any) => {
+                options.onBeforeFileWrite(target, null);
+                fs.mkdirSync(path.dirname(target), { recursive: true });
+                fs.writeFileSync(target, 'completed write', 'utf8');
+                options.onStep({
+                    type: 'tool_call',
+                    content: 'call write_file',
+                    toolName: 'write_file',
+                    toolArgs: { filePath: target, content: 'completed write' },
+                    invocationId: 'inv-pending-write',
+                    timestamp: Date.now(),
+                });
+                options.onStep({
+                    type: 'tool_result',
+                    content: 'result write_file',
+                    toolName: 'write_file',
+                    toolResult: {
+                        success: true,
+                        filePath: target,
+                        postWriteValidation: { verdict: 'pending' },
+                        requiresValidation: true,
+                    },
+                    invocationId: 'inv-pending-write',
+                    timestamp: Date.now(),
+                });
+                return {
+                    code: '',
+                    explanation: 'done',
+                    validationErrors: [{
+                        code: 'VALIDATION_PENDING',
+                        severity: 'error',
+                        message: 'diagnostics still pending',
+                        line: 0,
+                        column: 0,
+                    }],
+                    isValid: false,
+                    retryCount: 0,
+                    steps: [],
+                    tokenUsage: { total: 0, input: 0, output: 0, estimatedCostCny: 0 },
+                };
+            },
+        };
+        const orchestrator = new Orchestrator(runner as any);
+        const node = {
+            id: 'writer_pending',
+            agentType: 'build',
+            prompt: 'write target',
+            dependencies: [],
+            priority: 'normal',
+            status: 'pending',
+            retryCount: 0,
+            maxRetries: 0,
+        };
+
+        try {
+            const result = await (orchestrator as any).executeSubAgent(
+                node,
+                new Blackboard(),
+                { total: 0, input: 0, output: 0, estimatedCostCny: 0 },
+                new AbortController().signal,
+                (step: any) => steps.push(step),
+                { topicId: 'topic-1' },
+            );
+
+            expect(result.success).to.equal(true);
+            expect(result.validationPending).to.equal(true);
+            expect(result.writtenFiles).to.deep.equal([path.resolve(target)]);
+            expect(fs.existsSync(target)).to.equal(true);
+            expect(fs.readFileSync(target, 'utf8')).to.equal('completed write');
+            expect(steps.some(step => String(step.content).includes('Rollback:'))).to.equal(false);
+            expect(steps.find(step => step.type === 'subtask_complete')?.subtaskStatus).to.equal('pending_validation');
+        } finally {
+            fs.rmSync(root, { recursive: true, force: true });
+        }
+    });
+
+    it('executeSubAgent: preserves written files after explicit validation failure', async () => {
+        const fs = require('fs') as typeof import('fs');
+        const os = require('os') as typeof import('os');
+        const root = fs.mkdtempSync(path.join(os.tmpdir(), 'cwtools-subagent-failed-'));
+        const target = path.join(root, 'events', 'failed_target.txt');
+        const steps: any[] = [];
+        const runner = {
+            toolExecutor: { workspaceRoot: root },
+            run: async (_prompt: string, _context: any, _history: any[], options: any) => {
+                options.onBeforeFileWrite(target, null);
+                fs.mkdirSync(path.dirname(target), { recursive: true });
+                fs.writeFileSync(target, 'keep this write', 'utf8');
+                options.onStep({
+                    type: 'tool_call',
+                    content: 'call write_file',
+                    toolName: 'write_file',
+                    toolArgs: { filePath: target, content: 'keep this write' },
+                    invocationId: 'inv-failed-write',
+                    timestamp: Date.now(),
+                });
+                options.onStep({
+                    type: 'tool_result',
+                    content: 'result write_file',
+                    toolName: 'write_file',
+                    toolResult: { success: true, filePath: target },
+                    invocationId: 'inv-failed-write',
+                    timestamp: Date.now(),
+                });
+                return {
+                    code: '',
+                    explanation: 'post-write validation failed',
+                    validationErrors: [{
+                        code: 'POST_WRITE_VALIDATION_FAILED',
+                        severity: 'error',
+                        message: 'fresh diagnostics failed',
+                        line: 1,
+                        column: 1,
+                    }],
+                    isValid: false,
+                    retryCount: 0,
+                    steps: [],
+                    tokenUsage: { total: 0, input: 0, output: 0, estimatedCostCny: 0 },
+                };
+            },
+        };
+        const orchestrator = new Orchestrator(runner as any);
+        const node = {
+            id: 'writer_failed',
+            agentType: 'build',
+            prompt: 'write target',
+            dependencies: [],
+            priority: 'normal',
+            status: 'pending',
+            retryCount: 0,
+            maxRetries: 0,
+        };
+
+        try {
+            const result = await (orchestrator as any).executeSubAgent(
+                node,
+                new Blackboard(),
+                { total: 0, input: 0, output: 0, estimatedCostCny: 0 },
+                new AbortController().signal,
+                (step: any) => steps.push(step),
+                { topicId: 'topic-1' },
+            );
+
+            expect(result.success).to.equal(false);
+            expect(result.preservedAfterFailure).to.equal(true);
+            expect(result.writtenFiles).to.deep.equal([path.resolve(target)]);
+            expect(fs.existsSync(target)).to.equal(true);
+            expect(fs.readFileSync(target, 'utf8')).to.equal('keep this write');
+            expect(result.error).to.include('preserved 1 touched file');
+            expect(steps.some(step => String(step.content).includes('Rollback:'))).to.equal(false);
+            expect(steps.find(step => step.type === 'subtask_complete')?.subtaskStatus).to.equal('failed');
+        } finally {
+            fs.rmSync(root, { recursive: true, force: true });
+        }
     });
 
     it('executeSubAgent: exposes run_command to General Multi-Agent utility writers', async () => {

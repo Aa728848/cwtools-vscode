@@ -4162,6 +4162,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         lastStepAt: number;
         completedAt: number | null;
         isComplete: boolean;
+        subtaskStatus: string | null;
         lastSummaryRenderAt: number;
         pendingThinkingRender: boolean;
         pendingTextRender: boolean;
@@ -4228,6 +4229,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                 lastStepAt: Date.now(),
                 completedAt: null,
                 isComplete: false,
+                subtaskStatus: null,
                 lastSummaryRenderAt: 0,
                 pendingThinkingRender: false,
                 pendingTextRender: false,
@@ -4287,6 +4289,10 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         if (!state.isComplete) {
             card.classList.add(isBlocked ? 'lane-blocked' : 'lane-running');
             if (!isBlocked && idleMs >= 2 * 60 * 1000) card.classList.add('lane-stalled');
+        } else if (state.subtaskStatus === 'failed' || state.subtaskStatus === 'cancelled') {
+            card.classList.add('lane-failed');
+        } else if (state.subtaskStatus === 'pending_validation' || state.subtaskStatus === 'needs_clarification') {
+            card.classList.add('lane-blocked');
         } else {
             card.classList.add('lane-done');
         }
@@ -4645,6 +4651,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
             state.lastStepAt = Date.now();
             if (s.type === 'subtask_complete') {
                 state.isComplete = true;
+                state.subtaskStatus = s.subtaskStatus || 'completed';
                 state.completedAt = Date.now();
             }
             scheduleCodexLiveTurnRender(state, s.type === 'subtask_complete' ? (s.content || '') : '');
@@ -4670,6 +4677,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
 
         if (s.type === 'subtask_complete') {
             state.isComplete = true;
+            state.subtaskStatus = s.subtaskStatus || 'completed';
             state.completedAt = Date.now();
             if (state.liveSummary) {
                 state.liveSummary.innerHTML = renderRunSummaryHtml(makeRunSummary(state.liveSteps, s.content), false);
@@ -4678,8 +4686,14 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
             if (state.fullscreenId) {
                 const card = document.querySelector(`.subagent-card[data-target-id="${state.fullscreenId}"]`);
                 if (card) {
-                    card.classList.remove('lane-running');
-                    card.classList.add('lane-done');
+                    card.classList.remove('lane-running', 'lane-done', 'lane-failed', 'lane-stalled', 'lane-blocked');
+                    if (state.subtaskStatus === 'failed' || state.subtaskStatus === 'cancelled') {
+                        card.classList.add('lane-failed');
+                    } else if (state.subtaskStatus === 'pending_validation' || state.subtaskStatus === 'needs_clarification') {
+                        card.classList.add('lane-blocked');
+                    } else {
+                        card.classList.add('lane-done');
+                    }
                     const statusText = card.querySelector('.lane-status-text');
                     if (statusText) statusText.textContent = s.content || tr('Complete', '完成');
                 }

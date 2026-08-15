@@ -462,6 +462,25 @@ export class Orchestrator {
         return undefined;
     }
 
+    private isPendingValidationOnly(result: GenerationResult): boolean {
+        const errors = result.validationErrors ?? [];
+        return errors.some(error => error.code === 'VALIDATION_PENDING')
+            && errors.every(error => error.code === 'VALIDATION_PENDING' || error.severity !== 'error');
+    }
+
+    private collectPreservedFiles(writtenFiles: readonly string[], snapshots: Map<string, string | null>): string[] {
+        const preserved = new Set<string>();
+        for (const filePath of writtenFiles) {
+            preserved.add(path.resolve(filePath));
+        }
+        for (const [filePath, previousContent] of snapshots.entries()) {
+            if (previousContent !== null || fs.existsSync(filePath)) {
+                preserved.add(path.resolve(filePath));
+            }
+        }
+        return [...preserved].sort((left, right) => left.localeCompare(right));
+    }
+
     /** 
 * Execute a single sub-Agent. 
 * 
@@ -854,10 +873,21 @@ export class Orchestrator {
                     ),
                     timestamp: Date.now(),
                 });
-                await this.rollbackSnapshots(fileSnapshots, wrappedOnStep);
+                const preservedFiles = this.collectPreservedFiles(writtenFiles, fileSnapshots);
+                if (preservedFiles.length > 0) {
+                    wrappedOnStep({
+                        type: 'validation',
+                        content: aiText(
+                            `Subtask requested clarification after touching ${preservedFiles.length} file(s). Changes were preserved for parent inspection.`,
+                            `子任务在触及 ${preservedFiles.length} 个文件后请求澄清。已保留改动，交由父级检查。`,
+                        ),
+                        timestamp: Date.now(),
+                    });
+                }
                 wrappedOnStep({
                     type: 'subtask_complete',
                     content: aiText('Needs main agent clarification', '需要主 Agent 澄清'),
+                    subtaskStatus: 'needs_clarification',
                     timestamp: Date.now(),
                 });
                 return {
@@ -866,38 +896,91 @@ export class Orchestrator {
                     output: clarification,
                     error: `SUB_AGENT_NEEDS_CLARIFICATION: ${clarification}`,
                     tokenUsage: result.tokenUsage ?? { total: 0, input: 0, output: 0, estimatedCostCny: 0 },
-                    writtenFiles: [],
+                    writtenFiles: preservedFiles,
                     stepCount,
                     runId: result.runId,
                     needsClarification: true,
                     clarification,
                     clarificationOptions: clarificationDetails.options,
+                    preservedAfterFailure: preservedFiles.length > 0,
                 };
             }
 
-            // When the task ends, notify the front end to update the status
-            wrappedOnStep({
-                type: 'subtask_complete',
-                content: result.isValid ? aiText('Complete', '完成') : aiText('Failed validation', '未通过'),
-                timestamp: Date.now(),
-            });
-
-            //If execution fails, roll back the file
+            // If execution only ended with pending deterministic validation,
+            // preserve completed writes for the parent quality gate instead of
+            // deleting them as a failed transaction.
             if (!result.isValid || (result as any).success === false) {
-                await this.rollbackSnapshots(fileSnapshots, wrappedOnStep);
-                const actualError = result.explanation || '';
+                const pendingValidationOnly = this.isPendingValidationOnly(result);
+                const preservedFiles = this.collectPreservedFiles(writtenFiles, fileSnapshots);
+                if (pendingValidationOnly && preservedFiles.length > 0) {
+                    const finalOutput = result.explanation || result.code || '';
+                    const pendingNote = aiText(
+                        'Subtask wrote files, but deterministic validation was still pending/stale. Changes were preserved for the parent quality gate.',
+                        '子任务已写入文件，但确定性验证仍处于 pending/stale。已保留改动并交由父级质量门继续验收。',
+                    );
+                    wrappedOnStep({
+                        type: 'validation',
+                        content: pendingNote,
+                        timestamp: Date.now(),
+                    });
+                    wrappedOnStep({
+                        type: 'subtask_complete',
+                        content: aiText('Pending validation', '待验证'),
+                        subtaskStatus: 'pending_validation',
+                        timestamp: Date.now(),
+                    });
+                    const handoffOutput = [finalOutput, '', pendingNote].filter(Boolean).join('\n');
+                    const handoff = parseAgentHandoff(handoffOutput, preservedFiles);
+                    handoff.verification = [...new Set([...handoff.verification, pendingNote])];
+                    handoff.unresolved = [...new Set([
+                        ...handoff.unresolved,
+                        aiText(
+                            'Final deterministic validation was pending when the child finished; parent quality gate must re-check these files.',
+                            '子任务结束时最终确定性验证仍在等待；父级质量门必须重新检查这些文件。',
+                        ),
+                    ])];
+                    return {
+                        nodeId: taskNode.id,
+                        success: true,
+                        output: handoffOutput,
+                        handoff,
+                        tokenUsage: result.tokenUsage ?? { total: 0, input: 0, output: 0, estimatedCostCny: 0 },
+                        writtenFiles: preservedFiles,
+                        stepCount,
+                        runId: result.runId,
+                        validationPending: true,
+                    };
+                }
+                const actualError = result.explanation || result.code || '';
+                if (preservedFiles.length > 0) {
+                    wrappedOnStep({
+                        type: 'validation',
+                        content: aiText(
+                            `Subtask failed after touching ${preservedFiles.length} file(s). Changes were preserved for parent repair without reverting them.`,
+                            `子任务在触及 ${preservedFiles.length} 个文件后失败。已保留改动供父级修复，而不是回滚。`,
+                        ),
+                        timestamp: Date.now(),
+                    });
+                }
+                wrappedOnStep({
+                    type: 'subtask_complete',
+                    content: aiText('Failed validation', '未通过'),
+                    subtaskStatus: 'failed',
+                    timestamp: Date.now(),
+                });
                 return {
                     nodeId: taskNode.id,
                     success: false,
-                    output: '',
+                    output: actualError,
                     error: aiText(
-                        `Subtask failed: validation failed or execution errored; rolled back ${fileSnapshots.size} file(s).${actualError ? ' Reason: ' + actualError : ''}`,
-                        `子任务失败: 验证未通过或执行出错，已回滚 ${fileSnapshots.size} 个文件。${actualError ? ' 原因: ' + actualError : ''}`,
+                        `Subtask failed: validation failed or execution errored; preserved ${preservedFiles.length} touched file(s) for parent repair.${actualError ? ' Reason: ' + actualError : ''}`,
+                        `子任务失败: 验证未通过或执行出错；已保留 ${preservedFiles.length} 个被触及文件供父级修复。${actualError ? ' 原因: ' + actualError : ''}`,
                     ),
                     tokenUsage: result.tokenUsage ?? { total: 0, input: 0, output: 0, estimatedCostCny: 0 },
-                    writtenFiles: [],
+                    writtenFiles: preservedFiles,
                     stepCount,
                     runId: result.runId,
+                    preservedAfterFailure: preservedFiles.length > 0,
                 };
             }
 
@@ -915,6 +998,13 @@ export class Orchestrator {
                 handoff = repairAgentHandoff(finalOutput, writtenFiles, missing);
             }
 
+            wrappedOnStep({
+                type: 'subtask_complete',
+                content: aiText('Complete', '完成'),
+                subtaskStatus: 'completed',
+                timestamp: Date.now(),
+            });
+
             return {
                 nodeId: taskNode.id,
                 success: result.isValid,
@@ -929,24 +1019,36 @@ export class Orchestrator {
             clearSubAgentGuards();
 
             const error = e instanceof Error ? e.message : String(e);
+            const preservedFiles = this.collectPreservedFiles(writtenFiles, fileSnapshots);
+            if (preservedFiles.length > 0) {
+                wrappedOnStep({
+                    type: 'validation',
+                    content: aiText(
+                        `Subtask stopped after touching ${preservedFiles.length} file(s). Changes were preserved for parent inspection.`,
+                        `子任务在触及 ${preservedFiles.length} 个文件后中止。已保留改动，交由父级检查。`,
+                    ),
+                    timestamp: Date.now(),
+                });
+            }
             wrappedOnStep({
                 type: 'subtask_complete',
                 content: error.includes('timeout') ? aiText('Stopped after timeout', '超时终止') : aiText('Stopped after error', '异常终止'),
+                subtaskStatus: error.includes('timeout') ? 'cancelled' : 'failed',
                 timestamp: Date.now(),
             });
             ErrorReporter.warn(SOURCE.ORCHESTRATOR, aiText(`Sub-agent ${taskNode.id} execution failed`, `子 Agent ${taskNode.id} 执行异常`), e);
-            await this.rollbackSnapshots(fileSnapshots, wrappedOnStep);
             return {
                 nodeId: taskNode.id,
                 success: false,
                 output: '',
                 error: aiText(
-                    `Subtask stopped after error: ${error}; rolled back ${fileSnapshots.size} file(s).`,
-                    `子任务异常中止: ${error}，已回滚 ${fileSnapshots.size} 个文件。`,
+                    `Subtask stopped after error: ${error}; preserved ${preservedFiles.length} touched file(s) for parent inspection.`,
+                    `子任务异常中止: ${error}；已保留 ${preservedFiles.length} 个被触及文件供父级检查。`,
                 ),
                 tokenUsage: { total: 0, input: 0, output: 0, estimatedCostCny: 0 },
-                writtenFiles: [],
+                writtenFiles: preservedFiles,
                 stepCount,
+                preservedAfterFailure: preservedFiles.length > 0,
             };
         }
     }
@@ -962,44 +1064,6 @@ export class Orchestrator {
             }
         }
         return false;
-    }
-
-    /** 
-* File write rollback mechanism. 
-* When the sub-Agent fails to execute, restore all modified files to their original state. 
-*/
-    private async rollbackSnapshots(
-        snapshots: Map<string, string | null>,
-        onStep: (step: AgentStep) => void
-    ): Promise<void> {
-        if (snapshots.size === 0) return;
-
-        try {
-            const fs = await import('fs');
-            for (const [filePath, prevContent] of snapshots.entries()) {
-                if (prevContent === null) {
-                    //The file does not exist originally, indicating that it is newly created and needs to be deleted.
-                    if (fs.existsSync(filePath)) {
-                        fs.unlinkSync(filePath);
-                        onStep({
-                            type: 'thinking',
-                            content: aiText(`Rollback: deleted newly created file ${filePath}`, `回滚: 已删除新建的文件 ${filePath}`),
-                            timestamp: Date.now(),
-                        });
-                    }
-                } else {
-                    // Restore old content (prevContent is UTF-8 raw text)
-                    fs.writeFileSync(filePath, prevContent, 'utf-8');
-                    onStep({
-                        type: 'thinking',
-                        content: aiText(`Rollback: restored ${filePath} to its previous state`, `回滚: 已恢复文件 ${filePath} 到修改前状态`),
-                        timestamp: Date.now(),
-                    });
-                }
-            }
-        } catch (e) {
-            ErrorReporter.warn(SOURCE.ORCHESTRATOR, aiText('File rollback failed', '执行文件回滚时发生异常'), e);
-        }
     }
 
     // ─── Convenience factory method ───────────────────────────────────────────────────

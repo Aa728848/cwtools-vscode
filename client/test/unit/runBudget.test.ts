@@ -201,6 +201,15 @@ describe('terminal validation state', () => {
         expect(terminalValidationOutcome(state)).to.equal('repair');
     });
 
+    it('keeps stale diagnostic errors pending instead of treating them as repair', () => {
+        const state = createTerminalValidationState();
+        updateTerminalValidationState(state, ['events/test.txt'], {
+            diagnostics: [{ severity: 'error', message: 'old broken state' }],
+            freshness: 'stale',
+        });
+        expect(terminalValidationOutcome(state)).to.equal('pending');
+    });
+
     it('pauses only when pending is not accompanied by a real validation error', () => {
         expect(hasOnlyPendingValidationErrors([
             { code: 'VALIDATION_PENDING', severity: 'error' },

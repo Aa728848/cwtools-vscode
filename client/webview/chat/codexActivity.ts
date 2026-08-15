@@ -301,10 +301,18 @@ function createSpecialEvent(step: StepLike, labels: CodexI18nText, index: number
         };
     }
     if (type === 'orchestrator_progress' || type === 'subtask_start' || type === 'subtask_complete') {
+        const subtaskStatus = asString(step.subtaskStatus);
+        const status: CodexActivityStatus = type !== 'subtask_complete'
+            ? 'running'
+            : subtaskStatus === 'failed' || subtaskStatus === 'cancelled' || subtaskStatus === 'needs_clarification'
+                ? 'failed'
+                : subtaskStatus === 'pending_validation'
+                    ? 'waiting'
+                    : 'success';
         return {
             id: `subagent-${index}-${timestamp}`,
             kind: 'subagent',
-            status: type === 'subtask_complete' ? 'success' : 'running',
+            status,
             label: labels.activity.subtask,
             subject: content,
             timestamp,

@@ -205,9 +205,21 @@ export class Orchestrator {
         const result = await this.executor.executeGraph(
             taskGraph, this.blackboard, subAgentExecutor, options,
         );
+        const preservedFailureResults = this.getPreservedFailureResults(result);
+        const hasPreservedFailures = preservedFailureResults.length > 0;
+        if (hasPreservedFailures) {
+            emitStep({
+                type: 'validation',
+                content: aiText(
+                    `Parent quality gate will repair ${preservedFailureResults.length} preserved failed subtask(s).`,
+                    `父级质量门将接管修复 ${preservedFailureResults.length} 个已保留文件的失败子任务。`,
+                ),
+                timestamp: Date.now(),
+            });
+        }
 
-        // Quality gate: Trigger review on all successful Builder nodes
-        if (result.success && this.shouldRunQualityGate(taskGraph)) {
+        // Quality gate: review successful builder output and preserved failed writes.
+        if ((result.success && this.shouldRunQualityGate(taskGraph)) || hasPreservedFailures) {
             emitStep({
                 type: 'orchestrator_progress',
                 content: aiText('$(search) Triggering quality gate review...', '$(search) 触发质量门审查...'),
@@ -223,6 +235,7 @@ export class Orchestrator {
             allWrittenFiles.splice(0, allWrittenFiles.length, ...new Set(allWrittenFiles));
             {
                 const paradoxWorkflow = [...taskGraph.nodes.values()].some(node => ['build', 'loc_writer', 'gui_expert'].includes(node.agentType));
+                const preservedFailureReport = this.formatPreservedFailureReport(preservedFailureResults);
                 const userOwnsLocalisation = options.userExecutionPolicy?.localisationOwnership === 'user';
                 const userIgnoresWarnings = options.userExecutionPolicy?.warningHandling === 'ignore';
                 if (paradoxWorkflow && (userOwnsLocalisation || userIgnoresWarnings)) {
@@ -349,7 +362,8 @@ export class Orchestrator {
                         || (reviewResult.evidenceConflicts ?? 0) > 0
                         || reviewResult.semanticIssues > 0
                         || reviewResult.logicIssues > 0
-                        || reviewResult.acceptanceFailures.length > 0;
+                        || reviewResult.acceptanceFailures.length > 0
+                        || hasPreservedFailures;
 
                     if (config.autoFix && !reviewResult.operationalFailure && hasRepairableIssues) {
                         for (let fixCycle = 0; fixCycle < config.maxFixCycles && !reviewResult.passed; fixCycle++) {
@@ -361,7 +375,7 @@ export class Orchestrator {
                         emitStep({ type: 'orchestrator_progress', content: ORCHESTRATOR_MSG.AUTOFIX_START, timestamp: Date.now() });
                         
                         const fixPrompt = this.qualityGate.buildFixPrompt(
-                            reviewResult.reviewReport,
+                            [reviewResult.reviewReport, preservedFailureReport].filter(Boolean).join('\n\n'),
                             allWrittenFiles,
                             paradoxWorkflow,
                             options.userExecutionPolicy,
@@ -429,6 +443,9 @@ export class Orchestrator {
                         );
                     }
                 }
+                if (reviewResult.passed && hasPreservedFailures) {
+                    this.resolvePreservedFailureResults(taskGraph, result, preservedFailureResults, emitStep);
+                }
                 result.qualityGate = reviewResult;
                 this.blackboard.write(
                     `${BLACKBOARD_KEY_PREFIXES.qualityGate}final`,
@@ -479,6 +496,68 @@ export class Orchestrator {
             }
         }
         return [...preserved].sort((left, right) => left.localeCompare(right));
+    }
+
+    private getPreservedFailureResults(result: OrchestratorResult): SubAgentResult[] {
+        return [...result.agentResults.values()]
+            .filter(agentResult => !agentResult.success
+                && agentResult.preservedAfterFailure
+                && agentResult.writtenFiles.length > 0)
+            .sort((left, right) => left.nodeId.localeCompare(right.nodeId));
+    }
+
+    private formatPreservedFailureReport(results: readonly SubAgentResult[]): string {
+        if (results.length === 0) return '';
+        const lines = [
+            '## Preserved Failed Subtasks',
+            'These subtasks touched files and failed after the writes were preserved. The parent repair must inspect and fix the listed files instead of discarding them.',
+        ];
+        for (const result of results) {
+            lines.push(`- ${result.nodeId}: ${result.writtenFiles.join(', ')}`);
+            const reason = (result.error || result.output || '').trim();
+            if (reason) lines.push(`  Reason: ${reason.slice(0, 1200)}`);
+        }
+        return lines.join('\n');
+    }
+
+    private resolvePreservedFailureResults(
+        graph: TaskGraph,
+        result: OrchestratorResult,
+        preservedFailures: readonly SubAgentResult[],
+        onStep: (step: AgentStep) => void,
+    ): void {
+        const repairedNodeIds = new Set(preservedFailures.map(failure => failure.nodeId));
+        if (repairedNodeIds.size === 0) return;
+        const note = aiText(
+            `Parent quality gate repaired preserved subtask output: ${[...repairedNodeIds].join(', ')}`,
+            `父级质量门已修复保留的子任务产物: ${[...repairedNodeIds].join(', ')}`,
+        );
+
+        for (const nodeId of repairedNodeIds) {
+            const previous = result.agentResults.get(nodeId);
+            const existingOutput = previous?.output?.trim();
+            if (previous) {
+                result.agentResults.set(nodeId, {
+                    ...previous,
+                    success: true,
+                    output: existingOutput ? `${existingOutput}\n\n${note}` : note,
+                    error: undefined,
+                    preservedAfterFailure: undefined,
+                });
+            }
+            this.graphEngine.markComplete(graph, nodeId, note);
+        }
+
+        result.failedNodes = result.failedNodes.filter(nodeId => !repairedNodeIds.has(nodeId));
+        if (result.failedNodes.length === 0 && result.cancelledNodes.length === 0) {
+            result.success = true;
+        }
+        result.summary += `\n- ${note}`;
+        onStep({
+            type: 'validation',
+            content: note,
+            timestamp: Date.now(),
+        });
     }
 
     /** 

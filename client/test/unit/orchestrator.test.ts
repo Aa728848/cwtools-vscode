@@ -1836,6 +1836,71 @@ describe('Orchestrator quality propagation', () => {
         expect(counts()).to.deep.equal({ reviewCalls: 2, fixCalls: 1 });
     });
 
+    it('routes preserved failed files through parent quality-gate repair', async () => {
+        const { Orchestrator } = require('../../extension/ai/orchestrator/orchestrator') as typeof import('../../extension/ai/orchestrator/orchestrator');
+        const { TaskGraphEngine } = require('../../extension/ai/orchestrator/taskGraphEngine') as typeof import('../../extension/ai/orchestrator/taskGraphEngine');
+        const graph = TaskGraphEngine.createGraph('preserved repair');
+        const utility = TaskGraphEngine.addNode(graph, 'utility', 'utility', 'edit package', { plannedFiles: ['package.json'] });
+        const orchestrator = new Orchestrator({ toolExecutor: { workspaceRoot: process.cwd() } } as any);
+        (orchestrator as any).executor.executeGraph = async () => {
+            utility.status = 'failed';
+            utility.error = 'child validation failed';
+            return {
+                success: false,
+                summary: 'utility failed after write',
+                agentResults: new Map([['utility', {
+                    nodeId: 'utility',
+                    success: false,
+                    output: 'partial package update',
+                    error: 'child validation failed',
+                    tokenUsage: { total: 1, input: 1, output: 0, estimatedCostCny: 0 },
+                    writtenFiles: ['package.json'],
+                    stepCount: 1,
+                    preservedAfterFailure: true,
+                }]]),
+                totalTokenUsage: { total: 1, input: 1, output: 0, estimatedCostCny: 0 },
+                failedNodes: ['utility'],
+                cancelledNodes: [],
+            };
+        };
+        let reviewCalls = 0;
+        let fixCalls = 0;
+        let repairReport = '';
+        (orchestrator as any).qualityGate.reviewOutput = async () => gateResult(++reviewCalls > 1);
+        (orchestrator as any).qualityGate.getConfig = () => ({ autoFix: true, maxFixCycles: 1 });
+        (orchestrator as any).qualityGate.buildFixPrompt = (report: string) => {
+            repairReport = report;
+            return 'fix preserved package file';
+        };
+        (orchestrator as any).executeSubAgent = async (node: any) => {
+            fixCalls++;
+            expect(node.agentType).to.equal('utility');
+            expect(node.plannedFiles).to.deep.equal(['package.json']);
+            return {
+                nodeId: node.id,
+                success: true,
+                output: 'fixed',
+                writtenFiles: ['package.json'],
+                tokenUsage: { total: 1, input: 1, output: 0, estimatedCostCny: 0 },
+                stepCount: 1,
+            };
+        };
+
+        const result = await orchestrator.execute(graph, {
+            abortSignal: new AbortController().signal,
+            domain: 'general',
+        });
+
+        expect(reviewCalls).to.equal(2);
+        expect(fixCalls).to.equal(1);
+        expect(repairReport).to.include('Preserved Failed Subtasks');
+        expect(repairReport).to.include('child validation failed');
+        expect(result.success).to.equal(true);
+        expect(result.failedNodes).to.deep.equal([]);
+        expect(result.agentResults.get('utility')?.success).to.equal(true);
+        expect(graph.nodes.get('utility')?.status).to.equal('done');
+    });
+
     it('does not create the automatic localisation child when the user retained localisation', async () => {
         const { TaskGraphEngine } = require('../../extension/ai/orchestrator/taskGraphEngine') as typeof import('../../extension/ai/orchestrator/taskGraphEngine');
         const { orchestrator, executedNodes } = makeOrchestrator(3, 1);

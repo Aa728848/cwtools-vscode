@@ -1,5 +1,18 @@
 # Changelog
 
+## [2.14.5] - 2026-08-15
+
+### 优化 / Improvements
+- **[优化] 子任务失败保留改动并支持父级检查修复**：
+  - 子 Agent 在触及或写入文件后发生异常时，不再执行破坏性硬回滚与文件删除，而是主动保留改动（`preservedAfterFailure`）交由父级检查与修复，避免丢失有效工作。
+  - 多 Agent 并行调度器在子任务保留改动失败时自动停止无意义的盲目重试，将保留的文件清单回传并安全处理下游依赖。
+  - 父级质量门禁（Quality Gate）在多任务汇总校验时纳入子任务保留的文件，支持跨任务代码质量与规则校验及后置修复。
+  English: [Improvement] Preserve failed sub-agent changes for parent repair — when a sub-agent fails after writing or touching files, changes are preserved rather than rolled back or deleted (`preservedAfterFailure`), allowing the parent agent to inspect and repair partial work; parallel execution stops redundant retries and feeds touched files into the parent quality gate and post-write verification.
+- **[优化] 终端校验与诊断状态处理精准化**：陈旧（stale）文件诊断保持 pending 状态，不再误判为即时 repair，避免未就绪的诊断提前触发错误的修复逻辑。
+  English: [Improvement] Precise terminal validation state — stale diagnostics remain pending instead of triggering premature repair cycles before fresh results arrive.
+- **[优化] Webview 多任务卡片与活动流状态展现**：子任务活动流及并发泳道卡片完整支持 `failed`、`cancelled`、`pending_validation` 与 `needs_clarification` 状态渲染与样式区分。
+  English: [Improvement] Enhanced multi-agent card and activity status rendering — subtask activity streams and concurrent lane cards properly render and differentiate `failed`, `cancelled`, `pending_validation`, and `needs_clarification` states.
+
 ## [2.14.4] - 2026-08-15
 
 ### 优化 / Improvements

@@ -48,11 +48,24 @@ module LanguageServerFeatures =
         let filePrefix = if path.StartsWith('/') then "file://" else "file:///"
         Uri(filePrefix + path.Replace('\\', '/'))
 
+    let private normaliseLocalisationLookupKey (value: string) =
+        let trimmed = if isNull value then "" else value.Trim()
+        if trimmed.Length >= 2
+           && ((trimmed.[0] = '"' && trimmed.[trimmed.Length - 1] = '"')
+               || (trimmed.[0] = '\'' && trimmed.[trimmed.Length - 1] = '\'')) then
+            trimmed.Substring(1, trimmed.Length - 2)
+        else
+            trimmed
+
+    let private localisationDescription (localisation: (string * Entry) list) key =
+        let lookupKey = normaliseLocalisationLookupKey key
+        localisation
+        |> List.tryPick (fun (k, v) -> if k = lookupKey then Some v.desc else None)
+
     let lochoverFromInfo (localisation: (string * Entry) list) (infoOption: SymbolInformation option) (word: string) =
         let locToText (loc: SymbolLocalisationInfo) =
             let locdesc =
-                localisation
-                |> List.tryPick (fun (k, v) -> if k = loc.value then Some v.desc else None)
+                localisationDescription localisation loc.value
                 |> Option.defaultValue ""
 
             "|" + loc.key.Trim('\"') + "|" + locdesc.Trim('\"') + "|"
@@ -61,18 +74,15 @@ module LanguageServerFeatures =
         | Some info ->
             match info.localisation with
             | [] ->
-                localisation
-                |> List.tryPick (fun (k, v) -> if k = word then Some v.desc else None)
+                localisationDescription localisation word
             | [ h ] ->
-                localisation
-                |> List.tryPick (fun (k, v) -> if k = h.value then Some v.desc else None)
+                localisationDescription localisation h.value
             | h :: t ->
                 let head = locToText h
                 let tail = t |> List.map locToText
                 Some((head :: "|:---|:---|" :: tail) |> (fun s -> String.Join("\n", s)))
         | None ->
-            localisation
-            |> List.tryPick (fun (k, v) -> if k = word then Some v.desc else None)
+            localisationDescription localisation word
 
     let docstringFromInfo (uiText: string -> string -> string) (infoOption: SymbolInformation option) =
         match infoOption with
@@ -410,4 +420,3 @@ module LanguageServerFeatures =
                           edit = docChanges }
                     |> Async.Ignore
         }
-

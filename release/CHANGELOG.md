@@ -1,5 +1,20 @@
 # Changelog
 
+## [2.14.4] - 2026-08-15
+
+### 优化 / Improvements
+- **[优化] 内置规则包支持 ZIP 动态物化加载**：当以内置规则包（`stellaris-rules.zip`）启动时，语言服务端自动将规则解压并缓存至临时目录物化为实际文件加载，解决直接从流读取规则无法提供真实物理文件路径的问题。
+  English: [Improvement] Materialize zipped bundled rules to disk — when starting from a zipped bundled rules package (`stellaris-rules.zip`), the language server unpacks and caches the rules in a temp directory, ensuring real on-disk file paths are available to file-based parsers.
+- **[优化] CWT 规则发现与作用域链接解析增强**：
+  - AI LSP 工具支持递归加载子目录（如 `common/`）中的嵌套 CWT 规则文件中的 alias 规则。
+  - 支持解析 `links.cwt` 中的作用域链（scope links），将其作为 scope_change 的硬事实（hard facts）暴露并提供语义提示（semantic hints），增强前缀/点分符号匹配。
+  - 优化分词器以更好地支持包含点或冒号的作用域与规则名称查询。
+  English: [Improvement] Enhanced CWT rule discovery and scope link parsing — the AI LSP tools recursively load nested alias rules across subdirectories, parse `links.cwt` scope links as hard scope-change facts with rich semantic hints and dotted/prefixed query support, and expand scope tokens for better resolution.
+
+### 稳定性与工程 / Stability & Engineering
+- **[更新] 清理冗余项目配置**：更新 `cwtools-mcp` 子模块指针，移除未使用的配置文件。
+  English: [Updated] Cleaned up unused project configuration files (bumped `cwtools-mcp` submodule pointer).
+
 ## [2.14.2] - 2026-08-15
 
 ### 修复 / Fixes

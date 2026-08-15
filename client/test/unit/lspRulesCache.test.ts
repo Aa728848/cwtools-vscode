@@ -156,6 +156,49 @@ describe('LspToolHandler CWT rules cache lifecycle (plan §7.4)', () => {
         expect(result.rulesContentHash).to.be.a('string').with.lengthOf(16);
     });
 
+    it('exposes links.cwt scope links as hard scope-change facts', async () => {
+        fs.writeFileSync(path.join(rulesDir, 'links.cwt'), [
+            'links = {',
+            '  colony = {',
+            '    input_scopes = { planet ship colony }',
+            '    output_scope = Colony',
+            '  }',
+            '}',
+            '',
+        ].join('\n'), 'utf8');
+
+        const handler = makeHandler();
+        const result = await handler.queryRules({
+            category: 'scope_change',
+            name: 'ship.colony',
+            scope: 'ship',
+        });
+
+        expect(result.rules[0]!.name).to.equal('colony');
+        expect(result.rules[0]!.hardFacts?.supportedScopes).to.include('ship');
+        expect(result.rules[0]!.hardFacts?.pushScope).to.equal('colony');
+        expect(result.rules[0]!.semanticHints?.some(hint => hint.source === 'links.cwt')).to.equal(true);
+    });
+
+    it('loads alias rules from nested CWT files', async () => {
+        const nestedRuleFile = path.join(rulesDir, 'common', 'custom_agent_rules.cwt');
+        fs.mkdirSync(path.dirname(nestedRuleFile), { recursive: true });
+        fs.writeFileSync(nestedRuleFile, [
+            '## supported_scopes = country',
+            'alias[effect:custom_nested_effect] = yes',
+            '',
+        ].join('\n'), 'utf8');
+
+        const handler = makeHandler();
+        const result = await handler.queryRules({
+            category: 'effect',
+            name: 'custom_nested_effect',
+        });
+
+        expect(result.rules[0]!.name).to.equal('custom_nested_effect');
+        expect(result.rules[0]!.sourceFile?.replace(/\\/g, '/')).to.include('/common/custom_agent_rules.cwt');
+    });
+
     it('derives typed values and type-key filters for the semantic catalog without game tables', async () => {
         const handler = makeHandler();
         const catalog = await handler.getPdxSemanticCatalog(

@@ -882,7 +882,7 @@ export interface RuleInfo {
     };
     semanticHints?: Array<{
         text: string;
-        source: 'trigger_docs.log' | 'scopes.cwt' | 'cwt-comment' | 'modifiers.log';
+        source: 'trigger_docs.log' | 'scopes.cwt' | 'links.cwt' | 'cwt-comment' | 'modifiers.log';
         file?: string;
         line?: number;
         confidence: 'hint';

@@ -1016,10 +1016,14 @@ export class LspToolHandler {
         }
 
         if (args.name) {
-            const filtered = rules.filter(r => r.name.toLowerCase().includes(args.name!.toLowerCase()));
+            const needle = this.normalizeRuleNameQuery(args.name, args.category);
+            const filtered = rules
+                .filter(r => r.name.toLowerCase().includes(needle))
+                .sort((a, b) => this.scoreRuleNameMatch(a.name, needle) - this.scoreRuleNameMatch(b.name, needle)
+                    || a.name.localeCompare(b.name));
             if (filtered.length === 0 && rules.length > 0) {
                 // Fuzzy searching fallback
-                const scored = rules.map(r => ({ rule: r, score: this.levenshtein(args.name!.toLowerCase(), r.name.toLowerCase()) }));
+                const scored = rules.map(r => ({ rule: r, score: this.levenshtein(needle, r.name.toLowerCase()) }));
                 scored.sort((a, b) => a.score - b.score);
                 rules = scored.slice(0, 5).map(s => ({
                     ...s.rule,
@@ -1597,7 +1601,7 @@ export class LspToolHandler {
 
     private findCwtSchemaFiles(root: string, maxFiles: number): string[] {
         const results: string[] = [];
-        const ignoredDirs = new Set(['.git', 'node_modules', 'logs']);
+        const ignoredDirs = new Set(['.git', 'node_modules', 'logs', 'config']);
         const walk = (dir: string, depth: number) => {
             if (results.length >= maxFiles || depth > 8) return;
             let entries: fs.Dirent[];
@@ -1606,6 +1610,7 @@ export class LspToolHandler {
             } catch {
                 return;
             }
+            entries.sort((a, b) => a.name.localeCompare(b.name));
             for (const entry of entries) {
                 if (results.length >= maxFiles) break;
                 const fullPath = path.join(dir, entry.name);
@@ -1617,7 +1622,23 @@ export class LspToolHandler {
             }
         };
         walk(root, 0);
-        return results;
+        return results.sort((a, b) => a.localeCompare(b));
+    }
+
+    private collectCwtRuleSourceFiles(root: string, includeMissingLogs: boolean): string[] {
+        const files = this.findCwtSchemaFiles(root, LspToolHandler.CWT_RULE_FILE_SCAN_LIMIT);
+        for (const relativeLog of LspToolHandler.CWT_RULE_LOG_CANDIDATES) {
+            const fullPath = path.join(root, relativeLog);
+            if (includeMissingLogs || fs.existsSync(fullPath)) files.push(fullPath);
+        }
+        return Array.from(new Set(files)).sort((a, b) => a.localeCompare(b));
+    }
+
+    private scopeChangeFileCategoryOverride(relativeRuleFile: string): QueryRulesArgs['category'] | undefined {
+        const base = path.posix.basename(relativeRuleFile.replace(/\\/g, '/')).toLowerCase();
+        return base === 'scope_changes.cwt' || base === 'scope_changes.generated.cwt' || base === 'scope_change.cwt'
+            ? 'scope_change'
+            : undefined;
     }
 
     private buildCwtSchemaSnippet(filePath: string, name: string | undefined, includeContent: boolean): {
@@ -1917,28 +1938,16 @@ export class LspToolHandler {
         return score;
     }
 
-    /** Candidate rule files (per config root) feeding the CWT rule cache, in a
-     * fixed order so signatures/hashes are deterministic. Bounded: 12 files per root. */
-    private static readonly CWT_RULE_FILE_CANDIDATES: readonly string[] = [
-        'scopes.cwt',
+    private static readonly CWT_RULE_LOG_CANDIDATES: readonly string[] = [
         path.join('logs', 'trigger_docs.log'),
         path.join('logs', 'modifiers.log'),
-        'triggers.cwt',
-        'trigger.cwt',
-        path.join('generated', 'triggers.generated.cwt'),
-        'effects.cwt',
-        'effect.cwt',
-        path.join('generated', 'effects.generated.cwt'),
-        'modifier.cwt',
-        'scope_changes.cwt',
-        path.join('generated', 'scope_changes.generated.cwt'),
     ];
+    private static readonly CWT_RULE_FILE_SCAN_LIMIT = 5_000;
 
     /**
      * Return the parsed CWT rule cache, reloading when any candidate rule
-     * file's mtime/size changed (plan §7.4). The signature pass stats a small
-     * bounded file set (12 files per config root) on every call, which is far
-     * cheaper than the previous choice of never invalidating at all.
+     * file's mtime/size changed (plan §7.4). Rule facts are drawn from every
+     * `.cwt` file under the active config root, plus the docs/modifier logs.
      */
     private async getCwtRulesCache(): Promise<CwtRuleCache> {
         const signature = this.computeCwtRulesSignature();
@@ -1961,8 +1970,7 @@ export class LspToolHandler {
     private computeCwtRulesSignature(): string {
         const parts: string[] = [];
         for (const configPath of this.resolveCwtConfigPaths()) {
-            for (const file of LspToolHandler.CWT_RULE_FILE_CANDIDATES) {
-                const fullPath = path.join(configPath, file);
+            for (const fullPath of this.collectCwtRuleSourceFiles(configPath, true)) {
                 try {
                     const stat = fs.statSync(fullPath);
                     parts.push(`${fullPath}:${stat.mtimeMs}:${stat.size}`);
@@ -1985,8 +1993,7 @@ export class LspToolHandler {
     private computeCwtRulesContentHash(): string {
         const hash = crypto.createHash('sha256');
         for (const configPath of this.resolveCwtConfigPaths()) {
-            for (const file of LspToolHandler.CWT_RULE_FILE_CANDIDATES) {
-                const fullPath = path.join(configPath, file);
+            for (const fullPath of this.collectCwtRuleSourceFiles(configPath, true)) {
                 try {
                     if (!fs.existsSync(fullPath)) continue;
                     const content = fs.readFileSync(fullPath, 'utf8');
@@ -2014,19 +2021,16 @@ export class LspToolHandler {
             const docs = fs.existsSync(triggerDocsLog) ? this.parseDocsLog(triggerDocsLog) : new Map<string, RuleDocInfo>();
             const scopes = fs.existsSync(scopesFile) ? this.parseScopesFile(scopesFile) : new Map<string, ScopeInfo>();
 
-            for (const file of ['triggers.cwt', 'trigger.cwt', path.join('generated', 'triggers.generated.cwt')]) {
-                const fullPath = path.join(configPath, file);
-                if (fs.existsSync(fullPath)) this.parseCWTFile(fullPath, 'trigger', triggers, docs, scopes);
-            }
-            for (const file of ['effects.cwt', 'effect.cwt', path.join('generated', 'effects.generated.cwt')]) {
-                const fullPath = path.join(configPath, file);
-                if (fs.existsSync(fullPath)) this.parseCWTFile(fullPath, 'effect', effects, docs, scopes);
-            }
-            const modifierRulesFile = path.join(configPath, 'modifier.cwt');
-            if (fs.existsSync(modifierRulesFile)) this.parseCWTFile(modifierRulesFile, 'modifier', modifiers, docs, scopes);
-            for (const file of ['scope_changes.cwt', path.join('generated', 'scope_changes.generated.cwt')]) {
-                const fullPath = path.join(configPath, file);
-                if (fs.existsSync(fullPath)) this.parseCWTFile(fullPath, 'scope_change', scopeChanges, docs, scopes);
+            for (const fullPath of this.findCwtSchemaFiles(configPath, LspToolHandler.CWT_RULE_FILE_SCAN_LIMIT)) {
+                const relativeFile = path.relative(configPath, fullPath).replace(/\\/g, '/');
+                const parsed = this.parseCWTFile(fullPath, this.scopeChangeFileCategoryOverride(relativeFile), docs, scopes);
+                for (const rule of parsed) {
+                    if (rule.category === 'trigger') triggers.push(rule);
+                    else if (rule.category === 'effect') effects.push(rule);
+                    else if (rule.category === 'modifier') modifiers.push(rule);
+                    else scopeChanges.push(rule);
+                }
+                scopeChanges.push(...this.parseLinksFile(fullPath, scopes));
             }
             if (fs.existsSync(modifiersLog)) {
                 const loggedModifiers: RuleInfo[] = [];
@@ -2172,26 +2176,38 @@ export class LspToolHandler {
 
     private parseCWTFile(
         filePath: string,
-        category: QueryRulesArgs['category'],
-        results: RuleInfo[],
+        categoryOverride: QueryRulesArgs['category'] | undefined,
         docs: Map<string, RuleDocInfo>,
         scopes: Map<string, ScopeInfo>,
-    ): void {
+    ): RuleInfo[] {
         try {
             const content = fs.readFileSync(filePath, 'utf-8');
-            const lines = content.split(/\r?\n/);
+            return this.parseCwtRuleAliases(content, filePath, categoryOverride, docs, scopes);
+        } catch {
+            return [];
+        }
+    }
 
-            const namePattern = /^alias\[(?:trigger|effect|modifier):([^\]]+)\]\s*=\s*(.*)/;
+    private parseCwtRuleAliases(
+        content: string,
+        filePath: string,
+        categoryOverride: QueryRulesArgs['category'] | undefined,
+        docs: Map<string, RuleDocInfo>,
+        scopes: Map<string, ScopeInfo>,
+    ): RuleInfo[] {
+        const results: RuleInfo[] = [];
+        const lines = content.split(/\r?\n/);
 
-            let currentScopes: string[] = [];
-            let currentSupportedScopes: string[] = [];
-            let currentPushScope: string | undefined;
-            let currentTypeKeyFilter: string | undefined;
-            let currentDesc = '';
+        const namePattern = /^alias\[(trigger|effect|modifier):([^\]]+)\]\s*=\s*(.*)/;
 
-            for (let i = 0; i < lines.length; i++) {
-                 
-                const line = lines[i]!.trim();
+        let currentScopes: string[] = [];
+        let currentSupportedScopes: string[] = [];
+        let currentPushScope: string | undefined;
+        let currentTypeKeyFilter: string | undefined;
+        let currentDesc = '';
+
+        for (let i = 0; i < lines.length; i++) {
+            const line = lines[i]!.trim();
 
                 const directiveMatch = line.match(/^##\s*([A-Za-z_]+)\s*=\s*(.*)$/);
                 const directive = directiveMatch?.[1]?.toLowerCase();
@@ -2231,8 +2247,9 @@ export class LspToolHandler {
 
                 const nameMatch = line.match(namePattern);
                 if (nameMatch) {
-                     
-                    const name = nameMatch[1]!;
+                    const aliasKind = nameMatch[1] as QueryRulesArgs['category'];
+                    const category = categoryOverride ?? aliasKind;
+                    const name = nameMatch[2]!;
                      
                     const doc = docs.get(name);
                     const cwtBlockText = this.collectCwtBlockText(lines, i);
@@ -2241,7 +2258,7 @@ export class LspToolHandler {
                         : currentSupportedScopes.length
                             ? currentSupportedScopes
                             : currentScopes;
-                    const syntax = doc?.syntax || this.normalizeInlineSyntax(name, nameMatch[2]!);
+                    const syntax = doc?.syntax || this.normalizeInlineSyntax(name, nameMatch[3]!);
                     const description = doc?.description || currentDesc;
                     const semanticHints = this.buildSemanticHints({
                         description,
@@ -2285,7 +2302,133 @@ export class LspToolHandler {
                     currentDesc = '';
                 }
             }
-        } catch { /* skip */ }
+        return results;
+    }
+
+    private parseLinksFile(filePath: string, scopes: Map<string, ScopeInfo>): RuleInfo[] {
+        try {
+            const content = fs.readFileSync(filePath, 'utf-8');
+            if (!/^\s*links\s*=\s*\{/im.test(content)) return [];
+            return this.parseLinksCwtFile(content, filePath, scopes);
+        } catch {
+            return [];
+        }
+    }
+
+    private parseLinksCwtFile(
+        content: string,
+        filePath: string,
+        scopes: Map<string, ScopeInfo>,
+    ): RuleInfo[] {
+        const results: RuleInfo[] = [];
+        const lines = content.split(/\r?\n/);
+        let inLinks = false;
+        let depth = 0;
+        let current: { name: string; line: number; inputScopes: string[]; outputScope?: string } | undefined;
+
+        for (let i = 0; i < lines.length; i++) {
+            const rawLine = lines[i] ?? '';
+            const line = this.stripCwtLineComment(rawLine).trim();
+            if (!inLinks) {
+                if (/^links\s*=\s*\{/.test(line)) {
+                    inLinks = true;
+                    depth = this.countBraceDelta(line);
+                }
+                continue;
+            }
+
+            if (!current && depth === 1) {
+                const linkMatch = line.match(/^([A-Za-z_][\w.-]*)\s*=\s*\{\s*$/);
+                if (linkMatch?.[1]) {
+                    current = { name: linkMatch[1], line: i + 1, inputScopes: [] };
+                }
+            } else if (current) {
+                const inputMatch = line.match(/^input_scopes\s*=\s*(.*)$/i);
+                if (inputMatch?.[1]) {
+                    current.inputScopes = this.splitRuleValueList(inputMatch[1]).map(scope => this.normalizeScopeName(scope));
+                }
+                const outputMatch = line.match(/^output_scope\s*=\s*(.*)$/i);
+                if (outputMatch?.[1]) {
+                    const outputScope = this.stripRuleValueBraces(outputMatch[1]).split(/\s+/)[0];
+                    if (outputScope) current.outputScope = this.normalizeScopeName(outputScope);
+                }
+            }
+
+            depth += this.countBraceDelta(line);
+            if (current && depth <= 1) {
+                if (current.outputScope) {
+                    const inputScopes = current.inputScopes.length ? current.inputScopes : ['all'];
+                    const syntax = `${current.name} = scope link (${inputScopes.join(' | ')} -> ${current.outputScope})`;
+                    const linkHint: NonNullable<RuleInfo['semanticHints']>[number] = {
+                        text: `Legal scope link '${current.name}' accepts input scopes { ${inputScopes.join(' ')} } and outputs '${current.outputScope}'. Context pointers such as from/prev/root/this select the current input scope; they are not fixed object fields.`,
+                        source: 'links.cwt',
+                        file: filePath,
+                        line: current.line,
+                        confidence: 'hint',
+                    };
+                    const scopeHints = this.buildSemanticHints({
+                        description: '',
+                        cwtDescription: '',
+                        scopes,
+                        relatedScopeNames: [...inputScopes, current.outputScope],
+                        cwtFile: filePath,
+                        cwtLine: current.line,
+                    });
+                    results.push({
+                        name: current.name,
+                        description: `Legal scope link from { ${inputScopes.join(' ')} } to ${current.outputScope}.`,
+                        scopes: inputScopes,
+                        syntax,
+                        category: 'scope_change',
+                        sourceFile: filePath,
+                        sourceLine: current.line,
+                        hardFacts: {
+                            category: 'scope_change',
+                            supportedScopes: inputScopes,
+                            pushScope: current.outputScope,
+                            valueReferences: [],
+                            syntax,
+                            cwtSource: { file: filePath, line: current.line },
+                        },
+                        semanticHints: [linkHint, ...scopeHints].slice(0, 8),
+                    });
+                }
+                current = undefined;
+            }
+            if (inLinks && depth <= 0) {
+                inLinks = false;
+                current = undefined;
+            }
+        }
+
+        return results;
+    }
+
+    private normalizeRuleNameQuery(name: string, category: string): string {
+        const lowered = name.trim().toLowerCase();
+        if (category !== 'scope_change' || !lowered.includes('.')) return lowered;
+        const parts = lowered.split('.').map(part => part.trim()).filter(Boolean);
+        return parts[parts.length - 1] ?? lowered;
+    }
+
+    private scoreRuleNameMatch(name: string, needle: string): number {
+        const lower = name.toLowerCase();
+        if (lower === needle) return 0;
+        if (lower.startsWith(needle)) return 1;
+        return 2;
+    }
+
+    private normalizeScopeName(scope: string): string {
+        return scope.replace(/^["']|["']$/g, '').trim().toLowerCase();
+    }
+
+    private countBraceDelta(line: string): number {
+        let delta = 0;
+        for (const ch of line) {
+            if (ch === '{') delta += 1;
+            else if (ch === '}') delta -= 1;
+        }
+        return delta;
     }
 
     private buildSemanticHints(args: {
@@ -2415,7 +2558,14 @@ export class LspToolHandler {
         // not architecture facts. Exact scope names come from explain_scope /
         // query_scope, while free text is matched only against active CWT docs.
         const direct = intent.toLowerCase().match(/[\p{L}\p{N}_.:-]+/gu) ?? [];
-        return Array.from(new Set(direct.map(token => token.trim()).filter(Boolean)));
+        const expanded: string[] = [];
+        for (const token of direct) {
+            const trimmed = token.trim();
+            if (!trimmed) continue;
+            expanded.push(trimmed);
+            if (/[.:]/.test(trimmed)) expanded.push(...trimmed.split(/[.:]+/).filter(Boolean));
+        }
+        return Array.from(new Set(expanded));
     }
 
     private extractScopeNamesFromSyntax(syntax: string): string[] {

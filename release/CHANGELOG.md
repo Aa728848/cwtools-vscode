@@ -1,5 +1,11 @@
 # Changelog
 
+## [2.14.2] - 2026-08-15
+
+### 修复 / Fixes
+- **[修复] 本地化键悬停支持去除引号匹配**：修复了在事件或定义中使用带引号的本地化键（如 `"mod_event.1.name"`）时，悬停提示无法正确匹配并显示本地化文本的问题。
+  English: [Fix] Normalize quoted localization keys for hover lookup — strips surrounding quotes from localization keys (e.g. `"mod_event.1.name"`) in symbol info and hover queries, ensuring hover tooltips correctly find and render localized text.
+
 ## [2.14.1] - 2026-08-14
 
 ### 修复 / Fixes

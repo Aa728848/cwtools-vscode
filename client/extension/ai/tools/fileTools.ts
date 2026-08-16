@@ -235,6 +235,54 @@ export class FileToolHandler {
         }
     }
 
+    private abortError(signal?: AbortSignal): Error {
+        const reason = signal?.reason;
+        if (reason instanceof Error) return reason;
+        const error = new Error(reason ? String(reason) : 'AbortError');
+        error.name = 'AbortError';
+        return error;
+    }
+
+    private async withAbortAndTimeout<T>(
+        promise: Promise<T>,
+        timeoutMs: number,
+        timeoutMessage: string,
+        signal?: AbortSignal,
+    ): Promise<T> {
+        if (signal?.aborted) throw this.abortError(signal);
+        return new Promise<T>((resolve, reject) => {
+            let settled = false;
+            let timeoutId: ReturnType<typeof setTimeout> | undefined;
+            let onAbort: (() => void) | undefined;
+            const markSettled = (): boolean => {
+                if (settled) return false;
+                settled = true;
+                if (timeoutId) clearTimeout(timeoutId);
+                if (onAbort && signal) signal.removeEventListener('abort', onAbort);
+                return true;
+            };
+            const resolveOnce = (value: T) => {
+                if (!markSettled()) return;
+                resolve(value);
+            };
+            const rejectOnce = (error: Error) => {
+                if (!markSettled()) return;
+                reject(error);
+            };
+            timeoutId = setTimeout(() => {
+                const error = new Error(timeoutMessage);
+                error.name = 'TimeoutError';
+                rejectOnce(error);
+            }, timeoutMs);
+            onAbort = () => rejectOnce(this.abortError(signal));
+            signal?.addEventListener('abort', onAbort, { once: true });
+            promise.then(
+                value => resolveOnce(value),
+                error => rejectOnce(error instanceof Error ? error : new Error(String(error))),
+            );
+        });
+    }
+
     private shouldBypassWriteConfirmation(args: unknown, context?: import('../types').AgentToolContext): boolean {
         const record = (args && typeof args === 'object') ? args as Record<string, unknown> : {};
         return record._autoApply === true
@@ -1381,10 +1429,15 @@ export class FileToolHandler {
             const client = (this.ctx as any).client;
             if (!client) return null;
             const uri = vs.Uri.file(filePath);
-            const result = await client.sendRequest('workspace/executeCommand', {
-                command: 'cwtools.ai.getDiagnosticsFresh',
-                arguments: [uri.toString()],
-            }) as Record<string, unknown> | null;
+            const result = await this.withAbortAndTimeout(
+                client.sendRequest('workspace/executeCommand', {
+                    command: 'cwtools.ai.getDiagnosticsFresh',
+                    arguments: [uri.toString()],
+                }) as Promise<Record<string, unknown> | null>,
+                1500,
+                'Diagnostics freshness request timed out.',
+                context?.runnerOptions?.abortSignal,
+            );
             if (result && typeof result === 'object' && 'freshness' in result) {
                 return {
                     freshness: String(result.freshness) as 'fresh' | 'pending' | 'stale',
@@ -1395,21 +1448,30 @@ export class FileToolHandler {
                         ? (result.diagnostics as ValidationError[]) : undefined,
                 };
             }
-        } catch { /* LSP is not available */ }
+        } catch (error) {
+            if (error instanceof Error && error.name === 'AbortError') throw error;
+            /* LSP is not available */
+        }
         return null;
     }
 
-    private async requestRevalidateFromDisk(filePath: string): Promise<boolean> {
+    private async requestRevalidateFromDisk(filePath: string, context?: import('../types').AgentToolContext): Promise<boolean> {
         try {
             const client = (this.ctx as any).client;
             if (!client) return false;
             const uri = vs.Uri.file(filePath);
-            const res = await client.sendRequest('workspace/executeCommand', {
-                command: 'cwtools.ai.revalidateFiles',
-                arguments: [[uri.toString()]],
-            }) as Record<string, unknown> | null;
+            const res = await this.withAbortAndTimeout(
+                client.sendRequest('workspace/executeCommand', {
+                    command: 'cwtools.ai.revalidateFiles',
+                    arguments: [[uri.toString()]],
+                }) as Promise<Record<string, unknown> | null>,
+                1500,
+                'Diagnostics revalidation request timed out.',
+                context?.runnerOptions?.abortSignal,
+            );
             return !!(res && typeof res === 'object' && res.ok === true);
-        } catch {
+        } catch (error) {
+            if (error instanceof Error && error.name === 'AbortError') throw error;
             return false;
         }
     }
@@ -1440,7 +1502,7 @@ export class FileToolHandler {
         const timeoutMs = 3000;
         const pollIntervalMs = 100;
         const uri = vs.Uri.file(filePath);
-        const triggered = await this.requestRevalidateFromDisk(filePath);
+        const triggered = await this.requestRevalidateFromDisk(filePath, context);
         if (!triggered) {
             try { await vs.workspace.openTextDocument(uri); } catch { /* may already be open */ }
         }
@@ -1501,7 +1563,7 @@ export class FileToolHandler {
             try { await vs.workspace.openTextDocument(uri); } catch { /* may already be open */ }
             // P3 Fix: debounce diagnostic events - wait 300ms after last change
             // to avoid returning incomplete diagnostics from intermediate LSP states
-            await new Promise<void>((resolve) => {
+            await this.withAbortAndTimeout(new Promise<void>((resolve) => {
                 let settled = false;
                 let debounce: ReturnType<typeof setTimeout> | null = null;
                 // eslint-disable-next-line prefer-const -- deferred initialization
@@ -1521,7 +1583,7 @@ export class FileToolHandler {
                         debounce = setTimeout(finish, 300);
                     }
                 });
-            });
+            }), 2500, 'Diagnostics panel wait timed out.', context?.runnerOptions?.abortSignal);
             return vs.languages.getDiagnostics(uri)
                 .filter(d => context?.runnerOptions?.domain !== 'general' || !/cwtools/i.test(d.source ?? ''))
                 .map(d => {
@@ -1545,7 +1607,10 @@ export class FileToolHandler {
                     data: metadata.data,
                     } as ValidationError;
                 });
-        } catch { return []; }
+        } catch (error) {
+            if (error instanceof Error && error.name === 'AbortError') throw error;
+            return [];
+        }
     }
 
     // - OpenCode Replacer Suite -

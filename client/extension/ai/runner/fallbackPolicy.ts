@@ -22,7 +22,7 @@ export const PROVIDER_FALLBACK: Record<string, { providerId: string; model: stri
 export function isFallbackEligibleApiError(error: unknown): boolean {
     const msg = error instanceof Error ? error.message : String(error);
     return /\b(5\d{2})\b/.test(msg) ||          // 5xx server errors
-           /timeout|timed out|ETIMEDOUT|ECONNRESET/i.test(msg) ||  // Network failures
+           /timeout|timed out|fetch failed|network|socket|ETIMEDOUT|ECONNRESET|ENOTFOUND|EAI_AGAIN/i.test(msg) ||
            /overloaded|capacity|unavailable/i.test(msg); // Capacity issues
 }
 

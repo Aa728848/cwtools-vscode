@@ -219,6 +219,8 @@ export function classifyPostWriteValidation(
     };
 }
 
+const SEMANTIC_WRITE_TOOL_TIMEOUT = 120_000;
+
 const TOOL_TIMEOUTS: Record<string, number> = {
     query_scope: 45_000,
     query_types: 45_000,
@@ -266,9 +268,10 @@ const TOOL_TIMEOUTS: Record<string, number> = {
     validate_shader: 45_000,
     compare_shader_with_vanilla: 45_000,
     read_file: 30_000,
-    write_file: 30_000,
-    edit_file: 30_000,
-    replace_lines: 30_000,
+    // PDX writes may run evidence gates plus fresh diagnostics on cold caches.
+    write_file: SEMANTIC_WRITE_TOOL_TIMEOUT,
+    edit_file: SEMANTIC_WRITE_TOOL_TIMEOUT,
+    replace_lines: SEMANTIC_WRITE_TOOL_TIMEOUT,
     list_directory: 30_000,
     glob_files: 30_000,
     grep: 30_000,
@@ -280,6 +283,7 @@ const TOOL_TIMEOUTS: Record<string, number> = {
     convert_audio: 60_000,
     deploy_mod_asset: 0,
     git_ops: 30_000,
+    write_localisation: SEMANTIC_WRITE_TOOL_TIMEOUT,
     save_workflow: 30_000,
     todo_write: 5_000,
     run_skill: 30_000,

@@ -363,6 +363,11 @@ describe('runtime recovery helpers', () => {
             reason: 'context_overflow',
             shrinkInput: true,
         });
+        expect(policy.decide(new Error('fetch failed'), 1)).to.include({
+            retry: true,
+            reason: 'timeout',
+            shrinkInput: false,
+        });
         const attempts: string[] = [];
         const result = await new ModelRequestService().execute(
             'large',

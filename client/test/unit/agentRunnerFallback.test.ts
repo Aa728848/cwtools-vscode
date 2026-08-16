@@ -6,6 +6,8 @@ describe('AgentRunner fallback eligibility', () => {
 
         expect(isFallbackEligibleApiError(new Error('OpenAI API error (500): upstream error: do request failed'))).to.equal(true);
         expect(isFallbackEligibleApiError(new Error('OpenAI API request timed out after 20m'))).to.equal(true);
+        expect(isFallbackEligibleApiError(new Error('fetch failed'))).to.equal(true);
+        expect(isFallbackEligibleApiError(new Error('getaddrinfo EAI_AGAIN api.example.test'))).to.equal(true);
     });
 });
 

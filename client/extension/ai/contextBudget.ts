@@ -21,6 +21,7 @@ export function getToolResultBudget(maxContextTokens?: number): number {
 /** Default budget per tool result (characters). */
 export const TOOL_RESULT_BUDGET_BASE = 12000;
 export const TOOL_RESULT_BUDGET_HARD_STUB = 60000;
+export const TOOL_RESULT_UI_BUDGET = 6000;
 
 /**
  * Reserved characters for the truncation suffix appended after a budgeted
@@ -34,6 +35,21 @@ export const TRUNCATION_SUFFIX_RESERVE = 300;
 export interface CompactMessagesOptions {
     preserveTailBytes?: boolean;
     preserveReasoningContentForToolCalls?: boolean;
+}
+
+function fitBudgetedText(text: string, maxChars: number, originalLength = text.length): string {
+    if (text.length <= maxChars) return text;
+    return text.substring(0, Math.max(0, maxChars - TRUNCATION_SUFFIX_RESERVE)) +
+        `\n\n${BUDGET.TRUNCATED_GENERIC(originalLength)}`;
+}
+
+function stringifyForBudget(value: unknown): string {
+    try {
+        const raw = JSON.stringify(value);
+        return raw === undefined ? String(value) : raw;
+    } catch {
+        return String(value);
+    }
 }
 
 /**
@@ -50,8 +66,8 @@ export function budgetToolResult(result: unknown, maxChars: number = TOOL_RESULT
     if (result === null) return 'null';
     if (typeof result === 'string') {
         if (result.length <= maxChars) return result;
-        return result.substring(0, Math.max(0, maxChars - TRUNCATION_SUFFIX_RESERVE))
-            + `\n\n${BUDGET.TRUNCATED(result.length)}`;
+        return result.substring(0, Math.max(0, maxChars - TRUNCATION_SUFFIX_RESERVE)) +
+            `\n\n${BUDGET.TRUNCATED(result.length)}`;
     }
 
     const raw = JSON.stringify(result, null, 2) || '';
@@ -85,18 +101,51 @@ export function budgetToolResult(result: unknown, maxChars: number = TOOL_RESULT
     if (arrayTarget) {
         const { array, wrapper, key: arrayKey } = arrayTarget;
         const budgeted = budgetArray(array, maxChars, wrapper, arrayKey);
-        if (budgeted) return budgeted;
+        if (budgeted) return fitBudgetedText(budgeted, maxChars, raw.length);
     }
 
     // Strategy 2: If result is a direct array
     if (Array.isArray(result)) {
         const budgeted = budgetArray(result, maxChars, null, null);
-        if (budgeted) return budgeted;
+        if (budgeted) return fitBudgetedText(budgeted, maxChars, raw.length);
     }
 
     // Strategy 3: Generic truncation with structure hint
-    return raw.substring(0, Math.max(0, maxChars - TRUNCATION_SUFFIX_RESERVE)) +
-        `\n\n${BUDGET.TRUNCATED_GENERIC(raw.length)}`;
+    return fitBudgetedText(raw, maxChars, raw.length);
+}
+
+export function compactToolResultForUi(result: unknown, maxChars: number = TOOL_RESULT_UI_BUDGET): unknown {
+    const raw = stringifyForBudget(result);
+    if (raw.length <= maxChars) return result;
+
+    const note = `Tool result exceeded ${maxChars} chars and was compacted for the UI. Full details remain available through targeted follow-up tools.`;
+    const metadata: Record<string, unknown> = {
+        _truncated: true,
+        _originalLength: raw.length,
+    };
+    if (stringifyForBudget({ ...metadata, preview: '', _note: note }).length < maxChars - 100) {
+        metadata._note = note;
+    }
+
+    const metadataLength = stringifyForBudget({ ...metadata, preview: '' }).length;
+    let previewBudget = Math.max(0, maxChars - metadataLength - 64);
+    let compacted: Record<string, unknown> = { ...metadata, preview: budgetToolResult(result, previewBudget) };
+    let compactedLength = stringifyForBudget(compacted).length;
+    while (compactedLength > maxChars && previewBudget > 200) {
+        const nextBudget = Math.max(200, Math.floor(previewBudget * 0.75));
+        if (nextBudget === previewBudget) break;
+        previewBudget = nextBudget;
+        compacted = { ...metadata, preview: budgetToolResult(result, previewBudget) };
+        compactedLength = stringifyForBudget(compacted).length;
+    }
+    if (compactedLength <= maxChars) return compacted;
+
+    const overflow = compactedLength - maxChars;
+    const preview = String(compacted.preview ?? '');
+    return {
+        ...metadata,
+        preview: fitBudgetedText(preview, Math.max(0, preview.length - overflow - TRUNCATION_SUFFIX_RESERVE), raw.length),
+    };
 }
 
 /**

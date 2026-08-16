@@ -44,7 +44,7 @@ export class StepRetryPolicy {
                     ? 'rate_limit'
                     : (status !== undefined && status >= 500) || /server error|service unavailable|bad gateway/.test(text)
                         ? 'server_error'
-                        : /timeout|timed out|etimedout|econnreset/.test(text)
+                        : /timeout|timed out|fetch failed|network|socket|etimedout|econnreset|enotfound|eai_again/.test(text)
                             ? 'timeout'
                             : /empty response/.test(text)
                                 ? 'empty_response'

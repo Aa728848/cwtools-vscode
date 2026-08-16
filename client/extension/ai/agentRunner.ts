@@ -46,7 +46,7 @@ import { buildProviderCallTokenUsage } from './providerCallUsage';
 import { parseDsmlToolCalls as _parseDsmlToolCalls, stripDsmlMarkup as _stripDsmlMarkup, stripThinkBlocks as _stripThinkBlocks, cleanFinalContent as _cleanFinalContent } from './toolCallParser';
 import { tryRepairJson as _tryRepairJson } from './jsonRepair';
 import { repairToolArgs } from './tools/argRepair';
-import { budgetToolResult as _budgetToolResult, getToolResultBudget } from './contextBudget';
+import { budgetToolResult as _budgetToolResult, compactToolResultForUi, getToolResultBudget } from './contextBudget';
 import type { CompactMessagesOptions } from './contextBudget';
 import { AGENT, SOURCE, aiText } from './messages';
 import { describeImagesWithMinimaxCli } from './visionAdapter';
@@ -4015,7 +4015,14 @@ export class AgentRunner {
                     );
                 }
 
-                emitStep({ type: 'tool_result', content: `${AGENT.TOOL_RESULT_PREFIX}: ${toolName}`, toolName, toolResult, timestamp: Date.now(), invocationId });
+                emitStep({
+                    type: 'tool_result',
+                    content: `${AGENT.TOOL_RESULT_PREFIX}: ${toolName}`,
+                    toolName,
+                    toolResult: compactToolResultForUi(toolResult),
+                    timestamp: Date.now(),
+                    invocationId,
+                });
 
                 // Track consecutive errors
                 if (typeof toolResult === 'object' && toolResult !== null &&

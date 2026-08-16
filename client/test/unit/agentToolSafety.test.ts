@@ -2573,6 +2573,61 @@ describe('agent tool progress and aborts', () => {
         }
     });
 
+    it('allows semantic write tools to run past the short default timeout', async () => {
+        const clock = sinon.useFakeTimers();
+        try {
+            const executor = createExecutor();
+            sinon.stub(executor as any, 'executeInternal').callsFake(async () => {
+                await new Promise(resolve => setTimeout(resolve, 31_000));
+                return { success: true, message: 'write finished' };
+            });
+
+            const resultPromise = executor.execute('write_file', {
+                file: 'common/scripted_effects/slow_write.txt',
+                content: 'effect = { }\n',
+                _autoApply: true,
+            }, {
+                runnerOptions: { mode: 'build', domain: 'paradox' },
+            } as any);
+
+            await clock.tickAsync(31_000);
+            const result = await resultPromise as any;
+            expect(result).to.deep.equal({ success: true, message: 'write finished' });
+        } finally {
+            clock.restore();
+        }
+    });
+
+    it('does not hang a write when diagnostics LSP requests stop responding', async function () {
+        this.timeout(5000);
+        const clock = sinon.useFakeTimers();
+        try {
+            const target = path.join(workspaceRoot, 'notes', 'slow-diagnostics.md');
+            const client = {
+                onNotification: () => undefined,
+                sendNotification: () => undefined,
+                sendRequest: sinon.stub().returns(new Promise(() => undefined)),
+            } as any;
+            const executor = new AgentToolExecutor(client, workspaceRoot);
+
+            const resultPromise = executor.execute('write_file', {
+                file: target,
+                content: 'hello\n',
+                _autoApply: true,
+            }, {
+                runnerOptions: { mode: 'build', domain: 'paradox' },
+            } as any);
+
+            await clock.tickAsync(5_000);
+            const result = await resultPromise as any;
+            expect(result.success).to.equal(true);
+            expect(result.freshness).to.equal('pending');
+            expect(client.sendRequest.callCount).to.be.greaterThan(1);
+        } finally {
+            clock.restore();
+        }
+    });
+
     it('aborts the derived tool signal when a tool timeout fires', async () => {
         const clock = sinon.useFakeTimers();
         try {

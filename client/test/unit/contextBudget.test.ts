@@ -1,5 +1,5 @@
 import { expect } from 'chai';
-import { budgetToolResult, compactMessagesInPlace, TOOL_RESULT_BUDGET_BASE } from '../../extension/ai/contextBudget';
+import { budgetToolResult, compactMessagesInPlace, compactToolResultForUi, TOOL_RESULT_BUDGET_BASE } from '../../extension/ai/contextBudget';
 import { setAiMessageLocale } from '../../extension/ai/messages';
 import type { ChatMessage } from '../../extension/ai/types';
 
@@ -120,6 +120,33 @@ describe('budgetToolResult', () => {
     it('uses default budget when maxChars not specified', () => {
         const result = budgetToolResult({ small: true });
         expect(result).to.be.a('string');
+    });
+});
+
+// --- compactToolResultForUi --------------------------------------------------
+
+describe('compactToolResultForUi', () => {
+    it('preserves small structured results', () => {
+        const result = { success: true, message: 'ok', diagnostics: [] };
+        expect(compactToolResultForUi(result, 1000)).to.equal(result);
+    });
+
+    it('compacts oversized results for streamed UI steps', () => {
+        const result = {
+            success: true,
+            diff: 'x'.repeat(3000),
+            diagnostics: Array.from({ length: 50 }, (_, i) => ({
+                severity: 'error',
+                message: `Repeated diagnostic ${i}`,
+                file: `common/file_${i}.txt`,
+            })),
+        };
+
+        const compacted = compactToolResultForUi(result, 1000) as Record<string, unknown>;
+        expect(compacted._truncated).to.equal(true);
+        expect(compacted._originalLength).to.be.a('number').and.greaterThan(1000);
+        expect(JSON.stringify(compacted).length).to.be.at.most(1000);
+        expect(String(compacted.preview).length).to.be.lessThan(1000);
     });
 });
 

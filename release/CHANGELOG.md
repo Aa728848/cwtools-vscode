@@ -1,5 +1,13 @@
 # Changelog
 
+## [2.14.7] - 2026-08-16
+
+### 优化 / Improvements
+- **[优化] MCP 与 AI 工具支持点分多跳作用域链规则查询**：
+  - `query_rules`（MCP / AI 工具）支持直接查询点分多跳作用域链（如 `ship.colony.owner`、`from.owner` 等）。
+  - 自动从 `links.cwt` 构建合法的链式跃迁（hops）硬事实（`hardFacts`，含起点作用域、终点 `pushScope`）与语法示例（`ship.colony.owner = { ... }`），并生成各跳跃节点的语义提示（`semanticHints`），提升复杂链式作用域调用的分析与补全准确率。
+  English: [Improvement] Dotted multi-hop scope chain rule query support for MCP and AI tools — `query_rules` resolves compound scope chains (such as `ship.colony.owner` or `from.owner`) against `links.cwt`, synthesizing verified multi-hop pushScope hard facts, syntax structures, and rich per-hop semantic hints for accurate chained scoping and autocomplete.
+
 ## [2.14.6] - 2026-08-16
 
 ### 新功能 / New Features

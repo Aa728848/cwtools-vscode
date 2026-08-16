@@ -252,8 +252,6 @@ export class FileToolHandler {
         if (signal?.aborted) throw this.abortError(signal);
         return new Promise<T>((resolve, reject) => {
             let settled = false;
-            let timeoutId: ReturnType<typeof setTimeout> | undefined;
-            let onAbort: (() => void) | undefined;
             const markSettled = (): boolean => {
                 if (settled) return false;
                 settled = true;
@@ -269,12 +267,12 @@ export class FileToolHandler {
                 if (!markSettled()) return;
                 reject(error);
             };
-            timeoutId = setTimeout(() => {
+            const timeoutId: ReturnType<typeof setTimeout> = setTimeout(() => {
                 const error = new Error(timeoutMessage);
                 error.name = 'TimeoutError';
                 rejectOnce(error);
             }, timeoutMs);
-            onAbort = () => rejectOnce(this.abortError(signal));
+            const onAbort = () => rejectOnce(this.abortError(signal));
             signal?.addEventListener('abort', onAbort, { once: true });
             promise.then(
                 value => resolveOnce(value),

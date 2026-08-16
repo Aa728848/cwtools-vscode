@@ -190,6 +190,7 @@ Rule options are `##` comments attached to the following rule.
 | `## replace_scope` / `## replace_scopes` | `## replace_scopes = { this = country root = country from = planet }` | Replace system scopes inside the nested rule. | Shared |
 | `## completion_type` | `## completion_type = modifier` | Use completions from a specific type. | Shared; metadata-dependent |
 | `## error_if_only_match` | `## error_if_only_match = use x instead` | Report a custom error when only this rule matches. | Shared |
+| `## forbid_quoted_values` | `## forbid_quoted_values = { from }` | Report an error when any nested rule matches one of these quoted values. | Shared |
 | `## type_prefix_from` | `## type_prefix_from = key` | Derive type prefix context from another field. | Advanced |
 | `## type_suffix_pattern(s)` | `## type_suffix_patterns = { _desc _tooltip }` | Add suffix-derived type completion candidates. | Shared |
 | `## type_key_filter` / `## type_key_regex` / `## starts_with` | `## starts_with = prefix_` | Restrict the keys discovered for a type or subtype. | Shared |
@@ -1030,6 +1031,7 @@ subtype[!planet] = {
 | `## replace_scope` / `## replace_scopes` | `## replace_scopes = { this = country root = country from = planet }` | 替换嵌套规则内的系统作用域。 | Shared |
 | `## completion_type` | `## completion_type = modifier` | 使用指定类型的补全。 | Shared；依赖元数据 |
 | `## error_if_only_match` | `## error_if_only_match = use x instead` | 当只有此规则匹配时报自定义错误。 | Shared |
+| `## forbid_quoted_values` | `## forbid_quoted_values = { from }` | 当任何嵌套规则匹配这些带引号的值时报告错误。 | Shared |
 | `## type_prefix_from` | `## type_prefix_from = key` | 从另一个字段推导类型前缀上下文。 | Advanced |
 | `## type_suffix_pattern(s)` | `## type_suffix_patterns = { _desc _tooltip }` | 为类型补全添加后缀候选。 | Shared |
 | `## type_key_filter` / `## type_key_regex` / `## starts_with` | `## starts_with = prefix_` | 限制 type 或 subtype 发现的键。 | Shared |

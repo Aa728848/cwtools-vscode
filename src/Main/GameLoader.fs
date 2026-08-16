@@ -9,6 +9,7 @@ open CWTools.Games.Files
 open Main.Serialize
 open CWTools.Utilities.Utils
 open System.Text.Json
+open LibGit2Sharp
 
 // Store vanilla scripted variables path for hover (set after game load)
 let mutable stlVanillaScriptedVarsPath: string option = None
@@ -80,6 +81,23 @@ let private getRuleFilesFromFolder folder =
     else
         []
 
+let private isCwtRuleFile (file: string) =
+    String.Equals(Path.GetExtension file, ".cwt", StringComparison.OrdinalIgnoreCase)
+
+let private hasCwtRuleFiles folder =
+    getRuleFilesFromFolder folder |> List.exists isCwtRuleFile
+
+let private hasValidGitCheckout folder =
+    try
+        Repository.IsValid folder
+    with _ ->
+        false
+
+let hasUsableRemoteRulesCache cachePath =
+    match cachePath with
+    | Some path -> Directory.Exists path && hasValidGitCheckout path && hasCwtRuleFiles path
+    | None -> false
+
 let private extractBundledRulesZip (zipPath: string) : string option =
     try
         let stamp = File.GetLastWriteTimeUtc(zipPath).Ticks
@@ -102,6 +120,14 @@ let private extractBundledRulesZip (zipPath: string) : string option =
         logInfo $"Failed to extract bundled rules ZIP %s{zipPath}: %A{e}"
         None
 
+let bundledRulesAvailable bundledRulesFolder =
+    match bundledRulesFolder with
+    | Some (path: string) when path.EndsWith(".zip", StringComparison.OrdinalIgnoreCase) ->
+        extractBundledRulesZip path
+        |> Option.exists hasCwtRuleFiles
+    | Some path -> hasCwtRuleFiles path
+    | None -> false
+
 let private readConfigFiles configFiles =
     configFiles |> List.map (fun f -> f, File.ReadAllText(f))
 
@@ -113,7 +139,7 @@ let private resolveConfigFiles cachePath useManualRules manualRulesFolder bundle
 
     let cachedConfigFiles =
         match cachePath, useManualRules with
-        | Some path, false -> getRuleFilesFromFolder path
+        | Some path, false when hasUsableRemoteRulesCache cachePath -> getRuleFilesFromFolder path
         | _ -> []
 
     let bundledConfigFiles : (string * string) list =
@@ -144,18 +170,23 @@ let getConfigSource cachePath useManualRules manualRulesFolder bundledRulesFolde
     resolveConfigFiles cachePath useManualRules manualRulesFolder bundledRulesFolder preferBundledRules
     |> snd
 
-/// Automatic mode starts from a packaged fallback when one is available so
-/// project loading never waits for the remote rules check. Manual mode remains
-/// isolated from both bundled and remote rules.
-let shouldPreferBundledRulesAtStartup useManualRules =
-    not useManualRules
+/// Automatic mode starts with the newest immediately available local source:
+/// a cached remote checkout is already usable synchronously, so it is preferred
+/// over the bundled fallback. The bundle becomes the startup source only before
+/// the first successful checkout; otherwise every startup would load bundled
+/// rules, wait for the background remote check, and then reload the workspace
+/// to switch back to the same cached checkout.
+let shouldPreferBundledRulesAtStartup useManualRules cachePath =
+    not useManualRules && not (hasUsableRemoteRulesCache cachePath)
 
-/// Once the remote check completes, preserve the existing final-source policy:
-/// a successful check selects the remote cache, while a failed check selects
-/// the bundled fallback (and resolveConfigFiles falls back to the cache if the
-/// bundle is unavailable).
-let shouldPreferBundledRulesAfterRemoteUpdate useManualRules remoteUpdateSucceeded =
-    not useManualRules && not remoteUpdateSucceeded
+/// Once the remote check completes, keep a usable cached checkout when the
+/// network update failed (it was already loaded and remains valid); only fall
+/// back to the bundle when there is no cached checkout to keep using. A
+/// successful check always selects the remote cache.
+let shouldPreferBundledRulesAfterRemoteUpdate useManualRules remoteUpdateSucceeded cachePath =
+    not useManualRules
+    && not remoteUpdateSucceeded
+    && not (hasUsableRemoteRulesCache cachePath)
 
 let getFolderList (filename: string, filetext: string) =
     if Path.GetFileName filename = "folders.cwt" then

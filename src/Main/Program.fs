@@ -5210,7 +5210,7 @@ type Server(client: ILanguageClient) =
     let setupRulesCaches () =
         semanticCatalogCache <- None
         let generation = System.Threading.Interlocked.Increment(&rulesUpdateGeneration)
-        preferBundledRules <- shouldPreferBundledRulesAtStartup useManualRules
+        preferBundledRules <- shouldPreferBundledRulesAtStartup useManualRules cachePath
         let source = getConfigSource cachePath useManualRules manualRulesFolder bundledRulesPath preferBundledRules
         let status =
             match useManualRules, source with
@@ -5765,7 +5765,7 @@ type Server(client: ILanguageClient) =
                         | _ -> false
 
                     preferBundledRules <-
-                        shouldPreferBundledRulesAfterRemoteUpdate useManualRules remoteUpdateSucceeded
+                        shouldPreferBundledRulesAfterRemoteUpdate useManualRules remoteUpdateSucceeded cachePath
                     let finalSource =
                         getConfigSource cachePath useManualRules manualRulesFolder bundledRulesPath preferBundledRules
 
@@ -5791,9 +5791,14 @@ type Server(client: ILanguageClient) =
                     | _, "remote" ->
                         rulesStatus <- "fallback"
                         let warningMsg =
-                            uiText
-                                (sprintf "Failed to update CWTools rules for %A from the remote repository. The bundled fallback was unavailable, so the existing cached rules were kept." activeGame)
-                                (sprintf "无法从远程仓库更新 %A 的 CWTools 规则；内置备用规则不可用，因此继续使用现有缓存规则。" activeGame)
+                            if bundledRulesAvailable bundledRulesPath then
+                                uiText
+                                    (sprintf "Failed to update CWTools rules for %A from the remote repository. Existing cached rules were kept instead of reloading the bundled fallback rules." activeGame)
+                                    (sprintf "无法从远程仓库更新 %A 的 CWTools 规则；已继续使用现有缓存规则，而不是重新加载内置备用规则。" activeGame)
+                            else
+                                uiText
+                                    (sprintf "Failed to update CWTools rules for %A from the remote repository. The bundled fallback was unavailable, so the existing cached rules were kept." activeGame)
+                                    (sprintf "无法从远程仓库更新 %A 的 CWTools 规则；内置备用规则不可用，因此继续使用现有缓存规则。" activeGame)
                         logWarning warningMsg
                         userMessage <- Some (MessageType.Warning, warningMsg)
                     | _ ->

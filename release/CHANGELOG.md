@@ -1,5 +1,20 @@
 # Changelog
 
+## [2.14.6] - 2026-08-16
+
+### 新功能 / New Features
+- **[新增] CWT 规则禁止加引号值校验指令 (`## forbid_quoted_values`)**：
+  - 在 CWTools 规则引擎与解析器中新增 `## forbid_quoted_values = { ... }` 元指令支持，当规则匹配到指定被禁止加引号的标量值（如 `create_species` / `create_leader` 中的 `"from"`）时报告明确的语法错误并提示用户移除引号。
+  - 禁止加引号列表规则支持在子作用域与 alias 展开块中自动向下继承传递。
+  English: [New] `## forbid_quoted_values` CWT rule directive — adds support for the `## forbid_quoted_values = { ... }` directive to flag illegal quoted scalar values (such as `"from"` in `create_species` / `create_leader` effects) with actionable diagnostic messages suggesting unquoted usage; rule restrictions inherit automatically into child clauses and aliased blocks.
+
+### 优化 / Improvements
+- **[优化] 规则缓存优先与离线回退保活**：
+  - 自动模式启动时若本地存在有效的远程规则缓存检出（Git checkout），优先同步使用该本地缓存加载规则，避免启动时先加载内置 ZIP 规则又因后台更新检测触发二次重载工作区。
+  - 当远程网络规则更新失败时，若存在可用历史缓存则继续保留使用当前规则，不再强制降级重载内置备用规则。
+  - 增强规则目录有效性校验（支持 LibGit2Sharp 仓库合法性检查与 `.cwt` 规则文件探测）。
+  English: [Improvement] Cache-first rules startup and resilient offline fallback — automatic mode prefers an existing valid local remote-rules checkout on startup instead of loading bundled ZIP rules and triggering a second workspace reload after background checks; failed network updates retain usable cached checkouts instead of reloading bundled fallback rules; enhanced git repository validity checks and `.cwt` file detection.
+
 ## [2.14.5] - 2026-08-15
 
 ### 优化 / Improvements

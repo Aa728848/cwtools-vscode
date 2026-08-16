@@ -151,6 +151,10 @@ check "non-enum child in enums -> CWT111" (codesOf invalidEnumsChild "i.cwt" |> 
 let requiredOption = "localisation = {\n\t## required\n\tname = \"$\"\n}\n"
 check "## required accepted" (codesOf requiredOption "r.cwt" |> Set.isEmpty)
 
+// `## forbid_quoted_values` accepts a brace list like other list options.
+let forbidQuotedValuesOption = "## forbid_quoted_values = { from }\nenabled = bool\n"
+check "## forbid_quoted_values accepted" (codesOf forbidQuotedValuesOption "f.cwt" |> Set.isEmpty)
+
 // `##Checks if ...` prose must not be flagged as a directive.
 let proseComment = "##Checks if the target is at war\nenabled = bool\n"
 check "## prose not flagged" (codesOf proseComment "p.cwt" |> Set.isEmpty)

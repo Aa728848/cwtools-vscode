@@ -163,6 +163,10 @@ describe('LspToolHandler CWT rules cache lifecycle (plan §7.4)', () => {
             '    input_scopes = { planet ship colony }',
             '    output_scope = Colony',
             '  }',
+            '  owner = {',
+            '    input_scopes = { colony }',
+            '    output_scope = Country',
+            '  }',
             '}',
             '',
         ].join('\n'), 'utf8');
@@ -174,10 +178,22 @@ describe('LspToolHandler CWT rules cache lifecycle (plan §7.4)', () => {
             scope: 'ship',
         });
 
-        expect(result.rules[0]!.name).to.equal('colony');
+        expect(result.rules[0]!.name).to.equal('ship.colony');
         expect(result.rules[0]!.hardFacts?.supportedScopes).to.include('ship');
         expect(result.rules[0]!.hardFacts?.pushScope).to.equal('colony');
+        expect(result.rules[0]!.syntax).to.equal('ship.colony = { ... }');
         expect(result.rules[0]!.semanticHints?.some(hint => hint.source === 'links.cwt')).to.equal(true);
+
+        const multiHop = await handler.queryRules({
+            category: 'scope_change',
+            name: 'ship.colony.owner',
+            scope: 'ship',
+        });
+
+        expect(multiHop.rules[0]!.name).to.equal('ship.colony.owner');
+        expect(multiHop.rules[0]!.hardFacts?.supportedScopes).to.include('ship');
+        expect(multiHop.rules[0]!.hardFacts?.pushScope).to.equal('country');
+        expect(multiHop.rules[0]!.syntax).to.equal('ship.colony.owner = { ... }');
     });
 
     it('loads alias rules from nested CWT files', async () => {

@@ -1,5 +1,17 @@
 # Changelog
 
+## [2.14.8] - 2026-08-16
+
+### 优化 / Improvements
+- **[优化] 工具超时控制与 LSP 诊断查询抗卡死加固**：
+  - 语义写入类工具（`write_file`, `write_patch`, `write_localisation`, `multi_file_edit` 等）超时时间延长至 90 秒，保障大文件写入与后置校验充足运行时间。
+  - 文件写入后 LSP 重新校验与诊断获取流程增加防超时与取消信号支持（`withAbortAndTimeout` 2.5s / 3s），当语言服务端诊断卡死或未响应时优雅降级为 `pending` 状态返回，避免写入工具挂起。
+  - 增强 AgentRunner 故障降级与重试机制，对 `fetch failed`、`getaddrinfo EAI_AGAIN` 等网络异常支持自动重试与提供商降级。
+  English: [Improvement] Hardened tool timeouts and resilient LSP diagnostics — semantic write tools now allow up to 90 seconds for large files and post-write validation; LSP diagnostic requests and disk revalidation add bounded 2.5s/3s timeouts with abort-signal propagation, gracefully degrading to `pending` instead of hanging the write tool; AgentRunner adds retry and provider fallback for `fetch failed` and `getaddrinfo EAI_AGAIN` network errors.
+- **[优化] Webview UI 步骤结果紧凑化裁剪**：
+  - 新增 `compactToolResultForUi` 工具函数，对流式传输至 Webview 的大尺寸工具输出（如超长 diff 或海量重复诊断）进行紧凑化压缩与截断，防止界面渲染卡顿与 DOM 内存无界增长。
+  English: [Improvement] Compact oversized UI tool results — stream-compacts large tool outputs (such as massive diffs or dozens of diagnostics) before broadcasting to the Webview, preventing render freezes and unbounded DOM memory growth.
+
 ## [2.14.7] - 2026-08-16
 
 ### 优化 / Improvements

@@ -356,6 +356,38 @@ describe('runtime recovery helpers', () => {
         expect(projection.turn?.activeToolCalls).to.deep.equal([{ invocationId: 'tool', name: 'read_file' }]);
     });
 
+    it('projects durable goal status and budget progress for activity surfaces', () => {
+        const projection = projectActivities({
+            goal: {
+                version: 2,
+                goalId: 'goal',
+                topicId: 'topic',
+                threadId: 'thread',
+                objective: 'finish the migration',
+                completionCriterion: [],
+                status: 'active',
+                budgetLimits: { tokens: 1000, turns: 5 },
+                tokensUsed: 250,
+                turnsUsed: 2,
+                wallClockMs: 0,
+                budgetGracePending: false,
+                budgetGraceUsed: false,
+                tokenBudget: 1000,
+                createdAt: 1,
+                updatedAt: 2,
+            },
+        });
+
+        const goal = projection.items.find(item => item.kind === 'goal');
+        expect(goal).to.include({
+            id: 'goal',
+            label: 'finish the migration',
+            status: 'running',
+        });
+        expect(goal?.detail).to.include('tokens 250/1000');
+        expect(goal?.detail).to.include('turns 2/5');
+    });
+
     it('retries model requests with deterministic classification and bounded input shrinking', async () => {
         const policy = new StepRetryPolicy(3, 1, 2);
         expect(policy.decide({ status: 413 }, 1)).to.include({

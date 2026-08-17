@@ -901,6 +901,44 @@ body.chat-empty .input-container { box-shadow: 0 16px 38px rgba(0,0,0,0.22); }
 #imagePreviewArea > div { width: 48px !important; height: 48px !important; }
 #imagePreviewArea img { border-radius: 8px !important; border-color: rgba(255,255,255,0.12) !important; }
 #imagePreviewArea button { top: -7px !important; right: -7px !important; width: 18px !important; height: 18px !important; background: rgba(40,40,43,0.96) !important; border: 1px solid rgba(255,255,255,0.18) !important; color: #fff !important; }
+.goal-run-area { display: block; flex-shrink: 0; border-bottom: 1px solid rgba(255,255,255,0.09); }
+.goal-run-area[hidden] { display: none; }
+.goal-run-row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 9px; min-height: 42px; padding: 7px 9px 7px 12px; background: color-mix(in srgb, var(--warning) 8%, transparent); }
+.goal-run-icon { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; color: var(--warning); opacity: 0.95; }
+.goal-run-main { min-width: 0; border: 0; background: transparent; color: var(--fg); font: inherit; display: flex; align-items: center; gap: 7px; padding: 0; cursor: pointer; text-align: left; }
+.goal-run-status { flex: 0 0 auto; max-width: 86px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--warning); font-size: 11px; font-weight: 700; }
+.goal-run-objective { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--input-fg); font-size: 12.5px; line-height: 1.35; font-weight: 600; }
+.goal-run-detail { flex: 0 0 auto; max-width: min(34vw, 210px); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--vscode-descriptionForeground); font-size: 11px; opacity: 0.82; }
+.goal-run-actions { display: flex; align-items: center; gap: 2px; }
+.goal-run-action { width: 28px; height: 28px; border: 0; border-radius: 8px; background: transparent; color: var(--fg); display: inline-flex; align-items: center; justify-content: center; cursor: pointer; opacity: 0.78; transition: background 0.15s, color 0.15s, opacity 0.15s, transform 0.12s; }
+.goal-run-action:hover { background: color-mix(in srgb, var(--vscode-list-hoverBackground, rgba(255,255,255,0.09)) 88%, transparent); opacity: 1; }
+.goal-run-action:active { transform: translateY(1px); }
+.goal-run-action:focus { outline: none; }
+.goal-run-action:focus-visible { box-shadow: 0 0 0 1px var(--vscode-focusBorder); }
+.goal-action-cancel .stop-icon { margin: 0; }
+.goal-action-complete { color: #78d681; }
+.goal-action-complete:hover { color: #8ef09a; }
+.goal-action-blocked { color: var(--warning); }
+.goal-action-blocked:hover { color: #ffbf66; }
+.goal-action-cancel:hover { color: var(--error); }
+.goal-run-row.goal-run-complete { background: color-mix(in srgb, #78d681 8%, transparent); }
+.goal-run-row.goal-run-complete .goal-run-status, .goal-run-row.goal-run-complete .goal-run-icon { color: #78d681; }
+.goal-run-row.goal-run-blocked, .goal-run-row.goal-run-attention { background: color-mix(in srgb, var(--error) 7%, transparent); }
+.goal-run-row.goal-run-blocked .goal-run-status, .goal-run-row.goal-run-attention .goal-run-status { color: var(--error); }
+.queued-prompt-area { display: flex; flex-direction: column; gap: 0; flex-shrink: 0; border-bottom: 1px solid rgba(255,255,255,0.08); }
+.queued-prompt-area[hidden] { display: none; }
+.queued-prompt-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 8px; min-height: 38px; padding: 7px 9px 7px 12px; }
+.queued-prompt-row + .queued-prompt-row { border-top: 1px solid rgba(255,255,255,0.06); }
+.queued-prompt-main { min-width: 0; border: 0; background: transparent; color: var(--fg); font: inherit; display: flex; align-items: center; gap: 7px; padding: 0; cursor: pointer; text-align: left; }
+.queued-prompt-main:hover .queued-prompt-text { color: var(--vscode-foreground); }
+.queued-prompt-badge { flex: 0 0 auto; max-width: 74px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--warning); font-size: 11px; font-weight: 650; }
+.queued-prompt-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--input-fg); font-size: 12.5px; line-height: 1.35; }
+.queued-prompt-meta { flex: 0 0 auto; color: var(--vscode-descriptionForeground); font-size: 11px; opacity: 0.8; }
+.queued-prompt-actions { display: flex; align-items: center; gap: 2px; }
+.queued-prompt-action { width: 28px; height: 28px; border: 0; border-radius: 8px; background: transparent; color: var(--fg); display: inline-flex; align-items: center; justify-content: center; cursor: pointer; opacity: 0.78; }
+.queued-prompt-action:hover { background: color-mix(in srgb, var(--vscode-list-hoverBackground, rgba(255,255,255,0.09)) 88%, transparent); opacity: 1; }
+.queued-prompt-delete:hover { color: var(--error); }
+.queued-prompt-send { color: var(--warning); }
 .inline-message-editor { display: flex; flex-direction: column; gap: 9px; border: 1px solid rgba(100,166,255,0.28); border-radius: 8px; background: rgba(100,166,255,0.07); padding: 10px 11px; box-shadow: inset 0 0 0 1px rgba(100,166,255,0.06); }
 .inline-edit-top { display: flex; align-items: center; gap: 7px; color: #9fc7ff; font-size: 11.5px; opacity: 0.92; }
 .inline-edit-context-row { display: flex; flex-wrap: wrap; gap: 5px; }
@@ -1549,6 +1587,14 @@ body.chat-empty .slash-popup { max-height: min(360px, calc(50vh - 28px)); }
     .composer-reasoning-trigger { width: max-content; max-width: 112px; flex-basis: auto; }
     .composer-chip { max-width: 120px; }
     .workflow-chip { max-width: 140px; }
+    .goal-run-row { grid-template-columns: auto minmax(0, 1fr) auto; padding: 6px 8px 6px 10px; gap: 6px; }
+    .goal-run-status { max-width: 58px; font-size: 10.5px; }
+    .goal-run-detail { display: none; }
+    .goal-run-action { width: 26px; height: 26px; }
+    .queued-prompt-row { grid-template-columns: minmax(0, 1fr) auto; padding: 6px 8px 6px 10px; gap: 6px; }
+    .queued-prompt-badge { max-width: 58px; font-size: 10.5px; }
+    .queued-prompt-meta { display: none; }
+    .queued-prompt-action { width: 26px; height: 26px; }
     .model-menu { left: 52px; min-width: 220px; max-width: calc(100vw - 76px); }
     .reasoning-menu { width: max-content; min-width: max-content; max-width: min(200px, calc(100vw - 76px)); }
     .topics-panel-summary,

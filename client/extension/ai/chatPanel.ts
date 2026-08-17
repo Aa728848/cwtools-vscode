@@ -2795,12 +2795,14 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                             ? aiText(`Durable goal marked ${updated.status}.`, `持久目标已标记为${updated.status === 'complete' ? '完成' : '受阻'}。`)
                             : aiText('No durable goal exists for this topic.', '当前话题没有持久目标。'),
                     );
+                    if (updated) void this.sendManagerSnapshot();
                     return;
                 }
                 const budgetMatch = value.match(/^(\d+)\s*:\s*(.+)$/s);
                 const objective = budgetMatch?.[2]?.trim() || value;
                 const tokenBudget = budgetMatch?.[1] ? Number(budgetMatch[1]) : undefined;
                 await this.agentRuntime.setGoal(topicId, topicId, objective, tokenBudget);
+                void this.sendManagerSnapshot();
                 this.emitSlashCommandResult(
                     raw,
                     'success',

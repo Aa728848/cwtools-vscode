@@ -34,6 +34,19 @@ export interface ActivityProjection {
     items: AgentActivity[];
 }
 
+function goalDetail(goal: DurableAgentGoal): string | undefined {
+    const parts: string[] = [];
+    if (goal.budgetLimits.tokens !== undefined) parts.push(`tokens ${goal.tokensUsed}/${goal.budgetLimits.tokens}`);
+    else if (goal.tokensUsed > 0) parts.push(`tokens ${goal.tokensUsed}`);
+    if (goal.turnsUsed > 0 || goal.budgetLimits.turns !== undefined) {
+        parts.push(goal.budgetLimits.turns !== undefined ? `turns ${goal.turnsUsed}/${goal.budgetLimits.turns}` : `turns ${goal.turnsUsed}`);
+    }
+    if (goal.budgetLimits.wallClockMs !== undefined && goal.wallClockMs > 0) {
+        parts.push(`time ${Math.round(goal.wallClockMs / 60000)}/${Math.round(goal.budgetLimits.wallClockMs / 60000)}m`);
+    }
+    return goal.terminalReason || parts.join(' · ') || undefined;
+}
+
 export function projectActivities(input: {
     goal?: DurableAgentGoal;
     tasks?: readonly AgentTaskRecord[];
@@ -59,7 +72,7 @@ export function projectActivities(input: {
                         : 'failed',
             startedAt: input.goal.createdAt,
             endedAt: ['complete', 'cancelled'].includes(input.goal.status) ? input.goal.updatedAt : undefined,
-            detail: input.goal.terminalReason,
+            detail: goalDetail(input.goal),
         });
     }
     for (const task of input.tasks ?? []) {

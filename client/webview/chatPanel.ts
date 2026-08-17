@@ -194,6 +194,7 @@ interface UserMessageInputPayload {
     text: string;
     images?: string[];
     contexts?: ActiveContext[];
+    attachedFiles?: string[];
 }
 
 interface ResponsiveWorkspacePanel {
@@ -412,6 +413,28 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
     let pendingFiles: string[] = [];
     /** Pending structured references to attach to the next sent message */
     let activeContexts: ActiveContext[] = [];
+    type ComposerPayload = UserMessageInputPayload & {
+        agentProfile?: AgentProfileSelection;
+    };
+    type AgentActivityView = {
+        id: string;
+        kind: string;
+        label: string;
+        status: string;
+        startedAt?: number;
+        endedAt?: number;
+        detail?: string;
+    };
+    type QueuedComposerInput = ComposerPayload & {
+        id: string;
+        createdAt: number;
+    };
+    const queuedComposerInputs: QueuedComposerInput[] = [];
+    let currentGoalActivity: AgentActivityView | null = null;
+    let goalRunArea: HTMLElement | null = null;
+    let queuedPromptArea: HTMLElement | null = null;
+    let queuedPromptDispatchTimer: ReturnType<typeof setTimeout> | null = null;
+    let queuedPromptDispatchAfterCompletion = false;
     let inlineEditSession: {
         messageIndex: number;
         container: HTMLElement;
@@ -1488,7 +1511,220 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
             text: payload.text || '',
             images: payload.images ? [...payload.images] : undefined,
             contexts: payload.contexts ? payload.contexts.map(ctx => ({ ...ctx, id: ctx.id || generateContextId() })) : undefined,
+            attachedFiles: payload.attachedFiles ? [...payload.attachedFiles] : undefined,
         };
+    }
+
+    function getGoalRunArea(): HTMLElement | null {
+        if (goalRunArea?.isConnected) return goalRunArea;
+        const container = document.querySelector('.input-container');
+        if (!container) return null;
+        const area = document.createElement('div');
+        area.id = 'goalRunArea';
+        area.className = 'goal-run-area';
+        const anchor = queuedPromptArea?.isConnected
+            ? queuedPromptArea
+            : container.querySelector('#fileBadgeArea') || container.firstChild;
+        container.insertBefore(area, anchor);
+        goalRunArea = area;
+        return area;
+    }
+
+    function goalStatusLabel(status: string): string {
+        switch (status) {
+            case 'running': return tr('Running', '运行中');
+            case 'queued': return tr('Queued', '排队中');
+            case 'blocked': return tr('Blocked', '受阻');
+            case 'complete': return tr('Complete', '完成');
+            case 'failed': return tr('Stopped', '已停止');
+            case 'attention': return tr('Needs attention', '需要处理');
+            default: return status || tr('Goal', '目标');
+        }
+    }
+
+    function goalActionLabel(action: 'edit' | 'blocked' | 'complete' | 'cancel'): string {
+        switch (action) {
+            case 'edit': return tr('Edit goal', '编辑目标');
+            case 'blocked': return tr('Mark goal blocked', '标记目标受阻');
+            case 'complete': return tr('Mark goal complete', '标记目标完成');
+            case 'cancel': return tr('Cancel current run', '取消当前运行');
+        }
+    }
+
+    function renderGoalRunArea(): void {
+        const area = getGoalRunArea();
+        if (!area) return;
+        document.body.classList.toggle('has-goal-run', !!currentGoalActivity);
+        if (!currentGoalActivity) {
+            area.innerHTML = '';
+            area.hidden = true;
+            updateComposerStackHeight();
+            return;
+        }
+
+        const goal = currentGoalActivity;
+        const statusClass = goal.status.replace(/[^a-z0-9_-]/gi, '').toLowerCase() || 'unknown';
+        const canMarkTerminal = goal.status !== 'complete' && goal.status !== 'failed';
+        area.hidden = false;
+        area.innerHTML = `
+            <div class="goal-run-row goal-run-${escapeHtml(statusClass)}">
+                <span class="goal-run-icon" aria-hidden="true">${svgIconNoMargin('flag')}</span>
+                <button class="goal-run-main" type="button" data-goal-action="edit" title="${escapeHtml(goalActionLabel('edit'))}">
+                    <span class="goal-run-status">${escapeHtml(goalStatusLabel(goal.status))}</span>
+                    <span class="goal-run-objective">${escapeHtml(goal.label)}</span>
+                    ${goal.detail ? `<span class="goal-run-detail">${escapeHtml(goal.detail)}</span>` : ''}
+                </button>
+                <div class="goal-run-actions" role="toolbar" aria-label="${escapeHtml(tr('Goal controls', '目标控制'))}">
+                    ${isGenerating ? `<button class="goal-run-action goal-action-cancel" type="button" data-goal-action="cancel" title="${escapeHtml(goalActionLabel('cancel'))}" aria-label="${escapeHtml(goalActionLabel('cancel'))}"><span class="stop-icon"></span></button>` : ''}
+                    <button class="goal-run-action" type="button" data-goal-action="edit" title="${escapeHtml(goalActionLabel('edit'))}" aria-label="${escapeHtml(goalActionLabel('edit'))}">${svgIconNoMargin('pencil')}</button>
+                    ${canMarkTerminal ? `<button class="goal-run-action goal-action-blocked" type="button" data-goal-action="blocked" title="${escapeHtml(goalActionLabel('blocked'))}" aria-label="${escapeHtml(goalActionLabel('blocked'))}">${svgIconNoMargin('warning')}</button>` : ''}
+                    ${canMarkTerminal ? `<button class="goal-run-action goal-action-complete" type="button" data-goal-action="complete" title="${escapeHtml(goalActionLabel('complete'))}" aria-label="${escapeHtml(goalActionLabel('complete'))}">${svgIconNoMargin('check')}</button>` : ''}
+                </div>
+            </div>
+        `;
+
+        area.querySelectorAll<HTMLElement>('[data-goal-action]').forEach(button => {
+            button.addEventListener('click', event => {
+                event.preventDefault();
+                const action = button.dataset.goalAction;
+                if (action === 'edit') {
+                    setInputText(`/goal ${goal.label}`);
+                    input.focus();
+                } else if (action === 'blocked') {
+                    vscode.postMessage({ type: 'slashCommand', command: '/goal:blocked' });
+                } else if (action === 'complete') {
+                    vscode.postMessage({ type: 'slashCommand', command: '/goal:complete' });
+                } else if (action === 'cancel') {
+                    vscode.postMessage({ type: 'cancelGeneration' });
+                }
+            });
+        });
+        updateComposerStackHeight();
+    }
+
+    function updateGoalActivityFromProjection(activity: { items?: unknown[] } | undefined): void {
+        const items = Array.isArray(activity?.items) ? activity.items : [];
+        const goal = items.find((item): item is AgentActivityView => {
+            if (!item || typeof item !== 'object') return false;
+            const candidate = item as Partial<AgentActivityView>;
+            return candidate.kind === 'goal'
+                && typeof candidate.id === 'string'
+                && typeof candidate.label === 'string'
+                && typeof candidate.status === 'string';
+        });
+        currentGoalActivity = goal ? { ...goal } : null;
+        renderGoalRunArea();
+    }
+
+    function getQueuedPromptArea(): HTMLElement | null {
+        if (queuedPromptArea?.isConnected) return queuedPromptArea;
+        const container = document.querySelector('.input-container');
+        if (!container) return null;
+        const area = document.createElement('div');
+        area.id = 'queuedPromptArea';
+        area.className = 'queued-prompt-area';
+        const anchor = container.querySelector('#fileBadgeArea') || container.firstChild;
+        container.insertBefore(area, anchor);
+        queuedPromptArea = area;
+        return area;
+    }
+
+    function queuedPromptSummary(item: UserMessageInputPayload): string {
+        const text = item.text.trim().replace(/\s+/g, ' ');
+        if (text) return text;
+        const parts: string[] = [];
+        if (item.contexts?.length) parts.push(tr(`${item.contexts.length} reference(s)`, `${item.contexts.length} 个引用`));
+        if (item.images?.length) parts.push(tr(`${item.images.length} image(s)`, `${item.images.length} 张图片`));
+        return parts.join(' · ') || tr('Queued input', '待发送输入');
+    }
+
+    function queuedPromptMeta(item: UserMessageInputPayload): string {
+        const parts: string[] = [];
+        if (item.contexts?.length) parts.push(tr(`${item.contexts.length} ref`, `${item.contexts.length} 引用`));
+        if (item.images?.length) parts.push(tr(`${item.images.length} img`, `${item.images.length} 图`));
+        return parts.join(' · ');
+    }
+
+    function renderQueuedPromptArea(): void {
+        const area = getQueuedPromptArea();
+        if (!area) return;
+        document.body.classList.toggle('has-queued-composer-inputs', queuedComposerInputs.length > 0);
+        if (queuedComposerInputs.length === 0) {
+            area.innerHTML = '';
+            area.hidden = true;
+            updateComposerStackHeight();
+            return;
+        }
+
+        area.hidden = false;
+        area.innerHTML = queuedComposerInputs.map((item, index) => {
+            const meta = queuedPromptMeta(item);
+            const sendTitle = isGenerating
+                ? tr('Send to current run as steering input', '作为调整方向插入当前任务')
+                : tr('Send now', '立即发送');
+            return `
+                <div class="queued-prompt-row" data-queued-id="${escapeHtml(item.id)}">
+                    <button class="queued-prompt-main" type="button" data-action="edit" title="${escapeHtml(tr('Edit queued input', '编辑待发送输入'))}">
+                        <span class="queued-prompt-badge">${escapeHtml(index === 0 ? tr('Queued', '排队') : `#${index + 1}`)}</span>
+                        <span class="queued-prompt-text">${escapeHtml(queuedPromptSummary(item))}</span>
+                        ${meta ? `<span class="queued-prompt-meta">${escapeHtml(meta)}</span>` : ''}
+                    </button>
+                    <div class="queued-prompt-actions" role="toolbar" aria-label="${escapeHtml(tr('Queued input actions', '待发送输入操作'))}">
+                        <button class="queued-prompt-action" type="button" data-action="edit" title="${escapeHtml(tr('Edit queued input', '编辑待发送输入'))}" aria-label="${escapeHtml(tr('Edit queued input', '编辑待发送输入'))}">${svgIconNoMargin('pencil')}</button>
+                        <button class="queued-prompt-action queued-prompt-delete" type="button" data-action="delete" title="${escapeHtml(tr('Delete queued input', '删除待发送输入'))}" aria-label="${escapeHtml(tr('Delete queued input', '删除待发送输入'))}">${svgIconNoMargin('trash')}</button>
+                        <button class="queued-prompt-action queued-prompt-send" type="button" data-action="send" title="${escapeHtml(sendTitle)}" aria-label="${escapeHtml(sendTitle)}">${svgIconNoMargin('upload')}</button>
+                    </div>
+                </div>
+            `;
+        }).join('');
+
+        area.querySelectorAll<HTMLElement>('[data-action]').forEach(button => {
+            button.addEventListener('click', event => {
+                event.preventDefault();
+                const row = button.closest<HTMLElement>('.queued-prompt-row');
+                const id = row?.dataset.queuedId;
+                if (!id) return;
+                const action = button.dataset.action;
+                if (action === 'edit') editQueuedComposerInput(id);
+                else if (action === 'delete') removeQueuedComposerInput(id);
+                else if (action === 'send') sendQueuedComposerInput(id);
+            });
+        });
+        updateComposerStackHeight();
+    }
+
+    function enqueueComposerInput(payload: ComposerPayload): void {
+        queuedComposerInputs.push({
+            ...cloneInputPayload(payload),
+            agentProfile: payload.agentProfile ? { ...payload.agentProfile } : undefined,
+            id: `queued_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+            createdAt: Date.now(),
+        });
+        renderQueuedPromptArea();
+    }
+
+    function removeQueuedComposerInput(id: string): QueuedComposerInput | undefined {
+        const index = queuedComposerInputs.findIndex(item => item.id === id);
+        if (index < 0) return undefined;
+        const [removed] = queuedComposerInputs.splice(index, 1);
+        renderQueuedPromptArea();
+        return removed;
+    }
+
+    function editQueuedComposerInput(id: string): void {
+        const item = removeQueuedComposerInput(id);
+        if (!item) return;
+        restoreComposerPayload(item);
+    }
+
+    function clearQueuedComposerInputs(): void {
+        queuedComposerInputs.length = 0;
+        if (queuedPromptDispatchTimer) {
+            clearTimeout(queuedPromptDispatchTimer);
+            queuedPromptDispatchTimer = null;
+        }
+        queuedPromptDispatchAfterCompletion = false;
+        renderQueuedPromptArea();
     }
 
     function clearComposerAttachmentPreviews() {
@@ -3326,36 +3562,94 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
     const endpointInp = document.getElementById('settingsEndpoint');
     if (endpointInp) endpointInp.addEventListener('input', onEndpointChange);
 
-    function sendMessage() {
+    function captureComposerPayload(): ComposerPayload {
         syncContextsFromComposer();
-        const text = getInputText().trim();
-        if (!text && pendingImages.length === 0 && pendingFiles.length === 0 && activeContexts.length === 0) return;
-        setChatEmptyState(false);
+        return {
+            text: getInputText().trim(),
+            images: pendingImages.length > 0 ? [...pendingImages] : undefined,
+            contexts: activeContexts.length > 0 ? activeContexts.map(ctx => ({ ...ctx })) : undefined,
+            attachedFiles: pendingFiles.length > 0 ? [...pendingFiles] : undefined,
+            agentProfile: { ...agentProfile },
+        };
+    }
 
-        const imagesToSend = pendingImages.length > 0 ? [...pendingImages] : undefined;
-        const contextsToSend = activeContexts.length > 0 ? activeContexts.map(ctx => ({ ...ctx })) : undefined;
-        const isSlashSubmission = text.startsWith('/');
-        const slashHasAttachments = isSlashSubmission
-            && ((imagesToSend?.length ?? 0) > 0 || pendingFiles.length > 0 || (contextsToSend?.length ?? 0) > 0);
+    function hasPayloadContent(payload: UserMessageInputPayload): boolean {
+        return payload.text.trim() !== ''
+            || (payload.images?.length ?? 0) > 0
+            || (payload.contexts?.length ?? 0) > 0
+            || (payload.attachedFiles?.length ?? 0) > 0;
+    }
 
-        if (activeContexts.length > 0) {
+    function hasSlashAttachments(payload: UserMessageInputPayload): boolean {
+        return payload.text.startsWith('/')
+            && (((payload.images?.length ?? 0) > 0)
+                || ((payload.attachedFiles?.length ?? 0) > 0)
+                || ((payload.contexts?.length ?? 0) > 0));
+    }
+
+    function postComposerPayload(payload: ComposerPayload, mode: 'turn' | 'steer'): void {
+        const contextsToSend = payload.contexts && payload.contexts.length > 0
+            ? payload.contexts.map(ctx => ({ ...ctx }))
+            : undefined;
+        const imagesToSend = payload.images && payload.images.length > 0 ? [...payload.images] : undefined;
+        if (mode === 'steer' && isGenerating && !contextsToSend) {
+            vscode.postMessage({
+                type: 'steerGeneration',
+                text: payload.text,
+                images: imagesToSend,
+            });
+            return;
+        }
+        if (contextsToSend) {
             vscode.postMessage({
                 type: 'sendMessageWithReference',
-                text,
-                contexts: contextsToSend || [],
+                text: payload.text,
+                contexts: contextsToSend,
                 images: imagesToSend,
-                agentProfile,
+                agentProfile: payload.agentProfile || agentProfile,
             });
-            if (!slashHasAttachments) activeContexts = [];
-        } else {
-            vscode.postMessage({
-                type: isGenerating ? 'steerGeneration' : 'sendMessage',
-                text,
-                images: imagesToSend,
-                attachedFiles: pendingFiles.length > 0 ? [...pendingFiles] : undefined,
-                ...(!isGenerating ? { agentProfile } : {}),
-            });
+            return;
         }
+        vscode.postMessage({
+            type: 'sendMessage',
+            text: payload.text,
+            images: imagesToSend,
+            attachedFiles: payload.attachedFiles && payload.attachedFiles.length > 0 ? [...payload.attachedFiles] : undefined,
+            agentProfile: payload.agentProfile || agentProfile,
+        });
+    }
+
+    function sendQueuedComposerInput(id: string): void {
+        const item = removeQueuedComposerInput(id);
+        if (!item) return;
+        setChatEmptyState(false);
+        postComposerPayload(item, isGenerating ? 'steer' : 'turn');
+        updateSendButtonState();
+    }
+
+    function scheduleNextQueuedComposerInput(): void {
+        if (queuedPromptDispatchTimer || isGenerating || queuedComposerInputs.length === 0) return;
+        queuedPromptDispatchTimer = setTimeout(() => {
+            queuedPromptDispatchTimer = null;
+            if (isGenerating || queuedComposerInputs.length === 0) return;
+            const next = queuedComposerInputs.shift();
+            renderQueuedPromptArea();
+            if (!next) return;
+            setChatEmptyState(false);
+            postComposerPayload(next, 'turn');
+            updateSendButtonState();
+        }, 120);
+    }
+
+    function sendMessage() {
+        const payload = captureComposerPayload();
+        if (!hasPayloadContent(payload)) return;
+        setChatEmptyState(false);
+
+        const slashHasAttachments = hasSlashAttachments(payload);
+        if (slashHasAttachments) postComposerPayload(payload, 'turn');
+        else if (isGenerating) enqueueComposerInput(payload);
+        else postComposerPayload(payload, 'turn');
 
         // The Host rejects slash commands with attachments. Keep the complete
         // composer payload intact so the user can remove attachments and retry.
@@ -3407,7 +3701,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         }
         sendBtn.innerHTML = '<span class="send-icon">↑</span>';
         sendBtn.title = isGenerating
-            ? tr('Queue input for current run', '排队到当前任务')
+            ? tr('Queue after current run', '排队到当前任务之后')
             : `${chatI18n.buttons.send} (Enter)`;
         sendBtn.className = isGenerating ? 'send-btn steer-mode' : 'send-btn';
         sendBtn.disabled = !hasComposerPayload();
@@ -3415,7 +3709,13 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
 
     function setGenerating(val: boolean) {
         isGenerating = val;
+        if (val && queuedPromptDispatchTimer) {
+            clearTimeout(queuedPromptDispatchTimer);
+            queuedPromptDispatchTimer = null;
+        }
         updateSendButtonState();
+        renderGoalRunArea();
+        renderQueuedPromptArea();
         if (!val && isInputEmpty()) startPlaceholderRotation();
     }
 
@@ -6097,6 +6397,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                     updateTokenUsage(totalConversationTokens, contextLimit);
                 }
                 scrollBottom();
+                queuedPromptDispatchAfterCompletion = true;
                 break;
             }
 
@@ -6104,6 +6405,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                 removeReplayBanners();
                 clearActiveSubagentViews();
                 setGenerating(false);
+                queuedPromptDispatchAfterCompletion = false;
                 removeLiveAssistantViews();
                 
                 // Clear any unresolved interactive cards
@@ -6157,6 +6459,9 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                 chatArea.appendChild(emptyState);
                 messageIndexMap.clear();
                 userMessagePayloadMap.clear();
+                clearQueuedComposerInputs();
+                currentGoalActivity = null;
+                renderGoalRunArea();
                 setGenerating(false);
                 currentAssistantDiv = null;
                 streamStates.clear();
@@ -6235,6 +6540,9 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                 if (!isCurrentSurface(msg.targetSurface)) break;
                 clearActiveSubagentViews();
                 cancelInlineEdit();
+                clearQueuedComposerInputs();
+                currentGoalActivity = null;
+                renderGoalRunArea();
                 chatArea.innerHTML = '';
                 messageIndexMap.clear();
                 userMessagePayloadMap.clear();
@@ -6467,12 +6775,18 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                     lifecycle?: string;
                     turn?: { phase?: string; pendingApprovals?: unknown[]; activeToolCalls?: unknown[] };
                     background?: unknown[];
+                    items?: unknown[];
                 };
+                updateGoalActivityFromProjection(activity);
                 document.body.dataset.agentLifecycle = activity.lifecycle || 'ready';
                 document.body.dataset.agentPhase = activity.turn?.phase || 'idle';
                 document.body.dataset.agentBackgroundCount = String(activity.background?.length ?? 0);
                 document.body.dataset.agentApprovalCount = String(activity.turn?.pendingApprovals?.length ?? 0);
                 document.body.dataset.agentToolCallCount = String(activity.turn?.activeToolCalls?.length ?? 0);
+                if (queuedPromptDispatchAfterCompletion && !isGenerating) {
+                    queuedPromptDispatchAfterCompletion = false;
+                    scheduleNextQueuedComposerInput();
+                }
                 break;
             }
 

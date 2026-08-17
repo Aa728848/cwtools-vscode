@@ -1,5 +1,23 @@
 # Changelog
 
+## [2.14.9] - 2026-08-17
+
+### 新功能 / New Features
+- **[新增] 持久化目标执行进度与用户提示词排队队列**：
+  - Webview 聊天面板支持实时展示当前多步长程目标的持久化执行进度条（Durable Goal Progress）与阶段步骤计数。
+  - 支持在 Agent 忙碌运行期间将用户追加输入的 Prompt 自动加入排队队列，当前任务执行完毕后自动出队顺延执行，杜绝任务中断或指令丢失。
+  - 聊天界面增加排队徽章计数与流畅的交互动效。
+  English: [New] Durable goal progress and prompt queue — Webview chat panel displays persistent multi-step goal execution progress and stage counters; queues user prompts sent while the agent is running and consumes them sequentially upon task completion, preventing interrupted runs or lost instructions.
+
+### 优化 / Improvements
+- **[优化] `run_code` 批量工具执行引擎与编排调度增强**：
+  - 重构并强化 `run_code` 代码沙箱与批量工具执行调度器，支持更可靠的复杂上下文预算管理与后置证据校验。
+  - 增强 Policy 门禁与深度推理模型（如 DeepSeek V4）的适配与错误恢复机制。
+  English: [Improvement] Enhanced `run_code` batched execution and orchestration — strengthens sandbox security, refines prompt budget allocation, and hardens evidence validation for long-output models such as DeepSeek V4.
+- **[优化] Stellaris 本地化语法配置支持**：
+  - 优化 `language-configuration-localisation.json`，完善引号、括号自动闭合与成对匹配规则，并增加本地化语法单元测试。
+  English: [Improvement] Stellaris localisation language configuration — refines auto-closing pairs and quote matching for `.yml` localisation files.
+
 ## [2.14.8] - 2026-08-16
 
 ### 优化 / Improvements

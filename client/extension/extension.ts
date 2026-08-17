@@ -73,6 +73,7 @@ import {
 	shouldRequestLanguageServerSemanticTokens,
 	type ServerStartMode,
 } from './languageSelectors';
+import { createLocalisationWordPattern, LOCALISATION_WORD_PATTERN_LANGUAGE_IDS } from './localisationWordPattern';
 
 export let defaultClient: LanguageClient;
 
@@ -853,7 +854,14 @@ export async function activate(context: ExtensionContext) {
 	void indexService.start();
 	registerProjectKnowledgeWatcher(context, indexService);
 
-	// Register localization enhancements (§ color highlighting, $REF$ hover/goto)
+	// Register localization enhancements (§ color highlighting, $REF$ hover/goto).
+	// Some localisation .yml files stay under VS Code's built-in yaml id, so
+	// install the same word pattern there to keep §/£ markers out of words.
+	for (const language of LOCALISATION_WORD_PATTERN_LANGUAGE_IDS) {
+		context.subscriptions.push(vs.languages.setLanguageConfiguration(language, {
+			wordPattern: createLocalisationWordPattern(),
+		}));
+	}
 	registerLocalizationFeatures(context, indexService);
 	registerIndexedWorkspaceSymbols(context, indexService);
 	registerParadoxCsvFeatures(context);

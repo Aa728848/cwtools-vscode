@@ -1,6 +1,11 @@
 import { expect } from 'chai';
 import * as fs from 'fs';
 import * as path from 'path';
+import {
+    createLocalisationWordPattern,
+    LOCALISATION_WORD_PATTERN_LANGUAGE_IDS,
+    LOCALISATION_WORD_PATTERN_SOURCE,
+} from '../../extension/localisationWordPattern';
 
 describe('Stellaris Localisation Grammar & Language Configuration', () => {
     const root = path.join(__dirname, '../../..');
@@ -113,20 +118,28 @@ describe('Stellaris Localisation Grammar & Language Configuration', () => {
         expect(config.surroundingPairs).to.deep.include(['$', '$']);
     });
 
-    it('separates colour markers from Unicode localisation words', () => {
+    it('separates rich-text markers from Unicode localisation words', () => {
         const config = JSON.parse(fs.readFileSync(configPath, 'utf8')) as { wordPattern?: unknown };
-        expect(config.wordPattern).to.be.a('string');
-        if (typeof config.wordPattern !== 'string') {
-            throw new Error('localisation wordPattern must be a string');
-        }
+        expect(config.wordPattern).to.equal(LOCALISATION_WORD_PATTERN_SOURCE);
+        expect(LOCALISATION_WORD_PATTERN_LANGUAGE_IDS).to.deep.equal(['yaml', 'stellaris-localisation']);
 
-        const words = '\u00a7M最小期望值\u00a7!'.match(new RegExp(config.wordPattern, 'g'));
+        const wordPattern = new RegExp(LOCALISATION_WORD_PATTERN_SOURCE, 'g');
+        const runtimeWordPattern = createLocalisationWordPattern();
+        expect(runtimeWordPattern.source).to.equal(wordPattern.source);
+
+        const words = '\u00a7M最小期望值\u00a7!'.match(wordPattern);
         expect(words).to.deep.equal(['\u00a7M', '最小期望值', '\u00a7!']);
 
-        const latinWords = '\u00a7aExpected value\u00a7!'.match(new RegExp(config.wordPattern, 'g'));
+        const latinWords = '\u00a7aExpected value\u00a7!'.match(wordPattern);
         expect(latinWords).to.deep.equal(['\u00a7a', 'Expected', 'value', '\u00a7!']);
 
-        const reference = '$PLANET|Y$'.match(new RegExp(config.wordPattern, 'g'));
+        const icon = '\u00a3energy|Y\u00a3'.match(wordPattern);
+        expect(icon).to.deep.equal(['\u00a3', 'energy|Y', '\u00a3']);
+
+        const standaloneSection = '\u00a7裸字'.match(wordPattern);
+        expect(standaloneSection).to.deep.equal(['\u00a7', '裸字']);
+
+        const reference = '$PLANET|Y$'.match(wordPattern);
         expect(reference).to.deep.equal(['$PLANET|Y$']);
     });
 });

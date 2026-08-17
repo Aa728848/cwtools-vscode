@@ -112,4 +112,21 @@ describe('Stellaris Localisation Grammar & Language Configuration', () => {
         expect(config.comments.lineComment).to.equal('#');
         expect(config.surroundingPairs).to.deep.include(['$', '$']);
     });
+
+    it('separates colour markers from Unicode localisation words', () => {
+        const config = JSON.parse(fs.readFileSync(configPath, 'utf8')) as { wordPattern?: unknown };
+        expect(config.wordPattern).to.be.a('string');
+        if (typeof config.wordPattern !== 'string') {
+            throw new Error('localisation wordPattern must be a string');
+        }
+
+        const words = '\u00a7M最小期望值\u00a7!'.match(new RegExp(config.wordPattern, 'g'));
+        expect(words).to.deep.equal(['\u00a7M', '最小期望值', '\u00a7!']);
+
+        const latinWords = '\u00a7aExpected value\u00a7!'.match(new RegExp(config.wordPattern, 'g'));
+        expect(latinWords).to.deep.equal(['\u00a7a', 'Expected', 'value', '\u00a7!']);
+
+        const reference = '$PLANET|Y$'.match(new RegExp(config.wordPattern, 'g'));
+        expect(reference).to.deep.equal(['$PLANET|Y$']);
+    });
 });

@@ -2147,25 +2147,23 @@ const RUNTIME_CONTROL_TOOLS: ToolDefinition[] = [
         type: 'function',
         function: {
             name: 'run_code',
-            description: 'Execute a bounded sequence of tool steps in ONE call instead of one call per round trip. Each step runs through the same permission, plan-mode, and safety checks as a direct tool call. Prefer this for planned multi-step sequences (read → edit → verify) to save round trips, especially on long-output models. Do not nest run_code or interactive/orchestration tools; a failed step does not stop later steps.',
+            description: 'Execute a JavaScript async-function body inside an isolated QuickJS/WASM guest. Call current mode/domain/stage tools through the typed tools SDK, branch on their results, loop over bounded data, or use Promise.all for independent calls. Every nested call re-enters the normal permission, plan-mode, policy, scheduler, and write-queue pipeline. Only explicit console.log values and the outer return value reach model context; intermediate values stay guest-local. No Node, VS Code, filesystem, network, timer, module, eval, or Function-constructor globals are available.',
             parameters: {
                 type: 'object',
                 properties: {
-                    steps: {
-                        type: 'array',
-                        minItems: 1,
-                        maxItems: 32,
-                        items: {
-                            type: 'object',
-                            properties: {
-                                tool: { type: 'string', description: 'Exact tool name from the current catalog.' },
-                                args: { type: 'object', description: 'Arguments for that tool.' },
-                            },
-                            required: ['tool', 'args'],
-                        },
+                    code: {
+                        type: 'string',
+                        description: 'JavaScript async-function body. Top-level await and return are supported. Use only tools.<name>(args), JSON-safe values, and ordinary language constructs.',
+                        maxLength: 64000,
+                    },
+                    description: {
+                        type: 'string',
+                        description: 'Concise 5-10 word summary of what the program does.',
+                        maxLength: 240,
                     },
                 },
-                required: ['steps'],
+                required: ['code', 'description'],
+                additionalProperties: false,
             },
         },
     },

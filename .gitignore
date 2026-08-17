@@ -31,3 +31,4 @@ cwtools.local.props
 .tmp
 /.reasonix
 coverage/
+.npm-cache

@@ -34,6 +34,7 @@ const toolDefinitions = [
     'run_command',
     'write_file',
     'write_localisation',
+    'run_code',
 ].map(name => ({
     type: 'function',
     function: { name, description: '', parameters: {} },
@@ -69,9 +70,18 @@ describe('runnerPolicy', () => {
         expect(names).to.include('select_tools');
         expect(names).to.include('read_file');
         expect(names).to.include('query_workspace_index');
+        expect(names).to.include('run_code');
         expect(names).to.not.include('write_file');
         expect(names).to.not.include('replace_lines');
         expect(filterToolDefinitionsForStage(toolDefinitions, 'build', stage, true)).to.have.lengthOf(toolDefinitions.length);
+    });
+
+    it('keeps programmable Code Mode available throughout Paradox evidence stages', () => {
+        const buildTools = filterToolDefinitionsForMode(registeredTools, 'build', { domain: 'paradox' });
+        for (const stage of ['discovery', 'evidence', 'validation', 'write', 'finalize'] as const) {
+            const names = filterToolDefinitionsForStage(buildTools, 'build', stage).map(tool => tool.function.name);
+            expect(names, stage).to.include('run_code');
+        }
     });
 
     it('keeps structured user questions available during discovery and evidence', () => {
@@ -438,7 +448,7 @@ describe('runnerPolicy', () => {
     it('uses discovery, write, and finalize stages for general coding', () => {
         expect(initialToolStageForMode('utility')).to.equal('discovery');
         const discovery = filterToolDefinitionsForStage(toolDefinitions, 'utility', 'discovery').map(t => t.function.name);
-        expect(discovery).to.include('read_file');
+        expect(discovery).to.include.members(['read_file', 'run_code']);
         expect(discovery).to.not.include('write_file');
         expect(advanceToolStage('utility', 'discovery', 'read_file', { success: true })).to.equal('write');
         expect(advanceToolStage('utility', 'write', 'edit_file', { success: false })).to.equal('write');
@@ -451,7 +461,7 @@ describe('runnerPolicy', () => {
         const modeTools = filterToolDefinitionsForMode(registeredTools, 'utility', { domain: 'general' });
         const validation = filterToolDefinitionsForStage(modeTools, 'utility', 'validation')
             .map(tool => tool.function.name);
-        expect(validation).to.include.members(['read_file', 'get_diagnostics', 'todo_write']);
+        expect(validation).to.include.members(['read_file', 'get_diagnostics', 'todo_write', 'run_code']);
         expect(validation).to.not.include.members(['write_file', 'edit_file', 'run_command']);
     });
 

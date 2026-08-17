@@ -47,8 +47,9 @@ import { getPrivateAiStorageRoot, getPrivateTopicStorageDir, getPrivateTopicStor
 import { isPathInsideOrEqual } from '../pathScope';
 import { TOOL_REGISTRY, WRITE_TOOLS } from './tools/registry';
 import {
-    validateRunCodeStepPlan,
-    executeRunCodeSteps,
+    createRunCodeCapabilitySnapshot,
+    executeRunCodeProgram,
+    validateRunCodeProgram,
     RUN_CODE_FANOUT_TIMEOUT_MS,
 } from './tools/runCode';
 import { BUILTIN_PROVIDERS } from './providers/models/defaults';
@@ -287,8 +288,8 @@ const TOOL_TIMEOUTS: Record<string, number> = {
     save_workflow: 30_000,
     todo_write: 5_000,
     run_skill: 30_000,
-    // run_code owns its bounded fan-out lifetime: nested steps receive the
-    // fan-out AbortSignal and remaining steps stop on timeout (see executeRunCode).
+    // run_code owns its bounded guest lifetime and propagates cancellation to
+    // every in-flight nested tool call (see executeRunCode).
     run_code: 0,
     // Child activity/idle guards and run budgets own orchestration lifetime.
     // A fixed tool timeout would kill healthy long-running child graphs.
@@ -3273,56 +3274,50 @@ export class AgentToolExecutor {
     }>();
 
     /**
-     * run_code: fan out a bounded step plan through the runner's nested-tool
-     * pipeline. Shape validation happens here; permission/domain authority
-     * stays in the runner hook, which rejects any tool outside the
-     * model-visible catalog for the current mode/domain. A failed step does
-     * not stop later steps. The fan-out owns its bounded lifetime: the
-     * per-fan-out AbortSignal reaches every nested step and stops remaining
-     * steps once the wall-clock budget expires.
+     * Execute model-authored JavaScript in the isolated QuickJS/WASM guest.
+     * The capability snapshot is immutable for the program lifetime, while
+     * every nested call is revalidated and dispatched by the runner hook.
      */
     private async executeRunCode(args: Record<string, unknown>, context?: import('./types').AgentToolContext): Promise<unknown> {
         const runNestedTool = context?.runNestedTool;
-        if (!runNestedTool) {
+        const modelVisibleTools = context?.runCodeToolDefinitions?.();
+        if (!runNestedTool || !modelVisibleTools) {
             return {
                 success: false,
-                error: 'run_code is only available when the runner provides the nested-tool pipeline.',
+                error: 'run_code is only available when the runner provides its nested-tool pipeline and capability snapshot.',
             };
         }
-        const allowedStepNames = context?.runCodeAllowedStepNames?.();
-        if (!allowedStepNames) {
-            return {
-                success: false,
-                error: 'run_code is unavailable: the runner did not publish the model-visible toolset for this run.',
-            };
-        }
-        const validated = validateRunCodeStepPlan(args.steps, allowedStepNames);
+        const validated = validateRunCodeProgram(args);
         if (!validated.ok) return { success: false, error: validated.error };
+        const snapshot = createRunCodeCapabilitySnapshot(modelVisibleTools);
+        if (snapshot.tools.length === 0) {
+            return { success: false, error: 'run_code has no callable tools in the current mode/domain/stage.' };
+        }
 
         const controller = new AbortController();
         const parentSignal = context?.runnerOptions?.abortSignal;
         const onParentAbort = () => controller.abort(parentSignal?.reason);
         if (parentSignal) {
-            if (parentSignal.aborted) {
-                controller.abort(parentSignal.reason);
-            } else {
-                parentSignal.addEventListener('abort', onParentAbort, { once: true });
-            }
+            if (parentSignal.aborted) controller.abort(parentSignal.reason);
+            else parentSignal.addEventListener('abort', onParentAbort, { once: true });
         }
         const timeoutId = setTimeout(() => {
-            controller.abort(new Error(`run_code fan-out exceeded the ${RUN_CODE_FANOUT_TIMEOUT_MS / 1000}s budget.`));
+            controller.abort(new Error(`run_code exceeded the ${RUN_CODE_FANOUT_TIMEOUT_MS / 1000}s budget.`));
         }, RUN_CODE_FANOUT_TIMEOUT_MS);
         const deadline = Date.now() + RUN_CODE_FANOUT_TIMEOUT_MS;
         try {
-            return await executeRunCodeSteps(
-                validated.steps,
-                (tool, stepArgs) => runNestedTool(
+            return await executeRunCodeProgram(
+                validated.request,
+                snapshot,
+                (tool, toolArgs, signal, requestedWaitMs) => runNestedTool(
                     tool,
-                    stepArgs,
-                    controller.signal,
-                    Math.max(1, deadline - Date.now()),
+                    toolArgs,
+                    signal,
+                    Math.min(requestedWaitMs, Math.max(1, deadline - Date.now())),
                 ),
                 controller.signal,
+                tool => context?.runCodeAllowedStepNames?.().has(tool) === true,
+                deadline,
             );
         } finally {
             clearTimeout(timeoutId);

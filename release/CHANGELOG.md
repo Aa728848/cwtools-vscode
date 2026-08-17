@@ -78,6 +78,8 @@
   English: [Fix] Post-write validation trusts fresh full-file diagnostics — when full-file diagnostics are fresh and clean, they supersede stale evidence conflicts (`syntax_shape`, `scope_compatibility`, `symbol_exists`, `reference_exists`) from the evidence gate, avoiding spurious repair loops.
 
 ### 优化 / Improvements
+- **[升级] `run_code` 可编程 Code Mode**：原静态 `steps` 批处理升级为 QuickJS/WASM 隔离的 JavaScript async-function body；按当前 mode/domain/stage 生成类型化工具 SDK，支持基于 Paradox/CWTools 或通用工具结果分支、循环、筛选与有界 `Promise.all`。每个内部调用仍完整经过权限、策略、调度和写队列，只有显式日志与最终返回值进入模型上下文。
+  English: [Upgraded] Programmable `run_code` Code Mode — the former static `steps` batch is now a JavaScript async-function body isolated in QuickJS/WASM; a typed SDK is generated from the current mode/domain/stage catalog for branching, loops, filtering, and bounded `Promise.all` across Paradox/CWTools or general tools. Every nested call still passes the complete permission, policy, scheduler, and write-queue path; only explicit logs and the final return value enter model context.
 - **[优化] AI 实时步骤载荷受限**：Extension Host 先压缩再传输实时步骤、抑制噪声进度事件并保持回放缓冲同步；Webview 合并相邻文本/思考增量、裁剪超长流内容、固定卡片类步骤并限制 160 步窗口，避免长时间运行的 DOM 渲染输入与桥接消息无界增长。
   English: [Improvement] Bounded AI live-step payloads — the Extension Host compacts each live step before transport, suppresses noisy progress events, and keeps the replay buffer in sync; the Webview merges adjacent text/thinking deltas, clips oversized stream content, pins card steps, and caps the step window at 160, preventing unbounded DOM-render input and bridge congestion on long runs.
 

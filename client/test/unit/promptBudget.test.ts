@@ -57,12 +57,12 @@ describe('AI static prompt budgets', () => {
         for (const buildStage of ['discovery', 'evidence', 'validation', 'write', 'finalize'] as const) {
             const modeTools = runnerPolicy.filterToolDefinitionsForMode(TOOL_DEFINITIONS, 'build');
             const tools = runnerPolicy.filterToolDefinitionsForStage(modeTools, 'build', buildStage);
-            // The always-visible structured question tool occupies one runtime-control slot;
-            // run_code joins the write boundary as the scripted fan-out meta tool.
+            // Structured questions and programmable run_code occupy bounded
+            // runtime-control slots throughout the eligible Build stages.
             expect(tools.length, `${buildStage} tool count`).to.be.within(8, 17);
-            // 9_000: includes the always-visible structured question schema plus
-            // dispatch resume/append/clarification and durable-graph lookups.
-            expect(measure(buildStage, false), `${buildStage} main system + tools`).to.be.at.most(9_000);
+            // 9_200: includes the always-visible structured question and
+            // programmable run_code schemas plus dispatch/durable-graph lookups.
+            expect(measure(buildStage, false), `${buildStage} main system + tools`).to.be.at.most(9_200);
             expect(measure(buildStage, true), `${buildStage} slim system + tools`).to.be.at.most(4_000);
         }
     });

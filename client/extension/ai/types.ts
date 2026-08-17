@@ -1503,12 +1503,11 @@ export interface AgentToolContext {
     onTodoUpdate?: TodoUpdateCallback;
     /**
      * Execute another tool through the full runner pipeline (policy, plan
-     * guard, scheduler, write queue). Set by AgentRunner for run_code steps;
-     * run_code is rejected wherever this hook is absent. The optional signal
-     * is the fan-out-level AbortSignal: the runner propagates it into the
-     * nested call so a timed-out fan-out stops the step (and later steps).
-     * `writeQueueWaitTimeoutMs` bounds the nested write's lock-acquisition
-     * wait to the fan-out's remaining budget.
+     * guard, scheduler, write queue). Set by AgentRunner for run_code guest
+     * calls; run_code is rejected wherever this hook is absent. The optional
+     * signal is the guest-level AbortSignal propagated into every in-flight
+     * nested call. `writeQueueWaitTimeoutMs` bounds a nested write's lock
+     * acquisition to the guest program's remaining budget.
      */
     runNestedTool?: (
         toolName: string,
@@ -1517,10 +1516,12 @@ export interface AgentToolContext {
         writeQueueWaitTimeoutMs?: number,
     ) => Promise<unknown>;
     /**
-     * Model-visible toolset provider for the current run (mode/domain/stage
-     * filtered at call time); the authoritative allowlist for run_code steps.
-     * Supplied alongside runNestedTool by AgentRunner.
+     * Model-visible toolset provider for the current run. run_code snapshots
+     * this mode/domain/stage-filtered catalog before starting its guest program;
+     * the same catalog drives the generated SDK and nested-call allowlist.
      */
+    runCodeToolDefinitions?: () => readonly ToolDefinition[];
+    /** Compatibility name-only view used by older tests/callers. */
     runCodeAllowedStepNames?: () => ReadonlySet<string>;
     /** Host-recorded workspace revision observed by a successful authoritative read in this run. */
     authoritativeProjectRevision?: string;

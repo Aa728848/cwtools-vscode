@@ -308,7 +308,7 @@ const _MCP: AgentToolName[] = ['mcp_call'];
 const ORCHESTRATION: AgentToolName[] = ['dispatch_agents', 'query_blackboard', 'merge_results', 'cancel_dispatch'];
 const INTERACTION: AgentToolName[] = ['ask_user_question'];
 
-const WRITE_TOOLS_SET = new Set<string>([...EDIT, 'deploy_mod_asset', 'git_ops', 'run_code']);
+const WRITE_TOOLS_SET = new Set<string>([...EDIT, 'deploy_mod_asset', 'git_ops']);
 const SUB_AGENT_EXCLUDES_SET = new Set<string>([
     'ask_user_question',
     'web_search', 'web_open', 'web_find',
@@ -335,7 +335,6 @@ const MUTATING_TOOLS_SET = new Set<string>([
     ...EDIT,
     'deploy_mod_asset',
     'git_ops',
-    'run_code',
     'set_memory',
     'save_memory',
     'forget_memory',
@@ -453,11 +452,11 @@ for (const schema of SCHEMA_DEFINITIONS) {
         riskLevel = 0;
         concurrencyClass = 'interactive';
     } else if (name === 'run_code') {
-        // Meta tool: worst-case effect of its steps; the global-exclusive
-        // scheduler class serializes the whole script against sibling calls.
-        effect = 'workspace_write';
-        riskLevel = 2;
-        concurrencyClass = 'global-exclusive';
+        // Capability-only transport. It grants no authority itself; each guest
+        // call is scheduled and authorized from the nested tool's registry entry.
+        effect = 'none';
+        riskLevel = 0;
+        concurrencyClass = 'parallel';
     } else {
         effect = 'none';
         riskLevel = 2;
@@ -479,9 +478,9 @@ for (const schema of SCHEMA_DEFINITIONS) {
     const isReadOnly = name !== 'ask_user_question' && (effect === 'workspace_read'
         || effect === 'network'
         || (effect === 'none' && !mutating && !ORCHESTRATION.includes(name)));
-    const disclosure = ['ask_user_question', 'todo_write', 'read_file', 'grep', 'get_goal', 'select_tools'].includes(name)
+    const disclosure = ['ask_user_question', 'todo_write', 'read_file', 'grep', 'get_goal', 'select_tools', 'run_code'].includes(name)
         ? 'always'
-        : (['write_file', 'edit_file', 'replace_lines', 'run_command', 'git_ops', 'mcp_call', 'dispatch_agents', 'run_code'].includes(name)
+        : (['write_file', 'edit_file', 'replace_lines', 'run_command', 'git_ops', 'mcp_call', 'dispatch_agents'].includes(name)
             ? 'deferred'
             : 'stage');
     const group = effect === 'workspace_write' ? 'file_write'

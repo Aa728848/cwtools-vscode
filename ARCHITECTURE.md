@@ -232,6 +232,8 @@ sequenceDiagram
 
 The tool registry is authoritative for tool availability, effects, risk, and concurrency. `agentTools.ts` dispatches calls only after the policy engine evaluates them. File writes also use path containment, per-file exclusion, sorted multi-file locking, and plan-mode gates. Shell commands pass through command preflight.
 
+Programmable `run_code` is an authority-neutral transport, not a write permission. The runner snapshots the current mode/domain/stage-visible catalog, generates its typed SDK, and executes the model-authored async-function body in a memory/stack/output-bounded QuickJS/WASM guest. The guest receives no Node, VS Code, module, filesystem, network, timer, `eval`, or `Function` authority. Its only host capability is a JSON tool bridge; every nested call is live-rechecked and re-enters the same policy, permission, scheduler, and write-queue path as a direct call. Intermediate values remain guest-local, and only bounded logs plus the explicit return value enter model context. Guest continuations are never checkpointed; an interrupted outer call resumes as an ordinary interrupted tool result.
+
 The runner records typed events for streaming, replay, checkpoints, and resume. Adding an event requires matching reducer and Webview support. Persisted resume data remains compatible with V2.
 
 Long runs use bounded context compaction, checkpoints, budgets, loop detection, and child-agent activity monitoring. Multi-agent coordination uses `dispatch_agents`, `query_blackboard`, and `merge_results` with a shared typed Blackboard.
@@ -505,6 +507,8 @@ sequenceDiagram
 ```
 
 工具可用性、副作用、风险和并发策略以 registry 为准。`agentTools.ts` 只在策略引擎完成判断后 dispatch。文件写入还要经过路径包含、单文件写排他、排序后的多文件锁和 Plan 模式门；Shell 命令先做 command preflight。
+
+可编程 `run_code` 是不自带权限的 transport，不是写权限。Runner 会快照当前 mode/domain/stage 可见目录、生成对应类型化 SDK，并在受内存、栈和输出预算限制的 QuickJS/WASM guest 中执行模型生成的 async-function body。Guest 不具备 Node、VS Code、模块、文件系统、网络、计时器、`eval` 或 `Function` 权限；唯一宿主能力是 JSON 工具桥。每个内部调用都会实时复核可见性，并像直接调用一样重新进入策略、权限、调度和写队列。中间值只留在 guest 中，只有有界日志与显式返回值进入模型上下文。Guest continuation 不会写入 checkpoint；中断后的外层调用按普通中断工具结果恢复。
 
 Runner 用类型化事件支持流式展示、replay、checkpoint 和恢复。新增事件必须同步 reducer 与 Webview。持久化恢复数据继续兼容 V2。
 

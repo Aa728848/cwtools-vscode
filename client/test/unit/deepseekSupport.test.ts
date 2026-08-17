@@ -1,6 +1,6 @@
 /**
  * Regression tests for the DeepSeek-support improvements:
- *  - run_code scripted fan-out (plan validation, blocking, aggregation)
+ *  - programmable run_code Code Mode (isolation, SDK, policy, concurrency)
  *  - dispatch_agents per-task model/provider/reasoningEffort validation
  *  - per-model compaction ratios and tool-result archive limits
  *  - per-provider model supplement selection
@@ -9,13 +9,12 @@
 
 import { expect } from 'chai';
 import {
-    RUN_CODE_MAX_STEPS,
-    RUN_CODE_BLOCKED_STEPS,
+    RUN_CODE_BLOCKED_TOOLS,
+    buildRunCodeSdk,
     computeRunCodeAllowedStepNames,
-    validateRunCodeStepPlan,
-    executeRunCodeSteps,
-    truncateRunCodeStepResult,
-    runCodeStepSucceeded,
+    createRunCodeCapabilitySnapshot,
+    executeRunCodeProgram,
+    validateRunCodeProgram,
 } from '../../extension/ai/tools/runCode';
 import { TOOL_REGISTRY } from '../../extension/ai/tools/registry';
 import {
@@ -48,286 +47,241 @@ moduleLoader._load = function (this: unknown, request: string, ...args: any[]) {
     if (request === 'vscode') return vscodeStub;
     return originalLoad.apply(this, [request, ...args]);
 };
-
-// ─── run_code: registry classification ───────────────────────────────────────
+// ─── run_code: programmable Code Mode ────────────────────────────────────────
 
 describe('run_code registry classification', () => {
     const entry = TOOL_REGISTRY.get('run_code');
 
-    it('is registered as a shared write-capable meta tool', () => {
+    it('is an authority-neutral shared transport', () => {
         expect(entry).to.exist;
         expect(entry!.domain).to.equal('shared');
-        expect(entry!.effect).to.equal('workspace_write');
-        expect(entry!.riskLevel).to.equal(2);
-        expect(entry!.concurrencyClass).to.equal('global-exclusive');
+        expect(entry!.effect).to.equal('none');
+        expect(entry!.riskLevel).to.equal(0);
+        expect(entry!.concurrencyClass).to.equal('parallel');
+        expect(entry!.isWrite).to.be.false;
     });
 
-    it('is admitted only to writer modes and never to slim sub-agents', () => {
+    it('is admitted to writer modes but never slim sub-agents', () => {
         expect(entry!.allowedModes.has('build')).to.be.true;
         expect(entry!.allowedModes.has('utility')).to.be.true;
-        expect(entry!.allowedModes.has('plan')).to.be.false;
-        expect(entry!.allowedModes.has('explore')).to.be.false;
         expect(entry!.allowSubAgent).to.be.false;
     });
 });
 
-// ─── run_code: step plan validation ───────────────────────────────────────────
+describe('run_code capability snapshot and SDK', () => {
+    const def = (name: string, parameters: Record<string, unknown> = {}) => ({
+        type: 'function' as const,
+        function: { name, description: `${name} test`, parameters },
+    });
+    const definitions = [
+        def('read_file', { type: 'object', properties: { file: { type: 'string' } }, required: ['file'] }),
+        def('dispatch_agents'),
+        def('edit_file'),
+    ];
 
-describe('validateRunCodeStepPlan', () => {
-    const allowed = new Set<string>(['read_file', 'edit_file', 'grep', 'get_diagnostics']);
-
-    it('accepts a valid plan and defaults missing args to {}', () => {
-        const result = validateRunCodeStepPlan(
-            [{ tool: 'grep', args: { pattern: 'x' } }, { tool: 'read_file' }],
-            allowed,
-        );
-        expect(result.ok).to.be.true;
-        if (result.ok) {
-            expect(result.steps).to.have.length(2);
-            expect(result.steps[1]!.args).to.deep.equal({});
-        }
+    it('sorts capabilities and excludes nested/interactive orchestration', () => {
+        const snapshot = createRunCodeCapabilitySnapshot(definitions);
+        expect(snapshot.tools.map(tool => tool.name)).to.deep.equal(['edit_file', 'read_file']);
+        expect(snapshot.names.has('dispatch_agents')).to.be.false;
+        expect(RUN_CODE_BLOCKED_TOOLS.has('run_code')).to.be.true;
+        expect(computeRunCodeAllowedStepNames(definitions)).to.deep.equal(new Set(['edit_file', 'read_file']));
     });
 
-    it('rejects non-array, empty, and oversized plans', () => {
-        expect(validateRunCodeStepPlan(undefined, allowed).ok).to.be.false;
-        expect(validateRunCodeStepPlan([], allowed).ok).to.be.false;
-        const oversized = Array.from({ length: RUN_CODE_MAX_STEPS + 1 }, () => ({ tool: 'grep', args: {} }));
-        const result = validateRunCodeStepPlan(oversized, allowed);
-        expect(result.ok).to.be.false;
-        if (!result.ok) expect(result.error).to.include(`${RUN_CODE_MAX_STEPS}`);
-    });
-
-    it('rejects blocked tools including nested run_code', () => {
-        for (const tool of ['run_code', 'dispatch_agents', 'ask_user_question', 'create_goal']) {
-            expect(RUN_CODE_BLOCKED_STEPS.has(tool)).to.be.true;
-            const result = validateRunCodeStepPlan([{ tool, args: {} }], new Set([...allowed, tool]));
-            expect(result.ok).to.be.false;
-            if (!result.ok) expect(result.error).to.include(`'${tool}'`);
-        }
-    });
-
-    it('rejects tools outside the model-visible allowlist (domain isolation)', () => {
-        // query_types is Paradox-only; a general-domain catalog must not admit it.
-        const result = validateRunCodeStepPlan([{ tool: 'query_types', args: {} }], allowed);
-        expect(result.ok).to.be.false;
-        if (!result.ok) expect(result.error).to.include('query_types');
-    });
-
-    it('rejects malformed steps and non-object args', () => {
-        expect(validateRunCodeStepPlan([null], allowed).ok).to.be.false;
-        expect(validateRunCodeStepPlan([{ tool: 42, args: {} }], allowed).ok).to.be.false;
-        expect(validateRunCodeStepPlan([{ tool: 'grep', args: 'pattern' }], allowed).ok).to.be.false;
-        expect(validateRunCodeStepPlan([{ tool: 'grep', args: [] }], allowed).ok).to.be.false;
-    });
-
-    it('rejects oversized step args', () => {
-        const huge = 'x'.repeat(33_000);
-        const result = validateRunCodeStepPlan([{ tool: 'edit_file', args: { content: huge } }], allowed);
-        expect(result.ok).to.be.false;
+    it('generates deterministic typed arguments from the current schema', () => {
+        const sdk = buildRunCodeSdk(definitions);
+        expect(sdk).to.include('"read_file": {');
+        expect(sdk).to.include('file: string;');
+        expect(sdk).to.include('Promise<{ content: string;');
+        expect(sdk.indexOf('"edit_file"')).to.be.lessThan(sdk.indexOf('"read_file"'));
+        expect(sdk).not.to.include('dispatch_agents');
     });
 });
 
-// ─── run_code: allowlist derivation ───────────────────────────────────────────
+describe('validateRunCodeProgram', () => {
+    it('accepts code plus a concise description', () => {
+        expect(validateRunCodeProgram({ code: 'return { ok: true };', description: 'Return a value' }).ok).to.be.true;
+    });
 
-describe('computeRunCodeAllowedStepNames', () => {
+    it('rejects missing or oversized program fields', () => {
+        expect(validateRunCodeProgram({ description: 'missing code' }).ok).to.be.false;
+        expect(validateRunCodeProgram({ code: 'return 1' }).ok).to.be.false;
+        expect(validateRunCodeProgram({ code: 'x'.repeat(65_000), description: 'too large' }).ok).to.be.false;
+        expect(validateRunCodeProgram({ code: 'return 1', description: 'x'.repeat(241) }).ok).to.be.false;
+    });
+});
+
+describe('executeRunCodeProgram', () => {
     const def = (name: string) => ({
         type: 'function' as const,
-        function: { name, description: 'test', parameters: {} },
+        function: { name, description: 'test', parameters: { type: 'object', properties: {} } },
     });
-    const tools = [def('read_file'), def('dispatch_agents'), def('edit_file')];
 
-    it('drops blocked tools and keeps the rest', () => {
-        const names = computeRunCodeAllowedStepNames(tools);
-        expect(names.has('read_file')).to.be.true;
-        expect(names.has('edit_file')).to.be.true;
-        expect(names.has('dispatch_agents')).to.be.false;
-    });
-});
-
-// ─── write queue: lock-wait bound used by nested run_code writes ──────────────
-
-describe('PartitionedWriteQueue wait bound', () => {
-    it('rejects a waiter whose waitTimeoutMs expires before the lock is released', async () => {
-        const { PartitionedWriteQueue } = require('../../extension/ai/runner/writeCoordinator') as
-            typeof import('../../extension/ai/runner/writeCoordinator');
-        const queue = new PartitionedWriteQueue();
-        let release!: () => void;
-        const gate = new Promise<void>(resolve => { release = resolve; });
-        const holder = queue.enqueue(['file'], async () => { await gate; });
-        const waiter = queue.enqueue(['file'], async () => 'ran', {
-            waitTimeoutMs: 50,
-            timeoutMessage: 'run_code write queue wait timed out.',
-        });
-        let waiterError: unknown;
-        try {
-            await waiter;
-        } catch (error) {
-            waiterError = error;
-        }
-        expect(waiterError).to.be.an('error');
-        expect((waiterError as Error).message).to.include('run_code write queue wait timed out.');
-        release();
-        await holder;
-    });
-});
-
-// ─── run_code: step execution and aggregation ────────────────────────────────
-
-describe('executeRunCodeSteps', () => {
-    it('runs steps in order and aggregates results', async () => {
-        const order: string[] = [];
-        const aggregate = await executeRunCodeSteps(
-            [{ tool: 'grep', args: {} }, { tool: 'edit_file', args: {} }],
+    it('branches on Paradox semantic results and returns selected evidence', async () => {
+        const definitions = [def('query_scope'), def('query_rules')];
+        const calls: string[] = [];
+        const result = await executeRunCodeProgram(
+            {
+                description: 'Verify semantic scope',
+                code: `const scope = await tools.query_scope({ file: 'events/x.txt', line: 1, column: 0 });
+if (scope.certainty !== 'exact') return { status: 'unresolved' };
+const rules = await tools.query_rules({ category: 'effect', scope: scope.currentScope });
+return { status: 'verified', scope: scope.currentScope, count: rules.rules.length };`,
+            },
+            createRunCodeCapabilitySnapshot(definitions),
             async (tool) => {
-                order.push(tool);
-                return { success: true, tool };
+                calls.push(tool);
+                return tool === 'query_scope'
+                    ? { certainty: 'exact', currentScope: 'country' }
+                    : { rules: [{ name: 'set_country_flag' }], ignored: 'guest-local' };
             },
+            new AbortController().signal,
         );
-        expect(order).to.deep.equal(['grep', 'edit_file']);
-        expect(aggregate.success).to.be.true;
-        expect(aggregate.stepsExecuted).to.equal(2);
-        expect(aggregate.results.map(r => r.success)).to.deep.equal([true, true]);
+        expect(result.success).to.be.true;
+        expect(calls).to.deep.equal(['query_scope', 'query_rules']);
+        expect(result.value).to.deep.equal({ status: 'verified', scope: 'country', count: 1 });
     });
 
-    it('keeps running after a failed step and reports per-step failures', async () => {
-        const aggregate = await executeRunCodeSteps(
-            [{ tool: 'bad', args: {} }, { tool: 'read_file', args: {} }],
-            async (tool) => tool === 'bad'
-                ? { success: false, error: 'nope' }
-                : { success: true },
-        );
-        expect(aggregate.success).to.be.false;
-        expect(aggregate.stepsExecuted).to.equal(2);
-        expect(aggregate.results[0]).to.deep.include({ index: 0, tool: 'bad', success: false });
-        expect(aggregate.results[1]).to.deep.include({ index: 1, tool: 'read_file', success: true });
-    });
-
-    it('captures a throwing step without aborting the fan-out', async () => {
-        const aggregate = await executeRunCodeSteps(
-            [{ tool: 'boom', args: {} }, { tool: 'grep', args: {} }],
-            async (tool) => {
-                if (tool === 'boom') throw new Error('kaboom');
-                return { success: true };
+    it('supports Promise.all and bounds host in-flight calls', async () => {
+        const definitions = [def('read_file')];
+        let active = 0;
+        let maxActive = 0;
+        const result = await executeRunCodeProgram(
+            {
+                description: 'Read files concurrently',
+                code: `const values = await Promise.all([0,1,2,3,4,5].map(index => tools.read_file({ file: String(index) }))); return values.map(value => value.file);`,
             },
+            createRunCodeCapabilitySnapshot(definitions),
+            async (_tool, args) => {
+                active++;
+                maxActive = Math.max(maxActive, active);
+                await new Promise(resolve => setTimeout(resolve, 5));
+                active--;
+                return { file: args.file };
+            },
+            new AbortController().signal,
         );
-        expect(aggregate.success).to.be.false;
-        expect(aggregate.results[0]!.error).to.equal('kaboom');
-        expect(aggregate.results[1]!.success).to.be.true;
+        expect(result.success).to.be.true;
+        expect(result.callsExecuted).to.equal(6);
+        expect(maxActive).to.be.at.most(4);
+        expect(maxActive).to.be.greaterThan(1);
     });
 
-    it('truncates oversized step results with a marker', async () => {
-        const long = 'x'.repeat(10_000);
-        const aggregate = await executeRunCodeSteps(
-            [{ tool: 'read_file', args: {} }],
-            async () => long,
+    it('turns failed host results into catchable ToolCallError values', async () => {
+        const definitions = [def('read_file')];
+        const result = await executeRunCodeProgram(
+            { description: 'Catch tool failure', code: `try { await tools.read_file({ file: 'missing' }); } catch (error) { return { name: error.name, tool: error.toolName, message: error.message }; }` },
+            createRunCodeCapabilitySnapshot(definitions),
+            async () => ({ success: false, error: 'not found' }),
+            new AbortController().signal,
         );
-        expect(aggregate.success).to.be.true;
-        const outcome = aggregate.results[0]!;
-        expect(outcome.truncated).to.be.true;
-        expect(String(outcome.result).length).to.be.lessThan(long.length);
-        expect(String(outcome.result)).to.include('truncated');
+        expect(result.success).to.be.true;
+        expect(result.value).to.deep.equal({ name: 'ToolCallError', tool: 'read_file', message: 'not found' });
     });
 
-    it('judges a large failure object by its raw value, not its truncated string', async () => {
-        const hugeFailure = { success: false, error: 'failed', content: 'x'.repeat(10_000) };
-        const aggregate = await executeRunCodeSteps(
-            [{ tool: 'edit_file', args: {} }],
-            async () => hugeFailure,
+    it('blocks hidden tools without dispatching them', async () => {
+        const definitions = [def('read_file')];
+        let dispatched = false;
+        const result = await executeRunCodeProgram(
+            { description: 'Attempt hidden call', code: `return { available: typeof tools.query_types };` },
+            createRunCodeCapabilitySnapshot(definitions),
+            async () => { dispatched = true; return {}; },
+            new AbortController().signal,
         );
-        expect(aggregate.success).to.be.false;
-        const outcome = aggregate.results[0]!;
-        expect(outcome.success).to.be.false;
-        expect(outcome.truncated).to.be.true;
+        expect(result.success).to.be.true;
+        expect(dispatched).to.be.false;
+        expect(result.value).to.deep.equal({ available: 'undefined' });
     });
 
-    it('returns a partial aborted aggregate when the signal fires mid-fan-out', async () => {
+    it('does not expose Node or VS Code host authority', async () => {
+        const result = await executeRunCodeProgram(
+            { description: 'Inspect guest globals', code: `return { process: typeof process, require: typeof require, fetch: typeof fetch, vscode: typeof vscode };` },
+            createRunCodeCapabilitySnapshot([def('read_file')]),
+            async () => ({}),
+            new AbortController().signal,
+        );
+        expect(result.value).to.deep.equal({ process: 'undefined', require: 'undefined', fetch: 'undefined', vscode: 'undefined' });
+    });
+
+    it('interrupts a CPU-bound guest from an absolute deadline', async () => {
+        const startedAt = Date.now();
+        const result = await executeRunCodeProgram(
+            { description: 'Bound CPU loop', code: `while (true) {}` },
+            createRunCodeCapabilitySnapshot([def('read_file')]),
+            async () => ({}),
+            new AbortController().signal,
+            undefined,
+            Date.now() + 25,
+        );
+        expect(result.success).to.be.false;
+        expect(result.error).to.include('exceeded');
+        expect(Date.now() - startedAt).to.be.lessThan(2_000);
+    });
+
+    it('interrupts a CPU loop resumed after an awaited tool', async () => {
+        const result = await executeRunCodeProgram(
+            { description: 'Bound resumed CPU loop', code: `await tools.read_file({}); while (true) {}` },
+            createRunCodeCapabilitySnapshot([def('read_file')]),
+            async () => ({}),
+            new AbortController().signal,
+            undefined,
+            Date.now() + 25,
+        );
+        expect(result.success).to.be.false;
+        expect(result.error).to.include('exceeded');
+    });
+
+    it('preserves __proto__ as inert own JSON data', async () => {
+        let received: Record<string, unknown> | undefined;
+        const result = await executeRunCodeProgram(
+            { description: 'Copy hostile JSON safely', code: `const args = JSON.parse('{"__proto__":{"polluted":true},"nested":{"__proto__":{"path":"escape"}}}'); return await tools.read_file(args);` },
+            createRunCodeCapabilitySnapshot([def('read_file')]),
+            async (_tool, args) => { received = args; return { ok: true }; },
+            new AbortController().signal,
+        );
+        expect(result.success).to.be.true;
+        expect(received).to.exist;
+        expect(Object.prototype.hasOwnProperty.call(received, '__proto__')).to.be.true;
+        expect((received as { polluted?: unknown }).polluted).to.equal(undefined);
+        const nested = received!.nested as Record<string, unknown>;
+        expect(Object.prototype.hasOwnProperty.call(nested, '__proto__')).to.be.true;
+        expect((nested as { path?: unknown }).path).to.equal(undefined);
+    });
+
+    it('does not dispatch calls queued behind the semaphore after cancellation', async () => {
         const controller = new AbortController();
-        const run = new Set<string>();
-        const aggregate = await executeRunCodeSteps(
-            [{ tool: 'first', args: {} }, { tool: 'second', args: {} }],
-            async (tool) => {
-                run.add(tool);
-                if (tool === 'first') controller.abort(new Error('budget'));
-                return { success: true };
+        const started: number[] = [];
+        const run = executeRunCodeProgram(
+            { description: 'Cancel queued calls', code: `await Promise.all([0,1,2,3,4,5,6,7].map(index => tools.read_file({ index })));` },
+            createRunCodeCapabilitySnapshot([def('read_file')]),
+            async (_tool, args) => {
+                started.push(args.index as number);
+                await new Promise<void>(resolve => controller.signal.addEventListener('abort', () => resolve(), { once: true }));
+                return {};
             },
             controller.signal,
         );
-        expect(aggregate.success).to.be.false;
-        expect(aggregate.aborted).to.be.true;
-        expect(aggregate.stepsExecuted).to.equal(1);
-        expect(run.has('first')).to.be.true;
-        expect(run.has('second')).to.be.false;
+        await new Promise(resolve => setTimeout(resolve, 15));
+        controller.abort(new Error('cancel queued'));
+        const result = await run;
+        expect(result.success).to.be.false;
+        expect(started).to.have.length.at.most(4);
     });
 
-    it('does not start any step when the signal is already aborted', async () => {
+    it('reports cancellation while waiting for a host tool', async () => {
         const controller = new AbortController();
-        controller.abort(new Error('cancelled'));
-        const aggregate = await executeRunCodeSteps(
-            [{ tool: 'first', args: {} }],
-            async () => ({ success: true }),
+        const run = executeRunCodeProgram(
+            { description: 'Cancel pending read', code: `await tools.read_file({ file: 'slow' }); return 'late';` },
+            createRunCodeCapabilitySnapshot([def('read_file')]),
+            async () => new Promise(() => undefined),
             controller.signal,
         );
-        expect(aggregate.success).to.be.false;
-        expect(aggregate.aborted).to.be.true;
-        expect(aggregate.stepsExecuted).to.equal(0);
-        expect(aggregate.results).to.have.length(0);
-    });
-
-    it('marks a single failing last step as aborted when the signal caused the failure', async () => {
-        const controller = new AbortController();
-        const aggregate = await executeRunCodeSteps(
-            [{ tool: 'only', args: {} }],
-            async () => {
-                controller.abort(new Error('budget'));
-                controller.signal.throwIfAborted();
-                return { success: true };
-            },
-            controller.signal,
-        );
-        expect(aggregate.success).to.be.false;
-        expect(aggregate.aborted).to.be.true;
-        expect(aggregate.stepsExecuted).to.equal(1);
-        expect(aggregate.results[0]!.error).to.equal('budget');
-    });
-
-    it('still reports aborted when the signal fires right after the last step completed', async () => {
-        const controller = new AbortController();
-        const aggregate = await executeRunCodeSteps(
-            [{ tool: 'only', args: {} }],
-            async () => {
-                controller.abort(new Error('budget'));
-                return { success: true };
-            },
-            controller.signal,
-        );
-        expect(aggregate.aborted).to.be.true;
-        expect(aggregate.stepsExecuted).to.equal(1);
-        expect(aggregate.results[0]!.success).to.be.true;
+        setTimeout(() => controller.abort(new Error('cancelled')), 10);
+        const result = await run;
+        expect(result.success).to.be.false;
+        expect(result.aborted).to.be.true;
+        expect(result.error).to.include('cancelled');
     });
 });
-
-// ─── run_code: step result helpers ────────────────────────────────────────────
-
-describe('runCodeStepSucceeded / truncateRunCodeStepResult', () => {
-    it('mirrors the runner failure convention', () => {
-        expect(runCodeStepSucceeded({ success: true })).to.be.true;
-        expect(runCodeStepSucceeded({ ok: true })).to.be.true;
-        expect(runCodeStepSucceeded({ success: false })).to.be.false;
-        expect(runCodeStepSucceeded({ ok: false })).to.be.false;
-        expect(runCodeStepSucceeded({ status: 'error' })).to.be.false;
-        expect(runCodeStepSucceeded({ status: 'unavailable' })).to.be.false;
-        expect(runCodeStepSucceeded('plain text')).to.be.true;
-    });
-
-    it('keeps small values intact and truncates large strings', () => {
-        expect(truncateRunCodeStepResult('short')).to.deep.equal({ value: 'short', truncated: false });
-        const truncated = truncateRunCodeStepResult('x'.repeat(8_000));
-        expect(truncated.truncated).to.be.true;
-        expect(String(truncated.value)).to.include('truncated');
-    });
-});
-
-// ─── dispatch_agents: per-task model selection validation ─────────────────────
 
 describe('mapTaskModelSelection', () => {
     it('maps the model-visible schema fields onto the internal vocabulary', () => {

@@ -2379,6 +2379,7 @@
     },
     "dependencies": {
         "executable": "4.1.1",
+        "quickjs-emscripten": "^0.31.0",
         "sql.js": "^1.14.1",
         "vscode-languageclient": "^9.0.1"
     },

@@ -76,7 +76,7 @@ import {
 } from './runnerPolicy';
 import { getWorkflow } from './workflowRegistry';
 import { TOOL_REGISTRY, WRITE_TOOLS, READ_ONLY_TOOLS } from './tools/registry';
-import { computeRunCodeAllowedStepNames } from './tools/runCode';
+import { buildRunCodePromptBlock, computeRunCodeAllowedStepNames } from './tools/runCode';
 import { PartitionedWriteQueue } from './runner/writeCoordinator';
 import { runLedger } from './runner/runLedger';
 import { atomicWriteText, sha256Text } from './runner/durableStorage';
@@ -626,8 +626,8 @@ export class AgentRunner {
      * the model-visible catalog decides the allowlist (domain isolation),
      * writes take the partitioned per-file queue, and execution goes through
      * the shared pipeline (policy, plan guard, git guard, scheduler). The
-     * fan-out signal replaces the run-level signal for this nested call so a
-     * timed-out fan-out aborts the step instead of leaking background work.
+     * guest signal replaces the run-level signal for this nested call so a
+     * timed-out program aborts in-flight work instead of leaking it.
      */
     private async runNestedToolStep(
         toolName: string,
@@ -642,8 +642,12 @@ export class AgentRunner {
             return {
                 success: false,
                 stepBlocked: true,
-                error: `Tool '${toolName}' is not available to run_code in the current mode/domain.`,
+                error: `Tool '${toolName}' is not available to run_code in the current mode/domain/stage.`,
             };
+        }
+        const registryEntry = TOOL_REGISTRY.get(toolName as AgentToolName);
+        if (!registryEntry) {
+            return { success: false, stepBlocked: true, error: `Tool '${toolName}' is not registered.` };
         }
         const nestedContext: import('./types').AgentToolContext = signal
             ? {
@@ -657,6 +661,14 @@ export class AgentRunner {
         const workspaceRoot = this.toolExecutor.workspaceRoot;
         const filePaths = getAgentToolTargetFiles(toolName, args, workspaceRoot, nestedContext?.runnerOptions?.topicId);
         const primaryFilePath = filePaths[0] ?? '';
+        const executeWithScheduler = async (): Promise<unknown> => {
+            const releaseScheduler = await toolScheduler.acquireLock(registryEntry.concurrencyClass, signal);
+            try {
+                return await this.executeToolPipeline(toolName, args, nestedContext);
+            } finally {
+                releaseScheduler();
+            }
+        };
         if (WRITE_TOOLS.has(toolName)) {
             if (onFileWrite && primaryFilePath) {
                 const prev = fs.existsSync(primaryFilePath) ? fs.readFileSync(primaryFilePath, 'utf8') : null;
@@ -664,19 +676,18 @@ export class AgentRunner {
             }
             const lockPaths = (filePaths.length > 0 ? filePaths : ['__global__'])
                 .map(p => p === '__global__' ? p : canonicalPathKey(p, workspaceRoot));
-            // The lock wait itself must not outlive the fan-out budget: bound
-            // acquisition to the remaining budget so a long-held file lock
-            // fails this step instead of hanging the whole run_code call.
+            // Match direct calls: write queue first, then scheduler. Reversing
+            // that order can deadlock nested and sibling direct writes.
             return await this.writeQueue.enqueue(
                 lockPaths,
-                () => this.executeToolPipeline(toolName, args, nestedContext),
+                executeWithScheduler,
                 {
                     waitTimeoutMs: writeQueueWaitTimeoutMs,
-                    timeoutMessage: 'run_code step timed out waiting for the file write queue.',
+                    timeoutMessage: 'run_code call timed out waiting for the file write queue.',
                 },
             );
         }
-        return await this.executeToolPipeline(toolName, args, nestedContext);
+        return await executeWithScheduler();
     }
 
     private async executeToolPipeline(
@@ -2001,10 +2012,12 @@ export class AgentRunner {
             scopeId: runRecord.runId,
             onBeforeFileWrite: onFileWrite,
             onTodoUpdate: options?.onTodoUpdate,
-            // run_code fan-out: every step goes through the same pipeline as a
-            // direct tool call; `availableTools` is assigned below and read
-            // lazily so stage disclosure stays current.
-            runCodeAllowedStepNames: () => computeRunCodeAllowedStepNames(availableTools),
+            // run_code snapshots the current model-visible catalog when its
+            // guest starts. Nested calls still recheck the live catalog.
+            runCodeToolDefinitions: () => availableTools.filter(tool => TOOL_REGISTRY.has(tool.function.name as AgentToolName)),
+            runCodeAllowedStepNames: () => computeRunCodeAllowedStepNames(
+                availableTools.filter(tool => TOOL_REGISTRY.has(tool.function.name as AgentToolName)),
+            ),
             runNestedTool: async (toolName, args, signal, writeQueueWaitTimeoutMs) => {
                 const result = await this.runNestedToolStep(
                     toolName,
@@ -2196,6 +2209,12 @@ export class AgentRunner {
             return toolDisclosureService.initialTools(stagePool, disclosureContext);
         };
         availableTools = refreshAvailableTools();
+        const initialRunCodeSdk = buildRunCodePromptBlock(
+            availableTools.filter(tool => TOOL_REGISTRY.has(tool.function.name as AgentToolName)),
+        );
+        if (initialRunCodeSdk && availableTools.some(tool => tool.function.name === 'run_code')) {
+            messages.push({ role: 'user', content: initialRunCodeSdk });
+        }
 
         // M3 Fix: remove per-call dynamic import — getProvider is already statically
         // imported at the top of this file; dynamic import added latency for nothing.
@@ -4183,6 +4202,12 @@ export class AgentRunner {
                 const stageReminder = buildToolStageReminder(mode, toolStage, availableTools, options?.domain);
                 if (stageReminder) {
                     messages.push({ role: 'user', content: stageReminder });
+                }
+                const runCodeSdk = buildRunCodePromptBlock(
+                    availableTools.filter(tool => TOOL_REGISTRY.has(tool.function.name as AgentToolName)),
+                );
+                if (runCodeSdk && availableTools.some(tool => tool.function.name === 'run_code')) {
+                    messages.push({ role: 'user', content: runCodeSdk });
                 }
                 emitStep({
                     type: 'thinking',

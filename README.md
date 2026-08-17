@@ -61,6 +61,8 @@ Use the `Compare with Vanilla` CodeLens on a matching mod file. `Migrate Block f
 
 Open `AI: Open Chat Panel` from the Command Palette. The composer lets you keep routing automatic or restrict a turn to the Paradox/CWTools or general-coding domain. Provider credentials are stored through VS Code SecretStorage; tool access still follows the selected sandbox and approval policy.
 
+Eligible Build and Utility stages can use programmable `run_code`: a stage-specific typed SDK lets the model branch on Paradox/CWTools or general-tool results, filter intermediate evidence, and run bounded independent reads concurrently. Programs execute in a QuickJS/WASM guest without Node or VS Code authority. Every nested tool call still passes the normal mode/domain/stage, permission, policy, scheduler, and write-queue gates; only explicit logs and the final return value enter model context.
+
 The ChatGPT-subscription-compatible Codex provider uses a browser sign-in flow and the extension's own agent runtime. It is an integration with an upstream compatibility endpoint, not a public stable API, so upstream changes can require extension updates.
 
 #### Connect an external MCP client
@@ -182,6 +184,8 @@ Stellaris Language Serves 是一款面向 Paradox Mod 开发的 VS Code 扩展�
 #### 使用 AI 面板
 
 从命令面板运行 `AI: Open Chat Panel`。输入区可以保持自动路由，也可以把当前请求限制在 Paradox/CWTools 或通用编码领域。Provider 凭据通过 VS Code SecretStorage 保存；工具调用仍受当前沙盒和审批策略约束。
+
+符合条件的 Build 与 Utility 阶段可以使用可编程 `run_code`：模型通过当前阶段的类型化 SDK，按 Paradox/CWTools 或通用工具结果分支、筛选中间证据，并对有界的独立读取并发执行。程序运行在不具备 Node 或 VS Code 权限的 QuickJS/WASM guest 中；每个内部工具调用仍经过 mode/domain/stage、权限、策略、调度和写队列检查，只有显式日志与最终返回值进入模型上下文。
 
 兼容 ChatGPT 订阅的 Codex Provider 通过浏览器登录，并使用插件自己的 Agent 运行时。它依赖上游兼容端点，不属于公开稳定 API；如果上游流程变化，插件可能需要同步更新。
 

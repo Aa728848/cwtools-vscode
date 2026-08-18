@@ -62,7 +62,7 @@ export function buildProviderCallTokenUsage(
         ?? 0;
     const cachedTokens = Math.min(promptTokens, rawCachedTokens);
     const netInput = Math.max(0, promptTokens - cachedTokens);
-    const pricing = getModelPricing(model, providerId);
+    const pricing = getModelPricing(model, providerId, new Date());
     const cacheDiscount = getCacheDiscountFactor(model, providerId);
     const estimatedCostCny = (cachedTokens / 1_000_000) * pricing[0] * cacheDiscount
         + (netInput / 1_000_000) * pricing[0]

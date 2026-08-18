@@ -26,8 +26,8 @@
   "gpt-5-mini": [1.80, 14.40],
   "gpt-5-nano": [0.36, 2.88],
 
-  "deepseek-v4-pro": [2.97, 5.93],
-  "deepseek-v4-flash": [0.95, 1.91],
+  "deepseek-v4-pro": [9.00, 27.01],
+  "deepseek-v4-flash": [3.00, 9.00],
 
   "MiniMax-M3": [2.10, 8.40],
   "MiniMax-M2.7": [2.10, 8.40],

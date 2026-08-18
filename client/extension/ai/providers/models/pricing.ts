@@ -6,9 +6,35 @@ import pricingData from './pricingData.json';
 
 export const MODEL_PRICING: Record<string, number[]> = pricingData;
 
+const DEEPSEEK_OFF_PEAK_PRICING: Record<string, [number, number]> = {
+    'deepseek-v4-pro': [4.50, 13.50],
+    'deepseek-v4-flash': [1.50, 4.50],
+};
+
+function directDeepSeekModelKey(model: string, providerId?: string): keyof typeof DEEPSEEK_OFF_PEAK_PRICING | undefined {
+    const provider = providerId?.toLowerCase();
+    if (provider && provider !== 'deepseek') return undefined;
+    const lower = model.toLowerCase();
+    if (lower.startsWith('deepseek-v4-pro')) return 'deepseek-v4-pro';
+    if (lower.startsWith('deepseek-v4-flash')) return 'deepseek-v4-flash';
+    return undefined;
+}
+
+export function isDeepSeekPeakPricingWindow(at: Date = new Date()): boolean {
+    if (!Number.isFinite(at.getTime())) return true;
+    const utcMinutes = at.getUTCHours() * 60 + at.getUTCMinutes();
+    return (utcMinutes >= 60 && utcMinutes < 240)
+        || (utcMinutes >= 360 && utcMinutes < 600);
+}
+
 /** Look up per-million-token CNY cost for a model. Falls back to [0, 0] if unknown. */
-export function getModelPricing(model: string, providerId?: string): [number, number] {
+export function getModelPricing(model: string, providerId?: string, at?: Date): [number, number] {
     if (!model) return [0, 0];
+    const deepSeekKey = at ? directDeepSeekModelKey(model, providerId) : undefined;
+    if (deepSeekKey && !isDeepSeekPeakPricingWindow(at)) {
+        return DEEPSEEK_OFF_PEAK_PRICING[deepSeekKey]!;
+    }
+
     const providerEntry = providerId ? MODEL_PRICING[`${providerId}:${model}`] : undefined;
     if (providerEntry) return [providerEntry[0]!, providerEntry[1]!];
 
@@ -41,8 +67,8 @@ export function getModelPricing(model: string, providerId?: string): [number, nu
  * The factor represents the fraction of full input price charged for cached tokens.
  * e.g. 0.1 means cached tokens cost 10% of full price, saving 90%.
  *
- * Sources (2026-06):
- *  - DeepSeek V4:  cache hit ≈ 0.83% of full price → 0.01
+ * Sources (2026-08):
+ *  - DeepSeek V4:  cache hit ≈ 3.2-3.3% of full price after GA peak/off-peak pricing
  *  - Claude:       cache_read = 10% of input price → 0.1
  *  - OpenAI GPT:   cached = 50% of input price → 0.5
  *  - Gemini:       current text models cache input at 10% → 0.1
@@ -79,8 +105,9 @@ export function getCacheDiscountFactor(model: string, providerId?: string): numb
         if (lower.startsWith('glm')) return 0.19;
         return 0.1;
     }
-    // DeepSeek — extremely aggressive cache pricing
-    if (lower.includes('deepseek')) return 0.01;
+    // DeepSeek — GA peak/off-peak cache ratios are stable across both windows.
+    if (lower.includes('deepseek-v4-pro')) return 1 / 30;
+    if (lower.includes('deepseek-v4-flash') || lower.includes('deepseek')) return 7 / 220;
     // Anthropic Claude
     if (lower.includes('claude')) return 0.1;
     // OpenAI GPT series

@@ -370,7 +370,7 @@ function upstreamGatewayCapability(providerId: string, model: string): ModelReas
         return reasoningCapability('budget', ['none', 'minimal', 'low', 'medium', 'high', 'max'], 'high');
     }
     if (/deepseek-v4/.test(lower)) {
-        return reasoningCapability('effort', ['none', 'high', 'max'], 'high');
+        return reasoningCapability('effort', ['none', 'low', 'high', 'max'], 'high');
     }
     if (/glm-5[.]2/.test(lower)) {
         return reasoningCapability('effort', ['none', 'high', 'max'], 'max');
@@ -427,7 +427,7 @@ export function getModelReasoningCapability(
             : NO_REASONING;
     }
     if (provider === 'together') {
-        if (/deepseek-v4/.test(lower)) return reasoningCapability('effort', ['none', 'high', 'max'], 'high');
+        if (/deepseek-v4/.test(lower)) return reasoningCapability('effort', ['none', 'low', 'high', 'max'], 'high');
         if (/gpt-oss/.test(lower)) return reasoningCapability('effort', ['low', 'medium', 'high'], 'medium');
         if (isKnownReasoningModel(lower)) return reasoningCapability('toggle', ['none', 'high'], 'high');
         return NO_REASONING;
@@ -449,7 +449,7 @@ export function getModelReasoningCapability(
     if (provider === 'claude') return claudeReasoningCapability(lower);
     if (provider === 'google') return geminiReasoningCapability(lower);
     if (provider === 'deepseek') return /deepseek-v4/.test(lower)
-        ? reasoningCapability('effort', ['none', 'high', 'max'], 'high')
+        ? reasoningCapability('effort', ['none', 'low', 'high', 'max'], 'high')
         : reasoningCapability('fixed', ['high'], 'high');
     if (provider === 'glm') {
         if (/glm-5[.]2/.test(lower)) return reasoningCapability('effort', ['none', 'high', 'max'], 'max');
@@ -595,6 +595,11 @@ function withoutMax(effort: ReasoningEffort): ReasoningEffort {
 }
 
 function deepSeekV4Effort(effort: ReasoningEffort): ReasoningEffort {
+    if (effort === 'max' || effort === 'xhigh') return 'max';
+    return effort === 'minimal' || effort === 'low' ? 'low' : 'high';
+}
+
+function highOrMaxEffort(effort: ReasoningEffort): ReasoningEffort {
     return effort === 'max' || effort === 'xhigh' ? 'max' : 'high';
 }
 
@@ -796,7 +801,8 @@ const THINKING_RULES: ThinkingRule[] = [
     // OpenRouter normalizes request shapes; the upstream model decides whether an
     // effort selector exists and which values are meaningful.
     { providers: ['openrouter'], model: /(?:^|\/)(?:moonshotai\/kimi-k2|minimax\/minimax-m[23])/, build: () => ({ extraBody: { reasoning: { enabled: true } } }) },
-    { providers: ['openrouter'], model: /deepseek-v4|glm-5[.]2/, build: ctx => ({ extraBody: { reasoning: { effort: deepSeekV4Effort(ctx.requested) } } }) },
+    { providers: ['openrouter'], model: /deepseek-v4/, build: ctx => ({ extraBody: { reasoning: { effort: deepSeekV4Effort(ctx.requested) } } }) },
+    { providers: ['openrouter'], model: /glm-5[.]2/, build: ctx => ({ extraBody: { reasoning: { effort: highOrMaxEffort(ctx.requested) } } }) },
     { providers: ['openrouter'], model: /(?:^|\/)moonshotai\/kimi-k3(?:-|$)/, build: ctx => ({ extraBody: { reasoning: { effort: kimiK3Effort(ctx.requested) } } }) },
     { providers: ['openrouter'], model: KNOWN_REASONING_MODEL_RE, build: ctx => ({ extraBody: { reasoning: { effort: ctx.requested } } }) },
 
@@ -827,7 +833,7 @@ const THINKING_RULES: ThinkingRule[] = [
 
     { providers: ['siliconflow'], model: KNOWN_REASONING_MODEL_RE, build: ctx => ({ extraBody: { enable_thinking: true, thinking_budget: siliconflowThinkingBudget(ctx.requested) } }) },
 
-    { providers: ['glm', 'opencode', 'opencode-go'], model: /(?:^|\/)glm-5[.]2(?:-|$)/, build: ctx => ({ extraBody: { thinking: { type: 'enabled' } }, reasoningEffort: deepSeekV4Effort(ctx.requested) }) },
+    { providers: ['glm', 'opencode', 'opencode-go'], model: /(?:^|\/)glm-5[.]2(?:-|$)/, build: ctx => ({ extraBody: { thinking: { type: 'enabled' } }, reasoningEffort: highOrMaxEffort(ctx.requested) }) },
     { providers: ['glm', 'opencode', 'opencode-go'], model: /(?:^|\/)glm-(?:4[.]?[5-9]|5)(?:[-.]|$)/, build: () => ({ extraBody: { thinking: { type: 'enabled' } } }) },
 
     { providers: ['deepseek', 'opencode', 'opencode-go'], model: /deepseek-v4/, build: ctx => ({ extraBody: { thinking: { type: 'enabled' } }, reasoningEffort: deepSeekV4Effort(ctx.requested) }) },

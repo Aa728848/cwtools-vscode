@@ -15,7 +15,7 @@ describe('getModelPricing', () => {
     });
 
     it('exact match: deepseek-v4-pro', () => {
-        expect(getModelPricing('deepseek-v4-pro')).to.deep.equal([2.97, 5.93]);
+        expect(getModelPricing('deepseek-v4-pro')).to.deep.equal([9.00, 27.01]);
     });
 
     it('uses current direct-provider pricing', () => {
@@ -35,6 +35,15 @@ describe('getModelPricing', () => {
         expect(getModelPricing('mimo-v2.5-pro')).to.deep.equal([3.00, 6.00]);
         expect(getModelPricing('kimi-k2.7-code')).to.deep.equal([6.50, 27.00]);
         expect(getModelPricing('kimi-k3')).to.deep.equal([20.00, 100.00]);
+    });
+
+    it('uses DeepSeek peak pricing by default and off-peak pricing when timestamped', () => {
+        const peak = new Date('2026-08-16T02:30:00.000Z');
+        const offPeak = new Date('2026-08-16T05:00:00.000Z');
+        expect(getModelPricing('deepseek-v4-pro', 'deepseek', peak)).to.deep.equal([9.00, 27.01]);
+        expect(getModelPricing('deepseek-v4-pro', 'deepseek', offPeak)).to.deep.equal([4.50, 13.50]);
+        expect(getModelPricing('deepseek-v4-flash', 'deepseek', peak)).to.deep.equal([3.00, 9.00]);
+        expect(getModelPricing('deepseek-v4-flash', 'deepseek', offPeak)).to.deep.equal([1.50, 4.50]);
     });
 
     it('prefix match: dated model tag', () => {
@@ -80,9 +89,10 @@ describe('getModelPricing', () => {
 });
 
 describe('getCacheDiscountFactor', () => {
-    it('returns 0.01 for DeepSeek models', () => {
-        expect(getCacheDiscountFactor('deepseek-v4-pro')).to.equal(0.01);
-        expect(getCacheDiscountFactor('deepseek-chat')).to.equal(0.01);
+    it('returns current DeepSeek GA cache pricing ratios', () => {
+        expect(getCacheDiscountFactor('deepseek-v4-pro')).to.equal(1 / 30);
+        expect(getCacheDiscountFactor('deepseek-v4-flash')).to.equal(7 / 220);
+        expect(getCacheDiscountFactor('deepseek-chat')).to.equal(7 / 220);
     });
 
     it('returns 0.1 for Claude models', () => {

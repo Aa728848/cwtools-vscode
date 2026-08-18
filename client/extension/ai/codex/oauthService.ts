@@ -15,7 +15,7 @@ export const CODEX_CHATGPT_MODELS = [
     'gpt-5.5',
     'gpt-5.4',
     'gpt-5.4-mini',
-    'gpt-5.2',
+    'gpt-5.3-codex-spark',
 ] as const;
 
 /** Active context window advertised by the ChatGPT Codex model catalog. */

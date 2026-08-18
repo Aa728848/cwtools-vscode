@@ -2,6 +2,7 @@ import { expect } from 'chai';
 import {
     CHATGPT_OAUTH_ISSUER,
     ChatGptOAuthService,
+    CODEX_CHATGPT_MODELS,
     CODEX_CHATGPT_USAGE_URL,
     mapCodexUsage,
 } from '../../extension/ai/codex/oauthService';
@@ -9,6 +10,18 @@ import {
 const SECRET_KEY = 'cwtools.ai.codexChatgpt.oauth.v1';
 
 describe('ChatGptOAuthService', () => {
+    it('tracks the current ChatGPT Codex subscription model catalog', () => {
+        expect([...CODEX_CHATGPT_MODELS]).to.deep.equal([
+            'gpt-5.6-sol',
+            'gpt-5.6-terra',
+            'gpt-5.6-luna',
+            'gpt-5.5',
+            'gpt-5.4',
+            'gpt-5.4-mini',
+            'gpt-5.3-codex-spark',
+        ]);
+    });
+
     it('maps subscription and code-review usage windows', () => {
         const limits = mapCodexUsage({
             plan_type: 'plus',
@@ -143,4 +156,3 @@ class FakeSecrets {
         return Promise.resolve();
     }
 }
-

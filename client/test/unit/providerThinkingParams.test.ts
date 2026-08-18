@@ -79,6 +79,8 @@ describe('provider thinking params', () => {
             .to.deep.equal({ extraBody: { reasoning: { effort: 'high' } } });
         expect(getThinkingParams('deepseek/deepseek-v4-pro', 'openrouter', 'openai-chat-completions', 'medium'))
             .to.deep.equal({ extraBody: { reasoning: { effort: 'high' } } });
+        expect(getThinkingParams('deepseek/deepseek-v4-pro', 'openrouter', 'openai-chat-completions', 'low'))
+            .to.deep.equal({ extraBody: { reasoning: { effort: 'low' } } });
         expect(getThinkingParams('moonshotai/kimi-k2.7-code', 'openrouter', 'openai-chat-completions', 'max'))
             .to.deep.equal({ extraBody: { reasoning: { enabled: true } } });
     });
@@ -110,6 +112,8 @@ describe('provider thinking params', () => {
             .to.deep.equal({ extraBody: { thinking: { type: 'enabled' } }, reasoningEffort: 'high' });
         expect(getThinkingParams('deepseek-v4-pro', 'deepseek', 'openai-chat-completions', 'medium'))
             .to.deep.equal({ extraBody: { thinking: { type: 'enabled' } }, reasoningEffort: 'high' });
+        expect(getThinkingParams('deepseek-v4-pro', 'deepseek', 'openai-chat-completions', 'low'))
+            .to.deep.equal({ extraBody: { thinking: { type: 'enabled' } }, reasoningEffort: 'low' });
         expect(getThinkingParams('deepseek-v4-pro', 'deepseek', 'openai-chat-completions', 'high'))
             .to.deep.equal({ extraBody: { thinking: { type: 'enabled' } }, reasoningEffort: 'high' });
         expect(getThinkingParams('deepseek-v4-pro', 'deepseek', 'openai-chat-completions', 'max'))
@@ -178,6 +182,8 @@ describe('provider thinking params', () => {
         const { getThinkingParams, getReducedThinkingParams } = loadProviders();
         expect(getThinkingParams('deepseek-v4-pro', 'opencode-go', 'openai-chat-completions', 'medium'))
             .to.deep.equal({ extraBody: { thinking: { type: 'enabled' } }, reasoningEffort: 'high' });
+        expect(getThinkingParams('deepseek-v4-pro', 'opencode-go', 'openai-chat-completions', 'low'))
+            .to.deep.equal({ extraBody: { thinking: { type: 'enabled' } }, reasoningEffort: 'low' });
         expect(getThinkingParams('glm-5.2', 'opencode-go', 'openai-chat-completions', 'max'))
             .to.deep.equal({ extraBody: { thinking: { type: 'enabled' } }, reasoningEffort: 'max' });
         expect(getReducedThinkingParams('glm-5.2', 'opencode-go', 'openai-chat-completions'))
@@ -233,7 +239,7 @@ describe('provider thinking params', () => {
         });
         expect(getModelReasoningCapability('deepseek', 'deepseek-v4-pro', 'openai-chat-completions')).to.deep.equal({
             kind: 'effort',
-            options: ['none', 'high', 'max'],
+            options: ['none', 'low', 'high', 'max'],
             defaultValue: 'high',
         });
         expect(getModelReasoningCapability('glm', 'glm-5.1', 'openai-chat-completions')).to.deep.equal({

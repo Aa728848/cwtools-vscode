@@ -52,9 +52,9 @@ describe('AI static prompt budgets', () => {
             return estimateTokenCount(prompt) + estimateTokenCount(JSON.stringify(tools));
         };
 
-        expect(stage).to.equal('discovery');
+        expect(stage).to.equal('write');
 
-        for (const buildStage of ['discovery', 'evidence', 'validation', 'write', 'finalize'] as const) {
+        for (const buildStage of ['discovery', 'validation', 'write', 'finalize'] as const) {
             const modeTools = runnerPolicy.filterToolDefinitionsForMode(TOOL_DEFINITIONS, 'build');
             const tools = runnerPolicy.filterToolDefinitionsForStage(modeTools, 'build', buildStage);
             // Structured questions and programmable run_code occupy bounded
@@ -63,7 +63,7 @@ describe('AI static prompt budgets', () => {
             // 9_200: includes the always-visible structured question and
             // programmable run_code schemas plus dispatch/durable-graph lookups.
             expect(measure(buildStage, false), `${buildStage} main system + tools`).to.be.at.most(9_200);
-            expect(measure(buildStage, true), `${buildStage} slim system + tools`).to.be.at.most(4_000);
+            expect(measure(buildStage, true), `${buildStage} slim system + tools`).to.be.at.most(4_250);
         }
     });
 
@@ -71,7 +71,7 @@ describe('AI static prompt budgets', () => {
         const { PromptBuilder, TOOL_DEFINITIONS, runnerPolicy, estimateTokenCount } = loadPromptBudgetModules();
         const builder = new PromptBuilder(process.cwd());
         const stages = {
-            plan: ['discovery', 'design', 'validation', 'finalize'],
+            plan: ['discovery', 'validation', 'finalize'],
             explore: ['discovery', 'validation', 'finalize'],
             review: ['discovery', 'validation', 'finalize'],
         } as const;

@@ -4,7 +4,7 @@ import type { AgentAuthorization, AgentRuntimeDomain } from '../types';
 import type { AgentProfileSource, RuntimeAgentProfile } from './agentProfileCatalog';
 
 const AUTHORIZATIONS = new Set<AgentAuthorization>(['read_only', 'plan_write_only', 'workspace_write']);
-const DOMAINS = new Set<AgentRuntimeDomain>(['general', 'paradox']);
+const DOMAINS = new Set<AgentRuntimeDomain>(['general', 'paradox', 'hybrid']);
 
 function scalar(value: string): string | boolean | number {
     const trimmed = value.trim();
@@ -60,6 +60,10 @@ function parseAgentMarkdown(content: string, fallbackName: string): RuntimeAgent
         tools: readList('tools'),
         disallowedTools: readList('disallowedTools'),
         subagents: readList('subagents'),
+        subagentCapabilities: frontmatter.has('subagentRunCode') || frontmatter.has('subagentCommand') ? {
+            runCode: scalar(frontmatter.get('subagentRunCode') ?? 'false') === true,
+            command: scalar(frontmatter.get('subagentCommand') ?? 'false') === true,
+        } : undefined,
         modelPreference: frontmatter.get('modelPreference') === 'secondary' ? 'secondary' : 'primary',
         override: scalar(frontmatter.get('override') ?? 'false') === true,
         summaryPolicy: frontmatter.has('summaryMinCharacters') ? {

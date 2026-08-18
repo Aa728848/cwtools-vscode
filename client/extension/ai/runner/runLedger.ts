@@ -887,6 +887,7 @@ export class RunLedger {
                         || payload.authorization === 'workspace_write')
                     && (payload.initialPhase === 'inspect'
                         || payload.initialPhase === 'plan'
+                        || payload.initialPhase === 'execute'
                         || payload.initialPhase === 'verify')) {
                     record.schedulingState = schedulingStateFromAdmission({
                         domainProfile: payload.domainProfile,

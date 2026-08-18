@@ -24,7 +24,7 @@ export type { CwtRuleValueReference, CwtShaderReference, PdxRuleCategory, PdxSem
 export type AgentMode = 'build' | 'plan' | 'explore' | 'general' | 'utility' | 'review' | 'gui_expert' | 'script_reviewer' | 'loc_translator' | 'loc_writer' | 'orchestrator' | 'script';
 
 /** User-facing capability profile. AgentMode remains the internal execution adapter. */
-export type AgentDomain = 'auto' | 'paradox' | 'general';
+export type AgentDomain = 'auto' | 'paradox' | 'general' | 'hybrid';
 export type AgentRuntimeDomain = Exclude<AgentDomain, 'auto'>;
 export type AgentIntent = 'auto' | 'execute' | 'plan' | 'explore' | 'review';
 export type AgentExecutionStrategy = 'auto' | 'single' | 'multi';
@@ -55,7 +55,7 @@ export interface AgentSchedulingState {
 export interface AdmissionDecision {
     domainProfile: AgentRuntimeDomain;
     authorization: AgentAuthorization;
-    initialPhase: 'inspect' | 'plan' | 'verify';
+    initialPhase: 'inspect' | 'plan' | 'execute' | 'verify';
     explicitDelegation: boolean;
     confidence: number;
     evidence: string[];
@@ -2132,7 +2132,7 @@ export interface GetDiagnosticsResult {
 
 // ─── Token Usage & Cost ──────────────────────────────────────────────────────
 
-export type AgentToolStage = 'discovery' | 'design' | 'evidence' | 'validation' | 'write' | 'finalize';
+export type AgentToolStage = 'discovery' | 'validation' | 'write' | 'finalize';
 
 /** One completed provider request used for request-accurate cache metrics. */
 export interface CacheRequestUsage {

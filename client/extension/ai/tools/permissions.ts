@@ -9,6 +9,7 @@ import type { AgentMode, AgentToolName } from '../types';
 import type { AgentRuntimeDomain } from '../types';
 import { defaultDomainForMode } from '../agentProfile';
 import { evaluateEffectiveToolPolicy } from '../runner/effectiveToolPolicy';
+import { agentProfileCatalog } from '../runner/agentProfileCatalog';
 
 /**
  * Check if a tool is allowed under the current Agent operation mode.
@@ -44,6 +45,7 @@ export function validateToolAccess(
         mode: AgentMode;
         domain?: AgentRuntimeDomain;
         isSubAgent?: boolean;
+        profileName?: string;
     }
 ): { allowed: boolean; reason?: string } {
     let entry = TOOL_REGISTRY.get(toolName as AgentToolName);
@@ -61,6 +63,7 @@ export function validateToolAccess(
         mode: options.mode,
         domain,
         isSubAgent: options.isSubAgent,
+        profile: options.profileName ? agentProfileCatalog.get(options.profileName) : undefined,
     });
     if (decision.reason === 'domain') {
         return {

@@ -237,7 +237,13 @@ export class AgentRuntime {
             ?? agentProfileCatalog.resolve({
                 domainProfile: schedulingState.domainProfile,
                 authorization: schedulingState.authorization,
-                initialPhase: schedulingState.phase === 'plan' ? 'plan' : schedulingState.phase === 'verify' ? 'verify' : 'inspect',
+                initialPhase: schedulingState.phase === 'plan'
+                    ? 'plan'
+                    : schedulingState.phase === 'execute'
+                        ? 'execute'
+                        : schedulingState.phase === 'verify'
+                            ? 'verify'
+                            : 'inspect',
                 explicitDelegation: schedulingState.dispatch !== 'single',
                 confidence: schedulingState.routeConfidence,
                 evidence: schedulingState.routeEvidence,

@@ -20,12 +20,6 @@ const BUILD_STAGE_TOOLS: Partial<Record<AgentToolStage, ReadonlySet<string>>> = 
         'todo_write', 'mcp_call', 'run_code',
         'dispatch_agents',
     ]),
-    evidence: new Set([
-        'query_project_knowledge', 'query_rules', 'query_cwt_schema', 'query_scope',
-        'search_rule_capabilities', 'get_file_context', 'read_file', 'get_pdx_block',
-        'get_design_blueprint_contract', 'todo_write', 'run_code',
-        'grep', 'workspace_symbols', 'query_blackboard', 'merge_results',
-    ]),
     validation: new Set([
         'query_rules', 'query_cwt_schema', 'query_scope', 'explain_scope',
         'parse_pdx_fragment', 'query_references', 'query_definition_by_name',
@@ -54,10 +48,6 @@ const PLAN_STAGE_TOOLS: Partial<Record<AgentToolStage, ReadonlySet<string>>> = {
         'web_search', 'web_open', 'web_find', 'mcp_call',
         'dispatch_agents', 'query_blackboard', 'merge_results',
     ]),
-    design: new Set([
-        ...BUILD_STAGE_TOOLS.evidence!,
-        'dispatch_agents', 'query_blackboard', 'merge_results',
-    ]),
     validation: new Set([
         'query_rules', 'query_cwt_schema', 'query_scope',
         'parse_pdx_fragment', 'query_references', 'query_definition_by_name',
@@ -83,7 +73,6 @@ const EXPLORE_STAGE_TOOLS: Partial<Record<AgentToolStage, ReadonlySet<string>>> 
         'web_search', 'web_open', 'web_find', 'mcp_call',
         'dispatch_agents', 'query_blackboard', 'merge_results',
     ]),
-    design: new Set(),
     validation: new Set([
         'query_rules', 'query_cwt_schema', 'query_scope', 'explain_scope',
         'query_references', 'query_definition_by_name', 'verify_pdx_identifier',
@@ -108,7 +97,6 @@ const REVIEW_STAGE_TOOLS: Partial<Record<AgentToolStage, ReadonlySet<string>>> =
         'get_diagnostics', 'analyze_diagnostic_error', 'find_sprite_candidates',
         'query_localisation_index', 'mcp_call',
     ]),
-    design: new Set(),
     validation: new Set([
         'query_rules', 'query_scope', 'query_references', 'query_definition_by_name',
         'verify_pdx_identifier', 'get_diagnostics', 'analyze_diagnostic_error',
@@ -124,7 +112,7 @@ const REVIEW_STAGE_TOOLS: Partial<Record<AgentToolStage, ReadonlySet<string>>> =
     ]),
 };
 
-/** General coding stages deliberately skip the PDX design/evidence pipeline. */
+/** General coding stages use the same compact lifecycle without PDX-specific gates. */
 const UTILITY_STAGE_TOOLS: Partial<Record<AgentToolStage, ReadonlySet<string>>> = {
     discovery: new Set([
         'read_file', 'list_directory', 'glob_files', 'grep', 'get_file_context',
@@ -133,7 +121,6 @@ const UTILITY_STAGE_TOOLS: Partial<Record<AgentToolStage, ReadonlySet<string>>> 
         'web_search', 'web_open', 'web_find', 'mcp_call', 'todo_write', 'run_skill', 'run_code',
         'dispatch_agents',
     ]),
-    design: new Set(),
     validation: new Set([
         'read_file', 'get_file_context', 'grep', 'document_symbols',
         'workspace_symbols', 'go_to_definition', 'find_references', 'hover_symbol',
@@ -192,7 +179,7 @@ export function isSelectableStageSupportTool(
     stage: AgentToolStage | undefined,
 ): boolean {
     if (CROSS_STAGE_SUPPORT_TOOLS.has(toolName) || toolName.startsWith('mcp_')) return true;
-    const normalizedStage = normalizeToolStageForMode(mode, stage);
+    const normalizedStage = stage;
     return mode === 'build'
         && (normalizedStage === 'write' || normalizedStage === 'finalize')
         && BUILD_WRITE_ON_DEMAND_TOOLS.has(toolName);
@@ -260,11 +247,6 @@ const DISCOVERY_PROGRESS_TOOLS = new Set([
     'query_workspace_index', 'get_file_context', 'read_file', 'search_mod_files',
     'workspace_symbols', 'document_symbols', 'dispatch_agents',
 ]);
-const EVIDENCE_PROGRESS_TOOLS = new Set([
-    'query_rules', 'query_cwt_schema', 'query_scope', 'query_override_modes',
-    'search_rule_capabilities', 'query_scripted_effects', 'query_scripted_triggers',
-    'write_design_blueprint', 'read_file', 'get_file_context', 'get_pdx_block',
-]);
 const VALIDATION_PROGRESS_TOOLS = new Set([
     'parse_pdx_fragment', 'verify_pdx_identifier', 'get_diagnostics',
     'query_definition_by_name', 'query_references', 'explain_scope', 'todo_write',
@@ -275,16 +257,10 @@ const STAGED_WRITE_TOOLS = new Set([
 ]);
 
 export function initialToolStageForMode(mode: AgentMode): AgentToolStage | undefined {
+    if (mode === 'build' || mode === 'utility') return 'write';
     return MODE_STAGE_TOOLS[mode] ? 'discovery' : undefined;
 }
 
-/** V2 resume compatibility: Build's former design checkpoint is now evidence preparation. */
-export function normalizeToolStageForMode(
-    mode: AgentMode,
-    stage: AgentToolStage | undefined,
-): AgentToolStage | undefined {
-    return mode === 'build' && stage === 'design' ? 'evidence' : stage;
-}
 
 export function filterToolDefinitionsForStage(
     tools: readonly ToolDefinition[],
@@ -294,7 +270,7 @@ export function filterToolDefinitionsForStage(
     workflowSupportTools?: ReadonlySet<string>,
 ): ToolDefinition[] {
     if (legacyFullToolset || !stage) return [...tools];
-    const normalizedStage = normalizeToolStageForMode(mode, stage);
+    const normalizedStage = stage;
     const modeStages = MODE_STAGE_TOOLS[mode];
     if (!modeStages) return [...tools];
     const allowed = normalizedStage ? modeStages[normalizedStage] : undefined;
@@ -317,13 +293,13 @@ export function shouldAutoDiscloseExecutionTools(
     authorization: import('./types').AgentAuthorization,
 ): boolean {
     if (authorization !== 'workspace_write' || !WRITE_EXECUTION_MODES.has(mode)) return false;
-    const normalizedStage = normalizeToolStageForMode(mode, stage);
+    const normalizedStage = stage;
     return normalizedStage === undefined || normalizedStage === 'write' || normalizedStage === 'finalize';
 }
 
 /**
- * A workspace-write admission must not turn an internal discovery/evidence
- * checkpoint into a second user approval boundary.
+ * A workspace-write admission must not turn an internal validation checkpoint
+ * into a second user approval boundary.
  */
 export function shouldContinueAuthorizedExecution(
     mode: AgentMode,
@@ -332,7 +308,7 @@ export function shouldContinueAuthorizedExecution(
     executionActionObserved: boolean,
 ): boolean {
     if (authorization !== 'workspace_write' || !WRITE_EXECUTION_MODES.has(mode)) return false;
-    const normalizedStage = normalizeToolStageForMode(mode, stage);
+    const normalizedStage = stage;
     return normalizedStage ? normalizedStage !== 'finalize' : !executionActionObserved;
 }
 
@@ -379,8 +355,6 @@ export function isTruncationInducedStop(content: string): boolean {
 
 const STAGE_GUIDANCE: Record<AgentToolStage, string> = {
     discovery: 'Locate the relevant project area and evidence source; do not attempt writes yet.',
-    design: 'Resolve the architecture and implementation design before requesting approval.',
-    evidence: 'Obtain the applicable rules, scopes, and bounded archetype evidence without revisiting product design.',
     validation: 'Prove candidate syntax, scope, identifiers, and references before writing.',
     write: 'Apply the narrowest guarded edit; host-side semantic preflight remains authoritative.',
     finalize: 'Inspect fresh diagnostics and affected references; repair any post-write failure.',
@@ -393,7 +367,7 @@ export function buildToolStageReminder(
     tools: readonly ToolDefinition[],
     domain: AgentRuntimeDomain = defaultDomainForMode(mode),
 ): string {
-    const normalizedStage = normalizeToolStageForMode(mode, stage);
+    const normalizedStage = stage;
     if (!normalizedStage) return '';
     const names = tools.map(tool => tool.function.name).sort();
     const guidance = domain === 'general'
@@ -401,9 +375,7 @@ export function buildToolStageReminder(
             ? 'Inspect the repository and identify the exact implementation and verification surface; do not write yet.'
             : normalizedStage === 'write'
                 ? 'Implement the scoped change and run relevant commands through the policy engine.'
-                : normalizedStage === 'design' || normalizedStage === 'evidence'
-                    ? 'Map the concrete interfaces, dependencies, compatibility constraints, and tests using repository evidence.'
-                    : normalizedStage === 'validation'
+                : normalizedStage === 'validation'
                         ? 'Cross-check the proposed or reviewed behavior against callers, diagnostics, tests, and current implementation.'
                         : 'Synthesize the evidence, review the diff when applicable, and report verification and remaining risks.'
         : STAGE_GUIDANCE[normalizedStage];
@@ -417,7 +389,7 @@ export function advanceToolStage(
     toolName: string,
     result: { success: boolean; hasValidationErrors?: boolean },
 ): AgentToolStage | undefined {
-    const normalizedStage = normalizeToolStageForMode(mode, stage);
+    const normalizedStage = stage;
     if (!normalizedStage) return undefined;
     if (mode === 'utility' && STAGED_WRITE_TOOLS.has(toolName)) {
         return result.success && !result.hasValidationErrors ? 'finalize' : 'write';
@@ -429,12 +401,7 @@ export function advanceToolStage(
         case 'discovery':
             if (mode === 'utility' && result.success && UTILITY_STAGE_TOOLS.discovery!.has(toolName)) return 'write';
             if (!result.success || (!DISCOVERY_PROGRESS_TOOLS.has(toolName) && !VALIDATION_PROGRESS_TOOLS.has(toolName))) return normalizedStage;
-            return mode === 'build' ? 'evidence' : mode === 'plan' ? 'design' : 'validation';
-        case 'design':
-            if (mode === 'plan' && result.success && PLAN_STAGE_TOOLS.design!.has(toolName)) return 'validation';
-            return normalizedStage;
-        case 'evidence':
-            return mode === 'build' && result.success && EVIDENCE_PROGRESS_TOOLS.has(toolName) ? 'validation' : normalizedStage;
+            return 'validation';
         case 'validation':
             if (mode === 'plan' && result.success && PLAN_STAGE_TOOLS.validation!.has(toolName)) return 'finalize';
             if (!result.success || !VALIDATION_PROGRESS_TOOLS.has(toolName)) return normalizedStage;

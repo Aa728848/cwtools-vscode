@@ -12,6 +12,7 @@ import * as vs from 'vscode';
 import * as nodeCrypto from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
+import { consumeCapabilityLease } from './runner/capabilityLease';
 import type { LanguageClient } from 'vscode-languageclient/node';
 import type {
     AnalyzeDiagnosticErrorResult,
@@ -816,7 +817,10 @@ export class AgentToolExecutor {
         if (decision.action === 'deny' && !decision.denial?.approvalPath) {
             return { allowed: false, error: decision.denial?.whyDenied ?? `Policy '${profile.id}' denied ${toolName}.` };
         }
-        if (decision.action === 'allow') return { allowed: true };
+        const capabilityLease = consumeCapabilityLease(context?.runnerOptions?.capabilityLeases, {
+            tool: toolName, effect: entry.effect, targetPaths: targets, workspaceRoot: this.workspaceRoot,
+        });
+        if (decision.action === 'allow' || capabilityLease) return { allowed: true };
         if (selfManaged) return { allowed: true };
         const requestPermission = context?.onPermissionRequest;
         if (!requestPermission) return { allowed: false, error: `Policy requires approval for ${toolName}, but no permission handler is available.` };
@@ -1061,6 +1065,7 @@ export class AgentToolExecutor {
                 text,
                 previousText,
                 mode,
+                riskLevel: this.pdxWriteRiskLevel(toolName, resolvedTargetFile, text, previousText),
                 evidenceCalls: this.impactEvidenceCalls.get(this.getImpactEvidenceKey(context)),
             });
         } catch (error) {
@@ -1352,6 +1357,14 @@ export class AgentToolExecutor {
         };
     }
 
+    private pdxWriteRiskLevel(toolName: string, targetFile: string, text: string, previousText: string): 0 | 1 | 2 | 3 {
+        if (this.isHighRiskPdxWrite(toolName, targetFile)) return 3;
+        const changedSize = Math.abs(text.length - previousText.length);
+        if ((toolName === 'edit_file' || toolName === 'replace_lines') && changedSize <= 160) return 1;
+        if (toolName === 'write_file' && previousText.length === 0) return 2;
+        return 2;
+    }
+
     private isHighRiskPdxWrite(toolName: string, targetFile: string): boolean {
         if (toolName === 'rename_symbol') return true;
         const relative = path.relative(this.workspaceRoot, targetFile).replace(/\\/g, '/').toLowerCase();
@@ -1503,10 +1516,9 @@ export class AgentToolExecutor {
             };
         }
         const runtimeDomain = context?.runnerOptions?.domain;
-        const generalUtilityCommand = runtimeDomain === 'general'
-            && context?.runnerOptions?.mode === 'utility'
-            && toolName === 'run_command';
-        if (isSubAgent && toolName === 'run_command' && !generalUtilityCommand) {
+        const childCommandCapability = context?.runnerOptions?.agentProfileName === 'general-coder'
+            && context?.runnerOptions?.mode === 'utility';
+        if (isSubAgent && toolName === 'run_command' && !childCommandCapability) {
             return {
                 success: false,
                 message: 'run_command is disabled for orchestrator sub-agents. Do not create or run helper scripts for it. Use structured edit tools for bulk file changes; if a terminal command is truly required, return BLOCKED_FOR_ORCHESTRATOR with the command and reason.',
@@ -1514,7 +1526,10 @@ export class AgentToolExecutor {
         }
         const mode = context?.runnerOptions?.mode ?? 
             ((['dispatch_agents', 'merge_results', 'query_blackboard'].includes(toolName)) ? 'orchestrator' : 'build');
-        const access = validateToolAccess(toolName, { mode, domain: runtimeDomain, isSubAgent });
+        const access = validateToolAccess(toolName, {
+            mode, domain: runtimeDomain, isSubAgent,
+            profileName: context?.runnerOptions?.agentProfileName,
+        });
         if (!access.allowed) {
             return {
                 success: false,

@@ -97,7 +97,7 @@ describe('Execute-to-Plan handoff', () => {
         expect(validation.missing).to.include('unresolvedCritical must be empty');
     });
 
-    it('requires exactly one contract with exact unique target-file ownership', () => {
+    it('requires one exact contract and allows dependency-ordered shared files', () => {
         expect(validateImplementationPlan(`${completePlan()}\n${completePlan()}`).missing)
             .to.include('exactly one cwtools-plan contract');
         expect(validateImplementationPlan(completePlan({
@@ -124,7 +124,12 @@ describe('Execute-to-Plan handoff', () => {
                     dependsOn: ['runtime'],
                 },
             ],
-        })).missing).to.include('operation file ownership');
+        })).complete).to.equal(true);
+    });
+
+    it('accepts a lightweight plan without mandatory risks or rollback', () => {
+        const plan = completePlan({ tier: 'lightweight', risks: [], rollback: [] });
+        expect(validateImplementationPlan(plan).complete).to.equal(true);
     });
 
     it('renders approval for plans with a verification-only operation', () => {
@@ -265,11 +270,12 @@ describe('Execute-to-Plan handoff', () => {
         }, { mode: 'utility', planText: plan })).to.equal(false);
     });
 
-    it('keeps the approval lifecycle on the main Agent and out of slim sub-Agent prompts', () => {
+    it('keeps planning and approval lifecycle out of Execute prompts', () => {
         const mainPrompt = buildBuildSystemPrompt('', 'Synthetic', false);
         const childPrompt = buildBuildSystemPrompt('', 'Synthetic', true);
-        expect(mainPrompt).to.include('cwtools-plan');
-        expect(mainPrompt).to.include('Never show a plan and then continue into writes or dispatch in the same turn');
+        expect(mainPrompt).to.not.include('cwtools-plan');
+        expect(mainPrompt).to.include('Execute Mode begins at the write stage');
+        expect(mainPrompt).to.not.include('Explicit Plan Handoff');
         expect(childPrompt).to.not.include('cwtools-plan');
         expect(childPrompt).to.include('Slim Build Contract');
     });

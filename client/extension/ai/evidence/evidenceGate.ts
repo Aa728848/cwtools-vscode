@@ -98,6 +98,8 @@ export interface EvidenceGateEvaluateInput {
     truncated?: boolean;
     mode: Exclude<EvidenceGateMode, 'off'>;
     phase?: EvidenceGatePhase;
+    /** Host-classified semantic blast radius: 0 text-only, 1 local field, 2 entity/reference, 3 cross-file chain. */
+    riskLevel?: 0 | 1 | 2 | 3;
     /** Successful authoritative read calls already made in this run/thread. */
     evidenceCalls?: EvidenceCallRecord[];
 }
@@ -276,6 +278,7 @@ export class EvidenceGate {
             input.mode,
             input.phase ?? 'pre_write',
             input.toolName,
+            String(input.riskLevel ?? 2),
             input.targetFile,
             sha256Text(input.previousText ?? ''),
             sha256Text(input.text),
@@ -468,7 +471,9 @@ export class EvidenceGate {
         // contracts must surface the read-only queries that establish the
         // blast radius before writing. Advisory in shadow mode; in enforce
         // mode the missing evidence is surfaced for a manual override.
-        const impactEvidence = this.buildImpactScopeEvidence(input);
+        // Legacy/direct callers default to the strongest evidence profile. The
+        // AgentToolExecutor supplies an explicit tier for each pending write.
+        const impactEvidence = (input.riskLevel ?? 3) >= 3 ? this.buildImpactScopeEvidence(input) : [];
         if (impactEvidence.length > 0) {
             for (const item of impactEvidence) {
                 if (!missingEvidence.some(existing => existing.claim === item.claim)) {

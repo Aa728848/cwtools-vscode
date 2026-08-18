@@ -7,7 +7,6 @@ import {
     phaseForToolStage,
     normalizeSchedulingState,
     schedulingStateFromLegacyMode,
-    shouldEnterPlanFromTodos,
     transitionSchedulingState,
 } from '../../extension/ai/runner/scheduling';
 import { AgentInputQueue } from '../../extension/ai/runner/inputQueue';
@@ -18,7 +17,7 @@ describe('Agent runtime scheduling', () => {
         expect(state).to.include({
             domainProfile: 'general',
             authorization: 'workspace_write',
-            phase: 'inspect',
+            phase: 'execute',
             dispatch: 'single',
         });
         expect(deriveLegacyMode(state)).to.equal('utility');
@@ -56,9 +55,10 @@ describe('Agent runtime scheduling', () => {
         })).to.throw('cannot expand authorization');
     });
 
-    it('maps write completion through execute, verify, and terminal finalization phases', () => {
-        expect(phaseForToolStage('write', 'inspect')).to.equal('execute');
-        expect(phaseForToolStage('evidence', 'plan')).to.equal('plan');
+    it('keeps Execute stable across read-oriented stages and verifies after writes', () => {
+        expect(phaseForToolStage('write', 'execute')).to.equal('execute');
+        expect(phaseForToolStage('discovery', 'execute')).to.equal('execute');
+        expect(phaseForToolStage('validation', 'plan')).to.equal('plan');
         expect(phaseForToolStage('finalize', 'execute')).to.equal('verify');
         expect(phaseForToolStage('finalize', 'inspect')).to.equal('finalize');
     });
@@ -68,18 +68,6 @@ describe('Agent runtime scheduling', () => {
         expect(authorizationAllowsEffect('read_only', 'memory', true)).to.equal(true);
         expect(authorizationAllowsEffect('read_only', 'workspace_write', true)).to.equal(false);
         expect(authorizationAllowsEffect('read_only', 'shell', false)).to.equal(false);
-    });
-
-    it('enters dynamic planning only for a mutation-authorized multi-step decomposition', () => {
-        const writable = schedulingStateFromLegacyMode('utility', 'general');
-        const todos = [
-            { content: 'inspect', status: 'done' },
-            { content: 'implement', status: 'in_progress' },
-            { content: 'verify', status: 'pending' },
-        ];
-        expect(shouldEnterPlanFromTodos(writable, todos)).to.equal(true);
-        expect(shouldEnterPlanFromTodos({ ...writable, authorization: 'read_only' }, todos)).to.equal(false);
-        expect(shouldEnterPlanFromTodos({ ...writable, phase: 'execute' }, todos)).to.equal(false);
     });
 
     it('admits independent tasks and rejects duplicate or conflicting work', () => {

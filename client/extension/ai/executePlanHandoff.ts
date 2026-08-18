@@ -14,8 +14,11 @@ export interface ImplementationPlanOperation {
     dependsOn: string[];
 }
 
+export type ImplementationPlanTier = 'lightweight' | 'structured' | 'blueprint';
+
 export interface ImplementationPlanHandoff {
     version: 1;
+    tier: ImplementationPlanTier;
     status: 'ready';
     objective: string;
     targetFiles: string[];
@@ -38,6 +41,7 @@ export const IMPLEMENTATION_PLAN_HANDOFF_CONTRACT = `Before requesting approval,
 {
   "version": 1,
   "status": "ready",
+  "tier": "lightweight | structured | blueprint",
   "objective": "Concrete delivery objective",
   "targetFiles": ["exact/project/file.ts"],
   "operations": [
@@ -50,12 +54,13 @@ export const IMPLEMENTATION_PLAN_HANDOFF_CONTRACT = `Before requesting approval,
   "unresolvedCritical": []
 }
 \`\`\`
-The host renders an approval card only when this contract is present and valid. Every target must be an exact file path without globs and must be owned by exactly one operation, operation dependencies must reference valid operation IDs without cycles, and unresolvedCritical must be empty. Do not emit the block for preliminary analysis, exploration findings, clarification questions, drafts, or blocked plans.`;
+The host renders an approval card only when this contract is present and valid. Every target must be an exact file path without globs. Shared files are allowed only when all operations touching them are strictly ordered by dependencies; unordered writers are rejected. Operation dependencies must reference valid operation IDs without cycles, and unresolvedCritical must be empty. Do not emit the block for preliminary analysis, exploration findings, clarification questions, drafts, or blocked plans.`;
 
 export const IMPLEMENTATION_PLAN_AUTHORING_GUIDANCE = `Plan authoring guidance — keep the contract strict while adapting the prose to the task:
 - Scale the plan to the real work. A cohesive one-file change may have one concise operation; cross-file work should split only at meaningful ownership or dependency boundaries. Do not pad a small task or force every plan into the same large-task template.
 - Make the human-readable body execution-ready without relying on earlier chat. Organize it into multiple meaningful Markdown sections so objective/context, concrete operations and data flow, and verification/acceptance/risks/rollback are easy to find. Section names and depth should follow the task.
-- Build the contract from verified evidence before writing the artifact. targetFiles is the canonical manifest: use exact project file paths, no globs or placeholders, and make it equal the union of operation files with every file owned exactly once. A verification-only operation may use an empty files array.
+- Choose tier by risk: lightweight for cohesive one/two-file local changes, structured for ordinary cross-file work, and blueprint for high-impact or Multi-Agent entity/data-flow changes.
+- Build the contract from verified evidence before writing the artifact. targetFiles is the canonical manifest: use exact project file paths, no globs or placeholders, and make it equal the union of operation files. A file may appear in multiple operations only when those operations form a strict dependency chain. A verification-only operation may use an empty files array.
 - Give every operation a unique stable ID. dependsOn may reference only existing operation IDs and must contain no self-reference or cycle. Use an empty dependency list when no dependency exists.
 - Keep verification, acceptanceCriteria, risks with mitigations, and rollback concrete and non-empty. For a small change these may be brief, but they must still describe an observable check, a realistic regression risk, and a practical recovery action.
 - unresolvedCritical may be empty only after every decision that could change files, architecture, behavior, or acceptance has been resolved. If such a decision remains, ask the user or report the blocker; do not write a ready plan or emit the handoff block.
@@ -171,6 +176,10 @@ export function validateImplementationPlan(planText: string): ImplementationPlan
     const candidate = parsed.value as Record<string, unknown>;
     if (candidate.version !== 1) missing.push('version=1');
     if (candidate.status !== 'ready') missing.push('status=ready');
+    const tier: ImplementationPlanTier = candidate.tier === 'lightweight' || candidate.tier === 'structured' || candidate.tier === 'blueprint'
+        ? candidate.tier
+        : 'structured';
+    if (candidate.tier !== undefined && candidate.tier !== tier) missing.push('valid plan tier');
     if (!isNonEmptyString(candidate.objective)) missing.push('objective');
     if (!isNonEmptyStringArray(candidate.targetFiles)
         || !candidate.targetFiles.every(isExactFilePath)
@@ -179,13 +188,13 @@ export function validateImplementationPlan(planText: string): ImplementationPlan
     }
     if (!isNonEmptyStringArray(candidate.verification)) missing.push('verification');
     if (!isNonEmptyStringArray(candidate.acceptanceCriteria)) missing.push('acceptanceCriteria');
-    if (!isNonEmptyStringArray(candidate.rollback)) missing.push('rollback');
+    if (tier !== 'lightweight' && !isNonEmptyStringArray(candidate.rollback)) missing.push('rollback');
     if (!Array.isArray(candidate.unresolvedCritical) || candidate.unresolvedCritical.length !== 0) {
         missing.push('unresolvedCritical must be empty');
     }
 
     const risks = Array.isArray(candidate.risks) ? candidate.risks : [];
-    if (risks.length === 0 || !risks.every(risk => {
+    if ((tier !== 'lightweight' && risks.length === 0) || !risks.every(risk => {
         if (!risk || typeof risk !== 'object' || Array.isArray(risk)) return false;
         const record = risk as Record<string, unknown>;
         return isNonEmptyString(record.risk) && isNonEmptyString(record.mitigation);
@@ -226,17 +235,32 @@ export function validateImplementationPlan(planText: string): ImplementationPlan
         const targetFiles = new Set(candidate.targetFiles.map(file => file.trim()));
         const operationFiles = operations.flatMap(operation => operation.files);
         const ownedFiles = new Set(operationFiles);
+        const operationsById = new Map(operations.map(operation => [operation.id, operation]));
+        const dependsOn = (left: string, right: string, seen = new Set<string>()): boolean => {
+            if (left === right) return true;
+            if (seen.has(left)) return false;
+            seen.add(left);
+            return (operationsById.get(left)?.dependsOn ?? []).some(dependency =>
+                dependency === right || dependsOn(dependency, right, seen));
+        };
+        const unorderedSharedFile = [...ownedFiles].some(file => {
+            const owners = operations.filter(operation => operation.files.includes(file)).map(operation => operation.id);
+            return owners.some((left, index) => owners.slice(index + 1).some(right =>
+                !dependsOn(left, right) && !dependsOn(right, left)));
+        });
         if ([...targetFiles].some(file => !ownedFiles.has(file))
             || [...ownedFiles].some(file => !targetFiles.has(file))
-            || operationFiles.length !== ownedFiles.size) {
-            missing.push('operation file ownership');
+            || unorderedSharedFile) {
+            missing.push('ordered operation file ownership');
         }
     }
 
     const humanBody = planText.replace(PLAN_HANDOFF_BLOCK_PATTERN, '').trim();
     const headingCount = humanBody.match(/^#{1,4}\s+\S.+$/gm)?.length ?? 0;
-    if (humanBody.length < 240) missing.push('self-contained plan body');
-    if (headingCount < 3) missing.push('at least three plan sections');
+    const minimumBody = tier === 'lightweight' ? 80 : tier === 'structured' ? 160 : 240;
+    const minimumHeadings = tier === 'lightweight' ? 1 : tier === 'structured' ? 2 : 3;
+    if (humanBody.length < minimumBody) missing.push('self-contained plan body');
+    if (headingCount < minimumHeadings) missing.push(`at least ${minimumHeadings} plan sections`);
 
     if (missing.length > 0) return { complete: false, missing };
     return {
@@ -245,13 +269,14 @@ export function validateImplementationPlan(planText: string): ImplementationPlan
         handoff: {
             version: 1,
             status: 'ready',
+            tier,
             objective: candidate.objective as string,
             targetFiles: (candidate.targetFiles as string[]).map(file => file.trim()),
             operations,
             verification: candidate.verification as string[],
             acceptanceCriteria: candidate.acceptanceCriteria as string[],
             risks: risks as Array<{ risk: string; mitigation: string }>,
-            rollback: candidate.rollback as string[],
+            rollback: Array.isArray(candidate.rollback) ? candidate.rollback as string[] : [],
             unresolvedCritical: [],
         },
     };

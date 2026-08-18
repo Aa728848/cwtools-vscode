@@ -315,7 +315,6 @@ const SUB_AGENT_EXCLUDES_SET = new Set<string>([
     'run_command', 'list_processes', 'read_process', 'write_process_stdin', 'terminate_process',
     'git_ops', 'save_workflow',
     'rename_symbol',
-    'run_code',
     ...MEDIA,
     ...ORCHESTRATION,
 ]);
@@ -355,9 +354,9 @@ const STORM_EXEMPT_TOOLS_SET = new Set<string>([
     'query_blackboard',
 ]);
 
-const PLAN_MODES = new Set([...BASE_READ, ...INTERACTION, ...NETWORK, ..._MCP, ...ORCHESTRATION, 'todo_write', 'write_file', 'edit_file', 'replace_lines', 'write_design_blueprint', 'save_workflow', 'set_memory', 'get_memory', 'search_memory', 'git_ops']);
-const EXPLORE_MODES = new Set([...BASE_READ, ...INTERACTION, ...NETWORK, ..._MCP, ...ORCHESTRATION, 'git_ops', 'save_workflow']);
-const REVIEW_MODES = new Set([...BASE_READ, ...INTERACTION, ...NETWORK, ..._MCP, 'git_ops', 'save_workflow']);
+const PLAN_MODES = new Set([...BASE_READ, ...INTERACTION, ...NETWORK, ..._MCP, ...ORCHESTRATION, 'run_code', 'todo_write', 'write_file', 'edit_file', 'replace_lines', 'write_design_blueprint', 'save_workflow', 'set_memory', 'get_memory', 'search_memory', 'git_ops']);
+const EXPLORE_MODES = new Set([...BASE_READ, ...INTERACTION, ...NETWORK, ..._MCP, ...ORCHESTRATION, 'run_code', 'git_ops', 'save_workflow']);
+const REVIEW_MODES = new Set([...BASE_READ, ...INTERACTION, ...NETWORK, ..._MCP, 'run_code', 'git_ops', 'save_workflow']);
 const BUILD_MODES = new Set([...BASE_READ, ...INTERACTION, ...EDIT, ...MEMORY, ...NETWORK, ...UTILITY, ...MEDIA, ..._MCP, ...ORCHESTRATION, 'run_code']);
 const LOC_MODES = new Set([
     'select_tools', 'read_file', 'write_file',

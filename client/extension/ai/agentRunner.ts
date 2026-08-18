@@ -60,7 +60,6 @@ import {
     extendStageToolPoolWithSupport,
     getWorkflowStageSupportTools,
     initialToolStageForMode,
-    normalizeToolStageForMode,
     advanceToolStage,
     buildToolStageReminder,
     isExecutionActionTool,
@@ -99,7 +98,6 @@ import { isRetryStepRequest, type RetryStepRequest, type StepRequest } from './r
 import {
     normalizeSchedulingState,
     phaseForToolStage,
-    shouldEnterPlanFromTodos,
     transitionSchedulingState,
 } from './runner/scheduling';
 import { toolDisclosureService, type ToolDisclosureContext } from './runner/toolDisclosure';
@@ -209,6 +207,8 @@ export interface AgentRunnerOptions {
     agentProfileInstructions?: string;
     /** Dispatch roles allowed by the selected runtime profile. Undefined preserves mode defaults. */
     agentProfileAllowedSubagents?: string[];
+    /** Host-issued, bounded authority grants. They never bypass mode/domain/path guards. */
+    capabilityLeases?: import('./runner/capabilityLease').CapabilityLease[];
     /** Callback for real-time step updates (for UI) */
     onStep?: (step: AgentStep) => void;
     /** Called when an external runtime has allocated a durable run id. */
@@ -979,7 +979,7 @@ export class AgentRunner {
             output: 0,
             estimatedCostCny: 0,
             agentMode: mode,
-            toolStage: normalizeToolStageForMode(mode, options?.initialToolStage ?? initialToolStageForMode(mode)),
+            toolStage: options?.initialToolStage ?? initialToolStageForMode(mode),
         };
         const runMetrics: AgentRunMetrics = {
             iterations: 0,
@@ -1165,7 +1165,7 @@ export class AgentRunner {
             excludeTools: options?.excludeTools,
             legacyFullToolset: promptLegacyFullToolset,
         }));
-        const initialToolStage = normalizeToolStageForMode(mode, options?.initialToolStage ?? initialToolStageForMode(mode));
+        const initialToolStage = options?.initialToolStage ?? initialToolStageForMode(mode);
         const promptToolDefinitions = filterToolDefinitionsForStage(
             promptModeTools,
             mode,
@@ -2081,7 +2081,7 @@ export class AgentRunner {
         const confirmedWrittenFiles = new Set<string>();
         const performanceConfig = vs.workspace.getConfiguration('stellarisLanguageServices.ai.performance');
         const legacyFullToolset = performanceConfig.get<boolean>('legacyFullToolset') === true;
-        let toolStage = normalizeToolStageForMode(mode, options?.initialToolStage ?? initialToolStageForMode(mode));
+        let toolStage = options?.initialToolStage ?? initialToolStageForMode(mode);
         if (tokenAccumulator) tokenAccumulator.toolStage = toolStage;
         let requestArchiveState: ModelRequestArchiveState | undefined;
         const archivedToolsets = new Map<string, { ref: string; sha256: string }>();
@@ -4107,20 +4107,6 @@ export class AgentRunner {
                         !!todo && typeof todo === 'object' && (todo as Record<string, unknown>).status === 'done').length;
                     if (nextCompletedTodoCount > completedTodoCount) progressRevision++;
                     completedTodoCount = nextCompletedTodoCount;
-                    if (shouldEnterPlanFromTodos(schedulingState, todos)) {
-                        const previousPhase = schedulingState.phase;
-                        schedulingState = transitionSchedulingState(schedulingState, {
-                            phase: 'plan',
-                            reason: 'runtime task decomposition requires a design checkpoint',
-                        });
-                        if (options) options.schedulingState = schedulingState;
-                        options?.runEventSink?.appendSoon('phase_changed', {
-                            from: previousPhase,
-                            to: schedulingState.phase,
-                            reason: schedulingState.phaseReason,
-                            revision: schedulingState.revision,
-                        });
-                    }
                 }
                 if (Array.isArray(record?.diagnostics)) {
                     for (const targetKey of targetKeys) {
@@ -4144,32 +4130,6 @@ export class AgentRunner {
                         || record?.postWriteValidationPassed === false
                         || record?.requiresRepair === true,
                 });
-                if (record?.success !== false
-                    && record?.error === undefined
-                    && parsedCalls[j]!.toolName === 'write_design_blueprint'
-                    && schedulingState.phase !== 'plan') {
-                    const previousPhase = schedulingState.phase;
-                    schedulingState = transitionSchedulingState(schedulingState, {
-                        phase: 'plan',
-                        reason: 'design blueprint created after inspection',
-                    });
-                    if (options) options.schedulingState = schedulingState;
-                    options?.runEventSink?.appendSoon('phase_changed', {
-                        from: previousPhase,
-                        to: 'plan',
-                        reason: schedulingState.phaseReason,
-                        revision: schedulingState.revision,
-                    });
-                }
-            }
-            if (schedulingState.phase === 'plan'
-                && mode === 'utility'
-                && toolStage === 'discovery'
-                && nextToolStage === 'write') {
-                // A mutation-authorized planning admission uses Utility's
-                // validation surface as its design checkpoint before source
-                // editors become visible.
-                nextToolStage = 'validation';
             }
             if (nextToolStage !== toolStage) {
                 const previousStage = toolStage;

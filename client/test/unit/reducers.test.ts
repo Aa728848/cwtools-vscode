@@ -31,7 +31,7 @@ describe('RunReducers — pure event projections (T3.2)', () => {
                 ev('admission_decided', {}, {
                     domainProfile: 'general',
                     authorization: 'workspace_write',
-                    initialPhase: 'inspect',
+                    initialPhase: 'execute',
                     confidence: 0.9,
                     evidence: ['TypeScript'],
                 }),
@@ -267,7 +267,7 @@ describe('RunReducers & Structured Events', () => {
             ev('admission_decided', {}, {
                 domainProfile: 'general',
                 authorization: 'workspace_write',
-                initialPhase: 'inspect',
+                initialPhase: 'execute',
                 explicitDelegation: false,
                 confidence: 0.9,
                 evidence: ['TypeScript'],

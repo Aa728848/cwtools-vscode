@@ -1,7 +1,7 @@
 import type { ChatHistoryMessageView, TopicListItem, TopicStats } from './messages.shared';
 
 export interface ManagerAgentProfileView {
-    domain: 'auto' | 'paradox' | 'general';
+    domain: 'auto' | 'paradox' | 'general' | 'hybrid';
     intent: 'auto' | 'execute' | 'plan' | 'explore' | 'review';
     strategy: 'auto' | 'single' | 'multi';
     profileName?: string;

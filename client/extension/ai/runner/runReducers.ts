@@ -501,7 +501,8 @@ export function reduceScheduling(events: AgentRunEvent[]): SchedulingSnapshot {
                     || payload.authorization === 'workspace_write') {
                     snapshot.authorization = payload.authorization;
                 }
-                if (payload.initialPhase === 'inspect' || payload.initialPhase === 'plan' || payload.initialPhase === 'verify') {
+                if (payload.initialPhase === 'inspect' || payload.initialPhase === 'plan'
+                    || payload.initialPhase === 'execute' || payload.initialPhase === 'verify') {
                     snapshot.phase = payload.initialPhase;
                 }
                 snapshot.dispatch = payload.explicitDelegation === true ? 'parallel' : 'single';

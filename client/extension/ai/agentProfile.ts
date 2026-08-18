@@ -18,7 +18,7 @@ export const DEFAULT_AGENT_PROFILE: Readonly<AgentProfileSelection> = Object.fre
     strategy: 'auto',
 });
 
-const DOMAINS = new Set<AgentDomain>(['auto', 'paradox', 'general']);
+const DOMAINS = new Set<AgentDomain>(['auto', 'paradox', 'general', 'hybrid']);
 const INTENTS = new Set<AgentIntent>(['auto', 'execute', 'plan', 'explore', 'review']);
 const STRATEGIES = new Set<AgentExecutionStrategy>(['auto', 'single', 'multi']);
 const MODES = new Set<AgentMode>([
@@ -36,6 +36,9 @@ const NO_WRITE_INTENT_RE = /\b(?:do not|don't|without|no need to)\s+(?:change|ed
 const DIRECT_WRITE_OVERRIDE_RE = /\b(?:but|then)\s+(?:please\s+)?(?:change|edit|modify|write|implement)|\b(?:directly|immediately)\s+(?:change|edit|modify|write|implement)|(?:但|不过|然后|接着|之后|并且)[^，。；\n]{0,8}(?:修改|改动|更改|写入|执行|实现|修复)|(?:直接|马上|立即)(?:修改|改动|更改|写入|执行|实现|修复)/i;
 const MULTI_AGENT_RE = /\b(multi(?:ple)?[-\s]?agents?|sub[-\s]?agents?|dispatch_agents|parallel agents?|in parallel)\b|多\s*agent|子\s*agent|并行.*agent|并行处理/i;
 const BROAD_TASK_RE = /\b(all|every|entire|whole|across the (?:project|repository|workspace)|multi[-\s]?file|event chain|migration|large refactor)\b|全部|所有|整个项目|整个仓库|全项目|跨文件|多文件|事件链|批量|整套|大型重构|全面修复/i;
+// Narrow deterministic admission for design-complete mechanical edits. It must
+// carry an exact operation plus concrete old/new values or an explicit target.
+const MECHANICAL_WRITE_RE = /(?:\breplace\s+[`"']?[^\n]{1,80}[`"']?\s+with\s+[`"']?[^\n]{1,80}|\bchange\s+[`"']?[^\n]{1,80}[`"']?\s+to\s+[`"']?[^\n]{1,80}|把[^，。\n]{1,80}(?:改成|改为|替换成)[^，。\n]{1,80}|(?:删除|移除)\s*(?:第\s*\d+\s*行|选中|这个\s*TODO)|(?:rename|重命名|改名)\s+[`"']?[A-Za-z_][\w.:-]*[`"']?\s+(?:to|为|成)\s+[`"']?[A-Za-z_][\w.:-]*[`"']?)/i;
 const PDX_PATH_RE = /(?:^|[\\/])(?:common|events?|interface|localisation|localization|gfx|sound|music|map|history|decisions|missions|on_actions)(?:[\\/]|$)|\.(?:cwt|gui|gfx|asset|entity)$/i;
 
 export interface AgentProfileResolveHints {
@@ -63,7 +66,7 @@ export function cloneAgentProfile(profile: AgentProfileSelection = DEFAULT_AGENT
     return {
         // `auto` is retained in the wire type only for legacy topic imports.
         // Capability domains are user-owned and default to Paradox.
-        domain: profile.domain === 'general' ? 'general' : 'paradox',
+        domain: profile.domain === 'general' || profile.domain === 'hybrid' ? profile.domain : 'paradox',
         intent: profile.intent,
         strategy: profile.strategy,
         ...(profile.profileName ? { profileName: profile.profileName } : {}),
@@ -72,7 +75,7 @@ export function cloneAgentProfile(profile: AgentProfileSelection = DEFAULT_AGENT
 
 /** Build the only profile exposed by the normal composer: domain is selectable; routing stays automatic. */
 export function profileForUserDomain(domain: AgentDomain): AgentProfileSelection {
-    return { domain: domain === 'general' ? 'general' : 'paradox', intent: 'auto', strategy: 'auto' };
+    return { domain: domain === 'general' || domain === 'hybrid' ? domain : 'paradox', intent: 'auto', strategy: 'auto' };
 }
 
 export function sameAgentProfile(left: AgentProfileSelection, right: AgentProfileSelection): boolean {
@@ -105,7 +108,7 @@ export function isAgentMode(value: unknown): value is AgentMode {
 }
 
 export function isAgentRuntimeDomain(value: unknown): value is AgentRuntimeDomain {
-    return value === 'paradox' || value === 'general';
+    return value === 'paradox' || value === 'general' || value === 'hybrid';
 }
 
 export function normalizeAgentProfile(value: unknown): AgentProfileSelection {
@@ -152,7 +155,9 @@ function resolveMode(
     intent: ResolvedAgentProfile['intent'],
     strategy: ResolvedAgentProfile['strategy'],
 ): AgentMode {
-    if (strategy === 'multi') return domain === 'paradox' ? 'script' : 'orchestrator';
+    // Writable coordinators are legacy adapters; read-only intent keeps its own mode
+    // while the scheduler independently admits a parallel topology.
+    if (intent === 'execute' && strategy === 'multi') return domain === 'paradox' ? 'script' : 'orchestrator';
     if (intent === 'plan') return 'plan';
     if (intent === 'explore') return 'explore';
     if (intent === 'review') return 'review';
@@ -215,7 +220,9 @@ export function resolveAgentProfileFromModelDecision(
     const routeConfidence = decision.confidence ?? 0.65;
     // Capability domain is user-owned. Semantic routing may change task intent
     // and execution topology, but never Paradox/General capabilities.
-    const domain: ResolvedAgentProfile['domain'] = selection.domain === 'general' ? 'general' : 'paradox';
+    const domain: ResolvedAgentProfile['domain'] = selection.domain === 'general'
+        ? 'general'
+        : selection.domain === 'hybrid' ? 'hybrid' : 'paradox';
     // Once semantic routing succeeds, no keyword classifier may override it.
     // Regex admission remains only in resolveAgentProfile(), the unavailable-
     // router fallback path.
@@ -223,9 +230,7 @@ export function resolveAgentProfileFromModelDecision(
         ? 'plan'
         : decision.explicitNoWriteRequest === true
             ? (decision.intent === 'execute' ? 'explore' : decision.intent)
-            : decision.explicitExecutionRequest === true
-                ? 'execute'
-                : decision.intent;
+            : decision.intent;
     // A material unresolved choice is a hard read/plan boundary even when the
     // request also contains mutation verbs. Only a later user answer may admit
     // execution.
@@ -237,10 +242,9 @@ export function resolveAgentProfileFromModelDecision(
     // Multi-Agent is a runtime optimization. Automatic model routing may
     // recommend it, but only an explicit user request commits at admission;
     // broad tasks can still dispatch after repository-backed decomposition.
-    const selectedStrategy = selection.strategy === 'auto'
+    const strategy = selection.strategy === 'auto'
         ? (decision.explicitDelegationRequest === true ? 'multi' : 'single')
         : selection.strategy;
-    const strategy = intent === 'execute' ? selectedStrategy : 'single';
     const base = {
         selection,
         domain,
@@ -285,6 +289,12 @@ export function resolveAgentProfile(
             return !previousNoWrite && WRITE_INTENT_RE.test(previous);
         });
     const hasWriteIntent = !explicitNoWrite && (WRITE_INTENT_RE.test(request) || inheritedWriteIntent);
+    // The deterministic fallback cannot prove that a write request is design-complete.
+    // Fail into Plan rather than granting Execute from mutation keywords alone.
+    const fallbackWriteIntent: ResolvedAgentProfile['intent'] = MECHANICAL_WRITE_RE.test(request)
+        && !BROAD_TASK_RE.test(request)
+        ? 'execute'
+        : 'plan';
     let intent: ResolvedAgentProfile['intent'];
     if (selection.intent !== 'auto') {
         intent = selection.intent;
@@ -295,7 +305,7 @@ export function resolveAgentProfile(
     } else if (!hasWriteIntent && EXPLORE_INTENT_RE.test(request)) {
         intent = 'explore';
     } else {
-        intent = hasWriteIntent ? 'execute' : 'explore';
+        intent = hasWriteIntent ? fallbackWriteIntent : 'explore';
     }
 
     let strategy: ResolvedAgentProfile['strategy'];
@@ -305,7 +315,6 @@ export function resolveAgentProfile(
         const explicitMulti = MULTI_AGENT_RE.test(request);
         strategy = explicitMulti ? 'multi' : 'single';
     }
-    if (intent !== 'execute') strategy = 'single';
 
     const mode = resolveMode(domain, intent, strategy);
     const domainReason = selection.domain === 'auto'

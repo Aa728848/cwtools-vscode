@@ -84,7 +84,7 @@ function sanitizeMemoryEntry(raw: unknown): MemoryEntry | null {
     return {
         key: record.key,
         content: record.content,
-        domain: record.domain === 'general' || record.domain === 'paradox' ? record.domain : undefined,
+        domain: record.domain === 'general' || record.domain === 'paradox' || record.domain === 'hybrid' ? record.domain : undefined,
         priority: record.priority === 'high' || record.priority === 'low' ? record.priority : 'normal',
         source: typeof record.source === 'string' ? record.source : undefined,
         confidence: num(record.confidence),

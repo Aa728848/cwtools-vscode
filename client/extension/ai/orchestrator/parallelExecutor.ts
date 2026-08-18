@@ -349,7 +349,7 @@ export class ParallelExecutor {
                     runId: options.parentRunId,
                     threadId: options.topicId,
                     parentTaskId: previousTaskId,
-                    domain: options.domain,
+                    domain: options.domain === 'hybrid' ? 'paradox' : options.domain,
                     authorization: options.readOnlyFanout ? 'read_only' : 'workspace_write',
                     providerId: node.providerOverride ?? options.providerId,
                     model: node.modelOverride ?? options.model,

@@ -163,6 +163,7 @@ ${stylesheetLinks}
             <div class="model-menu-title">${t('Capability domain', '能力领域')}</div>
             <button class="composer-menu-item" data-profile-domain="paradox">${svgIconNoMargin('code')}<span>${t('Paradox / CWTools', 'Paradox / CWTools')}</span></button>
             <button class="composer-menu-item" data-profile-domain="general">${svgIconNoMargin('zap')}<span>${t('General coding', '通用编码')}</span></button>
+            <button class="composer-menu-item" data-profile-domain="hybrid">${svgIconNoMargin('layers')}<span>${t('Hybrid coding + CWTools', '混合编码 + CWTools')}</span></button>
         </div>
     </div>
     <div id="modelMenu" class="model-menu" aria-hidden="true">

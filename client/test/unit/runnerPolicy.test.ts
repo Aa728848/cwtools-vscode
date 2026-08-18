@@ -5,7 +5,6 @@ import {
     extendStageToolPoolWithSupport,
     getWorkflowStageSupportTools,
     initialToolStageForMode,
-    normalizeToolStageForMode,
     advanceToolStage,
     buildToolStageReminder,
     isExecutionActionTool,
@@ -62,31 +61,31 @@ describe('runnerPolicy', () => {
         expect(TOOL_REGISTRY.get('write_localisation')?.domain).to.equal('paradox');
     });
 
-    it('starts build runs with a narrow discovery tool stage', () => {
+    it('starts build runs at the writable tool stage', () => {
         const stage = initialToolStageForMode('build');
         const filtered = filterToolDefinitionsForStage(toolDefinitions, 'build', stage);
         const names = filtered.map(t => t.function.name);
-        expect(stage).to.equal('discovery');
+        expect(stage).to.equal('write');
         expect(names).to.include('select_tools');
         expect(names).to.include('read_file');
-        expect(names).to.include('query_workspace_index');
         expect(names).to.include('run_code');
-        expect(names).to.not.include('write_file');
-        expect(names).to.not.include('replace_lines');
+        expect(names).to.include('write_file');
+        expect(names).to.include('replace_lines');
+        expect(names).to.not.include('query_workspace_index');
         expect(filterToolDefinitionsForStage(toolDefinitions, 'build', stage, true)).to.have.lengthOf(toolDefinitions.length);
     });
 
-    it('keeps programmable Code Mode available throughout Paradox evidence stages', () => {
+    it('keeps programmable Code Mode available throughout Paradox stages', () => {
         const buildTools = filterToolDefinitionsForMode(registeredTools, 'build', { domain: 'paradox' });
-        for (const stage of ['discovery', 'evidence', 'validation', 'write', 'finalize'] as const) {
+        for (const stage of ['discovery', 'validation', 'write', 'finalize'] as const) {
             const names = filterToolDefinitionsForStage(buildTools, 'build', stage).map(tool => tool.function.name);
             expect(names, stage).to.include('run_code');
         }
     });
 
-    it('keeps structured user questions available during discovery and evidence', () => {
+    it('keeps structured user questions available during discovery and validation', () => {
         const buildTools = filterToolDefinitionsForMode(registeredTools, 'build', { domain: 'paradox' });
-        for (const stage of ['discovery', 'evidence'] as const) {
+        for (const stage of ['discovery', 'validation'] as const) {
             const names = filterToolDefinitionsForStage(buildTools, 'build', stage).map(tool => tool.function.name);
             expect(names, stage).to.include('ask_user_question');
         }
@@ -98,8 +97,8 @@ describe('runnerPolicy', () => {
 
     it('keeps deferred-tool selection reachable throughout every valid staged mode', () => {
         const stagesByMode = {
-            build: ['discovery', 'evidence', 'validation', 'write', 'finalize'],
-            plan: ['discovery', 'design', 'validation', 'write', 'finalize'],
+            build: ['discovery', 'validation', 'write', 'finalize'],
+            plan: ['discovery', 'validation', 'write', 'finalize'],
             explore: ['discovery', 'validation', 'write', 'finalize'],
             review: ['discovery', 'validation', 'write', 'finalize'],
             utility: ['discovery', 'validation', 'write', 'finalize'],
@@ -128,8 +127,8 @@ describe('runnerPolicy', () => {
             function: { name: 'mcp_cwtools_query_rules', description: '', parameters: {} },
         } as ToolDefinition;
         const stagesByMode = {
-            build: ['discovery', 'evidence', 'validation', 'write', 'finalize'],
-            plan: ['discovery', 'design', 'validation', 'finalize'],
+            build: ['discovery', 'validation', 'write', 'finalize'],
+            plan: ['discovery', 'validation', 'finalize'],
             explore: ['discovery', 'validation', 'finalize'],
             review: ['discovery', 'validation', 'finalize'],
         } as const;
@@ -228,8 +227,8 @@ describe('runnerPolicy', () => {
         expect(shouldAutoDiscloseExecutionTools('script', undefined, 'read_only')).to.equal(false);
     });
 
-    it('continues authorized execution across internal evidence stages without adding an approval stop', () => {
-        for (const stage of ['discovery', 'evidence', 'validation', 'write'] as const) {
+    it('continues authorized execution across internal stages without adding an approval stop', () => {
+        for (const stage of ['discovery', 'validation', 'write'] as const) {
             expect(shouldContinueAuthorizedExecution('build', stage, 'workspace_write', false), stage).to.equal(true);
         }
         expect(shouldContinueAuthorizedExecution('build', 'finalize', 'workspace_write', true)).to.equal(false);
@@ -277,22 +276,14 @@ describe('runnerPolicy', () => {
         expect(general).to.include('mcp_call');
     });
 
-    it('advances build stages only after successful evidence and write steps', () => {
-        expect(advanceToolStage('build', 'discovery', 'read_file', { success: true })).to.equal('evidence');
-        expect(advanceToolStage('build', 'evidence', 'query_rules', { success: true })).to.equal('validation');
+    it('advances build stages only after successful validation and write steps', () => {
+        expect(advanceToolStage('build', 'discovery', 'read_file', { success: true })).to.equal('validation');
         expect(advanceToolStage('build', 'validation', 'parse_pdx_fragment', { success: true })).to.equal('write');
         expect(advanceToolStage('build', 'write', 'edit_file', { success: false })).to.equal('validation');
         expect(advanceToolStage('build', 'write', 'edit_file', { success: true })).to.equal('finalize');
         expect(advanceToolStage('build', 'finalize', 'get_diagnostics', { success: true, hasValidationErrors: true })).to.equal('validation');
     });
 
-    it('maps persisted Build design checkpoints to the renamed evidence stage', () => {
-        expect(normalizeToolStageForMode('build', 'design')).to.equal('evidence');
-        expect(normalizeToolStageForMode('plan', 'design')).to.equal('design');
-        expect(advanceToolStage('build', 'design', 'query_rules', { success: true })).to.equal('validation');
-        expect(buildToolStageReminder('build', 'design', [])).to.include('Current build tool stage: evidence');
-        expect(filterToolDefinitionsForStage(toolDefinitions, 'plan', 'evidence')).to.deep.equal([]);
-    });
 
     it('describes the current stage with a deterministic tool list', () => {
         const reminder = buildToolStageReminder('build', 'validation', [toolDefinitions[3]!, toolDefinitions[1]!]);
@@ -302,17 +293,16 @@ describe('runnerPolicy', () => {
         expect(buildToolStageReminder('build', undefined, toolDefinitions)).to.equal('');
     });
 
-    it('advances ordinary Build evidence internally while keeping project writes out of design', () => {
-        expect(advanceToolStage('build', 'discovery', 'read_file', { success: true })).to.equal('evidence');
-        expect(advanceToolStage('build', 'evidence', 'read_file', { success: true })).to.equal('validation');
+    it('advances ordinary Build validation while keeping project writes out of read-only stages', () => {
+        expect(advanceToolStage('build', 'discovery', 'read_file', { success: true })).to.equal('validation');
         expect(advanceToolStage('build', 'validation', 'todo_write', { success: true })).to.equal('write');
 
-        const evidenceTools = filterToolDefinitionsForStage(registeredTools, 'build', 'evidence')
+        const validationTools = filterToolDefinitionsForStage(registeredTools, 'build', 'validation')
             .map(tool => tool.function.name);
-        expect(evidenceTools).to.not.include.members(['write_file', 'replace_lines', 'write_localisation']);
-        const planDesignTools = filterToolDefinitionsForStage(registeredTools, 'plan', 'design')
+        expect(validationTools).to.not.include.members(['write_file', 'replace_lines', 'write_localisation']);
+        const planValidationTools = filterToolDefinitionsForStage(registeredTools, 'plan', 'validation')
             .map(tool => tool.function.name);
-        expect(planDesignTools).to.not.include('write_localisation');
+        expect(planValidationTools).to.not.include('write_localisation');
     });
 
     it('stages plan, explore, and review without exposing project write tools', () => {
@@ -326,7 +316,7 @@ describe('runnerPolicy', () => {
             expect(names, `${mode} replace_lines`).to.not.include('replace_lines');
         }
 
-        expect(advanceToolStage('plan', 'discovery', 'read_file', { success: true })).to.equal('design');
+        expect(advanceToolStage('plan', 'discovery', 'read_file', { success: true })).to.equal('validation');
         expect(advanceToolStage('plan', 'validation', 'get_diagnostics', { success: true })).to.equal('finalize');
         expect(advanceToolStage('explore', 'discovery', 'read_file', { success: true })).to.equal('validation');
         expect(advanceToolStage('review', 'discovery', 'get_diagnostics', { success: true })).to.equal('validation');
@@ -339,7 +329,7 @@ describe('runnerPolicy', () => {
         expect(discoveryNames).to.include.members(['dispatch_agents', 'query_blackboard', 'merge_results']);
         expect(discoveryNames).to.not.include('write_localisation');
         expect(validateToolAccess('dispatch_agents', { mode: 'plan' }).allowed).to.equal(true);
-        expect(advanceToolStage('plan', 'discovery', 'dispatch_agents', { success: true })).to.equal('design');
+        expect(advanceToolStage('plan', 'discovery', 'dispatch_agents', { success: true })).to.equal('validation');
     });
 
     it('lets Explore mode fan out bounded read-only evidence work', () => {
@@ -380,7 +370,7 @@ describe('runnerPolicy', () => {
         const utility = filterToolDefinitionsForMode(toolDefinitions, 'utility').map(t => t.function.name);
         expect(utility).to.include.members(['read_file', 'write_file', 'run_command']);
         const utilityChild = filterToolDefinitionsForMode(toolDefinitions, 'utility', { useSlimPrompt: true }).map(t => t.function.name);
-        expect(utilityChild).to.include('run_command');
+        expect(utilityChild).to.not.include('run_command');
     });
 
     it('strictly removes every Paradox-only capability from all General Coding intents', () => {
@@ -437,6 +427,7 @@ describe('runnerPolicy', () => {
             mode: 'utility',
             domain: 'general',
             isSubAgent: true,
+            profileName: 'general-coder',
         }).allowed).to.equal(true);
         expect(validateToolAccess('run_command', {
             mode: 'build',
@@ -445,11 +436,10 @@ describe('runnerPolicy', () => {
         }).allowed).to.equal(false);
     });
 
-    it('uses discovery, write, and finalize stages for general coding', () => {
-        expect(initialToolStageForMode('utility')).to.equal('discovery');
-        const discovery = filterToolDefinitionsForStage(toolDefinitions, 'utility', 'discovery').map(t => t.function.name);
-        expect(discovery).to.include.members(['read_file', 'run_code']);
-        expect(discovery).to.not.include('write_file');
+    it('starts general coding at write and advances to finalize after edits', () => {
+        expect(initialToolStageForMode('utility')).to.equal('write');
+        const write = filterToolDefinitionsForStage(toolDefinitions, 'utility', 'write').map(t => t.function.name);
+        expect(write).to.include.members(['read_file', 'run_code', 'write_file']);
         expect(advanceToolStage('utility', 'discovery', 'read_file', { success: true })).to.equal('write');
         expect(advanceToolStage('utility', 'write', 'edit_file', { success: false })).to.equal('write');
         expect(advanceToolStage('utility', 'write', 'edit_file', { success: true })).to.equal('finalize');

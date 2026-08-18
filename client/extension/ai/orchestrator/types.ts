@@ -176,6 +176,17 @@ export interface AgentInstance {
 }
 
 /** Sub-Agent execution results */
+export interface ChildClarificationRequest {
+    questionId: string;
+    taskId: string;
+    question: string;
+    category: 'requirement' | 'scope' | 'risk' | 'environment' | 'other';
+    materiality: 'blocking' | 'important' | 'optional';
+    options?: string[];
+    repositoryEvidence?: string[];
+    recommendedDefault?: string;
+}
+
 export interface SubAgentResult {
     /** Corresponding task node ID */
     nodeId: string;
@@ -199,6 +210,8 @@ export interface SubAgentResult {
     clarification?: string;
     /** Optional preset answers (2-4) the parent agent/user can choose from. */
     clarificationOptions?: string[];
+    /** Structured child-to-parent mailbox entries. The parent deduplicates and asks the user once. */
+    clarificationRequests?: ChildClarificationRequest[];
     /** Files were written, but deterministic validation was still pending/stale. */
     validationPending?: boolean;
     /** The sub-Agent failed after touching files; changes were intentionally preserved for parent repair/inspection. */

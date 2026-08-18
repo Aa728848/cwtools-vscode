@@ -316,7 +316,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
     let isGenerating = false;
     let currentAssistantDiv: HTMLDivElement | null = null;
     let currentMode = 'build';
-    type ProfileDomain = 'auto' | 'paradox' | 'general';
+    type ProfileDomain = 'auto' | 'paradox' | 'general' | 'hybrid';
     type ProfileIntent = 'auto' | 'execute' | 'plan' | 'explore' | 'review';
     type ProfileStrategy = 'auto' | 'single' | 'multi';
     type AgentProfileSelection = {
@@ -330,7 +330,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
     function isAgentProfileSelection(value: unknown): value is AgentProfileSelection {
         if (!value || typeof value !== 'object') return false;
         const candidate = value as Partial<AgentProfileSelection>;
-        return ['auto', 'paradox', 'general'].includes(candidate.domain || '')
+        return ['auto', 'paradox', 'general', 'hybrid'].includes(candidate.domain || '')
             && ['auto', 'execute', 'plan', 'explore', 'review'].includes(candidate.intent || '')
             && ['auto', 'single', 'multi'].includes(candidate.strategy || '')
             && (candidate.profileName === undefined
@@ -341,7 +341,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         if (!isAgentProfileSelection(profile)) return;
         agentProfile = {
             ...profile,
-            domain: profile.domain === 'general' ? 'general' : 'paradox',
+            domain: profile.domain === 'general' || profile.domain === 'hybrid' ? profile.domain : 'paradox',
         };
         applyComposerModeLabels();
         renderComposerChips();
@@ -2261,7 +2261,9 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
     }
 
     function getProfileSummary(): string {
-        return agentProfile.domain === 'general' ? tr('General', '通用') : 'Paradox';
+        return agentProfile.domain === 'general'
+            ? tr('General', '通用')
+            : agentProfile.domain === 'hybrid' ? tr('Hybrid', '混合') : 'Paradox';
     }
 
     function applyComposerModeLabels(): void {
@@ -2858,7 +2860,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
     document.querySelectorAll<HTMLElement>('.composer-menu-item[data-profile-domain]').forEach(item => {
         item.addEventListener('click', () => {
             const domain = item.dataset.profileDomain;
-            if (domain === 'paradox' || domain === 'general') {
+            if (domain === 'paradox' || domain === 'general' || domain === 'hybrid') {
                 updateAgentDomain(domain);
                 setModeMenuOpen(false);
             }
@@ -5441,8 +5443,8 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
 
     function agentIntentLabel(intent: ResolvedAgentProfileView['intent']): string {
         return {
-            execute: tr('Execute', '执行'),
-            plan: tr('Plan', '计划'),
+            execute: tr('Execute (write now)', '执行（直接写入）'),
+            plan: tr('Plan (inspect and clarify)', '计划（调查与澄清）'),
             explore: tr('Explore', '探索'),
             review: tr('Review', '审查'),
         }[intent];
@@ -5478,7 +5480,11 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         } else if (resolved) {
             label.textContent = resolved.requiresUserDecision
                 ? tr('A user decision is required; execution remains blocked.', '需要用户敲定关键选择，本轮不会进入执行。')
-                : tr(`Selected ${agentIntentLabel(resolved.intent)} mode.`, `已选择${agentIntentLabel(resolved.intent)}模式。`);
+                : resolved.intent === 'execute'
+                    ? tr('Execute mode selected; writes may begin immediately.', '已选择执行模式，将直接进入可写执行。')
+                    : resolved.intent === 'plan'
+                        ? tr('Plan mode selected for pre-write inspection and clarification.', '已选择计划模式，先完成写入前调查与澄清。')
+                        : tr(`Selected ${agentIntentLabel(resolved.intent)} mode.`, `已选择${agentIntentLabel(resolved.intent)}模式。`);
         } else {
             label.textContent = tr('Task mode selected.', '任务模式判断完成。');
         }
@@ -5560,7 +5566,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
             summary.className = 'agent-routing-summary';
             const strategyLabel = resolved.strategy === 'multi'
                 ? tr('Multi-Agent', '多 Agent')
-                : tr('Single Agent', '单 Agent');
+                : tr('Adaptive parallelism', '按需并行');
             const sourceLabel = resolved.routingSource === 'model'
                 ? tr('Semantic routing', '语义路由')
                 : resolved.routingSource === 'manual'

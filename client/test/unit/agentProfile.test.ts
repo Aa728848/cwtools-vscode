@@ -9,6 +9,7 @@ import {
     resolveAgentProfileFromModelDecision,
     shouldUseSemanticAgentRouting,
 } from '../../extension/ai/agentProfile';
+import { agentProfileCatalog } from '../../extension/ai/runner/agentProfileCatalog';
 
 describe('agent profile', () => {
     it('validates all three runtime dimensions at the boundary', () => {
@@ -94,19 +95,25 @@ describe('agent profile', () => {
         });
     });
 
-    it('preserves a pinned domain and never uses multi-Agent for non-execution intents', () => {
+    it('preserves a pinned domain and keeps strategy orthogonal for non-execution intents', () => {
         expect(resolveAgentProfileFromModelDecision('review only', {
             domain: 'general', intent: 'auto', strategy: 'auto',
         }, {
-            intent: 'review', strategy: 'multi', requiresUserDecision: false, reason: '',
-        })).to.include({ domain: 'general', intent: 'review', strategy: 'single', mode: 'review' });
+            intent: 'review', strategy: 'multi', explicitDelegationRequest: true, requiresUserDecision: false, reason: '',
+        })).to.include({ domain: 'general', intent: 'review', strategy: 'multi', mode: 'review' });
         expect(resolveAgentProfileFromModelDecision('legacy plan', {
             domain: 'paradox', intent: 'plan', strategy: 'multi',
         }, {
             intent: 'execute', strategy: 'multi', requiresUserDecision: false, reason: '',
-        })).to.include({ domain: 'paradox', intent: 'plan', strategy: 'single', mode: 'plan' });
+        })).to.include({ domain: 'paradox', intent: 'plan', strategy: 'multi', mode: 'plan' });
         expect(resolveAgentProfile('Use multiple agents to review this repository without changes'))
-            .to.include({ intent: 'review', strategy: 'single', mode: 'review' });
+            .to.include({ intent: 'review', strategy: 'multi', mode: 'review' });
+    });
+
+    it('accepts Hybrid as an explicit capability domain', () => {
+        const resolved = resolveAgentProfile('inspect CWT while changing TypeScript', { domain: 'hybrid', intent: 'explore', strategy: 'single' });
+        expect(resolved).to.include({ domain: 'hybrid', intent: 'explore', mode: 'explore' });
+        expect(agentProfileCatalog.get('hybrid-agent')?.domain).to.equal('hybrid');
     });
 
     it('honors explicit dimensions while resolving Auto dimensions', () => {
@@ -117,9 +124,9 @@ describe('agent profile', () => {
         expect(resolved.schedulingState.profileName).to.equal('workspace-reviewer');
     });
 
-    it('resolves Auto independently for every turn', () => {
+    it('fails deterministic mutation fallback into Plan until semantic routing proves write-readiness', () => {
         expect(resolveAgentProfile('Explain this Python API').mode).to.equal('explore');
-        expect(resolveAgentProfile('Implement a new scripted effect').mode).to.equal('build');
+        expect(resolveAgentProfile('Implement a new scripted effect').mode).to.equal('plan');
         expect(resolveAgentProfile('Review the TypeScript cancellation logic').mode).to.equal('review');
     });
 
@@ -134,7 +141,7 @@ describe('agent profile', () => {
 
     it('keeps the previous domain for terse follow-up requests', () => {
         const resolved = resolveAgentProfile('把 23 替换为 X', undefined, { previousDomain: 'paradox' });
-        expect(resolved).to.include({ domain: 'paradox', intent: 'execute', mode: 'build' });
+        expect(resolved).to.include({ domain: 'paradox', intent: 'plan', mode: 'plan' });
     });
 
     it('inherits execute intent when a terse answer resolves a modification clarification', () => {
@@ -142,7 +149,7 @@ describe('agent profile', () => {
             previousDomain: 'paradox',
             previousUserRequests: ['把选中的 GFX_colony_type_capital 改成 GFX_colony_type_bureaucratic'],
         });
-        expect(resolved).to.include({ domain: 'paradox', intent: 'execute', strategy: 'single', mode: 'build' });
+        expect(resolved).to.include({ domain: 'paradox', intent: 'plan', strategy: 'single', mode: 'plan' });
 
         const routed = resolveAgentProfileFromModelDecision('只改一处', DEFAULT_AGENT_PROFILE, {
             intent: 'execute', strategy: 'single', explicitExecutionRequest: true, requiresUserDecision: false, reason: 'short answer confirms execution scope',
@@ -167,7 +174,7 @@ describe('agent profile', () => {
         const resolved = resolveAgentProfile('修复 TypeScript webview 的状态更新', undefined, {
             previousDomain: 'paradox',
         });
-        expect(resolved).to.include({ domain: 'paradox', intent: 'execute', mode: 'build' });
+        expect(resolved).to.include({ domain: 'paradox', intent: 'plan', mode: 'plan' });
     });
 
     it('honors explicit no-write constraints before write keywords', () => {
@@ -184,20 +191,20 @@ describe('agent profile', () => {
 
     it('defers broad execution requests to runtime dispatch admission', () => {
         const resolved = resolveAgentProfile('修复所有本地化错误');
-        expect(resolved).to.include({ domain: 'paradox', intent: 'execute', strategy: 'single', mode: 'build' });
+        expect(resolved).to.include({ domain: 'paradox', intent: 'plan', strategy: 'single', mode: 'plan' });
         expect(resolved.reason).to.contain('runtime dispatch evaluation requested');
     });
 
     it('uses one Paradox admission for narrow and broad writes unless delegation is explicit', () => {
-        expect(resolveAgentProfile('修复这个 CWT 诊断报错').mode).to.equal('build');
-        expect(resolveAgentProfile('Add one scripted_modifier to this Stellaris mod').mode).to.equal('build');
-        expect(resolveAgentProfile('Fix all localisation errors in this Stellaris mod').mode).to.equal('build');
+        expect(resolveAgentProfile('修复这个 CWT 诊断报错').mode).to.equal('plan');
+        expect(resolveAgentProfile('Add one scripted_modifier to this Stellaris mod').mode).to.equal('plan');
+        expect(resolveAgentProfile('Fix all localisation errors in this Stellaris mod').mode).to.equal('plan');
     });
 
     it('separates general coding from Paradox coordination', () => {
-        expect(resolveAgentProfile('Create a Python converter for this CSV file', profileForUserDomain('general')).mode).to.equal('utility');
-        expect(resolveAgentProfile('Use multiple agents to refactor this TypeScript API', profileForUserDomain('general')).mode).to.equal('orchestrator');
-        expect(resolveAgentProfile('Use multiple agents to repair this Stellaris event chain').mode).to.equal('script');
+        expect(resolveAgentProfile('Create a Python converter for this CSV file', profileForUserDomain('general')).mode).to.equal('plan');
+        expect(resolveAgentProfile('Use multiple agents to refactor this TypeScript API', profileForUserDomain('general')).mode).to.equal('plan');
+        expect(resolveAgentProfile('Use multiple agents to repair this Stellaris event chain').mode).to.equal('plan');
     });
 
     it('does not let request semantics override the selected Paradox domain', () => {
@@ -205,13 +212,13 @@ describe('agent profile', () => {
             activeFile: 'events/example.txt',
         });
         expect(resolved.domain).to.equal('paradox');
-        expect(resolved.mode).to.equal('build');
+        expect(resolved.mode).to.equal('plan');
     });
 
     it('uses Paradox for repository implementation work until the user selects General', () => {
         const resolved = resolveAgentProfile('Fix the TypeScript routing for the Paradox Agent webview');
         expect(resolved.domain).to.equal('paradox');
-        expect(resolved.mode).to.equal('build');
+        expect(resolved.mode).to.equal('plan');
     });
 
     it('keeps Paradox selected during semantic routing', () => {
@@ -253,18 +260,41 @@ describe('agent profile', () => {
             intent: 'execute', strategy: 'multi', explicitExecutionRequest: true, explicitDelegationRequest: true, requiresUserDecision: true, reason: 'the file format changes public behavior',
         });
         expect(routed).to.include({
-            intent: 'plan', strategy: 'single', mode: 'plan', requiresUserDecision: true, routingSource: 'model',
+            intent: 'plan', strategy: 'multi', mode: 'plan', requiresUserDecision: true, routingSource: 'model',
         });
         expect(routed.admission.authorization).to.equal('plan_write_only');
     });
 
-    it('enters Execute when semantic routing confirms the user asked to proceed', () => {
+    it('enters Execute only when semantic routing confirms the task is write-ready', () => {
         const routed = resolveAgentProfileFromModelDecision('方案没问题，就这么做', DEFAULT_AGENT_PROFILE, {
-            intent: 'plan', strategy: 'single', explicitExecutionRequest: true, requiresUserDecision: false,
-            reason: 'the user approved the plan and asked to carry it out',
+            intent: 'execute', strategy: 'single', explicitExecutionRequest: true, requiresUserDecision: false,
+            reason: 'the approved plan is write-ready',
         });
         expect(routed).to.include({ intent: 'execute', strategy: 'single', mode: 'build', requiresUserDecision: false });
-        expect(routed.admission.authorization).to.equal('workspace_write');
+        expect(routed.admission).to.include({ authorization: 'workspace_write', initialPhase: 'execute' });
+    });
+
+    it('keeps vague creative mutations in Plan despite an explicit request to modify now', () => {
+        const routed = resolveAgentProfileFromModelDecision(
+            '现在将 ship size 改成与灰鸽风暴类似的设计，这个船将作为一个领域变化成的特殊船',
+            DEFAULT_AGENT_PROFILE,
+            {
+                intent: 'plan', strategy: 'single', explicitExecutionRequest: true, requiresUserDecision: true,
+                reason: 'the target and meaning of the reference design require pre-write clarification',
+                confidence: 0.92,
+            },
+        );
+        expect(routed).to.include({ intent: 'plan', strategy: 'single', mode: 'plan', requiresUserDecision: true });
+        expect(routed.admission).to.include({ authorization: 'plan_write_only', initialPhase: 'plan' });
+    });
+
+    it('does not let execution wording override a router decision that pre-write planning remains', () => {
+        const routed = resolveAgentProfileFromModelDecision('立即实现这个新玩法', DEFAULT_AGENT_PROFILE, {
+            intent: 'plan', strategy: 'single', explicitExecutionRequest: true, requiresUserDecision: false,
+            reason: 'repository investigation is still required to determine the implementation',
+        });
+        expect(routed).to.include({ intent: 'plan', mode: 'plan' });
+        expect(routed.admission).to.include({ authorization: 'plan_write_only', initialPhase: 'plan' });
     });
 
     it('uses semantic routing whenever task intent is automatic', () => {

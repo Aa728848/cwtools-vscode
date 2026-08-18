@@ -17,6 +17,7 @@ import {
     validateRunCodeProgram,
 } from '../../extension/ai/tools/runCode';
 import { TOOL_REGISTRY } from '../../extension/ai/tools/registry';
+import { validateToolAccess } from '../../extension/ai/tools/permissions';
 import {
     validateNodeModelSelection,
     mapTaskModelSelection,
@@ -61,10 +62,14 @@ describe('run_code registry classification', () => {
         expect(entry!.isWrite).to.be.false;
     });
 
-    it('is admitted to writer modes but never slim sub-agents', () => {
+    it('is admitted to writer and read-only modes with child authority inherited from nested tools', () => {
         expect(entry!.allowedModes.has('build')).to.be.true;
         expect(entry!.allowedModes.has('utility')).to.be.true;
-        expect(entry!.allowSubAgent).to.be.false;
+        expect(entry!.allowedModes.has('plan')).to.be.true;
+        expect(entry!.allowSubAgent).to.be.true;
+        expect(validateToolAccess('run_code', { mode: 'explore', domain: 'paradox', isSubAgent: true, profileName: 'explore' }).allowed).to.be.true;
+        expect(validateToolAccess('run_command', { mode: 'build', domain: 'paradox', isSubAgent: true, profileName: 'paradox-coder' }).allowed).to.be.false;
+        expect(validateToolAccess('run_command', { mode: 'utility', domain: 'general', isSubAgent: true, profileName: 'general-coder' }).allowed).to.be.true;
     });
 });
 

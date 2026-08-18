@@ -30,11 +30,13 @@ export function admissionFromResolvedProfile(profile: Pick<
         : profile.intent === 'plan'
             ? 'plan_write_only'
             : 'read_only');
-    const initialPhase: AdmissionDecision['initialPhase'] = profile.intent === 'plan'
-        ? 'plan'
-        : profile.intent === 'review'
-            ? 'verify'
-            : 'inspect';
+    const initialPhase: AdmissionDecision['initialPhase'] = profile.intent === 'execute'
+        ? 'execute'
+        : profile.intent === 'plan'
+            ? 'plan'
+            : profile.intent === 'review'
+                ? 'verify'
+                : 'inspect';
     return {
         domainProfile: profile.domain,
         authorization,
@@ -88,11 +90,9 @@ export function schedulingStateFromLegacyMode(
         ? 'plan'
         : mode === 'review' || mode === 'script_reviewer'
             ? 'verify'
-            : mode === 'build' || mode === 'utility'
-                ? 'inspect'
-                : mode === 'orchestrator' || mode === 'script'
-                    ? 'inspect'
-                    : 'inspect';
+            : ['build', 'utility', 'orchestrator', 'script', 'gui_expert', 'loc_translator', 'loc_writer'].includes(mode)
+                ? 'execute'
+                : 'inspect';
     return {
         profileName: profileNameForLegacyMode(mode, domain),
         domainProfile: domain,
@@ -188,10 +188,9 @@ export function phaseForToolStage(
 ): AgentRunPhase {
     switch (stage) {
         case 'discovery':
-        case 'evidence':
-            return current === 'plan' ? 'plan' : 'inspect';
-        case 'design':
-            return 'plan';
+            // Planning owns all pre-write investigation, clarification, and design.
+            // Once Execute is admitted, read-oriented tool calls must not downgrade it.
+            return current;
         case 'validation':
             return current === 'execute' ? 'verify' : current;
         case 'write':
@@ -201,21 +200,6 @@ export function phaseForToolStage(
         default:
             return current;
     }
-}
-
-export function shouldEnterPlanFromTodos(
-    state: AgentSchedulingState,
-    todos: readonly unknown[],
-): boolean {
-    if (state.phase !== 'inspect' || state.authorization !== 'workspace_write' || todos.length < 3) {
-        return false;
-    }
-    const openTodos = todos.filter(todo => {
-        if (!todo || typeof todo !== 'object') return false;
-        const status = (todo as Record<string, unknown>).status;
-        return status === 'pending' || status === 'in_progress';
-    });
-    return openTodos.length >= 2;
 }
 
 export interface DispatchCandidate {
@@ -342,17 +326,22 @@ export function evaluateDispatchAdmission(
         && options.availableTokenBudget < tasks.length * 2_000
         ? 4
         : 0;
+    const hasDependencyIsolation = tasks.some(task => (task.dependencies?.length ?? 0) > 0);
     const score = independent * 2
         + Math.min(3, specialistRoles)
         + testable
-        + (options.explicitDelegation ? 3 : 0)
-        - tasks.length
+        + (hasDependencyIsolation ? 2 : 0)
+        + (options.explicitDelegation ? 6 : 0)
+        - Math.max(0, tasks.length - 4)
         - budgetPenalty;
     const threshold = options.minimumScore ?? 2;
+    // User-requested delegation bypasses only optimization scoring; every safety
+    // rejection above and the minimum token budget remain authoritative.
+    const accepted = options.explicitDelegation === true || score >= threshold;
     return {
-        accepted: score >= threshold,
+        accepted,
         score,
-        reason: score >= threshold
+        reason: accepted
             ? `Dispatch admitted with ${independent} independent tasks and score ${score}.`
             : `Dispatch benefit score ${score} is below threshold ${threshold}; continue with one Agent.`,
         conflicts: [],
@@ -432,13 +421,13 @@ function profileNameForAdmission(admission: AdmissionDecision): string {
     if (admission.authorization === 'read_only') {
         return admission.initialPhase === 'verify' ? 'reviewer' : 'explore';
     }
-    return admission.domainProfile === 'paradox' ? 'paradox-agent' : 'general-agent';
+    return admission.domainProfile === 'paradox' ? 'paradox-agent' : admission.domainProfile === 'hybrid' ? 'hybrid-agent' : 'general-agent';
 }
 
 function profileNameForLegacyMode(mode: AgentMode, domain: AgentRuntimeDomain): string {
     if (mode === 'review' || mode === 'script_reviewer') return 'reviewer';
     if (mode === 'explore' || mode === 'general') return 'explore';
-    return domain === 'paradox' ? 'paradox-agent' : 'general-agent';
+    return domain === 'paradox' ? 'paradox-agent' : domain === 'hybrid' ? 'hybrid-agent' : 'general-agent';
 }
 
 function schedulingOverlays(phase: AgentRunPhase, dispatch: AgentDispatchMode): string[] {

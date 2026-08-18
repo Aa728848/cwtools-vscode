@@ -24,6 +24,8 @@ export interface RuntimeAgentProfile {
     tools?: string[];
     disallowedTools?: string[];
     subagents?: string[];
+    /** Declarative child capability exceptions. Web remains denied by the registry. */
+    subagentCapabilities?: { runCode?: boolean; command?: boolean };
     modelPreference?: 'primary' | 'secondary';
     summaryPolicy?: AgentSummaryPolicy;
     override?: boolean;
@@ -59,6 +61,14 @@ const BUILTIN_PROFILES: RuntimeAgentProfile[] = [
         subagents: ['utility', 'explore', 'plan', 'review'],
     },
     {
+        name: 'hybrid-agent',
+        description: 'General workspace writer with Paradox/CWTools semantic read capabilities.',
+        domain: 'hybrid',
+        authorizationCeiling: 'workspace_write',
+        tools: ['*'],
+        subagents: ['utility', 'build', 'explore', 'plan', 'review'],
+    },
+    {
         name: 'paradox-agent',
         description: 'Paradox/CWTools Agent with semantic and workspace capabilities.',
         domain: 'paradox',
@@ -70,7 +80,8 @@ const BUILTIN_PROFILES: RuntimeAgentProfile[] = [
         name: 'explore',
         description: 'Read-only repository and semantic exploration.',
         authorizationCeiling: 'read_only',
-        tools: ['ask_user_question', 'select_tools', 'read_file', 'list_directory', 'glob_files', 'grep', 'query_*', 'search_*', 'get_*', 'web_*'],
+        tools: ['ask_user_question', 'select_tools', 'run_code', 'read_file', 'list_directory', 'glob_files', 'grep', 'query_*', 'search_*', 'get_*', 'web_*'],
+        subagentCapabilities: { runCode: true },
         disallowedTools: ['write_*', 'edit_file', 'replace_lines', 'run_command', 'git_ops', 'dispatch_agents'],
         summaryPolicy: {
             minCharacters: 160,
@@ -82,7 +93,8 @@ const BUILTIN_PROFILES: RuntimeAgentProfile[] = [
         name: 'reviewer',
         description: 'Read-only verification and review Agent.',
         authorizationCeiling: 'read_only',
-        tools: ['ask_user_question', 'select_tools', 'read_file', 'glob_files', 'grep', 'query_*', 'get_*', 'validate_*', 'compare_*', 'git_ops'],
+        tools: ['ask_user_question', 'select_tools', 'run_code', 'read_file', 'glob_files', 'grep', 'query_*', 'get_*', 'validate_*', 'compare_*', 'git_ops'],
+        subagentCapabilities: { runCode: true },
         disallowedTools: ['write_*', 'edit_file', 'replace_lines', 'dispatch_agents'],
         summaryPolicy: {
             minCharacters: 200,
@@ -96,6 +108,7 @@ const BUILTIN_PROFILES: RuntimeAgentProfile[] = [
         domain: 'general',
         authorizationCeiling: 'workspace_write',
         tools: ['*'],
+        subagentCapabilities: { runCode: true, command: true },
         summaryPolicy: {
             minCharacters: 240,
             requiredSections: ['summary', 'changedFiles', 'verification', 'unresolved'],
@@ -108,6 +121,7 @@ const BUILTIN_PROFILES: RuntimeAgentProfile[] = [
         domain: 'paradox',
         authorizationCeiling: 'workspace_write',
         tools: ['*'],
+        subagentCapabilities: { runCode: true },
         summaryPolicy: {
             minCharacters: 240,
             requiredSections: ['summary', 'changedFiles', 'verification', 'unresolved'],
@@ -126,7 +140,7 @@ function profileValidationError(profile: RuntimeAgentProfile): string | undefine
     if (profile.instructions !== undefined && (typeof profile.instructions !== 'string' || profile.instructions.length > 32_000)) {
         return `${profile.name}: instructions exceed 32000 characters`;
     }
-    if (profile.domain !== undefined && profile.domain !== 'general' && profile.domain !== 'paradox') {
+    if (profile.domain !== undefined && profile.domain !== 'general' && profile.domain !== 'paradox' && profile.domain !== 'hybrid') {
         return `${profile.name}: invalid capability domain`;
     }
     if (AUTHORITY_RANK[profile.authorizationCeiling] === undefined) {
@@ -251,8 +265,9 @@ export class AgentProfileCatalog {
         const readOnly = admission.authorization === 'read_only';
         const name = readOnly
             ? (admission.initialPhase === 'verify' ? 'reviewer' : 'explore')
-            : admission.domainProfile === 'paradox' ? 'paradox-agent' : 'general-agent';
-        return this.get(name) ?? this.get(admission.domainProfile === 'paradox' ? 'paradox-agent' : 'general-agent')!;
+            : admission.domainProfile === 'paradox' ? 'paradox-agent' : admission.domainProfile === 'hybrid' ? 'hybrid-agent' : 'general-agent';
+        const fallback = admission.domainProfile === 'paradox' ? 'paradox-agent' : admission.domainProfile === 'hybrid' ? 'hybrid-agent' : 'general-agent';
+        return this.get(name) ?? this.get(fallback)!;
     }
 
     subscribe(listener: (sourceId: string) => void): () => void {
@@ -357,7 +372,7 @@ export class ToolActivationService {
                 ? scheduling.phase === 'verify' || profile.name === 'reviewer' ? 'review' : 'explore'
                 : authorization === 'plan_write_only' || scheduling.phase === 'plan'
                     ? 'plan'
-                    : scheduling.domainProfile === 'general' ? 'utility' : 'build';
+                    : scheduling.domainProfile === 'paradox' ? 'build' : 'utility';
         const activated: string[] = registered.filter(name =>
             evaluateEffectiveToolPolicy(name, {
                 mode: effectiveMode,

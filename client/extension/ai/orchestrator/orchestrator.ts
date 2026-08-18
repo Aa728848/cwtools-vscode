@@ -625,6 +625,9 @@ export class Orchestrator {
             model,
             reasoningEffort: taskNode.reasoningEffort ?? orchestratorOptions.reasoningEffort,
             mode: profile.mode,
+            agentProfileName: profile.mode === 'utility' ? 'general-coder'
+                : profile.mode === 'review' || profile.mode === 'script_reviewer' ? 'reviewer'
+                    : profile.mode === 'explore' || profile.mode === 'plan' ? 'explore' : 'paradox-coder',
             // The parent already approved and decomposed this Execute task.
             // Staged writer roles start with write tools visible and never reopen
             // the main-Agent design/approval lifecycle.
@@ -981,6 +984,16 @@ export class Orchestrator {
                     needsClarification: true,
                     clarification,
                     clarificationOptions: clarificationDetails.options,
+                    clarificationRequests: [{
+                        questionId: `clarify_${taskNode.id}`,
+                        taskId: taskNode.id,
+                        question: clarification,
+                        category: 'requirement',
+                        materiality: 'blocking',
+                        ...(clarificationDetails.options?.length ? { options: clarificationDetails.options } : {}),
+                        repositoryEvidence: taskNode.contextFiles?.slice(0, 8),
+                        recommendedDefault: clarificationDetails.options?.[0],
+                    }],
                     preservedAfterFailure: preservedFiles.length > 0,
                 };
             }

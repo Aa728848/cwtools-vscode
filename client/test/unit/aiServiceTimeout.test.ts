@@ -1,4 +1,9 @@
 import { expect } from 'chai';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
+
+const ONE_PIXEL_PNG_BASE64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=';
 
 describe('AIService request timeout policy', () => {
     it('normalizes missing and invalid request timeouts to 20 minutes', () => {
@@ -283,6 +288,40 @@ describe('AIService OpenAI Responses payload', () => {
         }]);
         expect(payload.reasoning).to.deep.equal({ effort: 'max', summary: 'auto' });
         expect(payload).to.not.have.property('max_output_tokens');
+    });
+
+    it('enables the native Responses image_generation tool for explicit image requests', () => {
+        const { AIService } = loadAIService();
+        const service = new AIService({ secrets: {} } as any) as any;
+
+        const payload = service.buildOpenAIResponsesPayload({
+            model: 'gpt-5.6-sol',
+            messages: [{ role: 'user', content: '$imagegen 生成一张像素风星舰图标' }],
+        }, {
+            fastPath: true,
+            codexCompatibility: true,
+        });
+
+        expect(payload.tools).to.deep.equal([{ type: 'image_generation' }]);
+        expect(payload.tool_choice).to.equal('auto');
+        expect(payload.parallel_tool_calls).to.equal(true);
+    });
+
+    it('does not keep image_generation enabled from older user turns', () => {
+        const { AIService } = loadAIService();
+        const service = new AIService({ secrets: {} } as any) as any;
+
+        const payload = service.buildOpenAIResponsesPayload({
+            model: 'gpt-5.6-sol',
+            messages: [
+                { role: 'user', content: '$imagegen icon' },
+                { role: 'assistant', content: '![Generated image](C:/tmp/icon.png)' },
+                { role: 'user', content: 'Thanks, now explain the prompt.' },
+            ],
+        }, { fastPath: true, codexCompatibility: true });
+
+        expect(payload).to.not.have.property('tools');
+        expect(payload).to.not.have.property('tool_choice');
     });
 
     it('refreshes ChatGPT OAuth once after a Codex Responses 401', async () => {
@@ -578,6 +617,47 @@ describe('AIService OpenAI Responses payload', () => {
 
         expect(response.choices[0].message.content).to.equal('I cannot help with that.');
         expect(response.choices[0].message.responses_output_items).to.deep.equal(output);
+    });
+
+    it('persists Responses image_generation_call results and redacts base64 from replay items', async () => {
+        const { AIService } = loadAIService();
+        const storageRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'cwtools-ai-images-'));
+        const service = new AIService({
+            secrets: {},
+            globalStorageUri: { fsPath: storageRoot },
+        } as any) as any;
+        const output = [{
+            type: 'image_generation_call',
+            id: 'ig_test',
+            result: ONE_PIXEL_PNG_BASE64,
+            output_format: 'png',
+        }];
+        service.fetchWithRetry = async () => ({
+            ok: true,
+            json: async () => ({ id: 'resp_image', model: 'gpt-5.6-sol', output, usage: {} }),
+        });
+
+        try {
+            const response = await service.callOpenAIResponses(
+                'https://api.openai.com/v1',
+                'test-key',
+                { model: 'gpt-5.6-sol', messages: [{ role: 'user', content: '$imagegen icon' }] },
+                'custom',
+                new AbortController(),
+            );
+
+            const content = response.choices[0].message.content as string;
+            const imagePath = content.match(/!\[Generated image\]\(([^)]+)\)/)?.[1];
+            expect(imagePath).to.be.a('string');
+            expect(fs.existsSync(imagePath!)).to.equal(true);
+            expect(response.choices[0].message.responses_output_items![0]).to.deep.equal({
+                type: 'image_generation_call',
+                id: 'ig_test',
+                output_format: 'png',
+            });
+        } finally {
+            fs.rmSync(storageRoot, { recursive: true, force: true });
+        }
     });
 
     it('retries OpenAI Responses without summaries when account verification blocks them', async () => {

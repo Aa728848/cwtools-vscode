@@ -2071,6 +2071,37 @@ describe('agent tool topic artifacts', () => {
         expect(handler.isReadOnlyRunCommand('Select-String -Path "common/*.txt" -Pattern "planet" | Set-Content out.txt')).to.equal(false);
     });
 
+    it('declares platform-specific run_command shells in the model-visible schema', () => {
+        const tool = TOOL_DEFINITIONS.find(def => def.function.name === 'run_command')!;
+        const shell = (tool.function.parameters as any).properties.shell;
+
+        expect(shell.enum).to.deep.equal(['auto', 'sh', 'bash', 'pwsh', 'powershell']);
+        expect(shell.description).to.include('sh/bash are valid on macOS/Linux only');
+        expect(shell.description).to.include('pwsh/powershell are valid on Windows only');
+    });
+
+    it('rejects explicit run_command shells that do not match the host platform', async () => {
+        const handler = new ExternalToolHandler({ workspaceRoot });
+        const shell = process.platform === 'win32' ? 'bash' : 'pwsh';
+        let permissionRequested = false;
+
+        const result = await handler.runCommand({
+            command: 'echo ok',
+            shell: shell as any,
+            timeoutMs: 1000,
+        }, {
+            onPermissionRequest: async () => {
+                permissionRequested = true;
+                return true;
+            },
+        } as any);
+
+        expect(permissionRequested).to.equal(false);
+        expect(result.exitCode).to.equal(1);
+        expect(result.stderr).to.include('Blocked:');
+        expect(result.stderr).to.include(process.platform === 'win32' ? 'macOS/Linux' : 'Windows');
+    });
+
     it('does not request permission for read-only run_command invocations', async () => {
         const handler = new ExternalToolHandler({ workspaceRoot });
         let permissionRequested = false;

@@ -8,6 +8,8 @@
 
 import * as vs from 'vscode';
 import * as crypto from 'crypto';
+import * as fs from 'fs';
+import * as path from 'path';
 import type {
     ChatCompletionRequest,
     ChatCompletionResponse,
@@ -61,6 +63,8 @@ const DEFAULT_CHAT_COMPLETION_TIMEOUT_MS = 20 * 60 * 1000;
 const MIN_CHAT_COMPLETION_TIMEOUT_MS = 60 * 1000;
 const MAX_CHAT_COMPLETION_TIMEOUT_MS = 60 * 60 * 1000;
 const CHAT_COMPLETION_USAGE_TRAILER_GRACE_MS = 1500;
+const RESPONSES_IMAGE_GENERATION_INTENT =
+    /(\$imagegen\b|(?:生成|创建|绘制|画|制作|做).{0,16}(?:图片|图像|插画|海报|头像|图标|壁纸|照片)|(?:图片|图像|插画|海报|头像|图标|壁纸|照片).{0,16}(?:生成|创建|绘制|画|制作|做)|\b(?:generate|create|make|draw|render)\b.{0,48}\b(?:image|picture|illustration|poster|icon|wallpaper|logo|photo)\b)/i;
 
 interface ToolCallDeltaMetadata {
     id?: string;
@@ -1404,13 +1408,17 @@ export class AIService {
                 include: ['reasoning.encrypted_content'],
             } : {}),
         };
-        if (request.tools && request.tools.length > 0) {
-            payload.tools = request.tools.map(t => ({
+        const tools: Array<Record<string, unknown>> = (request.tools ?? []).map(t => ({
                 type: 'function',
                 name: t.function.name,
                 description: t.function.description,
                 parameters: t.function.parameters,
-            }));
+        }));
+        if (options?.fastPath && this.shouldEnableResponsesImageGeneration(request)) {
+            tools.push({ type: 'image_generation' });
+        }
+        if (tools.length > 0) {
+            payload.tools = tools;
             payload.tool_choice = 'auto';
             if (options?.fastPath) payload.parallel_tool_calls = true;
         }
@@ -1428,6 +1436,17 @@ export class AIService {
                 .slice(0, 32)}`;
         }
         return Object.fromEntries(Object.entries(payload).filter(([, value]) => value !== undefined));
+    }
+
+    private shouldEnableResponsesImageGeneration(request: ChatCompletionRequest): boolean {
+        const record = request as Record<string, unknown>;
+        if (record.responses_image_generation === true || record.image_generation === true) return true;
+        for (let i = request.messages.length - 1; i >= 0; i--) {
+            const message = request.messages[i]!;
+            if (message.role !== 'user') continue;
+            return RESPONSES_IMAGE_GENERATION_INTENT.test(this.messageContentToText(message.content));
+        }
+        return false;
     }
 
     private toResponsesInput(messages: ChatMessage[], omitSystem = false): Array<Record<string, unknown>> {
@@ -1675,6 +1694,23 @@ export class AIService {
                 if (typeof event.arguments === 'string') call.arguments = event.arguments;
                 return;
             }
+            if (type === 'response.image_generation_call.completed' || type === 'response.image_generation_call.done') {
+                const index = typeof event.output_index === 'number'
+                    ? event.output_index
+                    : streamedOutputItems.size;
+                const result = event.result ?? event.image_b64 ?? event.b64_json;
+                streamedOutputItems.set(index, {
+                    ...(streamedOutputItems.get(index) ?? {}),
+                    type: 'image_generation_call',
+                    ...(typeof event.item_id === 'string' ? { id: event.item_id } : {}),
+                    ...(typeof result === 'string' ? { result } : {}),
+                    ...(typeof event.output_format === 'string' ? { output_format: event.output_format } : {}),
+                    ...(typeof event.size === 'string' ? { size: event.size } : {}),
+                    ...(typeof event.quality === 'string' ? { quality: event.quality } : {}),
+                    ...(event.usage ? { usage: event.usage } : {}),
+                });
+                return;
+            }
             if (type === 'response.completed' || type === 'response.incomplete') {
                 finalResponse = event.response ?? responseMeta;
                 return;
@@ -1757,6 +1793,7 @@ export class AIService {
         const outputItems: any[] = Array.isArray(data.output) ? data.output : [];
         const contentParts: string[] = [];
         const toolCalls: NonNullable<ChatMessage['tool_calls']> = [];
+        const generatedImageMarkdown: string[] = [];
 
         const hasAggregateOutputText = typeof data.output_text === 'string' && data.output_text;
         if (hasAggregateOutputText) {
@@ -1783,12 +1820,17 @@ export class AIService {
                         arguments: typeof item.arguments === 'string' ? item.arguments : JSON.stringify(item.arguments ?? {}),
                     },
                 });
+            } else if (item?.type === 'image_generation_call') {
+                const imagePath = this.persistResponsesGeneratedImage(item, data.id, generatedImageMarkdown.length);
+                if (imagePath) generatedImageMarkdown.push(`![Generated image](${imagePath})`);
             }
         }
 
         const text = textOverride ?? contentParts.join('');
         if (!text && typeof data.refusal === 'string') contentParts.push(data.refusal);
-        const finalText = text || contentParts.join('');
+        const finalText = [text || contentParts.join(''), ...generatedImageMarkdown]
+            .filter(Boolean)
+            .join('\n\n');
         const effectiveToolCalls = toolCallsOverride ?? toolCalls;
         const usage = data.usage ?? {};
         const promptTokens = usage.input_tokens ?? usage.prompt_tokens ?? 0;
@@ -1806,7 +1848,7 @@ export class AIService {
                     content: finalText || null,
                     ...(effectiveToolCalls.length > 0 ? { tool_calls: effectiveToolCalls } : {}),
                     ...(outputItems.length > 0
-                        ? { responses_output_items: JSON.parse(JSON.stringify(outputItems)) as Array<Record<string, unknown>> }
+                        ? { responses_output_items: this.redactResponsesOutputItemsForReplay(outputItems) }
                         : {}),
                 },
                 finish_reason: effectiveToolCalls.length > 0 ? 'tool_calls' : (data.status === 'incomplete' ? 'length' : 'stop'),
@@ -1819,6 +1861,69 @@ export class AIService {
                 cache_creation_tokens: extractUsageCacheCreationTokens(usage, promptTokens, cachedTokens),
             },
         } as ChatCompletionResponse;
+    }
+
+    private persistResponsesGeneratedImage(item: Record<string, unknown>, responseId: unknown, index: number): string | undefined {
+        const rawBase64 = typeof item.result === 'string'
+            ? item.result
+            : typeof item.b64_json === 'string'
+            ? item.b64_json
+            : undefined;
+        if (!rawBase64) return undefined;
+        const normalizedBase64 = rawBase64.replace(/\s+/g, '');
+        if (!/^[A-Za-z0-9+/=]+$/.test(normalizedBase64)) return undefined;
+        try {
+            const buffer = Buffer.from(normalizedBase64, 'base64');
+            if (buffer.length === 0) return undefined;
+            const outputFormat = typeof item.output_format === 'string' ? item.output_format : 'png';
+            const extension = this.responsesImageExtension(outputFormat);
+            const idPart = this.safeFileName(typeof item.id === 'string' && item.id
+                ? item.id
+                : typeof responseId === 'string' && responseId
+                ? responseId
+                : crypto.randomUUID());
+            const dir = this.responsesGeneratedImageDir();
+            fs.mkdirSync(dir, { recursive: true });
+            const filePath = path.join(dir, `${idPart}-${index + 1}.${extension}`);
+            fs.writeFileSync(filePath, buffer, { mode: 0o600 });
+            return path.resolve(filePath).replace(/\\/g, '/');
+        } catch (error) {
+            ErrorReporter.warn(SOURCE.AI_SERVICE, 'Failed to persist Responses generated image', error);
+            return undefined;
+        }
+    }
+
+    private responsesGeneratedImageDir(): string {
+        const extensionContext = this.context as vs.ExtensionContext & {
+            globalStoragePath?: string;
+        };
+        const storageRoot = extensionContext.globalStorageUri?.fsPath
+            ?? extensionContext.globalStoragePath
+            ?? path.join(process.cwd(), '.cwtools-ai');
+        return path.join(storageRoot, 'ai-generated-images');
+    }
+
+    private responsesImageExtension(outputFormat: string): 'png' | 'webp' | 'jpg' {
+        const normalized = outputFormat.trim().toLowerCase();
+        if (normalized === 'webp') return 'webp';
+        if (normalized === 'jpeg' || normalized === 'jpg') return 'jpg';
+        return 'png';
+    }
+
+    private safeFileName(value: string): string {
+        return value.replace(/[^a-z0-9_.-]+/gi, '_').replace(/^_+|_+$/g, '').slice(0, 80) || 'image';
+    }
+
+    private redactResponsesOutputItemsForReplay(outputItems: any[]): Array<Record<string, unknown>> {
+        return outputItems.map(item => {
+            const clone = JSON.parse(JSON.stringify(item)) as Record<string, unknown>;
+            if (clone?.type === 'image_generation_call') {
+                delete clone.result;
+                delete clone.b64_json;
+                delete clone.partial_image_b64;
+            }
+            return clone;
+        });
     }
 
     private buildGeminiUrl(endpoint: string, model: string, stream = false): string {

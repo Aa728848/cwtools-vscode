@@ -2567,6 +2567,7 @@ export type PermissionDecision = 'accept' | 'acceptForSession' | 'decline' | 'ca
 
 export interface PermissionRequestPreflight {
     command?: string;
+    shell?: 'auto' | 'sh' | 'bash' | 'pwsh' | 'powershell';
     cwd?: string;
     classification?: string[];
     riskLevel?: 0 | 1 | 2 | 3;

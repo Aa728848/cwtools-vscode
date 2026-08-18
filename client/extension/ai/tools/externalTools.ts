@@ -70,6 +70,25 @@ const COMMAND_TEMP_SCRIPT_NAME_PATTERN = /^(?:agent_helper|helper|tmp|temp|scrat
 const COMMAND_STDOUT_MAX_CHARS = 4000;
 const COMMAND_STDERR_MAX_CHARS = 2000;
 const COMMAND_PROCESS_KILL_GRACE_MS = 1500;
+type RunCommandShell = 'auto' | 'sh' | 'bash' | 'pwsh' | 'powershell';
+
+function normalizeRunCommandShell(value: unknown): RunCommandShell {
+    return value === 'sh' || value === 'bash' || value === 'pwsh' || value === 'powershell'
+        ? value
+        : 'auto';
+}
+
+function validateRunCommandShellPlatform(shell: RunCommandShell, platform: NodeJS.Platform): string | undefined {
+    if (shell === 'auto') return undefined;
+    if (platform === 'win32') {
+        return shell === 'sh' || shell === 'bash'
+            ? `${shell} is available for run_command only on macOS/Linux. On Windows use shell=auto or shell=pwsh/powershell.`
+            : undefined;
+    }
+    return shell === 'pwsh' || shell === 'powershell'
+        ? `${shell} is available for run_command only on Windows. On macOS/Linux use shell=auto, shell=sh, or shell=bash.`
+        : undefined;
+}
 
 export class HeadTailTextBuffer {
     private head = '';
@@ -1021,7 +1040,7 @@ export class ExternalToolHandler {
         };
     }
 
-    async runCommand(args: { command: string; cwd?: string; timeoutMs?: number; background?: boolean; requestEscalation?: boolean; unsandboxed?: boolean; executionMode?: 'captured' | 'terminal'; networkAccess?: boolean; networkHosts?: string[] }, context?: import('../types').AgentToolContext): Promise<{
+    async runCommand(args: { command: string; shell?: RunCommandShell; cwd?: string; timeoutMs?: number; background?: boolean; requestEscalation?: boolean; unsandboxed?: boolean; executionMode?: 'captured' | 'terminal'; networkAccess?: boolean; networkHosts?: string[] }, context?: import('../types').AgentToolContext): Promise<{
         stdout: string;
         stderr: string;
         exitCode: number;
@@ -1036,6 +1055,11 @@ export class ExternalToolHandler {
         // Approval behavior is mode-agnostic: every mode shares the same
         // safe-command auto-approval, learned rules, and approval boundary.
         const topicId = context?.runnerOptions?.topicId || 'default';
+        const requestedShell = normalizeRunCommandShell(args.shell);
+        const shellPlatformError = validateRunCommandShellPlatform(requestedShell, process.platform);
+        if (shellPlatformError) {
+            return { stdout: '', stderr: `Blocked: ${shellPlatformError}`, exitCode: 1 };
+        }
         args.command = this.normalizeAgentWorkspaceCommand(args.command, topicId);
         const aliasNormalized = this.normalizeWorkspaceFolderAliasCommand(args.command);
         args.command = aliasNormalized.command;
@@ -1174,6 +1198,7 @@ export class ExternalToolHandler {
             // Build rich detailed telemetry payload for Webview visual enhancement
             const preflightPayload = {
                 command: args.command,
+                shell: requestedShell,
                 cwd,
                 opaqueExecution,
                 classification: preflight.segments.map(s => s.classification),
@@ -1229,17 +1254,26 @@ export class ExternalToolHandler {
                 exitCode: 1,
             };
         }
+        if (useWslSandbox && (requestedShell === 'pwsh' || requestedShell === 'powershell')) {
+            return {
+                stdout: '',
+                stderr: 'The enforced Windows fallback is WSL2 + bubblewrap, so explicit PowerShell shells cannot be honored. Use shell=auto with portable POSIX syntax, install the native Windows helper, or request a visible terminal explicitly.',
+                exitCode: 1,
+            };
+        }
         const shell = useWslSandbox
             ? '/bin/sh'
             : isWindows
-            ? 'powershell.exe'
+            ? (requestedShell === 'pwsh' ? 'pwsh.exe' : 'powershell.exe')
+            : requestedShell === 'bash'
+            ? 'bash'
             : '/bin/sh';
         const commandText = isWindows && !useWslSandbox
             ? '$OutputEncoding = [System.Text.UTF8Encoding]::new($false); [Console]::OutputEncoding = $OutputEncoding; ' + args.command
             : args.command;
         const shellArgs = isWindows && !useWslSandbox
             ? ['-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', commandText]
-            : ['-c', commandText];
+            : [requestedShell === 'bash' ? '-lc' : '-c', commandText];
         const agentWorkspaceDir = getPrivateTopicStorageDir(topicId, this.ctx.workspaceRoot);
         const scratchDir = getPrivateTopicScratchDir(topicId, this.ctx.workspaceRoot);
         const helperScript = scratchDir ? path.join(scratchDir, 'agent_helper.py') : '';

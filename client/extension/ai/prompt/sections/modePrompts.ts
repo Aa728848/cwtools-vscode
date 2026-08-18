@@ -26,8 +26,8 @@ const IS_WINDOWS = process.platform === 'win32';
 
 /** Platform-specific shell note for run_command (PowerShell on Windows, POSIX sh on macOS/Linux). */
 const RUN_COMMAND_SHELL_NOTE = IS_WINDOWS
-    ? 'On Windows, `run_command` already executes through PowerShell in every mode; do not wrap commands in another Windows shell or launcher script just to run a file.'
-    : 'On macOS/Linux, `run_command` executes through POSIX `/bin/sh` (`sh -c`); use standard POSIX shell syntax (commands like `ls`, `grep`, `find`, `cp`), not PowerShell cmdlets.';
+    ? 'On Windows, `run_command` shell=auto executes through PowerShell in every mode; do not wrap commands in another Windows shell or launcher script just to run a file. `shell=sh` and `shell=bash` are not valid on Windows.'
+    : 'On macOS/Linux, `run_command` shell=auto executes through POSIX `/bin/sh` (`sh -c`); use standard POSIX shell syntax (commands like `ls`, `grep`, `find`, `cp`), not PowerShell cmdlets. `shell=sh` and `shell=bash` are valid here; `shell=pwsh/powershell` is Windows-only.';
 
 /** Platform-specific environment-variable reference syntax for run_command. */
 const ENV_VAR_SYNTAX_NOTE = IS_WINDOWS

@@ -862,11 +862,12 @@ const RAW_TOOL_DEFINITIONS: ToolDefinition[] = [
         type: 'function',
         function: {
             name: 'run_command',
-            description: 'Run a shell command from the project workspace root by default. Use PowerShell syntax on Windows and POSIX shell syntax on macOS/Linux without wrapping the command in another shell. Prefer existing project scripts and direct commands; keep temporary helpers in the topic scratch directory and reuse one helper per task. Read-only commands may auto-run, while writes, network access, inline interpreter payloads, and sensitive operations remain subject to the policy and approval engine.',
+            description: 'Run a shell command from the project workspace root by default. Use shell=auto unless you are deliberately targeting a platform shell. auto uses PowerShell on Windows and POSIX /bin/sh on macOS/Linux; sh/bash are macOS/Linux-only; pwsh/powershell are Windows-only. Do not wrap commands in another shell. Prefer existing project scripts and direct commands; keep temporary helpers in the topic scratch directory and reuse one helper per task. Read-only commands may auto-run, while writes, network access, inline interpreter payloads, and sensitive operations remain subject to the policy and approval engine.',
             parameters: {
                 type: 'object',
                 properties: {
                     command: { type: 'string', description: 'The shell command to execute' },
+                    shell: { type: 'string', enum: ['auto', 'sh', 'bash', 'pwsh', 'powershell'], description: 'Target shell/platform. auto preserves the host default. sh/bash are valid on macOS/Linux only. pwsh/powershell are valid on Windows only.' },
                     cwd: { type: 'string', description: 'Working directory (defaults to workspace root)' },
                     timeoutMs: { type: 'number', description: 'Timeout in milliseconds for captured execution (default 30000, max 3600000)' },
                     background: { type: 'boolean', description: 'Start a captured sandboxed process and return its processId immediately. Use read_process, write_process_stdin, and terminate_process to control it.' },

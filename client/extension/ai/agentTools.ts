@@ -70,10 +70,13 @@ import {
     deserializeAgentResults,
 } from './orchestrator/orchestrationStore';
 import { backgroundOrchestrators } from './orchestrator/backgroundOrchestrators';
+import { evaluateDelegationBudget } from './orchestrator/delegationDepth';
+import { buildOrchestrationCatalog as projectOrchestrationCatalog } from './orchestrator/orchestrationCatalog';
 import { BLACKBOARD_KEY_PREFIXES } from './orchestrator/blackboardSchema';
 import { normalizeEvidenceGateMode, type EvidenceClaimKind, type EvidenceGateDecision, type EvidenceGateMode, type EvidenceGatePhase } from './evidence/evidenceTypes';
 import { isPdxScriptTarget } from './evidence/claimExtractor';
 import { runLedger } from './runner/runLedger';
+import { requestPermissionWithAbort } from './runner/permissionRequest';
 import { ErrorReporter } from './errorReporter';
 import { mergeTokenUsageTotals } from './cacheCapability';
 import { MemoryParser } from './memoryParser';
@@ -825,26 +828,33 @@ export class AgentToolExecutor {
         const requestPermission = context?.onPermissionRequest;
         if (!requestPermission) return { allowed: false, error: `Policy requires approval for ${toolName}, but no permission handler is available.` };
         const id = `policy_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
-        const allowed = await requestPermission(
-            id,
-            toolName,
-            aiText(`AI requests permission to use ${toolName}`, `AI 请求使用 ${toolName}`),
-            command,
+        // A permission card is an unbounded wait on a human. Race it against the
+        // run signal, or a dispatched child blocks its whole reasoning loop on a
+        // card nobody is necessarily watching.
+        const allowed = await requestPermissionWithAbort(
+            requestPermission,
             {
-                ...context,
-                preflight: {
-                    riskLevel,
-                    classification: [subject],
-                    cwd: this.workspaceRoot,
-                    reasons: [`Policy profile: ${profile.id}`],
-                    networkAccess: subject === 'network',
-                    networkHosts,
-                    sandboxMode: profile.sandboxMode,
-                    targetPaths: targets,
-                    mcpServer,
-                    mcpTool,
+                id,
+                tool: toolName,
+                description: aiText(`AI requests permission to use ${toolName}`, `AI 请求使用 ${toolName}`),
+                command,
+                context: {
+                    ...context,
+                    preflight: {
+                        riskLevel,
+                        classification: [subject],
+                        cwd: this.workspaceRoot,
+                        reasons: [`Policy profile: ${profile.id}`],
+                        networkAccess: subject === 'network',
+                        networkHosts,
+                        sandboxMode: profile.sandboxMode,
+                        targetPaths: targets,
+                        mcpServer,
+                        mcpTool,
+                    },
                 },
             },
+            context?.runnerOptions?.abortSignal,
         );
         return allowed ? { allowed: true } : { allowed: false, error: `Permission denied for ${toolName}.` };
     }
@@ -1117,12 +1127,15 @@ export class AgentToolExecutor {
                 .slice(0, 5)
                 .map(m => EVIDENCE_GATE_MSG.CLAIM_LINE(m.kind, m.status, m.claim));
             try {
-                const approved = await requestPermission(
-                    `evidence_gate_${decision.decisionId}`,
-                    toolName,
-                    EVIDENCE_GATE_MSG.OVERRIDE_REQUEST(targetRel, claimLines.join('\n')),
-                    undefined,
-                    context,
+                const approved = await requestPermissionWithAbort(
+                    requestPermission,
+                    {
+                        id: `evidence_gate_${decision.decisionId}`,
+                        tool: toolName,
+                        description: EVIDENCE_GATE_MSG.OVERRIDE_REQUEST(targetRel, claimLines.join('\n')),
+                        context,
+                    },
+                    context?.runnerOptions?.abortSignal,
                 );
                 if (approved) {
                     decision.verdict = 'override';
@@ -3404,6 +3417,34 @@ export class AgentToolExecutor {
                 error: `Graph '${resumeGraphId}' is still running in the background. Wait for its BACKGROUND TASK RESULT, then resume or merge it.`,
             };
         }
+
+        // ─── Delegation-depth budget ───
+        // Explicit and monotone: a resumed graph contributes a floor, so a nested
+        // coordinator can never be re-counted as top level and buy itself another
+        // delegation level. `SUB_AGENT_EXCLUDES` still hides the orchestration
+        // tools from children as defence in depth behind this budget.
+        const delegationBudget = evaluateDelegationBudget({
+            parentDepth: runnerOptsForLimits?.delegationDepth,
+            persistedFloor: resumeRecord?.delegationDepth,
+            maxDepth: vs.workspace
+                .getConfiguration('stellarisLanguageServices.ai.orchestrator')
+                .get<number>('maxDelegationDepth'),
+        });
+        runnerOptsForLimits?.runEventSink?.appendSoon('dispatch_evaluated', {
+            kind: 'delegation_depth',
+            allowed: delegationBudget.allowed,
+            parentDepth: delegationBudget.parentDepth,
+            childDepth: delegationBudget.childDepth,
+            maxDepth: delegationBudget.maxDepth,
+        }, { status: delegationBudget.allowed ? 'done' : 'failed' });
+        if (!delegationBudget.allowed) {
+            return {
+                success: false,
+                error: delegationBudget.reason,
+                delegationDepth: delegationBudget.parentDepth,
+                maxDelegationDepth: delegationBudget.maxDepth,
+            };
+        }
         if (backgroundRequested && blueprintFile) {
             return {
                 success: false,
@@ -3819,6 +3860,7 @@ export class AgentToolExecutor {
                     },
                 );
             }
+            let contextPreservingResumes = 0;
             for (const entry of answerClarifications) {
                 const id = typeof entry?.id === 'string' ? entry.id : '';
                 const answer = typeof entry?.answer === 'string' ? entry.answer.trim() : '';
@@ -3827,7 +3869,15 @@ export class AgentToolExecutor {
                 if (!node) {
                     return { success: false, error: `answerClarifications references unknown node id '${id}'.` };
                 }
+                // Two delivery paths, deliberately both:
+                // 1. The prompt append is durable — it survives a failed resume and
+                //    a later fresh retry, exactly as before this change.
+                // 2. `resumeAnswer` asks the executor to replay this child's own
+                //    preserved transcript and send only the answer, so an explorer
+                //    that already spent 40 iterations on evidence does not repeat it.
                 node.prompt = [node.prompt, '', '## Parent clarification answer', answer].join('\n');
+                node.resumeAnswer = answer;
+                if (node.resumeContextRef) contextPreservingResumes++;
                 if (node.status !== 'pending') {
                     node.status = 'pending';
                     node.error = undefined;
@@ -3866,6 +3916,7 @@ export class AgentToolExecutor {
                 abortSignal: localAbort.signal,
                 topicId: runnerOpts?.topicId,
                 parentRunId: parentRun?.runId ?? parentRunSink?.runId,
+                delegationDepth: delegationBudget.parentDepth,
                 durableGoal: runnerOpts?.durableGoal,
                 readOnlyFanout: parentMode === 'explore',
                 restoredBlackboard,
@@ -3935,6 +3986,7 @@ export class AgentToolExecutor {
                     runId: bgRunId,
                     domain: runtimeDomain,
                     mode: parentMode,
+                    delegationDepth: delegationBudget.parentDepth,
                     graph,
                     agentResults: new Map(),
                     blackboard: { entries: [], timestamp: Date.now() },
@@ -3982,6 +4034,14 @@ export class AgentToolExecutor {
                                     graphTask.taskId,
                                     bgResult.success ? 'completed' : 'failed',
                                     bgResult.summary,
+                                    {
+                                        stopReason: bgResult.success
+                                            ? 'completed'
+                                            : bgResult.cancelledNodes.length > 0
+                                                ? 'graph_partially_cancelled'
+                                                : 'graph_nodes_failed',
+                                        lastMessage: bgResult.summary,
+                                    },
                                 ).catch(() => {});
                             }
                             await this.finalizeOrchestration(bgResult, graph, {
@@ -3992,6 +4052,7 @@ export class AgentToolExecutor {
                                 hasWriteTasks,
                                 blackboardPrefix: bgBlackboardPrefix,
                                 blackboard: orchestrator.getBlackboard().snapshot(),
+                                delegationDepth: delegationBudget.parentDepth,
                             }, context);
                         } catch (error) {
                             const cancelled = bgLocalAbort.signal.aborted
@@ -4002,6 +4063,10 @@ export class AgentToolExecutor {
                                     graphTask.taskId,
                                     cancelled ? 'killed' : 'failed',
                                     cancelled ? 'Cancelled by parent' : errMsg,
+                                    {
+                                        stopReason: cancelled ? 'cancelled_by_parent' : 'orchestration_threw',
+                                        lastMessage: cancelled ? 'Cancelled by parent' : errMsg,
+                                    },
                                 ).catch(() => {});
                             }
                             await saveOrchestration({
@@ -4009,6 +4074,7 @@ export class AgentToolExecutor {
                                 runId: bgRunId,
                                 domain: runtimeDomain,
                                 mode: parentMode,
+                                delegationDepth: delegationBudget.parentDepth,
                                 graph,
                                 agentResults: new Map(),
                                 blackboard: { entries: [], timestamp: Date.now() },
@@ -4041,6 +4107,7 @@ export class AgentToolExecutor {
                 hasWriteTasks,
                 blackboardPrefix: blackboardDomainPrefix(context),
                 blackboard: orchestrator.getBlackboard().snapshot(),
+                delegationDepth: delegationBudget.parentDepth,
             }, context);
 
             // Keep the parent Agent context compact while preserving enough detail for the final global walkthrough.
@@ -4137,11 +4204,13 @@ export class AgentToolExecutor {
                 graphId: graph.id,
                 resumeGraphId: resumeGraphId || undefined,
                 completedNodes: doneCount,
+                delegationDepth: delegationBudget.parentDepth,
+                contextPreservingResumes: contextPreservingResumes || undefined,
                 indexRevision: readOnlyFanoutMode && this.indexService
                     ? `${this.indexService.workspaceSymbolUpdatedAt ?? 'unbuilt'}:${this.indexService.workspaceSymbolCount}:${this.indexService.workspaceSymbolStatus}`
                     : undefined,
                 hint: clarifications.length > 0
-                    ? 'One or more sub-agents escalated a decision to the parent agent. Answer them with dispatch_agents(answerClarifications=[...], resumeGraphId=...) after deciding, optionally appending more read-only tasks.'
+                    ? 'One or more sub-agents escalated a decision to the parent agent. Answer them with dispatch_agents(answerClarifications=[...], resumeGraphId=...) after deciding, optionally appending more read-only tasks. An answered node resumes from its preserved context instead of re-running its investigation.'
                     : resumeGraphId
                         ? `Wave complete. The graph '${graph.id}' is persisted and resumable: call dispatch_agents(resumeGraphId='${graph.id}', appendTasks=[...]) to extend it, or merge_results to consolidate node outputs.`
                         : 'To view the detailed output of each sub-agent, use the merge_results tool.',
@@ -4154,6 +4223,7 @@ export class AgentToolExecutor {
                     runId: undefined,
                     domain: runtimeDomain,
                     mode: parentMode,
+                    delegationDepth: delegationBudget.parentDepth,
                     graph: persistedGraph,
                     agentResults: new Map(),
                     blackboard: { entries: [], timestamp: Date.now() },
@@ -4184,6 +4254,8 @@ export class AgentToolExecutor {
             hasWriteTasks: boolean;
             blackboardPrefix: string;
             blackboard: import('./orchestrator/types').SerializedBlackboard;
+            /** Monotone delegation depth of this coordinator, persisted as a resume floor. */
+            delegationDepth?: number;
         },
         context?: import('./types').AgentToolContext,
     ): Promise<void> {
@@ -4237,6 +4309,7 @@ export class AgentToolExecutor {
             runId: meta.runId,
             domain: meta.domain,
             mode: meta.mode,
+            delegationDepth: meta.delegationDepth,
             graph,
             agentResults: result.agentResults,
             blackboard: meta.blackboard,
@@ -4289,7 +4362,10 @@ export class AgentToolExecutor {
             ? args.nodeIds.filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
             : [];
         if (requestedNodeIds.length === 0) {
-            return { success: false, message: 'merge_results requires at least one nodeIds entry.' };
+            // Catalog mode. Without it the only way back to a graph is to remember
+            // its id: a forgotten graphId is rejected outright, and the cheapest
+            // recovery the model has left is to re-dispatch a whole wave.
+            return this.buildOrchestrationCatalog(requestedTopicId, requestedDomain, requestedRunId);
         }
         const strategy = args.strategy === 'concatenate' || args.strategy === 'summary' ? args.strategy : 'structured';
 
@@ -4375,6 +4451,25 @@ export class AgentToolExecutor {
             }
         }
         return { success: false, message: 'Failed to find the most recent orchestrator execution result. Please use dispatch_agents first.' };
+    }
+
+    /**
+     * Catalog mode of `merge_results`: which orchestration graphs exist for this
+     * topic, how far each got, and what can still be done with each one.
+     * The projection and its state wording live in `orchestrationCatalog.ts`.
+     */
+    private buildOrchestrationCatalog(
+        topicId: string | undefined,
+        domain: import('./types').AgentRuntimeDomain,
+        runId?: string,
+    ): unknown {
+        const records = listOrchestrations({ topicId, domain, limit: 16 })
+            .filter(record => !runId || record.runId === runId);
+        return projectOrchestrationCatalog(
+            records,
+            graphId => backgroundOrchestrators.hasActive(graphId),
+            { topicId, domain },
+        );
     }
 
     private assembleMergeReport(

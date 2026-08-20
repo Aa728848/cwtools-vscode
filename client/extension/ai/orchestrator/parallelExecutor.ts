@@ -340,6 +340,25 @@ export class ParallelExecutor {
             const agentId = node.agentId ?? `agent_${graph.id}_${node.id}`;
             node.agentId = agentId;
             const previousTaskId = node.lastTaskId;
+            const currentAuthorization: 'read_only' | 'workspace_write' =
+                options.readOnlyFanout ? 'read_only' : 'workspace_write';
+            // A resume must never widen the authorization of the attempt whose
+            // context it replays: a read-only fanout transcript can contain
+            // guidance written on the assumption that nothing is writable.
+            if (node.resumeContextRef && previousTaskId) {
+                const previousTask = agentTaskManager.get(previousTaskId);
+                if (previousTask?.authorization === 'read_only' && currentAuthorization === 'workspace_write') {
+                    node.resumeContextRef = undefined;
+                    options.onStep?.({
+                        type: 'validation',
+                        content: aiText(
+                            `Node ${node.id} will restart from a fresh context: resuming a read-only attempt into a writable one is not allowed.`,
+                            `节点 ${node.id} 将以全新上下文重启：不允许把只读执行的上下文恢复到可写执行中。`,
+                        ),
+                        timestamp: Date.now(),
+                    });
+                }
+            }
             const managedTask = options.topicId && options.parentRunId
                 ? await agentTaskManager.create({
                     kind: 'subagent',
@@ -350,7 +369,7 @@ export class ParallelExecutor {
                     threadId: options.topicId,
                     parentTaskId: previousTaskId,
                     domain: options.domain === 'hybrid' ? 'paradox' : options.domain,
-                    authorization: options.readOnlyFanout ? 'read_only' : 'workspace_write',
+                    authorization: currentAuthorization,
                     providerId: node.providerOverride ?? options.providerId,
                     model: node.modelOverride ?? options.model,
                 })
@@ -385,18 +404,24 @@ export class ParallelExecutor {
                 const dependencyHandoffs = node.dependencies
                     .map(dependencyId => blackboard.readValue(`${BLACKBOARD_KEY_PREFIXES.handoff}${dependencyId}`))
                     .filter((value): value is string => !!value);
-                const executionNode = dependencyHandoffs.length > 0
-                    ? {
-                        ...node,
-                        prompt: [
-                            node.prompt,
-                            '',
-                            '## Structured dependency handoffs',
-                            'Treat these as parent-validated summaries. Re-read authoritative files before editing.',
-                            ...dependencyHandoffs,
-                        ].join('\n'),
-                    }
-                    : node;
+                const executionNode: TaskNode = {
+                    ...node,
+                    ...(dependencyHandoffs.length > 0
+                        ? {
+                            prompt: [
+                                node.prompt,
+                                '',
+                                '## Structured dependency handoffs',
+                                'Treat these as parent-validated summaries. Re-read authoritative files before editing.',
+                                ...dependencyHandoffs,
+                            ].join('\n'),
+                        }
+                        : {}),
+                };
+                // The resume hint belongs to this wave only. It is consumed here so
+                // a retry later in the same wave starts a fresh child — whose prompt
+                // still carries the parent answer appended at dispatch time.
+                node.resumeAnswer = undefined;
                 const result = await executor(
                     executionNode,
                     blackboard,
@@ -409,6 +434,10 @@ export class ParallelExecutor {
                 this.consumedTokens.total += result.tokenUsage.total;
 
                 node.tokenUsage = result.tokenUsage;
+                // Resume metadata describes what the NEXT wave may replay, so it is
+                // rebuilt from this attempt's outcome rather than inherited.
+                node.resumeContextRef = undefined;
+                node.pendingClarification = undefined;
 
                 if (result.success) {
                     this.retryEligibleAt.delete(node.id);
@@ -463,6 +492,13 @@ export class ParallelExecutor {
                     } else if (stormDecision?.tripped) {
                         this.graphEngine.markFailed(graph, node.id, stormDecision.reason ?? 'Parent recovery storm tripped');
                     } else if (result.needsClarification) {
+                        // The child is blocked on a decision, not broken: keep an
+                        // anchor to its transcript so the answering wave can resume
+                        // it instead of paying for the same evidence twice.
+                        node.resumeContextRef = result.runId;
+                        node.pendingClarification = result.clarification
+                            ?? result.error
+                            ?? 'Sub-task needs parent-agent clarification';
                         const cancelled = this.graphEngine.markFailed(
                             graph,
                             node.id,
@@ -470,7 +506,10 @@ export class ParallelExecutor {
                         );
                         options.onStep?.({
                             type: 'error',
-                            content: `Node ${node.id} needs parent-agent clarification; downstream nodes paused${cancelled.length ? `: ${cancelled.join(', ')}` : ''}`,
+                            content: `Node ${node.id} needs parent-agent clarification; downstream nodes paused${cancelled.length ? `: ${cancelled.join(', ')}` : ''}`
+                                + (node.resumeContextRef
+                                    ? '. Its context is preserved: answering with dispatch_agents(answerClarifications=[...]) resumes it instead of re-running it.'
+                                    : ''),
                             timestamp: Date.now(),
                         });
                     } else if (result.preservedAfterFailure) {
@@ -534,7 +573,29 @@ export class ParallelExecutor {
                                 : node.status === 'pending'
                                     ? 'suspended'
                                     : 'failed';
-                    await agentTaskManager.transition(managedTask.taskId, taskStatus, result.error ?? result.output);
+                    await agentTaskManager.transition(
+                        managedTask.taskId,
+                        taskStatus,
+                        result.error ?? result.output,
+                        {
+                            stopReason: result.success
+                                ? 'completed'
+                                : node.status === 'cancelled'
+                                    ? 'cancelled_by_parent'
+                                    : result.needsClarification
+                                        ? 'awaiting_parent_clarification'
+                                        : isTimeoutLikeError(result.error)
+                                            ? 'idle_timeout'
+                                            : isProviderRateLimit(result.error)
+                                                ? 'provider_rate_limit'
+                                                : result.preservedAfterFailure
+                                                    ? 'failed_with_preserved_writes'
+                                                    : node.status === 'pending'
+                                                        ? 'retry_queued'
+                                                        : 'failed',
+                            lastMessage: result.handoff?.summary ?? result.output,
+                        },
+                    );
                     this.eventSink?.appendSoon('task_status_changed', {
                         taskId: managedTask.taskId,
                         status: taskStatus,
@@ -584,7 +645,20 @@ export class ParallelExecutor {
                             : node.status === 'pending'
                                 ? 'suspended'
                                 : 'failed';
-                    await agentTaskManager.transition(managedTask.taskId, taskStatus, error);
+                    await agentTaskManager.transition(managedTask.taskId, taskStatus, error, {
+                        // A thrown attempt produced no handoff, so the thrown message
+                        // is the only account the parent will ever get.
+                        stopReason: options.abortSignal?.aborted
+                            ? 'cancelled_by_parent'
+                            : isTimeoutLikeError(error)
+                                ? 'idle_timeout'
+                                : isProviderRateLimit(error)
+                                    ? 'provider_rate_limit'
+                                    : node.status === 'pending'
+                                        ? 'retry_queued'
+                                        : 'execution_threw',
+                        lastMessage: error,
+                    });
                     this.eventSink?.appendSoon('task_status_changed', {
                         taskId: managedTask.taskId,
                         status: taskStatus,

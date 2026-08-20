@@ -39,9 +39,17 @@ export interface AgentTaskRecord {
     outputBytes: number;
     outputTruncated: boolean;
     resultSummary?: string;
+    stopReason?: string;
+    lastMessage?: string;
     notification: 'pending' | 'delivered' | 'suppressed';
     createdAt: number;
     updatedAt: number;
+}
+
+/** Optional account attached when a task settles. */
+export interface AgentTaskSettlement {
+    stopReason?: string;
+    lastMessage?: string;
 }
 
 export interface CreateAgentTask {
@@ -62,6 +70,8 @@ export interface CreateAgentTask {
 
 const TERMINAL = new Set<AgentTaskStatus>(['completed', 'failed', 'timed_out', 'killed', 'lost']);
 const MAX_TASKS = 500;
+const MAX_STOP_REASON_CHARS = 200;
+const MAX_LAST_MESSAGE_CHARS = 4_000;
 
 function isTaskArray(value: unknown): value is AgentTaskRecord[] {
     return Array.isArray(value) && value.every(item =>
@@ -89,6 +99,7 @@ export class AgentTaskManager {
                     restored.endedAt = Date.now();
                     restored.updatedAt = restored.endedAt;
                     restored.notification = 'pending';
+                    restored.stopReason = 'host_restart';
                 }
                 tasks.set(restored.taskId, restored);
             }
@@ -128,7 +139,12 @@ export class AgentTaskManager {
         return { ...task };
     }
 
-    async transition(taskId: string, status: AgentTaskStatus, summary?: string): Promise<AgentTaskRecord> {
+    async transition(
+        taskId: string,
+        status: AgentTaskStatus,
+        summary?: string,
+        settlement?: AgentTaskSettlement,
+    ): Promise<AgentTaskRecord> {
         const task = this.requireTask(taskId);
         if (TERMINAL.has(task.status)) throw new Error(`Task ${taskId} is already terminal.`);
         if (status === 'running') {
@@ -144,6 +160,14 @@ export class AgentTaskManager {
         if (status === 'running' && task.startedAt === undefined) task.startedAt = now;
         if (TERMINAL.has(status)) task.endedAt = now;
         if (summary !== undefined) task.resultSummary = summary.slice(0, 4_000);
+        if (settlement?.stopReason !== undefined) task.stopReason = settlement.stopReason.slice(0, MAX_STOP_REASON_CHARS);
+        if (settlement?.lastMessage !== undefined) {
+            const preserved = settlement.lastMessage.trim();
+            task.lastMessage = preserved ? preserved.slice(0, MAX_LAST_MESSAGE_CHARS) : undefined;
+        }
+        if (TERMINAL.has(status) && task.stopReason === undefined) {
+            task.stopReason = status === 'completed' ? 'completed' : status;
+        }
         await this.persist(task.topicId);
         return { ...task };
     }

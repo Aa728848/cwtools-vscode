@@ -17,6 +17,28 @@
 - **[优化] Stellaris 本地化语法配置支持**：
   - 优化 `language-configuration-localisation.json`，完善引号、括号自动闭合与成对匹配规则，并增加本地化语法单元测试。
   English: [Improvement] Stellaris localisation language configuration — refines auto-closing pairs and quote matching for `.yml` localisation files.
+- **[优化] 子 Agent 澄清改为上下文恢复，不再整节点重跑**：
+  - 子 Agent 通过 `BLOCKED_FOR_ORCHESTRATOR` 升级决策后，父级用 `dispatch_agents(answerClarifications=[...])` 回答时会恢复该子 Agent 已保留的工作上下文并只下发答复，不再从空历史重跑整个节点，避免重复消耗已完成的 CWT/LSP 证据收集。恢复失败时自动回退为原有的全新重跑路径；恢复不得把只读执行的上下文带入可写执行。
+  - `merge_results` 不带 `nodeIds` 调用时返回当前话题的编排图目录（图 ID、节点进度、待澄清项、是否可恢复），忘记 `graphId` 时不再只能重新派发一整批。
+  English: [Improvement] Clarification answers now resume a sub-agent instead of re-running it — answering with `dispatch_agents(answerClarifications=[...])` replays the child's own preserved working context and sends only the decision, so finished CWT/LSP evidence work is not paid for twice; it falls back to a fresh run when that context is unavailable, and never carries a read-only context into a writable attempt. `merge_results` called without `nodeIds` now returns this topic's orchestration graph catalog (ids, node progress, pending clarifications, resumability).
+- **[优化] 后台子任务结算通知补齐停止原因与保留输出**：
+  - `[BACKGROUND TASK RESULT]` 通知现在始终包含归一化的停止原因（如 `idle_timeout`、`provider_rate_limit`、`host_restart`、`cancelled_by_parent`）以及子 Agent 保留的最后一条内容；两者都缺失时明确提示先检查产出再原样重派，避免把「超时/宿主重启」误读为可直接重试的失败。
+  English: [Improvement] Background settlement notices now always carry a normalized stop reason (such as `idle_timeout`, `provider_rate_limit`, `host_restart`, `cancelled_by_parent`) plus any preserved final sub-agent message, and explicitly discourage re-dispatching identical work when neither exists.
+- **[优化] 子 Agent 委派范围声明与显式委派深度预算**：
+  - 每个被派发的子 Agent 在自身系统提示中收到其固定权限范围（可写作用域、用户保留作用域、被丢弃的越界目标），并被明确要求不重试宿主拒绝的操作、而是把限制写入交接报告的 `Unresolved` 段，减少无效重试与后续的恢复风暴。
+  - 委派深度改为显式且单调的预算（默认上限 1 层，可通过 `stellarisLanguageServices.ai.orchestrator.maxDelegationDepth` 调整），恢复已持久化的编排图时不会被重新计为顶层而多获得一层委派权。
+  English: [Improvement] Delegated sub-agents are told their own fixed permission scope and instructed to report out-of-scope needs in the handoff `Unresolved` section instead of retrying denied operations; delegation depth becomes an explicit monotone budget (default one level, configurable via `stellarisLanguageServices.ai.orchestrator.maxDelegationDepth`) that a resumed graph cannot reset to top level.
+
+### 修复 / Fixes
+- **[修复] 授权请求可能长时间挂起并残留审批卡片**：
+  - 策略引擎通用授权卡与证据门人工覆盖此前直接 `await` 宿主授权 Promise，而该 Promise 仅在用户点击时结算。子 Agent 因此可能在无人查看的卡片上阻塞整个推理循环，直到 20 分钟空闲看门狗介入，并遗留永不结算的 Promise 链、`pendingPermission*` 表项与会在每次视图恢复时重新出现的陈旧卡片。现统一改用带中止竞速的授权封装（`runner/permissionRequest.ts`），运行被中止即判定为拒绝（中止不等于同意），并同步清理解析器、卡片与运行时交互记录。
+  English: [Fix] Approval requests could hang and leave residual cards — the policy-engine approval card and the evidence-gate manual override awaited the host approval promise directly, which only settles on a user click. A sub-agent could therefore block its whole reasoning loop on a card nobody was watching until the 20-minute idle watchdog intervened, leaking a never-settling promise chain, the pending-approval bookkeeping, and a stale card that reappeared on every view restore. Both paths now use one abort-racing wrapper (`runner/permissionRequest.ts`) that denies on abort (an abort is not consent) and retires the resolver, card, and runtime interaction together.
+- **[修复] 停止主 Agent 未停止其后台子 Agent 任务图**：
+  - `dispatch_agents(background: true)` 启动的任务图，其中止链绑定在**启动它那一轮**的控制器上；当用户在后续轮次点击停止时该控制器已被置空，任务图会继续运行（此前 `cancelAllForTopic` 有实现但无调用者）。现在停止主 Agent 与销毁面板都会取消当前话题的全部后台任务图，并提示可用 `dispatch_agents(resumeGraphId=...)` 恢复其部分状态。
+  English: [Fix] Stopping the main agent now stops its background sub-agent graphs — a graph started by `dispatch_agents(background: true)` chained its abort to the controller of the turn that started it, which is already cleared when a later turn is stopped, so the graph kept running (`cancelAllForTopic` existed but had no callers). Stopping the main agent and disposing the panel now cancel every background graph of the current topic and report that their partial state stays resumable.
+- **[修复] 后台子 Agent 的授权事件可能记入错误的运行或话题**：
+  - 授权请求的运行 ID 此前会回落到面板当前的 `currentRunId`；对于在后续轮次弹卡的后台子 Agent，那是一个无关的运行。解析与取消时的话题 ID 也在点击时刻重新取值，导致跨话题切换后归属错误。现在运行 ID 优先取子 Agent 自身的 `runRecord`/`parentRunId`，话题 ID 在请求时刻快照并在解析、取消、放弃三条路径统一使用。
+  English: [Fix] Background sub-agent approval events could be recorded against the wrong run or topic — the run id fell back to the panel's live `currentRunId` (an unrelated run for a card raised in a later turn), and the topic id was re-derived at click time. The run id now prefers the sub-agent's own `runRecord`/`parentRunId`, and the topic id is snapshotted at request time and used consistently by the resolve, cancel, and abandon paths.
 
 ## [2.14.8] - 2026-08-16
 

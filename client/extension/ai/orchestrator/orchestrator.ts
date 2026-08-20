@@ -21,6 +21,7 @@ import type {
     AgentMode,
     AgentStep,
     AgentToolName,
+    ChatMessage,
     TokenUsage,
     GenerationResult,
 } from '../types';
@@ -38,6 +39,8 @@ import { mergeTokenUsageTotals } from '../cacheCapability';
 import { defaultDomainForMode } from '../agentProfile';
 import { agentProfileCatalog } from '../runner/agentProfileCatalog';
 import { parseAgentHandoff, repairAgentHandoff, validateAgentHandoff } from '../runner/agentHandoff';
+import { normalizeDelegationDepth } from './delegationDepth';
+import { runLedger } from '../runner/runLedger';
 
 // Type references of AgentRunner and AgentToolExecutor (to avoid circular dependencies, use import type)
 import type { AgentRunner, AgentRunnerOptions } from '../agentRunner';
@@ -645,6 +648,9 @@ export class Orchestrator {
             turnId: taskNode.id,
             onTodoUpdate: orchestratorOptions.onTodoUpdate,
             useSlimPrompt: true,
+            // Children run exactly one level below this coordinator. The dispatch
+            // gate reads this back to refuse a further delegation level.
+            delegationDepth: normalizeDelegationDepth(orchestratorOptions.delegationDepth) + 1,
             maxIterations: taskNode.maxIterations ?? profile.maxIterations,
             // Role iteration limits are health-check windows. Only a task-level
             // maxIterations override remains an absolute iteration ceiling.
@@ -785,9 +791,50 @@ export class Orchestrator {
             orchestratorOptions.onBeforeFileWrite?.(filePath, prevContent);
         };
 
+        // ─── Context-preserving resume (clarification answers) ───
+        let resumedHistory: ChatMessage[] = [];
+        if (taskNode.resumeAnswer && taskNode.resumeContextRef) {
+            try {
+                const transcript = await runLedger.readResumeTranscript(
+                    taskNode.resumeContextRef,
+                    orchestratorOptions.topicId,
+                );
+                const replayable = (transcript ?? []).filter(message => message.role !== 'system');
+                if (replayable.length > 0) {
+                    resumedHistory = replayable;
+                    wrappedOnStep({
+                        type: 'orchestrator_progress',
+                        content: aiText(
+                            `Resumed subtask ${taskNode.id} with its preserved context (${replayable.length} restored messages) instead of re-running it from scratch.`,
+                            `已带着已保留的上下文恢复子任务 ${taskNode.id}（复原 ${replayable.length} 条消息），未从零重跑。`,
+                        ),
+                        timestamp: Date.now(),
+                    });
+                }
+            } catch (error) {
+                ErrorReporter.debug(
+                    SOURCE.ORCHESTRATOR,
+                    `Clarification resume for ${taskNode.id} fell back to a fresh run: ${error instanceof Error ? error.message : String(error)}`,
+                );
+            }
+        }
+        const isResuming = resumedHistory.length > 0;
+
         // Pre-read and inject contextFiles
         let effectivePrompt = taskNode.prompt;
-        if ((taskNode.produces?.length ?? 0) > 0 || (taskNode.consumes?.length ?? 0) > 0 || (taskNode.acceptanceChecks?.length ?? 0) > 0) {
+        if (isResuming) {
+            effectivePrompt = [
+                '## Parent clarification answer',
+                taskNode.resumeAnswer,
+                '',
+                'Continue this same subtask from where you stopped. The conversation above is your own restored working context.',
+                '- Do not restart the investigation, and do not repeat tool calls whose results are already present above.',
+                '- Re-read a file only before you change it, or to confirm it changed since you last read it.',
+                '- This answer does not widen your permission scope.',
+                '- Finish with the same structured handoff (Summary, Changed Files, Verification, Unresolved).',
+            ].join('\n');
+        }
+        if (!isResuming && ((taskNode.produces?.length ?? 0) > 0 || (taskNode.consumes?.length ?? 0) > 0 || (taskNode.acceptanceChecks?.length ?? 0) > 0)) {
             effectivePrompt = [
                 '<system-entity-contract>',
                 JSON.stringify({
@@ -801,7 +848,7 @@ export class Orchestrator {
                 effectivePrompt,
             ].join('\n');
         }
-        if (taskNode.contextFiles && taskNode.contextFiles.length > 0) {
+        if (!isResuming && taskNode.contextFiles && taskNode.contextFiles.length > 0) {
             let injectedContext = '';
             for (const contextRef of taskNode.contextFiles) {
                 try {
@@ -930,7 +977,7 @@ export class Orchestrator {
             const runPromise = this.agentRunner.run(
                 effectivePrompt,
                 { topicId: orchestratorOptions.topicId },
-                [], // Empty conversation history - child Agent starts from scratch
+                resumedHistory,
                 runnerOptions,
             );
             const result: GenerationResult = await Promise.race([runPromise, subAgentAbortPromise]);

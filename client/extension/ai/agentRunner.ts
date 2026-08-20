@@ -275,6 +275,13 @@ export interface AgentRunnerOptions {
 * The sub-Agent should not directly ask questions to the user or wait for user approval, but should report the blocking points to the main Agent. 
 */
     useSlimPrompt?: boolean;
+    /**
+     * Delegation depth of this run: 0 for a top-level agent, parent depth + 1
+     * for a dispatched sub-agent. Read by the dispatch gate to decide whether
+     * this agent may open another delegation level; see
+     * `orchestrator/delegationDepth.ts` for the monotone accounting.
+     */
+    delegationDepth?: number;
     /** 
 * Whether to restore the state from the last breakpoint snapshot that exited abnormally (breakpoint resume) 
 */
@@ -1175,8 +1182,28 @@ export class AgentRunner {
         // DeepSeek prefix-cache optimization: use frozen (session-cached) system prompt
         // to ensure byte-level stability across API calls for cache hits.
         // rebuildSystemPrompt drops this fingerprint's cache entry before building (plan sec.7.1).
+        // A delegated child is told the shape of its own fixed scope so a host
+        // denial reads as policy instead of a transient error worth retrying. The
+        // host still enforces all of it independently. Only a real dispatched
+        // child has a sandbox; other slim runs (quality gate, side questions) get
+        // no statement.
+        const delegationScopeFacts = options?.sandbox
+            ? {
+                readOnly: options.sandbox.writeScope?.length === 0,
+                writeScope: options.sandbox.writeScope,
+                deniedWriteScopes: options.sandbox.deniedWriteScopes,
+                rejectedScopes: options.sandbox.rejectedScopes,
+            }
+            : undefined;
         const systemPrompt = options?.useSlimPrompt
-            ? this.promptBuilder.buildSlimSystemPromptForMode(mode, providerForPrompt, undefined, topicId, domain)
+            ? this.promptBuilder.buildSlimSystemPromptForMode(
+                mode,
+                providerForPrompt,
+                undefined,
+                topicId,
+                domain,
+                delegationScopeFacts,
+            )
             : supportsPrefixCache
                 ? this.promptBuilder.buildFrozenSystemPrompt(mode, providerForPrompt, undefined, {
                     toolsetHash: hashToolDefinitionsForFingerprint(promptToolDefinitions),

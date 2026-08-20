@@ -1914,7 +1914,7 @@ const RAW_TOOL_DEFINITIONS: ToolDefinition[] = [
                     },
                     answerClarifications: {
                         type: 'array',
-                        description: 'Parent answers to sub-agent clarifications from the last dispatch (clarifications[].id); each answered node is re-run with the answer appended.',
+                        description: 'Parent answers to sub-agent clarifications from the last dispatch (clarifications[].id). An answered node resumes from its own preserved working context and receives only the answer, so it does not repeat the investigation it already finished; if that context is unavailable it falls back to a fresh run with the answer appended to its prompt.',
                         items: {
                             type: 'object',
                             properties: {
@@ -1954,26 +1954,26 @@ const RAW_TOOL_DEFINITIONS: ToolDefinition[] = [
         type: 'function',
         function: {
             name: 'merge_results',
-            description: 'Merge completed sub-agent execution results into a final deliverable that consolidates implementation, verification, failures, and review output.',
+            description: 'Merge completed sub-agent execution results into a final deliverable that consolidates implementation, verification, failures, and review output. Call it with no nodeIds to list the orchestration graphs of this topic instead — their ids, progress, and whether each one is resumable — when you do not remember a graphId.',
             parameters: {
                 type: 'object',
                 properties: {
                     nodeIds: {
                         type: 'array',
                         items: { type: 'string' },
-                        description: 'List of task node IDs whose results should be merged',
+                        description: 'Task node IDs whose results should be merged. Omit to return the graph catalog for this topic instead of a merge.',
                     },
                     strategy: { type: 'string', enum: ['concatenate', 'structured', 'summary'], description: 'Merge strategy: "concatenate" (raw join), "structured" (group by file), "summary" (generate summary). Default: structured.' },
                     graphId: {
                         type: 'string',
-                        description: 'Persisted graph id to merge (from dispatch graphId). Defaults to the latest matching wave.',
+                        description: 'Persisted graph id to merge (from dispatch graphId). Defaults to the latest matching wave. Ignored by the catalog mode.',
                     },
                     runId: {
                         type: 'string',
                         description: 'Parent run id filter when waves belong to different runs.',
                     },
                 },
-                required: ['nodeIds'],
+                required: [],
             },
         },
     },

@@ -10,6 +10,7 @@ import type { TodoItem, TodoWriteResult } from '../types';
 import { ScopedTodoStore } from './scopedTodoStore';
 import { preflightCommand, type ConfiguredCommandPolicyRule } from '../runner/commandPreflight';
 import { hasInlineEvalPayload, PermissionPolicyStore } from '../runner/permissionPolicy';
+import { requestPermissionWithAbort as sharedRequestPermissionWithAbort } from '../runner/permissionRequest';
 import { processRegistry } from '../runner/processRegistry';
 import { BrokeredSandboxRunner, DirectSandboxRunner, detectSandboxBackendAsync, type SandboxRunner } from '../runner/sandboxRunner';
 import { getPrivateTopicRootCandidates, getPrivateTopicScratchDir, getPrivateTopicStorageDir } from '../workspacePaths';
@@ -770,26 +771,13 @@ export class ExternalToolHandler {
         context?: import('../types').AgentToolContext,
         command?: string
     ): Promise<boolean> {
-        const abortSignal = context?.runnerOptions?.abortSignal;
-        if (abortSignal?.aborted) return false;
-        if (!abortSignal) {
-            return onPermissionRequest(id, tool, description, command, context);
-        }
-        let onAbort: (() => void) | undefined;
-        const abortDeny = new Promise<boolean>((resolve) => {
-            onAbort = () => resolve(false);
-            abortSignal.addEventListener('abort', onAbort, { once: true });
-        });
-        try {
-            return await Promise.race([
-                onPermissionRequest(id, tool, description, command, context),
-                abortDeny,
-            ]);
-        } finally {
-            if (onAbort) {
-                abortSignal.removeEventListener('abort', onAbort);
-            }
-        }
+        // Single implementation lives in runner/permissionRequest so the policy
+        // engine and evidence gate share the same abort semantics.
+        return sharedRequestPermissionWithAbort(
+            onPermissionRequest as import('../runner/permissionRequest').PermissionRequestFn,
+            { id, tool, description, command, context },
+            context?.runnerOptions?.abortSignal,
+        );
     }
 
     // ─── todoWrite ───────────────────────────────────────────────────────────

@@ -56,6 +56,7 @@ import { UI, SOURCE, aiText } from './messages';
 import { ContextReferenceManager } from './contextReferences';
 import { AgentSessionCoordinator } from './agentSessionCoordinator';
 import { runLedger, type AgentRunEvent } from './runner/runLedger';
+import { backgroundOrchestrators } from './orchestrator/backgroundOrchestrators';
 import { AgentRuntime } from './runner/agentRuntime';
 import { agentProfileCatalog } from './runner/agentProfileCatalog';
 import { PermissionPolicyStore, deriveCommandPrefix, hasInlineEvalPayload } from './runner/permissionPolicy';
@@ -291,6 +292,12 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         if (this.abortController) {
             this.abortController.abort();
             this.abortController = null;
+        }
+        // Background graphs are owned by the panel, not by one turn's controller:
+        // dispose must stop them or they keep running against a dead host.
+        const disposedTopicId = this.topicManager.currentTopic?.id;
+        if (disposedTopicId) {
+            try { backgroundOrchestrators.cancelAllForTopic(disposedTopicId); } catch { /* ignore */ }
         }
         // Dispose the shared content provider if registered
         if (this._previewProviderRegistration) {
@@ -2506,6 +2513,29 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         }
         this.aiService.cancel();
 
+        // A background dispatch outlives the tool call that started it, and its
+        // abort chain is bound to THAT turn's controller — which is already null by
+        // the time a later turn is stopped. Stopping the main agent must stop every
+        // sub-agent it owns, so cancel the topic's background graphs explicitly.
+        // Their partial state stays persisted and resumable via resumeGraphId.
+        const backgroundTopicId = this.topicManager.currentTopic?.id;
+        if (backgroundTopicId) {
+            const cancelledGraphs = backgroundOrchestrators.cancelAllForTopic(backgroundTopicId);
+            if (cancelledGraphs > 0) {
+                this.postMessage({
+                    type: 'agentStep',
+                    step: {
+                        type: 'orchestrator_progress',
+                        content: aiText(
+                            `Cancelled ${cancelledGraphs} background sub-agent graph(s). Their partial state stays resumable with dispatch_agents(resumeGraphId=...).`,
+                            `已取消 ${cancelledGraphs} 个后台子 Agent 任务图。其部分状态仍可通过 dispatch_agents(resumeGraphId=...) 恢复。`,
+                        ),
+                        timestamp: Date.now(),
+                    },
+                });
+            }
+        }
+
         // Clean up all pending permission approval resolvers to prevent orphaned Promise and UI residual cards
         for (const [permissionId, resolver] of this.pendingPermissionResolvers.entries()) {
             const details = this.pendingPermissionDetails.get(permissionId);
@@ -2524,7 +2554,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             if (card) {
                 this.postMessage({ type: 'permissionResolved', permissionId, itemId: card.itemId, threadId: card.threadId, turnId: card.turnId, decision: 'cancel', reviewer: 'user' });
             }
-            const topicId = this.topicManager.currentTopic?.id ?? 'default';
+            const topicId = details?.topicId ?? this.topicManager.currentTopic?.id ?? 'default';
             this.agentRuntime.resolveInteraction(
                 permissionId,
                 topicId,
@@ -2960,7 +2990,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
 
     private pendingPermissionResolvers = new Map<string, (allowed: boolean) => void>();
     private pendingPermissionModes = new Map<string, AgentMode>();
-    private pendingPermissionDetails = new Map<string, { command?: string, cwd?: string, preflight?: any, runId?: string, threadId?: string, turnId?: string, itemId: string }>();
+    private pendingPermissionDetails = new Map<string, { command?: string, cwd?: string, preflight?: any, runId?: string, topicId?: string, threadId?: string, turnId?: string, itemId: string }>();
     private pendingPermissionCards = new Map<string, PendingPermissionCardMessage>();
     private pendingQuestionResolvers = new Map<string, (result: AskUserQuestionResult) => void>();
     private pendingQuestionCards = new Map<string, PendingQuestionCardMessage>();
@@ -3040,7 +3070,12 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         command?: string,
         context?: any
     ): Promise<boolean> {
-        const permissionRunId = context?.runnerOptions?.runRecord?.runId ?? this.currentRunId;
+        // Resolve the owning run from the request itself. `this.currentRunId` is the
+        // panel's live run, which for a background sub-agent raising a card in a
+        // later turn is an unrelated run — its approval events must not land there.
+        const permissionRunId = context?.runnerOptions?.runRecord?.runId
+            ?? context?.runnerOptions?.parentRunId
+            ?? this.currentRunId;
         const permissionTopicId = context?.runnerOptions?.topicId ?? this.topicManager.currentTopic?.id ?? 'default';
         const permissionThreadId = context?.runnerOptions?.threadId ?? permissionTopicId;
         this.agentRuntime.recordPermissionTrace({
@@ -3175,6 +3210,23 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         return new Promise<boolean>((resolve) => {
             const topicId = context?.runnerOptions?.topicId ?? this.topicManager.currentTopic?.id ?? 'default';
             const threadId = context?.runnerOptions?.threadId ?? topicId;
+            // An approval card is an unbounded wait on a human, and a dispatched
+            // sub-agent's card may outlive the turn that started its graph. If the
+            // run is aborted, deny and clear the card: an abort is not consent, and
+            // leaving the entry behind resurrects a stale card on every view
+            // restore while the child's inner await never settles.
+            const abortSignal: AbortSignal | undefined = context?.runnerOptions?.abortSignal;
+            if (abortSignal?.aborted) {
+                activePendingInteractions.delete(id);
+                resolve(false);
+                return;
+            }
+            let onAbort: (() => void) | undefined;
+            const settle = (allowed: boolean) => {
+                if (onAbort && abortSignal) abortSignal.removeEventListener('abort', onAbort);
+                onAbort = undefined;
+                resolve(allowed);
+            };
             this.agentRuntime.beginInteraction({
                 id,
                 topicId,
@@ -3186,7 +3238,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                 detail: command,
             });
             this.pendingPermissionResolvers.set(id, (allowed: boolean) => {
-                resolve(allowed);
+                settle(allowed);
             });
             this.pendingPermissionModes.set(id, requestMode);
             this.pendingPermissionDetails.set(id, {
@@ -3194,6 +3246,9 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                 cwd: context?.preflight?.cwd,
                 preflight: context?.preflight,
                 runId: permissionRunId,
+                // Snapshotted: a request that outlives a topic switch must still
+                // resolve against the topic/thread it was raised in.
+                topicId,
                 threadId: context?.runnerOptions?.threadId,
                 turnId: context?.runnerOptions?.turnId,
                 itemId: id,
@@ -3224,7 +3279,79 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             };
             this.pendingPermissionCards.set(id, card);
             this.postMessage(card);
+            onAbort = () => this.abandonPermissionRequest(id, 'run_aborted');
+            abortSignal?.addEventListener('abort', onAbort, { once: true });
         });
+    }
+
+    /**
+     * Deny and fully retire a pending approval whose run went away.
+     *
+     * Called when the requesting run aborts. Without it the resolver, the card
+     * and the runtime interaction all survive the run: the card is re-posted by
+     * `restorePendingInteractionCards` on every view restore, and the awaiting
+     * tool call never settles.
+     */
+    private abandonPermissionRequest(permissionId: string, reason: string): void {
+        const resolver = this.pendingPermissionResolvers.get(permissionId);
+        const card = this.pendingPermissionCards.get(permissionId);
+        const details = this.pendingPermissionDetails.get(permissionId);
+        if (!resolver && !card && !details) return;
+
+        this.pendingPermissionResolvers.delete(permissionId);
+        this.pendingPermissionCards.delete(permissionId);
+        this.pendingPermissionModes.delete(permissionId);
+        this.pendingPermissionDetails.delete(permissionId);
+        activePendingInteractions.delete(permissionId);
+
+        const topicId = details?.topicId ?? this.topicManager.currentTopic?.id ?? 'default';
+        const threadId = details?.threadId ?? topicId;
+        this.agentRuntime.resolveInteraction(
+            permissionId,
+            topicId,
+            threadId,
+            { decision: 'cancel', allowed: false },
+            true,
+        );
+        this.agentRuntime.recordPermissionTrace({
+            id: permissionId,
+            topicId,
+            threadId,
+            runId: details?.runId,
+            tool: card?.tool ?? 'unknown',
+            decision: 'cancelled',
+            source: 'policy',
+            reason,
+        });
+        const eventRunId = details?.runId;
+        if (eventRunId) {
+            runLedger.appendEvent(eventRunId, 'permission_resolved', {
+                allowed: false, decision: 'cancel', reviewer: 'policy', reason,
+            }, { invocationId: permissionId }).catch(() => {});
+            runLedger.appendEvent(eventRunId, 'item_completed', {
+                itemId: details?.itemId ?? permissionId,
+                threadId: details?.threadId,
+                turnId: details?.turnId,
+                type: 'permission',
+                status: 'cancelled',
+                completedAt: Date.now(),
+                decision: 'cancel',
+                reviewer: 'policy',
+                reason,
+            }, { invocationId: permissionId, status: 'cancelled' }).catch(() => {});
+        }
+        if (card) {
+            this.postMessage({
+                type: 'permissionResolved',
+                permissionId,
+                itemId: card.itemId,
+                threadId: card.threadId,
+                turnId: card.turnId,
+                decision: 'cancel',
+                reviewer: 'user',
+            });
+        }
+        resolver?.(false);
     }
 
     private autoReviewer?: AutoReviewer;
@@ -3376,7 +3503,9 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         const alwaysAllow = resolvedDecision === 'acceptForSession';
         activePendingInteractions.delete(permissionId);
         const details = this.pendingPermissionDetails.get(permissionId);
-        const interactionTopicId = this.topicManager.currentTopic?.id ?? 'default';
+        // Snapshotted at request time: a card that outlived a topic switch must
+        // still resolve against the topic it was raised in.
+        const interactionTopicId = details?.topicId ?? this.topicManager.currentTopic?.id ?? 'default';
         const interactionThreadId = details?.threadId ?? interactionTopicId;
         this.agentRuntime.resolveInteraction(
             permissionId,

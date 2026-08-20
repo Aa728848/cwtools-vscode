@@ -12,6 +12,7 @@ import { runAgentHooks } from './hookRunner';
 import { evaluateAgentRun } from './agentEvals';
 import { goalSupervisor } from './goalSupervisor';
 import { agentTaskManager, type AgentTaskRecord, type CreateAgentTask } from './taskManager';
+import { formatBackgroundTaskNotice, type BackgroundTaskNoticePayload } from './backgroundTaskNotice';
 import { projectActivities, type ActivityProjection } from './activityProjection';
 import {
     createRuntimeDomainStateStore,
@@ -441,21 +442,9 @@ export class AgentRuntime {
         agentTaskManager.configure(topicId);
         const backgroundNotifications = await this.takeTaskNotifications(topicId, threadId);
         for (const notification of backgroundNotifications) {
-            const payload = notification.payload as {
-                taskId: string;
-                status: string;
-                resultSummary?: string;
-                outputRef?: string;
-            };
             history.push({
                 role: 'system',
-                content: [
-                    '[BACKGROUND TASK RESULT]',
-                    `Task: ${payload.taskId}`,
-                    `Status: ${payload.status}`,
-                    payload.resultSummary ? `Summary: ${payload.resultSummary}` : '',
-                    payload.outputRef ? `Full output: ${payload.outputRef}` : '',
-                ].filter(Boolean).join('\n'),
+                content: formatBackgroundTaskNotice(notification.payload as BackgroundTaskNoticePayload),
             });
         }
         agentTaskManager.configure(topicId);
@@ -856,7 +845,9 @@ export class AgentRuntime {
                 taskId: task.taskId,
                 agentId: task.agentId,
                 status: task.status,
+                stopReason: task.stopReason,
                 resultSummary: task.resultSummary,
+                lastMessage: task.lastMessage,
                 outputRef: task.outputRef,
             }, { sourceId: task.taskId }));
         }

@@ -654,7 +654,8 @@ ${PARADOX_DISPATCH_AUTHORING_GUIDANCE}
    - Reject set-but-unread flags, saved-but-unread event targets, duplicate target assignments, orphan localisation, missing event definitions, and duplicated inline/scripted-effect responsibilities.
 
 5. **Synthesis**
-   - Call \`merge_results\` after dispatched agents finish.
+   - Call \`merge_results\` after dispatched agents finish. Call it with no \`nodeIds\` to list this topic's graphs, their progress, and which are resumable, whenever a \`graphId\` is no longer in context.
+   - Answer a child's clarification with \`dispatch_agents(resumeGraphId=..., answerClarifications=[{id, answer}])\`. The child resumes from its own preserved context, so send only the decision — never restate the subtask or re-dispatch evidence work it already finished.
    - Report diagnostics before/after, files changed, unresolved blockers, cache-stale findings, token/cost if available, and any follow-up needed.
 
 ## Parallelism Defaults
@@ -694,7 +695,8 @@ This mode is domain-neutral. Paradox/CWTools multi-agent work normally uses Para
 3. Assign ordinary writes to \`utility\`, never to Paradox-only \`build\`, \`loc_writer\`, or \`gui_expert\` roles.
 4. Keep prompts bounded. Put large approved manifests in \`contextFiles\` or the Blackboard. Sub-agents execute slices; they do not redesign the parent task.
 5. After writers finish, use a dependent review node for high-risk integration work. The host also runs a domain-appropriate quality gate for written files.
-6. Call \`merge_results\` after dispatch and report changed files, tests, failures, and remaining risks.
+6. Call \`merge_results\` after dispatch and report changed files, tests, failures, and remaining risks. Called with no \`nodeIds\` it lists this topic's graphs and which are resumable, for when a \`graphId\` is no longer in context.
+7. Answer a child's clarification with \`dispatch_agents(resumeGraphId=..., answerClarifications=[{id, answer}])\`. The child resumes from its own preserved context, so send only the decision — do not restate the subtask or re-dispatch work it already finished.
 
 ## Example DAG
 \`\`\`

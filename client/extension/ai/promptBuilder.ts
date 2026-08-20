@@ -73,6 +73,7 @@ import {
     buildGeneralReadOnlySystemPrompt,
     buildGeneralOrchestratorSystemPrompt,
 } from './prompt/sections/modePrompts';
+import { buildDelegationScopeStatement, type DelegationScopeFacts } from './prompt/sections/delegationScope';
 import { buildSkillIndexPrompt, listSkills } from './skills';
 
 // ─── Frozen prompt fingerprint (plan §7.1) ──────────────────────────────────
@@ -836,6 +837,7 @@ export class PromptBuilder {
         languageId?: string,
         topicId?: string,
         domain: AgentRuntimeDomain = defaultDomainForMode(mode),
+        delegation?: DelegationScopeFacts,
     ): string {
         const gameId = domain === 'paradox' ? languageId ?? this.detectGameLanguageId() : 'general';
         const gameKnowledge = domain === 'paradox' ? getGameKnowledge(gameId) : '';
@@ -852,6 +854,8 @@ export class PromptBuilder {
         }
         finalPrompt += basePrompt;
         if (supplement) finalPrompt += '\n' + supplement;
+        const delegationScope = buildDelegationScopeStatement(delegation);
+        if (delegationScope) finalPrompt += '\n\n' + delegationScope;
         
         // Slim agents load optional capabilities on demand. Utility children may
         // run approved scoped commands; Paradox children stay on structured tools.

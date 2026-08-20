@@ -133,6 +133,11 @@ export interface TaskNode {
     agentId?: string;
     /** Latest Task-plane execution id for lineage. */
     lastTaskId?: string;
+
+    // ── Context-preserving resume ──
+    resumeContextRef?: string;
+    pendingClarification?: string;
+    resumeAnswer?: string;
 }
 
 /** Task graph (DAG) */
@@ -295,6 +300,12 @@ export interface OrchestratorOptions {
     topicId?: string;
     /** Parent durable run id for child agent threads. */
     parentRunId?: string;
+    /**
+     * Delegation depth of the coordinator that owns this graph. Children run at
+     * `delegationDepth + 1`. The value is monotone: a resumed graph never
+     * re-counts itself as top level.
+     */
+    delegationDepth?: number;
     /** Whether the parent run belongs to an active durable goal. */
     durableGoal?: boolean;
     /** Force every child into a read-only tool surface for Explore-mode evidence fan-out. */

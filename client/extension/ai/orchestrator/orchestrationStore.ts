@@ -59,6 +59,8 @@ export interface StoredTaskNode {
     tokenUsage?: TokenUsage;
     agentId?: string;
     lastTaskId?: string;
+    resumeContextRef?: string;
+    pendingClarification?: string;
 }
 
 export interface StoredGraph {
@@ -94,6 +96,7 @@ export interface StoredOrchestration {
     runId?: string;
     domain: AgentRuntimeDomain;
     mode?: string;
+    delegationDepth?: number;
     graph: StoredGraph;
     agentResults: Record<string, StoredSubAgentResult>;
     blackboard: SerializedBlackboard;
@@ -110,6 +113,7 @@ export interface SaveOrchestrationInput {
     runId?: string;
     domain: AgentRuntimeDomain;
     mode?: string;
+    delegationDepth?: number;
     graph: TaskGraph;
     agentResults: Map<string, SubAgentResult>;
     blackboard: SerializedBlackboard;
@@ -136,7 +140,7 @@ function isStoredOrchestration(value: unknown): value is StoredOrchestration {
     return typeof value.summary === 'string';
 }
 
-function serializeGraph(graph: TaskGraph): StoredGraph {
+export function serializeGraph(graph: TaskGraph): StoredGraph {
     const nodes: StoredTaskNode[] = [];
     for (const node of graph.nodes.values()) {
         nodes.push({
@@ -165,6 +169,10 @@ function serializeGraph(graph: TaskGraph): StoredGraph {
             tokenUsage: node.tokenUsage ? { ...node.tokenUsage } : undefined,
             agentId: node.agentId,
             lastTaskId: node.lastTaskId,
+            resumeContextRef: node.resumeContextRef,
+            pendingClarification: node.pendingClarification && node.pendingClarification.length > MAX_STORED_CLARIFICATION_CHARS
+                ? node.pendingClarification.slice(0, MAX_STORED_CLARIFICATION_CHARS)
+                : node.pendingClarification,
         });
     }
     return {
@@ -206,6 +214,8 @@ export function deserializeGraph(stored: StoredGraph): TaskGraph {
             tokenUsage: node.tokenUsage ? { ...node.tokenUsage } : undefined,
             agentId: node.agentId,
             lastTaskId: node.lastTaskId,
+            resumeContextRef: node.resumeContextRef,
+            pendingClarification: node.pendingClarification,
         });
     }
     return {
@@ -309,6 +319,7 @@ export async function saveOrchestration(input: SaveOrchestrationInput): Promise<
             runId: input.runId,
             domain: input.domain,
             mode: input.mode,
+            delegationDepth: input.delegationDepth,
             graph: serializeGraph(input.graph),
             agentResults: serializeAgentResults(input.agentResults),
             blackboard: input.blackboard,

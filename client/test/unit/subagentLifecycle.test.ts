@@ -363,6 +363,90 @@ describe('formatBackgroundTaskNotice', () => {
     });
 });
 
+// ── 7. Resumed-graph normalization ───────────────────────────────────────────
+
+describe('normalizeResumedGraph', () => {
+    let normalize: typeof import('../../extension/ai/orchestrator/resumeNormalization').normalizeResumedGraph;
+    type TaskGraph = import('../../extension/ai/orchestrator/types').TaskGraph;
+    type TaskNode = import('../../extension/ai/orchestrator/types').TaskNode;
+
+    before(() => {
+        normalize = require('../../extension/ai/orchestrator/resumeNormalization').normalizeResumedGraph;
+    });
+
+    const node = (id: string, status: TaskNode['status'], overrides: Partial<TaskNode> = {}): TaskNode => ({
+        id,
+        agentType: 'explore',
+        prompt: id,
+        dependencies: [],
+        priority: 'normal',
+        status,
+        retryCount: 2,
+        error: 'previous failure',
+        maxRetries: 1,
+        ...overrides,
+    });
+
+    const graph = (nodes: TaskNode[]): TaskGraph => ({
+        id: 'g',
+        nodes: new Map(nodes.map(n => [n.id, n])),
+        metadata: { userPrompt: 'demo', createdAt: 1 },
+    });
+
+    it('failed/cancelled 节点重新入队并清除错误与重试计数（既有行为）', () => {
+        const g = graph([node('failed_a', 'failed'), node('cancelled_b', 'cancelled')]);
+        const summary = normalize(g);
+        expect(g.nodes.get('failed_a')!.status).to.equal('pending');
+        expect(g.nodes.get('failed_a')!.error).to.equal(undefined);
+        expect(g.nodes.get('failed_a')!.retryCount).to.equal(0);
+        expect(summary.resetFailed).to.deep.equal(['failed_a']);
+        expect(summary.resetCancelled).to.deep.equal(['cancelled_b']);
+    });
+
+    it('running 节点也重新入队：波中途抛出后被持久化的节点不再死锁', () => {
+        // This is the wave-threw-mid-flight shape: a live graph reference was
+        // persisted by the dispatch catch, so in-flight nodes stayed `running`.
+        // Without the reset they never schedule again — getReadyNodes only
+        // accepts `pending`.
+        const g = graph([node('interrupted', 'running')]);
+        const summary = normalize(g);
+        expect(g.nodes.get('interrupted')!.status).to.equal('pending');
+        expect(summary.resetRunning).to.deep.equal(['interrupted']);
+        expect(summary.changed).to.equal(true);
+    });
+
+    it('done 节点不受影响：已完成的工作绝不重跑', () => {
+        const g = graph([
+            node('done_a', 'done', { resumeContextRef: 'run_1' }),
+            node('running_b', 'running'),
+        ]);
+        const summary = normalize(g);
+        expect(g.nodes.get('done_a')!.status).to.equal('done');
+        expect(g.nodes.get('done_a')!.resumeContextRef).to.equal('run_1');
+        expect(summary.resetRunning).to.deep.equal(['running_b']);
+    });
+
+    it('恢复元数据原样保留：澄清恢复依赖 resumeContextRef 与 pendingClarification', () => {
+        const g = graph([node('asker', 'failed', {
+            resumeContextRef: 'run_42',
+            pendingClarification: 'Which namespace?',
+        })]);
+        normalize(g);
+        const resumed = g.nodes.get('asker')!;
+        expect(resumed.status).to.equal('pending');
+        expect(resumed.resumeContextRef).to.equal('run_42');
+        expect(resumed.pendingClarification).to.equal('Which namespace?');
+    });
+
+    it('无任何待重排队列的图返回 changed=false', () => {
+        const g = graph([node('done_a', 'done'), node('pending_b', 'pending')]);
+        const summary = normalize(g);
+        expect(summary.changed).to.equal(false);
+        expect(g.nodes.get('pending_b')!.status).to.equal('pending');
+    });
+});
+
+
 // ── 6. Executor-level resume bookkeeping ─────────────────────────────────────
 
 describe('ParallelExecutor — clarification resume bookkeeping', () => {

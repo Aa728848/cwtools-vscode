@@ -39,6 +39,9 @@
 - **[修复] 后台子 Agent 的授权事件可能记入错误的运行或话题**：
   - 授权请求的运行 ID 此前会回落到面板当前的 `currentRunId`；对于在后续轮次弹卡的后台子 Agent，那是一个无关的运行。解析与取消时的话题 ID 也在点击时刻重新取值，导致跨话题切换后归属错误。现在运行 ID 优先取子 Agent 自身的 `runRecord`/`parentRunId`，话题 ID 在请求时刻快照并在解析、取消、放弃三条路径统一使用。
   English: [Fix] Background sub-agent approval events could be recorded against the wrong run or topic — the run id fell back to the panel's live `currentRunId` (an unrelated run for a card raised in a later turn), and the topic id was re-derived at click time. The run id now prefers the sub-agent's own `runRecord`/`parentRunId`, and the topic id is snapshotted at request time and used consistently by the resolve, cancel, and abandon paths.
+- **[修复] 波中途异常后，恢复编排图时 `running` 节点不再死锁**：
+  - 若执行波在运行中抛出异常，调度入口的兜底会把带活引用的图持久化下来，导致当时仍在执行的节点以 `running` 状态落盘；而恢复逻辑只重置 `failed/cancelled`，且就绪调度只认 `pending`，这些节点从此永远不会被调度，图永久处于未完成状态。现在恢复时统一把 `failed/cancelled/running` 节点重新入队（`running` 在可恢复时刻必然是陈旧的），并保留澄清恢复所需的 `resumeContextRef` 与 `pendingClarification` 元数据。
+  English: [Fix] Resuming a graph whose wave threw mid-flight no longer deadlocks `running` nodes — the dispatch fallback persists the graph by live reference, so in-flight nodes landed on disk as `running`; resume only reset `failed/cancelled` while scheduling only accepts `pending`, leaving those nodes unschedulable forever. Resume now re-queues `failed/cancelled/running` alike (a `running` node is always stale at resume time) while preserving the clarification-resume metadata.
 
 ## [2.14.8] - 2026-08-16
 

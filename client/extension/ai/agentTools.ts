@@ -72,6 +72,7 @@ import {
 import { backgroundOrchestrators } from './orchestrator/backgroundOrchestrators';
 import { evaluateDelegationBudget } from './orchestrator/delegationDepth';
 import { buildOrchestrationCatalog as projectOrchestrationCatalog } from './orchestrator/orchestrationCatalog';
+import { normalizeResumedGraph } from './orchestrator/resumeNormalization';
 import { BLACKBOARD_KEY_PREFIXES } from './orchestrator/blackboardSchema';
 import { normalizeEvidenceGateMode, type EvidenceClaimKind, type EvidenceGateDecision, type EvidenceGateMode, type EvidenceGatePhase } from './evidence/evidenceTypes';
 import { isPdxScriptTarget } from './evidence/claimExtractor';
@@ -3823,12 +3824,23 @@ export class AgentToolExecutor {
                 graph = deserializeGraph(resumeRecord.graph);
                 restoredBlackboard = resumeRecord.blackboard;
                 // Nodes left incomplete by the previous wave are re-eligible.
-                for (const node of graph.nodes.values()) {
-                    if (node.status === 'failed' || node.status === 'cancelled') {
-                        node.status = 'pending';
-                        node.error = undefined;
-                        node.retryCount = 0;
-                    }
+                // `running` is included: a wave that threw mid-flight is persisted
+                // with a live graph reference, so its interrupted nodes would
+                // otherwise stay `running` on disk and never be scheduled again.
+                // See orchestrator/resumeNormalization.ts.
+                const resumeNormalization = normalizeResumedGraph(graph);
+                if (resumeNormalization.changed) {
+                    runnerOptsForLimits?.runEventSink?.appendSoon('step_appended', {
+                        step: {
+                            type: 'orchestrator_progress',
+                            content: `Resume re-queued ${resumeNormalization.resetFailed.length + resumeNormalization.resetCancelled.length} unfinished node(s)`
+                                + (resumeNormalization.resetRunning.length > 0
+                                    ? `, including ${resumeNormalization.resetRunning.length} interrupted mid-flight node(s) from a wave that never settled`
+                                    : '')
+                                + '.',
+                            timestamp: Date.now(),
+                        },
+                    });
                 }
                 if (resumeRecord.graph.userExecutionPolicy) {
                     userExecutionPolicy = resumeRecord.graph.userExecutionPolicy;

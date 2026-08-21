@@ -16,6 +16,8 @@ export interface ChatPanelHtmlOptions {
     surface?: 'chat' | 'manager';
     layout?: 'sidebar' | 'detached';
     enableCodexUi?: boolean;
+    /** Additional image origins already narrowed by localResourceRoots. */
+    imageSources?: string[];
 }
 
 /**
@@ -37,6 +39,7 @@ export function getChatPanelHtml(webview: vs.Webview, extensionUri: vs.Uri, opti
     const stylesheetUris = [cssUri.toString(), ...(options?.extraStylesheets ?? [])];
     const stylesheetLinks = stylesheetUris.map(uri => `<link rel="stylesheet" href="${uri}">`).join('\n');
     const csp = webview.cspSource;
+    const imageSources = [...new Set(options?.imageSources ?? [])].join(' ');
     const title = options?.title ?? 'Cwtool Code';
     const surface = options?.surface ?? 'chat';
     const layout = options?.layout ?? 'sidebar';
@@ -54,7 +57,7 @@ export function getChatPanelHtml(webview: vs.Webview, extensionUri: vs.Uri, opti
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${csp} 'unsafe-inline'; script-src ${csp}; img-src data: blob:;">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${csp} 'unsafe-inline'; script-src ${csp}; img-src data: blob:${imageSources ? ` ${imageSources}` : ''};">
 <title>${title}</title>
 ${stylesheetLinks}
 </head>

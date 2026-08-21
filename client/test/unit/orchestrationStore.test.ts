@@ -187,6 +187,30 @@ describe('orchestrationStore', () => {
         expect(store.listOrchestrations({ topicId, domain: 'paradox' })).to.have.length(0);
     });
 
+    it('rejects structurally valid JSON with invalid timestamps, domains, or node states', async () => {
+        const { graph, topicId } = makeGraph('invalid-boundary');
+        await store.saveOrchestration({
+            topicId, domain: 'paradox', graph, agentResults: new Map(),
+            blackboard: { entries: [], timestamp: 1 }, summary: 's',
+            totalTokenUsage: { total: 0, input: 0, output: 0, estimatedCostCny: 0 },
+        });
+        const target = path.join(root, 'topics', topicId, 'orchestrations', `${graph.id}.json`);
+        const valid = JSON.parse(fs.readFileSync(target, 'utf8'));
+
+        for (const mutate of [
+            (value: any) => { value.updatedAt = 'not-a-date'; },
+            (value: any) => { value.domain = 'unknown'; },
+            (value: any) => { value.graph.nodes[0].status = 'working'; },
+            (value: any) => { value.totalTokenUsage.total = 'NaN'; },
+        ]) {
+            const candidate = JSON.parse(JSON.stringify(valid));
+            mutate(candidate);
+            fs.writeFileSync(target, JSON.stringify(candidate), 'utf8');
+            expect(store.loadOrchestration(graph.id, { topicId, domain: 'paradox' })).to.equal(undefined);
+            expect(store.listOrchestrations({ topicId, domain: 'paradox' })).to.deep.equal([]);
+        }
+    });
+
     it('bounds stored graphs per topic (newest 32 retained)', async () => {
         const ids: string[] = [];
         for (let i = 0; i < 35; i++) {

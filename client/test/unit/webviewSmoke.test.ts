@@ -34,6 +34,11 @@ describe('webview smoke checks', () => {
         const css = fs.readFileSync(path.join(root, 'client/webview/chatPanel.css'), 'utf8');
 
         expect(html).to.include('id="chatArea"');
+        expect(html).to.include('img-src data: blob:');
+        expect(html).to.include('imageSources');
+        expect(host).to.include('GENERATED_IMAGE_MARKER_PATTERN');
+        expect(host).to.include('webview.asWebviewUri(vs.Uri.joinPath(dir, fileName)).toString()');
+        expect(host).to.include('this.generatedImageDirectoryUri()');
         expect(html).to.include('id="modeSel"');
         expect(html).to.include('id="composerAddBtn"');
         expect(html).to.include('id="quickModeTrigger"');

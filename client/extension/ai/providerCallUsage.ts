@@ -7,7 +7,7 @@
 import type { CacheRequestUsage, ChatCompletionResponse, ChatMessage, CustomApiFormat, TokenUsage } from './types';
 import { contentToString } from './types';
 import { appendCacheRequestUsage, isCacheCapableUsage } from './cacheCapability';
-import { getCacheDiscountFactor, getModelPricing } from './pricing';
+import { getCacheDiscountFactor, getCurrentModelPricing } from './pricing';
 
 export interface ProviderCallUsageOptions {
     providerId: string;
@@ -62,7 +62,7 @@ export function buildProviderCallTokenUsage(
         ?? 0;
     const cachedTokens = Math.min(promptTokens, rawCachedTokens);
     const netInput = Math.max(0, promptTokens - cachedTokens);
-    const pricing = getModelPricing(model, providerId, new Date());
+    const pricing = getCurrentModelPricing(model, providerId);
     const cacheDiscount = getCacheDiscountFactor(model, providerId);
     const estimatedCostCny = (cachedTokens / 1_000_000) * pricing[0] * cacheDiscount
         + (netInput / 1_000_000) * pricing[0]

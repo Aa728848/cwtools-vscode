@@ -60,6 +60,20 @@ describe('AgentUiBroadcaster', () => {
         expect(receivedB).to.deep.equal([payload]);
     });
 
+    it('can transform one message for each Webview target', () => {
+        const broadcaster = new AgentUiBroadcaster();
+        const receivedA: HostMessage[] = [];
+        const receivedB: HostMessage[] = [];
+        const webviewA = { postMessage: (msg: HostMessage) => { receivedA.push(msg); return Promise.resolve(true); } } as any;
+        const webviewB = { postMessage: (msg: HostMessage) => { receivedB.push(msg); return Promise.resolve(true); } } as any;
+        broadcaster.register(webviewA);
+        broadcaster.register(webviewB);
+        const payload: HostMessage = { type: 'slashCommandResult', command: '/x', status: 'success', message: 'base' };
+        broadcaster.postMessage(payload, (webview: any) => ({ ...payload, message: webview === webviewA ? 'A' : 'B' }));
+        expect((receivedA[0] as any).message).to.equal('A');
+        expect((receivedB[0] as any).message).to.equal('B');
+    });
+
     it('can send restore messages to a single registered surface', () => {
         const broadcaster = new AgentUiBroadcaster();
         const receivedChat: HostMessage[] = [];

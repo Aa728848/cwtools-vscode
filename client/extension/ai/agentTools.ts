@@ -4106,7 +4106,7 @@ export class AgentToolExecutor {
                     background: true,
                     graphId: bgGraphId,
                     nodeCount: graph.nodes.size,
-                    hint: 'Background dispatch started. A BACKGROUND TASK RESULT arrives in the next turn; then use merge_results(graphId) to consolidate, or dispatch_agents(resumeGraphId=...) to extend the graph.',
+                    hint: 'Background dispatch started. A BACKGROUND TASK RESULT arrives in the next turn; then call merge_results with this graphId to merge every available node result, or dispatch_agents with resumeGraphId to extend the graph.',
                 };
             }
 
@@ -4343,7 +4343,7 @@ export class AgentToolExecutor {
         if (!backgroundOrchestrators.hasActive(graphId)) {
             return {
                 success: false,
-                message: `Graph '${graphId}' is not running in the background (it may have already completed). Use merge_results(graphId) to inspect it.`,
+                message: `Graph '${graphId}' is not running in the background (it may have already completed). Call merge_results with that graphId to inspect all available node results.`,
             };
         }
         backgroundOrchestrators.cancel(graphId);
@@ -4351,7 +4351,7 @@ export class AgentToolExecutor {
             success: true,
             cancelled: true,
             graphId,
-            hint: 'Background graph cancelled. Its partial state stays persisted: resume it later with dispatch_agents(resumeGraphId=...) or inspect with merge_results(graphId).',
+            hint: 'Background graph cancelled. Its partial state stays persisted: resume it later with dispatch_agents(resumeGraphId=...) or call merge_results with that graphId to inspect all available node results.',
         };
     }
 
@@ -4370,13 +4370,15 @@ export class AgentToolExecutor {
             ? args.runId.trim()
             : undefined;
 
-        const requestedNodeIds = Array.isArray(args.nodeIds)
-            ? args.nodeIds.filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
+        let requestedNodeIds = Array.isArray(args.nodeIds)
+            ? [...new Set(args.nodeIds
+                .filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
+                .map(value => value.trim()))]
             : [];
-        if (requestedNodeIds.length === 0) {
-            // Catalog mode. Without it the only way back to a graph is to remember
-            // its id: a forgotten graphId is rejected outright, and the cheapest
-            // recovery the model has left is to re-dispatch a whole wave.
+        if (!requestedGraphId && requestedNodeIds.length === 0) {
+            // Empty/catalog mode recovers graph ids and node state. An explicit
+            // graph id is instead an actionable merge request and selects every
+            // available result when no node subset was supplied.
             return this.buildOrchestrationCatalog(requestedTopicId, requestedDomain, requestedRunId);
         }
         const strategy = args.strategy === 'concatenate' || args.strategy === 'summary' ? args.strategy : 'structured';
@@ -4392,6 +4394,7 @@ export class AgentToolExecutor {
             && !requestedRunId;
         if (memoryMatches) {
             const r = this._lastOrchestratorResult!;
+            if (requestedNodeIds.length === 0) requestedNodeIds = [...r.agentResults.keys()].sort();
             return this.assembleMergeReport(
                 r.agentResults,
                 memoryGraph,
@@ -4427,6 +4430,7 @@ export class AgentToolExecutor {
                 };
             }
             const agentResults = deserializeAgentResults(storedRecord.agentResults);
+            if (requestedNodeIds.length === 0) requestedNodeIds = [...agentResults.keys()].sort();
             const graph = deserializeGraph(storedRecord.graph);
             const failedNodes = [...graph.nodes.values()].filter(node => node.status === 'failed').map(node => node.id);
             const cancelledNodes = [...graph.nodes.values()].filter(node => node.status === 'cancelled').map(node => node.id);

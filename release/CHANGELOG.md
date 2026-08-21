@@ -30,6 +30,11 @@
   English: [Improvement] Delegated sub-agents are told their own fixed permission scope and instructed to report out-of-scope needs in the handoff `Unresolved` section instead of retrying denied operations; delegation depth becomes an explicit monotone budget (default one level, configurable via `stellarisLanguageServices.ai.orchestrator.maxDelegationDepth`) that a resumed graph cannot reset to top level.
 
 ### 修复 / Fixes
+- **[修复] 图片生成、编排结果合并、计费与持久化边界加固**：
+  - Responses 原生图片生成结果改用受控标记持久化，并在每个 Webview 中转换为 `asWebviewUri`；图片目录纳入 `localResourceRoots`/CSP，且写盘前限制大小并校验 PNG/JPEG/WebP 文件签名。
+  - `merge_results(graphId=...)` 现在会自动合并图中全部可用节点结果；空参数才返回图目录，目录同时列出节点 ID、状态与结果可用性。
+  - 所有实时模型调用统一使用请求时刻的 DeepSeek 峰谷价格；Stellaris 本地化分词配置只作用于专用语言，不再覆盖全局 YAML；损坏或字段非法的编排快照会在读取边界被拒绝。
+  English: [Fix] Hardened generated images, orchestration merging, pricing, and persistence boundaries — Responses images now flow through bounded/signature-checked storage and per-Webview `asWebviewUri` conversion with matching resource roots/CSP; `merge_results(graphId=...)` merges every available result while empty arguments return a node-aware catalog; all live model calls use time-of-request DeepSeek pricing, localisation word selection no longer overrides global YAML, and malformed orchestration snapshots are rejected at load time.
 - **[修复] 授权请求可能长时间挂起并残留审批卡片**：
   - 策略引擎通用授权卡与证据门人工覆盖此前直接 `await` 宿主授权 Promise，而该 Promise 仅在用户点击时结算。子 Agent 因此可能在无人查看的卡片上阻塞整个推理循环，直到 20 分钟空闲看门狗介入，并遗留永不结算的 Promise 链、`pendingPermission*` 表项与会在每次视图恢复时重新出现的陈旧卡片。现统一改用带中止竞速的授权封装（`runner/permissionRequest.ts`），运行被中止即判定为拒绝（中止不等于同意），并同步清理解析器、卡片与运行时交互记录。
   English: [Fix] Approval requests could hang and leave residual cards — the policy-engine approval card and the evidence-gate manual override awaited the host approval promise directly, which only settles on a user click. A sub-agent could therefore block its whole reasoning loop on a card nobody was watching until the 20-minute idle watchdog intervened, leaking a never-settling promise chain, the pending-approval bookkeeping, and a stale card that reappeared on every view restore. Both paths now use one abort-racing wrapper (`runner/permissionRequest.ts`) that denies on abort (an abort is not consent) and retires the resolver, card, and runtime interaction together.

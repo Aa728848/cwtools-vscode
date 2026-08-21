@@ -41,7 +41,7 @@ import { AgentToolExecutor, TOOL_DEFINITIONS } from './agentTools';
 import { PromptBuilder, hashToolDefinitionsForFingerprint, orderMessagesForStablePrefix } from './promptBuilder';
 import { getEffectiveEndpoint, getProvider, getProviderApiFormat, isModelVisionCapable } from './providers';
 import { DEFAULT_REASONING_KEY, detectReasoningKey, reasoningValue } from './providers/reasoningKey';
-import { getModelPricing, getCacheDiscountFactor } from './pricing';
+import { getCurrentModelPricing, getCacheDiscountFactor } from './pricing';
 import { buildProviderCallTokenUsage } from './providerCallUsage';
 import { parseDsmlToolCalls as _parseDsmlToolCalls, stripDsmlMarkup as _stripDsmlMarkup, stripThinkBlocks as _stripThinkBlocks, cleanFinalContent as _cleanFinalContent } from './toolCallParser';
 import { tryRepairJson as _tryRepairJson } from './jsonRepair';
@@ -761,7 +761,7 @@ export class AgentRunner {
             ?? providerId
             ?? this.aiService.getConfig().provider;
         const effectiveModel = response.model ?? requestedModel ?? '';
-        const pricing = getModelPricing(effectiveModel, effectiveProvider);
+        const pricing = getCurrentModelPricing(effectiveModel, effectiveProvider);
         const cachedTokens = response.usage?.cached_tokens
             ?? response.usage?.prompt_tokens_details?.cached_tokens
             ?? response.usage?.prompt_cache_hit_tokens
@@ -3028,7 +3028,7 @@ export class AgentRunner {
                         response.usage.prompt_tokens,
                     );
                 }
-                const pricing = getModelPricing(response.model ?? options?.model ?? '', responseProviderId);
+                const pricing = getCurrentModelPricing(response.model ?? options?.model ?? '', responseProviderId);
                  // Cache-aware cost calculation: cached tokens billed at discounted rate
                 const cachedTokens = response.usage?.cached_tokens ?? 
                                      (response.usage as any)?.prompt_tokens_details?.cached_tokens ?? 

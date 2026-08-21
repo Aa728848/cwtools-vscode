@@ -1,5 +1,5 @@
 import { expect } from 'chai';
-import { getModelPricing, MODEL_PRICING, getCacheDiscountFactor } from '../../extension/ai/pricing';
+import { getModelPricing, getCurrentModelPricing, MODEL_PRICING, getCacheDiscountFactor } from '../../extension/ai/pricing';
 
 describe('getModelPricing', () => {
     it('returns [0, 0] for empty model', () => {
@@ -44,6 +44,12 @@ describe('getModelPricing', () => {
         expect(getModelPricing('deepseek-v4-pro', 'deepseek', offPeak)).to.deep.equal([4.50, 13.50]);
         expect(getModelPricing('deepseek-v4-flash', 'deepseek', peak)).to.deep.equal([3.00, 9.00]);
         expect(getModelPricing('deepseek-v4-flash', 'deepseek', offPeak)).to.deep.equal([1.50, 4.50]);
+    });
+
+    it('uses the supplied clock for every live pricing lookup', () => {
+        const offPeak = new Date('2026-08-16T05:00:00.000Z');
+        expect(getCurrentModelPricing('deepseek-v4-pro', 'deepseek', offPeak)).to.deep.equal([4.50, 13.50]);
+        expect(getCurrentModelPricing('gpt-5.5', 'openai', offPeak)).to.deep.equal([34.10, 204.59]);
     });
 
     it('prefix match: dated model tag', () => {

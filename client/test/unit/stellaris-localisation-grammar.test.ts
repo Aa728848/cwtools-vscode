@@ -121,7 +121,7 @@ describe('Stellaris Localisation Grammar & Language Configuration', () => {
     it('separates rich-text markers from Unicode localisation words', () => {
         const config = JSON.parse(fs.readFileSync(configPath, 'utf8')) as { wordPattern?: unknown };
         expect(config.wordPattern).to.equal(LOCALISATION_WORD_PATTERN_SOURCE);
-        expect(LOCALISATION_WORD_PATTERN_LANGUAGE_IDS).to.deep.equal(['yaml', 'stellaris-localisation']);
+        expect(LOCALISATION_WORD_PATTERN_LANGUAGE_IDS).to.deep.equal(['stellaris-localisation']);
 
         const wordPattern = new RegExp(LOCALISATION_WORD_PATTERN_SOURCE, 'g');
         const runtimeWordPattern = createLocalisationWordPattern();

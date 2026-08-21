@@ -647,14 +647,41 @@ describe('AIService OpenAI Responses payload', () => {
             );
 
             const content = response.choices[0].message.content as string;
-            const imagePath = content.match(/!\[Generated image\]\(([^)]+)\)/)?.[1];
-            expect(imagePath).to.be.a('string');
-            expect(fs.existsSync(imagePath!)).to.equal(true);
+            const imageRef = content.match(/!\[Generated image\]\(([^)]+)\)/)?.[1];
+            expect(imageRef).to.equal('cwtools-generated-image:ig_test-1.png');
+            expect(fs.existsSync(path.join(storageRoot, 'ai-generated-images', 'ig_test-1.png'))).to.equal(true);
             expect(response.choices[0].message.responses_output_items![0]).to.deep.equal({
                 type: 'image_generation_call',
                 id: 'ig_test',
                 output_format: 'png',
             });
+        } finally {
+            fs.rmSync(storageRoot, { recursive: true, force: true });
+        }
+    });
+
+    it('rejects oversized or mismatched image payloads before writing files', async () => {
+        const { AIService } = loadAIService();
+        const storageRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'cwtools-ai-images-invalid-'));
+        const service = new AIService({ secrets: {}, globalStorageUri: { fsPath: storageRoot } } as any) as any;
+        const output = [{
+            type: 'image_generation_call',
+            id: 'ig_invalid',
+            result: Buffer.from('not a png').toString('base64'),
+            output_format: 'png',
+        }];
+        service.fetchWithRetry = async () => ({
+            ok: true,
+            json: async () => ({ id: 'resp_image', model: 'gpt-5.6-sol', output, usage: {} }),
+        });
+        try {
+            const response = await service.callOpenAIResponses(
+                'https://api.openai.com/v1', 'test-key',
+                { model: 'gpt-5.6-sol', messages: [{ role: 'user', content: '$imagegen icon' }] },
+                'custom', new AbortController(),
+            );
+            expect(response.choices[0].message.content).to.equal(null);
+            expect(fs.existsSync(path.join(storageRoot, 'ai-generated-images', 'ig_invalid-1.png'))).to.equal(false);
         } finally {
             fs.rmSync(storageRoot, { recursive: true, force: true });
         }

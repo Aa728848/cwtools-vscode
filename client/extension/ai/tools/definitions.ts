@@ -1954,19 +1954,19 @@ const RAW_TOOL_DEFINITIONS: ToolDefinition[] = [
         type: 'function',
         function: {
             name: 'merge_results',
-            description: 'Merge completed sub-agent execution results into a final deliverable that consolidates implementation, verification, failures, and review output. Call it with no nodeIds to list the orchestration graphs of this topic instead — their ids, progress, and whether each one is resumable — when you do not remember a graphId.',
+            description: 'Merge sub-agent results into a final deliverable. Call with no graphId and no nodeIds to list this topic\'s graph catalog. Call with graphId alone to merge every available result in that graph, or add nodeIds to merge only a selected subset.',
             parameters: {
                 type: 'object',
                 properties: {
                     nodeIds: {
                         type: 'array',
                         items: { type: 'string' },
-                        description: 'Task node IDs whose results should be merged. Omit to return the graph catalog for this topic instead of a merge.',
+                        description: 'Optional subset of task node IDs to merge. With graphId and no nodeIds, every available result in that graph is merged. With neither graphId nor nodeIds, the graph catalog is returned.',
                     },
                     strategy: { type: 'string', enum: ['concatenate', 'structured', 'summary'], description: 'Merge strategy: "concatenate" (raw join), "structured" (group by file), "summary" (generate summary). Default: structured.' },
                     graphId: {
                         type: 'string',
-                        description: 'Persisted graph id to merge (from dispatch graphId). Defaults to the latest matching wave. Ignored by the catalog mode.',
+                        description: 'Persisted graph id returned by dispatch_agents. Supplying graphId alone merges every available node result; omit it together with nodeIds to request the catalog.',
                     },
                     runId: {
                         type: 'string',

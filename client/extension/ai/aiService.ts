@@ -63,6 +63,8 @@ const DEFAULT_CHAT_COMPLETION_TIMEOUT_MS = 20 * 60 * 1000;
 const MIN_CHAT_COMPLETION_TIMEOUT_MS = 60 * 1000;
 const MAX_CHAT_COMPLETION_TIMEOUT_MS = 60 * 60 * 1000;
 const CHAT_COMPLETION_USAGE_TRAILER_GRACE_MS = 1500;
+const MAX_RESPONSES_GENERATED_IMAGE_BYTES = 25 * 1024 * 1024;
+const RESPONSES_GENERATED_IMAGE_MARKER_PREFIX = 'cwtools-generated-image:';
 const RESPONSES_IMAGE_GENERATION_INTENT =
     /(\$imagegen\b|(?:生成|创建|绘制|画|制作|做).{0,16}(?:图片|图像|插画|海报|头像|图标|壁纸|照片)|(?:图片|图像|插画|海报|头像|图标|壁纸|照片).{0,16}(?:生成|创建|绘制|画|制作|做)|\b(?:generate|create|make|draw|render)\b.{0,48}\b(?:image|picture|illustration|poster|icon|wallpaper|logo|photo)\b)/i;
 
@@ -1821,8 +1823,10 @@ export class AIService {
                     },
                 });
             } else if (item?.type === 'image_generation_call') {
-                const imagePath = this.persistResponsesGeneratedImage(item, data.id, generatedImageMarkdown.length);
-                if (imagePath) generatedImageMarkdown.push(`![Generated image](${imagePath})`);
+                const imageFileName = this.persistResponsesGeneratedImage(item, data.id, generatedImageMarkdown.length);
+                if (imageFileName) {
+                    generatedImageMarkdown.push(`![Generated image](${RESPONSES_GENERATED_IMAGE_MARKER_PREFIX}${imageFileName})`);
+                }
             }
         }
 
@@ -1872,11 +1876,21 @@ export class AIService {
         if (!rawBase64) return undefined;
         const normalizedBase64 = rawBase64.replace(/\s+/g, '');
         if (!/^[A-Za-z0-9+/=]+$/.test(normalizedBase64)) return undefined;
+        const estimatedBytes = Math.floor((normalizedBase64.length * 3) / 4)
+            - (normalizedBase64.endsWith('==') ? 2 : normalizedBase64.endsWith('=') ? 1 : 0);
+        if (estimatedBytes <= 0 || estimatedBytes > MAX_RESPONSES_GENERATED_IMAGE_BYTES) {
+            ErrorReporter.warn(SOURCE.AI_SERVICE, `Rejected Responses generated image with unsafe decoded size (${estimatedBytes} bytes).`);
+            return undefined;
+        }
         try {
             const buffer = Buffer.from(normalizedBase64, 'base64');
-            if (buffer.length === 0) return undefined;
+            if (buffer.length !== estimatedBytes || buffer.length > MAX_RESPONSES_GENERATED_IMAGE_BYTES) return undefined;
             const outputFormat = typeof item.output_format === 'string' ? item.output_format : 'png';
             const extension = this.responsesImageExtension(outputFormat);
+            if (!this.hasExpectedResponsesImageSignature(buffer, extension)) {
+                ErrorReporter.warn(SOURCE.AI_SERVICE, `Rejected Responses generated image whose bytes do not match ${extension}.`);
+                return undefined;
+            }
             const idPart = this.safeFileName(typeof item.id === 'string' && item.id
                 ? item.id
                 : typeof responseId === 'string' && responseId
@@ -1886,11 +1900,16 @@ export class AIService {
             fs.mkdirSync(dir, { recursive: true });
             const filePath = path.join(dir, `${idPart}-${index + 1}.${extension}`);
             fs.writeFileSync(filePath, buffer, { mode: 0o600 });
-            return path.resolve(filePath).replace(/\\/g, '/');
+            return path.basename(filePath);
         } catch (error) {
             ErrorReporter.warn(SOURCE.AI_SERVICE, 'Failed to persist Responses generated image', error);
             return undefined;
         }
+    }
+
+    /** Directory exposed to the chat host as a read-only Webview resource root. */
+    public getGeneratedImageDirectory(): string {
+        return this.responsesGeneratedImageDir();
     }
 
     private responsesGeneratedImageDir(): string {
@@ -1912,6 +1931,19 @@ export class AIService {
 
     private safeFileName(value: string): string {
         return value.replace(/[^a-z0-9_.-]+/gi, '_').replace(/^_+|_+$/g, '').slice(0, 80) || 'image';
+    }
+
+    private hasExpectedResponsesImageSignature(buffer: Buffer, extension: 'png' | 'webp' | 'jpg'): boolean {
+        if (extension === 'png') {
+            return buffer.length >= 8 && buffer.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
+        }
+        if (extension === 'jpg') {
+            return buffer.length >= 4 && buffer[0] === 0xff && buffer[1] === 0xd8
+                && buffer[buffer.length - 2] === 0xff && buffer[buffer.length - 1] === 0xd9;
+        }
+        return buffer.length >= 12
+            && buffer.subarray(0, 4).toString('ascii') === 'RIFF'
+            && buffer.subarray(8, 12).toString('ascii') === 'WEBP';
     }
 
     private redactResponsesOutputItemsForReplay(outputItems: any[]): Array<Record<string, unknown>> {

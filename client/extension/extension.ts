@@ -855,8 +855,8 @@ export async function activate(context: ExtensionContext) {
 	registerProjectKnowledgeWatcher(context, indexService);
 
 	// Register localization enhancements (§ color highlighting, $REF$ hover/goto).
-	// Some localisation .yml files stay under VS Code's built-in yaml id, so
-	// install the same word pattern there to keep §/£ markers out of words.
+	// Keep the custom word pattern scoped to the dedicated localisation language;
+	// overriding VS Code's shared yaml configuration would affect unrelated YAML.
 	for (const language of LOCALISATION_WORD_PATTERN_LANGUAGE_IDS) {
 		context.subscriptions.push(vs.languages.setLanguageConfiguration(language, {
 			wordPattern: createLocalisationWordPattern(),

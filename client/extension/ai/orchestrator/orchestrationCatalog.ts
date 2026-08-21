@@ -34,12 +34,19 @@ export interface OrchestrationCatalogClarification {
     contextPreserved: boolean;
 }
 
+export interface OrchestrationCatalogNode {
+    id: string;
+    status: StoredTaskNode['status'];
+    hasResult: boolean;
+}
+
 export interface OrchestrationCatalogEntry {
     graphId: string;
     runId?: string;
     mode?: string;
     domain: AgentRuntimeDomain;
     nodeCount: number;
+    nodes: OrchestrationCatalogNode[];
     nodeStatusCounts: Record<StoredTaskNode['status'], number>;
     updatedAt: string;
     totalTokens?: number;
@@ -66,7 +73,7 @@ const STATE_MEANINGS: Record<OrchestrationCatalogState, string> = {
     running_in_background:
         'Still executing off the tool call. Its BACKGROUND TASK RESULT arrives in a later turn; do not resume or merge it yet.',
     complete:
-        'Every node settled. merge_results(graphId, nodeIds=[...]) returns the per-node detail.',
+        'Every node settled. merge_results(graphId=...) automatically returns every available node result.',
     resumable:
         'Persisted with unfinished nodes. This is resumable, NOT terminal and NOT a result waiting to be collected: '
         + 'dispatch_agents(resumeGraphId=...) re-runs the unfinished nodes.',
@@ -113,6 +120,11 @@ export function buildOrchestrationCatalog(
             mode: record.mode,
             domain: record.domain,
             nodeCount: record.graph.nodes.length,
+            nodes: record.graph.nodes.map(node => ({
+                id: node.id,
+                status: node.status,
+                hasResult: Object.prototype.hasOwnProperty.call(record.agentResults, node.id),
+            })),
             nodeStatusCounts,
             updatedAt: new Date(record.updatedAt).toISOString(),
             totalTokens: record.totalTokenUsage?.total,
@@ -135,7 +147,7 @@ export function buildOrchestrationCatalog(
         graphs,
         hint: graphs.length === 0
             ? 'No orchestration graph is persisted for this topic yet. Use dispatch_agents to start one.'
-            : 'Pass nodeIds to merge a graph\'s node output. A graph that lists pendingClarifications is waiting on a decision: answer it with '
+            : 'Pass graphId alone to merge every available node output, or graphId plus nodeIds to select a subset. A graph that lists pendingClarifications is waiting on a decision: answer it with '
                 + 'dispatch_agents(resumeGraphId=..., answerClarifications=[{id, answer}]). Any node whose contextPreserved is true resumes from its own '
                 + 'preserved working context instead of repeating the investigation it already finished.',
     };

@@ -292,7 +292,6 @@ describe('merge_results durable store layer', () => {
 
         const executor = new AgentToolExecutor({} as any, workspaceRoot);
         const result = await executor.execute('merge_results', {
-            nodeIds: ['n1'],
             graphId: graph.id,
         }, {
             runnerOptions: { topicId: 'topic-a', domain: 'paradox' },
@@ -308,6 +307,22 @@ describe('merge_results durable store layer', () => {
         expect(result.fileGroups).to.have.length(1);
         expect(result.integration.entityContracts).to.have.length(1);
         expect(result.integration.entityContracts[0].nodeId).to.equal('n1');
+    });
+
+    it('returns the catalog only when both graphId and nodeIds are omitted', async () => {
+        const graph = engine.TaskGraphEngine.createGraph('Catalog objective');
+        engine.TaskGraphEngine.addNode(graph, 'catalog_n1', 'explore', 'Inspect.', { dependencies: [] });
+        await store.saveOrchestration({
+            topicId: 'topic-a', domain: 'general', mode: 'orchestrator', graph,
+            agentResults: new Map(), blackboard: { entries: [], timestamp: 1 },
+            summary: 'catalog', totalTokenUsage: { total: 0, input: 0, output: 0, estimatedCostCny: 0 },
+        });
+        const executor = new AgentToolExecutor({} as any, workspaceRoot);
+        const result = await executor.execute('merge_results', {}, {
+            runnerOptions: { topicId: 'topic-a', domain: 'general' },
+        } as any) as any;
+        expect(result.mode).to.equal('catalog');
+        expect(result.graphs[0].nodes[0]).to.deep.include({ id: 'catalog_n1', hasResult: false });
     });
 
     it('merge_results reports graphs still running in the background', async () => {

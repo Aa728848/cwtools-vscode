@@ -18,16 +18,20 @@ export class AgentUiBroadcaster {
         };
     }
 
-    postMessage(msg: HostMessage): void {
+    postMessage(msg: HostMessage, transform?: (webview: Webview, message: HostMessage) => HostMessage): void {
         for (const target of this.targets.keys()) {
-            target.postMessage(msg);
+            target.postMessage(transform ? transform(target, msg) : msg);
         }
     }
 
-    postMessageToSurface(surface: AgentSurface, msg: HostMessage): void {
+    postMessageToSurface(
+        surface: AgentSurface,
+        msg: HostMessage,
+        transform?: (webview: Webview, message: HostMessage) => HostMessage,
+    ): void {
         for (const [target, targetSurface] of this.targets) {
             if (targetSurface === surface) {
-                target.postMessage(msg);
+                target.postMessage(transform ? transform(target, msg) : msg);
             }
         }
     }

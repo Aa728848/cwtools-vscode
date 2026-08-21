@@ -123,21 +123,101 @@ export interface SaveOrchestrationInput {
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
-    return typeof value === 'object' && value !== null;
+    return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function isFiniteNonNegative(value: unknown): value is number {
+    return typeof value === 'number' && Number.isFinite(value) && value >= 0;
+}
+
+function isOptionalString(value: unknown): value is string | undefined {
+    return value === undefined || typeof value === 'string';
+}
+
+function isStringArray(value: unknown): value is string[] {
+    return Array.isArray(value) && value.every(item => typeof item === 'string');
+}
+
+function isTokenUsage(value: unknown): value is TokenUsage {
+    return isRecord(value)
+        && isFiniteNonNegative(value.total)
+        && isFiniteNonNegative(value.input)
+        && isFiniteNonNegative(value.output)
+        && isFiniteNonNegative(value.estimatedCostCny);
+}
+
+const STORED_NODE_STATUSES = new Set<StoredTaskNode['status']>(['pending', 'running', 'done', 'failed', 'cancelled']);
+const STORED_NODE_PRIORITIES = new Set<StoredTaskNode['priority']>(['critical', 'normal', 'low']);
+const STORED_AGENT_MODES = new Set<TaskNode['agentType']>([
+    'build', 'plan', 'explore', 'general', 'utility', 'review', 'gui_expert',
+    'script_reviewer', 'loc_translator', 'loc_writer', 'orchestrator', 'script',
+]);
+
+function isStoredTaskNode(value: unknown): value is StoredTaskNode {
+    if (!isRecord(value)) return false;
+    return typeof value.id === 'string' && value.id.length > 0
+        && STORED_AGENT_MODES.has(value.agentType as TaskNode['agentType'])
+        && typeof value.prompt === 'string'
+        && isStringArray(value.dependencies)
+        && STORED_NODE_STATUSES.has(value.status as StoredTaskNode['status'])
+        && STORED_NODE_PRIORITIES.has(value.priority as StoredTaskNode['priority'])
+        && Number.isSafeInteger(value.retryCount) && (value.retryCount as number) >= 0
+        && Number.isSafeInteger(value.maxRetries) && (value.maxRetries as number) >= 0
+        && (value.contextFiles === undefined || isStringArray(value.contextFiles))
+        && (value.plannedFiles === undefined || isStringArray(value.plannedFiles))
+        && (value.plannedEntities === undefined || isStringArray(value.plannedEntities))
+        && isOptionalString(value.result)
+        && isOptionalString(value.error)
+        && isOptionalString(value.agentId)
+        && isOptionalString(value.lastTaskId)
+        && isOptionalString(value.resumeContextRef)
+        && isOptionalString(value.pendingClarification)
+        && (value.tokenUsage === undefined || isTokenUsage(value.tokenUsage));
+}
+
+function isSerializedBlackboard(value: unknown): value is SerializedBlackboard {
+    if (!isRecord(value) || !Array.isArray(value.entries) || !isFiniteNonNegative(value.timestamp)) return false;
+    return value.entries.every(entry => Array.isArray(entry) && entry.length === 2
+        && typeof entry[0] === 'string' && isRecord(entry[1])
+        && entry[1].key === entry[0] && typeof entry[1].value === 'string'
+        && typeof entry[1].type === 'string' && Number.isSafeInteger(entry[1].version)
+        && typeof entry[1].authorAgentId === 'string' && isFiniteNonNegative(entry[1].timestamp));
+}
+
+function isStoredSubAgentResult(value: unknown): value is StoredSubAgentResult {
+    return isRecord(value)
+        && typeof value.nodeId === 'string' && value.nodeId.length > 0
+        && typeof value.success === 'boolean'
+        && typeof value.output === 'string'
+        && isTokenUsage(value.tokenUsage)
+        && isStringArray(value.writtenFiles)
+        && Number.isSafeInteger(value.stepCount) && (value.stepCount as number) >= 0
+        && isOptionalString(value.error)
+        && isOptionalString(value.runId)
+        && isOptionalString(value.clarification);
 }
 
 function isStoredOrchestration(value: unknown): value is StoredOrchestration {
-    if (!isRecord(value)) return false;
-    if (value.version !== 1) return false;
-    if (typeof value.graphId !== 'string' || typeof value.domain !== 'string') return false;
-    if (!isRecord(value.graph) || !Array.isArray(value.graph.nodes)) return false;
-    for (const node of value.graph.nodes) {
-        if (!isRecord(node)) return false;
-        if (typeof node.id !== 'string' || typeof node.prompt !== 'string') return false;
-        if (!Array.isArray(node.dependencies) || typeof node.status !== 'string') return false;
-    }
-    if (!isRecord(value.agentResults) || !isRecord(value.blackboard)) return false;
-    return typeof value.summary === 'string';
+    if (!isRecord(value) || value.version !== 1) return false;
+    if (typeof value.graphId !== 'string' || value.graphId.length === 0) return false;
+    if (value.domain !== 'paradox' && value.domain !== 'general' && value.domain !== 'hybrid') return false;
+    if (!isOptionalString(value.topicId) || !isOptionalString(value.runId) || !isOptionalString(value.mode)) return false;
+    if (value.delegationDepth !== undefined
+        && (!Number.isSafeInteger(value.delegationDepth) || (value.delegationDepth as number) < 0)) return false;
+    if (!isRecord(value.graph) || value.graph.id !== value.graphId
+        || typeof value.graph.userPrompt !== 'string'
+        || !isFiniteNonNegative(value.graph.createdAt)
+        || !Array.isArray(value.graph.nodes)
+        || !value.graph.nodes.every(isStoredTaskNode)) return false;
+    if (!isRecord(value.agentResults)
+        || !Object.values(value.agentResults).every(isStoredSubAgentResult)
+        || !isSerializedBlackboard(value.blackboard)
+        || typeof value.summary !== 'string'
+        || !isTokenUsage(value.totalTokenUsage)
+        || typeof value.complete !== 'boolean'
+        || !isFiniteNonNegative(value.createdAt)
+        || !isFiniteNonNegative(value.updatedAt)) return false;
+    return true;
 }
 
 export function serializeGraph(graph: TaskGraph): StoredGraph {

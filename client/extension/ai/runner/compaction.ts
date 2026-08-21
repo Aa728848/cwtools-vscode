@@ -3,7 +3,7 @@ import type { AgentRunnerOptions } from '../agentRunner';
 import { contentToString } from '../types';
 import { getModelContextTokens, getProvider } from '../providers';
 import { isDeepSeekModelOrProvider } from '../providers/models/capabilities';
-import { getCacheDiscountFactor, getModelPricing } from '../pricing';
+import { getCacheDiscountFactor, getCurrentModelPricing } from '../pricing';
 import { AGENT } from '../messages';
 import type { AIService } from '../aiService';
 import type { PromptBuilder } from '../promptBuilder';
@@ -531,7 +531,7 @@ export async function maybeCompactHistory(
                 ?? usage?.cached_content_token_count
                 ?? 0;
             const uncachedInputTokens = Math.max(0, promptTokens - cachedTokens);
-            const pricing = getModelPricing(responseModel, providerId);
+            const pricing = getCurrentModelPricing(responseModel, providerId);
             const cacheDiscount = getCacheDiscountFactor(responseModel, providerId);
             tokenAccumulator.input += promptTokens;
             tokenAccumulator.output += completionTokens;

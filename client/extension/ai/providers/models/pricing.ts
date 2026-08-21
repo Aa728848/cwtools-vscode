@@ -63,6 +63,20 @@ export function getModelPricing(model: string, providerId?: string, at?: Date): 
 }
 
 /**
+ * Resolve the price that applies to a live provider request. Keeping this
+ * separate from the stable table lookup prevents runtime call sites from
+ * silently forgetting time-of-use pricing while preserving deterministic
+ * configuration displays and tests that intentionally show peak/list prices.
+ */
+export function getCurrentModelPricing(
+    model: string,
+    providerId?: string,
+    at: Date = new Date(),
+): [number, number] {
+    return getModelPricing(model, providerId, at);
+}
+
+/**
  * Get cache-hit discount factor for a model.
  * The factor represents the fraction of full input price charged for cached tokens.
  * e.g. 0.1 means cached tokens cost 10% of full price, saving 90%.

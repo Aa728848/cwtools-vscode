@@ -136,6 +136,7 @@ const RUN_SNAPSHOT_THROTTLE_MS = 1000;
 const TEMP_DIFF_SCRIPT_EXTENSIONS = new Set(['.bat', '.cmd', '.cjs', '.js', '.mjs', '.ps1', '.py', '.sh']);
 const TEMP_DIFF_SCRIPT_DIR_NAMES = new Set(['.tmp', 'scratch', 'temp', 'tmp']);
 const TEMP_DIFF_SCRIPT_NAME_PATTERN = /^(?:agent_helper|helper|tmp|temp|scratch|batch|bulk|replace|rewrite|fix|verify|check|search|scan)(?:[_\-.].*)?\.(?:bat|cmd|cjs|js|mjs|ps1|py|sh)$/i;
+const GENERATED_IMAGE_MARKER_PATTERN = /cwtools-generated-image:([A-Za-z0-9_.-]+\.(?:png|webp|jpg))/gi;
 
 function normalizeSnapshotFilePath(filePath: string, workspaceRoot = getProjectWorkspaceRoot()): string {
     const resolved = path.isAbsolute(filePath) ? filePath : path.join(workspaceRoot, filePath);
@@ -3876,11 +3877,64 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
     }
 
     public postMessage(msg: HostMessage): void {
-        this.broadcaster.postMessage(msg);
+        this.broadcaster.postMessage(msg, (webview, message) => this.resolveGeneratedImageUris(message, webview));
     }
 
     public postMessageToSurface(surface: 'chat' | 'manager', msg: HostMessage): void {
-        this.broadcaster.postMessageToSurface(surface, msg);
+        this.broadcaster.postMessageToSurface(
+            surface,
+            msg,
+            (webview, message) => this.resolveGeneratedImageUris(message, webview),
+        );
+    }
+
+    private generatedImageDirectoryUri(): vs.Uri {
+        return vs.Uri.file(this.aiService.getGeneratedImageDirectory());
+    }
+
+    private generatedImageSource(webview: vs.Webview): string[] {
+        // localResourceRoots narrows filesystem access; the Webview CSP source
+        // is the corresponding origin used by asWebviewUri for those files.
+        return [webview.cspSource];
+    }
+
+    private resolveGeneratedImageUris(msg: HostMessage, webview: vs.Webview): HostMessage {
+        const dir = this.generatedImageDirectoryUri();
+        const replace = (text: string): string => text.replace(
+            GENERATED_IMAGE_MARKER_PATTERN,
+            (_marker, fileName: string) => webview.asWebviewUri(vs.Uri.joinPath(dir, fileName)).toString(),
+        );
+        if (msg.type === 'generationComplete') {
+            return {
+                ...msg,
+                result: {
+                    ...msg.result,
+                    explanation: replace(msg.result.explanation),
+                    code: replace(msg.result.code),
+                },
+            };
+        }
+        if (msg.type === 'loadTopicMessages') {
+            return {
+                ...msg,
+                messages: msg.messages.map(message => ({
+                    ...message,
+                    content: replace(message.content),
+                    code: message.code ? replace(message.code) : message.code,
+                })),
+            };
+        }
+        if (msg.type === 'managerSnapshot') {
+            return {
+                ...msg,
+                messages: msg.messages.map(message => ({
+                    ...message,
+                    content: replace(message.content),
+                    code: message.code ? replace(message.code) : message.code,
+                })),
+            };
+        }
+        return msg;
     }
 
     private clearArtifacts(): void {
@@ -3966,11 +4020,13 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
     // ─── HTML Content ────────────────────────────────────────────────────────
 
     private getHtmlContent(webview: vs.Webview): string {
-        return getChatPanelHtml(webview, this.extensionUri);
+        return getChatPanelHtml(webview, this.extensionUri, {
+            imageSources: this.generatedImageSource(webview),
+        });
     }
 
     private getManagerHtmlContent(webview: vs.Webview): string {
-        return getAgentManagerHtml(webview, this.extensionUri);
+        return getAgentManagerHtml(webview, this.extensionUri, this.generatedImageSource(webview));
     }
 
     public async openAgentManager(): Promise<void> {
@@ -3988,7 +4044,10 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             {
                 enableScripts: true,
                 retainContextWhenHidden: true,
-                localResourceRoots: [this.extensionUri],
+                localResourceRoots: [
+                    this.extensionUri,
+                    this.generatedImageDirectoryUri(),
+                ],
             }
         );
 
@@ -4048,9 +4107,10 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
     }
 
     private bindWebview(webview: vs.Webview, bucket: vs.Disposable[], surface: 'chat' | 'manager'): void {
+        const generatedImageDirectory = this.generatedImageDirectoryUri();
         webview.options = {
             enableScripts: true,
-            localResourceRoots: [this.extensionUri],
+            localResourceRoots: [this.extensionUri, generatedImageDirectory],
         };
         webview.html = surface === 'manager'
             ? this.getManagerHtmlContent(webview)

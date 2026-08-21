@@ -1,7 +1,11 @@
 import * as vs from 'vscode';
 import { getChatPanelHtml } from './chatHtml';
 
-export function getAgentManagerHtml(webview: vs.Webview, extensionUri: vs.Uri): string {
+export function getAgentManagerHtml(
+    webview: vs.Webview,
+    extensionUri: vs.Uri,
+    imageSources: string[] = [],
+): string {
     const managerCssUri = webview.asWebviewUri(
         vs.Uri.joinPath(extensionUri, 'bin', 'client', 'webview', 'agentManager.css')
     ).toString();
@@ -14,5 +18,6 @@ export function getAgentManagerHtml(webview: vs.Webview, extensionUri: vs.Uri): 
         surface: 'manager',
         layout: 'detached',
         enableCodexUi: true,
+        imageSources,
     });
 }

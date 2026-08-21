@@ -260,7 +260,13 @@ describe('buildOrchestrationCatalog', () => {
                 },
             ],
         },
-        agentResults: {},
+        agentResults: {
+            n1: {
+                nodeId: 'n1', success: true, output: 'done',
+                tokenUsage: { total: 1, input: 1, output: 0, estimatedCostCny: 0 },
+                writtenFiles: [], stepCount: 1,
+            },
+        },
         blackboard: { entries: [], timestamp: 1 },
         summary: 'partial wave',
         totalTokenUsage: { total: 120, input: 100, output: 20, estimatedCostCny: 0.01 },
@@ -291,6 +297,10 @@ describe('buildOrchestrationCatalog', () => {
         const entry = catalog.graphs[0]!;
         expect(entry.nodeStatusCounts.done).to.equal(1);
         expect(entry.nodeStatusCounts.failed).to.equal(1);
+        expect(entry.nodes).to.deep.equal([
+            { id: 'n1', status: 'done', hasResult: true },
+            { id: 'n2', status: 'failed', hasResult: false },
+        ]);
         expect(entry.pendingClarifications).to.have.length(1);
         expect(entry.pendingClarifications![0]!.nodeId).to.equal('n2');
         expect(entry.pendingClarifications![0]!.contextPreserved).to.equal(true);

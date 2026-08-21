@@ -85,6 +85,22 @@ describe('provider thinking params', () => {
             .to.deep.equal({ extraBody: { reasoning: { enabled: true } } });
     });
 
+    it('never sends an explicit reasoning disable to OpenRouter endpoints that require it', () => {
+        const { getReducedThinkingParams, getModelReasoningCapability } = loadProviders();
+        // Ox Alpha: reasoning is mandatory, the endpoint rejects enabled:false with
+        // HTTP 400 ("Reasoning is mandatory for this endpoint and cannot be disabled").
+        expect(getModelReasoningCapability('openrouter', 'stealth/ox-alpha', 'openai-chat-completions').kind)
+            .to.equal('none');
+        expect(getReducedThinkingParams('stealth/ox-alpha', 'openrouter', 'openai-chat-completions'))
+            .to.equal(undefined);
+        // Fixed-reasoning families must not receive the guessed disable either.
+        expect(getReducedThinkingParams('moonshotai/kimi-k2.7-code', 'openrouter', 'openai-chat-completions'))
+            .to.equal(undefined);
+        // Models whose capability allows disabling keep the explicit switch.
+        expect(getReducedThinkingParams('openai/gpt-5.5', 'openrouter', 'openai-chat-completions'))
+            .to.deep.equal({ extraBody: { reasoning: { enabled: false } } });
+    });
+
     it('maps Qwen levels to thinking budgets', () => {
         const { getThinkingParams } = loadProviders();
         expect(getThinkingParams('qwen3.7-plus', 'qwen', 'openai-chat-completions', 'low'))

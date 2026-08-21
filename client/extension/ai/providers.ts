@@ -710,7 +710,10 @@ export function getReducedThinkingParams(
         return { reasoningEffort: 'low' };
     }
     if (lowerProvider === 'openrouter') {
-        return { extraBody: { reasoning: { enabled: false } } };
+        const capability = getModelReasoningCapability('openrouter', model, apiFormat);
+        return capability.options.includes('none')
+            ? { extraBody: { reasoning: { enabled: false } } }
+            : undefined;
     }
     if (lowerProvider === 'together' && isKnownReasoningModel(lowerModel)) {
         return { extraBody: { reasoning: { enabled: false } } };

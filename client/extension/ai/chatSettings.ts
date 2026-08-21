@@ -897,17 +897,25 @@ export class ChatSettingsManager {
             return;
         }
 
+        // Reasoning-mandatory endpoints (e.g. OpenRouter's stealth/ox-alpha)
+        // reject an explicit reasoning disable (HTTP 400); only disable
+        // thinking where the model supports it, and give reasoning models a
+        // larger output budget for their thinking tokens.
+        const canDisableThinking = getModelReasoningCapability(
+            providerId, model ?? '', customApiFormat
+        ).options.includes('none');
+
         try {
             await this.aiService.chatCompletion(
                 [{ role: 'user', content: 'Reply with OK. Do not call the diagnostic tool.' }],
                 {
-                    maxTokens: 128,
+                    maxTokens: canDisableThinking ? 128 : 2048,
                     providerId,
                     model,
                     apiKey,
                     endpoint,
                     customApiFormat,
-                    disableThinking: true,
+                    disableThinking: canDisableThinking,
                     tools: provider.supportsToolUse ? [{
                         type: 'function',
                         function: {

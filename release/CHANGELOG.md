@@ -1,5 +1,60 @@
 # Changelog
 
+## [2.15.0] - 2026-08-21
+
+### 新功能 / New Features
+- **[新增] 子 Agent 编排系统重构——并行执行、冲突检测与中止感知授权**：
+  - 全面重构多 Agent 编排引擎，引入 DAG 委派深度预算（`delegationDepth.ts`）——委派深度改为显式且单调递增的预算（默认上限 1 层，可通过 `stellarisLanguageServices.ai.orchestrator.maxDelegationDepth` 调整，上限 4 层），恢复已持久化编排图时不会被重置为顶层而多获得额外委派权。
+  - 新增编排目录（`orchestrationCatalog.ts`）统一管理任务图元数据、节点进度查询与可恢复性检查；并行执行器（`parallelExecutor.ts`）增强冲突检测与级联取消能力。
+  - 统一改用带中止竞速的授权封装（`runner/permissionRequest.ts`），运行被中止即判定为拒绝（中止不等于同意），并同步清理解析器、卡片与运行时交互记录，消除授权请求长时间挂起与残留审批卡片问题。
+  English: [New] Sub-agent orchestration system overhaul — parallel execution, conflict detection, and abort-aware permissions: introduces explicit monotone delegation-depth budgeting (`delegationDepth.ts`, default cap 1, configurable up to 4 via `maxDelegationDepth`); a unified orchestration catalog (`orchestrationCatalog.ts`) for graph metadata, node progress, and resumability queries; enhanced parallel executor with conflict detection and cascading cancellation; and one abort-racing permission wrapper (`runner/permissionRequest.ts`) that denies on abort and retires the resolver, card, and runtime interaction together.
+- **[新增] 子 Agent 委派范围声明**：
+  - 每个被派发的子 Agent 在自身系统提示中收到其固定权限范围（`delegationScope.ts`），包括可写作用域、用户保留作用域与被丢弃的越界目标，并被明确要求不重试宿主拒绝的操作、而是把限制写入交接报告的 `Unresolved` 段，减少无效重试与后续的恢复风暴。
+  English: [New] Delegated sub-agent scope statement (`delegationScope.ts`) — each dispatched sub-agent's system prompt now declares its fixed permission scope (writable targets, user-retained scopes, rejected out-of-bounds targets) and instructs it to report scope limitations in the handoff `Unresolved` section instead of retrying denied operations.
+- **[新增] Responses 原生图片生成与终端 Shell 选择**：
+  - AI 聊天支持通过 OpenAI Responses API 原生生成图片，结果经受控标记持久化、大小限制与文件签名校验（PNG/JPEG/WebP）后存储，并在 Webview 中通过 `asWebviewUri` 安全展示。
+  - 新增终端 Shell 选择能力，支持模型根据任务需求选择合适的执行 Shell。
+  English: [New] Responses native image generation and shell selection — AI chat now generates images via the OpenAI Responses API with bounded/signature-checked storage and per-Webview `asWebviewUri` conversion; a shell-selection capability lets the model pick the appropriate execution shell.
+- **[新增] Codex OAuth 服务与模型专属推理参数管理**：
+  - 实现 Codex OAuth 服务、提供商使用量追踪增强与模型专属推理参数管理（reasoning effort/budget token 按模型 ID 动态配置）。
+  English: [New] Codex OAuth service, provider usage tracking enhancements, and model-specific reasoning parameter management — reasoning effort and budget tokens are now configured dynamically per model ID.
+
+### 优化 / Improvements
+- **[优化] 子 Agent 澄清改为上下文恢复，不再整节点重跑**：
+  - 子 Agent 通过 `BLOCKED_FOR_ORCHESTRATOR` 升级决策后，父级用 `dispatch_agents(answerClarifications=[...])` 回答时会恢复该子 Agent 已保留的工作上下文并只下发答复，不再从空历史重跑整个节点，避免重复消耗已完成的 CWT/LSP 证据收集。恢复失败时自动回退为全新重跑路径；恢复不得把只读执行的上下文带入可写执行。
+  - `merge_results` 不带 `nodeIds` 调用时返回当前话题的编排图目录（图 ID、节点进度、待澄清项、是否可恢复），忘记 `graphId` 时不再只能重新派发。
+  English: [Improvement] Clarification answers now resume a sub-agent instead of re-running it — answering with `dispatch_agents(answerClarifications=[...])` replays the child's preserved working context instead of paying for finished CWT/LSP evidence again; `merge_results` called without `nodeIds` returns the topic's orchestration graph catalog.
+- **[优化] 后台子任务结算通知补齐停止原因与保留输出**：
+  - `[BACKGROUND TASK RESULT]` 通知现在始终包含归一化的停止原因（如 `idle_timeout`、`provider_rate_limit`、`host_restart`、`cancelled_by_parent`）以及子 Agent 保留的最后一条内容（`backgroundTaskNotice.ts`）；两者都缺失时明确提示先检查产出再原样重派。
+  English: [Improvement] Background settlement notices now always carry a normalized stop reason plus any preserved final sub-agent message, and explicitly discourage re-dispatching identical work when neither exists.
+- **[优化] 编排图状态归一化**：
+  - 新增 `resumeNormalization.ts`，恢复编排图时统一把 `failed/cancelled/running` 节点重新入队（`running` 在可恢复时刻必然是陈旧的），并保留澄清恢复所需的 `resumeContextRef` 与 `pendingClarification` 元数据，解决波中途异常后 `running` 节点永久死锁问题。
+  English: [Improvement] Graph state normalization (`resumeNormalization.ts`) — resume re-queues `failed/cancelled/running` nodes alike (a `running` node is always stale at resume time) while preserving clarification-resume metadata, fixing permanent deadlock of `running` nodes after a mid-wave exception.
+- **[优化] 编排存储与目录增强**：
+  - `orchestrationStore` 重构增强持久化校验与损坏快照拒绝；`orchestrationCatalog` 提供统一的图元数据查询 API。
+  English: [Improvement] Orchestration store and catalog enhancements — hardened persistence validation, corrupted snapshot rejection, and unified graph metadata query API.
+- **[优化] Stellaris 本地化分词与语言配置**：
+  - 新增自定义 `localisationWordPattern.ts` 为 Stellaris 本地化文件提供精准的双击选词边界（支持 `$parameter$`、`[scope.GetName]`、`mod_key.1.name` 等 Paradox 特有语法），不再覆盖全局 YAML word pattern。
+  - `language-configuration-localisation.json` 配置更新完善引号、括号自动闭合规则。
+  English: [Improvement] Custom word pattern for Stellaris localisation files — double-click selection now respects Paradox-specific tokens (`$parameter$`, `[scope.GetName]`, dotted keys) without overriding the global YAML word pattern.
+- **[优化] AI 聊天面板与 Agent 运行时重构**：
+  - `chatPanel.ts` 重构增强子 Agent 生命周期管理、权限请求路由与后台任务图取消；`agentRunner.ts` 简化运行策略与调度逻辑；`modePrompts.ts` 精简提示词模板；新增 `capabilityLease.ts` 能力租约机制。
+  English: [Improvement] Chat panel and agent runtime refactoring — enhanced sub-agent lifecycle management, permission request routing, background graph cancellation, simplified runner policy and scheduling, streamlined mode prompts, and a new capability-lease mechanism.
+
+### 修复 / Fixes
+- **[修复] 授权请求可能长时间挂起并残留审批卡片**：
+  - 策略引擎通用授权卡与证据门人工覆盖此前直接 `await` 宿主授权 Promise，子 Agent 可能在无人查看的卡片上阻塞直到 20 分钟看门狗介入。现统一改用带中止竞速的授权封装，运行中止即拒绝，同步清理解析器、卡片与运行时交互记录。
+  English: [Fix] Approval requests could hang and leave residual cards — both the policy-engine approval card and the evidence-gate manual override now use one abort-racing wrapper that denies on abort and retires the resolver, card, and runtime interaction together.
+- **[修复] 停止主 Agent 未停止其后台子 Agent 任务图**：
+  - `dispatch_agents(background: true)` 启动的任务图中止链绑定在启动轮次的控制器上，后续轮次停止时该控制器已置空。现在停止主 Agent 与销毁面板都会取消当前话题的全部后台任务图。
+  English: [Fix] Stopping the main agent now stops its background sub-agent graphs — stopping and disposing now cancel every background graph of the current topic.
+- **[修复] 后台子 Agent 的授权事件可能记入错误的运行或话题**：
+  - 运行 ID 不再回落到面板当前的 `currentRunId`，优先取子 Agent 自身的 `runRecord`/`parentRunId`；话题 ID 在请求时刻快照并在解析、取消、放弃三条路径统一使用。
+  English: [Fix] Background sub-agent approval events recorded against the wrong run or topic — the run id now prefers the sub-agent's own record, and the topic id is snapshotted at request time.
+- **[修复] 图片生成、编排结果合并、计费与持久化边界加固**：
+  - Responses 图片写盘前限制大小并校验 PNG/JPEG/WebP 文件签名；`merge_results(graphId=...)` 自动合并全部可用节点结果；所有实时模型调用统一使用请求时刻的 DeepSeek 峰谷价格；损坏或字段非法的编排快照在读取边界被拒绝。
+  English: [Fix] Hardened generated images, orchestration merging, pricing, and persistence boundaries — bounded/signature-checked image storage, automatic full-graph merging, time-of-request DeepSeek pricing, and corrupted snapshot rejection at load time.
+
 ## [2.14.9] - 2026-08-17
 
 ### 新功能 / New Features

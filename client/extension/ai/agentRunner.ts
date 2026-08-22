@@ -80,9 +80,9 @@ import { PartitionedWriteQueue } from './runner/writeCoordinator';
 import { runLedger } from './runner/runLedger';
 import { atomicWriteText, sha256Text } from './runner/durableStorage';
 import { loadResumeState, hasResumeState, saveResumeState as saveCheckpointResumeState } from './runner/checkpoint';
-import { maybeCompactHistory as _maybeCompactHistory, MID_LOOP_COMPACTION_INTERVAL, DEFAULT_CONTEXT_LIMIT, AUTO_COMPACTION_MIN_INTERVAL_MS, resolveCompactionContextLimit, resolveCompactionRatios, resolveMidLoopBlockRatio, resolveToolResultArchiveLimit, type CompactionBudgetOptions, type AutoCompactionThrottle } from './runner/compaction';
+import { maybeCompactHistory as _maybeCompactHistory, MID_LOOP_COMPACTION_INTERVAL, DEFAULT_CONTEXT_LIMIT, AUTO_COMPACTION_MIN_INTERVAL_MS, COST_GATE_MIN_EVIDENCE_SAMPLES, COST_GATE_MIN_USAGE_RATIO, COST_GATE_WARM_HIT_RATIO, resolveCompactionContextLimit, resolveCompactionRatios, resolveMidLoopBlockRatio, resolveToolResultArchiveLimit, type CompactionBudgetOptions, type AutoCompactionThrottle } from './runner/compaction';
 import { refreshLiveVsCodeContext } from './runner/liveContext';
-import { runContextMaintenance } from './runner/contextMaintenance';
+import { runContextMaintenance, shouldCompactEarlyForCost } from './runner/contextMaintenance';
 import { TokenCalibrationTable, buildCalibrationKey } from './runner/tokenCalibration';
 import { executeFallbackRetry, isFallbackEligibleApiError } from './runner/fallbackPolicy';
 import { SUPERSEDED_BY_LATER_SAME_FILE_WRITE_TOOLS, getAgentToolTargetFiles, toolScheduler } from './runner/toolScheduler';
@@ -100,7 +100,7 @@ import {
     phaseForToolStage,
     transitionSchedulingState,
 } from './runner/scheduling';
-import { toolDisclosureService, type ToolDisclosureContext } from './runner/toolDisclosure';
+import { sortToolDefinitionsForStableRequest, toolDisclosureService, type ToolDisclosureContext } from './runner/toolDisclosure';
 import { ToolDedupeService } from './runner/toolDedupe';
 import { contextLimitTracker } from './runner/contextLimitTracker';
 import { RecoveryCoordinator } from './runner/recoveryCoordinator';
@@ -114,6 +114,7 @@ import {
     shouldPauseForInteractivePlan,
 } from './executePlanHandoff';
 import { appendCacheRequestUsage, isCacheCapableUsage, supportsOpenAiStylePrefixCache } from './cacheCapability';
+import { getCachedInputTokens, getCacheCreationInputTokens } from './providerUsage';
 import {
     DEFAULT_GOAL_HARD_BUDGET_MULTIPLIER,
     DEFAULT_HARD_BUDGET_MULTIPLIER,
@@ -450,6 +451,35 @@ export class AgentRunner {
         lastAutoCompactionAt: 0,
         minIntervalMs: AUTO_COMPACTION_MIN_INTERVAL_MS,
     };
+    private static readonly CACHE_EVIDENCE_KEY_LIMIT = 32;
+    private readonly cacheEvidence = new Map<string, { input: number; cached: number; samples: number }>();
+
+    private cacheHitRatio(providerId: string, model: string | undefined): number | undefined {
+        const evidence = this.cacheEvidence.get(this.calibrationKeyFor(providerId, model));
+        return evidence && evidence.samples >= COST_GATE_MIN_EVIDENCE_SAMPLES && evidence.input > 0
+            ? Math.min(1, evidence.cached / evidence.input)
+            : undefined;
+    }
+
+    private recordCacheEvidence(providerId: string, model: string | undefined, input: number, cached: number): void {
+        const config = this.aiService.getConfig();
+        if (!isCacheCapableUsage(
+            providerId, cached, config.customApiFormat, model, this.aiService.getEndpointForProvider(providerId),
+        ) || input <= 0) return;
+        const key = this.calibrationKeyFor(providerId, model);
+        const previous = this.cacheEvidence.get(key) ?? { input: 0, cached: 0, samples: 0 };
+        this.cacheEvidence.delete(key);
+        this.cacheEvidence.set(key, {
+            input: previous.input + input,
+            cached: previous.cached + Math.min(input, Math.max(0, cached)),
+            samples: previous.samples + 1,
+        });
+        while (this.cacheEvidence.size > AgentRunner.CACHE_EVIDENCE_KEY_LIMIT) {
+            const oldest = this.cacheEvidence.keys().next().value;
+            if (oldest === undefined) break;
+            this.cacheEvidence.delete(oldest);
+        }
+    }
 
     public clearPromptCache(): void {
         this.promptBuilder.clearFrozenPromptCache();
@@ -762,11 +792,7 @@ export class AgentRunner {
             ?? this.aiService.getConfig().provider;
         const effectiveModel = response.model ?? requestedModel ?? '';
         const pricing = getCurrentModelPricing(effectiveModel, effectiveProvider);
-        const cachedTokens = response.usage?.cached_tokens
-            ?? response.usage?.prompt_tokens_details?.cached_tokens
-            ?? response.usage?.prompt_cache_hit_tokens
-            ?? response.usage?.cached_content_token_count
-            ?? 0;
+        const cachedTokens = getCachedInputTokens(response.usage);
         const uncachedInputTokens = Math.max(0, promptTokens - cachedTokens);
         const cacheDiscount = getCacheDiscountFactor(effectiveModel, effectiveProvider);
         const cachedCost = (cachedTokens / 1_000_000) * pricing[0] * cacheDiscount;
@@ -809,7 +835,10 @@ export class AgentRunner {
         if (!accumulator) return;
         const config = this.aiService.getConfig();
         const customFormat = sample.provider === config.provider ? config.customApiFormat : undefined;
-        const cacheCapable = isCacheCapableUsage(sample.provider, sample.cachedTokens, customFormat);
+        const cacheCapable = isCacheCapableUsage(
+            sample.provider, sample.cachedTokens, customFormat, sample.model,
+            this.aiService.getEndpointForProvider(sample.provider),
+        );
         const previousComparable = [...(accumulator.cacheRequests ?? [])]
             .reverse()
             .find(request => request.purpose === sample.purpose);
@@ -1160,7 +1189,7 @@ export class AgentRunner {
 
         const promptConfig = this.aiService.getConfig();
         const providerForPrompt = options?.providerId ?? promptConfig.provider;
-        const supportsPrefixCache = supportsOpenAiStylePrefixCache(providerForPrompt, promptConfig.customApiFormat);
+        const supportsPrefixCache = supportsOpenAiStylePrefixCache(providerForPrompt, promptConfig.customApiFormat, options?.model ?? promptConfig.model, this.aiService.getEndpointForProvider(providerForPrompt));
         // The model-visible tool set feeds both the frozen prompt fingerprint
         // (plan sec.7.1) and the reserved-token estimate below; mirror the
         // reasoning loop's filter inputs so both describe the real toolset.
@@ -1196,13 +1225,15 @@ export class AgentRunner {
             }
             : undefined;
         const systemPrompt = options?.useSlimPrompt
-            ? this.promptBuilder.buildSlimSystemPromptForMode(
+            ? this.promptBuilder.buildFrozenSlimSystemPromptForMode(
                 mode,
                 providerForPrompt,
                 undefined,
-                topicId,
-                domain,
-                delegationScopeFacts,
+                {
+                    toolsetHash: hashToolDefinitionsForFingerprint(promptToolDefinitions),
+                    rebuild: options?.rebuildSystemPrompt === true,
+                    domain,
+                },
             )
             : supportsPrefixCache
                 ? this.promptBuilder.buildFrozenSystemPrompt(mode, providerForPrompt, undefined, {
@@ -1221,10 +1252,11 @@ export class AgentRunner {
                     false,
                     domain,
                 );
-        tokenAccumulator.promptFingerprint = supportsPrefixCache && !options?.useSlimPrompt
+        const usesFrozenPrompt = supportsPrefixCache || options?.useSlimPrompt === true;
+        tokenAccumulator.promptFingerprint = usesFrozenPrompt
             ? this.promptBuilder.getLastFrozenPromptFingerprintHash()
             : undefined;
-        tokenAccumulator.promptCacheMissReason = supportsPrefixCache && !options?.useSlimPrompt
+        tokenAccumulator.promptCacheMissReason = usesFrozenPrompt
             ? this.promptBuilder.getLastFrozenPromptLookup()?.missReason
             : undefined;
 
@@ -1260,7 +1292,10 @@ export class AgentRunner {
                 : undefined,
         });
         const initialStageReminder = buildToolStageReminder(mode, initialToolStage, promptToolDefinitions, domain);
-        const dynamicBlock: ChatMessage[] = [...promptDynamicBlock];
+        const dynamicBlock: ChatMessage[] = [
+            ...promptDynamicBlock,
+            ...(options?.useSlimPrompt ? this.promptBuilder.buildSlimDynamicPromptBlock(delegationScopeFacts) : []),
+        ];
         if (options?.agentProfileInstructions?.trim()) {
             dynamicBlock.unshift({
                 role: 'system',
@@ -1307,13 +1342,20 @@ export class AgentRunner {
         const admissionModel = options?.model ?? admissionConfig.model;
         const admissionPreserveMimo = admissionProviderId.startsWith('mimo')
             || (admissionModel ?? '').toLowerCase().startsWith('mimo-v2');
+        const admissionContextLimit = resolveCompactionContextLimit(
+            admissionProviderId,
+            admissionModel,
+            options?.maxContextTokens ?? admissionConfig.maxContextTokens,
+        );
+        const costGateConfig = vs.workspace.getConfiguration('stellarisLanguageServices.ai.performance');
+        const costGateEnabled = costGateConfig.get<boolean>('compactionCostGate.enabled', true);
         const admissionMaintenance = runContextMaintenance(conversationHistory, 'admission', {
             toolResultBudget: getToolResultBudget(
                 admissionConfig.maxContextTokens > 0
                     ? admissionConfig.maxContextTokens
                     : (getProvider(admissionProviderId).maxContextTokens || DEFAULT_CONTEXT_LIMIT)),
             compactionOptions: {
-                preserveTailBytes: supportsOpenAiStylePrefixCache(admissionProviderId, admissionConfig.customApiFormat)
+                preserveTailBytes: supportsOpenAiStylePrefixCache(admissionProviderId, admissionConfig.customApiFormat, admissionModel, this.aiService.getEndpointForProvider(admissionProviderId))
                     || admissionPreserveMimo,
                 preserveReasoningContentForToolCalls: admissionPreserveMimo,
             },
@@ -1323,8 +1365,17 @@ export class AgentRunner {
             // if the paid summarizer later fails or is throttled. That is
             // intentional (free prune first) and safe: squeezing is lossy only
             // for re-derivable tool output, and canonicalization still runs.
+            costGate: costGateEnabled ? {
+                contextLimitTokens: admissionContextLimit,
+                inputPriceCnyPerMillion: getCurrentModelPricing(admissionModel ?? '', admissionProviderId)[0],
+                recentHitRatio: this.cacheHitRatio(admissionProviderId, admissionModel),
+                warmHitRatio: COST_GATE_WARM_HIT_RATIO,
+                minUsageRatio: COST_GATE_MIN_USAGE_RATIO,
+                maxUncachedCostCny: Math.max(0.001, costGateConfig
+                    .get<number>('compactionCostGate.maxUncachedCostCnyPerRequest', 0.05)),
+            } : undefined,
             summarizeThreshold: Math.floor(
-                resolveCompactionContextLimit(admissionProviderId, admissionModel, options?.maxContextTokens ?? admissionConfig.maxContextTokens)
+                admissionContextLimit
                 * Math.max(0.5, Math.min(0.95, vs.workspace
                     .getConfiguration('stellarisLanguageServices.ai.performance')
                     .get<number>('compactionTriggerRatio', resolveCompactionRatios(admissionProviderId, admissionModel).thresholdRatio)))),
@@ -1355,6 +1406,7 @@ export class AgentRunner {
             {
                 reservedTokens: fixedPromptTokens + toolSchemaTokens,
                 precomputedRequestTokens: admissionMaintenance.afterTokens,
+                costGateFired: admissionMaintenance.costGateFired,
             },
         );
         if (compactedHistory !== conversationHistory) {
@@ -1759,7 +1811,7 @@ export class AgentRunner {
                     ? manualConfig.maxContextTokens
                     : (getProvider(manualProviderId).maxContextTokens || DEFAULT_CONTEXT_LIMIT)),
             compactionOptions: {
-                preserveTailBytes: supportsOpenAiStylePrefixCache(manualProviderId, manualConfig.customApiFormat)
+                preserveTailBytes: supportsOpenAiStylePrefixCache(manualProviderId, manualConfig.customApiFormat, manualModel, this.aiService.getEndpointForProvider(manualProviderId))
                     || manualPreserveMimo,
                 preserveReasoningContentForToolCalls: manualPreserveMimo,
             },
@@ -2011,7 +2063,7 @@ export class AgentRunner {
         const activeProviderId = options?.providerId ?? this.aiService.getConfig().provider;
         const activeModel = (options?.model ?? this.aiService.getConfig().model ?? '').toLowerCase();
         const preserveMimoReasoningContent = activeProviderId.startsWith('mimo') || activeModel.startsWith('mimo-v2');
-        const supportsPrefixCache = supportsOpenAiStylePrefixCache(activeProviderId, this.aiService.getConfig().customApiFormat)
+        const supportsPrefixCache = supportsOpenAiStylePrefixCache(activeProviderId, this.aiService.getConfig().customApiFormat, activeModel, this.aiService.getEndpointForProvider(activeProviderId))
             || preserveMimoReasoningContent;
         const compactionOptions: CompactMessagesOptions = {
             preserveTailBytes: supportsPrefixCache,
@@ -2179,7 +2231,7 @@ export class AgentRunner {
         if (!options?.useSlimPrompt) {
             try {
                 const mcpDefs = await this.toolExecutor.getDynamicMcpToolDefinitions(mode, options?.domain);
-                if (mcpDefs.length > 0) availableTools = [...availableTools, ...mcpDefs];
+                if (mcpDefs.length > 0) availableTools = sortToolDefinitionsForStableRequest([...availableTools, ...mcpDefs]);
             } catch { /* best effort */ }
         }
 
@@ -2201,6 +2253,7 @@ export class AgentRunner {
         const workflowStageSupportTools = activeWorkflow?.toolPolicy.strategy === 'allowlist'
             ? getWorkflowStageSupportTools(activeWorkflow.toolPolicy.tools)
             : undefined;
+        availableTools = sortToolDefinitionsForStableRequest(availableTools);
         const stagedToolPool = availableTools;
         const disclosureContext: ToolDisclosureContext = {
             mode,
@@ -2527,7 +2580,16 @@ export class AgentRunner {
                 const activeToolSchemaTokens = estimateTokenCount(JSON.stringify(availableTools));
                 const loopTokens = calibrateLoopEstimate(messages.reduce((s, m) => s + estimateChatMessageTokens(m), 0)
                     + activeToolSchemaTokens);
-                if (loopTokens > midLoopThreshold) {
+                const loopCostGate = runBudgetConfig.get<boolean>('compactionCostGate.enabled', true) ? {
+                    contextLimitTokens: contextLimit,
+                    inputPriceCnyPerMillion: getCurrentModelPricing(options?.model ?? _config0.model ?? '', _providerId0)[0],
+                    recentHitRatio: this.cacheHitRatio(_providerId0, options?.model ?? _config0.model),
+                    warmHitRatio: COST_GATE_WARM_HIT_RATIO,
+                    minUsageRatio: COST_GATE_MIN_USAGE_RATIO,
+                    maxUncachedCostCny: Math.max(0.001, runBudgetConfig
+                        .get<number>('compactionCostGate.maxUncachedCostCnyPerRequest', 0.05)),
+                } : undefined;
+                if (loopTokens > midLoopThreshold || shouldCompactEarlyForCost(loopTokens, loopCostGate)) {
                     emitStep({
                         type: 'compaction',
                         content: AGENT.COMPACTION_MID_LOOP(loopTokens, midLoopThreshold),
@@ -2552,6 +2614,7 @@ export class AgentRunner {
                         calibrateEstimate: calibrateLoopEstimate,
                         summarizeThreshold: midLoopThreshold,
                         ineffectivenessGate: true,
+                        costGate: loopCostGate,
                     });
                     refreshLiveVsCodeContext(messages);
                     let afterTokens = midLoopMaintenance.afterTokens;
@@ -3030,11 +3093,14 @@ export class AgentRunner {
                 }
                 const pricing = getCurrentModelPricing(response.model ?? options?.model ?? '', responseProviderId);
                  // Cache-aware cost calculation: cached tokens billed at discounted rate
-                const cachedTokens = response.usage?.cached_tokens ?? 
-                                     (response.usage as any)?.prompt_tokens_details?.cached_tokens ?? 
-                                     (response.usage as any)?.prompt_cache_hit_tokens ??
-                                     (response.usage as any)?.cached_content_token_count ?? 0;
+                const cachedTokens = Math.min(promptTokens, getCachedInputTokens(response.usage));
                 const uncachedInputTokens = Math.max(0, promptTokens - cachedTokens);
+                this.recordCacheEvidence(
+                    responseProviderId,
+                    response.model ?? options?.model,
+                    promptTokens,
+                    cachedTokens,
+                );
                 const cacheDiscount = getCacheDiscountFactor(response.model ?? options?.model ?? '', responseProviderId);
                 const cachedCost = (cachedTokens / 1_000_000) * pricing[0] * cacheDiscount;
                 const uncachedCost = (uncachedInputTokens / 1_000_000) * pricing[0];
@@ -3076,7 +3142,7 @@ export class AgentRunner {
                 });
 
                 // Emit cache hit rate, cache creation, and saved costs for real-time auditing in the UI
-                const cacheCreationTokens = response.usage?.cache_creation_tokens ?? 0;
+                const cacheCreationTokens = getCacheCreationInputTokens(response.usage, promptTokens, cachedTokens);
                 if (cachedTokens > 0 || cacheCreationTokens > 0) {
                     const hitRate = promptTokens > 0 ? Math.min(1, cachedTokens / promptTokens) : 0;
                     const savedCostCny = (cachedTokens / 1_000_000) * pricing[0] * (1 - cacheDiscount);
@@ -5117,6 +5183,7 @@ export class AgentRunner {
                 providerId: options?.providerId ?? config.provider,
                 requestedModel: options?.model ?? config.model,
                 customApiFormat: config.customApiFormat,
+                endpoint: this.aiService.getEndpointForProvider(options?.providerId ?? config.provider),
                 agentMode: 'title',
                 purpose: 'title',
             });

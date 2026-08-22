@@ -8,11 +8,13 @@ import type { CacheRequestUsage, ChatCompletionResponse, ChatMessage, CustomApiF
 import { contentToString } from './types';
 import { appendCacheRequestUsage, isCacheCapableUsage } from './cacheCapability';
 import { getCacheDiscountFactor, getCurrentModelPricing } from './pricing';
+import { getCachedInputTokens } from './providerUsage';
 
 export interface ProviderCallUsageOptions {
     providerId: string;
     requestedModel?: string;
     customApiFormat?: CustomApiFormat;
+    endpoint?: string;
     agentMode: string;
     purpose: NonNullable<CacheRequestUsage['purpose']>;
     toolStage?: CacheRequestUsage['toolStage'];
@@ -55,12 +57,7 @@ export function buildProviderCallTokenUsage(
         ?? Math.ceil(completionText.length / 4);
     const totalTokens = finiteNonNegative(response.usage?.total_tokens)
         ?? promptTokens + completionTokens;
-    const rawCachedTokens = finiteNonNegative(response.usage?.cached_tokens)
-        ?? finiteNonNegative(response.usage?.prompt_tokens_details?.cached_tokens)
-        ?? finiteNonNegative(response.usage?.prompt_cache_hit_tokens)
-        ?? finiteNonNegative(response.usage?.cached_content_token_count)
-        ?? 0;
-    const cachedTokens = Math.min(promptTokens, rawCachedTokens);
+    const cachedTokens = Math.min(promptTokens, getCachedInputTokens(response.usage));
     const netInput = Math.max(0, promptTokens - cachedTokens);
     const pricing = getCurrentModelPricing(model, providerId);
     const cacheDiscount = getCacheDiscountFactor(model, providerId);
@@ -68,7 +65,9 @@ export function buildProviderCallTokenUsage(
         + (netInput / 1_000_000) * pricing[0]
         + (completionTokens / 1_000_000) * pricing[1];
     const cacheSavedCostCny = (cachedTokens / 1_000_000) * pricing[0] * (1 - cacheDiscount);
-    const cacheCapable = isCacheCapableUsage(providerId, cachedTokens, options.customApiFormat);
+    const cacheCapable = isCacheCapableUsage(
+        providerId, cachedTokens, options.customApiFormat, model, options.endpoint,
+    );
     const usage: TokenUsage = {
         input: promptTokens,
         output: completionTokens,

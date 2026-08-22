@@ -84,7 +84,7 @@ import { buildSkillIndexPrompt, listSkills } from './skills';
  * shared policy text edited) so prompts cached by older builds are never
  * reused across extension updates (plan §7.1).
  */
-export const PROMPT_TEMPLATE_VERSION = 4;
+export const PROMPT_TEMPLATE_VERSION = 5;
 
 /**
  * Why a frozen system prompt lookup missed. Process-local diagnostics only —
@@ -140,10 +140,12 @@ function shortSha256(content: string, length = 16): string {
  * does not needlessly invalidate cached prompts (plan §7.1).
  */
 export function hashToolDefinitionsForFingerprint(tools: readonly ToolDefinition[]): string {
-    const stable = tools.map(tool => ({
-        name: tool.function.name,
-        required: (tool.function.parameters as { required?: unknown }).required ?? [],
-    }));
+    const stable = [...tools]
+        .sort((left, right) => left.function.name.localeCompare(right.function.name))
+        .map(tool => ({
+            name: tool.function.name,
+            required: [...((tool.function.parameters as { required?: string[] }).required ?? [])].sort(),
+        }));
     return shortSha256(JSON.stringify(stable));
 }
 
@@ -222,6 +224,7 @@ export class PromptBuilder {
      *  on Map's insertion-order semantics. */
     private static readonly FROZEN_PROMPT_CACHE_MAX = 32;
     private _frozenPromptCache = new Map<string, string>();
+    private _frozenSlimPromptCache = new Map<string, string>();
     /** Last-seen fingerprint components per identity key (mode|provider|game|locale),
      *  used to classify cache misses. Bounded, insertion-order trimmed. */
     private static readonly FROZEN_FINGERPRINT_HISTORY_MAX = 64;
@@ -658,7 +661,7 @@ export class PromptBuilder {
             missReasons[reason] = count;
             misses += count;
         }
-        return { size: this._frozenPromptCache.size, hits: this._frozenPromptHits, misses, missReasons };
+        return { size: this._frozenPromptCache.size + this._frozenSlimPromptCache.size, hits: this._frozenPromptHits, misses, missReasons };
     }
 
     /**
@@ -824,10 +827,58 @@ export class PromptBuilder {
     /** Clear the frozen prompt cache (e.g., when starting a new session). */
     clearFrozenPromptCache(): void {
         this._frozenPromptCache.clear();
+        this._frozenSlimPromptCache.clear();
         this._parsedRulesCache = null;
         this._parsedRulesMtime = 0;
         this._projectProfileCache = null;
         this._projectProfileMtime = 0;
+    }
+
+    /** Return a byte-stable slim prompt; run-specific scope belongs in a tail reminder. */
+    buildFrozenSlimSystemPromptForMode(
+        mode: AgentMode,
+        providerId?: string,
+        languageId?: string,
+        options?: { toolsetHash?: string; rebuild?: boolean; domain?: AgentRuntimeDomain },
+    ): string {
+        const domain = options?.domain ?? defaultDomainForMode(mode);
+        const fingerprint = this.computeFrozenPromptFingerprint(mode, providerId, languageId, `slim:${options?.toolsetHash ?? ''}`, domain);
+        const key = `slim:${fingerprint.hash}`;
+        if (options?.rebuild) {
+            this._frozenSlimPromptCache.delete(key);
+            this.recordFrozenPromptMiss('rebuild');
+            this._lastFrozenPromptLookup = { hit: false, missReason: 'rebuild' };
+        }
+        const cached = this._frozenSlimPromptCache.get(key);
+        if (cached !== undefined) {
+            this._frozenPromptHits++;
+            this._lastFrozenPromptLookup = { hit: true };
+            this._lastFrozenPromptFingerprint = fingerprint;
+            this.rememberFrozenFingerprint(fingerprint);
+            return cached;
+        }
+        if (!options?.rebuild) {
+            const missReason = this.classifyFrozenPromptMiss(fingerprint);
+            this.recordFrozenPromptMiss(missReason);
+            this._lastFrozenPromptLookup = { hit: false, missReason };
+        }
+        const prompt = this.buildSlimSystemPromptForMode(mode, providerId, fingerprint.gameId, undefined, domain, undefined);
+        if (this._frozenSlimPromptCache.size >= PromptBuilder.FROZEN_PROMPT_CACHE_MAX) {
+            const oldestKey = this._frozenSlimPromptCache.keys().next().value;
+            if (oldestKey !== undefined) this._frozenSlimPromptCache.delete(oldestKey);
+        }
+        this._frozenSlimPromptCache.set(key, prompt);
+        this._lastFrozenPromptFingerprint = fingerprint;
+        this.rememberFrozenFingerprint(fingerprint);
+        return prompt;
+    }
+
+    /** Build run-specific slim scope as a tail reminder. */
+    buildSlimDynamicPromptBlock(delegation?: DelegationScopeFacts): ChatMessage[] {
+        const scope = buildDelegationScopeStatement(delegation);
+        return scope
+            ? [{ role: 'user', content: `<system-reminder>\n${scope}\n</system-reminder>` }]
+            : [];
     }
 
     /** Build a slim sub-agent prompt with only a compact project hint. */

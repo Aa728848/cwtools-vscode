@@ -2,7 +2,7 @@ import type { ChatMessage, AgentStep, TokenUsage } from '../types';
 import type { AgentRunnerOptions } from '../agentRunner';
 import { contentToString } from '../types';
 import { getModelContextTokens, getProvider } from '../providers';
-import { isDeepSeekModelOrProvider } from '../providers/models/capabilities';
+import { isLowCostPrefixCacheModelOrProvider } from '../providers/models/capabilities';
 import { getCacheDiscountFactor, getCurrentModelPricing } from '../pricing';
 import { AGENT } from '../messages';
 import type { AIService } from '../aiService';
@@ -14,6 +14,7 @@ import { cloneChatMessage, normalizeTranscriptForPersistence, splitTranscriptFor
 import type { CompactionTranscriptSplit } from './contextTranscript';
 import * as crypto from 'crypto';
 import { appendCacheRequestUsage, isCacheCapableUsage } from '../cacheCapability';
+import { getCachedInputTokens } from '../providerUsage';
 
 // Leave room for the system prompt, tool schemas, the current turn, and output.
 // Both Codex and Claude Code compact before the model's hard context boundary.
@@ -35,6 +36,9 @@ export const MID_LOOP_COMPACTION_RATIO = 0.78;
 // Minimum spacing between two paid automatic compactions; near-threshold
 // histories would otherwise recompact on every turn with barely-changed content.
 export const AUTO_COMPACTION_MIN_INTERVAL_MS = 60_000;
+export const COST_GATE_MIN_USAGE_RATIO = 0.60;
+export const COST_GATE_WARM_HIT_RATIO = 0.70;
+export const COST_GATE_MIN_EVIDENCE_SAMPLES = 3;
 const MIN_HISTORY_TOKENS_FOR_AUTO_COMPACTION = 2_048;
 // Reserve for the generated summary when projecting post-compaction tokens.
 const COMPACTION_SUMMARY_RESERVE_TOKENS = 2_048;
@@ -109,6 +113,8 @@ export interface CompactionBudgetOptions {
      * decision so all paid entries share one accounting convention.
      */
     precomputedRequestTokens?: number;
+    /** Cost gate requested compaction below the normal context watermark. */
+    costGateFired?: boolean;
     /** Real-usage calibration hook (P0 design 3); invoked once per completed summarizer call. */
     onUsageSample?: (sample: { estimated: number; actual: number; providerId: string; model: string }) => void;
 }
@@ -142,7 +148,7 @@ export interface CompactionRatios {
  * trigger default (via resolveMidLoopBlockRatio) and the emergency ladder.
  */
 export function resolveCompactionRatios(providerId?: string, model?: string): CompactionRatios {
-    if (isDeepSeekModelOrProvider(providerId, model)) {
+    if (isLowCostPrefixCacheModelOrProvider(providerId, model)) {
         return { thresholdRatio: 0.85, targetRatio: 0.65, midLoopRatio: 0.80 };
     }
     return {
@@ -179,7 +185,7 @@ const STRUCTURED_READ_ARCHIVE_TOOLS: ReadonlySet<string> = new Set([
  */
 export function resolveToolResultArchiveLimit(toolName: string, providerId?: string, model?: string): number {
     const base = STRUCTURED_READ_ARCHIVE_TOOLS.has(toolName) ? 60_000 : 16_000;
-    return isDeepSeekModelOrProvider(providerId, model) ? base * 2 : base;
+    return isLowCostPrefixCacheModelOrProvider(providerId, model) ? base * 2 : base;
 }
 
 function renderMessageForCompaction(message: ChatMessage): string {
@@ -316,7 +322,7 @@ export async function maybeCompactHistory(
     const estimatedRequestTokens = budgetOptions.precomputedRequestTokens
         ?? (estimatedTokens + Math.max(0, budgetOptions.reservedTokens ?? 0));
 
-    if (!budgetOptions.force && estimatedRequestTokens <= compactionThreshold) {
+    if (!budgetOptions.force && !budgetOptions.costGateFired && estimatedRequestTokens <= compactionThreshold) {
         return canonicalHistory;
     }
 
@@ -518,18 +524,7 @@ export async function maybeCompactHistory(
             const promptTokens = compactionResponse.usage?.prompt_tokens ?? estimateMessagesTokens(compactionMessages);
             const completionTokens = compactionResponse.usage?.completion_tokens ?? estimateTokenCount(summary);
             const totalTokens = compactionResponse.usage?.total_tokens ?? promptTokens + completionTokens;
-            const usage = compactionResponse.usage as (typeof compactionResponse.usage & {
-                prompt_tokens_details?: { cached_tokens?: number };
-                prompt_cache_hit_tokens?: number;
-                cache_read_input_tokens?: number;
-                cached_content_token_count?: number;
-            }) | undefined;
-            const cachedTokens = usage?.cached_tokens
-                ?? usage?.prompt_tokens_details?.cached_tokens
-                ?? usage?.prompt_cache_hit_tokens
-                ?? usage?.cache_read_input_tokens
-                ?? usage?.cached_content_token_count
-                ?? 0;
+            const cachedTokens = Math.min(promptTokens, getCachedInputTokens(compactionResponse.usage));
             const uncachedInputTokens = Math.max(0, promptTokens - cachedTokens);
             const pricing = getCurrentModelPricing(responseModel, providerId);
             const cacheDiscount = getCacheDiscountFactor(responseModel, providerId);
@@ -548,7 +543,12 @@ export async function maybeCompactHistory(
             const customFormat = deps.aiService.getConfig().provider === providerId
                 ? deps.aiService.getConfig().customApiFormat
                 : undefined;
-            const cacheCapable = isCacheCapableUsage(providerId, cachedTokens, customFormat);
+            const cacheCapable = isCacheCapableUsage(
+                providerId, cachedTokens, customFormat, responseModel,
+                typeof deps.aiService.getEndpointForProvider === 'function'
+                    ? deps.aiService.getEndpointForProvider(providerId)
+                    : undefined,
+            );
             appendCacheRequestUsage(tokenAccumulator, {
                 provider: providerId,
                 model: responseModel,

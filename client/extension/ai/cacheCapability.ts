@@ -1,37 +1,122 @@
-/**
- * CWTools AI Module — Prefix-cache capability rules
- *
- * Shared between agentRunner (request path) and usageTracker (metrics path) so
- * cache hit-rate denominators use the same capability definition as the runner.
- */
+/** Shared provider/model cache capability and bounded usage samples. */
 
 import type { CacheRequestUsage, CustomApiFormat, TokenUsage } from './types';
 
-export function supportsOpenAiStylePrefixCache(providerId: string, customApiFormat?: CustomApiFormat): boolean {
-    if (providerId.startsWith('deepseek') || providerId.startsWith('openai')) return true;
-    if (providerId === 'custom') {
-        return customApiFormat === 'openai-chat-completions' || customApiFormat === 'openai-responses';
-    }
-    return false;
+export type CacheCapabilityStatus = 'supported' | 'unsupported' | 'unknown';
+export type CacheRequestMode = 'implicit-prefix' | 'openai-prompt-cache-key' | 'anthropic-breakpoints' | 'gemini-implicit' | 'none';
+
+export interface EffectiveCacheCapability {
+    status: CacheCapabilityStatus;
+    requestMode: CacheRequestMode;
+    supportsUsageTrailer: boolean;
 }
 
-/**
- * Whether a recorded request belongs in the cache hit-rate denominator.
- * An observed cache hit proves capability even when the provider is not covered
- * by the prefix-cache rule above (e.g. Gemini `cached_content_token_count`),
- * which keeps legacy records without an explicit `cacheCapable` flag countable.
- */
-export function isCacheCapableUsage(providerId: string, cachedTokens?: number, customApiFormat?: CustomApiFormat): boolean {
-    if ((cachedTokens ?? 0) > 0) return true;
-    const normalized = providerId.toLowerCase();
-    if (supportsOpenAiStylePrefixCache(normalized, customApiFormat)) return true;
-    // Native Anthropic requests carry cache_control breakpoints; native Gemini
-    // reports implicit cached_content usage. Count their zero-hit warmups too.
-    if (normalized === 'claude' || normalized === 'google' || normalized === 'codex-chatgpt') return true;
-    if (normalized === 'custom') {
-        return customApiFormat === 'anthropic-messages' || customApiFormat === 'gemini-generate-content';
+const OFFICIAL_OPENAI_PREFIX_PROVIDERS = new Set([
+    'deepseek', 'qwen', 'glm', 'mimo', 'mimo-token-plan', 'kimi', 'kimi-code-plan', 'minimax',
+]);
+const ANTHROPIC_BREAKPOINT_PROVIDERS = new Set(['claude', 'minimax-token-plan']);
+const GATEWAY_PROVIDERS = new Set([
+    'openrouter', 'siliconflow', 'github', 'together', 'deepinfra', 'opencode', 'opencode-go',
+]);
+
+function normalizedEndpointHost(endpoint?: string): string {
+    if (!endpoint) return '';
+    try { return new URL(endpoint).hostname.toLowerCase(); } catch { return endpoint.toLowerCase(); }
+}
+
+function officialTransportOrUnspecified(host: string, expected: RegExp): boolean {
+    return host.length === 0 || expected.test(host);
+}
+
+function modelImpliesPrefixCache(model?: string): boolean {
+    const normalized = model?.toLowerCase() ?? '';
+    return /deepseek|qwen|glm|mimo|kimi|moonshot|minimax|claude|gemini|gpt-[45]|o[134]-/.test(normalized);
+}
+
+/** One authoritative cache decision for request construction, metrics, and budgets. */
+export function resolveEffectiveCacheCapability(options: {
+    providerId: string;
+    model?: string;
+    endpoint?: string;
+    apiFormat?: CustomApiFormat;
+}): EffectiveCacheCapability {
+    const provider = options.providerId.toLowerCase();
+    const host = normalizedEndpointHost(options.endpoint);
+    const format = options.apiFormat;
+
+    if (provider === 'ollama') return { status: 'unknown', requestMode: 'none', supportsUsageTrailer: false };
+    if (provider === 'codex-chatgpt') return { status: 'supported', requestMode: 'openai-prompt-cache-key', supportsUsageTrailer: true };
+    if (provider === 'openai') {
+        const official = officialTransportOrUnspecified(host, /(^|\.)api\.openai\.com$/);
+        return { status: official ? 'supported' : 'unknown', requestMode: 'openai-prompt-cache-key', supportsUsageTrailer: official };
     }
-    return false;
+    if (provider === 'google') {
+        const official = officialTransportOrUnspecified(host, /(^|\.)generativelanguage\.googleapis\.com$/);
+        return { status: official ? 'supported' : 'unknown', requestMode: 'gemini-implicit', supportsUsageTrailer: false };
+    }
+    if (provider === 'claude') {
+        const official = officialTransportOrUnspecified(host, /(^|\.)api\.anthropic\.com$/);
+        return { status: official ? 'supported' : 'unknown', requestMode: 'anthropic-breakpoints', supportsUsageTrailer: false };
+    }
+    if (provider === 'minimax-token-plan') {
+        const official = officialTransportOrUnspecified(host, /(^|\.)api\.minimaxi\.com$/);
+        return { status: official ? 'supported' : 'unknown', requestMode: 'anthropic-breakpoints', supportsUsageTrailer: false };
+    }
+    if (OFFICIAL_OPENAI_PREFIX_PROVIDERS.has(provider)) {
+        const hostPatterns: Record<string, RegExp> = {
+            deepseek: /(^|\.)api\.deepseek\.com$/, qwen: /(^|\.)dashscope\.aliyuncs\.com$/,
+            glm: /(^|\.)open\.bigmodel\.cn$/, mimo: /(^|\.)api\.xiaomimimo\.com$/,
+            'mimo-token-plan': /(^|\.)token-plan-cn\.xiaomimimo\.com$/,
+            kimi: /(^|\.)api\.moonshot\.cn$/, 'kimi-code-plan': /(^|\.)api\.kimi\.com$/,
+            minimax: /(^|\.)api\.minimaxi\.com$/,
+        };
+        const official = officialTransportOrUnspecified(host, hostPatterns[provider] ?? /$a/);
+        return { status: official ? 'supported' : 'unknown', requestMode: 'implicit-prefix', supportsUsageTrailer: official };
+    }
+    if (provider === 'custom') {
+        if (format === 'openai-responses') return { status: 'unknown', requestMode: 'openai-prompt-cache-key', supportsUsageTrailer: false };
+        if (format === 'openai-chat-completions') return { status: 'unknown', requestMode: 'implicit-prefix', supportsUsageTrailer: false };
+        if (format === 'anthropic-messages') return { status: 'unknown', requestMode: 'anthropic-breakpoints', supportsUsageTrailer: false };
+        if (format === 'gemini-generate-content') return { status: 'unknown', requestMode: 'gemini-implicit', supportsUsageTrailer: false };
+        return { status: 'unknown', requestMode: 'none', supportsUsageTrailer: false };
+    }
+    if (GATEWAY_PROVIDERS.has(provider)) {
+        const supported = modelImpliesPrefixCache(options.model);
+        const anthropic = /claude/.test(options.model?.toLowerCase() ?? '') && format === 'anthropic-messages';
+        return {
+            status: supported ? 'supported' : 'unknown',
+            requestMode: anthropic ? 'anthropic-breakpoints' : supported ? 'implicit-prefix' : 'none',
+            supportsUsageTrailer: format === 'openai-chat-completions',
+        };
+    }
+    // Endpoint hints improve official aliases without turning arbitrary relays into assumed support.
+    if (/deepseek|dashscope|bigmodel|moonshot|kimi|minimaxi|xiaomimimo/.test(host)) {
+        return { status: 'supported', requestMode: 'implicit-prefix', supportsUsageTrailer: true };
+    }
+    return { status: 'unknown', requestMode: 'none', supportsUsageTrailer: false };
+}
+
+/** Compatibility facade for stable-prefix prompt construction. */
+export function supportsOpenAiStylePrefixCache(
+    providerId: string,
+    customApiFormat?: CustomApiFormat,
+    model?: string,
+    endpoint?: string,
+): boolean {
+    const capability = resolveEffectiveCacheCapability({ providerId, model, endpoint, apiFormat: customApiFormat });
+    return capability.status === 'supported'
+        && (capability.requestMode === 'implicit-prefix' || capability.requestMode === 'openai-prompt-cache-key');
+}
+
+export function isCacheCapableUsage(
+    providerId: string,
+    cachedTokens?: number,
+    customApiFormat?: CustomApiFormat,
+    model?: string,
+    endpoint?: string,
+): boolean {
+    if ((cachedTokens ?? 0) > 0) return true;
+    return resolveEffectiveCacheCapability({ providerId, model, endpoint, apiFormat: customApiFormat }).status === 'supported';
 }
 
 const MAX_CACHE_REQUEST_SAMPLES = 256;
@@ -43,50 +128,28 @@ function normalizedRequestCount(value: number | undefined): number {
 }
 
 function overflowKey(sample: CacheRequestUsage): string {
-    return [
-        sample.provider,
-        sample.model,
-        sample.cacheCapable ? '1' : '0',
-        sample.agentMode ?? '',
-        sample.toolStage ?? '',
-        sample.promptFingerprint ?? '',
-        sample.purpose ?? '',
-        sample.invalidationReason ?? '',
-    ].join('\u0000');
+    return [sample.provider, sample.model, sample.cacheCapable ? '1' : '0', sample.agentMode ?? '',
+        sample.toolStage ?? '', sample.promptFingerprint ?? '', sample.purpose ?? '', sample.invalidationReason ?? ''].join('\u0000');
 }
 
-/** Append one bounded, normalized provider-call sample to a run accumulator. */
 export function appendCacheRequestUsage(accumulator: TokenUsage | undefined, sample: CacheRequestUsage): void {
     if (!accumulator) return;
     const inputTokens = Number.isFinite(sample.inputTokens) ? Math.max(0, Math.floor(sample.inputTokens)) : 0;
     const cachedTokens = Number.isFinite(sample.cachedTokens)
-        ? Math.min(inputTokens, Math.max(0, Math.floor(sample.cachedTokens)))
-        : 0;
+        ? Math.min(inputTokens, Math.max(0, Math.floor(sample.cachedTokens))) : 0;
     const requestCount = normalizedRequestCount(sample.requestCount);
     const hitRequestCount = sample.hitRequestCount !== undefined && Number.isFinite(sample.hitRequestCount)
         ? Math.min(requestCount, Math.max(0, Math.floor(sample.hitRequestCount)))
         : cachedTokens > 0 ? requestCount : 0;
+    const normalized: CacheRequestUsage = { ...sample, provider: sample.provider || 'unknown', model: sample.model || 'unknown',
+        inputTokens, cachedTokens, ...(sample.requestCount !== undefined || requestCount > 1 ? { requestCount } : {}),
+        ...(sample.hitRequestCount !== undefined || requestCount > 1 ? { hitRequestCount } : {}) };
     const requests = accumulator.cacheRequests ?? [];
-    const normalized: CacheRequestUsage = {
-        ...sample,
-        provider: sample.provider || 'unknown',
-        model: sample.model || 'unknown',
-        inputTokens,
-        cachedTokens,
-        ...(sample.requestCount !== undefined || requestCount > 1 ? { requestCount } : {}),
-        ...(sample.hitRequestCount !== undefined || requestCount > 1 ? { hitRequestCount } : {}),
-    };
-    if (requests.length < MAX_CACHE_REQUEST_SAMPLES) {
-        requests.push(normalized);
-        accumulator.cacheRequests = requests;
-        return;
-    }
-
+    if (requests.length < MAX_CACHE_REQUEST_SAMPLES) { requests.push(normalized); accumulator.cacheRequests = requests; return; }
     const overflow = accumulator.cacheRequestOverflow ?? [];
     let bucket = overflow.find(item => overflowKey(item) === overflowKey(normalized));
     if (!bucket && overflow.length < MAX_CACHE_REQUEST_OVERFLOW_BUCKETS) {
-        bucket = { ...normalized, inputTokens: 0, cachedTokens: 0, requestCount: 0, hitRequestCount: 0 };
-        overflow.push(bucket);
+        bucket = { ...normalized, inputTokens: 0, cachedTokens: 0, requestCount: 0, hitRequestCount: 0 }; overflow.push(bucket);
     }
     if (bucket) {
         bucket.inputTokens += inputTokens;
@@ -96,23 +159,13 @@ export function appendCacheRequestUsage(accumulator: TokenUsage | undefined, sam
         accumulator.cacheRequestOverflow = overflow;
         return;
     }
-
-    // Preserve exact global denominators and hit counts without pretending the
-    // tail belongs to the final dimension bucket. At most two remainder rows
-    // exist (cache-capable and non-capable); all dropped dimensions are explicit.
     const remainder = accumulator.cacheRequestRemainder ?? [];
     let remainderBucket = remainder.find(item => item.cacheCapable === normalized.cacheCapable);
     if (!remainderBucket) {
         remainderBucket = {
-            provider: '__other__',
-            model: '__other__',
-            inputTokens: 0,
-            cachedTokens: 0,
-            cacheCapable: normalized.cacheCapable,
-            requestCount: 0,
-            hitRequestCount: 0,
-            invalidationReason: 'dimension_overflow',
-            dimensionsDropped: true,
+            provider: '__other__', model: '__other__', inputTokens: 0, cachedTokens: 0,
+            cacheCapable: normalized.cacheCapable, requestCount: 0, hitRequestCount: 0,
+            invalidationReason: 'dimension_overflow', dimensionsDropped: true,
         };
         remainder.push(remainderBucket);
     }
@@ -124,46 +177,20 @@ export function appendCacheRequestUsage(accumulator: TokenUsage | undefined, sam
     accumulator.cacheRequestRemainder = remainder;
 }
 
-/**
- * Merge a completed child/auxiliary run into a wider usage accumulator.
- * Request metadata stays on the individual samples; run-level mode/fingerprint
- * fields deliberately remain owned by the target run.
- */
 export function mergeTokenUsageTotals(target: TokenUsage | undefined, source: TokenUsage | undefined): void {
     if (!target || !source || target === source) return;
     target.input += source.input ?? 0;
     target.output += source.output ?? 0;
     target.total += source.total ?? 0;
     target.estimatedCostCny += source.estimatedCostCny ?? 0;
-
-    if (source.cachedTokens !== undefined) {
-        target.cachedTokens = (target.cachedTokens ?? 0) + source.cachedTokens;
-    }
-    if (source.netInput !== undefined) {
-        target.netInput = (target.netInput ?? 0) + source.netInput;
-    }
-    if (source.netTotal !== undefined) {
-        target.netTotal = (target.netTotal ?? 0) + source.netTotal;
-    }
-    if (source.cacheSavedCostCny !== undefined) {
-        target.cacheSavedCostCny = (target.cacheSavedCostCny ?? 0) + source.cacheSavedCostCny;
-    }
-    if (source.apiCalls !== undefined) {
-        target.apiCalls = (target.apiCalls ?? 0) + source.apiCalls;
-    }
-    if (source.compactionCalls !== undefined) {
-        target.compactionCalls = (target.compactionCalls ?? 0) + source.compactionCalls;
-    }
-    if (source.fallbackCalls !== undefined) {
-        target.fallbackCalls = (target.fallbackCalls ?? 0) + source.fallbackCalls;
-    }
-    for (const request of source.cacheRequests ?? []) {
-        appendCacheRequestUsage(target, request);
-    }
-    for (const request of source.cacheRequestOverflow ?? []) {
-        appendCacheRequestUsage(target, request);
-    }
-    for (const request of source.cacheRequestRemainder ?? []) {
-        appendCacheRequestUsage(target, request);
-    }
+    if (source.cachedTokens !== undefined) target.cachedTokens = (target.cachedTokens ?? 0) + source.cachedTokens;
+    if (source.netInput !== undefined) target.netInput = (target.netInput ?? 0) + source.netInput;
+    if (source.netTotal !== undefined) target.netTotal = (target.netTotal ?? 0) + source.netTotal;
+    if (source.cacheSavedCostCny !== undefined) target.cacheSavedCostCny = (target.cacheSavedCostCny ?? 0) + source.cacheSavedCostCny;
+    if (source.apiCalls !== undefined) target.apiCalls = (target.apiCalls ?? 0) + source.apiCalls;
+    if (source.compactionCalls !== undefined) target.compactionCalls = (target.compactionCalls ?? 0) + source.compactionCalls;
+    if (source.fallbackCalls !== undefined) target.fallbackCalls = (target.fallbackCalls ?? 0) + source.fallbackCalls;
+    for (const request of source.cacheRequests ?? []) appendCacheRequestUsage(target, request);
+    for (const request of source.cacheRequestOverflow ?? []) appendCacheRequestUsage(target, request);
+    for (const request of source.cacheRequestRemainder ?? []) appendCacheRequestUsage(target, request);
 }

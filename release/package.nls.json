@@ -238,6 +238,8 @@
   "configuration.stellarisLanguageServices.ai.performance.compactionTriggerRatio.description": "Context-window ratio that starts automatic compaction.",
   "configuration.stellarisLanguageServices.ai.performance.compactionBlockRatio.description": "Context-window ratio at which a model step must wait for compaction.",
   "configuration.stellarisLanguageServices.ai.performance.compactionReservedTokens.description": "Tokens reserved for system context, active tool schemas, the current request, and output.",
+  "configuration.stellarisLanguageServices.ai.performance.compactionCostGate.enabled.description": "Compact a large, measurably cold prompt early when its projected uncached input cost is high.",
+  "configuration.stellarisLanguageServices.ai.performance.compactionCostGate.maxUncachedCostCnyPerRequest.description": "Projected uncached input cost in CNY that triggers early compaction after sufficient cache evidence.",
   "configuration.stellarisLanguageServices.ai.runtime.domainState.enabled.description": "Persist replayable Scheduling, Goal, Task, and Context domain state.",
   "configuration.stellarisLanguageServices.ai.runtime.goalContinuation.enabled.description": "Allow an active durable goal to continue after a bounded turn ends with verified progress.",
   "configuration.stellarisLanguageServices.ai.runtime.backgroundTasks.maxRunning.description": "Maximum number of managed background tasks that may run concurrently.",

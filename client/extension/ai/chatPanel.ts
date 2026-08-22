@@ -1296,7 +1296,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                 this.usageTracker.addUsage(config.provider, config.model || 'unknown', result.tokenUsage, {
                     toolCalls: result.runMetrics?.toolCallsByName,
                     topicId: this.topicManager.currentTopic?.id,
-                    cacheCapable: supportsOpenAiStylePrefixCache(config.provider, config.customApiFormat),
+                    cacheCapable: supportsOpenAiStylePrefixCache(config.provider, config.customApiFormat, config.model, this.aiService.getEndpointForProvider(config.provider)),
                 });
                 this.postMessage({
                     type: 'tokenUsage',
@@ -2747,7 +2747,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                 if (compactionUsage.total > 0) {
                     this.usageTracker.addUsage(config.provider, config.model || 'unknown', compactionUsage, {
                         topicId: this.topicManager.currentTopic?.id,
-                        cacheCapable: supportsOpenAiStylePrefixCache(config.provider, config.customApiFormat),
+                        cacheCapable: supportsOpenAiStylePrefixCache(config.provider, config.customApiFormat, config.model, this.aiService.getEndpointForProvider(config.provider)),
                     });
                     this.postMessage({ type: 'tokenUsage', usage: compactionUsage, model: config.model });
                 }
@@ -3369,6 +3369,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             providerId: config.provider,
             requestedModel: config.model,
             customApiFormat: config.customApiFormat,
+            endpoint: this.aiService.getEndpointForProvider(config.provider),
             agentMode,
             purpose,
         });

@@ -36,6 +36,30 @@ export type MaintenanceAction =
     /** Paid summarization should run. */
     | 'summarize';
 
+export interface CostAwareCompactionGate {
+    contextLimitTokens: number;
+    inputPriceCnyPerMillion: number;
+    recentHitRatio?: number;
+    warmHitRatio: number;
+    minUsageRatio: number;
+    maxUncachedCostCny: number;
+}
+
+/** Compact early only with real evidence that a sufficiently large prefix is cold and costly. */
+export function shouldCompactEarlyForCost(
+    projectedRequestTokens: number,
+    gate: CostAwareCompactionGate | undefined,
+): boolean {
+    if (!gate
+        || gate.inputPriceCnyPerMillion <= 0
+        || gate.contextLimitTokens <= 0
+        || gate.recentHitRatio === undefined
+        || gate.recentHitRatio >= gate.warmHitRatio
+        || projectedRequestTokens < gate.contextLimitTokens * gate.minUsageRatio) return false;
+    const uncachedTokens = projectedRequestTokens * (1 - Math.max(0, gate.recentHitRatio));
+    return uncachedTokens / 1_000_000 * gate.inputPriceCnyPerMillion > gate.maxUncachedCostCny;
+}
+
 export interface MaintenanceDeps {
     /** Squeeze aggressiveness for old tool results (see contextBudget). */
     toolResultBudget: number;
@@ -60,6 +84,7 @@ export interface MaintenanceDeps {
      * the before/after estimates so thresholds compare calibrated values.
      */
     calibrateEstimate?: (tokens: number) => number;
+    costGate?: CostAwareCompactionGate;
 }
 
 export interface MaintenanceResult {
@@ -68,6 +93,7 @@ export interface MaintenanceResult {
     beforeTokens: number;
     afterTokens: number;
     action: MaintenanceAction;
+    costGateFired: boolean;
 }
 
 /** Unified request-size estimate: per-message tokens (incl. tool_calls/reasoning) + extras. */
@@ -88,12 +114,14 @@ export function runContextMaintenance(
 ): MaintenanceResult {
     const calibrate = deps.calibrateEstimate ?? ((tokens: number) => tokens);
     const beforeTokens = calibrate(estimateContextRequestTokens(messages, deps.extraTokens));
-    if (reason === 'admission' && beforeTokens <= deps.summarizeThreshold) {
-        return { messages, beforeTokens, afterTokens: beforeTokens, action: 'untouched' };
+    const beforeCostGateFired = shouldCompactEarlyForCost(beforeTokens, deps.costGate);
+    if (reason === 'admission' && beforeTokens <= deps.summarizeThreshold && !beforeCostGateFired) {
+        return { messages, beforeTokens, afterTokens: beforeTokens, action: 'untouched', costGateFired: false };
     }
 
     compactMessagesInPlace(messages, deps.toolResultBudget, deps.compactionOptions);
     const afterTokens = calibrate(estimateContextRequestTokens(messages, deps.extraTokens));
+    const costGateFired = shouldCompactEarlyForCost(afterTokens, deps.costGate);
 
     let summarize: boolean;
     switch (reason) {
@@ -105,11 +133,11 @@ export function runContextMaintenance(
             summarize = true;
             break;
         case 'mid_loop':
-            summarize = afterTokens > deps.summarizeThreshold
-                && (!deps.ineffectivenessGate || afterTokens >= beforeTokens * 0.90);
+            summarize = costGateFired || (afterTokens > deps.summarizeThreshold
+                && (!deps.ineffectivenessGate || afterTokens >= beforeTokens * 0.90));
             break;
         default:
-            summarize = afterTokens > deps.summarizeThreshold;
+            summarize = afterTokens > deps.summarizeThreshold || costGateFired;
             break;
     }
 
@@ -118,5 +146,6 @@ export function runContextMaintenance(
         beforeTokens,
         afterTokens,
         action: summarize ? 'summarize' : 'pruned-below-threshold',
+        costGateFired,
     };
 }

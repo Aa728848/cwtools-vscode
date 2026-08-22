@@ -412,8 +412,12 @@ export interface ChatCompletionResponse {
         total_tokens: number;
         /** Provider prefix-cache hit tokens (DeepSeek, Claude, etc.) */
         cached_tokens?: number;
-        prompt_tokens_details?: { cached_tokens?: number };
+        input_tokens_details?: { cached_tokens?: number; cache_creation_tokens?: number };
+        prompt_tokens_details?: { cached_tokens?: number; cache_creation_tokens?: number };
         prompt_cache_hit_tokens?: number;
+        prompt_cache_miss_tokens?: number;
+        cache_read_input_tokens?: number;
+        cache_creation_input_tokens?: number;
         cached_content_token_count?: number;
         /** Anthropic-only: tokens written into the prompt cache this turn (billed at 1.25x). */
         cache_creation_tokens?: number;

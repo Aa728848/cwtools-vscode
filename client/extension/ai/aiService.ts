@@ -41,12 +41,21 @@ import { DEFAULT_REASONING_KEY, detectReasoningKey, KNOWN_REASONING_KEYS, reason
 import { ErrorReporter } from './errorReporter';
 import { SOURCE, aiText } from './messages';
 import { ChatGptOAuthService } from './codex/oauthService';
+import { getCachedInputTokens, getCacheCreationInputTokens } from './providerUsage';
+import { resolveEffectiveCacheCapability } from './cacheCapability';
 
 // ─── Module-level constants ──────────────────────────────────────────────────
 
 /** Providers that reject the `detail` sub-field inside `image_url` objects. */
 const STRIP_IMAGE_DETAIL_PROVIDERS = new Set(['minimax', 'glm', 'qwen']);
-const STREAM_USAGE_PROVIDERS = new Set(['openai', 'deepseek', 'glm', 'qwen']);
+function shouldRequestStreamUsage(providerId: string, model: string, endpoint: string): boolean {
+    return resolveEffectiveCacheCapability({
+        providerId,
+        model,
+        endpoint,
+        apiFormat: 'openai-chat-completions',
+    }).supportsUsageTrailer;
+}
 const OPTIONAL_CHAT_REQUEST_FIELDS = [
     'stream_options',
     'reasoning_effort',
@@ -128,32 +137,6 @@ function finiteNumber(value: unknown): number | undefined {
     return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
 }
 
-function maxUsageNumber(...values: unknown[]): number | undefined {
-    const nums = values.map(finiteNumber).filter((n): n is number => n !== undefined);
-    return nums.length > 0 ? Math.max(...nums) : undefined;
-}
-
-function extractUsageCachedTokens(usage: Record<string, any>): number {
-    return maxUsageNumber(
-        usage.input_tokens_details?.cached_tokens,
-        usage.prompt_tokens_details?.cached_tokens,
-        usage.prompt_cache_hit_tokens,
-        usage.cached_tokens,
-        usage.cache_read_input_tokens,
-        usage.cached_content_token_count,
-    ) ?? 0;
-}
-
-function extractUsageCacheCreationTokens(usage: Record<string, any>, promptTokens: number, cachedTokens: number): number {
-    const explicit = maxUsageNumber(
-        usage.input_tokens_details?.cache_creation_tokens,
-        usage.prompt_tokens_details?.cache_creation_tokens,
-        usage.cache_creation_input_tokens,
-        usage.prompt_cache_miss_tokens,
-    );
-    if (explicit !== undefined) return explicit;
-    return cachedTokens > 0 && promptTokens > cachedTokens ? promptTokens - cachedTokens : 0;
-}
 
 export function normalizeChatCompletionTimeoutMs(value: unknown): number {
     const raw = typeof value === 'number' ? value : Number(value);
@@ -1152,7 +1135,7 @@ export class AIService {
         
         // Inject stream_options for providers that need it to return usage in streams.
         // OpenAI, DeepSeek, GLM, Qwen require it. We omit it for minimax (strict schema).
-        if (STREAM_USAGE_PROVIDERS.has(providerId)) {
+        if (shouldRequestStreamUsage(providerId, request.model, endpoint)) {
             requestPayload.stream_options = { include_usage: true };
         }
 
@@ -1221,7 +1204,7 @@ export class AIService {
             let readResult: ReadableStreamReadResult<Uint8Array>;
             try {
                 const waitingForUsageTrailer = finishReason !== null
-                    && STREAM_USAGE_PROVIDERS.has(providerId)
+                    && shouldRequestStreamUsage(providerId, request.model, endpoint)
                     && usageBuf === undefined;
                 readResult = await this.readWithTimeout(
                     reader,
@@ -1261,14 +1244,14 @@ export class AIService {
                 if (typeof chunk.model === 'string' && chunk.model) modelBuf = chunk.model;
                 if (typeof chunk.id === 'string' && chunk.id) responseIdBuf = chunk.id;
                 if (typeof chunk.created === 'number') createdBuf = chunk.created;
-                if (chunk.usage) { const u = chunk.usage as Record<string, any>; const promptTk = u.prompt_tokens ?? u.input_tokens ?? 0; const cached = extractUsageCachedTokens(u); const cacheCreation = extractUsageCacheCreationTokens(u, promptTk, cached); usageBuf = { prompt_tokens: promptTk, completion_tokens: u.completion_tokens ?? u.output_tokens ?? 0, total_tokens: u.total_tokens ?? (promptTk + (u.completion_tokens ?? 0)), cached_tokens: cached, cache_creation_tokens: cacheCreation }; }
+                if (chunk.usage) { const u = chunk.usage as Record<string, any>; const promptTk = u.prompt_tokens ?? u.input_tokens ?? 0; const cached = getCachedInputTokens(u); const cacheCreation = getCacheCreationInputTokens(u, promptTk, cached); usageBuf = { prompt_tokens: promptTk, completion_tokens: u.completion_tokens ?? u.output_tokens ?? 0, total_tokens: u.total_tokens ?? (promptTk + (u.completion_tokens ?? 0)), cached_tokens: cached, cache_creation_tokens: cacheCreation }; }
                 // With stream_options.include_usage, the protocol's final data
                 // chunk has an empty choices array and carries only usage. Some
                 // providers omit both finish_reason and [DONE], then keep the HTTP
                 // connection alive. The requested usage trailer is the final protocol
                 // frame for providers where we explicitly requested this shape.
                 if (!choices || choices.length === 0) {
-                    if (chunk.usage && STREAM_USAGE_PROVIDERS.has(providerId)) {
+                    if (chunk.usage && shouldRequestStreamUsage(providerId, request.model, endpoint)) {
                         terminalFrameSeen = true;
                     }
                     continue;
@@ -1331,7 +1314,7 @@ export class AIService {
             }
 
             if (finishReason !== null
-                && (!STREAM_USAGE_PROVIDERS.has(providerId) || usageBuf !== undefined)) {
+                && (!shouldRequestStreamUsage(providerId, request.model, endpoint) || usageBuf !== undefined)) {
                 terminalFrameSeen = true;
             }
         }
@@ -1534,6 +1517,7 @@ export class AIService {
         const sessionId = callbacks?.promptCacheKey
             ? crypto.createHash('sha256').update(callbacks.promptCacheKey).digest('hex').slice(0, 32)
             : crypto.randomUUID();
+        let promptCacheKeyEnabled = true;
         const send = async (
             reasoningSummary: 'auto' | 'concise' | 'detailed' | undefined,
             includeReasoning = true,
@@ -1553,7 +1537,7 @@ export class AIService {
                     includeReasoning ? request : { ...request, reasoning_effort: undefined },
                     useOpenAIFastPath ? {
                         fastPath: true,
-                        promptCacheKey: callbacks?.promptCacheKey,
+                        promptCacheKey: promptCacheKeyEnabled ? callbacks?.promptCacheKey : undefined,
                         reasoningSummary,
                         codexCompatibility,
                     } : undefined,
@@ -1569,6 +1553,20 @@ export class AIService {
         }
         if (!response.ok) {
             let errorText = await response.text();
+            if (
+                (response.status === 400 || response.status === 422)
+                && callbacks?.promptCacheKey
+                && /prompt_cache_key/i.test(errorText)
+                && /unsupported|not supported|unknown|unrecognized|unexpected|not permitted|not allowed/i.test(errorText)
+            ) {
+                promptCacheKeyEnabled = false;
+                response = await send(callbacks?.reasoningSummary);
+                if (response.ok) {
+                    ErrorReporter.debug(SOURCE.AI_SERVICE, `${getProvider(providerId).name}: retried Responses without prompt_cache_key.`);
+                } else {
+                    errorText = await response.text();
+                }
+            }
             if (
                 response.status === 400
                 && useOpenAIFastPath
@@ -1839,7 +1837,7 @@ export class AIService {
         const usage = data.usage ?? {};
         const promptTokens = usage.input_tokens ?? usage.prompt_tokens ?? 0;
         const completionTokens = usage.output_tokens ?? usage.completion_tokens ?? 0;
-        const cachedTokens = extractUsageCachedTokens(usage);
+        const cachedTokens = getCachedInputTokens(usage);
         return {
             id: data.id,
             object: data.object ?? 'response',
@@ -1862,7 +1860,7 @@ export class AIService {
                 completion_tokens: completionTokens,
                 total_tokens: usage.total_tokens ?? (promptTokens + completionTokens),
                 cached_tokens: cachedTokens,
-                cache_creation_tokens: extractUsageCacheCreationTokens(usage, promptTokens, cachedTokens),
+                cache_creation_tokens: getCacheCreationInputTokens(usage, promptTokens, cachedTokens),
             },
         } as ChatCompletionResponse;
     }
@@ -2278,6 +2276,8 @@ export class AIService {
                 completion_tokens: usage.candidatesTokenCount ?? usage.candidates_token_count ?? 0,
                 total_tokens: usage.totalTokenCount ?? usage.total_token_count
                     ?? ((usage.promptTokenCount ?? usage.prompt_token_count ?? 0) + (usage.candidatesTokenCount ?? usage.candidates_token_count ?? 0)),
+                cached_tokens: usage.cachedContentTokenCount ?? usage.cached_content_token_count ?? 0,
+                cached_content_token_count: usage.cachedContentTokenCount ?? usage.cached_content_token_count ?? 0,
             },
         } as ChatCompletionResponse;
     }
@@ -2322,11 +2322,12 @@ export class AIService {
     ): Promise<ChatCompletionResponse> {
         const url = `${normalizeAnthropicMessagesEndpoint(endpoint)}/messages`;
         // Force stream=true so we get SSE — enables thinking tokens and unblocks UI.
-        // Custom Anthropic-compatible relays often implement the core Messages API
-        // but reject Anthropic cache_control blocks, so keep that shape plain there.
+        const cacheCapability = resolveEffectiveCacheCapability({
+            providerId, model: request.model, endpoint, apiFormat: 'anthropic-messages',
+        });
         const claudeRequest = toClaudeRequest(
             { ...request, stream: true },
-            { cacheControl: providerId === 'claude' }
+            { cacheControl: cacheCapability.requestMode === 'anthropic-breakpoints' }
         );
         // Claude Code-style relays often expose models that reject temperature entirely.
         if (providerId === 'custom') {
@@ -2371,6 +2372,24 @@ export class AIService {
                 if (claudeRequest.output_config !== undefined && /output_config|effort/i.test(errorText)) {
                     delete claudeRequest.output_config;
                     removed.push('output_config');
+                }
+                if (/cache_control/i.test(errorText)) {
+                    let removedCacheControl = false;
+                    const removeFromParts = (parts: unknown): void => {
+                        if (!Array.isArray(parts)) return;
+                        for (const part of parts) {
+                            if (part && typeof part === 'object' && 'cache_control' in part) {
+                                delete (part as Record<string, unknown>).cache_control;
+                                removedCacheControl = true;
+                            }
+                        }
+                    };
+                    removeFromParts(claudeRequest.system);
+                    removeFromParts(claudeRequest.tools);
+                    for (const message of (claudeRequest.messages as Array<{ content?: unknown }> | undefined) ?? []) {
+                        removeFromParts(message.content);
+                    }
+                    if (removedCacheControl) removed.push('cache_control');
                 }
                 const thinking = claudeRequest.thinking as Record<string, unknown> | undefined;
                 if (thinking?.display !== undefined && /display/i.test(errorText)) {

@@ -1,5 +1,5 @@
 import { expect } from 'chai';
-import { ToolDisclosureService, type ToolDisclosureContext } from '../../extension/ai/runner/toolDisclosure';
+import { sortToolDefinitionsForStableRequest, ToolDisclosureService, type ToolDisclosureContext } from '../../extension/ai/runner/toolDisclosure';
 import type { AgentMode, AgentRuntimeDomain } from '../../extension/ai/types';
 
 const service = new ToolDisclosureService();
@@ -13,6 +13,14 @@ function context(
 }
 
 describe('toolDisclosure', () => {
+    it('sorts model-visible schemas deterministically by name', () => {
+        const makeTool = (name: string) => ({
+            type: 'function' as const,
+            function: { name, description: '', parameters: { type: 'object', properties: {} } },
+        });
+        expect(sortToolDefinitionsForStableRequest([makeTool('z'), makeTool('a')])
+            .map(tool => tool.function.name)).to.deep.equal(['a', 'z']);
+    });
     it('reports stage-hidden deferred tools as unavailable without deferStageGating', () => {
         const result = service.select(
             { tools: ['edit_file', 'replace_lines', 'get_goal'], reason: 'test' },

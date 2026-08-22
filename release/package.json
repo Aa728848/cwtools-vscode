@@ -1828,6 +1828,20 @@
                         "minimum": 0,
                         "description": "%configuration.stellarisLanguageServices.ai.performance.compactionReservedTokens.description%"
                     },
+                    "stellarisLanguageServices.ai.performance.compactionCostGate.enabled": {
+                        "scope": "window",
+                        "type": "boolean",
+                        "default": true,
+                        "description": "%configuration.stellarisLanguageServices.ai.performance.compactionCostGate.enabled.description%"
+                    },
+                    "stellarisLanguageServices.ai.performance.compactionCostGate.maxUncachedCostCnyPerRequest": {
+                        "scope": "window",
+                        "type": "number",
+                        "default": 0.05,
+                        "minimum": 0.001,
+                        "maximum": 10,
+                        "description": "%configuration.stellarisLanguageServices.ai.performance.compactionCostGate.maxUncachedCostCnyPerRequest.description%"
+                    },
                     "stellarisLanguageServices.ai.runtime.domainState.enabled": {
                         "scope": "window",
                         "type": "boolean",

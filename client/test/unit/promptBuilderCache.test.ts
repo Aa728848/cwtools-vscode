@@ -232,6 +232,25 @@ describe('orderMessagesForStablePrefix (plan §7.2)', () => {
     });
 });
 
+describe('PromptBuilder frozen slim prompt cache', () => {
+    it('serves a stable slim base while keeping delegation in a tail reminder', () => {
+        const { PromptBuilder } = loadPromptBuilderModule();
+        const builder = new PromptBuilder('', undefined, undefined);
+        const first = builder.buildFrozenSlimSystemPromptForMode('explore', 'mimo', undefined, {
+            toolsetHash: 'tools-a', domain: 'general',
+        });
+        const second = builder.buildFrozenSlimSystemPromptForMode('explore', 'mimo', undefined, {
+            toolsetHash: 'tools-a', domain: 'general',
+        });
+        expect(second).to.equal(first);
+        expect(builder.getFrozenPromptCacheStats().hits).to.equal(1);
+        const dynamic = builder.buildSlimDynamicPromptBlock({ readOnly: true, writeScope: [] });
+        expect(dynamic).to.have.length(1);
+        expect(first).to.not.include('Delegated scope');
+        expect(String(dynamic[0]?.content)).to.include('Delegated scope');
+    });
+});
+
 describe('hashToolDefinitionsForFingerprint (plan §7.1)', () => {
     it('changes with tool names and required lists but not descriptions', () => {
         const { hashToolDefinitionsForFingerprint } = loadPromptBuilderModule();
@@ -247,5 +266,16 @@ describe('hashToolDefinitionsForFingerprint (plan §7.1)', () => {
         expect(same).to.equal(base);
         expect(renamed).to.not.equal(base);
         expect(requiredChanged).to.not.equal(base);
+    });
+
+    it('is invariant to tool and required-parameter ordering', () => {
+        const { hashToolDefinitionsForFingerprint } = loadPromptBuilderModule();
+        const makeTool = (name: string, required: string[]) => ({
+            type: 'function' as const,
+            function: { name, description: '', parameters: { type: 'object', required, properties: {} } },
+        });
+        const left = [makeTool('write_file', ['content', 'path']), makeTool('read_file', ['path'])];
+        const right = [makeTool('read_file', ['path']), makeTool('write_file', ['path', 'content'])];
+        expect(hashToolDefinitionsForFingerprint(left)).to.equal(hashToolDefinitionsForFingerprint(right));
     });
 });

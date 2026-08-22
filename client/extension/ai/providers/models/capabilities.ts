@@ -129,6 +129,16 @@ export function isDeepSeekModelOrProvider(providerId?: string, model?: string): 
     return (model?.toLowerCase() ?? '').includes('deepseek');
 }
 
+/** Large-window providers with very low cached-input prices benefit from the same relaxed watermarks. */
+export function isLowCostPrefixCacheModelOrProvider(providerId?: string, model?: string): boolean {
+    const provider = providerId?.toLowerCase() ?? '';
+    const normalizedModel = model?.toLowerCase() ?? '';
+    return isDeepSeekModelOrProvider(provider, normalizedModel)
+        || provider === 'mimo'
+        || provider === 'mimo-token-plan'
+        || normalizedModel.includes('mimo-v2');
+}
+
 /**
  * Model-level FIM (Fill-in-the-Middle) capability map.
  */

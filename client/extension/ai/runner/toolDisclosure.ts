@@ -35,13 +35,19 @@ export interface ToolSelectionOptions {
     deferStageGating?: boolean;
 }
 
+export function sortToolDefinitionsForStableRequest(tools: readonly ToolDefinition[]): ToolDefinition[] {
+    return [...tools].sort((left, right) => left.function.name.localeCompare(right.function.name));
+}
+
 export class ToolDisclosureService {
     initialTools(tools: readonly ToolDefinition[], context: ToolDisclosureContext): ToolDefinition[] {
-        if (!context.dynamicSupported) return [...tools];
-        return tools.filter(tool => {
-            const entry = TOOL_REGISTRY.get(tool.function.name as AgentToolName);
-            return (entry ? entry.disclosure !== 'deferred' : false) || context.loaded.has(tool.function.name);
-        });
+        const visible = context.dynamicSupported
+            ? tools.filter(tool => {
+                const entry = TOOL_REGISTRY.get(tool.function.name as AgentToolName);
+                return (entry ? entry.disclosure !== 'deferred' : false) || context.loaded.has(tool.function.name);
+            })
+            : tools;
+        return sortToolDefinitionsForStableRequest(visible);
     }
 
     select(

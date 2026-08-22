@@ -15,7 +15,6 @@ export function collectLiveVsCodeContext(): ChatMessage {
         .slice(0, 12);
     const lines = [
         LIVE_CONTEXT_MARKER,
-        `Refreshed: ${new Date().toISOString()}`,
         `Workspace trusted: ${vs.workspace.isTrusted !== false}`,
         `Workspace folders: ${(vs.workspace.workspaceFolders ?? []).map(folder => folder.uri.fsPath).join(', ') || '(none)'}`,
         editor
@@ -28,11 +27,20 @@ export function collectLiveVsCodeContext(): ChatMessage {
 }
 
 export function refreshLiveVsCodeContext(messages: ChatMessage[]): void {
-    for (let index = messages.length - 1; index >= 0; index--) {
-        if (messages[index]?.role === 'system' && String(messages[index]?.content).startsWith(LIVE_CONTEXT_MARKER)) {
-            messages.splice(index, 1);
-        }
+    const next = collectLiveVsCodeContext();
+    const content = `<system-reminder>\n${String(next.content)}\n</system-reminder>`;
+    const liveIndexes = messages
+        .map((message, index) => String(message.content).includes(LIVE_CONTEXT_MARKER) ? index : -1)
+        .filter(index => index >= 0);
+    if (liveIndexes.length === 1
+        && liveIndexes[0] === messages.length - 1
+        && messages.at(-1)?.role === 'user'
+        && messages.at(-1)?.content === content) return;
+    for (let index = liveIndexes.length - 1; index >= 0; index--) {
+        messages.splice(liveIndexes[index]!, 1);
     }
-    const insertionIndex = messages[0]?.role === 'system' ? 1 : 0;
-    messages.splice(insertionIndex, 0, collectLiveVsCodeContext());
+
+    // Keep volatile editor state after the cacheable transcript. A user-role
+    // reminder avoids introducing a late system message on strict providers.
+    messages.push({ role: 'user', content });
 }

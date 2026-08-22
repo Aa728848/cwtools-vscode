@@ -238,6 +238,8 @@
   "configuration.stellarisLanguageServices.ai.performance.compactionTriggerRatio.description": "开始自动上下文压缩的窗口占用比例。",
   "configuration.stellarisLanguageServices.ai.performance.compactionBlockRatio.description": "新模型步骤必须等待上下文压缩完成的窗口占用比例。",
   "configuration.stellarisLanguageServices.ai.performance.compactionReservedTokens.description": "为系统上下文、活动工具 schema、当前请求和输出预留的 Token 数。",
+  "configuration.stellarisLanguageServices.ai.performance.compactionCostGate.enabled.description": "当大型提示词的缓存命中率经测量较低且预计未缓存输入成本较高时提前压缩。",
+  "configuration.stellarisLanguageServices.ai.performance.compactionCostGate.maxUncachedCostCnyPerRequest.description": "在收集足够缓存证据后触发提前压缩的单次请求预计未缓存输入成本（人民币）。",
   "configuration.stellarisLanguageServices.ai.runtime.domainState.enabled.description": "持久化可回放的调度、目标、任务和上下文领域状态。",
   "configuration.stellarisLanguageServices.ai.runtime.goalContinuation.enabled.description": "允许活动持久目标在有可验证进展的受限 Turn 结束后自动续作。",
   "configuration.stellarisLanguageServices.ai.runtime.backgroundTasks.maxRunning.description": "可同时运行的托管后台任务上限。",

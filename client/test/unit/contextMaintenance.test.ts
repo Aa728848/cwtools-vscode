@@ -3,6 +3,7 @@ import type { ChatMessage } from '../../extension/ai/types';
 import {
     estimateContextRequestTokens,
     runContextMaintenance,
+    shouldCompactEarlyForCost,
     type MaintenanceDeps,
 } from '../../extension/ai/runner/contextMaintenance';
 
@@ -50,6 +51,35 @@ function deps(overrides: Partial<MaintenanceDeps>): MaintenanceDeps {
         ...overrides,
     };
 }
+
+describe('cost-aware context maintenance', () => {
+    const gate = {
+        contextLimitTokens: 10_000,
+        inputPriceCnyPerMillion: 10,
+        recentHitRatio: 0.1,
+        warmHitRatio: 0.7,
+        minUsageRatio: 0.6,
+        maxUncachedCostCny: 0.05,
+    };
+
+    it('fires only for sufficiently large, cold, costly requests', () => {
+        expect(shouldCompactEarlyForCost(7_000, gate)).to.equal(true);
+        expect(shouldCompactEarlyForCost(5_000, gate)).to.equal(false);
+        expect(shouldCompactEarlyForCost(7_000, { ...gate, recentHitRatio: 0.8 })).to.equal(false);
+        expect(shouldCompactEarlyForCost(7_000, { ...gate, inputPriceCnyPerMillion: 0 })).to.equal(false);
+    });
+
+    it('escalates admission below the normal context watermark after free prune', () => {
+        const history = buildHistory(2, 600);
+        const result = runContextMaintenance(history, 'admission', deps({
+            summarizeThreshold: 1_000_000,
+            costGate: gate,
+            extraTokens: 7_000,
+        }));
+        expect(result.action).to.equal('summarize');
+        expect(result.costGateFired).to.equal(true);
+    });
+});
 
 describe('runner/contextMaintenance（P0 设计 2：统一剪枝阶梯）', () => {
     describe('admission', () => {

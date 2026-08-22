@@ -687,6 +687,30 @@ describe('AIService OpenAI Responses payload', () => {
         }
     });
 
+    it('retries OpenAI Responses without an explicitly rejected prompt_cache_key', async () => {
+        const { AIService } = loadAIService();
+        const service = new AIService({ secrets: {} } as any) as any;
+        const bodies: any[] = [];
+        service.fetchWithRetry = async (_url: string, init: RequestInit) => {
+            bodies.push(JSON.parse(init.body as string));
+            if (bodies.length === 1) {
+                return { ok: false, status: 400, text: async () => 'Unknown parameter: prompt_cache_key' };
+            }
+            return {
+                ok: true, status: 200, headers: new Headers({ 'content-type': 'application/json' }),
+                json: async () => ({ id: 'resp_retry', model: 'gpt-5.5', output_text: 'ok', usage: {} }),
+            };
+        };
+        await service.callOpenAIResponses(
+            'https://api.openai.com/v1', 'test-key',
+            { model: 'gpt-5.5', messages: [{ role: 'user', content: 'request' }] },
+            'openai', new AbortController(), { promptCacheKey: 'agent-thread:thread-1' },
+        );
+        expect(bodies).to.have.length(2);
+        expect(bodies[0].prompt_cache_key).to.match(/^cwtools:[a-f0-9]{32}$/);
+        expect(bodies[1]).to.not.have.property('prompt_cache_key');
+    });
+
     it('retries OpenAI Responses without summaries when account verification blocks them', async () => {
         const { AIService } = loadAIService();
         const service = new AIService({ secrets: {} } as any) as any;
@@ -925,6 +949,26 @@ describe('AIService OpenAI Chat Completions compatibility', () => {
         expect(response.choices[0].message.content).to.equal('done');
     });
 
+    it('requests and parses MiMo streaming usage trailers', async () => {
+        const { AIService } = loadAIService();
+        const service = new AIService({ secrets: {} } as any) as any;
+        let body: any;
+        service.fetchWithRetry = async (_url: string, init: RequestInit) => {
+            body = JSON.parse(init.body as string);
+            return openChatCompletionsSseResponse([
+                `data:${JSON.stringify({ choices: [{ delta: { content: 'done' }, finish_reason: null }] })}\n\n`,
+                `data:${JSON.stringify({ choices: [], usage: { prompt_tokens: 100, completion_tokens: 5, total_tokens: 105, prompt_cache_hit_tokens: 80 } })}\n\n`,
+            ]);
+        };
+        const response = await service.callOpenAICompatibleStreaming(
+            'https://api.xiaomimimo.com/v1', 'test-key',
+            { model: 'mimo-v2.5-pro', messages: [{ role: 'user', content: 'Hi' }] },
+            'mimo', undefined, new AbortController(),
+        );
+        expect(body.stream_options).to.deep.equal({ include_usage: true });
+        expect(response.usage!.cached_tokens).to.equal(80);
+    });
+
     it('finishes on a DeepSeek usage trailer without finish markers when the stream stays open', async () => {
         const { AIService } = loadAIService();
         const service = new AIService({ secrets: {} } as any) as any;
@@ -971,6 +1015,33 @@ describe('AIService OpenAI Chat Completions compatibility', () => {
         expect(bodies[0]).to.have.property('stream_options');
         expect(bodies[1]).to.not.have.property('stream_options');
     });
+
+    for (const provider of [
+        { id: 'kimi', endpoint: 'https://api.moonshot.cn/v1', model: 'kimi-k3' },
+        { id: 'kimi-code-plan', endpoint: 'https://api.kimi.com/coding/v1', model: 'kimi-for-coding' },
+        { id: 'minimax', endpoint: 'https://api.minimaxi.com/v1', model: 'MiniMax-M3' },
+    ]) {
+        it(`requests usage and safely falls back for ${provider.id}`, async () => {
+            const { AIService } = loadAIService();
+            const service = new AIService({ secrets: {} } as any) as any;
+            const bodies: any[] = [];
+            service.fetchWithRetry = async (_url: string, init: RequestInit) => {
+                bodies.push(JSON.parse(init.body as string));
+                if (bodies.length === 1) {
+                    return { ok: false, status: 400, text: async () => 'Unrecognized request argument: stream_options' };
+                }
+                return chatCompletionsSseResponse([{ choices: [{ delta: { content: 'ok' }, finish_reason: 'stop' }] }]);
+            };
+            await service.callOpenAICompatibleStreaming(
+                provider.endpoint, 'test-key',
+                { model: provider.model, messages: [{ role: 'user', content: 'Hi' }] },
+                provider.id, undefined, new AbortController(),
+            );
+            expect(bodies).to.have.length(2);
+            expect(bodies[0].stream_options).to.deep.equal({ include_usage: true });
+            expect(bodies[1]).to.not.have.property('stream_options');
+        });
+    }
 
     it('can remove explicitly rejected reasoning_content from replayed messages', async () => {
         const { AIService } = loadAIService();
@@ -1138,7 +1209,7 @@ describe('AIService Gemini generateContent compatibility', () => {
                 candidates: [{ content: { parts: [{ text: 'Thinking.', thought: true }] } }],
             }, {
                 candidates: [{ content: { parts: [{ text: 'Done.' }] }, finishReason: 'STOP' }],
-                usageMetadata: { promptTokenCount: 4, candidatesTokenCount: 2, totalTokenCount: 6 },
+                usageMetadata: { promptTokenCount: 4, candidatesTokenCount: 2, totalTokenCount: 6, cachedContentTokenCount: 3 },
             }]);
         };
         const text: string[] = [];
@@ -1161,11 +1232,12 @@ describe('AIService Gemini generateContent compatibility', () => {
         expect(response.choices[0].message.content).to.equal('Done.');
         expect(response.choices[0].message.reasoning_content).to.equal('Thinking.');
         expect(response.usage!.total_tokens).to.equal(6);
+        expect(response.usage!.cached_tokens).to.equal(3);
     });
 });
 
 describe('AIService Anthropic Messages compatibility', () => {
-    it('sends a plain Messages body for custom compatible relays', async () => {
+    it('offers cache breakpoints to custom Messages relays with fallback support', async () => {
         const { AIService } = loadAIService();
         const service = new AIService({ secrets: {} } as any) as any;
         const calls: Array<{ headers: Record<string, string>; body: Record<string, any> }> = [];
@@ -1205,8 +1277,8 @@ describe('AIService Anthropic Messages compatibility', () => {
         expect(calls).to.have.length(1);
         const firstCall = calls[0]!;
         expect(firstCall.headers['x-api-key']).to.equal('test-key');
-        expect(firstCall.body.system).to.equal('System prompt');
-        expect(JSON.stringify(firstCall.body)).to.not.include('cache_control');
+        expect(firstCall.body.system[0].text).to.equal('System prompt');
+        expect(JSON.stringify(firstCall.body)).to.include('cache_control');
     });
 
     it('retries custom Messages requests with Bearer auth after auth failure', async () => {

@@ -23,15 +23,6 @@ export interface ToolDisclosureContext {
 }
 
 export interface ToolSelectionOptions {
-    /**
-     * When true, tools that exist in the registry, are allowed for the current
-     * mode and domain, but are hidden only by the stage pool are loaded on
-     * demand instead of reported as `unavailable`. The stage system is a model
-     * guidance mechanism, not an execution gate (the tool executor does not
-     * enforce stages), so write-authorized runs must be able to load deferred
-     * write tools at any stage — otherwise a continuation turn that starts at
-     * discovery misreads `unavailable` as "the host never exposed this tool".
-     */
     deferStageGating?: boolean;
 }
 

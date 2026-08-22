@@ -1,5 +1,34 @@
 # Changelog
 
+## [2.15.1] - 2026-08-22
+
+### 新功能 / New Features
+- **[新增] 提示词前缀缓存（Prompt Cache）增强与小米 MiMo 原生支持**：
+  - 全面支持小米 MiMo 平台的提示词前缀缓存能力（`mimo` 与 `mimo-token-plan`），享受与 DeepSeek 相同的低成本前缀缓存水位（85% 触发 / 65% 目标水位）。
+  - 支持 MiMo 流式请求 Usage 尾包（`stream_options: { include_usage: true }`）的自动解析与缓存命中 Token 统计。
+  - English: [New] Prompt cache enhancements and native Xiaomi MiMo support — added full prefix caching support for Xiaomi MiMo (`mimo` and `mimo-token-plan`) with relaxed compaction watermarks (85% trigger / 65% target); enabled automatic parsing of MiMo streaming usage trailers (`stream_options: { include_usage: true }`) for cached token accounting.
+- **[新增] 成本感知的早熟上下文压缩门控（Cost-Aware Compaction Gate）**：
+  - 引入 `compactionCostGate` 性能配置项（`stellarisLanguageServices.ai.performance.compactionCostGate.enabled` 与 `maxUncachedCostCnyPerRequest`）。
+  - 当大型 Prompt 的近期实测缓存命中率偏低（$< 70\%$）且单次请求预计未缓存输入成本超过阈值（默认 0.05 元）时，在准入阶段或循环中提前触发免费剪枝与总结压缩，显著降低高单价模型的长上下文使用成本。
+  - 运行时内置基于 LRU 的缓存证据收集（`cacheEvidence`），至少采样 3 次真实调用后才进行成本门控判定，避免冷启动误触。
+  - English: [New] Cost-aware early compaction gate — introduces `compactionCostGate` settings (`enabled` and `maxUncachedCostCnyPerRequest`); early-triggers compaction during admission or mid-loop when a large prompt suffers low empirical cache hits (< 70%) and projected uncached input cost exceeds the threshold (default 0.05 CNY); collects bounded LRU cache evidence requiring at least 3 samples before evaluation.
+
+### 优化 / Improvements
+- **[优化] 提示词前缀缓存字节级稳定性加固**：
+  - 移除了活跃编辑器上下文（`liveContext.ts`）中每轮变化的 ISO 时间戳，并将挥发性的编辑器状态从头部注入改为在消息尾部作为 `<system-reminder>` user 消息追加，确保系统提示词与历史前缀严格不变。
+  - 工具 Schema（`toolDisclosure.ts`）与参数定义在生成 Fingerprint 及下发模型时强制按字典序排序（`sortToolDefinitionsForStableRequest`），消除因异步加载或阶段变化导致的工具乱序引起的缓存击穿。
+  - 提示词模板版本升级至 5（`PROMPT_TEMPLATE_VERSION = 5`）；为子代理 Slim Prompt 引入独立的冻结缓存（`_frozenSlimPromptCache`），并将运行时特定的委派范围（`DelegationScopeFacts`）抽离至尾部动态块。
+  - 建立单一事实来源 `resolveEffectiveCacheCapability`，统一多 Provider、官方主机名正则匹配、网关（OpenRouter、SiliconFlow 等）及自定义中转端点的缓存能力判定与降级逻辑。
+  - English: [Improvement] Byte-level prompt prefix cache stability hardening — removed volatile ISO timestamps from live editor context and moved context reminders to the tail as user `<system-reminder>` messages; sorted tool schemas deterministically (`sortToolDefinitionsForStableRequest`) to prevent cache misses from tool order drift; bumped `PROMPT_TEMPLATE_VERSION` to 5; introduced isolated `_frozenSlimPromptCache` for slim sub-agent prompts with scope moved to a tail block; unified cache capability resolution (`resolveEffectiveCacheCapability`) across official hosts, gateways, and custom endpoints.
+- **[优化] 统一 Provider 缓存用量解析**：
+  - 抽离统一的 `providerUsage.ts`（`getCachedInputTokens` 与 `getCacheCreationInputTokens`），归一化 OpenAI、DeepSeek、Anthropic、Gemini、MiMo 等各种接口格式的缓存字段，消除代码重复与潜在字段解析分歧。
+  - English: [Improvement] Unified provider cache usage parsing — extracted `providerUsage.ts` (`getCachedInputTokens` and `getCacheCreationInputTokens`) to normalize cached and cache-creation token fields across OpenAI, DeepSeek, Anthropic, Gemini, and MiMo.
+
+### 修复 / Fixes
+- **[修复] 强制推理模型（Reasoning-Mandatory）测试连接 400 报错与 Token 溢出截断**：
+  - 针对 OpenRouter `stealth/ox-alpha`、Kimi K2.7 Code 等不支持关闭思考的端点，测试连接时动态检测推理能力，不再下发非法的不支持参数 `{ reasoning: { enabled: false } }`；同时将不可禁用思考模型的测试预算提升至 2048 Tokens，防止因思考内容超限导致截断报错。
+  - English: [Fix] Reasoning-mandatory endpoint connection test 400 error and token truncation — dynamically detects reasoning capability during connection tests for endpoints that reject disabling reasoning (e.g., OpenRouter `stealth/ox-alpha`, Kimi K2.7 Code) and avoids sending unsupported `{ reasoning: { enabled: false } }`; increases the test token budget to 2048 for reasoning models to prevent truncation.
+
 ## [2.15.0] - 2026-08-21
 
 ### 新功能 / New Features

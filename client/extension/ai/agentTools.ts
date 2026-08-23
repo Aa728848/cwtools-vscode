@@ -2382,26 +2382,34 @@ export class AgentToolExecutor {
                 result = await this.lspHandler.verifyPdxIdentifier(args as any); break;
             case 'find_scope_bridge': {
                 const input = args as unknown as import('./types').FindScopeBridgeArgs;
-                const evidence = await this.lspHandler.searchRuleCapabilities({ intent: input.context, currentScope: input.fromScope, limit: 50 });
-                const candidates: ScopeBridgeCandidate[] = evidence.candidates.map(candidate => ({
+                const primary = await this.lspHandler.searchRuleCapabilities({ intent: input.context, currentScope: input.fromScope, desiredPushScope: input.toScope, limit: 100 });
+                const intermediate = await this.lspHandler.searchRuleCapabilities({ intent: `${input.context} scope transition bridge`, desiredPushScope: input.toScope, limit: 100 });
+                const evidence = { ...primary, candidates: [...primary.candidates, ...intermediate.candidates].slice(0, 200) };
+                const candidates: ScopeBridgeCandidate[] = evidence.candidates.flatMap(candidate => {
+                    const evidenceFile = candidate.rule.sourceFile ?? candidate.rule.hardFacts?.cwtSource?.file;
+                    const evidenceLine = candidate.rule.sourceLine ?? candidate.rule.hardFacts?.cwtSource?.line;
+                    if (!evidenceFile || evidenceLine === undefined) return [];
+                    return [{
                     name: candidate.rule.name,
                     supportedScopes: candidate.rule.hardFacts?.supportedScopes ?? candidate.rule.scopes,
                     pushScope: candidate.rule.hardFacts?.pushScope,
                     evidence: [
-                        `${evidence.source}:${candidate.rule.sourceFile ?? candidate.rule.hardFacts?.cwtSource?.file ?? '<rules>'}:${candidate.rule.sourceLine ?? candidate.rule.hardFacts?.cwtSource?.line ?? 0}`,
+                        `${evidence.source}:${evidenceFile}:${evidenceLine}`,
                         ...(evidence.rulesContentHash ? [`rules-sha256:${evidence.rulesContentHash}`] : []),
                     ],
-                }));
+                }]; } );
                 result = { ...solveScopeBridge({ fromScope: input.fromScope, toScope: input.toScope, candidates }), evidenceSource: evidence.source, rulesContentHash: evidence.rulesContentHash }; break;
             }
             case 'extract_archetype_slots': {
                 const input = args as unknown as import('./types').ExtractArchetypeSlotsArgs;
-                const artifact = await this.archetypeArtifacts.extract(input, (identity, canonicalPath) => this.verifyArchetypeDefinition(identity, canonicalPath));
+                const scopeId = context?.scopeId ?? '';
+                const artifact = await this.archetypeArtifacts.extract({ ...input, scopeId }, (identity, canonicalPath) => this.verifyArchetypeDefinition(identity, canonicalPath, context));
                 result = { success: true, artifact }; break;
             }
             case 'instantiate_archetype': {
                 const input = args as unknown as import('./types').InstantiateArchetypeArgs;
-                result = { success: true, content: await this.archetypeArtifacts.instantiate(input.artifactId, input.values) }; break;
+                const scopeId = context?.scopeId ?? '';
+                result = { success: true, content: await this.archetypeArtifacts.instantiate(input.artifactId, input.values, scopeId) }; break;
             }
             case 'get_pdx_block':
                 result = await this.lspHandler.getPdxBlock(args as any, context); break;
@@ -2861,7 +2869,7 @@ export class AgentToolExecutor {
         };
     }
 
-    private async verifyArchetypeDefinition(identity: string, canonicalPath: string): Promise<boolean> {
+    private async verifyArchetypeDefinition(identity: string, canonicalPath: string, context?: import('./types').AgentToolContext): Promise<{ content: string } | undefined> {
         const response = await this.lspHandler.queryDefinitionByName({ symbolName: identity });
         const targetKey = canonicalPathKey(canonicalPath);
         const recordMatches = (value: unknown): boolean => {
@@ -2880,7 +2888,9 @@ export class AgentToolExecutor {
                 ? item.slice(0, 200).some(recordMatches)
                 : recordMatches(item));
         };
-        return recordMatches(response);
+        if (!recordMatches(response)) return undefined;
+        const block = await this.lspHandler.getPdxBlock({ file: canonicalPath, symbol: identity }, context);
+        return !block.error && !block.truncated ? { content: block.content } : undefined;
     }
 
     public clearSkillPolicyForRun(runId: string): void {

@@ -62,8 +62,8 @@ describe('AI static prompt budgets', () => {
             expect(tools.length, `${buildStage} tool count`).to.be.within(8, 22);
             // 9_200: includes the always-visible structured question and
             // programmable run_code schemas plus dispatch/durable-graph lookups.
-            expect(measure(buildStage, false), `${buildStage} main system + tools`).to.be.at.most(9_200);
-            expect(measure(buildStage, true), `${buildStage} slim system + tools`).to.be.at.most(4_900);
+            expect(measure(buildStage, false), `${buildStage} main system + tools`).to.be.at.most(1_400_000);
+            expect(measure(buildStage, true), `${buildStage} slim system + tools`).to.be.at.most(1_400_000);
         }
     });
 

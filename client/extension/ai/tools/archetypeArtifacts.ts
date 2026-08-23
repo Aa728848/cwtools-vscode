@@ -12,6 +12,7 @@ export interface HostArchetypeExtractArgs {
     definitionIdentity: string;
     definitionPath: string;
     placeholders: ArchetypePlaceholders;
+    scopeId: string;
 }
 
 export interface HostArchetypeArtifact {
@@ -26,6 +27,7 @@ export interface HostArchetypeArtifact {
 interface StoredArtifact {
     artifactId: string;
     definitionIdentity: string;
+    ownerScopeId: string;
     canonicalRealpath: string;
     sourceHash: string;
     archetype: ExtractedArchetype;
@@ -48,10 +50,10 @@ export class HostArchetypeArtifactStore {
 
     async extract(
         args: HostArchetypeExtractArgs,
-        verifyDefinition: (identity: string, canonicalRealpath: string) => Promise<boolean>,
+        verifyDefinition: (identity: string, canonicalRealpath: string) => Promise<{ content: string } | undefined>,
     ): Promise<HostArchetypeArtifact> {
         if (!args || typeof args.filePath !== 'string' || typeof args.definitionPath !== 'string'
-            || typeof args.definitionIdentity !== 'string' || !args.definitionIdentity.trim()) {
+            || typeof args.definitionIdentity !== 'string' || !args.definitionIdentity.trim() || typeof args.scopeId !== 'string' || !args.scopeId) {
             fail('filePath, definitionIdentity, and definitionPath are required');
         }
         const canonicalWorkspace = await fs.promises.realpath(this.workspaceRoot);
@@ -67,9 +69,10 @@ export class HostArchetypeArtifactStore {
         const stat = await fs.promises.stat(canonicalSource);
         if (!stat.isFile()) fail('source must be a regular file');
         const identity = args.definitionIdentity.trim();
-        if (!await verifyDefinition(identity, canonicalSource)) fail('definition identity/path was not verified by the host');
-        const text = await fs.promises.readFile(canonicalSource, 'utf8');
-        const archetype = extractArchetypeSlots(text, args.placeholders);
+        const verified = await verifyDefinition(identity, canonicalSource);
+        if (!verified) fail('definition identity/path was not verified by the host');
+        const fileText = await fs.promises.readFile(canonicalSource, 'utf8');
+        const archetype = extractArchetypeSlots(verified.content, args.placeholders);
         const createdAt = this.now();
         this.prune(createdAt);
         while (this.artifacts.size >= MAX_ARTIFACTS) this.artifacts.delete(this.artifacts.keys().next().value as string);
@@ -77,8 +80,9 @@ export class HostArchetypeArtifactStore {
         const stored: StoredArtifact = {
             artifactId,
             definitionIdentity: identity,
+            ownerScopeId: args.scopeId,
             canonicalRealpath: canonicalSource,
-            sourceHash: sha256(text),
+            sourceHash: sha256(fileText),
             archetype,
             createdAt,
             expiresAt: createdAt + ARTIFACT_TTL_MS,
@@ -94,12 +98,12 @@ export class HostArchetypeArtifactStore {
         };
     }
 
-    async instantiate(artifactId: string, values: Readonly<Record<string, ArchetypeSlotValue>>): Promise<string> {
+    async instantiate(artifactId: string, values: Readonly<Record<string, ArchetypeSlotValue>>, scopeId: string): Promise<string> {
         if (typeof artifactId !== 'string' || !/^arch_[A-Za-z0-9_-]{32}$/.test(artifactId)) fail('invalid artifactId');
         const now = this.now();
         this.prune(now);
         const artifact = this.artifacts.get(artifactId);
-        if (!artifact) fail('artifact is expired, unknown, or belongs to another session');
+        if (!artifact || artifact.ownerScopeId !== scopeId) fail('artifact is expired, unknown, or belongs to another session');
         const canonicalCurrent = await fs.promises.realpath(artifact.canonicalRealpath);
         if (canonicalCurrent !== artifact.canonicalRealpath) fail('source realpath drift detected');
         const text = await fs.promises.readFile(canonicalCurrent, 'utf8');

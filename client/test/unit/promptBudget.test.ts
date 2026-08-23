@@ -57,9 +57,9 @@ describe('AI static prompt budgets', () => {
         for (const buildStage of ['discovery', 'validation', 'write', 'finalize'] as const) {
             const modeTools = runnerPolicy.filterToolDefinitionsForMode(TOOL_DEFINITIONS, 'build');
             const tools = runnerPolicy.filterToolDefinitionsForStage(modeTools, 'build', buildStage);
-            // Structured questions and programmable run_code occupy bounded
-            // runtime-control slots throughout the eligible Build stages.
-            expect(tools.length, `${buildStage} tool count`).to.be.within(8, 17);
+            // Structured questions, programmable run_code, and the bounded typed
+            // candidate/transaction pair occupy runtime-control slots in write stages.
+            expect(tools.length, `${buildStage} tool count`).to.be.within(8, 19);
             // 9_200: includes the always-visible structured question and
             // programmable run_code schemas plus dispatch/durable-graph lookups.
             expect(measure(buildStage, false), `${buildStage} main system + tools`).to.be.at.most(9_200);

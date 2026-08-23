@@ -123,6 +123,18 @@ describe('tool definitions', () => {
         expect(registry!.riskLevel).to.equal(0);
     });
 
+    it('registers typed PDX writes and candidate transactions as Paradox write tools', () => {
+        const typed = TOOL_REGISTRY.get('typed_pdx_write');
+        const transaction = TOOL_REGISTRY.get('candidate_transaction');
+        expect(typed?.effect).to.equal('workspace_write');
+        expect(typed?.concurrencyClass).to.equal('per-file-write');
+        expect(typed?.domain).to.equal('paradox');
+        expect(transaction?.effect).to.equal('workspace_write');
+        expect(transaction?.domain).to.equal('paradox');
+        const properties = typed?.schema.function.parameters.properties as Record<string, unknown> | undefined;
+        expect(properties?.operation).to.exist;
+    });
+
     it('registers edit_file as a first-class per-file write tool', () => {
         const tool = TOOL_DEFINITIONS.find(def => def.function.name === 'edit_file');
         expect(tool).to.not.equal(undefined);

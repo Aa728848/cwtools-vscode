@@ -86,6 +86,7 @@ export function getAgentToolTargetFiles(
             add(args.file);
             break;
         case 'edit_file':
+        case 'typed_pdx_write':
             add(args.filePath);
             break;
         case 'read_file':

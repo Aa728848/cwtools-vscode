@@ -29,14 +29,14 @@ const BUILD_STAGE_TOOLS: Partial<Record<AgentToolStage, ReadonlySet<string>>> = 
     write: new Set([
         'query_rules', 'query_scope', 'parse_pdx_fragment', 'verify_pdx_identifier',
         'get_diagnostics', 'read_file', 'get_file_context', 'get_pdx_block',
-        'write_file', 'edit_file', 'replace_lines',
+        'write_file', 'edit_file', 'replace_lines', 'typed_pdx_write', 'candidate_transaction',
         'rename_symbol',
         'write_localisation', 'todo_write', 'run_code',
     ]),
     finalize: new Set([
         'get_diagnostics', 'analyze_diagnostic_error', 'query_references',
         'verify_pdx_identifier', 'read_file', 'get_file_context', 'get_pdx_block',
-        'write_file', 'edit_file', 'replace_lines', 'todo_write', 'run_code',
+        'write_file', 'edit_file', 'replace_lines', 'typed_pdx_write', 'candidate_transaction', 'todo_write', 'run_code',
     ]),
 };
 
@@ -252,7 +252,7 @@ const VALIDATION_PROGRESS_TOOLS = new Set([
     'query_definition_by_name', 'query_references', 'explain_scope', 'todo_write',
 ]);
 const STAGED_WRITE_TOOLS = new Set([
-    'write_file', 'edit_file', 'replace_lines', 'rename_symbol', 'write_localisation',
+    'write_file', 'edit_file', 'replace_lines', 'typed_pdx_write', 'candidate_transaction', 'rename_symbol', 'write_localisation',
     'convert_image_to_dds', 'convert_audio', 'deploy_mod_asset',
 ]);
 

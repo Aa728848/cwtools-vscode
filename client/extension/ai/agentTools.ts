@@ -81,6 +81,9 @@ import { requestPermissionWithAbort } from './runner/permissionRequest';
 import { ErrorReporter } from './errorReporter';
 import { mergeTokenUsageTotals } from './cacheCapability';
 import { MemoryParser } from './memoryParser';
+import { createDiagnosticSnapshot, diffDiagnosticSnapshots, hasAddedErrors, type DiagnosticDelta } from './runner/diagnosticSnapshot';
+import { CandidateTransactionManager, sha256 } from './runner/candidateTransaction';
+import { buildTypedPdxCandidate } from './tools/typedPdxWrite';
 import { defaultDomainForMode } from './agentProfile';
 import { isMcpServerAllowedForDomain } from './mcpCapability';
 import {
@@ -190,13 +193,19 @@ export function classifyPostWriteValidation(
             return severity === 'error' || severity === 0;
         })
         : undefined;
+    const diagnosticDelta = result.diagnosticDelta && typeof result.diagnosticDelta === 'object'
+        ? result.diagnosticDelta as DiagnosticDelta
+        : undefined;
+    const comparableDelta = diagnosticDelta?.comparable === true;
+    const introducedDiagnosticErrors = comparableDelta ? hasAddedErrors(diagnosticDelta) : undefined;
     const freshness = result.freshness === 'fresh' || result.freshness === 'pending' || result.freshness === 'stale'
         ? result.freshness
         : undefined;
     const blockingClaims = decision?.claims.filter(claim => claim.blocking) ?? [];
-    const diagnosticsPassed = diagnosticErrors !== undefined
-        && diagnosticErrors.length === 0
-        && freshness === 'fresh';
+    const diagnosticsPassed = freshness === 'fresh'
+        && (comparableDelta
+            ? introducedDiagnosticErrors === false
+            : diagnosticErrors !== undefined && diagnosticErrors.length === 0);
     const supersededConflicts = diagnosticsPassed
         ? blockingClaims.filter(diagnosticsCanSupersedeEvidenceConflict)
         : [];
@@ -211,7 +220,8 @@ export function classifyPostWriteValidation(
         && decision.degraded !== true
         && blockingClaims.every(claim => claim.status === 'verified'
             || supersededConflictSet.has(claim));
-    const repair = hasConflict || ((diagnosticErrors?.length ?? 0) > 0 && freshness === 'fresh');
+    const repair = hasConflict || (freshness === 'fresh'
+        && (comparableDelta ? introducedDiagnosticErrors === true : (diagnosticErrors?.length ?? 0) > 0));
     const pending = evidenceUnavailable || !evidencePassed || !diagnosticsPassed;
     return {
         verdict: repair ? 'repair' : pending ? 'pending' : 'allow',
@@ -220,7 +230,9 @@ export function classifyPostWriteValidation(
         diagnosticsSupersededEvidenceConflicts: diagnosticsSupersededEvidenceConflicts || undefined,
         diagnosticsSupersededSyntaxConflict: diagnosticsSupersededSyntaxConflict || undefined,
         diagnosticsSupersededConflictKinds: supersededConflictKinds.length > 0 ? supersededConflictKinds : undefined,
-        diagnosticErrorCount: diagnosticErrors?.length,
+        diagnosticErrorCount: comparableDelta
+            ? diagnosticDelta!.added.filter(item => item.severity === 'error').length
+            : diagnosticErrors?.length,
         diagnosticsFreshness: freshness,
     };
 }
@@ -442,6 +454,8 @@ export class AgentToolExecutor {
 
     // - Domain handlers -
     private fileHandler: FileToolHandler;
+    private readonly candidateTransactions = new CandidateTransactionManager();
+    private candidateOwnerScope?: string;
     private lspHandler: LspToolHandler;
     private externalHandler: ExternalToolHandler;
     private memoryHandler: MemoryToolHandler;
@@ -646,6 +660,165 @@ export class AgentToolExecutor {
     private isDiagnosticRelevantFile(filePath: string): boolean {
         const ext = path.extname(filePath).toLowerCase();
         return ['.txt', '.gui', '.yml', '.gfx', '.asset', '.cwt', '.entity', '.shader', '.fxh'].includes(ext);
+    }
+
+    private requireCandidateTransaction(transactionId: unknown, context?: import('./types').AgentToolContext): string {
+        const requested = typeof transactionId === 'string' ? transactionId : '';
+        const active = this.candidateTransactions.id;
+        if (!active || requested !== active) throw new Error('Candidate transaction id is missing or stale.');
+        const scope = context?.scopeId ?? 'top-level';
+        if (this.candidateOwnerScope !== scope) throw new Error('Candidate transaction belongs to another run scope.');
+        return active;
+    }
+
+    private candidateContext(context?: import('./types').AgentToolContext): import('./types').AgentToolContext {
+        return {
+            ...(context ?? {}),
+            runnerOptions: {
+                ...(context?.runnerOptions ?? this.parentRunnerOptions ?? {}),
+                vfsOverlay: this.vfsOverlay ?? new Map<string, string>(),
+            },
+        };
+    }
+
+    private resolveCandidateFile(filePath: string): string {
+        const resolved = path.resolve(this.workspaceRoot, filePath);
+        const relative = path.relative(this.workspaceRoot, resolved);
+        if (relative.startsWith('..') || path.isAbsolute(relative)) {
+            throw new Error(`Candidate file is outside the workspace: ${filePath}`);
+        }
+        const realRoot = fs.realpathSync.native(this.workspaceRoot);
+        let realTarget: string;
+        if (fs.existsSync(resolved)) {
+            realTarget = fs.realpathSync.native(resolved);
+        } else {
+            const existingParent = path.dirname(resolved);
+            if (!fs.existsSync(existingParent)) throw new Error(`Candidate parent directory does not exist: ${existingParent}`);
+            realTarget = path.join(fs.realpathSync.native(existingParent), path.basename(resolved));
+        }
+        if (!isPathInsideOrEqual(realTarget, realRoot)) {
+            throw new Error(`Candidate file resolves outside the workspace: ${filePath}`);
+        }
+        return resolved;
+    }
+
+    private async executeTypedPdxWrite(
+        args: import('./types').TypedPdxWriteArgs,
+        context?: import('./types').AgentToolContext,
+    ): Promise<import('./types').TypedPdxWriteResult> {
+        const filePath = this.resolveCandidateFile(args.filePath);
+        const candidate = await buildTypedPdxCandidate({ filePath, operation: args.operation, expectedHash: args.expectedHash }, async target => {
+            const overlay = this.vfsOverlay;
+            if (overlay?.has(target)) return overlay.get(target)!;
+            return fs.readFileSync(target, 'utf8').replace(/^\uFEFF/, '');
+        });
+        if ((args.mode ?? 'preview') === 'preview') {
+            return { success: true, mode: 'preview', candidate };
+        }
+        const transactionId = this.requireCandidateTransaction(args.transactionId, context);
+        if (this.candidateTransactions.state !== 'active') throw new Error('Candidate transaction is not active.');
+        this.candidateTransactions.stage(filePath, candidate.content, candidate.beforeHash);
+        const overlay = this.vfsOverlay;
+        if (!overlay) throw new Error('Candidate overlay is unavailable.');
+        overlay.set(filePath, candidate.content);
+        return { success: true, mode: 'stage', transactionId, candidate, message: candidate.summary };
+    }
+
+    private async executeCandidateTransaction(
+        args: import('./types').CandidateTransactionArgs,
+        context?: import('./types').AgentToolContext,
+    ): Promise<import('./types').CandidateTransactionResult> {
+        try {
+            if (args.action === 'begin') {
+                if (this.parentRunnerOptions?.vfsOverlay && this.parentRunnerOptions.vfsOverlay.size > 0) {
+                    throw new Error('Candidate overlay already contains staged files.');
+                }
+                const transactionId = this.candidateTransactions.begin();
+                this.candidateOwnerScope = context?.scopeId ?? 'top-level';
+                if (!this.parentRunnerOptions) this.parentRunnerOptions = {};
+                this.parentRunnerOptions.vfsOverlay = new Map<string, string>();
+                return { success: true, action: args.action, transactionId, state: 'active', files: [], bytes: 0 };
+            }
+            const transactionId = this.requireCandidateTransaction(args.transactionId, context);
+            if (args.action === 'status') {
+                return { success: true, action: args.action, transactionId, state: this.candidateTransactions.state, files: this.candidateTransactions.files.map(file => file.path), bytes: this.candidateTransactions.bytes };
+            }
+            if (args.action === 'discard') {
+                this.candidateTransactions.discard();
+                this.parentRunnerOptions?.vfsOverlay?.clear();
+                this.candidateOwnerScope = undefined;
+                return { success: true, action: args.action, transactionId, state: this.candidateTransactions.state };
+            }
+            if (args.action === 'validate') {
+                if (this.candidateTransactions.state !== 'active') throw new Error('Candidate transaction is not active.');
+                let validationPassed = args.validationPassed !== false;
+                let validationError: string | undefined;
+                const preflight = context?.onBeforePdxWrite;
+                if (preflight) {
+                    for (const file of this.candidateTransactions.files) {
+                        const previousContent = fs.existsSync(file.path) ? fs.readFileSync(file.path, 'utf8').replace(/^\uFEFF/, '') : '';
+                        const decision = await preflight({
+                            toolName: 'typed_pdx_write',
+                            filePath: file.path,
+                            previousContent,
+                            content: file.content,
+                        });
+                        if (!decision.allowed) {
+                            validationPassed = false;
+                            validationError = decision.message ?? `Semantic evidence blocked ${path.basename(file.path)}.`;
+                            break;
+                        }
+                    }
+                }
+                this.candidateTransactions.validate(validationPassed, this.candidateTransactions.fingerprint());
+                return { success: validationPassed, action: args.action, transactionId, state: this.candidateTransactions.state, files: this.candidateTransactions.files.map(file => file.path), bytes: this.candidateTransactions.bytes, error: validationError };
+            }
+            const files = this.candidateTransactions.files;
+            const baselineDiagnostics = new Map<string, import('./runner/diagnosticSnapshot').DiagnosticSnapshot>();
+            const baselineEpochs = new Map<string, number>();
+            for (const file of files) {
+                const baseline = await this.lspHandler.getDiagnostics({ file: file.path, severity: 'all', limit: 2000 }, context);
+                baselineEpochs.set(file.path, baseline.lastEpoch ?? 0);
+                baselineDiagnostics.set(file.path, createDiagnosticSnapshot(baseline.diagnostics.map(item => ({
+                    code: item.code ?? '', severity: item.severity, message: item.message, line: item.line, column: item.column, data: item.data,
+                })), { status: baseline.freshness, complete: baseline.freshness === 'fresh' && baseline.truncated !== true }));
+            }
+            const deltas: Record<string, import('./runner/diagnosticSnapshot').DiagnosticDelta> = {};
+            const commit = await this.candidateTransactions.commit({
+                readDisk: file => fs.existsSync(file) ? fs.readFileSync(file) : Buffer.from(''),
+                writeDisk: (file, content) => {
+                    (context?.onBeforeFileWrite ?? this.onBeforeFileWrite)?.(file, fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : null);
+                    fs.mkdirSync(path.dirname(file), { recursive: true });
+                    fs.writeFileSync(file, content, 'utf8');
+                },
+                deleteDisk: file => { if (fs.existsSync(file)) fs.unlinkSync(file); },
+                validateDisk: async committedFiles => {
+                    await this.requestRevalidateFiles(committedFiles.map(file => file.path));
+                    let valid = true;
+                    for (const file of committedFiles) {
+                        let current = await this.lspHandler.getDiagnostics({ file: file.path, severity: 'all', limit: 2000 }, context);
+                        const baselineEpoch = baselineEpochs.get(file.path) ?? 0;
+                        const deadline = Date.now() + 8_000;
+                        while ((current.freshness !== 'fresh' || (current.lastEpoch ?? 0) <= baselineEpoch) && Date.now() < deadline) {
+                            await new Promise(resolve => setTimeout(resolve, 100));
+                            current = await this.lspHandler.getDiagnostics({ file: file.path, severity: 'all', limit: 2000 }, context);
+                        }
+                        const snapshot = createDiagnosticSnapshot(current.diagnostics.map(item => ({
+                            code: item.code ?? '', severity: item.severity, message: item.message, line: item.line, column: item.column, data: item.data,
+                        })), { status: current.freshness, complete: current.freshness === 'fresh' && current.truncated !== true });
+                        const delta = diffDiagnosticSnapshots(baselineDiagnostics.get(file.path)!, snapshot);
+                        deltas[file.path] = delta;
+                        if (!delta.comparable || hasAddedErrors(delta)) valid = false;
+                    }
+                    return { ok: valid, error: valid ? undefined : 'Candidate commit introduced errors or diagnostics were not fresh.' };
+                },
+            });
+            this.parentRunnerOptions?.vfsOverlay?.clear();
+            this.candidateOwnerScope = undefined;
+            return { success: commit.committed, action: args.action, transactionId, state: commit.state, files: commit.files, commit, diagnosticDeltas: deltas, error: commit.error };
+        } catch (error) {
+            return { success: false, action: args.action, transactionId: args.transactionId, state: this.candidateTransactions.state, error: error instanceof Error ? error.message : String(error) };
+        }
     }
 
     private async requestRevalidateFiles(files: string[]): Promise<Record<string, unknown> | undefined> {
@@ -2101,6 +2274,10 @@ export class AgentToolExecutor {
                 result = await this.fileHandler.editFile(args as any, context); break;
             case 'replace_lines':
                 result = await this.fileHandler.replaceLines(args as any, context); break;
+            case 'typed_pdx_write':
+                result = await this.executeTypedPdxWrite(args as any, context); break;
+            case 'candidate_transaction':
+                result = await this.executeCandidateTransaction(args as any, context); break;
             case 'list_directory':
                 result = await this.fileHandler.listDirectory(args as any, context); break;
             case 'glob_files':

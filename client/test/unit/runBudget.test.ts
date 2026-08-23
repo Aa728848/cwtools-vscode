@@ -201,6 +201,30 @@ describe('terminal validation state', () => {
         expect(terminalValidationOutcome(state)).to.equal('repair');
     });
 
+    it('does not treat comparable pre-existing diagnostic errors as new repair work', () => {
+        const state = createTerminalValidationState();
+        updateTerminalValidationState(state, ['events/test.txt'], {
+            diagnostics: [{ severity: 'error', message: 'pre-existing' }],
+            freshness: 'fresh',
+            diagnosticDelta: { comparable: true, added: [], removed: [] },
+        });
+        expect(terminalValidationOutcome(state)).to.equal('allow');
+    });
+
+    it('treats only newly introduced delta errors as repair work', () => {
+        const state = createTerminalValidationState();
+        updateTerminalValidationState(state, ['events/test.txt'], {
+            diagnostics: [{ severity: 'error', message: 'old' }, { severity: 'error', message: 'new' }],
+            freshness: 'fresh',
+            diagnosticDelta: {
+                comparable: true,
+                added: [{ severity: 'error', message: 'new', code: 'new', source: 'cwtools', line: 2, column: 1 }],
+                removed: [],
+            },
+        });
+        expect(terminalValidationOutcome(state)).to.equal('repair');
+    });
+
     it('keeps stale diagnostic errors pending instead of treating them as repair', () => {
         const state = createTerminalValidationState();
         updateTerminalValidationState(state, ['events/test.txt'], {

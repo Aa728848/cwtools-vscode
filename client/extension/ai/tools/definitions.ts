@@ -694,6 +694,59 @@ const RAW_TOOL_DEFINITIONS: ToolDefinition[] = [
     {
         type: 'function',
         function: {
+            name: 'typed_pdx_write',
+            description: 'Build a bounded typed Stellaris/PDXScript candidate without accepting raw script text. Preview by default; stage stores the candidate in the active candidate transaction.',
+            parameters: {
+                type: 'object',
+                properties: {
+                    filePath: { type: 'string', description: 'Absolute workspace .txt file path.' },
+                    expectedHash: { type: 'string', description: 'Optional SHA-256 of the source content; stale candidates are rejected.' },
+                    mode: { type: 'string', enum: ['preview', 'stage'], description: 'Preview is read-only; stage requires an active candidate transaction.' },
+                    transactionId: { type: 'string', description: 'Required when mode=stage.' },
+                    operation: {
+                        type: 'object',
+                        description: 'One typed mutation. Raw code/oldString/newString fields are rejected.',
+                        properties: {
+                            operation: { type: 'string', enum: ['clone_definition', 'add_event_call', 'add_event_option', 'append_trigger_condition', 'instantiate_inline_script'] },
+                            source: { type: 'string' },
+                            newSymbol: { type: 'string' },
+                            target: { type: 'string' },
+                            containerPath: { type: 'array', items: { type: 'string' } },
+                            callType: { type: 'string' },
+                            eventId: { type: 'string' },
+                            days: { type: 'number' },
+                            name: { type: 'string' },
+                            fields: { type: 'array', items: { type: 'object' } },
+                            condition: { type: 'object' },
+                            script: { type: 'string' },
+                            arguments: { type: 'array', items: { type: 'object' } },
+                        },
+                        required: ['operation'],
+                    },
+                },
+                required: ['filePath', 'operation'],
+            },
+        },
+    },
+    {
+        type: 'function',
+        function: {
+            name: 'candidate_transaction',
+            description: 'Manage one bounded candidate transaction. begin creates an overlay; validate marks the staged fingerprint; commit atomically materializes candidates and rolls back if fresh diagnostics introduce errors; discard removes candidates.',
+            parameters: {
+                type: 'object',
+                properties: {
+                    action: { type: 'string', enum: ['begin', 'validate', 'commit', 'discard', 'status'] },
+                    transactionId: { type: 'string', description: 'Required after begin.' },
+                    validationPassed: { type: 'boolean', description: 'Host/model static validation result for the exact staged fingerprint.' },
+                },
+                required: ['action'],
+            },
+        },
+    },
+    {
+        type: 'function',
+        function: {
             name: 'list_directory',
             description: 'List files and subdirectories in a directory. Use this to understand project structure before reading files.',
             parameters: {

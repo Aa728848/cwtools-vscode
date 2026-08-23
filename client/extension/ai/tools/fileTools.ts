@@ -38,6 +38,13 @@ import {
 import { GRAPHICS_EXTS, matchesExt } from '../../fileExtensions';
 import { queryProjectKnowledge, readProjectKnowledgeManifest } from '../projectKnowledge';
 import { getLocalisationTransactionTargets } from '../runner/toolScheduler';
+import {
+    createDiagnosticSnapshot,
+    diffDiagnosticSnapshots,
+    type DiagnosticDelta,
+    type DiagnosticSnapshot,
+    type DiagnosticStatus,
+} from '../runner/diagnosticSnapshot';
 
 // - Shared file-system helpers -
 
@@ -885,15 +892,21 @@ export class FileToolHandler {
                     this.ctx.onAutoWritten(args.file, isNewFile);
                 }
 
-                const preWriteEpoch = (await this.queryDiagnosticsFresh(args.file, context))?.epoch ?? 0;
+                const baselineState = await this.queryDiagnosticsFresh(args.file, context);
+                const baselineSnapshot = this.diagnosticSnapshot(baselineState);
+                const preWriteEpoch = baselineState?.epoch ?? 0;
                 this.writeTextFile(args.file, args.content, hasBom, args.encoding, context);
                 const freshResult = await this.getLspDiagnosticsForFileFresh(args.file, preWriteEpoch, context);
+                const diagnosticSnapshot = this.diagnosticSnapshot(freshResult);
+                const diagnosticDelta = this.diagnosticDelta(baselineSnapshot, diagnosticSnapshot);
                 return {
                     success: true,
                     message: `File written: ${args.file}. Freshness: ${freshResult.freshness}`,
                     diagnostics: freshResult.diagnostics,
                     freshness: freshResult.freshness,
                     pendingGlobalKinds: freshResult.pendingGlobalKinds,
+                    diagnosticSnapshot,
+                    diagnosticDelta,
                 };
             } catch (e) {
                 return { success: false, message: `Write failed: ${String(e)}` };
@@ -988,7 +1001,9 @@ export class FileToolHandler {
                 this.ctx.onAutoWritten(filePath, !fileExists);
             }
 
-            const preWriteEpoch = (await this.queryDiagnosticsFresh(filePath, context))?.epoch ?? 0;
+            const baselineState = await this.queryDiagnosticsFresh(filePath, context);
+            const baselineSnapshot = this.diagnosticSnapshot(baselineState);
+            const preWriteEpoch = baselineState?.epoch ?? 0;
             (context?.onBeforeFileWrite ?? this.ctx.onBeforeFileWrite)?.(filePath, fileExists ? originalContent : null);
             try {
                 this.writeTextFile(filePath, newContent, hasBom, args.encoding, context);
@@ -999,6 +1014,8 @@ export class FileToolHandler {
             this.editFailCount.delete(this.pathKey(filePath));
             const freshResult = await this.getLspDiagnosticsForFileFresh(filePath, preWriteEpoch, context);
             const diagnostics = freshResult.diagnostics;
+            const diagnosticSnapshot = this.diagnosticSnapshot(freshResult);
+            const diagnosticDelta = this.diagnosticDelta(baselineSnapshot, diagnosticSnapshot);
             const oldLineCount = originalContent.length === 0 ? 0 : originalContent.split(/\r?\n/).length;
             const newLineCount = newContent.length === 0 ? 0 : newContent.split(/\r?\n/).length;
             return {
@@ -1008,6 +1025,8 @@ export class FileToolHandler {
                 diagnostics,
                 freshness: freshResult.freshness,
                 pendingGlobalKinds: freshResult.pendingGlobalKinds,
+                diagnosticSnapshot,
+                diagnosticDelta,
                 stats: {
                     linesAdded: Math.max(0, newLineCount - oldLineCount),
                     linesRemoved: Math.max(0, oldLineCount - newLineCount),
@@ -1284,7 +1303,9 @@ export class FileToolHandler {
                 this.ctx.onAutoWritten(filePath, false);
             }
 
-            const preWriteEpoch = (await this.queryDiagnosticsFresh(filePath, context))?.epoch ?? 0;
+            const baselineState = await this.queryDiagnosticsFresh(filePath, context);
+            const baselineSnapshot = this.diagnosticSnapshot(baselineState);
+            const preWriteEpoch = baselineState?.epoch ?? 0;
             (context?.onBeforeFileWrite ?? this.ctx.onBeforeFileWrite)?.(filePath, originalContent || null);
             try {
                 this.writeTextFile(filePath, newContent, hasBom, args.encoding, context);
@@ -1295,6 +1316,8 @@ export class FileToolHandler {
             this.editFailCount.delete(this.pathKey(filePath));
             const freshResult = await this.getLspDiagnosticsForFileFresh(filePath, preWriteEpoch, context);
             const diagnostics = freshResult.diagnostics;
+            const diagnosticSnapshot = this.diagnosticSnapshot(freshResult);
+            const diagnosticDelta = this.diagnosticDelta(baselineSnapshot, diagnosticSnapshot);
             let message = `replace_lines: replaced lines ${startLine}-${endLine} in ${path.basename(filePath)}`;
             const errorsDiags = diagnostics.filter((d: any) => d.severity === 'error');
             if (errorsDiags.length > 0) {
@@ -1309,6 +1332,8 @@ export class FileToolHandler {
                 diagnostics,
                 freshness: freshResult.freshness,
                 pendingGlobalKinds: freshResult.pendingGlobalKinds,
+                diagnosticSnapshot,
+                diagnosticDelta,
             };
         });
     }
@@ -1404,6 +1429,23 @@ export class FileToolHandler {
             });
     }
 
+
+    private diagnosticSnapshot(
+        state: { freshness: 'fresh' | 'pending' | 'stale'; epoch: number; diagnostics?: ValidationError[]; timedOut?: boolean } | null,
+    ): DiagnosticSnapshot {
+        const status: DiagnosticStatus = state?.freshness ?? 'unavailable';
+        return createDiagnosticSnapshot(state?.diagnostics ?? [], {
+            status,
+            complete: status === 'fresh' && state?.timedOut !== true && Array.isArray(state?.diagnostics),
+        });
+    }
+
+    private diagnosticDelta(
+        before: DiagnosticSnapshot,
+        after: DiagnosticSnapshot,
+    ): DiagnosticDelta {
+        return diffDiagnosticSnapshots(before, after);
+    }
 
     /** 
 * Query the LSP for the current diagnostic status of the file (return immediately, without blocking). 

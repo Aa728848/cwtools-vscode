@@ -1,3 +1,5 @@
+import { hasAddedErrors, type DiagnosticDelta } from './diagnosticSnapshot';
+
 export type TerminalValidationOutcome = 'allow' | 'pending' | 'repair';
 
 export interface TerminalValidationState {
@@ -43,11 +45,16 @@ export function updateTerminalValidationState(
         ? record.freshness
         : undefined;
     if (diagnostics) {
-        const hasErrors = diagnostics.some(item => {
-            if (!item || typeof item !== 'object' || Array.isArray(item)) return false;
-            const severity = (item as Record<string, unknown>).severity;
-            return severity === 'error' || severity === 0;
-        });
+        const diagnosticDelta = record.diagnosticDelta && typeof record.diagnosticDelta === 'object'
+            ? record.diagnosticDelta as DiagnosticDelta
+            : undefined;
+        const hasErrors = diagnosticDelta?.comparable === true
+            ? hasAddedErrors(diagnosticDelta)
+            : diagnostics.some(item => {
+                if (!item || typeof item !== 'object' || Array.isArray(item)) return false;
+                const severity = (item as Record<string, unknown>).severity;
+                return severity === 'error' || severity === 0;
+            });
         for (const target of targetKeys) {
             if (freshness === 'fresh' && hasErrors) {
                 state.diagnosticErrorTargets.add(target);

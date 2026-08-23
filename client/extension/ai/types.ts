@@ -1570,6 +1570,8 @@ export type ToolArgs =
     | WriteFileArgs
     | EditFileArgs
     | ReplaceLinesArgs
+    | TypedPdxWriteArgs
+    | CandidateTransactionArgs
     | ListDirectoryArgs
     | CodesearchArgs
     | AnalyzeDiagnosticErrorArgs
@@ -1607,6 +1609,8 @@ export type ToolResult =
     | WriteFileResult
     | EditFileResult
     | ReplaceLinesResult
+    | TypedPdxWriteResult
+    | CandidateTransactionResult
     | ListDirectoryResult
     | AnalyzeDiagnosticErrorResult
     | SetMemoryResult
@@ -1656,6 +1660,8 @@ export type AgentToolName =
     | 'write_file'
     | 'edit_file'
     | 'replace_lines'
+    | 'typed_pdx_write'
+    | 'candidate_transaction'
     | 'list_directory'
     | 'glob_files'
     | 'lsp_operation'
@@ -1765,6 +1771,9 @@ export interface WriteFileResult {
     diagnostics?: ValidationError[];
     freshness?: 'fresh' | 'pending' | 'stale';
     pendingGlobalKinds?: string[];
+    /** Comparable before/after diagnostics for this exact write. */
+    diagnosticSnapshot?: import('./runner/diagnosticSnapshot').DiagnosticSnapshot;
+    diagnosticDelta?: import('./runner/diagnosticSnapshot').DiagnosticDelta;
     /** If agentFileWriteMode === 'confirm', this is a pending diff, not yet applied */
     pendingDiff?: string;
 }
@@ -1790,6 +1799,9 @@ export interface EditFileResult {
     diagnostics?: ValidationError[];
     freshness?: 'fresh' | 'pending' | 'stale';
     pendingGlobalKinds?: string[];
+    /** Comparable before/after diagnostics for this exact edit. */
+    diagnosticSnapshot?: import('./runner/diagnosticSnapshot').DiagnosticSnapshot;
+    diagnosticDelta?: import('./runner/diagnosticSnapshot').DiagnosticDelta;
     fileSyntaxFresh?: boolean;
     localKeyIndexed?: boolean;
     globalLocalisationFresh?: boolean;
@@ -1827,6 +1839,9 @@ export interface ReplaceLinesResult {
     diagnostics?: ValidationError[];
     freshness?: 'fresh' | 'pending' | 'stale';
     pendingGlobalKinds?: string[];
+    /** Comparable before/after diagnostics for this exact line replacement. */
+    diagnosticSnapshot?: import('./runner/diagnosticSnapshot').DiagnosticSnapshot;
+    diagnosticDelta?: import('./runner/diagnosticSnapshot').DiagnosticDelta;
     /** If agentFileWriteMode === 'confirm', write was queued, not yet applied */
     pendingDiff?: string;
     /** On safety-guard/anchor-guard failure: preview of the current line range. */
@@ -1843,6 +1858,38 @@ export interface AstMutateArgs {
 
 export interface AstMutateResult extends EditFileResult {
     nodeFound?: boolean;
+}
+
+export type TypedPdxWriteArgs = import('./tools/typedPdxWrite').BuildTypedPdxArgs & {
+    mode?: 'preview' | 'stage';
+    transactionId?: string;
+};
+
+export interface TypedPdxWriteResult {
+    success: boolean;
+    mode?: 'preview' | 'stage';
+    transactionId?: string;
+    candidate?: import('./tools/typedPdxWrite').TypedPdxCandidate;
+    message?: string;
+    error?: string;
+}
+
+export interface CandidateTransactionArgs {
+    action: 'begin' | 'validate' | 'commit' | 'discard' | 'status';
+    transactionId?: string;
+    validationPassed?: boolean;
+}
+
+export interface CandidateTransactionResult {
+    success: boolean;
+    action: CandidateTransactionArgs['action'];
+    transactionId?: string;
+    state?: import('./runner/candidateTransaction').CandidateTransactionState;
+    files?: string[];
+    bytes?: number;
+    commit?: import('./runner/candidateTransaction').CommitResult;
+    diagnosticDeltas?: Record<string, import('./runner/diagnosticSnapshot').DiagnosticDelta>;
+    error?: string;
 }
 
 export interface ListDirectoryArgs {

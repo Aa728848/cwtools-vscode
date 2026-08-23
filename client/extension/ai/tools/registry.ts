@@ -10,7 +10,7 @@ export type AgentToolName =
     | 'grep' | 'get_completion_at' | 'document_symbols' | 'workspace_symbols'
     | 'go_to_definition' | 'find_references' | 'hover_symbol' | 'rename_symbol'
     | 'verify_pdx_identifier' | 'todo_write' | 'read_file' | 'write_file' | 'edit_file'
-    | 'replace_lines' | 'list_directory' | 'get_lsp_status' | 'get_diagnostics' | 'analyze_diagnostic_error'
+    | 'replace_lines' | 'typed_pdx_write' | 'candidate_transaction' | 'list_directory' | 'get_lsp_status' | 'get_diagnostics' | 'analyze_diagnostic_error'
     | 'glob_files' | 'lsp_operation' | 'web_search' | 'web_open' | 'web_find' | 'run_command' | 'list_processes' | 'read_process' | 'write_process_stdin' | 'terminate_process'
     | 'query_definition' | 'query_definition_by_name' | 'query_scripted_effects'
     | 'query_scripted_triggers' | 'query_enums' | 'get_entity_info'
@@ -124,6 +124,8 @@ const TOOL_DOMAINS = {
     write_file: 'shared',
     edit_file: 'shared',
     replace_lines: 'shared',
+    typed_pdx_write: 'paradox',
+    candidate_transaction: 'paradox',
     list_directory: 'shared',
     get_lsp_status: 'paradox',
     get_diagnostics: 'shared',
@@ -297,7 +299,7 @@ const BASE_READ: AgentToolName[] = [
     'explain_shader_reachability', 'validate_shader', 'compare_shader_with_vanilla'
 ];
 const EDIT: AgentToolName[] = [
-    'write_file', 'edit_file', 'replace_lines', 'rename_symbol',
+    'write_file', 'edit_file', 'replace_lines', 'typed_pdx_write', 'candidate_transaction', 'rename_symbol',
     'write_localisation', 'write_design_blueprint', 'save_workflow', 'remove_ignored_diagnostic'
 ];
 const MEMORY: AgentToolName[] = ['todo_write', 'create_goal', 'update_goal', 'set_goal_budget', 'set_memory', 'get_memory', 'search_memory', 'save_memory', 'forget_memory', 'memory_recall_trace'];
@@ -315,6 +317,9 @@ const SUB_AGENT_EXCLUDES_SET = new Set<string>([
     'run_command', 'list_processes', 'read_process', 'write_process_stdin', 'terminate_process',
     'git_ops', 'save_workflow',
     'rename_symbol',
+    // Candidate transaction state is parent-run owned; slim sub-agents must
+    // report typed intents to the parent instead of sharing its overlay.
+    'typed_pdx_write', 'candidate_transaction',
     ...MEDIA,
     ...ORCHESTRATION,
 ]);
@@ -322,6 +327,8 @@ const FILE_SCOPED_WRITE_TOOLS_SET = new Set<string>([
     'write_file',
     'edit_file',
     'replace_lines',
+    'typed_pdx_write',
+    'candidate_transaction',
     'write_localisation',
     'write_design_blueprint',
     'deploy_mod_asset',
@@ -354,7 +361,7 @@ const STORM_EXEMPT_TOOLS_SET = new Set<string>([
     'query_blackboard',
 ]);
 
-const PLAN_MODES = new Set([...BASE_READ, ...INTERACTION, ...NETWORK, ..._MCP, ...ORCHESTRATION, 'run_code', 'todo_write', 'write_file', 'edit_file', 'replace_lines', 'write_design_blueprint', 'save_workflow', 'set_memory', 'get_memory', 'search_memory', 'git_ops']);
+const PLAN_MODES = new Set([...BASE_READ, ...INTERACTION, ...NETWORK, ..._MCP, ...ORCHESTRATION, 'run_code', 'todo_write', 'write_file', 'edit_file', 'replace_lines', 'typed_pdx_write', 'candidate_transaction', 'write_design_blueprint', 'save_workflow', 'set_memory', 'get_memory', 'search_memory', 'git_ops']);
 const EXPLORE_MODES = new Set([...BASE_READ, ...INTERACTION, ...NETWORK, ..._MCP, ...ORCHESTRATION, 'run_code', 'git_ops', 'save_workflow']);
 const REVIEW_MODES = new Set([...BASE_READ, ...INTERACTION, ...NETWORK, ..._MCP, 'run_code', 'git_ops', 'save_workflow']);
 const BUILD_MODES = new Set([...BASE_READ, ...INTERACTION, ...EDIT, ...MEMORY, ...NETWORK, ...UTILITY, ...MEDIA, ..._MCP, ...ORCHESTRATION, 'run_code']);
@@ -479,7 +486,7 @@ for (const schema of SCHEMA_DEFINITIONS) {
         || (effect === 'none' && !mutating && !ORCHESTRATION.includes(name)));
     const disclosure = ['ask_user_question', 'todo_write', 'read_file', 'grep', 'get_goal', 'select_tools', 'run_code'].includes(name)
         ? 'always'
-        : (['write_file', 'edit_file', 'replace_lines', 'run_command', 'git_ops', 'mcp_call', 'dispatch_agents'].includes(name)
+        : (['write_file', 'edit_file', 'replace_lines', 'typed_pdx_write', 'candidate_transaction', 'run_command', 'git_ops', 'mcp_call', 'dispatch_agents'].includes(name)
             ? 'deferred'
             : 'stage');
     const group = effect === 'workspace_write' ? 'file_write'

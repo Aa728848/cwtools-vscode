@@ -75,6 +75,7 @@ import {
 } from './runnerPolicy';
 import { getWorkflow } from './workflowRegistry';
 import { TOOL_REGISTRY, WRITE_TOOLS, READ_ONLY_TOOLS } from './tools/registry';
+import { hasAddedErrors, type DiagnosticDelta } from './runner/diagnosticSnapshot';
 import { buildRunCodePromptBlock, computeRunCodeAllowedStepNames } from './tools/runCode';
 import { PartitionedWriteQueue } from './runner/writeCoordinator';
 import { runLedger } from './runner/runLedger';
@@ -4181,7 +4182,15 @@ export class AgentRunner {
                     const severity = (item as Record<string, unknown>).severity;
                     return severity === 'error' || severity === 0;
                 }).length;
-                const hasDiagnosticErrors = diagnosticErrorCount > 0;
+                const diagnosticDelta = record?.diagnosticDelta && typeof record.diagnosticDelta === 'object'
+                    ? record.diagnosticDelta as DiagnosticDelta
+                    : undefined;
+                const effectiveDiagnosticErrorCount = diagnosticDelta?.comparable === true
+                    ? diagnosticDelta.added.filter(item => item.severity === 'error').length
+                    : diagnosticErrorCount;
+                const hasDiagnosticErrors = diagnosticDelta?.comparable === true
+                    ? hasAddedErrors(diagnosticDelta)
+                    : diagnosticErrorCount > 0;
                 const targetKeys = parsedCalls[j]!.targetPaths.length > 0
                     ? parsedCalls[j]!.targetPaths
                     : [`tool:${parsedCalls[j]!.toolName}`];
@@ -4204,10 +4213,10 @@ export class AgentRunner {
                 if (Array.isArray(record?.diagnostics)) {
                     for (const targetKey of targetKeys) {
                         const previousErrorCount = diagnosticErrorsByTarget.get(targetKey);
-                        if (previousErrorCount !== undefined && diagnosticErrorCount < previousErrorCount) {
+                        if (previousErrorCount !== undefined && effectiveDiagnosticErrorCount < previousErrorCount) {
                             progressRevision++;
                         }
-                        diagnosticErrorsByTarget.set(targetKey, diagnosticErrorCount);
+                        diagnosticErrorsByTarget.set(targetKey, effectiveDiagnosticErrorCount);
                         if (hasDiagnosticErrors) blockingValidationIssues.add(targetKey);
                         else if (record?.freshness === 'fresh') blockingValidationIssues.delete(targetKey);
                     }

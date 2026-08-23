@@ -83,37 +83,6 @@ suite(`Debug Integration Test: `, function() {
 		}
 	});
 
-	describe('Detached candidate overlay validation', function () {
-		this.timeout(3 * 60 * 1000);
-
-		it('validates candidate text through the real Extension Host and LSP without writing disk', async function () {
-			if (process.env.CWTOOLS_OVERLAY_E2E !== '1') this.skip();
-			await activate();
-			const folder = vscode.workspace.workspaceFolders?.[0];
-			assert.ok(folder, 'Fixture workspace is required');
-			const uri = vscode.Uri.joinPath(folder.uri, 'events', 'overlay_candidate.txt');
-			const content = 'country_event = { id = overlay_test.1 }\n';
-			let response: any;
-			for (let attempt = 0; attempt < 60; attempt++) {
-				try {
-					response = await vscode.commands.executeCommand('cwtools.ai.validateOverlay', { files: [{ uri: uri.toString(), content }] });
-					if (response && Array.isArray(response.files)) break;
-				} catch { /* server may still be loading */ }
-				await wait(500);
-			}
-			assert.ok(response, 'validateOverlay should return a response');
-			assert.strictEqual(response.ok, true);
-			assert.strictEqual(response.validationLevel, 'catalog-single-file');
-			assert.strictEqual(response.files.length, 1);
-			assert.strictEqual(response.files[0].ok, true);
-			assert.ok(Array.isArray(response.files[0].diagnostics));
-			assert.ok(!response.files[0].diagnostics.some((item: any) => item.severity === 'error'));
-			assert.match(response.files[0].contentHash, /^[a-f0-9]{64}$/);
-			try { await vscode.workspace.fs.stat(uri); assert.fail('Detached validation must not create the candidate file'); }
-			catch (error) { assert.ok(error instanceof vscode.FileSystemError); }
-		});
-	});
-
 	describe('Diagnostics and Language Features', function () {
 		this.timeout(2 * 60 * 1000);
 

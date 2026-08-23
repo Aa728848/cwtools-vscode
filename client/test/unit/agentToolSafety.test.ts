@@ -176,12 +176,12 @@ describe('enforced central tool policy', () => {
                     const file = request.arguments[0].files[0];
                     return {
                         ok: true,
-                        validationLevel: 'catalog-single-file',
-                        limitations: ['overlay_files_not_cross_visible'],
+                        validationLevel: 'catalog-overlay-batch',
+                        limitations: ['global_and_localisation_checks_omitted'],
                         files: [{
                             ok: true,
                             uri: file.uri,
-                            validationLevel: 'catalog-single-file',
+                            validationLevel: 'catalog-overlay-batch',
                             contentHash: require('crypto').createHash('sha256').update(file.content, 'utf8').digest('hex'),
                             diagnostics: [],
                         }],
@@ -207,7 +207,7 @@ describe('enforced central tool policy', () => {
             transactionId: begin.transactionId,
         }, context) as any;
         expect(validated.success).to.equal(true);
-        expect(validated.overlayValidation.validationLevel).to.equal('catalog-single-file');
+        expect(validated.overlayValidation.validationLevel).to.equal('catalog-overlay-batch');
         expect(overlayCalls).to.equal(1);
     });
 
@@ -219,7 +219,7 @@ describe('enforced central tool policy', () => {
         const client = { sendRequest: async (_method: string, request: any) => {
             if (request.command === 'cwtools.ai.validateOverlay') {
                 const file = request.arguments[0].files[0];
-                return { ok: true, validationLevel: 'catalog-single-file', files: [{ ok: true, uri: file.uri, validationLevel: 'catalog-single-file', contentHash: require('crypto').createHash('sha256').update(file.content, 'utf8').digest('hex'), diagnostics: [] }] };
+                return { ok: true, validationLevel: 'catalog-overlay-batch', files: [{ ok: true, uri: file.uri, validationLevel: 'catalog-overlay-batch', contentHash: require('crypto').createHash('sha256').update(file.content, 'utf8').digest('hex'), diagnostics: [] }] };
             }
             epoch++; return { ok: true };
         } };
@@ -314,6 +314,79 @@ describe('enforced central tool policy', () => {
         }, context) as any;
         expect(committed.success).to.equal(false);
         expect(fs.readFileSync(target, 'utf8')).to.equal('root = {}\n');
+    });
+
+    it('fails candidate rollback when fresh diagnostics do not restore the baseline multiset', async () => {
+        stubConfigOverrides['policy.preset'] = 'workspace-auto';
+        const target = path.join(workspaceRoot, 'rollback-diagnostics.txt');
+        const source = 'root = {}\n';
+        fs.writeFileSync(target, source);
+        const client = { sendRequest: async (_method: string, request: any) => {
+            if (request.command === 'cwtools.ai.validateOverlay') {
+                const file = request.arguments[0].files[0];
+                return { ok: true, files: [{ ok: true, uri: file.uri, contentHash: require('crypto').createHash('sha256').update(file.content, 'utf8').digest('hex'), diagnostics: [] }] };
+            }
+            return { ok: true };
+        } };
+        const executor = new AgentToolExecutor(client as any, workspaceRoot);
+        executor.parentRunnerOptions = { mode: 'build' } as any;
+        const context = { runnerOptions: { mode: 'build' }, scopeId: 'candidate-run' } as any;
+        let diagnosticsCall = 0;
+        (executor as any).lspHandler.getDiagnostics = async () => {
+            diagnosticsCall++;
+            const baselineDiagnostic = { code: 'CW100', severity: 'warning', message: 'baseline warning', line: 1, column: 1 };
+            const diagnostics = diagnosticsCall === 1 ? [baselineDiagnostic, baselineDiagnostic]
+                : diagnosticsCall === 2 ? [{ code: 'CW999', severity: 'error', message: 'reject candidate', line: 1, column: 1 }]
+                    : [baselineDiagnostic];
+            return { diagnostics, freshness: 'fresh', truncated: false, lastEpoch: diagnosticsCall };
+        };
+        const begin = await executor.execute('candidate_transaction', { action: 'begin' }, context) as any;
+        await executor.execute('typed_pdx_write', { filePath: target, mode: 'stage', transactionId: begin.transactionId, operation: { operation: 'clone_definition', source: 'root', newSymbol: 'copy' } }, context);
+        await executor.execute('candidate_transaction', { action: 'validate', transactionId: begin.transactionId }, context);
+        const committed = await executor.execute('candidate_transaction', { action: 'commit', transactionId: begin.transactionId }, context) as any;
+        expect(committed.success).to.equal(false);
+        expect(committed.commit.rollback.succeeded).to.equal(false);
+        expect(committed.commit.rollback.errors[0].error).to.include('diagnostics did not match baseline');
+        expect(fs.readFileSync(target, 'utf8')).to.equal(source);
+    });
+
+    it('fails candidate rollback when server content hash does not match the restored base', async () => {
+        stubConfigOverrides['policy.preset'] = 'workspace-auto';
+        const target = path.join(workspaceRoot, 'rollback-server-hash.txt');
+        const source = 'root = {}\n';
+        fs.writeFileSync(target, source);
+        let overlayCalls = 0;
+        let rollbackBaseHash: string | undefined;
+        const client = { sendRequest: async (_method: string, request: any) => {
+            if (request.command === 'cwtools.ai.validateOverlay') {
+                overlayCalls++;
+                const file = request.arguments[0].files[0];
+                if (overlayCalls === 2) rollbackBaseHash = file.baseHash;
+                const contentHash = overlayCalls === 1
+                    ? require('crypto').createHash('sha256').update(file.content, 'utf8').digest('hex')
+                    : '0'.repeat(64);
+                return { ok: true, files: [{ ok: true, uri: file.uri, contentHash, diagnostics: [] }] };
+            }
+            return { ok: true };
+        } };
+        const executor = new AgentToolExecutor(client as any, workspaceRoot);
+        executor.parentRunnerOptions = { mode: 'build' } as any;
+        const context = { runnerOptions: { mode: 'build' }, scopeId: 'candidate-run' } as any;
+        let diagnosticsCall = 0;
+        (executor as any).lspHandler.getDiagnostics = async () => ({
+            diagnostics: diagnosticsCall++ === 1 ? [{ code: 'CW999', severity: 'error', message: 'reject candidate', line: 1, column: 1 }] : [],
+            freshness: 'fresh', truncated: false, lastEpoch: diagnosticsCall,
+        });
+        const begin = await executor.execute('candidate_transaction', { action: 'begin' }, context) as any;
+        await executor.execute('typed_pdx_write', { filePath: target, mode: 'stage', transactionId: begin.transactionId, operation: { operation: 'clone_definition', source: 'root', newSymbol: 'copy' } }, context);
+        await executor.execute('candidate_transaction', { action: 'validate', transactionId: begin.transactionId }, context);
+        const committed = await executor.execute('candidate_transaction', { action: 'commit', transactionId: begin.transactionId }, context) as any;
+        expect(committed.success).to.equal(false);
+        expect(committed.commit.rollback.succeeded).to.equal(false);
+        expect(committed.commit.rollback.errors[0].error).to.include('server content did not match baseline');
+        expect(overlayCalls).to.equal(2);
+        expect(rollbackBaseHash).to.equal(require('crypto').createHash('sha256').update(source, 'utf8').digest('hex'));
+        expect(fs.readFileSync(target, 'utf8')).to.equal(source);
     });
 
     it('emits a non-shadow policy decision before a safe read', async () => {
@@ -2914,6 +2987,7 @@ describe('agent tool progress and aborts', () => {
         stubConfigOverrides['mcp.servers'] = [{ name: 'filesystem', capabilityDomain: 'paradox' }];
         const executor = createExecutor();
         const callTool = sinon.stub().resolves({ ok: true });
+
         sinon.stub(executor as any, 'getMcpClient').resolves({ callTool });
 
         const result = await executor.execute('mcp_call', { server: 'filesystem', tool: 'read_file', arguments: { path: 'a.txt' } }, {
@@ -2978,5 +3052,38 @@ describe('agent tool progress and aborts', () => {
         expect(commandResult.message).to.include('run_command is disabled');
         expect(commandResult.message).to.include('BLOCKED_FOR_ORCHESTRATOR');
         expect(executeInternal.called).to.equal(false);
+    });
+});
+
+describe('trusted host-owned AI tool contracts', () => {
+    it('exposes only host-owned scope evidence and archetype artifact inputs', () => {
+        const bridge = TOOL_DEFINITIONS.find(definition => definition.function.name === 'find_scope_bridge')!;
+        const bridgeProperties = (bridge.function.parameters as { properties: Record<string, unknown> }).properties;
+        expect(Object.keys(bridgeProperties)).to.deep.equal(['fromScope', 'toScope', 'context']);
+        expect(TOOL_DEFINITIONS.some(definition => definition.function.name === 'solve_scope_bridge')).to.equal(false);
+        const extract = TOOL_DEFINITIONS.find(definition => definition.function.name === 'extract_archetype_slots')!;
+        expect(extract.function.parameters.required).to.deep.equal(['filePath', 'definitionIdentity', 'definitionPath', 'placeholders']);
+        expect(extract.function.parameters.properties).not.to.have.property('text');
+        const instantiate = TOOL_DEFINITIONS.find(definition => definition.function.name === 'instantiate_archetype')!;
+        expect(instantiate.function.parameters.required).to.deep.equal(['artifactId', 'values']);
+        expect(instantiate.function.parameters.properties).not.to.have.property('archetype');
+    });
+
+    it('builds scope candidates only from the host capability API', async () => {
+        const workspaceRoot = makeWorkspace();
+        try {
+            const executor = new AgentToolExecutor({ onNotification: () => undefined } as any, workspaceRoot);
+            const search = sinon.stub((executor as any).lspHandler, 'searchRuleCapabilities').resolves({
+                status: 'ready', source: 'cwtools-node-rules', totalConsidered: 1, warnings: [], rulesContentHash: 'abc123',
+                candidates: [{ score: 10, reasons: [], rule: { name: 'owner', scopes: ['country'], sourceFile: 'scope.cwt', sourceLine: 7, hardFacts: { supportedScopes: ['country'], pushScope: 'planet' } } }],
+            });
+            const result = await (executor as any).executeInternal('find_scope_bridge', {
+                fromScope: 'country', toScope: 'planet', context: 'owner transition', candidates: [{ name: 'forged' }],
+            });
+            expect(search.calledOnceWith({ intent: 'owner transition', currentScope: 'country', limit: 50 })).to.equal(true);
+            expect(result.paths[0].steps[0].name).to.equal('owner');
+            expect(result.evidence).to.deep.include('cwtools-node-rules:scope.cwt:7');
+            expect(result.evidence).to.deep.include('rules-sha256:abc123');
+        } finally { cleanupWorkspace(workspaceRoot); }
     });
 });

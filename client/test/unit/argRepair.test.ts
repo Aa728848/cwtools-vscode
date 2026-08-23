@@ -41,10 +41,9 @@ describe('repairToolArgs', () => {
         expect(result.repaired).to.be.true;
     });
 
-    it('coerces string to number (preserves decimal for number type)', () => {
-        // query_scope 'line' is type: 'number', not 'integer', so decimal is preserved
+    it('coerces a decimal string to an integer for line positions', () => {
         const result = repairToolArgs('query_scope', { file: 'test.txt', line: '42.7', column: 0 });
-        expect(result.args.line).to.equal(42.7);
+        expect(result.args.line).to.equal(42);
         expect(result.repaired).to.be.true;
     });
 

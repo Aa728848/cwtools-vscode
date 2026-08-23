@@ -5,6 +5,130 @@
 
 import type { ToolDefinition } from '../types';
 
+const PDX_IDENTIFIER_PATTERN = '^[A-Za-z_][A-Za-z0-9_.:@-]*$';
+const PDX_INLINE_SCRIPT_PATTERN = '^[A-Za-z0-9_.:@/-]+$';
+const SHA256_PATTERN = '^[a-fA-F0-9]{64}$';
+const ARCHETYPE_SLOT_TYPES = ['identifier', 'string', 'number', 'boolean'] as const;
+
+function pdxPathSchema(allowEmpty: boolean): Record<string, unknown> {
+    return {
+        type: 'array',
+        minItems: allowEmpty ? 0 : 1,
+        maxItems: 8,
+        items: {
+            type: 'object',
+            properties: {
+                key: { type: 'string', pattern: PDX_IDENTIFIER_PATTERN },
+                occurrence: { type: 'integer', minimum: 1 },
+            },
+            required: ['key', 'occurrence'],
+            additionalProperties: false,
+        },
+    };
+}
+
+function pdxValueSchema(depth = 0): Record<string, unknown> {
+    const scalarBranches: Record<string, unknown>[] = [
+        { type: 'object', properties: { kind: { const: 'identifier' }, value: { type: 'string', pattern: PDX_IDENTIFIER_PATTERN } }, required: ['kind', 'value'], additionalProperties: false },
+        { type: 'object', properties: { kind: { const: 'string' }, value: { type: 'string', maxLength: 4096, pattern: '^[^\u0000-\u001F\u007F]*$' } }, required: ['kind', 'value'], additionalProperties: false },
+        { type: 'object', properties: { kind: { const: 'number' }, value: { type: 'number' } }, required: ['kind', 'value'], additionalProperties: false },
+        { type: 'object', properties: { kind: { const: 'boolean' }, value: { type: 'boolean' } }, required: ['kind', 'value'], additionalProperties: false },
+    ];
+    if (depth >= 8) return { oneOf: [
+        ...scalarBranches,
+        { type: 'object', properties: { kind: { const: 'list' }, values: { type: 'array', maxItems: 0 } }, required: ['kind', 'values'], additionalProperties: false },
+        { type: 'object', properties: { kind: { const: 'block' }, entries: { type: 'array', maxItems: 0 } }, required: ['kind', 'entries'], additionalProperties: false },
+    ] };
+    const child = pdxValueSchema(depth + 1);
+    return {
+        oneOf: [
+            ...scalarBranches,
+            { type: 'object', properties: { kind: { const: 'list' }, values: { type: 'array', maxItems: 256, items: child } }, required: ['kind', 'values'], additionalProperties: false },
+            { type: 'object', properties: { kind: { const: 'block' }, entries: pdxEntriesSchema(depth + 1) }, required: ['kind', 'entries'], additionalProperties: false },
+        ],
+    };
+}
+
+function pdxEntrySchema(depth = 0): Record<string, unknown> {
+    return {
+        type: 'object',
+        properties: {
+            key: { type: 'string', pattern: PDX_IDENTIFIER_PATTERN },
+            value: pdxValueSchema(depth),
+        },
+        required: ['key', 'value'],
+        additionalProperties: false,
+    };
+}
+
+function pdxEntriesSchema(depth = 0): Record<string, unknown> {
+    return { type: 'array', maxItems: 256, items: pdxEntrySchema(depth) };
+}
+
+const PDX_VALUE_SCHEMA = pdxValueSchema();
+const PDX_ENTRY_SCHEMA = pdxEntrySchema();
+const PDX_ENTRIES_SCHEMA = pdxEntriesSchema();
+const CONTAINER_PATH_SCHEMA = { type: 'array', maxItems: 8, items: { type: 'string' } };
+
+function operationBranch(operation: string, properties: Record<string, unknown>, required: string[]): Record<string, unknown> {
+    return {
+        type: 'object',
+        properties: { operation: { const: operation }, ...properties },
+        required: ['operation', ...required],
+        additionalProperties: false,
+    };
+}
+
+const CLONE_OVERRIDE_SCHEMA = {
+    oneOf: [
+        operationBranch('set', { path: pdxPathSchema(false), value: PDX_VALUE_SCHEMA }, ['path', 'value']),
+        operationBranch('delete', { path: pdxPathSchema(false) }, ['path']),
+        operationBranch('append', { path: pdxPathSchema(true), entry: PDX_ENTRY_SCHEMA }, ['path', 'entry']),
+    ].map(branch => {
+        const record = branch as { properties: Record<string, unknown> };
+        record.properties.action = record.properties.operation;
+        delete record.properties.operation;
+        const required = (branch as { required: string[] }).required;
+        required[0] = 'action';
+        return branch;
+    }),
+};
+
+const TYPED_PDX_OPERATION_SCHEMA = {
+    oneOf: [
+        operationBranch('clone_definition', { source: { type: 'string' }, newSymbol: { type: 'string', pattern: PDX_IDENTIFIER_PATTERN }, overrides: { type: 'array', maxItems: 64, items: CLONE_OVERRIDE_SCHEMA } }, ['source', 'newSymbol']),
+        operationBranch('add_event_call', { target: { type: 'string' }, callType: { type: 'string', pattern: PDX_IDENTIFIER_PATTERN }, eventId: { type: 'string', pattern: PDX_IDENTIFIER_PATTERN }, containerPath: CONTAINER_PATH_SCHEMA, days: { type: 'integer', minimum: 0 } }, ['target', 'callType', 'eventId']),
+        operationBranch('add_event_option', { target: { type: 'string' }, name: { type: 'string', pattern: PDX_IDENTIFIER_PATTERN }, fields: PDX_ENTRIES_SCHEMA }, ['target', 'name']),
+        operationBranch('append_trigger_condition', { target: { type: 'string' }, condition: PDX_ENTRY_SCHEMA, containerPath: CONTAINER_PATH_SCHEMA }, ['target', 'condition']),
+        operationBranch('instantiate_inline_script', { target: { type: 'string' }, script: { type: 'string', pattern: PDX_INLINE_SCRIPT_PATTERN }, arguments: PDX_ENTRIES_SCHEMA, containerPath: CONTAINER_PATH_SCHEMA }, ['target', 'script']),
+        operationBranch('set_definition_field', { target: { type: 'string' }, path: pdxPathSchema(false), value: PDX_VALUE_SCHEMA }, ['target', 'path', 'value']),
+        operationBranch('delete_definition_field', { target: { type: 'string' }, path: pdxPathSchema(false) }, ['target', 'path']),
+        operationBranch('add_definition_field', { target: { type: 'string' }, path: pdxPathSchema(true), entry: PDX_ENTRY_SCHEMA }, ['target', 'path', 'entry']),
+        operationBranch('add_scripted_effect_call', { target: { type: 'string' }, script: { type: 'string', pattern: PDX_IDENTIFIER_PATTERN }, arguments: PDX_ENTRIES_SCHEMA, containerPath: CONTAINER_PATH_SCHEMA }, ['target', 'script']),
+        operationBranch('add_scripted_trigger_call', { target: { type: 'string' }, script: { type: 'string', pattern: PDX_IDENTIFIER_PATTERN }, arguments: PDX_ENTRIES_SCHEMA, containerPath: CONTAINER_PATH_SCHEMA }, ['target', 'script']),
+        operationBranch('add_on_action_entry', { target: { type: 'string' }, entry: PDX_ENTRY_SCHEMA }, ['target', 'entry']),
+        operationBranch('bind_event_target', { target: { type: 'string' }, eventTarget: { type: 'string', pattern: PDX_IDENTIFIER_PATTERN }, containerPath: CONTAINER_PATH_SCHEMA }, ['target', 'eventTarget']),
+        operationBranch('clear_event_target', { target: { type: 'string' }, eventTarget: { type: 'string', pattern: PDX_IDENTIFIER_PATTERN }, containerPath: CONTAINER_PATH_SCHEMA }, ['target', 'eventTarget']),
+        operationBranch('add_variable_transition', { target: { type: 'string' }, transition: { type: 'string', enum: ['set_variable', 'change_variable', 'multiply_variable', 'divide_variable'] }, variable: { type: 'string', pattern: PDX_IDENTIFIER_PATTERN }, value: PDX_VALUE_SCHEMA, containerPath: CONTAINER_PATH_SCHEMA }, ['target', 'transition', 'variable', 'value']),
+    ],
+};
+
+const ARCHETYPE_SCALAR_VALUE_SCHEMA = {
+    oneOf: ARCHETYPE_SLOT_TYPES.map(kind => ({
+        type: 'object',
+        properties: {
+            kind: { const: kind },
+            value: kind === 'identifier'
+                ? { type: 'string', pattern: PDX_IDENTIFIER_PATTERN }
+                : kind === 'string'
+                    ? { type: 'string', maxLength: 4096, pattern: '^[^\u0000-\u001F\u007F]*$' }
+                    : { type: kind },
+        },
+        required: ['kind', 'value'],
+        additionalProperties: false,
+    })),
+};
+
 const RAW_TOOL_DEFINITIONS: ToolDefinition[] = [
     {
         type: 'function',
@@ -15,10 +139,11 @@ const RAW_TOOL_DEFINITIONS: ToolDefinition[] = [
                 type: 'object',
                 properties: {
                     file: { type: 'string', description: 'Absolute file path' },
-                    line: { type: 'number', description: 'Line number (0-based)' },
-                    column: { type: 'number', description: 'Column number (0-based)' },
+                    line: { type: 'integer', minimum: 0, description: 'Line number (0-based)' },
+                    column: { type: 'integer', minimum: 0, description: 'Column number (0-based)' },
                 },
                 required: ['file', 'line', 'column'],
+                additionalProperties: false,
             },
         },
     },
@@ -694,23 +819,16 @@ const RAW_TOOL_DEFINITIONS: ToolDefinition[] = [
     {
         type: 'function',
         function: {
-            name: 'solve_scope_bridge',
-            description: 'Find bounded evidence-backed CWT scope transitions. Returns deterministic paths only from supplied rule evidence.',
+            name: 'find_scope_bridge',
+            description: 'Find bounded scope transitions from fresh CWT/LSP evidence gathered by the Extension Host. The model supplies only endpoints and intent context; evidence candidates cannot be injected.',
             parameters: {
                 type: 'object',
                 properties: {
-                    fromScope: { type: 'string' },
-                    toScope: { type: 'string' },
-                    candidates: {
-                        type: 'array', maxItems: 200,
-                        items: {
-                            type: 'object',
-                            properties: { name: { type: 'string' }, supportedScopes: { type: 'array', items: { type: 'string' } }, pushScope: { type: 'string' }, evidence: { type: 'array', items: { type: 'string' } } },
-                            required: ['name', 'supportedScopes', 'pushScope', 'evidence'], additionalProperties: false,
-                        },
-                    },
+                    fromScope: { type: 'string', minLength: 1 },
+                    toScope: { type: 'string', minLength: 1 },
+                    context: { type: 'string', description: 'Concise transition intent used by the host to rank active rule capabilities.' },
                 },
-                required: ['fromScope', 'toScope', 'candidates'], additionalProperties: false,
+                required: ['fromScope', 'toScope', 'context'], additionalProperties: false,
             },
         },
     },
@@ -718,16 +836,41 @@ const RAW_TOOL_DEFINITIONS: ToolDefinition[] = [
         type: 'function',
         function: {
             name: 'extract_archetype_slots',
-            description: 'Extract a bounded typed slot contract and immutable hash from a reviewed PDX archetype. Placeholders must be complete scalar values.',
-            parameters: { type: 'object', properties: { text: { type: 'string' }, placeholders: { type: 'object' } }, required: ['text', 'placeholders'], additionalProperties: false },
+            description: 'Read a verified workspace definition and create a bounded, opaque, session-owned archetype artifact. Arbitrary source text is not accepted.',
+            parameters: {
+                type: 'object',
+                properties: {
+                    filePath: { type: 'string' },
+                    definitionIdentity: { type: 'string' },
+                    definitionPath: { type: 'string' },
+                    placeholders: {
+                        type: 'object', minProperties: 1, maxProperties: 64,
+                        propertyNames: { pattern: '^\\$[A-Za-z_][A-Za-z0-9_]*\\$$' },
+                        additionalProperties: {
+                            oneOf: [
+                                { type: 'string', enum: ARCHETYPE_SLOT_TYPES },
+                                { type: 'object', properties: { type: { type: 'string', enum: ARCHETYPE_SLOT_TYPES }, required: { type: 'boolean' } }, required: ['type'], additionalProperties: false },
+                            ],
+                        },
+                    },
+                },
+                required: ['filePath', 'definitionIdentity', 'definitionPath', 'placeholders'], additionalProperties: false,
+            },
         },
     },
     {
         type: 'function',
         function: {
             name: 'instantiate_archetype',
-            description: 'Fill a previously extracted immutable archetype using typed scalar values only. Raw script text is rejected.',
-            parameters: { type: 'object', properties: { archetype: { type: 'object' }, values: { type: 'object' } }, required: ['archetype', 'values'], additionalProperties: false },
+            description: 'Fill a host-owned archetype artifact using typed scalar values only. Expired artifacts and source path/content drift are rejected.',
+            parameters: {
+                type: 'object',
+                properties: {
+                    artifactId: { type: 'string' },
+                    values: { type: 'object', maxProperties: 64, propertyNames: { pattern: '^\\$[A-Za-z_][A-Za-z0-9_]*\\$$' }, additionalProperties: ARCHETYPE_SCALAR_VALUE_SCHEMA },
+                },
+                required: ['artifactId', 'values'], additionalProperties: false,
+            },
         },
     },
     {
@@ -739,65 +882,13 @@ const RAW_TOOL_DEFINITIONS: ToolDefinition[] = [
                 type: 'object',
                 properties: {
                     filePath: { type: 'string', description: 'Absolute workspace .txt file path.' },
-                    expectedHash: { type: 'string', description: 'Optional SHA-256 of the source content; stale candidates are rejected.' },
+                    expectedHash: { type: 'string', pattern: SHA256_PATTERN, description: 'Optional SHA-256 of the source content; stale candidates are rejected.' },
                     mode: { type: 'string', enum: ['preview', 'stage'], description: 'Preview is read-only; stage requires an active candidate transaction.' },
                     transactionId: { type: 'string', description: 'Required when mode=stage.' },
-                    operation: {
-                        type: 'object',
-                        description: 'One typed mutation. Raw code/oldString/newString fields are rejected.',
-                        properties: {
-                            operation: { type: 'string', enum: ['clone_definition', 'add_event_call', 'add_event_option', 'append_trigger_condition', 'instantiate_inline_script', 'set_definition_field', 'delete_definition_field', 'add_definition_field', 'add_scripted_effect_call', 'add_scripted_trigger_call', 'add_on_action_entry', 'bind_event_target', 'clear_event_target', 'add_variable_transition'] },
-                            source: { type: 'string' },
-                            newSymbol: { type: 'string' },
-                            target: { type: 'string' },
-                            containerPath: { type: 'array', items: { type: 'string' } },
-                            callType: { type: 'string' },
-                            eventId: { type: 'string' },
-                            days: { type: 'number' },
-                            name: { type: 'string' },
-                            fields: { type: 'array', items: { type: 'object' } },
-                            condition: { type: 'object' },
-                            script: { type: 'string' },
-                            arguments: { type: 'array', items: { type: 'object' } },
-                            path: { type: 'array', items: { type: 'object' }, description: 'Exact one-based PDX field path for definition field mutations.' },
-                            value: { type: 'object', description: 'Bounded typed PdxValue.' },
-                            entry: { type: 'object', description: 'Bounded typed PdxEntry.' },
-                            effect: { type: 'string' },
-                            trigger: { type: 'string' },
-                            onAction: { type: 'string' },
-                            eventTarget: { type: 'string' },
-                            variable: { type: 'string' },
-                            transition: { type: 'string', enum: ['set_variable', 'change_variable', 'multiply_variable', 'divide_variable'] },
-                            overrides: {
-                                type: 'array',
-                                maxItems: 64,
-                                description: 'Structured clone changes applied in order. Paths use exact keys and an explicit one-based occurrence; raw text is not accepted.',
-                                items: {
-                                    type: 'object',
-                                    properties: {
-                                        action: { type: 'string', enum: ['set', 'delete', 'append'] },
-                                        path: {
-                                            type: 'array',
-                                            items: {
-                                                type: 'object',
-                                                properties: {
-                                                    key: { type: 'string' },
-                                                    occurrence: { type: 'number', description: 'One-based occurrence among sibling entries with the same key.' },
-                                                },
-                                                required: ['key', 'occurrence'],
-                                            },
-                                        },
-                                        value: { type: 'object', description: 'Required for set; one bounded PdxValue.' },
-                                        entry: { type: 'object', description: 'Required for append; one typed PdxEntry.' },
-                                    },
-                                    required: ['action', 'path'],
-                                },
-                            },
-                        },
-                        required: ['operation'],
-                    },
+                    operation: { ...TYPED_PDX_OPERATION_SCHEMA, description: 'One discriminated typed mutation. Raw code/oldString/newString fields are rejected.' },
                 },
                 required: ['filePath', 'operation'],
+                additionalProperties: false,
             },
         },
     },

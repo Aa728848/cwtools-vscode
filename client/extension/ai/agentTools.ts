@@ -82,12 +82,12 @@ import { ErrorReporter } from './errorReporter';
 import { mergeTokenUsageTotals } from './cacheCapability';
 import { MemoryParser } from './memoryParser';
 import { createDiagnosticSnapshot, diffDiagnosticSnapshots, hasAddedErrors, type DiagnosticDelta } from './runner/diagnosticSnapshot';
-import { CandidateTransactionManager } from './runner/candidateTransaction';
+import { CandidateTransactionManager, sha256 } from './runner/candidateTransaction';
 import { buildTypedPdxCandidate } from './tools/typedPdxWrite';
 import { globalPartitionedWriteQueue } from './runner/writeCoordinator';
 import { validateOverlayCatalog } from './runner/overlayCatalog';
-import { solveScopeBridge } from './tools/scopeBridge';
-import { extractArchetypeSlots, instantiateArchetypeSlots } from './tools/archetypeSlots';
+import { solveScopeBridge, type ScopeBridgeCandidate } from './tools/scopeBridge';
+import { HostArchetypeArtifactStore } from './tools/archetypeArtifacts';
 import { canonicalPathKey } from './workspacePaths';
 import { defaultDomainForMode } from './agentProfile';
 import { isMcpServerAllowedForDomain } from './mcpCapability';
@@ -460,6 +460,7 @@ export class AgentToolExecutor {
     // - Domain handlers -
     private fileHandler: FileToolHandler;
     private readonly candidateTransactions = new CandidateTransactionManager();
+    private readonly archetypeArtifacts: HostArchetypeArtifactStore;
     private candidateOwnerScope?: string;
     private lspHandler: LspToolHandler;
     private externalHandler: ExternalToolHandler;
@@ -492,6 +493,7 @@ export class AgentToolExecutor {
         this.extensionPath = extensionPath;
         this.indexService = indexService;
         this.apiKeyManager = apiKeyManager;
+        this.archetypeArtifacts = new HostArchetypeArtifactStore(workspaceRoot);
         this.clientGetter = typeof clientOrGetter === 'function'
             ? clientOrGetter
             : () => clientOrGetter;
@@ -729,12 +731,13 @@ export class AgentToolExecutor {
         return { success: true, mode: 'stage', transactionId, candidate, message: candidate.summary };
     }
 
-    private async validateCandidateOverlay(): Promise<{
+    private async validateCandidateOverlay(
+        files: readonly import('./runner/candidateTransaction').CandidateFile[] = this.candidateTransactions.files,
+    ): Promise<{
         validationLevel?: string;
         limitations?: string[];
         files: Array<{ uri?: string; ok?: boolean; validationLevel?: string; contentHash?: string; diagnostics?: import('./types').ValidationError[]; error?: string; status?: string }>;
     }> {
-        const files = this.candidateTransactions.files;
         const client = this.client;
         if (!client || typeof (client as any).sendRequest !== 'function') {
             throw new Error('LSP client unavailable for candidate overlay validation.');
@@ -896,6 +899,21 @@ export class AgentToolExecutor {
                     const targets = rolledBackFiles.map(file => file.path);
                     const response = await this.requestRevalidateFiles(targets);
                     if (response?.ok !== true) return { ok: false, error: 'Rollback files could not be revalidated.' };
+                    const restoredFiles = rolledBackFiles.map(file => {
+                        const content = fs.existsSync(file.path) ? fs.readFileSync(file.path, 'utf8') : '';
+                        return { ...file, content, contentHash: sha256(content), bytes: Buffer.byteLength(content, 'utf8') };
+                    });
+                    const serverValidation = await this.validateCandidateOverlay(restoredFiles);
+                    for (const file of restoredFiles) {
+                        const uri = vs.Uri.file(file.path).toString();
+                        const result = serverValidation.files.find(item => item.uri === uri);
+                        if (result?.ok !== true || result.contentHash !== file.contentHash) {
+                            return { ok: false, error: `Rollback server content did not match baseline for ${file.path}.` };
+                        }
+                        if (file.baseHash !== undefined && result.contentHash !== file.baseHash) {
+                            return { ok: false, error: `Rollback server base hash did not match baseline for ${file.path}.` };
+                        }
+                    }
                     for (const file of rolledBackFiles) {
                         const baselineEpoch = baselineEpochs.get(file.path) ?? 0;
                         const deadline = Date.now() + 8_000;
@@ -906,6 +924,18 @@ export class AgentToolExecutor {
                         }
                         if (current.freshness !== 'fresh' || (current.lastEpoch ?? 0) <= baselineEpoch) {
                             return { ok: false, error: `Rollback diagnostics did not become fresh for ${file.path}.` };
+                        }
+                        const recoveredSnapshot = createDiagnosticSnapshot(current.diagnostics.map(item => ({
+                            code: item.code ?? '', severity: item.severity, message: item.message, line: item.line, column: item.column, data: item.data,
+                        })), { status: current.freshness, complete: current.truncated !== true });
+                        const recoveryDelta = diffDiagnosticSnapshots(baselineDiagnostics.get(file.path)!, recoveredSnapshot);
+                        if (!recoveryDelta.comparable || recoveryDelta.added.length > 0 || recoveryDelta.removed.length > 0) {
+                            return { ok: false, error: `Rollback diagnostics did not match baseline for ${file.path}.` };
+                        }
+                        const originalHash = file.baseHash;
+                        const restored = fs.existsSync(file.path) ? fs.readFileSync(file.path) : Buffer.from('');
+                        if (originalHash !== undefined && sha256(restored) !== originalHash) {
+                            return { ok: false, error: `Rollback content hash did not match baseline for ${file.path}.` };
                         }
                     }
                     return { ok: true };
@@ -2350,17 +2380,28 @@ export class AgentToolExecutor {
                 result = await this.lspHandler.renameSymbol(args as any, context); break;
             case 'verify_pdx_identifier':
                 result = await this.lspHandler.verifyPdxIdentifier(args as any); break;
-            case 'solve_scope_bridge': {
-                const input = args as unknown as import('./types').SolveScopeBridgeArgs;
-                result = solveScopeBridge(input); break;
+            case 'find_scope_bridge': {
+                const input = args as unknown as import('./types').FindScopeBridgeArgs;
+                const evidence = await this.lspHandler.searchRuleCapabilities({ intent: input.context, currentScope: input.fromScope, limit: 50 });
+                const candidates: ScopeBridgeCandidate[] = evidence.candidates.map(candidate => ({
+                    name: candidate.rule.name,
+                    supportedScopes: candidate.rule.hardFacts?.supportedScopes ?? candidate.rule.scopes,
+                    pushScope: candidate.rule.hardFacts?.pushScope,
+                    evidence: [
+                        `${evidence.source}:${candidate.rule.sourceFile ?? candidate.rule.hardFacts?.cwtSource?.file ?? '<rules>'}:${candidate.rule.sourceLine ?? candidate.rule.hardFacts?.cwtSource?.line ?? 0}`,
+                        ...(evidence.rulesContentHash ? [`rules-sha256:${evidence.rulesContentHash}`] : []),
+                    ],
+                }));
+                result = { ...solveScopeBridge({ fromScope: input.fromScope, toScope: input.toScope, candidates }), evidenceSource: evidence.source, rulesContentHash: evidence.rulesContentHash }; break;
             }
             case 'extract_archetype_slots': {
                 const input = args as unknown as import('./types').ExtractArchetypeSlotsArgs;
-                result = { success: true, archetype: extractArchetypeSlots(input.text, input.placeholders) }; break;
+                const artifact = await this.archetypeArtifacts.extract(input, (identity, canonicalPath) => this.verifyArchetypeDefinition(identity, canonicalPath));
+                result = { success: true, artifact }; break;
             }
             case 'instantiate_archetype': {
                 const input = args as unknown as import('./types').InstantiateArchetypeArgs;
-                result = { success: true, content: instantiateArchetypeSlots(input.archetype, input.values) }; break;
+                result = { success: true, content: await this.archetypeArtifacts.instantiate(input.artifactId, input.values) }; break;
             }
             case 'get_pdx_block':
                 result = await this.lspHandler.getPdxBlock(args as any, context); break;
@@ -2818,6 +2859,28 @@ export class AgentToolExecutor {
             activeSkills: effectivePolicy?.skillNames,
             effectiveAllowedTools: effectivePolicy ? [...effectivePolicy.allowedTools].sort() : undefined,
         };
+    }
+
+    private async verifyArchetypeDefinition(identity: string, canonicalPath: string): Promise<boolean> {
+        const response = await this.lspHandler.queryDefinitionByName({ symbolName: identity });
+        const targetKey = canonicalPathKey(canonicalPath);
+        const recordMatches = (value: unknown): boolean => {
+            if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+            const record = value as Record<string, unknown>;
+            const values = Object.values(record).slice(0, 200);
+            const identityMatches = ['name', 'symbolName', 'identity', 'key']
+                .some(key => typeof record[key] === 'string' && (record[key] as string).toLowerCase() === identity.toLowerCase());
+            const pathMatches = values.some(item => {
+                if (typeof item !== 'string') return false;
+                const fileValue = item.startsWith('file:') ? vs.Uri.parse(item).fsPath : item;
+                return path.isAbsolute(fileValue) && canonicalPathKey(path.resolve(fileValue)) === targetKey;
+            });
+            if (identityMatches && pathMatches) return true;
+            return values.some(item => Array.isArray(item)
+                ? item.slice(0, 200).some(recordMatches)
+                : recordMatches(item));
+        };
+        return recordMatches(response);
     }
 
     public clearSkillPolicyForRun(runId: string): void {

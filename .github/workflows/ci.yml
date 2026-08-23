@@ -114,6 +114,8 @@ jobs:
       - run: npm ci
       - run: npm run compile
       - run: npm run typecheck:test
+      - name: Run detached overlay Extension Host E2E
+        run: npm run test:overlay-e2e
 
   mcp:
     name: MCP contracts

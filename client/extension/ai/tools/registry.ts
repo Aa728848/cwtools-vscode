@@ -9,7 +9,7 @@ export type AgentToolName =
     | 'get_file_context' | 'search_mod_files' | 'find_sprite_candidates' | 'find_sound_candidates'
     | 'grep' | 'get_completion_at' | 'document_symbols' | 'workspace_symbols'
     | 'go_to_definition' | 'find_references' | 'hover_symbol' | 'rename_symbol'
-    | 'verify_pdx_identifier' | 'solve_scope_bridge' | 'extract_archetype_slots' | 'instantiate_archetype' | 'todo_write' | 'read_file' | 'write_file' | 'edit_file'
+    | 'verify_pdx_identifier' | 'find_scope_bridge' | 'extract_archetype_slots' | 'instantiate_archetype' | 'todo_write' | 'read_file' | 'write_file' | 'edit_file'
     | 'replace_lines' | 'typed_pdx_write' | 'candidate_transaction' | 'list_directory' | 'get_lsp_status' | 'get_diagnostics' | 'analyze_diagnostic_error'
     | 'glob_files' | 'lsp_operation' | 'web_search' | 'web_open' | 'web_find' | 'run_command' | 'list_processes' | 'read_process' | 'write_process_stdin' | 'terminate_process'
     | 'query_definition' | 'query_definition_by_name' | 'query_scripted_effects'
@@ -119,7 +119,7 @@ const TOOL_DOMAINS = {
     hover_symbol: 'shared',
     rename_symbol: 'shared',
     verify_pdx_identifier: 'paradox',
-    solve_scope_bridge: 'paradox',
+    find_scope_bridge: 'paradox',
     extract_archetype_slots: 'paradox',
     instantiate_archetype: 'paradox',
     todo_write: 'shared',
@@ -294,7 +294,7 @@ const BASE_READ: AgentToolName[] = [
     'query_scope', 'query_types', 'query_rules', 'query_cwt_schema', 'query_override_modes', 'search_rule_capabilities', 'explain_scope', 'parse_pdx_fragment', 'query_localisation_index', 'query_workspace_index', 'explore_pdx_project', 'query_inline_instantiation', 'analyze_pdx_flow', 'compare_definition_with_vanilla', 'query_references', 'get_design_blueprint_contract',
     'query_project_profile', 'query_project_knowledge', 'query_interface_knowledge', 'run_skill', 'history', 'get_file_context', 'search_mod_files', 'find_sprite_candidates', 'find_sound_candidates', 'grep', 'get_completion_at',
     'document_symbols', 'workspace_symbols', 'go_to_definition', 'find_references', 'hover_symbol',
-    'verify_pdx_identifier', 'solve_scope_bridge', 'extract_archetype_slots', 'instantiate_archetype', 'read_file', 'list_directory', 'glob_files',
+    'verify_pdx_identifier', 'find_scope_bridge', 'extract_archetype_slots', 'instantiate_archetype', 'read_file', 'list_directory', 'glob_files',
     'lsp_operation', 'get_lsp_status', 'get_diagnostics', 'query_definition', 'query_definition_by_name', 'web_find',
     'query_scripted_effects', 'query_scripted_triggers', 'query_enums',
     'get_entity_info', 'query_static_modifiers', 'query_variables', 'get_pdx_block', 'get_ignored_diagnostics',
@@ -475,7 +475,7 @@ for (const schema of SCHEMA_DEFINITIONS) {
     const mutating = MUTATING_TOOLS_SET.has(name);
     const stormExempt = STORM_EXEMPT_TOOLS_SET.has(name);
 
-    const noFlatten = ['dispatch_agents', 'merge_results', 'query_blackboard', 'todo_write', 'run_code'].includes(name);
+    const noFlatten = ['dispatch_agents', 'merge_results', 'query_blackboard', 'todo_write', 'run_code', 'typed_pdx_write', 'extract_archetype_slots', 'instantiate_archetype'].includes(name);
     let flatSchema: ToolDefinition | undefined = undefined;
     if (!noFlatten) {
         const analysis = analyzeSchema(schema);

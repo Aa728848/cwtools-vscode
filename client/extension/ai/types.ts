@@ -1361,11 +1361,11 @@ export interface VerifyPdxIdentifierResult {
     _warning?: string;
 }
 
-export type SolveScopeBridgeArgs = import('./tools/scopeBridge').ScopeBridgeInput;
-export type SolveScopeBridgeResult = import('./tools/scopeBridge').ScopeBridgeResult;
-export interface ExtractArchetypeSlotsArgs { text: string; placeholders: import('./tools/archetypeSlots').ArchetypePlaceholders }
-export interface InstantiateArchetypeArgs { archetype: import('./tools/archetypeSlots').ExtractedArchetype; values: Readonly<Record<string, import('./tools/archetypeSlots').ArchetypeSlotValue>> }
-export interface ArchetypeSlotResult { success: boolean; archetype?: import('./tools/archetypeSlots').ExtractedArchetype; content?: string; error?: string }
+export interface FindScopeBridgeArgs { fromScope: string; toScope: string; context: string }
+export type FindScopeBridgeResult = import('./tools/scopeBridge').ScopeBridgeResult;
+export type ExtractArchetypeSlotsArgs = import('./tools/archetypeArtifacts').HostArchetypeExtractArgs;
+export interface InstantiateArchetypeArgs { artifactId: string; values: Readonly<Record<string, import('./tools/archetypeSlots').ArchetypeSlotValue>> }
+export interface ArchetypeSlotResult { success: boolean; artifact?: import('./tools/archetypeArtifacts').HostArchetypeArtifact; content?: string; error?: string }
 
 // ─── TodoWrite Tool Types ────────────────────────────────────────────────────
 
@@ -1570,7 +1570,7 @@ export type ToolArgs =
     | DocumentSymbolsArgs
     | WorkspaceSymbolsArgs
     | VerifyPdxIdentifierArgs
-    | SolveScopeBridgeArgs
+    | FindScopeBridgeArgs
     | ExtractArchetypeSlotsArgs
     | InstantiateArchetypeArgs
     | TodoWriteArgs
@@ -1613,7 +1613,7 @@ export type ToolResult =
     | DocumentSymbolsResult
     | WorkspaceSymbolsResult
     | VerifyPdxIdentifierResult
-    | SolveScopeBridgeResult
+    | FindScopeBridgeResult
     | ArchetypeSlotResult
     | TodoWriteResult
     | ReadFileResult
@@ -1666,7 +1666,7 @@ export type AgentToolName =
     | 'hover_symbol'
     | 'rename_symbol'
     | 'verify_pdx_identifier'
-    | 'solve_scope_bridge'
+    | 'find_scope_bridge'
     | 'extract_archetype_slots'
     | 'instantiate_archetype'
     | 'todo_write'

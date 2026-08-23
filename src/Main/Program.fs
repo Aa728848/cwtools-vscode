@@ -11634,10 +11634,26 @@ type Server(client: ILanguageClient) =
                                 |> Option.bind (function JsonValue.Array files when files.Length > 0 -> Some files | _ -> None)
                                 |> Option.defaultValue [||]
                             let maxFiles = Main.OverlayValidation.MaxFiles
-                            let maxFileChars = Main.OverlayValidation.MaxFileChars
-                            let maxTotalChars = Main.OverlayValidation.MaxTotalChars
-                            let mutable totalChars = 0
-                            let seen = System.Collections.Generic.HashSet<string>(if OperatingSystem.IsWindows() then StringComparer.OrdinalIgnoreCase else StringComparer.Ordinal)
+                            let admissionInputs =
+                                fileValues
+                                |> Array.mapi (fun index fileValue ->
+                                    match fileValue with
+                                    | JsonValue.Record fields ->
+                                        match tryProperty "uri" fields, tryProperty "content" fields with
+                                        | Some(JsonValue.String uriText), Some(JsonValue.String content) ->
+                                            try
+                                                let uri = Uri(uriText)
+                                                if uri.Scheme = Uri.UriSchemeFile then
+                                                    Path.GetFullPath(getPathFromDoc uri), content.Length
+                                                else
+                                                    $"<invalid-overlay-{index}>", 0
+                                            with _ ->
+                                                $"<invalid-overlay-{index}>", 0
+                                        | _ -> $"<invalid-overlay-{index}>", 0
+                                    | _ -> $"<invalid-overlay-{index}>", 0)
+                            // Keep the production command's bounded/duplicate policy identical to the
+                            // independently regression-tested admission helper.
+                            let admissionDecisions = Main.OverlayValidation.admit admissionInputs
                             let severityName (severity: Severity) =
                                 match severity with
                                 | Severity.Error -> "error"
@@ -11671,17 +11687,15 @@ type Server(client: ILanguageClient) =
                                 match workspaceFolders with
                                 | folders when not folders.IsEmpty -> folders |> List.map (fun folder -> Path.GetFullPath folder.uri.LocalPath)
                                 | _ -> rootUri |> Option.map (fun uri -> Path.GetFullPath uri.LocalPath) |> Option.toList
-                            let pathComparison = if OperatingSystem.IsWindows() then StringComparison.OrdinalIgnoreCase else StringComparison.Ordinal
                             let isInsideWorkspace (candidate: string) =
                                 workspaceRoots
-                                |> List.exists (fun root ->
-                                    let relative = Path.GetRelativePath(root, candidate)
-                                    relative = "." || (not (Path.IsPathRooted relative) && relative <> ".." && not (relative.StartsWith(".." + string Path.DirectorySeparatorChar, pathComparison))))
+                                |> List.exists (fun root -> Main.OverlayValidation.isPathWithinResolvedRoot root candidate)
                             let mutable allAccepted = requestValid && fileValues.Length > 0 && fileValues.Length <= maxFiles
+                            let pendingBatch = System.Collections.Generic.Dictionary<int, struct (string * string * string)>()
                             let rejectFile error =
                                 allAccepted <- false
                                 JsonValue.Record [| "ok", JsonValue.Boolean false; "error", JsonValue.String error |]
-                            let validateFileValue fileValue =
+                            let validateFileValue index fileValue =
                                 if cancellationToken.IsCancellationRequested then
                                     allAccepted <- false
                                     JsonValue.Record [| "ok", JsonValue.Boolean false; "status", JsonValue.String "cancelled" |]
@@ -11702,16 +11716,17 @@ type Server(client: ILanguageClient) =
                                                         JsonValue.Record [| "ok", JsonValue.Boolean false; "uri", JsonValue.String uriText; "error", JsonValue.String "Only file: URIs are supported." |]
                                                     else
                                                         let filePath = Path.GetFullPath(getPathFromDoc uri)
-                                                        totalChars <- totalChars + content.Length
                                                         if not (isInsideWorkspace filePath) then
                                                             allAccepted <- false
                                                             JsonValue.Record [| "ok", JsonValue.Boolean false; "uri", JsonValue.String uriText; "error", JsonValue.String "Overlay path is outside the active workspace roots." |]
-                                                        elif content.Length > maxFileChars || totalChars > maxTotalChars then
+                                                        elif admissionDecisions.[index] = Main.OverlayValidation.Oversized then
                                                             allAccepted <- false
                                                             JsonValue.Record [| "ok", JsonValue.Boolean false; "uri", JsonValue.String uriText; "error", JsonValue.String "Overlay validation payload exceeds the bounded size limit." |]
-                                                        elif not (seen.Add filePath) then
+                                                        elif admissionDecisions.[index] = Main.OverlayValidation.Duplicate then
                                                             allAccepted <- false
                                                             JsonValue.Record [| "ok", JsonValue.Boolean false; "uri", JsonValue.String uriText; "error", JsonValue.String "Duplicate overlay URI." |]
+                                                        elif admissionDecisions.[index] = Main.OverlayValidation.Truncated then
+                                                            rejectFile "Overlay validation payload exceeds the bounded file limit."
                                                         else
                                                             let baseHash = tryProperty "baseHash" fields |> Option.bind (function JsonValue.String value when System.Text.RegularExpressions.Regex.IsMatch(value, "^[a-fA-F0-9]{64}$") -> Some value | _ -> None)
                                                             let baseHashFieldPresent = tryProperty "baseHash" fields |> Option.isSome
@@ -11745,27 +11760,51 @@ type Server(client: ILanguageClient) =
                                                                            "contentHash", JsonValue.String(sha256Text content)
                                                                            "diagnostics", JsonValue.Array [| parserDiagnostic filePath message position.Position |] |]
                                                                 | Success _ ->
-                                                                    let diagnostics = game.ValidateOverlayFile(filePath, content)
+                                                                    pendingBatch.[index] <- struct (filePath, uriText, content)
                                                                     JsonValue.Record
                                                                         [| "ok", JsonValue.Boolean true
                                                                            "uri", JsonValue.String uriText
-                                                                           "validationLevel", JsonValue.String "catalog-single-file"
+                                                                           "validationLevel", JsonValue.String "catalog-overlay-batch"
                                                                            "contentHash", JsonValue.String(sha256Text content)
-                                                                           "diagnostics", JsonValue.Array(diagnostics |> List.map diagnosticJson |> Array.ofList) |]
+                                                                           "diagnostics", JsonValue.Array [||] |]
                                                 with error ->
                                                     allAccepted <- false
                                                     JsonValue.Record [| "ok", JsonValue.Boolean false; "uri", JsonValue.String uriText; "error", JsonValue.String error.Message |]
                                             | _ -> rejectFile "Each overlay file requires string uri and content fields."
                                     | _ -> rejectFile "Overlay files must be objects."
-                            let fileResults =
+                            let initialResults =
                                 fileValues
                                 |> Array.truncate maxFiles
-                                |> Array.map validateFileValue
+                                |> Array.mapi validateFileValue
+                            let fileResults =
+                                if pendingBatch.Count = 0 then initialResults
+                                else
+                                    let batchFiles = pendingBatch.Values |> Seq.map (fun struct (filePath, _, content) -> filePath, content) |> Seq.toList
+                                    match game.ValidateOverlayFilesCancellable(batchFiles, fun () -> cancellationToken.IsCancellationRequested) with
+                                    | None ->
+                                        allAccepted <- false
+                                        initialResults
+                                        |> Array.mapi (fun index result ->
+                                            if pendingBatch.ContainsKey index then JsonValue.Record [| "ok", JsonValue.Boolean false; "status", JsonValue.String "cancelled" |]
+                                            else result)
+                                    | Some diagnostics ->
+                                        initialResults
+                                        |> Array.mapi (fun index result ->
+                                            match pendingBatch.TryGetValue index with
+                                            | true, struct (filePath, uriText, content) ->
+                                                let fileDiagnostics = diagnostics |> List.filter (fun error -> String.Equals(Path.GetFullPath error.range.FileName, filePath, pathComparison))
+                                                JsonValue.Record
+                                                    [| "ok", JsonValue.Boolean true
+                                                       "uri", JsonValue.String uriText
+                                                       "validationLevel", JsonValue.String "catalog-overlay-batch"
+                                                       "contentHash", JsonValue.String(sha256Text content)
+                                                       "diagnostics", JsonValue.Array(fileDiagnostics |> List.map diagnosticJson |> Array.ofList) |]
+                                            | _ -> result)
                             Some(
                                 JsonValue.Record
-                                    [| "ok", JsonValue.Boolean(allAccepted && totalChars <= maxTotalChars)
-                                       "validationLevel", JsonValue.String "catalog-single-file"
-                                       "limitations", JsonValue.Array [| JsonValue.String "overlay_files_not_cross_visible"; JsonValue.String "dynamic_indexes_from_live_model"; JsonValue.String "global_and_localisation_checks_omitted" |]
+                                    [| "ok", JsonValue.Boolean allAccepted
+                                       "validationLevel", JsonValue.String "catalog-overlay-batch"
+                                       "limitations", JsonValue.Array [| JsonValue.String "global_and_localisation_checks_omitted" |]
                                        "truncated", JsonValue.Boolean(fileValues.Length > maxFiles)
                                        "files", JsonValue.Array fileResults |])
 

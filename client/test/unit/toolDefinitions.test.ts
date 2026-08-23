@@ -135,6 +135,42 @@ describe('tool definitions', () => {
         expect(properties?.operation).to.exist;
     });
 
+    it('exposes bounded discriminated typed PDX and archetype schemas', () => {
+        const typed = TOOL_DEFINITIONS.find(def => def.function.name === 'typed_pdx_write');
+        const parameters = typed!.function.parameters as { additionalProperties?: boolean; properties: Record<string, any> };
+        expect(parameters.additionalProperties).to.equal(false);
+        expect(parameters.properties.expectedHash.pattern).to.equal('^[a-fA-F0-9]{64}$');
+        const branches = parameters.properties.operation.oneOf as Array<{ properties: Record<string, any>; required: string[]; additionalProperties: boolean }>;
+        expect(branches).to.have.length(14);
+        expect(branches.every(branch => branch.additionalProperties === false)).to.equal(true);
+        expect(branches.map(branch => branch.properties.operation.const)).to.have.members([
+            'clone_definition', 'add_event_call', 'add_event_option', 'append_trigger_condition',
+            'instantiate_inline_script', 'set_definition_field', 'delete_definition_field',
+            'add_definition_field', 'add_scripted_effect_call', 'add_scripted_trigger_call',
+            'add_on_action_entry', 'bind_event_target', 'clear_event_target', 'add_variable_transition',
+        ]);
+        const setField = branches.find(branch => branch.properties.operation.const === 'set_definition_field')!;
+        expect(setField.required).to.include.members(['target', 'path', 'value']);
+        expect(setField.properties.path.maxItems).to.equal(8);
+        expect(setField.properties.value.oneOf).to.have.length(6);
+
+        const instantiate = TOOL_DEFINITIONS.find(def => def.function.name === 'instantiate_archetype')!;
+        const values = (instantiate.function.parameters as any).properties.values;
+        expect(values.maxProperties).to.equal(64);
+        expect(values.additionalProperties.oneOf).to.have.length(4);
+        expect(values.additionalProperties.oneOf.every((branch: any) => branch.additionalProperties === false)).to.equal(true);
+    });
+
+    it('keeps scope schemas aligned with runtime integer positions and host-owned bridge evidence', () => {
+        const query = TOOL_DEFINITIONS.find(def => def.function.name === 'query_scope')!.function.parameters as any;
+        expect(query.additionalProperties).to.equal(false);
+        expect(query.properties.line).to.include({ type: 'integer', minimum: 0 });
+        expect(query.properties.column).to.include({ type: 'integer', minimum: 0 });
+        const bridge = TOOL_DEFINITIONS.find(def => def.function.name === 'find_scope_bridge')!.function.parameters as any;
+        expect(Object.keys(bridge.properties)).to.have.members(['fromScope', 'toScope', 'context']);
+        expect(bridge.additionalProperties).to.equal(false);
+    });
+
     it('registers edit_file as a first-class per-file write tool', () => {
         const tool = TOOL_DEFINITIONS.find(def => def.function.name === 'edit_file');
         expect(tool).to.not.equal(undefined);

@@ -102,7 +102,12 @@ suite(`Debug Integration Test: `, function() {
 				await wait(500);
 			}
 			assert.ok(response, 'validateOverlay should return a response');
+			assert.strictEqual(response.ok, true);
+			assert.strictEqual(response.validationLevel, 'catalog-single-file');
 			assert.strictEqual(response.files.length, 1);
+			assert.strictEqual(response.files[0].ok, true);
+			assert.ok(Array.isArray(response.files[0].diagnostics));
+			assert.ok(!response.files[0].diagnostics.some((item: any) => item.severity === 'error'));
 			assert.match(response.files[0].contentHash, /^[a-f0-9]{64}$/);
 			try { await vscode.workspace.fs.stat(uri); assert.fail('Detached validation must not create the candidate file'); }
 			catch (error) { assert.ok(error instanceof vscode.FileSystemError); }

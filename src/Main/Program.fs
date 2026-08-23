@@ -11720,7 +11720,10 @@ type Server(client: ILanguageClient) =
                                                                 |> Option.orElseWith (fun () -> try Some(File.ReadAllText filePath) with _ -> None)
                                                             let baseMatches =
                                                                 match baseHash, actualBaseText with
-                                                                | Some expected, Some actual -> String.Equals(expected, sha256Text actual, StringComparison.OrdinalIgnoreCase)
+                                                                | Some expected, Some actual ->
+                                                                    let normalizedActual = if actual.Length > 0 && actual.[0] = '\uFEFF' then actual.Substring(1) else actual
+                                                                    String.Equals(expected, sha256Text actual, StringComparison.OrdinalIgnoreCase)
+                                                                    || String.Equals(expected, sha256Text (string '\uFEFF' + normalizedActual), StringComparison.OrdinalIgnoreCase)
                                                                 | Some _, None -> false
                                                                 | None, _ -> true
                                                             if baseHashFieldPresent && baseHash.IsNone then

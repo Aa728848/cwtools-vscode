@@ -100,7 +100,8 @@ export class CandidateTransactionManager {
         if (!previous && this.filesByPath.size >= this.maxFiles) throw new Error('Transaction file limit exceeded');
         if (nextBytes > this.maxBytes) throw new Error('Transaction byte limit exceeded');
         if (baseHash !== undefined && !/^[a-f0-9]{64}$/i.test(baseHash)) throw new Error('baseHash must be a SHA-256 hex digest');
-        const entry: CandidateFile = Object.freeze({ path: filePath, content, contentHash: sha256(content), bytes, baseHash });
+        const stableBaseHash = previous?.baseHash ?? baseHash;
+        const entry: CandidateFile = Object.freeze({ path: filePath, content, contentHash: sha256(content), bytes, baseHash: stableBaseHash });
         this.filesByPath.set(filePath, entry);
         this.stagedBytes = nextBytes;
         return entry;

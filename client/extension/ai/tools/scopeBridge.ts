@@ -58,6 +58,7 @@ const MAX_RETURNED_PATHS = 200;
  * order and spelling case.
  */
 export function solveScopeBridge(input: ScopeBridgeInput): ScopeBridgeResult {
+    if (!input || typeof input !== 'object' || !Array.isArray(input.candidates) || input.candidates.length > MAX_SCOPE_BRIDGE_CANDIDATES) return emptyResult();
     const fromScopes = parseScopes(input.fromScope);
     const toScopes = parseScopes(input.toScope);
     if (fromScopes.length === 0 || toScopes.length === 0 || !Array.isArray(input.candidates)) {

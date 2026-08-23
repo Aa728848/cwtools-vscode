@@ -18,7 +18,7 @@
         "rules:stellaris:contracts": "node tools/rules-sync/stellaris-rules-sync.js contracts",
         "test": "npm run compile && tsc -p ./.config/tsconfig.test-build.json && node tools/copy-test-fixtures.js && vscode-test --config ./.config/vscode-test.js",
         "test:shader-lsp": "npm run compile && tsc -p ./.config/tsconfig.shader-test.json && vscode-test --config ./.config/vscode-test.shader.js",
-        "test:overlay-e2e": "npm run compile && tsc -p ./.config/tsconfig.test-build.json && node tools/copy-test-fixtures.js && dotnet publish src/Main/Main.fsproj --configuration Release --runtime win-x64 --self-contained true -p:PublishReadyToRun=false -p:UseLocalCwtools=false --output release/bin/server/win-x64 && vscode-test --config ./.config/vscode-test.overlay-e2e.js",
+        "test:overlay-e2e": "node tools/run-overlay-e2e.cjs",
         "test:watch": "tsc -w -p . & vscode-test --config ./.config/vscode-test.js -w",
         "test:unit": "npx ts-mocha -p tsconfig.json \"client/test/unit/**/*.test.ts\" && npm run test:rules-sync",
         "test:rules-sync": "ts-mocha -p tools/rules-sync/tsconfig.test.json \"tools/rules-sync/**/*.test.ts\"",

@@ -29,14 +29,14 @@ const BUILD_STAGE_TOOLS: Partial<Record<AgentToolStage, ReadonlySet<string>>> = 
     write: new Set([
         'query_rules', 'query_scope', 'parse_pdx_fragment', 'verify_pdx_identifier', 'find_scope_bridge',
         'get_diagnostics', 'read_file', 'get_file_context', 'get_pdx_block',
-        'write_file', 'edit_file', 'replace_lines', 'typed_pdx_write', 'extract_archetype_slots', 'instantiate_archetype', 'candidate_transaction',
+        'write_file', 'edit_file', 'replace_lines', 'extract_archetype_slots', 'instantiate_archetype', 'candidate_transaction',
         'rename_symbol',
         'write_localisation', 'todo_write', 'run_code',
     ]),
     finalize: new Set([
         'get_diagnostics', 'analyze_diagnostic_error', 'query_references',
         'verify_pdx_identifier', 'read_file', 'get_file_context', 'get_pdx_block', 'find_scope_bridge',
-        'write_file', 'edit_file', 'replace_lines', 'typed_pdx_write', 'extract_archetype_slots', 'instantiate_archetype', 'candidate_transaction', 'todo_write', 'run_code',
+        'write_file', 'edit_file', 'replace_lines', 'extract_archetype_slots', 'instantiate_archetype', 'candidate_transaction', 'todo_write', 'run_code',
     ]),
 };
 
@@ -170,7 +170,7 @@ const CROSS_STAGE_SUPPORT_TOOLS = new Set([
     'mcp_call',
 ]);
 const BUILD_WRITE_ON_DEMAND_TOOLS = new Set([
-    'convert_image_to_dds', 'convert_audio', 'deploy_mod_asset',
+    'convert_image_to_dds', 'convert_audio', 'deploy_mod_asset', 'typed_pdx_write',
 ]);
 
 export function isSelectableStageSupportTool(

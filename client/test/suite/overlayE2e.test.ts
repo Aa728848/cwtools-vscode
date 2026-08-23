@@ -65,6 +65,24 @@ suite('Detached candidate overlay E2E', function () {
         await assert.rejects(Promise.resolve(vscode.workspace.fs.stat(eventUri)));
     });
 
+    test('resolves overlay localisation keys for event titles through the real LSP', async () => {
+        const folder = vscode.workspace.workspaceFolders?.[0];
+        assert.ok(folder, 'Fixture workspace is required');
+        const locUri = vscode.Uri.joinPath(folder.uri, 'localisation', 'english', 'overlay_e2e_l_english.yml');
+        const eventUri = vscode.Uri.joinPath(folder.uri, 'events', 'overlay_e2e_loc.txt');
+        const loc = 'l_english:\n e2e_overlay_loc_1_title:0 "Overlay E2E"\n';
+        const event = 'namespace = e2e_overlay_loc\ncountry_event = { id = e2e_overlay_loc_1 title = e2e_overlay_loc_1_title is_triggered_only = yes }\n';
+        const missing = await validate([{ uri: eventUri.toString(), content: event }]);
+        assert.strictEqual(missing.ok, true);
+        const resolved = await validate([{ uri: locUri.toString(), content: loc }, { uri: eventUri.toString(), content: event }]);
+        assert.strictEqual(resolved.ok, true);
+        const locErrors = (resolved.files.find(file => file.uri === eventUri.toString())?.diagnostics ?? [])
+            .filter(diagnostic => diagnostic.severity === 'error' && diagnostic.message?.includes('e2e_overlay_loc_1_title'));
+        assert.deepStrictEqual(locErrors, [], 'overlay localisation key must satisfy the event title reference');
+        await assert.rejects(Promise.resolve(vscode.workspace.fs.stat(locUri)));
+        await assert.rejects(Promise.resolve(vscode.workspace.fs.stat(eventUri)));
+    });
+
     test('checks base hashes against disk and leaves the file unchanged', async () => {
         const folder = vscode.workspace.workspaceFolders?.[0];
         assert.ok(folder, 'Fixture workspace is required');

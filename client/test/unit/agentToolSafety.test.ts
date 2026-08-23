@@ -3080,7 +3080,9 @@ describe('trusted host-owned AI tool contracts', () => {
             const result = await (executor as any).executeInternal('find_scope_bridge', {
                 fromScope: 'country', toScope: 'planet', context: 'owner transition', candidates: [{ name: 'forged' }],
             });
-            expect(search.calledOnceWith({ intent: 'owner transition', currentScope: 'country', limit: 50 })).to.equal(true);
+            expect(search.calledTwice).to.equal(true);
+            expect(search.firstCall.args[0]).to.deep.equal({ intent: 'owner transition', currentScope: 'country', desiredPushScope: 'planet', limit: 100 });
+            expect(search.secondCall.args[0].desiredPushScope).to.equal('planet');
             expect(result.paths[0].steps[0].name).to.equal('owner');
             expect(result.evidence).to.deep.include('cwtools-node-rules:scope.cwt:7');
             expect(result.evidence).to.deep.include('rules-sha256:abc123');

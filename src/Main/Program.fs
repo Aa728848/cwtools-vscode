@@ -11750,6 +11750,16 @@ type Server(client: ILanguageClient) =
                                                                     [| "ok", JsonValue.Boolean false
                                                                        "uri", JsonValue.String uriText
                                                                        "status", JsonValue.String "base_hash_mismatch" |]
+                                                            elif filePath.EndsWith(".yml", StringComparison.OrdinalIgnoreCase) || filePath.EndsWith(".yaml", StringComparison.OrdinalIgnoreCase) then
+                                                                // Localisation files use the dedicated YML resource path inside
+                                                                // the detached batch; CKParser does not apply to them.
+                                                                pendingBatch.[index] <- struct (filePath, uriText, content)
+                                                                JsonValue.Record
+                                                                    [| "ok", JsonValue.Boolean true
+                                                                       "uri", JsonValue.String uriText
+                                                                       "validationLevel", JsonValue.String "catalog-overlay-batch"
+                                                                       "contentHash", JsonValue.String(sha256Text content)
+                                                                       "diagnostics", JsonValue.Array [||] |]
                                                             else
                                                                 match CKParser.parseString content filePath with
                                                                 | Failure(message, position, _) ->
@@ -11804,7 +11814,7 @@ type Server(client: ILanguageClient) =
                                 JsonValue.Record
                                     [| "ok", JsonValue.Boolean allAccepted
                                        "validationLevel", JsonValue.String "catalog-overlay-batch"
-                                       "limitations", JsonValue.Array [| JsonValue.String "global_and_localisation_checks_omitted" |]
+                                       "limitations", JsonValue.Array [| JsonValue.String "localisation_syntax_and_duplicate_key_checks_omitted" |]
                                        "truncated", JsonValue.Boolean(fileValues.Length > maxFiles)
                                        "files", JsonValue.Array fileResults |])
 

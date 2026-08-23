@@ -519,7 +519,7 @@ describe('runnerPolicy', () => {
         // A write-authorized continuation starts at discovery; after select_tools
         // loads edit_file, the visible pool must include it even though the
         // discovery stage pool does not.
-        const buildTools = filterToolDefinitionsForMode(registeredTools, 'build', { domain: 'general' });
+        const buildTools = filterToolDefinitionsForMode(registeredTools, 'build', { domain: 'hybrid' });
         const discoveryBase = filterToolDefinitionsForStage(buildTools, 'build', 'discovery');
         expect(discoveryBase.map(tool => tool.function.name)).to.not.include('edit_file');
 
@@ -528,6 +528,11 @@ describe('runnerPolicy', () => {
             .map(tool => tool.function.name);
         expect(visible).to.include('edit_file');
         expect(visible).to.include('replace_lines');
+        const writeBase = filterToolDefinitionsForStage(buildTools, 'build', 'write');
+        expect(writeBase.map(tool => tool.function.name)).to.not.include('typed_pdx_write');
+        const typedVisible = extendStageToolPoolWithSupport(writeBase, buildTools, 'build', 'write', new Set(['typed_pdx_write']))
+            .map(tool => tool.function.name);
+        expect(typedVisible).to.include('typed_pdx_write');
     });
 
     it('detects truncation-induced stops without flagging ordinary prose or questions', () => {

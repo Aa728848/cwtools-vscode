@@ -99,9 +99,13 @@ jobs:
             (cd "$(dirname "$f")" && dotnet fsi "$(basename "$f")");
           done
 
-  windows:
-    name: Windows typecheck
-    runs-on: windows-latest
+  platform-overlay-e2e:
+    name: Overlay E2E (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
@@ -111,11 +115,16 @@ jobs:
         with:
           node-version: 22
           cache: npm
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
       - run: npm ci
       - run: npm run compile
       - run: npm run typecheck:test
       - name: Run detached overlay Extension Host E2E
         run: npm run test:overlay-e2e
+        env:
+          GSETTINGS_BACKEND: memory
 
   mcp:
     name: MCP contracts

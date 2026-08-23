@@ -9,7 +9,7 @@ export type AgentToolName =
     | 'get_file_context' | 'search_mod_files' | 'find_sprite_candidates' | 'find_sound_candidates'
     | 'grep' | 'get_completion_at' | 'document_symbols' | 'workspace_symbols'
     | 'go_to_definition' | 'find_references' | 'hover_symbol' | 'rename_symbol'
-    | 'verify_pdx_identifier' | 'todo_write' | 'read_file' | 'write_file' | 'edit_file'
+    | 'verify_pdx_identifier' | 'solve_scope_bridge' | 'extract_archetype_slots' | 'instantiate_archetype' | 'todo_write' | 'read_file' | 'write_file' | 'edit_file'
     | 'replace_lines' | 'typed_pdx_write' | 'candidate_transaction' | 'list_directory' | 'get_lsp_status' | 'get_diagnostics' | 'analyze_diagnostic_error'
     | 'glob_files' | 'lsp_operation' | 'web_search' | 'web_open' | 'web_find' | 'run_command' | 'list_processes' | 'read_process' | 'write_process_stdin' | 'terminate_process'
     | 'query_definition' | 'query_definition_by_name' | 'query_scripted_effects'
@@ -119,6 +119,9 @@ const TOOL_DOMAINS = {
     hover_symbol: 'shared',
     rename_symbol: 'shared',
     verify_pdx_identifier: 'paradox',
+    solve_scope_bridge: 'paradox',
+    extract_archetype_slots: 'paradox',
+    instantiate_archetype: 'paradox',
     todo_write: 'shared',
     read_file: 'shared',
     write_file: 'shared',

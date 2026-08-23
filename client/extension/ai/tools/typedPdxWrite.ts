@@ -12,12 +12,31 @@ export interface PdxEntry {
     value: PdxValue;
 }
 
+export interface PdxPathSegment {
+    key: string;
+    occurrence: number;
+}
+
+export type CloneDefinitionOverride =
+    | { action: 'set'; path: PdxPathSegment[]; value: PdxValue }
+    | { action: 'delete'; path: PdxPathSegment[] }
+    | { action: 'append'; path: PdxPathSegment[]; entry: PdxEntry };
+
 export type TypedPdxOperation =
-    | { operation: 'clone_definition'; source: string; newSymbol: string }
+    | { operation: 'clone_definition'; source: string; newSymbol: string; overrides?: CloneDefinitionOverride[] }
     | { operation: 'add_event_call'; target: string; callType: string; eventId: string; containerPath?: string[]; days?: number }
     | { operation: 'add_event_option'; target: string; name: string; fields?: PdxEntry[] }
     | { operation: 'append_trigger_condition'; target: string; condition: PdxEntry; containerPath?: string[] }
-    | { operation: 'instantiate_inline_script'; target: string; script: string; arguments?: PdxEntry[]; containerPath?: string[] };
+    | { operation: 'instantiate_inline_script'; target: string; script: string; arguments?: PdxEntry[]; containerPath?: string[] }
+    | { operation: 'set_definition_field'; target: string; path: PdxPathSegment[]; value: PdxValue }
+    | { operation: 'delete_definition_field'; target: string; path: PdxPathSegment[] }
+    | { operation: 'add_definition_field'; target: string; path: PdxPathSegment[]; entry: PdxEntry }
+    | { operation: 'add_scripted_effect_call'; target: string; script: string; arguments?: PdxEntry[]; containerPath?: string[] }
+    | { operation: 'add_scripted_trigger_call'; target: string; script: string; arguments?: PdxEntry[]; containerPath?: string[] }
+    | { operation: 'add_on_action_entry'; target: string; entry: PdxEntry }
+    | { operation: 'bind_event_target'; target: string; eventTarget: string; containerPath?: string[] }
+    | { operation: 'clear_event_target'; target: string; eventTarget: string; containerPath?: string[] }
+    | { operation: 'add_variable_transition'; target: string; transition: 'set_variable' | 'change_variable' | 'multiply_variable' | 'divide_variable'; variable: string; value: PdxValue; containerPath?: string[] };
 
 export interface BuildTypedPdxArgs {
     filePath: string;
@@ -41,6 +60,7 @@ const MAX_DEPTH = 8;
 const MAX_NODES = 256;
 const MAX_TEXT = 4096;
 const MAX_FILE_CHARS = 2_000_000;
+const MAX_OVERRIDES = 64;
 const IDENTIFIER = /^[A-Za-z_][A-Za-z0-9_.:@-]*$/;
 const INLINE_SCRIPT = /^[A-Za-z0-9_.:@/-]+$/;
 
@@ -80,7 +100,7 @@ function validateValue(value: unknown, depth = 0, state = { nodes: 0 }): asserts
             return;
         case 'string':
             assertOnlyKeys(record, ['kind', 'value'], 'string value');
-            if (typeof record.value !== 'string' || record.value.length > MAX_TEXT) fail('invalid string value');
+            if (typeof record.value !== 'string' || record.value.length > MAX_TEXT || [...record.value].some(char => char.charCodeAt(0) < 32 || char.charCodeAt(0) === 127)) fail('invalid string value');
             return;
         case 'number':
             assertOnlyKeys(record, ['kind', 'value'], 'number value');
@@ -127,7 +147,7 @@ function renderValue(value: PdxValue, indent: string, newline: string, depth = 0
         case 'string': return quote(value.value);
         case 'number': return String(value.value);
         case 'boolean': return value.value ? 'yes' : 'no';
-        case 'list': return value.values.map(item => renderValue(item, indent, newline, depth + 1)).join(' ');
+        case 'list': return `{ ${value.values.map(item => renderValue(item, indent, newline, depth + 1)).join(' ')} }`;
         case 'block': {
             if (value.entries.length === 0) return '{}';
             const childIndent = indent + '\t';
@@ -221,7 +241,15 @@ function scanBlocks(text: string, start = 0, end = text.length, depth = 0, state
         i = skipTrivia(text, key.end);
         if (text[i] !== '=') { i = key.end; continue; }
         i = skipTrivia(text, i + 1);
-        if (text[i] !== '{') { while (i < end && text[i] !== '\n') i++; continue; }
+        if (text[i] !== '{') {
+            if (text[i] === '"') {
+                i++;
+                while (i < end) { if (text[i] === '\\') i += 2; else if (text[i++] === '"') break; }
+            } else {
+                while (i < end && !/\s|#|[{}]/.test(text[i]!)) i++;
+            }
+            continue;
+        }
         const open = i;
         const close = findMatchingBrace(text, open);
         const lineStart = text.lastIndexOf('\n', keyStart - 1) + 1;
@@ -243,6 +271,156 @@ function scanBlocks(text: string, start = 0, end = text.length, depth = 0, state
     return blocks;
 }
 
+interface EntrySpan {
+    key: string;
+    start: number;
+    keyEnd: number;
+    valueStart: number;
+    valueEnd: number;
+    end: number;
+    block?: BlockSpan;
+}
+
+function scanEntries(text: string, block: BlockSpan): EntrySpan[] {
+    const entries: EntrySpan[] = [];
+    let i = block.open + 1;
+    while (i < block.close) {
+        i = skipTrivia(text, i);
+        if (i >= block.close) break;
+        const key = readIdentifier(text, i);
+        if (!key) { i++; continue; }
+        const start = i;
+        i = skipTrivia(text, key.end);
+        if (text[i] !== '=') { i = key.end; continue; }
+        const valueStart = skipTrivia(text, i + 1);
+        let valueEnd = valueStart;
+        let child: BlockSpan | undefined;
+        if (text[valueStart] === '{') {
+            valueEnd = findMatchingBrace(text, valueStart) + 1;
+            child = block.children.find(candidate => candidate.open === valueStart);
+        } else if (text[valueStart] === '"') {
+            valueEnd++;
+            while (valueEnd < block.close) {
+                if (text[valueEnd] === '\\') valueEnd += 2;
+                else if (text[valueEnd++] === '"') break;
+            }
+        } else {
+            while (valueEnd < block.close && !/\s|#|[{}]/.test(text[valueEnd]!)) valueEnd++;
+        }
+        entries.push({ key: key.value, start, keyEnd: key.end, valueStart, valueEnd, end: valueEnd, block: child });
+        i = valueEnd;
+    }
+    return entries;
+}
+
+function validatePath(path: unknown, label: string): asserts path is PdxPathSegment[] {
+    if (!Array.isArray(path)) fail(`${label} path must be an array`);
+    if (path.length > MAX_DEPTH) fail(`${label} path exceeds safety limit`);
+    for (const segment of path) {
+        if (!segment || typeof segment !== 'object' || Array.isArray(segment)) fail(`${label} path segment must be an object`);
+        const record = segment as Record<string, unknown>;
+        assertOnlyKeys(record, ['key', 'occurrence'], `${label} path segment`);
+        if (typeof record.key !== 'string') fail(`${label} path key must be a string`);
+        assertIdentifier(record.key, `${label} path key`);
+        if (!Number.isSafeInteger(record.occurrence) || (record.occurrence as number) < 1) fail(`${label} occurrence must be a positive integer`);
+    }
+}
+
+function selectEntry(text: string, block: BlockSpan, segment: PdxPathSegment, label: string): EntrySpan {
+    const matches = scanEntries(text, block).filter(entry => entry.key === segment.key);
+    const selected = matches[segment.occurrence - 1];
+    if (!selected) fail(`${label} not found: ${segment.key}[${segment.occurrence}]`);
+    return selected;
+}
+
+function resolveOverridePath(text: string, root: BlockSpan, path: PdxPathSegment[], label: string): { parent: BlockSpan; entry: EntrySpan } {
+    if (path.length === 0) fail(`${label} path must not be empty`);
+    let parent = root;
+    for (let index = 0; index < path.length - 1; index++) {
+        const entry = selectEntry(text, parent, path[index]!, label);
+        if (!entry.block) fail(`${label} path traverses a scalar: ${entry.key}`);
+        parent = entry.block;
+    }
+    return { parent, entry: selectEntry(text, parent, path[path.length - 1]!, label) };
+}
+
+function indentationFor(text: string, block: BlockSpan): string {
+    const first = scanEntries(text, block)[0];
+    if (first) {
+        const lineStart = text.lastIndexOf('\n', first.start - 1) + 1;
+        const indent = /^[ \t]*/.exec(text.slice(lineStart, first.start))?.[0];
+        if (indent !== undefined && indent.length > block.indent.length) return indent;
+    }
+    const unit = block.indent.endsWith('\t') || /(?:^|\n)\t+\S/.test(text) ? '\t'
+        : (/ +$/.exec(block.indent)?.[0] ?? /^( +)\S/m.exec(text.slice(block.open + 1, block.close))?.[1] ?? '    ');
+    return block.indent + unit;
+}
+
+function appendOverrideEntry(text: string, block: BlockSpan, entry: PdxEntry, newline: string): string {
+    validateEntries([entry]);
+    const indent = indentationFor(text, block);
+    const rendered = `${indent}${entry.key} = ${renderValue(entry.value, indent, newline)}`;
+    const closeLineStart = text.lastIndexOf('\n', block.close - 1) + 1;
+    const closePrefix = text.slice(closeLineStart, block.close);
+    if (/^[ \t]*$/.test(closePrefix)) {
+        return text.slice(0, closeLineStart) + rendered + newline + closePrefix + text.slice(block.close);
+    }
+    let insertion = block.close;
+    while (insertion > block.open + 1 && (text[insertion - 1] === ' ' || text[insertion - 1] === '\t')) insertion--;
+    return text.slice(0, insertion) + newline + rendered + newline + block.indent + text.slice(block.close);
+}
+
+function validateOverride(value: unknown): asserts value is CloneDefinitionOverride {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) fail('clone override must be an object');
+    const record = value as Record<string, unknown>;
+    if (record.action === 'set') {
+        assertOnlyKeys(record, ['action', 'path', 'value'], 'set override');
+        validatePath(record.path, 'set override');
+        validateValue(record.value);
+    } else if (record.action === 'delete') {
+        assertOnlyKeys(record, ['action', 'path'], 'delete override');
+        validatePath(record.path, 'delete override');
+    } else if (record.action === 'append') {
+        assertOnlyKeys(record, ['action', 'path', 'entry'], 'append override');
+        validatePath(record.path, 'append override');
+        validateEntries([record.entry]);
+    } else {
+        fail('unsupported clone override action; raw code is forbidden');
+    }
+}
+
+function applyCloneOverride(text: string, root: BlockSpan, override: CloneDefinitionOverride, newline: string): string {
+    validateOverride(override);
+    if (override.action === 'append') {
+        let container = root;
+        for (const segment of override.path) {
+            const selected = selectEntry(text, container, segment, 'append override');
+            if (!selected.block) fail(`append override path traverses a scalar: ${selected.key}`);
+            container = selected.block;
+        }
+        if (container === root && override.entry.key === 'id') fail('clone override cannot append top-level identity');
+        return appendOverrideEntry(text, container, override.entry, newline);
+    }
+    const resolved = resolveOverridePath(text, root, override.path, `${override.action} override`);
+    if (resolved.parent === root && resolved.entry.key === 'id') fail('clone override cannot modify top-level identity');
+    if (override.action === 'set') {
+        const linePrefix = text.slice(text.lastIndexOf('\n', resolved.entry.start - 1) + 1, resolved.entry.start);
+        const indent = /^[ \t]*$/.test(linePrefix) ? linePrefix : resolved.parent.indent + (indentationFor(text, resolved.parent).slice(resolved.parent.indent.length) || '    ');
+        const rendered = renderValue(override.value, indent, newline);
+        return text.slice(0, resolved.entry.valueStart) + rendered + text.slice(resolved.entry.valueEnd);
+    }
+    let deleteStart = resolved.entry.start;
+    let deleteEnd = resolved.entry.end;
+    const lineStart = text.lastIndexOf('\n', deleteStart - 1) + 1;
+    const lineEnd = text.indexOf('\n', deleteEnd);
+    const trailing = text.slice(deleteEnd, lineEnd < 0 ? text.length : lineEnd).replace(/\r$/, '');
+    if (/^[ \t]*$/.test(text.slice(lineStart, deleteStart)) && /^[ \t]*(?:#[^\r\n]*)?$/.test(trailing)) {
+        deleteStart = lineStart;
+        deleteEnd = lineEnd < 0 ? text.length : lineEnd + 1;
+    }
+    return text.slice(0, deleteStart) + text.slice(deleteEnd);
+}
+
 function findUnique(blocks: readonly BlockSpan[], symbol: string, label: string): BlockSpan {
     assertIdentifier(symbol, label);
     const matches = blocks.filter(block => block.symbol === symbol || block.key === symbol);
@@ -252,18 +430,24 @@ function findUnique(blocks: readonly BlockSpan[], symbol: string, label: string)
 }
 
 function findContainer(root: BlockSpan, path: readonly string[] | undefined): BlockSpan {
+    if (path !== undefined && !Array.isArray(path)) fail('containerPath must be an array');
+    if ((path?.length ?? 0) > MAX_DEPTH) fail('containerPath exceeds safety limit');
     let current = root;
-    for (const segment of path ?? []) current = findUnique(current.children, segment, 'container');
+    for (const segment of path ?? []) {
+        if (typeof segment !== 'string') fail('containerPath segment must be a string');
+        current = findUnique(current.children, segment, 'container');
+    }
     return current;
 }
 
+function scriptedCallEntry(script: string, argumentsList: PdxEntry[]): PdxEntry {
+    assertIdentifier(script, 'script');
+    validateEntries(argumentsList);
+    return { key: script, value: { kind: 'block', entries: argumentsList } };
+}
+
 function appendEntry(text: string, block: BlockSpan, entry: PdxEntry, newline: string): string {
-    validateEntries([entry]);
-    const indent = block.indent + '\t';
-    const rendered = `${indent}${entry.key} = ${renderValue(entry.value, indent, newline)}`;
-    const beforeClose = text.slice(0, block.close);
-    const needsLeadingNewline = !beforeClose.endsWith('\n') && !beforeClose.endsWith('\r');
-    return beforeClose + (needsLeadingNewline ? newline : '') + rendered + newline + block.indent + text.slice(block.close);
+    return appendOverrideEntry(text, block, entry, newline);
 }
 
 function sha256(text: string): string {
@@ -293,24 +477,41 @@ export async function buildTypedPdxCandidate(
     let summary: string;
 
     if (operation.operation === 'clone_definition') {
-        assertOnlyKeys(operation as unknown as Record<string, unknown>, ['operation', 'source', 'newSymbol'], 'clone_definition');
+        assertOnlyKeys(operation as unknown as Record<string, unknown>, ['operation', 'source', 'newSymbol', 'overrides'], 'clone_definition');
         target = findUnique(blocks, operation.source, 'source');
         assertIdentifier(operation.newSymbol, 'newSymbol');
         if (blocks.some(block => block.symbol === operation.newSymbol || block.key === operation.newSymbol)) fail(`duplicate target: ${operation.newSymbol}`);
-        const sourceText = text.slice(target.start, target.end);
-        const sourceNameLength = readIdentifier(sourceText, 0)?.value.length ?? 0;
-        let clone: string;
-        if (target.symbol !== target.key) {
-            const escaped = operation.source.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-            const idPattern = new RegExp(`(\\bid\\s*=\\s*(?:"))${escaped}(")|(\\bid\\s*=\\s*)${escaped}(?=\\s|#|$)`);
-            clone = sourceText.replace(idPattern, (_match, quotedPrefix: string | undefined, quotedSuffix: string | undefined, plainPrefix: string | undefined) =>
-                quotedPrefix ? `${quotedPrefix}${operation.newSymbol}${quotedSuffix}` : `${plainPrefix}${operation.newSymbol}`);
-            if (clone === sourceText) fail(`could not rewrite id field for ${operation.source}`);
+        const overrides = operation.overrides ?? [];
+        if (!Array.isArray(overrides)) fail('clone_definition overrides must be an array');
+        if (overrides.length > MAX_OVERRIDES) fail(`clone_definition supports at most ${MAX_OVERRIDES} overrides`);
+        for (const override of overrides) validateOverride(override);
+        let clone = text.slice(target.start, target.end);
+        let cloneRoot = scanBlocks(clone)[0];
+        if (!cloneRoot) fail('could not scan cloned definition');
+        if (target.symbol !== target.key && operation.source === target.symbol) {
+            const identity = scanEntries(clone, cloneRoot).find(entry => entry.key === 'id');
+            if (!identity) fail(`could not rewrite id field for ${operation.source}`);
+            const current = clone.slice(identity.valueStart, identity.valueEnd);
+            const expected = current.startsWith('"') ? quote(operation.source) : operation.source;
+            if (current !== expected) fail(`could not rewrite id field for ${operation.source}`);
+            const replacement = current.startsWith('"') ? quote(operation.newSymbol) : operation.newSymbol;
+            clone = clone.slice(0, identity.valueStart) + replacement + clone.slice(identity.valueEnd);
         } else {
-            clone = operation.newSymbol + sourceText.slice(sourceNameLength);
+            const sourceName = readIdentifier(clone, 0);
+            if (!sourceName || sourceName.value !== operation.source) fail('could not rewrite definition key');
+            clone = operation.newSymbol + clone.slice(sourceName.end);
         }
-        const separator = text.slice(0, target.end).endsWith(newline) ? '' : newline;
-        content = text.slice(0, target.end) + separator + clone + text.slice(target.end);
+        for (const override of overrides) {
+            cloneRoot = scanBlocks(clone)[0];
+            if (!cloneRoot) fail('could not rescan cloned definition');
+            clone = applyCloneOverride(clone, cloneRoot, override, newline);
+        }
+        const tail = /^[ \t]*(?:#[^\r\n]*)?(?:\r?\n|$)/.exec(text.slice(target.end))?.[0] ?? '';
+        const insertion = target.end + tail.length;
+        const separator = insertion > 0 && (text[insertion - 1] === '\n' || text[insertion - 1] === '\r') ? '' : newline;
+        const suffix = text.slice(insertion);
+        const trailingSeparator = suffix.length > 0 || text.endsWith(newline) ? newline : '';
+        content = text.slice(0, insertion) + separator + clone + trailingSeparator + suffix;
         summary = `cloned ${operation.source} as ${operation.newSymbol}`;
     } else {
         target = findUnique(blocks, operation.target, 'target');
@@ -343,7 +544,7 @@ export async function buildTypedPdxCandidate(
             const path = operation.containerPath ?? ['trigger'];
             content = appendEntry(text, findContainer(target, path), operation.condition, newline);
             summary = `appended trigger condition ${operation.condition.key}`;
-        } else {
+        } else if (operation.operation === 'instantiate_inline_script') {
             assertOnlyKeys(operation as unknown as Record<string, unknown>, ['operation', 'target', 'script', 'arguments', 'containerPath'], 'instantiate_inline_script');
             if (!INLINE_SCRIPT.test(operation.script)) fail('inline script must be a safe project-relative identifier');
             const argumentsList = operation.arguments ?? [];
@@ -356,6 +557,59 @@ export async function buildTypedPdxCandidate(
                 ] },
             }, newline);
             summary = `instantiated inline script ${operation.script}`;
+        } else if (operation.operation === 'set_definition_field') {
+            assertOnlyKeys(operation as unknown as Record<string, unknown>, ['operation', 'target', 'path', 'value'], 'set_definition_field');
+            validatePath(operation.path, 'set_definition_field');
+            validateValue(operation.value);
+            content = applyCloneOverride(text, target, { action: 'set', path: operation.path, value: operation.value }, newline);
+            summary = `set field on ${operation.target}`;
+        } else if (operation.operation === 'delete_definition_field') {
+            assertOnlyKeys(operation as unknown as Record<string, unknown>, ['operation', 'target', 'path'], 'delete_definition_field');
+            validatePath(operation.path, 'delete_definition_field');
+            content = applyCloneOverride(text, target, { action: 'delete', path: operation.path }, newline);
+            summary = `deleted field from ${operation.target}`;
+        } else if (operation.operation === 'add_definition_field') {
+            assertOnlyKeys(operation as unknown as Record<string, unknown>, ['operation', 'target', 'path', 'entry'], 'add_definition_field');
+            validatePath(operation.path, 'add_definition_field');
+            validateEntries([operation.entry]);
+            content = applyCloneOverride(text, target, { action: 'append', path: operation.path, entry: operation.entry }, newline);
+            summary = `added field ${operation.entry.key} to ${operation.target}`;
+        } else if (operation.operation === 'add_scripted_effect_call' || operation.operation === 'add_scripted_trigger_call') {
+            const label = operation.operation;
+            assertOnlyKeys(operation as unknown as Record<string, unknown>, ['operation', 'target', 'script', 'arguments', 'containerPath'], label);
+            const argumentsList = operation.arguments ?? [];
+            content = appendEntry(text, findContainer(target, operation.containerPath), scriptedCallEntry(operation.script, argumentsList), newline);
+            summary = `added ${label === 'add_scripted_effect_call' ? 'scripted effect' : 'scripted trigger'} call ${operation.script}`;
+        } else if (operation.operation === 'add_on_action_entry') {
+            assertOnlyKeys(operation as unknown as Record<string, unknown>, ['operation', 'target', 'entry'], 'add_on_action_entry');
+            validateEntries([operation.entry]);
+            if (operation.entry.key === 'id') fail('add_on_action_entry cannot append identity');
+            content = appendEntry(text, target, operation.entry, newline);
+            summary = `added on-action entry ${operation.entry.key}`;
+        } else if (operation.operation === 'bind_event_target' || operation.operation === 'clear_event_target') {
+            const label = operation.operation;
+            assertOnlyKeys(operation as unknown as Record<string, unknown>, ['operation', 'target', 'eventTarget', 'containerPath'], label);
+            assertIdentifier(operation.eventTarget, 'eventTarget');
+            content = appendEntry(text, findContainer(target, operation.containerPath), {
+                key: label === 'bind_event_target' ? 'save_event_target_as' : 'clear_event_target',
+                value: { kind: 'identifier', value: operation.eventTarget },
+            }, newline);
+            summary = `${label === 'bind_event_target' ? 'bound' : 'cleared'} event target ${operation.eventTarget}`;
+        } else if (operation.operation === 'add_variable_transition') {
+            assertOnlyKeys(operation as unknown as Record<string, unknown>, ['operation', 'target', 'transition', 'variable', 'value', 'containerPath'], 'add_variable_transition');
+            if (!['set_variable', 'change_variable', 'multiply_variable', 'divide_variable'].includes(operation.transition)) fail('unsupported variable transition');
+            assertIdentifier(operation.variable, 'variable');
+            validateValue(operation.value);
+            content = appendEntry(text, findContainer(target, operation.containerPath), {
+                key: operation.transition,
+                value: { kind: 'block', entries: [
+                    { key: 'which', value: { kind: 'identifier', value: operation.variable } },
+                    { key: 'value', value: operation.value },
+                ] },
+            }, newline);
+            summary = `added ${operation.transition} transition for ${operation.variable}`;
+        } else {
+            fail('unsupported typed PDX operation; raw code is forbidden');
         }
     }
 

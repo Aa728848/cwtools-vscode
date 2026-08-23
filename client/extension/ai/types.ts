@@ -1361,6 +1361,12 @@ export interface VerifyPdxIdentifierResult {
     _warning?: string;
 }
 
+export type SolveScopeBridgeArgs = import('./tools/scopeBridge').ScopeBridgeInput;
+export type SolveScopeBridgeResult = import('./tools/scopeBridge').ScopeBridgeResult;
+export interface ExtractArchetypeSlotsArgs { text: string; placeholders: import('./tools/archetypeSlots').ArchetypePlaceholders }
+export interface InstantiateArchetypeArgs { archetype: import('./tools/archetypeSlots').ExtractedArchetype; values: Readonly<Record<string, import('./tools/archetypeSlots').ArchetypeSlotValue>> }
+export interface ArchetypeSlotResult { success: boolean; archetype?: import('./tools/archetypeSlots').ExtractedArchetype; content?: string; error?: string }
+
 // ─── TodoWrite Tool Types ────────────────────────────────────────────────────
 
 export interface TodoItem {
@@ -1564,6 +1570,9 @@ export type ToolArgs =
     | DocumentSymbolsArgs
     | WorkspaceSymbolsArgs
     | VerifyPdxIdentifierArgs
+    | SolveScopeBridgeArgs
+    | ExtractArchetypeSlotsArgs
+    | InstantiateArchetypeArgs
     | TodoWriteArgs
     | AskUserQuestionArgs
     | ReadFileArgs
@@ -1604,6 +1613,8 @@ export type ToolResult =
     | DocumentSymbolsResult
     | WorkspaceSymbolsResult
     | VerifyPdxIdentifierResult
+    | SolveScopeBridgeResult
+    | ArchetypeSlotResult
     | TodoWriteResult
     | ReadFileResult
     | WriteFileResult
@@ -1655,6 +1666,9 @@ export type AgentToolName =
     | 'hover_symbol'
     | 'rename_symbol'
     | 'verify_pdx_identifier'
+    | 'solve_scope_bridge'
+    | 'extract_archetype_slots'
+    | 'instantiate_archetype'
     | 'todo_write'
     | 'read_file'
     | 'write_file'
@@ -1889,6 +1903,11 @@ export interface CandidateTransactionResult {
     bytes?: number;
     commit?: import('./runner/candidateTransaction').CommitResult;
     diagnosticDeltas?: Record<string, import('./runner/diagnosticSnapshot').DiagnosticDelta>;
+    overlayValidation?: {
+        validationLevel?: string;
+        limitations?: string[];
+        files: Array<{ uri?: string; ok?: boolean; validationLevel?: string; contentHash?: string; diagnostics?: ValidationError[]; error?: string; status?: string }>;
+    };
     error?: string;
 }
 

@@ -6097,6 +6097,7 @@ type Server(client: ILanguageClient) =
                                           "cwtools.ai.exportProjectKnowledge"
                                           "cwtools.ai.queryProjectKnowledgeDb"
                                           "cwtools.ai.getSemanticCatalog"
+                                          "cwtools.ai.validateOverlay"
                                           "cwtools.ai.queryScriptedEffects"
                                           "cwtools.ai.queryScriptedTriggers"
                                           "cwtools.ai.queryEnums"
@@ -11610,6 +11611,160 @@ type Server(client: ILanguageClient) =
                                             [| "ok",    JsonValue.Boolean false
                                                "error", JsonValue.String $"No entity found for file: {filePath}" |]
                             Some result
+
+                        // - cwtools.ai.validateOverlay -
+                        // Validate bounded candidate text without committing it to the live game model.
+                        | { command = "cwtools.ai.validateOverlay"
+                            arguments = overlayArgs } ->
+                            let tryProperty name (fields: (string * JsonValue) array) =
+                                fields |> Array.tryPick (fun (key, value) -> if key = name then Some value else None)
+                            let requestFields =
+                                overlayArgs
+                                |> List.tryHead
+                                |> Option.bind (function JsonValue.Record fields -> Some fields | _ -> None)
+                            let requestValid =
+                                match overlayArgs, requestFields with
+                                | [ JsonValue.Record fields ], Some _ ->
+                                    let keys = fields |> Array.map fst |> Set.ofArray
+                                    keys = Set.singleton "files"
+                                | _ -> false
+                            let fileValues =
+                                requestFields
+                                |> Option.bind (tryProperty "files")
+                                |> Option.bind (function JsonValue.Array files when files.Length > 0 -> Some files | _ -> None)
+                                |> Option.defaultValue [||]
+                            let maxFiles = Main.OverlayValidation.MaxFiles
+                            let maxFileChars = Main.OverlayValidation.MaxFileChars
+                            let maxTotalChars = Main.OverlayValidation.MaxTotalChars
+                            let mutable totalChars = 0
+                            let seen = System.Collections.Generic.HashSet<string>(if OperatingSystem.IsWindows() then StringComparer.OrdinalIgnoreCase else StringComparer.Ordinal)
+                            let severityName (severity: Severity) =
+                                match severity with
+                                | Severity.Error -> "error"
+                                | Severity.Warning -> "warning"
+                                | Severity.Information -> "info"
+                                | _ -> "hint"
+                            let diagnosticJson (error: CWError) =
+                                let lspRange = convRangeToLSPRange error.range
+                                JsonValue.Record
+                                    [| "code", JsonValue.String error.code
+                                       "severity", JsonValue.String(severityName error.severity)
+                                       "message", JsonValue.String error.message
+                                       "line", JsonValue.Number(decimal lspRange.start.line)
+                                       "column", JsonValue.Number(decimal lspRange.start.character)
+                                       "range", locationToJson error.range |]
+                            let parserDiagnostic (filePath: string) (message: string) (position: FParsec.Position) =
+                                JsonValue.Record
+                                    [| "code", JsonValue.String "CW001"
+                                       "severity", JsonValue.String "error"
+                                       "message", JsonValue.String message
+                                       "line", JsonValue.Number(decimal (max 0 (int position.Line - 1)))
+                                       "column", JsonValue.Number(decimal (max 0 (int position.Column - 1)))
+                                       "file", JsonValue.String(filePath.Replace('\\', '/')) |]
+                            let sha256Text (text: string) =
+                                use sha = System.Security.Cryptography.SHA256.Create()
+                                let bytes: byte array = Encoding.UTF8.GetBytes(text)
+                                sha.ComputeHash(bytes)
+                                |> Convert.ToHexString
+                                |> fun value -> value.ToLowerInvariant()
+                            let workspaceRoots =
+                                match workspaceFolders with
+                                | folders when not folders.IsEmpty -> folders |> List.map (fun folder -> Path.GetFullPath folder.uri.LocalPath)
+                                | _ -> rootUri |> Option.map (fun uri -> Path.GetFullPath uri.LocalPath) |> Option.toList
+                            let pathComparison = if OperatingSystem.IsWindows() then StringComparison.OrdinalIgnoreCase else StringComparison.Ordinal
+                            let isInsideWorkspace (candidate: string) =
+                                workspaceRoots
+                                |> List.exists (fun root ->
+                                    let relative = Path.GetRelativePath(root, candidate)
+                                    relative = "." || (not (Path.IsPathRooted relative) && relative <> ".." && not (relative.StartsWith(".." + string Path.DirectorySeparatorChar, pathComparison))))
+                            let mutable allAccepted = requestValid && fileValues.Length > 0 && fileValues.Length <= maxFiles
+                            let rejectFile error =
+                                allAccepted <- false
+                                JsonValue.Record [| "ok", JsonValue.Boolean false; "error", JsonValue.String error |]
+                            let validateFileValue fileValue =
+                                if cancellationToken.IsCancellationRequested then
+                                    allAccepted <- false
+                                    JsonValue.Record [| "ok", JsonValue.Boolean false; "status", JsonValue.String "cancelled" |]
+                                else
+                                    match fileValue with
+                                    | JsonValue.Record fields ->
+                                        let keys = fields |> Array.map fst |> Set.ofArray
+                                        let allowedKeys = Set.ofList [ "uri"; "content"; "baseHash" ]
+                                        if not (Set.isSubset keys allowedKeys) then
+                                            rejectFile "Overlay file contains unsupported fields."
+                                        else
+                                            match tryProperty "uri" fields, tryProperty "content" fields with
+                                            | Some(JsonValue.String uriText), Some(JsonValue.String content) ->
+                                                try
+                                                    let uri = Uri(uriText)
+                                                    if uri.Scheme <> Uri.UriSchemeFile then
+                                                        allAccepted <- false
+                                                        JsonValue.Record [| "ok", JsonValue.Boolean false; "uri", JsonValue.String uriText; "error", JsonValue.String "Only file: URIs are supported." |]
+                                                    else
+                                                        let filePath = Path.GetFullPath(getPathFromDoc uri)
+                                                        totalChars <- totalChars + content.Length
+                                                        if not (isInsideWorkspace filePath) then
+                                                            allAccepted <- false
+                                                            JsonValue.Record [| "ok", JsonValue.Boolean false; "uri", JsonValue.String uriText; "error", JsonValue.String "Overlay path is outside the active workspace roots." |]
+                                                        elif content.Length > maxFileChars || totalChars > maxTotalChars then
+                                                            allAccepted <- false
+                                                            JsonValue.Record [| "ok", JsonValue.Boolean false; "uri", JsonValue.String uriText; "error", JsonValue.String "Overlay validation payload exceeds the bounded size limit." |]
+                                                        elif not (seen.Add filePath) then
+                                                            allAccepted <- false
+                                                            JsonValue.Record [| "ok", JsonValue.Boolean false; "uri", JsonValue.String uriText; "error", JsonValue.String "Duplicate overlay URI." |]
+                                                        else
+                                                            let baseHash = tryProperty "baseHash" fields |> Option.bind (function JsonValue.String value when System.Text.RegularExpressions.Regex.IsMatch(value, "^[a-fA-F0-9]{64}$") -> Some value | _ -> None)
+                                                            let baseHashFieldPresent = tryProperty "baseHash" fields |> Option.isSome
+                                                            let actualBaseText =
+                                                                docs.GetTextByPath filePath
+                                                                |> Option.orElseWith (fun () -> try Some(File.ReadAllText filePath) with _ -> None)
+                                                            let baseMatches =
+                                                                match baseHash, actualBaseText with
+                                                                | Some expected, Some actual -> String.Equals(expected, sha256Text actual, StringComparison.OrdinalIgnoreCase)
+                                                                | Some _, None -> false
+                                                                | None, _ -> true
+                                                            if baseHashFieldPresent && baseHash.IsNone then
+                                                                allAccepted <- false
+                                                                JsonValue.Record [| "ok", JsonValue.Boolean false; "uri", JsonValue.String uriText; "error", JsonValue.String "baseHash must be a SHA-256 hex digest." |]
+                                                            elif not baseMatches then
+                                                                allAccepted <- false
+                                                                JsonValue.Record
+                                                                    [| "ok", JsonValue.Boolean false
+                                                                       "uri", JsonValue.String uriText
+                                                                       "status", JsonValue.String "base_hash_mismatch" |]
+                                                            else
+                                                                match CKParser.parseString content filePath with
+                                                                | Failure(message, position, _) ->
+                                                                    JsonValue.Record
+                                                                        [| "ok", JsonValue.Boolean true
+                                                                           "uri", JsonValue.String uriText
+                                                                           "validationLevel", JsonValue.String "parser"
+                                                                           "contentHash", JsonValue.String(sha256Text content)
+                                                                           "diagnostics", JsonValue.Array [| parserDiagnostic filePath message position.Position |] |]
+                                                                | Success _ ->
+                                                                    let diagnostics = game.ValidateOverlayFile(filePath, content)
+                                                                    JsonValue.Record
+                                                                        [| "ok", JsonValue.Boolean true
+                                                                           "uri", JsonValue.String uriText
+                                                                           "validationLevel", JsonValue.String "catalog-single-file"
+                                                                           "contentHash", JsonValue.String(sha256Text content)
+                                                                           "diagnostics", JsonValue.Array(diagnostics |> List.map diagnosticJson |> Array.ofList) |]
+                                                with error ->
+                                                    allAccepted <- false
+                                                    JsonValue.Record [| "ok", JsonValue.Boolean false; "uri", JsonValue.String uriText; "error", JsonValue.String error.Message |]
+                                            | _ -> rejectFile "Each overlay file requires string uri and content fields."
+                                    | _ -> rejectFile "Overlay files must be objects."
+                            let fileResults =
+                                fileValues
+                                |> Array.truncate maxFiles
+                                |> Array.map validateFileValue
+                            Some(
+                                JsonValue.Record
+                                    [| "ok", JsonValue.Boolean(allAccepted && totalChars <= maxTotalChars)
+                                       "validationLevel", JsonValue.String "catalog-single-file"
+                                       "limitations", JsonValue.Array [| JsonValue.String "overlay_files_not_cross_visible"; JsonValue.String "dynamic_indexes_from_live_model"; JsonValue.String "global_and_localisation_checks_omitted" |]
+                                       "truncated", JsonValue.Boolean(fileValues.Length > maxFiles)
+                                       "files", JsonValue.Array fileResults |])
 
                         // - cwtools.ai.getDiagnosticsFresh -
                         // Immediately return the diagnostic freshness status of a file (without blocking)

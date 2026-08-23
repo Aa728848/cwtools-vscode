@@ -1,6 +1,3 @@
-import { ErrorReporter } from '../errorReporter';
-import { SOURCE } from '../messages';
-
 // WriteQueue: serializes write operations to prevent race conditions on AST/file state.
 // Each AgentRunner owns one; sub-agents get their own instance for isolated tracking.
 export class WriteQueue {
@@ -12,7 +9,7 @@ export class WriteQueue {
         return new Promise((resolve, reject) => {
             this.queue = this.queue
                 .then(() => fn().then(resolve, reject))
-                .catch((err) => { ErrorReporter.warn(SOURCE.AGENT_RUNNER, 'WriteQueue: swallowed rejected write to keep queue alive', err); });
+                .catch(() => { /* keep queue alive; caller already receives the rejection */ });
         });
     }
 
@@ -113,3 +110,5 @@ export class PartitionedWriteQueue {
         }
     }
 }
+
+export const globalPartitionedWriteQueue = new PartitionedWriteQueue();

@@ -529,6 +529,7 @@ let connect (serverFactory: ILanguageClient -> ILanguageServer, receive: BinaryR
                 | "cwtools.ai.compareDefinitionWithVanilla"
                 | "cwtools.ai.queryProjectKnowledgeDb"
                 | "cwtools.ai.getSemanticCatalog"
+                | "cwtools.ai.validateOverlay"
                 | "cwtools.ai.queryScriptedEffects"
                 | "cwtools.ai.queryScriptedTriggers"
                 | "cwtools.ai.queryEnums"

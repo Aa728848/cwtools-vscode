@@ -49,6 +49,7 @@
     <Compile Include="SemanticDelta.fs" />
     <Compile Include="SemanticDirectoryCatalog.fs" />
     <Compile Include="PdxFragmentValidation.fs" />
+    <Compile Include="OverlayValidation.fs" />
     <Compile Include="Program.fs" />
   </ItemGroup>
   <ItemGroup>

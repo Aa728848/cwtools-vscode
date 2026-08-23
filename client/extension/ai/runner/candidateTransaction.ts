@@ -9,6 +9,7 @@ export interface CandidateHostCallbacks {
     writeDisk: (filePath: string, content: string) => void | Promise<void>;
     deleteDisk?: (filePath: string) => void | Promise<void>;
     validateDisk?: (files: readonly CandidateFile[]) => ValidationResult | Promise<ValidationResult>;
+    afterRollback?: (files: readonly CandidateFile[], rollback: RollbackResult) => ValidationResult | Promise<ValidationResult>;
 }
 
 export interface CandidateFile {
@@ -158,7 +159,12 @@ export class CandidateTransactionManager {
                     const validation = await host.validateDisk(files);
                     const ok = typeof validation === 'boolean' ? validation : validation.ok;
                     if (!ok) {
-                        const rollback = await this.rollback(host, written);
+                        let rollback = await this.rollback(host, written);
+                        if (rollback.succeeded && host.afterRollback) {
+                            const recovery = await host.afterRollback(files, rollback);
+                            const recovered = typeof recovery === 'boolean' ? recovery : recovery.ok;
+                            if (!recovered) rollback = { ...rollback, succeeded: false, errors: [...rollback.errors, { path: '<semantic>', error: typeof recovery === 'boolean' ? 'Semantic rollback did not become fresh.' : recovery.error ?? 'Semantic rollback did not become fresh.' }] };
+                        }
                         this._state = rollback.succeeded ? 'discarded' : 'active';
                         return {
                             committed: false,
@@ -181,7 +187,12 @@ export class CandidateTransactionManager {
                     rollback: { attempted: false, succeeded: true, paths: [], errors: [] },
                 };
             } catch (error) {
-                const rollback = await this.rollback(host, written);
+                let rollback = await this.rollback(host, written);
+                if (rollback.succeeded && host.afterRollback) {
+                    const recovery = await host.afterRollback(files, rollback);
+                    const recovered = typeof recovery === 'boolean' ? recovery : recovery.ok;
+                    if (!recovered) rollback = { ...rollback, succeeded: false, errors: [...rollback.errors, { path: '<semantic>', error: typeof recovery === 'boolean' ? 'Semantic rollback did not become fresh.' : recovery.error ?? 'Semantic rollback did not become fresh.' }] };
+                }
                 this._state = rollback.succeeded ? 'discarded' : 'active';
                 return { committed: false, state: this._state, transactionId: this._id, files: paths, rollback, error: errorText(error) };
             }

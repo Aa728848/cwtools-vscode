@@ -51,5 +51,22 @@ describe('CandidateTransactionManager', () => {
         expect(disk.has('new.txt')).to.equal(false);
     });
 
+    it('marks rollback incomplete when semantic recovery does not become fresh', async () => {
+        const tx = new CandidateTransactionManager();
+        tx.begin();
+        tx.stage('a.txt', 'new A', sha256('A'));
+        tx.validate(true);
+        const result = await tx.commit({
+            readDisk: path => disk.get(path) ?? '',
+            writeDisk: (path, content) => { disk.set(path, content); },
+            validateDisk: () => false,
+            afterRollback: () => ({ ok: false, error: 'LSP recovery pending' }),
+        });
+        expect(result.committed).to.equal(false);
+        expect(result.rollback.succeeded).to.equal(false);
+        expect(result.rollback.errors[0]?.error).to.include('LSP recovery');
+        expect(tx.state).to.equal('active');
+    });
+
     it('does not write when validation is false and supports discard', async () => { const writes: string[] = []; const tx = new CandidateTransactionManager(); tx.begin(); tx.stage('a.txt', 'new'); tx.validate(false); const result = await tx.commit(host(writes)); expect(result.committed).to.equal(false); expect(writes).to.deep.equal([]); expect(tx.state).to.equal('discarded'); });
 });

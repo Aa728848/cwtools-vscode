@@ -77,7 +77,7 @@ import { getWorkflow } from './workflowRegistry';
 import { TOOL_REGISTRY, WRITE_TOOLS, READ_ONLY_TOOLS } from './tools/registry';
 import { hasAddedErrors, type DiagnosticDelta } from './runner/diagnosticSnapshot';
 import { buildRunCodePromptBlock, computeRunCodeAllowedStepNames } from './tools/runCode';
-import { PartitionedWriteQueue } from './runner/writeCoordinator';
+import { globalPartitionedWriteQueue } from './runner/writeCoordinator';
 import { runLedger } from './runner/runLedger';
 import { atomicWriteText, sha256Text } from './runner/durableStorage';
 import { loadResumeState, hasResumeState, saveResumeState as saveCheckpointResumeState } from './runner/checkpoint';
@@ -410,7 +410,6 @@ const _ORCHESTRATOR_MODE_TOOLS: AgentToolName[] = [
 
 
 
-const globalPartitionedWriteQueue = new PartitionedWriteQueue();
 
 export class AgentRunner {
     public readonly readTracker = new ReadTracker();

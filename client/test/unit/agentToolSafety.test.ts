@@ -163,6 +163,159 @@ describe('enforced central tool policy', () => {
         expect(fs.existsSync(target)).to.equal(false);
     });
 
+    it('validates staged typed PDX candidates through the detached LSP command before commit', async () => {
+        stubConfigOverrides['policy.preset'] = 'workspace-auto';
+        const target = path.join(workspaceRoot, 'events.txt');
+        const source = 'country_event = {\n\tid = test.1\n}\n';
+        fs.writeFileSync(target, source);
+        let overlayCalls = 0;
+        const client = {
+            sendRequest: async (_method: string, request: any) => {
+                if (request.command === 'cwtools.ai.validateOverlay') {
+                    overlayCalls++;
+                    const file = request.arguments[0].files[0];
+                    return {
+                        ok: true,
+                        validationLevel: 'catalog-single-file',
+                        limitations: ['overlay_files_not_cross_visible'],
+                        files: [{
+                            ok: true,
+                            uri: file.uri,
+                            validationLevel: 'catalog-single-file',
+                            contentHash: require('crypto').createHash('sha256').update(file.content, 'utf8').digest('hex'),
+                            diagnostics: [],
+                        }],
+                    };
+                }
+                return { ok: true };
+            },
+        };
+        const executor = new AgentToolExecutor(client as any, workspaceRoot);
+        executor.parentRunnerOptions = { mode: 'build' } as any;
+        const context = { runnerOptions: { mode: 'build' }, scopeId: 'candidate-run' } as any;
+        const begin = await executor.execute('candidate_transaction', { action: 'begin' }, context) as any;
+        const staged = await executor.execute('typed_pdx_write', {
+            filePath: target,
+            mode: 'stage',
+            transactionId: begin.transactionId,
+            operation: { operation: 'clone_definition', source: 'test.1', newSymbol: 'test.2' },
+        }, context) as any;
+        expect(staged.success).to.equal(true);
+        expect(fs.readFileSync(target, 'utf8')).to.equal(source);
+        const validated = await executor.execute('candidate_transaction', {
+            action: 'validate',
+            transactionId: begin.transactionId,
+        }, context) as any;
+        expect(validated.success).to.equal(true);
+        expect(validated.overlayValidation.validationLevel).to.equal('catalog-single-file');
+        expect(overlayCalls).to.equal(1);
+    });
+
+    it('preserves an existing UTF-8 BOM through typed stage, validation, and commit', async () => {
+        stubConfigOverrides['policy.preset'] = 'workspace-auto';
+        const target = path.join(workspaceRoot, 'bom-events.txt');
+        fs.writeFileSync(target, Buffer.from('\uFEFFroot = {}\n', 'utf8'));
+        let epoch = 0;
+        const client = { sendRequest: async (_method: string, request: any) => {
+            if (request.command === 'cwtools.ai.validateOverlay') {
+                const file = request.arguments[0].files[0];
+                return { ok: true, validationLevel: 'catalog-single-file', files: [{ ok: true, uri: file.uri, validationLevel: 'catalog-single-file', contentHash: require('crypto').createHash('sha256').update(file.content, 'utf8').digest('hex'), diagnostics: [] }] };
+            }
+            epoch++; return { ok: true };
+        } };
+        const executor = new AgentToolExecutor(client as any, workspaceRoot);
+        executor.parentRunnerOptions = { mode: 'build' } as any;
+        const context = { runnerOptions: { mode: 'build' }, scopeId: 'candidate-run' } as any;
+        (executor as any).lspHandler.getDiagnostics = async () => ({ diagnostics: [], freshness: 'fresh', truncated: false, lastEpoch: ++epoch });
+        const begin = await executor.execute('candidate_transaction', { action: 'begin' }, context) as any;
+        await executor.execute('typed_pdx_write', { filePath: target, mode: 'stage', transactionId: begin.transactionId, operation: { operation: 'clone_definition', source: 'root', newSymbol: 'copy' } }, context);
+        const validated = await executor.execute('candidate_transaction', { action: 'validate', transactionId: begin.transactionId }, context) as any;
+        expect(validated.success).to.equal(true);
+        const committed = await executor.execute('candidate_transaction', { action: 'commit', transactionId: begin.transactionId }, context) as any;
+        expect(committed.success).to.equal(true);
+        expect(fs.readFileSync(target).subarray(0, 3).equals(Buffer.from([0xef, 0xbb, 0xbf]))).to.equal(true);
+    });
+
+    it('rejects incomplete overlay validation responses instead of validating uncovered files', async () => {
+        stubConfigOverrides['policy.preset'] = 'workspace-auto';
+        const target = path.join(workspaceRoot, 'events.txt');
+        fs.writeFileSync(target, 'root = {}\n');
+        const client = { sendRequest: async () => ({ ok: true, files: [] }) };
+        const executor = new AgentToolExecutor(client as any, workspaceRoot);
+        executor.parentRunnerOptions = { mode: 'build' } as any;
+        const context = { runnerOptions: { mode: 'build' }, scopeId: 'candidate-run' } as any;
+        const begin = await executor.execute('candidate_transaction', { action: 'begin' }, context) as any;
+        await executor.execute('typed_pdx_write', {
+            filePath: target, mode: 'stage', transactionId: begin.transactionId,
+            operation: { operation: 'clone_definition', source: 'root', newSymbol: 'copy' },
+        }, context);
+        const validated = await executor.execute('candidate_transaction', { action: 'validate', transactionId: begin.transactionId }, context) as any;
+        expect(validated.success).to.equal(false);
+        expect(validated.error).to.include('file result');
+    });
+
+    it('rejects malformed overlay diagnostics instead of dropping them', async () => {
+        stubConfigOverrides['policy.preset'] = 'workspace-auto';
+        const target = path.join(workspaceRoot, 'events.txt');
+        fs.writeFileSync(target, 'root = {}\n');
+        const client = { sendRequest: async (_method: string, request: any) => {
+            const file = request.arguments[0].files[0];
+            return { ok: true, files: [{ ok: true, uri: file.uri, contentHash: require('crypto').createHash('sha256').update(file.content, 'utf8').digest('hex'), diagnostics: [{ severity: 1, message: 'numeric severity' }] }] };
+        } };
+        const executor = new AgentToolExecutor(client as any, workspaceRoot);
+        executor.parentRunnerOptions = { mode: 'build' } as any;
+        const context = { runnerOptions: { mode: 'build' }, scopeId: 'candidate-run' } as any;
+        const begin = await executor.execute('candidate_transaction', { action: 'begin' }, context) as any;
+        await executor.execute('typed_pdx_write', { filePath: target, mode: 'stage', transactionId: begin.transactionId, operation: { operation: 'clone_definition', source: 'root', newSymbol: 'copy' } }, context);
+        const validated = await executor.execute('candidate_transaction', { action: 'validate', transactionId: begin.transactionId }, context) as any;
+        expect(validated.success).to.equal(false);
+        expect(validated.error).to.include('severity');
+    });
+
+    it('keeps a candidate transaction uncommittable when overlay diagnostics contain an error', async () => {
+        stubConfigOverrides['policy.preset'] = 'workspace-auto';
+        const target = path.join(workspaceRoot, 'events.txt');
+        fs.writeFileSync(target, 'root = {}\n');
+        const client = {
+            sendRequest: async (_method: string, request: any) => {
+                if (request.command === 'cwtools.ai.validateOverlay') {
+                    const file = request.arguments[0].files[0];
+                    return {
+                        ok: true,
+                        files: [{
+                            ok: true,
+                            uri: file.uri,
+                            contentHash: require('crypto').createHash('sha256').update(file.content, 'utf8').digest('hex'),
+                            diagnostics: [{ code: 'CW999', severity: 'error', message: 'bad candidate', line: 0, column: 0 }],
+                        }],
+                    };
+                }
+                return { ok: true };
+            },
+        };
+        const executor = new AgentToolExecutor(client as any, workspaceRoot);
+        executor.parentRunnerOptions = { mode: 'build' } as any;
+        const context = { runnerOptions: { mode: 'build' }, scopeId: 'candidate-run' } as any;
+        const begin = await executor.execute('candidate_transaction', { action: 'begin' }, context) as any;
+        await executor.execute('typed_pdx_write', {
+            filePath: target,
+            mode: 'stage',
+            transactionId: begin.transactionId,
+            operation: { operation: 'clone_definition', source: 'root', newSymbol: 'root_copy' },
+        }, context);
+        const validated = await executor.execute('candidate_transaction', {
+            action: 'validate',
+            transactionId: begin.transactionId,
+        }, context) as any;
+        expect(validated.success).to.equal(false);
+        const committed = await executor.execute('candidate_transaction', {
+            action: 'commit',
+            transactionId: begin.transactionId,
+        }, context) as any;
+        expect(committed.success).to.equal(false);
+        expect(fs.readFileSync(target, 'utf8')).to.equal('root = {}\n');
+    });
+
     it('emits a non-shadow policy decision before a safe read', async () => {
         stubConfigOverrides['policy.preset'] = 'workspace-auto';
         const executor = new AgentToolExecutor({} as any, workspaceRoot);

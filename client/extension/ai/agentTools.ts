@@ -82,8 +82,13 @@ import { ErrorReporter } from './errorReporter';
 import { mergeTokenUsageTotals } from './cacheCapability';
 import { MemoryParser } from './memoryParser';
 import { createDiagnosticSnapshot, diffDiagnosticSnapshots, hasAddedErrors, type DiagnosticDelta } from './runner/diagnosticSnapshot';
-import { CandidateTransactionManager, sha256 } from './runner/candidateTransaction';
+import { CandidateTransactionManager } from './runner/candidateTransaction';
 import { buildTypedPdxCandidate } from './tools/typedPdxWrite';
+import { globalPartitionedWriteQueue } from './runner/writeCoordinator';
+import { validateOverlayCatalog } from './runner/overlayCatalog';
+import { solveScopeBridge } from './tools/scopeBridge';
+import { extractArchetypeSlots, instantiateArchetypeSlots } from './tools/archetypeSlots';
+import { canonicalPathKey } from './workspacePaths';
 import { defaultDomainForMode } from './agentProfile';
 import { isMcpServerAllowedForDomain } from './mcpCapability';
 import {
@@ -710,7 +715,7 @@ export class AgentToolExecutor {
         const candidate = await buildTypedPdxCandidate({ filePath, operation: args.operation, expectedHash: args.expectedHash }, async target => {
             const overlay = this.vfsOverlay;
             if (overlay?.has(target)) return overlay.get(target)!;
-            return fs.readFileSync(target, 'utf8').replace(/^\uFEFF/, '');
+            return fs.readFileSync(target, 'utf8');
         });
         if ((args.mode ?? 'preview') === 'preview') {
             return { success: true, mode: 'preview', candidate };
@@ -722,6 +727,80 @@ export class AgentToolExecutor {
         if (!overlay) throw new Error('Candidate overlay is unavailable.');
         overlay.set(filePath, candidate.content);
         return { success: true, mode: 'stage', transactionId, candidate, message: candidate.summary };
+    }
+
+    private async validateCandidateOverlay(): Promise<{
+        validationLevel?: string;
+        limitations?: string[];
+        files: Array<{ uri?: string; ok?: boolean; validationLevel?: string; contentHash?: string; diagnostics?: import('./types').ValidationError[]; error?: string; status?: string }>;
+    }> {
+        const files = this.candidateTransactions.files;
+        const client = this.client;
+        if (!client || typeof (client as any).sendRequest !== 'function') {
+            throw new Error('LSP client unavailable for candidate overlay validation.');
+        }
+        const request = client.sendRequest('workspace/executeCommand', {
+            command: 'cwtools.ai.validateOverlay',
+            arguments: [{
+                files: files.map(file => ({
+                    uri: vs.Uri.file(file.path).toString(),
+                    content: file.content,
+                    baseHash: file.baseHash,
+                })),
+            }],
+        }) as Promise<Record<string, unknown>>;
+        let timeoutId: ReturnType<typeof setTimeout> | undefined;
+        const timeout = new Promise<never>((_, reject) => {
+            timeoutId = setTimeout(() => reject(new Error('Overlay validation timed out after 15 seconds.')), 15_000);
+        });
+        const response = await Promise.race([request, timeout]).finally(() => { if (timeoutId) clearTimeout(timeoutId); });
+        if (!response || typeof response !== 'object' || response.ok !== true || !Array.isArray(response.files)) {
+            throw new Error(typeof response?.error === 'string' ? response.error : 'Overlay validation returned an invalid response.');
+        }
+        if (response.files.length !== files.length) {
+            throw new Error(`Overlay validation returned ${response.files.length} file result(s) for ${files.length} candidate(s).`);
+        }
+        const requestedByUri = new Map(files.map(file => [vs.Uri.file(file.path).toString(), file]));
+        const returnedUris = new Set<string>();
+        const normalizedFiles = response.files.map(item => {
+            const record = item && typeof item === 'object' ? item as Record<string, unknown> : {};
+            const uri = typeof record.uri === 'string' ? record.uri : undefined;
+            if (!uri || !requestedByUri.has(uri) || returnedUris.has(uri)) {
+                throw new Error(`Overlay validation returned an unknown, missing, or duplicate URI: ${uri ?? '<missing>'}.`);
+            }
+            returnedUris.add(uri);
+            if (!Array.isArray(record.diagnostics)) throw new Error(`Overlay validation omitted diagnostics for ${uri}.`);
+            const diagnostics = record.diagnostics.flatMap(raw => {
+                    if (!raw || typeof raw !== 'object') throw new Error(`Overlay validation returned a malformed diagnostic for ${uri}.`);
+                    const diagnostic = raw as Record<string, unknown>;
+                    const severity = diagnostic.severity;
+                    if (severity !== 'error' && severity !== 'warning' && severity !== 'info' && severity !== 'hint') {
+                        throw new Error(`Overlay validation returned an unknown diagnostic severity for ${uri}.`);
+                    }
+                    return [{
+                        code: typeof diagnostic.code === 'string' ? diagnostic.code : '',
+                        severity,
+                        message: typeof diagnostic.message === 'string' ? diagnostic.message : '',
+                        line: typeof diagnostic.line === 'number' ? diagnostic.line : 0,
+                        column: typeof diagnostic.column === 'number' ? diagnostic.column : 0,
+                    } satisfies import('./types').ValidationError];
+                });
+            return {
+                uri,
+                ok: record.ok === true,
+                validationLevel: typeof record.validationLevel === 'string' ? record.validationLevel : undefined,
+                contentHash: typeof record.contentHash === 'string' ? record.contentHash : undefined,
+                diagnostics,
+                error: typeof record.error === 'string' ? record.error : undefined,
+                status: typeof record.status === 'string' ? record.status : undefined,
+            };
+        });
+        if (returnedUris.size !== requestedByUri.size) throw new Error('Overlay validation did not cover every candidate file.');
+        return {
+            validationLevel: typeof response.validationLevel === 'string' ? response.validationLevel : undefined,
+            limitations: Array.isArray(response.limitations) ? response.limitations.filter((item): item is string => typeof item === 'string') : undefined,
+            files: normalizedFiles,
+        };
     }
 
     private async executeCandidateTransaction(
@@ -770,8 +849,28 @@ export class AgentToolExecutor {
                         }
                     }
                 }
+                let overlayValidation: import('./types').CandidateTransactionResult['overlayValidation'];
+                if (validationPassed) {
+                    const catalog = validateOverlayCatalog(this.candidateTransactions.files.map(file => ({ file: file.path, content: file.content })));
+                    const catalogErrors = catalog.issues.filter(issue => issue.severity === 'error' && issue.code === 'overlay_duplicate_definition');
+                    if (catalogErrors.length > 0) {
+                        validationPassed = false;
+                        validationError = catalogErrors.map(issue => issue.message).join('; ');
+                    }
+                }
+                if (validationPassed) {
+                    overlayValidation = await this.validateCandidateOverlay();
+                    const invalidFile = overlayValidation.files.find(file =>
+                        file.ok !== true
+                        || file.contentHash !== this.candidateTransactions.files.find(candidate => vs.Uri.file(candidate.path).toString() === file.uri)?.contentHash
+                        || (file.diagnostics ?? []).some(diagnostic => diagnostic.severity === 'error'));
+                    if (invalidFile) {
+                        validationPassed = false;
+                        validationError = invalidFile.error ?? `Overlay validation rejected ${invalidFile.uri ?? 'a candidate file'}.`;
+                    }
+                }
                 this.candidateTransactions.validate(validationPassed, this.candidateTransactions.fingerprint());
-                return { success: validationPassed, action: args.action, transactionId, state: this.candidateTransactions.state, files: this.candidateTransactions.files.map(file => file.path), bytes: this.candidateTransactions.bytes, error: validationError };
+                return { success: validationPassed, action: args.action, transactionId, state: this.candidateTransactions.state, files: this.candidateTransactions.files.map(file => file.path), bytes: this.candidateTransactions.bytes, overlayValidation, error: validationError };
             }
             const files = this.candidateTransactions.files;
             const baselineDiagnostics = new Map<string, import('./runner/diagnosticSnapshot').DiagnosticSnapshot>();
@@ -784,7 +883,8 @@ export class AgentToolExecutor {
                 })), { status: baseline.freshness, complete: baseline.freshness === 'fresh' && baseline.truncated !== true }));
             }
             const deltas: Record<string, import('./runner/diagnosticSnapshot').DiagnosticDelta> = {};
-            const commit = await this.candidateTransactions.commit({
+            const lockPaths = files.map(file => canonicalPathKey(file.path, this.workspaceRoot));
+            const commit = await globalPartitionedWriteQueue.enqueue(lockPaths, () => this.candidateTransactions.commit({
                 readDisk: file => fs.existsSync(file) ? fs.readFileSync(file) : Buffer.from(''),
                 writeDisk: (file, content) => {
                     (context?.onBeforeFileWrite ?? this.onBeforeFileWrite)?.(file, fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : null);
@@ -792,6 +892,24 @@ export class AgentToolExecutor {
                     fs.writeFileSync(file, content, 'utf8');
                 },
                 deleteDisk: file => { if (fs.existsSync(file)) fs.unlinkSync(file); },
+                afterRollback: async rolledBackFiles => {
+                    const targets = rolledBackFiles.map(file => file.path);
+                    const response = await this.requestRevalidateFiles(targets);
+                    if (response?.ok !== true) return { ok: false, error: 'Rollback files could not be revalidated.' };
+                    for (const file of rolledBackFiles) {
+                        const baselineEpoch = baselineEpochs.get(file.path) ?? 0;
+                        const deadline = Date.now() + 8_000;
+                        let current = await this.lspHandler.getDiagnostics({ file: file.path, severity: 'all', limit: 2000 }, context);
+                        while ((current.freshness !== 'fresh' || (current.lastEpoch ?? 0) <= baselineEpoch) && Date.now() < deadline) {
+                            await new Promise(resolve => setTimeout(resolve, 100));
+                            current = await this.lspHandler.getDiagnostics({ file: file.path, severity: 'all', limit: 2000 }, context);
+                        }
+                        if (current.freshness !== 'fresh' || (current.lastEpoch ?? 0) <= baselineEpoch) {
+                            return { ok: false, error: `Rollback diagnostics did not become fresh for ${file.path}.` };
+                        }
+                    }
+                    return { ok: true };
+                },
                 validateDisk: async committedFiles => {
                     await this.requestRevalidateFiles(committedFiles.map(file => file.path));
                     let valid = true;
@@ -812,7 +930,7 @@ export class AgentToolExecutor {
                     }
                     return { ok: valid, error: valid ? undefined : 'Candidate commit introduced errors or diagnostics were not fresh.' };
                 },
-            });
+            }), { waitTimeoutMs: 30_000, timeoutMessage: 'Candidate commit timed out waiting for file locks.' });
             this.parentRunnerOptions?.vfsOverlay?.clear();
             this.candidateOwnerScope = undefined;
             return { success: commit.committed, action: args.action, transactionId, state: commit.state, files: commit.files, commit, diagnosticDeltas: deltas, error: commit.error };
@@ -943,7 +1061,9 @@ export class AgentToolExecutor {
         if (subject === 'edit' && effectiveWriteMode === 'auto' && preset !== 'read-only') {
             profileRules.push({ id: 'effective-auto-write', subject: 'edit', pathGlob: '**', action: 'allow', riskMax: 2, scope: 'session' });
         }
-        const targets = getAgentToolTargetFiles(toolName, args, this.workspaceRoot, context?.runnerOptions?.topicId);
+        const targets = toolName === 'candidate_transaction' && args.action === 'commit'
+            ? this.candidateTransactions.files.map(file => file.path)
+            : getAgentToolTargetFiles(toolName, args, this.workspaceRoot, context?.runnerOptions?.topicId);
         const profile = buildProfile(preset, this.workspaceRoot, profileRules);
         const topicId = context?.runnerOptions?.topicId;
         if (subject === 'edit' && topicId && targets.length > 0) {
@@ -2230,6 +2350,18 @@ export class AgentToolExecutor {
                 result = await this.lspHandler.renameSymbol(args as any, context); break;
             case 'verify_pdx_identifier':
                 result = await this.lspHandler.verifyPdxIdentifier(args as any); break;
+            case 'solve_scope_bridge': {
+                const input = args as unknown as import('./types').SolveScopeBridgeArgs;
+                result = solveScopeBridge(input); break;
+            }
+            case 'extract_archetype_slots': {
+                const input = args as unknown as import('./types').ExtractArchetypeSlotsArgs;
+                result = { success: true, archetype: extractArchetypeSlots(input.text, input.placeholders) }; break;
+            }
+            case 'instantiate_archetype': {
+                const input = args as unknown as import('./types').InstantiateArchetypeArgs;
+                result = { success: true, content: instantiateArchetypeSlots(input.archetype, input.values) }; break;
+            }
             case 'get_pdx_block':
                 result = await this.lspHandler.getPdxBlock(args as any, context); break;
             case 'lsp_operation':

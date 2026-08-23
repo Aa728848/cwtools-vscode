@@ -694,6 +694,45 @@ const RAW_TOOL_DEFINITIONS: ToolDefinition[] = [
     {
         type: 'function',
         function: {
+            name: 'solve_scope_bridge',
+            description: 'Find bounded evidence-backed CWT scope transitions. Returns deterministic paths only from supplied rule evidence.',
+            parameters: {
+                type: 'object',
+                properties: {
+                    fromScope: { type: 'string' },
+                    toScope: { type: 'string' },
+                    candidates: {
+                        type: 'array', maxItems: 200,
+                        items: {
+                            type: 'object',
+                            properties: { name: { type: 'string' }, supportedScopes: { type: 'array', items: { type: 'string' } }, pushScope: { type: 'string' }, evidence: { type: 'array', items: { type: 'string' } } },
+                            required: ['name', 'supportedScopes', 'pushScope', 'evidence'], additionalProperties: false,
+                        },
+                    },
+                },
+                required: ['fromScope', 'toScope', 'candidates'], additionalProperties: false,
+            },
+        },
+    },
+    {
+        type: 'function',
+        function: {
+            name: 'extract_archetype_slots',
+            description: 'Extract a bounded typed slot contract and immutable hash from a reviewed PDX archetype. Placeholders must be complete scalar values.',
+            parameters: { type: 'object', properties: { text: { type: 'string' }, placeholders: { type: 'object' } }, required: ['text', 'placeholders'], additionalProperties: false },
+        },
+    },
+    {
+        type: 'function',
+        function: {
+            name: 'instantiate_archetype',
+            description: 'Fill a previously extracted immutable archetype using typed scalar values only. Raw script text is rejected.',
+            parameters: { type: 'object', properties: { archetype: { type: 'object' }, values: { type: 'object' } }, required: ['archetype', 'values'], additionalProperties: false },
+        },
+    },
+    {
+        type: 'function',
+        function: {
             name: 'typed_pdx_write',
             description: 'Build a bounded typed Stellaris/PDXScript candidate without accepting raw script text. Preview by default; stage stores the candidate in the active candidate transaction.',
             parameters: {
@@ -707,7 +746,7 @@ const RAW_TOOL_DEFINITIONS: ToolDefinition[] = [
                         type: 'object',
                         description: 'One typed mutation. Raw code/oldString/newString fields are rejected.',
                         properties: {
-                            operation: { type: 'string', enum: ['clone_definition', 'add_event_call', 'add_event_option', 'append_trigger_condition', 'instantiate_inline_script'] },
+                            operation: { type: 'string', enum: ['clone_definition', 'add_event_call', 'add_event_option', 'append_trigger_condition', 'instantiate_inline_script', 'set_definition_field', 'delete_definition_field', 'add_definition_field', 'add_scripted_effect_call', 'add_scripted_trigger_call', 'add_on_action_entry', 'bind_event_target', 'clear_event_target', 'add_variable_transition'] },
                             source: { type: 'string' },
                             newSymbol: { type: 'string' },
                             target: { type: 'string' },
@@ -720,6 +759,40 @@ const RAW_TOOL_DEFINITIONS: ToolDefinition[] = [
                             condition: { type: 'object' },
                             script: { type: 'string' },
                             arguments: { type: 'array', items: { type: 'object' } },
+                            path: { type: 'array', items: { type: 'object' }, description: 'Exact one-based PDX field path for definition field mutations.' },
+                            value: { type: 'object', description: 'Bounded typed PdxValue.' },
+                            entry: { type: 'object', description: 'Bounded typed PdxEntry.' },
+                            effect: { type: 'string' },
+                            trigger: { type: 'string' },
+                            onAction: { type: 'string' },
+                            eventTarget: { type: 'string' },
+                            variable: { type: 'string' },
+                            transition: { type: 'string', enum: ['set_variable', 'change_variable', 'multiply_variable', 'divide_variable'] },
+                            overrides: {
+                                type: 'array',
+                                maxItems: 64,
+                                description: 'Structured clone changes applied in order. Paths use exact keys and an explicit one-based occurrence; raw text is not accepted.',
+                                items: {
+                                    type: 'object',
+                                    properties: {
+                                        action: { type: 'string', enum: ['set', 'delete', 'append'] },
+                                        path: {
+                                            type: 'array',
+                                            items: {
+                                                type: 'object',
+                                                properties: {
+                                                    key: { type: 'string' },
+                                                    occurrence: { type: 'number', description: 'One-based occurrence among sibling entries with the same key.' },
+                                                },
+                                                required: ['key', 'occurrence'],
+                                            },
+                                        },
+                                        value: { type: 'object', description: 'Required for set; one bounded PdxValue.' },
+                                        entry: { type: 'object', description: 'Required for append; one typed PdxEntry.' },
+                                    },
+                                    required: ['action', 'path'],
+                                },
+                            },
                         },
                         required: ['operation'],
                     },
@@ -732,13 +805,13 @@ const RAW_TOOL_DEFINITIONS: ToolDefinition[] = [
         type: 'function',
         function: {
             name: 'candidate_transaction',
-            description: 'Manage one bounded candidate transaction. begin creates an overlay; validate marks the staged fingerprint; commit atomically materializes candidates and rolls back if fresh diagnostics introduce errors; discard removes candidates.',
+            description: 'Manage one bounded candidate transaction. begin creates an overlay; validate runs host semantic evidence plus detached LSP parser/catalog validation without writing disk; commit atomically materializes validated candidates and rolls back if fresh diagnostics introduce errors; discard removes candidates.',
             parameters: {
                 type: 'object',
                 properties: {
                     action: { type: 'string', enum: ['begin', 'validate', 'commit', 'discard', 'status'] },
                     transactionId: { type: 'string', description: 'Required after begin.' },
-                    validationPassed: { type: 'boolean', description: 'Host/model static validation result for the exact staged fingerprint.' },
+                    validationPassed: { type: 'boolean', description: 'Optional explicit veto for the exact staged fingerprint. The host always runs detached overlay validation and never trusts this flag as proof.' },
                 },
                 required: ['action'],
             },

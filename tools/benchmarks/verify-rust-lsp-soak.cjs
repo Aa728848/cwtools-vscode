@@ -133,6 +133,12 @@ function verifyReport(report, options = {}) {
   if (report.lane === 'final') {
     if (!isObject(report.completionIdentity) || !isObject(report.completionIdentity.repository)) add(errors, 'final report requires completion repository identity');
     else if (report.completionIdentity.repository.workingTree !== 'clean' || report.completionIdentity.repository.commit !== report.repository.commit || report.completionIdentity.repository.tree !== report.repository.tree) add(errors, 'repository identity drifted during final soak');
+    if (!Array.isArray(report.repositories) || !Array.isArray(report.completionIdentity?.repositories) || report.repositories.length !== 4 || report.completionIdentity.repositories.length !== report.repositories.length) add(errors, 'final report requires all repository identities');
+    else for (let index = 0; index < report.repositories.length; index += 1) {
+      const started = report.repositories[index];
+      const completed = report.completionIdentity.repositories[index];
+      if (!isObject(started) || !isObject(completed) || started.root !== completed.root || started.commit !== completed.commit || started.tree !== completed.tree || started.workingTree !== 'clean' || completed.workingTree !== 'clean') add(errors, 'nested repository identity drifted during final soak');
+    }
     if (report.completionIdentity?.artifactSha256 !== report.artifact?.sha256) add(errors, 'release artifact changed during final soak');
   }
   return errors;

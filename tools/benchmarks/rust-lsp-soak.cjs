@@ -198,6 +198,24 @@ function gitIdentity(root) {
   };
 }
 
+const REPOSITORY_ROOTS = [
+  ROOT,
+  path.join(ROOT, 'submodules', 'cwtools'),
+  path.join(ROOT, 'submodules', 'cwtools-mcp'),
+  path.join(ROOT, 'submodules', 'cwtools-stellaris-config'),
+];
+
+function repositoryIdentities() {
+  return REPOSITORY_ROOTS.map(gitIdentity);
+}
+
+function repositoryIdentitiesMatch(start, finish) {
+  return Array.isArray(start) && Array.isArray(finish) && start.length === finish.length && start.every((identity, index) => {
+    const completed = finish[index];
+    return completed && completed.workingTree === 'clean' && completed.root === identity.root && completed.commit === identity.commit && completed.tree === identity.tree;
+  });
+}
+
 function stageStandaloneArtifact(serverPath) {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'cwtools-rust-lsp-soak-'));
   const name = process.platform === 'win32' ? 'cwtools-lsp.exe' : 'cwtools-lsp';
@@ -563,6 +581,7 @@ async function run(options) {
     elapsedMs: null,
     lane: options.iterationsExplicit || (options.minutesExplicit && options.minutes !== DEFAULT_MINUTES) ? 'smoke' : 'final',
     repository: gitIdentity(ROOT),
+    repositories: repositoryIdentities(),
     artifact,
     completionIdentity: null,
     configuration: {
@@ -639,11 +658,13 @@ async function run(options) {
     }
     report.rss.growth = analyzeGrowth(report.rss.samples, { minimumSamples: 8, windowSize: 4 });
     const finalRepository = gitIdentity(ROOT);
+    const finalRepositories = repositoryIdentities();
     const finalArtifactSha256 = fs.existsSync(serverPath) ? await sha256File(serverPath) : null;
-    report.completionIdentity = { repository: finalRepository, artifactSha256: finalArtifactSha256 };
+    report.completionIdentity = { repository: finalRepository, repositories: finalRepositories, artifactSha256: finalArtifactSha256 };
     if (report.lane === 'final' && (finalRepository.workingTree !== 'clean' || finalRepository.commit !== report.repository.commit || finalRepository.tree !== report.repository.tree)) {
       report.errors.push('repository identity drifted during final soak');
     }
+    if (report.lane === 'final' && !repositoryIdentitiesMatch(report.repositories, finalRepositories)) report.errors.push('nested repository identity drifted during final soak');
     if (report.lane === 'final' && finalArtifactSha256 !== report.artifact.sha256) report.errors.push('release artifact changed during final soak');
     report.finishedAt = new Date().toISOString();
     report.elapsedMs = Date.now() - startedEpoch;

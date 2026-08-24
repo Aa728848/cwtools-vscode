@@ -1,9 +1,27 @@
 'use strict';
-const assert=require('assert');
-const { verifyReport }=require('./verify-rust-lsp-soak.cjs');
-function report(){return {schemaVersion:1,reportType:'cwtools.rust-lsp-soak',workloadVersion:'v',startedAt:new Date(0).toISOString(),finishedAt:new Date(86400000).toISOString(),elapsedMs:86400000,lane:'final',repository:{root:'x',commit:'abc',tree:'tree',workingTree:'clean'},artifact:{requestedPath:'server',bytes:1,sha256:'a'.repeat(64),staged:true,workerIsolation:'standalone-rust-artifact'},completionIdentity:{repository:{root:'x',commit:'abc',tree:'tree',workingTree:'clean'},artifactSha256:'a'.repeat(64)},configuration:{requestedMinutes:1440,requestedIterations:0,sampleIntervalMs:1000},workload:{queryMethods:['a','b','c','d','e'],documentOperations:['didChange'],lifecycle:['initialize','initialized','shutdown','exit'],cancellation:'cancel'},counters:{iterations:1,sessions:1,restarts:0,messagesSent:1,notificationsSent:1,requestsSent:1,cancelRequestsSent:1,queryResponses:1,expectedQueryErrors:0,queryResults:1,unexpectedResponses:0,cleanLifecycles:1,deadlocks:0,timeouts:0,orphanedProcesses:0,protocolErrors:0,unexpectedExits:0},sessions:[{session:1,pid:1,clean:true,forcedTermination:false,orphanCheck:{rootPidGone:true},exit:{code:0,signal:null}}],rss:{source:'server-process',sampleAttempts:8,unavailableSampleCount:0,numericSampleCount:8,peakRssBytes:1,samples:Array.from({length:8},()=>({source:'server-process',pid:1,rssBytes:1})),growth:{detected:false,passed:true}},passCriteria:{finalLaneUsesExactly1440Minutes:true,rustOnlyStagedArtifact:true,allRequestedIterationsCompleted:true,lifecycleAndRestartClean:true,noDeadlockOrTimeout:true,noOrphanedServerProcess:true,noProtocolErrors:true,serverRssSampled:true,noSustainedServerRssGrowth:true},passed:true,errors:[]};}
-assert.deepStrictEqual(verifyReport(report(),{final:true}),[]);
-const dirty=report();dirty.completionIdentity.repository.workingTree='dirty';assert(verifyReport(dirty,{final:true}).some(e=>e.includes('repository identity drifted')));
-const changed=report();changed.completionIdentity.artifactSha256='b'.repeat(64);assert(verifyReport(changed,{final:true}).some(e=>e.includes('artifact changed')));
-const short=report();short.elapsedMs=100;assert(verifyReport(short,{final:true}).some(e=>e.includes('shorter')));
+const assert = require('assert');
+const { verifyReport } = require('./verify-rust-lsp-soak.cjs');
+function identity(root, commit) { return { root, commit, tree: commit + '-tree', workingTree: 'clean' }; }
+function report() {
+  const repositories = ['root', 'core', 'mcp', 'rules'].map((root, index) => identity(root, 'c' + index));
+  return {
+    schemaVersion: 1, reportType: 'cwtools.rust-lsp-soak', workloadVersion: 'v',
+    startedAt: new Date(0).toISOString(), finishedAt: new Date(86400000).toISOString(), elapsedMs: 86400000, lane: 'final',
+    repository: repositories[0], repositories,
+    artifact: { requestedPath: 'server', bytes: 1, sha256: 'a'.repeat(64), staged: true, workerIsolation: 'standalone-rust-artifact' },
+    completionIdentity: { repository: { ...repositories[0] }, repositories: repositories.map(value => ({ ...value })), artifactSha256: 'a'.repeat(64) },
+    configuration: { requestedMinutes: 1440, requestedIterations: 0, sampleIntervalMs: 1000 },
+    workload: { queryMethods: ['a', 'b', 'c', 'd', 'e'], documentOperations: ['didChange'], lifecycle: ['initialize', 'initialized', 'shutdown', 'exit'], cancellation: 'cancel' },
+    counters: { iterations: 1, sessions: 1, restarts: 0, messagesSent: 1, notificationsSent: 1, requestsSent: 1, cancelRequestsSent: 1, queryResponses: 1, expectedQueryErrors: 0, queryResults: 1, unexpectedResponses: 0, cleanLifecycles: 1, deadlocks: 0, timeouts: 0, orphanedProcesses: 0, protocolErrors: 0, unexpectedExits: 0 },
+    sessions: [{ session: 1, pid: 1, clean: true, forcedTermination: false, orphanCheck: { rootPidGone: true }, exit: { code: 0, signal: null } }],
+    rss: { source: 'server-process', sampleAttempts: 8, unavailableSampleCount: 0, numericSampleCount: 8, peakRssBytes: 1, samples: Array.from({ length: 8 }, () => ({ source: 'server-process', pid: 1, rssBytes: 1 })), growth: { detected: false, passed: true } },
+    passCriteria: { finalLaneUsesExactly1440Minutes: true, rustOnlyStagedArtifact: true, allRequestedIterationsCompleted: true, lifecycleAndRestartClean: true, noDeadlockOrTimeout: true, noOrphanedServerProcess: true, noProtocolErrors: true, serverRssSampled: true, noSustainedServerRssGrowth: true },
+    passed: true, errors: [],
+  };
+}
+assert.deepStrictEqual(verifyReport(report(), { final: true }), []);
+const dirty = report(); dirty.completionIdentity.repository.workingTree = 'dirty'; assert(verifyReport(dirty, { final: true }).some(error => error.includes('repository identity drifted')));
+const nested = report(); nested.completionIdentity.repositories[2].commit = 'changed'; assert(verifyReport(nested, { final: true }).some(error => error.includes('nested repository identity drifted')));
+const changed = report(); changed.completionIdentity.artifactSha256 = 'b'.repeat(64); assert(verifyReport(changed, { final: true }).some(error => error.includes('artifact changed')));
+const short = report(); short.elapsedMs = 100; assert(verifyReport(short, { final: true }).some(error => error.includes('shorter')));
 console.log('Final soak verifier regression tests passed.');

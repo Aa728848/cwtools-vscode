@@ -8,7 +8,6 @@
         "check:mcp-schema": "node tools/generate-mcp-schema.cjs --check",
         "pack": "powershell -ExecutionPolicy Bypass -File ./package.ps1",
         "pack:install": "powershell -ExecutionPolicy Bypass -File ./package.ps1 -Install",
-        "pack:quick": "powershell -ExecutionPolicy Bypass -File ./package.ps1 -SkipServer -Install",
         "pack:release": "powershell -ExecutionPolicy Bypass -File ./package.ps1 -Publish",
         "rules:stellaris": "node tools/rules-sync/stellaris-rules-sync.js",
         "rules:stellaris:scan": "node tools/rules-sync/stellaris-rules-sync.js scan",
@@ -34,13 +33,11 @@
         "check:lsp-contract": "node tools/contracts/check-lsp-manifest.cjs",
         "test:rust-core": "cargo test --manifest-path submodules/cwtools/Cargo.toml --workspace --all-targets",
         "test:rust-lsp": "cargo test --manifest-path rust/Cargo.toml --workspace --all-targets",
-        "test:rust-transport": "node tools/lsp-transcript/transport-negative.cjs",
         "baseline:rust-transport": "node tools/benchmarks/transport-overhead.cjs",
         "soak:rust-smoke": "node tools/benchmarks/rust-lsp-soak.cjs --iterations 3 --restart-every 1 --delay-ms 0",
         "soak:rust-24h": "node tools/benchmarks/rust-lsp-soak.cjs --minutes 1440",
         "soak:rust-verify": "node tools/benchmarks/verify-rust-lsp-soak.cjs --report benchmarks/results/rust-lsp-soak.json --final",
-        "test:rust-parser-fuzz": "node tools/benchmarks/parser-fuzz-smoke.cjs",
-        "benchmark:rust-parser-performance": "node tools/benchmarks/parser-performance.cjs"
+        "test:rust-parser-fuzz": "node tools/benchmarks/parser-fuzz-smoke.cjs"
     },
     "dependencies": {
         "google-translate-api-x": "^10.7.2",

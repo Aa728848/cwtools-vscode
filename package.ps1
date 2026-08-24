@@ -11,7 +11,6 @@
 param (
     [string]$Version,
     [switch]$Install,
-    [switch]$SkipServer,
     [switch]$SkipClient,
     [switch]$IncludeMcp,
     [switch]$Publish,
@@ -23,18 +22,16 @@ if ($Version) {
         node -e 'const fs=require("fs");const f=process.argv[1];const p=JSON.parse(fs.readFileSync(f,"utf8"));p.version=process.argv[2];fs.writeFileSync(f,JSON.stringify(p,null,4)+"\n")' $file $Version
     }
 }
-if (-not $SkipServer) {
-    $Target = if ($IsWindows -or $env:OS -eq "Windows_NT") { "x86_64-pc-windows-msvc" } elseif ($IsMacOS) { "x86_64-apple-darwin" } else { "x86_64-unknown-linux-gnu" }
-    $Rid = if ($IsWindows -or $env:OS -eq "Windows_NT") { "win-x64" } elseif ($IsMacOS) { "osx-x64" } else { "linux-x64" }
-    $SourceName = if ($Rid -eq "win-x64") { "cwtools-lsp.exe" } else { "cwtools-lsp" }
-    $DestinationName = if ($Rid -eq "win-x64") { "CWTools Server.exe" } else { "CWTools Server" }
-    cargo build --manifest-path rust/Cargo.toml --release --locked --target $Target
-    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-    $Source = Join-Path $PSScriptRoot "rust/target/$Target/release/$SourceName"
-    $DestinationDir = Join-Path $PSScriptRoot "release/bin/server/$Rid"
-    New-Item -ItemType Directory -Path $DestinationDir -Force | Out-Null
-    Copy-Item -LiteralPath $Source -Destination (Join-Path $DestinationDir $DestinationName) -Force
-}
+$Target = if ($IsWindows -or $env:OS -eq "Windows_NT") { "x86_64-pc-windows-msvc" } elseif ($IsMacOS) { "x86_64-apple-darwin" } else { "x86_64-unknown-linux-gnu" }
+$Rid = if ($IsWindows -or $env:OS -eq "Windows_NT") { "win-x64" } elseif ($IsMacOS) { "osx-x64" } else { "linux-x64" }
+$SourceName = if ($Rid -eq "win-x64") { "cwtools-lsp.exe" } else { "cwtools-lsp" }
+$DestinationName = if ($Rid -eq "win-x64") { "CWTools Server.exe" } else { "CWTools Server" }
+cargo build --manifest-path rust/Cargo.toml --release --locked --target $Target
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+$Source = Join-Path $PSScriptRoot "rust/target/$Target/release/$SourceName"
+$DestinationDir = Join-Path $PSScriptRoot "release/bin/server/$Rid"
+New-Item -ItemType Directory -Path $DestinationDir -Force | Out-Null
+Copy-Item -LiteralPath $Source -Destination (Join-Path $DestinationDir $DestinationName) -Force
 
 # 3. Compile Client TypeScript
 if (-not $SkipClient) {

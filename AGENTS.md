@@ -79,8 +79,8 @@ changing these docs; it also regenerates `release/README.md` from `README.md`.
 - `client/extension/`: VS Code Extension Host code.
 - `client/extension/ai/`: AI runtime, tools, workflows, memory, and orchestration.
 - `client/webview/`: browser-sandboxed Webviews.
-- `src/LSP/`, `src/Main/`: .NET 10 / F# language server.
-- `submodules/cwtools/`: upstream F# library.
+- `rust/cwtools-lsp/`: standalone Rust stdio language server.
+- `submodules/cwtools/`: reusable Rust parser, rules, workspace, game, Shader, and semantic crates.
 - `submodules/cwtools-stellaris-config/`: Stellaris CWT rules data.
 - `submodules/cwtools-mcp/`: standalone read-only MCP server (`cwtools-shared` +
   `cwtools-mcp` packages), a separate repository vendored as a submodule. The
@@ -128,7 +128,7 @@ must retain V2 compatibility. Read `ARCHITECTURE.md` before large runner changes
 - Add new semantic capability as a `cwtools.ai.*` LSP command first.
 - Keep tool names and schema generation inputs synchronized; do not hand-edit
   `submodules/cwtools-mcp/packages/cwtools-shared/src/generated/mcpTools.ts`.
-- Add read-only LSP commands to `LanguageServer.fs` `isReadCmd`.
+- Add read-only LSP commands to the Rust command manifest and dispatch in `rust/cwtools-lsp/`.
 - Tool-schema workflow after changing `client/extension/ai/tools/definitions.ts`:
   run `npm run generate:mcp-schema` (writes into the submodule), commit and push
   inside `submodules/cwtools-mcp`, then bump the root submodule pointer. Publish
@@ -137,16 +137,9 @@ must retain V2 compatibility. Read `ARCHITECTURE.md` before large runner changes
 - MCP builds and contract tests run inside the submodule:
   `cd submodules/cwtools-mcp && npm run build && npm run test:contracts`.
 
-### F# and shader work (`src/`, `submodules/cwtools/`)
+### Rust core and Shader work (`rust/`, `submodules/cwtools/`)
 
-Reuse `PdxShaderFeatures`; cache expensive parsing where supported, use
-bracket-depth scanning for nested blocks, preserve escaped-quote handling, and
-use case-insensitive path comparison only on Windows.
-
-Incremental scripted-type refresh spans `src/Main/Program.fs` and the upstream
-CWTools submodule. Only Stellaris has a real incremental implementation. When
-changing it, compare incremental results with a full refresh and keep submodule
-and root commits separate.
+Reuse the shared Rust Shader and workspace crates; cache expensive parsing where supported, preserve escaped-quote handling, and use case-insensitive path comparison only on Windows. Incremental changes must be regression-tested against a clean full rebuild, including additions, edits, removals, renames, and overlay transitions. Keep submodule and root commits separate.
 
 ## Verification
 
@@ -164,15 +157,10 @@ Run the narrowest useful checks, then broaden according to risk:
   separately via `npm run test:shader-lsp`). Fixture workspace settings are
   created by `tools/copy-test-fixtures.js` with Stellaris language associations
   (`*.txt/gui/gfx/asset/cwt -> stellaris`) and the vendored
-  `submodules/cwtools-stellaris-config/config` rules. The Stellaris game model
-  needs vanilla data (game install or `stl.cwb` cache) and takes ~20s to build;
-  when neither exists the server degrades to the generic game (see
-  `hasStellarisVanillaData` in `src/Main/GameLoader.fs`).
+  `submodules/cwtools-stellaris-config/config` rules. The Stellaris game model uses vanilla data when available and otherwise degrades safely to the generic profile.
 - MCP: `npm run generate:mcp-schema`, then inside `submodules/cwtools-mcp`:
   `npm run build` and `npm run test:contracts`.
-- F# backend: `dotnet build src/LSP/` and/or `dotnet build src/Main/`, plus the
-  `src/**/*.Tests.fsx` regression scripts via `dotnet fsi` (run from each
-  script's directory).
+- Rust backend: `cargo test --manifest-path rust/Cargo.toml --workspace --all-targets` and `cargo clippy --manifest-path rust/Cargo.toml --workspace --all-targets -- -D warnings`; run the equivalent workspace gates inside `submodules/cwtools`.
 - Broad pre-release gate: `npm run verify`.
 
 If a relevant check cannot run, report that explicitly instead of silently

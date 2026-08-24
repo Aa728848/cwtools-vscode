@@ -259,18 +259,13 @@ function runShaderAbiAutoMerge(opts) {
     }
     const shaderOut = path.join(opts.out, 'shader-abi');
     const inventoryPath = path.join(shaderOut, 'shader-abi-inventory.json');
-    const cliProject = path.join(repoRoot, 'submodules', 'cwtools', 'CWToolsCLI', 'CWToolsCLI.fsproj');
-    const inventoryArgs = [
-        'run', '--project', cliProject, '--no-restore', '--',
-        '--game', 'STL', '--directory', gamePath,
-        'shader-abi-inventory',
-    ];
-    if (opts.version && opts.version !== 'local') inventoryArgs.push('--gameversion', opts.version);
-    inventoryArgs.push(inventoryPath);
     fs.mkdirSync(shaderOut, { recursive: true });
-    console.log('[rules-sync] shader-abi: scanning gfx/FX and auto-merging into config/shader');
+    console.log('[rules-sync] shader-abi: use the Rust Shader LSP inventory command before merging');
     console.log(`[rules-sync] gamePath=${gamePath}`);
-    run('dotnet', inventoryArgs, false, opts.ci);
+    if (!fs.existsSync(inventoryPath)) {
+        console.log('[rules-sync] shader-abi skipped: no Rust-generated inventory found.');
+        return '';
+    }
     const syncScript = path.join(repoRoot, 'tools', 'rules-sync', 'shader-abi-sync.ts');
     runTsNode(syncScript, ['--inventory', inventoryPath, '--config', opts.config, '--output', shaderOut], false, opts.ci);
     return path.join(shaderOut, 'shader-abi-merge-report.json');

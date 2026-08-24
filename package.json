@@ -38,7 +38,7 @@
         "baseline:rust-transport": "node tools/benchmarks/transport-overhead.cjs",
         "soak:rust-smoke": "node tools/benchmarks/rust-lsp-soak.cjs --iterations 3 --restart-every 1 --delay-ms 0",
         "soak:rust-24h": "node tools/benchmarks/rust-lsp-soak.cjs --minutes 1440",
-        "soak:rust-verify": "node tools/benchmarks/verify-rust-lsp-soak.cjs --report benchmarks/results/rust-lsp-soak.json",
+        "soak:rust-verify": "node tools/benchmarks/verify-rust-lsp-soak.cjs --report benchmarks/results/rust-lsp-soak.json --final",
         "test:rust-parser-fuzz": "node tools/benchmarks/parser-fuzz-smoke.cjs",
         "benchmark:rust-parser-performance": "node tools/benchmarks/parser-performance.cjs"
     },

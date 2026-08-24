@@ -70,7 +70,7 @@ function verifyReport(report, options = {}) {
     if (typeof report.artifact.requestedPath !== 'string' || report.artifact.requestedPath.length === 0) add(errors, 'artifact.requestedPath is required');
     if (!integer(report.artifact.bytes) || report.artifact.bytes <= 0) add(errors, 'artifact.bytes must be positive');
     if (typeof report.artifact.sha256 !== 'string' || !/^[a-f0-9]{64}$/i.test(report.artifact.sha256)) add(errors, 'artifact.sha256 must be a SHA-256 hex digest');
-    if (report.artifact.staged !== true || report.artifact.workerIsolation !== 'staged-no-fsharp-worker') add(errors, 'artifact must be staged with F# worker isolation');
+    if (report.artifact.staged !== true || report.artifact.workerIsolation !== 'standalone-rust-artifact') add(errors, 'artifact must be a staged standalone Rust server');
   }
 
   const configuration = report.configuration;

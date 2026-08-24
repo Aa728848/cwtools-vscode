@@ -520,10 +520,7 @@ export function diagnosticMatchesIgnoredKey(
 
 // ---- Localisation warning folding ----
 
-/**
- * CW codes the F# server classifies as localisation diagnostics. Mirror of
- * `localisationDiagnosticCodes` in src/Main/Program.fs — keep the two in sync.
- */
+/** Localisation diagnostic codes exposed by the Rust language-server contract. */
 const LOCALISATION_CODES = new Set([
     'CW100', 'CW225', 'CW226', 'CW234', 'CW254', 'CW255',
     'CW256', 'CW257', 'CW258', 'CW259', 'CW260', 'CW266',

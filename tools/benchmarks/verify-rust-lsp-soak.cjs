@@ -116,7 +116,8 @@ function verifyReport(report, options = {}) {
     if (rss.source !== 'server-process') add(errors, 'RSS source must be server-process, never Node memory');
     for (const key of ['sampleAttempts', 'unavailableSampleCount', 'numericSampleCount']) if (!integer(rss[key]) || rss[key] < 0) add(errors, 'rss.' + key + ' must be a non-negative integer');
     if (!Array.isArray(rss.samples) || rss.samples.length !== rss.numericSampleCount) add(errors, 'RSS sample count is inconsistent');
-    if (rss.numericSampleCount < 8) add(errors, 'at least eight server RSS samples are required');
+    const requiredSamples = report.lane === 'final' ? 100 : 8;
+    if (rss.numericSampleCount < requiredSamples) add(errors, 'at least ' + requiredSamples + ' server RSS samples are required');
     if (!integer(rss.peakRssBytes) || rss.peakRssBytes <= 0) add(errors, 'peak server RSS is required');
     if (Array.isArray(rss.samples)) for (const sample of rss.samples) {
       if (!isObject(sample) || sample.source !== 'server-process' || !integer(sample.pid) || !integer(sample.rssBytes) || sample.rssBytes <= 0) add(errors, 'invalid server RSS sample');

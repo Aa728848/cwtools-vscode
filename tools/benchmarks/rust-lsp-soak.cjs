@@ -25,6 +25,8 @@ const DEFAULT_TIMEOUT_MS = 10000;
 const DEFAULT_RESTART_EVERY = 60;
 const DEFAULT_DELAY_MS = 1000;
 const DEFAULT_SEED = 0x5eed2026;
+const FINAL_MIN_RSS_SAMPLES = 100;
+const SMOKE_MIN_RSS_SAMPLES = 8;
 const MAX_FRAME_BYTES = 16 * 1024 * 1024;
 const EXPECTED_STANDALONE_QUERY_ERRORS = new Set([-32601, -32602]);
 const QUERY_METHODS = [
@@ -553,7 +555,7 @@ function buildPassCriteria(report, growth) {
     noDeadlockOrTimeout: report.counters.deadlocks === 0 && report.counters.timeouts === 0,
     noOrphanedServerProcess: report.counters.orphanedProcesses === 0,
     noProtocolErrors: report.counters.protocolErrors === 0 && report.counters.unexpectedResponses === 0,
-    serverRssSampled: report.rss.source === 'server-process' && report.rss.numericSampleCount >= 8,
+    serverRssSampled: report.rss.source === 'server-process' && report.rss.numericSampleCount >= (finalLane ? FINAL_MIN_RSS_SAMPLES : SMOKE_MIN_RSS_SAMPLES),
     noSustainedServerRssGrowth: growth.passed,
   };
 }
@@ -657,7 +659,8 @@ async function run(options) {
     if (session) {
       try { await closeSession(session, report); } catch (error) { report.errors.push('cleanup: ' + String(error && error.stack || error)); }
     }
-    report.rss.growth = analyzeGrowth(report.rss.samples, { minimumSamples: 8, windowSize: 4 });
+    const requiredRssSamples = report.lane === 'final' ? FINAL_MIN_RSS_SAMPLES : SMOKE_MIN_RSS_SAMPLES;
+    report.rss.growth = analyzeGrowth(report.rss.samples, { minimumSamples: requiredRssSamples, windowSize: report.lane === 'final' ? 10 : 4 });
     const finalRepository = gitIdentity(ROOT);
     const finalRepositories = repositoryIdentities();
     const finalArtifactSha256 = fs.existsSync(serverPath) ? await sha256File(serverPath) : null;

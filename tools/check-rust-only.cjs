@@ -15,6 +15,7 @@ const forbiddenDirectoryNames = [
   /(?:^|[-_])fsharp(?:$|[-_])/i,
   /(?:^|[-_])oracle(?:$|[-_])/i,
   /^differential$/i,
+  /^CWToolsTests$/i,
 ];
 
 function relative(file) {

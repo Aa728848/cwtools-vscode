@@ -91,6 +91,42 @@ jobs:
           path: release/bin/server/${{ matrix.rid }}/${{ matrix.staged }}
           if-no-files-found: error
 
+  universal-vsix:
+    needs: [typescript, rust-release-artifacts]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { submodules: recursive }
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm }
+      - run: npm ci
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: cwtools-server-*
+          path: release/bin/server
+          merge-multiple: false
+      - name: Normalize downloaded server layout
+        shell: bash
+        run: |
+          for rid in win-x64 linux-x64 osx-x64; do
+            test -d "release/bin/server/cwtools-server-$rid"
+            rm -rf "release/bin/server/$rid"
+            mv "release/bin/server/cwtools-server-$rid" "release/bin/server/$rid"
+          done
+          chmod +x "release/bin/server/linux-x64/CWTools Server" "release/bin/server/osx-x64/CWTools Server"
+      - run: npm run compile
+      - run: npm run build:docs
+      - run: npm run check:rust-only
+      - run: npm run check:release -- --skip-compile --skip-test
+      - name: Package universal VSIX
+        working-directory: release
+        run: npx @vscode/vsce package
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cwtools-universal-vsix
+          path: release/*.vsix
+          if-no-files-found: error
+
   mcp-contracts:
     runs-on: ubuntu-latest
     defaults:

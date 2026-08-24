@@ -27,7 +27,7 @@
         "lint": "eslint client/",
         "check:release": "node tools/check-release.js",
         "check:rust-only": "node tools/check-rust-only.cjs",
-        "verify": "npm run check:lsp-contract && npm run lint && npm run compile && npm run typecheck:test && npm run test:unit && npm run check:release -- --skip-compile --skip-test",
+        "verify": "npm run check:lsp-contract && npm run check:rust-only && npm run lint && npm run compile && npm run typecheck:test && npm run test:unit && npm run check:release -- --skip-compile --skip-test --host-only",
         "test:cwt-lsp": "npm run compile && tsc -p ./.config/tsconfig.cwt-test.json && vscode-test --config ./.config/vscode-test.cwt.js",
         "test:cwt-game-lsp": "npm run compile && tsc -p ./.config/tsconfig.cwt-test.json && vscode-test --config ./.config/vscode-test.cwt-game.js",
         "check:lsp-contract": "node tools/contracts/check-lsp-manifest.cjs",

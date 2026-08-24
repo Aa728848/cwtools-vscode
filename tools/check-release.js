@@ -31,6 +31,7 @@ const WARN = '\x1b[33m⚠\x1b[0m';
 const args = process.argv.slice(2);
 const skipCompile = args.includes('--skip-compile');
 const skipTest = args.includes('--skip-test');
+const hostOnly = args.includes('--host-only');
 
 let failures = 0;
 let warnings = 0;
@@ -440,15 +441,16 @@ function checkServerTree(relativeDir, required) {
     return invalid.length === 0;
 }
 
-check('Rust server binaries exist for staged platforms', () => {
-    const serverDir = path.join(RELEASE, 'bin', 'server');
-    if (!fs.existsSync(serverDir)) return false;
-    const platforms = fs.readdirSync(serverDir).filter(name => fs.statSync(path.join(serverDir, name)).isDirectory());
-    return platforms.length > 0 && platforms.every(platform => {
+if (hostOnly) {
+    check('Rust server binary exists for the current host', () => {
+        const platform = process.platform === 'win32' ? 'win-x64' : process.platform === 'darwin' ? 'osx-x64' : 'linux-x64';
         const executable = EXPECTED_SERVER_BINARIES[platform];
-        return executable && fs.existsSync(path.join(serverDir, platform, executable));
+        const binary = path.join(RELEASE, 'bin', 'server', platform, executable);
+        return fs.existsSync(binary) && fs.statSync(binary).isFile() && fs.statSync(binary).size > 0;
     });
-});
+} else {
+    check('Rust server binaries exist for every supported platform', () => checkServerTree('server', true));
+}
 
 // ── Summary ─────────────────────────────────────────────────────────────────
 

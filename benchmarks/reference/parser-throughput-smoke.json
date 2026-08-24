@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "fixture": "submodules/cwtools/CWToolsTests/testfiles/parsertests/simple.txt",
+  "fixture": "submodules/cwtools/fixtures/testfiles/parsertests/simple.txt",
   "fixtureBytes": 40,
   "iterations": 10000,
   "tokens": 19,

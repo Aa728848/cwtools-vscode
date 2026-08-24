@@ -1,0 +1,20 @@
+{
+  "version": 1,
+  "canonicalCodes": {
+    "RULE001": { "messageKey": "rules.syntax", "fsharpCodes": ["CW000"] },
+    "RULE101": { "messageKey": "rules.unknown_field", "fsharpCodes": ["CW262"] },
+    "RULE102": { "messageKey": "rules.expected_clause", "fsharpCodes": ["CW262"] },
+    "RULE103": { "messageKey": "rules.expected_scalar", "fsharpCodes": ["CW262"] },
+    "RULE110": { "messageKey": "rules.cardinality_minimum", "fsharpCodes": ["CW242"] },
+    "RULE111": { "messageKey": "rules.cardinality_maximum", "fsharpCodes": ["CW242"] },
+    "RULE120": { "messageKey": "rules.invalid_value", "fsharpCodes": ["CW240", "CW257"] },
+    "RULE130": { "messageKey": "rules.unresolved_reference", "fsharpCodes": [] },
+    "RULE140": { "messageKey": "rules.scope_mismatch", "fsharpCodes": ["CW244"] },
+    "RULE150": { "messageKey": "rules.depth_exceeded", "fsharpCodes": [] }
+  },
+  "rangePolicy": {
+    "rust": "precise-offending-token-or-overflow-occurrence",
+    "fsharpLegacy": "whole-assignment-or-clause-origin",
+    "approvedDifference": "Rust range precision is intentional and fixture-specific; semantic code and messageKey must still match."
+  }
+}

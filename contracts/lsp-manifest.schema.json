@@ -1,0 +1,119 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cwtools.example/contracts/lsp-manifest.schema.json",
+  "title": "CWTools LSP compatibility manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "protocol",
+    "initialization",
+    "capabilities",
+    "commands",
+    "notifications",
+    "invariants"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": 1
+    },
+    "protocol": {
+      "type": "object",
+      "required": [
+        "transport",
+        "framing",
+        "positionEncoding",
+        "maxFrameBytes",
+        "lifecycle"
+      ],
+      "additionalProperties": true
+    },
+    "initialization": {
+      "type": "object",
+      "required": [
+        "options",
+        "gameIds"
+      ],
+      "additionalProperties": true
+    },
+    "capabilities": {
+      "type": "object",
+      "required": [
+        "completionTriggerCharacters",
+        "semanticTokens"
+      ],
+      "additionalProperties": true
+    },
+    "commands": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "name",
+          "effect",
+          "advertised",
+          "handler"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "effect": {
+            "enum": [
+              "read",
+              "write",
+              "dynamic"
+            ]
+          },
+          "lockFree": {
+            "type": "boolean"
+          },
+          "advertised": {
+            "type": "boolean"
+          },
+          "handler": {
+            "type": "boolean"
+          },
+          "notes": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "notifications": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "name",
+          "direction"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "direction": {
+            "enum": [
+              "client-to-server",
+              "server-to-client"
+            ]
+          },
+          "payload": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "invariants": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    }
+  }
+}

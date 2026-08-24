@@ -1,0 +1,20 @@
+#!/usr/bin/env node
+'use strict';
+const { spawnSync } = require('child_process');
+const path = require('path');
+const { encodeMessage } = require('../lsp-transcript/lib/jsonrpc.cjs');
+const root = path.resolve(__dirname, '..', '..');
+const binary = path.join(root, 'rust', 'target', 'release', process.platform === 'win32' ? 'cwtools-lsp.exe' : 'cwtools-lsp');
+const samples = Number(process.argv[2] || 200);
+if (!Number.isSafeInteger(samples) || samples < 20 || samples > 10000) throw new Error('samples must be 20..10000');
+const frames = [];
+for (let id = 1; id <= samples; id += 1) frames.push(encodeMessage({ jsonrpc: '2.0', id, method: '$/cancelRequest', params: { id } }));
+const input = Buffer.concat(frames);
+const started = process.hrtime.bigint();
+const result = spawnSync(binary, ['--stdio'], { input, env: { ...process.env, CWTOOLS_FSHARP_WORKER: '' }, windowsHide: true, maxBuffer: 64 * 1024 * 1024 });
+const elapsedMs = Number(process.hrtime.bigint() - started) / 1e6;
+if (result.status !== 0) throw new Error('sidecar exited ' + result.status + ': ' + String(result.stderr));
+const perFrameMs = elapsedMs / samples;
+const report = { samples, elapsedMs, perFrameMs, gateMs: 2, passed: perFrameMs < 2 };
+console.log(JSON.stringify(report, null, 2));
+if (!report.passed) process.exitCode = 1;

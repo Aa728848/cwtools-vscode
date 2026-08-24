@@ -1,0 +1,33 @@
+{
+  "$schema": "./phase0-baseline.schema.json",
+  "schemaVersion": 1,
+  "workspace": "client/test/sample",
+  "server": "artifacts/bin/Main/debug/CWTools Server.exe",
+  "gameId": "paradox",
+  "operations": [
+    {
+      "id": "completion",
+      "method": "textDocument/completion",
+      "params": {
+        "textDocument": {
+          "uri": "<fileUri:events/irm.txt>"
+        },
+        "position": {
+          "line": 12,
+          "character": 0
+        },
+        "context": {
+          "triggerKind": 1
+        }
+      }
+    },
+    {
+      "id": "validation-readiness",
+      "method": "workspace/executeCommand",
+      "params": {
+        "command": "cwtools.ai.getValidationStatus",
+        "arguments": []
+      }
+    }
+  ]
+}

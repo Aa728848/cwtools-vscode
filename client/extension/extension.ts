@@ -1697,19 +1697,14 @@ export async function activate(context: ExtensionContext) {
 				{ open: "'", close: "'" }
 			]
 		})
-		// The server is implemented using dotnet core
-		let serverExe: string;
-		if (os.platform() == "win32") {
-			serverExe = context.asAbsolutePath(path.join('bin', 'server', 'win-x64', 'CWTools Server.exe'))
-		}
-		else if (os.platform() == "darwin") {
-			serverExe = context.asAbsolutePath(path.join('bin', 'server', 'osx-x64', 'CWTools Server'))
-			fs.chmodSync(serverExe, '755');
-		}
-		else {
-			serverExe = context.asAbsolutePath(path.join('bin', 'server', 'linux-x64', 'CWTools Server'))
-			fs.chmodSync(serverExe, '755');
-		}
+		const serverTarget = os.platform() === 'win32'
+			? { rid: 'win-x64', fileName: 'CWTools Server.exe' }
+			: os.platform() === 'darwin'
+				? { rid: 'osx-x64', fileName: 'CWTools Server' }
+				: { rid: 'linux-x64', fileName: 'CWTools Server' };
+		const serverExe = path.join(context.extensionPath, 'bin', 'server', serverTarget.rid, serverTarget.fileName);
+		if (os.platform() !== 'win32' && fs.existsSync(serverExe)) fs.chmodSync(serverExe, '755');
+		ErrorReporter.debug('Extension', `Rust language server path: ${serverExe}`);
 		
 		const repoPathStr = getRulesRemoteUrl(language);
 		const defaultRepoPath = repoPathStr;

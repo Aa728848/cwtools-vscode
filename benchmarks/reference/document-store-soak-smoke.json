@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "startedAt": "2026-08-24T04:38:31.698Z",
+  "finishedAt": "2026-08-24T04:38:32.954Z",
+  "elapsedMs": 1256,
+  "rounds": 5,
+  "platform": "win32",
+  "arch": "x64",
+  "hostname": "DESKTOP-P06AE3E",
+  "rssBefore": 56004608,
+  "rssAfter": 56692736,
+  "rssDelta": 688128,
+  "passed": true,
+  "requestedMinutes": 1,
+  "requestedIterations": 5
+}

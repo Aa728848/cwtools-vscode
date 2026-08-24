@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "fixture": "submodules/cwtools/CWToolsTests/testfiles/parsertests/simple.txt",
+  "fixtureBytes": 40,
+  "iterations": 10000,
+  "tokens": 19,
+  "roots": 2,
+  "elapsedMs": 29.6599,
+  "bytesPerSecond": 13486222,
+  "passed": true
+}

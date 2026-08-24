@@ -417,32 +417,37 @@ check('Webview bundles exist and are non-empty', () => {
 
 // ── 10. Server Binaries ─────────────────────────────────────────────────────
 
-const EXPECTED_PLATFORMS = ['win-x64', 'linux-x64', 'osx-x64'];
+const EXPECTED_SERVER_BINARIES = {
+    'win-x64': 'CWTools Server.exe',
+    'linux-x64': 'CWTools Server',
+    'osx-x64': 'CWTools Server',
+};
 
-check('Server binaries exist for all platforms', () => {
-    const serverDir = path.join(RELEASE, 'bin', 'server');
+function checkServerTree(relativeDir, required) {
+    const serverDir = path.join(RELEASE, 'bin', relativeDir);
     if (!fs.existsSync(serverDir)) {
-        console.log(`    Directory not found: release/bin/server/`);
-        return 'warn';
+        console.log(`    Directory not found: release/bin/${relativeDir}/`);
+        return required ? false : 'warn';
     }
-
-    const missing = [];
-    const empty = [];
-    for (const platform of EXPECTED_PLATFORMS) {
-        const platformDir = path.join(serverDir, platform);
-        if (!fs.existsSync(platformDir)) {
-            missing.push(platform);
-        } else {
-            const files = fs.readdirSync(platformDir);
-            if (files.length === 0) {
-                empty.push(platform);
-            }
+    const invalid = [];
+    for (const [platform, executable] of Object.entries(EXPECTED_SERVER_BINARIES)) {
+        const binary = path.join(serverDir, platform, executable);
+        if (!fs.existsSync(binary) || !fs.statSync(binary).isFile() || fs.statSync(binary).size === 0) {
+            invalid.push(`${platform}/${executable}`);
         }
     }
+    if (invalid.length > 0) console.log(`    Missing or empty binaries: ${invalid.join(', ')}`);
+    return invalid.length === 0;
+}
 
-    if (missing.length > 0) console.log(`    Missing platforms: ${missing.join(', ')}`);
-    if (empty.length > 0) console.log(`    Empty platform dirs: ${empty.join(', ')}`);
-    return missing.length === 0 && empty.length === 0;
+check('Rust server binaries exist for staged platforms', () => {
+    const serverDir = path.join(RELEASE, 'bin', 'server');
+    if (!fs.existsSync(serverDir)) return false;
+    const platforms = fs.readdirSync(serverDir).filter(name => fs.statSync(path.join(serverDir, name)).isDirectory());
+    return platforms.length > 0 && platforms.every(platform => {
+        const executable = EXPECTED_SERVER_BINARIES[platform];
+        return executable && fs.existsSync(path.join(serverDir, platform, executable));
+    });
 });
 
 // ── Summary ─────────────────────────────────────────────────────────────────
@@ -458,3 +463,4 @@ if (failures > 0) {
     console.log('\x1b[32m✅ All checks passed — ready to release!\x1b[0m');
     process.exit(0);
 }
+

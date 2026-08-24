@@ -758,14 +758,14 @@ For Stellaris rule changes:
 
 ```bash
 npm run rules:stellaris:check
-dotnet build src/Main/
+cargo test --manifest-path submodules/cwtools/Cargo.toml --workspace --all-targets
 ```
 
 For parser or field semantics changes:
 
 ```bash
-dotnet build src/LSP/
-dotnet build src/Main/
+cargo test --manifest-path rust/Cargo.toml --workspace --all-targets
+cargo test --manifest-path submodules/cwtools/Cargo.toml --workspace --all-targets
 ```
 
 For documentation:
@@ -1599,14 +1599,14 @@ Stellaris 规则改动：
 
 ```bash
 npm run rules:stellaris:check
-dotnet build src/Main/
+cargo test --manifest-path submodules/cwtools/Cargo.toml --workspace --all-targets
 ```
 
 解析器或字段语义改动：
 
 ```bash
-dotnet build src/LSP/
-dotnet build src/Main/
+cargo test --manifest-path rust/Cargo.toml --workspace --all-targets
+cargo test --manifest-path submodules/cwtools/Cargo.toml --workspace --all-targets
 ```
 
 文档改动：

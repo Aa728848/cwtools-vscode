@@ -1,31 +1,12 @@
 #Requires -Version 5.1
 <#
 .SYNOPSIS
-    CWTools VSCode Extension Package and Publish Automation Script.
+    Packages the Rust-only CWTools VS Code extension.
 .DESCRIPTION
-    Compiles .NET LSP server (win/linux/osx), compiles typescript client and webviews,
-    copies static resources, packs vsix, and optionally installs the extension locally.
-.PARAMETER Version
-    Specifies a new version (e.g. 2.2.3) to update in release/package.json.
-.PARAMETER Install
-    Force installs the newly generated VSIX package to the local VSCode instance,
-    then removes the conflicting upstream CWTools extension if it is installed.
-.PARAMETER SkipServer
-    Skips the F# .NET server compilation step to save time.
-.PARAMETER SkipClient
-    Skips typescript and webview Rollup compilation.
-.PARAMETER IncludeMcp
-    Opt-in: builds the MCP server from submodules/cwtools-mcp and bundles it into
-    the VSIX at bin/mcp. By default the VSIX ships without the MCP server, which is
-    installed standalone (npx -y cwtools-mcp) from its own repository.
-.EXAMPLE
-    .\package.ps1 -Install
-.EXAMPLE
-    .\package.ps1 -Version 2.2.3 -Install
-.EXAMPLE
-    .\package.ps1 -SkipServer -Install
+    Builds the standalone Rust language server for the current host, compiles the client,
+    stages resources, and creates the universal VSIX. Cross-platform release lanes invoke
+    this script once per target and merge release/bin/server/<rid> before packaging.
 #>
-
 [CmdletBinding()]
 param (
     [string]$Version,
@@ -36,61 +17,23 @@ param (
     [switch]$Publish,
     [switch]$SkipDocs
 )
-
 $StartTime = Get-Date
-
-Write-Host ""
-Write-Host "=======================================================" -ForegroundColor Cyan
-Write-Host "         CWTools VSCode Extension Build Tool           " -ForegroundColor Cyan
-Write-Host "=======================================================" -ForegroundColor Cyan
-Write-Host ""
-
-# 1. Update Version in package.json
 if ($Version) {
-    Write-Host "[*] Updating version to $Version ..." -ForegroundColor Yellow
-    $PackageJsonPath = Join-Path $PSScriptRoot "package.json"
-    $ReleasePackageJsonPath = Join-Path $PSScriptRoot "release/package.json"
-    foreach ($file in @($PackageJsonPath, $ReleasePackageJsonPath)) {
-        if (Test-Path $file) {
-            node -e 'const fs = require(''fs''); const file = process.argv[1]; const pkg = JSON.parse(fs.readFileSync(file, ''utf8'')); pkg.version = process.argv[2]; fs.writeFileSync(file, JSON.stringify(pkg, null, 4) + ''\n'', ''utf8'');' $file $Version
-        }
+    foreach ($file in @((Join-Path $PSScriptRoot "package.json"), (Join-Path $PSScriptRoot "release/package.json"))) {
+        node -e 'const fs=require("fs");const f=process.argv[1];const p=JSON.parse(fs.readFileSync(f,"utf8"));p.version=process.argv[2];fs.writeFileSync(f,JSON.stringify(p,null,4)+"\n")' $file $Version
     }
-    Write-Host "[OK] Successfully updated package.json and release/package.json to $Version" -ForegroundColor Green
-    Write-Host "[!] Remember to log the updates in release/CHANGELOG.md!" -ForegroundColor Yellow
 }
-
-# 2. Compile F# Server (win-x64, linux-x64, osx-x64)
 if (-not $SkipServer) {
-    Write-Host "[1/6] Compiling F# server (3 platforms, sequentially)..." -ForegroundColor Yellow
-    
-    # win-x64 (ReadyToRun optimization)
-    Write-Host ">>> Publishing win-x64 (ReadyToRun=true)..." -ForegroundColor Cyan
-    dotnet publish src/Main/Main.fsproj -c Release -r win-x64 --self-contained true /p:PublishReadyToRun=true /p:UseLocalCwtools=False -o release/bin/server/win-x64
-    if ($LASTEXITCODE -ne 0) {
-        Write-Error "Failed to publish win-x64 server!"
-        exit $LASTEXITCODE
-    }
-    Write-Host "[OK] win-x64 server published successfully." -ForegroundColor Green
-
-    # linux-x64
-    Write-Host ">>> Publishing linux-x64..." -ForegroundColor Cyan
-    dotnet publish src/Main/Main.fsproj -c Release -r linux-x64 --self-contained true /p:PublishReadyToRun=false /p:UseLocalCwtools=False -o release/bin/server/linux-x64
-    if ($LASTEXITCODE -ne 0) {
-        Write-Error "Failed to publish linux-x64 server!"
-        exit $LASTEXITCODE
-    }
-    Write-Host "[OK] linux-x64 server published successfully." -ForegroundColor Green
-
-    # osx-x64
-    Write-Host ">>> Publishing osx-x64..." -ForegroundColor Cyan
-    dotnet publish src/Main/Main.fsproj -c Release -r osx-x64 --self-contained true /p:PublishReadyToRun=false /p:UseLocalCwtools=False -o release/bin/server/osx-x64
-    if ($LASTEXITCODE -ne 0) {
-        Write-Error "Failed to publish osx-x64 server!"
-        exit $LASTEXITCODE
-    }
-    Write-Host "[OK] osx-x64 server published successfully." -ForegroundColor Green
-} else {
-    Write-Host "[1/6] (SKIPPED) Skip F# server compilation." -ForegroundColor Gray
+    $Target = if ($IsWindows -or $env:OS -eq "Windows_NT") { "x86_64-pc-windows-msvc" } elseif ($IsMacOS) { "x86_64-apple-darwin" } else { "x86_64-unknown-linux-gnu" }
+    $Rid = if ($IsWindows -or $env:OS -eq "Windows_NT") { "win-x64" } elseif ($IsMacOS) { "osx-x64" } else { "linux-x64" }
+    $SourceName = if ($Rid -eq "win-x64") { "cwtools-lsp.exe" } else { "cwtools-lsp" }
+    $DestinationName = if ($Rid -eq "win-x64") { "CWTools Server.exe" } else { "CWTools Server" }
+    cargo build --manifest-path rust/Cargo.toml --release --locked --target $Target
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    $Source = Join-Path $PSScriptRoot "rust/target/$Target/release/$SourceName"
+    $DestinationDir = Join-Path $PSScriptRoot "release/bin/server/$Rid"
+    New-Item -ItemType Directory -Path $DestinationDir -Force | Out-Null
+    Copy-Item -LiteralPath $Source -Destination (Join-Path $DestinationDir $DestinationName) -Force
 }
 
 # 3. Compile Client TypeScript
@@ -251,7 +194,7 @@ if ($Install) {
         Write-Host "[*] Executing local installation (code --install-extension)..." -ForegroundColor Yellow
         code --install-extension $VsixFile.FullName --force
         if ($LASTEXITCODE -eq 0) {
-            # The upstream extension starts the same F# language server and must not
+            # The upstream extension starts a competing language server and must not
             # remain installed alongside this fork. VSIX manifests cannot declare
             # conflicting extensions, so enforce the replacement in this install flow.
             $ConflictingExtensionIds = @(

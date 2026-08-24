@@ -3,8 +3,7 @@ name: CI
 on:
   pull_request:
   push:
-    branches:
-      - main
+    branches: [main]
 
 permissions:
   contents: read
@@ -18,139 +17,55 @@ env:
 
 jobs:
   typescript:
-    name: TypeScript and unit tests
     runs-on: ubuntu-latest
-    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
-        with:
-          submodules: recursive
+        with: { submodules: recursive }
       - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
+        with: { node-version: 22, cache: npm }
       - run: npm ci
       - run: npm run verify
       - run: npm run check:mcp-schema
 
-  vscode-integration:
-    name: Extension Host integration
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          submodules: recursive
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
-      - uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: 10.0.x
-      - run: npm ci
-      - name: Publish Linux language server
-        run: >-
-          dotnet publish src/Main/Main.fsproj
-          --configuration Release
-          --runtime linux-x64
-          --self-contained true
-          -p:PublishReadyToRun=false
-          -p:UseLocalCwtools=false
-          --output release/bin/server/linux-x64
-      - name: Run Extension Host integration suites
-        run: xvfb-run -a npm run test
-        env:
-          GSETTINGS_BACKEND: memory
-      - name: Run Shader Extension Host contract
-        run: xvfb-run -a npm run test:shader-lsp
-        env:
-          GSETTINGS_BACKEND: memory
-      - name: Dump Extension Host logs
-        if: failure()
-        shell: bash
-        run: >-
-          find .vscode-test -type f
-          \( -name '*Paradox Language Server.log' -o -name '*MemDiag.log' \)
-          -print -exec tail -n 500 '{}' \;
-
-  dotnet:
-    name: .NET server build
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          submodules: recursive
-      - uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: 10.0.x
-      - run: dotnet build src/LSP/LSP.fsproj --configuration Release
-      - run: dotnet build src/Main/Main.fsproj --configuration Release
-      - name: Build debug artifacts for F# regression scripts
-        run: dotnet build src/Main/Main.fsproj --configuration Debug
-      - name: Ensure FSharp.Data design-time assembly for F# scripts
-        shell: bash
-        run: >-
-          find "$HOME/.nuget/packages/fsharp.data" -name "FSharp.Data.DesignTime.dll"
-          -path "*/lib/netstandard2.0/*" -exec cp {} artifacts/bin/Main/debug/ \; -quit
-      - name: Run F# regression scripts
-        shell: bash
-        run: >-
-          for f in src/Main/*.Tests.fsx src/LSP/*.Tests.fsx; do
-            echo "Running ${f}";
-            (cd "$(dirname "$f")" && dotnet fsi "$(basename "$f")");
-          done
-
-  platform-overlay-e2e:
-    name: Overlay E2E (${{ matrix.os }})
+  rust-core:
+    runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
-      matrix:
-        os: [windows-latest, ubuntu-latest, macos-latest]
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          submodules: recursive
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
-      - uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: 10.0.x
-      - run: npm ci
-      - run: npm run compile
-      - run: npm run typecheck:test
-      - name: Run detached overlay Extension Host E2E (Linux)
-        if: runner.os == 'Linux'
-        run: xvfb-run -a npm run test:overlay-e2e
-        env:
-          GSETTINGS_BACKEND: memory
-      - name: Run detached overlay Extension Host E2E (Windows/macOS)
-        if: runner.os != 'Linux'
-        run: npm run test:overlay-e2e
-        env:
-          GSETTINGS_BACKEND: memory
-
-  mcp:
-    name: MCP contracts
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
+      matrix: { os: [ubuntu-latest, windows-latest, macos-latest] }
     defaults:
-      run:
-        working-directory: submodules/cwtools-mcp
+      run: { working-directory: submodules/cwtools }
     steps:
       - uses: actions/checkout@v4
-        with:
-          submodules: recursive
+        with: { submodules: recursive }
+      - uses: dtolnay/rust-toolchain@stable
+        with: { components: rustfmt, clippy }
+      - run: cargo fmt --all -- --check
+      - run: cargo test --workspace --all-targets --locked
+      - run: cargo clippy --workspace --all-targets --locked -- -D warnings
+
+  rust-lsp:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix: { os: [ubuntu-latest, windows-latest, macos-latest] }
+    steps:
+      - uses: actions/checkout@v4
+        with: { submodules: recursive }
+      - uses: dtolnay/rust-toolchain@stable
+        with: { components: rustfmt, clippy }
+      - run: cargo fmt --manifest-path rust/Cargo.toml --all -- --check
+      - run: cargo test --manifest-path rust/Cargo.toml --workspace --all-targets --locked
+      - run: cargo clippy --manifest-path rust/Cargo.toml --workspace --all-targets --locked -- -D warnings
+
+  mcp-contracts:
+    runs-on: ubuntu-latest
+    defaults:
+      run: { working-directory: submodules/cwtools-mcp }
+    steps:
+      - uses: actions/checkout@v4
+        with: { submodules: recursive }
       - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
-          cache-dependency-path: submodules/cwtools-mcp/package-lock.json
+        with: { node-version: 22, cache: npm, cache-dependency-path: submodules/cwtools-mcp/package-lock.json }
       - run: npm ci
       - run: npm run build
       - run: npm run test:contracts

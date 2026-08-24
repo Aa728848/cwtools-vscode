@@ -31,4 +31,6 @@ cwtools.local.props
 .tmp
 /.reasonix
 coverage/
+/rust/target/
+/benchmarks/results/
 .npm-cache

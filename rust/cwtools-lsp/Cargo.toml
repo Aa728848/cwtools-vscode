@@ -1,0 +1,24 @@
+[package]
+name = "cwtools-lsp"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "cwtools-lsp"
+path = "src/main.rs"
+
+[dependencies]
+cwtools-protocol.workspace = true
+cwtools-transport.workspace = true
+cwtools-source.workspace = true
+cwtools-leaf.workspace = true
+cwtools-script-syntax.workspace = true
+cwtools-game-core.workspace = true
+cwtools-shader.workspace = true
+cwtools-semantic.workspace = true
+serde_json.workspace = true
+
+[lints]
+workspace = true

@@ -1,0 +1,577 @@
+{
+  "schemaVersion": 1,
+  "protocol": {
+    "transport": "stdio",
+    "framing": "Content-Length: N\\r\\n\\r\\n<payload>",
+    "positionEncoding": "utf-16",
+    "maxFrameBytes": 16777216,
+    "lifecycle": [
+      "initialize",
+      "initialized",
+      "shutdown",
+      "exit",
+      "stdin-eof",
+      "$/cancelRequest"
+    ],
+    "arguments": [
+      "--stdio"
+    ],
+    "environment": [
+      "CWTOOLS_SERVER_INSTANCE_ID"
+    ]
+  },
+  "initialization": {
+    "options": [
+      "language",
+      "uiLanguage",
+      "isVanillaFolder",
+      "rulesCache",
+      "bundledRulesPath",
+      "rules_version",
+      "defaultRepoPath",
+      "repoPath",
+      "diagnosticLogging"
+    ],
+    "gameIds": [
+      "stellaris",
+      "hoi4",
+      "eu4",
+      "ck2",
+      "imperator",
+      "vic2",
+      "ck3",
+      "vic3",
+      "eu5",
+      "cwt",
+      "paradox"
+    ],
+    "clientCapabilityBranches": [
+      "textDocument.completion.completionItem.insertReplaceSupport"
+    ]
+  },
+  "capabilities": {
+    "textDocumentSync": {
+      "openClose": true,
+      "change": "incremental",
+      "willSave": true,
+      "willSaveWaitUntil": false,
+      "saveIncludeText": true
+    },
+    "providers": [
+      "hover",
+      "signatureHelp",
+      "definition",
+      "references",
+      "documentHighlight",
+      "documentFormatting",
+      "completion",
+      "codeAction",
+      "codeLens",
+      "documentLink",
+      "documentSymbol",
+      "workspaceSymbol",
+      "inlayHint",
+      "foldingRange",
+      "selectionRange",
+      "callHierarchy",
+      "rename",
+      "semanticTokens"
+    ],
+    "completionTriggerCharacters": [
+      ".",
+      "|",
+      "$",
+      "\"",
+      "=",
+      "{",
+      ":"
+    ],
+    "signatureTriggerCharacters": [
+      "(",
+      ","
+    ],
+    "semanticTokens": {
+      "tokenTypes": [
+        "namespace",
+        "type",
+        "function",
+        "variable",
+        "parameter",
+        "property",
+        "enumMember",
+        "keyword",
+        "number",
+        "string",
+        "comment",
+        "operator",
+        "macro",
+        "decorator"
+      ],
+      "tokenModifiers": [
+        "declaration",
+        "definition",
+        "readonly",
+        "inactive"
+      ],
+      "full": true,
+      "range": false,
+      "delta": true
+    }
+  },
+  "commands": [
+    {
+      "name": "cacheVanilla",
+      "effect": "write",
+      "lockFree": false,
+      "advertised": true,
+      "handler": true
+    },
+    {
+      "name": "cwtools.ai.analyzePdxFlow",
+      "effect": "read",
+      "lockFree": false,
+      "advertised": false,
+      "handler": true
+    },
+    {
+      "name": "cwtools.ai.compareDefinitionWithVanilla",
+      "effect": "read",
+      "lockFree": false,
+      "advertised": false,
+      "handler": true
+    },
+    {
+      "name": "cwtools.ai.exploreInlineGraph",
+      "effect": "read",
+      "lockFree": false,
+      "advertised": false,
+      "handler": true
+    },
+    {
+      "name": "cwtools.ai.exploreProject",
+      "effect": "read",
+      "lockFree": false,
+      "advertised": true,
+      "handler": true
+    },
+    {
+      "name": "cwtools.ai.exportProjectKnowledge",
+      "effect": "dynamic",
+      "lockFree": false,
+      "advertised": true,
+      "handler": true,
+      "notes": "Read only when generationMode=incremental; otherwise write."
+    },
+    {
+      "name": "cwtools.ai.getAllDiagnostics",
+      "effect": "read",
+      "lockFree": false,
+      "advertised": false,
+      "handler": true
+    },
+    {
+      "name": "cwtools.ai.getCompletionContext",
+      "effect": "read",
+      "lockFree": false,
+      "advertised": true,
+      "handler": true
+    },
+    {
+      "name": "cwtools.ai.getDiagnosticsFresh",
+      "effect": "read",
+      "lockFree": false,
+      "advertised": true,
+      "handler": false
+    },
+    {
+      "name": "cwtools.ai.getEntityInfo",
+      "effect": "read",
+      "lockFree": false,
+      "advertised": true,
+      "handler": true
+    },
+    {
+      "name": "cwtools.ai.getScopeAtPosition",
+      "effect": "read",
+      "lockFree": false,
+      "advertised": true,
+      "handler": true
+    },
+    {
+      "name": "cwtools.ai.getSemanticCatalog",
+      "effect": "read",
+      "lockFree": false,
+      "advertised": true,
+      "handler": true
+    },
+    {
+      "name": "cwtools.ai.getValidationStatus",
+      "effect": "read",
+      "lockFree": true,
+      "advertised": true,
+      "handler": true
+    },
+    {
+      "name": "cwtools.ai.parseFragment",
+      "effect": "read",
+      "lockFree": false,
+      "advertised": true,
+      "handler": true
+    },
+    {
+      "name": "cwtools.ai.queryDefinition",
+      "effect": "read",
+      "lockFree": false,
+      "advertised": true,
+      "handler": true
+    },
+    {
+      "name": "cwtools.ai.queryDefinitionByName",
+      "effect": "read",
+      "lockFree": false,
+      "advertised": true,
+      "handler": true
+    },
+    {
+      "name": "cwtools.ai.queryEnums",
+      "effect": "read",
+      "lockFree": false,
+      "advertised": true,
+      "handler": true
+    },
+    {
+      "name": "cwtools.ai.queryLocalisationAudit",
+      "effect": "read",
+      "lockFree": false,
+      "advertised": false,
+      "handler": true
+    },
+    {
+      "name": "cwtools.ai.queryOverrideModes",
+      "effect": "read",
+      "lockFree": false,
+      "advertised": true,
+      "handler": true
+    },
+    {
+      "name": "cwtools.ai.queryProjectKnowledgeDb",
+      "effect": "read",
+      "lockFree": false,
+      "advertised": true,
+      "handler": true
+    },
+    {
+      "name": "cwtools.ai.queryScriptedEffects",
+      "effect": "read",
+      "lockFree": false,
+      "advertised": true,
+      "handler": true
+    },
+    {
+      "name": "cwtools.ai.queryScriptedTriggers",
+      "effect": "read",
+      "lockFree": false,
+      "advertised": true,
+      "handler": true
+    },
+    {
+      "name": "cwtools.ai.queryStaticModifiers",
+      "effect": "read",
+      "lockFree": false,
+      "advertised": true,
+      "handler": true
+    },
+    {
+      "name": "cwtools.ai.queryTypes",
+      "effect": "read",
+      "lockFree": false,
+      "advertised": true,
+      "handler": true
+    },
+    {
+      "name": "cwtools.ai.queryVariables",
+      "effect": "read",
+      "lockFree": false,
+      "advertised": true,
+      "handler": true
+    },
+    {
+      "name": "cwtools.ai.revalidateFiles",
+      "effect": "read",
+      "lockFree": false,
+      "advertised": false,
+      "handler": true
+    },
+    {
+      "name": "cwtools.ai.shader.callers",
+      "effect": "read",
+      "lockFree": false,
+      "advertised": true,
+      "handler": true
+    },
+    {
+      "name": "cwtools.ai.shader.compareVanilla",
+      "effect": "read",
+      "lockFree": false,
+      "advertised": true,
+      "handler": true
+    },
+    {
+      "name": "cwtools.ai.shader.compileUnit",
+      "effect": "read",
+      "lockFree": false,
+      "advertised": true,
+      "handler": true
+    },
+    {
+      "name": "cwtools.ai.shader.preflightEdit",
+      "effect": "read",
+      "lockFree": false,
+      "advertised": true,
+      "handler": true
+    },
+    {
+      "name": "cwtools.ai.shader.reachability",
+      "effect": "read",
+      "lockFree": false,
+      "advertised": true,
+      "handler": true
+    },
+    {
+      "name": "cwtools.ai.shader.symbols",
+      "effect": "read",
+      "lockFree": false,
+      "advertised": true,
+      "handler": true
+    },
+    {
+      "name": "cwtools.ai.shader.validate",
+      "effect": "read",
+      "lockFree": false,
+      "advertised": true,
+      "handler": true
+    },
+    {
+      "name": "cwtools.ai.shader.variants",
+      "effect": "read",
+      "lockFree": false,
+      "advertised": true,
+      "handler": true
+    },
+    {
+      "name": "cwtools.ai.validateOverlay",
+      "effect": "read",
+      "lockFree": false,
+      "advertised": true,
+      "handler": true
+    },
+    {
+      "name": "cwtools.ai.waitDiagnosticsFresh",
+      "effect": "read",
+      "lockFree": false,
+      "advertised": true,
+      "handler": false
+    },
+    {
+      "name": "cwtools.exportTypes",
+      "effect": "read",
+      "lockFree": false,
+      "advertised": true,
+      "handler": false
+    },
+    {
+      "name": "cwtools.findTypeReferences",
+      "effect": "read",
+      "lockFree": false,
+      "advertised": true,
+      "handler": true
+    },
+    {
+      "name": "debugrules",
+      "effect": "write",
+      "lockFree": false,
+      "advertised": true,
+      "handler": true
+    },
+    {
+      "name": "exportTypes",
+      "effect": "write",
+      "lockFree": false,
+      "advertised": true,
+      "handler": true
+    },
+    {
+      "name": "genlocall",
+      "effect": "write",
+      "lockFree": false,
+      "advertised": true,
+      "handler": true
+    },
+    {
+      "name": "genlocfile",
+      "effect": "write",
+      "lockFree": false,
+      "advertised": true,
+      "handler": true
+    },
+    {
+      "name": "getDataForFile",
+      "effect": "read",
+      "lockFree": false,
+      "advertised": false,
+      "handler": false
+    },
+    {
+      "name": "getFileTypes",
+      "effect": "read",
+      "lockFree": false,
+      "advertised": true,
+      "handler": true
+    },
+    {
+      "name": "getGraphData",
+      "effect": "write",
+      "lockFree": false,
+      "advertised": true,
+      "handler": true
+    },
+    {
+      "name": "getTypesForFile",
+      "effect": "read",
+      "lockFree": false,
+      "advertised": false,
+      "handler": false
+    },
+    {
+      "name": "gettech",
+      "effect": "write",
+      "lockFree": false,
+      "advertised": true,
+      "handler": true
+    },
+    {
+      "name": "listAllFiles",
+      "effect": "write",
+      "lockFree": false,
+      "advertised": true,
+      "handler": true
+    },
+    {
+      "name": "listAllLocFiles",
+      "effect": "write",
+      "lockFree": false,
+      "advertised": true,
+      "handler": true
+    },
+    {
+      "name": "outputerrors",
+      "effect": "write",
+      "lockFree": false,
+      "advertised": true,
+      "handler": true
+    },
+    {
+      "name": "pretriggerAllFiles",
+      "effect": "write",
+      "lockFree": false,
+      "advertised": true,
+      "handler": true
+    },
+    {
+      "name": "pretriggerThisFile",
+      "effect": "write",
+      "lockFree": false,
+      "advertised": true,
+      "handler": true
+    },
+    {
+      "name": "reloadrulesconfig",
+      "effect": "write",
+      "lockFree": false,
+      "advertised": true,
+      "handler": true
+    },
+    {
+      "name": "typeGraphInfo",
+      "effect": "read",
+      "lockFree": false,
+      "advertised": false,
+      "handler": false
+    }
+  ],
+  "notifications": [
+    {
+      "name": "didFocusFile",
+      "direction": "client-to-server",
+      "payload": "{ uri: string }"
+    },
+    {
+      "name": "loadingBar",
+      "direction": "server-to-client",
+      "payload": "{ enable: boolean, value: string, percentage?: number }"
+    },
+    {
+      "name": "debugBar",
+      "direction": "server-to-client",
+      "payload": "{ enable: boolean, value: string }"
+    },
+    {
+      "name": "createVirtualFile",
+      "direction": "server-to-client",
+      "payload": "{ uri: string, fileContent: string }"
+    },
+    {
+      "name": "promptReload",
+      "direction": "server-to-client",
+      "payload": "string"
+    },
+    {
+      "name": "forceReload",
+      "direction": "server-to-client",
+      "payload": "string"
+    },
+    {
+      "name": "vanillaCacheGenerated",
+      "direction": "server-to-client",
+      "payload": "unknown"
+    },
+    {
+      "name": "cwtools/serverReady",
+      "direction": "server-to-client",
+      "payload": "unknown"
+    },
+    {
+      "name": "promptVanillaPath",
+      "direction": "server-to-client",
+      "payload": "string"
+    },
+    {
+      "name": "updateFileList",
+      "direction": "server-to-client",
+      "payload": "{ fileList: FileListItem[] }"
+    },
+    {
+      "name": "monitorLog",
+      "direction": "server-to-client",
+      "payload": "{ category?: string, message: string, timestamp?: string }"
+    },
+    {
+      "name": "cwtools/validationComplete",
+      "direction": "server-to-client",
+      "payload": "unknown"
+    },
+    {
+      "name": "completionRefresh",
+      "direction": "server-to-client",
+      "payload": "{ uri: string, line: number, character: number, version: number }"
+    }
+  ],
+  "invariants": [
+    "stdout contains framed JSON-RPC only; logs use stderr",
+    "all LSP Position and Range values use UTF-16 code units",
+    "semantic token type and modifier order is an integer ABI",
+    "getValidationStatus is lock-free and preserves readiness/epoch/freshness semantics",
+    "unknown executeCommand values default to write locking",
+    "MCP remains read-only"
+  ]
+}

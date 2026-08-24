@@ -1,0 +1,55 @@
+{
+  "schemaVersion": 1,
+  "metadata": {
+    "timestamp": "2026-08-24T03:53:07.082Z",
+    "commit": "18c5b6498bc469073ccfa758ebcaa84bebc475b7",
+    "platform": "win32",
+    "arch": "x64",
+    "node": "v24.14.1",
+    "workspace": "C:\\Users\\eddy\\Documents\\cwtools-vscode\\client\\test\\sample",
+    "server": "C:\\Users\\eddy\\Documents\\cwtools-vscode\\artifacts\\bin\\Main\\debug\\CWTools Server.exe",
+    "serverBytes": 162304,
+    "vsix": null
+  },
+  "runCount": 3,
+  "metrics": {
+    "startupMs": {
+      "count": 3,
+      "min": 1227.0959,
+      "median": 29943.716999999975,
+      "max": 46519.692299999995
+    },
+    "completionMs": {
+      "count": 3,
+      "min": 3245.4574999999604,
+      "median": 6215.0707,
+      "max": 23742.621900000013
+    },
+    "validationReadinessMs": {
+      "count": 3,
+      "min": 16746.727300000028,
+      "median": 39025.2194,
+      "max": 70659.92790000001
+    },
+    "peakRssBytes": {
+      "count": 3,
+      "min": 45490176,
+      "median": 51912704,
+      "max": 52264960
+    },
+    "elapsedMs": {
+      "count": 3,
+      "min": 55440.53749999998,
+      "median": 82748.1044,
+      "max": 170933.72840000002
+    }
+  },
+  "review": {
+    "status": "accepted-phase0-reference",
+    "notes": [
+      "All three runs completed with clean shutdown.",
+      "Large variance is retained rather than discarded; future comparisons must use matching commit, platform, workspace, and build configuration.",
+      "VSIX size is null because this run measured the debug server before packaging; package-size baselines remain a separate release lane."
+    ]
+  }
+}

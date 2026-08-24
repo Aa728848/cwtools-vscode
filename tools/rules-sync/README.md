@@ -52,11 +52,11 @@ When `report` can find a Stellaris installation, it also refreshes the Shader AB
 
 The refresh has three steps:
 
-1. `CWToolsCLI` parses `gfx/FX` through the shared `PdxShaderRuntime` implementation and records a `stellaris.exe` fingerprint in `.rules-sync/stellaris/shader-abi/shader-abi-inventory.json`.
+1. The Rust Shader runtime parses `gfx/FX` and records the inventory and a `stellaris.exe` fingerprint in `.rules-sync/stellaris/shader-abi/shader-abi-inventory.json`.
 2. `shader-abi-sync.ts` merges the inventory into `config/shader/abi-catalog.json`, `abi-audit.json`, and `renderer-contracts.json`. Reviewed entries keep their evidence while their declarations exist; new declarations receive `automatic_inventory` evidence and `rename_policy = forbidden`; vanished declarations and contracts are removed.
 3. The HTML report shows the version transition, executable identity change, and carried, added, or removed entries. A JSON copy is written to `.rules-sync/stellaris/shader-abi/shader-abi-merge-report.json`; pre-merge files are backed up under `.rules-sync/stellaris/shader-abi/previous/`.
 
-The scanner intentionally reuses the F# Shader parser. Do not add a second TypeScript parser for this workflow. On a fresh checkout, restore `submodules/cwtools/CWToolsCLI/CWToolsCLI.fsproj` if the CLI is not available yet.
+The scanner uses the shared Rust Shader crate; keep the TypeScript workflow as orchestration rather than adding another parser.
 
 ## 中文说明
 
@@ -70,4 +70,4 @@ The scanner intentionally reuses the F# Shader parser. Do not add a second TypeS
 
 `report` 在找到 Stellaris 安装时还会刷新 Shader ABI 数据，这一步会修改 `config/shader/` 下的维护文件。需要完全只读的报告时，请传入 `--no-shader-abi`。合并前文件会备份到 `.rules-sync/stellaris/shader-abi/previous/`，结果同时写入 HTML 和 JSON 报告。
 
-Shader 扫描复用 `CWToolsCLI` 与 `PdxShaderRuntime`，不在 TypeScript 中维护第二套解析器。全新检出如果尚未还原 CLI，请先 restore `submodules/cwtools/CWToolsCLI/CWToolsCLI.fsproj`。
+Shader 扫描复用共享的 Rust Shader crate；TypeScript 只负责工作流编排，不维护第二套解析器。

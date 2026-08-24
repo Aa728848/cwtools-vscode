@@ -202,6 +202,7 @@ const REPOSITORY_ROOTS = [
   ROOT,
   path.join(ROOT, 'submodules', 'cwtools'),
   path.join(ROOT, 'submodules', 'cwtools-mcp'),
+  path.join(ROOT, 'submodules', 'cwtools-mcp', 'submodules', 'cwtools-stellaris-config'),
   path.join(ROOT, 'submodules', 'cwtools-stellaris-config'),
 ];
 

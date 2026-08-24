@@ -3,7 +3,7 @@ const assert = require('assert');
 const { verifyReport } = require('./verify-rust-lsp-soak.cjs');
 function identity(root, commit) { return { root, commit, tree: commit + '-tree', workingTree: 'clean' }; }
 function report() {
-  const repositories = ['root', 'core', 'mcp', 'rules'].map((root, index) => identity(root, 'c' + index));
+  const repositories = ['root', 'core', 'mcp', 'mcp-rules', 'rules'].map((root, index) => identity(root, 'c' + index));
   return {
     schemaVersion: 1, reportType: 'cwtools.rust-lsp-soak', workloadVersion: 'v',
     startedAt: new Date(0).toISOString(), finishedAt: new Date(86400000).toISOString(), elapsedMs: 86400000, lane: 'final',

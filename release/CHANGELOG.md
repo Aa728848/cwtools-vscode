@@ -2,11 +2,28 @@
 
 ## [2.15.2] - 2026-08-24
 
-### 修复 / Fixes
-- **[修复] 约束式 PDX 候选工作流与 detached overlay 验证加固**：修复事务回滚失败后的恢复状态、跨多次写入的诊断阻塞、多跳 scope bridge 候选收集、overlay 路径链接逃逸与取消传播，并为 Linux Extension Host E2E 启用虚拟显示。
-  - English: [Fix] Hardened constrained PDX candidate workflows and detached overlay validation — preserves recovery state after incomplete rollback, retains run-introduced diagnostic blockers across repeated writes, restores multi-hop scope bridge discovery, closes linked-path workspace escapes, propagates cancellation, and runs Linux Extension Host E2E under a virtual display.
-- **[修复] 发布版本与 MCP 契约同步**：扩展升级至 2.15.2，`cwtools-mcp` 与 `cwtools-shared` 升级至 0.2.4，确保外部用户可获取最新只读工具契约。
-  - English: [Fix] Release and MCP contract synchronization — bumps the extension to 2.15.2 and `cwtools-mcp`/`cwtools-shared` to 0.2.4 so external users can receive the updated read-only tool contracts.
+### 新功能 / New Features
+- **[新增] 类型化 PDX 写入与安全候选事务系统（Typed Paradox Writes & Candidate Transactions）**：
+  - 引入文件系统候选事务管理（`candidateTransaction.ts`），支持原子级快照、分步暂存、变更隔离与安全回滚；在事务异常中断或部分回滚时保留恢复状态。
+  - 新增类型化 PDX 写入工具（`typedPdxWrite.ts`），针对 Paradox 脚本提供结构化修改能力，杜绝破坏性文本替换。
+  - 引入精准的诊断快照比对（`diagnosticSnapshot.ts`），捕获修改前后的 LSP 诊断差异，在多次写入过程中持续追踪并阻断新引入的语法或语义错误。
+  - English: [New] Typed Paradox writes and candidate transaction system — introduced transactional filesystem management (`candidateTransaction.ts`) with snapshotting, staged modifications, and safe rollback preserving recovery state; added structured Paradox write tool (`typedPdxWrite.ts`); introduced precise LSP diagnostic snapshot diffing (`diagnosticSnapshot.ts`) to track and block newly introduced diagnostic regressions across multiple edits.
+- **[新增] 静态 Paradox 语义闭包、作用域桥接与插槽分析（Semantic Closure, Scope Bridging & Archetype Slots）**：
+  - 新增多跳作用域桥接器（`scopeBridge.ts`），能够从相邻上下文与规则库中深度探索并校验复杂的作用域调用链路。
+  - 新增 Archetype 插槽分析（`archetypeSlots.ts`）与语义工件绑定机制（`archetypeArtifacts.ts`），支持对游戏定义与槽位结构进行静态闭包推断与工件生成。
+  - English: [New] Static Paradox semantic closure, scope bridging, and archetype slots — added multi-hop scope bridge resolution (`scopeBridge.ts`) for complex scope chains; introduced archetype slot analysis (`archetypeSlots.ts`) and semantic artifact bindings (`archetypeArtifacts.ts`) for static definition closures.
+- **[新增] Detached Overlay 内存隔离验证与跨平台 E2E 测试**：
+  - Language Server 引入 Detached Overlay 验证能力（`OverlayValidation.fs`），在不污染实际工作区文件的前提下提供纯内存的语法与全局语义校验，严密拦截符号链接逃逸。
+  - 增加自动化端到端测试套件（`tools/run-overlay-e2e.cjs` 与 `.config/vscode-test.overlay-e2e.js`），支持 Windows、macOS 及 Linux（配置 Xvfb 虚拟显示）跨平台自动化验证。
+  - English: [New] Detached overlay in-memory validation and cross-platform E2E — added Language Server detached overlay validation (`OverlayValidation.fs`) for in-memory diagnostics without modifying workspace files; introduced automated E2E test harness (`run-overlay-e2e.cjs`) supporting cross-platform CI (with Xvfb virtual display on Linux).
+
+### 修复与优化 / Fixes & Improvements
+- **[修复] 约束式 PDX 候选工作流与 detached overlay 验证加固**：
+  - 修复事务回滚失败后的状态保持、跨写入诊断拦截一致性、多跳 scope bridge 候选收集以及取消信号的端到端传播。
+  - English: [Fix] Hardened constrained PDX candidate workflows and detached overlay validation — preserved recovery state after rollback failures, maintained diagnostic blocker consistency across repeated writes, restored multi-hop scope bridge discovery, and ensured full cancellation signal propagation.
+- **[优化] 发布版本与 MCP 契约同步**：
+  - 扩展升级至 2.15.2，同步更新 `cwtools-mcp` 与 `cwtools-shared` 至 0.2.4，确保外部用户与 AI 宿主均可获得最新只读工具契约。
+  - English: [Improvement] Release and MCP contract synchronization — bumped extension to 2.15.2 and synced `cwtools-mcp`/`cwtools-shared` to 0.2.4 for the latest read-only MCP tool contracts.
 
 ## [2.15.1] - 2026-08-22
 

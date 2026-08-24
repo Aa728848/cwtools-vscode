@@ -128,6 +128,7 @@ function verifyReport(report, options = {}) {
 
   if (!isObject(report.passCriteria)) add(errors, 'passCriteria is required');
   else for (const key of REQUIRED_CRITERIA) if (report.passCriteria[key] !== true) add(errors, 'pass criterion failed: ' + key);
+  if (report.lane === 'final' && (!isObject(report.counters) || report.counters.iterations < 100 || report.counters.sessions < 2 || report.counters.restarts < 1)) add(errors, 'final report requires at least 100 iterations and one restart');
   if (report.passed !== true) add(errors, 'report.passed is not true');
   if (Array.isArray(report.errors) && report.errors.length > 0) add(errors, 'report contains runtime errors');
   if (options.final && report.elapsedMs < 1440 * 60 * 1000) add(errors, 'final report elapsedMs is shorter than 1440 minutes');

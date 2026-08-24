@@ -25,6 +25,8 @@ const DEFAULT_TIMEOUT_MS = 10000;
 const DEFAULT_RESTART_EVERY = 60;
 const DEFAULT_DELAY_MS = 1000;
 const DEFAULT_SEED = 0x5eed2026;
+const FINAL_MIN_ITERATIONS = 100;
+const FINAL_MIN_SESSIONS = 2;
 const FINAL_MIN_RSS_SAMPLES = 100;
 const SMOKE_MIN_RSS_SAMPLES = 8;
 const MAX_FRAME_BYTES = 16 * 1024 * 1024;
@@ -548,8 +550,8 @@ function buildPassCriteria(report, growth) {
   return {
     finalLaneUsesExactly1440Minutes: !finalLane || (report.configuration.requestedMinutes === DEFAULT_MINUTES && report.configuration.requestedIterations === 0),
     rustOnlyStagedArtifact: report.artifact.workerIsolation === 'standalone-rust-artifact',
-    allRequestedIterationsCompleted: report.counters.iterations > 0 && (report.configuration.requestedIterations === 0 || report.counters.iterations === report.configuration.requestedIterations),
-    lifecycleAndRestartClean: report.counters.cleanLifecycles === report.counters.sessions && report.counters.unexpectedExits === 0,
+    allRequestedIterationsCompleted: report.counters.iterations >= (finalLane ? FINAL_MIN_ITERATIONS : 1) && (report.configuration.requestedIterations === 0 || report.counters.iterations === report.configuration.requestedIterations),
+    lifecycleAndRestartClean: report.counters.cleanLifecycles === report.counters.sessions && report.counters.unexpectedExits === 0 && (!finalLane || (report.counters.sessions >= FINAL_MIN_SESSIONS && report.counters.restarts >= 1)),
     noDeadlockOrTimeout: report.counters.deadlocks === 0 && report.counters.timeouts === 0,
     noOrphanedServerProcess: report.counters.orphanedProcesses === 0,
     noProtocolErrors: report.counters.protocolErrors === 0 && report.counters.unexpectedResponses === 0,

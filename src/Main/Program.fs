@@ -11797,6 +11797,12 @@ type Server(client: ILanguageClient) =
                                         |> Array.mapi (fun index result ->
                                             if pendingBatch.ContainsKey index then JsonValue.Record [| "ok", JsonValue.Boolean false; "status", JsonValue.String "cancelled" |]
                                             else result)
+                                    | Some _ when cancellationToken.IsCancellationRequested ->
+                                        allAccepted <- false
+                                        initialResults
+                                        |> Array.mapi (fun index result ->
+                                            if pendingBatch.ContainsKey index then JsonValue.Record [| "ok", JsonValue.Boolean false; "status", JsonValue.String "cancelled" |]
+                                            else result)
                                     | Some diagnostics ->
                                         initialResults
                                         |> Array.mapi (fun index result ->

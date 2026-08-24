@@ -347,7 +347,20 @@ describe('enforced central tool policy', () => {
         expect(committed.success).to.equal(false);
         expect(committed.commit.rollback.succeeded).to.equal(false);
         expect(committed.commit.rollback.errors[0].error).to.include('diagnostics did not match baseline');
+        expect(committed.state).to.equal('active');
         expect(fs.readFileSync(target, 'utf8')).to.equal(source);
+
+        const overlay = executor.parentRunnerOptions?.vfsOverlay;
+        expect(overlay?.has(target)).to.equal(true);
+        expect(overlay?.get(target)).to.include('copy');
+        const status = await executor.execute('candidate_transaction', { action: 'status', transactionId: begin.transactionId }, context) as any;
+        expect(status.success).to.equal(true);
+        expect(status.state).to.equal('active');
+        expect(status.files).to.deep.equal([target]);
+        const discarded = await executor.execute('candidate_transaction', { action: 'discard', transactionId: begin.transactionId }, context) as any;
+        expect(discarded.success).to.equal(true);
+        expect(discarded.state).to.equal('discarded');
+        expect(overlay?.size).to.equal(0);
     });
 
     it('fails candidate rollback when server content hash does not match the restored base', async () => {
@@ -3073,18 +3086,27 @@ describe('trusted host-owned AI tool contracts', () => {
         const workspaceRoot = makeWorkspace();
         try {
             const executor = new AgentToolExecutor({ onNotification: () => undefined } as any, workspaceRoot);
-            const search = sinon.stub((executor as any).lspHandler, 'searchRuleCapabilities').resolves({
-                status: 'ready', source: 'cwtools-node-rules', totalConsidered: 1, warnings: [], rulesContentHash: 'abc123',
-                candidates: [{ score: 10, reasons: [], rule: { name: 'owner', scopes: ['country'], sourceFile: 'scope.cwt', sourceLine: 7, hardFacts: { supportedScopes: ['country'], pushScope: 'planet' } } }],
+            const response = (candidates: any[]) => ({
+                status: 'ready' as const, source: 'cwtools-node-rules', totalConsidered: candidates.length, warnings: [], rulesContentHash: 'abc123', candidates,
             });
+            const outgoing = { score: 10, reasons: [], rule: { name: 'owner_system', scopes: ['country'], sourceFile: 'scope.cwt', sourceLine: 7, hardFacts: { supportedScopes: ['country'], pushScope: 'system' } } };
+            const middle = { score: 10, reasons: [], rule: { name: 'system_planet', scopes: ['system'], sourceFile: 'scope.cwt', sourceLine: 10, hardFacts: { supportedScopes: ['system'], pushScope: 'planet' } } };
+            const incoming = { score: 10, reasons: [], rule: { name: 'planet_fleet', scopes: ['planet'], sourceFile: 'scope.cwt', sourceLine: 12, hardFacts: { supportedScopes: ['planet'], pushScope: 'fleet' } } };
+            const search = sinon.stub((executor as any).lspHandler, 'searchRuleCapabilities');
+            search.onFirstCall().resolves(response([outgoing]));
+            search.onSecondCall().resolves(response([incoming]));
+            search.onThirdCall().resolves(response([middle]));
             const result = await (executor as any).executeInternal('find_scope_bridge', {
-                fromScope: 'country', toScope: 'planet', context: 'owner transition', candidates: [{ name: 'forged' }],
+                fromScope: 'country', toScope: 'fleet', context: 'owner transition', candidates: [{ name: 'forged' }],
             });
-            expect(search.calledTwice).to.equal(true);
-            expect(search.firstCall.args[0]).to.deep.equal({ intent: 'owner transition', currentScope: 'country', desiredPushScope: 'planet', limit: 100 });
-            expect(search.secondCall.args[0].desiredPushScope).to.equal('planet');
-            expect(result.paths[0].steps[0].name).to.equal('owner');
+            expect(search.callCount).to.equal(3);
+            expect(search.firstCall.args[0]).to.deep.equal({ intent: 'owner transition', category: 'scope_change', currentScope: 'country', limit: 50 });
+            expect(search.secondCall.args[0]).to.deep.equal({ intent: 'owner transition scope transition bridge', category: 'scope_change', desiredPushScope: 'fleet', limit: 50 });
+            expect(search.thirdCall.args[0]).to.deep.equal({ intent: 'owner transition intermediate scope transitions', category: 'scope_change', limit: 100 });
+            expect(result.paths[0].steps.map((step: any) => step.name)).to.deep.equal(['owner_system', 'system_planet', 'planet_fleet']);
             expect(result.evidence).to.deep.include('cwtools-node-rules:scope.cwt:7');
+            expect(result.evidence).to.deep.include('cwtools-node-rules:scope.cwt:10');
+            expect(result.evidence).to.deep.include('cwtools-node-rules:scope.cwt:12');
             expect(result.evidence).to.deep.include('rules-sha256:abc123');
         } finally { cleanupWorkspace(workspaceRoot); }
     });

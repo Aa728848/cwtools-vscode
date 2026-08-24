@@ -121,7 +121,13 @@ jobs:
       - run: npm ci
       - run: npm run compile
       - run: npm run typecheck:test
-      - name: Run detached overlay Extension Host E2E
+      - name: Run detached overlay Extension Host E2E (Linux)
+        if: runner.os == 'Linux'
+        run: xvfb-run -a npm run test:overlay-e2e
+        env:
+          GSETTINGS_BACKEND: memory
+      - name: Run detached overlay Extension Host E2E (Windows/macOS)
+        if: runner.os != 'Linux'
         run: npm run test:overlay-e2e
         env:
           GSETTINGS_BACKEND: memory

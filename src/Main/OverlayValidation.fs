@@ -40,25 +40,32 @@ module OverlayValidation =
         if isNull target then info.FullName else target.FullName
         |> normalizeResolvedPath
 
-    /// Resolve the final existing target, or the nearest existing parent for a
-    /// path that does not exist yet. This closes symlink/junction escapes while
-    /// still allowing overlays for new files. Resolution failures are rejected.
+    /// Resolve every existing path component before appending any non-existent
+    /// tail. ResolveLinkTarget on only the final FileSystemInfo does not expose
+    /// symlinks or junctions traversed on the way to an ordinary existing file.
     let tryResolveFinalPath (path: string) =
         try
             let full = normalizeResolvedPath path
-            let rec findExisting current =
-                match tryFileSystemInfo current with
-                | Some info ->
-                    let resolvedParent = resolveExisting info
-                    let suffix = Path.GetRelativePath(current, full)
-                    if suffix = "." then Some resolvedParent
-                    elif Path.IsPathRooted suffix || suffix = ".." || suffix.StartsWith(".." + string Path.DirectorySeparatorChar, pathComparison) then None
-                    else Some(normalizeResolvedPath (Path.Combine(resolvedParent, suffix)))
-                | None ->
-                    let parent = Path.GetDirectoryName current
-                    if String.IsNullOrEmpty parent || String.Equals(parent, current, pathComparison) then None
-                    else findExisting parent
-            findExisting full
+            let root = Path.GetPathRoot full
+            if String.IsNullOrEmpty root then
+                None
+            else
+                let components =
+                    Path.GetRelativePath(root, full)
+                        .Split([| Path.DirectorySeparatorChar; Path.AltDirectorySeparatorChar |], StringSplitOptions.RemoveEmptyEntries)
+                let rec resolveComponents current index =
+                    if index >= components.Length then
+                        Some(normalizeResolvedPath current)
+                    else
+                        let candidate = Path.Combine(current, components.[index])
+                        match tryFileSystemInfo candidate with
+                        | Some info -> resolveComponents (resolveExisting info) (index + 1)
+                        | None ->
+                            components.[index..]
+                            |> Array.fold (fun resolved pathPart -> Path.Combine(resolved, pathPart)) current
+                            |> normalizeResolvedPath
+                            |> Some
+                resolveComponents root 0
         with
         | :? IOException
         | :? UnauthorizedAccessException

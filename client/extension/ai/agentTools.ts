@@ -961,8 +961,10 @@ export class AgentToolExecutor {
                     return { ok: valid, error: valid ? undefined : 'Candidate commit introduced errors or diagnostics were not fresh.' };
                 },
             }), { waitTimeoutMs: 30_000, timeoutMessage: 'Candidate commit timed out waiting for file locks.' });
-            this.parentRunnerOptions?.vfsOverlay?.clear();
-            this.candidateOwnerScope = undefined;
+            if (commit.state === 'committed' || commit.state === 'discarded') {
+                this.parentRunnerOptions?.vfsOverlay?.clear();
+                this.candidateOwnerScope = undefined;
+            }
             return { success: commit.committed, action: args.action, transactionId, state: commit.state, files: commit.files, commit, diagnosticDeltas: deltas, error: commit.error };
         } catch (error) {
             return { success: false, action: args.action, transactionId: args.transactionId, state: this.candidateTransactions.state, error: error instanceof Error ? error.message : String(error) };
@@ -2382,9 +2384,31 @@ export class AgentToolExecutor {
                 result = await this.lspHandler.verifyPdxIdentifier(args as any); break;
             case 'find_scope_bridge': {
                 const input = args as unknown as import('./types').FindScopeBridgeArgs;
-                const primary = await this.lspHandler.searchRuleCapabilities({ intent: input.context, currentScope: input.fromScope, desiredPushScope: input.toScope, limit: 100 });
-                const intermediate = await this.lspHandler.searchRuleCapabilities({ intent: `${input.context} scope transition bridge`, desiredPushScope: input.toScope, limit: 100 });
-                const evidence = { ...primary, candidates: [...primary.candidates, ...intermediate.candidates].slice(0, 200) };
+                // Retrieve both sides of a possible bridge: outgoing edges from the
+                // source scope and edges that reach the requested destination. If both
+                // queries are prefiltered by the final destination, valid intermediate
+                // transitions (for example country -> system) never reach the solver.
+                const outgoing = await this.lspHandler.searchRuleCapabilities({
+                    intent: input.context,
+                    category: 'scope_change',
+                    currentScope: input.fromScope,
+                    limit: 50,
+                });
+                const incoming = await this.lspHandler.searchRuleCapabilities({
+                    intent: `${input.context} scope transition bridge`,
+                    category: 'scope_change',
+                    desiredPushScope: input.toScope,
+                    limit: 50,
+                });
+                const intermediate = await this.lspHandler.searchRuleCapabilities({
+                    intent: `${input.context} intermediate scope transitions`,
+                    category: 'scope_change',
+                    limit: 100,
+                });
+                const evidence = {
+                    ...outgoing,
+                    candidates: [...outgoing.candidates, ...intermediate.candidates, ...incoming.candidates].slice(0, 200),
+                };
                 const candidates: ScopeBridgeCandidate[] = evidence.candidates.flatMap(candidate => {
                     const evidenceFile = candidate.rule.sourceFile ?? candidate.rule.hardFacts?.cwtSource?.file;
                     const evidenceLine = candidate.rule.sourceLine ?? candidate.rule.hardFacts?.cwtSource?.line;

@@ -225,6 +225,41 @@ describe('terminal validation state', () => {
         expect(terminalValidationOutcome(state)).to.equal('repair');
     });
 
+    it('retains a run-introduced error until a fresh snapshot removes its identity', () => {
+        const state = createTerminalValidationState();
+        const introduced = { severity: 'error', message: 'new', code: 'new', source: 'cwtools', line: 2, column: 1 };
+        const snapshot = (diagnostics: typeof introduced[]) => ({ status: 'fresh' as const, complete: true, diagnostics });
+
+        updateTerminalValidationState(state, ['events/test.txt'], {
+            diagnostics: [introduced], freshness: 'fresh', diagnosticSnapshot: snapshot([introduced]),
+            diagnosticDelta: { comparable: true, added: [introduced], removed: [] },
+        });
+        expect(terminalValidationOutcome(state)).to.equal('repair');
+
+        updateTerminalValidationState(state, ['events/test.txt'], {
+            diagnostics: [introduced], freshness: 'fresh', diagnosticSnapshot: snapshot([introduced]),
+            diagnosticDelta: { comparable: true, added: [], removed: [] },
+        });
+        expect(terminalValidationOutcome(state)).to.equal('repair');
+
+        updateTerminalValidationState(state, ['events/test.txt'], {
+            diagnostics: [], freshness: 'fresh', diagnosticSnapshot: snapshot([]),
+            diagnosticDelta: { comparable: true, added: [], removed: [introduced] },
+        });
+        expect(terminalValidationOutcome(state)).to.equal('allow');
+    });
+
+    it('keeps pre-existing errors non-blocking while reconciling introduced errors', () => {
+        const state = createTerminalValidationState();
+        const oldError = { severity: 'error', message: 'old', code: 'old', source: 'cwtools', line: 1, column: 1 };
+        updateTerminalValidationState(state, ['events/test.txt'], {
+            diagnostics: [oldError], freshness: 'fresh',
+            diagnosticSnapshot: { status: 'fresh', complete: true, diagnostics: [oldError] },
+            diagnosticDelta: { comparable: true, added: [], removed: [] },
+        });
+        expect(terminalValidationOutcome(state)).to.equal('allow');
+    });
+
     it('keeps stale diagnostic errors pending instead of treating them as repair', () => {
         const state = createTerminalValidationState();
         updateTerminalValidationState(state, ['events/test.txt'], {

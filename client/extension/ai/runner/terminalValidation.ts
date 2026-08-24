@@ -1,4 +1,4 @@
-import { hasAddedErrors, type DiagnosticDelta } from './diagnosticSnapshot';
+import { diagnosticsPresentInSnapshot, type DiagnosticDelta, type DiagnosticSnapshot, type NormalizedDiagnostic } from './diagnosticSnapshot';
 
 export type TerminalValidationOutcome = 'allow' | 'pending' | 'repair';
 
@@ -6,6 +6,7 @@ export interface TerminalValidationState {
     readonly pendingTargets: Set<string>;
     readonly repairTargets: Set<string>;
     readonly diagnosticErrorTargets: Set<string>;
+    readonly introducedErrorsByTarget: Map<string, NormalizedDiagnostic[]>;
     readonly coveragePendingTargets: Set<string>;
 }
 
@@ -14,6 +15,7 @@ export function createTerminalValidationState(): TerminalValidationState {
         pendingTargets: new Set<string>(),
         repairTargets: new Set<string>(),
         diagnosticErrorTargets: new Set<string>(),
+        introducedErrorsByTarget: new Map<string, NormalizedDiagnostic[]>(),
         coveragePendingTargets: new Set<string>(),
     };
 }
@@ -48,24 +50,40 @@ export function updateTerminalValidationState(
         const diagnosticDelta = record.diagnosticDelta && typeof record.diagnosticDelta === 'object'
             ? record.diagnosticDelta as DiagnosticDelta
             : undefined;
-        const hasErrors = diagnosticDelta?.comparable === true
-            ? hasAddedErrors(diagnosticDelta)
-            : diagnostics.some(item => {
-                if (!item || typeof item !== 'object' || Array.isArray(item)) return false;
-                const severity = (item as Record<string, unknown>).severity;
-                return severity === 'error' || severity === 0;
-            });
+        const diagnosticSnapshot = record.diagnosticSnapshot && typeof record.diagnosticSnapshot === 'object'
+            ? record.diagnosticSnapshot as DiagnosticSnapshot
+            : undefined;
+        const fallbackHasErrors = diagnostics.some(item => {
+            if (!item || typeof item !== 'object' || Array.isArray(item)) return false;
+            const severity = (item as Record<string, unknown>).severity;
+            return severity === 'error' || severity === 0;
+        });
         for (const target of targetKeys) {
-            if (freshness === 'fresh' && hasErrors) {
-                state.diagnosticErrorTargets.add(target);
-            } else if (freshness === 'fresh') {
-                state.diagnosticErrorTargets.delete(target);
-                if (state.coveragePendingTargets.has(target)) {
+            if (freshness === 'fresh') {
+                const previous = state.introducedErrorsByTarget.get(target) ?? [];
+                const added = diagnosticDelta?.comparable === true
+                    ? diagnosticDelta.added.filter(item => item.severity === 'error')
+                    : previous.length === 0 && fallbackHasErrors ? undefined : [];
+                if (added) {
+                    const candidates = [...previous, ...added];
+                    const introduced = diagnosticSnapshot
+                        ? diagnosticsPresentInSnapshot(candidates, diagnosticSnapshot) ?? previous
+                        : candidates;
+                    if (introduced.length > 0) {
+                        state.introducedErrorsByTarget.set(target, introduced);
+                        state.diagnosticErrorTargets.add(target);
+                    } else {
+                        state.introducedErrorsByTarget.delete(target);
+                        state.diagnosticErrorTargets.delete(target);
+                    }
+                } else {
+                    state.diagnosticErrorTargets.add(target);
+                }
+                if (!state.diagnosticErrorTargets.has(target) && state.coveragePendingTargets.has(target)) {
                     state.coveragePendingTargets.delete(target);
                     state.pendingTargets.delete(target);
                 }
             } else if (freshness === 'pending' || freshness === 'stale') {
-                state.diagnosticErrorTargets.delete(target);
                 state.pendingTargets.add(target);
             }
         }

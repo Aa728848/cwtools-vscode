@@ -1,5 +1,13 @@
 # Changelog
 
+## [2.15.2] - 2026-08-24
+
+### 修复 / Fixes
+- **[修复] 约束式 PDX 候选工作流与 detached overlay 验证加固**：修复事务回滚失败后的恢复状态、跨多次写入的诊断阻塞、多跳 scope bridge 候选收集、overlay 路径链接逃逸与取消传播，并为 Linux Extension Host E2E 启用虚拟显示。
+  - English: [Fix] Hardened constrained PDX candidate workflows and detached overlay validation — preserves recovery state after incomplete rollback, retains run-introduced diagnostic blockers across repeated writes, restores multi-hop scope bridge discovery, closes linked-path workspace escapes, propagates cancellation, and runs Linux Extension Host E2E under a virtual display.
+- **[修复] 发布版本与 MCP 契约同步**：扩展升级至 2.15.2，`cwtools-mcp` 与 `cwtools-shared` 升级至 0.2.4，确保外部用户可获取最新只读工具契约。
+  - English: [Fix] Release and MCP contract synchronization — bumps the extension to 2.15.2 and `cwtools-mcp`/`cwtools-shared` to 0.2.4 so external users can receive the updated read-only tool contracts.
+
 ## [2.15.1] - 2026-08-22
 
 ### 新功能 / New Features

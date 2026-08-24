@@ -35,11 +35,18 @@ try
 
     let link = Path.Combine(workspace, "escape")
     try
+        let outsideExisting = Path.Combine(outside, "existing.txt")
+        File.WriteAllText(outsideExisting, "outside")
         Directory.CreateSymbolicLink(link, outside) |> ignore
         assertEqual "existing reparse target escape" false (isPathWithinResolvedRoot workspace link)
-        assertEqual "nearest existing reparse parent escape" false (isPathWithinResolvedRoot workspace (Path.Combine(link, "new.txt")))
-    with :? UnauthorizedAccessException ->
-        printfn "Skipping reparse containment assertions: symbolic links are unavailable"
+        assertEqual "intermediate reparse existing file escape" false (isPathWithinResolvedRoot workspace (Path.Combine(link, "existing.txt")))
+        assertEqual "intermediate reparse missing tail escape" false (isPathWithinResolvedRoot workspace (Path.Combine(link, "new.txt")))
+    with
+    | (:? UnauthorizedAccessException
+      | :? IOException
+      | :? PlatformNotSupportedException
+      | :? NotSupportedException) as error ->
+        printfn "Skipping reparse containment assertions: symbolic links are unavailable (%s)" error.Message
 
     if OperatingSystem.IsWindows() then
         assertEqual "device UNC normalization" @"\\server\share\file.txt" (normalizeResolvedPath @"\\?\UNC\server\share\file.txt")

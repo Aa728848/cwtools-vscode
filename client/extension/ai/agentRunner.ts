@@ -4211,23 +4211,33 @@ export class AgentRunner {
                 }
                 if (Array.isArray(record?.diagnostics)) {
                     for (const targetKey of targetKeys) {
+                        const currentErrorCount = terminalValidation?.introducedErrorsByTarget.get(targetKey)?.length
+                            ?? effectiveDiagnosticErrorCount;
                         const previousErrorCount = diagnosticErrorsByTarget.get(targetKey);
-                        if (previousErrorCount !== undefined && effectiveDiagnosticErrorCount < previousErrorCount) {
+                        if (previousErrorCount !== undefined && currentErrorCount < previousErrorCount) {
                             progressRevision++;
                         }
-                        diagnosticErrorsByTarget.set(targetKey, effectiveDiagnosticErrorCount);
-                        if (hasDiagnosticErrors) blockingValidationIssues.add(targetKey);
+                        diagnosticErrorsByTarget.set(targetKey, currentErrorCount);
+                        const hasRunDiagnosticErrors = terminalValidation?.diagnosticErrorTargets.has(targetKey)
+                            ?? hasDiagnosticErrors;
+                        if (hasRunDiagnosticErrors) blockingValidationIssues.add(targetKey);
                         else if (record?.freshness === 'fresh') blockingValidationIssues.delete(targetKey);
                     }
                 }
                 if (record?.requiresRepair === true) {
                     for (const targetKey of targetKeys) blockingValidationIssues.add(targetKey);
                 } else if (record?.postWriteValidationPassed === true) {
-                    for (const targetKey of targetKeys) blockingValidationIssues.delete(targetKey);
+                    for (const targetKey of targetKeys) {
+                        if (!terminalValidation?.diagnosticErrorTargets.has(targetKey)) {
+                            blockingValidationIssues.delete(targetKey);
+                        }
+                    }
                 }
+                const hasRunDiagnosticErrors = targetKeys.some(targetKey =>
+                    terminalValidation?.diagnosticErrorTargets.has(targetKey) ?? false);
                 nextToolStage = advanceToolStage(mode, nextToolStage, parsedCalls[j]!.toolName, {
                     success: record?.success !== false && record?.error === undefined,
-                    hasValidationErrors: hasDiagnosticErrors
+                    hasValidationErrors: hasRunDiagnosticErrors || hasDiagnosticErrors
                         || record?.postWriteValidationPassed === false
                         || record?.requiresRepair === true,
                 });

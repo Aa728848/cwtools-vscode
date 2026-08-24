@@ -1788,12 +1788,12 @@ export async function activate(context: ExtensionContext) {
 
 		// Options to control the language client
 		const clientOptions: LanguageClientOptions = {
-			// Register the server for F# documents
+			// Register the Rust server for supported Paradox, CWT, and Shader documents
 			documentSelector: getLanguageClientDocumentSelector(),
 			synchronize: {
 				// Synchronize extension settings to the language server.
 				configurationSection: 'stellarisLanguageServices',
-				// Notify the server about file changes to F# project files contain in the workspace
+				// Notify the server about relevant workspace file changes
 
 				fileEvents: fileEvents
 			},
@@ -1838,7 +1838,7 @@ export async function activate(context: ExtensionContext) {
 				workspace: {
 					didChangeConfiguration: async (sections: any, next: (sections: any) => Promise<void>) => {
 						// Drop config changes if they were just triggered by our own AI Settings Manager
-						// This prevents the F# server from resetting the workspace because of pure UI changes.
+						// Avoid unnecessary Rust workspace reloads after UI-only setting writes.
 						if (Date.now() - lastAISettingsWriteTime < 1500) {
 							return;
 						}

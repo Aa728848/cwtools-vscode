@@ -34,8 +34,8 @@ export class CWToolsCodeActionProvider implements vs.CodeActionProvider {
         context: vs.CodeActionContext,
         _token: vs.CancellationToken
     ): vs.CodeAction[] {
-        // Accept all diagnostics within our supported languages.
-        // CWTools F# backend sets both 'code' and 'source' to the error code itself (e.g. "CW001").
+        // Accept all diagnostics within our supported languages; Rust protocol
+        // diagnostics preserve the stable CW code used by these actions.
         const cwDiags = context.diagnostics;
 
         if (cwDiags.length === 0) return [];

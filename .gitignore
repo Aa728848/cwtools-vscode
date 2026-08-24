@@ -2,7 +2,6 @@ bin/
 obj/
 out/
 artifacts/
-src/Main/output/
 packages/*/dist/
 packages/*/coverage/
 packages/*/node_modules/

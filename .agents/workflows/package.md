@@ -1,150 +1,43 @@
 ---
-description: 打包 CWTools VSCode 插件为 .vsix 格式（含 Win/Linux/macOS 三平台）
+description: 构建并打包 Rust-only CWTools VS Code 扩展
 ---
 
-# 打包 CWTools VSCode 插件
+# Rust-only 打包流程
 
-所有命令在项目根目录 `c:\Users\A\Documents\cwtools-vscode` 下执行。
-最终产物为一个通用 `.vsix` 文件，内含 win-x64、linux-x64、osx-x64 三组自包含服务端。
+所有命令在仓库根目录执行。最终 VSIX 使用固定布局：
 
----
+- Windows: `release/bin/server/win-x64/CWTools Server.exe`
+- Linux: `release/bin/server/linux-x64/CWTools Server`
+- macOS: `release/bin/server/osx-x64/CWTools Server`
 
-## 💡 自动化打包捷径 (推荐)
+## 本机构建与打包
 
-项目根目录提供了全自动一键打包与安装脚本 [package.ps1](file:///c:/Users/A/Documents/cwtools-vscode/package.ps1)，可以通过集成在 `package.json` 中的快捷命令随时在终端调用：
+`npm run pack` 必定构建当前宿主平台的 standalone Rust 服务端、TypeScript 客户端和 Webview，然后执行文档与 VSIX 检查。服务端不可跳过。
 
-* **完整一键打包安装**（自动依次执行下述第 0 至 6 步，并将最新版本强制升级部署至当前系统的 VSCode）：
-  ```bash
-  npm run pack:install
-  ```
-* **极速更新调试模式**（跳过第 1 步 .NET 服务端的编译，仅快速重编译 TypeScript 和 Webview 前端，打包并强制升级仅需 30 秒，极力推荐在仅调试修改前端 UI/逻辑时使用）：
-  ```bash
-  npm run pack:quick
-  ```
-* **仅一键打包通用包**（自动执行编译与打包，不执行最后的本地安装）：
-  ```bash
-  npm run pack
-  ```
-* **打包并自动发布至 GitHub Release**（打包通用包，并通过 GitHub CLI 自动 Tag、推送并创建 Release 上传 VSIX）：
-  ```bash
-  npm run pack:release
-  ```
-
-如果您需要对流程进行更细粒度的控制，或者查验手动编译细节，请依次参阅下述各步：
-
----
-
-## 0. 更新版本号与变更日志（可选项）
-
-在开始打包前，如果需要发布新版本，请确保已手动或通过脚本更新 `release/package.json` 中的 `version` 字段，并在 `release/CHANGELOG.md` 记录本次更新内容。也可通过 `package.ps1 -Version <version>` 传参一键更新。
-
-// turbo
 ```powershell
-Write-Host "请确保已修改版本号并记录更新日志！"
+npm ci
+npm run verify
+npm run check:rust-only
+npm run pack
 ```
 
+本地打包并安装：
 
-## 1. 编译服务端（三平台，自包含，含 .NET 运行时）
-
-依次为三个平台发布 .NET 服务端。**不可并行执行**，否则 dotnet 会因锁冲突导致构建取消。
-
-// turbo
 ```powershell
-dotnet publish src/Main/Main.fsproj -c Release -r win-x64 --self-contained true /p:PublishReadyToRun=true /p:UseLocalCwtools=False -o release/bin/server/win-x64
+npm run pack:install
 ```
 
-// turbo
-```powershell
-dotnet publish src/Main/Main.fsproj -c Release -r linux-x64 --self-contained true /p:PublishReadyToRun=false /p:UseLocalCwtools=False -o release/bin/server/linux-x64
-```
+## 三平台发布 artifact
 
-// turbo
-```powershell
-dotnet publish src/Main/Main.fsproj -c Release -r osx-x64 --self-contained true /p:PublishReadyToRun=false /p:UseLocalCwtools=False -o release/bin/server/osx-x64
-```
+GitHub Actions 的 `rust-release-artifacts` matrix 在 Windows、Linux、macOS 原生 runner 上分别构建并上传三组 Rust 二进制。合并 artifact 后再生成通用 VSIX；不得用其他平台的二进制占位。
 
-> **说明**：
-> - `PublishReadyToRun=true` 仅用于 win-x64（交叉编译 R2R 在 linux/osx 目标上不支持）
-> - `UseLocalCwtools=False` 使用 submodule 中的 cwtools 源码
+## 发布顺序
 
-## 2. 编译客户端（TypeScript）
+1. 更新根目录和 `release/package.json` 的版本与 changelog。
+2. 完成 TypeScript、Rust core、Rust LSP、MCP、文档与 release gate。
+3. 确认三平台 artifact 使用上述最终布局。
+4. 执行 `npm run check:rust-only` 并检查 VSIX 文件列表。
+5. 只在其他门禁全部通过且仓库 clean 后运行最终 24 小时 soak 与严格报告核验。
+6. 使用 `npm run pack:release` 创建最终发布。
 
-// turbo
-```powershell
-npx tsc -p tsconfig.extension.json
-```
-
-## 3. 编译 Webview 脚本（Rollup 打包）
-
-// turbo
-```powershell
-npx rollup -c
-```
-
-## 4. 复制 Webview 静态资源与内置技能
-
-// turbo
-```powershell
-Copy-Item "client\webview\solarSystemPreview.css" "release\bin\client\webview\" -Force
-Copy-Item "client\webview\chatPanel.css" "release\bin\client\webview\" -Force
-```
-
-## 5. 打包 VSIX（通用包，含三平台）
-
-不指定 `--target`，生成一个通用 `.vsix`，内含全部三组平台服务端。
-
-// turbo
-```powershell
-Push-Location release; npx @vscode/vsce package; Pop-Location
-```
-
-产物路径：`release/eddy-stellaris-cwt-<version>.vsix`
-
-## 6. 本地安装
-
-获取 release 目录下最新生成的 `.vsix` 扩展包并强制安装到当前的 VSCode 中。
-
-// turbo
-```powershell
-$vsix = Get-ChildItem -Path release -Filter *.vsix | Sort-Object LastWriteTime -Descending | Select-Object -First 1
-if ($vsix) {
-    code --install-extension $vsix.FullName --force
-} else {
-    Write-Host "未找到可安装的 VSIX 包！"
-}
-```
-
----
-
-## 7. 发布至 GitHub Release
-
-使用 GitHub CLI (`gh`) 自动提交 Commit、打 Tag 并发布至 GitHub Release 页面。
-
-// turbo
-```powershell
-$vsix = Get-ChildItem -Path release -Filter *.vsix | Sort-Object LastWriteTime -Descending | Select-Object -First 1
-$ver = (Get-Content release/package.json -Raw | ConvertFrom-Json).version
-$tag = "v$ver"
-git commit -am "Bump version to $ver and add changelog"
-git tag $tag
-git push origin main
-git push origin $tag
-gh release create $tag $vsix.FullName --repo Aa728848/cwtools-vscode --title $tag --generate-notes
-```
-
----
-
-## 注意事项
-
-- `release/package.json` 中包含发布者、版本号等信息，修改后需重新打包
-- `.vscodeignore` 已配置排除 `.cwtools/` 缓存目录、`*.js.map` 和 `bin/client/test`
-- 打包前确认 `release/__metadata` 字段已移除（会干扰 VSCode 加载）
-- 服务端二进制路径在 `client/extension/extension.ts` 中根据 `process.platform` 自动选择：
-  - `win32` → `bin/server/win-x64/CWTools Server.exe`
-  - `darwin` → `bin/server/osx-x64/CWTools Server`
-  - `linux` → `bin/server/linux-x64/CWTools Server`
-- 事件流程图功能已于 2026-04-19 移除，相关文件：`graph.ts`、`graphPanel.ts`、`graphTypes.ts`
-- 性能分析器功能已于 2026-04-18 移除，相关文件：`performanceHints.ts`
-- 星系可视化预览功能于 1.3.0 版本加入，相关文件：`solarSystemParser.ts`、`solarSystemPanel.ts`、`solarSystemPreview.ts`、`solarSystemPreview.css`
-- F# 后端 `IGameDispatcher` 多态化分发及 `agentRunner.ts` 代理核心模块化剥离已于 2026-04-25 完成重建，大幅消减了 10 向 `match` 匹配与代码冗余耦合。
-// turbo-all
+VSIX 不包含 MCP；MCP 是独立发布的只读包。任何缓存均不得打包，旧或损坏缓存由 Rust 服务端按 schema/指纹安全重建。

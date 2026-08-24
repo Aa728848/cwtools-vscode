@@ -201,10 +201,8 @@ export class LspToolHandler {
     }
 
     // - Concurrency limiter -
-    // The CWTools LSP server is single-threaded (F# async event loop).
-    // When the AI agent fires many parallel read-only tool calls, flooding it
-    // with simultaneous requests causes queue saturation and deadlocks.
-    // This semaphore limits in-flight LSP requests to prevent overload.
+    // Bound parallel read-only calls so large semantic queries cannot saturate
+    // the standalone Rust server's request queue or starve editor traffic.
     private static readonly MAX_CONCURRENT_LSP = 2;
     private lspInFlight = 0;
     private lspQueue: Array<() => void> = [];

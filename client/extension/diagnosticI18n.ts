@@ -5,8 +5,8 @@
  * `source` field so the Problems panel shows "CWTools(CW102)" instead of
  * "CW102(CW102)".
  *
- * The F# server hardcodes English diagnostic text (CWTools Validation.fs), so
- * translation happens here, keyed by message shape + CW error code. The
+ * The Rust protocol emits stable English diagnostic text, so translation
+ * happens here, keyed by message shape + CW error code. The
  * ignore-list matching in extension.ts runs against the original server
  * message BEFORE this enrichment; symbols stay quoted inside the Chinese text
  * so the ignore-manager's quoted-key extraction keeps working.

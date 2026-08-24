@@ -100,7 +100,8 @@ function verifyReport(report, options = {}) {
     if (counters.sessions < 1 || counters.cleanLifecycles > counters.sessions) add(errors, 'session counters are inconsistent');
     if (counters.restarts !== Math.max(0, counters.sessions - 1)) add(errors, 'restart counter does not match sessions');
     if (counters.cancelRequestsSent < counters.iterations) add(errors, 'cancellation workload was not exercised');
-    if (counters.queryResponses !== counters.queryResults + counters.expectedQueryErrors) add(errors, 'query response accounting is inconsistent');
+    if (counters.expectedQueryErrors !== 0) add(errors, 'implemented Rust queries returned tolerated protocol errors');
+    if (counters.queryResponses !== counters.queryResults) add(errors, 'query response accounting is inconsistent');
   }
 
   if (!Array.isArray(report.sessions) || !counters || report.sessions.length !== counters.sessions) add(errors, 'session records must match session counter');

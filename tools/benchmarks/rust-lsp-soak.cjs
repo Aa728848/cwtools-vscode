@@ -28,7 +28,6 @@ const DEFAULT_SEED = 0x5eed2026;
 const FINAL_MIN_RSS_SAMPLES = 100;
 const SMOKE_MIN_RSS_SAMPLES = 8;
 const MAX_FRAME_BYTES = 16 * 1024 * 1024;
-const EXPECTED_STANDALONE_QUERY_ERRORS = new Set([-32601, -32602]);
 const QUERY_METHODS = [
   'textDocument/completion',
   'textDocument/hover',
@@ -448,8 +447,7 @@ class ServerSession {
         ? await this.cancellableRequest(method, params)
         : await this.request(method, params);
       this.report.counters.queryResponses += 1;
-      if (response.error && EXPECTED_STANDALONE_QUERY_ERRORS.has(response.error.code)) this.report.counters.expectedQueryErrors += 1;
-      else if (response.error) {
+      if (response.error) {
         this.report.counters.unexpectedResponses += 1;
         throw new Error(method + ' returned unexpected error ' + JSON.stringify(response.error));
       } else {

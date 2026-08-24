@@ -25,4 +25,5 @@ const nested = report(); nested.completionIdentity.repositories[2].commit = 'cha
 const changed = report(); changed.completionIdentity.artifactSha256 = 'b'.repeat(64); assert(verifyReport(changed, { final: true }).some(error => error.includes('artifact changed')));
 const short = report(); short.elapsedMs = 100; assert(verifyReport(short, { final: true }).some(error => error.includes('shorter')));
 const sparse = report(); sparse.rss.samples = sparse.rss.samples.slice(0, 99); sparse.rss.sampleAttempts = 99; sparse.rss.numericSampleCount = 99; assert(verifyReport(sparse, { final: true }).some(error => error.includes('at least 100')));
+const tolerated = report(); tolerated.counters.expectedQueryErrors = 1; tolerated.counters.queryResults = 0; assert(verifyReport(tolerated, { final: true }).some(error => error.includes('tolerated protocol errors')));
 console.log('Final soak verifier regression tests passed.');

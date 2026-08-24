@@ -11,7 +11,11 @@ const crypto = require('crypto');
 const { spawn, execFile, spawnSync } = require('child_process');
 const { performance } = require('perf_hooks');
 const { pathToFileURL } = require('url');
-const { writeMessage } = require('../lsp-transcript/lib/jsonrpc.cjs');
+function writeMessage(stream, message) {
+  const body = Buffer.from(JSON.stringify(message), 'utf8');
+  const frame = Buffer.concat([Buffer.from('Content-Length: ' + body.length + '\r\n\r\n', 'ascii'), body]);
+  return new Promise((resolve, reject) => stream.write(frame, error => error ? reject(error) : resolve()));
+}
 
 const REPORT_SCHEMA_VERSION = 1;
 const REPORT_TYPE = 'cwtools.rust-lsp-soak';

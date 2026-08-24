@@ -9,7 +9,7 @@ const violations = [];
 const ignoredDirectories = new Set(['.git', '.codegraph', 'node_modules', 'target', 'artifacts', '.vscode-test']);
 const forbiddenExtensions = new Set(['.fs', '.fsx', '.fsproj', '.cs', '.csproj', '.sln', '.slnx']);
 const forbiddenRootFiles = new Set(['global.json', 'Directory.Build.props', 'Directory.Packages.props']);
-const forbiddenFileNames = new Set(['dotnet.config', 'test.runsettings', 'capture-lsp-trace.ps1', 'rules-validation-performance.cjs', 'parser-performance.cjs']);
+const forbiddenFileNames = new Set(['dotnet.config', 'dotnet-tools.json', 'test.runsettings', 'capture-lsp-trace.ps1', 'rules-validation-performance.cjs', 'parser-performance.cjs']);
 const forbiddenFileNamePatterns = [/(?:^|[-_])fsharp(?:$|[-_.])/i, /(?:^|[-_])oracle(?:$|[-_.])/i, /(?:structural-diff|projection-cli)/i];
 const forbiddenDirectoryNames = [
   /(?:^|[-_])fsharp(?:$|[-_])/i,

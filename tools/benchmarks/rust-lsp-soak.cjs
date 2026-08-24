@@ -1,9 +1,8 @@
 #!/usr/bin/env node
 'use strict';
 
-// Production Rust-only LSP soak lane. This harness deliberately stages the
-// requested binary in an isolated directory so the Rust executable cannot
-// discover or launch the packaged F# compatibility worker.
+// Production Rust-only LSP soak lane. The requested binary is staged in an
+// isolated directory so the test exercises exactly one self-contained server artifact.
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
@@ -288,7 +287,7 @@ class ServerSession {
     this.startedAt = performance.now();
     this.child = spawn(this.executable, ['--stdio'], {
       cwd: ROOT,
-      env: { ...process.env, CWTOOLS_FSHARP_WORKER: '' },
+      env: { ...process.env },
       stdio: ['pipe', 'pipe', 'pipe'],
       windowsHide: true,
       detached: process.platform !== 'win32',
@@ -529,7 +528,7 @@ function buildPassCriteria(report, growth) {
   const finalLane = report.lane === 'final';
   return {
     finalLaneUsesExactly1440Minutes: !finalLane || (report.configuration.requestedMinutes === DEFAULT_MINUTES && report.configuration.requestedIterations === 0),
-    rustOnlyStagedArtifact: report.artifact.workerIsolation === 'staged-no-fsharp-worker',
+    rustOnlyStagedArtifact: report.artifact.workerIsolation === 'standalone-rust-artifact',
     allRequestedIterationsCompleted: report.counters.iterations > 0 && (report.configuration.requestedIterations === 0 || report.counters.iterations === report.configuration.requestedIterations),
     lifecycleAndRestartClean: report.counters.cleanLifecycles === report.counters.sessions && report.counters.unexpectedExits === 0,
     noDeadlockOrTimeout: report.counters.deadlocks === 0 && report.counters.timeouts === 0,
@@ -552,7 +551,7 @@ async function run(options) {
     platform: process.platform,
     arch: process.arch,
     staged: true,
-    workerIsolation: 'staged-no-fsharp-worker',
+    workerIsolation: 'standalone-rust-artifact',
   };
   const staged = stageStandaloneArtifact(serverPath);
   const report = {

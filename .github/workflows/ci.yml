@@ -57,6 +57,40 @@ jobs:
       - run: cargo test --manifest-path rust/Cargo.toml --workspace --all-targets --locked
       - run: cargo clippy --manifest-path rust/Cargo.toml --workspace --all-targets --locked -- -D warnings
 
+  rust-release-artifacts:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: windows-latest, rid: win-x64, binary: cwtools-lsp.exe, staged: 'CWTools Server.exe' }
+          - { os: ubuntu-latest, rid: linux-x64, binary: cwtools-lsp, staged: 'CWTools Server' }
+          - { os: macos-latest, rid: osx-x64, binary: cwtools-lsp, staged: 'CWTools Server' }
+    steps:
+      - uses: actions/checkout@v4
+        with: { submodules: recursive }
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Build standalone Rust server
+        run: cargo build --manifest-path rust/Cargo.toml --release --locked
+      - name: Stage Windows server
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force "release/bin/server/${{ matrix.rid }}" | Out-Null
+          Copy-Item "rust/target/release/${{ matrix.binary }}" "release/bin/server/${{ matrix.rid }}/${{ matrix.staged }}"
+      - name: Stage Unix server
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          mkdir -p "release/bin/server/${{ matrix.rid }}"
+          cp "rust/target/release/${{ matrix.binary }}" "release/bin/server/${{ matrix.rid }}/${{ matrix.staged }}"
+          chmod +x "release/bin/server/${{ matrix.rid }}/${{ matrix.staged }}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cwtools-server-${{ matrix.rid }}
+          path: release/bin/server/${{ matrix.rid }}/${{ matrix.staged }}
+          if-no-files-found: error
+
   mcp-contracts:
     runs-on: ubuntu-latest
     defaults:

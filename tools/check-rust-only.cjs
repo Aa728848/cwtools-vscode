@@ -7,8 +7,10 @@ const root = path.resolve(__dirname, '..');
 const release = path.join(root, 'release');
 const violations = [];
 const ignoredDirectories = new Set(['.git', '.codegraph', 'node_modules', 'target', 'artifacts', '.vscode-test']);
-const forbiddenExtensions = new Set(['.fs', '.fsx', '.fsproj', '.sln', '.slnx']);
+const forbiddenExtensions = new Set(['.fs', '.fsx', '.fsproj', '.cs', '.csproj', '.sln', '.slnx']);
 const forbiddenRootFiles = new Set(['global.json', 'Directory.Build.props', 'Directory.Packages.props']);
+const forbiddenFileNames = new Set(['dotnet.config', 'test.runsettings', 'capture-lsp-trace.ps1', 'rules-validation-performance.cjs', 'parser-performance.cjs']);
+const forbiddenFileNamePatterns = [/(?:^|[-_])fsharp(?:$|[-_.])/i, /(?:^|[-_])oracle(?:$|[-_.])/i, /(?:structural-diff|projection-cli)/i];
 const forbiddenDirectoryNames = [
   /(?:^|[-_])fsharp(?:$|[-_])/i,
   /(?:^|[-_])oracle(?:$|[-_])/i,
@@ -47,8 +49,11 @@ walk(root, (full, entry, isDirectory) => {
   if (forbiddenExtensions.has(path.extname(entry.name).toLowerCase())) {
     violations.push({ kind: 'dotnet-source', path: rel });
   }
-  if (!rel.includes('/') && forbiddenRootFiles.has(entry.name)) {
+  if ((!rel.includes('/') && forbiddenRootFiles.has(entry.name)) || forbiddenFileNames.has(entry.name)) {
     violations.push({ kind: 'dotnet-build-metadata', path: rel });
+  }
+  if (forbiddenFileNamePatterns.some(pattern => pattern.test(entry.name))) {
+    violations.push({ kind: 'migration-file', path: rel });
   }
   if (rel === 'rust/cwtools-lsp/src/proxy.rs' || rel === 'client/extension/serverImplementation.ts') {
     violations.push({ kind: 'migration-runtime', path: rel });

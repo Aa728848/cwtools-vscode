@@ -81,6 +81,22 @@ walk(release, (full, entry, isDirectory) => {
   }
 });
 
+const nestedRepositoryFiles = [
+  path.join(root, 'submodules', 'cwtools', '.config', 'dotnet-tools.json'),
+  path.join(root, 'submodules', 'cwtools', '.github', 'workflows', 'release.yml'),
+  path.join(root, 'submodules', 'cwtools', '.github', 'workflows', 'test.yml'),
+  path.join(root, 'submodules', 'cwtools-mcp', 'packages', 'cwtools-mcp', 'src', 'hosts', 'lspProcessHost.ts'),
+  path.join(root, 'submodules', 'cwtools-mcp', 'packages', 'cwtools-shared', 'src', 'host', 'vanillaCache.ts'),
+  path.join(root, 'submodules', 'cwtools-stellaris-config', '.gitlab-ci.yml'),
+];
+for (const file of nestedRepositoryFiles) {
+  if (!fs.existsSync(file)) continue;
+  const text = fs.readFileSync(file, 'utf8');
+  if (/F#|FSharp|dotnet|src[\\/]Main|src[\\/]LSP|server-rust|oracle|differential/i.test(text)) {
+    violations.push({ kind: 'nested-migration-reference', path: relative(file) });
+  }
+}
+
 const runtimeFiles = [
   path.join(root, 'client', 'extension', 'extension.ts'),
   path.join(root, 'package.ps1'),

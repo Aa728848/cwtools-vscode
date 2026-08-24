@@ -686,17 +686,51 @@ function writeReport(output, report) {
   return target;
 }
 
+async function acquireSoakLock(lockPath, output) {
+  fs.mkdirSync(path.dirname(lockPath), { recursive: true });
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      const handle = fs.openSync(lockPath, 'wx');
+      fs.writeFileSync(handle, JSON.stringify({ pid: process.pid, startedAt: new Date().toISOString(), output }) + '\n');
+      return handle;
+    } catch (error) {
+      if (error?.code !== 'EEXIST' || attempt > 0) throw error;
+      let owner = null;
+      try { owner = JSON.parse(fs.readFileSync(lockPath, 'utf8')); } catch { /* malformed lock is stale */ }
+      if (owner?.pid && await processExists(owner.pid)) throw new Error('active soak pid ' + owner.pid);
+      fs.rmSync(lockPath, { force: true });
+    }
+  }
+  throw new Error('could not acquire soak lock');
+}
+
+function releaseSoakLock(handle, lockPath) {
+  try { fs.closeSync(handle); } catch { /* already closed */ }
+  try { fs.rmSync(lockPath, { force: true }); } catch { /* best-effort cleanup */ }
+}
+
 async function main(argv) {
   const options = parseArgs(argv || process.argv.slice(2));
   if (options.help) { console.log(usage()); return 0; }
+  const outputPath = path.resolve(options.output);
+  const lockPath = outputPath + '.lock';
+  let lock;
+  try {
+    lock = await acquireSoakLock(lockPath, outputPath);
+  } catch (error) {
+    console.error('Another soak owns this report path: ' + lockPath + ' (' + String(error?.message || error) + ')');
+    return 1;
+  }
   let report;
   try {
     report = await run(options);
   } catch (error) {
+    releaseSoakLock(lock, lockPath);
     console.error('Rust LSP soak setup failed: ' + String(error && error.stack || error));
     return 1;
   }
   const output = writeReport(options.output, report);
+  releaseSoakLock(lock, lockPath);
   console.log(JSON.stringify({ report: output, lane: report.lane, iterations: report.counters.iterations, sessions: report.counters.sessions, peakServerRssBytes: report.rss.peakRssBytes, passed: report.passed }, null, 2));
   if (!report.passed) {
     console.error('Rust LSP soak failed. Verify: node tools/benchmarks/verify-rust-lsp-soak.cjs --report ' + output);

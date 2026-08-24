@@ -564,6 +564,7 @@ async function run(options) {
     lane: options.iterationsExplicit || (options.minutesExplicit && options.minutes !== DEFAULT_MINUTES) ? 'smoke' : 'final',
     repository: gitIdentity(ROOT),
     artifact,
+    completionIdentity: null,
     configuration: {
       requestedMinutes: options.minutes,
       requestedIterations: options.iterations,
@@ -637,6 +638,13 @@ async function run(options) {
       try { await closeSession(session, report); } catch (error) { report.errors.push('cleanup: ' + String(error && error.stack || error)); }
     }
     report.rss.growth = analyzeGrowth(report.rss.samples, { minimumSamples: 8, windowSize: 4 });
+    const finalRepository = gitIdentity(ROOT);
+    const finalArtifactSha256 = fs.existsSync(serverPath) ? await sha256File(serverPath) : null;
+    report.completionIdentity = { repository: finalRepository, artifactSha256: finalArtifactSha256 };
+    if (report.lane === 'final' && (finalRepository.workingTree !== 'clean' || finalRepository.commit !== report.repository.commit || finalRepository.tree !== report.repository.tree)) {
+      report.errors.push('repository identity drifted during final soak');
+    }
+    if (report.lane === 'final' && finalArtifactSha256 !== report.artifact.sha256) report.errors.push('release artifact changed during final soak');
     report.finishedAt = new Date().toISOString();
     report.elapsedMs = Date.now() - startedEpoch;
     report.passCriteria = buildPassCriteria(report, report.rss.growth);

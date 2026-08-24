@@ -130,6 +130,11 @@ function verifyReport(report, options = {}) {
   if (Array.isArray(report.errors) && report.errors.length > 0) add(errors, 'report contains runtime errors');
   if (options.final && report.elapsedMs < 1440 * 60 * 1000) add(errors, 'final report elapsedMs is shorter than 1440 minutes');
   if (report.lane === 'final' && (!isObject(report.repository) || report.repository.workingTree !== 'clean')) add(errors, 'final report must identify a clean repository');
+  if (report.lane === 'final') {
+    if (!isObject(report.completionIdentity) || !isObject(report.completionIdentity.repository)) add(errors, 'final report requires completion repository identity');
+    else if (report.completionIdentity.repository.workingTree !== 'clean' || report.completionIdentity.repository.commit !== report.repository.commit || report.completionIdentity.repository.tree !== report.repository.tree) add(errors, 'repository identity drifted during final soak');
+    if (report.completionIdentity?.artifactSha256 !== report.artifact?.sha256) add(errors, 'release artifact changed during final soak');
+  }
   return errors;
 }
 

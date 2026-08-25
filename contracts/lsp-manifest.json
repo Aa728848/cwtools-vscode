@@ -26,6 +26,8 @@
       "uiLanguage",
       "isVanillaFolder",
       "rulesCache",
+      "vanillaCachePath",
+      "vanillaGamePath",
       "bundledRulesPath",
       "rules_version",
       "defaultRepoPath",

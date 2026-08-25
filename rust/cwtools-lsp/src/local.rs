@@ -50,6 +50,9 @@ const MAX_REVERSE_REQUESTS: usize = 64;
 const MAX_RULE_DOCUMENTS: usize = 4096;
 const MAX_RULE_FILE_BYTES: usize = 2 * 1024 * 1024;
 const MAX_RULE_TOTAL_BYTES: usize = 64 * 1024 * 1024;
+const MAX_VANILLA_FILES: usize = 20_000;
+const MAX_VANILLA_FILE_BYTES: usize = 8 * 1024 * 1024;
+const MAX_VANILLA_TOTAL_BYTES: usize = 512 * 1024 * 1024;
 const WRITE_COMMANDS: &[&str] = &[
     "cacheVanilla",
     "exportProjectKnowledge",
@@ -68,6 +71,8 @@ pub struct InitializationState {
     pub ui_language: Option<String>,
     pub is_vanilla_folder: bool,
     pub rules_cache: Option<String>,
+    pub vanilla_cache_path: Option<String>,
+    pub vanilla_game_path: Option<String>,
     pub bundled_rules_path: Option<String>,
     pub rules_version: Option<String>,
     pub default_repo_path: Option<String>,
@@ -145,6 +150,8 @@ pub struct LocalRouter {
     semantic: BTreeMap<String, SemanticSnapshot>,
     game_session: Option<GameSession>,
     rule_catalog: Option<RuleCatalog>,
+    vanilla_cache_status: String,
+    vanilla_sources: Option<Vec<SourceInput>>,
     session_epoch: u64,
     notifications: Vec<Message>,
     reverse_requests: Vec<ReverseRequest>,
@@ -160,7 +167,6 @@ impl LocalRouter {
         self.workspace_root = root.or_else(|| folders.first().map(|folder| folder.uri.clone()));
         self.workspace_folders = folders.into_iter().take(MAX_WORKSPACE_FOLDERS).collect();
         self.initialization = initialization;
-        self.rebuild_game_session();
     }
 
     fn selected_game_id(&self) -> GameId {
@@ -180,8 +186,8 @@ impl LocalRouter {
                 .as_ref()
                 .map(std::path::PathBuf::from),
             snapshot_limits: SnapshotLimits {
-                max_sources: MAX_DOCUMENTS,
-                max_nodes: MAX_DOCUMENT_CHARS,
+                max_sources: MAX_VANILLA_FILES.saturating_add(MAX_DOCUMENTS),
+                max_nodes: 20_000_000,
             },
             ..GameSessionConfig::default()
         });
@@ -218,6 +224,24 @@ impl LocalRouter {
         if let Some(catalog) = self.rule_catalog.clone() {
             session.set_rule_catalog(catalog);
         }
+        if self.vanilla_sources.is_none()
+            && !self.initialization.is_vanilla_folder
+            && let Some(path) = self.initialization.vanilla_game_path.as_deref()
+        {
+            match load_vanilla_sources(Path::new(path), &session.profile().script_folders) {
+                Ok(sources) => self.vanilla_sources = Some(sources),
+                Err(error) => self.notifications.push(notification(
+                    "window/logMessage",
+                    json!({"type":1,"message":format!("Failed to rebuild vanilla data from {path}: {error}")}),
+                )),
+            }
+        }
+        let vanilla_count = self.vanilla_sources.as_ref().map_or(0, Vec::len);
+        if let Some(sources) = &self.vanilla_sources {
+            for source in sources.iter().cloned() {
+                let _ = session.upsert_source(source);
+            }
+        }
         for source in self.workspace_sources() {
             let _ = session.upsert_source(SourceInput {
                 scope: source.scope,
@@ -228,6 +252,25 @@ impl LocalRouter {
             });
         }
         let refreshed = session.refresh_full().is_ok();
+        self.vanilla_cache_status = if vanilla_count > 0 {
+            format!("rebuilt_from_game:{vanilla_count}")
+        } else {
+            self
+            .initialization
+            .vanilla_cache_path
+            .as_deref()
+            .map_or_else(|| "not_configured".to_owned(), |path| {
+                let cache_path = Path::new(path);
+                if !cache_path.is_file() { return "missing".to_owned(); }
+                if cache_path.extension().is_some_and(|extension| extension.eq_ignore_ascii_case("cwb")) {
+                    self.notifications.push(notification(
+                        "window/logMessage",
+                        json!({"type":2,"message":format!("Legacy FsPickler vanilla cache cannot be loaded by the Rust server: {path}. Regenerate the vanilla cache in Rust format.")}),
+                    ));
+                    "legacy_incompatible".to_owned()
+                } else { "available".to_owned() }
+            })
+        };
         self.session_epoch = self.session_epoch.saturating_add(1);
         self.game_session = Some(session);
         if !self.sources.is_empty() {
@@ -325,6 +368,7 @@ impl LocalRouter {
 
     /// Announces readiness and resets client progress indicators after initialize.
     pub fn notify_server_ready(&mut self) {
+        self.rebuild_game_session();
         let instance_id = std::env::var("CWTOOLS_SERVER_INSTANCE_ID").ok();
         self.notifications.push(notification(
             "window/logMessage",
@@ -1626,6 +1670,8 @@ impl LocalRouter {
                 "referenceCount": snapshot.references.len(),
                 "parseErrorCount": snapshot.parse_errors.len(),
                 "cacheFingerprint": fingerprint.to_hex(),
+                "lastCacheStatus": self.vanilla_cache_status,
+                "vanillaCachePath": self.initialization.vanilla_cache_path,
                 "games": all_game_profiles().into_iter().map(|profile| profile.id.as_str()).collect::<Vec<_>>()
             }),
             Err(error) => json!({
@@ -2015,6 +2061,79 @@ impl LocalRouter {
         }
         locations
     }
+}
+
+fn load_vanilla_sources(root: &Path, folders: &[String]) -> Result<Vec<SourceInput>, String> {
+    if !root.is_dir() {
+        return Err(format!("game path does not exist: {}", root.display()));
+    }
+    let mut files = Vec::<PathBuf>::new();
+    for folder in folders {
+        let start = root.join(folder);
+        if !start.is_dir() {
+            continue;
+        }
+        let mut pending = vec![start];
+        while let Some(directory) = pending.pop() {
+            let mut entries = fs::read_dir(&directory)
+                .map_err(|error| error.to_string())?
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|error| error.to_string())?;
+            entries.sort_by_key(fs::DirEntry::path);
+            for entry in entries {
+                let path = entry.path();
+                let file_type = entry.file_type().map_err(|error| error.to_string())?;
+                if file_type.is_dir() {
+                    pending.push(path);
+                } else if file_type.is_file()
+                    && path.extension().is_some_and(|extension| {
+                        ["txt", "gui", "gfx", "asset"]
+                            .iter()
+                            .any(|candidate| extension.eq_ignore_ascii_case(candidate))
+                    })
+                {
+                    files.push(path);
+                }
+            }
+            if files.len() > MAX_VANILLA_FILES {
+                return Err(format!("vanilla data exceeds {MAX_VANILLA_FILES} files"));
+            }
+        }
+    }
+    files.sort();
+    files.dedup();
+    let mut total = 0_usize;
+    files
+        .into_iter()
+        .map(|path| {
+            let bytes = fs::read(&path).map_err(|error| error.to_string())?;
+            if bytes.len() > MAX_VANILLA_FILE_BYTES {
+                return Err(format!(
+                    "vanilla file exceeds {MAX_VANILLA_FILE_BYTES} bytes: {}",
+                    path.display()
+                ));
+            }
+            total = total.saturating_add(bytes.len());
+            if total > MAX_VANILLA_TOTAL_BYTES {
+                return Err(format!(
+                    "vanilla data exceeds {MAX_VANILLA_TOTAL_BYTES} bytes"
+                ));
+            }
+            let logical_path = path
+                .strip_prefix(root)
+                .unwrap_or(&path)
+                .to_string_lossy()
+                .replace('\\', "/");
+            let text = String::from_utf8_lossy(&bytes).into_owned();
+            Ok(SourceInput {
+                scope: "vanilla".to_owned(),
+                path: path.to_string_lossy().into_owned(),
+                logical_path,
+                text,
+                overwrite: Overwrite::No,
+            })
+        })
+        .collect()
 }
 
 fn load_rule_documents(path: &Path) -> Result<Vec<cwtools_rule_ir::Document>, String> {

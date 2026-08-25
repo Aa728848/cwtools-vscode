@@ -243,6 +243,14 @@ impl Router {
                     .get("rulesCache")
                     .and_then(Value::as_str)
                     .map(str::to_owned),
+                vanilla_cache_path: options
+                    .get("vanillaCachePath")
+                    .and_then(Value::as_str)
+                    .map(str::to_owned),
+                vanilla_game_path: options
+                    .get("vanillaGamePath")
+                    .and_then(Value::as_str)
+                    .map(str::to_owned),
                 bundled_rules_path: options
                     .get("bundledRulesPath")
                     .and_then(Value::as_str)

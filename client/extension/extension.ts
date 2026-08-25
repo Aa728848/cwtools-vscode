@@ -51,7 +51,7 @@ import { configureHistoryPolicy, enforceHistoryRetention } from './ai/runner/his
 import { TokenCalibrationTable, readCalibrationSnapshot } from './ai/runner/tokenCalibration';
 import { sha256Text } from './ai/runner/durableStorage';
 import { processRegistry } from './ai/runner/processRegistry';
-import { getAllLanguageIds, getAllProfiles, getCacheSettingKey, getKnownProfileByLanguageId, getProfileByLanguageId, getRulesRemoteUrl, getGameExeList, getGameFolderMapping, getAlternativeSteamFolderNames } from './gameProfiles';
+import { getAllLanguageIds, getAllProfiles, getCacheSettingKey, getKnownProfileByLanguageId, getProfileByLanguageId, getRulesRemoteUrl, getGameExeList, getGameFolderMapping, getAlternativeSteamFolderNames, getVanillaCacheFileName } from './gameProfiles';
 import { IndexService, type WorkspaceSymbolEntry } from './indexing/indexService';
 import { McpBridgeServer } from './ai/mcpBridgeServer';
 import { maybePromptForDefaultDarkModernTheme } from './themePrompt';
@@ -1750,6 +1750,9 @@ export async function activate(context: ExtensionContext) {
 		const bundledRulesPath = resolveBundledRulesPath(context, language);
 		await updateRemoteRulesCache(language, cacheDir, repoPath);
 		const effectiveRulesPath = resolveEffectiveRulesPath(language, cacheDir, bundledRulesPath);
+		const vanillaCacheFileName = getVanillaCacheFileName(language);
+		const vanillaCachePath = vanillaCacheFileName ? path.join(cacheDir, vanillaCacheFileName) : undefined;
+		const vanillaGamePath = getConfiguredGamePath(language);
 		ErrorReporter.debug('Extension', `Language: ${language}, repo: ${repoPath}`);
 		registerRulesConfigGroupCommands(context, () => ({
 			languageId: language,
@@ -1937,6 +1940,8 @@ export async function activate(context: ExtensionContext) {
 				uiLanguage: vs.env.language,
 				isVanillaFolder: isVanillaFolder,
 				rulesCache: cacheDir,
+				vanillaCachePath: vanillaCachePath,
+				vanillaGamePath: vanillaGamePath,
 				bundledRulesPath: effectiveRulesPath,
 				rules_version: workspace.getConfiguration('stellarisLanguageServices').get('rules_version'),
 				defaultRepoPath: defaultRepoPath,

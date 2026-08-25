@@ -12,6 +12,7 @@ const commands=manifest.commands.map(command=>command.name);
 const notifications=manifest.notifications.map(notification=>notification.direction+':'+notification.name);
 for(const value of duplicate(commands)) failures.push('duplicate command: '+value);
 for(const value of duplicate(notifications)) failures.push('duplicate notification: '+value);
+for(const command of manifest.commands){if(command.advertised&&command.handler!==true)failures.push('advertised command lacks Rust handler: '+command.name);}
 if(manifest.schemaVersion!==1) failures.push('schemaVersion must be 1');
 if(manifest.protocol.transport!=='stdio'||manifest.protocol.positionEncoding!=='utf-16') failures.push('protocol drift');
 if(!rust.includes('include_str!("../../../contracts/lsp-manifest.json")')) failures.push('Rust server must embed the command manifest');

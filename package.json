@@ -7,6 +7,7 @@
         "generate:mcp-schema": "node tools/generate-mcp-schema.cjs",
         "check:mcp-schema": "node tools/generate-mcp-schema.cjs --check",
         "pack": "powershell -ExecutionPolicy Bypass -File ./package.ps1",
+        "pack:host": "powershell -ExecutionPolicy Bypass -File ./package.ps1",
         "pack:install": "powershell -ExecutionPolicy Bypass -File ./package.ps1 -Install",
         "pack:universal": "node tools/package-universal.cjs",
         "pack:universal:download": "node tools/package-universal.cjs --download-run",

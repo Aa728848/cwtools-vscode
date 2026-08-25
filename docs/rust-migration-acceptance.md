@@ -7,7 +7,8 @@ This document records the remaining acceptance work after implementation. It is 
 - The extension launches only `release/bin/server/<rid>/CWTools Server[.exe]`.
 - The standalone server is Rust-only; no F#/.NET worker, selector, proxy, sidecar, or automatic fallback remains.
 - The Rust core workspace contains source/document overlays, parser/domain/process, CWT syntax/project/service, rule IR/engine, workspace snapshots, cache, game profiles, scope catalogs, Shader, and semantic/knowledge functionality.
-- The Rust LSP consumes the game, Shader, and semantic crates and handles standard LSP and custom commands directly.
+- The Rust LSP owns a bounded `GameSession`, refreshes it on document/configuration/watcher changes, queries workspace definition/reference indexes, enforces standalone read-only command policy, persists schema-V7 project knowledge, builds versioned session caches, and handles all eight Shader command adapters directly.
+- The authoritative implementation audit uses root branch `cc8131a864f76e16cab529b0c49868f3586a1d82`, core branch `b377453dee803f9258be92cfc49896d09039702d`, and MCP `NET10` commit `6ebc5ee5670d550b5c1620eb5d68197e0c4d2e3e`; the similarly named historical tag is not a baseline.
 - MCP remains a separately published read-only TypeScript package and is not bundled in the VSIX.
 - The migration execution plan remains in source control until acceptance closes; its presence is not a runtime or release artifact.
 

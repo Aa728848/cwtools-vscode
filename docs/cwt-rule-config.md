@@ -10,16 +10,16 @@ This guide is for people who maintain CWT rules. It explains the rule model used
 
 If you are adding one field to an existing rule, start with [Basic Syntax](#basic-syntax), [Field Expression Support Matrix](#field-expression-support-matrix), and [Authoring Workflow](#authoring-workflow). Read the parser-oriented sections when you are changing the CWT language itself.
 
-The implementation source of truth is in:
+The Rust implementation source of truth is in:
 
-- `submodules/cwtools/CWTools/Rules/RulesParser.fs`
-- `submodules/cwtools/CWTools/Rules/RulesTypes.fs`
-- `submodules/cwtools/CWTools/Rules/FieldValidators.fs`
-- `submodules/cwtools/CWTools/Rules/InfoService.fs`
-- `submodules/cwtools/CWTools/Rules/CompletionService.fs`
-- `submodules/cwtools-stellaris-config/config/`
+- `submodules/cwtools/crates/cwtools-cwt-syntax/src/lib.rs` — CWT parsing and diagnostics.
+- `submodules/cwtools/crates/cwtools-rule-ir/src/lib.rs` — rule intermediate representation and field types.
+- `submodules/cwtools/crates/cwtools-rules-engine/src/lib.rs` — rule compilation, validation, scopes, and completion semantics.
+- `submodules/cwtools/crates/cwtools-cwt-service/src/lib.rs` — document-level CWT symbols, references, diagnostics, and completion.
+- `submodules/cwtools/crates/cwtools-workspace/src/lib.rs` — resource precedence, indexes, full snapshots, and incremental updates.
+- `submodules/cwtools-stellaris-config/config/` — Stellaris rule data.
 
-The implementation files above are authoritative. Examples in this guide describe this project's dialect and may not apply unchanged to another CWT tool.
+These Rust crates and rules data are authoritative. Examples in this guide describe this project's dialect and may not apply unchanged to another CWT tool.
 
 ### Support Labels
 
@@ -836,12 +836,12 @@ When adding a field expression or changing field semantics, check:
 
 | File | Why |
 | --- | --- |
-| `RulesTypes.fs` | New `NewField` union case if needed. |
-| `RulesParser.fs` | `processKey`, rule parsing, and rule consistency. |
-| `FieldValidators.fs` | Validation and non-empty checks. |
-| `InfoService.fs` | Reference extraction and hover/go-to-definition. |
-| `CompletionService.fs` | LHS/RHS/leaf-value completion. |
-| `submodules/cwtools-stellaris-config/config/` | Rule data using the new expression. |
+| `submodules/cwtools/crates/cwtools-rule-ir/src/lib.rs` | Add or update the rule field/type representation. |
+| `submodules/cwtools/crates/cwtools-cwt-syntax/src/lib.rs` | Update CWT parsing and syntax diagnostics when needed. |
+| `submodules/cwtools/crates/cwtools-rules-engine/src/lib.rs` | Implement validation, scope, completion, and rule-consistency semantics. |
+| `submodules/cwtools/crates/cwtools-cwt-service/src/lib.rs` | Update document symbols, references, diagnostics, or completion projections. |
+| `submodules/cwtools/crates/cwtools-workspace/src/lib.rs` | Update project indexing, precedence, snapshot, or incremental behavior. |
+| `submodules/cwtools-stellaris-config/config/` | Add rule data using the new expression. |
 
 <a id="zh-cn"></a>
 
@@ -851,16 +851,16 @@ When adding a field expression or changing field semantics, check:
 
 如果只是给现有规则增加一个字段，可以先看[基础语法](#基础语法)、[字段表达式支持矩阵](#字段表达式支持矩阵)和[规则开发流程](#规则开发流程)。只有修改 CWT 语言本身时，才需要继续阅读偏解析器实现的章节。
 
-实现上的事实来源是：
+Rust 实现的事实来源是：
 
-- `submodules/cwtools/CWTools/Rules/RulesParser.fs`
-- `submodules/cwtools/CWTools/Rules/RulesTypes.fs`
-- `submodules/cwtools/CWTools/Rules/FieldValidators.fs`
-- `submodules/cwtools/CWTools/Rules/InfoService.fs`
-- `submodules/cwtools/CWTools/Rules/CompletionService.fs`
-- `submodules/cwtools-stellaris-config/config/`
+- `submodules/cwtools/crates/cwtools-cwt-syntax/src/lib.rs`：CWT 解析与诊断。
+- `submodules/cwtools/crates/cwtools-rule-ir/src/lib.rs`：规则中间表示与字段类型。
+- `submodules/cwtools/crates/cwtools-rules-engine/src/lib.rs`：规则编译、校验、作用域与补全语义。
+- `submodules/cwtools/crates/cwtools-cwt-service/src/lib.rs`：文档级 CWT 符号、引用、诊断与补全。
+- `submodules/cwtools/crates/cwtools-workspace/src/lib.rs`：资源优先级、索引、全量快照与增量更新。
+- `submodules/cwtools-stellaris-config/config/`：Stellaris 规则数据。
 
-以上实现文件是最终依据。本文示例描述的是本项目方言，不一定能原样用于其他 CWT 工具。
+以上 Rust crate 和规则数据是最终依据。本文示例描述的是本项目方言，不一定能原样用于其他 CWT 工具。
 
 ### 支持范围标记
 
@@ -1669,9 +1669,9 @@ npm run verify
 
 | 文件 | 原因 |
 | --- | --- |
-| `RulesTypes.fs` | 是否需要新的 `NewField` union case。 |
-| `RulesParser.fs` | `processKey`、规则解析和规则一致性。 |
-| `FieldValidators.fs` | 校验和非空校验。 |
-| `InfoService.fs` | 引用提取、悬浮和跳转定义。 |
-| `CompletionService.fs` | LHS/RHS/裸值补全。 |
-| `submodules/cwtools-stellaris-config/config/` | 使用新表达式的规则数据。 |
+| `submodules/cwtools/crates/cwtools-rule-ir/src/lib.rs` | 增加或修改规则字段/类型表示。 |
+| `submodules/cwtools/crates/cwtools-cwt-syntax/src/lib.rs` | 必要时修改 CWT 解析与语法诊断。 |
+| `submodules/cwtools/crates/cwtools-rules-engine/src/lib.rs` | 实现校验、scope、补全和规则一致性语义。 |
+| `submodules/cwtools/crates/cwtools-cwt-service/src/lib.rs` | 修改文档符号、引用、诊断或补全投影。 |
+| `submodules/cwtools/crates/cwtools-workspace/src/lib.rs` | 修改项目索引、优先级、快照或增量行为。 |
+| `submodules/cwtools-stellaris-config/config/` | 添加使用新表达式的规则数据。 |

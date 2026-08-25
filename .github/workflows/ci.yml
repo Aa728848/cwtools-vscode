@@ -63,33 +63,21 @@ jobs:
       - run: cargo test --manifest-path rust/Cargo.toml --workspace --all-targets --locked
       - run: cargo clippy --manifest-path rust/Cargo.toml --workspace --all-targets --locked -- -D warnings
 
+  release-platform-matrix:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.platforms.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: platforms
+        run: node tools/release-platform-matrix.cjs
+
   rust-release-artifacts:
+    needs: release-platform-matrix
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          - {
-              os: windows-latest,
-              rid: win-x64,
-              target: x86_64-pc-windows-msvc,
-              binary: cwtools-lsp.exe,
-              staged: "CWTools Server.exe",
-            }
-          - {
-              os: ubuntu-latest,
-              rid: linux-x64,
-              target: x86_64-unknown-linux-gnu,
-              binary: cwtools-lsp,
-              staged: "CWTools Server",
-            }
-          - {
-              os: macos-latest,
-              rid: osx-x64,
-              target: x86_64-apple-darwin,
-              binary: cwtools-lsp,
-              staged: "CWTools Server",
-            }
+      matrix: ${{ fromJSON(needs.release-platform-matrix.outputs.matrix) }}
     steps:
       - uses: actions/checkout@v4
         with: { submodules: recursive }
@@ -109,10 +97,14 @@ jobs:
           mkdir -p "release/bin/server/${{ matrix.rid }}"
           cp "rust/target/${{ matrix.target }}/release/${{ matrix.binary }}" "release/bin/server/${{ matrix.rid }}/${{ matrix.staged }}"
           chmod +x "release/bin/server/${{ matrix.rid }}/${{ matrix.staged }}"
+      - name: Write artifact provenance manifest
+        run: node tools/write-release-artifact-manifest.cjs --rid ${{ matrix.rid }} --binary "release/bin/server/${{ matrix.rid }}/${{ matrix.staged }}" --output "release/bin/server/${{ matrix.rid }}/artifact-manifest.json" --source-sha ${{ github.sha }}
       - uses: actions/upload-artifact@v4
         with:
           name: cwtools-server-${{ matrix.rid }}
-          path: release/bin/server/${{ matrix.rid }}/${{ matrix.staged }}
+          path: |
+            release/bin/server/${{ matrix.rid }}/${{ matrix.staged }}
+            release/bin/server/${{ matrix.rid }}/artifact-manifest.json
           if-no-files-found: error
 
   universal-vsix:
@@ -126,35 +118,24 @@ jobs:
       - run: npm ci
       - uses: actions/download-artifact@v4
         with:
-          pattern: cwtools-server-*
-          path: release/bin/server
-          merge-multiple: false
-      - name: Normalize downloaded server layout
-        shell: bash
-        run: |
-          for rid in win-x64 linux-x64 osx-x64; do
-            test -d "release/bin/server/cwtools-server-$rid"
-            rm -rf "release/bin/server/$rid"
-            mv "release/bin/server/cwtools-server-$rid" "release/bin/server/$rid"
-          done
-          chmod +x "release/bin/server/linux-x64/CWTools Server" "release/bin/server/osx-x64/CWTools Server"
-      - run: npm run compile
-      - run: npm run build:docs
-      - run: npm run check:rust-only
-      - run: npm run check:release -- --skip-compile --skip-test
-      - name: Package universal VSIX
-        working-directory: release
-        run: npx @vscode/vsce package
-      - name: Verify packaged universal VSIX
-        shell: bash
-        run: |
-          vsix=$(find release -maxdepth 1 -name '*.vsix' -type f -print -quit)
-          test -n "$vsix"
-          node tools/check-vsix.js --vsix "$vsix"
+          name: cwtools-server-win-x64
+          path: artifacts/universal-server/cwtools-server-win-x64
+      - uses: actions/download-artifact@v4
+        with:
+          name: cwtools-server-linux-x64
+          path: artifacts/universal-server/cwtools-server-linux-x64
+      - uses: actions/download-artifact@v4
+        with:
+          name: cwtools-server-osx-x64
+          path: artifacts/universal-server/cwtools-server-osx-x64
+      - name: Aggregate, package, and verify exact universal VSIX
+        run: npm run pack:universal
       - uses: actions/upload-artifact@v4
         with:
           name: cwtools-universal-vsix
-          path: release/*.vsix
+          path: |
+            release/*.vsix
+            release/*.vsix.sha256
           if-no-files-found: error
 
   publish-release:
@@ -172,22 +153,24 @@ jobs:
         with:
           name: cwtools-universal-vsix
           path: release
-      - name: Verify tag and universal VSIX
+      - name: Verify tag, exact immutable VSIX, and checksum
         shell: bash
         run: |
           version=$(node -p "require('./release/package.json').version")
           test "${GITHUB_REF_NAME}" = "v$version"
-          vsix=$(find release -maxdepth 1 -name "*-$version.vsix" -type f)
-          test $(printf '%s\n' "$vsix" | grep -c .) -eq 1
-          node tools/check-vsix.js --vsix "$vsix"
+          vsix="release/foreverskywalker-stellaris-cwtools-$version.vsix"
+          test -f "$vsix"
+          test -f "$vsix.sha256"
+          sha256sum --check "$vsix.sha256"
+          node tools/check-vsix.js --vsix "$vsix" --source-sha "$GITHUB_SHA"
       - name: Publish immutable GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           version=$(node -p "require('./release/package.json').version")
-          vsix=$(find release -maxdepth 1 -name "*-$version.vsix" -type f)
-          gh release create "$GITHUB_REF_NAME" "$vsix" --repo "$GITHUB_REPOSITORY" --verify-tag --title "$GITHUB_REF_NAME" --generate-notes
+          vsix="release/foreverskywalker-stellaris-cwtools-$version.vsix"
+          gh release create "$GITHUB_REF_NAME" "$vsix" "$vsix.sha256" --repo "$GITHUB_REPOSITORY" --verify-tag --title "$GITHUB_REF_NAME" --generate-notes
 
   mcp-contracts:
     runs-on: ubuntu-latest

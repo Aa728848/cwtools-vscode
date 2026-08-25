@@ -139,14 +139,18 @@ dependencies = [
 name = "cwtools-lsp"
 version = "0.1.0"
 dependencies = [
+ "cwtools-cache",
  "cwtools-game-core",
  "cwtools-leaf",
  "cwtools-protocol",
+ "cwtools-rule-ir",
+ "cwtools-rules-engine",
  "cwtools-script-syntax",
  "cwtools-semantic",
  "cwtools-shader",
  "cwtools-source",
  "cwtools-transport",
+ "cwtools-workspace",
  "serde_json",
 ]
 
@@ -191,6 +195,9 @@ version = "0.1.0"
 [[package]]
 name = "cwtools-script-syntax"
 version = "0.1.0"
+dependencies = [
+ "serde",
+]
 
 [[package]]
 name = "cwtools-semantic"
@@ -234,6 +241,7 @@ dependencies = [
  "cwtools-script-syntax",
  "globset",
  "regex",
+ "serde",
  "zip",
 ]
 

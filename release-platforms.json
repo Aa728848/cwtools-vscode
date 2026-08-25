@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "platforms": [
+    {
+      "rid": "win-x64",
+      "target": "x86_64-pc-windows-msvc",
+      "runner": "windows-latest",
+      "artifact": "cwtools-server-win-x64",
+      "sourceBinary": "cwtools-lsp.exe",
+      "stagedBinary": "CWTools Server.exe",
+      "format": "pe-x86_64"
+    },
+    {
+      "rid": "linux-x64",
+      "target": "x86_64-unknown-linux-gnu",
+      "runner": "ubuntu-latest",
+      "artifact": "cwtools-server-linux-x64",
+      "sourceBinary": "cwtools-lsp",
+      "stagedBinary": "CWTools Server",
+      "format": "elf-x86_64"
+    },
+    {
+      "rid": "osx-x64",
+      "target": "x86_64-apple-darwin",
+      "runner": "macos-latest",
+      "artifact": "cwtools-server-osx-x64",
+      "sourceBinary": "cwtools-lsp",
+      "stagedBinary": "CWTools Server",
+      "format": "macho-x86_64"
+    }
+  ]
+}

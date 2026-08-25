@@ -15,6 +15,7 @@ param (
     [switch]$IncludeMcp,
     [switch]$SkipDocs
 )
+$ErrorActionPreference = "Stop"
 $StartTime = Get-Date
 if ($Version) {
     foreach ($file in @((Join-Path $PSScriptRoot "package.json"), (Join-Path $PSScriptRoot "release/package.json"))) {
@@ -28,6 +29,9 @@ $DestinationName = if ($Rid -eq "win-x64") { "CWTools Server.exe" } else { "CWTo
 cargo build --manifest-path rust/Cargo.toml --release --locked --target $Target
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 $Source = Join-Path $PSScriptRoot "rust/target/$Target/release/$SourceName"
+if (-not (Test-Path -LiteralPath $Source -PathType Leaf) -or (Get-Item -LiteralPath $Source).Length -eq 0) {
+    throw "Rust server build did not produce a non-empty file: $Source"
+}
 $DestinationDir = Join-Path $PSScriptRoot "release/bin/server/$Rid"
 New-Item -ItemType Directory -Path $DestinationDir -Force | Out-Null
 Copy-Item -LiteralPath $Source -Destination (Join-Path $DestinationDir $DestinationName) -Force

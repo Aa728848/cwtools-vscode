@@ -19,7 +19,7 @@ function report() {
     passed: true, errors: [],
   };
 }
-assert.deepStrictEqual(verifyReport(report(), { final: true }), []);
+assert.deepStrictEqual(verifyReport(report(), { final: true, checkArtifact: false }), []);
 const dirty = report(); dirty.completionIdentity.repository.workingTree = 'dirty'; assert(verifyReport(dirty, { final: true }).some(error => error.includes('repository identity drifted')));
 const nested = report(); nested.completionIdentity.repositories[2].commit = 'changed'; assert(verifyReport(nested, { final: true }).some(error => error.includes('nested repository identity drifted')));
 const changed = report(); changed.completionIdentity.artifactSha256 = 'b'.repeat(64); assert(verifyReport(changed, { final: true }).some(error => error.includes('artifact changed')));

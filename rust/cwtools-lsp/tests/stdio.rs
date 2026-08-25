@@ -70,7 +70,7 @@ fn stdio_process_completes_manifest_lifecycle_without_proxy() {
     assert!(child.wait().expect("server exit").success());
 
     let messages = frames(&output);
-    assert_eq!(messages.len(), 2);
+    assert_eq!(messages.len(), 5);
     assert_eq!(messages[0]["id"], 1);
     assert!(
         messages[0]["result"]["capabilities"]["hoverProvider"]
@@ -84,6 +84,9 @@ fn stdio_process_completes_manifest_lifecycle_without_proxy() {
             .iter()
             .any(|command| command == "cacheVanilla")
     );
-    assert_eq!(messages[1]["id"], 2);
-    assert_eq!(messages[1]["result"], Value::Null);
+    assert_eq!(messages[1]["method"], "loadingBar");
+    assert_eq!(messages[2]["method"], "debugBar");
+    assert_eq!(messages[3]["method"], "cwtools/serverReady");
+    assert_eq!(messages[4]["id"], 2);
+    assert_eq!(messages[4]["result"], Value::Null);
 }

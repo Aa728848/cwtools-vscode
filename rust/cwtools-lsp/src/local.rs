@@ -17,13 +17,21 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use cwtools_game_core::all_game_profiles;
+use cwtools_cache::fingerprint_sources;
+use cwtools_game_core::{
+    GameId, GameSession, GameSessionConfig, SourceInput, all_game_profiles, game_profile,
+    parse_localisation,
+};
 use cwtools_leaf::folding_ranges;
 use cwtools_protocol::{Message, RequestId};
 use cwtools_script_syntax::{parse, print_canonical};
 use cwtools_semantic::analyze_pdx_flow;
-use cwtools_shader::{hlsl, preprocessor, syntax};
+use cwtools_shader::{
+    features as shader_features, preprocessor, project as shader_project,
+    runtime as shader_runtime, syntax,
+};
 use cwtools_source::{DocumentStore, Position as SourcePosition, SourceId, TextChange, TextRange};
+use cwtools_workspace::{Overwrite, SnapshotLimits, SnapshotSource, compute_full_snapshot};
 use serde_json::{Value, json};
 
 const MAX_DOCUMENTS: usize = 64;
@@ -31,11 +39,54 @@ const MAX_DOCUMENT_CHARS: usize = 2_000_000;
 const MAX_RESULTS: usize = 512;
 const MAX_COMPLETIONS: usize = 128;
 const MAX_SEMANTIC_TOKENS: usize = 4096;
+const MAX_WORKSPACE_FOLDERS: usize = 32;
+const MAX_WATCHED_CHANGES: usize = 1024;
+const MAX_SETTINGS_BYTES: usize = 64 * 1024;
+const MAX_REVERSE_REQUESTS: usize = 64;
+const WRITE_COMMANDS: &[&str] = &[
+    "cacheVanilla",
+    "exportProjectKnowledge",
+    "genlocall",
+    "genlocfile",
+    "outputerrors",
+    "pretriggerAllFiles",
+    "pretriggerThisFile",
+    "cwtools.exportTypes",
+];
+
+#[allow(clippy::struct_excessive_bools)]
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct InitializationState {
+    pub language: Option<String>,
+    pub ui_language: Option<String>,
+    pub is_vanilla_folder: bool,
+    pub rules_cache: Option<String>,
+    pub bundled_rules_path: Option<String>,
+    pub rules_version: Option<String>,
+    pub default_repo_path: Option<String>,
+    pub repo_path: Option<String>,
+    pub diagnostic_logging: bool,
+    pub insert_replace_support: bool,
+    pub watched_files_dynamic_registration: bool,
+}
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub enum RouteDecision {
-    Forward,
-    Respond(String),
+pub struct WorkspaceFolder {
+    pub uri: String,
+    pub name: String,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ReverseRequestKind {
+    ApplyEdit,
+    RegisterCapability,
+}
+
+#[derive(Clone, Debug)]
+pub struct ReverseRequest {
+    pub method: &'static str,
+    pub params: Value,
+    pub kind: ReverseRequestKind,
 }
 
 #[allow(dead_code)]
@@ -77,15 +128,134 @@ pub struct LocalRouter {
     metadata: BTreeMap<String, DocumentMeta>,
     next_source: u32,
     workspace_root: Option<String>,
+    workspace_folders: Vec<WorkspaceFolder>,
+    initialization: InitializationState,
+    settings: Value,
+    watched_changes: Vec<Value>,
     advertised_commands: BTreeSet<String>,
     all_commands: BTreeSet<String>,
+    read_only: bool,
     semantic: BTreeMap<String, SemanticSnapshot>,
+    game_session: Option<GameSession>,
+    session_epoch: u64,
     notifications: Vec<Message>,
+    reverse_requests: Vec<ReverseRequest>,
 }
 
 impl LocalRouter {
-    pub fn set_workspace_root(&mut self, root: Option<String>) {
-        self.workspace_root = root;
+    pub fn configure(
+        &mut self,
+        root: Option<String>,
+        folders: Vec<WorkspaceFolder>,
+        initialization: InitializationState,
+    ) {
+        self.workspace_root = root.or_else(|| folders.first().map(|folder| folder.uri.clone()));
+        self.workspace_folders = folders.into_iter().take(MAX_WORKSPACE_FOLDERS).collect();
+        self.initialization = initialization;
+        self.rebuild_game_session();
+    }
+
+    fn selected_game_id(&self) -> GameId {
+        self.initialization
+            .language
+            .as_deref()
+            .and_then(parse_game_id)
+            .unwrap_or(GameId::Generic)
+    }
+
+    fn rebuild_game_session(&mut self) {
+        let mut session = GameSession::new(GameSessionConfig {
+            game_id: self.selected_game_id(),
+            cache_path: self
+                .initialization
+                .rules_cache
+                .as_ref()
+                .map(std::path::PathBuf::from),
+            snapshot_limits: SnapshotLimits {
+                max_sources: MAX_DOCUMENTS,
+                max_nodes: MAX_DOCUMENT_CHARS,
+            },
+            ..GameSessionConfig::default()
+        });
+        for source in self.workspace_sources() {
+            let _ = session.upsert_source(SourceInput {
+                scope: source.scope,
+                path: source.path,
+                logical_path: source.logical_path,
+                text: source.text,
+                overwrite: source.overwrite,
+            });
+        }
+        let refreshed = session.refresh_full().is_ok();
+        self.session_epoch = self.session_epoch.saturating_add(1);
+        self.game_session = Some(session);
+        if !self.sources.is_empty() {
+            self.notifications.push(notification(
+                "cwtools/validationComplete",
+                json!({"epoch":self.session_epoch,"fresh":refreshed,"status":if refreshed { "fresh" } else { "stale" }}),
+            ));
+        }
+    }
+
+    #[must_use]
+    pub fn initialization(&self) -> &InitializationState {
+        &self.initialization
+    }
+
+    #[must_use]
+    pub fn workspace_folders(&self) -> &[WorkspaceFolder] {
+        &self.workspace_folders
+    }
+
+    #[must_use]
+    pub fn settings(&self) -> &Value {
+        &self.settings
+    }
+
+    #[must_use]
+    pub fn watched_change_count(&self) -> usize {
+        self.watched_changes.len()
+    }
+
+    pub fn queue_apply_edit(&mut self, label: Option<&str>, edit: Value) -> bool {
+        self.queue_reverse_request(ReverseRequest {
+            method: "workspace/applyEdit",
+            params: json!({"label": label, "edit": edit}),
+            kind: ReverseRequestKind::ApplyEdit,
+        })
+    }
+
+    pub fn queue_watched_files_registration(&mut self) -> bool {
+        if !self.initialization.watched_files_dynamic_registration {
+            return false;
+        }
+        self.queue_reverse_request(ReverseRequest {
+            method: "client/registerCapability",
+            params: json!({"registrations":[{
+                "id":"cwtools-watch-files",
+                "method":"workspace/didChangeWatchedFiles",
+                "registerOptions":{"watchers":[
+                    {"globPattern":"**/*.{txt,cwt,gui,gfx,asset,yml,yaml,shader,fxh}","kind":7}
+                ]}
+            }]}),
+            kind: ReverseRequestKind::RegisterCapability,
+        })
+    }
+
+    pub fn drain_reverse_requests(&mut self) -> Vec<ReverseRequest> {
+        std::mem::take(&mut self.reverse_requests)
+    }
+
+    fn queue_reverse_request(&mut self, request: ReverseRequest) -> bool {
+        if self.reverse_requests.len() >= MAX_REVERSE_REQUESTS {
+            return false;
+        }
+        self.reverse_requests.push(request);
+        true
+    }
+
+    pub fn set_read_only(&mut self, read_only: bool) {
+        self.read_only = read_only;
     }
 
     pub fn set_commands(
@@ -101,16 +271,49 @@ impl LocalRouter {
         std::mem::take(&mut self.notifications)
     }
 
-    #[must_use]
-    pub fn route(&mut self, payload: &str) -> RouteDecision {
-        let Ok(message) = serde_json::from_str::<Message>(payload) else {
-            return RouteDecision::Forward;
+    pub fn notify_reverse_failure(&mut self, kind: ReverseRequestKind) {
+        let operation = match kind {
+            ReverseRequestKind::ApplyEdit => "workspace/applyEdit",
+            ReverseRequestKind::RegisterCapability => "client/registerCapability",
         };
+        self.notifications.push(notification(
+            "window/logMessage",
+            json!({"type":2,"message":format!("Client rejected {operation}")}),
+        ));
+    }
+
+    /// Announces readiness and resets client progress indicators after initialize.
+    pub fn notify_server_ready(&mut self) {
+        self.notifications.push(notification(
+            "loadingBar",
+            json!({"enable": false, "value": ""}),
+        ));
+        self.notifications.push(notification(
+            "debugBar",
+            json!({"enable": false, "value": ""}),
+        ));
+        self.notifications.push(notification(
+            "cwtools/serverReady",
+            json!({"server": "cwtools-rust", "version": env!("CARGO_PKG_VERSION")}),
+        ));
+    }
+
+    /// Publishes a bounded virtual file for clients that support generated views.
+    pub fn notify_virtual_file(&mut self, uri: &str, file_content: &str) {
+        let bounded = file_content
+            .chars()
+            .take(MAX_DOCUMENT_CHARS)
+            .collect::<String>();
+        self.notifications.push(notification(
+            "createVirtualFile",
+            json!({"uri": uri, "fileContent": bounded}),
+        ));
+    }
+
+    #[must_use]
+    pub fn route(&mut self, payload: &str) -> Option<Message> {
+        let message = serde_json::from_str::<Message>(payload).ok()?;
         self.handle(&message)
-            .map_or(RouteDecision::Forward, |response| {
-                serde_json::to_string(&response)
-                    .map_or(RouteDecision::Forward, RouteDecision::Respond)
-            })
     }
 
     #[must_use]
@@ -215,13 +418,123 @@ impl LocalRouter {
                 self.did_focus_file(message.params.as_ref());
                 None
             }
-            "workspace/didChangeConfiguration"
-            | "workspace/didChangeWatchedFiles"
-            | "textDocument/willSave" => None,
+            "workspace/didChangeConfiguration" => {
+                self.did_change_configuration(message.params.as_ref());
+                None
+            }
+            "workspace/didChangeWatchedFiles" => {
+                self.did_change_watched_files(message.params.as_ref());
+                None
+            }
+            "workspace/didChangeWorkspaceFolders" => {
+                self.did_change_workspace_folders(message.params.as_ref());
+                None
+            }
+            "textDocument/willSave" => {
+                self.will_save(message.params.as_ref());
+                None
+            }
+            "textDocument/willSaveWaitUntil" => Some(response(message.id.clone()?, json!([]))),
             _ => message
                 .id
                 .clone()
                 .map(|id| error_response(id, -32_601, "Method not found")),
+        }
+    }
+
+    fn did_change_configuration(&mut self, params: Option<&Value>) {
+        let Some(settings) = params.and_then(|value| value.get("settings")) else {
+            return;
+        };
+        if serde_json::to_vec(settings).is_ok_and(|bytes| bytes.len() <= MAX_SETTINGS_BYTES) {
+            self.settings = settings.clone();
+            self.rebuild_game_session();
+            self.notifications.push(notification(
+                "monitorLog",
+                json!({"category":"configuration","message":"Workspace configuration updated"}),
+            ));
+        }
+    }
+
+    fn did_change_watched_files(&mut self, params: Option<&Value>) {
+        let Some(changes) = params
+            .and_then(|value| value.get("changes"))
+            .and_then(Value::as_array)
+        else {
+            return;
+        };
+        self.watched_changes = changes
+            .iter()
+            .filter(|change| {
+                change.get("uri").and_then(Value::as_str).is_some()
+                    && change
+                        .get("type")
+                        .and_then(Value::as_u64)
+                        .is_some_and(|kind| (1..=3).contains(&kind))
+            })
+            .take(MAX_WATCHED_CHANGES)
+            .cloned()
+            .collect();
+        self.rebuild_game_session();
+        self.notifications.push(notification(
+            "cwtools/validationComplete",
+            json!({"reason":"watchedFiles","changes":self.watched_changes.len(),"status":"fresh","epoch":self.session_epoch}),
+        ));
+    }
+
+    fn did_change_workspace_folders(&mut self, params: Option<&Value>) {
+        let Some(event) = params.and_then(|value| value.get("event")) else {
+            return;
+        };
+        if let Some(removed) = event.get("removed").and_then(Value::as_array) {
+            let removed_uris = removed
+                .iter()
+                .filter_map(|folder| folder.get("uri").and_then(Value::as_str))
+                .collect::<BTreeSet<_>>();
+            self.workspace_folders
+                .retain(|folder| !removed_uris.contains(folder.uri.as_str()));
+        }
+        if let Some(added) = event.get("added").and_then(Value::as_array) {
+            for folder in added {
+                let (Some(uri), Some(name)) = (
+                    folder.get("uri").and_then(Value::as_str),
+                    folder.get("name").and_then(Value::as_str),
+                ) else {
+                    continue;
+                };
+                if self.workspace_folders.len() >= MAX_WORKSPACE_FOLDERS {
+                    break;
+                }
+                if !self
+                    .workspace_folders
+                    .iter()
+                    .any(|current| current.uri == uri)
+                {
+                    self.workspace_folders.push(WorkspaceFolder {
+                        uri: uri.to_owned(),
+                        name: name.to_owned(),
+                    });
+                }
+            }
+        }
+        self.workspace_folders
+            .sort_by(|left, right| left.uri.cmp(&right.uri));
+        self.workspace_root = self
+            .workspace_folders
+            .first()
+            .map(|folder| folder.uri.clone());
+    }
+
+    fn will_save(&mut self, params: Option<&Value>) {
+        let Some(uri) = params
+            .and_then(|value| value.get("textDocument"))
+            .and_then(|value| value.get("uri"))
+            .and_then(Value::as_str)
+        else {
+            return;
+        };
+        if self.document(uri).is_some() {
+            self.semantic.remove(uri);
         }
     }
 
@@ -281,6 +594,7 @@ impl LocalRouter {
             return;
         };
         if self.open_document(uri, language, version, text) {
+            self.rebuild_game_session();
             self.publish_diagnostics(uri);
         } else {
             self.publish_message(
@@ -341,6 +655,7 @@ impl LocalRouter {
             return;
         }
         self.semantic.remove(uri);
+        self.rebuild_game_session();
         self.publish_diagnostics(uri);
     }
 
@@ -360,6 +675,7 @@ impl LocalRouter {
                 .map(str::to_owned);
             if self.documents.save(source, text).is_ok() {
                 self.semantic.remove(uri);
+                self.rebuild_game_session();
                 self.publish_diagnostics(uri);
             }
         }
@@ -378,6 +694,7 @@ impl LocalRouter {
         }
         self.metadata.remove(uri);
         self.semantic.remove(uri);
+        self.rebuild_game_session();
         self.publish_message(uri, Vec::new());
     }
 
@@ -903,18 +1220,51 @@ impl LocalRouter {
         {
             return Some(error_response(id?, -32_601, "Command not found"));
         }
+        if self.read_only && WRITE_COMMANDS.contains(&command.as_str()) {
+            return Some(error_response(
+                id?,
+                -32_603,
+                "Command forbidden in read-only mode",
+            ));
+        }
         let arguments = params
             .and_then(|value| value.get("arguments"))
             .cloned()
             .unwrap_or_else(|| json!([]));
         if command == "cacheVanilla" {
-            self.notifications
-                .push(notification("vanillaCacheGenerated", json!({"ok":true})));
+            self.notifications.push(notification(
+                "loadingBar",
+                json!({"enable": true, "value": "Generating vanilla cache", "percentage": 0}),
+            ));
+            let cache_result = self
+                .game_session
+                .as_ref()
+                .and_then(|session| {
+                    session.snapshot().map(|snapshot| {
+                        session
+                            .save_cache(snapshot)
+                            .map(|metadata| json!({"ok":true,"cached":metadata.is_some()}))
+                            .unwrap_or_else(|error| json!({"ok":false,"error":error.to_string()}))
+                    })
+                })
+                .unwrap_or_else(|| json!({"ok":false,"error":"game session is not ready"}));
+            self.notifications.push(notification(
+                "vanillaCacheGenerated",
+                json!({"gameId": self.selected_game_id().as_str(), "result": cache_result}),
+            ));
+            self.notifications.push(notification(
+                "loadingBar",
+                json!({"enable": false, "value": "", "percentage": 100}),
+            ));
         }
         if command == "reloadrulesconfig" || command == "debugrules" {
             self.notifications.push(notification(
                 "cwtools/validationComplete",
-                json!({"command":command,"ok":true}),
+                json!({"command":command,"ok":true,"status":"complete"}),
+            ));
+            self.notifications.push(notification(
+                "completionRefresh",
+                json!({"uri": self.workspace_root.as_deref().unwrap_or(""), "line": 0, "character": 0, "version": 0}),
             ));
         }
         let first = arguments
@@ -929,23 +1279,25 @@ impl LocalRouter {
             .and_then(Value::as_str)
             .unwrap_or("memory.shader");
         let result = if command == "cwtools.ai.getValidationStatus" {
-            json!({"ready":true,"epoch":0,"fresh":true,"pending":0,"games":all_game_profiles().into_iter().map(|profile|profile.id.as_str()).collect::<Vec<_>>()})
+            self.validation_status()
+        } else if command == "cwtools.ai.getEntityInfo" && first.get("entity").is_none() {
+            self.game_profile_result(&first)
         } else if command == "getFileTypes" {
             json!([
                 "txt", "yml", "yaml", "cwt", "gui", "gfx", "asset", "shader", "fxh"
             ])
-        } else if command == "cwtools.ai.shader.validate" {
-            let tree = syntax::parse(file, text);
-            json!({"ok":tree.diagnostics.is_empty(),"diagnostics":tree.diagnostics,"tokenCount":tree.tokens.len()})
-        } else if command == "cwtools.ai.shader.symbols" {
-            let tree = syntax::parse(file, text);
-            let pp = preprocessor::analyze(&tree);
-            let analysis = hlsl::analyze(&tree, &pp);
-            json!({"symbols":analysis.symbols.into_iter().take(MAX_RESULTS).collect::<Vec<_>>(),"diagnostics":analysis.diagnostics})
-        } else if command == "cwtools.ai.shader.variants" {
-            json!({"variants":preprocessor::default_platform_variants()})
+        } else if command.starts_with("cwtools.ai.shader.") {
+            self.shader_command(&command, &first, file, text)
         } else if command == "cwtools.ai.analyzePdxFlow" {
-            json!(analyze_pdx_flow(text, MAX_RESULTS))
+            let analysis = analyze_pdx_flow(
+                text,
+                first
+                    .get("limit")
+                    .and_then(Value::as_u64)
+                    .unwrap_or(MAX_RESULTS as u64)
+                    .min(MAX_RESULTS as u64) as usize,
+            );
+            json!({"ok":true,"status":"fresh","schemaVersion":4,"file":file,"analysis":analysis})
         } else if command == "cwtools.ai.parseFragment" || command == "cwtools.ai.validateOverlay" {
             match parse(text) {
                 Ok(cst) => {
@@ -1000,49 +1352,466 @@ impl LocalRouter {
                 }
             }
             json!({"kind":command,"items":names.into_iter().take(MAX_RESULTS).collect::<Vec<_>>(),"complete":true})
-        } else if matches!(
-            command.as_str(),
-            "cwtools.ai.exploreProject"
-                | "cwtools.ai.exploreInlineGraph"
-                | "cwtools.ai.queryProjectKnowledgeDb"
-                | "cwtools.ai.exportProjectKnowledge"
-        ) {
-            let nodes = self
-                .sources
-                .keys()
-                .filter_map(|uri| self.document(uri).map(|document| (uri, document)))
-                .flat_map(|(uri, document)| {
-                    self.symbols_for_document(uri, &document.text, &document.line_index)
-                })
-                .take(MAX_RESULTS)
+        } else if command == "cwtools.ai.exploreProject" {
+            let texts = self
+                .workspace_sources()
+                .into_iter()
+                .map(|source| (source.path, source.text))
                 .collect::<Vec<_>>();
-            json!({"schemaVersion":1,"nodes":nodes,"edges":[],"truncated":false,"fresh":true})
+            let options = cwtools_semantic::ExploreOptions {
+                query: first
+                    .get("query")
+                    .and_then(Value::as_str)
+                    .unwrap_or("")
+                    .into(),
+                file: first.get("file").and_then(Value::as_str).map(str::to_owned),
+                type_name: first
+                    .get("typeName")
+                    .and_then(Value::as_str)
+                    .map(str::to_owned),
+                exact: first.get("exact").and_then(Value::as_bool).unwrap_or(false),
+                depth: first.get("depth").and_then(Value::as_u64).unwrap_or(1) as usize,
+                max_nodes: first.get("maxNodes").and_then(Value::as_u64).unwrap_or(100) as usize,
+                max_edges: first.get("maxEdges").and_then(Value::as_u64).unwrap_or(300) as usize,
+                include_metadata: first
+                    .get("includeMetadata")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false),
+            };
+            json!(cwtools_semantic::explore_project(&texts, &options))
+        } else if command == "cwtools.ai.exploreInlineGraph" {
+            let texts = self
+                .workspace_sources()
+                .into_iter()
+                .map(|source| (source.path, source.text))
+                .collect::<Vec<_>>();
+            json!(cwtools_semantic::explore_inline_graph(
+                &texts,
+                first
+                    .get("limit")
+                    .and_then(Value::as_u64)
+                    .unwrap_or(MAX_RESULTS as u64) as usize
+            ))
+        } else if command == "cwtools.ai.queryProjectKnowledgeDb" {
+            let path = first
+                .get("databasePath")
+                .or_else(|| first.get("path"))
+                .and_then(Value::as_str)
+                .map(std::path::PathBuf::from);
+            match path {
+                Some(path) => json!(
+                    cwtools_semantic::query_project_knowledge(
+                        &path,
+                        &cwtools_semantic::KnowledgeQuery {
+                            identifier: first
+                                .get("identifier")
+                                .or_else(|| first.get("name"))
+                                .and_then(Value::as_str)
+                                .map(str::to_owned),
+                            entity_type: first
+                                .get("entityType")
+                                .and_then(Value::as_str)
+                                .map(str::to_owned),
+                            limit: first
+                                .get("limit")
+                                .and_then(Value::as_u64)
+                                .unwrap_or(100)
+                                .min(MAX_RESULTS as u64)
+                                as usize,
+                        }
+                    )
+                    .unwrap_or_else(|_error| {
+                        cwtools_semantic::KnowledgeResult {
+                            ok: false,
+                            status: "error".to_owned(),
+                            schema_version: cwtools_semantic::KNOWLEDGE_SCHEMA_VERSION,
+                            manifest: cwtools_semantic::KnowledgeManifest::default(),
+                            evidence: Vec::new(),
+                            truncated: false,
+                        }
+                    })
+                ),
+                None => {
+                    json!({"ok":false,"status":"error","schemaVersion":cwtools_semantic::KNOWLEDGE_SCHEMA_VERSION,"error":"databasePath is required"})
+                }
+            }
+        } else if command == "cwtools.ai.exportProjectKnowledge" {
+            let path = first
+                .get("databasePath")
+                .or_else(|| first.get("path"))
+                .and_then(Value::as_str)
+                .map(std::path::PathBuf::from);
+            match path {
+                Some(path) => {
+                    let texts = self
+                        .workspace_sources()
+                        .into_iter()
+                        .map(|source| (source.path, source.text))
+                        .collect::<Vec<_>>();
+                    match cwtools_semantic::export_project_knowledge(&path, &texts) {
+                        Ok(manifest) => {
+                            json!({"ok":true,"status":"fresh","schemaVersion":cwtools_semantic::KNOWLEDGE_SCHEMA_VERSION,"manifest":manifest})
+                        }
+                        Err(error) => {
+                            json!({"ok":false,"status":"error","schemaVersion":cwtools_semantic::KNOWLEDGE_SCHEMA_VERSION,"error":error})
+                        }
+                    }
+                }
+                None => {
+                    json!({"ok":false,"status":"error","schemaVersion":cwtools_semantic::KNOWLEDGE_SCHEMA_VERSION,"error":"databasePath is required"})
+                }
+            }
         } else if command == "cwtools.ai.getCompletionContext" {
             json!({"prefix":first.get("prefix").cloned().unwrap_or(Value::String(String::new())),"status":"fresh","items":[],"diagnosticsComplete":true})
         } else if command == "cwtools.ai.getScopeAtPosition" {
             json!({"scope":"any","scopeStack":["any"],"resolved":true})
         } else if command == "cwtools.ai.queryLocalisationAudit" {
-            json!({"missing":[],"unused":[],"duplicates":[],"complete":true})
+            self.localisation_audit(&first)
         } else if command == "cwtools.ai.queryOverrideModes"
             || command == "cwtools.ai.compareDefinitionWithVanilla"
         {
             json!({"mode":"replace","differences":[],"complete":true})
-        } else if matches!(
-            command.as_str(),
-            "cwtools.ai.shader.compileUnit"
-                | "cwtools.ai.shader.callers"
-                | "cwtools.ai.shader.reachability"
-                | "cwtools.ai.shader.compareVanilla"
-                | "cwtools.ai.shader.preflightEdit"
-        ) {
-            let tree = syntax::parse(file, text);
-            let pp = preprocessor::analyze(&tree);
-            let analysis = hlsl::analyze(&tree, &pp);
-            json!({"file":file,"symbols":analysis.symbols.into_iter().take(MAX_RESULTS).collect::<Vec<_>>(),"diagnostics":analysis.diagnostics,"reachable":true,"callers":[],"differences":[]})
         } else {
-            json!({"ok":true,"command":command,"complete":true})
+            return Some(error_response(id?, -32_601, "Command is declared but has no Rust handler"));
         };
         Some(response(id?, result))
+    }
+
+    fn workspace_sources(&self) -> Vec<SnapshotSource> {
+        self.sources
+            .keys()
+            .filter_map(|uri| {
+                let document = self.document(uri)?;
+                Some(SnapshotSource {
+                    scope: "workspace".to_owned(),
+                    path: uri.clone(),
+                    logical_path: uri.clone(),
+                    text: document.text.clone(),
+                    overwrite: Overwrite::No,
+                })
+            })
+            .take(MAX_DOCUMENTS)
+            .collect()
+    }
+
+    fn validation_status(&self) -> Value {
+        let sources = self.workspace_sources();
+        let fingerprint = fingerprint_sources(
+            sources
+                .iter()
+                .map(|source| (source.logical_path.as_str(), source.text.as_str())),
+        );
+        match compute_full_snapshot(
+            sources,
+            SnapshotLimits {
+                max_sources: MAX_DOCUMENTS,
+                max_nodes: MAX_DOCUMENT_CHARS,
+            },
+        ) {
+            Ok(snapshot) => json!({
+                "ready": true,
+                "epoch": fingerprint.0,
+                "fresh": true,
+                "pending": 0,
+                "sourceCount": snapshot.sources.len(),
+                "definitionCount": snapshot.definitions.len(),
+                "referenceCount": snapshot.references.len(),
+                "parseErrorCount": snapshot.parse_errors.len(),
+                "cacheFingerprint": fingerprint.to_hex(),
+                "games": all_game_profiles().into_iter().map(|profile| profile.id.as_str()).collect::<Vec<_>>()
+            }),
+            Err(error) => json!({
+                "ready": false,
+                "epoch": fingerprint.0,
+                "fresh": false,
+                "pending": 0,
+                "error": error.to_string(),
+                "cacheFingerprint": fingerprint.to_hex()
+            }),
+        }
+    }
+
+    fn game_profile_result(&self, params: &Value) -> Value {
+        let id = params
+            .get("gameId")
+            .and_then(Value::as_str)
+            .and_then(parse_game_id)
+            .unwrap_or(GameId::Generic);
+        let profile = game_profile(id);
+        json!({
+            "id": profile.id.as_str(),
+            "displayName": profile.display_name,
+            "isJomini": profile.is_jomini,
+            "isCwtOnly": profile.is_cwt_only,
+            "scriptFolders": profile.script_folders,
+            "scopeFamily": profile.scope_family.map(|family| format!("{family:?}")),
+            "localisation": {
+                "format": format!("{:?}", profile.localisation.format),
+                "encoding": format!("{:?}", profile.localisation.encoding),
+                "extensions": profile.localisation.extensions,
+                "directories": profile.localisation.directories,
+                "defaultLanguage": profile.localisation.default_language.tag(),
+                "supportedLanguages": profile.supported_languages.into_iter().map(|language| language.tag()).collect::<Vec<_>>()
+            }
+        })
+    }
+
+    fn localisation_audit(&self, params: &Value) -> Value {
+        let id = params
+            .get("gameId")
+            .and_then(Value::as_str)
+            .and_then(parse_game_id)
+            .unwrap_or(GameId::Stellaris);
+        let profile = game_profile(id);
+        let path = params
+            .get("path")
+            .and_then(Value::as_str)
+            .unwrap_or("memory_l_english.yml");
+        let text = params.get("text").and_then(Value::as_str).unwrap_or("");
+        let file = parse_localisation(path, text, &profile.localisation);
+        let truncated = file.entries.len() > MAX_RESULTS || file.errors.len() > MAX_RESULTS;
+        json!({
+            "gameId": id.as_str(),
+            "path": file.path,
+            "language": file.language.tag(),
+            "encoding": format!("{:?}", file.encoding),
+            "hasBom": file.has_bom,
+            "entries": file.entries.iter().take(MAX_RESULTS).collect::<Vec<_>>(),
+            "diagnostics": file.errors.iter().take(MAX_RESULTS).collect::<Vec<_>>(),
+            "complete": true,
+            "truncated": truncated
+        })
+    }
+
+    fn shader_snapshots(
+        &self,
+        params: &Value,
+        file: &str,
+        text: &str,
+    ) -> Vec<shader_project::ShaderSnapshot> {
+        let mut snapshots = Vec::new();
+        if let Some(values) = params.get("sources").and_then(Value::as_array) {
+            for value in values.iter().take(MAX_DOCUMENTS) {
+                let Some(source_text) = value.get("text").and_then(Value::as_str) else {
+                    continue;
+                };
+                let source_file = value
+                    .get("file")
+                    .and_then(Value::as_str)
+                    .unwrap_or("memory.shader");
+                let logical = value
+                    .get("logicalPath")
+                    .and_then(Value::as_str)
+                    .unwrap_or(source_file);
+                let origin = if value
+                    .get("vanilla")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false)
+                {
+                    shader_project::ShaderOrigin::Vanilla
+                } else {
+                    shader_project::ShaderOrigin::Workspace
+                };
+                snapshots.push(shader_project::create_snapshot(
+                    origin,
+                    source_file,
+                    logical,
+                    source_text,
+                ));
+            }
+        }
+        if snapshots.is_empty()
+            || !snapshots
+                .iter()
+                .any(|snapshot| shader_project::same_file_path(&snapshot.display_path, file))
+        {
+            snapshots.push(shader_project::create_snapshot(
+                shader_project::ShaderOrigin::CurrentDocument,
+                file,
+                file,
+                text,
+            ));
+        }
+        snapshots.sort_by_key(shader_project::sort_key);
+        snapshots.truncate(MAX_DOCUMENTS);
+        snapshots
+    }
+
+    fn shader_command(&self, command: &str, params: &Value, file: &str, text: &str) -> Value {
+        let snapshots = self.shader_snapshots(params, file, text);
+        let name = params
+            .get("effectName")
+            .or_else(|| params.get("name"))
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        let operation = command;
+        let raw_limit = params.get("limit").and_then(Value::as_u64).unwrap_or(100);
+        if !(1..=500).contains(&raw_limit) {
+            return json!({"ok": false, "operation": operation, "target": "limit", "error": "limit must be between 1 and 500"});
+        }
+        let limit = raw_limit as usize;
+        let cursor = params.get("cursor").and_then(Value::as_u64).unwrap_or(0) as usize;
+        if file.trim().is_empty() && command != "cwtools.ai.shader.reachability" {
+            return json!({"ok": false, "status": "error", "operation": operation, "target": "", "error": "Missing shader file path"});
+        }
+        match command {
+            "cwtools.ai.shader.validate" => {
+                let tree = syntax::parse(file, text);
+                let diagnostics = shader_features::validate(file, text);
+                json!({"ok": diagnostics.is_empty() && tree.diagnostics.is_empty(), "status": if diagnostics.is_empty() && tree.diagnostics.is_empty() { "ok" } else { "error" }, "operation": operation, "target": file, "diagnostics": diagnostics.into_iter().take(MAX_RESULTS).collect::<Vec<_>>(), "syntaxDiagnostics": tree.diagnostics.into_iter().take(MAX_RESULTS).collect::<Vec<_>>()})
+            }
+            "cwtools.ai.shader.symbols" => {
+                let symbols = shader_features::document_symbols(file, text);
+                let declarations = snapshots
+                    .iter()
+                    .flat_map(shader_runtime::declarations_from_snapshot)
+                    .collect::<Vec<_>>();
+                let filtered = declarations
+                    .into_iter()
+                    .filter(|declaration| {
+                        let kind = format!("{:?}", declaration.kind).to_ascii_lowercase();
+                        let kind_filter =
+                            params.get("kind").and_then(Value::as_str).unwrap_or("all");
+                        (kind_filter == "all")
+                            || (kind_filter == "effect" && kind.contains("effect"))
+                            || (kind_filter == "maincode" && kind.contains("main"))
+                            || (kind_filter == "constantbuffer" && kind.contains("constantbuffer"))
+                            || (kind_filter == "state" && kind.contains("state"))
+                    })
+                    .filter(|declaration| {
+                        params
+                            .get("filter")
+                            .and_then(Value::as_str)
+                            .is_none_or(|needle| {
+                                declaration
+                                    .name
+                                    .to_ascii_lowercase()
+                                    .contains(&needle.to_ascii_lowercase())
+                            })
+                    })
+                    .collect::<Vec<_>>();
+                let total = filtered.len();
+                let page = filtered
+                    .into_iter()
+                    .skip(cursor)
+                    .take(limit)
+                    .collect::<Vec<_>>();
+                json!({"ok": true, "status": "ok", "operation": operation, "target": file, "symbols": symbols.into_iter().take(limit).collect::<Vec<_>>(), "declarations": page, "totalCount": total, "returnedCount": total.saturating_sub(cursor).min(limit), "nextCursor": if cursor + total.saturating_sub(cursor).min(limit) < total { json!(cursor + limit) } else { Value::Null }, "complete": true})
+            }
+            "cwtools.ai.shader.variants" => {
+                let tree = syntax::parse(file, text);
+                let pp = preprocessor::analyze(&tree);
+                let variants = preprocessor::compare_variants(
+                    &preprocessor::default_platform_variants(),
+                    &pp.regions
+                        .iter()
+                        .map(|region| region.condition.clone())
+                        .collect::<Vec<_>>(),
+                );
+                json!({"ok": true, "status": "ok", "operation": operation, "target": file, "variants": variants.into_iter().take(limit).collect::<Vec<_>>(), "platforms": preprocessor::default_platform_variants().into_iter().take(limit).collect::<Vec<_>>(), "directives": pp.directives.into_iter().take(limit).collect::<Vec<_>>(), "activeSymbols": snapshots.iter().flat_map(shader_runtime::declarations_from_snapshot).take(limit).collect::<Vec<_>>(), "complete": true})
+            }
+            "cwtools.ai.shader.compileUnit" => {
+                match shader_runtime::compile_unit_for(&snapshots, file) {
+                    Some(unit) => json!({
+                        "ok": true,
+                        "status": "ok",
+                        "operation": operation,
+                        "root": unit.root.display_path,
+                        "members": unit.members.into_iter().take(limit).map(|member| json!({"path": member.display_path, "logicalPath": member.logical_path, "origin": member.origin})).collect::<Vec<_>>(),
+                        "effective": unit.effective.into_iter().take(MAX_RESULTS).map(|member| member.display_path).collect::<Vec<_>>(),
+                        "problems": unit.problems.into_iter().take(MAX_RESULTS).collect::<Vec<_>>(),
+                        "edges": unit.edges.into_iter().take(MAX_RESULTS).collect::<Vec<_>>()
+                    }),
+                    None => {
+                        json!({"root": file, "members": [], "effective": [], "problems": ["root shader not found"], "edges": []})
+                    }
+                }
+            }
+            "cwtools.ai.shader.callers"
+            | "cwtools.ai.shader.reachability"
+            | "cwtools.ai.shader.compareVanilla"
+            | "cwtools.ai.shader.preflightEdit" => {
+                let scripts = params
+                    .get("resources")
+                    .and_then(Value::as_array)
+                    .into_iter()
+                    .flatten()
+                    .take(MAX_DOCUMENTS)
+                    .filter_map(|value| {
+                        Some(shader_runtime::create_script_source(
+                            value.get("file")?.as_str()?,
+                            value
+                                .get("logicalPath")
+                                .and_then(Value::as_str)
+                                .unwrap_or_else(|| {
+                                    value.get("file").and_then(Value::as_str).unwrap_or("")
+                                }),
+                            value
+                                .get("scope")
+                                .and_then(Value::as_str)
+                                .unwrap_or("workspace"),
+                            value.get("text")?.as_str()?,
+                        ))
+                    })
+                    .collect::<Vec<_>>();
+                let model = shader_runtime::build_model(None, &scripts, snapshots.clone());
+                match command {
+                    "cwtools.ai.shader.callers" => {
+                        let callers = shader_runtime::callers_of(&model, name);
+                        let total = callers.len();
+                        let page = callers
+                            .into_iter()
+                            .skip(cursor)
+                            .take(limit)
+                            .collect::<Vec<_>>();
+                        json!({"ok": true, "status": "ok", "operation": operation, "target": name, "effectName": name, "totalCount": total, "returnedCount": page.len(), "callers": page, "nextCursor": if cursor + limit < total { json!(cursor + limit) } else { Value::Null }, "complete": true})
+                    }
+                    "cwtools.ai.shader.reachability" => {
+                        match shader_runtime::effect_reachability(&model, name) {
+                            Some(effect) => {
+                                json!({"ok": true, "status": "ok", "operation": operation, "target": name, "effect": effect, "renamePolicy": shader_runtime::rename_policy(&model, name), "confidence": shader_runtime::reachability_confidence(&effect.reachability)})
+                            }
+                            None => {
+                                json!({"ok": false, "status": "error", "operation": operation, "target": name, "error": "Effect is not declared"})
+                            }
+                        }
+                    }
+                    "cwtools.ai.shader.compareVanilla" => {
+                        let comparison = shader_runtime::compare_with_vanilla(&model, name);
+                        json!({"ok": true, "status": "ok", "operation": operation, "target": name, "comparison": comparison, "complete": true})
+                    }
+                    "cwtools.ai.shader.preflightEdit" => {
+                        let proposed = params
+                            .get("proposedText")
+                            .and_then(Value::as_str)
+                            .unwrap_or(text);
+                        let proposed_snapshots = self.shader_snapshots(params, file, proposed);
+                        let before = shader_runtime::build_model(None, &scripts, snapshots);
+                        let after = shader_runtime::build_model(None, &scripts, proposed_snapshots);
+                        let removed = before
+                            .declarations
+                            .iter()
+                            .filter(|item| {
+                                !after
+                                    .declarations
+                                    .iter()
+                                    .any(|candidate| candidate.stable_id == item.stable_id)
+                            })
+                            .count();
+                        let policy = if name.is_empty() {
+                            None
+                        } else {
+                            Some(shader_runtime::rename_policy(&before, name))
+                        };
+                        json!({"ok": true, "status": "ok", "operation": operation, "target": file, "allowed": removed == 0, "removedDeclarations": removed, "renamePolicy": policy, "beforeDeclarationCount": before.declarations.len(), "afterDeclarationCount": after.declarations.len(), "risks": if removed == 0 { Vec::<String>::new() } else { vec!["declarations changed".to_owned()] }})
+                    }
+                    _ => {
+                        json!({"ok": false, "status": "error", "operation": operation, "target": name, "error": "unsupported shader command"})
+                    }
+                }
+            }
+            _ => json!({"error": "unsupported shader command", "command": command}),
+        }
     }
 
     fn parse_script(&self, id: Option<RequestId>, params: Option<&Value>) -> Option<Message> {
@@ -1096,6 +1865,23 @@ impl LocalRouter {
     }
 
     fn locations_for_name(&self, name: &str, declarations_only: bool) -> Vec<Value> {
+        if let Some(snapshot) = self.game_session.as_ref().and_then(GameSession::snapshot) {
+            let occurrences = if declarations_only {
+                snapshot.full.definitions.get(name)
+            } else {
+                snapshot.full.references.get(name)
+            };
+            if let Some(occurrences) = occurrences {
+                return occurrences
+                    .iter()
+                    .take(MAX_RESULTS)
+                    .map(|occurrence| json!({
+                        "uri": occurrence.path,
+                        "range": byte_range_to_lsp(&snapshot.full.sources, &occurrence.path, occurrence.range),
+                    }))
+                    .collect();
+            }
+        }
         let mut locations = Vec::new();
         for uri in self.sources.keys() {
             let Some(document) = self.document(uri) else {
@@ -1121,6 +1907,44 @@ impl LocalRouter {
         }
         locations
     }
+}
+
+fn byte_range_to_lsp(
+    sources: &[SnapshotSource],
+    path: &str,
+    range: cwtools_script_syntax::ByteRange,
+) -> Value {
+    let Some(source) = sources.iter().find(|source| source.path == path) else {
+        return json!({"start":{"line":0,"character":0},"end":{"line":0,"character":0}});
+    };
+    let index = cwtools_source::LineIndex::new(&source.text);
+    let start = index
+        .position(&source.text, range.start)
+        .unwrap_or(SourcePosition {
+            line: 0,
+            character: 0,
+        });
+    let end = index.position(&source.text, range.end).unwrap_or(start);
+    json!({"start":{"line":start.line,"character":start.character},"end":{"line":end.line,"character":end.character}})
+}
+
+fn parse_game_id(value: &str) -> Option<GameId> {
+    Some(match value.to_ascii_lowercase().as_str() {
+        "generic" | "paradox" => GameId::Generic,
+        "custom" => GameId::Custom,
+        "jomini" => GameId::Jomini,
+        "ck2" => GameId::Ck2,
+        "ck3" => GameId::Ck3,
+        "eu4" => GameId::Eu4,
+        "eu5" => GameId::Eu5,
+        "hoi4" => GameId::Hoi4,
+        "imperator" => GameId::Imperator,
+        "vic2" => GameId::Vic2,
+        "vic3" => GameId::Vic3,
+        "stellaris" => GameId::Stellaris,
+        "cwt" | "cwt-only" => GameId::CwtOnly,
+        _ => return None,
+    })
 }
 
 fn parse_position(value: &Value) -> Option<SourcePosition> {
@@ -1441,17 +2265,15 @@ mod tests {
     fn overlay_change_and_utf16_features_are_local() {
         let mut router = LocalRouter::default();
         let uri = "file:///unicode.txt";
-        assert_eq!(router.route(&payload(&json!({"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":uri,"languageId":"paradox","version":1,"text":"root = {\n  label = \"😀\"\n}"}}}))), RouteDecision::Forward);
+        assert!(router.route(&payload(&json!({"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":uri,"languageId":"paradox","version":1,"text":"root = {\n  label = \"😀\"\n}"}}}))).is_none());
         let response = router.route(&payload(&json!({"jsonrpc":"2.0","id":1,"method":"textDocument/hover","params":{"textDocument":{"uri":uri},"position":{"line":1,"character":3}}})));
-        let RouteDecision::Respond(response) = response else {
-            panic!("hover must be handled locally")
-        };
-        let value: Value = serde_json::from_str(&response).unwrap();
+        let response = response.expect("hover must be handled locally");
+        let value = serde_json::to_value(response).unwrap();
         assert_eq!(value["id"], 1);
         assert_eq!(value["result"]["range"]["start"]["character"], 2);
         let _ = router.route(&payload(&json!({"jsonrpc":"2.0","method":"textDocument/didChange","params":{"textDocument":{"uri":uri,"version":2},"contentChanges":[{"range":{"start":{"line":1,"character":11},"end":{"line":1,"character":13}},"rangeLength":2,"text":"x"}]}})));
         let response = router.route(&payload(&json!({"jsonrpc":"2.0","id":2,"method":"textDocument/semanticTokens/full","params":{"textDocument":{"uri":uri}}})));
-        assert!(matches!(response, RouteDecision::Respond(_)));
+        assert!(response.is_some());
     }
     #[test]
     fn all_provider_methods_return_bounded_json() {
@@ -1502,10 +2324,7 @@ mod tests {
             ),
         ] {
             let message = json!({"jsonrpc":"2.0","id":id,"method":method,"params":params});
-            assert!(
-                matches!(router.route(&payload(&message)), RouteDecision::Respond(_)),
-                "{method}"
-            );
+            assert!(router.route(&payload(&message)).is_some(), "{method}");
         }
     }
     #[test]

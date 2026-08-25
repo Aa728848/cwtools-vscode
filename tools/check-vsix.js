@@ -1,66 +1,23 @@
 #!/usr/bin/env node
 'use strict';
-
 const fs = require('fs');
 const path = require('path');
-const crypto = require('crypto');
 const JSZip = require('jszip');
-
-const REQUIRED = {
-  'extension/bin/server/win-x64/CWTools Server.exe': buffer => {
-    if (buffer.length < 64 || buffer[0] !== 0x4d || buffer[1] !== 0x5a) return false;
-    const pe = buffer.readUInt32LE(0x3c);
-    return pe + 6 <= buffer.length && buffer.subarray(pe, pe + 4).equals(Buffer.from('PE\0\0')) && buffer.readUInt16LE(pe + 4) === 0x8664;
-  },
-  'extension/bin/server/linux-x64/CWTools Server': buffer => buffer.length >= 20 && buffer[0] === 0x7f && buffer.subarray(1, 4).toString('ascii') === 'ELF' && buffer[4] === 2 && buffer.readUInt16LE(18) === 0x3e,
-  'extension/bin/server/osx-x64/CWTools Server': buffer => buffer.length >= 8 && buffer.subarray(0, 4).toString('hex') === 'cffaedfe' && buffer.readUInt32LE(4) === 0x01000007,
-};
+const { platforms, sha256, validateNativeBytes } = require('./release-platforms.cjs');
+const REQUIRED = Object.fromEntries(platforms.map(platform => ['extension/bin/server/' + platform.rid + '/' + platform.stagedBinary, buffer => validateNativeBytes(platform, buffer)]));
 const FORBIDDEN = /(?:^|\/)(?:server-rust|src\/Main|src\/LSP|CWToolsTests|oracle|differential|sidecar)(?:\/|$)|\.(?:dll|deps\.json|runtimeconfig\.json|fs|fsx|fsproj|cs|csproj|sln|slnx)$/i;
-
-async function validateVsix(vsixPath) {
-  const archive = await JSZip.loadAsync(fs.readFileSync(vsixPath));
-  const names = Object.keys(archive.files).filter(name => !archive.files[name].dir);
-  const errors = [];
-  const hashes = new Set();
-  for (const [name, signature] of Object.entries(REQUIRED)) {
-    const entry = archive.file(name);
-    if (!entry) { errors.push('missing ' + name); continue; }
-    const buffer = await entry.async('nodebuffer');
-    if (buffer.length === 0) errors.push('empty ' + name);
-    else if (!signature(buffer)) errors.push('invalid native executable signature for ' + name);
-    hashes.add(crypto.createHash('sha256').update(buffer).digest('hex'));
-  }
-  if (hashes.size !== Object.keys(REQUIRED).length) errors.push('native server artifacts are not three distinct binaries');
+async function validateVsix(vsixPath, options = {}) {
+  const archive = await JSZip.loadAsync(fs.readFileSync(vsixPath)); const names = Object.keys(archive.files).filter(name => !archive.files[name].dir); const errors = []; const hashes = new Set();
+  for (const platform of platforms) { const name = 'extension/bin/server/' + platform.rid + '/' + platform.stagedBinary; const entry = archive.file(name); if (!entry) { errors.push('missing ' + name); continue; } const buffer = await entry.async('nodebuffer'); if (!validateNativeBytes(platform, buffer)) errors.push('invalid native executable signature for ' + name); hashes.add(sha256(buffer)); }
+  if (hashes.size !== platforms.length) errors.push('native server artifacts are not three distinct binaries');
   for (const name of names) if (FORBIDDEN.test(name)) errors.push('forbidden migration/.NET artifact: ' + name);
-  const serverFiles = names.filter(name => name.startsWith('extension/bin/server/'));
-  for (const name of serverFiles) if (!Object.hasOwn(REQUIRED, name)) errors.push('unexpected server artifact: ' + name);
+  const expectedServers = new Set(Object.keys(REQUIRED)); for (const name of names.filter(name => name.startsWith('extension/bin/server/'))) if (!expectedServers.has(name)) errors.push('unexpected server artifact: ' + name);
   if (names.some(name => name.startsWith('extension/bin/mcp/'))) errors.push('MCP must not be bundled in the universal VSIX');
-  for (const required of ['extension/package.json', 'extension/readme.md', 'extension/rules/stellaris-rules.zip', 'extension/rules/stellaris-rules.version.json']) {
-    if (!archive.file(required)) errors.push('missing ' + required);
-  }
-  const packageEntry = archive.file('extension/package.json');
-  if (packageEntry) {
-    const manifest = JSON.parse(await packageEntry.async('string'));
-    const rootManifest = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'release', 'package.json'), 'utf8'));
-    if (manifest.version !== rootManifest.version) errors.push('VSIX version does not match release/package.json');
-  }
-  return { errors, names, serverFiles };
+  for (const required of ['extension/package.json', 'extension/readme.md', 'extension/rules/stellaris-rules.zip', 'extension/rules/stellaris-rules.version.json', 'extension/release-provenance.json']) if (!archive.file(required)) errors.push('missing ' + required);
+  const packageEntry = archive.file('extension/package.json'); if (packageEntry) { const packaged = JSON.parse(await packageEntry.async('string')); const local = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'release', 'package.json'), 'utf8')); if (packaged.version !== local.version) errors.push('VSIX version does not match release/package.json'); const expectedName = 'foreverskywalker-stellaris-cwtools-' + packaged.version + '.vsix'; if (path.basename(vsixPath) !== expectedName) errors.push('VSIX filename does not match packaged version: expected ' + expectedName); }
+  const provenanceEntry = archive.file('extension/release-provenance.json'); if (provenanceEntry) { const provenance = JSON.parse(await provenanceEntry.async('string')); if (provenance.schemaVersion !== 1 || !Array.isArray(provenance.platforms) || provenance.platforms.length !== platforms.length) errors.push('invalid release provenance schema'); if (options.sourceSha && provenance.sourceSha !== options.sourceSha.toLowerCase()) errors.push('release provenance source SHA mismatch'); for (const platform of platforms) { const item = provenance.platforms && provenance.platforms.find(value => value.rid === platform.rid); const entry = archive.file('extension/bin/server/' + platform.rid + '/' + platform.stagedBinary); if (!item || !entry) continue; const bytes = await entry.async('nodebuffer'); if (item.target !== platform.target || item.stagedBinary !== platform.stagedBinary || item.size !== bytes.length || item.sha256 !== sha256(bytes)) errors.push('release provenance mismatch for ' + platform.rid); } }
+  return { errors, names, serverFiles: names.filter(name => name.startsWith('extension/bin/server/')) };
 }
-
-async function main(argv) {
-  const index = argv.indexOf('--vsix');
-  const vsixPath = index >= 0 ? argv[index + 1] : undefined;
-  if (!vsixPath || vsixPath.startsWith('--')) throw new Error('--vsix requires a file');
-  const absolute = path.resolve(vsixPath);
-  if (!fs.existsSync(absolute)) throw new Error('VSIX not found: ' + absolute);
-  const result = await validateVsix(absolute);
-  if (result.errors.length) {
-    for (const error of result.errors) console.error('FAIL: ' + error);
-    return 1;
-  }
-  console.log('Universal VSIX gate passed: three distinct native Rust servers and no migration/.NET runtime artifacts.');
-  return 0;
-}
-
+async function main(argv) { const i = argv.indexOf('--vsix'); const vsixPath = i >= 0 ? argv[i + 1] : undefined; const s = argv.indexOf('--source-sha'); const sourceSha = s >= 0 ? argv[s + 1] : undefined; if (!vsixPath || vsixPath.startsWith('--')) throw new Error('--vsix requires a file'); const absolute = path.resolve(vsixPath); if (!fs.existsSync(absolute)) throw new Error('VSIX not found: ' + absolute); const result = await validateVsix(absolute, { sourceSha }); if (result.errors.length) { for (const error of result.errors) console.error('FAIL: ' + error); return 1; } console.log('Universal VSIX gate passed: exact versioned artifact, provenance, three distinct native Rust servers, and no migration/.NET runtime artifacts.'); return 0; }
 if (require.main === module) main(process.argv.slice(2)).then(code => { process.exitCode = code; }).catch(error => { console.error(error.message || error); process.exitCode = 1; });
 module.exports = { REQUIRED, validateVsix };

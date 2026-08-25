@@ -21,6 +21,7 @@
 const fs = require('fs');
 const path = require('path');
 const { execSync } = require('child_process');
+const { byRid, validateStagedServers } = require('./release-platforms.cjs');
 
 const ROOT = path.resolve(__dirname, '..');
 const RELEASE = path.join(ROOT, 'release');
@@ -418,11 +419,7 @@ check('Webview bundles exist and are non-empty', () => {
 
 // ── 10. Server Binaries ─────────────────────────────────────────────────────
 
-const EXPECTED_SERVER_BINARIES = {
-    'win-x64': 'CWTools Server.exe',
-    'linux-x64': 'CWTools Server',
-    'osx-x64': 'CWTools Server',
-};
+const EXPECTED_SERVER_BINARIES = Object.fromEntries([...byRid].map(([rid, platform]) => [rid, platform.stagedBinary]));
 
 function checkServerTree(relativeDir, required) {
     const serverDir = path.join(RELEASE, 'bin', relativeDir);
@@ -449,7 +446,11 @@ if (hostOnly) {
         return fs.existsSync(binary) && fs.statSync(binary).isFile() && fs.statSync(binary).size > 0;
     });
 } else {
-    check('Rust server binaries exist for every supported platform', () => checkServerTree('server', true));
+    check('Rust server binaries satisfy the shared universal staging invariant', () => {
+        const errors = validateStagedServers(RELEASE);
+        if (errors.length > 0) console.log(`    ${errors.join('\n    ')}`);
+        return errors.length === 0;
+    });
 }
 
 // ── Summary ─────────────────────────────────────────────────────────────────

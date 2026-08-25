@@ -79,9 +79,9 @@ changing these docs; it also regenerates `release/README.md` from `README.md`.
 - `client/extension/`: VS Code Extension Host code.
 - `client/extension/ai/`: AI runtime, tools, workflows, memory, and orchestration.
 - `client/webview/`: browser-sandboxed Webviews.
-- `rust/cwtools-lsp/`: standalone Rust stdio language server.
-- `submodules/cwtools/`: reusable Rust parser, rules, workspace, game, Shader, and semantic crates.
-- `submodules/cwtools-stellaris-config/`: Stellaris CWT rules data.
+- `rust/cwtools-lsp/`: standalone Rust stdio language server; release binaries are staged at `release/bin/server/<rid>/CWTools Server[.exe]`.
+- `submodules/cwtools/`: reusable Rust parser, rules, workspace, game, cache, Shader, and semantic crates.
+- `submodules/cwtools-stellaris-config/`: Stellaris CWT rules data; it is content, not executable code.
 - `submodules/cwtools-mcp/`: standalone read-only MCP server (`cwtools-shared` +
   `cwtools-mcp` packages), a separate repository vendored as a submodule. The
   extension VSIX does not bundle it; users install it via `npx -y cwtools-mcp`.

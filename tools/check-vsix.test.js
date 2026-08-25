@@ -9,7 +9,8 @@ const { REQUIRED, validateVsix } = require('./check-vsix.js');
 async function make(entries) {
   const zip = new JSZip();
   for (const [name, bytes] of Object.entries(entries)) zip.file(name, Buffer.from(bytes));
-  const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'cwtools-vsix-test-')), 'test.vsix');
+  const manifest = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'release', 'package.json'), 'utf8'));
+  const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'cwtools-vsix-test-')), 'foreverskywalker-stellaris-cwtools-' + manifest.version + '.vsix');
   fs.writeFileSync(file, await zip.generateAsync({ type: 'nodebuffer' }));
   return file;
 }
@@ -27,6 +28,14 @@ async function make(entries) {
     'extension/readme.md': Buffer.from('readme'),
     'extension/rules/stellaris-rules.zip': Buffer.from('zip'),
     'extension/rules/stellaris-rules.version.json': Buffer.from('{}'),
+    'extension/release-provenance.json': Buffer.from(JSON.stringify({
+      schemaVersion: 1, sourceSha: '0'.repeat(40),
+      platforms: [
+        { rid: 'win-x64', target: 'x86_64-pc-windows-msvc', stagedBinary: 'CWTools Server.exe', size: pe.length, sha256: require('crypto').createHash('sha256').update(pe).digest('hex') },
+        { rid: 'linux-x64', target: 'x86_64-unknown-linux-gnu', stagedBinary: 'CWTools Server', size: elf.length, sha256: require('crypto').createHash('sha256').update(elf).digest('hex') },
+        { rid: 'osx-x64', target: 'x86_64-apple-darwin', stagedBinary: 'CWTools Server', size: macho.length, sha256: require('crypto').createHash('sha256').update(macho).digest('hex') },
+      ],
+    })),
   };
   assert.deepStrictEqual((await validateVsix(await make(valid))).errors, []);
   const missing = { ...valid }; delete missing[Object.keys(REQUIRED)[1]];

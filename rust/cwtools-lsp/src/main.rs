@@ -12,7 +12,10 @@ fn run_stdio() -> i32 {
     let mut input = BufReader::new(stdin.lock());
     let mut output = stdout.lock();
     let limits = Limits::default();
-    let mut router = Router::default();
+    let args = std::env::args().skip(1).collect::<Vec<_>>();
+    let read_only = args.iter().any(|argument| argument == "--read-only")
+        || std::env::var("CWTOOLS_READ_ONLY").is_ok_and(|value| value == "1");
+    let mut router = Router::with_read_only(read_only);
 
     loop {
         let payload = match read_frame(&mut input, limits) {
@@ -30,20 +33,27 @@ fn run_stdio() -> i32 {
                 return 1;
             }
         };
-        let is_exit = message.method.as_deref() == Some("exit");
+        if let Err(error) = message.validate() {
+            eprintln!("Invalid JSON-RPC envelope: {error}");
+            return 1;
+        }
         if let Some(response) = router.route(&message) {
             if let Err(error) = write_message(&mut output, &response, limits) {
                 eprintln!("Transport write failure: {error}");
                 return 1;
             }
         }
-        for notification in router.drain_notifications() {
-            if let Err(error) = write_message(&mut output, &notification, limits) {
+        for outgoing in router
+            .drain_notifications()
+            .into_iter()
+            .chain(router.drain_outgoing())
+        {
+            if let Err(error) = write_message(&mut output, &outgoing, limits) {
                 eprintln!("Transport write failure: {error}");
                 return 1;
             }
         }
-        if is_exit || router.is_exited() {
+        if router.is_exited() {
             return 0;
         }
     }

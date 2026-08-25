@@ -1,7 +1,7 @@
 #![forbid(unsafe_code)]
 #![allow(clippy::match_same_arms)]
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use cwtools_protocol::{JsonRpcError, Lifecycle, Message, RequestId};
 use serde_json::{Value, json};
@@ -12,18 +12,34 @@ const MANIFEST: &str = include_str!("../../../contracts/lsp-manifest.json");
 const REQUEST_CANCELLED: i64 = -32_800;
 const INVALID_REQUEST: i64 = -32_600;
 const METHOD_NOT_FOUND: i64 = -32_601;
+const MAX_REVERSE_REQUESTS: usize = 64;
+const MAX_OPTION_CHARS: usize = 32 * 1024;
 
 #[derive(Debug, Default)]
 pub struct Router {
     lifecycle: Lifecycle,
     local: local::LocalRouter,
     cancelled: BTreeSet<String>,
+    next_reverse_id: i64,
+    pending_reverse: BTreeMap<String, local::ReverseRequestKind>,
+    outgoing: Vec<Message>,
 }
 
 impl Router {
+    #[must_use]
+    pub fn with_read_only(read_only: bool) -> Self {
+        let mut router = Self::default();
+        router.local.set_read_only(read_only);
+        router
+    }
+
     /// Routes one complete JSON-RPC message and keeps all semantic work local.
     #[must_use]
     pub fn route(&mut self, message: &Message) -> Option<Message> {
+        if message.method.is_none() {
+            self.correlate_reverse_response(message);
+            return None;
+        }
         let method = message.method.as_deref()?;
         if method == "$/cancelRequest" {
             let _ = self.lifecycle.observe(method);
@@ -51,7 +67,13 @@ impl Router {
                         .clone()
                         .map(|id| response(id, initialize_result()))
                 }
-                "initialized" | "exit" => None,
+                "initialized" => {
+                    self.local.notify_server_ready();
+                    let _ = self.local.queue_watched_files_registration();
+                    self.collect_reverse_requests();
+                    None
+                }
+                "exit" => None,
                 "shutdown" => message.id.clone().map(|id| response(id, Value::Null)),
                 _ => None,
             };
@@ -88,24 +110,140 @@ impl Router {
         self.local.drain_notifications()
     }
 
+    pub fn drain_outgoing(&mut self) -> Vec<Message> {
+        self.collect_reverse_requests();
+        std::mem::take(&mut self.outgoing)
+    }
+
+    #[must_use]
+    pub fn pending_reverse_count(&self) -> usize {
+        self.pending_reverse.len()
+    }
+
+    pub fn request_apply_edit(&mut self, label: Option<&str>, edit: Value) -> bool {
+        let queued = self.local.queue_apply_edit(label, edit);
+        self.collect_reverse_requests();
+        queued
+    }
+
+    fn collect_reverse_requests(&mut self) {
+        for reverse in self.local.drain_reverse_requests() {
+            if self.pending_reverse.len() >= MAX_REVERSE_REQUESTS {
+                break;
+            }
+            self.next_reverse_id = self.next_reverse_id.saturating_add(1).max(1);
+            let id = RequestId::Number(-self.next_reverse_id);
+            self.pending_reverse
+                .insert(request_id_key(&id), reverse.kind);
+            self.outgoing
+                .push(server_request(id, reverse.method, reverse.params));
+        }
+    }
+
+    fn correlate_reverse_response(&mut self, message: &Message) {
+        let Some(id) = message.id.as_ref() else {
+            return;
+        };
+        let Some(kind) = self.pending_reverse.remove(&request_id_key(id)) else {
+            return;
+        };
+        if message.error.is_some() {
+            self.local.notify_reverse_failure(kind);
+        }
+    }
+
     #[must_use]
     pub fn is_exited(&self) -> bool {
         self.lifecycle == Lifecycle::Exited
     }
 
     fn configure_initialize(&mut self, params: Option<&Value>) {
-        let root = params
-            .and_then(|value| value.get("rootUri"))
-            .and_then(Value::as_str)
-            .or_else(|| {
-                params
-                    .and_then(|value| value.get("rootPath"))
-                    .and_then(Value::as_str)
+        let root = bounded_string(params.and_then(|value| value.get("rootUri")))
+            .or_else(|| bounded_string(params.and_then(|value| value.get("rootPath"))));
+        let folders = params
+            .and_then(|value| value.get("workspaceFolders"))
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(|folder| {
+                Some(local::WorkspaceFolder {
+                    uri: folder.get("uri")?.as_str()?.to_owned(),
+                    name: folder
+                        .get("name")
+                        .and_then(Value::as_str)
+                        .unwrap_or("workspace")
+                        .to_owned(),
+                })
             })
-            .map(str::to_owned);
+            .collect();
+        let options = params
+            .and_then(|value| value.get("initializationOptions"))
+            .filter(|value| {
+                serde_json::to_vec(value).is_ok_and(|bytes| bytes.len() <= MAX_OPTION_CHARS)
+            })
+            .cloned()
+            .unwrap_or(Value::Null);
+        let insert_replace_support = params
+            .and_then(|value| {
+                value.pointer(
+                    "/capabilities/textDocument/completion/completionItem/insertReplaceSupport",
+                )
+            })
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
         let advertised = manifest_command_names(true);
         let all = manifest_command_names(false);
-        self.local.set_workspace_root(root);
+        self.local.configure(
+            root,
+            folders,
+            local::InitializationState {
+                language: options
+                    .get("language")
+                    .and_then(Value::as_str)
+                    .map(str::to_owned),
+                ui_language: options
+                    .get("uiLanguage")
+                    .and_then(Value::as_str)
+                    .map(str::to_owned),
+                is_vanilla_folder: options
+                    .get("isVanillaFolder")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false),
+                rules_cache: options
+                    .get("rulesCache")
+                    .and_then(Value::as_str)
+                    .map(str::to_owned),
+                bundled_rules_path: options
+                    .get("bundledRulesPath")
+                    .and_then(Value::as_str)
+                    .map(str::to_owned),
+                rules_version: options
+                    .get("rules_version")
+                    .and_then(Value::as_str)
+                    .map(str::to_owned),
+                default_repo_path: options
+                    .get("defaultRepoPath")
+                    .and_then(Value::as_str)
+                    .map(str::to_owned),
+                repo_path: options
+                    .get("repoPath")
+                    .and_then(Value::as_str)
+                    .map(str::to_owned),
+                diagnostic_logging: options
+                    .get("diagnosticLogging")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false),
+                insert_replace_support,
+                watched_files_dynamic_registration: params
+                    .and_then(|value| {
+                        value.pointer(
+                            "/capabilities/workspace/didChangeWatchedFiles/dynamicRegistration",
+                        )
+                    })
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false),
+            },
+        );
         self.local.set_commands(advertised, all);
     }
 }
@@ -122,6 +260,11 @@ fn cancel_id(params: &Value) -> Option<String> {
 
 fn request_id_key(id: &RequestId) -> String {
     serde_json::to_string(id).unwrap_or_else(|_| "null".to_owned())
+}
+
+fn bounded_string(value: Option<&Value>) -> Option<String> {
+    let string = value.and_then(Value::as_str)?;
+    (string.chars().count() <= MAX_OPTION_CHARS).then(|| string.to_owned())
 }
 
 fn manifest_value() -> Value {
@@ -186,6 +329,17 @@ fn initialize_result() -> Value {
         },
         "serverInfo": { "name": "cwtools-rust", "version": env!("CARGO_PKG_VERSION") }
     })
+}
+
+fn server_request(id: RequestId, method: &str, params: Value) -> Message {
+    Message {
+        jsonrpc: "2.0".to_owned(),
+        id: Some(id),
+        method: Some(method.to_owned()),
+        params: Some(params),
+        result: None,
+        error: None,
+    }
 }
 
 fn response(id: RequestId, result: Value) -> Message {
@@ -271,6 +425,22 @@ mod tests {
                 .route(&notification("initialized", json!({})))
                 .is_none()
         );
+        let readiness = router.drain_notifications();
+        assert!(
+            readiness
+                .iter()
+                .any(|message| message.method.as_deref() == Some("loadingBar"))
+        );
+        assert!(
+            readiness
+                .iter()
+                .any(|message| message.method.as_deref() == Some("debugBar"))
+        );
+        assert!(
+            readiness
+                .iter()
+                .any(|message| message.method.as_deref() == Some("cwtools/serverReady"))
+        );
         assert!(router.route(&notification("textDocument/didOpen", json!({
             "textDocument": {"uri":"file:///x.txt","languageId":"paradox","version":1,"text":"x = {"}
         }))).is_none());
@@ -287,6 +457,78 @@ mod tests {
             cancelled.error.expect("cancel error").code,
             REQUEST_CANCELLED
         );
+    }
+
+    #[test]
+    fn consumes_initialization_options_and_workspace_folders() {
+        let mut router = Router::default();
+        let response = router
+            .route(&request(1, "initialize", json!({
+                "rootUri": "file:///root",
+                "workspaceFolders": [
+                    {"uri":"file:///a","name":"A"},
+                    {"uri":"file:///b","name":"B"}
+                ],
+                "initializationOptions": {
+                    "language": "stellaris",
+                    "uiLanguage": "zh-cn",
+                    "isVanillaFolder": true,
+                    "rulesCache": "file:///cache",
+                    "rules_version": "v1",
+                    "diagnosticLogging": true
+                },
+                "capabilities": {
+                    "textDocument": {"completion": {"completionItem": {"insertReplaceSupport": true}}},
+                    "workspace": {"didChangeWatchedFiles": {"dynamicRegistration": true}}
+                }
+            })))
+            .expect("initialize response");
+        assert!(response.result.is_some());
+    }
+
+    #[test]
+    fn correlates_bounded_apply_edit_reverse_request() {
+        let mut router = Router::default();
+        assert!(router.request_apply_edit(Some("rename"), json!({"changes":{}})));
+        let outgoing = router.drain_outgoing();
+        assert_eq!(outgoing.len(), 1);
+        assert_eq!(outgoing[0].method.as_deref(), Some("workspace/applyEdit"));
+        let id = outgoing[0].id.clone().expect("reverse request id");
+        assert_eq!(router.pending_reverse_count(), 1);
+        assert!(
+            router
+                .route(&Message {
+                    jsonrpc: "2.0".to_owned(),
+                    id: Some(id),
+                    method: None,
+                    params: None,
+                    result: Some(json!({"applied":true})),
+                    error: None,
+                })
+                .is_none()
+        );
+        assert_eq!(router.pending_reverse_count(), 0);
+    }
+
+    #[test]
+    fn read_only_router_rejects_write_commands() {
+        let mut router = Router::with_read_only(true);
+        assert!(router.route(&request(1, "initialize", json!({}))).is_some());
+        assert!(
+            router
+                .route(&notification("initialized", json!({})))
+                .is_none()
+        );
+        let response = router
+            .route(&request(
+                2,
+                "workspace/executeCommand",
+                json!({
+                    "command": "cacheVanilla", "arguments": []
+                }),
+            ))
+            .expect("read-only error");
+        assert_eq!(response.error.expect("error").code, -32_603);
     }
 
     #[test]

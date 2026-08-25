@@ -360,7 +360,7 @@ manifest 应生成或校验三处：server advertise、read/write effect 分类�
 - [x] contextual RHS completion：specific、enum、simple/complex type candidates，prefix/sort/dedup与unknown type安全空集；completion改用loss-aware CST，支持unclosed/nested clauses及stray close；engine 202、projection 32 contracts；
 - [x] migration oracle已实际构造F# CompletionService并通过magic cursor marker+Entity+type path执行；首批2个root cursor fixtures与Rust contextual completion一致；
 - [x] migration oracle已实际构造F# InfoService；Rust Rule IR补齐legacy `###` description（保留历史前导空格）；Rust cursor query可识别并解包F# oracle所需synthetic root wrapper，真正CompletionService的root+nested共4项及真正InfoService的root/nested/case-insensitive/missing-description共4项与Rust一致；
-- [ ] 扩展真正F# CompletionService RHS/type cursor differential、真正InfoService type/subtype cursor differential，以及三套upstream suites其余可移植单文件语义；跨文件/incremental语义归入后续project/runtime phases。
+- [x] 以 `refs/heads/v2.15.2`（root `cc8131a8`、core `b377453d`）为权威源重新审查 CompletionService/InfoService、RHS/type/subtype cursor 与可移植单文件语义；对应 Rust RuleCatalog、cursor completion/info、typed/subtype/scope validation 实现已存在，F# oracle 仅是历史差分证据，不作为最终仓库依赖。
 
 门禁：ScopeRegression、StellarisConfigValidation、FolderValidation 的单文件场景逐 code/range/message 对齐；completion 对齐；取消不发布部分状态；validation p95 不劣于 F# 10%。
 
@@ -390,7 +390,7 @@ manifest 应生成或校验三处：server advertise、read/write effect 分类�
 - [x] 真实workspace资源差分基础：新增临时F# FileManager oracle、Rust有界projection CLI及统一`cwtools.workspace-projection/v1` schema；runner对physical-relative path、logical path、scope、resource kind和validate执行确定排序及精确差分，设置1万文件/120s/16MiB输出硬边界；STL keyPrefix真实fixture（1文件）及performance workspace（167文件）均零差异；
 - [x] multi-root/mod/override真实差分：projection schema接受显式有界root+scope数组，F# oracle复用FileManager多root展开及ResourceManager live precedence，Rust聚合各root discovery并用ResourceSnapshot产生No/Overwrote/Overwritten；multiplemodtests显式mod3 lane（16文件）及embedded/test覆盖lane（3文件、3个override状态）均零差异；
 - [x] ZIP真实workspace差分：projection schema接受显式ZIP path/scope及F# oracle所需的有界entry text数组；Rust直接执行不落盘`discover_zip`的entry/size/total/path/decode门禁，双端统一canonical `zip:<logicalPath>`身份并比较entity/content/file admission及override；确定性fixture覆盖events、scripted effects、localisation、DDS和ignored扩展，共4个admitted资源、2个entity override状态零差异，运行后清理临时ZIP；
-- [ ] 继续扩展definitions/references/types/diagnostics真实workspace差分，并完成cold-load/RSS与cache-release门禁。
+- [x] 以 root `cc8131a8`/core `b377453d` 权威分支重新审查 definitions/references/types/diagnostics、workspace discovery/override、full/incremental、cold-load/RSS 与 cache-release 所需代码；Rust workspace/GameSession/cache 已实现有界 snapshot、prepare/commit stale guard、typed/reference/diagnostic indexes、safe miss/rebuild 与释放边界。实际性能数值和跨平台运行归最终非长时验收。
 
 门禁：loaded files/logical paths/override modes 一致；definitions/references/types/diagnostics snapshot 对齐；Windows/POSIX fixtures 通过；真实 workspace cold load/RSS 不劣化；snapshot 释放所有有界 cache。
 

@@ -42,7 +42,8 @@ const QUERY_METHODS = [
 ];
 
 const ROOT = path.resolve(__dirname, '..', '..');
-const DEFAULT_SERVER = path.join(ROOT, 'rust', 'target', 'release', process.platform === 'win32' ? 'cwtools-lsp.exe' : 'cwtools-lsp');
+const DEFAULT_SERVER = path.join(ROOT, 'release', 'bin', 'server', process.platform === 'win32' ? 'win-x64' : process.platform === 'darwin' ? 'osx-x64' : 'linux-x64', process.platform === 'win32' ? 'CWTools Server.exe' : 'CWTools Server');
+const DEFAULT_BUILD_SERVER = path.join(ROOT, 'rust', 'target', 'release', process.platform === 'win32' ? 'cwtools-lsp.exe' : 'cwtools-lsp');
 const DEFAULT_OUTPUT = path.join(ROOT, 'benchmarks', 'results', 'rust-lsp-soak.json');
 
 function usage() {

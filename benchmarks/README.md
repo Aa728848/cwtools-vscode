@@ -14,4 +14,4 @@ Verify the completed final report:
 
     npm run soak:rust-verify
 
-The final verifier requires a clean repository identity, a staged standalone Rust artifact, at least 1440 elapsed minutes, clean lifecycle/restart/cancellation accounting, no deadlock, timeout, orphan, protocol error, unexpected exit, or sustained RSS growth. Generated reports remain outside version control unless intentionally reviewed.
+The final verifier requires a clean repository identity, a staged standalone Rust artifact, at least 1440 elapsed minutes, clean lifecycle/restart/cancellation accounting, no deadlock, timeout, orphan, protocol error, unexpected exit, or sustained RSS growth. Run the final lane only after `npm run verify`, `npm run check:rust-only`, package inspection, and all other non-long-running acceptance gates pass. Generated reports remain outside version control unless intentionally reviewed.

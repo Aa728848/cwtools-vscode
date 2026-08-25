@@ -3,6 +3,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 
 const REPORT_SCHEMA_VERSION = 1;
 const REPORT_TYPE = 'cwtools.rust-lsp-soak';
@@ -47,6 +48,10 @@ function parseArgs(argv) {
 function isObject(value) { return value !== null && typeof value === 'object' && !Array.isArray(value); }
 function integer(value) { return Number.isSafeInteger(value); }
 function add(errors, message) { errors.push(message); }
+function sha256(file) {
+  try { return crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex'); }
+  catch { return null; }
+}
 
 function verifyReport(report, options = {}) {
   const errors = [];
@@ -71,6 +76,16 @@ function verifyReport(report, options = {}) {
     if (!integer(report.artifact.bytes) || report.artifact.bytes <= 0) add(errors, 'artifact.bytes must be positive');
     if (typeof report.artifact.sha256 !== 'string' || !/^[a-f0-9]{64}$/i.test(report.artifact.sha256)) add(errors, 'artifact.sha256 must be a SHA-256 hex digest');
     if (report.artifact.staged !== true || report.artifact.workerIsolation !== 'standalone-rust-artifact') add(errors, 'artifact must be a staged standalone Rust server');
+    if (report.artifact.requestedPath.includes('rust\\target') || report.artifact.requestedPath.includes('rust/target')) add(errors, 'artifact must be the packaged release server, not a build target');
+    if (options.checkArtifact !== false) {
+      if (!fs.existsSync(report.artifact.requestedPath)) add(errors, 'artifact path does not exist');
+      else {
+        const actualBytes = fs.statSync(report.artifact.requestedPath).size;
+        if (actualBytes !== report.artifact.bytes) add(errors, 'artifact byte size changed');
+        const actualHash = sha256(report.artifact.requestedPath);
+        if (actualHash !== report.artifact.sha256) add(errors, 'artifact SHA-256 changed');
+      }
+    }
   }
 
   const configuration = report.configuration;

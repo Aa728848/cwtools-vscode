@@ -21,6 +21,7 @@ cwtools-rules-engine = { path = "../submodules/cwtools/crates/cwtools-rules-engi
 cwtools-shader = { path = "../submodules/cwtools/crates/cwtools-shader" }
 cwtools-semantic = { path = "../submodules/cwtools/crates/cwtools-semantic" }
 serde_json = "1.0"
+zip = { version = "2.4", default-features = false, features = ["deflate"] }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

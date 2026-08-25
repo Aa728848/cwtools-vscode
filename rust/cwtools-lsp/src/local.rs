@@ -16,6 +16,9 @@
 )]
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::fs;
+use std::io::Read;
+use std::path::{Path, PathBuf};
 
 use cwtools_cache::fingerprint_sources;
 use cwtools_game_core::{
@@ -24,6 +27,7 @@ use cwtools_game_core::{
 };
 use cwtools_leaf::folding_ranges;
 use cwtools_protocol::{Message, RequestId};
+use cwtools_rules_engine::{RuleCatalog, ScopeUniverse};
 use cwtools_script_syntax::{parse, print_canonical};
 use cwtools_semantic::analyze_pdx_flow;
 use cwtools_shader::{
@@ -43,6 +47,9 @@ const MAX_WORKSPACE_FOLDERS: usize = 32;
 const MAX_WATCHED_CHANGES: usize = 1024;
 const MAX_SETTINGS_BYTES: usize = 64 * 1024;
 const MAX_REVERSE_REQUESTS: usize = 64;
+const MAX_RULE_DOCUMENTS: usize = 4096;
+const MAX_RULE_FILE_BYTES: usize = 2 * 1024 * 1024;
+const MAX_RULE_TOTAL_BYTES: usize = 64 * 1024 * 1024;
 const WRITE_COMMANDS: &[&str] = &[
     "cacheVanilla",
     "exportProjectKnowledge",
@@ -137,6 +144,7 @@ pub struct LocalRouter {
     read_only: bool,
     semantic: BTreeMap<String, SemanticSnapshot>,
     game_session: Option<GameSession>,
+    rule_catalog: Option<RuleCatalog>,
     session_epoch: u64,
     notifications: Vec<Message>,
     reverse_requests: Vec<ReverseRequest>,
@@ -177,6 +185,39 @@ impl LocalRouter {
             },
             ..GameSessionConfig::default()
         });
+        if self.rule_catalog.is_none()
+            && let Some(path) = self.initialization.bundled_rules_path.as_deref()
+        {
+            match load_rule_documents(Path::new(path)) {
+                Ok(documents) if !documents.is_empty() => {
+                    let count = documents.len();
+                    match RuleCatalog::compile(&documents, ScopeUniverse::default()) {
+                        Ok(catalog) => {
+                            self.rule_catalog = Some(catalog);
+                            self.notifications.push(notification(
+                                "monitorLog",
+                                json!({"category":"rules","message":format!("Loaded {count} CWT rule documents from {path}")}),
+                            ));
+                        }
+                        Err(error) => self.notifications.push(notification(
+                            "window/logMessage",
+                            json!({"type":1,"message":format!("Failed to compile bundled CWT rules from {path}: {error:?}")}),
+                        )),
+                    }
+                }
+                Ok(_) => self.notifications.push(notification(
+                    "window/logMessage",
+                    json!({"type":2,"message":format!("No CWT rule documents found at {path}")}),
+                )),
+                Err(error) => self.notifications.push(notification(
+                    "window/logMessage",
+                    json!({"type":1,"message":format!("Failed to load bundled CWT rules from {path}: {error}")}),
+                )),
+            }
+        }
+        if let Some(catalog) = self.rule_catalog.clone() {
+            session.set_rule_catalog(catalog);
+        }
         for source in self.workspace_sources() {
             let _ = session.upsert_source(SourceInput {
                 scope: source.scope,
@@ -1976,6 +2017,121 @@ impl LocalRouter {
     }
 }
 
+fn load_rule_documents(path: &Path) -> Result<Vec<cwtools_rule_ir::Document>, String> {
+    let sources = if path.is_file() {
+        load_rule_zip(path)?
+    } else if path.is_dir() {
+        load_rule_directory(path)?
+    } else {
+        return Err(format!("path does not exist: {}", path.display()));
+    };
+    let mut documents = Vec::new();
+    for (name, source) in sources {
+        match cwtools_rule_ir::parse_document(&name, &source) {
+            Ok(document) => documents.push(document),
+            Err(errors) => {
+                return Err(format!(
+                    "{}: {}",
+                    name,
+                    errors.into_iter().take(4).collect::<Vec<_>>().join("; ")
+                ));
+            }
+        }
+    }
+    Ok(documents)
+}
+
+fn load_rule_zip(path: &Path) -> Result<Vec<(String, String)>, String> {
+    let file = fs::File::open(path).map_err(|error| error.to_string())?;
+    let mut archive = zip::ZipArchive::new(file).map_err(|error| error.to_string())?;
+    if archive.len() > MAX_RULE_DOCUMENTS {
+        return Err(format!("archive exceeds {MAX_RULE_DOCUMENTS} entries"));
+    }
+    let mut sources = Vec::new();
+    let mut total = 0_usize;
+    for index in 0..archive.len() {
+        let mut entry = archive.by_index(index).map_err(|error| error.to_string())?;
+        let name = entry.name().replace('\\', "/");
+        if entry.is_dir() || !name.to_ascii_lowercase().ends_with(".cwt") {
+            continue;
+        }
+        if name.split('/').any(|part| part == "..") {
+            return Err(format!("unsafe archive path: {name}"));
+        }
+        let size = usize::try_from(entry.size()).map_err(|_| format!("oversized entry: {name}"))?;
+        if size > MAX_RULE_FILE_BYTES {
+            return Err(format!(
+                "rule file exceeds {MAX_RULE_FILE_BYTES} bytes: {name}"
+            ));
+        }
+        total = total.saturating_add(size);
+        if total > MAX_RULE_TOTAL_BYTES {
+            return Err(format!("rules exceed {MAX_RULE_TOTAL_BYTES} bytes"));
+        }
+        let mut bytes = Vec::with_capacity(size);
+        entry
+            .read_to_end(&mut bytes)
+            .map_err(|error| error.to_string())?;
+        let source = String::from_utf8(bytes).map_err(|error| format!("{name}: {error}"))?;
+        sources.push((name, source));
+    }
+    sources.sort_by(|left, right| left.0.cmp(&right.0));
+    Ok(sources)
+}
+
+fn load_rule_directory(root: &Path) -> Result<Vec<(String, String)>, String> {
+    let mut pending = vec![root.to_path_buf()];
+    let mut files = Vec::<PathBuf>::new();
+    while let Some(directory) = pending.pop() {
+        let mut entries = fs::read_dir(&directory)
+            .map_err(|error| error.to_string())?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|error| error.to_string())?;
+        entries.sort_by_key(fs::DirEntry::path);
+        for entry in entries {
+            let path = entry.path();
+            let file_type = entry.file_type().map_err(|error| error.to_string())?;
+            if file_type.is_dir() {
+                pending.push(path);
+            } else if file_type.is_file()
+                && path
+                    .extension()
+                    .is_some_and(|extension| extension.eq_ignore_ascii_case("cwt"))
+            {
+                files.push(path);
+            }
+        }
+        if files.len() > MAX_RULE_DOCUMENTS {
+            return Err(format!("rules exceed {MAX_RULE_DOCUMENTS} files"));
+        }
+    }
+    files.sort();
+    let mut total = 0_usize;
+    files
+        .into_iter()
+        .map(|path| {
+            let bytes = fs::read(&path).map_err(|error| error.to_string())?;
+            if bytes.len() > MAX_RULE_FILE_BYTES {
+                return Err(format!(
+                    "rule file exceeds {MAX_RULE_FILE_BYTES} bytes: {}",
+                    path.display()
+                ));
+            }
+            total = total.saturating_add(bytes.len());
+            if total > MAX_RULE_TOTAL_BYTES {
+                return Err(format!("rules exceed {MAX_RULE_TOTAL_BYTES} bytes"));
+            }
+            let name = path
+                .strip_prefix(root)
+                .unwrap_or(&path)
+                .to_string_lossy()
+                .replace('\\', "/");
+            let source = String::from_utf8(bytes).map_err(|error| format!("{name}: {error}"))?;
+            Ok((name, source))
+        })
+        .collect()
+}
+
 fn byte_range_to_lsp(
     sources: &[SnapshotSource],
     path: &str,
@@ -2394,6 +2550,23 @@ mod tests {
             assert!(router.route(&payload(&message)).is_some(), "{method}");
         }
     }
+    #[test]
+    fn packaged_stellaris_rules_are_loaded_into_game_session() {
+        let rules =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../../release/rules/stellaris-rules.zip");
+        assert!(rules.is_file(), "packaged rules fixture");
+        let documents = load_rule_documents(&rules).expect("load packaged rules");
+        assert!(!documents.is_empty(), "CWT documents");
+        let mut session = GameSession::new(GameSessionConfig {
+            game_id: GameId::Stellaris,
+            ..GameSessionConfig::default()
+        });
+        session
+            .set_rules(&documents, std::iter::empty())
+            .expect("compile packaged rules");
+        assert!(session.rules_catalog().is_some());
+    }
+
     #[test]
     fn syntax_diagnostics_are_bounded_and_deterministic() {
         let mut router = LocalRouter::default();

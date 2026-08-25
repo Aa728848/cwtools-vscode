@@ -152,6 +152,7 @@ dependencies = [
  "cwtools-transport",
  "cwtools-workspace",
  "serde_json",
+ "zip",
 ]
 
 [[package]]

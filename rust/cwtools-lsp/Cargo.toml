@@ -23,6 +23,7 @@ cwtools-rules-engine.workspace = true
 cwtools-shader.workspace = true
 cwtools-semantic.workspace = true
 serde_json.workspace = true
+zip.workspace = true
 
 [lints]
 workspace = true

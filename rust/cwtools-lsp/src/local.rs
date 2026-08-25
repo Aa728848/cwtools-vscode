@@ -1319,8 +1319,16 @@ impl LocalRouter {
                 | "cwtools.ai.revalidateFiles"
                 | "cwtools.ai.waitDiagnosticsFresh"
         ) {
-            let diagnostics = self.sources.keys().filter_map(|uri| self.document(uri).map(|document|(uri,document))).flat_map(|(uri,document)| parse(&document.text).err().unwrap_or_default().into_iter().map(move |error|json!({"uri":uri,"code":error.code,"message":error.message,"line":error.line,"character":error.utf16_column}))).take(MAX_RESULTS).collect::<Vec<_>>();
-            json!({"status":"fresh","complete":true,"diagnostics":diagnostics})
+            let diagnostics = self.game_session.as_ref().and_then(GameSession::snapshot).map_or_else(Vec::new, |snapshot| {
+                let mut values = snapshot.full.diagnostics.iter().take(MAX_RESULTS).map(|diagnostic| json!({
+                    "uri":diagnostic.path,"code":diagnostic.code,"messageKey":diagnostic.message_key,"message":format!("{}: {}", diagnostic.message_key, diagnostic.args.join(", ")),"severity":"error","range":byte_range_to_lsp(&snapshot.full.sources,&diagnostic.path,diagnostic.range)
+                })).collect::<Vec<_>>();
+                values.extend(snapshot.full.parse_errors.iter().take(MAX_RESULTS.saturating_sub(values.len())).map(|error| json!({
+                    "uri":error.path,"code":error.code,"message":error.message,"offset":error.offset
+                })));
+                values
+            });
+            json!({"status":"fresh","complete":true,"epoch":self.session_epoch,"pending":0,"diagnostics":diagnostics,"totalCount":diagnostics.len()})
         } else if matches!(
             command.as_str(),
             "cwtools.ai.queryDefinition"
@@ -1345,15 +1353,31 @@ impl LocalRouter {
                 | "cwtools.ai.getSemanticCatalog"
         ) {
             let mut names = BTreeSet::new();
-            for uri in self.sources.keys() {
-                if let Some(document) = self.document(uri) {
-                    for token in scan_tokens(&document.text)
-                        .into_iter()
-                        .filter(|token| token.kind == LexKind::Identifier)
-                        .take(MAX_RESULTS)
-                    {
-                        names.insert(token.value);
+            if let Some(snapshot) = self.game_session.as_ref().and_then(GameSession::snapshot) {
+                match command.as_str() {
+                    "cwtools.ai.queryVariables" => {
+                        names.extend(snapshot.full.variables.keys().cloned());
                     }
+                    "cwtools.ai.queryScriptedEffects" => {
+                        names.extend(snapshot.game_data.scripted_effect_params.keys().cloned());
+                    }
+                    "cwtools.ai.queryScriptedTriggers" => names.extend(
+                        snapshot
+                            .game_data
+                            .trigger_blocks
+                            .iter()
+                            .map(|item| item.key.clone()),
+                    ),
+                    "cwtools.ai.queryTypes" => {
+                        names.extend(snapshot.full.typed_definitions.keys().cloned());
+                    }
+                    "cwtools.ai.queryEnums"
+                    | "cwtools.ai.queryStaticModifiers"
+                    | "cwtools.ai.getSemanticCatalog" => {
+                        names.extend(snapshot.full.definitions.keys().cloned());
+                        names.extend(snapshot.full.typed_definitions.keys().cloned());
+                    }
+                    _ => {}
                 }
             }
             json!({"kind":command,"items":names.into_iter().take(MAX_RESULTS).collect::<Vec<_>>(),"complete":true})

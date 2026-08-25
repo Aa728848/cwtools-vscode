@@ -20,7 +20,7 @@ fn run_stdio() -> i32 {
     loop {
         let payload = match read_frame(&mut input, limits) {
             Ok(payload) => payload,
-            Err(FrameError::Eof) => return 0,
+            Err(FrameError::Eof) => return i32::from(!router.is_shutdown()),
             Err(error) => {
                 eprintln!("Controlled transport failure: {error}");
                 return 1;

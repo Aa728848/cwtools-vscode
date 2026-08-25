@@ -259,6 +259,7 @@ impl LocalRouter {
                     "rules" => ("正在编译 CWT 规则...".to_owned(), 20),
                     "project" => ("正在索引 Mod 项目...".to_owned(), 70),
                     "finalize" => ("正在保存语义快照...".to_owned(), 90),
+                    "merged" => ("正在载入语义快照...".to_owned(), 90),
                     _ if step.starts_with("vanilla:") => {
                         let (loaded, total) = step
                             .strip_prefix("vanilla:")
@@ -2797,6 +2798,7 @@ fn build_session_worker(
         if let Some(catalog) = catalog.as_ref() {
             session.set_rule_catalog(catalog.clone());
         }
+        let _ = progress.send("merged".to_owned());
         true
     } else {
         // Fresh state: build the merged snapshot in a single parse+enrich pass

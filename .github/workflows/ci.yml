@@ -82,6 +82,8 @@ jobs:
       - uses: actions/checkout@v4
         with: { submodules: recursive }
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
       - name: Build standalone Rust server
         run: cargo build --manifest-path rust/Cargo.toml --release --locked --target ${{ matrix.target }}
       - name: Stage Windows server

@@ -22,8 +22,8 @@ use std::path::{Path, PathBuf};
 
 use cwtools_cache::fingerprint_sources;
 use cwtools_game_core::{
-    GameId, GameSession, GameSessionConfig, SourceInput, all_game_profiles, game_profile,
-    parse_localisation,
+    GameId, GameSession, GameSessionConfig, SessionSnapshot, SourceInput, all_game_profiles,
+    game_profile, parse_localisation,
 };
 use cwtools_leaf::folding_ranges;
 use cwtools_protocol::{Message, RequestId};
@@ -2657,41 +2657,51 @@ fn build_session_worker(
     progress: std::sync::mpsc::SyncSender<String>,
 ) -> BuildOutcome {
     let _ = progress.send("rules".to_owned());
-    let catalog = if !initialization.rule_files.is_empty() {
-        load_rule_file_set(&initialization.rule_files)
-            .ok()
-            .and_then(|documents| RuleCatalog::compile(&documents, ScopeUniverse::default()).ok())
+    let (catalog, rules_digest) = if !initialization.rule_files.is_empty() {
+        match load_rule_file_set(&initialization.rule_files) {
+            Ok(documents) => (
+                RuleCatalog::compile(&documents, ScopeUniverse::default()).ok(),
+                fingerprint_sources(
+                    documents
+                        .iter()
+                        .map(|document| (document.file.as_str(), document.source.as_str())),
+                ),
+            ),
+            Err(_) => (None, cwtools_cache::Fingerprint::new(0)),
+        }
     } else if let Some(path) = initialization.bundled_rules_path.as_deref() {
-        load_rule_documents(Path::new(path))
-            .ok()
-            .and_then(|documents| RuleCatalog::compile(&documents, ScopeUniverse::default()).ok())
+        match load_rule_documents(Path::new(path)) {
+            Ok(documents) => (
+                RuleCatalog::compile(&documents, ScopeUniverse::default()).ok(),
+                fingerprint_sources(
+                    documents
+                        .iter()
+                        .map(|document| (document.file.as_str(), document.source.as_str())),
+                ),
+            ),
+            Err(_) => (None, cwtools_cache::Fingerprint::new(0)),
+        }
     } else {
-        None
+        (None, cwtools_cache::Fingerprint::new(0))
     };
+    let game_id = initialization
+        .language
+        .as_deref()
+        .and_then(parse_game_id)
+        .unwrap_or(GameId::Generic);
     let mut session = GameSession::new(GameSessionConfig {
-        game_id: initialization
-            .language
-            .as_deref()
-            .and_then(parse_game_id)
-            .unwrap_or(GameId::Generic),
+        game_id,
         cache_path: initialization
             .vanilla_cache_path
             .as_ref()
             .map(std::path::PathBuf::from),
-        cache_limits: cwtools_cache::CacheLimits {
-            max_payload_bytes: 1024 * 1024 * 1024,
-            max_compressed_bytes: 512 * 1024 * 1024,
-            ..cwtools_cache::CacheLimits::default()
-        },
+        cache_limits: merged_cache_limits(),
         snapshot_limits: SnapshotLimits {
             max_sources: MAX_VANILLA_FILES.saturating_add(MAX_DOCUMENTS),
             max_nodes: 20_000_000,
         },
         ..GameSessionConfig::default()
     });
-    if let Some(catalog) = catalog.clone() {
-        session.set_rule_catalog(catalog);
-    }
     let _ = progress.send("vanilla".to_owned());
     let vanilla = match vanilla_sources {
         Some(sources) => sources,
@@ -2709,37 +2719,97 @@ fn build_session_worker(
         }
     };
     let vanilla_count = vanilla.len();
-    for (index, source) in vanilla.iter().cloned().enumerate() {
+    let mut merged_sources = vanilla.clone();
+    merged_sources.extend(project.iter().cloned());
+    let merged_fingerprint = fingerprint_sources(
+        merged_sources
+            .iter()
+            .map(|source| (source.logical_path.as_str(), source.text.as_str())),
+    );
+    for (index, source) in merged_sources.iter().cloned().enumerate() {
         let _ = session.upsert_source(source);
         if index % 256 == 0 {
             let _ = progress.send("vanilla".to_owned());
         }
     }
-    let vanilla_fingerprint = fingerprint_sources(
-        vanilla
-            .iter()
-            .map(|source| (source.logical_path.as_str(), source.text.as_str())),
-    );
-    let cache = session.load_cache(vanilla_fingerprint);
-    let cache_hit = cache.value.is_some();
-    let vanilla_refreshed = if let Some(snapshot) = cache.value {
-        session.install_cached_snapshot(snapshot).is_ok()
-    } else {
-        let refreshed = session.refresh_full().is_ok();
-        if refreshed && let Some(snapshot) = session.snapshot() {
-            let _ = session.save_cache(snapshot);
+    let merged_cache_path = initialization
+        .vanilla_cache_path
+        .as_ref()
+        .map(|vanilla_path| {
+            let vanilla = Path::new(vanilla_path);
+            let stem = vanilla.file_stem().map_or_else(
+                || "project".to_owned(),
+                |value| value.to_string_lossy().into_owned(),
+            );
+            vanilla.with_file_name(format!("{stem}-project.cwb"))
+        });
+    let merged_key = merged_cache_path.as_ref().and_then(|_| {
+        cwtools_cache::CacheKey::new(game_id.as_str(), rules_digest, merged_fingerprint).ok()
+    });
+    let merged_cache_hit = (|| {
+        let path = merged_cache_path.as_ref()?;
+        let key = merged_key.as_ref()?;
+        let store = cwtools_cache::CacheStore::with_limits(path, merged_cache_limits());
+        store.read_json::<SessionSnapshot>(key).value
+    })();
+    let cache_hit = if let Some(snapshot) = merged_cache_hit {
+        // Restoring the merged snapshot avoids re-parsing vanilla or the project.
+        if session.install_cached_snapshot(snapshot).is_err() {
+            return Err("failed to install cached project snapshot".to_owned());
         }
-        refreshed
+        if let Some(catalog) = catalog.as_ref() {
+            session.set_rule_catalog(catalog.clone());
+        }
+        true
+    } else {
+        let vanilla_fingerprint = fingerprint_sources(
+            vanilla
+                .iter()
+                .map(|source| (source.logical_path.as_str(), source.text.as_str())),
+        );
+        let cache = session.load_cache(vanilla_fingerprint);
+        let vanilla_hit = cache.value.is_some();
+        let vanilla_refreshed = if let Some(snapshot) = cache.value {
+            session.install_cached_snapshot(snapshot).is_ok()
+        } else {
+            // Refresh before the catalog is installed so the vanilla snapshot is
+            // parsed once without the expensive rule game-data pass; the merged
+            // enrichment below runs that pass a single time.
+            let refreshed = session.refresh_full().is_ok();
+            if refreshed && let Some(snapshot) = session.snapshot() {
+                let _ = session.save_cache(snapshot);
+            }
+            refreshed
+        };
+        if !vanilla_refreshed {
+            return Err("failed to build vanilla snapshot".to_owned());
+        }
+        if let Some(catalog) = catalog.clone() {
+            session.set_rule_catalog(catalog);
+        }
+        let _ = progress.send("project".to_owned());
+        if session.merge_sources(&project, true).is_err() {
+            return Err("failed to merge project snapshot".to_owned());
+        }
+        if let (Some(path), Some(key)) = (merged_cache_path.as_ref(), merged_key.as_ref())
+            && let Some(snapshot) = session.snapshot()
+            && let Ok(payload) = serde_json::to_vec(snapshot)
+        {
+            let store = cwtools_cache::CacheStore::with_limits(path, merged_cache_limits());
+            let _ = store.write_bytes(key, &payload);
+        }
+        vanilla_hit
     };
-    if !vanilla_refreshed {
-        return Err("failed to build vanilla snapshot".to_owned());
-    }
-    let _ = progress.send("project".to_owned());
-    if session.merge_sources(&project, !cache_hit).is_err() {
-        return Err("failed to merge project snapshot".to_owned());
-    }
     let _ = progress.send("finalize".to_owned());
     Ok((session, cache_hit, vanilla_count, Some(vanilla), catalog))
+}
+
+fn merged_cache_limits() -> cwtools_cache::CacheLimits {
+    cwtools_cache::CacheLimits {
+        max_payload_bytes: 1024 * 1024 * 1024,
+        max_compressed_bytes: 512 * 1024 * 1024,
+        ..cwtools_cache::CacheLimits::default()
+    }
 }
 
 fn byte_range_to_lsp(

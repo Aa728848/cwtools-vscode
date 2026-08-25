@@ -16,6 +16,7 @@
 )]
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::fmt::Write as _;
 use std::fs;
 use std::io::Read;
 use std::path::{Path, PathBuf};
@@ -169,7 +170,7 @@ pub struct LocalRouter {
     build_progress: Option<std::sync::mpsc::Receiver<String>>,
     build_stage: String,
     build_percentage: u32,
-    build_tick_max: u32,
+    build_started: Option<std::time::Instant>,
     session_epoch: u64,
     notifications: Vec<Message>,
     reverse_requests: Vec<ReverseRequest>,
@@ -205,7 +206,7 @@ impl LocalRouter {
         }
         "CWTools: 正在生成/载入 stl.cwb 并索引项目...".clone_into(&mut self.build_stage);
         self.build_percentage = 10;
-        self.build_tick_max = 19;
+        self.build_started = Some(std::time::Instant::now());
         let initialization = self.initialization.clone();
         let vanilla_sources = self.vanilla_sources.clone();
         let project = self
@@ -226,7 +227,7 @@ impl LocalRouter {
                 if ticker.send("tick".to_owned()).is_err() {
                     break;
                 }
-                std::thread::sleep(std::time::Duration::from_secs(3));
+                std::thread::sleep(std::time::Duration::from_secs(1));
             }
         });
         self.build_task = Some(std::thread::spawn(move || {
@@ -241,26 +242,43 @@ impl LocalRouter {
         if let Some(receiver) = self.build_progress.as_mut() {
             while let Ok(step) = receiver.try_recv() {
                 if step == "tick" {
-                    self.build_percentage = self
-                        .build_percentage
-                        .saturating_add(1)
-                        .min(self.build_tick_max);
+                    self.build_percentage = self.build_percentage.saturating_add(1).min(99);
+                    let mut value = self.build_stage.clone();
+                    if let Some(started) = self.build_started {
+                        let elapsed = started.elapsed().as_secs();
+                        let _ = write!(value, " · {:02}:{:02}", elapsed / 60, elapsed % 60);
+                    }
                     self.notifications.push(notification(
                         "loadingBar",
-                        json!({"enable":true,"value":self.build_stage,"percentage":self.build_percentage}),
+                        json!({"enable":true,"value":value,"percentage":self.build_percentage}),
                     ));
                     continue;
                 }
-                let (value, percentage, tick_max) = match step.as_str() {
-                    "vanilla" => ("正在扫描原版数据...", 30, 69),
-                    "rules" => ("正在编译 CWT 规则...", 20, 29),
-                    "project" => ("正在索引 Mod 项目...", 70, 89),
-                    "finalize" => ("正在合并原版与 Mod 语义快照...", 90, 99),
-                    _ => ("CWTools indexing...", 50, 99),
+                let (value, percentage) = match step.as_str() {
+                    "vanilla" => ("正在扫描原版数据...".to_owned(), 30),
+                    "rules" => ("正在编译 CWT 规则...".to_owned(), 20),
+                    "project" => ("正在索引 Mod 项目...".to_owned(), 70),
+                    "finalize" => ("正在保存语义快照...".to_owned(), 90),
+                    _ if step.starts_with("vanilla:") => {
+                        let (loaded, total) = step
+                            .strip_prefix("vanilla:")
+                            .and_then(|rest| rest.split_once(':'))
+                            .and_then(|(a, b)| {
+                                let a = a.parse::<usize>().ok()?;
+                                let b = b.parse::<usize>().ok()?;
+                                Some((a, b))
+                            })
+                            .unwrap_or_default();
+                        if total > 0 {
+                            (format!("正在扫描原版数据... ({loaded}/{total})"), 30)
+                        } else {
+                            ("正在扫描原版数据...".to_owned(), 30)
+                        }
+                    }
+                    _ => ("CWTools indexing...".to_owned(), 50),
                 };
                 value.clone_into(&mut self.build_stage);
                 self.build_percentage = self.build_percentage.max(percentage);
-                self.build_tick_max = tick_max;
                 self.notifications.push(notification(
                     "loadingBar",
                     json!({"enable":true,"value":value,"percentage":self.build_percentage}),
@@ -2657,7 +2675,8 @@ fn build_session_worker(
     progress: std::sync::mpsc::SyncSender<String>,
 ) -> BuildOutcome {
     let _ = progress.send("rules".to_owned());
-    let (catalog, rules_digest) = if !initialization.rule_files.is_empty() {
+    let rules_started = std::time::Instant::now();
+    let (catalog, rules_digest, rule_count) = if !initialization.rule_files.is_empty() {
         match load_rule_file_set(&initialization.rule_files) {
             Ok(documents) => (
                 RuleCatalog::compile(&documents, ScopeUniverse::default()).ok(),
@@ -2666,8 +2685,9 @@ fn build_session_worker(
                         .iter()
                         .map(|document| (document.file.as_str(), document.source.as_str())),
                 ),
+                documents.len(),
             ),
-            Err(_) => (None, cwtools_cache::Fingerprint::new(0)),
+            Err(_) => (None, cwtools_cache::Fingerprint::new(0), 0),
         }
     } else if let Some(path) = initialization.bundled_rules_path.as_deref() {
         match load_rule_documents(Path::new(path)) {
@@ -2678,12 +2698,17 @@ fn build_session_worker(
                         .iter()
                         .map(|document| (document.file.as_str(), document.source.as_str())),
                 ),
+                documents.len(),
             ),
-            Err(_) => (None, cwtools_cache::Fingerprint::new(0)),
+            Err(_) => (None, cwtools_cache::Fingerprint::new(0), 0),
         }
     } else {
-        (None, cwtools_cache::Fingerprint::new(0))
+        (None, cwtools_cache::Fingerprint::new(0), 0)
     };
+    eprintln!(
+        "[cwtools-build] rules={}ms docs={rule_count}",
+        rules_started.elapsed().as_millis()
+    );
     let game_id = initialization
         .language
         .as_deref()
@@ -2726,12 +2751,18 @@ fn build_session_worker(
             .iter()
             .map(|source| (source.logical_path.as_str(), source.text.as_str())),
     );
+    let upsert_started = std::time::Instant::now();
     for (index, source) in merged_sources.iter().cloned().enumerate() {
         let _ = session.upsert_source(source);
-        if index % 256 == 0 {
-            let _ = progress.send("vanilla".to_owned());
+        if index % 128 == 0 {
+            let _ = progress.send(format!("vanilla:{index}:{}", merged_sources.len()));
         }
     }
+    eprintln!(
+        "[cwtools-build] upsert={}ms sources={}",
+        upsert_started.elapsed().as_millis(),
+        merged_sources.len()
+    );
     let merged_cache_path = initialization
         .vanilla_cache_path
         .as_ref()
@@ -2746,12 +2777,18 @@ fn build_session_worker(
     let merged_key = merged_cache_path.as_ref().and_then(|_| {
         cwtools_cache::CacheKey::new(game_id.as_str(), rules_digest, merged_fingerprint).ok()
     });
+    let cache_read_started = std::time::Instant::now();
     let merged_cache_hit = (|| {
         let path = merged_cache_path.as_ref()?;
         let key = merged_key.as_ref()?;
         let store = cwtools_cache::CacheStore::with_limits(path, merged_cache_limits());
         store.read_json::<SessionSnapshot>(key).value
     })();
+    eprintln!(
+        "[cwtools-build] merged_cache_read={}ms hit={}",
+        cache_read_started.elapsed().as_millis(),
+        merged_cache_hit.is_some()
+    );
     let cache_hit = if let Some(snapshot) = merged_cache_hit {
         // Restoring the merged snapshot avoids re-parsing vanilla or the project.
         if session.install_cached_snapshot(snapshot).is_err() {
@@ -2762,35 +2799,20 @@ fn build_session_worker(
         }
         true
     } else {
-        let vanilla_fingerprint = fingerprint_sources(
-            vanilla
-                .iter()
-                .map(|source| (source.logical_path.as_str(), source.text.as_str())),
-        );
-        let cache = session.load_cache(vanilla_fingerprint);
-        let vanilla_hit = cache.value.is_some();
-        let vanilla_refreshed = if let Some(snapshot) = cache.value {
-            session.install_cached_snapshot(snapshot).is_ok()
-        } else {
-            // Refresh before the catalog is installed so the vanilla snapshot is
-            // parsed once without the expensive rule game-data pass; the merged
-            // enrichment below runs that pass a single time.
-            let refreshed = session.refresh_full().is_ok();
-            if refreshed && let Some(snapshot) = session.snapshot() {
-                let _ = session.save_cache(snapshot);
-            }
-            refreshed
-        };
-        if !vanilla_refreshed {
-            return Err("failed to build vanilla snapshot".to_owned());
-        }
+        // Fresh state: build the merged snapshot in a single parse+enrich pass
+        // (the session has no base snapshot yet). No double work in this path.
         if let Some(catalog) = catalog.clone() {
             session.set_rule_catalog(catalog);
         }
         let _ = progress.send("project".to_owned());
+        let merge_started = std::time::Instant::now();
         if session.merge_sources(&project, true).is_err() {
             return Err("failed to merge project snapshot".to_owned());
         }
+        eprintln!(
+            "[cwtools-build] merge+enrich={}ms",
+            merge_started.elapsed().as_millis()
+        );
         if let (Some(path), Some(key)) = (merged_cache_path.as_ref(), merged_key.as_ref())
             && let Some(snapshot) = session.snapshot()
             && let Ok(payload) = serde_json::to_vec(snapshot)
@@ -2798,10 +2820,70 @@ fn build_session_worker(
             let store = cwtools_cache::CacheStore::with_limits(path, merged_cache_limits());
             let _ = store.write_bytes(key, &payload);
         }
-        vanilla_hit
+        false
     };
+    if vanilla_count > 0 {
+        spawn_vanilla_cache_ensure(
+            game_id,
+            initialization.vanilla_cache_path.clone(),
+            vanilla.clone(),
+        );
+    }
+    eprintln!(
+        "[cwtools-build] total={}ms hit={cache_hit}",
+        rules_started.elapsed().as_millis()
+    );
     let _ = progress.send("finalize".to_owned());
     Ok((session, cache_hit, vanilla_count, Some(vanilla), catalog))
+}
+
+fn spawn_vanilla_cache_ensure(
+    game_id: GameId,
+    vanilla_cache_path: Option<String>,
+    vanilla: Vec<SourceInput>,
+) {
+    std::thread::spawn(move || {
+        let mut cache_session = GameSession::new(GameSessionConfig {
+            game_id,
+            cache_path: vanilla_cache_path.map(std::path::PathBuf::from),
+            cache_limits: merged_cache_limits(),
+            snapshot_limits: SnapshotLimits {
+                max_sources: MAX_VANILLA_FILES.saturating_add(MAX_DOCUMENTS),
+                max_nodes: 20_000_000,
+            },
+            ..GameSessionConfig::default()
+        });
+        for source in vanilla.iter().cloned() {
+            let _ = cache_session.upsert_source(source);
+        }
+        let fingerprint = fingerprint_sources(
+            vanilla
+                .iter()
+                .map(|source| (source.logical_path.as_str(), source.text.as_str())),
+        );
+        let started = std::time::Instant::now();
+        if cache_session.load_cache(fingerprint).value.is_some() {
+            eprintln!(
+                "[cwtools-build] vanilla_cache_up_to_date={}ms",
+                started.elapsed().as_millis()
+            );
+            return;
+        }
+        if cache_session.refresh_full().is_ok()
+            && let Some(snapshot) = cache_session.snapshot()
+        {
+            let _ = cache_session.save_cache(snapshot);
+            eprintln!(
+                "[cwtools-build] vanilla_cache_generated={}ms",
+                started.elapsed().as_millis()
+            );
+        } else {
+            eprintln!(
+                "[cwtools-build] vanilla_cache_generation_failed={}ms",
+                started.elapsed().as_millis()
+            );
+        }
+    });
 }
 
 fn merged_cache_limits() -> cwtools_cache::CacheLimits {

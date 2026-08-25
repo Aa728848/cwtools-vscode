@@ -82,6 +82,7 @@ fn run_stdio() -> i32 {
                 return 1;
             }
         }
+        let build_after_flush = message.method.as_deref() == Some("initialized");
         for outgoing in router
             .drain_notifications()
             .into_iter()
@@ -90,6 +91,15 @@ fn run_stdio() -> i32 {
             if let Err(error) = write_message(&mut output, &outgoing, limits) {
                 eprintln!("Transport write failure: {error}");
                 return 1;
+            }
+        }
+        if build_after_flush {
+            router.build_game_session();
+            for outgoing in router.drain_notifications() {
+                if let Err(error) = write_message(&mut output, &outgoing, limits) {
+                    eprintln!("Transport write failure: {error}");
+                    return 1;
+                }
             }
         }
         if router.is_exited() {

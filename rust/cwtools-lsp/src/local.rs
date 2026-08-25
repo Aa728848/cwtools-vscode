@@ -177,7 +177,7 @@ impl LocalRouter {
             .unwrap_or(GameId::Generic)
     }
 
-    fn rebuild_game_session(&mut self) {
+    pub(crate) fn rebuild_game_session(&mut self) {
         let mut session = GameSession::new(GameSessionConfig {
             game_id: self.selected_game_id(),
             cache_path: self
@@ -374,7 +374,6 @@ impl LocalRouter {
 
     /// Announces readiness and resets client progress indicators after initialize.
     pub fn notify_server_ready(&mut self) {
-        self.rebuild_game_session();
         let instance_id = std::env::var("CWTOOLS_SERVER_INSTANCE_ID").ok();
         self.notifications.push(notification(
             "window/logMessage",

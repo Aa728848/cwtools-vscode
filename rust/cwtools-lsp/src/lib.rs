@@ -130,6 +130,12 @@ impl Router {
         })
     }
 
+    /// Builds the configured rules, vanilla, and workspace semantic session after
+    /// the initialized handshake has already been flushed to the client.
+    pub fn build_game_session(&mut self) {
+        self.local.rebuild_game_session();
+    }
+
     /// Drains deterministic server notifications emitted by local adapters.
     pub fn drain_notifications(&mut self) -> Vec<Message> {
         self.local.drain_notifications()

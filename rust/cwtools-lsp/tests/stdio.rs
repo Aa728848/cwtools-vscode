@@ -88,6 +88,12 @@ fn stdio_process_completes_manifest_lifecycle_without_proxy() {
     assert_eq!(messages[2]["method"], "loadingBar");
     assert_eq!(messages[3]["method"], "debugBar");
     assert_eq!(messages[4]["method"], "cwtools/serverReady");
+    // Readiness must be emitted before any potentially expensive semantic build.
+    assert!(
+        messages[..=4]
+            .iter()
+            .all(|message| message["method"] != "cwtools/validationComplete")
+    );
     assert_eq!(messages[5]["id"], 2);
     assert_eq!(messages[5]["result"], Value::Null);
 }

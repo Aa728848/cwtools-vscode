@@ -181,7 +181,7 @@
       "effect": "read",
       "lockFree": false,
       "advertised": true,
-      "handler": false
+      "handler": true
     },
     {
       "name": "cwtools.ai.getEntityInfo",
@@ -370,13 +370,13 @@
       "effect": "read",
       "lockFree": false,
       "advertised": true,
-      "handler": false
+      "handler": true
     },
     {
       "name": "cwtools.exportTypes",
-      "effect": "read",
+      "effect": "write",
       "lockFree": false,
-      "advertised": true,
+      "advertised": false,
       "handler": false
     },
     {

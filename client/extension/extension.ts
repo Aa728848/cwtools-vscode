@@ -8,6 +8,8 @@ import * as path from 'path';
 import { localize, isChineseLocale } from './panelI18n';
 import * as os from 'os';
 import * as fs from 'fs';
+import { execFile } from 'child_process';
+import { promisify } from 'util';
 import * as vs from 'vscode';
 import { workspace, ExtensionContext, window, Disposable, Uri, WorkspaceEdit, TextEdit, Range, commands } from 'vscode';
 import { LanguageClient, LanguageClientOptions, NotificationType, RevealOutputChannelOn, State } from 'vscode-languageclient/node';
@@ -244,6 +246,8 @@ function safeRegisterCommand(context: ExtensionContext, commandId: string, handl
 	context.subscriptions.push(disposable);
 }
 
+const execFileAsync = promisify(execFile);
+
 type RulesSourceName = 'Manual' | 'Remote' | 'Bundled' | 'Missing';
 
 interface RulesSourceStatus {
@@ -440,7 +444,39 @@ function inferLanguageIdFromWorkspace(): string | undefined {
 	return inferGameIdFromWorkspace(rootPath, getConfiguredGamePath);
 }
 
-function getRulesSourceStatus(languageId: string, cacheDir: string, _bundledRulesPath: string): RulesSourceStatus {
+async function updateRemoteRulesCache(languageId: string, cacheDir: string, remoteUrl: string): Promise<void> {
+	const config = workspace.getConfiguration('stellarisLanguageServices');
+	if (config.get<string>('rules_version', 'latest') === 'manual') return;
+	const target = path.join(cacheDir, languageId);
+	await fs.promises.mkdir(cacheDir, { recursive: true });
+	const gitDir = path.join(target, '.git');
+	const options = { timeout: 60_000, windowsHide: true, maxBuffer: 2 * 1024 * 1024 };
+	try {
+		if (!fs.existsSync(gitDir)) {
+			if (fs.existsSync(target)) await fs.promises.rm(target, { recursive: true, force: true });
+			await execFileAsync('git', ['clone', '--depth', '1', remoteUrl, target], options);
+		} else {
+			await execFileAsync('git', ['-C', target, 'remote', 'set-url', 'origin', remoteUrl], options);
+			await execFileAsync('git', ['-C', target, 'fetch', '--depth', '1', 'origin'], options);
+			const { stdout } = await execFileAsync('git', ['-C', target, 'symbolic-ref', 'refs/remotes/origin/HEAD'], options);
+			const remoteBranch = stdout.trim() || 'refs/remotes/origin/main';
+			await execFileAsync('git', ['-C', target, 'reset', '--hard', remoteBranch], options);
+		}
+	} catch (error) {
+		ErrorReporter.warn('Rules', `Failed to update remote rules from ${remoteUrl}`, error);
+	}
+}
+
+function resolveEffectiveRulesPath(languageId: string, cacheDir: string, bundledRulesPath: string): string {
+	const config = workspace.getConfiguration('stellarisLanguageServices');
+	const rulesVersion = config.get<string>('rules_version', 'latest');
+	const manualRulesFolder = config.get<string>('rules_folder', '')?.trim();
+	if (rulesVersion === 'manual') return manualRulesFolder || bundledRulesPath;
+	const cachedRulesPath = path.join(cacheDir, languageId);
+	return countRuleFiles(cachedRulesPath) > 0 ? cachedRulesPath : bundledRulesPath;
+}
+
+function getRulesSourceStatus(languageId: string, cacheDir: string, bundledRulesPath: string): RulesSourceStatus {
 	const config = workspace.getConfiguration('stellarisLanguageServices');
 	const rulesVersion = config.get<string>('rules_version', 'latest');
 	const manualRulesFolder = config.get<string>('rules_folder', '')?.trim();
@@ -454,6 +490,8 @@ function getRulesSourceStatus(languageId: string, cacheDir: string, _bundledRule
 	const cachedCount = countRuleFiles(cachedRulesPath);
 	if (cachedCount > 0) return { source: 'Remote', path: cachedRulesPath, fileCount: cachedCount };
 
+	const bundledCount = countRuleFiles(bundledRulesPath);
+	if (bundledCount > 0) return { source: 'Bundled', path: bundledRulesPath, fileCount: bundledCount };
 	return { source: 'Missing', fileCount: 0 };
 }
 
@@ -1710,6 +1748,8 @@ export async function activate(context: ExtensionContext) {
 		const defaultRepoPath = repoPathStr;
 		const repoPath = getConfiguredRulesRemoteUrl(language);
 		const bundledRulesPath = resolveBundledRulesPath(context, language);
+		await updateRemoteRulesCache(language, cacheDir, repoPath);
+		const effectiveRulesPath = resolveEffectiveRulesPath(language, cacheDir, bundledRulesPath);
 		ErrorReporter.debug('Extension', `Language: ${language}, repo: ${repoPath}`);
 		registerRulesConfigGroupCommands(context, () => ({
 			languageId: language,
@@ -1897,7 +1937,7 @@ export async function activate(context: ExtensionContext) {
 				uiLanguage: vs.env.language,
 				isVanillaFolder: isVanillaFolder,
 				rulesCache: cacheDir,
-				bundledRulesPath: bundledRulesPath,
+				bundledRulesPath: effectiveRulesPath,
 				rules_version: workspace.getConfiguration('stellarisLanguageServices').get('rules_version'),
 				defaultRepoPath: defaultRepoPath,
 				repoPath: repoPath,

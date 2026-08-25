@@ -38,6 +38,6 @@ export class ManagedLanguageClient extends LanguageClient {
 				stopError === undefined ? 'client-stop-left-process-running' : 'client-stop-timeout-or-failure',
 			);
 		}
-		if (stopError !== undefined) throw stopError;
+		if (stopError !== undefined && this.controller.captureCurrentProcess() === serverProcess) throw stopError;
 	}
 }

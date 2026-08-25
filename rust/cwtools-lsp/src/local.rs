@@ -38,7 +38,7 @@ use cwtools_source::{DocumentStore, Position as SourcePosition, SourceId, TextCh
 use cwtools_workspace::{Overwrite, SnapshotLimits, SnapshotSource, compute_full_snapshot};
 use serde_json::{Value, json};
 
-const MAX_DOCUMENTS: usize = 64;
+const MAX_DOCUMENTS: usize = 4096;
 const MAX_DOCUMENT_CHARS: usize = 2_000_000;
 const MAX_RESULTS: usize = 512;
 const MAX_COMPLETIONS: usize = 128;
@@ -50,7 +50,7 @@ const MAX_REVERSE_REQUESTS: usize = 64;
 const MAX_RULE_DOCUMENTS: usize = 4096;
 const MAX_RULE_FILE_BYTES: usize = 2 * 1024 * 1024;
 const MAX_RULE_TOTAL_BYTES: usize = 64 * 1024 * 1024;
-const MAX_VANILLA_FILES: usize = 20_000;
+const MAX_VANILLA_FILES: usize = 50_000;
 const MAX_VANILLA_FILE_BYTES: usize = 8 * 1024 * 1024;
 const MAX_VANILLA_TOTAL_BYTES: usize = 512 * 1024 * 1024;
 const WRITE_COMMANDS: &[&str] = &[
@@ -252,6 +252,12 @@ impl LocalRouter {
             });
         }
         let refreshed = session.refresh_full().is_ok();
+        if refreshed && let Some(snapshot) = session.snapshot() {
+            let _ = session.save_cache(snapshot);
+        }
+        if !refreshed {
+            self.notifications.push(notification("window/logMessage", json!({"type":1,"message":"CWTools failed to build the combined vanilla and workspace semantic snapshot"})));
+        }
         self.vanilla_cache_status = if vanilla_count > 0 {
             format!("rebuilt_from_game:{vanilla_count}")
         } else {
@@ -671,6 +677,38 @@ impl LocalRouter {
         true
     }
 
+    fn refresh_open_document(&mut self, uri: &str) {
+        let Some(text) = self.document(uri).map(|document| document.text.clone()) else {
+            return;
+        };
+        let Some(session) = self.game_session.as_mut() else {
+            return;
+        };
+        let path = workspace_root_path(Some(uri)).unwrap_or_else(|| PathBuf::from(uri));
+        let logical_path = self
+            .workspace_root
+            .as_deref()
+            .and_then(|root| workspace_root_path(Some(root)))
+            .and_then(|root| {
+                path.strip_prefix(root)
+                    .ok()
+                    .map(|relative| relative.to_string_lossy().replace('\\', "/"))
+            })
+            .unwrap_or_else(|| uri.to_owned());
+        let source = SourceInput {
+            scope: "workspace".to_owned(),
+            path: path.to_string_lossy().into_owned(),
+            logical_path,
+            text,
+            overwrite: Overwrite::No,
+        };
+        let changed = source.path.clone();
+        if session.upsert_source(source).is_ok() {
+            let _ = session.refresh_incremental(&[changed]);
+            self.session_epoch = self.session_epoch.saturating_add(1);
+        }
+    }
+
     fn did_open(&mut self, params: Option<&Value>) {
         let Some(document) = params.and_then(|value| value.get("textDocument")) else {
             return;
@@ -684,7 +722,14 @@ impl LocalRouter {
             return;
         };
         if self.open_document(uri, language, version, text) {
-            self.rebuild_game_session();
+            let has_sources = self
+                .game_session
+                .as_ref()
+                .and_then(GameSession::snapshot)
+                .is_some_and(|snapshot| !snapshot.full.sources.is_empty());
+            if !has_sources {
+                self.rebuild_game_session();
+            }
             self.publish_diagnostics(uri);
         } else {
             self.publish_message(
@@ -745,7 +790,7 @@ impl LocalRouter {
             return;
         }
         self.semantic.remove(uri);
-        self.rebuild_game_session();
+        self.refresh_open_document(uri);
         self.publish_diagnostics(uri);
     }
 
@@ -1630,7 +1675,10 @@ impl LocalRouter {
     }
 
     fn workspace_sources(&self) -> Vec<SnapshotSource> {
-        self.sources
+        let mut sources =
+            discover_workspace_sources(self.workspace_root.as_deref()).unwrap_or_default();
+        let overlays = self
+            .sources
             .keys()
             .filter_map(|uri| {
                 let document = self.document(uri)?;
@@ -1643,10 +1691,35 @@ impl LocalRouter {
                 })
             })
             .take(MAX_DOCUMENTS)
-            .collect()
+            .collect::<Vec<_>>();
+        for overlay in overlays {
+            if let Some(existing) = sources
+                .iter_mut()
+                .find(|source| source.path == overlay.path)
+            {
+                *existing = overlay;
+            } else if sources.len() < MAX_DOCUMENTS {
+                sources.push(overlay);
+            }
+        }
+        sources.sort_by(|left, right| left.logical_path.cmp(&right.logical_path));
+        sources
     }
 
     fn validation_status(&self) -> Value {
+        if let Some(snapshot) = self.game_session.as_ref().and_then(GameSession::snapshot) {
+            return json!({
+                "ready": true, "epoch": self.session_epoch, "fresh": true, "pending": 0,
+                "sourceCount": snapshot.full.sources.len(),
+                "definitionCount": snapshot.full.definitions.len(),
+                "referenceCount": snapshot.full.references.len(),
+                "parseErrorCount": snapshot.full.parse_errors.len(),
+                "cacheFingerprint": snapshot.source_fingerprint.to_hex(),
+                "lastCacheStatus": self.vanilla_cache_status,
+                "vanillaCachePath": self.initialization.vanilla_cache_path,
+                "games": all_game_profiles().into_iter().map(|profile| profile.id.as_str()).collect::<Vec<_>>()
+            });
+        }
         let sources = self.workspace_sources();
         let fingerprint = fingerprint_sources(
             sources
@@ -2061,6 +2134,107 @@ impl LocalRouter {
         }
         locations
     }
+}
+
+fn workspace_root_path(uri: Option<&str>) -> Option<PathBuf> {
+    let uri = uri?;
+    let raw = uri
+        .strip_prefix("file:///")
+        .or_else(|| uri.strip_prefix("file://"))?;
+    let decoded = percent_decode(raw)?;
+    Some(PathBuf::from(
+        decoded.replace('/', std::path::MAIN_SEPARATOR_STR),
+    ))
+}
+
+fn percent_decode(value: &str) -> Option<String> {
+    let bytes = value.as_bytes();
+    let mut output = Vec::with_capacity(bytes.len());
+    let mut index = 0;
+    while index < bytes.len() {
+        if bytes[index] == b'%' {
+            let high = *bytes.get(index + 1)?;
+            let low = *bytes.get(index + 2)?;
+            output.push((hex(high)? << 4) | hex(low)?);
+            index += 3;
+        } else {
+            output.push(bytes[index]);
+            index += 1;
+        }
+    }
+    String::from_utf8(output).ok()
+}
+
+fn hex(value: u8) -> Option<u8> {
+    match value {
+        b'0'..=b'9' => Some(value - b'0'),
+        b'a'..=b'f' => Some(value - b'a' + 10),
+        b'A'..=b'F' => Some(value - b'A' + 10),
+        _ => None,
+    }
+}
+
+fn discover_workspace_sources(uri: Option<&str>) -> Result<Vec<SnapshotSource>, String> {
+    let Some(root) = workspace_root_path(uri) else {
+        return Ok(Vec::new());
+    };
+    if !root.is_dir() {
+        return Ok(Vec::new());
+    }
+    let mut pending = vec![root.clone()];
+    let mut files = Vec::new();
+    while let Some(directory) = pending.pop() {
+        let mut entries = fs::read_dir(&directory)
+            .map_err(|error| error.to_string())?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|error| error.to_string())?;
+        entries.sort_by_key(fs::DirEntry::path);
+        for entry in entries {
+            let path = entry.path();
+            let file_type = entry.file_type().map_err(|error| error.to_string())?;
+            if file_type.is_dir() {
+                if ![".git", ".cwtools", ".vscode", "node_modules"]
+                    .iter()
+                    .any(|name| entry.file_name() == *name)
+                {
+                    pending.push(path);
+                }
+            } else if file_type.is_file()
+                && path.extension().is_some_and(|extension| {
+                    ["txt", "gui", "gfx", "asset"]
+                        .iter()
+                        .any(|candidate| extension.eq_ignore_ascii_case(candidate))
+                })
+            {
+                files.push(path);
+            }
+        }
+        if files.len() > MAX_DOCUMENTS {
+            return Err(format!("workspace exceeds {MAX_DOCUMENTS} files"));
+        }
+    }
+    files.sort();
+    files
+        .into_iter()
+        .map(|path| {
+            let bytes = fs::read(&path).map_err(|error| error.to_string())?;
+            if bytes.len() > MAX_DOCUMENT_CHARS {
+                return Err(format!("workspace file too large: {}", path.display()));
+            }
+            let logical_path = path
+                .strip_prefix(&root)
+                .unwrap_or(&path)
+                .to_string_lossy()
+                .replace('\\', "/");
+            Ok(SnapshotSource {
+                scope: "workspace".to_owned(),
+                path: path.to_string_lossy().into_owned(),
+                logical_path,
+                text: String::from_utf8_lossy(&bytes).into_owned(),
+                overwrite: Overwrite::No,
+            })
+        })
+        .collect()
 }
 
 fn load_vanilla_sources(root: &Path, folders: &[String]) -> Result<Vec<SourceInput>, String> {

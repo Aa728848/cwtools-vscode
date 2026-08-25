@@ -1,5 +1,29 @@
 # Changelog
 
+## [2.15.3] - 2026-08-25
+
+### 新功能 / New Features
+- **[优化] Language Server 规则更新热替换与启动性能大幅优化（In-Place Rules Swap & Startup Optimization）**：
+  - 在 F# 服务端中重构规则重载流程（`GameLoader.fs` 与 `Program.fs`）：当规则更新（自动下载或本地切换）且已存在活跃的 Game Model 时，直接就地热替换规则定义（`game.ReplaceConfigRules` 及重载着色器 ABI 编目），避免了在服务启动及规则更新时重复完整解析和验证整个工作区所有文件的性能开销。
+  - 重构了着色器 ABI 编目重载机制（`reloadStellarisShaderRuleCatalogs`），在重置旧数据后安全加载最新 ABI 编目、审计与渲染器契约，若版本不匹配则严格 fail-closed。
+  - English: [Improvement] In-place rules swap and startup performance optimization in Language Server — refactored rule reloading in F# backend (`GameLoader.fs` and `Program.fs`) to hot-swap rule configs in place (`game.ReplaceConfigRules` and shader ABI catalogs) when an active game model exists, eliminating redundant full workspace re-parsing and re-validation on startup; hardened shader ABI catalog reload (`reloadStellarisShaderRuleCatalogs`) with strict fail-closed resets.
+
+- **[修复] AI 编排器子任务生命周期与质量门禁状态对齐（Orchestrator Quality Gate & Subtask Reconciliation）**：
+  - 新增父级自动修复通过后的挂起子任务状态对齐机制（`resolvePendingValidationResults`），向前端及事件流正确发射 `subtask_complete` 事件，确保 UI 状态严格一致。
+  - 优化质量门禁自动修复子代理（`quality_gate_autofix_*`）的动态文件范围（放宽硬编码的 `plannedFiles` 约束，支持修复级联生成的契约依赖文件）。
+  - 支持在修复子代理遇到阻塞需要父级决策（`needsClarification`）时立即停止冗余重试，向上透传阻塞原因与决策请求。
+  - 修复保留失败节点在父级修复成功后的状态恢复和 UI 阶段推进。
+  - English: [Fix] AI Orchestrator quality gate and subtask lifecycle reconciliation — added pending validation resolution (`resolvePendingValidationResults`) to emit `subtask_complete` events after parent validation succeeds; enabled dynamic repair scopes for quality-gate autofix sub-agents to handle dependent contract files; stopped redundant repair loops when child agents need parent clarification (`needsClarification`); fixed restored status handling for preserved failures.
+
+- **[优化] AI 工具执行策略阶段推进与多文件本地化写入鉴权加固（Runner Policy & Multi-File Localisation Authorization）**：
+  - 修复 `runnerPolicy.ts` 中的 `advanceToolStage`：当阶段化写入工具（如 `write_localisation`、`edit_file`）因参数或策略鉴权失败（`success: false`）时，保留在 `write` 阶段允许模型立即修复参数重试，而非错误地跳回 `validation` 阶段。
+  - 加固 `writeLocalisation` 多文件批量本地化事务的预授权检查：在任何目标文件鉴权失败（如未先读取触发 ReadTracker 拦截）时立即终止并保留原始错误信息，杜绝部分写入或错误静默。
+  - English: [Improvement] Runner policy tool stage advancement and multi-file localisation authorization — kept the tool stage in `write` on failed write attempts (`runnerPolicy.ts`) so the agent can repair arguments instead of falling back to validation prematurely; hardened pre-authorization in `writeLocalisation` multi-file transactions to fail closed and preserve error messages when any target fails ReadTracker checks.
+
+- **[优化] MCP 子模块同步（MCP Submodule Sync）**：
+  - 同步 `submodules/cwtools-mcp` 子模块指针至最新提交，保持外部工具契约最新。
+  - English: [Improvement] Synced `submodules/cwtools-mcp` pointer to the latest commit.
+
 ## [2.15.2] - 2026-08-24
 
 ### 新功能 / New Features

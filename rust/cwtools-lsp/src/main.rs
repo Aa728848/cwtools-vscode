@@ -3,6 +3,7 @@
 use std::io::{self, BufReader, Write};
 use std::sync::mpsc;
 use std::thread;
+use std::time::Duration;
 
 use cwtools_lsp::Router;
 use cwtools_protocol::Message;
@@ -55,7 +56,28 @@ fn run_stdio() -> i32 {
         }
     });
 
-    while let Ok(incoming) = receiver.recv() {
+    loop {
+        let incoming = match receiver.recv_timeout(Duration::from_millis(100)) {
+            Ok(incoming) => incoming,
+            Err(mpsc::RecvTimeoutError::Timeout) => {
+                router.poll_background_build();
+                for outgoing in router
+                    .drain_notifications()
+                    .into_iter()
+                    .chain(router.drain_outgoing())
+                {
+                    if let Err(error) = write_message(&mut output, &outgoing, limits) {
+                        eprintln!("Transport write failure: {error}");
+                        return 1;
+                    }
+                }
+                if router.is_exited() {
+                    return 0;
+                }
+                continue;
+            }
+            Err(mpsc::RecvTimeoutError::Disconnected) => break,
+        };
         let message = match incoming {
             Ok(message) => message,
             Err(error) => {

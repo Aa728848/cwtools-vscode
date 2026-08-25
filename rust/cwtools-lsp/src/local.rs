@@ -284,6 +284,11 @@ impl LocalRouter {
 
     /// Announces readiness and resets client progress indicators after initialize.
     pub fn notify_server_ready(&mut self) {
+        let instance_id = std::env::var("CWTOOLS_SERVER_INSTANCE_ID").ok();
+        self.notifications.push(notification(
+            "window/logMessage",
+            json!({"type":3,"message":format!("CWTools Rust server pid={} instance={}", std::process::id(), instance_id.as_deref().unwrap_or("unset"))}),
+        ));
         self.notifications.push(notification(
             "loadingBar",
             json!({"enable": false, "value": ""}),
@@ -1472,7 +1477,11 @@ impl LocalRouter {
         {
             json!({"mode":"replace","differences":[],"complete":true})
         } else {
-            return Some(error_response(id?, -32_601, "Command is declared but has no Rust handler"));
+            return Some(error_response(
+                id?,
+                -32_601,
+                "Command is declared but has no Rust handler",
+            ));
         };
         Some(response(id?, result))
     }

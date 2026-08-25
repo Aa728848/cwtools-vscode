@@ -157,6 +157,11 @@ impl Router {
         self.lifecycle == Lifecycle::Exited
     }
 
+    #[must_use]
+    pub fn is_shutdown(&self) -> bool {
+        matches!(self.lifecycle, Lifecycle::Shutdown | Lifecycle::Exited)
+    }
+
     fn configure_initialize(&mut self, params: Option<&Value>) {
         let root = bounded_string(params.and_then(|value| value.get("rootUri")))
             .or_else(|| bounded_string(params.and_then(|value| value.get("rootPath"))));

@@ -395,7 +395,11 @@ export function advanceToolStage(
         return result.success && !result.hasValidationErrors ? 'finalize' : 'write';
     }
     if (mode === 'build' && STAGED_WRITE_TOOLS.has(toolName)) {
-        return result.success && !result.hasValidationErrors ? 'finalize' : 'validation';
+        // A transport/policy/argument failure has not produced a candidate to
+        // validate. Keep the write surface available so the model can repair the
+        // invocation (notably write_localisation, the only legal YML writer).
+        if (!result.success) return 'write';
+        return result.hasValidationErrors ? 'validation' : 'finalize';
     }
     switch (normalizedStage) {
         case 'discovery':

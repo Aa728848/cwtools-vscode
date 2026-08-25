@@ -279,7 +279,9 @@ describe('runnerPolicy', () => {
     it('advances build stages only after successful validation and write steps', () => {
         expect(advanceToolStage('build', 'discovery', 'read_file', { success: true })).to.equal('validation');
         expect(advanceToolStage('build', 'validation', 'parse_pdx_fragment', { success: true })).to.equal('write');
-        expect(advanceToolStage('build', 'write', 'edit_file', { success: false })).to.equal('validation');
+        expect(advanceToolStage('build', 'write', 'edit_file', { success: false })).to.equal('write');
+        expect(advanceToolStage('build', 'write', 'write_localisation', { success: false })).to.equal('write');
+        expect(advanceToolStage('build', 'write', 'edit_file', { success: true, hasValidationErrors: true })).to.equal('validation');
         expect(advanceToolStage('build', 'write', 'edit_file', { success: true })).to.equal('finalize');
         expect(advanceToolStage('build', 'finalize', 'get_diagnostics', { success: true, hasValidationErrors: true })).to.equal('validation');
     });

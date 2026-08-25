@@ -48,6 +48,11 @@ try
         failwith "Automatic startup without a cached checkout should prefer bundled rules."
     assertSelection "bundled" (Some cache) false None (Some bundled) firstRunStartupPreference
 
+    if shouldReloadWorkspaceAfterRulesUpdate true then
+        failwith "A live game model should hot-swap updated rules instead of reloading the workspace."
+    if not (shouldReloadWorkspaceAfterRulesUpdate false) then
+        failwith "Missing game models must still trigger a full workspace load after rules arrive."
+
     Directory.CreateDirectory(cache) |> ignore
     File.WriteAllText(Path.Combine(cache, "failed-update.log"), "clone failed")
     markGitCheckout cache

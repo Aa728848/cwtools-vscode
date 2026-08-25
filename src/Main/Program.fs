@@ -5826,11 +5826,30 @@ type Server(client: ILanguageClient) =
 
                     if finalSource <> previousSource || remoteRulesChanged then
                         semanticCatalogCache <- None
-                        bumpGameModelEpoch ()
-                        bumpRulesModelEpoch ()
-                        bumpTypesModelEpoch ()
-                        bumpLocalisationModelEpoch ()
-                        processWorkspace rootUri
+                        match gameObj with
+                        | Some game when not (shouldReloadWorkspaceAfterRulesUpdate true) ->
+                            // The project model is already loaded. Swap only the
+                            // updated rule set and let the normal global refresh
+                            // pipeline revalidate it; rebuilding the entire workspace
+                            // here made startup load and validate every file twice.
+                            let configs =
+                                getConfigFiles cachePath useManualRules manualRulesFolder bundledRulesPath preferBundledRules
+                            game.ReplaceConfigRules configs
+                            if activeGame = STL then
+                                reloadStellarisShaderRuleCatalogs configs
+                            bumpGameModelEpoch ()
+                            bumpRulesModelEpoch ()
+                            bumpTypesModelEpoch ()
+                            bumpLocalisationModelEpoch ()
+                            fileDiagnosticStates.Keys
+                            |> Seq.toArray
+                            |> Array.iter markFilePendingGlobalRevalidation
+                            needsTypeRefresh <- true
+                            lastTypeRefreshRequestAt <- DateTime.UtcNow
+                        | _ ->
+                            // No live model exists (for example an incomplete first
+                            // startup), so a full workspace load is still required.
+                            processWorkspace rootUri
             finally
                 exitGameStateWriteLock ()
 

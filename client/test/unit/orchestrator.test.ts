@@ -1836,6 +1836,32 @@ describe('Orchestrator quality propagation', () => {
         expect(counts()).to.deep.equal({ reviewCalls: 2, fixCalls: 1 });
     });
 
+    it('reconciles an original pending child after parent auto-fix passes validation', async () => {
+        const { TaskGraphEngine } = require('../../extension/ai/orchestrator/taskGraphEngine') as typeof import('../../extension/ai/orchestrator/taskGraphEngine');
+        const { orchestrator } = makeOrchestrator(1, 2);
+        (orchestrator as any).executor.executeGraph = async () => {
+            const result = executionResult();
+            const builderResult = result.agentResults.get('builder')!;
+            result.agentResults.set('builder', { ...builderResult, validationPending: true } as typeof builderResult & { validationPending: true });
+            return result;
+        };
+        const graph = TaskGraphEngine.createGraph('pending child reconciliation');
+        const builder = TaskGraphEngine.addNode(graph, 'builder', 'build', 'build', { plannedFiles: ['events/test.txt'] });
+        builder.status = 'done';
+        const steps: any[] = [];
+
+        const result = await orchestrator.execute(graph, {
+            abortSignal: new AbortController().signal,
+            onStep: (step: any) => steps.push(step),
+        });
+
+        expect(result.success).to.equal(true);
+        expect(result.agentResults.get('builder')?.validationPending).to.equal(undefined);
+        expect(steps.some(step => step.type === 'subtask_complete'
+            && step.agentId === 'builder'
+            && step.subtaskStatus === 'completed')).to.equal(true);
+    });
+
     it('routes preserved failed files through parent quality-gate repair', async () => {
         const { Orchestrator } = require('../../extension/ai/orchestrator/orchestrator') as typeof import('../../extension/ai/orchestrator/orchestrator');
         const { TaskGraphEngine } = require('../../extension/ai/orchestrator/taskGraphEngine') as typeof import('../../extension/ai/orchestrator/taskGraphEngine');
@@ -1875,7 +1901,7 @@ describe('Orchestrator quality propagation', () => {
         (orchestrator as any).executeSubAgent = async (node: any) => {
             fixCalls++;
             expect(node.agentType).to.equal('utility');
-            expect(node.plannedFiles).to.deep.equal(['package.json']);
+            expect(node.plannedFiles).to.equal(undefined);
             return {
                 nodeId: node.id,
                 success: true,
@@ -1886,9 +1912,11 @@ describe('Orchestrator quality propagation', () => {
             };
         };
 
+        const steps: any[] = [];
         const result = await orchestrator.execute(graph, {
             abortSignal: new AbortController().signal,
             domain: 'general',
+            onStep: (step: any) => steps.push(step),
         });
 
         expect(reviewCalls).to.equal(2);
@@ -1899,6 +1927,9 @@ describe('Orchestrator quality propagation', () => {
         expect(result.failedNodes).to.deep.equal([]);
         expect(result.agentResults.get('utility')?.success).to.equal(true);
         expect(graph.nodes.get('utility')?.status).to.equal('done');
+        expect(steps.some(step => step.type === 'subtask_complete'
+            && step.agentId === 'utility'
+            && step.subtaskStatus === 'completed')).to.equal(true);
     });
 
     it('does not create the automatic localisation child when the user retained localisation', async () => {
@@ -1946,6 +1977,37 @@ describe('Orchestrator quality propagation', () => {
 
         expect(result.success).to.equal(true);
         expect(executedNodes).to.not.include('loc_sweep');
+    });
+
+    it('stops quality re-review when the repair child needs parent clarification', async () => {
+        const { TaskGraphEngine } = require('../../extension/ai/orchestrator/taskGraphEngine') as typeof import('../../extension/ai/orchestrator/taskGraphEngine');
+        const { orchestrator } = makeOrchestrator(3, Number.POSITIVE_INFINITY);
+        let reviewCalls = 0;
+        (orchestrator as any).qualityGate.reviewOutput = async () => {
+            reviewCalls++;
+            return gateResult(false);
+        };
+        (orchestrator as any).executeSubAgent = async (node: any) => ({
+            nodeId: node.id,
+            success: false,
+            output: 'BLOCKED_FOR_ORCHESTRATOR: expand the repair scope',
+            error: 'parent decision required',
+            writtenFiles: [],
+            tokenUsage: { total: 0, input: 0, output: 0, estimatedCostCny: 0 },
+            stepCount: 1,
+            needsClarification: true,
+            clarification: 'expand the repair scope',
+        });
+        const graph = TaskGraphEngine.createGraph('quality clarification');
+        const builder = TaskGraphEngine.addNode(graph, 'builder', 'build', 'build', { plannedFiles: ['events/test.txt'] });
+        builder.status = 'done';
+
+        const result = await orchestrator.execute(graph, { abortSignal: new AbortController().signal });
+
+        expect(reviewCalls).to.equal(1);
+        expect(result.success).to.equal(false);
+        expect(result.agentResults.get('quality_gate_autofix_1')?.needsClarification).to.equal(true);
+        expect(result.failedNodes).to.include('quality_gate_autofix_1');
     });
 
     it('propagates persistent quality-gate failure into the orchestrator result', async () => {

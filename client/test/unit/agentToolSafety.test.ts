@@ -1032,6 +1032,36 @@ describe('agent tool file path safety', () => {
         }
     });
 
+    it('preserves multi-file localisation authorization failures and writes nothing', async () => {
+        const handler = createFileHandler();
+        const english = path.join(workspaceRoot, 'localisation', 'english', 'auth_l_english.yml');
+        const chinese = path.join(workspaceRoot, 'localisation', 'simp_chinese', 'auth_l_simp_chinese.yml');
+        fs.mkdirSync(path.dirname(english), { recursive: true });
+        fs.mkdirSync(path.dirname(chinese), { recursive: true });
+        fs.writeFileSync(english, '\uFEFFl_english:\n key:0 \"Old\"\n', 'utf8');
+        fs.writeFileSync(chinese, '\uFEFFl_simp_chinese:\n key:0 \"Old Chinese\"\n', 'utf8');
+        const context = makeContext();
+        context.agentRunner = {
+            readTracker: {
+                canWrite: sinon.stub().returns({ ok: false, reason: 'file was not read' }),
+                markWritten: sinon.spy(),
+            },
+        };
+
+        const result = await handler.writeLocalisation({
+            filePath: english,
+            language: 'l_english',
+            languages: ['l_english', 'l_simp_chinese'],
+            entries: [{ key: 'key', value: 'New' }],
+        }, context);
+
+        expect(result.success).to.equal(false);
+        expect(result.message).to.include('authorization failed for l_english');
+        expect(result.message).to.include('ReadTracker Blocked');
+        expect(fs.readFileSync(english, 'utf8')).to.include('Old');
+        expect(fs.readFileSync(chinese, 'utf8')).to.include('Old Chinese');
+    });
+
     it('rejects a multi-file transaction when the primary file is outside localisation folders', async () => {
         const handler = createFileHandler();
         const result = await handler.writeLocalisation({

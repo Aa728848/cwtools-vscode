@@ -1701,8 +1701,14 @@ export class FileToolHandler {
                 try {
                     const authorized = await this.resolveAndAuthorizeWrite(target.filePath, 'write_localisation', context);
                     targets.push({ ...target, filePath: authorized });
-                } catch {
-                    targets.push(target);
+                } catch (error) {
+                    // Authorization failures (read-before-write, scope, approval)
+                    // are not path-shape failures. Preserve the real actionable
+                    // reason and abort before snapshots or writes begin.
+                    return {
+                        success: false,
+                        message: `write_localisation multi-file transaction authorization failed for ${target.languageTag}: ${error instanceof Error ? error.message : String(error)}. No files were written.`,
+                    };
                 }
             }
             const invalid = targets.filter(target => this.validateLocalisationTarget(target.filePath) !== null);

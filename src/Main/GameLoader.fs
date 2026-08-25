@@ -187,6 +187,10 @@ let shouldPreferBundledRulesAfterRemoteUpdate useManualRules remoteUpdateSucceed
     not useManualRules
     && not remoteUpdateSucceeded
     && not (hasUsableRemoteRulesCache cachePath)
+/// Updated rule files can be applied to an existing game model in place. A
+/// full workspace load is needed only when startup has no live model yet.
+let shouldReloadWorkspaceAfterRulesUpdate hasLiveGameModel =
+    not hasLiveGameModel
 
 let getFolderList (filename: string, filetext: string) =
     if Path.GetFileName filename = "folders.cwt" then
@@ -464,6 +468,31 @@ let loadVIC2 serverSettings =
     let game = CWTools.Games.VIC2.VIC2Game(vic2settings)
     game
 
+let reloadStellarisShaderRuleCatalogs (configs: (string * string) list) =
+    // Reset first so missing, malformed, or version-mismatched replacement
+    // evidence fails closed instead of retaining data from the previous rules.
+    CWTools.Games.PdxShaderRuntime.resetShaderAbiCatalog ()
+    CWTools.Games.PdxShaderRuntime.resetShaderAbiAudit ()
+    CWTools.Games.PdxShaderRuntime.resetSpriteRendererContracts ()
+
+    configs
+    |> List.tryPick (fun (path, _) ->
+        let normalized = path.Replace('\\', '/')
+        let marker = normalized.LastIndexOf("/config/", StringComparison.Ordinal)
+        if marker >= 0 then Some(normalized.Substring(0, marker + "/config".Length)) else None)
+    |> Option.iter (fun configDir ->
+        let catalogPath = System.IO.Path.Combine(configDir, "shader", "abi-catalog.json")
+        if System.IO.File.Exists catalogPath then
+            CWTools.Games.PdxShaderRuntime.loadShaderAbiCatalog stlGameVersion catalogPath
+
+        let abiAuditPath = System.IO.Path.Combine(configDir, "shader", "abi-audit.json")
+        if System.IO.File.Exists abiAuditPath then
+            CWTools.Games.PdxShaderRuntime.loadShaderAbiAudit stlGameVersion abiAuditPath
+
+        let rendererContractsPath = System.IO.Path.Combine(configDir, "shader", "renderer-contracts.json")
+        if System.IO.File.Exists rendererContractsPath then
+            CWTools.Games.PdxShaderRuntime.loadSpriteRendererContracts stlGameVersion rendererContractsPath)
+
 let loadSTL serverSettings =
     stlGameVersion <- None
     let cached, cachedFiles =
@@ -507,30 +536,9 @@ let loadSTL serverSettings =
         CWTools.Games.PdxShaderFeatures.loadVanillaFxSources vp
     | None -> ()
 
-    // Load version-bound shader ABI evidence shipped with the Stellaris rules.
     // launcher-settings.json supplies the active game version; missing/mismatched
-    // versions fail closed and cannot classify Effects.
-    CWTools.Games.PdxShaderRuntime.resetShaderAbiCatalog ()
-    CWTools.Games.PdxShaderRuntime.resetShaderAbiAudit ()
-    CWTools.Games.PdxShaderRuntime.resetSpriteRendererContracts ()
-
-    configs
-    |> List.tryPick (fun (path, _) ->
-        let normalized = path.Replace('\\', '/')
-        let marker = normalized.LastIndexOf("/config/", StringComparison.Ordinal)
-        if marker >= 0 then Some(normalized.Substring(0, marker + "/config".Length)) else None)
-    |> Option.iter (fun configDir ->
-        let catalogPath = System.IO.Path.Combine(configDir, "shader", "abi-catalog.json")
-        if System.IO.File.Exists catalogPath then
-            CWTools.Games.PdxShaderRuntime.loadShaderAbiCatalog stlGameVersion catalogPath
-
-        let abiAuditPath = System.IO.Path.Combine(configDir, "shader", "abi-audit.json")
-        if System.IO.File.Exists abiAuditPath then
-            CWTools.Games.PdxShaderRuntime.loadShaderAbiAudit stlGameVersion abiAuditPath
-
-        let rendererContractsPath = System.IO.Path.Combine(configDir, "shader", "renderer-contracts.json")
-        if System.IO.File.Exists rendererContractsPath then
-            CWTools.Games.PdxShaderRuntime.loadSpriteRendererContracts stlGameVersion rendererContractsPath)
+    // replacement evidence fails closed inside the shared reload helper.
+    reloadStellarisShaderRuleCatalogs configs
 
     game
 

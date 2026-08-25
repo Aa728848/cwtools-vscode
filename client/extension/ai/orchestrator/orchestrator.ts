@@ -387,7 +387,11 @@ export class Orchestrator {
                             id: `quality_gate_autofix_${fixCycle + 1}`,
                             agentType: paradoxWorkflow ? 'build' : 'utility',
                             prompt: fixPrompt,
-                            plannedFiles: [...new Set(allWrittenFiles)],
+                            // Quality review may identify a dependent contract file that
+                            // was not written by the original children. Leave this repair
+                            // scope dynamic; every actual target still passes workspace,
+                            // user-ownership, policy, and per-file write safety gates.
+                            plannedFiles: undefined,
                             dependencies: [],
                             priority: 'critical',
                             status: 'pending',
@@ -419,6 +423,17 @@ export class Orchestrator {
                             }
                             emitStep({ type: 'error', content: ORCHESTRATOR_MSG.AUTOFIX_FAIL, timestamp: Date.now() });
                         }
+                        if (fixResult.needsClarification) {
+                            // Synthetic repair children are outside the original graph,
+                            // so retain their blocker explicitly or dispatch_agents would
+                            // omit it and the main Agent could never route the follow-up.
+                            result.agentResults.set(fixNode.id, fixResult);
+                            if (!result.failedNodes.includes(fixNode.id)) result.failedNodes.push(fixNode.id);
+                            // A parent decision is required before another deterministic
+                            // review can prove anything new. Stop this repair wave instead
+                            // of reloading/revalidating the unchanged project up to three times.
+                            break;
+                        }
                         reviewResult = await this.qualityGate.reviewOutput(
                             this.agentRunner,
                             allWrittenFiles,
@@ -446,8 +461,11 @@ export class Orchestrator {
                         );
                     }
                 }
-                if (reviewResult.passed && hasPreservedFailures) {
-                    this.resolvePreservedFailureResults(taskGraph, result, preservedFailureResults, emitStep);
+                if (reviewResult.passed) {
+                    this.resolvePendingValidationResults(result, emitStep);
+                    if (hasPreservedFailures) {
+                        this.resolvePreservedFailureResults(taskGraph, result, preservedFailureResults, emitStep);
+                    }
                 }
                 result.qualityGate = reviewResult;
                 this.blackboard.write(
@@ -509,6 +527,26 @@ export class Orchestrator {
             .sort((left, right) => left.nodeId.localeCompare(right.nodeId));
     }
 
+    private resolvePendingValidationResults(
+        result: OrchestratorResult,
+        onStep: (step: AgentStep) => void,
+    ): void {
+        for (const [nodeId, agentResult] of result.agentResults) {
+            if (!agentResult.validationPending) continue;
+            result.agentResults.set(nodeId, {
+                ...agentResult,
+                validationPending: undefined,
+            });
+            onStep({
+                type: 'subtask_complete',
+                agentId: nodeId,
+                content: aiText('Complete after parent validation', '父级验证后完成'),
+                subtaskStatus: 'completed',
+                timestamp: Date.now(),
+            });
+        }
+    }
+
     private formatPreservedFailureReport(results: readonly SubAgentResult[]): string {
         if (results.length === 0) return '';
         const lines = [
@@ -549,6 +587,13 @@ export class Orchestrator {
                 });
             }
             this.graphEngine.markComplete(graph, nodeId, note);
+            onStep({
+                type: 'subtask_complete',
+                agentId: nodeId,
+                content: aiText('Complete after parent repair', '父级修复后完成'),
+                subtaskStatus: 'completed',
+                timestamp: Date.now(),
+            });
         }
 
         result.failedNodes = result.failedNodes.filter(nodeId => !repairedNodeIds.has(nodeId));

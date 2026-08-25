@@ -171,6 +171,8 @@ pub struct LocalRouter {
     build_stage: String,
     build_percentage: u32,
     build_started: Option<std::time::Instant>,
+    build_stage_started: Option<std::time::Instant>,
+    build_pace: (u32, u32, u32),
     session_epoch: u64,
     notifications: Vec<Message>,
     reverse_requests: Vec<ReverseRequest>,
@@ -207,6 +209,8 @@ impl LocalRouter {
         "CWTools: 正在生成/载入 stl.cwb 并索引项目...".clone_into(&mut self.build_stage);
         self.build_percentage = 10;
         self.build_started = Some(std::time::Instant::now());
+        self.build_stage_started = Some(std::time::Instant::now());
+        self.build_pace = (10, 19, 5);
         let initialization = self.initialization.clone();
         let vanilla_sources = self.vanilla_sources.clone();
         let project = self
@@ -242,7 +246,20 @@ impl LocalRouter {
         if let Some(receiver) = self.build_progress.as_mut() {
             while let Ok(step) = receiver.try_recv() {
                 if step == "tick" {
-                    self.build_percentage = self.build_percentage.saturating_add(1).min(99);
+                    // Pace the percentage against the expected duration of the
+                    // current stage so the bar tracks real progress instead of
+                    // filling early and then sitting at 99%.
+                    if let Some(stage_started) = self.build_stage_started {
+                        let elapsed = stage_started.elapsed().as_secs_f64();
+                        let (from, to, expected) = self.build_pace;
+                        let fraction = (elapsed / f64::from(expected.max(1))).clamp(0.0, 1.0);
+                        let paced = (f64::from(from)
+                            + fraction * f64::from(to.saturating_sub(from)))
+                            as u32;
+                        self.build_percentage = self.build_percentage.max(paced).min(99);
+                    } else {
+                        self.build_percentage = self.build_percentage.saturating_add(1).min(99);
+                    }
                     let mut value = self.build_stage.clone();
                     if let Some(started) = self.build_started {
                         let elapsed = started.elapsed().as_secs();
@@ -279,6 +296,16 @@ impl LocalRouter {
                     _ => ("CWTools indexing...".to_owned(), 50),
                 };
                 value.clone_into(&mut self.build_stage);
+                self.build_stage_started = Some(std::time::Instant::now());
+                self.build_pace = match step.as_str() {
+                    "rules" => (20, 29, 10),
+                    step_name if step_name == "vanilla" || step_name.starts_with("vanilla:") => {
+                        (30, 69, 15)
+                    }
+                    "project" => (70, 99, 300),
+                    "merged" | "finalize" => (90, 99, 8),
+                    _ => (50, 99, 300),
+                };
                 self.build_percentage = self.build_percentage.max(percentage);
                 self.notifications.push(notification(
                     "loadingBar",
@@ -320,6 +347,19 @@ impl LocalRouter {
                 self.notifications.push(notification(
                     "cwtools/validationComplete",
                     json!({"epoch":self.session_epoch,"fresh":true,"status":"fresh"}),
+                ));
+                self.notifications.push(notification(
+                    "vanillaCacheGenerated",
+                    json!({
+                        "gameId": self.selected_game_id().as_str(),
+                        "message": if cache_hit {
+                            "CWTools 原版语义数据库已载入"
+                        } else {
+                            "CWTools 原版语义数据库已生成"
+                        },
+                        "auto": true,
+                        "result": {"ok": true, "cached": cache_hit},
+                    }),
                 ));
             }
             Ok(Err(error)) => self.notifications.push(notification(
@@ -883,6 +923,19 @@ impl LocalRouter {
         true
     }
 
+    fn logical_path_for_uri(&self, uri: &str) -> String {
+        let path = workspace_root_path(Some(uri)).unwrap_or_else(|| PathBuf::from(uri));
+        self.workspace_root
+            .as_deref()
+            .and_then(|root| workspace_root_path(Some(root)))
+            .and_then(|root| {
+                path.strip_prefix(root)
+                    .ok()
+                    .map(|relative| relative.to_string_lossy().replace('\\', "/"))
+            })
+            .unwrap_or_else(|| uri.to_owned())
+    }
+
     fn refresh_open_document(&mut self, uri: &str) {
         let Some(text) = self.document(uri).map(|document| document.text.clone()) else {
             return;
@@ -1058,7 +1111,7 @@ impl LocalRouter {
         let Some(document) = self.document(uri) else {
             return;
         };
-        let diagnostics = match parse(&document.text) {
+        let mut diagnostics: Vec<Value> = match parse(&document.text) {
             Ok(_) => Vec::new(),
             Err(errors) => errors
                 .into_iter()
@@ -1078,6 +1131,50 @@ impl LocalRouter {
                 })
                 .collect(),
         };
+        // Publish rule diagnostics from the merged snapshot for this document so
+        // validation reflects CWT rules, not only syntax errors.
+        if let Some(snapshot) = self.game_session.as_ref().and_then(GameSession::snapshot) {
+            let logical = self.logical_path_for_uri(uri);
+            let disk = workspace_root_path(Some(uri))
+                .map(|path| path.to_string_lossy().replace('\\', "/"))
+                .unwrap_or_else(|| uri.to_owned());
+            for item in snapshot.full.diagnostics.iter().filter(|item| {
+                item.logical_path.eq_ignore_ascii_case(&logical)
+                    || item.path.eq_ignore_ascii_case(&disk)
+            }) {
+                if diagnostics.len() >= MAX_RESULTS {
+                    break;
+                }
+                let range = byte_range_to_lsp(&snapshot.full.sources, &item.path, item.range);
+                let start = range
+                    .get("start")
+                    .cloned()
+                    .unwrap_or_else(|| json!({"line": 0, "character": 0}));
+                let end = range
+                    .get("end")
+                    .cloned()
+                    .unwrap_or_else(|| json!({"line": 0, "character": 1}));
+                let line = start
+                    .get("line")
+                    .and_then(Value::as_u64)
+                    .and_then(|value| u32::try_from(value).ok())
+                    .unwrap_or(0);
+                let character = start
+                    .get("character")
+                    .and_then(Value::as_u64)
+                    .and_then(|value| u32::try_from(value).ok())
+                    .unwrap_or(0);
+                let end_character = end
+                    .get("character")
+                    .and_then(Value::as_u64)
+                    .and_then(|value| u32::try_from(value).ok())
+                    .unwrap_or(character.saturating_add(1));
+                let message = format!("{}: {}", item.message_key, item.args.join(", "));
+                let mut value = diagnostic(line, character, end_character, 1, &message, &item.code);
+                value["messageKey"] = json!(item.message_key);
+                diagnostics.push(value);
+            }
+        }
         self.publish_message(uri, diagnostics);
     }
 

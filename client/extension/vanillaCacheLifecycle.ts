@@ -3,6 +3,8 @@ import { getKnownProfileByLanguageId } from './gameProfiles';
 export interface VanillaCacheGeneratedParams {
 	gameId: string;
 	message: string;
+	/** Background completion: refresh symbols without prompting or reloading. */
+	auto?: boolean;
 }
 
 export interface VanillaCacheGeneratedDependencies {
@@ -23,7 +25,7 @@ export function parseVanillaCacheGeneratedParams(value: unknown): VanillaCacheGe
 	const gameId = record.gameId.trim().toLowerCase();
 	const message = record.message.trim();
 	if (!gameId || !message || !getKnownProfileByLanguageId(gameId)) return undefined;
-	return { gameId, message };
+	return { gameId, message, auto: record.auto === true };
 }
 
 /** Rebuild the matching vanilla symbol database before honoring the LSP reload request. */
@@ -46,6 +48,10 @@ export async function handleVanillaCacheGenerated(
 		dependencies.warn(`Failed to rebuild vanilla symbol cache for ${params.gameId}`, error);
 	}
 
+	if (params.auto) {
+		dependencies.debug(`Embedded vanilla symbols for ${params.gameId} after background build`);
+		return result;
+	}
 	void Promise.resolve(dependencies.showInformationMessage(params.message)).catch(error => {
 		dependencies.warn('Failed to show the vanilla cache completion message', error);
 	});

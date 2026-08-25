@@ -173,6 +173,7 @@ pub struct LocalRouter {
     build_started: Option<std::time::Instant>,
     build_stage_started: Option<std::time::Instant>,
     build_pace: (u32, u32, u32),
+    deferred_exports: Option<std::sync::mpsc::Receiver<(RequestId, Value)>>,
     session_epoch: u64,
     notifications: Vec<Message>,
     reverse_requests: Vec<ReverseRequest>,
@@ -243,6 +244,11 @@ impl LocalRouter {
     }
 
     pub(crate) fn poll_background_build(&mut self) {
+        if let Some(receiver) = self.deferred_exports.as_mut() {
+            while let Ok((id, result)) = receiver.try_recv() {
+                self.notifications.push(response(id, result));
+            }
+        }
         if let Some(receiver) = self.build_progress.as_mut() {
             while let Ok(step) = receiver.try_recv() {
                 if step == "tick" {
@@ -921,6 +927,36 @@ impl LocalRouter {
             },
         );
         true
+    }
+
+    fn spawn_export_task(&mut self, id: RequestId, path: std::path::PathBuf) {
+        if self.deferred_exports.is_some() {
+            self.notifications
+                .push(response(id, json!({"ok":false,"status":"error","schemaVersion":cwtools_semantic::KNOWLEDGE_SCHEMA_VERSION,"error":"an export is already running"})));
+            return;
+        }
+        let texts = self
+            .workspace_sources()
+            .into_iter()
+            .map(|source| (source.path, source.text))
+            .collect::<Vec<_>>();
+        let (sender, receiver) = std::sync::mpsc::channel::<(RequestId, Value)>();
+        self.deferred_exports = Some(receiver);
+        self.notifications.push(notification(
+            "loadingBar",
+            json!({"enable": true, "value": "CWTools: 正在后台重建项目知识数据库...", "percentage": 5}),
+        ));
+        std::thread::spawn(move || {
+            let result = match cwtools_semantic::export_project_knowledge(&path, &texts) {
+                Ok(manifest) => {
+                    json!({"ok":true,"status":"fresh","schemaVersion":cwtools_semantic::KNOWLEDGE_SCHEMA_VERSION,"manifest":manifest})
+                }
+                Err(error) => {
+                    json!({"ok":false,"status":"error","schemaVersion":cwtools_semantic::KNOWLEDGE_SCHEMA_VERSION,"error":error})
+                }
+            };
+            let _ = sender.send((id, result));
+        });
     }
 
     fn logical_path_for_uri(&self, uri: &str) -> String {
@@ -1925,19 +1961,12 @@ impl LocalRouter {
             } else {
                 match path {
                     Some(path) => {
-                        let texts = self
-                            .workspace_sources()
-                            .into_iter()
-                            .map(|source| (source.path, source.text))
-                            .collect::<Vec<_>>();
-                        match cwtools_semantic::export_project_knowledge(&path, &texts) {
-                            Ok(manifest) => {
-                                json!({"ok":true,"status":"fresh","schemaVersion":cwtools_semantic::KNOWLEDGE_SCHEMA_VERSION,"manifest":manifest})
-                            }
-                            Err(error) => {
-                                json!({"ok":false,"status":"error","schemaVersion":cwtools_semantic::KNOWLEDGE_SCHEMA_VERSION,"error":error})
-                            }
-                        }
+                        // Run the export off the request thread so editor
+                        // requests keep flowing while the knowledge database is
+                        // rebuilt; the response is delivered when done.
+                        let id = id?;
+                        self.spawn_export_task(id, path);
+                        return None;
                     }
                     None => {
                         json!({"ok":false,"status":"error","schemaVersion":cwtools_semantic::KNOWLEDGE_SCHEMA_VERSION,"error":"databasePath is required"})

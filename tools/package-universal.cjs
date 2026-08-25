@@ -44,7 +44,7 @@ function main() {
     run(process.platform === 'win32' ? 'npx.cmd' : 'npx', ['@vscode/vsce', 'package', '--out', expectedName], { cwd: RELEASE });
   } finally {
     fs.rmSync(path.join(RELEASE, 'node_modules'), { recursive: true, force: true });
-    fs.rmSync(path.join(RELEASE, 'package-lock.json'), { force: true });
+    if (!fs.existsSync(path.join(RELEASE, 'package-lock.json'))) throw new Error('release package-lock.json was unexpectedly removed');
   }
   const vsix = path.join(RELEASE, expectedName); requireFile(vsix, 'versioned VSIX'); const candidates = fs.readdirSync(RELEASE).filter(name => name.endsWith('.vsix')); if (candidates.length !== 1 || candidates[0] !== expectedName) throw new Error('Expected exactly one deterministic VSIX: ' + expectedName);
   run(process.execPath, [path.join('tools', 'check-vsix.js'), '--vsix', vsix, '--source-sha', sourceSha]); const digest = sha256(fs.readFileSync(vsix)); fs.writeFileSync(vsix + '.sha256', digest + '  ' + expectedName + '\n'); console.log('Universal VSIX ready: ' + vsix + ' sha256=' + digest);

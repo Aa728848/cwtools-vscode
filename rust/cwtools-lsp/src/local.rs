@@ -182,9 +182,14 @@ impl LocalRouter {
             game_id: self.selected_game_id(),
             cache_path: self
                 .initialization
-                .rules_cache
+                .vanilla_cache_path
                 .as_ref()
                 .map(std::path::PathBuf::from),
+            cache_limits: cwtools_cache::CacheLimits {
+                max_payload_bytes: 1024 * 1024 * 1024,
+                max_compressed_bytes: 512 * 1024 * 1024,
+                ..cwtools_cache::CacheLimits::default()
+            },
             snapshot_limits: SnapshotLimits {
                 max_sources: MAX_VANILLA_FILES.saturating_add(MAX_DOCUMENTS),
                 max_nodes: 20_000_000,
@@ -251,15 +256,38 @@ impl LocalRouter {
                 overwrite: source.overwrite,
             });
         }
-        let refreshed = session.refresh_full().is_ok();
-        if refreshed && let Some(snapshot) = session.snapshot() {
-            let _ = session.save_cache(snapshot);
+        let fingerprint = fingerprint_sources(
+            session
+                .sources()
+                .map(|source| (source.logical_path.as_str(), source.text.as_str())),
+        );
+        let cache = session.load_cache(fingerprint);
+        let cache_hit = cache.value.is_some();
+        let refreshed = if let Some(snapshot) = cache.value {
+            session.install_cached_snapshot(snapshot).is_ok()
+        } else {
+            session.refresh_full().is_ok()
+        };
+        if refreshed
+            && !cache_hit
+            && let Some(snapshot) = session.snapshot()
+        {
+            if let Err(error) = session.save_cache(snapshot) {
+                self.notifications.push(notification("window/logMessage", json!({"type":1,"message":format!("Failed to write Rust vanilla database: {error}")})));
+            }
+        }
+        if refreshed {
+            self.notifications.push(notification("monitorLog", json!({"category":"indexing","message":if cache_hit { "Loaded Rust vanilla database and project snapshot" } else { "Generated Rust vanilla database and project snapshot" }})));
         }
         if !refreshed {
             self.notifications.push(notification("window/logMessage", json!({"type":1,"message":"CWTools failed to build the combined vanilla and workspace semantic snapshot"})));
         }
-        self.vanilla_cache_status = if vanilla_count > 0 {
-            format!("rebuilt_from_game:{vanilla_count}")
+        self.vanilla_cache_status = if cache_hit {
+            format!("loaded_rust_cwb:{vanilla_count}")
+        } else if refreshed && vanilla_count > 0 {
+            format!("generated_rust_cwb:{vanilla_count}")
+        } else if vanilla_count > 0 {
+            format!("rebuild_failed:{vanilla_count}")
         } else {
             self
             .initialization

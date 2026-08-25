@@ -70,7 +70,7 @@ fn stdio_process_completes_manifest_lifecycle_without_proxy() {
     assert!(child.wait().expect("server exit").success());
 
     let messages = frames(&output);
-    assert_eq!(messages.len(), 6);
+    assert!(messages.len() >= 6);
     assert_eq!(messages[0]["id"], 1);
     assert!(
         messages[0]["result"]["capabilities"]["hoverProvider"]
@@ -94,6 +94,9 @@ fn stdio_process_completes_manifest_lifecycle_without_proxy() {
             .iter()
             .all(|message| message["method"] != "cwtools/validationComplete")
     );
-    assert_eq!(messages[5]["id"], 2);
-    assert_eq!(messages[5]["result"], Value::Null);
+    let shutdown = messages
+        .iter()
+        .find(|message| message["id"] == 2)
+        .expect("shutdown response");
+    assert_eq!(shutdown["result"], Value::Null);
 }

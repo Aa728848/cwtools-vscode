@@ -20,6 +20,61 @@ export type ManagerWebviewMessage =
     | { type: 'switchMode'; mode: 'build' | 'plan' | 'explore' | 'utility' | 'review' | 'orchestrator' | 'script' }
     | { type: 'cancelGeneration' };
 
+export interface ManagerChildRunView {
+    runId: string;
+    parentRunId?: string;
+    parentAgentId?: string;
+    agentId?: string;
+    threadId?: string;
+    turnId?: string;
+    status: string;
+    mode: string;
+    startedAt: number;
+    completedAt?: number;
+    userPromptPreview: string;
+}
+
+export interface ManagerRunSnapshotMessage {
+    type: 'runSnapshot';
+    snapshot: {
+        runId: string;
+        agentId?: string;
+        status: string;
+        startedAt: number;
+        createdAt: number;
+        completedAt?: number;
+        metrics: {
+            totalTokens: number;
+            promptTokens: number;
+            completionTokens: number;
+            cachedTokens?: number;
+            costCny: number;
+            iterations: number;
+            maxIterations?: number;
+            toolCalls: number;
+        };
+        context?: { estimatedPromptTokens?: number; contextLimit?: number };
+        writtenFiles: string[];
+        [key: string]: unknown;
+    };
+    events?: Array<{
+        eventId: string;
+        runId: string;
+        sequence: number;
+        timestamp: number;
+        type: string;
+        status?: string;
+        invocationId?: string;
+        agentId?: string;
+        payload?: unknown;
+    }>;
+    eventCount?: number;
+    truncatedEventCount?: number;
+    childRuns?: ManagerChildRunView[];
+    cacheStats?: unknown;
+    scheduling?: unknown;
+}
+
 export interface ManagerSnapshotMessage {
     type: 'managerSnapshot';
     topics: TopicListItem[];

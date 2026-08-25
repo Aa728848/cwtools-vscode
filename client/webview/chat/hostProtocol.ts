@@ -118,7 +118,7 @@ const validators = {
     orchestratorProgress: fields({ progress: isObject }),
     runSnapshot: fields({ snapshot: isObject }, {
         events: optional(isRecordArray), eventCount: optional(isFiniteNumber), truncatedEventCount: optional(isFiniteNumber),
-        artifacts: optional(isRecordArray), cacheStats: optional(isObject), scheduling: optional(isObject),
+        childRuns: optional(isRecordArray), artifacts: optional(isRecordArray), cacheStats: optional(isObject), scheduling: optional(isObject),
     }),
     mentionSearchResults: fields({ results: isRecordArray }),
     managerSnapshot: fields({

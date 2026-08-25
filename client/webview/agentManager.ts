@@ -1,19 +1,28 @@
 import './chatPanel';
 import { escapeHtml } from './chat/formatters';
 import { renderInspectorHTML } from './chat/runInspector';
-import { groupTimelineEvents, renderTimelineHTML } from './chat/runTimeline';
+import {
+    buildAgentTraceModel,
+    renderAgentTreeHTML,
+    renderTraceRailHTML,
+    stableTrajectoryEndTime,
+    type AgentTraceEvent,
+    type AgentTraceLabels,
+} from './chat/agentTrace';
 import { getChatI18n, normalizeChatLocale } from './chat/i18n';
 import { getDiffArtifactFiles } from './chat/artifacts';
 import { svgIcon, svgIconNoMargin } from './svgIcons';
 import type { ManagerSnapshotMessage, OrchestratorProgressMessage } from './chat/messages.manager';
-import type { ManagerAgentProfileView } from './chat/messages.manager';
+import type { ManagerAgentProfileView, ManagerRunSnapshotMessage } from './chat/messages.manager';
 import type { TopicListItem, TopicStats } from './chat/messages.shared';
 import { parseHostMessage } from './chat/hostProtocol';
 
 type ManagerTab = 'changes' | 'activity' | 'settings';
+type ManagerMainView = 'conversation' | 'trajectory';
 
 type PersistedManagerUiState = {
-    activeTab?: 'changes' | 'activity';
+    activeTab?: 'changes' | 'activity' | 'trajectory';
+    mainView?: ManagerMainView;
     drawerOpen?: boolean;
     leftWidth?: number;
     rightWidth?: number;
@@ -32,8 +41,9 @@ type ManagerEnhancementState = {
     liveStepCount: number;
     messageCount: number;
     orchestrator: OrchestratorProgressMessage['progress'] | null;
-    run: any | null;
-    runEvents: any[];
+    run: ManagerRunSnapshotMessage['snapshot'] | null;
+    runEvents: AgentTraceEvent[];
+    childRuns: NonNullable<ManagerRunSnapshotMessage['childRuns']>;
     activity?: ManagerSnapshotMessage['activity'];
     runtimeInspector?: ManagerSnapshotMessage['runtimeInspector'];
     transcript?: ManagerSnapshotMessage['transcript'];
@@ -75,6 +85,7 @@ const DEFAULT_STATE: ManagerEnhancementState = {
     orchestrator: null,
     run: null,
     runEvents: [],
+    childRuns: [],
     activity: undefined,
     runtimeInspector: undefined,
     transcript: undefined,
@@ -99,20 +110,25 @@ const DEFAULT_STATE: ManagerEnhancementState = {
     const persistedRootState = vscode?.getState?.() || {};
     const persistedUi = (persistedRootState.agentManager || {}) as PersistedManagerUiState;
     let activeTab: ManagerTab = persistedUi.activeTab === 'activity' ? 'activity' : 'changes';
-    let hasUserSelectedPrimaryTab = !!persistedUi.activeTab;
+    let mainView: ManagerMainView = persistedUi.mainView === 'trajectory' || persistedUi.activeTab === 'trajectory'
+        ? 'trajectory'
+        : 'conversation';
+    let hasUserSelectedPrimaryTab = persistedUi.activeTab === 'changes' || persistedUi.activeTab === 'activity';
     let settingsRequestPending = false;
     let topicTitleEditing = false;
     let runDockOpen: 'tasks' | 'changes' | null = null;
+    let selectedAgentId: string | undefined;
+    let trajectoryDetailsOpen = false;
     let lastKnownTopicId: string | null = null;
     let lastOverviewSignature = '';
     let lastWorkspaceRenderSignature = '';
     let workspaceRenderRevision = 0;
-    const collapsedTimelineGroups = new Set<string>();
     const collapsedWorkspaceFiles = new Set<string>();
     const expandedWorkspaceDiffFiles = new Set<string>();
     const expandedWorkspaceContextFiles = new Set<string>();
     const cacheStatsByRunId = new Map<string, NonNullable<ManagerEnhancementState['cacheStats']>>();
     document.body.dataset.managerActiveTab = activeTab;
+    document.body.dataset.managerMainView = mainView;
 
     const initialDrawerOpen = persistedUi.drawerOpen ?? ((window.innerWidth || document.documentElement.clientWidth) > 1280);
     document.body.classList.toggle('artifact-drawer-open', initialDrawerOpen);
@@ -135,7 +151,7 @@ const DEFAULT_STATE: ManagerEnhancementState = {
     const ui = locale === 'zh-cn'
         ? {
             topicsTitle: 'Agent 话题',
-            tabs: { changes: '变更', activity: '活动' },
+            tabs: { conversation: '对话', trajectory: '轨迹', changes: '变更', activity: '运行' },
             actions: { workbench: '工作台', closeWorkbench: '关闭工作台', settings: '设置', showTopics: '显示话题', toggleTopics: '折叠话题栏', newTopic: '新话题', archived: '已归档', exportTopic: '导出', searchTopics: '搜索话题...', renameTopic: '重命名话题', review: '审核' },
             workflow: { build: '构建工作流', plan: '计划工作流', review: '审查工作流', explore: '探索工作流', orchestrator: '通用多 Agent 工作流', script: 'Paradox 多 Agent 工作流' },
             status: { paused: '已暂停', running: '运行中', completed: '已完成', failed: '失败', cancelled: '已取消', idle: '空闲' },
@@ -200,7 +216,7 @@ const DEFAULT_STATE: ManagerEnhancementState = {
         }
         : {
             topicsTitle: 'Agent Topics',
-            tabs: { changes: 'Changes', activity: 'Activity' },
+            tabs: { conversation: 'Conversation', trajectory: 'Trajectory', changes: 'Changes', activity: 'Run' },
             actions: { workbench: 'Workbench', closeWorkbench: 'Close Workbench', settings: 'Settings', showTopics: 'Show topics', toggleTopics: 'Toggle topics', newTopic: 'New topic', archived: 'Archived', exportTopic: 'Export', searchTopics: 'Search topics...', renameTopic: 'Rename topic', review: 'Review' },
             workflow: { build: 'Build Workflow', plan: 'Plan Workflow', review: 'Review Workflow', explore: 'Explore Workflow', orchestrator: 'General Multi-Agent Workflow', script: 'Paradox Multi-Agent Workflow' },
             status: { paused: 'Paused', running: 'Running', completed: 'Completed', failed: 'Failed', cancelled: 'Cancelled', idle: 'Idle' },
@@ -262,6 +278,41 @@ const DEFAULT_STATE: ManagerEnhancementState = {
                 loading: 'Loading settings...',
             },
             titleEditPlaceholder: 'Topic title',
+        };
+    const traceLabels: AgentTraceLabels = locale === 'zh-cn'
+        ? {
+            mainAgent: '主代理',
+            subagent: '子代理',
+            conversation: '代理任务',
+            trajectory: '运行轨迹',
+            modelCalls: '模型',
+            toolCalls: '工具',
+            events: '事件',
+            noConversation: '该代理暂无可显示的对话步骤。',
+            noTrajectory: '该代理暂无运行轨迹。',
+            running: '运行中',
+            completed: '已完成',
+            failed: '失败',
+            pending: '等待中',
+            backToMain: '返回主代理',
+            inspectHint: '点击树节点进入对应代理路径；点击轨迹条查看事件详情。',
+        }
+        : {
+            mainAgent: 'Main agent',
+            subagent: 'Subagent',
+            conversation: 'Agent tasks',
+            trajectory: 'Run trajectory',
+            modelCalls: 'Model',
+            toolCalls: 'Tools',
+            events: 'Events',
+            noConversation: 'No conversation steps are available for this agent.',
+            noTrajectory: 'No run trajectory is available for this agent.',
+            running: 'Running',
+            completed: 'Completed',
+            failed: 'Failed',
+            pending: 'Pending',
+            backToMain: 'Back to main agent',
+            inspectHint: 'Select a tree node to enter that agent path; select a trace span to inspect its event.',
         };
 
     function isNoisyRunEvent(evt: any): boolean {
@@ -403,8 +454,11 @@ const DEFAULT_STATE: ManagerEnhancementState = {
         const previousCacheStats = options.preserveCache ? state.cacheStats : undefined;
         state.run = null;
         state.runEvents = [];
+        state.childRuns = [];
         state.todos = [];
         runDockOpen = null;
+        selectedAgentId = undefined;
+        trajectoryDetailsOpen = false;
         state.selectedRunEventId = undefined;
         state.cacheStats = previousCacheStats;
         state.compactedMemoryContent = undefined;
@@ -412,7 +466,6 @@ const DEFAULT_STATE: ManagerEnhancementState = {
         state.workspaceContent = null;
         state.workspaceEntries = [];
         if (!options.preserveCache) cacheStatsByRunId.clear();
-        collapsedTimelineGroups.clear();
         collapsedWorkspaceFiles.clear();
         expandedWorkspaceDiffFiles.clear();
         expandedWorkspaceContextFiles.clear();
@@ -588,6 +641,19 @@ const DEFAULT_STATE: ManagerEnhancementState = {
         topicsSummary.insertAdjacentElement('afterend', overview);
     }
 
+    const mainViewTabs = document.createElement('nav');
+    mainViewTabs.className = 'manager-main-tabs';
+    mainViewTabs.setAttribute('role', 'tablist');
+    mainViewTabs.setAttribute('aria-label', locale === 'zh-cn' ? '主页面视图' : 'Main views');
+    overview.insertAdjacentElement('afterend', mainViewTabs);
+
+    const trajectoryView = document.createElement('section');
+    trajectoryView.className = 'manager-trajectory-view';
+    trajectoryView.id = 'managerTrajectoryView';
+    trajectoryView.setAttribute('role', 'tabpanel');
+    trajectoryView.setAttribute('aria-label', ui.tabs.trajectory);
+    document.querySelector<HTMLElement>('.chat-area')?.insertAdjacentElement('beforebegin', trajectoryView);
+
     const runDock = document.createElement('div');
     runDock.className = 'manager-run-dock';
     runDock.id = 'managerRunDock';
@@ -660,7 +726,8 @@ const DEFAULT_STATE: ManagerEnhancementState = {
         const leftWidth = Number.parseFloat(getComputedStyle(document.body).getPropertyValue('--manager-left-width'));
         const rightWidth = Number.parseFloat(getComputedStyle(document.body).getPropertyValue('--manager-right-width'));
         return {
-            activeTab: activeTab === 'settings' ? (persistedUi.activeTab || 'changes') : activeTab,
+            activeTab: activeTab === 'settings' ? (persistedUi.activeTab === 'activity' ? 'activity' : 'changes') : activeTab,
+            mainView,
             drawerOpen: document.body.classList.contains('artifact-drawer-open'),
             leftWidth: Number.isFinite(leftWidth) ? Math.round(leftWidth) : undefined,
             rightWidth: Number.isFinite(rightWidth) ? Math.round(rightWidth) : undefined,
@@ -827,6 +894,21 @@ const DEFAULT_STATE: ManagerEnhancementState = {
         return false;
     }
 
+    mainViewTabs.addEventListener('click', event => {
+        const button = (event.target as HTMLElement | null)?.closest<HTMLButtonElement>('[data-manager-main-tab]');
+        const nextView = button?.dataset.managerMainTab as ManagerMainView | undefined;
+        if (!nextView) return;
+        setMainView(nextView);
+    });
+
+    mainViewTabs.addEventListener('keydown', event => {
+        if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
+        const nextView: ManagerMainView = mainView === 'trajectory' ? 'conversation' : 'trajectory';
+        event.preventDefault();
+        setMainView(nextView);
+        mainViewTabs.querySelector<HTMLButtonElement>(`[data-manager-main-tab="${nextView}"]`)?.focus();
+    });
+
     tabs.addEventListener('click', event => {
         const button = (event.target as HTMLElement | null)?.closest<HTMLButtonElement>('[data-manager-tab]');
         if (!button) return;
@@ -930,6 +1012,33 @@ const DEFAULT_STATE: ManagerEnhancementState = {
 
     });
 
+    trajectoryView.addEventListener('click', event => {
+        const target = event.target as HTMLElement | null;
+        if (target?.closest('[data-trajectory-close-details]')) {
+            state.selectedRunEventId = undefined;
+            trajectoryDetailsOpen = false;
+            updateTrajectoryDetails();
+            return;
+        }
+        const actionButton = target?.closest<HTMLButtonElement>('[data-run-action]');
+        if (actionButton?.dataset.runAction === 'copy-event') {
+            const selectedEvent = state.runEvents.find(item => item.eventId === state.selectedRunEventId);
+            if (selectedEvent) {
+                void navigator.clipboard?.writeText(JSON.stringify(selectedEvent, null, 2)).then(() => {
+                    state.copiedEventAt = Date.now();
+                    updateTrajectoryDetails();
+                });
+            }
+            return;
+        }
+        const eventButton = target?.closest<HTMLElement>('[data-trace-event-id]');
+        if (eventButton?.dataset.traceEventId) {
+            state.selectedRunEventId = eventButton.dataset.traceEventId;
+            trajectoryDetailsOpen = true;
+            updateTrajectoryDetails();
+        }
+    });
+
     artifactListEl.addEventListener('click', event => {
         const target = event.target as HTMLElement | null;
         const managerActionButton = target?.closest<HTMLButtonElement>('[data-manager-action]');
@@ -1009,23 +1118,18 @@ const DEFAULT_STATE: ManagerEnhancementState = {
             return;
         }
 
-        // 时间线分组折叠切换（问题5）
-        const groupHeader = target?.closest<HTMLElement>('.timeline-group-header');
-        if (groupHeader) {
-            const groupEl = groupHeader.closest<HTMLElement>('.timeline-group');
-            const groupId = groupEl?.dataset.group;
-            if (groupEl && groupId) {
-                groupEl.classList.toggle('collapsed');
-                if (groupEl.classList.contains('collapsed')) collapsedTimelineGroups.add(groupId);
-                else collapsedTimelineGroups.delete(groupId);
-            }
+        const agentPath = target?.closest<HTMLElement>('[data-agent-path]');
+        if (activeTab === 'activity' && agentPath?.dataset.agentPath) {
+            selectedAgentId = agentPath.dataset.agentPath;
+            state.selectedRunEventId = undefined;
+            renderInspector();
             return;
         }
 
         // Keep event details inside the workbench so the right column stays spatially stable.
-        const eventRow = target?.closest<HTMLElement>('.timeline-event');
-        if (activeTab === 'activity' && eventRow?.dataset.eventId) {
-            state.selectedRunEventId = eventRow.dataset.eventId;
+        const traceEvent = target?.closest<HTMLElement>('[data-trace-event-id]');
+        if (activeTab === 'activity' && traceEvent?.dataset.traceEventId) {
+            state.selectedRunEventId = traceEvent.dataset.traceEventId;
             renderInspector();
         }
     });
@@ -1215,12 +1319,17 @@ const DEFAULT_STATE: ManagerEnhancementState = {
             statusText,
             statusClass,
             activeTab,
+            mainView,
             fileCount: workspaceFiles.length,
             additions,
             deletions,
         });
         if (overviewSignature === lastOverviewSignature) return;
         lastOverviewSignature = overviewSignature;
+        mainViewTabs.innerHTML = `
+            <button type="button" role="tab" aria-selected="${mainView === 'conversation'}" class="manager-main-tab ${mainView === 'conversation' ? 'active' : ''}" data-manager-main-tab="conversation">${ui.tabs.conversation}</button>
+            <button type="button" role="tab" aria-selected="${mainView === 'trajectory'}" class="manager-main-tab ${mainView === 'trajectory' ? 'active' : ''}" data-manager-main-tab="trajectory">${ui.tabs.trajectory}<span>${state.runEvents.length || ''}</span></button>
+        `;
         overview.innerHTML = `
             <div class="manager-command-left">
                 <button type="button" class="manager-command-icon manager-overview-topic-toggle" data-manager-action="toggle-topics" title="${ui.actions.showTopics}" aria-label="${ui.actions.showTopics}">${svgIconNoMargin('collapseAll')}</button>
@@ -1259,6 +1368,19 @@ const DEFAULT_STATE: ManagerEnhancementState = {
         `;
     }
 
+    function setMainView(nextView: ManagerMainView): void {
+        mainView = nextView;
+        document.body.dataset.managerMainView = mainView;
+        mainViewTabs.querySelectorAll<HTMLElement>('[data-manager-main-tab]').forEach(button => {
+            const selected = button.dataset.managerMainTab === mainView;
+            button.classList.toggle('active', selected);
+            button.setAttribute('aria-selected', selected ? 'true' : 'false');
+        });
+        persistManagerUiState();
+        renderOverview();
+        renderTrajectoryView();
+    }
+
     function setActiveTab(nextTab: ManagerTab, options: { forceSettingsRefresh?: boolean; suppressSettingsRequest?: boolean } = {}): void {
         activeTab = nextTab;
         document.body.dataset.managerActiveTab = activeTab;
@@ -1268,7 +1390,6 @@ const DEFAULT_STATE: ManagerEnhancementState = {
             button.classList.toggle('active', selected);
             button.setAttribute('aria-selected', selected ? 'true' : 'false');
         });
-
         renderOverview();
         if (activeTab === 'activity') {
             vscode?.postMessage?.({ type: 'requestUsageStats' });
@@ -1279,6 +1400,7 @@ const DEFAULT_STATE: ManagerEnhancementState = {
 
         if (activeTab !== 'settings') persistManagerUiState();
         renderInspector();
+        renderTrajectoryView();
     }
 
     function syncSuggestedPrimaryTab(): void {
@@ -1426,9 +1548,40 @@ const DEFAULT_STATE: ManagerEnhancementState = {
                 </details>
             ` : '';
 
-            // 时间线：传入 i18n，并在分组 header 上加折叠按钮（问题5）
-            const eventGroups = groupTimelineEvents(events, i18n).filter(group => group.id !== 'other');
-            const eventTimelineHtml = eventGroups.length ? renderTimelineHTML(eventGroups, true, collapsedTimelineGroups) : '';
+            const traceModel = buildAgentTraceModel(state.runEvents, {
+                agentId: typeof run?.agentId === 'string' ? run.agentId : undefined,
+                runId: typeof run?.runId === 'string' ? run.runId : undefined,
+                status: typeof run?.status === 'string' ? run.status : undefined,
+                startedAt: typeof run?.startedAt === 'number' ? run.startedAt : undefined,
+                completedAt: typeof run?.completedAt === 'number' ? run.completedAt : undefined,
+            });
+            for (const childRun of state.childRuns) {
+                if (!childRun.agentId || traceModel.nodes.some(node => node.agentId === childRun.agentId)) continue;
+                traceModel.nodes.push({
+                    agentId: childRun.agentId,
+                    parentAgentId: childRun.parentAgentId || traceModel.rootAgentId,
+                    role: childRun.mode,
+                    status: childRun.status === 'completed' || childRun.status === 'done' ? 'done'
+                        : childRun.status === 'failed' ? 'failed'
+                            : childRun.status === 'cancelled' ? 'cancelled'
+                                : childRun.status === 'running' ? 'running' : 'pending',
+                    task: childRun.userPromptPreview,
+                    startedAt: childRun.startedAt,
+                    endedAt: childRun.completedAt,
+                    eventCount: 0,
+                    modelCallCount: 0,
+                    toolCallCount: 0,
+                    tokenCount: 0,
+                });
+            }
+            if (!selectedAgentId || !traceModel.nodes.some(node => node.agentId === selectedAgentId)) {
+                selectedAgentId = traceModel.rootAgentId;
+            }
+            const currentTopicTitle = state.topics.find(topic => topic.id === state.stats.currentTopicId)?.title
+                || state.stats.currentTopicTitle
+                || (typeof run?.userPromptPreview === 'string' ? run.userPromptPreview : '')
+                || traceLabels.mainAgent;
+            const agentTreeHtml = renderAgentTreeHTML(traceModel, selectedAgentId, traceLabels, { rootTitle: currentTopicTitle });
             const progressPercent = runProgressPercent(run);
             const startedAt = Number(run?.startedAt || run?.createdAt || Date.now());
             const finishedAt = Number(run?.completedAt || Date.now());
@@ -1436,11 +1589,6 @@ const DEFAULT_STATE: ManagerEnhancementState = {
             const contextUsed = Number(run?.context?.estimatedPromptTokens || metrics.promptTokens || 0);
             const contextLimit = Number(run?.context?.contextLimit || 0);
             const contextPct = contextPercent(run);
-            const selectedEventContextMeter = contextUsed && contextLimit ? {
-                estimatedPromptTokens: contextUsed,
-                contextLimit,
-                percentage: contextPct,
-            } : undefined;
             const contextHtml = contextUsed ? `
                 <section class="manager-context-card">
                     <div class="manager-card-title">${ui.run.contextUsage} <span>${contextLimit ? `${compactNumber(contextUsed)} / ${compactNumber(contextLimit)}` : compactNumber(contextUsed)} tokens</span></div>
@@ -1462,18 +1610,6 @@ const DEFAULT_STATE: ManagerEnhancementState = {
                 </button>
             `).join('') : `<div class="manager-side-empty">${ui.run.noArtifacts}</div>`;
             const usageStatsHtml = renderUsageStatsCard();
-            const selectedEvent = events.find((evt: any) => evt.eventId === state.selectedRunEventId);
-            const copyLabel = state.copiedEventAt && Date.now() - state.copiedEventAt < 2500 ? m.runs.copiedEvent : m.runs.copyEventJson;
-            const selectedEventHtml = selectedEvent ? `
-                <section class="manager-selected-event-card">
-                    <div class="manager-card-title">${ui.run.selectedEvent} <span>${escapeHtml(selectedEvent.type || '')}</span></div>
-                    <div class="run-action-row manager-selected-event-actions">
-                        <button type="button" class="run-action-btn" data-run-action="copy-event">${copyLabel}</button>
-                    </div>
-                    ${renderInspectorHTML({ selectedEventId: state.selectedRunEventId, selectedEvent, contextMeter: selectedEventContextMeter }, i18n)}
-                </section>
-            ` : '';
-
             const progress = state.orchestrator;
             const agentsHtml = progress ? `
                 <section class="manager-activity-section manager-agents-section">
@@ -1604,17 +1740,21 @@ const DEFAULT_STATE: ManagerEnhancementState = {
                             </div>
                         </header>
                     ` : hasActivity ? `<header class="manager-activity-header"><strong>${ui.activity.title}</strong><span>${m.runs.noRun}</span></header>` : `<div class="manager-review-empty"><strong>${ui.activity.noActivity}</strong><span>${m.runs.noRun}</span></div>`}
+                    ${run ? `
+                        <section class="manager-activity-section manager-agent-explorer">
+                            <div class="manager-activity-section-title manager-agent-explorer-title">
+                                <strong>${traceLabels.conversation}</strong>
+                                <span>${traceModel.nodes.length} ${traceModel.nodes.length === 1 ? traceLabels.mainAgent : traceLabels.subagent}</span>
+                            </div>
+                            <div class="manager-agent-task-list" aria-label="${traceLabels.conversation}">
+                                ${agentTreeHtml}
+                            </div>
+                        </section>
+                    ` : ''}
                     ${agentsHtml}
                     ${tasksHtml}
                     ${runtimeInspectorHtml}
                     ${transcriptHtml}
-                    ${eventTimelineHtml ? `
-                        <section class="manager-activity-section run-events-container">
-                            <div class="manager-activity-section-title"><strong>${ui.activity.timeline}</strong><span>${events.length}</span></div>
-                            ${eventTimelineHtml}
-                        </section>
-                    ` : ''}
-                    ${selectedEventHtml}
                     <section class="manager-activity-section">
                         <div class="manager-activity-section-title"><strong>${ui.activity.artifacts}</strong><span>${state.artifacts.length}</span></div>
                         <div class="manager-artifact-grid">${artifactCardsHtml}</div>
@@ -1651,9 +1791,90 @@ const DEFAULT_STATE: ManagerEnhancementState = {
     }
 
     function markSelectedRunEvent(): void {
-        artifactListEl.querySelectorAll<HTMLElement>('.timeline-event').forEach(row => {
-            row.classList.toggle('selected', !!state.selectedRunEventId && row.dataset.eventId === state.selectedRunEventId);
+        document.querySelectorAll<HTMLElement>('[data-trace-event-id]').forEach(row => {
+            row.classList.toggle('is-selected', !!state.selectedRunEventId && row.dataset.traceEventId === state.selectedRunEventId);
         });
+    }
+
+    function trajectoryEventById(eventId: string | undefined): AgentTraceEvent | undefined {
+        return eventId ? state.runEvents.find(event => event.eventId === eventId) : undefined;
+    }
+
+    function trajectoryDetailHtml(selectedEvent: AgentTraceEvent): string {
+        const copyLabel = state.copiedEventAt && Date.now() - state.copiedEventAt < 2500 ? m.runs.copiedEvent : m.runs.copyEventJson;
+        return '<aside class="manager-trajectory-details"><header><span><i></i><strong>' + escapeHtml(selectedEvent.type) + '</strong><small>' + escapeHtml(selectedEvent.agentId || traceLabels.mainAgent) + '</small></span><button type="button" data-trajectory-close-details aria-label="Close">×</button></header>' +
+            '<nav><span class="active">' + (locale === 'zh-cn' ? '摘要' : 'Summary') + '</span><span>Payload</span><span>Result</span><span>Timing</span></nav>' +
+            '<div class="manager-trajectory-detail-body"><button type="button" class="run-action-btn" data-run-action="copy-event">' + escapeHtml(copyLabel) + '</button>' +
+            renderInspectorHTML({ selectedEventId: state.selectedRunEventId, selectedEvent }, i18n) + '</div></aside>';
+    }
+
+    function updateTrajectoryDetails(): void {
+        trajectoryView.querySelector('.manager-trajectory-details')?.remove();
+        const selectedEvent = trajectoryDetailsOpen ? trajectoryEventById(state.selectedRunEventId) : undefined;
+        if (!selectedEvent) {
+            markSelectedRunEvent();
+            return;
+        }
+        const ledger = trajectoryView.querySelector<HTMLElement>('.manager-trajectory-ledger');
+        ledger?.insertAdjacentHTML('beforeend', trajectoryDetailHtml(selectedEvent));
+        markSelectedRunEvent();
+    }
+
+    function renderTrajectoryView(): void {
+        trajectoryView.hidden = mainView !== 'trajectory';
+        if (mainView !== 'trajectory') return;
+
+        const run = state.run;
+        const events = getRenderableRunEvents(Array.isArray(state.runEvents) ? state.runEvents : []);
+        if (!run || events.length === 0) {
+            trajectoryView.innerHTML = '<div class="manager-trajectory-empty"><strong>' + escapeHtml(traceLabels.trajectory) + '</strong><span>' + escapeHtml(traceLabels.noTrajectory) + '</span></div>';
+            return;
+        }
+        if (!state.selectedRunEventId || !events.some(event => event.eventId === state.selectedRunEventId)) {
+            state.selectedRunEventId = undefined;
+            trajectoryDetailsOpen = false;
+        }
+        const traceModel = buildAgentTraceModel(state.runEvents, {
+            agentId: typeof run.agentId === 'string' ? run.agentId : undefined,
+            runId: run.runId,
+            status: run.status,
+            startedAt: run.startedAt,
+            completedAt: run.completedAt,
+        });
+        if (!selectedAgentId || !traceModel.nodes.some(node => node.agentId === selectedAgentId)) {
+            selectedAgentId = traceModel.rootAgentId;
+        }
+        const selectedAgentEvents = traceModel.eventsByAgent.get(selectedAgentId) ?? [];
+        const modelCalls = events.filter(event => event.type === 'model_call_start').length;
+        const toolCalls = events.filter(event => event.type === 'tool_call_start' || event.type === 'tool_call_created').length;
+        const startedAt = Number(run.startedAt || run.createdAt || Date.now());
+        const finishedAt = stableTrajectoryEndTime(run, state.runEvents);
+        const duration = formatDuration(Math.max(0, finishedAt - startedAt));
+        const eventRows = events.map(event => {
+            const selected = event.eventId === state.selectedRunEventId;
+            const time = new Date(event.timestamp).toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+            const payload = event.payload && typeof event.payload === 'object' ? event.payload as Record<string, unknown> : {};
+            const name = typeof payload.toolName === 'string' ? payload.toolName
+                : typeof payload.model === 'string' ? payload.model
+                    : event.type.replace(/_/g, ' ');
+            const summary = typeof payload.description === 'string' ? payload.description
+                : typeof payload.reason === 'string' ? payload.reason
+                    : typeof payload.filePath === 'string' ? payload.filePath : '';
+            return '<button type="button" class="manager-trajectory-record' + (selected ? ' is-selected' : '') + '" data-trace-event-id="' + escapeHtml(event.eventId) + '">' +
+                '<span class="manager-trajectory-selection"></span><time>' + escapeHtml(time) + '</time>' +
+                '<span class="manager-trajectory-record-main"><strong>' + escapeHtml(name) + '</strong>' + (summary ? '<small>' + escapeHtml(summary) + '</small>' : '') + '</span>' +
+                '<span class="manager-trajectory-record-agent">' + escapeHtml(event.agentId || traceLabels.mainAgent) + '</span>' +
+                '<span class="manager-trajectory-record-status">' + escapeHtml(event.status || 'done') + '</span></button>';
+        }).join('');
+        trajectoryView.innerHTML = '<div class="manager-trajectory-shell">' +
+            '<header class="manager-trajectory-toolbar"><span><strong>' + escapeHtml(traceLabels.trajectory) + '</strong><em>' + escapeHtml(duration) + '</em></span>' +
+            '<span><b>' + traceModel.nodes.length + '</b> ' + escapeHtml(traceLabels.subagent) + '</span>' +
+            '<span><b>' + modelCalls + '</b> ' + escapeHtml(traceLabels.modelCalls) + '</span>' +
+            '<span><b>' + toolCalls + '</b> ' + escapeHtml(traceLabels.toolCalls) + '</span>' +
+            '<span class="manager-trajectory-count">' + events.length + ' ' + escapeHtml(traceLabels.events) + '</span></header>' +
+            '<div class="manager-trajectory-overview">' + renderTraceRailHTML(selectedAgentEvents.length ? selectedAgentEvents : events, state.selectedRunEventId, traceLabels, finishedAt, { includeList: false }) + '</div>' +
+            '<div class="manager-trajectory-ledger"><main class="manager-trajectory-table"><header><span>Event</span><span>Content</span><span>Agent</span><span>Status</span></header><div>' + eventRows + '</div></main></div></div>';
+        updateTrajectoryDetails();
     }
 
     function formatBytes(bytes: number): string {
@@ -1774,11 +1995,13 @@ const DEFAULT_STATE: ManagerEnhancementState = {
             case 'runSnapshot':
                 state.run = msg.snapshot;
                 state.runEvents = Array.isArray(msg.events) ? msg.events : [];
+                state.childRuns = Array.isArray(msg.childRuns) ? msg.childRuns : [];
                 lastWorkspaceRenderSignature = '';
                 setRunCacheStats(msg.snapshot?.runId, msg.cacheStats);
                 syncSuggestedPrimaryTab();
                 renderOverview();
                 renderInspector();
+                renderTrajectoryView();
                 break;
             case 'compactedMemoryResult':
                 state.compactedMemoryContent = msg.content || '';
@@ -1795,6 +2018,7 @@ const DEFAULT_STATE: ManagerEnhancementState = {
                     reclaimedBytes: Number(msg.reclaimedBytes || 0),
                 };
                 renderInspector();
+                renderTrajectoryView();
                 break;
             case 'topicList':
                 {
@@ -1803,6 +2027,7 @@ const DEFAULT_STATE: ManagerEnhancementState = {
                     syncTopicScopedState(state.stats.currentTopicId);
                     renderOverview();
                     renderInspector();
+                    renderTrajectoryView();
                 }
                 break;
             case 'topicSearchResults':
@@ -1843,6 +2068,7 @@ const DEFAULT_STATE: ManagerEnhancementState = {
                 lastWorkspaceRenderSignature = '';
                 renderOverview();
                 renderInspector();
+                renderTrajectoryView();
                 break;
             case 'usageStats':
                 state.usageStats = msg.stats;
@@ -1922,6 +2148,7 @@ const DEFAULT_STATE: ManagerEnhancementState = {
 
     renderOverview();
     renderInspector();
+    renderTrajectoryView();
 })();
 
 (window as any).__cwtoolsPostReady?.();

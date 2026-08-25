@@ -439,45 +439,94 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
     private buildRunSnapshotMessage(runId: string): Extract<HostMessage, { type: 'runSnapshot' }> | undefined {
         const snapshot = runLedger.getSnapshot(runId);
         if (!snapshot) return undefined;
-        const compactEvents = snapshot.events
+        let rootRun = snapshot;
+        const ancestorIds = new Set<string>();
+        while (rootRun.run.parentRunId && !ancestorIds.has(rootRun.run.parentRunId)) {
+            ancestorIds.add(rootRun.run.runId);
+            const parent = runLedger.getSnapshot(rootRun.run.parentRunId);
+            if (!parent || parent.run.topicId !== snapshot.run.topicId) break;
+            rootRun = parent;
+        }
+        const topicRuns = runLedger.listRecentRuns()
+            .filter(run => run.topicId === rootRun.run.topicId);
+        const descendantRunIds = new Set<string>([rootRun.run.runId]);
+        const childRuns: typeof topicRuns = [];
+        let addedDescendant = true;
+        while (addedDescendant) {
+            addedDescendant = false;
+            for (const run of topicRuns) {
+                if (!run.parentRunId || !descendantRunIds.has(run.parentRunId) || descendantRunIds.has(run.runId)) continue;
+                descendantRunIds.add(run.runId);
+                childRuns.push(run);
+                addedDescendant = true;
+            }
+        }
+        childRuns.sort((left, right) => left.startedAt - right.startedAt || left.runId.localeCompare(right.runId));
+        const familyRunById = new Map([rootRun.run, ...childRuns].map(run => [run.runId, run]));
+        const familyEvents = [
+            ...rootRun.events,
+            ...childRuns.flatMap(child => runLedger.getSnapshot(child.runId)?.events ?? []),
+        ].sort((left, right) => left.timestamp - right.timestamp || left.sequence - right.sequence || left.eventId.localeCompare(right.eventId));
+        const compactEvents = familyEvents
             .map(event => this.compactRunEventForUi(event))
             .filter((event): event is AgentRunEvent => !!event);
         const events = compactEvents.length > UI_RUN_EVENT_LIMIT
             ? compactEvents.slice(compactEvents.length - UI_RUN_EVENT_LIMIT)
             : compactEvents;
         const run = {
-            ...snapshot.run,
+            ...rootRun.run,
             steps: [],
         };
-        // T3.3 — derive cache stats from the full event list (not truncated copy)
-        // so the badge shows the lifetime hit rate, not just the visible window.
+        // Derive aggregates from the complete run family so the manager can show
+        // root and child calls on one DSH-style trace without losing child identity.
         const { reduceCacheStats, reduceScheduling } = require('./runner/runReducers') as typeof import('./runner/runReducers');
-        const cacheStats = reduceCacheStats(snapshot.events);
-        const scheduling = reduceScheduling(snapshot.events);
+        const cacheStats = reduceCacheStats(familyEvents);
+        const scheduling = reduceScheduling(rootRun.events);
         return {
             type: 'runSnapshot',
             snapshot: run,
             events,
-            eventCount: snapshot.events.length,
+            eventCount: familyEvents.length,
             truncatedEventCount: Math.max(0, compactEvents.length - events.length),
+            childRuns: childRuns.map(child => ({
+                runId: child.runId,
+                parentRunId: child.parentRunId,
+                parentAgentId: child.parentRunId ? familyRunById.get(child.parentRunId)?.agentId : undefined,
+                agentId: child.agentId,
+                threadId: child.threadId,
+                turnId: child.turnId,
+                status: child.status,
+                mode: child.mode,
+                startedAt: child.startedAt,
+                completedAt: child.completedAt,
+                userPromptPreview: child.userPromptPreview,
+            })),
             cacheStats,
             scheduling,
-        } as any;
+        };
     }
 
     private queueRunSnapshot(runId: string, immediate = false): void {
         if (!this.managerPanel?.visible) return;
-        if (this.pendingRunSnapshotTimers.has(runId)) return;
-        const elapsed = Date.now() - (this.lastRunSnapshotSentAt.get(runId) ?? 0);
+        let snapshotRunId = runId;
+        let changedRun = runLedger.getRun(runId);
+        const visitedRunIds = new Set<string>();
+        while (changedRun?.parentRunId && !visitedRunIds.has(changedRun.parentRunId)) {
+            visitedRunIds.add(changedRun.runId);
+            snapshotRunId = changedRun.parentRunId;
+            changedRun = runLedger.getRun(changedRun.parentRunId);
+        }
+        if (this.pendingRunSnapshotTimers.has(snapshotRunId)) return;
+        const elapsed = Date.now() - (this.lastRunSnapshotSentAt.get(snapshotRunId) ?? 0);
         const delay = immediate ? 0 : Math.max(0, RUN_SNAPSHOT_THROTTLE_MS - elapsed);
         const timer = setTimeout(() => {
-            this.pendingRunSnapshotTimers.delete(runId);
-            const msg = this.buildRunSnapshotMessage(runId);
+            this.pendingRunSnapshotTimers.delete(snapshotRunId);
+            const msg = this.buildRunSnapshotMessage(snapshotRunId);
             if (!msg) return;
-            this.lastRunSnapshotSentAt.set(runId, Date.now());
+            this.lastRunSnapshotSentAt.set(snapshotRunId, Date.now());
             this.postMessageToSurface('manager', msg);
         }, delay);
-        this.pendingRunSnapshotTimers.set(runId, timer);
+        this.pendingRunSnapshotTimers.set(snapshotRunId, timer);
     }
 
     private _syncViewChromeState(targetSurface?: 'chat' | 'manager'): void {

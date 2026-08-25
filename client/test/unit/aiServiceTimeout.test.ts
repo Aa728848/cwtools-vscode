@@ -287,7 +287,34 @@ describe('AIService OpenAI Responses payload', () => {
             content: [{ type: 'input_text', text: 'Inspect the workspace.' }],
         }]);
         expect(payload.reasoning).to.deep.equal({ effort: 'max', summary: 'auto' });
+        expect(payload).to.not.have.property('temperature');
         expect(payload).to.not.have.property('max_output_tokens');
+    });
+
+    it('omits temperature from Codex-compatible payloads even without reasoning', () => {
+        const { AIService } = loadAIService();
+        const service = new AIService({ secrets: {} } as any) as any;
+
+        const payload = service.buildOpenAIResponsesPayload({
+            model: 'gpt-5.6-sol',
+            messages: [{ role: 'user', content: 'Implement the change.' }],
+            temperature: 0.2,
+        }, { fastPath: true, codexCompatibility: true });
+
+        expect(payload).to.not.have.property('temperature');
+    });
+
+    it('keeps temperature for non-Codex Responses models without reasoning', () => {
+        const { AIService } = loadAIService();
+        const service = new AIService({ secrets: {} } as any) as any;
+
+        const payload = service.buildOpenAIResponsesPayload({
+            model: 'gpt-4.1',
+            messages: [{ role: 'user', content: 'Hello' }],
+            temperature: 0.2,
+        });
+
+        expect(payload.temperature).to.equal(0.2);
     });
 
     it('enables the native Responses image_generation tool for explicit image requests', () => {

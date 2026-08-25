@@ -1384,8 +1384,9 @@ export class AIService {
             model: request.model,
             ...(systemInstructions ? { instructions: systemInstructions } : {}),
             input: this.toResponsesInput(request.messages, options?.codexCompatibility === true),
-            // GPT reasoning models reject sampling controls while reasoning is enabled.
-            temperature: request.reasoning_effort ? undefined : request.temperature,
+            // The ChatGPT Codex Responses endpoint rejects sampling controls for all supported models.
+            // Other Responses providers may still accept temperature when reasoning is disabled.
+            temperature: options?.codexCompatibility || request.reasoning_effort ? undefined : request.temperature,
             max_output_tokens: options?.codexCompatibility ? undefined : request.max_tokens,
             ...(options?.fastPath ? { stream: true } : {}),
             ...(options?.codexCompatibility ? {

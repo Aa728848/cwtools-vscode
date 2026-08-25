@@ -4362,6 +4362,8 @@ export class AgentToolExecutor {
                         {
                             taskNodeId: task.id,
                             agentType: task.agentType,
+                            parentAgentId: parentRun?.agentId ?? parentRunSink?.agentId,
+                            task: task.prompt.slice(0, 240),
                             plannedFiles: task.plannedFiles ?? [],
                             plannedEntities: task.plannedEntities ?? [],
                             dependencies: task.dependencies ?? [],

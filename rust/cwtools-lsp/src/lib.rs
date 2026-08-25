@@ -489,6 +489,23 @@ mod tests {
     }
 
     #[test]
+    fn cancellation_registry_is_visible_across_threads() {
+        let router = Router::default();
+        let registry = router.cancellation_registry();
+        let worker = std::thread::spawn(move || Router::cancel(&registry, &RequestId::Number(41)));
+        worker.join().expect("cancellation reader thread");
+        assert!(router.take_cancelled(&RequestId::Number(41)));
+        assert!(!router.take_cancelled(&RequestId::Number(41)));
+        assert_eq!(
+            Router::cancelled_response(RequestId::Number(41))
+                .error
+                .expect("cancel error")
+                .code,
+            REQUEST_CANCELLED
+        );
+    }
+
+    #[test]
     fn consumes_initialization_options_and_workspace_folders() {
         let mut router = Router::default();
         let response = router

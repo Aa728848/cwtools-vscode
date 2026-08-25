@@ -8,6 +8,7 @@ use cwtools_lsp::Router;
 use cwtools_protocol::Message;
 use cwtools_transport::{FrameError, Limits, read_frame, write_frame};
 
+#[allow(clippy::too_many_lines)]
 fn run_stdio() -> i32 {
     let stdout = io::stdout();
     let mut output = stdout.lock();
@@ -94,6 +95,13 @@ fn run_stdio() -> i32 {
             }
         }
         if build_after_flush {
+            router.notify_indexing_started();
+            for outgoing in router.drain_notifications() {
+                if let Err(error) = write_message(&mut output, &outgoing, limits) {
+                    eprintln!("Transport write failure: {error}");
+                    return 1;
+                }
+            }
             router.build_game_session();
             for outgoing in router.drain_notifications() {
                 if let Err(error) = write_message(&mut output, &outgoing, limits) {

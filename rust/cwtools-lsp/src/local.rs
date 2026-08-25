@@ -177,6 +177,11 @@ impl LocalRouter {
             .unwrap_or(GameId::Generic)
     }
 
+    pub(crate) fn notify_indexing_started(&mut self) {
+        self.notifications.push(notification("loadingBar", json!({"enable":true,"value":"CWTools: 正在生成/载入 stl.cwb 并索引项目...","percentage":5})));
+        self.notifications.push(notification("monitorLog", json!({"category":"indexing","message":"Started CWT rules, Rust stl.cwb, vanilla, and project indexing"})));
+    }
+
     pub(crate) fn rebuild_game_session(&mut self) {
         let mut session = GameSession::new(GameSessionConfig {
             game_id: self.selected_game_id(),
@@ -307,6 +312,10 @@ impl LocalRouter {
         };
         self.session_epoch = self.session_epoch.saturating_add(1);
         self.game_session = Some(session);
+        self.notifications.push(notification(
+            "loadingBar",
+            json!({"enable":false,"value":"","percentage":100}),
+        ));
         if !self.sources.is_empty() {
             self.notifications.push(notification(
                 "cwtools/validationComplete",

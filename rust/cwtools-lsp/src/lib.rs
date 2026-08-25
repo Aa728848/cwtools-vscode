@@ -130,6 +130,11 @@ impl Router {
         })
     }
 
+    /// Queues a visible progress notification before the blocking semantic build.
+    pub fn notify_indexing_started(&mut self) {
+        self.local.notify_indexing_started();
+    }
+
     /// Builds the configured rules, vanilla, and workspace semantic session after
     /// the initialized handshake has already been flushed to the client.
     pub fn build_game_session(&mut self) {

@@ -761,6 +761,14 @@ impl LocalRouter {
         let prefix =
             prefix_at_position(&document.text, &document.line_index, position).unwrap_or_default();
         let mut names = BTreeSet::new();
+        if let Some(snapshot) = self.game_session.as_ref().and_then(GameSession::snapshot) {
+            names.extend(snapshot.full.definitions.keys().cloned());
+            names.extend(snapshot.full.variables.keys().cloned());
+            names.extend(snapshot.full.typed_definitions.keys().cloned());
+            for values in snapshot.full.typed_definitions.values() {
+                names.extend(values.keys().cloned());
+            }
+        }
         for token in scan_tokens(&document.text) {
             if token.kind != LexKind::Comment && is_name(&token.value) {
                 names.insert(token.value);
@@ -1491,9 +1499,35 @@ impl LocalRouter {
                 }
             }
         } else if command == "cwtools.ai.getCompletionContext" {
-            json!({"prefix":first.get("prefix").cloned().unwrap_or(Value::String(String::new())),"status":"fresh","items":[],"diagnosticsComplete":true})
+            let prefix = first.get("prefix").and_then(Value::as_str).unwrap_or("");
+            let mut items = BTreeSet::new();
+            if let Some(snapshot) = self.game_session.as_ref().and_then(GameSession::snapshot) {
+                items.extend(
+                    snapshot
+                        .full
+                        .definitions
+                        .keys()
+                        .filter(|name| name.starts_with(prefix))
+                        .take(MAX_COMPLETIONS)
+                        .cloned(),
+                );
+                items.extend(
+                    snapshot
+                        .full
+                        .typed_definitions
+                        .keys()
+                        .filter(|name| name.starts_with(prefix))
+                        .take(MAX_COMPLETIONS)
+                        .cloned(),
+                );
+            }
+            json!({"prefix":prefix,"status":"fresh","epoch":self.session_epoch,"items":items,"diagnosticsComplete":true})
         } else if command == "cwtools.ai.getScopeAtPosition" {
-            json!({"scope":"any","scopeStack":["any"],"resolved":true})
+            let scope = self
+                .game_session
+                .as_ref()
+                .map_or("any", |session| session.profile().id.as_str());
+            json!({"scope":scope,"scopeStack":[scope],"resolved":self.game_session.is_some(),"epoch":self.session_epoch})
         } else if command == "cwtools.ai.queryLocalisationAudit" {
             self.localisation_audit(&first)
         } else if command == "cwtools.ai.queryOverrideModes"

@@ -134,6 +134,9 @@ struct SemanticSnapshot {
     data: Vec<u32>,
 }
 
+type BuildOutcome =
+    std::result::Result<(GameSession, bool, usize, Option<Vec<SourceInput>>), String>;
+
 #[derive(Debug, Default)]
 pub struct LocalRouter {
     documents: DocumentStore,
@@ -154,6 +157,8 @@ pub struct LocalRouter {
     vanilla_cache_status: String,
     vanilla_sources: Option<Vec<SourceInput>>,
     rule_catalog_signature: String,
+    build_task: Option<std::thread::JoinHandle<BuildOutcome>>,
+    build_progress: Option<std::sync::mpsc::Receiver<String>>,
     session_epoch: u64,
     notifications: Vec<Message>,
     reverse_requests: Vec<ReverseRequest>,
@@ -177,6 +182,114 @@ impl LocalRouter {
             .as_deref()
             .and_then(parse_game_id)
             .unwrap_or(GameId::Generic)
+    }
+
+    pub(crate) fn is_building(&self) -> bool {
+        self.build_task.is_some()
+    }
+
+    pub(crate) fn start_background_build(&mut self) {
+        if self.build_task.is_some() {
+            return;
+        }
+        let requested = self.initialization.rule_files.join("\u{1f}");
+        if self.rule_catalog.is_none() || self.rule_catalog_signature != requested {
+            let loaded = if !self.initialization.rule_files.is_empty() {
+                load_rule_file_set(&self.initialization.rule_files)
+                    .map(|documents| (documents, "explicit rule files"))
+            } else if let Some(path) = self.initialization.bundled_rules_path.as_deref() {
+                load_rule_documents(Path::new(path)).map(|documents| (documents, path))
+            } else {
+                Ok((Vec::new(), "no rules configured"))
+            };
+            if let Ok((documents, source)) = loaded {
+                if let Ok(catalog) = RuleCatalog::compile(&documents, ScopeUniverse::default()) {
+                    self.rule_catalog = Some(catalog);
+                    self.rule_catalog_signature.clone_from(&requested);
+                    self.notifications.push(notification("monitorLog", json!({"category":"rules","message":format!("Loaded {} CWT rule documents from {source}", documents.len())})));
+                }
+            }
+        }
+        let initialization = self.initialization.clone();
+        let vanilla_sources = self.vanilla_sources.clone();
+        let catalog = self.rule_catalog.clone();
+        let project = self
+            .workspace_sources()
+            .into_iter()
+            .map(|source| SourceInput {
+                scope: source.scope,
+                path: source.path,
+                logical_path: source.logical_path,
+                text: source.text,
+                overwrite: source.overwrite,
+            })
+            .collect::<Vec<_>>();
+        let (sender, receiver) = std::sync::mpsc::channel::<String>();
+        self.build_task = Some(std::thread::spawn(move || {
+            build_session_worker(initialization, vanilla_sources, project, catalog, sender)
+        }));
+        self.build_progress = Some(receiver);
+        self.notifications.push(notification("monitorLog", json!({"category":"indexing","message":"Background vanilla CWB and project indexing started"})));
+        self.notifications.push(notification("loadingBar", json!({"enable":true,"value":"CWTools: 正在生成/载入 stl.cwb 并索引项目...","percentage":10})));
+    }
+
+    pub(crate) fn poll_background_build(&mut self) {
+        if let Some(receiver) = self.build_progress.as_mut() {
+            while let Ok(step) = receiver.try_recv() {
+                let (value, percentage) = match step.as_str() {
+                    "vanilla" => ("正在扫描原版数据...", 30),
+                    "rules" => ("正在编译 CWT 规则...", 20),
+                    "project" => ("正在索引 Mod 项目...", 70),
+                    "finalize" => ("正在合并原版与 Mod 语义快照...", 90),
+                    _ => ("CWTools indexing...", 50),
+                };
+                self.notifications.push(notification(
+                    "loadingBar",
+                    json!({"enable":true,"value":value,"percentage":percentage}),
+                ));
+            }
+        }
+        let Some(handle) = self.build_task.take() else {
+            return;
+        };
+        if !handle.is_finished() {
+            self.build_task = Some(handle);
+            return;
+        }
+        match handle.join() {
+            Ok(Ok((session, cache_hit, vanilla_count, vanilla_loaded))) => {
+                if let Some(sources) = vanilla_loaded {
+                    self.vanilla_sources = Some(sources);
+                }
+                self.vanilla_cache_status = if cache_hit {
+                    format!("loaded_rust_cwb:{vanilla_count}")
+                } else if vanilla_count > 0 {
+                    format!("generated_rust_cwb:{vanilla_count}")
+                } else {
+                    "not_configured".to_owned()
+                };
+                self.session_epoch = self.session_epoch.saturating_add(1);
+                self.game_session = Some(session);
+                self.notifications.push(notification("monitorLog", json!({"category":"indexing","message":if cache_hit { "Loaded Rust vanilla database and merged project snapshot" } else { "Generated Rust vanilla database and merged project snapshot" }})));
+                self.notifications.push(notification(
+                    "loadingBar",
+                    json!({"enable":false,"value":"","percentage":100}),
+                ));
+                self.notifications.push(notification(
+                    "cwtools/validationComplete",
+                    json!({"epoch":self.session_epoch,"fresh":true,"status":"fresh"}),
+                ));
+            }
+            Ok(Err(error)) => self.notifications.push(notification(
+                "window/logMessage",
+                json!({"type":1,"message":format!("Background CWTools indexing failed: {error}")}),
+            )),
+            Err(_) => self.notifications.push(notification(
+                "window/logMessage",
+                json!({"type":1,"message":"Background CWTools indexing task panicked"}),
+            )),
+        }
+        self.build_progress = None;
     }
 
     pub(crate) fn notify_indexing_started(&mut self) {
@@ -292,7 +405,7 @@ impl LocalRouter {
                 overwrite: source.overwrite,
             })
             .collect::<Vec<_>>();
-        let refreshed = vanilla_refreshed && session.merge_sources(&project).is_ok();
+        let refreshed = vanilla_refreshed && session.merge_sources(&project, !cache_hit).is_ok();
         if refreshed {
             self.notifications.push(notification("monitorLog", json!({"category":"indexing","message":if cache_hit { "Loaded Rust vanilla database and merged project snapshot" } else { "Generated Rust vanilla database and merged project snapshot" }})));
         }
@@ -2509,6 +2622,90 @@ fn load_rule_directory(root: &Path) -> Result<Vec<(String, String)>, String> {
             Ok((name, source))
         })
         .collect()
+}
+
+fn build_session_worker(
+    initialization: InitializationState,
+    vanilla_sources: Option<Vec<SourceInput>>,
+    project: Vec<SourceInput>,
+    catalog: Option<RuleCatalog>,
+    progress: std::sync::mpsc::Sender<String>,
+) -> BuildOutcome {
+    let _ = progress.send("rules".to_owned());
+    let mut session = GameSession::new(GameSessionConfig {
+        game_id: initialization
+            .language
+            .as_deref()
+            .and_then(parse_game_id)
+            .unwrap_or(GameId::Generic),
+        cache_path: initialization
+            .vanilla_cache_path
+            .as_ref()
+            .map(std::path::PathBuf::from),
+        cache_limits: cwtools_cache::CacheLimits {
+            max_payload_bytes: 1024 * 1024 * 1024,
+            max_compressed_bytes: 512 * 1024 * 1024,
+            ..cwtools_cache::CacheLimits::default()
+        },
+        snapshot_limits: SnapshotLimits {
+            max_sources: MAX_VANILLA_FILES.saturating_add(MAX_DOCUMENTS),
+            max_nodes: 20_000_000,
+        },
+        ..GameSessionConfig::default()
+    });
+    if let Some(catalog) = catalog {
+        session.set_rule_catalog(catalog);
+    }
+    let _ = progress.send("vanilla".to_owned());
+    let vanilla = match vanilla_sources {
+        Some(sources) => sources,
+        None if initialization.is_vanilla_folder => Vec::new(),
+        None => {
+            let path = initialization
+                .vanilla_game_path
+                .as_deref()
+                .unwrap_or_default();
+            if path.is_empty() {
+                Vec::new()
+            } else {
+                let sources =
+                    load_vanilla_sources(Path::new(path), &session.profile().script_folders)?;
+                let count = sources.len();
+                let _ = progress.send("vanilla".to_owned());
+                let _ = count;
+                sources
+            }
+        }
+    };
+    let vanilla_count = vanilla.len();
+    for source in vanilla.iter().cloned() {
+        let _ = session.upsert_source(source);
+    }
+    let vanilla_fingerprint = fingerprint_sources(
+        vanilla
+            .iter()
+            .map(|source| (source.logical_path.as_str(), source.text.as_str())),
+    );
+    let cache = session.load_cache(vanilla_fingerprint);
+    let cache_hit = cache.value.is_some();
+    let vanilla_refreshed = if let Some(snapshot) = cache.value {
+        session.install_cached_snapshot(snapshot).is_ok()
+    } else {
+        let refreshed = session.refresh_full().is_ok();
+        if refreshed && let Some(snapshot) = session.snapshot() {
+            let _ = session.save_cache(snapshot);
+        }
+        refreshed
+    };
+    if !vanilla_refreshed {
+        return Err("failed to build vanilla snapshot".to_owned());
+    }
+    let _ = progress.send("project".to_owned());
+    if session.merge_sources(&project, !cache_hit).is_err() {
+        return Err("failed to merge project snapshot".to_owned());
+    }
+    let _ = progress.send("finalize".to_owned());
+    Ok((session, cache_hit, vanilla_count, Some(vanilla)))
 }
 
 fn byte_range_to_lsp(

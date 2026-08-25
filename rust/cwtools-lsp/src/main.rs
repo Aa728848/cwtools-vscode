@@ -102,12 +102,19 @@ fn run_stdio() -> i32 {
                     return 1;
                 }
             }
-            router.build_game_session();
+            router.start_background_build();
             for outgoing in router.drain_notifications() {
                 if let Err(error) = write_message(&mut output, &outgoing, limits) {
                     eprintln!("Transport write failure: {error}");
                     return 1;
                 }
+            }
+        }
+        router.poll_background_build();
+        for outgoing in router.drain_notifications() {
+            if let Err(error) = write_message(&mut output, &outgoing, limits) {
+                eprintln!("Transport write failure: {error}");
+                return 1;
             }
         }
         if router.is_exited() {

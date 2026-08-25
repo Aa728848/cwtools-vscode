@@ -135,6 +135,22 @@ impl Router {
         self.local.notify_indexing_started();
     }
 
+    /// Starts the configured rules, vanilla, and workspace semantic session build
+    /// on a background thread so the server stays responsive while indexing runs.
+    pub fn start_background_build(&mut self) {
+        self.local.start_background_build();
+    }
+
+    /// Collects background build progress and installs the finished session.
+    pub fn poll_background_build(&mut self) {
+        self.local.poll_background_build();
+    }
+
+    #[must_use]
+    pub fn is_building(&self) -> bool {
+        self.local.is_building()
+    }
+
     /// Builds the configured rules, vanilla, and workspace semantic session after
     /// the initialized handshake has already been flushed to the client.
     pub fn build_game_session(&mut self) {

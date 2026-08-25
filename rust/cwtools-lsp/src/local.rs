@@ -36,7 +36,7 @@ use cwtools_shader::{
     runtime as shader_runtime, syntax,
 };
 use cwtools_source::{DocumentStore, Position as SourcePosition, SourceId, TextChange, TextRange};
-use cwtools_workspace::{Overwrite, SnapshotLimits, SnapshotSource, compute_full_snapshot};
+use cwtools_workspace::{Overwrite, SnapshotLimits, SnapshotSource};
 use serde_json::{Value, json};
 
 const MAX_DOCUMENTS: usize = 4096;
@@ -220,7 +220,7 @@ impl LocalRouter {
                 overwrite: source.overwrite,
             })
             .collect::<Vec<_>>();
-        let (sender, receiver) = std::sync::mpsc::sync_channel::<String>(2);
+        let (sender, receiver) = std::sync::mpsc::channel::<String>();
         let ticker = sender.clone();
         std::thread::spawn(move || {
             loop {
@@ -1814,24 +1814,37 @@ impl LocalRouter {
                 .or_else(|| first.get("path"))
                 .and_then(Value::as_str)
                 .map(std::path::PathBuf::from);
-            match path {
-                Some(path) => {
-                    let texts = self
-                        .workspace_sources()
-                        .into_iter()
-                        .map(|source| (source.path, source.text))
-                        .collect::<Vec<_>>();
-                    match cwtools_semantic::export_project_knowledge(&path, &texts) {
-                        Ok(manifest) => {
-                            json!({"ok":true,"status":"fresh","schemaVersion":cwtools_semantic::KNOWLEDGE_SCHEMA_VERSION,"manifest":manifest})
-                        }
-                        Err(error) => {
-                            json!({"ok":false,"status":"error","schemaVersion":cwtools_semantic::KNOWLEDGE_SCHEMA_VERSION,"error":error})
+            let require_ready = first
+                .get("requireReady")
+                .and_then(Value::as_bool)
+                .unwrap_or(false);
+            let ready = self
+                .game_session
+                .as_ref()
+                .and_then(GameSession::snapshot)
+                .is_some();
+            if require_ready && !ready {
+                json!({"ok":false,"status":"loading","schemaVersion":cwtools_semantic::KNOWLEDGE_SCHEMA_VERSION,"error":"CWTools semantic model is still indexing; retry after loading completes"})
+            } else {
+                match path {
+                    Some(path) => {
+                        let texts = self
+                            .workspace_sources()
+                            .into_iter()
+                            .map(|source| (source.path, source.text))
+                            .collect::<Vec<_>>();
+                        match cwtools_semantic::export_project_knowledge(&path, &texts) {
+                            Ok(manifest) => {
+                                json!({"ok":true,"status":"fresh","schemaVersion":cwtools_semantic::KNOWLEDGE_SCHEMA_VERSION,"manifest":manifest})
+                            }
+                            Err(error) => {
+                                json!({"ok":false,"status":"error","schemaVersion":cwtools_semantic::KNOWLEDGE_SCHEMA_VERSION,"error":error})
+                            }
                         }
                     }
-                }
-                None => {
-                    json!({"ok":false,"status":"error","schemaVersion":cwtools_semantic::KNOWLEDGE_SCHEMA_VERSION,"error":"databasePath is required"})
+                    None => {
+                        json!({"ok":false,"status":"error","schemaVersion":cwtools_semantic::KNOWLEDGE_SCHEMA_VERSION,"error":"databasePath is required"})
+                    }
                 }
             }
         } else if command == "cwtools.ai.getCompletionContext" {
@@ -1913,55 +1926,38 @@ impl LocalRouter {
     }
 
     fn validation_status(&self) -> Value {
+        let ready = self
+            .game_session
+            .as_ref()
+            .and_then(GameSession::snapshot)
+            .is_some();
+        let mut status = json!({
+            "ready": ready,
+            "ok": true,
+            "modelReadyForKnowledgeExport": ready,
+            "epoch": self.session_epoch,
+            "fresh": ready,
+            "pending": 0,
+            "inProgress": !ready,
+            "loading": { "inProgress": !ready },
+            "pendingGlobalKinds": [],
+            "lastCacheStatus": self.vanilla_cache_status,
+            "vanillaCachePath": self.initialization.vanilla_cache_path,
+            "games": all_game_profiles().into_iter().map(|profile| profile.id.as_str()).collect::<Vec<_>>()
+        });
         if let Some(snapshot) = self.game_session.as_ref().and_then(GameSession::snapshot) {
-            return json!({
-                "ready": true, "epoch": self.session_epoch, "fresh": true, "pending": 0,
-                "sourceCount": snapshot.full.sources.len(),
-                "definitionCount": snapshot.full.definitions.len(),
-                "referenceCount": snapshot.full.references.len(),
-                "parseErrorCount": snapshot.full.parse_errors.len(),
-                "cacheFingerprint": snapshot.source_fingerprint.to_hex(),
-                "lastCacheStatus": self.vanilla_cache_status,
-                "vanillaCachePath": self.initialization.vanilla_cache_path,
-                "games": all_game_profiles().into_iter().map(|profile| profile.id.as_str()).collect::<Vec<_>>()
-            });
+            status["sourceCount"] = json!(snapshot.full.sources.len());
+            status["definitionCount"] = json!(snapshot.full.definitions.len());
+            status["referenceCount"] = json!(snapshot.full.references.len());
+            status["parseErrorCount"] = json!(snapshot.full.parse_errors.len());
+            status["cacheFingerprint"] = json!(snapshot.source_fingerprint.to_hex());
+        } else {
+            // The semantic index is still building: answer instantly without
+            // computing a workspace snapshot on the request thread.
+            status["error"] =
+                json!("CWTools semantic index is still building; retry after loading completes");
         }
-        let sources = self.workspace_sources();
-        let fingerprint = fingerprint_sources(
-            sources
-                .iter()
-                .map(|source| (source.logical_path.as_str(), source.text.as_str())),
-        );
-        match compute_full_snapshot(
-            sources,
-            SnapshotLimits {
-                max_sources: MAX_DOCUMENTS,
-                max_nodes: MAX_DOCUMENT_CHARS,
-            },
-        ) {
-            Ok(snapshot) => json!({
-                "ready": true,
-                "epoch": fingerprint.0,
-                "fresh": true,
-                "pending": 0,
-                "sourceCount": snapshot.sources.len(),
-                "definitionCount": snapshot.definitions.len(),
-                "referenceCount": snapshot.references.len(),
-                "parseErrorCount": snapshot.parse_errors.len(),
-                "cacheFingerprint": fingerprint.to_hex(),
-                "lastCacheStatus": self.vanilla_cache_status,
-                "vanillaCachePath": self.initialization.vanilla_cache_path,
-                "games": all_game_profiles().into_iter().map(|profile| profile.id.as_str()).collect::<Vec<_>>()
-            }),
-            Err(error) => json!({
-                "ready": false,
-                "epoch": fingerprint.0,
-                "fresh": false,
-                "pending": 0,
-                "error": error.to_string(),
-                "cacheFingerprint": fingerprint.to_hex()
-            }),
-        }
+        status
     }
 
     fn game_profile_result(&self, params: &Value) -> Value {
@@ -2673,7 +2669,7 @@ fn build_session_worker(
     initialization: InitializationState,
     vanilla_sources: Option<Vec<SourceInput>>,
     project: Vec<SourceInput>,
-    progress: std::sync::mpsc::SyncSender<String>,
+    progress: std::sync::mpsc::Sender<String>,
 ) -> BuildOutcome {
     let _ = progress.send("rules".to_owned());
     let rules_started = std::time::Instant::now();

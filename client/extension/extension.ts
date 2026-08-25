@@ -2159,21 +2159,29 @@ export async function activate(context: ExtensionContext) {
 			appendMemDiagEntry(entry);
 		})
 		client.onNotification(validationCompleteNotification, (param: unknown) => {
-			if (
-				typeof param !== 'object'
-				|| param === null
-				|| !('uri' in param)
-				|| typeof param.uri !== 'string'
-				|| !('documentVersion' in param)
-				|| typeof param.documentVersion !== 'number'
-				|| !Number.isInteger(param.documentVersion)
-				|| !('phase' in param)
-				|| (param.phase !== 'shallow-complete' && param.phase !== 'deep-complete')
-			) {
+			if (typeof param !== 'object' || param === null) {
 				ErrorReporter.warn('MemDiag', 'Ignored invalid validationComplete notification');
 				return;
 			}
-			lspPerformanceStats.finishValidation(param.uri, param.documentVersion, param.phase);
+			if (
+				'uri' in param
+				&& typeof param.uri === 'string'
+				&& 'documentVersion' in param
+				&& typeof param.documentVersion === 'number'
+				&& Number.isInteger(param.documentVersion)
+				&& 'phase' in param
+				&& (param.phase === 'shallow-complete' || param.phase === 'deep-complete')
+			) {
+				lspPerformanceStats.finishValidation(param.uri, param.documentVersion, param.phase);
+				return;
+			}
+			if ('epoch' in param && 'status' in param) {
+				// Global session-ready signal: resume any deferred project
+				// knowledge refreshes that were waiting for the semantic model.
+				resumeStaleProjectKnowledgeRefreshes(indexService);
+				return;
+			}
+			ErrorReporter.warn('MemDiag', 'Ignored invalid validationComplete notification');
 		});
 		client.onNotification(completionRefreshNotification, (param: CompletionRefreshParams) => {
 			setTimeout(() => {

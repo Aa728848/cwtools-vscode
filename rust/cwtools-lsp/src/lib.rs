@@ -2,6 +2,7 @@
 #![allow(clippy::match_same_arms)]
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::sync::{Arc, Mutex};
 
 use cwtools_protocol::{JsonRpcError, Lifecycle, Message, RequestId};
 use serde_json::{Value, json};
@@ -15,11 +16,13 @@ const METHOD_NOT_FOUND: i64 = -32_601;
 const MAX_REVERSE_REQUESTS: usize = 64;
 const MAX_OPTION_CHARS: usize = 32 * 1024;
 
+pub type CancellationRegistry = Arc<Mutex<BTreeSet<String>>>;
+
 #[derive(Debug, Default)]
 pub struct Router {
     lifecycle: Lifecycle,
     local: local::LocalRouter,
-    cancelled: BTreeSet<String>,
+    cancelled: CancellationRegistry,
     next_reverse_id: i64,
     pending_reverse: BTreeMap<String, local::ReverseRequestKind>,
     outgoing: Vec<Message>,
@@ -33,6 +36,29 @@ impl Router {
         router
     }
 
+    #[must_use]
+    pub fn cancellation_registry(&self) -> CancellationRegistry {
+        Arc::clone(&self.cancelled)
+    }
+
+    pub fn cancel(registry: &CancellationRegistry, id: &RequestId) {
+        if let Ok(mut cancelled) = registry.lock() {
+            cancelled.insert(request_id_key(id));
+        }
+    }
+
+    #[must_use]
+    pub fn take_cancelled(&self, id: &RequestId) -> bool {
+        self.cancelled
+            .lock()
+            .is_ok_and(|mut cancelled| cancelled.remove(&request_id_key(id)))
+    }
+
+    #[must_use]
+    pub fn cancelled_response(id: RequestId) -> Message {
+        error_response(id, REQUEST_CANCELLED, "Request cancelled")
+    }
+
     /// Routes one complete JSON-RPC message and keeps all semantic work local.
     #[must_use]
     pub fn route(&mut self, message: &Message) -> Option<Message> {
@@ -43,8 +69,8 @@ impl Router {
         let method = message.method.as_deref()?;
         if method == "$/cancelRequest" {
             let _ = self.lifecycle.observe(method);
-            if let Some(cancelled) = message.params.as_ref().and_then(cancel_id) {
-                self.cancelled.insert(cancelled);
+            if let Some(id) = message.params.as_ref().and_then(cancel_request_id) {
+                Self::cancel(&self.cancelled, &id);
             }
             return None;
         }
@@ -87,8 +113,7 @@ impl Router {
         }
 
         if let Some(id) = message.id.as_ref() {
-            let key = request_id_key(id);
-            if self.cancelled.remove(&key) {
+            if self.take_cancelled(id) {
                 return Some(error_response(
                     id.clone(),
                     REQUEST_CANCELLED,
@@ -257,10 +282,9 @@ fn is_lifecycle_method(method: &str) -> bool {
     matches!(method, "initialize" | "initialized" | "shutdown" | "exit")
 }
 
-fn cancel_id(params: &Value) -> Option<String> {
-    let id = params.get("id")?;
-    let request_id = serde_json::from_value::<RequestId>(id.clone()).ok()?;
-    Some(request_id_key(&request_id))
+#[must_use]
+pub fn cancel_request_id(params: &Value) -> Option<RequestId> {
+    serde_json::from_value(params.get("id")?.clone()).ok()
 }
 
 fn request_id_key(id: &RequestId) -> String {

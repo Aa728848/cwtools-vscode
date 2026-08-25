@@ -38,7 +38,14 @@ function main() {
   run(process.platform === 'win32' ? 'npm.cmd' : 'npm', ['run', 'compile']); run(process.platform === 'win32' ? 'npm.cmd' : 'npm', ['run', 'build:docs']); run(process.execPath, [path.join('tools', 'check-rust-only.cjs')]); run(process.execPath, [path.join('tools', 'check-release.js'), '--skip-compile', '--skip-test']);
   for (const name of fs.readdirSync(RELEASE)) if (name.endsWith('.vsix') || name.endsWith('.sha256')) fs.rmSync(path.join(RELEASE, name));
   const pkg = JSON.parse(fs.readFileSync(path.join(RELEASE, 'package.json'), 'utf8')); const expectedName = 'foreverskywalker-stellaris-cwtools-' + pkg.version + '.vsix';
-  run(process.platform === 'win32' ? 'npx.cmd' : 'npx', ['@vscode/vsce', 'package', '--out', expectedName], { cwd: RELEASE });
+  const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm';
+  try {
+    run(npm, ['install', '--omit=dev', '--ignore-scripts', '--no-audit', '--no-fund'], { cwd: RELEASE });
+    run(process.platform === 'win32' ? 'npx.cmd' : 'npx', ['@vscode/vsce', 'package', '--out', expectedName], { cwd: RELEASE });
+  } finally {
+    fs.rmSync(path.join(RELEASE, 'node_modules'), { recursive: true, force: true });
+    fs.rmSync(path.join(RELEASE, 'package-lock.json'), { force: true });
+  }
   const vsix = path.join(RELEASE, expectedName); requireFile(vsix, 'versioned VSIX'); const candidates = fs.readdirSync(RELEASE).filter(name => name.endsWith('.vsix')); if (candidates.length !== 1 || candidates[0] !== expectedName) throw new Error('Expected exactly one deterministic VSIX: ' + expectedName);
   run(process.execPath, [path.join('tools', 'check-vsix.js'), '--vsix', vsix, '--source-sha', sourceSha]); const digest = sha256(fs.readFileSync(vsix)); fs.writeFileSync(vsix + '.sha256', digest + '  ' + expectedName + '\n'); console.log('Universal VSIX ready: ' + vsix + ' sha256=' + digest);
 }

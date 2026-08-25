@@ -1,35 +1,64 @@
 #![forbid(unsafe_code)]
 
 use std::io::{self, BufReader, Write};
+use std::sync::mpsc;
+use std::thread;
 
 use cwtools_lsp::Router;
 use cwtools_protocol::Message;
 use cwtools_transport::{FrameError, Limits, read_frame, write_frame};
 
 fn run_stdio() -> i32 {
-    let stdin = io::stdin();
     let stdout = io::stdout();
-    let mut input = BufReader::new(stdin.lock());
     let mut output = stdout.lock();
     let limits = Limits::default();
     let args = std::env::args().skip(1).collect::<Vec<_>>();
     let read_only = args.iter().any(|argument| argument == "--read-only")
         || std::env::var("CWTOOLS_READ_ONLY").is_ok_and(|value| value == "1");
     let mut router = Router::with_read_only(read_only);
-
-    loop {
-        let payload = match read_frame(&mut input, limits) {
-            Ok(payload) => payload,
-            Err(FrameError::Eof) => return i32::from(!router.is_shutdown()),
-            Err(error) => {
-                eprintln!("Controlled transport failure: {error}");
-                return 1;
+    let cancellation = router.cancellation_registry();
+    let (sender, receiver) = mpsc::sync_channel::<Result<Message, String>>(64);
+    thread::spawn(move || {
+        let stdin = io::stdin();
+        let mut input = BufReader::new(stdin.lock());
+        loop {
+            let parsed = match read_frame(&mut input, limits) {
+                Ok(payload) => serde_json::from_str::<Message>(&payload)
+                    .map_err(|error| format!("Invalid JSON-RPC payload: {error}")),
+                Err(FrameError::Eof) => break,
+                Err(error) => {
+                    let _ = sender.send(Err(format!("Controlled transport failure: {error}")));
+                    break;
+                }
+            };
+            match parsed {
+                Ok(message) if message.method.as_deref() == Some("$/cancelRequest") => {
+                    if let Some(id) = message
+                        .params
+                        .as_ref()
+                        .and_then(cwtools_lsp::cancel_request_id)
+                    {
+                        Router::cancel(&cancellation, &id);
+                    }
+                }
+                Ok(message) => {
+                    if sender.send(Ok(message)).is_err() {
+                        break;
+                    }
+                }
+                Err(error) => {
+                    let _ = sender.send(Err(error));
+                    break;
+                }
             }
-        };
-        let message: Message = match serde_json::from_str(&payload) {
+        }
+    });
+
+    while let Ok(incoming) = receiver.recv() {
+        let message = match incoming {
             Ok(message) => message,
             Err(error) => {
-                eprintln!("Invalid JSON-RPC payload: {error}");
+                eprintln!("{error}");
                 return 1;
             }
         };
@@ -37,7 +66,17 @@ fn run_stdio() -> i32 {
             eprintln!("Invalid JSON-RPC envelope: {error}");
             return 1;
         }
-        if let Some(response) = router.route(&message) {
+        let request_id = message.id.clone();
+        if let Some(mut response) = router.route(&message) {
+            if let Some(id) = request_id.as_ref()
+                && response
+                    .error
+                    .as_ref()
+                    .is_none_or(|error| error.code != -32_800)
+                && router.take_cancelled(id)
+            {
+                response = Router::cancelled_response(id.clone());
+            }
             if let Err(error) = write_message(&mut output, &response, limits) {
                 eprintln!("Transport write failure: {error}");
                 return 1;
@@ -57,6 +96,7 @@ fn run_stdio() -> i32 {
             return 0;
         }
     }
+    i32::from(!router.is_shutdown())
 }
 
 fn write_message<W: Write>(

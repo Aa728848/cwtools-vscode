@@ -198,6 +198,7 @@ impl Router {
         matches!(self.lifecycle, Lifecycle::Shutdown | Lifecycle::Exited)
     }
 
+    #[allow(clippy::too_many_lines)]
     fn configure_initialize(&mut self, params: Option<&Value>) {
         let root = bounded_string(params.and_then(|value| value.get("rootUri")))
             .or_else(|| bounded_string(params.and_then(|value| value.get("rootPath"))));
@@ -258,6 +259,16 @@ impl Router {
                     .get("vanillaCachePath")
                     .and_then(Value::as_str)
                     .map(str::to_owned),
+                rule_files: options
+                    .get("ruleFiles")
+                    .and_then(Value::as_array)
+                    .into_iter()
+                    .flatten()
+                    .filter_map(Value::as_str)
+                    .filter(|path| !path.is_empty() && path.chars().count() <= MAX_OPTION_CHARS)
+                    .take(64)
+                    .map(str::to_owned)
+                    .collect(),
                 vanilla_game_path: options
                     .get("vanillaGamePath")
                     .and_then(Value::as_str)

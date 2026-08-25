@@ -74,6 +74,7 @@ pub struct InitializationState {
     pub vanilla_cache_path: Option<String>,
     pub vanilla_game_path: Option<String>,
     pub bundled_rules_path: Option<String>,
+    pub rule_files: Vec<String>,
     pub rules_version: Option<String>,
     pub default_repo_path: Option<String>,
     pub repo_path: Option<String>,
@@ -152,6 +153,7 @@ pub struct LocalRouter {
     rule_catalog: Option<RuleCatalog>,
     vanilla_cache_status: String,
     vanilla_sources: Option<Vec<SourceInput>>,
+    rule_catalog_signature: String,
     session_epoch: u64,
     notifications: Vec<Message>,
     reverse_requests: Vec<ReverseRequest>,
@@ -201,33 +203,41 @@ impl LocalRouter {
             },
             ..GameSessionConfig::default()
         });
-        if self.rule_catalog.is_none()
-            && let Some(path) = self.initialization.bundled_rules_path.as_deref()
-        {
-            match load_rule_documents(Path::new(path)) {
-                Ok(documents) if !documents.is_empty() => {
+        let requested = self.initialization.rule_files.join("\u{1f}");
+        if self.rule_catalog.is_none() || self.rule_catalog_signature != requested {
+            let loaded = if !self.initialization.rule_files.is_empty() {
+                load_rule_file_set(&self.initialization.rule_files)
+                    .map(|documents| (documents, "explicit rule files"))
+            } else if let Some(path) = self.initialization.bundled_rules_path.as_deref() {
+                load_rule_documents(Path::new(path)).map(|documents| (documents, path))
+            } else {
+                Ok((Vec::new(), "no rules configured"))
+            };
+            match loaded {
+                Ok((documents, source)) if !documents.is_empty() => {
                     let count = documents.len();
                     match RuleCatalog::compile(&documents, ScopeUniverse::default()) {
                         Ok(catalog) => {
                             self.rule_catalog = Some(catalog);
+                            self.rule_catalog_signature.clone_from(&requested);
                             self.notifications.push(notification(
                                 "monitorLog",
-                                json!({"category":"rules","message":format!("Loaded {count} CWT rule documents from {path}")}),
+                                json!({"category":"rules","message":format!("Loaded {count} CWT rule documents from {source}")}),
                             ));
                         }
                         Err(error) => self.notifications.push(notification(
                             "window/logMessage",
-                            json!({"type":1,"message":format!("Failed to compile bundled CWT rules from {path}: {error:?}")}),
+                            json!({"type":1,"message":format!("Failed to compile CWT rules: {error:?}")}),
                         )),
                     }
                 }
                 Ok(_) => self.notifications.push(notification(
                     "window/logMessage",
-                    json!({"type":2,"message":format!("No CWT rule documents found at {path}")}),
+                    json!({"type":2,"message":"No CWT rule documents found"}),
                 )),
                 Err(error) => self.notifications.push(notification(
                     "window/logMessage",
-                    json!({"type":1,"message":format!("Failed to load bundled CWT rules from {path}: {error}")}),
+                    json!({"type":1,"message":format!("Failed to load CWT rules: {error}")}),
                 )),
             }
         }
@@ -252,37 +262,39 @@ impl LocalRouter {
                 let _ = session.upsert_source(source);
             }
         }
-        for source in self.workspace_sources() {
-            let _ = session.upsert_source(SourceInput {
+        let vanilla_fingerprint = fingerprint_sources(
+            self.vanilla_sources
+                .iter()
+                .flatten()
+                .map(|source| (source.logical_path.as_str(), source.text.as_str())),
+        );
+        let cache = session.load_cache(vanilla_fingerprint);
+        let cache_hit = cache.value.is_some();
+        let vanilla_refreshed = if let Some(snapshot) = cache.value {
+            session.install_cached_snapshot(snapshot).is_ok()
+        } else {
+            let refreshed = session.refresh_full().is_ok();
+            if refreshed && let Some(snapshot) = session.snapshot() {
+                if let Err(error) = session.save_cache(snapshot) {
+                    self.notifications.push(notification("window/logMessage", json!({"type":1,"message":format!("Failed to write Rust vanilla database: {error}")})));
+                }
+            }
+            refreshed
+        };
+        let project = self
+            .workspace_sources()
+            .into_iter()
+            .map(|source| SourceInput {
                 scope: source.scope,
                 path: source.path,
                 logical_path: source.logical_path,
                 text: source.text,
                 overwrite: source.overwrite,
-            });
-        }
-        let fingerprint = fingerprint_sources(
-            session
-                .sources()
-                .map(|source| (source.logical_path.as_str(), source.text.as_str())),
-        );
-        let cache = session.load_cache(fingerprint);
-        let cache_hit = cache.value.is_some();
-        let refreshed = if let Some(snapshot) = cache.value {
-            session.install_cached_snapshot(snapshot).is_ok()
-        } else {
-            session.refresh_full().is_ok()
-        };
-        if refreshed
-            && !cache_hit
-            && let Some(snapshot) = session.snapshot()
-        {
-            if let Err(error) = session.save_cache(snapshot) {
-                self.notifications.push(notification("window/logMessage", json!({"type":1,"message":format!("Failed to write Rust vanilla database: {error}")})));
-            }
-        }
+            })
+            .collect::<Vec<_>>();
+        let refreshed = vanilla_refreshed && session.merge_sources(&project).is_ok();
         if refreshed {
-            self.notifications.push(notification("monitorLog", json!({"category":"indexing","message":if cache_hit { "Loaded Rust vanilla database and project snapshot" } else { "Generated Rust vanilla database and project snapshot" }})));
+            self.notifications.push(notification("monitorLog", json!({"category":"indexing","message":if cache_hit { "Loaded Rust vanilla database and merged project snapshot" } else { "Generated Rust vanilla database and merged project snapshot" }})));
         }
         if !refreshed {
             self.notifications.push(notification("window/logMessage", json!({"type":1,"message":"CWTools failed to build the combined vanilla and workspace semantic snapshot"})));
@@ -2344,6 +2356,44 @@ fn load_vanilla_sources(root: &Path, folders: &[String]) -> Result<Vec<SourceInp
             })
         })
         .collect()
+}
+
+fn load_rule_file_set(paths: &[String]) -> Result<Vec<cwtools_rule_ir::Document>, String> {
+    let mut documents = Vec::new();
+    let mut total = 0_usize;
+    for raw in paths {
+        let path = Path::new(raw);
+        if !path.is_file() {
+            return Err(format!("rule file does not exist: {}", path.display()));
+        }
+        let bytes = fs::read(path).map_err(|error| error.to_string())?;
+        if bytes.len() > MAX_RULE_FILE_BYTES {
+            return Err(format!(
+                "rule file exceeds {MAX_RULE_FILE_BYTES} bytes: {}",
+                path.display()
+            ));
+        }
+        total = total.saturating_add(bytes.len());
+        if total > MAX_RULE_TOTAL_BYTES {
+            return Err(format!("rules exceed {MAX_RULE_TOTAL_BYTES} bytes"));
+        }
+        let source =
+            String::from_utf8(bytes).map_err(|error| format!("{}: {error}", path.display()))?;
+        let name = path
+            .file_name()
+            .map_or_else(|| raw.clone(), |value| value.to_string_lossy().into_owned());
+        match cwtools_rule_ir::parse_document(&name, &source) {
+            Ok(document) => documents.push(document),
+            Err(errors) => {
+                return Err(format!(
+                    "{}: {}",
+                    path.display(),
+                    errors.into_iter().take(4).collect::<Vec<_>>().join("; ")
+                ));
+            }
+        }
+    }
+    Ok(documents)
 }
 
 fn load_rule_documents(path: &Path) -> Result<Vec<cwtools_rule_ir::Document>, String> {

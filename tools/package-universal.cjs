@@ -7,7 +7,7 @@ const { ROOT, platforms, sha256, validateNativeBytes, stagedPath, validateStaged
 const RELEASE = path.join(ROOT, 'release');
 const SERVER_ROOT = path.join(RELEASE, 'bin', 'server');
 const ARTIFACT_ROOT = path.join(ROOT, 'artifacts', 'universal-server');
-function run(command, args, options = {}) { console.log('> ' + command + ' ' + args.join(' ')); execFileSync(command, args, { cwd: ROOT, stdio: 'inherit', ...options }); }
+function run(command, args, options = {}) { console.log('> ' + command + ' ' + args.join(' ')); const shell = process.platform === 'win32' && command.toLowerCase().endsWith('.cmd'); execFileSync(command, args, { cwd: ROOT, stdio: 'inherit', shell, ...options }); }
 function output(command, args) { return execFileSync(command, args, { cwd: ROOT, encoding: 'utf8' }).trim(); }
 function requireFile(file, label) { if (!fs.existsSync(file) || !fs.statSync(file).isFile() || fs.statSync(file).size === 0) throw new Error(label + ' is missing or empty: ' + file); }
 function collectArtifacts(sourceRoot, expectedSha) {

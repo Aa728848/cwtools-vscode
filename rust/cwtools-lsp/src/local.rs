@@ -142,6 +142,7 @@ type BuildOutcome = std::result::Result<
         usize,
         Option<Vec<SourceInput>>,
         Option<RuleCatalog>,
+        Option<Vec<cwtools_rule_ir::Document>>,
     ),
     String,
 >;
@@ -163,6 +164,7 @@ pub struct LocalRouter {
     semantic: BTreeMap<String, SemanticSnapshot>,
     game_session: Option<GameSession>,
     rule_catalog: Option<RuleCatalog>,
+    rule_documents: Vec<cwtools_rule_ir::Document>,
     vanilla_cache_status: String,
     vanilla_sources: Option<Vec<SourceInput>>,
     rule_catalog_signature: String,
@@ -327,9 +329,12 @@ impl LocalRouter {
             return;
         }
         match handle.join() {
-            Ok(Ok((session, cache_hit, vanilla_count, vanilla_loaded, catalog))) => {
+            Ok(Ok((session, cache_hit, vanilla_count, vanilla_loaded, catalog, documents))) => {
                 if let Some(sources) = vanilla_loaded {
                     self.vanilla_sources = Some(sources);
+                }
+                if let Some(documents) = documents {
+                    self.rule_documents = documents;
                 }
                 if let Some(catalog) = catalog {
                     let requested = self.initialization.rule_files.join("\u{1f}");
@@ -944,7 +949,7 @@ impl LocalRouter {
         self.deferred_exports = Some(receiver);
         self.notifications.push(notification(
             "loadingBar",
-            json!({"enable": true, "value": "CWTools: 正在后台重建项目知识数据库...", "percentage": 5}),
+            json!({"enable": true, "value": "正在后台重建项目知识数据库...", "percentage": 5}),
         ));
         std::thread::spawn(move || {
             let result = match cwtools_semantic::export_project_knowledge(&path, &texts) {
@@ -1973,6 +1978,53 @@ impl LocalRouter {
                     }
                 }
             }
+        } else if command == "cwtools.ai.getSemanticCatalog" {
+            let mut definition_types = Vec::new();
+            let mut directory_paths = BTreeSet::new();
+            for document in &self.rule_documents {
+                for type_def in &document.types {
+                    let mut paths = Vec::new();
+                    if let Some(path) = &type_def.path {
+                        paths.push(path.clone());
+                    }
+                    if let Some(path) = &type_def.path_file {
+                        paths.push(path.clone());
+                    }
+                    for path in &paths {
+                        directory_paths.insert(path.trim_start_matches("game/").to_owned());
+                    }
+                    let filters = type_def
+                        .type_key_filter
+                        .as_ref()
+                        .map_or_else(Vec::new, |(filters, _)| filters.clone());
+                    definition_types.push(json!({
+                        "name": type_def.name,
+                        "paths": paths,
+                        "nameField": type_def.name_field,
+                        "typeKeyFilters": filters,
+                        "valueReferences": [],
+                        "shaderReferences": [],
+                    }));
+                }
+            }
+            json!({
+                "ok": true,
+                "status": "ready",
+                "source": "lsp",
+                "gameProfile": game_profile(self.selected_game_id()).id.as_str(),
+                "rulesGeneration": 0,
+                "rulesContentHash": self.rule_catalog_signature,
+                "directoryCatalogVersion": 1,
+                "directoryPaths": directory_paths
+                    .into_iter()
+                    .take(MAX_RESULTS)
+                    .map(|path| json!({"path": path, "entityTypes": []}))
+                    .collect::<Vec<_>>(),
+                "directoryPathsTruncated": false,
+                "rules": [],
+                "definitionTypes": definition_types,
+                "warnings": [],
+            })
         } else if command == "cwtools.ai.getCompletionContext" {
             let prefix = first.get("prefix").and_then(Value::as_str).unwrap_or("");
             let mut items = BTreeSet::new();
@@ -2799,35 +2851,38 @@ fn build_session_worker(
 ) -> BuildOutcome {
     let _ = progress.send("rules".to_owned());
     let rules_started = std::time::Instant::now();
-    let (catalog, rules_digest, rule_count) = if !initialization.rule_files.is_empty() {
-        match load_rule_file_set(&initialization.rule_files) {
-            Ok(documents) => (
-                RuleCatalog::compile(&documents, ScopeUniverse::default()).ok(),
-                fingerprint_sources(
-                    documents
-                        .iter()
-                        .map(|document| (document.file.as_str(), document.source.as_str())),
+    let (catalog, rules_digest, rule_count, rule_documents) =
+        if !initialization.rule_files.is_empty() {
+            match load_rule_file_set(&initialization.rule_files) {
+                Ok(documents) => (
+                    RuleCatalog::compile(&documents, ScopeUniverse::default()).ok(),
+                    fingerprint_sources(
+                        documents
+                            .iter()
+                            .map(|document| (document.file.as_str(), document.source.as_str())),
+                    ),
+                    documents.len(),
+                    Some(documents),
                 ),
-                documents.len(),
-            ),
-            Err(_) => (None, cwtools_cache::Fingerprint::new(0), 0),
-        }
-    } else if let Some(path) = initialization.bundled_rules_path.as_deref() {
-        match load_rule_documents(Path::new(path)) {
-            Ok(documents) => (
-                RuleCatalog::compile(&documents, ScopeUniverse::default()).ok(),
-                fingerprint_sources(
-                    documents
-                        .iter()
-                        .map(|document| (document.file.as_str(), document.source.as_str())),
+                Err(_) => (None, cwtools_cache::Fingerprint::new(0), 0, None),
+            }
+        } else if let Some(path) = initialization.bundled_rules_path.as_deref() {
+            match load_rule_documents(Path::new(path)) {
+                Ok(documents) => (
+                    RuleCatalog::compile(&documents, ScopeUniverse::default()).ok(),
+                    fingerprint_sources(
+                        documents
+                            .iter()
+                            .map(|document| (document.file.as_str(), document.source.as_str())),
+                    ),
+                    documents.len(),
+                    Some(documents),
                 ),
-                documents.len(),
-            ),
-            Err(_) => (None, cwtools_cache::Fingerprint::new(0), 0),
-        }
-    } else {
-        (None, cwtools_cache::Fingerprint::new(0), 0)
-    };
+                Err(_) => (None, cwtools_cache::Fingerprint::new(0), 0, None),
+            }
+        } else {
+            (None, cwtools_cache::Fingerprint::new(0), 0, None)
+        };
     eprintln!(
         "[cwtools-build] rules={}ms docs={rule_count}",
         rules_started.elapsed().as_millis()
@@ -2958,7 +3013,14 @@ fn build_session_worker(
         rules_started.elapsed().as_millis()
     );
     let _ = progress.send("finalize".to_owned());
-    Ok((session, cache_hit, vanilla_count, Some(vanilla), catalog))
+    Ok((
+        session,
+        cache_hit,
+        vanilla_count,
+        Some(vanilla),
+        catalog,
+        rule_documents,
+    ))
 }
 
 fn spawn_vanilla_cache_ensure(

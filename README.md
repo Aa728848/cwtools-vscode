@@ -35,8 +35,10 @@ npm run test:unit
 npm run test:rust-core
 npm run test:rust-lsp
 npm run verify
-npm run pack
+npm run pack # host-only development VSIX
 ```
+
+Published VSIX files are universal and must contain native Rust servers for `win-x64`, `linux-x64`, and `osx-x64`. GitHub Actions builds those binaries on their native runners. After downloading the three `cwtools-server-*` artifacts, run `npm run pack:universal`; publication uses only the archive-verified universal VSIX via `npm run pack:release`.
 
 Cache files are schema/fingerprint checked. Old or corrupt cache files are treated as safe misses and rebuilt automatically.
 
@@ -67,7 +69,9 @@ npm run test:unit
 npm run test:rust-core
 npm run test:rust-lsp
 npm run verify
-npm run pack
+npm run pack # 仅当前宿主平台的开发 VSIX
 ```
+
+正式发布的 VSIX 必须同时包含 `win-x64`、`linux-x64` 和 `osx-x64` 三个原生 Rust 服务端。GitHub Actions 在三个原生 runner 上分别构建；下载三个 `cwtools-server-*` artifact 后执行 `npm run pack:universal`，并且只能通过会重新检查归档内容的 `npm run pack:release` 发布。
 
 缓存会检查 schema 与指纹；旧缓存或损坏缓存会安全失效并自动重建。发布验收先运行 `npm run check:rust-only` 与全部非长时门禁，最后运行 `npm run soak:rust-24h`，并用 `npm run soak:rust-verify` 核验报告。

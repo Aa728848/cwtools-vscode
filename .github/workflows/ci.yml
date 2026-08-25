@@ -4,6 +4,7 @@ on:
   pull_request:
   push:
     branches: [main]
+    tags: ["v*"]
 
 permissions:
   contents: read
@@ -24,7 +25,12 @@ jobs:
       - uses: actions/setup-node@v4
         with: { node-version: 22, cache: npm }
       - run: npm ci
-      - run: npm run verify
+      - run: npm run check:lsp-contract
+      - run: npm run check:rust-only
+      - run: npm run lint
+      - run: npm run compile
+      - run: npm run typecheck:test
+      - run: npm run test:unit
       - run: npm run check:mcp-schema
 
   rust-core:
@@ -63,27 +69,45 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { os: windows-latest, rid: win-x64, binary: cwtools-lsp.exe, staged: 'CWTools Server.exe' }
-          - { os: ubuntu-latest, rid: linux-x64, binary: cwtools-lsp, staged: 'CWTools Server' }
-          - { os: macos-latest, rid: osx-x64, binary: cwtools-lsp, staged: 'CWTools Server' }
+          - {
+              os: windows-latest,
+              rid: win-x64,
+              target: x86_64-pc-windows-msvc,
+              binary: cwtools-lsp.exe,
+              staged: "CWTools Server.exe",
+            }
+          - {
+              os: ubuntu-latest,
+              rid: linux-x64,
+              target: x86_64-unknown-linux-gnu,
+              binary: cwtools-lsp,
+              staged: "CWTools Server",
+            }
+          - {
+              os: macos-latest,
+              rid: osx-x64,
+              target: x86_64-apple-darwin,
+              binary: cwtools-lsp,
+              staged: "CWTools Server",
+            }
     steps:
       - uses: actions/checkout@v4
         with: { submodules: recursive }
       - uses: dtolnay/rust-toolchain@stable
       - name: Build standalone Rust server
-        run: cargo build --manifest-path rust/Cargo.toml --release --locked
+        run: cargo build --manifest-path rust/Cargo.toml --release --locked --target ${{ matrix.target }}
       - name: Stage Windows server
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force "release/bin/server/${{ matrix.rid }}" | Out-Null
-          Copy-Item "rust/target/release/${{ matrix.binary }}" "release/bin/server/${{ matrix.rid }}/${{ matrix.staged }}"
+          Copy-Item "rust/target/${{ matrix.target }}/release/${{ matrix.binary }}" "release/bin/server/${{ matrix.rid }}/${{ matrix.staged }}"
       - name: Stage Unix server
         if: runner.os != 'Windows'
         shell: bash
         run: |
           mkdir -p "release/bin/server/${{ matrix.rid }}"
-          cp "rust/target/release/${{ matrix.binary }}" "release/bin/server/${{ matrix.rid }}/${{ matrix.staged }}"
+          cp "rust/target/${{ matrix.target }}/release/${{ matrix.binary }}" "release/bin/server/${{ matrix.rid }}/${{ matrix.staged }}"
           chmod +x "release/bin/server/${{ matrix.rid }}/${{ matrix.staged }}"
       - uses: actions/upload-artifact@v4
         with:
@@ -121,11 +145,49 @@ jobs:
       - name: Package universal VSIX
         working-directory: release
         run: npx @vscode/vsce package
+      - name: Verify packaged universal VSIX
+        shell: bash
+        run: |
+          vsix=$(find release -maxdepth 1 -name '*.vsix' -type f -print -quit)
+          test -n "$vsix"
+          node tools/check-vsix.js --vsix "$vsix"
       - uses: actions/upload-artifact@v4
         with:
           name: cwtools-universal-vsix
           path: release/*.vsix
           if-no-files-found: error
+
+  publish-release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [universal-vsix, rust-core, rust-lsp, mcp-contracts]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm }
+      - run: npm ci
+      - uses: actions/download-artifact@v4
+        with:
+          name: cwtools-universal-vsix
+          path: release
+      - name: Verify tag and universal VSIX
+        shell: bash
+        run: |
+          version=$(node -p "require('./release/package.json').version")
+          test "${GITHUB_REF_NAME}" = "v$version"
+          vsix=$(find release -maxdepth 1 -name "*-$version.vsix" -type f)
+          test $(printf '%s\n' "$vsix" | grep -c .) -eq 1
+          node tools/check-vsix.js --vsix "$vsix"
+      - name: Publish immutable GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          version=$(node -p "require('./release/package.json').version")
+          vsix=$(find release -maxdepth 1 -name "*-$version.vsix" -type f)
+          gh release create "$GITHUB_REF_NAME" "$vsix" --repo "$GITHUB_REPOSITORY" --verify-tag --title "$GITHUB_REF_NAME" --generate-notes
 
   mcp-contracts:
     runs-on: ubuntu-latest
@@ -135,7 +197,12 @@ jobs:
       - uses: actions/checkout@v4
         with: { submodules: recursive }
       - uses: actions/setup-node@v4
-        with: { node-version: 22, cache: npm, cache-dependency-path: submodules/cwtools-mcp/package-lock.json }
+        with:
+          {
+            node-version: 22,
+            cache: npm,
+            cache-dependency-path: submodules/cwtools-mcp/package-lock.json,
+          }
       - run: npm ci
       - run: npm run build
       - run: npm run test:contracts

@@ -37,7 +37,7 @@ npm run build
 npm run test:contracts
 ```
 
-Before release, build host/cross-platform Rust binaries into `release/bin/server/<rid>`, run `npm run verify`, `npm run check:rust-only`, package the VSIX, inspect it, and complete the final soak. Never run the final 24-hour soak before all other acceptance gates pass. Cache format changes must preserve safe miss/rebuild behavior.
+`npm run pack` produces only a host-development VSIX. A release must use native CI artifacts for `win-x64`, `linux-x64`, and `osx-x64`, aggregate them with `npm run pack:universal`, pass the archive-level `npm run check:vsix -- --vsix <file>` gate, and publish only through `npm run pack:release` or the tag workflow. Missing or copied platform binaries fail closed. Run `npm run verify`, `npm run check:rust-only`, and all other non-long-running acceptance gates before the final soak. Never run the final 24-hour soak before those gates pass. Cache format changes must preserve safe miss/rebuild behavior.
 
 <a id="zh-cn"></a>
 ## 中文
@@ -64,4 +64,4 @@ Before release, build host/cross-platform Rust binaries into `release/bin/server
 
 ### 验收
 
-先运行 TypeScript、Rust core、Rust LSP 与 MCP 门禁。发布前将各平台 Rust 二进制写入 `release/bin/server/<rid>`，运行 `npm run verify`、`npm run check:rust-only`，打包并检查 VSIX。只有全部非长时门禁通过后才能运行最终 24 小时 soak。缓存格式改变必须保持安全失效和自动重建。
+`npm run pack` 只生成当前宿主平台的开发 VSIX。正式发布必须使用 `win-x64`、`linux-x64`、`osx-x64` 三个平台的原生 CI artifact，通过 `npm run pack:universal` 聚合，并通过 `npm run check:vsix -- --vsix <file>` 的归档级检查；只能使用 `npm run pack:release` 或 tag workflow 发布。缺失平台或复制其他平台二进制都会失败。先运行 `npm run verify`、`npm run check:rust-only` 及全部其他非长时门禁，全部通过后才能运行最终 24 小时 soak。缓存格式改变必须保持安全失效和自动重建。

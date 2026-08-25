@@ -4,8 +4,8 @@
     Packages the Rust-only CWTools VS Code extension.
 .DESCRIPTION
     Builds the standalone Rust language server for the current host, compiles the client,
-    stages resources, and creates the universal VSIX. Cross-platform release lanes invoke
-    this script once per target and merge release/bin/server/<rid> before packaging.
+    stages resources, and creates a host-only development VSIX. Published universal VSIX
+    files are created only after native Windows, Linux, and macOS artifacts are merged.
 #>
 [CmdletBinding()]
 param (
@@ -13,7 +13,6 @@ param (
     [switch]$Install,
     [switch]$SkipClient,
     [switch]$IncludeMcp,
-    [switch]$Publish,
     [switch]$SkipDocs
 )
 $StartTime = Get-Date
@@ -141,8 +140,8 @@ if ($IncludeMcp) {
     Write-Host "[5/6] (SKIPPED) MCP server is not bundled by default (use -IncludeMcp to opt in)." -ForegroundColor Gray
 }
 
-# 6. Package VSIX Universal Bundle
-Write-Host "[6/6] Packaging universal VSIX bundle..." -ForegroundColor Yellow
+# 6. Package Host-only Development VSIX
+Write-Host "[6/6] Packaging host-only development VSIX..." -ForegroundColor Yellow
 if (-not $SkipDocs) {
     $GithubDocsBuilder = Join-Path $PSScriptRoot "tools/build-github-docs.js"
     Write-Host ">>> Checking single-source bilingual docs..." -ForegroundColor Cyan
@@ -225,38 +224,6 @@ if ($Install) {
         }
     } else {
         Write-Error "No VSIX bundle found to install!"
-    }
-}
-
-# 7. GitHub Release Publishing
-if ($Publish) {
-    if ($VsixFile) {
-        Write-Host "[*] Executing GitHub Release publishing via gh CLI..." -ForegroundColor Yellow
-        $PkgJson = Get-Content -Path (Join-Path $PSScriptRoot "release/package.json") -Raw | ConvertFrom-Json
-        $CurrentVer = $PkgJson.version
-        $TagName = "v$CurrentVer"
-        Write-Host ">>> Target release tag: $TagName" -ForegroundColor Cyan
-        
-        $GitStatus = & git status --short
-        if ($GitStatus) {
-            Write-Host ">>> Committing version bump & changelog..." -ForegroundColor Cyan
-            git commit -am "Bump version to $CurrentVer and add changelog"
-        }
-        
-        Write-Host ">>> Tagging and pushing $TagName to GitHub..." -ForegroundColor Cyan
-        git tag $TagName 2>$null
-        git push origin main
-        git push origin $TagName
-        
-        Write-Host ">>> Creating GitHub Release on Aa728848/cwtools-vscode..." -ForegroundColor Cyan
-        gh release create $TagName $VsixFile.FullName --repo Aa728848/cwtools-vscode --title $TagName --generate-notes
-        if ($LASTEXITCODE -eq 0) {
-            Write-Host "[OK] GitHub Release $TagName published successfully!" -ForegroundColor Green
-        } else {
-            Write-Warning "GitHub Release publishing returned non-zero exit code."
-        }
-    } else {
-        Write-Error "No VSIX bundle found to publish!"
     }
 }
 

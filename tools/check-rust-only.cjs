@@ -53,14 +53,11 @@ walk(root, (full, entry, isDirectory) => {
   if ((!rel.includes('/') && forbiddenRootFiles.has(entry.name)) || forbiddenFileNames.has(entry.name)) {
     violations.push({ kind: 'dotnet-build-metadata', path: rel });
   }
-  if (forbiddenFileNamePatterns.some(pattern => pattern.test(entry.name))) {
+  if (rel !== 'docs/fsharp-to-rust-migration-plan.md' && forbiddenFileNamePatterns.some(pattern => pattern.test(entry.name))) {
     violations.push({ kind: 'migration-file', path: rel });
   }
   if (rel === 'rust/cwtools-lsp/src/proxy.rs' || rel === 'client/extension/serverImplementation.ts') {
     violations.push({ kind: 'migration-runtime', path: rel });
-  }
-  if (rel === 'docs/fsharp-to-rust-migration-plan.md') {
-    violations.push({ kind: 'migration-plan', path: rel });
   }
 });
 

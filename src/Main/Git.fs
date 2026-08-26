@@ -34,6 +34,8 @@ let rec initOrUpdateRules repoPath gameCacheDir first =
         if isRepo then
             ()
         else
+            if Directory.Exists gameCacheDir then
+                try Directory.Delete(gameCacheDir, true) with _ -> ()
             Repository.Clone(repoPath, gameCacheDir) |> ignore
 
         let git = new Repository(gameCacheDir)

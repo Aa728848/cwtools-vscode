@@ -730,6 +730,10 @@ let connect (serverFactory: ILanguageClient -> ILanguageServer, receive: BinaryR
                             // Readiness snapshots use independently synchronized state
                             // and must remain observable while project loading has the writer.
                             processQueue.Add(ProcessLockFreeRequest(id, task, cancel))
+                        | Shutdown ->
+                            // Shutdown is a lightweight handshake (returns None) and must
+                            // respond immediately without waiting behind heavy game-model writers.
+                            processQueue.Add(ProcessLockFreeRequest(id, task, cancel))
                         | _ ->
                             processQueue.Add(ProcessRequest(id, task, cancel, isReadOnly, lockFallback))
                 | Parser.ResponseMessage(id, result) -> responseAgent.Post(Response(id, result))

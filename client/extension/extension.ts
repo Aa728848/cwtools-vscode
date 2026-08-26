@@ -440,7 +440,7 @@ function inferLanguageIdFromWorkspace(): string | undefined {
 	return inferGameIdFromWorkspace(rootPath, getConfiguredGamePath);
 }
 
-function getRulesSourceStatus(languageId: string, cacheDir: string, _bundledRulesPath: string): RulesSourceStatus {
+function getRulesSourceStatus(languageId: string, cacheDir: string, bundledRulesPath: string): RulesSourceStatus {
 	const config = workspace.getConfiguration('stellarisLanguageServices');
 	const rulesVersion = config.get<string>('rules_version', 'latest');
 	const manualRulesFolder = config.get<string>('rules_folder', '')?.trim();
@@ -453,6 +453,10 @@ function getRulesSourceStatus(languageId: string, cacheDir: string, _bundledRule
 	const cachedRulesPath = path.join(cacheDir, languageId);
 	const cachedCount = countRuleFiles(cachedRulesPath);
 	if (cachedCount > 0) return { source: 'Remote', path: cachedRulesPath, fileCount: cachedCount };
+
+	if (bundledRulesPath && fs.existsSync(bundledRulesPath)) {
+		return { source: 'Bundled', path: bundledRulesPath, fileCount: 1 };
+	}
 
 	return { source: 'Missing', fileCount: 0 };
 }

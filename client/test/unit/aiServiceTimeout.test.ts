@@ -31,6 +31,7 @@ describe('AIService session overrides', () => {
         expect(service.getReasoningEffortOverride()).to.equal('medium');
         expect(service.getConfig().model).to.equal('session-model');
         expect(service.getConfig().reasoningEffort).to.equal('medium');
+        expect(service.getConfig().responseVerbosity).to.equal('default');
     });
 });
 
@@ -119,13 +120,14 @@ describe('AIService provider protocol routing', () => {
     it('routes the ChatGPT subscription provider through the fixed Codex Responses endpoint', async () => {
         const { AIService } = loadAIService();
         const service = new AIService({ secrets: {} } as any) as any;
-        const routes: Array<{ endpoint: string; providerId: string; model: string; reasoning?: string }> = [];
+        const routes: Array<{ endpoint: string; providerId: string; model: string; reasoning?: string; verbosity?: string }> = [];
         service.callOpenAIResponses = async (endpoint: string, _apiKey: string, request: any, providerId: string) => {
             routes.push({
                 endpoint,
                 providerId,
                 model: request.model,
                 reasoning: request.reasoning_effort,
+                verbosity: request.response_verbosity,
             });
             return completionResponse(request.model);
         };
@@ -134,6 +136,7 @@ describe('AIService provider protocol routing', () => {
             providerId: 'codex-chatgpt',
             model: 'gpt-5.6-sol',
             reasoningEffort: 'max',
+            responseVerbosity: 'high',
             endpoint: 'https://malicious-relay.example/v1',
         });
 
@@ -142,6 +145,7 @@ describe('AIService provider protocol routing', () => {
             providerId: 'codex-chatgpt',
             model: 'gpt-5.6-sol',
             reasoning: 'xhigh',
+            verbosity: 'high',
         }]);
     });
 
@@ -262,6 +266,7 @@ describe('AIService OpenAI Responses payload', () => {
                 { role: 'user', content: 'Inspect the workspace.' },
             ],
             reasoning_effort: 'max',
+            response_verbosity: 'high',
             max_tokens: 8192,
             tools: [{
                 type: 'function',
@@ -287,6 +292,7 @@ describe('AIService OpenAI Responses payload', () => {
             content: [{ type: 'input_text', text: 'Inspect the workspace.' }],
         }]);
         expect(payload.reasoning).to.deep.equal({ effort: 'max', summary: 'auto' });
+        expect(payload.text).to.deep.equal({ verbosity: 'high' });
         expect(payload).to.not.have.property('temperature');
         expect(payload).to.not.have.property('max_output_tokens');
     });
@@ -302,6 +308,7 @@ describe('AIService OpenAI Responses payload', () => {
         }, { fastPath: true, codexCompatibility: true });
 
         expect(payload).to.not.have.property('temperature');
+        expect(payload).to.not.have.property('text');
     });
 
     it('keeps temperature for non-Codex Responses models without reasoning', () => {

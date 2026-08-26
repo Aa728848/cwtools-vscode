@@ -58,11 +58,13 @@ describe('AI chat protocol boundaries', () => {
             maxContextTokens: 128000,
             agentFileWriteMode: 'confirm',
             reasoningEffort: 'medium',
+            responseVerbosity: 'low',
             inlineCompletion: {},
             translationPreview: {},
         };
         expect(parseWebviewMessage({ type: 'saveSettings', settings })).to.not.equal(null);
         expect(parseWebviewMessage({ type: 'saveSettings', settings: { ...settings, maxContextTokens: 'large' } })).to.equal(null);
+        expect(parseWebviewMessage({ type: 'saveSettings', settings: { ...settings, responseVerbosity: 'verbose' } })).to.equal(null);
     });
 
     it('accepts the provider fields used by connection tests', () => {

@@ -1,4 +1,10 @@
-import type { ConnectionTestSettings, ContextItem, PanelSettings, WebViewMessage } from '../types';
+import {
+    isResponseVerbosity,
+    type ConnectionTestSettings,
+    type ContextItem,
+    type PanelSettings,
+    type WebViewMessage,
+} from '../types';
 import { isAgentMode, isAgentProfileSelection } from '../agentProfile';
 import {
     fields,
@@ -65,6 +71,7 @@ function isPanelSettings(value: unknown): value is PanelSettings {
         && isFiniteNumber(value.maxContextTokens)
         && (value.agentFileWriteMode === 'confirm' || value.agentFileWriteMode === 'auto')
         && isReasoningEffort(value.reasoningEffort)
+        && isResponseVerbosity(value.responseVerbosity)
         && isRecord(value.inlineCompletion)
         && isRecord(value.translationPreview);
 }

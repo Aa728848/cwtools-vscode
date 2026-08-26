@@ -1307,6 +1307,24 @@
                         "default": "high",
                         "description": "%configuration.stellarisLanguageServices.ai.reasoningEffort.description%"
                     },
+                    "stellarisLanguageServices.ai.responseVerbosity": {
+                        "scope": "window",
+                        "type": "string",
+                        "enum": [
+                            "default",
+                            "low",
+                            "medium",
+                            "high"
+                        ],
+                        "enumDescriptions": [
+                            "%configuration.stellarisLanguageServices.ai.responseVerbosity.enum.default%",
+                            "%configuration.stellarisLanguageServices.ai.responseVerbosity.enum.low%",
+                            "%configuration.stellarisLanguageServices.ai.responseVerbosity.enum.medium%",
+                            "%configuration.stellarisLanguageServices.ai.responseVerbosity.enum.high%"
+                        ],
+                        "default": "default",
+                        "description": "%configuration.stellarisLanguageServices.ai.responseVerbosity.description%"
+                    },
                     "stellarisLanguageServices.ai.maxContextTokens": {
                         "scope": "window",
                         "type": "integer",

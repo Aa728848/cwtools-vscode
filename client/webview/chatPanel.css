@@ -1545,6 +1545,18 @@ body.chat-empty .slash-popup { max-height: min(360px, calc(50vh - 28px)); }
 .detect-btn:hover { background: var(--btn-hover); }
 .detect-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 .settings-hint { font-size: 10px; opacity: 0.52; margin-top: 2px; line-height: 1.45; }
+.codex-quota-status { margin-top: 8px; font-size: 10px; color: var(--fg); }
+.codex-quota-list { display: flex; flex-direction: column; gap: 8px; }
+.codex-quota-item { display: flex; flex-direction: column; gap: 4px; }
+.codex-quota-header, .codex-quota-meta { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.codex-quota-header { font-size: 10.5px; }
+.codex-quota-header strong { font-weight: 600; }
+.codex-quota-meta { font-size: 9.5px; opacity: 0.58; }
+.codex-quota-track { height: 6px; overflow: hidden; border-radius: 999px; border: 1px solid var(--border); background: var(--input-bg); }
+.codex-quota-fill { display: block; height: 100%; border-radius: inherit; }
+.codex-quota-fill-normal { background: var(--vscode-progressBar-background, var(--accent)); }
+.codex-quota-fill-warning { background: var(--vscode-charts-yellow, #cca700); }
+.codex-quota-fill-critical { background: var(--vscode-errorForeground, #f14c4c); }
 .settings-footer { width: min(100%, var(--chat-column-width)); max-width: var(--chat-column-width); padding: 10px 12px 12px; display: flex; flex-direction: column; gap: 8px; border-top: 1px solid rgba(255,255,255,0.06); flex-shrink: 0; background: rgba(255,255,255,0.02); }
 .settings-footer-actions { display: flex; gap: 8px; }
 .settings-footer-actions .settings-test-btn,

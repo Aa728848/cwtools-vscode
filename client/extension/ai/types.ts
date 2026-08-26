@@ -78,6 +78,19 @@ export function isReasoningEffort(value: unknown): value is ReasoningEffort {
         && (REASONING_EFFORT_VALUES as readonly string[]).includes(value);
 }
 
+/** Visible-answer detail for OpenAI Responses models. `default` omits the wire option. */
+export type ResponseVerbosity = 'default' | 'low' | 'medium' | 'high';
+
+export const RESPONSE_VERBOSITY_VALUES: readonly ResponseVerbosity[] = [
+    'default', 'low', 'medium', 'high',
+] as const;
+
+/** Narrow an untrusted value to the shared ResponseVerbosity union. */
+export function isResponseVerbosity(value: unknown): value is ResponseVerbosity {
+    return typeof value === 'string'
+        && (RESPONSE_VERBOSITY_VALUES as readonly string[]).includes(value);
+}
+
 export type ModelReasoningControlKind = 'none' | 'fixed' | 'toggle' | 'budget' | 'effort';
 
 /** Model-specific choices used by both request shaping and the Webview. */
@@ -292,6 +305,8 @@ export interface AIUserConfig {
     agentFileWriteMode: 'confirm' | 'auto';
     /** Reasoning effort / thinking mode selected for the active model. */
     reasoningEffort: ReasoningEffort;
+    /** Visible-answer detail for the Codex ChatGPT subscription provider. */
+    responseVerbosity: ResponseVerbosity;
     /**
      * Optional reasoning field name override for OpenAI-compatible providers
      * whose gateways return thinking content under a non-standard key.
@@ -389,6 +404,8 @@ export interface ChatCompletionRequest {
     stop?: string[];
     /** Provider wire value for reasoning depth. */
     reasoning_effort?: ReasoningEffort;
+    /** Internal normalized value mapped to Responses API `text.verbosity`. */
+    response_verbosity?: Exclude<ResponseVerbosity, 'default'>;
     /** Extra provider-specific params to merge into the request body (e.g. thinking config) */
      
     [key: string]: any;
@@ -2893,6 +2910,8 @@ export interface PanelSettings {
     sandboxBackend?: { available: boolean; backend?: string; message: string };
     /** Reasoning effort / thinking mode for the selected provider/model. */
     reasoningEffort: ReasoningEffort;
+    /** Visible-answer detail for the Codex ChatGPT subscription provider. */
+    responseVerbosity: ResponseVerbosity;
     /** Reasoning field override for OpenAI-compatible gateways (empty = auto-detect). */
     reasoningKey?: string;
     webAccess?: {

@@ -19,6 +19,7 @@ import type {
     CustomApiFormat,
     ContentPart,
     ReasoningEffort,
+    ResponseVerbosity,
 } from './types';
 import {
     getProvider,
@@ -183,6 +184,17 @@ function normalizeConfiguredReasoningEffort(value: unknown): ReasoningEffort {
     }
 }
 
+function normalizeConfiguredResponseVerbosity(value: unknown): ResponseVerbosity {
+    switch (value) {
+        case 'low':
+        case 'medium':
+        case 'high':
+            return value;
+        default:
+            return 'default';
+    }
+}
+
 function normalizeAnthropicMessagesEndpoint(endpoint: string): string {
     const cleanEndpoint = endpoint
         .replace(/\/messages\/?(?:\?.*)?$/i, '')
@@ -324,6 +336,9 @@ export class AIService {
             agentFileWriteMode: cfg.get<'confirm' | 'auto'>('agentFileWriteMode', 'auto'),
             reasoningEffort: this.reasoningEffortOverride
                 ?? normalizeConfiguredReasoningEffort(cfg.get<unknown>('reasoningEffort', 'high')),
+            responseVerbosity: normalizeConfiguredResponseVerbosity(
+                cfg.get<unknown>('responseVerbosity', 'default'),
+            ),
             inlineCompletion: {
                 enabled: cfg.get<boolean>('inlineCompletion.enabled') || false,
                 debounceMs: cfg.get<number>('inlineCompletion.debounceMs', 200),
@@ -440,6 +455,7 @@ export class AIService {
             providerId?: string;   // Override provider
             model?: string;        // Override model
             reasoningEffort?: AIUserConfig['reasoningEffort']; // Override reasoning level for this run
+            responseVerbosity?: AIUserConfig['responseVerbosity']; // Override visible answer detail for this run
             apiKey?: string;       // Override API key (for test-without-save)
             endpoint?: string;     // Override endpoint
             customApiFormat?: CustomApiFormat; // Override custom provider wire protocol
@@ -509,6 +525,9 @@ export class AIService {
         // Strip the UI '(免费)' suffix from the model ID before sending to the API
         const model = rawModel.replace(/\s*\(免费\)$/i, '');
         const effectiveApiFormat = getProviderApiFormat(providerId, model, selectedCustomApiFormat);
+        const responseVerbosity = normalizeConfiguredResponseVerbosity(
+            options?.responseVerbosity ?? config.responseVerbosity,
+        );
 
         // ── Disable thinking: per-provider API parameters ──
         // Each provider has a different mechanism to disable thinking/reasoning.
@@ -567,6 +586,9 @@ export class AIService {
             // and will self-truncate if capped at 8192.
             max_tokens: options?.maxTokens ?? getModelOutputTokens(model, providerId),
             stream: false,
+            response_verbosity: providerId === 'codex-chatgpt' && responseVerbosity !== 'default'
+                ? responseVerbosity
+                : undefined,
             ...(extraBody ?? {}),
         };
 
@@ -1392,6 +1414,9 @@ export class AIService {
             ...(options?.codexCompatibility ? {
                 store: false,
                 include: ['reasoning.encrypted_content'],
+            } : {}),
+            ...(request.response_verbosity ? {
+                text: { verbosity: request.response_verbosity },
             } : {}),
         };
         const tools: Array<Record<string, unknown>> = (request.tools ?? []).map(t => ({

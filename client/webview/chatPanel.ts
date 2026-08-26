@@ -43,6 +43,7 @@ import {
     buildSettingsOverviewModel,
     resolveSettingsModelContextTokens,
 } from './chat/settingsOverview';
+import { buildCodexQuotaHtml } from './chat/codexQuota';
 import {
     renderTopicSearchResults as renderTopicSearchResultsView,
     renderTopics as renderTopicsView,
@@ -7861,6 +7862,12 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         (document.getElementById('settingsCtx') as HTMLInputElement).value = initCtx;
         (document.getElementById('settingsReasoningEffort') as HTMLSelectElement).dataset.requested =
             current.reasoningEffort || 'high';
+        const responseVerbositySelect = document.getElementById('settingsResponseVerbosity') as HTMLSelectElement | null;
+        if (responseVerbositySelect) {
+            responseVerbositySelect.value = ['low', 'medium', 'high'].includes(current.responseVerbosity)
+                ? current.responseVerbosity
+                : 'default';
+        }
         (document.getElementById('inlineEnabled') as HTMLInputElement).checked = current.inlineCompletion?.enabled ?? false;
         const overlapEl = document.getElementById('inlineOverlapStripping') as HTMLInputElement | null;
         if (overlapEl) overlapEl.checked = current.inlineCompletion?.overlapStripping ?? true;
@@ -8098,11 +8105,13 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         const status = document.getElementById('apiKeyStatus')!;
         const group = document.getElementById('apiKeyGroup')!;
         const codexGroup = document.getElementById('codexAccountGroup') as HTMLElement | null;
+        const responseVerbosityGroup = document.getElementById('settingsResponseVerbosityGroup') as HTMLElement | null;
         const endpointGroup = document.getElementById('endpointGroup') as HTMLElement | null;
         const providerHint = document.getElementById('providerHint')!;
         const deleteBtn = document.getElementById('deleteApiKeyBtn') as HTMLButtonElement | null;
         const isCodex = p?.authKind === 'chatgpt-oauth';
         if (codexGroup) codexGroup.style.display = isCodex ? '' : 'none';
+        if (responseVerbosityGroup) responseVerbosityGroup.style.display = isCodex ? '' : 'none';
         if (endpointGroup) endpointGroup.style.display = isCodex ? 'none' : '';
         if (isCodex) {
             group.style.display = 'none';
@@ -8133,20 +8142,14 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                 logoutBtn.style.display = hasCodexAccount ? '' : 'none';
             }
             if (quotaStatus) {
-                const buckets = Array.isArray(account?.rateLimits) ? account.rateLimits : [];
-                quotaStatus.innerHTML = buckets.length
-                    ? buckets.map((bucket: any) => {
-                        const label = bucket.limitName || bucket.limitId || 'Codex';
-                        const windows = [bucket.primary, bucket.secondary].filter(Boolean);
-                        return windows.map((window: any, index: number) => {
-                            const suffix = windows.length > 1 ? ` ${index + 1}` : '';
-                            const reset = window?.resetsAt
-                                ? new Date(window.resetsAt * 1000).toLocaleString()
-                                : tr('unknown reset time', '重置时间未知');
-                            return `<div>${escapeHtml(label + suffix)}: ${Number(window?.usedPercent || 0).toFixed(0)}% ${tr('used', '已用')} · ${tr('resets', '重置')} ${escapeHtml(reset)}</div>`;
-                        }).join('');
-                    }).join('')
-                    : tr('Quota details are unavailable for this account.', '当前账户暂未返回额度详情。');
+                quotaStatus.innerHTML = buildCodexQuotaHtml(account?.rateLimits, {
+                    used: tr('used', '已用'),
+                    remaining: tr('remaining', '剩余'),
+                    resets: tr('Resets', '重置'),
+                    window: tr('Window', '窗口'),
+                    unknownReset: tr('unknown reset time', '重置时间未知'),
+                    unavailable: tr('Quota details are unavailable for this account.', '当前账户暂未返回额度详情。'),
+                }, chatI18n.locale === 'zh-cn' ? 'zh-CN' : 'en');
             }
             refreshSettingsOverview();
             return;
@@ -8508,6 +8511,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                     reviewer: ((document.getElementById('approvalsAutoReview') as HTMLInputElement | null)?.checked ? 'auto_review' : 'user'),
                 },
                 reasoningEffort: (document.getElementById('settingsReasoningEffort') as HTMLSelectElement).value || 'high',
+                responseVerbosity: (document.getElementById('settingsResponseVerbosity') as HTMLSelectElement | null)?.value || 'default',
                 reasoningKey: ((document.getElementById('settingsReasoningKey') as HTMLInputElement | null)?.value || '').trim(),
                 webAccess: {
                     mode: ((document.getElementById('webAccessMode') as HTMLSelectElement | null)?.value || 'indexed'),

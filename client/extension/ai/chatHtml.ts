@@ -308,7 +308,7 @@ ${stylesheetLinks}
                         <button class="detect-btn" id="codexRefreshBtn" style="margin-left:4px; padding:0 8px; width:auto; border-radius:4px">${svgIcon('refresh')}${t('Refresh status', '刷新状态')}</button>
                         <button class="detect-btn" id="codexLogoutBtn" style="margin-left:4px; padding:0 8px; width:auto; border-radius:4px; display:none">${svgIcon('trash')}${t('Sign out', '退出账号')}</button>
                     </div>
-                    <div class="settings-hint" id="codexQuotaStatus" style="margin-top:6px"></div>
+                    <div class="codex-quota-status" id="codexQuotaStatus"></div>
                 </div>
                 <div class="settings-group" id="endpointGroup">
                     <label class="settings-label">${svgIcon('link')} Endpoint <span style="opacity:0.5;font-weight:400">${t('(optional)', '(可选)')}</span></label>
@@ -322,6 +322,16 @@ ${stylesheetLinks}
                 <div class="settings-group" id="settingsReasoningGroup">
                     <label class="settings-label">${svgIcon('stethoscope')} <span id="settingsReasoningLabel">${t('Reasoning effort', '推理强度')}</span> <span id="settingsReasoningHint" style="opacity:0.5;font-weight:400"></span></label>
                     <select class="settings-select" id="settingsReasoningEffort"></select>
+                </div>
+                <div class="settings-group" id="settingsResponseVerbosityGroup" style="display:none">
+                    <label class="settings-label">${svgIcon('fileText')} ${t('Output detail', '输出详细程度')}</label>
+                    <select class="settings-select" id="settingsResponseVerbosity">
+                        <option value="default">${t('Model default', '模型默认')}</option>
+                        <option value="low">${t('Low — keep replies concise', '低 — 保持回复简洁')}</option>
+                        <option value="medium">${t('Medium — balance detail and brevity', '中 — 兼顾细节与简洁')}</option>
+                        <option value="high">${t('High — include more detail', '高 — 在回复中包含更多细节')}</option>
+                    </select>
+                    <div class="settings-hint">${t('Controls visible reply detail for Codex subscription models; reasoning effort is configured separately.', '控制 Codex 订阅模型可见回复的详细程度；推理强度单独设置。')}</div>
                 </div>
             </div>
         </div>

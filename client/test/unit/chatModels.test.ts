@@ -20,6 +20,7 @@ import {
 } from '../../webview/chat/topics';
 import { buildSubagentCardHtml, buildSubagentMetaHtml, hasVisibleLiveContent, latestLiveToolName, pushBoundedWebviewLiveStep } from '../../webview/chat/liveSteps';
 import { buildSettingsOverviewModel, resolveSettingsModelContextTokens } from '../../webview/chat/settingsOverview';
+import { buildCodexQuotaHtml } from '../../webview/chat/codexQuota';
 import { getChatI18n } from '../../webview/chat/i18n';
 import { applyModeUi } from '../../webview/chat/modes';
 import { renderMarkdown } from '../../webview/chat/markdown';
@@ -91,6 +92,34 @@ describe('settings model context resolution', () => {
             .to.equal(272000);
         expect(resolveSettingsModelContextTokens('unknown-model', 'codex-chatgpt', contexts, 272000))
             .to.equal(272000);
+    });
+});
+
+describe('Codex quota presentation', () => {
+    it('renders sanitized usage windows as accessible progress bars', () => {
+        const html = buildCodexQuotaHtml([{
+            limitName: 'Codex <main>',
+            primary: {
+                usedPercent: 72.4,
+                windowDurationMins: 300,
+                resetsAt: 1_800_000_000,
+            },
+        }], {
+            used: 'used',
+            remaining: 'remaining',
+            resets: 'Resets',
+            window: 'Window',
+            unknownReset: 'unknown',
+            unavailable: 'unavailable',
+        }, 'en');
+
+        expect(html).to.include('role="progressbar"');
+        expect(html).to.include('aria-valuenow="72"');
+        expect(html).to.include('style="width:72%"');
+        expect(html).to.include('codex-quota-fill-warning');
+        expect(html).to.include('Codex &lt;main&gt; · 5h');
+        expect(html).to.include('28% remaining');
+        expect(html).to.not.include('Codex <main>');
     });
 });
 

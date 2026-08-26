@@ -12,7 +12,7 @@ import * as fs from 'fs';
 import * as cp from 'child_process';
 import { promisify } from 'util';
 import type { ConnectionTestSettings, PanelSettings, HostMessage, CustomApiFormat, ModelReasoningCapability, ReasoningEffort } from './types';
-import { isReasoningEffort } from './types';
+import { isReasoningEffort, isResponseVerbosity } from './types';
 import type { AIService } from './aiService';
 import { aiText } from './messages';
 import { getProjectWorkspaceRoot } from './workspacePaths';
@@ -340,6 +340,7 @@ export class ChatSettingsManager {
                     ? aiText('No enforced Windows command backend is ready. Install bubblewrap in WSL2, use a Dev Container, configure a verified native helper, or explicitly approve a terminal run.', 'Windows 强制命令后端尚未就绪。请在 WSL2 中安装 bubblewrap、使用开发容器、配置已验证的原生 helper，或明确批准终端运行。')
                     : aiText('No supported OS command sandbox backend is available. Captured commands fail closed.', '没有可用的操作系统命令沙箱后端。捕获命令将安全拒绝。') },
             reasoningEffort: config.reasoningEffort,
+            responseVerbosity: config.responseVerbosity,
             reasoningKey: config.reasoningKey ?? '',
             webAccess: {
                 mode: webConfig.get<'disabled' | 'indexed' | 'live'>('mode', 'indexed'),
@@ -573,6 +574,11 @@ export class ChatSettingsManager {
             'reasoningEffort',
             normalizeReasoningEffort(reasoningCapability, requestedReasoning),
             vs.ConfigurationTarget.Global
+        );
+        await cfg.update(
+            'responseVerbosity',
+            isResponseVerbosity(settings.responseVerbosity) ? settings.responseVerbosity : 'default',
+            vs.ConfigurationTarget.Global,
         );
         await cfg.update('enabled', true, vs.ConfigurationTarget.Global);
         if (settings.inlineCompletion) {

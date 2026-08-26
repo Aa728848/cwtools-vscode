@@ -5,6 +5,7 @@ export interface CodexQuotaLabels {
     remaining: string;
     resets: string;
     window: string;
+    weekly: string;
     unknownReset: string;
     unavailable: string;
 }
@@ -32,9 +33,10 @@ function safeLabel(value: unknown, fallback: string): string {
         : fallback;
 }
 
-function compactDuration(minutes: unknown): string {
+function compactDuration(minutes: unknown, weeklyLabel: string): string {
     const value = finiteNumber(minutes);
     if (value === undefined || value <= 0) return '';
+    if (Math.abs(value - 7 * 24 * 60) < 0.5) return weeklyLabel;
     const compact = (amount: number) => Number.isInteger(amount) ? String(amount) : amount.toFixed(1);
     if (value >= 1440) return `${compact(value / 1440)}d`;
     if (value >= 60) return `${compact(value / 60)}h`;
@@ -71,9 +73,11 @@ export function buildCodexQuotaHtml(
             const used = Math.max(0, Math.min(100, rawUsed));
             const usedPercent = Math.round(used);
             const remainingPercent = Math.max(0, 100 - usedPercent);
-            const duration = compactDuration(window.windowDurationMins);
+            const duration = compactDuration(window.windowDurationMins, labels.weekly);
             const windowName = duration || (windows.length > 1 ? `${labels.window} ${index + 1}` : '');
-            const title = windowName ? `${label} · ${windowName}` : label;
+            const title = duration === labels.weekly
+                ? labels.weekly
+                : windowName ? `${label} · ${windowName}` : label;
             const usedText = `${usedPercent}% ${labels.used}`;
             const tone = used >= 90 ? 'critical' : used >= 70 ? 'warning' : 'normal';
             const reset = resetTime(window.resetsAt, locale, labels.unknownReset);

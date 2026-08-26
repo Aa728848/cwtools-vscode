@@ -109,6 +109,7 @@ describe('Codex quota presentation', () => {
             remaining: 'remaining',
             resets: 'Resets',
             window: 'Window',
+            weekly: 'Weekly limit',
             unknownReset: 'unknown',
             unavailable: 'unavailable',
         }, 'en');
@@ -120,6 +121,25 @@ describe('Codex quota presentation', () => {
         expect(html).to.include('Codex &lt;main&gt; · 5h');
         expect(html).to.include('28% remaining');
         expect(html).to.not.include('Codex <main>');
+    });
+
+    it('names the seven-day Codex window as the weekly limit', () => {
+        const html = buildCodexQuotaHtml([{
+            limitName: 'Codex',
+            secondary: { usedPercent: 6, windowDurationMins: 7 * 24 * 60 },
+        }], {
+            used: '已用',
+            remaining: '剩余',
+            resets: '重置',
+            window: '窗口',
+            weekly: '周额度',
+            unknownReset: '重置时间未知',
+            unavailable: '额度不可用',
+        }, 'zh-CN');
+
+        expect(html).to.include('>周额度<');
+        expect(html).to.not.include('Codex · 周额度');
+        expect(html).to.not.include('Codex · 7d');
     });
 });
 

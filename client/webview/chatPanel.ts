@@ -8147,6 +8147,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                     remaining: tr('remaining', '剩余'),
                     resets: tr('Resets', '重置'),
                     window: tr('Window', '窗口'),
+                    weekly: tr('Weekly limit', '周额度'),
                     unknownReset: tr('unknown reset time', '重置时间未知'),
                     unavailable: tr('Quota details are unavailable for this account.', '当前账户暂未返回额度详情。'),
                 }, chatI18n.locale === 'zh-cn' ? 'zh-CN' : 'en');

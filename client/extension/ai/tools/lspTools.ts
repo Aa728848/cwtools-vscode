@@ -2814,6 +2814,9 @@ export class LspToolHandler {
         const severityFilter = args.severity && args.severity !== 'all' ? args.severity : null;
 
         const allPairs = vs.languages.getDiagnostics();
+        const exactTargetPath = args.file
+            ? path.resolve(this.ctx.workspaceRoot, args.file).replace(/\\/g, '/').toLowerCase()
+            : undefined;
         const activelyIgnoredKeys = new Set<string>();
         const ignored = generalDomain
             ? []
@@ -2838,10 +2841,9 @@ export class LspToolHandler {
 
             const fsPath = uri.fsPath;
 
-            if (args.file) {
-                const fileNorm = args.file.replace(/\\/g, '/').toLowerCase();
-                const pathNorm = fsPath.replace(/\\/g, '/').toLowerCase();
-                if (!pathNorm.includes(fileNorm)) continue;
+            if (exactTargetPath) {
+                const pathNorm = path.resolve(fsPath).replace(/\\/g, '/').toLowerCase();
+                if (pathNorm !== exactTargetPath) continue;
             }
 
             if (isAgentTempPath(fsPath)) continue;
@@ -2937,11 +2939,29 @@ export class LspToolHandler {
         try {
             const client = this.clientGetter();
             if (client) {
-                const statusResult = await this.lspRequest<Record<string, unknown> | null>(
-                    'cwtools.ai.getValidationStatus',
-                    [],
-                    2000,
-                );
+                let statusResult: Record<string, unknown> | null = null;
+                let fileStatusResult: Record<string, unknown> | null = null;
+                if (exactTargetPath) {
+                    try {
+                        fileStatusResult = await this.lspRequest<Record<string, unknown> | null>(
+                            'cwtools.ai.getDiagnosticsFresh',
+                            [vs.Uri.file(path.resolve(this.ctx.workspaceRoot, args.file!)).toString()],
+                            2000,
+                        );
+                    } catch {
+                        // Target freshness is authoritative when available, but the
+                        // Problems snapshot remains usable if this metadata call fails.
+                    }
+                }
+                try {
+                    statusResult = await this.lspRequest<Record<string, unknown> | null>(
+                        'cwtools.ai.getValidationStatus',
+                        [],
+                        2000,
+                    );
+                } catch {
+                    // Workspace runtime metadata is supplemental for a targeted query.
+                }
                 diagnosticService = {
                     status: 'available',
                     responded: true,
@@ -2952,6 +2972,64 @@ export class LspToolHandler {
                     pendingGlobalKinds = Array.isArray(statusResult.pendingGlobalKinds)
                         ? statusResult.pendingGlobalKinds as string[] : [];
                     lastEpoch = typeof statusResult.epoch === 'number' ? statusResult.epoch : 0;
+                }
+                // File-targeted diagnostics must use that file's freshness. The
+                // workspace aggregate can be pending because of an unrelated file.
+                if (fileStatusResult && typeof fileStatusResult === 'object') {
+                    const fileFreshness = fileStatusResult.freshness;
+                    if (fileFreshness === 'fresh' || fileFreshness === 'pending' || fileFreshness === 'stale') {
+                        freshness = fileFreshness;
+                    }
+                    pendingGlobalKinds = Array.isArray(fileStatusResult.pendingGlobalKinds)
+                        ? fileStatusResult.pendingGlobalKinds.map(String)
+                        : [];
+                    lastEpoch = typeof fileStatusResult.epoch === 'number' ? fileStatusResult.epoch : lastEpoch;
+                    // Keep diagnostics and freshness from the same server snapshot.
+                    // Problems-panel publication can lag the per-file epoch after a
+                    // force-disk AI write.
+                    if (Array.isArray(fileStatusResult.diagnostics)) {
+                        entries.splice(0);
+                        filesWithDiags.clear();
+                        summary.errors = 0;
+                        summary.warnings = 0;
+                        summary.info = 0;
+                        summary.hints = 0;
+                        totalDiagCount = 0;
+                        for (const value of fileStatusResult.diagnostics) {
+                            if (!value || typeof value !== 'object') continue;
+                            const item = value as Record<string, unknown>;
+                            const sev = item.severity === 'warning' || item.severity === 'info' || item.severity === 'hint'
+                                ? item.severity
+                                : 'error';
+                            if (severityFilter && sev !== severityFilter) continue;
+                            totalDiagCount++;
+                            filesWithDiags.add(path.resolve(this.ctx.workspaceRoot, args.file!));
+                            if (sev === 'error') summary.errors++;
+                            else if (sev === 'warning') summary.warnings++;
+                            else if (sev === 'info') summary.info++;
+                            else summary.hints++;
+                            if (entries.length >= limit) continue;
+                            const target = path.resolve(this.ctx.workspaceRoot, args.file!);
+                            entries.push({
+                                file: target,
+                                logicalPath: path.relative(this.ctx.workspaceRoot, target).replace(/\\/g, '/'),
+                                severity: sev,
+                                message: String(item.message ?? ''),
+                                line: typeof item.line === 'number' ? item.line : 0,
+                                column: typeof item.column === 'number' ? item.column : 0,
+                                code: item.code === undefined ? undefined : String(item.code),
+                                category: item.category as import('../types').DiagnosticAnalysisCategory | undefined,
+                                repairHint: typeof item.repairHint === 'string' ? item.repairHint : undefined,
+                                expectedType: typeof item.expectedType === 'string' ? item.expectedType : undefined,
+                                actualType: typeof item.actualType === 'string' ? item.actualType : undefined,
+                                scope: typeof item.scope === 'string' ? item.scope : undefined,
+                                symbol: typeof item.symbol === 'string' ? item.symbol : undefined,
+                                confidence: typeof item.confidence === 'string' ? item.confidence : undefined,
+                                metadataSource: typeof item.metadataSource === 'string' ? item.metadataSource : undefined,
+                                data: item.data,
+                            });
+                        }
+                    }
                 }
             }
         } catch (error) {

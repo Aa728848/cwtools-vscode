@@ -812,15 +812,15 @@ describe('dispatch_agents tool wiring', () => {
 });
 
 describe('approved blueprint dispatch', () => {
-    it('hydrates the canonical feature manifest and task DAG from design_blueprint.json', async () => {
+    it('hydrates the canonical feature manifest and task DAG from Implementation_Plan.md', async () => {
         const fs = require('fs') as typeof import('fs');
         const os = require('os') as typeof import('os');
         const path = require('path') as typeof import('path');
         const root = fs.mkdtempSync(path.join(os.tmpdir(), 'cwtools-blueprint-dispatch-'));
         const blueprintDir = path.join(root, '.cwtools-ai', 'topic');
-        const blueprintFile = path.join(blueprintDir, 'design_blueprint.json');
+        const blueprintFile = path.join(blueprintDir, 'Implementation_Plan.md');
         fs.mkdirSync(blueprintDir, { recursive: true });
-        fs.writeFileSync(blueprintFile, JSON.stringify({
+        fs.writeFileSync(blueprintFile, `# Implementation Plan\n\n## Executable Contract\n\n\`\`\`cwtools-blueprint\n${JSON.stringify({
             schemaVersion: 2,
             featureManifest: {
                 objective: 'Build approved event',
@@ -838,7 +838,7 @@ describe('approved blueprint dispatch', () => {
                 dependencies: [],
                 acceptanceChecks: [{ id: 'event_exists', description: 'Event exists', type: 'entity_exists', subject: 'approved.1' }],
             }],
-        }));
+        }, null, 2)}\n\`\`\`\n`, 'utf8');
 
         const { AgentToolExecutor } = require('../../extension/ai/agentTools') as typeof import('../../extension/ai/agentTools');
         const { Orchestrator } = require('../../extension/ai/orchestrator/orchestrator') as typeof import('../../extension/ai/orchestrator/orchestrator');
@@ -2274,11 +2274,43 @@ describe('QualityGate', () => {
         expect(usage.cacheRequests?.[0]?.promptFingerprint).to.equal('review-fp');
     });
 
-    it('reviewOutput keeps pending diagnostics distinct from a passed final check', async () => {
+    it('accepts pending-only diagnostics as advisory without launching a reviewer', async () => {
+        let reviewerCalls = 0;
         const runner = {
             toolExecutor: {
                 workspaceRoot: process.cwd(),
+                finalizePdxEvidence: async () => ({
+                    passed: true, filesChecked: [], conflictFiles: [], pendingFiles: [], coveragePendingFiles: [], report: '',
+                }),
                 execute: async () => ({ totalDiagnosticCount: 0, diagnostics: [], freshness: 'pending' }),
+            },
+            run: async () => {
+                reviewerCalls++;
+                throw new Error('reviewer should not run for freshness-only pending state');
+            },
+        };
+
+        const result = await new QualityGate().reviewOutput(
+            runner as any,
+            ['events/test.txt'],
+            {},
+        );
+
+        expect(result.passed).to.equal(true);
+        expect(result.diagnosticErrors).to.equal(0);
+        expect(result.validationPending).to.equal(1);
+        expect(result.reviewReport).to.include('advisory');
+        expect(reviewerCalls).to.equal(0);
+    });
+
+    it('does not accept stale cached errors as freshness-only success', async () => {
+        const runner = {
+            toolExecutor: {
+                workspaceRoot: process.cwd(),
+                finalizePdxEvidence: async () => ({
+                    passed: true, filesChecked: [], conflictFiles: [], pendingFiles: [], coveragePendingFiles: [], report: '',
+                }),
+                execute: async () => ({ totalDiagnosticCount: 3, diagnostics: [{ severity: 'error' }], freshness: 'stale' }),
             },
             run: async () => ({
                 explanation: '```json\n{"logicIssuesCount":0,"logicIssues":[],"fixSuggestions":[],"acceptanceEvidence":[],"acceptanceFailures":[]}\n```',
@@ -2289,11 +2321,7 @@ describe('QualityGate', () => {
             }),
         };
 
-        const result = await new QualityGate().reviewOutput(
-            runner as any,
-            ['events/test.txt'],
-            {},
-        );
+        const result = await new QualityGate().reviewOutput(runner as any, ['events/test.txt'], {});
 
         expect(result.passed).to.equal(false);
         expect(result.diagnosticErrors).to.equal(0);

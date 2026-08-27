@@ -2079,7 +2079,7 @@ export interface WriteDesignBlueprintResult {
     success: boolean;
     message: string;
     filePath: string;
-    /** Machine-readable approved contract stored beside the Markdown blueprint. */
+    /** Canonical Implementation Plan path containing the embedded machine-readable contract. */
     dataFilePath?: string;
     writtenFiles?: string[];
 }

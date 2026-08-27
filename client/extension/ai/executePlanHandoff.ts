@@ -4,6 +4,7 @@ import { WRITE_TOOLS } from './tools/registry';
 
 const PLAN_ARTIFACT_PATTERN = /(?:^|[\\/])implementation_plan\.md$/i;
 const PLAN_HANDOFF_BLOCK_PATTERN = /```cwtools-plan\s*([\s\S]*?)```/gi;
+const BLUEPRINT_CONTRACT_BLOCK_PATTERN = /```cwtools-blueprint\s*([\s\S]*?)```/gi;
 const EXECUTE_HANDOFF_MODES = new Set<AgentMode>(['build', 'utility', 'orchestrator', 'script']);
 const NON_PROJECT_WRITE_TOOLS = new Set(['git_ops', 'write_design_blueprint', 'save_workflow']);
 
@@ -54,7 +55,17 @@ export const IMPLEMENTATION_PLAN_HANDOFF_CONTRACT = `Before requesting approval,
   "unresolvedCritical": []
 }
 \`\`\`
-The host renders an approval card only when this contract is present and valid. Every target must be an exact file path without globs. Shared files are allowed only when all operations touching them are strictly ordered by dependencies; unordered writers are rejected. Operation dependencies must reference valid operation IDs without cycles, and unresolvedCritical must be empty. Do not emit the block for preliminary analysis, exploration findings, clarification questions, drafts, or blocked plans.`;
+The host renders an approval card only when this contract is present and valid. Every target must be an exact file path without globs. Shared files are allowed only when all operations touching them are strictly ordered by dependencies; unordered writers are rejected. Operation dependencies must reference valid operation IDs without cycles, and unresolvedCritical must be empty. Do not emit the block for preliminary analysis, exploration findings, clarification questions, drafts, or blocked plans.
+
+Mandatory pre-write validation — perform this locally before the FIRST write; do not learn the format by triggering the guard:
+1. Write exactly one complete document to the exact path shown as **Implementation Plan File** in Current Editor Context. Use that literal path and do not substitute a project-root path, plan.md, or another filename.
+2. Choose one literal tier value: \`lightweight\`, \`structured\`, or \`blueprint\`. Never copy the schema placeholder text \`lightweight | structured | blueprint\`.
+3. Outside machine-readable fences, provide at least 1 heading and 80 characters for lightweight, 2 headings and 160 characters for structured, or 3 headings and 240 characters for blueprint.
+4. Include exactly one \`cwtools-plan\` fence containing strict JSON. Do not add comments, trailing commas, Markdown inside JSON, or a second fence.
+5. Make \`targetFiles\` a non-empty, unique list of exact project file paths. It must equal the unique union of every \`operations[].files\` entry; verification-only operations may have an empty files list.
+6. Give every operation a non-empty unique ID and description. Every \`dependsOn\` ID must exist; no self-reference or cycle is allowed. If two operations touch the same file, one must depend directly or transitively on the other.
+7. Keep \`verification\` and \`acceptanceCriteria\` non-empty. Structured and blueprint plans also require at least one concrete risk+mitigation and one rollback step. \`unresolvedCritical\` must be exactly \`[]\`.
+8. Submit the plan write by itself and STOP. Do not combine it with project writes, commands, or \`dispatch_agents\` before approval.`;
 
 export const IMPLEMENTATION_PLAN_AUTHORING_GUIDANCE = `Plan authoring guidance — keep the contract strict while adapting the prose to the task:
 - Scale the plan to the real work. A cohesive one-file change may have one concise operation; cross-file work should split only at meaningful ownership or dependency boundaries. Do not pad a small task or force every plan into the same large-task template.
@@ -65,7 +76,7 @@ export const IMPLEMENTATION_PLAN_AUTHORING_GUIDANCE = `Plan authoring guidance �
 - Keep verification, acceptanceCriteria, risks with mitigations, and rollback concrete and non-empty. For a small change these may be brief, but they must still describe an observable check, a realistic regression risk, and a practical recovery action.
 - unresolvedCritical may be empty only after every decision that could change files, architecture, behavior, or acceptance has been resolved. If such a decision remains, ask the user or report the blocker; do not write a ready plan or emit the handoff block.
 - Append exactly one cwtools-plan fence containing strict JSON with no comments or trailing commas. The JSON is a machine-readable index of the prose, not a substitute for it.
-- When writing the plan artifact, use the exact Agent Workspace Dir from Current Editor Context and the filename Implementation_Plan.md. Never guess a topic path or write plan.md/project-root artifacts. Perform this self-check before the first write instead of relying on tool rejection to discover omissions.`;
+- When writing the plan artifact, copy the literal **Implementation Plan File** path ending in \`Implementation_Plan.md\` from Current Editor Context. Never construct or guess the topic path, and never write plan.md or a project-root artifact. Perform the mandatory pre-write validation above before the first write instead of relying on tool rejection to discover omissions.`;
 
 export const EXECUTE_IMPLEMENTATION_PLAN_HANDOFF_CONTRACT = `${IMPLEMENTATION_PLAN_HANDOFF_CONTRACT}
 ${IMPLEMENTATION_PLAN_AUTHORING_GUIDANCE}
@@ -129,6 +140,23 @@ function parsePlanHandoff(planText: string): { blockCount: number; value?: unkno
     if (blocks.length !== 1 || !blocks[0]?.[1]) return { blockCount: blocks.length };
     try {
         return { blockCount: 1, value: JSON.parse(blocks[0][1]) };
+    } catch {
+        return { blockCount: 1 };
+    }
+}
+
+/** Parse the optional executable Paradox contract embedded in the canonical Implementation Plan. */
+export function parseImplementationPlanBlueprint(planText: string): {
+    blockCount: number;
+    value?: { schemaVersion?: number; featureManifest?: unknown; taskPlan?: unknown };
+} {
+    const blocks = [...planText.matchAll(BLUEPRINT_CONTRACT_BLOCK_PATTERN)];
+    if (blocks.length !== 1 || !blocks[0]?.[1]) return { blockCount: blocks.length };
+    try {
+        const value = JSON.parse(blocks[0][1]);
+        return value && typeof value === 'object' && !Array.isArray(value)
+            ? { blockCount: 1, value }
+            : { blockCount: 1 };
     } catch {
         return { blockCount: 1 };
     }
@@ -255,7 +283,10 @@ export function validateImplementationPlan(planText: string): ImplementationPlan
         }
     }
 
-    const humanBody = planText.replace(PLAN_HANDOFF_BLOCK_PATTERN, '').trim();
+    const humanBody = planText
+        .replace(PLAN_HANDOFF_BLOCK_PATTERN, '')
+        .replace(BLUEPRINT_CONTRACT_BLOCK_PATTERN, '')
+        .trim();
     const headingCount = humanBody.match(/^#{1,4}\s+\S.+$/gm)?.length ?? 0;
     const minimumBody = tier === 'lightweight' ? 80 : tier === 'structured' ? 160 : 240;
     const minimumHeadings = tier === 'lightweight' ? 1 : tier === 'structured' ? 2 : 3;

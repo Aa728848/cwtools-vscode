@@ -18,7 +18,7 @@ import {
     shortenText,
     type TopicPanelItem,
 } from '../../webview/chat/topics';
-import { buildSubagentCardHtml, buildSubagentMetaHtml, hasVisibleLiveContent, latestLiveToolName, pushBoundedWebviewLiveStep } from '../../webview/chat/liveSteps';
+import { buildSubagentCardHtml, buildSubagentMetaHtml, hasVisibleLiveContent, latestLiveToolName, pushBoundedWebviewLiveStep, reactivateSubagentStreamState } from '../../webview/chat/liveSteps';
 import { buildSettingsOverviewModel, resolveSettingsModelContextTokens } from '../../webview/chat/settingsOverview';
 import { buildCodexQuotaHtml } from '../../webview/chat/codexQuota';
 import { getChatI18n } from '../../webview/chat/i18n';
@@ -55,6 +55,27 @@ describe('long user message presentation', () => {
         }
         expect(steps).to.have.length(4);
         expect(steps.map(step => step.invocationId)).to.deep.equal(['call-6', 'call-7', 'call-8', 'call-9']);
+    });
+
+    it('reactivates a completed subagent when a new subtask run starts', () => {
+        const state = {
+            liveSteps: [],
+            startedAt: 10,
+            lastStepAt: 20,
+            completedAt: 30,
+            isComplete: true,
+            subtaskStatus: 'completed',
+        };
+        expect(reactivateSubagentStreamState(state, 'tool_call', 100)).to.equal(false);
+        expect(state.isComplete).to.equal(true);
+        expect(reactivateSubagentStreamState(state, 'subtask_start', 100)).to.equal(true);
+        expect(state).to.deep.include({
+            startedAt: 100,
+            lastStepAt: 100,
+            completedAt: null,
+            isComplete: false,
+            subtaskStatus: null,
+        });
     });
 
     it('collapses long single-paragraph input and bounds its preview', () => {

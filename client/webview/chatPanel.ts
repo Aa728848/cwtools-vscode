@@ -37,6 +37,7 @@ import {
     hasVisibleLiveContent,
     latestLiveToolName,
     pushBoundedWebviewLiveStep,
+    reactivateSubagentStreamState,
 } from './chat/liveSteps';
 import {
     applySettingsOverview,
@@ -3326,7 +3327,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                     pushUnique({
                         id: `restored:plan:${step.content}`,
                         kind: 'plan',
-                        title: step.mode === 'orchestrator' ? tr('General Multi-Agent Plan', '通用多 Agent 计划') : step.mode === 'script' ? tr('Paradox Multi-Agent Plan', 'Paradox 多 Agent 计划') : 'Implementation Plan',
+                        title: tr('Implementation Plan', '实施计划'),
                         summary: 'Restored from chat history.',
                         filePath: step.content,
                         relPath: step.content,
@@ -4941,6 +4942,9 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         if (!currentAssistantDiv) return;
 
         const state = getStreamState(s.agentId);
+        if (s.agentId && reactivateSubagentStreamState(state, s.type)) {
+            ensureSubagentTicker();
+        }
         if ((s.type === 'thinking' || s.type === 'thinking_content') && !state.liveThinkBlock && !hasVisibleLiveContent(s)) {
             if (s.transactionCard && s.transactionCard.status === 'pending') {
                 showTransactionCard(s.transactionCard);
@@ -7209,7 +7213,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                 card.innerHTML = `
                     <div class="plan-file-icon">${svgIconNoMargin(isOrchestratorPlan ? 'bot' : 'clipboard')}</div>
                     <div class="plan-file-info">
-                        <div class="plan-file-title">${isScriptPlan ? tr('Paradox Multi-Agent plan exported', 'Paradox 多 Agent 计划已导出') : isOrchestratorPlan ? tr('General Multi-Agent plan exported', '通用多 Agent 计划已导出') : tr('Plan exported', '计划已导出')}</div>
+                        <div class="plan-file-title">${tr('Implementation Plan exported', '实施计划已导出')}</div>
                         <div class="plan-file-path">${escapeHtml(msg.relPath)}</div>
                         <div class="plan-file-hint">${isScriptPlan ? tr('After confirmation, dispatch_agents will run the dynamic pipeline in parallel.', '确认后将按动态流水线进入 dispatch_agents 并行执行。') : isOrchestratorPlan ? tr('After confirmation, dispatch_agents will run this in parallel.', '确认后将进入 dispatch_agents 并行执行。') : tr('After confirmation, execution will switch to build mode.', '确认后将切换到构建执行。')}</div>
                     </div>

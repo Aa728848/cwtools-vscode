@@ -230,7 +230,7 @@ describe('PromptBuilder 快照与稳定性测试', () => {
         expect(prompt).to.include('Never call `write_design_blueprint`');
         expect(prompt).to.not.include('Blueprint Self-check');
         expect(prompt).to.include('Structured dispatch preflight for Paradox write waves');
-        expect(prompt).to.include('exact current-topic `design_blueprint.json`');
+        expect(prompt).to.include('exact current-topic `Implementation_Plan.md`');
         expect(prompt).to.include('schemaVersion 2 manifest and task DAG remain canonical');
         expect(prompt).to.include('cross-check task IDs, files, entity contracts, dependencies, and acceptance checks');
     });

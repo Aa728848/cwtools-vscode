@@ -102,6 +102,8 @@ describe('agent manager cross-surface contracts', () => {
 
     it('keeps task progress and changed files visible above the manager composer', () => {
         const manager = fs.readFileSync(path.join(root, 'client/webview/agentManager.ts'), 'utf8');
+        const runner = fs.readFileSync(path.join(root, 'client/extension/ai/agentRunner.ts'), 'utf8');
+        const ledger = fs.readFileSync(path.join(root, 'client/extension/ai/runner/runLedger.ts'), 'utf8');
         const css = fs.readFileSync(path.join(root, 'client/webview/agentManager.css'), 'utf8');
 
         expect(manager).to.include("runDock.id = 'managerRunDock'");
@@ -110,8 +112,13 @@ describe('agent manager cross-surface contracts', () => {
         expect(manager).to.include('data-manager-dock-file=');
         expect(manager).to.include('focusWorkspaceFile(');
         expect(manager).to.include("if (evt?.type === 'file_change')");
+        expect(manager).to.include("if (evt?.type !== 'file_change') continue");
+        expect(manager).to.include("diffLines: Array.isArray(payload.diffLines) ? payload.diffLines : undefined");
         expect(manager).to.include("if (evt?.type === 'tool_call_end')");
         expect(manager).to.include("if (evt?.type === 'subagent_end')");
+        expect(runner).to.include("status: 'modified', additions: diff.additions, deletions: diff.deletions");
+        expect(ledger).to.include("if (type === 'file_change')");
+        expect(ledger).to.include('compacted.diffLines = lines');
         expect(css).to.include('.manager-run-dock');
         expect(css).to.include('.manager-dock-popover');
         expect(css).to.include('.manager-file-status-created');

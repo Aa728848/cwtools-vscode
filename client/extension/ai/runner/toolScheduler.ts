@@ -123,8 +123,7 @@ export function getAgentToolTargetFiles(
         case 'write_design_blueprint':
             if (workspaceRoot) {
                 const blueprintDir = getPrivateTopicStorageDir(topicId || 'default', workspaceRoot);
-                paths.push(path.join(blueprintDir, 'design_blueprint.md'));
-                paths.push(path.join(blueprintDir, 'design_blueprint.json'));
+                paths.push(path.join(blueprintDir, 'Implementation_Plan.md'));
             }
             break;
         case 'save_workflow':

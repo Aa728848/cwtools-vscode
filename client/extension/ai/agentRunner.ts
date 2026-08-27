@@ -39,7 +39,7 @@ import * as path from 'path';
 import { AIService } from './aiService';
 import { AgentToolExecutor, TOOL_DEFINITIONS } from './agentTools';
 import { PromptBuilder, hashToolDefinitionsForFingerprint, orderMessagesForStablePrefix } from './promptBuilder';
-import { getEffectiveEndpoint, getProvider, getProviderApiFormat, isModelVisionCapable } from './providers';
+import { getEffectiveEndpoint, getModelOutputTokens, getProvider, getProviderApiFormat, isModelVisionCapable } from './providers';
 import { DEFAULT_REASONING_KEY, detectReasoningKey, reasoningValue } from './providers/reasoningKey';
 import { getCurrentModelPricing, getCacheDiscountFactor } from './pricing';
 import { buildProviderCallTokenUsage } from './providerCallUsage';
@@ -48,6 +48,7 @@ import { tryRepairJson as _tryRepairJson } from './jsonRepair';
 import { repairToolArgs } from './tools/argRepair';
 import { budgetToolResult as _budgetToolResult, compactToolResultForUi, getToolResultBudget } from './contextBudget';
 import type { CompactMessagesOptions } from './contextBudget';
+import { computeLineDiff } from './diffEngine';
 import { AGENT, SOURCE, aiText } from './messages';
 import { describeImagesWithMinimaxCli } from './visionAdapter';
 import { ErrorReporter } from './errorReporter';
@@ -65,6 +66,8 @@ import {
     isExecutionActionTool,
     resolveMaxToolIterations,
     resolveRunMaxOutputTokens,
+    resolveContextSafeOutputTokens,
+    resolveCompactionOutputReserve,
     shouldAutoDiscloseExecutionTools,
     shouldContinueAuthorizedExecution,
     finalResponseRequiresUserInput,
@@ -1347,6 +1350,9 @@ export class AgentRunner {
             admissionModel,
             options?.maxContextTokens ?? admissionConfig.maxContextTokens,
         );
+        const admissionDesiredOutput = resolveRunMaxOutputTokens({ useSlimPrompt: options?.useSlimPrompt })
+            ?? getModelOutputTokens(admissionModel ?? getProvider(admissionProviderId).defaultModel, admissionProviderId);
+        const admissionOutputReserve = resolveCompactionOutputReserve(admissionDesiredOutput, admissionContextLimit);
         const costGateConfig = vs.workspace.getConfiguration('stellarisLanguageServices.ai.performance');
         const costGateEnabled = costGateConfig.get<boolean>('compactionCostGate.enabled', true);
         const admissionMaintenance = runContextMaintenance(conversationHistory, 'admission', {
@@ -1359,7 +1365,7 @@ export class AgentRunner {
                     || admissionPreserveMimo,
                 preserveReasoningContentForToolCalls: admissionPreserveMimo,
             },
-            extraTokens: fixedPromptTokens + toolSchemaTokens,
+            extraTokens: fixedPromptTokens + toolSchemaTokens + admissionOutputReserve,
             calibrateEstimate: (t) => this.calibrateContextEstimate(admissionProviderId, admissionModel, t),
             // NOTE: when this prunes, conversationHistory is mutated in place even
             // if the paid summarizer later fails or is throttled. That is
@@ -1404,7 +1410,7 @@ export class AgentRunner {
             options,
             tokenAccumulator,
             {
-                reservedTokens: fixedPromptTokens + toolSchemaTokens,
+                reservedTokens: fixedPromptTokens + toolSchemaTokens + admissionOutputReserve,
                 precomputedRequestTokens: admissionMaintenance.afterTokens,
                 costGateFired: admissionMaintenance.costGateFired,
             },
@@ -1805,6 +1811,14 @@ export class AgentRunner {
         const manualPreserveMimo = manualProviderId.startsWith('mimo')
             || (manualModel ?? '').toLowerCase().startsWith('mimo-v2');
         const manualSchemaTokens = estimateTokenCount(JSON.stringify(TOOL_DEFINITIONS));
+        const manualDesiredOutput = resolveRunMaxOutputTokens({ useSlimPrompt: options?.useSlimPrompt })
+            ?? getModelOutputTokens(manualModel ?? getProvider(manualProviderId).defaultModel, manualProviderId);
+        const manualContextLimit = resolveCompactionContextLimit(
+            manualProviderId,
+            manualModel,
+            options?.maxContextTokens ?? manualConfig.maxContextTokens,
+        );
+        const manualOutputReserve = resolveCompactionOutputReserve(manualDesiredOutput, manualContextLimit);
         runContextMaintenance(history, 'manual', {
             toolResultBudget: getToolResultBudget(
                 manualConfig.maxContextTokens > 0
@@ -1815,7 +1829,7 @@ export class AgentRunner {
                     || manualPreserveMimo,
                 preserveReasoningContentForToolCalls: manualPreserveMimo,
             },
-            extraTokens: manualSchemaTokens,
+            extraTokens: manualSchemaTokens + manualOutputReserve,
             summarizeThreshold: 0,
         });
         const compacted = await this.maybeCompactHistory(
@@ -1831,7 +1845,7 @@ export class AgentRunner {
             tokenAccumulator,
             {
                 force: true,
-                reservedTokens: manualSchemaTokens,
+                reservedTokens: manualSchemaTokens + manualOutputReserve,
             },
         );
         if (compacted === history) return { compacted: false, steps };
@@ -2324,6 +2338,8 @@ export class AgentRunner {
         const configuredReservedTokens = Math.max(0,
             vs.workspace.getConfiguration('stellarisLanguageServices.ai.performance')
                 .get<number>('compactionReservedTokens', 4_096));
+        const desiredRunOutputTokens = resolveRunMaxOutputTokens({ useSlimPrompt: options?.useSlimPrompt })
+            ?? getModelOutputTokens(options?.model ?? _config0.model ?? _provider0.defaultModel, _providerId0);
         const midLoopThreshold = Math.floor((contextLimit - configuredReservedTokens) * configuredBlockRatio);
         const toolResultBudget = getToolResultBudget(baseContextLimit);
 
@@ -2726,7 +2742,17 @@ export class AgentRunner {
             const activeProviderConfig = this.aiService.getConfig();
             const requestProviderId = options?.providerId ?? activeProviderConfig.provider;
             const requestModel = options?.model ?? activeProviderConfig.model;
-            const requestMaxTokens = resolveRunMaxOutputTokens({ useSlimPrompt: options?.useSlimPrompt });
+            const activeToolSchemaTokens = estimateTokenCount(JSON.stringify(availableTools));
+            const estimatedPromptTokens = calibrateLoopEstimate(
+                messages.reduce((sum, message) => sum + estimateChatMessageTokens(message), 0)
+                + activeToolSchemaTokens,
+            );
+            const requestMaxTokens = resolveContextSafeOutputTokens({
+                desiredTokens: desiredRunOutputTokens,
+                contextLimit,
+                promptTokens: estimatedPromptTokens,
+                safetyMarginTokens: configuredReservedTokens,
+            });
             const requestDisableThinking = options?.useSlimPrompt === true && (mode === 'loc_writer' || mode === 'loc_translator');
             const appendModelDeltaEvent = (kind: string, text: string) => {
                 const now = Date.now();
@@ -3269,8 +3295,43 @@ export class AgentRunner {
             // output only thinking tokens or was mid-tool-call with no text content.
             const hasContent = assistantMessage.content && (typeof assistantMessage.content === 'string' ? assistantMessage.content.trim().length > 0 : true);
             const hasToolCalls = assistantMessage.tool_calls && assistantMessage.tool_calls.length > 0;
+            if (choice.finish_reason === 'length' && !hasContent && !hasToolCalls) {
+                emitStep({
+                    type: 'error',
+                    content: aiText(
+                        'The model exhausted its output budget before producing visible text. Compacting context and retrying with a context-safe output allowance...',
+                        '模型在生成可见文本前已耗尽输出预算。正在压缩上下文，并以安全的输出额度重试...',
+                    ),
+                    timestamp: Date.now(),
+                });
+                if (topLevelLengthRecoveries >= MAX_TOP_LEVEL_LENGTH_RECOVERIES) {
+                    return '[Agent Execution Terminated]: The model exhausted its output limit twice; generation stopped safely.';
+                }
+                topLevelLengthRecoveries++;
+                runContextMaintenance(messages, 'overflow', {
+                    toolResultBudget,
+                    compactionOptions,
+                    extraTokens: activeToolSchemaTokens + configuredReservedTokens,
+                    calibrateEstimate: calibrateLoopEstimate,
+                    summarizeThreshold: 0,
+                });
+                refreshLiveVsCodeContext(messages);
+                messages = await this.maybeCompactHistory(
+                    messages,
+                    emitStep,
+                    options,
+                    tokenAccumulator,
+                    { reservedTokens: activeToolSchemaTokens + configuredReservedTokens, force: true },
+                );
+                refreshLiveVsCodeContext(messages);
+                messages.push({
+                    role: 'user',
+                    content: '[SYSTEM] The previous response used its output budget without producing visible text. Continue from the compacted context with one concise tool call or final answer.',
+                });
+                continue;
+            }
             if (!hasContent && !hasToolCalls) {
-                assistantMessage.content = '[Response truncated — no text content was generated before the length limit was reached.]';
+                assistantMessage.content = '[Response contained no text or tool call.]';
             }
 
             messages.push(assistantMessage);
@@ -3938,6 +3999,7 @@ export class AgentRunner {
                     const lockPaths = (filePaths.length > 0 ? filePaths : ['__global__'])
                         .map(p => p === '__global__' ? p : canonicalPathKey(p, this.toolExecutor.workspaceRoot));
                     const waitTimeoutMs = options?.writeQueueWaitTimeoutMs ?? (options?.useSlimPrompt ? 60_000 : 90_000);
+                    let previousFileContent: string | null | undefined;
 
                     try {
                         await this.writeQueue.enqueue(lockPaths, async () => {
@@ -3946,10 +4008,26 @@ export class AgentRunner {
                                 options?.abortSignal?.throwIfAborted();
                                 await runLedger.appendEvent(runRecord.runId, 'tool_call_start', { toolName: ci.toolName }, { invocationId: ci.invocationId });
                             
-                            // Sub-agent snapshot isolate hook
-                            if (onFileWrite && primaryFilePath) {
-                                const prev = fs.existsSync(primaryFilePath) ? fs.readFileSync(primaryFilePath, 'utf8') : null;
-                                onFileWrite(primaryFilePath, prev);
+                            // Sub-agent snapshot isolate hook. Keep the same bounded
+                            // before image locally so the durable file_change event can
+                            // reconstruct line-level details after a manager reload.
+                            if (primaryFilePath) {
+                                try {
+                                    const stat = fs.existsSync(primaryFilePath) ? fs.statSync(primaryFilePath) : undefined;
+                                    previousFileContent = stat && stat.size <= 500_000
+                                        ? fs.readFileSync(primaryFilePath, 'utf8')
+                                        : stat ? undefined : null;
+                                } catch {
+                                    previousFileContent = undefined;
+                                }
+                                if (onFileWrite) {
+                                    // Preserve the existing write-ownership hook even when
+                                    // the file is too large to retain for a durable inline diff.
+                                    const hookContent = previousFileContent === undefined && fs.existsSync(primaryFilePath)
+                                        ? fs.readFileSync(primaryFilePath, 'utf8')
+                                        : previousFileContent ?? null;
+                                    onFileWrite(primaryFilePath, hookContent);
+                                }
                             }
 
                             if (isSupersededWrite) {
@@ -4021,10 +4099,44 @@ export class AgentRunner {
                                     { invocationId: ci.invocationId }
                                 );
                                 if (success && primaryFilePath) {
+                                    const fileChange: Record<string, unknown> = { filePath: primaryFilePath };
+                                    try {
+                                        const existsAfter = fs.existsSync(primaryFilePath);
+                                        const afterStat = existsAfter ? fs.statSync(primaryFilePath) : undefined;
+                                        const currentContent = afterStat && afterStat.size <= 500_000
+                                            ? fs.readFileSync(primaryFilePath, 'utf8')
+                                            : afterStat ? undefined : null;
+                                        if (previousFileContent !== undefined && currentContent !== undefined) {
+                                            if (previousFileContent === null && currentContent !== null) {
+                                                const lines = currentContent.split('\n');
+                                                Object.assign(fileChange, {
+                                                    status: 'created', additions: lines.length, deletions: 0,
+                                                    diffPreview: `+ ${lines.length} lines added`,
+                                                    diffLines: lines.slice(0, 1200).map((content, index) => ({ type: 'add', content, newLineNo: index + 1 })),
+                                                });
+                                            } else if (previousFileContent !== null && currentContent === null) {
+                                                const lines = previousFileContent.split('\n');
+                                                Object.assign(fileChange, {
+                                                    status: 'deleted', additions: 0, deletions: lines.length,
+                                                    diffPreview: `- ${lines.length} lines removed`,
+                                                    diffLines: lines.slice(0, 1200).map((content, index) => ({ type: 'remove', content, oldLineNo: index + 1 })),
+                                                });
+                                            } else if (previousFileContent !== null && currentContent !== null) {
+                                                const diff = computeLineDiff(previousFileContent, currentContent);
+                                                Object.assign(fileChange, {
+                                                    status: 'modified', additions: diff.additions, deletions: diff.deletions,
+                                                    diffPreview: `+${diff.additions} -${diff.deletions}${diff.truncated ? ' (truncated)' : ''}`,
+                                                    diffLines: diff.lines,
+                                                });
+                                            }
+                                        }
+                                    } catch (error) {
+                                        reportBestEffortFailure('ledger.file_change_diff', { filePath: primaryFilePath }, error);
+                                    }
                                     await runLedger.appendEvent(
                                         runRecord.runId,
                                         'file_change',
-                                        { filePath: primaryFilePath },
+                                        fileChange,
                                         { invocationId: ci.invocationId }
                                     );
                                 }

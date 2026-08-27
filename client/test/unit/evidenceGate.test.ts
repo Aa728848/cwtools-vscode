@@ -1123,6 +1123,37 @@ describe('AgentToolExecutor evidence gate wiring', () => {
         expect(result.diagnosticsSupersededConflictKinds).to.deep.equal(['symbol_exists']);
     });
 
+    it('accepts zero-error pending diagnostics when deterministic evidence passed', () => {
+        const { classifyPostWriteValidation } = loadExecutorModule();
+        const decision = makePostWriteDecision('symbol_exists');
+        decision.verdict = 'allow';
+        decision.claims[0]!.status = 'verified';
+        decision.claims[0]!.blocking = false;
+        const result = classifyPostWriteValidation(decision, {
+            diagnostics: [],
+            freshness: 'pending',
+        });
+
+        expect(result).to.deep.include({
+            verdict: 'allow',
+            evidencePassed: true,
+            diagnosticsPassed: true,
+            diagnosticsFreshness: 'pending',
+        });
+    });
+
+    it('does not let pending diagnostics supersede a confirmed evidence conflict', () => {
+        const { classifyPostWriteValidation } = loadExecutorModule();
+        const result = classifyPostWriteValidation(makePostWriteDecision('symbol_exists'), {
+            diagnostics: [],
+            freshness: 'pending',
+        });
+
+        expect(result.verdict).to.equal('repair');
+        expect(result.evidencePassed).to.equal(false);
+        expect(result.diagnosticsSupersededEvidenceConflicts).to.equal(undefined);
+    });
+
     it('does not let diagnostics supersede impact evidence conflicts', () => {
         const { classifyPostWriteValidation } = loadExecutorModule();
         const result = classifyPostWriteValidation(makePostWriteDecision('call_chain'), {
@@ -1284,7 +1315,7 @@ describe('AgentToolExecutor evidence gate wiring', () => {
         expect(result.postWriteValidation).to.deep.include({
             verdict: 'pending',
             evidencePassed: false,
-            diagnosticsPassed: false,
+            diagnosticsPassed: true,
         });
         expect(result.requiresValidation).to.equal(true);
         expect(result.requiresRepair).to.not.equal(true);

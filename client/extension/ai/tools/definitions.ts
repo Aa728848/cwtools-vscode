@@ -1615,7 +1615,7 @@ const RAW_TOOL_DEFINITIONS: ToolDefinition[] = [
         type: 'function',
         function: {
             name: 'write_design_blueprint',
-            description: 'Write a structured, executable design blueprint for a Paradox game-entity pipeline to the Agent Workspace. Paradox planning and Paradox Multi-Agent execution MUST use it before implementing connected multi-entity work; General Multi-Agent repository work does not require this PDX-specific contract. Besides human-readable topology, it requires featureManifest and taskPlan so the approved entity edges, produces/consumes contracts, dependencies, and acceptance criteria can be loaded directly by dispatch_agents without model reinterpretation. It saves design_blueprint.md plus design_blueprint.json. Research must follow the evidence hierarchy: CWT/LSP and typed indexes first, current project examples second, bounded vanilla archetype evidence third.',
+            description: 'Write the blueprint tier of the unified Implementation Plan for a Paradox game-entity pipeline. Paradox planning and Paradox Multi-Agent execution MUST use it before implementing connected multi-entity work; General Multi-Agent repository work does not require this PDX-specific contract. The single topic-scoped Implementation_Plan.md contains the human-readable topology, approval handoff, featureManifest, and taskPlan so dispatch_agents can load the approved contract without model reinterpretation or sidecar plan files. Research must follow the evidence hierarchy: CWT/LSP and typed indexes first, current project examples second, bounded vanilla archetype evidence third.',
             parameters: {
                 type: 'object',
                 properties: {
@@ -1962,7 +1962,7 @@ const RAW_TOOL_DEFINITIONS: ToolDefinition[] = [
                 properties: {
                     blueprintFile: {
                         type: 'string',
-                        description: 'Approved topic-scoped design_blueprint.json. When provided, its featureManifest and taskPlan replace model-supplied tasks as the canonical approved contract.',
+                        description: 'Approved topic-scoped Implementation_Plan.md with an embedded cwtools-blueprint contract. When provided, its featureManifest and taskPlan replace model-supplied tasks as the canonical approved contract. Legacy design_blueprint.json remains read-compatible.',
                     },
                     userConstraints: {
                         type: 'object',

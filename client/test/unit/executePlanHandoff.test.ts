@@ -286,7 +286,13 @@ describe('Execute-to-Plan handoff', () => {
             expect(prompt).to.include('Scale the plan to the real work');
             expect(prompt).to.include('Section names and depth should follow the task');
             expect(prompt).to.include('equal the union of operation files');
-            expect(prompt).to.include('Perform this self-check before the first write');
+            expect(prompt).to.include('Mandatory pre-write validation');
+            expect(prompt).to.include('before the FIRST write');
+            expect(prompt).to.include('one literal tier value');
+            expect(prompt).to.include('targetFiles');
+            expect(prompt).to.include('unique union');
+            expect(prompt).to.include('Submit the plan write by itself and STOP');
+            expect(prompt).to.include('Implementation Plan File');
             expect(prompt).to.include('Implementation_Plan.md');
         }
     });

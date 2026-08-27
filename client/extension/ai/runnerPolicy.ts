@@ -447,6 +447,31 @@ export function resolveRunMaxOutputTokens(options: Pick<ToolFilterOptions, 'useS
     return options.useSlimPrompt ? SLIM_SUB_AGENT_MAX_OUTPUT_TOKENS : undefined;
 }
 
+export function resolveCompactionOutputReserve(desiredTokens: number, contextLimit: number): number {
+    const finiteDesired = Number.isFinite(desiredTokens) ? Math.max(0, Math.floor(desiredTokens)) : 0;
+    const finiteLimit = Number.isFinite(contextLimit) ? Math.max(1, Math.floor(contextLimit)) : 1;
+    return Math.min(finiteDesired, Math.max(4_096, Math.floor(finiteLimit * 0.25)));
+}
+
+export interface ContextSafeOutputBudgetOptions {
+    desiredTokens: number;
+    contextLimit: number;
+    promptTokens: number;
+    safetyMarginTokens?: number;
+    minimumTokens?: number;
+}
+
+/** Clamp the advertised output allowance to the request's remaining context window. */
+export function resolveContextSafeOutputTokens(options: ContextSafeOutputBudgetOptions): number {
+    const desired = Math.max(1, Math.floor(options.desiredTokens));
+    const minimum = Math.max(1, Math.floor(options.minimumTokens ?? 1_024));
+    const available = Math.floor(options.contextLimit)
+        - Math.max(0, Math.ceil(options.promptTokens))
+        - Math.max(0, Math.ceil(options.safetyMarginTokens ?? 2_048));
+    if (available < minimum) return Math.max(1, Math.min(desired, available));
+    return Math.min(desired, available);
+}
+
 export function filterToolDefinitionsForMode(
     tools: readonly ToolDefinition[],
     mode: AgentMode,

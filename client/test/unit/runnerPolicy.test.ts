@@ -10,6 +10,8 @@ import {
     isExecutionActionTool,
     resolveMaxToolIterations,
     resolveRunMaxOutputTokens,
+    resolveContextSafeOutputTokens,
+    resolveCompactionOutputReserve,
     shouldAutoDiscloseExecutionTools,
     shouldContinueAuthorizedExecution,
     finalResponseRequiresUserInput,
@@ -468,6 +470,28 @@ describe('runnerPolicy', () => {
     it('caps model output only for slim sub-agent runs', () => {
         expect(resolveRunMaxOutputTokens()).to.equal(undefined);
         expect(resolveRunMaxOutputTokens({ useSlimPrompt: true })).to.equal(SLIM_SUB_AGENT_MAX_OUTPUT_TOKENS);
+    });
+
+    it('clamps advertised output to the remaining context window', () => {
+        expect(resolveContextSafeOutputTokens({
+            desiredTokens: 384_000,
+            contextLimit: 1_000_000,
+            promptTokens: 600_000,
+            safetyMarginTokens: 4_096,
+        })).to.equal(395_904);
+        expect(resolveContextSafeOutputTokens({
+            desiredTokens: 16_384,
+            contextLimit: 128_000,
+            promptTokens: 10_000,
+        })).to.equal(16_384);
+        expect(resolveContextSafeOutputTokens({
+            desiredTokens: 16_384,
+            contextLimit: 8_000,
+            promptTokens: 7_500,
+            safetyMarginTokens: 1_000,
+        })).to.equal(1);
+        expect(resolveCompactionOutputReserve(384_000, 1_000_000)).to.equal(250_000);
+        expect(resolveCompactionOutputReserve(16_384, 128_000)).to.equal(16_384);
     });
 
     it('lets top-level build runs rely on soft and hard runtime budgets', () => {

@@ -387,6 +387,19 @@ const DEFAULT_STATE: ManagerEnhancementState = {
                 addRecord(file);
             }
         }
+        for (const evt of Array.isArray(events) ? events : []) {
+            if (evt?.type !== 'file_change') continue;
+            const payload = evt?.payload || {};
+            if (typeof payload.filePath !== 'string' || !payload.filePath.trim()) continue;
+            addRecord({
+                file: payload.filePath,
+                status: typeof payload.status === 'string' ? payload.status : undefined,
+                additions: typeof payload.additions === 'number' ? payload.additions : undefined,
+                deletions: typeof payload.deletions === 'number' ? payload.deletions : undefined,
+                diffPreview: typeof payload.diffPreview === 'string' ? payload.diffPreview : undefined,
+                diffLines: Array.isArray(payload.diffLines) ? payload.diffLines : undefined,
+            });
+        }
         for (const file of collectChangedFiles(run, events)) {
             addRecord({ file });
         }

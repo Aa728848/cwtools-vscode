@@ -8,6 +8,22 @@ export interface AgentStreamStateLike {
     lastStepAt: number;
     completedAt: number | null;
     isComplete: boolean;
+    subtaskStatus?: string | null;
+}
+
+/** Reopen a cached completed subagent state when its explicit next run begins. */
+export function reactivateSubagentStreamState(
+    state: AgentStreamStateLike,
+    stepType: unknown,
+    now = Date.now(),
+): boolean {
+    if (stepType !== 'subtask_start' || !state.isComplete) return false;
+    state.isComplete = false;
+    state.subtaskStatus = null;
+    state.completedAt = null;
+    state.startedAt = now;
+    state.lastStepAt = now;
+    return true;
 }
 
 export const WEBVIEW_LIVE_STEP_LIMIT = 160;

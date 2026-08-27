@@ -138,7 +138,7 @@ describe('PromptBuilder context budgeting', () => {
         }
     });
 
-    it('injects only the current topic design blueprint into build prompts', () => {
+    it('injects only the current topic unified implementation plan into build prompts', () => {
         const { PromptBuilder } = loadPromptBuilder();
         const workspaceRoot = makeWorkspace();
         try {
@@ -146,13 +146,13 @@ describe('PromptBuilder context budgeting', () => {
             const topicB = path.join(workspaceRoot, '.cwtools', 'topic-b');
             fs.mkdirSync(topicA, { recursive: true });
             fs.mkdirSync(topicB, { recursive: true });
-            fs.writeFileSync(path.join(topicA, 'design_blueprint.md'), '# Design Blueprint: Topic A\n\nA_ONLY_ENTITY\n', 'utf8');
-            fs.writeFileSync(path.join(topicB, 'design_blueprint.md'), '# Design Blueprint: Topic B\n\nB_ONLY_ENTITY\n', 'utf8');
+            fs.writeFileSync(path.join(topicA, 'Implementation_Plan.md'), '# Implementation Plan: Topic A\n\nA_ONLY_ENTITY\n', 'utf8');
+            fs.writeFileSync(path.join(topicB, 'Implementation_Plan.md'), '# Implementation Plan: Topic B\n\nB_ONLY_ENTITY\n', 'utf8');
 
             const builder = new PromptBuilder(workspaceRoot);
             const prompt = builder.buildSystemPromptForMode('build', undefined, undefined, 'topic-a');
 
-            expect(prompt).to.include('Current Topic Design Blueprint');
+            expect(prompt).to.include('Current Topic Implementation Plan');
             expect(prompt).to.include('topic-a');
             expect(prompt).to.include('A_ONLY_ENTITY');
             expect(prompt).to.not.include('B_ONLY_ENTITY');
@@ -233,6 +233,17 @@ describe('PromptBuilder context budgeting', () => {
         } finally {
             cleanupWorkspace(workspaceRoot);
         }
+    });
+
+    it('provides the exact canonical Implementation Plan path before a write', () => {
+        const { PromptBuilder } = loadPromptBuilder();
+        const builder = new PromptBuilder(process.cwd());
+        const context = builder.buildContextMessages({ topicId: 'topic-123' });
+        const content = String(context[0]!.content);
+
+        expect(content).to.include('**Implementation Plan File**');
+        expect(content).to.include('.cwtools/topic-123/Implementation_Plan.md');
+        expect(content).to.include('copy this exact literal path');
     });
 
     it('tells agents to reuse one temporary helper script per task', () => {

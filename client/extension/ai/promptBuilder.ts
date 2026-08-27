@@ -714,7 +714,7 @@ export class PromptBuilder {
             if (runtime.mode) {
                 lines.push(`mode: ${runtime.mode}`);
                 if (runtime.mode === 'plan') {
-                    lines.push('plan-write-policy: Only write_design_blueprint and topic-scoped Agent Workspace card artifacts (Implementation_Plan.md, design_blueprint.md, walkthrough.md, task.md, annotation files, and tmp/artifact previews) may be written. Project file mutations are blocked at runtime.');
+                    lines.push('plan-write-policy: Only write_design_blueprint and topic-scoped Agent Workspace card artifacts (Implementation_Plan.md, walkthrough.md, task.md, annotation files, and tmp/artifact previews) may be written. All plan-like content belongs in Implementation_Plan.md; project file mutations are blocked at runtime.');
                 }
             }
             if (runtime.workflow) {
@@ -1032,13 +1032,13 @@ export class PromptBuilder {
     }
 
     /**
-     * Read the current topic's design_blueprint.md and return it as a directive for Build mode.
-     * The blueprint is produced by Plan Mode's write_design_blueprint tool and guides code generation.
+     * Read the current topic's unified Implementation_Plan.md and return it as a directive for Build mode.
+     * Paradox blueprint details and the executable task DAG are embedded in this canonical plan.
      */
     private getDesignBlueprintPrompt(topicId?: string): string {
         try {
             if (!this.workspaceRoot || !topicId) return '';
-            const blueprintPath = getExistingPrivateTopicFilePath(topicId, 'design_blueprint.md', this.workspaceRoot);
+            const blueprintPath = getExistingPrivateTopicFilePath(topicId, 'Implementation_Plan.md', this.workspaceRoot);
             if (!blueprintPath || !fs.existsSync(blueprintPath)) return '';
             const content = fs.readFileSync(blueprintPath, 'utf-8').trim();
             if (!content) return '';
@@ -1046,19 +1046,19 @@ export class PromptBuilder {
             // Keep both the head and tail so dependency order, cleanup, and risk sections survive truncation.
             const maxChars = 12_000;
             const trimmed = content.length > maxChars
-                ? `${content.substring(0, 8_000)}\n\n... [blueprint middle truncated; read ${relativePath} for the full current-topic blueprint] ...\n\n${content.substring(content.length - 3_000)}`
+                ? `${content.substring(0, 8_000)}\n\n... [plan middle truncated; read ${relativePath} for the full current-topic Implementation Plan] ...\n\n${content.substring(content.length - 3_000)}`
                 : content;
-            return `<design-blueprint>
-## Current Topic Design Blueprint (MANDATORY - Follow This Architecture)
-This blueprint belongs to topic \`${topicId}\` and is stored at \`${relativePath}\`. You MUST:
+            return `<implementation-plan>
+## Current Topic Implementation Plan (MANDATORY - Follow This Architecture)
+This unified plan belongs to topic \`${topicId}\` and is stored at \`${relativePath}\`. You MUST:
 1. Create files in the exact dependency order listed
 2. Use the exact typed entity IDs and scope contexts specified
 3. Verify scope transitions at every TypeDef/dependency boundary
 4. Preserve the selected dependency families, behavior plan, and cleanup plan
-5. Reference this blueprint when making ANY architectural decision
+5. Reference this Implementation Plan when making ANY architectural decision
 
 ${trimmed}
-</design-blueprint>`;
+</implementation-plan>`;
         } catch {
             return '';
         }
@@ -1184,6 +1184,7 @@ ${trimmed}
 
         if (options.topicId) {
             contextParts.push(`**Agent Workspace Dir**: \`.cwtools/${options.topicId}/\``);
+            contextParts.push(`**Implementation Plan File**: \`.cwtools/${options.topicId}/Implementation_Plan.md\` (copy this exact literal path for the one canonical plan; do not guess or rename it)`);
             contextParts.push(`**Agent Scratch Dir**: \`.cwtools/${options.topicId}/scratch/\``);
             if (commandToolsAvailable) {
                 contextParts.push(`**Agent Helper Script**: \`.cwtools/${options.topicId}/scratch/agent_helper.py\` (reuse/overwrite for temporary Python helpers; delete only temporary execution/verification helpers, never user-requested deliverables)`);

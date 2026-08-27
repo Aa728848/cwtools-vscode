@@ -373,9 +373,11 @@ export class QualityGate {
                 if (res && typeof res === 'object') {
                     const record = res as Record<string, unknown>;
                     const count = typeof record.totalDiagnosticCount === 'number' ? record.totalDiagnosticCount : 0;
-                    if (count > 0) {
+                    if (record.freshness === 'fresh' && count > 0) {
                         diagnosticErrorCount += count;
                         diagResults.push(`File: ${file}\n${JSON.stringify(record.diagnostics, null, 2)}`);
+                    } else if (record.freshness !== 'fresh' && count > 0) {
+                        diagResults.push(`File: ${file}\n${count} cached diagnostic(s) are advisory because freshness is ${String(record.freshness ?? 'unavailable')}.`);
                     }
                     if (record.freshness !== 'fresh') {
                         validationPendingFiles.add(resolvedFile);
@@ -413,6 +415,53 @@ export class QualityGate {
                 : '',
             semantic.report,
         ].filter(Boolean).join('\n\n');
+
+        // A reviewer cannot make the LSP fresher. If every deterministic logic,
+        // semantic, evidence, and acceptance check passed and the only remaining
+        // uncertainty is diagnostic freshness, accept once with an advisory and
+        // skip the token-heavy reviewer/repair stack.
+        const freshnessOnlyPending = validationPendingCount > 0
+            && unresolvedEvidencePending.length === 0
+            && diagnosticErrorCount === 0
+            && !preFetchedDiagnostics.includes('cached diagnostic(s) are advisory')
+            && finalEvidence.conflictFiles.length === 0
+            && semantic.issues.length === 0
+            && semantic.acceptanceFailures.length === 0;
+        if (freshnessOnlyPending) {
+            cleanupReviewBudget();
+            const reviewReport = [
+                deterministicReport,
+                aiText(
+                    `${validationPendingCount} file diagnostic refresh(es) remain pending; deterministic checks passed, so this is advisory and does not restart validation.`,
+                    `${validationPendingCount} 个文件的诊断刷新仍在等待；确定性检查已通过，因此仅作提示，不再重新启动验证。`,
+                ),
+            ].filter(Boolean).join('\n\n');
+            this.eventSink?.appendSoon('quality_gate_decision', {
+                passed: true,
+                acceptedWithAdvisory: true,
+                diagnosticErrors: 0,
+                validationPending: validationPendingCount,
+                evidenceConflicts: 0,
+                logicIssues: 0,
+                semanticIssues: 0,
+                acceptanceFailures: [],
+                filesChecked: writtenFiles,
+                fixSuggestions: [],
+            });
+            return {
+                passed: true,
+                diagnosticErrors: 0,
+                validationPending: validationPendingCount,
+                evidenceConflicts: 0,
+                logicIssues: 0,
+                semanticIssues: 0,
+                acceptanceFailures: [],
+                filesChecked: writtenFiles,
+                reviewReport,
+                semanticReport: deterministicReport,
+                fixSuggestions: [],
+            };
+        }
         const prompt = this.buildCombinedReviewPrompt(writtenFiles, preFetchedDiagnostics, reviewContext, deterministicReport);
         
         // Run the hidden post-dispatch reviewer as a real bounded child agent.

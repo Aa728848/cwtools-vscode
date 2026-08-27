@@ -86,6 +86,7 @@ import { CandidateTransactionManager, sha256 } from './runner/candidateTransacti
 import { buildTypedPdxCandidate } from './tools/typedPdxWrite';
 import { globalPartitionedWriteQueue } from './runner/writeCoordinator';
 import { validateOverlayCatalog } from './runner/overlayCatalog';
+import { parseImplementationPlanBlueprint } from './executePlanHandoff';
 import { solveScopeBridge, type ScopeBridgeCandidate } from './tools/scopeBridge';
 import { HostArchetypeArtifactStore } from './tools/archetypeArtifacts';
 import { canonicalPathKey } from './workspacePaths';
@@ -207,11 +208,16 @@ export function classifyPostWriteValidation(
         ? result.freshness
         : undefined;
     const blockingClaims = decision?.claims.filter(claim => claim.blocking) ?? [];
+    const hasNoReportedDiagnosticErrors = comparableDelta
+        ? introducedDiagnosticErrors === false
+        : diagnosticErrors !== undefined && diagnosticErrors.length === 0;
+    // A pending/stale global refresh is not itself a defect. When deterministic
+    // post-write evidence passed and the latest available file diagnostics report
+    // no errors, accept the write instead of re-running repair agents indefinitely.
     const diagnosticsPassed = freshness === 'fresh'
-        && (comparableDelta
-            ? introducedDiagnosticErrors === false
-            : diagnosticErrors !== undefined && diagnosticErrors.length === 0);
-    const supersededConflicts = diagnosticsPassed
+        ? hasNoReportedDiagnosticErrors
+        : freshness === 'pending' || freshness === 'stale';
+    const supersededConflicts = freshness === 'fresh' && diagnosticsPassed
         ? blockingClaims.filter(diagnosticsCanSupersedeEvidenceConflict)
         : [];
     const supersededConflictSet = new Set(supersededConflicts);
@@ -3893,10 +3899,11 @@ export class AgentToolExecutor {
             const privateStorageRoot = getPrivateAiStorageRoot(this.workspaceRoot);
             const insidePrivateStorage = !!privateStorageRoot && isPathInsideOrEqual(resolvedBlueprint, path.resolve(privateStorageRoot));
             if (!insideLegacyAiStorage && !insidePrivateStorage) {
-                return { success: false, error: 'blueprintFile must be a topic-scoped design_blueprint.json inside the agent storage directory.' };
+                return { success: false, error: 'blueprintFile must be a topic-scoped Implementation_Plan.md inside the agent storage directory.' };
             }
-            if (path.basename(resolvedBlueprint).toLowerCase() !== 'design_blueprint.json') {
-                return { success: false, error: 'blueprintFile must point to design_blueprint.json.' };
+            const blueprintBaseName = path.basename(resolvedBlueprint).toLowerCase();
+            if (blueprintBaseName !== 'implementation_plan.md' && blueprintBaseName !== 'design_blueprint.json') {
+                return { success: false, error: 'blueprintFile must point to the unified Implementation_Plan.md (legacy design_blueprint.json remains read-compatible).' };
             }
             const approvedTopicId = runnerOptsForLimits?.topicId;
             if (approvedTopicId) {
@@ -3911,13 +3918,20 @@ export class AgentToolExecutor {
                 if (!stat.isFile() || stat.size > 2 * 1024 * 1024) {
                     return { success: false, error: 'Approved blueprint data is missing or exceeds the 2 MiB safety limit.' };
                 }
-                const approvedBlueprint = JSON.parse(fs.readFileSync(resolvedBlueprint, 'utf8')) as {
-                    schemaVersion?: number;
-                    featureManifest?: import('./types').FeatureManifest;
-                    taskPlan?: typeof tasks;
-                };
-                if (approvedBlueprint.schemaVersion !== 2 || !approvedBlueprint.featureManifest || !Array.isArray(approvedBlueprint.taskPlan)) {
-                    return { success: false, error: 'Approved blueprint data is not a valid schemaVersion 2 executable contract.' };
+                const fileContent = fs.readFileSync(resolvedBlueprint, 'utf8').replace(/^\uFEFF/, '');
+                const approvedBlueprint = blueprintBaseName === 'implementation_plan.md'
+                    ? parseImplementationPlanBlueprint(fileContent).value as {
+                        schemaVersion?: number;
+                        featureManifest?: import('./types').FeatureManifest;
+                        taskPlan?: typeof tasks;
+                    } | undefined
+                    : JSON.parse(fileContent) as {
+                        schemaVersion?: number;
+                        featureManifest?: import('./types').FeatureManifest;
+                        taskPlan?: typeof tasks;
+                    };
+                if (approvedBlueprint?.schemaVersion !== 2 || !approvedBlueprint.featureManifest || !Array.isArray(approvedBlueprint.taskPlan)) {
+                    return { success: false, error: 'Approved Implementation Plan does not contain a valid schemaVersion 2 executable blueprint contract.' };
                 }
                 featureManifest = approvedBlueprint.featureManifest;
                 tasks = approvedBlueprint.taskPlan;

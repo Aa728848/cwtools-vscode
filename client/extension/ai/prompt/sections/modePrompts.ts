@@ -59,7 +59,7 @@ const DESIGN_BLUEPRINT_AUTHORING_GUIDANCE = `### Paradox Dynamic Coupling Assess
 - Trace scopes, call direction, IDs, files, dependencies, evidence, rewards, cleanup, and acceptance checks across the whole object immediately before the first \`write_design_blueprint\` call. Do not use repeated validator rejection as the blueprint-authoring loop.`;
 
 const PARADOX_DISPATCH_AUTHORING_GUIDANCE = `### Structured dispatch preflight for Paradox write waves
-- Prefer an approved blueprint when one exists: pass the exact current-topic \`design_blueprint.json\` emitted by the host as \`blueprintFile\` and let its schemaVersion 2 manifest and task DAG remain canonical. Do not guess another topic path, point at the Markdown companion, or reconstruct its tasks by hand. Plan and Explore fan-out never executes a \`blueprintFile\`.
+- Prefer an approved blueprint when one exists: pass the exact current-topic \`Implementation_Plan.md\` emitted by the host as \`blueprintFile\`; its embedded schemaVersion 2 manifest and task DAG remain canonical. Do not guess another topic path or reconstruct its tasks by hand. Plan and Explore fan-out never executes a \`blueprintFile\`.
 - Without a blueprint, dispatch writers only from the approved design. Supply a feature objective and stable acceptance criteria, give each writer exact in-workspace \`plannedFiles\` and the relevant \`produces\`/\`consumes\` contracts, make localisation consume its owner, and make dependencies reflect producer/consumer order and shared-file serialization.
 - Before each call, check the current mode's allowed roles and wave-size limit, then cross-check task IDs, files, entity contracts, dependencies, and acceptance checks as one payload. Read-only discovery waves stay free of writer roles and write intent.
 - User scope is authoritative. If the user retains localisation work or explicitly ignores warnings, encode that decision in \`userConstraints\`; never create a localisation task for user-owned work. Error-severity diagnostics remain blocking even when warnings are ignored.`;
@@ -291,6 +291,8 @@ ${IMPLEMENTATION_PLAN_AUTHORING_GUIDANCE}
 
 4. **Deliverable**
    - Produce a self-contained, execution-ready plan with objective, exact operations and files in dependency order, ownership, verification, acceptance criteria, risks, and rollback.
+   - Before the first write, run the mandatory pre-write validation in the Approval Handoff against the fully assembled content. Write only to the literal **Implementation Plan File** supplied in Current Editor Context; never probe the guard with partial drafts.
+   - The plan write is the only tool call in its submission step. After it succeeds, STOP for approval; do not dispatch or mutate project files in that turn.
    - Do not write implementation code in Plan Mode.
 
 ## Project Context Usage

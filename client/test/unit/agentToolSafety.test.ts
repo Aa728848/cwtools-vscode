@@ -1106,8 +1106,7 @@ describe('agent tool file path safety', () => {
             .to.deep.equal([path.join(workspaceRoot, 'common', 'relics', 'samplemod.txt')]);
         expect(getAgentToolTargetFiles('write_design_blueprint', {}, workspaceRoot, 'topic-123'))
             .to.deep.equal([
-                path.join(workspaceRoot, '.cwtools', 'topic-123', 'design_blueprint.md'),
-                path.join(workspaceRoot, '.cwtools', 'topic-123', 'design_blueprint.json'),
+                path.join(workspaceRoot, '.cwtools', 'topic-123', 'Implementation_Plan.md'),
             ]);
 
         expect(SUPERSEDED_BY_LATER_SAME_FILE_WRITE_TOOLS.has('write_file')).to.equal(true);
@@ -1147,7 +1146,7 @@ describe('agent tool file path safety', () => {
 
         expect(result.success).to.equal(false);
         expect(result.message).to.include('missing required planning section');
-        expect(fs.existsSync(path.join(workspaceRoot, '.cwtools', 'topic-blueprint', 'design_blueprint.md'))).to.equal(false);
+        expect(fs.existsSync(path.join(workspaceRoot, '.cwtools', 'topic-blueprint', 'Implementation_Plan.md'))).to.equal(false);
     });
 
     it('writes complete design blueprints with a completeness gate', async () => {
@@ -1257,17 +1256,20 @@ describe('agent tool file path safety', () => {
         }, makeContext('topic-blueprint'));
 
         expect(result.success).to.equal(true);
-        const content = fs.readFileSync(path.join(workspaceRoot, '.cwtools', 'topic-blueprint', 'design_blueprint.md'), 'utf8');
+        const planPath = path.join(workspaceRoot, '.cwtools', 'topic-blueprint', 'Implementation_Plan.md');
+        const content = fs.readFileSync(planPath, 'utf8');
+        expect(content).to.include('# Implementation Plan: Native Hook Event Chain');
         expect(content).to.include('## Blueprint Completeness Gate');
         expect(content).to.include('Common Directory Capability Review');
         expect(content).to.include('Reward and Outcome Plan');
         expect(content).to.include('Executable Feature Relationship Contract');
         expect(content).to.include('Approved Multi-Agent Task DAG');
-        const dataPath = path.join(workspaceRoot, '.cwtools', 'topic-blueprint', 'design_blueprint.json');
-        expect(result.dataFilePath).to.equal(dataPath);
-        const data = JSON.parse(fs.readFileSync(dataPath, 'utf8'));
-        expect(data.schemaVersion).to.equal(2);
-        expect(data.featureManifest.requiredEdges[0].to).to.equal('test_chain_active');
+        expect(content).to.include('```cwtools-blueprint');
+        expect(content).to.include('```cwtools-plan');
+        expect(result.dataFilePath).to.equal(planPath);
+        expect(result.writtenFiles).to.deep.equal([planPath]);
+        expect(fs.existsSync(path.join(workspaceRoot, '.cwtools', 'topic-blueprint', 'design_blueprint.md'))).to.equal(false);
+        expect(fs.existsSync(path.join(workspaceRoot, '.cwtools', 'topic-blueprint', 'design_blueprint.json'))).to.equal(false);
     });
 
     it('lets orchestrator sub-agents write localisation without waiting for pending-write confirmation', async () => {

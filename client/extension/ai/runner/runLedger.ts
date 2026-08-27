@@ -460,8 +460,24 @@ export class RunLedger {
         if (type === 'tool_call_end') {
             return { ...obj, result: this.compactUnknown(obj.result) };
         }
-        if (type === 'file_change' && obj.diff) {
-            return { ...obj, diff: this.clipText(obj.diff) };
+        if (type === 'file_change') {
+            const compacted: Record<string, unknown> = {
+                ...obj,
+                ...(obj.diff !== undefined ? { diff: this.clipText(obj.diff) } : {}),
+            };
+            if (Array.isArray(obj.diffLines)) {
+                const lines: unknown[] = [];
+                let chars = 0;
+                for (const line of obj.diffLines) {
+                    const raw = JSON.stringify(line);
+                    if (lines.length >= 240 || chars + raw.length > RUN_LEDGER_FIELD_MAX_CHARS) break;
+                    lines.push(line);
+                    chars += raw.length;
+                }
+                compacted.diffLines = lines;
+                if (lines.length < obj.diffLines.length) compacted.diffTruncated = true;
+            }
+            return compacted;
         }
         if (type === 'compaction_end' && obj.summary) {
             return { ...obj, summary: this.compactUnknown(obj.summary) };

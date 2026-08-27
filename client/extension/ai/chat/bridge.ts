@@ -221,8 +221,8 @@ export async function routeWebviewMessage(
                 reviseContext = `\n\n${aiText('Annotations for the parts that need revision:', '需要修改的地方批注如下:')}\n` + msg.annotations.map((a: { section: string; note: string }) => `- ${a.section}: ${a.note}`).join('\n');
             }
             const revisePrompt = aiText(
-                'Please revise the existing execution plan based on my annotations. If the task has a design blueprint, call write_design_blueprint again so both design_blueprint.md and the executable design_blueprint.json contract are updated before requesting approval again.',
-                '请根据我的批注修改现有执行计划。如果任务包含设计蓝图，必须再次调用 write_design_blueprint，同时更新 design_blueprint.md 和可执行的 design_blueprint.json 契约，然后再请求批准。',
+                'Please revise the existing Implementation Plan based on my annotations. If it contains a Paradox blueprint, call write_design_blueprint again so the human-readable design and embedded executable contract are updated together in the same Implementation_Plan.md before requesting approval again.',
+                '请根据我的批注修改现有 Implementation Plan。如果其中包含 Paradox 蓝图，必须再次调用 write_design_blueprint，在同一个 Implementation_Plan.md 中同步更新人类可读设计和内嵌可执行契约，然后再请求批准。',
             ) + reviseContext;
             await provider.handleUserMessage(revisePrompt, undefined, undefined, true, true);
             break;

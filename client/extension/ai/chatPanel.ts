@@ -1282,10 +1282,23 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             if (latestUserHistory && durableRunId) latestUserHistory.runId = durableRunId;
             const topicId = this.topicManager.currentTopic?.id || 'default';
             const generatedPlanPath = this.findGeneratedTopicFile(topicId, 'Implementation_Plan.md');
-            const hasCurrentPlanArtifact = !!generatedPlanPath && hasImplementationPlanArtifact(result.steps, {
+            const successfulToolInvocations = new Set(result.steps
+                .filter(step => step.type === 'tool_result'
+                    && typeof step.invocationId === 'string'
+                    && step.toolResult
+                    && typeof step.toolResult === 'object'
+                    && !Array.isArray(step.toolResult)
+                    && (step.toolResult as Record<string, unknown>).success !== false)
+                .map(step => step.invocationId as string));
+            const wroteUnifiedBlueprintPlan = result.steps.some(step =>
+                step.type === 'tool_call'
+                && step.toolName === 'write_design_blueprint'
+                && typeof step.invocationId === 'string'
+                && successfulToolInvocations.has(step.invocationId));
+            const hasCurrentPlanArtifact = !!generatedPlanPath && (wroteUnifiedBlueprintPlan || hasImplementationPlanArtifact(result.steps, {
                 expectedPath: generatedPlanPath,
                 workspaceRoot: getProjectWorkspaceRoot(),
-            });
+            }));
             let interactivePlanText = result.explanation;
             if (generatedPlanPath && hasCurrentPlanArtifact) {
                 try {
@@ -1331,11 +1344,6 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                 });
             }
             this.topicManager.saveTopics();
-
-            const bpPath = this.findGeneratedTopicFile(topicId, 'design_blueprint.md');
-            if (bpPath) {
-                await this.renderBlueprintUI(bpPath, topicId, uiSteps);
-            }
 
             this.collectArtifactsFromResult(uiResult);
 
@@ -1968,14 +1976,10 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         const workspaceRoot = getProjectWorkspaceRoot();
         const findExisting = (fileName: string) => getPrivateTopicFileCandidates(topicId, fileName, workspaceRoot)
             .find(candidate => fs.existsSync(candidate));
-        const blueprintData = findExisting('design_blueprint.json');
-        const blueprintMarkdown = findExisting('design_blueprint.md');
         const implementationPlan = findExisting('Implementation_Plan.md');
-        return [
-            blueprintData ? `Approved blueprintFile: ${blueprintData}` : '',
-            blueprintMarkdown ? `Approved blueprint: ${blueprintMarkdown}` : '',
-            implementationPlan ? `Approved implementation plan: ${implementationPlan}` : '',
-        ].filter(Boolean).join('\n');
+        return implementationPlan
+            ? [`Approved implementation plan: ${implementationPlan}`, `Approved blueprintFile: ${implementationPlan}`].join('\n')
+            : '';
     }
 
     private _recordFileSnapshot(filePath: string): void {
@@ -2033,8 +2037,8 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             this.upsertArtifact({
                 id: this.artifactId('plan', path.basename(filePath)),
                 kind: 'plan',
-                title: approvalMode === 'orchestrator' ? 'General Multi-Agent Plan' : 'Paradox Multi-Agent Plan',
-                summary: 'DAG dispatch plan awaiting approval.',
+                title: 'Implementation Plan',
+                summary: 'Unified implementation and dispatch plan awaiting approval.',
                 filePath,
                 relPath,
                 status: 'pending',

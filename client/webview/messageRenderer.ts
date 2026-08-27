@@ -87,12 +87,12 @@ export interface ToolPairOptions {
 
 const TOOL_ICON_LABELS: Record<string, string> = {
     read_file: '📂', write_file: '💾', edit_file: '✏️', multiedit: '✏️', save_workflow: '💾',
-    list_directory: '📁', search_mod_files: '🔍', validate_code: '✅',
-    get_file_context: '📄', get_diagnostics: '🩺', get_completion_at: '💡',
+    list_directory: '📁', grep: '🔍', validate_code: '✅',
+    get_diagnostics: '🩺', get_completion_at: '💡',
     document_symbols: '🔖', workspace_symbols: '🔖', go_to_definition: '🔖',
     find_references: '🔗', hover_symbol: '💡', rename_symbol: '✏️', query_scope: '🔭',
-    query_types: '📏', query_rules: '📏', query_references: '🔗',
-    todo_write: '📋', run_command: '⚡', list_processes: '⚡', read_process: '⚡', write_process_stdin: '⚡', terminate_process: '⚡', web_search: '🌐', web_open: '🌐', web_find: '🔎', search_web: '🌐', codesearch: '🔎',
+    query_types: '📏', query_rules: '📏',
+    todo_write: '📋', manage_goal: '🎯', run_command: '⚡', manage_process: '⚡', web_search: '🌐', web_open: '🌐', web_find: '🔎', search_web: '🌐', codesearch: '🔎',
     glob_files: '📁', delete_file: '🗑️', apply_patch: '🩹',
     web_fetch: '🌐',
     permission_request: '🔑',
@@ -262,7 +262,7 @@ export function summarizeToolArgs(toolName: string, args: Record<string, unknown
         const basename = fp.split(/[\\/]/).pop() || fp;
         // For file tools, just show the basename
         if (['read_file', 'write_file', 'edit_file', 'multiedit', 'delete_file',
-            'get_file_context', 'list_directory', 'apply_patch', 'glob_files'].includes(toolName)) {
+            'list_directory', 'apply_patch', 'glob_files'].includes(toolName)) {
             return basename;
         }
     }
@@ -274,7 +274,7 @@ export function summarizeToolArgs(toolName: string, args: Record<string, unknown
     }
 
     // Search tools
-    if ((toolName === 'web_search' || toolName === 'search_web' || toolName === 'codesearch' || toolName === 'search_mod_files') && args.query) {
+    if ((toolName === 'web_search' || toolName === 'search_web' || toolName === 'codesearch' || toolName === 'grep') && args.query) {
         const q = String(args.query);
         return q.length > limit ? q.substring(0, limit) + '...' : q;
     }

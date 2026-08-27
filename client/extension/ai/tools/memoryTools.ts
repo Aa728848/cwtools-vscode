@@ -13,10 +13,16 @@ import { defaultDomainForMode } from '../agentProfile';
 import type { BlackboardEntry, BlackboardEntryType } from '../orchestrator/types';
 
 const MAX_BLACKBOARD_PAYLOAD_BYTES = 2 * 1024 * 1024;
-const BLACKBOARD_ENTRY_TYPES = new Set<BlackboardEntryType>([
-    'file_snapshot', 'scope_info', 'diag_result', 'entity_registry',
-    'entity_relation', 'acceptance_evidence', 'write_intent', 'free_text',
-]);
+function isBlackboardEntryType(value: string): value is BlackboardEntryType {
+    return value === 'file_snapshot'
+        || value === 'scope_info'
+        || value === 'diag_result'
+        || value === 'entity_registry'
+        || value === 'entity_relation'
+        || value === 'acceptance_evidence'
+        || value === 'write_intent'
+        || value === 'free_text';
+}
 
 // ─── Context type ────────────────────────────────────────────────────────────
 
@@ -88,53 +94,11 @@ export class MemoryToolHandler {
             const safeKey = scopedKey.replace(/[^a-zA-Z0-9_-]/g, '_').slice(-180);
             const filePath = path.join(blackboardDir, `${safeKey}.txt`);
             fs.writeFileSync(filePath, value, 'utf-8');
-            this.ctx.blackboard.legacySet(scopedKey, `file://${filePath}`);
+            this.ctx.blackboard.setFreeText(scopedKey, `file://${filePath}`);
             return { success: true, message: `Successfully saved large payload (${value.length} chars) to high-capacity storage. Reference stored in blackboard. You MUST now output your final text response to complete your sub-task.` };
         } else {
-            this.ctx.blackboard.legacySet(scopedKey, value);
+            this.ctx.blackboard.setFreeText(scopedKey, value);
             return { success: true, message: `Stored value in memory under key '${key}'.` };
-        }
-    }
-
-    /** get_memory tool execution */
-    async getMemory(args: import('../types').GetMemoryArgs, context?: import('../types').AgentToolContext): Promise<unknown> {
-        const { key } = args;
-        if (!key) {
-            return { found: false };
-        } else {
-            const domain = context?.runnerOptions?.domain
-                ?? defaultDomainForMode(context?.runnerOptions?.mode ?? 'build');
-            const mem = this.ctx.blackboard.legacyGet(`${blackboardDomainPrefix(context)}${key}`);
-            const resolved = mem.found || domain !== 'paradox' ? mem : this.ctx.blackboard.legacyGet(key);
-            if (resolved && typeof resolved.value === 'string' && resolved.value.startsWith('file://')) {
-                const payload = this.readStoredPayload(resolved.value, context);
-                if (payload.error || payload.content === undefined) return { found: false, error: payload.error };
-                const truncated = payload.content.length > 3000
-                    ? payload.content.substring(0, 3000) + `\n...[truncated, full ${payload.fullLength} chars]`
-                    : payload.content;
-                return { found: true, value: truncated, _sourceFile: payload.filePath, _fullLength: payload.fullLength };
-            } else {
-                return resolved;
-            }
-        }
-    }
-
-    /** search_memory tool execution */
-    searchMemory(args: { query: string }, context?: import('../types').AgentToolContext): unknown {
-        const { query } = args;
-        if (!query) {
-            return { success: false, message: 'Missing query argument' };
-        } else {
-            const prefix = blackboardDomainPrefix(context);
-            const matches = this.ctx.blackboard.queryByPrefix(prefix)
-                .filter(entry => entry.key.toLowerCase().includes(query.toLowerCase())
-                    || entry.value.toLowerCase().includes(query.toLowerCase()))
-                .slice(0, 50)
-                .map(entry => ({
-                    key: entry.key.slice(prefix.length),
-                    preview: entry.value.length > 150 ? `${entry.value.slice(0, 150)}...` : entry.value,
-                }));
-            return { found: matches.length > 0, count: matches.length, matches };
         }
     }
 
@@ -196,8 +160,8 @@ export class MemoryToolHandler {
     }
 
     /** query_blackboard tool execution */
-    async queryBlackboard(args: { key?: string; prefix?: string; type?: string; structured?: boolean }, context?: import('../types').AgentToolContext): Promise<unknown> {
-        const { key: qbKey, prefix, type: qbType, structured } = args;
+    async queryBlackboard(args: { key?: string; prefix?: string; query?: string; type?: string; structured?: boolean }, context?: import('../types').AgentToolContext): Promise<unknown> {
+        const { key: qbKey, prefix, query, type: qbType, structured } = args;
         const domainPrefix = blackboardDomainPrefix(context);
         const domain = context?.runnerOptions?.domain
             ?? defaultDomainForMode(context?.runnerOptions?.mode ?? 'build');
@@ -233,6 +197,17 @@ export class MemoryToolHandler {
             const entry = this.ctx.blackboard.read(`${domainPrefix}${qbKey}`)
                 ?? (domain === 'paradox' ? this.ctx.blackboard.read(qbKey) : undefined);
             return entry ? { found: true, entry: await maybeStructured(entry) } : { found: false };
+        } else if (query?.trim()) {
+            const needle = query.trim().toLowerCase();
+            const entries = this.ctx.blackboard.queryByPrefix(domainPrefix);
+            if (domain === 'paradox') {
+                entries.push(...this.ctx.blackboard.queryByPrefix('')
+                    .filter(entry => !entry.key.startsWith('domain:')));
+            }
+            const matches = entries.filter(entry =>
+                entry.key.toLowerCase().includes(needle) || entry.value.toLowerCase().includes(needle));
+            const resolved = await Promise.all(matches.slice(0, 50).map(maybeStructured));
+            return { found: resolved.length > 0, count: matches.length, entries: resolved };
         } else if (prefix) {
             const entries = this.ctx.blackboard.queryByPrefix(`${domainPrefix}${prefix}`);
             if (domain === 'paradox') {
@@ -242,19 +217,19 @@ export class MemoryToolHandler {
             const resolved = await Promise.all(entries.slice(0, 50).map(maybeStructured));
             return { found: resolved.length > 0, count: entries.length, entries: resolved };
         } else if (qbType) {
-            if (!BLACKBOARD_ENTRY_TYPES.has(qbType as BlackboardEntryType)) {
+            if (!isBlackboardEntryType(qbType)) {
                 return { success: false, message: `Unsupported blackboard entry type: ${qbType}` };
             }
             const entries = this.ctx.blackboard.queryByPrefix(domainPrefix)
                 .filter(entry => entry.type === qbType);
             if (domain === 'paradox') {
-                entries.push(...this.ctx.blackboard.queryByType(qbType as BlackboardEntryType)
+                entries.push(...this.ctx.blackboard.queryByType(qbType)
                     .filter(entry => !entry.key.startsWith('domain:')));
             }
             const resolved = await Promise.all(entries.slice(0, 50).map(maybeStructured));
             return { found: resolved.length > 0, count: entries.length, entries: resolved };
         } else {
-            return { success: false, message: aiText('Please provide a key, prefix, or type argument.', '请提供 key、prefix 或 type 参数') };
+            return { success: false, message: aiText('Please provide a key, prefix, query, or type argument.', '请提供 key、prefix、query 或 type 参数') };
         }
     }
 }

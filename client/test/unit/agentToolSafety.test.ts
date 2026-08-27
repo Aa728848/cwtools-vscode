@@ -498,9 +498,10 @@ describe('enforced central tool policy', () => {
 
         const memoryCall = await executor.execute('set_memory', { key: 'secret', value: 'value' }, context) as any;
         expect(memoryCall.success).to.equal(true);
-        const generalMemory = await executor.execute('get_memory', { key: 'secret' }, context) as any;
-        expect(generalMemory).to.deep.include({ found: true, value: 'value' });
-        const paradoxMemory = await executor.execute('get_memory', { key: 'secret' }, {
+        const generalMemory = await executor.execute('query_blackboard', { key: 'secret' }, context) as any;
+        expect(generalMemory.found).to.equal(true);
+        expect(generalMemory.entry.value).to.equal('value');
+        const paradoxMemory = await executor.execute('query_blackboard', { key: 'secret' }, {
             runnerOptions: { mode: 'build', domain: 'paradox' },
         } as any) as any;
         expect(paradoxMemory).to.deep.equal({ found: false });
@@ -809,22 +810,22 @@ describe('agent tool file path safety', () => {
             .to.equal('literal template brace: {\n');
     });
 
-    it('keeps General file context classification domain-neutral', async () => {
+    it('serves targeted read_file context consistently across domains', async () => {
         const eventDir = path.join(workspaceRoot, 'events');
         fs.mkdirSync(eventDir, { recursive: true });
         const target = path.join(eventDir, 'sample.txt');
         fs.writeFileSync(target, 'sample = {\n}\n');
         const executor = new AgentToolExecutor({} as any, workspaceRoot);
 
-        const general = await executor.execute('get_file_context', { file: target, line: 0 }, {
+        const general = await executor.execute('read_file', { file: target, centerLine: 0, radius: 1 }, {
             runnerOptions: { mode: 'utility', domain: 'general' },
         } as any) as any;
-        expect(general.fileType).to.equal('txt');
+        expect(general.content).to.include('sample = {');
 
-        const paradox = await executor.execute('get_file_context', { file: target, line: 0 }, {
+        const paradox = await executor.execute('read_file', { file: target, centerLine: 0, radius: 1 }, {
             runnerOptions: { mode: 'build', domain: 'paradox' },
         } as any) as any;
-        expect(paradox.fileType).to.equal('events');
+        expect(paradox.content).to.equal(general.content);
     });
 
     it('applies edit_file replacements through the shared fuzzy replacer', async () => {

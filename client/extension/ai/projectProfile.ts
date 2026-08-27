@@ -300,10 +300,9 @@ export function buildProjectProfile(workspaceRoot: string): ProjectProfile {
         'query_cwt_schema',
         'query_workspace_index',
         'query_localisation_index',
-        'query_definition_by_name',
+        'go_to_definition',
         'get_pdx_block',
         'document_symbols',
-        'get_file_context',
     ];
 
     const profileBase: Omit<ProjectProfile, 'promptCards' | 'efficiencyHints'> = {
@@ -413,7 +412,7 @@ export function buildProjectProfile(workspaceRoot: string): ProjectProfile {
     const efficiencyHints = [
         'Call query_project_profile(section="summary") before broad workspace scans.',
         'Use query_cwt_schema or get_completion_at before inventing common/ entity fields or block shapes.',
-        'Use query_project_knowledge for complex cross-subsystem work, then explore_pdx_project/query_workspace_index/query_definition_by_name for live exact evidence.',
+        'Use query_project_knowledge for complex cross-subsystem work, then explore_pdx_project/query_workspace_index/go_to_definition for live exact evidence.',
         'Use mode-specific prompt cards from the profile instead of injecting full project files.',
         'Keep CWTOOLS.md for human-edited rules; use profile.json for machine routing facts.',
     ];
@@ -568,7 +567,7 @@ function buildPromptCards(profile: Omit<ProjectProfile, 'promptCards' | 'efficie
             `- Workspace kind: ${profile.workspaceKind}; game: ${profile.game.displayName}.`,
             `- Key directories: ${keyDirs}.`,
             `- Namespaces: ${namespaces}.`,
-            '- Before editing known IDs, prefer explore_pdx_project/query_workspace_index/query_definition_by_name/get_pdx_block.',
+            '- Before editing known IDs, prefer explore_pdx_project/query_workspace_index/go_to_definition/get_pdx_block.',
             '- After edits, run get_diagnostics on changed files.',
         ].join('\n'),
         plan: [

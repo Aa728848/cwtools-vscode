@@ -3,19 +3,19 @@ import { TOOL_DEFINITIONS as SCHEMA_DEFINITIONS } from './definitions';
 import { analyzeSchema, flattenSchema } from './schemaFlatten';
 
 export type AgentToolName =
-    | 'ask_user_question' | 'select_tools' | 'create_goal' | 'get_goal' | 'update_goal' | 'set_goal_budget'
+    | 'ask_user_question' | 'select_tools' | 'manage_goal'
     | 'query_scope' | 'query_types' | 'query_rules' | 'query_cwt_schema' | 'query_override_modes' | 'search_rule_capabilities' | 'explain_scope' | 'parse_pdx_fragment' | 'remove_ignored_diagnostic'
-    | 'query_localisation_index' | 'query_workspace_index' | 'explore_pdx_project' | 'query_inline_instantiation' | 'analyze_pdx_flow' | 'compare_definition_with_vanilla' | 'query_project_profile' | 'query_project_knowledge' | 'query_interface_knowledge' | 'run_skill' | 'get_ignored_diagnostics' | 'get_pdx_block' | 'query_references'
-    | 'get_file_context' | 'search_mod_files' | 'find_sprite_candidates' | 'find_sound_candidates'
+    | 'query_localisation_index' | 'query_workspace_index' | 'explore_pdx_project' | 'query_inline_instantiation' | 'analyze_pdx_flow' | 'compare_definition_with_vanilla' | 'query_project_profile' | 'query_project_knowledge' | 'query_interface_knowledge' | 'run_skill' | 'get_ignored_diagnostics' | 'get_pdx_block'
+    | 'find_sprite_candidates' | 'find_sound_candidates'
     | 'grep' | 'get_completion_at' | 'document_symbols' | 'workspace_symbols'
     | 'go_to_definition' | 'find_references' | 'hover_symbol' | 'rename_symbol'
     | 'verify_pdx_identifier' | 'find_scope_bridge' | 'extract_archetype_slots' | 'instantiate_archetype' | 'todo_write' | 'read_file' | 'write_file' | 'edit_file'
     | 'replace_lines' | 'typed_pdx_write' | 'candidate_transaction' | 'list_directory' | 'get_lsp_status' | 'get_diagnostics' | 'analyze_diagnostic_error'
-    | 'glob_files' | 'lsp_operation' | 'web_search' | 'web_open' | 'web_find' | 'run_command' | 'list_processes' | 'read_process' | 'write_process_stdin' | 'terminate_process'
-    | 'query_definition' | 'query_definition_by_name' | 'query_scripted_effects'
+    | 'glob_files' | 'web_search' | 'web_open' | 'web_find' | 'run_command' | 'manage_process'
+    | 'query_scripted_effects'
     | 'query_scripted_triggers' | 'query_enums' | 'get_entity_info'
     | 'query_static_modifiers' | 'query_variables' | 'set_memory'
-    | 'get_memory' | 'search_memory' | 'history' | 'save_memory' | 'forget_memory' | 'memory_recall_trace'
+    | 'history' | 'save_memory' | 'forget_memory' | 'memory_recall_trace'
     | 'convert_image_to_dds' | 'convert_audio' | 'deploy_mod_asset' | 'mcp_call'
     | 'write_localisation' | 'write_design_blueprint' | 'save_workflow' | 'git_ops' | 'dispatch_agents'
     | 'query_blackboard' | 'merge_results' | 'cancel_dispatch' | 'get_design_blueprint_contract'
@@ -80,10 +80,7 @@ export const TOOL_REGISTRY = new Map<AgentToolName, ToolRegistryEntry>();
 const TOOL_DOMAINS = {
     ask_user_question: 'shared',
     select_tools: 'shared',
-    create_goal: 'shared',
-    get_goal: 'shared',
-    update_goal: 'shared',
-    set_goal_budget: 'shared',
+    manage_goal: 'shared',
     query_scope: 'paradox',
     query_types: 'paradox',
     query_rules: 'paradox',
@@ -105,9 +102,6 @@ const TOOL_DOMAINS = {
     run_skill: 'shared',
     get_ignored_diagnostics: 'paradox',
     get_pdx_block: 'paradox',
-    query_references: 'shared',
-    get_file_context: 'shared',
-    search_mod_files: 'paradox',
     find_sprite_candidates: 'paradox',
     find_sound_candidates: 'paradox',
     grep: 'shared',
@@ -134,17 +128,11 @@ const TOOL_DOMAINS = {
     get_diagnostics: 'shared',
     analyze_diagnostic_error: 'paradox',
     glob_files: 'shared',
-    lsp_operation: 'paradox',
     web_search: 'shared',
     web_open: 'shared',
     web_find: 'shared',
     run_command: 'shared',
-    list_processes: 'shared',
-    read_process: 'shared',
-    write_process_stdin: 'shared',
-    terminate_process: 'shared',
-    query_definition: 'paradox',
-    query_definition_by_name: 'paradox',
+    manage_process: 'shared',
     query_scripted_effects: 'paradox',
     query_scripted_triggers: 'paradox',
     query_enums: 'paradox',
@@ -152,8 +140,6 @@ const TOOL_DOMAINS = {
     query_static_modifiers: 'paradox',
     query_variables: 'paradox',
     set_memory: 'shared',
-    get_memory: 'shared',
-    search_memory: 'shared',
     history: 'shared',
     save_memory: 'shared',
     forget_memory: 'shared',
@@ -239,12 +225,13 @@ const GENERAL_BLACKBOARD_SCHEMA: ToolDefinition = {
     type: 'function',
     function: {
         name: 'query_blackboard',
-        description: 'Query the shared cross-agent store by exact key, prefix, or ordinary repository record type.',
+        description: 'Query the shared cross-agent store by exact key, prefix, text search, or ordinary repository record type.',
         parameters: {
             type: 'object',
             properties: {
                 key: { type: 'string', description: 'Exact key to look up.' },
                 prefix: { type: 'string', description: 'Key prefix for bounded range queries.' },
+                query: { type: 'string', description: 'Case-insensitive substring search across keys and values.' },
                 type: {
                     type: 'string',
                     enum: ['file_snapshot', 'diag_result', 'write_intent', 'free_text'],
@@ -253,6 +240,27 @@ const GENERAL_BLACKBOARD_SCHEMA: ToolDefinition = {
                 structured: { type: 'boolean', description: 'Parse JSON values and return them under `parsed` (or `parseError: true` when not JSON).' },
             },
             required: [],
+        },
+    },
+};
+
+const GENERAL_GREP_SCHEMA: ToolDefinition = {
+    type: 'function',
+    function: {
+        name: 'grep',
+        description: 'Search for literal text or a regular expression inside the current workspace.',
+        parameters: {
+            type: 'object',
+            properties: {
+                query: { type: 'string', description: 'The search pattern or regular expression.' },
+                path: { type: 'string', description: 'Workspace-relative or absolute path inside the workspace.' },
+                isRegex: { type: 'boolean', description: 'Treat query as a regular expression. Default false.' },
+                caseSensitive: { type: 'boolean', description: 'Perform a case-sensitive search. Default false.' },
+                include: { type: 'string', description: 'Optional file glob, for example "*.ts" or "**/*.json".' },
+                limit: { type: 'number', description: 'Maximum matching lines to return (default 50, max 200).' },
+            },
+            required: ['query'],
+            additionalProperties: false,
         },
     },
 };
@@ -290,12 +298,12 @@ const GENERAL_WORKFLOW_SCHEMA: ToolDefinition = {
 
 // Categories to help assign modes
 const BASE_READ: AgentToolName[] = [
-    'select_tools', 'get_goal',
-    'query_scope', 'query_types', 'query_rules', 'query_cwt_schema', 'query_override_modes', 'search_rule_capabilities', 'explain_scope', 'parse_pdx_fragment', 'query_localisation_index', 'query_workspace_index', 'explore_pdx_project', 'query_inline_instantiation', 'analyze_pdx_flow', 'compare_definition_with_vanilla', 'query_references', 'get_design_blueprint_contract',
-    'query_project_profile', 'query_project_knowledge', 'query_interface_knowledge', 'run_skill', 'history', 'get_file_context', 'search_mod_files', 'find_sprite_candidates', 'find_sound_candidates', 'grep', 'get_completion_at',
+    'select_tools', 'manage_goal',
+    'query_scope', 'query_types', 'query_rules', 'query_cwt_schema', 'query_override_modes', 'search_rule_capabilities', 'explain_scope', 'parse_pdx_fragment', 'query_localisation_index', 'query_workspace_index', 'explore_pdx_project', 'query_inline_instantiation', 'analyze_pdx_flow', 'compare_definition_with_vanilla', 'get_design_blueprint_contract',
+    'query_project_profile', 'query_project_knowledge', 'query_interface_knowledge', 'run_skill', 'history', 'find_sprite_candidates', 'find_sound_candidates', 'grep', 'get_completion_at',
     'document_symbols', 'workspace_symbols', 'go_to_definition', 'find_references', 'hover_symbol',
     'verify_pdx_identifier', 'find_scope_bridge', 'extract_archetype_slots', 'instantiate_archetype', 'read_file', 'list_directory', 'glob_files',
-    'lsp_operation', 'get_lsp_status', 'get_diagnostics', 'query_definition', 'query_definition_by_name', 'web_find',
+    'get_lsp_status', 'get_diagnostics', 'web_find',
     'query_scripted_effects', 'query_scripted_triggers', 'query_enums',
     'get_entity_info', 'query_static_modifiers', 'query_variables', 'get_pdx_block', 'get_ignored_diagnostics',
     'query_shader_symbol', 'query_shader_compile_unit', 'query_shader_platform_variants', 'query_shader_callers',
@@ -305,19 +313,70 @@ const EDIT: AgentToolName[] = [
     'write_file', 'edit_file', 'replace_lines', 'typed_pdx_write', 'candidate_transaction', 'rename_symbol',
     'write_localisation', 'write_design_blueprint', 'save_workflow', 'remove_ignored_diagnostic'
 ];
-const MEMORY: AgentToolName[] = ['todo_write', 'create_goal', 'update_goal', 'set_goal_budget', 'set_memory', 'get_memory', 'search_memory', 'save_memory', 'forget_memory', 'memory_recall_trace'];
+const MEMORY: AgentToolName[] = ['todo_write', 'manage_goal', 'set_memory', 'save_memory', 'forget_memory', 'memory_recall_trace'];
 const NETWORK: AgentToolName[] = ['web_search', 'web_open'];
-const UTILITY: AgentToolName[] = ['run_command', 'list_processes', 'read_process', 'write_process_stdin', 'terminate_process', 'git_ops', 'analyze_diagnostic_error'];
+const UTILITY: AgentToolName[] = ['run_command', 'manage_process', 'git_ops', 'analyze_diagnostic_error'];
 const MEDIA: AgentToolName[] = ['convert_image_to_dds', 'convert_audio', 'deploy_mod_asset'];
 const _MCP: AgentToolName[] = ['mcp_call'];
 const ORCHESTRATION: AgentToolName[] = ['dispatch_agents', 'query_blackboard', 'merge_results', 'cancel_dispatch'];
 const INTERACTION: AgentToolName[] = ['ask_user_question'];
 
+const GENERIC_FILE_WRITE_TOOLS = new Set<AgentToolName>([
+    'write_file', 'edit_file', 'replace_lines', 'rename_symbol',
+]);
+const PDX_WRITE_TOOLS = new Set<AgentToolName>([
+    'typed_pdx_write', 'candidate_transaction', 'write_localisation',
+    'write_design_blueprint', 'remove_ignored_diagnostic',
+]);
+const SHADER_TOOLS = new Set<AgentToolName>([
+    'query_shader_symbol', 'query_shader_compile_unit', 'query_shader_platform_variants',
+    'query_shader_callers', 'explain_shader_reachability', 'validate_shader',
+    'compare_shader_with_vanilla',
+]);
+const PDX_PROJECT_TOOLS = new Set<AgentToolName>([
+    'query_project_profile', 'query_project_knowledge', 'query_interface_knowledge',
+    'query_workspace_index', 'query_localisation_index', 'explore_pdx_project',
+    'query_inline_instantiation', 'analyze_pdx_flow', 'compare_definition_with_vanilla',
+]);
+const PDX_RULE_TOOLS = new Set<AgentToolName>([
+    'query_scope', 'query_rules', 'query_cwt_schema', 'query_override_modes',
+    'search_rule_capabilities', 'explain_scope', 'parse_pdx_fragment',
+    'verify_pdx_identifier', 'find_scope_bridge',
+]);
+const PDX_CATALOG_TOOLS = new Set<AgentToolName>([
+    'query_types', 'query_scripted_effects', 'query_scripted_triggers', 'query_enums',
+    'get_entity_info', 'query_static_modifiers', 'query_variables',
+]);
+const NAVIGATION_TOOLS = new Set<AgentToolName>([
+    'read_file', 'list_directory', 'glob_files', 'grep', 'get_pdx_block',
+    'get_completion_at', 'document_symbols', 'workspace_symbols',
+    'go_to_definition', 'find_references', 'hover_symbol',
+]);
+const DIAGNOSTIC_TOOLS = new Set<AgentToolName>([
+    'get_lsp_status', 'get_diagnostics', 'analyze_diagnostic_error',
+    'get_ignored_diagnostics', 'remove_ignored_diagnostic',
+]);
+const ASSET_TOOLS = new Set<AgentToolName>([
+    'find_sprite_candidates', 'find_sound_candidates',
+]);
+const DEFERRED_TOOLS_SET = new Set<AgentToolName>([
+    ...GENERIC_FILE_WRITE_TOOLS,
+    ...PDX_WRITE_TOOLS,
+    ...MEDIA,
+    ...ORCHESTRATION,
+    ...SHADER_TOOLS,
+    'save_workflow', 'run_command', 'manage_process', 'git_ops', 'mcp_call',
+    'run_code', 'run_skill',
+    'set_memory', 'save_memory', 'forget_memory', 'memory_recall_trace',
+    'query_interface_knowledge', 'query_inline_instantiation', 'analyze_pdx_flow',
+    'compare_definition_with_vanilla', 'find_scope_bridge',
+    'extract_archetype_slots', 'instantiate_archetype', 'get_design_blueprint_contract',
+]);
 const WRITE_TOOLS_SET = new Set<string>([...EDIT, 'deploy_mod_asset', 'git_ops']);
 const SUB_AGENT_EXCLUDES_SET = new Set<string>([
     'ask_user_question',
     'web_search', 'web_open', 'web_find',
-    'run_command', 'list_processes', 'read_process', 'write_process_stdin', 'terminate_process',
+    'run_command', 'manage_process',
     'git_ops', 'save_workflow',
     'rename_symbol',
     // Candidate transaction state is parent-run owned; slim sub-agents must
@@ -347,9 +406,9 @@ const MUTATING_TOOLS_SET = new Set<string>([
     'set_memory',
     'save_memory',
     'forget_memory',
+    'manage_goal',
     'merge_results',
-    'write_process_stdin',
-    'terminate_process',
+    'manage_process',
 ]);
 
 // Storm-exempt tools: 廉价状态检查 / 协作信号,允许在同一轮反复调用,不计入 doom-loop 窗口。
@@ -364,19 +423,19 @@ const STORM_EXEMPT_TOOLS_SET = new Set<string>([
     'query_blackboard',
 ]);
 
-const PLAN_MODES = new Set([...BASE_READ, ...INTERACTION, ...NETWORK, ..._MCP, ...ORCHESTRATION, 'run_code', 'todo_write', 'write_file', 'edit_file', 'replace_lines', 'typed_pdx_write', 'candidate_transaction', 'write_design_blueprint', 'save_workflow', 'set_memory', 'get_memory', 'search_memory', 'git_ops']);
+const PLAN_MODES = new Set([...BASE_READ, ...INTERACTION, ...NETWORK, ..._MCP, ...ORCHESTRATION, 'run_code', 'todo_write', 'write_file', 'edit_file', 'replace_lines', 'typed_pdx_write', 'candidate_transaction', 'write_design_blueprint', 'save_workflow', 'set_memory', 'git_ops']);
 const EXPLORE_MODES = new Set([...BASE_READ, ...INTERACTION, ...NETWORK, ..._MCP, ...ORCHESTRATION, 'run_code', 'git_ops', 'save_workflow']);
 const REVIEW_MODES = new Set([...BASE_READ, ...INTERACTION, ...NETWORK, ..._MCP, 'run_code', 'git_ops', 'save_workflow']);
 const BUILD_MODES = new Set([...BASE_READ, ...INTERACTION, ...EDIT, ...MEMORY, ...NETWORK, ...UTILITY, ...MEDIA, ..._MCP, ...ORCHESTRATION, 'run_code']);
 const LOC_MODES = new Set([
     'select_tools', 'read_file', 'write_file',
-    'list_directory', 'glob_files', 'search_mod_files', 'find_sprite_candidates', 'find_sound_candidates', 'grep',
-    'workspace_symbols', 'document_symbols', 'verify_pdx_identifier', 'get_file_context', 'get_lsp_status', 'get_diagnostics',
-    'query_types', 'query_rules', 'query_cwt_schema', 'query_override_modes', 'search_rule_capabilities', 'explain_scope', 'parse_pdx_fragment', 'query_references', 'todo_write', 'write_localisation', 'git_ops',
+    'list_directory', 'glob_files', 'find_sprite_candidates', 'find_sound_candidates', 'grep',
+    'workspace_symbols', 'document_symbols', 'go_to_definition', 'find_references', 'verify_pdx_identifier', 'get_lsp_status', 'get_diagnostics',
+    'query_types', 'query_rules', 'query_cwt_schema', 'query_override_modes', 'search_rule_capabilities', 'explain_scope', 'parse_pdx_fragment', 'todo_write', 'write_localisation', 'git_ops',
     'analyze_diagnostic_error', 'save_workflow', ...INTERACTION
 ]);
-const ORCHESTRATOR_MODES = new Set([...BASE_READ, ...INTERACTION, ...NETWORK, ..._MCP, 'set_memory', 'get_memory', 'search_memory', 'todo_write', 'write_file', 'write_design_blueprint', ...ORCHESTRATION, 'git_ops', 'analyze_diagnostic_error', 'save_workflow']);
-const SCRIPT_MODES = new Set([...BASE_READ, ...INTERACTION, ...NETWORK, ..._MCP, 'set_memory', 'get_memory', 'search_memory', 'todo_write', 'write_file', 'write_design_blueprint', ...ORCHESTRATION, 'git_ops', 'analyze_diagnostic_error', 'save_workflow']);
+const ORCHESTRATOR_MODES = new Set([...BASE_READ, ...INTERACTION, ...NETWORK, ..._MCP, 'set_memory', 'todo_write', 'write_file', 'write_design_blueprint', ...ORCHESTRATION, 'git_ops', 'analyze_diagnostic_error', 'save_workflow']);
+const SCRIPT_MODES = new Set([...BASE_READ, ...INTERACTION, ...NETWORK, ..._MCP, 'set_memory', 'todo_write', 'write_file', 'write_design_blueprint', ...ORCHESTRATION, 'git_ops', 'analyze_diagnostic_error', 'save_workflow']);
 // Legacy General mode is intentionally read-only. Writable general coding work
 // belongs to Utility mode, whose staged surface and policy gates are explicit.
 const GENERAL_MODES = new Set([...BASE_READ, ...INTERACTION, ...NETWORK]);
@@ -403,10 +462,14 @@ for (const schema of SCHEMA_DEFINITIONS) {
     let riskLevel: 0 | 1 | 2 | 3 = 0;
     let concurrencyClass: ToolConcurrencyClass = 'parallel';
 
-    if (BASE_READ.includes(name)) {
+    if (name === 'manage_goal') {
+        effect = 'memory';
+        riskLevel = 0;
+        concurrencyClass = 'parallel';
+    } else if (BASE_READ.includes(name)) {
         effect = 'workspace_read';
         riskLevel = 0;
-        if (['document_symbols', 'workspace_symbols', 'get_lsp_status', 'get_diagnostics', 'lsp_operation', 'query_references', 'query_definition', 'explore_pdx_project',
+        if (['document_symbols', 'workspace_symbols', 'get_lsp_status', 'get_diagnostics', 'go_to_definition', 'find_references', 'explore_pdx_project',
             'query_shader_symbol', 'query_shader_compile_unit', 'query_shader_platform_variants', 'query_shader_callers', 'explain_shader_reachability', 'validate_shader', 'compare_shader_with_vanilla', 'query_inline_instantiation', 'analyze_pdx_flow', 'compare_definition_with_vanilla'].includes(name)) {
             concurrencyClass = 'lsp-limited';
         } else {
@@ -432,11 +495,7 @@ for (const schema of SCHEMA_DEFINITIONS) {
         effect = 'shell';
         riskLevel = 2;
         concurrencyClass = 'interactive';
-    } else if (name === 'list_processes' || name === 'read_process') {
-        effect = 'none';
-        riskLevel = 0;
-        concurrencyClass = 'parallel';
-    } else if (name === 'write_process_stdin' || name === 'terminate_process') {
+    } else if (name === 'manage_process') {
         effect = 'process';
         riskLevel = 0;
         concurrencyClass = 'interactive';
@@ -487,21 +546,27 @@ for (const schema of SCHEMA_DEFINITIONS) {
     const isReadOnly = name !== 'ask_user_question' && (effect === 'workspace_read'
         || effect === 'network'
         || (effect === 'none' && !mutating && !ORCHESTRATION.includes(name)));
-    const disclosure = ['ask_user_question', 'todo_write', 'read_file', 'grep', 'get_goal', 'select_tools', 'run_code'].includes(name)
+    const disclosure = ['ask_user_question', 'todo_write', 'read_file', 'grep', 'manage_goal', 'select_tools'].includes(name)
         ? 'always'
-        : (['write_file', 'edit_file', 'replace_lines', 'typed_pdx_write', 'candidate_transaction', 'run_command', 'git_ops', 'mcp_call', 'dispatch_agents'].includes(name)
-            ? 'deferred'
-            : 'stage');
-    const group = effect === 'workspace_write' ? 'file_write'
-        : effect === 'workspace_read' ? (name.includes('shader') ? 'shader' : 'workspace_read')
-            : effect === 'network' ? 'web'
+        : DEFERRED_TOOLS_SET.has(name) ? 'deferred' : 'stage';
+    const group = GENERIC_FILE_WRITE_TOOLS.has(name) ? 'file_write'
+        : PDX_WRITE_TOOLS.has(name) ? 'pdx_write'
+            : SHADER_TOOLS.has(name) ? 'shader'
+                : PDX_PROJECT_TOOLS.has(name) ? 'pdx_project'
+                    : PDX_RULE_TOOLS.has(name) ? 'pdx_rules'
+                        : PDX_CATALOG_TOOLS.has(name) ? 'pdx_catalog'
+                            : NAVIGATION_TOOLS.has(name) ? 'navigation'
+                                : DIAGNOSTIC_TOOLS.has(name) ? 'diagnostics'
+                                    : ASSET_TOOLS.has(name) ? 'assets'
+                                        : effect === 'network' || name === 'web_find' ? 'web'
                 : effect === 'shell' || effect === 'process' ? 'command'
                     : effect === 'git' ? 'git'
                         : effect === 'media' ? 'media'
                             : effect === 'mcp' ? 'mcp'
                                 : ORCHESTRATION.includes(name) ? 'orchestrator'
-                                    : MEMORY.includes(name) ? 'memory'
-                                        : 'support';
+                                    : MEMORY.includes(name) || name === 'query_blackboard' || name === 'history' ? 'memory'
+                                        : effect === 'workspace_read' ? 'workspace_read'
+                                            : 'support';
     TOOL_REGISTRY.set(name, {
         name,
         schema,
@@ -521,9 +586,11 @@ for (const schema of SCHEMA_DEFINITIONS) {
             ? GENERAL_DISPATCH_SCHEMA
             : name === 'query_blackboard'
                 ? GENERAL_BLACKBOARD_SCHEMA
-                : name === 'save_workflow'
-                    ? GENERAL_WORKFLOW_SCHEMA
-                    : undefined,
+                : name === 'grep'
+                    ? GENERAL_GREP_SCHEMA
+                    : name === 'save_workflow'
+                        ? GENERAL_WORKFLOW_SCHEMA
+                        : undefined,
         disclosure,
         group,
         providerCapability: disclosure === 'deferred' ? 'dynamic_tools' : undefined,

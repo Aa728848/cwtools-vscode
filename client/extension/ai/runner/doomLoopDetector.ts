@@ -51,13 +51,6 @@ export function normalizeToolResultHash(toolName: string, result: unknown): stri
     if (toolName === 'get_diagnostics' && obj.summary) {
         return `diag:${JSON.stringify(obj.summary)}`;
     }
-    // lsp_operation → hash the returned structure (exclude positions)
-    if (toolName === 'lsp_operation') {
-        const stripped = JSON.stringify(obj, (key, val) =>
-            (key === 'line' || key === 'column' || key === 'character' || key === 'offset') ? undefined : val
-        );
-        return `lsp:${stripped.substring(0, 256)}`;
-    }
     // Generic fallback: first 256 chars of JSON
     return `${toolName}:${JSON.stringify(obj).substring(0, 256)}`;
 }

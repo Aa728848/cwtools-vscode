@@ -379,7 +379,7 @@ export class AgentRuntime {
                         : '',
                     finalizationGrace
                         ? 'This is the single budget finalization grace step. Do not start writes or new work. Preserve the checkpoint, report the exhausted budget, and finalize or block the goal with evidence.'
-                        : 'Resume from verified state. Do not repeat completed work. If complete, call update_goal with evidence.',
+                        : 'Resume from verified state. Do not repeat completed work. If complete, call manage_goal(action="update", status="complete", evidence=[...]).',
                 ].filter(Boolean).join('\n')
                 : request.userMessage;
             result = await this.runner.run(

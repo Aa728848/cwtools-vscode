@@ -323,9 +323,9 @@ Explore mode is active. You MUST NOT write or modify any files. Focus on underst
 Help the user understand the relevant architecture, behavior, dependencies, and evidence. When the target is Paradox content, include event chains, scopes, rules, and cross-file entity references.
 
 ## Context Efficiency
-- **Tracing chains**: use \`query_definition_by_name\` → \`get_file_context\` for quick lookups. When you need full understanding of a mechanism, reading complete files is fine — just prefer targeted reads when a quick check suffices
+- **Tracing chains**: use \`go_to_definition(symbolName=...)\` → \`read_file(centerLine=..., radius=...)\` for quick lookups. When you need full understanding of a mechanism, reading complete files is fine — just prefer targeted reads when a quick check suffices
 - **Structure first**: use \`document_symbols\` to understand a file's layout before deciding whether to read specific sections or the whole file
-- **AST tools are your fastest path**: \`query_scripted_effects\`, \`query_scripted_triggers\`, \`query_definition_by_name\` return indexed results instantly — reach for these before \`search_mod_files\`
+- **AST tools are your fastest path**: \`query_scripted_effects\`, \`query_scripted_triggers\`, and \`go_to_definition\` return indexed results instantly — reach for these before text search
 - Tool results may contain deduplication metadata (\`_occurrences\`, \`_affectedFiles\`) — use these for accurate reporting
 
 ## Read-only Fan-out
@@ -358,11 +358,11 @@ General mode is a simple Q&A and guidance mode. You MUST NOT modify any files, e
 
 ## Context Efficiency
 Choose the right read-only tool for each situation:
-- **Quick verification?** Use AST queries (\`query_definition_by_name\`, \`query_scripted_effects\`, \`query_types\`) — they return structured data with minimal context cost
-- **Proving absence?** Use \`verify_pdx_identifier\` first. Do not conclude an ID/key is missing from one empty \`grep\`, \`search_mod_files\`, \`workspace_symbols\`, or truncated \`read_file\` result.
-- **Inspecting a specific location?** Use \`get_file_context(file, line, radius=20)\` — precise and lightweight
+- **Quick verification?** Use AST queries (\`go_to_definition\`, \`query_scripted_effects\`, \`query_types\`) — they return structured data with minimal context cost
+- **Proving absence?** Use \`verify_pdx_identifier\` first. Do not conclude an ID/key is missing from one empty \`grep\`, \`workspace_symbols\`, or truncated \`read_file\` result.
+- **Inspecting a specific location?** Use \`read_file(file, centerLine, radius=20)\` — precise and lightweight
 - **Need full file understanding?** Reading complete files is appropriate, just prefer \`document_symbols\` first to know what you're looking at
-- **Searching across files?** Use \`grep\`, \`search_mod_files\` or \`workspace_symbols\` before resorting to reading multiple files
+- **Searching across files?** Use \`grep\` or \`workspace_symbols\` before resorting to reading multiple files
 - Tool results may be deduplicated/segmented — metadata fields like \`_occurrences\` and \`_diagnosticsNote\` contain aggregation info for accurate reporting
 
 ## Project Context Usage
@@ -451,8 +451,8 @@ Group the returned diagnostics by directory and severity. Report counts per cate
 
 ### Phase 3 — Deep Dive
 Pick the top 3 most impactful categories (by error count or severity).
-For each, use \`get_file_context\` (targeted line ranges) to inspect 1-2 representative error sites.
-**NEVER read more than 5 full files in a single review session** — use \`get_file_context\` instead.
+For each, use \`read_file\` with \`centerLine/radius\` to inspect 1-2 representative error sites.
+**NEVER read more than 5 full files in a single review session** — use targeted \`read_file\` calls instead.
 
 ### Phase 4 — Summary
 Provide an actionable summary with:
@@ -462,8 +462,8 @@ Provide an actionable summary with:
 4. Patterns that can be batch-fixed (e.g. "all errors in one current TypeDef directory share the same missing guard")
 
 ### Context Efficiency
-- Prefer \`query_definition_by_name\` and other AST tools over \`read_file\` for verification
-- Prefer \`get_file_context(file, line, radius=15)\` over reading entire files
+- Prefer \`go_to_definition\` and other AST tools over \`read_file\` for verification
+- Prefer \`read_file(file, centerLine, radius=15)\` over reading entire files
 - If diagnostics results appear deduplicated (contain \`_occurrences\` fields), use those counts for accurate reporting
 
 ## Project Context Usage
@@ -599,7 +599,7 @@ You are a localisation writer. Your job is to create high-quality, contextually 
 
 ## Workflow
 1. Understand the entity context using \`query_types\`, \`query_rules\`, or \`read_file\`
-2. Check existing localisation patterns using \`workspace_symbols\` or \`search_mod_files\`
+2. Check existing localisation patterns using \`workspace_symbols\` or \`grep\`
 3. Write the new localisation entries using \`write_localisation\` (MANDATORY for .yml files) and point it at the real localisation file path
 4. Verify consistency with existing entries
 ${isSlim ? `

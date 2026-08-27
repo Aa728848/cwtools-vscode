@@ -23,6 +23,7 @@ import {
 import type { ToolDefinition } from '../../extension/ai/types';
 import { TOOL_DEFINITIONS as registeredTools, TOOL_REGISTRY } from '../../extension/ai/tools/registry';
 import { validateToolAccess } from '../../extension/ai/tools/permissions';
+import { toolDisclosureService } from '../../extension/ai/runner/toolDisclosure';
 
 const toolDefinitions = [
     'select_tools',
@@ -42,6 +43,32 @@ const toolDefinitions = [
 })) as ToolDefinition[];
 
 describe('runnerPolicy', () => {
+    it('keeps every initial model-visible tool surface compact', () => {
+        const modes = [
+            'build', 'plan', 'explore', 'general', 'utility', 'review',
+            'gui_expert', 'script_reviewer', 'loc_translator', 'loc_writer',
+            'orchestrator', 'script',
+        ] as const;
+        for (const mode of modes) {
+            const domain = mode === 'general' || mode === 'utility' || mode === 'orchestrator'
+                ? 'general'
+                : 'paradox';
+            const eligible = filterToolDefinitionsForMode(registeredTools, mode, { domain });
+            const stage = initialToolStageForMode(mode);
+            const staged = filterToolDefinitionsForStage(eligible, mode, stage);
+            const visible = toolDisclosureService.initialTools(staged, {
+                mode,
+                domain,
+                dynamicSupported: true,
+                loaded: new Set(),
+            });
+            const tokens = visible.reduce((total, tool) =>
+                total + (TOOL_REGISTRY.get(tool.function.name as any)?.estimatedSchemaTokens ?? 0), 0);
+            expect(visible.length, `${mode} visible tools`).to.be.at.most(18);
+            expect(tokens, `${mode} visible schema tokens`).to.be.lessThan(4_500);
+        }
+    });
+
     it('keeps core edit tools and runtime dispatch in build mode', () => {
         const filtered = filterToolDefinitionsForMode(toolDefinitions, 'build');
         const names = filtered.map(t => t.function.name);
@@ -120,8 +147,8 @@ describe('runnerPolicy', () => {
 
     it('keeps Paradox skill, memory, goal, and MCP support reachable across staged runs', () => {
         const supportNames = [
-            'run_skill', 'get_goal', 'create_goal', 'update_goal', 'set_goal_budget',
-            'set_memory', 'get_memory', 'search_memory', 'save_memory', 'mcp_call',
+            'run_skill', 'manage_goal',
+            'set_memory', 'query_blackboard', 'save_memory', 'mcp_call',
         ];
         const supportDefinitions = registeredTools.filter(tool => supportNames.includes(tool.function.name));
         const dynamicMcp = {
@@ -393,7 +420,7 @@ describe('runnerPolicy', () => {
             'read_file', 'write_file', 'edit_file', 'replace_lines', 'grep', 'document_symbols', 'workspace_symbols',
             'go_to_definition', 'find_references', 'hover_symbol', 'get_completion_at', 'rename_symbol',
             'get_diagnostics', 'run_command', 'git_ops', 'run_skill',
-            'set_memory', 'get_memory', 'search_memory', 'save_memory', 'mcp_call',
+            'set_memory', 'query_blackboard', 'save_memory', 'mcp_call',
         ]);
         expect(generalUtility).to.not.include.members([
             'query_cwt_schema', 'query_scope', 'query_types', 'verify_pdx_identifier',
@@ -419,6 +446,13 @@ describe('runnerPolicy', () => {
         expect(serializedDispatch).to.not.include('loc_writer');
         expect(serializedDispatch).to.not.include('blueprintFile');
         expect(serializedDispatch).to.not.include('CWT');
+
+        const generalGrep = filterToolDefinitionsForMode(registeredTools, 'utility', { domain: 'general' })
+            .find(tool => tool.function.name === 'grep');
+        const serializedGrep = JSON.stringify(generalGrep);
+        expect(serializedGrep).to.not.include('vanilla');
+        expect(serializedGrep).to.not.include('searchContext');
+        expect(serializedGrep).to.not.include('fileExtensions');
     });
 
     it('rejects hallucinated Paradox calls at the execution boundary for General Coding', () => {
@@ -475,6 +509,12 @@ describe('runnerPolicy', () => {
     it('clamps advertised output to the remaining context window', () => {
         expect(resolveContextSafeOutputTokens({
             desiredTokens: 384_000,
+            contextLimit: 1_000_000,
+            promptTokens: 600_000,
+            safetyMarginTokens: 4_096,
+        })).to.equal(384_000);
+        expect(resolveContextSafeOutputTokens({
+            desiredTokens: 400_000,
             contextLimit: 1_000_000,
             promptTokens: 600_000,
             safetyMarginTokens: 4_096,

@@ -298,48 +298,6 @@ export interface AgentRunnerOptions {
     workflowId?: string;
 }
 
-/** Tools allowed in Plan mode (read-only + architecture design tools) */
-const _PLAN_MODE_TOOLS: AgentToolName[] = [
-    'explore_pdx_project',
-    'query_scope', 'query_types', 'query_rules', 'query_override_modes', 'search_rule_capabilities', 'explain_scope', 'parse_pdx_fragment', 'query_references', 'query_localisation_index', 'query_workspace_index',
-    'get_file_context', 'search_mod_files', 'find_sprite_candidates', 'find_sound_candidates', 'grep', 'get_completion_at',
-    'document_symbols', 'workspace_symbols', 'verify_pdx_identifier', 'todo_write',
-    'read_file', 'list_directory', 'get_lsp_status', 'get_diagnostics', 'web_open', 'web_search',
-    'glob_files', 'web_find',
-    // Deep API tools for archetype study in Plan mode
-    'query_scripted_effects', 'query_scripted_triggers', 'query_enums',
-    'get_entity_info', 'query_definition', 'query_definition_by_name',
-    'query_static_modifiers', 'query_variables',
-    // Structured design blueprint output
-    'write_design_blueprint', 'save_workflow',
-    // Read-only planning fan-out; the dispatch boundary rejects writer roles in Plan mode.
-    'dispatch_agents', 'query_blackboard', 'merge_results',
-    // Memory tools for persisting architectural state
-    'set_memory', 'get_memory', 'search_memory',
-    // Git operations for investigation
-    'git_ops', 'save_workflow',
-];
-
-/** Explore mode: same as plan, plus CWTools Deep API tools — no writes (OpenCode explore agent) */
-const _EXPLORE_MODE_TOOLS: AgentToolName[] = [
-    'explore_pdx_project',
-    'query_scope', 'query_types', 'query_rules', 'query_override_modes', 'search_rule_capabilities', 'explain_scope', 'parse_pdx_fragment', 'query_references', 'query_localisation_index', 'query_workspace_index',
-    'get_file_context', 'search_mod_files', 'find_sprite_candidates', 'find_sound_candidates', 'grep', 'get_completion_at',
-    'document_symbols', 'workspace_symbols', 'verify_pdx_identifier', 'read_file', 'list_directory',
-    'get_lsp_status', 'get_diagnostics', 'web_open', 'web_search', 'glob_files',
-    // CWTools Deep API tools (read-only, advertised in Explore mode prompt)
-    'query_scripted_effects', 'query_scripted_triggers', 'query_enums',
-    'get_entity_info', 'query_static_modifiers', 'query_variables',
-    'query_definition', 'query_definition_by_name', 'web_find',
-    // Bounded read-only evidence fan-out. The dispatch boundary rejects writer roles and planned files.
-    'dispatch_agents', 'query_blackboard', 'merge_results',
-    // Git operations for investigation
-    'git_ops', 'save_workflow',
-];
-
-/** General mode: legacy read-only Q&A mode. */
-const _GENERAL_EXCLUDED_TOOLS: AgentToolName[] = ['todo_write'];
-
 function filterWebToolsForConfiguredAccess(tools: ToolDefinition[]): ToolDefinition[] {
     const mode = vs.workspace.getConfiguration('stellarisLanguageServices.ai.web')
         .get<'disabled' | 'indexed' | 'live'>('mode', 'indexed');
@@ -349,70 +307,6 @@ function filterWebToolsForConfiguredAccess(tools: ToolDefinition[]): ToolDefinit
         : new Set(['web_open', 'web_find']);
     return tools.filter(tool => !unavailable.has(tool.function.name));
 }
-
-/** Utility mode: full ordinary coding tools for non-PDX helper scripts/tools. */
-const _UTILITY_EXCLUDED_TOOLS: AgentToolName[] = ['dispatch_agents', 'query_blackboard', 'merge_results'];
-
-/** Review mode: same as explore, plus query_definition — read-only tools only */
-const _REVIEW_MODE_TOOLS: AgentToolName[] = [
-    'explore_pdx_project',
-    'query_scope', 'query_types', 'query_rules', 'query_override_modes', 'search_rule_capabilities', 'explain_scope', 'parse_pdx_fragment', 'query_references', 'query_localisation_index', 'query_workspace_index',
-    'get_file_context', 'search_mod_files', 'find_sprite_candidates', 'find_sound_candidates', 'grep', 'get_completion_at',
-    'document_symbols', 'workspace_symbols', 'verify_pdx_identifier', 'read_file', 'list_directory',
-    'get_lsp_status', 'get_diagnostics', 'query_definition', 'query_definition_by_name',
-    'query_scripted_effects', 'query_scripted_triggers', 'query_enums',
-    'get_entity_info', 'query_static_modifiers', 'query_variables',
-    'web_open', 'web_search', 'glob_files', 'web_find',
-    // Git operations for investigation
-    'git_ops',
-];
-
-/** Loc Translator mode: read localisation files, write translated output */
-const _LOC_TRANSLATOR_TOOLS: AgentToolName[] = [
-    'explore_pdx_project',
-    'read_file', 'write_file', 'edit_file', 'replace_lines',
-    'list_directory', 'glob_files', 'search_mod_files', 'find_sprite_candidates', 'find_sound_candidates', 'grep', 'workspace_symbols',
-    'document_symbols', 'verify_pdx_identifier', 'get_file_context', 'get_lsp_status', 'get_diagnostics',
-    'query_localisation_index', 'query_workspace_index',
-    'todo_write',
-    'write_localisation', 'git_ops', 'save_workflow',
-];
-
-/** Loc Writer mode: create new localisation entries from scratch */
-const _LOC_WRITER_TOOLS: AgentToolName[] = [
-    'explore_pdx_project',
-    'read_file', 'write_file', 'edit_file', 'replace_lines',
-    'list_directory', 'glob_files', 'search_mod_files', 'find_sprite_candidates', 'find_sound_candidates', 'grep', 'workspace_symbols',
-    'document_symbols', 'verify_pdx_identifier', 'get_file_context', 'get_lsp_status', 'get_diagnostics',
-    'query_types', 'query_rules', 'query_override_modes', 'search_rule_capabilities', 'explain_scope', 'parse_pdx_fragment', 'query_references', 'query_localisation_index', 'query_workspace_index',
-    'todo_write',
-    'write_localisation', 'git_ops', 'save_workflow',
-];
-
-/** General Multi-Agent parent: read-only tools plus coordinator-specific dispatch/blackboard/merge tools. */
-const _ORCHESTRATOR_MODE_TOOLS: AgentToolName[] = [
-    'explore_pdx_project',
-    //Read-only information collection
-    'query_scope', 'query_types', 'query_rules', 'query_override_modes', 'search_rule_capabilities', 'explain_scope', 'parse_pdx_fragment', 'query_references', 'query_localisation_index', 'query_workspace_index',
-    'get_file_context', 'search_mod_files', 'find_sprite_candidates', 'find_sound_candidates', 'grep', 'get_completion_at',
-    'document_symbols', 'workspace_symbols', 'verify_pdx_identifier', 'read_file', 'list_directory',
-    'get_lsp_status', 'get_diagnostics', 'web_open', 'web_search', 'glob_files', 'web_find',
-    'query_scripted_effects', 'query_scripted_triggers', 'query_enums',
-    'get_entity_info', 'query_static_modifiers', 'query_variables',
-    'query_definition', 'query_definition_by_name',
-    // Blackboard and task management
-    'set_memory', 'get_memory', 'search_memory', 'todo_write',
-    // Topic-scoped Implementation_Plan.md handoff only; runtime guard blocks project files.
-    'write_file',
-    // Coordinator-specific
-    'dispatch_agents', 'query_blackboard', 'merge_results',
-    // Git
-    'git_ops', 'save_workflow',
-];
-
-
-
-
 
 export class AgentRunner {
     public readonly readTracker = new ReadTracker();
@@ -2296,9 +2190,9 @@ export class AgentRunner {
             );
             if (shouldAutoDiscloseExecutionTools(mode, toolStage, schedulingState.authorization)) {
                 toolDisclosureService.select({
-                    groups: ['file_write', 'command', 'git', 'media', 'orchestrator'],
+                    groups: ['file_write', 'command', 'git'],
                     reason: 'Runtime-authorized execution surface',
-                }, stagePool, disclosureContext);
+                }, stagePool, disclosureContext, { eligibleTools: stagedToolPool });
             }
             return toolDisclosureService.initialTools(stagePool, disclosureContext);
         };
@@ -3552,14 +3446,7 @@ export class AgentRunner {
                         ? selectionArgs.groups.filter((value): value is string => typeof value === 'string')
                         : undefined,
                     reason: typeof selectionArgs.reason === 'string' ? selectionArgs.reason : '',
-                }, selectionPool, disclosureContext, {
-                    // Write-authorized runs may load stage-hidden deferred tools
-                    // (edit_file/replace_lines/write_file/...) on demand. Without
-                    // this, a continuation turn that starts at the discovery
-                    // stage reports them as "unavailable" and the model concludes
-                    // the host never exposed them.
-                    deferStageGating: schedulingState.authorization === 'workspace_write',
-                });
+                }, selectionPool, disclosureContext, { eligibleTools: stagedToolPool });
                 selectionArgs._selectionResult = selection;
                 toolCall.function.arguments = JSON.stringify(selectionArgs);
                 const visibleStagePool = extendStageToolPoolWithSupport(

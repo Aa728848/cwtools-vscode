@@ -29,9 +29,8 @@ export function getToolMetadata(toolName: string): {
     // 1. Memory tools
     if (
         name === 'todo_write' ||
+        name === 'manage_goal' ||
         name === 'set_memory' ||
-        name === 'get_memory' ||
-        name === 'search_memory' ||
         name === 'query_blackboard'
     ) {
         return { effect: 'memory', riskLevel: 0, concurrencyClass: 'parallel' };
@@ -69,9 +68,7 @@ export function getToolMetadata(toolName: string): {
         name === 'read_file' ||
         name === 'list_directory' ||
         name === 'glob_files' ||
-        name === 'search_mod_files' ||
         name === 'grep' ||
-        name === 'get_file_context' ||
         name === 'get_completion_at' ||
         name === 'find_sprite_candidates' ||
         name === 'find_sound_candidates'

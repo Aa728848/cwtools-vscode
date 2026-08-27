@@ -28,11 +28,10 @@ interface ToolPhraseEntry {
 const TOOL_PHRASES: Record<string, ToolPhraseEntry> = {
     explore_pdx_project:       { category: 'query',       icon: '🕸️', en: 'Explore semantic graph', zh: '探索语义图' },
     read_file:                 { category: 'read',        icon: '📖', en: 'Read file', zh: '读取文件' },
-    get_file_context:          { category: 'read',        icon: '📖', en: 'Get file context', zh: '获取文件上下文' },
     get_pdx_block:             { category: 'read',        icon: '📖', en: 'Extract script block', zh: '提取脚本块' },
     list_directory:            { category: 'read',        icon: '📖', en: 'List directory', zh: '列出目录' },
     glob_files:                { category: 'read',        icon: '📖', en: 'Search files', zh: '搜索文件' },
-    search_mod_files:          { category: 'read',        icon: '📖', en: 'Search mod files', zh: '搜索 Mod 文件' },
+    grep:                      { category: 'read',        icon: '📖', en: 'Search files', zh: '搜索文件' },
     web_find:                 { category: 'read',        icon: '📖', en: 'Find in web page', zh: '在网页中查找' },
     codesearch:                { category: 'read',        icon: '📖', en: 'Code search', zh: '代码搜索' },
 
@@ -58,7 +57,6 @@ const TOOL_PHRASES: Record<string, ToolPhraseEntry> = {
     query_types:               { category: 'query',       icon: '🔍', en: 'Query types', zh: '查询类型' },
     query_rules:               { category: 'query',       icon: '🔍', en: 'Query rules', zh: '查询规则' },
     query_interface_knowledge: { category: 'query',       icon: '🔍', en: 'Query Interface knowledge', zh: '查询界面知识' },
-    query_references:          { category: 'query',       icon: '🔍', en: 'Query references', zh: '查询引用' },
     query_blackboard:          { category: 'query',       icon: '🔍', en: 'Query blackboard', zh: '查询黑板' },
     web_search:                { category: 'query',       icon: '🔍', en: 'Search web', zh: '搜索网页' },
     web_open:                  { category: 'query',       icon: '🔍', en: 'Open web page', zh: '打开网页' },
@@ -70,10 +68,8 @@ const TOOL_PHRASES: Record<string, ToolPhraseEntry> = {
     validate_code:             { category: 'validate',    icon: '🩺', en: 'Validate code', zh: '验证代码' },
 
     run_command:               { category: 'execute',     icon: '⚡', en: 'Run command', zh: '执行命令' },
-    list_processes:            { category: 'execute',     icon: '⚡', en: 'List command processes', zh: '列出命令进程' },
-    read_process:              { category: 'execute',     icon: '⚡', en: 'Read command process', zh: '读取命令进程' },
-    write_process_stdin:       { category: 'execute',     icon: '⚡', en: 'Send process input', zh: '发送进程输入' },
-    terminate_process:         { category: 'execute',     icon: '⚡', en: 'Stop command process', zh: '停止命令进程' },
+    manage_process:            { category: 'execute',     icon: '⚡', en: 'Manage command process', zh: '管理命令进程' },
+    manage_goal:               { category: 'orchestrate', icon: '🎯', en: 'Manage run goal', zh: '管理运行目标' },
 
     dispatch_agents:           { category: 'orchestrate', icon: '🎯', en: 'Dispatch subtasks', zh: '分派子任务' },
     merge_results:             { category: 'orchestrate', icon: '🎯', en: 'Merge results', zh: '合并结果' },
@@ -181,7 +177,7 @@ export function getToolDynamicPhrase(
             return dualPhrase(meta.phrase, locale);
         }
         case 'glob_files':
-        case 'search_mod_files': {
+        case 'grep': {
             const pattern = args.Pattern ?? args.pattern ?? args.query;
             if (typeof pattern === 'string') {
                 const short = truncateStr(pattern, 60);

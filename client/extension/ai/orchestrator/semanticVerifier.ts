@@ -310,7 +310,7 @@ export class SemanticVerifier {
             }
             if (!found && operation === 'define' && toolExecutor && contract.kind !== 'localisation') {
                 try {
-                    found = positiveDefinitionResult(await toolExecutor.execute('query_definition_by_name', { symbolName: contract.id }));
+                    found = positiveDefinitionResult(await toolExecutor.execute('go_to_definition', { symbolName: contract.id }));
                 } catch {
                     found = false;
                 }

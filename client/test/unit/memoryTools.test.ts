@@ -41,13 +41,13 @@ describe('MemoryToolHandler file reference safety', () => {
         } as AgentToolContext;
 
         await handler.setMemory({ key: 'large', value: 'v'.repeat(700) }, context);
-        const result = await handler.getMemory({ key: 'large' }, context) as Record<string, unknown>;
+        const result = await handler.queryBlackboard({ key: 'large' }, context) as any;
 
         expect(result.found).to.equal(true);
-        expect(result.value).to.equal('v'.repeat(700));
+        expect(result.entry.value).to.equal('v'.repeat(700));
     });
 
-    it('rejects legacy file references outside the current topic blackboard', async () => {
+    it('rejects file references outside the current topic blackboard', async () => {
         const { MemoryToolHandler, blackboardDomainPrefix } = loadMemoryTools();
         const blackboard = new Blackboard();
         const handler = new MemoryToolHandler({ workspaceRoot, blackboard });
@@ -56,12 +56,12 @@ describe('MemoryToolHandler file reference safety', () => {
         } as AgentToolContext;
         const outsidePath = path.join(workspaceRoot, 'outside-secret.txt');
         fs.writeFileSync(outsidePath, 'DO_NOT_EXPOSE', 'utf8');
-        blackboard.legacySet(`${blackboardDomainPrefix(context)}secret`, `file://${outsidePath}`);
+        blackboard.setFreeText(`${blackboardDomainPrefix(context)}secret`, `file://${outsidePath}`);
 
-        const result = await handler.getMemory({ key: 'secret' }, context) as Record<string, unknown>;
+        const result = await handler.queryBlackboard({ key: 'secret' }, context) as any;
 
-        expect(result.found).to.equal(false);
-        expect(String(result.error)).to.include('outside the current topic blackboard');
+        expect(result.found).to.equal(true);
+        expect(String(result.entry.value)).to.include('outside the current topic blackboard');
         expect(JSON.stringify(result)).to.not.include('DO_NOT_EXPOSE');
     });
 });

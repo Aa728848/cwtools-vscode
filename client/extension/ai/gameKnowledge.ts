@@ -16,7 +16,7 @@ This prompt intentionally contains no game-version rule tables, scope lists, ent
 
 ### Evidence routing
 - Rule legality and scope: use \`query_rules\`, \`query_scope\`, \`explain_scope\`, \`search_rule_capabilities\`, and position-aware completions. Pass exact scopes returned by CWT/LSP instead of translating them through prompt examples.
-- Entity and file shape: use \`query_cwt_schema\` for the actual target path, then \`query_types\`, \`query_definition_by_name\`, and \`get_entity_info\` for typed definitions and references.
+- Entity and file shape: use \`query_cwt_schema\` for the actual target path, then \`query_types\`, \`go_to_definition\`, and \`get_entity_info\` for typed definitions and references.
 - Syntax and operators: use \`parse_pdx_fragment\`, completions, and fresh diagnostics. Do not infer an operator, field, parameter, or block form from another game or an older version.
 - Project behaviour: use \`query_project_knowledge\` and \`explore_pdx_project\`, then read only the matched current project or vanilla archetype blocks needed for the decision.
 - Overrides: use \`query_override_modes\` for the exact intended target path and obey its returned \`decision\` as authoritative. Never assume a generic load-order rule, reuse the procedure from a different returned strategy, or contradict \`decision.requiredApproach\` / \`decision.forbiddenApproaches\`. File naming, same-key redefinition, and whole-file replacement are strategy-specific choices, not interchangeable techniques.

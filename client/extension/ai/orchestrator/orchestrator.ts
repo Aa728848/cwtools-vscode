@@ -274,7 +274,7 @@ export class Orchestrator {
                     '',
                     '### STRICT RULES:',
                     '- You MUST ONLY fix keys that appear as "Missing localisation key" in `get_diagnostics` output.',
-                    '- DO NOT use `search_mod_files` to look for existing localisation keys. That wastes time and finds keys that already exist.',
+                    '- Use `query_localisation_index` or an exact `grep` to check existing localisation keys.',
                     '- Your ONLY data source is the diagnostic error list from `get_diagnostics`.',
                     '',
                     '### Workflow:',

@@ -161,7 +161,7 @@ export class FileToolHandler {
         const state = this.failureSignatures.get(key);
         if (!state || state.count < FileToolHandler.ANCHOR_GUARD_BLOCK_THRESHOLD) return null;
         const basename = path.basename(filePath);
-        return `edit BLOCKED by anchor guard for ${basename}: this exact edit (same file + same anchor) already failed ${state.count} times with ${currentErrorClass} and the anchor still cannot succeed. Do NOT retry it unchanged. MANDATORY: call read_file/get_file_context on this file to see its CURRENT content, then choose a different anchor (or fresh line numbers for replace_lines). If the section was already modified as intended, move on instead of re-applying.`;
+        return `edit BLOCKED by anchor guard for ${basename}: this exact edit (same file + same anchor) already failed ${state.count} times with ${currentErrorClass} and the anchor still cannot succeed. Do NOT retry it unchanged. MANDATORY: call read_file on this file to see its CURRENT content, then choose a different anchor (or fresh line numbers for replace_lines). If the section was already modified as intended, move on instead of re-applying.`;
     }
 
     /** Record one consecutive failure of the same anchor (bounded LRU). */
@@ -446,7 +446,7 @@ export class FileToolHandler {
         if (readTracker && !this.shouldBypassReadTrackerCheck(resolution.resolved)) {
             const check = readTracker.canWrite(resolution.resolved);
             if (!check.ok) {
-                throw new Error(`ReadTracker Blocked: ${check.reason}. You must read the file context first using read_file or get_file_context. If you have already read it, the file might have been modified externally; please perform a fresh read_file to synchronize, and then retry your edit.`);
+                throw new Error(`ReadTracker Blocked: ${check.reason}. You must read the file context first using read_file. If you have already read it, the file might have been modified externally; please perform a fresh read_file to synchronize, and then retry your edit.`);
             }
         }
         return resolution.resolved;
@@ -611,8 +611,15 @@ export class FileToolHandler {
 
     // - readFile -
 
-    async readFile(args: { file: string; startLine?: number; endLine?: number }, context?: import('../types').AgentToolContext): Promise<import('../types').ReadFileResult> {
+    async readFile(args: { file: string; startLine?: number; endLine?: number; centerLine?: number; radius?: number }, context?: import('../types').AgentToolContext): Promise<import('../types').ReadFileResult> {
         try {
+            if (args.centerLine !== undefined) {
+                if (!Number.isInteger(args.centerLine) || args.centerLine < 0) throw new Error('centerLine must be a non-negative 0-based integer.');
+                if (args.startLine !== undefined || args.endLine !== undefined) throw new Error('centerLine is mutually exclusive with startLine/endLine.');
+                const radius = Number.isInteger(args.radius) ? Math.max(0, Math.min(args.radius!, 150)) : 20;
+                args.startLine = Math.max(1, args.centerLine + 1 - radius);
+                args.endLine = args.centerLine + 1 + radius;
+            }
             args.file = this.resolveAndAssertInWorkspace(args.file, context);
             const paradoxDomain = context?.runnerOptions?.domain !== 'general';
             const localisationFile = this.isLocalisationPath(args.file) && matchesExt(args.file, '.yml');
@@ -648,8 +655,8 @@ export class FileToolHandler {
                             gapInfo = `\n... [${totalLines - 100} lines omitted - Stop: STOP! DO NOT READ FULL FILE! Use document_symbols + get_pdx_block] ...\n`;
                             hint = `Warning: FILE TOO LARGE. The first 100 lines and last 20 are displayed. For PDX scripts (.txt), you MUST call document_symbols("${args.file}") to get the structure, then use get_pdx_block("${args.file}", symbol) to extract the specific block you need. DO NOT use read_file for large PDX scripts.`;
                         } else if (paradoxDomain && localisationFile) {
-                            gapInfo = `\n... [${totalLines - 100} lines omitted - Stop: STOP! YML IS TOO LARGE. Use search_mod_files or grep] ...\n`;
-                            hint = `Warning: YML TOO LARGE. You MUST NOT read entire localisation files. Use grep or search_mod_files to find specific keys instead.`;
+                            gapInfo = `\n... [${totalLines - 100} lines omitted - Stop: STOP! YML IS TOO LARGE. Use grep] ...\n`;
+                            hint = `Warning: YML TOO LARGE. You MUST NOT read entire localisation files. Use grep to find specific keys instead.`;
                         }
 
                         hint += paradoxDomain
@@ -730,8 +737,8 @@ export class FileToolHandler {
                     gapInfo = `\n... [${totalLines - 100} lines omitted - Stop: STOP! DO NOT READ FULL FILE! Use document_symbols + get_pdx_block] ...\n`;
                     hint = `Warning: FILE TOO LARGE. The first 100 lines and last 20 are displayed. For PDX scripts (.txt), you MUST call document_symbols("${args.file}") to get the structure, then use get_pdx_block("${args.file}", symbol) to extract the specific block you need. DO NOT use read_file for large PDX scripts.`;
                 } else if (paradoxDomain && localisationFile) {
-                    gapInfo = `\n... [${totalLines - 100} lines omitted - Stop: STOP! YML IS TOO LARGE. Use search_mod_files or grep] ...\n`;
-                    hint = `Warning: YML TOO LARGE. You MUST NOT read entire localisation files. Use grep or search_mod_files to find specific keys instead.`;
+                    gapInfo = `\n... [${totalLines - 100} lines omitted - Stop: STOP! YML IS TOO LARGE. Use grep] ...\n`;
+                    hint = `Warning: YML TOO LARGE. You MUST NOT read entire localisation files. Use grep to find specific keys instead.`;
                 }
 
                 hint += paradoxDomain
@@ -1268,7 +1275,7 @@ export class FileToolHandler {
                 const preview = normalizedCurrentRange.split('\n').slice(0, 12).join('\n');
                 return {
                     success: false,
-                    message: `replace_lines safety check failed for ${path.basename(filePath)} lines ${startLine}-${endLine}: ${guardErrors.join('; ')}. The file may have changed since the line numbers were chosen. Re-read the current context with get_file_context/read_file, then retry with updated line numbers and expectedContent.` + this.recordEditFailure(filePath),
+                    message: `replace_lines safety check failed for ${path.basename(filePath)} lines ${startLine}-${endLine}: ${guardErrors.join('; ')}. The file may have changed since the line numbers were chosen. Re-read the current context with read_file, then retry with updated line numbers and expectedContent.` + this.recordEditFailure(filePath),
                     currentContentPreview: preview,
                 };
             }

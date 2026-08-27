@@ -156,29 +156,23 @@ describe('Blackboard', () => {
         expect(bb2.size).to.equal(2);
     });
 
-    // ── Compatibility layer testing ──
-    it('legacySet + legacyGet: 兼容旧 API', () => {
+    it('setFreeText + read: 自由文本读写', () => {
         const bb = new Blackboard();
-        bb.legacySet('old_key', 'old_value');
-        const result = bb.legacyGet('old_key');
-        expect(result.found).to.be.true;
-        expect(result.value).to.equal('old_value');
+        bb.setFreeText('key', 'value');
+        expect(bb.read('key')?.value).to.equal('value');
     });
 
-    it('legacyGet: 不存在的 key', () => {
+    it('read: 不存在的 key', () => {
         const bb = new Blackboard();
-        const result = bb.legacyGet('nonexistent');
-        expect(result.found).to.be.false;
+        expect(bb.read('nonexistent')).to.equal(undefined);
     });
 
-    it('legacySearch: 关键词搜索', () => {
+    it('queryByPrefix: 前缀搜索', () => {
         const bb = new Blackboard();
-        bb.legacySet('ship_data', 'corvette class');
-        bb.legacySet('planet_data', 'continental world');
-        bb.legacySet('fleet_info', 'corvette fleet');
-        const result = bb.legacySearch('corvette');
-        expect(result.found).to.be.true;
-        expect(result.count).to.equal(2);
+        bb.setFreeText('ship:data', 'corvette class');
+        bb.setFreeText('planet:data', 'continental world');
+        bb.setFreeText('ship:fleet', 'corvette fleet');
+        expect(bb.queryByPrefix('ship:')).to.have.length(2);
     });
 
     it('clearAgent: 清除指定 Agent 的所有条目', () => {

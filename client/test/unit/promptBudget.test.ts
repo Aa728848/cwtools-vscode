@@ -87,9 +87,8 @@ describe('AI static prompt budgets', () => {
                 // also expose one structured question slot to the main agent.
                 const maxToolCount = mode === 'plan' || mode === 'explore' ? 19 : 16;
                 expect(tools.length, `${mode}/${stage} tool count`).to.be.within(8, maxToolCount);
-                // 9_000: includes the always-visible structured question schema plus
-                // dispatch resume/append/clarification and durable-graph lookups.
-                expect(total, `${mode}/${stage} system + tools`).to.be.at.most(9_000);
+                // Keep a small margin for the coordinator schemas used by Plan and Explore.
+                expect(total, `${mode}/${stage} system + tools`).to.be.at.most(9_500);
                 expect(tools.some(tool => projectWriteTools.has(tool.function.name)), `${mode}/${stage} project writes`).to.equal(false);
             }
         }

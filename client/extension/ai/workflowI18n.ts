@@ -95,7 +95,7 @@ const WORKFLOW_TEXT: Record<string, Record<WorkflowLocale, LocalizedWorkflowText
                 },
             },
             verification: {
-                'keys-present': 'All generated localisation keys are searchable via search_mod_files.',
+                'keys-present': 'All generated localisation keys are searchable via grep.',
             },
         },
         'zh-cn': {
@@ -116,7 +116,7 @@ const WORKFLOW_TEXT: Record<string, Record<WorkflowLocale, LocalizedWorkflowText
                 },
             },
             verification: {
-                'keys-present': '所有生成的本地化 key 都能通过 search_mod_files 查询到。',
+                'keys-present': '所有生成的本地化 key 都能通过 grep 查询到。',
             },
         },
     },

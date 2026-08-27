@@ -16,7 +16,6 @@ import type {
     QueryRulesArgs,
     QueryRulesResult,
     QueryReferencesResult,
-    GetFileContextResult,
     GetCompletionAtResult,
     DocumentSymbolsResult,
     DocumentSymbolInfo,
@@ -40,6 +39,30 @@ import {
 
 type CwtSchemaEntitySummary = NonNullable<QueryCwtSchemaResult['entities']>[number];
 
+interface PdxTextSearchArgs {
+    query: string;
+    directory?: string;
+    fileExtension?: string;
+    exactMatch?: boolean;
+    searchContext?: 'mod' | 'vanilla' | 'both';
+    isRegex?: boolean;
+    caseSensitive?: boolean;
+    limit?: number;
+    fileExtensions?: string[];
+}
+
+interface PdxTextSearchResult {
+    files: Array<{
+        logicalPath: string;
+        matchingLines: Array<{ line: number; content: string }>;
+    }>;
+    searchedRoot?: string;
+    totalFound?: number;
+    _warning?: string;
+    _nextSteps?: string[];
+    _hint?: string;
+}
+
 function isAgentTempPath(filePath: string): boolean {
     return /(?:^|[\\/])\.(?:cwtools|cwtools-ai)[\\/](?:tmp|[^\\/]+[\\/]tmp)(?:[\\/]|$)/i.test(filePath);
 }
@@ -58,7 +81,7 @@ export function isExcludedModSearchPath(workspaceRoot: string, filePath: string)
 }
 
 function buildAbsenceWarning(identifier: string): string {
-    return `No matches for "${identifier}" are not proof that it is missing. PDX identifiers can live in vanilla cache, localisation, .gui/.gfx/.asset files, generated indexes, or a different AST type. Before declaring it nonexistent, verify with verify_pdx_identifier or at least two independent lookups such as query_definition_by_name, workspace_symbols/query_types, and search_mod_files(searchContext="both").`;
+    return `No matches for "${identifier}" are not proof that it is missing. PDX identifiers can live in vanilla cache, localisation, .gui/.gfx/.asset files, generated indexes, or a different AST type. Before declaring it nonexistent, verify with verify_pdx_identifier or at least two independent lookups such as go_to_definition, workspace_symbols/query_types, and grep(searchContext="both").`;
 }
 
 function uniqStrings(values: string[]): string[] {
@@ -514,7 +537,7 @@ export class LspToolHandler {
         if (!name) {
             return {
                 ok: false,
-                error: 'Missing required symbolName argument. Pass an exact symbol name, for example query_definition_by_name({ "symbolName": "samplemod_has_psionic_research" }).',
+                error: 'Missing required symbolName argument. Pass an exact symbol name, for example go_to_definition({ "symbolName": "samplemod_has_psionic_research" }).',
             };
         }
         try {
@@ -2754,21 +2777,23 @@ export class LspToolHandler {
 
     // - queryReferences -
 
-    async queryReferences(args: { identifier: string; file?: string }): Promise<QueryReferencesResult> {
+    async queryReferences(args: { identifier: string; file?: string; limit?: number }): Promise<QueryReferencesResult> {
+        const limit = Math.max(1, Math.min(500, Math.trunc(args.limit ?? 100)));
         try {
             // Strategy 1: LSP via workspace_symbols + executeReferenceProvider
             const symbols = await this.vsCommand<vs.SymbolInformation[]>(
                 'vscode.executeWorkspaceSymbolProvider', [args.identifier]
             );
             if (symbols && symbols.length > 0) {
-                const sym = symbols.find(s => s.name === args.identifier) || symbols[0]!;
+                const sym = symbols.find(s => s.name === args.identifier) ?? symbols[0];
+                if (!sym) return { references: [] };
                 const refs = await this.vsCommand<vs.Location[]>(
                     'vscode.executeReferenceProvider',
                     [sym.location.uri, sym.location.range.start]
                 );
                 if (refs && refs.length > 0) {
                     return {
-                        references: refs.slice(0, 50).map(r => ({
+                        references: refs.slice(0, limit).map(r => ({
                             file: path.relative(this.ctx.workspaceRoot, r.uri.fsPath).replace(/\\/g, '/'),
                             line: r.range.start.line,
                             context: '', // LSP doesn't provide line content natively without opening the document
@@ -2783,7 +2808,7 @@ export class LspToolHandler {
             const grepRes = await this.grep({
                 query: args.identifier,
                 path: args.file ? path.relative(this.ctx.workspaceRoot, path.dirname(args.file)) : undefined,
-                limit: 50
+                limit,
             });
             return {
                 references: grepRes.matches.map(m => ({
@@ -3090,48 +3115,9 @@ export class LspToolHandler {
         };
     }
 
-    // - getFileContext -
-
-    async getFileContext(args: { file: string; line: number; radius?: number }, context?: import('../types').AgentToolContext): Promise<GetFileContextResult> {
-        const radius = args.radius ?? 20;
-        try {
-            const content = fs.readFileSync(args.file, 'utf-8');
-            const readTracker = (context?.agentRunner as any)?.readTracker;
-            if (readTracker) { readTracker.markRead(args.file); }
-            const lines = content.split('\n');
-            const startLine = Math.max(0, args.line - radius);
-            const endLine = Math.min(lines.length - 1, args.line + radius);
-            const contextLines = lines.slice(startLine, endLine + 1);
-
-            const relPath = path.relative(this.ctx.workspaceRoot, args.file).replace(/\\/g, '/');
-            const generalDomain = context?.runnerOptions?.domain === 'general';
-            let fileType = generalDomain
-                ? path.extname(relPath).replace(/^\./, '').toLowerCase() || 'text'
-                : 'unknown';
-            if (!generalDomain) {
-                if (relPath.startsWith('events/')) fileType = 'events';
-                else if (relPath.startsWith('common/')) {
-                    const parts = relPath.split('/');
-                    fileType = parts.length >= 2 ? `common/${parts[1]}` : 'common';
-                }
-                else if (relPath.startsWith('localisation')) fileType = 'localisation';
-            }
-
-            return {
-                code: contextLines.map((line, idx) => `${startLine + idx + 1} | ${line}`).join('\n'),
-                fileType,
-                startLine: startLine + 1,
-                endLine: endLine + 1,
-                lineNumberBase: 1,
-            };
-        } catch (e) {
-            return { code: '', fileType: 'unknown', error: e instanceof Error ? e.message : String(e) };
-        }
-    }
-
-    async searchModFiles(args: import('../types').SearchModFilesArgs): Promise<import('../types').SearchModFilesResult> {
+    private async searchPdxText(args: PdxTextSearchArgs): Promise<PdxTextSearchResult> {
         const limit = Math.min(args.limit ?? 30, 50);
-        const results: import('../types').SearchModFilesResult['files'] = [];
+        const results: PdxTextSearchResult['files'] = [];
         const ctxStr = args.searchContext || 'mod';
         const workspaceFolders = vs.workspace.workspaceFolders?.map(f => f.uri.fsPath) ?? [this.ctx.workspaceRoot];
         const searchedRoots: string[] = [];
@@ -3406,14 +3392,14 @@ export class LspToolHandler {
             returnObj._nextSteps = [
                 'For a PDX ID or key, call verify_pdx_identifier(identifier=...) before treating it as missing.',
                 'If you only searched mod files, retry with searchContext="both" or the likely vanilla/localisation extension.',
-                'For event/scripted trigger/effect/type definitions, prefer query_definition_by_name, workspace_symbols, or query_types.',
+                'For event/scripted trigger/effect/type definitions, prefer go_to_definition, workspace_symbols, or query_types.',
             ];
         }
         if (limitReached) {
             returnObj._warning = `[CRITICAL TRUNCATION] Truncation: The output limit of ${limit} files has been reached. The remaining matching files (which may contain hundreds) have been forcibly discarded to protect the large model context! Please narrow your search using the more precise \`query\` or \`directory\` parameters.`;
         }
         returnObj._hint = "Found what you need? If the match is in a PDX Script (.txt), use document_symbols to find its boundaries, get_pdx_block for exact context, then make the smallest guarded edit with edit_file or replace_lines.";
-        return returnObj as import('../types').SearchModFilesResult;
+        return returnObj as PdxTextSearchResult;
     }
 
     async findSpriteCandidates(args: import('../types').FindSpriteCandidatesArgs): Promise<import('../types').FindSpriteCandidatesResult> {
@@ -3845,6 +3831,39 @@ export class LspToolHandler {
         return result;
     }
 
+    async searchText(args: import('../types').GrepArgs, context?: import('../types').AgentToolContext): Promise<import('../types').GrepResult> {
+        if (context?.runnerOptions?.domain === 'general') {
+            const { query, path: searchPath, isRegex, caseSensitive, include, limit } = args;
+            return this.grep({ query, path: searchPath, isRegex, caseSensitive, include, limit }, context);
+        }
+        if (!args.searchContext && !args.exactMatch && !args.fileExtensions?.length) {
+            return this.grep(args, context);
+        }
+        const result = await this.searchPdxText({
+            query: args.query,
+            directory: args.path,
+            exactMatch: args.exactMatch,
+            searchContext: args.searchContext === 'workspace' ? 'mod' : args.searchContext,
+            isRegex: args.isRegex,
+            caseSensitive: args.caseSensitive,
+            limit: args.limit,
+            fileExtensions: args.fileExtensions,
+        });
+        const matches = result.files.flatMap(file => file.matchingLines.map(line => ({
+            file: file.logicalPath,
+            line: line.line,
+            content: line.content,
+        })));
+        return {
+            matches,
+            totalMatches: result.totalFound ?? matches.length,
+            truncated: !!result._warning?.toLowerCase().includes('limit'),
+            ...(result._warning ? { _warning: result._warning } : {}),
+            ...(result._nextSteps ? { _nextSteps: result._nextSteps } : {}),
+            ...(result._hint ? { _hint: result._hint } : {}),
+        };
+    }
+
     async grep(args: import('../types').GrepArgs, context?: import('../types').AgentToolContext): Promise<import('../types').GrepResult> {
         try {
             return await this.grepImpl(args, context);
@@ -4010,7 +4029,7 @@ export class LspToolHandler {
                 ]
                 : [
                     'For a PDX ID or key, call verify_pdx_identifier(identifier=...) before treating it as missing.',
-                    'If the key may be vanilla, use search_mod_files(searchContext="both") because grep only searches the workspace.',
+                    'If the key may be vanilla, use grep(searchContext="both").',
                     'If the key may be in a large PDX file, use workspace_symbols/document_symbols instead of relying on line search.',
                 ];
         }
@@ -4220,7 +4239,7 @@ export class LspToolHandler {
                         : buildAbsenceWarning(args.query),
                     _hint: generalDomain
                         ? 'Cross-check with targeted grep or document_symbols before concluding the definition is absent.'
-                        : 'workspace_symbols depends on the current LSP index. If this was a PDX ID lookup, cross-check with verify_pdx_identifier, query_definition_by_name/query_types, or search_mod_files(searchContext="both") before deciding it is missing.',
+                        : 'workspace_symbols depends on the current LSP index. If this was a PDX ID lookup, cross-check with verify_pdx_identifier, go_to_definition/query_types, or grep(searchContext="both") before deciding it is missing.',
                 };
             }
 
@@ -4315,9 +4334,9 @@ export class LspToolHandler {
             if (isOkObject(raw)) {
                 const file = typeof raw.file === 'string' ? raw.file : '';
                 const line = typeof raw.line === 'number' ? raw.line : undefined;
-                addEvidence('query_definition_by_name', 'found', `Exact AST definition found in ${file || 'unknown file'}.`);
+                addEvidence('go_to_definition', 'found', `Exact AST definition found in ${file || 'unknown file'}.`);
                 addMatch({
-                    source: 'query_definition_by_name',
+                    source: 'go_to_definition',
                     file,
                     line,
                     name: typeof raw.name === 'string' ? raw.name : identifier,
@@ -4326,12 +4345,12 @@ export class LspToolHandler {
                 const error = typeof raw === 'object' && raw !== null && typeof (raw as any).error === 'string'
                     ? (raw as any).error
                     : 'No exact AST definition returned.';
-                addEvidence('query_definition_by_name', 'not_found', error);
+                addEvidence('go_to_definition', 'not_found', error);
                 addNextStep('If this should be a typed game entity, provide typeName so query_types can verify the proper index.');
             }
         } catch (e) {
-            addEvidence('query_definition_by_name', 'error', e instanceof Error ? e.message : String(e));
-            addNextStep('Retry query_definition_by_name after the LSP finishes indexing.');
+            addEvidence('go_to_definition', 'error', e instanceof Error ? e.message : String(e));
+            addNextStep('Retry go_to_definition after the LSP finishes indexing.');
         }
 
         try {
@@ -4419,7 +4438,7 @@ export class LspToolHandler {
             ? args.fileExtensions
             : ['.txt', '.yml', '.gui', '.gfx', '.asset'];
         try {
-            const textRes = await this.searchModFiles({
+            const textRes = await this.searchPdxText({
                 query: identifier,
                 directory: args.directory,
                 fileExtensions: searchExtensions,
@@ -4429,11 +4448,11 @@ export class LspToolHandler {
                 limit,
             });
             if (textRes.files.length > 0) {
-                addEvidence('search_mod_files', 'found', `${textRes.files.length} file(s) contain the identifier text.`);
+                addEvidence('grep', 'found', `${textRes.files.length} file(s) contain the identifier text.`);
                 for (const file of textRes.files.slice(0, limit)) {
                     for (const line of file.matchingLines.slice(0, 3)) {
                         addMatch({
-                            source: 'search_mod_files',
+                            source: 'grep',
                             file: file.logicalPath,
                             line: line.line,
                             content: line.content,
@@ -4441,20 +4460,20 @@ export class LspToolHandler {
                     }
                 }
             } else {
-                addEvidence('search_mod_files', 'not_found', `No text matches in ${args.includeVanilla === false ? 'mod workspace' : 'mod workspace + vanilla cache'} for extensions ${searchExtensions.join(', ')}.`);
+                addEvidence('grep', 'not_found', `No text matches in ${args.includeVanilla === false ? 'mod workspace' : 'mod workspace + vanilla cache'} for extensions ${searchExtensions.join(', ')}.`);
                 addNextStep('If the ID may appear in another file type, retry with fileExtensions including that extension.');
             }
         } catch (e) {
-            addEvidence('search_mod_files', 'error', e instanceof Error ? e.message : String(e));
+            addEvidence('grep', 'error', e instanceof Error ? e.message : String(e));
         }
 
-        const strongFound = evidence.some(e => e.status === 'found' && (e.source === 'query_definition_by_name' || e.source === 'query_types'));
+        const strongFound = evidence.some(e => e.status === 'found' && (e.source === 'go_to_definition' || e.source === 'query_types'));
         const anyFound = evidence.some(e => e.status === 'found');
         const partialFound = evidence.some(e => e.status === 'partial');
         const anyError = evidence.some(e => e.status === 'error');
         const requiredSources = args.typeName
-            ? ['query_definition_by_name', 'workspace_symbols', 'query_types', 'search_mod_files']
-            : ['query_definition_by_name', 'workspace_symbols', 'search_mod_files'];
+            ? ['go_to_definition', 'workspace_symbols', 'query_types', 'grep']
+            : ['go_to_definition', 'workspace_symbols', 'grep'];
         const completedRequired = requiredSources.every(source =>
             evidence.some(e => e.source === source && e.status !== 'error')
         );
@@ -4498,9 +4517,19 @@ export class LspToolHandler {
         };
     }
 
-    async goToDefinition(args: { file: string; line: number; column: number }): Promise<unknown> {
+    async goToDefinition(args: { symbolName?: string; file?: string; line?: number; column?: number }): Promise<unknown> {
+        const symbolName = args.symbolName?.trim();
+        if (symbolName) return this.queryDefinitionByName({ symbolName });
+        const line = args.line;
+        const column = args.column;
+        if (!args.file || typeof line !== 'number' || !Number.isInteger(line)
+            || line < 0 || typeof column !== 'number' || !Number.isInteger(column) || column < 0) {
+            return { locations: [], error: 'Provide symbolName or file, line, and column.' };
+        }
+        const semantic = await this.queryDefinition({ file: args.file, line, column });
+        if (semantic && typeof semantic === 'object' && (semantic as { ok?: boolean }).ok === true) return semantic;
         const uri = vs.Uri.file(args.file);
-        const position = new vs.Position(args.line, args.column);
+        const position = new vs.Position(line, column);
         try {
             const definitions = await this.vsCommand<Array<vs.Location | vs.LocationLink>>(
                 'vscode.executeDefinitionProvider',
@@ -4523,9 +4552,17 @@ export class LspToolHandler {
         }
     }
 
-    async findReferencesAt(args: { file: string; line: number; column: number; limit?: number }): Promise<unknown> {
+    async findReferences(args: { identifier?: string; file?: string; line?: number; column?: number; limit?: number }): Promise<unknown> {
+        const identifier = args.identifier?.trim();
+        if (identifier) return this.queryReferences({ identifier, file: args.file, limit: args.limit });
+        const line = args.line;
+        const column = args.column;
+        if (!args.file || typeof line !== 'number' || !Number.isInteger(line)
+            || line < 0 || typeof column !== 'number' || !Number.isInteger(column) || column < 0) {
+            return { references: [], total: 0, error: 'Provide identifier or file, line, and column.' };
+        }
         const uri = vs.Uri.file(args.file);
-        const position = new vs.Position(args.line, args.column);
+        const position = new vs.Position(line, column);
         const limit = Math.max(1, Math.min(500, Math.trunc(args.limit ?? 100)));
         try {
             const references = await this.vsCommand<vs.Location[]>(
@@ -4566,179 +4603,130 @@ export class LspToolHandler {
         args: { file: string; line: number; column: number; newName: string; expectedExpansionPlanHash?: string },
         context?: import('../types').AgentToolContext,
     ): Promise<unknown> {
-        return this.lspOperation({ ...args, operation: 'rename' }, context);
+        return this.applyRename(args, context);
     }
 
-    // lspOperation
-    async lspOperation(args: {
-        operation: 'goToDefinition' | 'findReferences' | 'hover' | 'rename';
+    private async applyRename(args: {
         file: string;
         line: number;
         column: number;
-        newName?: string;
+        newName: string;
         expectedExpansionPlanHash?: string;
     }, context?: import('../types').AgentToolContext): Promise<unknown> {
         const uri = vs.Uri.file(args.file);
         const position = new vs.Position(args.line, args.column);
 
         try {
-            switch (args.operation) {
-                case 'goToDefinition': {
-                    const defs = await this.vsCommand<vs.Location[]>(
-                        'vscode.executeDefinitionProvider', [uri, position]
-                    );
-                    if (!defs || defs.length === 0) return { locations: [], message: 'Definition not found.' };
+            const edit = await this.vsCommand<vs.WorkspaceEdit>(
+                'vscode.executeDocumentRenameProvider', [uri, position, args.newName]
+            );
+            if (!edit) return { error: 'Rename is not supported at this position.' };
+            const entries = edit.entries();
+            if (entries.length === 0) return { error: 'Rename provider returned an empty workspace edit.' };
+            const outside = entries.find(([target]) =>
+                target.scheme !== 'file' || !isPathInsideOrEqual(target.fsPath, this.ctx.workspaceRoot));
+            if (outside) {
+                return { error: `Rename was rejected because it targets a path outside the active workspace: ${outside[0].toString()}` };
+            }
+            const changes: Array<{ file: string; edits: number }> = entries.map(([target, edits]) => ({
+                file: path.relative(this.ctx.workspaceRoot, target.fsPath).replace(/\\/g, '/'),
+                edits: edits.length,
+            }));
+            const sourceDocument = await vs.workspace.openTextDocument(uri);
+            const sourceRange = sourceDocument.getWordRangeAtPosition(position, /[A-Za-z0-9_.$:@-]+/);
+            const oldName = sourceRange ? sourceDocument.getText(sourceRange) : sourceDocument.lineAt(position.line).text.slice(position.character).match(/^[A-Za-z0-9_.$:@-]+/)?.[0] ?? '';
+            const previews: RenameEditPreview[] = [];
+            const nextContents = new Map<string, { previousContent: string; content: string }>();
+            for (const [target, targetEdits] of entries) {
+                const document = await vs.workspace.openTextDocument(target);
+                const previousContent = document.getText();
+                const file = path.relative(this.ctx.workspaceRoot, target.fsPath).replace(/\\/g, '/');
+                const filePreviews = targetEdits.map(targetEdit => {
+                    const lineText = document.lineAt(targetEdit.range.start.line).text;
                     return {
-                        locations: defs.map(d => ({
-                            file: d.uri.fsPath,
-                            range: {
-                                startLine: d.range.start.line,
-                                startColumn: d.range.start.character,
-                                endLine: d.range.end.line,
-                                endColumn: d.range.end.character,
-                            },
-                        })),
-                    };
-                }
-                case 'findReferences': {
-                    const refs = await this.vsCommand<vs.Location[]>(
-                        'vscode.executeReferenceProvider', [uri, position]
-                    );
-                    if (!refs || refs.length === 0) return { references: [], message: 'References not found.' };
-                    return {
-                        references: refs.slice(0, 50).map(r => ({
-                            file: path.relative(this.ctx.workspaceRoot, r.uri.fsPath).replace(/\\/g, '/'),
-                            line: r.range.start.line,
-                            column: r.range.start.character,
-                        })),
-                        total: refs.length,
-                    };
-                }
-                case 'hover': {
-                    const hovers = await this.vsCommand<vs.Hover[]>(
-                        'vscode.executeHoverProvider', [uri, position]
-                    );
-                    if (!hovers || hovers.length === 0) return { text: '', message: 'No hover information available.' };
-                    const text = hovers.flatMap(h =>
-                        h.contents.map(c => typeof c === 'string' ? c : (c as vs.MarkdownString).value)
-                    ).join('\n\n');
-                    return { text };
-                }
-                case 'rename': {
-                    if (!args.newName) return { error: 'Rename requires the newName argument.' };
-                    const edit = await this.vsCommand<vs.WorkspaceEdit>(
-                        'vscode.executeDocumentRenameProvider', [uri, position, args.newName]
-                    );
-                    if (!edit) return { error: 'Rename is not supported at this position.' };
-                    const entries = edit.entries();
-                    if (entries.length === 0) return { error: 'Rename provider returned an empty workspace edit.' };
-                    const outside = entries.find(([target]) =>
-                        target.scheme !== 'file' || !isPathInsideOrEqual(target.fsPath, this.ctx.workspaceRoot));
-                    if (outside) {
-                        return { error: `Rename was rejected because it targets a path outside the active workspace: ${outside[0].toString()}` };
-                    }
-                    const changes: Array<{ file: string; edits: number }> = entries.map(([target, edits]) => ({
-                        file: path.relative(this.ctx.workspaceRoot, target.fsPath).replace(/\\/g, '/'),
-                        edits: edits.length,
-                    }));
-                    const sourceDocument = await vs.workspace.openTextDocument(uri);
-                    const sourceRange = sourceDocument.getWordRangeAtPosition(position, /[A-Za-z0-9_.$:@-]+/);
-                    const oldName = sourceRange ? sourceDocument.getText(sourceRange) : sourceDocument.lineAt(position.line).text.slice(position.character).match(/^[A-Za-z0-9_.$:@-]+/)?.[0] ?? '';
-                    const previews: RenameEditPreview[] = [];
-                    const nextContents = new Map<string, { previousContent: string; content: string }>();
-                    for (const [target, targetEdits] of entries) {
-                        const document = await vs.workspace.openTextDocument(target);
-                        const previousContent = document.getText();
-                        const file = path.relative(this.ctx.workspaceRoot, target.fsPath).replace(/\\/g, '/');
-                        const filePreviews = targetEdits.map(targetEdit => {
-                            const line = document.lineAt(targetEdit.range.start.line).text;
-                            return {
-                                file,
-                                startOffset: document.offsetAt(targetEdit.range.start),
-                                endOffset: document.offsetAt(targetEdit.range.end),
-                                newText: targetEdit.newText,
-                                context: line,
-                            } satisfies RenameEditPreview;
-                        });
-                        previews.push(...filePreviews);
-                        nextContents.set(target.fsPath, {
-                            previousContent,
-                            content: applyRenameEdits(previousContent, filePreviews),
-                        });
-                    }
-                    const expansionPlan = buildRenameExpansionPlan(oldName, args.newName, previews);
-                    if (renameNeedsExpansionPlan(oldName, args.newName, previews)
-                        && args.expectedExpansionPlanHash !== expansionPlan.planHash) {
+                        file,
+                        startOffset: document.offsetAt(targetEdit.range.start),
+                        endOffset: document.offsetAt(targetEdit.range.end),
+                        newText: targetEdit.newText,
+                        context: lineText,
+                    } satisfies RenameEditPreview;
+                });
+                previews.push(...filePreviews);
+                nextContents.set(target.fsPath, {
+                    previousContent,
+                    content: applyRenameEdits(previousContent, filePreviews),
+                });
+            }
+            const expansionPlan = buildRenameExpansionPlan(oldName, args.newName, previews);
+            if (renameNeedsExpansionPlan(oldName, args.newName, previews)
+                && args.expectedExpansionPlanHash !== expansionPlan.planHash) {
+                return {
+                    applied: false,
+                    previewOnly: true,
+                    requiresExpansionPlan: true,
+                    ...(args.expectedExpansionPlanHash ? {
+                        error: 'Rename expansion plan changed or the supplied hash was invalid. Review the refreshed plan before retrying.',
+                    } : {}),
+                    expansionPlan,
+                    suggestedQueries: [
+                        'query_inline_instantiation for inline-generated identifiers',
+                        'query_localisation_index with referenceStatus/auditMode for localisation composites',
+                        'query_workspace_index with includeAssetChain for GUI/GFX composites',
+                    ],
+                };
+            }
+            const readTracker = context?.agentRunner?.readTracker;
+            for (const [target] of entries) {
+                const contents = nextContents.get(target.fsPath);
+                if (!contents) return { error: `Rename could not build the resulting content for ${target.fsPath}.` };
+                readTracker?.markRead(target.fsPath);
+                const writeAccess = readTracker?.canWrite(target.fsPath);
+                if (writeAccess && !writeAccess.ok) return { error: writeAccess.reason };
+                context?.onBeforeFileWrite?.(target.fsPath, contents.previousContent);
+                const extension = path.extname(target.fsPath).toLowerCase();
+                if (context?.onBeforePdxWrite && ['.txt', '.gui', '.gfx', '.asset', '.yml', '.shader', '.fxh'].includes(extension)) {
+                    const preflight = await context.onBeforePdxWrite({
+                        toolName: 'rename_symbol',
+                        filePath: target.fsPath,
+                        previousContent: contents.previousContent,
+                        content: contents.content,
+                    });
+                    if (!preflight.allowed) {
                         return {
                             applied: false,
-                            previewOnly: true,
-                            requiresExpansionPlan: true,
-                            ...(args.expectedExpansionPlanHash ? {
-                                error: 'Rename expansion plan changed or the supplied hash was invalid. Review the refreshed plan before retrying.',
-                            } : {}),
-                            expansionPlan,
-                            suggestedQueries: [
-                                'query_inline_instantiation for inline-generated identifiers',
-                                'query_localisation_index with referenceStatus/auditMode for localisation composites',
-                                'query_workspace_index with includeAssetChain for GUI/GFX composites',
-                            ],
+                            error: preflight.message ?? `Rename was rejected by semantic preflight for ${relativeWorkspacePath(this.ctx.workspaceRoot, target.fsPath)}.`,
+                            evidenceGateBlocked: true,
+                            changes,
                         };
                     }
-                    const readTracker = context?.agentRunner?.readTracker;
-                    for (const [target] of entries) {
-                        const contents = nextContents.get(target.fsPath);
-                        if (!contents) return { error: `Rename could not build the resulting content for ${target.fsPath}.` };
-                        readTracker?.markRead(target.fsPath);
-                        const writeAccess = readTracker?.canWrite(target.fsPath);
-                        if (writeAccess && !writeAccess.ok) return { error: writeAccess.reason };
-                        context?.onBeforeFileWrite?.(target.fsPath, contents.previousContent);
-                        const extension = path.extname(target.fsPath).toLowerCase();
-                        if (context?.onBeforePdxWrite && ['.txt', '.gui', '.gfx', '.asset', '.yml', '.shader', '.fxh'].includes(extension)) {
-                            const preflight = await context.onBeforePdxWrite({
-                                toolName: 'rename_symbol',
-                                filePath: target.fsPath,
-                                previousContent: contents.previousContent,
-                                content: contents.content,
-                            });
-                            if (!preflight.allowed) {
-                                return {
-                                    applied: false,
-                                    error: preflight.message ?? `Rename was rejected by semantic preflight for ${relativeWorkspacePath(this.ctx.workspaceRoot, target.fsPath)}.`,
-                                    evidenceGateBlocked: true,
-                                    changes,
-                                };
-                            }
-                        }
-                    }
-                    // Permission check: rename modifies multiple files, require user confirmation
-                    // in 'confirm' mode (consistent with edit_file/write_file permission model).
-                    const shouldBypassConfirmation = context?.runnerOptions?.forceAutoApplyWrites === true
-                        || context?.runnerOptions?.useSlimPrompt === true;
-                    if (this.ctx.fileWriteMode === 'confirm' && this.ctx.onPendingWrite && !shouldBypassConfirmation) {
-                        const summary = changes.map(c => `${c.file} (${c.edits} edits)`).join(', ');
-                        const confirmed = await this.ctx.onPendingWrite(
-                            args.file, `Rename: ${changes.length} file(s) affected: ${summary}`, `rename_${Date.now()}`
-                        );
-                        if (!confirmed) return { error: 'The user rejected the rename operation.' };
-                    }
-                    const applied = await vs.workspace.applyEdit(edit);
-                    if (!applied) return { error: 'Rename failed because the workspace rejected the edit.' };
-                    for (const [target] of entries) readTracker?.markWritten(target.fsPath);
-                    return {
-                        applied: true,
-                        changes,
-                        writtenFiles: entries.map(([target]) => target.fsPath),
-                        expansionPlanHash: expansionPlan.planHash,
-                        message: `Rename applied across ${changes.length} file(s), ${changes.reduce((s, c) => s + c.edits, 0)} edit(s).`,
-                    };
                 }
-                default:
-                    return { error: `Unknown LSP operation: ${args.operation}` };
             }
+            // Permission check: rename modifies multiple files, require user confirmation
+            // in 'confirm' mode (consistent with edit_file/write_file permission model).
+            const shouldBypassConfirmation = context?.runnerOptions?.forceAutoApplyWrites === true
+                || context?.runnerOptions?.useSlimPrompt === true;
+            if (this.ctx.fileWriteMode === 'confirm' && this.ctx.onPendingWrite && !shouldBypassConfirmation) {
+                const summary = changes.map(c => `${c.file} (${c.edits} edits)`).join(', ');
+                const confirmed = await this.ctx.onPendingWrite(
+                    args.file, `Rename: ${changes.length} file(s) affected: ${summary}`, `rename_${Date.now()}`
+                );
+                if (!confirmed) return { error: 'The user rejected the rename operation.' };
+            }
+            const applied = await vs.workspace.applyEdit(edit);
+            if (!applied) return { error: 'Rename failed because the workspace rejected the edit.' };
+            for (const [target] of entries) readTracker?.markWritten(target.fsPath);
+            return {
+                applied: true,
+                changes,
+                writtenFiles: entries.map(([target]) => target.fsPath),
+                expansionPlanHash: expansionPlan.planHash,
+                message: `Rename applied across ${changes.length} file(s), ${changes.reduce((s, c) => s + c.edits, 0)} edit(s).`,
+            };
         } catch (e) {
-            return { error: `LSP operation failed: ${e instanceof Error ? e.message : String(e)}` };
+            return { error: `Rename failed: ${e instanceof Error ? e.message : String(e)}` };
         }
     }
+
     async queryLocalisationIndex(args: import('../types').QueryLocalisationIndexArgs): Promise<import('../types').QueryLocalisationIndexResult> {
         if (!this.ctx.indexService) {
             return {

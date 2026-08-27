@@ -38,9 +38,8 @@ const MCP_BRIDGE_TOOL_NAMES = [
     'get_completion_at',
     'document_symbols',
     'workspace_symbols',
-    'query_definition',
-    'query_definition_by_name',
-    'query_references',
+    'go_to_definition',
+    'find_references',
     'query_scripted_effects',
     'query_scripted_triggers',
     'query_enums',
@@ -340,7 +339,7 @@ export class McpBridgeServer implements Disposable {
                         { category: 'syntax', recommendedTools: ['get_diagnostics', 'get_pdx_block', 'query_cwt_schema', 'query_rules'] },
                         { category: 'localisation', recommendedTools: ['get_diagnostics', 'query_localisation_index'] },
                         { category: 'scope', recommendedTools: ['query_scope', 'query_cwt_schema', 'query_rules', 'get_completion_at'] },
-                        { category: 'reference', recommendedTools: ['query_definition_by_name', 'query_references', 'workspace_symbols'] },
+                        { category: 'reference', recommendedTools: ['go_to_definition', 'find_references', 'workspace_symbols'] },
                     ],
                 };
             case 'cwtools://knowledge/workflow-hints':

@@ -15,27 +15,27 @@ export type { AgentToolStage } from './types';
 const BUILD_STAGE_TOOLS: Partial<Record<AgentToolStage, ReadonlySet<string>>> = {
     discovery: new Set([
         'query_project_profile', 'query_project_knowledge', 'explore_pdx_project',
-        'query_workspace_index', 'get_file_context', 'read_file', 'search_mod_files',
+        'query_workspace_index', 'read_file', 'grep',
         'workspace_symbols', 'document_symbols',
         'todo_write', 'mcp_call', 'run_code',
         'dispatch_agents',
     ]),
     validation: new Set([
         'query_rules', 'query_cwt_schema', 'query_scope', 'explain_scope',
-        'parse_pdx_fragment', 'query_references', 'query_definition_by_name',
+        'parse_pdx_fragment', 'find_references', 'go_to_definition',
         'verify_pdx_identifier', 'get_diagnostics', 'get_completion_at', 'get_pdx_block',
-        'get_file_context', 'read_file', 'todo_write', 'run_code',
+        'read_file', 'todo_write', 'run_code',
     ]),
     write: new Set([
         'query_rules', 'query_scope', 'parse_pdx_fragment', 'verify_pdx_identifier', 'find_scope_bridge',
-        'get_diagnostics', 'read_file', 'get_file_context', 'get_pdx_block',
+        'get_diagnostics', 'read_file', 'get_pdx_block',
         'write_file', 'edit_file', 'replace_lines', 'extract_archetype_slots', 'instantiate_archetype', 'candidate_transaction',
         'rename_symbol',
         'write_localisation', 'todo_write', 'run_code',
     ]),
     finalize: new Set([
-        'get_diagnostics', 'analyze_diagnostic_error', 'query_references',
-        'verify_pdx_identifier', 'read_file', 'get_file_context', 'get_pdx_block', 'find_scope_bridge',
+        'get_diagnostics', 'analyze_diagnostic_error', 'find_references',
+        'verify_pdx_identifier', 'read_file', 'get_pdx_block', 'find_scope_bridge',
         'write_file', 'edit_file', 'replace_lines', 'extract_archetype_slots', 'instantiate_archetype', 'candidate_transaction', 'todo_write', 'run_code',
     ]),
 };
@@ -43,23 +43,23 @@ const BUILD_STAGE_TOOLS: Partial<Record<AgentToolStage, ReadonlySet<string>>> = 
 const PLAN_STAGE_TOOLS: Partial<Record<AgentToolStage, ReadonlySet<string>>> = {
     discovery: new Set([
         'query_project_profile', 'query_project_knowledge', 'explore_pdx_project',
-        'query_workspace_index', 'get_file_context', 'read_file', 'search_mod_files',
+        'read_file', 'grep',
         'workspace_symbols', 'document_symbols',
-        'web_search', 'web_open', 'web_find', 'mcp_call',
+        'web_search', 'web_open', 'mcp_call',
         'dispatch_agents', 'query_blackboard', 'merge_results',
     ]),
     validation: new Set([
         'query_rules', 'query_cwt_schema', 'query_scope',
-        'parse_pdx_fragment', 'query_references', 'query_definition_by_name',
+        'parse_pdx_fragment', 'find_references', 'go_to_definition',
         'verify_pdx_identifier', 'get_diagnostics',
-        'get_file_context', 'read_file', 'get_design_blueprint_contract',
+        'read_file', 'get_design_blueprint_contract',
         'write_design_blueprint', 'todo_write', 'grep',
         'dispatch_agents', 'query_blackboard', 'merge_results',
     ]),
     write: new Set(),
     finalize: new Set([
-        'get_diagnostics', 'query_references', 'verify_pdx_identifier',
-        'get_pdx_block', 'get_file_context', 'read_file',
+        'get_diagnostics', 'find_references', 'verify_pdx_identifier',
+        'get_pdx_block', 'read_file',
         'get_design_blueprint_contract', 'write_design_blueprint', 'todo_write',
         'dispatch_agents', 'query_blackboard', 'merge_results',
     ]),
@@ -68,23 +68,23 @@ const PLAN_STAGE_TOOLS: Partial<Record<AgentToolStage, ReadonlySet<string>>> = {
 const EXPLORE_STAGE_TOOLS: Partial<Record<AgentToolStage, ReadonlySet<string>>> = {
     discovery: new Set([
         'query_project_profile', 'query_project_knowledge', 'explore_pdx_project',
-        'query_workspace_index', 'get_file_context', 'read_file', 'search_mod_files',
+        'read_file', 'grep',
         'workspace_symbols', 'document_symbols',
-        'web_search', 'web_open', 'web_find', 'mcp_call',
+        'web_search', 'web_open', 'mcp_call',
         'dispatch_agents', 'query_blackboard', 'merge_results',
     ]),
     validation: new Set([
         'query_rules', 'query_cwt_schema', 'query_scope', 'explain_scope',
-        'query_references', 'query_definition_by_name', 'verify_pdx_identifier',
-        'get_diagnostics', 'get_pdx_block', 'get_file_context', 'read_file',
-        'search_mod_files', 'workspace_symbols', 'explore_pdx_project',
+        'find_references', 'go_to_definition', 'verify_pdx_identifier',
+        'get_diagnostics', 'get_pdx_block', 'read_file',
+        'grep', 'workspace_symbols', 'explore_pdx_project',
         'dispatch_agents', 'query_blackboard', 'merge_results',
     ]),
     write: new Set(),
     finalize: new Set([
-        'query_references', 'verify_pdx_identifier', 'get_diagnostics',
-        'get_pdx_block', 'get_file_context', 'read_file',
-        'search_mod_files', 'workspace_symbols', 'document_symbols',
+        'find_references', 'verify_pdx_identifier', 'get_diagnostics',
+        'get_pdx_block', 'read_file',
+        'grep', 'workspace_symbols', 'document_symbols',
         'dispatch_agents', 'query_blackboard', 'merge_results',
     ]),
 };
@@ -92,58 +92,56 @@ const EXPLORE_STAGE_TOOLS: Partial<Record<AgentToolStage, ReadonlySet<string>>> 
 const REVIEW_STAGE_TOOLS: Partial<Record<AgentToolStage, ReadonlySet<string>>> = {
     discovery: new Set([
         'query_project_profile', 'query_project_knowledge', 'explore_pdx_project',
-        'query_workspace_index', 'get_file_context', 'read_file', 'search_mod_files',
+        'query_workspace_index', 'read_file', 'grep',
         'workspace_symbols', 'document_symbols',
         'get_diagnostics', 'analyze_diagnostic_error', 'find_sprite_candidates',
         'query_localisation_index', 'mcp_call',
     ]),
     validation: new Set([
-        'query_rules', 'query_scope', 'query_references', 'query_definition_by_name',
+        'query_rules', 'query_scope', 'find_references', 'go_to_definition',
         'verify_pdx_identifier', 'get_diagnostics', 'analyze_diagnostic_error',
-        'get_pdx_block', 'get_file_context', 'read_file', 'search_mod_files',
+        'get_pdx_block', 'read_file', 'grep',
         'document_symbols', 'workspace_symbols', 'find_sprite_candidates',
         'query_localisation_index',
     ]),
     write: new Set(),
     finalize: new Set([
-        'get_diagnostics', 'analyze_diagnostic_error', 'query_references',
-        'verify_pdx_identifier', 'read_file', 'get_file_context', 'get_pdx_block',
-        'search_mod_files', 'find_sprite_candidates', 'query_localisation_index',
+        'get_diagnostics', 'analyze_diagnostic_error', 'find_references',
+        'verify_pdx_identifier', 'read_file', 'get_pdx_block',
+        'grep', 'find_sprite_candidates', 'query_localisation_index',
     ]),
 };
 
 /** General coding stages use the same compact lifecycle without PDX-specific gates. */
 const UTILITY_STAGE_TOOLS: Partial<Record<AgentToolStage, ReadonlySet<string>>> = {
     discovery: new Set([
-        'read_file', 'list_directory', 'glob_files', 'grep', 'get_file_context',
+        'read_file', 'list_directory', 'glob_files', 'grep',
         'document_symbols', 'workspace_symbols', 'go_to_definition', 'find_references',
         'hover_symbol', 'get_completion_at', 'get_diagnostics',
         'web_search', 'web_open', 'web_find', 'mcp_call', 'todo_write', 'run_skill', 'run_code',
         'dispatch_agents',
     ]),
     validation: new Set([
-        'read_file', 'get_file_context', 'grep', 'document_symbols',
+        'read_file', 'grep', 'document_symbols',
         'workspace_symbols', 'go_to_definition', 'find_references', 'hover_symbol',
         'get_completion_at', 'get_diagnostics', 'mcp_call', 'todo_write', 'run_skill', 'run_code',
         'query_blackboard', 'merge_results',
     ]),
     write: new Set([
-        'read_file', 'list_directory', 'glob_files', 'grep', 'get_file_context',
+        'read_file', 'list_directory', 'glob_files', 'grep',
         'document_symbols', 'workspace_symbols', 'go_to_definition', 'find_references',
         'hover_symbol', 'get_completion_at', 'get_diagnostics',
         'write_file', 'edit_file', 'replace_lines', 'rename_symbol',
-        'run_command', 'list_processes', 'read_process',
-        'write_process_stdin', 'terminate_process', 'git_ops', 'todo_write',
+        'run_command', 'manage_process', 'git_ops', 'todo_write',
         'mcp_call', 'run_skill', 'run_code',
         'dispatch_agents', 'query_blackboard', 'merge_results',
     ]),
     finalize: new Set([
-        'read_file', 'get_file_context', 'grep', 'document_symbols', 'workspace_symbols',
+        'read_file', 'grep', 'document_symbols', 'workspace_symbols',
         'go_to_definition', 'find_references', 'hover_symbol', 'get_completion_at',
         'get_diagnostics', 'write_file', 'edit_file', 'replace_lines',
         'rename_symbol',
-        'run_command', 'list_processes', 'read_process', 'write_process_stdin',
-        'terminate_process', 'git_ops', 'todo_write',
+        'run_command', 'manage_process', 'git_ops', 'todo_write',
         'mcp_call', 'run_skill', 'run_code',
         'dispatch_agents', 'query_blackboard', 'merge_results',
     ]),
@@ -151,10 +149,17 @@ const UTILITY_STAGE_TOOLS: Partial<Record<AgentToolStage, ReadonlySet<string>>> 
 
 const MODE_STAGE_TOOLS: Partial<Record<AgentMode, Partial<Record<AgentToolStage, ReadonlySet<string>>>>> = {
     build: BUILD_STAGE_TOOLS,
+    gui_expert: BUILD_STAGE_TOOLS,
+    loc_translator: BUILD_STAGE_TOOLS,
+    loc_writer: BUILD_STAGE_TOOLS,
     plan: PLAN_STAGE_TOOLS,
+    orchestrator: PLAN_STAGE_TOOLS,
     explore: EXPLORE_STAGE_TOOLS,
     review: REVIEW_STAGE_TOOLS,
+    script_reviewer: REVIEW_STAGE_TOOLS,
     utility: UTILITY_STAGE_TOOLS,
+    general: UTILITY_STAGE_TOOLS,
+    script: BUILD_STAGE_TOOLS,
 };
 
 /**
@@ -165,8 +170,8 @@ const MODE_STAGE_TOOLS: Partial<Record<AgentMode, Partial<Record<AgentToolStage,
 const CROSS_STAGE_SUPPORT_TOOLS = new Set([
     'run_skill',
     'history',
-    'get_goal', 'create_goal', 'update_goal', 'set_goal_budget',
-    'set_memory', 'get_memory', 'search_memory', 'save_memory', 'forget_memory', 'memory_recall_trace',
+    'manage_goal',
+    'set_memory', 'query_blackboard', 'save_memory', 'forget_memory', 'memory_recall_trace',
     'mcp_call',
 ]);
 const BUILD_WRITE_ON_DEMAND_TOOLS = new Set([
@@ -244,20 +249,24 @@ const NON_DELIVERY_WRITE_TOOLS = new Set([
 
 const DISCOVERY_PROGRESS_TOOLS = new Set([
     'query_project_profile', 'query_project_knowledge', 'explore_pdx_project',
-    'query_workspace_index', 'get_file_context', 'read_file', 'search_mod_files',
+    'query_workspace_index', 'read_file', 'grep',
     'workspace_symbols', 'document_symbols', 'dispatch_agents',
 ]);
 const VALIDATION_PROGRESS_TOOLS = new Set([
     'parse_pdx_fragment', 'verify_pdx_identifier', 'get_diagnostics',
-    'query_definition_by_name', 'query_references', 'explain_scope', 'todo_write',
+    'go_to_definition', 'find_references', 'explain_scope', 'todo_write',
 ]);
 const STAGED_WRITE_TOOLS = new Set([
     'write_file', 'edit_file', 'replace_lines', 'typed_pdx_write', 'candidate_transaction', 'rename_symbol', 'write_localisation',
     'convert_image_to_dds', 'convert_audio', 'deploy_mod_asset',
 ]);
 
+const BUILD_LIFECYCLE_MODES = new Set<AgentMode>([
+    'build', 'gui_expert', 'loc_translator', 'loc_writer', 'script',
+]);
+
 export function initialToolStageForMode(mode: AgentMode): AgentToolStage | undefined {
-    if (mode === 'build' || mode === 'utility') return 'write';
+    if (BUILD_LIFECYCLE_MODES.has(mode) || mode === 'utility') return 'write';
     return MODE_STAGE_TOOLS[mode] ? 'discovery' : undefined;
 }
 
@@ -394,7 +403,7 @@ export function advanceToolStage(
     if (mode === 'utility' && STAGED_WRITE_TOOLS.has(toolName)) {
         return result.success && !result.hasValidationErrors ? 'finalize' : 'write';
     }
-    if (mode === 'build' && STAGED_WRITE_TOOLS.has(toolName)) {
+    if (BUILD_LIFECYCLE_MODES.has(mode) && STAGED_WRITE_TOOLS.has(toolName)) {
         // A transport/policy/argument failure has not produced a candidate to
         // validate. Keep the write surface available so the model can repair the
         // invocation (notably write_localisation, the only legal YML writer).
@@ -409,7 +418,7 @@ export function advanceToolStage(
         case 'validation':
             if (mode === 'plan' && result.success && PLAN_STAGE_TOOLS.validation!.has(toolName)) return 'finalize';
             if (!result.success || !VALIDATION_PROGRESS_TOOLS.has(toolName)) return normalizedStage;
-            return mode === 'build' || mode === 'utility' ? 'write' : 'finalize';
+            return BUILD_LIFECYCLE_MODES.has(mode) || mode === 'utility' ? 'write' : 'finalize';
         case 'write': return normalizedStage;
         case 'finalize': return result.hasValidationErrors ? 'validation' : normalizedStage;
     }

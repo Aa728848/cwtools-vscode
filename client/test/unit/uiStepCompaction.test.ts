@@ -121,8 +121,8 @@ describe('uiStepCompaction', () => {
 
         const arrayPayload = prepareLiveStepForUi(liveSteps, {
             type: 'tool_result',
-            toolName: 'search_mod_files',
-            toolResult: { files: Array.from({ length: 2_000 }, (_, index) => ({ file: `common/test_${index}.txt` })) },
+            toolName: 'grep',
+            toolResult: { matches: Array.from({ length: 2_000 }, (_, index) => ({ file: `common/test_${index}.txt` })) },
             timestamp: 2,
         }, 4);
         expect(JSON.stringify(arrayPayload.toolResult).length).to.be.lessThan(8_000);

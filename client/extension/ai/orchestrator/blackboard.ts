@@ -321,34 +321,8 @@ export class Blackboard {
         }
     }
 
-    // ─── Compatibility layer (adapted to the old sharedMemory API) ──────────────────────────────────
-
-    /** 
-* Compatible with old set_memory tool calls. 
-* Write pure KV to a Blackboard entry mapped to type free_text. 
-*/
-    legacySet(key: string, value: string): void {
-        this.write(key, value, 'free_text', '__legacy__');
-    }
-
-    /** 
-* Compatible with old get_memory tool calls. 
-*/
-    legacyGet(key: string): { found: boolean; value?: string } {
-        const entry = this.entries.get(key);
-        return entry ? { found: true, value: entry.value } : { found: false };
-    }
-
-    /** 
-* Compatible with old search_memory tool calls. 
-*/
-    legacySearch(query: string): { found: boolean; count: number; matches: Array<{ key: string; preview: string }> } {
-        const entries = this.search(query);
-        const matches = entries.map(e => {
-            let preview = e.value;
-            if (preview.length > 150) preview = preview.substring(0, 150) + '...';
-            return { key: e.key, preview };
-        });
-        return { found: matches.length > 0, count: matches.length, matches };
+    /** Write plain key/value memory as a typed Blackboard free-text entry. */
+    setFreeText(key: string, value: string): void {
+        this.write(key, value, 'free_text', 'agent');
     }
 }

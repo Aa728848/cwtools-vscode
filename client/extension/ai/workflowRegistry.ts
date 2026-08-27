@@ -147,12 +147,12 @@ registerWorkflow({
 			'explore_pdx_project',
 			...DEEP_PARADOX_READ_TOOLS,
 			// Read & analyze
-			'read_file', 'get_file_context', 'document_symbols', 'workspace_symbols',
-			'search_mod_files', 'grep', 'query_localisation_index', 'query_workspace_index', 'query_project_profile', 'query_project_knowledge', 'get_lsp_status', 'get_diagnostics', 'verify_pdx_identifier',
+			'read_file', 'document_symbols', 'workspace_symbols',
+			'grep', 'query_localisation_index', 'query_workspace_index', 'query_project_profile', 'query_project_knowledge', 'get_lsp_status', 'get_diagnostics', 'verify_pdx_identifier',
 			// Query rules
-			'query_scope', 'query_types', 'query_cwt_schema', 'query_rules', 'query_override_modes', 'query_references',
+			'query_scope', 'query_types', 'query_cwt_schema', 'query_rules', 'query_override_modes', 'find_references',
 			'query_scripted_effects', 'query_scripted_triggers', 'query_enums',
-			'query_definition', 'query_definition_by_name',
+			'go_to_definition',
 			'query_static_modifiers', 'query_variables',
 			// Asset lookup
 			'find_sprite_candidates', 'find_sound_candidates',
@@ -219,11 +219,11 @@ registerWorkflow({
 			'explore_pdx_project',
 			...DEEP_PARADOX_READ_TOOLS,
 			// Read & analyze
-			'read_file', 'get_file_context', 'document_symbols', 'workspace_symbols',
-			'search_mod_files', 'grep', 'query_localisation_index', 'query_workspace_index', 'query_project_profile', 'query_project_knowledge', 'list_directory', 'glob_files',
+			'read_file', 'document_symbols', 'workspace_symbols',
+			'grep', 'query_localisation_index', 'query_workspace_index', 'query_project_profile', 'query_project_knowledge', 'list_directory', 'glob_files',
 			'get_lsp_status', 'get_diagnostics', 'verify_pdx_identifier',
 			// Query
-			'query_types', 'query_definition_by_name',
+			'query_types', 'go_to_definition',
 			// Write (localisation only)
 			'write_localisation', 'write_file',
 			// Task tracking
@@ -250,7 +250,7 @@ registerWorkflow({
 	verification: [
 		{
 			id: 'keys-present',
-			description: 'All generated localisation keys are searchable via search_mod_files.',
+			description: 'All generated localisation keys are searchable via grep.',
 			required: true,
 		},
 	],
@@ -278,20 +278,20 @@ registerWorkflow({
 			'explore_pdx_project',
 			...DEEP_PARADOX_READ_TOOLS,
 			// Read-only analysis
-			'read_file', 'get_file_context', 'document_symbols', 'workspace_symbols',
-			'search_mod_files', 'grep', 'query_localisation_index', 'query_workspace_index', 'query_project_profile', 'query_project_knowledge', 'list_directory', 'glob_files',
+			'read_file', 'document_symbols', 'workspace_symbols',
+			'grep', 'query_localisation_index', 'query_workspace_index', 'query_project_profile', 'query_project_knowledge', 'list_directory', 'glob_files',
 			'get_lsp_status', 'get_diagnostics', 'verify_pdx_identifier',
 			// Deep API
-			'query_scope', 'query_types', 'query_cwt_schema', 'query_rules', 'query_override_modes', 'query_references',
+			'query_scope', 'query_types', 'query_cwt_schema', 'query_rules', 'query_override_modes', 'find_references',
 			'query_scripted_effects', 'query_scripted_triggers', 'query_enums',
-			'query_definition', 'query_definition_by_name',
+			'go_to_definition',
 			'get_entity_info', 'query_static_modifiers', 'query_variables',
 			// Web research
 			'web_search', 'web_open', 'web_find',
 			// Design output
 			'get_design_blueprint_contract', 'write_design_blueprint',
 			// Memory
-			'set_memory', 'get_memory', 'search_memory',
+			'set_memory', 'query_blackboard',
 			// Task tracking
 			'todo_write',
 		],
@@ -362,12 +362,12 @@ registerWorkflow({
 		tools: [
 			'explore_pdx_project',
 			...DEEP_PARADOX_READ_TOOLS,
-			'read_file', 'get_file_context', 'document_symbols', 'workspace_symbols',
-			'search_mod_files', 'grep', 'query_localisation_index', 'query_workspace_index', 'query_project_profile', 'query_project_knowledge', 'list_directory', 'glob_files',
+			'read_file', 'document_symbols', 'workspace_symbols',
+			'grep', 'query_localisation_index', 'query_workspace_index', 'query_project_profile', 'query_project_knowledge', 'list_directory', 'glob_files',
 			'get_lsp_status', 'get_diagnostics', 'verify_pdx_identifier',
-			'query_scope', 'query_types', 'query_cwt_schema', 'query_rules', 'query_override_modes', 'query_references',
+			'query_scope', 'query_types', 'query_cwt_schema', 'query_rules', 'query_override_modes', 'find_references',
 			'query_scripted_effects', 'query_scripted_triggers', 'query_enums',
-			'query_definition', 'query_definition_by_name',
+			'go_to_definition',
 			'get_entity_info', 'query_static_modifiers', 'query_variables',
 			'find_sprite_candidates', 'find_sound_candidates',
 			'web_search', 'web_open', 'web_find',
@@ -418,8 +418,8 @@ registerWorkflow({
 		tools: [
 			'explore_pdx_project',
 			...DEEP_PARADOX_READ_TOOLS,
-			'read_file', 'get_file_context', 'document_symbols', 'workspace_symbols',
-			'search_mod_files', 'grep', 'query_localisation_index', 'query_workspace_index', 'query_project_profile', 'query_project_knowledge', 'list_directory', 'glob_files',
+			'read_file', 'document_symbols', 'workspace_symbols',
+			'grep', 'query_localisation_index', 'query_workspace_index', 'query_project_profile', 'query_project_knowledge', 'list_directory', 'glob_files',
 			'get_lsp_status', 'get_diagnostics', 'verify_pdx_identifier',
 			'find_sprite_candidates', 'find_sound_candidates',
 			'query_cwt_schema', 'query_rules', 'query_override_modes',

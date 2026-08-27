@@ -107,15 +107,14 @@ const FINAL_EVIDENCE_CONCURRENCY = 4;
 
 const AUTHORITATIVE_MEMORY_EVIDENCE_TOOLS = new Set<string>([
     'read_file',
-    'get_file_context',
     'query_rules',
     'query_cwt_schema',
     'query_project_profile',
     'query_project_knowledge',
     'query_scope',
     'query_types',
-    'query_definition_by_name',
-    'query_references',
+    'go_to_definition',
+    'find_references',
     'verify_pdx_identifier',
     'workspace_symbols',
     'document_symbols',
@@ -123,7 +122,7 @@ const AUTHORITATIVE_MEMORY_EVIDENCE_TOOLS = new Set<string>([
     'query_inline_instantiation',
     'analyze_pdx_flow',
     'compare_definition_with_vanilla',
-    'search_mod_files',
+    'grep',
 ]);
 
 function abortSignalError(signal: AbortSignal): Error {
@@ -268,11 +267,8 @@ const TOOL_TIMEOUTS: Record<string, number> = {
     search_rule_capabilities: 45_000,
     explain_scope: 45_000,
     parse_pdx_fragment: 45_000,
-    query_references: 45_000,
     get_lsp_status: 10_000,
     get_diagnostics: 45_000,
-    get_file_context: 45_000,
-    search_mod_files: 45_000,
     find_sprite_candidates: 45_000,
     find_sound_candidates: 45_000,
     get_completion_at: 45_000,
@@ -280,9 +276,6 @@ const TOOL_TIMEOUTS: Record<string, number> = {
     workspace_symbols: 45_000,
     verify_pdx_identifier: 45_000,
     get_pdx_block: 45_000,
-    lsp_operation: 45_000,
-    query_definition: 45_000,
-    query_definition_by_name: 45_000,
     query_scripted_effects: 45_000,
     query_scripted_triggers: 45_000,
     query_enums: 45_000,
@@ -330,9 +323,7 @@ const WRITE_CONFIRMATION_TOOLS = new Set<string>([
     'write_file',
     'edit_file',
     'replace_lines',
-    'ast_mutate',
     'write_localisation',
-    'lsp_operation',
 ]);
 
 const DEFAULT_TOOL_TIMEOUT = 30_000;
@@ -631,9 +622,7 @@ export class AgentToolExecutor {
         try { void this.client.sendNotification('cwtools/resumeIndexing'); } catch { /* ignore */ }
     }
 
-    /** Enhanced Blackboard - Shared knowledge storage between multiple Agents. 
-* Replaces the old sharedMemory Map and provides typed entries, CAS optimistic locking, and prefix subscriptions. 
-* Compatibility layer legacySet/Get/Search ensures existing set_memory/get_memory/search_memory tools work seamlessly. */
+    /** Shared typed knowledge storage with CAS optimistic locking and prefix subscriptions. */
     public blackboard!: import('./orchestrator/blackboard').Blackboard;
 
     invalidateCacheForFile(filePath: string): void {
@@ -1286,7 +1275,7 @@ export class AgentToolExecutor {
                     }
                 },
                 queryReferences: async (name) => {
-                    const result = await this.lspHandler.queryReferences({ identifier: name });
+                    const result = await this.lspHandler.findReferences({ identifier: name }) as import('./types').QueryReferencesResult;
                     return result.references.map(reference => ({
                         file: reference.file,
                         line: reference.line,
@@ -1845,13 +1834,6 @@ export class AgentToolExecutor {
                 };
             }
         }
-        // Redirect the retired AST mutation tool instead of failing without guidance.
-        if (toolName === 'ast_mutate') {
-            return {
-                success: false,
-                message: `${toolName} has been retired. Use get_pdx_block to obtain exact context, then edit_file(filePath, oldString, newString) for the smallest text replacement or replace_lines(filePath, startLine, endLine, newContent, expectedContent) for guarded line-range edits. Use write_file only for new or intentional whole-file writes, and write_localisation for .yml localisation files.`,
-            };
-        }
         const readTracker = (context?.agentRunner as any)?.readTracker;
         const isSubAgent = !!context?.runnerOptions?.useSlimPrompt;
         if (isSubAgent && toolName === 'git_ops') {
@@ -2355,23 +2337,17 @@ export class AgentToolExecutor {
                 result = await this.lspHandler.explainScope(args as any); break;
             case 'parse_pdx_fragment':
                 result = await this.lspHandler.parsePdxFragment(args as any); break;
-            case 'query_references':
-                result = await this.lspHandler.queryReferences(args as any); break;
             // validate_code - REMOVED: replaced by get_diagnostics + edit_file inline diagnostics
             case 'get_lsp_status':
                 result = await this.lspHandler.getLspStatus(args as any); break;
             case 'get_diagnostics':
                 result = await this.lspHandler.getDiagnostics(args as any, context); break;
-            case 'get_file_context':
-                result = await this.lspHandler.getFileContext(args as any, context); break;
-            case 'search_mod_files':
-                result = await this.lspHandler.searchModFiles(args as any); break;
             case 'find_sprite_candidates':
                 result = await this.lspHandler.findSpriteCandidates(args as any); break;
             case 'find_sound_candidates':
                 result = await this.lspHandler.findSoundCandidates(args as any); break;
             case 'grep':
-                result = await this.lspHandler.grep(args as any, context); break;
+                result = await this.lspHandler.searchText(args as any, context); break;
             case 'get_completion_at':
                 result = await this.lspHandler.getCompletionAt(args as any, context); break;
             case 'document_symbols':
@@ -2381,7 +2357,7 @@ export class AgentToolExecutor {
             case 'go_to_definition':
                 result = await this.lspHandler.goToDefinition(args as any); break;
             case 'find_references':
-                result = await this.lspHandler.findReferencesAt(args as any); break;
+                result = await this.lspHandler.findReferences(args as any); break;
             case 'hover_symbol':
                 result = await this.lspHandler.hoverSymbol(args as any); break;
             case 'rename_symbol':
@@ -2443,12 +2419,6 @@ export class AgentToolExecutor {
             }
             case 'get_pdx_block':
                 result = await this.lspHandler.getPdxBlock(args as any, context); break;
-            case 'lsp_operation':
-                result = await this.lspHandler.lspOperation(args as any, context); break;
-            case 'query_definition':
-                result = await this.lspHandler.queryDefinition(args as any); break;
-            case 'query_definition_by_name':
-                result = await this.lspHandler.queryDefinitionByName(args as any); break;
             case 'query_scripted_effects':
                 result = await this.lspHandler.queryScriptedEffects(args as any); break;
             case 'query_scripted_triggers':
@@ -2516,14 +2486,13 @@ export class AgentToolExecutor {
                 result = await this.executeRunCode(args, context); break;
             case 'run_command':
                 result = await this.externalHandler.runCommand(args as any, context); break;
-            case 'list_processes':
-                result = this.externalHandler.listProcesses(args as any, context); break;
-            case 'read_process':
-                result = this.externalHandler.readProcess(args as any, context); break;
-            case 'write_process_stdin':
-                result = this.externalHandler.writeProcessStdin(args as any, context); break;
-            case 'terminate_process':
-                result = this.externalHandler.terminateProcess(args as any, context); break;
+            case 'manage_process':
+                if (args.action === 'list') result = this.externalHandler.listProcesses(args as any, context);
+                else if (args.action === 'read') result = this.externalHandler.readProcess(args as any, context);
+                else if (args.action === 'write') result = this.externalHandler.writeProcessStdin(args as any, context);
+                else if (args.action === 'terminate') result = this.externalHandler.terminateProcess(args as any, context);
+                else result = { success: false, error: 'Unsupported manage_process action.' };
+                break;
             case 'web_search':
                 result = await this.externalHandler.webSearch(args as any, context); break;
             case 'web_find':
@@ -2599,101 +2568,99 @@ export class AgentToolExecutor {
                         error: 'select_tools must be evaluated by the active Agent runner.',
                     };
                 break;
-            case 'get_goal': {
+            case 'manage_goal': {
+                const action = args.action;
                 const topicId = context?.runnerOptions?.topicId ?? 'default';
                 const threadId = context?.runnerOptions?.threadId ?? topicId;
-                result = { success: true, goal: await goalStore.getGoal(topicId, threadId) ?? null };
-                break;
-            }
-            case 'create_goal': {
-                if (context?.runnerOptions?.useSlimPrompt) {
-                    result = { success: false, error: 'Sub-agents cannot create parent goals.' };
+                if (action === 'get') {
+                    result = { success: true, goal: await goalStore.getGoal(topicId, threadId) ?? null };
                     break;
                 }
-                if (context?.runnerOptions?.goalCreationAuthorized !== true) {
-                    result = { success: false, error: 'Goal creation requires explicit long-running user intent.' };
-                    break;
-                }
-                const objective = typeof args.objective === 'string' ? args.objective.trim() : '';
-                if (!objective) {
-                    result = { success: false, error: 'objective is required.' };
-                    break;
-                }
-                const topicId = context?.runnerOptions?.topicId ?? 'default';
-                const threadId = context?.runnerOptions?.threadId ?? topicId;
-                const criteria = Array.isArray(args.completionCriterion)
-                    ? args.completionCriterion.filter((item): item is string => typeof item === 'string')
-                    : [];
-                const tokenBudget = typeof args.tokenBudget === 'number' ? args.tokenBudget : undefined;
-                result = { success: true, goal: await goalStore.setGoal(topicId, threadId, objective, tokenBudget, criteria) };
-                break;
-            }
-            case 'update_goal': {
-                const status = args.status as DurableGoalStatus;
-                const validStatuses: DurableGoalStatus[] = ['active', 'paused', 'blocked', 'complete', 'cancelled'];
-                if (!validStatuses.includes(status)) {
-                    result = { success: false, error: 'Invalid goal status.' };
-                    break;
-                }
-                const reason = typeof args.reason === 'string' ? args.reason.trim() : undefined;
-                const evidence = Array.isArray(args.evidence)
-                    ? args.evidence.filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
-                    : [];
-                if (status === 'complete' && (context?.runnerOptions?.useSlimPrompt || evidence.length === 0)) {
-                    result = { success: false, error: 'Completing a goal requires parent-agent completion evidence.' };
-                    break;
-                }
-                if (status === 'complete') {
-                    const incompleteTodos = context?.agentRunner?.toolExecutor.getTodos(context?.runnerOptions?.agentId)
-                        .filter(todo => todo.status !== 'done') ?? [];
-                    const topicId = context?.runnerOptions?.topicId ?? 'default';
-                    agentTaskManager.configure(topicId);
-                    const activeTasks = agentTaskManager.list().filter(task =>
-                        task.status === 'queued' || task.status === 'running' || task.status === 'detached');
-                    if (incompleteTodos.length > 0 || activeTasks.length > 0
-                        || context?.runnerOptions?.schedulingState?.phase !== 'finalize') {
-                        result = {
-                            success: false,
-                            error: `Goal completion rejected: ${incompleteTodos.length} incomplete todo(s), ${activeTasks.length} active task(s), phase ${context?.runnerOptions?.schedulingState?.phase ?? 'unknown'}.`,
-                        };
+                if (action === 'create') {
+                    if (context?.runnerOptions?.useSlimPrompt) {
+                        result = { success: false, error: 'Sub-agents cannot create parent goals.' };
                         break;
                     }
-                }
-                if (status === 'blocked' && !reason) {
-                    result = { success: false, error: 'Blocking a goal requires a concrete reason.' };
+                    if (context?.runnerOptions?.goalCreationAuthorized !== true) {
+                        result = { success: false, error: 'Goal creation requires explicit long-running user intent.' };
+                        break;
+                    }
+                    const objective = typeof args.objective === 'string' ? args.objective.trim() : '';
+                    if (!objective) {
+                        result = { success: false, error: 'objective is required for action=create.' };
+                        break;
+                    }
+                    const criteria = Array.isArray(args.completionCriterion)
+                        ? args.completionCriterion.filter((item): item is string => typeof item === 'string')
+                        : [];
+                    const tokenBudget = typeof args.tokenBudget === 'number' ? args.tokenBudget : undefined;
+                    result = { success: true, goal: await goalStore.setGoal(topicId, threadId, objective, tokenBudget, criteria) };
                     break;
                 }
-                const topicId = context?.runnerOptions?.topicId ?? 'default';
-                const threadId = context?.runnerOptions?.threadId ?? topicId;
-                const transitioned = await goalSupervisor.transition(topicId, threadId, status, reason);
-                if (transitioned) {
-                    context?.runEventSink?.appendSoon('goal_transitioned', {
-                        goalId: transitioned.goalId,
-                        status: transitioned.status,
-                        reason,
-                        evidenceCount: evidence.length,
-                    }, { status: transitioned.status === 'blocked' ? 'failed' : 'done' });
-                }
-                result = transitioned
-                    ? { success: true, goal: transitioned }
-                    : { success: false, error: 'No durable goal exists for this thread.' };
-                break;
-            }
-            case 'set_goal_budget': {
-                if (context?.runnerOptions?.useSlimPrompt) {
-                    result = { success: false, error: 'Sub-agents cannot change parent goal budgets.' };
+                if (action === 'update') {
+                    const validStatuses: DurableGoalStatus[] = ['active', 'paused', 'blocked', 'complete', 'cancelled'];
+                    const status = validStatuses.find(candidate => candidate === args.status);
+                    if (!status) {
+                        result = { success: false, error: 'A valid status is required for action=update.' };
+                        break;
+                    }
+                    const reason = typeof args.reason === 'string' ? args.reason.trim() : undefined;
+                    const evidence = Array.isArray(args.evidence)
+                        ? args.evidence.filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
+                        : [];
+                    if (status === 'complete' && (context?.runnerOptions?.useSlimPrompt || evidence.length === 0)) {
+                        result = { success: false, error: 'Completing a goal requires parent-agent completion evidence.' };
+                        break;
+                    }
+                    if (status === 'complete') {
+                        const incompleteTodos = context?.agentRunner?.toolExecutor.getTodos(context?.runnerOptions?.agentId)
+                            .filter(todo => todo.status !== 'done') ?? [];
+                        agentTaskManager.configure(topicId);
+                        const activeTasks = agentTaskManager.list().filter(task =>
+                            task.status === 'queued' || task.status === 'running' || task.status === 'detached');
+                        if (incompleteTodos.length > 0 || activeTasks.length > 0
+                            || context?.runnerOptions?.schedulingState?.phase !== 'finalize') {
+                            result = {
+                                success: false,
+                                error: `Goal completion rejected: ${incompleteTodos.length} incomplete todo(s), ${activeTasks.length} active task(s), phase ${context?.runnerOptions?.schedulingState?.phase ?? 'unknown'}.`,
+                            };
+                            break;
+                        }
+                    }
+                    if (status === 'blocked' && !reason) {
+                        result = { success: false, error: 'Blocking a goal requires a concrete reason.' };
+                        break;
+                    }
+                    const transitioned = await goalSupervisor.transition(topicId, threadId, status, reason);
+                    if (transitioned) {
+                        context?.runEventSink?.appendSoon('goal_transitioned', {
+                            goalId: transitioned.goalId,
+                            status: transitioned.status,
+                            reason,
+                            evidenceCount: evidence.length,
+                        }, { status: transitioned.status === 'blocked' ? 'failed' : 'done' });
+                    }
+                    result = transitioned
+                        ? { success: true, goal: transitioned }
+                        : { success: false, error: 'No durable goal exists for this thread.' };
                     break;
                 }
-                const topicId = context?.runnerOptions?.topicId ?? 'default';
-                const threadId = context?.runnerOptions?.threadId ?? topicId;
-                result = {
-                    success: true,
-                    goal: await goalStore.setBudget(topicId, threadId, {
-                        tokens: typeof args.tokens === 'number' ? args.tokens : undefined,
-                        turns: typeof args.turns === 'number' ? args.turns : undefined,
-                        wallClockMs: typeof args.wallClockMs === 'number' ? args.wallClockMs : undefined,
-                    }),
-                };
+                if (action === 'set_budget') {
+                    if (context?.runnerOptions?.useSlimPrompt) {
+                        result = { success: false, error: 'Sub-agents cannot change parent goal budgets.' };
+                        break;
+                    }
+                    result = {
+                        success: true,
+                        goal: await goalStore.setBudget(topicId, threadId, {
+                            tokens: typeof args.tokens === 'number' ? args.tokens : undefined,
+                            turns: typeof args.turns === 'number' ? args.turns : undefined,
+                            wallClockMs: typeof args.wallClockMs === 'number' ? args.wallClockMs : undefined,
+                        }),
+                    };
+                    break;
+                }
+                result = { success: false, error: 'Unsupported manage_goal action.' };
                 break;
             }
             // ignore_validation_error - REMOVED: AI must fix errors, not suppress them
@@ -2701,17 +2668,6 @@ export class AgentToolExecutor {
                 result = await this.externalHandler.removeIgnoredDiagnostic(args as any, context); break;
             case 'get_ignored_diagnostics':
                 result = await this.externalHandler.getIgnoredDiagnostics(); break;
-
-
-
-
-
-
-
-
-
-
-
             // - Media Asset Conversion tools -
             case 'convert_image_to_dds':
                 result = await this.externalHandler.convertImageToDds(args as any, context); break;
@@ -2724,13 +2680,6 @@ export class AgentToolExecutor {
                 result = await this.analyzeDiagnosticError(args); break;
             case 'set_memory':
                 result = await this.memoryHandler.setMemory(args as any, context); break;
-            case 'set_memory_disabled': break;
-            case 'get_memory':
-                result = await this.memoryHandler.getMemory(args as any, context); break;
-            case 'get_memory_disabled': break;
-            case 'search_memory':
-                result = this.memoryHandler.searchMemory(args as any, context); break;
-            case 'search_memory_disabled': break;
             case 'history': {
                 result = searchAgentHistory(this.workspaceRoot, args as any, {
                     topicId: context?.runnerOptions?.topicId,
@@ -2750,7 +2699,6 @@ export class AgentToolExecutor {
             // - Persistent memory (cross-session, written to the topic-scoped .cwtools-memory.md) -
             case 'save_memory':
                 result = await this.memoryHandler.saveMemory(args as any, context); break;
-            case 'save_memory_disabled': break;
             case 'forget_memory':
                 result = await this.memoryHandler.forgetMemory(args as any, context); break;
             case 'memory_recall_trace':
@@ -2767,7 +2715,6 @@ export class AgentToolExecutor {
             }
             case 'query_blackboard':
                 result = await this.memoryHandler.queryBlackboard(args as any, context); break;
-            case 'query_blackboard_disabled': break;
             case 'merge_results': {
                 result = this.executeMergeResults(args, context);
                 break;
@@ -2900,7 +2847,7 @@ export class AgentToolExecutor {
     }
 
     private async verifyArchetypeDefinition(identity: string, canonicalPath: string, context?: import('./types').AgentToolContext): Promise<{ content: string } | undefined> {
-        const response = await this.lspHandler.queryDefinitionByName({ symbolName: identity });
+        const response = await this.lspHandler.goToDefinition({ symbolName: identity });
         const targetKey = canonicalPathKey(canonicalPath);
         const recordMatches = (value: unknown): boolean => {
             if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
@@ -3017,7 +2964,7 @@ export class AgentToolExecutor {
             || freshness === 'stale'
             || /stale|cache|pending global|validation\s+pending/i.test(analysisText);
         const requiredFreshRead = category === 'read_tracker_stale'
-            || /readtracker|fresh read|was not read|modified externally|get_file_context/i.test(analysisText);
+            || /readtracker|fresh read|was not read|modified externally/i.test(analysisText);
         const referenceCandidates = this.extractDiagnosticReferenceCandidates(analysisText);
         const referenceVerificationRequired = this.shouldVerifyDiagnosticReferences(category, referenceCandidates);
         const verificationInstruction = referenceVerificationRequired
@@ -3176,7 +3123,7 @@ export class AgentToolExecutor {
 
         const lower = text.toLowerCase();
         if (/validation_degraded_lsp_no_feedback|diagnostics?_unavailable|lsp.*no feedback|did not provide fresh diagnostics|diagnostic service:\s*(timeout|error|unavailable)/.test(lower)) return 'lsp_no_feedback';
-        if (/readtracker|was not read|modified externally|fresh read|get_file_context/.test(lower)) return 'read_tracker_stale';
+        if (/readtracker|was not read|modified externally|fresh read/.test(lower)) return 'read_tracker_stale';
         if (/json parse|tool argument|targetcontent|target content|replacementchunks|output length limit|same massive file|truncated/.test(lower)) return 'tool_argument_error';
         if (/cw001|syntax|unexpected token|unexpected end|unbalanced|missing closing|brace|parse error/.test(lower)) return 'brace_or_syntax_error';
         if (/expected value of type sprite|spritetype|gfx_|picture\s*=|sprite/.test(lower)) return 'unknown_sprite';
@@ -3244,15 +3191,15 @@ export class AgentToolExecutor {
             return `Before editing again, verify the concrete sound reference(s) [${refs}] with find_sound_candidates(searchContext="both") and only then use a guarded line edit.`;
         }
         if (category === 'missing_localisation') {
-            return `Before creating localisation, verify key(s) [${refs}] with query_localisation_index and search_mod_files(searchContext="both"); only use write_localisation if absent.`;
+            return `Before creating localisation, verify key(s) [${refs}] with query_localisation_index and grep(searchContext="both"); only use write_localisation if absent.`;
         }
         if (category === 'invalid_value_type') {
             return `Before replacing value(s) [${refs}], query the field rule/scope and verify type-correct candidates through local indexes.`;
         }
         if (category === 'missing_definition') {
-            return `Before creating definition(s) [${refs}], verify workspace and vanilla definitions with query_definition_by_name, workspace_symbols, and search_mod_files(searchContext="both").`;
+            return `Before creating definition(s) [${refs}], verify workspace and vanilla definitions with go_to_definition(symbolName=...), workspace_symbols, and grep(searchContext="both").`;
         }
-        return `Before editing or creating definitions again, verify reference(s) [${refs}] through query_rules/query_definition_by_name/workspace_symbols, then search_mod_files(searchContext="both") or verify_pdx_identifier(includeVanilla=true) if still unresolved.`;
+        return `Before editing or creating definitions again, verify reference(s) [${refs}] through query_rules/go_to_definition/workspace_symbols, then grep(searchContext="both") or verify_pdx_identifier(includeVanilla=true) if still unresolved.`;
     }
 
     private buildDiagnosticRoute(
@@ -3265,78 +3212,78 @@ export class AgentToolExecutor {
             ? ' If freshness is pending/stale, treat zero diagnostics cautiously and avoid duplicating already-created references.'
             : '';
         const referenceTools = referenceVerificationRequired
-            ? ['query_definition_by_name', 'workspace_symbols', 'search_mod_files', 'verify_pdx_identifier']
+            ? ['go_to_definition', 'workspace_symbols', 'grep', 'verify_pdx_identifier']
             : [];
         switch (category) {
             case 'read_tracker_stale':
                 return {
-                    recommendedTools: ['read_file', 'get_file_context'],
+                    recommendedTools: ['read_file'],
                     avoidTools: ['write_file', 'replace_lines'],
-                    nextInstruction: 'Refresh the target file with read_file or get_file_context, then retry the smallest guarded edit.',
+                    nextInstruction: 'Refresh the target file with read_file, using centerLine/radius when appropriate, then retry the smallest guarded edit.',
                 };
             case 'tool_argument_error':
                 return {
-                    recommendedTools: ['read_file', 'get_file_context', 'replace_lines'],
+                    recommendedTools: ['read_file', 'replace_lines'],
                     avoidTools: ['write_file with a large whole-file payload'],
                     nextInstruction: 'Do not retry the same malformed arguments. Re-read exact current text or switch to line-based replacement with anchors.',
                 };
             case 'brace_or_syntax_error':
                 return {
-                    recommendedTools: ['get_file_context', 'document_symbols', 'query_rules', 'get_diagnostics'],
+                    recommendedTools: ['read_file', 'document_symbols', 'query_rules', 'get_diagnostics'],
                     avoidTools: ['large write_file rewrites'],
                     nextInstruction: `Inspect the local syntax context and fix the smallest malformed block before re-running diagnostics.${staleHint}`,
                 };
             case 'unknown_sprite':
                 return {
-                    recommendedTools: ['find_sprite_candidates', 'search_mod_files', 'replace_lines', 'get_diagnostics'],
+                    recommendedTools: ['find_sprite_candidates', 'grep', 'replace_lines', 'get_diagnostics'],
                     avoidTools: ['inventing GFX_* names', 'raw .dds paths in sprite fields'],
                     nextInstruction: 'Resolve the sprite through verified project or vanilla .gfx candidates before editing the offending line.',
                 };
             case 'unknown_sound':
                 return {
-                    recommendedTools: ['find_sound_candidates', 'search_mod_files', 'replace_lines', 'get_diagnostics'],
+                    recommendedTools: ['find_sound_candidates', 'grep', 'replace_lines', 'get_diagnostics'],
                     avoidTools: ['inventing sound names', 'raw audio paths where an asset name is expected'],
                     nextInstruction: 'Resolve the sound/music asset through verified .asset candidates before editing the offending line.',
                 };
             case 'missing_localisation':
                 return {
-                    recommendedTools: ['query_localisation_index', 'search_mod_files', 'write_localisation', 'get_diagnostics'],
+                    recommendedTools: ['query_localisation_index', 'grep', 'write_localisation', 'get_diagnostics'],
                     avoidTools: ['write_file on .yml localisation files', 'duplicating keys without searching first'],
                     nextInstruction: `Search for the key first; if absent, use write_localisation on a real localisation path, then verify diagnostics.${staleHint}`,
                 };
             case 'scope_mismatch':
                 return {
-                    recommendedTools: ['query_scope', 'query_rules', 'get_file_context', 'document_symbols'],
+                    recommendedTools: ['query_scope', 'query_rules', 'read_file', 'document_symbols'],
                     avoidTools: ['guessing scope transitions'],
                     nextInstruction: 'Use CWTools scope/rule queries to verify the legal scope chain before changing triggers or effects.',
                 };
             case 'invalid_value_type':
                 return {
-                    recommendedTools: ['query_rules', 'query_scope', 'get_file_context', 'verify_pdx_identifier', ...referenceTools],
+                    recommendedTools: ['query_rules', 'query_scope', 'read_file', 'verify_pdx_identifier', ...referenceTools],
                     avoidTools: ['guessing enum/type values', 'copying unrelated vanilla values without scope/rule evidence'],
                     nextInstruction: 'Read the exact field rule and current scope, then replace only the invalid value with a verified type-correct candidate.',
                 };
             case 'missing_definition':
                 return {
-                    recommendedTools: ['query_definition_by_name', 'workspace_symbols', 'search_mod_files', 'verify_pdx_identifier', ...referenceTools],
+                    recommendedTools: ['go_to_definition', 'workspace_symbols', 'grep', 'verify_pdx_identifier', ...referenceTools],
                     avoidTools: ['creating duplicate definitions before checking vanilla/project sources'],
                     nextInstruction: 'Verify whether the referenced ID exists in workspace or vanilla before creating or renaming anything.',
                 };
             case 'duplicate_definition':
                 return {
-                    recommendedTools: ['query_definition_by_name', 'workspace_symbols', 'document_symbols', 'get_file_context'],
+                    recommendedTools: ['go_to_definition', 'workspace_symbols', 'document_symbols', 'read_file'],
                     avoidTools: ['deleting definitions without checking references', 'renaming both copies blindly'],
                     nextInstruction: 'Locate both definitions and references, then remove or rename only the unintended duplicate.',
                 };
             case 'unknown_trigger_effect':
                 return {
-                    recommendedTools: ['query_rules', 'query_scripted_triggers', 'query_scripted_effects', 'query_definition_by_name', 'workspace_symbols', ...referenceTools],
+                    recommendedTools: ['query_rules', 'query_scripted_triggers', 'query_scripted_effects', 'go_to_definition', 'workspace_symbols', ...referenceTools],
                     avoidTools: ['web_search as first step', 'renaming identifiers by guesswork'],
                     nextInstruction: 'Check local CWT rules and workspace/project/vanilla definitions first, then edit only the invalid trigger/effect reference.',
                 };
             case 'stale_lsp_cache':
                 return {
-                    recommendedTools: ['get_diagnostics', 'query_definition_by_name', 'workspace_symbols', ...referenceTools],
+                    recommendedTools: ['get_diagnostics', 'go_to_definition', 'workspace_symbols', ...referenceTools],
                     avoidTools: ['duplicate localisation/entity creation', 'blind retries'],
                     nextInstruction: referenceVerificationRequired
                         ? 'Verify whether the concrete referenced entity/key already exists before writing again; wait for fresh diagnostics if global checks are pending.'
@@ -3345,14 +3292,14 @@ export class AgentToolExecutor {
             case 'lsp_no_feedback':
                 return {
                     recommendedTools: ['get_diagnostics'],
-                    avoidTools: ['search_mod_files without a concrete identifier', 'duplicate entity/localisation creation', 'blind retries'],
+                    avoidTools: ['grep without a concrete identifier', 'duplicate entity/localisation creation', 'blind retries'],
                     nextInstruction: 'The LSP feedback path did not confirm semantic diagnostics. Do not search project/vanilla without a concrete diagnostic identifier; use the degraded validation warning as a caveat or retry get_diagnostics later.',
                 };
             default:
                 return {
                     recommendedTools: requiredFreshRead
-                        ? ['read_file', 'get_file_context', 'get_diagnostics']
-                        : ['get_file_context', 'query_rules', 'get_diagnostics', ...referenceTools],
+                        ? ['read_file', 'get_diagnostics']
+                        : ['read_file', 'query_rules', 'get_diagnostics', ...referenceTools],
                     avoidTools: ['blind write retries'],
                     nextInstruction: `Gather narrower file context and rule data, then choose the smallest safe edit.${staleHint}`,
                 };

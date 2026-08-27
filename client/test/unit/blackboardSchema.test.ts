@@ -105,8 +105,8 @@ describe('Blackboard write schema gate', () => {
         expect(bb.write(`${BLACKBOARD_KEY_PREFIXES.clarification}n1`, 'Need more input.', 'free_text', 'n1').success).to.equal(true);
         // quality gate evidence
         expect(bb.write(`${BLACKBOARD_KEY_PREFIXES.qualityGate}final`, JSON.stringify({ passed: true }), 'acceptance_evidence', '__quality_gate__').success).to.equal(true);
-        // legacy set_memory mapping
-        expect(bb.legacySet('memory:key', 'value')).to.equal(undefined);
+        // set_memory mapping
+        expect(bb.setFreeText('memory:key', 'value')).to.equal(undefined);
     });
 });
 

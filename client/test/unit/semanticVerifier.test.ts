@@ -74,7 +74,7 @@ describe('SemanticVerifier', () => {
         });
         const verifier = new SemanticVerifier();
         const result = await verifier.verify(root, [eventFile, locFile], graph, semanticTools(
-            async (toolName) => toolName === 'query_references' ? { references: [] } : { ok: false },
+            async (toolName) => toolName === 'find_references' ? { references: [] } : { ok: false },
         ));
 
         expect(result.passed).to.equal(false);

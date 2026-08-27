@@ -3,6 +3,22 @@ import { TOOL_DEFINITIONS } from '../../extension/ai/tools/definitions';
 import { TOOL_REGISTRY } from '../../extension/ai/tools/registry';
 
 describe('tool definitions', () => {
+    it('removes retired aliases and keeps the static schema budget bounded', () => {
+        const names = TOOL_DEFINITIONS.map(definition => definition.function.name);
+        expect(names).to.not.include.members([
+            'lsp_operation',
+            'create_goal', 'get_goal', 'update_goal', 'set_goal_budget',
+            'get_memory', 'search_memory',
+            'list_processes', 'read_process', 'write_process_stdin', 'terminate_process',
+            'get_file_context', 'search_mod_files',
+            'query_definition', 'query_definition_by_name', 'query_references',
+        ]);
+        expect(names.length).to.be.lessThan(91);
+        const schemaTokens = [...TOOL_REGISTRY.values()]
+            .reduce((total, entry) => total + entry.estimatedSchemaTokens, 0);
+        expect(schemaTokens).to.be.lessThan(30_000);
+    });
+
     it('registers structured user questions as a host interaction', () => {
         const tool = TOOL_DEFINITIONS.find(definition => definition.function.name === 'ask_user_question');
         const registry = TOOL_REGISTRY.get('ask_user_question');
@@ -24,16 +40,29 @@ describe('tool definitions', () => {
         expect(TOOL_REGISTRY.get('web_find')?.riskLevel).to.equal(0);
     });
 
-    it('registers task-scoped process inspection and control with explicit effects', () => {
-        for (const name of ['list_processes', 'read_process', 'write_process_stdin', 'terminate_process']) {
-            expect(TOOL_DEFINITIONS.some(definition => definition.function.name === name), name).to.equal(true);
-        }
-        expect(TOOL_REGISTRY.get('list_processes')?.isReadOnly).to.equal(true);
-        expect(TOOL_REGISTRY.get('read_process')?.isReadOnly).to.equal(true);
-        expect(TOOL_REGISTRY.get('write_process_stdin')?.effect).to.equal('process');
-        expect(TOOL_REGISTRY.get('write_process_stdin')?.isReadOnly).to.equal(false);
-        expect(TOOL_REGISTRY.get('terminate_process')?.effect).to.equal('process');
-        expect(TOOL_REGISTRY.get('terminate_process')?.isReadOnly).to.equal(false);
+    it('registers one task-scoped process management tool', () => {
+        const tool = TOOL_DEFINITIONS.find(definition => definition.function.name === 'manage_process');
+        expect(tool).to.not.equal(undefined);
+        const parameters = tool!.function.parameters as { properties: { action: { enum: string[] } } };
+        expect(parameters.properties.action.enum).to.deep.equal(['list', 'read', 'write', 'terminate']);
+        expect(TOOL_REGISTRY.get('manage_process')?.effect).to.equal('process');
+        expect(TOOL_REGISTRY.get('manage_process')?.isReadOnly).to.equal(false);
+        expect(TOOL_REGISTRY.get('manage_process')?.concurrencyClass).to.equal('interactive');
+    });
+
+    it('keeps recursive PDX write schema bounded', () => {
+        const tool = TOOL_DEFINITIONS.find(definition => definition.function.name === 'typed_pdx_write');
+        expect(JSON.stringify(tool).length).to.be.lessThan(32_000);
+    });
+
+    it('keeps expensive specialist schemas behind focused disclosure groups', () => {
+        expect(TOOL_REGISTRY.get('typed_pdx_write')?.group).to.equal('pdx_write');
+        expect(TOOL_REGISTRY.get('typed_pdx_write')?.disclosure).to.equal('deferred');
+        expect(TOOL_REGISTRY.get('run_code')?.disclosure).to.equal('deferred');
+        expect(TOOL_REGISTRY.get('query_shader_symbol')?.group).to.equal('shader');
+        expect(TOOL_REGISTRY.get('query_shader_symbol')?.disclosure).to.equal('deferred');
+        expect(TOOL_REGISTRY.get('write_file')?.group).to.equal('file_write');
+        expect(TOOL_REGISTRY.get('write_localisation')?.group).to.equal('pdx_write');
     });
 
     it('registers project knowledge as a read-only planning evidence tool', () => {

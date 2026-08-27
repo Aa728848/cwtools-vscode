@@ -4,7 +4,9 @@
 
 import type { SlashCommandDescriptor } from './slashCommands';
 import type { CwtRuleValueReference } from '../../shared/pdxSemanticCatalog';
+import type { AgentToolName } from './tools/registry';
 export type { CwtRuleValueReference, CwtShaderReference, PdxRuleCategory, PdxSemanticCatalog } from '../../shared/pdxSemanticCatalog';
+export type { AgentToolName } from './tools/registry';
 
 // ─── Agent Modes ─────────────────────────────────────────────────────────────
 
@@ -1156,55 +1158,6 @@ export interface ValidationError {
 }
 
 
-export interface GetFileContextArgs {
-    file: string;
-    line: number;
-    radius?: number;
-}
-
-export interface GetFileContextResult {
-    code: string;
-    symbolInfo?: {
-        typename: string;
-        name: string;
-        ruleDescription?: string;
-        requiredScopes: string[];
-    };
-    fileType: string;
-    startLine?: number;
-    endLine?: number;
-    lineNumberBase?: 1;
-    error?: string;
-}
-
-export interface SearchModFilesArgs {
-    query: string;
-    directory?: string;
-    fileExtension?: string;
-    exactMatch?: boolean;
-    searchContext?: 'mod' | 'vanilla' | 'both';
-    isRegex?: boolean;
-    caseSensitive?: boolean;
-    limit?: number;
-    fileExtensions?: string[];
-}
-
-export interface SearchModFilesResult {
-    files: Array<{
-        /** Relative path from searchedRoot */
-        logicalPath: string;
-        matchingLines: Array<{
-            line: number;
-            content: string;
-        }>;
-    }>;
-    searchedRoot?: string;
-    totalFound?: number;
-    _warning?: string;
-    _nextSteps?: string[];
-    _hint?: string;
-}
-
 export interface FindSpriteCandidatesArgs {
     /** Free-text search query derived from the surrounding content. */
     query?: string;
@@ -1279,6 +1232,9 @@ export interface GrepArgs {
     isRegex?: boolean;
     caseSensitive?: boolean;
     include?: string;
+    fileExtensions?: string[];
+    exactMatch?: boolean;
+    searchContext?: 'workspace' | 'vanilla' | 'both';
     limit?: number;
 }
 
@@ -1478,15 +1434,6 @@ export interface SetMemoryResult {
     message: string;
 }
 
-export interface GetMemoryArgs {
-    key: string;
-}
-
-export interface GetMemoryResult {
-    found: boolean;
-    value?: string;
-}
-
 export interface SaveMemoryArgs {
     key: string;
     content: string;
@@ -1577,8 +1524,6 @@ export type ToolArgs =
     | ExplainScopeArgs
     | ParsePdxFragmentArgs
     | QueryReferencesArgs
-    | GetFileContextArgs
-    | SearchModFilesArgs
     | FindSpriteCandidatesArgs
     | FindSoundCandidatesArgs
     | GetCompletionAtArgs
@@ -1602,7 +1547,6 @@ export type ToolArgs =
     | CodesearchArgs
     | AnalyzeDiagnosticErrorArgs
     | SetMemoryArgs
-    | GetMemoryArgs
     | WriteDesignBlueprintArgs
     | GrepArgs;
 
@@ -1620,8 +1564,6 @@ export type ToolResult =
     | ExplainScopeResult
     | ParsePdxFragmentResult
     | QueryReferencesResult
-    | GetFileContextResult
-    | SearchModFilesResult
     | FindSpriteCandidatesResult
     | FindSoundCandidatesResult
     | GetCompletionAtResult
@@ -1642,109 +1584,9 @@ export type ToolResult =
     | ListDirectoryResult
     | AnalyzeDiagnosticErrorResult
     | SetMemoryResult
-    | GetMemoryResult
     | WriteDesignBlueprintResult
     | ReplaceLinesResult
     | GrepResult;
-
-export type AgentToolName =
-    | 'ask_user_question'
-    | 'query_scope'
-    | 'query_types'
-    | 'query_localisation_index'
-    | 'query_workspace_index'
-    | 'explore_pdx_project'
-    | 'query_inline_instantiation'
-    | 'analyze_pdx_flow'
-    | 'compare_definition_with_vanilla'
-    | 'query_project_profile'
-    | 'query_project_knowledge'
-    | 'query_interface_knowledge'
-    | 'run_skill'
-    | 'query_rules'
-    | 'query_cwt_schema'
-    | 'query_override_modes'
-    | 'search_rule_capabilities'
-    | 'explain_scope'
-    | 'parse_pdx_fragment'
-    | 'query_references'
-    // validate_code — REMOVED: replaced by get_diagnostics and inline write diagnostics
-    | 'get_lsp_status'
-    | 'get_diagnostics'
-    | 'get_file_context'
-    | 'search_mod_files'
-    | 'find_sprite_candidates'
-    | 'find_sound_candidates'
-    | 'get_completion_at'
-    | 'document_symbols'
-    | 'workspace_symbols'
-    | 'go_to_definition'
-    | 'find_references'
-    | 'hover_symbol'
-    | 'rename_symbol'
-    | 'verify_pdx_identifier'
-    | 'find_scope_bridge'
-    | 'extract_archetype_slots'
-    | 'instantiate_archetype'
-    | 'todo_write'
-    | 'read_file'
-    | 'write_file'
-    | 'edit_file'
-    | 'replace_lines'
-    | 'typed_pdx_write'
-    | 'candidate_transaction'
-    | 'list_directory'
-    | 'glob_files'
-    | 'lsp_operation'
-    | 'web_search'
-    | 'web_open'
-    | 'web_find'
-    | 'grep'
-    | 'run_command'
-    | 'list_processes'
-    | 'read_process'
-    | 'write_process_stdin'
-    | 'terminate_process'
-    | 'analyze_diagnostic_error'
-    | 'set_memory'
-    | 'get_memory'
-    | 'search_memory'
-    | 'history'
-    | 'save_memory'
-    | 'forget_memory'
-    | 'memory_recall_trace'
-    // ── CWTools Deep API tools ──
-    | 'query_definition'
-    | 'query_definition_by_name'
-    | 'query_scripted_effects'
-    | 'query_scripted_triggers'
-    | 'query_enums'
-    | 'get_entity_info'
-    | 'query_static_modifiers'
-    | 'query_variables'
-    // ── Error Resolution tools ──
-    // ignore_validation_error — REMOVED: AI must fix errors, not suppress them
-    | 'remove_ignored_diagnostic'
-    | 'get_ignored_diagnostics'
-    | 'get_pdx_block'
-    // ── Media Asset Conversion tools ──
-    | 'convert_image_to_dds'
-    | 'convert_audio'
-    | 'deploy_mod_asset'
-    // ── Localisation tools ──
-    | 'write_localisation'
-    // ── Design tools ──
-    | 'write_design_blueprint'
-    | 'get_design_blueprint_contract'
-    | 'save_workflow'
-    // ── Git tools ──
-    | 'git_ops'
-    // ── MCP tools ──
-    | 'mcp_call'
-    // ── Orchestrator tools ──
-    | 'dispatch_agents'
-    | 'query_blackboard'
-    | 'merge_results';
 
 export interface HistorySearchArgs {
     query: string;
@@ -1779,6 +1621,8 @@ export interface ReadFileArgs {
     file: string;
     startLine?: number;
     endLine?: number;
+    centerLine?: number;
+    radius?: number;
 }
 
 export interface ReadFileResult {

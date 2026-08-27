@@ -23,7 +23,8 @@ export interface ToolDisclosureContext {
 }
 
 export interface ToolSelectionOptions {
-    deferStageGating?: boolean;
+    /** Full mode/domain/workflow-filtered pool before stage gating. */
+    eligibleTools?: readonly ToolDefinition[];
 }
 
 export function sortToolDefinitionsForStableRequest(tools: readonly ToolDefinition[]): ToolDefinition[] {
@@ -55,20 +56,21 @@ export class ToolDisclosureService {
             unavailable: [],
         };
         const poolByName = new Map(pool.map(tool => [tool.function.name, tool]));
+        const eligibleByName = new Map((options?.eligibleTools ?? pool).map(tool => [tool.function.name, tool]));
         const requested = new Set(request.tools ?? []);
         for (const group of request.groups ?? []) {
             for (const entry of TOOL_REGISTRY.values()) {
-                if (entry.group === group) requested.add(entry.name);
+                if (entry.group === group && eligibleByName.has(entry.name)) requested.add(entry.name);
             }
             if (group === 'mcp') {
-                for (const tool of pool) {
+                for (const tool of eligibleByName.values()) {
                     if (!TOOL_REGISTRY.has(tool.function.name as AgentToolName)) requested.add(tool.function.name);
                 }
             }
         }
         for (const name of [...requested].sort()) {
             const entry = TOOL_REGISTRY.get(name as AgentToolName);
-            if (!entry && !poolByName.has(name)) {
+            if (!entry && !eligibleByName.has(name)) {
                 result.unknown.push(name);
             } else if (!entry) {
                 if (context.loaded.has(name)) result.alreadyLoaded.push(name);
@@ -76,13 +78,15 @@ export class ToolDisclosureService {
                     context.loaded.add(name);
                     result.loaded.push(name);
                 }
-            } else if (context.loaded.has(name) || entry.disclosure !== 'deferred') {
+            } else if (context.loaded.has(name)) {
+                result.alreadyLoaded.push(name);
+            } else if (entry.disclosure !== 'deferred' && poolByName.has(name)) {
                 result.alreadyLoaded.push(name);
             } else if (context.domain === 'general' && entry.domain === 'paradox') {
                 result.denied.push(name);
             } else if (!entry.allowedModes.has(context.mode)) {
                 result.denied.push(name);
-            } else if (!poolByName.has(name) && options?.deferStageGating !== true) {
+            } else if (!eligibleByName.has(name)) {
                 result.unavailable.push(name);
             } else {
                 context.loaded.add(name);

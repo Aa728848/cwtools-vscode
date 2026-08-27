@@ -4057,7 +4057,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         }
 
         const blackboardSteps = result.steps.filter(s =>
-            ['set_memory', 'get_memory', 'search_memory', 'query_blackboard', 'merge_results', 'dispatch_agents'].includes(String(s.toolName))
+            ['set_memory', 'query_blackboard', 'merge_results', 'dispatch_agents'].includes(String(s.toolName))
         );
         if (blackboardSteps.length > 0) {
             this.upsertArtifact({

@@ -237,7 +237,7 @@ describe('Codex activity view model', () => {
     it('filters internal repair notes out of process text', () => {
         const model = build([
             { type: 'thinking', content: '[Tool Arg Repair] Nested schema reconstructed', timestamp: 1000 },
-            { type: 'tool_call', toolName: 'query_references', invocationId: '1', toolArgs: { query: 'foo' }, timestamp: 1100 },
+            { type: 'tool_call', toolName: 'find_references', invocationId: '1', toolArgs: { identifier: 'foo' }, timestamp: 1100 },
         ]);
 
         const group = firstGroup(model, 'tool');

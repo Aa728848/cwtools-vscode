@@ -487,7 +487,7 @@ export class ContextReferenceManager {
                     return await this.listReferencedFolderPreview(targetPath);
                 }
                 if (stat.size > 1_000_000) {
-                    return `File: ${this.workspaceLabel(targetPath)}\n[File is ${stat.size} bytes. Use read_file/get_file_context for targeted ranges.]`;
+                    return `File: ${this.workspaceLabel(targetPath)}\n[File is ${stat.size} bytes. Use read_file with a range or centerLine/radius for targeted context.]`;
                 }
                 content = new TextDecoder('utf-8').decode(await vs.workspace.fs.readFile(targetUri));
             }
@@ -507,7 +507,7 @@ export class ContextReferenceManager {
                 '```',
                 preview,
                 '```',
-                truncated ? '[Truncated. Use read_file/get_file_context for the exact range if needed.]' : '',
+                truncated ? '[Truncated. Use read_file with an exact range or centerLine/radius if needed.]' : '',
             ].filter(Boolean).join('\n');
         } catch (e) {
             ErrorReporter.warn(SOURCE.CHAT_PANEL, `Failed to read referenced file '${refPath}'`, e);

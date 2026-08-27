@@ -5409,6 +5409,168 @@ type Server(client: ILanguageClient) =
             JsonValue.Record [| "value", JsonValue.String(""); "enable", JsonValue.Boolean(false) |]
         )
 
+    let startFullWorkspaceBackgroundValidation
+        (game: IGame)
+        (allParserErrors: (string * Severity * string * string * range * int * CWRelatedError list option) list) =
+        Task.Run(fun () ->
+            try
+                try
+                    let fileEntries =
+                        game.AllFiles()
+                        |> List.choose (fun resource ->
+                            let f =
+                                match resource with
+                                | EntityResource(f, _) -> f
+                                | FileResource(f, _) -> f
+                                | FileWithContentResource(f, _) -> f
+                            match Uri.TryCreate(f, UriKind.Absolute) with
+                            | TrySuccess url -> Some(getPathFromDoc url)
+                            | TryFailure -> None)
+                        |> List.distinctBy normaliseCachePath
+
+                    let batchSize = 30
+                    let batches = fileEntries |> List.chunkBySize batchSize
+
+                    client.CustomNotification(
+                        "loadingBar",
+                        JsonValue.Record
+                            [| "value", JsonValue.String(LangResources.loadingBar_ValidatingFiles)
+                               "enable", JsonValue.Boolean(true)
+                               "percentage", JsonValue.Number(0M) |]
+                    )
+
+                    // Warm up AST rule validation in fine-grained chunks so gameStateLock
+                    // is only held for tens of milliseconds per slice, allowing user typing,
+                    // file switching (didOpen/didChange), and completion to run with zero lag.
+                    let mutable completedBatches = 0
+                    for batch in batches do
+                        Task.Delay(15).Wait()
+                        use _heavyAnalysisLease = acquireHeavyAnalysisGate ()
+                        gameStateLock.EnterReadLock()
+                        try
+                            game.ValidateFilesLocalCancellable(batch, (fun () -> false)) |> ignore
+                        finally
+                            gameStateLock.ExitReadLock()
+                        completedBatches <- completedBatches + 1
+                        let pct = int (float completedBatches / float (batches.Length + 1) * 100.0)
+                        client.CustomNotification(
+                            "loadingBar",
+                            JsonValue.Record
+                                [| "value", JsonValue.String(sprintf "%s (%d/%d)" LangResources.loadingBar_ValidatingFiles completedBatches batches.Length)
+                                   "enable", JsonValue.Boolean(true)
+                                   "percentage", JsonValue.Number(decimal pct) |]
+                        )
+
+                    // Now that rule validation caches are warmed up in sliced background passes,
+                    // the full workspace consolidation runs in a single short lock window (<100ms).
+                    use _heavyAnalysisLease = acquireHeavyAnalysisGate ()
+                    let bgModelEpoch = modelEpochSnapshot ()
+
+                    let (valErrors, locErrors) =
+                        gameStateLock.EnterReadLock()
+                        try
+                            (try
+                                let preflightSw = Stopwatch.StartNew()
+                                let forced =
+                                    game.ForceDynamicParameterData(dynamicPreflightTimeoutMs, dynamicPreflightMaxEntities)
+                                preflightSw.Stop()
+                                logDiag
+                                    $"Dynamic parameter preflight forced {forced} entities in {preflightSw.ElapsedMilliseconds}ms (timeout {dynamicPreflightTimeoutMs}ms, cap {dynamicPreflightMaxEntities})"
+                             with e -> logDiag $"Dynamic parameter preflight error: {e.Message}")
+
+                            let valErrorRaw =
+                                game.ValidationErrors()
+                                |> correctDynamicParameterValidationErrors "bg-full" game
+                            let valErrors =
+                                valErrorRaw
+                                |> List.map (fun e ->
+                                    (e.code, e.severity, e.range.FileName, e.message, e.range, e.keyLength, e.relatedErrors))
+
+                            let locRaw = game.LocalisationErrors(true, true)
+                            clearLocalisationDiagnosticCache ()
+                            cachedLocMap <- None
+                            cachedLocMapCount <- 0
+                            for fileName, errors in locRaw |> List.groupBy _.range.FileName do
+                                cachePut locCache fileName errors
+
+                            let locErrors =
+                                locRaw
+                                |> List.map (fun e ->
+                                    (e.code, e.severity, e.range.FileName, e.message, e.range, e.keyLength, e.relatedErrors))
+
+                            valErrors, locErrors
+                        finally
+                            gameStateLock.ExitReadLock()
+
+                    let allDiagnostics =
+                        allParserErrors @ valErrors @ locErrors
+                        |> List.map parserErrorToDiagnostics
+                        |> List.filter diagnosticFilter
+
+                    let diagnosticsByFile =
+                        allDiagnostics
+                        |> List.groupBy (fun (filePath, _) -> normaliseCachePath filePath)
+                        |> Map.ofList
+
+                    let loadedNormalised = fileEntries |> List.map normaliseCachePath |> Set.ofList
+                    let publishEpoch = nextDiagnosticEpoch ()
+
+                    for filePath in fileEntries do
+                        let currentVersion = docs.GetVersionByPath filePath
+                        let isSuperseded =
+                            match fileDiagnosticStates.TryGetValue filePath with
+                            | true, prior when prior.epoch > publishEpoch -> true
+                            | true, prior when prior.validatedVersion.IsSome && prior.validatedVersion <> currentVersion -> true
+                            | _ -> false
+
+                        if not isSuperseded then
+                            let diagnostics =
+                                diagnosticsByFile
+                                |> Map.tryFind (normaliseCachePath filePath)
+                                |> Option.map (List.map snd)
+                                |> Option.defaultValue []
+                            client.PublishDiagnostics { uri = diagnosticUri filePath; diagnostics = diagnostics }
+                            setFileDiagnosticStateWithSnapshot
+                                filePath
+                                publishEpoch
+                                currentVersion
+                                bgModelEpoch
+                                Fresh
+                                []
+                                diagnostics
+
+                    diagnosticsByFile
+                    |> Map.toSeq
+                    |> Seq.iter (fun (_, entries) ->
+                        match entries with
+                        | (filePath, _) :: _ when not (loadedNormalised.Contains(normaliseCachePath filePath)) ->
+                            let currentVersion = docs.GetVersionByPath filePath
+                            let isSuperseded =
+                                match fileDiagnosticStates.TryGetValue filePath with
+                                | true, prior when prior.epoch > publishEpoch -> true
+                                | true, prior when prior.validatedVersion.IsSome && prior.validatedVersion <> currentVersion -> true
+                                | _ -> false
+                            if not isSuperseded then
+                                let diagnostics = entries |> List.map snd
+                                client.PublishDiagnostics { uri = diagnosticUri filePath; diagnostics = diagnostics }
+                                setFileDiagnosticStateWithSnapshot
+                                    filePath
+                                    publishEpoch
+                                    currentVersion
+                                    bgModelEpoch
+                                    Fresh
+                                    []
+                                    diagnostics
+                        | _ -> ())
+                with e ->
+                    logDiag $"Full workspace background validation error: {e.Message}"
+            finally
+                client.CustomNotification(
+                    "loadingBar",
+                    JsonValue.Record [| "value", JsonValue.String(""); "enable", JsonValue.Boolean(false) |]
+                )
+        ) |> ignore
+
     let processWorkspace (uri: option<Uri>) =
         let sw = Stopwatch.StartNew()
         let mutable loadedFileCount = 0
@@ -5579,11 +5741,6 @@ type Server(client: ILanguageClient) =
                             (mkPos (int start.Line) (int start.Column))
                             (mkPos (int endp.Line) (int endp.Column))
 
-                    let parserErrors =
-                        game.ParserErrors()
-                        |> List.map (fun (n, e, p) -> "CW001", Severity.Error, n, e, (getRange p p), 0, None)
-                    parserErrorCount <- parserErrors.Length
-
                     let mapResourceToFilePath =
                         function
                         | EntityResource(f, r) -> r.scope, f, r.logicalpath
@@ -5616,47 +5773,40 @@ type Server(client: ILanguageClient) =
 
                     client.CustomNotification("updateFileList", JsonValue.Record [| "fileList", JsonValue.Array fileList |])
 
-                    client.CustomNotification(
-                        "loadingBar",
-                        JsonValue.Record
-                            [| "value", JsonValue.String(LangResources.loadingBar_ValidatingFiles)
-                               "enable", JsonValue.Boolean(true) |]
-                    )
+                    let parserErrors =
+                        game.ParserErrors()
+                        |> List.map (fun (n, e, p) -> "CW001", Severity.Error, n, e, (getRange p p), 0, None)
+                    parserErrorCount <- parserErrors.Length
 
-                    (try
-                        let preflightSw = Stopwatch.StartNew()
-                        let forced =
-                            game.ForceDynamicParameterData(dynamicPreflightTimeoutMs, dynamicPreflightMaxEntities)
-                        preflightSw.Stop()
-                        logDiag
-                            $"Dynamic parameter preflight forced {forced} entities in {preflightSw.ElapsedMilliseconds}ms (timeout {dynamicPreflightTimeoutMs}ms, cap {dynamicPreflightMaxEntities})"
-                     with e -> logDiag $"Dynamic parameter preflight error: {e.Message}")
+                    let openFileSet =
+                        docs.OpenFiles()
+                        |> List.map (fun f -> normaliseCachePath f.FullName)
+                        |> Set.ofList
 
-                    let valErrorRaw =
-                        game.ValidationErrors()
-                        |> correctDynamicParameterValidationErrors "initial" game
-                    let valErrors =
-                        valErrorRaw
-                        |> List.map (fun e ->
-                            (e.code, e.severity, e.range.FileName, e.message, e.range, e.keyLength, e.relatedErrors))
+                    let priorityFilePaths =
+                        loadedFilePaths
+                        |> List.filter (fun p -> openFileSet.Contains(normaliseCachePath p))
 
-                    validationErrorCount <- valErrorRaw.Length
+                    let priorityValErrors =
+                        if not priorityFilePaths.IsEmpty then
+                            let valErrorRaw =
+                                game.ValidateFilesLocalCancellable(priorityFilePaths, (fun () -> false))
+                                |> Option.defaultValue []
+                                |> correctDynamicParameterValidationErrors "initial-priority" game
+                            valErrorRaw
+                            |> List.map (fun e ->
+                                (e.code, e.severity, e.range.FileName, e.message, e.range, e.keyLength, e.relatedErrors))
+                        else
+                            []
 
-                    let locRaw = game.LocalisationErrors(true, true)
-                    localisationErrorCount <- locRaw.Length
-                    clearLocalisationDiagnosticCache ()
-                    cachedLocMap <- None
-                    cachedLocMapCount <- 0
-                    for fileName, errors in locRaw |> List.groupBy _.range.FileName do
-                        cachePut locCache fileName errors
-
-                    let locErrors =
-                        locRaw
-                        |> List.map (fun e ->
-                            (e.code, e.severity, e.range.FileName, e.message, e.range, e.keyLength, e.relatedErrors))
+                    validationErrorCount <- priorityValErrors.Length
+                    localisationErrorCount <- 0
 
                     let visibleInitialDiagnostics =
-                        parserErrors @ valErrors @ locErrors
+                        (parserErrors
+                         |> List.filter (fun (_, _, file, _, _, _, _) ->
+                             openFileSet.Contains(normaliseCachePath file) || priorityFilePaths.IsEmpty))
+                        @ priorityValErrors
                         |> List.map parserErrorToDiagnostics
                         |> List.filter diagnosticFilter
 
@@ -5686,8 +5836,11 @@ type Server(client: ILanguageClient) =
                             setFileDiagnosticStateWithEpoch filePath loadEpoch Fresh [] (entries |> List.map snd)
                         | _ -> ())
 
-                    // L6 Fix: non-blocking optimised GC avoids a 100ms freeze on load
+                    // Non-blocking optimised GC avoids freeze on load
                     maybeCollectGarbage ()
+
+                    // Kick off full workspace validation in the background (asynchronous, non-blocking)
+                    startFullWorkspaceBackgroundValidation game parserErrors
             with e ->
                 loadError <- Some e.Message
                 eprintfn $"%A{e}"

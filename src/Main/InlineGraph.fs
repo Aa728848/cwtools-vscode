@@ -365,6 +365,23 @@ let private collectInvocations (root: Node) (filePath: string) =
     visit root None
     invocations |> Seq.toList, arguments |> Seq.toList, problems |> Seq.toList
 
+let emptyInlineGraphFacts =
+    { templates = []
+      parameters = []
+      invocations = []
+      arguments = []
+      expansions = []
+      generatedReferences = []
+      problems = [] }
+
+let containsInlineInvocation (root: Node) =
+    let rec visit (node: Node) =
+        node.Key.Equals(inlineScriptKey, StringComparison.OrdinalIgnoreCase)
+        || (node.Leaves
+            |> Seq.exists (fun leaf -> leaf.Key.Equals(inlineScriptKey, StringComparison.OrdinalIgnoreCase)))
+        || (node.Nodes |> Seq.exists visit)
+    visit root
+
 /// Build the inline graph for a set of entities. Template extraction reads the
 /// inline_scripts directory from the same entity set, so caller and callee stay
 /// in one coherent snapshot.
@@ -375,6 +392,8 @@ let collectInlineGraphCancellable (shouldCancel: unit -> bool) (entities: seq<st
     let templates = ResizeArray<InlineTemplateFact>()
     let parameters = ResizeArray<InlineParameterFact>()
     let templateMap = Dictionary<string, Node * string * int>(StringComparer.OrdinalIgnoreCase)
+    let templateFactMap = Dictionary<string, InlineTemplateFact>(StringComparer.OrdinalIgnoreCase)
+    let parameterUsagesByTemplate = Dictionary<string, (string * int * string list) list>(StringComparer.OrdinalIgnoreCase)
     for struct (entity, _) in entitiesList do
         checkCancelled ()
         if isInlineTemplateFile entity.filepath then
@@ -383,26 +402,31 @@ let collectInlineGraphCancellable (shouldCancel: unit -> bool) (entities: seq<st
                 let content = entity.rawEntity.ToString()
                 let lineCount = int (content.Split('\n').Length)
                 templateMap.[templateId] <- (entity.rawEntity, content, lineCount)
-                templates.Add
+                let templateFact =
                     { templateId = templateId
                       logicalPath = normalizePath entity.logicalpath
                       file = normalizePath entity.filepath
                       line = 1
                       contentHash = hashContent content }
+                templates.Add templateFact
+                templateFactMap.[templateId] <- templateFact
 
     let invocations = ResizeArray<InlineInvocationFact>()
     let arguments = ResizeArray<InlineArgumentFact>()
     let problems = ResizeArray<InlineProblemFact>()
     for struct (entity, _) in entitiesList do
         checkCancelled ()
-        let collectedInvocations, collectedArguments, collectedProblems = collectInvocations entity.rawEntity entity.filepath
-        invocations.AddRange collectedInvocations
-        arguments.AddRange collectedArguments
-        problems.AddRange collectedProblems
+        if containsInlineInvocation entity.rawEntity then
+            let collectedInvocations, collectedArguments, collectedProblems = collectInvocations entity.rawEntity entity.filepath
+            invocations.AddRange collectedInvocations
+            arguments.AddRange collectedArguments
+            problems.AddRange collectedProblems
 
     for KeyValue(templateId, (template, _, _)) in templateMap do
         checkCancelled ()
-        for name, occurrences, usageKinds in collectParameterUsages template do
+        let templateParameterUsages = collectParameterUsages template
+        parameterUsagesByTemplate.[templateId] <- templateParameterUsages
+        for name, occurrences, usageKinds in templateParameterUsages do
             let inferredType = inferredTypeFor usageKinds
             parameters.Add
                 { templateId = templateId
@@ -469,10 +493,9 @@ let collectInlineGraphCancellable (shouldCancel: unit -> bool) (entities: seq<st
                     match templateMap.TryGetValue currentTemplateId with
                     | true, (currentTemplate, _, _) ->
                         let templateFile =
-                            templates
-                            |> Seq.tryFind (fun item -> item.templateId.Equals(currentTemplateId, StringComparison.OrdinalIgnoreCase))
-                            |> Option.map _.file
-                            |> Option.defaultValue currentTemplateId
+                            match templateFactMap.TryGetValue currentTemplateId with
+                            | true, fact -> fact.file
+                            | _ -> currentTemplateId
                         for idTemplate, entityTypeTemplate, templateLine in topLevelIdentities currentTemplate do
                             let expandedId = renderExpandedId idTemplate currentArgs
                             let renderedType = renderExpandedId entityTypeTemplate currentArgs |> fun value -> value.ToLowerInvariant()
@@ -522,7 +545,10 @@ let collectInlineGraphCancellable (shouldCancel: unit -> bool) (entities: seq<st
                     | _ -> ()
             instantiate invocation.templateId args 0 Set.empty
             // Parameter usage problems: unused parameters and missing required ones.
-            let templateParameterUsages = collectParameterUsages template
+            let templateParameterUsages =
+                match parameterUsagesByTemplate.TryGetValue invocation.templateId with
+                | true, usages -> usages
+                | _ -> []
             let templateParameterNames = templateParameterUsages |> Seq.map (fun (name, _, _) -> name) |> HashSet<string>
             for parameter in templateParameterNames do
                 if not (used.Contains parameter) then

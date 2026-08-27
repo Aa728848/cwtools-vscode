@@ -66,7 +66,11 @@ let templateEntity = parseEntity templateContent "common/inline_scripts/template
 let callerEntity = parseEntity caller1 "events/caller1.txt"
 
 let facts = collectInlineGraph [ struct (templateEntity, ()); struct (callerEntity, ()) ]
+let unrelatedEntity = parseEntity "country_event = { id = unrelated.1 }" "events/unrelated.txt"
 
+assertTrue "inline relevance detects callers" (containsInlineInvocation callerEntity.rawEntity)
+assertEqual "inline relevance skips unrelated files" false (containsInlineInvocation unrelatedEntity.rawEntity)
+assertEqual "empty inline graph facts stay empty" 0 emptyInlineGraphFacts.invocations.Length
 assertEqual "one template indexed" 1 facts.templates.Length
 assertEqual "template logical path normalized" "common/inline_scripts/template_def.txt" facts.templates.Head.logicalPath
 assertEqual "seven invocations indexed" 7 facts.invocations.Length

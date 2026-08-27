@@ -3523,7 +3523,38 @@ let private tryIncrementalProjectKnowledgeExport
                     checkCancelled ()
                     let freshTopology = collectTopology projectRoots collectionOptions None game
                     checkCancelled ()
-                    let freshInlineGraph = InlineGraph.collectInlineGraphCancellable shouldCancel (game.AllEntities())
+                    let currentEntityByFile = Dictionary<string, Entity>(StringComparer.OrdinalIgnoreCase)
+                    for struct (entity, _) in game.AllEntities() do
+                        currentEntityByFile.[normalizeFileKey entity.filepath] <- entity
+                    let retainedInlineFiles = HashSet<string>(StringComparer.OrdinalIgnoreCase)
+                    let retainedConnectionString =
+                        SqliteConnectionStringBuilder(
+                            DataSource = target,
+                            Mode = SqliteOpenMode.ReadOnly,
+                            Pooling = false
+                        ).ToString()
+                    use retainedConnection = new SqliteConnection(retainedConnectionString)
+                    retainedConnection.Open()
+                    use retainedInlineCommand = retainedConnection.CreateCommand()
+                    retainedInlineCommand.CommandText <- "SELECT file FROM inline_templates UNION SELECT caller_file FROM inline_invocations"
+                    use retainedInlineReader = retainedInlineCommand.ExecuteReader()
+                    while retainedInlineReader.Read() do
+                        retainedInlineFiles.Add(normalizeFileKey (retainedInlineReader.GetString 0)) |> ignore
+                    retainedInlineReader.Close()
+                    retainedConnection.Close()
+                    let inlineRelevantFile (file: string) =
+                        let normalizedFile = normalizeFileKey file
+                        normalizedFile.Contains("common/inline_scripts/", StringComparison.OrdinalIgnoreCase)
+                        || (match currentEntityByFile.TryGetValue normalizedFile with
+                            | true, entity -> InlineGraph.containsInlineInvocation entity.rawEntity
+                            | _ -> false)
+                        || retainedInlineFiles.Contains normalizedFile
+                    let refreshInlineGraph = changedFiles |> List.exists inlineRelevantFile
+                    let freshInlineGraph =
+                        if refreshInlineGraph then
+                            InlineGraph.collectInlineGraphCancellable shouldCancel (game.AllEntities())
+                        else
+                            InlineGraph.emptyInlineGraphFacts
                     checkCancelled ()
                     let connectionString =
                         SqliteConnectionStringBuilder(

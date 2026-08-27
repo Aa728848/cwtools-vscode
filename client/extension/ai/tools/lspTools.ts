@@ -728,8 +728,41 @@ export class LspToolHandler {
                 const raw = await this.lspRequest(
                     'cwtools.ai.queryOverrideModes',
                     [args.path ?? '', args.limit ?? 250],
-                ) as any;
-                return raw ?? { ok: false, error: 'No response.' };
+                ) as unknown;
+                if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+                    return { ok: false, error: 'No response.' };
+                }
+                const result = raw as Record<string, unknown>;
+                const matched = result.matched && typeof result.matched === 'object' && !Array.isArray(result.matched)
+                    ? result.matched as Record<string, unknown>
+                    : undefined;
+                const strategy = typeof matched?.strategy === 'string' ? matched.strategy.toUpperCase() : '';
+                const requestedPath = typeof args.path === 'string' ? args.path.replace(/\\/g, '/') : '';
+                const decision = strategy === 'LIOS'
+                    ? {
+                        strategy,
+                        targetPath: requestedPath,
+                        winner: 'last-loaded same-key definition',
+                        requiredApproach: 'Redefine only the intended key in a normal later-loaded mod file.',
+                        forbiddenApproaches: [
+                            'Do not rename or prefix the file merely to sort before vanilla; that is a FIOS technique and reverses the intended LIOS ordering.',
+                            'Do not replace or copy the whole vanilla file unless the user explicitly requests a full-file replacement for another reason.',
+                        ],
+                    }
+                    : strategy === 'FIOS'
+                        ? {
+                            strategy,
+                            targetPath: requestedPath,
+                            winner: 'first-loaded definition',
+                            requiredApproach: 'Make the override load before vanilla (for example with the verified filename ordering) or replace the exact vanilla file when appropriate.',
+                            forbiddenApproaches: [
+                                'Do not rely on a normal later-loaded same-key definition; under FIOS it does not beat the first-loaded vanilla definition.',
+                            ],
+                        }
+                        : undefined;
+                return decision
+                    ? { ...result, decision, instruction: `AUTHORITATIVE OVERRIDE DECISION: ${strategy}. Follow decision.requiredApproach and avoid every decision.forbiddenApproaches entry.` }
+                    : result;
             } catch (e) {
                 return { ok: false, error: String(e) };
             }

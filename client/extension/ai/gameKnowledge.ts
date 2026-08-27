@@ -19,7 +19,7 @@ This prompt intentionally contains no game-version rule tables, scope lists, ent
 - Entity and file shape: use \`query_cwt_schema\` for the actual target path, then \`query_types\`, \`query_definition_by_name\`, and \`get_entity_info\` for typed definitions and references.
 - Syntax and operators: use \`parse_pdx_fragment\`, completions, and fresh diagnostics. Do not infer an operator, field, parameter, or block form from another game or an older version.
 - Project behaviour: use \`query_project_knowledge\` and \`explore_pdx_project\`, then read only the matched current project or vanilla archetype blocks needed for the decision.
-- Overrides: use \`query_override_modes\` for the exact path and follow its active CWT-derived result. Never assume a generic load-order rule.
+- Overrides: use \`query_override_modes\` for the exact intended target path and obey its returned \`decision\` as authoritative. Never assume a generic load-order rule, reuse the procedure from a different returned strategy, or contradict \`decision.requiredApproach\` / \`decision.forbiddenApproaches\`. File naming, same-key redefinition, and whole-file replacement are strategy-specific choices, not interchangeable techniques.
 - Localisation: use the active game profile and \`write_localisation\`; do not reproduce encoding, directory, header, or key-shape conventions from prompt memory.
 
 ### Decision boundary

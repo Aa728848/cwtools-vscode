@@ -423,7 +423,7 @@ const RAW_TOOL_DEFINITIONS: ToolDefinition[] = [
         type: 'function',
         function: {
             name: 'query_override_modes',
-            description: 'Query path override/load-order modes from the active CWT rules currently loaded by the language server. Use this before advising how to override vanilla files; do not rely on hard-coded prompt tables. The response includes: `modes` (path to strategy mapping, truncated to `limit`), `matched` and `matchedModeInfo` (longest-prefix match for `path` plus the documentation for that mode), and `modeInfo` (the full legend of every mode `name` and `description` - meaning / who wins by default / how to override vanilla - sourced from the CWT `override_modes_info` block). Read mode semantics from `modeInfo` / `matchedModeInfo` rather than from prompt text.',
+            description: 'Query the authoritative override/load-order strategy for the exact intended target path before choosing a filename, same-key override, or whole-file replacement. The response includes `matched`, `matchedModeInfo`, the full `modeInfo` legend, and a normalized `decision` with `requiredApproach` and `forbiddenApproaches`. Follow that decision literally: never reuse a technique from another strategy or convert a matched LIOS path into a FIOS-style early-sorting/full-file override.',
             parameters: {
                 type: 'object',
                 properties: {

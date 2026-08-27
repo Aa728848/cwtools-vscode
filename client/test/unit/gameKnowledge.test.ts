@@ -13,6 +13,9 @@ describe('game knowledge', () => {
         expect(knowledge).to.include('query_types');
         expect(knowledge).to.include('parse_pdx_fragment');
         expect(knowledge).to.include('query_override_modes');
+        expect(knowledge).to.include('decision.requiredApproach');
+        expect(knowledge).to.include('decision.forbiddenApproaches');
+        expect(knowledge).to.include('strategy-specific choices');
         expect(knowledge).to.include('active game profile');
         expect(knowledge).to.include('source/revision');
         expect(knowledge).to.include('numeric suffixes');

@@ -81,20 +81,10 @@ describe('summarizeToolArgs', () => {
         expect(result).to.not.include('...');
     });
 
-    it('shows query for search_web', () => {
-        const result = summarizeToolArgs('search_web', { query: 'stellaris modding' });
-        expect(result).to.include('stellaris modding');
-    });
-
     it('shows canonical web tool arguments', () => {
         expect(summarizeToolArgs('web_search', { query: 'stellaris modding' })).to.include('stellaris modding');
         expect(summarizeToolArgs('web_open', { ref: 'src_123' })).to.equal('src_123');
         expect(summarizeToolArgs('web_find', { pattern: 'triggered only' })).to.equal('triggered only');
-    });
-
-    it('shows query for codesearch', () => {
-        const result = summarizeToolArgs('codesearch', { query: 'escapeHtml' });
-        expect(result).to.include('escapeHtml');
     });
 
     it('shows item count for todo_write', () => {

@@ -283,9 +283,9 @@ describe('policyEngine MCP and network subjects', () => {
                 rule({ id: 'net-exact', subject: 'network', networkHostGlob: 'docs.example.com', action: 'allow', riskMax: 2 }),
             ],
         });
-        const d = descriptor({ toolName: 'web_fetch', subject: 'network', riskLevel: 1, networkHosts: ['docs.example.com'], targetPaths: [] });
+        const d = descriptor({ toolName: 'web_open', subject: 'network', riskLevel: 1, networkHosts: ['docs.example.com'], targetPaths: [] });
         expect(resolvePolicy(d, p).action).to.equal('allow');
-        const blocked = descriptor({ toolName: 'web_fetch', subject: 'network', riskLevel: 1, networkHosts: ['evil.example.com'], targetPaths: [] });
+        const blocked = descriptor({ toolName: 'web_open', subject: 'network', riskLevel: 1, networkHosts: ['evil.example.com'], targetPaths: [] });
         expect(resolvePolicy(blocked, p).action).to.equal('deny');
     });
 });

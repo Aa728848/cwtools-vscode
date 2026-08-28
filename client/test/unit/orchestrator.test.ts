@@ -423,7 +423,7 @@ describe('dispatch_agents tool wiring', () => {
                     plannedEntities: ['event:foo.1'],
                 }],
             }, {
-                runnerOptions: { abortSignal: new AbortController().signal },
+                runnerOptions: { schedulingState: { dispatch: 'parallel' }, abortSignal: new AbortController().signal },
                 onStep: () => undefined,
             } as any) as any;
 
@@ -469,7 +469,7 @@ describe('dispatch_agents tool wiring', () => {
                     plannedFiles: ['localisation/english/demo_l_english.yml'],
                 }],
             }, {
-                runnerOptions: { abortSignal: new AbortController().signal },
+                runnerOptions: { schedulingState: { dispatch: 'parallel' }, abortSignal: new AbortController().signal },
                 onStep: () => undefined,
             } as any) as any;
 
@@ -521,7 +521,7 @@ describe('dispatch_agents tool wiring', () => {
                     prompt: 'write something',
                 }],
             }, {
-                runnerOptions: { abortSignal: new AbortController().signal },
+                runnerOptions: { schedulingState: { dispatch: 'parallel' }, abortSignal: new AbortController().signal },
                 onStep: () => undefined,
             } as any) as any;
 

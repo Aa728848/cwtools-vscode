@@ -46,7 +46,7 @@ describe('PromptBuilder 快照与稳定性测试', () => {
 
         // 验证系统提示词中包含核心规则，防止重构时遗漏
         expect(prompt).to.include('Eddy CWTool Code');
-        expect(prompt).to.include('Execute Mode begins at the write stage');
+        expect(prompt).to.include('bounded reads and semantic queries');
         expect(prompt).to.not.include('Clarification and execution');
         expect(prompt).to.not.include('Explicit Plan Handoff');
         expect(prompt).to.include('Strict Rule Compliance in Code Generation');
@@ -54,7 +54,7 @@ describe('PromptBuilder 快照与稳定性测试', () => {
         expect(prompt).to.include('write_localisation');
         expect(prompt).to.include('evidence hierarchy');
         expect(prompt).to.include('fresh diagnostics');
-        expect(prompt).to.include('do not reopen discovery');
+        expect(prompt).to.include('collect the named bounded evidence and retry');
         expect(prompt).to.include('Generic Paradox');
         expect(prompt).to.not.include('Stellaris common/ Design Space Review');
     });
@@ -225,7 +225,8 @@ describe('PromptBuilder 快照与稳定性测试', () => {
         expect(prompt).to.include('approved `blueprintFile`');
         expect(prompt).to.include('write_design_blueprint');
         expect(prompt).to.include('Approved Implementation Plan');
-        expect(prompt).to.include('dispatch immediately');
+        expect(prompt).to.include('bounded read-only preflight wave');
+        expect(prompt).to.include('must not change the approved design');
         expect(prompt).to.include('Never call `write_design_blueprint`');
         expect(prompt).to.not.include('Blueprint Self-check');
         expect(prompt).to.include('Structured dispatch preflight for Paradox write waves');

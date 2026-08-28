@@ -3170,10 +3170,10 @@ describe('agent tool progress and aborts', () => {
         const commandResult = await executor.execute('run_command', { command: 'git status' }, context) as any;
 
         expect(gitResult.success).to.equal(false);
-        expect(gitResult.message).to.include('git_ops is disabled');
+        expect(gitResult.error).to.include("Tool 'git_ops' is disabled in sub-agent sandbox context");
         expect(commandResult.success).to.equal(false);
-        expect(commandResult.message).to.include('run_command is disabled');
-        expect(commandResult.message).to.include('BLOCKED_FOR_ORCHESTRATOR');
+        expect(commandResult.error).to.include("Tool 'run_command' is disabled in sub-agent sandbox context");
+        expect(commandResult.terminalOutcome).to.equal('policy_denied');
         expect(executeInternal.called).to.equal(false);
     });
 });

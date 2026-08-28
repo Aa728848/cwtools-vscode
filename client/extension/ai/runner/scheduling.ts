@@ -207,8 +207,11 @@ export function evaluateDispatchAdmission(
         knownTaskIds?: string[];
     } = {},
 ): DispatchAdmissionResult {
-    if (tasks.length < 2) {
-        return { accepted: false, score: -10, reason: 'Multi-Agent dispatch requires at least two distinct tasks.', conflicts: [] };
+    if (tasks.length === 0) {
+        return { accepted: false, score: -10, reason: 'Dispatch requires at least one task.', conflicts: [] };
+    }
+    if (tasks.length === 1 && options.explicitDelegation !== true) {
+        return { accepted: false, score: -10, reason: 'Single-agent dispatch requires explicit delegation.', conflicts: [] };
     }
     const knownIds = new Set(options.knownTaskIds ?? []);
     const ids = new Set<string>();

@@ -92,9 +92,8 @@ const TOOL_ICON_LABELS: Record<string, string> = {
     document_symbols: '🔖', workspace_symbols: '🔖', go_to_definition: '🔖',
     find_references: '🔗', hover_symbol: '💡', rename_symbol: '✏️', query_scope: '🔭',
     query_types: '📏', query_rules: '📏',
-    todo_write: '📋', manage_goal: '🎯', run_command: '⚡', manage_process: '⚡', web_search: '🌐', web_open: '🌐', web_find: '🔎', search_web: '🌐', codesearch: '🔎',
+    todo_write: '📋', manage_goal: '🎯', run_command: '⚡', manage_process: '⚡', web_search: '🌐', web_open: '🌐', web_find: '🔎',
     glob_files: '📁', delete_file: '🗑️', apply_patch: '🩹',
-    web_fetch: '🌐',
     permission_request: '🔑',
     // Coordinator tool
     dispatch_agents: '🎯', query_blackboard: '📋', merge_results: '🔗',
@@ -274,7 +273,7 @@ export function summarizeToolArgs(toolName: string, args: Record<string, unknown
     }
 
     // Search tools
-    if ((toolName === 'web_search' || toolName === 'search_web' || toolName === 'codesearch' || toolName === 'grep') && args.query) {
+    if ((toolName === 'web_search' || toolName === 'grep') && args.query) {
         const q = String(args.query);
         return q.length > limit ? q.substring(0, limit) + '...' : q;
     }

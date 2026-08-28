@@ -202,7 +202,7 @@ function renderMessageForCompaction(message: ChatMessage): string {
         const summary = [
             content.includes('<write_file>') ? '[wrote file]' : '',
             content.includes('<run_command>') ? '[ran command]' : '',
-            (content.includes('<web_search>') || content.includes('<search_web>')) ? '[searched web]' : '',
+            content.includes('<web_search>') ? '[searched web]' : '',
         ].filter(Boolean).join(' ');
         return `<${role}>: ${summary || content.substring(0, 500)}`;
     }

@@ -310,7 +310,8 @@ describe('Execute-to-Plan handoff', () => {
         const mainPrompt = buildBuildSystemPrompt('', 'Synthetic', false);
         const childPrompt = buildBuildSystemPrompt('', 'Synthetic', true);
         expect(mainPrompt).to.not.include('cwtools-plan');
-        expect(mainPrompt).to.include('Execute Mode begins at the write stage');
+        expect(mainPrompt).to.include('bounded reads and semantic queries');
+        expect(mainPrompt).to.include('part of Execute, not a new planning phase');
         expect(mainPrompt).to.not.include('Explicit Plan Handoff');
         expect(childPrompt).to.not.include('cwtools-plan');
         expect(childPrompt).to.include('Slim Build Contract');

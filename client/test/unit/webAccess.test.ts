@@ -3,7 +3,6 @@ import {
     SafeHttpClient,
     WebAccessService,
     isPublicAddress,
-    normalizeLegacyWebToolCall,
     type WebAccessConfig,
     type WebSearchProvider,
 } from '../../extension/ai/tools/webAccess';
@@ -34,18 +33,6 @@ async function rejectionMessage(promise: Promise<unknown>): Promise<string> {
 }
 
 describe('web access network boundary', () => {
-    it('normalizes persisted legacy tool calls to the unified toolset', () => {
-        expect(normalizeLegacyWebToolCall('web_fetch', { url: 'https://example.com', maxChars: 20 })).to.deep.equal({
-            toolName: 'web_open',
-            args: { ref: 'https://example.com', maxChars: 20 },
-        });
-        expect(normalizeLegacyWebToolCall('search_web', { query: 'x' }).toolName).to.equal('web_search');
-        expect(normalizeLegacyWebToolCall('codesearch', { query: 'x' })).to.deep.equal({
-            toolName: 'web_search',
-            args: { query: 'x', purpose: 'code' },
-        });
-    });
-
     it('classifies public and non-public addresses conservatively', () => {
         expect(isPublicAddress('93.184.216.34')).to.equal(true);
         expect(isPublicAddress('2606:2800:220:1:248:1893:25c8:1946')).to.equal(true);

@@ -48,17 +48,6 @@ export interface WebFindArgs {
     maxMatches?: number;
 }
 
-export function normalizeLegacyWebToolCall(toolName: string, args: Record<string, unknown>): { toolName: string; args: Record<string, unknown> } {
-    if (toolName === 'web_fetch') {
-        const normalized: Record<string, unknown> = { ...args, ref: args.ref ?? args.url };
-        delete normalized.url;
-        return { toolName: 'web_open', args: normalized };
-    }
-    if (toolName === 'search_web') return { toolName: 'web_search', args };
-    if (toolName === 'codesearch') return { toolName: 'web_search', args: { ...args, purpose: 'code' } };
-    return { toolName, args };
-}
-
 export interface WebSearchItem {
     sourceId: string;
     title: string;

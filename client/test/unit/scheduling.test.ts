@@ -76,6 +76,22 @@ describe('Agent runtime scheduling', () => {
         expect(conflict.conflicts).to.have.length(1);
     });
 
+    it('admits a single task only through explicit delegation and still validates it', () => {
+        const task = [{ id: 'focused', objective: 'inspect one isolated subsystem', role: 'explore' }];
+        const implicit = evaluateDispatchAdmission(task);
+        expect(implicit.accepted).to.equal(false);
+        expect(implicit.reason).to.contain('explicit delegation');
+
+        const explicit = evaluateDispatchAdmission(task, { explicitDelegation: true });
+        expect(explicit.accepted).to.equal(true);
+
+        const invalid = evaluateDispatchAdmission([
+            { id: 'focused', objective: 'inspect one isolated subsystem', dependencies: ['missing'] },
+        ], { explicitDelegation: true });
+        expect(invalid.accepted).to.equal(false);
+        expect(invalid.reason).to.contain('missing task');
+    });
+
     it('allows explicitly ordered writers to share a resource', () => {
         const result = evaluateDispatchAdmission([
             { id: 'a', objective: 'prepare a', expectedWrites: ['src/a.ts'] },

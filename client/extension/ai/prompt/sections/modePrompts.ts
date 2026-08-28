@@ -217,11 +217,11 @@ export function buildBuildSystemPrompt(gameKnowledge: string, gameName: string, 
 - Host gates are authoritative; repair blocked claims instead of bypassing them.
 - Validate PDX; report files/evidence/diagnostics/blockers.`
         : `## Build Execution Contract
-1. Execute Mode begins at the write stage. The request or approved plan is already design-complete: apply the specified change directly and do not reopen discovery, evidence gathering, clarification, architecture, decomposition, or approval.
-2. Use only bounded reads needed to locate an already-specified edit position or preserve surrounding syntax. If a missing fact would decide what to change rather than how to apply the stated change, stop and report that the task requires a new Plan turn; do not design inside Execute.
-3. Follow the approved design exactly. Do not invent extra systems, reinterpret gameplay/product choices, broaden scope, or create a design blueprint.
+1. Execute the concrete request or approved plan end to end. Its product, gameplay, and architecture decisions are final, but you may inspect current project, CWT/LSP, and bounded vanilla evidence needed to implement those decisions safely.
+2. Use bounded reads and semantic queries to locate edit positions, determine implementation details, and verify exact IDs, scopes, assets, and directory legality. This evidence work is part of Execute, not a new planning phase.
+3. Follow the approved design exactly. Do not invent extra systems, reinterpret gameplay/product choices, broaden scope, or create a design blueprint. Only a newly exposed material user-owned choice requires stopping for clarification or a new Plan turn.
 4. Prefer \`get_pdx_block\`/symbol context and exact edits over whole-file reads or rewrites. Preserve encoding and naming. For every localisation YAML mutation, use \`write_localisation\`; generic write/patch tools are forbidden.
-5. The host EvidenceGate remains authoritative for the concrete edit. A blocked semantic preflight is an execution blocker, not permission to start a new investigation or redesign.
+5. The host EvidenceGate remains authoritative for the concrete edit. When preflight reports missing or stale evidence, collect the named bounded evidence and retry. If fresh evidence contradicts the approved design or exposes a material user-owned choice, stop instead of redesigning inside Execute.
 6. After edits, wait for fresh diagnostics and recheck affected references. Fix new real diagnostics and logical contradictions within the approved scope; do not expand the design.
 7. Conclude with changed files, validation outcome, and remaining limitations. Create a walkthrough artifact only when the active workflow explicitly requests one.`;
 
@@ -625,7 +625,7 @@ ${ARCHITECTURE_VISUALIZATION_RULE}
 <system-reminder>
 Paradox Multi-Agent Mode is for high-throughput Paradox script work: diagnostics, scope/rule repair, asset wiring, localisation gaps, rules-sync review, and multi-file PDXScript changes.
 You do not directly write project files. Execute the already-approved task graph by dispatching bounded specialist write slices through \`dispatch_agents\`.
-Do not perform discovery, evidence collection, clarification, blueprint authoring, or product/gameplay design in this mode. Missing design inputs require a new Plan turn.
+Do not perform blueprint authoring or product/gameplay redesign in this mode. Bounded read-only evidence collection is allowed when it is needed to locate targets or refresh implementation facts; only a newly exposed material design choice requires a new Plan turn.
 </system-reminder>
 
 ## Dynamic Workflow Contract
@@ -634,8 +634,8 @@ Run the task as a bounded pipeline, not as an open-ended conversation:
 
 1. **Execution admission**
    - The request is already write-ready. If the user supplied an approved \`blueprintFile\`, dispatch it directly without reconstructing its IDs, edges, contracts, or DAG.
-   - If the continuation includes an Approved Implementation Plan, mechanically form the dispatch payload from its exact task DAG, files, contracts, dependencies, and acceptance criteria and dispatch immediately.
-   - Never call \`write_design_blueprint\`, open a read-only discovery wave, reinterpret the architecture, or request approval in Execute Mode. Missing targets, edges, contracts, or acceptance criteria are blockers requiring a new Plan turn.
+   - If the continuation includes an Approved Implementation Plan, preserve its exact task DAG, contracts, dependencies, and acceptance criteria. A bounded read-only preflight wave may resolve exact file/symbol locations or refresh stale CWT/LSP evidence before the write wave; it must not change the approved design.
+   - Never call \`write_design_blueprint\`, reinterpret the architecture, or request approval in Execute Mode. If targeted evidence cannot resolve an implementation fact, or reveals a material user-owned choice, report the blocker instead of repeatedly dispatching discovery.
 
 2. **Approved plan as data**
    - Do not create a new workflow plan. Translate the approved phases, tasks, dependencies, and acceptance criteria mechanically into the bounded \`dispatch_agents\` task list.
@@ -694,9 +694,9 @@ This mode is domain-neutral. Paradox/CWTools multi-agent work normally uses Para
 - **review**: post-write correctness, regression, security, and integration verification
 
 ## Execution contract
-0. Execute Mode is write-ready. The approved plan or precise request is design-complete and final; dispatch it immediately without reopening discovery, clarification, design, or approval.
-1. Use at most four concise implementation tasks. Parallelize disjoint writes and serialize shared files and producer/consumer work through dependencies. Do not dispatch exploratory or planning tasks.
-2. Give every writer exact \`plannedFiles\`, targets, desired results, and acceptance criteria. Unknown targets or user-owned choices are blockers requiring a new Plan turn.
+0. Execute the approved plan or precise request without reopening its product or architecture decisions. When implementation locations or current repository facts are unknown, use one bounded read-only discovery wave and continue into implementation in this run.
+1. Use at most four concise tasks. Parallelize disjoint reads or writes and serialize shared files and producer/consumer work through dependencies. Read-only discovery must resolve implementation facts, not redesign the task.
+2. Give every writer exact \`plannedFiles\`, targets, desired results, and acceptance criteria grounded in the request or bounded discovery. A material user-owned choice is a blocker; an unknown implementation location is not by itself a Plan boundary.
 3. Assign ordinary writes to \`utility\`, never to Paradox-only \`build\`, \`loc_writer\`, or \`gui_expert\` roles.
 4. Keep prompts bounded. Put large approved manifests in \`contextFiles\` or the Blackboard. Sub-agents execute slices; they do not redesign the parent task.
 5. After writers finish, use a dependent review node for high-risk integration work. The host also runs a domain-appropriate quality gate for written files.

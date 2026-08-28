@@ -1000,7 +1000,7 @@ export class ExternalToolHandler {
         }
     }
 
-    // ─── webFetch ────────────────────────────────────────────────────────────
+    // ─── Web access ─────────────────────────────────────────────────────────
 
     async webOpen(args: import('./webAccess').WebOpenArgs, context?: import('../types').AgentToolContext): Promise<Record<string, unknown>> {
         return this.webAccess.open(args, context?.runnerOptions?.abortSignal);
@@ -1016,16 +1016,6 @@ export class ExternalToolHandler {
 
     resolveWebReference(ref: string): string {
         return this.webAccess.resolveReference(ref);
-    }
-
-    /** @deprecated Model-visible calls are normalized to web_open. */
-    async webFetch(args: { url: string; maxChars?: number }, context?: import('../types').AgentToolContext): Promise<{ content: string; url: string; truncated: boolean }> {
-        const result = await this.webOpen({ ref: args.url, maxChars: args.maxChars }, context);
-        return {
-            content: typeof result.content === 'string' ? result.content : String(result.error ?? ''),
-            url: typeof result.url === 'string' ? result.url : args.url,
-            truncated: result.truncated === true,
-        };
     }
 
     async runCommand(args: { command: string; shell?: RunCommandShell; cwd?: string; timeoutMs?: number; background?: boolean; requestEscalation?: boolean; unsandboxed?: boolean; executionMode?: 'captured' | 'terminal'; networkAccess?: boolean; networkHosts?: string[] }, context?: import('../types').AgentToolContext): Promise<{
@@ -1637,36 +1627,6 @@ export class ExternalToolHandler {
             };
         }
         return commandResult;
-    }
-
-    // ─── searchWeb ───────────────────────────────────────────────────────────
-
-    /** @deprecated Model-visible calls are normalized to web_search. */
-    async searchWeb(args: { query: string; maxResults?: number }, context?: import('../types').AgentToolContext): Promise<{
-        results: Array<{ title: string; url: string; description: string }>;
-        source: 'brave' | 'duckduckgo';
-        query: string;
-    }> {
-        const result = await this.webSearch(args, context);
-        return {
-            results: result.results.map(item => ({ title: item.title, url: item.url, description: item.snippet })),
-            source: result.provider === 'brave' ? 'brave' : 'duckduckgo',
-            query: result.query,
-        };
-    }
-
-    /** @deprecated Model-visible calls are normalized to web_search with purpose=code. */
-    async searchCode(args: { query: string; maxResults?: number }, context?: import('../types').AgentToolContext): Promise<{
-        results: Array<{ title: string; url: string; description: string }>;
-        source: 'exa' | 'brave';
-        query: string;
-    }> {
-        const result = await this.webSearch({ ...args, purpose: 'code' }, context);
-        return {
-            results: result.results.map(item => ({ title: item.title, url: item.url, description: item.snippet })),
-            source: result.provider === 'exa' ? 'exa' : 'brave',
-            query: result.query,
-        };
     }
 
     /** Ensure the topic-scoped media output directory exists and return its path. */

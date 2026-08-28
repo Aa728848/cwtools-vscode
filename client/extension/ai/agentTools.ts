@@ -59,7 +59,7 @@ import { buildProfile, resolvePolicy, subjectForEffect, type PolicyPresetId, typ
 import { preflightCommand, type ConfiguredCommandPolicyRule } from './runner/commandPreflight';
 import { sessionFileWriteMode, sessionPolicyPreset } from './runner/sessionPermissions';
 import type { ApiKeyManager } from './aiService';
-import { normalizeLegacyWebToolCall, type WebSearchProvider } from './tools/webAccess';
+import type { WebSearchProvider } from './tools/webAccess';
 import { EvidenceGate, type EvidenceCallRecord } from './evidence/evidenceGate';
 import {
     saveOrchestration,
@@ -1818,8 +1818,6 @@ export class AgentToolExecutor {
     }
 
     async execute(toolName: string, args: Record<string, unknown>, context?: import('./types').AgentToolContext): Promise<unknown> {
-        // Persisted histories may still contain the pre-unification tool names.
-        ({ toolName, args } = normalizeLegacyWebToolCall(toolName, args));
         if (toolName === 'web_search' || toolName === 'web_open' || toolName === 'web_find') {
             const webMode = vs.workspace.getConfiguration('stellarisLanguageServices.ai.web')
                 .get<'disabled' | 'indexed' | 'live'>('mode', 'indexed');
@@ -1835,21 +1833,7 @@ export class AgentToolExecutor {
         }
         const readTracker = (context?.agentRunner as any)?.readTracker;
         const isSubAgent = !!context?.runnerOptions?.useSlimPrompt;
-        if (isSubAgent && toolName === 'git_ops') {
-            return {
-                success: false,
-                message: 'git_ops is disabled for orchestrator sub-agents. Report the issue to the main agent instead of running git commands.',
-            };
-        }
         const runtimeDomain = context?.runnerOptions?.domain;
-        const childCommandCapability = context?.runnerOptions?.agentProfileName === 'general-coder'
-            && context?.runnerOptions?.mode === 'utility';
-        if (isSubAgent && toolName === 'run_command' && !childCommandCapability) {
-            return {
-                success: false,
-                message: 'run_command is disabled for orchestrator sub-agents. Do not create or run helper scripts for it. Use structured edit tools for bulk file changes; if a terminal command is truly required, return BLOCKED_FOR_ORCHESTRATOR with the command and reason.',
-            };
-        }
         const mode = context?.runnerOptions?.mode ?? 
             ((['dispatch_agents', 'merge_results', 'query_blackboard'].includes(toolName)) ? 'orchestrator' : 'build');
         const access = validateToolCapability(toolName, {
@@ -4041,29 +4025,18 @@ export class AgentToolExecutor {
                 role: task.agentType,
             })),
             {
-                explicitDelegation: runnerOptsForLimits?.schedulingState?.dispatch !== 'single'
+                explicitDelegation: runnerOptsForLimits?.schedulingState?.dispatch === 'parallel'
+                    || runnerOptsForLimits?.schedulingState?.dispatch === 'specialist'
                     || parentMode === 'orchestrator'
-                    || parentMode === 'script',
+                    || parentMode === 'script'
+                    || !!blueprintFile,
                 availableTokenBudget: runnerOptsForLimits?.tokenBudget,
                 knownTaskIds: resumeRecord
                     ? resumeRecord.graph.nodes.map(node => node.id)
                     : undefined,
             },
         );
-        // Stored coordinator workflows and host-side callers historically used
-        // a one-node graph for isolation. Preserve that compatibility while
-        // requiring two independent nodes for the new build/utility runtime
-        // dispatch path.
-        const legacySingleNodeCoordinator = normalizedTasks.length === 1
-            && (!parentMode || parentMode === 'orchestrator' || parentMode === 'script' || !!blueprintFile);
-        const dispatchAdmission = legacySingleNodeCoordinator
-            ? {
-                accepted: true,
-                score: 0,
-                reason: 'Legacy coordinator single-node compatibility.',
-                conflicts: [],
-            }
-            : evaluatedDispatchAdmission;
+        const dispatchAdmission = evaluatedDispatchAdmission;
         runnerOptsForLimits?.runEventSink?.appendSoon('dispatch_evaluated', {
             accepted: dispatchAdmission.accepted,
             score: dispatchAdmission.score,

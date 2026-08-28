@@ -1854,7 +1854,7 @@ const RAW_TOOL_DEFINITIONS: ToolDefinition[] = [
                 properties: {
                     blueprintFile: {
                         type: 'string',
-                        description: 'Approved topic-scoped Implementation_Plan.md with an embedded cwtools-blueprint contract. When provided, its featureManifest and taskPlan replace model-supplied tasks as the canonical approved contract. Legacy design_blueprint.json remains read-compatible.',
+                        description: 'Approved topic-scoped Implementation_Plan.md whose cwtools-plan contract contains a schemaVersion 2 blueprint. When provided, its featureManifest and taskPlan replace model-supplied tasks as the canonical approved contract.',
                     },
                     userConstraints: {
                         type: 'object',
@@ -2109,34 +2109,25 @@ const RAW_TOOL_DEFINITIONS: ToolDefinition[] = [
 const detailedBlueprintTool = RAW_TOOL_DEFINITIONS.find(tool => tool.function.name === 'write_design_blueprint');
 if (!detailedBlueprintTool) throw new Error('write_design_blueprint schema is missing');
 
-/** Loaded on demand by get_design_blueprint_contract instead of every model request. */
-export const DESIGN_BLUEPRINT_DETAILED_PARAMETERS = detailedBlueprintTool.function.parameters;
+/** Full contract substituted after the deferred blueprint capability is selected. */
+export const DESIGN_BLUEPRINT_DISCLOSED_TOOL = detailedBlueprintTool;
 
 const COMPACT_BLUEPRINT_WRITE_TOOL: ToolDefinition = {
     type: 'function',
     function: {
         name: 'write_design_blueprint',
-        description: 'Validate and save a design blueprint. First call get_design_blueprint_contract once, then pass the available object as blueprint. Always include title and unresolvedCritical. Exact blockers save an incremental draft even when other sections are incomplete; [] requests approval and activates the stricter executable-plan checks.',
+        description: 'Validate and save a connected Paradox design blueprint. Selecting this deferred tool reveals its complete schema. Always include title and unresolvedCritical; exact blockers save a draft, while [] requests approval and activates executable-plan checks.',
         parameters: {
             type: 'object',
             properties: {
                 blueprint: {
                     type: 'object',
-                    description: 'Complete blueprint object conforming to get_design_blueprint_contract.',
+                    description: 'Blueprint object. Select this tool before calling it so the host can disclose the complete schema.',
                     additionalProperties: true,
                 },
             },
             required: ['blueprint'],
         },
-    },
-};
-
-const GET_BLUEPRINT_CONTRACT_TOOL: ToolDefinition = {
-    type: 'function',
-    function: {
-        name: 'get_design_blueprint_contract',
-        description: 'Load the detailed versioned JSON Schema for write_design_blueprint on demand. The schema permits partial drafts; approval-ready submissions activate stricter host checks. Call only when a connected multi-entity blueprint is actually required.',
-        parameters: { type: 'object', properties: {}, required: [] },
     },
 };
 
@@ -2259,6 +2250,5 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
     ...RAW_TOOL_DEFINITIONS.map(tool => tool.function.name === 'write_design_blueprint'
         ? COMPACT_BLUEPRINT_WRITE_TOOL
         : tool),
-    GET_BLUEPRINT_CONTRACT_TOOL,
     ...RUNTIME_CONTROL_TOOLS,
 ];

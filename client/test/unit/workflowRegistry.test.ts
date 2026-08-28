@@ -81,7 +81,7 @@ describe('AI Workflow Registry', () => {
     it('event-chain-design includes write_design_blueprint', () => {
         const wf = getWorkflow('event-chain-design')!;
         expect(wf.toolPolicy.tools).to.include('write_design_blueprint');
-        expect(wf.toolPolicy.tools).to.include('get_design_blueprint_contract');
+        expect(wf.toolPolicy.tools).to.not.include('get_design_blueprint_contract');
     });
 
     it('all built-in workflows expose the current deep semantic read tools', () => {

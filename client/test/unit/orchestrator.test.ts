@@ -811,28 +811,30 @@ describe('approved blueprint dispatch', () => {
         const os = require('os') as typeof import('os');
         const path = require('path') as typeof import('path');
         const root = fs.mkdtempSync(path.join(os.tmpdir(), 'cwtools-blueprint-dispatch-'));
-        const blueprintDir = path.join(root, '.cwtools-ai', 'topic');
+        const blueprintDir = path.join(root, '.cwtools', 'topic');
         const blueprintFile = path.join(blueprintDir, 'Implementation_Plan.md');
         fs.mkdirSync(blueprintDir, { recursive: true });
-        fs.writeFileSync(blueprintFile, `# Implementation Plan\n\n## Executable Contract\n\n\`\`\`cwtools-blueprint\n${JSON.stringify({
-            schemaVersion: 2,
-            featureManifest: {
-                objective: 'Build approved event',
-                entities: [{ kind: 'event', id: 'approved.1', operation: 'define' }],
-                requiredEdges: [],
-                acceptanceCriteria: [{ id: 'event_exists', description: 'Event exists', type: 'entity_exists', subject: 'approved.1' }],
-                expectsFileChanges: true,
+        fs.writeFileSync(blueprintFile, `# Implementation Plan\n\n## Executable Contract\n\n\`\`\`cwtools-plan\n${JSON.stringify({
+            blueprint: {
+                schemaVersion: 2,
+                featureManifest: {
+                    objective: 'Build approved event',
+                    entities: [{ kind: 'event', id: 'approved.1', operation: 'define' }],
+                    requiredEdges: [],
+                    acceptanceCriteria: [{ id: 'event_exists', description: 'Event exists', type: 'entity_exists', subject: 'approved.1' }],
+                    expectsFileChanges: true,
+                },
+                taskPlan: [{
+                    id: 'build_event',
+                    agentType: 'build',
+                    prompt: 'Build the approved event.',
+                    plannedFiles: ['events/approved.txt'],
+                    produces: [{ kind: 'event', id: 'approved.1', operation: 'define' }],
+                    dependencies: [],
+                    acceptanceChecks: [{ id: 'event_exists', description: 'Event exists', type: 'entity_exists', subject: 'approved.1' }],
+                }],
+                unresolvedCritical: [],
             },
-            taskPlan: [{
-                id: 'build_event',
-                agentType: 'build',
-                prompt: 'Build the approved event.',
-                plannedFiles: ['events/approved.txt'],
-                produces: [{ kind: 'event', id: 'approved.1', operation: 'define' }],
-                dependencies: [],
-                acceptanceChecks: [{ id: 'event_exists', description: 'Event exists', type: 'entity_exists', subject: 'approved.1' }],
-            }],
-            unresolvedCritical: [],
         }, null, 2)}\n\`\`\`\n`, 'utf8');
 
         const { AgentToolExecutor } = require('../../extension/ai/agentTools') as typeof import('../../extension/ai/agentTools');

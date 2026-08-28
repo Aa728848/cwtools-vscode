@@ -1,5 +1,5 @@
 import type { ToolDefinition, AgentMode } from '../types';
-import { TOOL_DEFINITIONS as SCHEMA_DEFINITIONS } from './definitions';
+import { DESIGN_BLUEPRINT_DISCLOSED_TOOL, TOOL_DEFINITIONS as SCHEMA_DEFINITIONS } from './definitions';
 import { analyzeSchema, flattenSchema } from './schemaFlatten';
 
 export type AgentToolName =
@@ -18,7 +18,7 @@ export type AgentToolName =
     | 'history' | 'save_memory' | 'forget_memory' | 'memory_recall_trace'
     | 'convert_image_to_dds' | 'convert_audio' | 'deploy_mod_asset' | 'mcp_call'
     | 'write_localisation' | 'write_design_blueprint' | 'save_workflow' | 'git_ops' | 'dispatch_agents'
-    | 'query_blackboard' | 'merge_results' | 'cancel_dispatch' | 'get_design_blueprint_contract'
+    | 'query_blackboard' | 'merge_results' | 'cancel_dispatch'
     | 'query_shader_symbol' | 'query_shader_compile_unit' | 'query_shader_platform_variants' | 'query_shader_callers'
     | 'explain_shader_reachability' | 'validate_shader' | 'compare_shader_with_vanilla' | 'run_code';
 
@@ -62,6 +62,8 @@ export interface ToolRegistryEntry {
     stormExempt?: boolean;
     noFlatten?: boolean;
     flatSchema?: ToolDefinition;
+    /** Full schema substituted only after this deferred capability is selected. */
+    disclosedSchema?: ToolDefinition;
     /** Domain-safe schema used when a shared tool has mixed-domain parameters. */
     generalSchema?: ToolDefinition;
     disclosure: ToolDisclosure;
@@ -158,7 +160,6 @@ const TOOL_DOMAINS = {
     query_blackboard: 'shared',
     merge_results: 'shared',
     cancel_dispatch: 'shared',
-    get_design_blueprint_contract: 'paradox',
     query_shader_symbol: 'paradox',
     query_shader_compile_unit: 'paradox',
     query_shader_platform_variants: 'paradox',
@@ -299,7 +300,7 @@ const GENERAL_WORKFLOW_SCHEMA: ToolDefinition = {
 // Categories to help assign modes
 const BASE_READ: AgentToolName[] = [
     'select_tools', 'manage_goal',
-    'query_scope', 'query_types', 'query_rules', 'query_cwt_schema', 'query_override_modes', 'search_rule_capabilities', 'explain_scope', 'parse_pdx_fragment', 'query_localisation_index', 'query_workspace_index', 'explore_pdx_project', 'query_inline_instantiation', 'analyze_pdx_flow', 'compare_definition_with_vanilla', 'get_design_blueprint_contract',
+    'query_scope', 'query_types', 'query_rules', 'query_cwt_schema', 'query_override_modes', 'search_rule_capabilities', 'explain_scope', 'parse_pdx_fragment', 'query_localisation_index', 'query_workspace_index', 'explore_pdx_project', 'query_inline_instantiation', 'analyze_pdx_flow', 'compare_definition_with_vanilla',
     'query_project_profile', 'query_project_knowledge', 'query_interface_knowledge', 'run_skill', 'history', 'find_sprite_candidates', 'find_sound_candidates', 'grep', 'get_completion_at',
     'document_symbols', 'workspace_symbols', 'go_to_definition', 'find_references', 'hover_symbol',
     'verify_pdx_identifier', 'find_scope_bridge', 'extract_archetype_slots', 'instantiate_archetype', 'read_file', 'list_directory', 'glob_files',
@@ -565,6 +566,7 @@ for (const schema of SCHEMA_DEFINITIONS) {
         stormExempt,
         noFlatten,
         flatSchema,
+        disclosedSchema: name === 'write_design_blueprint' ? DESIGN_BLUEPRINT_DISCLOSED_TOOL : undefined,
         generalSchema: name === 'dispatch_agents'
             ? GENERAL_DISPATCH_SCHEMA
             : name === 'query_blackboard'

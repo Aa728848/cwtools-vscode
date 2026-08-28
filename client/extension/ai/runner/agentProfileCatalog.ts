@@ -7,6 +7,7 @@ import type {
 } from '../types';
 import { TOOL_REGISTRY } from '../tools/registry';
 import { evaluateEffectiveToolPolicy, matchesToolPattern } from './effectiveToolPolicy';
+import { authorizationAllowsEffect } from './scheduling';
 
 export interface AgentSummaryPolicy {
     minCharacters: number;
@@ -373,13 +374,14 @@ export class ToolActivationService {
                 : authorization === 'plan_write_only' || scheduling.phase === 'plan'
                     ? 'plan'
                     : scheduling.domainProfile === 'paradox' ? 'build' : 'utility';
-        const activated: string[] = registered.filter(name =>
-            evaluateEffectiveToolPolicy(name, {
+        const activated: string[] = registered.filter(name => {
+            const entry = TOOL_REGISTRY.get(name as AgentToolName);
+            return !!entry && evaluateEffectiveToolPolicy(name, {
                 mode: effectiveMode,
                 domain: scheduling.domainProfile,
-                authorization,
                 profile,
-            }).allowed);
+            }).allowed && authorizationAllowsEffect(authorization, entry.effect, entry.mutating ?? false);
+        });
         this.snapshotValue = {
             profileName: profile.name,
             registered,

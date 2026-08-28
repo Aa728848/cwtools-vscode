@@ -25,7 +25,6 @@ import type {
 
 // Re-export the canonical tool definitions (unchanged public API)
 export { TOOL_DEFINITIONS } from './tools/definitions';
-import { DESIGN_BLUEPRINT_DETAILED_PARAMETERS } from './tools/definitions';
 
 // Import handler classes
 import { FileToolHandler, findFiles } from './tools/fileTools';
@@ -34,7 +33,7 @@ import { ExternalToolHandler } from './tools/externalTools';
 import { MemoryToolHandler, blackboardDomainPrefix } from './tools/memoryTools';
 import { searchAgentHistory } from './tools/historyTool';
 import type { IndexService } from '../indexing/indexService';
-import { validateToolAccess, evaluateMcpPermission } from './tools/permissions';
+import { validateToolCapability, evaluateMcpPermission } from './tools/permissions';
 import { readProjectProfile, queryProjectProfile } from './projectProfile';
 import { queryProjectKnowledge } from './projectKnowledge';
 import { queryInterfaceKnowledge } from './interfaceKnowledge';
@@ -1853,7 +1852,7 @@ export class AgentToolExecutor {
         }
         const mode = context?.runnerOptions?.mode ?? 
             ((['dispatch_agents', 'merge_results', 'query_blackboard'].includes(toolName)) ? 'orchestrator' : 'build');
-        const access = validateToolAccess(toolName, {
+        const access = validateToolCapability(toolName, {
             mode, domain: runtimeDomain, isSubAgent,
             profileName: context?.runnerOptions?.agentProfileName,
         });
@@ -2470,13 +2469,6 @@ export class AgentToolExecutor {
                 result = await this.fileHandler.writeLocalisation(args as any, context); break;
             case 'write_design_blueprint':
                 result = await this.fileHandler.writeDesignBlueprint(args as any, context); break;
-            case 'get_design_blueprint_contract':
-                result = {
-                    success: true,
-                    schemaVersion: 2,
-                    usage: 'Pass a complete object conforming to parameters as write_design_blueprint({ blueprint: <object> }).',
-                    parameters: DESIGN_BLUEPRINT_DETAILED_PARAMETERS,
-                }; break;
             case 'save_workflow':
                 result = this.saveWorkflow(args); break;
             case 'git_ops':
@@ -3842,17 +3834,16 @@ export class AgentToolExecutor {
                 && !relativeBlueprint.startsWith('..')
                 && !path.isAbsolute(relativeBlueprint);
             const normalizedRelative = relativeBlueprint.replace(/\\/g, '/').toLowerCase();
-            const insideLegacyAiStorage = !!insideWorkspace
-                && (normalizedRelative.includes('/.cwtools/') || normalizedRelative.startsWith('.cwtools/')
-                    || normalizedRelative.includes('/.cwtools-ai/') || normalizedRelative.startsWith('.cwtools-ai/'));
+            const insideProjectAgentStorage = !!insideWorkspace
+                && (normalizedRelative.includes('/.cwtools/') || normalizedRelative.startsWith('.cwtools/'));
             const privateStorageRoot = getPrivateAiStorageRoot(this.workspaceRoot);
             const insidePrivateStorage = !!privateStorageRoot && isPathInsideOrEqual(resolvedBlueprint, path.resolve(privateStorageRoot));
-            if (!insideLegacyAiStorage && !insidePrivateStorage) {
+            if (!insideProjectAgentStorage && !insidePrivateStorage) {
                 return { success: false, error: 'blueprintFile must be a topic-scoped Implementation_Plan.md inside the agent storage directory.' };
             }
             const blueprintBaseName = path.basename(resolvedBlueprint).toLowerCase();
-            if (blueprintBaseName !== 'implementation_plan.md' && blueprintBaseName !== 'design_blueprint.json') {
-                return { success: false, error: 'blueprintFile must point to the unified Implementation_Plan.md (legacy design_blueprint.json remains read-compatible).' };
+            if (blueprintBaseName !== 'implementation_plan.md') {
+                return { success: false, error: 'blueprintFile must point to the unified Implementation_Plan.md.' };
             }
             const approvedTopicId = runnerOptsForLimits?.topicId;
             if (approvedTopicId) {
@@ -3868,19 +3859,12 @@ export class AgentToolExecutor {
                     return { success: false, error: 'Approved blueprint data is missing or exceeds the 2 MiB safety limit.' };
                 }
                 const fileContent = fs.readFileSync(resolvedBlueprint, 'utf8').replace(/^\uFEFF/, '');
-                const approvedBlueprint = blueprintBaseName === 'implementation_plan.md'
-                    ? parseImplementationPlanBlueprint(fileContent).value as {
-                        schemaVersion?: number;
-                        featureManifest?: import('./types').FeatureManifest;
-                        taskPlan?: typeof tasks;
-                        unresolvedCritical?: unknown;
-                    } | undefined
-                    : JSON.parse(fileContent) as {
-                        schemaVersion?: number;
-                        featureManifest?: import('./types').FeatureManifest;
-                        taskPlan?: typeof tasks;
-                        unresolvedCritical?: unknown;
-                    };
+                const approvedBlueprint = parseImplementationPlanBlueprint(fileContent).value as {
+                    schemaVersion?: number;
+                    featureManifest?: import('./types').FeatureManifest;
+                    taskPlan?: typeof tasks;
+                    unresolvedCritical?: unknown;
+                } | undefined;
                 if (approvedBlueprint?.schemaVersion !== 2 || !approvedBlueprint.featureManifest || !Array.isArray(approvedBlueprint.taskPlan)) {
                     return { success: false, error: 'Approved Implementation Plan does not contain a valid schemaVersion 2 executable blueprint contract.' };
                 }

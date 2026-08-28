@@ -18,7 +18,7 @@ import {
 } from '../../extension/ai/runnerPolicy';
 import type { ToolDefinition } from '../../extension/ai/types';
 import { TOOL_DEFINITIONS as registeredTools, TOOL_REGISTRY } from '../../extension/ai/tools/registry';
-import { validateToolAccess } from '../../extension/ai/tools/permissions';
+import { validateToolCapability } from '../../extension/ai/tools/permissions';
 import { toolDisclosureService } from '../../extension/ai/runner/toolDisclosure';
 
 const toolDefinitions = [
@@ -99,13 +99,13 @@ describe('runnerPolicy', () => {
                 .map(entry => entry!.name);
             expect(leaked, `${mode} leaked Paradox tools`).to.deep.equal([]);
         }
-        expect(validateToolAccess('query_cwt_schema', { mode: 'utility', domain: 'general' }).allowed).to.equal(false);
-        expect(validateToolAccess('write_localisation', { mode: 'utility', domain: 'general' }).allowed).to.equal(false);
-        expect(validateToolAccess('mcp_call', { mode: 'utility', domain: 'general' }).allowed).to.equal(true);
-        expect(validateToolAccess('run_command', {
+        expect(validateToolCapability('query_cwt_schema', { mode: 'utility', domain: 'general' }).allowed).to.equal(false);
+        expect(validateToolCapability('write_localisation', { mode: 'utility', domain: 'general' }).allowed).to.equal(false);
+        expect(validateToolCapability('mcp_call', { mode: 'utility', domain: 'general' }).allowed).to.equal(true);
+        expect(validateToolCapability('run_command', {
             mode: 'utility', domain: 'general', isSubAgent: true, profileName: 'general-coder',
         }).allowed).to.equal(true);
-        expect(validateToolAccess('run_command', {
+        expect(validateToolCapability('run_command', {
             mode: 'build', domain: 'paradox', isSubAgent: true,
         }).allowed).to.equal(false);
         const utilityChildTools = filterToolDefinitionsForMode(toolDefinitions, 'utility', {

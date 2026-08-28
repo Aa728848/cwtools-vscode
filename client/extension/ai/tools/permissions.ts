@@ -32,7 +32,7 @@ export function parseMcpToolName(toolName: string): { server: string; tool: stri
     return { server: match[1], tool: match[2] };
 }
 
-export function validateToolAccess(
+export function validateToolCapability(
     toolName: string,
     options: {
         mode: AgentMode;

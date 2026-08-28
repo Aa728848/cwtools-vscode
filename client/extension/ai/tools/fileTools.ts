@@ -2415,46 +2415,44 @@ export class FileToolHandler {
                 ...args,
                 unresolvedCritical,
             };
-            lines.push('## Executable Plan Contracts');
+            lines.push('## Executable Plan Contract');
             lines.push('');
-            lines.push('```cwtools-blueprint');
-            lines.push(JSON.stringify(executableBlueprint, null, 2));
+            const targetFiles = Array.from(new Set(args.taskPlan.flatMap(task => task.plannedFiles ?? [])));
+            const operations = args.taskPlan.map(task => ({
+                id: task.id,
+                description: task.prompt,
+                files: task.plannedFiles ?? [],
+                dependsOn: task.dependencies,
+            }));
+            const verification = Array.from(new Set((args.featureManifest.acceptanceCriteria ?? []).map(check => check.description)));
+            const risks = (args.riskRegister ?? []).map(risk => ({
+                risk,
+                mitigation: 'Verify the affected entity contracts and diagnostics before accepting the implementation.',
+            }));
+            const handoff = {
+                version: 1,
+                status: approvalReady ? 'ready' : 'draft',
+                tier: 'blueprint',
+                objective: args.featureManifest.objective || args.title,
+                targetFiles,
+                operations,
+                verification,
+                acceptanceCriteria: verification,
+                risks: risks.length > 0 ? risks : [{
+                    risk: 'Implementation may diverge from the approved entity and dependency contracts.',
+                    mitigation: 'Dispatch the embedded task DAG verbatim and verify every required acceptance check.',
+                }],
+                rollback: targetFiles.length > 0
+                    ? ['Revert the exact target files listed in this plan to their pre-execution contents.']
+                    : [],
+                unresolvedCritical,
+                blueprint: executableBlueprint,
+            };
+            lines.push('```cwtools-plan');
+            lines.push(JSON.stringify(handoff, null, 2));
             lines.push('```');
             lines.push('');
-            if (approvalReady) {
-                const targetFiles = Array.from(new Set(args.taskPlan.flatMap(task => task.plannedFiles ?? [])));
-                const operations = args.taskPlan.map(task => ({
-                    id: task.id,
-                    description: task.prompt,
-                    files: task.plannedFiles ?? [],
-                    dependsOn: task.dependencies,
-                }));
-                const verification = Array.from(new Set((args.featureManifest.acceptanceCriteria ?? []).map(check => check.description)));
-                const risks = (args.riskRegister ?? []).map(risk => ({
-                    risk,
-                    mitigation: 'Verify the affected entity contracts and diagnostics before accepting the implementation.',
-                }));
-                const handoff = {
-                    version: 1,
-                    status: 'ready',
-                    tier: 'blueprint',
-                    objective: args.featureManifest.objective,
-                    targetFiles,
-                    operations,
-                    verification,
-                    acceptanceCriteria: verification,
-                    risks: risks.length > 0 ? risks : [{
-                        risk: 'Implementation may diverge from the approved entity and dependency contracts.',
-                        mitigation: 'Dispatch the embedded task DAG verbatim and verify every required acceptance check.',
-                    }],
-                    rollback: ['Revert the exact target files listed in this plan to their pre-execution contents.'],
-                    unresolvedCritical: [],
-                };
-                lines.push('```cwtools-plan');
-                lines.push(JSON.stringify(handoff, null, 2));
-                lines.push('```');
-                lines.push('');
-            } else {
+            if (!approvalReady) {
                 lines.push('> Approval handoff is withheld until the unresolved critical decisions above are answered.');
                 lines.push('');
             }

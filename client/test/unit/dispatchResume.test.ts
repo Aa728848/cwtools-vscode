@@ -144,7 +144,7 @@ describe('dispatch_agents resume/append/clarification', () => {
         const executor = createExecutor();
         const result = await executor.execute('dispatch_agents', {
             resumeGraphId: graph.id,
-            blueprintFile: '.cwtools/topic-a/design_blueprint.json',
+            blueprintFile: '.cwtools/topic-a/Implementation_Plan.md',
         }, makeContext('topic-a', 'script', 'paradox') as any) as any;
         expect(result.success).to.equal(false);
         expect(result.error).to.include('Resumed graphs are already approved contracts');

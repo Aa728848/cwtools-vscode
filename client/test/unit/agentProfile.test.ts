@@ -124,9 +124,9 @@ describe('agent profile', () => {
         expect(resolved.schedulingState.profileName).to.equal('workspace-reviewer');
     });
 
-    it('fails deterministic mutation fallback into Plan until semantic routing proves write-readiness', () => {
+    it('keeps ordinary deterministic mutation fallbacks executable', () => {
         expect(resolveAgentProfile('Explain this Python API').mode).to.equal('explore');
-        expect(resolveAgentProfile('Implement a new scripted effect').mode).to.equal('plan');
+        expect(resolveAgentProfile('Implement a new scripted effect').mode).to.equal('build');
         expect(resolveAgentProfile('Review the TypeScript cancellation logic').mode).to.equal('review');
     });
 
@@ -141,7 +141,7 @@ describe('agent profile', () => {
 
     it('keeps the previous domain for terse follow-up requests', () => {
         const resolved = resolveAgentProfile('把 23 替换为 X', undefined, { previousDomain: 'paradox' });
-        expect(resolved).to.include({ domain: 'paradox', intent: 'plan', mode: 'plan' });
+        expect(resolved).to.include({ domain: 'paradox', intent: 'execute', mode: 'build' });
     });
 
     it('inherits execute intent when a terse answer resolves a modification clarification', () => {
@@ -149,7 +149,7 @@ describe('agent profile', () => {
             previousDomain: 'paradox',
             previousUserRequests: ['把选中的 GFX_colony_type_capital 改成 GFX_colony_type_bureaucratic'],
         });
-        expect(resolved).to.include({ domain: 'paradox', intent: 'plan', strategy: 'single', mode: 'plan' });
+        expect(resolved).to.include({ domain: 'paradox', intent: 'execute', strategy: 'single', mode: 'build' });
 
         const routed = resolveAgentProfileFromModelDecision('只改一处', DEFAULT_AGENT_PROFILE, {
             intent: 'execute', strategy: 'single', explicitExecutionRequest: true, requiresUserDecision: false, reason: 'short answer confirms execution scope',
@@ -174,7 +174,7 @@ describe('agent profile', () => {
         const resolved = resolveAgentProfile('修复 TypeScript webview 的状态更新', undefined, {
             previousDomain: 'paradox',
         });
-        expect(resolved).to.include({ domain: 'paradox', intent: 'plan', mode: 'plan' });
+        expect(resolved).to.include({ domain: 'paradox', intent: 'execute', mode: 'build' });
     });
 
     it('honors explicit no-write constraints before write keywords', () => {
@@ -196,14 +196,14 @@ describe('agent profile', () => {
     });
 
     it('uses one Paradox admission for narrow and broad writes unless delegation is explicit', () => {
-        expect(resolveAgentProfile('修复这个 CWT 诊断报错').mode).to.equal('plan');
-        expect(resolveAgentProfile('Add one scripted_modifier to this Stellaris mod').mode).to.equal('plan');
+        expect(resolveAgentProfile('修复这个 CWT 诊断报错').mode).to.equal('build');
+        expect(resolveAgentProfile('Add one scripted_modifier to this Stellaris mod').mode).to.equal('build');
         expect(resolveAgentProfile('Fix all localisation errors in this Stellaris mod').mode).to.equal('plan');
     });
 
     it('separates general coding from Paradox coordination', () => {
-        expect(resolveAgentProfile('Create a Python converter for this CSV file', profileForUserDomain('general')).mode).to.equal('plan');
-        expect(resolveAgentProfile('Use multiple agents to refactor this TypeScript API', profileForUserDomain('general')).mode).to.equal('plan');
+        expect(resolveAgentProfile('Create a Python converter for this CSV file', profileForUserDomain('general')).mode).to.equal('utility');
+        expect(resolveAgentProfile('Use multiple agents to refactor this TypeScript API', profileForUserDomain('general')).mode).to.equal('orchestrator');
         expect(resolveAgentProfile('Use multiple agents to repair this Stellaris event chain').mode).to.equal('plan');
     });
 
@@ -212,13 +212,13 @@ describe('agent profile', () => {
             activeFile: 'events/example.txt',
         });
         expect(resolved.domain).to.equal('paradox');
-        expect(resolved.mode).to.equal('plan');
+        expect(resolved.mode).to.equal('build');
     });
 
     it('uses Paradox for repository implementation work until the user selects General', () => {
         const resolved = resolveAgentProfile('Fix the TypeScript routing for the Paradox Agent webview');
         expect(resolved.domain).to.equal('paradox');
-        expect(resolved.mode).to.equal('plan');
+        expect(resolved.mode).to.equal('build');
     });
 
     it('keeps Paradox selected during semantic routing', () => {

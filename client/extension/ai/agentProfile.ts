@@ -36,9 +36,6 @@ const NO_WRITE_INTENT_RE = /\b(?:do not|don't|without|no need to)\s+(?:change|ed
 const DIRECT_WRITE_OVERRIDE_RE = /\b(?:but|then)\s+(?:please\s+)?(?:change|edit|modify|write|implement)|\b(?:directly|immediately)\s+(?:change|edit|modify|write|implement)|(?:但|不过|然后|接着|之后|并且)[^，。；\n]{0,8}(?:修改|改动|更改|写入|执行|实现|修复)|(?:直接|马上|立即)(?:修改|改动|更改|写入|执行|实现|修复)/i;
 const MULTI_AGENT_RE = /\b(multi(?:ple)?[-\s]?agents?|sub[-\s]?agents?|dispatch_agents|parallel agents?|in parallel)\b|多\s*agent|子\s*agent|并行.*agent|并行处理/i;
 const BROAD_TASK_RE = /\b(all|every|entire|whole|across the (?:project|repository|workspace)|multi[-\s]?file|event chain|migration|large refactor)\b|全部|所有|整个项目|整个仓库|全项目|跨文件|多文件|事件链|批量|整套|大型重构|全面修复/i;
-// Narrow deterministic admission for design-complete mechanical edits. It must
-// carry an exact operation plus concrete old/new values or an explicit target.
-const MECHANICAL_WRITE_RE = /(?:\breplace\s+[`"']?[^\n]{1,80}[`"']?\s+with\s+[`"']?[^\n]{1,80}|\bchange\s+[`"']?[^\n]{1,80}[`"']?\s+to\s+[`"']?[^\n]{1,80}|把[^，。\n]{1,80}(?:改成|改为|替换成)[^，。\n]{1,80}|(?:删除|移除)\s*(?:第\s*\d+\s*行|选中|这个\s*TODO)|(?:rename|重命名|改名)\s+[`"']?[A-Za-z_][\w.:-]*[`"']?\s+(?:to|为|成)\s+[`"']?[A-Za-z_][\w.:-]*[`"']?)/i;
 const PDX_PATH_RE = /(?:^|[\\/])(?:common|events?|interface|localisation|localization|gfx|sound|music|map|history|decisions|missions|on_actions)(?:[\\/]|$)|\.(?:cwt|gui|gfx|asset|entity)$/i;
 
 export interface AgentProfileResolveHints {
@@ -289,12 +286,14 @@ export function resolveAgentProfile(
             return !previousNoWrite && WRITE_INTENT_RE.test(previous);
         });
     const hasWriteIntent = !explicitNoWrite && (WRITE_INTENT_RE.test(request) || inheritedWriteIntent);
-    // The deterministic fallback cannot prove that a write request is design-complete.
-    // Fail into Plan rather than granting Execute from mutation keywords alone.
-    const fallbackWriteIntent: ResolvedAgentProfile['intent'] = MECHANICAL_WRITE_RE.test(request)
-        && !BROAD_TASK_RE.test(request)
-        ? 'execute'
-        : 'plan';
+    // A failed semantic router must not turn every ordinary mutation into a
+    // planning round-trip. Only explicit planning or broad/coupled scope keeps
+    // the deterministic fallback in Plan; Execute may inspect the repository
+    // within the user's requested scope before applying the change.
+    const fallbackWriteIntent: ResolvedAgentProfile['intent'] = PLAN_INTENT_RE.test(request)
+        || BROAD_TASK_RE.test(request)
+        ? 'plan'
+        : 'execute';
     let intent: ResolvedAgentProfile['intent'];
     if (selection.intent !== 'auto') {
         intent = selection.intent;

@@ -1,5 +1,6 @@
 import { expect } from 'chai';
 import { sortToolDefinitionsForStableRequest, ToolDisclosureService, type ToolDisclosureContext } from '../../extension/ai/runner/toolDisclosure';
+import { TOOL_DEFINITIONS } from '../../extension/ai/tools/definitions';
 import type { AgentMode, AgentRuntimeDomain } from '../../extension/ai/types';
 
 const service = new ToolDisclosureService();
@@ -53,6 +54,23 @@ describe('toolDisclosure', () => {
         expect(result.unavailable).to.deep.equal([]);
         expect(ctx.loaded.has('edit_file')).to.equal(true);
         expect(ctx.loaded.has('replace_lines')).to.equal(true);
+    });
+
+    it('reveals the complete blueprint contract without a second helper tool', () => {
+        const blueprint = TOOL_DEFINITIONS.find(tool => tool.function.name === 'write_design_blueprint')!;
+        const ctx = context('plan', 'paradox');
+        const selected = service.select(
+            { tools: ['write_design_blueprint'], reason: 'author connected design' },
+            [blueprint],
+            ctx,
+            { eligibleTools: [blueprint] },
+        );
+        const [revealed] = service.initialTools([blueprint], ctx);
+
+        expect(selected.loaded).to.deep.equal(['write_design_blueprint']);
+        expect(revealed?.function.parameters.required).to.deep.equal(['title', 'unresolvedCritical']);
+        expect(JSON.stringify(revealed).length).to.be.greaterThan(1_500);
+        expect(TOOL_DEFINITIONS.some(tool => tool.function.name === 'get_design_blueprint_contract')).to.equal(false);
     });
 
     it('never lifts mode or domain denials through dynamic disclosure', () => {

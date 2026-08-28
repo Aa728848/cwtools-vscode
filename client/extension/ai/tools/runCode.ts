@@ -42,7 +42,6 @@ export const RUN_CODE_BLOCKED_TOOLS: ReadonlySet<string> = new Set([
     'save_workflow',
     'manage_goal',
     'write_design_blueprint',
-    'get_design_blueprint_contract',
     'history',
     'web_open',
     'web_find',

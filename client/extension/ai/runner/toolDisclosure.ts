@@ -39,7 +39,11 @@ export class ToolDisclosureService {
                 return (entry ? entry.disclosure !== 'deferred' : false) || context.loaded.has(tool.function.name);
             })
             : tools;
-        return sortToolDefinitionsForStableRequest(visible);
+        return sortToolDefinitionsForStableRequest(visible.map(tool => {
+            const entry = TOOL_REGISTRY.get(tool.function.name as AgentToolName);
+            const revealDeferredSchema = !context.dynamicSupported || context.loaded.has(tool.function.name);
+            return revealDeferredSchema && entry?.disclosedSchema ? entry.disclosedSchema : tool;
+        }));
     }
 
     select(

@@ -4,7 +4,6 @@ import { WRITE_TOOLS } from './tools/registry';
 
 const PLAN_ARTIFACT_PATTERN = /(?:^|[\\/])implementation_plan\.md$/i;
 const PLAN_HANDOFF_BLOCK_PATTERN = /```cwtools-plan\s*([\s\S]*?)```/gi;
-const BLUEPRINT_CONTRACT_BLOCK_PATTERN = /```cwtools-blueprint\s*([\s\S]*?)```/gi;
 const EXECUTE_HANDOFF_MODES = new Set<AgentMode>(['build', 'utility', 'orchestrator', 'script']);
 const NON_PROJECT_WRITE_TOOLS = new Set(['git_ops', 'write_design_blueprint', 'save_workflow']);
 
@@ -29,6 +28,15 @@ export interface ImplementationPlanHandoff {
     risks: Array<{ risk: string; mitigation: string }>;
     rollback: string[];
     unresolvedCritical: [];
+    blueprint?: ImplementationPlanBlueprint;
+}
+
+export interface ImplementationPlanBlueprint {
+    schemaVersion: 2;
+    featureManifest: unknown;
+    taskPlan: unknown[];
+    unresolvedCritical?: unknown;
+    [key: string]: unknown;
 }
 
 export interface ImplementationPlanValidation {
@@ -146,21 +154,19 @@ function parsePlanHandoff(planText: string): { blockCount: number; value?: unkno
     }
 }
 
-/** Parse the optional executable Paradox contract embedded in the canonical Implementation Plan. */
+/** Parse the optional executable Paradox payload from the canonical plan contract. */
 export function parseImplementationPlanBlueprint(planText: string): {
     blockCount: number;
-    value?: { schemaVersion?: number; featureManifest?: unknown; taskPlan?: unknown };
+    value?: ImplementationPlanBlueprint;
 } {
-    const blocks = [...planText.matchAll(BLUEPRINT_CONTRACT_BLOCK_PATTERN)];
-    if (blocks.length !== 1 || !blocks[0]?.[1]) return { blockCount: blocks.length };
-    try {
-        const value = JSON.parse(blocks[0][1]);
-        return value && typeof value === 'object' && !Array.isArray(value)
-            ? { blockCount: 1, value }
-            : { blockCount: 1 };
-    } catch {
-        return { blockCount: 1 };
+    const parsed = parsePlanHandoff(planText);
+    if (parsed.blockCount !== 1 || !parsed.value || typeof parsed.value !== 'object' || Array.isArray(parsed.value)) {
+        return { blockCount: parsed.blockCount };
     }
+    const blueprint = (parsed.value as Record<string, unknown>).blueprint;
+    return blueprint && typeof blueprint === 'object' && !Array.isArray(blueprint)
+        ? { blockCount: 1, value: blueprint as ImplementationPlanBlueprint }
+        : { blockCount: 1 };
 }
 
 function isExactFilePath(value: string): boolean {
@@ -229,6 +235,22 @@ export function validateImplementationPlan(planText: string): ImplementationPlan
         missing.push('unresolvedCritical must be empty');
     }
 
+    let blueprint: ImplementationPlanBlueprint | undefined;
+    if (candidate.blueprint !== undefined) {
+        if (!candidate.blueprint || typeof candidate.blueprint !== 'object' || Array.isArray(candidate.blueprint)) {
+            missing.push('valid blueprint');
+        } else {
+            const payload = candidate.blueprint as Record<string, unknown>;
+            if (payload.schemaVersion !== 2
+                || !payload.featureManifest || typeof payload.featureManifest !== 'object' || Array.isArray(payload.featureManifest)
+                || !Array.isArray(payload.taskPlan)) {
+                missing.push('valid blueprint');
+            } else {
+                blueprint = payload as ImplementationPlanBlueprint;
+            }
+        }
+    }
+
     const risks = Array.isArray(candidate.risks) ? candidate.risks : [];
     if (!risks.every(risk => {
         if (!risk || typeof risk !== 'object' || Array.isArray(risk)) return false;
@@ -295,7 +317,6 @@ export function validateImplementationPlan(planText: string): ImplementationPlan
 
     const humanBody = planText
         .replace(PLAN_HANDOFF_BLOCK_PATTERN, '')
-        .replace(BLUEPRINT_CONTRACT_BLOCK_PATTERN, '')
         .trim();
     const headingCount = humanBody.match(/^#{1,4}\s+\S.+$/gm)?.length ?? 0;
     const minimumBody = tier === 'lightweight' ? 40 : tier === 'structured' ? 80 : 120;
@@ -319,6 +340,7 @@ export function validateImplementationPlan(planText: string): ImplementationPlan
             risks: risks as Array<{ risk: string; mitigation: string }>,
             rollback: rollback ?? [],
             unresolvedCritical: [],
+            ...(blueprint ? { blueprint } : {}),
         },
     };
 }

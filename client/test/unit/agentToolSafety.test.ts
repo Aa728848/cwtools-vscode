@@ -2,7 +2,6 @@ import { expect } from 'chai';
 import sinon from 'sinon';
 import * as fs from 'fs';
 import * as path from 'path';
-import { DESIGN_BLUEPRINT_DETAILED_PARAMETERS } from '../../extension/ai/tools/definitions';
 
 let diagnosticPairs: Array<[any, any[]]> = [];
 let ignoredDiagnostics: string[] = [];
@@ -1145,15 +1144,14 @@ describe('agent tool file path safety', () => {
         expect(SUPERSEDED_BY_LATER_SAME_FILE_WRITE_TOOLS.has('write_localisation')).to.equal(false);
     });
 
-    it('loads the rich blueprint contract on demand instead of every request', () => {
+    it('keeps blueprint detail behind one deferred write tool', () => {
         const tool = TOOL_DEFINITIONS.find(def => def.function.name === 'write_design_blueprint');
         const contractTool = TOOL_DEFINITIONS.find(def => def.function.name === 'get_design_blueprint_contract');
-        const required = DESIGN_BLUEPRINT_DETAILED_PARAMETERS.required ?? [];
+        const required = tool?.function.parameters.required ?? [];
 
-        expect(tool?.function.parameters.required).to.deep.equal(['blueprint']);
-        expect(contractTool).to.not.equal(undefined);
+        expect(contractTool).to.equal(undefined);
+        expect(required).to.deep.equal(['blueprint']);
         expect(JSON.stringify(tool).length).to.be.lessThan(1_500);
-        expect(required).to.deep.equal(['title', 'unresolvedCritical']);
     });
 
     it('rejects blueprints without an explicit draft or ready state', async () => {
@@ -1181,8 +1179,11 @@ describe('agent tool file path safety', () => {
         expect(result.approvalReady).to.equal(false);
         const content = fs.readFileSync(result.filePath, 'utf8');
         expect(content).to.include('Choose the trigger mechanism.');
-        expect(content).to.include('```cwtools-blueprint');
-        expect(content).to.not.include('```cwtools-plan');
+        expect(content).to.not.include('```cwtools-blueprint');
+        expect(content).to.include('```cwtools-plan');
+        const draftContract = JSON.parse(content.match(/```cwtools-plan\n([\s\S]*?)\n```/)?.[1] ?? '{}');
+        expect(draftContract.status).to.equal('draft');
+        expect(draftContract.blueprint.unresolvedCritical).to.deep.equal(['Choose the trigger mechanism.']);
     });
 
     it('writes complete design blueprints with a completeness gate', async () => {
@@ -1302,16 +1303,14 @@ describe('agent tool file path safety', () => {
         expect(content).to.include('Reward and Outcome Plan');
         expect(content).to.include('Executable Feature Relationship Contract');
         expect(content).to.include('Approved Multi-Agent Task DAG');
-        expect(content).to.include('```cwtools-blueprint');
+        expect(content).to.not.include('```cwtools-blueprint');
         expect(content).to.include('```cwtools-plan');
         expect(result.dataFilePath).to.equal(planPath);
         expect(result.writtenFiles).to.deep.equal([planPath]);
-        expect(fs.existsSync(path.join(workspaceRoot, '.cwtools', 'topic-blueprint', 'design_blueprint.md'))).to.equal(false);
-        expect(fs.existsSync(path.join(workspaceRoot, '.cwtools', 'topic-blueprint', 'design_blueprint.json'))).to.equal(false);
 
-        const blueprintBlock = content.match(/```cwtools-blueprint\n([\s\S]*?)\n```/)?.[1];
-        expect(blueprintBlock).to.not.equal(undefined);
-        const draftBlueprint = JSON.parse(blueprintBlock!);
+        const planBlock = content.match(/```cwtools-plan\n([\s\S]*?)\n```/)?.[1];
+        expect(planBlock).to.not.equal(undefined);
+        const draftBlueprint = JSON.parse(planBlock!).blueprint;
         delete draftBlueprint.schemaVersion;
         delete draftBlueprint.generatedAt;
         const leanBlueprint = JSON.parse(JSON.stringify(draftBlueprint));
@@ -1344,7 +1343,8 @@ describe('agent tool file path safety', () => {
         expect(draftResult.message).to.include('Blueprint draft saved');
         expect(draftContent).to.include('## Unresolved Critical Decisions');
         expect(draftContent).to.include('Choose the leader eligibility scope.');
-        expect(draftContent).to.not.include('```cwtools-plan');
+        expect(draftContent).to.include('```cwtools-plan');
+        expect(JSON.parse(draftContent.match(/```cwtools-plan\n([\s\S]*?)\n```/)?.[1] ?? '{}').status).to.equal('draft');
     });
 
     it('lets orchestrator sub-agents write localisation without waiting for pending-write confirmation', async () => {
@@ -2904,7 +2904,7 @@ describe('agent tool progress and aborts', () => {
     it('rejects executable blueprints in Explore-mode fan-out', async () => {
         const executor = createExecutor();
         const result = await executor.execute('dispatch_agents', {
-            blueprintFile: '.cwtools/topic/design_blueprint.json',
+            blueprintFile: '.cwtools/topic/Implementation_Plan.md',
         }, {
             runnerOptions: { mode: 'explore', domain: 'paradox' },
         } as any) as any;

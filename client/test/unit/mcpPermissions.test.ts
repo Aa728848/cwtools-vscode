@@ -2,7 +2,7 @@ import { expect } from 'chai';
 import {
     parseMcpToolName,
     evaluateMcpPermission,
-    validateToolAccess,
+    validateToolCapability,
 } from '../../extension/ai/tools/permissions';
 import { isMcpServerAllowedForDomain } from '../../extension/ai/mcpCapability';
 
@@ -21,13 +21,13 @@ describe('mcp tool name parsing', () => {
 
 describe('dynamic MCP access validation', () => {
     it('governs dynamic MCP names by the mcp_call registry policy', () => {
-        const generalAccess = validateToolAccess('mcp_filesystem_read_file', {
+        const generalAccess = validateToolCapability('mcp_filesystem_read_file', {
             mode: 'utility',
             domain: 'general',
         });
         expect(generalAccess.allowed).to.equal(true);
 
-        const paradoxAccess = validateToolAccess('mcp_filesystem_read_file', {
+        const paradoxAccess = validateToolCapability('mcp_filesystem_read_file', {
             mode: 'build',
             domain: 'paradox',
         });
@@ -36,11 +36,11 @@ describe('dynamic MCP access validation', () => {
 
     it('allows Paradox top-level modes and rejects modes outside the MCP surface', () => {
         for (const mode of ['build', 'plan', 'explore', 'review', 'orchestrator', 'script'] as const) {
-            const access = validateToolAccess('mcp_filesystem_read_file', { mode, domain: 'paradox' });
+            const access = validateToolCapability('mcp_filesystem_read_file', { mode, domain: 'paradox' });
             expect(access.allowed, `mode ${mode}`).to.equal(true);
         }
 
-        const specialist = validateToolAccess('mcp_filesystem_read_file', {
+        const specialist = validateToolCapability('mcp_filesystem_read_file', {
             mode: 'loc_writer',
             domain: 'paradox',
         });
@@ -50,7 +50,7 @@ describe('dynamic MCP access validation', () => {
     });
 
     it('still reports truly unknown tools as unknown', () => {
-        const access = validateToolAccess('made_up_tool', { mode: 'general' });
+        const access = validateToolCapability('made_up_tool', { mode: 'general' });
         expect(access.allowed).to.equal(false);
         expect(access.reason).to.include('Unknown tool');
     });

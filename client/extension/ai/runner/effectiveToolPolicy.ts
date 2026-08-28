@@ -1,23 +1,20 @@
 import type {
-    AgentAuthorization,
     AgentMode,
     AgentRuntimeDomain,
 } from '../types';
 import { TOOL_REGISTRY, type AgentToolName } from '../tools/registry';
 import type { RuntimeAgentProfile } from './agentProfileCatalog';
-import { authorizationAllowsEffect } from './scheduling';
 
 export interface EffectiveToolPolicyContext {
     mode: AgentMode;
     domain: AgentRuntimeDomain;
-    authorization?: AgentAuthorization;
     isSubAgent?: boolean;
     profile?: RuntimeAgentProfile;
 }
 
 export interface EffectiveToolPolicyDecision {
     allowed: boolean;
-    reason?: 'unknown' | 'domain' | 'mode' | 'profile-domain' | 'profile' | 'subagent' | 'authorization';
+    reason?: 'unknown' | 'domain' | 'mode' | 'profile-domain' | 'profile' | 'subagent';
 }
 
 export function matchesToolPattern(name: string, pattern: string): boolean {
@@ -68,9 +65,5 @@ export function evaluateEffectiveToolPolicy(
         return { allowed: false, reason: 'subagent' };
     }
 
-    if (context.authorization
-        && !authorizationAllowsEffect(context.authorization, entry.effect, entry.mutating ?? false)) {
-        return { allowed: false, reason: 'authorization' };
-    }
     return { allowed: true };
 }

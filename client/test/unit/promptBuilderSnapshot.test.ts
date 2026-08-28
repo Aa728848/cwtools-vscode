@@ -50,7 +50,6 @@ describe('PromptBuilder 快照与稳定性测试', () => {
         expect(prompt).to.not.include('Clarification and execution');
         expect(prompt).to.not.include('Explicit Plan Handoff');
         expect(prompt).to.include('Strict Rule Compliance in Code Generation');
-        expect(prompt).to.include('write-ready');
         expect(prompt).to.include('host EvidenceGate');
         expect(prompt).to.include('write_localisation');
         expect(prompt).to.include('evidence hierarchy');
@@ -150,8 +149,8 @@ describe('PromptBuilder 快照与稳定性测试', () => {
 
         expect(prompt).to.include('plannedFiles');
         expect(prompt).to.include('utility');
-        expect(prompt).to.include('not permission to dispatch a discovery wave');
-        expect(prompt).to.include('Execute Mode is write-ready');
+        expect(prompt).to.include('bounded read-only discovery wave');
+        expect(prompt).to.include('repository investigation alone is not a Plan boundary');
         expect(prompt).to.not.include('mandatory user-facing approval');
         expect(prompt).to.not.include('LocWriter');
     });
@@ -202,7 +201,7 @@ describe('PromptBuilder 快照与稳定性测试', () => {
         const prompt = builder.buildSystemPromptForMode('plan');
 
         expect(prompt).to.include('Blueprint Self-check');
-        expect(prompt).to.include('get_design_blueprint_contract');
+        expect(prompt).to.include('disclosed tool schema is the complete contract');
         expect(prompt).to.include('Exact blockers may be saved immediately');
         expect(prompt).to.include('Approval-ready blueprints need entities with verified scopes');
         expect(prompt).to.include('feature manifest with acceptance criteria');

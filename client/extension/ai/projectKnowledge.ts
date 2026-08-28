@@ -170,6 +170,14 @@ function pendingRootRefresh(workspaceRoot: string): PendingRootRefresh {
     return state;
 }
 
+function activeProjectKnowledgeRefresh(workspaceRoot: string): PendingRootRefresh | undefined {
+    const state = pendingRootRefreshes.get(workspaceRootKey(workspaceRoot));
+    if (!state) return undefined;
+    return state.timer || state.inFlight || state.fullRefresh || state.changedFiles.size > 0
+        ? state
+        : undefined;
+}
+
 function findKnowledgeOwnerRoot(sourceWorkspaceRoot: string): string | undefined {
     const sourceKey = workspaceRootKey(sourceWorkspaceRoot);
     for (const folder of vs.workspace.workspaceFolders ?? []) {
@@ -611,6 +619,7 @@ export async function queryProjectKnowledge(
     }
 
     const staleReasons = currentStaleReasons(workspaceRoot, manifest);
+    const activeRefresh = activeProjectKnowledgeRefresh(workspaceRoot);
     try {
         const result = await vs.commands.executeCommand<Record<string, unknown>>(
             'cwtools.ai.queryProjectKnowledgeDb',
@@ -664,7 +673,9 @@ export async function queryProjectKnowledge(
             _hint: status === 'partial'
                 ? 'Knowledge topology is partial because export limits were reached. Use targeted CWT/LSP queries before treating missing relationships as absent.'
                 : staleReasons.length > 0
-                ? 'Knowledge is stale. The background watcher will refresh it when the LSP is ready; rerun /init for an immediate rebuild.'
+                ? activeRefresh
+                    ? 'A background knowledge refresh is queued or running. This is not an expired package; retry this query for the live snapshot before falling back to other evidence.'
+                    : 'Knowledge is stale. The background watcher will refresh it when the LSP is ready; rerun /init for an immediate rebuild.'
                 : 'The SQLite knowledge graph is retrieval evidence. Exact CWT/LSP legality checks remain authoritative.',
         };
     } catch (error) {
@@ -688,7 +699,20 @@ export async function queryProjectKnowledge(
 export function buildProjectKnowledgePrompt(workspaceRoot: string): string {
     const manifest = readProjectKnowledgeManifest(workspaceRoot);
     if (!manifest) return '';
-    const staleReasons = manifest.staleReasons ?? [];
+    const refresh = activeProjectKnowledgeRefresh(workspaceRoot);
+    const staleReasons = Array.from(new Set([
+        ...(manifest.staleReasons ?? []),
+        ...(refresh ? Array.from(refresh.staleReasons) : []),
+    ]));
+    const status = refresh && staleReasons.length > 0
+        ? 'refreshing'
+        : staleReasons.length > 0
+            ? 'stale'
+            : manifest.status;
+    const refreshNote = status === 'refreshing'
+        ? 'Refresh: A background knowledge refresh is queued or running. This is not an expired package. Continue using unaffected evidence and call query_project_knowledge for the live status before deciding the pack is unusable.\n'
+        : '';
+    const reasonLabel = status === 'refreshing' ? 'Refresh reasons' : 'Stale reasons';
     const eventLogic = manifest.counts.eventLogic ?? 0;
     const stateFlowWarning = eventLogic === 0
         ? '\nWARNING: eventLogic=0 means no directed state facts (variables/flags/event targets) are indexed. If the design depends on state flow, do NOT treat an empty unresolvedCritical as settled: call query_project_knowledge with the involved IDs, or analyze_pdx_flow, and record any missing state evidence as unresolved before approval.'
@@ -696,7 +720,7 @@ export function buildProjectKnowledgePrompt(workspaceRoot: string): string {
     const syntheticDetail = manifest.counts.workspaceSyntheticDefinitions
         ? `, ${manifest.counts.workspaceSyntheticDefinitions} synthetic`
         : '';
-    return `<project-knowledge>\n# PROJECT KNOWLEDGE PACK\nStatus: ${staleReasons.length > 0 ? 'stale' : manifest.status}\nGame: ${manifest.game}\nGenerated: ${manifest.generatedAt}\nGraph version: ${manifest.graphVersion ?? 'unknown'}\nStorage: manifest + current SQLite V${PROJECT_KNOWLEDGE_SCHEMA_VERSION}\nDomains: ${manifest.domains.join(', ') || 'none'}\nDefinitions: ${manifest.counts.workspaceDefinitions ?? 0} workspace (${manifest.counts.workspaceDeclaredDefinitions ?? 'unknown'} declared${syntheticDetail}) + ${manifest.counts.vanillaDefinitions ?? 0} vanilla + ${manifest.counts.dependencyDefinitions ?? 0} dependency + ${manifest.counts.curatedDefinitions ?? 0} curated; topology: ${manifest.counts.topologyFiles} files / ${manifest.counts.topologyEdges} edges; typed graph: ${manifest.counts.eventNodes ?? 0} event nodes / ${manifest.counts.eventEdges ?? 0} directed edges / ${eventLogic} logic facts${stateFlowWarning}\n${staleReasons.length > 0 ? `Stale reasons: ${staleReasons.join(', ')}\n` : ''}Event IDs, numeric/source order, and missing incoming edges are never entry or causality evidence. For complex cross-subsystem planning, call query_project_knowledge before write_design_blueprint. Enumerate the involved TypeDefs and dependency families from the current semantic catalog, then load their project/vanilla patterns, typed topology, unresolved facts, and relevant graph slices. A blueprint must cite exact directed evidence and must not present unresolved critical facts as settled.\n</project-knowledge>\n`;
+    return `<project-knowledge>\n# PROJECT KNOWLEDGE PACK\nStatus: ${status}\n${refreshNote}Game: ${manifest.game}\nGenerated: ${manifest.generatedAt}\nGraph version: ${manifest.graphVersion ?? 'unknown'}\nStorage: manifest + current SQLite V${PROJECT_KNOWLEDGE_SCHEMA_VERSION}\nDomains: ${manifest.domains.join(', ') || 'none'}\nDefinitions: ${manifest.counts.workspaceDefinitions ?? 0} workspace (${manifest.counts.workspaceDeclaredDefinitions ?? 'unknown'} declared${syntheticDetail}) + ${manifest.counts.vanillaDefinitions ?? 0} vanilla + ${manifest.counts.dependencyDefinitions ?? 0} dependency + ${manifest.counts.curatedDefinitions ?? 0} curated; topology: ${manifest.counts.topologyFiles} files / ${manifest.counts.topologyEdges} edges; typed graph: ${manifest.counts.eventNodes ?? 0} event nodes / ${manifest.counts.eventEdges ?? 0} directed edges / ${eventLogic} logic facts${stateFlowWarning}\n${staleReasons.length > 0 ? `${reasonLabel}: ${staleReasons.join(', ')}\n` : ''}Event IDs, numeric/source order, and missing incoming edges are never entry or causality evidence. For complex cross-subsystem planning, call query_project_knowledge before write_design_blueprint. Enumerate the involved TypeDefs and dependency families from the current semantic catalog, then load their project/vanilla patterns, typed topology, unresolved facts, and relevant graph slices. A blueprint must cite exact directed evidence and must not present unresolved critical facts as settled.\n</project-knowledge>\n`;
 }
 
 const FULL_REFRESH_STALE_REASONS = new Set([
@@ -962,14 +986,19 @@ export function registerProjectKnowledgeWatcher(context: vs.ExtensionContext, in
         markProjectKnowledgeStale(ownerRoot, graphWideChange
             ? ['workspace_files_changed', 'graph_wide_inputs_changed']
             : ['workspace_files_changed']);
-        if (graphWideChange) return;
         const state = pendingRootRefresh(ownerRoot);
         // A real filesystem change starts a fresh bounded readiness window.
         // Automatic follow-ups do not reset this counter, so a model that stays
         // stale cannot create an endless polling loop.
         state.modelReadyRetryCount = 0;
-        state.changedFiles.add(path.resolve(uri.fsPath));
-        state.staleReasons.add('workspace_files_changed');
+        if (graphWideChange) {
+            state.fullRefresh = true;
+            state.staleReasons.add('workspace_files_changed');
+            state.staleReasons.add('graph_wide_inputs_changed');
+        } else {
+            state.changedFiles.add(path.resolve(uri.fsPath));
+            state.staleReasons.add('workspace_files_changed');
+        }
         scheduleRootRefresh(ownerRoot, indexService);
     };
     watcher.onDidChange(uri => {

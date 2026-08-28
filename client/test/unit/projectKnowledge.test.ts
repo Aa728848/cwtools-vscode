@@ -1021,7 +1021,7 @@ describe('project knowledge current SQLite schema', () => {
         expect(manifest.staleReasons).to.deep.equal([]);
     });
 
-    it('includes .shader and .fxh files in the fingerprint and marks watcher changes stale', async () => {
+    it('includes graph-wide files in the fingerprint and coalesces their changes into a full refresh', async () => {
         const shaderFile = path.join(workspaceRoot, 'gfx', 'FX', 'test.shader');
         const fxhFile = path.join(workspaceRoot, 'gfx', 'FX', 'test.fxh');
         fs.mkdirSync(path.dirname(shaderFile), { recursive: true });
@@ -1063,6 +1063,10 @@ describe('project knowledge current SQLite schema', () => {
         try {
             watcherStubs[0]!.change?.({ fsPath: shaderFile });
             watcherStubs[0]!.change?.({ fsPath: fxhFile });
+            const refreshingPrompt = projectKnowledge.buildProjectKnowledgePrompt(workspaceRoot);
+            expect(refreshingPrompt).to.include('Status: refreshing');
+            expect(refreshingPrompt).to.include('This is not an expired package.');
+            expect(refreshingPrompt).to.include('Refresh reasons: workspace_files_changed, graph_wide_inputs_changed');
             await clock.tickAsync(2000);
             await clock.runAllAsync();
         } finally {
@@ -1070,11 +1074,13 @@ describe('project knowledge current SQLite schema', () => {
             for (const disposable of context.subscriptions.reverse()) disposable.dispose();
         }
 
-        expect(commandCalls.filter(call => call.command === 'cwtools.ai.exportProjectKnowledge')).to.have.length(0);
-        expect(progressCalls).to.have.length(0);
+        const exports = commandCalls.filter(call => call.command === 'cwtools.ai.exportProjectKnowledge');
+        expect(exports).to.have.length(1);
+        expect(exports[0]!.args[0]).to.deep.include({ generationMode: 'full' });
+        expect(progressCalls).to.have.length(1);
+        expect(progressCalls[0]!.reports.some(report => report.message?.includes('Rebuilding the knowledge database'))).to.equal(true);
         const manifest = projectKnowledge.readProjectKnowledgeManifest(workspaceRoot)!;
-        expect(manifest.status).to.equal('stale');
-        expect(manifest.staleReasons).to.include('workspace_files_changed');
-        expect(manifest.staleReasons).to.include('graph_wide_inputs_changed');
+        expect(manifest.status).to.equal('ready');
+        expect(manifest.staleReasons).to.deep.equal([]);
     });
 });

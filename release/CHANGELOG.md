@@ -1,5 +1,36 @@
 # Changelog
 
+## [2.16.0] - 2026-08-28
+
+### 新功能 / New Features
+- **[新增] Inline Script 图依赖分析与传递扩展验证（Inline Script Graph Analysis & Verification）**：
+  - 在 F# 服务端中实现内联脚本（Inline Script）的依赖图分析、传递扩展（transitive expansions）解析、索引与结构化诊断（`InlineGraph.fs` 与 `ProjectKnowledge.fs`）。
+  - 支持对 inline script 调用关系进行拓扑分析与循环依赖检测，并在语言服务层输出精确的语法与语义诊断。
+  - English: [New] Inline script graph analysis and transitive expansion verification — implemented dependency graph analysis, transitive expansion resolution, indexing, and structured diagnostics for inline scripts in the F# backend (`InlineGraph.fs` and `ProjectKnowledge.fs`), supporting topological analysis and cycle detection with precise language server diagnostics.
+
+- **[新增] 全新 Agent Manager 面板与执行链路追踪（Agent Manager & Agent Trace Visualization）**：
+  - 推出全新的 Agent Manager 面板（`agentManager.ts`、`agentManager.css`），提供运行中 Agent 的实时执行拓扑、事件时间线与决策链路可视化追踪（`agentTrace.ts`）。
+  - 支持多 Agent 并行执行过程中的状态监控与详细检查卡片展示。
+  - English: [New] Agent Manager and agent trace visualization — introduced a new Agent Manager UI (`agentManager.ts`, `agentManager.css`) providing real-time execution topology, event timeline, and decision trace visualization (`agentTrace.ts`) for active sub-agents.
+
+- **[新增] Codex 配额展示与多 Provider 路由管理（Codex Quota Display & Multi-Provider Routing）**：
+  - AI 聊天面板集成 Codex 配额与活动状态实时展示（`codexQuota.ts`）。
+  - 模块化 Chat 设置，支持多 Provider 动态模型发现、请求超时隔离与灵活路由策略（`chatSettings.ts`、`aiService.ts`）。
+  - English: [New] Codex quota display and multi-provider routing — integrated real-time Codex quota and activity indicators in the AI chat panel (`codexQuota.ts`); modularized chat settings with dynamic multi-provider model discovery, request timeout isolation, and configurable routing policies.
+
+### 优化与重构 / Improvements & Refactoring
+- **[重构] AI 控制循环与工具系统精简重构（Agent Control Loop & Tool System Simplification）**：
+  - 大幅简化并解耦 AI 核心控制循环（`agentRunner.ts`），优化状态机流转与执行开销。
+  - 统一与精简工具注册表（`definitions.ts`、`registry.ts`、`lspTools.ts`、`fileTools.ts`、`memoryTools.ts`），规范工具执行安全策略（`runnerPolicy.ts`）。
+  - 强化死锁循环检测（`doomLoopDetector.ts`）与错误恢复协调（`recoveryCoordinator.ts`）。
+  - 改进大型工具结果归档时的工具状态保持机制，优化长上下文基线性能。
+  - English: [Improvement] Agent control loop simplification and tool system refactor — streamlined and modularized the core agent control loop (`agentRunner.ts`), reducing scheduling overhead; unified tool registries (`definitions.ts`, `registry.ts`, `lspTools.ts`, `fileTools.ts`, `memoryTools.ts`) and hardened runner policies (`runnerPolicy.ts`); strengthened doom loop detection (`doomLoopDetector.ts`) and recovery coordination (`recoveryCoordinator.ts`); preserved tool state during large result archiving.
+
+- **[优化] Language Server 规则加载与缓存管理（Rule Loading & Cache Management）**：
+  - 加固 `GameLoader.fs` 与 `Program.fs` 规则加载与版本探测逻辑，优化基于 Git 的规则缓存管理。
+  - 修复 CI 环境下的 lint 检查与 F# 测试程序集引用。
+  - English: [Improvement] Rule loading and cache management — hardened rule loading and version detection in `GameLoader.fs` and `Program.fs`; improved Git-based rule caching; resolved CI lint errors and F# test assembly references.
+
 ## [2.15.3] - 2026-08-25
 
 ### 新功能 / New Features

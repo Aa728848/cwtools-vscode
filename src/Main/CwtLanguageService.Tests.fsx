@@ -11,7 +11,8 @@
 // Failing assertions name the fixture, the expected diagnostic/code, and the
 // actual observation.
 
-#r "../../submodules/cwtools/artifacts/bin/CWTools/debug/CWTools.dll"
+#r "../../artifacts/bin/Main/debug/CWTools.dll"
+#r "../../artifacts/bin/Main/debug/FsPickler.dll"
 #r "../../artifacts/bin/Main/debug/FParsec.dll"
 #r "../../artifacts/bin/Main/debug/FParsecCS.dll"
 #r "../../artifacts/bin/Main/debug/CWTools Server.dll"

@@ -2217,7 +2217,7 @@ export class AgentRunner {
         terminalValidation?: TerminalValidationState,
         restoredStepRequests: readonly StepRequest[] = [],
     ): Promise<string> {
-        let schedulingState = normalizeSchedulingState(
+        const schedulingState = normalizeSchedulingState(
             options?.schedulingState,
             mode,
             options?.domain,

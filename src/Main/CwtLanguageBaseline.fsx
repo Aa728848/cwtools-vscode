@@ -11,7 +11,7 @@
 //
 // Output is a stable, sortable table so a later run can be diffed.
 
-#r "../../submodules/cwtools/artifacts/bin/CWTools/debug/CWTools.dll"
+#r "../../artifacts/bin/Main/debug/CWTools.dll"
 #r "../../artifacts/bin/Main/debug/FParsec.dll"
 #r "../../artifacts/bin/Main/debug/FParsecCS.dll"
 #r "../../artifacts/bin/Main/debug/CWTools Server.dll"

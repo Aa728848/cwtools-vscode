@@ -1039,8 +1039,8 @@ describe('agent tool file path safety', () => {
         const chinese = path.join(workspaceRoot, 'localisation', 'simp_chinese', 'auth_l_simp_chinese.yml');
         fs.mkdirSync(path.dirname(english), { recursive: true });
         fs.mkdirSync(path.dirname(chinese), { recursive: true });
-        fs.writeFileSync(english, '\uFEFFl_english:\n key:0 \"Old\"\n', 'utf8');
-        fs.writeFileSync(chinese, '\uFEFFl_simp_chinese:\n key:0 \"Old Chinese\"\n', 'utf8');
+        fs.writeFileSync(english, '\uFEFFl_english:\n key:0 "Old"\n', 'utf8');
+        fs.writeFileSync(chinese, '\uFEFFl_simp_chinese:\n key:0 "Old Chinese"\n', 'utf8');
         const context = makeContext();
         context.agentRunner = {
             readTracker: {

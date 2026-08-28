@@ -1917,8 +1917,8 @@ export interface WriteDesignBlueprintArgs {
     /** Executable DAG slices. Paradox/General Multi-Agent modes hydrate dispatch_agents from this plan. */
     taskPlan?: BlueprintTaskPlan[];
     riskRegister?: string[];
-    /** Critical knowledge gaps remaining after research. Non-empty values save a draft without an approval handoff. */
-    unresolvedCritical: string[];
+    /** Explicit blockers the model wants resolved before approval. Omission or an empty list submits the blueprint for approval. */
+    unresolvedCritical?: string[];
     notes?: string;
 }
 

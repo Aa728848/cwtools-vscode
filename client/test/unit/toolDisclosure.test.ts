@@ -56,7 +56,7 @@ describe('toolDisclosure', () => {
         expect(ctx.loaded.has('replace_lines')).to.equal(true);
     });
 
-    it('reveals the complete blueprint contract without a second helper tool', () => {
+    it('reveals advisory blueprint sections without nested completeness requirements', () => {
         const blueprint = TOOL_DEFINITIONS.find(tool => tool.function.name === 'write_design_blueprint')!;
         const ctx = context('plan', 'paradox');
         const selected = service.select(
@@ -68,7 +68,11 @@ describe('toolDisclosure', () => {
         const [revealed] = service.initialTools([blueprint], ctx);
 
         expect(selected.loaded).to.deep.equal(['write_design_blueprint']);
-        expect(revealed?.function.parameters.required).to.deep.equal(['title', 'unresolvedCritical']);
+        expect(revealed?.function.parameters.required).to.deep.equal(['title']);
+        const properties = revealed?.function.parameters.properties as Record<string, any>;
+        expect(properties.entities.items.required).to.equal(undefined);
+        expect(properties.featureManifest.required).to.equal(undefined);
+        expect(properties.taskPlan.items.required).to.equal(undefined);
         expect(JSON.stringify(revealed).length).to.be.greaterThan(1_500);
         expect(TOOL_DEFINITIONS.some(tool => tool.function.name === 'get_design_blueprint_contract')).to.equal(false);
     });

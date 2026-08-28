@@ -1962,24 +1962,12 @@ export class FileToolHandler {
     async writeDesignBlueprint(input: import('../types').WriteDesignBlueprintArgs | { blueprint: import('../types').WriteDesignBlueprintArgs }, context?: import('../types').AgentToolContext): Promise<import('../types').WriteDesignBlueprintResult> {
         try {
             const rawArgs = 'blueprint' in input ? input.blueprint : input;
-            const failBlueprint = (message: string): import('../types').WriteDesignBlueprintResult => ({
-                success: false,
-                approvalReady: false,
-                message,
-                filePath: '',
-            });
-            if (!String(rawArgs.title ?? '').trim()) {
-                return failBlueprint('Design blueprint refused: title is required.');
-            }
-            if (!Array.isArray(rawArgs.unresolvedCritical)) {
-                return failBlueprint('Design blueprint refused: unresolvedCritical must be an array. Use [] for an approval-ready plan or list exact blockers to save a draft.');
-            }
-            const unresolvedCritical = rawArgs.unresolvedCritical
+            const unresolvedCritical = (Array.isArray(rawArgs.unresolvedCritical) ? rawArgs.unresolvedCritical : [])
                 .map(item => String(item).trim())
                 .filter(Boolean);
             const args = {
                 ...rawArgs,
-                title: String(rawArgs.title).trim(),
+                title: String(rawArgs.title ?? '').trim() || 'Implementation Plan',
                 entities: Array.isArray(rawArgs.entities) ? rawArgs.entities : [],
                 commonDirectoryReview: Array.isArray(rawArgs.commonDirectoryReview) ? rawArgs.commonDirectoryReview : [],
                 subsystemPlan: Array.isArray(rawArgs.subsystemPlan) ? rawArgs.subsystemPlan : [],
@@ -2000,173 +1988,9 @@ export class FileToolHandler {
                 unresolvedCritical,
             };
             const approvalReady = unresolvedCritical.length === 0;
-            const hasItems = (value: unknown): value is unknown[] => Array.isArray(value) && value.length > 0;
-            if (approvalReady) {
-                const requiredSections: Array<[string, unknown]> = [
-                    ['entities', args.entities],
-                    ['evidence', args.evidence],
-                    ['featureManifest.entities', args.featureManifest.entities],
-                    ['featureManifest.acceptanceCriteria', args.featureManifest.acceptanceCriteria],
-                    ['taskPlan', args.taskPlan],
-                ];
-                const missingSections = requiredSections
-                    .filter(([, value]) => !hasItems(value))
-                    .map(([name]) => name);
-                if (missingSections.length > 0) {
-                    return failBlueprint(`Design blueprint refused: approval-ready plans still need: ${missingSections.join(', ')}. Add exact blockers to unresolvedCritical to save the current work as a draft instead.`);
-                }
-                if (!args.taskPlan.some(task => (task.plannedFiles?.length ?? 0) > 0)) {
-                    return failBlueprint('Design blueprint refused: an approval-ready taskPlan must name at least one exact planned file.');
-                }
-            }
 
-            if (approvalReady) {
-            const manifest = args.featureManifest;
-            if (!manifest.objective) {
-                return failBlueprint('Design blueprint refused: featureManifest.objective is required.');
-            }
-            const manifestEntityIds = new Set(manifest.entities.map(entity => entity.id.trim()).filter(Boolean));
-            const duplicateManifestEntities = manifest.entities
-                .map(entity => `${entity.kind}:${entity.id}:${entity.operation}`.toLowerCase())
-                .filter((key, index, all) => all.indexOf(key) !== index);
-            if (duplicateManifestEntities.length > 0) {
-                return failBlueprint(`Design blueprint refused: duplicate feature entity contracts: ${[...new Set(duplicateManifestEntities)].join(', ')}.`);
-            }
-            const invalidEdges = manifest.requiredEdges
-                .filter(edge => !manifestEntityIds.has(edge.from) || !manifestEntityIds.has(edge.to))
-                .map(edge => `${edge.from} --${edge.relation}--> ${edge.to}`);
-            if (invalidEdges.length > 0) {
-                return failBlueprint(`Design blueprint refused: every required edge endpoint must be declared in featureManifest.entities. Invalid edge(s): ${invalidEdges.join('; ')}.`);
-            }
-            const criterionIds = manifest.acceptanceCriteria.map(item => item.id.trim()).filter(Boolean);
-            if (new Set(criterionIds).size !== criterionIds.length) {
-                return failBlueprint('Design blueprint refused: acceptance criterion IDs must be unique.');
-            }
-
-            const taskIds = args.taskPlan.map(task => task.id.trim()).filter(Boolean);
-            if (new Set(taskIds).size !== taskIds.length) {
-                return failBlueprint('Design blueprint refused: taskPlan IDs must be non-empty and unique.');
-            }
-            const knownTaskIds = new Set(taskIds);
-            const invalidTaskDependencies = args.taskPlan.flatMap(task =>
-                task.dependencies.filter(dependency => !knownTaskIds.has(dependency)).map(dependency => `${task.id} -> ${dependency}`)
-            );
-            if (invalidTaskDependencies.length > 0) {
-                return failBlueprint(`Design blueprint refused: taskPlan contains missing dependencies: ${invalidTaskDependencies.join(', ')}.`);
-            }
-            const taskById = new Map(args.taskPlan.map(task => [task.id, task]));
-            const visitedTasks = new Set<string>();
-            const activeTasks = new Set<string>();
-            const visitTask = (taskId: string): boolean => {
-                if (activeTasks.has(taskId)) return true;
-                if (visitedTasks.has(taskId)) return false;
-                visitedTasks.add(taskId);
-                activeTasks.add(taskId);
-                const cyclic = (taskById.get(taskId)?.dependencies ?? []).some(visitTask);
-                activeTasks.delete(taskId);
-                return cyclic;
-            };
-            if (taskIds.some(visitTask)) {
-                return failBlueprint('Design blueprint refused: taskPlan contains a dependency cycle.');
-            }
-            const orphanLocTasks = args.taskPlan
-                .filter(task => task.profileName === 'localization-writer'
-                    && task.produces?.some(contract => contract.kind === 'localisation')
-                    && !task.consumes?.some(contract => contract.kind !== 'localisation'))
-                .map(task => task.id);
-            if (orphanLocTasks.length > 0) {
-                return failBlueprint(`Design blueprint refused: localisation tasks must consume their owning event/object entity: ${orphanLocTasks.join(', ')}.`);
-            }
-            const assignedContractKeys = new Set(args.taskPlan.flatMap(task => [
-                ...(task.produces ?? []),
-                ...(task.consumes ?? []),
-            ]).map(contract => `${contract.kind}:${contract.id}:${contract.operation}`.toLowerCase()));
-            const unassignedContracts = manifest.entities
-                .filter(contract => contract.required !== false
-                    && !assignedContractKeys.has(`${contract.kind}:${contract.id}:${contract.operation}`.toLowerCase()))
-                .map(contract => `${contract.kind}:${contract.id}:${contract.operation}`);
-            if (unassignedContracts.length > 0) {
-                return failBlueprint(`Design blueprint refused: required feature contracts are not assigned to taskPlan nodes: ${unassignedContracts.join(', ')}.`);
-            }
-            const producersByEntity = new Map<string, string[]>();
-            for (const task of args.taskPlan) {
-                for (const contract of task.produces ?? []) {
-                    const key = `${contract.kind}:${contract.id}`.toLowerCase();
-                    producersByEntity.set(key, [...(producersByEntity.get(key) ?? []), task.id]);
-                }
-            }
-            const missingDataFlowDependencies: string[] = [];
-            const dependsOnTask = (taskId: string, dependencyId: string, seen = new Set<string>()): boolean => {
-                if (seen.has(taskId)) return false;
-                seen.add(taskId);
-                return (taskById.get(taskId)?.dependencies ?? []).some(dependency =>
-                    dependency === dependencyId || dependsOnTask(dependency, dependencyId, seen));
-            };
-            for (const task of args.taskPlan) {
-                for (const contract of task.consumes ?? []) {
-                    const producers = producersByEntity.get(`${contract.kind}:${contract.id}`.toLowerCase()) ?? [];
-                    for (const producer of producers) {
-                        if (producer !== task.id && !dependsOnTask(task.id, producer)) {
-                            missingDataFlowDependencies.push(`${task.id} consumes ${contract.kind}:${contract.id} but does not depend on ${producer}`);
-                        }
-                    }
-                }
-            }
-            if (missingDataFlowDependencies.length > 0) {
-                return failBlueprint(`Design blueprint refused: task DAG does not encode entity data flow: ${missingDataFlowDependencies.join('; ')}.`);
-            }
-
-            const commonReview = args.commonDirectoryReview;
-            const commonWithoutFindings = commonReview
-                .filter(item => !String(item.findings ?? '').trim())
-                .map(item => item.directory);
-            if (commonWithoutFindings.length > 0) {
-                return failBlueprint(`Design blueprint refused: commonDirectoryReview entries need concrete CWT/project/vanilla findings. Missing findings for: ${commonWithoutFindings.join(', ')}.`);
-            }
-
-            const entitiesMissingScope = args.entities
-                .filter(entity => !String(entity.scopeContext ?? '').trim())
-                .map(entity => entity.id);
-            if (entitiesMissingScope.length > 0) {
-                return failBlueprint(`Design blueprint refused: every entity needs a scopeContext, even if it is "definition/no runtime scope". Missing scopeContext for: ${entitiesMissingScope.join(', ')}.`);
-            }
-
-            const rewardWithoutImplementation = args.rewardPlan
-                .filter(reward => !String(reward.directory ?? '').trim() || !String(reward.entityType ?? '').trim() || !String(reward.implementation ?? '').trim())
-                .map(reward => reward.rewardId);
-            if (rewardWithoutImplementation.length > 0) {
-                return failBlueprint(`Design blueprint refused: every reward must name a concrete directory/entity type and implementation path. Incomplete reward(s): ${rewardWithoutImplementation.join(', ')}.`);
-            }
-
-            const cleanupWithoutMechanism = args.cleanupPlan
-                .filter(item => !String(item.cleanup ?? '').trim())
-                .map(item => item.target);
-            if (cleanupWithoutMechanism.length > 0) {
-                return failBlueprint(`Design blueprint refused: cleanupPlan entries need exact cleanup or closure mechanisms. Missing cleanup for: ${cleanupWithoutMechanism.join(', ')}.`);
-            }
-
-            const evidence = args.evidence;
-            const evidenceText = evidence
-                .map(item => `${item.sourceType} ${item.source} ${item.insight}`)
-                .join('\n')
-                .toLowerCase();
-            const hasCwtEvidence = /(cwt|lsp|query_rules|query_scope|query_types|scope|rule)/.test(evidenceText);
-            if (!hasCwtEvidence) {
-                return failBlueprint('Design blueprint refused: evidence must include at least one CWT/LSP or typed-rule verification source.');
-            }
-            const complexBlueprint = args.entities.length >= 3 || args.subsystemPlan.length >= 2;
-            if (complexBlueprint) {
-                const evidenceKinds = evidence.map(item => `${item.sourceType} ${item.source}`.toLowerCase());
-                const hasKnowledge = evidenceKinds.some(value => value.includes('project_knowledge') || value.includes('query_project_knowledge') || value.includes('.cwtools/project/knowledge'));
-                const hasVanilla = evidenceKinds.some(value => value.includes('vanilla'));
-                if (!hasKnowledge && !hasVanilla) {
-                    return failBlueprint('Design blueprint refused: complex plans must cite current project knowledge or a bounded vanilla archetype.');
-                }
-            }
-            }
-
-            // Keep one canonical, topic-scoped plan artifact. The executable blueprint
-            // contract is embedded in the Markdown instead of drifting into sidecar files.
+            // Keep one canonical, topic-scoped plan artifact. Its optional structured
+            // payload stays embedded in the Markdown instead of drifting into sidecars.
             const topicId = context?.runnerOptions?.topicId || 'default';
             const blueprintDir = getPrivateTopicStorageDir(topicId, this.ctx.workspaceRoot);
             if (!fs.existsSync(blueprintDir)) fs.mkdirSync(blueprintDir, { recursive: true });
@@ -2180,17 +2004,19 @@ export class FileToolHandler {
             lines.push(`> Generated: ${new Date().toISOString()}`);
             lines.push('');
 
-            lines.push('## Blueprint Completeness Gate');
+            lines.push('## Blueprint Self-Check (Advisory)');
             lines.push('');
-            const gate = (complete: boolean, label: string) => lines.push(`- [${complete ? 'x' : ' '}] ${label}`);
-            gate(args.entities.length > 0, 'Entity topology is present');
-            gate(args.evidence.length > 0, 'Semantic evidence is present');
-            gate(args.featureManifest.entities.length > 0 && args.featureManifest.acceptanceCriteria.length > 0,
-                'Feature manifest defines entity operations and acceptance criteria');
-            gate(args.taskPlan.length > 0, 'Execution task plan is present');
+            lines.push('These sections are optional authoring aids; omitted sections do not block approval.');
+            lines.push('');
+            const advisory = (included: boolean, label: string) => lines.push(`- ${label}: ${included ? 'included' : 'not supplied (optional)'}`);
+            advisory(args.entities.length > 0, 'Entity topology');
+            advisory(args.evidence.length > 0, 'Semantic evidence');
+            advisory(args.featureManifest.entities.length > 0 || args.featureManifest.acceptanceCriteria.length > 0,
+                'Feature manifest');
+            advisory(args.taskPlan.length > 0, 'Execution task plan');
             lines.push(approvalReady
-                ? '- [x] No design-changing facts remain unresolved'
-                : `- [ ] ${unresolvedCritical.length} design-changing fact(s) remain unresolved; approval handoff is withheld`);
+                ? '- Explicit blockers: none; submit for approval'
+                : `- Explicit blockers: ${unresolvedCritical.length}; this version stays a draft`);
             lines.push('');
 
             if (unresolvedCritical.length > 0) {
@@ -2230,84 +2056,97 @@ export class FileToolHandler {
                 lines.push('');
             }
 
-            // Entity Topology Map
-            lines.push('## Entity Topology (Cascading Trigger Pipeline)');
-            lines.push('');
-            lines.push('| # | Entity ID | Type | File | Triggered By | Fires | Scope Context |');
-            lines.push('|---|-----------|------|------|-------------|-------|---------------|');
-            for (let i = 0; i < args.entities.length; i++) {
-                const e = args.entities[i]!;
-                const fires = listCell(e.fires);
-                const triggeredBy = cell(e.triggeredBy);
-                const scope = cell(e.scopeContext);
-                lines.push(`| ${i + 1} | \`${cell(e.id)}\` | ${cell(e.type)} | \`${cell(e.file)}\` | ${triggeredBy} | ${fires} | ${scope} |`);
-            }
-            lines.push('');
+            if (args.entities.length > 0) {
+                lines.push('## Entity Topology (Cascading Trigger Pipeline)');
+                lines.push('');
+                lines.push('| # | Entity ID | Type | File | Triggered By | Fires | Scope Context |');
+                lines.push('|---|-----------|------|------|-------------|-------|---------------|');
+                for (let i = 0; i < args.entities.length; i++) {
+                    const e = args.entities[i]!;
+                    const fires = listCell(e.fires);
+                    const triggeredBy = cell(e.triggeredBy);
+                    const scope = cell(e.scopeContext);
+                    lines.push(`| ${i + 1} | \`${cell(e.id)}\` | ${cell(e.type)} | \`${cell(e.file)}\` | ${triggeredBy} | ${fires} | ${scope} |`);
+                }
+                lines.push('');
 
-            // Trigger flow visualization
-            lines.push('### Trigger Flow');
-            lines.push('```');
-            for (let i = 0; i < args.entities.length; i++) {
-                const e = args.entities[i]!;
-                const prefix = i === 0 ? '[START]' : '  ->';
-                const scopeNote = e.scopeContext ? ` (${e.scopeContext})` : '';
-                lines.push(`${prefix} [${e.type}] ${e.id}${scopeNote}`);
-                if (e.fires && e.fires.length > 0) {
-                    for (const target of e.fires) {
-                        lines.push(`      +-- fires -> ${target}`);
+                lines.push('### Trigger Flow');
+                lines.push('```');
+                for (let i = 0; i < args.entities.length; i++) {
+                    const e = args.entities[i]!;
+                    const prefix = i === 0 ? '[START]' : '  ->';
+                    const scopeNote = e.scopeContext ? ` (${e.scopeContext})` : '';
+                    lines.push(`${prefix} [${e.type}] ${e.id}${scopeNote}`);
+                    if (e.fires && e.fires.length > 0) {
+                        for (const target of e.fires) lines.push(`      +-- fires -> ${target}`);
                     }
                 }
-            }
-            lines.push('```');
-            lines.push('');
-
-            lines.push('## Executable Feature Relationship Contract');
-            lines.push('');
-            lines.push(`**Objective:** ${cell(args.featureManifest.objective)}`);
-            lines.push('');
-            lines.push('### Entity Operations');
-            lines.push('');
-            lines.push('| Kind | Entity | Operation | Scope | Required |');
-            lines.push('|------|--------|-----------|-------|----------|');
-            for (const contract of args.featureManifest.entities ?? []) {
-                lines.push(`| ${cell(contract.kind)} | \`${cell(contract.id)}\` | ${cell(contract.operation)} | ${cell(contract.scope)} | ${contract.required === false ? 'no' : 'yes'} |`);
-            }
-            lines.push('');
-            lines.push('### Required Edges');
-            lines.push('');
-            lines.push('| From | Relation | To | Required |');
-            lines.push('|------|----------|----|----------|');
-            for (const edge of args.featureManifest.requiredEdges ?? []) {
-                lines.push(`| \`${cell(edge.from)}\` | ${cell(edge.relation)} | \`${cell(edge.to)}\` | ${edge.required === false ? 'no' : 'yes'} |`);
-            }
-            lines.push('');
-            if ((args.featureManifest.invariants?.length ?? 0) > 0) {
-                lines.push('### Invariants');
-                lines.push('');
-                for (const invariant of args.featureManifest.invariants ?? []) lines.push(`- ${cell(invariant)}`);
+                lines.push('```');
                 lines.push('');
             }
-            lines.push('### Acceptance Criteria');
-            lines.push('');
-            lines.push('| ID | Type | Subject | Required | Description |');
-            lines.push('|----|------|---------|----------|-------------|');
-            for (const check of args.featureManifest.acceptanceCriteria ?? []) {
-                lines.push(`| \`${cell(check.id)}\` | ${cell(check.type)} | \`${cell(check.subject)}\` | ${check.required === false ? 'no' : 'yes'} | ${cell(check.description)} |`);
-            }
-            lines.push('');
 
-            lines.push(approvalReady
-                ? '## Approved Multi-Agent Task DAG'
-                : '## Draft Multi-Agent Task DAG');
-            lines.push('');
-            lines.push('| Task | Agent | Planned Files | Produces | Consumes | Dependencies | Acceptance Checks |');
-            lines.push('|------|-------|---------------|----------|----------|--------------|-------------------|');
-            const contractCell = (contracts?: import('../types').TaskEntityContract[]) =>
-                contracts?.map(contract => `${contract.kind}:${contract.id}:${contract.operation}`).join(', ') || '-';
-            for (const task of args.taskPlan) {
-                lines.push(`| \`${cell(task.id)}\` | ${cell(task.profileName)} | ${listCell(task.plannedFiles)} | ${cell(contractCell(task.produces))} | ${cell(contractCell(task.consumes))} | ${listCell(task.dependencies)} | ${listCell(task.acceptanceChecks?.map(check => check.id))} |`);
+            const hasFeatureManifest = !!args.featureManifest.objective
+                || args.featureManifest.entities.length > 0
+                || args.featureManifest.requiredEdges.length > 0
+                || (args.featureManifest.invariants?.length ?? 0) > 0
+                || args.featureManifest.acceptanceCriteria.length > 0;
+            if (hasFeatureManifest) {
+                lines.push('## Executable Feature Relationship Contract');
+                lines.push('');
+                lines.push(`**Objective:** ${cell(args.featureManifest.objective)}`);
+                lines.push('');
+                if (args.featureManifest.entities.length > 0) {
+                    lines.push('### Entity Operations');
+                    lines.push('');
+                    lines.push('| Kind | Entity | Operation | Scope | Required |');
+                    lines.push('|------|--------|-----------|-------|----------|');
+                    for (const contract of args.featureManifest.entities) {
+                        lines.push(`| ${cell(contract.kind)} | \`${cell(contract.id)}\` | ${cell(contract.operation)} | ${cell(contract.scope)} | ${contract.required === false ? 'no' : 'yes'} |`);
+                    }
+                    lines.push('');
+                }
+                if (args.featureManifest.requiredEdges.length > 0) {
+                    lines.push('### Required Edges');
+                    lines.push('');
+                    lines.push('| From | Relation | To | Required |');
+                    lines.push('|------|----------|----|----------|');
+                    for (const edge of args.featureManifest.requiredEdges) {
+                        lines.push(`| \`${cell(edge.from)}\` | ${cell(edge.relation)} | \`${cell(edge.to)}\` | ${edge.required === false ? 'no' : 'yes'} |`);
+                    }
+                    lines.push('');
+                }
+                if ((args.featureManifest.invariants?.length ?? 0) > 0) {
+                    lines.push('### Invariants');
+                    lines.push('');
+                    for (const invariant of args.featureManifest.invariants ?? []) lines.push(`- ${cell(invariant)}`);
+                    lines.push('');
+                }
+                if (args.featureManifest.acceptanceCriteria.length > 0) {
+                    lines.push('### Acceptance Criteria');
+                    lines.push('');
+                    lines.push('| ID | Type | Subject | Required | Description |');
+                    lines.push('|----|------|---------|----------|-------------|');
+                    for (const check of args.featureManifest.acceptanceCriteria) {
+                        lines.push(`| \`${cell(check.id)}\` | ${cell(check.type)} | \`${cell(check.subject)}\` | ${check.required === false ? 'no' : 'yes'} | ${cell(check.description)} |`);
+                    }
+                    lines.push('');
+                }
             }
-            lines.push('');
+
+            if (args.taskPlan.length > 0) {
+                lines.push(approvalReady
+                    ? '## Approved Multi-Agent Task DAG'
+                    : '## Draft Multi-Agent Task DAG');
+                lines.push('');
+                lines.push('| Task | Agent | Planned Files | Produces | Consumes | Dependencies | Acceptance Checks |');
+                lines.push('|------|-------|---------------|----------|----------|--------------|-------------------|');
+                const contractCell = (contracts?: import('../types').TaskEntityContract[]) =>
+                    contracts?.map(contract => `${contract.kind}:${contract.id}:${contract.operation}`).join(', ') || '-';
+                for (const task of args.taskPlan) {
+                    lines.push(`| \`${cell(task.id)}\` | ${cell(task.profileName)} | ${listCell(task.plannedFiles)} | ${cell(contractCell(task.produces))} | ${cell(contractCell(task.consumes))} | ${listCell(task.dependencies)} | ${listCell(task.acceptanceChecks?.map(check => check.id))} |`);
+                }
+                lines.push('');
+            }
 
             // Trigger and pacing plan
             if (args.triggerPlan && args.triggerPlan.length > 0) {
@@ -2364,13 +2203,14 @@ export class FileToolHandler {
                 lines.push('');
             }
 
-            // Dependency Order
-            lines.push('## File Dependency Order (Write Sequence)');
-            lines.push('');
-            for (let i = 0; i < args.dependencyOrder.length; i++) {
-                lines.push(`${i + 1}. \`${args.dependencyOrder[i]}\``);
+            if (args.dependencyOrder.length > 0) {
+                lines.push('## File Dependency Order (Write Sequence)');
+                lines.push('');
+                for (let i = 0; i < args.dependencyOrder.length; i++) {
+                    lines.push(`${i + 1}. \`${args.dependencyOrder[i]}\``);
+                }
+                lines.push('');
             }
-            lines.push('');
 
             // Cleanup and lifecycle closure plan
             if (args.cleanupPlan && args.cleanupPlan.length > 0) {
@@ -2414,22 +2254,18 @@ export class FileToolHandler {
                 lines.push('');
             }
 
-            // Scope Chain Verification Checklist
-            lines.push('## Scope Chain Verification Checklist');
-            lines.push('');
-            lines.push('Warning: Before Build phase, verify each entity\'s scope matches CWT rules:');
-            lines.push('');
-            // Entity-specific scope facts must come from active CWT/LSP, not this template.
-            const entityTypes = Array.from(new Set(args.entities.map(e => e.type))).filter((type): type is string => !!type);
-            if (entityTypes.length > 0) {
-                lines.push(`- [ ] Verified scope contexts for entity type(s): ${entityTypes.join(', ')}`);
+            if (args.entities.length > 0) {
+                lines.push('## Scope Chain Verification Suggestions');
+                lines.push('');
+                const entityTypes = Array.from(new Set(args.entities.map(e => e.type))).filter((type): type is string => !!type);
+                if (entityTypes.length > 0) {
+                    lines.push(`- Verify scope contexts for entity type(s): ${entityTypes.join(', ')}`);
+                }
+                lines.push('- Verify trigger/event context with active CWT/LSP evidence or a current-version archetype where scope matters');
+                lines.push('- Check cross-scope references and persistence mechanisms used by the selected design');
+                lines.push('- Keep entity IDs unique and aligned with project namespace conventions');
+                lines.push('');
             }
-            lines.push('- [ ] Verified trigger/event context with query_scope, query_rules, query_cwt_schema, completions, diagnostics, or a current-version archetype');
-            lines.push('- [ ] Recorded evidence for every scope bridge and did not fill scope facts from static prompt memory');
-            // Always add cross-scope persistence check without prescribing game-specific scope facts.
-            lines.push('- [ ] Cross-scope references and persistence mechanisms are verified against active CWT/LSP evidence');
-            lines.push('- [ ] All entity IDs are unique and follow project namespace conventions');
-            lines.push('');
 
             const executableBlueprint = {
                 schemaVersion: 2,
@@ -2488,8 +2324,8 @@ export class FileToolHandler {
                 success: true,
                 approvalReady,
                 message: approvalReady
-                    ? `Unified Implementation Plan saved to ${blueprintPath}. It contains the human-readable design, approval handoff, and executable Multi-Agent contract.`
-                    : `Blueprint draft saved to ${blueprintPath}. Resolve ${unresolvedCritical.length} critical decision(s), then write it again with unresolvedCritical: [] to create the approval handoff.`,
+                    ? `Unified Implementation Plan saved to ${blueprintPath} and submitted for approval. Blueprint sections are advisory; the host did not reject the model's design on semantic completeness.`
+                    : `Blueprint draft saved to ${blueprintPath} with ${unresolvedCritical.length} explicit blocker(s).`,
                 filePath: blueprintPath,
                 dataFilePath: blueprintPath,
                 writtenFiles: [blueprintPath],

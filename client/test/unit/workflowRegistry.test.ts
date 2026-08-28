@@ -97,12 +97,16 @@ describe('AI Workflow Registry', () => {
         }
     });
 
-    it('event-chain-design includes common review and reward planning gates', () => {
+    it('event-chain-design keeps common review and reward planning advisory', () => {
         const wf = getWorkflow('event-chain-design')!;
         expect(wf.phases.map(p => p.id)).to.include.members(['common-review', 'rewards']);
         expect(wf.verification.map(v => v.id)).to.include.members(['common-review-written', 'reward-plan-written', 'blueprint-written']);
+        expect(wf.verification.find(v => v.id === 'common-review-written')?.required).to.equal(false);
+        expect(wf.verification.find(v => v.id === 'reward-plan-written')?.required).to.equal(false);
+        expect(wf.verification.find(v => v.id === 'blueprint-written')?.required).to.equal(true);
         expect(wf.promptSupplement).to.include('common/');
         expect(wf.promptSupplement).to.include('concrete common entity families');
+        expect(wf.promptSupplement).to.include('not approval gates');
     });
 
     // ── Rules Sync Review Workflow ──────────────────────────────────────

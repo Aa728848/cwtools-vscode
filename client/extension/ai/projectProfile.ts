@@ -464,7 +464,7 @@ function buildGuidanceCards(profile: Omit<ProjectProfile, 'guidanceCards' | 'eff
         ].join('\n'),
         planning: [
             'Planning guidance:',
-            '- For complex pipelines, query_project_knowledge must establish project patterns, vanilla archetypes, topology, override evidence, and unresolved facts before blueprint approval.',
+            '- For complex pipelines, query_project_knowledge can supply project patterns, vanilla archetypes, topology, override evidence, and unresolved facts when they materially improve the blueprint.',
             `- Study existing patterns in: ${keyDirs}.`,
             '- Enumerate current TypeDefs and relevant project-graph dependency families before approving a complex pipeline; record only candidates that materially affected the design.',
             '- Use exact vanilla archetypes before inventing cross-type calls or scope flows.',

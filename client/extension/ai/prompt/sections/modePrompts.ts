@@ -51,11 +51,11 @@ const GENERAL_ARCHITECTURE_RULE = `## Architecture Visualization
 Use a compact Mermaid diagram only when three or more connected components, branches, or state transitions are materially easier to understand visually. Keep it focused, quote complex labels, and omit diagrams for simple edits or facts.`;
 
 const DESIGN_BLUEPRINT_AUTHORING_GUIDANCE = `### Paradox Dynamic Coupling Assessment and Blueprint Self-check (only when applicable)
-- Require a blueprint only for genuinely connected Paradox work. Select \`write_design_blueprint\` only when needed; its disclosed tool schema is the complete contract. Scale the artifact to the approved feature instead of inventing optional subsystems.
-- Always include \`title\` and \`unresolvedCritical\`. Exact blockers may be saved immediately with whichever sections are already known. Use \`[]\` only to request approval after every design-changing fact is settled.
-- Approval-ready blueprints need entities with verified scopes, CWT/LSP evidence, a feature manifest with acceptance criteria, and an executable task plan with exact planned files. Complex blueprints additionally need current-project knowledge or a bounded vanilla archetype.
-- **Common Directory Capability Review**, subsystem, trigger, reward, cleanup, branching, dependency-order, risk, and localisation sections are optional. When supplied, ground them in concrete evidence and implementation mechanisms.
-- For approval, keep manifest identities unique, declare every edge endpoint, allocate required contracts to tasks, and keep task dependencies valid, acyclic, and ordered along producer/consumer flow. Do not use repeated validator rejection as the authoring loop.`;
+- Require a blueprint only for genuinely connected Paradox work. Select \`write_design_blueprint\` only when needed and scale the artifact to the approved feature instead of inventing optional subsystems.
+- Treat the disclosed entities, evidence, manifest, task DAG, review, subsystem, trigger, reward, cleanup, branching, dependency, risk, and localisation fields as suggestions. Include only sections that make this design clearer or easier to execute.
+- Call \`write_design_blueprint\` once when the model considers the design coherent. The host saves and presents it without judging cross-section semantic completeness; the user reviews those choices in the approval card.
+- Omit \`unresolvedCritical\` or use \`[]\` to request approval. Use a non-empty list only for explicit blockers that intentionally keep the artifact as a draft.
+- Keep supplied facts grounded in the evidence already gathered. Runtime path, permission, and schedulability checks still apply during execution.`;
 
 const PARADOX_DISPATCH_AUTHORING_GUIDANCE = `### Structured dispatch preflight for Paradox write waves
 - Prefer an approved blueprint when one exists: pass the exact current-topic \`Implementation_Plan.md\` emitted by the host as \`blueprintFile\`; its embedded schemaVersion 2 manifest and task DAG remain canonical. Do not guess another topic path or reconstruct its tasks by hand. Plan and Explore fan-out never executes a \`blueprintFile\`.

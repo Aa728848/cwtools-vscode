@@ -68,9 +68,9 @@ describe('PromptBuilder 快照与稳定性测试', () => {
         expect(prompt).to.include('Clarification BEFORE Planning Phase');
         expect(prompt).to.include('write_design_blueprint');
         expect(prompt).to.include('Dynamic Coupling Assessment');
-        expect(prompt).to.include('Common Directory Capability Review');
-        expect(prompt).to.include('sections are optional');
-        expect(prompt).to.include('Exact blockers may be saved immediately');
+        expect(prompt).to.include('fields as suggestions');
+        expect(prompt).to.include('Include only sections');
+        expect(prompt).to.include('Call `write_design_blueprint` once');
         expect(prompt).to.include('ordinary software engineering or Paradox/CWTools work');
         expect(prompt).to.include('ordinary code');
         expect(prompt).to.include('final design authority');
@@ -87,7 +87,7 @@ describe('PromptBuilder 快照与稳定性测试', () => {
 
         expect(prompt).to.include('current workspace');
         expect(prompt).to.include('query active CWT/LSP');
-        expect(prompt).to.include('Common Directory Capability Review');
+        expect(prompt).to.include('fields as suggestions');
         expect(prompt).to.not.include('intentionally contains no game-version rule tables');
         expect(prompt).to.not.include('Stellaris common/ Design Space Review');
         expect(prompt).to.not.include('common/pop_faction_types');
@@ -195,19 +195,16 @@ describe('PromptBuilder 快照与稳定性测试', () => {
         expect(paradoxPlan).to.include('write_design_blueprint');
     });
 
-    it('requires plan mode to design executable entity relationships before approval', () => {
+    it('treats blueprint structure as model guidance instead of a host completeness gate', () => {
         const { PromptBuilder } = loadPromptBuilder();
         const builder = new PromptBuilder(process.cwd());
         const prompt = builder.buildSystemPromptForMode('plan', undefined, undefined, undefined, undefined, undefined, true, true, 'paradox');
 
         expect(prompt).to.include('Blueprint Self-check');
-        expect(prompt).to.include('disclosed tool schema is the complete contract');
-        expect(prompt).to.include('Exact blockers may be saved immediately');
-        expect(prompt).to.include('Approval-ready blueprints need entities with verified scopes');
-        expect(prompt).to.include('feature manifest with acceptance criteria');
-        expect(prompt).to.include('task plan with exact planned files');
-        expect(prompt).to.include('sections are optional');
-        expect(prompt).to.include('ordered along producer/consumer flow');
+        expect(prompt).to.include('fields as suggestions');
+        expect(prompt).to.include('host saves and presents it without judging cross-section semantic completeness');
+        expect(prompt).to.include('Omit `unresolvedCritical` or use `[]` to request approval');
+        expect(prompt).to.include('Runtime path, permission, and schedulability checks still apply');
         expect(prompt).to.include('STOP and wait for user approval');
         expect(prompt).to.include('Do not defer any design work until after approval');
     });

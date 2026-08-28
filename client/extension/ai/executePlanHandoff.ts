@@ -102,8 +102,8 @@ export function isCompleteImplementationPlanWrite(
         const blueprint = args.blueprint && typeof args.blueprint === 'object' && !Array.isArray(args.blueprint)
             ? args.blueprint as Record<string, unknown>
             : args;
-        return Array.isArray(blueprint.unresolvedCritical)
-            && blueprint.unresolvedCritical.length === 0;
+        return blueprint.unresolvedCritical === undefined
+            || (Array.isArray(blueprint.unresolvedCritical) && blueprint.unresolvedCritical.length === 0);
     }
     if (toolName !== 'write_file' || typeof args.content !== 'string') return false;
     const targets = targetPaths.length > 0
@@ -392,6 +392,20 @@ export function shouldRenderInteractivePlan(
     },
 ): boolean {
     const toolCalls = result.steps.filter(step => step.type === 'tool_call' && typeof step.toolName === 'string');
+    const approvalReadyBlueprintInvocations = new Set(result.steps
+        .filter(step => step.type === 'tool_result'
+            && step.toolName === 'write_design_blueprint'
+            && typeof step.invocationId === 'string'
+            && step.toolResult
+            && typeof step.toolResult === 'object'
+            && !Array.isArray(step.toolResult)
+            && (step.toolResult as Record<string, unknown>).success !== false
+            && (step.toolResult as Record<string, unknown>).approvalReady === true)
+        .map(step => step.invocationId as string));
+    const wroteApprovalReadyBlueprint = toolCalls.some(step =>
+        step.toolName === 'write_design_blueprint'
+        && typeof step.invocationId === 'string'
+        && approvalReadyBlueprintInvocations.has(step.invocationId));
     const wrotePlanArtifact = context.hasCurrentPlanArtifact ?? hasImplementationPlanArtifact(result.steps);
     const wroteProjectFile = toolCalls.some(step => !NON_PROJECT_WRITE_TOOLS.has(String(step.toolName))
         && WRITE_TOOLS.has(step.toolName as any)
@@ -399,6 +413,7 @@ export function shouldRenderInteractivePlan(
     if (wroteProjectFile) return false;
     if (context.approvedPlanExecution) return false;
     if (context.mode !== 'plan' && !EXECUTE_HANDOFF_MODES.has(context.mode)) return false;
+    if (wroteApprovalReadyBlueprint && wrotePlanArtifact) return true;
 
     const planText = context.planText ?? (context.mode === 'plan' ? result.explanation : '');
     return (context.mode === 'plan' || wrotePlanArtifact || shouldPauseForInteractivePlan(planText, context))

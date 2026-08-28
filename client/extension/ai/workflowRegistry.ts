@@ -336,21 +336,21 @@ registerWorkflow({
 	verification: [
 		{
 			id: 'common-review-written',
-			description: 'The blueprint records common/ directories considered, selected, and rejected with rationale.',
-			required: true,
+			description: 'When useful, the blueprint records material common/ directory alternatives and rationale.',
+			required: false,
 		},
 		{
 			id: 'reward-plan-written',
-			description: 'The blueprint maps rewards and outcomes to concrete common entity families.',
-			required: true,
+			description: 'When useful, the blueprint maps rewards and outcomes to concrete common entity families.',
+			required: false,
 		},
 		{
 			id: 'blueprint-written',
-			description: 'A design_blueprint.md has been created in the topic directory.',
+			description: 'Implementation_Plan.md has been saved in the topic directory.',
 			required: true,
 		},
 	],
-	promptSupplement: `You are running in the **Event Chain Design Workflow**. Follow the Deep Archetype Study (Rule 0c), Common Directory Capability Review, and Blueprint Architecture (Step 3) protocols strictly. The final blueprint must show which current-game common/ directories were considered, which are selected, why unused candidates are rejected, and how rewards/outcomes are implemented through concrete common entity families.`,
+	promptSupplement: `You are running in the **Event Chain Design Workflow**. Use the Deep Archetype Study (Rule 0c), Common Directory Capability Review, and Blueprint Architecture (Step 3) as authoring guidance. Include current-game common/ directory alternatives, rejected candidates, and concrete common entity families for rewards/outcomes only when they materially explain the chosen design; these sections are not approval gates.`,
 });
 
 // ── Rules Sync Review Workflow ───────────────────────────────────────────────

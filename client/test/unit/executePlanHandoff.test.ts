@@ -102,6 +102,19 @@ describe('Execute-to-Plan handoff', () => {
         })).to.equal(true);
     });
 
+    it('renders a blueprint submitted by the model without re-validating advisory sections', () => {
+        const invocationId = 'blueprint-1';
+        const steps: AgentStep[] = [
+            { type: 'tool_call', toolName: 'write_design_blueprint', toolArgs: { title: 'Sparse plan' }, content: '', timestamp: 1, invocationId },
+            { type: 'tool_result', toolName: 'write_design_blueprint', toolResult: { success: true, approvalReady: true }, content: '', timestamp: 2, invocationId },
+        ];
+        expect(shouldRenderInteractivePlan({ explanation: '', steps }, {
+            mode: 'plan',
+            planText: '# Sparse model-authored plan',
+            hasCurrentPlanArtifact: true,
+        })).to.equal(true);
+    });
+
     it('rejects Plan-mode prose without the structured contract', () => {
         const explanation = 'The implementation plan is ready for approval.';
         expect(shouldRenderInteractivePlan({ explanation, steps: [] }, {
@@ -270,6 +283,9 @@ describe('Execute-to-Plan handoff', () => {
         }, ['C:/workspace/src/not-the-plan.md'])).to.equal(false);
         expect(isCompleteImplementationPlanWrite('write_design_blueprint', {
             blueprint: { unresolvedCritical: [] },
+        }, [])).to.equal(true);
+        expect(isCompleteImplementationPlanWrite('write_design_blueprint', {
+            blueprint: { title: 'Model-ready plan' },
         }, [])).to.equal(true);
         expect(isCompleteImplementationPlanWrite('write_design_blueprint', {
             blueprint: { unresolvedCritical: ['Choose a scope.'] },

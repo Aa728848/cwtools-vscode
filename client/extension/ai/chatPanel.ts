@@ -91,7 +91,7 @@ import {
     prepareLiveStepForUi,
     UI_TOOL_RESULT_BUDGET,
 } from './chat/uiStepCompaction';
-import { hasImplementationPlanArtifact, shouldRenderInteractivePlan } from './executePlanHandoff';
+import { hasImplementationPlanArtifact, parseImplementationPlanBlueprint, shouldRenderInteractivePlan } from './executePlanHandoff';
 import {
     getSlashCommandDescriptors,
     resolveSlashCommand,
@@ -1930,9 +1930,35 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             return candidate && fs.existsSync(candidate) ? candidate : undefined;
         };
         const implementationPlan = findExisting('Implementation_Plan.md');
-        return implementationPlan
-            ? [`Approved implementation plan: ${implementationPlan}`, `Approved blueprintFile: ${implementationPlan}`].join('\n')
-            : '';
+        if (!implementationPlan) return '';
+        let hasExecutableBlueprint = false;
+        try {
+            const blueprint = parseImplementationPlanBlueprint(fs.readFileSync(implementationPlan, 'utf8')).value;
+            const featureManifest = blueprint?.featureManifest && typeof blueprint.featureManifest === 'object'
+                ? blueprint.featureManifest as Record<string, unknown>
+                : undefined;
+            hasExecutableBlueprint = !!blueprint
+                && Array.isArray(blueprint.taskPlan)
+                && blueprint.taskPlan.length > 0
+                && blueprint.taskPlan.every(task => {
+                    if (!task || typeof task !== 'object' || Array.isArray(task)) return false;
+                    const record = task as Record<string, unknown>;
+                    return typeof record.id === 'string' && record.id.trim().length > 0
+                        && typeof record.profileName === 'string' && record.profileName.trim().length > 0
+                        && typeof record.prompt === 'string' && record.prompt.trim().length > 0
+                        && Array.isArray(record.dependencies);
+                })
+                && typeof featureManifest?.objective === 'string'
+                && featureManifest.objective.trim().length > 0
+                && Array.isArray(featureManifest.acceptanceCriteria)
+                && featureManifest.acceptanceCriteria.length > 0;
+        } catch (error) {
+            ErrorReporter.warn(SOURCE.CHAT_PANEL, 'Failed to inspect the approved blueprint payload; continuing from the prose plan', error);
+        }
+        return [
+            `Approved implementation plan: ${implementationPlan}`,
+            ...(hasExecutableBlueprint ? [`Approved blueprintFile: ${implementationPlan}`] : []),
+        ].join('\n');
     }
 
     private _recordFileSnapshot(filePath: string): void {
@@ -2105,7 +2131,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             }
 
         } catch (e) {
-            ErrorReporter.warn(SOURCE.CHAT_PANEL, 'Failed to parse design_blueprint.md', e);
+            ErrorReporter.warn(SOURCE.CHAT_PANEL, 'Failed to render the Implementation_Plan.md blueprint', e);
         }
     }
 

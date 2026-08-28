@@ -1194,7 +1194,7 @@ describe('agent tool file path safety', () => {
         expect(JSON.stringify(tool).length).to.be.lessThan(1_500);
     });
 
-    it('rejects blueprints without an explicit draft or ready state', async () => {
+    it('saves and submits a sparse model-authored blueprint without a host completeness gate', async () => {
         const handler = createFileHandler();
         const result = await handler.writeDesignBlueprint({
             title: 'Incomplete Chain',
@@ -1202,9 +1202,14 @@ describe('agent tool file path safety', () => {
             dependencyOrder: ['events/test.txt'],
         } as any, makeContext('topic-blueprint'));
 
-        expect(result.success).to.equal(false);
-        expect(result.message).to.include('unresolvedCritical must be an array');
-        expect(fs.existsSync(path.join(workspaceRoot, '.cwtools', 'topic-blueprint', 'Implementation_Plan.md'))).to.equal(false);
+        expect(result.success).to.equal(true);
+        expect(result.approvalReady).to.equal(true);
+        expect(result.message).to.include('submitted for approval');
+        const content = fs.readFileSync(path.join(workspaceRoot, '.cwtools', 'topic-blueprint', 'Implementation_Plan.md'), 'utf8');
+        expect(content).to.include('## Blueprint Self-Check (Advisory)');
+        expect(content).to.include('Semantic evidence: not supplied (optional)');
+        expect(content).to.not.include('## Executable Feature Relationship Contract');
+        expect(content).to.not.include('## Approved Multi-Agent Task DAG');
     });
 
     it('saves a partial blueprint as an incremental draft', async () => {
@@ -1226,7 +1231,7 @@ describe('agent tool file path safety', () => {
         expect(draftContract.blueprint.unresolvedCritical).to.deep.equal(['Choose the trigger mechanism.']);
     });
 
-    it('writes complete design blueprints with a completeness gate', async () => {
+    it('writes detailed design blueprints with an advisory self-check', async () => {
         const handler = createFileHandler();
         const result = await handler.writeDesignBlueprint({
             title: 'Native Hook Event Chain',
@@ -1338,7 +1343,7 @@ describe('agent tool file path safety', () => {
         const planPath = path.join(workspaceRoot, '.cwtools', 'topic-blueprint', 'Implementation_Plan.md');
         const content = fs.readFileSync(planPath, 'utf8');
         expect(content).to.include('# Implementation Plan: Native Hook Event Chain');
-        expect(content).to.include('## Blueprint Completeness Gate');
+        expect(content).to.include('## Blueprint Self-Check (Advisory)');
         expect(content).to.include('Common Directory Capability Review');
         expect(content).to.include('Reward and Outcome Plan');
         expect(content).to.include('Executable Feature Relationship Contract');

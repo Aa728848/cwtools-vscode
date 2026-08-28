@@ -143,13 +143,13 @@ const WORKFLOW_TEXT: Record<string, Record<WorkflowLocale, LocalizedWorkflowText
                 },
                 blueprint: {
                     title: 'Blueprint',
-                    description: 'Write the design blueprint with common review, subsystem plan, scope chains, rewards, and cleanup.',
+                    description: 'Write the blueprint using only the optional sections that materially clarify the design.',
                 },
             },
             verification: {
-                'common-review-written': 'The blueprint records common/ directories considered, selected, and rejected with rationale.',
-                'reward-plan-written': 'The blueprint maps rewards and outcomes to concrete common entity families.',
-                'blueprint-written': 'A design_blueprint.md has been created in the topic directory.',
+                'common-review-written': 'When useful, the blueprint records material common/ directory alternatives and rationale.',
+                'reward-plan-written': 'When useful, the blueprint maps rewards and outcomes to concrete common entity families.',
+                'blueprint-written': 'Implementation_Plan.md has been saved in the topic directory.',
             },
         },
         'zh-cn': {
@@ -160,17 +160,27 @@ const WORKFLOW_TEXT: Record<string, Record<WorkflowLocale, LocalizedWorkflowText
                     title: '原型研究',
                     description: '寻找并研究复杂度相近的原版事件链。',
                 },
+                'common-review': {
+                    title: 'Common 能力审查',
+                    description: '按需比较真正影响设计的 common/ 目录与引擎子系统。',
+                },
                 topology: {
                     title: '流程拓扑',
                     description: '梳理入口、中间节点和结局分支。',
                 },
+                rewards: {
+                    title: '奖励实现',
+                    description: '按需把结局映射到当前 TypeDefs 与项目知识中的具体实体族。',
+                },
                 blueprint: {
                     title: '设计蓝图',
-                    description: '写出包含作用域链和 ID 分配的设计蓝图。',
+                    description: '只采用确实有助于说明设计的可选章节来写出蓝图。',
                 },
             },
             verification: {
-                'blueprint-written': '主题目录中已创建 design_blueprint.md。',
+                'common-review-written': '如有必要，蓝图记录关键 common/ 目录备选项与取舍理由。',
+                'reward-plan-written': '如有必要，蓝图将奖励和结果映射到具体 common 实体族。',
+                'blueprint-written': '主题目录中已保存 Implementation_Plan.md。',
             },
         },
     },

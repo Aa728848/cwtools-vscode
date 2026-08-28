@@ -1507,14 +1507,14 @@ const RAW_TOOL_DEFINITIONS: ToolDefinition[] = [
         type: 'function',
         function: {
             name: 'write_design_blueprint',
-            description: 'Write the blueprint tier of the unified Implementation Plan for a connected Paradox game-entity pipeline. Always pass title and unresolvedCritical. A non-empty unresolvedCritical saves the available sections as an incremental draft. Use [] only to request approval; ready plans then require entities, semantic evidence, a feature manifest, exact planned files, and a task plan. General repository work does not use this PDX-specific contract.',
+            description: 'Save the model-authored blueprint tier of the unified Implementation Plan for connected Paradox work. The listed sections are authoring suggestions, not host completeness requirements. The host submits the saved plan for approval unless unresolvedCritical explicitly lists blockers. General repository work does not use this PDX-specific tool.',
             parameters: {
                 type: 'object',
                 properties: {
                     title: { type: 'string', description: 'Blueprint title, e.g. "Ancient Databank Excavation Pipeline"' },
                     entities: {
                         type: 'array',
-                        description: 'All game entities in the cascade pipeline, ordered by trigger sequence',
+                        description: 'Optional suggested section: game entities in the cascade pipeline, ordered by trigger sequence.',
                         items: {
                             type: 'object',
                             properties: {
@@ -1525,7 +1525,6 @@ const RAW_TOOL_DEFINITIONS: ToolDefinition[] = [
                                 fires: { type: 'array', items: { type: 'string' }, description: 'IDs of downstream entities this one triggers, with a verified scope-transition path when applicable. Format each entry as "targetId via verified_scope_path". Plain IDs are accepted, but evidence-backed paths help catch scope-chain errors.' },
                                 scopeContext: { type: 'string', description: 'Scope context in CWT format, e.g. "this=X root=X from=Y fromfrom=Z". MUST be dynamically verified against active CWT/LSP rules and current archetype evidence; do not fill this from static prompt memory.' },
                             },
-                            required: ['id', 'type', 'file'],
                         },
                     },
                     commonDirectoryReview: {
@@ -1541,7 +1540,6 @@ const RAW_TOOL_DEFINITIONS: ToolDefinition[] = [
                                 rationale: { type: 'string', description: 'Why it is used or intentionally rejected for this user requirement' },
                                 findings: { type: 'string', description: 'Archetype or rule insight discovered from project/vanilla/CWT research' },
                             },
-                            required: ['directory', 'role', 'selected', 'rationale', 'findings'],
                         },
                     },
                     subsystemPlan: {
@@ -1556,7 +1554,6 @@ const RAW_TOOL_DEFINITIONS: ToolDefinition[] = [
                                 rationale: { type: 'string', description: 'Why this layer belongs in the design and how it serves the feature' },
                                 requirementSource: { type: 'string', description: 'User requirement or inferred design need that justifies the layer' },
                             },
-                            required: ['layer', 'directories', 'rationale'],
                         },
                     },
                     triggerPlan: {
@@ -1571,7 +1568,6 @@ const RAW_TOOL_DEFINITIONS: ToolDefinition[] = [
                                 timing: { type: 'string', description: 'Timing or pacing detail, verified against the selected mechanism.' },
                                 rationale: { type: 'string', description: 'Why this trigger mechanism is appropriate' },
                             },
-                            required: ['nodeId', 'mechanism', 'rationale'],
                         },
                     },
                     branchingPlan: {
@@ -1586,7 +1582,6 @@ const RAW_TOOL_DEFINITIONS: ToolDefinition[] = [
                                 convergence: { type: 'string', description: 'Entity or condition where branch paths converge, if any' },
                                 consequences: { type: 'string', description: 'Mechanical and narrative consequences of the branch' },
                             },
-                            required: ['branchId', 'fromEntity', 'choices', 'consequences'],
                         },
                     },
                     rewardPlan: {
@@ -1602,7 +1597,6 @@ const RAW_TOOL_DEFINITIONS: ToolDefinition[] = [
                                 implementation: { type: 'string', description: 'How the reward is granted, unlocked, activated, or cleaned up' },
                                 balanceNotes: { type: 'string', description: 'Balance constraints, cooldowns, costs, AI weights, or limits' },
                             },
-                            required: ['rewardId', 'directory', 'entityType', 'playerValue', 'implementation'],
                         },
                     },
                     cleanupPlan: {
@@ -1616,12 +1610,11 @@ const RAW_TOOL_DEFINITIONS: ToolDefinition[] = [
                                 cleanup: { type: 'string', description: 'Exact cleanup or closure mechanism' },
                                 owner: { type: 'string', description: 'Scope or subsystem responsible for cleanup' },
                             },
-                            required: ['target', 'lifecycle', 'cleanup'],
                         },
                     },
                     evidence: {
                         type: 'array',
-                        description: 'Research evidence used for the blueprint. Include project examples, vanilla archetypes, CWT rule queries, and common/ directory inventory findings.',
+                        description: 'Optional suggested section: concise project, vanilla, CWT, or directory evidence that materially supports the design.',
                         items: {
                             type: 'object',
                             properties: {
@@ -1629,7 +1622,6 @@ const RAW_TOOL_DEFINITIONS: ToolDefinition[] = [
                                 source: { type: 'string', description: 'File path, symbol ID, query name, or user requirement reference' },
                                 insight: { type: 'string', description: 'Relevant design fact learned from this source' },
                             },
-                            required: ['sourceType', 'source', 'insight'],
                         },
                     },
                     eventIdAllocation: {
@@ -1652,7 +1644,7 @@ const RAW_TOOL_DEFINITIONS: ToolDefinition[] = [
                     },
                     featureManifest: {
                         type: 'object',
-                        description: 'Approved machine-checkable objective, entity operations, required cross-entity edges, invariants, and acceptance criteria.',
+                        description: 'Optional execution aid: machine-readable objective, entity operations, cross-entity edges, invariants, and acceptance criteria.',
                         properties: {
                             objective: { type: 'string' },
                             entities: {
@@ -1666,7 +1658,6 @@ const RAW_TOOL_DEFINITIONS: ToolDefinition[] = [
                                         scope: { type: 'string' },
                                         required: { type: 'boolean' },
                                     },
-                                    required: ['kind', 'id', 'operation'],
                                 },
                             },
                             requiredEdges: {
@@ -1679,7 +1670,6 @@ const RAW_TOOL_DEFINITIONS: ToolDefinition[] = [
                                         to: { type: 'string' },
                                         required: { type: 'boolean' },
                                     },
-                                    required: ['from', 'relation', 'to'],
                                 },
                             },
                             invariants: { type: 'array', items: { type: 'string' } },
@@ -1695,16 +1685,14 @@ const RAW_TOOL_DEFINITIONS: ToolDefinition[] = [
                                         subject: { type: 'string' },
                                         required: { type: 'boolean' },
                                     },
-                                    required: ['id', 'description', 'type'],
                                 },
                             },
                             expectsFileChanges: { type: 'boolean' },
                         },
-                        required: ['objective', 'entities', 'requiredEdges', 'acceptanceCriteria'],
                     },
                     taskPlan: {
                         type: 'array',
-                        description: 'Approved executable DAG slices. Connected writers declare produces/consumes and localisation writers consume their owning entity.',
+                        description: 'Optional execution aid: task slices and dependencies. The host does not use this section to judge whether the blueprint may be saved or shown for approval.',
                         items: {
                             type: 'object',
                             properties: {
@@ -1724,7 +1712,6 @@ const RAW_TOOL_DEFINITIONS: ToolDefinition[] = [
                                             scope: { type: 'string' },
                                             required: { type: 'boolean' },
                                         },
-                                        required: ['kind', 'id', 'operation'],
                                     },
                                 },
                                 consumes: {
@@ -1738,7 +1725,6 @@ const RAW_TOOL_DEFINITIONS: ToolDefinition[] = [
                                             scope: { type: 'string' },
                                             required: { type: 'boolean' },
                                         },
-                                        required: ['kind', 'id', 'operation'],
                                     },
                                 },
                                 dependencies: { type: 'array', items: { type: 'string' } },
@@ -1754,11 +1740,9 @@ const RAW_TOOL_DEFINITIONS: ToolDefinition[] = [
                                             subject: { type: 'string' },
                                             required: { type: 'boolean' },
                                         },
-                                        required: ['id', 'description', 'type'],
                                     },
                                 },
                             },
-                            required: ['id', 'profileName', 'prompt', 'dependencies'],
                         },
                     },
                     riskRegister: {
@@ -1769,11 +1753,11 @@ const RAW_TOOL_DEFINITIONS: ToolDefinition[] = [
                     unresolvedCritical: {
                         type: 'array',
                         items: { type: 'string' },
-                        description: 'Always provide this array. Use [] when all design-changing facts are resolved. Otherwise list each exact user decision or missing fact; the tool saves a blocked draft that can be updated after clarification.',
+                        description: 'Optional explicit blockers. Omit or use [] to submit the saved blueprint for approval; use a non-empty list only when the model intentionally wants to keep it as a draft.',
                     },
                     notes: { type: 'string', description: 'Additional design notes: scope chain transition warnings, edge cases, branching logic, or vanilla references studied.' },
                 },
-                required: ['title', 'unresolvedCritical'],
+                required: ['title'],
             },
         },
     },
@@ -2130,7 +2114,7 @@ const COMPACT_BLUEPRINT_WRITE_TOOL: ToolDefinition = {
     type: 'function',
     function: {
         name: 'write_design_blueprint',
-        description: 'Validate and save a connected Paradox design blueprint. Selecting this deferred tool reveals its complete schema. Always include title and unresolvedCritical; exact blockers save a draft, while [] requests approval and activates executable-plan checks.',
+        description: 'Save a connected Paradox design blueprint. Selecting this deferred tool reveals suggested sections; the host does not enforce their semantic completeness. Explicit unresolvedCritical blockers keep a draft, otherwise the saved plan is submitted for approval.',
         parameters: {
             type: 'object',
             properties: {

@@ -32,6 +32,7 @@ describe('AIService session overrides', () => {
         expect(service.getConfig().model).to.equal('session-model');
         expect(service.getConfig().reasoningEffort).to.equal('medium');
         expect(service.getConfig().responseVerbosity).to.equal('default');
+        expect(service.getConfig().codexServiceTier).to.equal('default');
     });
 });
 
@@ -120,7 +121,9 @@ describe('AIService provider protocol routing', () => {
     it('routes the ChatGPT subscription provider through the fixed Codex Responses endpoint', async () => {
         const { AIService } = loadAIService();
         const service = new AIService({ secrets: {} } as any) as any;
-        const routes: Array<{ endpoint: string; providerId: string; model: string; reasoning?: string; verbosity?: string }> = [];
+        const baseConfig = service.getConfig.bind(service);
+        service.getConfig = () => ({ ...baseConfig(), codexServiceTier: 'fast' });
+        const routes: Array<{ endpoint: string; providerId: string; model: string; reasoning?: string; verbosity?: string; serviceTier?: string }> = [];
         service.callOpenAIResponses = async (endpoint: string, _apiKey: string, request: any, providerId: string) => {
             routes.push({
                 endpoint,
@@ -128,6 +131,7 @@ describe('AIService provider protocol routing', () => {
                 model: request.model,
                 reasoning: request.reasoning_effort,
                 verbosity: request.response_verbosity,
+                serviceTier: request.service_tier,
             });
             return completionResponse(request.model);
         };
@@ -146,6 +150,7 @@ describe('AIService provider protocol routing', () => {
             model: 'gpt-5.6-sol',
             reasoning: 'xhigh',
             verbosity: 'high',
+            serviceTier: 'fast',
         }]);
     });
 

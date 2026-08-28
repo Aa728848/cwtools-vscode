@@ -1325,6 +1325,20 @@
                         "default": "default",
                         "description": "%configuration.stellarisLanguageServices.ai.responseVerbosity.description%"
                     },
+                    "stellarisLanguageServices.ai.codexServiceTier": {
+                        "scope": "window",
+                        "type": "string",
+                        "enum": [
+                            "default",
+                            "fast"
+                        ],
+                        "enumDescriptions": [
+                            "%configuration.stellarisLanguageServices.ai.codexServiceTier.enum.default%",
+                            "%configuration.stellarisLanguageServices.ai.codexServiceTier.enum.fast%"
+                        ],
+                        "default": "default",
+                        "description": "%configuration.stellarisLanguageServices.ai.codexServiceTier.description%"
+                    },
                     "stellarisLanguageServices.ai.maxContextTokens": {
                         "scope": "window",
                         "type": "integer",

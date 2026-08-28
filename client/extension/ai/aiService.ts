@@ -18,6 +18,7 @@ import type {
     AIUserConfig,
     CustomApiFormat,
     ContentPart,
+    CodexServiceTier,
     ReasoningEffort,
     ResponseVerbosity,
 } from './types';
@@ -195,6 +196,10 @@ function normalizeConfiguredResponseVerbosity(value: unknown): ResponseVerbosity
     }
 }
 
+function normalizeConfiguredCodexServiceTier(value: unknown): CodexServiceTier {
+    return value === 'fast' ? 'fast' : 'default';
+}
+
 function normalizeAnthropicMessagesEndpoint(endpoint: string): string {
     const cleanEndpoint = endpoint
         .replace(/\/messages\/?(?:\?.*)?$/i, '')
@@ -338,6 +343,9 @@ export class AIService {
                 ?? normalizeConfiguredReasoningEffort(cfg.get<unknown>('reasoningEffort', 'high')),
             responseVerbosity: normalizeConfiguredResponseVerbosity(
                 cfg.get<unknown>('responseVerbosity', 'default'),
+            ),
+            codexServiceTier: normalizeConfiguredCodexServiceTier(
+                cfg.get<unknown>('codexServiceTier', 'default'),
             ),
             inlineCompletion: {
                 enabled: cfg.get<boolean>('inlineCompletion.enabled') || false,
@@ -589,6 +597,7 @@ export class AIService {
             response_verbosity: providerId === 'codex-chatgpt' && responseVerbosity !== 'default'
                 ? responseVerbosity
                 : undefined,
+            service_tier: providerId === 'codex-chatgpt' ? config.codexServiceTier : undefined,
             ...(extraBody ?? {}),
         };
 
@@ -1418,6 +1427,7 @@ export class AIService {
             ...(request.response_verbosity ? {
                 text: { verbosity: request.response_verbosity },
             } : {}),
+            service_tier: request.service_tier,
         };
         const tools: Array<Record<string, unknown>> = (request.tools ?? []).map(t => ({
                 type: 'function',

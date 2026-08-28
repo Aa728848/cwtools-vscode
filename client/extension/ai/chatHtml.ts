@@ -323,6 +323,14 @@ ${stylesheetLinks}
                     <label class="settings-label">${svgIcon('stethoscope')} <span id="settingsReasoningLabel">${t('Reasoning effort', '推理强度')}</span> <span id="settingsReasoningHint" style="opacity:0.5;font-weight:400"></span></label>
                     <select class="settings-select" id="settingsReasoningEffort"></select>
                 </div>
+                <div class="settings-group" id="settingsCodexSpeedGroup" style="display:none">
+                    <label class="settings-label">${svgIcon('zap')} ${t('Speed', '速度')}</label>
+                    <select class="settings-select" id="settingsCodexServiceTier">
+                        <option value="default">${t('Standard — default speed', '标准 — 默认速度')}</option>
+                        <option value="fast">${t('Fast — lower latency, uses more quota', '快速 — 更低延迟，消耗更多额度')}</option>
+                    </select>
+                    <div class="settings-hint">${t('Fast mode is available for Codex subscription models and uses more ChatGPT quota.', '快速模式仅用于 Codex 订阅模型，并会消耗更多 ChatGPT 额度。')}</div>
+                </div>
                 <div class="settings-group" id="settingsResponseVerbosityGroup" style="display:none">
                     <label class="settings-label">${svgIcon('fileText')} ${t('Output detail', '输出详细程度')}</label>
                     <select class="settings-select" id="settingsResponseVerbosity">

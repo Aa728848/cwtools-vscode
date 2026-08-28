@@ -93,6 +93,19 @@ export function isResponseVerbosity(value: unknown): value is ResponseVerbosity 
         && (RESPONSE_VERBOSITY_VALUES as readonly string[]).includes(value);
 }
 
+/** Processing speed for the Codex ChatGPT subscription provider. */
+export type CodexServiceTier = 'default' | 'fast';
+
+export const CODEX_SERVICE_TIER_VALUES: readonly CodexServiceTier[] = [
+    'default', 'fast',
+] as const;
+
+/** Narrow an untrusted value to the supported Codex service tiers. */
+export function isCodexServiceTier(value: unknown): value is CodexServiceTier {
+    return typeof value === 'string'
+        && (CODEX_SERVICE_TIER_VALUES as readonly string[]).includes(value);
+}
+
 export type ModelReasoningControlKind = 'none' | 'fixed' | 'toggle' | 'budget' | 'effort';
 
 /** Model-specific choices used by both request shaping and the Webview. */
@@ -309,6 +322,8 @@ export interface AIUserConfig {
     reasoningEffort: ReasoningEffort;
     /** Visible-answer detail for the Codex ChatGPT subscription provider. */
     responseVerbosity: ResponseVerbosity;
+    /** Processing speed for the Codex ChatGPT subscription provider. */
+    codexServiceTier: CodexServiceTier;
     /**
      * Optional reasoning field name override for OpenAI-compatible providers
      * whose gateways return thinking content under a non-standard key.
@@ -408,6 +423,8 @@ export interface ChatCompletionRequest {
     reasoning_effort?: ReasoningEffort;
     /** Internal normalized value mapped to Responses API `text.verbosity`. */
     response_verbosity?: Exclude<ResponseVerbosity, 'default'>;
+    /** OpenAI Responses API service tier used by the Codex subscription provider. */
+    service_tier?: CodexServiceTier;
     /** Extra provider-specific params to merge into the request body (e.g. thinking config) */
      
     [key: string]: any;
@@ -2754,6 +2771,8 @@ export interface PanelSettings {
     reasoningEffort: ReasoningEffort;
     /** Visible-answer detail for the Codex ChatGPT subscription provider. */
     responseVerbosity: ResponseVerbosity;
+    /** Processing speed for the Codex ChatGPT subscription provider. */
+    codexServiceTier: CodexServiceTier;
     /** Reasoning field override for OpenAI-compatible gateways (empty = auto-detect). */
     reasoningKey?: string;
     webAccess?: {

@@ -7872,6 +7872,10 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                 ? current.responseVerbosity
                 : 'default';
         }
+        const codexServiceTierSelect = document.getElementById('settingsCodexServiceTier') as HTMLSelectElement | null;
+        if (codexServiceTierSelect) {
+            codexServiceTierSelect.value = current.codexServiceTier === 'fast' ? 'fast' : 'default';
+        }
         (document.getElementById('inlineEnabled') as HTMLInputElement).checked = current.inlineCompletion?.enabled ?? false;
         const overlapEl = document.getElementById('inlineOverlapStripping') as HTMLInputElement | null;
         if (overlapEl) overlapEl.checked = current.inlineCompletion?.overlapStripping ?? true;
@@ -8109,12 +8113,14 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         const status = document.getElementById('apiKeyStatus')!;
         const group = document.getElementById('apiKeyGroup')!;
         const codexGroup = document.getElementById('codexAccountGroup') as HTMLElement | null;
+        const codexSpeedGroup = document.getElementById('settingsCodexSpeedGroup') as HTMLElement | null;
         const responseVerbosityGroup = document.getElementById('settingsResponseVerbosityGroup') as HTMLElement | null;
         const endpointGroup = document.getElementById('endpointGroup') as HTMLElement | null;
         const providerHint = document.getElementById('providerHint')!;
         const deleteBtn = document.getElementById('deleteApiKeyBtn') as HTMLButtonElement | null;
         const isCodex = p?.authKind === 'chatgpt-oauth';
         if (codexGroup) codexGroup.style.display = isCodex ? '' : 'none';
+        if (codexSpeedGroup) codexSpeedGroup.style.display = isCodex ? '' : 'none';
         if (responseVerbosityGroup) responseVerbosityGroup.style.display = isCodex ? '' : 'none';
         if (endpointGroup) endpointGroup.style.display = isCodex ? 'none' : '';
         if (isCodex) {
@@ -8517,6 +8523,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                 },
                 reasoningEffort: (document.getElementById('settingsReasoningEffort') as HTMLSelectElement).value || 'high',
                 responseVerbosity: (document.getElementById('settingsResponseVerbosity') as HTMLSelectElement | null)?.value || 'default',
+                codexServiceTier: (document.getElementById('settingsCodexServiceTier') as HTMLSelectElement | null)?.value || 'default',
                 reasoningKey: ((document.getElementById('settingsReasoningKey') as HTMLInputElement | null)?.value || '').trim(),
                 webAccess: {
                     mode: ((document.getElementById('webAccessMode') as HTMLSelectElement | null)?.value || 'indexed'),

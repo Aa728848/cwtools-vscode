@@ -1,4 +1,5 @@
 import {
+    isCodexServiceTier,
     isResponseVerbosity,
     type ConnectionTestSettings,
     type ContextItem,
@@ -72,6 +73,7 @@ function isPanelSettings(value: unknown): value is PanelSettings {
         && (value.agentFileWriteMode === 'confirm' || value.agentFileWriteMode === 'auto')
         && isReasoningEffort(value.reasoningEffort)
         && isResponseVerbosity(value.responseVerbosity)
+        && isCodexServiceTier(value.codexServiceTier)
         && isRecord(value.inlineCompletion)
         && isRecord(value.translationPreview);
 }

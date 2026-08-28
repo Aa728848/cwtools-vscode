@@ -25,6 +25,7 @@ import type {
     AgentRuntimeDomain,
     ToolCall,
     ToolInvocation,
+    ToolTerminalOutcome,
 } from './types';
 import { contentToString } from './types';
 import { estimateTokenCount, estimateChatMessageTokens, hasImageContent, CHARS_PER_TOKEN } from './runner/tokenEstimation';
@@ -149,12 +150,38 @@ function toolResultRecord(result: unknown): Record<string, unknown> | undefined 
 export function isToolResultFailure(result: unknown): boolean {
     const record = toolResultRecord(result);
     if (!record) return false;
-    return record.success === false || record.ok === false || record.error !== undefined;
+    return record.success === false
+        || record.ok === false
+        || record.error !== undefined
+        || (typeof record.exitCode === 'number' && record.exitCode !== 0);
 }
 
 export function isToolResultSuccess(result: unknown): boolean {
     if (isToolResultFailure(result)) return false;
     return toolResultRecord(result)?.skipped !== true;
+}
+
+export function getTerminalToolOutcome(result: unknown): { kind: ToolTerminalOutcome; message: string } | undefined {
+    const record = toolResultRecord(result);
+    if (!record) return undefined;
+    let kind: ToolTerminalOutcome | undefined;
+    if (record.terminalOutcome === 'user_cancelled'
+        || record.terminalOutcome === 'permission_denied'
+        || record.terminalOutcome === 'policy_denied'
+        || record.terminalOutcome === 'interaction_unavailable') {
+        kind = record.terminalOutcome;
+    } else if (record.cancelled === true) {
+        kind = 'user_cancelled';
+    } else if (record.policyDenied === true || record.workspaceTrustRequired === true) {
+        kind = 'policy_denied';
+    }
+    if (!kind) return undefined;
+    const detail = [record.error, record.message, record.stderr]
+        .find((value): value is string => typeof value === 'string' && value.trim().length > 0);
+    return {
+        kind,
+        message: detail?.trim() ?? 'The requested operation was not performed.',
+    };
 }
 
 function compactArchiveControlValue(value: unknown): unknown {
@@ -496,7 +523,9 @@ function foldToolBatchState(input: {
         const call = input.calls[index]!;
         const targetKeys = call.targetPaths.length > 0 ? call.targetPaths : [`tool:${call.toolName}`];
         const resultSucceeded = isToolResultSuccess(record);
-        if (resultSucceeded && index === input.submittedPlanIndex) interactivePlanApprovalPending = true;
+        if (resultSucceeded && (index === input.submittedPlanIndex || record?.approvalReady === true)) {
+            interactivePlanApprovalPending = true;
+        }
         if (resultSucceeded && isExecutionActionTool(call.toolName)) executionActionObserved = true;
         if (input.terminalValidation) {
             updateTerminalValidationState(input.terminalValidation, targetKeys, record);
@@ -1407,7 +1436,7 @@ export class AgentRunner {
             }
 
             const { getPendingInteractions } = require('./chatPanel');
-            const pendingInteractions = getPendingInteractions();
+            const pendingInteractions = getPendingInteractions(topicId);
             const pinnedSummary = this.loadPinnedContextSummary(topicId, runId);
 
             pinnedData = {
@@ -1430,6 +1459,7 @@ export class AgentRunner {
             domain,
             useSlimPrompt: options?.useSlimPrompt,
             excludeTools: options?.excludeTools,
+            agentProfileName: options?.agentProfileName,
         }));
         const initialToolFocus = options?.initialToolFocus ?? initialToolFocusForMode(mode);
         const promptToolDefinitions = promptModeTools;
@@ -2366,6 +2396,7 @@ export class AgentRunner {
             domain: options?.domain,
             useSlimPrompt: options?.useSlimPrompt,
             excludeTools: options?.excludeTools,
+            agentProfileName: options?.agentProfileName,
         }));
 
         // 🌟 核心优化：若开启了扁平化并且工具注册了展平 schema，则展现给模型的 availableTools 使用扁平化版本
@@ -4119,6 +4150,9 @@ export class AgentRunner {
             }
 
             const effectiveToolResults = toolResults.map((result, index) => toolStateResults[index] ?? result);
+            const terminalToolOutcome = effectiveToolResults
+                .map(getTerminalToolOutcome)
+                .find((outcome): outcome is NonNullable<typeof outcome> => outcome !== undefined);
 
             // ── Mutating write progress check ──
             // If a mutating tool call succeeded, clear only the pair entries that
@@ -4152,7 +4186,7 @@ export class AgentRunner {
             }
 
             // ── Two-phase doom-loop detection: phase 2 (post-exec hash check) ──
-            if (needsHashValidation) {
+            if (needsHashValidation && !terminalToolOutcome) {
                 let allHashesMatch = true;
                 for (const j of loopGuardedCallIndices) {
                     const { toolName, toolArgs, targetPaths } = parsedCalls[j]!;
@@ -4265,6 +4299,18 @@ export class AgentRunner {
                     'The implementation plan is ready for your review. Execution will begin only after you explicitly approve it.',
                     '实施方案已准备好，正在等待你的审阅。只有在你明确批准后才会开始执行。',
                 );
+            }
+
+            if (terminalToolOutcome) {
+                emitStep({
+                    type: 'validation',
+                    content: `Tool execution stopped after ${terminalToolOutcome.kind}: ${terminalToolOutcome.message}`,
+                    timestamp: Date.now(),
+                });
+                await saveRetainedResumeSnapshot();
+                return options?.useSlimPrompt
+                    ? `BLOCKED_FOR_ORCHESTRATOR: ${terminalToolOutcome.message}`
+                    : terminalToolOutcome.message;
             }
 
             // Run emergency compaction only after every tool result has been

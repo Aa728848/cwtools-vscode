@@ -153,8 +153,9 @@ describe('enforced central tool policy', () => {
         expect(callbackCalled).to.equal(false);
     });
 
-    it('allows orchestrator sub-agents to route structured user questions', async () => {
+    it('routes orchestrator sub-agent clarification back to the parent instead of the user host', async () => {
         const executor = new AgentToolExecutor({} as any, workspaceRoot);
+        let callbackCalled = false;
         const result = await executor.execute('ask_user_question', {
             questions: [{
                 id: 'scope',
@@ -167,10 +168,15 @@ describe('enforced central tool policy', () => {
             }],
         }, {
             runnerOptions: { mode: 'plan', useSlimPrompt: true },
-            onUserQuestion: async () => ({ success: true, answers: { scope: 'Active file' } }),
+            onUserQuestion: async () => {
+                callbackCalled = true;
+                return { success: true, answers: { scope: 'Active file' } };
+            },
         } as any) as any;
 
-        expect(result).to.deep.equal({ success: true, answers: { scope: 'Active file' } });
+        expect(result.success).to.equal(false);
+        expect(result.terminalOutcome).to.equal('policy_denied');
+        expect(callbackCalled).to.equal(false);
     });
 
     it('blocks workspace writes when the effective policy preset is read-only', async () => {
@@ -616,10 +622,15 @@ describe('enforced central tool policy', () => {
             expect(fs.existsSync(otherWalkthrough)).to.equal(false);
 
             const blueprintResult = await executor.execute('write_design_blueprint', {
-                blueprint: { title: 'Incomplete blueprint' },
+                blueprint: {
+                    title: 'Incremental blueprint',
+                    unresolvedCritical: ['Choose the final entity topology.'],
+                },
             }, context) as any;
             expect(blueprintResult.policyDenied).to.equal(undefined);
-            expect(blueprintResult.message).to.include('missing required planning section');
+            expect(blueprintResult.success).to.equal(true);
+            expect(blueprintResult.approvalReady).to.equal(false);
+            expect(blueprintResult.filePath).to.equal(planPath);
 
             const otherTopic = path.join(privateRoot, 'topics', 'other-topic', 'Implementation_Plan.md');
             const blocked = await executor.execute('write_file', {
@@ -1142,23 +1153,10 @@ describe('agent tool file path safety', () => {
         expect(tool?.function.parameters.required).to.deep.equal(['blueprint']);
         expect(contractTool).to.not.equal(undefined);
         expect(JSON.stringify(tool).length).to.be.lessThan(1_500);
-        expect(required).to.include.members([
-            'title',
-            'entities',
-            'commonDirectoryReview',
-            'subsystemPlan',
-            'triggerPlan',
-            'rewardPlan',
-            'cleanupPlan',
-            'evidence',
-            'dependencyOrder',
-            'featureManifest',
-            'taskPlan',
-            'unresolvedCritical',
-        ]);
+        expect(required).to.deep.equal(['title', 'unresolvedCritical']);
     });
 
-    it('rejects incomplete design blueprints before writing', async () => {
+    it('rejects blueprints without an explicit draft or ready state', async () => {
         const handler = createFileHandler();
         const result = await handler.writeDesignBlueprint({
             title: 'Incomplete Chain',
@@ -1167,8 +1165,24 @@ describe('agent tool file path safety', () => {
         } as any, makeContext('topic-blueprint'));
 
         expect(result.success).to.equal(false);
-        expect(result.message).to.include('missing required planning section');
+        expect(result.message).to.include('unresolvedCritical must be an array');
         expect(fs.existsSync(path.join(workspaceRoot, '.cwtools', 'topic-blueprint', 'Implementation_Plan.md'))).to.equal(false);
+    });
+
+    it('saves a partial blueprint as an incremental draft', async () => {
+        const handler = createFileHandler();
+        const result = await handler.writeDesignBlueprint({
+            title: 'Partial Chain',
+            entities: [{ id: 'test.1', type: 'country_event', file: 'events/test.txt' }],
+            unresolvedCritical: ['Choose the trigger mechanism.'],
+        }, makeContext('topic-blueprint'));
+
+        expect(result.success).to.equal(true);
+        expect(result.approvalReady).to.equal(false);
+        const content = fs.readFileSync(result.filePath, 'utf8');
+        expect(content).to.include('Choose the trigger mechanism.');
+        expect(content).to.include('```cwtools-blueprint');
+        expect(content).to.not.include('```cwtools-plan');
     });
 
     it('writes complete design blueprints with a completeness gate', async () => {
@@ -1279,6 +1293,7 @@ describe('agent tool file path safety', () => {
         }, makeContext('topic-blueprint'));
 
         expect(result.success).to.equal(true);
+        expect(result.approvalReady).to.equal(true);
         const planPath = path.join(workspaceRoot, '.cwtools', 'topic-blueprint', 'Implementation_Plan.md');
         const content = fs.readFileSync(planPath, 'utf8');
         expect(content).to.include('# Implementation Plan: Native Hook Event Chain');
@@ -1299,6 +1314,18 @@ describe('agent tool file path safety', () => {
         const draftBlueprint = JSON.parse(blueprintBlock!);
         delete draftBlueprint.schemaVersion;
         delete draftBlueprint.generatedAt;
+        const leanBlueprint = JSON.parse(JSON.stringify(draftBlueprint));
+        leanBlueprint.commonDirectoryReview = [];
+        leanBlueprint.subsystemPlan = [];
+        leanBlueprint.triggerPlan = [];
+        leanBlueprint.rewardPlan = [];
+        leanBlueprint.cleanupPlan = [];
+        leanBlueprint.dependencyOrder = [];
+        leanBlueprint.evidence = [leanBlueprint.evidence[0]];
+        const leanResult = await handler.writeDesignBlueprint(leanBlueprint, makeContext('topic-blueprint'));
+        expect(leanResult.success).to.equal(true);
+        expect(leanResult.approvalReady).to.equal(true);
+
         draftBlueprint.entities.push(
             { ...draftBlueprint.entities[0], id: 'test.2' },
             { ...draftBlueprint.entities[0], id: 'test.3' },
@@ -1313,6 +1340,7 @@ describe('agent tool file path safety', () => {
         const draftResult = await handler.writeDesignBlueprint(draftBlueprint, makeContext('topic-blueprint'));
         const draftContent = fs.readFileSync(planPath, 'utf8');
         expect(draftResult.success).to.equal(true);
+        expect(draftResult.approvalReady).to.equal(false);
         expect(draftResult.message).to.include('Blueprint draft saved');
         expect(draftContent).to.include('## Unresolved Critical Decisions');
         expect(draftContent).to.include('Choose the leader eligibility scope.');

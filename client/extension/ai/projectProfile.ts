@@ -574,7 +574,7 @@ function buildPromptCards(profile: Omit<ProjectProfile, 'promptCards' | 'efficie
             'Plan mode project card:',
             '- For complex pipelines, query_project_knowledge must establish project patterns, vanilla archetypes, topology, override evidence, and unresolved facts before blueprint approval.',
             `- Study existing patterns in: ${keyDirs}.`,
-            '- Enumerate current TypeDefs and project-graph dependency families before designing a complex pipeline; record selected and rejected families in the blueprint.',
+            '- Enumerate current TypeDefs and relevant project-graph dependency families before approving a complex pipeline; record only candidates that materially affected the design.',
             '- Use exact vanilla archetypes before inventing cross-type calls or scope flows.',
             `- Existing namespaces: ${namespaces}. Allocate IDs deliberately and record them in the blueprint.`,
             '- Prefer write_design_blueprint for implementation-ready plans.',

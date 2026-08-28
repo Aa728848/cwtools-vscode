@@ -22,7 +22,7 @@ import { validateToolAccess } from '../../extension/ai/tools/permissions';
 import { toolDisclosureService } from '../../extension/ai/runner/toolDisclosure';
 
 const toolDefinitions = [
-    'select_tools', 'read_file', 'replace_lines', 'query_workspace_index',
+    'ask_user_question', 'select_tools', 'read_file', 'replace_lines', 'query_workspace_index',
     'dispatch_agents', 'query_blackboard', 'mcp_call', 'run_command',
     'write_file', 'write_localisation', 'run_code',
 ].map(name => ({
@@ -108,6 +108,13 @@ describe('runnerPolicy', () => {
         expect(validateToolAccess('run_command', {
             mode: 'build', domain: 'paradox', isSubAgent: true,
         }).allowed).to.equal(false);
+        const utilityChildTools = filterToolDefinitionsForMode(toolDefinitions, 'utility', {
+            domain: 'general',
+            useSlimPrompt: true,
+            agentProfileName: 'general-coder',
+        }).map(tool => tool.function.name);
+        expect(utilityChildTools).to.include('run_command');
+        expect(utilityChildTools).to.not.include('ask_user_question');
     });
 
     it('registers only current source editors and keeps specialised writes scoped', () => {

@@ -891,7 +891,7 @@ export class FileToolHandler {
                     const messageId = `write_${crypto.randomUUID()}`;
                     const confirmed = await this.confirmPendingWrite(args.file, args.content, messageId, context);
                     if (!confirmed) {
-                        return { success: false, message: 'User cancelled the write operation' };
+                        return { success: false, message: 'User cancelled the write operation', terminalOutcome: 'user_cancelled' };
                     }
                 } else if (this.ctx.onAutoWritten && !vfsOverlay) {
                     const isNewFile = !fs.existsSync(args.file);
@@ -1001,7 +1001,7 @@ export class FileToolHandler {
             if (this.ctx.fileWriteMode === 'confirm' && this.ctx.onPendingWrite && !this.shouldBypassWriteConfirmation(args, context) && !vfsOverlay) {
                 const confirmed = await this.confirmPendingWrite(filePath, newContent, `edit_${crypto.randomUUID()}`, context);
                 if (!confirmed) {
-                    return { success: false, message: 'User cancelled the edit_file operation', pendingDiff: diff };
+                    return { success: false, message: 'User cancelled the edit_file operation', pendingDiff: diff, terminalOutcome: 'user_cancelled' };
                 }
             } else if (this.ctx.onAutoWritten && !vfsOverlay) {
                 this.ctx.onAutoWritten(filePath, !fileExists);
@@ -1148,7 +1148,7 @@ export class FileToolHandler {
         if (this.ctx.fileWriteMode === 'confirm' && this.ctx.onPendingWrite && !this.shouldBypassWriteConfirmation(args, context)) {
             const confirmed = await this.confirmPendingWrite(filePath, newContent, `ast_${Date.now()}`, context);
             if (!confirmed) {
-                return { success: false, message: 'User cancelled the edit operation', pendingDiff: diff };
+                return { success: false, message: 'User cancelled the edit operation', pendingDiff: diff, terminalOutcome: 'user_cancelled' };
             }
         } else if (this.ctx.onAutoWritten) {
             this.ctx.onAutoWritten(filePath, false);
@@ -1303,7 +1303,7 @@ export class FileToolHandler {
             if (this.ctx.fileWriteMode === 'confirm' && this.ctx.onPendingWrite && !this.shouldBypassWriteConfirmation(args, context) && !vfsOverlay) {
                 const confirmed = await this.confirmPendingWrite(filePath, newContent, `replace_lines_${Date.now()}`, context);
                 if (!confirmed) {
-                    return { success: false, message: 'User cancelled the replace_lines operation', pendingDiff: diff };
+                    return { success: false, message: 'User cancelled the replace_lines operation', pendingDiff: diff, terminalOutcome: 'user_cancelled' };
                 }
             } else if (this.ctx.onAutoWritten && !vfsOverlay) {
                 this.ctx.onAutoWritten(filePath, false);
@@ -1939,75 +1939,84 @@ export class FileToolHandler {
 
     async writeDesignBlueprint(input: import('../types').WriteDesignBlueprintArgs | { blueprint: import('../types').WriteDesignBlueprintArgs }, context?: import('../types').AgentToolContext): Promise<import('../types').WriteDesignBlueprintResult> {
         try {
-            const args = 'blueprint' in input ? input.blueprint : input;
+            const rawArgs = 'blueprint' in input ? input.blueprint : input;
             const failBlueprint = (message: string): import('../types').WriteDesignBlueprintResult => ({
                 success: false,
+                approvalReady: false,
                 message,
                 filePath: '',
             });
-            const hasItems = (value: unknown): value is unknown[] => Array.isArray(value) && value.length > 0;
-            const requiredSections: Array<[string, unknown]> = [
-                ['entities', args.entities],
-                ['commonDirectoryReview', args.commonDirectoryReview],
-                ['subsystemPlan', args.subsystemPlan],
-                ['triggerPlan', args.triggerPlan],
-                ['rewardPlan', args.rewardPlan],
-                ['cleanupPlan', args.cleanupPlan],
-                ['evidence', args.evidence],
-                ['dependencyOrder', args.dependencyOrder],
-                ['featureManifest.entities', args.featureManifest?.entities],
-                ['featureManifest.requiredEdges', args.featureManifest?.requiredEdges],
-                ['featureManifest.acceptanceCriteria', args.featureManifest?.acceptanceCriteria],
-                ['taskPlan', args.taskPlan],
-            ];
-            const missingSections = requiredSections
-                .filter(([, value]) => !hasItems(value))
-                .map(([name]) => name);
-            if (missingSections.length > 0) {
-                return failBlueprint(`Design blueprint refused: missing required planning section(s): ${missingSections.join(', ')}. Complex pipelines also require an executable feature manifest and task DAG before approval.`);
+            if (!String(rawArgs.title ?? '').trim()) {
+                return failBlueprint('Design blueprint refused: title is required.');
             }
-
-            const complexBlueprint = args.entities.length >= 3
-                || (args.subsystemPlan?.length ?? 0) >= 2
-                || new Set((args.commonDirectoryReview ?? []).filter(item => item.selected).map(item => item.directory)).size >= 2;
-            if (!Array.isArray(args.unresolvedCritical)) {
+            if (!Array.isArray(rawArgs.unresolvedCritical)) {
                 return failBlueprint('Design blueprint refused: unresolvedCritical must be an array. Use [] for an approval-ready plan or list exact blockers to save a draft.');
             }
-            const unresolvedCritical = args.unresolvedCritical
+            const unresolvedCritical = rawArgs.unresolvedCritical
                 .map(item => String(item).trim())
                 .filter(Boolean);
-            if (complexBlueprint) {
-                const evidenceKinds = (args.evidence ?? []).map(item => `${item.sourceType} ${item.source}`.toLowerCase());
-                const hasKnowledge = evidenceKinds.some(value => value.includes('project_knowledge') || value.includes('query_project_knowledge') || value.includes('.cwtools/project/knowledge'));
-                const hasVanilla = evidenceKinds.some(value => value.includes('vanilla'));
-                const hasCwt = evidenceKinds.some(value => /\b(cwt|lsp|schema|rule)\b/.test(value));
-                const missingEvidence = [
-                    !hasKnowledge && !hasVanilla ? 'project knowledge or a bounded vanilla archetype' : '',
-                    !hasCwt ? 'CWT/LSP legality' : '',
-                ].filter(Boolean);
-                if (missingEvidence.length > 0) {
-                    return failBlueprint(`Design blueprint refused: complex plans must cite ${missingEvidence.join(', ')} evidence.`);
+            const args = {
+                ...rawArgs,
+                title: String(rawArgs.title).trim(),
+                entities: Array.isArray(rawArgs.entities) ? rawArgs.entities : [],
+                commonDirectoryReview: Array.isArray(rawArgs.commonDirectoryReview) ? rawArgs.commonDirectoryReview : [],
+                subsystemPlan: Array.isArray(rawArgs.subsystemPlan) ? rawArgs.subsystemPlan : [],
+                triggerPlan: Array.isArray(rawArgs.triggerPlan) ? rawArgs.triggerPlan : [],
+                branchingPlan: Array.isArray(rawArgs.branchingPlan) ? rawArgs.branchingPlan : [],
+                rewardPlan: Array.isArray(rawArgs.rewardPlan) ? rawArgs.rewardPlan : [],
+                cleanupPlan: Array.isArray(rawArgs.cleanupPlan) ? rawArgs.cleanupPlan : [],
+                evidence: Array.isArray(rawArgs.evidence) ? rawArgs.evidence : [],
+                dependencyOrder: Array.isArray(rawArgs.dependencyOrder) ? rawArgs.dependencyOrder : [],
+                featureManifest: {
+                    ...rawArgs.featureManifest,
+                    objective: String(rawArgs.featureManifest?.objective ?? '').trim(),
+                    entities: Array.isArray(rawArgs.featureManifest?.entities) ? rawArgs.featureManifest.entities : [],
+                    requiredEdges: Array.isArray(rawArgs.featureManifest?.requiredEdges) ? rawArgs.featureManifest.requiredEdges : [],
+                    acceptanceCriteria: Array.isArray(rawArgs.featureManifest?.acceptanceCriteria) ? rawArgs.featureManifest.acceptanceCriteria : [],
+                },
+                taskPlan: Array.isArray(rawArgs.taskPlan) ? rawArgs.taskPlan : [],
+                unresolvedCritical,
+            };
+            const approvalReady = unresolvedCritical.length === 0;
+            const hasItems = (value: unknown): value is unknown[] => Array.isArray(value) && value.length > 0;
+            if (approvalReady) {
+                const requiredSections: Array<[string, unknown]> = [
+                    ['entities', args.entities],
+                    ['evidence', args.evidence],
+                    ['featureManifest.entities', args.featureManifest.entities],
+                    ['featureManifest.acceptanceCriteria', args.featureManifest.acceptanceCriteria],
+                    ['taskPlan', args.taskPlan],
+                ];
+                const missingSections = requiredSections
+                    .filter(([, value]) => !hasItems(value))
+                    .map(([name]) => name);
+                if (missingSections.length > 0) {
+                    return failBlueprint(`Design blueprint refused: approval-ready plans still need: ${missingSections.join(', ')}. Add exact blockers to unresolvedCritical to save the current work as a draft instead.`);
+                }
+                if (!args.taskPlan.some(task => (task.plannedFiles?.length ?? 0) > 0)) {
+                    return failBlueprint('Design blueprint refused: an approval-ready taskPlan must name at least one exact planned file.');
                 }
             }
 
+            if (approvalReady) {
             const manifest = args.featureManifest;
-            if (!String(manifest.objective ?? '').trim()) {
+            if (!manifest.objective) {
                 return failBlueprint('Design blueprint refused: featureManifest.objective is required.');
             }
-            const manifestEntityIds = new Set(manifest.entities!.map(entity => entity.id.trim()).filter(Boolean));
-            const duplicateManifestEntities = manifest.entities!
+            const manifestEntityIds = new Set(manifest.entities.map(entity => entity.id.trim()).filter(Boolean));
+            const duplicateManifestEntities = manifest.entities
                 .map(entity => `${entity.kind}:${entity.id}:${entity.operation}`.toLowerCase())
                 .filter((key, index, all) => all.indexOf(key) !== index);
             if (duplicateManifestEntities.length > 0) {
                 return failBlueprint(`Design blueprint refused: duplicate feature entity contracts: ${[...new Set(duplicateManifestEntities)].join(', ')}.`);
             }
-            const invalidEdges = manifest.requiredEdges!
+            const invalidEdges = manifest.requiredEdges
                 .filter(edge => !manifestEntityIds.has(edge.from) || !manifestEntityIds.has(edge.to))
                 .map(edge => `${edge.from} --${edge.relation}--> ${edge.to}`);
             if (invalidEdges.length > 0) {
                 return failBlueprint(`Design blueprint refused: every required edge endpoint must be declared in featureManifest.entities. Invalid edge(s): ${invalidEdges.join('; ')}.`);
             }
-            const criterionIds = manifest.acceptanceCriteria!.map(item => item.id.trim()).filter(Boolean);
+            const criterionIds = manifest.acceptanceCriteria.map(item => item.id.trim()).filter(Boolean);
             if (new Set(criterionIds).size !== criterionIds.length) {
                 return failBlueprint('Design blueprint refused: acceptance criterion IDs must be unique.');
             }
@@ -2038,14 +2047,6 @@ export class FileToolHandler {
             if (taskIds.some(visitTask)) {
                 return failBlueprint('Design blueprint refused: taskPlan contains a dependency cycle.');
             }
-            const writerWithoutContracts = args.taskPlan
-                .filter(task => ['build', 'loc_writer', 'gui_expert'].includes(task.agentType)
-                    && (task.produces?.length ?? 0) === 0
-                    && (task.consumes?.length ?? 0) === 0)
-                .map(task => task.id);
-            if (writerWithoutContracts.length > 0) {
-                return failBlueprint(`Design blueprint refused: writer tasks must declare produces/consumes contracts: ${writerWithoutContracts.join(', ')}.`);
-            }
             const orphanLocTasks = args.taskPlan
                 .filter(task => task.agentType === 'loc_writer'
                     && task.produces?.some(contract => contract.kind === 'localisation')
@@ -2058,7 +2059,7 @@ export class FileToolHandler {
                 ...(task.produces ?? []),
                 ...(task.consumes ?? []),
             ]).map(contract => `${contract.kind}:${contract.id}:${contract.operation}`.toLowerCase()));
-            const unassignedContracts = manifest.entities!
+            const unassignedContracts = manifest.entities
                 .filter(contract => contract.required !== false
                     && !assignedContractKeys.has(`${contract.kind}:${contract.id}:${contract.operation}`.toLowerCase()))
                 .map(contract => `${contract.kind}:${contract.id}:${contract.operation}`);
@@ -2073,11 +2074,17 @@ export class FileToolHandler {
                 }
             }
             const missingDataFlowDependencies: string[] = [];
+            const dependsOnTask = (taskId: string, dependencyId: string, seen = new Set<string>()): boolean => {
+                if (seen.has(taskId)) return false;
+                seen.add(taskId);
+                return (taskById.get(taskId)?.dependencies ?? []).some(dependency =>
+                    dependency === dependencyId || dependsOnTask(dependency, dependencyId, seen));
+            };
             for (const task of args.taskPlan) {
                 for (const contract of task.consumes ?? []) {
                     const producers = producersByEntity.get(`${contract.kind}:${contract.id}`.toLowerCase()) ?? [];
                     for (const producer of producers) {
-                        if (producer !== task.id && !task.dependencies.includes(producer)) {
+                        if (producer !== task.id && !dependsOnTask(task.id, producer)) {
                             missingDataFlowDependencies.push(`${task.id} consumes ${contract.kind}:${contract.id} but does not depend on ${producer}`);
                         }
                     }
@@ -2087,12 +2094,7 @@ export class FileToolHandler {
                 return failBlueprint(`Design blueprint refused: task DAG does not encode entity data flow: ${missingDataFlowDependencies.join('; ')}.`);
             }
 
-            const commonReview = args.commonDirectoryReview!;
-            const hasSelectedCommon = commonReview.some(item => item.selected === true);
-            const hasRejectedCommon = commonReview.some(item => item.selected === false);
-            if (!hasSelectedCommon || !hasRejectedCommon) {
-                return failBlueprint('Design blueprint refused: commonDirectoryReview must include at least one selected and one rejected common/ candidate so the plan shows a real design-space comparison.');
-            }
+            const commonReview = args.commonDirectoryReview;
             const commonWithoutFindings = commonReview
                 .filter(item => !String(item.findings ?? '').trim())
                 .map(item => item.directory);
@@ -2107,30 +2109,38 @@ export class FileToolHandler {
                 return failBlueprint(`Design blueprint refused: every entity needs a scopeContext, even if it is "definition/no runtime scope". Missing scopeContext for: ${entitiesMissingScope.join(', ')}.`);
             }
 
-            const rewardWithoutImplementation = args.rewardPlan!
+            const rewardWithoutImplementation = args.rewardPlan
                 .filter(reward => !String(reward.directory ?? '').trim() || !String(reward.entityType ?? '').trim() || !String(reward.implementation ?? '').trim())
                 .map(reward => reward.rewardId);
             if (rewardWithoutImplementation.length > 0) {
                 return failBlueprint(`Design blueprint refused: every reward must name a concrete directory/entity type and implementation path. Incomplete reward(s): ${rewardWithoutImplementation.join(', ')}.`);
             }
 
-            const cleanupWithoutMechanism = args.cleanupPlan!
+            const cleanupWithoutMechanism = args.cleanupPlan
                 .filter(item => !String(item.cleanup ?? '').trim())
                 .map(item => item.target);
             if (cleanupWithoutMechanism.length > 0) {
                 return failBlueprint(`Design blueprint refused: cleanupPlan entries need exact cleanup or closure mechanisms. Missing cleanup for: ${cleanupWithoutMechanism.join(', ')}.`);
             }
 
-            const evidence = args.evidence!;
+            const evidence = args.evidence;
             const evidenceText = evidence
                 .map(item => `${item.sourceType} ${item.source} ${item.insight}`)
                 .join('\n')
                 .toLowerCase();
-            if (!/(cwt|lsp|query_rules|query_scope|query_types|scope|rule)/.test(evidenceText)) {
+            const hasCwtEvidence = /(cwt|lsp|query_rules|query_scope|query_types|scope|rule)/.test(evidenceText);
+            if (!hasCwtEvidence) {
                 return failBlueprint('Design blueprint refused: evidence must include at least one CWT/LSP or typed-rule verification source.');
             }
-            if (!/(common_inventory|common\/|list_directory\("common"\)|list_directory\('common'\)|common directory)/.test(evidenceText)) {
-                return failBlueprint('Design blueprint refused: evidence must include the common/ inventory or common directory findings used to choose subsystems.');
+            const complexBlueprint = args.entities.length >= 3 || args.subsystemPlan.length >= 2;
+            if (complexBlueprint) {
+                const evidenceKinds = evidence.map(item => `${item.sourceType} ${item.source}`.toLowerCase());
+                const hasKnowledge = evidenceKinds.some(value => value.includes('project_knowledge') || value.includes('query_project_knowledge') || value.includes('.cwtools/project/knowledge'));
+                const hasVanilla = evidenceKinds.some(value => value.includes('vanilla'));
+                if (!hasKnowledge && !hasVanilla) {
+                    return failBlueprint('Design blueprint refused: complex plans must cite current project knowledge or a bounded vanilla archetype.');
+                }
+            }
             }
 
             // Keep one canonical, topic-scoped plan artifact. The executable blueprint
@@ -2150,13 +2160,13 @@ export class FileToolHandler {
 
             lines.push('## Blueprint Completeness Gate');
             lines.push('');
-            lines.push('- [x] Common directory review includes selected and rejected candidates');
-            lines.push('- [x] Entity topology includes scopeContext for every entity');
-            lines.push('- [x] Trigger, reward, cleanup, and dependency plans are present');
-            lines.push('- [x] Evidence includes CWT/LSP verification and common/ inventory findings');
-            lines.push('- [x] Feature manifest defines entity operations and required relationship edges');
-            lines.push('- [x] Task DAG assigns every required contract and acceptance criterion before execution');
-            lines.push(unresolvedCritical.length === 0
+            const gate = (complete: boolean, label: string) => lines.push(`- [${complete ? 'x' : ' '}] ${label}`);
+            gate(args.entities.length > 0, 'Entity topology is present');
+            gate(args.evidence.length > 0, 'Semantic evidence is present');
+            gate(args.featureManifest.entities.length > 0 && args.featureManifest.acceptanceCriteria.length > 0,
+                'Feature manifest defines entity operations and acceptance criteria');
+            gate(args.taskPlan.length > 0, 'Execution task plan is present');
+            lines.push(approvalReady
                 ? '- [x] No design-changing facts remain unresolved'
                 : `- [ ] ${unresolvedCritical.length} design-changing fact(s) remain unresolved; approval handoff is withheld`);
             lines.push('');
@@ -2264,7 +2274,7 @@ export class FileToolHandler {
             }
             lines.push('');
 
-            lines.push(unresolvedCritical.length === 0
+            lines.push(approvalReady
                 ? '## Approved Multi-Agent Task DAG'
                 : '## Draft Multi-Agent Task DAG');
             lines.push('');
@@ -2411,7 +2421,7 @@ export class FileToolHandler {
             lines.push(JSON.stringify(executableBlueprint, null, 2));
             lines.push('```');
             lines.push('');
-            if (unresolvedCritical.length === 0) {
+            if (approvalReady) {
                 const targetFiles = Array.from(new Set(args.taskPlan.flatMap(task => task.plannedFiles ?? [])));
                 const operations = args.taskPlan.map(task => ({
                     id: task.id,
@@ -2456,7 +2466,8 @@ export class FileToolHandler {
 
             return {
                 success: true,
-                message: unresolvedCritical.length === 0
+                approvalReady,
+                message: approvalReady
                     ? `Unified Implementation Plan saved to ${blueprintPath}. It contains the human-readable design, approval handoff, and executable Multi-Agent contract.`
                     : `Blueprint draft saved to ${blueprintPath}. Resolve ${unresolvedCritical.length} critical decision(s), then write it again with unresolvedCritical: [] to create the approval handoff.`,
                 filePath: blueprintPath,
@@ -2466,6 +2477,7 @@ export class FileToolHandler {
         } catch (e) {
             return {
                 success: false,
+                approvalReady: false,
                 message: `Failed to write design blueprint: ${e instanceof Error ? e.message : String(e)}`,
                 filePath: '',
             };

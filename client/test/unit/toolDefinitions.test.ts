@@ -26,7 +26,7 @@ describe('tool definitions', () => {
         expect(registry?.effect).to.equal('none');
         expect(registry?.riskLevel).to.equal(0);
         expect(registry?.concurrencyClass).to.equal('interactive');
-        expect(registry?.allowSubAgent).to.equal(true);
+        expect(registry?.allowSubAgent).to.equal(false);
         expect(registry?.idempotency).to.equal('none');
     });
 

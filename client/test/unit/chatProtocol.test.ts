@@ -106,6 +106,7 @@ describe('AI chat protocol boundaries', () => {
         expect(parseHostMessage({
             type: 'questionRequest',
             questionId: 'q1',
+            topicId: 'topic-1',
             questions: [{
                 id: 'scope',
                 question: 'Which scope?',
@@ -118,7 +119,20 @@ describe('AI chat protocol boundaries', () => {
         expect(parseHostMessage({
             type: 'questionRequest',
             questionId: 'q1',
+            topicId: 'topic-1',
             questions: [{ id: 'scope', question: 'Which scope?', options: [] }],
+        })).to.equal(null);
+        expect(parseHostMessage({
+            type: 'questionRequest',
+            questionId: 'q1',
+            questions: [{
+                id: 'scope',
+                question: 'Which scope?',
+                options: [
+                    { label: 'Workspace', description: 'Use the full workspace.' },
+                    { label: 'File', description: 'Use the active file.' },
+                ],
+            }],
         })).to.equal(null);
 
         expect(parseHostMessage('clearChat')).to.equal(null);

@@ -56,16 +56,26 @@ function loadAgentRunner(options: { freshLiveContext?: boolean } = {}) {
 describe('AgentRunner 状态机与工具调度测试 (阶段 0 基线)', () => {
     describe('工具结果健康状态', () => {
         it('把带 success=false 或 ok=false 的结构化结果计为失败', () => {
-            const { isToolResultFailure, isToolResultSuccess } = loadAgentRunner();
+            const { getTerminalToolOutcome, isToolResultFailure, isToolResultSuccess } = loadAgentRunner();
             expect(isToolResultFailure({ success: false, error: 'denied' })).to.equal(true);
             expect(isToolResultFailure({ ok: false, error: 'invalid args' })).to.equal(true);
             expect(isToolResultFailure({ error: 'thrown error' })).to.equal(true);
             expect(isToolResultFailure({ success: true })).to.equal(false);
             expect(isToolResultFailure({ diagnostics: [] })).to.equal(false);
+            expect(isToolResultFailure({ exitCode: 1, stderr: 'failed' })).to.equal(true);
             expect(isToolResultSuccess({ ok: false })).to.equal(false);
             expect(isToolResultSuccess({ success: false })).to.equal(false);
             expect(isToolResultSuccess({ skipped: true })).to.equal(false);
             expect(isToolResultSuccess({ success: true })).to.equal(true);
+            expect(getTerminalToolOutcome({ cancelled: true, error: 'cancelled' })).to.deep.equal({
+                kind: 'user_cancelled',
+                message: 'cancelled',
+            });
+            expect(getTerminalToolOutcome({ policyDenied: true, error: 'blocked' })).to.deep.equal({
+                kind: 'policy_denied',
+                message: 'blocked',
+            });
+            expect(getTerminalToolOutcome({ success: false, error: 'retryable' })).to.equal(undefined);
         });
 
         it('归档大型结果时保留失败与验证摘要', () => {

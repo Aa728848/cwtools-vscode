@@ -364,6 +364,7 @@ const ALWAYS_DISCLOSED_TOOLS = new Set<AgentToolName>([
 ]);
 const WRITE_TOOLS_SET = new Set<string>([...EDIT, 'deploy_mod_asset', 'git_ops']);
 const SUB_AGENT_EXCLUDES_SET = new Set<string>([
+    'ask_user_question',
     'web_search', 'web_open', 'web_find',
     'run_command', 'manage_process',
     'git_ops', 'save_workflow',

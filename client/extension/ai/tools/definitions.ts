@@ -1507,7 +1507,7 @@ const RAW_TOOL_DEFINITIONS: ToolDefinition[] = [
         type: 'function',
         function: {
             name: 'write_design_blueprint',
-            description: 'Write the blueprint tier of the unified Implementation Plan for a connected Paradox game-entity pipeline. Load get_design_blueprint_contract once, include every required field, and always pass unresolvedCritical. Use [] only when every design-changing choice is resolved; a non-empty list saves a blocked draft without an approval handoff. Complex plans need CWT/LSP evidence plus either current-project knowledge or a bounded vanilla archetype. General repository work does not use this PDX-specific contract.',
+            description: 'Write the blueprint tier of the unified Implementation Plan for a connected Paradox game-entity pipeline. Always pass title and unresolvedCritical. A non-empty unresolvedCritical saves the available sections as an incremental draft. Use [] only to request approval; ready plans then require entities, semantic evidence, a feature manifest, exact planned files, and a task plan. General repository work does not use this PDX-specific contract.',
             parameters: {
                 type: 'object',
                 properties: {
@@ -1530,7 +1530,7 @@ const RAW_TOOL_DEFINITIONS: ToolDefinition[] = [
                     },
                     commonDirectoryReview: {
                         type: 'array',
-                        description: 'Capability review of current-game common/ directories considered for this design. Include selected and rejected directories so the plan shows a broad game-system search, not just event text.',
+                        description: 'Optional capability review of current-game common/ directories that materially affected this design. Include rejected alternatives only when they represent a real design choice.',
                         items: {
                             type: 'object',
                             properties: {
@@ -1773,7 +1773,7 @@ const RAW_TOOL_DEFINITIONS: ToolDefinition[] = [
                     },
                     notes: { type: 'string', description: 'Additional design notes: scope chain transition warnings, edge cases, branching logic, or vanilla references studied.' },
                 },
-                required: ['title', 'entities', 'commonDirectoryReview', 'subsystemPlan', 'triggerPlan', 'rewardPlan', 'cleanupPlan', 'evidence', 'dependencyOrder', 'featureManifest', 'taskPlan', 'unresolvedCritical'],
+                required: ['title', 'unresolvedCritical'],
             },
         },
     },
@@ -2023,7 +2023,7 @@ const RAW_TOOL_DEFINITIONS: ToolDefinition[] = [
                     },
                     answerClarifications: {
                         type: 'array',
-                        description: 'Parent answers to sub-agent clarifications from the last dispatch (clarifications[].id). An answered node resumes from its own preserved working context and receives only the answer, so it does not repeat the investigation it already finished; if that context is unavailable it falls back to a fresh run with the answer appended to its prompt.',
+                        description: 'Parent answers to sub-agent clarifications from the last dispatch (clarifications[].id). Resolve from the user request, approved plan, repository evidence, and shared context first. If the parent still cannot decide, call ask_user_question separately, then resume with the user answer. An answered node resumes from its preserved working context and receives only the answer; if that context is unavailable it falls back to a fresh run with the answer appended to its prompt.',
                         items: {
                             type: 'object',
                             properties: {
@@ -2116,7 +2116,7 @@ const COMPACT_BLUEPRINT_WRITE_TOOL: ToolDefinition = {
     type: 'function',
     function: {
         name: 'write_design_blueprint',
-        description: 'Validate and save a design blueprint. First call get_design_blueprint_contract once, then pass the completed object as blueprint. Always include unresolvedCritical: [] for an approval-ready plan, or list exact blockers to save a draft without an approval handoff. The host validates required sections, evidence, entity edges, task dependencies, and acceptance criteria.',
+        description: 'Validate and save a design blueprint. First call get_design_blueprint_contract once, then pass the available object as blueprint. Always include title and unresolvedCritical. Exact blockers save an incremental draft even when other sections are incomplete; [] requests approval and activates the stricter executable-plan checks.',
         parameters: {
             type: 'object',
             properties: {
@@ -2135,7 +2135,7 @@ const GET_BLUEPRINT_CONTRACT_TOOL: ToolDefinition = {
     type: 'function',
     function: {
         name: 'get_design_blueprint_contract',
-        description: 'Load the detailed versioned JSON Schema for write_design_blueprint on demand. Call only when a connected multi-entity blueprint is actually required.',
+        description: 'Load the detailed versioned JSON Schema for write_design_blueprint on demand. The schema permits partial drafts; approval-ready submissions activate stricter host checks. Call only when a connected multi-entity blueprint is actually required.',
         parameters: { type: 'object', properties: {}, required: [] },
     },
 };

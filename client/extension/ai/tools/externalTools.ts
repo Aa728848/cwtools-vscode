@@ -853,7 +853,7 @@ export class ExternalToolHandler {
 
     // ─── ignoreValidationError ───────────────────────────────────────────────
 
-    async ignoreValidationError(args: { errorId: string; reason: string }, context?: import('../types').AgentToolContext): Promise<{ success: boolean; message: string }> {
+    async ignoreValidationError(args: { errorId: string; reason: string }, context?: import('../types').AgentToolContext): Promise<{ success: boolean; message: string; terminalOutcome?: import('../types').ToolTerminalOutcome }> {
         const onPermissionRequest = context?.onPermissionRequest;
         if (!onPermissionRequest) {
             return { success: false, message: 'Permission handler not configured. Cannot ignore validation errors.' };
@@ -871,7 +871,7 @@ export class ExternalToolHandler {
         );
 
         if (!allowed) {
-            return { success: false, message: 'User denied the request to ignore the validation error.' };
+            return { success: false, message: 'User denied the request to ignore the validation error.', terminalOutcome: 'permission_denied' };
         }
 
         try {
@@ -894,7 +894,7 @@ export class ExternalToolHandler {
 
     // ─── removeIgnoredDiagnostic ──────────────────────────────────────────────
 
-    async removeIgnoredDiagnostic(args: { diagnosticKey: string; reason: string }, context?: import('../types').AgentToolContext): Promise<{ success: boolean; message: string }> {
+    async removeIgnoredDiagnostic(args: { diagnosticKey: string; reason: string }, context?: import('../types').AgentToolContext): Promise<{ success: boolean; message: string; terminalOutcome?: import('../types').ToolTerminalOutcome }> {
         const vs = await import('vscode');
         const fileWriteMode = vs.workspace.getConfiguration('stellarisLanguageServices.ai').get<string>('agentFileWriteMode', 'auto');
 
@@ -920,7 +920,7 @@ export class ExternalToolHandler {
         );
 
         if (!allowed) {
-            return { success: false, message: 'User denied the request to remove the ignored diagnostic.' };
+            return { success: false, message: 'User denied the request to remove the ignored diagnostic.', terminalOutcome: 'permission_denied' };
         }
 
         try {
@@ -1029,6 +1029,7 @@ export class ExternalToolHandler {
     }
 
     async runCommand(args: { command: string; shell?: RunCommandShell; cwd?: string; timeoutMs?: number; background?: boolean; requestEscalation?: boolean; unsandboxed?: boolean; executionMode?: 'captured' | 'terminal'; networkAccess?: boolean; networkHosts?: string[] }, context?: import('../types').AgentToolContext): Promise<{
+        success?: boolean;
         stdout: string;
         stderr: string;
         exitCode: number;
@@ -1038,6 +1039,7 @@ export class ExternalToolHandler {
         changedFiles?: string[];
         writtenFiles?: string[];
         recordedSnapshots?: number;
+        terminalOutcome?: import('../types').ToolTerminalOutcome;
     }> {
         // Safety: deny obviously dangerous commands and shell control operators.
         // Approval behavior is mode-agnostic: every mode shares the same
@@ -1221,7 +1223,13 @@ export class ExternalToolHandler {
                 onPermissionRequest, permId, 'run_command', description, { ...context, preflight: preflightPayload } as any, args.command
             );
             if (!allowed) {
-                return { stdout: '', stderr: aiText('User denied permission to run this command', '用户拒绝了此命令的执行权限'), exitCode: 1 };
+                return {
+                    success: false,
+                    stdout: '',
+                    stderr: aiText('User denied permission to run this command', '用户拒绝了此命令的执行权限'),
+                    exitCode: 1,
+                    terminalOutcome: 'permission_denied',
+                };
             }
             grantedPermissionId = permId;
         } else if (requiresPermission) {
@@ -1949,7 +1957,7 @@ export class ExternalToolHandler {
         sourcePath: string;
         targetRelativePath: string;
         overwrite?: boolean;
-    }, context?: import('../types').AgentToolContext): Promise<{ success: boolean; message: string; finalPath?: string; writtenFiles?: string[] }> {
+    }, context?: import('../types').AgentToolContext): Promise<{ success: boolean; message: string; finalPath?: string; writtenFiles?: string[]; terminalOutcome?: import('../types').ToolTerminalOutcome }> {
         const sourcePath = this.resolveWorkspacePath(args.sourcePath);
         if (!this.isWithinAnyWorkspace(sourcePath)) {
             return { success: false, message: `Source file must be within the workspace: ${args.sourcePath}` };
@@ -1986,7 +1994,11 @@ export class ExternalToolHandler {
                 context
             );
             if (!allowed) {
-                return { success: false, message: aiText('User denied this asset deployment request.', '用户拒绝了此资产部署请求。') };
+                return {
+                    success: false,
+                    message: aiText('User denied this asset deployment request.', '用户拒绝了此资产部署请求。'),
+                    terminalOutcome: 'permission_denied',
+                };
             }
         }
 

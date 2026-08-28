@@ -65,6 +65,26 @@ ${JSON.stringify(contract, null, 2)}
 \`\`\``;
 }
 
+function compactReadyPlan(): string {
+    return `# Plan
+
+Update the approval validator and run its focused regression test. Preserve exact file ownership.
+
+\`\`\`cwtools-plan
+${JSON.stringify({
+        objective: 'Simplify plan approval without weakening file ownership.',
+        targetFiles: ['client/extension/ai/executePlanHandoff.ts'],
+        operations: [{
+            id: 'update',
+            description: 'Adjust the plan validator.',
+            files: ['client/extension/ai/executePlanHandoff.ts'],
+        }],
+        verification: ['Run the focused handoff test.'],
+        unresolvedCritical: [],
+    }, null, 2)}
+\`\`\``;
+}
+
 describe('Execute-to-Plan handoff', () => {
     it('never turns Explore prose into an approvable plan', () => {
         const explanation = 'The implementation plan is ready for approval. Confirm and I will execute it.';
@@ -130,6 +150,16 @@ describe('Execute-to-Plan handoff', () => {
     it('accepts a lightweight plan without mandatory risks or rollback', () => {
         const plan = completePlan({ tier: 'lightweight', risks: [], rollback: [] });
         expect(validateImplementationPlan(plan).complete).to.equal(true);
+    });
+
+    it('accepts a compact ready plan with safe defaults for optional metadata', () => {
+        const validation = validateImplementationPlan(compactReadyPlan());
+        expect(validation.complete).to.equal(true);
+        expect(validation.handoff?.tier).to.equal('structured');
+        expect(validation.handoff?.acceptanceCriteria).to.deep.equal(['Run the focused handoff test.']);
+        expect(validation.handoff?.risks).to.deep.equal([]);
+        expect(validation.handoff?.rollback).to.deep.equal([]);
+        expect(validation.handoff?.operations[0]?.dependsOn).to.deep.equal([]);
     });
 
     it('renders approval for plans with a verification-only operation', () => {
@@ -224,7 +254,7 @@ describe('Execute-to-Plan handoff', () => {
         })).to.equal(false);
     });
 
-    it('recognizes only a complete exact Implementation_Plan write as a runtime approval boundary', () => {
+    it('recognizes complete plan artifacts and ready blueprints as runtime approval boundaries', () => {
         const plan = completePlan();
         expect(isCompleteImplementationPlanWrite('write_file', {
             file: '.cwtools/topic/Implementation_Plan.md',
@@ -238,6 +268,12 @@ describe('Execute-to-Plan handoff', () => {
             file: 'src/Implementation_Plan.md',
             content: plan,
         }, ['C:/workspace/src/not-the-plan.md'])).to.equal(false);
+        expect(isCompleteImplementationPlanWrite('write_design_blueprint', {
+            blueprint: { unresolvedCritical: [] },
+        }, [])).to.equal(true);
+        expect(isCompleteImplementationPlanWrite('write_design_blueprint', {
+            blueprint: { unresolvedCritical: ['Choose a scope.'] },
+        }, [])).to.equal(false);
     });
 
     it('does not intercept an Execute result after a project write', () => {

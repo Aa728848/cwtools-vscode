@@ -2,11 +2,13 @@ import type { AgentMode, AgentRuntimeDomain, AgentToolFocus, ToolDefinition } fr
 import { defaultDomainForMode } from './agentProfile';
 import { TOOL_REGISTRY } from './tools/registry';
 import { evaluateEffectiveToolPolicy } from './runner/effectiveToolPolicy';
+import { agentProfileCatalog } from './runner/agentProfileCatalog';
 
 export interface ToolFilterOptions {
     domain?: AgentRuntimeDomain;
     useSlimPrompt?: boolean;
     excludeTools?: string[];
+    agentProfileName?: string;
 }
 
 export type { AgentToolFocus } from './types';
@@ -204,6 +206,7 @@ export function filterToolDefinitionsForMode(
             mode,
             domain,
             isSubAgent: options.useSlimPrompt,
+            profile: options.agentProfileName ? agentProfileCatalog.get(options.agentProfileName) : undefined,
         }).allowed;
     });
 

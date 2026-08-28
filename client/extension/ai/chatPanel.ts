@@ -113,10 +113,12 @@ import {
     getTopicStorageDirCandidates,
 } from './workspacePaths';
 
-const activePendingInteractions = new Map<string, string>();
+const activePendingInteractions = new Map<string, { topicId: string; description: string }>();
 
-export function getPendingInteractions(): string[] {
-    return Array.from(activePendingInteractions.values());
+export function getPendingInteractions(topicId?: string): string[] {
+    return Array.from(activePendingInteractions.values())
+        .filter(interaction => !topicId || interaction.topicId === topicId)
+        .map(interaction => interaction.description);
 }
 
 type PendingWriteCardMessage = Extract<HostMessage, { type: 'pendingWriteFile' }>;
@@ -409,7 +411,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             send(card);
         }
         for (const card of this.pendingQuestionCards.values()) {
-            send(card);
+            if (card.topicId === (this.topicManager.currentTopic?.id ?? 'default')) send(card);
         }
     }
 
@@ -1290,11 +1292,20 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                     && !Array.isArray(step.toolResult)
                     && (step.toolResult as Record<string, unknown>).success !== false)
                 .map(step => step.invocationId as string));
+            const approvalReadyInvocations = new Set(result.steps
+                .filter(step => step.type === 'tool_result'
+                    && typeof step.invocationId === 'string'
+                    && step.toolResult
+                    && typeof step.toolResult === 'object'
+                    && !Array.isArray(step.toolResult)
+                    && (step.toolResult as Record<string, unknown>).approvalReady === true)
+                .map(step => step.invocationId as string));
             const wroteUnifiedBlueprintPlan = result.steps.some(step =>
                 step.type === 'tool_call'
                 && step.toolName === 'write_design_blueprint'
                 && typeof step.invocationId === 'string'
-                && successfulToolInvocations.has(step.invocationId));
+                && successfulToolInvocations.has(step.invocationId)
+                && approvalReadyInvocations.has(step.invocationId));
             const hasCurrentPlanArtifact = !!generatedPlanPath && (wroteUnifiedBlueprintPlan || hasImplementationPlanArtifact(result.steps, {
                 expectedPath: generatedPlanPath,
                 workspaceRoot: getProjectWorkspaceRoot(),
@@ -2626,7 +2637,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
 
         for (const [questionId, resolver] of this.pendingQuestionResolvers.entries()) {
             const card = this.pendingQuestionCards.get(questionId);
-            const topicId = this.topicManager.currentTopic?.id ?? 'default';
+            const topicId = card?.topicId ?? 'default';
             this.agentRuntime.resolveInteraction(
                 questionId,
                 topicId,
@@ -3059,6 +3070,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         const card: PendingQuestionCardMessage = {
             type: 'questionRequest',
             questionId,
+            topicId,
             threadId,
             turnId: context?.turnId,
             questions: request.questions,
@@ -3074,7 +3086,10 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             detail: JSON.stringify(request.questions),
         });
         this.pendingQuestionCards.set(questionId, card);
-        activePendingInteractions.set(questionId, request.questions[0]?.question ?? 'Clarification required');
+        activePendingInteractions.set(questionId, {
+            topicId,
+            description: request.questions[0]?.question ?? 'Clarification required',
+        });
         this.postMessage(card);
         return new Promise(resolve => this.pendingQuestionResolvers.set(questionId, resolve));
     }
@@ -3087,7 +3102,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         const resolver = this.pendingQuestionResolvers.get(questionId);
         const card = this.pendingQuestionCards.get(questionId);
         if (!resolver || !card) return;
-        const topicId = this.topicManager.currentTopic?.id ?? 'default';
+        const topicId = card.topicId;
         const validAnswers = !cancelled && !!answers && card.questions.every(question => {
             const answer = answers[question.id];
             return question.multiSelect
@@ -3158,7 +3173,10 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             };
             runLedger.appendEvent(permissionRunId, 'item_started', item as any, { invocationId: id, status: 'pending' }).catch(() => {});
         }
-        activePendingInteractions.set(id, command ? `[run_command] ${command}` : `[${tool}] ${description}`);
+        activePendingInteractions.set(id, {
+            topicId: permissionTopicId,
+            description: command ? `[run_command] ${command}` : `[${tool}] ${description}`,
+        });
         const requestMode = this.currentMode;
         // Structured flags from preflight/tool context decide escalation; the
         // description-tag regex stays only as a fail-safe fallback.

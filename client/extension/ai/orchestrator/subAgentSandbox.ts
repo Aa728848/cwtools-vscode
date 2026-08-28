@@ -4,7 +4,7 @@ import type { TaskNode } from './types';
 import type { AgentMode } from '../types';
 import { isPlanModeCardArtifactFile } from '../planModeGuard';
 import { getAgentToolTargetFiles } from '../runner/toolScheduler';
-import { FILE_SCOPED_WRITE_TOOLS, MUTATING_TOOLS, SUB_AGENT_EXCLUDES } from '../tools/registry';
+import { FILE_SCOPED_WRITE_TOOLS, MUTATING_TOOLS, TOOL_REGISTRY } from '../tools/registry';
 import { isPathInsideOrEqual, foldPathCase } from '../workspaceSandbox';
 import { clampWriteScopeToRoots } from '../runner/policyEngine';
 import { aiText } from '../messages';
@@ -16,6 +16,7 @@ export interface SubAgentSandbox {
     agentId: string;
     role: string;
     mode: AgentMode;
+    agentProfileName?: string;
     allowedTools?: Set<string>;
     readScope?: string[];
     writeScope?: string[];
@@ -31,6 +32,12 @@ export interface SubAgentSandbox {
 const TOPIC_ARTIFACT_SCOPE = '.cwtools';
 const LEGACY_TOPIC_ARTIFACT_SCOPE = '.cwtools-ai';
 
+function runtimeProfileNameForMode(mode: AgentMode): string {
+    return mode === 'utility' ? 'general-coder'
+        : mode === 'review' || mode === 'script_reviewer' ? 'reviewer'
+            : mode === 'explore' || mode === 'plan' ? 'explore' : 'paradox-coder';
+}
+
 /**
  * 根据 TaskNode 任务节点与项目环境动态构造子 Agent 隔离沙盒
  */
@@ -42,28 +49,18 @@ export function buildSubAgentSandbox(
 ): SubAgentSandbox {
     const profile = getAgentProfile(taskNode.agentType);
     const role = taskNode.agentType;
+    const agentProfileName = runtimeProfileNameForMode(profile.mode);
 
     const sandbox: SubAgentSandbox = {
         agentId: taskNode.id,
         role,
         mode: profile.mode,
+        agentProfileName,
         permissionPolicy: 'delegate_to_parent',
         deniedWriteScopes: deniedWriteScopes?.length ? [...deniedWriteScopes] : undefined,
     };
 
-    // ─── 1. 计算允许的工具集 ───
-    // 默认黑名单拦截高危/交互型特权工具
-    const defaultExcludes = new Set<string>(SUB_AGENT_EXCLUDES);
-
-    // 如果是只读或者 plan 规划角色，额外禁止所有物理写入工具
-    if (profile.toolBudget === 'read_only' || profile.toolBudget === 'plan') {
-        MUTATING_TOOLS.forEach(t => defaultExcludes.add(t));
-    }
-
-    // 假设注册的完整工具白名单（基于可用工具过滤去重）
-    // 后续在 enforce 中主要使用此黑名单做直接防御，以简化集成
-
-    // ─── 2. 计算写入作用域 (Write Scope) ───
+    // ─── 1. 计算写入作用域 (Write Scope) ───
     // 如果是只读性质的角色，其 writeScope 直接设为空数组（绝对禁止任何写物理文件操作）
     if (profile.toolBudget === 'read_only' || profile.toolBudget === 'plan') {
         sandbox.writeScope = [];
@@ -105,7 +102,7 @@ export function buildSubAgentSandbox(
         }
     }
 
-    // ─── 3. 设定读作用域 (Read Scope) ───
+    // ─── 2. 设定读作用域 (Read Scope) ───
     // 默认子 Agent 读操作开放，但如果声明了 readScope，可以做相应限制，默认不开启硬拦截
     sandbox.readScope = undefined;
 
@@ -150,15 +147,13 @@ export function enforceSubAgentSafety(
     args: any,
     workspaceRoot: string
 ): { allowed: boolean; reason?: string } {
-    // W7 fix: 针对 excluded 敏感特权工具直接物理阻断
-    const excludedTools = new Set<string>(SUB_AGENT_EXCLUDES);
-
-    if (excludedTools.has(toolName)) {
+    const registryEntry = TOOL_REGISTRY.get(toolName as import('../tools/registry').AgentToolName);
+    const profileException = toolName === 'run_command' && sandbox.mode === 'utility';
+    if (registryEntry && !registryEntry.allowSubAgent && !profileException) {
         if (toolName === 'run_command') {
-            if (sandbox.mode === 'utility') return { allowed: true };
             return {
                 allowed: false,
-                reason: 'run_command is disabled for orchestrator sub-agents. Use structured edit tools for bulk file changes; if a terminal command is truly required, return BLOCKED_FOR_ORCHESTRATOR with the command and reason.'
+                reason: 'run_command is disabled for orchestrator sub-agents. Use structured edit tools; if a terminal command is truly required, return BLOCKED_FOR_ORCHESTRATOR with the command and reason.',
             };
         }
         return {

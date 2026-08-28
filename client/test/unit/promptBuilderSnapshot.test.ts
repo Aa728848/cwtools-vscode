@@ -70,7 +70,8 @@ describe('PromptBuilder 快照与稳定性测试', () => {
         expect(prompt).to.include('write_design_blueprint');
         expect(prompt).to.include('Dynamic Coupling Assessment');
         expect(prompt).to.include('Common Directory Capability Review');
-        expect(prompt).to.include('Reward Implementation Grounding');
+        expect(prompt).to.include('sections are optional');
+        expect(prompt).to.include('Exact blockers may be saved immediately');
         expect(prompt).to.include('ordinary software engineering or Paradox/CWTools work');
         expect(prompt).to.include('ordinary code');
         expect(prompt).to.include('final design authority');
@@ -202,13 +203,12 @@ describe('PromptBuilder 快照与稳定性测试', () => {
 
         expect(prompt).to.include('Blueprint Self-check');
         expect(prompt).to.include('get_design_blueprint_contract');
-        expect(prompt).to.include('machine-checkable `featureManifest`');
-        expect(prompt).to.include('executable `taskPlan`');
-        expect(prompt).to.include('produces/consumes');
-        expect(prompt).to.include('at least one evidence-backed selection and rejection');
-        expect(prompt).to.include('Audit the manifest as one identity graph');
-        expect(prompt).to.include('dependencies must encode that producer-to-consumer order');
-        expect(prompt).to.include('before the first `write_design_blueprint` call');
+        expect(prompt).to.include('Exact blockers may be saved immediately');
+        expect(prompt).to.include('Approval-ready blueprints need entities with verified scopes');
+        expect(prompt).to.include('feature manifest with acceptance criteria');
+        expect(prompt).to.include('task plan with exact planned files');
+        expect(prompt).to.include('sections are optional');
+        expect(prompt).to.include('ordered along producer/consumer flow');
         expect(prompt).to.include('STOP and wait for user approval');
         expect(prompt).to.include('Do not defer any design work until after approval');
     });

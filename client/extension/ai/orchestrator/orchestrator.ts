@@ -673,9 +673,7 @@ export class Orchestrator {
             model,
             reasoningEffort: taskNode.reasoningEffort ?? orchestratorOptions.reasoningEffort,
             mode: profile.mode,
-            agentProfileName: profile.mode === 'utility' ? 'general-coder'
-                : profile.mode === 'review' || profile.mode === 'script_reviewer' ? 'reviewer'
-                    : profile.mode === 'explore' || profile.mode === 'plan' ? 'explore' : 'paradox-coder',
+            agentProfileName: sandbox.agentProfileName!,
             // The parent already approved and decomposed this Execute task.
             // Writer roles start with execution-focused guidance and never reopen
             // the main-Agent design/approval lifecycle.
@@ -692,7 +690,6 @@ export class Orchestrator {
             threadId: `${orchestratorOptions.parentRunId ?? orchestratorOptions.topicId ?? 'orchestrator'}/${taskNode.id}`,
             turnId: taskNode.id,
             onTodoUpdate: orchestratorOptions.onTodoUpdate,
-            onUserQuestion: orchestratorOptions.onUserQuestion,
             useSlimPrompt: true,
             // Children run exactly one level below this coordinator. The dispatch
             // gate reads this back to refuse a further delegation level.

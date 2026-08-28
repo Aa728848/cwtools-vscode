@@ -1399,6 +1399,8 @@ export interface AskUserQuestionResult {
     error?: string;
 }
 
+export type ToolTerminalOutcome = 'user_cancelled' | 'permission_denied' | 'policy_denied' | 'interaction_unavailable';
+
 export interface TodoUpdateScope {
     agentId?: string;
     threadId?: string;
@@ -1657,6 +1659,7 @@ export interface WriteFileArgs {
 export interface WriteFileResult {
     success: boolean;
     message: string;
+    terminalOutcome?: ToolTerminalOutcome;
     /** LSP diagnostics detected after the write */
     diagnostics?: ValidationError[];
     freshness?: 'fresh' | 'pending' | 'stale';
@@ -1683,6 +1686,7 @@ export interface EditFileArgs {
 export interface EditFileResult {
     success: boolean;
     message: string;
+    terminalOutcome?: ToolTerminalOutcome;
     /** Unified diff of the change */
     diff?: string;
     /** LSP diagnostics detected after the edit */
@@ -1723,6 +1727,7 @@ export interface ReplaceLinesArgs {
 export interface ReplaceLinesResult {
     success: boolean;
     message: string;
+    terminalOutcome?: ToolTerminalOutcome;
     /** Unified diff of the change */
     diff?: string;
     /** LSP diagnostics detected after the edit */
@@ -1910,7 +1915,7 @@ export interface BlueprintTaskPlan {
 
 export interface WriteDesignBlueprintArgs {
     title: string;
-    entities: BlueprintEntity[];
+    entities?: BlueprintEntity[];
     commonDirectoryReview?: BlueprintCommonDirectoryReview[];
     subsystemPlan?: BlueprintSubsystemPlan[];
     triggerPlan?: BlueprintTriggerPlan[];
@@ -1923,11 +1928,11 @@ export interface WriteDesignBlueprintArgs {
         ranges: string;
     };
     localisationKeys?: string[];
-    dependencyOrder: string[];
+    dependencyOrder?: string[];
     /** Executable entity/edge/acceptance contract approved by the user with this blueprint. */
-    featureManifest: FeatureManifest;
+    featureManifest?: FeatureManifest;
     /** Executable DAG slices. Paradox/General Multi-Agent modes hydrate dispatch_agents from this plan. */
-    taskPlan: BlueprintTaskPlan[];
+    taskPlan?: BlueprintTaskPlan[];
     riskRegister?: string[];
     /** Critical knowledge gaps remaining after research. Non-empty values save a draft without an approval handoff. */
     unresolvedCritical: string[];
@@ -1936,6 +1941,8 @@ export interface WriteDesignBlueprintArgs {
 
 export interface WriteDesignBlueprintResult {
     success: boolean;
+    /** True only when the saved plan contains a complete approval handoff. */
+    approvalReady: boolean;
     message: string;
     filePath: string;
     /** Canonical Implementation Plan path containing the embedded machine-readable contract. */
@@ -2654,7 +2661,7 @@ export type HostMessage =
     | { type: 'topicForked'; newTopicId: string; title: string }
     | { type: 'permissionRequest'; permissionId: string; itemId: string; threadId?: string; turnId?: string; tool: string; description: string; command?: string; allowAlways?: boolean; availableDecisions: PermissionDecision[]; proposedRule?: { commandPrefix: string[]; cwdScope: string; riskMax: number; scope: 'session' }; preflight?: PermissionRequestPreflight }
     | { type: 'permissionResolved'; permissionId: string; itemId: string; threadId?: string; turnId?: string; decision: PermissionDecision; reviewer: 'user' | 'auto_review' | 'policy' }
-    | { type: 'questionRequest'; questionId: string; threadId?: string; turnId?: string; questions: AskUserQuestionItem[] }
+    | { type: 'questionRequest'; questionId: string; topicId: string; threadId?: string; turnId?: string; questions: AskUserQuestionItem[] }
     | { type: 'questionResolved'; questionId: string; cancelled?: boolean }
     | { type: 'floatingCardResolved'; card: 'permission' | 'question' | 'write' | 'transaction' | 'plan' | 'walkthrough' | 'blueprint'; id?: string }
     /** Restore mode state after webview rebuild (panel visibility change) */

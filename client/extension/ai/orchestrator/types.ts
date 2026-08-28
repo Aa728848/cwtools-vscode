@@ -324,8 +324,6 @@ export interface OrchestratorOptions {
     onTodoUpdate?: import('../types').TodoUpdateCallback;
     /** Permission approval callback, the sub-Agent uses this callback to request permission from the user to perform sensitive operations */
     onPermissionRequest?: (id: string, tool: string, description: string, command?: string, context?: any) => Promise<boolean>;
-    /** Structured clarification callback shared with child Agents. */
-    onUserQuestion?: import('../types').AgentToolContext['onUserQuestion'];
 }
 
 /** Quality gate test results */

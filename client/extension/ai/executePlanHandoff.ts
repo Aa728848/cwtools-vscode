@@ -40,40 +40,34 @@ export interface ImplementationPlanValidation {
 export const IMPLEMENTATION_PLAN_HANDOFF_CONTRACT = `Before requesting approval, append exactly one fenced \`cwtools-plan\` JSON block to the self-contained plan:
 \`\`\`cwtools-plan
 {
-  "version": 1,
-  "status": "ready",
-  "tier": "lightweight | structured | blueprint",
   "objective": "Concrete delivery objective",
   "targetFiles": ["exact/project/file.ts"],
   "operations": [
-    { "id": "op_1", "description": "Exact change", "files": ["exact/project/file.ts"], "dependsOn": [] }
+    { "id": "op_1", "description": "Exact change", "files": ["exact/project/file.ts"] }
   ],
   "verification": ["Exact check or test"],
-  "acceptanceCriteria": ["Observable completion criterion"],
-  "risks": [{ "risk": "Concrete risk", "mitigation": "Mitigation" }],
-  "rollback": ["Concrete rollback step"],
   "unresolvedCritical": []
 }
 \`\`\`
-The host renders an approval card only when this contract is present and valid. Every target must be an exact file path without globs. Shared files are allowed only when all operations touching them are strictly ordered by dependencies; unordered writers are rejected. Operation dependencies must reference valid operation IDs without cycles, and unresolvedCritical must be empty. Do not emit the block for preliminary analysis, exploration findings, clarification questions, drafts, or blocked plans.
+The host renders an approval card only when this contract is present and valid. \`version\`, \`status\`, \`tier\`, \`acceptanceCriteria\`, \`risks\`, \`rollback\`, and each operation's \`dependsOn\` may be omitted; the host supplies safe defaults. Every target must be an exact file path without globs. Shared files are allowed only when all operations touching them are dependency-ordered, and unresolvedCritical must be empty. Do not emit the block for drafts or blocked plans.
 
 Mandatory pre-write validation — perform this locally before the FIRST write; do not learn the format by triggering the guard:
 1. Write exactly one complete document to the exact path shown as **Implementation Plan File** in Current Editor Context. Use that literal path and do not substitute a project-root path, plan.md, or another filename.
-2. Choose one literal tier value: \`lightweight\`, \`structured\`, or \`blueprint\`. Never copy the schema placeholder text \`lightweight | structured | blueprint\`.
-3. Outside machine-readable fences, provide at least 1 heading and 80 characters for lightweight, 2 headings and 160 characters for structured, or 3 headings and 240 characters for blueprint.
+2. Optionally choose one literal tier value: \`lightweight\`, \`structured\`, or \`blueprint\`; omission defaults to \`structured\`.
+3. Outside machine-readable fences, provide at least 1 heading and 40 characters for lightweight, 1 heading and 80 characters for structured, or 2 headings and 120 characters for blueprint.
 4. Include exactly one \`cwtools-plan\` fence containing strict JSON. Do not add comments, trailing commas, Markdown inside JSON, or a second fence.
 5. Make \`targetFiles\` a non-empty, unique list of exact project file paths. It must equal the unique union of every \`operations[].files\` entry; verification-only operations may have an empty files list.
-6. Give every operation a non-empty unique ID and description. Every \`dependsOn\` ID must exist; no self-reference or cycle is allowed. If two operations touch the same file, one must depend directly or transitively on the other.
-7. Keep \`verification\` and \`acceptanceCriteria\` non-empty. Structured and blueprint plans also require at least one concrete risk+mitigation and one rollback step. \`unresolvedCritical\` must be exactly \`[]\`.
+6. Give every operation a non-empty unique ID and description. \`dependsOn\` may be omitted when empty; supplied IDs must exist without self-reference or cycles. Shared-file operations must remain dependency-ordered.
+7. Keep \`verification\` non-empty. \`acceptanceCriteria\` defaults to verification; risks and rollback are optional. \`unresolvedCritical\` must be exactly \`[]\`.
 8. Submit the plan write by itself and STOP. Do not combine it with project writes, commands, or \`dispatch_agents\` before approval.`;
 
 export const IMPLEMENTATION_PLAN_AUTHORING_GUIDANCE = `Plan authoring guidance — keep the contract strict while adapting the prose to the task:
 - Scale the plan to the real work. A cohesive one-file change may have one concise operation; cross-file work should split only at meaningful ownership or dependency boundaries. Do not pad a small task or force every plan into the same large-task template.
-- Make the human-readable body execution-ready without relying on earlier chat. Organize it into multiple meaningful Markdown sections so objective/context, concrete operations and data flow, and verification/acceptance/risks/rollback are easy to find. Section names and depth should follow the task.
+- Make the human-readable body execution-ready without relying on earlier chat. Use only the sections the task needs. Section names and depth should follow the task; do not pad a small plan to satisfy a template.
 - Choose tier by risk: lightweight for cohesive one/two-file local changes, structured for ordinary cross-file work, and blueprint for high-impact or Multi-Agent entity/data-flow changes.
 - Build the contract from verified evidence before writing the artifact. targetFiles is the canonical manifest: use exact project file paths, no globs or placeholders, and make it equal the union of operation files. A file may appear in multiple operations only when those operations form a strict dependency chain. A verification-only operation may use an empty files array.
-- Give every operation a unique stable ID. dependsOn may reference only existing operation IDs and must contain no self-reference or cycle. Use an empty dependency list when no dependency exists.
-- Keep verification, acceptanceCriteria, risks with mitigations, and rollback concrete and non-empty. For a small change these may be brief, but they must still describe an observable check, a realistic regression risk, and a practical recovery action.
+- Give every operation a unique stable ID. dependsOn may be omitted when empty; supplied dependencies may reference only existing operation IDs and must contain no self-reference or cycle.
+- Keep verification concrete and non-empty. Add separate acceptance criteria, risks, or rollback only when they provide information beyond the verification and operation list.
 - unresolvedCritical may be empty only after every decision that could change files, architecture, behavior, or acceptance has been resolved. If such a decision remains, ask the user or report the blocker; do not write a ready plan or emit the handoff block.
 - Append exactly one cwtools-plan fence containing strict JSON with no comments or trailing commas. The JSON is a machine-readable index of the prose, not a substitute for it.
 - When writing the plan artifact, copy the literal **Implementation Plan File** path ending in \`Implementation_Plan.md\` from Current Editor Context. Never construct or guess the topic path, and never write plan.md or a project-root artifact. Perform the mandatory pre-write validation above before the first write instead of relying on tool rejection to discover omissions.`;
@@ -96,6 +90,13 @@ export function isCompleteImplementationPlanWrite(
     args: Record<string, unknown>,
     targetPaths: readonly string[],
 ): boolean {
+    if (toolName === 'write_design_blueprint') {
+        const blueprint = args.blueprint && typeof args.blueprint === 'object' && !Array.isArray(args.blueprint)
+            ? args.blueprint as Record<string, unknown>
+            : args;
+        return Array.isArray(blueprint.unresolvedCritical)
+            && blueprint.unresolvedCritical.length === 0;
+    }
     if (toolName !== 'write_file' || typeof args.content !== 'string') return false;
     const targets = targetPaths.length > 0
         ? targetPaths
@@ -202,8 +203,8 @@ export function validateImplementationPlan(planText: string): ImplementationPlan
     }
 
     const candidate = parsed.value as Record<string, unknown>;
-    if (candidate.version !== 1) missing.push('version=1');
-    if (candidate.status !== 'ready') missing.push('status=ready');
+    if (candidate.version !== undefined && candidate.version !== 1) missing.push('version=1');
+    if (candidate.status !== undefined && candidate.status !== 'ready') missing.push('status=ready');
     const tier: ImplementationPlanTier = candidate.tier === 'lightweight' || candidate.tier === 'structured' || candidate.tier === 'blueprint'
         ? candidate.tier
         : 'structured';
@@ -215,14 +216,21 @@ export function validateImplementationPlan(planText: string): ImplementationPlan
         missing.push('exact unique targetFiles');
     }
     if (!isNonEmptyStringArray(candidate.verification)) missing.push('verification');
-    if (!isNonEmptyStringArray(candidate.acceptanceCriteria)) missing.push('acceptanceCriteria');
-    if (tier !== 'lightweight' && !isNonEmptyStringArray(candidate.rollback)) missing.push('rollback');
+    const acceptanceCriteria = isNonEmptyStringArray(candidate.acceptanceCriteria)
+        ? candidate.acceptanceCriteria
+        : isNonEmptyStringArray(candidate.verification) ? candidate.verification : [];
+    if (candidate.acceptanceCriteria !== undefined
+        && !isStringArray(candidate.acceptanceCriteria)) missing.push('acceptanceCriteria');
+    const rollback = candidate.rollback === undefined
+        ? []
+        : isStringArray(candidate.rollback) ? candidate.rollback : undefined;
+    if (!rollback) missing.push('rollback');
     if (!Array.isArray(candidate.unresolvedCritical) || candidate.unresolvedCritical.length !== 0) {
         missing.push('unresolvedCritical must be empty');
     }
 
     const risks = Array.isArray(candidate.risks) ? candidate.risks : [];
-    if ((tier !== 'lightweight' && risks.length === 0) || !risks.every(risk => {
+    if (!risks.every(risk => {
         if (!risk || typeof risk !== 'object' || Array.isArray(risk)) return false;
         const record = risk as Record<string, unknown>;
         return isNonEmptyString(record.risk) && isNonEmptyString(record.mitigation);
@@ -240,13 +248,15 @@ export function validateImplementationPlan(planText: string): ImplementationPlan
             || !isStringArray(operation.files)
             || !operation.files.every(isExactFilePath)
             || new Set(operation.files.map(file => file.trim())).size !== operation.files.length
-            || !Array.isArray(operation.dependsOn)
-            || !operation.dependsOn.every(isNonEmptyString)) continue;
+            || (operation.dependsOn !== undefined
+                && (!Array.isArray(operation.dependsOn) || !operation.dependsOn.every(isNonEmptyString)))) continue;
         operations.push({
             id: operation.id.trim(),
             description: operation.description.trim(),
             files: operation.files.map(file => file.trim()),
-            dependsOn: operation.dependsOn.map(id => id.trim()),
+            dependsOn: Array.isArray(operation.dependsOn)
+                ? operation.dependsOn.map(id => String(id).trim())
+                : [],
         });
     }
     if (operations.length !== rawOperations.length || operations.length === 0) missing.push('operations');
@@ -288,8 +298,8 @@ export function validateImplementationPlan(planText: string): ImplementationPlan
         .replace(BLUEPRINT_CONTRACT_BLOCK_PATTERN, '')
         .trim();
     const headingCount = humanBody.match(/^#{1,4}\s+\S.+$/gm)?.length ?? 0;
-    const minimumBody = tier === 'lightweight' ? 80 : tier === 'structured' ? 160 : 240;
-    const minimumHeadings = tier === 'lightweight' ? 1 : tier === 'structured' ? 2 : 3;
+    const minimumBody = tier === 'lightweight' ? 40 : tier === 'structured' ? 80 : 120;
+    const minimumHeadings = tier === 'blueprint' ? 2 : 1;
     if (humanBody.length < minimumBody) missing.push('self-contained plan body');
     if (headingCount < minimumHeadings) missing.push(`at least ${minimumHeadings} plan sections`);
 
@@ -305,9 +315,9 @@ export function validateImplementationPlan(planText: string): ImplementationPlan
             targetFiles: (candidate.targetFiles as string[]).map(file => file.trim()),
             operations,
             verification: candidate.verification as string[],
-            acceptanceCriteria: candidate.acceptanceCriteria as string[],
+            acceptanceCriteria,
             risks: risks as Array<{ risk: string; mitigation: string }>,
-            rollback: Array.isArray(candidate.rollback) ? candidate.rollback as string[] : [],
+            rollback: rollback ?? [],
             unresolvedCritical: [],
         },
     };

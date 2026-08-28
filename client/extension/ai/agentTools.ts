@@ -1860,7 +1860,8 @@ export class AgentToolExecutor {
         if (!access.allowed) {
             return {
                 success: false,
-                error: access.reason
+                error: access.reason,
+                terminalOutcome: 'policy_denied',
             };
         }
         const skillPolicyKey = this.getSkillPolicyKey(context);
@@ -1903,6 +1904,7 @@ export class AgentToolExecutor {
                 success: false,
                 error: `Scheduling authorization '${authorization}' blocks tool '${toolName}' (${registryEntry.effect}).`,
                 authorizationBlocked: true,
+                terminalOutcome: 'policy_denied',
             };
         }
         if (vs.workspace.isTrusted === false && registryEntry) {
@@ -1915,6 +1917,7 @@ export class AgentToolExecutor {
                         `工作区处于受限模式，工具“${toolName}”不可用。请先信任工作区，再启用命令、网络访问和修改操作。`,
                     ),
                     workspaceTrustRequired: true,
+                    terminalOutcome: 'policy_denied',
                 };
             }
         }
@@ -1951,7 +1954,7 @@ export class AgentToolExecutor {
 
         const policy = await this.enforcePolicy(toolName, args, mode, context);
         if (!policy.allowed) {
-            return { success: false, error: policy.error, policyDenied: true };
+            return { success: false, error: policy.error, policyDenied: true, terminalOutcome: 'policy_denied' };
         }
 
         const replaySession = (context?.runnerOptions as any)?.replaySession;
@@ -2502,7 +2505,11 @@ export class AgentToolExecutor {
             case 'ask_user_question': {
                 const callback = context?.onUserQuestion;
                 if (!callback) {
-                    result = { success: false, error: 'The active host does not support interactive questions. Report the blocked user-owned decision without inventing an answer.' };
+                    result = {
+                        success: false,
+                        error: 'The active host does not support interactive questions. Report the blocked user-owned decision without inventing an answer.',
+                        terminalOutcome: 'interaction_unavailable',
+                    };
                     break;
                 }
                 const rawQuestions = Array.isArray(args.questions) ? args.questions : [];
@@ -3504,7 +3511,7 @@ export class AgentToolExecutor {
         arguments?: Record<string, unknown>;
         _toolName?: string;
         [key: string]: unknown;
-    }, context?: import('./types').AgentToolContext): Promise<{ success: boolean; result?: unknown; error?: string }> {
+    }, context?: import('./types').AgentToolContext): Promise<{ success: boolean; result?: unknown; error?: string; terminalOutcome?: import('./types').ToolTerminalOutcome }> {
         let serverName = args.server;
         let toolName = args.tool;
         let isDynamicNameCall = false;
@@ -3566,7 +3573,11 @@ export class AgentToolExecutor {
                         },
                     },
                 );
-                if (!approved) return { success: false, error: `User denied MCP tool ${serverName}/${toolName}.` };
+                if (!approved) return {
+                    success: false,
+                    error: `User denied MCP tool ${serverName}/${toolName}.`,
+                    terminalOutcome: 'permission_denied',
+                };
             } else {
                 return { success: false, error: permission.reason };
             }
@@ -4304,8 +4315,6 @@ export class AgentToolExecutor {
                 onPermissionRequest: context?.onPermissionRequest
                     ?? runnerOpts?.onPermissionRequest
                     ?? this.onPermissionRequest,
-                onUserQuestion: context?.onUserQuestion
-                    ?? runnerOpts?.onUserQuestion,
             };
 
             // Push initial progress
@@ -4589,7 +4598,7 @@ export class AgentToolExecutor {
                     ? `${this.indexService.workspaceSymbolUpdatedAt ?? 'unbuilt'}:${this.indexService.workspaceSymbolCount}:${this.indexService.workspaceSymbolStatus}`
                     : undefined,
                 hint: clarifications.length > 0
-                    ? 'One or more sub-agents escalated a decision to the parent agent. Answer them with dispatch_agents(answerClarifications=[...], resumeGraphId=...) after deciding, optionally appending more read-only tasks. An answered node resumes from its preserved context instead of re-running its investigation.'
+                    ? 'One or more sub-agents escalated a decision to the parent agent. First answer from the user request, approved plan, repository evidence, and shared context. If the answer is still genuinely ambiguous, call ask_user_question as the only tool call; after the user answers, resume with dispatch_agents(answerClarifications=[...], resumeGraphId=...). An answered node resumes from its preserved context instead of re-running its investigation.'
                     : resumeGraphId
                         ? `Wave complete. The graph '${graph.id}' is persisted and resumable: call dispatch_agents(resumeGraphId='${graph.id}', appendTasks=[...]) to extend it, or merge_results to consolidate node outputs.`
                         : 'To view the detailed output of each sub-agent, use the merge_results tool.',

@@ -90,7 +90,7 @@ const validators = {
     permissionResolved: fields({ permissionId: isString, itemId: isString, decision: isString, reviewer: isString }, {
         threadId: optional(isString), turnId: optional(isString),
     }),
-    questionRequest: fields({ questionId: isString, questions: isQuestionItems }, {
+    questionRequest: fields({ questionId: isString, topicId: isString, questions: isQuestionItems }, {
         threadId: optional(isString), turnId: optional(isString),
     }),
     questionResolved: fields({ questionId: isString }, { cancelled: optional(isBoolean) }),

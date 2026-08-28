@@ -4,7 +4,7 @@
  * Centralizes permission checks, mode validation, and sandbox/sub-agent boundary logic.
  */
 
-import { TOOL_REGISTRY, WRITE_TOOLS, SUB_AGENT_EXCLUDES } from './registry';
+import { TOOL_REGISTRY, WRITE_TOOLS } from './registry';
 import type { AgentMode, AgentToolName } from '../types';
 import type { AgentRuntimeDomain } from '../types';
 import { defaultDomainForMode } from '../agentProfile';
@@ -23,13 +23,6 @@ export function isToolAllowedForMode(toolName: string, mode: AgentMode, domain: 
  */
 export function isToolWritable(toolName: string): boolean {
     return WRITE_TOOLS.has(toolName);
-}
-
-/**
- * Check if a tool is permitted to be invoked inside sub-agents (Orchestrator context).
- */
-export function isToolAllowedForSubAgent(toolName: string): boolean {
-    return !SUB_AGENT_EXCLUDES.has(toolName);
 }
 
 export function parseMcpToolName(toolName: string): { server: string; tool: string } | undefined {

@@ -446,13 +446,14 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         const events = compactEvents.length > UI_RUN_EVENT_LIMIT
             ? compactEvents.slice(compactEvents.length - UI_RUN_EVENT_LIMIT)
             : compactEvents;
-        const run = {
-            ...rootRun.run,
-            steps: [],
-        };
         // Derive aggregates from the complete run family so the manager can show
         // root and child calls on one DSH-style trace without losing child identity.
-        const { reduceCacheStats, reduceScheduling } = require('./runner/runReducers') as typeof import('./runner/runReducers');
+        const { reduceCacheStats, reduceRunFamilyWrittenFiles, reduceScheduling } = require('./runner/runReducers') as typeof import('./runner/runReducers');
+        const run = {
+            ...rootRun.run,
+            writtenFiles: reduceRunFamilyWrittenFiles([rootRun.run, ...childRuns]),
+            steps: [],
+        };
         const cacheStats = reduceCacheStats(familyEvents);
         const scheduling = reduceScheduling(rootRun.events);
         return {

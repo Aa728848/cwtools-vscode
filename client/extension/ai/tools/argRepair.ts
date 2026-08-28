@@ -122,15 +122,26 @@ export function repairToolArgs(
         }
     }
 
-    // Some providers materialize omitted numeric fields as zero. Preserve the
-    // locator with real values and remove zero placeholders from the other one.
+    // Some providers materialize every optional numeric field. Normalize the
+    // two mutually-exclusive locators before the runtime sees the call.
     if (toolName === 'read_file') {
         const hasRange = Number(args.startLine) > 0 || Number(args.endLine) > 0;
-        if (hasRange && args.centerLine === 0 && args.radius === 0) {
+        const hasCenter = args.centerLine !== undefined;
+        const minimumRangePlaceholder = args.startLine === 1
+            && args.endLine === 1
+            && Number(args.centerLine) > 0;
+        if (minimumRangePlaceholder) {
+            delete args.startLine;
+            repairs.push("Removed provider placeholder 'startLine' because centerLine selects the read window");
+            delete args.endLine;
+            repairs.push("Removed provider placeholder 'endLine' because centerLine selects the read window");
+        } else if (hasRange && hasCenter) {
             delete args.centerLine;
-            repairs.push("Removed zero placeholder 'centerLine' because startLine/endLine select the read range");
-            delete args.radius;
-            repairs.push("Removed zero placeholder 'radius' because startLine/endLine select the read range");
+            repairs.push("Removed conflicting 'centerLine' because startLine/endLine select the exact read range");
+            if (args.radius !== undefined) {
+                delete args.radius;
+                repairs.push("Removed conflicting 'radius' because startLine/endLine select the exact read range");
+            }
         } else if (args.centerLine !== undefined) {
             for (const key of ['startLine', 'endLine'] as const) {
                 if (args[key] !== 0) continue;

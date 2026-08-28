@@ -25,6 +25,23 @@ import type {
 } from '../types';
 import { normalizeSchedulingState } from './scheduling';
 
+/** Preserve file changes from every run in a root/child family even when UI events are truncated. */
+export function reduceRunFamilyWrittenFiles(
+    runs: ReadonlyArray<{ writtenFiles?: readonly unknown[] }>,
+): string[] {
+    const files = new Map<string, string>();
+    for (const run of runs) {
+        for (const value of run.writtenFiles ?? []) {
+            if (typeof value !== 'string' || !value.trim()) continue;
+            const file = value.trim();
+            const normalized = file.replace(/\\/g, '/');
+            const key = process.platform === 'win32' ? normalized.toLowerCase() : normalized;
+            if (!files.has(key)) files.set(key, file);
+        }
+    }
+    return [...files.values()].sort((left, right) => left.localeCompare(right));
+}
+
 // ─── Run state ───────────────────────────────────────────────────────────────
 
 export interface RunStateSnapshot {

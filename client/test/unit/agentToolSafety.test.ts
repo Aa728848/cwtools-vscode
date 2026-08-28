@@ -834,6 +834,16 @@ describe('agent tool file path safety', () => {
         expect(paradox.content).to.equal(general.content);
     });
 
+    it('marks read_file argument failures as failed tool results', async () => {
+        const target = path.join(workspaceRoot, 'sample.txt');
+        fs.writeFileSync(target, 'sample\n');
+
+        const result = await createFileHandler().readFile({ file: target, centerLine: -1 });
+
+        expect(result.error).to.include('centerLine must be a non-negative 0-based integer');
+        expect(result.content).to.equal(result.error);
+    });
+
     it('ignores zero range placeholders in a center-based read_file call', async () => {
         const target = path.join(workspaceRoot, 'large.txt');
         fs.writeFileSync(target, Array.from({ length: 20 }, (_, index) => `line ${index + 1}`).join('\n'));
@@ -844,6 +854,40 @@ describe('agent tool file path safety', () => {
             endLine: 0,
             centerLine: 9,
             radius: 1,
+        });
+
+        expect(result.content).to.include('9 | line 9');
+        expect(result.content).to.include('11 | line 11');
+        expect(result.content).to.not.include('12 | line 12');
+    });
+
+    it('ignores provider minimum-range placeholders in a center-based read_file call', async () => {
+        const target = path.join(workspaceRoot, 'large.txt');
+        fs.writeFileSync(target, Array.from({ length: 20 }, (_, index) => `line ${index + 1}`).join('\n'));
+
+        const result = await createFileHandler().readFile({
+            file: target,
+            startLine: 1,
+            endLine: 1,
+            centerLine: 9,
+            radius: 1,
+        });
+
+        expect(result.content).to.include('9 | line 9');
+        expect(result.content).to.include('11 | line 11');
+        expect(result.content).to.not.include('12 | line 12');
+    });
+
+    it('prefers an explicit range over conflicting read_file center defaults', async () => {
+        const target = path.join(workspaceRoot, 'large.txt');
+        fs.writeFileSync(target, Array.from({ length: 20 }, (_, index) => `line ${index + 1}`).join('\n'));
+
+        const result = await createFileHandler().readFile({
+            file: target,
+            startLine: 9,
+            endLine: 11,
+            centerLine: 0,
+            radius: 20,
         });
 
         expect(result.content).to.include('9 | line 9');

@@ -624,14 +624,19 @@ export class FileToolHandler {
 
     async readFile(args: { file: string; startLine?: number; endLine?: number; centerLine?: number; radius?: number }, context?: import('../types').AgentToolContext): Promise<import('../types').ReadFileResult> {
         try {
-            const hasRange = (args.startLine !== undefined && args.startLine > 0)
-                || (args.endLine !== undefined && args.endLine > 0);
+            const minimumRangePlaceholder = args.startLine === 1
+                && args.endLine === 1
+                && Number(args.centerLine) > 0;
+            const hasRange = !minimumRangePlaceholder && (
+                (args.startLine !== undefined && args.startLine > 0)
+                || (args.endLine !== undefined && args.endLine > 0)
+            );
             const normalizedArgs = {
                 ...args,
-                startLine: args.startLine === 0 ? undefined : args.startLine,
-                endLine: args.endLine === 0 ? undefined : args.endLine,
-                centerLine: hasRange && args.centerLine === 0 && args.radius === 0 ? undefined : args.centerLine,
-                radius: hasRange && args.centerLine === 0 && args.radius === 0 ? undefined : args.radius,
+                startLine: args.startLine === 0 || minimumRangePlaceholder ? undefined : args.startLine,
+                endLine: args.endLine === 0 || minimumRangePlaceholder ? undefined : args.endLine,
+                centerLine: hasRange ? undefined : args.centerLine,
+                radius: hasRange ? undefined : args.radius,
             };
             if (normalizedArgs.centerLine !== undefined) {
                 if (!Number.isInteger(normalizedArgs.centerLine) || normalizedArgs.centerLine < 0) throw new Error('centerLine must be a non-negative 0-based integer.');
@@ -732,7 +737,8 @@ export class FileToolHandler {
                     }
                 }
             } catch (e) {
-                return { content: `Error reading file:${String(e)}`, totalLines: 0, truncated: false };
+                const error = `Error reading file: ${String(e)}`;
+                return { content: error, error, totalLines: 0, truncated: false };
             }
 
             // Cache the full content for potential re-reads within this loop
@@ -818,7 +824,8 @@ export class FileToolHandler {
                 } : {}),
             };
         } catch (e) {
-            return { content: `Error reading file:${String(e)}`, totalLines: 0, truncated: false };
+            const error = `Error reading file: ${String(e)}`;
+            return { content: error, error, totalLines: 0, truncated: false };
         }
     }
 

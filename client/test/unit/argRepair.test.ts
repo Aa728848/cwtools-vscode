@@ -127,16 +127,43 @@ describe('repairToolArgs', () => {
         expect(result.repairs).to.have.length(2);
     });
 
-    it('keeps a real range conflict visible for read_file validation', () => {
+    it('removes provider minimum-range placeholders from a center-based read_file call', () => {
+        const result = repairToolArgs('read_file', {
+            file: 'test.txt',
+            startLine: 1,
+            endLine: 1,
+            centerLine: 350,
+            radius: 90,
+        });
+
+        expect(result.args).to.deep.equal({ file: 'test.txt', centerLine: 350, radius: 90 });
+        expect(result.repairs).to.have.length(2);
+    });
+
+    it('prefers an explicit range when both read_file locators have real values', () => {
         const result = repairToolArgs('read_file', {
             file: 'test.txt',
             startLine: 10,
             endLine: 20,
             centerLine: 15,
+            radius: 5,
         });
 
-        expect(result.repaired).to.equal(false);
-        expect(result.args).to.include({ startLine: 10, endLine: 20, centerLine: 15 });
+        expect(result.args).to.deep.equal({ file: 'test.txt', startLine: 10, endLine: 20 });
+        expect(result.repairs).to.have.length(2);
+    });
+
+    it('removes a provider center default from an explicit read_file range', () => {
+        const result = repairToolArgs('read_file', {
+            file: 'test.txt',
+            startLine: 1,
+            endLine: 75,
+            centerLine: 0,
+            radius: 20,
+        });
+
+        expect(result.args).to.deep.equal({ file: 'test.txt', startLine: 1, endLine: 75 });
+        expect(result.repairs).to.have.length(2);
     });
 
     it('removes provider zero placeholders from a range-based read_file call', () => {

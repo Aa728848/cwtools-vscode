@@ -1633,6 +1633,8 @@ export interface ReadFileResult {
     content: string;
     totalLines: number;
     truncated: boolean;
+    /** Present when the read failed so the runner records a failed tool call. */
+    error?: string;
     /** Guidance message returned when file is too large or content is truncated */
     _hint?: string;
 }

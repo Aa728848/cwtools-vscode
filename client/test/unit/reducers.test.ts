@@ -4,6 +4,7 @@ import {
     reduceToolTimeline,
     reduceAgentGraph,
     reduceCacheStats,
+    reduceRunFamilyWrittenFiles,
     reduceRuntimeItems,
     reduceScheduling,
     reduceAll,
@@ -26,6 +27,30 @@ function ev(type: AgentRunEvent['type'], extra: Partial<AgentRunEvent> = {}, pay
 }
 
 describe('RunReducers — pure event projections (T3.2)', () => {
+    describe('reduceRunFamilyWrittenFiles', () => {
+        it('keeps earlier child-run changes when the root run has not recorded them', () => {
+            const files = reduceRunFamilyWrittenFiles([
+                { writtenFiles: [] },
+                { writtenFiles: ['e:\\mod\\common\\game_rules\\rules.txt'] },
+                { writtenFiles: ['e:\\mod\\common\\pop_jobs\\jobs.txt'] },
+            ]);
+
+            expect(files).to.have.members([
+                'e:\\mod\\common\\game_rules\\rules.txt',
+                'e:\\mod\\common\\pop_jobs\\jobs.txt',
+            ]);
+        });
+
+        it('deduplicates separator and case aliases on Windows', () => {
+            const files = reduceRunFamilyWrittenFiles([
+                { writtenFiles: ['E:\\mod\\common\\rules.txt'] },
+                { writtenFiles: ['E:/mod/common/rules.txt'] },
+            ]);
+
+            expect(files).to.have.length(process.platform === 'win32' ? 1 : 2);
+        });
+    });
+
     describe('reduceScheduling', () => {
         it('projects admission, phase, prompt, dispatch, and capacity events', () => {
             const admitted = schedulingStateFromAdmission({

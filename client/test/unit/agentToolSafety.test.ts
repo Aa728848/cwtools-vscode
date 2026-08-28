@@ -834,6 +834,70 @@ describe('agent tool file path safety', () => {
         expect(paradox.content).to.equal(general.content);
     });
 
+    it('ignores zero range placeholders in a center-based read_file call', async () => {
+        const target = path.join(workspaceRoot, 'large.txt');
+        fs.writeFileSync(target, Array.from({ length: 20 }, (_, index) => `line ${index + 1}`).join('\n'));
+
+        const result = await createFileHandler().readFile({
+            file: target,
+            startLine: 0,
+            endLine: 0,
+            centerLine: 9,
+            radius: 1,
+        });
+
+        expect(result.content).to.include('9 | line 9');
+        expect(result.content).to.include('11 | line 11');
+        expect(result.content).to.not.include('12 | line 12');
+    });
+
+    it('allows reads under configured game roots but keeps other external paths blocked', async () => {
+        const configuredRoot = makeWorkspace();
+        const otherRoot = makeWorkspace();
+        const vanillaFile = path.join(configuredRoot, 'common', 'game_rules', '00_rules.txt');
+        const otherFile = path.join(otherRoot, 'outside.txt');
+        fs.mkdirSync(path.dirname(vanillaFile), { recursive: true });
+        fs.writeFileSync(vanillaFile, 'vanilla_rule = yes\n');
+        fs.writeFileSync(otherFile, 'outside\n');
+        stubConfigOverrides['cache.stellaris'] = configuredRoot;
+
+        try {
+            const handler = createFileHandler();
+            const vanilla = await handler.readFile({ file: vanillaFile });
+            const blocked = await handler.readFile({ file: otherFile });
+
+            expect(vanilla.content).to.include('vanilla_rule = yes');
+            expect(blocked.content).to.include('outside the workspace and configured game directories');
+        } finally {
+            cleanupWorkspace(configuredRoot);
+            cleanupWorkspace(otherRoot);
+        }
+    });
+
+    it('applies the configured-game read boundary to other file-scoped read tools', async () => {
+        const configuredRoot = makeWorkspace();
+        const otherRoot = makeWorkspace();
+        const vanillaFile = path.join(configuredRoot, 'common', 'game_rules', '00_rules.txt');
+        const otherFile = path.join(otherRoot, 'outside.txt');
+        fs.mkdirSync(path.dirname(vanillaFile), { recursive: true });
+        fs.writeFileSync(vanillaFile, 'vanilla_rule = yes\n');
+        fs.writeFileSync(otherFile, 'outside\n');
+        stubConfigOverrides['cache.stellaris'] = configuredRoot;
+
+        try {
+            const executor = new AgentToolExecutor({} as any, workspaceRoot);
+            const allowed = await executor.execute('document_symbols', { file: vanillaFile }, makeContext());
+            const blocked = await executor.execute('document_symbols', { file: otherFile }, makeContext()) as any;
+
+            expect(allowed).to.have.property('symbols');
+            expect(blocked.success).to.equal(false);
+            expect(blocked.error).to.include('outside the workspace and configured game directories');
+        } finally {
+            cleanupWorkspace(configuredRoot);
+            cleanupWorkspace(otherRoot);
+        }
+    });
+
     it('applies edit_file replacements through the shared fuzzy replacer', async () => {
         const handler = createFileHandler();
         const fileAbs = path.join(workspaceRoot, 'notes.md');

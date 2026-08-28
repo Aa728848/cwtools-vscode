@@ -168,10 +168,11 @@ describe('shader knowledge tools', () => {
 
     it('passes an existing file URI through unchanged', async () => {
         const { executor, calls } = createExecutor(workspaceRoot, () => ({ ok: true, file: '', count: 0, diagnostics: [] }));
-        await executor.execute('validate_shader', { file: 'file:///vanilla/gfx/FX/a.shader' }, buildContext);
+        const fileUri = `file:///${path.join(workspaceRoot, 'gfx', 'FX', 'a.shader').replace(/\\/g, '/')}`;
+        await executor.execute('validate_shader', { file: fileUri }, buildContext);
 
         expect(calls[0]!.command).to.equal('cwtools.ai.shader.validate');
-        expect((calls[0]!.args[0] as Record<string, unknown>).uri).to.equal('file:///vanilla/gfx/FX/a.shader');
+        expect((calls[0]!.args[0] as Record<string, unknown>).uri).to.equal(fileUri);
     });
 
     it('routes query_shader_platform_variants with a normalized file URI', async () => {

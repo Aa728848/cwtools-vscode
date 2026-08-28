@@ -101,9 +101,41 @@ import { goalStore, type DurableGoalStatus } from './runner/goalStore';
 import { goalSupervisor } from './runner/goalSupervisor';
 import { agentTaskManager } from './runner/taskManager';
 import { deriveUserExecutionPolicy } from './orchestrator/userExecutionPolicy';
+import { isSecuritySandboxDisabled, resolveReadablePathInput } from './workspaceSandbox';
 
 const MAX_TOOL_RESULT_CHARS = TOOL_RESULT_BUDGET_HARD_STUB;
 const FINAL_EVIDENCE_CONCURRENCY = 4;
+
+const READ_PATH_ARGUMENTS: Readonly<Record<string, 'file' | 'path' | 'directory'>> = {
+    query_scope: 'file',
+    explore_pdx_project: 'file',
+    query_inline_instantiation: 'file',
+    analyze_pdx_flow: 'file',
+    get_completion_at: 'file',
+    document_symbols: 'file',
+    go_to_definition: 'file',
+    find_references: 'file',
+    hover_symbol: 'file',
+    get_pdx_block: 'file',
+    get_entity_info: 'file',
+    query_shader_compile_unit: 'file',
+    query_shader_platform_variants: 'file',
+    explain_shader_reachability: 'file',
+    validate_shader: 'file',
+    compare_shader_with_vanilla: 'file',
+    read_file: 'file',
+    list_directory: 'directory',
+    glob_files: 'path',
+    grep: 'path',
+};
+
+const FILE_URI_READ_TOOLS = new Set([
+    'query_shader_compile_unit',
+    'query_shader_platform_variants',
+    'explain_shader_reachability',
+    'validate_shader',
+    'compare_shader_with_vanilla',
+]);
 
 const AUTHORITATIVE_MEMORY_EVIDENCE_TOOLS = new Set<string>([
     'read_file',
@@ -1882,6 +1914,45 @@ export class AgentToolExecutor {
             }
         }
 
+        const readPathArgument = registryEntry?.effect === 'workspace_read'
+            ? READ_PATH_ARGUMENTS[toolName]
+            : undefined;
+        const requestedReadPath = readPathArgument ? args[readPathArgument] : undefined;
+        if (readPathArgument && typeof requestedReadPath === 'string' && requestedReadPath.trim()) {
+            const fileUri = /^file:\/\//i.test(requestedReadPath);
+            let pathForResolution = requestedReadPath;
+            if (fileUri) {
+                try {
+                    const uri = new URL(requestedReadPath);
+                    pathForResolution = decodeURIComponent(uri.pathname);
+                    if (/^\/[A-Za-z]:\//.test(pathForResolution)) pathForResolution = pathForResolution.slice(1);
+                    if (uri.hostname && uri.hostname !== 'localhost') {
+                        pathForResolution = `\\\\${uri.hostname}${pathForResolution.replace(/\//g, '\\')}`;
+                    }
+                } catch {
+                    return {
+                        success: false,
+                        error: `Access denied: '${requestedReadPath}' is not a valid local file URI.`,
+                        terminalOutcome: 'policy_denied',
+                    };
+                }
+            }
+            const resolution = resolveReadablePathInput(pathForResolution, this.workspaceRoot);
+            if (!isSecuritySandboxDisabled() && !resolution.isWithinReadableRoot) {
+                return {
+                    success: false,
+                    error: `Access denied: Path '${requestedReadPath}' is outside the workspace and configured game directories.`,
+                    terminalOutcome: 'policy_denied',
+                };
+            }
+            args = {
+                ...args,
+                [readPathArgument]: fileUri && FILE_URI_READ_TOOLS.has(toolName)
+                    ? requestedReadPath
+                    : resolution.resolved,
+            };
+        }
+
         const runtimePlanPhase = context?.runnerOptions?.schedulingState?.phase === 'plan';
         if (runtimePlanPhase
             || mode === 'plan'
@@ -2426,7 +2497,7 @@ export class AgentToolExecutor {
             case 'list_directory':
                 result = await this.fileHandler.listDirectory(args as any, context); break;
             case 'glob_files':
-                result = await this.fileHandler.globFiles(args as any); break;
+                result = await this.fileHandler.globFiles(args as any, context); break;
             case 'write_localisation':
                 result = await this.fileHandler.writeLocalisation(args as any, context); break;
             case 'write_design_blueprint':

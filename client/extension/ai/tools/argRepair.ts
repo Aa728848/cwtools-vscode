@@ -122,6 +122,16 @@ export function repairToolArgs(
         }
     }
 
+    // Some providers materialize omitted numeric fields as zero. For read_file,
+    // zero is invalid for the 1-based range but centerLine=0 is meaningful.
+    if (toolName === 'read_file' && args.centerLine !== undefined) {
+        for (const key of ['startLine', 'endLine'] as const) {
+            if (args[key] !== 0) continue;
+            delete args[key];
+            repairs.push(`Removed zero placeholder '${key}' because centerLine selects the read window`);
+        }
+    }
+
     return { args, repaired: repairs.length > 0, repairs };
 }
 

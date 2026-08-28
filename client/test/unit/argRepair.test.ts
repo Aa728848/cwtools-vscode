@@ -113,4 +113,29 @@ describe('repairToolArgs', () => {
         expect(result.args.line).to.equal(5);            // coerced
         expect(result.args.column).to.equal(0);          // untouched
     });
+
+    it('removes provider zero placeholders from a center-based read_file call', () => {
+        const result = repairToolArgs('read_file', {
+            file: 'test.txt',
+            startLine: 0,
+            endLine: 0,
+            centerLine: 450,
+            radius: 30,
+        });
+
+        expect(result.args).to.deep.equal({ file: 'test.txt', centerLine: 450, radius: 30 });
+        expect(result.repairs).to.have.length(2);
+    });
+
+    it('keeps a real range conflict visible for read_file validation', () => {
+        const result = repairToolArgs('read_file', {
+            file: 'test.txt',
+            startLine: 10,
+            endLine: 20,
+            centerLine: 15,
+        });
+
+        expect(result.repaired).to.equal(false);
+        expect(result.args).to.include({ startLine: 10, endLine: 20, centerLine: 15 });
+    });
 });

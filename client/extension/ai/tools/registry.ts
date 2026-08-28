@@ -249,12 +249,12 @@ const GENERAL_GREP_SCHEMA: ToolDefinition = {
     type: 'function',
     function: {
         name: 'grep',
-        description: 'Search for literal text or a regular expression inside the current workspace.',
+        description: 'Search for literal text or a regular expression inside the workspace or a configured game installation.',
         parameters: {
             type: 'object',
             properties: {
                 query: { type: 'string', description: 'The search pattern or regular expression.' },
-                path: { type: 'string', description: 'Workspace-relative or absolute path inside the workspace.' },
+                path: { type: 'string', description: 'Workspace-relative path or an absolute path inside the workspace/configured game installation.' },
                 isRegex: { type: 'boolean', description: 'Treat query as a regular expression. Default false.' },
                 caseSensitive: { type: 'boolean', description: 'Perform a case-sensitive search. Default false.' },
                 include: { type: 'string', description: 'Optional file glob, for example "*.ts" or "**/*.json".' },

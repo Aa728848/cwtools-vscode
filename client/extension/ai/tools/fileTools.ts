@@ -32,6 +32,7 @@ import { isPlanModeCardArtifactFile } from '../planModeGuard';
 import { isPathInsideOrEqual } from '../../pathScope';
 import {
     isSecuritySandboxDisabled,
+    resolveReadablePathInput,
     resolveWorkspacePathInput,
     type WorkspacePathResolution,
 } from '../workspaceSandbox';
@@ -341,6 +342,17 @@ export class FileToolHandler {
         throw new Error(`Access denied: Path '${filePath}' is outside the workspace root.`);
     }
 
+    private resolveAndAssertReadable(filePath: string, context?: import('../types').AgentToolContext): string {
+        const normalizedInput = this.normalizeAgentWorkspacePath(filePath, context);
+        const resolution = resolveReadablePathInput(normalizedInput, this.ctx.workspaceRoot);
+        if (isSecuritySandboxDisabled() || resolution.isWithinReadableRoot) {
+            return resolution.resolved;
+        }
+        const topicArtifact = this.resolveCurrentTopicArtifact(filePath, context);
+        if (topicArtifact) return topicArtifact;
+        throw new Error(`Access denied: Path '${filePath}' is outside the workspace and configured game directories.`);
+    }
+
     private async requestPermissionWithAbort(
         id: string,
         tool: string,
@@ -612,14 +624,20 @@ export class FileToolHandler {
 
     async readFile(args: { file: string; startLine?: number; endLine?: number; centerLine?: number; radius?: number }, context?: import('../types').AgentToolContext): Promise<import('../types').ReadFileResult> {
         try {
-            if (args.centerLine !== undefined) {
-                if (!Number.isInteger(args.centerLine) || args.centerLine < 0) throw new Error('centerLine must be a non-negative 0-based integer.');
-                if (args.startLine !== undefined || args.endLine !== undefined) throw new Error('centerLine is mutually exclusive with startLine/endLine.');
-                const radius = Number.isInteger(args.radius) ? Math.max(0, Math.min(args.radius!, 150)) : 20;
-                args.startLine = Math.max(1, args.centerLine + 1 - radius);
-                args.endLine = args.centerLine + 1 + radius;
+            const normalizedArgs = {
+                ...args,
+                startLine: args.startLine === 0 ? undefined : args.startLine,
+                endLine: args.endLine === 0 ? undefined : args.endLine,
+            };
+            if (normalizedArgs.centerLine !== undefined) {
+                if (!Number.isInteger(normalizedArgs.centerLine) || normalizedArgs.centerLine < 0) throw new Error('centerLine must be a non-negative 0-based integer.');
+                if (normalizedArgs.startLine !== undefined || normalizedArgs.endLine !== undefined) throw new Error('centerLine is mutually exclusive with startLine/endLine.');
+                const radius = Number.isInteger(normalizedArgs.radius) ? Math.max(0, Math.min(normalizedArgs.radius!, 150)) : 20;
+                normalizedArgs.startLine = Math.max(1, normalizedArgs.centerLine + 1 - radius);
+                normalizedArgs.endLine = normalizedArgs.centerLine + 1 + radius;
             }
-            args.file = this.resolveAndAssertInWorkspace(args.file, context);
+            args = normalizedArgs;
+            args.file = this.resolveAndAssertReadable(args.file, context);
             const paradoxDomain = context?.runnerOptions?.schedulingState.domainProfile !== 'general';
             const localisationFile = this.isLocalisationPath(args.file) && matchesExt(args.file, '.yml');
             const readTracker = (context?.agentRunner as any)?.readTracker;
@@ -1348,7 +1366,7 @@ export class FileToolHandler {
 
     async listDirectory(args: { directory: string; recursive?: boolean }, context?: import('../types').AgentToolContext): Promise<import('../types').ListDirectoryResult> {
         try {
-            const dirPath = this.resolveAndAssertInWorkspace(args.directory, context);
+            const dirPath = this.resolveAndAssertReadable(args.directory, context);
             const limit = 200;
 
             if (!fs.existsSync(dirPath)) {
@@ -1394,10 +1412,14 @@ export class FileToolHandler {
 
     // - globFiles -
 
-    async globFiles(args: { pattern: string; limit?: number }): Promise<{ files: string[]; truncated: boolean; hasMore: boolean; returnedCount: number; limit: number; error?: string }> {
+    async globFiles(args: { pattern: string; path?: string; limit?: number }, context?: import('../types').AgentToolContext): Promise<{ files: string[]; truncated: boolean; hasMore: boolean; returnedCount: number; limit: number; error?: string }> {
         try {
             const limit = Math.min(args.limit ?? 200, 500);
-            const uris = await vs.workspace.findFiles(args.pattern, '**/node_modules/**', limit + 1);
+            const searchRoot = args.path ? this.resolveAndAssertReadable(args.path, context) : undefined;
+            const include = searchRoot ? new vs.RelativePattern(searchRoot, args.pattern) : args.pattern;
+            const exclude = searchRoot ? new vs.RelativePattern(searchRoot, '**/node_modules/**') : '**/node_modules/**';
+            const uris = (await vs.workspace.findFiles(include, exclude, limit + 1))
+                .filter(uri => !searchRoot || isPathInsideOrEqual(uri.fsPath, searchRoot));
             const hasMore = uris.length > limit;
             const files = uris.slice(0, limit).map(u => u.fsPath);
             return { files, truncated: hasMore, hasMore, returnedCount: files.length, limit };

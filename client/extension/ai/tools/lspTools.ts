@@ -26,6 +26,7 @@ import type {
     PdxSemanticCatalog,
 } from '../types';
 import { isPathInsideOrEqual } from '../workspaceSandbox';
+import { getConfiguredGameRoots } from '../../configuredGameRoots';
 import { diagnosticMetadata } from './diagnosticMetadata';
 import { diagnosticCodeString, diagnosticMatchesIgnoredKey } from '../../diagnosticI18n';
 import { readProjectProfile } from '../projectProfile';
@@ -3125,7 +3126,13 @@ export class LspToolHandler {
 
         const escapeRegex = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
-        if (ctxStr === 'mod' || ctxStr === 'both') {
+        const explicitDirectory = args.directory && path.isAbsolute(args.directory)
+            ? path.resolve(args.directory)
+            : undefined;
+        const searchExplicitWorkspaceDirectory = !explicitDirectory
+            || isPathInsideOrEqual(explicitDirectory, this.ctx.workspaceRoot);
+
+        if ((ctxStr === 'mod' || ctxStr === 'both') && searchExplicitWorkspaceDirectory) {
             searchedRoots.push(...workspaceFolders);
             const localisationSearch = isLocalisationSearch(args);
             const pattern = args.isRegex ? args.query : escapeRegex(args.query);
@@ -3150,7 +3157,10 @@ export class LspToolHandler {
             }
 
             if (args.directory) {
-                const normalizedDirectory = args.directory.replace(/\\/g, '/').replace(/^\/+|\/+$/g, '');
+                const directory = explicitDirectory
+                    ? path.relative(this.ctx.workspaceRoot, explicitDirectory)
+                    : args.directory;
+                const normalizedDirectory = directory.replace(/\\/g, '/').replace(/^\/+|\/+$/g, '');
                 includeGlob = `${normalizedDirectory}/${includeGlob}`;
             }
 
@@ -3299,17 +3309,17 @@ export class LspToolHandler {
         }
 
         if (ctxStr === 'vanilla' || ctxStr === 'both') {
-            const cwtoolsConfig = vs.workspace.getConfiguration('stellarisLanguageServices');
-            const vanillaStellaris = cwtoolsConfig.get<string>('cache.stellaris');
-            const vanillaMods = [vanillaStellaris].filter(Boolean) as string[];
-            
             const vanillaRoots: string[] = [];
-            for (const vMod of vanillaMods) {
-                if (args.directory) {
-                    const candidate = path.join(vMod, args.directory);
+            for (const configured of getConfiguredGameRoots()) {
+                if (explicitDirectory) {
+                    if (isPathInsideOrEqual(explicitDirectory, configured.root) && fs.existsSync(explicitDirectory)) {
+                        vanillaRoots.push(explicitDirectory);
+                    }
+                } else if (args.directory) {
+                    const candidate = path.join(configured.root, args.directory);
                     if (fs.existsSync(candidate)) vanillaRoots.push(candidate);
-                } else if (fs.existsSync(vMod)) {
-                    vanillaRoots.push(vMod);
+                } else if (fs.existsSync(configured.root)) {
+                    vanillaRoots.push(configured.root);
                 }
             }
             searchedRoots.push(...vanillaRoots);
@@ -3896,11 +3906,13 @@ export class LspToolHandler {
         };
 
         const searchPath = args.path ? path.resolve(this.ctx.workspaceRoot, args.path) : this.ctx.workspaceRoot;
+        const searchInWorkspace = isPathInsideOrEqual(searchPath, this.ctx.workspaceRoot);
         let includePattern = normalizeWorkspaceIncludeGlob(args.include);
+        let searchBase = this.ctx.workspaceRoot;
         
         // Ensure path stays within workspace boundaries to use findTextInFiles
         let relativePath = '';
-        if (isPathInsideOrEqual(searchPath, this.ctx.workspaceRoot)) {
+        if (searchInWorkspace) {
             relativePath = relativeWorkspacePath(this.ctx.workspaceRoot, searchPath);
             if (relativePath) {
                 const isFilePath = fs.existsSync(searchPath)
@@ -3911,24 +3923,27 @@ export class LspToolHandler {
                     : `${relativePath.replace(/\/+$/g, '')}/${includePattern}`;
             }
         } else {
-             // Fallback for paths outside workspace: not natively supported by VSCode findTextInFiles
-             includePattern = `**/*`; // just a fallback
+            const isFilePath = fs.existsSync(searchPath)
+                ? fs.statSync(searchPath).isFile()
+                : /\.[^\\/]+$/.test(path.basename(searchPath));
+            searchBase = isFilePath ? path.dirname(searchPath) : searchPath;
+            if (isFilePath) includePattern = path.basename(searchPath);
         }
 
         const options: any = {
-            include: new vs.RelativePattern(this.ctx.workspaceRoot, includePattern),
-            exclude: new vs.RelativePattern(this.ctx.workspaceRoot, '**/{.cwtools,.git,node_modules,release}/**'),
+            include: new vs.RelativePattern(searchBase, includePattern),
+            exclude: new vs.RelativePattern(searchBase, '**/{.cwtools,.git,node_modules,release}/**'),
             maxResults: limit,
             previewOptions: { matchLines: 1, charsPerLine: 150 },
         };
 
         const pushMatch = (fsPath: string, line: number, content: string) => {
-            if (isExcludedModSearchPath(this.ctx.workspaceRoot, fsPath)) return;
+            if (searchInWorkspace && isExcludedModSearchPath(this.ctx.workspaceRoot, fsPath)) return;
             if (matches.length >= limit) {
                 truncated = true;
                 return;
             }
-            const file = relativeWorkspacePath(this.ctx.workspaceRoot, fsPath);
+            const file = searchInWorkspace ? relativeWorkspacePath(this.ctx.workspaceRoot, fsPath) : path.resolve(fsPath);
             const key = `${file}:${line}:${content}`;
             if (matches.some(match => `${match.file}:${match.line}:${match.content}` === key)) return;
             matches.push({ file, line, content });
@@ -3957,12 +3972,13 @@ export class LspToolHandler {
         // Strategy 2: Fallback - findFiles + manual regex scan (VSCode 1.95+)
         if (matches.length < limit) {
             try {
-                const globPattern = new vs.RelativePattern(this.ctx.workspaceRoot, includePattern);
+                const globPattern = new vs.RelativePattern(searchBase, includePattern);
                 const uris = (await vs.workspace.findFiles(
                     globPattern,
-                    '**/{.cwtools,.git,node_modules,release}/**',
+                    new vs.RelativePattern(searchBase, '**/{.cwtools,.git,node_modules,release}/**'),
                     limit * 20,
-                )).filter(uri => !isExcludedModSearchPath(this.ctx.workspaceRoot, uri.fsPath));
+                )).filter(uri => isPathInsideOrEqual(uri.fsPath, searchBase)
+                    && (!searchInWorkspace || !isExcludedModSearchPath(this.ctx.workspaceRoot, uri.fsPath)));
                 const regex = new RegExp(pattern, args.caseSensitive ? '' : 'i');
 
                 const CHUNK_SIZE = 30;
@@ -3990,7 +4006,7 @@ export class LspToolHandler {
             } catch { /* skip */ }
         }
 
-        if (!generalDomain && localisationSearch && matches.length < limit && this.ctx.indexService && !args.isRegex) {
+        if (searchInWorkspace && !generalDomain && localisationSearch && matches.length < limit && this.ctx.indexService && !args.isRegex) {
             const entries = this.ctx.indexService.queryLocalisation({
                 key: args.query,
                 contains: true,

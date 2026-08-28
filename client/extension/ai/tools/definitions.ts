@@ -162,7 +162,7 @@ const RAW_TOOL_DEFINITIONS: ToolDefinition[] = [
             parameters: {
                 type: 'object',
                 properties: {
-                    file: { type: 'string', description: 'Absolute file path' },
+                    file: { type: 'string', description: 'Absolute path inside the workspace or a configured game installation.' },
                     line: { type: 'integer', minimum: 0, description: 'Line number (0-based)' },
                     column: { type: 'integer', minimum: 0, description: 'Column number (0-based)' },
                 },
@@ -327,7 +327,7 @@ const RAW_TOOL_DEFINITIONS: ToolDefinition[] = [
                 type: 'object',
                 properties: {
                     query: { type: 'string', description: 'Identifier or concise semantic search text. Exact PDX IDs give the strongest results. Optional when file or typeName is supplied.' },
-                    file: { type: 'string', description: 'Optional workspace-relative or absolute file path used to restrict entry points.' },
+                    file: { type: 'string', description: 'Optional workspace-relative path or absolute path inside the workspace/configured game installation used to restrict entry points.' },
                     typeName: { type: 'string', description: 'Optional exact CWTools type name obtained from active schema/type evidence.' },
                     exact: { type: 'boolean', description: 'Require query to exactly match an entity ID. Default false.' },
                     depth: { type: 'number', minimum: 0, maximum: 3, description: 'Incoming/outgoing graph traversal depth. Default 1; use 2-3 only for focused IDs.' },
@@ -349,7 +349,7 @@ const RAW_TOOL_DEFINITIONS: ToolDefinition[] = [
                 type: 'object',
                 properties: {
                     template: { type: 'string', description: 'Template path, e.g. common/inline_scripts/example.txt.' },
-                    file: { type: 'string', description: 'Caller file; narrows to one invocation.' },
+                    file: { type: 'string', description: 'Caller file inside the workspace or a configured game installation; narrows to one invocation.' },
                     line: { type: 'number', description: 'Caller line; combined with file selects one invocation.' },
                     limit: { type: 'number', description: 'Maximum invocations to return. Default 50, max 200.' },
                 },
@@ -419,7 +419,7 @@ const RAW_TOOL_DEFINITIONS: ToolDefinition[] = [
             parameters: {
                 type: 'object',
                 properties: {
-                    file: { type: 'string', description: 'Optional file path to analyze; when omitted a definitionId must be given.' },
+                    file: { type: 'string', description: 'Optional path inside the workspace or a configured game installation; when omitted a definitionId must be given.' },
                     definitionId: { type: 'string', description: 'Optional exact definition ID; combined with file to scope the analysis.' },
                     entityType: { type: 'string', description: 'Optional exact CWTools entity type; use with definitionId to disambiguate duplicate IDs.' },
                     limit: { type: 'number', description: 'Maximum costs and relations returned per collection. Default 100, max 500.' },
@@ -536,11 +536,11 @@ const RAW_TOOL_DEFINITIONS: ToolDefinition[] = [
         type: 'function',
         function: {
             name: 'get_pdx_block',
-            description: 'Extract exactly one complete AST block by symbol name. Works with .txt (events, common), .gui (containerWindowType by name), and .gfx (pdxmesh by name). Returns 1-based startLine/endLine that can be passed directly to replace_lines. If the symbol is not found, the error response includes a full list of available symbols with line ranges so you can retry with the correct name.',
+            description: 'Extract exactly one complete AST block by symbol name from the workspace or a configured game installation. Works with .txt (events, common), .gui (containerWindowType by name), and .gfx (pdxmesh by name). Returns 1-based startLine/endLine that can be passed directly to replace_lines. If the symbol is not found, the error response includes a full list of available symbols with line ranges so you can retry with the correct name.',
             parameters: {
                 type: 'object',
                 properties: {
-                    file: { type: 'string', description: 'Absolute file path' },
+                    file: { type: 'string', description: 'Absolute path inside the workspace or a configured game installation.' },
                     symbol: { type: 'string', description: 'Exact symbol returned by document_symbols or another active typed lookup. If not found, the error lists available symbols and line ranges.' },
                 },
                 required: ['file', 'symbol'],
@@ -618,7 +618,7 @@ const RAW_TOOL_DEFINITIONS: ToolDefinition[] = [
             parameters: {
                 type: 'object',
                 properties: {
-                    file: { type: 'string', description: 'Absolute file path (must be in the workspace)' },
+                    file: { type: 'string', description: 'Absolute file path inside the workspace or a configured game installation.' },
                     line: { type: 'number', description: 'Line number (0-based)' },
                     column: { type: 'number', description: 'Column number (0-based)' },
                     limit: { type: 'number', description: 'Max completions to return (default 30). Increase if you need to see more options.' },
@@ -649,7 +649,7 @@ const RAW_TOOL_DEFINITIONS: ToolDefinition[] = [
             parameters: {
                 type: 'object',
                 properties: {
-                    file: { type: 'string', description: 'Absolute file path' },
+                    file: { type: 'string', description: 'Absolute path inside the workspace or a configured game installation.' },
                 },
                 required: ['file'],
             },
@@ -721,15 +721,15 @@ const RAW_TOOL_DEFINITIONS: ToolDefinition[] = [
         type: 'function',
         function: {
             name: 'read_file',
-            description: 'Read file content by optional 1-based range or around a 0-based centerLine. Large files are automatically truncated with continuation guidance. Use document_symbols first when a language provider can supply structure. Binary images return metadata rather than raw bytes.',
+            description: 'Read a file inside the workspace or a configured game installation. Choose either a 1-based startLine/endLine range or a 0-based centerLine/radius window, and omit the unused locator fields. Large files are automatically truncated with continuation guidance. Use document_symbols first when a language provider can supply structure. Binary images return metadata rather than raw bytes.',
             parameters: {
                 type: 'object',
                 properties: {
-                    file: { type: 'string', description: 'Absolute file path' },
-                    startLine: { type: 'number', description: 'Start line (1-based). Required for large files.' },
-                    endLine: { type: 'number', description: 'End line (1-based inclusive). Keep the range under 150 lines where possible.' },
-                    centerLine: { type: 'number', description: 'Optional center line (0-based). Mutually exclusive with startLine/endLine.' },
-                    radius: { type: 'number', description: 'Lines above and below centerLine; defaults to 20.' },
+                    file: { type: 'string', description: 'Absolute path inside the workspace or a configured game installation.' },
+                    startLine: { type: 'integer', minimum: 1, description: 'Start line (1-based). Omit when using centerLine; never send 0 as a placeholder.' },
+                    endLine: { type: 'integer', minimum: 1, description: 'End line (1-based inclusive). Omit when using centerLine; keep the range under 150 lines where possible.' },
+                    centerLine: { type: 'integer', minimum: 0, description: 'Optional center line (0-based). When present, omit startLine and endLine.' },
+                    radius: { type: 'integer', minimum: 0, maximum: 150, description: 'Lines above and below centerLine; defaults to 20. Use only with centerLine.' },
                 },
                 required: ['file'],
                 additionalProperties: false,
@@ -889,11 +889,11 @@ const RAW_TOOL_DEFINITIONS: ToolDefinition[] = [
         type: 'function',
         function: {
             name: 'list_directory',
-            description: 'List files and subdirectories in a directory. Use this to understand project structure before reading files.',
+            description: 'List files and subdirectories inside the workspace or a configured game installation. Use this to understand structure before reading files.',
             parameters: {
                 type: 'object',
                 properties: {
-                    directory: { type: 'string', description: 'Directory path (absolute or relative to workspace root)' },
+                    directory: { type: 'string', description: 'Directory path, relative to the workspace or absolute inside the workspace/configured game installation.' },
                     recursive: { type: 'boolean', description: 'Whether to list recursively (default false, depth limited to 3)' },
                 },
                 required: ['directory'],
@@ -940,11 +940,12 @@ const RAW_TOOL_DEFINITIONS: ToolDefinition[] = [
         type: 'function',
         function: {
             name: 'glob_files',
-            description: 'Find files in the authorized workspace using glob patterns. Prefer targeted patterns and check truncation metadata. Returns absolute paths.',
+            description: 'Find files in the workspace or a configured game installation using glob patterns. Prefer targeted patterns and check truncation metadata. Returns absolute paths.',
             parameters: {
                 type: 'object',
                 properties: {
                     pattern: { type: 'string', description: 'Glob pattern relative to workspace root, e.g. "<typed-directory>/**/*.txt"' },
+                    path: { type: 'string', description: 'Optional search root. Must be inside the workspace or a configured game installation; defaults to the workspace.' },
                     limit: { type: 'number', description: 'Max files to return (default 200)' },
                 },
                 required: ['pattern'],
@@ -960,7 +961,7 @@ const RAW_TOOL_DEFINITIONS: ToolDefinition[] = [
                 type: 'object',
                 properties: {
                     symbolName: { type: 'string', description: 'Exact symbol name. Use this instead of file/line/column when the identifier is known.' },
-                    file: { type: 'string', description: 'Absolute file path inside the workspace.' },
+                    file: { type: 'string', description: 'Absolute file path inside the workspace or a configured game installation.' },
                     line: { type: 'number', description: 'Line number (0-based).' },
                     column: { type: 'number', description: 'Column number (0-based).' },
                 },
@@ -978,7 +979,7 @@ const RAW_TOOL_DEFINITIONS: ToolDefinition[] = [
                 type: 'object',
                 properties: {
                     identifier: { type: 'string', description: 'Exact identifier. Use this instead of file/line/column when the name is known.' },
-                    file: { type: 'string', description: 'Absolute file path inside the workspace.' },
+                    file: { type: 'string', description: 'Absolute file path inside the workspace or a configured game installation.' },
                     line: { type: 'number', description: 'Line number (0-based).' },
                     column: { type: 'number', description: 'Column number (0-based).' },
                     limit: { type: 'number', description: 'Maximum references to return (default 100, max 500).' },
@@ -996,7 +997,7 @@ const RAW_TOOL_DEFINITIONS: ToolDefinition[] = [
             parameters: {
                 type: 'object',
                 properties: {
-                    file: { type: 'string', description: 'Absolute file path inside the workspace.' },
+                    file: { type: 'string', description: 'Absolute file path inside the workspace or a configured game installation.' },
                     line: { type: 'number', description: 'Line number (0-based).' },
                     column: { type: 'number', description: 'Column number (0-based).' },
                 },
@@ -1177,7 +1178,7 @@ const RAW_TOOL_DEFINITIONS: ToolDefinition[] = [
             parameters: {
                 type: 'object',
                 properties: {
-                    file: { type: 'string', description: 'Absolute file path (must be a parsed mod file)' },
+                    file: { type: 'string', description: 'Absolute path to a parsed file inside the workspace or a configured game installation.' },
                 },
                 required: ['file'],
             },
@@ -1238,7 +1239,7 @@ const RAW_TOOL_DEFINITIONS: ToolDefinition[] = [
             parameters: {
                 type: 'object',
                 properties: {
-                    file: { type: 'string', description: 'Absolute or workspace-relative path of the .shader/.fxh file.' },
+                    file: { type: 'string', description: 'Workspace-relative path or absolute path inside the workspace/configured game installation.' },
                 },
                 required: ['file'],
             },
@@ -1252,7 +1253,7 @@ const RAW_TOOL_DEFINITIONS: ToolDefinition[] = [
             parameters: {
                 type: 'object',
                 properties: {
-                    file: { type: 'string', description: 'Absolute or workspace-relative path of the .shader/.fxh file.' },
+                    file: { type: 'string', description: 'Workspace-relative path or absolute path inside the workspace/configured game installation.' },
                 },
                 required: ['file'],
             },
@@ -1282,7 +1283,7 @@ const RAW_TOOL_DEFINITIONS: ToolDefinition[] = [
                 type: 'object',
                 properties: {
                     effectName: { type: 'string', description: 'Exact shader Effect name. Takes precedence over file.' },
-                    file: { type: 'string', description: 'Absolute or workspace-relative path of a .shader/.fxh file; lists its Effects with cursor pagination.' },
+                    file: { type: 'string', description: 'Workspace-relative path or absolute path inside the workspace/configured game installation; lists its Effects with cursor pagination.' },
                     limit: { type: 'number', description: 'Max results for the per-file form (1-500, default 100).' },
                     cursor: { type: 'number', description: 'Numeric offset returned as nextCursor by a previous per-file call. Default 0.' },
                 },
@@ -1298,7 +1299,7 @@ const RAW_TOOL_DEFINITIONS: ToolDefinition[] = [
             parameters: {
                 type: 'object',
                 properties: {
-                    file: { type: 'string', description: 'Absolute or workspace-relative path of the .shader/.fxh file.' },
+                    file: { type: 'string', description: 'Workspace-relative path or absolute path inside the workspace/configured game installation.' },
                 },
                 required: ['file'],
             },
@@ -1313,7 +1314,7 @@ const RAW_TOOL_DEFINITIONS: ToolDefinition[] = [
                 type: 'object',
                 properties: {
                     effectName: { type: 'string', description: 'Exact shader Effect name. Takes precedence over file.' },
-                    file: { type: 'string', description: 'Absolute or workspace-relative path of a .shader/.fxh file.' },
+                    file: { type: 'string', description: 'Workspace-relative path or absolute path inside the workspace/configured game installation.' },
                 },
                 required: [],
             },

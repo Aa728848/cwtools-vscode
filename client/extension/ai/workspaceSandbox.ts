@@ -4,6 +4,7 @@ import { getAiStorageRoot, getPrivateAiStorageRoot, getPrivateTopicRoot } from '
 import { isPathInsideOrEqual } from '../pathScope';
 import { getProjectWorkspaceRoot } from './workspacePaths';
 import { getSessionPermissionMode } from './runner/sessionPermissions';
+import { getConfiguredGameRoots } from '../configuredGameRoots';
 
 export type WorkspacePathScope = 'project' | 'ai' | 'workspace' | 'outside';
 
@@ -15,6 +16,11 @@ export interface WorkspacePathResolution {
     workspaceFolder?: string;
     isTrusted: boolean;
     isWithinAnyWorkspace: boolean;
+}
+
+export interface ReadablePathResolution extends WorkspacePathResolution {
+    isWithinReadableRoot: boolean;
+    configuredGameRoot?: string;
 }
 
 // Path-scope helpers (foldPathCase / isPathInsideOrEqual) live in the neutral
@@ -134,5 +140,25 @@ export function resolveWorkspacePathInput(
         workspaceFolder,
         isTrusted: scope === 'project' || scope === 'ai',
         isWithinAnyWorkspace: scope === 'project' || scope === 'ai' || scope === 'workspace',
+    };
+}
+
+/** Resolve a model-supplied read path against the workspace and configured game roots. */
+export function resolveReadablePathInput(
+    inputPath: string,
+    workspaceRoot: string,
+): ReadablePathResolution {
+    const resolution = resolveWorkspacePathInput(inputPath, workspaceRoot);
+    if (resolution.isWithinAnyWorkspace) {
+        return { ...resolution, isWithinReadableRoot: true };
+    }
+
+    const configuredGameRoot = getConfiguredGameRoots()
+        .map(item => item.root)
+        .find(root => isPathInsideOrEqual(resolution.resolved, root));
+    return {
+        ...resolution,
+        isWithinReadableRoot: !!configuredGameRoot,
+        configuredGameRoot,
     };
 }

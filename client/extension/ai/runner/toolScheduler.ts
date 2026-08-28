@@ -54,7 +54,19 @@ export function getAgentToolTargetFiles(
     const paths: string[] = [];
     const add = (value: unknown) => {
         if (typeof value === 'string' && value.trim()) {
-            const trimmed = value.trim();
+            let trimmed = value.trim();
+            if (/^file:\/\//i.test(trimmed)) {
+                try {
+                    const uri = new URL(trimmed);
+                    trimmed = decodeURIComponent(uri.pathname);
+                    if (/^\/[A-Za-z]:\//.test(trimmed)) trimmed = trimmed.slice(1);
+                    if (uri.hostname && uri.hostname !== 'localhost') {
+                        trimmed = `\\\\${uri.hostname}${trimmed.replace(/\//g, '\\')}`;
+                    }
+                } catch {
+                    return;
+                }
+            }
             if (workspaceRoot) {
                 const isWinAbs = /^[a-zA-Z]:[\\/]/.test(trimmed) || trimmed.startsWith('\\\\');
                 const isPosixAbs = trimmed.startsWith('/');
@@ -90,14 +102,32 @@ export function getAgentToolTargetFiles(
             add(args.filePath);
             break;
         case 'read_file':
+        case 'query_scope':
+        case 'explore_pdx_project':
+        case 'query_inline_instantiation':
+        case 'analyze_pdx_flow':
         case 'get_pdx_block':
         case 'get_completion_at':
+        case 'document_symbols':
         case 'get_diagnostics':
         case 'go_to_definition':
         case 'find_references':
         case 'hover_symbol':
+        case 'get_entity_info':
+        case 'query_shader_compile_unit':
+        case 'query_shader_platform_variants':
+        case 'explain_shader_reachability':
+        case 'validate_shader':
+        case 'compare_shader_with_vanilla':
         case 'rename_symbol':
             add(args.file);
+            break;
+        case 'list_directory':
+            add(args.directory);
+            break;
+        case 'glob_files':
+        case 'grep':
+            add(args.path);
             break;
         case 'replace_lines':
             add(args.filePath);

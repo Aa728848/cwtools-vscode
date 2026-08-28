@@ -1,5 +1,30 @@
 # Changelog
 
+## [2.16.1] - 2026-08-29
+
+### 新功能 / New Features
+- **[新增] 计划执行机制增强与散文计划支持（Planning & Execution Enhancements）**：
+  - 优化计划交接与执行机制（`executePlanHandoff.ts`），放宽蓝图硬性约束，直接支持执行已批准的自然语言与散文计划（prose plans）。
+  - 允许 Execute 模式在执行受限/有界变更前完整巡检仓库上下文与依赖，支持显式单任务分发。
+  - 支持子代理向上级请求澄清（sub-agent clarification），妥善处理终端工具执行结果与挂起的会话交互。
+  - English: [New] Planning and execution enhancements — relaxed blueprint constraints to execute approved prose plans (`executePlanHandoff.ts`); allowed Execute mode to inspect repository context and dependencies before bounded edits with explicit single-task dispatch; enabled sub-agent clarification and graceful terminal tool outcome handling.
+
+- **[新增] Codex 服务层级配置与上下文压缩指标展示（Codex Service Tier & Compaction Telemetry）**：
+  - 新增 Codex 服务层级（service tier）配置项及设置 UI。
+  - 在 AI Chat Webview 中直观展示上下文压缩（Context Compaction）触发前后的 Token 预估与节省数据。
+  - English: [New] Codex service tier and context compaction telemetry — added Codex service tier configuration and settings UI; introduced visual context compaction results with token estimates in the AI chat webview.
+
+### 优化与安全加固 / Improvements & Security
+- **[安全] AI 工作区读取沙箱安全加固（AI Read Sandbox Hardening）**：
+  - 严格强化 AI 工具在工作区文件读取操作中的沙箱路径校验（`sandboxed paths`），杜绝符号链接逃逸与越界读取风险。
+  - English: [Security] AI workspace read sandbox hardening — enforced strict sandboxed path containment for AI file read operations to eliminate symlink escapes and out-of-bounds reads.
+
+- **[优化] 项目知识刷新与代码库精简（Project Knowledge Refresh & Cleanup）**：
+  - 在 `projectKnowledge.ts` 中合并图级别的大范围文件变更，智能触发全量项目知识重构与刷新。
+  - 清理多项废弃的旧版工具函数与中间件模块，进一步降低包体积并提升运行时效率。
+  - 同步更新只读 MCP 服务端相关工具契约。
+  - English: [Improvement] Project knowledge refresh optimization and codebase cleanup — coalesced graph-wide file changes into full project knowledge refreshes (`projectKnowledge.ts`); removed obsolete utility modules and legacy middleware; synced MCP tool schemas.
+
 ## [2.16.0] - 2026-08-28
 
 ### 新功能 / New Features

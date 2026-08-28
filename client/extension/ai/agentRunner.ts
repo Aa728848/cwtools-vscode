@@ -1097,8 +1097,8 @@ export class AgentRunner {
         let schedulingState = normalizeSchedulingState(
             restoredResumeState?.schedulingState ?? options?.schedulingState,
         );
-        let mode = executionModeForSchedulingState(schedulingState);
-        let domain = schedulingState.domainProfile;
+        const mode = executionModeForSchedulingState(schedulingState);
+        const domain = schedulingState.domainProfile;
         const topicId = context.topicId || 'default';
         const threadId = options?.threadId ?? topicId;
         const turnId = options?.turnId ?? `turn_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;

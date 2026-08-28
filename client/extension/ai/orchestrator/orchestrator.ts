@@ -677,7 +677,7 @@ export class Orchestrator {
                 : profile.mode === 'review' || profile.mode === 'script_reviewer' ? 'reviewer'
                     : profile.mode === 'explore' || profile.mode === 'plan' ? 'explore' : 'paradox-coder',
             // The parent already approved and decomposed this Execute task.
-            // Staged writer roles start with write tools visible and never reopen
+            // Writer roles start with execution-focused guidance and never reopen
             // the main-Agent design/approval lifecycle.
             initialToolStage: profile.mode === 'build' || profile.mode === 'utility' ? 'write' : undefined,
             domain: childDomain,
@@ -700,10 +700,8 @@ export class Orchestrator {
             // Role iteration limits are health-check windows. Only a task-level
             // maxIterations override remains an absolute iteration ceiling.
             renewableIterationLimit: taskNode.maxIterations === undefined,
-            // The subagent skips the built-in validation loop - Orchestrator has an independent QualityGate mechanism,
-            // No need for sub-agent to re-verify. At the same time, it prevents the validation loop from continuing to generate steps after the inference is completed.
-            // Leading to an inconsistent UI state where the external judgment card is marked as completed but the internal one is still running.
-            skipValidation: true,
+            // The parent quality gate owns final cross-subtask validation.
+            deferTerminalValidationToParent: true,
             forceAutoApplyWrites: true,
             writeQueueWaitTimeoutMs: 60_000,
             // 🔴 Sub-Agent disables specific tools:

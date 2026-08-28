@@ -2559,8 +2559,8 @@ export class AgentToolExecutor {
                         success: true,
                         ...args._selectionResult as Record<string, unknown>,
                         message: aiText(
-                            'Loaded schemas are now visible. loaded/alreadyLoaded = usable now; unavailable = not offered in the current mode/stage (write-authorized runs can load stage-hidden tools through select_tools); denied = blocked by domain or mode policy. Execution still respects mode, policy, and permission checks.',
-                            '已加载的工具现在可见。loaded/alreadyLoaded = 当前即可使用；unavailable = 当前模式/阶段未提供（写授权运行可通过 select_tools 加载阶段隐藏工具）；denied = 被域或模式策略阻止。执行时仍会遵守模式、策略与权限检查。',
+                            'Loaded schemas are now visible. loaded/alreadyLoaded = usable now; unavailable = excluded by the active workflow; denied = blocked by domain or mode policy. Execution still respects mode, policy, and permission checks.',
+                            '已加载的工具现在可见。loaded/alreadyLoaded = 当前即可使用；unavailable = 被当前工作流排除；denied = 被域或模式策略阻止。执行时仍会遵守模式、策略与权限检查。',
                         ),
                     }
                     : {
@@ -3679,7 +3679,7 @@ export class AgentToolExecutor {
         if (!validated.ok) return { success: false, error: validated.error };
         const snapshot = createRunCodeCapabilitySnapshot(modelVisibleTools);
         if (snapshot.tools.length === 0) {
-            return { success: false, error: 'run_code has no callable tools in the current mode/domain/stage.' };
+            return { success: false, error: 'run_code has no callable tools in the current mode, domain, or disclosed toolset.' };
         }
 
         const controller = new AbortController();
@@ -3704,7 +3704,6 @@ export class AgentToolExecutor {
                     Math.min(requestedWaitMs, Math.max(1, deadline - Date.now())),
                 ),
                 controller.signal,
-                tool => context?.runCodeAllowedStepNames?.().has(tool) === true,
                 deadline,
             );
         } finally {

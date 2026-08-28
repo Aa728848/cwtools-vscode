@@ -2251,7 +2251,7 @@ describe('QualityGate', () => {
         expect(reviewerOptions.mode).to.equal('review');
         expect(reviewerOptions.useSlimPrompt).to.equal(true);
         expect(reviewerOptions.maxIterations).to.equal(15);
-        expect(reviewerOptions.skipValidation).to.equal(true);
+        expect(reviewerOptions.deferTerminalValidationToParent).to.equal(true);
         expect(reviewerOptions.abortSignal).to.be.instanceOf(AbortSignal);
         expect(reviewSteps.map(step => step.type)).to.deep.equal(['subtask_start', 'subtask_complete']);
         expect(reviewSteps.every(step => step.agentId === 'quality_gate_review')).to.equal(true);

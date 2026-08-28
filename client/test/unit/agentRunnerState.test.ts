@@ -1,4 +1,5 @@
 import { expect } from 'chai';
+import { classifyRecoveryError } from '../../extension/ai/runner/recoveryCoordinator';
 
 const vscodeStub = {
     workspace: {
@@ -94,25 +95,22 @@ describe('AgentRunner 状态机与工具调度测试 (阶段 0 基线)', () => {
         });
     });
 
-    describe('API 错误回退 (Fallback) 判定', () => {
+    describe('统一恢复错误分类', () => {
         it('识别 5xx 服务器端错误', () => {
-            const { isFallbackEligibleApiError } = loadAgentRunner();
-            expect(isFallbackEligibleApiError('API returns 502 Bad Gateway')).to.equal(true);
-            expect(isFallbackEligibleApiError(new Error('Internal error 500'))).to.equal(true);
-            expect(isFallbackEligibleApiError('503 Service Temporarily Unavailable')).to.equal(true);
+            expect(classifyRecoveryError('API returns 502 Bad Gateway').kind).to.equal('provider');
+            expect(classifyRecoveryError(new Error('Internal error 500')).kind).to.equal('provider');
+            expect(classifyRecoveryError('503 Service Temporarily Unavailable').kind).to.equal('provider');
         });
 
         it('识别网络超时和重置错误', () => {
-            const { isFallbackEligibleApiError } = loadAgentRunner();
-            expect(isFallbackEligibleApiError('request timed out')).to.equal(true);
-            expect(isFallbackEligibleApiError(new Error('ETIMEDOUT'))).to.equal(true);
-            expect(isFallbackEligibleApiError('ECONNRESET')).to.equal(true);
+            expect(classifyRecoveryError('request timed out').kind).to.equal('transport');
+            expect(classifyRecoveryError(new Error('ETIMEDOUT')).kind).to.equal('transport');
+            expect(classifyRecoveryError('ECONNRESET').kind).to.equal('transport');
         });
 
-        it('普通业务错误不应被判定为 fallback-eligible', () => {
-            const { isFallbackEligibleApiError } = loadAgentRunner();
-            expect(isFallbackEligibleApiError('Invalid API Key')).to.equal(false);
-            expect(isFallbackEligibleApiError(new Error('rate limit reached'))).to.equal(false);
+        it('区分限流与不可恢复业务错误', () => {
+            expect(classifyRecoveryError('Invalid API Key').kind).to.equal('unknown');
+            expect(classifyRecoveryError(new Error('rate limit reached')).kind).to.equal('rate_limit');
         });
     });
 

@@ -6,7 +6,6 @@ import type {
     AgentRunPhase,
     AgentRuntimeDomain,
     AgentSchedulingState,
-    AgentToolStage,
     ResolvedAgentProfile,
     ToolEffect,
 } from '../types';
@@ -180,26 +179,6 @@ export function transitionSchedulingState(
         dispatchReason: update.dispatchReason ?? current.dispatchReason,
         revision: current.revision + 1,
     };
-}
-
-export function phaseForToolStage(
-    stage: AgentToolStage | undefined,
-    current: AgentRunPhase,
-): AgentRunPhase {
-    switch (stage) {
-        case 'discovery':
-            // Planning owns all pre-write investigation, clarification, and design.
-            // Once Execute is admitted, read-oriented tool calls must not downgrade it.
-            return current;
-        case 'validation':
-            return current === 'execute' ? 'verify' : current;
-        case 'write':
-            return 'execute';
-        case 'finalize':
-            return current === 'execute' ? 'verify' : 'finalize';
-        default:
-            return current;
-    }
 }
 
 export interface DispatchCandidate {

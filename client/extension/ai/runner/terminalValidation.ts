@@ -125,9 +125,31 @@ export function terminalValidationOutcome(state: TerminalValidationState): Termi
     return 'allow';
 }
 
-export function hasOnlyPendingValidationErrors(
-    errors: readonly { code: string; severity?: string }[],
-): boolean {
-    return errors.some(error => error.code === 'VALIDATION_PENDING')
-        && errors.every(error => error.code === 'VALIDATION_PENDING' || error.severity !== 'error');
+/** Compact deterministic feedback suitable for the next step of the main loop. */
+export function formatTerminalValidationFeedback(state: TerminalValidationState): string {
+    const outcome = terminalValidationOutcome(state);
+    if (outcome === 'allow') return 'Post-write validation passed.';
+
+    const targets = [...new Set([
+        ...state.repairTargets,
+        ...state.diagnosticErrorTargets,
+        ...state.pendingTargets,
+    ])].sort();
+    const diagnostics = [...state.introducedErrorsByTarget.entries()]
+        .sort(([left], [right]) => left.localeCompare(right))
+        .flatMap(([target, errors]) => errors.map(error => {
+            const location = error.line !== undefined
+                ? `:${error.line + 1}${error.column !== undefined ? `:${error.column + 1}` : ''}`
+                : '';
+            return `${target}${location} ${error.message}`;
+        }))
+        .slice(0, 12);
+    const status = outcome === 'pending'
+        ? 'Post-write validation is pending and requires fresh diagnostics.'
+        : 'Post-write validation requires repair.';
+    return [
+        status,
+        targets.length > 0 ? `Affected targets: ${targets.join(', ')}.` : '',
+        diagnostics.length > 0 ? `Introduced errors:\n- ${diagnostics.join('\n- ')}` : '',
+    ].filter(Boolean).join('\n');
 }

@@ -11,7 +11,7 @@ import {
 } from '../../extension/ai/runner/runBudget';
 import {
     createTerminalValidationState,
-    hasOnlyPendingValidationErrors,
+    formatTerminalValidationFeedback,
     terminalValidationOutcome,
     updateTerminalValidationState,
 } from '../../extension/ai/runner/terminalValidation';
@@ -171,6 +171,24 @@ describe('terminal validation state', () => {
         expect(terminalValidationOutcome(state)).to.equal('repair');
     });
 
+    it('formats deterministic validation feedback for the next main-loop step', () => {
+        const state = createTerminalValidationState();
+        updateTerminalValidationState(state, ['events/b.txt'], { requiresRepair: true });
+        updateTerminalValidationState(state, ['events/a.txt'], {
+            diagnostics: [{ severity: 'error', message: 'broken scope' }],
+            freshness: 'fresh',
+            diagnosticDelta: {
+                comparable: true,
+                added: [{ severity: 'error', message: 'broken scope', code: 'scope', source: 'cwtools', line: 2, column: 1 }],
+                removed: [],
+            },
+        });
+        const feedback = formatTerminalValidationFeedback(state);
+        expect(feedback).to.include('Post-write validation requires repair.');
+        expect(feedback).to.include('Affected targets: events/a.txt, events/b.txt.');
+        expect(feedback).to.include('events/a.txt:3:2 broken scope');
+    });
+
     it('resolves coverage-only pending after fresh full-file diagnostics', () => {
         const state = createTerminalValidationState();
         updateTerminalValidationState(state, ['interface/large.gfx'], {
@@ -269,14 +287,4 @@ describe('terminal validation state', () => {
         expect(terminalValidationOutcome(state)).to.equal('pending');
     });
 
-    it('pauses only when pending is not accompanied by a real validation error', () => {
-        expect(hasOnlyPendingValidationErrors([
-            { code: 'VALIDATION_PENDING', severity: 'error' },
-            { code: 'advisory', severity: 'warning' },
-        ])).to.equal(true);
-        expect(hasOnlyPendingValidationErrors([
-            { code: 'VALIDATION_PENDING', severity: 'error' },
-            { code: 'syntax_error', severity: 'error' },
-        ])).to.equal(false);
-    });
 });

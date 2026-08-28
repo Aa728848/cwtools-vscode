@@ -1,8 +1,8 @@
 /**
  * CWTools AI Module — Runner Fallback Policy
  * 
- * Handles API failure detection (5xx, timeouts, network issues, capacity limits)
- * and determines provider fallback routing chains.
+ * Executes provider fallback routing after RecoveryCoordinator classifies and
+ * admits the recovery.
  */
 
 import type { ChatMessage, ChatCompletionResponse, AgentStep, ToolDefinition } from '../types';
@@ -18,13 +18,6 @@ export const PROVIDER_FALLBACK: Record<string, { providerId: string; model: stri
     google:     [{ providerId: 'deepseek', model: 'deepseek-v4-flash' }],
     minimax:    [{ providerId: 'deepseek', model: 'deepseek-v4-flash' }],
 };
-
-export function isFallbackEligibleApiError(error: unknown): boolean {
-    const msg = error instanceof Error ? error.message : String(error);
-    return /\b(5\d{2})\b/.test(msg) ||          // 5xx server errors
-           /timeout|timed out|fetch failed|network|socket|ETIMEDOUT|ECONNRESET|ENOTFOUND|EAI_AGAIN/i.test(msg) ||
-           /overloaded|capacity|unavailable/i.test(msg); // Capacity issues
-}
 
 export async function executeFallbackRetry(
     aiService: AIService,

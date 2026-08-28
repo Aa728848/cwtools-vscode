@@ -2233,7 +2233,7 @@ const RUNTIME_CONTROL_TOOLS: ToolDefinition[] = [
         type: 'function',
         function: {
             name: 'run_code',
-            description: 'Execute a JavaScript async-function body inside an isolated QuickJS/WASM guest. Call current mode/domain/stage tools through the typed tools SDK, branch on their results, loop over bounded data, or use Promise.all for independent calls. Every nested call re-enters the normal permission, plan-mode, policy, scheduler, and write-queue pipeline. Only explicit console.log values and the outer return value reach model context; intermediate values stay guest-local. No Node, VS Code, filesystem, network, timer, module, eval, or Function-constructor globals are available.',
+            description: 'Execute a JavaScript async-function body inside an isolated QuickJS/WASM guest. Call tools from the current mode, domain, and disclosed toolset through the typed tools SDK, branch on their results, loop over bounded data, or use Promise.all for independent calls. Every nested call re-enters the normal permission, plan-mode, policy, scheduler, and write-queue pipeline. Only explicit console.log values and the outer return value reach model context; intermediate values stay guest-local. No Node, VS Code, filesystem, network, timer, module, eval, or Function-constructor globals are available.',
             parameters: {
                 type: 'object',
                 properties: {

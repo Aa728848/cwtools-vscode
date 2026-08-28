@@ -12,7 +12,7 @@ export type { AgentToolName } from './tools/registry';
 
 /**
  * Agent modes — aligned with OpenCode's agent configuration.
- * - build:   Full tool access including file writes + validation loop (default)
+ * - build:   Full tool access including file writes and in-loop validation (default)
  * - plan:    Read-only analysis, no writes, structured plan output
  * - explore: Parallel read-only exploration; focuses on understanding codebase, no validation
  * - general: Legacy read-only Q&A mode kept for saved-topic compatibility.
@@ -1491,12 +1491,10 @@ export interface AgentToolContext {
     ) => Promise<unknown>;
     /**
      * Model-visible toolset provider for the current run. run_code snapshots
-     * this mode/domain/stage-filtered catalog before starting its guest program;
+     * this mode/domain/disclosure-filtered catalog before starting its guest program;
      * the same catalog drives the generated SDK and nested-call allowlist.
      */
     runCodeToolDefinitions?: () => readonly ToolDefinition[];
-    /** Compatibility name-only view used by older tests/callers. */
-    runCodeAllowedStepNames?: () => ReadonlySet<string>;
     /** Host-recorded workspace revision observed by a successful authoritative read in this run. */
     authoritativeProjectRevision?: string;
     escalation?: boolean;

@@ -34,13 +34,13 @@ describe('toolDisclosure', () => {
         expect(result.loaded).to.deep.equal([]);
         expect(result.unavailable).to.include('edit_file');
         expect(result.unavailable).to.include('replace_lines');
-        // Non-deferred tools that are absent from the current stage are not
-        // falsely reported as already visible.
+        // Always-disclosed tools absent from the effective pool are not falsely
+        // reported as already visible.
         expect(result.unavailable).to.include('manage_goal');
         expect(result.alreadyLoaded).to.deep.equal([]);
     });
 
-    it('loads stage-hidden tools from the effective mode/domain/workflow pool', () => {
+    it('loads deferred tools from the effective mode/domain/workflow pool', () => {
         const ctx = context('build');
         const result = service.select(
             { tools: ['edit_file', 'replace_lines'], reason: 'continue task' },
@@ -70,13 +70,13 @@ describe('toolDisclosure', () => {
 
         // Domain-specific schemas remain denied in a General Coding run.
         const generalCtx = context('build');
-        const paradoxStage = service.select(
+        const paradoxSelection = service.select(
             { tools: ['query_types'], reason: 'test' },
             [],
             generalCtx,
             { eligibleTools: [eligibleTool('query_types')] },
         );
-        expect(paradoxStage.loaded).to.deep.equal([]);
+        expect(paradoxSelection.loaded).to.deep.equal([]);
         expect(generalCtx.loaded.has('query_types')).to.equal(false);
     });
 

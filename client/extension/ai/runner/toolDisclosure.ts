@@ -23,7 +23,7 @@ export interface ToolDisclosureContext {
 }
 
 export interface ToolSelectionOptions {
-    /** Full mode/domain/workflow-filtered pool before stage gating. */
+    /** Full mode/domain/workflow-filtered pool available for explicit loading. */
     eligibleTools?: readonly ToolDefinition[];
 }
 

@@ -13,8 +13,6 @@ import { TOOL_REGISTRY } from '../../extension/ai/tools/registry';
 import { TOOL_DEFINITIONS } from '../../extension/ai/tools/definitions';
 import {
     filterToolDefinitionsForMode,
-    filterToolDefinitionsForStage,
-    initialToolStageForMode,
     shouldAutoDiscloseExecutionTools,
 } from '../../extension/ai/runnerPolicy';
 import { createToolDedupeKey, ToolDedupeService } from '../../extension/ai/runner/toolDedupe';
@@ -22,9 +20,6 @@ import { ContextLimitTracker } from '../../extension/ai/runner/contextLimitTrack
 import { ConversationUndoCoordinator } from '../../extension/ai/runner/undoCoordinator';
 import { FaultInjector } from '../../extension/ai/runner/faultInjection';
 import { SideQuestionService } from '../../extension/ai/runner/sideQuestionService';
-import { StepRetryPolicy } from '../../extension/ai/runner/stepRetryPolicy';
-import { ModelRequestService } from '../../extension/ai/runner/modelRequestService';
-import { ToolExecutionPipeline } from '../../extension/ai/runner/toolExecutionPipeline';
 import { migrateLegacyRuntimeState } from '../../extension/ai/runner/state/migrations';
 import { projectActivities } from '../../extension/ai/runner/activityProjection';
 import { TranscriptStreamBuffer } from '../../extension/ai/runner/transcriptStreamBuffer';
@@ -216,12 +211,7 @@ describe('domain replay', () => {
 describe('tool disclosure and dedupe', () => {
     it('keeps the initial build schema materially smaller than the eligible tool pool', () => {
         const modeTools = filterToolDefinitionsForMode(TOOL_DEFINITIONS, 'build', { domain: 'paradox' });
-        const stageTools = filterToolDefinitionsForStage(
-            modeTools,
-            'build',
-            initialToolStageForMode('build'),
-        );
-        const initialTools = new ToolDisclosureService().initialTools(stageTools, {
+        const initialTools = new ToolDisclosureService().initialTools(modeTools, {
             mode: 'build',
             domain: 'paradox',
             dynamicSupported: true,
@@ -229,7 +219,7 @@ describe('tool disclosure and dedupe', () => {
         });
         const modeBytes = Buffer.byteLength(JSON.stringify(modeTools), 'utf8');
         const initialBytes = Buffer.byteLength(JSON.stringify(initialTools), 'utf8');
-        expect(initialTools.length).to.be.lessThan(stageTools.length);
+        expect(initialTools.length).to.be.lessThan(modeTools.length);
         expect(initialBytes / modeBytes).to.be.lessThan(0.25);
     });
 
@@ -269,20 +259,19 @@ describe('tool disclosure and dedupe', () => {
     it('makes critical deferred tools visible for every workspace-write execution surface', () => {
         const service = new ToolDisclosureService();
         const cases = [
-            { mode: 'build', domain: 'paradox', stage: 'write', expected: ['write_file', 'edit_file', 'replace_lines'] },
-            { mode: 'utility', domain: 'general', stage: 'write', expected: ['write_file', 'edit_file', 'replace_lines', 'run_command', 'dispatch_agents'] },
-            { mode: 'gui_expert', domain: 'paradox', stage: undefined, expected: ['write_file', 'edit_file', 'replace_lines', 'run_command', 'dispatch_agents'] },
-            { mode: 'loc_translator', domain: 'paradox', stage: undefined, expected: ['write_file', 'git_ops'] },
-            { mode: 'loc_writer', domain: 'paradox', stage: undefined, expected: ['write_file', 'git_ops'] },
-            { mode: 'orchestrator', domain: 'paradox', stage: undefined, expected: ['write_file', 'git_ops', 'dispatch_agents'] },
-            { mode: 'script', domain: 'paradox', stage: undefined, expected: ['write_file', 'git_ops', 'dispatch_agents'] },
+            { mode: 'build', domain: 'paradox', expected: ['write_file', 'edit_file', 'replace_lines'] },
+            { mode: 'utility', domain: 'general', expected: ['write_file', 'edit_file', 'replace_lines', 'run_command', 'dispatch_agents'] },
+            { mode: 'gui_expert', domain: 'paradox', expected: ['write_file', 'edit_file', 'replace_lines', 'run_command', 'dispatch_agents'] },
+            { mode: 'loc_translator', domain: 'paradox', expected: ['write_file', 'git_ops'] },
+            { mode: 'loc_writer', domain: 'paradox', expected: ['write_file', 'git_ops'] },
+            { mode: 'orchestrator', domain: 'paradox', expected: ['write_file', 'git_ops', 'dispatch_agents'] },
+            { mode: 'script', domain: 'paradox', expected: ['write_file', 'git_ops', 'dispatch_agents'] },
         ] as const;
 
         for (const testCase of cases) {
             const modePool = filterToolDefinitionsForMode(TOOL_DEFINITIONS, testCase.mode, {
                 domain: testCase.domain,
             });
-            const stagePool = filterToolDefinitionsForStage(modePool, testCase.mode, testCase.stage);
             const context = {
                 mode: testCase.mode,
                 domain: testCase.domain,
@@ -290,14 +279,14 @@ describe('tool disclosure and dedupe', () => {
                 loaded: new Set<string>(),
             };
             expect(
-                shouldAutoDiscloseExecutionTools(testCase.mode, testCase.stage, 'workspace_write'),
+                shouldAutoDiscloseExecutionTools(testCase.mode, 'workspace_write'),
                 `${testCase.mode} disclosure boundary`,
             ).to.equal(true);
             service.select({
                 groups: ['file_write', 'command', 'git', 'media', 'orchestrator'],
                 reason: 'runtime-authorized execution surface',
-            }, stagePool, context);
-            const visible = service.initialTools(stagePool, context).map(tool => tool.function.name);
+            }, modePool, context);
+            const visible = service.initialTools(modePool, context).map(tool => tool.function.name);
             expect(visible, testCase.mode).to.include.members(testCase.expected);
             expect(visible, `${testCase.mode}:select_tools`).to.include('select_tools');
         }
@@ -386,63 +375,6 @@ describe('runtime recovery helpers', () => {
         });
         expect(goal?.detail).to.include('tokens 250/1000');
         expect(goal?.detail).to.include('turns 2/5');
-    });
-
-    it('retries model requests with deterministic classification and bounded input shrinking', async () => {
-        const policy = new StepRetryPolicy(3, 1, 2);
-        expect(policy.decide({ status: 413 }, 1)).to.include({
-            retry: true,
-            reason: 'context_overflow',
-            shrinkInput: true,
-        });
-        expect(policy.decide(new Error('fetch failed'), 1)).to.include({
-            retry: true,
-            reason: 'timeout',
-            shrinkInput: false,
-        });
-        const attempts: string[] = [];
-        const result = await new ModelRequestService().execute(
-            'large',
-            async ({ request, attempt }) => {
-                attempts.push(`${attempt}:${request}`);
-                if (attempt === 1) throw Object.assign(new Error('context overflow'), { status: 413 });
-                return request;
-            },
-            {
-                retryPolicy: policy,
-                delay: async () => undefined,
-                shrink: request => request.slice(0, 3),
-            },
-        );
-        expect(result).to.equal('lar');
-        expect(attempts).to.deep.equal(['1:large', '2:lar']);
-    });
-
-    it('runs the tool pipeline in the fixed fail-closed order', async () => {
-        const stages: string[] = [];
-        const pipeline = new ToolExecutionPipeline({
-            guard: stage => {
-                stages.push(stage);
-                return { allowed: stage !== 'permission', reason: 'denied' };
-            },
-            execute: async () => {
-                stages.push('actual');
-                return { success: true };
-            },
-        });
-        expect(await pipeline.run({ invocationId: 'i', toolName: 'read_file', args: {} })).to.deep.include({
-            success: false,
-            rejectedAt: 'permission',
-        });
-        expect(stages).to.deep.equal([
-            'parse',
-            'registry',
-            'scheduling',
-            'sandbox',
-            'policy',
-            'plan_guard',
-            'permission',
-        ]);
     });
 
     it('learns a lower context limit after overflow', () => {

@@ -5,14 +5,13 @@
  * 1. Send user message + context + tools to AI
  * 2. If AI wants to call tools → execute tools → feed results back
  * 3. Repeat until AI produces final answer or max iterations reached
- * 4. Extract generated code → validate → retry if needed (max 3 rounds)
+ * 4. Fold deterministic tool validation back into the same loop before finalizing
  */
 
 import type {
     ChatMessage,
     AgentStep,
     GenerationResult,
-    ValidationError,
     AgentToolName,
     AgentMode,
     ChatCompletionResponse,
@@ -20,8 +19,6 @@ import type {
     TokenUsage,
     AgentToolStage,
     AgentRunMetrics,
-    AnalyzeDiagnosticErrorResult,
-    GetDiagnosticsResult,
     ToolDefinition,
     ReasoningEffort,
     AgentSchedulingState,
@@ -57,12 +54,8 @@ import { MemoryParser } from './memoryParser';
 import { getProjectWorkspaceRoot, getPrivateTopicStorageDir, getPrivateTopicStorageDirCandidates, canonicalPathKey } from './workspacePaths';
 import {
     filterToolDefinitionsForMode,
-    filterToolDefinitionsForStage,
-    extendStageToolPoolWithSupport,
-    getWorkflowStageSupportTools,
     initialToolStageForMode,
-    advanceToolStage,
-    buildToolStageReminder,
+    buildToolFocusReminder,
     isExecutionActionTool,
     resolveMaxToolIterations,
     resolveRunMaxOutputTokens,
@@ -73,13 +66,12 @@ import {
     finalResponseRequiresUserInput,
     isTruncationInducedStop,
     shouldRenewIterationLimit,
-    SLIM_SUB_AGENT_OUTPUT_BUDGET_RECOVERY_LIMIT,
     SLIM_SUB_AGENT_THINKING_CHAR_LIMIT,
 } from './runnerPolicy';
 import { getWorkflow } from './workflowRegistry';
 import { TOOL_REGISTRY, WRITE_TOOLS, READ_ONLY_TOOLS } from './tools/registry';
 import { hasAddedErrors, type DiagnosticDelta } from './runner/diagnosticSnapshot';
-import { buildRunCodePromptBlock, computeRunCodeAllowedStepNames } from './tools/runCode';
+import { buildRunCodePromptBlock, createRunCodeCapabilitySnapshot } from './tools/runCode';
 import { globalPartitionedWriteQueue } from './runner/writeCoordinator';
 import { runLedger } from './runner/runLedger';
 import { atomicWriteText, sha256Text } from './runner/durableStorage';
@@ -88,7 +80,7 @@ import { maybeCompactHistory as _maybeCompactHistory, MID_LOOP_COMPACTION_INTERV
 import { refreshLiveVsCodeContext } from './runner/liveContext';
 import { runContextMaintenance, shouldCompactEarlyForCost } from './runner/contextMaintenance';
 import { TokenCalibrationTable, buildCalibrationKey } from './runner/tokenCalibration';
-import { executeFallbackRetry, isFallbackEligibleApiError } from './runner/fallbackPolicy';
+import { executeFallbackRetry } from './runner/fallbackPolicy';
 import { SUPERSEDED_BY_LATER_SAME_FILE_WRITE_TOOLS, getAgentToolTargetFiles, toolScheduler } from './runner/toolScheduler';
 import { buildToolInvocation } from './runner/toolInvocation';
 import { DOOM_LOOP_SOFT_THRESHOLD, DOOM_LOOP_PAIR_THRESHOLD, fnv32a, normalizeToolResultHash, DoomLoopState } from './runner/doomLoopDetector';
@@ -101,17 +93,14 @@ import { activeTurnRegistry } from './runner/activeTurnRegistry';
 import { isRetryStepRequest, type RetryStepRequest, type StepRequest } from './runner/stepRequest';
 import {
     normalizeSchedulingState,
-    phaseForToolStage,
     transitionSchedulingState,
 } from './runner/scheduling';
 import { sortToolDefinitionsForStableRequest, toolDisclosureService, type ToolDisclosureContext } from './runner/toolDisclosure';
 import { ToolDedupeService } from './runner/toolDedupe';
 import { contextLimitTracker } from './runner/contextLimitTracker';
 import { RecoveryCoordinator } from './runner/recoveryCoordinator';
-import { createAgentRuntimeServices } from './runner/runtimeServices';
 import { runtimeFaultInjector } from './runner/faultInjection';
 import { threadStore } from './runner/threadStore';
-import { validateGitOpsForMode, validatePlanModeToolUse } from './planModeGuard';
 import {
     buildApprovedPlanExecutionReminder,
     isCompleteImplementationPlanWrite,
@@ -133,13 +122,12 @@ import {
 import { buildModelRequestMessageArchive, type ModelRequestArchiveState } from './runner/requestArtifacts';
 import {
     createTerminalValidationState,
-    hasOnlyPendingValidationErrors,
+    formatTerminalValidationFeedback,
     terminalValidationOutcome,
     updateTerminalValidationState,
     type TerminalValidationState,
 } from './runner/terminalValidation';
 
-export { isFallbackEligibleApiError } from './runner/fallbackPolicy';
 export { getAgentToolTargetFiles, SUPERSEDED_BY_LATER_SAME_FILE_WRITE_TOOLS } from './runner/toolScheduler';
 export { DOOM_LOOP_SOFT_THRESHOLD, DOOM_LOOP_PAIR_THRESHOLD, fnv32a, normalizeToolResultHash } from './runner/doomLoopDetector';
 export { AgentAbortError, checkCancellation, isAbortError } from './runner/cancellation';
@@ -149,14 +137,6 @@ export { StepEmitter } from './runner/stepEmitter';
 export { estimateTokenCount, estimateChatMessageTokens, estimateChatMessagesTokens, CHARS_PER_TOKEN } from './runner/tokenEstimation';
 
 
-// Maximum validation-retry rounds (reduced: edit_file now returns inline LSP diagnostics)
-const MAX_VALIDATION_RETRIES = 2;
-const VALIDATION_DIAGNOSTIC_FRESHNESS_RECHECK_DELAYS_MS = [500, 1500, 3000];
-const MAX_OUTPUT_REPETITION_RECOVERIES = 1;
-const MAX_TOP_LEVEL_LENGTH_RECOVERIES = 1;
-// Bounded recoveries for final answers that stop because the model misread
-// display-only tool-result truncation as partial application.
-const MAX_TRUNCATION_STOP_RECOVERIES = 2;
 const reportBestEffortFailure = createBestEffortReporter((message, error) => {
     ErrorReporter.debug(SOURCE.AGENT_RUNNER, message, error);
 });
@@ -257,12 +237,8 @@ export interface AgentRunnerOptions {
     onBeforeFileWrite?: (filePath: string, prevContent: string | null) => void;
     /** Callback when a sub-agent creates or modifies a todo list plan */
     onTodoUpdate?: import('./types').TodoUpdateCallback;
-    /** 
-* Skip built-in validation loop (Phase 3). 
-* Orchestrator subagent uses this flag because Orchestrator has its own QualityGate mechanism, 
-* The subagent does not need to be repeatedly verified, and the validation loop will continue to generate steps after the inference ends, resulting in inconsistent UI status. 
-*/
-    skipValidation?: boolean;
+    /** Leave terminal validation ownership to the parent orchestrator quality gate. */
+    deferTerminalValidationToParent?: boolean;
     /** 
 * A list of tool names to exclude from the set of available tools. 
 * Used in sub-Agent scenarios: disable tools that are not suitable for independent use by sub-Agents (such as network search), 
@@ -310,7 +286,6 @@ function filterWebToolsForConfiguredAccess(tools: ToolDefinition[]): ToolDefinit
 
 export class AgentRunner {
     public readonly readTracker = new ReadTracker();
-    private readonly runtimeServices = createAgentRuntimeServices();
     private writeQueue = globalPartitionedWriteQueue;
     private activeRunRecordPromise?: Promise<import('./types').AgentRunRecord>;
     private readonly turnRunner = new TurnRunner();
@@ -544,22 +519,11 @@ export class AgentRunner {
         }
     }
 
-    // ─── Batch 2.5: Provider fallback retry ──────────────────────────────────
-
-    /**
-     * Determine if an API error is catastrophic enough to warrant a fallback retry.
-     * Returns true for 5xx server errors, network timeouts, and exhausted rate limits.
-     */
-    private isFallbackEligibleError(error: unknown): boolean {
-        return isFallbackEligibleApiError(error)
-            || this.runtimeServices.retryPolicy.decide(error, 1).retry;
-    }
-
     /**
      * One run_code step through the same gates as a direct model tool call:
      * the model-visible catalog decides the allowlist (domain isolation),
      * writes take the partitioned per-file queue, and execution goes through
-     * the shared pipeline (policy, plan guard, git guard, scheduler). The
+     * the authoritative executor (policy, plan guard, git guard). The
      * guest signal replaces the run-level signal for this nested call so a
      * timed-out program aborts in-flight work instead of leaking it.
      */
@@ -572,11 +536,11 @@ export class AgentRunner {
         signal?: AbortSignal,
         writeQueueWaitTimeoutMs?: number,
     ): Promise<unknown> {
-        if (!computeRunCodeAllowedStepNames(modelVisibleTools).has(toolName)) {
+        if (!createRunCodeCapabilitySnapshot(modelVisibleTools).names.has(toolName)) {
             return {
                 success: false,
                 stepBlocked: true,
-                error: `Tool '${toolName}' is not available to run_code in the current mode/domain/stage.`,
+                error: `Tool '${toolName}' is not available to run_code in the current mode, domain, or disclosed toolset.`,
             };
         }
         const registryEntry = TOOL_REGISTRY.get(toolName as AgentToolName);
@@ -633,19 +597,8 @@ export class AgentRunner {
             .getConfiguration('stellarisLanguageServices.ai.developer')
             .get<boolean>('faultInjection', false));
         await runtimeFaultInjector.hit('before_tool', context?.runnerOptions?.abortSignal);
-        const pipeline = this.runtimeServices.createToolPipeline({
-            execute: pipelineContext => this.toolExecutor.execute(
-                pipelineContext.toolName,
-                pipelineContext.args,
-                context,
-            ),
-        });
-        const result = await pipeline.run({
-            invocationId: context?.runnerOptions?.runRecord?.runId ?? `tool_${Date.now()}`,
-            toolName,
-            args,
-            signal: context?.runnerOptions?.abortSignal,
-        });
+        context?.runnerOptions?.abortSignal?.throwIfAborted();
+        const result = await this.toolExecutor.execute(toolName, args, context);
         await runtimeFaultInjector.hit('after_tool', context?.runnerOptions?.abortSignal);
         return result;
     }
@@ -899,8 +852,6 @@ export class AgentRunner {
                 reportBestEffortFailure('run_status.persist', { topicId, threadId, status }, error);
             });
         };
-            // Empty
-        // Empty
 
         // Accumulate token usage across all API calls in this generation
         // (declared here so compaction call and sub-agent dispatch can also contribute to the total)
@@ -1099,12 +1050,7 @@ export class AgentRunner {
             legacyFullToolset: promptLegacyFullToolset,
         }));
         const initialToolStage = options?.initialToolStage ?? initialToolStageForMode(mode);
-        const promptToolDefinitions = filterToolDefinitionsForStage(
-            promptModeTools,
-            mode,
-            initialToolStage,
-            promptLegacyFullToolset,
-        );
+        const promptToolDefinitions = promptModeTools;
         // DeepSeek prefix-cache optimization: use frozen (session-cached) system prompt
         // to ensure byte-level stability across API calls for cache hits.
         // rebuildSystemPrompt drops this fingerprint's cache entry before building (plan sec.7.1).
@@ -1188,7 +1134,7 @@ export class AgentRunner {
                 }
                 : undefined,
         });
-        const initialStageReminder = buildToolStageReminder(mode, initialToolStage, promptToolDefinitions, domain);
+        const initialStageReminder = buildToolFocusReminder(mode, initialToolStage, domain);
         const dynamicBlock: ChatMessage[] = [
             ...promptDynamicBlock,
             ...(options?.useSlimPrompt ? this.promptBuilder.buildSlimDynamicPromptBlock(delegationScopeFacts) : []),
@@ -1433,117 +1379,17 @@ export class AgentRunner {
                 };
             }
 
-            // Plan / Explore / General / Review / multi-Agent parent — or no code generated — just an explanation
-            if (!code || mode === 'plan' || mode === 'explore' || mode === 'general' || mode === 'utility' || mode === 'review' || mode === 'orchestrator' || mode === 'script') {
-                const orchestratorValidation = mode === 'script' || mode === 'orchestrator'
-                    ? this.toolExecutor.getOrchestratorValidation(runId)
-                    : undefined;
-                const toolValidationOutcome = terminalValidationOutcome(terminalValidation);
-                const parentQualityGateWillRevalidate = options?.useSlimPrompt === true && !!options.parentRunId;
-                const validationPending = !parentQualityGateWillRevalidate && (
-                    orchestratorValidation?.pendingOnly === true
-                    || (!orchestratorValidation && toolValidationOutcome === 'pending')
-                );
-                const validationFailed = (orchestratorValidation?.success === false && orchestratorValidation.pendingOnly !== true)
-                    || (!orchestratorValidation && toolValidationOutcome === 'repair');
-                if (validationPending && !validationFailed) {
-                    this.retainedResumeRuns.add(runId);
-                    if (context.topicId) {
-                        await this.saveResumeState(context.topicId, messages, mode, domain, runId, undefined, options.schedulingState ?? schedulingState);
-                    }
-                    updateRunStatus('paused');
-                    await clearResumeStateIfComplete();
-                    return {
-                        runId,
-                        code: '',
-                        explanation: finalMessage,
-                        validationErrors: [{
-                            code: 'VALIDATION_PENDING',
-                            severity: 'error',
-                            message: orchestratorValidation?.summary
-                                ?? 'Written files are saved, but final deterministic validation is still pending. The run can be resumed.',
-                            line: 0,
-                            column: 0,
-                        }],
-                        isValid: false,
-                        retryCount: 0,
-                        steps,
-                        tokenUsage: tokenAccumulator.total > 0 ? tokenAccumulator : undefined,
-                        runMetrics,
-                    };
-                }
-                const isValid = orchestratorValidation?.success ?? (toolValidationOutcome !== 'repair');
-                updateRunStatus(isValid ? 'completed' : 'failed');
-                if (isValid) this.autoCompleteTodos(options);
-                await clearResumeStateIfComplete();
-                return {
-                    runId,
-                    code: '',
-                    explanation: finalMessage,
-                    validationErrors: isValid ? [] : [{
-                        code: orchestratorValidation ? 'orchestrator_quality_gate' : 'post_write_validation',
-                        severity: 'error',
-                        message: orchestratorValidation?.summary ?? aiText(
-                            `Post-write validation requires repair for ${terminalValidation.repairTargets.size + terminalValidation.diagnosticErrorTargets.size} target(s).`,
-                            `写后验证发现 ${terminalValidation.repairTargets.size + terminalValidation.diagnosticErrorTargets.size} 个目标需要修复。`,
-                        ),
-                        line: 0,
-                        column: 0,
-                    }],
-                    isValid,
-                    retryCount: 0,
-                    steps,
-                    tokenUsage: tokenAccumulator.total > 0 ? tokenAccumulator : undefined,
-                    runMetrics,
-                };
-            }
-
-            // Phase 3: Validation loop
-            // Orchestrator subagent skips this stage via skipValidation -
-            // Orchestrator has an independent QualityGate mechanism, and subagents do not need to be repeatedly verified.
-            // In addition, the validation loop will continue to generate steps after the reasoning ends, causing the external judgment card to be inconsistent with the internal state.
-            if (options?.skipValidation) {
-                updateRunStatus('completed');
-                this.autoCompleteTodos(options);
-                await clearResumeStateIfComplete();
-                return {
-                    runId,
-                    code,
-                    explanation: this.extractExplanation(finalMessage),
-                    validationErrors: [],
-                    isValid: true,
-                    retryCount: 0,
-                    steps,
-                    tokenUsage: tokenAccumulator.total > 0 ? tokenAccumulator : undefined,
-                    runMetrics,
-                };
-            }
-
-            const targetFile = context.activeFile ?? '';
-            const validationResult = await this.validationLoop(
-                code, targetFile, messages, emitStep, options, tokenAccumulator
-            );
-
+            const orchestratorValidation = mode === 'script' || mode === 'orchestrator'
+                ? this.toolExecutor.getOrchestratorValidation(runId)
+                : undefined;
             const toolValidationOutcome = terminalValidationOutcome(terminalValidation);
-            if (validationResult.isValid && toolValidationOutcome !== 'allow') {
-                validationResult.isValid = false;
-                validationResult.validationErrors.push({
-                    code: toolValidationOutcome === 'pending' ? 'VALIDATION_PENDING' : 'post_write_validation',
-                    severity: 'error',
-                    message: toolValidationOutcome === 'pending'
-                        ? aiText(
-                            'Written files are saved, but final deterministic validation is still pending. The run can be resumed.',
-                            '文件已写入，但最终确定性验证仍在等待中；该运行可以恢复。',
-                        )
-                        : aiText(
-                            'A tool-written file still requires repair after post-write validation.',
-                            '工具写入的文件在写后验证后仍需修复。',
-                        ),
-                    line: 0,
-                    column: 0,
-                });
-            }
-            const validationPending = hasOnlyPendingValidationErrors(validationResult.validationErrors);
+            const terminalValidationDeferred = options?.deferTerminalValidationToParent === true;
+            const validationPending = !terminalValidationDeferred
+                && (orchestratorValidation?.pendingOnly === true
+                    || (!orchestratorValidation && toolValidationOutcome === 'pending'));
+            const validationFailed = !terminalValidationDeferred
+                && ((orchestratorValidation?.success === false && orchestratorValidation.pendingOnly !== true)
+                    || (!orchestratorValidation && toolValidationOutcome === 'repair'));
             if (validationPending) {
                 this.retainedResumeRuns.add(runId);
                 if (context.topicId) {
@@ -1551,14 +1397,31 @@ export class AgentRunner {
                 }
                 updateRunStatus('paused');
             } else {
-                updateRunStatus(validationResult.isValid ? 'completed' : 'failed');
-                if (validationResult.isValid) this.autoCompleteTodos(options);
+                updateRunStatus(validationFailed ? 'failed' : 'completed');
+                if (!validationFailed) this.autoCompleteTodos(options);
             }
             await clearResumeStateIfComplete();
+            const validationErrors = validationPending || validationFailed ? [{
+                code: validationPending
+                    ? 'VALIDATION_PENDING'
+                    : orchestratorValidation ? 'orchestrator_quality_gate' : 'post_write_validation',
+                severity: 'error' as const,
+                message: orchestratorValidation?.summary ?? (validationPending
+                    ? aiText(
+                        'Written files are saved, but final deterministic validation is still pending. The run can be resumed.',
+                        '文件已写入，但最终确定性验证仍在等待中；该运行可以恢复。',
+                    )
+                    : formatTerminalValidationFeedback(terminalValidation)),
+                line: 0,
+                column: 0,
+            }] : [];
             return {
                 runId,
-                ...validationResult,
-                explanation: this.extractExplanation(finalMessage),
+                code: code ?? '',
+                explanation: code ? this.extractExplanation(finalMessage) : finalMessage,
+                validationErrors,
+                isValid: !validationPending && !validationFailed,
+                retryCount: 0,
                 steps,
                 tokenUsage: tokenAccumulator.total > 0 ? tokenAccumulator : undefined,
                 runMetrics,
@@ -2002,9 +1865,6 @@ export class AgentRunner {
             // run_code snapshots the current model-visible catalog when its
             // guest starts. Nested calls still recheck the live catalog.
             runCodeToolDefinitions: () => availableTools.filter(tool => TOOL_REGISTRY.has(tool.function.name as AgentToolName)),
-            runCodeAllowedStepNames: () => computeRunCodeAllowedStepNames(
-                availableTools.filter(tool => TOOL_REGISTRY.has(tool.function.name as AgentToolName)),
-            ),
             runNestedTool: async (toolName, args, signal, writeQueueWaitTimeoutMs) => {
                 const result = await this.runNestedToolStep(
                     toolName,
@@ -2033,14 +1893,8 @@ export class AgentRunner {
         let consecutiveErrorCount = 0;
         // Flag set to true when we need to exit the outer while loop
         let forceStop = false;
-        let outputRepetitionRecoveries = 0;
-        let contextOverflowRecoveries = 0;
-        let topLevelLengthRecoveries = 0;
-        let prematureExecutionFinalRecoveries = 0;
-        let truncationStopRecoveries = 0;
         let executionActionObserved = false;
         let interactivePlanApprovalPending = false;
-        let ineffectiveCompactionCount = 0;
         const updateFinalPromptMetric = () => {
             if (!runMetrics) return;
             runMetrics.finalPromptTokens = messages.reduce((s, m) => {
@@ -2068,7 +1922,7 @@ export class AgentRunner {
         const confirmedWrittenFiles = new Set<string>();
         const performanceConfig = vs.workspace.getConfiguration('stellarisLanguageServices.ai.performance');
         const legacyFullToolset = performanceConfig.get<boolean>('legacyFullToolset') === true;
-        let toolStage = options?.initialToolStage ?? initialToolStageForMode(mode);
+        const toolStage = options?.initialToolStage ?? initialToolStageForMode(mode);
         if (tokenAccumulator) tokenAccumulator.toolStage = toolStage;
         let requestArchiveState: ModelRequestArchiveState | undefined;
         const archivedToolsets = new Map<string, { ref: string; sha256: string }>();
@@ -2158,11 +2012,8 @@ export class AgentRunner {
             }
             ErrorReporter.debug('AgentRunner', `Workflow "${activeWorkflow.id}" tool policy applied: ${availableTools.length} tools available`);
         }
-        const workflowStageSupportTools = activeWorkflow?.toolPolicy.strategy === 'allowlist'
-            ? getWorkflowStageSupportTools(activeWorkflow.toolPolicy.tools)
-            : undefined;
         availableTools = sortToolDefinitionsForStableRequest(availableTools);
-        const stagedToolPool = availableTools;
+        const eligibleToolPool = availableTools;
         const disclosureContext: ToolDisclosureContext = {
             mode,
             domain: options?.domain ?? defaultDomainForMode(mode),
@@ -2174,27 +2025,13 @@ export class AgentRunner {
         };
         const toolDedupe = new ToolDedupeService();
         const refreshAvailableTools = (): ToolDefinition[] => {
-            const baseStagePool = filterToolDefinitionsForStage(
-                stagedToolPool,
-                mode,
-                toolStage,
-                legacyFullToolset,
-                workflowStageSupportTools,
-            );
-            const stagePool = extendStageToolPoolWithSupport(
-                baseStagePool,
-                stagedToolPool,
-                mode,
-                toolStage,
-                disclosureContext.loaded,
-            );
-            if (shouldAutoDiscloseExecutionTools(mode, toolStage, schedulingState.authorization)) {
+            if (shouldAutoDiscloseExecutionTools(mode, schedulingState.authorization)) {
                 toolDisclosureService.select({
                     groups: ['file_write', 'command', 'git'],
                     reason: 'Runtime-authorized execution surface',
-                }, stagePool, disclosureContext, { eligibleTools: stagedToolPool });
+                }, eligibleToolPool, disclosureContext, { eligibleTools: eligibleToolPool });
             }
-            return toolDisclosureService.initialTools(stagePool, disclosureContext);
+            return toolDisclosureService.initialTools(eligibleToolPool, disclosureContext);
         };
         availableTools = refreshAvailableTools();
         const initialRunCodeSdk = buildRunCodePromptBlock(
@@ -2323,11 +2160,9 @@ export class AgentRunner {
 
         // Global tool call counter for timeline step indexing (Phase 4)
         let globalToolCallIndex = 0;
-        let slimOutputBudgetRecoveries = 0;
         const recoverSlimOutputBudget = (reason: 'thinking' | 'length'): boolean => {
             if (options?.useSlimPrompt !== true) return false;
-            if (slimOutputBudgetRecoveries >= SLIM_SUB_AGENT_OUTPUT_BUDGET_RECOVERY_LIMIT) return false;
-            slimOutputBudgetRecoveries++;
+            if (!recoveryCoordinator.claim('output_truncated')) return false;
             messages.push({
                 role: 'user',
                 content: reason === 'thinking'
@@ -2540,11 +2375,12 @@ export class AgentRunner {
                         afterTokens = calibrateLoopEstimate(messages.reduce((s, m) => s + estimateChatMessageTokens(m), 0)
                             + activeToolSchemaTokens);
                     }
-                    if (afterTokens > midLoopThreshold && afterTokens >= loopTokens * 0.95) {
-                        ineffectiveCompactionCount++;
-                    } else {
-                        ineffectiveCompactionCount = 0;
-                    }
+                    const ineffectiveCompaction = afterTokens > midLoopThreshold
+                        && afterTokens >= loopTokens * 0.95;
+                    const compactionClaim = ineffectiveCompaction
+                        ? recoveryCoordinator.claim('compaction_ineffective')
+                        : undefined;
+                    const compactionBudgetExhausted = ineffectiveCompaction && !compactionClaim;
                     await runLedger.appendEvent(
                         runRecord.runId,
                         'compaction_end',
@@ -2553,26 +2389,26 @@ export class AgentRunner {
                     );
                     emitStep({
                         type: 'compaction',
-                        content: ineffectiveCompactionCount >= 3
+                        content: compactionBudgetExhausted
                             ? AGENT.COMPACTION_THRASHING
                             : AGENT.COMPACTION_PHASE_DONE(loopTokens, afterTokens),
                         timestamp: Date.now(),
                         compactionInfo: {
-                            state: ineffectiveCompactionCount >= 3 ? 'failed' : 'complete',
+                            state: compactionBudgetExhausted ? 'failed' : 'complete',
                             kind: 'mid_loop',
                             beforeTokens: loopTokens,
                             afterTokens,
                             thresholdTokens: midLoopThreshold,
                         },
                     });
-                    if (ineffectiveCompactionCount >= 3) {
+                    if (compactionBudgetExhausted) {
                         emitStep({
                             type: 'error',
                             content: AGENT.COMPACTION_THRASHING,
                             timestamp: Date.now(),
                         });
                         updateFinalPromptMetric();
-                        return '[Agent Execution Terminated]: Context compaction was ineffective three times; stopped to avoid a retry loop.';
+                        return '[Agent Execution Terminated]: Context compaction remained ineffective and the shared recovery budget is exhausted.';
                     }
                 }
             }
@@ -2812,11 +2648,10 @@ export class AgentRunner {
                 });
                 const errorText = recoveryError.message;
                 if (recoveryError.kind === 'cancelled') throw recoveryError.cause;
-                const overflowAttempt = recoveryError.kind === 'context_overflow'
-                    ? recoveryCoordinator.claim('context_overflow', 2)
+                const overflowClaim = recoveryError.kind === 'context_overflow'
+                    ? recoveryCoordinator.claim('context_overflow')
                     : undefined;
-                if (overflowAttempt !== undefined) {
-                    contextOverflowRecoveries = overflowAttempt;
+                if (overflowClaim) {
                     const activeSchemaTokens = estimateTokenCount(JSON.stringify(availableTools));
                     const estimatedTokens = messages.reduce((sum, message) => sum + estimateChatMessageTokens(message), 0)
                         + activeSchemaTokens;
@@ -2834,7 +2669,8 @@ export class AgentRunner {
                     }, { invocationId: modelCallId, status: 'failed' });
                     await runLedger.appendEvent(runRecord.runId, 'compaction_retry', {
                         iteration,
-                        attempt: contextOverflowRecoveries,
+                        attempt: overflowClaim.attempt,
+                        totalAttempt: overflowClaim.totalAttempt,
                         reason: errorText,
                     }, { invocationId: modelCallId, status: 'running' });
                     // Provider-reported overflow is authoritative: free-prune only
@@ -2868,8 +2704,8 @@ export class AgentRunner {
                         },
                         { invocationId: modelCallId, status: 'failed' }
                     );
-                    if (outputRepetitionRecoveries < MAX_OUTPUT_REPETITION_RECOVERIES) {
-                        outputRepetitionRecoveries++;
+                    const repetitionClaim = recoveryCoordinator.claim('output_repetition');
+                    if (repetitionClaim) {
                         emitStep({
                             type: 'validation',
                             content: AGENT.OUTPUT_REPETITION_RETRY(outputRepetition.kind, outputRepetition.match.cycleChars),
@@ -2900,14 +2736,47 @@ export class AgentRunner {
                     }
                     return stopForSlimOutputBudget();
                 }
-                const transportAttempt = recoveryError.kind === 'transport'
-                    ? recoveryCoordinator.claim('transport', 2)
+                const rateLimitClaim = recoveryError.kind === 'rate_limit'
+                    ? recoveryCoordinator.claim('rate_limit')
                     : undefined;
-                if (transportAttempt !== undefined) {
+                if (rateLimitClaim) {
                     await runLedger.appendEvent(
                         runRecord.runId,
                         'model_call_end',
-                        { iteration, success: false, error: recoveryError.message, recoveryKind: recoveryError.kind, attempt: transportAttempt },
+                        {
+                            iteration,
+                            success: false,
+                            error: recoveryError.message,
+                            recoveryKind: recoveryError.kind,
+                            attempt: rateLimitClaim.attempt,
+                            totalAttempt: rateLimitClaim.totalAttempt,
+                        },
+                        { invocationId: modelCallId, status: 'failed' },
+                    );
+                    emitStep({
+                        type: 'validation',
+                        content: 'Provider rate limit reached; retrying once under the shared recovery budget.',
+                        timestamp: Date.now(),
+                    });
+                    await new Promise(resolve => setTimeout(resolve, 1_000));
+                    options?.abortSignal?.throwIfAborted();
+                    continue;
+                }
+                const transportClaim = recoveryError.kind === 'transport'
+                    ? recoveryCoordinator.claim('transport')
+                    : undefined;
+                if (transportClaim) {
+                    await runLedger.appendEvent(
+                        runRecord.runId,
+                        'model_call_end',
+                        {
+                            iteration,
+                            success: false,
+                            error: recoveryError.message,
+                            recoveryKind: recoveryError.kind,
+                            attempt: transportClaim.attempt,
+                            totalAttempt: transportClaim.totalAttempt,
+                        },
                         { invocationId: modelCallId, status: 'failed' }
                     );
                     emitStep({
@@ -2924,8 +2793,13 @@ export class AgentRunner {
                     });
                     continue;
                 }
-                // Batch 2.5: Provider fallback on catastrophic errors
-                if (this.isFallbackEligibleError(err)) {
+                const fallbackEligible = recoveryError.kind === 'transport'
+                    || recoveryError.kind === 'rate_limit'
+                    || recoveryError.kind === 'provider';
+                const fallbackClaim = fallbackEligible
+                    ? recoveryCoordinator.claim('provider_fallback')
+                    : undefined;
+                if (fallbackClaim) {
                     const fallbackResponse = await this.tryFallbackProvider(
                         messages,
                         _providerId0,
@@ -3106,8 +2980,8 @@ export class AgentRunner {
             if (!options?.streaming) {
                 const repetition = textRepetitionDetector.append(rawContent);
                 if (repetition) {
-                    if (outputRepetitionRecoveries < MAX_OUTPUT_REPETITION_RECOVERIES) {
-                        outputRepetitionRecoveries++;
+                    const repetitionClaim = recoveryCoordinator.claim('output_repetition');
+                    if (repetitionClaim) {
                         emitStep({
                             type: 'validation',
                             content: AGENT.OUTPUT_REPETITION_RETRY('response', repetition.cycleChars),
@@ -3198,10 +3072,10 @@ export class AgentRunner {
                     ),
                     timestamp: Date.now(),
                 });
-                if (topLevelLengthRecoveries >= MAX_TOP_LEVEL_LENGTH_RECOVERIES) {
-                    return '[Agent Execution Terminated]: The model exhausted its output limit twice; generation stopped safely.';
+                const truncationClaim = recoveryCoordinator.claim('output_truncated');
+                if (!truncationClaim) {
+                    return '[Agent Execution Terminated]: The model exhausted its output limit and the shared recovery budget is unavailable.';
                 }
-                topLevelLengthRecoveries++;
                 runContextMaintenance(messages, 'overflow', {
                     toolResultBudget,
                     compactionOptions,
@@ -3254,11 +3128,11 @@ export class AgentRunner {
                 if (options?.useSlimPrompt === true) {
                     return stopForSlimOutputBudget();
                 }
-                if (topLevelLengthRecoveries >= MAX_TOP_LEVEL_LENGTH_RECOVERIES) {
+                const truncationClaim = recoveryCoordinator.claim('output_truncated');
+                if (!truncationClaim) {
                     return this.cleanFinalContent(contentToString(assistantMessage.content))
-                        || '[Agent Execution Terminated]: The model reached its output limit twice; generation stopped safely.';
+                        || '[Agent Execution Terminated]: The model reached its output limit and the shared recovery budget is unavailable.';
                 }
-                topLevelLengthRecoveries++;
                 messages.push({
                     role: 'user',
                     content: `[SYSTEM] Your previous response was truncated by the API max_tokens length limit. Please DO NOT output massive blocks of text. Break down your modifications into smaller steps. Use todo_write to plan them, and execute a single edit_file/replace_lines per response.`
@@ -3320,37 +3194,36 @@ export class AgentRunner {
                     }
                 }
                 if (!requiresUserInput
-                    && prematureExecutionFinalRecoveries < 3
                     && shouldContinueAuthorizedExecution(
                         mode,
-                        toolStage,
                         schedulingState.authorization,
                         executionActionObserved,
                     )) {
-                    prematureExecutionFinalRecoveries++;
-                    messages.push({
-                        role: 'user',
-                        content: `<system-reminder>This task already has workspace-write authorization. `
-                            + `${toolStage ? `The current ${toolStage} stage is an internal execution checkpoint, not a user approval boundary. ` : ''}`
-                            + `Do not ask the user to say "execute", do not return manual edit instructions, and do not stop at evidence collection. `
-                            + `Continue now with the available tools until the requested execution and verification are complete. `
-                            + `Only call ask_user_question when progress requires a user-owned decision that cannot be discovered or safely defaulted.</system-reminder>`,
-                    });
-                    ErrorReporter.debug(
-                        SOURCE.AGENT_RUNNER,
-                        `Authorized execution recovery ${prematureExecutionFinalRecoveries}/3 from ${toolStage ?? 'full'} stage.`,
-                    );
-                    continue;
+                    const incompleteClaim = recoveryCoordinator.claim('incomplete_execution');
+                    if (incompleteClaim) {
+                        messages.push({
+                            role: 'user',
+                            content: `<system-reminder>This task already has workspace-write authorization. `
+                                + `Do not ask the user to say "execute", do not return manual edit instructions, and do not stop at evidence collection. `
+                                + `Continue now with the available tools until the requested execution and verification are complete. `
+                                + `Only call ask_user_question when progress requires a user-owned decision that cannot be discovered or safely defaulted.</system-reminder>`,
+                        });
+                        ErrorReporter.debug(
+                            SOURCE.AGENT_RUNNER,
+                            `Authorized execution recovery ${incompleteClaim.attempt}/${incompleteClaim.limit}.`,
+                        );
+                        continue;
+                    }
                 }
                 if (!requiresUserInput
-                    && truncationStopRecoveries < MAX_TRUNCATION_STOP_RECOVERIES
                     && schedulingState.authorization === 'workspace_write'
                     && isTruncationInducedStop(finalContent)) {
                     // The model stopped because it misread display-only tool-result
                     // truncation as partial application. Tool results are always
                     // fully applied; only the response text is shortened. Push one
                     // bounded recovery so the task continues instead of stalling.
-                    truncationStopRecoveries++;
+                    const incompleteClaim = recoveryCoordinator.claim('incomplete_execution');
+                    if (!incompleteClaim) return finalContent;
                     messages.push({
                         role: 'user',
                         content: `<system-reminder>Truncation markers in tool results ("truncated" / "已截断") are display-only: every tool completed and its result was fully applied; nothing is partial or unsafe. `
@@ -3358,9 +3231,28 @@ export class AgentRunner {
                     });
                     ErrorReporter.debug(
                         SOURCE.AGENT_RUNNER,
-                        `Truncation-stop recovery ${truncationStopRecoveries}/${MAX_TRUNCATION_STOP_RECOVERIES}.`,
+                        `Truncation-stop recovery ${incompleteClaim.attempt}/${incompleteClaim.limit}.`,
                     );
                     continue;
+                }
+                if (!requiresUserInput && terminalValidation) {
+                    const validationOutcome = terminalValidationOutcome(terminalValidation);
+                    if (validationOutcome !== 'allow') {
+                        const validationClaim = recoveryCoordinator.claim('validation_failed');
+                        if (validationClaim) {
+                            const feedback = formatTerminalValidationFeedback(terminalValidation);
+                            messages.push({
+                                role: 'user',
+                                content: `<system-reminder>${feedback} Continue in this same loop: inspect the structured tool results, repair the affected targets, and obtain fresh validation before finalizing. Do not merely describe the remaining error.</system-reminder>`,
+                            });
+                            emitStep({
+                                type: 'validation',
+                                content: `Post-write validation returned to the main loop (${validationClaim.attempt}/${validationClaim.limit}).`,
+                                timestamp: Date.now(),
+                            });
+                            continue;
+                        }
+                    }
                 }
                 return finalContent;
             }
@@ -3425,19 +3317,6 @@ export class AgentRunner {
                 } catch {
                     // The normal argument-repair path will report malformed arguments.
                 }
-                const baseStagePool = filterToolDefinitionsForStage(
-                    stagedToolPool,
-                    mode,
-                    toolStage,
-                    legacyFullToolset,
-                    workflowStageSupportTools,
-                );
-                const selectionPool = extendStageToolPoolWithSupport(
-                    baseStagePool,
-                    stagedToolPool,
-                    mode,
-                    toolStage,
-                );
                 const selection = toolDisclosureService.select({
                     tools: Array.isArray(selectionArgs.tools)
                         ? selectionArgs.tools.filter((value): value is string => typeof value === 'string')
@@ -3446,17 +3325,10 @@ export class AgentRunner {
                         ? selectionArgs.groups.filter((value): value is string => typeof value === 'string')
                         : undefined,
                     reason: typeof selectionArgs.reason === 'string' ? selectionArgs.reason : '',
-                }, selectionPool, disclosureContext, { eligibleTools: stagedToolPool });
+                }, eligibleToolPool, disclosureContext, { eligibleTools: eligibleToolPool });
                 selectionArgs._selectionResult = selection;
                 toolCall.function.arguments = JSON.stringify(selectionArgs);
-                const visibleStagePool = extendStageToolPoolWithSupport(
-                    baseStagePool,
-                    stagedToolPool,
-                    mode,
-                    toolStage,
-                    disclosureContext.loaded,
-                );
-                availableTools = toolDisclosureService.initialTools(visibleStagePool, disclosureContext);
+                availableTools = refreshAvailableTools();
                 await runLedger.appendEvent(runRecord.runId, 'tool_disclosure_changed', {
                     iteration,
                     ...selection,
@@ -3702,62 +3574,6 @@ export class AgentRunner {
                     }
                     toolResults[i] = { ok: false, error: errMsg };
                     continue;
-                }
-
-                const runtimePlanPhase = options?.schedulingState?.phase === 'plan';
-                if (runtimePlanPhase
-                    || mode === 'plan'
-                    || ((mode === 'orchestrator' || mode === 'script') && toolName === 'write_file')) {
-                    const guard = validatePlanModeToolUse(
-                        toolName,
-                        toolArgs,
-                        this.toolExecutor.workspaceRoot,
-                        options?.topicId,
-                        ci.targetPaths,
-                        runtimePlanPhase ? 'plan' : mode as 'plan' | 'orchestrator' | 'script',
-                    );
-                    if (!guard.allowed) {
-                        emitStep({
-                            type: 'validation',
-                            content: guard.reason ?? 'Plan mode blocked this tool call.',
-                            timestamp: Date.now(),
-                            invocationId: ci.invocationId,
-                        });
-                        toolResults[i] = {
-                            success: false,
-                            error: guard.reason ?? 'Plan mode blocked this tool call.',
-                            planModeBlocked: true,
-                        };
-                        await runLedger.appendEvent(
-                            runRecord.runId,
-                            'tool_call_end',
-                            { success: false, error: toolResults[i].error, planModeBlocked: true },
-                            { invocationId: ci.invocationId }
-                        );
-                        continue;
-                    }
-                }
-                if (toolName === 'git_ops') {
-                    const guard = validateGitOpsForMode(runtimePlanPhase ? 'plan' : mode, toolArgs);
-                    if (!guard.allowed) {
-                        emitStep({
-                            type: 'validation',
-                            content: guard.reason ?? 'Current mode blocked this git operation.',
-                            timestamp: Date.now(),
-                            invocationId: ci.invocationId,
-                        });
-                        toolResults[i] = {
-                            success: false,
-                            error: guard.reason ?? 'Current mode blocked this git operation.',
-                        };
-                        await runLedger.appendEvent(
-                            runRecord.runId,
-                            'tool_call_end',
-                            { success: false, error: toolResults[i].error },
-                            { invocationId: ci.invocationId }
-                        );
-                        continue;
-                    }
                 }
 
                 if (READ_ONLY_TOOLS.has(toolName)) {
@@ -4168,7 +3984,6 @@ export class AgentRunner {
                 }
             }
 
-            let nextToolStage = toolStage;
             for (let j = 0; j < parsedCalls.length; j++) {
                 const result = toolResults[j];
                 const record = result && typeof result === 'object' && !Array.isArray(result)
@@ -4232,58 +4047,6 @@ export class AgentRunner {
                         }
                     }
                 }
-                const hasRunDiagnosticErrors = targetKeys.some(targetKey =>
-                    terminalValidation?.diagnosticErrorTargets.has(targetKey) ?? false);
-                nextToolStage = advanceToolStage(mode, nextToolStage, parsedCalls[j]!.toolName, {
-                    success: record?.success !== false && record?.error === undefined,
-                    hasValidationErrors: hasRunDiagnosticErrors || hasDiagnosticErrors
-                        || record?.postWriteValidationPassed === false
-                        || record?.requiresRepair === true,
-                });
-            }
-            if (nextToolStage !== toolStage) {
-                const previousStage = toolStage;
-                const previousToolNames = new Set(availableTools.map(tool => tool.function.name));
-                toolStage = nextToolStage;
-                if (tokenAccumulator) tokenAccumulator.toolStage = toolStage;
-                const nextPhase = phaseForToolStage(toolStage, schedulingState.phase);
-                if (nextPhase !== schedulingState.phase) {
-                    const previousPhase = schedulingState.phase;
-                    schedulingState = transitionSchedulingState(schedulingState, {
-                        phase: nextPhase,
-                        reason: `tool stage advanced to ${toolStage ?? 'full'}`,
-                    });
-                    if (options) options.schedulingState = schedulingState;
-                    options?.runEventSink?.appendSoon('phase_changed', {
-                        from: previousPhase,
-                        to: nextPhase,
-                        reason: schedulingState.phaseReason,
-                        revision: schedulingState.revision,
-                    });
-                }
-                availableTools = refreshAvailableTools();
-                const nextToolNames = new Set(availableTools.map(tool => tool.function.name));
-                options?.runEventSink?.appendSoon('capabilities_changed', {
-                    stage: toolStage,
-                    added: [...nextToolNames].filter(name => !previousToolNames.has(name)).sort(),
-                    removed: [...previousToolNames].filter(name => !nextToolNames.has(name)).sort(),
-                    toolHash: hashToolDefinitionsForFingerprint(availableTools),
-                });
-                const stageReminder = buildToolStageReminder(mode, toolStage, availableTools, options?.domain);
-                if (stageReminder) {
-                    messages.push({ role: 'user', content: stageReminder });
-                }
-                const runCodeSdk = buildRunCodePromptBlock(
-                    availableTools.filter(tool => TOOL_REGISTRY.has(tool.function.name as AgentToolName)),
-                );
-                if (runCodeSdk && availableTools.some(tool => tool.function.name === 'run_code')) {
-                    messages.push({ role: 'user', content: runCodeSdk });
-                }
-                emitStep({
-                    type: 'thinking',
-                    content: `Tool stage advanced: ${previousStage ?? 'full'} -> ${toolStage ?? 'full'} (${availableTools.length} tools).`,
-                    timestamp: Date.now(),
-                });
             }
 
             if (interactivePlanApprovalPending) {
@@ -4524,578 +4287,6 @@ export class AgentRunner {
     private budgetToolResult(result: unknown, maxChars?: number): string {
         return _budgetToolResult(result, maxChars);
     }
-
-    /** 
-* Verification loop: Check the LSP diagnosis of the target file after inference, and if there are errors, hand them over to AI for repair. 
-* Use get_diagnostics to directly read the diagnostic panel (zero side effects), replacing the old validate_code (temporary file method). 
-*/
-    private async validationLoop(
-        initialCode: string,
-        targetFile: string,
-        conversationMessages: ChatMessage[],
-        emitStep: (step: AgentStep) => void,
-        options?: AgentRunnerOptions,
-        tokenAccumulator?: TokenUsage,
-    ): Promise<Omit<GenerationResult, 'explanation' | 'steps'>> {
-        let currentCode = initialCode;
-        let retryCount = 0;
-        let lastErrors: ValidationError[] = [];
-        const validationRunRecord = options?.runRecord ?? await this.activeRunRecordPromise?.catch(() => undefined);
-        let validationEndEmitted = false;
-        if (validationRunRecord) {
-            await runLedger.appendEvent(
-                validationRunRecord.runId,
-                'validation_start',
-                { targetFile, maxRetries: MAX_VALIDATION_RETRIES },
-                { status: 'running' }
-            );
-        }
-        const appendValidationEnd = async (payload: Record<string, unknown>, status: 'done' | 'failed' = 'done') => {
-            if (!validationRunRecord) return;
-            if (validationEndEmitted) return;
-            validationEndEmitted = true;
-            await runLedger.appendEvent(
-                validationRunRecord.runId,
-                'validation_end',
-                { targetFile, retryCount, ...payload },
-                { status }
-            ).catch(error => {
-                reportBestEffortFailure('ledger.append_validation_end', { runId: validationRunRecord.runId, targetFile, status }, error);
-            });
-        };
-
-        const agentToolContext: import('./types').AgentToolContext = {
-            runnerOptions: options,
-            agentRunner: this,
-            runEventSink: options?.runEventSink,
-            onStep: emitStep,
-            onPermissionRequest: options?.onPermissionRequest,
-            // Same run as the main loop: share its anchor-guard scope.
-            scopeId: validationRunRecord?.runId,
-            onTodoUpdate: options?.onTodoUpdate
-        };
-
-        const readValidationDiagnostics = async (): Promise<{
-            rawResult: GetDiagnosticsResult;
-            diagnostics: ValidationError[];
-            freshness?: 'fresh' | 'pending' | 'stale';
-            pendingGlobalKinds: string[];
-            lastEpoch?: number;
-            diagnosticService?: GetDiagnosticsResult['diagnosticService'];
-            validationStatus?: GetDiagnosticsResult['validationStatus'];
-        }> => {
-            const rawResult = await this.executeToolPipeline('get_diagnostics', {
-                file: targetFile,
-                severity: 'error',
-            }, agentToolContext) as GetDiagnosticsResult;
-
-            const diagnostics: ValidationError[] = [];
-            if (rawResult?.diagnostics && Array.isArray(rawResult.diagnostics)) {
-                for (const d of rawResult.diagnostics) {
-                    diagnostics.push({
-                        code: String(d.code ?? ''),
-                        severity: d.severity ?? 'error',
-                        message: String(d.message ?? ''),
-                        line: Number(d.line ?? 0),
-                        column: Number(d.column ?? 0),
-                        currentVersion: d.currentVersion,
-                        validatedVersion: d.validatedVersion,
-                        category: d.category,
-                        repairHint: d.repairHint,
-                        expectedType: d.expectedType,
-                        actualType: d.actualType,
-                        scope: d.scope,
-                        symbol: d.symbol,
-                        confidence: d.confidence,
-                        metadataSource: d.metadataSource,
-                        data: d.data,
-                    });
-                }
-            }
-
-            const rawFreshness = rawResult?.freshness;
-            const freshness = rawFreshness === 'fresh' || rawFreshness === 'pending' || rawFreshness === 'stale'
-                ? rawFreshness
-                : undefined;
-            const pendingGlobalKinds = Array.isArray(rawResult?.pendingGlobalKinds)
-                ? rawResult.pendingGlobalKinds.map((kind: unknown) => String(kind))
-                : [];
-            const lastEpoch = typeof rawResult?.lastEpoch === 'number' ? rawResult.lastEpoch : undefined;
-
-            return {
-                rawResult,
-                diagnostics,
-                freshness,
-                pendingGlobalKinds,
-                lastEpoch,
-                diagnosticService: rawResult?.diagnosticService,
-                validationStatus: rawResult?.validationStatus,
-            };
-        };
-
-        while (retryCount <= MAX_VALIDATION_RETRIES) {
-            options?.abortSignal?.throwIfAborted();
-
-            emitStep({
-                type: 'validation',
-                content: retryCount === 0
-                    ? 'Running validation diagnostics...'
-                    : "Retrying validation fix " + retryCount + "...",
-                timestamp: Date.now(),
-            });
-
-            // Use get_diagnostics to read directly from the diagnostics panel (zero side effects, ~50ms)
-            let result: { isValid: boolean; errors: ValidationError[] };
-            let rawDiagnosticResult: unknown | undefined;
-            try {
-                let diagnosticRead = await readValidationDiagnostics();
-                rawDiagnosticResult = diagnosticRead.rawResult;
-                let sawDiagnosticEpochProgress = false;
-
-                for (let attempt = 0; diagnosticRead.diagnostics.length === 0
-                    && (diagnosticRead.freshness === 'pending' || diagnosticRead.freshness === 'stale')
-                    && attempt < VALIDATION_DIAGNOSTIC_FRESHNESS_RECHECK_DELAYS_MS.length; attempt++) {
-                    const delayMs = VALIDATION_DIAGNOSTIC_FRESHNESS_RECHECK_DELAYS_MS[attempt]!;
-                    const previousEpoch = diagnosticRead.lastEpoch;
-                    emitStep({
-                        type: 'validation',
-                        content: `Validation diagnostics are ${diagnosticRead.freshness}; waiting ${delayMs}ms for CWTools LSP to settle.${this.formatValidationStatusBrief(diagnosticRead.validationStatus)}`,
-                        timestamp: Date.now(),
-                    });
-                    await this.delay(delayMs);
-                    options?.abortSignal?.throwIfAborted();
-                    diagnosticRead = await readValidationDiagnostics();
-                    rawDiagnosticResult = diagnosticRead.rawResult;
-                    if (typeof previousEpoch === 'number'
-                        && typeof diagnosticRead.lastEpoch === 'number'
-                        && diagnosticRead.lastEpoch > previousEpoch) {
-                        sawDiagnosticEpochProgress = true;
-                    }
-                }
-
-                const diagnostics = diagnosticRead.diagnostics;
-                const freshness = diagnosticRead.freshness;
-                const pendingGlobalKinds = diagnosticRead.pendingGlobalKinds;
-                if (diagnostics.length === 0 && (freshness === 'pending' || freshness === 'stale')) {
-                    const fallbackErrors = this.runLocalSyntaxFallbackValidation(
-                        targetFile,
-                        currentCode,
-                        freshness,
-                        pendingGlobalKinds,
-                        diagnosticRead.diagnosticService,
-                        diagnosticRead.validationStatus,
-                        sawDiagnosticEpochProgress,
-                    );
-                    const fallbackErrorCount = fallbackErrors.filter(e => e.severity === 'error').length;
-                    if (fallbackErrorCount === 0) {
-                        const pendingError: ValidationError = {
-                            code: 'VALIDATION_PENDING',
-                            severity: 'error',
-                            message: `Local syntax passed, but CWTools diagnostics are still ${freshness}; final semantic validation is pending.`,
-                            line: 0,
-                            column: 0,
-                        };
-                        emitStep({
-                            type: 'validation',
-                            content: `CWTools LSP diagnostics are still ${freshness}; local syntax passed, but final semantic validation remains pending.`,
-                            timestamp: Date.now(),
-                        });
-                        await appendValidationEnd({
-                            isValid: false,
-                            errorCount: 1,
-                            warningCount: fallbackErrors.length,
-                            validationMode: 'local-syntax-fallback',
-                            diagnosticFreshness: freshness,
-                            pendingGlobalKinds,
-                            diagnosticService: diagnosticRead.diagnosticService?.status,
-                            diagnosticEpochProgress: sawDiagnosticEpochProgress,
-                            validationRuntime: this.compactValidationStatus(diagnosticRead.validationStatus),
-                        }, 'failed');
-                        return {
-                            code: currentCode,
-                            validationErrors: [...fallbackErrors, pendingError],
-                            isValid: false,
-                            retryCount,
-                        };
-                    }
-                    emitStep({
-                        type: 'validation',
-                        content: `CWTools LSP diagnostics are still ${freshness}; local syntax fallback found ${fallbackErrorCount} issue(s).`,
-                        timestamp: Date.now(),
-                    });
-                    result = {
-                        isValid: false,
-                        errors: fallbackErrors,
-                    };
-                } else {
-                    result = {
-                        isValid: diagnostics.length === 0,
-                        errors: diagnostics,
-                    };
-                }
-            } catch (error) {
-                const message = error instanceof Error ? error.message : String(error);
-                const diagnosticError: ValidationError = {
-                    code: 'DIAGNOSTICS_UNAVAILABLE',
-                    severity: 'error',
-                    message: `get_diagnostics failed during validation: ${message}`,
-                    line: 0,
-                    column: 0,
-                };
-                emitStep({
-                    type: 'validation',
-                    content: 'Validation diagnostics unavailable; stopping validation as inconclusive.',
-                    timestamp: Date.now(),
-                });
-                await appendValidationEnd({ isValid: false, errorCount: 1, diagnosticUnavailable: true }, 'failed');
-                return {
-                    code: currentCode,
-                    validationErrors: [diagnosticError],
-                    isValid: false,
-                    retryCount,
-                };
-            }
-
-            lastErrors = result.errors;
-
-            if (result.isValid) {
-                emitStep({
-                    type: 'validation',
-                    content: 'Validation passed.',
-                    timestamp: Date.now(),
-                });
-                await appendValidationEnd({ isValid: true, errorCount: 0 });
-
-                return {
-                    code: currentCode,
-                    validationErrors: result.errors,
-                    isValid: true,
-                    retryCount,
-                };
-            }
-
-            //The number of retries has been exhausted
-            if (retryCount >= MAX_VALIDATION_RETRIES) {
-                emitStep({
-                    type: 'validation',
-                    content: `Validation still failed after ${MAX_VALIDATION_RETRIES} retries.`,
-                    timestamp: Date.now(),
-                });
-                await appendValidationEnd({ isValid: false, errorCount: result.errors.length }, 'failed');
-                break;
-            }
-
-            //Retry: send error list back to AI for correction
-            retryCount++;
-            const errorDiagnostics = result.errors.filter(e => e.severity === "error");
-            emitStep({
-                type: 'validation',
-                content: "Found " + errorDiagnostics.length + " validation error(s); requesting a focused fix (" + retryCount + "/" + MAX_VALIDATION_RETRIES + ").",
-                timestamp: Date.now(),
-            });
-
-            let diagnosticAdvice: string | undefined;
-            try {
-                const rawAnalysis = await this.executeToolPipeline('analyze_diagnostic_error', {
-                    file: targetFile,
-                    toolName: 'get_diagnostics',
-                    diagnosticsSnapshot: rawDiagnosticResult ?? { diagnostics: result.errors },
-                    message: 'validationLoop retry',
-                    previousAttempt: retryCount > 1 ? `Validation retry ${retryCount - 1} did not clear diagnostics.` : undefined,
-                }, agentToolContext);
-                const analysis = rawAnalysis as Partial<AnalyzeDiagnosticErrorResult>;
-                if (analysis.success) {
-                    diagnosticAdvice = this.formatValidationDiagnosticAdvice(analysis);
-                }
-            } catch {
-                // Validation retry can continue without routing advice.
-            }
-
-            const retryMessage = this.promptBuilder.buildValidationRetryMessage(
-                currentCode,
-                errorDiagnostics,
-                diagnosticAdvice
-            );
-
-            const retryMessages: ChatMessage[] = [
-                ...conversationMessages,
-                {
-                    role: 'assistant',
-                    content: `\`\`\`pdx\n${currentCode}\n\`\`\``,
-                },
-                retryMessage,
-            ];
-
-            try {
-                if (tokenAccumulator) {
-                    tokenAccumulator.apiCalls = (tokenAccumulator.apiCalls ?? 0) + 1;
-                }
-                const retryResponse = await this.aiService.chatCompletion(retryMessages, {
-                    providerId: options?.providerId,
-                    model: options?.model,
-                    reasoningEffort: options?.reasoningEffort,
-                });
-                this.accumulateAuxiliaryUsage(
-                    retryResponse,
-                    retryMessages,
-                    tokenAccumulator,
-                    options?.providerId,
-                    options?.model,
-                    {
-                        toolStage: 'validation',
-                        purpose: 'validation',
-                        promptFingerprint: tokenAccumulator?.promptFingerprint,
-                    },
-                );
-
-                const retryContent = contentToString(retryResponse.choices[0]?.message?.content);
-                const fixedCode = this.extractCode(retryContent);
-
-                if (fixedCode && fixedCode !== currentCode) {
-                    currentCode = fixedCode;
-                    emitStep({
-                        type: 'code_generated',
-                        content: 'Generated corrected code after validation.',
-                        timestamp: Date.now(),
-                    });
-                } else {
-                    // AI cannot be repaired
-                    break;
-                }
-            } catch {
-                break;
-            }
-        }
-
-        await appendValidationEnd({ isValid: false, errorCount: lastErrors.length }, 'failed');
-        return {
-            code: currentCode,
-            validationErrors: lastErrors,
-            isValid: false,
-            retryCount,
-        };
-    }
-
-    // ─── Helpers ─────────────────────────────────────────────────────────────
-
-    private delay(ms: number): Promise<void> {
-        return new Promise(resolve => setTimeout(resolve, ms));
-    }
-
-    private runLocalSyntaxFallbackValidation(
-        targetFile: string,
-        currentCode: string,
-        freshness: 'pending' | 'stale',
-        pendingGlobalKinds: string[],
-        diagnosticService: GetDiagnosticsResult['diagnosticService'],
-        validationStatus: GetDiagnosticsResult['validationStatus'],
-        sawDiagnosticEpochProgress: boolean,
-    ): ValidationError[] {
-        const text = this.readValidationFallbackText(targetFile, currentCode);
-        const syntaxErrors = this.scanLocalPdxSyntax(text);
-        if (syntaxErrors.length > 0) {
-            return syntaxErrors;
-        }
-
-        const pendingSuffix = pendingGlobalKinds.length
-            ? ` Pending global checks: ${pendingGlobalKinds.join(', ')}.`
-            : '';
-        const serviceSuffix = diagnosticService
-            ? ` Diagnostic service: ${diagnosticService.status}${diagnosticService.responded ? ', responded' : ', no response'}.`
-            : ' Diagnostic service: unknown.';
-        const epochSuffix = sawDiagnosticEpochProgress
-            ? ' Diagnostic epoch advanced while waiting.'
-            : ' Diagnostic epoch did not advance while waiting.';
-        const runtimeSuffix = this.formatValidationStatusBrief(validationStatus);
-        return [{
-            code: 'VALIDATION_DEGRADED_LSP_NO_FEEDBACK',
-            severity: 'warning',
-            message: `CWTools LSP did not provide fresh diagnostics (${freshness}).${pendingSuffix}${serviceSuffix}${epochSuffix}${runtimeSuffix} Local syntax fallback found no brace/string errors, but semantic CWTools validation was not confirmed.`,
-            line: 0,
-            column: 0,
-        }];
-    }
-
-    private compactValidationStatus(status?: GetDiagnosticsResult['validationStatus']): Record<string, unknown> | undefined {
-        if (!status) return undefined;
-        const runtime = status.runtime && typeof status.runtime === 'object'
-            ? status.runtime as Record<string, unknown>
-            : {};
-        const loading = status.loading && typeof status.loading === 'object'
-            ? status.loading as Record<string, unknown>
-            : {};
-        const completion = status.completion && typeof status.completion === 'object'
-            ? status.completion as Record<string, unknown>
-            : {};
-        const refreshDomains = status.refreshDomains && typeof status.refreshDomains === 'object'
-            ? status.refreshDomains as Record<string, unknown>
-            : {};
-        return {
-            inProgress: status.inProgress,
-            inProgressFile: status.inProgressFile,
-            queueDepth: status.queueDepth,
-            debounceQueueDepth: status.debounceQueueDepth,
-            pendingGlobalKinds: status.pendingGlobalKinds,
-            needsTypeRefresh: status.needsTypeRefresh,
-            delayedLocalisationUpdate: status.delayedLocalisationUpdate,
-            refreshSkipCount: status.refreshSkipCount,
-            nextAnalyzeDelayMs: status.nextAnalyzeDelayMs,
-            lastGlobalRefreshAtUnixMs: status.lastGlobalRefreshAtUnixMs,
-            refreshPendingDomains: Array.isArray(refreshDomains.pendingDomains) ? refreshDomains.pendingDomains.map(String) : undefined,
-            refreshLastCompletedDomains: Array.isArray(refreshDomains.lastCompletedDomains) ? refreshDomains.lastCompletedDomains.map(String) : undefined,
-            refreshLastStatus: typeof refreshDomains.lastStatus === 'string' ? refreshDomains.lastStatus : undefined,
-            lastRefreshStatus: typeof runtime.lastRefreshStatus === 'string' ? runtime.lastRefreshStatus : undefined,
-            lastCycleElapsedMs: typeof runtime.lastCycleElapsedMs === 'number' ? runtime.lastCycleElapsedMs : undefined,
-            lastAnalyzeElapsedMs: typeof runtime.lastAnalyzeElapsedMs === 'number' ? runtime.lastAnalyzeElapsedMs : undefined,
-            loadingInProgress: typeof loading.inProgress === 'boolean' ? loading.inProgress : undefined,
-            loadingPhase: typeof loading.phase === 'string' ? loading.phase : undefined,
-            loadingElapsedMs: typeof loading.lastElapsedMs === 'number' ? loading.lastElapsedMs : undefined,
-            loadedFileCount: typeof loading.lastFileCount === 'number' ? loading.lastFileCount : undefined,
-            completionLastElapsedMs: typeof completion.lastElapsedMs === 'number' ? completion.lastElapsedMs : undefined,
-            completionLastItemCount: typeof completion.lastItemCount === 'number' ? completion.lastItemCount : undefined,
-            completionLastCacheHit: typeof completion.lastCacheHit === 'boolean' ? completion.lastCacheHit : undefined,
-            completionLastIsIncomplete: typeof completion.lastIsIncomplete === 'boolean' ? completion.lastIsIncomplete : undefined,
-            completionCacheHitRate: typeof completion.cacheHitRate === 'number' ? completion.cacheHitRate : undefined,
-            completionTtlCacheEntries: typeof completion.ttlCacheEntries === 'number' ? completion.ttlCacheEntries : undefined,
-        };
-    }
-
-    private formatValidationStatusBrief(status?: GetDiagnosticsResult['validationStatus']): string {
-        const compact = this.compactValidationStatus(status);
-        if (!compact) return '';
-        const parts: string[] = [];
-        if (typeof compact.inProgress === 'boolean') parts.push(`inProgress=${compact.inProgress}`);
-        if (typeof compact.inProgressFile === 'string' && compact.inProgressFile) parts.push(`file=${path.basename(compact.inProgressFile)}`);
-        if (typeof compact.queueDepth === 'number') parts.push(`queue=${compact.queueDepth}`);
-        if (typeof compact.debounceQueueDepth === 'number') parts.push(`debounce=${compact.debounceQueueDepth}`);
-        if (Array.isArray(compact.pendingGlobalKinds) && compact.pendingGlobalKinds.length > 0) parts.push(`pending=${compact.pendingGlobalKinds.join('/')}`);
-        if (typeof compact.needsTypeRefresh === 'boolean' && compact.needsTypeRefresh) parts.push('needsTypeRefresh=true');
-        if (typeof compact.delayedLocalisationUpdate === 'boolean' && compact.delayedLocalisationUpdate) parts.push('delayedLoc=true');
-        if (Array.isArray(compact.refreshPendingDomains) && compact.refreshPendingDomains.length > 0) parts.push(`domains=${compact.refreshPendingDomains.join('/')}`);
-        if (Array.isArray(compact.refreshLastCompletedDomains) && compact.refreshLastCompletedDomains.length > 0) parts.push(`lastDomains=${compact.refreshLastCompletedDomains.join('/')}`);
-        if (typeof compact.refreshLastStatus === 'string') parts.push(`domainStatus=${compact.refreshLastStatus}`);
-        if (typeof compact.nextAnalyzeDelayMs === 'number') parts.push(`nextDelayMs=${compact.nextAnalyzeDelayMs}`);
-        if (typeof compact.lastRefreshStatus === 'string') parts.push(`lastRefresh=${compact.lastRefreshStatus}`);
-        if (compact.loadingInProgress === true || typeof compact.loadingPhase === 'string') {
-            const loadingBits = [
-                typeof compact.loadingPhase === 'string' ? compact.loadingPhase : undefined,
-                compact.loadingInProgress === true ? 'in-progress' : undefined,
-                typeof compact.loadedFileCount === 'number' ? `files=${compact.loadedFileCount}` : undefined,
-            ].filter(Boolean).join('/');
-            if (loadingBits) parts.push(`loading=${loadingBits}`);
-        }
-        if (typeof compact.completionLastElapsedMs === 'number' && compact.completionLastElapsedMs > 0) {
-            const completionBits = [
-                `${compact.completionLastElapsedMs}ms`,
-                typeof compact.completionLastItemCount === 'number' ? `${compact.completionLastItemCount} items` : undefined,
-                compact.completionLastCacheHit === true ? 'ttl-hit' : undefined,
-                compact.completionLastIsIncomplete === true ? 'incomplete' : undefined,
-            ].filter(Boolean).join('/');
-            if (completionBits) parts.push(`completion=${completionBits}`);
-        }
-        return parts.length ? ` Runtime: ${parts.join(', ')}.` : '';
-    }
-
-    private readValidationFallbackText(targetFile: string, currentCode: string): string {
-        if (targetFile && fs.existsSync(targetFile)) {
-            try {
-                return fs.readFileSync(targetFile, 'utf8');
-            } catch {
-                // Fall through to the generated code block.
-            }
-        }
-        return currentCode;
-    }
-
-    private scanLocalPdxSyntax(text: string): ValidationError[] {
-        const errors: ValidationError[] = [];
-        const braceStack: Array<{ line: number; column: number }> = [];
-        const lines = text.split(/\r?\n/);
-
-        for (let lineIndex = 0; lineIndex < lines.length; lineIndex++) {
-            const line = lines[lineIndex] ?? '';
-            let inString = false;
-            let stringStartColumn = 0;
-            let escaped = false;
-
-            for (let column = 0; column < line.length; column++) {
-                const ch = line[column];
-                if (inString) {
-                    if (escaped) {
-                        escaped = false;
-                    } else if (ch === '\\') {
-                        escaped = true;
-                    } else if (ch === '"') {
-                        inString = false;
-                    }
-                    continue;
-                }
-
-                if (ch === '#') break;
-                if (ch === '"') {
-                    inString = true;
-                    stringStartColumn = column;
-                    continue;
-                }
-                if (ch === '{') {
-                    braceStack.push({ line: lineIndex, column });
-                } else if (ch === '}') {
-                    const opened = braceStack.pop();
-                    if (!opened) {
-                        errors.push({
-                            code: 'LOCAL_SYNTAX_UNEXPECTED_CLOSING_BRACE',
-                            severity: 'error',
-                            message: 'Unexpected closing brace in local syntax fallback validation.',
-                            line: lineIndex,
-                            column,
-                        });
-                    }
-                }
-            }
-
-            if (inString) {
-                errors.push({
-                    code: 'LOCAL_SYNTAX_UNTERMINATED_STRING',
-                    severity: 'error',
-                    message: 'Unterminated string in local syntax fallback validation.',
-                    line: lineIndex,
-                    column: stringStartColumn,
-                });
-            }
-            if (errors.length >= 20) return errors;
-        }
-
-        for (const opened of braceStack.slice(-20)) {
-            errors.push({
-                code: 'LOCAL_SYNTAX_MISSING_CLOSING_BRACE',
-                severity: 'error',
-                message: 'Missing closing brace in local syntax fallback validation.',
-                line: opened.line,
-                column: opened.column,
-            });
-        }
-        return errors;
-    }
-
-    private formatValidationDiagnosticAdvice(analysis: Partial<AnalyzeDiagnosticErrorResult>): string {
-        const recommendedTools = Array.isArray(analysis.recommendedTools) ? analysis.recommendedTools.join(', ') : '';
-        const avoidTools = Array.isArray(analysis.avoidTools) ? analysis.avoidTools.join(', ') : '';
-        const references = Array.isArray(analysis.referenceCandidates) ? analysis.referenceCandidates.join(', ') : '';
-        const lines = [
-            `Category: ${analysis.category ?? 'unknown'}`,
-            `Recommended tools: ${recommendedTools || '(none)'}`,
-            avoidTools ? `Avoid tools/patterns: ${avoidTools}` : '',
-            references ? `Concrete references: ${references}` : '',
-            analysis.referenceVerificationRequired ? 'Reference verification required before another write.' : '',
-            analysis.verificationInstruction ? `Verification instruction: ${analysis.verificationInstruction}` : '',
-            analysis.requiredFreshRead ? 'Fresh read required before writing.' : '',
-            analysis.suspectedStaleCache ? 'Freshness warning: diagnostics may be pending/stale; avoid duplicate writes.' : '',
-            analysis.nextInstruction ? `Next instruction: ${analysis.nextInstruction}` : '',
-            analysis.stopReason ? `Stop reason: ${analysis.stopReason}` : '',
-        ].filter(Boolean);
-        return lines.join('\n');
-    }
-
     /**
      * Extract code blocks from AI response.
      * Looks for ```pdx or ``` code fences, or falls back to indented blocks.

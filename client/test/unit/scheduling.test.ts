@@ -4,7 +4,6 @@ import {
     authorizationAllowsEffect,
     deriveLegacyMode,
     evaluateDispatchAdmission,
-    phaseForToolStage,
     normalizeSchedulingState,
     schedulingStateFromLegacyMode,
     transitionSchedulingState,
@@ -53,14 +52,6 @@ describe('Agent runtime scheduling', () => {
             authorization: 'workspace_write',
             reason: 'invalid expansion',
         })).to.throw('cannot expand authorization');
-    });
-
-    it('keeps Execute stable across read-oriented stages and verifies after writes', () => {
-        expect(phaseForToolStage('write', 'execute')).to.equal('execute');
-        expect(phaseForToolStage('discovery', 'execute')).to.equal('execute');
-        expect(phaseForToolStage('validation', 'plan')).to.equal('plan');
-        expect(phaseForToolStage('finalize', 'execute')).to.equal('verify');
-        expect(phaseForToolStage('finalize', 'inspect')).to.equal('finalize');
     });
 
     it('allows read-only orchestration state while blocking external mutation effects', () => {

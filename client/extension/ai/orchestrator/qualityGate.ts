@@ -511,7 +511,7 @@ export class QualityGate {
                     mode: reviewerMode,
                     useSlimPrompt: true,
                     maxIterations: QUALITY_GATE_REVIEW_MAX_ITERATIONS,
-                    skipValidation: true,
+                    deferTerminalValidationToParent: true,
                     agentId: QUALITY_GATE_REVIEW_AGENT_ID,
                     threadId: `${options.parentRunId ?? options.topicId ?? 'orchestrator'}/${QUALITY_GATE_REVIEW_AGENT_ID}`,
                     turnId: `${QUALITY_GATE_REVIEW_AGENT_ID}_${Date.now()}`,

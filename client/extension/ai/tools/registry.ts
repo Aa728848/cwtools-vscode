@@ -43,7 +43,7 @@ export type ToolConcurrencyClass =
     | 'interactive';
 
 export type ToolDomain = 'shared' | 'paradox';
-export type ToolDisclosure = 'always' | 'stage' | 'deferred';
+export type ToolDisclosure = 'always' | 'deferred';
 export type ToolIdempotency = 'none' | 'read' | 'deterministic' | 'effect-keyed';
 
 export interface ToolRegistryEntry {
@@ -359,18 +359,8 @@ const DIAGNOSTIC_TOOLS = new Set<AgentToolName>([
 const ASSET_TOOLS = new Set<AgentToolName>([
     'find_sprite_candidates', 'find_sound_candidates',
 ]);
-const DEFERRED_TOOLS_SET = new Set<AgentToolName>([
-    ...GENERIC_FILE_WRITE_TOOLS,
-    ...PDX_WRITE_TOOLS,
-    ...MEDIA,
-    ...ORCHESTRATION,
-    ...SHADER_TOOLS,
-    'save_workflow', 'run_command', 'manage_process', 'git_ops', 'mcp_call',
-    'run_code', 'run_skill',
-    'set_memory', 'save_memory', 'forget_memory', 'memory_recall_trace',
-    'query_interface_knowledge', 'query_inline_instantiation', 'analyze_pdx_flow',
-    'compare_definition_with_vanilla', 'find_scope_bridge',
-    'extract_archetype_slots', 'instantiate_archetype', 'get_design_blueprint_contract',
+const ALWAYS_DISCLOSED_TOOLS = new Set<AgentToolName>([
+    'ask_user_question', 'todo_write', 'read_file', 'grep', 'manage_goal', 'select_tools',
 ]);
 const WRITE_TOOLS_SET = new Set<string>([...EDIT, 'deploy_mod_asset', 'git_ops']);
 const SUB_AGENT_EXCLUDES_SET = new Set<string>([
@@ -546,9 +536,7 @@ for (const schema of SCHEMA_DEFINITIONS) {
     const isReadOnly = name !== 'ask_user_question' && (effect === 'workspace_read'
         || effect === 'network'
         || (effect === 'none' && !mutating && !ORCHESTRATION.includes(name)));
-    const disclosure = ['ask_user_question', 'todo_write', 'read_file', 'grep', 'manage_goal', 'select_tools'].includes(name)
-        ? 'always'
-        : DEFERRED_TOOLS_SET.has(name) ? 'deferred' : 'stage';
+    const disclosure: ToolDisclosure = ALWAYS_DISCLOSED_TOOLS.has(name) ? 'always' : 'deferred';
     const group = GENERIC_FILE_WRITE_TOOLS.has(name) ? 'file_write'
         : PDX_WRITE_TOOLS.has(name) ? 'pdx_write'
             : SHADER_TOOLS.has(name) ? 'shader'

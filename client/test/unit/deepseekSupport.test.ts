@@ -11,7 +11,6 @@ import { expect } from 'chai';
 import {
     RUN_CODE_BLOCKED_TOOLS,
     buildRunCodeSdk,
-    computeRunCodeAllowedStepNames,
     createRunCodeCapabilitySnapshot,
     executeRunCodeProgram,
     validateRunCodeProgram,
@@ -89,7 +88,6 @@ describe('run_code capability snapshot and SDK', () => {
         expect(snapshot.tools.map(tool => tool.name)).to.deep.equal(['edit_file', 'read_file']);
         expect(snapshot.names.has('dispatch_agents')).to.be.false;
         expect(RUN_CODE_BLOCKED_TOOLS.has('run_code')).to.be.true;
-        expect(computeRunCodeAllowedStepNames(definitions)).to.deep.equal(new Set(['edit_file', 'read_file']));
     });
 
     it('generates deterministic typed arguments from the current schema', () => {
@@ -214,7 +212,6 @@ return { status: 'verified', scope: scope.currentScope, count: rules.rules.lengt
             createRunCodeCapabilitySnapshot([def('read_file')]),
             async () => ({}),
             new AbortController().signal,
-            undefined,
             Date.now() + 25,
         );
         expect(result.success).to.be.false;
@@ -228,7 +225,6 @@ return { status: 'verified', scope: scope.currentScope, count: rules.rules.lengt
             createRunCodeCapabilitySnapshot([def('read_file')]),
             async () => ({}),
             new AbortController().signal,
-            undefined,
             Date.now() + 25,
         );
         expect(result.success).to.be.false;

@@ -120,11 +120,6 @@ export function createRunCodeCapabilitySnapshot(tools: readonly ToolDefinition[]
     return { tools: capabilities, names: new Set(capabilities.map(tool => tool.name)) };
 }
 
-/** Compatibility helper retained for callers/tests that only need the name allowlist. */
-export function computeRunCodeAllowedStepNames(tools: readonly ToolDefinition[]): Set<string> {
-    return new Set(createRunCodeCapabilitySnapshot(tools).names);
-}
-
 function isRecord(value: unknown): value is Record<string, unknown> {
     return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
@@ -237,7 +232,7 @@ export function buildRunCodeSdk(tools: readonly ToolDefinition[]): string {
     return [
         'run_code executes a JavaScript async-function body inside an isolated QuickJS/WASM guest.',
         'Only explicit console.log values and the outer return value reach model context; intermediate tool values stay inside the guest.',
-        'Every tools.<name>(args) call re-enters the normal CWTools policy, stage, permission, scheduler, and write queue. Catch ToolCallError for fallback behavior.',
+        'Every tools.<name>(args) call re-enters the normal CWTools policy, permission, scheduler, and write queue. Catch ToolCallError for fallback behavior.',
         'The code field is strict JavaScript, not TypeScript: do not use type annotations, interfaces, enums, namespaces, imports, require, eval, or Function. No Node/VS Code APIs, filesystem/network globals, or host timers are available. Use only the catalog below.',
         'Independent calls may use Promise.all; host concurrency limits remain authoritative. Writes and exclusive operations remain serialized by the host.',
         '',
@@ -283,7 +278,6 @@ export async function executeRunCodeProgram(
     snapshot: RunCodeCapabilitySnapshot,
     runTool: (tool: string, args: Record<string, unknown>, signal: AbortSignal, waitTimeoutMs: number) => Promise<unknown>,
     signal: AbortSignal,
-    isToolStillAllowed: (tool: string) => boolean = tool => snapshot.names.has(tool),
     deadline = Date.now() + RUN_CODE_FANOUT_TIMEOUT_MS,
 ): Promise<RunCodeProgramResult> {
     const quickJs = await getQuickJS();
@@ -360,7 +354,7 @@ export async function executeRunCodeProgram(
                     if (requestText.length > RUN_CODE_MAX_ARGS_CHARS) throw new Error('Tool call arguments exceed the size bound.');
                     const parsed = JSON.parse(requestText) as unknown;
                     if (!isRecord(parsed) || typeof parsed.tool !== 'string') throw new Error('Malformed tool call request.');
-                    if (!snapshot.names.has(parsed.tool) || !isToolStillAllowed(parsed.tool)) {
+                    if (!snapshot.names.has(parsed.tool)) {
                         throw new Error(`Tool '${parsed.tool}' is not available in the current run_code capability surface.`);
                     }
                     const argsValue = parsed.args === undefined ? {} : toLosslessJson(parsed.args, 'Tool arguments');

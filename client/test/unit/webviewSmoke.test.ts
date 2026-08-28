@@ -76,6 +76,9 @@ describe('webview smoke checks', () => {
         expect(script).to.include("codexSpeedGroup.style.display = isCodex ? '' : 'none'");
         expect(script).to.include('settingsReasoningCapabilities');
         expect(script).to.include('populateReasoningSelect');
+        expect(script).to.include('div.prepend(createContextCompactionCard(latestCompactionStep))');
+        expect(script).to.include("tr('after compaction estimate', '压缩后估算')");
+        expect(script).to.include("tr('last request', '上次请求')");
         expect(html).to.include('id="quickWriteModeTrigger"');
         expect(html).to.include('role="listbox"');
         expect(html).to.include('id="btnWorkspace"');

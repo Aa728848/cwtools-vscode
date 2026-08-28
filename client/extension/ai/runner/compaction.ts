@@ -569,18 +569,6 @@ export async function maybeCompactHistory(
         }
         if (summary.length > 0) {
             const compactionType = existingSummaryText ? AGENT.COMPACTION_INCREMENTAL : AGENT.COMPACTION_INITIAL;
-            emitStep({
-                type: 'compaction',
-                content: AGENT.COMPACTION_DONE(compactionType, olderMessages.length, summary.length, pinnedContext.length),
-                timestamp: Date.now(),
-                compactionInfo: {
-                    state: 'complete',
-                    kind: 'history',
-                    beforeTokens: estimatedRequestTokens,
-                    thresholdTokens: compactionThreshold,
-                },
-            });
-
             const compacted = normalizeTranscriptForPersistence([
                 ...persistentSystemMessages,
                 {
@@ -593,6 +581,20 @@ export async function maybeCompactHistory(
                 },
                 ...recentMessages,
             ]);
+            const afterTokens = Math.max(0, budgetOptions.reservedTokens ?? 0)
+                + estimateMessagesTokens(compacted);
+            emitStep({
+                type: 'compaction',
+                content: AGENT.COMPACTION_DONE(compactionType, olderMessages.length, summary.length, pinnedContext.length),
+                timestamp: Date.now(),
+                compactionInfo: {
+                    state: 'complete',
+                    kind: 'history',
+                    beforeTokens: estimatedRequestTokens,
+                    afterTokens,
+                    thresholdTokens: compactionThreshold,
+                },
+            });
             // Cache a private copy: callers mutate the returned array in place.
             compactionSummaryCache.set(cacheKey, compacted.map(cloneChatMessage));
             if (compactionSummaryCache.size > COMPACTION_SUMMARY_CACHE_CAPACITY) {

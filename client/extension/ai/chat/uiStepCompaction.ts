@@ -129,6 +129,7 @@ export function compactStepsForUi(steps: any[] | undefined, limit = UI_HISTORY_S
     const cards: any[] = [];
     const regular: any[] = [];
     const latestSubAgentStep = new Map<string, any>();
+    let latestCompactionStep: any | undefined;
     for (const step of aggregateStreamStepsForUi(steps)) {
         const compact = compactStepForUi(step);
         if (!compact) continue;
@@ -136,6 +137,9 @@ export function compactStepsForUi(steps: any[] | undefined, limit = UI_HISTORY_S
             cards.push(compact);
         } else {
             regular.push(compact);
+            if (compact.type === 'compaction' && compact.compactionInfo) {
+                latestCompactionStep = compact;
+            }
             if (typeof compact.agentId === 'string' && compact.agentId) {
                 latestSubAgentStep.set(compact.agentId, compact);
             }
@@ -146,7 +150,11 @@ export function compactStepsForUi(steps: any[] | undefined, limit = UI_HISTORY_S
     const subAgentMarkers = [...latestSubAgentStep.entries()]
         .filter(([agentId]) => !tailedSubAgents.has(agentId))
         .map(([, step]) => step);
-    return [...cards, ...subAgentMarkers, ...tail].sort((a, b) => Number(a?.timestamp || 0) - Number(b?.timestamp || 0));
+    const compactionMarker = latestCompactionStep && !tail.includes(latestCompactionStep)
+        ? [latestCompactionStep]
+        : [];
+    return [...cards, ...subAgentMarkers, ...compactionMarker, ...tail]
+        .sort((a, b) => Number(a?.timestamp || 0) - Number(b?.timestamp || 0));
 }
 
 export function compactMessagesForWebview(messages: any[] | undefined): any[] {

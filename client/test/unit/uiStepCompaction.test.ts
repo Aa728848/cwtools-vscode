@@ -108,6 +108,26 @@ describe('uiStepCompaction', () => {
         expect(liveSteps[0].content).to.equal('c6');
     });
 
+    it('keeps the latest compaction result outside the regular history tail', () => {
+        const compacted = compactStepsForUi([
+            {
+                type: 'compaction',
+                content: 'Context compacted',
+                timestamp: 1,
+                compactionInfo: { state: 'complete', kind: 'history', beforeTokens: 10_000, afterTokens: 4_000 },
+            },
+            ...Array.from({ length: 8 }, (_, index) => ({
+                type: 'tool_call',
+                content: `call-${index}`,
+                toolName: 'read_file',
+                timestamp: index + 2,
+            })),
+        ], 4);
+
+        expect(compacted.some(step => step.type === 'compaction' && step.compactionInfo?.afterTokens === 4_000)).to.equal(true);
+        expect(compacted.filter(step => step.type === 'tool_call')).to.have.length(4);
+    });
+
     it('prepares the same compact bounded payload for live transport and replay', () => {
         const liveSteps: any[] = [];
         const transported = prepareLiveStepForUi(liveSteps, {

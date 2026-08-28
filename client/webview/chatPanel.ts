@@ -4269,9 +4269,9 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                 ? chatI18n.live.contextCompactionFailed
                 : chatI18n.live.compactingContext;
         let detail = state === 'start' ? chatI18n.live.compactingContextDetail : String(step.content || '');
-        if (info?.beforeTokens && info.afterTokens) {
+        if (typeof info?.beforeTokens === 'number' && typeof info.afterTokens === 'number') {
             detail = `${formatNum(info.beforeTokens)} → ${formatNum(info.afterTokens)} tokens`;
-        } else if (state === 'start' && info?.beforeTokens && info.thresholdTokens) {
+        } else if (state === 'start' && typeof info?.beforeTokens === 'number' && typeof info.thresholdTokens === 'number') {
             detail += ` · ${formatNum(info.beforeTokens)} / ${formatNum(info.thresholdTokens)} tokens`;
         }
         const icon = state === 'complete' ? 'check' : state === 'failed' ? 'x' : 'package';
@@ -4294,6 +4294,25 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         const card = document.createElement('div');
         updateContextCompactionCard(card, step);
         return card;
+    }
+
+    function isContextCompactionStep(step: any): step is RendererStep {
+        return step?.type === 'compaction' && !!step.compactionInfo;
+    }
+
+    function updateContextMeterFromCompaction(step: RendererStep): void {
+        const info = step.compactionInfo;
+        const tokens = info?.state === 'complete' ? info.afterTokens : info?.beforeTokens;
+        if (typeof tokens !== 'number' || tokens <= 0) return;
+        updateTokenUsage(tokens, contextLimit);
+        const label = document.getElementById('tokenUsageLabel');
+        if (!label) return;
+        const stateLabel = info?.state === 'complete'
+            ? tr('after compaction estimate', '压缩后估算')
+            : info?.state === 'failed'
+                ? tr('compaction failed', '压缩失败')
+                : tr('compacting', '正在压缩');
+        label.textContent = `${label.textContent} · ${stateLabel}`;
     }
 
     // ── OpenCode-style: build complete assistant message DOM ────────────────────
@@ -4327,12 +4346,17 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         }
 
         const sorted = [...mainSteps].sort((a: any, b: any) => (a.timestamp || 0) - (b.timestamp || 0));
-        div.innerHTML = renderAssistantTurnCodex(content, sorted, {
+        const latestCompactionStep = [...sorted].reverse().find(isContextCompactionStep);
+        const renderedSteps = sorted.filter(step => !isContextCompactionStep(step));
+        div.innerHTML = renderAssistantTurnCodex(content, renderedSteps, {
             i18n: chatI18n,
             msgTime,
             renderMarkdown,
             isSubagentView,
         });
+        if (latestCompactionStep) {
+            div.prepend(createContextCompactionCard(latestCompactionStep));
+        }
 
         // Recursively render all sub-Agent independent boxes to prevent merging with the main dialogue flow
         for (const [agentId, groupSteps] of subAgentGroups.entries()) {
@@ -4801,7 +4825,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         if (renderKey === state.lastCodexRenderKey) return;
         state.lastCodexRenderKey = renderKey;
         const uiSnapshot = snapshotCodexTurnUiState(host);
-        host.innerHTML = renderAssistantTurnCodex(finalContent, state.liveSteps, {
+        host.innerHTML = renderAssistantTurnCodex(finalContent, state.liveSteps.filter(step => !isContextCompactionStep(step)), {
             i18n: chatI18n,
             live: !state.isComplete,
             renderMarkdown,
@@ -4922,6 +4946,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         } else {
             updateContextCompactionCard(state.liveCompactionCard, step);
         }
+        updateContextMeterFromCompaction(step);
     }
 
     function applyStandaloneCompactionStep(step: RendererStep): void {
@@ -4935,6 +4960,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
             updateContextCompactionCard(standaloneCompactionCard, step);
             standaloneCompactionCard.classList.add('context-compaction-standalone');
         }
+        updateContextMeterFromCompaction(step);
         scrollBottom(true);
     }
 
@@ -6391,11 +6417,14 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                     updateTokenUsage(gaugeUsage, contextLimit);
                     // Show cost badge
                     const label = document.getElementById('tokenUsageLabel');
-                    if (label && r.tokenUsage.estimatedCostCny > 0) {
-                        const cost = r.tokenUsage.estimatedCostCny < 0.01
-                            ? '<¥0.01'
-                            : '¥' + r.tokenUsage.estimatedCostCny.toFixed(2);
-                        label.textContent = label.textContent + '  ·  ' + cost;
+                    if (label) {
+                        label.textContent = `${label.textContent} · ${tr('last request', '上次请求')}`;
+                        if (r.tokenUsage.estimatedCostCny > 0) {
+                            const cost = r.tokenUsage.estimatedCostCny < 0.01
+                                ? '<¥0.01'
+                                : '¥' + r.tokenUsage.estimatedCostCny.toFixed(2);
+                            label.textContent = `${label.textContent} · ${cost}`;
+                        }
                     }
                 } else {
                     // Rough estimate fallback (no API usage data)
@@ -6406,6 +6435,8 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                     }, 0) : 0;
                     totalConversationTokens += Math.ceil((r.explanation || '').length / 4) + stepTokens + 500;
                     updateTokenUsage(totalConversationTokens, contextLimit);
+                    const label = document.getElementById('tokenUsageLabel');
+                    if (label) label.textContent = `${label.textContent} · ${tr('conversation estimate', '对话估算')}`;
                 }
                 scrollBottom();
                 queuedPromptDispatchAfterCompletion = true;
@@ -7388,16 +7419,18 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                 // only update if we don't already have real data (avoid double-counting).
                 const u = msg.usage;
                 if (u && u.total > 0) {
-                    const gaugeUsage = u.contextWindowTokens ?? u.input ?? u.total;
+                    const gaugeUsage = u.contextWindowTokens
+                        ?? ((u.compactionCalls ?? 0) > 0 ? undefined : (u.input ?? u.total));
                     totalConversationTokens = u.total;
+                    if (typeof gaugeUsage !== 'number' || gaugeUsage <= 0) break;
                     updateTokenUsage(gaugeUsage, contextLimit);
                     // Completely replace the label with token + cost info
                     const label = document.getElementById('tokenUsageLabel');
                     if (label) {
-                        const cacheText = u.cachedTokens ? `, <span style="display:inline-flex; align-items:center; gap:2px; vertical-align:middle; color:var(--vscode-charts-green, #388a34); margin-top:-2px;">${svgIconNoMargin('zap')} ${formatNum(u.cachedTokens)} ${tr('cached', '缓存')}</span>` : '';
-                        const base = `~${formatNum(gaugeUsage)} / ${formatNum(contextLimit)} tokens` + cacheText;
+                        const cacheText = u.cachedTokens ? ` · <span style="display:inline-flex; align-items:center; gap:2px; vertical-align:middle; color:var(--vscode-charts-green, #388a34); margin-top:-2px;">${svgIconNoMargin('zap')} ${formatNum(u.cachedTokens)} ${tr('cached', '缓存')}</span>` : '';
+                        const base = `~${formatNum(gaugeUsage)} / ${formatNum(contextLimit)} tokens · ${tr('last request', '上次请求')}` + cacheText;
                         const cost = u.estimatedCostCny > 0
-                            ? '  ·  ' + (u.estimatedCostCny < 0.01 ? '<¥0.01' : '¥' + u.estimatedCostCny.toFixed(2))
+                            ? ' · ' + (u.estimatedCostCny < 0.01 ? '<¥0.01' : '¥' + u.estimatedCostCny.toFixed(2))
                             : '';
                         label.innerHTML = base + cost;
                     }

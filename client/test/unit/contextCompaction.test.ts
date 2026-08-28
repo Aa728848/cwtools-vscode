@@ -79,6 +79,9 @@ describe('context compaction', () => {
         expect(result.some(message => String(message.content).includes('OLD_SUMMARY'))).to.equal(false);
         expect(result.some(message => String(message.content).includes('NEW_SUMMARY'))).to.equal(true);
         expect(steps.map(step => step.compactionInfo?.state)).to.deep.equal(['start', 'complete']);
+        const completed = steps.find(step => step.compactionInfo?.state === 'complete');
+        expect(completed.compactionInfo.afterTokens).to.be.greaterThan(0);
+        expect(completed.compactionInfo.afterTokens).to.be.lessThan(completed.compactionInfo.beforeTokens);
     });
 
     it('preserves leading system instructions for providers without OpenAI prefix caching', async () => {

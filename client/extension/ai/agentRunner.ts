@@ -1370,6 +1370,7 @@ export class AgentRunner {
         const delegationScopeFacts = options?.sandbox
             ? {
                 readOnly: options.sandbox.writeScope?.length === 0,
+                readScope: options.sandbox.readScope,
                 writeScope: options.sandbox.writeScope,
                 deniedWriteScopes: options.sandbox.deniedWriteScopes,
                 rejectedScopes: options.sandbox.rejectedScopes,

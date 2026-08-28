@@ -29,6 +29,15 @@ export interface ReadablePathResolution extends WorkspacePathResolution {
 export { foldPathCase } from '../pathScope';
 export { isPathInsideOrEqual };
 
+/** Keep workspace files compact while preserving usable absolute paths for configured game data. */
+export function formatReadablePathForTool(filePath: string, workspaceRoot: string): string {
+    if (!path.isAbsolute(filePath)) return filePath.replace(/\\/g, '/');
+    const resolved = path.resolve(filePath);
+    return isPathInsideOrEqual(resolved, workspaceRoot)
+        ? path.relative(workspaceRoot, resolved).replace(/\\/g, '/')
+        : resolved.replace(/\\/g, '/');
+}
+
 export function escapeRegExp(value: string): string {
     return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }

@@ -8,12 +8,14 @@ import * as path from 'path';
 describe('SubAgentSandbox', () => {
     let buildSubAgentSandbox: typeof import('../../extension/ai/orchestrator/subAgentSandbox').buildSubAgentSandbox;
     let enforceSubAgentSafety: typeof import('../../extension/ai/orchestrator/subAgentSandbox').enforceSubAgentSafety;
+    let formatReadablePathForTool: typeof import('../../extension/ai/workspaceSandbox').formatReadablePathForTool;
     type TaskNode = import('../../extension/ai/orchestrator/types').TaskNode;
 
     before(() => {
         const sandboxModule = require('../../extension/ai/orchestrator/subAgentSandbox');
         buildSubAgentSandbox = sandboxModule.buildSubAgentSandbox;
         enforceSubAgentSafety = sandboxModule.enforceSubAgentSafety;
+        formatReadablePathForTool = require('../../extension/ai/workspaceSandbox').formatReadablePathForTool;
     });
 
     // ── 1. 沙盒构建生成校验 ──
@@ -32,6 +34,16 @@ describe('SubAgentSandbox', () => {
             const sandbox = buildSubAgentSandbox(mockNode, process.cwd());
             expect(sandbox.writeScope).to.exist;
             expect(sandbox.writeScope).to.have.length(0); // 必须是空数组，代表物理只读
+            expect(sandbox.readScope).to.include(path.resolve(process.cwd()));
+        });
+
+        it('preserves external game files as absolute readable tool paths', () => {
+            const workspaceRoot = path.join(process.cwd(), 'workspace');
+            const workspaceFile = path.join(workspaceRoot, 'common', 'rules.txt');
+            const vanillaFile = path.resolve(workspaceRoot, '..', 'Stellaris', 'common', 'game_rules', '00_rules.txt');
+
+            expect(formatReadablePathForTool(workspaceFile, workspaceRoot)).to.equal('common/rules.txt');
+            expect(formatReadablePathForTool(vanillaFile, workspaceRoot)).to.equal(vanillaFile.replace(/\\/g, '/'));
         });
 
         it('reviewer (只读 Profile) — 应该生成空的 writeScope', () => {

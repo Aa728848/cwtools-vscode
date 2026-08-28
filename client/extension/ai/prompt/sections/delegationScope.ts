@@ -20,6 +20,8 @@
 export interface DelegationScopeFacts {
     /** True when the runtime profile has no project write tools. */
     readOnly?: boolean;
+    /** Absolute workspace and configured game roots this child may read. */
+    readScope?: readonly string[];
     /** Workspace-relative or absolute scopes this child may write. */
     writeScope?: readonly string[];
     /** Scopes withheld because the user retained ownership of them. */
@@ -66,6 +68,14 @@ export function buildDelegationScopeStatement(facts?: DelegationScopeFacts): str
         lines.push(writable
             ? `- You may write only inside: ${writable}.`
             : '- You may write only inside the coordinator-approved workspace targets for this subtask.');
+    }
+
+    const readable = formatScopes(facts.readScope);
+    if (readable) {
+        lines.push(
+            `- You may read inside: ${readable}. Configured game roots are read-only. `
+            + 'Pass an absolute vanilla path returned by a semantic query directly to `read_file`, `document_symbols`, or `get_pdx_block`.',
+        );
     }
 
     const denied = formatScopes(facts.deniedWriteScopes);

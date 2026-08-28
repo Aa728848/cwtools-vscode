@@ -140,6 +140,17 @@ describe('buildDelegationScopeStatement', () => {
         expect(text).to.not.match(/You may write only inside:/);
     });
 
+    it('明确告知子代理可只读访问已配置游戏目录及对应读取工具', () => {
+        const text = build({
+            readOnly: true,
+            readScope: ['D:/Steam/steamapps/common/Stellaris', 'C:/workspace/mod'],
+            writeScope: [],
+        });
+        expect(text).to.include('D:/Steam/steamapps/common/Stellaris');
+        expect(text).to.include('Configured game roots are read-only');
+        expect(text).to.include('`read_file`, `document_symbols`, or `get_pdx_block`');
+    });
+
     it('可写 Profile 列出写作用域，去重且排序', () => {
         const text = build({ writeScope: ['events/b.txt', 'events/a.txt', 'events/a.txt'] });
         expect(text).to.include('events/a.txt, events/b.txt');

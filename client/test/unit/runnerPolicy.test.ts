@@ -69,6 +69,29 @@ describe('runnerPolicy', () => {
         expect(initialToolFocusForMode('utility')).to.equal('write');
     });
 
+    it('gives read-only sub-agents direct semantic tools for vanilla evidence', () => {
+        for (const [mode, profileName] of [
+            ['explore', 'explore'],
+            ['plan', 'planner'],
+            ['review', 'reviewer'],
+        ] as const) {
+            const names = filterToolDefinitionsForMode(registeredTools, mode, {
+                domain: 'paradox',
+                useSlimPrompt: true,
+                profileName,
+            }).map(tool => tool.function.name);
+            expect(names, profileName).to.include.members([
+                'read_file',
+                'document_symbols',
+                'workspace_symbols',
+                'go_to_definition',
+                'find_references',
+                'hover_symbol',
+                'get_pdx_block',
+            ]);
+        }
+    });
+
     it('uses focus only as advisory guidance', () => {
         const reminder = buildToolFocusReminder('build', 'validation', 'paradox');
         expect(reminder).to.include('Current build focus: validation');

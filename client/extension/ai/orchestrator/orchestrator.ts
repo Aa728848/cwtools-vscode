@@ -645,6 +645,7 @@ export class Orchestrator {
             agentId: taskNode.id,
             profileName: profile.name,
             domain: childDomain,
+            readScope: sandbox.readScope,
             writeScope: sandbox.writeScope,
             rejectedScopes: sandbox.rejectedScopes,
         }, { agentId: taskNode.id });

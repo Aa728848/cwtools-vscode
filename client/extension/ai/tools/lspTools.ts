@@ -25,7 +25,7 @@ import type {
     CwtRuleValueReference,
     PdxSemanticCatalog,
 } from '../types';
-import { isPathInsideOrEqual } from '../workspaceSandbox';
+import { formatReadablePathForTool, isPathInsideOrEqual } from '../workspaceSandbox';
 import { getConfiguredGameRoots } from '../../configuredGameRoots';
 import { diagnosticMetadata } from './diagnosticMetadata';
 import { diagnosticCodeString, diagnosticMatchesIgnoredKey } from '../../diagnosticI18n';
@@ -971,11 +971,7 @@ export class LspToolHandler {
                         const instances = Array.isArray(raw.instances)
                             ? raw.instances.map((i: any) => ({
                                 id: i.id ?? '',
-                                file: i.file
-                                    ? (path.isAbsolute(i.file)
-                                        ? path.relative(this.ctx.workspaceRoot, i.file).replace(/\\/g, '/')
-                                        : i.file)
-                                    : '',
+                                file: i.file ? formatReadablePathForTool(i.file, this.ctx.workspaceRoot) : '',
                                 vanilla: i.vanilla ?? false,
                             }))
                             : [];
@@ -4269,7 +4265,7 @@ export class LspToolHandler {
                 symbols: symbols.slice(0, limit).map(s => ({
                     name: s.name,
                     kind: vs.SymbolKind[s.kind],
-                    file: path.relative(this.ctx.workspaceRoot, s.location.uri.fsPath).replace(/\\/g, '/'),
+                    file: formatReadablePathForTool(s.location.uri.fsPath, this.ctx.workspaceRoot),
                     line: s.location.range.start.line,
                 })),
             };
@@ -4302,7 +4298,7 @@ export class LspToolHandler {
                 symbols: entries.map(entry => ({
                     name: entry.name,
                     kind: entry.kind,
-                    file: path.relative(this.ctx.workspaceRoot, entry.file).replace(/\\/g, '/'),
+                    file: formatReadablePathForTool(entry.file, this.ctx.workspaceRoot),
                     line: Math.max(0, entry.line - 1),
                 })),
                 _warning: providerMessage

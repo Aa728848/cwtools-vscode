@@ -492,7 +492,8 @@ describe('RunLedger Unit Tests', () => {
         expect(capturedOptions[0].durableGoal).to.equal(false);
 
         const durableGoal = await runtime.setGoal('topic_protocol', 'thread_protocol', 'finish the long Paradox task', 10_000);
-        expect(durableGoal).to.include({ version: 2, status: 'active', tokenBudget: 10_000 });
+        expect(durableGoal).to.include({ version: 2, status: 'active' });
+        expect(durableGoal.budgetLimits.tokens).to.equal(10_000);
         expect(durableGoal.goalId).to.be.a('string').and.not.empty;
         await runtime.startTurn({
             userMessage: 'continue',

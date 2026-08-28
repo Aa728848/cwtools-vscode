@@ -148,7 +148,7 @@ describe('dispatch_agents resume/append/clarification', () => {
         const executor = createExecutor();
         const result = await executor.execute('dispatch_agents', {
             resumeGraphId: 'tg_unknown_000000',
-            appendTasks: [{ id: 'n3', agentType: 'explore', prompt: 'more' }],
+            appendTasks: [{ id: 'n3', profileName: 'explore', prompt: 'more' }],
         }, makeContext('topic-a', 'general') as any) as any;
         expect(result.success).to.equal(false);
         expect(result.error).to.include('not a known orchestration');
@@ -180,7 +180,7 @@ describe('dispatch_agents resume/append/clarification', () => {
         const executor = createExecutor();
         const result = await executor.execute('dispatch_agents', {
             resumeGraphId: graph.id,
-            appendTasks: [{ id: 'n1', agentType: 'explore', prompt: 'duplicate' }],
+            appendTasks: [{ id: 'n1', profileName: 'explore', prompt: 'duplicate' }],
         }, makeContext('topic-a', 'paradox') as any) as any;
         expect(result.success).to.equal(false);
         expect(result.error).to.include(`already exists in graph '${graph.id}'`);
@@ -191,10 +191,10 @@ describe('dispatch_agents resume/append/clarification', () => {
         const executor = createExecutor();
         const result = await executor.execute('dispatch_agents', {
             resumeGraphId: graph.id,
-            appendTasks: [{ id: 'w1', agentType: 'build', prompt: 'Write a file.' }],
+            appendTasks: [{ id: 'w1', profileName: 'paradox-coder', prompt: 'Write a file.' }],
         }, makeContext('topic-a', 'paradox') as any) as any;
         expect(result.success).to.equal(false);
-        expect(result.error).to.include('must be read-only (explore/plan/review)');
+        expect(result.error).to.include('must use read-only profiles');
     });
 
     it('rejects read-only roles that still declare plannedFiles when appending', async () => {
@@ -203,12 +203,12 @@ describe('dispatch_agents resume/append/clarification', () => {
         const result = await executor.execute('dispatch_agents', {
             resumeGraphId: graph.id,
             appendTasks: [{
-                id: 'e1', agentType: 'explore', prompt: 'Inspect.',
+                id: 'e1', profileName: 'explore', prompt: 'Inspect.',
                 plannedFiles: ['client/extension/ai/chatPanel.ts'],
             }],
         }, makeContext('topic-a', 'paradox') as any) as any;
         expect(result.success).to.equal(false);
-        expect(result.error).to.include('must be read-only (explore/plan/review)');
+        expect(result.error).to.include('must use read-only profiles');
     });
 
     it('allows read-only appended tasks in the Paradox domain (incl. dependencies on stored nodes)', async () => {
@@ -217,7 +217,7 @@ describe('dispatch_agents resume/append/clarification', () => {
         const result = await executor.execute('dispatch_agents', {
             resumeGraphId: graph.id,
             appendTasks: [{
-                id: 'e2', agentType: 'explore', prompt: 'Inspect more.',
+                id: 'e2', profileName: 'explore', prompt: 'Inspect more.',
                 dependencies: ['n1'], // references a node from the stored wave
             }],
         }, makeContext('topic-a', 'paradox') as any) as any;
@@ -236,7 +236,7 @@ describe('dispatch_agents resume/append/clarification', () => {
         const result = await executor.execute('dispatch_agents', {
             resumeGraphId: graph.id,
             appendTasks: [{
-                id: 'u1', agentType: 'utility', prompt: 'Write a file.',
+                id: 'u1', profileName: 'general-coder', prompt: 'Write a file.',
                 plannedFiles: [target],
             }],
         }, makeContext('topic-a', 'general') as any) as any;

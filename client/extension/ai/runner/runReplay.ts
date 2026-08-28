@@ -115,27 +115,13 @@ export function buildReplaySession(events: AgentRunEvent[], mode: ReplayMode = '
         } else if (ev.type === 'tool_call_end' && ev.invocationId) {
             const created = pending.get(ev.invocationId);
             if (created && created.toolName) {
-                const result = p?.result ?? p?.toolResult ?? p?.output ?? p;
+                const result = p?.result ?? p;
                 session.record(created.toolName, created.toolArgs, result);
             }
             pending.delete(ev.invocationId);
         }
     }
     return session;
-}
-
-/**
- * Extract the user prompt that originally kicked off the run.
- */
-export function extractOriginalUserPrompt(events: AgentRunEvent[]): string | undefined {
-    for (const ev of events) {
-        if (ev.type === 'run_created') {
-            const p = ev.payload as Record<string, any> | undefined;
-            const candidate = p?.userPrompt ?? p?.prompt;
-            if (typeof candidate === 'string') return candidate;
-        }
-    }
-    return undefined;
 }
 
 /**
@@ -157,7 +143,6 @@ export async function replayRun(
     }
     const events = rollout.events;
     const userPrompt = await runLedger.readPrompt(originalRunId, rollout.run.topicId)
-        ?? extractOriginalUserPrompt(events)
         ?? rollout.run.userPromptPreview;
     if (!userPrompt) {
         throw new Error(`replayRun: could not extract original user prompt from ${originalRunId}`);

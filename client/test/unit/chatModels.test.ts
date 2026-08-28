@@ -263,7 +263,7 @@ describe('chat workflow model helpers', () => {
         id: 'diagnostic-fix',
         title: 'Diagnostic Fix',
         description: 'Fix diagnostics',
-        mode: 'build',
+        scheduling: { domain: 'paradox', intent: 'execute', strategy: 'single' },
         phases: [{ id: 'collect', title: 'Collect' }],
         verification: [{ id: 'zero', description: 'No errors', required: true }],
     };
@@ -303,7 +303,7 @@ describe('chat i18n and command helpers', () => {
             id: 'diagnostic-fix',
             title: '诊断修复',
             description: '自动修复诊断',
-            mode: 'build',
+            scheduling: { domain: 'paradox', intent: 'execute', strategy: 'single' },
             phases: [],
             verification: [],
         };

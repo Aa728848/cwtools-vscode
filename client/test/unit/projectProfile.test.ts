@@ -173,7 +173,6 @@ describe('ProjectProfile localisation detection', () => {
 
             expect(profile.keyDirectories.map(directory => directory.path)).to.include('common/ritual_definitions');
             expect(profile.identifiers.byType).to.deep.equal({});
-            expect(profile.identifiers.scriptedEffects).to.equal(undefined);
         } finally {
             cleanupWorkspace(workspaceRoot);
         }
@@ -254,15 +253,15 @@ describe('ProjectProfile localisation detection', () => {
         }
     });
 
-    it('accepts schemaVersion 2 and rejects obsolete profile schemas', () => {
+    it('accepts schemaVersion 4 and rejects obsolete profile schemas', () => {
         const workspaceRoot = makeWorkspace();
         try {
             const profile = buildProjectProfile(workspaceRoot);
-            expect(profile.schemaVersion).to.equal(2);
+            expect(profile.schemaVersion).to.equal(4);
 
             const profilePath = getProjectProfilePath(workspaceRoot);
             fs.mkdirSync(path.dirname(profilePath), { recursive: true });
-            fs.writeFileSync(profilePath, JSON.stringify({ ...profile, schemaVersion: 1 }), 'utf8');
+            fs.writeFileSync(profilePath, JSON.stringify({ ...profile, schemaVersion: 3 }), 'utf8');
 
             expect(readProjectProfile(workspaceRoot)).to.equal(null);
         } finally {

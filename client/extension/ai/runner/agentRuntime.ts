@@ -216,7 +216,7 @@ export class AgentRuntime {
         if (goal?.status === 'active') {
             history.unshift({
                 role: 'system',
-                content: `[DURABLE GOAL]\nObjective: ${goal.objective}\nStatus: ${goal.status}${goal.tokenBudget ? `\nToken budget: ${goal.tokenBudget}` : ''}`,
+                content: `[DURABLE GOAL]\nObjective: ${goal.objective}\nStatus: ${goal.status}${goal.budgetLimits.tokens ? `\nToken budget: ${goal.budgetLimits.tokens}` : ''}`,
             });
         }
         const promptHook = await runAgentHooks('userPromptSubmit', { topicId, threadId, turnId });
@@ -231,21 +231,10 @@ export class AgentRuntime {
         const scope = this.getAgentScope(topicId, threadId);
         this.getTranscriptStore(topicId, threadId, domainStore);
         const schedulingState = normalizeSchedulingState(request.options?.schedulingState);
-        const profile = agentProfileCatalog.get(schedulingState.profileName ?? '')
-            ?? agentProfileCatalog.resolve({
-                domainProfile: schedulingState.domainProfile,
-                authorization: schedulingState.authorization,
-                initialPhase: schedulingState.phase === 'plan'
-                    ? 'plan'
-                    : schedulingState.phase === 'execute'
-                        ? 'execute'
-                        : schedulingState.phase === 'verify'
-                            ? 'verify'
-                            : 'inspect',
-                explicitDelegation: schedulingState.dispatch !== 'single',
-                confidence: schedulingState.routeConfidence,
-                evidence: schedulingState.routeEvidence,
-            });
+        const profile = agentProfileCatalog.get(schedulingState.profileName);
+        if (!profile) {
+            throw new Error(`Agent scheduler profile "${schedulingState.profileName}" is not registered.`);
+        }
         const activation = scope.get<ToolActivationService>('toolActivation')
             ?? scope.set('toolActivation', new ToolActivationService());
         const toolSnapshot = activation.activate(profile, schedulingState);
@@ -265,12 +254,7 @@ export class AgentRuntime {
             ? vs.workspace.getConfiguration('stellarisLanguageServices.ai')
                 .get<Record<string, { provider: string; model: string }>>('orchestrator.agentModels')
             : undefined;
-        const modelBindingKey = configuredModels?.[profile.name]
-            ? profile.name
-            : profile.modelPreference && configuredModels?.[profile.modelPreference]
-                ? profile.modelPreference
-                : undefined;
-        const modelBinding = modelBindingKey ? configuredModels?.[modelBindingKey] : undefined;
+        const modelBinding = configuredModels?.[profile.name];
         const priorOnStep = request.options?.onStep;
         const effectiveOptions = {
             ...request.options,
@@ -301,7 +285,7 @@ export class AgentRuntime {
         const bindingState: ModelBindingState = {
             source: request.options?.providerId || request.options?.model
                 ? 'request'
-                : modelBindingKey ? `profile:${modelBindingKey}` : 'workspace-default',
+                : modelBinding ? `profile:${profile.name}` : 'workspace-default',
             providerId: effectiveOptions.providerId,
             model: effectiveOptions.model,
         };
@@ -616,17 +600,16 @@ export class AgentRuntime {
                 payload: { state: finalSchedulingState },
             });
             const admission = events.find(event => event.type === 'admission_decided')?.payload;
+            const admissionState = admission?.state as AgentSchedulingState | undefined;
             const finalPhase = [...events].reverse()
-                .find(event => event.type === 'phase_changed')?.payload?.to
+                .find(event => event.type === 'phase_changed')?.payload?.state?.phase
                 ?? run?.schedulingState?.phase;
-            const dispatched = events.some(event =>
-                event.type === 'dispatch_evaluated' && event.payload?.accepted === true);
             const wroteFiles = (run?.writtenFiles.length ?? 0) > 0;
             await runLedger.appendEvent(result.runId, 'route_outcome_evaluated', {
-                predictedPhase: admission?.initialPhase,
+                predictedPhase: admissionState?.phase,
                 actualPhase: finalPhase,
-                predictedDispatch: admission?.explicitDelegation === true ? 'parallel' : 'single',
-                actualDispatch: dispatched ? 'parallel' : 'single',
+                predictedDispatch: admissionState?.dispatch,
+                actualDispatch: finalSchedulingState.dispatch,
                 wroteFiles,
                 toolCallCount: result.runMetrics?.toolCallCount ?? 0,
                 validationPassed: result.isValid,
@@ -767,11 +750,10 @@ export class AgentRuntime {
         return goal;
     }
 
-    async updateGoal(topicId: string, threadId: string, status: DurableGoalStatus | 'completed', reason?: string): Promise<DurableAgentGoal | undefined> {
-        const normalized = status === 'completed' ? 'complete' : status;
+    async updateGoal(topicId: string, threadId: string, status: DurableGoalStatus, reason?: string): Promise<DurableAgentGoal | undefined> {
         const state = this.getGoalRuntimeState(topicId, threadId);
-        if (normalized === 'active') state.owned = true;
-        const goal = await goalSupervisor.transition(topicId, threadId, normalized, reason);
+        if (status === 'active') state.owned = true;
+        const goal = await goalSupervisor.transition(topicId, threadId, status, reason);
         if (goal) state.goal = goal;
         return goal;
     }
@@ -1423,7 +1405,7 @@ export class AgentRuntime {
                         content: step.content,
                         agentId: step.agentId,
                         invocationId: step.invocationId,
-                        subagentType: step.subagentType,
+                        subagentProfileName: step.subagentProfileName,
                         subtaskStatus: step.subtaskStatus,
                     },
                     updatedAt: step.timestamp,

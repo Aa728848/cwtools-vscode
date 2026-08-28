@@ -64,7 +64,9 @@ function parseAgentMarkdown(content: string, fallbackName: string): RuntimeAgent
             runCode: scalar(frontmatter.get('subagentRunCode') ?? 'false') === true,
             command: scalar(frontmatter.get('subagentCommand') ?? 'false') === true,
         } : undefined,
-        modelPreference: frontmatter.get('modelPreference') === 'secondary' ? 'secondary' : 'primary',
+        maxIterations: frontmatter.has('maxIterations')
+            ? Math.max(1, Math.min(10_000, Number(scalar(frontmatter.get('maxIterations')!)) || 1))
+            : undefined,
         override: scalar(frontmatter.get('override') ?? 'false') === true,
         summaryPolicy: frontmatter.has('summaryMinCharacters') ? {
             minCharacters: Math.max(0, Number(scalar(frontmatter.get('summaryMinCharacters')!)) || 0),

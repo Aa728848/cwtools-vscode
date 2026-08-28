@@ -24,7 +24,7 @@ import { SOURCE, aiText } from '../messages';
 import type { RunEventSink } from '../runner/runContext';
 import { AdaptiveConcurrencyController, isProviderRateLimit } from '../runner/scheduling';
 import { agentTaskManager, type AgentTaskStatus } from '../runner/taskManager';
-import { getAgentProfile } from './agentRegistry';
+import { agentProfileCatalog } from '../runner/agentProfileCatalog';
 import { RecoveryStormBudget, classifyStormFailure } from './recoveryStormBudget';
 
 /** Sub-agent executor injected by Orchestrator. */
@@ -231,8 +231,8 @@ export class ParallelExecutor {
             const allReadyNodes = this.graphEngine.getReadyNodes(graph);
             if (this.recoveryStorm.decision) {
                 for (const node of allReadyNodes) {
-                    const profile = getAgentProfile(node.agentType);
-                    if (profile.toolBudget !== 'read_only' && profile.toolBudget !== 'plan') node.status = 'cancelled';
+                    const profile = agentProfileCatalog.getRequired(node.profileName);
+                    if (profile.authorizationCeiling === 'workspace_write') node.status = 'cancelled';
                 }
             }
             const now = Date.now();
@@ -276,7 +276,7 @@ export class ParallelExecutor {
 
             emitStep({
                 type: 'orchestrator_progress',
-                content: `$(zap) Executing batch: ${batch.map(n => `${n.id}(${n.agentType})`).join(', ')}`,
+                content: `$(zap) Executing batch: ${batch.map(n => `${n.id}(${n.profileName})`).join(', ')}`,
                 timestamp: Date.now(),
             });
 

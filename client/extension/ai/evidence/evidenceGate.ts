@@ -93,7 +93,7 @@ export interface EvidenceGateEvaluateInput {
     toolName: string;
     targetFile: string;
     text: string;
-    /** Exact content before the pending edit; unchanged legacy claims do not block repairs. */
+    /** Exact content before the pending edit; unchanged pre-existing claims do not block repairs. */
     previousText?: string;
     truncated?: boolean;
     mode: Exclude<EvidenceGateMode, 'off'>;
@@ -471,8 +471,8 @@ export class EvidenceGate {
         // contracts must surface the read-only queries that establish the
         // blast radius before writing. Advisory in shadow mode; in enforce
         // mode the missing evidence is surfaced for a manual override.
-        // Legacy/direct callers default to the strongest evidence profile. The
-        // AgentToolExecutor supplies an explicit tier for each pending write.
+        // Inputs without a host risk classification use the strongest evidence
+        // profile. AgentToolExecutor supplies an explicit tier for each pending write.
         const impactEvidence = (input.riskLevel ?? 3) >= 3 ? this.buildImpactScopeEvidence(input) : [];
         if (impactEvidence.length > 0) {
             for (const item of impactEvidence) {

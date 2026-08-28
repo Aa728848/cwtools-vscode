@@ -155,10 +155,10 @@ export function buildAgentTraceModel(
 
         if (event.type === 'subagent_start') {
             node.status = 'running';
-            node.role = stringValue(payload.role) ?? stringValue(payload.agentType) ?? node.role;
+            node.role = stringValue(payload.profileName) ?? node.role;
             node.task = stringValue(payload.task) ?? stringValue(payload.prompt) ?? stringValue(payload.taskNodeId) ?? node.task;
         } else if (event.type === 'subagent_policy_derived') {
-            node.role = stringValue(payload.role) ?? node.role;
+            node.role = stringValue(payload.profileName) ?? node.role;
         } else if (event.type === 'subagent_end') {
             node.status = payload.success === false ? 'failed' : 'done';
         } else if (event.type === 'subagent_refused') {
@@ -213,7 +213,7 @@ function spanLabel(event: AgentTraceEvent): string {
     if (event.type.startsWith('process_')) return stringValue(payload.command) ?? stringValue(payload.description) ?? 'Process';
     if (event.type.startsWith('permission_') || event.type.startsWith('write_confirmation_')) return stringValue(payload.tool) ?? 'Permission';
     if (event.type === 'file_change' || event.type === 'artifact_created') return stringValue(payload.filePath) ?? stringValue(payload.path) ?? 'File change';
-    if (event.type.startsWith('subagent_')) return stringValue(payload.role) ?? stringValue(payload.agentType) ?? stringValue(payload.taskNodeId) ?? 'Subagent';
+    if (event.type.startsWith('subagent_')) return stringValue(payload.profileName) ?? stringValue(payload.taskNodeId) ?? 'Subagent';
     return event.type.replace(/_/g, ' ');
 }
 
@@ -292,10 +292,10 @@ export function buildTraceSpans(events: readonly AgentTraceEvent[], now = Date.n
 
 
 export function stableTrajectoryEndTime(
-    run: { startedAt?: number; createdAt?: number; completedAt?: number },
+    run: { startedAt?: number; completedAt?: number },
     events: readonly AgentTraceEvent[],
 ): number {
-    const startedAt = Number(run.startedAt || run.createdAt || 0);
+    const startedAt = Number(run.startedAt || 0);
     const completedAt = Number(run.completedAt || 0);
     if (completedAt > 0) return Math.max(startedAt, completedAt);
     let latestEventAt = startedAt;

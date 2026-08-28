@@ -2,7 +2,7 @@ import * as path from 'path';
 import { getAgentToolTargetFiles } from './runner/toolScheduler';
 import { WRITE_TOOLS } from './tools/registry';
 import type { AgentMode } from './types';
-import { getPrivateTopicStorageDirCandidates } from './workspacePaths';
+import { getPrivateTopicStorageDir } from './workspacePaths';
 
 export interface PlanModeGuardResult {
     allowed: boolean;
@@ -75,10 +75,8 @@ function getAiRelativeSegments(filePath: string, workspaceRoot: string, topicId?
     let relative = '';
     if (topicId) {
         const safeTopicId = topicId.replace(/[^a-zA-Z0-9_.-]/g, '_');
-        const currentTopicDir = getPrivateTopicStorageDirCandidates(topicId, workspaceRoot)
-            .map(candidate => path.resolve(candidate))
-            .find(candidate => isInside(resolved, candidate));
-        if (currentTopicDir) {
+        const currentTopicDir = path.resolve(getPrivateTopicStorageDir(topicId, workspaceRoot));
+        if (isInside(resolved, currentTopicDir)) {
             relative = path.join(safeTopicId, path.relative(currentTopicDir, resolved));
         }
     }

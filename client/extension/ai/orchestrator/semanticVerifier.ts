@@ -356,7 +356,7 @@ export class SemanticVerifier {
         }
 
         const expectedChanges = graph.metadata.featureManifest?.expectsFileChanges === true
-            || [...graph.nodes.values()].some(node => ['build', 'loc_writer', 'gui_expert'].includes(node.agentType)
+            || [...graph.nodes.values()].some(node => ['paradox-coder', 'localization-writer', 'gui-expert'].includes(node.profileName)
                 && ((node.plannedFiles?.length ?? 0) > 0 || (node.produces?.length ?? 0) > 0));
         if (expectedChanges && filesChecked.length === 0) {
             issues.push({ code: 'expected_changes_missing', message: 'The feature contract expected project changes, but no written project file could be verified.' });

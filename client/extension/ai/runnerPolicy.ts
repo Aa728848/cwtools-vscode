@@ -1,11 +1,10 @@
 import type { AgentMode, AgentRuntimeDomain, AgentToolFocus, ToolDefinition } from './types';
-import { domainForExecutionMode } from './runner/scheduling';
 import { TOOL_REGISTRY } from './tools/registry';
 import { evaluateEffectiveToolPolicy } from './runner/effectiveToolPolicy';
 import { agentProfileCatalog } from './runner/agentProfileCatalog';
 
 export interface ToolFilterOptions {
-    domain?: AgentRuntimeDomain;
+    domain: AgentRuntimeDomain;
     useSlimPrompt?: boolean;
     excludeTools?: string[];
     profileName?: string;
@@ -118,7 +117,7 @@ const FOCUS_GUIDANCE: Record<AgentToolFocus, string> = {
 export function buildToolFocusReminder(
     mode: AgentMode,
     focus: AgentToolFocus | undefined,
-    domain: AgentRuntimeDomain = domainForExecutionMode(mode),
+    domain: AgentRuntimeDomain,
 ): string {
     const normalizedFocus = focus;
     if (!normalizedFocus) return '';
@@ -194,9 +193,9 @@ export function resolveContextSafeOutputTokens(options: ContextSafeOutputBudgetO
 export function filterToolDefinitionsForMode(
     tools: readonly ToolDefinition[],
     mode: AgentMode,
-    options: ToolFilterOptions = {},
+    options: ToolFilterOptions,
 ): ToolDefinition[] {
-    const domain = options.domain ?? domainForExecutionMode(mode);
+    const domain = options.domain;
     let filtered = tools.filter(t => {
         const entry = TOOL_REGISTRY.get(t.function.name as import('./types').AgentToolName);
         if (!entry) return false;

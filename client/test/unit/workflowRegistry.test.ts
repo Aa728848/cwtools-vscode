@@ -29,10 +29,10 @@ describe('AI Workflow Registry', () => {
 
     // ── Diagnostic Fix Workflow ────────────────────────────────────────
 
-    it('diagnostic-fix workflow exists and has correct mode', () => {
+    it('diagnostic-fix workflow exists and has an explicit scheduling profile', () => {
         const wf = getWorkflow('diagnostic-fix');
         expect(wf).to.not.be.undefined;
-        expect(wf!.mode).to.equal('build');
+        expect(wf!.scheduling).to.deep.equal({ domain: 'paradox', intent: 'execute', strategy: 'single' });
         expect(wf!.title).to.equal('Diagnostic Fix');
     });
 
@@ -58,10 +58,10 @@ describe('AI Workflow Registry', () => {
 
     // ── Localisation Generation Workflow ────────────────────────────────
 
-    it('loc-generation workflow exists and runs in build mode', () => {
+    it('loc-generation workflow exists and requests execution', () => {
         const wf = getWorkflow('loc-generation');
         expect(wf).to.not.be.undefined;
-        expect(wf!.mode).to.equal('build');
+        expect(wf!.scheduling.intent).to.equal('execute');
     });
 
     it('loc-generation includes write_localisation in tool policy', () => {
@@ -72,10 +72,10 @@ describe('AI Workflow Registry', () => {
 
     // ── Event Chain Design Workflow ─────────────────────────────────────
 
-    it('event-chain-design runs in plan mode', () => {
+    it('event-chain-design requests planning', () => {
         const wf = getWorkflow('event-chain-design');
         expect(wf).to.not.be.undefined;
-        expect(wf!.mode).to.equal('plan');
+        expect(wf!.scheduling.intent).to.equal('plan');
     });
 
     it('event-chain-design includes write_design_blueprint', () => {
@@ -107,10 +107,10 @@ describe('AI Workflow Registry', () => {
 
     // ── Rules Sync Review Workflow ──────────────────────────────────────
 
-    it('rules-sync-review runs in review mode', () => {
+    it('rules-sync-review requests review', () => {
         const wf = getWorkflow('rules-sync-review');
         expect(wf).to.not.be.undefined;
-        expect(wf!.mode).to.equal('review');
+        expect(wf!.scheduling.intent).to.equal('review');
     });
 
     // ── Asset Wiring Workflow ──────────────────────────────────────────
@@ -179,7 +179,9 @@ describe('AI Workflow Registry', () => {
                 id: 'Saved Demo',
                 title: 'Saved Demo',
                 description: 'Reusable saved workflow.',
-                mode: 'plan',
+                domain: 'paradox',
+                intent: 'plan',
+                strategy: 'single',
                 promptSupplement: 'Follow the saved process and verify the result.',
                 allowedTools: ['read_file', 'save_workflow', 'unknown_tool' as any],
                 requiredContext: ['workspace!'],
@@ -195,7 +197,7 @@ describe('AI Workflow Registry', () => {
             expect(fs.existsSync(result.filePath!)).to.be.true;
             expect(snapshottedPath).to.equal(result.filePath);
             expect(snapshottedContent).to.equal(null);
-            expect(result.workflow!.mode).to.equal('plan');
+            expect(result.workflow!.scheduling).to.deep.equal({ domain: 'paradox', intent: 'plan', strategy: 'single' });
             expect(result.workflow!.toolPolicy.strategy).to.equal('allowlist');
             expect(result.workflow!.toolPolicy.tools).to.include('read_file');
             expect(result.workflow!.toolPolicy.tools).to.include('save_workflow');
@@ -206,21 +208,39 @@ describe('AI Workflow Registry', () => {
         }
     });
 
-    it('saves script-mode project workflows and parses them back', () => {
+    it('rejects mode-only workflow input instead of converting it', () => {
+        const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'cwtools-obsolete-workflow-'));
+        try {
+            const result = saveProjectWorkflow({
+                title: 'Obsolete Workflow',
+                description: 'Uses the removed mode field.',
+                mode: 'build',
+                promptSupplement: 'Do work.',
+            } as any, tempRoot);
+            expect(result.success).to.equal(false);
+            expect(result.message).to.include('domain, intent, strategy');
+        } finally {
+            fs.rmSync(tempRoot, { recursive: true, force: true });
+        }
+    });
+
+    it('saves multi-agent project workflows and parses them back', () => {
         const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'cwtools-script-workflow-'));
         try {
             const result = saveProjectWorkflow({
                 id: 'Script Pipeline',
                 title: 'Script Pipeline',
                 description: 'Dynamic PDXScript coordination workflow.',
-                mode: 'script',
+                domain: 'paradox',
+                intent: 'execute',
+                strategy: 'multi',
                 promptSupplement: 'Dispatch read waves before narrow Builder write waves.',
                 allowedTools: ['read_file', 'dispatch_agents', 'query_blackboard', 'merge_results'],
                 requiredContext: ['workspace!'],
             }, tempRoot);
 
             expect(result.success).to.be.true;
-            expect(result.workflow!.mode).to.equal('script');
+            expect(result.workflow!.scheduling).to.deep.equal({ domain: 'paradox', intent: 'execute', strategy: 'multi' });
             expect(result.workflow!.toolPolicy.tools).to.include('dispatch_agents');
             expect(result.workflow!.toolPolicy.tools).to.include('merge_results');
         } finally {
@@ -233,7 +253,9 @@ describe('AI Workflow Registry', () => {
             expect(wf.id, `${wf.id}.id`).to.be.a('string').and.not.be.empty;
             expect(wf.title, `${wf.id}.title`).to.be.a('string').and.not.be.empty;
             expect(wf.description, `${wf.id}.description`).to.be.a('string').and.not.be.empty;
-            expect(wf.mode, `${wf.id}.mode`).to.be.a('string');
+            expect(wf.scheduling.domain, `${wf.id}.scheduling.domain`).to.be.oneOf(['paradox', 'general', 'hybrid']);
+            expect(wf.scheduling.intent, `${wf.id}.scheduling.intent`).to.be.oneOf(['execute', 'plan', 'explore', 'review']);
+            expect(wf.scheduling.strategy, `${wf.id}.scheduling.strategy`).to.be.oneOf(['single', 'multi']);
             expect(wf.phases, `${wf.id}.phases`).to.be.an('array').and.not.be.empty;
             expect(wf.toolPolicy.tools, `${wf.id}.toolPolicy.tools`).to.be.an('array').and.not.be.empty;
         }

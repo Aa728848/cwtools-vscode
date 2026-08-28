@@ -207,7 +207,11 @@ The composer selects a capability domain: automatic, Paradox/CWTools, or general
 
 Routing uses risk and unresolved user ownership rather than repository reads as the Plan boundary. Execute may perform bounded inspection and validation needed for a concrete requested change in the same run. Plan is reserved for explicit planning, material user-owned choices, or high-impact design that should be reviewed before writes.
 
+`AgentSchedulingState` is the only persisted and host-to-Webview scheduling state. Prompt/tool execution labels such as Build, Plan, or Orchestrator are projections derived at the call boundary and are never restored independently.
+
 General coding loads normal repository instructions and cannot use Paradox-only semantic capabilities. The Paradox domain can query the active profile, CWT rules, indexes, and LSP evidence. `CWTOOLS.md` remains user-owned and is only scaffolded when absent.
+
+The generated `.cwtools/project/profile.json` uses the current V4 guidance-card schema. Older profile shapes are rejected and rebuilt by `/init`; MCP exposes targeted `guidance` rather than an execution-mode compatibility selector.
 
 #### Runner and tools
 
@@ -232,15 +236,15 @@ sequenceDiagram
     R-->>C: streamed output and final state
 ```
 
-The tool registry is authoritative for tool availability, effects, risk, and concurrency. Enforcement has three conceptual layers: capability eligibility (domain, mode, profile, child role), invocation authorization (run authorization, trust, approvals), and resource sandboxing (paths, commands, locks). Deferred tools may substitute a detailed schema only after selection, so a complex contract does not consume every model request. `agentTools.ts` dispatches calls only after the policy engine evaluates them. File writes also use path containment, per-file exclusion, sorted multi-file locking, and plan-mode gates. Shell commands pass through command preflight.
+The tool registry is authoritative for tool availability, effects, risk, and concurrency. Enforcement has three conceptual layers: capability eligibility (domain, derived execution label, runtime profile), invocation authorization (run authorization, trust, approvals), and resource sandboxing (paths, commands, locks). Deferred tools may substitute a detailed schema only after selection, so a complex contract does not consume every model request. `agentTools.ts` dispatches calls only after the policy engine evaluates them. File writes also use path containment, per-file exclusion, sorted multi-file locking, and plan-mode gates. Shell commands pass through command preflight.
 
 `Implementation_Plan.md` contains one machine-readable `cwtools-plan` contract. A Paradox blueprint is an optional payload inside that contract; drafts and approval-ready plans no longer use a second `cwtools-blueprint` fence or a separate contract-loading tool.
 
 Programmable `run_code` is an authority-neutral transport, not a write permission. The runner snapshots the current mode/domain/disclosed catalog, generates its typed SDK, and executes the model-authored async-function body in a memory/stack/output-bounded QuickJS/WASM guest. The guest receives no Node, VS Code, module, filesystem, network, timer, `eval`, or `Function` authority. Its only host capability is a JSON tool bridge; every nested call is live-rechecked and re-enters the same policy, permission, scheduler, and write-queue path as a direct call. Intermediate values remain guest-local, and only bounded logs plus the explicit return value enter model context. Guest continuations are never checkpointed; an interrupted outer call resumes as an ordinary interrupted tool result.
 
-The runner records typed events for streaming, replay, checkpoints, and resume. Adding an event requires matching reducer and Webview support. Persisted resume data remains compatible with V2.
+The runner records typed events for streaming, replay, checkpoints, and resume. Adding an event requires matching reducer and Webview support. Resume accepts only the current V4 snapshot contract; older snapshots are rejected instead of migrated.
 
-Long runs use bounded context compaction, checkpoints, budgets, loop detection, and child-agent activity monitoring. Multi-agent coordination uses `dispatch_agents`, `query_blackboard`, and `merge_results` with a shared typed Blackboard.
+Long runs use bounded context compaction, checkpoints, budgets, loop detection, and child-agent activity monitoring. Multi-agent coordination uses `dispatch_agents`, `query_blackboard`, and `merge_results` with a shared typed Blackboard. Child tasks name a registered runtime `profileName` directly; there is no separate role registry, alias mapping, or default writer fallback. Persisted orchestration graphs accept only the current V3 contract.
 
 #### Provider and secret boundary
 
@@ -487,7 +491,11 @@ CWT-only 工作区只索引当前工作区,不激活游戏模型。候选可用�
 
 Plan 边界由风险和仍属于用户的未决选择决定，而不是由“是否需要读取仓库”决定。面对具体修改请求，Execute 可以在同一轮完成有界调查与验证；只有显式计划请求、重要用户选择或需要写前评审的高影响设计才进入 Plan。
 
+`AgentSchedulingState` 是唯一会持久化、并在宿主与 Webview 间传递的调度状态。Build、Plan、Orchestrator 等 Prompt/工具执行标签只在调用边界由它派生，不会被独立恢复。
+
 通用编码会读取常规仓库指令，但不能调用 Paradox 专用语义能力。Paradox 领域可以查询当前 Profile、CWT 规则、索引和 LSP 证据。`CWTOOLS.md` 属于用户，只有缺失时才创建最小模板。
+
+生成的 `.cwtools/project/profile.json` 使用当前 V4 guidance-card schema。旧 Profile 结构会被拒绝并由 `/init` 重建；MCP 暴露定向 `guidance`，不再提供执行模式兼容选择器。
 
 #### Runner 与工具
 
@@ -512,15 +520,15 @@ sequenceDiagram
     R-->>C: 流式输出和最终状态
 ```
 
-工具可用性、副作用、风险和并发策略以 registry 为准。执行概念上只有三层：能力资格（领域、模式、Profile、子 Agent 角色）、调用授权（Run 授权、信任、审批）和资源沙箱（路径、命令、锁）。延迟工具只在被选中后替换为详细 Schema，复杂合同不会占用每次模型请求。`agentTools.ts` 只在策略引擎完成判断后 dispatch。文件写入还要经过路径包含、单文件写排他、排序后的多文件锁和 Plan 模式门；Shell 命令先做 command preflight。
+工具可用性、副作用、风险和并发策略以 registry 为准。执行概念上只有三层：能力资格（领域、派生执行标签、运行时 Profile）、调用授权（Run 授权、信任、审批）和资源沙箱（路径、命令、锁）。延迟工具只在被选中后替换为详细 Schema，复杂合同不会占用每次模型请求。`agentTools.ts` 只在策略引擎完成判断后 dispatch。文件写入还要经过路径包含、单文件写排他、排序后的多文件锁和 Plan 模式门；Shell 命令先做 command preflight。
 
 `Implementation_Plan.md` 只包含一个机器可读 `cwtools-plan` 合同。Paradox 蓝图是该合同中的可选 payload；草案和审批就绪计划不再使用第二个 `cwtools-blueprint` 围栏，也不再需要独立的合同加载工具。
 
 可编程 `run_code` 是不自带权限的 transport，不是写权限。Runner 会快照当前 mode/domain/已披露工具目录、生成对应类型化 SDK，并在受内存、栈和输出预算限制的 QuickJS/WASM guest 中执行模型生成的 async-function body。Guest 不具备 Node、VS Code、模块、文件系统、网络、计时器、`eval` 或 `Function` 权限；唯一宿主能力是 JSON 工具桥。每个内部调用都会实时复核可见性，并像直接调用一样重新进入策略、权限、调度和写队列。中间值只留在 guest 中，只有有界日志与显式返回值进入模型上下文。Guest continuation 不会写入 checkpoint；中断后的外层调用按普通中断工具结果恢复。
 
-Runner 用类型化事件支持流式展示、replay、checkpoint 和恢复。新增事件必须同步 reducer 与 Webview。持久化恢复数据继续兼容 V2。
+Runner 用类型化事件支持流式展示、replay、checkpoint 和恢复。新增事件必须同步 reducer 与 Webview。恢复只接受当前 V4 快照合同；旧快照会被拒绝，不再迁移。
 
-长任务使用有界上下文压缩、checkpoint、预算、循环检测和子 Agent 活动监控。多 Agent 通过 `dispatch_agents`、`query_blackboard`、`merge_results` 与共享类型化 Blackboard 协作。
+长任务使用有界上下文压缩、checkpoint、预算、循环检测和子 Agent 活动监控。多 Agent 通过 `dispatch_agents`、`query_blackboard`、`merge_results` 与共享类型化 Blackboard 协作。子任务直接引用已注册的运行时 `profileName`；不再存在第二套角色注册表、别名映射或默认写入 Profile 回退。持久化任务图只接受当前 V3 契约。
 
 #### Provider 与 Secret 边界
 

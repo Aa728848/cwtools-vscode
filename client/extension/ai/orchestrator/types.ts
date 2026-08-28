@@ -2,12 +2,11 @@
 * Eddy CWTool Code — Multi-Agent collaboration system type definition 
 * 
 * Defines all types required for task graphs, blackboard entries, Agent instances and coordinators. 
-* Model selection inherits the supplier/model configured by the user in the settings panel and supports override by role. 
+* Model selection inherits the supplier/model configured by the user in the settings panel and supports override by runtime profile.
 */
 
 import type {
     AcceptanceCheck,
-    AgentMode,
     AgentStep,
     FeatureManifest,
     TaskEntityContract,
@@ -81,8 +80,8 @@ export type TaskPriority = 'critical' | 'normal' | 'low';
 export interface TaskNode {
     /** Unique node ID (such as "explore_1", "build_events") */
     id: string;
-    /** Agent mode to perform this task */
-    agentType: AgentMode;
+    /** Runtime Agent profile that performs this task. */
+    profileName: string;
     /** Subtask description (user message as Agent) */
     prompt: string;
     /** File path or Blackboard Key list of injected context */
@@ -168,8 +167,8 @@ export type AgentInstanceStatus = 'idle' | 'running' | 'done' | 'failed';
 export interface AgentInstance {
     /** Instance unique ID (such as "agent_explore_1_abc123") */
     id: string;
-    /** Agent mode */
-    type: AgentMode;
+    /** Runtime Agent profile name. */
+    profileName: string;
     /** Corresponding task node ID */
     taskNodeId: string;
     /** Instance status */
@@ -225,39 +224,6 @@ export interface SubAgentResult {
     handoff?: import('../runner/agentHandoff').AgentHandoff;
 }
 
-// ───Agent registry type ─────────────────────────────────────────────────────
-
-/** Agent role’s tool budget level */
-export type ToolBudget =
-    | 'full'         // All tools
-    | 'read_only'    // read-only tool
-    | 'plan'         // Planning tools (read-only + todo + blueprint)
-    | 'loc'          // Localization tools (read and write + search)
-    | 'media_only';  // Media tools (mmx + convert + deploy)
-
-/** Agent role configuration description */
-export interface AgentProfile {
-    /** AgentMode mapped to */
-    mode: AgentMode;
-    /** 
-* Recommended model—default only. 
-* If it is undefined, the model configured by the user in the settings panel will be inherited. 
-* Users can explicitly override in TaskNode.modelOverride. 
-*/
-    suggestedModel?: string;
-    /** 
-* Recommended vendor - default only. 
-* If undefined, the provider configured by the user in the settings panel will be inherited. 
-*/
-    suggestedProvider?: string;
-    /** Healthy-progress iteration window used by this role. */
-    maxIterations: number;
-    /** Tool budget level */
-    toolBudget: ToolBudget;
-    /** Role description (task decomposition prompt word for Orchestrator) */
-    description: string;
-}
-
 // ─── Orchestrator type ────────────────────────────────────────────────────
 
 /** Orchestrator execution results */
@@ -294,6 +260,8 @@ export interface OrchestratorOptions {
     model?: string;
     /** User configured reasoning level (inherited from the parent Agent run) */
     reasoningEffort?: ReasoningEffort;
+    /** Per-profile provider/model selections from current settings. */
+    agentModelOverrides?: Record<string, { provider: string; model: string }>;
     /** Abort signal */
     abortSignal?: AbortSignal;
     /** Topic ID (used for checkpoints and working directories) */
@@ -347,7 +315,7 @@ export interface QualityGateResult {
 export interface AgentRunTrace {
     runId: string;
     agentId: string;
-    type: AgentMode;
+    profileName: string;
     status: AgentInstanceStatus;
     totalTimeMs: number;
     tokenUsage: TokenUsage;

@@ -272,8 +272,6 @@ export class ChatSettingsManager {
     /** Build the settingsData payload and send it to the WebView */
     async buildAndSendSettingsData(showPanel = false, targetSurface?: 'chat' | 'manager'): Promise<void> {
         const { BUILTIN_PROVIDERS, fetchOllamaModels, MODEL_CONTEXT_TOKENS } = await import('./providers');
-        // Fold any legacy global endpoint into the per-provider map before reading config.
-        await this.aiService.migrateLegacyEndpoint();
         const config = this.aiService.getConfig();
         const detectedSandbox = await detectSandboxBackendAsync();
         const codexAccount = showPanel || config.provider === 'codex-chatgpt'
@@ -309,7 +307,6 @@ export class ChatSettingsManager {
                 : !!(await this.aiService.getKeyForProvider(p.id));
         }
 
-        await this.migrateLegacyWebSearchKeys();
         const webConfig = vs.workspace.getConfiguration('stellarisLanguageServices.ai.web');
         const webKeys: Partial<Record<'brave' | 'exa' | 'tavily' | 'serper' | 'serpapi', string>> = {};
         for (const provider of ['brave', 'exa', 'tavily', 'serper', 'serpapi'] as const) {
@@ -522,7 +519,6 @@ export class ChatSettingsManager {
             const trimmedKey = settings.apiKey.trim();
             if (trimmedKey.length > 0 && !trimmedKey.startsWith('•')) {
                 await this.aiService.getKeyManager().setKey(settings.provider, trimmedKey);
-                await this.clearLegacyApiKeySettings();
             }
         }
         if (settings.webAccess) {
@@ -546,7 +542,7 @@ export class ChatSettingsManager {
             }
         }
         // Endpoints are stored per-provider so switching providers cannot leak an
-        // endpoint into another provider. The legacy global `endpoint` is retired.
+        // endpoint into another provider. Endpoints are provider-specific.
         {
             const map = { ...(cfg.get<Record<string, string>>('providerEndpoints', {}) || {}) };
             const trimmed = (settings.endpoint || '').trim();
@@ -644,62 +640,9 @@ export class ChatSettingsManager {
         }
 
         await this.aiService.getKeyManager().deleteKey(providerId);
-        await this.clearLegacyApiKeySettings();
 
         vs.window.showInformationMessage(aiText(`${provider.name} API key removed.`, `${provider.name} API Key 已移除。`));
         await this.openSettingsPage(targetSurface);
-    }
-
-    private async migrateLegacyWebSearchKeys(): Promise<void> {
-        const mappings = [
-            { setting: 'braveSearchApiKey', secret: 'web.brave' },
-            { setting: 'exaApiKey', secret: 'web.exa' },
-        ] as const;
-        const keyManager = this.aiService.getKeyManager();
-        const configs: Array<{ config: vs.WorkspaceConfiguration; target: vs.ConfigurationTarget }> = [
-            { config: vs.workspace.getConfiguration('stellarisLanguageServices.ai'), target: vs.ConfigurationTarget.Global },
-            { config: vs.workspace.getConfiguration('stellarisLanguageServices.ai'), target: vs.ConfigurationTarget.Workspace },
-            ...(vs.workspace.workspaceFolders ?? []).map(folder => ({
-                config: vs.workspace.getConfiguration('stellarisLanguageServices.ai', folder.uri),
-                target: vs.ConfigurationTarget.WorkspaceFolder,
-            })),
-        ];
-        for (const mapping of mappings) {
-            let stored = await keyManager.getKey(mapping.secret);
-            for (const { config } of configs) {
-                const legacy = config.get<string>(mapping.setting, '').trim();
-                if (legacy && !stored) {
-                    await keyManager.setKey(mapping.secret, legacy);
-                    stored = legacy;
-                }
-            }
-            await Promise.all(configs.map(async ({ config, target }) => {
-                try { await config.update(mapping.setting, undefined, target); } catch { /* scope may not exist */ }
-            }));
-        }
-    }
-
-    private async clearLegacyApiKeySettings(): Promise<void> {
-        const baseConfig = vs.workspace.getConfiguration('stellarisLanguageServices.ai');
-        const clear = async (config: vs.WorkspaceConfiguration, target: vs.ConfigurationTarget): Promise<void> => {
-            try {
-                await config.update('apiKey', undefined, target);
-            } catch {
-                // Some targets may be unavailable depending on whether a workspace/folder is open.
-            }
-        };
-
-        const updates: Promise<void>[] = [
-            clear(baseConfig, vs.ConfigurationTarget.Global),
-            clear(baseConfig, vs.ConfigurationTarget.Workspace),
-        ];
-
-        for (const folder of vs.workspace.workspaceFolders ?? []) {
-            const folderConfig = vs.workspace.getConfiguration('stellarisLanguageServices.ai', folder.uri);
-            updates.push(clear(folderConfig, vs.ConfigurationTarget.WorkspaceFolder));
-        }
-
-        await Promise.all(updates);
     }
 
     async detectOllamaModels(endpoint: string): Promise<void> {

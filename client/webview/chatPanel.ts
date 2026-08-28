@@ -104,17 +104,19 @@ interface SideDiffFocus {
 }
 
 interface AgentSchedulingStateView {
-    profileName?: string;
+    profileName: string;
     domainProfile: 'paradox' | 'general' | 'hybrid';
     authorization: 'read_only' | 'plan_write_only' | 'workspace_write';
     phase: 'inspect' | 'plan' | 'execute' | 'verify' | 'finalize';
     dispatch: 'single' | 'parallel' | 'specialist';
+    overlays: string[];
     routeConfidence: number;
     routeEvidence: string[];
     awaitingUserDecision: boolean;
     routingSource?: 'model' | 'deterministic' | 'workflow' | 'user';
-    phaseReason?: string;
+    phaseReason: string;
     dispatchReason?: string;
+    revision: number;
 }
 
 function parseSchedulingStateView(value: unknown): AgentSchedulingStateView | undefined {
@@ -124,32 +126,39 @@ function parseSchedulingStateView(value: unknown): AgentSchedulingStateView | un
     const authorization = candidate.authorization;
     const phase = candidate.phase;
     const dispatch = candidate.dispatch;
+    const profileName = candidate.profileName;
+    const overlays = candidate.overlays;
+    const routeConfidence = candidate.routeConfidence;
+    const routeEvidence = candidate.routeEvidence;
+    const phaseReason = candidate.phaseReason;
+    const revision = candidate.revision;
     if (domainProfile !== 'paradox' && domainProfile !== 'general' && domainProfile !== 'hybrid') return undefined;
     if (authorization !== 'read_only' && authorization !== 'plan_write_only' && authorization !== 'workspace_write') return undefined;
     if (phase !== 'inspect' && phase !== 'plan' && phase !== 'execute' && phase !== 'verify' && phase !== 'finalize') return undefined;
     if (dispatch !== 'single' && dispatch !== 'parallel' && dispatch !== 'specialist') return undefined;
+    if (typeof profileName !== 'string' || !profileName.trim()) return undefined;
+    if (!Array.isArray(overlays) || !overlays.every(item => typeof item === 'string')) return undefined;
+    if (typeof routeConfidence !== 'number' || !Number.isFinite(routeConfidence)) return undefined;
+    if (!Array.isArray(routeEvidence) || !routeEvidence.every(item => typeof item === 'string')) return undefined;
+    if (typeof phaseReason !== 'string') return undefined;
+    if (typeof revision !== 'number' || !Number.isSafeInteger(revision) || revision < 0) return undefined;
     const routingSource = candidate.routingSource;
     return {
-        profileName: typeof candidate.profileName === 'string' ? candidate.profileName.slice(0, 100) : undefined,
+        profileName: profileName.slice(0, 100),
         domainProfile,
         authorization,
         phase,
         dispatch,
-        routeConfidence: typeof candidate.routeConfidence === 'number' && Number.isFinite(candidate.routeConfidence)
-            ? Math.max(0, Math.min(1, candidate.routeConfidence))
-            : 0,
-        routeEvidence: Array.isArray(candidate.routeEvidence)
-            ? candidate.routeEvidence
-                .filter((item): item is string => typeof item === 'string')
-                .map(item => item.slice(0, 240))
-                .slice(0, 4)
-            : [],
+        overlays: overlays.map(item => item.slice(0, 80)).slice(0, 12),
+        routeConfidence: Math.max(0, Math.min(1, routeConfidence)),
+        routeEvidence: routeEvidence.map(item => item.slice(0, 240)).slice(0, 4),
         awaitingUserDecision: candidate.awaitingUserDecision === true,
         routingSource: routingSource === 'model' || routingSource === 'deterministic' || routingSource === 'workflow' || routingSource === 'user'
             ? routingSource
             : undefined,
-        phaseReason: typeof candidate.phaseReason === 'string' ? candidate.phaseReason.slice(0, 500) : undefined,
+        phaseReason: phaseReason.slice(0, 500),
         dispatchReason: typeof candidate.dispatchReason === 'string' ? candidate.dispatchReason.slice(0, 500) : undefined,
+        revision,
     };
 }
 
@@ -327,13 +336,17 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
     let currentAssistantDiv: HTMLDivElement | null = null;
     type SchedulingDomain = AgentSchedulingStateView['domainProfile'];
     let schedulingState: AgentSchedulingStateView = {
+        profileName: 'paradox-agent',
         domainProfile: 'paradox',
         authorization: 'workspace_write',
         phase: 'execute',
         dispatch: 'single',
+        overlays: [],
         routeConfidence: 1,
         routeEvidence: [],
         awaitingUserDecision: false,
+        phaseReason: 'Initial host state pending.',
+        revision: 0,
     };
 
     function applySchedulingState(value: unknown): void {
@@ -2818,9 +2831,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         setDomainMenuOpen(!domainMenu?.classList.contains('show'));
     });
     const updateSchedulingDomain = (domain: SchedulingDomain) => {
-        schedulingState = { ...schedulingState, domainProfile: domain, profileName: undefined };
         vscode.postMessage({ type: 'switchSchedulingDomain', domain });
-        renderComposerChips();
     };
     document.querySelectorAll<HTMLElement>('.composer-menu-item[data-scheduling-domain]').forEach(item => {
         item.addEventListener('click', () => {
@@ -4898,9 +4909,6 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
             ensureSubagentTicker();
         }
         if ((s.type === 'thinking' || s.type === 'thinking_content') && !state.liveThinkBlock && !hasVisibleLiveContent(s)) {
-            if (s.transactionCard && s.transactionCard.status === 'pending') {
-                showTransactionCard(s.transactionCard);
-            }
             return;
         }
 
@@ -4916,9 +4924,6 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
             scheduleCodexLiveTurnRender(state, s.type === 'subtask_complete' ? (s.content || '') : '');
             if (s.agentId) {
                 updateSubagentCard(state, s.type === 'subtask_complete' ? (s.content || '') : undefined);
-            }
-            if (s.transactionCard && s.transactionCard.status === 'pending') {
-                showTransactionCard(s.transactionCard);
             }
             return;
         }
@@ -5015,9 +5020,6 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                 }
                 scheduleThinkingRender(state);
             }
-            if (s.transactionCard && s.transactionCard.status === 'pending') {
-                showTransactionCard(s.transactionCard);
-            }
             return;
         }
 
@@ -5039,9 +5041,6 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
             if (state.liveTextProcessBody) {
                 state.liveTextContent += (s.content || '');
                 scheduleTextRender(state);
-            }
-            if (s.transactionCard && s.transactionCard.status === 'pending') {
-                showTransactionCard(s.transactionCard);
             }
             return;
         }
@@ -5677,28 +5676,6 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         }, delay || 400);
     }
     
-    // ── Transaction Card (Batch VFS Commit) ──────────────────────────────
-    function showTransactionCard(cardInfo: any) {
-        const div = document.createElement('div');
-        const card = document.createElement('div');
-        card.className = 'diff-card';
-        const safeId = escapeHtml(cardInfo.id);
-        const filesListHTML = (cardInfo.filesRequested || []).map((f: string) => `<li>${escapeHtml(f.split(/[\\/]/).pop() || f)}</li>`).join('');
-        card.innerHTML =
-            '<div class="diff-card-header">' +
-            svgIcon('edit') + tr(`Request to apply batch changes (${cardInfo.filesRequested?.length || 0} file(s)):`, `请求批量应用更改 (${cardInfo.filesRequested?.length || 0} 个文件):`) +
-            '<ul style="margin: 4px 0; padding-left: 16px; font-size: 11px; font-family: monospace; opacity: 0.8; max-height: 60px; overflow-y: auto;">' + filesListHTML + '</ul>' +
-            `<span class="diff-card-hint">${tr('All changes are prepared in memory first', '所有的修改会在内存中隔离准备')}</span></div>` +
-            `<div class="diff-card-hint">${tr(
-                `Legacy transaction ${safeId} is retained for history only; direct transaction commits were removed in favor of the guarded write pipeline.`,
-                `旧事务 ${safeId} 仅保留用于历史显示；直接事务提交已移除，统一使用受保护的写入管线。`,
-            )}</div>`;
-        div.appendChild(card);
-        chatArea.appendChild(div);
-        scrollBottom();
-        // Batch transaction cards keep their compact confirmation UI.
-    }
-
     // ── Diff card ──────────────────────────────────────────────────────────────
     function showAutoWriteCard(file: string, isNewFile: boolean) {
         const fileName = (file || '').split(/[\\/]/).pop() || file;
@@ -5842,7 +5819,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         });
     }
 
-    function resolveFloatingCard(card: 'permission' | 'question' | 'write' | 'transaction' | 'plan' | 'walkthrough' | 'blueprint', id?: string): void {
+    function resolveFloatingCard(card: 'permission' | 'question' | 'write' | 'plan' | 'walkthrough' | 'blueprint', id?: string): void {
         if (card === 'permission') {
             if (id) floatingPermissionIds.delete(id);
             else floatingPermissionIds.clear();
@@ -5875,16 +5852,6 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                 const button = cardEl.querySelector('[data-msgid]') as HTMLElement | null;
                 if (!button) return;
                 if (!id || button.dataset.msgid === id) dismissResolvedCard(cardShell(cardEl));
-            });
-            return;
-        }
-
-        if (card === 'transaction') {
-            document.querySelectorAll('.diff-card').forEach(el => {
-                const cardEl = el as HTMLElement;
-                const button = cardEl.querySelector('[data-txid]') as HTMLElement | null;
-                if (!button) return;
-                if (!id || button.dataset.txid === id) dismissResolvedCard(cardShell(cardEl));
             });
             return;
         }
@@ -7066,100 +7033,6 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                 }
 
                 c.innerHTML = html;
-                break;
-            }
-
-            case 'orchestratorProgress': {
-                const p = msg.progress;
-                // Make sure the Agent Lane panel exists
-                let lanePanel = document.getElementById('orchestratorLanePanel');
-                if (!lanePanel) {
-                    lanePanel = document.createElement('div');
-                    lanePanel.id = 'orchestratorLanePanel';
-                    lanePanel.className = 'orchestrator-lane-panel';
-                    //Insert at the end of chatArea
-                    chatArea.appendChild(lanePanel);
-                }
-                // Build progress summary header (use SVG icon instead of emoji)
-                const phaseLabels: Record<string, string> = {
-                    planning: `${svgIconNoMargin('clipboard')} ${tr('Planning', '规划中')}`,
-                    executing: `${svgIconNoMargin('zap')} ${tr('Executing', '执行中')}`,
-                    reviewing: `${svgIconNoMargin('search')} ${tr('Reviewing', '审查中')}`,
-                    complete: `${svgIconNoMargin('check')} ${tr('Complete', '已完成')}`,
-                    failed: `${svgIconNoMargin('x')} ${tr('Failed', '失败')}`,
-                };
-                const phaseCls = p.phase === 'complete' ? 'phase-complete' : p.phase === 'failed' ? 'phase-failed' : 'phase-active';
-                const pct = p.total > 0 ? Math.round((p.done / p.total) * 100) : 0;
-                const lanes = Array.isArray(p.lanes) ? p.lanes : [];
-                const laneStats = lanes.reduce((acc: Record<string, number>, lane: any) => {
-                    const key = lane.status || 'pending';
-                    acc[key] = (acc[key] || 0) + 1;
-                    return acc;
-                }, {});
-
-                let html = `<div class="orch-header">
-                    <span class="orch-phase ${phaseCls}">${phaseLabels[p.phase] || p.phase}</span>
-                    <span class="orch-progress-text">${p.done}/${p.total} ${tr('complete', '完成')} · ${pct}%</span>
-                </div>
-                <div class="orch-kpis">
-                    <span>${svgIconNoMargin('refresh')} ${laneStats.running || 0} running</span>
-                    <span>${svgIconNoMargin('check')} ${laneStats.done || 0} done</span>
-                    <span>${svgIconNoMargin('warning')} ${laneStats.failed || 0} failed</span>
-                    <span>${svgIconNoMargin('gear')} ${laneStats.pending || 0} pending</span>
-                </div>
-                <div class="orch-progress-bar">
-                    <div class="orch-progress-fill" style="width:${pct}%"></div>
-                </div>`;
-
-                if (p.latestEvent) {
-                    html += `<div class="orch-event">${escapeHtml(p.latestEvent)}</div>`;
-                }
-
-                // Build Agent Lanes (use SVG icons instead of emojis)
-                if (lanes.length > 0) {
-                    html += '<div class="orch-lanes">';
-                    const roleIcons: Record<string, string> = {
-                        explorer: svgIconNoMargin('search'),
-                        architect: svgIconNoMargin('ruler'),
-                        builder: svgIconNoMargin('edit'),
-                        locWriter: svgIconNoMargin('pencil'),
-                        reviewer: svgIconNoMargin('shield'),
-                        assetGen: svgIconNoMargin('sparkles'),
-                    };
-                    const statusIcons: Record<string, string> = {
-                        pending: svgIconNoMargin('gear'),
-                        running: svgIconNoMargin('refresh'),
-                        done: svgIconNoMargin('check'),
-                        failed: svgIconNoMargin('x'),
-                        cancelled: svgIconNoMargin('eyeOff'),
-                    };
-                    for (const lane of lanes) {
-                        const icon = roleIcons[lane.role] || svgIconNoMargin('bot');
-                        const sIcon = statusIcons[lane.status] || svgIconNoMargin('question');
-                        const durationText = lane.duration ? `${(lane.duration / 1000).toFixed(1)}s` : '';
-                        const tokenText = lane.tokenUsed > 0 ? `${formatNum(lane.tokenUsed)} tok` : '';
-                        const statusClass = `lane-${lane.status}`;
-                        const laneTitle = `${lane.role || 'agent'} · ${lane.status || 'pending'} · ${lane.taskNodeId || ''}`;
-                        html += `<div class="orch-lane ${statusClass}" title="${escapeHtml(laneTitle)}">
-                            <div class="lane-header">
-                                <span class="lane-icon">${icon}</span>
-                                <span class="lane-role">${escapeHtml(lane.role)}</span>
-                                <span class="lane-status">${sIcon}</span>
-                            </div>
-                            <div class="lane-id">${escapeHtml(lane.taskNodeId)}</div>
-                            <div class="lane-meta">
-                                ${durationText ? `<span>${durationText}</span>` : ''}
-                                ${tokenText ? `<span>${tokenText}</span>` : ''}
-                                ${lane.stepCount > 0 ? `<span>${lane.stepCount} steps</span>` : ''}
-                            </div>
-                            ${lane.statusText ? `<div class="lane-status-text">${escapeHtml(lane.statusText)}</div>` : ''}
-                        </div>`;
-                    }
-                    html += '</div>';
-                }
-
-                lanePanel.innerHTML = html;
-                scrollBottom();
                 break;
             }
 

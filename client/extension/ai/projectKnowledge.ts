@@ -28,7 +28,7 @@ export const PROJECT_KNOWLEDGE_RELATIVE_DIR = path.join('.cwtools', 'project', '
 export interface ProjectKnowledgeManifest {
     schemaVersion: 7;
     capabilityVersions: Record<keyof typeof PROJECT_KNOWLEDGE_CAPABILITY_VERSIONS, number>;
-    capabilityStatus: Record<keyof typeof PROJECT_KNOWLEDGE_CAPABILITY_VERSIONS, 'ready' | 'legacy' | 'unavailable'>;
+    capabilityStatus: Record<keyof typeof PROJECT_KNOWLEDGE_CAPABILITY_VERSIONS, 'ready' | 'unavailable'>;
     generatedAt: string;
     generationMode: 'full' | 'incremental';
     status: 'ready' | 'partial' | 'stale' | 'loading' | 'unavailable' | 'error';
@@ -84,7 +84,7 @@ interface LspKnowledgeSnapshot {
     source?: string;
     schemaVersion?: number;
     capabilityVersions?: Partial<Record<keyof typeof PROJECT_KNOWLEDGE_CAPABILITY_VERSIONS, number>>;
-    capabilityStatus?: Partial<Record<keyof typeof PROJECT_KNOWLEDGE_CAPABILITY_VERSIONS, 'ready' | 'legacy' | 'unavailable'>>;
+    capabilityStatus?: Partial<Record<keyof typeof PROJECT_KNOWLEDGE_CAPABILITY_VERSIONS, 'ready' | 'unavailable'>>;
     game?: string;
     generatedAtUnixMs?: number;
     graphVersion?: number;
@@ -423,11 +423,14 @@ export async function generateProjectKnowledge(
     const manifest: ProjectKnowledgeManifest = {
         schemaVersion: PROJECT_KNOWLEDGE_SCHEMA_VERSION,
         capabilityVersions: { ...PROJECT_KNOWLEDGE_CAPABILITY_VERSIONS, ...snapshot.capabilityVersions },
-        capabilityStatus: {
-            inlineGraph: 'unavailable', stateFlow: 'unavailable', overrideResolution: 'unavailable',
-            interfaceGraph: 'unavailable', localisationAudit: 'unavailable', pdxFlow: 'unavailable',
-            ...snapshot.capabilityStatus,
-        },
+        capabilityStatus: Object.fromEntries(
+            Object.keys(PROJECT_KNOWLEDGE_CAPABILITY_VERSIONS).map(key => [
+                key,
+                snapshot.capabilityStatus?.[key as keyof typeof PROJECT_KNOWLEDGE_CAPABILITY_VERSIONS] === 'ready'
+                    ? 'ready'
+                    : 'unavailable',
+            ]),
+        ) as ProjectKnowledgeManifest['capabilityStatus'],
         generatedAt: new Date(snapshot.generatedAtUnixMs ?? Date.now()).toISOString(),
         generationMode: snapshot.generationMode ?? 'full',
         status: snapshot.status,
@@ -455,8 +458,7 @@ export async function generateProjectKnowledge(
         },
     };
     // The database is atomically replaced by the server. Publish the compact
-    // manifest only after it exists, then remove V1 files so a failed migration
-    // always leaves the previous knowledge pack recoverable.
+    // manifest only after it exists, then remove obsolete non-current artifacts.
     writeJson(getProjectKnowledgeManifestPath(workspaceRoot), manifest);
     removeNonCurrentKnowledgeArtifacts(root);
     return manifest;

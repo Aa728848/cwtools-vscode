@@ -505,18 +505,17 @@ ${stylesheetLinks}
                     <div id="installedSkillsList" style="margin-top: 10px; display: flex; flex-direction: column; gap: 6px;"></div>
                 </div>
                 <div class="settings-group" style="border-top: 1px solid rgba(255,255,255,0.1); padding-top: 10px; margin-top: 10px;">
-                    <label class="settings-label">${svgIcon('bot')} ${t('Multi-Agent role model settings', '多 Agent 角色模型配置')}</label>
-                    <div class="settings-hint" style="margin-bottom:8px;">${t('Set a provider/model per sub-agent role. Leave as "Inherit main settings" to use the main model configured above.', '为每个子 Agent 角色单独指定供应商/模型。留为"继承主设置"则使用上方配置的主模型。')}</div>
+                    <label class="settings-label">${svgIcon('bot')} ${t('Multi-Agent profile model settings', '多 Agent Profile 模型配置')}</label>
+                    <div class="settings-hint" style="margin-bottom:8px;">${t('Set a provider/model per runtime profile. Leave as "Inherit main settings" to use the main model configured above.', '为每个运行时 Profile 单独指定供应商/模型。留为“继承主设置”则使用上方配置的主模型。')}</div>
                     <div id="agentModelRows" style="display:flex;flex-direction:column;gap:8px;">
                         ${[
-                                `explorer|${t('Explorer', '探索者 (Explorer)')}`,
-                                `architect|${t('Architect', '架构师 (Architect)')}`,
-                                `builder|${t('Builder', '构建者 (Builder)')}`,
-                                `locWriter|${t('Localisation writer', '本地化 (LocWriter)')}`,
-                                `locTranslator|${t('Translator', '翻译 (LocTranslator)')}`,
+                                `explore|${t('Explorer', '探索 Profile')}`,
+                                `planner|${t('Planner', '规划 Profile')}`,
+                                `general-coder|${t('General coder', '通用编码 Profile')}`,
+                                `paradox-coder|${t('Paradox coder', 'Paradox 编码 Profile')}`,
+                                `localization-writer|${t('Localisation writer', '本地化写入 Profile')}`,
                                 `reviewer|${t('Reviewer', '审查者 (Reviewer)')}`,
-                                `assetGen|${t('Asset generator', '资产 (AssetGen)')}`,
-                                `guiExpert|${t('GUI expert', 'GUI专家 (GuiExpert)')}`,
+                                `gui-expert|${t('GUI expert', 'GUI 专家 Profile')}`,
                             ]
                             .map(item => {
                                 const [role, label] = item.split('|');

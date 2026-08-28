@@ -3,7 +3,6 @@ import {
     DEFAULT_AGENT_PROFILE,
     isAgentProfileSelection,
     parseModelAgentProfileDecision,
-    profileForExecutionMode,
     profileForUserDomain,
     resolveAgentProfile,
     resolveAgentProfileFromModelDecision,
@@ -125,11 +124,8 @@ describe('agent routing', () => {
         expect(broad.schedulingState.phaseReason).to.contain('runtime dispatch evaluation requested');
     });
 
-    it('maps workflow execution labels to explicit profiles without storing a second state', () => {
-        expect(profileForExecutionMode('loc_writer')).to.deep.equal({ domain: 'paradox', intent: 'execute', strategy: 'single' });
-        expect(profileForExecutionMode('script_reviewer')).to.deep.equal({ domain: 'paradox', intent: 'review', strategy: 'single' });
-        expect(profileForExecutionMode('orchestrator')).to.deep.equal({ domain: 'general', intent: 'execute', strategy: 'multi' });
-        expect(shouldUseSemanticAgentRouting(profileForExecutionMode('plan'))).to.equal(false);
+    it('accepts explicit workflow profiles without storing a second state', () => {
+        expect(shouldUseSemanticAgentRouting({ domain: 'paradox', intent: 'plan', strategy: 'single' })).to.equal(false);
         expect(agentProfileCatalog.get('hybrid-agent')?.domain).to.equal('hybrid');
     });
 });

@@ -39,13 +39,13 @@ export type AgentDispatchMode = 'single' | 'parallel' | 'specialist';
 
 export interface AgentSchedulingState {
     /** Concrete runtime profile selected from the catalog. */
-    profileName?: string;
+    profileName: string;
     domainProfile: AgentRuntimeDomain;
     authorization: AgentAuthorization;
     phase: AgentRunPhase;
     dispatch: AgentDispatchMode;
     /** Orthogonal execution overlays such as planning, verification, and swarm coordination. */
-    overlays?: string[];
+    overlays: string[];
     routeConfidence: number;
     routeEvidence: string[];
     /** The router found a material choice that must remain with the user. */
@@ -294,8 +294,6 @@ export interface AIUserConfig {
     endpoint: string;
     /** Per-provider endpoint overrides, keyed by provider id. Source of truth for endpoints. */
     providerEndpoints: Record<string, string>;
-    /** Legacy plaintext key — only read for migration; write via SecretStorage */
-    apiKey: string;
     /** Wire protocol used when provider === 'custom'. */
     customApiFormat: CustomApiFormat;
     maxRetries: number;
@@ -734,8 +732,19 @@ export interface QueryWorkspaceIndexResult {
 
 export type ProjectProfileWorkspaceKind = 'paradox_mod' | 'extension_source' | 'mixed' | 'generic';
 
+export type ProjectGuidanceCard =
+    | 'implementation'
+    | 'planning'
+    | 'exploration'
+    | 'review'
+    | 'utility'
+    | 'localisation'
+    | 'assets'
+    | 'coordination'
+    | 'paradox_coordination';
+
 export interface ProjectProfile {
-    schemaVersion: 2;
+    schemaVersion: 4;
     generatedAt: string;
     workspaceRoot: string;
     workspaceKind: ProjectProfileWorkspaceKind;
@@ -809,18 +818,11 @@ export interface ProjectProfile {
         byType: Record<string, string[]>;
         /** Total counts per TypeDef name; byType holds bounded samples. */
         byTypeCounts?: Record<string, number>;
-        /** Legacy schemaVersion 1 fields accepted when reading older generated profiles. */
-        scriptedTriggers?: string[];
-        scriptedEffects?: string[];
-        events?: string[];
-        onActions?: string[];
-        staticModifiers?: string[];
     };
     routing: {
         recommendedWorkflowByIntent: Array<{
             intent: string;
             workflowId: string;
-            mode: AgentMode;
             reason: string;
         }>;
         preferredReadTools: string[];
@@ -841,13 +843,13 @@ export interface ProjectProfile {
     };
     /** Non-fatal detection warnings (mixed BOM, descriptor issues, ...). */
     warnings?: string[];
-    promptCards: Partial<Record<AgentMode | 'asset', string>>;
+    guidanceCards: Partial<Record<ProjectGuidanceCard, string>>;
     efficiencyHints: string[];
 }
 
 export interface QueryProjectProfileArgs {
-    section?: 'summary' | 'routing' | 'directories' | 'localisation' | 'identifiers' | 'validation' | 'compatibility' | 'promptCards' | 'all';
-    mode?: AgentMode | 'asset';
+    section?: 'summary' | 'routing' | 'directories' | 'localisation' | 'identifiers' | 'validation' | 'compatibility' | 'guidanceCards' | 'all';
+    guidance?: ProjectGuidanceCard;
 }
 
 export interface QueryProjectProfileResult {
@@ -858,7 +860,7 @@ export interface QueryProjectProfileResult {
     profile?: ProjectProfile;
     summary?: string;
     data?: unknown;
-    promptCard?: string;
+    guidanceCard?: string;
     _hint?: string;
     error?: string;
 }
@@ -1546,7 +1548,7 @@ export type ToolArgs =
     | TypedPdxWriteArgs
     | CandidateTransactionArgs
     | ListDirectoryArgs
-    | CodesearchArgs
+    | WebSearchArgs
     | AnalyzeDiagnosticErrorArgs
     | SetMemoryArgs
     | WriteDesignBlueprintArgs
@@ -1805,9 +1807,6 @@ export interface WebSearchArgs {
     contextSize?: 'low' | 'medium' | 'high';
 }
 
-/** @deprecated Compatibility alias for persisted histories. */
-export type CodesearchArgs = WebSearchArgs;
-
 export interface AnalyzeDiagnosticErrorArgs {
     file?: string;
     errorCode?: string;
@@ -1887,7 +1886,7 @@ export interface BlueprintEvidenceRef {
 /** Approved execution slice derived during design, before any builder is dispatched. */
 export interface BlueprintTaskPlan {
     id: string;
-    agentType: 'explore' | 'plan' | 'build' | 'review' | 'loc_writer' | 'gui_expert';
+    profileName: 'explore' | 'planner' | 'paradox-coder' | 'reviewer' | 'localization-writer' | 'gui-expert';
     prompt: string;
     plannedFiles?: string[];
     plannedEntities?: string[];
@@ -2118,12 +2117,6 @@ export interface TokenUsage {
     compactionCalls?: number;
     /** Subset of apiCalls used for provider fallback attempts. */
     fallbackCalls?: number;
-    /** Mode/fingerprint metadata for legacy run-level usage consumers. */
-    agentMode?: string;
-    promptFingerprint?: string;
-    toolFocus?: AgentToolFocus;
-    /** Local frozen-prompt lookup miss attached to the first provider request. */
-    promptCacheMissReason?: string;
     /** Per-provider-call cache samples; bounded by the request path. */
     cacheRequests?: CacheRequestUsage[];
     /** Bounded dimension-preserving rollups after the per-call sample cap is reached. */
@@ -2164,23 +2157,6 @@ export interface AgentRunMetrics {
  * Agent checkpoint — serializable snapshot for long-task resilience (Batch 2.3).
  * Saved periodically so the agent can resume after crashes or context resets.
  */
-export interface AgentCheckpoint {
-    /** Checkpoint version for forward compatibility */
-    version: 1;
-    /** Timestamp of the checkpoint */
-    timestamp: number;
-    /** Current iteration index in the reasoning loop */
-    iteration: number;
-    /** Files written so far (for rollback awareness) */
-    writtenFiles: string[];
-    /** Compressed summary of conversation up to this point */
-    conversationSummary: string;
-    /** Current todo list state */
-    todoSnapshot: string;
-    /** Topic ID for associating with the correct session */
-    topicId?: string;
-}
-
 /**
  * Agent resume state — fully serializable state of an interrupted agent task.
  * Allows the agent to resume execution from the exact point of interruption
@@ -2247,7 +2223,7 @@ export interface AgentStep {
     | 'code_generated' | 'validation' | 'error' | 'compaction'
     | 'todo_update' | 'permission_request'
     | 'subtask_start' | 'subtask_complete' | 'diff_summary'
-    | 'plan_card' | 'blueprint_card' | 'walkthrough_card' | 'transaction_card' | 'orchestrator_progress' | 'cache_stats';
+    | 'plan_card' | 'blueprint_card' | 'walkthrough_card' | 'orchestrator_progress' | 'cache_stats';
     cacheStats?: {
         cachedTokens: number;
         totalTokens: number;
@@ -2270,15 +2246,10 @@ export interface AgentStep {
     timestamp: number;
     /** For permission_request: identifier so UI can respond */
     permissionId?: string;
-    /** For subtask steps: the sub-agent type */
-    subagentType?: string;
+    /** For subtask steps: the runtime sub-agent profile. */
+    subagentProfileName?: string;
     /** For subtask_complete: terminal state for UI/history. */
     subtaskStatus?: 'completed' | 'failed' | 'cancelled' | 'needs_clarification' | 'pending_validation';
-    transactionCard?: {
-        id: string;
-        filesRequested: string[];
-        status: 'pending' | 'approved' | 'rejected';
-    };
     /** Global 1-based index of this tool call within the reasoning loop */
     stepIndex?: number;
     /** Tool execution duration in milliseconds (tool_result only) */
@@ -2602,8 +2573,8 @@ export type HostMessage =
     | { type: 'loadTopicMessages'; messages: ChatHistoryMessage[]; targetSurface?: 'chat' | 'manager' }
     | { type: 'streamToken'; token: string }
     | { type: 'clearChat'; targetSurface?: 'chat' | 'manager' }
-    | { type: 'workflowList'; workflows: Array<{ id: string; title: string; description: string; mode: string; locale?: string; phases: Array<{ id: string; title: string; description: string }>; verification: Array<{ id: string; description: string; required: boolean; verificationTool?: string }> }>; currentWorkflowId?: string | null; labels?: { selectorPlaceholder: string; noWorkflowSelected: string; phaseUnit: string; phasesUnit: string; requiredCheckUnit: string; requiredChecksUnit: string } }
-    | { type: 'workflowChanged'; workflowId?: string | null; workflow?: { id: string; title: string; description: string; mode: string; locale?: string; phases: Array<{ id: string; title: string; description: string }>; verification: Array<{ id: string; description: string; required: boolean; verificationTool?: string }> }; labels?: { selectorPlaceholder: string; noWorkflowSelected: string; phaseUnit: string; phasesUnit: string; requiredCheckUnit: string; requiredChecksUnit: string } }
+    | { type: 'workflowList'; workflows: Array<{ id: string; title: string; description: string; scheduling: { domain: string; intent: string; strategy: string; profileName?: string }; locale?: string; phases: Array<{ id: string; title: string; description: string }>; verification: Array<{ id: string; description: string; required: boolean; verificationTool?: string }> }>; currentWorkflowId?: string | null; labels?: { selectorPlaceholder: string; noWorkflowSelected: string; phaseUnit: string; phasesUnit: string; requiredCheckUnit: string; requiredChecksUnit: string } }
+    | { type: 'workflowChanged'; workflowId?: string | null; workflow?: { id: string; title: string; description: string; scheduling: { domain: string; intent: string; strategy: string; profileName?: string }; locale?: string; phases: Array<{ id: string; title: string; description: string }>; verification: Array<{ id: string; description: string; required: boolean; verificationTool?: string }> }; labels?: { selectorPlaceholder: string; noWorkflowSelected: string; phaseUnit: string; phasesUnit: string; requiredCheckUnit: string; requiredChecksUnit: string } }
     | { type: 'slashCommandList'; commands: SlashCommandDescriptor[] }
     | { type: 'slashCommandResult'; command: string; status: 'success' | 'error' | 'queued' | 'needsInput'; message: string; uiAction?: 'openModelMenu' | 'openReasoningMenu' | 'openPermissionsMenu' }
     | { type: 'todoUpdate'; todos: TodoItem[]; agentId?: string; threadId?: string; runId?: string }
@@ -2620,7 +2591,7 @@ export type HostMessage =
     | { type: 'permissionResolved'; permissionId: string; itemId: string; threadId?: string; turnId?: string; decision: PermissionDecision; reviewer: 'user' | 'auto_review' | 'policy' }
     | { type: 'questionRequest'; questionId: string; topicId: string; threadId?: string; turnId?: string; questions: AskUserQuestionItem[] }
     | { type: 'questionResolved'; questionId: string; cancelled?: boolean }
-    | { type: 'floatingCardResolved'; card: 'permission' | 'question' | 'write' | 'transaction' | 'plan' | 'walkthrough' | 'blueprint'; id?: string }
+    | { type: 'floatingCardResolved'; card: 'permission' | 'question' | 'write' | 'plan' | 'walkthrough' | 'blueprint'; id?: string }
     | { type: 'setSchedulingState'; schedulingState: AgentSchedulingState }
     /** Replay all AI steps accumulated while the panel was hidden; isGenerating=true means still running */
     | { type: 'replaySteps'; steps: AgentStep[]; isGenerating: boolean }
@@ -2646,8 +2617,6 @@ export type HostMessage =
     | { type: 'skillInstallComplete'; success: boolean }
     | { type: 'usageStats'; stats: any }
     | { type: 'artifactList'; artifacts: AgentArtifact[] }
-    /** Multi-Agent coordinator progress push — Agent Lane UI */
-    | { type: 'orchestratorProgress'; progress: OrchestratorProgressPayload }
     | { type: 'runSnapshot'; snapshot: AgentRunRecord; events?: import('./runner/runLedger').AgentRunEvent[]; eventCount?: number; truncatedEventCount?: number; childRuns?: Array<Pick<AgentRunRecord, 'runId' | 'parentRunId' | 'agentId' | 'threadId' | 'turnId' | 'status' | 'schedulingState' | 'startedAt' | 'completedAt' | 'userPromptPreview'> & { parentAgentId?: string }>; artifacts?: Array<{ id: string; kind: string; title: string; summary?: string; status?: string; createdAt?: number }>; cacheStats?: import('./runner/runReducers').CacheStatsSnapshot; scheduling?: import('./runner/runReducers').SchedulingSnapshot }
     | { type: 'mentionSearchResults'; results: Array<{
         type?: ContextItemType;
@@ -2796,50 +2765,6 @@ export function contentToString(content: string | ContentPart[] | null | undefin
         .join('');
 }
 
-// ─── Orchestrator progress push payload ────────────────────────────────────────────
-
-/** Real-time status of a single Agent lane */
-export interface AgentLaneInfo {
-    /** Agent instance ID */
-    id: string;
-    /** Role tag (explorer / builder / reviewer...) */
-    role: string;
-    /** Corresponding task node ID */
-    taskNodeId: string;
-    /** Current status */
-    status: 'pending' | 'running' | 'done' | 'failed' | 'cancelled';
-    /** Number of steps used */
-    stepCount: number;
-    /** Number of tokens consumed */
-    tokenUsed: number;
-    /** Start time */
-    startedAt?: number;
-    /** Time consuming (ms) */
-    duration?: number;
-    /** Latest status text */
-    statusText?: string;
-}
-
-/** Progress data pushed to WebView by Orchestrator */
-export interface OrchestratorProgressPayload {
-    /** Stage label */
-    phase: 'planning' | 'executing' | 'reviewing' | 'complete' | 'failed';
-    /** Total number of nodes */
-    total: number;
-    /** Number of completed nodes */
-    done: number;
-    /** Number of running nodes */
-    running: number;
-    /** Number of failed nodes */
-    failed: number;
-    /** Number of canceled nodes */
-    cancelled: number;
-    /** Each Agent swim lane information */
-    lanes: AgentLaneInfo[];
-    /** Latest event description */
-    latestEvent?: string;
-}
-
 export type AgentRunStatus =
     | 'created'
     | 'initializing'
@@ -2872,8 +2797,6 @@ export interface AgentRunRecord {
     model?: string;
     userPromptPreview: string;
     startedAt: number;
-    /** @deprecated Use startedAt */
-    createdAt: number;
     updatedAt: number;
     completedAt?: number;
     steps: AgentStep[];

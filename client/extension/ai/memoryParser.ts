@@ -13,7 +13,7 @@ export interface MemoryEntry {
     key: string;
     content: string;
     /** Capability domain for this fact. */
-    domain?: AgentRuntimeDomain;
+    domain: AgentRuntimeDomain;
     priority: 'high' | 'normal' | 'low';
     source?: string;
     confidence?: number;
@@ -68,8 +68,8 @@ export interface MemoryRetrievalContext {
     pathScope?: string[];
     /** Include stale entries, annotated with `stale=true`, instead of excluding them. */
     includeStale?: boolean;
-    /** Capability-domain namespace. Legacy entries are visible only to Paradox. */
-    domain?: AgentRuntimeDomain;
+    /** Capability-domain namespace. */
+    domain: AgentRuntimeDomain;
 }
 
 /** Validate one untrusted entry parsed from memory.json. Returns null when unusable. */
@@ -430,10 +430,10 @@ export class MemoryParser {
 
     private buildStaleProjectFactPrompt(
         entries: MemoryEntry[],
-        context: MemoryRetrievalContext | undefined,
+        context: MemoryRetrievalContext,
         now: number,
     ): string {
-        if (context?.includeStale === true || !context?.taskText?.trim()) return '';
+        if (context.includeStale === true || !context.taskText?.trim()) return '';
         const keywords = MemoryParser.tokenizeTaskText(context.taskText);
         const gameId = context.gameId?.toLowerCase();
         const pathHints = (context.pathScope ?? []).map(hint => hint.toLowerCase()).filter(Boolean);
@@ -479,14 +479,14 @@ export class MemoryParser {
      * relevance to the optional retrieval context, under a strict total budget of
      * MAX_MEMORY_CHARS; the surrounding safety header has its own quota on top.
      */
-    public getMemoryPrompt(topicId = this.topicId, context?: MemoryRetrievalContext): string {
+    public getMemoryPrompt(topicId: string | undefined, context: MemoryRetrievalContext): string {
         try {
             if (!this.workspaceRoot) return '';
             if (topicId) MemoryParser.rememberTopic(this.workspaceRoot, topicId);
 
             const structured = this.readStructuredEntries(topicId);
             if (structured.length > 0) {
-                const requestedDomain = context?.domain ?? 'paradox';
+                const requestedDomain = context.domain;
                 const scoped = structured.filter(entry => entry.domain === requestedDomain);
                 if (scoped.length === 0) {
                     this.recordRecallTrace({
@@ -713,7 +713,7 @@ export class MemoryParser {
             const entries = this.readStructuredEntries(topicId);
             this.synchronizeProjectFactRevision(entries);
             const normalizedKey = entry.key.trim().slice(0, 160);
-            const requestedDomain = entry.domain ?? 'paradox';
+            const requestedDomain = entry.domain;
             const existing = entries.find(candidate =>
                 candidate.key.toLowerCase() === normalizedKey.toLowerCase()
                 && candidate.domain === requestedDomain);

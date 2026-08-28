@@ -31,7 +31,7 @@ import {
     getAnthropicModelFeatures
 } from './providers/models/capabilities';
 
-// Re-export for external backward compatibility
+// Public provider surface shared by the extension and tests.
 export {
     BUILTIN_PROVIDERS,
     VISION_CAPABLE_MODELS,

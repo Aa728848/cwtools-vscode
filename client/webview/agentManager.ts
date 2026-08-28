@@ -12,7 +12,7 @@ import {
 import { getChatI18n, normalizeChatLocale } from './chat/i18n';
 import { getDiffArtifactFiles } from './chat/artifacts';
 import { svgIcon, svgIconNoMargin } from './svgIcons';
-import type { ManagerSnapshotMessage, OrchestratorProgressMessage } from './chat/messages.manager';
+import type { ManagerSnapshotMessage } from './chat/messages.manager';
 import type { ManagerRunSnapshotMessage } from './chat/messages.manager';
 import type { TopicListItem, TopicStats } from './chat/messages.shared';
 import { parseHostMessage } from './chat/hostProtocol';
@@ -38,7 +38,6 @@ type ManagerEnhancementState = {
     isGenerating: boolean;
     liveStepCount: number;
     messageCount: number;
-    orchestrator: OrchestratorProgressMessage['progress'] | null;
     run: ManagerRunSnapshotMessage['snapshot'] | null;
     runEvents: AgentTraceEvent[];
     childRuns: NonNullable<ManagerRunSnapshotMessage['childRuns']>;
@@ -79,12 +78,17 @@ const DEFAULT_STATE: ManagerEnhancementState = {
         authorization: 'workspace_write',
         phase: 'execute',
         dispatch: 'single',
+        overlays: [],
+        routeConfidence: 1,
+        routeEvidence: ['manager default'],
+        routingSource: 'deterministic',
+        phaseReason: 'Waiting for the host scheduling snapshot.',
+        revision: 0,
     },
     workflowId: null,
     isGenerating: false,
     liveStepCount: 0,
     messageCount: 0,
-    orchestrator: null,
     run: null,
     runEvents: [],
     childRuns: [],
@@ -1168,7 +1172,7 @@ const DEFAULT_STATE: ManagerEnhancementState = {
             if (locale !== 'zh-cn') return value === 'general' ? 'General' : value === 'paradox' ? 'Paradox' : value[0]!.toUpperCase() + value.slice(1);
             return ({ general: '通用', paradox: 'Paradox', hybrid: '混合', inspect: '探索', plan: '规划', execute: '执行', verify: '验证', finalize: '收尾', single: '单 Agent', parallel: '并行', specialist: '专家' } as Record<string, string>)[value] ?? value;
         };
-        return [scheduling.profileName || scheduling.domainProfile, scheduling.phase, scheduling.dispatch]
+        return [scheduling.profileName, scheduling.phase, scheduling.dispatch]
             .map(label)
             .join(' · ');
     }
@@ -1330,7 +1334,7 @@ const DEFAULT_STATE: ManagerEnhancementState = {
             drawerOpen,
             topicTitleEditing,
             topicTitle,
-            workflow: state.workflowId || state.schedulingState.profileName || state.schedulingState.phase,
+            workflow: state.workflowId || state.schedulingState.profileName,
             statusText,
             statusClass,
             activeTab,
@@ -1575,7 +1579,7 @@ const DEFAULT_STATE: ManagerEnhancementState = {
                 traceModel.nodes.push({
                     agentId: childRun.agentId,
                     parentAgentId: childRun.parentAgentId || traceModel.rootAgentId,
-                    role: childRun.schedulingState.profileName || childRun.schedulingState.domainProfile,
+                    role: childRun.schedulingState.profileName,
                     status: childRun.status === 'completed' || childRun.status === 'done' ? 'done'
                         : childRun.status === 'failed' ? 'failed'
                             : childRun.status === 'cancelled' ? 'cancelled'
@@ -1598,7 +1602,7 @@ const DEFAULT_STATE: ManagerEnhancementState = {
                 || traceLabels.mainAgent;
             const agentTreeHtml = renderAgentTreeHTML(traceModel, selectedAgentId, traceLabels, { rootTitle: currentTopicTitle });
             const progressPercent = runProgressPercent(run);
-            const startedAt = Number(run?.startedAt || run?.createdAt || Date.now());
+            const startedAt = Number(run?.startedAt || Date.now());
             const finishedAt = Number(run?.completedAt || Date.now());
             const startedLabel = new Date(startedAt).toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit', second: '2-digit' });
             const contextUsed = Number(run?.context?.estimatedPromptTokens || metrics.promptTokens || 0);
@@ -1625,22 +1629,6 @@ const DEFAULT_STATE: ManagerEnhancementState = {
                 </button>
             `).join('') : `<div class="manager-side-empty">${ui.run.noArtifacts}</div>`;
             const usageStatsHtml = renderUsageStatsCard();
-            const progress = state.orchestrator;
-            const agentsHtml = progress ? `
-                <section class="manager-activity-section manager-agents-section">
-                    <div class="manager-activity-section-title"><strong>${ui.activity.agents}</strong><span>${m.agents.done} ${progress.done}/${progress.total} · ${m.agents.running} ${progress.running} · ${m.agents.failed} ${progress.failed}</span></div>
-                    <div class="manager-agent-summary-line"><span>${m.agents.phase}: ${escapeHtml(progress.phase)}</span><em>${escapeHtml(progress.latestEvent || '')}</em></div>
-                    <div class="manager-agent-lanes">
-                        ${progress.lanes.map(lane => `
-                            <article class="manager-agent-lane manager-agent-${escapeHtml(lane.status)}">
-                                <span class="manager-agent-state" aria-hidden="true"></span>
-                                <span class="manager-agent-main"><strong>${escapeHtml(lane.role)}</strong><em>${escapeHtml(lane.statusText || lane.taskNodeId)}</em></span>
-                                <span class="manager-agent-metrics">${lane.stepCount} ${m.agents.steps} · ${compactNumber(lane.tokenUsed)} ${m.agents.tokens}</span>
-                            </article>
-                        `).join('')}
-                    </div>
-                </section>
-            ` : '';
             const runtimeTasks = state.activity?.items.filter(item => item.kind === 'task' || item.kind === 'goal') ?? [];
             const tasksHtml = `
                 <section class="manager-activity-section manager-tasks-section">
@@ -1729,7 +1717,7 @@ const DEFAULT_STATE: ManagerEnhancementState = {
                     </div>
                 </section>
             ` : '';
-            const hasActivity = !!run || !!progress || state.todos.length > 0 || runtimeTasks.length > 0
+            const hasActivity = !!run || state.todos.length > 0 || runtimeTasks.length > 0
                 || state.artifacts.length > 0 || events.length > 0 || !!runtime;
 
             artifactListEl.innerHTML = `
@@ -1766,7 +1754,6 @@ const DEFAULT_STATE: ManagerEnhancementState = {
                             </div>
                         </section>
                     ` : ''}
-                    ${agentsHtml}
                     ${tasksHtml}
                     ${runtimeInspectorHtml}
                     ${transcriptHtml}
@@ -1862,7 +1849,7 @@ const DEFAULT_STATE: ManagerEnhancementState = {
         const selectedAgentEvents = traceModel.eventsByAgent.get(selectedAgentId) ?? [];
         const modelCalls = events.filter(event => event.type === 'model_call_start').length;
         const toolCalls = events.filter(event => event.type === 'tool_call_start' || event.type === 'tool_call_created').length;
-        const startedAt = Number(run.startedAt || run.createdAt || Date.now());
+        const startedAt = Number(run.startedAt || Date.now());
         const finishedAt = stableTrajectoryEndTime(run, state.runEvents);
         const duration = formatDuration(Math.max(0, finishedAt - startedAt));
         const eventRows = events.map(event => {
@@ -2120,10 +2107,6 @@ const DEFAULT_STATE: ManagerEnhancementState = {
                 state.liveStepCount = 0;
                 state.isGenerating = false;
                 renderOverview();
-                break;
-            case 'orchestratorProgress':
-                state.orchestrator = (msg as OrchestratorProgressMessage).progress || null;
-                renderInspector();
                 break;
         }
     }

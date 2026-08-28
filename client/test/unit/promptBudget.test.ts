@@ -45,14 +45,15 @@ describe('AI static prompt budgets', () => {
 
         for (const slim of [false, true]) {
             const eligible = runnerPolicy.filterToolDefinitionsForMode(TOOL_DEFINITIONS, 'build', {
+                domain: 'paradox',
                 useSlimPrompt: slim,
             });
             const tools = toolDisclosureService.initialTools(eligible, {
                 mode: 'build', domain: 'paradox', dynamicSupported: true, loaded: new Set(),
             });
             const prompt = slim
-                ? builder.buildSlimSystemPromptForMode('build', undefined, 'stellaris')
-                : builder.buildSystemPromptForMode('build', undefined, 'stellaris');
+                ? builder.buildSlimSystemPromptForMode('build', undefined, 'stellaris', undefined, 'paradox')
+                : builder.buildSystemPromptForMode('build', undefined, 'stellaris', undefined, undefined, undefined, true, true, 'paradox');
             const total = estimateTokenCount(prompt) + estimateTokenCount(JSON.stringify(tools));
             const names = tools.map(tool => tool.function.name);
             expect(names, `${slim ? 'slim' : 'main'} tool count`).to.have.length.within(4, coreTools.size);
@@ -70,11 +71,11 @@ describe('AI static prompt budgets', () => {
         const projectWriteTools = new Set(['write_file', 'edit_file', 'replace_lines', 'write_localisation']);
 
         for (const mode of ['plan', 'explore', 'review'] as const) {
-            const eligible = runnerPolicy.filterToolDefinitionsForMode(TOOL_DEFINITIONS, mode);
+            const eligible = runnerPolicy.filterToolDefinitionsForMode(TOOL_DEFINITIONS, mode, { domain: 'paradox' });
             const tools = toolDisclosureService.initialTools(eligible, {
                 mode, domain: 'paradox', dynamicSupported: true, loaded: new Set(),
             });
-            const total = estimateTokenCount(builder.buildSystemPromptForMode(mode, undefined, 'stellaris'))
+            const total = estimateTokenCount(builder.buildSystemPromptForMode(mode, undefined, 'stellaris', undefined, undefined, undefined, true, true, 'paradox'))
                 + estimateTokenCount(JSON.stringify(tools));
             const names = tools.map(tool => tool.function.name);
             expect(names, `${mode} tool count`).to.have.length.within(4, coreTools.size);

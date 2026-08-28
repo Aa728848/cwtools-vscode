@@ -34,7 +34,7 @@ describe('dynamic MCP access validation', () => {
     });
 
     it('still reports truly unknown tools as unknown', () => {
-        const access = validateToolCapability('made_up_tool', { mode: 'explore' });
+        const access = validateToolCapability('made_up_tool', { mode: 'explore', domain: 'paradox' });
         expect(access.allowed).to.equal(false);
         expect(access.reason).to.include('Unknown tool');
     });

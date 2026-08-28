@@ -9,7 +9,7 @@ import {
     reduceAll,
 } from '../../extension/ai/runner/runReducers';
 import type { AgentRunEvent } from '../../extension/ai/runner/runLedger';
-import { schedulingStateFromAdmission } from '../../extension/ai/runner/scheduling';
+import { schedulingStateFromAdmission, transitionSchedulingState } from '../../extension/ai/runner/scheduling';
 
 function ev(type: AgentRunEvent['type'], extra: Partial<AgentRunEvent> = {}, payload: any = {}): AgentRunEvent {
     return {
@@ -28,18 +28,25 @@ function ev(type: AgentRunEvent['type'], extra: Partial<AgentRunEvent> = {}, pay
 describe('RunReducers — pure event projections (T3.2)', () => {
     describe('reduceScheduling', () => {
         it('projects admission, phase, prompt, dispatch, and capacity events', () => {
+            const admitted = schedulingStateFromAdmission({
+                domainProfile: 'general',
+                authorization: 'workspace_write',
+                initialPhase: 'execute',
+                explicitDelegation: false,
+                confidence: 0.9,
+                evidence: ['TypeScript'],
+            });
             const snapshot = reduceScheduling([
-                ev('admission_decided', {}, {
-                    domainProfile: 'general',
-                    authorization: 'workspace_write',
-                    initialPhase: 'execute',
-                    confidence: 0.9,
-                    evidence: ['TypeScript'],
+                ev('admission_decided', {}, { state: admitted }),
+                ev('phase_changed', {}, {
+                    state: transitionSchedulingState(admitted, { phase: 'execute', reason: 'test phase' }),
                 }),
-                ev('phase_changed', {}, { to: 'execute', revision: 1 }),
                 ev('prompt_queued'),
                 ev('prompt_steered'),
-                ev('dispatch_evaluated', {}, { accepted: true }),
+                ev('dispatch_evaluated', {}, {
+                    accepted: true,
+                    state: transitionSchedulingState(admitted, { dispatch: 'parallel', reason: 'test dispatch' }),
+                }),
                 ev('provider_capacity_changed', {}, { current: 2 }),
             ]);
             expect(snapshot).to.include({
@@ -137,14 +144,14 @@ describe('RunReducers — pure event projections (T3.2)', () => {
         it('builds parent → child topology from subagent_start', () => {
             const events: AgentRunEvent[] = [
                 ev('run_created', {}, { parentAgentId: 'root' }),
-                ev('subagent_start', {}, { agentId: 'sub_a', parentAgentId: 'root', role: 'gui_expert' }),
+                ev('subagent_start', {}, { agentId: 'sub_a', parentAgentId: 'root', profileName: 'gui-expert' }),
                 ev('subagent_end', {}, { agentId: 'sub_a', success: true }),
             ];
             const snap = reduceAgentGraph(events);
             expect(snap.rootAgentId).to.equal('root');
             const sub = snap.nodeById.get('sub_a')!;
             expect(sub.parentAgentId).to.equal('root');
-            expect(sub.role).to.equal('gui_expert');
+            expect(sub.role).to.equal('gui-expert');
             expect(sub.status).to.equal('done');
         });
 
@@ -260,17 +267,25 @@ describe('RunReducers & Structured Events', () => {
             writtenFiles: [],
             metrics: {},
         } as any;
+        const dispatched = transitionSchedulingState(record.schedulingState, {
+            dispatch: 'parallel',
+            reason: 'independent tasks',
+        });
         (ledger as any).applyPersistedEvents(record, [
             ev('admission_decided', {}, {
-                domainProfile: 'general',
-                authorization: 'workspace_write',
-                initialPhase: 'execute',
-                explicitDelegation: false,
-                confidence: 0.9,
-                evidence: ['TypeScript'],
+                state: schedulingStateFromAdmission({
+                    domainProfile: 'general',
+                    authorization: 'workspace_write',
+                    initialPhase: 'execute',
+                    explicitDelegation: false,
+                    confidence: 0.9,
+                    evidence: ['TypeScript'],
+                }),
             }),
-            ev('phase_changed', {}, { to: 'execute', reason: 'write stage', revision: 1 }),
-            ev('dispatch_evaluated', {}, { accepted: true, reason: 'independent tasks' }),
+            ev('phase_changed', {}, {
+                state: transitionSchedulingState(record.schedulingState, { phase: 'execute', reason: 'write stage' }),
+            }),
+            ev('dispatch_evaluated', {}, { accepted: true, state: dispatched, reason: 'independent tasks' }),
         ]);
 
         expect(record.schedulingState).to.include({

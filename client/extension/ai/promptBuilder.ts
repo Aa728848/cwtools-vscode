@@ -12,21 +12,20 @@ import * as crypto from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
 import type { ChatMessage, AgentMode, AgentRuntimeDomain, ToolDefinition } from './types';
-import { domainForExecutionMode } from './runner/scheduling';
 import { getGameKnowledge, getGameDisplayName } from './gameKnowledge';
 import { MemoryParser } from './memoryParser';
 import { buildGeneralProjectInstructionsPrompt } from './projectInstructions';
 import { ErrorReporter } from './errorReporter';
 import { SOURCE, aiText, getAiMessageLocale } from './messages';
-import { getExistingPrivateTopicFilePath, getPrivateTopicStorageDir } from './workspacePaths';
+import { getPrivateTopicStorageDir } from './workspacePaths';
 import {
     buildProfileSummary,
+    getGuidanceCard,
     getProjectProfilePath,
-    getPromptCardForMode,
     readProjectProfile,
 } from './projectProfile';
 import { buildProjectKnowledgePrompt, readProjectKnowledgeManifest } from './projectKnowledge';
-import type { ProjectProfile } from './types';
+import type { ProjectGuidanceCard, ProjectProfile } from './types';
 
 // ─── Parsed CWTOOLS.md Structure ─────────────────────────────────────────────
 
@@ -36,7 +35,7 @@ interface ParsedProjectRules {
 
 interface RuntimePromptState {
     mode?: AgentMode;
-    domain?: AgentRuntimeDomain;
+    domain: AgentRuntimeDomain;
     /** Current user task used only for relevance-ranked memory retrieval. */
     taskText?: string;
     /** Active/recent files used as path-scope hints for memory retrieval. */
@@ -281,24 +280,24 @@ export class PromptBuilder {
      * @param languageId - override game language id (auto-detected if not provided)
      */
     buildSystemPromptForMode(
-        mode: AgentMode = 'build', 
-        providerId?: string, 
-        languageId?: string,
-        topicId?: string,
-        runId?: string,
-        pinned?: {
+        mode: AgentMode,
+        providerId: string | undefined,
+        languageId: string | undefined,
+        topicId: string | undefined,
+        runId: string | undefined,
+        pinned: {
             todos?: import('./types').TodoItem[];
             diagnostics?: Array<{ file: string; message: string; line: number }>;
             pendingInteractions?: string[];
             recentWrittenFiles?: string[];
             blockedSubAgents?: string[];
             decisions?: string[];
-        },
-        includeMemory = true,
-        includeProjectKnowledge = true,
-        domain?: AgentRuntimeDomain,
+        } | undefined,
+        includeMemory: boolean,
+        includeProjectKnowledge: boolean,
+        domain: AgentRuntimeDomain,
     ): string {
-        const runtimeDomain = domain ?? domainForExecutionMode(mode);
+        const runtimeDomain = domain;
         const gameId = runtimeDomain === 'paradox' ? languageId ?? this.detectGameLanguageId() : 'general';
         const gameKnowledge = runtimeDomain === 'paradox' ? getGameKnowledge(gameId) : '';
         const gameName = runtimeDomain === 'paradox' ? getGameDisplayName(gameId) : 'repository';
@@ -435,13 +434,13 @@ export class PromptBuilder {
      *   fingerprint's entry and rebuild (counts as a 'rebuild' miss).
      */
     buildFrozenSystemPrompt(
-        mode: AgentMode = 'build',
-        providerId?: string,
-        languageId?: string,
-        options?: { toolsetHash?: string; rebuild?: boolean; domain?: AgentRuntimeDomain }
+        mode: AgentMode,
+        providerId: string | undefined,
+        languageId: string | undefined,
+        options: { toolsetHash?: string; rebuild?: boolean; domain: AgentRuntimeDomain }
     ): string {
-        const fingerprint = this.computeFrozenPromptFingerprint(mode, providerId, languageId, options?.toolsetHash, options?.domain);
-        if (options?.rebuild) {
+        const fingerprint = this.computeFrozenPromptFingerprint(mode, providerId, languageId, options.domain, options.toolsetHash);
+        if (options.rebuild) {
             // Precise invalidation: only this fingerprint's entry is dropped;
             // other modes/providers keep their cached prompts.
             this._frozenPromptCache.delete(fingerprint.hash);
@@ -523,8 +522,8 @@ export class PromptBuilder {
         mode: AgentMode,
         providerId: string | undefined,
         languageId: string | undefined,
+        domain: AgentRuntimeDomain,
         toolsetHash?: string,
-        domain: AgentRuntimeDomain = domainForExecutionMode(mode),
     ): FrozenPromptFingerprint {
         let incomplete = false;
         let gameId = 'unknown';
@@ -675,20 +674,20 @@ export class PromptBuilder {
      * Wrapped in a <system-reminder> user message to maintain high cognitive weight for the LLM.
      */
     buildDynamicPromptBlock(
-        pinned?: {
+        pinned: {
             todos?: import('./types').TodoItem[];
             diagnostics?: Array<{ file: string; message: string; line: number }>;
             pendingInteractions?: string[];
             recentWrittenFiles?: string[];
             blockedSubAgents?: string[];
             decisions?: string[];
-        },
-        topicId?: string,
-        runId?: string,
-        runtime?: RuntimePromptState
+        } | undefined,
+        topicId: string | undefined,
+        runId: string | undefined,
+        runtime: RuntimePromptState,
     ): ChatMessage[] {
         const dynamicParts: string[] = [];
-        const runtimeDomain = runtime?.domain ?? domainForExecutionMode(runtime?.mode ?? 'build');
+        const runtimeDomain = runtime.domain;
         if (runtimeDomain === 'general' && runtime?.pathScope?.[0]) {
             const scopedInstructions = buildGeneralProjectInstructionsPrompt(
                 this.workspaceRoot,
@@ -829,14 +828,14 @@ export class PromptBuilder {
     /** Return a byte-stable slim prompt; run-specific scope belongs in a tail reminder. */
     buildFrozenSlimSystemPromptForMode(
         mode: AgentMode,
-        providerId?: string,
-        languageId?: string,
-        options?: { toolsetHash?: string; rebuild?: boolean; domain?: AgentRuntimeDomain },
+        providerId: string | undefined,
+        languageId: string | undefined,
+        options: { toolsetHash?: string; rebuild?: boolean; domain: AgentRuntimeDomain },
     ): string {
-        const domain = options?.domain ?? domainForExecutionMode(mode);
-        const fingerprint = this.computeFrozenPromptFingerprint(mode, providerId, languageId, `slim:${options?.toolsetHash ?? ''}`, domain);
+        const domain = options.domain;
+        const fingerprint = this.computeFrozenPromptFingerprint(mode, providerId, languageId, domain, `slim:${options.toolsetHash ?? ''}`);
         const key = `slim:${fingerprint.hash}`;
-        if (options?.rebuild) {
+        if (options.rebuild) {
             this._frozenSlimPromptCache.delete(key);
             this.recordFrozenPromptMiss('rebuild');
             this._lastFrozenPromptLookup = { hit: false, missReason: 'rebuild' };
@@ -849,7 +848,7 @@ export class PromptBuilder {
             this.rememberFrozenFingerprint(fingerprint);
             return cached;
         }
-        if (!options?.rebuild) {
+        if (!options.rebuild) {
             const missReason = this.classifyFrozenPromptMiss(fingerprint);
             this.recordFrozenPromptMiss(missReason);
             this._lastFrozenPromptLookup = { hit: false, missReason };
@@ -876,10 +875,10 @@ export class PromptBuilder {
     /** Build a slim sub-agent prompt with only a compact project hint. */
     buildSlimSystemPromptForMode(
         mode: AgentMode,
-        providerId?: string,
-        languageId?: string,
-        topicId?: string,
-        domain: AgentRuntimeDomain = domainForExecutionMode(mode),
+        providerId: string | undefined,
+        languageId: string | undefined,
+        topicId: string | undefined,
+        domain: AgentRuntimeDomain,
         delegation?: DelegationScopeFacts,
     ): string {
         const gameId = domain === 'paradox' ? languageId ?? this.detectGameLanguageId() : 'general';
@@ -978,13 +977,29 @@ export class PromptBuilder {
     }
 
     private buildProjectProfilePrompt(mode: AgentMode | undefined, profile: ProjectProfile): string {
-        const activeMode = mode ?? 'build';
-        const promptCard = getPromptCardForMode(profile, activeMode);
+        const guidance: ProjectGuidanceCard = mode === 'plan'
+            ? 'planning'
+            : mode === 'explore'
+                ? 'exploration'
+                : mode === 'review' || mode === 'script_reviewer'
+                    ? 'review'
+                    : mode === 'utility'
+                        ? 'utility'
+                        : mode === 'loc_writer' || mode === 'loc_translator'
+                            ? 'localisation'
+                            : mode === 'gui_expert'
+                                ? 'assets'
+                                : mode === 'orchestrator'
+                                    ? 'coordination'
+                                    : mode === 'script'
+                                        ? 'paradox_coordination'
+                                        : 'implementation';
+        const guidanceCard = getGuidanceCard(profile, guidance);
         const workflowHints = profile.routing.recommendedWorkflowByIntent
             .slice(0, 5)
-            .map(item => `- ${item.intent}: ${item.workflowId} (${item.mode})`)
+            .map(item => `- ${item.intent}: ${item.workflowId}`)
             .join('\n');
-        return `<project-premise>\n# PROJECT PROFILE (from .cwtools/project/profile.json)\nUse this compact profile for routing and project convention hints. Do not broad-scan the workspace until you have checked the profile and the relevant indexed tools. Cross-check profile facts against current files and CWT/LSP evidence before treating them as binding. For more details, call \`query_project_profile\` with a targeted section.\n\n## Summary\n${buildProfileSummary(profile)}\n\n## Active Mode Card\n${this.truncateProjectRuleSection(promptCard || 'No mode-specific project card was generated.', 1800)}\n\n## Recommended Workflows\n${workflowHints || '- No workflow recommendations generated.'}\n\n## Efficiency Hints\n${profile.efficiencyHints.slice(0, 5).map(hint => `- ${hint}`).join('\n')}\n</project-premise>\n`;
+        return `<project-premise>\n# PROJECT PROFILE (from .cwtools/project/profile.json)\nUse this compact profile for routing and project convention hints. Do not broad-scan the workspace until you have checked the profile and the relevant indexed tools. Cross-check profile facts against current files and CWT/LSP evidence before treating them as binding. For more details, call \`query_project_profile\` with a targeted section.\n\n## Summary\n${buildProfileSummary(profile)}\n\n## Active Guidance\n${this.truncateProjectRuleSection(guidanceCard || 'No targeted project guidance was generated.', 1800)}\n\n## Recommended Workflows\n${workflowHints || '- No workflow recommendations generated.'}\n\n## Efficiency Hints\n${profile.efficiencyHints.slice(0, 5).map(hint => `- ${hint}`).join('\n')}\n</project-premise>\n`;
     }
 
     /** Inject user-owned CWTOOLS.md instructions independently from generated profile facts. */
@@ -1030,7 +1045,9 @@ export class PromptBuilder {
     private getDesignBlueprintPrompt(topicId?: string): string {
         try {
             if (!this.workspaceRoot || !topicId) return '';
-            const blueprintPath = getExistingPrivateTopicFilePath(topicId, 'Implementation_Plan.md', this.workspaceRoot);
+            const topicDir = getPrivateTopicStorageDir(topicId, this.workspaceRoot);
+            if (!topicDir) return '';
+            const blueprintPath = path.join(topicDir, 'Implementation_Plan.md');
             if (!blueprintPath || !fs.existsSync(blueprintPath)) return '';
             const content = fs.readFileSync(blueprintPath, 'utf-8').trim();
             if (!content) return '';
@@ -1060,8 +1077,8 @@ ${trimmed}
         mode: AgentMode,
         gameKnowledge: string,
         gameName: string,
-        isSlim: boolean = false,
-        domain: AgentRuntimeDomain = domainForExecutionMode(mode),
+        isSlim: boolean,
+        domain: AgentRuntimeDomain,
     ): string {
         if (domain === 'general') {
             switch (mode) {
@@ -1160,7 +1177,7 @@ ${trimmed}
         fileContent?: string;
         topicId?: string;
         commandToolsAvailable?: boolean;
-        domain?: AgentRuntimeDomain;
+        domain: AgentRuntimeDomain;
     }): ChatMessage[] {
         const contextParts: string[] = [];
         const paradoxDomain = options.domain !== 'general';

@@ -1037,7 +1037,6 @@ export async function activate(context: ExtensionContext) {
 	const aiService = new AIService(context);
 	// Retire the legacy global endpoint into the per-provider map early so quick-switching
 	// providers before opening settings cannot leak one provider's endpoint into another.
-	void aiService.migrateLegacyEndpoint();
 	const privateAgentRoot = context.storageUri?.fsPath
 		?? path.join(context.globalStorageUri.fsPath, 'agent-workspaces', sha256Text(workspaceRoot || 'empty-window').slice(0, 16));
 	configurePrivateAgentStorage(privateAgentRoot);

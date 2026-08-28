@@ -2,7 +2,7 @@ import * as crypto from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as vs from 'vscode';
-import { getPrivateTopicStorageDir, getPrivateTopicStorageDirCandidates } from '../workspacePaths';
+import { getPrivateTopicStorageDir } from '../workspacePaths';
 import { atomicWriteJson, readJsonWithBackup } from './durableStorage';
 
 export type AgentTaskKind = 'process' | 'subagent' | 'validation' | 'compaction' | 'hook' | 'background_read';
@@ -89,21 +89,22 @@ export class AgentTaskManager {
         this.configuredTopic = topicId;
         if (this.loadedTopics.has(topicId)) return;
         const tasks = this.tasksFor(topicId);
-        for (const dir of getPrivateTopicStorageDirCandidates(topicId)) {
+        const dir = getPrivateTopicStorageDir(topicId);
+        if (dir) {
             const loaded = readJsonWithBackup<AgentTaskRecord[]>(path.join(dir, 'tasks', 'tasks.json'), isTaskArray);
-            if (!loaded) continue;
-            for (const task of loaded.value) {
-                const restored = { ...task };
-                if (restored.status === 'running' || restored.status === 'detached') {
-                    restored.status = 'lost';
-                    restored.endedAt = Date.now();
-                    restored.updatedAt = restored.endedAt;
-                    restored.notification = 'pending';
-                    restored.stopReason = 'host_restart';
+            if (loaded) {
+                for (const task of loaded.value) {
+                    const restored = { ...task };
+                    if (restored.status === 'running' || restored.status === 'detached') {
+                        restored.status = 'lost';
+                        restored.endedAt = Date.now();
+                        restored.updatedAt = restored.endedAt;
+                        restored.notification = 'pending';
+                        restored.stopReason = 'host_restart';
+                    }
+                    tasks.set(restored.taskId, restored);
                 }
-                tasks.set(restored.taskId, restored);
             }
-            break;
         }
         this.loadedTopics.add(topicId);
         void this.persist(topicId);

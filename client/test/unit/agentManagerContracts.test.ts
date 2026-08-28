@@ -44,7 +44,6 @@ describe('agent manager cross-surface contracts', () => {
 
         expect(manager).to.include("import './chatPanel'");
         expect(manager).to.include("import type { ManagerSnapshotMessage");
-        expect(manager).to.include("case 'orchestratorProgress'");
         expect(manager).to.include('data-manager-tab="changes"');
         expect(manager).to.include('data-manager-tab="activity"');
         expect(manager).to.include('data-manager-main-tab="conversation"');
@@ -60,7 +59,6 @@ describe('agent manager cross-surface contracts', () => {
         expect(manager).to.include('manager-agent-task-list');
         expect(manager).to.include('childRun.parentAgentId || traceModel.rootAgentId');
         expect(manager).to.include("tabs.setAttribute('role', 'tablist')");
-        expect(manager).to.include('manager-agent-lanes');
         expect(manager).to.include('renderAgentTreeHTML');
         expect(manager).to.include('renderTraceRailHTML');
         expect(manager).to.include('data-agent-path');
@@ -77,7 +75,6 @@ describe('agent manager cross-surface contracts', () => {
         expect(contracts).to.include('export interface ManagerSnapshotMessage');
         expect(contracts).to.include('export interface ManagerRunSnapshotMessage');
         expect(contracts).to.include('childRuns?: ManagerChildRunView[]');
-        expect(contracts).to.include('export interface OrchestratorProgressMessage');
 
         expect(css).to.include('.manager-inspector-tabs');
         expect(css).to.include('.manager-review-files');

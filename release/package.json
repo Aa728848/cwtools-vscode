@@ -1088,12 +1088,6 @@
                         "default": "",
                         "description": "%configuration.stellarisLanguageServices.ai.model.description%"
                     },
-                    "stellarisLanguageServices.ai.endpoint": {
-                        "scope": "window",
-                        "type": "string",
-                        "default": "",
-                        "description": "%configuration.stellarisLanguageServices.ai.endpoint.description%"
-                    },
                     "stellarisLanguageServices.ai.providerEndpoints": {
                         "scope": "window",
                         "type": "object",

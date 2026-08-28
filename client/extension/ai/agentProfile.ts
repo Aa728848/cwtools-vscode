@@ -92,20 +92,6 @@ export function normalizeAgentProfile(value: unknown): AgentProfileSelection {
     return isAgentProfileSelection(value) ? cloneAgentProfile(value) : cloneAgentProfile();
 }
 
-/** Translate a workflow's internal execution label into an explicit user/profile selection. */
-export function profileForExecutionMode(mode: import('./types').AgentMode): AgentProfileSelection {
-    switch (mode) {
-        case 'plan': return { domain: 'paradox', intent: 'plan', strategy: 'single' };
-        case 'explore': return { domain: 'paradox', intent: 'explore', strategy: 'single' };
-        case 'review':
-        case 'script_reviewer': return { domain: 'paradox', intent: 'review', strategy: 'single' };
-        case 'utility':
-        case 'orchestrator': return { domain: 'general', intent: 'execute', strategy: 'multi' };
-        case 'script': return { domain: 'paradox', intent: 'execute', strategy: 'multi' };
-        default: return { domain: 'paradox', intent: 'execute', strategy: 'single' };
-    }
-}
-
 export function parseModelAgentProfileDecision(raw: string): ModelAgentProfileDecision | undefined {
     const fenced = /```(?:json)?\s*([\s\S]*?)```/i.exec(raw)?.[1];
     const objectText = fenced ?? /\{[\s\S]*\}/.exec(raw)?.[0];

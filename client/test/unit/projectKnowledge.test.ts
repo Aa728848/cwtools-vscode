@@ -133,7 +133,7 @@ const vscodeStub = {
 
 function testProjectProfile(workspaceRoot: string): import('../../extension/ai/types').ProjectProfile {
     return {
-        schemaVersion: 2,
+        schemaVersion: 4,
         generatedAt: '2026-08-28T00:00:00.000Z',
         workspaceRoot,
         workspaceKind: 'paradox_mod',
@@ -144,7 +144,7 @@ function testProjectProfile(workspaceRoot: string): import('../../extension/ai/t
         identifiers: { namespaces: [], variablePrefixes: [], byType: {} },
         routing: { recommendedWorkflowByIntent: [], preferredReadTools: [], avoidPatterns: [] },
         validation: { lspReady: 'ready', indexStatus: 'ready', vanillaCache: 'configured' },
-        promptCards: {},
+        guidanceCards: {},
         efficiencyHints: [],
     };
 }

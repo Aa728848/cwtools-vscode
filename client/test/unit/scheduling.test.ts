@@ -35,11 +35,16 @@ describe('Agent runtime scheduling', () => {
             dispatch: 'single',
         })).to.throw('invalid');
         const restored = normalizeSchedulingState({
+            profileName: 'reviewer',
             domainProfile: 'general',
             authorization: 'read_only',
             phase: 'execute',
             dispatch: 'single',
+            overlays: [],
+            routeConfidence: 1,
             routeEvidence: [],
+            phaseReason: 'test',
+            revision: 0,
         });
         expect(restored).to.include({
             domainProfile: 'general', authorization: 'read_only', phase: 'execute', dispatch: 'single',
@@ -67,8 +72,8 @@ describe('Agent runtime scheduling', () => {
 
     it('admits independent tasks and rejects duplicate or conflicting work', () => {
         const accepted = evaluateDispatchAdmission([
-            { id: 'a', objective: 'inspect parser', role: 'explore', acceptanceCriteria: ['report'] },
-            { id: 'b', objective: 'inspect runner', role: 'review', acceptanceCriteria: ['report'] },
+            { id: 'a', objective: 'inspect parser', profileName: 'explore', acceptanceCriteria: ['report'] },
+            { id: 'b', objective: 'inspect runner', profileName: 'reviewer', acceptanceCriteria: ['report'] },
         ]);
         expect(accepted.accepted).to.equal(true);
 
@@ -81,7 +86,7 @@ describe('Agent runtime scheduling', () => {
     });
 
     it('admits a single task only through explicit delegation and still validates it', () => {
-        const task = [{ id: 'focused', objective: 'inspect one isolated subsystem', role: 'explore' }];
+        const task = [{ id: 'focused', objective: 'inspect one isolated subsystem', profileName: 'explore' }];
         const implicit = evaluateDispatchAdmission(task);
         expect(implicit.accepted).to.equal(false);
         expect(implicit.reason).to.contain('explicit delegation');

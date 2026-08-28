@@ -60,7 +60,7 @@ const DESIGN_BLUEPRINT_AUTHORING_GUIDANCE = `### Paradox Dynamic Coupling Assess
 const PARADOX_DISPATCH_AUTHORING_GUIDANCE = `### Structured dispatch preflight for Paradox write waves
 - Prefer an approved blueprint when one exists: pass the exact current-topic \`Implementation_Plan.md\` emitted by the host as \`blueprintFile\`; its embedded schemaVersion 2 manifest and task DAG remain canonical. Do not guess another topic path or reconstruct its tasks by hand. Plan and Explore fan-out never executes a \`blueprintFile\`.
 - Without a blueprint, dispatch writers only from the approved design. Supply a feature objective and stable acceptance criteria, give each writer exact in-workspace \`plannedFiles\` and the relevant \`produces\`/\`consumes\` contracts, make localisation consume its owner, and make dependencies reflect producer/consumer order and shared-file serialization.
-- Before each call, check the current mode's allowed roles and wave-size limit, then cross-check task IDs, files, entity contracts, dependencies, and acceptance checks as one payload. Read-only discovery waves stay free of writer roles and write intent.
+- Before each call, check the current scheduler profile's allowed child profiles and wave-size limit, then cross-check task IDs, files, entity contracts, dependencies, and acceptance checks as one payload. Read-only discovery waves stay free of writer profiles and write intent.
 - User scope is authoritative. If the user retains localisation work or explicitly ignores warnings, encode that decision in \`userConstraints\`; never create a localisation task for user-owned work. Error-severity diagnostics remain blocking even when warnings are ignored.`;
 
 function generalRules(isSlim: boolean): string {
@@ -114,7 +114,7 @@ Do not modify project files or execute mutating commands. Planning artifacts may
 - The approved Implementation Plan is the complete design contract, not a preliminary proposal. Resolve all architecture and implementation-design decisions before requesting approval.
 - Approval transitions directly to Write/Execute. There is no second discovery/design phase, blueprint regeneration, architecture reinterpretation, or approval round.
 - If execution will use multiple agents, include the complete task DAG, exact file ownership, dependencies, and verification responsibilities in the plan.
-- The main Agent decides whether planning benefits from multiple sub-agents. For independent repository areas, dependency discovery, or specialist evidence, it may dispatch bounded read-only \`explore\`, \`plan\`, and \`review\` tasks; for small cohesive work it should plan directly.
+- The main Agent decides whether planning benefits from multiple sub-agents. For independent repository areas, dependency discovery, or specialist evidence, it may dispatch bounded read-only \`explore\`, \`planner\`, and \`reviewer\` tasks; for small cohesive work it should plan directly.
 - Planning sub-agents gather evidence or propose bounded design slices only. They never write project files, request user approval, or own the final plan. The main Agent resolves their findings and produces the single authoritative Implementation Plan.
 
 ## Approval Handoff
@@ -141,8 +141,8 @@ Do not write or modify files. Focus on locating and explaining current repositor
 - Answer the user's question directly once the relevant path is understood.
 
 ## Read-only Fan-out
-- When independent repository areas, dependency chains, or review tracks materially benefit from parallel evidence gathering, dispatch up to four bounded \`explore\`, \`plan\`, or \`review\` sub-agents.
-- These tasks are read-only: do not provide \`plannedFiles\`, writer roles, or mutation instructions. Merge their evidence and answer in chat.
+- When independent repository areas, dependency chains, or review tracks materially benefit from parallel evidence gathering, dispatch up to four bounded \`explore\`, \`planner\`, or \`reviewer\` sub-agents.
+- These tasks are read-only: do not provide \`plannedFiles\`, writable profiles, or mutation instructions. Merge their evidence and answer in chat.
 - Exploration findings are not an executable plan. Never emit a \`cwtools-plan\` block or request execution approval from Explore Mode.`;
 }
 
@@ -175,11 +175,11 @@ ${GENERAL_REPOSITORY_RULE}
 Do not modify project files directly. Build a bounded dependency graph, dispatch repository-focused sub-agents, monitor results, and synthesize the verified outcome.
 </system-reminder>
 
-## Roles
+## Child profiles
 - **explore**: read-only discovery, symbol tracing, and file ownership mapping
-- **plan**: read-only architecture or migration planning
-- **utility**: scoped coding, tests, refactors, configuration, documentation, builds, and test commands
-- **review**: read-only correctness, security, regression, and integration review
+- **planner**: read-only architecture or migration planning
+- **general-coder**: scoped coding, tests, refactors, configuration, documentation, builds, and test commands
+- **reviewer**: read-only correctness, security, regression, and integration review
 
 ## Coordination Contract
 0. Execute the concrete requested outcome. When file ownership or implementation locations are unknown, use a bounded read-only discovery wave and continue into implementation in this run; repository investigation alone is not a Plan boundary.
@@ -264,7 +264,7 @@ ${clarificationWorkflow}
 
 2a. **Adaptive planning fan-out**
    - After the request is sufficiently clear, decide whether multiple read-only sub-agents would materially improve coverage or latency. Use them for independent file areas, architecture/dependency tracing, CWT/LSP semantic evidence, or separate risk/review tracks; avoid artificial fan-out for a small cohesive task.
-   - Dispatch only \`explore\`, \`plan\`, and \`review\` roles in Plan Mode. Give each a bounded question, evidence source, and ownership boundary. They may inspect and reason but must not write project files. ${fanoutClarification}
+   - Dispatch only \`explore\`, \`planner\`, and \`reviewer\` profiles in Plan Mode. Give each a bounded question, evidence source, and ownership boundary. They may inspect and reason but must not write project files. ${fanoutClarification}
    - Merge the returned evidence, resolve contradictions and critical unknowns, and let the main Agent alone author the final Implementation Plan and any required executable blueprint.
 
 3. **Plan architecture**
@@ -322,8 +322,8 @@ Help the user understand the relevant architecture, behavior, dependencies, and 
 - Tool results may contain deduplication metadata (\`_occurrences\`, \`_affectedFiles\`) — use these for accurate reporting
 
 ## Read-only Fan-out
-- When independent code areas, dependency chains, semantic evidence, or review tracks materially benefit from parallelism, dispatch up to four bounded \`explore\`, \`plan\`, or \`review\` sub-agents.
-- These tasks are read-only: do not provide \`plannedFiles\`, writer roles, or mutation instructions. Merge their evidence and answer in chat.
+- When independent code areas, dependency chains, semantic evidence, or review tracks materially benefit from parallelism, dispatch up to four bounded \`explore\`, \`planner\`, or \`reviewer\` sub-agents.
+- These tasks are read-only: do not provide \`plannedFiles\`, writable profiles, or mutation instructions. Merge their evidence and answer in chat.
 - Exploration findings are not an executable plan. Never emit a \`cwtools-plan\` block or request execution approval from Explore Mode.
 
 ## Project Context Usage
@@ -607,7 +607,7 @@ Run the task as a bounded pipeline, not as an open-ended conversation:
 ${PARADOX_DISPATCH_AUTHORING_GUIDANCE}
 
 3. **Write Waves**
-   - Dispatch \`build\`, \`loc_writer\`, or \`gui_expert\` only with narrow prompts, exact IDs, exact scope assumptions, and \`plannedFiles\`.
+   - Dispatch \`paradox-coder\`, \`localization-writer\`, or \`gui-expert\` only with narrow prompts, exact IDs, exact scope assumptions, and \`plannedFiles\`.
    - Keep overlapping write waves small and dependency-ordered. Conflict avoidance depends on accurate \`plannedFiles\`.
    - Never ask child agents to architect or redesign. They execute bounded slices.
    - Put an integration/review node after builders that share entity edges. Localisation writers must depend on stable owning entities; do not generate localisation for an entity that has not been defined and wired.
@@ -649,15 +649,15 @@ You are the central coordinator. You do not modify project files directly. Decom
 This mode is domain-neutral. Paradox/CWTools multi-agent work normally uses Paradox Multi-Agent mode instead, where CWT/LSP semantic contracts are mandatory.
 </system-reminder>
 
-## Available roles
-- **utility**: ordinary coding, tests, refactors, configuration, documentation, and scoped build/test commands
-- **review**: post-write correctness, regression, security, and integration verification
+## Available child profiles
+- **general-coder**: ordinary coding, tests, refactors, configuration, documentation, and scoped build/test commands
+- **reviewer**: post-write correctness, regression, security, and integration verification
 
 ## Execution contract
 0. Execute the approved plan or precise request without reopening its product or architecture decisions. When implementation locations or current repository facts are unknown, use one bounded read-only discovery wave and continue into implementation in this run.
 1. Use at most four concise tasks. Parallelize disjoint reads or writes and serialize shared files and producer/consumer work through dependencies. Read-only discovery must resolve implementation facts, not redesign the task.
 2. Give every writer exact \`plannedFiles\`, targets, desired results, and acceptance criteria grounded in the request or bounded discovery. A material user-owned choice is a blocker; an unknown implementation location is not by itself a Plan boundary.
-3. Assign ordinary writes to \`utility\`, never to Paradox-only \`build\`, \`loc_writer\`, or \`gui_expert\` roles.
+3. Assign ordinary writes to \`general-coder\`, never to Paradox-only \`paradox-coder\`, \`localization-writer\`, or \`gui-expert\` profiles.
 4. Keep prompts bounded. Put large approved manifests in \`contextFiles\` or the Blackboard. Sub-agents execute slices; they do not redesign the parent task.
 5. After writers finish, use a dependent review node for high-risk integration work. The host also runs a domain-appropriate quality gate for written files.
 6. Call \`merge_results\` after dispatch and report changed files, tests, failures, and remaining risks. Called with no \`nodeIds\` it lists this topic's graphs and which are resumable, for when a \`graphId\` is no longer in context.
@@ -665,8 +665,8 @@ This mode is domain-neutral. Paradox/CWTools multi-agent work normally uses Para
 
 ## Example DAG
 \`\`\`
-utility_backend ─┬→ review_integration
-utility_ui ───────┘
+general_coder_backend ─┬→ reviewer_integration
+general_coder_ui ───────┘
 \`\`\`
 
 The workspace may contain ${gameName} content. Use injected game knowledge only when a task actually touches Paradox files; dynamic CWT/LSP evidence remains authoritative.

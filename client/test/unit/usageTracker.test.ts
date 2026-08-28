@@ -83,7 +83,6 @@ describe('Auxiliary provider-call usage', () => {
             netInput: 600,
             netTotal: 700,
             apiCalls: 1,
-            agentMode: 'routing',
         });
         expect(sample.usage.cacheSavedCostCny).to.be.greaterThan(0);
         expect(sample.usage.cacheRequests?.[0]).to.deep.include({
@@ -228,9 +227,9 @@ describe('UsageTracker request-level cache metrics (plan §7.3)', () => {
         const { context } = makeContext();
         const tracker = new UsageTracker(context);
 
-        tracker.addUsage('deepseek', 'deepseek-chat', makeUsage(1000, 100, 800, { agentMode: 'build' }));
-        tracker.addUsage('deepseek', 'deepseek-chat', makeUsage(1000, 100, 0, { agentMode: 'build' }));
-        tracker.addUsage('deepseek', 'deepseek-chat', makeUsage(500, 100, 250, { agentMode: 'plan' }));
+        tracker.addUsage('deepseek', 'deepseek-chat', makeUsage(1000, 100, 800, { cacheRequests: [{ provider: 'deepseek', model: 'deepseek-chat', inputTokens: 1000, cachedTokens: 800, cacheCapable: true, agentMode: 'build' }] }));
+        tracker.addUsage('deepseek', 'deepseek-chat', makeUsage(1000, 100, 0, { cacheRequests: [{ provider: 'deepseek', model: 'deepseek-chat', inputTokens: 1000, cachedTokens: 0, cacheCapable: true, agentMode: 'build' }] }));
+        tracker.addUsage('deepseek', 'deepseek-chat', makeUsage(500, 100, 250, { cacheRequests: [{ provider: 'deepseek', model: 'deepseek-chat', inputTokens: 500, cachedTokens: 250, cacheCapable: true, agentMode: 'plan' }] }));
         tracker.addUsage('deepseek', 'deepseek-chat', makeUsage(200, 100, 0));
 
         const byMode = tracker.getStats().cacheStats.byAgentMode;
@@ -240,19 +239,24 @@ describe('UsageTracker request-level cache metrics (plan §7.3)', () => {
         expect(byMode.unspecified).to.deep.equal({ requests: 1, hitRequests: 0, requestHitRate: 0, cacheHitRate: 0 });
     });
 
-    it('persists agentMode and promptFingerprint on the usage record', () => {
+    it('persists cache dimensions only on provider-call samples', () => {
         const { UsageTracker } = loadUsageTrackerModule();
         const { context, state } = makeContext();
         const tracker = new UsageTracker(context);
 
-        tracker.addUsage('deepseek', 'deepseek-chat', makeUsage(1000, 100, 500, {
+        tracker.addUsage('deepseek', 'deepseek-chat', makeUsage(1000, 100, 500, { cacheRequests: [{
+            provider: 'deepseek',
+            model: 'deepseek-chat',
+            inputTokens: 1000,
+            cachedTokens: 500,
+            cacheCapable: true,
             agentMode: 'build',
             promptFingerprint: 'abc123def456',
-        }));
+        }] }));
 
-        const persisted = state.get<{ records: Array<{ agentMode?: string; promptFingerprint?: string }> }>(STORAGE_KEY);
-        expect(persisted?.records[0]?.agentMode).to.equal('build');
-        expect(persisted?.records[0]?.promptFingerprint).to.equal('abc123def456');
+        const persisted = state.get<{ records: Array<{ cacheRequests?: Array<{ agentMode?: string; promptFingerprint?: string }> }> }>(STORAGE_KEY);
+        expect(persisted?.records[0]?.cacheRequests?.[0]?.agentMode).to.equal('build');
+        expect(persisted?.records[0]?.cacheRequests?.[0]?.promptFingerprint).to.equal('abc123def456');
     });
 
     it('uses provider-call samples for true request rates and every required grouping dimension', () => {

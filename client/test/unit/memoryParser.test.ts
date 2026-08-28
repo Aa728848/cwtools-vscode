@@ -27,6 +27,7 @@ describe('MemoryParser topic storage', () => {
             key: 'namespace convention',
             content: 'Use foo namespace for test events.',
             priority: 'normal',
+            domain: 'paradox',
         });
 
         const topicMemoryPath = path.join(workspaceRoot, '.cwtools', 'topic_123', '.cwtools-memory.md');
@@ -43,6 +44,7 @@ describe('MemoryParser topic storage', () => {
             key: 'private convention',
             content: 'Use namespace alpha. token=sk-abcdefghijklmnopqrstuvwxyz123456',
             priority: 'high',
+            domain: 'paradox',
             confidence: 0.95,
             source: 'run:test',
         });
@@ -50,6 +52,7 @@ describe('MemoryParser topic storage', () => {
             key: 'expired fact',
             content: 'This should disappear.',
             priority: 'low',
+            domain: 'paradox',
             expiresAt: Date.now() - 1,
         });
 
@@ -57,7 +60,7 @@ describe('MemoryParser topic storage', () => {
         const beforeContent = fs.readFileSync(jsonPath, 'utf8');
         const beforeMtime = fs.statSync(jsonPath).mtimeMs;
 
-        const prompt = parser.getMemoryPrompt();
+        const prompt = parser.getMemoryPrompt(undefined, { domain: 'paradox' });
         expect(prompt).to.include('private convention');
         expect(prompt).to.include('[REDACTED_API_KEY]');
         expect(prompt).to.not.include('expired fact');
@@ -118,15 +121,18 @@ describe('MemoryParser topic storage', () => {
                 key: `filler fact ${i}`,
                 content: `Unrelated filler content number ${i} about bananas.`,
                 priority: 'low',
+                domain: 'paradox',
             });
         }
         await parser.appendMemory({
             key: 'stellaris event namespace',
             content: 'Use the foo namespace for stellaris events.',
             priority: 'low',
+            domain: 'paradox',
         });
 
         const prompt = parser.getMemoryPrompt('topic_topk', {
+            domain: 'paradox',
             taskText: 'add a stellaris event in namespace foo',
             gameId: 'stellaris',
         });
@@ -148,9 +154,10 @@ describe('MemoryParser topic storage', () => {
                 key: `high fact ${i}`,
                 content: `H${i}-` + 'x'.repeat(2400),
                 priority: 'high',
+                domain: 'paradox',
             });
         }
-        await parser.appendMemory({ key: 'normal fact', content: 'n'.repeat(1000), priority: 'normal' });
+        await parser.appendMemory({ key: 'normal fact', content: 'n'.repeat(1000), priority: 'normal', domain: 'paradox' });
 
         const structured = JSON.parse(fs.readFileSync(parser.getStructuredMemoryFilePath(), 'utf8'));
         const totalSize = structured.entries.reduce(
@@ -169,12 +176,12 @@ describe('MemoryParser topic storage', () => {
     it('counts usage only on explicit reference and persists debounced', async () => {
         const { MemoryParser } = loadMemoryParserModule();
         const parser = new MemoryParser(workspaceRoot, 'topic_usage');
-        await parser.appendMemory({ key: 'alpha rule', content: 'Always alpha.', priority: 'normal' });
-        await parser.appendMemory({ key: 'beta rule', content: 'Always beta.', priority: 'normal' });
+        await parser.appendMemory({ key: 'alpha rule', content: 'Always alpha.', priority: 'normal', domain: 'paradox' });
+        await parser.appendMemory({ key: 'beta rule', content: 'Always beta.', priority: 'normal', domain: 'paradox' });
         const jsonPath = parser.getStructuredMemoryFilePath();
 
         // Prompt building alone must not count usage.
-        parser.getMemoryPrompt();
+        parser.getMemoryPrompt(undefined, { domain: 'paradox' });
         let entries = JSON.parse(fs.readFileSync(jsonPath, 'utf8')).entries;
         expect(entries.every((entry: { usageCount?: number }) => (entry.usageCount ?? 0) === 0)).to.equal(true);
 
@@ -197,7 +204,7 @@ describe('MemoryParser topic storage', () => {
     it('debounces usage persistence and coalesces repeated marks', async () => {
         const { MemoryParser } = loadMemoryParserModule();
         const parser = new MemoryParser(workspaceRoot, 'topic_debounce');
-        await parser.appendMemory({ key: 'gamma rule', content: 'Always gamma.', priority: 'normal' });
+        await parser.appendMemory({ key: 'gamma rule', content: 'Always gamma.', priority: 'normal', domain: 'paradox' });
         const jsonPath = parser.getStructuredMemoryFilePath();
 
         const originalDebounce = MemoryParser.usagePersistDebounceMs;
@@ -223,17 +230,17 @@ describe('MemoryParser topic storage', () => {
     it('marks entries stale and excludes them from prompts until revalidated', async () => {
         const { MemoryParser } = loadMemoryParserModule();
         const parser = new MemoryParser(workspaceRoot, 'topic_stale');
-        await parser.appendMemory({ key: 'rules depend on vanilla', content: 'CW rules v1.', priority: 'high' });
-        await parser.appendMemory({ key: 'user preference', content: 'Prefers tabs.', priority: 'normal', source: 'user:instruction' });
+        await parser.appendMemory({ key: 'rules depend on vanilla', content: 'CW rules v1.', priority: 'high', domain: 'paradox' });
+        await parser.appendMemory({ key: 'user preference', content: 'Prefers tabs.', priority: 'normal', domain: 'paradox', source: 'user:instruction' });
 
         expect(parser.markMemoryStale(undefined, entry => entry.key.includes('rules'))).to.equal(1);
 
-        let prompt = parser.getMemoryPrompt();
+        let prompt = parser.getMemoryPrompt(undefined, { domain: 'paradox' });
         expect(prompt).to.not.include('rules depend on vanilla');
         expect(prompt).to.include('user preference');
 
         // Opt-in: stale entries are annotated instead of excluded.
-        prompt = parser.getMemoryPrompt(undefined, { includeStale: true });
+        prompt = parser.getMemoryPrompt(undefined, { domain: 'paradox', includeStale: true });
         expect(prompt).to.include('rules depend on vanilla');
         expect(prompt).to.include('stale=true');
 
@@ -241,8 +248,8 @@ describe('MemoryParser topic storage', () => {
         expect(entries.find((entry: { key: string }) => entry.key === 'rules depend on vanilla').stale).to.equal(true);
 
         // Re-saving the key revalidates it (clears the stale flag).
-        await parser.appendMemory({ key: 'rules depend on vanilla', content: 'CW rules v2.', priority: 'high' });
-        prompt = parser.getMemoryPrompt();
+        await parser.appendMemory({ key: 'rules depend on vanilla', content: 'CW rules v2.', priority: 'high', domain: 'paradox' });
+        prompt = parser.getMemoryPrompt(undefined, { domain: 'paradox' });
         expect(prompt).to.include('CW rules v2.');
         expect(prompt).to.not.include('stale=true');
     });
@@ -251,14 +258,14 @@ describe('MemoryParser topic storage', () => {
         const { MemoryParser } = loadMemoryParserModule();
         const first = new MemoryParser(workspaceRoot, 'topic_project_a');
         const second = new MemoryParser(workspaceRoot, 'topic_project_b');
-        await first.appendMemory({ key: 'project rule a', content: 'Old rule A.', priority: 'normal', source: 'project-docs' });
-        await first.appendMemory({ key: 'user preference a', content: 'Keep tabs.', priority: 'normal', source: 'user:instruction' });
-        await second.appendMemory({ key: 'project rule b', content: 'Old rule B.', priority: 'normal', source: 'project-profile' });
+        await first.appendMemory({ key: 'project rule a', content: 'Old rule A.', priority: 'normal', domain: 'paradox', source: 'project-docs' });
+        await first.appendMemory({ key: 'user preference a', content: 'Keep tabs.', priority: 'normal', domain: 'paradox', source: 'user:instruction' });
+        await second.appendMemory({ key: 'project rule b', content: 'Old rule B.', priority: 'normal', domain: 'paradox', source: 'project-profile' });
 
         expect(MemoryParser.markWorkspaceProjectFactsStale(workspaceRoot)).to.equal(2);
-        expect(first.getMemoryPrompt()).to.not.include('project rule a');
-        expect(first.getMemoryPrompt()).to.include('user preference a');
-        expect(second.getMemoryPrompt()).to.not.include('project rule b');
+        expect(first.getMemoryPrompt(undefined, { domain: 'paradox' })).to.not.include('project rule a');
+        expect(first.getMemoryPrompt(undefined, { domain: 'paradox' })).to.include('user preference a');
+        expect(second.getMemoryPrompt(undefined, { domain: 'paradox' })).to.not.include('project rule b');
     });
 
     it('queues stale project facts for metadata-only revalidation on a later task', async () => {
@@ -268,12 +275,14 @@ describe('MemoryParser topic storage', () => {
             key: 'stellaris event namespace',
             content: 'The old namespace is obsolete and must never be injected.',
             priority: 'high',
+            domain: 'paradox',
             source: 'events/project_events.txt',
             revision: 'sha256:old',
         });
 
         parser.markMemoryStale(undefined, undefined, 'events_file_changed');
         const prompt = parser.getMemoryPrompt(undefined, {
+            domain: 'paradox',
             taskText: 'update the stellaris event namespace',
             gameId: 'stellaris',
         });
@@ -285,6 +294,7 @@ describe('MemoryParser topic storage', () => {
         expect(prompt).to.not.include('The old namespace is obsolete');
 
         const unrelatedPrompt = parser.getMemoryPrompt(undefined, {
+            domain: 'paradox',
             taskText: 'translate a localisation tooltip',
             gameId: 'stellaris',
         });
@@ -298,6 +308,7 @@ describe('MemoryParser topic storage', () => {
             key: 'project namespace',
             content: 'Use old namespace.',
             priority: 'normal',
+            domain: 'paradox',
             source: 'events/project_events.txt',
             revision: 'sha256:old',
         });
@@ -307,6 +318,7 @@ describe('MemoryParser topic storage', () => {
             key: 'project namespace',
             content: 'Use new namespace.',
             priority: 'normal',
+            domain: 'paradox',
             source: 'run:revalidation-run',
             revision: 'sha256:new',
         });
@@ -318,6 +330,7 @@ describe('MemoryParser topic storage', () => {
             key: 'project namespace',
             content: 'Use new namespace.',
             priority: 'normal',
+            domain: 'paradox',
             source: 'run:revalidation-run',
             revision: 'sha256:new',
         }, undefined, { authoritativeProjectRevision: currentProjectRevision });
@@ -331,8 +344,8 @@ describe('MemoryParser topic storage', () => {
             projectRevision: currentProjectRevision,
         });
         expect(entries[0].stale).to.equal(undefined);
-        expect(parser.getMemoryPrompt(undefined, { taskText: 'project namespace' })).to.include('Use new namespace.');
-        expect(parser.getMemoryPrompt(undefined, { taskText: 'project namespace' })).to.not.include('<stale-project-memory>');
+        expect(parser.getMemoryPrompt(undefined, { domain: 'paradox', taskText: 'project namespace' })).to.include('Use new namespace.');
+        expect(parser.getMemoryPrompt(undefined, { domain: 'paradox', taskText: 'project namespace' })).to.not.include('<stale-project-memory>');
     });
 
     it('lazily invalidates an inactive topic after the workspace revision advances', () => {
@@ -355,11 +368,11 @@ describe('MemoryParser topic storage', () => {
 
         MemoryParser.advanceWorkspaceProjectRevision(workspaceRoot, 'project_changed_while_topic_inactive');
         const parser = new MemoryParser(workspaceRoot, 'topic_inactive');
-        const prompt = parser.getMemoryPrompt(undefined, { taskText: 'inactive project fact' });
+        const prompt = parser.getMemoryPrompt(undefined, { domain: 'paradox', taskText: 'inactive project fact' });
 
         expect(prompt).to.include('<stale-project-memory>');
         expect(prompt).to.not.include('This value belongs to the old project revision.');
-        const auditPrompt = parser.getMemoryPrompt(undefined, { includeStale: true });
+        const auditPrompt = parser.getMemoryPrompt(undefined, { domain: 'paradox', includeStale: true });
         expect(auditPrompt).to.include('stale=true');
     });
 
@@ -370,6 +383,7 @@ describe('MemoryParser topic storage', () => {
             key: 'session-bound project fact',
             content: 'Value observed before the extension restarted.',
             priority: 'normal',
+            domain: 'paradox',
             source: 'project-profile',
             kind: 'project_fact',
         });
@@ -378,7 +392,7 @@ describe('MemoryParser topic storage', () => {
 
         const restartedModule = loadMemoryParserModule();
         const restartedParser = new restartedModule.MemoryParser(workspaceRoot, 'topic_restart');
-        const prompt = restartedParser.getMemoryPrompt(undefined, { taskText: 'session-bound project fact' });
+        const prompt = restartedParser.getMemoryPrompt(undefined, { domain: 'paradox', taskText: 'session-bound project fact' });
 
         expect(prompt).to.include('<stale-project-memory>');
         expect(prompt).to.not.include('Value observed before the extension restarted.');
@@ -404,7 +418,7 @@ describe('MemoryParser topic storage', () => {
             'utf8',
         );
 
-        const prompt = parser.getMemoryPrompt('topic_obsolete');
+        const prompt = parser.getMemoryPrompt('topic_obsolete', { domain: 'paradox' });
         expect(prompt).to.equal('');
     });
 
@@ -413,33 +427,33 @@ describe('MemoryParser topic storage', () => {
         const first = new MemoryParser(workspaceRoot, 'topic_cas');
         const second = new MemoryParser(workspaceRoot, 'topic_cas');
         const [one, two] = await Promise.all([
-            first.appendMemory({ key: 'shared', content: 'one', priority: 'normal' }),
-            second.appendMemory({ key: 'shared', content: 'two', priority: 'normal' }),
+            first.appendMemory({ key: 'shared', content: 'one', priority: 'normal', domain: 'paradox' }),
+            second.appendMemory({ key: 'shared', content: 'two', priority: 'normal', domain: 'paradox' }),
         ]);
         expect([one.storeRevision, two.storeRevision].sort()).to.deep.equal([1, 2]);
 
         const conflict = await first.appendMemory(
-            { key: 'shared', content: 'stale update', priority: 'normal' },
+            { key: 'shared', content: 'stale update', priority: 'normal', domain: 'paradox' },
             'topic_cas',
             { expectedRevision: 1 },
         );
         expect(conflict.success).to.equal(false);
         expect(conflict.storeRevision).to.equal(2);
-        expect(first.getMemoryPrompt('topic_cas')).to.not.include('stale update');
+        expect(first.getMemoryPrompt('topic_cas', { domain: 'paradox' })).to.not.include('stale update');
     });
 
     it('archives memory from recall and exposes a metadata-only retrieval trace', async () => {
         const { MemoryParser } = loadMemoryParserModule();
         const parser = new MemoryParser(workspaceRoot, 'topic_trace');
-        const saved = await parser.appendMemory({ key: 'trace key', content: 'recallable value', priority: 'normal' });
-        expect(parser.getMemoryPrompt('topic_trace', { taskText: 'trace key' })).to.include('recallable value');
+        const saved = await parser.appendMemory({ key: 'trace key', content: 'recallable value', priority: 'normal', domain: 'paradox' });
+        expect(parser.getMemoryPrompt('topic_trace', { domain: 'paradox', taskText: 'trace key' })).to.include('recallable value');
         const trace = parser.getRecallTrace('topic_trace');
         expect(trace?.selected[0]).to.include({ key: 'trace key', storeRevision: 1 });
         expect(JSON.stringify(trace)).to.not.include('recallable value');
 
         const archived = await parser.forgetMemory('trace key', 'paradox', 'archive', 'topic_trace', saved.storeRevision);
         expect(archived.success).to.equal(true);
-        expect(parser.getMemoryPrompt('topic_trace', { taskText: 'trace key' })).to.not.include('recallable value');
+        expect(parser.getMemoryPrompt('topic_trace', { domain: 'paradox', taskText: 'trace key' })).to.not.include('recallable value');
         expect(parser.getRecallTrace('topic_trace')?.excluded.archived).to.equal(1);
     });
 });

@@ -57,12 +57,6 @@ export function getPrivateTopicStorageDir(topicId: string | undefined, fallbackW
     return path.join(privateAgentStorageRoot, 'topics', safeTopicId);
 }
 
-/** The single configured private topic location. */
-export function getPrivateTopicStorageDirCandidates(topicId: string | undefined, fallbackWorkspaceRoot = ''): string[] {
-    const topicDir = getPrivateTopicStorageDir(topicId, fallbackWorkspaceRoot);
-    return topicDir ? [topicDir] : [];
-}
-
 /** The configured directory whose children are topic IDs. */
 export function getPrivateTopicRoot(fallbackWorkspaceRoot = ''): string {
     return privateAgentStorageRoot
@@ -150,39 +144,10 @@ export function getAiStorageRoot(fallbackWorkspaceRoot = ''): string {
     return workspaceRoot ? path.join(workspaceRoot, '.cwtools') : '';
 }
 
-export function getAiStorageRootCandidates(fallbackWorkspaceRoot = ''): string[] {
-    const primary = getAiStorageRoot(fallbackWorkspaceRoot);
-    return primary ? [primary] : [];
-}
-
 export function getTopicStorageDir(topicId: string | undefined, fallbackWorkspaceRoot = ''): string {
     const safeTopicId = (topicId || 'default').replace(/[^a-zA-Z0-9_.-]/g, '_');
     const aiRoot = getAiStorageRoot(fallbackWorkspaceRoot);
     return aiRoot ? path.join(aiRoot, safeTopicId) : '';
-}
-
-export function getTopicStorageDirCandidates(topicId: string | undefined, fallbackWorkspaceRoot = ''): string[] {
-    const safeTopicId = (topicId || 'default').replace(/[^a-zA-Z0-9_.-]/g, '_');
-    return getAiStorageRootCandidates(fallbackWorkspaceRoot).map(root => path.join(root, safeTopicId));
-}
-
-export function getTopicFileCandidates(topicId: string | undefined, fileName: string, fallbackWorkspaceRoot = ''): string[] {
-    return getTopicStorageDirCandidates(topicId, fallbackWorkspaceRoot).map(dir => path.join(dir, fileName));
-}
-
-/** Private topic file candidates from the single configured storage root. */
-export function getPrivateTopicFileCandidates(topicId: string | undefined, fileName: string, fallbackWorkspaceRoot = ''): string[] {
-    return getPrivateTopicStorageDirCandidates(topicId, fallbackWorkspaceRoot).map(dir => path.join(dir, fileName));
-}
-
-export function getExistingTopicFilePath(topicId: string | undefined, fileName: string, fallbackWorkspaceRoot = ''): string {
-    const candidates = getTopicFileCandidates(topicId, fileName, fallbackWorkspaceRoot);
-    return candidates.find(candidate => fs.existsSync(candidate)) ?? candidates[0] ?? '';
-}
-
-export function getExistingPrivateTopicFilePath(topicId: string | undefined, fileName: string, fallbackWorkspaceRoot = ''): string {
-    const candidates = getPrivateTopicFileCandidates(topicId, fileName, fallbackWorkspaceRoot);
-    return candidates.find(candidate => fs.existsSync(candidate)) ?? candidates[0] ?? '';
 }
 
 export function getScratchDir(fallbackWorkspaceRoot = ''): string {

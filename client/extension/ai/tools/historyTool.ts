@@ -1,7 +1,7 @@
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import type { AgentRuntimeDomain, ChatMessage, HistorySearchArgs, HistorySearchResult } from '../types';
+import type { ChatMessage, HistorySearchArgs, HistorySearchResult } from '../types';
 import { contentToString } from '../types';
 import { getPrivateAiStorageRoot } from '../workspacePaths';
 import { getHistoryPolicy } from '../runner/historyPolicy';
@@ -98,7 +98,7 @@ function loadDocuments(files: readonly TranscriptFile[], includeToolResults: boo
 export function searchAgentHistory(
     workspaceRoot: string,
     args: HistorySearchArgs,
-    context: { topicId?: string; domain?: AgentRuntimeDomain } = {},
+    context: { topicId?: string } = {},
 ): HistorySearchResult {
     const policy = getHistoryPolicy();
     if (policy.persistence !== 'full') {

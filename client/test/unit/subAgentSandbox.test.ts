@@ -18,10 +18,10 @@ describe('SubAgentSandbox', () => {
 
     // ── 1. 沙盒构建生成校验 ──
     describe('buildSubAgentSandbox', () => {
-        it('explorer (只读角色) — 应该生成空的 writeScope', () => {
+        it('explore (只读 Profile) — 应该生成空的 writeScope', () => {
             const mockNode: TaskNode = {
                 id: 'explore_task',
-                agentType: 'explore',
+                profileName: 'explore',
                 prompt: 'scan project',
                 dependencies: [],
                 priority: 'normal',
@@ -34,10 +34,10 @@ describe('SubAgentSandbox', () => {
             expect(sandbox.writeScope).to.have.length(0); // 必须是空数组，代表物理只读
         });
 
-        it('reviewer (只读角色) — 应该生成空的 writeScope', () => {
+        it('reviewer (只读 Profile) — 应该生成空的 writeScope', () => {
             const mockNode: TaskNode = {
                 id: 'review_task',
-                agentType: 'review',
+                profileName: 'reviewer',
                 prompt: 'verify diagnostics',
                 dependencies: [],
                 priority: 'normal',
@@ -50,10 +50,10 @@ describe('SubAgentSandbox', () => {
             expect(sandbox.writeScope).to.have.length(0);
         });
 
-        it('locWriter — 应该将 writeScope 限制为 localisation', () => {
+        it('localization-writer — 应该将 writeScope 限制为 localisation', () => {
             const mockNode: TaskNode = {
                 id: 'loc_task',
-                agentType: 'loc_writer',
+                profileName: 'localization-writer',
                 prompt: 'translate keys',
                 dependencies: [],
                 priority: 'normal',
@@ -65,10 +65,10 @@ describe('SubAgentSandbox', () => {
             expect(sandbox.writeScope).to.include('localisation');
         });
 
-        it('guiExpert — 应该将 writeScope 限制为 .gui', () => {
+        it('gui-expert — 应该将 writeScope 限制为 .gui', () => {
             const mockNode: TaskNode = {
                 id: 'gui_task',
-                agentType: 'gui_expert',
+                profileName: 'gui-expert',
                 prompt: 'layout interfaces',
                 dependencies: [],
                 priority: 'normal',
@@ -83,7 +83,7 @@ describe('SubAgentSandbox', () => {
         it('plannedFiles 驱动 — 应该将指定的计划文件映射到 writeScope', () => {
             const mockNode: TaskNode = {
                 id: 'builder_task',
-                agentType: 'build',
+                profileName: 'paradox-coder',
                 prompt: 'implement events',
                 plannedFiles: ['common/events/test_event.txt', 'interface/gfx.gui'],
                 dependencies: [],
@@ -102,7 +102,7 @@ describe('SubAgentSandbox', () => {
         it('lets general build workers write workspace files when plannedFiles are omitted', () => {
             const mockNode: TaskNode = {
                 id: 'unplanned_builder_task',
-                agentType: 'build',
+                profileName: 'paradox-coder',
                 prompt: 'implement script values',
                 dependencies: [],
                 priority: 'normal',
@@ -124,11 +124,10 @@ describe('SubAgentSandbox', () => {
 
     // ── 2. 沙盒物理拦截逻辑校验 ──
     describe('enforceSubAgentSafety', () => {
-        it('blocks localisation paths that the user retained, regardless of writer role', () => {
+        it('blocks localisation paths that the user retained, regardless of writable profile', () => {
             const sandbox = {
                 agentId: 'user_owned_localisation',
-                role: 'build',
-                runtimeProfileName: 'paradox-coder',
+                profileName: 'paradox-coder',
                 deniedWriteScopes: ['localisation'],
                 permissionPolicy: 'delegate_to_parent' as const,
             };
@@ -161,8 +160,7 @@ describe('SubAgentSandbox', () => {
         it('只读沙盒调用写入类工具时应该直接被物理拦截', () => {
             const sandbox = {
                 agentId: 'explorer_test',
-                role: 'explore',
-                runtimeProfileName: 'explore',
+                profileName: 'explore',
                 writeScope: [], // 空数组
                 permissionPolicy: 'deny' as const
             };
@@ -172,11 +170,10 @@ describe('SubAgentSandbox', () => {
             expect(result.reason).to.include('is read-only and cannot call file-writing tool');
         });
 
-        it('locWriter 沙盒写入越权路径应该被拦截，写入本地化文件顺利放行', () => {
+        it('localization-writer 沙盒写入越权路径应该被拦截，写入本地化文件顺利放行', () => {
             const sandbox = {
                 agentId: 'loc_test',
-                role: 'locWriter',
-                runtimeProfileName: 'localization-writer',
+                profileName: 'localization-writer',
                 writeScope: ['localisation'],
                 permissionPolicy: 'deny' as const
             };
@@ -191,11 +188,10 @@ describe('SubAgentSandbox', () => {
             expect(goodResult.allowed).to.be.true;
         });
 
-        it('guiExpert 沙盒写入非 gui 后缀文件应该被拦截，写入 gui 界面文件顺利放行', () => {
+        it('gui-expert 沙盒写入非 gui 后缀文件应该被拦截，写入 gui 界面文件顺利放行', () => {
             const sandbox = {
                 agentId: 'gui_test',
-                role: 'guiExpert',
-                runtimeProfileName: 'gui-expert',
+                profileName: 'gui-expert',
                 writeScope: ['.gui'],
                 permissionPolicy: 'deny' as const
             };
@@ -212,8 +208,7 @@ describe('SubAgentSandbox', () => {
         it('keeps command and parent-owned tools blocked for sub-agents', () => {
             const sandbox = {
                 agentId: 'super_builder',
-                role: 'builder',
-                runtimeProfileName: 'paradox-coder',
+                profileName: 'paradox-coder',
                 writeScope: ['*'], // 全放通写入
                 permissionPolicy: 'deny' as const
             };
@@ -230,8 +225,7 @@ describe('SubAgentSandbox', () => {
         it('blocks non-file-scoped mutating tools in read-only sub-agent sandboxes', () => {
             const sandbox = {
                 agentId: 'readonly_state_tool',
-                role: 'explore',
-                runtimeProfileName: 'explore',
+                profileName: 'explore',
                 writeScope: [],
                 permissionPolicy: 'deny' as const
             };
@@ -250,8 +244,7 @@ describe('SubAgentSandbox', () => {
         it('allows writable workers to store topic walkthrough artifacts', () => {
             const sandbox = {
                 agentId: 'builder_topic_artifact',
-                role: 'build',
-                runtimeProfileName: 'paradox-coder',
+                profileName: 'paradox-coder',
                 writeScope: ['common/buildings/samplemod_buildings.txt', '.cwtools'],
                 permissionPolicy: 'delegate_to_parent' as const
             };
@@ -270,8 +263,7 @@ describe('SubAgentSandbox', () => {
         it('directory-scope-from-file：放行同目录兄弟文件写入', () => {
             const sandbox = {
                 agentId: 'builder_sibling',
-                role: 'build',
-                runtimeProfileName: 'paradox-coder',
+                profileName: 'paradox-coder',
                 writeScope: ['common/buildings/samplemod_buildings.txt', '.cwtools'],
                 permissionPolicy: 'delegate_to_parent' as const
             };
@@ -286,8 +278,7 @@ describe('SubAgentSandbox', () => {
         it('子串逃逸：拒绝 common/buildings_evil（防前缀截断绕过）', () => {
             const sandbox = {
                 agentId: 'builder_escape',
-                role: 'build',
-                runtimeProfileName: 'paradox-coder',
+                profileName: 'paradox-coder',
                 writeScope: ['common/buildings/samplemod_buildings.txt'],
                 permissionPolicy: 'delegate_to_parent' as const
             };
@@ -299,8 +290,7 @@ describe('SubAgentSandbox', () => {
         it('.cwtools 前缀边界：拒绝相似目录，仅精确或 / 前缀放行', () => {
             const sandbox = {
                 agentId: 'builder_topic_boundary',
-                role: 'build',
-                runtimeProfileName: 'paradox-coder',
+                profileName: 'paradox-coder',
                 writeScope: ['.cwtools'],
                 permissionPolicy: 'delegate_to_parent' as const
             };
@@ -313,8 +303,7 @@ describe('SubAgentSandbox', () => {
         it('平台条件折叠：Windows 大小写无关、Linux 区分大小写', () => {
             const sandbox = {
                 agentId: 'builder_case',
-                role: 'build',
-                runtimeProfileName: 'paradox-coder',
+                profileName: 'paradox-coder',
                 writeScope: ['common/buildings/samplemod_buildings.txt'],
                 permissionPolicy: 'delegate_to_parent' as const
             };
@@ -330,8 +319,7 @@ describe('SubAgentSandbox', () => {
         it('非写入且无害的工具，应该在默认沙盒下放行', () => {
             const sandbox = {
                 agentId: 'builder_read',
-                role: 'builder',
-                runtimeProfileName: 'paradox-coder',
+                profileName: 'paradox-coder',
                 writeScope: ['common/events.txt'],
                 permissionPolicy: 'deny' as const
             };
@@ -344,8 +332,7 @@ describe('SubAgentSandbox', () => {
             const workspaceRoot = process.cwd();
             const sandbox = {
                 agentId: 'plan_card_editor',
-                role: 'plan',
-                runtimeProfileName: 'planner',
+                profileName: 'planner',
                 writeScope: [],
                 permissionPolicy: 'deny' as const
             };

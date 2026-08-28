@@ -39,20 +39,6 @@ Executable statements may be order-sensitive. Preserve source order unless curre
 - If Shader tools fail, report it and remain read-only; never guess semantics.
 `;
 
-/**
- * Compatibility exports retain the previous module surface without retaining
- * separate game fact blocks. Every profile now shares the same evidence policy.
- */
-export const STELLARIS_KNOWLEDGE = PARADOX_KNOWLEDGE;
-export const HOI4_KNOWLEDGE = PARADOX_KNOWLEDGE;
-export const EU4_KNOWLEDGE = PARADOX_KNOWLEDGE;
-export const CK2_KNOWLEDGE = PARADOX_KNOWLEDGE;
-export const CK3_KNOWLEDGE = PARADOX_KNOWLEDGE;
-export const VIC2_KNOWLEDGE = PARADOX_KNOWLEDGE;
-export const VIC3_KNOWLEDGE = PARADOX_KNOWLEDGE;
-export const IMPERATOR_KNOWLEDGE = PARADOX_KNOWLEDGE;
-export const EU5_KNOWLEDGE = PARADOX_KNOWLEDGE;
-
 /** Return a stable policy header; all mutable facts are queried at run time. */
 export function getGameKnowledge(languageId: string): string {
     const profile = getKnownProfileByLanguageId(languageId);

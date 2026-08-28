@@ -27,7 +27,9 @@ describe('AgentUiBroadcaster', () => {
         const payload: HostMessage = {
             type: 'setSchedulingState',
             schedulingState: {
+                profileName: 'paradox-agent',
                 domainProfile: 'paradox', authorization: 'workspace_write', phase: 'execute', dispatch: 'single',
+                overlays: [],
                 routeConfidence: 1, routeEvidence: ['test'], phaseReason: 'test', revision: 0,
             },
         };
@@ -62,7 +64,9 @@ describe('AgentUiBroadcaster', () => {
         const payload: HostMessage = {
             type: 'setSchedulingState',
             schedulingState: {
+                profileName: 'paradox-agent',
                 domainProfile: 'paradox', authorization: 'plan_write_only', phase: 'plan', dispatch: 'single',
+                overlays: ['planning'],
                 routeConfidence: 1, routeEvidence: ['test'], phaseReason: 'test', revision: 0,
             },
         };

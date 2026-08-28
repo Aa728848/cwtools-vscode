@@ -256,8 +256,6 @@ describe('compaction efficiency (unified summary plan §5.1)', () => {
             input: 0,
             output: 0,
             estimatedCostCny: 0,
-            agentMode: 'build',
-            toolFocus: 'discovery',
         };
         const { aiService, getCalls } = makeAiServiceStub(4_000, () => ({
             ...defaultResponse(),
@@ -268,7 +266,7 @@ describe('compaction efficiency (unified summary plan §5.1)', () => {
             makeSpacedHistory(8, 2_000),
             () => undefined,
             { aiService, promptBuilder: promptBuilderStub },
-            runnerOptions,
+            { ...runnerOptions, agentMode: 'build', toolFocus: 'discovery' },
             accumulator,
             undefined,
             { force: true },

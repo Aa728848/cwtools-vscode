@@ -13,7 +13,7 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
-import type { AgentMode, AgentToolName } from './types';
+import type { AgentExecutionStrategy, AgentIntent, AgentRuntimeDomain, AgentToolName } from './types';
 import { getProjectWorkspaceRoot } from './workspacePaths';
 import { TOOL_REGISTRY } from './tools/registry';
 
@@ -32,10 +32,17 @@ export interface WorkflowContextRequirement {
 /** Controls which tools are available during workflow execution. */
 export interface WorkflowToolPolicy {
 	/** If 'allowlist', only the listed tools are available.
-	 *  If 'blocklist', listed tools are excluded from the default mode set. */
+	 *  If 'blocklist', listed tools are excluded from the scheduled profile's default set. */
 	strategy: 'allowlist' | 'blocklist';
 	/** Tool names to allow or block. */
 	tools: AgentToolName[];
+}
+
+export interface WorkflowSchedulingProfile {
+	domain: AgentRuntimeDomain;
+	intent: Exclude<AgentIntent, 'auto'>;
+	strategy: Exclude<AgentExecutionStrategy, 'auto'>;
+	profileName?: string;
 }
 
 /** A discrete phase within a workflow (for UI display and progress tracking). */
@@ -70,8 +77,8 @@ export interface AiWorkflow {
 	title: string;
 	/** Short description for display in the chat panel and command palette. */
 	description: string;
-	/** The agent mode this workflow runs in. */
-	mode: AgentMode;
+	/** Explicit routing profile used to create the canonical scheduling state. */
+	scheduling: WorkflowSchedulingProfile;
 	/** Context requirements that must be satisfied before launching. */
 	requiredContext: WorkflowContextRequirement[];
 	/** Tool access policy for the entire workflow. */
@@ -80,7 +87,7 @@ export interface AiWorkflow {
 	phases: WorkflowPhase[];
 	/** Verification steps to check before marking the workflow complete. */
 	verification: WorkflowVerificationStep[];
-	/** Optional: system prompt supplement injected before the mode prompt. */
+	/** Optional system prompt supplement injected for this workflow. */
 	promptSupplement?: string;
 }
 
@@ -88,7 +95,10 @@ export interface WorkflowSaveInput {
 	id?: string;
 	title: string;
 	description: string;
-	mode?: AgentMode;
+	domain: AgentRuntimeDomain;
+	intent: Exclude<AgentIntent, 'auto'>;
+	strategy: Exclude<AgentExecutionStrategy, 'auto'>;
+	profileName?: string;
 	promptSupplement: string;
 	allowedTools?: AgentToolName[];
 	blockedTools?: AgentToolName[];
@@ -128,7 +138,7 @@ registerWorkflow({
 	id: 'diagnostic-fix',
 	title: 'Diagnostic Fix',
 	description: 'Automatically fix CWTools LSP diagnostics in the current file or workspace.',
-	mode: 'build',
+	scheduling: { domain: 'paradox', intent: 'execute', strategy: 'single' },
 	requiredContext: [
 		{
 			kind: 'diagnostics',
@@ -205,7 +215,7 @@ registerWorkflow({
 	id: 'loc-generation',
 	title: 'Localisation Generation',
 	description: 'Generate missing localisation entries for new or existing game entities.',
-	mode: 'build',
+	scheduling: { domain: 'paradox', intent: 'execute', strategy: 'single' },
 	requiredContext: [
 		{
 			kind: 'workspace',
@@ -264,7 +274,7 @@ registerWorkflow({
 	id: 'event-chain-design',
 	title: 'Event Chain Design',
 	description: 'Design and plan a new event chain with common/ subsystem review, scope chains, rewards, and dependencies.',
-	mode: 'plan',
+	scheduling: { domain: 'paradox', intent: 'plan', strategy: 'single' },
 	requiredContext: [
 		{
 			kind: 'workspace',
@@ -349,7 +359,7 @@ registerWorkflow({
 	id: 'rules-sync-review',
 	title: 'Rules Sync Review',
 	description: 'Review the project after a CWTools rules update to identify new or changed diagnostics.',
-	mode: 'review',
+	scheduling: { domain: 'paradox', intent: 'review', strategy: 'single' },
 	requiredContext: [
 		{
 			kind: 'workspace',
@@ -400,7 +410,7 @@ registerWorkflow({
 	id: 'asset-wiring',
 	title: 'Asset Wiring',
 	description: 'Find and wire sprite/sound assets to entities with missing or invalid references.',
-	mode: 'build',
+	scheduling: { domain: 'paradox', intent: 'execute', strategy: 'single' },
 	requiredContext: [
 		{
 			kind: 'diagnostics',
@@ -463,9 +473,9 @@ registerWorkflow({
 // ─── Query helpers ───────────────────────────────────────────────────────────
 
 // Project workflow files:
-// .cwtools/workflows/<id>.md or .agents/workflows/<id>.md
-// Frontmatter keys: id, title, description, mode, allowed-tools, blocked-tools,
-// required-context, verification-tool.
+// .cwtools/workflows/<id>.md
+// Frontmatter keys: id, title, description, domain, intent, strategy, profile,
+// allowed-tools, blocked-tools, required-context, verification-tool.
 function parseWorkflowFrontmatter(content: string): { meta: Record<string, string>; body: string } {
 	const normalized = content.replace(/^\uFEFF/, '');
 	if (!normalized.startsWith('---')) return { meta: {}, body: normalized.trim() };
@@ -493,10 +503,21 @@ function splitCsv(value: string | undefined): string[] {
 	return value.split(/[,\n]/).map(v => v.trim()).filter(Boolean);
 }
 
-function parseMode(value: string | undefined): AgentMode {
-    const mode = (value || 'build').trim() as AgentMode;
-    if (['build', 'plan', 'explore', 'utility', 'review', 'orchestrator', 'script'].includes(mode)) return mode;
-    return 'build';
+function parseSchedulingProfile(values: {
+	domain?: string;
+	intent?: string;
+	strategy?: string;
+	profileName?: string;
+}): WorkflowSchedulingProfile | undefined {
+	const domain = values.domain?.trim();
+	const intent = values.intent?.trim();
+	const strategy = values.strategy?.trim();
+	const profileName = values.profileName?.trim();
+	if (domain !== 'paradox' && domain !== 'general' && domain !== 'hybrid') return undefined;
+	if (intent !== 'execute' && intent !== 'plan' && intent !== 'explore' && intent !== 'review') return undefined;
+	if (strategy !== 'single' && strategy !== 'multi') return undefined;
+	if (profileName && !/^[a-zA-Z0-9_.-]{1,80}$/.test(profileName)) return undefined;
+	return { domain, intent, strategy, ...(profileName ? { profileName } : {}) };
 }
 
 function parseToolList(value: string | undefined): AgentToolName[] {
@@ -544,15 +565,22 @@ function parseProjectWorkflow(filePath: string): AiWorkflow | undefined {
 		const { meta, body } = parseWorkflowFrontmatter(raw);
 		const id = (meta.id || path.basename(filePath, path.extname(filePath))).trim();
 		if (!id) return undefined;
+		const scheduling = parseSchedulingProfile({
+			domain: meta.domain,
+			intent: meta.intent,
+			strategy: meta.strategy,
+			profileName: meta.profile,
+		});
+		if (!scheduling) return undefined;
 
-		const allowedTools = parseToolList(meta['allowed-tools'] || meta.allowedtools || meta.tools);
-		const blockedTools = parseToolList(meta['blocked-tools'] || meta.blockedtools);
-		const hasAllowlist = allowedTools.length > 0 || (meta['tool-policy'] || meta.toolpolicy || '').toLowerCase() === 'allowlist';
+		const allowedTools = parseToolList(meta['allowed-tools']);
+		const blockedTools = parseToolList(meta['blocked-tools']);
+		const hasAllowlist = allowedTools.length > 0 || meta['tool-policy']?.toLowerCase() === 'allowlist';
 		const toolPolicy: WorkflowToolPolicy = hasAllowlist
 			? { strategy: 'allowlist', tools: allowedTools }
 			: { strategy: 'blocklist', tools: blockedTools };
 
-		const verificationTool = (meta['verification-tool'] || meta.verificationtool) as AgentToolName | undefined;
+		const verificationTool = meta['verification-tool'] as AgentToolName | undefined;
 		const verification: WorkflowVerificationStep[] = verificationTool && TOOL_REGISTRY.has(verificationTool as any)
 			? [{
 				id: 'verify',
@@ -566,8 +594,8 @@ function parseProjectWorkflow(filePath: string): AiWorkflow | undefined {
 			id,
 			title: meta.title || id,
 			description: meta.description || 'Project-defined workflow.',
-			mode: parseMode(meta.mode),
-			requiredContext: parseRequiredContext(meta['required-context'] || meta.requiredcontext),
+			scheduling,
+			requiredContext: parseRequiredContext(meta['required-context']),
 			toolPolicy,
 			phases: [{
 				id: 'run',
@@ -587,10 +615,7 @@ function loadProjectWorkflows(): Map<string, AiWorkflow> {
 	const workspaceRoot = getProjectWorkspaceRoot();
 	if (!workspaceRoot) return out;
 
-	const dirs = [
-		path.join(workspaceRoot, '.cwtools', 'workflows'),
-		path.join(workspaceRoot, '.agents', 'workflows'),
-	];
+	const dirs = [path.join(workspaceRoot, '.cwtools', 'workflows')];
 	for (const dir of dirs) {
 		if (!fs.existsSync(dir)) continue;
 		let entries: fs.Dirent[];
@@ -661,6 +686,15 @@ export function saveProjectWorkflow(
 	if (!promptSupplement) {
 		return { success: false, id: '', message: 'Workflow instructions are required.' };
 	}
+	const scheduling = parseSchedulingProfile({
+		domain: input.domain,
+		intent: input.intent,
+		strategy: input.strategy,
+		profileName: input.profileName,
+	});
+	if (!scheduling) {
+		return { success: false, id: '', message: 'Workflow domain, intent, strategy, or profileName is invalid.' };
+	}
 
 	const id = sanitizeWorkflowId(input.id, title);
 	const workflowDir = path.join(workspaceRoot, '.cwtools', 'workflows');
@@ -675,7 +709,6 @@ export function saveProjectWorkflow(
 		};
 	}
 
-	const mode = parseMode(input.mode);
 	const allowedTools = uniqueTools(input.allowedTools);
 	const blockedTools = uniqueTools(input.blockedTools);
 	const requiredContext = normalizeRequiredContextForSave(input.requiredContext);
@@ -688,9 +721,12 @@ export function saveProjectWorkflow(
 		`id: ${id}`,
 		`title: "${frontmatterValue(title)}"`,
 		`description: "${frontmatterValue(description)}"`,
-		`mode: ${mode}`,
+		`domain: ${scheduling.domain}`,
+		`intent: ${scheduling.intent}`,
+		`strategy: ${scheduling.strategy}`,
 		`required-context: ${requiredContext.join(', ')}`,
 	];
+	if (scheduling.profileName) frontmatter.push(`profile: ${scheduling.profileName}`);
 	const allowed = formatFrontmatterCsv(allowedTools);
 	const blocked = formatFrontmatterCsv(blockedTools);
 	if (allowed) {
@@ -750,7 +786,7 @@ export function getAllWorkflowIds(): string[] {
 /**
  * Derives the effective tool allowlist for a workflow.
  * If the workflow uses an allowlist strategy, returns those tools directly.
- * If it uses a blocklist, returns the default mode tools minus blocked ones.
+ * If it uses a blocklist, returns the scheduled profile's default tools minus blocked ones.
  */
 export function getWorkflowAllowedTools(
 	workflow: AiWorkflow,

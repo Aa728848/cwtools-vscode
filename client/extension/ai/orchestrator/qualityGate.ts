@@ -1,11 +1,11 @@
 /** 
 * Eddy CWTool Code — Quality Gate 
 * 
-* After the Builder Agent is completed, the Reviewer Agent is automatically triggered for review. 
+* After writable child profiles complete, the quality gate runs an independent review.
 * Supports multiple rounds of repair cycles (up to 3 rounds) to ensure code quality. 
 */
 
-import type { QualityGateResult, SubAgentResult, TaskGraph } from './types';
+import type { QualityGateResult, TaskGraph } from './types';
 import * as path from 'path';
 import type { AgentStep, GenerationResult, TokenUsage } from '../types';
 import { aiText } from '../messages';
@@ -49,7 +49,8 @@ export function isPdxDiagnosticFile(file: string): boolean {
 
 function isParadoxTaskGraph(graph: TaskGraph | undefined): boolean {
     if (!graph) return true;
-    return [...graph.nodes.values()].some(node => ['build', 'loc_writer', 'gui_expert'].includes(node.agentType));
+    return [...graph.nodes.values()].some(node =>
+        ['paradox-coder', 'localization-writer', 'gui-expert'].includes(node.profileName));
 }
 
 function qualityGateAbortError(signal: AbortSignal): Error {
@@ -124,8 +125,8 @@ export const SOUND_REPAIR_PROTOCOL = [
 * 
 * Workflow: 
 * 1. Builder Agent completes code generation 
-* 2. QualityGate automatically generates review prompts (based on the file list written by Builder) 
-* 3. Call Reviewer Agent to review 
+* 2. QualityGate automatically generates review prompts from written files
+* 3. Run the reviewer profile
 * 4. If a problem is found and autoFix = true: 
 * - Generate repair prompt and call Builder Agent to repair 
 * - re-examine (up to maxFixCycles rounds) 
@@ -340,7 +341,8 @@ export class QualityGate {
             throw error;
         }
         const expectedChanges = taskGraph?.metadata.featureManifest?.expectsFileChanges === true
-            || [...(taskGraph?.nodes.values() ?? [])].some(node => ['build', 'loc_writer', 'gui_expert', 'utility'].includes(node.agentType)
+            || [...(taskGraph?.nodes.values() ?? [])].some(node =>
+                ['paradox-coder', 'localization-writer', 'gui-expert', 'general-coder'].includes(node.profileName)
                 && ((node.plannedFiles?.length ?? 0) > 0 || (node.produces?.length ?? 0) > 0));
         if (writtenFiles.length === 0) {
             const acceptanceFailures = [...semantic.acceptanceFailures];
@@ -483,7 +485,6 @@ export class QualityGate {
             refreshReviewIdleTimeout();
             options.onStep?.({ ...step, agentId: QUALITY_GATE_REVIEW_AGENT_ID });
         };
-        const reviewerMode = paradoxReview ? 'script_reviewer' : 'review';
         let abortListener: (() => void) | undefined;
         const abortPromise = new Promise<never>((_, reject) => {
             abortListener = () => {
@@ -511,7 +512,7 @@ export class QualityGate {
             forwardStep({
                 type: 'subtask_start',
                 content: aiText('Starting bounded quality gate review', '启动有界质量门审查'),
-                subagentType: reviewerMode,
+                subagentProfileName: 'reviewer',
                 timestamp: Date.now(),
             });
             const runPromise = agentRunner.run(
@@ -654,28 +655,6 @@ export class QualityGate {
                 ...parsed.fixSuggestions,
             ])],
         };
-    }
-
-    // W11 fix: Removed old interface that was an exact duplicate of buildCombinedReviewPrompt functionality.
-    // The old method only exists because of the different parameter types (SubAgentResult vs string[]),
-    // Now use buildCombinedReviewPrompt(writtenFiles: string[]) uniformly.
-    /** @deprecated Use buildCombinedReviewPrompt instead */
-    buildReviewPrompt(builderResult: SubAgentResult, preFetchedDiagnostics?: string): string {
-        const files = [...new Set([
-            ...builderResult.writtenFiles,
-            ...(builderResult.handoff?.changedFiles ?? []),
-        ])].sort();
-        return [
-            this.buildCombinedReviewPrompt(files, preFetchedDiagnostics),
-            ...(builderResult.handoff ? [
-                '',
-                '## Builder structured handoff',
-                `Summary: ${builderResult.handoff.summary}`,
-                `Verification: ${builderResult.handoff.verification.join('; ') || 'not reported'}`,
-                `Unresolved: ${builderResult.handoff.unresolved.join('; ') || 'none reported'}`,
-                'Verify these claims independently; unresolved items are mandatory review targets.',
-            ] : []),
-        ].join('\n');
     }
 
     /** 

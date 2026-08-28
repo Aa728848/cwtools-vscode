@@ -134,13 +134,13 @@ describe('buildDelegationScopeStatement', () => {
         expect(build(undefined)).to.equal('');
     });
 
-    it('只读角色明确说明所有写工具都已收回', () => {
+    it('只读 Profile 明确说明所有写工具都已收回', () => {
         const text = build({ readOnly: true, writeScope: [] });
         expect(text).to.match(/read-only/i);
         expect(text).to.not.match(/You may write only inside:/);
     });
 
-    it('可写角色列出写作用域，去重且排序', () => {
+    it('可写 Profile 列出写作用域，去重且排序', () => {
         const text = build({ writeScope: ['events/b.txt', 'events/a.txt', 'events/a.txt'] });
         expect(text).to.include('events/a.txt, events/b.txt');
     });
@@ -188,7 +188,7 @@ describe('orchestration store — clarification resume metadata', () => {
 
     const nodeWith = (overrides: Partial<TaskNode>): TaskNode => ({
         id: 'explore_events',
-        agentType: 'explore',
+        profileName: 'explore',
         prompt: 'scan events',
         dependencies: [],
         priority: 'normal',
@@ -241,7 +241,7 @@ describe('buildOrchestrationCatalog', () => {
     });
 
     const record = (overrides: Partial<StoredOrchestration> = {}): StoredOrchestration => ({
-        version: 2,
+        version: 3,
         graphId: 'graph_a',
         topicId: 'topic_1',
         runId: 'run_1',
@@ -252,11 +252,11 @@ describe('buildOrchestrationCatalog', () => {
             createdAt: 1,
             nodes: [
                 {
-                    id: 'n1', agentType: 'explore', prompt: 'p', dependencies: [],
+                    id: 'n1', profileName: 'explore', prompt: 'p', dependencies: [],
                     priority: 'normal', status: 'done', retryCount: 0, maxRetries: 1,
                 },
                 {
-                    id: 'n2', agentType: 'build', prompt: 'p', dependencies: [],
+                    id: 'n2', profileName: 'paradox-coder', prompt: 'p', dependencies: [],
                     priority: 'normal', status: 'failed', retryCount: 0, maxRetries: 1,
                     pendingClarification: 'Which namespace?', resumeContextRef: 'run_9',
                 },
@@ -388,7 +388,7 @@ describe('normalizeResumedGraph', () => {
 
     const node = (id: string, status: TaskNode['status'], overrides: Partial<TaskNode> = {}): TaskNode => ({
         id,
-        agentType: 'explore',
+        profileName: 'explore',
         prompt: id,
         dependencies: [],
         priority: 'normal',

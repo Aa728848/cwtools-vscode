@@ -1,6 +1,6 @@
 import * as fs from 'fs';
 import * as pathModule from 'path';
-import { getProjectWorkspaceRoot, getPrivateTopicStorageDir, getPrivateTopicStorageDirCandidates } from '../workspacePaths';
+import { getProjectWorkspaceRoot, getPrivateTopicStorageDir } from '../workspacePaths';
 import type { AgentResumeState, ChatMessage, AgentSchedulingState, ToolCall } from '../types';
 import type { AgentToolExecutor } from '../agentTools';
 import { isPathInsideOrEqual } from '../../pathScope';
@@ -86,11 +86,11 @@ export function buildResumeMessages(
     const tail = split.recentMessages.map(cloneChatMessage);
 
     const resumeMessages: ChatMessage[] = split.persistentSystemMessages.map(cloneChatMessage);
-    const hasLegacySystemSummary = split.persistentSystemMessages.some(message => (
+    const hasSystemSummary = split.persistentSystemMessages.some(message => (
         message.role === 'system'
         && String(message.content).includes('## Conversation Summary (compacted)')
     ));
-    if (summaryText.trim() && !hasLegacySystemSummary) {
+    if (summaryText.trim() && !hasSystemSummary) {
         resumeMessages.push({
             role: 'user',
             content: [
@@ -228,10 +228,10 @@ export async function saveResumeState(
 export async function loadResumeState(topicId: string): Promise<AgentResumeState | null> {
     try {
         const wsRoot = getProjectWorkspaceRoot();
-        const resumePath = getPrivateTopicStorageDirCandidates(topicId, wsRoot)
-            .map(dir => pathModule.join(dir, 'resume_state.json'))
-            .find(candidate => fs.existsSync(candidate) || fs.existsSync(`${candidate}.bak`));
-        if (!resumePath) return null;
+        const topicDir = getPrivateTopicStorageDir(topicId, wsRoot);
+        if (!topicDir) return null;
+        const resumePath = pathModule.join(topicDir, 'resume_state.json');
+        if (!fs.existsSync(resumePath) && !fs.existsSync(`${resumePath}.bak`)) return null;
         const loaded = readJsonWithBackup<AgentResumeState>(resumePath, (value): value is AgentResumeState => {
             if (!value || typeof value !== 'object') return false;
             const candidate = value as Partial<AgentResumeState>;
@@ -300,9 +300,10 @@ export async function hasResumeState(topicId: string): Promise<boolean> {
     if (!topicId) return false;
     try {
         const wsRoot = getProjectWorkspaceRoot();
-        return getPrivateTopicStorageDirCandidates(topicId, wsRoot)
-            .map(dir => pathModule.join(dir, 'resume_state.json'))
-            .some(candidate => fs.existsSync(candidate) || fs.existsSync(`${candidate}.bak`));
+        const topicDir = getPrivateTopicStorageDir(topicId, wsRoot);
+        if (!topicDir) return false;
+        const candidate = pathModule.join(topicDir, 'resume_state.json');
+        return fs.existsSync(candidate) || fs.existsSync(`${candidate}.bak`);
     } catch {
         return false;
     }
@@ -315,12 +316,11 @@ export async function clearResumeState(topicId: string): Promise<void> {
     if (!topicId) return;
     try {
         const wsRoot = getProjectWorkspaceRoot();
-        const resumePaths = getPrivateTopicStorageDirCandidates(topicId, wsRoot)
-            .map(dir => pathModule.join(dir, 'resume_state.json'));
-        for (const candidate of resumePaths) {
-            for (const file of [candidate, `${candidate}.bak`]) {
-                if (fs.existsSync(file)) fs.unlinkSync(file);
-            }
+        const topicDir = getPrivateTopicStorageDir(topicId, wsRoot);
+        if (!topicDir) return;
+        const candidate = pathModule.join(topicDir, 'resume_state.json');
+        for (const file of [candidate, `${candidate}.bak`]) {
+            if (fs.existsSync(file)) fs.unlinkSync(file);
         }
     } catch {
         // Ignore

@@ -51,11 +51,11 @@ describe('agent trace view model', () => {
         const events = [
             event(1, 'run_created', 1_000, { agentId: 'main' }),
             event(2, 'model_call_start', 1_100, { agentId: 'main', invocationId: 'model_main' }),
-            event(3, 'subagent_start', 1_200, { agentId: 'child-a', payload: { role: 'explorer', task: 'Inspect UI', parentAgentId: 'main' } }),
+            event(3, 'subagent_start', 1_200, { agentId: 'child-a', payload: { profileName: 'explore', task: 'Inspect UI', parentAgentId: 'main' } }),
             event(4, 'model_call_start', 1_300, { agentId: 'child-a', invocationId: 'model_child' }),
             event(5, 'tool_call_end', 1_400, { agentId: 'child-a', invocationId: 'tool_child' }),
             event(6, 'subagent_end', 1_500, { agentId: 'child-a', payload: { success: true } }),
-            event(7, 'subagent_start', 1_600, { agentId: 'child-b', payload: { role: 'reviewer', task: 'Review UI', parentAgentId: 'child-a' } }),
+            event(7, 'subagent_start', 1_600, { agentId: 'child-b', payload: { profileName: 'reviewer', task: 'Review UI', parentAgentId: 'child-a' } }),
             event(8, 'subagent_end', 1_700, { agentId: 'child-b', payload: { success: true, parentAgentId: 'child-a' } }),
         ];
 
@@ -65,7 +65,7 @@ describe('agent trace view model', () => {
         expect(model.nodes[2]).to.include({ parentAgentId: 'child-a', role: 'reviewer', task: 'Review UI', status: 'done' });
         expect(model.nodes[1]).to.include({
             parentAgentId: 'main',
-            role: 'explorer',
+            role: 'explore',
             task: 'Inspect UI',
             status: 'done',
             modelCallCount: 1,
@@ -81,7 +81,7 @@ describe('agent trace view model', () => {
         expect(html).to.include('aria-level="3"');
         expect(html).to.include('is-selected');
         expect(html).to.include('Inspect UI');
-        expect(html).to.include('<small>explorer</small><em>Completed</em>');
+        expect(html).to.include('<small>explore</small><em>Completed</em>');
         expect(html).to.include('<span>1 M · 1 T');
         expect(html).to.not.include('agent-tree-enter');
         expect(html).to.not.include('agent-tree-stats');

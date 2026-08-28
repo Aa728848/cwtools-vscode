@@ -90,9 +90,7 @@ function readSkillEntry(
         const parsed = parseFrontmatter(raw);
         const name = parsed.frontmatter.name || fallbackName;
         const description = parsed.frontmatter.description || firstUsefulLine(parsed.body) || 'No description provided.';
-        const declaredDomain = parsed.frontmatter['capability-domain']
-            || parsed.frontmatter.capabilitydomain
-            || parsed.frontmatter.domain;
+        const declaredDomain = parsed.frontmatter['capability-domain'];
         const capabilityDomain: SkillCapabilityDomain = declaredDomain === 'general'
             || declaredDomain === 'paradox'
             || declaredDomain === 'both'
@@ -102,8 +100,8 @@ function readSkillEntry(
             name,
             description,
             source,
-            runAs: parsed.frontmatter.runas || parsed.frontmatter['run-as'],
-            allowedTools: parseAllowedTools(parsed.frontmatter['allowed-tools'] || parsed.frontmatter.allowedtools),
+            runAs: parsed.frontmatter['run-as'],
+            allowedTools: parseAllowedTools(parsed.frontmatter['allowed-tools']),
             capabilityDomain,
             filePath: skillMd,
         };

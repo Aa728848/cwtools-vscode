@@ -87,9 +87,6 @@ export function compactStepForUi(step: any): any | undefined {
     if (typeof copy.content === 'string') copy.content = clipUiText(copy.content, contentLimit);
     if (copy.toolArgs !== undefined) copy.toolArgs = compactToolArgsForUi(copy.toolArgs);
     if (copy.toolResult !== undefined) copy.toolResult = compactToolResultForUi(copy.toolResult);
-    if (copy.transactionCard?.summary) {
-        copy.transactionCard = { ...copy.transactionCard, summary: clipUiText(copy.transactionCard.summary, 1200) };
-    }
     return copy;
 }
 

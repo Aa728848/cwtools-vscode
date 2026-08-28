@@ -1,4 +1,4 @@
-import type { ChatMessage, AgentStep, TokenUsage } from '../types';
+import type { AgentMode, AgentToolFocus, ChatMessage, AgentStep, TokenUsage } from '../types';
 import { contentToString } from '../types';
 import { getModelContextTokens, getProvider } from '../providers';
 import { isLowCostPrefixCacheModelOrProvider } from '../providers/models/capabilities';
@@ -8,7 +8,7 @@ import type { AIService } from '../aiService';
 import type { PromptBuilder } from '../promptBuilder';
 import { OutputRepetitionDetector } from './outputRepetitionDetector';
 import { runtimeFaultInjector } from './faultInjection';
-import { estimateTokenCount, estimateChatMessagesTokens, CHARS_PER_TOKEN } from './tokenEstimation';
+import { estimateTokenCount, estimateChatMessagesTokens, BASE64_CHARS_PER_TOKEN_ESTIMATE } from './tokenEstimation';
 import { cloneChatMessage, normalizeTranscriptForPersistence, splitTranscriptForCompaction } from './contextTranscript';
 import type { CompactionTranscriptSplit } from './contextTranscript';
 import * as crypto from 'crypto';
@@ -21,6 +21,8 @@ export interface CompactionRunOptions {
     maxContextTokens?: number;
     abortSignal?: AbortSignal;
     useSlimPrompt?: boolean;
+    agentMode?: AgentMode;
+    toolFocus?: AgentToolFocus;
 }
 
 // Leave room for the system prompt, tool schemas, the current turn, and output.
@@ -271,7 +273,7 @@ function estimateMessagesTokens(messages: ChatMessage[]): number {
                 if (part.type === 'text') return s + estimateTokenCount(part.text);
                 if (part.type === 'image_url') {
                     const urlLen = part.image_url.url.length;
-                    return s + Math.ceil(urlLen / 3 / CHARS_PER_TOKEN);
+                    return s + Math.ceil(urlLen / 3 / BASE64_CHARS_PER_TOKEN_ESTIMATE);
                 }
                 return s;
             }, 0);
@@ -562,8 +564,8 @@ export async function maybeCompactHistory(
                 inputTokens: promptTokens,
                 cachedTokens,
                 cacheCapable,
-                agentMode: tokenAccumulator.agentMode,
-                toolFocus: tokenAccumulator.toolFocus,
+                agentMode: options?.agentMode,
+                toolFocus: options?.toolFocus,
                 promptFingerprint: fingerprintTranscript(compactionMessages).slice(0, 24),
                 purpose: 'compaction',
                 invalidationReason: cacheCapable && cachedTokens === 0 ? 'provider_miss' : undefined,

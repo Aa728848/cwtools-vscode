@@ -2048,7 +2048,7 @@ export class FileToolHandler {
                 return failBlueprint('Design blueprint refused: taskPlan contains a dependency cycle.');
             }
             const orphanLocTasks = args.taskPlan
-                .filter(task => task.agentType === 'loc_writer'
+                .filter(task => task.profileName === 'localization-writer'
                     && task.produces?.some(contract => contract.kind === 'localisation')
                     && !task.consumes?.some(contract => contract.kind !== 'localisation'))
                 .map(task => task.id);
@@ -2283,7 +2283,7 @@ export class FileToolHandler {
             const contractCell = (contracts?: import('../types').TaskEntityContract[]) =>
                 contracts?.map(contract => `${contract.kind}:${contract.id}:${contract.operation}`).join(', ') || '-';
             for (const task of args.taskPlan) {
-                lines.push(`| \`${cell(task.id)}\` | ${cell(task.agentType)} | ${listCell(task.plannedFiles)} | ${cell(contractCell(task.produces))} | ${cell(contractCell(task.consumes))} | ${listCell(task.dependencies)} | ${listCell(task.acceptanceChecks?.map(check => check.id))} |`);
+                lines.push(`| \`${cell(task.id)}\` | ${cell(task.profileName)} | ${listCell(task.plannedFiles)} | ${cell(contractCell(task.produces))} | ${cell(contractCell(task.consumes))} | ${listCell(task.dependencies)} | ${listCell(task.acceptanceChecks?.map(check => check.id))} |`);
             }
             lines.push('');
 

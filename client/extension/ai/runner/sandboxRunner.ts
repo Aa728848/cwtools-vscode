@@ -154,7 +154,7 @@ export class BrokeredSandboxRunner implements SandboxRunner {
     }
 }
 
-/** Kept for Full Access, one-shot unsandboxed execution, and compatibility tests. */
+/** Used for Full Access, one-shot unsandboxed execution, and direct-execution tests. */
 export class DirectSandboxRunner implements SandboxRunner {
     constructor(private readonly spawnFn: typeof import('child_process').spawn) {}
     spawn(request: SandboxSpawnRequest): ChildProcess {

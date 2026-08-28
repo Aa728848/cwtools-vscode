@@ -27,7 +27,8 @@ export interface RuntimeAgentProfile {
     subagents?: string[];
     /** Declarative child capability exceptions. Web remains denied by the registry. */
     subagentCapabilities?: { runCode?: boolean; command?: boolean };
-    modelPreference?: 'primary' | 'secondary';
+    /** Healthy-progress iteration window for child runs using this profile. */
+    maxIterations?: number;
     summaryPolicy?: AgentSummaryPolicy;
     override?: boolean;
 }
@@ -59,7 +60,7 @@ const BUILTIN_PROFILES: RuntimeAgentProfile[] = [
         domain: 'general',
         authorizationCeiling: 'workspace_write',
         tools: ['*'],
-        subagents: ['utility', 'explore', 'plan', 'review'],
+        subagents: ['general-coder', 'explore', 'planner', 'reviewer'],
     },
     {
         name: 'hybrid-agent',
@@ -67,7 +68,7 @@ const BUILTIN_PROFILES: RuntimeAgentProfile[] = [
         domain: 'hybrid',
         authorizationCeiling: 'workspace_write',
         tools: ['*'],
-        subagents: ['utility', 'build', 'explore', 'plan', 'review'],
+        subagents: ['general-coder', 'paradox-coder', 'explore', 'planner', 'reviewer'],
     },
     {
         name: 'paradox-agent',
@@ -75,7 +76,7 @@ const BUILTIN_PROFILES: RuntimeAgentProfile[] = [
         domain: 'paradox',
         authorizationCeiling: 'workspace_write',
         tools: ['*'],
-        subagents: ['build', 'explore', 'plan', 'review', 'loc_writer', 'gui_expert'],
+        subagents: ['paradox-coder', 'explore', 'planner', 'reviewer', 'localization-writer', 'gui-expert'],
     },
     {
         name: 'explore',
@@ -83,6 +84,7 @@ const BUILTIN_PROFILES: RuntimeAgentProfile[] = [
         authorizationCeiling: 'read_only',
         tools: ['ask_user_question', 'select_tools', 'run_code', 'read_file', 'list_directory', 'glob_files', 'grep', 'query_*', 'search_*', 'get_*', 'web_*'],
         subagentCapabilities: { runCode: true },
+        maxIterations: 40,
         disallowedTools: ['write_*', 'edit_file', 'replace_lines', 'run_command', 'git_ops', 'dispatch_agents'],
         summaryPolicy: {
             minCharacters: 160,
@@ -96,6 +98,7 @@ const BUILTIN_PROFILES: RuntimeAgentProfile[] = [
         authorizationCeiling: 'plan_write_only',
         tools: ['ask_user_question', 'select_tools', 'run_code', 'read_file', 'list_directory', 'glob_files', 'grep', 'query_*', 'search_*', 'get_*', 'write_design_blueprint'],
         subagentCapabilities: { runCode: true },
+        maxIterations: 30,
         disallowedTools: ['edit_file', 'replace_lines', 'run_command', 'git_ops', 'dispatch_agents'],
         summaryPolicy: {
             minCharacters: 160,
@@ -109,6 +112,7 @@ const BUILTIN_PROFILES: RuntimeAgentProfile[] = [
         authorizationCeiling: 'read_only',
         tools: ['ask_user_question', 'select_tools', 'run_code', 'read_file', 'glob_files', 'grep', 'query_*', 'get_*', 'validate_*', 'compare_*', 'git_ops'],
         subagentCapabilities: { runCode: true },
+        maxIterations: 30,
         disallowedTools: ['write_*', 'edit_file', 'replace_lines', 'dispatch_agents'],
         summaryPolicy: {
             minCharacters: 200,
@@ -123,6 +127,7 @@ const BUILTIN_PROFILES: RuntimeAgentProfile[] = [
         authorizationCeiling: 'workspace_write',
         tools: ['*'],
         subagentCapabilities: { runCode: true, command: true },
+        maxIterations: 80,
         summaryPolicy: {
             minCharacters: 240,
             requiredSections: ['summary', 'changedFiles', 'verification', 'unresolved'],
@@ -136,6 +141,7 @@ const BUILTIN_PROFILES: RuntimeAgentProfile[] = [
         authorizationCeiling: 'workspace_write',
         tools: ['*'],
         subagentCapabilities: { runCode: true },
+        maxIterations: 80,
         summaryPolicy: {
             minCharacters: 240,
             requiredSections: ['summary', 'changedFiles', 'verification', 'unresolved'],
@@ -149,6 +155,7 @@ const BUILTIN_PROFILES: RuntimeAgentProfile[] = [
         authorizationCeiling: 'workspace_write',
         tools: ['*'],
         subagentCapabilities: { runCode: true },
+        maxIterations: 50,
     },
     {
         name: 'localization-translator',
@@ -157,6 +164,7 @@ const BUILTIN_PROFILES: RuntimeAgentProfile[] = [
         authorizationCeiling: 'workspace_write',
         tools: ['*'],
         subagentCapabilities: { runCode: true },
+        maxIterations: 50,
     },
     {
         name: 'gui-expert',
@@ -165,6 +173,7 @@ const BUILTIN_PROFILES: RuntimeAgentProfile[] = [
         authorizationCeiling: 'workspace_write',
         tools: ['*'],
         subagentCapabilities: { runCode: true },
+        maxIterations: 60,
     },
 ];
 
@@ -200,10 +209,9 @@ function profileValidationError(profile: RuntimeAgentProfile): string | undefine
             || profile.subagents.some(role => typeof role !== 'string' || !/^[a-zA-Z0-9_.-]{1,80}$/.test(role)))) {
         return `${profile.name}: invalid subagent list`;
     }
-    if (profile.modelPreference !== undefined
-        && profile.modelPreference !== 'primary'
-        && profile.modelPreference !== 'secondary') {
-        return `${profile.name}: invalid model preference`;
+    if (profile.maxIterations !== undefined
+        && (!Number.isSafeInteger(profile.maxIterations) || profile.maxIterations < 1 || profile.maxIterations > 10_000)) {
+        return `${profile.name}: invalid maxIterations`;
     }
     if (profile.override !== undefined && typeof profile.override !== 'boolean') {
         return `${profile.name}: override must be boolean`;
@@ -294,6 +302,12 @@ export class AgentProfileCatalog {
         return profile ? { ...profile } : undefined;
     }
 
+    getRequired(name: string): RuntimeAgentProfile {
+        const profile = this.get(name);
+        if (!profile) throw new Error(`Agent profile "${name}" is not registered.`);
+        return profile;
+    }
+
     list(): RuntimeAgentProfile[] {
         return [...this.merged.values()].map(profile => ({ ...profile }))
             .sort((a, b) => a.name.localeCompare(b.name));
@@ -304,8 +318,7 @@ export class AgentProfileCatalog {
         const name = readOnly
             ? (admission.initialPhase === 'verify' ? 'reviewer' : 'explore')
             : admission.domainProfile === 'paradox' ? 'paradox-agent' : admission.domainProfile === 'hybrid' ? 'hybrid-agent' : 'general-agent';
-        const fallback = admission.domainProfile === 'paradox' ? 'paradox-agent' : admission.domainProfile === 'hybrid' ? 'hybrid-agent' : 'general-agent';
-        return this.get(name) ?? this.get(fallback)!;
+        return this.getRequired(name);
     }
 
     subscribe(listener: (sourceId: string) => void): () => void {

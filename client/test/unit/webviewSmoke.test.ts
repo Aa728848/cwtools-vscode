@@ -50,7 +50,7 @@ describe('webview smoke checks', () => {
         expect(html).not.to.include('data-profile-intent=');
         expect(html).not.to.include('data-profile-strategy=');
         expect(script).to.include("let schedulingState: AgentSchedulingStateView = {");
-        expect(script).to.include("schedulingState = { ...schedulingState, domainProfile: domain, profileName: undefined }");
+        expect(script).to.not.include("schedulingState = { ...schedulingState, domainProfile: domain");
         expect(script).to.include("tr('Parallel', '并行')");
         expect(script).to.include('updateSchedulingDomain(domain);\n                setDomainMenuOpen(false);');
         expect(css).not.to.include('.composer-write-mode-trigger.write-mode-elevated {');
@@ -447,7 +447,6 @@ describe('webview smoke checks', () => {
         expect(codexRows).to.include('codex-activity-row-details');
         expect(managerEntry).to.include("import type { ManagerSnapshotMessage");
         expect(managerEntry).to.include("case 'managerSnapshot'");
-        expect(managerEntry).to.include("case 'orchestratorProgress'");
         expect(hostBridge).to.include("case 'requestManagerSnapshot'");
         expect(hostPanel).to.include("type: 'managerSnapshot'");
         expect(hostBridge).to.include("case 'pinTopic'");

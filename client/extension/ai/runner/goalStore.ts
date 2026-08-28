@@ -1,7 +1,7 @@
 import * as path from 'path';
 import * as crypto from 'crypto';
 import * as fs from 'fs';
-import { getPrivateTopicStorageDir, getPrivateTopicStorageDirCandidates } from '../workspacePaths';
+import { getPrivateTopicStorageDir } from '../workspacePaths';
 import { atomicWriteJson, readJsonWithBackup } from './durableStorage';
 
 export type DurableGoalStatus = 'active' | 'paused' | 'blocked' | 'complete' | 'cancelled';
@@ -28,41 +28,38 @@ export interface DurableAgentGoal {
     budgetGracePending?: boolean;
     budgetGraceUsed?: boolean;
     terminalReason?: string;
-    /** Compatibility alias consumed by existing AgentRunner callers. */
-    tokenBudget?: number;
     createdAt: number;
     updatedAt: number;
 }
 
-interface LegacyAgentGoal {
-    version: 1;
-    topicId: string;
-    threadId: string;
-    objective: string;
-    status: 'active' | 'completed' | 'blocked';
-    tokenBudget?: number;
-    createdAt: number;
-    updatedAt: number;
-}
-
-function isStoredGoal(value: unknown): value is DurableAgentGoal | LegacyAgentGoal {
-    return !!value
-        && typeof value === 'object'
-        && typeof (value as Partial<DurableAgentGoal>).objective === 'string'
-        && typeof (value as Partial<DurableAgentGoal>).topicId === 'string'
-        && typeof (value as Partial<DurableAgentGoal>).threadId === 'string';
+function isStoredGoal(value: unknown): value is DurableAgentGoal {
+    if (!value || typeof value !== 'object') return false;
+    const goal = value as Partial<DurableAgentGoal>;
+    return goal.version === 2
+        && typeof goal.goalId === 'string'
+        && typeof goal.objective === 'string'
+        && typeof goal.topicId === 'string'
+        && typeof goal.threadId === 'string'
+        && Array.isArray(goal.completionCriterion)
+        && goal.completionCriterion.every(item => typeof item === 'string')
+        && !!goal.budgetLimits && typeof goal.budgetLimits === 'object'
+        && typeof goal.tokensUsed === 'number' && Number.isFinite(goal.tokensUsed)
+        && typeof goal.turnsUsed === 'number' && Number.isFinite(goal.turnsUsed)
+        && typeof goal.wallClockMs === 'number' && Number.isFinite(goal.wallClockMs)
+        && typeof goal.createdAt === 'number' && Number.isFinite(goal.createdAt)
+        && typeof goal.updatedAt === 'number' && Number.isFinite(goal.updatedAt)
+        && ['active', 'paused', 'blocked', 'complete', 'cancelled'].includes(String(goal.status));
 }
 
 export class GoalStore {
     async getGoal(topicId: string, threadId: string): Promise<DurableAgentGoal | undefined> {
-        for (const dir of getPrivateTopicStorageDirCandidates(topicId)) {
-            const loaded = readJsonWithBackup<DurableAgentGoal | LegacyAgentGoal>(
-                path.join(dir, 'goals', `${this.safe(threadId)}.json`),
-                isStoredGoal,
-            );
-            if (loaded) return this.normalize(loaded.value);
-        }
-        return undefined;
+        const dir = getPrivateTopicStorageDir(topicId);
+        if (!dir) return undefined;
+        const loaded = readJsonWithBackup<DurableAgentGoal>(
+            path.join(dir, 'goals', `${this.safe(threadId)}.json`),
+            isStoredGoal,
+        );
+        return loaded ? this.normalize(loaded.value) : undefined;
     }
 
     async setGoal(
@@ -92,7 +89,6 @@ export class GoalStore {
             wallClockMs: existing?.wallClockMs ?? 0,
             budgetGracePending: existing?.budgetGracePending ?? false,
             budgetGraceUsed: existing?.budgetGraceUsed ?? false,
-            tokenBudget: normalizedBudget ?? existing?.budgetLimits.tokens,
             createdAt: existing?.createdAt ?? now,
             updatedAt: now,
         };
@@ -103,12 +99,12 @@ export class GoalStore {
     async updateStatus(
         topicId: string,
         threadId: string,
-        status: DurableGoalStatus | 'completed',
+        status: DurableGoalStatus,
         terminalReason?: string,
     ): Promise<DurableAgentGoal | undefined> {
         const goal = await this.getGoal(topicId, threadId);
         if (!goal) return undefined;
-        goal.status = status === 'completed' ? 'complete' : status;
+        goal.status = status;
         goal.terminalReason = terminalReason;
         goal.updatedAt = Date.now();
         await atomicWriteJson(this.goalPath(topicId, threadId), goal);
@@ -119,7 +115,6 @@ export class GoalStore {
         const goal = await this.getGoal(topicId, threadId);
         if (!goal) return undefined;
         goal.budgetLimits = this.normalizeBudget({ ...goal.budgetLimits, ...budgetLimits });
-        goal.tokenBudget = goal.budgetLimits.tokens;
         goal.updatedAt = Date.now();
         await atomicWriteJson(this.goalPath(topicId, threadId), goal);
         return goal;
@@ -175,40 +170,17 @@ export class GoalStore {
 
     private safe(value: string): string { return value.replace(/[^a-zA-Z0-9_.-]/g, '_'); }
 
-    private normalize(goal: DurableAgentGoal | LegacyAgentGoal): DurableAgentGoal {
-        if (goal.version === 2) {
-            const budgetLimits = this.normalizeBudget(goal.budgetLimits ?? {});
-            return {
-                ...goal,
-                completionCriterion: Array.isArray(goal.completionCriterion)
-                    ? goal.completionCriterion.filter(item => typeof item === 'string')
-                    : [],
-                budgetLimits,
-                tokenBudget: budgetLimits.tokens,
-                tokensUsed: Number.isFinite(goal.tokensUsed) ? Math.max(0, goal.tokensUsed) : 0,
-                turnsUsed: Number.isFinite(goal.turnsUsed) ? Math.max(0, goal.turnsUsed) : 0,
-                wallClockMs: Number.isFinite(goal.wallClockMs) ? Math.max(0, goal.wallClockMs) : 0,
-                budgetGracePending: goal.budgetGracePending === true,
-                budgetGraceUsed: goal.budgetGraceUsed === true,
-            };
-        }
+    private normalize(goal: DurableAgentGoal): DurableAgentGoal {
+        const budgetLimits = this.normalizeBudget(goal.budgetLimits);
         return {
-            version: 2,
-            goalId: crypto.createHash('sha256').update(`${goal.topicId}\0${goal.threadId}\0${goal.createdAt}`).digest('hex').slice(0, 32),
-            topicId: goal.topicId,
-            threadId: goal.threadId,
-            objective: goal.objective,
-            completionCriterion: [],
-            status: goal.status === 'completed' ? 'complete' : goal.status,
-            budgetLimits: this.normalizeBudget({ tokens: goal.tokenBudget }),
-            tokenBudget: goal.tokenBudget,
-            tokensUsed: 0,
-            turnsUsed: 0,
-            wallClockMs: 0,
-            budgetGracePending: false,
-            budgetGraceUsed: false,
-            createdAt: goal.createdAt,
-            updatedAt: goal.updatedAt,
+            ...goal,
+            completionCriterion: goal.completionCriterion.filter(item => typeof item === 'string'),
+            budgetLimits,
+            tokensUsed: Math.max(0, goal.tokensUsed),
+            turnsUsed: Math.max(0, goal.turnsUsed),
+            wallClockMs: Math.max(0, goal.wallClockMs),
+            budgetGracePending: goal.budgetGracePending === true,
+            budgetGraceUsed: goal.budgetGraceUsed === true,
         };
     }
 

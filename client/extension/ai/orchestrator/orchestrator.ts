@@ -18,7 +18,6 @@ import type {
     OrchestratorOptions,
 } from './types';
 import type {
-    AgentMode,
     AgentStep,
     AgentToolName,
     ChatMessage,
@@ -30,7 +29,6 @@ import { Blackboard } from './blackboard';
 import { BLACKBOARD_KEY_PREFIXES } from './blackboardSchema';
 import { ParallelExecutor, type SubAgentExecutor } from './parallelExecutor';
 import { QualityGate, PDX_DIAGNOSTIC_EXTENSIONS, isPdxDiagnosticFile } from './qualityGate';
-import { getAgentProfile } from './agentRegistry';
 import { ErrorReporter } from '../errorReporter';
 import { SOURCE, ORCHESTRATOR_MSG, aiText } from '../messages';
 import { getAgentToolTargetFiles } from '../runner/toolScheduler';
@@ -116,7 +114,7 @@ export function parseClarificationOptions(text: string): string[] | undefined {
 * 2. Task decomposition: Decompose complex requests into TaskGraph (DAG) 
 * 3. Scheduling execution: Manage Agent life cycle through ParallelExecutor 
 * 4. Result synthesis: Summarize the output of each Agent into the final deliverable 
-* 5. Quality control: Reviewer triggers review after Builder is completed 
+* 5. Quality control: run the quality gate after writable child profiles complete
 */
 export class Orchestrator {
     private blackboard: Blackboard;
@@ -233,7 +231,8 @@ export class Orchestrator {
             }
             allWrittenFiles.splice(0, allWrittenFiles.length, ...new Set(allWrittenFiles));
             {
-                const paradoxWorkflow = [...taskGraph.nodes.values()].some(node => ['build', 'loc_writer', 'gui_expert'].includes(node.agentType));
+                const paradoxWorkflow = [...taskGraph.nodes.values()].some(node =>
+                    ['paradox-coder', 'localization-writer', 'gui-expert'].includes(node.profileName));
                 const preservedFailureReport = this.formatPreservedFailureReport(preservedFailureResults);
                 const userOwnsLocalisation = options.userExecutionPolicy?.localisationOwnership === 'user';
                 const userIgnoresWarnings = options.userExecutionPolicy?.warningHandling === 'ignore';
@@ -288,7 +287,7 @@ export class Orchestrator {
 
                 const sweepNode: TaskNode = {
                     id: 'loc_sweep',
-                    agentType: 'loc_writer',
+                    profileName: 'localization-writer',
                     prompt: sweepPrompt,
                     dependencies: [],
                     priority: 'critical',
@@ -381,7 +380,7 @@ export class Orchestrator {
                         );
                         const fixNode: TaskNode = {
                             id: `quality_gate_autofix_${fixCycle + 1}`,
-                            agentType: paradoxWorkflow ? 'build' : 'utility',
+                            profileName: paradoxWorkflow ? 'paradox-coder' : 'general-coder',
                             prompt: fixPrompt,
                             // Quality review may identify a dependent contract file that
                             // was not written by the original children. Leave this repair
@@ -608,7 +607,7 @@ export class Orchestrator {
 * Execute a single sub-Agent. 
 * 
 * Convert TaskNode to AgentRunner.run() call, 
-* Model selection priority: TaskNode.modelOverride > AgentProfile.suggestedModel > User settings 
+* Model selection priority: TaskNode override > per-profile setting > parent setting.
 */
     private async executeSubAgent(
         taskNode: TaskNode,
@@ -618,18 +617,19 @@ export class Orchestrator {
         onStep: (step: AgentStep) => void,
         orchestratorOptions: OrchestratorOptions,
     ): Promise<SubAgentResult> {
-        const profile = getAgentProfile(taskNode.agentType);
-        const childDomain = orchestratorOptions.schedulingState.domainProfile;
+        const profile = agentProfileCatalog.getRequired(taskNode.profileName);
+        const childDomain = profile.domain ?? orchestratorOptions.schedulingState.domainProfile;
+        const configuredModel = orchestratorOptions.agentModelOverrides?.[profile.name];
 
         // Model selection priority chain:
         // 1. TaskNode explicit override
-        // 2. AgentProfile recommended value
+        // 2. Per-profile user setting
         // 3. Orchestrator options (from user settings)
         const providerId = taskNode.providerOverride
-            ?? profile.suggestedProvider
+            ?? (configuredModel?.provider && configuredModel.provider !== '__inherit__' ? configuredModel.provider : undefined)
             ?? orchestratorOptions.providerId;
         const model = taskNode.modelOverride
-            ?? profile.suggestedModel
+            ?? (configuredModel?.model && configuredModel.model !== '__inherit__' ? configuredModel.model : undefined)
             ?? orchestratorOptions.model;
 
         const workspaceRoot = this.agentRunner.toolExecutor?.workspaceRoot || process.cwd();
@@ -643,8 +643,7 @@ export class Orchestrator {
         );
         orchestratorOptions.runEventSink?.appendSoon('subagent_policy_derived', {
             agentId: taskNode.id,
-            role: taskNode.agentType,
-            mode: profile.mode,
+            profileName: profile.name,
             domain: childDomain,
             writeScope: sandbox.writeScope,
             rejectedScopes: sandbox.rejectedScopes,
@@ -653,7 +652,7 @@ export class Orchestrator {
         const onlyLocalisationYmlWrites = plannedFiles.length > 0 && plannedFiles.every(isLocalisationYmlPath);
         const excludedTools = [
             'web_search', 'web_open', 'web_find',
-            ...(profile.mode === 'utility' ? [] : ['run_command']),
+            ...(profile.name === 'general-coder' ? [] : ['run_command']),
             'git_ops',
             'convert_image_to_dds', 'convert_audio', 'deploy_mod_asset',
             ...(onlyLocalisationYmlWrites ? LOCALISATION_GENERIC_WRITE_TOOLS : []),
@@ -663,16 +662,12 @@ export class Orchestrator {
                 : []),
         ];
 
-        const childAuthorization = profile.toolBudget === 'read_only'
-            ? 'read_only'
-            : profile.toolBudget === 'plan'
-                ? 'plan_write_only'
-                : 'workspace_write';
-        const childPhase = profile.mode === 'plan'
+        const childAuthorization = profile.authorizationCeiling;
+        const childPhase = profile.name === 'planner'
             ? 'plan'
-            : profile.mode === 'review' || profile.mode === 'script_reviewer'
+            : profile.name === 'reviewer'
                 ? 'verify'
-                : profile.mode === 'explore'
+                : profile.name === 'explore'
                     ? 'inspect'
                     : 'execute';
         const childSchedulingState = {
@@ -682,9 +677,9 @@ export class Orchestrator {
                 initialPhase: childPhase,
                 explicitDelegation: false,
                 confidence: 1,
-                evidence: [`orchestrator role: ${taskNode.agentType}`],
-            }, `orchestrator role: ${taskNode.agentType}`),
-            profileName: sandbox.runtimeProfileName,
+                evidence: [`orchestrator profile: ${profile.name}`],
+            }, `orchestrator profile: ${profile.name}`),
+            profileName: profile.name,
         };
 
         const runnerOptions: AgentRunnerOptions = {
@@ -694,9 +689,9 @@ export class Orchestrator {
             reasoningEffort: taskNode.reasoningEffort ?? orchestratorOptions.reasoningEffort,
             schedulingState: childSchedulingState,
             // The parent already approved and decomposed this Execute task.
-            // Writer roles start with execution-focused guidance and never reopen
+            // Writable profiles start with execution-focused guidance and never reopen
             // the main-Agent design/approval lifecycle.
-            initialToolFocus: profile.mode === 'build' || profile.mode === 'utility' ? 'write' : undefined,
+            initialToolFocus: profile.authorizationCeiling === 'workspace_write' ? 'write' : undefined,
             onStep,
             abortSignal, // Replaced below by the child controller with parent/idle guards.
             streaming: true, // Enable streaming output to visualize the progress of deep thinking
@@ -712,7 +707,7 @@ export class Orchestrator {
             // Children run exactly one level below this coordinator. The dispatch
             // gate reads this back to refuse a further delegation level.
             delegationDepth: normalizeDelegationDepth(orchestratorOptions.delegationDepth) + 1,
-            maxIterations: taskNode.maxIterations ?? profile.maxIterations,
+            maxIterations: taskNode.maxIterations ?? profile.maxIterations ?? 80,
             // Role iteration limits are health-check windows. Only a task-level
             // maxIterations override remains an absolute iteration ceiling.
             renewableIterationLimit: taskNode.maxIterations === undefined,
@@ -1028,8 +1023,8 @@ export class Orchestrator {
         try {
             wrappedOnStep({
                 type: 'subtask_start',
-                content: aiText(`Starting ${profile.mode} subtask`, `启动 ${profile.mode} 子任务`),
-                subagentType: profile.mode,
+                content: aiText(`Starting ${profile.name} subtask`, `启动 ${profile.name} 子任务`),
+                subagentProfileName: profile.name,
                 timestamp: Date.now(),
             });
 
@@ -1183,12 +1178,7 @@ export class Orchestrator {
             }
 
             const finalOutput = result.explanation || result.code || '';
-            const summaryProfileName = taskNode.agentType === 'review' || taskNode.agentType === 'script_reviewer'
-                ? 'reviewer'
-                : taskNode.agentType === 'explore'
-                    ? 'explore'
-                    : childDomain === 'paradox' ? 'paradox-coder' : 'general-coder';
-            const summaryPolicy = agentProfileCatalog.get(summaryProfileName)?.summaryPolicy;
+            const summaryPolicy = profile.summaryPolicy;
             let handoff = parseAgentHandoff(finalOutput, writtenFiles);
             const missing = summaryPolicy ? validateAgentHandoff(handoff, summaryPolicy) : [];
             const totalUsage = result.tokenUsage ?? { total: 0, input: 0, output: 0, estimatedCostCny: 0 };
@@ -1257,7 +1247,8 @@ export class Orchestrator {
 */
     private shouldRunQualityGate(graph: TaskGraph): boolean {
         for (const node of graph.nodes.values()) {
-            if ((node.agentType === 'build' || node.agentType === 'utility') && node.status === 'done') {
+            if (agentProfileCatalog.getRequired(node.profileName).authorizationCeiling === 'workspace_write'
+                && node.status === 'done') {
                 return true;
             }
         }
@@ -1269,25 +1260,25 @@ export class Orchestrator {
      /**
 * Quickly create a simple pipeline task diagram.
 *
-* Example usage (Explorer → Builder → LocWriter → Reviewer):
+* Example usage (explore → paradox-coder → localization-writer → reviewer):
 * ```typescript
 * const graph = Orchestrator.createPipeline('Create a typed content pipeline', [
-* { id: 'explore', agentType: 'explore', prompt: 'Scan project structure...' },
-* { id: 'build', agentType: 'build', prompt: 'Create the selected typed definition file...' },
-* { id: 'loc', agentType: 'loc_writer', prompt: 'Generate localization...' },
-* { id: 'review', agentType: 'review', prompt: 'Review code quality...' },
+* { id: 'explore', profileName: 'explore', prompt: 'Scan project structure...' },
+* { id: 'build', profileName: 'paradox-coder', prompt: 'Create the selected typed definition file...' },
+* { id: 'loc', profileName: 'localization-writer', prompt: 'Generate localization...' },
+* { id: 'review', profileName: 'reviewer', prompt: 'Review code quality...' },
 * ]);
 * ```
 */
     static createPipeline(
         userPrompt: string,
-        stages: Array<{ id: string; agentType: AgentMode; prompt: string }>,
+        stages: Array<{ id: string; profileName: string; prompt: string }>,
     ): TaskGraph {
         const graph = TaskGraphEngine.createGraph(userPrompt);
         let prevId: string | undefined;
 
         for (const stage of stages) {
-            TaskGraphEngine.addNode(graph, stage.id, stage.agentType, stage.prompt, {
+            TaskGraphEngine.addNode(graph, stage.id, stage.profileName, stage.prompt, {
                 dependencies: prevId ? [prevId] : [],
             });
             prevId = stage.id;
@@ -1302,21 +1293,21 @@ export class Orchestrator {
 * Example usage: 
 * ```typescript 
 * const graph = Orchestrator.createFanOut('Translation Localization', 'explore_1', [ 
-* { id: 'loc_en', agentType: 'loc_writer', prompt: 'Generate English localization' }, 
-* { id: 'loc_zh', agentType: 'loc_writer', prompt: 'Generate Chinese localization' }, 
-* { id: 'loc_fr', agentType: 'loc_writer', prompt: 'Generate French localization' }, 
+* { id: 'loc_en', profileName: 'localization-writer', prompt: 'Generate English localization' },
+* { id: 'loc_zh', profileName: 'localization-writer', prompt: 'Generate Chinese localization' },
+* { id: 'loc_fr', profileName: 'localization-writer', prompt: 'Generate French localization' },
 * ]); 
 * ``` 
 */
     static createFanOut(
         userPrompt: string,
         sharedDependency: string,
-        branches: Array<{ id: string; agentType: AgentMode; prompt: string }>,
+        branches: Array<{ id: string; profileName: string; prompt: string }>,
     ): TaskGraph {
         const graph = TaskGraphEngine.createGraph(userPrompt);
 
         for (const branch of branches) {
-            TaskGraphEngine.addNode(graph, branch.id, branch.agentType, branch.prompt, {
+            TaskGraphEngine.addNode(graph, branch.id, branch.profileName, branch.prompt, {
                 dependencies: [sharedDependency],
             });
         }

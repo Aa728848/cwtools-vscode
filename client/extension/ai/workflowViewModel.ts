@@ -5,7 +5,7 @@ export interface WorkflowViewModel {
     id: string;
     title: string;
     description: string;
-    mode: string;
+    scheduling: { domain: string; intent: string; strategy: string; profileName?: string };
     locale: WorkflowLocale;
     phases: Array<{ id: string; title: string; description: string }>;
     verification: Array<{ id: string; description: string; required: boolean; verificationTool?: string }>;
@@ -18,7 +18,7 @@ export function toWorkflowViewModel(workflow: AiWorkflow, locale?: string | null
         id: localized.id,
         title: localized.title,
         description: localized.description,
-        mode: localized.mode,
+        scheduling: { ...localized.scheduling },
         locale: normalizedLocale,
         phases: localized.phases.map(phase => ({
             id: phase.id,

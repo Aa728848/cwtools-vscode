@@ -56,11 +56,11 @@ describe('runnerPolicy', () => {
     });
 
     it('keeps the mode policy authoritative for execution capabilities', () => {
-        const build = filterToolDefinitionsForMode(toolDefinitions, 'build').map(tool => tool.function.name);
+        const build = filterToolDefinitionsForMode(toolDefinitions, 'build', { domain: 'paradox' }).map(tool => tool.function.name);
         expect(build).to.include.members(['read_file', 'replace_lines', 'dispatch_agents', 'mcp_call']);
 
         for (const mode of ['plan', 'explore', 'review'] as const) {
-            const names = filterToolDefinitionsForMode(registeredTools, mode).map(tool => tool.function.name);
+            const names = filterToolDefinitionsForMode(registeredTools, mode, { domain: 'paradox' }).map(tool => tool.function.name);
             expect(initialToolFocusForMode(mode)).to.equal('discovery');
             expect(names).to.include('read_file');
             expect(names).to.not.include.members(['write_file', 'replace_lines', 'write_localisation']);
@@ -70,12 +70,12 @@ describe('runnerPolicy', () => {
     });
 
     it('uses focus only as advisory guidance', () => {
-        const reminder = buildToolFocusReminder('build', 'validation');
+        const reminder = buildToolFocusReminder('build', 'validation', 'paradox');
         expect(reminder).to.include('Current build focus: validation');
         expect(reminder).to.include('advisory');
         expect(reminder).to.include('select_tools');
         expect(reminder).to.not.include('Only these stage tools');
-        expect(buildToolFocusReminder('build', undefined)).to.equal('');
+        expect(buildToolFocusReminder('build', undefined, 'paradox')).to.equal('');
     });
 
     it('auto-discloses and continues execution from authorization, not stage', () => {
@@ -125,7 +125,7 @@ describe('runnerPolicy', () => {
         }
         expect(TOOL_REGISTRY.get('write_localisation')?.domain).to.equal('paradox');
 
-        const locWriter = filterToolDefinitionsForMode(toolDefinitions, 'loc_writer', { useSlimPrompt: true })
+        const locWriter = filterToolDefinitionsForMode(toolDefinitions, 'loc_writer', { domain: 'paradox', useSlimPrompt: true })
             .map(tool => tool.function.name);
         expect(locWriter).to.include.members(['write_localisation', 'write_file']);
         expect(locWriter).to.not.include('replace_lines');

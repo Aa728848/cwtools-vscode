@@ -5,8 +5,6 @@ import { getPrivateTopicRoot, getPrivateTopicStorageDir } from '../workspacePath
 import { ErrorReporter } from '../errorReporter';
 import {
     AgentRunRecord,
-    type AdmissionDecision,
-    type AgentRunPhase,
     type AgentRunStatus,
     type AgentSchedulingState,
     type ChatMessage,
@@ -216,7 +214,6 @@ export class RunLedger {
             model: metadata?.model,
             userPromptPreview,
             startedAt: now,
-            createdAt: now,
             updatedAt: now,
             steps: [],
             metrics: {
@@ -321,22 +318,18 @@ export class RunLedger {
             }
         } else if (type === 'metrics_updated' && isRecord(storedPayload.metrics)) {
             run.metrics = { ...run.metrics, ...storedPayload.metrics };
-        } else if (type === 'phase_changed' && run.schedulingState && typeof storedPayload?.to === 'string') {
-            run.schedulingState = {
-                ...run.schedulingState,
-                phase: storedPayload.to as AgentRunPhase,
-                phaseReason: typeof storedPayload.reason === 'string' ? storedPayload.reason : run.schedulingState.phaseReason,
-                revision: typeof storedPayload.revision === 'number'
-                    ? storedPayload.revision
-                    : run.schedulingState.revision + 1,
-            };
+        } else if (type === 'phase_changed' && run.schedulingState) {
+            try {
+                run.schedulingState = normalizeSchedulingState(storedPayload.state);
+            } catch {
+                // Invalid scheduling events do not replace the canonical run state.
+            }
         } else if (type === 'dispatch_evaluated' && run.schedulingState && storedPayload?.accepted === true) {
-            run.schedulingState = {
-                ...run.schedulingState,
-                dispatch: 'parallel',
-                dispatchReason: typeof storedPayload.reason === 'string' ? storedPayload.reason : run.schedulingState.dispatchReason,
-                revision: run.schedulingState.revision + 1,
-            };
+            try {
+                run.schedulingState = normalizeSchedulingState(storedPayload.state);
+            } catch {
+                // Invalid scheduling events do not replace the canonical run state.
+            }
         }
         const metrics = run.metrics;
         if (type === 'model_call_start') {
@@ -870,7 +863,6 @@ export class RunLedger {
             }),
             userPromptPreview: `Run state is large (${Math.round(size / 1024)} KB); showing a compact recovery view.`,
             startedAt: mtimeMs,
-            createdAt: mtimeMs,
             updatedAt: mtimeMs,
             steps: [],
             metrics: {
@@ -900,48 +892,24 @@ export class RunLedger {
         record.writtenFiles = Array.isArray(record.writtenFiles) ? record.writtenFiles : [];
         for (const event of events) {
             if (event.type === 'admission_decided') {
-                const payload = event.payload as Partial<AdmissionDecision>;
-                if ((payload.domainProfile === 'general' || payload.domainProfile === 'paradox')
-                    && (payload.authorization === 'read_only'
-                        || payload.authorization === 'plan_write_only'
-                        || payload.authorization === 'workspace_write')
-                    && (payload.initialPhase === 'inspect'
-                        || payload.initialPhase === 'plan'
-                        || payload.initialPhase === 'execute'
-                        || payload.initialPhase === 'verify')) {
-                    record.schedulingState = schedulingStateFromAdmission({
-                        domainProfile: payload.domainProfile,
-                        authorization: payload.authorization,
-                        initialPhase: payload.initialPhase,
-                        explicitDelegation: payload.explicitDelegation === true,
-                        confidence: typeof payload.confidence === 'number' ? payload.confidence : 0,
-                        evidence: Array.isArray(payload.evidence)
-                            ? payload.evidence.filter((item): item is string => typeof item === 'string')
-                            : [],
-                    });
+                try {
+                    record.schedulingState = normalizeSchedulingState(event.payload?.state);
+                } catch {
+                    // Ignore invalid event payloads; the persisted run state remains authoritative.
                 }
-            } else if (event.type === 'phase_changed' && record.schedulingState
-                && ['inspect', 'plan', 'execute', 'verify', 'finalize'].includes(event.payload?.to)) {
-                record.schedulingState = {
-                    ...record.schedulingState,
-                    phase: event.payload.to,
-                    phaseReason: typeof event.payload.reason === 'string'
-                        ? event.payload.reason
-                        : record.schedulingState.phaseReason,
-                    revision: typeof event.payload.revision === 'number'
-                        ? event.payload.revision
-                        : record.schedulingState.revision + 1,
-                };
+            } else if (event.type === 'phase_changed' && record.schedulingState) {
+                try {
+                    record.schedulingState = normalizeSchedulingState(event.payload?.state);
+                } catch {
+                    // Invalid scheduling events do not replace the canonical run state.
+                }
             } else if (event.type === 'dispatch_evaluated' && record.schedulingState
                 && event.payload?.accepted === true) {
-                record.schedulingState = {
-                    ...record.schedulingState,
-                    dispatch: 'parallel',
-                    dispatchReason: typeof event.payload.reason === 'string'
-                        ? event.payload.reason
-                        : record.schedulingState.dispatchReason,
-                    revision: record.schedulingState.revision + 1,
-                };
+                try {
+                    record.schedulingState = normalizeSchedulingState(event.payload.state);
+                } catch {
+                    // Invalid scheduling events do not replace the canonical run state.
+                }
             } else if (event.type === 'status_changed' && event.payload?.status) {
                 record.status = event.payload.status;
             } else if (event.type === 'complete') {

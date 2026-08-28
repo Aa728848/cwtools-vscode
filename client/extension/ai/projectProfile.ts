@@ -1,8 +1,8 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import type {
-    AgentMode,
     ProjectProfile,
+    ProjectGuidanceCard,
     QueryProjectProfileArgs,
     QueryProjectProfileResult,
 } from './types';
@@ -12,10 +12,6 @@ export const PROJECT_PROFILE_RELATIVE_PATH = path.join('.cwtools', 'project', 'p
 const MAX_PROJECT_PROFILE_BYTES = 2 * 1024 * 1024;
 const PROFILE_WORKSPACE_KINDS = new Set(['paradox_mod', 'extension_source', 'mixed', 'generic']);
 const PROFILE_GAME_CONFIDENCE = new Set(['high', 'medium', 'low']);
-const PROFILE_AGENT_MODES = new Set([
-    'build', 'plan', 'explore', 'utility', 'review', 'gui_expert',
-    'script_reviewer', 'loc_translator', 'loc_writer', 'orchestrator', 'script',
-]);
 const PROFILE_LSP_STATES = new Set(['unknown', 'ready', 'not_ready']);
 const PROFILE_INDEX_STATES = new Set(['unknown', 'ready', 'partial', 'indexing', 'idle', 'unavailable']);
 const PROFILE_VANILLA_STATES = new Set(['unknown', 'configured', 'missing']);
@@ -40,7 +36,7 @@ function isStringArrayRecord(value: unknown): value is Record<string, string[]> 
 /** Validate the generated profile before it reaches prompts, LSP, or MCP paths. */
 export function isProjectProfile(value: unknown): value is ProjectProfile {
     if (!isRecord(value)
-        || value.schemaVersion !== 2
+        || value.schemaVersion !== 4
         || typeof value.generatedAt !== 'string'
         || typeof value.workspaceRoot !== 'string'
         || !PROFILE_WORKSPACE_KINDS.has(String(value.workspaceKind))
@@ -75,8 +71,8 @@ export function isProjectProfile(value: unknown): value is ProjectProfile {
         || !PROFILE_LSP_STATES.has(String(value.validation.lspReady))
         || !PROFILE_INDEX_STATES.has(String(value.validation.indexStatus))
         || !PROFILE_VANILLA_STATES.has(String(value.validation.vanillaCache))
-        || !isRecord(value.promptCards)
-        || !Object.values(value.promptCards).every(item => typeof item === 'string')
+        || !isRecord(value.guidanceCards)
+        || !Object.values(value.guidanceCards).every(item => typeof item === 'string')
         || !isStringArray(value.efficiencyHints)) {
         return false;
     }
@@ -93,7 +89,6 @@ export function isProjectProfile(value: unknown): value is ProjectProfile {
         isRecord(route)
         && typeof route.intent === 'string'
         && typeof route.workflowId === 'string'
-        && PROFILE_AGENT_MODES.has(String(route.mode))
         && typeof route.reason === 'string')) {
         return false;
     }
@@ -130,10 +125,6 @@ export function isProjectProfile(value: unknown): value is ProjectProfile {
             || typeof value.compatibility.coverage.truncated !== 'boolean'
             || (value.compatibility.coverage.evidenceSources !== undefined && !isStringArray(value.compatibility.coverage.evidenceSources))
             || (value.compatibility.coverage.unavailableSources !== undefined && !isStringArray(value.compatibility.coverage.unavailableSources))) return false;
-    }
-    for (const key of ['scriptedTriggers', 'scriptedEffects', 'events', 'onActions', 'staticModifiers']) {
-        const legacyValue = value.identifiers[key];
-        if (legacyValue !== undefined && !isStringArray(legacyValue)) return false;
     }
     return true;
 }
@@ -215,8 +206,8 @@ export function buildProjectProfile(workspaceRoot: string): ProjectProfile {
         'document_symbols',
     ];
 
-    const profileBase: Omit<ProjectProfile, 'promptCards' | 'efficiencyHints'> = {
-        schemaVersion: 2,
+    const profileBase: Omit<ProjectProfile, 'guidanceCards' | 'efficiencyHints'> = {
+        schemaVersion: 4,
         generatedAt: new Date().toISOString(),
         workspaceRoot: root,
         workspaceKind,
@@ -274,31 +265,26 @@ export function buildProjectProfile(workspaceRoot: string): ProjectProfile {
                 {
                     intent: 'Fix CWTools diagnostics',
                     workflowId: 'diagnostic-fix',
-                    mode: 'build',
                     reason: 'Starts from get_diagnostics and verifies zero real errors after edits.',
                 },
                 {
                     intent: 'Generate missing localisation',
                     workflowId: 'loc-generation',
-                    mode: 'build',
                     reason: 'Uses write_localisation and the detected language/encoding profile.',
                 },
                 {
                     intent: 'Design event chains',
                     workflowId: 'event-chain-design',
-                    mode: 'plan',
                     reason: 'Studies vanilla archetypes and writes a reusable design blueprint.',
                 },
                 {
                     intent: 'Review rules or cache updates',
                     workflowId: 'rules-sync-review',
-                    mode: 'review',
                     reason: 'Triages diagnostics after CWTools rule updates.',
                 },
                 {
                     intent: 'Fix sprite or sound references',
                     workflowId: 'asset-wiring',
-                    mode: 'build',
                     reason: 'Uses verified project/vanilla asset candidates instead of guessed IDs.',
                 },
             ],
@@ -318,18 +304,18 @@ export function buildProjectProfile(workspaceRoot: string): ProjectProfile {
         warnings,
     };
 
-    const promptCards = buildPromptCards(profileBase);
+    const guidanceCards = buildGuidanceCards(profileBase);
     const efficiencyHints = [
         'Call query_project_profile(section="summary") before broad workspace scans.',
         'Use query_cwt_schema or get_completion_at before inventing common/ entity fields or block shapes.',
         'Use query_project_knowledge for complex cross-subsystem work, then explore_pdx_project/query_workspace_index/go_to_definition for live exact evidence.',
-        'Use mode-specific prompt cards from the profile instead of injecting full project files.',
+        'Use targeted guidance cards from the profile instead of injecting full project files.',
         'Keep CWTOOLS.md for human-edited rules; use profile.json for machine routing facts.',
     ];
 
     return {
         ...profileBase,
-        promptCards,
+        guidanceCards,
         efficiencyHints,
     };
 }
@@ -353,9 +339,9 @@ export function queryProjectProfile(workspaceRoot: string, args: QueryProjectPro
             };
         }
         const section = args.section ?? 'summary';
-        const promptCard = args.mode ? getPromptCardForMode(profile, args.mode) : undefined;
+        const guidanceCard = args.guidance ? getGuidanceCard(profile, args.guidance) : undefined;
         if (section === 'all') {
-            return { status: 'ready', profilePath, generatedAt: profile.generatedAt, section, profile, promptCard };
+            return { status: 'ready', profilePath, generatedAt: profile.generatedAt, section, profile, guidanceCard };
         }
         const data = selectProfileSection(profile, section);
         return {
@@ -365,8 +351,8 @@ export function queryProjectProfile(workspaceRoot: string, args: QueryProjectPro
             section,
             summary: buildProfileSummary(profile),
             data,
-            promptCard,
-            _hint: 'Use section="routing", "localisation", "identifiers", or mode-specific promptCard for targeted context.',
+            guidanceCard,
+            _hint: 'Use section="routing", "localisation", "identifiers", or a targeted guidance card for focused context.',
         };
     } catch (e) {
         return {
@@ -377,11 +363,8 @@ export function queryProjectProfile(workspaceRoot: string, args: QueryProjectPro
     }
 }
 
-export function getPromptCardForMode(profile: ProjectProfile, mode: AgentMode | 'asset'): string {
-    if (mode === 'loc_translator' || mode === 'loc_writer') return profile.promptCards.loc_writer ?? profile.promptCards.build ?? '';
-    if (mode === 'gui_expert') return profile.promptCards.asset ?? profile.promptCards.build ?? '';
-    if (mode === 'script_reviewer') return profile.promptCards.review ?? '';
-    return profile.promptCards[mode] ?? profile.promptCards.build ?? '';
+export function getGuidanceCard(profile: ProjectProfile, guidance: ProjectGuidanceCard): string {
+    return profile.guidanceCards[guidance] ?? profile.guidanceCards.implementation ?? '';
 }
 
 export function buildProfileSummary(profile: ProjectProfile): string {
@@ -449,7 +432,7 @@ function selectProfileSection(profile: ProjectProfile, section: NonNullable<Quer
             vanillaCacheEvidence: profile.validation.vanillaCacheEvidence,
             game: profile.game,
         };
-        case 'promptCards': return profile.promptCards;
+        case 'guidanceCards': return profile.guidanceCards;
         case 'summary':
         default:
             return {
@@ -465,22 +448,22 @@ function selectProfileSection(profile: ProjectProfile, section: NonNullable<Quer
     }
 }
 
-function buildPromptCards(profile: Omit<ProjectProfile, 'promptCards' | 'efficiencyHints'>): ProjectProfile['promptCards'] {
+function buildGuidanceCards(profile: Omit<ProjectProfile, 'guidanceCards' | 'efficiencyHints'>): ProjectProfile['guidanceCards'] {
     const namespaces = profile.identifiers.namespaces.slice(0, 12).join(', ') || 'none detected';
     const languages = profile.localisation.languages.join(', ') || 'unknown';
     const encoding = profile.localisation.encoding;
     const keyDirs = keyDirectoryLines(profile).slice(0, 10).join(', ') || 'none detected';
     return {
-        build: [
-            'Build mode project card:',
+        implementation: [
+            'Implementation guidance:',
             `- Workspace kind: ${profile.workspaceKind}; game: ${profile.game.displayName}.`,
             `- Key directories: ${keyDirs}.`,
             `- Namespaces: ${namespaces}.`,
             '- Before editing known IDs, prefer explore_pdx_project/query_workspace_index/go_to_definition/get_pdx_block.',
             '- After edits, run get_diagnostics on changed files.',
         ].join('\n'),
-        plan: [
-            'Plan mode project card:',
+        planning: [
+            'Planning guidance:',
             '- For complex pipelines, query_project_knowledge must establish project patterns, vanilla archetypes, topology, override evidence, and unresolved facts before blueprint approval.',
             `- Study existing patterns in: ${keyDirs}.`,
             '- Enumerate current TypeDefs and relevant project-graph dependency families before approving a complex pipeline; record only candidates that materially affected the design.',
@@ -488,43 +471,43 @@ function buildPromptCards(profile: Omit<ProjectProfile, 'promptCards' | 'efficie
             `- Existing namespaces: ${namespaces}. Allocate IDs deliberately and record them in the blueprint.`,
             '- Prefer write_design_blueprint for implementation-ready plans.',
         ].join('\n'),
-        explore: [
-            'Explore mode project card:',
+        exploration: [
+            'Exploration guidance:',
             '- Start with query_project_profile, then explore_pdx_project for a bounded semantic graph.',
             '- Use broad scans only after indexed lookups fail or when the user asks for a full audit.',
         ].join('\n'),
         review: [
-            'Review mode project card:',
+            'Review guidance:',
             '- Collect diagnostics first, group by rule/category, then inspect representative files.',
             '- Treat cache/rules-sync issues separately from real script defects.',
             '- Verify suspicious missing IDs through at least two independent indexed sources.',
         ].join('\n'),
         utility: [
-            'Utility mode project card:',
+            'Utility guidance:',
             '- Use project profile facts for paths and routing before running shell commands.',
             '- Prefer existing repository scripts and keep generated helpers in the topic scratch directory.',
         ].join('\n'),
-        loc_writer: [
-            'Localisation mode project card:',
+        localisation: [
+            'Localisation guidance:',
             `- Languages: ${languages}.`,
             `- Encoding: ${encoding}.`,
             '- Use write_localisation for YML writes; do not patch localisation files with generic write tools.',
             '- Query query_localisation_index before creating keys.',
         ].join('\n'),
-        asset: [
-            'Asset mode project card:',
+        assets: [
+            'Asset guidance:',
             '- Use find_sprite_candidates/find_sound_candidates with searchContext="both" before replacing asset references.',
             '- Never invent GFX_* or sound names; use verified project or vanilla definitions.',
             '- Check interface, gfx, and sound directories from the profile before scanning everything.',
         ].join('\n'),
-        orchestrator: [
-            'General Multi-Agent project card:',
+        coordination: [
+            'General Multi-Agent guidance:',
             '- Dispatch sub-agents with plannedFiles when known.',
             '- Put shared interfaces, file ownership, and decisions on the blackboard.',
-            '- Utility writers may run scoped formatting, build, and test commands through the parent policy engine; explore, plan, and review roles stay read-only.',
+            '- General-coder may run scoped formatting, build, and test commands through the parent policy engine; explore, planner, and reviewer profiles stay read-only.',
         ].join('\n'),
-        script: [
-            'Paradox Multi-Agent project card:',
+        paradox_coordination: [
+            'Paradox Multi-Agent guidance:',
             '- Use dynamic workflow waves: preflight, read fanout, classify, write batches, verify, summarize.',
             '- Start with project profile, workspace index, diagnostics, scope/rule queries, and asset candidates.',
             '- Dispatch up to 8 concise read-heavy tasks, but keep write waves narrow and always set plannedFiles.',

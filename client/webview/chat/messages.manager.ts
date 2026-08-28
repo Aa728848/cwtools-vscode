@@ -12,6 +12,22 @@ export type ManagerWebviewMessage =
     | { type: 'setTopicWorkspace'; topicId: string; workspaceId?: string | null; workspaceLabel?: string | null }
     | { type: 'cancelGeneration' };
 
+export interface ManagerSchedulingStateView {
+    profileName: string;
+    domainProfile: 'paradox' | 'general' | 'hybrid';
+    authorization: 'read_only' | 'plan_write_only' | 'workspace_write';
+    phase: 'inspect' | 'plan' | 'execute' | 'verify' | 'finalize';
+    dispatch: 'single' | 'parallel' | 'specialist';
+    overlays: string[];
+    routeConfidence: number;
+    routeEvidence: string[];
+    awaitingUserDecision?: boolean;
+    routingSource?: 'model' | 'deterministic' | 'workflow' | 'user';
+    phaseReason: string;
+    dispatchReason?: string;
+    revision: number;
+}
+
 export interface ManagerChildRunView {
     runId: string;
     parentRunId?: string;
@@ -20,13 +36,7 @@ export interface ManagerChildRunView {
     threadId?: string;
     turnId?: string;
     status: string;
-    schedulingState: {
-        profileName?: string;
-        domainProfile: 'paradox' | 'general' | 'hybrid';
-        authorization: 'read_only' | 'plan_write_only' | 'workspace_write';
-        phase: 'inspect' | 'plan' | 'execute' | 'verify' | 'finalize';
-        dispatch: 'single' | 'parallel' | 'specialist';
-    };
+    schedulingState: ManagerSchedulingStateView;
     startedAt: number;
     completedAt?: number;
     userPromptPreview: string;
@@ -39,7 +49,6 @@ export interface ManagerRunSnapshotMessage {
         agentId?: string;
         status: string;
         startedAt: number;
-        createdAt: number;
         completedAt?: number;
         metrics: {
             totalTokens: number;
@@ -93,14 +102,7 @@ export interface ManagerSnapshotMessage {
     };
     runtimeInspector?: {
         version: 1;
-        scheduling?: {
-            profileName?: string;
-            authorization: string;
-            phase: string;
-            dispatch: string;
-            routeConfidence: number;
-            overlays?: string[];
-        };
+        scheduling?: ManagerSchedulingStateView;
         tools?: {
             registered: string[];
             activated: string[];
@@ -143,29 +145,5 @@ export interface ManagerSnapshotMessage {
             }>;
         }>;
         entities: Array<{ id: string; kind: string; state?: string; anchorTurnId?: string; value: unknown }>;
-    };
-}
-
-export interface OrchestratorProgressMessage {
-    type: 'orchestratorProgress';
-    progress: {
-        phase: 'planning' | 'executing' | 'reviewing' | 'complete' | 'failed';
-        total: number;
-        done: number;
-        running: number;
-        failed: number;
-        cancelled: number;
-        latestEvent?: string;
-        lanes: Array<{
-            id: string;
-            role: string;
-            taskNodeId: string;
-            status: 'pending' | 'running' | 'done' | 'failed' | 'cancelled';
-            stepCount: number;
-            tokenUsed: number;
-            startedAt?: number;
-            duration?: number;
-            statusText?: string;
-        }>;
     };
 }

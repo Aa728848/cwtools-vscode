@@ -552,11 +552,13 @@ describe('enforced central tool policy', () => {
         const workflowCall = await executor.execute('save_workflow', {
             title: 'bad domain switch',
             description: 'should not save',
-            mode: 'build',
+            domain: 'paradox',
+            intent: 'execute',
+            strategy: 'single',
             promptSupplement: 'do work',
         }, context) as any;
         expect(workflowCall.success).to.equal(false);
-        expect(workflowCall.error).to.include("domain-specific mode 'build'");
+        expect(workflowCall.error).to.include("domain 'paradox'");
     });
 
     it('limits coordinator write_file calls to the current plan artifact', async () => {
@@ -1250,7 +1252,7 @@ describe('agent tool file path safety', () => {
             },
             taskPlan: [{
                 id: 'build_event',
-                agentType: 'build',
+                profileName: 'paradox-coder',
                 prompt: 'Implement test.1 with the approved flag lifecycle.',
                 plannedFiles: ['events/test.txt'],
                 produces: [
@@ -1518,7 +1520,7 @@ describe('agent sprite candidate tool contract', () => {
         }
         expect(definition.function.description).to.include('Agent project profile');
         expect(definition.function.parameters.properties).to.have.property('section');
-        expect(definition.function.parameters.properties).to.have.property('mode');
+        expect(definition.function.parameters.properties).to.have.property('guidance');
     });
 
     it('registers query_cwt_schema as a first-class CWT-first read-only tool', () => {
@@ -1828,7 +1830,7 @@ describe('agent sprite candidate tool contract', () => {
         const profileDir = path.join(workspaceRoot, '.cwtools', 'project');
         fs.mkdirSync(profileDir, { recursive: true });
         fs.writeFileSync(path.join(profileDir, 'profile.json'), JSON.stringify({
-            schemaVersion: 2,
+            schemaVersion: 4,
             generatedAt: '2026-05-24T00:00:00.000Z',
             workspaceRoot,
             workspaceKind: 'paradox_mod',
@@ -1840,11 +1842,6 @@ describe('agent sprite candidate tool contract', () => {
                 namespaces: ['samplemod'],
                 variablePrefixes: ['@samplemod_'],
                 byType: {},
-                scriptedTriggers: [],
-                scriptedEffects: [],
-                events: ['samplemod.1'],
-                onActions: [],
-                staticModifiers: [],
             },
             routing: {
                 recommendedWorkflowByIntent: [],
@@ -1852,16 +1849,16 @@ describe('agent sprite candidate tool contract', () => {
                 avoidPatterns: [],
             },
             validation: { lspReady: 'unknown', indexStatus: 'unknown', vanillaCache: 'unknown' },
-            promptCards: { build: 'Build card' },
+            guidanceCards: { implementation: 'Build guidance' },
             efficiencyHints: ['Use profile first'],
         }), 'utf8');
 
         const executor = new AgentToolExecutor({} as any, workspaceRoot);
-        const result = await executor.execute('query_project_profile', { section: 'summary', mode: 'build' }, { runnerOptions: { schedulingState: PARADOX_WRITE } } as any) as any;
+        const result = await executor.execute('query_project_profile', { section: 'summary', guidance: 'implementation' }, { runnerOptions: { schedulingState: PARADOX_WRITE } } as any) as any;
 
         expect(result.status).to.equal('ready');
         expect(result.summary).to.include('Project: SampleMod');
-        expect(result.promptCard).to.equal('Build card');
+        expect(result.guidanceCard).to.equal('Build guidance');
         expect(result.data.workspaceKind).to.equal('paradox_mod');
     });
 
@@ -2840,20 +2837,20 @@ describe('agent tool progress and aborts', () => {
     it('rejects writer sub-agents when Plan mode fans out repository exploration', async () => {
         const executor = createExecutor();
         const result = await executor.execute('dispatch_agents', {
-            tasks: [{ id: 'writer', agentType: 'build', prompt: 'Modify a project file.' }],
+            tasks: [{ id: 'writer', profileName: 'paradox-coder', prompt: 'Modify a project file.' }],
         }, {
             runnerOptions: { schedulingState: PARADOX_PLAN },
         } as any) as any;
 
         expect(result.success).to.equal(false);
-        expect(result.error).to.include("Agent type 'build' is not allowed by scheduler profile");
-        expect(result.error).to.include('explore, plan, review');
+        expect(result.error).to.include("Sub-agent profile 'paradox-coder' is not allowed by scheduler profile");
+        expect(result.error).to.include('explore, planner, reviewer');
     });
 
     it('does not expose dispatch_agents to an Explore scheduler', async () => {
         const executor = createExecutor();
         const result = await executor.execute('dispatch_agents', {
-            tasks: [{ id: 'writer', agentType: 'utility', prompt: 'Modify a project file.' }],
+            tasks: [{ id: 'writer', profileName: 'general-coder', prompt: 'Modify a project file.' }],
         }, {
             runnerOptions: { schedulingState: GENERAL_EXPLORE },
         } as any) as any;

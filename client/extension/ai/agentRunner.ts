@@ -28,7 +28,7 @@ import type {
     ToolTerminalOutcome,
 } from './types';
 import { contentToString } from './types';
-import { estimateTokenCount, estimateChatMessageTokens, hasImageContent, CHARS_PER_TOKEN } from './runner/tokenEstimation';
+import { estimateTokenCount, estimateChatMessageTokens, hasImageContent, BASE64_CHARS_PER_TOKEN_ESTIMATE } from './runner/tokenEstimation';
 import * as vs from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -50,7 +50,7 @@ import { describeImagesWithMinimaxCli } from './visionAdapter';
 import { ErrorReporter } from './errorReporter';
 import { createBestEffortReporter } from './runner/bestEffortDiagnostics';
 import { MemoryParser } from './memoryParser';
-import { getProjectWorkspaceRoot, getPrivateTopicStorageDir, getPrivateTopicStorageDirCandidates, canonicalPathKey } from './workspacePaths';
+import { getProjectWorkspaceRoot, getPrivateTopicStorageDir, canonicalPathKey } from './workspacePaths';
 import {
     filterToolDefinitionsForMode,
     initialToolFocusForMode,
@@ -134,7 +134,7 @@ export { AgentAbortError, checkCancellation, isAbortError } from './runner/cance
 export { StepEmitter } from './runner/stepEmitter';
 // Token estimation primitives live in runner/tokenEstimation (extracted to avoid
 // runner/ modules importing this god-file). Re-exported for existing consumers.
-export { estimateTokenCount, estimateChatMessageTokens, estimateChatMessagesTokens, CHARS_PER_TOKEN } from './runner/tokenEstimation';
+export { estimateTokenCount, estimateChatMessageTokens, estimateChatMessagesTokens } from './runner/tokenEstimation';
 
 
 const reportBestEffortFailure = createBestEffortReporter((message, error) => {
@@ -573,11 +573,6 @@ function foldToolBatchState(input: {
 // Mid-loop compaction: check every N iterations within reasoningLoop
 // Mid-loop compaction triggers at this fraction of context limit
 
-// ─── Batch 2.3: Checkpoint mechanism ─────────────────────────────────────────
-// Save a lightweight progress checkpoint every N iterations within the reasoning loop.
-// On crash or context-window overflow, the agent can load the last checkpoint
-// instead of starting from scratch.
-const CHECKPOINT_INTERVAL = 10;
 const RESUME_SNAPSHOT_INTERVAL = 10;
 const RESUME_SNAPSHOT_MIN_INTERVAL_MS = 30_000;
 
@@ -816,78 +811,6 @@ export class AgentRunner {
         return true;
     }
 
-    // ─── Batch 2.3: Checkpoint save/load ─────────────────────────────────────
-
-    /**
-     * Save a lightweight checkpoint of agent progress for crash recovery.
-     * Called every CHECKPOINT_INTERVAL iterations in the reasoning loop.
-     */
-    private async saveCheckpoint(
-        iteration: number,
-        messages: ChatMessage[],
-        writtenFiles: string[],
-        topicId?: string,
-        agentId?: string,
-    ): Promise<void> {
-        try {
-            const wsRoot = getProjectWorkspaceRoot();
-
-            const checkpointDir = getPrivateTopicStorageDir(topicId || 'default', wsRoot);
-            if (!checkpointDir) return;
-            if (!fs.existsSync(checkpointDir)) fs.mkdirSync(checkpointDir, { recursive: true });
-
-            const checkpoint: import('./types').AgentCheckpoint = {
-                version: 1,
-                timestamp: Date.now(),
-                iteration,
-                writtenFiles,
-                conversationSummary: messages
-                    .filter(m => m.role === 'assistant')
-                    .slice(-3)
-                    .map(m => contentToString(m.content).substring(0, 500))
-                    .join('\n---\n'),
-                todoSnapshot: JSON.stringify(this.toolExecutor.getTodos(agentId)),
-                topicId,
-            };
-
-            fs.writeFileSync(
-                path.join(checkpointDir, 'checkpoint.json'),
-                JSON.stringify(checkpoint, null, 2),
-                'utf-8'
-            );
-        } catch (error) {
-            reportBestEffortFailure('checkpoint.save', {
-                topicId: topicId || 'default',
-                agentId,
-                iteration,
-            }, error);
-        }
-    }
-
-    /**
-     * Load a previously saved checkpoint for UI display purposes.
-     * Returns null if no checkpoint exists or it is invalid.
-     * Note: this does NOT restore agent state — checkpoints are lossy
-     * (only 3 recent assistant message summaries, 500 chars each).
-     */
-    async loadCheckpoint(topicId: string): Promise<import('./types').AgentCheckpoint | null> {
-        try {
-            const wsRoot = getProjectWorkspaceRoot();
-
-            const checkpointPath = getPrivateTopicStorageDirCandidates(topicId, wsRoot)
-                .map(dir => path.join(dir, 'checkpoint.json'))
-                .find(candidate => fs.existsSync(candidate));
-            if (!checkpointPath) return null;
-
-            const raw = JSON.parse(fs.readFileSync(checkpointPath, 'utf-8'));
-            if (!raw || raw.version !== 1 || typeof raw.timestamp !== 'number') return null;
-
-            return raw as import('./types').AgentCheckpoint;
-        } catch {
-            return null;
-        }
-    }
-
     /** 
 * Save the complete status of the current Agent (for use in resumed downloads). 
 * Unlike Checkpoint, this will save the complete message queue and tool return results, 
@@ -926,11 +849,11 @@ export class AgentRunner {
         if (!topicId) return;
         try {
             const wsRoot = getProjectWorkspaceRoot();
-            for (const resumeDir of getPrivateTopicStorageDirCandidates(topicId, wsRoot)) {
-                const resumePath = path.join(resumeDir, 'resume_state.json');
-                if (fs.existsSync(resumePath)) {
-                    fs.unlinkSync(resumePath);
-                }
+            const resumeDir = getPrivateTopicStorageDir(topicId, wsRoot);
+            if (!resumeDir) return;
+            const resumePath = path.join(resumeDir, 'resume_state.json');
+            if (fs.existsSync(resumePath)) {
+                fs.unlinkSync(resumePath);
             }
         } catch (error) {
             reportBestEffortFailure('resume.clear', { topicId }, error);
@@ -1042,6 +965,7 @@ export class AgentRunner {
         providerId: string | undefined,
         requestedModel: string | undefined,
         metadata: {
+            agentMode: AgentMode;
             toolFocus?: AgentToolFocus;
             purpose: 'validation' | 'final_summary';
             promptFingerprint?: string;
@@ -1081,6 +1005,7 @@ export class AgentRunner {
             model: effectiveModel,
             inputTokens: promptTokens,
             cachedTokens,
+            agentMode: metadata.agentMode,
             toolFocus: metadata.toolFocus,
             purpose: metadata.purpose,
             promptFingerprint: metadata.promptFingerprint,
@@ -1094,6 +1019,7 @@ export class AgentRunner {
             model: string;
             inputTokens: number;
             cachedTokens: number;
+            agentMode: AgentMode;
             toolFocus?: AgentToolFocus;
             purpose: 'reasoning' | 'fallback' | 'validation' | 'final_summary';
             promptFingerprint?: string;
@@ -1123,7 +1049,6 @@ export class AgentRunner {
         appendCacheRequestUsage(accumulator, {
             ...sample,
             cacheCapable,
-            agentMode: accumulator.agentMode,
             invalidationReason,
         });
     }
@@ -1226,10 +1151,8 @@ export class AgentRunner {
                     if (options) options.schedulingState = finalized;
                     schedulingState = finalized;
                     await runLedger.appendEvent(r.runId, 'phase_changed', {
-                        from: previousPhase,
-                        to: finalized.phase,
-                        reason: finalized.phaseReason,
-                        revision: finalized.revision,
+                        previousPhase,
+                        state: finalized,
                     });
                 }
                 await runLedger.appendEvent(r.runId, 'status_changed', { status });
@@ -1275,8 +1198,6 @@ export class AgentRunner {
             input: 0,
             output: 0,
             estimatedCostCny: 0,
-            agentMode: mode,
-            toolFocus: options?.initialToolFocus ?? initialToolFocusForMode(mode),
         };
         const runMetrics: AgentRunMetrics = {
             iterations: 0,
@@ -1368,20 +1289,10 @@ export class AgentRunner {
             schedulingState,
         };
         await turnRuntime.eventSink.append('admission_decided', {
-            profileName: schedulingState.profileName,
-            overlays: schedulingState.overlays ?? [],
-            domainProfile: schedulingState.domainProfile,
-            authorization: schedulingState.authorization,
-            initialPhase: schedulingState.phase,
-            explicitDelegation: schedulingState.dispatch !== 'single',
-            confidence: schedulingState.routeConfidence,
-            evidence: schedulingState.routeEvidence,
+            state: schedulingState,
         });
         await turnRuntime.eventSink.append('phase_changed', {
-            from: null,
-            to: schedulingState.phase,
-            reason: schedulingState.phaseReason,
-            revision: schedulingState.revision,
+            state: schedulingState,
         });
         this.activeRunEventSinks.set(runId, turnRuntime.eventSink);
         this.activeInputQueues.set(runId, turnRuntime.inputQueue);
@@ -1493,10 +1404,10 @@ export class AgentRunner {
                     domain,
                 );
         const usesFrozenPrompt = supportsPrefixCache || options?.useSlimPrompt === true;
-        tokenAccumulator.promptFingerprint = usesFrozenPrompt
+        const basePromptFingerprint = usesFrozenPrompt
             ? this.promptBuilder.getLastFrozenPromptFingerprintHash()
             : undefined;
-        tokenAccumulator.promptCacheMissReason = usesFrozenPrompt
+        const initialPromptCacheMissReason = usesFrozenPrompt
             ? this.promptBuilder.getLastFrozenPromptLookup()?.missReason
             : undefined;
 
@@ -1540,7 +1451,7 @@ export class AgentRunner {
             dynamicBlock.unshift({
                 role: 'system',
                 content: [
-                    `[AGENT PROFILE: ${schedulingState.profileName ?? 'custom'}]`,
+                    `[AGENT PROFILE: ${schedulingState.profileName}]`,
                     options.agentProfileInstructions.trim().slice(0, 32_000),
                 ].join('\n'),
             });
@@ -1567,7 +1478,7 @@ export class AgentRunner {
             if (!Array.isArray(message.content)) return sum + estimateTokenCount(contentToString(message.content));
             return sum + message.content.reduce((partSum, part) => {
                 if (part.type === 'text') return partSum + estimateTokenCount(part.text);
-                if (part.type === 'image_url') return partSum + Math.ceil(part.image_url.url.length / 3 / CHARS_PER_TOKEN);
+                if (part.type === 'image_url') return partSum + Math.ceil(part.image_url.url.length / 3 / BASE64_CHARS_PER_TOKEN_ESTIMATE);
                 return partSum;
             }, 0);
         }, 0);
@@ -1644,7 +1555,7 @@ export class AgentRunner {
         const compactedHistory = await this.maybeCompactHistory(
             conversationHistory,
             emitStep,
-            options,
+            { ...options, agentMode: mode, toolFocus: initialToolFocus },
             tokenAccumulator,
             {
                 reservedTokens: fixedPromptTokens + toolSchemaTokens + admissionOutputReserve,
@@ -1701,9 +1612,6 @@ export class AgentRunner {
             });
         }
 
-        // mode may have been overridden by the resumed checkpoint; record the final one.
-        tokenAccumulator.agentMode = mode;
-
         if (context.topicId) {
             options = { ...options, topicId: context.topicId };
             await this.saveResumeState(context.topicId, messages, options.schedulingState, runId);
@@ -1737,13 +1645,14 @@ export class AgentRunner {
             const finalMessage = await this.reasoningLoop(
                 messages,
                 emitStep,
-                mode,
                 options,
                 tokenAccumulator,
                 options?.onBeforeFileWrite,
                 runMetrics,
                 terminalValidation,
                 restoredStepRequests,
+                basePromptFingerprint,
+                initialPromptCacheMissReason,
             );
             runMetrics.finalPromptTokens = messages.reduce((s, m) => s + estimateChatMessageTokens(m), 0);
 
@@ -2207,16 +2116,17 @@ export class AgentRunner {
     private async reasoningLoop(
         messages: ChatMessage[],
         emitStep: (step: AgentStep) => void,
-        mode: AgentMode,
         options?: AgentRunnerOptions,
         tokenAccumulator?: TokenUsage,
         onFileWrite?: (filePath: string, prevContent: string | null) => void,
         runMetrics?: AgentRunMetrics,
         terminalValidation?: TerminalValidationState,
         restoredStepRequests: readonly StepRequest[] = [],
+        basePromptFingerprint?: string,
+        initialPromptCacheMissReason?: string,
     ): Promise<string> {
         const schedulingState = normalizeSchedulingState(options?.schedulingState);
-        mode = executionModeForSchedulingState(schedulingState);
+        const mode = executionModeForSchedulingState(schedulingState);
         if (options) options.schedulingState = schedulingState;
         const runRecord = options?.runRecord ?? await this.activeRunRecordPromise!;
         this.readTracker.reset();
@@ -2296,7 +2206,7 @@ export class AgentRunner {
                 if (Array.isArray(m.content)) {
                     return s + m.content.reduce((inner, part) => {
                         if (part.type === 'text') return inner + estimateTokenCount(part.text);
-                        if (part.type === 'image_url') return inner + Math.ceil(part.image_url.url.length / 3 / CHARS_PER_TOKEN);
+                        if (part.type === 'image_url') return inner + Math.ceil(part.image_url.url.length / 3 / BASE64_CHARS_PER_TOKEN_ESTIMATE);
                         return inner;
                     }, 0);
                 }
@@ -2317,7 +2227,7 @@ export class AgentRunner {
         const confirmedWrittenFiles = new Set<string>();
         const performanceConfig = vs.workspace.getConfiguration('stellarisLanguageServices.ai.performance');
         const toolFocus = options?.initialToolFocus ?? initialToolFocusForMode(mode);
-        if (tokenAccumulator) tokenAccumulator.toolFocus = toolFocus;
+        const compactionRunOptions: CompactionRunOptions = { ...options, agentMode: mode, toolFocus };
         let requestArchiveState: ModelRequestArchiveState | undefined;
         const archivedToolsets = new Map<string, { ref: string; sha256: string }>();
         const archiveModelRequest = async (
@@ -2697,17 +2607,6 @@ export class AgentRunner {
                     });
                 }
 
-            // Batch 2.3: Periodic checkpoint save for crash recovery
-            if (iteration > 1 && iteration % CHECKPOINT_INTERVAL === 0) {
-                void this.saveCheckpoint(
-                    iteration,
-                    messages,
-                    Array.from(confirmedWrittenFiles),
-                    options?.topicId,
-                    options?.agentId,
-                );
-            }
-
             // ── Mid-loop compaction: prevent uncontrolled context growth ──────
             // Every MID_LOOP_COMPACTION_INTERVAL iterations, estimate message size
             // and compact if approaching the context window limit.
@@ -2757,7 +2656,7 @@ export class AgentRunner {
                         messages = await this.maybeCompactHistory(
                             messages,
                             emitStep,
-                            options,
+                            compactionRunOptions,
                             tokenAccumulator,
                             { reservedTokens: activeToolSchemaTokens + configuredReservedTokens, force: true },
                         );
@@ -3079,7 +2978,7 @@ export class AgentRunner {
                     messages = await this.maybeCompactHistory(
                         messages,
                         emitStep,
-                        options,
+                        compactionRunOptions,
                         tokenAccumulator,
                         { reservedTokens: activeSchemaTokens + configuredReservedTokens, force: true },
                     );
@@ -3310,7 +3209,7 @@ export class AgentRunner {
                     .map(message => contentToString(message.content))
                     .join('\n\u0000');
                 const requestPromptFingerprint = sha256Text([
-                    tokenAccumulator.promptFingerprint ?? sha256Text(systemPrefix),
+                    basePromptFingerprint ?? sha256Text(systemPrefix),
                     mode,
                     toolFocus ?? 'full',
                     hashToolDefinitionsForFingerprint(availableTools),
@@ -3322,10 +3221,11 @@ export class AgentRunner {
                     model: response.model ?? options?.model ?? 'unknown',
                     inputTokens: promptTokens,
                     cachedTokens,
+                    agentMode: mode,
                     toolFocus,
                     purpose: fallbackFromError ? 'fallback' : 'reasoning',
                     promptFingerprint: requestPromptFingerprint,
-                    invalidationReason: firstReasoningSample ? tokenAccumulator.promptCacheMissReason : undefined,
+                    invalidationReason: firstReasoningSample ? initialPromptCacheMissReason : undefined,
                 });
 
                 // Emit cache hit rate, cache creation, and saved costs for real-time auditing in the UI
@@ -3480,7 +3380,7 @@ export class AgentRunner {
                 messages = await this.maybeCompactHistory(
                     messages,
                     emitStep,
-                    options,
+                    compactionRunOptions,
                     tokenAccumulator,
                     { reservedTokens: activeToolSchemaTokens + configuredReservedTokens, force: true },
                 );
@@ -4327,7 +4227,7 @@ export class AgentRunner {
                         messages = await this.maybeCompactHistory(
                             messages,
                             emitStep,
-                            options,
+                            compactionRunOptions,
                             tokenAccumulator,
                             { reservedTokens: activeToolSchemaTokens + configuredReservedTokens, force: true },
                         );
@@ -4469,9 +4369,10 @@ export class AgentRunner {
             reasoningEffort: options?.reasoningEffort,
         });
         this.accumulateAuxiliaryUsage(finalResponse, messages, tokenAccumulator, finalProviderId, finalModel, {
+            agentMode: mode,
             toolFocus: 'finalize',
             purpose: 'final_summary',
-            promptFingerprint: tokenAccumulator?.promptFingerprint,
+            promptFingerprint: basePromptFingerprint,
         });
         await runLedger.appendEvent(
             runRecord.runId,

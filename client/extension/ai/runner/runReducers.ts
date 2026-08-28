@@ -23,6 +23,7 @@ import type {
     AgentRunPhase,
     AgentRuntimeDomain,
 } from '../types';
+import { normalizeSchedulingState } from './scheduling';
 
 // ─── Run state ───────────────────────────────────────────────────────────────
 
@@ -254,7 +255,7 @@ export function reduceAgentGraph(events: AgentRunEvent[]): AgentGraphSnapshot {
                 const parent = p?.parentAgentId ?? rootAgentId;
                 if (aid) {
                     const node = ensure(aid, parent);
-                    node.role = p?.role ?? node.role;
+                    node.role = p?.profileName ?? node.role;
                     node.status = 'running';
                 }
                 break;
@@ -493,32 +494,32 @@ export function reduceScheduling(events: AgentRunEvent[]): SchedulingSnapshot {
         const payload = (event.payload as Record<string, unknown>) ?? {};
         switch (event.type) {
             case 'admission_decided':
-                if (payload.domainProfile === 'general' || payload.domainProfile === 'paradox') {
-                    snapshot.domainProfile = payload.domainProfile;
+                try {
+                    const state = normalizeSchedulingState(payload.state);
+                    snapshot.domainProfile = state.domainProfile;
+                    snapshot.authorization = state.authorization;
+                    snapshot.phase = state.phase;
+                    snapshot.dispatch = state.dispatch;
+                    snapshot.routeConfidence = state.routeConfidence;
+                    snapshot.routeEvidence = [...state.routeEvidence];
+                    snapshot.phaseRevision = state.revision;
+                } catch {
+                    // Invalid scheduling events do not alter the projection.
                 }
-                if (payload.authorization === 'read_only'
-                    || payload.authorization === 'plan_write_only'
-                    || payload.authorization === 'workspace_write') {
-                    snapshot.authorization = payload.authorization;
-                }
-                if (payload.initialPhase === 'inspect' || payload.initialPhase === 'plan'
-                    || payload.initialPhase === 'execute' || payload.initialPhase === 'verify') {
-                    snapshot.phase = payload.initialPhase;
-                }
-                snapshot.dispatch = payload.explicitDelegation === true ? 'parallel' : 'single';
-                snapshot.routeConfidence = typeof payload.confidence === 'number' ? payload.confidence : 0;
-                snapshot.routeEvidence = Array.isArray(payload.evidence)
-                    ? payload.evidence.filter((item): item is string => typeof item === 'string').slice(0, 12)
-                    : [];
                 break;
             case 'phase_changed':
-                if (payload.to === 'inspect' || payload.to === 'plan' || payload.to === 'execute'
-                    || payload.to === 'verify' || payload.to === 'finalize') {
-                    snapshot.phase = payload.to;
+                try {
+                    const state = normalizeSchedulingState(payload.state);
+                    snapshot.domainProfile = state.domainProfile;
+                    snapshot.authorization = state.authorization;
+                    snapshot.phase = state.phase;
+                    snapshot.dispatch = state.dispatch;
+                    snapshot.routeConfidence = state.routeConfidence;
+                    snapshot.routeEvidence = [...state.routeEvidence];
+                    snapshot.phaseRevision = state.revision;
+                } catch {
+                    // Invalid scheduling events do not alter the projection.
                 }
-                snapshot.phaseRevision = typeof payload.revision === 'number'
-                    ? Math.max(snapshot.phaseRevision, payload.revision)
-                    : snapshot.phaseRevision + 1;
                 break;
             case 'prompt_queued':
                 snapshot.queuedPrompts++;
@@ -530,7 +531,11 @@ export function reduceScheduling(events: AgentRunEvent[]): SchedulingSnapshot {
                 snapshot.dispatchEvaluations++;
                 if (payload.accepted === true) {
                     snapshot.dispatchAccepted++;
-                    snapshot.dispatch = 'parallel';
+                    try {
+                        snapshot.dispatch = normalizeSchedulingState(payload.state).dispatch;
+                    } catch {
+                        // Invalid scheduling events do not alter the projection.
+                    }
                 }
                 break;
             case 'agent_suspended':

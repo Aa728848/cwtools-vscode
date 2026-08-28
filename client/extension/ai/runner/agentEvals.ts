@@ -49,7 +49,7 @@ export async function evaluateAgentRun(runId: string, topicId?: string): Promise
         { name: 'event_sequence_monotonic', passed: monotonic, detail: `${sequences.length} persisted events` },
         { name: 'sandbox_metadata_honest', passed: honestSandbox, detail: `${processEvents.length} command process events` },
         { name: 'tool_failure_rate', passed: failureRate <= 0.5, detail: `${failedTools}/${toolEnds.length} failed` },
-        { name: 'durable_identity', passed: !!snapshot.run.topicId && !!snapshot.run.runId, detail: `topic=${snapshot.run.topicId}; thread=${snapshot.run.threadId ?? '(legacy)'}` },
+        { name: 'durable_identity', passed: !!snapshot.run.topicId && !!snapshot.run.runId, detail: `topic=${snapshot.run.topicId}; thread=${snapshot.run.threadId ?? '(missing)'}` },
         { name: 'approval_items_resolved', passed: approvalsClosed, detail: `${resolvedApprovalIds.size}/${requestedApprovalIds.size} approval requests resolved` },
         { name: 'unsandboxed_execution_authorized', passed: unsandboxedAuthorized, detail: `${processEvents.filter(event => event.payload?.sandboxMode === 'disabled' || event.payload?.sandboxMode === 'user-approved-terminal').length} unsandboxed process events` },
     ];

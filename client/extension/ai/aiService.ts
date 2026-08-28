@@ -320,8 +320,7 @@ export class AIService {
         const provider = cfg.get<string>('provider', 'openai');
         const providerEndpoints = cfg.get<Record<string, string>>('providerEndpoints', {}) || {};
         const model = this.modelOverride ?? cfg.get<string>('model', '');
-        // Per-provider endpoint wins; legacy global endpoint only ever applies to the
-        const endpoint = (providerEndpoints[provider] || cfg.get<string>('endpoint', '') || '').trim();
+        const endpoint = (providerEndpoints[provider] || '').trim();
         return {
             enabled: cfg.get<boolean>('enabled', false),
             provider,
@@ -329,7 +328,6 @@ export class AIService {
             model,
             endpoint,
             providerEndpoints,
-            apiKey: '',
             customApiFormat: normalizeCustomApiFormat(cfg.get<string>('customApiFormat', DEFAULT_CUSTOM_API_FORMAT)),
             maxRetries: Math.max(1, cfg.get<number>('maxRetries') || 3),
             requestTimeoutMs: normalizeChatCompletionTimeoutMs(cfg.get<number>('requestTimeoutMs')),
@@ -375,68 +373,16 @@ export class AIService {
     /**
      * Resolve the user-configured endpoint override for an arbitrary provider id
      * (no provider default applied — pass the result to getEffectiveEndpoint for that).
-     * The legacy global `endpoint` is only honoured for the currently-active provider,
-     * so it never leaks into other providers.
      */
     getEndpointForProvider(providerId: string): string {
         const cfg = vs.workspace.getConfiguration('stellarisLanguageServices.ai');
         const map = cfg.get<Record<string, string>>('providerEndpoints', {}) || {};
-        const perProvider = (map[providerId] || '').trim();
-        if (perProvider) return perProvider;
-        const activeProvider = cfg.get<string>('provider', '');
-        if (providerId === activeProvider) return (cfg.get<string>('endpoint', '') || '').trim();
-        return '';
+        return (map[providerId] || '').trim();
     }
 
-    /**
-     * One-time migration: fold the legacy global `endpoint` into the per-provider
-     * map under the active provider, then clear the legacy value. Idempotent —
-     * a no-op once the legacy value is empty.
-     */
-    async migrateLegacyEndpoint(): Promise<void> {
-        const cfg = vs.workspace.getConfiguration('stellarisLanguageServices.ai');
-        const legacy = (cfg.get<string>('endpoint', '') || '').trim();
-        if (!legacy) return;
-        const provider = cfg.get<string>('provider', '');
-        if (provider) {
-            const map = { ...(cfg.get<Record<string, string>>('providerEndpoints', {}) || {}) };
-            if (!map[provider]) {
-                map[provider] = legacy;
-                await cfg.update('providerEndpoints', map, vs.ConfigurationTarget.Global);
-            }
-        }
-        await cfg.update('endpoint', undefined, vs.ConfigurationTarget.Global);
-    }
-
-    /**
-     * Get API key for a provider: SecretStorage first, then migrate from settings.json.
-     */
+    /** Get the provider API key from SecretStorage. */
     async getKeyForProvider(providerId: string): Promise<string> {
-        // 1. Try SecretStorage
-        const key = await this.keyManager.getKey(providerId);
-        if (key) return key;
-
-        // 2. Migration path: read plaintext from settings.json and move to SecretStorage
-        const cfg = vs.workspace.getConfiguration('stellarisLanguageServices.ai');
-        const legacyKey = cfg.get<string>('apiKey', '');
-        if (legacyKey && legacyKey.trim().length > 0) {
-            const currentProvider = cfg.get<string>('provider', '');
-            // Only migrate if the saved provider matches the one being requested
-            if (currentProvider === providerId) {
-                await this.keyManager.setKey(providerId, legacyKey.trim());
-                // Clear plaintext from settings.json
-                await cfg.update('apiKey', '', vs.ConfigurationTarget.Global);
-                vs.window.showInformationMessage(
-                    aiText(
-                        `CWTools AI: API key was migrated securely to SecretStorage (${providerId})`,
-                        `CWTools AI: API Key 已安全迁移到 SecretStorage (${providerId})`,
-                    )
-                );
-                return legacyKey.trim();
-            }
-        }
-
-        return '';
+        return await this.keyManager.getKey(providerId) ?? '';
     }
 
     /**
@@ -503,7 +449,7 @@ export class AIService {
         // Some providers (for example Ollama) do not require an API key.
         let apiKey = '';
         if (provider.requiresApiKey) {
-            // Priority: options override (for test) > SecretStorage (with migration fallback)
+            // Priority: options override (for tests) > SecretStorage.
             if (options?.apiKey) {
                 apiKey = options.apiKey;
             } else {

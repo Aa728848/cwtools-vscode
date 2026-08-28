@@ -107,7 +107,6 @@ const validators = {
     skillInstallComplete: fields({ success: isBoolean }),
     usageStats: fields({ stats: isAny }),
     artifactList: fields({ artifacts: isRecordArray }),
-    orchestratorProgress: fields({ progress: isObject }),
     runSnapshot: fields({ snapshot: isObject }, {
         events: optional(isRecordArray), eventCount: optional(isFiniteNumber), truncatedEventCount: optional(isFiniteNumber),
         childRuns: optional(isRecordArray), artifacts: optional(isRecordArray), cacheStats: optional(isObject), scheduling: optional(isObject),

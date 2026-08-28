@@ -186,10 +186,10 @@ const GENERAL_DISPATCH_SCHEMA: ToolDefinition = {
                         type: 'object',
                         properties: {
                             id: { type: 'string', description: 'Unique sub-task ID.' },
-                            agentType: {
+                            profileName: {
                                 type: 'string',
-                                enum: ['explore', 'plan', 'utility', 'review'],
-                                description: 'Repository role. Use utility for scoped implementation and verification commands.',
+                                enum: ['explore', 'planner', 'general-coder', 'reviewer'],
+                                description: 'Registered runtime profile. Use general-coder for scoped implementation and verification commands.',
                             },
                             prompt: { type: 'string', description: 'Concise sub-task description.' },
                             dependencies: {
@@ -213,7 +213,7 @@ const GENERAL_DISPATCH_SCHEMA: ToolDefinition = {
                             provider: { type: 'string', description: 'Optional configured built-in provider id paired with model.' },
                             reasoningEffort: { type: 'string', enum: ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'], description: 'Optional per-task reasoning level.' },
                         },
-                        required: ['id', 'agentType', 'prompt'],
+                        required: ['id', 'profileName', 'prompt'],
                     },
                 },
             },

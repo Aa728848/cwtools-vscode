@@ -205,10 +205,10 @@ describe('dispatch_agents background contract', () => {
         const executor = createExecutor();
         const result = await executor.execute('dispatch_agents', {
             background: true,
-            tasks: [{ id: 'w1', agentType: 'build', prompt: 'Write.' }],
+            tasks: [{ id: 'w1', profileName: 'paradox-coder', prompt: 'Write.' }],
         }, makeContext('topic-a', 'paradox') as any) as any;
         expect(result.success).to.equal(false);
-        expect(result.error).to.include('Background waves are read-only');
+        expect(result.error).to.include('Background waves require read-only profiles');
     });
 
     it('rejects background read-only nodes that declare plannedFiles in the Paradox domain', async () => {
@@ -216,12 +216,12 @@ describe('dispatch_agents background contract', () => {
         const result = await executor.execute('dispatch_agents', {
             background: true,
             tasks: [{
-                id: 'e1', agentType: 'explore', prompt: 'Inspect.',
+                id: 'e1', profileName: 'explore', prompt: 'Inspect.',
                 plannedFiles: ['client/a.txt'],
             }],
         }, makeContext('topic-a', 'paradox') as any) as any;
         expect(result.success).to.equal(false);
-        expect(result.error).to.include('Background waves are read-only');
+        expect(result.error).to.include('Background waves require read-only profiles');
     });
 
     it('rejects background dispatch with a blueprintFile', async () => {
@@ -280,8 +280,8 @@ describe('dispatch_agents background contract', () => {
             const result = await executor.execute('dispatch_agents', {
                 background: true,
                 tasks: [
-                    { id: 'n1', agentType: 'explore', prompt: 'Inspect.' },
-                    { id: 'n2', agentType: 'explore', prompt: 'Inspect deeper.', dependencies: ['n1'] },
+                    { id: 'n1', profileName: 'explore', prompt: 'Inspect.' },
+                    { id: 'n2', profileName: 'explore', prompt: 'Inspect deeper.', dependencies: ['n1'] },
                 ],
             }, makeContext('topic-a', 'general') as any) as any;
 
@@ -326,8 +326,8 @@ describe('dispatch_agents background contract', () => {
             const result = await executor.execute('dispatch_agents', {
                 background: true,
                 tasks: [
-                    { id: 'n1', agentType: 'explore', prompt: 'Inspect.' },
-                    { id: 'n2', agentType: 'explore', prompt: 'Inspect deeper.', dependencies: ['n1'] },
+                    { id: 'n1', profileName: 'explore', prompt: 'Inspect.' },
+                    { id: 'n2', profileName: 'explore', prompt: 'Inspect deeper.', dependencies: ['n1'] },
                 ],
             }, makeContext('topic-a', 'general') as any) as any;
             expect(result.success).to.equal(true);

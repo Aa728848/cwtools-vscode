@@ -294,7 +294,7 @@ export class TaskGraphEngine {
     static addNode(
         graph: TaskGraph,
         id: string,
-        agentType: TaskNode['agentType'],
+        profileName: TaskNode['profileName'],
         prompt: string,
         options?: {
             contextFiles?: string[];
@@ -315,7 +315,7 @@ export class TaskGraphEngine {
         const contractEntities = (options?.produces ?? []).map(contract => `${contract.kind}:${contract.id}`);
         const node: TaskNode = {
             id,
-            agentType,
+            profileName,
             prompt,
             contextFiles: options?.contextFiles,
             plannedFiles: options?.plannedFiles,

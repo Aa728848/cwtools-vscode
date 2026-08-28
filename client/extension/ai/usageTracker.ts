@@ -33,10 +33,6 @@ export interface UsageRecord {
     durationMs?: number;
     /** Topic/session ID for grouping (Batch 4.2) */
     topicId?: string;
-    /** Agent mode that produced this request (plan §7.3 per-mode cache aggregation) */
-    agentMode?: string;
-    /** Short frozen-prompt fingerprint hash for cache grouping (plan §7.3) */
-    promptFingerprint?: string;
     /** Completed provider-call samples for request-accurate cache metrics. */
     cacheRequests?: CacheRequestUsage[];
     /** Aggregated provider calls beyond the persisted per-call sample cap. */
@@ -137,8 +133,6 @@ export class UsageTracker {
     addUsage(
         providerId: string,
         model: string,
-        // agentMode/promptFingerprint arrive as extra fields on the runner's
-        // token accumulator (see agentRunner); chatPanel passes it through unchanged.
         usage: TokenUsage,
         options?: {
             toolCalls?: Record<string, number>;
@@ -168,8 +162,6 @@ export class UsageTracker {
             toolCalls: options?.toolCalls,
             durationMs: options?.durationMs,
             topicId: options?.topicId,
-            agentMode: usage.agentMode,
-            promptFingerprint: usage.promptFingerprint,
             cacheRequests: usage.cacheRequests?.slice(0, 256).map(request => ({ ...request })),
             cacheRequestOverflow: usage.cacheRequestOverflow?.slice(0, 64).map(request => ({ ...request })),
             cacheRequestRemainder: usage.cacheRequestRemainder?.slice(0, 2).map(request => ({ ...request })),
@@ -289,8 +281,6 @@ export class UsageTracker {
                 inputTokens: record.inputTokens,
                 cachedTokens: record.cachedTokens ?? 0,
                 cacheCapable,
-                agentMode: record.agentMode,
-                promptFingerprint: record.promptFingerprint,
                 invalidationReason: cacheCapable && (record.cachedTokens ?? 0) === 0
                     ? 'provider_miss'
                     : undefined,

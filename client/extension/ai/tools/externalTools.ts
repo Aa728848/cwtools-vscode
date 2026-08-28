@@ -860,6 +860,7 @@ export class ExternalToolHandler {
             const result = await parser.appendMemory({
                 key: 'Ignored Validation Error / Whitelist',
                 content: `\`${args.errorId}\` (Reason: ${args.reason})`,
+                domain: 'paradox',
                 priority: 'high',
             });
 

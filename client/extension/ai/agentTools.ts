@@ -43,7 +43,7 @@ import { isPlanModeCardArtifactFile, validateGitOpsForMode, validatePlanModeTool
 import { saveProjectWorkflow } from './workflowRegistry';
 import { budgetToolResult, TOOL_RESULT_BUDGET_HARD_STUB } from './contextBudget';
 import { aiText, EVIDENCE_GATE_MSG } from './messages';
-import { getPrivateAiStorageRoot, getPrivateTopicStorageDir, getPrivateTopicStorageDirCandidates } from './workspacePaths';
+import { getPrivateAiStorageRoot, getPrivateTopicStorageDir } from './workspacePaths';
 import { isPathInsideOrEqual } from '../pathScope';
 import { TOOL_REGISTRY, WRITE_TOOLS } from './tools/registry';
 import {
@@ -348,7 +348,7 @@ function promptMentionsLocalisationYml(prompt: unknown): boolean {
 }
 
 function normalizeDispatchTaskForLocalisationYml<T extends {
-    agentType: string;
+    profileName: string;
     prompt: string;
     contextFiles?: string[];
     plannedFiles?: string[];
@@ -359,11 +359,7 @@ function normalizeDispatchTaskForLocalisationYml<T extends {
     const hasLocalisationYml = localisationTargets.length > 0 || promptMentionsLocalisationYml(task.prompt);
     if (!hasLocalisationYml) return task;
 
-    const hasOnlyLocalisationPlannedFiles = plannedFiles.length > 0 && plannedFiles.every(isLocalisationYmlPath);
     const nextTask = { ...task };
-    if (hasOnlyLocalisationPlannedFiles && nextTask.agentType !== 'loc_writer') {
-        nextTask.agentType = 'loc_writer';
-    }
 
     if (!nextTask.prompt.includes('write_localisation')) {
         const targetLine = localisationTargets.length > 0
@@ -521,18 +517,7 @@ export class AgentToolExecutor {
 
     async getWebSearchApiKey(provider: Exclude<WebSearchProvider, 'auto' | 'duckduckgo' | 'searxng'>): Promise<string | undefined> {
         const secretId = provider === 'openai' ? 'openai' : `web.${provider}`;
-        const stored = await this.apiKeyManager?.getKey(secretId);
-        const legacyName = provider === 'brave' ? 'braveSearchApiKey' : provider === 'exa' ? 'exaApiKey' : undefined;
-        if (!legacyName) return stored;
-        const cfg = vs.workspace.getConfiguration('stellarisLanguageServices.ai');
-        const legacy = cfg.get<string>(legacyName, '').trim();
-        if (legacy) {
-            if (!stored) await this.apiKeyManager?.setKey(secretId, legacy);
-            for (const target of [vs.ConfigurationTarget.Global, vs.ConfigurationTarget.Workspace, vs.ConfigurationTarget.WorkspaceFolder]) {
-                try { await cfg.update(legacyName, undefined, target); } catch { /* scope may not exist */ }
-            }
-        }
-        return stored || legacy || undefined;
+        return this.apiKeyManager?.getKey(secretId);
     }
 
     private async queryLocalisationIndex(args: import('./types').QueryLocalisationIndexArgs): Promise<import('./types').QueryLocalisationIndexResult> {
@@ -1851,12 +1836,11 @@ export class AgentToolExecutor {
             };
         }
         if (runtimeDomain === 'general' && toolName === 'save_workflow') {
-            const workflowMode = typeof args.mode === 'string' ? args.mode : 'utility';
-            const generalWorkflowModes = new Set(['plan', 'explore', 'utility', 'review', 'orchestrator']);
-            if (!generalWorkflowModes.has(workflowMode)) {
+            const workflowDomain = typeof args.domain === 'string' ? args.domain : '';
+            if (workflowDomain !== 'general') {
                 return {
                     success: false,
-                    error: `General Coding cannot save a workflow for domain-specific mode '${workflowMode}'.`,
+                    error: `General Coding cannot save a workflow for domain '${workflowDomain || '(missing)'}'.`,
                 };
             }
             const requestedTools = [args.allowedTools, args.blockedTools]
@@ -2656,7 +2640,6 @@ export class AgentToolExecutor {
             case 'history': {
                 result = searchAgentHistory(this.workspaceRoot, args as any, {
                     topicId: context?.runnerOptions?.topicId,
-                    domain: context?.runnerOptions?.schedulingState.domainProfile,
                 });
                 const count = typeof result === 'object' && result !== null
                     && 'results' in result && Array.isArray(result.results) ? result.results.length : 0;
@@ -2878,7 +2861,7 @@ export class AgentToolExecutor {
     }
 
     private async analyzeDiagnosticError(args: Record<string, unknown>): Promise<AnalyzeDiagnosticErrorResult> {
-        const snapshot = args.diagnosticsSnapshot ?? args.toolResult ?? args.diagnostics;
+        const snapshot = args.diagnosticsSnapshot ?? args.toolResult;
         let source: AnalyzeDiagnosticErrorResult['source'] = snapshot === undefined ? 'message' : 'snapshot';
         let diagnostics = snapshot === undefined ? [] : this.extractDiagnostics(snapshot);
         let freshness = this.extractFreshness(snapshot);
@@ -3680,7 +3663,7 @@ export class AgentToolExecutor {
     private async executeDispatchAgents(args: Record<string, unknown>, context?: import('./types').AgentToolContext): Promise<unknown> {
         let tasks = args.tasks as Array<{
             id: string;
-            agentType: string;
+            profileName: string;
             prompt: string;
             contextFiles?: string[];
             plannedFiles?: string[];
@@ -3818,9 +3801,8 @@ export class AgentToolExecutor {
             }
             const approvedTopicId = runnerOptsForLimits?.topicId;
             if (approvedTopicId) {
-                const topicDirs = getPrivateTopicStorageDirCandidates(approvedTopicId, this.workspaceRoot)
-                    .map(dir => path.resolve(dir));
-                if (!topicDirs.some(dir => isPathInsideOrEqual(resolvedBlueprint, dir))) {
+                const topicDir = path.resolve(getPrivateTopicStorageDir(approvedTopicId, this.workspaceRoot));
+                if (!isPathInsideOrEqual(resolvedBlueprint, topicDir)) {
                     return { success: false, error: 'blueprintFile must belong to the current approved topic.' };
                 }
             }
@@ -3860,7 +3842,7 @@ export class AgentToolExecutor {
                 };
             }
         } else if (!tasks || !Array.isArray(tasks) || tasks.length === 0) {
-            return { success: false, error: 'Provide tasks or blueprintFile. Each task must include id, agentType, and prompt.' };
+            return { success: false, error: 'Provide tasks or blueprintFile. Each task must include id, profileName, and prompt.' };
         }
 
         if (tasks && tasks.length > maxTasksPerDispatch) {
@@ -3900,7 +3882,7 @@ export class AgentToolExecutor {
         }
         if (userExecutionPolicy.localisationOwnership === 'user') {
             const localisationWriter = normalizedTasks.find(task =>
-                task.agentType === 'loc_writer'
+                task.profileName === 'localization-writer'
                 || (Array.isArray(task.plannedFiles) && task.plannedFiles.some(isLocalisationYmlPath))
                 || (Array.isArray(task.produces) && task.produces.some(contract =>
                     !!contract
@@ -3922,32 +3904,47 @@ export class AgentToolExecutor {
             ? agentProfileCatalog.get(schedulingState.profileName)
             : undefined;
         if (!runtimeProfile) {
-            return { success: false, error: `dispatch_agents requires a known scheduler profile; received '${schedulingState.profileName ?? 'none'}'.` };
+            return { success: false, error: `dispatch_agents requires a known scheduler profile; received '${schedulingState.profileName}'.` };
         }
-        const allowedAgentTypes = new Set(runtimeProfile.subagents ?? []);
+        const allowedProfileNames = new Set(runtimeProfile.subagents ?? []);
         if (schedulingState.authorization !== 'workspace_write') {
-            for (const role of [...allowedAgentTypes]) {
-                if (role !== 'explore' && role !== 'plan' && role !== 'review') allowedAgentTypes.delete(role);
+            for (const profileName of [...allowedProfileNames]) {
+                if (agentProfileCatalog.get(profileName)?.authorizationCeiling === 'workspace_write') {
+                    allowedProfileNames.delete(profileName);
+                }
             }
         }
-        const invalidAgentType = normalizedTasks.find(task => !allowedAgentTypes.has(task.agentType));
-        if (invalidAgentType) {
+        const invalidProfile = normalizedTasks.find(task =>
+            !allowedProfileNames.has(task.profileName) || !agentProfileCatalog.get(task.profileName));
+        if (invalidProfile) {
             return {
                 success: false,
-                error: `Agent type '${invalidAgentType.agentType}' is not allowed by scheduler profile '${runtimeProfile.name}'. Allowed roles: ${[...allowedAgentTypes].join(', ')}.`,
+                error: `Sub-agent profile '${invalidProfile.profileName}' is not allowed by scheduler profile '${runtimeProfile.name}'. Allowed profiles: ${[...allowedProfileNames].join(', ')}.`,
             };
         }
+        const localisationProfileMismatch = normalizedTasks.find(task => {
+            const plannedFiles = Array.isArray(task.plannedFiles) ? task.plannedFiles : [];
+            return plannedFiles.some(isLocalisationYmlPath) && task.profileName !== 'localization-writer';
+        });
+        if (localisationProfileMismatch) {
+            return {
+                success: false,
+                error: `Task '${localisationProfileMismatch.id}' targets localisation YML but uses profile '${localisationProfileMismatch.profileName}'. Use profileName='localization-writer'.`,
+            };
+        }
+        const isWritableProfile = (profileName: string): boolean =>
+            agentProfileCatalog.getRequired(profileName).authorizationCeiling === 'workspace_write';
         // Resumed graphs keep the static write contract of the approved plan:
         // appended nodes in the Paradox domain are read-only evidence work.
         if (resumeGraphId && runtimeDomain === 'paradox') {
             const appendedWriter = normalizedTasks.find(task =>
-                !['explore', 'plan', 'review'].includes(task.agentType)
+                isWritableProfile(task.profileName)
                 || (task.plannedFiles?.length ?? 0) > 0
             );
             if (appendedWriter) {
                 return {
                     success: false,
-                    error: `Appended task '${appendedWriter.id}' declares a write intent in the Paradox domain. Write waves are static contracts — dispatch them as a new graph instead of appending to '${resumeGraphId}'. Appended tasks must be read-only (explore/plan/review).`,
+                    error: `Appended task '${appendedWriter.id}' declares a write intent in the Paradox domain. Write waves are static contracts — dispatch them as a new graph instead of appending to '${resumeGraphId}'. Appended tasks must use read-only profiles.`,
                 };
             }
         }
@@ -3955,18 +3952,18 @@ export class AgentToolExecutor {
         // write waves keep the synchronous quality-gate transaction.
         if (backgroundRequested && runtimeDomain === 'paradox') {
             const backgroundWriter = normalizedTasks.find(task =>
-                !['explore', 'plan', 'review'].includes(task.agentType)
+                isWritableProfile(task.profileName)
                 || (task.plannedFiles?.length ?? 0) > 0
             );
             if (backgroundWriter) {
                 return {
                     success: false,
-                    error: `Background task '${backgroundWriter.id}' declares a write intent in the Paradox domain. Background waves are read-only (explore/plan/review); dispatch write waves synchronously.`,
+                    error: `Background task '${backgroundWriter.id}' declares a write intent in the Paradox domain. Background waves require read-only profiles; dispatch write waves synchronously.`,
                 };
             }
             if (resumeRecord) {
                 const resumableWriter = resumeRecord.graph.nodes.find(node =>
-                    node.status !== 'done' && !['explore', 'plan', 'review'].includes(node.agentType));
+                    node.status !== 'done' && isWritableProfile(node.profileName));
                 if (resumableWriter) {
                     return {
                         success: false,
@@ -3985,7 +3982,7 @@ export class AgentToolExecutor {
             }
         }
         const hasWriteTasks = normalizedTasks.some(task =>
-            ['build', 'loc_writer', 'gui_expert', 'utility'].includes(task.agentType)
+            isWritableProfile(task.profileName)
             || (task.plannedFiles?.length ?? 0) > 0
         );
         // Answers-only resumes add no new work: the re-run nodes were already
@@ -4001,7 +3998,7 @@ export class AgentToolExecutor {
                 dependencies: task.dependencies,
                 expectedWrites: task.plannedFiles,
                 acceptanceCriteria: task.acceptanceChecks?.map(check => check.description),
-                role: task.agentType,
+                profileName: task.profileName,
             })),
             {
                 explicitDelegation: schedulingState.dispatch === 'parallel'
@@ -4014,14 +4011,14 @@ export class AgentToolExecutor {
             },
         );
         const dispatchAdmission = evaluatedDispatchAdmission;
-        runnerOptsForLimits?.runEventSink?.appendSoon('dispatch_evaluated', {
-            accepted: dispatchAdmission.accepted,
-            score: dispatchAdmission.score,
-            reason: dispatchAdmission.reason,
-            taskCount: normalizedTasks.length,
-            conflicts: dispatchAdmission.conflicts,
-        }, { status: dispatchAdmission.accepted ? 'done' : 'failed' });
         if (!dispatchAdmission.accepted) {
+            runnerOptsForLimits?.runEventSink?.appendSoon('dispatch_evaluated', {
+                accepted: false,
+                score: dispatchAdmission.score,
+                reason: dispatchAdmission.reason,
+                taskCount: normalizedTasks.length,
+                conflicts: dispatchAdmission.conflicts,
+            }, { status: 'failed' });
             return {
                 success: false,
                 error: `Runtime dispatch admission rejected this graph: ${dispatchAdmission.reason}`,
@@ -4038,14 +4035,22 @@ export class AgentToolExecutor {
                 },
             );
         }
+        runnerOptsForLimits?.runEventSink?.appendSoon('dispatch_evaluated', {
+            accepted: true,
+            state: runnerOptsForLimits?.schedulingState,
+            score: dispatchAdmission.score,
+            reason: dispatchAdmission.reason,
+            taskCount: normalizedTasks.length,
+            conflicts: dispatchAdmission.conflicts,
+        }, { status: 'done' });
         if (requiresStructuredWriteContract && hasWriteTasks) {
             const invalidWriter = normalizedTasks.find(task =>
-                ['build', 'loc_writer', 'gui_expert'].includes(task.agentType)
+                ['paradox-coder', 'localization-writer', 'gui-expert'].includes(task.profileName)
                 && (task.produces?.length ?? 0) === 0
                 && (task.consumes?.length ?? 0) === 0
             );
             const orphanLocWriter = normalizedTasks.find(task =>
-                task.agentType === 'loc_writer'
+                task.profileName === 'localization-writer'
                 && task.produces?.some(contract => contract.kind === 'localisation')
                 && !task.consumes?.some(contract => contract.kind !== 'localisation')
             );
@@ -4116,12 +4121,8 @@ export class AgentToolExecutor {
             //Dynamic import avoids circular dependencies
             const { Orchestrator } = await import('./orchestrator/orchestrator');
             const { TaskGraphEngine, validateNodeModelSelection } = await import('./orchestrator/taskGraphEngine');
-            const { applyUserModelOverrides } = await import('./orchestrator/agentRegistry');            //Apply user's child Agent model configuration (read from VS Code settings)
             const cfg = vs.workspace.getConfiguration('stellarisLanguageServices.ai');
             const agentModels = cfg.get<Record<string, { provider: string; model: string }>>('orchestrator.agentModels');
-            if (agentModels) {
-                applyUserModelOverrides(agentModels);
-            }
 
             // Build TaskGraph (resume path restores the persisted graph and
             // merges appended read-only tasks and clarification answers).
@@ -4163,7 +4164,7 @@ export class AgentToolExecutor {
                 TaskGraphEngine.addNode(
                     graph,
                     task.id,
-                    task.agentType as import('./types').AgentMode,
+                    task.profileName,
                     task.prompt,
                     {
                         contextFiles: task.contextFiles,
@@ -4193,7 +4194,7 @@ export class AgentToolExecutor {
                 // 1. The prompt append is durable — it survives a failed resume and
                 //    a later fresh retry, exactly as before this change.
                 // 2. `resumeAnswer` asks the executor to replay this child's own
-                //    preserved transcript and send only the answer, so an explorer
+                //    preserved transcript and send only the answer, so an explore profile
                 //    that already spent 40 iterations on evidence does not repeat it.
                 node.prompt = [node.prompt, '', '## Parent clarification answer', answer].join('\n');
                 node.resumeAnswer = answer;
@@ -4232,6 +4233,7 @@ export class AgentToolExecutor {
                 providerId: runnerOpts.providerId,
                 model: runnerOpts.model,
                 reasoningEffort: runnerOpts.reasoningEffort,
+                agentModelOverrides: agentModels,
                 abortSignal: localAbort.signal,
                 topicId: runnerOpts.topicId,
                 parentRunId: parentRun?.runId ?? parentRunSink?.runId,
@@ -4260,7 +4262,7 @@ export class AgentToolExecutor {
                         'subagent_start',
                         {
                             taskNodeId: task.id,
-                            agentType: task.agentType,
+                            profileName: task.profileName,
                             parentAgentId: parentRun?.agentId ?? parentRunSink?.agentId,
                             task: task.prompt.slice(0, 240),
                             plannedFiles: task.plannedFiles ?? [],
@@ -4427,7 +4429,7 @@ export class AgentToolExecutor {
             // Keep the parent Agent context compact while preserving enough detail for the final global walkthrough.
             const agentSummaries: Array<{
                 id: string;
-                agentType?: string;
+                profileName?: string;
                 prompt?: string;
                 dependencies?: string[];
                 plannedFiles?: string[];
@@ -4482,7 +4484,7 @@ export class AgentToolExecutor {
                 const taskMeta = normalizedTasks.find(task => task.id === id);
                 agentSummaries.push({
                     id,
-                    agentType: taskMeta?.agentType,
+                    profileName: taskMeta?.profileName,
                     prompt: taskMeta?.prompt,
                     dependencies: taskMeta?.dependencies ?? [],
                     plannedFiles: taskMeta?.plannedFiles ?? [],

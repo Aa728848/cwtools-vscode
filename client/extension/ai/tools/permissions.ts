@@ -7,14 +7,13 @@
 import { TOOL_REGISTRY, WRITE_TOOLS } from './registry';
 import type { AgentMode, AgentToolName } from '../types';
 import type { AgentRuntimeDomain } from '../types';
-import { domainForExecutionMode } from '../runner/scheduling';
 import { evaluateEffectiveToolPolicy } from '../runner/effectiveToolPolicy';
 import { agentProfileCatalog } from '../runner/agentProfileCatalog';
 
 /**
  * Check if a tool is allowed under the current Agent operation mode.
  */
-export function isToolAllowedForMode(toolName: string, mode: AgentMode, domain: AgentRuntimeDomain = domainForExecutionMode(mode)): boolean {
+export function isToolAllowedForMode(toolName: string, mode: AgentMode, domain: AgentRuntimeDomain): boolean {
     return evaluateEffectiveToolPolicy(toolName, { mode, domain }).allowed;
 }
 
@@ -29,7 +28,7 @@ export function validateToolCapability(
     toolName: string,
     options: {
         mode: AgentMode;
-        domain?: AgentRuntimeDomain;
+        domain: AgentRuntimeDomain;
         isSubAgent?: boolean;
         profileName?: string;
     }
@@ -39,7 +38,7 @@ export function validateToolCapability(
         return { allowed: false, reason: `Unknown tool: ${toolName}` };
     }
 
-    const domain = options.domain ?? domainForExecutionMode(options.mode);
+    const domain = options.domain;
     const decision = evaluateEffectiveToolPolicy(entry.name, {
         mode: options.mode,
         domain,

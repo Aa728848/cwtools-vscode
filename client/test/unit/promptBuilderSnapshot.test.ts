@@ -42,7 +42,7 @@ describe('PromptBuilder 快照与稳定性测试', () => {
     it('验证 build 模式的系统提示词关键特征', () => {
         const { PromptBuilder } = loadPromptBuilder();
         const builder = new PromptBuilder(process.cwd());
-        const prompt = builder.buildSystemPromptForMode('build');
+        const prompt = builder.buildSystemPromptForMode('build', undefined, undefined, undefined, undefined, undefined, true, true, 'paradox');
 
         // 验证系统提示词中包含核心规则，防止重构时遗漏
         expect(prompt).to.include('Eddy CWTool Code');
@@ -62,7 +62,7 @@ describe('PromptBuilder 快照与稳定性测试', () => {
     it('验证 plan 模式的系统提示词关键特征', () => {
         const { PromptBuilder } = loadPromptBuilder();
         const builder = new PromptBuilder(process.cwd());
-        const prompt = builder.buildSystemPromptForMode('plan');
+        const prompt = builder.buildSystemPromptForMode('plan', undefined, undefined, undefined, undefined, undefined, true, true, 'paradox');
 
         expect(prompt).to.include('Plan Mode');
         expect(prompt).to.include('Clarification BEFORE Planning Phase');
@@ -76,14 +76,14 @@ describe('PromptBuilder 快照与稳定性测试', () => {
         expect(prompt).to.include('final design authority');
         expect(prompt).to.include('Approval transitions directly to Write/Execute');
         expect(prompt).to.include('Adaptive planning fan-out');
-        expect(prompt).to.include('Dispatch only `explore`, `plan`, and `review` roles');
+        expect(prompt).to.include('Dispatch only `explore`, `planner`, and `reviewer` profiles');
         expect(prompt).to.include('main Agent alone author the final Implementation Plan');
     });
 
     it('keeps changing Stellaris facts out of domain-neutral plan prompts', () => {
         const { PromptBuilder } = loadPromptBuilder();
         const builder = new PromptBuilder(process.cwd());
-        const prompt = builder.buildSystemPromptForMode('plan', undefined, 'stellaris');
+        const prompt = builder.buildSystemPromptForMode('plan', undefined, 'stellaris', undefined, undefined, undefined, true, true, 'paradox');
 
         expect(prompt).to.include('current workspace');
         expect(prompt).to.include('query active CWT/LSP');
@@ -97,9 +97,9 @@ describe('PromptBuilder 快照与稳定性测试', () => {
     it('requires visible process updates for main, orchestrator, and slim prompts', () => {
         const { PromptBuilder } = loadPromptBuilder();
         const builder = new PromptBuilder(process.cwd());
-        const buildPrompt = builder.buildSystemPromptForMode('build');
-        const orchestratorPrompt = builder.buildSystemPromptForMode('orchestrator');
-        const slimPrompt = builder.buildSlimSystemPromptForMode('build');
+        const buildPrompt = builder.buildSystemPromptForMode('build', undefined, undefined, undefined, undefined, undefined, true, true, 'paradox');
+        const orchestratorPrompt = builder.buildSystemPromptForMode('orchestrator', undefined, undefined, undefined, undefined, undefined, true, true, 'general');
+        const slimPrompt = builder.buildSlimSystemPromptForMode('build', undefined, undefined, undefined, 'paradox');
 
         for (const prompt of [buildPrompt, orchestratorPrompt, slimPrompt]) {
             expect(prompt).to.include('Visible Process Updates');
@@ -115,7 +115,7 @@ describe('PromptBuilder 快照与稳定性测试', () => {
     it('验证 explore 模式的系统提示词关键特征', () => {
         const { PromptBuilder } = loadPromptBuilder();
         const builder = new PromptBuilder(process.cwd());
-        const prompt = builder.buildSystemPromptForMode('explore');
+        const prompt = builder.buildSystemPromptForMode('explore', undefined, undefined, undefined, undefined, undefined, true, true, 'paradox');
 
         expect(prompt).to.include('Explore Mode');
         expect(prompt).to.include('Explore Mode Guidelines');
@@ -125,7 +125,7 @@ describe('PromptBuilder 快照与稳定性测试', () => {
     it('验证 review 模式的系统提示词关键特征', () => {
         const { PromptBuilder } = loadPromptBuilder();
         const builder = new PromptBuilder(process.cwd());
-        const prompt = builder.buildSystemPromptForMode('review');
+        const prompt = builder.buildSystemPromptForMode('review', undefined, undefined, undefined, undefined, undefined, true, true, 'paradox');
 
         expect(prompt).to.include('Review Mode');
         expect(prompt).to.include('Diagnostics Retrieval');
@@ -135,20 +135,20 @@ describe('PromptBuilder 快照与稳定性测试', () => {
     it('验证 gui_expert 模式的系统提示词关键特征', () => {
         const { PromptBuilder } = loadPromptBuilder();
         const builder = new PromptBuilder(process.cwd());
-        const prompt = builder.buildSystemPromptForMode('gui_expert');
+        const prompt = builder.buildSystemPromptForMode('gui_expert', undefined, undefined, undefined, undefined, undefined, true, true, 'paradox');
 
         expect(prompt).to.include('GUI Expert Mode');
         expect(prompt).to.include('NEVER Delete Vanilla Elements');
         expect(prompt).to.include('Template Reference Methodology');
     });
 
-    it('keeps general orchestrators on utility writers and explicit write targets', () => {
+    it('keeps general orchestrators on general-coder profiles and explicit write targets', () => {
         const { PromptBuilder } = loadPromptBuilder();
         const builder = new PromptBuilder(process.cwd());
-        const prompt = builder.buildSystemPromptForMode('orchestrator');
+        const prompt = builder.buildSystemPromptForMode('orchestrator', undefined, undefined, undefined, undefined, undefined, true, true, 'general');
 
         expect(prompt).to.include('plannedFiles');
-        expect(prompt).to.include('utility');
+        expect(prompt).to.include('general-coder');
         expect(prompt).to.include('bounded read-only discovery wave');
         expect(prompt).to.include('repository investigation alone is not a Plan boundary');
         expect(prompt).to.not.include('mandatory user-facing approval');
@@ -171,11 +171,11 @@ describe('PromptBuilder 快照与稳定性测试', () => {
                 'general',
             );
         const prompts = [
-            builder.buildSystemPromptForMode('utility'),
+            builder.buildSystemPromptForMode('utility', undefined, undefined, undefined, undefined, undefined, true, true, 'general'),
             generalDomainPrompt('plan'),
             generalDomainPrompt('explore'),
             generalDomainPrompt('review'),
-            builder.buildSystemPromptForMode('orchestrator'),
+            builder.buildSystemPromptForMode('orchestrator', undefined, undefined, undefined, undefined, undefined, true, true, 'general'),
             builder.buildSlimSystemPromptForMode('utility', undefined, undefined, undefined, 'general'),
         ];
         const forbidden = [
@@ -190,7 +190,7 @@ describe('PromptBuilder 快照与稳定性测试', () => {
             expect(prompt).to.include('repository');
         }
 
-        const paradoxPlan = builder.buildSystemPromptForMode('plan');
+        const paradoxPlan = builder.buildSystemPromptForMode('plan', undefined, undefined, undefined, undefined, undefined, true, true, 'paradox');
         expect(paradoxPlan).to.include('query active CWT/LSP');
         expect(paradoxPlan).to.include('write_design_blueprint');
     });
@@ -198,7 +198,7 @@ describe('PromptBuilder 快照与稳定性测试', () => {
     it('requires plan mode to design executable entity relationships before approval', () => {
         const { PromptBuilder } = loadPromptBuilder();
         const builder = new PromptBuilder(process.cwd());
-        const prompt = builder.buildSystemPromptForMode('plan');
+        const prompt = builder.buildSystemPromptForMode('plan', undefined, undefined, undefined, undefined, undefined, true, true, 'paradox');
 
         expect(prompt).to.include('Blueprint Self-check');
         expect(prompt).to.include('disclosed tool schema is the complete contract');
@@ -215,7 +215,7 @@ describe('PromptBuilder 快照与稳定性测试', () => {
     it('describes script mode as a dynamic PDXScript workflow coordinator', () => {
         const { PromptBuilder } = loadPromptBuilder();
         const builder = new PromptBuilder(process.cwd());
-        const prompt = builder.buildSystemPromptForMode('script');
+        const prompt = builder.buildSystemPromptForMode('script', undefined, undefined, undefined, undefined, undefined, true, true, 'paradox');
 
         expect(prompt).to.include('Paradox Multi-Agent Mode');
         expect(prompt).to.include('dynamic workflow coordinator');
@@ -238,7 +238,7 @@ describe('PromptBuilder 快照与稳定性测试', () => {
     it('keeps slim localisation writers on write_localisation and concise completion', () => {
         const { PromptBuilder } = loadPromptBuilder();
         const builder = new PromptBuilder(process.cwd());
-        const prompt = builder.buildSlimSystemPromptForMode('loc_writer');
+        const prompt = builder.buildSlimSystemPromptForMode('loc_writer', undefined, undefined, undefined, 'paradox');
 
         expect(prompt).to.include('write_localisation` is the only mutation path');
         expect(prompt).to.include('Do not use `edit_file`');

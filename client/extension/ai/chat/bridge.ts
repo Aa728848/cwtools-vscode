@@ -335,14 +335,13 @@ export async function routeWebviewMessage(
         }
         case 'requestScratchFiles': {
             try {
-                const { getProjectWorkspaceRoot, getPrivateTopicStorageDirCandidates } = await import('../workspacePaths');
+                const { getProjectWorkspaceRoot, getPrivateTopicStorageDir } = await import('../workspacePaths');
                 const fsModule = await import('fs');
                 const pathModule = await import('path');
                 const root = getProjectWorkspaceRoot();
                 const topicId = provider.topicManager.currentTopic?.id || 'default';
-                const scratchDir = getPrivateTopicStorageDirCandidates(topicId, root)
-                    .map(dir => pathModule.join(dir, 'scratch'))
-                    .find(candidate => fsModule.existsSync(candidate)) ?? null;
+                const topicDir = getPrivateTopicStorageDir(topicId, root);
+                const scratchDir = topicDir ? pathModule.join(topicDir, 'scratch') : null;
                 const files: Array<{ name: string; relPath: string; size: number }> = [];
                 if (scratchDir && fsModule.existsSync(scratchDir)) {
                     const entries = fsModule.readdirSync(scratchDir, { withFileTypes: true });

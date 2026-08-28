@@ -15,7 +15,7 @@ export interface WorkflowView {
     id: string;
     title: string;
     description: string;
-    mode: string;
+    scheduling: { domain: string; intent: string; strategy: string; profileName?: string };
     locale?: string;
     phases: WorkflowPhaseView[];
     verification: WorkflowVerificationView[];
@@ -53,7 +53,8 @@ export function buildWorkflowSummary(workflow: WorkflowView | undefined, labels?
     const requiredChecks = (workflow.verification ?? []).filter(v => v.required !== false).length;
     const phaseUnit = phaseCount === 1 ? ui.phaseUnit : ui.phasesUnit;
     const checkUnit = requiredChecks === 1 ? ui.requiredCheckUnit : ui.requiredChecksUnit;
-    return `${workflow.title} | ${workflow.mode} | ${phaseCount} ${phaseUnit} | ${requiredChecks} ${checkUnit}`;
+    const route = `${workflow.scheduling.domain}/${workflow.scheduling.intent}/${workflow.scheduling.strategy}`;
+    return `${workflow.title} | ${route} | ${phaseCount} ${phaseUnit} | ${requiredChecks} ${checkUnit}`;
 }
 
 export function getWorkflowSlashCommand(workflowId: string): string {

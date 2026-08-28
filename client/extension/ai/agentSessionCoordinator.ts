@@ -15,7 +15,7 @@ function initialSchedulingState(): AgentSchedulingState {
 function cloneSchedulingState(state: AgentSchedulingState): AgentSchedulingState {
     return {
         ...state,
-        overlays: state.overlays ? [...state.overlays] : undefined,
+        overlays: [...state.overlays],
         routeEvidence: [...state.routeEvidence],
     };
 }

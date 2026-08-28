@@ -58,6 +58,7 @@ describe('PromptBuilder context budgeting', () => {
         const builder = new PromptBuilder(process.cwd());
         const fileContent = Array.from({ length: 40 }, (_, i) => `line_${i + 1} = yes`).join('\n');
         const messages = builder.buildContextMessages({
+            domain: 'paradox',
             activeFile: `${process.cwd()}\\events\\small.txt`,
             cursorLine: 30,
             fileContent,
@@ -71,7 +72,7 @@ describe('PromptBuilder context budgeting', () => {
     it('tells utility mode to run existing scripts directly instead of creating wrappers', () => {
         const { PromptBuilder } = loadPromptBuilder();
         const builder = new PromptBuilder(process.cwd());
-        const prompt = builder.buildSystemPromptForMode('utility');
+        const prompt = builder.buildSystemPromptForMode('utility', undefined, undefined, undefined, undefined, undefined, true, true, 'general');
 
         expect(prompt).to.include('edit that script directly');
         expect(prompt).to.include('execute it from the project root');
@@ -86,7 +87,7 @@ describe('PromptBuilder context budgeting', () => {
             const profileDir = path.join(workspaceRoot, '.cwtools', 'project');
             fs.mkdirSync(profileDir, { recursive: true });
             fs.writeFileSync(path.join(profileDir, 'profile.json'), JSON.stringify({
-                schemaVersion: 2,
+                schemaVersion: 4,
                 generatedAt: '2026-05-24T00:00:00.000Z',
                 workspaceRoot,
                 workspaceKind: 'paradox_mod',
@@ -98,24 +99,18 @@ describe('PromptBuilder context budgeting', () => {
                     namespaces: ['samplemod'],
                     variablePrefixes: [],
                     byType: {},
-                    scriptedTriggers: [],
-                    scriptedEffects: [],
-                    events: [],
-                    onActions: [],
-                    staticModifiers: [],
                 },
                 routing: {
                     recommendedWorkflowByIntent: [{
                         intent: 'Fix CWTools diagnostics',
                         workflowId: 'diagnostic-fix',
-                        mode: 'build',
                         reason: 'test',
                     }],
                     preferredReadTools: ['query_project_profile'],
                     avoidPatterns: [],
                 },
                 validation: { lspReady: 'unknown', indexStatus: 'unknown', vanillaCache: 'unknown' },
-                promptCards: { build: 'Build card from profile' },
+                guidanceCards: { implementation: 'Build guidance from profile' },
                 efficiencyHints: ['Use profile first'],
             }), 'utf8');
             fs.writeFileSync(path.join(workspaceRoot, 'CWTOOLS.md'), [
@@ -126,10 +121,10 @@ describe('PromptBuilder context budgeting', () => {
             ].join('\n'), 'utf8');
 
             const builder = new PromptBuilder(workspaceRoot);
-            const prompt = builder.buildSystemPromptForMode('build');
+            const prompt = builder.buildSystemPromptForMode('build', undefined, undefined, undefined, undefined, undefined, true, true, 'paradox');
 
             expect(prompt).to.include('PROJECT PROFILE');
-            expect(prompt).to.include('Build card from profile');
+            expect(prompt).to.include('Build guidance from profile');
             expect(prompt).to.include('query_project_profile');
             expect(prompt).to.include('PROJECT INSTRUCTIONS');
             expect(prompt).to.include('PRESERVE_USER_ARCHITECTURE_RULE');
@@ -151,7 +146,7 @@ describe('PromptBuilder context budgeting', () => {
             fs.writeFileSync(path.join(topicB, 'Implementation_Plan.md'), '# Implementation Plan: Topic B\n\nB_ONLY_ENTITY\n', 'utf8');
 
             const builder = new PromptBuilder(workspaceRoot);
-            const prompt = builder.buildSystemPromptForMode('build', undefined, undefined, 'topic-a');
+            const prompt = builder.buildSystemPromptForMode('build', undefined, undefined, 'topic-a', undefined, undefined, true, true, 'paradox');
 
             expect(prompt).to.include('Current Topic Implementation Plan');
             expect(prompt).to.include('topic-a');
@@ -185,9 +180,9 @@ describe('PromptBuilder context budgeting', () => {
             fs.writeFileSync(path.join(topicB, 'memory.json'), memory('TOPIC_B_MEMORY'), 'utf8');
 
             const builder = new PromptBuilder(workspaceRoot);
-            const prompt = builder.buildSystemPromptForMode('build', undefined, undefined, 'topic-memory-a');
-            const dynamic = builder.buildDynamicPromptBlock(undefined, 'topic-memory-a');
-            const frozen = builder.buildFrozenSystemPrompt('build');
+            const prompt = builder.buildSystemPromptForMode('build', undefined, undefined, 'topic-memory-a', undefined, undefined, true, true, 'paradox');
+            const dynamic = builder.buildDynamicPromptBlock(undefined, 'topic-memory-a', undefined, { domain: 'paradox' });
+            const frozen = builder.buildFrozenSystemPrompt('build', undefined, undefined, { domain: 'paradox' });
 
             expect(prompt).to.include('TOPIC_A_MEMORY');
             expect(prompt).to.not.include('TOPIC_B_MEMORY');
@@ -239,6 +234,7 @@ describe('PromptBuilder context budgeting', () => {
             const builder = new PromptBuilder(workspaceRoot);
             const dynamic = builder.buildDynamicPromptBlock(undefined, topicId, undefined, {
                 mode: 'build',
+                domain: 'paradox',
                 taskText: 'Add a country event to the alpha namespace',
                 pathScope: ['events/alpha.txt'],
             });
@@ -256,7 +252,7 @@ describe('PromptBuilder context budgeting', () => {
     it('provides the exact canonical Implementation Plan path before a write', () => {
         const { PromptBuilder } = loadPromptBuilder();
         const builder = new PromptBuilder(process.cwd());
-        const context = builder.buildContextMessages({ topicId: 'topic-123' });
+        const context = builder.buildContextMessages({ topicId: 'topic-123', domain: 'paradox' });
         const content = String(context[0]!.content);
 
         expect(content).to.include('**Implementation Plan File**');
@@ -267,8 +263,8 @@ describe('PromptBuilder context budgeting', () => {
     it('tells agents to reuse one temporary helper script per task', () => {
         const { PromptBuilder } = loadPromptBuilder();
         const builder = new PromptBuilder(process.cwd());
-        const prompt = builder.buildSystemPromptForMode('utility');
-        const context = builder.buildContextMessages({ topicId: 'topic-123' });
+        const prompt = builder.buildSystemPromptForMode('utility', undefined, undefined, undefined, undefined, undefined, true, true, 'general');
+        const context = builder.buildContextMessages({ topicId: 'topic-123', domain: 'general' });
 
         expect(prompt).to.include('reuse one helper for the whole task');
         expect(prompt).to.include('provided topic scratch directory');
@@ -283,7 +279,7 @@ describe('PromptBuilder context budgeting', () => {
     it('tells agents to use platform-appropriate run_command env-var syntax', () => {
         const { PromptBuilder } = loadPromptBuilder();
         const builder = new PromptBuilder(process.cwd());
-        const prompt = builder.buildSystemPromptForMode('utility');
+        const prompt = builder.buildSystemPromptForMode('utility', undefined, undefined, undefined, undefined, undefined, true, true, 'general');
 
         if (process.platform === 'win32') {
             expect(prompt).to.include('PowerShell in every mode');
@@ -298,9 +294,10 @@ describe('PromptBuilder context budgeting', () => {
     it('tells slim sub-agents to use structured edits instead of commands', () => {
         const { PromptBuilder } = loadPromptBuilder();
         const builder = new PromptBuilder(process.cwd());
-        const prompt = builder.buildSlimSystemPromptForMode('build');
+        const prompt = builder.buildSlimSystemPromptForMode('build', undefined, undefined, undefined, 'paradox');
         const context = builder.buildContextMessages({
             topicId: 'topic-123',
+            domain: 'paradox',
             commandToolsAvailable: false,
         });
 
@@ -342,7 +339,7 @@ describe('PromptBuilder context budgeting', () => {
     it('lets slim utility sub-agents run scoped repository verification commands', () => {
         const { PromptBuilder } = loadPromptBuilder();
         const builder = new PromptBuilder(process.cwd());
-        const prompt = builder.buildSlimSystemPromptForMode('utility');
+        const prompt = builder.buildSlimSystemPromptForMode('utility', undefined, undefined, undefined, 'general');
 
         expect(prompt).to.include('general-coding sub-task');
         expect(prompt).to.include('scoped repository inspection, formatting, builds, or tests');

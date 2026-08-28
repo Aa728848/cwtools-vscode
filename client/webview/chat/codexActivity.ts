@@ -59,7 +59,7 @@ function timestampOf(step: StepLike, fallback: number): number {
 }
 
 function invocationIdOf(step: StepLike): string | undefined {
-    return asString(step.invocationId || step.toolCallId || step.callId || step.id) || undefined;
+    return asString(step.invocationId) || undefined;
 }
 
 function commandFromArgs(args: Record<string, unknown>, step?: StepLike): string {
@@ -75,7 +75,7 @@ function targetPathFromArgs(args: Record<string, unknown>): string {
 }
 
 function getResultObject(step: StepLike): Record<string, unknown> {
-    return asRecord(step.toolResult || step.result);
+    return asRecord(step.toolResult);
 }
 
 function resultFailed(result: Record<string, unknown>): boolean {
@@ -321,7 +321,7 @@ function createSpecialEvent(step: StepLike, labels: CodexI18nText, index: number
     if (type === 'permission_request') {
         return createToolEvent(step, labels, index);
     }
-    if (type === 'write_confirmation_request' || type === 'pending_write') {
+    if (type === 'write_confirmation_request') {
         const args = asRecord(step.toolArgs || step.args);
         const targetPath = targetPathFromArgs(args) || content;
         return {
@@ -339,7 +339,7 @@ function createSpecialEvent(step: StepLike, labels: CodexI18nText, index: number
             detailModel: {
                 args,
                 targetPath: targetPath || undefined,
-                result: step.toolResult || step.result,
+                result: step.toolResult,
                 statusText: labels.activity.waitingWrite,
             },
         };
@@ -353,7 +353,7 @@ function createSpecialEvent(step: StepLike, labels: CodexI18nText, index: number
             subject: content,
             timestamp,
             sourceStep: step,
-            detailModel: { result: step.toolResult || step.result, preview: content },
+            detailModel: { result: step.toolResult, preview: content },
         };
     }
     return undefined;

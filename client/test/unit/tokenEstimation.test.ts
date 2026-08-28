@@ -4,7 +4,7 @@ import {
     estimateChatMessageTokens,
     estimateChatMessagesTokens,
     hasImageContent,
-    CHARS_PER_TOKEN,
+    BASE64_CHARS_PER_TOKEN_ESTIMATE,
 } from '../../extension/ai/runner/tokenEstimation';
 
 /**
@@ -122,9 +122,9 @@ describe('runner/tokenEstimation 特征测试（P0 第 0 步纯重构）', () =>
         });
     });
 
-    describe('CHARS_PER_TOKEN 兼容别名', () => {
+    describe('BASE64_CHARS_PER_TOKEN_ESTIMATE', () => {
         it('保持为 4', () => {
-            expect(CHARS_PER_TOKEN).to.equal(4);
+            expect(BASE64_CHARS_PER_TOKEN_ESTIMATE).to.equal(4);
         });
     });
 });

@@ -2,7 +2,7 @@
  * Eddy CWTool Code — Delegated sub-agent scope statement.
  *
  * A dispatched sub-agent runs inside a permission scope the coordinator fixed
- * when it was started: role tool budget, clamped `writeScope`, denied
+ * when it was started: runtime profile authority, clamped `writeScope`, denied
  * user-owned scopes, and `plannedFiles` that were dropped because they escaped
  * the parent's writable roots.
  *
@@ -18,7 +18,7 @@
 
 /** Scope facts a coordinator already computed for one child. */
 export interface DelegationScopeFacts {
-    /** True when the role has no write tools at all (explore / plan / review). */
+    /** True when the runtime profile has no project write tools. */
     readOnly?: boolean;
     /** Workspace-relative or absolute scopes this child may write. */
     writeScope?: readonly string[];
@@ -60,7 +60,7 @@ export function buildDelegationScopeStatement(facts?: DelegationScopeFacts): str
     ];
 
     if (facts.readOnly) {
-        lines.push('- This role is read-only: every file-mutating tool is withheld. Produce evidence and findings, not edits.');
+        lines.push('- This profile is read-only: every file-mutating tool is withheld. Produce evidence and findings, not edits.');
     } else {
         const writable = formatScopes(facts.writeScope);
         lines.push(writable

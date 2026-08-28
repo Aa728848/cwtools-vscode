@@ -47,7 +47,6 @@ describe('workspace AI storage paths', () => {
         const workspacePaths = loadWorkspacePaths();
         const expected = path.join(projectRoot, '.cwtools');
         expect(workspacePaths.getAiStorageRoot(projectRoot)).to.equal(expected);
-        expect(workspacePaths.getAiStorageRootCandidates(projectRoot)).to.deep.equal([expected]);
     });
 
     it('recognizes a directly opened .cwtools folder as the canonical storage root', () => {
@@ -88,8 +87,8 @@ describe('workspace AI storage paths', () => {
         const privateRoot = path.join(projectRoot, 'private-storage');
         workspacePaths.configurePrivateAgentStorage(privateRoot);
         try {
-            const expected = path.join(privateRoot, 'topics', 'topic_1', 'task.md');
-            expect(workspacePaths.getPrivateTopicFileCandidates('topic_1', 'task.md', projectRoot)).to.deep.equal([expected]);
+            expect(workspacePaths.getPrivateTopicStorageDir('topic_1', projectRoot))
+                .to.equal(path.join(privateRoot, 'topics', 'topic_1'));
             expect(workspacePaths.getPrivateTopicScratchDir('topic_1', projectRoot))
                 .to.equal(path.join(privateRoot, 'topics', 'topic_1', 'scratch'));
         } finally {

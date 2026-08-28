@@ -75,11 +75,10 @@ import { toWorkflowViewModel } from './workflowViewModel';
 import { getWorkflowUiLabels } from './workflowI18n';
 import {
     parseModelAgentProfileDecision,
-    profileForExecutionMode,
     resolveAgentProfile,
     resolveAgentProfileFromModelDecision,
 } from './agentProfile';
-import { executionModeForSchedulingState, normalizeSchedulingState } from './runner/scheduling';
+import { executionModeForSchedulingState, normalizeSchedulingState, schedulingStateFromAdmission } from './runner/scheduling';
 import { computeLineDiff } from './diffEngine';
 import {
     clipUiText,
@@ -100,11 +99,9 @@ import {
     type ResolvedSlashCommand,
 } from './slashCommands';
 import {
-    getPrivateTopicFileCandidates,
     getPrivateTopicStorageDir,
-    getPrivateTopicStorageDirCandidates,
     getProjectWorkspaceRoot,
-    getTopicStorageDirCandidates,
+    getTopicStorageDir,
 } from './workspacePaths';
 
 const activePendingInteractions = new Map<string, { topicId: string; description: string }>();
@@ -595,7 +592,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             const contextFiles = task.contextFiles.length > 0
                 ? task.contextFiles.map(c => `\`${c}\``).join(', ')
                 : aiText('none', '无');
-            lines.push(`- \`${task.id}\` (${task.agentType})`);
+            lines.push(`- \`${task.id}\` (${task.profileName})`);
             lines.push(aiText(`  - Dependencies: ${deps}`, `  - 依赖: ${deps}`));
             lines.push(aiText(`  - Context: ${contextFiles}`, `  - 上下文: ${contextFiles}`));
             lines.push(aiText(`  - Task: ${task.prompt}`, `  - 任务: ${task.prompt}`));
@@ -606,14 +603,14 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
 
     private extractDispatchTasks(result: GenerationResult): Array<{
         id: string;
-        agentType: string;
+        profileName: string;
         prompt: string;
         dependencies: string[];
         contextFiles: string[];
     }> {
         const tasks: Array<{
             id: string;
-            agentType: string;
+            profileName: string;
             prompt: string;
             dependencies: string[];
             contextFiles: string[];
@@ -629,7 +626,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                 if (!rawTask || typeof rawTask !== 'object') continue;
                 const task = rawTask as Record<string, unknown>;
                 const id = this.shortPlainText(task.id, 80) || `task_${tasks.length + 1}`;
-                const agentType = this.shortPlainText(task.agentType, 40) || 'agent';
+                const profileName = this.shortPlainText(task.profileName, 80) || 'agent';
                 const prompt = this.shortPlainText(task.prompt, 320) || aiText('No task description provided', '未提供任务描述');
                 const dependencies = Array.isArray(task.dependencies)
                     ? task.dependencies.map(d => this.shortPlainText(d, 80)).filter(Boolean)
@@ -637,10 +634,10 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                 const contextFiles = Array.isArray(task.contextFiles)
                     ? task.contextFiles.map(c => this.shortPlainText(c, 120)).filter(Boolean)
                     : [];
-                const key = `${id}:${agentType}:${prompt}`;
+                const key = `${id}:${profileName}:${prompt}`;
                 if (seen.has(key)) continue;
                 seen.add(key);
-                tasks.push({ id, agentType, prompt, dependencies, contextFiles });
+                tasks.push({ id, profileName, prompt, dependencies, contextFiles });
             }
         }
 
@@ -974,8 +971,8 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         if (!topicId) return false;
         // A plan artifact for the topic means planning already delivered its
         // blueprint; only the plan-less state needs a plan continuation.
-        const candidates = getPrivateTopicFileCandidates(topicId, 'Implementation_Plan.md', getProjectWorkspaceRoot());
-        return !candidates.some(candidate => fs.existsSync(candidate));
+        const topicDir = getPrivateTopicStorageDir(topicId, getProjectWorkspaceRoot());
+        return !topicDir || !fs.existsSync(path.join(topicDir, 'Implementation_Plan.md'));
     }
 
     public async handleUserMessage(text: string, images?: string[], _attachedFiles?: string[], _skipAutoModeSwitch = false, isBackground = false, resumeFromState = false, displayText?: string, contexts?: import('./types').ContextItem[]): Promise<void> {
@@ -1913,10 +1910,11 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
     }
 
     private findGeneratedTopicFile(topicId: string, fileName: string): string | null {
-        const candidates = getPrivateTopicFileCandidates(topicId, fileName, getProjectWorkspaceRoot());
-        const normalizedCandidates = new Set(candidates.map(candidate => path.normalize(candidate).toLowerCase()));
+        const topicDir = getPrivateTopicStorageDir(topicId, getProjectWorkspaceRoot());
+        if (!topicDir) return null;
+        const expectedPath = path.normalize(path.join(topicDir, fileName)).toLowerCase();
         const written = this._currentMessageSnapshots?.find(snapshot =>
-            normalizedCandidates.has(path.normalize(snapshot.filePath).toLowerCase())
+            path.normalize(snapshot.filePath).toLowerCase() === expectedPath
         );
         return written?.filePath ?? null;
     }
@@ -1926,8 +1924,11 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         const topicId = this.topicManager.currentTopic?.id;
         if (!topicId) return '';
         const workspaceRoot = getProjectWorkspaceRoot();
-        const findExisting = (fileName: string) => getPrivateTopicFileCandidates(topicId, fileName, workspaceRoot)
-            .find(candidate => fs.existsSync(candidate));
+        const topicDir = getPrivateTopicStorageDir(topicId, workspaceRoot);
+        const findExisting = (fileName: string) => {
+            const candidate = topicDir ? path.join(topicDir, fileName) : '';
+            return candidate && fs.existsSync(candidate) ? candidate : undefined;
+        };
         const implementationPlan = findExisting('Implementation_Plan.md');
         return implementationPlan
             ? [`Approved implementation plan: ${implementationPlan}`, `Approved blueprintFile: ${implementationPlan}`].join('\n')
@@ -2355,7 +2356,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
     public startNewTopic(): void {
         this.persistSchedulingStateForCurrentTopic();
         this.topicManager.startNewTopic();
-        const initialScheduling = resolveAgentProfile('', profileForExecutionMode('build')).schedulingState;
+        const initialScheduling = resolveAgentProfile('', { domain: 'paradox', intent: 'execute', strategy: 'single' }).schedulingState;
         this.session.schedulingState = initialScheduling;
         this.session.previousSchedulingState = initialScheduling;
         this.currentWorkflowId = null;
@@ -2377,12 +2378,9 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         );
         const restoredWorkflow = topic?.workflowId ? getWorkflow(topic.workflowId) : undefined;
         this.currentWorkflowId = restoredWorkflow?.id ?? null;
-        const restoredWorkflowProfile = restoredWorkflow ? profileForExecutionMode(restoredWorkflow.mode) : undefined;
-        this.session.schedulingState = restoredWorkflowProfile
-            ? resolveAgentProfile('', restoredWorkflowProfile).schedulingState
-            : topic?.schedulingState
-                ? normalizeSchedulingState(topic.schedulingState)
-                : resolveAgentProfile('', profileForExecutionMode('build')).schedulingState;
+        this.session.schedulingState = topic?.schedulingState
+            ? normalizeSchedulingState(topic.schedulingState)
+            : resolveAgentProfile('', { domain: 'paradox', intent: 'execute', strategy: 'single' }).schedulingState;
         this.session.previousSchedulingState = topic?.workflowReturnSchedulingState
             ? normalizeSchedulingState(topic.workflowReturnSchedulingState)
             : this.session.schedulingState;
@@ -2414,10 +2412,11 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
 
         // Asynchronously clean up the disk folder corresponding to the topic (.cwtools/{topicId}/),
         //Includes all derivative files such as plan, walkthrough, task, scratch, media, tmp, etc.
+        const workspaceRoot = getProjectWorkspaceRoot();
         const topicDirs = Array.from(new Set([
-            ...getTopicStorageDirCandidates(topicId, getProjectWorkspaceRoot()),
-            ...getPrivateTopicStorageDirCandidates(topicId, getProjectWorkspaceRoot()),
-        ]));
+            getTopicStorageDir(topicId, workspaceRoot),
+            getPrivateTopicStorageDir(topicId, workspaceRoot),
+        ].filter(Boolean)));
         if (topicDirs.length > 0) {
             for (const topicDir of topicDirs) fs.promises.rm(topicDir, { recursive: true, force: true }).catch(() => {
                 // Silently ignore if the folder does not exist or fails to be deleted
@@ -2697,10 +2696,11 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                     input: 0,
                     output: 0,
                     estimatedCostCny: 0,
-                    agentMode: this.currentMode,
                 };
                 const result = await this.agentRunner.compactActiveHistory(this.conversationMessages, {
                     model: config.model || undefined,
+                    agentMode: this.currentMode,
+                    toolFocus: 'finalize',
                 }, step => {
                     if (step.compactionInfo) this.postMessage({ type: 'contextCompactionStatus', step });
                 }, compactionUsage);
@@ -2770,15 +2770,15 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                         goal ? 'success' : 'error',
                         goal
                             ? aiText(
-                                `Goal: ${goal.objective} · ${goal.status}${goal.tokenBudget ? ` · budget ${goal.tokenBudget}` : ''}`,
-                                `目标：${goal.objective} · ${goal.status}${goal.tokenBudget ? ` · 预算 ${goal.tokenBudget}` : ''}`,
+                                `Goal: ${goal.objective} · ${goal.status}${goal.budgetLimits.tokens ? ` · budget ${goal.budgetLimits.tokens}` : ''}`,
+                                `目标：${goal.objective} · ${goal.status}${goal.budgetLimits.tokens ? ` · 预算 ${goal.budgetLimits.tokens}` : ''}`,
                             )
                             : aiText('No durable goal exists for this topic.', '当前话题没有持久目标。'),
                     );
                     return;
                 }
                 if (normalized === 'complete' || normalized === 'blocked') {
-                    const status = normalized === 'complete' ? 'completed' : 'blocked';
+                    const status = normalized === 'complete' ? 'complete' : 'blocked';
                     const updated = await this.agentRuntime.updateGoal(topicId, topicId, status);
                     this.emitSlashCommandResult(
                         raw,
@@ -2929,7 +2929,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             `The user invoked ${visibleCommand} to save the reusable process from this conversation as a project workflow.`,
             idInstruction,
             'Extract only the repeatable workflow: objective, phases, constraints, useful tools, required context, and verification.',
-            'Then call save_workflow with title, description, mode, promptSupplement, and any narrow allowedTools/blockedTools that make the workflow safer.',
+            'Then call save_workflow with title, description, domain, intent, strategy, promptSupplement, and any narrow allowedTools/blockedTools that make the workflow safer.',
             'After saving, briefly tell the user the workflow id and slash command to run it.',
         ].join('\n');
         await this.handleUserMessage(prompt, undefined, undefined, true, false, false, visibleCommand);
@@ -3581,9 +3581,18 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             this.currentWorkflowId = null;
             this.sendWorkflowState();
         }
+        const current = this.session.schedulingState;
+        const profileName = schedulingStateFromAdmission({
+            domainProfile: domain,
+            authorization: current.authorization,
+            initialPhase: current.phase === 'finalize' ? 'verify' : current.phase,
+            explicitDelegation: current.dispatch !== 'single',
+            confidence: current.routeConfidence,
+            evidence: ['user selected capability domain'],
+        }, 'User selected capability domain.').profileName;
         this.session.schedulingState = normalizeSchedulingState({
-            ...this.session.schedulingState,
-            profileName: undefined,
+            ...current,
+            profileName,
             domainProfile: domain,
             routeEvidence: ['user selected capability domain'],
             routingSource: 'user',
@@ -3620,9 +3629,8 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             return;
         }
 
-        const workflowProfile = profileForExecutionMode(workflow.mode);
         const workflowScheduling = {
-            ...resolveAgentProfile('', workflowProfile).schedulingState,
+            ...resolveAgentProfile('', workflow.scheduling).schedulingState,
             routingSource: 'workflow' as const,
         };
         this.session.activateWorkflow(workflow.id, workflowScheduling);
@@ -4075,8 +4083,8 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             .filter((toolResult): toolResult is Record<string, any> => !!toolResult && Array.isArray(toolResult.agents));
         if (dispatchResults.length > 0) {
             const topicId = this.topicManager.currentTopic?.id || 'default';
-            const candidates = getPrivateTopicFileCandidates(topicId, 'walkthrough.md', getProjectWorkspaceRoot());
-            const wtPath = candidates[0];
+            const topicDir = getPrivateTopicStorageDir(topicId, getProjectWorkspaceRoot());
+            const wtPath = topicDir ? path.join(topicDir, 'walkthrough.md') : '';
             if (wtPath) {
                 const runEvents = this.currentRunId
                     ? (runLedger.getSnapshot(this.currentRunId)?.events ?? [])
@@ -4229,7 +4237,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             agents.forEach((agent: any, agentIndex: number) => {
                 const id = this.shortPlainText(agent.id, 100) || `agent_${batchIndex + 1}_${agentIndex + 1}`;
                 const task = taskLookup.get(id);
-                const role = agent.agentType || task?.agentType || 'agent';
+                const role = agent.profileName || task?.profileName || 'agent';
                 const resultFiles: string[] = Array.isArray(agent.filesWritten)
                     ? agent.filesWritten.filter((file: unknown): file is string => typeof file === 'string' && !!file)
                     : [];

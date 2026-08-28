@@ -75,12 +75,12 @@ describe('PromptBuilder frozen prompt fingerprint cache (plan §7.1)', () => {
 
     it('serves a byte-identical cached prompt on identical inputs (cold then hit)', () => {
         const builder = makeBuilder();
-        const first = builder.buildFrozenSystemPrompt('build', 'deepseek', undefined, { toolsetHash: 'tools-a' });
+        const first = builder.buildFrozenSystemPrompt('build', 'deepseek', undefined, { toolsetHash: 'tools-a', domain: 'paradox' });
         let stats = builder.getFrozenPromptCacheStats();
         expect(stats.misses).to.equal(1);
         expect(stats.missReasons.cold).to.equal(1);
 
-        const second = builder.buildFrozenSystemPrompt('build', 'deepseek', undefined, { toolsetHash: 'tools-a' });
+        const second = builder.buildFrozenSystemPrompt('build', 'deepseek', undefined, { toolsetHash: 'tools-a', domain: 'paradox' });
         expect(second).to.equal(first);
         stats = builder.getFrozenPromptCacheStats();
         expect(stats.hits).to.equal(1);
@@ -89,10 +89,10 @@ describe('PromptBuilder frozen prompt fingerprint cache (plan §7.1)', () => {
 
     it('invalidates with rules_changed when CWTOOLS.md content changes', () => {
         const builder = makeBuilder();
-        builder.buildFrozenSystemPrompt('build', 'deepseek', undefined, { toolsetHash: 'tools-a' });
+        builder.buildFrozenSystemPrompt('build', 'deepseek', undefined, { toolsetHash: 'tools-a', domain: 'paradox' });
 
         fs.writeFileSync(path.join(workspaceRoot, 'CWTOOLS.md'), '# CWTOOLS\n\n## Mod Info\n- **Name**: RenamedMod\n', 'utf8');
-        const rebuilt = builder.buildFrozenSystemPrompt('build', 'deepseek', undefined, { toolsetHash: 'tools-a' });
+        const rebuilt = builder.buildFrozenSystemPrompt('build', 'deepseek', undefined, { toolsetHash: 'tools-a', domain: 'paradox' });
 
         expect(rebuilt).to.include('RenamedMod');
         expect(builder.getFrozenPromptCacheStats().missReasons.rules_changed).to.equal(1);
@@ -100,7 +100,7 @@ describe('PromptBuilder frozen prompt fingerprint cache (plan §7.1)', () => {
 
     it('re-reads CWTOOLS.md after invalidateProjectPromptInputs even when mtime is unchanged', () => {
         const builder = makeBuilder();
-        builder.buildFrozenSystemPrompt('build', 'deepseek', undefined, { toolsetHash: 'tools-a' });
+        builder.buildFrozenSystemPrompt('build', 'deepseek', undefined, { toolsetHash: 'tools-a', domain: 'paradox' });
 
         // Simulate an edit hidden by mtime granularity: same mtime, new content.
         const rulesPath = path.join(workspaceRoot, 'CWTOOLS.md');
@@ -109,50 +109,50 @@ describe('PromptBuilder frozen prompt fingerprint cache (plan §7.1)', () => {
         fs.utimesSync(rulesPath, before.atime, before.mtime);
 
         builder.invalidateProjectPromptInputs();
-        const rebuilt = builder.buildFrozenSystemPrompt('build', 'deepseek', undefined, { toolsetHash: 'tools-a' });
+        const rebuilt = builder.buildFrozenSystemPrompt('build', 'deepseek', undefined, { toolsetHash: 'tools-a', domain: 'paradox' });
         expect(rebuilt).to.include('SilentEdit');
         expect(builder.getFrozenPromptCacheStats().missReasons.rules_changed).to.equal(1);
     });
 
     it('invalidates with flag_changed when a prompt-affecting flag flips', () => {
         const builder = makeBuilder();
-        builder.buildFrozenSystemPrompt('build', 'deepseek', undefined, { toolsetHash: 'tools-a' });
+        builder.buildFrozenSystemPrompt('build', 'deepseek', undefined, { toolsetHash: 'tools-a', domain: 'paradox' });
 
         stubFlags.includeFullSmallFiles = true;
-        builder.buildFrozenSystemPrompt('build', 'deepseek', undefined, { toolsetHash: 'tools-a' });
+        builder.buildFrozenSystemPrompt('build', 'deepseek', undefined, { toolsetHash: 'tools-a', domain: 'paradox' });
 
         expect(builder.getFrozenPromptCacheStats().missReasons.flag_changed).to.equal(1);
     });
 
     it('invalidates with toolset_changed when the tool set hash changes', () => {
         const builder = makeBuilder();
-        builder.buildFrozenSystemPrompt('build', 'deepseek', undefined, { toolsetHash: 'tools-a' });
-        builder.buildFrozenSystemPrompt('build', 'deepseek', undefined, { toolsetHash: 'tools-b' });
+        builder.buildFrozenSystemPrompt('build', 'deepseek', undefined, { toolsetHash: 'tools-a', domain: 'paradox' });
+        builder.buildFrozenSystemPrompt('build', 'deepseek', undefined, { toolsetHash: 'tools-b', domain: 'paradox' });
 
         expect(builder.getFrozenPromptCacheStats().missReasons.toolset_changed).to.equal(1);
     });
 
     it('rebuild:true forces a rebuild and counts a rebuild miss', () => {
         const builder = makeBuilder();
-        builder.buildFrozenSystemPrompt('build', 'deepseek', undefined, { toolsetHash: 'tools-a' });
-        builder.buildFrozenSystemPrompt('build', 'deepseek', undefined, { toolsetHash: 'tools-a', rebuild: true });
+        builder.buildFrozenSystemPrompt('build', 'deepseek', undefined, { toolsetHash: 'tools-a', domain: 'paradox' });
+        builder.buildFrozenSystemPrompt('build', 'deepseek', undefined, { toolsetHash: 'tools-a', rebuild: true, domain: 'paradox' });
 
         const stats = builder.getFrozenPromptCacheStats();
         expect(stats.missReasons.rebuild).to.equal(1);
         expect(stats.hits).to.equal(0);
         // The rebuilt entry is cached again for subsequent calls.
-        builder.buildFrozenSystemPrompt('build', 'deepseek', undefined, { toolsetHash: 'tools-a' });
+        builder.buildFrozenSystemPrompt('build', 'deepseek', undefined, { toolsetHash: 'tools-a', domain: 'paradox' });
         expect(builder.getFrozenPromptCacheStats().hits).to.equal(1);
     });
 
     it('resolves the real game id into the fingerprint when languageId is omitted', () => {
         const builder = makeBuilder();
         stubEditorLanguageId = 'stellaris';
-        const stellarisPrompt = builder.buildFrozenSystemPrompt('build', 'deepseek', undefined, { toolsetHash: 'tools-a' });
+        const stellarisPrompt = builder.buildFrozenSystemPrompt('build', 'deepseek', undefined, { toolsetHash: 'tools-a', domain: 'paradox' });
         expect(stellarisPrompt).to.include('Stellaris');
 
         stubEditorLanguageId = 'eu4';
-        const eu4Prompt = builder.buildFrozenSystemPrompt('build', 'deepseek', undefined, { toolsetHash: 'tools-a' });
+        const eu4Prompt = builder.buildFrozenSystemPrompt('build', 'deepseek', undefined, { toolsetHash: 'tools-a', domain: 'paradox' });
 
         expect(eu4Prompt).to.not.equal(stellarisPrompt);
         // A different game identity is a new cache identity, not a mutation.
@@ -163,19 +163,19 @@ describe('PromptBuilder frozen prompt fingerprint cache (plan §7.1)', () => {
         const builder = makeBuilder();
         // FROZEN_PROMPT_CACHE_MAX is 32: 33 distinct providers evict the first entry.
         for (let i = 0; i < 33; i++) {
-            builder.buildFrozenSystemPrompt('build', `provider-${i}`, undefined, { toolsetHash: 'tools-a' });
+            builder.buildFrozenSystemPrompt('build', `provider-${i}`, undefined, { toolsetHash: 'tools-a', domain: 'paradox' });
         }
         expect(builder.getFrozenPromptCacheStats().size).to.equal(32);
         expect(builder.getFrozenPromptCacheStats().missReasons.cold).to.equal(33);
 
-        builder.buildFrozenSystemPrompt('build', 'provider-0', undefined, { toolsetHash: 'tools-a' });
+        builder.buildFrozenSystemPrompt('build', 'provider-0', undefined, { toolsetHash: 'tools-a', domain: 'paradox' });
         expect(builder.getFrozenPromptCacheStats().missReasons.evicted).to.equal(1);
     });
 
     it('keeps the cache bounded at FROZEN_PROMPT_CACHE_MAX', () => {
         const builder = makeBuilder();
         for (let i = 0; i < 40; i++) {
-            builder.buildFrozenSystemPrompt('build', `provider-${i}`, undefined, { toolsetHash: 'tools-a' });
+            builder.buildFrozenSystemPrompt('build', `provider-${i}`, undefined, { toolsetHash: 'tools-a', domain: 'paradox' });
         }
         expect(builder.getFrozenPromptCacheStats().size).to.be.at.most(32);
     });

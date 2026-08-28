@@ -240,19 +240,19 @@ const RAW_TOOL_DEFINITIONS: ToolDefinition[] = [
         type: 'function',
         function: {
             name: 'query_project_profile',
-            description: 'Read the /init-generated Agent project profile from .cwtools/project/profile.json. Use this before broad scans to get workspace type, key directories, localisation languages/encoding, namespaces, workflow routing, validation hints, and mode-specific prompt cards.',
+            description: 'Read the /init-generated Agent project profile from .cwtools/project/profile.json. Use this before broad scans to get workspace type, key directories, localisation languages/encoding, namespaces, workflow routing, validation hints, and targeted guidance cards.',
             parameters: {
                 type: 'object',
                 properties: {
                     section: {
                         type: 'string',
-                        enum: ['summary', 'routing', 'directories', 'localisation', 'identifiers', 'validation', 'compatibility', 'promptCards', 'all'],
+                        enum: ['summary', 'routing', 'directories', 'localisation', 'identifiers', 'validation', 'compatibility', 'guidanceCards', 'all'],
                         description: 'Targeted profile section to return. Default summary. Use all only when you need the whole profile.',
                     },
-                    mode: {
+                    guidance: {
                         type: 'string',
-                        enum: ['build', 'plan', 'explore', 'utility', 'review', 'gui_expert', 'script_reviewer', 'loc_translator', 'loc_writer', 'orchestrator', 'script', 'asset'],
-                        description: 'Optional mode card to return, e.g. build, plan, loc_writer, asset, orchestrator, script.',
+                        enum: ['implementation', 'planning', 'exploration', 'review', 'utility', 'localisation', 'assets', 'coordination', 'paradox_coordination'],
+                        description: 'Optional guidance card to return for the current task concern.',
                     },
                 },
                 required: [],
@@ -1708,7 +1708,7 @@ const RAW_TOOL_DEFINITIONS: ToolDefinition[] = [
                             type: 'object',
                             properties: {
                                 id: { type: 'string' },
-                                agentType: { type: 'string', enum: ['explore', 'plan', 'build', 'review', 'loc_writer', 'gui_expert'] },
+                                profileName: { type: 'string', enum: ['explore', 'planner', 'paradox-coder', 'reviewer', 'localization-writer', 'gui-expert'] },
                                 prompt: { type: 'string' },
                                 plannedFiles: { type: 'array', items: { type: 'string' } },
                                 plannedEntities: { type: 'array', items: { type: 'string' } },
@@ -1757,7 +1757,7 @@ const RAW_TOOL_DEFINITIONS: ToolDefinition[] = [
                                     },
                                 },
                             },
-                            required: ['id', 'agentType', 'prompt', 'dependencies'],
+                            required: ['id', 'profileName', 'prompt', 'dependencies'],
                         },
                     },
                     riskRegister: {
@@ -1787,10 +1787,24 @@ const RAW_TOOL_DEFINITIONS: ToolDefinition[] = [
                     id: { type: 'string', description: 'Optional stable workflow id, lowercase/kebab-case preferred. If omitted, it is derived from the title.' },
                     title: { type: 'string', description: 'User-facing workflow title.' },
                     description: { type: 'string', description: 'Short one-sentence summary shown in the workflow picker and slash command list.' },
-                    mode: {
+                    domain: {
                         type: 'string',
-                        enum: ['build', 'plan', 'explore', 'utility', 'review', 'orchestrator', 'script'],
-                        description: 'Public Agent mode for this workflow. Internal specialist roles are selected by the coordinator and cannot be saved as a top-level workflow mode. Default build.',
+                        enum: ['paradox', 'general', 'hybrid'],
+                        description: 'Capability domain for the workflow.',
+                    },
+                    intent: {
+                        type: 'string',
+                        enum: ['execute', 'plan', 'explore', 'review'],
+                        description: 'Explicit workflow intent used by the scheduler.',
+                    },
+                    strategy: {
+                        type: 'string',
+                        enum: ['single', 'multi'],
+                        description: 'Execution topology requested by the workflow.',
+                    },
+                    profileName: {
+                        type: 'string',
+                        description: 'Optional registered runtime profile name.',
                     },
                     promptSupplement: {
                         type: 'string',
@@ -1799,7 +1813,7 @@ const RAW_TOOL_DEFINITIONS: ToolDefinition[] = [
                     allowedTools: {
                         type: 'array',
                         items: { type: 'string' },
-                        description: 'Optional tool allowlist. Use this for narrow workflows; leave empty to use the mode default tools.',
+                        description: 'Optional tool allowlist. Use this for narrow workflows; leave empty to use the scheduled profile default tools.',
                     },
                     blockedTools: {
                         type: 'array',
@@ -1820,7 +1834,7 @@ const RAW_TOOL_DEFINITIONS: ToolDefinition[] = [
                         description: 'If true, replace an existing workflow with the same id. Default false.',
                     },
                 },
-                required: ['title', 'description', 'promptSupplement'],
+                required: ['title', 'description', 'domain', 'intent', 'strategy', 'promptSupplement'],
             },
         },
     },
@@ -1847,7 +1861,7 @@ const RAW_TOOL_DEFINITIONS: ToolDefinition[] = [
         type: 'function',
         function: {
             name: 'dispatch_agents',
-            description: 'Dispatch a bounded task DAG using only roles authorized by the current coordinator domain. Declare dependencies, planned files, and explicit userConstraints. Each wave persists and can be resumed via resumeGraphId.',
+            description: 'Dispatch a bounded task DAG using only runtime profiles authorized by the current scheduler profile. Declare dependencies, planned files, and explicit userConstraints. Each wave persists and can be resumed via resumeGraphId.',
             parameters: {
                 type: 'object',
                 properties: {
@@ -1879,7 +1893,7 @@ const RAW_TOOL_DEFINITIONS: ToolDefinition[] = [
                             type: 'object',
                             properties: {
                                 id: { type: 'string', description: 'Unique sub-task ID (e.g. "explore_structure", "build_events")' },
-                                agentType: { type: 'string', enum: ['explore', 'plan', 'utility', 'review', 'build', 'loc_writer', 'gui_expert'], description: 'Agent role. General Multi-Agent writers use utility; Paradox-only writers use build, loc_writer, or gui_expert.' },
+                                profileName: { type: 'string', enum: ['explore', 'planner', 'general-coder', 'reviewer', 'paradox-coder', 'localization-writer', 'gui-expert'], description: 'Registered runtime profile for this child. General work uses general-coder; Paradox writers use paradox-coder, localization-writer, or gui-expert.' },
                                 prompt: { type: 'string', description: 'Sub-task description (sent as the agent\'s user message). Warning: CRITICAL: KEEP THIS CONCISE to prevent JSON truncation errors. Do NOT embed large file contents or massive path lists here. If you need to pass large data, use `set_memory` first and just pass the memory key in this prompt.' },
                                 dependencies: {
                                     type: 'array',
@@ -1894,7 +1908,7 @@ const RAW_TOOL_DEFINITIONS: ToolDefinition[] = [
                                 plannedFiles: {
                                     type: 'array',
                                     items: { type: 'string' },
-                                    description: 'Expected project files this writer will modify. Provide this whenever targets are known so the coordinator can prevent concurrent write conflicts and narrow child write scope. Paradox localisation/localization .yml targets require agentType="loc_writer" and write_localisation. If exploration must discover files first, dispatch it before the writer.',
+                                    description: 'Expected project files this writer will modify. Provide this whenever targets are known so the coordinator can prevent concurrent write conflicts and narrow child write scope. Paradox localisation/localization .yml targets require profileName="localization-writer" and write_localisation. If exploration must discover files first, dispatch it before the writer.',
                                 },
                                 plannedEntities: {
                                     type: 'array',
@@ -1948,12 +1962,12 @@ const RAW_TOOL_DEFINITIONS: ToolDefinition[] = [
                                     },
                                 },
                                 priority: { type: 'string', enum: ['critical', 'normal', 'low'], description: 'Task priority (default: normal)' },
-                                maxIterations: { type: 'integer', minimum: 1, maximum: 100, description: 'Optional per-agent reasoning-loop cap. Leave unset to use the role default.' },
+                                maxIterations: { type: 'integer', minimum: 1, maximum: 100, description: 'Optional per-agent reasoning-loop cap. Leave unset to use the runtime profile default.' },
                                 model: { type: 'string', description: 'Optional model id for this sub-agent only. Leave unset to inherit the coordinator model. Prefer a cheaper model (e.g. deepseek-v4-flash) for read-only evidence tasks.' },
                                 provider: { type: 'string', description: 'Optional provider id paired with model. Must name a configured built-in provider. Leave unset to inherit the coordinator provider.' },
                                 reasoningEffort: { type: 'string', enum: ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'], description: 'Optional reasoning level for this sub-agent only. Leave unset to inherit the coordinator level. Use low/minimal for mechanical evidence tasks.' },
                             },
-                            required: ['id', 'agentType', 'prompt'],
+                            required: ['id', 'profileName', 'prompt'],
                         },
                     },
                     featureManifest: {
@@ -2010,14 +2024,14 @@ const RAW_TOOL_DEFINITIONS: ToolDefinition[] = [
                     },
                     resumeGraphId: {
                         type: 'string',
-                        description: 'Resume a persisted graph (id returned by a previous dispatch as graphId). Done nodes are skipped; failed/cancelled nodes re-run; appended tasks are merged in. Write waves stay static contracts: in the Paradox domain appended roles must be read-only (explore/plan/review).',
+                        description: 'Resume a persisted graph (id returned by a previous dispatch as graphId). Done nodes are skipped; failed/cancelled nodes re-run; appended tasks are merged in. Write waves stay static contracts: in the Paradox domain appended profiles must be read-only.',
                     },
                     appendTasks: {
                         type: 'array',
                         description: 'New tasks appended to a resumed graph; same item shape as tasks. Ids must be new; dependencies may reference existing node ids.',
                         items: {
                             type: 'object',
-                            required: ['id', 'agentType', 'prompt'],
+                            required: ['id', 'profileName', 'prompt'],
                         },
                     },
                     answerClarifications: {
@@ -2034,7 +2048,7 @@ const RAW_TOOL_DEFINITIONS: ToolDefinition[] = [
                     },
                     background: {
                         type: 'boolean',
-                        description: 'Run the wave in the background and return immediately; completion arrives as a BACKGROUND TASK RESULT in the next turn. General domain: any role. Paradox domain: read-only roles (explore/plan/review) only.',
+                        description: 'Run the wave in the background and return immediately; completion arrives as a BACKGROUND TASK RESULT in the next turn. General domain: any authorized profile. Paradox domain: read-only profiles only.',
                     },
                 },
                 required: [],

@@ -9,7 +9,7 @@ describe('workflowViewModel', () => {
 
         expect(view.id).to.equal('diagnostic-fix');
         expect(view.title).to.equal(workflow.title);
-        expect(view.mode).to.equal(workflow.mode);
+        expect(view.scheduling).to.deep.equal(workflow.scheduling);
         expect(view.phases).to.have.lengthOf(workflow.phases.length);
         expect(view.verification[0]!.id).to.equal(workflow.verification[0]!.id);
     });

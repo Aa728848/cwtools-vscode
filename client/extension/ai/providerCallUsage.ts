@@ -78,8 +78,6 @@ export function buildProviderCallTokenUsage(
         netTotal: netInput + completionTokens,
         cacheSavedCostCny,
         apiCalls: 1,
-        agentMode: options.agentMode,
-        promptFingerprint: options.promptFingerprint,
     };
     appendCacheRequestUsage(usage, {
         provider: providerId,

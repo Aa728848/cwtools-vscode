@@ -96,7 +96,7 @@ export function resolveEffectiveCacheCapability(options: {
     return { status: 'unknown', requestMode: 'none', supportsUsageTrailer: false };
 }
 
-/** Compatibility facade for stable-prefix prompt construction. */
+/** Boolean helper for stable-prefix prompt construction. */
 export function supportsOpenAiStylePrefixCache(
     providerId: string,
     customApiFormat?: CustomApiFormat,

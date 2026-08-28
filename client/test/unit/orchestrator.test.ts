@@ -1,7 +1,7 @@
 /** 
 * Multi-Agent coordinator module - unit testing 
 * 
-* Covers Blackboard, TaskGraphEngine, ConflictDetector, QualityGate, AgentRegistry. 
+* Covers Blackboard, TaskGraphEngine, ConflictDetector, QualityGate, and runtime profiles.
 * Use ts-mocha + chai to be consistent with the existing testing style of the project. 
 */
 
@@ -205,9 +205,9 @@ describe('TaskGraphEngine', () => {
     function makeGraph(): TaskGraph {
         const graph = TaskGraphEngine.createGraph('test');
         TaskGraphEngine.addNode(graph, 'A', 'explore', 'explore');
-        TaskGraphEngine.addNode(graph, 'B', 'build', 'build 1', { dependencies: ['A'] });
-        TaskGraphEngine.addNode(graph, 'C', 'build', 'build 2', { dependencies: ['A'] });
-        TaskGraphEngine.addNode(graph, 'D', 'review', 'review', { dependencies: ['B', 'C'] });
+        TaskGraphEngine.addNode(graph, 'B', 'paradox-coder', 'build 1', { dependencies: ['A'] });
+        TaskGraphEngine.addNode(graph, 'C', 'paradox-coder', 'build 2', { dependencies: ['A'] });
+        TaskGraphEngine.addNode(graph, 'D', 'reviewer', 'review', { dependencies: ['B', 'C'] });
         return graph;
     }
 
@@ -258,7 +258,7 @@ describe('TaskGraphEngine', () => {
         const graph = TaskGraphEngine.createGraph('cycle test');
         // Manually create the ring: X → Y → Z → X
         const makeNode = (id: string, deps: string[]): TaskNode => ({
-            id, agentType: 'explore', prompt: '', dependencies: deps,
+            id, profileName: 'explore', prompt: '', dependencies: deps,
             status: 'pending', priority: 'normal', retryCount: 0, maxRetries: 1,
         });
         graph.nodes.set('X', makeNode('X', ['Z']));
@@ -300,7 +300,7 @@ describe('TaskGraphEngine', () => {
 
     it('addNode: stores planned write targets for conflict-aware scheduling', () => {
         const graph = TaskGraphEngine.createGraph('planned targets');
-        const node = TaskGraphEngine.addNode(graph, 'A', 'build', 'build', {
+        const node = TaskGraphEngine.addNode(graph, 'A', 'paradox-coder', 'build', {
             plannedFiles: ['events/shared.txt'],
             plannedEntities: ['event:foo.1'],
         });
@@ -311,10 +311,10 @@ describe('TaskGraphEngine', () => {
 
     it('linkEntityDependencies: derives producer-consumer ordering', () => {
         const graph = TaskGraphEngine.createGraph('entity data flow');
-        TaskGraphEngine.addNode(graph, 'build_effect', 'build', 'build effect', {
+        TaskGraphEngine.addNode(graph, 'build_effect', 'paradox-coder', 'build effect', {
             produces: [{ kind: 'scripted_effect', id: 'foo_create', operation: 'define' }],
         });
-        const consumer = TaskGraphEngine.addNode(graph, 'build_event', 'build', 'build event', {
+        const consumer = TaskGraphEngine.addNode(graph, 'build_event', 'paradox-coder', 'build event', {
             consumes: [{ kind: 'scripted_effect', id: 'foo_create', operation: 'call' }],
         });
 
@@ -415,7 +415,7 @@ describe('dispatch_agents tool wiring', () => {
 
     const makeTasks = (count: number) => Array.from({ length: count }, (_, index) => ({
         id: `task_${index + 1}`,
-        agentType: 'explore',
+        profileName: 'explore',
         prompt: `inspect area ${index + 1}`,
     }));
 
@@ -448,7 +448,7 @@ describe('dispatch_agents tool wiring', () => {
                 featureManifest: featureManifest('Update event script', 'foo.1'),
                 tasks: [{
                     id: 'build_events',
-                    agentType: 'build',
+                    profileName: 'paradox-coder',
                     prompt: 'update event script',
                     plannedFiles: ['events/shared.txt'],
                     plannedEntities: ['event:foo.1'],
@@ -468,7 +468,7 @@ describe('dispatch_agents tool wiring', () => {
         }
     });
 
-    it('routes localisation yml planned-file tasks to loc_writer with write_localisation guidance', async () => {
+    it('keeps localization-writer tasks explicit and injects write_localisation guidance', async () => {
         const { AgentToolExecutor } = require('../../extension/ai/agentTools') as typeof import('../../extension/ai/agentTools');
         const { Orchestrator } = require('../../extension/ai/orchestrator/orchestrator') as typeof import('../../extension/ai/orchestrator/orchestrator');
         const executor = new AgentToolExecutor({
@@ -497,7 +497,7 @@ describe('dispatch_agents tool wiring', () => {
                 featureManifest: featureManifest('Update event localisation', 'demo.1'),
                 tasks: [{
                     id: 'build_loc',
-                    agentType: 'build',
+                    profileName: 'localization-writer',
                     prompt: 'Update the title text in this yml file.',
                     plannedFiles: ['localisation/english/demo_l_english.yml'],
                     consumes: [{ kind: 'event', id: 'demo.1', operation: 'reference' }],
@@ -510,7 +510,7 @@ describe('dispatch_agents tool wiring', () => {
 
             expect(result.success, JSON.stringify(result)).to.equal(true);
             const node = capturedGraph?.nodes.get('build_loc');
-            expect(node?.agentType).to.equal('loc_writer');
+            expect(node?.profileName).to.equal('localization-writer');
             expect(node?.prompt).to.include('write_localisation');
             expect(node?.prompt).to.include('Do not use `write_file`');
         } finally {
@@ -552,7 +552,7 @@ describe('dispatch_agents tool wiring', () => {
                 userPrompt: 'compact output',
                 tasks: [{
                     id: 'writer',
-                    agentType: 'utility',
+                    profileName: 'general-coder',
                     prompt: 'write something',
                 }],
             }, {
@@ -587,7 +587,7 @@ describe('dispatch_agents tool wiring', () => {
         expect(result.error).to.include('current mode limit of 4');
     });
 
-    it('separates general and Paradox writer roles at dispatch time', async () => {
+    it('separates general and Paradox writable profiles at dispatch time', async () => {
         const { AgentToolExecutor } = require('../../extension/ai/agentTools') as typeof import('../../extension/ai/agentTools');
         const executor = new AgentToolExecutor({
             onNotification: () => undefined,
@@ -595,14 +595,14 @@ describe('dispatch_agents tool wiring', () => {
         } as any, process.cwd());
 
         const result = await executor.execute('dispatch_agents', {
-            tasks: [{ id: 'wrong_writer', agentType: 'build', prompt: 'edit TypeScript' }],
+            tasks: [{ id: 'wrong_writer', profileName: 'paradox-coder', prompt: 'edit TypeScript' }],
         }, {
             runnerOptions: { schedulingState: GENERAL_PARALLEL, abortSignal: new AbortController().signal },
         } as any) as any;
 
         expect(result.success).to.equal(false);
-        expect(result.error).to.include("Agent type 'build' is not allowed by scheduler profile 'general-agent'");
-        expect(result.error).to.include('utility');
+        expect(result.error).to.include("Sub-agent profile 'paradox-coder' is not allowed by scheduler profile 'general-agent'");
+        expect(result.error).to.include('general-coder');
     });
 
     it('rejects localisation child work retained by the user', async () => {
@@ -619,7 +619,7 @@ describe('dispatch_agents tool wiring', () => {
             },
             tasks: [{
                 id: 'write_loc',
-                agentType: 'loc_writer',
+                profileName: 'localization-writer',
                 prompt: 'Write localisation.',
                 plannedFiles: ['localisation/english/demo_l_english.yml'],
             }],
@@ -757,7 +757,7 @@ describe('dispatch_agents tool wiring', () => {
         const result = await executor.execute('dispatch_agents', {
             tasks: [{
                 id: 'build_event',
-                agentType: 'build',
+                profileName: 'paradox-coder',
                 prompt: 'build event',
                 plannedFiles: ['events/test.txt'],
             }],
@@ -793,7 +793,7 @@ describe('approved blueprint dispatch', () => {
                 },
                 taskPlan: [{
                     id: 'build_event',
-                    agentType: 'build',
+                    profileName: 'paradox-coder',
                     prompt: 'Build the approved event.',
                     plannedFiles: ['events/approved.txt'],
                     produces: [{ kind: 'event', id: 'approved.1', operation: 'define' }],
@@ -899,7 +899,7 @@ describe('Orchestrator runtime safety', () => {
     it('executeGraph: reports missing dependencies instead of silently completing', async () => {
         const executor = new ParallelExecutor({ maxConcurrency: 1 });
         const graph = TaskGraphEngine.createGraph('missing dependency');
-        TaskGraphEngine.addNode(graph, 'A', 'build', 'build', { dependencies: ['missing_node'] });
+        TaskGraphEngine.addNode(graph, 'A', 'paradox-coder', 'build', { dependencies: ['missing_node'] });
 
         const result = await executor.executeGraph(
             graph,
@@ -918,7 +918,7 @@ describe('Orchestrator runtime safety', () => {
     it('executeGraph: never heals a misspelled dependency to the node itself', async () => {
         const executor = new ParallelExecutor({ maxConcurrency: 1 });
         const graph = TaskGraphEngine.createGraph('self dependency healing');
-        TaskGraphEngine.addNode(graph, 'build_ui', 'build', 'build', { dependencies: ['build_u1'] });
+        TaskGraphEngine.addNode(graph, 'build_ui', 'paradox-coder', 'build', { dependencies: ['build_u1'] });
 
         const result = await executor.executeGraph(graph, new Blackboard(), async () => {
             throw new Error('should not run');
@@ -932,9 +932,9 @@ describe('Orchestrator runtime safety', () => {
     it('executeGraph: rejects ambiguous dependency healing matches', async () => {
         const executor = new ParallelExecutor({ maxConcurrency: 1 });
         const graph = TaskGraphEngine.createGraph('ambiguous dependency healing');
-        TaskGraphEngine.addNode(graph, 'build_ui', 'build', 'build');
-        TaskGraphEngine.addNode(graph, 'build_ux', 'build', 'build');
-        TaskGraphEngine.addNode(graph, 'consumer', 'build', 'build', { dependencies: ['build_ua'] });
+        TaskGraphEngine.addNode(graph, 'build_ui', 'paradox-coder', 'build');
+        TaskGraphEngine.addNode(graph, 'build_ux', 'paradox-coder', 'build');
+        TaskGraphEngine.addNode(graph, 'consumer', 'paradox-coder', 'build', { dependencies: ['build_ua'] });
 
         const result = await executor.executeGraph(graph, new Blackboard(), async () => {
             throw new Error('should not run');
@@ -948,8 +948,8 @@ describe('Orchestrator runtime safety', () => {
     it('executeGraph: rechecks cycles introduced by dependency healing', async () => {
         const executor = new ParallelExecutor({ maxConcurrency: 1 });
         const graph = TaskGraphEngine.createGraph('healed dependency cycle');
-        TaskGraphEngine.addNode(graph, 'compile', 'build', 'build', { dependencies: ['consumr'] });
-        TaskGraphEngine.addNode(graph, 'consumer', 'build', 'build', { dependencies: ['compile'] });
+        TaskGraphEngine.addNode(graph, 'compile', 'paradox-coder', 'build', { dependencies: ['consumr'] });
+        TaskGraphEngine.addNode(graph, 'consumer', 'paradox-coder', 'build', { dependencies: ['compile'] });
 
         const result = await executor.executeGraph(graph, new Blackboard(), async () => {
             throw new Error('should not run');
@@ -963,7 +963,7 @@ describe('Orchestrator runtime safety', () => {
     it('executeGraph: does not retry timeout-like sub-agent failures', async () => {
         const executor = new ParallelExecutor({ maxConcurrency: 1 });
         const graph = TaskGraphEngine.createGraph('timeout');
-        TaskGraphEngine.addNode(graph, 'A', 'build', 'build', { maxRetries: 2 });
+        TaskGraphEngine.addNode(graph, 'A', 'paradox-coder', 'build', { maxRetries: 2 });
         let calls = 0;
 
         const result = await executor.executeGraph(
@@ -992,7 +992,7 @@ describe('Orchestrator runtime safety', () => {
     it('executeGraph: does not retry failures after preserving written files', async () => {
         const executor = new ParallelExecutor({ maxConcurrency: 1 });
         const graph = TaskGraphEngine.createGraph('preserved failure');
-        TaskGraphEngine.addNode(graph, 'A', 'build', 'build', { maxRetries: 2 });
+        TaskGraphEngine.addNode(graph, 'A', 'paradox-coder', 'build', { maxRetries: 2 });
         const steps: any[] = [];
         let calls = 0;
 
@@ -1025,8 +1025,8 @@ describe('Orchestrator runtime safety', () => {
     it('executeGraph: serializes ready nodes that declare the same planned file', async () => {
         const executor = new ParallelExecutor({ maxConcurrency: 2 });
         const graph = TaskGraphEngine.createGraph('file conflict');
-        TaskGraphEngine.addNode(graph, 'A', 'build', 'build A', { plannedFiles: ['events/shared.txt'] });
-        TaskGraphEngine.addNode(graph, 'B', 'build', 'build B', { plannedFiles: ['events/shared.txt'] });
+        TaskGraphEngine.addNode(graph, 'A', 'paradox-coder', 'build A', { plannedFiles: ['events/shared.txt'] });
+        TaskGraphEngine.addNode(graph, 'B', 'paradox-coder', 'build B', { plannedFiles: ['events/shared.txt'] });
         const order: string[] = [];
 
         const result = await executor.executeGraph(
@@ -1054,7 +1054,7 @@ describe('Orchestrator runtime safety', () => {
         const executor = new ParallelExecutor({ maxConcurrency: 2 });
         const graph = TaskGraphEngine.createGraph('handoff propagation');
         TaskGraphEngine.addNode(graph, 'A', 'explore', 'inspect source');
-        TaskGraphEngine.addNode(graph, 'B', 'build', 'implement result', { dependencies: ['A'] });
+        TaskGraphEngine.addNode(graph, 'B', 'paradox-coder', 'implement result', { dependencies: ['A'] });
         const blackboard = new Blackboard();
         let dependentPrompt = '';
 
@@ -1092,8 +1092,8 @@ describe('Orchestrator runtime safety', () => {
     it('executeGraph: keeps non-conflicting planned files in the same batch', async () => {
         const executor = new ParallelExecutor({ maxConcurrency: 2 });
         const graph = TaskGraphEngine.createGraph('no file conflict');
-        TaskGraphEngine.addNode(graph, 'A', 'build', 'build A', { plannedFiles: ['events/a.txt'] });
-        TaskGraphEngine.addNode(graph, 'B', 'build', 'build B', { plannedFiles: ['events/b.txt'] });
+        TaskGraphEngine.addNode(graph, 'A', 'paradox-coder', 'build A', { plannedFiles: ['events/a.txt'] });
+        TaskGraphEngine.addNode(graph, 'B', 'paradox-coder', 'build B', { plannedFiles: ['events/b.txt'] });
         let active = 0;
         let maxActive = 0;
 
@@ -1124,7 +1124,7 @@ describe('Orchestrator runtime safety', () => {
     it('executeGraph: preserves child cache and request-level usage in totals', async () => {
         const executor = new ParallelExecutor({ maxConcurrency: 1 });
         const graph = TaskGraphEngine.createGraph('usage aggregation');
-        TaskGraphEngine.addNode(graph, 'A', 'build', 'build A');
+        TaskGraphEngine.addNode(graph, 'A', 'paradox-coder', 'build A');
 
         const result = await executor.executeGraph(
             graph,
@@ -1183,8 +1183,8 @@ describe('Orchestrator runtime safety', () => {
     it('executeGraph: serializes ready nodes that declare the same planned entity', async () => {
         const executor = new ParallelExecutor({ maxConcurrency: 2 });
         const graph = TaskGraphEngine.createGraph('entity conflict');
-        TaskGraphEngine.addNode(graph, 'A', 'build', 'build A', { plannedEntities: ['event:foo.1'] });
-        TaskGraphEngine.addNode(graph, 'B', 'build', 'build B', { plannedEntities: ['event:foo.1'] });
+        TaskGraphEngine.addNode(graph, 'A', 'paradox-coder', 'build A', { plannedEntities: ['event:foo.1'] });
+        TaskGraphEngine.addNode(graph, 'B', 'paradox-coder', 'build B', { plannedEntities: ['event:foo.1'] });
         const order: string[] = [];
 
         const result = await executor.executeGraph(
@@ -1216,7 +1216,7 @@ describe('Orchestrator runtime safety', () => {
         const abortController = new AbortController();
         const node = {
             id: 'A',
-            agentType: 'explore',
+            profileName: 'explore',
             prompt: 'scan',
             dependencies: [],
             priority: 'normal',
@@ -1260,7 +1260,7 @@ describe('Orchestrator runtime safety', () => {
             const orchestrator = new Orchestrator(runner as any);
             const promise = (orchestrator as any).executeSubAgent(
                 {
-                    id: 'long-active', agentType: 'explore', prompt: 'scan', dependencies: [],
+                    id: 'long-active', profileName: 'explore', prompt: 'scan', dependencies: [],
                     priority: 'normal', status: 'pending', retryCount: 0, maxRetries: 0,
                 },
                 new Blackboard(),
@@ -1312,7 +1312,7 @@ describe('Orchestrator runtime safety', () => {
             const orchestrator = new Orchestrator(runner as any);
             const promise = (orchestrator as any).executeSubAgent(
                 {
-                    id: 'stalled', agentType: 'explore', prompt: 'scan', dependencies: [],
+                    id: 'stalled', profileName: 'explore', prompt: 'scan', dependencies: [],
                     priority: 'normal', status: 'pending', retryCount: 0, maxRetries: 0,
                 },
                 new Blackboard(),
@@ -1369,7 +1369,7 @@ describe('Orchestrator runtime safety', () => {
         const orchestrator = new Orchestrator(runner as any);
         const node = {
             id: 'writer',
-            agentType: 'build',
+            profileName: 'paradox-coder',
             prompt: 'edit target',
             dependencies: [],
             priority: 'normal',
@@ -1449,7 +1449,7 @@ describe('Orchestrator runtime safety', () => {
         const orchestrator = new Orchestrator(runner as any);
         const node = {
             id: 'writer_pending',
-            agentType: 'build',
+            profileName: 'paradox-coder',
             prompt: 'write target',
             dependencies: [],
             priority: 'normal',
@@ -1528,7 +1528,7 @@ describe('Orchestrator runtime safety', () => {
         const orchestrator = new Orchestrator(runner as any);
         const node = {
             id: 'writer_failed',
-            agentType: 'build',
+            profileName: 'paradox-coder',
             prompt: 'write target',
             dependencies: [],
             priority: 'normal',
@@ -1581,7 +1581,7 @@ describe('Orchestrator runtime safety', () => {
         const orchestrator = new Orchestrator(runner as any);
         const node = {
             id: 'utility_writer',
-            agentType: 'utility',
+            profileName: 'general-coder',
             prompt: 'update code and run focused tests',
             plannedFiles: ['client/example.ts'],
             dependencies: [],
@@ -1630,7 +1630,7 @@ describe('Orchestrator runtime safety', () => {
         const orchestrator = new Orchestrator(runner as any);
         const node = {
             id: 'loc_writer',
-            agentType: 'loc_writer',
+            profileName: 'localization-writer',
             prompt: 'update localisation keys',
             plannedFiles: ['localisation/english/demo_l_english.yml'],
             dependencies: [],
@@ -1674,7 +1674,7 @@ describe('Orchestrator runtime safety', () => {
         };
         const orchestrator = new Orchestrator(runner as any);
         const node = {
-            id: 'reader', agentType: 'plan', prompt: 'Inspect dependencies.', dependencies: [],
+            id: 'reader', profileName: 'planner', prompt: 'Inspect dependencies.', dependencies: [],
             priority: 'normal', status: 'pending', retryCount: 0, maxRetries: 0,
         };
 
@@ -1800,7 +1800,7 @@ describe('Orchestrator quality propagation', () => {
         const { TaskGraphEngine } = require('../../extension/ai/orchestrator/taskGraphEngine') as typeof import('../../extension/ai/orchestrator/taskGraphEngine');
         const { orchestrator, counts } = makeOrchestrator(3, 2);
         const graph = TaskGraphEngine.createGraph('quality re-review');
-        const builder = TaskGraphEngine.addNode(graph, 'builder', 'build', 'build', { plannedFiles: ['events/test.txt'] });
+        const builder = TaskGraphEngine.addNode(graph, 'builder', 'paradox-coder', 'build', { plannedFiles: ['events/test.txt'] });
         builder.status = 'done';
 
         const result = await orchestrator.execute(graph, {
@@ -1823,7 +1823,7 @@ describe('Orchestrator quality propagation', () => {
             return result;
         };
         const graph = TaskGraphEngine.createGraph('pending child reconciliation');
-        const builder = TaskGraphEngine.addNode(graph, 'builder', 'build', 'build', { plannedFiles: ['events/test.txt'] });
+        const builder = TaskGraphEngine.addNode(graph, 'builder', 'paradox-coder', 'build', { plannedFiles: ['events/test.txt'] });
         builder.status = 'done';
         const steps: any[] = [];
 
@@ -1844,7 +1844,7 @@ describe('Orchestrator quality propagation', () => {
         const { Orchestrator } = require('../../extension/ai/orchestrator/orchestrator') as typeof import('../../extension/ai/orchestrator/orchestrator');
         const { TaskGraphEngine } = require('../../extension/ai/orchestrator/taskGraphEngine') as typeof import('../../extension/ai/orchestrator/taskGraphEngine');
         const graph = TaskGraphEngine.createGraph('preserved repair');
-        const utility = TaskGraphEngine.addNode(graph, 'utility', 'utility', 'edit package', { plannedFiles: ['package.json'] });
+        const utility = TaskGraphEngine.addNode(graph, 'utility', 'general-coder', 'edit package', { plannedFiles: ['package.json'] });
         const orchestrator = new Orchestrator({ toolExecutor: { workspaceRoot: process.cwd() } } as any);
         (orchestrator as any).executor.executeGraph = async () => {
             utility.status = 'failed';
@@ -1878,7 +1878,7 @@ describe('Orchestrator quality propagation', () => {
         };
         (orchestrator as any).executeSubAgent = async (node: any) => {
             fixCalls++;
-            expect(node.agentType).to.equal('utility');
+            expect(node.profileName).to.equal('general-coder');
             expect(node.plannedFiles).to.equal(undefined);
             return {
                 nodeId: node.id,
@@ -1918,7 +1918,7 @@ describe('Orchestrator quality propagation', () => {
             localisationOwnership: 'user',
             warningHandling: 'ignore',
         };
-        const builder = TaskGraphEngine.addNode(graph, 'builder', 'build', 'build', { plannedFiles: ['events/test.txt'] });
+        const builder = TaskGraphEngine.addNode(graph, 'builder', 'paradox-coder', 'build', { plannedFiles: ['events/test.txt'] });
         builder.status = 'done';
 
         const result = await orchestrator.execute(graph, {
@@ -1934,7 +1934,7 @@ describe('Orchestrator quality propagation', () => {
         const { TaskGraphEngine } = require('../../extension/ai/orchestrator/taskGraphEngine') as typeof import('../../extension/ai/orchestrator/taskGraphEngine');
         const { orchestrator, executedNodes } = makeOrchestrator(3, 1);
         const graph = TaskGraphEngine.createGraph('实现完整事件功能');
-        const builder = TaskGraphEngine.addNode(graph, 'builder', 'build', 'build', { plannedFiles: ['events/test.txt'] });
+        const builder = TaskGraphEngine.addNode(graph, 'builder', 'paradox-coder', 'build', { plannedFiles: ['events/test.txt'] });
         builder.status = 'done';
 
         const result = await orchestrator.execute(graph, {
@@ -1954,7 +1954,7 @@ describe('Orchestrator quality propagation', () => {
             localisationOwnership: 'agent',
             warningHandling: 'ignore',
         };
-        const builder = TaskGraphEngine.addNode(graph, 'builder', 'build', 'build', { plannedFiles: ['events/test.txt'] });
+        const builder = TaskGraphEngine.addNode(graph, 'builder', 'paradox-coder', 'build', { plannedFiles: ['events/test.txt'] });
         builder.status = 'done';
 
         const result = await orchestrator.execute(graph, {
@@ -1986,7 +1986,7 @@ describe('Orchestrator quality propagation', () => {
             clarification: 'expand the repair scope',
         });
         const graph = TaskGraphEngine.createGraph('quality clarification');
-        const builder = TaskGraphEngine.addNode(graph, 'builder', 'build', 'build', { plannedFiles: ['events/test.txt'] });
+        const builder = TaskGraphEngine.addNode(graph, 'builder', 'paradox-coder', 'build', { plannedFiles: ['events/test.txt'] });
         builder.status = 'done';
 
         const result = await orchestrator.execute(graph, {
@@ -2004,7 +2004,7 @@ describe('Orchestrator quality propagation', () => {
         const { TaskGraphEngine } = require('../../extension/ai/orchestrator/taskGraphEngine') as typeof import('../../extension/ai/orchestrator/taskGraphEngine');
         const { orchestrator, counts } = makeOrchestrator(2, Number.POSITIVE_INFINITY);
         const graph = TaskGraphEngine.createGraph('quality failure');
-        const builder = TaskGraphEngine.addNode(graph, 'builder', 'build', 'build', { plannedFiles: ['events/test.txt'] });
+        const builder = TaskGraphEngine.addNode(graph, 'builder', 'paradox-coder', 'build', { plannedFiles: ['events/test.txt'] });
         builder.status = 'done';
 
         const result = await orchestrator.execute(graph, {
@@ -2026,7 +2026,7 @@ describe('Orchestrator quality propagation', () => {
             operationalFailure: true,
         });
         const graph = TaskGraphEngine.createGraph('quality reviewer failure');
-        const builder = TaskGraphEngine.addNode(graph, 'builder', 'build', 'build', { plannedFiles: ['events/test.txt'] });
+        const builder = TaskGraphEngine.addNode(graph, 'builder', 'paradox-coder', 'build', { plannedFiles: ['events/test.txt'] });
         builder.status = 'done';
 
         const result = await orchestrator.execute(graph, {
@@ -2055,7 +2055,7 @@ describe('Orchestrator quality propagation', () => {
         });
         const repairRoles: string[] = [];
         (orchestrator as any).executeSubAgent = async (node: any) => {
-            repairRoles.push(node.agentType);
+            repairRoles.push(node.profileName);
             return {
                 nodeId: node.id, success: true, output: '', writtenFiles: [],
                 tokenUsage: { total: 0, input: 0, output: 0, estimatedCostCny: 0 }, stepCount: 1,
@@ -2066,7 +2066,7 @@ describe('Orchestrator quality propagation', () => {
         (orchestrator as any).qualityGate.getConfig = () => ({ autoFix: true, maxFixCycles: 1 });
         (orchestrator as any).qualityGate.buildFixPrompt = () => 'fix general code';
         const graph = TaskGraphEngine.createGraph('general code');
-        const utility = TaskGraphEngine.addNode(graph, 'utility', 'utility', 'edit package', { plannedFiles: ['package.json'] });
+        const utility = TaskGraphEngine.addNode(graph, 'utility', 'general-coder', 'edit package', { plannedFiles: ['package.json'] });
         utility.status = 'done';
 
         const result = await orchestrator.execute(graph, {
@@ -2075,7 +2075,7 @@ describe('Orchestrator quality propagation', () => {
         });
 
         expect(result.success).to.equal(true);
-        expect(repairRoles).to.deep.equal(['utility']);
+        expect(repairRoles).to.deep.equal(['general-coder']);
     });
 
     it('does not launch a code repair agent when only final validation is pending', async () => {
@@ -2088,7 +2088,7 @@ describe('Orchestrator quality propagation', () => {
             reviewReport: 'diagnostics pending',
         });
         const graph = TaskGraphEngine.createGraph('quality pending');
-        const builder = TaskGraphEngine.addNode(graph, 'builder', 'build', 'build', { plannedFiles: ['events/test.txt'] });
+        const builder = TaskGraphEngine.addNode(graph, 'builder', 'paradox-coder', 'build', { plannedFiles: ['events/test.txt'] });
         builder.status = 'done';
 
         const result = await orchestrator.execute(graph, {
@@ -2114,17 +2114,9 @@ describe('QualityGate', () => {
         PDX_DIAGNOSTIC_EXTENSIONS = qualityGate.PDX_DIAGNOSTIC_EXTENSIONS;
     });
 
-    it('buildReviewPrompt: 生成包含文件列表的审查提示', () => {
+    it('buildCombinedReviewPrompt: 生成包含文件列表的审查提示', () => {
         const qg = new QualityGate();
-        const mockResult = {
-            nodeId: 'mock_node',
-            success: true,
-            output: 'built everything',
-            tokenUsage: { input: 100, output: 50, total: 150, estimatedCostCny: 0.01 },
-            writtenFiles: ['events/test.txt', 'common/tech.txt'],
-            stepCount: 5,
-        };
-        const prompt = qg.buildReviewPrompt(mockResult);
+        const prompt = qg.buildCombinedReviewPrompt(['events/test.txt', 'common/tech.txt']);
         expect(prompt).to.include('events/test.txt');
         expect(prompt).to.include('common/tech.txt');
     });
@@ -2479,48 +2471,18 @@ describe('QualityGate', () => {
     });
 });
 
-// ── AgentRegistry ─────────────────────────────────────────────────────────────
+describe('AgentProfileCatalog orchestration contract', () => {
+    const { agentProfileCatalog } = require('../../extension/ai/runner/agentProfileCatalog') as typeof import('../../extension/ai/runner/agentProfileCatalog');
 
-describe('AgentRegistry', () => {
-    let AGENT_REGISTRY: typeof import('../../extension/ai/orchestrator/agentRegistry').AGENT_REGISTRY;
-    let getAgentProfile: typeof import('../../extension/ai/orchestrator/agentRegistry').getAgentProfile;
-    let getAvailableRoles: typeof import('../../extension/ai/orchestrator/agentRegistry').getAvailableRoles;
-
-    before(() => {
-        const registry = require('../../extension/ai/orchestrator/agentRegistry');
-        AGENT_REGISTRY = registry.AGENT_REGISTRY;
-        getAgentProfile = registry.getAgentProfile;
-        getAvailableRoles = registry.getAvailableRoles;
+    it('uses registered runtime profiles directly for child dispatch', () => {
+        expect(agentProfileCatalog.getRequired('paradox-coder').authorizationCeiling).to.equal('workspace_write');
+        expect(agentProfileCatalog.getRequired('planner').authorizationCeiling).to.equal('plan_write_only');
+        expect(agentProfileCatalog.getRequired('paradox-agent').subagents).to.include.members([
+            'paradox-coder', 'explore', 'planner', 'reviewer', 'localization-writer', 'gui-expert',
+        ]);
     });
 
-    it('AGENT_REGISTRY: 包含所有预定义角色', () => {
-        const roles = Object.keys(AGENT_REGISTRY);
-        expect(roles).to.include.members(['explorer', 'architect', 'builder', 'locWriter', 'reviewer']);
-    });
-
-    it('getAgentProfile: 返回已注册角色', () => {
-        const profile = getAgentProfile('explorer');
-        expect(profile).to.exist;
-        expect(profile.mode).to.equal('explore');
-    });
-
-    it('getAgentProfile: 未注册角色返回 builder 默认', () => {
-        const profile = getAgentProfile('unknown_role');
-        expect(profile).to.exist;
-        expect(profile.mode).to.equal('build'); //default builder
-    });
-
-    it('每个角色都有 toolBudget 和 maxIterations', () => {
-        for (const [, profile] of Object.entries(AGENT_REGISTRY)) {
-            expect(profile.toolBudget).to.be.a('string');
-            expect(profile.maxIterations).to.be.a('number').and.greaterThan(0);
-        }
-    });
-
-    it('getAvailableRoles: 返回所有角色名称', () => {
-        const roles = getAvailableRoles();
-        expect(roles).to.be.an('array');
-        expect(roles.length).to.be.greaterThan(4);
-        expect(roles).to.include('builder');
+    it('rejects unknown profiles instead of falling back to a writer', () => {
+        expect(() => agentProfileCatalog.getRequired('unknown_role')).to.throw('is not registered');
     });
 });

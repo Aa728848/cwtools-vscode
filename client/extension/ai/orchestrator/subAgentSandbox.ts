@@ -1,7 +1,6 @@
 import * as path from 'path';
-import { getAgentProfile } from './agentRegistry';
+import { agentProfileCatalog } from '../runner/agentProfileCatalog';
 import type { TaskNode } from './types';
-import type { AgentMode } from '../types';
 import { isPlanModeCardArtifactFile } from '../planModeGuard';
 import { getAgentToolTargetFiles } from '../runner/toolScheduler';
 import { FILE_SCOPED_WRITE_TOOLS, MUTATING_TOOLS, TOOL_REGISTRY } from '../tools/registry';
@@ -14,8 +13,7 @@ import { aiText } from '../messages';
  */
 export interface SubAgentSandbox {
     agentId: string;
-    role: string;
-    runtimeProfileName: string;
+    profileName: string;
     allowedTools?: Set<string>;
     readScope?: string[];
     writeScope?: string[];
@@ -30,17 +28,6 @@ export interface SubAgentSandbox {
 
 const TOPIC_ARTIFACT_SCOPE = '.cwtools';
 
-function runtimeProfileNameForMode(mode: AgentMode): string {
-    return mode === 'utility' ? 'general-coder'
-        : mode === 'review' || mode === 'script_reviewer' ? 'reviewer'
-            : mode === 'plan' ? 'planner'
-                : mode === 'explore' ? 'explore'
-                : mode === 'loc_writer' ? 'localization-writer'
-                    : mode === 'loc_translator' ? 'localization-translator'
-                        : mode === 'gui_expert' ? 'gui-expert'
-                            : 'paradox-coder';
-}
-
 /**
  * 根据 TaskNode 任务节点与项目环境动态构造子 Agent 隔离沙盒
  */
@@ -50,34 +37,26 @@ export function buildSubAgentSandbox(
     parentWritableRoots?: string[],
     deniedWriteScopes?: string[],
 ): SubAgentSandbox {
-    const profile = getAgentProfile(taskNode.agentType);
-    const role = taskNode.agentType;
-    const runtimeProfileName = runtimeProfileNameForMode(profile.mode);
+    const profile = agentProfileCatalog.getRequired(taskNode.profileName);
 
     const sandbox: SubAgentSandbox = {
         agentId: taskNode.id,
-        role,
-        runtimeProfileName,
+        profileName: profile.name,
         permissionPolicy: 'delegate_to_parent',
         deniedWriteScopes: deniedWriteScopes?.length ? [...deniedWriteScopes] : undefined,
     };
 
     // ─── 1. 计算写入作用域 (Write Scope) ───
-    // 如果是只读性质的角色，其 writeScope 直接设为空数组（绝对禁止任何写物理文件操作）
-    if (profile.toolBudget === 'read_only' || profile.toolBudget === 'plan') {
+    // 只读 Profile 的 writeScope 为空，物理文件写入一律禁止。
+    if (profile.authorizationCeiling !== 'workspace_write') {
         sandbox.writeScope = [];
     } else {
         const scopes: string[] = [];
-        const roleStr: string = role;
-        const modeStr: string = profile.mode;
-
-        // 2.1 融合 locWriter / locTranslator 的本地化写约束
-        if (roleStr === 'locWriter' || roleStr === 'locTranslator' || modeStr === 'loc_writer' || modeStr === 'loc_translator') {
+        if (profile.name === 'localization-writer' || profile.name === 'localization-translator') {
             scopes.push('localisation'); // 仅允许包含 localisation 的目录写入
         }
 
-        // 2.2 融合 guiExpert 的界面文件写入约束
-        if (roleStr === 'guiExpert' || modeStr === 'gui_expert') {
+        if (profile.name === 'gui-expert') {
             scopes.push('.gui'); // 仅允许以 .gui 结尾或在 gui 目录下的路径写入
         }
 
@@ -149,7 +128,7 @@ export function enforceSubAgentSafety(
     workspaceRoot: string
 ): { allowed: boolean; reason?: string } {
     const registryEntry = TOOL_REGISTRY.get(toolName as import('../tools/registry').AgentToolName);
-    const profileException = toolName === 'run_command' && sandbox.runtimeProfileName === 'general-coder';
+    const profileException = toolName === 'run_command' && sandbox.profileName === 'general-coder';
     if (registryEntry && !registryEntry.allowSubAgent && !profileException) {
         if (toolName === 'run_command') {
             return {
@@ -170,8 +149,8 @@ export function enforceSubAgentSafety(
         return {
             allowed: false,
             reason: aiText(
-                `Subtask role '${sandbox.role}' (${sandbox.runtimeProfileName}) is read-only and cannot call mutating tool '${toolName}'.`,
-                `子任务角色 '${sandbox.role}' (${sandbox.runtimeProfileName}) 属于只读角色，禁止调用会修改状态的工具 '${toolName}'`,
+                `Subtask profile '${sandbox.profileName}' is read-only and cannot call mutating tool '${toolName}'.`,
+                `子任务 Profile '${sandbox.profileName}' 为只读，禁止调用会修改状态的工具 '${toolName}'`,
             ),
         };
     }
@@ -200,14 +179,14 @@ export function enforceSubAgentSafety(
                 };
             }
         }
-        const isPlanCardArtifactWrite = sandbox.runtimeProfileName === 'planner'
+        const isPlanCardArtifactWrite = sandbox.profileName === 'planner'
             && targetFiles.length > 0
             && targetFiles.every(target => isPlanModeCardArtifactFile(target, workspaceRoot));
 
-        if (toolName === 'write_design_blueprint' && sandbox.runtimeProfileName === 'planner') {
+        if (toolName === 'write_design_blueprint' && sandbox.profileName === 'planner') {
             return { allowed: true };
         }
-        // 如果子 Agent 本身就是只读角色（如 explorer, reviewer），直接断开拦截
+        // 如果子 Agent Profile 本身只读（如 explore、reviewer），直接拦截写入。
         if (sandbox.writeScope && sandbox.writeScope.length === 0) {
             if (isPlanCardArtifactWrite) {
                 return { allowed: true };
@@ -215,8 +194,8 @@ export function enforceSubAgentSafety(
             return {
                 allowed: false,
                 reason: aiText(
-                    `Subtask role '${sandbox.role}' (${sandbox.runtimeProfileName}) is read-only and cannot call file-writing tool '${toolName}'.`,
-                    `子任务角色 '${sandbox.role}' (${sandbox.runtimeProfileName}) 属于只读角色，禁止调用物理写入工具 '${toolName}'`,
+                    `Subtask profile '${sandbox.profileName}' is read-only and cannot call file-writing tool '${toolName}'.`,
+                    `子任务 Profile '${sandbox.profileName}' 为只读，禁止调用物理写入工具 '${toolName}'`,
                 ),
             };
         }

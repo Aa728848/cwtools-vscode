@@ -1,7 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import type { AgentRunRecord } from '../types';
-import { getPrivateTopicStorageDir, getPrivateTopicStorageDirCandidates } from '../workspacePaths';
+import { getPrivateTopicStorageDir } from '../workspacePaths';
 import { atomicWriteJson, readJsonWithBackup } from './durableStorage';
 import { getHistoryPolicy } from './historyPolicy';
 
@@ -92,12 +92,12 @@ export class ThreadStore {
         const key = this.cacheKey(topicId, threadId);
         const cached = this.cache.get(key);
         if (cached) return cached;
-        for (const dir of getPrivateTopicStorageDirCandidates(topicId)) {
-            const loaded = readJsonWithBackup<AgentThreadRecord>(this.threadPathFromTopicDir(dir, threadId), isThreadRecord);
-            if (loaded) {
-                this.cache.set(key, loaded.value);
-                return loaded.value;
-            }
+        const dir = getPrivateTopicStorageDir(topicId);
+        if (!dir) return undefined;
+        const loaded = readJsonWithBackup<AgentThreadRecord>(this.threadPathFromTopicDir(dir, threadId), isThreadRecord);
+        if (loaded) {
+            this.cache.set(key, loaded.value);
+            return loaded.value;
         }
         return undefined;
     }

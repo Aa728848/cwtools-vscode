@@ -106,5 +106,5 @@ export function hasImageContent(messages: readonly ChatMessage[]): boolean {
         && message.content.some(part => part.type === 'image_url'));
 }
 
-// Backward-compat alias for non-text token estimation (images etc.)
-export const CHARS_PER_TOKEN = 4;
+/** Approximate provider token density for Base64-encoded binary payloads. */
+export const BASE64_CHARS_PER_TOKEN_ESTIMATE = 4;

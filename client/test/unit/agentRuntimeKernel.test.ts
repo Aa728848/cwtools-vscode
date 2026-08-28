@@ -346,7 +346,6 @@ describe('runtime recovery helpers', () => {
                 wallClockMs: 0,
                 budgetGracePending: false,
                 budgetGraceUsed: false,
-                tokenBudget: 1000,
                 createdAt: 1,
                 updatedAt: 2,
             },

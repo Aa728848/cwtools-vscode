@@ -84,11 +84,6 @@ export function executionModeForSchedulingState(state: AgentSchedulingState): Ag
     return state.domainProfile === 'paradox' ? 'build' : 'utility';
 }
 
-/** Domain implied by an internal prompt/tool execution label. */
-export function domainForExecutionMode(mode: AgentMode): AgentRuntimeDomain {
-    return mode === 'utility' || mode === 'orchestrator' ? 'general' : 'paradox';
-}
-
 export function normalizeSchedulingState(
     value: unknown,
 ): AgentSchedulingState {
@@ -96,10 +91,30 @@ export function normalizeSchedulingState(
         throw new Error('Agent scheduling state is required.');
     }
     const candidate = value as Partial<AgentSchedulingState>;
+    const revision = candidate.revision;
     if ((candidate.domainProfile !== 'general' && candidate.domainProfile !== 'paradox' && candidate.domainProfile !== 'hybrid')
         || !AUTHORIZATIONS.has(candidate.authorization as AgentAuthorization)
         || !PHASES.has(candidate.phase as AgentRunPhase)
-        || !DISPATCH_MODES.has(candidate.dispatch as AgentDispatchMode)) {
+        || !DISPATCH_MODES.has(candidate.dispatch as AgentDispatchMode)
+        || typeof candidate.profileName !== 'string'
+        || !candidate.profileName.trim()
+        || !Array.isArray(candidate.overlays)
+        || !candidate.overlays.every(item => typeof item === 'string')
+        || typeof candidate.routeConfidence !== 'number'
+        || !Number.isFinite(candidate.routeConfidence)
+        || !Array.isArray(candidate.routeEvidence)
+        || !candidate.routeEvidence.every(item => typeof item === 'string')
+        || typeof candidate.phaseReason !== 'string'
+        || typeof revision !== 'number'
+        || !Number.isSafeInteger(revision)
+        || revision < 0
+        || (candidate.awaitingUserDecision !== undefined && typeof candidate.awaitingUserDecision !== 'boolean')
+        || (candidate.routingSource !== undefined
+            && candidate.routingSource !== 'model'
+            && candidate.routingSource !== 'deterministic'
+            && candidate.routingSource !== 'workflow'
+            && candidate.routingSource !== 'user')
+        || (candidate.dispatchReason !== undefined && typeof candidate.dispatchReason !== 'string')) {
         throw new Error('Agent scheduling state is invalid.');
     }
     const domainProfile = candidate.domainProfile as AgentRuntimeDomain;
@@ -107,26 +122,15 @@ export function normalizeSchedulingState(
     const phase = candidate.phase as AgentRunPhase;
     const dispatch = candidate.dispatch as AgentDispatchMode;
     return {
-        profileName: typeof candidate.profileName === 'string' && candidate.profileName.trim()
-            ? candidate.profileName.trim().slice(0, 100)
-            : profileNameForAdmission({
-                domainProfile,
-                authorization,
-                initialPhase: phase === 'finalize' ? 'verify' : phase,
-                explicitDelegation: dispatch !== 'single',
-                confidence: candidate.routeConfidence ?? 0,
-                evidence: candidate.routeEvidence ?? [],
-            }),
+        profileName: candidate.profileName.trim().slice(0, 100),
         domainProfile,
         authorization,
         phase,
         dispatch,
-        overlays: Array.isArray(candidate.overlays)
-            ? [...new Set(candidate.overlays.filter((value): value is string => typeof value === 'string' && !!value.trim())
-                .map(value => value.trim().slice(0, 80)))].slice(0, 12)
-            : schedulingOverlays(candidate.phase as AgentRunPhase, candidate.dispatch as AgentDispatchMode),
+        overlays: [...new Set(candidate.overlays.filter(value => !!value.trim())
+            .map(value => value.trim().slice(0, 80)))].slice(0, 12),
         routeConfidence: clampConfidence(candidate.routeConfidence),
-        routeEvidence: uniqueEvidence(candidate.routeEvidence ?? []),
+        routeEvidence: uniqueEvidence(candidate.routeEvidence),
         awaitingUserDecision: candidate.awaitingUserDecision === true ? true : undefined,
         routingSource: candidate.routingSource === 'model'
             || candidate.routingSource === 'deterministic'
@@ -134,9 +138,9 @@ export function normalizeSchedulingState(
             || candidate.routingSource === 'user'
             ? candidate.routingSource
             : undefined,
-        phaseReason: typeof candidate.phaseReason === 'string' ? candidate.phaseReason.slice(0, 500) : 'restored state',
-        dispatchReason: typeof candidate.dispatchReason === 'string' ? candidate.dispatchReason.slice(0, 500) : undefined,
-        revision: Number.isSafeInteger(candidate.revision) && (candidate.revision ?? -1) >= 0 ? candidate.revision! : 0,
+        phaseReason: candidate.phaseReason.slice(0, 500),
+        dispatchReason: candidate.dispatchReason?.slice(0, 500),
+        revision,
     };
 }
 
@@ -177,7 +181,7 @@ export interface DispatchCandidate {
     dependencies?: readonly string[];
     expectedWrites?: readonly string[];
     acceptanceCriteria?: readonly string[];
-    role?: string;
+    profileName?: string;
 }
 
 export interface DispatchAdmissionResult {
@@ -291,7 +295,7 @@ export function evaluateDispatchAdmission(
     }
 
     const independent = tasks.filter(task => (task.dependencies?.length ?? 0) === 0).length;
-    const specialistRoles = new Set(tasks.map(task => task.role).filter(Boolean)).size;
+    const specialistProfiles = new Set(tasks.map(task => task.profileName).filter(Boolean)).size;
     const testable = tasks.filter(task => (task.acceptanceCriteria?.length ?? 0) > 0).length;
     const budgetPenalty = options.availableTokenBudget !== undefined
         && options.availableTokenBudget > 0
@@ -300,7 +304,7 @@ export function evaluateDispatchAdmission(
         : 0;
     const hasDependencyIsolation = tasks.some(task => (task.dependencies?.length ?? 0) > 0);
     const score = independent * 2
-        + Math.min(3, specialistRoles)
+        + Math.min(3, specialistProfiles)
         + testable
         + (hasDependencyIsolation ? 2 : 0)
         + (options.explicitDelegation ? 6 : 0)

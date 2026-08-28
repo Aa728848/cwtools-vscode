@@ -11,7 +11,6 @@ import type { WebViewMessage } from '../types';
 import type { AIChatPanelProvider } from '../chatPanel';
 import { ErrorReporter } from '../errorReporter';
 import { SOURCE, aiText } from '../messages';
-import { isAgentMode, isAgentProfileSelection } from '../agentProfile';
 
 export async function routeWebviewMessage(
     provider: AIChatPanelProvider,
@@ -23,7 +22,6 @@ export async function routeWebviewMessage(
             await provider.handleComposerSubmission(msg.text, {
                 images: msg.images,
                 attachedFiles: msg.attachedFiles,
-                agentProfile: isAgentProfileSelection(msg.agentProfile) ? msg.agentProfile : undefined,
             });
             break;
         case 'steerGeneration':
@@ -33,7 +31,6 @@ export async function routeWebviewMessage(
             await provider.handleComposerSubmission(msg.text, {
                 images: msg.images,
                 contexts: msg.contexts,
-                agentProfile: isAgentProfileSelection(msg.agentProfile) ? msg.agentProfile : undefined,
             });
             break;
         }
@@ -124,13 +121,8 @@ export async function routeWebviewMessage(
         case 'cancelGeneration':
             provider.cancelGeneration();
             break;
-        case 'switchMode':
-            if (isAgentMode(msg.mode)) provider.switchMode(msg.mode);
-            else ErrorReporter.warn(SOURCE.CHAT_PANEL, 'Rejected invalid Agent mode from Webview.');
-            break;
-        case 'switchAgentProfile':
-            if (isAgentProfileSelection(msg.profile)) provider.switchAgentProfile(msg.profile);
-            else ErrorReporter.warn(SOURCE.CHAT_PANEL, 'Rejected invalid Agent profile from Webview.');
+        case 'switchSchedulingDomain':
+            provider.switchSchedulingDomain(msg.domain);
             break;
         case 'switchWorkflow':
             provider.switchWorkflow(msg.workflowId);
@@ -201,9 +193,6 @@ export async function routeWebviewMessage(
                 contextStr = `\n\n${aiText('User annotations:', '用户批注:')}\n` + msg.annotations.map((a: { section: string; note: string }) => `- ${a.section}: ${a.note}`).join('\n');
             }
 
-            const executionMode = provider.getApprovedPlanExecutionMode();
-            provider.switchWorkflow(null);
-            provider.switchMode(executionMode, false, false);
             provider.beginApprovedPlanExecution();
             const approvedArtifacts = provider.getApprovedPlanArtifactContext();
             const prompt = aiText(
@@ -246,9 +235,7 @@ export async function routeWebviewMessage(
         case 'approveWalkthrough':
             provider.markLatestInteractiveCardApproved(['walkthrough_card']);
             provider.postMessage({ type: 'floatingCardResolved', card: 'walkthrough' });
-            if (provider.session.previousMode && provider.session.previousMode !== provider.session.currentMode) {
-                provider.switchMode(provider.session.previousMode);
-            }
+            provider.restorePreviousSchedulingState();
             break;
         case 'searchTopics':
             provider.topicManager.handleSearchTopics(msg.query);

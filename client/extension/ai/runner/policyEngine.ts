@@ -91,8 +91,6 @@ const WRITE_LIKE = new Set<PolicySubject>(['edit', 'bash', 'git', 'media', 'mcp'
 
 export const DEFAULT_PROTECTED_PATHS = [
     '.git/**', '.agents/**', '.codex/**',
-    '.cwtools-ai/*/runs/**', '.cwtools-ai/*/threads/**', '.cwtools-ai/*/goals/**',
-    '.cwtools-ai/*/blackboard/**', '.cwtools-ai/*/resume_state.json*',
     '.cwtools/*/runs/**', '.cwtools/*/threads/**', '.cwtools/*/goals/**',
     '.cwtools/*/blackboard/**', '.cwtools/*/resume_state.json*',
     '.env', '.env.*',
@@ -285,7 +283,7 @@ export function newRuleId(prefix = 'rule'): string {
     return `${prefix}_${Date.now()}_${++ruleSeq}`;
 }
 
-const READABLE_BUT_WRITE_PROTECTED_PREFIXES = ['.git/', '.agents/', '.codex/', '.cwtools-ai/', '.cwtools/'];
+const READABLE_BUT_WRITE_PROTECTED_PREFIXES = ['.git/', '.agents/', '.codex/', '.cwtools/'];
 
 /** Protected agent/Git stores remain readable; secret-like paths deny reads too. */
 export function buildProtectedPathRules(protectedPaths: string[]): PolicyRule[] {

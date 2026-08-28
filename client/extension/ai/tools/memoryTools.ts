@@ -9,7 +9,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { getPrivateTopicStorageDir } from '../workspacePaths';
 import { aiText } from '../messages';
-import { defaultDomainForMode } from '../agentProfile';
+import { normalizeSchedulingState } from '../runner/scheduling';
 import type { BlackboardEntry, BlackboardEntryType } from '../orchestrator/types';
 
 const MAX_BLACKBOARD_PAYLOAD_BYTES = 2 * 1024 * 1024;
@@ -30,12 +30,10 @@ function isBlackboardEntryType(value: string): value is BlackboardEntryType {
 export interface MemoryToolContext {
     readonly workspaceRoot: string;
     readonly blackboard: import('../orchestrator/blackboard').Blackboard;
-    readonly parentRunnerOptions?: any;
 }
 
 export function blackboardDomainPrefix(context?: import('../types').AgentToolContext): string {
-    const mode = context?.runnerOptions?.mode ?? 'build';
-    const domain = context?.runnerOptions?.domain ?? defaultDomainForMode(mode);
+    const domain = normalizeSchedulingState(context?.runnerOptions?.schedulingState).domainProfile;
     const topicId = encodeURIComponent(context?.runnerOptions?.topicId ?? 'session');
     return `domain:${domain}:topic:${topicId}:`;
 }
@@ -46,7 +44,7 @@ export class MemoryToolHandler {
     constructor(private ctx: MemoryToolContext) {}
 
     private getBlackboardDirectory(context?: import('../types').AgentToolContext): string {
-        const topicId = context?.runnerOptions?.topicId ?? this.ctx.parentRunnerOptions?.topicId ?? 'session';
+        const topicId = context?.runnerOptions?.topicId ?? 'session';
         return path.resolve(getPrivateTopicStorageDir(topicId, this.ctx.workspaceRoot), 'blackboard');
     }
 
@@ -109,10 +107,9 @@ export class MemoryToolHandler {
             return { success: false, message: 'Missing key or content' };
         } else {
             const { MemoryParser } = await import('../memoryParser');
-            const topicId = context?.runnerOptions?.topicId ?? this.ctx.parentRunnerOptions?.topicId;
+            const topicId = context?.runnerOptions?.topicId;
             const parser = new MemoryParser(this.ctx.workspaceRoot, topicId);
-            const domain = context?.runnerOptions?.domain
-                ?? defaultDomainForMode(context?.runnerOptions?.mode ?? 'build');
+            const domain = normalizeSchedulingState(context?.runnerOptions?.schedulingState).domainProfile;
             const result = await parser.appendMemory({
                 key,
                 content,
@@ -140,18 +137,16 @@ export class MemoryToolHandler {
     async forgetMemory(args: import('../types').ForgetMemoryArgs, context?: import('../types').AgentToolContext): Promise<unknown> {
         if (!args.key) return { success: false, message: 'Missing key' };
         const { MemoryParser } = await import('../memoryParser');
-        const topicId = context?.runnerOptions?.topicId ?? this.ctx.parentRunnerOptions?.topicId;
-        const domain = context?.runnerOptions?.domain
-            ?? defaultDomainForMode(context?.runnerOptions?.mode ?? 'build');
+        const topicId = context?.runnerOptions?.topicId;
+        const domain = normalizeSchedulingState(context?.runnerOptions?.schedulingState).domainProfile;
         const parser = new MemoryParser(this.ctx.workspaceRoot, topicId);
         return parser.forgetMemory(args.key, domain, args.mode ?? 'archive', topicId, args.expectedRevision);
     }
 
     async getRecallTrace(context?: import('../types').AgentToolContext): Promise<unknown> {
         const { MemoryParser } = await import('../memoryParser');
-        const topicId = context?.runnerOptions?.topicId ?? this.ctx.parentRunnerOptions?.topicId;
-        const domain = context?.runnerOptions?.domain
-            ?? defaultDomainForMode(context?.runnerOptions?.mode ?? 'build');
+        const topicId = context?.runnerOptions?.topicId;
+        const domain = normalizeSchedulingState(context?.runnerOptions?.schedulingState).domainProfile;
         const parser = new MemoryParser(this.ctx.workspaceRoot, topicId);
         const trace = parser.getRecallTrace(topicId, domain);
         return trace
@@ -163,8 +158,7 @@ export class MemoryToolHandler {
     async queryBlackboard(args: { key?: string; prefix?: string; query?: string; type?: string; structured?: boolean }, context?: import('../types').AgentToolContext): Promise<unknown> {
         const { key: qbKey, prefix, query, type: qbType, structured } = args;
         const domainPrefix = blackboardDomainPrefix(context);
-        const domain = context?.runnerOptions?.domain
-            ?? defaultDomainForMode(context?.runnerOptions?.mode ?? 'build');
+        const domain = normalizeSchedulingState(context?.runnerOptions?.schedulingState).domainProfile;
         const exposeEntry = <T extends { key: string }>(entry: T): T & { key: string } => ({
             ...entry,
             key: entry.key.startsWith(domainPrefix) ? entry.key.slice(domainPrefix.length) : entry.key,

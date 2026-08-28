@@ -29,7 +29,6 @@ import type {
 } from './types';
 import { contentToString } from './types';
 import { estimateTokenCount, estimateChatMessageTokens, hasImageContent, CHARS_PER_TOKEN } from './runner/tokenEstimation';
-import { defaultDomainForMode } from './agentProfile';
 import * as vs from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -76,7 +75,7 @@ import { globalPartitionedWriteQueue } from './runner/writeCoordinator';
 import { runLedger } from './runner/runLedger';
 import { atomicWriteText, sha256Text } from './runner/durableStorage';
 import { loadResumeState, hasResumeState, saveResumeState as saveCheckpointResumeState } from './runner/checkpoint';
-import { maybeCompactHistory as _maybeCompactHistory, MID_LOOP_COMPACTION_INTERVAL, DEFAULT_CONTEXT_LIMIT, AUTO_COMPACTION_MIN_INTERVAL_MS, COST_GATE_MIN_EVIDENCE_SAMPLES, COST_GATE_MIN_USAGE_RATIO, COST_GATE_WARM_HIT_RATIO, resolveCompactionContextLimit, resolveCompactionRatios, resolveMidLoopBlockRatio, resolveToolResultArchiveLimit, type CompactionBudgetOptions, type AutoCompactionThrottle } from './runner/compaction';
+import { maybeCompactHistory as _maybeCompactHistory, MID_LOOP_COMPACTION_INTERVAL, DEFAULT_CONTEXT_LIMIT, AUTO_COMPACTION_MIN_INTERVAL_MS, COST_GATE_MIN_EVIDENCE_SAMPLES, COST_GATE_MIN_USAGE_RATIO, COST_GATE_WARM_HIT_RATIO, resolveCompactionContextLimit, resolveCompactionRatios, resolveMidLoopBlockRatio, resolveToolResultArchiveLimit, type CompactionBudgetOptions, type AutoCompactionThrottle, type CompactionRunOptions } from './runner/compaction';
 import { refreshLiveVsCodeContext } from './runner/liveContext';
 import { runContextMaintenance, shouldCompactEarlyForCost } from './runner/contextMaintenance';
 import { TokenCalibrationTable, buildCalibrationKey } from './runner/tokenCalibration';
@@ -92,6 +91,7 @@ import type { RunEventSink } from './runner/runContext';
 import { activeTurnRegistry } from './runner/activeTurnRegistry';
 import { isRetryStepRequest, type RetryStepRequest, type StepRequest } from './runner/stepRequest';
 import {
+    executionModeForSchedulingState,
     normalizeSchedulingState,
     transitionSchedulingState,
 } from './runner/scheduling';
@@ -602,23 +602,16 @@ export interface AgentRunnerOptions {
     maxIterations?: number;
     /** Treat maxIterations as a renewable healthy-progress window instead of an absolute ceiling. */
     renewableIterationLimit?: boolean;
-    /** Agent mode: build (default), plan (read-only), explore (parallel read), general (research) */
-    mode?: AgentMode;
     /** Main-Agent approved-plan continuation may start with write-focused guidance. */
     initialToolFocus?: AgentToolFocus;
     /** The user approved a design-complete plan; coordinators must execute it without a second design pass. */
     approvedPlanExecution?: boolean;
     /** Original top-level user turn used to preserve user-owned work across orchestration. */
     originalUserMessage?: string;
-    /** Resolved capability domain. General runs cannot access Paradox-only tools or prompts. */
-    domain?: import('./types').AgentRuntimeDomain;
-    /** Admission and runtime phase state, persisted independently from legacy mode. */
-    schedulingState?: AgentSchedulingState;
-    /** Concrete catalog profile and its isolated operating instructions. */
-    agentProfileName?: string;
+    /** Authoritative admission, authorization, phase, and dispatch state. */
+    schedulingState: AgentSchedulingState;
+    /** Isolated operating instructions supplied by the concrete scheduler profile. */
     agentProfileInstructions?: string;
-    /** Dispatch roles allowed by the selected runtime profile. Undefined preserves mode defaults. */
-    agentProfileAllowedSubagents?: string[];
     /** Host-issued, bounded authority grants. They never bypass mode/domain/path guards. */
     capabilityLeases?: import('./runner/capabilityLease').CapabilityLease[];
     /** Callback for real-time step updates (for UI) */
@@ -903,13 +896,11 @@ export class AgentRunner {
     private async saveResumeState(
         topicId: string,
         messages: ChatMessage[],
-        mode: AgentMode,
-        domain: import('./types').AgentRuntimeDomain,
+        schedulingState: AgentSchedulingState,
         runId?: string,
         pendingToolCalls?: ToolCall[],
-        schedulingState?: AgentSchedulingState,
     ): Promise<void> {
-        await saveCheckpointResumeState(topicId, mode, messages, this.toolExecutor, runId, pendingToolCalls, domain, schedulingState);
+        await saveCheckpointResumeState(topicId, schedulingState, messages, this.toolExecutor, runId, pendingToolCalls);
     }
 
     /** 
@@ -1152,7 +1143,7 @@ export class AgentRunner {
             topicId?: string;
         },
         conversationHistory: ChatMessage[],
-        options?: AgentRunnerOptions,
+        options: AgentRunnerOptions,
         /** Base64 data-URL images to attach to this user turn (vision/multimodal) */
         images?: string[]
     ): Promise<GenerationResult> {
@@ -1178,20 +1169,16 @@ export class AgentRunner {
         const restoredResumeState = options?.resumeFromState && context.topicId
             ? await this.loadResumeState(context.topicId)
             : null;
-        let mode = restoredResumeState?.mode ?? options?.mode ?? 'build';
-        let domain = restoredResumeState?.domain ?? options?.domain ?? defaultDomainForMode(mode);
         let schedulingState = normalizeSchedulingState(
             restoredResumeState?.schedulingState ?? options?.schedulingState,
-            mode,
-            domain,
         );
+        let mode = executionModeForSchedulingState(schedulingState);
+        let domain = schedulingState.domainProfile;
         const topicId = context.topicId || 'default';
         const threadId = options?.threadId ?? topicId;
         const turnId = options?.turnId ?? `turn_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
         options = {
             ...options,
-            mode,
-            domain,
             schedulingState,
             abortSignal: turnAbortController.signal,
             threadId,
@@ -1201,7 +1188,7 @@ export class AgentRunner {
         const userPromptPreview = userMessage.substring(0, 100);
         const turnRuntimePromise = this.turnRunner.startTurn({
             topicId,
-            mode,
+            schedulingState,
             userPrompt: userMessage,
             userPromptPreview,
             parentRunId: options?.parentRunId,
@@ -1211,7 +1198,6 @@ export class AgentRunner {
             workflowId: options?.workflowId,
             threadId,
             turnId,
-            schedulingState,
         });
         runRecordPromise = turnRuntimePromise.then(runtime => runtime.run);
         this.activeRunRecordPromise = runRecordPromise;
@@ -1376,14 +1362,13 @@ export class AgentRunner {
         options = {
             ...options,
             topicId,
-            mode,
             runEventSink: turnRuntime.eventSink,
             inputQueue: turnRuntime.inputQueue,
             runRecord: turnRuntime.run,
             schedulingState,
         };
         await turnRuntime.eventSink.append('admission_decided', {
-            profileName: schedulingState.profileName ?? options.agentProfileName,
+            profileName: schedulingState.profileName,
             overlays: schedulingState.overlays ?? [],
             domainProfile: schedulingState.domainProfile,
             authorization: schedulingState.authorization,
@@ -1459,7 +1444,7 @@ export class AgentRunner {
             domain,
             useSlimPrompt: options?.useSlimPrompt,
             excludeTools: options?.excludeTools,
-            agentProfileName: options?.agentProfileName,
+            profileName: schedulingState.profileName,
         }));
         const initialToolFocus = options?.initialToolFocus ?? initialToolFocusForMode(mode);
         const promptToolDefinitions = promptModeTools;
@@ -1555,7 +1540,7 @@ export class AgentRunner {
             dynamicBlock.unshift({
                 role: 'system',
                 content: [
-                    `[AGENT PROFILE: ${options.agentProfileName ?? schedulingState.profileName ?? 'custom'}]`,
+                    `[AGENT PROFILE: ${schedulingState.profileName ?? 'custom'}]`,
                     options.agentProfileInstructions.trim().slice(0, 32_000),
                 ].join('\n'),
             });
@@ -1688,9 +1673,6 @@ export class AgentRunner {
             const resumeState = restoredResumeState;
             if (resumeState) {
                 messages = resumeState.messages;
-                mode = resumeState.mode ?? mode;
-                domain = resumeState.domain ?? domain;
-                options = { ...options, mode, domain };
                 if (resumeState.todos && resumeState.todos.length > 0) {
                     void this.toolExecutor.getExternalToolHandler().todoWrite({ todos: resumeState.todos });
                 }
@@ -1723,15 +1705,14 @@ export class AgentRunner {
         tokenAccumulator.agentMode = mode;
 
         if (context.topicId) {
-            options = { ...options, topicId: context.topicId, mode, domain };
-            await this.saveResumeState(context.topicId, messages, mode, domain, runId, undefined, options.schedulingState ?? schedulingState);
+            options = { ...options, topicId: context.topicId };
+            await this.saveResumeState(context.topicId, messages, options.schedulingState, runId);
         }
 
         const modeLabel: Record<string, string> = {
             build: AGENT.MODE_BUILD,
             plan: AGENT.MODE_PLAN,
             explore: AGENT.MODE_EXPLORE,
-            general: AGENT.MODE_GENERAL,
             utility: AGENT.MODE_UTILITY,
             review: AGENT.MODE_REVIEW,
             orchestrator: AGENT.MODE_ORCHESTRATOR,
@@ -1747,7 +1728,7 @@ export class AgentRunner {
         try {
             // Wire topicId from context into options for checkpoint persistence
             if (context.topicId) {
-                options = { ...options, topicId: context.topicId, mode };
+                options = { ...options, topicId: context.topicId };
             }
 
             // Phase 1: Agent reasoning loop (with tool calls)
@@ -1805,7 +1786,7 @@ export class AgentRunner {
             if (validationPending) {
                 this.retainedResumeRuns.add(runId);
                 if (context.topicId) {
-                    await this.saveResumeState(context.topicId, messages, mode, domain, runId, undefined, options.schedulingState ?? schedulingState);
+                    await this.saveResumeState(context.topicId, messages, options.schedulingState ?? schedulingState, runId);
                 }
                 updateRunStatus('paused');
             } else {
@@ -1852,7 +1833,7 @@ export class AgentRunner {
             }
 
             if (context.topicId) {
-                await this.saveResumeState(context.topicId, messages, mode, domain, runId, undefined, options.schedulingState ?? schedulingState);
+                await this.saveResumeState(context.topicId, messages, options.schedulingState ?? schedulingState, runId);
             }
             runMetrics.finalPromptTokens = messages.reduce((s, m) => s + estimateChatMessageTokens(m), 0);
 
@@ -1925,7 +1906,7 @@ export class AgentRunner {
     private async maybeCompactHistory(
         history: import('./types').ChatMessage[],
         emitStep: (step: import('./types').AgentStep) => void,
-        options?: import('./agentRunner').AgentRunnerOptions,
+        options?: CompactionRunOptions,
         tokenAccumulator?: import('./types').TokenUsage,
         budgetOptions?: CompactionBudgetOptions,
     ): Promise<import('./types').ChatMessage[]> {
@@ -1966,7 +1947,7 @@ export class AgentRunner {
     /** Manually replace the active model history with one rolling summary. */
     public async compactActiveHistory(
         history: ChatMessage[],
-        options?: AgentRunnerOptions,
+        options?: CompactionRunOptions,
         onStep?: (step: AgentStep) => void,
         tokenAccumulator?: TokenUsage,
     ): Promise<{ compacted: boolean; steps: AgentStep[] }> {
@@ -2234,11 +2215,8 @@ export class AgentRunner {
         terminalValidation?: TerminalValidationState,
         restoredStepRequests: readonly StepRequest[] = [],
     ): Promise<string> {
-        const schedulingState = normalizeSchedulingState(
-            options?.schedulingState,
-            mode,
-            options?.domain,
-        );
+        const schedulingState = normalizeSchedulingState(options?.schedulingState);
+        mode = executionModeForSchedulingState(schedulingState);
         if (options) options.schedulingState = schedulingState;
         const runRecord = options?.runRecord ?? await this.activeRunRecordPromise!;
         this.readTracker.reset();
@@ -2393,10 +2371,10 @@ export class AgentRunner {
             return requestArtifact;
         };
         let availableTools = filterWebToolsForConfiguredAccess(filterToolDefinitionsForMode(TOOL_DEFINITIONS, mode, {
-            domain: options?.domain,
+            domain: schedulingState.domainProfile,
             useSlimPrompt: options?.useSlimPrompt,
             excludeTools: options?.excludeTools,
-            agentProfileName: options?.agentProfileName,
+            profileName: schedulingState.profileName,
         }));
 
         // 🌟 核心优化：若开启了扁平化并且工具注册了展平 schema，则展现给模型的 availableTools 使用扁平化版本
@@ -2408,7 +2386,7 @@ export class AgentRunner {
         // Dynamic MCP tools (Phase 2): opt-in, share mcp_call mode gating, never offered to slim sub-agents.
         if (!options?.useSlimPrompt) {
             try {
-                const mcpDefs = await this.toolExecutor.getDynamicMcpToolDefinitions(mode, options?.domain);
+                const mcpDefs = await this.toolExecutor.getDynamicMcpToolDefinitions(mode, schedulingState.domainProfile);
                 if (mcpDefs.length > 0) availableTools = sortToolDefinitionsForStableRequest([...availableTools, ...mcpDefs]);
             } catch { /* best effort */ }
         }
@@ -2432,7 +2410,7 @@ export class AgentRunner {
         const eligibleToolPool = availableTools;
         const disclosureContext: ToolDisclosureContext = {
             mode,
-            domain: options?.domain ?? defaultDomainForMode(mode),
+            domain: schedulingState.domainProfile,
             dynamicSupported: vs.workspace.getConfiguration('stellarisLanguageServices.ai.performance')
                 .get<boolean>('dynamicToolDisclosure.enabled', true),
             loaded: new Set<string>(),
@@ -2552,11 +2530,8 @@ export class AgentRunner {
             await this.saveResumeState(
                 options.topicId,
                 messages,
-                mode,
-                options.domain ?? defaultDomainForMode(mode),
+                options.schedulingState ?? schedulingState,
                 runRecord.runId,
-                undefined,
-                options.schedulingState,
             );
             lastResumeSnapshotAt = now;
             lastResumeSnapshotIteration = iteration;
@@ -3527,7 +3502,7 @@ export class AgentRunner {
             this.trackMemoryKeyReferences(
                 options?.topicId,
                 contentToString(assistantMessage.content),
-                options?.domain ?? defaultDomainForMode(mode),
+                schedulingState.domainProfile,
             );
 
             // ── M3: Length Truncation Fallback ──

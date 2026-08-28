@@ -1,6 +1,20 @@
 import { expect } from 'chai';
 import * as fs from 'fs';
 import * as path from 'path';
+import { executionModeForSchedulingState, schedulingStateFromAdmission } from '../../extension/ai/runner/scheduling';
+
+const PARADOX_WRITE = schedulingStateFromAdmission({
+    domainProfile: 'paradox', authorization: 'workspace_write', initialPhase: 'execute',
+    explicitDelegation: false, confidence: 1, evidence: ['test'],
+});
+const PARADOX_PLAN = schedulingStateFromAdmission({
+    domainProfile: 'paradox', authorization: 'plan_write_only', initialPhase: 'plan',
+    explicitDelegation: false, confidence: 1, evidence: ['test'],
+});
+const GENERAL_PARALLEL = schedulingStateFromAdmission({
+    domainProfile: 'general', authorization: 'workspace_write', initialPhase: 'execute',
+    explicitDelegation: true, confidence: 1, evidence: ['test'],
+});
 
 const TEMP_BASE = path.resolve(__dirname, '../../..', '.tmp-test');
 
@@ -21,7 +35,7 @@ describe('RunLedger Unit Tests', () => {
 
     it('creates a new run and appends events with incremental sequence numbers', async () => {
         const { runLedger } = loadRunLedgerModule();
-        const run = await runLedger.createRun('topic_test', 'build', 'test user prompt');
+        const run = await runLedger.createRun('topic_test', PARADOX_WRITE, 'test user prompt');
         const runId = run.runId;
         expect(runId).to.be.a('string');
 
@@ -29,7 +43,7 @@ describe('RunLedger Unit Tests', () => {
         expect(updatedRun).to.not.be.undefined;
         expect(updatedRun!.runId).to.equal(runId);
         expect(updatedRun!.topicId).to.equal('topic_test');
-        expect(updatedRun!.mode).to.equal('build');
+        expect(executionModeForSchedulingState(updatedRun!.schedulingState)).to.equal('build');
 
         // Runs keep structured events only; chat steps stay in the conversation surface.
         await runLedger.appendEvent(runId, 'step_appended', { step: { type: 'thinking', content: 'drafting', timestamp: 1 } });
@@ -42,7 +56,7 @@ describe('RunLedger Unit Tests', () => {
 
     it('correctly tracks status transition events', async () => {
         const { runLedger } = loadRunLedgerModule();
-        const run = await runLedger.createRun('topic_status', 'plan', 'test prompt');
+        const run = await runLedger.createRun('topic_status', PARADOX_PLAN, 'test prompt');
         const runId = run.runId;
         
         await runLedger.appendEvent(runId, 'status_changed', { status: 'running' });
@@ -56,7 +70,7 @@ describe('RunLedger Unit Tests', () => {
 
     it('filters chat step events from persisted run state', async () => {
         const { runLedger } = loadRunLedgerModule();
-        const run = await runLedger.createRun('topic_streaming', 'orchestrator', 'stream prompt');
+        const run = await runLedger.createRun('topic_streaming', GENERAL_PARALLEL, 'stream prompt');
         const runId = run.runId;
 
         await runLedger.appendEvent(runId, 'step_appended', { step: { type: 'text_delta', content: 'hello', timestamp: 1 } });
@@ -71,7 +85,7 @@ describe('RunLedger Unit Tests', () => {
 
     it('reloads persisted events and continues sequence numbers after restart', async () => {
         const { RunLedger, runLedger } = loadRunLedgerModule();
-        const run = await runLedger.createRun('topic_reload', 'build', 'reload prompt');
+        const run = await runLedger.createRun('topic_reload', PARADOX_WRITE, 'reload prompt');
         await runLedger.appendEvent(run.runId, 'tool_call_start', { toolName: 'read_file' }, { invocationId: 'inv_reload' });
         await runLedger.appendEvent(run.runId, 'tool_call_end', { toolName: 'read_file', success: true }, { invocationId: 'inv_reload' });
 
@@ -97,7 +111,7 @@ describe('RunLedger Unit Tests', () => {
         const fullPrompt = `inspect every relevant file\n${'detail '.repeat(200)}`;
         const run = await runLedger.createRun(
             'topic_replay',
-            'build',
+            PARADOX_WRITE,
             fullPrompt.slice(0, 100),
             undefined,
             fullPrompt,
@@ -118,7 +132,7 @@ describe('RunLedger Unit Tests', () => {
 
     it('writes checked JSON artifacts under the run directory', async () => {
         const { runLedger } = loadRunLedgerModule();
-        const run = await runLedger.createRun('topic_artifact', 'build', 'artifact prompt');
+        const run = await runLedger.createRun('topic_artifact', PARADOX_WRITE, 'artifact prompt');
 
         const artifact = await runLedger.writeJsonArtifact(run.runId, 'model_requests/request_1.json', {
             messages: [{ role: 'user', content: 'hello' }],
@@ -145,7 +159,7 @@ describe('RunLedger Unit Tests', () => {
     it('replays a disk-only run with its original prompt and recorded tool result', async () => {
         const { runLedger } = loadRunLedgerModule();
         const fullPrompt = 'compare the persisted implementation after restart';
-        const run = await runLedger.createRun('topic_disk_replay', 'build', fullPrompt, undefined, fullPrompt);
+        const run = await runLedger.createRun('topic_disk_replay', PARADOX_WRITE, fullPrompt, undefined, fullPrompt);
         await runLedger.appendEvent(
             run.runId,
             'tool_call_created',
@@ -176,7 +190,7 @@ describe('RunLedger Unit Tests', () => {
 
     it('serializes concurrent event writes in monotonic JSONL order', async () => {
         const { RunLedger, runLedger } = loadRunLedgerModule();
-        const run = await runLedger.createRun('topic_order', 'build', 'ordered prompt');
+        const run = await runLedger.createRun('topic_order', PARADOX_WRITE, 'ordered prompt');
         await Promise.all(Array.from({ length: 24 }, (_, index) => (
             runLedger.appendEvent(run.runId, 'todo_update', { index })
         )));
@@ -195,7 +209,7 @@ describe('RunLedger Unit Tests', () => {
 
     it('recovers run state from its atomic backup and reapplies durable events', async () => {
         const { RunLedger, runLedger } = loadRunLedgerModule();
-        const run = await runLedger.createRun('topic_state_backup', 'build', 'backup prompt');
+        const run = await runLedger.createRun('topic_state_backup', PARADOX_WRITE, 'backup prompt');
         await runLedger.appendEvent(run.runId, 'status_changed', { status: 'running' });
         await runLedger.appendEvent(run.runId, 'model_call_start', { model: 'test-model' });
 
@@ -250,8 +264,8 @@ describe('RunLedger Unit Tests', () => {
         const { createRunEventSink } = loadRunContextModule();
         const { Blackboard } = loadBlackboardModule();
 
-        const intendedRun = await runLedger.createRun('topic_sink_a', 'orchestrator', 'intended prompt');
-        const latestRun = await runLedger.createRun('topic_sink_b', 'orchestrator', 'latest prompt');
+        const intendedRun = await runLedger.createRun('topic_sink_a', GENERAL_PARALLEL, 'intended prompt');
+        const latestRun = await runLedger.createRun('topic_sink_b', GENERAL_PARALLEL, 'latest prompt');
         const sink = createRunEventSink({ runId: intendedRun.runId, agentId: 'parent' });
         const blackboard = new Blackboard(undefined, sink);
 
@@ -272,8 +286,8 @@ describe('RunLedger Unit Tests', () => {
         const { Blackboard } = loadBlackboardModule();
         const { ConflictDetector } = loadConflictDetectorModule();
 
-        const intendedRun = await runLedger.createRun('topic_conflict_a', 'orchestrator', 'intended prompt');
-        const latestRun = await runLedger.createRun('topic_conflict_b', 'orchestrator', 'latest prompt');
+        const intendedRun = await runLedger.createRun('topic_conflict_a', GENERAL_PARALLEL, 'intended prompt');
+        const latestRun = await runLedger.createRun('topic_conflict_b', GENERAL_PARALLEL, 'latest prompt');
         const sink = createRunEventSink({ runId: intendedRun.runId, agentId: 'parent' });
         const blackboard = new Blackboard(undefined, sink);
         const detector = new ConflictDetector(sink);
@@ -293,7 +307,7 @@ describe('RunLedger Unit Tests', () => {
         const { readRunRollout } = loadRolloutStoreModule();
         const run = await runLedger.createRun(
             'topic_rollout',
-            'build',
+            PARADOX_WRITE,
             'rollout prompt',
             'parent_run',
             'rollout prompt',
@@ -326,7 +340,7 @@ describe('RunLedger Unit Tests', () => {
         const { runLedger } = loadRunLedgerModule();
         const { createRunEventSink } = loadRunContextModule();
         const { ProcessRegistry } = loadProcessRegistryModule();
-        const run = await runLedger.createRun('topic_process', 'build', 'process prompt');
+        const run = await runLedger.createRun('topic_process', PARADOX_WRITE, 'process prompt');
         const sink = createRunEventSink({ runId: run.runId });
         const registry = new ProcessRegistry();
 
@@ -361,7 +375,7 @@ describe('RunLedger Unit Tests', () => {
         const store = new ThreadStore();
         const run = await runLedger.createRun(
             'topic_threads',
-            'build',
+            PARADOX_WRITE,
             'thread prompt',
             undefined,
             'thread prompt',
@@ -392,9 +406,9 @@ describe('RunLedger Unit Tests', () => {
         const { runLedger } = loadRunLedgerModule();
         const { ThreadStore } = loadThreadStoreModule();
         const store = new ThreadStore();
-        const first = await runLedger.createRun('topic_exact_fork', 'build', 'first', undefined, 'first', { threadId: 'thread_exact', turnId: 'turn_1' });
+        const first = await runLedger.createRun('topic_exact_fork', PARADOX_WRITE, 'first', undefined, 'first', { threadId: 'thread_exact', turnId: 'turn_1' });
         await store.recordRun(first);
-        const second = await runLedger.createRun('topic_exact_fork', 'build', 'second', first.runId, 'second', { threadId: 'thread_exact', turnId: 'turn_2' });
+        const second = await runLedger.createRun('topic_exact_fork', PARADOX_WRITE, 'second', first.runId, 'second', { threadId: 'thread_exact', turnId: 'turn_2' });
         await store.recordRun(second);
 
         const fork = await store.forkThread('topic_exact_fork', 'thread_exact', 'thread_from_first', 'topic_from_first', first.runId, 1);
@@ -412,7 +426,7 @@ describe('RunLedger Unit Tests', () => {
 
         const runtime = await runner.startTurn({
             topicId: 'topic_turn_runner',
-            mode: 'build',
+            schedulingState: PARADOX_WRITE,
             userPrompt: 'turn prompt',
             threadId: 'thread_turn_runner',
             turnId: 'turn_1',
@@ -469,7 +483,7 @@ describe('RunLedger Unit Tests', () => {
         const started = await runtime.startTurn({
             userMessage: 'hello',
             context: { topicId: 'topic_protocol' },
-            options: { threadId: 'thread_protocol' },
+            options: { threadId: 'thread_protocol', schedulingState: PARADOX_WRITE },
         });
 
         expect(started.threadId).to.equal('thread_protocol');
@@ -483,7 +497,7 @@ describe('RunLedger Unit Tests', () => {
         await runtime.startTurn({
             userMessage: 'continue',
             context: { topicId: 'topic_protocol' },
-            options: { threadId: 'thread_protocol' },
+            options: { threadId: 'thread_protocol', schedulingState: PARADOX_WRITE },
         });
         expect(capturedOptions[1].durableGoal).to.equal(true);
 
@@ -545,14 +559,14 @@ describe('RunLedger Unit Tests', () => {
         }
     });
 
-    it('routes new run state to configured VS Code private storage while retaining legacy fallback', async () => {
+    it('routes new run state to configured VS Code private storage', async () => {
         const { RunLedger } = loadRunLedgerModule();
         const workspacePaths = require('../../extension/ai/workspacePaths') as typeof import('../../extension/ai/workspacePaths');
         const privateRoot = path.join(workspaceRoot, '.private-agent-state');
         workspacePaths.configurePrivateAgentStorage(privateRoot);
         try {
             const ledger = new (RunLedger as any)();
-            const run = await ledger.createRun('topic_private', 'build', 'private prompt', undefined, 'private prompt');
+            const run = await ledger.createRun('topic_private', PARADOX_WRITE, 'private prompt', undefined, 'private prompt');
             expect(fs.existsSync(path.join(privateRoot, 'topics', 'topic_private', 'runs', run.runId, 'run_state.json'))).to.equal(true);
             expect(fs.existsSync(path.join(workspaceRoot, '.cwtools', 'topic_private', 'runs', run.runId))).to.equal(false);
         } finally {
@@ -564,38 +578,38 @@ describe('RunLedger Unit Tests', () => {
         const { ChatTopicManager } = loadChatTopicsModule();
         const storageRoot = path.join(workspaceRoot, '.chat-private');
         const manager = new ChatTopicManager({ fsPath: storageRoot } as any, () => {}, 'metadata');
-        manager.createNewTopic('metadata topic');
-        manager.addHistoryMessage({ role: 'user', content: 'sensitive prompt', timestamp: Date.now() });
+        manager.createNewTopic('metadata topic', PARADOX_WRITE);
+        manager.addHistoryMessage({ role: 'user', content: 'sensitive prompt', timestamp: Date.now(), schedulingState: PARADOX_WRITE });
         manager.saveTopics();
         const stored = JSON.parse(fs.readFileSync(path.join(storageRoot, 'ai-chat-topics.json'), 'utf8'));
         expect(stored[0].title).to.include('metadata topic');
         expect(stored[0].messages).to.deep.equal([]);
     });
 
-    it('persists, forks, and validates the resolved Agent domain on topics', async () => {
+    it('persists, forks, and validates canonical scheduling state on topics', async () => {
         const { ChatTopicManager } = loadChatTopicsModule();
         const storageRoot = path.join(workspaceRoot, '.chat-domain');
         const storageUri = { fsPath: storageRoot } as ConstructorParameters<typeof ChatTopicManager>[0];
         const manager = new ChatTopicManager(storageUri, () => {}, 'full');
-        manager.createNewTopic('Paradox follow-up');
+        manager.createNewTopic('Paradox follow-up', PARADOX_WRITE);
         if (!manager.currentTopic) throw new Error('Expected the topic to be created.');
-        manager.currentTopic.resolvedAgentDomain = 'paradox';
-        manager.addHistoryMessage({ role: 'user', content: 'change the next event id', timestamp: Date.now() });
+        manager.currentTopic.schedulingState = PARADOX_WRITE;
+        manager.addHistoryMessage({ role: 'user', content: 'change the next event id', timestamp: Date.now(), schedulingState: PARADOX_WRITE });
         manager.saveTopics();
 
         const restored = new ChatTopicManager(storageUri, () => {}, 'full');
-        expect(restored.topics[0]?.resolvedAgentDomain).to.equal('paradox');
+        expect(restored.topics[0]?.schedulingState?.domainProfile).to.equal('paradox');
         const restoredTopic = restored.topics[0];
         if (!restoredTopic) throw new Error('Expected the topic to be restored.');
         restored.forkTopic(restoredTopic.id, 0);
-        expect(restored.currentTopic?.resolvedAgentDomain).to.equal('paradox');
+        expect(restored.currentTopic?.schedulingState?.domainProfile).to.equal('paradox');
 
-        await restored.importTopicFromJson(JSON.stringify({
-            title: 'invalid domain',
+        const invalid = await restored.importTopicFromJson(JSON.stringify({
+            title: 'invalid scheduler',
             messages: [{ role: 'user', content: 'continue', timestamp: Date.now() }],
-            resolvedAgentDomain: 'invalid',
+            schedulingState: { domainProfile: 'invalid' },
         }));
-        expect(restored.currentTopic?.resolvedAgentDomain).to.equal(undefined);
+        expect(invalid).to.equal(null);
     });
 });
 

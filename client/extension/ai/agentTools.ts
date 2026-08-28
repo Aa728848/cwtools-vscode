@@ -89,11 +89,12 @@ import { parseImplementationPlanBlueprint } from './executePlanHandoff';
 import { solveScopeBridge, type ScopeBridgeCandidate } from './tools/scopeBridge';
 import { HostArchetypeArtifactStore } from './tools/archetypeArtifacts';
 import { canonicalPathKey } from './workspacePaths';
-import { defaultDomainForMode } from './agentProfile';
+import { agentProfileCatalog } from './runner/agentProfileCatalog';
 import { isMcpServerAllowedForDomain } from './mcpCapability';
 import {
     authorizationAllowsEffect,
     evaluateDispatchAdmission,
+    executionModeForSchedulingState,
     transitionSchedulingState,
 } from './runner/scheduling';
 import { goalStore, type DurableGoalStatus } from './runner/goalStore';
@@ -429,33 +430,16 @@ export class AgentToolExecutor {
     public onAutoWritten?: (file: string, isNewFile: boolean) => void;
     /** Callback when a project workflow is saved. */
     public onWorkflowSaved?: () => void;
-    /**
-     * Callback fired BEFORE any file is written or created.
-     * Used by the retract system to snapshot file state for later restoration.
-     */
-    public onBeforeFileWrite?: (filePath: string, previousContent: string | null) => void;
     /** Agent file write mode from config */
     public fileWriteMode: 'confirm' | 'auto' = 'confirm';
 
-    /** Parent AgentRunner options (used for sub-agent dispatch to inherit provider/model/abort) */
-    public parentRunnerOptions?: import('./agentRunner').AgentRunnerOptions;
     /** Parent AgentRunner instance (used for Orchestrator to spawn sub-agents) */
     public parentAgentRunner?: import('./agentRunner').AgentRunner;
-    /** Parent token accumulator (used for sub-agent dispatch to merge costs) */
-    public parentTokenAccumulator?: import('./types').TokenUsage;
-    /** Permission request callback for run_command */
-    public onPermissionRequest?: (
-        id: string,
-        tool: string,
-        description: string,
-        command?: string
-    ) => Promise<boolean>;
-    /** Step callback for real-time UI progress (subtask events) */
-    public onStep?: (step: import('./types').AgentStep) => void;
 
     // - Domain handlers -
     private fileHandler: FileToolHandler;
     private readonly candidateTransactions = new CandidateTransactionManager();
+    private candidateOverlay?: Map<string, string>;
     private readonly archetypeArtifacts: HostArchetypeArtifactStore;
     private candidateOwnerScope?: string;
     private lspHandler: LspToolHandler;
@@ -673,11 +657,12 @@ export class AgentToolExecutor {
     }
 
     private candidateContext(context?: import('./types').AgentToolContext): import('./types').AgentToolContext {
+        if (!context?.runnerOptions) throw new Error('Candidate transactions require an active scheduler context.');
         return {
-            ...(context ?? {}),
+            ...context,
             runnerOptions: {
-                ...(context?.runnerOptions ?? this.parentRunnerOptions ?? {}),
-                vfsOverlay: this.vfsOverlay ?? new Map<string, string>(),
+                ...context.runnerOptions,
+                vfsOverlay: this.candidateOverlay ?? new Map<string, string>(),
             },
         };
     }
@@ -806,13 +791,12 @@ export class AgentToolExecutor {
     ): Promise<import('./types').CandidateTransactionResult> {
         try {
             if (args.action === 'begin') {
-                if (this.parentRunnerOptions?.vfsOverlay && this.parentRunnerOptions.vfsOverlay.size > 0) {
+                if (this.candidateOverlay && this.candidateOverlay.size > 0) {
                     throw new Error('Candidate overlay already contains staged files.');
                 }
                 const transactionId = this.candidateTransactions.begin();
                 this.candidateOwnerScope = context?.scopeId ?? 'top-level';
-                if (!this.parentRunnerOptions) this.parentRunnerOptions = {};
-                this.parentRunnerOptions.vfsOverlay = new Map<string, string>();
+                this.candidateOverlay = new Map<string, string>();
                 return { success: true, action: args.action, transactionId, state: 'active', files: [], bytes: 0 };
             }
             const transactionId = this.requireCandidateTransaction(args.transactionId, context);
@@ -821,7 +805,8 @@ export class AgentToolExecutor {
             }
             if (args.action === 'discard') {
                 this.candidateTransactions.discard();
-                this.parentRunnerOptions?.vfsOverlay?.clear();
+                this.candidateOverlay?.clear();
+                this.candidateOverlay = undefined;
                 this.candidateOwnerScope = undefined;
                 return { success: true, action: args.action, transactionId, state: this.candidateTransactions.state };
             }
@@ -884,7 +869,7 @@ export class AgentToolExecutor {
             const commit = await globalPartitionedWriteQueue.enqueue(lockPaths, () => this.candidateTransactions.commit({
                 readDisk: file => fs.existsSync(file) ? fs.readFileSync(file) : Buffer.from(''),
                 writeDisk: (file, content) => {
-                    (context?.onBeforeFileWrite ?? this.onBeforeFileWrite)?.(file, fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : null);
+                    context?.onBeforeFileWrite?.(file, fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : null);
                     fs.mkdirSync(path.dirname(file), { recursive: true });
                     fs.writeFileSync(file, content, 'utf8');
                 },
@@ -956,7 +941,7 @@ export class AgentToolExecutor {
                 },
             }), { waitTimeoutMs: 30_000, timeoutMessage: 'Candidate commit timed out waiting for file locks.' });
             if (commit.state === 'committed' || commit.state === 'discarded') {
-                this.parentRunnerOptions?.vfsOverlay?.clear();
+                this.candidateOverlay = undefined;
                 this.candidateOwnerScope = undefined;
             }
             return { success: commit.committed, action: args.action, transactionId, state: commit.state, files: commit.files, commit, diagnosticDeltas: deltas, error: commit.error };
@@ -1005,7 +990,7 @@ export class AgentToolExecutor {
     }
 
     get vfsOverlay(): Map<string, string> | undefined {
-        return this.parentRunnerOptions?.vfsOverlay;
+        return this.candidateOverlay;
     }
 
     /** Expose the external handler so AgentRunner can auto-complete todos on task finish. */
@@ -1070,7 +1055,7 @@ export class AgentToolExecutor {
         context?: import('./types').AgentToolContext,
     ): Promise<{ allowed: boolean; error?: string }> {
         const entry = TOOL_REGISTRY.get(toolName as any)
-            ?? (toolName.startsWith('mcp_') ? TOOL_REGISTRY.get('mcp_call') : undefined);
+            ?? (this.dynamicMcpToolNames.has(toolName) ? TOOL_REGISTRY.get('mcp_call') : undefined);
         if (!entry) return { allowed: false, error: `Unknown tool: ${toolName}` };
         const subject = subjectForEffect(entry.effect);
         if (!subject) return { allowed: true };
@@ -1833,12 +1818,20 @@ export class AgentToolExecutor {
         }
         const readTracker = (context?.agentRunner as any)?.readTracker;
         const isSubAgent = !!context?.runnerOptions?.useSlimPrompt;
-        const runtimeDomain = context?.runnerOptions?.domain;
-        const mode = context?.runnerOptions?.mode ?? 
-            ((['dispatch_agents', 'merge_results', 'query_blackboard'].includes(toolName)) ? 'orchestrator' : 'build');
-        const access = validateToolCapability(toolName, {
+        const schedulingState = context?.runnerOptions?.schedulingState;
+        if (!schedulingState) {
+            return {
+                success: false,
+                error: `Tool '${toolName}' requires an active scheduler context.`,
+                terminalOutcome: 'policy_denied',
+            };
+        }
+        const runtimeDomain = schedulingState.domainProfile;
+        const mode = executionModeForSchedulingState(schedulingState);
+        const registeredToolName = this.dynamicMcpToolNames.has(toolName) ? 'mcp_call' : toolName;
+        const access = validateToolCapability(registeredToolName, {
             mode, domain: runtimeDomain, isSubAgent,
-            profileName: context?.runnerOptions?.agentProfileName,
+            profileName: schedulingState.profileName,
         });
         if (!access.allowed) {
             return {
@@ -1953,7 +1946,7 @@ export class AgentToolExecutor {
 
         let timeout = TOOL_TIMEOUTS[toolName];
         if (timeout === undefined) {
-            if (toolName.startsWith('mcp_') || toolName === 'mcp_call') {
+            if (this.dynamicMcpToolNames.has(toolName) || toolName === 'mcp_call') {
                 timeout = 120_000; // MCP tools can involve network calls or complex processing
             } else {
                 timeout = DEFAULT_TOOL_TIMEOUT;
@@ -2038,10 +2031,11 @@ export class AgentToolExecutor {
                 ...(context ?? {}),
                 runnerOptions: {
                     ...(context?.runnerOptions ?? {}),
+                    schedulingState,
                     abortSignal,
                 },
             };
-            if (toolContext.runnerOptions?.domain !== 'general') toolContext.onBeforePdxWrite = async request => {
+            if (toolContext.runnerOptions?.schedulingState.domainProfile !== 'general') toolContext.onBeforePdxWrite = async request => {
                 if (inheritedPdxPreflight) {
                     const inherited = await inheritedPdxPreflight(request);
                     if (!inherited.allowed) return inherited;
@@ -2454,7 +2448,7 @@ export class AgentToolExecutor {
             case 'write_design_blueprint':
                 result = await this.fileHandler.writeDesignBlueprint(args as any, context); break;
             case 'save_workflow':
-                result = this.saveWorkflow(args); break;
+                result = this.saveWorkflow(args, context); break;
             case 'git_ops':
                 result = await this.fileHandler.gitOps(args as any); break; // git ops uses workspace wide state mostly
 
@@ -2662,7 +2656,7 @@ export class AgentToolExecutor {
             case 'history': {
                 result = searchAgentHistory(this.workspaceRoot, args as any, {
                     topicId: context?.runnerOptions?.topicId,
-                    domain: context?.runnerOptions?.domain,
+                    domain: context?.runnerOptions?.schedulingState.domainProfile,
                 });
                 const count = typeof result === 'object' && result !== null
                     && 'results' in result && Array.isArray(result.results) ? result.results.length : 0;
@@ -2705,7 +2699,7 @@ export class AgentToolExecutor {
 
             default:
                 // Check if this is a dynamically registered MCP tool (mcp_<server>_<tool>)
-                if (toolName.startsWith('mcp_')) {
+                if (this.dynamicMcpToolNames.has(toolName)) {
                     result = await this.executeMcpTool({ ...args, _toolName: toolName } as any, context);
                 } else {
                     throw new Error(`Unknown tool: ${toolName}`);
@@ -2770,8 +2764,7 @@ export class AgentToolExecutor {
             workspaceRoot: this.workspaceRoot,
             globalStoragePath: this.globalStoragePath,
             extensionPath: this.extensionPath,
-        }, context?.runnerOptions?.domain
-            ?? defaultDomainForMode(context?.runnerOptions?.mode ?? 'build'));
+        }, context?.runnerOptions?.schedulingState.domainProfile);
         if (!loaded.success) return loaded;
 
         const declaredTools = loaded.skill.allowedTools;
@@ -2872,11 +2865,11 @@ export class AgentToolExecutor {
         return threadId ? `thread:${threadId}` : undefined;
     }
 
-    private saveWorkflow(args: Record<string, unknown>): unknown {
+    private saveWorkflow(args: Record<string, unknown>, context?: import('./types').AgentToolContext): unknown {
         const result = saveProjectWorkflow(
             args as any,
             this.workspaceRoot,
-            (filePath, previousContent) => this.onBeforeFileWrite?.(filePath, previousContent)
+            (filePath, previousContent) => context?.onBeforeFileWrite?.(filePath, previousContent)
         );
         if (result.success) {
             this.onWorkflowSaved?.();
@@ -2913,7 +2906,6 @@ export class AgentToolExecutor {
                 this.asString(args.errorCode),
                 this.asString(args.message),
                 this.asString(args.previousAttempt),
-                this.asString(args.reflection),
             ].filter(Boolean).join('\n');
             if (fallbackMessage) {
                 diagnostics = [{
@@ -2934,7 +2926,6 @@ export class AgentToolExecutor {
             this.asString(args.errorCode),
             this.asString(args.message),
             this.asString(args.previousAttempt),
-            this.asString(args.reflection),
             ...diagnostics.map(d => `${d.code ?? ''} ${d.file ?? ''} ${d.message}`),
         ].filter(Boolean).join('\n');
 
@@ -3421,14 +3412,14 @@ export class AgentToolExecutor {
     /** List configured MCP servers' tools as mcp_<server>_<tool> definitions. Opt-in; metadata is untrusted. */
     async getDynamicMcpToolDefinitions(
         mode: import('./types').AgentMode,
-        domain?: import('./types').AgentRuntimeDomain,
+        domain: import('./types').AgentRuntimeDomain,
     ): Promise<import('./types').ToolDefinition[]> {
         const cfg = vs.workspace.getConfiguration('stellarisLanguageServices.ai');
         if (cfg.get<boolean>('mcp.registerDynamicTools', false) !== true) return [];
         const { isToolAllowedForMode } = require('./tools/permissions') as typeof import('./tools/permissions');
         if (!isToolAllowedForMode('mcp_call', mode, domain)) return [];
 
-        const runtimeDomain = domain ?? defaultDomainForMode(mode);
+        const runtimeDomain = domain;
         if (this.dynamicMcpToolCache
             && this.dynamicMcpToolCache.domain === runtimeDomain
             && Date.now() - this.dynamicMcpToolCache.at < AgentToolExecutor.MCP_TOOL_CACHE_TTL_MS) {
@@ -3492,19 +3483,13 @@ export class AgentToolExecutor {
         let toolName = args.tool;
         let isDynamicNameCall = false;
 
-        // Resolve mcp_<server>_<tool>: registered map first, regex as fallback.
+        // Dynamic MCP names are valid only when disclosed and registered for this run.
         if (!serverName && args._toolName) {
             isDynamicNameCall = true;
             const mapped = this.dynamicMcpToolNames.get(args._toolName);
             if (mapped) {
                 serverName = mapped.server;
                 toolName = mapped.tool;
-            } else {
-                const match = args._toolName.match(/^mcp_(.+?)_(.+)$/);
-                if (match) {
-                    serverName = match[1];
-                    toolName = match[2];
-                }
             }
         }
 
@@ -3559,8 +3544,10 @@ export class AgentToolExecutor {
             }
         }
 
-        const runtimeDomain = context?.runnerOptions?.domain
-            ?? defaultDomainForMode(context?.runnerOptions?.mode ?? 'build');
+        const runtimeDomain = context?.runnerOptions?.schedulingState.domainProfile;
+        if (!runtimeDomain) {
+            return { success: false, error: 'MCP calls require an active scheduler context.', terminalOutcome: 'policy_denied' };
+        }
         const configuredServers = vs.workspace.getConfiguration('stellarisLanguageServices.ai')
             .get<import('./types').MCPServerConfig[]>('mcp.servers', []);
         const configuredServer = configuredServers.find(server => server.name === serverName);
@@ -3629,11 +3616,6 @@ export class AgentToolExecutor {
      */
     private readonly _activeDispatchAbortControllers = new Set<AbortController>();
 
-    /** The latest coordinator execution result (read by merge_results) */
-    private _lastOrchestratorResult?: import('./orchestrator/types').OrchestratorResult;
-    private _lastOrchestratorGraph?: import('./orchestrator/types').TaskGraph;
-    private _lastOrchestratorDomain?: import('./types').AgentRuntimeDomain;
-    private _lastOrchestratorTopicId?: string;
     private readonly _orchestratorValidationByRun = new Map<string, {
         success: boolean;
         summary: string;
@@ -3724,16 +3706,21 @@ export class AgentToolExecutor {
         // off the tool call; completion arrives as a BACKGROUND TASK RESULT.
         const backgroundRequested = args.background === true;
 
-        const runnerOptsForLimits = context?.runnerOptions ?? this.parentRunnerOptions;
-        const originalUserMessage = runnerOptsForLimits?.originalUserMessage
+        const runnerOptsForLimits = context?.runnerOptions;
+        if (!runnerOptsForLimits?.schedulingState) {
+            return { success: false, error: 'dispatch_agents requires an active scheduler context.' };
+        }
+        const schedulingState = runnerOptsForLimits.schedulingState;
+        const originalUserMessage = runnerOptsForLimits.originalUserMessage
             ?? (typeof args.userPrompt === 'string' ? args.userPrompt : undefined);
         let userExecutionPolicy = deriveUserExecutionPolicy(
             originalUserMessage,
             args.userConstraints,
         );
-        const runtimeDomain = runnerOptsForLimits?.domain
-            ?? (runnerOptsForLimits?.mode === 'orchestrator' ? 'general' : 'paradox');
-        const isScriptMode = runtimeDomain === 'paradox' && runnerOptsForLimits?.mode === 'script';
+        const runtimeDomain = schedulingState.domainProfile;
+        const isScriptMode = runtimeDomain === 'paradox'
+            && schedulingState.authorization === 'workspace_write'
+            && schedulingState.dispatch !== 'single';
         const requiresStructuredWriteContract = isScriptMode;
         let featureManifest = args.featureManifest as import('./types').FeatureManifest | undefined;
         const blueprintFile = typeof args.blueprintFile === 'string' ? args.blueprintFile.trim() : '';
@@ -3741,7 +3728,7 @@ export class AgentToolExecutor {
         // Load the persisted graph up front when resuming so appended task
         // ids and the stored feature manifest are known to later validations.
         const resumeRecord = resumeGraphId
-            ? loadOrchestration(resumeGraphId, { topicId: runnerOptsForLimits?.topicId, domain: runtimeDomain })
+            ? loadOrchestration(resumeGraphId, { topicId: runnerOptsForLimits?.topicId, domain: runtimeDomain, workspaceRoot: this.workspaceRoot })
             : undefined;
         if (resumeGraphId && !resumeRecord) {
             return {
@@ -3799,10 +3786,10 @@ export class AgentToolExecutor {
             featureManifest = resumeRecord.graph.featureManifest;
         }
 
-        if ((runnerOptsForLimits?.mode === 'explore' || runnerOptsForLimits?.mode === 'plan') && blueprintFile) {
+        if (schedulingState.authorization !== 'workspace_write' && blueprintFile) {
             return {
                 success: false,
-                error: `${runnerOptsForLimits.mode === 'explore' ? 'Explore' : 'Plan'} mode fan-out is read-only and cannot execute a blueprintFile task graph. Dispatch at most four bounded evidence tasks directly.`,
+                error: 'The current scheduler authorization cannot execute a blueprintFile task graph. Dispatch at most four bounded evidence tasks directly.',
             };
         }
         if (runtimeDomain === 'general' && blueprintFile) {
@@ -3931,31 +3918,23 @@ export class AgentToolExecutor {
                 };
             }
         }
-        const parentMode = runnerOptsForLimits?.mode;
-        const readOnlyFanoutMode = parentMode === 'plan' || parentMode === 'explore';
-        const allowedAgentTypes = new Set(readOnlyFanoutMode
-            ? ['explore', 'plan', 'review']
-            : runtimeDomain === 'general'
-            ? ['explore', 'plan', 'utility', 'review']
-            : parentMode === 'script'
-                ? ['explore', 'plan', 'build', 'review', 'loc_writer', 'gui_expert']
-            : parentMode === 'orchestrator'
-                ? ['explore', 'plan', 'utility', 'review']
-                // Compatibility for host-side callers created before the mode
-                // was carried in AgentToolContext. Model-visible calls always
-                // arrive with an explicit coordinator mode.
-                : ['explore', 'plan', 'utility', 'review', 'build', 'loc_writer', 'gui_expert']);
-        const profileRoles = runnerOptsForLimits?.agentProfileAllowedSubagents;
-        if (profileRoles) {
+        const runtimeProfile = schedulingState.profileName
+            ? agentProfileCatalog.get(schedulingState.profileName)
+            : undefined;
+        if (!runtimeProfile) {
+            return { success: false, error: `dispatch_agents requires a known scheduler profile; received '${schedulingState.profileName ?? 'none'}'.` };
+        }
+        const allowedAgentTypes = new Set(runtimeProfile.subagents ?? []);
+        if (schedulingState.authorization !== 'workspace_write') {
             for (const role of [...allowedAgentTypes]) {
-                if (!profileRoles.includes(role)) allowedAgentTypes.delete(role);
+                if (role !== 'explore' && role !== 'plan' && role !== 'review') allowedAgentTypes.delete(role);
             }
         }
         const invalidAgentType = normalizedTasks.find(task => !allowedAgentTypes.has(task.agentType));
         if (invalidAgentType) {
             return {
                 success: false,
-                error: `Agent type '${invalidAgentType.agentType}' is not allowed in ${parentMode === 'plan' ? 'Plan' : parentMode === 'explore' ? 'Explore' : isScriptMode ? 'Paradox Multi-Agent' : 'General Multi-Agent'} mode. Allowed roles: ${[...allowedAgentTypes].join(', ')}.`,
+                error: `Agent type '${invalidAgentType.agentType}' is not allowed by scheduler profile '${runtimeProfile.name}'. Allowed roles: ${[...allowedAgentTypes].join(', ')}.`,
             };
         }
         // Resumed graphs keep the static write contract of the approved plan:
@@ -3996,12 +3975,12 @@ export class AgentToolExecutor {
                 }
             }
         }
-        if (parentMode === 'explore') {
+        if (schedulingState.authorization !== 'workspace_write') {
             const taskWithWriteIntent = normalizedTasks.find(task => (task.plannedFiles?.length ?? 0) > 0);
             if (taskWithWriteIntent) {
                 return {
                     success: false,
-                    error: `Explore mode fan-out is read-only. Task '${taskWithWriteIntent.id}' must not declare plannedFiles or any write intent.`,
+                    error: `Read-only fan-out task '${taskWithWriteIntent.id}' must not declare plannedFiles or any write intent.`,
                 };
             }
         }
@@ -4025,10 +4004,8 @@ export class AgentToolExecutor {
                 role: task.agentType,
             })),
             {
-                explicitDelegation: runnerOptsForLimits?.schedulingState?.dispatch === 'parallel'
-                    || runnerOptsForLimits?.schedulingState?.dispatch === 'specialist'
-                    || parentMode === 'orchestrator'
-                    || parentMode === 'script'
+                explicitDelegation: schedulingState.dispatch === 'parallel'
+                    || schedulingState.dispatch === 'specialist'
                     || !!blueprintFile,
                 availableTokenBudget: runnerOptsForLimits?.tokenBudget,
                 knownTaskIds: resumeRecord
@@ -4240,38 +4217,35 @@ export class AgentToolExecutor {
             const parentRun = runnerOptsForLimits?.runRecord
                 ?? await parentRunPromise?.catch(() => undefined);
 
-            // Build execution options (read first from AgentToolContext, fallback to old instance fields)
+            // Build child execution options from the active tool-call context.
             const runnerOpts = runnerOptsForLimits;
             const parentRunSink = context?.runEventSink ?? runnerOpts?.runEventSink;
             this.blackboard.setEventSink(parentRunSink);
 
             const onBeforeFileWrite =
                 context?.onBeforeFileWrite
-                ?? runnerOpts?.onBeforeFileWrite
-                ?? this.onBeforeFileWrite;
+                ?? runnerOpts.onBeforeFileWrite;
             const validationRunId = parentRun?.runId ?? parentRunSink?.runId;
 
             const options: import('./orchestrator/types').OrchestratorOptions = {
-                domain: runnerOpts?.domain ?? (parentMode === 'orchestrator' ? 'general' : 'paradox'),
-                providerId: runnerOpts?.providerId,
-                model: runnerOpts?.model,
-                reasoningEffort: runnerOpts?.reasoningEffort,
+                schedulingState,
+                providerId: runnerOpts.providerId,
+                model: runnerOpts.model,
+                reasoningEffort: runnerOpts.reasoningEffort,
                 abortSignal: localAbort.signal,
-                topicId: runnerOpts?.topicId,
+                topicId: runnerOpts.topicId,
                 parentRunId: parentRun?.runId ?? parentRunSink?.runId,
                 delegationDepth: delegationBudget.parentDepth,
-                durableGoal: runnerOpts?.durableGoal,
-                readOnlyFanout: parentMode === 'explore',
+                durableGoal: runnerOpts.durableGoal,
                 restoredBlackboard,
                 originalUserMessage,
                 userExecutionPolicy,
                 runEventSink: parentRunSink,
                 onStep: context?.onStep,
                 onBeforeFileWrite,
-                onTodoUpdate: context?.onTodoUpdate || runnerOpts?.onTodoUpdate,
+                onTodoUpdate: context?.onTodoUpdate || runnerOpts.onTodoUpdate,
                 onPermissionRequest: context?.onPermissionRequest
-                    ?? runnerOpts?.onPermissionRequest
-                    ?? this.onPermissionRequest,
+                    ?? runnerOpts.onPermissionRequest,
             };
 
             // Push initial progress
@@ -4327,10 +4301,10 @@ export class AgentToolExecutor {
 
                 // In-progress snapshot so merge_results/resume see the graph.
                 await saveOrchestration({
+                    workspaceRoot: this.workspaceRoot,
                     topicId: bgTopicId,
                     runId: bgRunId,
                     domain: runtimeDomain,
-                    mode: parentMode,
                     delegationDepth: delegationBudget.parentDepth,
                     graph,
                     agentResults: new Map(),
@@ -4358,7 +4332,6 @@ export class AgentToolExecutor {
                     }
                     : options;
 
-                const bgBlackboardPrefix = blackboardDomainPrefix(context);
                 backgroundOrchestrators.start({
                     graphId: bgGraphId,
                     topicId: bgTopicId,
@@ -4391,11 +4364,9 @@ export class AgentToolExecutor {
                             }
                             await this.finalizeOrchestration(bgResult, graph, {
                                 domain: runtimeDomain,
-                                mode: parentMode,
                                 topicId: bgTopicId,
                                 runId: bgRunId,
                                 hasWriteTasks,
-                                blackboardPrefix: bgBlackboardPrefix,
                                 blackboard: orchestrator.getBlackboard().snapshot(),
                                 delegationDepth: delegationBudget.parentDepth,
                             }, context);
@@ -4415,10 +4386,10 @@ export class AgentToolExecutor {
                                 ).catch(() => {});
                             }
                             await saveOrchestration({
+                                workspaceRoot: this.workspaceRoot,
                                 topicId: bgTopicId,
                                 runId: bgRunId,
                                 domain: runtimeDomain,
-                                mode: parentMode,
                                 delegationDepth: delegationBudget.parentDepth,
                                 graph,
                                 agentResults: new Map(),
@@ -4446,11 +4417,9 @@ export class AgentToolExecutor {
             const result = await orchestrator.execute(graph, options);
             await this.finalizeOrchestration(result, graph, {
                 domain: runtimeDomain,
-                mode: parentMode,
                 topicId: runnerOpts?.topicId,
                 runId: validationRunId,
                 hasWriteTasks,
-                blackboardPrefix: blackboardDomainPrefix(context),
                 blackboard: orchestrator.getBlackboard().snapshot(),
                 delegationDepth: delegationBudget.parentDepth,
             }, context);
@@ -4551,7 +4520,7 @@ export class AgentToolExecutor {
                 completedNodes: doneCount,
                 delegationDepth: delegationBudget.parentDepth,
                 contextPreservingResumes: contextPreservingResumes || undefined,
-                indexRevision: readOnlyFanoutMode && this.indexService
+                indexRevision: schedulingState.authorization !== 'workspace_write' && this.indexService
                     ? `${this.indexService.workspaceSymbolUpdatedAt ?? 'unbuilt'}:${this.indexService.workspaceSymbolCount}:${this.indexService.workspaceSymbolStatus}`
                     : undefined,
                 hint: clarifications.length > 0
@@ -4564,10 +4533,10 @@ export class AgentToolExecutor {
             const errMsg = e instanceof Error ? e.message : String(e);
             if (persistedGraph) {
                 void saveOrchestration({
+                    workspaceRoot: this.workspaceRoot,
                     topicId: runnerOptsForLimits?.topicId,
                     runId: undefined,
                     domain: runtimeDomain,
-                    mode: parentMode,
                     delegationDepth: delegationBudget.parentDepth,
                     graph: persistedGraph,
                     agentResults: new Map(),
@@ -4585,19 +4554,16 @@ export class AgentToolExecutor {
 
     /**
      * Shared post-execution settlement for foreground and background waves:
-     * token accounting, merge_results cache, run validation state, blackboard
-     * summary, and the durable orchestration record.
+     * token accounting, run validation state, and the durable orchestration record.
      */
     private async finalizeOrchestration(
         result: import('./orchestrator/types').OrchestratorResult,
         graph: import('./orchestrator/types').TaskGraph,
         meta: {
             domain: import('./types').AgentRuntimeDomain;
-            mode?: string;
             topicId?: string;
             runId?: string;
             hasWriteTasks: boolean;
-            blackboardPrefix: string;
             blackboard: import('./orchestrator/types').SerializedBlackboard;
             /** Monotone delegation depth of this coordinator, persisted as a resume floor. */
             delegationDepth?: number;
@@ -4606,11 +4572,6 @@ export class AgentToolExecutor {
     ): Promise<void> {
         mergeTokenUsageTotals(context?.tokenAccumulator, result.totalTokenUsage);
 
-        // Cache results for use by merge_results
-        this._lastOrchestratorResult = result;
-        this._lastOrchestratorGraph = graph;
-        this._lastOrchestratorDomain = meta.domain;
-        this._lastOrchestratorTopicId = meta.topicId;
         if (meta.runId && (meta.hasWriteTasks || result.qualityGate !== undefined)) {
             this._orchestratorValidationByRun.set(meta.runId, {
                 // A later quality-gated repair wave supersedes an earlier failed write wave.
@@ -4633,27 +4594,11 @@ export class AgentToolExecutor {
             }
         }
 
-        // Write execution results to Blackboard for subsequent query
-        this.blackboard.write(
-            `${meta.blackboardPrefix}${BLACKBOARD_KEY_PREFIXES.orchestratorResult}`,
-            JSON.stringify({
-                success: result.success,
-                summary: result.summary,
-                totalTokenUsage: result.totalTokenUsage,
-                failedNodes: result.failedNodes,
-                cancelledNodes: result.cancelledNodes,
-            }),
-            'free_text',
-            '__orchestrator__',
-        );
-
-        // Persist the full graph, per-node results, and blackboard so a
-        // later wave (or session) can resume or merge this orchestration.
-        await saveOrchestration({
+        const saved = await saveOrchestration({
+            workspaceRoot: this.workspaceRoot,
             topicId: meta.topicId,
             runId: meta.runId,
             domain: meta.domain,
-            mode: meta.mode,
             delegationDepth: meta.delegationDepth,
             graph,
             agentResults: result.agentResults,
@@ -4662,6 +4607,9 @@ export class AgentToolExecutor {
             totalTokenUsage: result.totalTokenUsage,
             qualityGate: result.qualityGate,
         }).catch(() => false);
+        if (!saved) {
+            throw new Error(`Failed to persist orchestration '${graph.id}'.`);
+        }
     }
 
     /**
@@ -4693,8 +4641,10 @@ export class AgentToolExecutor {
 * Falls back to the durable orchestration store so past waves remain mergeable. 
 */
     private executeMergeResults(args: Record<string, unknown>, context?: import('./types').AgentToolContext): unknown {
-        const requestedDomain = context?.runnerOptions?.domain
-            ?? defaultDomainForMode(context?.runnerOptions?.mode ?? 'build');
+        const requestedDomain = context?.runnerOptions?.schedulingState.domainProfile;
+        if (!requestedDomain) {
+            return { success: false, message: 'merge_results requires an active scheduler context.' };
+        }
         const requestedTopicId = context?.runnerOptions?.topicId;
         const requestedGraphId = typeof args.graphId === 'string' && args.graphId.trim().length > 0
             ? args.graphId.trim()
@@ -4716,40 +4666,12 @@ export class AgentToolExecutor {
         }
         const strategy = args.strategy === 'concatenate' || args.strategy === 'summary' ? args.strategy : 'structured';
 
-        // 1. In-memory cache (fast path, same topic/domain and matching graphId).
-        const memoryGraph = this._lastOrchestratorGraph;
-        const memoryMatches = !!this._lastOrchestratorResult
-            && (this._lastOrchestratorDomain === undefined
-                || (this._lastOrchestratorDomain === requestedDomain
-                    && (this._lastOrchestratorTopicId === undefined
-                        || requestedTopicId === this._lastOrchestratorTopicId)))
-            && (!requestedGraphId || memoryGraph?.id === requestedGraphId)
-            && !requestedRunId;
-        if (memoryMatches) {
-            const r = this._lastOrchestratorResult!;
-            if (requestedNodeIds.length === 0) requestedNodeIds = [...r.agentResults.keys()].sort();
-            return this.assembleMergeReport(
-                r.agentResults,
-                memoryGraph,
-                {
-                    success: r.success,
-                    summary: r.summary,
-                    totalTokenUsage: r.totalTokenUsage,
-                    qualityGate: r.qualityGate,
-                    failedNodes: r.failedNodes,
-                    cancelledNodes: r.cancelledNodes,
-                },
-                requestedNodeIds,
-                strategy,
-            );
-        }
-
-        // 2. Durable store: explicit graphId, else the latest matching wave.
+        // Durable store: explicit graphId, else the latest matching wave.
         let storedRecord: import('./orchestrator/orchestrationStore').StoredOrchestration | undefined;
         if (requestedGraphId) {
-            storedRecord = loadOrchestration(requestedGraphId, { topicId: requestedTopicId, domain: requestedDomain });
+            storedRecord = loadOrchestration(requestedGraphId, { topicId: requestedTopicId, domain: requestedDomain, workspaceRoot: this.workspaceRoot });
         } else {
-            const candidates = listOrchestrations({ topicId: requestedTopicId, domain: requestedDomain, limit: 16 });
+            const candidates = listOrchestrations({ topicId: requestedTopicId, domain: requestedDomain, limit: 16, workspaceRoot: this.workspaceRoot });
             storedRecord = candidates.find(record => !record.complete && (!requestedRunId || record.runId === requestedRunId))
                 ?? (requestedRunId ? candidates.find(record => record.runId === requestedRunId) : candidates[0]);
         }
@@ -4783,22 +4705,6 @@ export class AgentToolExecutor {
             );
         }
 
-        // 3. Legacy blackboard summary (never carries node detail).
-        const stored = this.blackboard.readValue(`${blackboardDomainPrefix(context)}${BLACKBOARD_KEY_PREFIXES.orchestratorResult}`)
-            ?? (requestedDomain === 'paradox' ? this.blackboard.readValue(BLACKBOARD_KEY_PREFIXES.orchestratorResult) : undefined);
-        if (stored) {
-            try {
-                const parsed = JSON.parse(stored);
-                return {
-                    success: false,
-                    ...parsed,
-                    source: 'blackboard',
-                    message: 'Detailed node outputs are no longer in memory, so the requested nodeIds cannot be merged safely. Dispatch a new verification/integration wave.',
-                };
-            } catch {
-                return { success: false, message: 'Failed to find the most recent orchestrator execution result. Please use dispatch_agents first.' };
-            }
-        }
         return { success: false, message: 'Failed to find the most recent orchestrator execution result. Please use dispatch_agents first.' };
     }
 
@@ -4812,7 +4718,7 @@ export class AgentToolExecutor {
         domain: import('./types').AgentRuntimeDomain,
         runId?: string,
     ): unknown {
-        const records = listOrchestrations({ topicId, domain, limit: 16 })
+        const records = listOrchestrations({ topicId, domain, limit: 16, workspaceRoot: this.workspaceRoot })
             .filter(record => !runId || record.runId === runId);
         return projectOrchestrationCatalog(
             records,

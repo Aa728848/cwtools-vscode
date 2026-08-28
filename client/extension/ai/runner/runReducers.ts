@@ -64,7 +64,7 @@ export function reduceRunState(events: AgentRunEvent[]): RunStateSnapshot {
                 snap.status = 'running';
                 break;
             case 'status_changed': {
-                const status = normalizeRunStatus(p?.status ?? ev.status);
+                const status = normalizeRunStatus(p?.status);
                 if (status) snap.status = status;
                 if (isTerminalRunStatus(status)) {
                     snap.endedAt = ev.timestamp;

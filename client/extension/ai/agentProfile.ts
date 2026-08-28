@@ -2,10 +2,9 @@ import type {
     AgentDomain,
     AgentExecutionStrategy,
     AgentIntent,
-    AgentMode,
     AgentProfileSelection,
     AgentRuntimeDomain,
-    ResolvedAgentProfile,
+    ResolvedSchedulingDecision,
 } from './types';
 import {
     admissionFromResolvedProfile,
@@ -18,16 +17,10 @@ export const DEFAULT_AGENT_PROFILE: Readonly<AgentProfileSelection> = Object.fre
     strategy: 'auto',
 });
 
-const DOMAINS = new Set<AgentDomain>(['auto', 'paradox', 'general', 'hybrid']);
+const DOMAINS = new Set<AgentDomain>(['paradox', 'general', 'hybrid']);
 const INTENTS = new Set<AgentIntent>(['auto', 'execute', 'plan', 'explore', 'review']);
 const STRATEGIES = new Set<AgentExecutionStrategy>(['auto', 'single', 'multi']);
-const MODES = new Set<AgentMode>([
-    'build', 'plan', 'explore', 'general', 'utility', 'review', 'gui_expert',
-    'script_reviewer', 'loc_translator', 'loc_writer', 'orchestrator', 'script',
-]);
 
-const PDX_REQUEST_RE = /\b(pdx|pdxscript|paradox|stellaris|eu4|hoi4|ck3|vic3|imperator|modding|clausewitz|cwt|cwtools|locali[sz]ation|sprite|sound asset|event chain|event id|scripted[ _](?:effect|trigger)|modifier|static_modifier|scripted_modifier|scope chain|common[\\/]|events?[\\/]|\.cwt|\.gui|\.gfx|\.asset)\b|群星|悖论|模组|事件号|事件\s*ID|本地化|事件链|作用域链|脚本触发器|脚本效果|修饰符/i;
-const GENERAL_CODE_REQUEST_RE = /\b(typescript|javascript|python|rust|java|c#|f#|react|webview|extension host|api|unit test|integration test|typecheck|compiler|build config|package\.json|tsconfig|source code|codebase|repository code)\b|类型脚本|前端|后端|扩展宿主|单元测试|集成测试|编译|源码|代码库|仓库代码|项目代码|程序代码/i;
 const WRITE_INTENT_RE = /\b(fix|repair|implement|add|create|generate|update|edit|modify|write|remove|delete|replace|rename|wire|migrate|refactor|apply|build|change|convert)\b|修复|实现|添加|新增|创建|生成|更新|修改|写入|移除|删除|接入|补齐|迁移|调整|执行|构建|替换|重命名|改名|换成|改成|改为|调整为|设为|改一下|改好|补上|加上|删掉/i;
 const PLAN_INTENT_RE = /\b(plan|design|blueprint|proposal|architecture|roadmap)\b|计划|规划|方案|设计|蓝图|路线图|实施步骤/i;
 const REVIEW_INTENT_RE = /\b(review|audit|triage|inspect|diagnose|diagnostic report|check for (?:issues|problems|bugs))\b|审查|评审|巡检|诊断报告|检查|核查|排查|评估|找问题|找出问题|有没有问题|是否有问题|看看.*问题/i;
@@ -36,11 +29,8 @@ const NO_WRITE_INTENT_RE = /\b(?:do not|don't|without|no need to)\s+(?:change|ed
 const DIRECT_WRITE_OVERRIDE_RE = /\b(?:but|then)\s+(?:please\s+)?(?:change|edit|modify|write|implement)|\b(?:directly|immediately)\s+(?:change|edit|modify|write|implement)|(?:但|不过|然后|接着|之后|并且)[^，。；\n]{0,8}(?:修改|改动|更改|写入|执行|实现|修复)|(?:直接|马上|立即)(?:修改|改动|更改|写入|执行|实现|修复)/i;
 const MULTI_AGENT_RE = /\b(multi(?:ple)?[-\s]?agents?|sub[-\s]?agents?|dispatch_agents|parallel agents?|in parallel)\b|多\s*agent|子\s*agent|并行.*agent|并行处理/i;
 const BROAD_TASK_RE = /\b(all|every|entire|whole|across the (?:project|repository|workspace)|multi[-\s]?file|event chain|migration|large refactor)\b|全部|所有|整个项目|整个仓库|全项目|跨文件|多文件|事件链|批量|整套|大型重构|全面修复/i;
-const PDX_PATH_RE = /(?:^|[\\/])(?:common|events?|interface|localisation|localization|gfx|sound|music|map|history|decisions|missions|on_actions)(?:[\\/]|$)|\.(?:cwt|gui|gfx|asset|entity)$/i;
-
 export interface AgentProfileResolveHints {
     activeFile?: string;
-    previousDomain?: AgentRuntimeDomain;
     previousUserRequests?: readonly string[];
 }
 
@@ -61,9 +51,7 @@ export interface ModelAgentProfileDecision {
 
 export function cloneAgentProfile(profile: AgentProfileSelection = DEFAULT_AGENT_PROFILE): AgentProfileSelection {
     return {
-        // `auto` is retained in the wire type only for legacy topic imports.
-        // Capability domains are user-owned and default to Paradox.
-        domain: profile.domain === 'general' || profile.domain === 'hybrid' ? profile.domain : 'paradox',
+        domain: profile.domain,
         intent: profile.intent,
         strategy: profile.strategy,
         ...(profile.profileName ? { profileName: profile.profileName } : {}),
@@ -72,7 +60,7 @@ export function cloneAgentProfile(profile: AgentProfileSelection = DEFAULT_AGENT
 
 /** Build the only profile exposed by the normal composer: domain is selectable; routing stays automatic. */
 export function profileForUserDomain(domain: AgentDomain): AgentProfileSelection {
-    return { domain: domain === 'general' || domain === 'hybrid' ? domain : 'paradox', intent: 'auto', strategy: 'auto' };
+    return { domain, intent: 'auto', strategy: 'auto' };
 }
 
 export function sameAgentProfile(left: AgentProfileSelection, right: AgentProfileSelection): boolean {
@@ -93,72 +81,29 @@ export function isAgentProfileSelection(value: unknown): value is AgentProfileSe
 }
 
 function schedulingForSelection(
-    admission: ResolvedAgentProfile['admission'],
+    admission: import('./types').AdmissionDecision,
     selection: AgentProfileSelection,
-): ResolvedAgentProfile['schedulingState'] {
+): import('./types').AgentSchedulingState {
     const schedulingState = schedulingStateFromAdmission(admission);
     return selection.profileName ? { ...schedulingState, profileName: selection.profileName } : schedulingState;
-}
-
-export function isAgentMode(value: unknown): value is AgentMode {
-    return typeof value === 'string' && MODES.has(value as AgentMode);
-}
-
-export function isAgentRuntimeDomain(value: unknown): value is AgentRuntimeDomain {
-    return value === 'paradox' || value === 'general' || value === 'hybrid';
 }
 
 export function normalizeAgentProfile(value: unknown): AgentProfileSelection {
     return isAgentProfileSelection(value) ? cloneAgentProfile(value) : cloneAgentProfile();
 }
 
-export function profileForLegacyMode(mode: AgentMode): AgentProfileSelection {
+/** Translate a workflow's internal execution label into an explicit user/profile selection. */
+export function profileForExecutionMode(mode: import('./types').AgentMode): AgentProfileSelection {
     switch (mode) {
         case 'plan': return { domain: 'paradox', intent: 'plan', strategy: 'single' };
         case 'explore': return { domain: 'paradox', intent: 'explore', strategy: 'single' };
         case 'review':
         case 'script_reviewer': return { domain: 'paradox', intent: 'review', strategy: 'single' };
         case 'utility':
-        case 'general': return { domain: 'general', intent: 'execute', strategy: 'single' };
         case 'orchestrator': return { domain: 'general', intent: 'execute', strategy: 'multi' };
         case 'script': return { domain: 'paradox', intent: 'execute', strategy: 'multi' };
-        case 'gui_expert':
-        case 'loc_translator':
-        case 'loc_writer':
-        case 'build':
         default: return { domain: 'paradox', intent: 'execute', strategy: 'single' };
     }
-}
-
-/**
- * Compatibility fallback for callers and snapshots that predate explicit
- * runtime domains. Shared read-only modes historically meant Paradox unless a
- * resolved profile says otherwise; preserving that default avoids silently
- * removing CWT/LSP capabilities from old topics.
- */
-export function defaultDomainForMode(mode: AgentMode): AgentRuntimeDomain {
-    switch (mode) {
-        case 'general':
-        case 'utility':
-        case 'orchestrator':
-            return 'general';
-        default:
-            return 'paradox';
-    }
-}
-
-function resolveMode(
-    domain: ResolvedAgentProfile['domain'],
-    intent: ResolvedAgentProfile['intent'],
-    strategy: ResolvedAgentProfile['strategy'],
-): AgentMode {
-    // Writable coordinators are legacy adapters; read-only intent keeps its own mode
-    // while the scheduler independently admits a parallel topology.
-    if (intent === 'execute' && strategy === 'multi') return domain === 'paradox' ? 'script' : 'orchestrator';
-    if (intent === 'plan') return 'plan';
-    if (intent === 'explore') return 'explore';
-    if (intent === 'review') return 'review';
-    return domain === 'paradox' ? 'build' : 'utility';
 }
 
 export function parseModelAgentProfileDecision(raw: string): ModelAgentProfileDecision | undefined {
@@ -212,12 +157,12 @@ export function resolveAgentProfileFromModelDecision(
     profile: AgentProfileSelection,
     decision: ModelAgentProfileDecision,
     _hints: AgentProfileResolveHints = {},
-): ResolvedAgentProfile {
+): ResolvedSchedulingDecision {
     const selection = normalizeAgentProfile(profile);
     const routeConfidence = decision.confidence ?? 0.65;
     // Capability domain is user-owned. Semantic routing may change task intent
     // and execution topology, but never Paradox/General capabilities.
-    const domain: ResolvedAgentProfile['domain'] = selection.domain === 'general'
+    const domain: AgentRuntimeDomain = selection.domain === 'general'
         ? 'general'
         : selection.domain === 'hybrid' ? 'hybrid' : 'paradox';
     // Once semantic routing succeeds, no keyword classifier may override it.
@@ -244,37 +189,35 @@ export function resolveAgentProfileFromModelDecision(
         : selection.strategy;
     const base = {
         selection,
-        domain,
         intent,
         strategy,
-        mode: resolveMode(domain, intent, strategy),
         reason: decision.reason || 'Semantic routing completed.',
         requiresUserDecision: decision.requiresUserDecision,
         routingSource: 'model' as const,
     };
     const admission = admissionFromResolvedProfile(
-        base,
+        { ...base, domain },
         routeConfidence,
         decision.evidence ?? [decision.reason || 'model-assisted routing'],
     );
-    return { ...base, admission, schedulingState: schedulingForSelection(admission, selection) };
+    return {
+        schedulingState: {
+            ...schedulingForSelection(admission, selection),
+            awaitingUserDecision: decision.requiresUserDecision || undefined,
+            routingSource: 'model',
+            phaseReason: base.reason,
+        },
+    };
 }
 
 export function resolveAgentProfile(
     text: string,
     profile: AgentProfileSelection = cloneAgentProfile(),
     hints: AgentProfileResolveHints = {},
-): ResolvedAgentProfile {
+): ResolvedSchedulingDecision {
     const selection = normalizeAgentProfile(profile);
     const request = text.trim();
-    const hasPdxText = PDX_REQUEST_RE.test(request);
-    const hasGeneralCodeText = GENERAL_CODE_REQUEST_RE.test(request);
-    const hasPdxFile = !!hints.activeFile && PDX_PATH_RE.test(hints.activeFile.replace(/\\/g, '/'));
-    const domain: ResolvedAgentProfile['domain'] = selection.domain === 'auto'
-        // Explicit repository-language/framework semantics describe the file being
-        // changed and therefore outrank incidental mentions of Paradox/CWTools.
-        ? (hasGeneralCodeText ? 'general' : hasPdxText ? 'paradox' : hasPdxFile ? 'paradox' : hints.previousDomain ?? 'general')
-        : selection.domain;
+    const domain: AgentRuntimeDomain = selection.domain;
 
     const explicitNoWrite = NO_WRITE_INTENT_RE.test(request) && !DIRECT_WRITE_OVERRIDE_RE.test(request);
     const explicitReadOnlyIntent = PLAN_INTENT_RE.test(request) || REVIEW_INTENT_RE.test(request) || EXPLORE_INTENT_RE.test(request);
@@ -290,11 +233,11 @@ export function resolveAgentProfile(
     // planning round-trip. Only explicit planning or broad/coupled scope keeps
     // the deterministic fallback in Plan; Execute may inspect the repository
     // within the user's requested scope before applying the change.
-    const fallbackWriteIntent: ResolvedAgentProfile['intent'] = PLAN_INTENT_RE.test(request)
+    const fallbackWriteIntent: Exclude<AgentIntent, 'auto'> = PLAN_INTENT_RE.test(request)
         || BROAD_TASK_RE.test(request)
         ? 'plan'
         : 'execute';
-    let intent: ResolvedAgentProfile['intent'];
+    let intent: Exclude<AgentIntent, 'auto'>;
     if (selection.intent !== 'auto') {
         intent = selection.intent;
     } else if (!hasWriteIntent && PLAN_INTENT_RE.test(request)) {
@@ -307,7 +250,7 @@ export function resolveAgentProfile(
         intent = hasWriteIntent ? fallbackWriteIntent : 'explore';
     }
 
-    let strategy: ResolvedAgentProfile['strategy'];
+    let strategy: Exclude<AgentExecutionStrategy, 'auto'>;
     if (selection.strategy !== 'auto') {
         strategy = selection.strategy;
     } else {
@@ -315,40 +258,33 @@ export function resolveAgentProfile(
         strategy = explicitMulti ? 'multi' : 'single';
     }
 
-    const mode = resolveMode(domain, intent, strategy);
-    const domainReason = selection.domain === 'auto'
-        ? hasGeneralCodeText ? 'general code semantics' : hasPdxText ? 'request semantics' : hasPdxFile ? 'active Paradox file' : hints.previousDomain ? 'conversation continuity' : 'general workspace task'
-        : 'user selection';
+    const domainReason = 'user selection';
     const intentReason = selection.intent === 'auto' ? 'request intent' : 'user selection';
     const strategyReason = selection.strategy === 'auto' ? 'task scope' : 'user selection';
 
     const base = {
         selection,
-        domain,
         intent,
         strategy,
-        mode,
         reason: `domain: ${domainReason}; intent: ${intentReason}; strategy: ${strategyReason}${BROAD_TASK_RE.test(request) ? '; runtime dispatch evaluation requested' : ''}`,
         requiresUserDecision: false,
         routingSource: selection.intent === 'auto' ? 'deterministic' as const : 'manual' as const,
     };
-    const confidence = selection.domain !== 'auto'
-        ? 1
-        : hasGeneralCodeText || hasPdxText
-            ? 0.9
-            : hasPdxFile
-                ? 0.8
-                : hints.previousDomain
-                    ? 0.7
-                    : 0.55;
+    const confidence = 1;
     const evidence = [
         `domain: ${domainReason}`,
         `intent: ${intentReason}`,
         `strategy: ${strategyReason}`,
         ...(BROAD_TASK_RE.test(request) ? ['broad task requires runtime decomposition'] : []),
     ];
-    const admission = admissionFromResolvedProfile(base, confidence, evidence);
-    return { ...base, admission, schedulingState: schedulingForSelection(admission, selection) };
+    const admission = admissionFromResolvedProfile({ ...base, domain }, confidence, evidence);
+    return {
+        schedulingState: {
+            ...schedulingForSelection(admission, selection),
+            routingSource: 'deterministic',
+            phaseReason: base.reason,
+        },
+    };
 }
 
 /** Automatic task intent is semantic; deterministic admission is only its bounded fallback. */

@@ -28,7 +28,6 @@ export const BLACKBOARD_KEY_PREFIXES = {
     intent: '__intent:',
     clarification: 'orchestrator:clarification:',
     qualityGate: '__quality_gate:',
-    orchestratorResult: 'orchestrator:lastResult',
 } as const;
 
 interface TypeRule {

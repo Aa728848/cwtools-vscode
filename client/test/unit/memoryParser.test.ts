@@ -30,27 +30,10 @@ describe('MemoryParser topic storage', () => {
         });
 
         const topicMemoryPath = path.join(workspaceRoot, '.cwtools', 'topic_123', '.cwtools-memory.md');
-        const legacyRootPath = path.join(workspaceRoot, '.cwtools-memory.md');
-
         expect(result.success).to.equal(true);
         expect(parser.memoryFilePath).to.equal(topicMemoryPath);
         expect(fs.existsSync(topicMemoryPath)).to.equal(true);
-        expect(fs.existsSync(legacyRootPath)).to.equal(false);
         expect(fs.readFileSync(topicMemoryPath, 'utf8')).to.include('Use foo namespace');
-    });
-
-    it('reads legacy root memory as a fallback alongside topic memory', () => {
-        const { MemoryParser } = loadMemoryParserModule();
-        const topicDir = path.join(workspaceRoot, '.cwtools', 'topic_legacy');
-        fs.mkdirSync(topicDir, { recursive: true });
-        fs.writeFileSync(path.join(workspaceRoot, '.cwtools-memory.md'), '# Legacy\n\nLEGACY_MEMORY', 'utf8');
-        fs.writeFileSync(path.join(topicDir, '.cwtools-memory.md'), '# Topic\n\nTOPIC_MEMORY', 'utf8');
-
-        const parser = new MemoryParser(workspaceRoot, 'topic_legacy');
-        const prompt = parser.getMemoryPrompt();
-
-        expect(prompt).to.include('TOPIC_MEMORY');
-        expect(prompt).to.include('LEGACY_MEMORY');
     });
 
     it('persists structured provenance, redacts secrets, and keeps prompt building read-only', async () => {
@@ -95,13 +78,14 @@ describe('MemoryParser topic storage', () => {
         expect(pruned.entries[0].key).to.equal('private convention');
     });
 
-    it('isolates structured memory by capability domain while retaining legacy entries for Paradox', async () => {
+    it('isolates structured memory by its explicit capability domain', async () => {
         const { MemoryParser } = loadMemoryParserModule();
         const parser = new MemoryParser(workspaceRoot, 'topic_domains');
         await parser.appendMemory({
             key: 'shared-name',
-            content: 'Paradox-only legacy-compatible fact.',
+            content: 'Paradox-only explicit-domain fact.',
             priority: 'normal',
+            domain: 'paradox',
         });
         await parser.appendMemory({
             key: 'shared-name',
@@ -112,15 +96,15 @@ describe('MemoryParser topic storage', () => {
 
         const paradoxPrompt = parser.getMemoryPrompt('topic_domains', { domain: 'paradox' });
         const generalPrompt = parser.getMemoryPrompt('topic_domains', { domain: 'general' });
-        expect(paradoxPrompt).to.include('Paradox-only legacy-compatible fact.');
+        expect(paradoxPrompt).to.include('Paradox-only explicit-domain fact.');
         expect(paradoxPrompt).to.not.include('General repository fact.');
         expect(generalPrompt).to.include('General repository fact.');
-        expect(generalPrompt).to.not.include('Paradox-only legacy-compatible fact.');
+        expect(generalPrompt).to.not.include('Paradox-only explicit-domain fact.');
 
         expect(parser.markMemoryUsed('topic_domains', ['shared-name'], 'general')).to.equal(1);
         MemoryParser.flushUsageWrites();
         const entries = JSON.parse(fs.readFileSync(parser.getStructuredMemoryFilePath(), 'utf8')).entries;
-        const paradoxEntry = entries.find((entry: { domain?: string }) => (entry.domain ?? 'paradox') === 'paradox');
+        const paradoxEntry = entries.find((entry: { domain?: string }) => entry.domain === 'paradox');
         const generalEntry = entries.find((entry: { domain?: string }) => entry.domain === 'general');
         expect(paradoxEntry.usageCount ?? 0).to.equal(0);
         expect(generalEntry.usageCount).to.equal(1);
@@ -357,12 +341,13 @@ describe('MemoryParser topic storage', () => {
         const topicDir = path.join(workspaceRoot, '.cwtools', 'topic_inactive');
         fs.mkdirSync(topicDir, { recursive: true });
         fs.writeFileSync(path.join(topicDir, 'memory.json'), JSON.stringify({
-            version: 4,
+            version: MemoryParser.STRUCTURED_MEMORY_VERSION,
             entries: [{
                 key: 'inactive project fact',
                 content: 'This value belongs to the old project revision.',
                 priority: 'normal',
                 source: 'project-profile',
+                domain: 'paradox',
                 kind: 'project_fact',
                 projectRevision: currentRevision,
             }],
@@ -400,37 +385,27 @@ describe('MemoryParser topic storage', () => {
         expect(fs.readFileSync(jsonPath, 'utf8')).to.equal(before);
     });
 
-    it('reads version 1 memory files and infers kinds conservatively', () => {
+    it('rejects non-current structured memory versions', () => {
         const { MemoryParser } = loadMemoryParserModule();
-        const parser = new MemoryParser(workspaceRoot, 'topic_v1');
-        const topicDir = path.join(workspaceRoot, '.cwtools', 'topic_v1');
+        const parser = new MemoryParser(workspaceRoot, 'topic_obsolete');
+        const topicDir = path.join(workspaceRoot, '.cwtools', 'topic_obsolete');
         fs.mkdirSync(topicDir, { recursive: true });
-        const legacyEntries = [
+        const obsoleteEntries = [
             { key: 'agent learned fact', content: 'Model inferred this.', priority: 'normal', source: 'run:abc' },
             { key: 'user instruction fact', content: 'User said tabs.', priority: 'normal', source: 'user:instruction' },
             { key: 'project convention', content: 'From docs.', priority: 'high', source: 'project-docs' },
-            { key: 'unsourced fact', content: 'Legacy without source.', priority: 'low' },
+            { key: 'unsourced fact', content: 'Obsolete without source.', priority: 'low' },
             { key: 42, content: 'invalid entry without string key' },
             { content: 'entry without any key' },
         ];
         fs.writeFileSync(
             path.join(topicDir, 'memory.json'),
-            JSON.stringify({ version: 1, entries: legacyEntries }),
+            JSON.stringify({ version: 1, entries: obsoleteEntries }),
             'utf8',
         );
 
-        const prompt = parser.getMemoryPrompt('topic_v1');
-        expect(prompt).to.include('agent learned fact');
-        expect(prompt).to.include('kind=inferred');
-        expect(prompt).to.include('kind=user_fact');
-        expect(prompt).to.not.include('project convention');
-        expect(prompt).to.include('unsourced fact');
-        const auditPrompt = parser.getMemoryPrompt('topic_v1', { includeStale: true });
-        expect(auditPrompt).to.include('kind=project_fact');
-        expect(auditPrompt).to.include('stale=true');
-        // Invalid entries are dropped at the untrusted-JSON boundary.
-        expect(prompt).to.not.include('invalid entry without string key');
-        expect(prompt).to.not.include('entry without any key');
+        const prompt = parser.getMemoryPrompt('topic_obsolete');
+        expect(prompt).to.equal('');
     });
 
     it('serializes concurrent writes and rejects stale expected revisions', async () => {

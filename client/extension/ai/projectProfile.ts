@@ -13,7 +13,7 @@ const MAX_PROJECT_PROFILE_BYTES = 2 * 1024 * 1024;
 const PROFILE_WORKSPACE_KINDS = new Set(['paradox_mod', 'extension_source', 'mixed', 'generic']);
 const PROFILE_GAME_CONFIDENCE = new Set(['high', 'medium', 'low']);
 const PROFILE_AGENT_MODES = new Set([
-    'build', 'plan', 'explore', 'general', 'utility', 'review', 'gui_expert',
+    'build', 'plan', 'explore', 'utility', 'review', 'gui_expert',
     'script_reviewer', 'loc_translator', 'loc_writer', 'orchestrator', 'script',
 ]);
 const PROFILE_LSP_STATES = new Set(['unknown', 'ready', 'not_ready']);
@@ -37,93 +37,10 @@ function isStringArrayRecord(value: unknown): value is Record<string, string[]> 
     return isRecord(value) && Object.values(value).every(isStringArray);
 }
 
-function normalizeLegacyProjectProfile(value: unknown): unknown {
-    if (!isRecord(value)
-        || (value.schemaVersion !== 1 && value.schemaVersion !== 2)
-        || !isRecord(value.game)
-        || typeof value.game.id !== 'string') return value;
-    const game = value.game;
-    const localisation = value.localisation === undefined ? {} : value.localisation;
-    const identifiers = value.identifiers === undefined ? {} : value.identifiers;
-    const routing = value.routing === undefined ? {} : value.routing;
-    const validation = value.validation === undefined ? {} : value.validation;
-    if (!isRecord(localisation)
-        || !isRecord(identifiers)
-        || !isRecord(routing)
-        || !isRecord(validation)) return value;
-    const normalized = {
-        ...value,
-        schemaVersion: value.schemaVersion === 1 ? 2 : 2,
-        legacyProfile: value.schemaVersion === 1 ? true : undefined,
-        generatedAt: value.generatedAt ?? '',
-        workspaceRoot: value.workspaceRoot ?? '',
-        workspaceKind: value.workspaceKind ?? 'generic',
-        projectName: value.projectName ?? '',
-        game: {
-            ...game,
-            displayName: game.displayName ?? game.id,
-            confidence: game.confidence ?? 'low',
-            evidence: game.evidence ?? [],
-        },
-        modInfo: isRecord(value.modInfo)
-            ? {
-                name: value.modInfo.name,
-                version: value.modInfo.version,
-                tags: Array.isArray(value.modInfo.tags) ? value.modInfo.tags : undefined,
-                supportedVersion: value.modInfo.supportedVersion,
-                remoteFileId: value.modInfo.remoteFileId,
-                dependencies: Array.isArray(value.modInfo.dependencies) ? value.modInfo.dependencies : undefined,
-            }
-            : value.modInfo,
-        compatibility: isRecord(value.compatibility) ? value.compatibility : {
-            supportedVersion: isRecord(value.modInfo) ? value.modInfo.supportedVersion : undefined,
-            declaredDependencies: isRecord(value.modInfo) && Array.isArray(value.modInfo.dependencies)
-                ? value.modInfo.dependencies.filter((item): item is string => typeof item === 'string').map(name => ({ name, source: 'descriptor.mod' }))
-                : [],
-            possibleSoftDependencies: [],
-            dependencyRoots: [],
-            loadOrder: {
-                source: 'descriptor_only', confidence: 'partial', orderedLayers: ['vanilla', 'workspace'],
-                warnings: ['Launcher dependency roots and active load order were not present in this legacy profile.'],
-            },
-            coverage: { unresolvedIdInference: 'not_available', truncated: false },
-        },
-        keyDirectories: value.keyDirectories ?? [],
-        localisation: {
-            ...localisation,
-            roots: localisation.roots ?? [],
-            languages: localisation.languages ?? [],
-            encoding: localisation.encoding ?? 'unknown',
-            sampleFiles: localisation.sampleFiles ?? [],
-        },
-        identifiers: {
-            ...identifiers,
-            namespaces: identifiers.namespaces ?? [],
-            variablePrefixes: identifiers.variablePrefixes ?? [],
-            byType: identifiers.byType ?? {},
-        },
-        routing: {
-            ...routing,
-            recommendedWorkflowByIntent: routing.recommendedWorkflowByIntent ?? [],
-            preferredReadTools: routing.preferredReadTools ?? [],
-            avoidPatterns: routing.avoidPatterns ?? [],
-        },
-        validation: {
-            ...validation,
-            lspReady: validation.lspReady ?? 'unknown',
-            indexStatus: validation.indexStatus ?? 'unknown',
-            vanillaCache: validation.vanillaCache ?? 'unknown',
-        },
-        promptCards: value.promptCards ?? {},
-        efficiencyHints: value.efficiencyHints ?? [],
-    };
-    return normalized;
-}
-
 /** Validate the generated profile before it reaches prompts, LSP, or MCP paths. */
 export function isProjectProfile(value: unknown): value is ProjectProfile {
     if (!isRecord(value)
-        || (value.schemaVersion !== 1 && value.schemaVersion !== 2)
+        || value.schemaVersion !== 2
         || typeof value.generatedAt !== 'string'
         || typeof value.workspaceRoot !== 'string'
         || !PROFILE_WORKSPACE_KINDS.has(String(value.workspaceKind))
@@ -225,7 +142,7 @@ function readProjectProfileFile(profilePath: string): ProjectProfile | null {
     try {
         const stat = fs.statSync(profilePath);
         if (!stat.isFile() || stat.size > MAX_PROJECT_PROFILE_BYTES) return null;
-        const parsed = normalizeLegacyProjectProfile(JSON.parse(fs.readFileSync(profilePath, 'utf8')) as unknown);
+        const parsed = JSON.parse(fs.readFileSync(profilePath, "utf8")) as unknown;
         return isProjectProfile(parsed) ? parsed : null;
     } catch {
         return null;
@@ -234,14 +151,7 @@ function readProjectProfileFile(profilePath: string): ProjectProfile | null {
 
 export function readProjectProfile(workspaceRoot: string): ProjectProfile | null {
     const profilePath = getProjectProfilePath(workspaceRoot);
-    if (fs.existsSync(profilePath)) {
-        return readProjectProfileFile(profilePath);
-    }
-    const legacyPath = path.join(workspaceRoot, '.cwtools-ai', 'project', 'profile.json');
-    if (fs.existsSync(legacyPath)) {
-        return readProjectProfileFile(legacyPath);
-    }
-    return null;
+    return fs.existsSync(profilePath) ? readProjectProfileFile(profilePath) : null;
 }
 
 export function writeProjectProfile(workspaceRoot: string, profile: ProjectProfile): string {
@@ -429,8 +339,7 @@ export function queryProjectProfile(workspaceRoot: string, args: QueryProjectPro
     try {
         const profile = readProjectProfile(workspaceRoot);
         if (!profile) {
-            const legacyPath = path.join(workspaceRoot, '.cwtools-ai', 'project', 'profile.json');
-            if (fs.existsSync(profilePath) || fs.existsSync(legacyPath)) {
+            if (fs.existsSync(profilePath)) {
                 return {
                     status: 'error',
                     profilePath,
@@ -851,10 +760,7 @@ function detectLocalisation(root: string): LocalisationDetectionResult {
 function detectVanillaCache(root: string): { state: ProjectProfile['validation']['vanillaCache']; evidence?: string } {
     // A bare `.cwtools` directory is not proof of a usable vanilla cache: verify
     // that a serialized cache file or a vanilla data folder is actually present.
-    const candidates = [
-        path.join(root, '.cwtools'),
-        path.join(root, '.cwtools-ai'),
-    ];
+    const candidates = [path.join(root, '.cwtools')];
     for (const candidate of candidates) {
         if (!fs.existsSync(candidate)) continue;
         const cacheFiles = collectFiles(candidate, 8, ['.cwb']);

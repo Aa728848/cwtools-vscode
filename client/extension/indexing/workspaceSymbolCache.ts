@@ -42,15 +42,6 @@ export function getWorkspaceSymbolCachePath(workspaceRoot: string): string {
     return path.join(getWorkspaceCacheRoot(workspaceRoot), WORKSPACE_SYMBOL_CACHE_RELATIVE_PATH);
 }
 
-/** Previous in-project cache location, kept as a read-only migration fallback. */
-export function getProjectWorkspaceSymbolCachePath(workspaceRoot: string): string {
-    return path.join(workspaceRoot, '.cwtools', 'index', 'workspace-symbols.sqlite');
-}
-
-export function getLegacyWorkspaceSymbolCachePath(workspaceRoot: string): string {
-    return path.join(workspaceRoot, '.cwtools-ai', 'index', 'workspace-symbols.sqlite');
-}
-
 export interface WorkspaceSymbolFileFact {
     path: string;
     size: number;
@@ -69,7 +60,7 @@ export interface WorkspaceSymbolCacheSnapshot {
     coverage?: WorkspaceSymbolCacheCoverage;
 }
 
-export type WorkspaceSymbolCacheOpenResult = 'created' | 'rebuilt' | 'reused' | 'migrated';
+export type WorkspaceSymbolCacheOpenResult = 'created' | 'rebuilt' | 'reused';
 
 export interface WorkspaceSymbolCacheCoverage {
     discoveredFiles: number;
@@ -92,30 +83,6 @@ function getSql(wasmDirectory: string): Promise<SqlJsStatic> {
 
 function normalizePath(value: string): string {
     return path.resolve(value).replace(/\\/g, '/');
-}
-
-function removeMigratedFallback(sourcePath: string, sourceRoot: string): void {
-    fs.rmSync(sourcePath, { force: true });
-    // Only directories that exclusively hold migrated cache files may be
-    // removed; other project .cwtools content is left untouched.
-    const removableRoots = [
-        path.resolve(sourceRoot, '.cwtools-ai'),
-        path.resolve(sourceRoot, '.cwtools', 'index'),
-    ];
-    const isInsideOrEqual = (target: string, root: string): boolean => {
-        const relative = path.relative(root, target);
-        return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
-    };
-    let current = path.dirname(path.resolve(sourcePath));
-    while (removableRoots.some(root => isInsideOrEqual(current, root))) {
-        try {
-            fs.rmdirSync(current);
-        } catch {
-            break;
-        }
-        if (removableRoots.some(root => current === root)) break;
-        current = path.dirname(current);
-    }
 }
 
 function stringValue(value: unknown): string | undefined {
@@ -217,22 +184,16 @@ export class WorkspaceSymbolSqliteCache {
 		private readonly wasmDirectory: string,
 		private readonly sourceRoot: string,
 		private readonly sourceFingerprint = '',
-		private readonly fallbackDatabasePaths: readonly string[] = [],
 	) {}
 
     async open(): Promise<WorkspaceSymbolCacheOpenResult> {
         if (this.database) return 'reused';
         const SQL = await getSql(this.wasmDirectory);
         let bytes: Uint8Array | undefined;
-        const primaryExists = fs.existsSync(this.databasePath);
-        const sourcePath = primaryExists
-            ? this.databasePath
-            : this.fallbackDatabasePaths.find(candidate => fs.existsSync(candidate)) ?? this.databasePath;
-        const sourceExists = primaryExists || fs.existsSync(sourcePath);
-        const loadedFallback = path.resolve(sourcePath) !== path.resolve(this.databasePath);
+        const sourceExists = fs.existsSync(this.databasePath);
         let rebuilt = false;
         try {
-            bytes = new Uint8Array(await fs.promises.readFile(sourcePath));
+            bytes = new Uint8Array(await fs.promises.readFile(this.databasePath));
         } catch {
             bytes = undefined;
         }
@@ -246,13 +207,9 @@ export class WorkspaceSymbolSqliteCache {
         }
         // Persist an empty current-schema database immediately. A process crash
         // before indexing finishes must not leave the obsolete file in place.
-        if (rebuilt || loadedFallback) {
+        if (rebuilt) {
             await this.save();
         }
-        if (loadedFallback) {
-            removeMigratedFallback(sourcePath, this.sourceRoot);
-        }
-        if (loadedFallback) return 'migrated';
         if (!sourceExists) return 'created';
         return rebuilt ? 'rebuilt' : 'reused';
     }

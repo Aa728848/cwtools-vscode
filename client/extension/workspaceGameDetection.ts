@@ -220,7 +220,6 @@ const RULE_WORKSPACE_SCAN_IGNORED_DIRS = new Set([
 	'.vscode',
 	'.vscode-test',
 	'.cwtools',
-	'.cwtools-ai',
 	'node_modules',
 	'bin',
 	'obj',

@@ -128,7 +128,6 @@ describe('orchestrationStore', () => {
             topicId,
             runId: 'run-1',
             domain: 'paradox',
-            mode: 'script',
             graph,
             agentResults: results,
             blackboard,

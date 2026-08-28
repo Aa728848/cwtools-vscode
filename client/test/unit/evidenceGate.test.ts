@@ -13,6 +13,7 @@ import { expect } from 'chai';
 import sinon from 'sinon';
 import * as fs from 'fs';
 import * as path from 'path';
+import { PARADOX_WRITE } from './schedulingFixtures';
 
 const TEMP_BASE = path.resolve(__dirname, '../../..', '.tmp-test');
 
@@ -1074,7 +1075,7 @@ describe('AgentToolExecutor evidence gate wiring', () => {
 
     function makeContext(events: Array<{ type: string; payload: any }>, permissionAnswer?: boolean) {
         return {
-            runnerOptions: { mode: 'build', topicId: 'evidence-test' },
+            runnerOptions: { schedulingState: PARADOX_WRITE, topicId: 'evidence-test' },
             runEventSink: {
                 runId: 'evidence-test-run',
                 appendSoon: (type: string, payload: any) => events.push({ type, payload }),
@@ -1296,7 +1297,7 @@ describe('AgentToolExecutor evidence gate wiring', () => {
         const events: Array<{ type: string; payload: any }> = [];
         let permissionAsked = false;
         const context = {
-            runnerOptions: { mode: 'build', topicId: 'evidence-test' },
+            runnerOptions: { schedulingState: PARADOX_WRITE, topicId: 'evidence-test' },
             runEventSink: { runId: 'evidence-test-run', appendSoon: (type: string, payload: any) => events.push({ type, payload }) },
             onPermissionRequest: async () => { permissionAsked = true; return true; },
         } as any;

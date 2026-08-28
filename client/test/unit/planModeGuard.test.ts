@@ -22,7 +22,7 @@ describe('planModeGuard', () => {
 
         const artifact = validatePlanModeToolUse(
             'edit_file',
-            { filePath: path.join(workspaceRoot, '.cwtools-ai', 'topic-123', 'annotations.md') },
+            { filePath: path.join(workspaceRoot, '.cwtools', 'topic-123', 'annotations.md') },
             workspaceRoot
         );
         expect(artifact.allowed).to.equal(true);

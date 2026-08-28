@@ -254,7 +254,7 @@ describe('ProjectProfile localisation detection', () => {
         }
     });
 
-    it('writes and reads a schemaVersion 2 profile and reports legacy V1 as legacyProfile', () => {
+    it('accepts schemaVersion 2 and rejects obsolete profile schemas', () => {
         const workspaceRoot = makeWorkspace();
         try {
             const profile = buildProjectProfile(workspaceRoot);
@@ -264,9 +264,7 @@ describe('ProjectProfile localisation detection', () => {
             fs.mkdirSync(path.dirname(profilePath), { recursive: true });
             fs.writeFileSync(profilePath, JSON.stringify({ ...profile, schemaVersion: 1 }), 'utf8');
 
-            const legacy = readProjectProfile(workspaceRoot);
-            expect(legacy?.schemaVersion).to.equal(2);
-            expect(legacy?.legacyProfile).to.equal(true);
+            expect(readProjectProfile(workspaceRoot)).to.equal(null);
         } finally {
             cleanupWorkspace(workspaceRoot);
         }
@@ -302,31 +300,6 @@ describe('Paradox project profile boundaries', () => {
 
     afterEach(() => {
         fs.rmSync(workspaceRoot, { recursive: true, force: true });
-    });
-
-    it('normalizes legacy schemaVersion 1 profiles without identifiers.byType', () => {
-        const profile = buildProjectProfile(workspaceRoot);
-        const legacy = JSON.parse(JSON.stringify(profile)) as { identifiers: { byType?: unknown } };
-        delete legacy.identifiers.byType;
-        const profilePath = getProjectProfilePath(workspaceRoot);
-        fs.mkdirSync(path.dirname(profilePath), { recursive: true });
-        fs.writeFileSync(profilePath, JSON.stringify(legacy), 'utf8');
-
-        expect(readProjectProfile(workspaceRoot)?.identifiers.byType).to.deep.equal({});
-    });
-
-    it('normalizes the minimal legacy profile consumed by project-knowledge refreshes', () => {
-        const profilePath = getProjectProfilePath(workspaceRoot);
-        fs.mkdirSync(path.dirname(profilePath), { recursive: true });
-        fs.writeFileSync(profilePath, JSON.stringify({
-            schemaVersion: 1,
-            game: { id: 'stellaris' },
-        }), 'utf8');
-
-        const profile = readProjectProfile(workspaceRoot);
-        expect(profile?.game.displayName).to.equal('stellaris');
-        expect(profile?.workspaceKind).to.equal('generic');
-        expect(profile?.routing.recommendedWorkflowByIntent).to.deep.equal([]);
     });
 
     it('rejects malformed and oversized profile files instead of throwing into prompt or LSP callers', () => {

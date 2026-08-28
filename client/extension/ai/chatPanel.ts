@@ -34,8 +34,8 @@ import type {
     GenerationResult,
     ContextItem,
     TokenUsage,
-    AgentProfileSelection,
-    ResolvedAgentProfile,
+    AgentSchedulingState,
+    ResolvedSchedulingDecision,
     TodoUpdateScope,
 } from './types';
 import { contentToString } from './types';
@@ -74,18 +74,12 @@ import { getAllWorkflows, getWorkflow } from './workflowRegistry';
 import { toWorkflowViewModel } from './workflowViewModel';
 import { getWorkflowUiLabels } from './workflowI18n';
 import {
-    cloneAgentProfile,
-    defaultDomainForMode,
-    isAgentMode,
-    normalizeAgentProfile,
     parseModelAgentProfileDecision,
-    profileForLegacyMode,
-    profileForUserDomain,
+    profileForExecutionMode,
     resolveAgentProfile,
     resolveAgentProfileFromModelDecision,
-    sameAgentProfile,
-    shouldUseSemanticAgentRouting,
 } from './agentProfile';
+import { executionModeForSchedulingState, normalizeSchedulingState } from './runner/scheduling';
 import { computeLineDiff } from './diffEngine';
 import {
     clipUiText,
@@ -152,7 +146,7 @@ function isTempScriptSnapshot(snapshot: FileSnapshot, workspaceRoot = getProject
     const basename = path.basename(snapshot.filePath).toLowerCase();
     const ext = path.extname(basename).toLowerCase();
     if (!TEMP_DIFF_SCRIPT_EXTENSIONS.has(ext)) return false;
-    if ((segments[0] === '.cwtools' || segments[0] === '.cwtools-ai') && segments[2] === 'scratch') return true;
+    if (segments[0] === '.cwtools' && segments[2] === 'scratch') return true;
     if (segments.some(segment => TEMP_DIFF_SCRIPT_DIR_NAMES.has(segment))) return true;
     if (basename === 'agent_helper.py') return true;
     return snapshot.previousContent === null && TEMP_DIFF_SCRIPT_NAME_PATTERN.test(basename);
@@ -205,7 +199,6 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
     private readonly lastRunSnapshotSentAt = new Map<string, number>();
     private readonly queuedSlashCommands: string[] = [];
     private flushingSlashCommands = false;
-    private readonly disposeProfileCatalogSubscription: () => void;
     /** One-shot main-Agent continuation set only by approving an interactive plan card. */
     private approvedPlanExecutionPending = false;
     public topicManager!: ChatTopicManager;
@@ -213,23 +206,16 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
     public contextReferences: ContextReferenceManager;
 
     private get currentMode(): AgentMode {
-        return this.session.currentMode;
-    }
-
-    private set currentMode(mode: AgentMode) {
-        this.session.currentMode = mode;
+        return executionModeForSchedulingState(this.session.schedulingState);
     }
 
     public beginApprovedPlanExecution(): void {
+        const domain = this.session.schedulingState.domainProfile;
+        this.switchWorkflow(null);
+        this.session.schedulingState = resolveAgentProfile('', { domain, intent: 'execute', strategy: 'multi' }).schedulingState;
         this.approvedPlanExecutionPending = true;
-    }
-
-    private get previousMode(): AgentMode {
-        return this.session.previousMode;
-    }
-
-    private set previousMode(mode: AgentMode) {
-        this.session.previousMode = mode;
+        this.persistSchedulingStateForCurrentTopic();
+        this.postMessage({ type: 'setSchedulingState', schedulingState: this.session.schedulingState });
     }
 
     private get currentWorkflowId(): string | null {
@@ -238,14 +224,6 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
 
     private set currentWorkflowId(workflowId: string | null) {
         this.session.currentWorkflowId = workflowId;
-    }
-
-    private get agentProfile(): AgentProfileSelection {
-        return this.session.agentProfile;
-    }
-
-    private set agentProfile(profile: AgentProfileSelection) {
-        this.session.agentProfile = profile;
     }
 
     private get _liveSteps(): AgentStep[] {
@@ -283,7 +261,6 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         this.agentRunner.toolExecutor.onWorkflowSaved = () => this.sendWorkflowState();
         runLedger.onChange((runId) => this.queueRunSnapshot(runId));
         agentProfileCatalog.startWatching();
-        this.disposeProfileCatalogSubscription = agentProfileCatalog.subscribe(() => this.sendRuntimeProfiles());
     }
 
     /**
@@ -330,7 +307,6 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         this.pendingRunSnapshotTimers.clear();
         this.lastRunSnapshotSentAt.clear();
         this.queuedSlashCommands.length = 0;
-        this.disposeProfileCatalogSubscription();
         void this.agentRuntime.dispose();
     }
 
@@ -376,10 +352,8 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         if (this.topicManager.currentTopic && this.topicManager.currentTopic.messages.length > 0) {
             send({ type: 'loadTopicMessages', messages: compactMessagesForWebview(this.topicManager.currentTopic.messages), targetSurface });
         }
-        // 2. Restore current mode
-        send({ type: 'setMode', mode: this.currentMode });
-        send({ type: 'setAgentProfile', profile: this.agentProfile, resolved: this.session.lastResolvedProfile });
-        this.sendRuntimeProfiles(send);
+        // 2. Restore the canonical scheduler state.
+        send({ type: 'setSchedulingState', schedulingState: this.session.schedulingState });
         send({ type: 'slashCommandList', commands: getSlashCommandDescriptors(vs.env.language) });
         // 3. If a generation was running when the panel was hidden, replay steps
         //    so the user can see what the AI has done so far and cancel if needed
@@ -498,7 +472,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                 threadId: child.threadId,
                 turnId: child.turnId,
                 status: child.status,
-                mode: child.mode,
+                schedulingState: child.schedulingState,
                 startedAt: child.startedAt,
                 completedAt: child.completedAt,
                 userPromptPreview: child.userPromptPreview,
@@ -539,8 +513,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                 this.postMessage(msg);
             }
         };
-        send({ type: 'setMode', mode: this.currentMode });
-        send({ type: 'setAgentProfile', profile: this.agentProfile, resolved: this.session.lastResolvedProfile });
+        send({ type: 'setSchedulingState', schedulingState: this.session.schedulingState });
         send({ type: 'slashCommandList', commands: getSlashCommandDescriptors(vs.env.language) });
         if (this.artifactStore.size > 0) {
             send({ type: 'artifactList', artifacts: this.artifactStore.list() });
@@ -806,6 +779,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             contexts,
             timestamp: Date.now(),
             images: hasImages ? images : undefined,
+            schedulingState: this.session.schedulingState,
         });
         const historyContent: ChatMessage['content'] = hasImages
             ? [
@@ -831,14 +805,8 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
 
     public async handleComposerSubmission(
         text: string,
-        payload: { images?: string[]; attachedFiles?: string[]; contexts?: ContextItem[]; agentProfile?: AgentProfileSelection } = {},
+        payload: { images?: string[]; attachedFiles?: string[]; contexts?: ContextItem[] } = {},
     ): Promise<void> {
-        if (payload.agentProfile) {
-            const submittedProfile = normalizeAgentProfile(payload.agentProfile);
-            if (!sameAgentProfile(submittedProfile, this.agentProfile)) {
-                this.switchAgentProfile(submittedProfile);
-            }
-        }
         const trimmed = text.trim();
         if (trimmed.startsWith('/')) {
             const attachmentCount = (payload.images?.length ?? 0)
@@ -886,12 +854,8 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         text: string,
         showRoutingStatus = true,
         extra: { planContinuationPending?: boolean } = {},
-    ): Promise<ResolvedAgentProfile> {
+    ): Promise<ResolvedSchedulingDecision> {
         const activeFile = vs.window.activeTextEditor?.document.uri.fsPath;
-        const hasTopicContext = (this.topicManager.currentTopic?.messages.length ?? 0) > 0;
-        const previousDomain = this.session.lastResolvedProfile?.domain
-            ?? this.topicManager.currentTopic?.resolvedAgentDomain
-            ?? (hasTopicContext ? defaultDomainForMode(this.currentMode) : undefined);
         const recentConversation = this.conversationMessages
             .filter(message => message.role === 'user' || message.role === 'assistant')
             .slice(-6)
@@ -902,8 +866,14 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         const previousUserRequests = recentConversation
             .filter(message => message.role === 'user')
             .map(message => message.content);
-        const hints = { activeFile, previousDomain, previousUserRequests };
-        const selection = normalizeAgentProfile(this.agentProfile);
+        const hints = { previousUserRequests };
+        const activeScheduling = this.session.schedulingState;
+        const selection = {
+            domain: activeScheduling.domainProfile,
+            intent: 'auto' as const,
+            strategy: 'auto' as const,
+            ...(activeScheduling.profileName ? { profileName: activeScheduling.profileName } : {}),
+        };
         // The previous turn ran in Plan Mode and never delivered the plan
         // artifact: an answer to its clarification must continue planning so
         // the planner can hand over the full Implementation Plan. Routing it as
@@ -911,12 +881,11 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         if (extra.planContinuationPending === true) {
             const continued = resolveAgentProfile(text, { ...selection, intent: 'plan' }, hints);
             if (showRoutingStatus) {
-                this.postMessageToSurface('chat', { type: 'agentRoutingStatus', phase: 'resolved', profile: continued });
+                this.postMessageToSurface('chat', { type: 'agentRoutingStatus', phase: 'resolved', schedulingState: continued.schedulingState });
             }
             return continued;
         }
-        const fallback = resolveAgentProfile(text, this.agentProfile, hints);
-        if (!shouldUseSemanticAgentRouting(selection)) return fallback;
+        const fallback = resolveAgentProfile(text, selection, hints);
         if (showRoutingStatus) {
             this.postMessageToSurface('chat', { type: 'agentRoutingStatus', phase: 'classifying' });
         }
@@ -977,13 +946,13 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             if (!decision) throw new Error('Router returned an invalid classification payload.');
             const resolved = resolveAgentProfileFromModelDecision(text, selection, decision, hints);
             if (showRoutingStatus) {
-                this.postMessageToSurface('chat', { type: 'agentRoutingStatus', phase: 'resolved', profile: resolved });
+                this.postMessageToSurface('chat', { type: 'agentRoutingStatus', phase: 'resolved', schedulingState: resolved.schedulingState });
             }
             return resolved;
         } catch (error) {
             ErrorReporter.warn(SOURCE.CHAT_PANEL, 'Agent model routing failed; using the deterministic safety fallback.', error);
             if (showRoutingStatus) {
-                this.postMessageToSurface('chat', { type: 'agentRoutingStatus', phase: 'fallback', profile: fallback });
+                this.postMessageToSurface('chat', { type: 'agentRoutingStatus', phase: 'fallback', schedulingState: fallback.schedulingState });
             }
             return fallback;
         }
@@ -997,11 +966,10 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
      */
     private isPendingPlanContinuation(text: string): boolean {
         if (this.approvedPlanExecutionPending) return false;
-        if (this.session.currentMode !== 'plan') return false;
+        if (this.session.schedulingState.phase !== 'plan') return false;
         const lower = text.trim().toLowerCase();
         if (!lower) return false;
-        // Explicit mode overrides and "execute now" phrasing opt out of planning.
-        if (/(?:^|\s)\/mode:|\/plan\b|不用计划|不做计划|不要计划|取消计划|跳过计划|别计划|别规划|放弃计划|不再计划|直接执行|立即执行|马上执行|直接开始|开始执行|继续执行/.test(lower)) return false;
+        if (/不用计划|不做计划|不要计划|取消计划|跳过计划|别计划|别规划|放弃计划|不再计划|直接执行|立即执行|马上执行|直接开始|开始执行|继续执行/.test(lower)) return false;
         const topicId = this.topicManager.currentTopic?.id;
         if (!topicId) return false;
         // A plan artifact for the topic means planning already delivered its
@@ -1044,32 +1012,26 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             return;
         }
 
-        let turnMode = this.currentMode;
-        let turnDomain = this.agentProfile.domain === 'auto'
-            ? defaultDomainForMode(turnMode)
-            : this.agentProfile.domain;
-        let resolvedProfile: ResolvedAgentProfile | undefined;
+        let schedulingState = this.session.schedulingState;
+        let resolvedProfile: ResolvedSchedulingDecision | undefined;
         if (!_skipAutoModeSwitch && text.trim() && !this.currentWorkflowId) {
             resolvedProfile = await this.resolveTurnAgentProfile(text, !isBackground, {
                 planContinuationPending: this.isPendingPlanContinuation(text),
             });
-            turnMode = resolvedProfile.mode;
-            turnDomain = resolvedProfile.domain;
-            this.session.lastResolvedProfile = resolvedProfile;
-            if (turnMode !== this.currentMode) this.currentMode = turnMode;
-            this.postMessage({ type: 'modeChanged', mode: turnMode });
+            schedulingState = resolvedProfile.schedulingState;
+            this.session.schedulingState = schedulingState;
         }
+        let turnMode = executionModeForSchedulingState(schedulingState);
+        let turnDomain = schedulingState.domainProfile;
 
         // Ensure we have a topic
         const visibleUserText = displayText ?? text;
 
         if (!this.topicManager.currentTopic) {
-            this.topicManager.createNewTopic(visibleUserText);
+            this.topicManager.createNewTopic(visibleUserText, schedulingState);
         }
         if (this.topicManager.currentTopic) {
-            this.topicManager.currentTopic.agentProfile = cloneAgentProfile(this.agentProfile);
-            this.topicManager.currentTopic.agentMode = turnMode;
-            this.topicManager.currentTopic.resolvedAgentDomain = resolvedProfile?.domain ?? turnDomain;
+            this.topicManager.currentTopic.schedulingState = schedulingState;
         }
 
         const normalizedText = text.trim().toLowerCase();
@@ -1081,9 +1043,11 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         }
         if (resumeFromState && this.topicManager.currentTopic?.id) {
             const resumeState = await this.agentRunner.loadResumeState(this.topicManager.currentTopic.id);
-            if (resumeState?.mode) {
-                turnMode = resumeState.mode;
-                turnDomain = resumeState.domain ?? defaultDomainForMode(turnMode);
+            if (resumeState) {
+                schedulingState = resumeState.schedulingState;
+                this.session.schedulingState = schedulingState;
+                turnMode = executionModeForSchedulingState(schedulingState);
+                turnDomain = schedulingState.domainProfile;
             }
         }
 
@@ -1099,7 +1063,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                     messageIndex,
                     images: images?.length ? images : undefined,
                     contexts,
-                    resolvedAgentProfile: resolvedProfile,
+                    schedulingState,
                 });
             } else {
                 this.postMessage({ type: 'startBackgroundGeneration' });
@@ -1114,7 +1078,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                 timestamp: Date.now(),
                 images: images?.length ? images : undefined,
                 isHidden: isBackground,
-                resolvedAgentProfile: resolvedProfile,
+                schedulingState,
             });
             
             // When a new task starts, clean up old breakpoint snapshots to prevent context pollution.
@@ -1133,7 +1097,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                     messageIndex,
                     images: images?.length ? images : undefined,
                     contexts,
-                    resolvedAgentProfile: resolvedProfile,
+                    schedulingState,
                 });
             } else {
                 this.postMessage({ type: 'startBackgroundGeneration' });
@@ -1146,7 +1110,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                 timestamp: Date.now(),
                 images: images?.length ? images : undefined,
                 isHidden: isBackground,
-                resolvedAgentProfile: resolvedProfile,
+                schedulingState,
             });
         }
 
@@ -1184,7 +1148,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         // can slice directly without the fragile `-2` hardcode.
         const convLengthBeforeExchange = this.conversationMessages.length;
         this._currentMessageSnapshots = messageSnapshots;
-        this.agentRunner.toolExecutor.onBeforeFileWrite = (filePath, previousContent) => {
+        const onBeforeFileWrite = (filePath: string, previousContent: string | null) => {
             // Only record the first snapshot for each file (earliest = true "before" state)
             if (!messageSnapshots.some(s => s.filePath === filePath)) {
                 if (previousContent && previousContent.length > 500000) {
@@ -1207,13 +1171,11 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                 context: { ...context, topicId: this.topicManager.currentTopic?.id },
                 conversationHistory: this.conversationMessages,
                 options: {
-                    mode: turnMode,
-                    schedulingState: resolvedProfile?.schedulingState,
+                    schedulingState,
                     approvedPlanExecution,
                     initialToolFocus: approvedPlanExecution && (turnMode === 'build' || turnMode === 'utility')
                         ? 'write'
                         : undefined,
-                    domain: turnDomain,
                     providerId: config.provider,
                     model: this.aiService.getConfig().model || undefined,
                     reasoningEffort: config.reasoningEffort,
@@ -1228,6 +1190,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                     // Permission callback for run_command tool (OpenCode strategy)
                     onPermissionRequest: (id: string, tool: string, description: string, command?: string, ctx?: any) =>
                         this.requestPermission(id, tool, description, command, ctx),
+                    onBeforeFileWrite,
                     onUserQuestion: (request, questionContext) => this.requestUserQuestion(request, questionContext),
                     onTodoUpdate: (todos, scope) => this.sendTodoUpdate(todos, scope),
                     resumeFromState,
@@ -1341,7 +1304,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                     steps: uiSteps,
                     runId: durableRunId,
                 });
-                await this.savePlanFile(interactivePlanText, text, uiSteps, turnMode);
+                await this.savePlanFile(interactivePlanText, text, uiSteps);
             } else {
                 this.postMessage({ type: 'generationComplete', result: uiResult });
                 this.topicManager.addHistoryMessage({
@@ -1442,8 +1405,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                     }
                 }
             }
-            // Clean up the per-request callback and snapshot pointer
-            this.agentRunner.toolExecutor.onBeforeFileWrite = undefined;
+            // Clean up the per-request snapshot pointer.
             this._currentMessageSnapshots = null;
 
             // Send diff summary if files were changed
@@ -1797,7 +1759,6 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         }
 
         if (artifact.filePath) {
-            // Shared path compatibility: if the stored filePath does not exist, try to find it in a candidate location
             const resolvedPath = this.resolveArtifactFilePath(artifact.filePath);
             if (!resolvedPath) {
                 vs.window.showWarningMessage(aiText(`Could not find file: ${path.basename(artifact.filePath)}`, `无法找到文件: ${path.basename(artifact.filePath)}`));
@@ -1905,7 +1866,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         try {
             if (!fs.existsSync(tmpDir)) return;
             const entries = await fs.promises.readdir(tmpDir);
-            // Delete only temporary diff files (matching deterministic naming format or legacy Date.now format)
+            // Delete only deterministic temporary diff files.
             for (const entry of entries) {
                 if (/_(before|after)\.[^.]+$/.test(entry)) {
                     await fs.promises.unlink(path.join(tmpDir, entry)).catch(() => { /* neglect */ });
@@ -1917,8 +1878,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
     }
 
     /** 
-* Parse artifact file paths - compatible with shared paths and multiple candidate locations. 
-* Used if direct path exists, otherwise inferred from filename and looked in all topic candidate directories. 
+* Resolve an artifact's exact stored path or a workspace-relative path.
 */
     public resolveArtifactFilePath(filePath: string): string | null {
         // Check direct paths first
@@ -1926,25 +1886,6 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         if (!path.isAbsolute(filePath)) {
             const workspacePath = path.join(getProjectWorkspaceRoot(), filePath);
             if (fs.existsSync(workspacePath)) return workspacePath;
-        }
-
-        // Extract the file name from the path and search in the candidate location
-        const fileName = path.basename(filePath);
-        const topicId = this.topicManager.currentTopic?.id;
-
-        // First try to search from all candidate directories of the current topic
-        if (topicId) {
-            const candidates = getPrivateTopicFileCandidates(topicId, fileName, getProjectWorkspaceRoot());
-            const found = candidates.find(c => fs.existsSync(c));
-            if (found) return found;
-        }
-
-        // Finally try to infer the topicId from the path itself (which may be different from the current topic)
-        const parentName = path.basename(path.dirname(filePath));
-        if (parentName && parentName !== topicId) {
-            const candidates = getPrivateTopicFileCandidates(parentName, fileName, getProjectWorkspaceRoot());
-            const found = candidates.find(c => fs.existsSync(c));
-            if (found) return found;
         }
 
         return null;
@@ -2020,7 +1961,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         return filePath;
     }
 
-    private async savePlanFile(planText: string, userPrompt: string, steps?: any[], mode: AgentMode = this.currentMode): Promise<void> {
+    private async savePlanFile(planText: string, userPrompt: string, steps?: any[]): Promise<void> {
         // ── Persist .md export ──────────────────────────────────────────────
         let filePath = '';
         let relPath = '';
@@ -2040,11 +1981,8 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         }
 
         if (filePath) {
-            const approvalMode = mode === 'orchestrator' || mode === 'script'
-                ? mode
-                : this.getApprovedPlanExecutionMode();
             // Post plan file saved card and render interactive annotation UI
-            this.postMessage({ type: 'planFileSaved', filePath, relPath, mode: approvalMode });
+            this.postMessage({ type: 'planFileSaved', filePath, relPath });
             this.upsertArtifact({
                 id: this.artifactId('plan', path.basename(filePath)),
                 kind: 'plan',
@@ -2072,10 +2010,10 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             if (currentSection.trim()) sections.push(currentSection.trim());
             if (sections.length === 0 && planText.trim()) sections.push(planText.trim());
 
-            this.postMessage({ type: 'renderPlan', sections, planText, mode: approvalMode });
+            this.postMessage({ type: 'renderPlan', sections, planText });
 
             if (steps) {
-                steps.push({ type: 'plan_card', content: filePath, toolResult: sections, mode: approvalMode, uiState: 'pending', timestamp: Date.now() });
+                steps.push({ type: 'plan_card', content: filePath, toolResult: sections, uiState: 'pending', timestamp: Date.now() });
                 this.topicManager.saveTopics();
             }
 
@@ -2414,39 +2352,23 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
 
     // ─── Topic Management ────────────────────────────────────────────────────
 
-    private createNewTopic(firstMessage: string): void {
-        const title = firstMessage.substring(0, 40) + (firstMessage.length > 40 ? '...' : '');
-        this.topicManager.currentTopic = {
-            id: `topic_${Date.now()}`,
-            title,
-            createdAt: Date.now(),
-            updatedAt: Date.now(),
-            messages: [],
-        };
-        this.conversationMessages = [];
-        this.topicManager.topics.unshift(this.topicManager.currentTopic);
-    }
-
     public startNewTopic(): void {
-        this.persistAgentProfileForCurrentTopic();
+        this.persistSchedulingStateForCurrentTopic();
         this.topicManager.startNewTopic();
-        this.agentProfile = cloneAgentProfile();
-        this.session.previousAgentProfile = cloneAgentProfile();
-        this.currentMode = 'build';
-        this.previousMode = 'build';
+        const initialScheduling = resolveAgentProfile('', profileForExecutionMode('build')).schedulingState;
+        this.session.schedulingState = initialScheduling;
+        this.session.previousSchedulingState = initialScheduling;
         this.currentWorkflowId = null;
-        this.session.lastResolvedProfile = undefined;
         this.conversationMessages = [];
         this._messageFileSnapshots.clear();
         this._currentMessageSnapshots = null;
         this.clearArtifacts();
-        this.postMessage({ type: 'setAgentProfile', profile: this.agentProfile });
-        this.postMessage({ type: 'modeChanged', mode: this.currentMode });
+        this.postMessage({ type: 'setSchedulingState', schedulingState: this.session.schedulingState });
         this.sendWorkflowState();
     }
 
     public async loadTopic(topicId: string): Promise<void> {
-        this.persistAgentProfileForCurrentTopic();
+        this.persistSchedulingStateForCurrentTopic();
         this.clearArtifacts();
         const topic = this.topicManager.topics.find(t => t.id === topicId);
         this.conversationMessages = this.topicManager.loadTopic(
@@ -2454,22 +2376,17 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             topic ? compactMessagesForWebview(topic.messages) as any : undefined
         );
         const restoredWorkflow = topic?.workflowId ? getWorkflow(topic.workflowId) : undefined;
-        const normalizedStoredProfile = normalizeAgentProfile(topic?.agentProfile);
-        const storedProfile = normalizedStoredProfile.profileName
-            ? profileForUserDomain(normalizedStoredProfile.domain)
-            : normalizedStoredProfile;
-        this.agentProfile = storedProfile;
         this.currentWorkflowId = restoredWorkflow?.id ?? null;
-        this.currentMode = restoredWorkflow?.mode ?? (isAgentMode(topic?.agentMode) ? topic.agentMode : 'build');
-        const normalizedReturnProfile = normalizeAgentProfile(topic?.workflowReturnProfile ?? topic?.agentProfile);
-        const storedReturnProfile = normalizedReturnProfile.profileName
-            ? profileForUserDomain(normalizedReturnProfile.domain)
-            : normalizedReturnProfile;
-        this.session.previousAgentProfile = storedReturnProfile;
-        this.previousMode = isAgentMode(topic?.workflowReturnMode) ? topic.workflowReturnMode : this.currentMode;
-        this.session.lastResolvedProfile = undefined;
-        this.postMessage({ type: 'setAgentProfile', profile: this.agentProfile });
-        this.postMessage({ type: 'modeChanged', mode: this.currentMode });
+        const restoredWorkflowProfile = restoredWorkflow ? profileForExecutionMode(restoredWorkflow.mode) : undefined;
+        this.session.schedulingState = restoredWorkflowProfile
+            ? resolveAgentProfile('', restoredWorkflowProfile).schedulingState
+            : topic?.schedulingState
+                ? normalizeSchedulingState(topic.schedulingState)
+                : resolveAgentProfile('', profileForExecutionMode('build')).schedulingState;
+        this.session.previousSchedulingState = topic?.workflowReturnSchedulingState
+            ? normalizeSchedulingState(topic.workflowReturnSchedulingState)
+            : this.session.schedulingState;
+        this.postMessage({ type: 'setSchedulingState', schedulingState: this.session.schedulingState });
         this.sendWorkflowState();
         void this.agentRuntime.resumeThread(topicId, topicId).catch(() => undefined);
         const resumeState = await this.agentRunner.loadResumeState(topicId);
@@ -2768,26 +2685,6 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
 
     private async executeSlashCommand(resolved: ResolvedSlashCommand): Promise<void> {
         const { definition, raw, argument } = resolved;
-        const modeByCommand: Partial<Record<typeof definition.id, AgentMode>> = {
-            modeBuild: 'build',
-            modePlan: 'plan',
-            modeExplore: 'explore',
-            modeUtility: 'utility',
-            modeReview: 'review',
-            modeOrchestrator: 'orchestrator',
-            modeScript: 'script',
-        };
-        const targetMode = modeByCommand[definition.id];
-        if (targetMode) {
-            this.switchMode(targetMode);
-            this.emitSlashCommandResult(
-                raw,
-                'success',
-                aiText(`Mode switched to ${targetMode}.`, `已切换到 ${targetMode} 模式。`),
-            );
-            return;
-        }
-
         switch (definition.id) {
             case 'clear':
                 this.startNewTopic();
@@ -2803,7 +2700,6 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                     agentMode: this.currentMode,
                 };
                 const result = await this.agentRunner.compactActiveHistory(this.conversationMessages, {
-                    mode: this.currentMode,
                     model: config.model || undefined,
                 }, step => {
                     if (step.compactionInfo) this.postMessage({ type: 'contextCompactionStatus', step });
@@ -2983,6 +2879,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             }
             case 'status': {
                 const config = this.aiService.getConfig();
+                const scheduling = this.session.schedulingState;
                 const configuredReviewer = vs.workspace.getConfiguration('stellarisLanguageServices.ai')
                     .get<'user' | 'auto_review'>('approvals.reviewer', 'user');
                 const permission = getSessionPermissionMode(getProjectWorkspaceRoot())
@@ -2995,8 +2892,8 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                     raw,
                     'success',
                     aiText(
-                        `Model ${config.model || '(not set)'} · reasoning ${config.reasoningEffort} · mode ${this.currentMode} · workflow ${this.currentWorkflowId || 'off'} · permissions ${permission}`,
-                        `模型 ${config.model || '（未设置）'} · 推理 ${config.reasoningEffort} · 模式 ${this.currentMode} · 工作流 ${this.currentWorkflowId || '关闭'} · 权限 ${permission}`,
+                        `Model ${config.model || '(not set)'} · reasoning ${config.reasoningEffort} · scheduling ${scheduling.domainProfile}/${scheduling.phase}/${scheduling.dispatch}/${scheduling.authorization} · workflow ${this.currentWorkflowId || 'off'} · permissions ${permission}`,
+                        `模型 ${config.model || '（未设置）'} · 推理 ${config.reasoningEffort} · 调度 ${scheduling.domainProfile}/${scheduling.phase}/${scheduling.dispatch}/${scheduling.authorization} · 工作流 ${this.currentWorkflowId || '关闭'} · 权限 ${permission}`,
                     ),
                 );
                 return;
@@ -3662,94 +3559,56 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         }
     }
 
-    private persistAgentProfileForCurrentTopic(): void {
+    private persistSchedulingStateForCurrentTopic(): void {
         const topic = this.topicManager.currentTopic;
         if (!topic) return;
-        topic.agentProfile = cloneAgentProfile(this.agentProfile);
-        topic.agentMode = this.currentMode;
-        const resolvedDomain = this.session.lastResolvedProfile?.domain
-            ?? (this.agentProfile.domain === 'auto' ? topic.resolvedAgentDomain : this.agentProfile.domain);
-        if (resolvedDomain) topic.resolvedAgentDomain = resolvedDomain;
-        else delete topic.resolvedAgentDomain;
+        topic.schedulingState = this.session.schedulingState;
         if (this.currentWorkflowId) topic.workflowId = this.currentWorkflowId;
         else delete topic.workflowId;
         if (this.currentWorkflowId) {
-            topic.workflowReturnProfile = cloneAgentProfile(this.session.previousAgentProfile);
-            topic.workflowReturnMode = this.previousMode;
+            topic.workflowReturnSchedulingState = this.session.previousSchedulingState;
         } else {
-            delete topic.workflowReturnProfile;
-            delete topic.workflowReturnMode;
+            delete topic.workflowReturnSchedulingState;
         }
         this.topicManager.saveTopics();
     }
 
-    public switchAgentProfile(profile: AgentProfileSelection, preserveWorkflow = false): void {
-        const normalized = normalizeAgentProfile(profile);
-        if (normalized.profileName && !agentProfileCatalog.get(normalized.profileName)) {
-            ErrorReporter.warn(SOURCE.CHAT_PANEL, `Rejected unknown runtime Agent profile "${normalized.profileName}".`);
-            return;
-        }
-        if (sameAgentProfile(normalized, this.agentProfile) && (preserveWorkflow || !this.currentWorkflowId)) return;
-        if (!preserveWorkflow) this.session.previousAgentProfile = this.agentProfile;
-        this.agentProfile = normalized;
-        this.session.lastResolvedProfile = undefined;
-        if (!preserveWorkflow && this.currentWorkflowId) {
+    public switchSchedulingDomain(domain: AgentSchedulingState['domainProfile']): void {
+        if (domain !== 'paradox' && domain !== 'general' && domain !== 'hybrid') return;
+        if (domain === this.session.schedulingState.domainProfile && !this.currentWorkflowId) return;
+        this.session.previousSchedulingState = this.session.schedulingState;
+        if (this.currentWorkflowId) {
             this.currentWorkflowId = null;
             this.sendWorkflowState();
         }
-        this.persistAgentProfileForCurrentTopic();
-        this.postMessage({ type: 'agentProfileChanged', profile: normalized });
-    }
-
-    private sendRuntimeProfiles(postMessage: (msg: HostMessage) => void = msg => this.postMessage(msg)): void {
-        const snapshot = agentProfileCatalog.snapshot();
-        postMessage({
-            type: 'runtimeProfiles',
-            revision: snapshot.revision,
-            profiles: snapshot.profiles.map(profile => ({
-                name: profile.name,
-                description: profile.description,
-                domain: profile.domain,
-                authorizationCeiling: profile.authorizationCeiling,
-                modelPreference: profile.modelPreference,
-            })),
+        this.session.schedulingState = normalizeSchedulingState({
+            ...this.session.schedulingState,
+            profileName: undefined,
+            domainProfile: domain,
+            routeEvidence: ['user selected capability domain'],
+            routingSource: 'user',
+            phaseReason: 'User selected capability domain.',
+            revision: this.session.schedulingState.revision + 1,
         });
+        this.persistSchedulingStateForCurrentTopic();
+        this.postMessage({ type: 'setSchedulingState', schedulingState: this.session.schedulingState });
     }
 
-    public switchMode(mode: AgentMode, preserveWorkflow = false, syncProfile = true): void {
-        if (this.currentMode !== mode && !preserveWorkflow) this.previousMode = this.currentMode;
-        this.currentMode = mode;
-        if (syncProfile) {
-            this.switchAgentProfile(profileForLegacyMode(mode), preserveWorkflow);
-        } else if (!preserveWorkflow && this.currentWorkflowId) {
-            this.currentWorkflowId = null;
-            this.sendWorkflowState();
-        }
-        this.persistAgentProfileForCurrentTopic();
-        this.postMessage({ type: 'modeChanged', mode });
-    }
-
-    /** Approved implementation plans execute through the domain-matched multi-Agent coordinator. */
-    public getApprovedPlanExecutionMode(): 'orchestrator' | 'script' {
-        const domain = this.session.lastResolvedProfile?.domain
-            ?? (this.agentProfile.domain === 'auto'
-                ? this.topicManager.currentTopic?.resolvedAgentDomain
-                : this.agentProfile.domain)
-            ?? defaultDomainForMode(this.currentMode);
-        return domain === 'paradox' ? 'script' : 'orchestrator';
+    public restorePreviousSchedulingState(): void {
+        this.session.schedulingState = this.session.previousSchedulingState;
+        this.persistSchedulingStateForCurrentTopic();
+        this.postMessage({ type: 'setSchedulingState', schedulingState: this.session.schedulingState });
     }
 
     public switchWorkflow(workflowId?: string | null): void {
         const normalized = (workflowId || '').trim();
         if (!normalized) {
-            const previousMode = this.currentMode;
             if (!this.session.deactivateWorkflow()) {
                 this.sendWorkflowState();
                 return;
             }
-            this.persistAgentProfileForCurrentTopic();
-            this.postMessage({ type: 'agentProfileChanged', profile: this.agentProfile });
-            if (previousMode !== this.currentMode) this.postMessage({ type: 'modeChanged', mode: this.currentMode });
+            this.persistSchedulingStateForCurrentTopic();
+            this.postMessage({ type: 'setSchedulingState', schedulingState: this.session.schedulingState });
             this.sendWorkflowState();
             return;
         }
@@ -3761,14 +3620,14 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             return;
         }
 
-        const previousProfile = this.agentProfile;
-        const previousMode = this.currentMode;
-        this.session.activateWorkflow(workflow.id, workflow.mode, profileForLegacyMode(workflow.mode));
-        this.persistAgentProfileForCurrentTopic();
-        if (!sameAgentProfile(previousProfile, this.agentProfile)) {
-            this.postMessage({ type: 'agentProfileChanged', profile: this.agentProfile });
-        }
-        if (previousMode !== this.currentMode) this.postMessage({ type: 'modeChanged', mode: this.currentMode });
+        const workflowProfile = profileForExecutionMode(workflow.mode);
+        const workflowScheduling = {
+            ...resolveAgentProfile('', workflowProfile).schedulingState,
+            routingSource: 'workflow' as const,
+        };
+        this.session.activateWorkflow(workflow.id, workflowScheduling);
+        this.persistSchedulingStateForCurrentTopic();
+        this.postMessage({ type: 'setSchedulingState', schedulingState: this.session.schedulingState });
         this.sendWorkflowState();
     }
 
@@ -3829,9 +3688,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             },
             messages: [],
             messageCount: (this.topicManager.currentTopic?.messages ?? []).filter(message => !message.isHidden).length,
-            mode: this.currentMode,
-            agentProfile: cloneAgentProfile(this.agentProfile),
-            resolvedAgentProfile: this.session.lastResolvedProfile,
+            schedulingState: this.session.schedulingState,
             workflowId: this.currentWorkflowId,
             isGenerating: this._isGenerating,
             liveStepCount: this._liveSteps.length,

@@ -422,9 +422,6 @@ const LOC_MODES = new Set([
 ]);
 const ORCHESTRATOR_MODES = new Set([...BASE_READ, ...INTERACTION, ...NETWORK, ..._MCP, 'set_memory', 'todo_write', 'write_file', 'write_design_blueprint', ...ORCHESTRATION, 'git_ops', 'analyze_diagnostic_error', 'save_workflow']);
 const SCRIPT_MODES = new Set([...BASE_READ, ...INTERACTION, ...NETWORK, ..._MCP, 'set_memory', 'todo_write', 'write_file', 'write_design_blueprint', ...ORCHESTRATION, 'git_ops', 'analyze_diagnostic_error', 'save_workflow']);
-// Legacy General mode is intentionally read-only. Writable general coding work
-// belongs to Utility mode, whose staged surface and policy gates are explicit.
-const GENERAL_MODES = new Set([...BASE_READ, ...INTERACTION, ...NETWORK]);
 const UTILITY_MODES = new Set([...BASE_READ, ...INTERACTION, ...EDIT, ...MEMORY, ...NETWORK, ...UTILITY, ...MEDIA, ...ORCHESTRATION, 'mcp_call', 'run_code']);
 
 for (const schema of SCHEMA_DEFINITIONS) {
@@ -440,7 +437,6 @@ for (const schema of SCHEMA_DEFINITIONS) {
     
     // Security-sensitive modes use positive allowlists. New tools must be
     // deliberately assigned instead of becoming available by omission.
-    if (GENERAL_MODES.has(name)) allowed.add('general');
     if (UTILITY_MODES.has(name)) allowed.add('utility');
 
     // 动态推演 effect、riskLevel 与 concurrencyClass 以维护单一事实源

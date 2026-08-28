@@ -18,8 +18,8 @@ describe('AI chat protocol boundaries', () => {
             type: 'sendMessage',
             text: 'hello',
             images: ['data:image/png;base64,AA=='],
-            agentProfile: { domain: 'general', intent: 'execute', strategy: 'single' },
         })).to.not.equal(null);
+        expect(parseWebviewMessage({ type: 'switchSchedulingDomain', domain: 'general' })).to.not.equal(null);
         expect(parseWebviewMessage({
             type: 'permissionResponse',
             permissionId: 'permission-1',
@@ -36,7 +36,6 @@ describe('AI chat protocol boundaries', () => {
         expect(parseWebviewMessage(null)).to.equal(null);
         expect(parseWebviewMessage({ type: 'unknown-command' })).to.equal(null);
         expect(parseWebviewMessage({ type: 'sendMessage', text: 42 })).to.equal(null);
-        expect(parseWebviewMessage({ type: 'switchMode', mode: 'root' })).to.equal(null);
         expect(parseWebviewMessage({ type: 'openContextReference', context: { type: 'file' } })).to.equal(null);
         expect(parseWebviewMessage({
             type: 'submitPlanAnnotations',

@@ -37,8 +37,6 @@ import { getAllProfiles, getLocalisationDirectoryGlob, getVanillaCacheFileName }
 import { parseLocFile, addEntriesToIndex, removeFileFromIndex, queryLocIndex, countLocIndex } from './locParser';
 import {
 	WorkspaceSymbolSqliteCache,
-	getLegacyWorkspaceSymbolCachePath,
-	getProjectWorkspaceSymbolCachePath,
 	getWorkspaceSymbolCachePath,
 	type WorkspaceSymbolCachedFile,
 	type WorkspaceSymbolCacheOpenResult,
@@ -554,7 +552,7 @@ export class IndexService implements vscode.Disposable {
 
 		const discoveredFiles = (await vscode.workspace.findFiles(
 			'**/*.{txt,gfx,asset,gui}',
-			'**/{node_modules,.git,.cwtools,.cwtools-ai,release,artifacts,dist,coverage,out}/**',
+			'**/{node_modules,.git,.cwtools,release,artifacts,dist,coverage,out}/**',
 			IndexService.WORKSPACE_SYMBOL_FILE_LIMIT + 1,
 		)).slice().sort((a, b) => IndexService._normalizeFilePath(a.fsPath).localeCompare(IndexService._normalizeFilePath(b.fsPath)));
 		this._workspaceSymbolTruncated = discoveredFiles.length > IndexService.WORKSPACE_SYMBOL_FILE_LIMIT;
@@ -665,7 +663,7 @@ export class IndexService implements vscode.Disposable {
 
 			const uri = vscode.Uri.file(source.root);
 			const pattern = new vscode.RelativePattern(uri, '**/*.{txt,gfx,asset,gui}');
-			const discoveredFiles = (await vscode.workspace.findFiles(pattern, '**/{node_modules,.git,.cwtools,.cwtools-ai,release,artifacts,dist,coverage,out}/**', IndexService.VANILLA_SYMBOL_FILE_LIMIT + 1))
+			const discoveredFiles = (await vscode.workspace.findFiles(pattern, '**/{node_modules,.git,.cwtools,release,artifacts,dist,coverage,out}/**', IndexService.VANILLA_SYMBOL_FILE_LIMIT + 1))
 				.slice()
 				.sort((a, b) => IndexService._normalizeFilePath(a.fsPath).localeCompare(IndexService._normalizeFilePath(b.fsPath)));
 			const truncated = discoveredFiles.length > IndexService.VANILLA_SYMBOL_FILE_LIMIT;
@@ -944,16 +942,11 @@ export class IndexService implements vscode.Disposable {
 		if (!workspaceRoot || !this._options.extensionPath) return undefined;
 		const roots = (vscode.workspace.workspaceFolders ?? []).map(folder => IndexService._normalizeFilePath(folder.uri.fsPath)).sort();
 		const primaryPath = getWorkspaceSymbolCachePath(workspaceRoot);
-		const fallbackPaths = [
-			getProjectWorkspaceSymbolCachePath(workspaceRoot),
-			getLegacyWorkspaceSymbolCachePath(workspaceRoot),
-		].filter(candidate => path.resolve(candidate) !== path.resolve(primaryPath));
 		const cache = new WorkspaceSymbolSqliteCache(
 			primaryPath,
 			path.join(this._options.extensionPath, 'node_modules', 'sql.js', 'dist'),
 			workspaceRoot,
 			IndexService._hashParts([...roots, this._semanticCatalogFingerprint]),
-			fallbackPaths,
 		);
 		await cache.open();
 		return cache;

@@ -2,51 +2,55 @@ import { expect } from 'chai';
 import {
     AdaptiveConcurrencyController,
     authorizationAllowsEffect,
-    deriveLegacyMode,
+    executionModeForSchedulingState,
     evaluateDispatchAdmission,
     normalizeSchedulingState,
-    schedulingStateFromLegacyMode,
+    schedulingStateFromAdmission,
     transitionSchedulingState,
 } from '../../extension/ai/runner/scheduling';
 import { AgentInputQueue } from '../../extension/ai/runner/inputQueue';
 
 describe('Agent runtime scheduling', () => {
-    it('derives legacy modes without collapsing persisted scheduler dimensions', () => {
-        const state = schedulingStateFromLegacyMode('utility', 'general');
+    it('projects execution labels without creating a second persisted state', () => {
+        const state = schedulingStateFromAdmission({
+            domainProfile: 'general', authorization: 'workspace_write', initialPhase: 'execute',
+            explicitDelegation: false, confidence: 1, evidence: ['test'],
+        });
         expect(state).to.include({
             domainProfile: 'general',
             authorization: 'workspace_write',
             phase: 'execute',
             dispatch: 'single',
         });
-        expect(deriveLegacyMode(state)).to.equal('utility');
-        expect(deriveLegacyMode({ ...state, dispatch: 'parallel' })).to.equal('orchestrator');
+        expect(executionModeForSchedulingState(state)).to.equal('utility');
+        expect(executionModeForSchedulingState({ ...state, dispatch: 'parallel' })).to.equal('orchestrator');
     });
 
-    it('fails closed when restored scheduling state is invalid', () => {
+    it('rejects missing or invalid scheduling state instead of reconstructing it', () => {
+        expect(() => normalizeSchedulingState(undefined)).to.throw('required');
+        expect(() => normalizeSchedulingState({
+            domainProfile: 'general',
+            authorization: 'root',
+            phase: 'execute',
+            dispatch: 'single',
+        })).to.throw('invalid');
         const restored = normalizeSchedulingState({
             domainProfile: 'general',
-            authorization: 'root',
-            phase: 'execute',
-            dispatch: 'single',
-        }, 'review', 'general');
-        expect(restored.authorization).to.equal('read_only');
-        expect(restored.phase).to.equal('verify');
-        const formerlyWritable = normalizeSchedulingState({
-            domainProfile: 'general',
-            authorization: 'root',
-            phase: 'execute',
-            dispatch: 'parallel',
-        }, 'utility', 'general');
-        expect(formerlyWritable).to.include({
             authorization: 'read_only',
-            phase: 'inspect',
+            phase: 'execute',
             dispatch: 'single',
+            routeEvidence: [],
+        });
+        expect(restored).to.include({
+            domainProfile: 'general', authorization: 'read_only', phase: 'execute', dispatch: 'single',
         });
     });
 
     it('never expands authorization during a runtime transition', () => {
-        const readOnly = schedulingStateFromLegacyMode('review', 'general');
+        const readOnly = schedulingStateFromAdmission({
+            domainProfile: 'general', authorization: 'read_only', initialPhase: 'verify',
+            explicitDelegation: false, confidence: 1, evidence: ['test'],
+        });
         expect(() => transitionSchedulingState(readOnly, {
             phase: 'execute',
             authorization: 'workspace_write',

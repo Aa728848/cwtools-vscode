@@ -13,6 +13,7 @@ import type { RunEventSink } from '../runner/runContext';
 import { SemanticVerifier } from './semanticVerifier';
 import { mergeTokenUsageTotals } from '../cacheCapability';
 import type { UserExecutionPolicy } from './userExecutionPolicy';
+import { schedulingStateFromAdmission } from '../runner/scheduling';
 
 /** Quality gate configuration */
 export interface QualityGateConfig {
@@ -276,6 +277,17 @@ export class QualityGate {
     ): Promise<QualityGateResult> {
         const taskGraph = reviewContext?.taskGraph;
         const paradoxReview = isParadoxTaskGraph(taskGraph);
+        const reviewSchedulingState = {
+            ...schedulingStateFromAdmission({
+                domainProfile: paradoxReview ? 'paradox' : 'general',
+                authorization: 'read_only',
+                initialPhase: 'verify',
+                explicitDelegation: false,
+                confidence: 1,
+                evidence: ['quality gate review'],
+            }, 'quality gate review'),
+            profileName: 'reviewer',
+        };
         const workspaceRoot = reviewContext?.workspaceRoot ?? agentRunner.toolExecutor.workspaceRoot;
         const parentAbortSignal = options.abortSignal;
         const reviewController = new AbortController();
@@ -309,7 +321,7 @@ export class QualityGate {
             [finalEvidence, semantic] = await qualityGateAwait(Promise.all([
                 paradoxReview && typeof agentRunner.toolExecutor.finalizePdxEvidence === 'function'
                     ? agentRunner.toolExecutor.finalizePdxEvidence(writtenFiles, {
-                        runnerOptions: { abortSignal: reviewController.signal },
+                        runnerOptions: { schedulingState: reviewSchedulingState, abortSignal: reviewController.signal },
                     })
                     : Promise.resolve({ passed: true, filesChecked: [], conflictFiles: [], pendingFiles: [], coveragePendingFiles: [], report: '' }),
                 paradoxReview && taskGraph
@@ -362,7 +374,7 @@ export class QualityGate {
                     const result = await agentRunner.toolExecutor.execute(
                         'get_diagnostics',
                         { file, severity: 'error' },
-                        { runnerOptions: { abortSignal: reviewController.signal } },
+                        { runnerOptions: { schedulingState: reviewSchedulingState, abortSignal: reviewController.signal } },
                     );
                     refreshReviewIdleTimeout();
                     return { file, result };
@@ -508,7 +520,7 @@ export class QualityGate {
                 [], // conversationHistory
                 {
                     ...options,
-                    mode: reviewerMode,
+                    schedulingState: reviewSchedulingState,
                     useSlimPrompt: true,
                     maxIterations: QUALITY_GATE_REVIEW_MAX_ITERATIONS,
                     deferTerminalValidationToParent: true,

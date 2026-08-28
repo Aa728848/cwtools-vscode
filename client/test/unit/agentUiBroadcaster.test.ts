@@ -24,7 +24,13 @@ describe('AgentUiBroadcaster', () => {
         broadcaster.register(webviewA);
         broadcaster.register(webviewB);
 
-        const payload: HostMessage = { type: 'setMode', mode: 'build' };
+        const payload: HostMessage = {
+            type: 'setSchedulingState',
+            schedulingState: {
+                domainProfile: 'paradox', authorization: 'workspace_write', phase: 'execute', dispatch: 'single',
+                routeConfidence: 1, routeEvidence: ['test'], phaseReason: 'test', revision: 0,
+            },
+        };
         broadcaster.postMessage(payload);
 
         expect(receivedA).to.deep.equal([payload]);
@@ -53,7 +59,13 @@ describe('AgentUiBroadcaster', () => {
         broadcaster.register(webviewB);
 
         disposeA.dispose();
-        const payload: HostMessage = { type: 'setMode', mode: 'plan' };
+        const payload: HostMessage = {
+            type: 'setSchedulingState',
+            schedulingState: {
+                domainProfile: 'paradox', authorization: 'plan_write_only', phase: 'plan', dispatch: 'single',
+                routeConfidence: 1, routeEvidence: ['test'], phaseReason: 'test', revision: 0,
+            },
+        };
         broadcaster.postMessage(payload);
 
         expect(receivedA).to.deep.equal([]);

@@ -17,6 +17,7 @@ import {
     parseBridgeJsonRpcPayload,
     readMcpBridgeRequestBody,
 } from './mcpBridgeProtocol';
+import { schedulingStateFromAdmission } from './runner/scheduling';
 
 const BRIDGE_PROTOCOL_VERSION = 1;
 const MANIFEST_FILE_NAME = 'bridge-manifest.json';
@@ -276,7 +277,14 @@ export class McpBridgeServer implements Disposable {
         try {
             const result = await this.options.toolExecutor.execute(name, args, {
                 runnerOptions: {
-                    mode: 'utility',
+                    schedulingState: schedulingStateFromAdmission({
+                        domainProfile: 'paradox',
+                        authorization: 'read_only',
+                        initialPhase: 'inspect',
+                        explicitDelegation: false,
+                        confidence: 1,
+                        evidence: ['read-only MCP bridge'],
+                    }, 'read-only MCP bridge'),
                     forceAutoApplyWrites: false,
                 },
             } as never);

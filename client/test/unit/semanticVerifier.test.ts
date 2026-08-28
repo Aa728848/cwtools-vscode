@@ -68,8 +68,8 @@ describe('SemanticVerifier', () => {
             objective: 'Build a connected event chain',
             expectsFileChanges: true,
             acceptanceCriteria: [
-                { id: 'flag_lifecycle', description: 'Realm state is consumed', type: 'typed_lifecycle', entityKind: 'realm_flag', subject: 'broken_unused_flag' },
-                { id: 'target_lifecycle', description: 'Target is consumed', type: 'typed_lifecycle', entityKind: 'anchor_handle', subject: 'broken_unused_target' },
+                { id: 'typed_flag_lifecycle', description: 'Realm state is consumed', type: 'typed_lifecycle', entityKind: 'realm_flag', subject: 'broken_unused_flag' },
+                { id: 'typed_target_lifecycle', description: 'Target is consumed', type: 'typed_lifecycle', entityKind: 'anchor_handle', subject: 'broken_unused_target' },
             ],
         });
         const verifier = new SemanticVerifier();
@@ -117,7 +117,7 @@ describe('SemanticVerifier', () => {
             ],
             acceptanceCriteria: [
                 { id: 'event_exists', description: 'Event exists', type: 'entity_exists', subject: 'connected.1' },
-                { id: 'target_lifecycle', description: 'Typed target is stored and referenced', type: 'typed_lifecycle', entityKind: 'anchor_handle', subject: 'connected_fleet' },
+                { id: 'typed_target_lifecycle', description: 'Typed target is stored and referenced', type: 'typed_lifecycle', entityKind: 'anchor_handle', subject: 'connected_fleet' },
             ],
         });
         TaskGraphEngine.addNode(graph, 'effect', 'build', 'build effect', {

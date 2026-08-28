@@ -7,14 +7,14 @@
 import { TOOL_REGISTRY, WRITE_TOOLS } from './registry';
 import type { AgentMode, AgentToolName } from '../types';
 import type { AgentRuntimeDomain } from '../types';
-import { defaultDomainForMode } from '../agentProfile';
+import { domainForExecutionMode } from '../runner/scheduling';
 import { evaluateEffectiveToolPolicy } from '../runner/effectiveToolPolicy';
 import { agentProfileCatalog } from '../runner/agentProfileCatalog';
 
 /**
  * Check if a tool is allowed under the current Agent operation mode.
  */
-export function isToolAllowedForMode(toolName: string, mode: AgentMode, domain: AgentRuntimeDomain = defaultDomainForMode(mode)): boolean {
+export function isToolAllowedForMode(toolName: string, mode: AgentMode, domain: AgentRuntimeDomain = domainForExecutionMode(mode)): boolean {
     return evaluateEffectiveToolPolicy(toolName, { mode, domain }).allowed;
 }
 
@@ -23,13 +23,6 @@ export function isToolAllowedForMode(toolName: string, mode: AgentMode, domain: 
  */
 export function isToolWritable(toolName: string): boolean {
     return WRITE_TOOLS.has(toolName);
-}
-
-export function parseMcpToolName(toolName: string): { server: string; tool: string } | undefined {
-    if (toolName === 'mcp_call') return undefined;
-    const match = /^mcp_(.+?)_(.+)$/.exec(toolName);
-    if (!match || !match[1] || !match[2]) return undefined;
-    return { server: match[1], tool: match[2] };
 }
 
 export function validateToolCapability(
@@ -41,17 +34,12 @@ export function validateToolCapability(
         profileName?: string;
     }
 ): { allowed: boolean; reason?: string } {
-    let entry = TOOL_REGISTRY.get(toolName as AgentToolName);
-    let governedByMcpCall = false;
-    if (!entry && parseMcpToolName(toolName)) {
-        entry = TOOL_REGISTRY.get('mcp_call');
-        governedByMcpCall = true;
-    }
+    const entry = TOOL_REGISTRY.get(toolName as AgentToolName);
     if (!entry) {
         return { allowed: false, reason: `Unknown tool: ${toolName}` };
     }
 
-    const domain = options.domain ?? defaultDomainForMode(options.mode);
+    const domain = options.domain ?? domainForExecutionMode(options.mode);
     const decision = evaluateEffectiveToolPolicy(entry.name, {
         mode: options.mode,
         domain,
@@ -66,12 +54,9 @@ export function validateToolCapability(
     }
 
     if (decision.reason === 'mode') {
-        const governedNote = governedByMcpCall
-            ? ' Dynamic MCP tools follow the mcp_call policy.'
-            : '';
         return {
             allowed: false,
-            reason: `Tool '${toolName}' is not allowed in current mode '${options.mode}'.${governedNote} Allowed modes: ${[...entry.allowedModes].sort().join(', ')}.`
+            reason: `Tool '${toolName}' is not allowed in current mode '${options.mode}'. Allowed modes: ${[...entry.allowedModes].sort().join(', ')}.`
         };
     }
 

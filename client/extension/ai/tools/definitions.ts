@@ -251,7 +251,7 @@ const RAW_TOOL_DEFINITIONS: ToolDefinition[] = [
                     },
                     mode: {
                         type: 'string',
-                        enum: ['build', 'plan', 'explore', 'general', 'utility', 'review', 'gui_expert', 'script_reviewer', 'loc_translator', 'loc_writer', 'orchestrator', 'script', 'asset'],
+                        enum: ['build', 'plan', 'explore', 'utility', 'review', 'gui_expert', 'script_reviewer', 'loc_translator', 'loc_writer', 'orchestrator', 'script', 'asset'],
                         description: 'Optional mode card to return, e.g. build, plan, loc_writer, asset, orchestrator, script.',
                     },
                 },
@@ -930,8 +930,7 @@ const RAW_TOOL_DEFINITIONS: ToolDefinition[] = [
                     previousAttempt: { type: 'string', description: 'Optional summary of the last attempted fix. Helps detect repeated blind retries.' },
                     toolName: { type: 'string', description: 'Optional name of the tool that failed, e.g. edit_file, write_localisation, get_diagnostics.' },
                     diagnosticsSnapshot: { type: 'object', description: 'Optional raw get_diagnostics result, write-tool diagnostics payload, or compact diagnostic object to classify without querying diagnostics again.' },
-                    toolResult: { type: 'object', description: 'Optional raw failed tool result to classify without querying diagnostics again.' },
-                    reflection: { type: 'string', description: 'Optional legacy free-form analysis from the model. Kept for backward compatibility; the host still returns deterministic routing advice.' }
+                    toolResult: { type: 'object', description: 'Optional raw failed tool result to classify without querying diagnostics again.' }
                 },
                 required: [],
             },

@@ -12,7 +12,7 @@ import * as crypto from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
 import type { ChatMessage, AgentMode, AgentRuntimeDomain, ToolDefinition } from './types';
-import { defaultDomainForMode } from './agentProfile';
+import { domainForExecutionMode } from './runner/scheduling';
 import { getGameKnowledge, getGameDisplayName } from './gameKnowledge';
 import { MemoryParser } from './memoryParser';
 import { buildGeneralProjectInstructionsPrompt } from './projectInstructions';
@@ -57,7 +57,6 @@ import {
     buildBuildSystemPrompt,
     buildPlanModeSystemPrompt,
     buildExploreModeSystemPrompt,
-    buildGeneralModeSystemPrompt,
     buildUtilityModeSystemPrompt,
     buildReviewModeSystemPrompt,
     buildGuiExpertSystemPrompt,
@@ -70,7 +69,6 @@ import {
     buildGeneralPlanSystemPrompt,
     buildGeneralExploreSystemPrompt,
     buildGeneralReviewSystemPrompt,
-    buildGeneralReadOnlySystemPrompt,
     buildGeneralOrchestratorSystemPrompt,
 } from './prompt/sections/modePrompts';
 import { buildDelegationScopeStatement, type DelegationScopeFacts } from './prompt/sections/delegationScope';
@@ -300,7 +298,7 @@ export class PromptBuilder {
         includeProjectKnowledge = true,
         domain?: AgentRuntimeDomain,
     ): string {
-        const runtimeDomain = domain ?? defaultDomainForMode(mode);
+        const runtimeDomain = domain ?? domainForExecutionMode(mode);
         const gameId = runtimeDomain === 'paradox' ? languageId ?? this.detectGameLanguageId() : 'general';
         const gameKnowledge = runtimeDomain === 'paradox' ? getGameKnowledge(gameId) : '';
         const gameName = runtimeDomain === 'paradox' ? getGameDisplayName(gameId) : 'repository';
@@ -526,7 +524,7 @@ export class PromptBuilder {
         providerId: string | undefined,
         languageId: string | undefined,
         toolsetHash?: string,
-        domain: AgentRuntimeDomain = defaultDomainForMode(mode),
+        domain: AgentRuntimeDomain = domainForExecutionMode(mode),
     ): FrozenPromptFingerprint {
         let incomplete = false;
         let gameId = 'unknown';
@@ -690,7 +688,7 @@ export class PromptBuilder {
         runtime?: RuntimePromptState
     ): ChatMessage[] {
         const dynamicParts: string[] = [];
-        const runtimeDomain = runtime?.domain ?? defaultDomainForMode(runtime?.mode ?? 'build');
+        const runtimeDomain = runtime?.domain ?? domainForExecutionMode(runtime?.mode ?? 'build');
         if (runtimeDomain === 'general' && runtime?.pathScope?.[0]) {
             const scopedInstructions = buildGeneralProjectInstructionsPrompt(
                 this.workspaceRoot,
@@ -835,7 +833,7 @@ export class PromptBuilder {
         languageId?: string,
         options?: { toolsetHash?: string; rebuild?: boolean; domain?: AgentRuntimeDomain },
     ): string {
-        const domain = options?.domain ?? defaultDomainForMode(mode);
+        const domain = options?.domain ?? domainForExecutionMode(mode);
         const fingerprint = this.computeFrozenPromptFingerprint(mode, providerId, languageId, `slim:${options?.toolsetHash ?? ''}`, domain);
         const key = `slim:${fingerprint.hash}`;
         if (options?.rebuild) {
@@ -881,7 +879,7 @@ export class PromptBuilder {
         providerId?: string,
         languageId?: string,
         topicId?: string,
-        domain: AgentRuntimeDomain = defaultDomainForMode(mode),
+        domain: AgentRuntimeDomain = domainForExecutionMode(mode),
         delegation?: DelegationScopeFacts,
     ): string {
         const gameId = domain === 'paradox' ? languageId ?? this.detectGameLanguageId() : 'general';
@@ -1063,14 +1061,13 @@ ${trimmed}
         gameKnowledge: string,
         gameName: string,
         isSlim: boolean = false,
-        domain: AgentRuntimeDomain = defaultDomainForMode(mode),
+        domain: AgentRuntimeDomain = domainForExecutionMode(mode),
     ): string {
         if (domain === 'general') {
             switch (mode) {
                 case 'plan': return buildGeneralPlanSystemPrompt(isSlim);
                 case 'explore': return buildGeneralExploreSystemPrompt(isSlim);
                 case 'review': return buildGeneralReviewSystemPrompt(isSlim);
-                case 'general': return buildGeneralReadOnlySystemPrompt();
                 case 'orchestrator': return buildGeneralOrchestratorSystemPrompt();
                 default: return buildGeneralCodingSystemPrompt(isSlim);
             }
@@ -1078,13 +1075,12 @@ ${trimmed}
         // Public domain-neutral modes discover changing game facts through the
         // active CWT/LSP/index tools. Avoid injecting a large static game pack
         // into every ordinary coding, planning, exploration, or review turn.
-        const dynamicKnowledge = ['plan', 'explore', 'general', 'utility', 'review', 'orchestrator'].includes(mode)
+        const dynamicKnowledge = ['plan', 'explore', 'utility', 'review', 'orchestrator'].includes(mode)
             ? ''
             : gameKnowledge;
         switch (mode) {
             case 'plan': return buildPlanModeSystemPrompt(dynamicKnowledge, gameName, isSlim);
             case 'explore': return buildExploreModeSystemPrompt(dynamicKnowledge, gameName, isSlim);
-            case 'general': return buildGeneralModeSystemPrompt(dynamicKnowledge, gameName); // general never slim
             case 'utility': return buildUtilityModeSystemPrompt(dynamicKnowledge, gameName, isSlim);
             case 'review': return buildReviewModeSystemPrompt(dynamicKnowledge, gameName, isSlim);
             case 'gui_expert': return buildGuiExpertSystemPrompt(dynamicKnowledge, gameName);

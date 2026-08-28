@@ -91,6 +91,19 @@ const BUILTIN_PROFILES: RuntimeAgentProfile[] = [
         },
     },
     {
+        name: 'planner',
+        description: 'Plan-only Agent that may write guarded design blueprints.',
+        authorizationCeiling: 'plan_write_only',
+        tools: ['ask_user_question', 'select_tools', 'run_code', 'read_file', 'list_directory', 'glob_files', 'grep', 'query_*', 'search_*', 'get_*', 'write_design_blueprint'],
+        subagentCapabilities: { runCode: true },
+        disallowedTools: ['edit_file', 'replace_lines', 'run_command', 'git_ops', 'dispatch_agents'],
+        summaryPolicy: {
+            minCharacters: 160,
+            requiredSections: ['summary', 'unresolved'],
+            retries: 1,
+        },
+    },
+    {
         name: 'reviewer',
         description: 'Read-only verification and review Agent.',
         authorizationCeiling: 'read_only',
@@ -128,6 +141,30 @@ const BUILTIN_PROFILES: RuntimeAgentProfile[] = [
             requiredSections: ['summary', 'changedFiles', 'verification', 'unresolved'],
             retries: 1,
         },
+    },
+    {
+        name: 'localization-writer',
+        description: 'Paradox localization writing sub-Agent.',
+        domain: 'paradox',
+        authorizationCeiling: 'workspace_write',
+        tools: ['*'],
+        subagentCapabilities: { runCode: true },
+    },
+    {
+        name: 'localization-translator',
+        description: 'Paradox localization translation sub-Agent.',
+        domain: 'paradox',
+        authorizationCeiling: 'workspace_write',
+        tools: ['*'],
+        subagentCapabilities: { runCode: true },
+    },
+    {
+        name: 'gui-expert',
+        description: 'Paradox GUI implementation sub-Agent.',
+        domain: 'paradox',
+        authorizationCeiling: 'workspace_write',
+        tools: ['*'],
+        subagentCapabilities: { runCode: true },
     },
 ];
 

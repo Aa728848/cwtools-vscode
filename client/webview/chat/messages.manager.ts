@@ -1,12 +1,5 @@
 import type { ChatHistoryMessageView, TopicListItem, TopicStats } from './messages.shared';
 
-export interface ManagerAgentProfileView {
-    domain: 'auto' | 'paradox' | 'general' | 'hybrid';
-    intent: 'auto' | 'execute' | 'plan' | 'explore' | 'review';
-    strategy: 'auto' | 'single' | 'multi';
-    profileName?: string;
-}
-
 export type ManagerWebviewMessage =
     | { type: 'ready' }
     | { type: 'requestManagerSnapshot' }
@@ -17,7 +10,6 @@ export type ManagerWebviewMessage =
     | { type: 'setShowArchived'; show: boolean }
     | { type: 'pinTopic'; topicId: string; pinned?: boolean }
     | { type: 'setTopicWorkspace'; topicId: string; workspaceId?: string | null; workspaceLabel?: string | null }
-    | { type: 'switchMode'; mode: 'build' | 'plan' | 'explore' | 'utility' | 'review' | 'orchestrator' | 'script' }
     | { type: 'cancelGeneration' };
 
 export interface ManagerChildRunView {
@@ -28,7 +20,13 @@ export interface ManagerChildRunView {
     threadId?: string;
     turnId?: string;
     status: string;
-    mode: string;
+    schedulingState: {
+        profileName?: string;
+        domainProfile: 'paradox' | 'general' | 'hybrid';
+        authorization: 'read_only' | 'plan_write_only' | 'workspace_write';
+        phase: 'inspect' | 'plan' | 'execute' | 'verify' | 'finalize';
+        dispatch: 'single' | 'parallel' | 'specialist';
+    };
     startedAt: number;
     completedAt?: number;
     userPromptPreview: string;
@@ -81,9 +79,7 @@ export interface ManagerSnapshotMessage {
     stats?: TopicStats;
     messages: ChatHistoryMessageView[];
     messageCount?: number;
-    mode: string;
-    agentProfile: ManagerAgentProfileView;
-    resolvedAgentProfile?: ManagerAgentProfileView & { mode: string; reason?: string };
+    schedulingState: ManagerChildRunView['schedulingState'];
     workflowId?: string | null;
     isGenerating: boolean;
     liveStepCount: number;
@@ -97,13 +93,13 @@ export interface ManagerSnapshotMessage {
     };
     runtimeInspector?: {
         version: 1;
-        profile?: string;
-        overlays: string[];
         scheduling?: {
+            profileName?: string;
             authorization: string;
             phase: string;
             dispatch: string;
             routeConfidence: number;
+            overlays?: string[];
         };
         tools?: {
             registered: string[];

@@ -1,5 +1,4 @@
 import type { ChatMessage, AgentStep, TokenUsage } from '../types';
-import type { AgentRunnerOptions } from '../agentRunner';
 import { contentToString } from '../types';
 import { getModelContextTokens, getProvider } from '../providers';
 import { isLowCostPrefixCacheModelOrProvider } from '../providers/models/capabilities';
@@ -15,6 +14,14 @@ import type { CompactionTranscriptSplit } from './contextTranscript';
 import * as crypto from 'crypto';
 import { appendCacheRequestUsage, isCacheCapableUsage } from '../cacheCapability';
 import { getCachedInputTokens } from '../providerUsage';
+
+export interface CompactionRunOptions {
+    providerId?: string;
+    model?: string;
+    maxContextTokens?: number;
+    abortSignal?: AbortSignal;
+    useSlimPrompt?: boolean;
+}
 
 // Leave room for the system prompt, tool schemas, the current turn, and output.
 // Both Codex and Claude Code compact before the model's hard context boundary.
@@ -294,7 +301,7 @@ export async function maybeCompactHistory(
     history: ChatMessage[],
     emitStep: (step: AgentStep) => void,
     deps: CompactionDependencies,
-    options?: AgentRunnerOptions,
+    options?: CompactionRunOptions,
     tokenAccumulator?: TokenUsage,
     thresholdRatio: number = COMPACTION_THRESHOLD_RATIO,
     budgetOptions: CompactionBudgetOptions = {},

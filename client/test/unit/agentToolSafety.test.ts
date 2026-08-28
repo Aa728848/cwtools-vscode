@@ -2,6 +2,16 @@ import { expect } from 'chai';
 import sinon from 'sinon';
 import * as fs from 'fs';
 import * as path from 'path';
+import {
+    GENERAL_EXPLORE,
+    GENERAL_PARALLEL,
+    GENERAL_WRITE,
+    LOCALIZATION_WRITE,
+    PARADOX_EXPLORE,
+    PARADOX_PARALLEL,
+    PARADOX_PLAN,
+    PARADOX_WRITE,
+} from './schedulingFixtures';
 
 let diagnosticPairs: Array<[any, any[]]> = [];
 let ignoredDiagnostics: string[] = [];
@@ -114,7 +124,7 @@ describe('enforced central tool policy', () => {
                 ],
             }],
         }, {
-            runnerOptions: { mode: 'build', threadId: 'thread-1', turnId: 'turn-1' },
+            runnerOptions: { schedulingState: PARADOX_WRITE, threadId: 'thread-1', turnId: 'turn-1' },
             scopeId: 'run-1',
             onUserQuestion: async (request: any, context: any) => {
                 received = { request, context };
@@ -140,7 +150,7 @@ describe('enforced central tool policy', () => {
                 ],
             }],
         }, {
-            runnerOptions: { mode: 'build' },
+            runnerOptions: { schedulingState: PARADOX_WRITE },
             onUserQuestion: async () => {
                 callbackCalled = true;
                 return { success: true, answers: {} };
@@ -166,7 +176,7 @@ describe('enforced central tool policy', () => {
                 ],
             }],
         }, {
-            runnerOptions: { mode: 'plan', useSlimPrompt: true },
+            runnerOptions: { schedulingState: PARADOX_PLAN, useSlimPrompt: true },
             onUserQuestion: async () => {
                 callbackCalled = true;
                 return { success: true, answers: { scope: 'Active file' } };
@@ -183,7 +193,7 @@ describe('enforced central tool policy', () => {
         const executor = new AgentToolExecutor({} as any, workspaceRoot);
         executor.fileWriteMode = 'auto';
         const target = path.join(workspaceRoot, 'blocked.txt');
-        const result = await executor.execute('write_file', { file: target, content: 'nope' }, { runnerOptions: { mode: 'build', topicId: 'policy-test' } } as any) as any;
+        const result = await executor.execute('write_file', { file: target, content: 'nope' }, { runnerOptions: { schedulingState: PARADOX_WRITE, topicId: 'policy-test' } } as any) as any;
         expect(result.policyDenied).to.equal(true);
         expect(fs.existsSync(target)).to.equal(false);
     });
@@ -216,8 +226,7 @@ describe('enforced central tool policy', () => {
             },
         };
         const executor = new AgentToolExecutor(client as any, workspaceRoot);
-        executor.parentRunnerOptions = { mode: 'build' } as any;
-        const context = { runnerOptions: { mode: 'build' }, scopeId: 'candidate-run' } as any;
+        const context = { runnerOptions: { schedulingState: PARADOX_WRITE }, scopeId: 'candidate-run' } as any;
         const begin = await executor.execute('candidate_transaction', { action: 'begin' }, context) as any;
         const staged = await executor.execute('typed_pdx_write', {
             filePath: target,
@@ -249,8 +258,7 @@ describe('enforced central tool policy', () => {
             epoch++; return { ok: true };
         } };
         const executor = new AgentToolExecutor(client as any, workspaceRoot);
-        executor.parentRunnerOptions = { mode: 'build' } as any;
-        const context = { runnerOptions: { mode: 'build' }, scopeId: 'candidate-run' } as any;
+        const context = { runnerOptions: { schedulingState: PARADOX_WRITE }, scopeId: 'candidate-run' } as any;
         (executor as any).lspHandler.getDiagnostics = async () => ({ diagnostics: [], freshness: 'fresh', truncated: false, lastEpoch: ++epoch });
         const begin = await executor.execute('candidate_transaction', { action: 'begin' }, context) as any;
         await executor.execute('typed_pdx_write', { filePath: target, mode: 'stage', transactionId: begin.transactionId, operation: { operation: 'clone_definition', source: 'root', newSymbol: 'copy' } }, context);
@@ -267,8 +275,7 @@ describe('enforced central tool policy', () => {
         fs.writeFileSync(target, 'root = {}\n');
         const client = { sendRequest: async () => ({ ok: true, files: [] }) };
         const executor = new AgentToolExecutor(client as any, workspaceRoot);
-        executor.parentRunnerOptions = { mode: 'build' } as any;
-        const context = { runnerOptions: { mode: 'build' }, scopeId: 'candidate-run' } as any;
+        const context = { runnerOptions: { schedulingState: PARADOX_WRITE }, scopeId: 'candidate-run' } as any;
         const begin = await executor.execute('candidate_transaction', { action: 'begin' }, context) as any;
         await executor.execute('typed_pdx_write', {
             filePath: target, mode: 'stage', transactionId: begin.transactionId,
@@ -288,8 +295,7 @@ describe('enforced central tool policy', () => {
             return { ok: true, files: [{ ok: true, uri: file.uri, contentHash: require('crypto').createHash('sha256').update(file.content, 'utf8').digest('hex'), diagnostics: [{ severity: 1, message: 'numeric severity' }] }] };
         } };
         const executor = new AgentToolExecutor(client as any, workspaceRoot);
-        executor.parentRunnerOptions = { mode: 'build' } as any;
-        const context = { runnerOptions: { mode: 'build' }, scopeId: 'candidate-run' } as any;
+        const context = { runnerOptions: { schedulingState: PARADOX_WRITE }, scopeId: 'candidate-run' } as any;
         const begin = await executor.execute('candidate_transaction', { action: 'begin' }, context) as any;
         await executor.execute('typed_pdx_write', { filePath: target, mode: 'stage', transactionId: begin.transactionId, operation: { operation: 'clone_definition', source: 'root', newSymbol: 'copy' } }, context);
         const validated = await executor.execute('candidate_transaction', { action: 'validate', transactionId: begin.transactionId }, context) as any;
@@ -319,8 +325,7 @@ describe('enforced central tool policy', () => {
             },
         };
         const executor = new AgentToolExecutor(client as any, workspaceRoot);
-        executor.parentRunnerOptions = { mode: 'build' } as any;
-        const context = { runnerOptions: { mode: 'build' }, scopeId: 'candidate-run' } as any;
+        const context = { runnerOptions: { schedulingState: PARADOX_WRITE }, scopeId: 'candidate-run' } as any;
         const begin = await executor.execute('candidate_transaction', { action: 'begin' }, context) as any;
         await executor.execute('typed_pdx_write', {
             filePath: target,
@@ -354,8 +359,7 @@ describe('enforced central tool policy', () => {
             return { ok: true };
         } };
         const executor = new AgentToolExecutor(client as any, workspaceRoot);
-        executor.parentRunnerOptions = { mode: 'build' } as any;
-        const context = { runnerOptions: { mode: 'build' }, scopeId: 'candidate-run' } as any;
+        const context = { runnerOptions: { schedulingState: PARADOX_WRITE }, scopeId: 'candidate-run' } as any;
         let diagnosticsCall = 0;
         (executor as any).lspHandler.getDiagnostics = async () => {
             diagnosticsCall++;
@@ -375,7 +379,7 @@ describe('enforced central tool policy', () => {
         expect(committed.state).to.equal('active');
         expect(fs.readFileSync(target, 'utf8')).to.equal(source);
 
-        const overlay = executor.parentRunnerOptions?.vfsOverlay;
+        const overlay = executor.vfsOverlay;
         expect(overlay?.has(target)).to.equal(true);
         expect(overlay?.get(target)).to.include('copy');
         const status = await executor.execute('candidate_transaction', { action: 'status', transactionId: begin.transactionId }, context) as any;
@@ -408,8 +412,7 @@ describe('enforced central tool policy', () => {
             return { ok: true };
         } };
         const executor = new AgentToolExecutor(client as any, workspaceRoot);
-        executor.parentRunnerOptions = { mode: 'build' } as any;
-        const context = { runnerOptions: { mode: 'build' }, scopeId: 'candidate-run' } as any;
+        const context = { runnerOptions: { schedulingState: PARADOX_WRITE }, scopeId: 'candidate-run' } as any;
         let diagnosticsCall = 0;
         (executor as any).lspHandler.getDiagnostics = async () => ({
             diagnostics: diagnosticsCall++ === 1 ? [{ code: 'CW999', severity: 'error', message: 'reject candidate', line: 1, column: 1 }] : [],
@@ -434,7 +437,7 @@ describe('enforced central tool policy', () => {
         fs.writeFileSync(target, 'ok');
         const events: any[] = [];
         const result = await executor.execute('read_file', { file: target }, {
-            runnerOptions: { mode: 'build', topicId: 'policy-test' },
+            runnerOptions: { schedulingState: PARADOX_WRITE, topicId: 'policy-test' },
             runEventSink: { appendSoon: (type: string, payload: any) => events.push({ type, payload }) },
         } as any) as any;
         expect(result.content).to.include('ok');
@@ -454,7 +457,7 @@ describe('enforced central tool policy', () => {
         ].join('\n'), 'utf8');
         const executor = new AgentToolExecutor({} as any, workspaceRoot);
         const context = {
-            runnerOptions: { mode: 'build', domain: 'general', topicId: 'skill-policy', runRecord: { runId: 'skill-run' } },
+            runnerOptions: { schedulingState: GENERAL_WRITE, topicId: 'skill-policy', runRecord: { runId: 'skill-run' } },
         } as any;
 
         const loaded = await executor.execute('run_skill', { name: 'read-only-skill' }, context) as any;
@@ -486,7 +489,7 @@ describe('enforced central tool policy', () => {
 
         const executor = new AgentToolExecutor({} as any, workspaceRoot);
         const context = {
-            runnerOptions: { mode: 'build', domain: 'general', topicId: 'skill-policy', runRecord: { runId: 'monotonic-skill-run' } },
+            runnerOptions: { schedulingState: GENERAL_WRITE, topicId: 'skill-policy', runRecord: { runId: 'monotonic-skill-run' } },
         } as any;
         const broad = await executor.execute('run_skill', { name: 'broad-skill' }, context) as any;
         expect(broad.effectiveAllowedTools).to.deep.equal(['get_diagnostics', 'read_file']);
@@ -507,8 +510,7 @@ describe('enforced central tool policy', () => {
         const executor = new AgentToolExecutor({} as any, workspaceRoot);
         const context = {
             runnerOptions: {
-                mode: 'utility',
-                domain: 'general',
+                schedulingState: GENERAL_WRITE,
                 abortSignal: new AbortController().signal,
             },
         } as any;
@@ -519,7 +521,7 @@ describe('enforced central tool policy', () => {
 
         const mcpCall = await executor.execute('mcp_filesystem_read_file', { path: 'README.md' }, context) as any;
         expect(mcpCall.success).to.equal(false);
-        expect(mcpCall.error).to.include('not found in configuration');
+        expect(mcpCall.error).to.include('Unknown tool');
 
         const memoryCall = await executor.execute('set_memory', { key: 'secret', value: 'value' }, context) as any;
         expect(memoryCall.success).to.equal(true);
@@ -527,23 +529,23 @@ describe('enforced central tool policy', () => {
         expect(generalMemory.found).to.equal(true);
         expect(generalMemory.entry.value).to.equal('value');
         const paradoxMemory = await executor.execute('query_blackboard', { key: 'secret' }, {
-            runnerOptions: { mode: 'build', domain: 'paradox' },
+            runnerOptions: { schedulingState: PARADOX_WRITE },
         } as any) as any;
         expect(paradoxMemory).to.deep.equal({ found: false });
 
         executor.blackboard.write('domain:paradox:topic:session:secret', 'paradox value', 'free_text', 'test');
         const generalBlackboard = await executor.execute('query_blackboard', { key: 'secret' }, {
-            runnerOptions: { mode: 'orchestrator', domain: 'general' },
+            runnerOptions: { schedulingState: GENERAL_PARALLEL },
         } as any) as any;
         expect(generalBlackboard.found).to.equal(true);
         expect(generalBlackboard.entry.value).to.equal('value');
         const paradoxBlackboard = await executor.execute('query_blackboard', { key: 'secret' }, {
-            runnerOptions: { mode: 'script', domain: 'paradox' },
+            runnerOptions: { schedulingState: PARADOX_PARALLEL },
         } as any) as any;
         expect(paradoxBlackboard.found).to.equal(true);
         expect(paradoxBlackboard.entry.value).to.equal('paradox value');
         const otherTopicBlackboard = await executor.execute('query_blackboard', { key: 'secret' }, {
-            runnerOptions: { mode: 'script', domain: 'paradox', topicId: 'other-topic' },
+            runnerOptions: { schedulingState: PARADOX_PARALLEL, topicId: 'other-topic' },
         } as any) as any;
         expect(otherTopicBlackboard).to.deep.equal({ found: false });
 
@@ -560,7 +562,7 @@ describe('enforced central tool policy', () => {
     it('limits coordinator write_file calls to the current plan artifact', async () => {
         const executor = new AgentToolExecutor({} as any, workspaceRoot);
         executor.fileWriteMode = 'auto';
-        const context = { runnerOptions: { mode: 'orchestrator', domain: 'general', topicId: 'policy-test' } } as any;
+        const context = { runnerOptions: { schedulingState: GENERAL_PARALLEL, topicId: 'policy-test' } } as any;
         const projectTarget = path.join(workspaceRoot, 'client', 'blocked.ts');
 
         const blocked = await executor.execute('write_file', {
@@ -587,7 +589,7 @@ describe('enforced central tool policy', () => {
             stubConfigOverrides['policy.preset'] = 'workspace-auto';
             const executor = new AgentToolExecutor({} as any, workspaceRoot);
             executor.fileWriteMode = 'auto';
-            const context = { runnerOptions: { mode: 'plan', domain: 'paradox', topicId: 'private-topic' } } as any;
+            const context = { runnerOptions: { schedulingState: PARADOX_PLAN, topicId: 'private-topic' } } as any;
             const planPath = path.join(privateRoot, 'topics', 'private-topic', 'Implementation_Plan.md');
 
             const planResult = await executor.execute('write_file', {
@@ -597,7 +599,7 @@ describe('enforced central tool policy', () => {
             expect(planResult.success).to.equal(true);
             expect(fs.readFileSync(planPath, 'utf8')).to.equal('# Complete plan');
             const readBack = await executor.execute('read_file', { file: planPath }, {
-                runnerOptions: { mode: 'build', domain: 'paradox', topicId: 'private-topic' },
+                runnerOptions: { schedulingState: PARADOX_WRITE, topicId: 'private-topic' },
             } as any) as any;
             expect(readBack.content).to.include('# Complete plan');
 
@@ -606,7 +608,7 @@ describe('enforced central tool policy', () => {
                 file: walkthroughPath,
                 content: '# Walkthrough',
             }, {
-                runnerOptions: { mode: 'build', domain: 'paradox', topicId: 'private-topic' },
+                runnerOptions: { schedulingState: PARADOX_WRITE, topicId: 'private-topic' },
             } as any) as any;
             expect(walkthroughResult.success).to.equal(true);
             expect(fs.readFileSync(walkthroughPath, 'utf8')).to.equal('# Walkthrough');
@@ -615,7 +617,7 @@ describe('enforced central tool policy', () => {
                 file: otherWalkthrough,
                 content: '# Wrong walkthrough',
             }, {
-                runnerOptions: { mode: 'build', domain: 'paradox', topicId: 'private-topic' },
+                runnerOptions: { schedulingState: PARADOX_WRITE, topicId: 'private-topic' },
             } as any) as any;
             expect(blockedWalkthrough.policyDenied).to.equal(true);
             expect(fs.existsSync(otherWalkthrough)).to.equal(false);
@@ -680,6 +682,7 @@ function makeContext(topicId = 'topic-a'): any {
     const abortController = new AbortController();
     return {
         runnerOptions: {
+            schedulingState: PARADOX_WRITE,
             topicId,
             abortSignal: abortController.signal,
         },
@@ -712,34 +715,6 @@ describe('agent tool file path safety', () => {
         expect(diff.message).to.include('inside the workspace');
         expect(checkout.success).to.equal(false);
         expect(checkout.message).to.include('inside the workspace');
-    });
-
-    it('remaps legacy .cwtools-ai/scratch writes into the current topic folder', async () => {
-        const handler = createFileHandler();
-        const result = await handler.writeFile(
-            { file: '.cwtools-ai/scratch/notes.txt', content: 'hello topic scratch' },
-            makeContext('topic-123'),
-        );
-
-        expect(result.success).to.equal(true);
-        const expectedPath = path.join(workspaceRoot, '.cwtools', 'topic-123', 'scratch', 'notes.txt');
-        const legacyPath = path.join(workspaceRoot, '.cwtools', 'scratch', 'notes.txt');
-        expect(fs.readFileSync(expectedPath, 'utf8')).to.equal('hello topic scratch');
-        expect(fs.existsSync(legacyPath)).to.equal(false);
-    });
-
-    it('remaps loose .cwtools-ai writes into the current topic folder', async () => {
-        const handler = createFileHandler();
-        const result = await handler.writeFile(
-            { file: '.cwtools-ai/notes.md', content: 'topic note' },
-            makeContext('topic-123'),
-        );
-
-        expect(result.success).to.equal(true);
-        const expectedPath = path.join(workspaceRoot, '.cwtools', 'topic-123', 'notes.md');
-        const loosePath = path.join(workspaceRoot, '.cwtools', 'notes.md');
-        expect(fs.readFileSync(expectedPath, 'utf8')).to.equal('topic note');
-        expect(fs.existsSync(loosePath)).to.equal(false);
     });
 
     it('bypasses ReadTracker only for exact .cwtools path segments', async () => {
@@ -818,8 +793,7 @@ describe('agent tool file path safety', () => {
     it('lets General Coding write ordinary YAML and text without Paradox file gates', async () => {
         const handler = createFileHandler();
         const ctx = makeContext();
-        ctx.runnerOptions.mode = 'utility';
-        ctx.runnerOptions.domain = 'general';
+        ctx.runnerOptions.schedulingState = GENERAL_WRITE;
 
         const yamlRel = '.github/workflows/verify.yml';
         const yamlResult = await handler.writeFile({
@@ -848,12 +822,12 @@ describe('agent tool file path safety', () => {
         const executor = new AgentToolExecutor({} as any, workspaceRoot);
 
         const general = await executor.execute('read_file', { file: target, centerLine: 0, radius: 1 }, {
-            runnerOptions: { mode: 'utility', domain: 'general' },
+            runnerOptions: { schedulingState: GENERAL_WRITE },
         } as any) as any;
         expect(general.content).to.include('sample = {');
 
         const paradox = await executor.execute('read_file', { file: target, centerLine: 0, radius: 1 }, {
-            runnerOptions: { mode: 'build', domain: 'paradox' },
+            runnerOptions: { schedulingState: PARADOX_WRITE },
         } as any) as any;
         expect(paradox.content).to.equal(general.content);
     });
@@ -998,7 +972,7 @@ describe('agent tool file path safety', () => {
     it('rejects write_localisation targets outside real localisation folders', async () => {
         const handler = createFileHandler();
         const result = await handler.writeLocalisation({
-            filePath: '.cwtools-ai/scratch/bad_l_english.yml',
+            filePath: '.cwtools/scratch/bad_l_english.yml',
             language: 'l_english',
             entries: [{ key: 'bad_key', value: 'Bad' }],
         }, makeContext('topic-123'));
@@ -1096,7 +1070,7 @@ describe('agent tool file path safety', () => {
     it('rejects a multi-file transaction when the primary file is outside localisation folders', async () => {
         const handler = createFileHandler();
         const result = await handler.writeLocalisation({
-            filePath: '.cwtools-ai/scratch/samplemod_events_l_english.yml',
+            filePath: '.cwtools/scratch/samplemod_events_l_english.yml',
             language: 'l_english',
             languages: ['l_english', 'l_simp_chinese'],
             entries: [{ key: 'samplemod.1.title', value: 'SampleMod Echo' }],
@@ -1270,7 +1244,7 @@ describe('agent tool file path safety', () => {
                 invariants: ['The flag is read after it is set and removed at closure.'],
                 acceptanceCriteria: [
                     { id: 'event_exists', description: 'The event is defined.', type: 'entity_exists', subject: 'test.1' },
-                    { id: 'flag_lifecycle', description: 'The flag is set and read.', type: 'flag_lifecycle', subject: 'test_chain_active' },
+                    { id: 'typed_flag_lifecycle', description: 'The flag is set and read.', type: 'typed_lifecycle', entityKind: 'flag', subject: 'test_chain_active' },
                 ],
                 expectsFileChanges: true,
             },
@@ -1287,7 +1261,7 @@ describe('agent tool file path safety', () => {
                 dependencies: [],
                 acceptanceChecks: [
                     { id: 'event_exists', description: 'The event is defined.', type: 'entity_exists', subject: 'test.1' },
-                    { id: 'flag_lifecycle', description: 'The flag is set and read.', type: 'flag_lifecycle', subject: 'test_chain_active' },
+                    { id: 'typed_flag_lifecycle', description: 'The flag is set and read.', type: 'typed_lifecycle', entityKind: 'flag', subject: 'test_chain_active' },
                 ],
             }],
             unresolvedCritical: [],
@@ -1361,6 +1335,7 @@ describe('agent tool file path safety', () => {
             entries: [{ key: 'samplemod_rakata_arc_epilogue_title', value: 'Epilogue' }],
         }, {
             runnerOptions: {
+                schedulingState: LOCALIZATION_WRITE,
                 topicId: 'topic-123',
                 useSlimPrompt: true,
                 forceAutoApplyWrites: true,
@@ -1393,6 +1368,7 @@ describe('agent tool file path safety', () => {
             newContent: '\tid = samplemod.2',
         }, {
             runnerOptions: {
+                schedulingState: PARADOX_WRITE,
                 topicId: 'topic-123',
                 useSlimPrompt: true,
                 forceAutoApplyWrites: true,
@@ -1513,7 +1489,7 @@ describe('agent sprite candidate tool contract', () => {
             const result = await executor.execute('write_file', {
                 filePath: 'blocked.txt',
                 content: 'must not be written',
-            }, { runnerOptions: { mode: 'build' } } as any) as any;
+            }, { runnerOptions: { schedulingState: PARADOX_WRITE } } as any) as any;
             expect(result.workspaceTrustRequired).to.equal(true);
             expect(fs.existsSync(path.join(workspaceRoot, 'blocked.txt'))).to.equal(false);
         } finally {
@@ -1586,7 +1562,7 @@ describe('agent sprite candidate tool contract', () => {
         const result = await executor.execute('query_localisation_index', {
             key: 'my_key',
             language: 'l_english',
-        }) as any;
+        }, { runnerOptions: { schedulingState: PARADOX_WRITE } } as any) as any;
 
         expect(result.status).to.equal('ready');
         expect(result.totalCount).to.equal(1);
@@ -1595,7 +1571,7 @@ describe('agent sprite candidate tool contract', () => {
 
     it('returns unavailable localisation index result without IndexService', async () => {
         const executor = new AgentToolExecutor({} as any, workspaceRoot);
-        const result = await executor.execute('query_localisation_index', { key: 'my_key' }) as any;
+        const result = await executor.execute('query_localisation_index', { key: 'my_key' }, { runnerOptions: { schedulingState: PARADOX_WRITE } } as any) as any;
 
         expect(result.status).to.equal('unavailable');
         expect(result.entries).to.deep.equal([]);
@@ -1630,7 +1606,7 @@ describe('agent sprite candidate tool contract', () => {
             kind: 'event',
             exact: true,
             includeReferences: true,
-        }) as any;
+        }, { runnerOptions: { schedulingState: PARADOX_WRITE } } as any) as any;
 
         expect(result.status).to.equal('ready');
         expect(result.totalCount).to.equal(1);
@@ -1692,7 +1668,7 @@ describe('agent sprite candidate tool contract', () => {
         const executor = new AgentToolExecutor({} as any, workspaceRoot, fakeIndexService as any);
         const result = await executor.execute('query_workspace_index', {
             name: 'samplemod_btn', exact: true, source: 'gui', includeAssetChain: true,
-        }) as any;
+        }, { runnerOptions: { schedulingState: PARADOX_WRITE } } as any) as any;
         const refs = result.assetChain[0].references;
         expect(refs.some((ref: any) => ref.target === 'samplemod_button_effect' && ref.exists)).to.equal(true);
         expect(refs.some((ref: any) => ref.target === 'GFX_samplemod_button' && ref.exists)).to.equal(true);
@@ -1730,7 +1706,7 @@ describe('agent sprite candidate tool contract', () => {
                 name: 'crisis',
                 prefix: true,
                 limit: 20,
-            }) as Promise<any>;
+            }, { runnerOptions: { schedulingState: PARADOX_WRITE } } as any) as Promise<any>;
 
             await clock.tickAsync(8_000);
             const result = await pending;
@@ -1745,7 +1721,7 @@ describe('agent sprite candidate tool contract', () => {
 
     it('returns unavailable workspace index result without IndexService', async () => {
         const executor = new AgentToolExecutor({} as any, workspaceRoot);
-        const result = await executor.execute('query_workspace_index', { name: 'samplemod.100' }) as any;
+        const result = await executor.execute('query_workspace_index', { name: 'samplemod.100' }, { runnerOptions: { schedulingState: PARADOX_WRITE } } as any) as any;
 
         expect(result.status).to.equal('unavailable');
         expect(result.entries).to.deep.equal([]);
@@ -1786,7 +1762,7 @@ describe('agent sprite candidate tool contract', () => {
             const result = await executor.execute('workspace_symbols', {
                 query: 'habitat_phase_03_entity',
                 limit: 5,
-            }) as any;
+            }, { runnerOptions: { schedulingState: PARADOX_WRITE } } as any) as any;
 
             expect(ensureArgs).to.deep.equal({ includeVanilla: true });
             expect(indexQuery).to.deep.equal({ name: 'habitat_phase_03_entity', limit: 5 });
@@ -1837,7 +1813,7 @@ describe('agent sprite candidate tool contract', () => {
         ];
 
         const executor = new AgentToolExecutor({} as any, workspaceRoot);
-        const result = await executor.execute('get_diagnostics', { limit: 1 }) as any;
+        const result = await executor.execute('get_diagnostics', { limit: 1 }, { runnerOptions: { schedulingState: PARADOX_WRITE } } as any) as any;
 
         expect(result.summary).to.deep.include({ errors: 2, warnings: 0 });
         expect(result.totalDiagnosticCount).to.equal(2);
@@ -1852,7 +1828,7 @@ describe('agent sprite candidate tool contract', () => {
         const profileDir = path.join(workspaceRoot, '.cwtools', 'project');
         fs.mkdirSync(profileDir, { recursive: true });
         fs.writeFileSync(path.join(profileDir, 'profile.json'), JSON.stringify({
-            schemaVersion: 1,
+            schemaVersion: 2,
             generatedAt: '2026-05-24T00:00:00.000Z',
             workspaceRoot,
             workspaceKind: 'paradox_mod',
@@ -1863,6 +1839,7 @@ describe('agent sprite candidate tool contract', () => {
             identifiers: {
                 namespaces: ['samplemod'],
                 variablePrefixes: ['@samplemod_'],
+                byType: {},
                 scriptedTriggers: [],
                 scriptedEffects: [],
                 events: ['samplemod.1'],
@@ -1880,7 +1857,7 @@ describe('agent sprite candidate tool contract', () => {
         }), 'utf8');
 
         const executor = new AgentToolExecutor({} as any, workspaceRoot);
-        const result = await executor.execute('query_project_profile', { section: 'summary', mode: 'build' }) as any;
+        const result = await executor.execute('query_project_profile', { section: 'summary', mode: 'build' }, { runnerOptions: { schedulingState: PARADOX_WRITE } } as any) as any;
 
         expect(result.status).to.equal('ready');
         expect(result.summary).to.include('Project: SampleMod');
@@ -2047,8 +2024,8 @@ describe('agent tool topic artifacts', () => {
             threadId: 'thread-owner',
             terminate,
         });
-        const foreignContext = { runnerOptions: { threadId: 'thread-other' } } as any;
-        const ownerContext = { runnerOptions: { threadId: 'thread-owner' } } as any;
+        const foreignContext = { runnerOptions: { schedulingState: GENERAL_WRITE, threadId: 'thread-other' } } as any;
+        const ownerContext = { runnerOptions: { schedulingState: GENERAL_WRITE, threadId: 'thread-owner' } } as any;
 
         expect(handler.listProcesses({}, foreignContext).processes.some(item => item.processId === record.processId)).to.equal(false);
         expect(handler.readProcess({ processId: record.processId }, foreignContext).success).to.equal(false);
@@ -2234,7 +2211,7 @@ describe('agent tool topic artifacts', () => {
             timeoutMs: 10000,
         }, {
             runnerOptions: {
-                mode: 'utility',
+                schedulingState: GENERAL_WRITE,
                 topicId: 'media-topic',
                 abortSignal: new AbortController().signal,
             },
@@ -2248,7 +2225,7 @@ describe('agent tool topic artifacts', () => {
         expect(result.stdout).to.include('ran script');
     });
 
-    it('maps legacy scratch paths into the current topic scratch directory for commands', async () => {
+    it('maps the canonical scratch alias into the current topic scratch directory for commands', async () => {
         const handler = new ExternalToolHandler({ workspaceRoot });
         const topicScratch = path.join(workspaceRoot, '.cwtools', 'media-topic', 'scratch');
         fs.mkdirSync(topicScratch, { recursive: true });
@@ -2256,11 +2233,11 @@ describe('agent tool topic artifacts', () => {
         fs.writeFileSync(targetPath, 'console.log("ok");\n', 'utf8');
 
         const result = await handler.runCommand({
-            command: 'node ".cwtools-ai/scratch/helper.js"',
+            command: 'node ".cwtools/scratch/helper.js"',
             timeoutMs: 10000,
         }, {
             runnerOptions: {
-                mode: 'utility',
+                schedulingState: GENERAL_WRITE,
                 topicId: 'media-topic',
                 abortSignal: new AbortController().signal,
             },
@@ -2290,7 +2267,7 @@ describe('agent tool topic artifacts', () => {
             timeoutMs: 10000,
         }, {
             runnerOptions: {
-                mode: 'utility',
+                schedulingState: GENERAL_WRITE,
                 topicId: 'media-topic',
                 abortSignal: new AbortController().signal,
             },
@@ -2317,11 +2294,11 @@ describe('agent tool topic artifacts', () => {
         fs.writeFileSync(targetPath, 'console.log("escaped ok");\n', 'utf8');
 
         const result = await handler.runCommand({
-            command: 'node \\".cwtools-ai/scratch/agent_helper.js\\"',
+            command: 'node \\".cwtools/scratch/agent_helper.js\\"',
             timeoutMs: 10000,
         }, {
             runnerOptions: {
-                mode: 'utility',
+                schedulingState: GENERAL_WRITE,
                 topicId: 'media-topic',
                 abortSignal: new AbortController().signal,
             },
@@ -2342,11 +2319,11 @@ describe('agent tool topic artifacts', () => {
         fs.writeFileSync(targetPath, 'console.log("topic escaped ok");\n', 'utf8');
 
         const result = await handler.runCommand({
-            command: 'node \\".cwtools-ai\\topic_1779112553395\\scratch\\search_fallen.js"',
+            command: 'node \\".cwtools\\topic_1779112553395\\scratch\\search_fallen.js"',
             timeoutMs: 10000,
         }, {
             runnerOptions: {
-                mode: 'utility',
+                schedulingState: GENERAL_WRITE,
                 topicId: 'topic_1779112553395',
                 abortSignal: new AbortController().signal,
             },
@@ -2367,11 +2344,11 @@ describe('agent tool topic artifacts', () => {
         fs.writeFileSync(targetPath, 'powershell path ok\n', 'utf8');
 
         const result = await handler.runCommand({
-            command: 'Get-Content \\".cwtools-ai\\topic_1779112553395\\scratch\\search_fallen.txt"',
+            command: 'Get-Content \\".cwtools\\topic_1779112553395\\scratch\\search_fallen.txt"',
             timeoutMs: 10000,
         }, {
             runnerOptions: {
-                mode: 'utility',
+                schedulingState: GENERAL_WRITE,
                 topicId: 'topic_1779112553395',
                 abortSignal: new AbortController().signal,
             },
@@ -2392,10 +2369,11 @@ describe('agent tool topic artifacts', () => {
         fs.writeFileSync(targetPath, 'normal powershell path ok\n', 'utf8');
 
         const result = await handler.runCommand({
-            command: 'Get-Content \\".cwtools-ai\\topic_1779112553395\\scratch\\search_fallen.txt"',
+            command: 'Get-Content \\".cwtools\\topic_1779112553395\\scratch\\search_fallen.txt"',
             timeoutMs: 10000,
         }, {
             runnerOptions: {
+                schedulingState: GENERAL_WRITE,
                 topicId: 'topic_1779112553395',
                 abortSignal: new AbortController().signal,
             },
@@ -2457,6 +2435,7 @@ describe('agent tool topic artifacts', () => {
             timeoutMs: 10000,
         }, {
             runnerOptions: {
+                schedulingState: GENERAL_WRITE,
                 topicId: 'media-topic',
                 abortSignal: new AbortController().signal,
             },
@@ -2488,6 +2467,7 @@ describe('agent tool topic artifacts', () => {
             timeoutMs: 10000,
         }, {
             runnerOptions: {
+                schedulingState: GENERAL_WRITE,
                 topicId: 'media-topic',
                 abortSignal: new AbortController().signal,
             },
@@ -2521,7 +2501,7 @@ describe('agent tool topic artifacts', () => {
             timeoutMs: 10000,
         }, {
             runnerOptions: {
-                mode: 'utility',
+                schedulingState: GENERAL_WRITE,
                 topicId: 'media-topic',
                 abortSignal: new AbortController().signal,
             },
@@ -2558,7 +2538,7 @@ describe('agent tool topic artifacts', () => {
             timeoutMs: 10000,
         }, {
             runnerOptions: {
-                mode: 'utility',
+                schedulingState: GENERAL_WRITE,
                 topicId: 'media-topic',
                 abortSignal: new AbortController().signal,
             },
@@ -2593,7 +2573,7 @@ describe('agent tool topic artifacts', () => {
             timeoutMs: 10000,
         }, {
             runnerOptions: {
-                mode: 'utility',
+                schedulingState: GENERAL_WRITE,
                 topicId: 'media-topic',
                 abortSignal: new AbortController().signal,
             },
@@ -2631,7 +2611,7 @@ describe('agent tool topic artifacts', () => {
             timeoutMs: 10000,
         }, {
             runnerOptions: {
-                mode: 'utility',
+                schedulingState: GENERAL_WRITE,
                 topicId: 'media-topic',
                 abortSignal: new AbortController().signal,
             },
@@ -2669,7 +2649,7 @@ describe('agent tool topic artifacts', () => {
             timeoutMs: 10000,
         }, {
             runnerOptions: {
-                mode: 'utility',
+                schedulingState: GENERAL_WRITE,
                 topicId: 'shader-topic',
                 abortSignal: new AbortController().signal,
             },
@@ -2766,7 +2746,7 @@ describe('agent tool progress and aborts', () => {
 
         const permission = sinon.stub().resolves(true);
         const result = await executor.execute('git_ops', { action: 'checkout', file: 'events/scripted_change.txt' }, {
-            runnerOptions: { mode: 'build' },
+            runnerOptions: { schedulingState: PARADOX_WRITE },
             agentRunner: { readTracker: { invalidate } },
             onPermissionRequest: permission,
         } as any) as any;
@@ -2796,7 +2776,7 @@ describe('agent tool progress and aborts', () => {
         (executor as any).postWriteAffectedFiles.set('topic:default', [callerFile]);
 
         const result = await executor.execute('git_ops', { action: 'checkout', file: 'common/inline_scripts/template.txt' }, {
-            runnerOptions: { mode: 'build' },
+            runnerOptions: { schedulingState: PARADOX_WRITE },
             agentRunner: { readTracker: { invalidate: () => undefined } },
             onPermissionRequest: sinon.stub().resolves(true),
         } as any) as any;
@@ -2830,7 +2810,7 @@ describe('agent tool progress and aborts', () => {
 
         const permission = sinon.stub().resolves(true);
         const result = await executor.execute('git_ops', { action: 'checkout', file: 'gfx/FX/test.shader' }, {
-            runnerOptions: { mode: 'build' },
+            runnerOptions: { schedulingState: PARADOX_WRITE },
             agentRunner: { readTracker: { invalidate } },
             onPermissionRequest: permission,
         } as any) as any;
@@ -2850,7 +2830,7 @@ describe('agent tool progress and aborts', () => {
         sinon.stub(executor as any, 'executeInternal').resolves({ success: true, output: '' });
         const permission = sinon.stub().resolves(true);
         const result = await executor.execute('git_ops', { action: 'status' }, {
-            runnerOptions: { mode: 'build' },
+            runnerOptions: { schedulingState: PARADOX_WRITE },
             onPermissionRequest: permission,
         } as any) as any;
         expect(result.success).to.equal(true);
@@ -2862,56 +2842,24 @@ describe('agent tool progress and aborts', () => {
         const result = await executor.execute('dispatch_agents', {
             tasks: [{ id: 'writer', agentType: 'build', prompt: 'Modify a project file.' }],
         }, {
-            runnerOptions: { mode: 'plan', domain: 'paradox' },
+            runnerOptions: { schedulingState: PARADOX_PLAN },
         } as any) as any;
 
         expect(result.success).to.equal(false);
-        expect(result.error).to.include("Agent type 'build' is not allowed in Plan mode");
+        expect(result.error).to.include("Agent type 'build' is not allowed by scheduler profile");
         expect(result.error).to.include('explore, plan, review');
     });
 
-    it('rejects writer sub-agents when Explore mode fans out evidence collection', async () => {
+    it('does not expose dispatch_agents to an Explore scheduler', async () => {
         const executor = createExecutor();
         const result = await executor.execute('dispatch_agents', {
             tasks: [{ id: 'writer', agentType: 'utility', prompt: 'Modify a project file.' }],
         }, {
-            runnerOptions: { mode: 'explore', domain: 'general' },
+            runnerOptions: { schedulingState: GENERAL_EXPLORE },
         } as any) as any;
 
         expect(result.success).to.equal(false);
-        expect(result.error).to.include("Agent type 'utility' is not allowed in Explore mode");
-        expect(result.error).to.include('explore, plan, review');
-    });
-
-    it('rejects planned write targets in Explore-mode fan-out', async () => {
-        const executor = createExecutor();
-        const result = await executor.execute('dispatch_agents', {
-            tasks: [{
-                id: 'reader',
-                agentType: 'explore',
-                prompt: 'Inspect the target file.',
-                plannedFiles: ['client/extension/ai/chatPanel.ts'],
-            }],
-        }, {
-            runnerOptions: { mode: 'explore', domain: 'general' },
-        } as any) as any;
-
-        expect(result.success).to.equal(false);
-        expect(result.error).to.include('Explore mode fan-out is read-only');
-        expect(result.error).to.include('must not declare plannedFiles');
-    });
-
-    it('rejects executable blueprints in Explore-mode fan-out', async () => {
-        const executor = createExecutor();
-        const result = await executor.execute('dispatch_agents', {
-            blueprintFile: '.cwtools/topic/Implementation_Plan.md',
-        }, {
-            runnerOptions: { mode: 'explore', domain: 'paradox' },
-        } as any) as any;
-
-        expect(result.success).to.equal(false);
-        expect(result.error).to.include('Explore mode fan-out is read-only');
-        expect(result.error).to.include('at most four bounded evidence tasks');
+        expect(result.error).to.include("Tool 'dispatch_agents' is unavailable under the effective runtime policy");
     });
 
     it('emits heartbeat progress while a tool is still running and stops after abort', async () => {
@@ -2922,7 +2870,7 @@ describe('agent tool progress and aborts', () => {
             const abortController = new AbortController();
             const steps: any[] = [];
             const promise = executor.execute('dispatch_agents', {}, {
-                runnerOptions: { abortSignal: abortController.signal },
+                runnerOptions: { schedulingState: PARADOX_PARALLEL, abortSignal: abortController.signal },
                 onStep: (step: any) => steps.push(step),
             } as any);
 
@@ -2964,7 +2912,7 @@ describe('agent tool progress and aborts', () => {
                 content: 'effect = { }\n',
                 _autoApply: true,
             }, {
-                runnerOptions: { mode: 'build', domain: 'paradox' },
+                runnerOptions: { schedulingState: PARADOX_WRITE },
             } as any);
 
             await clock.tickAsync(31_000);
@@ -2992,7 +2940,7 @@ describe('agent tool progress and aborts', () => {
                 content: 'hello\n',
                 _autoApply: true,
             }, {
-                runnerOptions: { mode: 'build', domain: 'paradox' },
+                runnerOptions: { schedulingState: PARADOX_WRITE },
             } as any);
 
             await clock.tickAsync(5_000);
@@ -3017,7 +2965,7 @@ describe('agent tool progress and aborts', () => {
             });
 
             const resultPromise = executor.execute('todo_write', {}, {
-                runnerOptions: {},
+                runnerOptions: { schedulingState: PARADOX_WRITE },
                 onStep: () => undefined,
             } as any);
 
@@ -3031,30 +2979,29 @@ describe('agent tool progress and aborts', () => {
         }
     });
 
-    it('routes dynamic MCP tool names through mcp_call mode validation', async () => {
+    it('routes generic MCP calls through the canonical mcp_call mode validation', async () => {
         const executor = createExecutor();
         const executeInternal = sinon.stub(executor as any, 'executeInternal').resolves({ success: true, routed: true });
 
-        const blocked = await executor.execute('mcp_filesystem_read_file', { path: 'README.md' }, {
-            runnerOptions: { mode: 'loc_writer', domain: 'paradox' },
+        const blocked = await executor.execute('mcp_call', { server: 'filesystem', tool: 'read_file' }, {
+            runnerOptions: { schedulingState: LOCALIZATION_WRITE },
         } as any) as any;
         expect(blocked.success).to.equal(false);
         expect(blocked.error).to.include("not allowed in current mode 'loc_writer'");
-        expect(blocked.error).to.include('mcp_call');
         expect(executeInternal.called).to.equal(false);
 
-        const routed = await executor.execute('mcp_filesystem_read_file', { path: 'README.md' }, {
-            runnerOptions: { mode: 'utility', domain: 'paradox' },
+        const routed = await executor.execute('mcp_call', { server: 'filesystem', tool: 'read_file' }, {
+            runnerOptions: { schedulingState: GENERAL_WRITE },
         } as any) as any;
         expect(routed).to.deep.include({ success: true, routed: true });
         expect(executeInternal.calledOnce).to.equal(true);
-        expect(executeInternal.firstCall.args[0]).to.equal('mcp_filesystem_read_file');
+        expect(executeInternal.firstCall.args[0]).to.equal('mcp_call');
     });
 
     it('denies MCP tools to orchestrator sub-agents by default at the execution chokepoint', async () => {
         const executor = createExecutor();
-        const result = await executor.execute('mcp_filesystem_read_file', { path: 'README.md' }, {
-            runnerOptions: { mode: 'utility', domain: 'paradox', useSlimPrompt: true },
+        const result = await executor.execute('mcp_call', { server: 'filesystem', tool: 'read_file' }, {
+            runnerOptions: { schedulingState: GENERAL_WRITE, useSlimPrompt: true },
         } as any) as any;
 
         expect(result.success).to.equal(false);
@@ -3065,8 +3012,8 @@ describe('agent tool progress and aborts', () => {
     it('lets an explicit allow pattern grant sub-agent MCP access', async () => {
         permissionsConfig = { mcp: { 'filesystem_read_*': 'allow' } };
         const executor = createExecutor();
-        const result = await executor.execute('mcp_filesystem_read_file', { path: 'README.md' }, {
-            runnerOptions: { mode: 'utility', domain: 'paradox', useSlimPrompt: true },
+        const result = await executor.execute('mcp_call', { server: 'filesystem', tool: 'read_file' }, {
+            runnerOptions: { schedulingState: GENERAL_WRITE, useSlimPrompt: true },
         } as any) as any;
 
         // Permission gate passed; failure comes from the unconfigured server, not the sandbox.
@@ -3079,7 +3026,7 @@ describe('agent tool progress and aborts', () => {
         permissionsConfig = { mcp: { 'filesystem_*': 'ask' } };
         const executor = createExecutor();
         const result = await executor.execute('mcp_call', { server: 'filesystem', tool: 'read_file' }, {
-            runnerOptions: { mode: 'utility', domain: 'paradox' },
+            runnerOptions: { schedulingState: GENERAL_WRITE },
         } as any) as any;
 
         expect(result.success).to.equal(false);
@@ -3088,13 +3035,18 @@ describe('agent tool progress and aborts', () => {
     });
 
     it('forwards top-level dynamic MCP args to the MCP call', async () => {
-        stubConfigOverrides['mcp.servers'] = [{ name: 'filesystem', capabilityDomain: 'paradox' }];
+        stubConfigOverrides['mcp.registerDynamicTools'] = true;
+        stubConfigOverrides['mcp.servers'] = [{ name: 'filesystem', capabilityDomain: 'general' }];
         const executor = createExecutor();
         const callTool = sinon.stub().resolves({ ok: true });
-        sinon.stub(executor as any, 'getMcpClient').resolves({ callTool });
+        sinon.stub(executor as any, 'getMcpClient').resolves({
+            callTool,
+            listTools: async () => ({ tools: [{ name: 'read_file', description: 'd', inputSchema: { type: 'object', properties: {} } }] }),
+        });
+        await executor.getDynamicMcpToolDefinitions('utility', 'general');
 
         const result = await executor.execute('mcp_filesystem_read_file', { path: 'README.md' }, {
-            runnerOptions: { mode: 'utility', domain: 'paradox' },
+            runnerOptions: { schedulingState: GENERAL_WRITE },
         } as any) as any;
 
         expect(result.success).to.equal(true);
@@ -3104,14 +3056,14 @@ describe('agent tool progress and aborts', () => {
     });
 
     it('keeps mcp_call nested arguments intact', async () => {
-        stubConfigOverrides['mcp.servers'] = [{ name: 'filesystem', capabilityDomain: 'paradox' }];
+        stubConfigOverrides['mcp.servers'] = [{ name: 'filesystem', capabilityDomain: 'general' }];
         const executor = createExecutor();
         const callTool = sinon.stub().resolves({ ok: true });
 
         sinon.stub(executor as any, 'getMcpClient').resolves({ callTool });
 
         const result = await executor.execute('mcp_call', { server: 'filesystem', tool: 'read_file', arguments: { path: 'a.txt' } }, {
-            runnerOptions: { mode: 'utility', domain: 'paradox' },
+            runnerOptions: { schedulingState: GENERAL_WRITE },
         } as any) as any;
 
         expect(result.success).to.equal(true);
@@ -3121,7 +3073,7 @@ describe('agent tool progress and aborts', () => {
     it('resolves underscore server names through the dynamic registration map', async () => {
         stubConfigOverrides = {
             'mcp.registerDynamicTools': true,
-            'mcp.servers': [{ name: 'my_server', type: 'stdio', capabilityDomain: 'paradox' }],
+            'mcp.servers': [{ name: 'my_server', type: 'stdio', capabilityDomain: 'general' }],
         };
         const executor = createExecutor();
         const callTool = sinon.stub().resolves({ ok: true });
@@ -3130,11 +3082,11 @@ describe('agent tool progress and aborts', () => {
             listTools: async () => ({ tools: [{ name: 'read_file', description: 'd', inputSchema: { type: 'object', properties: {} } }] }),
         });
 
-        const defs = await executor.getDynamicMcpToolDefinitions('utility' as any, 'paradox');
+        const defs = await executor.getDynamicMcpToolDefinitions('utility' as any, 'general');
         expect(defs.map((d: any) => d.function.name)).to.include('mcp_my_server_read_file');
 
         const result = await executor.execute('mcp_my_server_read_file', { path: 'x' }, {
-            runnerOptions: { mode: 'utility', domain: 'paradox' },
+            runnerOptions: { schedulingState: GENERAL_WRITE },
         } as any) as any;
 
         expect(result.success).to.equal(true);
@@ -3148,7 +3100,7 @@ describe('agent tool progress and aborts', () => {
         const executeInternal = sinon.stub(executor as any, 'executeInternal').resolves({ success: true });
 
         const result = await executor.execute('mcp_call', { server: 'filesystem', tool: 'read_file' }, {
-            runnerOptions: { mode: 'loc_writer', domain: 'paradox' },
+            runnerOptions: { schedulingState: LOCALIZATION_WRITE },
         } as any) as any;
 
         expect(result.success).to.equal(false);
@@ -3161,7 +3113,7 @@ describe('agent tool progress and aborts', () => {
         const executeInternal = sinon.stub(executor as any, 'executeInternal').resolves({ success: true });
         const context = {
             runnerOptions: {
-                mode: 'build',
+                schedulingState: PARADOX_WRITE,
                 useSlimPrompt: true,
             },
         } as any;

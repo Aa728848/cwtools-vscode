@@ -8,14 +8,13 @@ import type { AgentToolName } from './tools/registry';
 export type { CwtRuleValueReference, CwtShaderReference, PdxRuleCategory, PdxSemanticCatalog } from '../../shared/pdxSemanticCatalog';
 export type { AgentToolName } from './tools/registry';
 
-// ─── Agent Modes ─────────────────────────────────────────────────────────────
+// ─── Agent Execution Labels ──────────────────────────────────────────────────
 
 /**
- * Agent modes — aligned with OpenCode's agent configuration.
+ * Internal prompt/tool execution labels derived from AgentSchedulingState.
  * - build:   Full tool access including file writes and in-loop validation (default)
  * - plan:    Read-only analysis, no writes, structured plan output
  * - explore: Parallel read-only exploration; focuses on understanding codebase, no validation
- * - general: Legacy read-only Q&A mode kept for saved-topic compatibility.
  * - utility: General-purpose workspace task mode for non-PDXScript scripts/tools.
  * - review:  Read-only mode focused on code review, finding issues, and providing feedback.
  * - loc_translator: Specialized for translating YML localisation files between languages.
@@ -23,23 +22,23 @@ export type { AgentToolName } from './tools/registry';
  * - orchestrator: Multi-Agent coordinator mode — decomposes tasks and dispatches sub-agents.
  * - script: Paradox Multi-Agent — dynamic PDXScript workflow coordination with higher read parallelism.
  */
-export type AgentMode = 'build' | 'plan' | 'explore' | 'general' | 'utility' | 'review' | 'gui_expert' | 'script_reviewer' | 'loc_translator' | 'loc_writer' | 'orchestrator' | 'script';
+export type AgentMode = 'build' | 'plan' | 'explore' | 'utility' | 'review' | 'gui_expert' | 'script_reviewer' | 'loc_translator' | 'loc_writer' | 'orchestrator' | 'script';
 
-/** User-facing capability profile. AgentMode remains the internal execution adapter. */
-export type AgentDomain = 'auto' | 'paradox' | 'general' | 'hybrid';
-export type AgentRuntimeDomain = Exclude<AgentDomain, 'auto'>;
+/** Transient routing input; never persisted as session or topic state. */
+export type AgentDomain = 'paradox' | 'general' | 'hybrid';
+export type AgentRuntimeDomain = AgentDomain;
 export type AgentIntent = 'auto' | 'execute' | 'plan' | 'explore' | 'review';
 export type AgentExecutionStrategy = 'auto' | 'single' | 'multi';
 
 /** Maximum effect authority granted by the user for a run. Runtime transitions may only preserve or reduce it. */
 export type AgentAuthorization = 'read_only' | 'plan_write_only' | 'workspace_write';
-/** Evidence-driven runtime phase. This is intentionally independent from the legacy AgentMode adapter. */
+/** Evidence-driven runtime phase. */
 export type AgentRunPhase = 'inspect' | 'plan' | 'execute' | 'verify' | 'finalize';
 /** Runtime execution topology. */
 export type AgentDispatchMode = 'single' | 'parallel' | 'specialist';
 
 export interface AgentSchedulingState {
-    /** Concrete runtime profile selected from the catalog. Legacy mode is derived from the axes below. */
+    /** Concrete runtime profile selected from the catalog. */
     profileName?: string;
     domainProfile: AgentRuntimeDomain;
     authorization: AgentAuthorization;
@@ -49,6 +48,10 @@ export interface AgentSchedulingState {
     overlays?: string[];
     routeConfidence: number;
     routeEvidence: string[];
+    /** The router found a material choice that must remain with the user. */
+    awaitingUserDecision?: boolean;
+    /** Provenance for the current routing decision. */
+    routingSource?: 'model' | 'deterministic' | 'workflow' | 'user';
     phaseReason: string;
     dispatchReason?: string;
     revision: number;
@@ -123,20 +126,7 @@ export interface AgentProfileSelection {
     profileName?: string;
 }
 
-export interface ResolvedAgentProfile {
-    selection: AgentProfileSelection;
-    domain: AgentRuntimeDomain;
-    intent: Exclude<AgentIntent, 'auto'>;
-    strategy: Exclude<AgentExecutionStrategy, 'auto'>;
-    mode: AgentMode;
-    reason: string;
-    /** Whether the semantic router found a material choice that must remain with the user. */
-    requiresUserDecision?: boolean;
-    /** User-visible provenance for the bounded routing summary. */
-    routingSource?: 'model' | 'deterministic' | 'manual';
-    /** Admission decision retained separately from the legacy mode adapter. */
-    admission: AdmissionDecision;
-    /** Initial persisted runtime scheduler state. */
+export interface ResolvedSchedulingDecision {
     schedulingState: AgentSchedulingState;
 }
 
@@ -165,9 +155,6 @@ export type AcceptanceCheckType =
     | 'entity_exists'
     | 'entity_referenced'
     | 'typed_lifecycle'
-    // Legacy persisted-plan values remain accepted for resume compatibility.
-    | 'flag_lifecycle'
-    | 'target_lifecycle'
     | 'localisation_owner'
     | 'scope'
     | 'custom';
@@ -753,8 +740,6 @@ export interface ProjectProfile {
     workspaceRoot: string;
     workspaceKind: ProjectProfileWorkspaceKind;
     projectName: string;
-    /** True when a schemaVersion 1 profile was read and normalized; V2 writes false/absent. */
-    legacyProfile?: boolean;
     game: {
         id: string;
         displayName: string;
@@ -1831,7 +1816,6 @@ export interface AnalyzeDiagnosticErrorArgs {
     toolName?: string;
     diagnosticsSnapshot?: unknown;
     toolResult?: unknown;
-    reflection?: string;
 }
 
 // ─── Design Blueprint Tool Types ─────────────────────────────────────────────
@@ -2203,14 +2187,9 @@ export interface AgentCheckpoint {
  * with the complete tool call context and reasoning history.
  */
 export interface AgentResumeState {
-    /** V4 adds replay anchors, typed pending work, model binding, and disclosure state. */
-    version?: 2 | 3 | 4;
+    version: 4;
     timestamp: number;
-    mode: AgentMode;
-    /** Resolved capability domain. Missing on older snapshots and inferred from mode. */
-    domain?: AgentRuntimeDomain;
-    /** Optional scheduler state added without breaking V2/V3 restore. */
-    schedulingState?: AgentSchedulingState;
+    schedulingState: AgentSchedulingState;
     messages: ChatMessage[];
     todos: TodoItem[];
     topicId: string;
@@ -2218,8 +2197,6 @@ export interface AgentResumeState {
     status?: AgentRunStatus;
     summaryRef?: string;
     fullTranscriptRef?: string;
-    /** @deprecated V4 migrates this field into pendingStepRequests. */
-    pendingToolCalls?: ToolCall[];
     lastStableEventId?: string;
     lastStableSequence?: number;
     tailMessageCount?: number;
@@ -2229,7 +2206,7 @@ export interface AgentResumeState {
     recoveredFromBackup?: boolean;
     /** A newer checksummed model-request artifact was replayed after the last periodic snapshot. */
     recoveredFromEventLog?: boolean;
-    /** @deprecated V3 never persists session-only approval rules. */
+    /** Explicitly durable approval rules captured with this V4 state. */
     permissionRules?: import('./runner/permissionPolicy').PermissionRule[];
     domainSequence?: number;
     domainSnapshot?: import('./runner/state/domainModel').DomainSnapshot;
@@ -2408,18 +2385,12 @@ export interface ChatTopic {
     workspaceId?: string;
     /** Optional workspace display label */
     workspaceLabel?: string;
-    /** Per-topic user-facing Agent profile. Missing means the legacy Auto default. */
-    agentProfile?: AgentProfileSelection;
-    /** Last resolved internal mode, used only to restore topic chrome and resume compatibility. */
-    agentMode?: AgentMode;
-    /** Last resolved capability domain, persisted because read-only modes do not encode it. */
-    resolvedAgentDomain?: AgentRuntimeDomain;
+    /** Canonical scheduler state for the topic. */
+    schedulingState: AgentSchedulingState;
     /** Optional active workflow restored with this topic. */
     workflowId?: string;
-    /** Profile to restore when the active workflow is disabled. */
-    workflowReturnProfile?: AgentProfileSelection;
-    /** Internal mode to restore when the active workflow is disabled. */
-    workflowReturnMode?: AgentMode;
+    /** Scheduler state to restore when the active workflow is disabled. */
+    workflowReturnSchedulingState?: AgentSchedulingState;
 }
 
 export interface ChatHistoryMessage {
@@ -2439,8 +2410,8 @@ export interface ChatHistoryMessage {
     images?: string[];
     /** Whether this message should remain hidden from the UI (e.g. system programmatic instructions) */
     isHidden?: boolean;
-    /** Automatic task routing applied to this user turn, shown in conversation replay. */
-    resolvedAgentProfile?: ResolvedAgentProfile;
+    /** Canonical scheduling decision applied to this user turn. */
+    schedulingState?: AgentSchedulingState;
 }
 
 // ─── Context Tray Types ──────────────────────────────────────────────────────
@@ -2539,9 +2510,9 @@ export interface PermissionRequestPreflight {
 }
 
 export type WebViewMessage =
-    | { type: 'sendMessage'; text: string; attachedFiles?: string[]; images?: string[]; agentProfile?: AgentProfileSelection }
+    | { type: 'sendMessage'; text: string; attachedFiles?: string[]; images?: string[] }
     | { type: 'steerGeneration'; text: string; images?: string[] }
-    | { type: 'sendMessageWithReference'; text: string; contexts: ContextItem[]; images?: string[]; agentProfile?: AgentProfileSelection }
+    | { type: 'sendMessageWithReference'; text: string; contexts: ContextItem[]; images?: string[] }
     | { type: 'editAndResendMessage'; messageIndex: number; text: string; contexts?: ContextItem[]; images?: string[] }
     | { type: 'openContextReference'; context: ContextItem }
     | { type: 'insertCode'; code: string }
@@ -2559,8 +2530,7 @@ export type WebViewMessage =
     | { type: 'setShowArchived'; show: boolean }
     | { type: 'configureProvider' }
     | { type: 'cancelGeneration' }
-    | { type: 'switchMode'; mode: AgentMode }
-    | { type: 'switchAgentProfile'; profile: AgentProfileSelection }
+    | { type: 'switchSchedulingDomain'; domain: AgentRuntimeDomain }
     | { type: 'switchWorkflow'; workflowId?: string | null }
     | { type: 'openAgentManager' }
     | { type: 'openSettings' }
@@ -2619,8 +2589,8 @@ export type WebViewMessage =
     | { type: 'openScratchFile'; file: string };
 
 export type HostMessage =
-    | { type: 'addUserMessage'; text: string; messageIndex: number; images?: string[]; contexts?: ContextItem[]; resolvedAgentProfile?: ResolvedAgentProfile }
-    | { type: 'agentRoutingStatus'; phase: 'classifying' | 'resolved' | 'fallback'; profile?: ResolvedAgentProfile }
+    | { type: 'addUserMessage'; text: string; messageIndex: number; images?: string[]; contexts?: ContextItem[]; schedulingState?: AgentSchedulingState }
+    | { type: 'agentRoutingStatus'; phase: 'classifying' | 'resolved' | 'fallback'; schedulingState?: AgentSchedulingState }
     | { type: 'queuedUserInput'; text: string; messageIndex: number; images?: string[]; contexts?: ContextItem[] }
     | { type: 'startBackgroundGeneration' }
     | { type: 'agentStep'; step: AgentStep }
@@ -2632,19 +2602,6 @@ export type HostMessage =
     | { type: 'loadTopicMessages'; messages: ChatHistoryMessage[]; targetSurface?: 'chat' | 'manager' }
     | { type: 'streamToken'; token: string }
     | { type: 'clearChat'; targetSurface?: 'chat' | 'manager' }
-    | { type: 'modeChanged'; mode: AgentMode; label?: string }
-    | { type: 'agentProfileChanged'; profile: AgentProfileSelection }
-    | {
-        type: 'runtimeProfiles';
-        revision: number;
-        profiles: Array<{
-            name: string;
-            description: string;
-            domain?: AgentRuntimeDomain;
-            authorizationCeiling: AgentAuthorization;
-            modelPreference?: 'primary' | 'secondary';
-        }>;
-    }
     | { type: 'workflowList'; workflows: Array<{ id: string; title: string; description: string; mode: string; locale?: string; phases: Array<{ id: string; title: string; description: string }>; verification: Array<{ id: string; description: string; required: boolean; verificationTool?: string }> }>; currentWorkflowId?: string | null; labels?: { selectorPlaceholder: string; noWorkflowSelected: string; phaseUnit: string; phasesUnit: string; requiredCheckUnit: string; requiredChecksUnit: string } }
     | { type: 'workflowChanged'; workflowId?: string | null; workflow?: { id: string; title: string; description: string; mode: string; locale?: string; phases: Array<{ id: string; title: string; description: string }>; verification: Array<{ id: string; description: string; required: boolean; verificationTool?: string }> }; labels?: { selectorPlaceholder: string; noWorkflowSelected: string; phaseUnit: string; phasesUnit: string; requiredCheckUnit: string; requiredChecksUnit: string } }
     | { type: 'slashCommandList'; commands: SlashCommandDescriptor[] }
@@ -2664,17 +2621,15 @@ export type HostMessage =
     | { type: 'questionRequest'; questionId: string; topicId: string; threadId?: string; turnId?: string; questions: AskUserQuestionItem[] }
     | { type: 'questionResolved'; questionId: string; cancelled?: boolean }
     | { type: 'floatingCardResolved'; card: 'permission' | 'question' | 'write' | 'transaction' | 'plan' | 'walkthrough' | 'blueprint'; id?: string }
-    /** Restore mode state after webview rebuild (panel visibility change) */
-    | { type: 'setMode'; mode: AgentMode }
-    | { type: 'setAgentProfile'; profile: AgentProfileSelection; resolved?: ResolvedAgentProfile }
+    | { type: 'setSchedulingState'; schedulingState: AgentSchedulingState }
     /** Replay all AI steps accumulated while the panel was hidden; isGenerating=true means still running */
     | { type: 'replaySteps'; steps: AgentStep[]; isGenerating: boolean }
     /** Plan file saved to disk — tells webview to show the Open/Submit card */
-    | { type: 'planFileSaved'; filePath: string; relPath: string; mode?: AgentMode }
+    | { type: 'planFileSaved'; filePath: string; relPath: string }
     | { type: 'walkthroughFileSaved'; filePath: string; relPath: string }
     | { type: 'blueprintFileSaved'; filePath: string; relPath: string }
     /** Send plan sections to webview for interactive inline annotation */
-    | { type: 'renderPlan'; sections: string[]; planText?: string; mode?: AgentMode }
+    | { type: 'renderPlan'; sections: string[]; planText?: string }
     | { type: 'renderWalkthrough'; sections: string[] }
     | { type: 'renderBlueprint'; sections: string[]; planText?: string }
     /** Return workspace file list for @ mention popup */
@@ -2693,7 +2648,7 @@ export type HostMessage =
     | { type: 'artifactList'; artifacts: AgentArtifact[] }
     /** Multi-Agent coordinator progress push — Agent Lane UI */
     | { type: 'orchestratorProgress'; progress: OrchestratorProgressPayload }
-    | { type: 'runSnapshot'; snapshot: AgentRunRecord; events?: import('./runner/runLedger').AgentRunEvent[]; eventCount?: number; truncatedEventCount?: number; childRuns?: Array<Pick<AgentRunRecord, 'runId' | 'parentRunId' | 'agentId' | 'threadId' | 'turnId' | 'status' | 'mode' | 'startedAt' | 'completedAt' | 'userPromptPreview'> & { parentAgentId?: string }>; artifacts?: Array<{ id: string; kind: string; title: string; summary?: string; status?: string; createdAt?: number }>; cacheStats?: import('./runner/runReducers').CacheStatsSnapshot; scheduling?: import('./runner/runReducers').SchedulingSnapshot }
+    | { type: 'runSnapshot'; snapshot: AgentRunRecord; events?: import('./runner/runLedger').AgentRunEvent[]; eventCount?: number; truncatedEventCount?: number; childRuns?: Array<Pick<AgentRunRecord, 'runId' | 'parentRunId' | 'agentId' | 'threadId' | 'turnId' | 'status' | 'schedulingState' | 'startedAt' | 'completedAt' | 'userPromptPreview'> & { parentAgentId?: string }>; artifacts?: Array<{ id: string; kind: string; title: string; summary?: string; status?: string; createdAt?: number }>; cacheStats?: import('./runner/runReducers').CacheStatsSnapshot; scheduling?: import('./runner/runReducers').SchedulingSnapshot }
     | { type: 'mentionSearchResults'; results: Array<{
         type?: ContextItemType;
         uri?: string;
@@ -2717,9 +2672,7 @@ export type HostMessage =
         stats?: { total: number; visible: number; archived: number; currentTopicId?: string | null; currentTopicTitle?: string | null };
         messages: ChatHistoryMessage[];
         messageCount?: number;
-        mode: AgentMode;
-        agentProfile: AgentProfileSelection;
-        resolvedAgentProfile?: ResolvedAgentProfile;
+        schedulingState: AgentSchedulingState;
         workflowId?: string | null;
         isGenerating: boolean;
         liveStepCount: number;
@@ -2913,9 +2866,7 @@ export interface AgentRunRecord {
     threadId?: string;
     turnId?: string;
     status: AgentRunStatus;
-    mode: AgentMode | string;
-    /** Runtime scheduling state; legacy records derive it from mode/domain. */
-    schedulingState?: AgentSchedulingState;
+    schedulingState: AgentSchedulingState;
     workflowId?: string | null;
     providerId?: string;
     model?: string;

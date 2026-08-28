@@ -1,14 +1,8 @@
 export type ChatLocale = 'en' | 'zh-cn';
 
-export interface ChatModeMeta {
-    label: string | null;
-    bodyClass: string;
-}
-
 export interface ChatI18nText {
     locale: ChatLocale;
     promptExamples: string[];
-    modeLabels: Record<string, ChatModeMeta>;
     artifact: {
         emptyTitle: string;
         emptySubtitle: string;
@@ -125,7 +119,6 @@ export interface ChatI18nText {
     };
     annotations: {
         plan: AnnotationI18nText;
-        orchestratorPlan: AnnotationI18nText;
         walkthrough: AnnotationI18nText;
         blueprint: AnnotationI18nText;
     };
@@ -174,7 +167,7 @@ export interface ChatI18nText {
         tabs: { agents: string; runs: string; artifacts: string; tasks: string };
         overview: {
             topics: string; artifacts: string; steps: string; messages: string;
-            run: string; mode: string; workflow: string; status: string;
+            run: string; workflow: string; status: string;
             none: string; running: string; idle: string;
         };
         runs: {
@@ -226,18 +219,6 @@ const EN: ChatI18nText = {
         'Optimize this loop that checks every planet',
         'Create a modifier formula based on empire technology level',
     ],
-    modeLabels: {
-        build: { label: null, bodyClass: 'build-mode' },
-        plan: { label: 'Plan Mode - read-only planning, no file changes', bodyClass: 'plan-mode' },
-        explore: { label: 'Explore Mode - inspect project structure', bodyClass: 'explore-mode' },
-        general: { label: 'Utility Mode - scripts, tools, and non-PDXScript tasks', bodyClass: 'utility-mode' },
-        utility: { label: 'Utility Mode - scripts, tools, and non-PDXScript tasks', bodyClass: 'utility-mode' },
-        review: { label: 'Review Mode - code review', bodyClass: 'review-mode' },
-        loc_translator: { label: 'Translation Mode - localisation file translation', bodyClass: 'build-mode' },
-        loc_writer: { label: 'Writing Mode - localisation content creation', bodyClass: 'build-mode' },
-        orchestrator: { label: 'General Multi-Agent - DAG dispatch for repository engineering', bodyClass: 'orchestrator-mode' },
-        script: { label: 'Paradox Multi-Agent - dynamic CWT/LSP workflow', bodyClass: 'script-mode' },
-    },
     artifact: {
         emptyTitle: 'No Artifacts',
         emptySubtitle: 'Plans, blueprints, diagnostics, diffs, and walkthroughs will appear here.',
@@ -371,19 +352,6 @@ const EN: ChatI18nText = {
             cancel: 'Cancel',
             edit: 'Edit',
         },
-        orchestratorPlan: {
-            title: 'Multi-agent plan annotations',
-            hint: 'Approval starts DAG dispatch and parallel execution',
-            approve: 'Start multi-agent',
-            approved: 'Multi-agent started...',
-            submit: 'Submit annotations',
-            submitted: 'Submitted',
-            addTitle: 'Add annotation',
-            placeholder: 'Enter annotation...',
-            confirm: 'Confirm',
-            cancel: 'Cancel',
-            edit: 'Edit',
-        },
         walkthrough: {
             title: 'Walkthrough annotations',
             hint: 'Click a section to request changes',
@@ -414,7 +382,7 @@ const EN: ChatI18nText = {
     manager: {
         tabs: { agents: 'Agents', runs: 'Runs', artifacts: 'Artifacts', tasks: 'Tasks' },
         // placeholder — EN manager block already present below
-        overview: { topics: 'Topics', artifacts: 'Artifacts', steps: 'Steps', messages: 'Messages', run: 'Run', mode: 'Mode', workflow: 'Workflow', status: 'Status', none: 'none', running: 'running', idle: 'idle' },
+        overview: { topics: 'Topics', artifacts: 'Artifacts', steps: 'Steps', messages: 'Messages', run: 'Run', workflow: 'Workflow', status: 'Status', none: 'none', running: 'running', idle: 'idle' },
         runs: {
             noRun: 'No active run recorded',
             runId: 'Run ID',
@@ -496,18 +464,6 @@ const ZH_CN: ChatI18nText = {
         '帮我优化这个循环检查所有星球的触发器',
         '创建一个基于帝国科技等级的 modifier 公式',
     ],
-    modeLabels: {
-        build: { label: null, bodyClass: 'build-mode' },
-        plan: { label: '计划模式 - 只读规划，不修改文件', bodyClass: 'plan-mode' },
-        explore: { label: '分析模式 - 探索项目结构', bodyClass: 'explore-mode' },
-        general: { label: '泛用模式 - 脚本、工具与非 PDXScript 工程任务', bodyClass: 'utility-mode' },
-        utility: { label: '泛用模式 - 脚本、工具与非 PDXScript 工程任务', bodyClass: 'utility-mode' },
-        review: { label: '审查模式 - 代码审查', bodyClass: 'review-mode' },
-        loc_translator: { label: '翻译模式 - 本地化文件翻译', bodyClass: 'build-mode' },
-        loc_writer: { label: '写作模式 - 本地化内容创作', bodyClass: 'build-mode' },
-        orchestrator: { label: '通用多 Agent - 面向仓库工程的 DAG 协作', bodyClass: 'orchestrator-mode' },
-        script: { label: 'Paradox 多 Agent - CWT/LSP 动态工作流', bodyClass: 'script-mode' },
-    },
     artifact: {
         emptyTitle: '暂无 Artifacts',
         emptySubtitle: '计划、蓝图、诊断、Diff 和 Walkthrough 会在这里集中出现。',
@@ -641,19 +597,6 @@ const ZH_CN: ChatI18nText = {
             cancel: '取消',
             edit: '编辑',
         },
-        orchestratorPlan: {
-            title: '多 Agent 计划批注',
-            hint: '确认后进入 DAG 分派与并行执行',
-            approve: '启动多 Agent',
-            approved: '已启动多 Agent...',
-            submit: '提交批注',
-            submitted: '已提交',
-            addTitle: '添加批注',
-            placeholder: '输入批注内容...',
-            confirm: '确定',
-            cancel: '取消',
-            edit: '编辑',
-        },
         walkthrough: {
             title: 'Walkthrough 批注',
             hint: '点击段落添加批注要求',
@@ -683,7 +626,7 @@ const ZH_CN: ChatI18nText = {
     },
     manager: {
         tabs: { agents: 'Agents', runs: 'Runs', artifacts: 'Artifacts', tasks: '任务' },
-        overview: { topics: '话题', artifacts: 'Artifacts', steps: '步骤', messages: '消息', run: '运行', mode: '模式', workflow: '工作流', status: '状态', none: '无', running: '运行中', idle: '空闲' },
+        overview: { topics: '话题', artifacts: 'Artifacts', steps: '步骤', messages: '消息', run: '运行', workflow: '工作流', status: '状态', none: '无', running: '运行中', idle: '空闲' },
         runs: {
             noRun: '暂无运行记录',
             runId: '运行 ID',

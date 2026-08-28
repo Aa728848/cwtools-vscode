@@ -11,7 +11,55 @@ import * as fs from 'fs';
 import type { ChatTopic, ChatHistoryMessage, HostMessage, ChatMessage } from './types';
 import { UI, aiText, getAiMessageLocale } from './messages';
 import { getPrivateAiStorageRoot, getProjectWorkspaceRoot } from './workspacePaths';
-import { cloneAgentProfile, isAgentMode, isAgentProfileSelection, isAgentRuntimeDomain } from './agentProfile';
+import { normalizeSchedulingState } from './runner/scheduling';
+
+function readSchedulingState(value: unknown) {
+    try {
+        return normalizeSchedulingState(value);
+    } catch {
+        return undefined;
+    }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+    return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function readStoredTopic(value: unknown): ChatTopic | undefined {
+    if (!isRecord(value)
+        || typeof value.id !== 'string'
+        || typeof value.title !== 'string'
+        || typeof value.createdAt !== 'number'
+        || typeof value.updatedAt !== 'number'
+        || !Array.isArray(value.messages)) return undefined;
+    const schedulingState = readSchedulingState(value.schedulingState);
+    if (!schedulingState) return undefined;
+    if (!value.messages.every(message => isRecord(message)
+        && (message.role === 'user' || message.role === 'assistant')
+        && typeof message.content === 'string'
+        && typeof message.timestamp === 'number')) return undefined;
+    const workflowId = typeof value.workflowId === 'string' ? value.workflowId : undefined;
+    const workflowReturnSchedulingState = value.workflowReturnSchedulingState === undefined
+        ? undefined
+        : readSchedulingState(value.workflowReturnSchedulingState);
+    if (workflowId && !workflowReturnSchedulingState) return undefined;
+    return {
+        id: value.id,
+        title: value.title,
+        createdAt: value.createdAt,
+        updatedAt: value.updatedAt,
+        messages: value.messages as ChatHistoryMessage[],
+        parentTopicId: typeof value.parentTopicId === 'string' ? value.parentTopicId : undefined,
+        forkedFromMessageIndex: Number.isSafeInteger(value.forkedFromMessageIndex) ? value.forkedFromMessageIndex as number : undefined,
+        archived: typeof value.archived === 'boolean' ? value.archived : undefined,
+        pinned: typeof value.pinned === 'boolean' ? value.pinned : undefined,
+        workspaceId: typeof value.workspaceId === 'string' ? value.workspaceId : undefined,
+        workspaceLabel: typeof value.workspaceLabel === 'string' ? value.workspaceLabel : undefined,
+        schedulingState,
+        workflowId,
+        workflowReturnSchedulingState,
+    };
+}
 
 /** Callback type for sending messages to the WebView */
 type PostMessageFn = (msg: HostMessage) => void;
@@ -43,7 +91,10 @@ export class ChatTopicManager {
         try {
             if (fs.existsSync(filePath)) {
                 const data = fs.readFileSync(filePath, 'utf-8');
-                this.topics = JSON.parse(data);
+                const parsed: unknown = JSON.parse(data);
+                this.topics = Array.isArray(parsed)
+                    ? parsed.map(readStoredTopic).filter((topic): topic is ChatTopic => !!topic)
+                    : [];
             }
         } catch { /* ignore */ }
     }
@@ -67,7 +118,7 @@ export class ChatTopicManager {
 
     // ─── Topic CRUD ──────────────────────────────────────────────────────────
 
-    createNewTopic(firstMessage: string): void {
+    createNewTopic(firstMessage: string, schedulingState: ChatTopic['schedulingState']): void {
         const title = firstMessage.substring(0, 40) + (firstMessage.length > 40 ? '...' : '');
         this.currentTopic = {
             id: `topic_${Date.now()}`,
@@ -75,6 +126,7 @@ export class ChatTopicManager {
             createdAt: Date.now(),
             updatedAt: Date.now(),
             messages: [],
+            schedulingState: normalizeSchedulingState(schedulingState),
         };
         this.topics.unshift(this.currentTopic);
         this.sendTopicList();
@@ -154,12 +206,9 @@ export class ChatTopicManager {
             messages: forkedMessages,
             parentTopicId: topicId,
             forkedFromMessageIndex: messageIndex,
-            agentProfile: source.agentProfile ? cloneAgentProfile(source.agentProfile) : undefined,
-            agentMode: source.agentMode,
-            resolvedAgentDomain: source.resolvedAgentDomain,
+            schedulingState: normalizeSchedulingState(source.schedulingState),
             workflowId: source.workflowId,
-            workflowReturnProfile: source.workflowReturnProfile ? cloneAgentProfile(source.workflowReturnProfile) : undefined,
-            workflowReturnMode: source.workflowReturnMode,
+            workflowReturnSchedulingState: readSchedulingState(source.workflowReturnSchedulingState),
         };
 
         this.topics.unshift(forked);
@@ -484,6 +533,10 @@ export class ChatTopicManager {
             }
 
             // Generate a new ID to avoid collisions
+            const schedulingState = readSchedulingState(data.schedulingState);
+            if (!schedulingState) {
+                throw new Error(aiText('Invalid session file format (missing canonical scheduling state)', '无效的会话文件格式（缺少规范调度状态）'));
+            }
             const importedTopic: ChatTopic = {
                 id: `topic_imported_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
                 title: `${data.title} ${aiText('(imported)', '(导入)')}`,
@@ -491,12 +544,9 @@ export class ChatTopicManager {
                 updatedAt: Date.now(),
                 messages: data.messages as ChatHistoryMessage[],
                 archived: false,
-                agentProfile: isAgentProfileSelection(data.agentProfile) ? cloneAgentProfile(data.agentProfile) : undefined,
-                agentMode: isAgentMode(data.agentMode) ? data.agentMode : undefined,
-                resolvedAgentDomain: isAgentRuntimeDomain(data.resolvedAgentDomain) ? data.resolvedAgentDomain : undefined,
+                schedulingState,
                 workflowId: typeof data.workflowId === 'string' ? data.workflowId : undefined,
-                workflowReturnProfile: isAgentProfileSelection(data.workflowReturnProfile) ? cloneAgentProfile(data.workflowReturnProfile) : undefined,
-                workflowReturnMode: isAgentMode(data.workflowReturnMode) ? data.workflowReturnMode : undefined,
+                workflowReturnSchedulingState: readSchedulingState(data.workflowReturnSchedulingState),
             };
 
             // Validate messages

@@ -23,15 +23,6 @@ export function canonicalPathKey(filePath: string, base?: string): string {
 let privateAgentStorageRoot = '';
 let workspaceCacheStorageRoot = '';
 
-export interface AiStorageMigrationResult {
-    legacyRoot: string;
-    primaryRoot: string;
-    migrated: boolean;
-    movedEntries: number;
-    resolvedConflicts: number;
-    obsoleteKnowledgeRemoved: boolean;
-}
-
 /** Configure the extension-owned directory used for private Agent state. */
 export function configurePrivateAgentStorage(storageRoot: string | undefined): void {
     privateAgentStorageRoot = storageRoot ? path.resolve(storageRoot) : '';
@@ -44,7 +35,7 @@ export function configureWorkspaceCacheStorage(storageRoot: string | undefined):
 
 /**
  * Per-workspace cache root (symbol index and similar regenerable caches).
- * Falls back to the legacy project directory until activation supplies
+ * Falls back to the canonical project directory until activation supplies
  * ExtensionContext.storageUri, which keeps unit tests deterministic.
  */
 export function getWorkspaceCacheRoot(fallbackWorkspaceRoot = ''): string {
@@ -52,8 +43,8 @@ export function getWorkspaceCacheRoot(fallbackWorkspaceRoot = ''): string {
 }
 
 /**
- * Private state falls back to the legacy project directory until activation
- * supplies ExtensionContext.storageUri. This keeps unit tests and migrations
+ * Private state falls back to the canonical project directory until activation
+ * supplies ExtensionContext.storageUri. This keeps unit tests
  * deterministic without mixing new private data with project artifacts.
  */
 export function getPrivateAiStorageRoot(fallbackWorkspaceRoot = ''): string {
@@ -66,182 +57,24 @@ export function getPrivateTopicStorageDir(topicId: string | undefined, fallbackW
     return path.join(privateAgentStorageRoot, 'topics', safeTopicId);
 }
 
-/** Private location first, followed by project locations used by older builds. */
+/** The single configured private topic location. */
 export function getPrivateTopicStorageDirCandidates(topicId: string | undefined, fallbackWorkspaceRoot = ''): string[] {
-    const candidates: string[] = [];
-    const add = (value: string) => {
-        if (!value) return;
-        const resolved = path.resolve(value);
-        if (!candidates.some(candidate => path.resolve(candidate).toLowerCase() === resolved.toLowerCase())) {
-            candidates.push(value);
-        }
-    };
-    add(getPrivateTopicStorageDir(topicId, fallbackWorkspaceRoot));
-    for (const legacy of getTopicStorageDirCandidates(topicId, fallbackWorkspaceRoot)) add(legacy);
-    return candidates;
+    const topicDir = getPrivateTopicStorageDir(topicId, fallbackWorkspaceRoot);
+    return topicDir ? [topicDir] : [];
 }
 
-/** Directories whose children are topic IDs, private first then legacy. */
-export function getPrivateTopicRootCandidates(fallbackWorkspaceRoot = ''): string[] {
-    const roots: string[] = [];
-    const add = (value: string) => {
-        if (!value) return;
-        const resolved = path.resolve(value);
-        if (!roots.some(root => path.resolve(root).toLowerCase() === resolved.toLowerCase())) roots.push(value);
-    };
-    if (privateAgentStorageRoot) add(path.join(privateAgentStorageRoot, 'topics'));
-    for (const legacy of getAiStorageRootCandidates(fallbackWorkspaceRoot)) add(legacy);
-    return roots;
-}
-
-/** Copy legacy private runtime data without moving project-shareable artifacts. */
-export function migrateLegacyPrivateAgentState(fallbackWorkspaceRoot = ''): number {
-    if (!privateAgentStorageRoot) return 0;
-    let copied = 0;
-    const privateNames = new Set([
-        'runs', 'threads', 'goals', 'resume_state.json', 'resume_state.json.bak',
-        '.cwtools-ai-memory.md', '.cwtools-memory.md', 'memory.json',
-    ]);
-    for (const legacyRoot of getAiStorageRootCandidates(fallbackWorkspaceRoot)) {
-        if (!fs.existsSync(legacyRoot)) continue;
-        const topics = fs.readdirSync(legacyRoot, { withFileTypes: true });
-        for (const topic of topics) {
-            if (!topic.isDirectory() || ['project', 'workflows'].includes(topic.name)) continue;
-            const sourceTopic = path.join(legacyRoot, topic.name);
-            const targetTopic = path.join(privateAgentStorageRoot, 'topics', topic.name);
-            for (const name of privateNames) {
-                const source = path.join(sourceTopic, name);
-                const target = path.join(targetTopic, name);
-                if (!fs.existsSync(source) || fs.existsSync(target)) continue;
-                fs.mkdirSync(path.dirname(target), { recursive: true });
-                fs.cpSync(source, target, { recursive: true, errorOnExist: false });
-                copied++;
-            }
-        }
-    }
-    return copied;
-}
-
-function resolveAiStorageRoots(fallbackWorkspaceRoot = ''): { legacyRoot: string; primaryRoot: string } | undefined {
-    const workspaceRoot = getProjectWorkspaceRoot(fallbackWorkspaceRoot);
-    if (!workspaceRoot) return undefined;
-    const name = path.basename(workspaceRoot).toLowerCase();
-    if (name === '.cwtools') {
-        return {
-            primaryRoot: workspaceRoot,
-            legacyRoot: path.join(path.dirname(workspaceRoot), '.cwtools-ai'),
-        };
-    }
-    if (name === '.cwtools-ai') {
-        return {
-            primaryRoot: path.join(path.dirname(workspaceRoot), '.cwtools'),
-            legacyRoot: workspaceRoot,
-        };
-    }
-    return {
-        primaryRoot: path.join(workspaceRoot, '.cwtools'),
-        legacyRoot: path.join(workspaceRoot, '.cwtools-ai'),
-    };
-}
-
-function mergeLegacyStorageEntry(
-    source: string,
-    target: string,
-    primaryRoot: string,
-    result: { movedEntries: number; resolvedConflicts: number },
-): void {
-    if (!fs.existsSync(target)) {
-        fs.mkdirSync(path.dirname(target), { recursive: true });
-        fs.renameSync(source, target);
-        result.movedEntries++;
-        return;
-    }
-
-    const sourceStat = fs.lstatSync(source);
-    const targetStat = fs.lstatSync(target);
-    if (sourceStat.isDirectory() && !sourceStat.isSymbolicLink()
-        && targetStat.isDirectory() && !targetStat.isSymbolicLink()) {
-        const entries = fs.readdirSync(source, { withFileTypes: true })
-            .sort((a, b) => a.name.localeCompare(b.name));
-        for (const entry of entries) {
-            mergeLegacyStorageEntry(path.join(source, entry.name), path.join(target, entry.name), primaryRoot, result);
-        }
-        fs.rmdirSync(source);
-        return;
-    }
-
-    // The current .cwtools copy is authoritative, but preserve the legacy conflict.
-    const relativeTarget = path.relative(primaryRoot, target);
-    const archiveBase = path.join(primaryRoot, 'migration-conflicts', 'cwtools-ai', relativeTarget);
-    let archiveTarget = archiveBase;
-    let suffix = 1;
-    while (fs.existsSync(archiveTarget)) {
-        archiveTarget = `${archiveBase}.${suffix++}`;
-    }
-    fs.mkdirSync(path.dirname(archiveTarget), { recursive: true });
-    fs.renameSync(source, archiveTarget);
-    result.resolvedConflicts++;
-}
-
-/** Merge the old project storage root into .cwtools and remove .cwtools-ai. */
-export function migrateLegacyAiStorageRoot(fallbackWorkspaceRoot = ''): AiStorageMigrationResult {
-    const roots = resolveAiStorageRoots(fallbackWorkspaceRoot);
-    if (!roots) {
-        return { legacyRoot: '', primaryRoot: '', migrated: false, movedEntries: 0, resolvedConflicts: 0, obsoleteKnowledgeRemoved: false };
-    }
-    const result: AiStorageMigrationResult = {
-        ...roots,
-        migrated: false,
-        movedEntries: 0,
-        resolvedConflicts: 0,
-        obsoleteKnowledgeRemoved: false,
-    };
-    if (!fs.existsSync(roots.legacyRoot)) return result;
-
-    // Project Knowledge has a single current schema and must be rebuilt from
-    // the active LSP model. Never migrate the removed .cwtools-ai knowledge
-    // pack into the current root as if it were usable data.
-    const obsoleteKnowledgeRoot = path.join(roots.legacyRoot, 'project', 'knowledge');
-    if (fs.existsSync(obsoleteKnowledgeRoot)) {
-        fs.rmSync(obsoleteKnowledgeRoot, { recursive: true, force: true });
-        result.obsoleteKnowledgeRemoved = true;
-        result.migrated = true;
-        for (const candidate of [path.dirname(obsoleteKnowledgeRoot), roots.legacyRoot]) {
-            try {
-                if (fs.existsSync(candidate) && fs.readdirSync(candidate).length === 0) fs.rmdirSync(candidate);
-            } catch { /* another legacy entry still owns the directory */ }
-        }
-        if (!fs.existsSync(roots.legacyRoot)) return result;
-    }
-
-    if (!fs.existsSync(roots.primaryRoot)) {
-        fs.mkdirSync(path.dirname(roots.primaryRoot), { recursive: true });
-        fs.renameSync(roots.legacyRoot, roots.primaryRoot);
-        result.migrated = true;
-        result.movedEntries = 1;
-        return result;
-    }
-
-    const entries = fs.readdirSync(roots.legacyRoot, { withFileTypes: true })
-        .sort((a, b) => a.name.localeCompare(b.name));
-    for (const entry of entries) {
-        mergeLegacyStorageEntry(
-            path.join(roots.legacyRoot, entry.name),
-            path.join(roots.primaryRoot, entry.name),
-            roots.primaryRoot,
-            result,
-        );
-    }
-    fs.rmdirSync(roots.legacyRoot);
-    result.migrated = true;
-    return result;
+/** The configured directory whose children are topic IDs. */
+export function getPrivateTopicRoot(fallbackWorkspaceRoot = ''): string {
+    return privateAgentStorageRoot
+        ? path.join(privateAgentStorageRoot, 'topics')
+        : getAiStorageRoot(fallbackWorkspaceRoot);
 }
 
 export function getProjectWorkspaceRoots(): string[] {
     const folders = vs.workspace.workspaceFolders ?? [];
     return folders.filter(folder => {
         const name = path.basename(folder.uri.fsPath).toLowerCase();
-        return name !== '.cwtools' && name !== '.cwtools-ai';
+        return name !== '.cwtools';
     }).map(folder => folder.uri.fsPath);
 }
 
@@ -303,74 +136,23 @@ export function getAiStorageRoot(fallbackWorkspaceRoot = ''): string {
 
     for (const folder of folders) {
         const name = path.basename(folder.uri.fsPath).toLowerCase();
-        if (name === '.cwtools' || name === '.cwtools-ai') continue;
+        if (name === '.cwtools') continue;
         const childAiRoot = path.join(folder.uri.fsPath, '.cwtools');
         if (fs.existsSync(childAiRoot)) return childAiRoot;
     }
 
-    const legacyAiFolder = folders.find(folder => path.basename(folder.uri.fsPath).toLowerCase() === '.cwtools-ai');
-    if (legacyAiFolder) return path.join(path.dirname(legacyAiFolder.uri.fsPath), '.cwtools');
-
     if (fallbackWorkspaceRoot) {
         const fallbackName = path.basename(fallbackWorkspaceRoot).toLowerCase();
         if (fallbackName === '.cwtools') return fallbackWorkspaceRoot;
-        if (fallbackName === '.cwtools-ai') return path.join(path.dirname(fallbackWorkspaceRoot), '.cwtools');
     }
 
     const workspaceRoot = getProjectWorkspaceRoot(fallbackWorkspaceRoot);
-    if (path.basename(workspaceRoot).toLowerCase() === '.cwtools-ai') {
-        return path.join(path.dirname(workspaceRoot), '.cwtools');
-    }
     return workspaceRoot ? path.join(workspaceRoot, '.cwtools') : '';
 }
 
 export function getAiStorageRootCandidates(fallbackWorkspaceRoot = ''): string[] {
-    const roots: string[] = [];
-    const add = (value: string) => {
-        if (!value) return;
-        const resolved = path.resolve(value);
-        if (!roots.some(root => path.resolve(root).toLowerCase() === resolved.toLowerCase())) {
-            roots.push(value);
-        }
-    };
-
     const primary = getAiStorageRoot(fallbackWorkspaceRoot);
-    add(primary);
-
-    for (const folder of vs.workspace.workspaceFolders ?? []) {
-        const name = path.basename(folder.uri.fsPath).toLowerCase();
-        if (name === '.cwtools' || name === '.cwtools-ai') {
-            add(folder.uri.fsPath);
-            continue;
-        }
-        const childAiRoot = path.join(folder.uri.fsPath, '.cwtools');
-        if (fs.existsSync(childAiRoot)) {
-            add(childAiRoot);
-        }
-        const legacyAiRoot = path.join(folder.uri.fsPath, '.cwtools-ai');
-        if (fs.existsSync(legacyAiRoot)) {
-            add(legacyAiRoot);
-        }
-    }
-
-    const projectRoot = getProjectWorkspaceRoot(fallbackWorkspaceRoot);
-    if (projectRoot) {
-        const name = path.basename(projectRoot).toLowerCase();
-        if (name === '.cwtools' || name === '.cwtools-ai') {
-            add(projectRoot);
-        } else {
-            const legacyProjectRoot = path.join(projectRoot, '.cwtools');
-            if (fs.existsSync(legacyProjectRoot)) {
-                add(legacyProjectRoot);
-            }
-            const legacyProjectRootAi = path.join(projectRoot, '.cwtools-ai');
-            if (fs.existsSync(legacyProjectRootAi)) {
-                add(legacyProjectRootAi);
-            }
-        }
-    }
-
-    return roots;
+    return primary ? [primary] : [];
 }
 
 export function getTopicStorageDir(topicId: string | undefined, fallbackWorkspaceRoot = ''): string {
@@ -388,7 +170,7 @@ export function getTopicFileCandidates(topicId: string | undefined, fileName: st
     return getTopicStorageDirCandidates(topicId, fallbackWorkspaceRoot).map(dir => path.join(dir, fileName));
 }
 
-/** Private topic file candidates, private location first then legacy project locations. */
+/** Private topic file candidates from the single configured storage root. */
 export function getPrivateTopicFileCandidates(topicId: string | undefined, fileName: string, fallbackWorkspaceRoot = ''): string[] {
     return getPrivateTopicStorageDirCandidates(topicId, fallbackWorkspaceRoot).map(dir => path.join(dir, fileName));
 }

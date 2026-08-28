@@ -44,7 +44,7 @@ import { registerTranslationPreviewCommands } from './translationPreview';
 import { registerSpecialPathCommands } from './specialPaths';
 import { registerInspectionOverviewCommand } from './inspectionOverview';
 import { formatMemDiagEntry, memDiagLanguageForLocale } from './memDiagFormatter';
-import { configurePrivateAgentStorage, configureWorkspaceCacheStorage, getProjectWorkspaceRoot, getPrivateAiStorageRoot, migrateLegacyAiStorageRoot, migrateLegacyPrivateAgentState } from './ai/workspacePaths';
+import { configurePrivateAgentStorage, configureWorkspaceCacheStorage, getProjectWorkspaceRoot, getPrivateAiStorageRoot } from './ai/workspacePaths';
 import { configureHistoryPolicy, enforceHistoryRetention } from './ai/runner/historyPolicy';
 import { TokenCalibrationTable, readCalibrationSnapshot } from './ai/runner/tokenCalibration';
 import { sha256Text } from './ai/runner/durableStorage';
@@ -54,7 +54,6 @@ import { IndexService, type WorkspaceSymbolEntry } from './indexing/indexService
 import { McpBridgeServer } from './ai/mcpBridgeServer';
 import { maybePromptForDefaultDarkModernTheme } from './themePrompt';
 import { registerProjectKnowledgeWatcher, resumeStaleProjectKnowledgeRefreshes } from './ai/projectKnowledge';
-import { repairMovedAgentWorktrees } from './ai/orchestrator/worktreeManager';
 import { QuickPickSelectionGuard } from './quickPickSelectionGuard';
 import { getDefaultLocalisationLanguagesForUiLocale } from './localisationLanguagePreference';
 import { handleVanillaCacheGenerated } from './vanillaCacheLifecycle';
@@ -828,17 +827,6 @@ export async function activate(context: ExtensionContext) {
 	}).catch((e) => ErrorReporter.warn(SOURCE.UPDATE_CHECKER, 'Failed to check for updates', e));
 
 	const workspaceRoot = getProjectWorkspaceRoot();
-	const aiStorageMigration = migrateLegacyAiStorageRoot(workspaceRoot);
-	if (aiStorageMigration.migrated) {
-		ErrorReporter.debug(
-			'Extension',
-			`Migrated AI workspace storage to ${aiStorageMigration.primaryRoot} (${aiStorageMigration.movedEntries} moved, ${aiStorageMigration.resolvedConflicts} conflicts kept from .cwtools, obsolete knowledge removed: ${aiStorageMigration.obsoleteKnowledgeRemoved})`,
-		);
-		await repairMovedAgentWorktrees(workspaceRoot).catch(error =>
-			ErrorReporter.warn('Extension', 'Failed to repair Agent worktrees after AI storage migration', error)
-		);
-	}
-
 	const indexService = new IndexService({
 		extensionPath: context.extensionPath,
 		globalStoragePath: context.globalStorageUri.fsPath,
@@ -1056,7 +1044,6 @@ export async function activate(context: ExtensionContext) {
 	// Regenerable per-workspace caches (symbol index) live in extension storage,
 	// never in the project tree.
 	configureWorkspaceCacheStorage(privateAgentRoot);
-	migrateLegacyPrivateAgentState(workspaceRoot);
 	const historyConfig = workspace.getConfiguration('stellarisLanguageServices.ai.history');
 	const historyPersistence = historyConfig.get<'off' | 'metadata' | 'full'>('persistence', 'full');
 	configureHistoryPolicy({
@@ -1281,7 +1268,7 @@ export async function activate(context: ExtensionContext) {
 	// so they miss naturally on edit; this watcher proactively drops the parsed
 	// mtime caches so the next fingerprint reflects current content immediately
 	// (plan §7.1).
-	const aiPromptInputsWatcher = workspace.createFileSystemWatcher('{CWTOOLS.md,.cwtools/project/profile.json,.cwtools-ai/project/profile.json}');
+	const aiPromptInputsWatcher = workspace.createFileSystemWatcher('{CWTOOLS.md,.cwtools/project/profile.json}');
 	const invalidatePromptInputs = () => {
 		promptBuilder.invalidateProjectPromptInputs();
 		scheduleProjectMemoryInvalidation();
@@ -2454,7 +2441,7 @@ export async function activate(context: ExtensionContext) {
 
 	let languageId: string;
 	const getLanguageIdFallback = async function () {
-		const markerFiles = await workspace.findFiles("**/*.txt", '**/{node_modules,.git,.vscode,.vscode-test,.cwtools,.cwtools-ai}/**', 2);
+		const markerFiles = await workspace.findFiles("**/*.txt", '**/{node_modules,.git,.vscode,.vscode-test,.cwtools}/**', 2);
 		if (markerFiles.length == 1) {
 			 
 			return (await workspace.openTextDocument(markerFiles[0]!)).languageId;

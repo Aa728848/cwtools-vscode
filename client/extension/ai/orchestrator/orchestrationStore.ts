@@ -90,12 +90,11 @@ export interface StoredSubAgentResult {
 }
 
 export interface StoredOrchestration {
-    version: 1;
+    version: 2;
     graphId: string;
     topicId?: string;
     runId?: string;
     domain: AgentRuntimeDomain;
-    mode?: string;
     delegationDepth?: number;
     graph: StoredGraph;
     agentResults: Record<string, StoredSubAgentResult>;
@@ -109,10 +108,10 @@ export interface StoredOrchestration {
 }
 
 export interface SaveOrchestrationInput {
+    workspaceRoot?: string;
     topicId?: string;
     runId?: string;
     domain: AgentRuntimeDomain;
-    mode?: string;
     delegationDepth?: number;
     graph: TaskGraph;
     agentResults: Map<string, SubAgentResult>;
@@ -149,7 +148,7 @@ function isTokenUsage(value: unknown): value is TokenUsage {
 const STORED_NODE_STATUSES = new Set<StoredTaskNode['status']>(['pending', 'running', 'done', 'failed', 'cancelled']);
 const STORED_NODE_PRIORITIES = new Set<StoredTaskNode['priority']>(['critical', 'normal', 'low']);
 const STORED_AGENT_MODES = new Set<TaskNode['agentType']>([
-    'build', 'plan', 'explore', 'general', 'utility', 'review', 'gui_expert',
+    'build', 'plan', 'explore', 'utility', 'review', 'gui_expert',
     'script_reviewer', 'loc_translator', 'loc_writer', 'orchestrator', 'script',
 ]);
 
@@ -198,10 +197,10 @@ function isStoredSubAgentResult(value: unknown): value is StoredSubAgentResult {
 }
 
 function isStoredOrchestration(value: unknown): value is StoredOrchestration {
-    if (!isRecord(value) || value.version !== 1) return false;
+    if (!isRecord(value) || value.version !== 2) return false;
     if (typeof value.graphId !== 'string' || value.graphId.length === 0) return false;
     if (value.domain !== 'paradox' && value.domain !== 'general' && value.domain !== 'hybrid') return false;
-    if (!isOptionalString(value.topicId) || !isOptionalString(value.runId) || !isOptionalString(value.mode)) return false;
+    if (!isOptionalString(value.topicId) || !isOptionalString(value.runId)) return false;
     if (value.delegationDepth !== undefined
         && (!Number.isSafeInteger(value.delegationDepth) || (value.delegationDepth as number) < 0)) return false;
     if (!isRecord(value.graph) || value.graph.id !== value.graphId
@@ -373,12 +372,12 @@ function safeGraphId(graphId: string): string {
     return graphId.replace(/[^a-zA-Z0-9_.-]/g, '_');
 }
 
-function orchestrationDir(topicId: string | undefined): string {
-    return path.join(getPrivateTopicStorageDir(topicId), 'orchestrations');
+function orchestrationDir(topicId: string | undefined, workspaceRoot = ''): string {
+    return path.join(getPrivateTopicStorageDir(topicId, workspaceRoot), 'orchestrations');
 }
 
-function orchestrationPath(topicId: string | undefined, graphId: string): string {
-    return path.join(orchestrationDir(topicId), `${safeGraphId(graphId)}.json`);
+function orchestrationPath(topicId: string | undefined, graphId: string, workspaceRoot = ''): string {
+    return path.join(orchestrationDir(topicId, workspaceRoot), `${safeGraphId(graphId)}.json`);
 }
 
 function isGraphComplete(graph: TaskGraph): boolean {
@@ -391,14 +390,13 @@ function isGraphComplete(graph: TaskGraph): boolean {
 /** Best-effort: returns false when private storage is unavailable. */
 export async function saveOrchestration(input: SaveOrchestrationInput): Promise<boolean> {
     try {
-        if (!getPrivateTopicStorageDir(input.topicId)) return false;
+        if (!getPrivateTopicStorageDir(input.topicId, input.workspaceRoot)) return false;
         const record: StoredOrchestration = {
-            version: 1,
+            version: 2,
             graphId: input.graph.id,
             topicId: input.topicId,
             runId: input.runId,
             domain: input.domain,
-            mode: input.mode,
             delegationDepth: input.delegationDepth,
             graph: serializeGraph(input.graph),
             agentResults: serializeAgentResults(input.agentResults),
@@ -410,9 +408,9 @@ export async function saveOrchestration(input: SaveOrchestrationInput): Promise<
             createdAt: input.graph.metadata.createdAt,
             updatedAt: Date.now(),
         };
-        const target = orchestrationPath(input.topicId, input.graph.id);
+        const target = orchestrationPath(input.topicId, input.graph.id, input.workspaceRoot);
         await atomicWriteJson(target, record);
-        pruneOrchestrations(input.topicId);
+        pruneOrchestrations(input.topicId, input.workspaceRoot);
         return true;
     } catch (error) {
         ErrorReporter.debug(
@@ -425,10 +423,10 @@ export async function saveOrchestration(input: SaveOrchestrationInput): Promise<
 
 export function loadOrchestration(
     graphId: string,
-    options?: { topicId?: string; domain?: AgentRuntimeDomain },
+    options?: { topicId?: string; domain?: AgentRuntimeDomain; workspaceRoot?: string },
 ): StoredOrchestration | undefined {
     const topicId = options?.topicId;
-    for (const dir of getPrivateTopicStorageDirCandidates(topicId)) {
+    for (const dir of getPrivateTopicStorageDirCandidates(topicId, options?.workspaceRoot)) {
         const candidate = path.join(dir, 'orchestrations', `${safeGraphId(graphId)}.json`);
         const loaded = readJsonWithBackup<StoredOrchestration>(candidate, isStoredOrchestration);
         if (!loaded) continue;
@@ -443,10 +441,11 @@ export function listOrchestrations(options: {
     topicId?: string;
     domain?: AgentRuntimeDomain;
     limit?: number;
+    workspaceRoot?: string;
 }): StoredOrchestration[] {
     const limit = options.limit ?? 10;
     const records: StoredOrchestration[] = [];
-    for (const dir of getPrivateTopicStorageDirCandidates(options.topicId)) {
+    for (const dir of getPrivateTopicStorageDirCandidates(options.topicId, options.workspaceRoot)) {
         const dirPath = path.join(dir, 'orchestrations');
         let names: string[];
         try {
@@ -477,9 +476,9 @@ export function listOrchestrations(options: {
     return unique.slice(0, limit);
 }
 
-function pruneOrchestrations(topicId: string | undefined): void {
+function pruneOrchestrations(topicId: string | undefined, workspaceRoot = ''): void {
     try {
-        const dirPath = orchestrationDir(topicId);
+        const dirPath = orchestrationDir(topicId, workspaceRoot);
         const entries = fs.readdirSync(dirPath)
             .filter(name => name.endsWith('.json'))
             .map(name => {

@@ -22,7 +22,6 @@ import { buildSubagentCardHtml, buildSubagentMetaHtml, hasVisibleLiveContent, la
 import { buildSettingsOverviewModel, resolveSettingsModelContextTokens } from '../../webview/chat/settingsOverview';
 import { buildCodexQuotaHtml } from '../../webview/chat/codexQuota';
 import { getChatI18n } from '../../webview/chat/i18n';
-import { applyModeUi } from '../../webview/chat/modes';
 import { renderMarkdown } from '../../webview/chat/markdown';
 import { mentionResultToActiveContext, stripConsumedMentionText, type ActiveContext } from '../../webview/chat/contextMentions';
 import {
@@ -327,11 +326,10 @@ describe('chat i18n and command helpers', () => {
         expect(getSlashCommandFilter('explain /goal')).to.equal(null);
     });
 
-    it('parses canonical, legacy colon, alias, and dynamic workflow commands', () => {
+    it('parses canonical, colon-argument, and dynamic workflow commands', () => {
         expect(resolveSlashCommand('/goal write tests')?.definition.id).to.equal('goal');
         expect(resolveSlashCommand('/goal:1200:write tests')?.argument).to.equal('1200:write tests');
         expect(resolveSlashCommand('/goal:complete')?.definition.id).to.equal('goalComplete');
-        expect(resolveSlashCommand('/plan')?.definition.id).to.equal('modePlan');
         expect(resolveSlashCommand('/workflow:diagnostic-fix')?.definition.id).to.equal('workflowSelect');
         expect(resolveSlashCommand('/workflow:diagnostic-fix')?.argument).to.equal('diagnostic-fix');
         expect(resolveSlashCommand('/does-not-exist')).to.equal(undefined);
@@ -346,29 +344,9 @@ describe('chat i18n and command helpers', () => {
             duringRun: 'queue',
         });
         expect(commands.find(command => command.command === '/clear')?.duringRun).to.equal('deny');
-        expect(commands.find(command => command.command === '/mode:plan')?.duringRun).to.equal('immediate');
         expect(commands.find(command => command.command === '/permissions')?.category).to.equal('configuration');
     });
 
-    it('applies mode UI state without reimplementing it in chatPanel', () => {
-        const classSet = new Set<string>();
-        const body = {
-            classList: {
-                add: (...classes: string[]) => classes.forEach(cls => classSet.add(cls)),
-                remove: (...classes: string[]) => classes.forEach(cls => classSet.delete(cls)),
-                contains: (cls: string) => classSet.has(cls),
-            },
-        } as unknown as HTMLElement;
-        const selector = { value: 'plan' } as HTMLSelectElement;
-        const indicator = { textContent: '' } as HTMLElement;
-
-        const normalized = applyModeUi('general', getChatI18n('en').modeLabels, body, selector, indicator);
-
-        expect(normalized).to.equal('utility');
-        expect(classSet.has('utility-mode')).to.equal(true);
-        expect(selector.value).to.equal('utility');
-        expect(indicator.textContent).to.include('Utility Mode');
-    });
 });
 
 describe('chat view contract helpers', () => {

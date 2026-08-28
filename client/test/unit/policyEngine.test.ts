@@ -224,9 +224,9 @@ describe('policyEngine protected paths', () => {
         expect(resolvePolicy(d, profile()).action).to.equal('deny');
     });
 
-    it('protects private legacy run state without blocking shareable topic artifacts', () => {
-        const privateRun = descriptor({ targetPaths: [path.join(WS, '.cwtools-ai', 'topic', 'runs', 'run-1', 'events.jsonl')] });
-        const blueprint = descriptor({ targetPaths: [path.join(WS, '.cwtools-ai', 'topic', 'blueprint.md')] });
+    it('protects private run state without blocking shareable topic artifacts', () => {
+        const privateRun = descriptor({ targetPaths: [path.join(WS, '.cwtools', 'topic', 'runs', 'run-1', 'events.jsonl')] });
+        const blueprint = descriptor({ targetPaths: [path.join(WS, '.cwtools', 'topic', 'blueprint.md')] });
         expect(resolvePolicy(privateRun, profile()).action).to.equal('deny');
         expect(resolvePolicy(blueprint, profile()).action).to.equal('ask');
     });

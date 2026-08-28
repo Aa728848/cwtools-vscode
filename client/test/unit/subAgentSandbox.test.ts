@@ -128,7 +128,7 @@ describe('SubAgentSandbox', () => {
             const sandbox = {
                 agentId: 'user_owned_localisation',
                 role: 'build',
-                mode: 'build' as any,
+                runtimeProfileName: 'paradox-coder',
                 deniedWriteScopes: ['localisation'],
                 permissionPolicy: 'delegate_to_parent' as const,
             };
@@ -162,7 +162,7 @@ describe('SubAgentSandbox', () => {
             const sandbox = {
                 agentId: 'explorer_test',
                 role: 'explore',
-                mode: 'explore' as any,
+                runtimeProfileName: 'explore',
                 writeScope: [], // 空数组
                 permissionPolicy: 'deny' as const
             };
@@ -176,7 +176,7 @@ describe('SubAgentSandbox', () => {
             const sandbox = {
                 agentId: 'loc_test',
                 role: 'locWriter',
-                mode: 'loc_writer' as any,
+                runtimeProfileName: 'localization-writer',
                 writeScope: ['localisation'],
                 permissionPolicy: 'deny' as const
             };
@@ -195,7 +195,7 @@ describe('SubAgentSandbox', () => {
             const sandbox = {
                 agentId: 'gui_test',
                 role: 'guiExpert',
-                mode: 'gui_expert' as any,
+                runtimeProfileName: 'gui-expert',
                 writeScope: ['.gui'],
                 permissionPolicy: 'deny' as const
             };
@@ -213,7 +213,7 @@ describe('SubAgentSandbox', () => {
             const sandbox = {
                 agentId: 'super_builder',
                 role: 'builder',
-                mode: 'build' as any,
+                runtimeProfileName: 'paradox-coder',
                 writeScope: ['*'], // 全放通写入
                 permissionPolicy: 'deny' as const
             };
@@ -231,7 +231,7 @@ describe('SubAgentSandbox', () => {
             const sandbox = {
                 agentId: 'readonly_state_tool',
                 role: 'explore',
-                mode: 'explore' as any,
+                runtimeProfileName: 'explore',
                 writeScope: [],
                 permissionPolicy: 'deny' as const
             };
@@ -251,7 +251,7 @@ describe('SubAgentSandbox', () => {
             const sandbox = {
                 agentId: 'builder_topic_artifact',
                 role: 'build',
-                mode: 'build' as any,
+                runtimeProfileName: 'paradox-coder',
                 writeScope: ['common/buildings/samplemod_buildings.txt', '.cwtools'],
                 permissionPolicy: 'delegate_to_parent' as const
             };
@@ -259,37 +259,11 @@ describe('SubAgentSandbox', () => {
             const result = enforceSubAgentSafety(
                 sandbox,
                 'write_file',
-                { TargetFile: '.cwtools-ai/topic_123/walkthrough.md' },
-                process.cwd()
-            );
-
-            expect(result.allowed).to.be.true;
-        });
-
-        it('keeps legacy topic artifact scopes compatible with both storage directory names', () => {
-            const sandbox = {
-                agentId: 'legacy_builder_topic_artifact',
-                role: 'build',
-                mode: 'build' as any,
-                writeScope: ['.cwtools-ai'],
-                permissionPolicy: 'delegate_to_parent' as const
-            };
-
-            const legacyResult = enforceSubAgentSafety(
-                sandbox,
-                'write_file',
-                { TargetFile: '.cwtools-ai/topic_123/walkthrough.md' },
-                process.cwd()
-            );
-            const primaryResult = enforceSubAgentSafety(
-                sandbox,
-                'write_file',
                 { TargetFile: '.cwtools/topic_123/walkthrough.md' },
                 process.cwd()
             );
 
-            expect(legacyResult.allowed).to.be.true;
-            expect(primaryResult.allowed).to.be.true;
+            expect(result.allowed).to.be.true;
         });
 
         // ── 跨平台与作用域边界（采纳评审 #3：directory-scope-from-file / 子串逃逸 / 前缀边界 / 大小写）──
@@ -297,7 +271,7 @@ describe('SubAgentSandbox', () => {
             const sandbox = {
                 agentId: 'builder_sibling',
                 role: 'build',
-                mode: 'build' as any,
+                runtimeProfileName: 'paradox-coder',
                 writeScope: ['common/buildings/samplemod_buildings.txt', '.cwtools'],
                 permissionPolicy: 'delegate_to_parent' as const
             };
@@ -313,7 +287,7 @@ describe('SubAgentSandbox', () => {
             const sandbox = {
                 agentId: 'builder_escape',
                 role: 'build',
-                mode: 'build' as any,
+                runtimeProfileName: 'paradox-coder',
                 writeScope: ['common/buildings/samplemod_buildings.txt'],
                 permissionPolicy: 'delegate_to_parent' as const
             };
@@ -322,15 +296,15 @@ describe('SubAgentSandbox', () => {
             expect(escape.reason).to.include('blocked the write');
         });
 
-        it('.cwtools-ai 前缀边界：拒绝 .cwtools-ai-evil，仅精确或 / 前缀放行', () => {
+        it('.cwtools 前缀边界：拒绝相似目录，仅精确或 / 前缀放行', () => {
             const sandbox = {
                 agentId: 'builder_topic_boundary',
                 role: 'build',
-                mode: 'build' as any,
+                runtimeProfileName: 'paradox-coder',
                 writeScope: ['.cwtools'],
                 permissionPolicy: 'delegate_to_parent' as const
             };
-            const evil = enforceSubAgentSafety(sandbox, 'write_file', { TargetFile: '.cwtools-ai-evil/x.md' }, process.cwd());
+            const evil = enforceSubAgentSafety(sandbox, 'write_file', { TargetFile: '.cwtools-evil/x.md' }, process.cwd());
             expect(evil.allowed).to.be.false;
             const ok = enforceSubAgentSafety(sandbox, 'write_file', { TargetFile: '.cwtools/topic/walkthrough.md' }, process.cwd());
             expect(ok.allowed).to.be.true;
@@ -340,7 +314,7 @@ describe('SubAgentSandbox', () => {
             const sandbox = {
                 agentId: 'builder_case',
                 role: 'build',
-                mode: 'build' as any,
+                runtimeProfileName: 'paradox-coder',
                 writeScope: ['common/buildings/samplemod_buildings.txt'],
                 permissionPolicy: 'delegate_to_parent' as const
             };
@@ -357,7 +331,7 @@ describe('SubAgentSandbox', () => {
             const sandbox = {
                 agentId: 'builder_read',
                 role: 'builder',
-                mode: 'build' as any,
+                runtimeProfileName: 'paradox-coder',
                 writeScope: ['common/events.txt'],
                 permissionPolicy: 'deny' as const
             };
@@ -371,7 +345,7 @@ describe('SubAgentSandbox', () => {
             const sandbox = {
                 agentId: 'plan_card_editor',
                 role: 'plan',
-                mode: 'plan' as any,
+                runtimeProfileName: 'planner',
                 writeScope: [],
                 permissionPolicy: 'deny' as const
             };

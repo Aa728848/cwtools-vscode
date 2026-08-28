@@ -9,6 +9,7 @@ import {
     reduceAll,
 } from '../../extension/ai/runner/runReducers';
 import type { AgentRunEvent } from '../../extension/ai/runner/runLedger';
+import { schedulingStateFromAdmission } from '../../extension/ai/runner/scheduling';
 
 function ev(type: AgentRunEvent['type'], extra: Partial<AgentRunEvent> = {}, payload: any = {}): AgentRunEvent {
     return {
@@ -65,16 +66,6 @@ describe('RunReducers — pure event projections (T3.2)', () => {
             const snap = reduceRunState(events);
             expect(snap.status).to.equal('completed');
             expect(snap.startedAt).to.equal(1);
-            expect(snap.endedAt).to.equal(2);
-        });
-
-        it('keeps compatibility with legacy top-level run status events', () => {
-            const events: AgentRunEvent[] = [
-                ev('run_created', { timestamp: 1 }),
-                ev('status_changed', { status: 'done', timestamp: 2 }),
-            ];
-            const snap = reduceRunState(events);
-            expect(snap.status).to.equal('done');
             expect(snap.endedAt).to.equal(2);
         });
 
@@ -250,7 +241,10 @@ describe('RunReducers & Structured Events', () => {
     it('latestActiveRunId gets updated correctly on createRun', async () => {
         const { RunLedger } = loadRunLedgerModule();
         const ledger = RunLedger.getInstance();
-        const run = await ledger.createRun('topic_1', 'edit', 'test prompt');
+        const run = await ledger.createRun('topic_1', schedulingStateFromAdmission({
+            domainProfile: 'general', authorization: 'workspace_write', initialPhase: 'execute',
+            explicitDelegation: false, confidence: 1, evidence: ['test'],
+        }), 'test prompt');
         expect(RunLedger.getLatestActiveRunId()).to.equal(run.runId);
     });
 
@@ -258,7 +252,10 @@ describe('RunReducers & Structured Events', () => {
         const { RunLedger } = loadRunLedgerModule();
         const ledger = RunLedger.getInstance();
         const record = {
-            mode: 'utility',
+            schedulingState: schedulingStateFromAdmission({
+                domainProfile: 'general', authorization: 'workspace_write', initialPhase: 'execute',
+                explicitDelegation: false, confidence: 1, evidence: ['test'],
+            }),
             steps: [],
             writtenFiles: [],
             metrics: {},

@@ -180,9 +180,24 @@ describe('dispatch_agents background contract', () => {
         return new AgentToolExecutor(client, workspaceRoot);
     }
 
-    function makeContext(topicId: string, mode: string, domain: 'general' | 'paradox') {
+    function makeContext(topicId: string, domain: 'general' | 'paradox') {
         return {
-            runnerOptions: { topicId, mode, domain },
+            runnerOptions: {
+                topicId,
+                schedulingState: {
+                    profileName: domain === 'paradox' ? 'paradox-agent' : 'general-agent',
+                    domainProfile: domain,
+                    authorization: 'workspace_write',
+                    phase: 'execute',
+                    dispatch: 'parallel',
+                    overlays: ['swarm'],
+                    routeConfidence: 1,
+                    routeEvidence: ['test'],
+                    phaseReason: 'test',
+                    dispatchReason: 'test',
+                    revision: 0,
+                },
+            },
         };
     }
 
@@ -191,7 +206,7 @@ describe('dispatch_agents background contract', () => {
         const result = await executor.execute('dispatch_agents', {
             background: true,
             tasks: [{ id: 'w1', agentType: 'build', prompt: 'Write.' }],
-        }, makeContext('topic-a', 'script', 'paradox') as any) as any;
+        }, makeContext('topic-a', 'paradox') as any) as any;
         expect(result.success).to.equal(false);
         expect(result.error).to.include('Background waves are read-only');
     });
@@ -204,7 +219,7 @@ describe('dispatch_agents background contract', () => {
                 id: 'e1', agentType: 'explore', prompt: 'Inspect.',
                 plannedFiles: ['client/a.txt'],
             }],
-        }, makeContext('topic-a', 'script', 'paradox') as any) as any;
+        }, makeContext('topic-a', 'paradox') as any) as any;
         expect(result.success).to.equal(false);
         expect(result.error).to.include('Background waves are read-only');
     });
@@ -214,7 +229,7 @@ describe('dispatch_agents background contract', () => {
         const result = await executor.execute('dispatch_agents', {
             background: true,
             blueprintFile: '.cwtools/topic-a/Implementation_Plan.md',
-        }, makeContext('topic-a', 'script', 'paradox') as any) as any;
+        }, makeContext('topic-a', 'paradox') as any) as any;
         expect(result.success).to.equal(false);
         expect(result.error).to.include('does not accept blueprintFile');
     });
@@ -226,7 +241,7 @@ describe('dispatch_agents background contract', () => {
         const graph = engine.TaskGraphEngine.createGraph('Active objective');
         engine.TaskGraphEngine.addNode(graph, 'n1', 'explore', 'Inspect.', { dependencies: [] });
         await store.saveOrchestration({
-            topicId: 'topic-a', domain: 'paradox', mode: 'script', graph,
+            topicId: 'topic-a', domain: 'paradox', graph,
             agentResults: new Map(),
             blackboard: { entries: [], timestamp: 1 },
             summary: 's',
@@ -244,7 +259,7 @@ describe('dispatch_agents background contract', () => {
         const result = await executor.execute('dispatch_agents', {
             resumeGraphId: graph.id,
             answerClarifications: [{ id: 'n1', answer: 'Proceed.' }],
-        }, makeContext('topic-a', 'script', 'paradox') as any) as any;
+        }, makeContext('topic-a', 'paradox') as any) as any;
         expect(result.success).to.equal(false);
         expect(result.error).to.include('still running in the background');
         registry.backgroundOrchestrators.cancel(graph.id);
@@ -268,7 +283,7 @@ describe('dispatch_agents background contract', () => {
                     { id: 'n1', agentType: 'explore', prompt: 'Inspect.' },
                     { id: 'n2', agentType: 'explore', prompt: 'Inspect deeper.', dependencies: ['n1'] },
                 ],
-            }, makeContext('topic-a', 'orchestrator', 'general') as any) as any;
+            }, makeContext('topic-a', 'general') as any) as any;
 
             expect(result.success).to.equal(true);
             expect(result.background).to.equal(true);
@@ -314,13 +329,13 @@ describe('dispatch_agents background contract', () => {
                     { id: 'n1', agentType: 'explore', prompt: 'Inspect.' },
                     { id: 'n2', agentType: 'explore', prompt: 'Inspect deeper.', dependencies: ['n1'] },
                 ],
-            }, makeContext('topic-a', 'orchestrator', 'general') as any) as any;
+            }, makeContext('topic-a', 'general') as any) as any;
             expect(result.success).to.equal(true);
             expect(result.background).to.equal(true);
 
             const cancelResult = await executor.execute('cancel_dispatch', {
                 graphId: result.graphId,
-            }, makeContext('topic-a', 'orchestrator', 'general') as any) as any;
+            }, makeContext('topic-a', 'general') as any) as any;
             expect(cancelResult.success).to.equal(true);
             expect(cancelResult.cancelled).to.equal(true);
 
@@ -341,7 +356,7 @@ describe('dispatch_agents background contract', () => {
         const executor = createExecutor();
         const result = await executor.execute('cancel_dispatch', {
             graphId: 'tg_never_ran',
-        }, makeContext('topic-a', 'orchestrator', 'general') as any) as any;
+        }, makeContext('topic-a', 'general') as any) as any;
         expect(result.success).to.equal(false);
         expect(result.message).to.include('not running in the background');
     });

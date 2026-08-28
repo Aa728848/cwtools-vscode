@@ -3,10 +3,11 @@ import type {
     AgentAuthorization,
     AgentDispatchMode,
     AgentMode,
+    AgentExecutionStrategy,
+    AgentIntent,
     AgentRunPhase,
     AgentRuntimeDomain,
     AgentSchedulingState,
-    ResolvedAgentProfile,
     ToolEffect,
 } from '../types';
 
@@ -20,10 +21,12 @@ const PHASES = new Set<AgentRunPhase>(['inspect', 'plan', 'execute', 'verify', '
 const AUTHORIZATIONS = new Set<AgentAuthorization>(['read_only', 'plan_write_only', 'workspace_write']);
 const DISPATCH_MODES = new Set<AgentDispatchMode>(['single', 'parallel', 'specialist']);
 
-export function admissionFromResolvedProfile(profile: Pick<
-    ResolvedAgentProfile,
-    'domain' | 'intent' | 'strategy' | 'reason'
->, confidence = 1, evidence: readonly string[] = [], authorizationOverride?: AgentAuthorization): AdmissionDecision {
+export function admissionFromResolvedProfile(profile: {
+    domain: AgentRuntimeDomain;
+    intent: Exclude<AgentIntent, 'auto'>;
+    strategy: Exclude<AgentExecutionStrategy, 'auto'>;
+    reason: string;
+}, confidence = 1, evidence: readonly string[] = [], authorizationOverride?: AgentAuthorization): AdmissionDecision {
     const authorization: AgentAuthorization = authorizationOverride ?? (profile.intent === 'execute'
         ? 'workspace_write'
         : profile.intent === 'plan'
@@ -66,7 +69,12 @@ export function schedulingStateFromAdmission(
     };
 }
 
-export function deriveLegacyMode(state: AgentSchedulingState): AgentMode {
+/** Project the canonical scheduler axes into the prompt/tool execution label. */
+export function executionModeForSchedulingState(state: AgentSchedulingState): AgentMode {
+    if (state.profileName === 'localization-writer') return 'loc_writer';
+    if (state.profileName === 'localization-translator') return 'loc_translator';
+    if (state.profileName === 'gui-expert') return 'gui_expert';
+    if (state.profileName === 'reviewer' && state.domainProfile === 'paradox') return 'script_reviewer';
     if (state.dispatch !== 'single') {
         return state.domainProfile === 'paradox' ? 'script' : 'orchestrator';
     }
@@ -76,74 +84,56 @@ export function deriveLegacyMode(state: AgentSchedulingState): AgentMode {
     return state.domainProfile === 'paradox' ? 'build' : 'utility';
 }
 
-export function schedulingStateFromLegacyMode(
-    mode: AgentMode,
-    domain: AgentRuntimeDomain = defaultDomainForLegacyMode(mode),
-): AgentSchedulingState {
-    const authorization: AgentAuthorization = mode === 'plan'
-        ? 'plan_write_only'
-        : ['explore', 'general', 'review', 'script_reviewer'].includes(mode)
-            ? 'read_only'
-            : 'workspace_write';
-    const phase: AgentRunPhase = mode === 'plan'
-        ? 'plan'
-        : mode === 'review' || mode === 'script_reviewer'
-            ? 'verify'
-            : ['build', 'utility', 'orchestrator', 'script', 'gui_expert', 'loc_translator', 'loc_writer'].includes(mode)
-                ? 'execute'
-                : 'inspect';
-    return {
-        profileName: profileNameForLegacyMode(mode, domain),
-        domainProfile: domain,
-        authorization,
-        phase,
-        dispatch: mode === 'orchestrator' || mode === 'script' ? 'parallel' : 'single',
-        overlays: schedulingOverlays(phase, mode === 'orchestrator' || mode === 'script' ? 'parallel' : 'single'),
-        routeConfidence: 0,
-        routeEvidence: ['legacy mode compatibility'],
-        phaseReason: 'restored from legacy mode',
-        dispatchReason: mode === 'orchestrator' || mode === 'script' ? 'legacy coordinator mode' : 'legacy single mode',
-        revision: 0,
-    };
+/** Domain implied by an internal prompt/tool execution label. */
+export function domainForExecutionMode(mode: AgentMode): AgentRuntimeDomain {
+    return mode === 'utility' || mode === 'orchestrator' ? 'general' : 'paradox';
 }
 
 export function normalizeSchedulingState(
     value: unknown,
-    fallbackMode: AgentMode,
-    fallbackDomain?: AgentRuntimeDomain,
 ): AgentSchedulingState {
     if (!value || typeof value !== 'object') {
-        return schedulingStateFromLegacyMode(fallbackMode, fallbackDomain);
+        throw new Error('Agent scheduling state is required.');
     }
     const candidate = value as Partial<AgentSchedulingState>;
-    if ((candidate.domainProfile !== 'general' && candidate.domainProfile !== 'paradox')
+    if ((candidate.domainProfile !== 'general' && candidate.domainProfile !== 'paradox' && candidate.domainProfile !== 'hybrid')
         || !AUTHORIZATIONS.has(candidate.authorization as AgentAuthorization)
         || !PHASES.has(candidate.phase as AgentRunPhase)
         || !DISPATCH_MODES.has(candidate.dispatch as AgentDispatchMode)) {
-        const legacy = schedulingStateFromLegacyMode(fallbackMode, fallbackDomain);
-        return {
-            ...legacy,
-            authorization: 'read_only',
-            phase: legacy.phase === 'verify' ? 'verify' : 'inspect',
-            dispatch: 'single',
-            phaseReason: 'invalid persisted scheduling state rejected',
-            dispatchReason: 'invalid persisted dispatch state rejected',
-        };
+        throw new Error('Agent scheduling state is invalid.');
     }
+    const domainProfile = candidate.domainProfile as AgentRuntimeDomain;
+    const authorization = candidate.authorization as AgentAuthorization;
+    const phase = candidate.phase as AgentRunPhase;
+    const dispatch = candidate.dispatch as AgentDispatchMode;
     return {
         profileName: typeof candidate.profileName === 'string' && candidate.profileName.trim()
             ? candidate.profileName.trim().slice(0, 100)
-            : profileNameForLegacyMode(fallbackMode, candidate.domainProfile),
-        domainProfile: candidate.domainProfile,
-        authorization: candidate.authorization as AgentAuthorization,
-        phase: candidate.phase as AgentRunPhase,
-        dispatch: candidate.dispatch as AgentDispatchMode,
+            : profileNameForAdmission({
+                domainProfile,
+                authorization,
+                initialPhase: phase === 'finalize' ? 'verify' : phase,
+                explicitDelegation: dispatch !== 'single',
+                confidence: candidate.routeConfidence ?? 0,
+                evidence: candidate.routeEvidence ?? [],
+            }),
+        domainProfile,
+        authorization,
+        phase,
+        dispatch,
         overlays: Array.isArray(candidate.overlays)
             ? [...new Set(candidate.overlays.filter((value): value is string => typeof value === 'string' && !!value.trim())
                 .map(value => value.trim().slice(0, 80)))].slice(0, 12)
             : schedulingOverlays(candidate.phase as AgentRunPhase, candidate.dispatch as AgentDispatchMode),
         routeConfidence: clampConfidence(candidate.routeConfidence),
         routeEvidence: uniqueEvidence(candidate.routeEvidence ?? []),
+        awaitingUserDecision: candidate.awaitingUserDecision === true ? true : undefined,
+        routingSource: candidate.routingSource === 'model'
+            || candidate.routingSource === 'deterministic'
+            || candidate.routingSource === 'workflow'
+            || candidate.routingSource === 'user'
+            ? candidate.routingSource
+            : undefined,
         phaseReason: typeof candidate.phaseReason === 'string' ? candidate.phaseReason.slice(0, 500) : 'restored state',
         dispatchReason: typeof candidate.dispatchReason === 'string' ? candidate.dispatchReason.slice(0, 500) : undefined,
         revision: Number.isSafeInteger(candidate.revision) && (candidate.revision ?? -1) >= 0 ? candidate.revision! : 0,
@@ -395,21 +385,11 @@ function uniqueEvidence(values: readonly string[]): string[] {
     return [...new Set(values.filter(value => typeof value === 'string' && value.trim()).map(value => value.trim().slice(0, 300)))].slice(0, 12);
 }
 
-function defaultDomainForLegacyMode(mode: AgentMode): AgentRuntimeDomain {
-    return mode === 'general' || mode === 'utility' || mode === 'orchestrator' ? 'general' : 'paradox';
-}
-
 function profileNameForAdmission(admission: AdmissionDecision): string {
     if (admission.authorization === 'read_only') {
         return admission.initialPhase === 'verify' ? 'reviewer' : 'explore';
     }
     return admission.domainProfile === 'paradox' ? 'paradox-agent' : admission.domainProfile === 'hybrid' ? 'hybrid-agent' : 'general-agent';
-}
-
-function profileNameForLegacyMode(mode: AgentMode, domain: AgentRuntimeDomain): string {
-    if (mode === 'review' || mode === 'script_reviewer') return 'reviewer';
-    if (mode === 'explore' || mode === 'general') return 'explore';
-    return domain === 'paradox' ? 'paradox-agent' : domain === 'hybrid' ? 'hybrid-agent' : 'general-agent';
 }
 
 function schedulingOverlays(phase: AgentRunPhase, dispatch: AgentDispatchMode): string[] {

@@ -13,7 +13,7 @@ import { hasInlineEvalPayload, PermissionPolicyStore } from '../runner/permissio
 import { requestPermissionWithAbort as sharedRequestPermissionWithAbort } from '../runner/permissionRequest';
 import { processRegistry } from '../runner/processRegistry';
 import { BrokeredSandboxRunner, DirectSandboxRunner, detectSandboxBackendAsync, type SandboxRunner } from '../runner/sandboxRunner';
-import { getPrivateTopicRootCandidates, getPrivateTopicScratchDir, getPrivateTopicStorageDir } from '../workspacePaths';
+import { getPrivateTopicRoot, getPrivateTopicScratchDir, getPrivateTopicStorageDir } from '../workspacePaths';
 import {
     escapeRegExp,
     isPathInsideOrEqual,
@@ -61,7 +61,7 @@ const COMMAND_TEMP_SCRIPT_EXTENSIONS = new Set([
     '.bat', '.cmd', '.cjs', '.js', '.mjs', '.ps1', '.py', '.sh',
 ]);
 const COMMAND_SNAPSHOT_EXCLUDED_DIRS = new Set([
-    '.cwtools', '.cwtools-ai', '.git', '.hg', '.svn', '.tmp-test', '.vscode-test', '.vs', '.idea',
+    '.cwtools', '.git', '.hg', '.svn', '.tmp-test', '.vscode-test', '.vs', '.idea',
     'node_modules', 'dist', 'out', 'build', 'coverage',
 ]);
 const COMMAND_TEMP_SCRIPT_DIR_NAMES = new Set([
@@ -147,10 +147,6 @@ interface CommandFileChangeResult {
 /** Structural type for the properties ExternalToolHandler reads from the executor. */
 export interface ExternalToolContext {
     readonly workspaceRoot: string;
-    parentRunnerOptions?: import('../agentRunner').AgentRunnerOptions;
-    parentTokenAccumulator?: import('../types').TokenUsage;
-    /** C5: File write hook for sub-agent isolation (mirrors FileToolContext.onBeforeFileWrite) */
-    onBeforeFileWrite?: (filePath: string, previousContent: string | null) => void;
     /** Resolve search-provider credentials from VS Code SecretStorage. */
     getWebSearchApiKey?: (provider: Exclude<WebSearchProvider, 'auto' | 'duckduckgo' | 'searxng'>) => Promise<string | undefined>;
 }
@@ -251,15 +247,15 @@ export class ExternalToolHandler {
     }
 
     private isWithinAnyWorkspace(candidate: string): boolean {
-        return resolveWorkspacePathInput(candidate, this.ctx.workspaceRoot, { preferExistingAiPath: true }).isWithinAnyWorkspace;
+        return resolveWorkspacePathInput(candidate, this.ctx.workspaceRoot).isWithinAnyWorkspace;
     }
 
     private isTrustedCommandWorkspace(candidate: string): boolean {
-        return resolveWorkspacePathInput(candidate, this.ctx.workspaceRoot, { preferExistingAiPath: true }).isTrusted;
+        return resolveWorkspacePathInput(candidate, this.ctx.workspaceRoot).isTrusted;
     }
 
     private resolveWorkspacePath(inputPath: string): string {
-        return resolveWorkspacePathInput(inputPath, this.ctx.workspaceRoot, { preferExistingAiPath: true }).resolved;
+        return resolveWorkspacePathInput(inputPath, this.ctx.workspaceRoot).resolved;
     }
 
     // ─── Permission request assistance: compete with AbortSignal, automatically deny when abort ────────────────
@@ -337,16 +333,13 @@ export class ExternalToolHandler {
     }
 
     private normalizeAgentWorkspaceCommand(command: string, topicId: string): string {
-        // Topic-scoped storage lives in the private root first; legacy project
-        // .cwtools roots remain as fallbacks for pre-migration files.
-        const topicRoots = getPrivateTopicRootCandidates(this.ctx.workspaceRoot);
-        const primaryTopicRoot = topicRoots[0] ?? '';
+        const topicRoot = getPrivateTopicRoot(this.ctx.workspaceRoot);
         const safeTopicId = (topicId || 'default').replace(/[^a-zA-Z0-9_.-]/g, '_');
         const safeTopicLower = safeTopicId.toLowerCase();
         const rewriteAgentPath = (rawPath: string): string => {
             const normalized = rawPath.replace(/\\/g, '/');
-            const rest = normalized.replace(/^\.(?:cwtools|cwtools-ai)(?:[\\/]|$)/i, '').replace(/^\/+/, '');
-            if (!rest) return primaryTopicRoot || '.cwtools';
+            const rest = normalized.replace(/^\.cwtools(?:[\\/]|$)/i, '').replace(/^\/+/, '');
+            if (!rest) return topicRoot || '.cwtools';
 
             const restSegments = rest.split('/').filter(Boolean);
             const firstSegment = restSegments[0]?.toLowerCase() ?? '';
@@ -357,36 +350,23 @@ export class ExternalToolHandler {
                     ? restSegments
                     : [safeTopicId, ...restSegments];
 
-            if (!primaryTopicRoot) {
+            if (!topicRoot) {
                 return `.cwtools/${targetSegments.join('/')}`;
             }
-
-            const candidates: string[] = [];
-            for (const root of topicRoots) {
-                candidates.push(path.join(root, ...targetSegments));
-                if (!explicitlyScopedTopic && firstSegment !== 'scratch') {
-                    candidates.push(path.join(root, safeTopicId, 'scratch', ...restSegments));
-                }
-            }
-            const existingCandidate = candidates.find(candidate => fs.existsSync(candidate));
-            if (existingCandidate) {
-                return existingCandidate;
-            }
-
-            return path.join(primaryTopicRoot, ...targetSegments);
+            return path.join(topicRoot, ...targetSegments);
         };
 
-        const quotedAgentPathPattern = /(^|[\s(])\\?(["'])(\.(?:cwtools|cwtools-ai)(?:[\\/][^"']+?)?)\\?\2/g;
+        const quotedAgentPathPattern = /(^|[\s(])\\?(["'])(\.cwtools(?:[\\/][^"']+?)?)\\?\2/g;
         const withEscapedQuotedPaths = command.replace(quotedAgentPathPattern, (_match, prefix: string, quote: string, agentPath: string) =>
             `${prefix}${quote}${rewriteAgentPath(agentPath)}${quote}`
         );
 
-        const quotedPattern = /(^|[\s(])(["'])(\.(?:cwtools|cwtools-ai)(?:[\\/][^"']*)?)\2/g;
+        const quotedPattern = /(^|[\s(])(["'])(\.cwtools(?:[\\/][^"']*)?)\2/g;
         const withQuotedPaths = withEscapedQuotedPaths.replace(quotedPattern, (_match, prefix: string, quote: string, agentPath: string) =>
             `${prefix}${quote}${rewriteAgentPath(agentPath)}${quote}`
         );
 
-        const barePattern = /(^|[\s(])(\.(?:cwtools|cwtools-ai)(?:[\\/][^\s"';&|<>]+)?)/g;
+        const barePattern = /(^|[\s(])(\.cwtools(?:[\\/][^\s"';&|<>]+)?)/g;
         return withQuotedPaths.replace(barePattern, (_match, prefix: string, agentPath: string) =>
             `${prefix}${this.quoteCommandPath(rewriteAgentPath(agentPath), false)}`
         );
@@ -398,7 +378,7 @@ export class ExternalToolHandler {
         const folders = vs.workspace.workspaceFolders ?? [];
         for (const folder of folders) {
             const alias = path.basename(folder.uri.fsPath);
-            if (!alias || alias.toLowerCase() === '.cwtools-ai' || alias.toLowerCase() === '.cwtools') continue;
+            if (!alias || alias.toLowerCase() === '.cwtools') continue;
             const aliasPattern = escapeRegExp(alias);
 
             const rewriteAliasPath = (aliasPath: string): string | null => {
@@ -433,7 +413,7 @@ export class ExternalToolHandler {
     private getCommandSnapshotRoots(): string[] {
         const roots: string[] = [];
         const addRoot = (root: string | undefined) => {
-            if (!root || path.basename(root).toLowerCase() === '.cwtools-ai' || path.basename(root).toLowerCase() === '.cwtools') return;
+            if (!root || path.basename(root).toLowerCase() === '.cwtools') return;
             const resolved = path.resolve(root);
             const key = process.platform === 'win32' ? resolved.toLowerCase() : resolved;
             if (!roots.some(existing => this.commandSnapshotKey(existing) === key)) {
@@ -468,7 +448,7 @@ export class ExternalToolHandler {
 
         const relPath = this.getCommandSnapshotRelativePath(filePath);
         const segments = relPath.split('/').filter(Boolean).map(segment => segment.toLowerCase());
-        if (segments[0] === '.cwtools-ai' || segments[0] === '.cwtools') return true;
+        if (segments[0] === '.cwtools') return true;
 
         const basename = path.basename(filePath).toLowerCase();
         const ext = path.extname(basename).toLowerCase();
@@ -581,8 +561,7 @@ export class ExternalToolHandler {
         | ((filePath: string, previousContent: string | null) => void)
         | undefined {
         return context?.onBeforeFileWrite
-            ?? context?.runnerOptions?.onBeforeFileWrite
-            ?? this.ctx.onBeforeFileWrite;
+            ?? context?.runnerOptions?.onBeforeFileWrite;
     }
 
     private async recordCommandFileChanges(
@@ -876,7 +855,7 @@ export class ExternalToolHandler {
 
         try {
             const { MemoryParser } = await import('../memoryParser');
-            const topicId = context?.runnerOptions?.topicId ?? this.ctx.parentRunnerOptions?.topicId;
+            const topicId = context?.runnerOptions?.topicId;
             const parser = new MemoryParser(this.ctx.workspaceRoot, topicId);
             const result = await parser.appendMemory({
                 key: 'Ignored Validation Error / Whitelist',
@@ -1093,7 +1072,7 @@ export class ExternalToolHandler {
             const requestedCwd = typeof args.cwd === 'string' && args.cwd.trim()
                 ? sanitizePathInput(args.cwd)
                 : this.ctx.workspaceRoot;
-            const cwdResolution = resolveWorkspacePathInput(requestedCwd, this.ctx.workspaceRoot, { preferExistingAiPath: true });
+            const cwdResolution = resolveWorkspacePathInput(requestedCwd, this.ctx.workspaceRoot);
             cwd = cwdResolution.resolved;
 
             if (!cwdResolution.isTrusted && !bypassSandbox) {
@@ -1361,7 +1340,7 @@ export class ExternalToolHandler {
                     if (match?.[1]) protectedPaths.push(path.resolve(root, match[1].trim()));
                 }
             } catch { /* non-worktree or inaccessible marker */ }
-            const agentRoots = [path.join(root, '.cwtools'), path.join(root, '.cwtools-ai')];
+            const agentRoots = [path.join(root, '.cwtools')];
             const privateNames = ['runs', 'threads', 'goals', 'blackboard', 'resume_state.json', 'resume_state.json.bak'];
             for (const agentRoot of agentRoots) {
                 for (const topic of this.cachedAgentTopicDirs(agentRoot)) {
@@ -1631,7 +1610,7 @@ export class ExternalToolHandler {
 
     /** Ensure the topic-scoped media output directory exists and return its path. */
     private async getMediaOutputDir(context?: import('../types').AgentToolContext): Promise<string> {
-        const topicId = context?.runnerOptions?.topicId ?? this.ctx.parentRunnerOptions?.topicId ?? 'session';
+        const topicId = context?.runnerOptions?.topicId ?? 'session';
         const mediaDir = path.join(getPrivateTopicStorageDir(topicId, this.ctx.workspaceRoot), 'media');
         if (!fs.existsSync(mediaDir)) {
             fs.mkdirSync(mediaDir, { recursive: true });
@@ -1972,7 +1951,7 @@ export class ExternalToolHandler {
             const previousContent = fs.existsSync(targetPath)
                 ? fs.readFileSync(targetPath).toString('base64')
                 : null;
-            this.ctx.onBeforeFileWrite?.(targetPath, previousContent);
+            (context?.onBeforeFileWrite ?? context?.runnerOptions?.onBeforeFileWrite)?.(targetPath, previousContent);
 
             // Copy the file
             fs.copyFileSync(sourcePath, targetPath);

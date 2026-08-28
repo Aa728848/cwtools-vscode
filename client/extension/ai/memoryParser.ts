@@ -2,7 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { ErrorReporter } from './errorReporter';
 import { SOURCE } from './messages';
-import { getPrivateTopicStorageDir, getPrivateTopicStorageDirCandidates } from './workspacePaths';
+import { getPrivateTopicStorageDir } from './workspacePaths';
 import type { AgentRuntimeDomain } from './types';
 
 /** Classification of a memory entry's provenance. */
@@ -12,7 +12,7 @@ export type MemoryKind = 'user_fact' | 'project_fact' | 'inferred' | 'ephemeral'
 export interface MemoryEntry {
     key: string;
     content: string;
-    /** Missing on legacy entries, which belong to the Paradox domain. */
+    /** Capability domain for this fact. */
     domain?: AgentRuntimeDomain;
     priority: 'high' | 'normal' | 'low';
     source?: string;
@@ -24,8 +24,8 @@ export interface MemoryEntry {
     expiresAt?: number;
     scope?: 'private' | 'project';
     /**
-     * Provenance classification. Missing on legacy (version 1) entries and inferred
-     * from `source` on read/write. 'inferred' entries are model guesses: they are
+     * Provenance classification. When omitted by a new write, it is derived from
+     * `source`. 'inferred' entries are model guesses: they are
      * never auto-promoted to long-term facts — promotion requires an explicit
      * rewrite with a different kind (no automatic promotion path exists).
      */
@@ -81,10 +81,13 @@ function sanitizeMemoryEntry(raw: unknown): MemoryEntry | null {
     const num = (value: unknown): number | undefined =>
         typeof value === 'number' && Number.isFinite(value) ? value : undefined;
     const kind = record.kind;
+    const domain = record.domain;
+    if (domain !== 'general' && domain !== 'paradox' && domain !== 'hybrid') return null;
+    if (kind !== 'user_fact' && kind !== 'project_fact' && kind !== 'inferred' && kind !== 'ephemeral') return null;
     return {
         key: record.key,
         content: record.content,
-        domain: record.domain === 'general' || record.domain === 'paradox' || record.domain === 'hybrid' ? record.domain : undefined,
+        domain,
         priority: record.priority === 'high' || record.priority === 'low' ? record.priority : 'normal',
         source: typeof record.source === 'string' ? record.source : undefined,
         confidence: num(record.confidence),
@@ -94,7 +97,7 @@ function sanitizeMemoryEntry(raw: unknown): MemoryEntry | null {
         usageCount: num(record.usageCount),
         expiresAt: num(record.expiresAt),
         scope: record.scope === 'project' ? 'project' : record.scope === 'private' ? 'private' : undefined,
-        kind: kind === 'user_fact' || kind === 'project_fact' || kind === 'inferred' || kind === 'ephemeral' ? kind : undefined,
+        kind,
         revision: typeof record.revision === 'string' ? record.revision : undefined,
         projectRevision: typeof record.projectRevision === 'string' ? record.projectRevision : undefined,
         stale: record.stale === true ? true : undefined,
@@ -108,8 +111,8 @@ function sanitizeMemoryEntry(raw: unknown): MemoryEntry | null {
 /**
  * Parses topic-scoped .cwtools-memory.md files to extract workspace-specific rules.
  * Also supports appending new memory entries and pruning old ones.
- * Legacy workspace-root memory is read as a fallback, but new writes go under
- * .cwtools/<topicId>/.cwtools-memory.md.
+ * The structured topic file is the sole source of truth. The Markdown file beside
+ * it is only a generated human-readable projection.
  *
  * Prompt building is read-only and retrieves the top-k most relevant entries under
  * a strict character budget (plan §8). Usage statistics change only via
@@ -117,8 +120,6 @@ function sanitizeMemoryEntry(raw: unknown): MemoryEntry | null {
  * (debounced); call `flushUsageWrites` to force persistence.
  */
 export class MemoryParser {
-    private cache = new Map<string, { signature: string; prompt: string }>();
-
     /** Strict cap on the total size of memory entries injected into a prompt. */
     static readonly MAX_MEMORY_CHARS = 12000;
     /** Max number of entries injected per prompt (top-k retrieval, plan §8). */
@@ -129,7 +130,7 @@ export class MemoryParser {
     static usagePersistDebounceMs = 2000;
     static readonly MEMORY_FILE_NAME = '.cwtools-memory.md';
     static readonly STRUCTURED_MEMORY_FILE_NAME = 'memory.json';
-    /** Structured file format version written by this build. Readers stay lenient. */
+    /** Structured file format accepted and written by this build. */
     static readonly STRUCTURED_MEMORY_VERSION = 5;
     /** Half-life scale for freshness/last-used decay in retrieval scoring. */
     private static readonly FRESHNESS_DECAY_MS = 30 * 24 * 60 * 60 * 1000;
@@ -271,7 +272,7 @@ export class MemoryParser {
         for (const topicId of topics) {
             const parser = new MemoryParser(workspaceRoot, topicId);
             marked += parser.markMemoryStale(topicId, entry =>
-                (entry.kind ?? MemoryParser.inferKind(entry.source)) === 'project_fact', reason);
+                entry.kind === 'project_fact', reason);
         }
         return marked;
     }
@@ -281,16 +282,9 @@ export class MemoryParser {
         return this.getMemoryFilePath();
     }
 
-    /** Legacy pre-topic memory path, kept as a read-only fallback. */
-    public get legacyMemoryFilePath(): string {
-        return path.join(this.workspaceRoot, MemoryParser.MEMORY_FILE_NAME);
-    }
-
     public getMemoryFilePath(topicId = this.topicId): string {
         const topicDir = getPrivateTopicStorageDir(topicId || 'default', this.workspaceRoot);
-        return topicDir
-            ? path.join(topicDir, MemoryParser.MEMORY_FILE_NAME)
-            : this.legacyMemoryFilePath;
+        return topicDir ? path.join(topicDir, MemoryParser.MEMORY_FILE_NAME) : '';
     }
 
     public getStructuredMemoryFilePath(topicId = this.topicId): string {
@@ -301,11 +295,10 @@ export class MemoryParser {
         const filePath = this.getStructuredMemoryFilePath(topicId);
         try {
             if (!fs.existsSync(filePath)) return [];
-            // Untrusted JSON: `version` is advisory. Version 1 lacks kind/revision/
-            // stale (all optional); unknown versions are read leniently and each
-            // entry is validated field by field.
             const value: unknown = JSON.parse(fs.readFileSync(filePath, 'utf8'));
-            const rawEntries = (value as { entries?: unknown } | null)?.entries;
+            if (!value || typeof value !== 'object'
+                || (value as { version?: unknown }).version !== MemoryParser.STRUCTURED_MEMORY_VERSION) return [];
+            const rawEntries = (value as { entries?: unknown }).entries;
             if (!Array.isArray(rawEntries)) return [];
             const entries: MemoryEntry[] = [];
             for (const raw of rawEntries) {
@@ -367,32 +360,8 @@ export class MemoryParser {
             .replace(/(["']?(?:api[_-]?key|token|password)["']?\s*[:=]\s*["'])[^"'\s]{8,}/gi, '$1[REDACTED]');
     }
 
-    private getMemoryReadCandidates(topicId = this.topicId): string[] {
-        const paths: string[] = [];
-        const add = (filePath: string) => {
-            if (!filePath) return;
-            const resolved = path.resolve(filePath);
-            const key = process.platform === 'win32' ? resolved.toLowerCase() : resolved;
-            if (!paths.some(existing => {
-                const existingResolved = path.resolve(existing);
-                const existingKey = process.platform === 'win32' ? existingResolved.toLowerCase() : existingResolved;
-                return existingKey === key;
-            })) {
-                paths.push(filePath);
-            }
-        };
-
-        for (const topicDir of getPrivateTopicStorageDirCandidates(topicId || 'default', this.workspaceRoot)) {
-            add(path.join(topicDir, MemoryParser.MEMORY_FILE_NAME));
-            add(path.join(topicDir, '.cwtools-ai-memory.md'));
-        }
-        add(this.legacyMemoryFilePath);
-        add(path.join(this.workspaceRoot, '.cwtools-ai-memory.md'));
-        return paths;
-    }
-
     /**
-     * Kind inference for entries without an explicit kind (all version 1 data).
+     * Kind inference for new writes without an explicit kind.
      * Agent-sourced memories ('agent:save_memory', 'run:*') are model inferences;
      * explicit 'user:*' sources are user facts; any other explicit source is a
      * project fact; a missing source is conservatively treated as 'inferred'.
@@ -441,7 +410,7 @@ export class MemoryParser {
 
     private formatEntryBlock(entry: MemoryEntry): string {
         const staleMarker = entry.stale === true ? '; stale=true' : '';
-        return `## ${entry.key} [priority=${entry.priority}; confidence=${entry.confidence ?? 0.8}; source=${entry.source ?? 'agent'}; kind=${entry.kind ?? MemoryParser.inferKind(entry.source)}${staleMarker}]\n${entry.content}`;
+        return `## ${entry.key} [priority=${entry.priority}; confidence=${entry.confidence ?? 0.8}; source=${entry.source ?? 'agent'}; kind=${entry.kind}${staleMarker}]\n${entry.content}`;
     }
 
     private synchronizeProjectFactRevision(entries: MemoryEntry[]): boolean {
@@ -449,7 +418,7 @@ export class MemoryParser {
         const revisionRecord = MemoryParser.workspaceProjectRevisions.get(MemoryParser.workspaceKey(this.workspaceRoot));
         let changed = false;
         for (const entry of entries) {
-            if ((entry.kind ?? MemoryParser.inferKind(entry.source)) !== 'project_fact') continue;
+            if (entry.kind !== 'project_fact') continue;
             if (entry.projectRevision === currentRevision) continue;
             if (entry.stale !== true) changed = true;
             entry.stale = true;
@@ -471,7 +440,7 @@ export class MemoryParser {
         const candidates = entries
             .filter(entry => entry.stale === true
                 && (!entry.expiresAt || entry.expiresAt > now)
-                && (entry.kind ?? MemoryParser.inferKind(entry.source)) === 'project_fact')
+                && entry.kind === 'project_fact')
             .filter(entry => {
                 const haystack = `${entry.key}\n${entry.content}\n${entry.source ?? ''}`.toLowerCase();
                 const entryTerms = MemoryParser.tokenizeTaskText(haystack);
@@ -509,7 +478,6 @@ export class MemoryParser {
      * injects only the top-k entries (see TOP_K_MEMORY_ENTRIES) selected by
      * relevance to the optional retrieval context, under a strict total budget of
      * MAX_MEMORY_CHARS; the surrounding safety header has its own quota on top.
-     * Uses caching to avoid excessive file reads (legacy fallback path only).
      */
     public getMemoryPrompt(topicId = this.topicId, context?: MemoryRetrievalContext): string {
         try {
@@ -519,9 +487,7 @@ export class MemoryParser {
             const structured = this.readStructuredEntries(topicId);
             if (structured.length > 0) {
                 const requestedDomain = context?.domain ?? 'paradox';
-                const scoped = structured.filter(entry =>
-                    entry.domain === requestedDomain
-                    || (requestedDomain === 'paradox' && entry.domain === undefined));
+                const scoped = structured.filter(entry => entry.domain === requestedDomain);
                 if (scoped.length === 0) {
                     this.recordRecallTrace({
                         topicId: topicId || 'default', domain: requestedDomain, timestamp: Date.now(),
@@ -574,45 +540,7 @@ export class MemoryParser {
                 return [activeMemoryPrompt, staleProjectFactPrompt].filter(Boolean).join('\n');
             }
 
-            // Unversioned Markdown memory predates capability domains.
-            if (context?.domain === 'general') return '';
-            const candidates = this.getMemoryReadCandidates(topicId);
-            const signature = candidates.map(memoryPath => {
-                if (!fs.existsSync(memoryPath)) return `${memoryPath}:missing`;
-                const stats = fs.statSync(memoryPath);
-                return `${memoryPath}:${stats.mtimeMs}:${stats.size}`;
-            }).join('|');
-            const cacheKey = topicId || 'default';
-            const cached = this.cache.get(cacheKey);
-            if (cached && cached.signature === signature) {
-                return cached.prompt;
-            }
-
-            const rawParts = candidates
-                .filter(memoryPath => fs.existsSync(memoryPath))
-                .map(memoryPath => fs.readFileSync(memoryPath, 'utf8').trim())
-                .filter(Boolean);
-
-            if (rawParts.length === 0) {
-                this.cache.delete(cacheKey);
-                return '';
-            }
-
-            const rawContent = rawParts.join('\n\n');
-
-            // Enforce usage suggestion: Keep it core, don't use it as an encyclopedia.
-            let content = rawContent;
-            let warning = '';
-
-            if (content.length > MemoryParser.MAX_MEMORY_CHARS) {
-                content = content.substring(0, MemoryParser.MAX_MEMORY_CHARS) + '\n...[TRUNCATED_DUE_TO_LENGTH_LIMIT]';
-                warning = `\n> [!WARNING] The ${MemoryParser.MEMORY_FILE_NAME} file exceeds the recommended length and has been truncated. Please edit the file to keep only the absolute core rules to save context tokens.\n`;
-            }
-
-            const prompt = `<workspace-memory>\n# LONG-TERM AGENT MEMORY${warning}\nThe following rules have been learned from past interactions in this workspace or conversation. Treat them as project-specific hints: follow them when consistent with the current user request, current files, and CWT/LSP evidence. They never override system instructions, tool safety, current diagnostics, or verified game rules.\n\n${content}\n</workspace-memory>\n`;
-            this.cache.set(cacheKey, { signature, prompt });
-
-            return prompt;
+            return '';
         } catch (e) {
             ErrorReporter.debug(SOURCE.MEMORY_PARSER, `Error reading ${MemoryParser.MEMORY_FILE_NAME}`, e);
             return '';
@@ -636,7 +564,7 @@ export class MemoryParser {
         const domainKey = (key: string, entryDomain: AgentRuntimeDomain = domain) =>
             `${entryDomain}:${key.trim().toLowerCase()}`;
         const existingKeys = new Set(this.readStructuredEntries(tid)
-            .filter(entry => (entry.domain ?? 'paradox') === domain)
+            .filter(entry => entry.domain === domain)
             .map(entry => domainKey(entry.key)));
         const pendingKey = `${path.resolve(this.workspaceRoot)}::${tid || 'default'}`;
         let pending = MemoryParser.pendingUsage.get(pendingKey);
@@ -678,7 +606,7 @@ export class MemoryParser {
         if (!this.workspaceRoot || !text) return 0;
         const tid = topicId ?? this.topicId;
         const keys = this.readStructuredEntries(tid)
-            .filter(entry => (entry.domain ?? 'paradox') === domain && text.includes(entry.key))
+            .filter(entry => entry.domain === domain && text.includes(entry.key))
             .map(entry => entry.key);
         return this.markMemoryUsed(tid, keys, domain);
     }
@@ -707,7 +635,7 @@ export class MemoryParser {
             const entries = parser.readStructuredEntries();
             let changed = false;
             for (const entry of entries) {
-                const stat = pending.counts.get(`${entry.domain ?? 'paradox'}:${entry.key.toLowerCase()}`);
+                const stat = pending.counts.get(`${entry.domain}:${entry.key.toLowerCase()}`);
                 if (!stat) continue;
                 entry.usageCount = (entry.usageCount ?? 0) + stat.count;
                 entry.lastUsedAt = stat.lastUsedAt;
@@ -748,7 +676,6 @@ export class MemoryParser {
             }
             if (marked > 0) {
                 this.writeStructuredEntries(entries, topicId);
-                this.cache.clear();
             }
             return marked;
         } catch (e) {
@@ -789,7 +716,7 @@ export class MemoryParser {
             const requestedDomain = entry.domain ?? 'paradox';
             const existing = entries.find(candidate =>
                 candidate.key.toLowerCase() === normalizedKey.toLowerCase()
-                && (candidate.domain ?? 'paradox') === requestedDomain);
+                && candidate.domain === requestedDomain);
             const currentStoreRevision = existing ? (existing.storeRevision ?? 1) : 0;
             if (options?.expectedRevision !== undefined && options.expectedRevision !== currentStoreRevision) {
                 return {
@@ -800,7 +727,7 @@ export class MemoryParser {
                 };
             }
             const requestedSource = entry.source ?? 'agent:save_memory';
-            const existingKind = existing?.kind ?? MemoryParser.inferKind(existing?.source);
+            const existingKind = existing?.kind;
             const genericAgentRewrite = requestedSource === 'agent:save_memory' || requestedSource.startsWith('run:');
             const revalidatedProjectFact = existing?.stale === true
                 && existingKind === 'project_fact'
@@ -850,7 +777,7 @@ export class MemoryParser {
             };
             const consolidated = entries.filter(candidate =>
                 candidate.key.toLowerCase() !== normalized.key.toLowerCase()
-                || (candidate.domain ?? 'paradox') !== requestedDomain);
+                || candidate.domain !== requestedDomain);
             consolidated.push(normalized);
             const priorityScore = { high: 3, normal: 2, low: 1 } as const;
             consolidated.sort((a, b) =>
@@ -870,9 +797,6 @@ export class MemoryParser {
             }
             kept.sort((a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0));
             this.writeStructuredEntries(kept, topicId);
-
-            // Invalidate cache
-            this.cache.clear();
 
             return {
                 success: true,
@@ -899,7 +823,7 @@ export class MemoryParser {
         return this.withTopicWriteLock(topicId, async () => {
             const entries = this.readStructuredEntries(topicId);
             const index = entries.findIndex(entry => entry.key.toLowerCase() === key.trim().toLowerCase()
-                && (entry.domain ?? 'paradox') === domain);
+                && entry.domain === domain);
             if (index < 0) return { success: false, message: `Memory not found: "${key}"`, storeRevision: 0 };
             const entry = entries[index]!;
             const currentRevision = entry.storeRevision ?? 1;
@@ -913,14 +837,12 @@ export class MemoryParser {
             if (mode === 'delete') {
                 entries.splice(index, 1);
                 this.writeStructuredEntries(entries, topicId);
-                this.cache.clear();
                 return { success: true, message: `Memory permanently deleted: "${key}"` };
             }
             entry.archivedAt = Date.now();
             entry.updatedAt = entry.archivedAt;
             entry.storeRevision = currentRevision + 1;
             this.writeStructuredEntries(entries, topicId);
-            this.cache.clear();
             return { success: true, message: `Memory archived: "${key}"`, storeRevision: entry.storeRevision };
         });
     }
@@ -936,51 +858,7 @@ export class MemoryParser {
                 const now = Date.now();
                 const active = structured.filter(entry => !entry.expiresAt || entry.expiresAt > now);
                 this.writeStructuredEntries(active, topicId);
-                this.cache.clear();
-                return;
             }
-            const memoryPath = this.getMemoryFilePath(topicId);
-            if (!fs.existsSync(memoryPath)) return;
-
-            const content = fs.readFileSync(memoryPath, 'utf8');
-            if (content.length <= MemoryParser.MAX_MEMORY_CHARS) return;
-
-            // Parse sections by ## headings
-            const sections = content.split(/(?=^## )/m);
-            const header = sections[0] || ''; // Everything before first ## 
-            const entries = sections.slice(1);
-
-            // Sort: low priority first, then oldest first (for removal candidates)
-            const priorityOrder: Record<string, number> = { low: 0, normal: 1, high: 2 };
-            const scored = entries.map((entry, idx) => {
-                const isLow = entry.includes('[low]');
-                const isHigh = entry.includes('[high]');
-                const priority = isHigh ? 'high' : isLow ? 'low' : 'normal';
-                return { entry, idx, priority, score: priorityOrder[priority] ?? 1 };
-            });
-
-            // Remove lowest priority entries first (oldest among same priority)
-            scored.sort((a, b) => a.score - b.score || a.idx - b.idx);
-
-            let totalLen = header.length;
-            const keepEntries: typeof scored = [];
-
-            // Keep from highest priority first
-            for (const s of [...scored].reverse()) {
-                if (totalLen + s.entry.length <= MemoryParser.MAX_MEMORY_CHARS) {
-                    keepEntries.push(s);
-                    totalLen += s.entry.length;
-                }
-            }
-
-            // Restore original order
-            keepEntries.sort((a, b) => a.idx - b.idx);
-            const pruned = header + keepEntries.map(s => s.entry).join('');
-
-            fs.writeFileSync(memoryPath, pruned, 'utf8');
-            this.cache.clear();
-
-            ErrorReporter.debug(SOURCE.MEMORY_PARSER, `Pruned memory: removed ${entries.length - keepEntries.length} entries`);
         } catch (e) {
             ErrorReporter.debug(SOURCE.MEMORY_PARSER, 'Error pruning memory', e);
         }

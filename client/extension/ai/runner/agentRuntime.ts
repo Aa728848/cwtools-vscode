@@ -48,7 +48,7 @@ import {
 import { agentProfileCatalog, ToolActivationService, type ToolActivationSnapshot } from './agentProfileCatalog';
 import { createDirectoryAgentProfileSource } from './agentProfileSources';
 import { getProjectWorkspaceRoots } from '../workspacePaths';
-import { schedulingStateFromLegacyMode } from './scheduling';
+import { normalizeSchedulingState, schedulingStateFromAdmission } from './scheduling';
 import { ErrorReporter } from '../errorReporter';
 
 const registeredProfileRoots = new Set<string>();
@@ -64,7 +64,7 @@ export interface TurnStartRequest {
         topicId?: string;
     };
     conversationHistory?: ChatMessage[];
-    options?: AgentRunnerOptions;
+    options: AgentRunnerOptions & { schedulingState: AgentSchedulingState };
     images?: string[];
     /** Internal prompt lifecycle id. Hosts should normally omit this. */
     promptId?: string;
@@ -103,8 +103,6 @@ export interface AgentRuntimeInspector {
     version: 1;
     topicId: string;
     threadId: string;
-    profile?: string;
-    overlays: string[];
     scheduling?: AgentSchedulingState;
     tools?: ToolActivationSnapshot;
     prompts: { total: number; pending: number; running: number };
@@ -232,8 +230,7 @@ export class AgentRuntime {
         await this.profilesReady;
         const scope = this.getAgentScope(topicId, threadId);
         this.getTranscriptStore(topicId, threadId, domainStore);
-        const schedulingState = request.options?.schedulingState
-            ?? schedulingStateFromLegacyMode(request.options?.mode ?? 'build', request.options?.domain);
+        const schedulingState = normalizeSchedulingState(request.options?.schedulingState);
         const profile = agentProfileCatalog.get(schedulingState.profileName ?? '')
             ?? agentProfileCatalog.resolve({
                 domainProfile: schedulingState.domainProfile,
@@ -279,7 +276,6 @@ export class AgentRuntime {
             ...request.options,
             // The admitted domain is user/runtime-owned. Profiles may only
             // narrow tools and authorization; they cannot cross this boundary.
-            domain: schedulingState.domainProfile,
             schedulingState: {
                 ...schedulingState,
                 domainProfile: schedulingState.domainProfile,
@@ -291,9 +287,7 @@ export class AgentRuntime {
                 dispatch: profileDispatch,
                 profileName: profile.name,
             },
-            agentProfileName: profile.name,
             agentProfileInstructions: profile.instructions,
-            agentProfileAllowedSubagents: profile.subagents,
             providerId: request.options?.providerId ?? modelBinding?.provider,
             model: request.options?.model ?? modelBinding?.model,
             excludeTools: [...new Set([...existingExclusions, ...inactiveTools])],
@@ -629,7 +623,6 @@ export class AgentRuntime {
                 event.type === 'dispatch_evaluated' && event.payload?.accepted === true);
             const wroteFiles = (run?.writtenFiles.length ?? 0) > 0;
             await runLedger.appendEvent(result.runId, 'route_outcome_evaluated', {
-                predictedMode: run?.mode,
                 predictedPhase: admission?.initialPhase,
                 actualPhase: finalPhase,
                 predictedDispatch: admission?.explicitDelegation === true ? 'parallel' : 'single',
@@ -989,8 +982,6 @@ export class AgentRuntime {
             version: 1,
             topicId,
             threadId,
-            profile: scheduling?.profileName ?? scope.get<ToolActivationService>('toolActivation')?.snapshot().profileName,
-            overlays: [...(scheduling?.overlays ?? [])],
             scheduling,
             tools: scope.get<ToolActivationService>('toolActivation')?.snapshot(),
             prompts: {
@@ -1077,8 +1068,14 @@ export class AgentRuntime {
                 {
                     topicId: input.topicId,
                     threadId: `${input.threadId}:side-question`,
-                    mode: 'general',
-                    domain: 'general',
+                    schedulingState: schedulingStateFromAdmission({
+                        domainProfile: 'general',
+                        authorization: 'read_only',
+                        initialPhase: 'inspect',
+                        explicitDelegation: false,
+                        confidence: 1,
+                        evidence: ['side question snapshot'],
+                    }, 'side question snapshot'),
                     maxIterations: 1,
                     useSlimPrompt: true,
                     excludeTools: [...TOOL_REGISTRY.keys()],

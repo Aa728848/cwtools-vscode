@@ -1,46 +1,30 @@
 import { expect } from 'chai';
 import {
-    parseMcpToolName,
     evaluateMcpPermission,
     validateToolCapability,
 } from '../../extension/ai/tools/permissions';
 import { isMcpServerAllowedForDomain } from '../../extension/ai/mcpCapability';
 
-describe('mcp tool name parsing', () => {
-    it('parses dynamic mcp_<server>_<tool> names', () => {
-        expect(parseMcpToolName('mcp_filesystem_read_file')).to.deep.equal({ server: 'filesystem', tool: 'read_file' });
-        expect(parseMcpToolName('mcp_github_create_issue')).to.deep.equal({ server: 'github', tool: 'create_issue' });
-    });
-
-    it('does not treat mcp_call or malformed names as dynamic MCP tools', () => {
-        expect(parseMcpToolName('mcp_call')).to.equal(undefined);
-        expect(parseMcpToolName('mcp_solo')).to.equal(undefined);
-        expect(parseMcpToolName('read_file')).to.equal(undefined);
-    });
-});
-
 describe('dynamic MCP access validation', () => {
-    it('governs dynamic MCP names by the mcp_call registry policy', () => {
-        const generalAccess = validateToolCapability('mcp_filesystem_read_file', {
+    it('governs only the registered mcp_call surface', () => {
+        const generalAccess = validateToolCapability('mcp_call', {
             mode: 'utility',
             domain: 'general',
         });
         expect(generalAccess.allowed).to.equal(true);
 
-        const paradoxAccess = validateToolCapability('mcp_filesystem_read_file', {
-            mode: 'build',
-            domain: 'paradox',
-        });
-        expect(paradoxAccess.allowed).to.equal(true);
+        const unregisteredDynamic = validateToolCapability('mcp_filesystem_read_file', { mode: 'utility', domain: 'general' });
+        expect(unregisteredDynamic.allowed).to.equal(false);
+        expect(unregisteredDynamic.reason).to.include('Unknown tool');
     });
 
     it('allows Paradox top-level modes and rejects modes outside the MCP surface', () => {
         for (const mode of ['build', 'plan', 'explore', 'review', 'orchestrator', 'script'] as const) {
-            const access = validateToolCapability('mcp_filesystem_read_file', { mode, domain: 'paradox' });
+            const access = validateToolCapability('mcp_call', { mode, domain: 'paradox' });
             expect(access.allowed, `mode ${mode}`).to.equal(true);
         }
 
-        const specialist = validateToolCapability('mcp_filesystem_read_file', {
+        const specialist = validateToolCapability('mcp_call', {
             mode: 'loc_writer',
             domain: 'paradox',
         });
@@ -50,7 +34,7 @@ describe('dynamic MCP access validation', () => {
     });
 
     it('still reports truly unknown tools as unknown', () => {
-        const access = validateToolCapability('made_up_tool', { mode: 'general' });
+        const access = validateToolCapability('made_up_tool', { mode: 'explore' });
         expect(access.allowed).to.equal(false);
         expect(access.reason).to.include('Unknown tool');
     });

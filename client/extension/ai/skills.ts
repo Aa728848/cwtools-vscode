@@ -147,7 +147,6 @@ export function listSkills(roots: SkillLookupRoots, domain?: AgentRuntimeDomain)
     if (roots.workspaceRoot) {
         scanSkillDir(path.join(roots.workspaceRoot, '.agents', 'skills'), 'project', 'both', skills);
         scanSkillDir(path.join(roots.workspaceRoot, '.cwtools', 'skills'), 'project', 'paradox', skills);
-        scanSkillDir(path.join(roots.workspaceRoot, '.cwtools-ai', 'skills'), 'project', 'paradox', skills);
     }
 
     return [...skills.values()]

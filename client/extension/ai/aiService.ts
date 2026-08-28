@@ -1952,7 +1952,7 @@ export class AIService {
         };
         const storageRoot = extensionContext.globalStorageUri?.fsPath
             ?? extensionContext.globalStoragePath
-            ?? path.join(process.cwd(), '.cwtools-ai');
+            ?? path.join(process.cwd(), '.cwtools');
         return path.join(storageRoot, 'ai-generated-images');
     }
 

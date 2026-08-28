@@ -86,7 +86,7 @@ describe('PromptBuilder context budgeting', () => {
             const profileDir = path.join(workspaceRoot, '.cwtools', 'project');
             fs.mkdirSync(profileDir, { recursive: true });
             fs.writeFileSync(path.join(profileDir, 'profile.json'), JSON.stringify({
-                schemaVersion: 1,
+                schemaVersion: 2,
                 generatedAt: '2026-05-24T00:00:00.000Z',
                 workspaceRoot,
                 workspaceKind: 'paradox_mod',
@@ -97,6 +97,7 @@ describe('PromptBuilder context budgeting', () => {
                 identifiers: {
                     namespaces: ['samplemod'],
                     variablePrefixes: [],
+                    byType: {},
                     scriptedTriggers: [],
                     scriptedEffects: [],
                     events: [],
@@ -169,8 +170,19 @@ describe('PromptBuilder context budgeting', () => {
             const topicB = path.join(workspaceRoot, '.cwtools', 'topic-memory-b');
             fs.mkdirSync(topicA, { recursive: true });
             fs.mkdirSync(topicB, { recursive: true });
-            fs.writeFileSync(path.join(topicA, '.cwtools-memory.md'), '# Memory\n\nTOPIC_A_MEMORY', 'utf8');
-            fs.writeFileSync(path.join(topicB, '.cwtools-memory.md'), '# Memory\n\nTOPIC_B_MEMORY', 'utf8');
+            const memory = (content: string) => JSON.stringify({
+                version: 5,
+                entries: [{
+                    key: content,
+                    content,
+                    domain: 'paradox',
+                    priority: 'normal',
+                    source: 'user:test',
+                    kind: 'user_fact',
+                }],
+            });
+            fs.writeFileSync(path.join(topicA, 'memory.json'), memory('TOPIC_A_MEMORY'), 'utf8');
+            fs.writeFileSync(path.join(topicB, 'memory.json'), memory('TOPIC_B_MEMORY'), 'utf8');
 
             const builder = new PromptBuilder(workspaceRoot);
             const prompt = builder.buildSystemPromptForMode('build', undefined, undefined, 'topic-memory-a');
@@ -200,11 +212,14 @@ describe('PromptBuilder context budgeting', () => {
                 content: `Generic banana convention ${index}.`,
                 priority: 'normal',
                 confidence: 0.8,
+                domain: 'paradox',
+                source: 'user:test',
+                kind: 'user_fact',
                 createdAt: now,
                 updatedAt: now,
             }));
             fs.writeFileSync(path.join(topicDir, 'memory.json'), JSON.stringify({
-                version: 2,
+                version: 5,
                 entries: [
                     ...fillerEntries,
                     {
@@ -212,6 +227,9 @@ describe('PromptBuilder context budgeting', () => {
                         content: 'For events/alpha.txt, use the alpha namespace for country events.',
                         priority: 'normal',
                         confidence: 0.8,
+                        domain: 'paradox',
+                        source: 'user:test',
+                        kind: 'user_fact',
                         createdAt: now,
                         updatedAt: now,
                     },

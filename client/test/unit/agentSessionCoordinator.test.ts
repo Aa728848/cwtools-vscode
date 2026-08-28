@@ -1,90 +1,72 @@
 import { expect } from 'chai';
 import { AgentSessionCoordinator } from '../../extension/ai/agentSessionCoordinator';
-import type { AgentArtifact } from '../../extension/ai/types';
+import { executionModeForSchedulingState, schedulingStateFromAdmission } from '../../extension/ai/runner/scheduling';
+import type { AgentArtifact, AgentRuntimeDomain, AgentSchedulingState } from '../../extension/ai/types';
+
+function schedulingState(
+    domainProfile: AgentRuntimeDomain,
+    authorization: 'read_only' | 'plan_write_only' | 'workspace_write',
+    phase: 'inspect' | 'plan' | 'execute' | 'verify',
+): AgentSchedulingState {
+    return schedulingStateFromAdmission({
+        domainProfile,
+        authorization,
+        initialPhase: phase,
+        explicitDelegation: false,
+        confidence: 1,
+        evidence: ['test'],
+    });
+}
 
 describe('AgentSessionCoordinator', () => {
-    it('starts with expected defaults', () => {
+    it('starts with one canonical scheduling state', () => {
         const session = new AgentSessionCoordinator();
-
-        expect(session.currentMode).to.equal('build');
-        expect(session.previousMode).to.equal('build');
+        expect(executionModeForSchedulingState(session.schedulingState)).to.equal('build');
+        expect(session.schedulingState).to.include({ domainProfile: 'paradox', authorization: 'workspace_write', phase: 'execute' });
         expect(session.currentWorkflowId).to.equal(null);
-        expect(session.agentProfile).to.deep.equal({ domain: 'paradox', intent: 'auto', strategy: 'auto' });
-        expect(session.previousAgentProfile).to.deep.equal({ domain: 'paradox', intent: 'auto', strategy: 'auto' });
         expect(session.liveSteps).to.deep.equal([]);
         expect(session.isGenerating).to.equal(false);
-        expect([...session.artifacts.values()]).to.deep.equal([]);
     });
 
-    it('stores and returns mutable session state', () => {
+    it('stores mutable session data without exposing scheduler snapshots by reference', () => {
         const session = new AgentSessionCoordinator();
-        const artifact: AgentArtifact = {
-            id: 'a1',
-            kind: 'plan',
-            title: 'Plan',
-            createdAt: 1,
-        };
-        const artifacts = new Map<string, AgentArtifact>([[artifact.id, artifact]]);
-
-        session.currentMode = 'plan';
-        session.previousMode = 'build';
-        session.currentWorkflowId = 'workflow.plan';
-        session.agentProfile = { domain: 'general', intent: 'execute', strategy: 'multi' };
-        session.previousAgentProfile = { domain: 'auto', intent: 'review', strategy: 'single' };
+        const artifact: AgentArtifact = { id: 'a1', kind: 'plan', title: 'Plan', createdAt: 1 };
+        session.schedulingState = schedulingState('general', 'read_only', 'verify');
         session.liveSteps = [{ type: 'thinking', content: 'drafting', timestamp: 1 }];
         session.isGenerating = true;
-        session.artifacts = artifacts;
+        session.artifacts = new Map([[artifact.id, artifact]]);
 
-        expect(session.currentMode).to.equal('plan');
-        expect(session.previousMode).to.equal('build');
-        expect(session.currentWorkflowId).to.equal('workflow.plan');
-        expect(session.agentProfile).to.deep.equal({ domain: 'general', intent: 'execute', strategy: 'multi' });
-        expect(session.previousAgentProfile).to.deep.equal({ domain: 'paradox', intent: 'review', strategy: 'single' });
-        expect(session.liveSteps).to.have.length(1);
-        expect(session.isGenerating).to.equal(true);
+        const snapshot = session.schedulingState;
+        snapshot.routeEvidence.push('mutated');
+        expect(session.schedulingState.routeEvidence).to.deep.equal(['test']);
+        expect(executionModeForSchedulingState(session.schedulingState)).to.equal('review');
         expect(session.artifacts.get('a1')?.title).to.equal('Plan');
     });
 
-    it('returns profile copies so turn and workflow snapshots cannot be mutated indirectly', () => {
+    it('restores the original scheduler after switching workflows', () => {
         const session = new AgentSessionCoordinator();
-        session.agentProfile = { domain: 'general', intent: 'execute', strategy: 'single' };
-        const snapshot = session.agentProfile;
-        snapshot.domain = 'paradox';
-        expect(session.agentProfile.domain).to.equal('general');
-    });
-
-    it('restores the original profile and mode after switching between workflows', () => {
-        const session = new AgentSessionCoordinator();
-        session.currentMode = 'utility';
-        session.agentProfile = { domain: 'general', intent: 'execute', strategy: 'single' };
+        session.schedulingState = schedulingState('general', 'workspace_write', 'execute');
 
         session.activateWorkflow(
             'diagnostic-fix',
-            'build',
-            { domain: 'paradox', intent: 'execute', strategy: 'single' },
+            schedulingState('paradox', 'workspace_write', 'execute'),
         );
         session.activateWorkflow(
             'event-chain-design',
-            'plan',
-            { domain: 'auto', intent: 'plan', strategy: 'single' },
+            schedulingState('paradox', 'plan_write_only', 'plan'),
         );
 
         expect(session.currentWorkflowId).to.equal('event-chain-design');
-        expect(session.previousMode).to.equal('utility');
-        expect(session.previousAgentProfile).to.deep.equal({ domain: 'general', intent: 'execute', strategy: 'single' });
+        expect(executionModeForSchedulingState(session.schedulingState)).to.equal('plan');
         expect(session.deactivateWorkflow()).to.equal(true);
         expect(session.currentWorkflowId).to.equal(null);
-        expect(session.currentMode).to.equal('utility');
-        expect(session.agentProfile).to.deep.equal({ domain: 'general', intent: 'execute', strategy: 'single' });
+        expect(executionModeForSchedulingState(session.schedulingState)).to.equal('utility');
     });
 
-    it('does not alter the selected profile when no workflow is active', () => {
+    it('does not alter state when no workflow is active', () => {
         const session = new AgentSessionCoordinator();
-        session.currentMode = 'review';
-        session.agentProfile = { domain: 'paradox', intent: 'review', strategy: 'single' };
-
+        session.schedulingState = schedulingState('paradox', 'read_only', 'verify');
         expect(session.deactivateWorkflow()).to.equal(false);
-        expect(session.currentMode).to.equal('review');
-        expect(session.agentProfile).to.deep.equal({ domain: 'paradox', intent: 'review', strategy: 'single' });
+        expect(executionModeForSchedulingState(session.schedulingState)).to.equal('script_reviewer');
     });
 });

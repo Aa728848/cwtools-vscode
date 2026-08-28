@@ -33,12 +33,12 @@ const toolDefinitions = [
 describe('runnerPolicy', () => {
     it('keeps initial disclosure compact without narrowing the eligible pool', () => {
         const modes = [
-            'build', 'plan', 'explore', 'general', 'utility', 'review',
+            'build', 'plan', 'explore', 'utility', 'review',
             'gui_expert', 'script_reviewer', 'loc_translator', 'loc_writer',
             'orchestrator', 'script',
         ] as const;
         for (const mode of modes) {
-            const domain = mode === 'general' || mode === 'utility' || mode === 'orchestrator'
+            const domain = mode === 'utility' || mode === 'orchestrator'
                 ? 'general'
                 : 'paradox';
             const eligible = filterToolDefinitionsForMode(registeredTools, mode, { domain });
@@ -82,7 +82,7 @@ describe('runnerPolicy', () => {
         for (const mode of ['build', 'utility', 'gui_expert', 'loc_translator', 'loc_writer', 'orchestrator', 'script'] as const) {
             expect(shouldAutoDiscloseExecutionTools(mode, 'workspace_write'), mode).to.equal(true);
         }
-        for (const mode of ['plan', 'explore', 'review', 'script_reviewer', 'general'] as const) {
+        for (const mode of ['plan', 'explore', 'review', 'script_reviewer'] as const) {
             expect(shouldAutoDiscloseExecutionTools(mode, 'workspace_write'), mode).to.equal(false);
         }
         expect(shouldAutoDiscloseExecutionTools('build', 'read_only')).to.equal(false);
@@ -111,7 +111,7 @@ describe('runnerPolicy', () => {
         const utilityChildTools = filterToolDefinitionsForMode(toolDefinitions, 'utility', {
             domain: 'general',
             useSlimPrompt: true,
-            agentProfileName: 'general-coder',
+            profileName: 'general-coder',
         }).map(tool => tool.function.name);
         expect(utilityChildTools).to.include('run_command');
         expect(utilityChildTools).to.not.include('ask_user_question');

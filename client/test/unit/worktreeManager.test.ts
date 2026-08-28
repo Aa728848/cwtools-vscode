@@ -3,7 +3,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { execFileSync } from 'child_process';
-import { WorktreeManager, repairMovedAgentWorktrees } from '../../extension/ai/orchestrator/worktreeManager';
+import { WorktreeManager } from '../../extension/ai/orchestrator/worktreeManager';
 
 const TEMP_BASE = path.resolve(__dirname, '../../..', '.tmp-test');
 
@@ -124,26 +124,6 @@ describe('worktreeManager', function () {
         for (const info of [a, b]) {
             try { await manager.remove(info); } catch { /* already pruned */ }
         }
-    });
-
-    it('repairs linked worktrees after the legacy storage root is moved', async () => {
-        const legacyPath = path.join(repo, '.cwtools-ai', 'worktrees', 'run-legacy', 'agent-legacy');
-        const currentPath = path.join(repo, '.cwtools', 'worktrees', 'run-legacy', 'agent-legacy');
-        fs.mkdirSync(path.dirname(legacyPath), { recursive: true });
-        git(repo, 'worktree', 'add', '--detach', legacyPath, 'HEAD');
-        fs.renameSync(path.join(repo, '.cwtools-ai'), path.join(repo, '.cwtools'));
-
-        expect(await repairMovedAgentWorktrees(repo)).to.equal(1);
-        git(currentPath, 'status', '--short');
-        const registered = execFileSync('git', ['worktree', 'list', '--porcelain'], {
-            cwd: repo,
-            encoding: 'utf8',
-            windowsHide: true,
-        });
-        expect(registered.replace(/\\/g, '/')).to.include(currentPath.replace(/\\/g, '/'));
-        expect(registered.replace(/\\/g, '/')).to.not.include(legacyPath.replace(/\\/g, '/'));
-
-        git(repo, 'worktree', 'remove', '--force', currentPath);
     });
 
     it('rejects conflicting patches without corrupting the main workspace', async () => {

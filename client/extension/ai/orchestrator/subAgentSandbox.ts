@@ -15,8 +15,7 @@ import { aiText } from '../messages';
 export interface SubAgentSandbox {
     agentId: string;
     role: string;
-    mode: AgentMode;
-    agentProfileName?: string;
+    runtimeProfileName: string;
     allowedTools?: Set<string>;
     readScope?: string[];
     writeScope?: string[];
@@ -30,12 +29,16 @@ export interface SubAgentSandbox {
 }
 
 const TOPIC_ARTIFACT_SCOPE = '.cwtools';
-const LEGACY_TOPIC_ARTIFACT_SCOPE = '.cwtools-ai';
 
 function runtimeProfileNameForMode(mode: AgentMode): string {
     return mode === 'utility' ? 'general-coder'
         : mode === 'review' || mode === 'script_reviewer' ? 'reviewer'
-            : mode === 'explore' || mode === 'plan' ? 'explore' : 'paradox-coder';
+            : mode === 'plan' ? 'planner'
+                : mode === 'explore' ? 'explore'
+                : mode === 'loc_writer' ? 'localization-writer'
+                    : mode === 'loc_translator' ? 'localization-translator'
+                        : mode === 'gui_expert' ? 'gui-expert'
+                            : 'paradox-coder';
 }
 
 /**
@@ -49,13 +52,12 @@ export function buildSubAgentSandbox(
 ): SubAgentSandbox {
     const profile = getAgentProfile(taskNode.agentType);
     const role = taskNode.agentType;
-    const agentProfileName = runtimeProfileNameForMode(profile.mode);
+    const runtimeProfileName = runtimeProfileNameForMode(profile.mode);
 
     const sandbox: SubAgentSandbox = {
         agentId: taskNode.id,
         role,
-        mode: profile.mode,
-        agentProfileName,
+        runtimeProfileName,
         permissionPolicy: 'delegate_to_parent',
         deniedWriteScopes: deniedWriteScopes?.length ? [...deniedWriteScopes] : undefined,
     };
@@ -117,14 +119,13 @@ function targetMatchesWriteScope(targetFile: string, writeScope: string[], works
     for (const scope of writeScope) {
         const scopeLower = scope.toLowerCase();
 
-        if (scope.startsWith('.') && scopeLower !== TOPIC_ARTIFACT_SCOPE && scopeLower !== LEGACY_TOPIC_ARTIFACT_SCOPE) {
+        if (scope.startsWith('.') && scopeLower !== TOPIC_ARTIFACT_SCOPE) {
             if (relTarget.endsWith(foldPathCase(scope))) return true;
             continue;
         }
 
-        if (scopeLower === TOPIC_ARTIFACT_SCOPE || scopeLower === LEGACY_TOPIC_ARTIFACT_SCOPE) {
-            if (relTarget === TOPIC_ARTIFACT_SCOPE || relTarget.startsWith(`${TOPIC_ARTIFACT_SCOPE}/`) ||
-                relTarget === LEGACY_TOPIC_ARTIFACT_SCOPE || relTarget.startsWith(`${LEGACY_TOPIC_ARTIFACT_SCOPE}/`)) return true;
+        if (scopeLower === TOPIC_ARTIFACT_SCOPE) {
+            if (relTarget === TOPIC_ARTIFACT_SCOPE || relTarget.startsWith(`${TOPIC_ARTIFACT_SCOPE}/`)) return true;
             continue;
         }
 
@@ -148,7 +149,7 @@ export function enforceSubAgentSafety(
     workspaceRoot: string
 ): { allowed: boolean; reason?: string } {
     const registryEntry = TOOL_REGISTRY.get(toolName as import('../tools/registry').AgentToolName);
-    const profileException = toolName === 'run_command' && sandbox.mode === 'utility';
+    const profileException = toolName === 'run_command' && sandbox.runtimeProfileName === 'general-coder';
     if (registryEntry && !registryEntry.allowSubAgent && !profileException) {
         if (toolName === 'run_command') {
             return {
@@ -169,8 +170,8 @@ export function enforceSubAgentSafety(
         return {
             allowed: false,
             reason: aiText(
-                `Subtask role '${sandbox.role}' (${sandbox.mode}) is read-only and cannot call mutating tool '${toolName}'.`,
-                `子任务角色 '${sandbox.role}' (${sandbox.mode}) 属于只读角色，禁止调用会修改状态的工具 '${toolName}'`,
+                `Subtask role '${sandbox.role}' (${sandbox.runtimeProfileName}) is read-only and cannot call mutating tool '${toolName}'.`,
+                `子任务角色 '${sandbox.role}' (${sandbox.runtimeProfileName}) 属于只读角色，禁止调用会修改状态的工具 '${toolName}'`,
             ),
         };
     }
@@ -199,11 +200,11 @@ export function enforceSubAgentSafety(
                 };
             }
         }
-        const isPlanCardArtifactWrite = sandbox.mode === 'plan'
+        const isPlanCardArtifactWrite = sandbox.runtimeProfileName === 'planner'
             && targetFiles.length > 0
             && targetFiles.every(target => isPlanModeCardArtifactFile(target, workspaceRoot));
 
-        if (toolName === 'write_design_blueprint' && sandbox.mode === 'plan') {
+        if (toolName === 'write_design_blueprint' && sandbox.runtimeProfileName === 'planner') {
             return { allowed: true };
         }
         // 如果子 Agent 本身就是只读角色（如 explorer, reviewer），直接断开拦截
@@ -214,8 +215,8 @@ export function enforceSubAgentSafety(
             return {
                 allowed: false,
                 reason: aiText(
-                    `Subtask role '${sandbox.role}' (${sandbox.mode}) is read-only and cannot call file-writing tool '${toolName}'.`,
-                    `子任务角色 '${sandbox.role}' (${sandbox.mode}) 属于只读角色，禁止调用物理写入工具 '${toolName}'`,
+                    `Subtask role '${sandbox.role}' (${sandbox.runtimeProfileName}) is read-only and cannot call file-writing tool '${toolName}'.`,
+                    `子任务角色 '${sandbox.role}' (${sandbox.runtimeProfileName}) 属于只读角色，禁止调用物理写入工具 '${toolName}'`,
                 ),
             };
         }

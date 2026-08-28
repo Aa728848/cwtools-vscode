@@ -340,8 +340,9 @@ export class ParallelExecutor {
             const agentId = node.agentId ?? `agent_${graph.id}_${node.id}`;
             node.agentId = agentId;
             const previousTaskId = node.lastTaskId;
-            const currentAuthorization: 'read_only' | 'workspace_write' =
-                options.readOnlyFanout ? 'read_only' : 'workspace_write';
+            const currentAuthorization = options.schedulingState.authorization === 'workspace_write'
+                ? 'workspace_write'
+                : 'read_only';
             // A resume must never widen the authorization of the attempt whose
             // context it replays: a read-only fanout transcript can contain
             // guidance written on the assumption that nothing is writable.
@@ -368,7 +369,9 @@ export class ParallelExecutor {
                     runId: options.parentRunId,
                     threadId: options.topicId,
                     parentTaskId: previousTaskId,
-                    domain: options.domain === 'hybrid' ? 'paradox' : options.domain,
+                    domain: options.schedulingState.domainProfile === 'hybrid'
+                        ? 'paradox'
+                        : options.schedulingState.domainProfile,
                     authorization: currentAuthorization,
                     providerId: node.providerOverride ?? options.providerId,
                     model: node.modelOverride ?? options.model,

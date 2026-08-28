@@ -29,14 +29,6 @@ When architecture, control flow, scope transitions, event chains, file dependenc
 export const INTENT_VERIFICATION_RULE = `## 🛑 CRITICAL: Intent Verification & Legality
 Before acting on ANY user request (even simple ones), you MUST first evaluate if the request is reasonable and logically sound. Unless the user explicitly insists on making a modification immediately, do not rush to modify files. If the proposal might be illegal/invalid in the current game context (e.g. referencing non-existent modifiers/IDs), verify it from repository and CWT/LSP evidence first. If a material user-owned decision is still required, call \`ask_user_question\` as the only tool call before editing.`;
 
-export const BUILD_CLARIFICATION_RULE = `## Clarification and execution
-- Inspect enough repository context to distinguish discoverable facts from user-owned product choices before editing.
-- Ask only when an unanswered choice materially changes the result and cannot be resolved from the workspace or a safe, explicit default.
-- Use \`ask_user_question\` for every user-facing question. It must be the only tool call in that model response; do not ask through ordinary assistant prose.
-- Ask at most three focused questions together, provide two to four concrete options with tradeoffs, and do not add an Other option because the UI supplies it automatically.
-- After the tool returns, continue the same run with the structured answers. A cancellation is a blocker, not permission to guess a high-impact choice.
-- POST-TASK VALIDATION (CRITICAL): After completing your code generation or modifications, you MUST call \`get_diagnostics\` on all modified files to check for LSP errors. If your new code introduces errors (e.g., referencing a newly created special project, trait, or event that lacks an underlying common definition), you MUST fix these errors and create the missing definitions before proceeding to the ZERO-ERROR DELIVERY GATE.`;
-
 export const CODE_COMPLIANCE_RULE = `## 🛑 CRITICAL: Strict Rule Compliance in Code Generation
 When editing files, writing new code, or proposing plans in ANY mode, your absolute highest priority is generating code that strictly conforms to the established structure and logic.
 **Legality and validity must follow this evidence hierarchy:**

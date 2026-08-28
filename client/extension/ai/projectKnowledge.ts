@@ -133,7 +133,7 @@ export interface GenerateProjectKnowledgeOptions {
 
 const RELEVANT_EXTENSIONS = new Set(['.txt', '.gfx', '.asset', '.gui', '.yml', '.cwt', '.mod', '.shader', '.fxh']);
 const GRAPH_WIDE_EXTENSIONS = new Set(['.gfx', '.asset', '.gui', '.cwt', '.mod', '.shader', '.fxh']);
-const EXCLUDED_DIRECTORIES = new Set(['.git', '.cwtools', '.cwtools-ai', 'node_modules', 'release', 'artifacts', 'dist', 'out']);
+const EXCLUDED_DIRECTORIES = new Set(['.git', '.cwtools', 'node_modules', 'release', 'artifacts', 'dist', 'out']);
 let watcherRegistration: vs.Disposable | undefined;
 interface PendingRootRefresh {
     workspaceRoot: string;
@@ -979,7 +979,7 @@ export function registerProjectKnowledgeWatcher(context: vs.ExtensionContext, in
         const workspaceFolder = vs.workspace.getWorkspaceFolder(uri);
         if (!workspaceFolder) return;
         const relative = normalizePath(path.relative(workspaceFolder.uri.fsPath, uri.fsPath));
-        if (!relative || relative.startsWith('.cwtools/') || relative.startsWith('.cwtools-ai/') || relative.startsWith('.git/') || relative.startsWith('node_modules/')) return;
+        if (!relative || relative.startsWith('.cwtools/') || relative.startsWith('.git/') || relative.startsWith('node_modules/')) return;
         const ownerRoot = findKnowledgeOwnerRoot(workspaceFolder.uri.fsPath);
         if (!ownerRoot) return;
         const graphWideChange = GRAPH_WIDE_EXTENSIONS.has(path.extname(uri.fsPath).toLowerCase());

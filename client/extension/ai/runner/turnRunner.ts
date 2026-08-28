@@ -1,4 +1,4 @@
-import type { AgentMode, AgentRunRecord, AgentSchedulingState } from '../types';
+import type { AgentRunRecord, AgentSchedulingState } from '../types';
 import { runLedger, type RunLedger } from './runLedger';
 import { AgentInputQueue } from './inputQueue';
 import { createRunEventSink, type RunEventSink } from './runContext';
@@ -6,7 +6,7 @@ import { threadStore, type ThreadStore } from './threadStore';
 
 export interface TurnStartOptions {
     topicId: string;
-    mode: AgentMode | string;
+    schedulingState: AgentSchedulingState;
     userPrompt: string;
     userPromptPreview?: string;
     parentRunId?: string;
@@ -16,7 +16,6 @@ export interface TurnStartOptions {
     workflowId?: string | null;
     threadId?: string;
     turnId?: string;
-    schedulingState?: AgentSchedulingState;
 }
 
 export interface TurnRuntime {
@@ -35,7 +34,7 @@ export class TurnRunner {
         const threadId = options.threadId ?? options.topicId;
         const run = await this.ledger.createRun(
             options.topicId,
-            options.mode,
+            options.schedulingState,
             options.userPromptPreview ?? options.userPrompt.substring(0, 100),
             options.parentRunId,
             options.userPrompt,
@@ -46,7 +45,6 @@ export class TurnRunner {
                 workflowId: options.workflowId,
                 threadId,
                 turnId: options.turnId,
-                schedulingState: options.schedulingState,
             },
         );
         await this.threads.recordRun(run, { threadId });

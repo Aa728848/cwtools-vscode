@@ -105,7 +105,6 @@ ${stylesheetLinks}
     <div class="topics-panel-summary" id="topicsPanelSummary"></div>
     <div class="topics-list" id="topicsList"></div>
 </div>
-<div class="mode-indicator" id="modeIndicator">${svgIcon('clipboard')}${t('Plan Mode - read-only analysis, no file changes', 'Plan Mode — 只读分析，不修改文件')}</div>
 <details class="todo-panel" id="todoPanel">
     <summary class="todo-panel-title">Tasks</summary>
     <div id="todoList"></div>
@@ -158,15 +157,14 @@ ${stylesheetLinks}
         <button class="composer-menu-item" data-composer-action="mentions">${svgIconNoMargin('tag')}<span>Mentions</span></button>
         <button class="composer-menu-item" data-composer-action="workflows">${svgIconNoMargin('sparkles')}<span>Workflows</span></button>
         <div class="composer-menu-divider"></div>
-        <button class="composer-menu-item" data-composer-action="plan">${svgIconNoMargin('clipboard')}<span>${t('Plan mode', '计划模式')}</span></button>
         <button class="composer-menu-item" data-composer-action="goal">${svgIconNoMargin('flag')}<span>${t('Set goal', '设置 Goal')}</span></button>
     </div>
-    <div id="modeMenu" class="composer-menu mode-menu" aria-hidden="true">
+    <div id="domainMenu" class="composer-menu domain-menu" aria-hidden="true">
         <div class="composer-menu-section">
             <div class="model-menu-title">${t('Capability domain', '能力领域')}</div>
-            <button class="composer-menu-item" data-profile-domain="paradox">${svgIconNoMargin('code')}<span>${t('Paradox / CWTools', 'Paradox / CWTools')}</span></button>
-            <button class="composer-menu-item" data-profile-domain="general">${svgIconNoMargin('zap')}<span>${t('General coding', '通用编码')}</span></button>
-            <button class="composer-menu-item" data-profile-domain="hybrid">${svgIconNoMargin('layers')}<span>${t('Hybrid coding + CWTools', '混合编码 + CWTools')}</span></button>
+            <button class="composer-menu-item" data-scheduling-domain="paradox">${svgIconNoMargin('code')}<span>${t('Paradox / CWTools', 'Paradox / CWTools')}</span></button>
+            <button class="composer-menu-item" data-scheduling-domain="general">${svgIconNoMargin('zap')}<span>${t('General coding', '通用编码')}</span></button>
+            <button class="composer-menu-item" data-scheduling-domain="hybrid">${svgIconNoMargin('layers')}<span>${t('Hybrid coding + CWTools', '混合编码 + CWTools')}</span></button>
         </div>
     </div>
     <div id="modelMenu" class="model-menu" aria-hidden="true">
@@ -177,7 +175,7 @@ ${stylesheetLinks}
         <div class="model-menu-title">${t('Reasoning effort', '推理强度')}</div>
         <div id="reasoningMenuList" class="model-menu-list" role="listbox" aria-label="${t('Reasoning effort', '推理强度')}"></div>
     </div>
-    <div id="writeModeMenu" class="model-menu write-mode-menu" aria-hidden="true">
+    <div id="writeModeMenu" class="model-menu write-domain-menu" aria-hidden="true">
         <div class="model-menu-title" id="writeModeMenuTitle">${t('Permission profile', '权限配置')}</div>
         <div id="writeModeMenuList" class="model-menu-list"></div>
     </div>
@@ -205,20 +203,11 @@ ${stylesheetLinks}
                     <span id="quickWriteModeLabel">${t('Auto write', '自动写入')}</span>
                     <span class="composer-chevron" aria-hidden="true">v</span>
                 </button>
-                <button class="composer-model-trigger composer-mode-trigger" id="quickModeTrigger" title="${t('Select capability domain', '选择能力领域')}" aria-haspopup="listbox" aria-expanded="false">
-                    <span id="quickModeLabel">Paradox</span>
+                <button class="composer-model-trigger composer-domain-trigger" id="quickDomainTrigger" title="${t('Select capability domain', '选择能力领域')}" aria-haspopup="listbox" aria-expanded="false">
+                    <span id="quickDomainLabel">Paradox</span>
                     <span class="composer-chevron" aria-hidden="true">v</span>
                 </button>
                 <div class="composer-chip-row" id="composerChipRow"></div>
-                <select class="hidden-composer-select" id="modeSel" title="${t('Legacy mode compatibility', '旧模式兼容')}" aria-hidden="true" tabindex="-1">
-                    <option value="build">${t('Build mode', '构建模式')}</option>
-                    <option value="plan">${t('Plan mode', '计划模式')}</option>
-                    <option value="explore">${t('Explore mode', '分析模式')}</option>
-                    <option value="utility">${t('Utility mode', '泛用模式')}</option>
-                    <option value="review">${t('Review mode', '审查模式')}</option>
-                    <option value="orchestrator">${t('General Multi-Agent', '通用多 Agent')}</option>
-                    <option value="script">${t('Paradox Multi-Agent', 'Paradox 多 Agent')}</option>
-                </select>
                 <select class="hidden-composer-select" id="quickModelSelect" title="${t('Current model', '当前模型')}" aria-hidden="true" tabindex="-1"></select>
                 <button class="hidden-composer-action" id="imgPickBtn" title="${t('Upload image', '上传图片')}" aria-hidden="true" tabindex="-1"></button>
             </div>

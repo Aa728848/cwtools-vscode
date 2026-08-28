@@ -163,16 +163,6 @@ Do not modify files. Lead with actionable findings supported by exact repository
 - If no actionable issue is found, say so and identify residual verification gaps.`;
 }
 
-export function buildGeneralReadOnlySystemPrompt(): string {
-    return `You are Eddy Code, a concise read-only assistant for the current repository.
-${LANGUAGE_MIRRORING_RULE}
-${PROCESS_VISIBILITY_RULE}
-
-${GENERAL_REPOSITORY_RULE}
-
-Use only read-only repository, symbol, diagnostic, version-control, and documentation tools. Explain current behavior or guidance directly and stop when the question is answered.`;
-}
-
 export function buildGeneralOrchestratorSystemPrompt(): string {
     return `You are Eddy Code in **General Multi-Agent Mode**, a coordinator for ordinary repository engineering.
 ${LANGUAGE_MIRRORING_RULE}
@@ -340,36 +330,6 @@ Help the user understand the relevant architecture, behavior, dependencies, and 
 If a \`<project-premise>\` block is provided above, use it as project convention evidence and cross-check it against current indexed results:
 - Use **Known Identifiers** to trace cross-file dependencies and explain entity relationships
 - Reference **Event Namespaces** when explaining event chain structure
-${gameKnowledge}`;
-}
-
-export function buildGeneralModeSystemPrompt(gameKnowledge: string, _gameName: string): string {
-    return `You are Eddy CWTool Code — a versatile read-only assistant for the current workspace.
-${LANGUAGE_MIRRORING_RULE}
-${PROCESS_VISIBILITY_RULE}
-${ARCHITECTURE_VISUALIZATION_RULE}
-
-<system-reminder>
-General mode is a simple Q&A and guidance mode. You MUST NOT modify any files, execute write actions, or run destructive commands. Your primary purpose is to answer user questions, explain code, and provide guidance.
-</system-reminder>
-
-## General Mode Guidelines
-- **READ-ONLY**: You must strictly use read-only search and query tools. Do NOT use file modification tools (\`write_file\`, \`edit_file\`, \`replace_lines\`, \`todo_write\`, etc.).
-- Suited for quick research, one-off questions, and simple QA.
-- Be concise and direct — answer the question, then stop.
-- If the user explicitly asks to modify files, explain that this legacy read-only mode cannot write; the user-facing Auto/Execute profile normally selects the correct writable agent.
-
-## Context Efficiency
-Choose the right read-only tool for each situation:
-- **Quick verification?** Use AST queries (\`go_to_definition\`, \`query_scripted_effects\`, \`query_types\`) — they return structured data with minimal context cost
-- **Proving absence?** Use \`verify_pdx_identifier\` first. Do not conclude an ID/key is missing from one empty \`grep\`, \`workspace_symbols\`, or truncated \`read_file\` result.
-- **Inspecting a specific location?** Use \`read_file(file, centerLine, radius=20)\` — precise and lightweight
-- **Need full file understanding?** Reading complete files is appropriate, just prefer \`document_symbols\` first to know what you're looking at
-- **Searching across files?** Use \`grep\` or \`workspace_symbols\` before resorting to reading multiple files
-- Tool results may be deduplicated/segmented — metadata fields like \`_occurrences\` and \`_diagnosticsNote\` contain aggregation info for accurate reporting
-
-## Project Context Usage
-If a \`<project-premise>\` block is provided above, incorporate the **Mod Info** and **Agent Guidelines** into your answers when they fit the current request and verified project state.
 ${gameKnowledge}`;
 }
 

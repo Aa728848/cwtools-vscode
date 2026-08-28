@@ -1,15 +1,19 @@
 import { expect } from 'chai';
+import { executionModeForSchedulingState, schedulingStateFromAdmission } from '../../extension/ai/runner/scheduling';
 
 describe('AgentManagerRunSnapshot Unit Tests', () => {
     it('saves, queries, and completes multi-agent run records', async () => {
         const { runLedger } = loadRunLedgerModule();
-        const run = await runLedger.createRun('topic_mult', 'orchestrator', 'test prompt');
+        const run = await runLedger.createRun('topic_mult', schedulingStateFromAdmission({
+            domainProfile: 'general', authorization: 'workspace_write', initialPhase: 'execute',
+            explicitDelegation: true, confidence: 1, evidence: ['test'],
+        }), 'test prompt');
         const runId = run.runId;
         
         // Assert base fields of snapshot
         let updated = runLedger.getRun(runId);
         expect(updated!.runId).to.equal(runId);
-        expect(updated!.mode).to.equal('orchestrator');
+        expect(executionModeForSchedulingState(updated!.schedulingState)).to.equal('orchestrator');
 
         // Emulate subagent dispatch run events
         await runLedger.appendEvent(runId, 'tool_call_created', { toolName: 'dispatch_agents' }, { invocationId: 'inv_sub1' });

@@ -51,7 +51,6 @@ import {
 } from './chat/topicViews';
 import { getChatI18n } from './chat/i18n';
 import { parseHostMessage } from './chat/hostProtocol';
-import { applyModeUi } from './chat/modes';
 import {
     buildSlashCommands,
     filterSlashCommands,
@@ -104,44 +103,53 @@ interface SideDiffFocus {
     file?: string;
 }
 
-interface ResolvedAgentProfileView {
-    intent: 'execute' | 'plan' | 'explore' | 'review';
-    strategy: 'single' | 'multi';
-    reason?: string;
-    requiresUserDecision: boolean;
-    routingSource?: 'model' | 'deterministic' | 'manual';
-    confidence?: number;
-    evidence: string[];
+interface AgentSchedulingStateView {
+    profileName?: string;
+    domainProfile: 'paradox' | 'general' | 'hybrid';
+    authorization: 'read_only' | 'plan_write_only' | 'workspace_write';
+    phase: 'inspect' | 'plan' | 'execute' | 'verify' | 'finalize';
+    dispatch: 'single' | 'parallel' | 'specialist';
+    routeConfidence: number;
+    routeEvidence: string[];
+    awaitingUserDecision: boolean;
+    routingSource?: 'model' | 'deterministic' | 'workflow' | 'user';
+    phaseReason?: string;
+    dispatchReason?: string;
 }
 
-function parseResolvedAgentProfileView(value: unknown): ResolvedAgentProfileView | undefined {
+function parseSchedulingStateView(value: unknown): AgentSchedulingStateView | undefined {
     if (!value || typeof value !== 'object') return undefined;
     const candidate = value as Record<string, unknown>;
-    const intent = candidate.intent;
-    const strategy = candidate.strategy;
-    if (intent !== 'execute' && intent !== 'plan' && intent !== 'explore' && intent !== 'review') return undefined;
-    if (strategy !== 'single' && strategy !== 'multi') return undefined;
-    const admission = candidate.admission && typeof candidate.admission === 'object'
-        ? candidate.admission as Record<string, unknown>
-        : undefined;
+    const domainProfile = candidate.domainProfile;
+    const authorization = candidate.authorization;
+    const phase = candidate.phase;
+    const dispatch = candidate.dispatch;
+    if (domainProfile !== 'paradox' && domainProfile !== 'general' && domainProfile !== 'hybrid') return undefined;
+    if (authorization !== 'read_only' && authorization !== 'plan_write_only' && authorization !== 'workspace_write') return undefined;
+    if (phase !== 'inspect' && phase !== 'plan' && phase !== 'execute' && phase !== 'verify' && phase !== 'finalize') return undefined;
+    if (dispatch !== 'single' && dispatch !== 'parallel' && dispatch !== 'specialist') return undefined;
     const routingSource = candidate.routingSource;
     return {
-        intent,
-        strategy,
-        reason: typeof candidate.reason === 'string' ? candidate.reason.slice(0, 240) : undefined,
-        requiresUserDecision: candidate.requiresUserDecision === true,
-        routingSource: routingSource === 'model' || routingSource === 'deterministic' || routingSource === 'manual'
-            ? routingSource
-            : undefined,
-        confidence: typeof admission?.confidence === 'number' && Number.isFinite(admission.confidence)
-            ? Math.max(0, Math.min(1, admission.confidence))
-            : undefined,
-        evidence: Array.isArray(admission?.evidence)
-            ? admission.evidence
+        profileName: typeof candidate.profileName === 'string' ? candidate.profileName.slice(0, 100) : undefined,
+        domainProfile,
+        authorization,
+        phase,
+        dispatch,
+        routeConfidence: typeof candidate.routeConfidence === 'number' && Number.isFinite(candidate.routeConfidence)
+            ? Math.max(0, Math.min(1, candidate.routeConfidence))
+            : 0,
+        routeEvidence: Array.isArray(candidate.routeEvidence)
+            ? candidate.routeEvidence
                 .filter((item): item is string => typeof item === 'string')
                 .map(item => item.slice(0, 240))
                 .slice(0, 4)
             : [],
+        awaitingUserDecision: candidate.awaitingUserDecision === true,
+        routingSource: routingSource === 'model' || routingSource === 'deterministic' || routingSource === 'workflow' || routingSource === 'user'
+            ? routingSource
+            : undefined,
+        phaseReason: typeof candidate.phaseReason === 'string' ? candidate.phaseReason.slice(0, 500) : undefined,
+        dispatchReason: typeof candidate.dispatchReason === 'string' ? candidate.dispatchReason.slice(0, 500) : undefined,
     };
 }
 
@@ -317,38 +325,25 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
 
     let isGenerating = false;
     let currentAssistantDiv: HTMLDivElement | null = null;
-    let currentMode = 'build';
-    type ProfileDomain = 'auto' | 'paradox' | 'general' | 'hybrid';
-    type ProfileIntent = 'auto' | 'execute' | 'plan' | 'explore' | 'review';
-    type ProfileStrategy = 'auto' | 'single' | 'multi';
-    type AgentProfileSelection = {
-        domain: ProfileDomain;
-        intent: ProfileIntent;
-        strategy: ProfileStrategy;
-        profileName?: string;
+    type SchedulingDomain = AgentSchedulingStateView['domainProfile'];
+    let schedulingState: AgentSchedulingStateView = {
+        domainProfile: 'paradox',
+        authorization: 'workspace_write',
+        phase: 'execute',
+        dispatch: 'single',
+        routeConfidence: 1,
+        routeEvidence: [],
+        awaitingUserDecision: false,
     };
-    let agentProfile: AgentProfileSelection = { domain: 'paradox', intent: 'auto', strategy: 'auto' };
 
-    function isAgentProfileSelection(value: unknown): value is AgentProfileSelection {
-        if (!value || typeof value !== 'object') return false;
-        const candidate = value as Partial<AgentProfileSelection>;
-        return ['auto', 'paradox', 'general', 'hybrid'].includes(candidate.domain || '')
-            && ['auto', 'execute', 'plan', 'explore', 'review'].includes(candidate.intent || '')
-            && ['auto', 'single', 'multi'].includes(candidate.strategy || '')
-            && (candidate.profileName === undefined
-                || (typeof candidate.profileName === 'string' && /^[a-zA-Z0-9_.-]{1,80}$/.test(candidate.profileName)));
-    }
-
-    function applyAgentProfile(profile: unknown): void {
-        if (!isAgentProfileSelection(profile)) return;
-        agentProfile = {
-            ...profile,
-            domain: profile.domain === 'general' || profile.domain === 'hybrid' ? profile.domain : 'paradox',
-        };
-        applyComposerModeLabels();
+    function applySchedulingState(value: unknown): void {
+        const parsed = parseSchedulingStateView(value);
+        if (!parsed) return;
+        schedulingState = parsed;
+        applyComposerDomainLabels();
         renderComposerChips();
-        const trigger = document.getElementById('quickModeTrigger');
-        if (trigger) trigger.title = tr(`Capability domain: ${getProfileSummary()}`, `能力领域：${getProfileSummary()}`);
+        const trigger = document.getElementById('quickDomainTrigger');
+        if (trigger) trigger.title = tr(`Capability domain: ${getSchedulingDomainSummary()}`, `能力领域：${getSchedulingDomainSummary()}`);
     }
     const messageIndexMap = new Map<number, HTMLDivElement>();
     const userMessagePayloadMap = new Map<number, UserMessageInputPayload>();
@@ -415,9 +410,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
     let pendingFiles: string[] = [];
     /** Pending structured references to attach to the next sent message */
     let activeContexts: ActiveContext[] = [];
-    type ComposerPayload = UserMessageInputPayload & {
-        agentProfile?: AgentProfileSelection;
-    };
+    type ComposerPayload = UserMessageInputPayload;
     type AgentActivityView = {
         id: string;
         kind: string;
@@ -636,8 +629,6 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
             chatHeader.style.display = '';
             document.getElementById('chatArea')!.style.display = 'flex';
             if (inputWrapper) inputWrapper.style.display = '';
-            const mi = document.getElementById('modeIndicator');
-            if (mi) mi.style.display = '';
             if (todoPanel) todoPanel.style.display = '';
         }
     }
@@ -1698,7 +1689,6 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
     function enqueueComposerInput(payload: ComposerPayload): void {
         queuedComposerInputs.push({
             ...cloneInputPayload(payload),
-            agentProfile: payload.agentProfile ? { ...payload.agentProfile } : undefined,
             id: `queued_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
             createdAt: Date.now(),
         });
@@ -2239,59 +2229,32 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         setArtifactDrawerOpen(nextOpen);
     }
 
-    function getModeChipLabel(mode: string): string {
-        const labels: Record<string, string> = chatI18n.locale === 'zh-cn'
-            ? {
-                build: '构建模式',
-                plan: '计划模式',
-                explore: '探索模式',
-                utility: '工具模式',
-                review: '审查模式',
-                orchestrator: '通用多 Agent',
-                script: 'Paradox 多 Agent',
-            }
-            : {
-                build: 'Build',
-                plan: 'Plan',
-                explore: 'Explore',
-                utility: 'Utility',
-                review: 'Review',
-                orchestrator: 'General Multi-Agent',
-                script: 'Paradox Multi-Agent',
-            };
-        return labels[mode === 'general' ? 'utility' : mode] || mode;
-    }
-
-    function getProfileSummary(): string {
-        return agentProfile.domain === 'general'
+    function getSchedulingDomainSummary(): string {
+        return schedulingState.domainProfile === 'general'
             ? tr('General', '通用')
-            : agentProfile.domain === 'hybrid' ? tr('Hybrid', '混合') : 'Paradox';
+            : schedulingState.domainProfile === 'hybrid' ? tr('Hybrid', '混合') : 'Paradox';
     }
 
-    function applyComposerModeLabels(): void {
-        const modeSelector = document.getElementById('modeSel') as HTMLSelectElement | null;
-        modeSelector?.querySelectorAll<HTMLOptionElement>('option').forEach(option => {
-            option.textContent = getModeChipLabel(option.value);
-        });
-        const quickModeLabel = document.getElementById('quickModeLabel');
-        if (quickModeLabel) quickModeLabel.textContent = getProfileSummary();
+    function applyComposerDomainLabels(): void {
+        const quickDomainLabel = document.getElementById('quickDomainLabel');
+        if (quickDomainLabel) quickDomainLabel.textContent = getSchedulingDomainSummary();
     }
 
     function closeComposerMenus() {
         const composerMenu = document.getElementById('composerMenu');
-        const modeMenu = document.getElementById('modeMenu');
+        const domainMenu = document.getElementById('domainMenu');
         const modelMenu = document.getElementById('modelMenu');
         const reasoningMenu = document.getElementById('reasoningMenu');
         const writeModeMenu = document.getElementById('writeModeMenu');
         const composerAddBtn = document.getElementById('composerAddBtn');
-        const quickModeTrigger = document.getElementById('quickModeTrigger');
+        const quickDomainTrigger = document.getElementById('quickDomainTrigger');
         const quickModelTrigger = document.getElementById('quickModelTrigger');
         const quickReasoningTrigger = document.getElementById('quickReasoningTrigger');
         const quickWriteModeTrigger = document.getElementById('quickWriteModeTrigger');
         composerMenu?.classList.remove('show');
         composerMenu?.setAttribute('aria-hidden', 'true');
-        modeMenu?.classList.remove('show');
-        modeMenu?.setAttribute('aria-hidden', 'true');
+        domainMenu?.classList.remove('show');
+        domainMenu?.setAttribute('aria-hidden', 'true');
         modelMenu?.classList.remove('show');
         modelMenu?.setAttribute('aria-hidden', 'true');
         reasoningMenu?.classList.remove('show');
@@ -2299,8 +2262,8 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         writeModeMenu?.classList.remove('show');
         writeModeMenu?.setAttribute('aria-hidden', 'true');
         composerAddBtn?.classList.remove('active');
-        quickModeTrigger?.classList.remove('active');
-        quickModeTrigger?.setAttribute('aria-expanded', 'false');
+        quickDomainTrigger?.classList.remove('active');
+        quickDomainTrigger?.setAttribute('aria-expanded', 'false');
         quickModelTrigger?.classList.remove('active');
         quickModelTrigger?.setAttribute('aria-expanded', 'false');
         quickReasoningTrigger?.classList.remove('active');
@@ -2311,12 +2274,12 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
 
     function setComposerMenuOpen(open: boolean) {
         const composerMenu = document.getElementById('composerMenu');
-        const modeMenu = document.getElementById('modeMenu');
+        const domainMenu = document.getElementById('domainMenu');
         const modelMenu = document.getElementById('modelMenu');
         const reasoningMenu = document.getElementById('reasoningMenu');
         const writeModeMenu = document.getElementById('writeModeMenu');
         const composerAddBtn = document.getElementById('composerAddBtn');
-        const quickModeTrigger = document.getElementById('quickModeTrigger');
+        const quickDomainTrigger = document.getElementById('quickDomainTrigger');
         const quickModelTrigger = document.getElementById('quickModelTrigger');
         const quickReasoningTrigger = document.getElementById('quickReasoningTrigger');
         const quickWriteModeTrigger = document.getElementById('quickWriteModeTrigger');
@@ -2325,8 +2288,8 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         composerAddBtn?.classList.toggle('active', open);
         if (open) positionComposerMenus();
         if (open) {
-            modeMenu?.classList.remove('show');
-            modeMenu?.setAttribute('aria-hidden', 'true');
+            domainMenu?.classList.remove('show');
+            domainMenu?.setAttribute('aria-hidden', 'true');
             modelMenu?.classList.remove('show');
             modelMenu?.setAttribute('aria-hidden', 'true');
             reasoningMenu?.classList.remove('show');
@@ -2337,33 +2300,33 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
             quickModelTrigger?.setAttribute('aria-expanded', 'false');
             quickReasoningTrigger?.classList.remove('active');
             quickReasoningTrigger?.setAttribute('aria-expanded', 'false');
-            quickModeTrigger?.classList.remove('active');
-            quickModeTrigger?.setAttribute('aria-expanded', 'false');
+            quickDomainTrigger?.classList.remove('active');
+            quickDomainTrigger?.setAttribute('aria-expanded', 'false');
             quickWriteModeTrigger?.classList.remove('active');
             quickWriteModeTrigger?.setAttribute('aria-expanded', 'false');
         }
     }
 
-    function setModeMenuOpen(open: boolean) {
-        const modeMenu = document.getElementById('modeMenu');
-        const quickModeTrigger = document.getElementById('quickModeTrigger');
-        if (!modeMenu || !quickModeTrigger) return;
+    function setDomainMenuOpen(open: boolean) {
+        const domainMenu = document.getElementById('domainMenu');
+        const quickDomainTrigger = document.getElementById('quickDomainTrigger');
+        if (!domainMenu || !quickDomainTrigger) return;
         closeComposerMenus();
-        modeMenu.classList.toggle('show', open);
-        modeMenu.setAttribute('aria-hidden', open ? 'false' : 'true');
-        quickModeTrigger.classList.toggle('active', open);
-        quickModeTrigger.setAttribute('aria-expanded', open ? 'true' : 'false');
+        domainMenu.classList.toggle('show', open);
+        domainMenu.setAttribute('aria-hidden', open ? 'false' : 'true');
+        quickDomainTrigger.classList.toggle('active', open);
+        quickDomainTrigger.setAttribute('aria-expanded', open ? 'true' : 'false');
         if (open) positionComposerMenus();
     }
 
     function setModelMenuOpen(open: boolean) {
         const composerMenu = document.getElementById('composerMenu');
-        const modeMenu = document.getElementById('modeMenu');
+        const domainMenu = document.getElementById('domainMenu');
         const modelMenu = document.getElementById('modelMenu');
         const reasoningMenu = document.getElementById('reasoningMenu');
         const writeModeMenu = document.getElementById('writeModeMenu');
         const composerAddBtn = document.getElementById('composerAddBtn');
-        const quickModeTrigger = document.getElementById('quickModeTrigger');
+        const quickDomainTrigger = document.getElementById('quickDomainTrigger');
         const quickModelTrigger = document.getElementById('quickModelTrigger');
         const quickReasoningTrigger = document.getElementById('quickReasoningTrigger');
         const quickWriteModeTrigger = document.getElementById('quickWriteModeTrigger');
@@ -2375,15 +2338,15 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         if (open) {
             composerMenu?.classList.remove('show');
             composerMenu?.setAttribute('aria-hidden', 'true');
-            modeMenu?.classList.remove('show');
-            modeMenu?.setAttribute('aria-hidden', 'true');
+            domainMenu?.classList.remove('show');
+            domainMenu?.setAttribute('aria-hidden', 'true');
             reasoningMenu?.classList.remove('show');
             reasoningMenu?.setAttribute('aria-hidden', 'true');
             writeModeMenu?.classList.remove('show');
             writeModeMenu?.setAttribute('aria-hidden', 'true');
             composerAddBtn?.classList.remove('active');
-            quickModeTrigger?.classList.remove('active');
-            quickModeTrigger?.setAttribute('aria-expanded', 'false');
+            quickDomainTrigger?.classList.remove('active');
+            quickDomainTrigger?.setAttribute('aria-expanded', 'false');
             quickReasoningTrigger?.classList.remove('active');
             quickReasoningTrigger?.setAttribute('aria-expanded', 'false');
             quickWriteModeTrigger?.classList.remove('active');
@@ -2405,12 +2368,12 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
 
     function setWriteModeMenuOpen(open: boolean) {
         const composerMenu = document.getElementById('composerMenu');
-        const modeMenu = document.getElementById('modeMenu');
+        const domainMenu = document.getElementById('domainMenu');
         const modelMenu = document.getElementById('modelMenu');
         const reasoningMenu = document.getElementById('reasoningMenu');
         const writeModeMenu = document.getElementById('writeModeMenu');
         const composerAddBtn = document.getElementById('composerAddBtn');
-        const quickModeTrigger = document.getElementById('quickModeTrigger');
+        const quickDomainTrigger = document.getElementById('quickDomainTrigger');
         const quickModelTrigger = document.getElementById('quickModelTrigger');
         const quickReasoningTrigger = document.getElementById('quickReasoningTrigger');
         const quickWriteModeTrigger = document.getElementById('quickWriteModeTrigger');
@@ -2422,15 +2385,15 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         if (open) {
             composerMenu?.classList.remove('show');
             composerMenu?.setAttribute('aria-hidden', 'true');
-            modeMenu?.classList.remove('show');
-            modeMenu?.setAttribute('aria-hidden', 'true');
+            domainMenu?.classList.remove('show');
+            domainMenu?.setAttribute('aria-hidden', 'true');
             modelMenu?.classList.remove('show');
             modelMenu?.setAttribute('aria-hidden', 'true');
             reasoningMenu?.classList.remove('show');
             reasoningMenu?.setAttribute('aria-hidden', 'true');
             composerAddBtn?.classList.remove('active');
-            quickModeTrigger?.classList.remove('active');
-            quickModeTrigger?.setAttribute('aria-expanded', 'false');
+            quickDomainTrigger?.classList.remove('active');
+            quickDomainTrigger?.setAttribute('aria-expanded', 'false');
             quickModelTrigger?.classList.remove('active');
             quickModelTrigger?.setAttribute('aria-expanded', 'false');
             quickReasoningTrigger?.classList.remove('active');
@@ -2442,12 +2405,12 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         if (!inputWrapper) return;
         const wrapperRect = inputWrapper.getBoundingClientRect();
         const composerMenu = document.getElementById('composerMenu') as HTMLElement | null;
-        const modeMenu = document.getElementById('modeMenu') as HTMLElement | null;
+        const domainMenu = document.getElementById('domainMenu') as HTMLElement | null;
         const modelMenu = document.getElementById('modelMenu') as HTMLElement | null;
         const reasoningMenu = document.getElementById('reasoningMenu') as HTMLElement | null;
         const writeModeMenu = document.getElementById('writeModeMenu') as HTMLElement | null;
         const composerAddBtn = document.getElementById('composerAddBtn') as HTMLElement | null;
-        const quickModeTrigger = document.getElementById('quickModeTrigger') as HTMLElement | null;
+        const quickDomainTrigger = document.getElementById('quickDomainTrigger') as HTMLElement | null;
         const quickModelTrigger = document.getElementById('quickModelTrigger') as HTMLElement | null;
         const quickReasoningTrigger = document.getElementById('quickReasoningTrigger') as HTMLElement | null;
         const quickWriteModeTrigger = document.getElementById('quickWriteModeTrigger') as HTMLElement | null;
@@ -2464,7 +2427,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         };
 
         positionMenu(composerMenu, composerAddBtn);
-        positionMenu(modeMenu, quickModeTrigger);
+        positionMenu(domainMenu, quickDomainTrigger);
         positionMenu(modelMenu, quickModelTrigger);
         positionMenu(reasoningMenu, quickReasoningTrigger, 'end');
         positionMenu(writeModeMenu, quickWriteModeTrigger);
@@ -2474,8 +2437,8 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         const chipRow = document.getElementById('composerChipRow');
         if (!chipRow) return;
         chipRow.innerHTML = '';
-        const quickModeLabel = document.getElementById('quickModeLabel');
-        if (quickModeLabel) quickModeLabel.textContent = getProfileSummary();
+        const quickDomainLabel = document.getElementById('quickDomainLabel');
+        if (quickDomainLabel) quickDomainLabel.textContent = getSchedulingDomainSummary();
 
         if (activeWorkflowId) {
             const activeWorkflow = workflows.find(workflow => workflow.id === activeWorkflowId);
@@ -2497,8 +2460,8 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
             chipRow.appendChild(workflowChip);
         }
 
-        document.querySelectorAll<HTMLElement>('.composer-menu-item[data-profile-domain]').forEach(item => {
-            item.classList.toggle('active', item.dataset.profileDomain === agentProfile.domain);
+        document.querySelectorAll<HTMLElement>('.composer-menu-item[data-scheduling-domain]').forEach(item => {
+            item.classList.toggle('active', item.dataset.schedulingDomain === schedulingState.domainProfile);
         });
     }
 
@@ -2827,11 +2790,11 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         quickWriteModeSel.setAttribute('aria-label', 'Permission profile');
     }
 
-    applyComposerModeLabels();
+    applyComposerDomainLabels();
     renderQuickReasoningMenu();
 
     const composerAddBtn = document.getElementById('composerAddBtn');
-    const quickModeTrigger = document.getElementById('quickModeTrigger');
+    const quickDomainTrigger = document.getElementById('quickDomainTrigger');
     const quickModelTrigger = document.getElementById('quickModelTrigger');
     const quickReasoningTrigger = document.getElementById('quickReasoningTrigger');
     composerAddBtn?.addEventListener('click', e => {
@@ -2849,22 +2812,22 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         const reasoningMenu = document.getElementById('reasoningMenu');
         setReasoningMenuOpen(!reasoningMenu?.classList.contains('show'));
     });
-    quickModeTrigger?.addEventListener('click', e => {
+    quickDomainTrigger?.addEventListener('click', e => {
         e.stopPropagation();
-        const modeMenu = document.getElementById('modeMenu');
-        setModeMenuOpen(!modeMenu?.classList.contains('show'));
+        const domainMenu = document.getElementById('domainMenu');
+        setDomainMenuOpen(!domainMenu?.classList.contains('show'));
     });
-    const updateAgentDomain = (domain: Exclude<ProfileDomain, 'auto'>) => {
-        agentProfile = { domain, intent: 'auto', strategy: 'auto' };
-        vscode.postMessage({ type: 'switchAgentProfile', profile: agentProfile });
+    const updateSchedulingDomain = (domain: SchedulingDomain) => {
+        schedulingState = { ...schedulingState, domainProfile: domain, profileName: undefined };
+        vscode.postMessage({ type: 'switchSchedulingDomain', domain });
         renderComposerChips();
     };
-    document.querySelectorAll<HTMLElement>('.composer-menu-item[data-profile-domain]').forEach(item => {
+    document.querySelectorAll<HTMLElement>('.composer-menu-item[data-scheduling-domain]').forEach(item => {
         item.addEventListener('click', () => {
-            const domain = item.dataset.profileDomain;
+            const domain = item.dataset.schedulingDomain;
             if (domain === 'paradox' || domain === 'general' || domain === 'hybrid') {
-                updateAgentDomain(domain);
-                setModeMenuOpen(false);
+                updateSchedulingDomain(domain);
+                setDomainMenuOpen(false);
             }
         });
     });
@@ -2880,8 +2843,6 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
             } else if (action === 'workflows') {
                 setInputText('/workflow:');
                 input.dispatchEvent(new Event('input', { bubbles: true }));
-            } else if (action === 'plan') {
-                switchMode('plan', /* fromUI */ true);
             } else if (action === 'goal') {
                 setInputText('/goal ');
                 input.focus();
@@ -2890,7 +2851,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
     });
     document.addEventListener('click', e => {
         const target = e.target as Element | null;
-        if (!target?.closest('#composerMenu') && !target?.closest('#composerAddBtn') && !target?.closest('#modeMenu') && !target?.closest('#quickModeTrigger') && !target?.closest('#modelMenu') && !target?.closest('#quickModelTrigger') && !target?.closest('#reasoningMenu') && !target?.closest('#quickReasoningTrigger') && !target?.closest('#writeModeMenu') && !target?.closest('#quickWriteModeTrigger')) {
+        if (!target?.closest('#composerMenu') && !target?.closest('#composerAddBtn') && !target?.closest('#domainMenu') && !target?.closest('#quickDomainTrigger') && !target?.closest('#modelMenu') && !target?.closest('#quickModelTrigger') && !target?.closest('#reasoningMenu') && !target?.closest('#quickReasoningTrigger') && !target?.closest('#writeModeMenu') && !target?.closest('#quickWriteModeTrigger')) {
             closeComposerMenus();
         }
     });
@@ -3053,14 +3014,6 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
     });
     renderArtifactPanel();
 
-
-    // ── Mode dropdown ──────────────────────────────────────────────────────────
-    const modeSel = document.getElementById('modeSel') as HTMLSelectElement | null;
-    if (modeSel) {
-        modeSel.addEventListener('change', () => {
-            switchMode(modeSel.value, /* fromUI */ true);
-        });
-    }
 
     // ── Slash command popup ────────────────────────────────────────────────────
     const slashPopup = document.getElementById('slashPopup');
@@ -3573,7 +3526,6 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
             images: pendingImages.length > 0 ? [...pendingImages] : undefined,
             contexts: activeContexts.length > 0 ? activeContexts.map(ctx => ({ ...ctx })) : undefined,
             attachedFiles: pendingFiles.length > 0 ? [...pendingFiles] : undefined,
-            agentProfile: { ...agentProfile },
         };
     }
 
@@ -3610,7 +3562,6 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                 text: payload.text,
                 contexts: contextsToSend,
                 images: imagesToSend,
-                agentProfile: payload.agentProfile || agentProfile,
             });
             return;
         }
@@ -3619,7 +3570,6 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
             text: payload.text,
             images: imagesToSend,
             attachedFiles: payload.attachedFiles && payload.attachedFiles.length > 0 ? [...payload.attachedFiles] : undefined,
-            agentProfile: payload.agentProfile || agentProfile,
         });
     }
 
@@ -3669,30 +3619,6 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         updateSendButtonState();
     }
 
-    /**
-     * switchMode(mode, fromUI)
-     * fromUI=true  → user clicked dropdown → send message to backend + update UI
-     * fromUI=false → backend sent modeChanged message → only update UI (no echo back)
-     */
-    function switchMode(mode: string, fromUI?: boolean) {
-        if (mode === 'general') mode = 'utility';
-        if (currentMode === mode && !fromUI) return; // avoid redundant update
-        // Only post to backend when user initiated (avoids ping-pong)
-        if (fromUI) vscode.postMessage({ type: 'switchMode', mode });
-        currentMode = applyModeUi(
-            mode,
-            chatI18n.modeLabels,
-            document.body,
-            document.getElementById('modeSel') as HTMLSelectElement | null,
-            document.getElementById('modeIndicator')
-        );
-        document.querySelector<HTMLElement>('[data-composer-action="plan"]')
-            ?.classList.toggle('active', currentMode === 'plan');
-        renderComposerChips();
-    }
-    
-    // Give initial mode its body class
-    document.body.classList.add('build-mode');
     renderComposerChips();
 
     function updateSendButtonState() {
@@ -5472,13 +5398,30 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
 
     let liveAgentRoutingStatus: HTMLDivElement | null = null;
 
-    function agentIntentLabel(intent: ResolvedAgentProfileView['intent']): string {
+    function schedulingPhaseLabel(phase: AgentSchedulingStateView['phase']): string {
         return {
-            execute: tr('Execute (write now)', '执行（直接写入）'),
-            plan: tr('Plan (inspect and clarify)', '计划（调查与澄清）'),
-            explore: tr('Explore', '探索'),
-            review: tr('Review', '审查'),
-        }[intent];
+            inspect: tr('Inspect', '调查'),
+            plan: tr('Plan', '计划'),
+            execute: tr('Execute', '执行'),
+            verify: tr('Verify', '验证'),
+            finalize: tr('Finalize', '收尾'),
+        }[phase];
+    }
+
+    function schedulingDispatchLabel(dispatch: AgentSchedulingStateView['dispatch']): string {
+        return {
+            single: tr('Single Agent', '单 Agent'),
+            parallel: tr('Parallel', '并行'),
+            specialist: tr('Specialists', '专家协作'),
+        }[dispatch];
+    }
+
+    function schedulingAuthorizationLabel(authorization: AgentSchedulingStateView['authorization']): string {
+        return {
+            read_only: tr('Read-only', '只读'),
+            plan_write_only: tr('Plan writes only', '仅计划写入'),
+            workspace_write: tr('Workspace writes', '工作区写入'),
+        }[authorization];
     }
 
     function clearAgentRoutingStatus(): void {
@@ -5488,7 +5431,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
 
     function updateAgentRoutingStatus(
         phase: 'classifying' | 'resolved' | 'fallback',
-        profile?: unknown,
+        state?: unknown,
     ): void {
         if (!liveAgentRoutingStatus) {
             emptyState.style.display = 'none';
@@ -5503,27 +5446,26 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         indicator.className = phase === 'classifying' ? 'agent-routing-spinner' : 'agent-routing-dot';
         indicator.setAttribute('aria-hidden', 'true');
         const label = document.createElement('span');
-        const resolved = parseResolvedAgentProfileView(profile);
+        const resolved = parseSchedulingStateView(state);
         if (phase === 'classifying') {
             label.textContent = tr('Judging the task mode from its meaning…', '正在根据需求语义判断任务模式…');
         } else if (phase === 'fallback') {
             label.textContent = tr('Semantic routing was unavailable; using the safe rule fallback…', '语义路由暂不可用，正在使用安全规则回退…');
         } else if (resolved) {
-            label.textContent = resolved.requiresUserDecision
+            label.textContent = resolved.awaitingUserDecision
                 ? tr('A user decision is required; execution remains blocked.', '需要用户敲定关键选择，本轮不会进入执行。')
-                : resolved.intent === 'execute'
-                    ? tr('Execute mode selected; writes may begin immediately.', '已选择执行模式，将直接进入可写执行。')
-                    : resolved.intent === 'plan'
-                        ? tr('Plan mode selected for pre-write inspection and clarification.', '已选择计划模式，先完成写入前调查与澄清。')
-                        : tr(`Selected ${agentIntentLabel(resolved.intent)} mode.`, `已选择${agentIntentLabel(resolved.intent)}模式。`);
+                : tr(
+                    `Scheduled ${schedulingPhaseLabel(resolved.phase)} with ${schedulingDispatchLabel(resolved.dispatch)}.`,
+                    `已调度为${schedulingPhaseLabel(resolved.phase)}，${schedulingDispatchLabel(resolved.dispatch)}。`,
+                );
         } else {
-            label.textContent = tr('Task mode selected.', '任务模式判断完成。');
+            label.textContent = tr('Scheduling decision completed.', '调度决策已完成。');
         }
         liveAgentRoutingStatus.append(indicator, label);
         scrollBottom();
     }
 
-    function addUserMessage(text: string, msgIdx: number, images?: string[], contexts?: ActiveContext[], resolvedAgentProfile?: unknown) {
+    function addUserMessage(text: string, msgIdx: number, images?: string[], contexts?: ActiveContext[], state?: unknown) {
         clearAgentRoutingStatus();
         emptyState.style.display = 'none';
         const div = document.createElement('div');
@@ -5589,29 +5531,28 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         div.appendChild(hdr);
         div.appendChild(bubble);
 
-        const resolved = parseResolvedAgentProfileView(resolvedAgentProfile);
+        const resolved = parseSchedulingStateView(state);
         if (resolved) {
             const routing = document.createElement('details');
-            routing.className = `agent-routing-status agent-routing-${resolved.intent}`;
+            routing.className = `agent-routing-status agent-routing-${resolved.phase}`;
             const summary = document.createElement('summary');
             summary.className = 'agent-routing-summary';
-            const strategyLabel = resolved.strategy === 'multi'
-                ? tr('Multi-Agent', '多 Agent')
-                : tr('Adaptive parallelism', '按需并行');
             const sourceLabel = resolved.routingSource === 'model'
                 ? tr('Semantic routing', '语义路由')
-                : resolved.routingSource === 'manual'
-                    ? tr('Manual mode', '手动模式')
-                    : tr('Rule fallback', '规则回退');
-            summary.textContent = resolved.requiresUserDecision
-                ? `${sourceLabel} · ${tr('Awaiting your decision', '等待用户敲定')} · ${agentIntentLabel(resolved.intent)}`
-                : `${sourceLabel} · ${agentIntentLabel(resolved.intent)} · ${strategyLabel}`;
+                : resolved.routingSource === 'workflow'
+                    ? tr('Workflow scheduling', '工作流调度')
+                    : resolved.routingSource === 'user'
+                        ? tr('User scheduling', '用户调度')
+                        : tr('Rule routing', '规则路由');
+            summary.textContent = resolved.awaitingUserDecision
+                ? `${sourceLabel} · ${tr('Awaiting your decision', '等待用户敲定')} · ${schedulingPhaseLabel(resolved.phase)}`
+                : `${sourceLabel} · ${schedulingPhaseLabel(resolved.phase)} · ${schedulingDispatchLabel(resolved.dispatch)} · ${schedulingAuthorizationLabel(resolved.authorization)}`;
             routing.setAttribute('aria-label', `${tr('Task routing decision', '任务路由判断')}：${summary.textContent}`);
             routing.appendChild(summary);
 
             const explanation = document.createElement('div');
             explanation.className = 'agent-routing-explanation';
-            if (resolved.requiresUserDecision) {
+            if (resolved.awaitingUserDecision) {
                 const boundary = document.createElement('div');
                 boundary.className = 'agent-routing-decision-boundary';
                 boundary.textContent = tr(
@@ -5620,26 +5561,32 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                 );
                 explanation.appendChild(boundary);
             }
-            if (resolved.reason) {
+            if (resolved.phaseReason) {
                 const reason = document.createElement('div');
                 reason.className = 'agent-routing-reason';
-                reason.textContent = `${tr('Decision summary', '判断摘要')}：${resolved.reason}`;
+                reason.textContent = `${tr('Scheduling reason', '调度依据')}：${resolved.phaseReason}`;
                 explanation.appendChild(reason);
             }
-            if (resolved.evidence.length > 0) {
+            if (resolved.dispatchReason && resolved.dispatchReason !== resolved.phaseReason) {
+                const reason = document.createElement('div');
+                reason.className = 'agent-routing-reason';
+                reason.textContent = `${tr('Dispatch reason', '分派依据')}：${resolved.dispatchReason}`;
+                explanation.appendChild(reason);
+            }
+            if (resolved.routeEvidence.length > 0) {
                 const evidence = document.createElement('ul');
                 evidence.className = 'agent-routing-evidence';
-                for (const item of resolved.evidence) {
+                for (const item of resolved.routeEvidence) {
                     const entry = document.createElement('li');
                     entry.textContent = item;
                     evidence.appendChild(entry);
                 }
                 explanation.appendChild(evidence);
             }
-            if (resolved.confidence !== undefined) {
+            if (resolved.routeConfidence > 0) {
                 const confidence = document.createElement('div');
                 confidence.className = 'agent-routing-confidence';
-                confidence.textContent = `${tr('Confidence', '置信度')} ${Math.round(resolved.confidence * 100)}%`;
+                confidence.textContent = `${tr('Confidence', '置信度')} ${Math.round(resolved.routeConfidence * 100)}%`;
                 explanation.appendChild(confidence);
             }
             if (explanation.childElementCount > 0) routing.appendChild(explanation);
@@ -5955,7 +5902,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                     : chatI18n.annotations.plan;
             document.querySelectorAll(`.annotatable-plan.${className}`).forEach(el => {
                 const cardEl = el as HTMLElement;
-                const resolvedLabels = cardEl.classList.contains('orchestrator-plan-card') ? chatI18n.annotations.orchestratorPlan : labels;
+                const resolvedLabels = labels;
                 cardEl.dataset.resolved = 'true';
                 cardEl.classList.add('ap-approved', 'ap-compact');
                 cardEl.style.display = '';
@@ -6308,7 +6255,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         const pCard = steps.find((s: any) => s.type === 'plan_card' && s.uiState === 'pending');
         if (pCard && pCard.toolResult) {
             window.dispatchEvent(new MessageEvent('message', {
-                data: { type: 'renderPlan', sections: pCard.toolResult, planText: pCard.content, mode: pCard.mode }
+                data: { type: 'renderPlan', sections: pCard.toolResult, planText: pCard.content }
             }));
         }
         const wtCard = steps.find((s: any) => s.type === 'walkthrough_card' && s.uiState === 'pending');
@@ -6341,7 +6288,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                     subagentTicker = null;
                 }
                 removeLiveAssistantViews();
-                addUserMessage(msg.text, msg.messageIndex, msg.images, msg.contexts, msg.resolvedAgentProfile);
+                addUserMessage(msg.text, msg.messageIndex, msg.images, msg.contexts, msg.schedulingState);
                 currentAssistantDiv = initLiveAssistantDiv();
                 chatArea.appendChild(currentAssistantDiv);
                 scrollBottom(true);
@@ -6593,7 +6540,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                     if (m.isHidden === true) return;
                     
                     // M4 fix: pass images array when restoring user messages from history
-                    if (m.role === 'user') addUserMessage(m.displayContent || m.content, idx, m.images, m.contexts, m.resolvedAgentProfile);
+                    if (m.role === 'user') addUserMessage(m.displayContent || m.content, idx, m.images, m.contexts, m.schedulingState);
                     else {
                         chatArea.appendChild(buildAssistantMessage(m.content, m.steps, null));
                         scrollBottom();
@@ -6698,38 +6645,20 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
             }
 
             case 'agentRoutingStatus':
-                updateAgentRoutingStatus(msg.phase, msg.profile);
+                updateAgentRoutingStatus(msg.phase, msg.schedulingState);
                 break;
 
-            case 'modeChanged':
-                switchMode(msg.mode, /* fromUI */ false);
-                break;
-
-            case 'setMode':
-                // Restore mode selector state after panel rebuild (no backend call needed)
-                switchMode(msg.mode, /* fromUI */ false);
-                break;
-
-            case 'setAgentProfile':
-                applyAgentProfile(msg.profile);
-                break;
-
-            case 'agentProfileChanged':
-                applyAgentProfile(msg.profile);
-                break;
-
-            case 'runtimeProfiles':
-                // Runtime profiles are internal scheduling policy. Keep accepting
-                // the compatibility projection without exposing it in the composer.
+            case 'setSchedulingState':
+                applySchedulingState(msg.schedulingState);
                 break;
 
             case 'runtimeInspectorSnapshot': {
                 // Detailed runtime diagnostics remain available in Agent Manager.
                 // The composer deliberately exposes only the capability domain.
-                const trigger = document.getElementById('quickModeTrigger');
+                const trigger = document.getElementById('quickDomainTrigger');
                 if (trigger) trigger.title = tr(
-                    `Capability domain: ${getProfileSummary()}`,
-                    `能力领域：${getProfileSummary()}`,
+                    `Capability domain: ${getSchedulingDomainSummary()}`,
+                    `能力领域：${getSchedulingDomainSummary()}`,
                 );
                 break;
             }
@@ -7236,17 +7165,15 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
 
             case 'planFileSaved': {
                 // Compact card — just "open file" button; annotation is handled by renderPlan below
-                const isOrchestratorPlan = msg.mode === 'orchestrator' || msg.mode === 'script';
-                const isScriptPlan = msg.mode === 'script';
                 const card = document.createElement('div');
-                card.className = `plan-file-card ${isOrchestratorPlan ? 'orchestrator-plan-card' : ''}`;
+                card.className = 'plan-file-card';
                 prepareSingleFileArtifactCard(card, 'plan', msg.filePath, msg.relPath);
                 card.innerHTML = `
-                    <div class="plan-file-icon">${svgIconNoMargin(isOrchestratorPlan ? 'bot' : 'clipboard')}</div>
+                    <div class="plan-file-icon">${svgIconNoMargin('clipboard')}</div>
                     <div class="plan-file-info">
                         <div class="plan-file-title">${tr('Implementation Plan exported', '实施计划已导出')}</div>
                         <div class="plan-file-path">${escapeHtml(msg.relPath)}</div>
-                        <div class="plan-file-hint">${isScriptPlan ? tr('After confirmation, dispatch_agents will run the dynamic pipeline in parallel.', '确认后将按动态流水线进入 dispatch_agents 并行执行。') : isOrchestratorPlan ? tr('After confirmation, dispatch_agents will run this in parallel.', '确认后将进入 dispatch_agents 并行执行。') : tr('After confirmation, execution will switch to build mode.', '确认后将切换到构建执行。')}</div>
+                        <div class="plan-file-hint">${tr('After confirmation, the approved plan enters execution.', '确认后，已批准计划将进入执行。')}</div>
                     </div>
                     <div class="plan-file-actions">
                         <button class="plan-open-btn" data-path="${escapeHtml(msg.filePath)}">${svgIconNoMargin('folder')} ${tr('Open file', '打开文件')}</button>
@@ -7260,17 +7187,16 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
             }
 
             case 'renderPlan': {
-                const isOrchestratorPlan = msg.mode === 'orchestrator' || msg.mode === 'script';
-                const labels = isOrchestratorPlan ? chatI18n.annotations.orchestratorPlan : chatI18n.annotations.plan;
-                const sourceKey = msg.mode === 'script' ? 'plan:script' : isOrchestratorPlan ? 'plan:orchestrator' : 'plan';
+                const labels = chatI18n.annotations.plan;
+                const sourceKey = 'plan';
                 const signature = JSON.stringify(msg.sections || []);
                 if (!isManagerShell()) {
                     document.querySelectorAll('.annotatable-plan.plan-card-wrap').forEach(el => dismissCard(el as HTMLElement, 0));
                 }
                 const cardOptions: AnnotationCardOptions = {
-                    className: `plan-card-wrap ${isOrchestratorPlan ? 'orchestrator-plan-card' : ''}`,
-                    icon: isOrchestratorPlan ? 'bot' : 'edit',
-                    approveIcon: isOrchestratorPlan ? 'zap' : 'check',
+                    className: 'plan-card-wrap',
+                    icon: 'edit',
+                    approveIcon: 'check',
                     sections: msg.sections || [],
                     labels,
                     renderMarkdown,
@@ -7804,7 +7730,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         const ctxInput = document.getElementById('settingsCtx') as HTMLInputElement | null;
         const inlineEnabled = document.getElementById('inlineEnabled') as HTMLInputElement | null;
         const inlineProviderSel = document.getElementById('inlineProvider') as HTMLSelectElement | null;
-        const agentModeSel = document.getElementById('agentWriteMode') as HTMLSelectElement | null;
+        const writePermissionSel = document.getElementById('agentWriteMode') as HTMLSelectElement | null;
         const reasoningSel = document.getElementById('settingsReasoningEffort') as HTMLSelectElement | null;
         const inlineProviderName = inlineProviderSel?.value
             ? (settingsProviders.find((p: any) => p.id === inlineProviderSel.value)?.name || inlineProviderSel.value)
@@ -7827,7 +7753,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                 mcpCount: document.querySelectorAll('#mcpServersList .mcp-server-block').length,
                 writeMode: (() => {
                     if (settingsSandboxDisabled) return 'full';
-                    const base = agentModeSel?.value || 'confirm';
+                    const base = writePermissionSel?.value || 'confirm';
                     const autoReviewEl = document.getElementById('approvalsAutoReview') as HTMLInputElement | null;
                     return base === 'auto' && autoReviewEl?.checked ? 'auto_review' : base;
                 })(),
@@ -8105,8 +8031,6 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
             chatHeader.style.display = 'none';
             document.getElementById('chatArea')!.style.display = 'none';
             if (inputWrapper) inputWrapper.style.display = 'none';
-            const mi = document.getElementById('modeIndicator');
-            if (mi) mi.style.display = 'none';
             if (todoPanel) todoPanel.style.display = 'none';
         }
         const _tr = document.getElementById('testResult');
@@ -8136,8 +8060,6 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         chatHeader.style.display = '';
         document.getElementById('chatArea')!.style.display = 'flex';
         if (inputWrapper) inputWrapper.style.display = '';
-        const mi = document.getElementById('modeIndicator');
-        if (mi) mi.style.display = '';
         if (todoPanel) todoPanel.style.display = '';
     }
 
@@ -8419,10 +8341,8 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         const div = document.createElement('div');
         div.className = 'mcp-server-block';
 
-        // Normalize: support both flat MCPServerConfig { type, command, args, env }
-        // and legacy nested { transport: { type, command, args } } format
-        const t = server.transport || server;
-        const serverEnv: Record<string, string> | undefined = server.env || t.env;
+        const t = server;
+        const serverEnv: Record<string, string> | undefined = server.env;
 
         div.innerHTML = `
             <div class="mcp-row">

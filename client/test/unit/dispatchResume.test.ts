@@ -1,6 +1,7 @@
 import { expect } from 'chai';
 import * as fs from 'fs';
 import * as path from 'path';
+import { GENERAL_PARALLEL, PARADOX_PARALLEL } from './schedulingFixtures';
 
 /**
  * Resume/append/clarification contract of dispatch_agents plus the durable
@@ -108,7 +109,6 @@ describe('dispatch_agents resume/append/clarification', () => {
         const ok = await store.saveOrchestration({
             topicId,
             domain,
-            mode: domain === 'paradox' ? 'script' : 'orchestrator',
             graph,
             agentResults: new Map([['n1', {
                 nodeId: 'n1', success: true, output: 'done wave one',
@@ -123,9 +123,24 @@ describe('dispatch_agents resume/append/clarification', () => {
         return graph;
     }
 
-    function makeContext(topicId: string, mode: string, domain: 'general' | 'paradox') {
+    function makeContext(topicId: string, domain: 'general' | 'paradox') {
         return {
-            runnerOptions: { topicId, mode, domain },
+            runnerOptions: {
+                topicId,
+                schedulingState: {
+                    profileName: domain === 'paradox' ? 'paradox-agent' : 'general-agent',
+                    domainProfile: domain,
+                    authorization: 'workspace_write',
+                    phase: 'execute',
+                    dispatch: 'parallel',
+                    overlays: ['swarm'],
+                    routeConfidence: 1,
+                    routeEvidence: ['test'],
+                    phaseReason: 'test',
+                    dispatchReason: 'test',
+                    revision: 0,
+                },
+            },
         };
     }
 
@@ -134,7 +149,7 @@ describe('dispatch_agents resume/append/clarification', () => {
         const result = await executor.execute('dispatch_agents', {
             resumeGraphId: 'tg_unknown_000000',
             appendTasks: [{ id: 'n3', agentType: 'explore', prompt: 'more' }],
-        }, makeContext('topic-a', 'explore', 'general') as any) as any;
+        }, makeContext('topic-a', 'general') as any) as any;
         expect(result.success).to.equal(false);
         expect(result.error).to.include('not a known orchestration');
     });
@@ -145,7 +160,7 @@ describe('dispatch_agents resume/append/clarification', () => {
         const result = await executor.execute('dispatch_agents', {
             resumeGraphId: graph.id,
             blueprintFile: '.cwtools/topic-a/Implementation_Plan.md',
-        }, makeContext('topic-a', 'script', 'paradox') as any) as any;
+        }, makeContext('topic-a', 'paradox') as any) as any;
         expect(result.success).to.equal(false);
         expect(result.error).to.include('Resumed graphs are already approved contracts');
     });
@@ -155,7 +170,7 @@ describe('dispatch_agents resume/append/clarification', () => {
         const executor = createExecutor();
         const result = await executor.execute('dispatch_agents', {
             resumeGraphId: graph.id,
-        }, makeContext('topic-a', 'script', 'paradox') as any) as any;
+        }, makeContext('topic-a', 'paradox') as any) as any;
         expect(result.success).to.equal(false);
         expect(result.error).to.include('Resuming requires appendTasks');
     });
@@ -166,7 +181,7 @@ describe('dispatch_agents resume/append/clarification', () => {
         const result = await executor.execute('dispatch_agents', {
             resumeGraphId: graph.id,
             appendTasks: [{ id: 'n1', agentType: 'explore', prompt: 'duplicate' }],
-        }, makeContext('topic-a', 'script', 'paradox') as any) as any;
+        }, makeContext('topic-a', 'paradox') as any) as any;
         expect(result.success).to.equal(false);
         expect(result.error).to.include(`already exists in graph '${graph.id}'`);
     });
@@ -177,7 +192,7 @@ describe('dispatch_agents resume/append/clarification', () => {
         const result = await executor.execute('dispatch_agents', {
             resumeGraphId: graph.id,
             appendTasks: [{ id: 'w1', agentType: 'build', prompt: 'Write a file.' }],
-        }, makeContext('topic-a', 'script', 'paradox') as any) as any;
+        }, makeContext('topic-a', 'paradox') as any) as any;
         expect(result.success).to.equal(false);
         expect(result.error).to.include('must be read-only (explore/plan/review)');
     });
@@ -191,7 +206,7 @@ describe('dispatch_agents resume/append/clarification', () => {
                 id: 'e1', agentType: 'explore', prompt: 'Inspect.',
                 plannedFiles: ['client/extension/ai/chatPanel.ts'],
             }],
-        }, makeContext('topic-a', 'script', 'paradox') as any) as any;
+        }, makeContext('topic-a', 'paradox') as any) as any;
         expect(result.success).to.equal(false);
         expect(result.error).to.include('must be read-only (explore/plan/review)');
     });
@@ -205,7 +220,7 @@ describe('dispatch_agents resume/append/clarification', () => {
                 id: 'e2', agentType: 'explore', prompt: 'Inspect more.',
                 dependencies: ['n1'], // references a node from the stored wave
             }],
-        }, makeContext('topic-a', 'script', 'paradox') as any) as any;
+        }, makeContext('topic-a', 'paradox') as any) as any;
         // Passes all resume validations; the missing parentAgentRunner is the
         // next gate, proving the appended task was accepted.
         expect(result.success).to.equal(false);
@@ -224,7 +239,7 @@ describe('dispatch_agents resume/append/clarification', () => {
                 id: 'u1', agentType: 'utility', prompt: 'Write a file.',
                 plannedFiles: [target],
             }],
-        }, makeContext('topic-a', 'orchestrator', 'general') as any) as any;
+        }, makeContext('topic-a', 'general') as any) as any;
         expect(result.success).to.equal(false);
         expect(result.error).to.include('Orchestrator is not ready');
     });
@@ -236,7 +251,7 @@ describe('dispatch_agents resume/append/clarification', () => {
         const result = await executor.execute('dispatch_agents', {
             resumeGraphId: graph.id,
             answerClarifications: [{ id: 'ghost', answer: 'Proceed.' }],
-        }, makeContext('topic-a', 'script', 'paradox') as any) as any;
+        }, makeContext('topic-a', 'paradox') as any) as any;
         expect(result.success).to.equal(false);
         expect(result.error).to.include("answerClarifications references unknown node id 'ghost'");
     });
@@ -269,7 +284,6 @@ describe('merge_results durable store layer', () => {
         const ok = await store.saveOrchestration({
             topicId: 'topic-a',
             domain: 'paradox',
-            mode: 'script',
             graph,
             agentResults: new Map([['n1', {
                 nodeId: 'n1', success: true, output: 'the complete detailed answer',
@@ -294,7 +308,7 @@ describe('merge_results durable store layer', () => {
         const result = await executor.execute('merge_results', {
             graphId: graph.id,
         }, {
-            runnerOptions: { topicId: 'topic-a', domain: 'paradox' },
+            runnerOptions: { topicId: 'topic-a', schedulingState: PARADOX_PARALLEL },
         } as any) as any;
 
         expect(result.success).to.equal(true);
@@ -313,13 +327,13 @@ describe('merge_results durable store layer', () => {
         const graph = engine.TaskGraphEngine.createGraph('Catalog objective');
         engine.TaskGraphEngine.addNode(graph, 'catalog_n1', 'explore', 'Inspect.', { dependencies: [] });
         await store.saveOrchestration({
-            topicId: 'topic-a', domain: 'general', mode: 'orchestrator', graph,
+            topicId: 'topic-a', domain: 'general', graph,
             agentResults: new Map(), blackboard: { entries: [], timestamp: 1 },
             summary: 'catalog', totalTokenUsage: { total: 0, input: 0, output: 0, estimatedCostCny: 0 },
         });
         const executor = new AgentToolExecutor({} as any, workspaceRoot);
         const result = await executor.execute('merge_results', {}, {
-            runnerOptions: { topicId: 'topic-a', domain: 'general' },
+            runnerOptions: { topicId: 'topic-a', schedulingState: GENERAL_PARALLEL },
         } as any) as any;
         expect(result.mode).to.equal('catalog');
         expect(result.graphs[0].nodes[0]).to.deep.include({ id: 'catalog_n1', hasResult: false });
@@ -329,7 +343,7 @@ describe('merge_results durable store layer', () => {
         const graph = engine.TaskGraphEngine.createGraph('Bg merge objective');
         engine.TaskGraphEngine.addNode(graph, 'n1', 'explore', 'Inspect.', { dependencies: [] });
         await store.saveOrchestration({
-            topicId: 'topic-a', domain: 'general', mode: 'orchestrator', graph,
+            topicId: 'topic-a', domain: 'general', graph,
             agentResults: new Map(),
             blackboard: { entries: [], timestamp: 1 },
             summary: 'in progress',
@@ -348,7 +362,7 @@ describe('merge_results durable store layer', () => {
             nodeIds: ['n1'],
             graphId: graph.id,
         }, {
-            runnerOptions: { topicId: 'topic-a', domain: 'general' },
+            runnerOptions: { topicId: 'topic-a', schedulingState: GENERAL_PARALLEL },
         } as any) as any;
         expect(result.success).to.equal(false);
         expect(result.background).to.equal(true);
@@ -363,7 +377,6 @@ describe('merge_results durable store layer', () => {
         await store.saveOrchestration({
             topicId: 'topic-a',
             domain: 'general',
-            mode: 'orchestrator',
             graph,
             agentResults: new Map([['n1', {
                 nodeId: 'n1', success: true, output: 'latest wave output',
@@ -378,7 +391,7 @@ describe('merge_results durable store layer', () => {
         const result = await executor.execute('merge_results', {
             nodeIds: ['n1'],
         }, {
-            runnerOptions: { topicId: 'topic-a', domain: 'general' },
+            runnerOptions: { topicId: 'topic-a', schedulingState: GENERAL_PARALLEL },
         } as any) as any;
         expect(result.success).to.equal(true);
         expect(result.agentOutputs[0].output).to.include('latest wave output');
@@ -390,7 +403,6 @@ describe('merge_results durable store layer', () => {
         await store.saveOrchestration({
             topicId: 'topic-a',
             domain: 'general',
-            mode: 'orchestrator',
             graph,
             agentResults: new Map([['n1', {
                 nodeId: 'n1', success: true, output: 'o',
@@ -406,7 +418,7 @@ describe('merge_results durable store layer', () => {
             nodeIds: ['missing'],
             graphId: graph.id,
         }, {
-            runnerOptions: { topicId: 'topic-a', domain: 'general' },
+            runnerOptions: { topicId: 'topic-a', schedulingState: GENERAL_PARALLEL },
         } as any) as any;
         expect(result.success).to.equal(false);
         expect(result.message).to.include('Unknown or unavailable task node IDs: missing');

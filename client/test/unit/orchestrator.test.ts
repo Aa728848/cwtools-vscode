@@ -8,6 +8,9 @@
 import { expect } from 'chai';
 import * as path from 'path';
 import sinon from 'sinon';
+import { GENERAL_EXPLORE, GENERAL_PARALLEL, PARADOX_PARALLEL } from './schedulingFixtures';
+
+const ORCHESTRATOR_OPTIONS = { schedulingState: GENERAL_PARALLEL };
 
 const vscodeStub = {
     workspace: {
@@ -383,6 +386,33 @@ describe('ConflictDetector', () => {
 // -- dispatch_agents wiring ---------------------------------------------------
 
 describe('dispatch_agents tool wiring', () => {
+    let orchestrationStorageRoot = '';
+
+    before(() => {
+        const fs = require('fs') as typeof import('fs');
+        const os = require('os') as typeof import('os');
+        orchestrationStorageRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'cwtools-dispatch-store-'));
+        vscodeStub.workspace.workspaceFolders = [{ uri: { fsPath: orchestrationStorageRoot } }] as any;
+        const { configurePrivateAgentStorage } = require('../../extension/ai/workspacePaths') as typeof import('../../extension/ai/workspacePaths');
+        configurePrivateAgentStorage(orchestrationStorageRoot);
+    });
+
+    after(() => {
+        const fs = require('fs') as typeof import('fs');
+        const { configurePrivateAgentStorage } = require('../../extension/ai/workspacePaths') as typeof import('../../extension/ai/workspacePaths');
+        configurePrivateAgentStorage(undefined);
+        vscodeStub.workspace.workspaceFolders = [];
+        fs.rmSync(orchestrationStorageRoot, { recursive: true, force: true });
+    });
+
+    const featureManifest = (objective: string, id: string) => ({
+        objective,
+        entities: [{ kind: 'event', id, operation: 'define' }],
+        requiredEdges: [],
+        acceptanceCriteria: [{ id: `${id}_exists`, description: `${id} exists`, type: 'entity_exists', subject: id }],
+        expectsFileChanges: true,
+    });
+
     const makeTasks = (count: number) => Array.from({ length: count }, (_, index) => ({
         id: `task_${index + 1}`,
         agentType: 'explore',
@@ -415,19 +445,21 @@ describe('dispatch_agents tool wiring', () => {
         try {
             const result = await executor.execute('dispatch_agents', {
                 userPrompt: 'planned target pass-through',
+                featureManifest: featureManifest('Update event script', 'foo.1'),
                 tasks: [{
                     id: 'build_events',
                     agentType: 'build',
                     prompt: 'update event script',
                     plannedFiles: ['events/shared.txt'],
                     plannedEntities: ['event:foo.1'],
+                    produces: [{ kind: 'event', id: 'foo.1', operation: 'define' }],
                 }],
             }, {
-                runnerOptions: { schedulingState: { dispatch: 'parallel' }, abortSignal: new AbortController().signal },
+                runnerOptions: { schedulingState: PARADOX_PARALLEL, topicId: 'planned-target', abortSignal: new AbortController().signal },
                 onStep: () => undefined,
             } as any) as any;
 
-            expect(result.success).to.equal(true);
+            expect(result.success, JSON.stringify(result)).to.equal(true);
             const node = capturedGraph?.nodes.get('build_events');
             expect(node?.plannedFiles).to.deep.equal(['events/shared.txt']);
             expect(node?.plannedEntities).to.deep.equal(['event:foo.1']);
@@ -462,18 +494,21 @@ describe('dispatch_agents tool wiring', () => {
         try {
             const result = await executor.execute('dispatch_agents', {
                 userPrompt: 'localisation update',
+                featureManifest: featureManifest('Update event localisation', 'demo.1'),
                 tasks: [{
                     id: 'build_loc',
                     agentType: 'build',
                     prompt: 'Update the title text in this yml file.',
                     plannedFiles: ['localisation/english/demo_l_english.yml'],
+                    consumes: [{ kind: 'event', id: 'demo.1', operation: 'reference' }],
+                    produces: [{ kind: 'localisation', id: 'demo.1.title', operation: 'localise' }],
                 }],
             }, {
-                runnerOptions: { schedulingState: { dispatch: 'parallel' }, abortSignal: new AbortController().signal },
+                runnerOptions: { schedulingState: PARADOX_PARALLEL, topicId: 'localisation-route', abortSignal: new AbortController().signal },
                 onStep: () => undefined,
             } as any) as any;
 
-            expect(result.success).to.equal(true);
+            expect(result.success, JSON.stringify(result)).to.equal(true);
             const node = capturedGraph?.nodes.get('build_loc');
             expect(node?.agentType).to.equal('loc_writer');
             expect(node?.prompt).to.include('write_localisation');
@@ -517,15 +552,15 @@ describe('dispatch_agents tool wiring', () => {
                 userPrompt: 'compact output',
                 tasks: [{
                     id: 'writer',
-                    agentType: 'build',
+                    agentType: 'utility',
                     prompt: 'write something',
                 }],
             }, {
-                runnerOptions: { schedulingState: { dispatch: 'parallel' }, abortSignal: new AbortController().signal },
+                runnerOptions: { schedulingState: GENERAL_PARALLEL, topicId: 'compact-output', abortSignal: new AbortController().signal },
                 onStep: () => undefined,
             } as any) as any;
 
-            expect(result.success).to.equal(true);
+            expect(result.success, JSON.stringify(result)).to.equal(true);
             expect(result.agents[0].outputSummary).to.not.include('truncated, full length');
             expect(result.agents[0].outputSummary.trim()).to.not.match(/(^|\n)\s*2\.\s*$/);
         } finally {
@@ -544,7 +579,7 @@ describe('dispatch_agents tool wiring', () => {
             userPrompt: 'too many classic tasks',
             tasks: makeTasks(5),
         }, {
-            runnerOptions: { mode: 'orchestrator', abortSignal: new AbortController().signal },
+            runnerOptions: { schedulingState: GENERAL_PARALLEL, abortSignal: new AbortController().signal },
             onStep: () => undefined,
         } as any) as any;
 
@@ -562,11 +597,11 @@ describe('dispatch_agents tool wiring', () => {
         const result = await executor.execute('dispatch_agents', {
             tasks: [{ id: 'wrong_writer', agentType: 'build', prompt: 'edit TypeScript' }],
         }, {
-            runnerOptions: { mode: 'orchestrator', abortSignal: new AbortController().signal },
+            runnerOptions: { schedulingState: GENERAL_PARALLEL, abortSignal: new AbortController().signal },
         } as any) as any;
 
         expect(result.success).to.equal(false);
-        expect(result.error).to.include("Agent type 'build' is not allowed in General Multi-Agent mode");
+        expect(result.error).to.include("Agent type 'build' is not allowed by scheduler profile 'general-agent'");
         expect(result.error).to.include('utility');
     });
 
@@ -590,8 +625,7 @@ describe('dispatch_agents tool wiring', () => {
             }],
         }, {
             runnerOptions: {
-                mode: 'script',
-                domain: 'paradox',
+                schedulingState: PARADOX_PARALLEL,
                 originalUserMessage: '本地化由我自己写',
                 abortSignal: new AbortController().signal,
             },
@@ -599,28 +633,6 @@ describe('dispatch_agents tool wiring', () => {
 
         expect(result.success).to.equal(false);
         expect(result.error).to.include('retained ownership of localisation');
-    });
-
-    it('intersects mode roles with the selected runtime profile sub-agent allowlist', async () => {
-        const { AgentToolExecutor } = require('../../extension/ai/agentTools') as typeof import('../../extension/ai/agentTools');
-        const executor = new AgentToolExecutor({
-            onNotification: () => undefined,
-            sendNotification: () => undefined,
-        } as any, process.cwd());
-
-        const result = await executor.execute('dispatch_agents', {
-            tasks: [{ id: 'reviewer', agentType: 'review', prompt: 'review changes' }],
-        }, {
-            runnerOptions: {
-                mode: 'orchestrator',
-                agentProfileAllowedSubagents: ['explore'],
-                abortSignal: new AbortController().signal,
-            },
-        } as any) as any;
-
-        expect(result.success).to.equal(false);
-        expect(result.error).to.include("Agent type 'review' is not allowed");
-        expect(result.error).to.include('explore');
     });
 
     it('allows script mode to dispatch up to eight tasks but rejects nine', async () => {
@@ -651,18 +663,18 @@ describe('dispatch_agents tool wiring', () => {
                 userPrompt: 'script wave',
                 tasks: makeTasks(8),
             }, {
-                runnerOptions: { mode: 'script', abortSignal: new AbortController().signal },
+                runnerOptions: { schedulingState: PARADOX_PARALLEL, topicId: 'eight-tasks', abortSignal: new AbortController().signal },
                 onStep: () => undefined,
             } as any) as any;
 
-            expect(allowed.success).to.equal(true);
+            expect(allowed.success, JSON.stringify(allowed)).to.equal(true);
             expect(capturedGraph?.nodes.size).to.equal(8);
 
             const rejected = await executor.execute('dispatch_agents', {
                 userPrompt: 'script wave too large',
                 tasks: makeTasks(9),
             }, {
-                runnerOptions: { mode: 'script', abortSignal: new AbortController().signal },
+                runnerOptions: { schedulingState: PARADOX_PARALLEL, topicId: 'nine-tasks', abortSignal: new AbortController().signal },
                 onStep: () => undefined,
             } as any) as any;
 
@@ -709,7 +721,7 @@ describe('dispatch_agents tool wiring', () => {
         };
 
         const context = () => ({
-            runnerOptions: { mode: 'script', abortSignal: new AbortController().signal },
+            runnerOptions: { schedulingState: PARADOX_PARALLEL, topicId: 'dispatch-overlap', abortSignal: new AbortController().signal },
             onStep: () => undefined,
         } as any);
 
@@ -725,7 +737,7 @@ describe('dispatch_agents tool wiring', () => {
                 tasks: makeTasks(1),
             }, context()) as any;
 
-            expect(second.success).to.equal(true);
+            expect(second.success, JSON.stringify(second)).to.equal(true);
             expect(firstSignal?.aborted).to.equal(false);
             releaseFirst();
             expect((await first).success).to.equal(true);
@@ -750,59 +762,13 @@ describe('dispatch_agents tool wiring', () => {
                 plannedFiles: ['events/test.txt'],
             }],
         }, {
-            runnerOptions: { mode: 'script', abortSignal: new AbortController().signal },
+            runnerOptions: { schedulingState: PARADOX_PARALLEL, abortSignal: new AbortController().signal },
         } as any) as any;
 
         expect(result.success).to.equal(false);
         expect(result.error).to.include('featureManifest');
     });
 
-    it('merge_results honors nodeIds and returns entity-level integration data', async () => {
-        const { AgentToolExecutor } = require('../../extension/ai/agentTools') as typeof import('../../extension/ai/agentTools');
-        const { TaskGraphEngine } = require('../../extension/ai/orchestrator/taskGraphEngine') as typeof import('../../extension/ai/orchestrator/taskGraphEngine');
-        const executor = new AgentToolExecutor({
-            onNotification: () => undefined,
-            sendNotification: () => undefined,
-        } as any, process.cwd());
-        const graph = TaskGraphEngine.createGraph('merge', {
-            objective: 'merge selected work',
-            acceptanceCriteria: [],
-        });
-        TaskGraphEngine.addNode(graph, 'A', 'build', 'A', {
-            produces: [{ kind: 'event', id: 'foo.1', operation: 'define' }],
-        });
-        TaskGraphEngine.addNode(graph, 'B', 'build', 'B');
-        (executor as any)._lastOrchestratorGraph = graph;
-        (executor as any)._lastOrchestratorDomain = 'paradox';
-        (executor as any)._lastOrchestratorTopicId = 'merge-topic';
-        (executor as any)._lastOrchestratorResult = {
-            success: true,
-            summary: 'ok',
-            agentResults: new Map([
-                ['A', { nodeId: 'A', success: true, output: 'A output', writtenFiles: ['events/a.txt'], tokenUsage: { total: 1, input: 1, output: 0, estimatedCostCny: 0 }, stepCount: 1 }],
-                ['B', { nodeId: 'B', success: true, output: 'B output', writtenFiles: ['events/b.txt'], tokenUsage: { total: 1, input: 1, output: 0, estimatedCostCny: 0 }, stepCount: 1 }],
-            ]),
-            totalTokenUsage: { total: 2, input: 2, output: 0, estimatedCostCny: 0 },
-            failedNodes: [],
-            cancelledNodes: [],
-        };
-
-        const merged = await executor.execute('merge_results', { nodeIds: ['A'], strategy: 'structured' }, {
-            runnerOptions: { mode: 'script', domain: 'paradox', topicId: 'merge-topic' },
-        } as any) as any;
-
-        expect(merged.success).to.equal(true);
-        expect(merged.selectedNodeIds).to.deep.equal(['A']);
-        expect(merged.writtenFiles).to.deep.equal(['events/a.txt']);
-        expect(merged.integration.entityContracts[0].produces[0].id).to.equal('foo.1');
-        expect(merged.agentOutputs.map((entry: any) => entry.id)).to.deep.equal(['A']);
-
-        const crossDomain = await executor.execute('merge_results', { nodeIds: ['A'], strategy: 'structured' }, {
-            runnerOptions: { mode: 'orchestrator', domain: 'general', topicId: 'merge-topic' },
-        } as any) as any;
-        expect(crossDomain.success).to.equal(false);
-        expect(crossDomain.message).to.include('dispatch_agents first');
-    });
 });
 
 describe('approved blueprint dispatch', () => {
@@ -813,6 +779,7 @@ describe('approved blueprint dispatch', () => {
         const root = fs.mkdtempSync(path.join(os.tmpdir(), 'cwtools-blueprint-dispatch-'));
         const blueprintDir = path.join(root, '.cwtools', 'topic');
         const blueprintFile = path.join(blueprintDir, 'Implementation_Plan.md');
+        vscodeStub.workspace.workspaceFolders = [{ uri: { fsPath: root } }] as any;
         fs.mkdirSync(blueprintDir, { recursive: true });
         fs.writeFileSync(blueprintFile, `# Implementation Plan\n\n## Executable Contract\n\n\`\`\`cwtools-plan\n${JSON.stringify({
             blueprint: {
@@ -881,7 +848,7 @@ describe('approved blueprint dispatch', () => {
 
         try {
             const result = await executor.execute('dispatch_agents', { blueprintFile }, {
-                runnerOptions: { mode: 'script', abortSignal: new AbortController().signal },
+                runnerOptions: { schedulingState: PARADOX_PARALLEL, topicId: 'topic', abortSignal: new AbortController().signal },
                 tokenAccumulator: parentUsage,
             } as any) as any;
             expect(result.success).to.equal(true);
@@ -904,12 +871,13 @@ describe('approved blueprint dispatch', () => {
                 .replace('"unresolvedCritical": []', '"unresolvedCritical": ["Choose the leader scope."]');
             fs.writeFileSync(blueprintFile, draftContent, 'utf8');
             const blockedDraft = await executor.execute('dispatch_agents', { blueprintFile }, {
-                runnerOptions: { mode: 'script', abortSignal: new AbortController().signal },
+                runnerOptions: { schedulingState: PARADOX_PARALLEL, topicId: 'topic', abortSignal: new AbortController().signal },
             } as any) as any;
             expect(blockedDraft.success).to.equal(false);
             expect(blockedDraft.error).to.include('unresolvedCritical must be an empty array');
         } finally {
             (Orchestrator.prototype as any).execute = originalExecute;
+            vscodeStub.workspace.workspaceFolders = [];
             fs.rmSync(root, { recursive: true, force: true });
         }
     });
@@ -939,7 +907,7 @@ describe('Orchestrator runtime safety', () => {
             async () => {
                 throw new Error('should not run');
             },
-            {},
+            ORCHESTRATOR_OPTIONS,
         );
 
         expect(result.success).to.equal(false);
@@ -954,7 +922,7 @@ describe('Orchestrator runtime safety', () => {
 
         const result = await executor.executeGraph(graph, new Blackboard(), async () => {
             throw new Error('should not run');
-        }, {});
+        }, ORCHESTRATOR_OPTIONS);
 
         expect(result.success).to.equal(false);
         expect(result.summary).to.include('missing dependencies');
@@ -970,7 +938,7 @@ describe('Orchestrator runtime safety', () => {
 
         const result = await executor.executeGraph(graph, new Blackboard(), async () => {
             throw new Error('should not run');
-        }, {});
+        }, ORCHESTRATOR_OPTIONS);
 
         expect(result.success).to.equal(false);
         expect(result.summary).to.include('missing dependencies');
@@ -985,7 +953,7 @@ describe('Orchestrator runtime safety', () => {
 
         const result = await executor.executeGraph(graph, new Blackboard(), async () => {
             throw new Error('should not run');
-        }, {});
+        }, ORCHESTRATOR_OPTIONS);
 
         expect(result.success).to.equal(false);
         expect(result.summary).to.include('cyclic dependencies after dependency healing');
@@ -1013,7 +981,7 @@ describe('Orchestrator runtime safety', () => {
                     stepCount: 1,
                 };
             },
-            {},
+            ORCHESTRATOR_OPTIONS,
         );
 
         expect(calls).to.equal(1);
@@ -1044,7 +1012,7 @@ describe('Orchestrator runtime safety', () => {
                     preservedAfterFailure: true,
                 };
             },
-            { onStep: step => steps.push(step) },
+            { ...ORCHESTRATOR_OPTIONS, onStep: step => steps.push(step) },
         );
 
         expect(calls).to.equal(1);
@@ -1075,7 +1043,7 @@ describe('Orchestrator runtime safety', () => {
                     stepCount: 1,
                 };
             },
-            {},
+            ORCHESTRATOR_OPTIONS,
         );
 
         expect(result.success).to.equal(true);
@@ -1111,7 +1079,7 @@ describe('Orchestrator runtime safety', () => {
                     stepCount: 1,
                 };
             },
-            {},
+            ORCHESTRATOR_OPTIONS,
         );
 
         expect(result.success).to.equal(true);
@@ -1146,7 +1114,7 @@ describe('Orchestrator runtime safety', () => {
                     stepCount: 1,
                 };
             },
-            {},
+            ORCHESTRATOR_OPTIONS,
         );
 
         expect(result.success).to.equal(true);
@@ -1192,7 +1160,7 @@ describe('Orchestrator runtime safety', () => {
                 writtenFiles: [],
                 stepCount: 1,
             }),
-            {},
+            ORCHESTRATOR_OPTIONS,
         );
 
         expect(result.totalTokenUsage).to.include({
@@ -1233,7 +1201,7 @@ describe('Orchestrator runtime safety', () => {
                     stepCount: 1,
                 };
             },
-            {},
+            ORCHESTRATOR_OPTIONS,
         );
 
         expect(result.success).to.equal(true);
@@ -1263,7 +1231,7 @@ describe('Orchestrator runtime safety', () => {
             { total: 0, input: 0, output: 0, estimatedCostCny: 0 },
             abortController.signal,
             () => undefined,
-            { topicId: 'topic-1' },
+            { topicId: 'topic-1', schedulingState: GENERAL_EXPLORE },
         );
 
         abortController.abort(new Error('manual abort'));
@@ -1299,7 +1267,7 @@ describe('Orchestrator runtime safety', () => {
                 { total: 0, input: 0, output: 0, estimatedCostCny: 0 },
                 new AbortController().signal,
                 () => undefined,
-                { topicId: 'topic-long' },
+                { topicId: 'topic-long', schedulingState: GENERAL_EXPLORE },
             );
 
             await Promise.resolve();
@@ -1351,7 +1319,7 @@ describe('Orchestrator runtime safety', () => {
                 { total: 0, input: 0, output: 0, estimatedCostCny: 0 },
                 new AbortController().signal,
                 () => undefined,
-                { topicId: 'topic-stalled' },
+                { topicId: 'topic-stalled', schedulingState: GENERAL_EXPLORE },
             );
 
             await clock.tickAsync(20 * 60_000);
@@ -1416,7 +1384,7 @@ describe('Orchestrator runtime safety', () => {
             { total: 0, input: 0, output: 0, estimatedCostCny: 0 },
             new AbortController().signal,
             () => undefined,
-            { topicId: 'topic-1' },
+            { topicId: 'topic-1', schedulingState: PARADOX_PARALLEL },
         );
 
         expect(result.success).to.equal(true);
@@ -1497,7 +1465,7 @@ describe('Orchestrator runtime safety', () => {
                 { total: 0, input: 0, output: 0, estimatedCostCny: 0 },
                 new AbortController().signal,
                 (step: any) => steps.push(step),
-                { topicId: 'topic-1' },
+                { topicId: 'topic-1', schedulingState: PARADOX_PARALLEL },
             );
 
             expect(result.success).to.equal(true);
@@ -1576,7 +1544,7 @@ describe('Orchestrator runtime safety', () => {
                 { total: 0, input: 0, output: 0, estimatedCostCny: 0 },
                 new AbortController().signal,
                 (step: any) => steps.push(step),
-                { topicId: 'topic-1' },
+                { topicId: 'topic-1', schedulingState: PARADOX_PARALLEL },
             );
 
             expect(result.success).to.equal(false);
@@ -1629,11 +1597,11 @@ describe('Orchestrator runtime safety', () => {
             { total: 0, input: 0, output: 0, estimatedCostCny: 0 },
             new AbortController().signal,
             () => undefined,
-            { topicId: 'topic-1', domain: 'general' },
+            { topicId: 'topic-1', schedulingState: GENERAL_PARALLEL },
         );
 
         expect(result.success).to.equal(true);
-        expect(capturedOptions.domain).to.equal('general');
+        expect(capturedOptions.schedulingState.domainProfile).to.equal('general');
         expect(capturedOptions.initialToolFocus).to.equal('write');
         expect(capturedOptions.useSlimPrompt).to.equal(true);
         expect(capturedOptions.forceAutoApplyWrites).to.equal(true);
@@ -1678,11 +1646,11 @@ describe('Orchestrator runtime safety', () => {
             { total: 0, input: 0, output: 0, estimatedCostCny: 0 },
             new AbortController().signal,
             () => undefined,
-            { topicId: 'topic-1', domain: 'paradox' },
+            { topicId: 'topic-1', schedulingState: PARADOX_PARALLEL },
         );
 
         expect(result.success).to.equal(true);
-        expect(capturedOptions.domain).to.equal('paradox');
+        expect(capturedOptions.schedulingState.domainProfile).to.equal('paradox');
         expect(capturedOptions.excludeTools).to.include.members([
             'write_file',
             'edit_file',
@@ -1716,7 +1684,7 @@ describe('Orchestrator runtime safety', () => {
             { total: 0, input: 0, output: 0, estimatedCostCny: 0 },
             new AbortController().signal,
             () => undefined,
-            { topicId: 'topic-1', domain: 'general', readOnlyFanout: true },
+            { topicId: 'topic-1', schedulingState: GENERAL_EXPLORE },
         );
 
         const { MUTATING_TOOLS } = require('../../extension/ai/tools/registry') as typeof import('../../extension/ai/tools/registry');
@@ -1765,7 +1733,7 @@ describe('Orchestrator runtime safety', () => {
                     stepCount: 1,
                 };
             },
-            {},
+            ORCHESTRATOR_OPTIONS,
         );
 
         expect(result.success).to.equal(true);
@@ -1835,7 +1803,10 @@ describe('Orchestrator quality propagation', () => {
         const builder = TaskGraphEngine.addNode(graph, 'builder', 'build', 'build', { plannedFiles: ['events/test.txt'] });
         builder.status = 'done';
 
-        const result = await orchestrator.execute(graph, { abortSignal: new AbortController().signal });
+        const result = await orchestrator.execute(graph, {
+            ...ORCHESTRATOR_OPTIONS,
+            abortSignal: new AbortController().signal,
+        });
 
         expect(result.success).to.equal(true);
         expect(result.qualityGate?.passed).to.equal(true);
@@ -1857,6 +1828,7 @@ describe('Orchestrator quality propagation', () => {
         const steps: any[] = [];
 
         const result = await orchestrator.execute(graph, {
+            ...ORCHESTRATOR_OPTIONS,
             abortSignal: new AbortController().signal,
             onStep: (step: any) => steps.push(step),
         });
@@ -1921,7 +1893,7 @@ describe('Orchestrator quality propagation', () => {
         const steps: any[] = [];
         const result = await orchestrator.execute(graph, {
             abortSignal: new AbortController().signal,
-            domain: 'general',
+            schedulingState: GENERAL_PARALLEL,
             onStep: (step: any) => steps.push(step),
         });
 
@@ -1949,7 +1921,10 @@ describe('Orchestrator quality propagation', () => {
         const builder = TaskGraphEngine.addNode(graph, 'builder', 'build', 'build', { plannedFiles: ['events/test.txt'] });
         builder.status = 'done';
 
-        const result = await orchestrator.execute(graph, { abortSignal: new AbortController().signal });
+        const result = await orchestrator.execute(graph, {
+            ...ORCHESTRATOR_OPTIONS,
+            abortSignal: new AbortController().signal,
+        });
 
         expect(result.success).to.equal(true);
         expect(executedNodes).to.not.include('loc_sweep');
@@ -1962,7 +1937,10 @@ describe('Orchestrator quality propagation', () => {
         const builder = TaskGraphEngine.addNode(graph, 'builder', 'build', 'build', { plannedFiles: ['events/test.txt'] });
         builder.status = 'done';
 
-        const result = await orchestrator.execute(graph, { abortSignal: new AbortController().signal });
+        const result = await orchestrator.execute(graph, {
+            ...ORCHESTRATOR_OPTIONS,
+            abortSignal: new AbortController().signal,
+        });
 
         expect(result.success).to.equal(true);
         expect(executedNodes).to.include('loc_sweep');
@@ -1979,7 +1957,10 @@ describe('Orchestrator quality propagation', () => {
         const builder = TaskGraphEngine.addNode(graph, 'builder', 'build', 'build', { plannedFiles: ['events/test.txt'] });
         builder.status = 'done';
 
-        const result = await orchestrator.execute(graph, { abortSignal: new AbortController().signal });
+        const result = await orchestrator.execute(graph, {
+            ...ORCHESTRATOR_OPTIONS,
+            abortSignal: new AbortController().signal,
+        });
 
         expect(result.success).to.equal(true);
         expect(executedNodes).to.not.include('loc_sweep');
@@ -2008,7 +1989,10 @@ describe('Orchestrator quality propagation', () => {
         const builder = TaskGraphEngine.addNode(graph, 'builder', 'build', 'build', { plannedFiles: ['events/test.txt'] });
         builder.status = 'done';
 
-        const result = await orchestrator.execute(graph, { abortSignal: new AbortController().signal });
+        const result = await orchestrator.execute(graph, {
+            ...ORCHESTRATOR_OPTIONS,
+            abortSignal: new AbortController().signal,
+        });
 
         expect(reviewCalls).to.equal(1);
         expect(result.success).to.equal(false);
@@ -2023,7 +2007,10 @@ describe('Orchestrator quality propagation', () => {
         const builder = TaskGraphEngine.addNode(graph, 'builder', 'build', 'build', { plannedFiles: ['events/test.txt'] });
         builder.status = 'done';
 
-        const result = await orchestrator.execute(graph, { abortSignal: new AbortController().signal });
+        const result = await orchestrator.execute(graph, {
+            ...ORCHESTRATOR_OPTIONS,
+            abortSignal: new AbortController().signal,
+        });
 
         expect(result.success).to.equal(false);
         expect(result.failedNodes).to.include('quality_gate');
@@ -2042,7 +2029,10 @@ describe('Orchestrator quality propagation', () => {
         const builder = TaskGraphEngine.addNode(graph, 'builder', 'build', 'build', { plannedFiles: ['events/test.txt'] });
         builder.status = 'done';
 
-        const result = await orchestrator.execute(graph, { abortSignal: new AbortController().signal });
+        const result = await orchestrator.execute(graph, {
+            ...ORCHESTRATOR_OPTIONS,
+            abortSignal: new AbortController().signal,
+        });
 
         expect(result.success).to.equal(false);
         expect(result.qualityGate?.operationalFailure).to.equal(true);
@@ -2079,7 +2069,10 @@ describe('Orchestrator quality propagation', () => {
         const utility = TaskGraphEngine.addNode(graph, 'utility', 'utility', 'edit package', { plannedFiles: ['package.json'] });
         utility.status = 'done';
 
-        const result = await orchestrator.execute(graph, { abortSignal: new AbortController().signal });
+        const result = await orchestrator.execute(graph, {
+            ...ORCHESTRATOR_OPTIONS,
+            abortSignal: new AbortController().signal,
+        });
 
         expect(result.success).to.equal(true);
         expect(repairRoles).to.deep.equal(['utility']);
@@ -2098,7 +2091,10 @@ describe('Orchestrator quality propagation', () => {
         const builder = TaskGraphEngine.addNode(graph, 'builder', 'build', 'build', { plannedFiles: ['events/test.txt'] });
         builder.status = 'done';
 
-        const result = await orchestrator.execute(graph, { abortSignal: new AbortController().signal });
+        const result = await orchestrator.execute(graph, {
+            ...ORCHESTRATOR_OPTIONS,
+            abortSignal: new AbortController().signal,
+        });
 
         expect(result.success).to.equal(false);
         expect(result.qualityGate?.validationPending).to.equal(1);
@@ -2260,7 +2256,8 @@ describe('QualityGate', () => {
 
         expect(result.passed).to.equal(false);
         expect(result.acceptanceFailures[0]).to.include('functional_chain');
-        expect(reviewerOptions.mode).to.equal('review');
+        expect(reviewerOptions.schedulingState.profileName).to.equal('reviewer');
+        expect(reviewerOptions.schedulingState.phase).to.equal('verify');
         expect(reviewerOptions.useSlimPrompt).to.equal(true);
         expect(reviewerOptions.maxIterations).to.equal(15);
         expect(reviewerOptions.deferTerminalValidationToParent).to.equal(true);

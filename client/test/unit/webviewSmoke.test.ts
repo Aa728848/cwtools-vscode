@@ -39,20 +39,20 @@ describe('webview smoke checks', () => {
         expect(host).to.include('GENERATED_IMAGE_MARKER_PATTERN');
         expect(host).to.include('webview.asWebviewUri(vs.Uri.joinPath(dir, fileName)).toString()');
         expect(host).to.include('this.generatedImageDirectoryUri()');
-        expect(html).to.include('id="modeSel"');
+        expect(html).not.to.include('id="modeSel"');
         expect(html).to.include('id="composerAddBtn"');
-        expect(html).to.include('id="quickModeTrigger"');
-        expect(html).not.to.include('data-profile-domain="auto"');
-        expect(html).to.include('data-profile-domain="paradox"');
-        expect(html).to.include('data-profile-domain="general"');
-        expect(html).to.include('data-profile-domain="hybrid"');
-        expect(html).to.include('<span id="quickModeLabel">Paradox</span>');
+        expect(html).to.include('id="quickDomainTrigger"');
+        expect(html).not.to.include('data-scheduling-domain="auto"');
+        expect(html).to.include('data-scheduling-domain="paradox"');
+        expect(html).to.include('data-scheduling-domain="general"');
+        expect(html).to.include('data-scheduling-domain="hybrid"');
+        expect(html).to.include('<span id="quickDomainLabel">Paradox</span>');
         expect(html).not.to.include('data-profile-intent=');
         expect(html).not.to.include('data-profile-strategy=');
-        expect(script).to.include("let agentProfile: AgentProfileSelection = { domain: 'paradox', intent: 'auto', strategy: 'auto' };");
-        expect(script).to.include("agentProfile = { domain, intent: 'auto', strategy: 'auto' }");
-        expect(script).to.include("tr('Adaptive parallelism', '按需并行')");
-        expect(script).to.include('updateAgentDomain(domain);\n                setModeMenuOpen(false);');
+        expect(script).to.include("let schedulingState: AgentSchedulingStateView = {");
+        expect(script).to.include("schedulingState = { ...schedulingState, domainProfile: domain, profileName: undefined }");
+        expect(script).to.include("tr('Parallel', '并行')");
+        expect(script).to.include('updateSchedulingDomain(domain);\n                setDomainMenuOpen(false);');
         expect(css).not.to.include('.composer-write-mode-trigger.write-mode-elevated {');
         expect(css).not.to.include('.write-mode-item-danger.active { border-color: var(--error); }');
         expect(css).to.include('.composer-write-mode-trigger:focus-visible');
@@ -62,10 +62,10 @@ describe('webview smoke checks', () => {
         expect(css).not.to.include('#quickWriteModeTrigger:focus-visible');
         expect(css).not.to.include('#quickWriteModeTrigger.write-mode-danger {\n    background: transparent !important;\n    color: var(--error);');
         expect(css).to.include('#quickWriteModeTrigger.write-mode-danger { color: var(--warning); }');
-        expect(css).to.include('.write-mode-menu .write-mode-item-danger span:first-child { color: var(--warning); }');
+        expect(css).to.include('.write-domain-menu .write-mode-item-danger span:first-child { color: var(--warning); }');
         expect(css).not.to.include('.sandbox-backend-unavailable');
         expect(script).not.to.include("classList.toggle('sandbox-backend-unavailable'");
-        expect(css).to.include('.write-mode-menu .write-mode-item-danger:focus-visible { outline: none; box-shadow: none; }');
+        expect(css).to.include('.write-domain-menu .write-mode-item-danger:focus-visible { outline: none; box-shadow: none; }');
         expect(script).to.include('setWriteModeMenuOpen(false);\n                input.focus();');
         expect(html).to.include('id="quickModelTrigger"');
         expect(html).to.include('id="quickReasoningEffort"');
@@ -83,13 +83,13 @@ describe('webview smoke checks', () => {
         expect(html).to.include('role="listbox"');
         expect(html).to.include('id="btnWorkspace"');
         expect(html).to.include('data-composer-action="workflows"');
-        expect(html).to.include('data-composer-action="plan"');
+        expect(html).not.to.include('data-composer-action="plan"');
         expect(html).to.include('data-composer-action="goal"');
         expect(html).not.to.include('id="runtimeProfileMenuList"');
-        expect(script).to.include("switchMode('plan', /* fromUI */ true);");
+        expect(script).to.include("vscode.postMessage({ type: 'switchSchedulingDomain', domain });");
         expect(script).to.include("setInputText('/goal ');");
         expect(script).not.to.include('function renderRuntimeProfiles()');
-        expect(host).to.include('profileForUserDomain(normalizedStoredProfile.domain)');
+        expect(host).not.to.include('profileForUserDomain');
         expect(html).to.include('id="artifactDrawer"');
         expect(html).to.include("'mermaid.min.js'");
         expect(script).to.include("case 'workflowList'");
@@ -118,20 +118,20 @@ describe('webview smoke checks', () => {
         const script = fs.readFileSync(path.join(root, 'client/webview/chatPanel.ts'), 'utf8');
         const css = fs.readFileSync(path.join(root, 'client/webview/chatPanel.css'), 'utf8');
 
-        expect(host).to.include('resolvedAgentProfile: resolvedProfile');
-        expect(types).to.include('resolvedAgentProfile?: ResolvedAgentProfile');
-        expect(script).to.include('parseResolvedAgentProfileView(resolvedAgentProfile)');
-        expect(script).to.include("tr('Multi-Agent', '多 Agent')");
+        expect(host).to.include('schedulingState,');
+        expect(types).to.include('schedulingState?: AgentSchedulingState');
+        expect(script).to.include('parseSchedulingStateView(state)');
+        expect(script).to.include("tr('Specialists', '专家协作')");
         expect(script).to.include("case 'agentRoutingStatus'");
-        expect(script).to.include("tr('Decision summary', '判断摘要')");
+        expect(script).to.include("tr('Scheduling reason', '调度依据')");
         expect(script).to.include("tr('Awaiting your decision', '等待用户敲定')");
-        expect(script).to.include('m.resolvedAgentProfile');
+        expect(script).to.include('m.schedulingState');
         expect(css).to.include('.agent-routing-status');
         expect(css).to.include('.agent-routing-live');
-        expect(host).to.include("public getApprovedPlanExecutionMode(): 'orchestrator' | 'script'");
-        expect(host).to.include('mode: approvalMode');
-        expect(bridge).to.include('const executionMode = provider.getApprovedPlanExecutionMode();');
-        expect(bridge).to.include('provider.switchMode(executionMode, false, false);');
+        expect(host).to.include('public beginApprovedPlanExecution(): void');
+        expect(host).to.include("intent: 'execute', strategy: 'multi'");
+        expect(bridge).to.include('provider.beginApprovedPlanExecution();');
+        expect(bridge).not.to.include('provider.switchMode');
     });
 
     it('usage panel exposes request-level cache metrics and every required grouping', () => {
@@ -168,7 +168,6 @@ describe('webview smoke checks', () => {
             'annotations.ts',
             'contextMentions.ts',
             'i18n.ts',
-            'modes.ts',
             'slashCommands.ts',
         ];
 
@@ -245,7 +244,7 @@ describe('webview smoke checks', () => {
         expect(css).to.include('border-radius: 20px; overflow: visible;');
         expect(css).to.include('.composer-menu-item.active::after, .model-menu-item.active::after');
         expect(css).to.include('.reasoning-menu { width: max-content; min-width: max-content;');
-        expect(css).to.include('.send-btn, body.plan-mode .send-btn');
+        expect(css).to.include('.send-btn {');
         expect(css).to.include('border-radius: 13px; z-index: 240;');
         expect(css).to.include('.ds-review-btn');
         expect(script).to.include("el.className = 'slash-popup mention-popup'");

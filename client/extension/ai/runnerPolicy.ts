@@ -1,5 +1,5 @@
 import type { AgentMode, AgentRuntimeDomain, AgentToolFocus, ToolDefinition } from './types';
-import { defaultDomainForMode } from './agentProfile';
+import { domainForExecutionMode } from './runner/scheduling';
 import { TOOL_REGISTRY } from './tools/registry';
 import { evaluateEffectiveToolPolicy } from './runner/effectiveToolPolicy';
 import { agentProfileCatalog } from './runner/agentProfileCatalog';
@@ -8,7 +8,7 @@ export interface ToolFilterOptions {
     domain?: AgentRuntimeDomain;
     useSlimPrompt?: boolean;
     excludeTools?: string[];
-    agentProfileName?: string;
+    profileName?: string;
 }
 
 export type { AgentToolFocus } from './types';
@@ -33,7 +33,7 @@ const BUILD_LIFECYCLE_MODES = new Set<AgentMode>([
 ]);
 
 const READ_FOCUSED_MODES = new Set<AgentMode>([
-    'plan', 'orchestrator', 'explore', 'review', 'script_reviewer', 'general',
+    'plan', 'orchestrator', 'explore', 'review', 'script_reviewer',
 ]);
 
 export function initialToolFocusForMode(mode: AgentMode): AgentToolFocus | undefined {
@@ -118,7 +118,7 @@ const FOCUS_GUIDANCE: Record<AgentToolFocus, string> = {
 export function buildToolFocusReminder(
     mode: AgentMode,
     focus: AgentToolFocus | undefined,
-    domain: AgentRuntimeDomain = defaultDomainForMode(mode),
+    domain: AgentRuntimeDomain = domainForExecutionMode(mode),
 ): string {
     const normalizedFocus = focus;
     if (!normalizedFocus) return '';
@@ -196,7 +196,7 @@ export function filterToolDefinitionsForMode(
     mode: AgentMode,
     options: ToolFilterOptions = {},
 ): ToolDefinition[] {
-    const domain = options.domain ?? defaultDomainForMode(mode);
+    const domain = options.domain ?? domainForExecutionMode(mode);
     let filtered = tools.filter(t => {
         const entry = TOOL_REGISTRY.get(t.function.name as import('./types').AgentToolName);
         if (!entry) return false;
@@ -206,7 +206,7 @@ export function filterToolDefinitionsForMode(
             mode,
             domain,
             isSubAgent: options.useSlimPrompt,
-            profile: options.agentProfileName ? agentProfileCatalog.get(options.agentProfileName) : undefined,
+            profile: options.profileName ? agentProfileCatalog.get(options.profileName) : undefined,
         }).allowed;
     });
 
@@ -227,7 +227,6 @@ const MODE_ITERATION_LIMITS: Record<AgentMode, { min: number; base: number; cap:
     build: { min: 20, base: 40, cap: 60 },
     plan: { min: 10, base: 18, cap: 28 },
     explore: { min: 8, base: 16, cap: 24 },
-    general: { min: 8, base: 18, cap: 26 },
     utility: { min: 15, base: 30, cap: 45 },
     review: { min: 15, base: 30, cap: 45 },
     gui_expert: { min: 15, base: 30, cap: 45 },

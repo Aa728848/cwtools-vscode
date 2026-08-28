@@ -16,7 +16,7 @@
 import type { AgentRunEvent } from './runLedger';
 import { runLedger } from './runLedger';
 import { readRunRollout } from './rolloutStore';
-import type { AgentRunRecord, AgentMode, AgentStep, GenerationResult, AgentToolName } from '../types';
+import type { AgentRunRecord, AgentSchedulingState, AgentStep, GenerationResult, AgentToolName } from '../types';
 import type { AgentRunner, AgentRunnerOptions } from '../agentRunner';
 
 export type ReplayMode = 'recorded-tool' | 'full-replay';
@@ -26,8 +26,8 @@ export interface ReplayOverrides {
     model?: string;
     /** Switch provider for the replay. */
     providerId?: string;
-    /** Switch mode for the replay (e.g. `build` → `plan`). */
-    mode?: AgentMode;
+    /** Override the canonical scheduler for the replay. */
+    schedulingState?: AgentSchedulingState;
     /** Force a rebuild of the system prompt (useful after promptBuilder edits). */
     rebuildSystemPrompt?: boolean;
     /** Replay mode. Default: recorded-tool (mode A). */
@@ -162,7 +162,7 @@ export async function replayRun(
     if (!userPrompt) {
         throw new Error(`replayRun: could not extract original user prompt from ${originalRunId}`);
     }
-    const mode: AgentMode = overrides.mode ?? (rollout.run as any).mode ?? 'build';
+    const schedulingState = overrides.schedulingState ?? rollout.run.schedulingState;
     const replayMode: ReplayMode = overrides.replayMode ?? 'recorded-tool';
     if (replayMode === 'full-replay') {
         // Mode B not implemented — fall through to mode A but flag.
@@ -174,7 +174,7 @@ export async function replayRun(
     const opts: AgentRunnerOptions = {
         providerId: overrides.providerId,
         model: overrides.model,
-        mode,
+        schedulingState,
         replaySession: session,
         replayOf: originalRunId,
         rebuildSystemPrompt: overrides.rebuildSystemPrompt,

@@ -131,6 +131,24 @@ const vscodeStub = {
     Disposable: DisposableStub,
 };
 
+function testProjectProfile(workspaceRoot: string): import('../../extension/ai/types').ProjectProfile {
+    return {
+        schemaVersion: 2,
+        generatedAt: '2026-08-28T00:00:00.000Z',
+        workspaceRoot,
+        workspaceKind: 'paradox_mod',
+        projectName: 'KnowledgeTestMod',
+        game: { id: 'stellaris', displayName: 'Stellaris', confidence: 'high', evidence: ['test'] },
+        keyDirectories: [],
+        localisation: { roots: [], languages: [], encoding: 'UTF-8 with BOM', sampleFiles: [] },
+        identifiers: { namespaces: [], variablePrefixes: [], byType: {} },
+        routing: { recommendedWorkflowByIntent: [], preferredReadTools: [], avoidPatterns: [] },
+        validation: { lspReady: 'ready', indexStatus: 'ready', vanillaCache: 'configured' },
+        promptCards: {},
+        efficiencyHints: [],
+    };
+}
+
 function loadProjectKnowledge() {
     const moduleLoader = require('module') as { _load: (...args: any[]) => any };
     const originalLoad = moduleLoader._load;
@@ -280,16 +298,8 @@ describe('project knowledge current SQLite schema', () => {
         expect(commandCalls).to.deep.equal([]);
     });
 
-    it('ignores the removed .cwtools-ai knowledge path and writes only to .cwtools', async () => {
-        const legacyRoot = path.join(workspaceRoot, '.cwtools-ai', 'project', 'knowledge');
+    it('writes project knowledge only to the canonical .cwtools root', async () => {
         const primaryRoot = path.join(workspaceRoot, '.cwtools', 'project', 'knowledge');
-        fs.mkdirSync(legacyRoot, { recursive: true });
-        fs.writeFileSync(path.join(legacyRoot, 'manifest.json'), JSON.stringify({
-            schemaVersion: 2,
-            status: 'ready',
-            staleReasons: [],
-        }), 'utf8');
-        fs.writeFileSync(path.join(legacyRoot, 'knowledge.sqlite'), 'legacy-sqlite', 'utf8');
         nextSnapshot = {
             ok: true,
             status: 'ready',
@@ -311,7 +321,6 @@ describe('project knowledge current SQLite schema', () => {
 
         expect(fs.readFileSync(path.join(primaryRoot, 'knowledge.sqlite'), 'utf8')).to.equal('sqlite-v2');
         expect(fs.existsSync(path.join(primaryRoot, 'manifest.json'))).to.equal(true);
-        expect(fs.readFileSync(path.join(legacyRoot, 'knowledge.sqlite'), 'utf8')).to.equal('legacy-sqlite');
         expect((commandCalls[0]!.args[0] as { databasePath: string }).databasePath)
             .to.equal(path.join(primaryRoot, 'knowledge.sqlite'));
     });
@@ -470,7 +479,7 @@ describe('project knowledge current SQLite schema', () => {
             counts: { definitions: 1, workspaceDefinitions: 1, vanillaDefinitions: 0, definitionStacks: 0, topologyFiles: 1, topologyEdges: 0 },
             warnings: [],
         };
-        const profile = { schemaVersion: 1, game: { id: 'stellaris' } } as unknown as import('../../extension/ai/types').ProjectProfile;
+        const profile = testProjectProfile(workspaceRoot);
         await projectKnowledge.generateProjectKnowledge(workspaceRoot, profile);
         fs.mkdirSync(path.join(workspaceRoot, '.cwtools', 'project'), { recursive: true });
         fs.writeFileSync(path.join(workspaceRoot, '.cwtools', 'project', 'profile.json'), JSON.stringify(profile));
@@ -517,7 +526,7 @@ describe('project knowledge current SQLite schema', () => {
             counts: { definitions: 2, workspaceDefinitions: 1, vanillaDefinitions: 1, definitionStacks: 0, topologyFiles: 1, topologyEdges: 0 },
             warnings: [],
         };
-        const profile = { schemaVersion: 1, game: { id: 'stellaris' } } as unknown as import('../../extension/ai/types').ProjectProfile;
+        const profile = testProjectProfile(workspaceRoot);
         await projectKnowledge.generateProjectKnowledge(workspaceRoot, profile, { complete: true });
         fs.mkdirSync(path.join(workspaceRoot, '.cwtools', 'project'), { recursive: true });
         fs.writeFileSync(path.join(workspaceRoot, '.cwtools', 'project', 'profile.json'), JSON.stringify(profile), 'utf8');
@@ -565,7 +574,7 @@ describe('project knowledge current SQLite schema', () => {
             counts: { definitions: 1, workspaceDefinitions: 1, vanillaDefinitions: 0, definitionStacks: 0, topologyFiles: 1, topologyEdges: 0 },
             warnings: [],
         };
-        const profile = { schemaVersion: 1, game: { id: 'stellaris' } } as unknown as import('../../extension/ai/types').ProjectProfile;
+        const profile = testProjectProfile(workspaceRoot);
         await projectKnowledge.generateProjectKnowledge(workspaceRoot, profile);
         fs.mkdirSync(path.join(workspaceRoot, '.cwtools', 'project'), { recursive: true });
         fs.writeFileSync(path.join(workspaceRoot, '.cwtools', 'project', 'profile.json'), JSON.stringify(profile), 'utf8');
@@ -603,7 +612,7 @@ describe('project knowledge current SQLite schema', () => {
             counts: { definitions: 1, workspaceDefinitions: 1, vanillaDefinitions: 0, definitionStacks: 0, topologyFiles: 1, topologyEdges: 0 },
             warnings: [],
         };
-        const profile = { schemaVersion: 1, game: { id: 'stellaris' } } as unknown as import('../../extension/ai/types').ProjectProfile;
+        const profile = testProjectProfile(workspaceRoot);
         await projectKnowledge.generateProjectKnowledge(workspaceRoot, profile);
         fs.mkdirSync(path.join(workspaceRoot, '.cwtools', 'project'), { recursive: true });
         fs.writeFileSync(path.join(workspaceRoot, '.cwtools', 'project', 'profile.json'), JSON.stringify(profile), 'utf8');
@@ -656,7 +665,7 @@ describe('project knowledge current SQLite schema', () => {
 
     it('deduplicates saved files into one incremental batch per workspace', async () => {
         const secondRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'cwtools-project-knowledge-second-'));
-        const profile = { schemaVersion: 1, game: { id: 'stellaris' } } as unknown as import('../../extension/ai/types').ProjectProfile;
+        const profile = testProjectProfile(workspaceRoot);
         nextSnapshot = {
             ok: true,
             status: 'ready',
@@ -711,7 +720,7 @@ describe('project knowledge current SQLite schema', () => {
     });
 
     it('runs the synthetic add-change-delete lifecycle through incremental exports', async () => {
-        const profile = { schemaVersion: 2, game: { id: 'stellaris' } } as import('../../extension/ai/types').ProjectProfile;
+        const profile = testProjectProfile(workspaceRoot);
         nextSnapshot = {
             ok: true,
             status: 'ready',
@@ -759,7 +768,7 @@ describe('project knowledge current SQLite schema', () => {
     });
 
     it('keeps Git-style file changes queued without leaving progress active during startup validation', async () => {
-        const profile = { schemaVersion: 1, game: { id: 'stellaris' } } as unknown as import('../../extension/ai/types').ProjectProfile;
+        const profile = testProjectProfile(workspaceRoot);
         nextSnapshot = {
             ok: true,
             status: 'ready',
@@ -839,7 +848,7 @@ describe('project knowledge current SQLite schema', () => {
     });
 
     it('ignores unchanged saves and coalesces an open-document save with its file-watcher echo', async () => {
-        const profile = { schemaVersion: 1, game: { id: 'stellaris' } } as unknown as import('../../extension/ai/types').ProjectProfile;
+        const profile = testProjectProfile(workspaceRoot);
         nextSnapshot = {
             ok: true,
             status: 'ready',
@@ -902,7 +911,7 @@ describe('project knowledge current SQLite schema', () => {
     });
 
     it('bounds readiness polling after an indentation-only save and recovers on the next change', async () => {
-        const profile = { schemaVersion: 1, game: { id: 'stellaris' } } as unknown as import('../../extension/ai/types').ProjectProfile;
+        const profile = testProjectProfile(workspaceRoot);
         nextSnapshot = {
             ok: true,
             status: 'ready',
@@ -973,7 +982,7 @@ describe('project knowledge current SQLite schema', () => {
 
     it('routes secondary-root changes into one primary incremental export', async () => {
         const secondRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'cwtools-project-knowledge-combined-'));
-        const profile = { schemaVersion: 1, game: { id: 'stellaris' } } as unknown as import('../../extension/ai/types').ProjectProfile;
+        const profile = testProjectProfile(workspaceRoot);
         vscodeStub.workspace.workspaceFolders = [{ uri: { fsPath: workspaceRoot } }, { uri: { fsPath: secondRoot } }];
         nextSnapshot = {
             ok: true,
@@ -1037,7 +1046,7 @@ describe('project knowledge current SQLite schema', () => {
         expect(afterShader).to.not.equal(before);
         expect(afterFxh).to.not.equal(afterShader);
 
-        const profile = { schemaVersion: 1, game: { id: 'stellaris' } } as unknown as import('../../extension/ai/types').ProjectProfile;
+        const profile = testProjectProfile(workspaceRoot);
         nextSnapshot = {
             ok: true,
             status: 'ready',

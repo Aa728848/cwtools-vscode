@@ -280,8 +280,8 @@ export interface OrchestratorResult {
 
 /** Orchestrator configuration options */
 export interface OrchestratorOptions {
-    /** Capability domain inherited by every child Agent in this graph. */
-    domain?: import('../types').AgentRuntimeDomain;
+    /** Canonical scheduler state inherited by every child Agent in this graph. */
+    schedulingState: import('../types').AgentSchedulingState;
     /** Blackboard snapshot restored before execution (resumed graphs). */
     restoredBlackboard?: SerializedBlackboard;
     /** Maximum number of concurrent Agents (default 4) */
@@ -308,8 +308,6 @@ export interface OrchestratorOptions {
     delegationDepth?: number;
     /** Whether the parent run belongs to an active durable goal. */
     durableGoal?: boolean;
-    /** Force every child into a read-only tool surface for Explore-mode evidence fan-out. */
-    readOnlyFanout?: boolean;
     /** The original top-level user turn, preserved across child execution. */
     originalUserMessage?: string;
     /** Host-enforced user ownership and warning policy. */

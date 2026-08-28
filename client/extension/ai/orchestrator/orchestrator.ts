@@ -36,7 +36,7 @@ import { SOURCE, ORCHESTRATOR_MSG, aiText } from '../messages';
 import { getAgentToolTargetFiles } from '../runner/toolScheduler';
 import { MUTATING_TOOLS, WRITE_TOOLS } from '../tools/registry';
 import { mergeTokenUsageTotals } from '../cacheCapability';
-import { defaultDomainForMode } from '../agentProfile';
+import { schedulingStateFromAdmission } from '../runner/scheduling';
 import { agentProfileCatalog } from '../runner/agentProfileCatalog';
 import { parseAgentHandoff, repairAgentHandoff, validateAgentHandoff } from '../runner/agentHandoff';
 import { normalizeDelegationDepth } from './delegationDepth';
@@ -158,10 +158,6 @@ export class Orchestrator {
     ): Promise<OrchestratorResult> {
         options = {
             ...options,
-            domain: options.domain ?? ([...taskGraph.nodes.values()].some(node =>
-                ['build', 'loc_writer', 'gui_expert', 'script_reviewer'].includes(node.agentType))
-                ? 'paradox'
-                : 'general'),
             userExecutionPolicy: options.userExecutionPolicy ?? taskGraph.metadata.userExecutionPolicy,
         };
         const emitStep = options.onStep ?? (() => {});
@@ -623,7 +619,7 @@ export class Orchestrator {
         orchestratorOptions: OrchestratorOptions,
     ): Promise<SubAgentResult> {
         const profile = getAgentProfile(taskNode.agentType);
-        const childDomain = orchestratorOptions.domain ?? defaultDomainForMode(profile.mode);
+        const childDomain = orchestratorOptions.schedulingState.domainProfile;
 
         // Model selection priority chain:
         // 1. TaskNode explicit override
@@ -662,23 +658,45 @@ export class Orchestrator {
             'convert_image_to_dds', 'convert_audio', 'deploy_mod_asset',
             ...(onlyLocalisationYmlWrites ? LOCALISATION_GENERIC_WRITE_TOOLS : []),
             ...(userOwnsLocalisation ? ['write_localisation'] : []),
-            ...(orchestratorOptions.readOnlyFanout
+            ...(orchestratorOptions.schedulingState.authorization !== 'workspace_write'
                 ? [...MUTATING_TOOLS, 'dispatch_agents', 'merge_results']
                 : []),
         ];
+
+        const childAuthorization = profile.toolBudget === 'read_only'
+            ? 'read_only'
+            : profile.toolBudget === 'plan'
+                ? 'plan_write_only'
+                : 'workspace_write';
+        const childPhase = profile.mode === 'plan'
+            ? 'plan'
+            : profile.mode === 'review' || profile.mode === 'script_reviewer'
+                ? 'verify'
+                : profile.mode === 'explore'
+                    ? 'inspect'
+                    : 'execute';
+        const childSchedulingState = {
+            ...schedulingStateFromAdmission({
+                domainProfile: childDomain,
+                authorization: childAuthorization,
+                initialPhase: childPhase,
+                explicitDelegation: false,
+                confidence: 1,
+                evidence: [`orchestrator role: ${taskNode.agentType}`],
+            }, `orchestrator role: ${taskNode.agentType}`),
+            profileName: sandbox.runtimeProfileName,
+        };
 
         const runnerOptions: AgentRunnerOptions = {
             sandbox,
             providerId,
             model,
             reasoningEffort: taskNode.reasoningEffort ?? orchestratorOptions.reasoningEffort,
-            mode: profile.mode,
-            agentProfileName: sandbox.agentProfileName!,
+            schedulingState: childSchedulingState,
             // The parent already approved and decomposed this Execute task.
             // Writer roles start with execution-focused guidance and never reopen
             // the main-Agent design/approval lifecycle.
             initialToolFocus: profile.mode === 'build' || profile.mode === 'utility' ? 'write' : undefined,
-            domain: childDomain,
             onStep,
             abortSignal, // Replaced below by the child controller with parent/idle guards.
             streaming: true, // Enable streaming output to visualize the progress of deep thinking
@@ -1167,7 +1185,7 @@ export class Orchestrator {
             const finalOutput = result.explanation || result.code || '';
             const summaryProfileName = taskNode.agentType === 'review' || taskNode.agentType === 'script_reviewer'
                 ? 'reviewer'
-                : taskNode.agentType === 'explore' || taskNode.agentType === 'general'
+                : taskNode.agentType === 'explore'
                     ? 'explore'
                     : childDomain === 'paradox' ? 'paradox-coder' : 'general-coder';
             const summaryPolicy = agentProfileCatalog.get(summaryProfileName)?.summaryPolicy;

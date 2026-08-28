@@ -2,6 +2,7 @@ import { expect } from 'chai';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+import { GENERAL_WRITE } from './schedulingFixtures';
 
 /**
  * Anchor-aware repeated write-failure guard (P0 design 1).
@@ -43,8 +44,7 @@ function makeWorkspace(): string {
 }
 
 function makeContext(scopeId?: string): any {
-    // domain: 'general' 走无 LSP 的诊断分支，避免测试环境依赖语言服务器。
-    return { runnerOptions: { topicId: 'topic-a', domain: 'general' }, scopeId };
+    return { runnerOptions: { topicId: 'topic-a', schedulingState: GENERAL_WRITE }, scopeId };
 }
 
 describe('anchor 级重复写失败守卫（P0 设计 1）', () => {

@@ -16,10 +16,6 @@ import {
 } from '../../shared/protocolValidation';
 
 const isSurface = isOneOf(['chat', 'manager'] as const);
-const isMode = isOneOf([
-    'build', 'plan', 'explore', 'general', 'utility', 'review', 'gui_expert',
-    'script_reviewer', 'loc_translator', 'loc_writer', 'orchestrator', 'script',
-] as const);
 const isRecordArray = isArrayOf(isObject);
 const isQuestionOption = (value: unknown): boolean => {
     if (!isRecord(value)) return false;
@@ -43,8 +39,8 @@ const isAny = () => true;
 const noFields = fields();
 
 const validators = {
-    addUserMessage: fields({ text: isString, messageIndex: isInteger }, { images: optional(isStringArray), contexts: optional(isArray), resolvedAgentProfile: optional(isObject) }),
-    agentRoutingStatus: fields({ phase: isOneOf(['classifying', 'resolved', 'fallback'] as const) }, { profile: optional(isObject) }),
+    addUserMessage: fields({ text: isString, messageIndex: isInteger }, { images: optional(isStringArray), contexts: optional(isArray), schedulingState: optional(isObject) }),
+    agentRoutingStatus: fields({ phase: isOneOf(['classifying', 'resolved', 'fallback'] as const) }, { schedulingState: optional(isObject) }),
     queuedUserInput: fields({ text: isString, messageIndex: isInteger }, { images: optional(isStringArray), contexts: optional(isArray) }),
     startBackgroundGeneration: noFields,
     agentStep: fields({ step: isObject }),
@@ -56,9 +52,6 @@ const validators = {
     loadTopicMessages: fields({ messages: isRecordArray }, { targetSurface: optional(isSurface) }),
     streamToken: fields({ token: isString }),
     clearChat: fields({}, { targetSurface: optional(isSurface) }),
-    modeChanged: fields({ mode: isMode }, { label: optional(isString) }),
-    agentProfileChanged: fields({ profile: isObject }),
-    runtimeProfiles: fields({ revision: isFiniteNumber, profiles: isRecordArray }),
     workflowList: fields({ workflows: isRecordArray }, { currentWorkflowId: optional(value => value === null || typeof value === 'string'), labels: optional(isObject) }),
     workflowChanged: fields({}, { workflowId: optional(value => value === null || typeof value === 'string'), workflow: optional(isObject), labels: optional(isObject) }),
     slashCommandList: fields({ commands: isRecordArray }),
@@ -95,13 +88,12 @@ const validators = {
     }),
     questionResolved: fields({ questionId: isString }, { cancelled: optional(isBoolean) }),
     floatingCardResolved: fields({ card: isString }, { id: optional(isString) }),
-    setMode: fields({ mode: isMode }),
-    setAgentProfile: fields({ profile: isObject }, { resolved: optional(isObject) }),
+    setSchedulingState: fields({ schedulingState: isObject }),
     replaySteps: fields({ steps: isRecordArray, isGenerating: isBoolean }),
-    planFileSaved: fields({ filePath: isString, relPath: isString }, { mode: optional(isMode) }),
+    planFileSaved: fields({ filePath: isString, relPath: isString }),
     walkthroughFileSaved: fields({ filePath: isString, relPath: isString }),
     blueprintFileSaved: fields({ filePath: isString, relPath: isString }),
-    renderPlan: fields({ sections: isStringArray }, { planText: optional(isString), mode: optional(isMode) }),
+    renderPlan: fields({ sections: isStringArray }, { planText: optional(isString) }),
     renderWalkthrough: fields({ sections: isStringArray }),
     renderBlueprint: fields({ sections: isStringArray }, { planText: optional(isString) }),
     fileList: fields({ files: isStringArray }),
@@ -122,10 +114,10 @@ const validators = {
     }),
     mentionSearchResults: fields({ results: isRecordArray }),
     managerSnapshot: fields({
-        topics: isRecordArray, messages: isRecordArray, mode: isMode, agentProfile: isObject,
+        topics: isRecordArray, messages: isRecordArray, schedulingState: isObject,
         isGenerating: isBoolean, liveStepCount: isFiniteNumber, artifacts: isRecordArray,
     }, {
-        stats: optional(isObject), messageCount: optional(isFiniteNumber), resolvedAgentProfile: optional(isObject),
+        stats: optional(isObject), messageCount: optional(isFiniteNumber),
         workflowId: optional(value => value === null || typeof value === 'string'), todos: optional(isRecordArray),
         activity: optional(isObject), runtimeInspector: optional(isObject), transcript: optional(isObject),
     }),

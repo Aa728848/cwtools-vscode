@@ -12,6 +12,9 @@
  */
 
 import { expect } from 'chai';
+import { GENERAL_PARALLEL } from './schedulingFixtures';
+
+const ORCHESTRATOR_OPTIONS = { schedulingState: GENERAL_PARALLEL };
 
 const vscodeStub = {
     workspace: {
@@ -238,12 +241,11 @@ describe('buildOrchestrationCatalog', () => {
     });
 
     const record = (overrides: Partial<StoredOrchestration> = {}): StoredOrchestration => ({
-        version: 1,
+        version: 2,
         graphId: 'graph_a',
         topicId: 'topic_1',
         runId: 'run_1',
         domain: 'paradox',
-        mode: 'script',
         graph: {
             id: 'graph_a',
             userPrompt: 'demo',
@@ -493,7 +495,7 @@ describe('ParallelExecutor — clarification resume bookkeeping', () => {
             needsClarification: true,
             clarification: 'Which namespace?',
             runId: 'run_77',
-        }), {});
+        }), ORCHESTRATOR_OPTIONS);
 
         const node = graph.nodes.get('A')!;
         expect(node.resumeContextRef).to.equal('run_77');
@@ -508,7 +510,7 @@ describe('ParallelExecutor — clarification resume bookkeeping', () => {
         node.resumeContextRef = 'stale_run';
         node.pendingClarification = 'stale question';
 
-        await executor.executeGraph(graph, new Blackboard(), async () => baseResult('A'), {});
+        await executor.executeGraph(graph, new Blackboard(), async () => baseResult('A'), ORCHESTRATOR_OPTIONS);
 
         expect(node.resumeContextRef).to.equal(undefined);
         expect(node.pendingClarification).to.equal(undefined);
@@ -526,7 +528,7 @@ describe('ParallelExecutor — clarification resume bookkeeping', () => {
         await executor.executeGraph(graph, new Blackboard(), async executionNode => {
             seenByChild = executionNode.resumeAnswer;
             return baseResult('A');
-        }, {});
+        }, ORCHESTRATOR_OPTIONS);
 
         expect(seenByChild).to.equal('use namespace foo');
         expect(node.resumeAnswer).to.equal(undefined);

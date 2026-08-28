@@ -1,7 +1,6 @@
 import * as path from 'path';
-import * as fs from 'fs';
 import * as vs from 'vscode';
-import { getAiStorageRoot, getAiStorageRootCandidates, getPrivateAiStorageRoot, getPrivateTopicRootCandidates } from './workspacePaths';
+import { getAiStorageRoot, getPrivateAiStorageRoot, getPrivateTopicRoot } from './workspacePaths';
 import { isPathInsideOrEqual } from '../pathScope';
 import { getProjectWorkspaceRoot } from './workspacePaths';
 import { getSessionPermissionMode } from './runner/sessionPermissions';
@@ -55,43 +54,28 @@ export function sanitizePathInput(inputPath: string): string {
 
 // Shared artifacts (project profile, workflows) intentionally stay in the
 // project .cwtools directory; topic-scoped private data lives in the private
-// agent storage root. Mirrors the split in migrateLegacyPrivateAgentState.
+// agent storage root.
 const SHARED_AI_STORAGE_SEGMENTS = new Set(['project', 'workflows']);
 
-function resolveAiStorageAlias(filePath: string, workspaceRoot: string, preferExisting = false): string | undefined {
+function resolveAiStorageAlias(filePath: string, workspaceRoot: string): string | undefined {
     const normalized = filePath.trim().replace(/\\/g, '/');
-    const match = normalized.match(/^\.(?:cwtools|cwtools-ai)(?:\/(.*))?$/i);
+    const match = normalized.match(/^\.cwtools(?:\/(.*))?$/i);
     if (!match) return undefined;
 
     const rest = (match[1] ?? '').split('/').filter(Boolean);
     if (!SHARED_AI_STORAGE_SEGMENTS.has(rest[0]?.toLowerCase() ?? '')) {
-        const topicRoots = getPrivateTopicRootCandidates(workspaceRoot);
-        if (preferExisting) {
-            const existing = topicRoots
-                .map(root => path.join(root, ...rest))
-                .find(candidate => fs.existsSync(candidate));
-            if (existing) return existing;
-        }
-        const primary = topicRoots[0];
-        if (primary) return path.join(primary, ...rest);
-    }
-
-    const roots = getAiStorageRootCandidates(workspaceRoot);
-    if (preferExisting) {
-        const existing = roots
-            .map(root => path.join(root, ...rest))
-            .find(candidate => fs.existsSync(candidate));
-        if (existing) return existing;
+        const topicRoot = getPrivateTopicRoot(workspaceRoot);
+        if (topicRoot) return path.join(topicRoot, ...rest);
     }
 
     const primary = getAiStorageRoot(workspaceRoot);
     return primary ? path.join(primary, ...rest) : filePath;
 }
 
-export function resolveWorkspaceFolderAlias(filePath: string, workspaceRoot: string, preferExistingAiPath = false): string {
+export function resolveWorkspaceFolderAlias(filePath: string, workspaceRoot: string): string {
     if (path.isAbsolute(filePath)) return filePath;
 
-    const aiResolved = resolveAiStorageAlias(filePath, workspaceRoot, preferExistingAiPath);
+    const aiResolved = resolveAiStorageAlias(filePath, workspaceRoot);
     if (aiResolved) return aiResolved;
 
     const normalized = filePath.trim().replace(/\\/g, '/');
@@ -112,10 +96,9 @@ export function resolveWorkspaceFolderAlias(filePath: string, workspaceRoot: str
 export function resolveWorkspacePathInput(
     inputPath: string,
     workspaceRoot: string,
-    options?: { preferExistingAiPath?: boolean }
 ): WorkspacePathResolution {
     const sanitized = sanitizePathInput(inputPath);
-    const workspacePath = resolveWorkspaceFolderAlias(sanitized, workspaceRoot, options?.preferExistingAiPath === true);
+    const workspacePath = resolveWorkspaceFolderAlias(sanitized, workspaceRoot);
     const resolved = path.resolve(path.isAbsolute(workspacePath)
         ? workspacePath
         : path.join(workspaceRoot, workspacePath));

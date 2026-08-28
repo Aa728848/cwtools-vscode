@@ -421,20 +421,6 @@ export class SemanticVerifier {
                     && evidence.some(item => item.kind.toLowerCase() === kind
                         && item.id.toLowerCase() === subject.toLowerCase()
                         && ['read', 'call', 'reference', 'clear'].includes(item.operation));
-            } else if ((check.type === 'flag_lifecycle' || check.type === 'target_lifecycle') && subject) {
-                // Resume compatibility for persisted plans created before
-                // typed_lifecycle existed. Infer the exact CWT kind from the
-                // evidence pair instead of recreating the retired game tables.
-                const byKind = new Map<string, SemanticEvidence[]>();
-                for (const item of evidence) {
-                    if (item.id.toLowerCase() !== subject.toLowerCase()) continue;
-                    const values = byKind.get(item.kind.toLowerCase()) ?? [];
-                    values.push(item);
-                    byKind.set(item.kind.toLowerCase(), values);
-                }
-                passed = [...byKind.values()].some(items =>
-                    items.some(item => ['set', 'save', 'define'].includes(item.operation))
-                    && items.some(item => ['read', 'call', 'reference', 'clear'].includes(item.operation)));
             } else if (check.type === 'localisation_owner' && subject) {
                 const normalized = subject.toLowerCase();
                 const ownerKind = check.entityKind?.toLowerCase();

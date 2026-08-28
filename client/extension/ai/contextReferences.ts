@@ -17,7 +17,7 @@ import type { BlackboardEntry } from './orchestrator/types';
 import { getProjectWorkspaceRoot, resolveProjectWorkspacePath } from './workspacePaths';
 
 function isAgentTempPath(filePath: string): boolean {
-    return /(?:^|[\\/])\.(?:cwtools|cwtools-ai)[\\/](?:tmp|[^\\/]+[\\/]tmp)(?:[\\/]|$)/i.test(filePath);
+    return /(?:^|[\\/])\.cwtools[\\/](?:tmp|[^\\/]+[\\/]tmp)(?:[\\/]|$)/i.test(filePath);
 }
 
 const QUOTED_TEXT_PROMPT_LIMIT = 8000;

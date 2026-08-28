@@ -140,18 +140,18 @@ describe('agent manager cross-surface contracts', () => {
         expect(css).to.include('.subagent-task-panel');
     });
 
-    it('shares runtime profiles, inspector, and canonical transcript across surfaces', () => {
+    it('shares canonical scheduling, inspector, and transcript across surfaces', () => {
         const hostTypes = fs.readFileSync(path.join(root, 'client/extension/ai/types.ts'), 'utf8');
         const hostPanel = fs.readFileSync(path.join(root, 'client/extension/ai/chatPanel.ts'), 'utf8');
         const chat = fs.readFileSync(path.join(root, 'client/webview/chatPanel.ts'), 'utf8');
         const manager = fs.readFileSync(path.join(root, 'client/webview/agentManager.ts'), 'utf8');
 
-        expect(hostTypes).to.include("type: 'runtimeProfiles'");
+        expect(hostTypes).to.include("type: 'setSchedulingState'");
         expect(hostTypes).to.include("type: 'runtimeInspectorSnapshot'");
         expect(hostTypes).to.include("type: 'transcriptSnapshot'");
         expect(hostPanel).to.include('agentProfileCatalog.startWatching()');
         expect(hostPanel).to.include("getTranscript(currentTopicId, currentTopicId, 'block')");
-        expect(chat).to.include("case 'runtimeProfiles'");
+        expect(chat).to.include("case 'setSchedulingState'");
         expect(chat).to.include("case 'runtimeInspectorSnapshot'");
         expect(manager).to.include("case 'transcriptSnapshot'");
         expect(manager).to.include('Canonical transcript');

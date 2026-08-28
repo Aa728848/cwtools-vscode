@@ -184,7 +184,7 @@ describe('autoReviewer', () => {
         const decision = await reviewer.review({
             ...baseRequest,
             riskLevel: 2,
-            command: 'python ".cwtools-ai\\topic_123\\scratch\\agent_helper.py" --dry-run',
+            command: 'python ".cwtools\\topic_123\\scratch\\agent_helper.py" --dry-run',
             classification: ['interpreter'],
         });
 
@@ -212,7 +212,7 @@ describe('autoReviewer', () => {
         const decision = await reviewer.review({
             ...baseRequest,
             riskLevel: 2,
-            command: 'python "D:\\other\\.cwtools-ai\\topic_123\\scratch\\agent_helper.py"',
+            command: 'python "D:\\other\\.cwtools\\topic_123\\scratch\\agent_helper.py"',
             classification: ['interpreter'],
         });
 

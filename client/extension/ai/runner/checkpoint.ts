@@ -1,8 +1,7 @@
 import * as fs from 'fs';
 import * as pathModule from 'path';
 import { getProjectWorkspaceRoot, getPrivateTopicStorageDir, getPrivateTopicStorageDirCandidates } from '../workspacePaths';
-import type { AgentResumeState, ChatMessage, AgentMode, AgentRuntimeDomain, AgentSchedulingState, ToolCall } from '../types';
-import { defaultDomainForMode } from '../agentProfile';
+import type { AgentResumeState, ChatMessage, AgentSchedulingState, ToolCall } from '../types';
 import type { AgentToolExecutor } from '../agentTools';
 import { isPathInsideOrEqual } from '../../pathScope';
 import { ErrorReporter } from '../errorReporter';
@@ -20,7 +19,6 @@ import type { DomainSnapshot } from './state/domainModel';
 import { goalStore } from './goalStore';
 import { agentTaskManager } from './taskManager';
 import { createStepRequest, isRetryStepRequest, type RetryStepPayload } from './stepRequest';
-import { migrateLegacyRuntimeState } from './state/migrations';
 
 export const RESUME_TAIL_MESSAGE_LIMIT = 24;
 const RESUME_SUMMARY_CHAR_LIMIT = 12000;
@@ -139,13 +137,11 @@ async function archiveFullTranscript(
 */
 export async function saveResumeState(
     topicId: string,
-    mode: AgentMode,
+    schedulingState: AgentSchedulingState,
     messages: ChatMessage[],
     toolExecutor: AgentToolExecutor,
     runId?: string,
     pendingToolCalls?: ToolCall[],
-    domain: AgentRuntimeDomain = defaultDomainForMode(mode),
-    schedulingState?: AgentSchedulingState,
 ): Promise<void> {
     if (getHistoryPolicy().persistence !== 'full') return;
     try {
@@ -189,8 +185,6 @@ export async function saveResumeState(
         const resumeState: AgentResumeState = {
             version: 4,
             timestamp: Date.now(),
-            mode,
-            domain,
             schedulingState,
             messages: compactedMessages,
             todos: toolExecutor.getTodos(),
@@ -209,7 +203,7 @@ export async function saveResumeState(
             pendingStepRequests: pendingToolCalls?.length
                 ? [createStepRequest<RetryStepPayload>('retry', { pendingToolCalls }, { sourceId: runId })]
                 : undefined,
-            schedulingRevision: schedulingState?.revision,
+            schedulingRevision: schedulingState.revision,
             goalId: goal?.goalId,
             taskIds,
             providerId: runRecord?.providerId,
@@ -229,7 +223,7 @@ export async function saveResumeState(
 
 /**
  * Read the resumable state under the specified topicId.
- * Supports V4, V3, V2, and the legacy unversioned format.
+ * Only the current scheduler-backed V4 contract is accepted.
  */
 export async function loadResumeState(topicId: string): Promise<AgentResumeState | null> {
     try {
@@ -238,9 +232,17 @@ export async function loadResumeState(topicId: string): Promise<AgentResumeState
             .map(dir => pathModule.join(dir, 'resume_state.json'))
             .find(candidate => fs.existsSync(candidate) || fs.existsSync(`${candidate}.bak`));
         if (!resumePath) return null;
-        const loaded = readJsonWithBackup<AgentResumeState>(resumePath, (value): value is AgentResumeState => (
-            !!value && typeof value === 'object' && typeof (value as AgentResumeState).timestamp === 'number'
-        ));
+        const loaded = readJsonWithBackup<AgentResumeState>(resumePath, (value): value is AgentResumeState => {
+            if (!value || typeof value !== 'object') return false;
+            const candidate = value as Partial<AgentResumeState>;
+            if (candidate.version !== 4 || typeof candidate.timestamp !== 'number') return false;
+            try {
+                normalizeSchedulingState(candidate.schedulingState);
+                return true;
+            } catch {
+                return false;
+            }
+        });
         if (!loaded) return null;
         const raw = loaded.value;
 
@@ -276,35 +278,14 @@ export async function loadResumeState(topicId: string): Promise<AgentResumeState
             }
         }
         raw.messages = prepareMessagesForResume(raw.messages);
+        raw.schedulingState = normalizeSchedulingState(raw.schedulingState);
         const typedPending = Array.isArray(raw.pendingStepRequests)
             ? raw.pendingStepRequests.filter(isRetryStepRequest)
             : [];
-        if (typedPending.length === 0 && Array.isArray(raw.pendingToolCalls) && raw.pendingToolCalls.length > 0) {
-            const migrated = createStepRequest<RetryStepPayload>(
-                'retry',
-                { pendingToolCalls: raw.pendingToolCalls },
-                { sourceId: raw.runId },
-            );
-            if (isRetryStepRequest(migrated)) typedPending.push(migrated);
-        }
         raw.pendingStepRequests = typedPending.length > 0 ? typedPending : undefined;
-        raw.pendingToolCalls = undefined;
-        raw.domain = raw.domain ?? defaultDomainForMode(raw.mode);
-        raw.schedulingState = normalizeSchedulingState(raw.schedulingState, raw.mode, raw.domain);
-        if (!raw.domainSnapshot) {
-            raw.domainSnapshot = migrateLegacyRuntimeState({
-                agentId: raw.topicId || topicId,
-                mode: raw.mode,
-                schedulingState: raw.schedulingState,
-                context: { messages: raw.messages, toolSchemas: raw.toolDisclosureState?.loaded ?? [] },
-            });
-            raw.domainSequence = raw.domainSnapshot.sequence;
-            raw.version = 4;
-            await atomicWriteJson(resumePath, raw);
-        }
         raw.recoveredFromBackup = loaded.recoveredFromBackup;
-        // A process restart ends the approval session. Only explicitly durable
-        // rules may be restored; legacy V2 session-only approvals are ignored.
+        // A process restart ends the approval session. Restore only rules that
+        // the V4 checkpoint explicitly marked durable.
         PermissionPolicyStore.getInstance().restore(raw.permissionRules, { allowSessionOnly: false });
         return raw as AgentResumeState;
     } catch {

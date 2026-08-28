@@ -6,7 +6,6 @@ import {
     type PanelSettings,
     type WebViewMessage,
 } from '../types';
-import { isAgentMode, isAgentProfileSelection } from '../agentProfile';
 import {
     fields,
     isArrayOf,
@@ -98,9 +97,9 @@ const isOptionalStringArray = optional(isStringArray);
 const noFields = fields();
 
 const validators: Record<WebViewMessage['type'], MessageValidator> = {
-    sendMessage: fields({ text: isString }, { attachedFiles: isOptionalStringArray, images: isOptionalStringArray, agentProfile: optional(isAgentProfileSelection) }),
+    sendMessage: fields({ text: isString }, { attachedFiles: isOptionalStringArray, images: isOptionalStringArray }),
     steerGeneration: fields({ text: isString }, { images: isOptionalStringArray }),
-    sendMessageWithReference: fields({ text: isString, contexts: isContexts }, { images: isOptionalStringArray, agentProfile: optional(isAgentProfileSelection) }),
+    sendMessageWithReference: fields({ text: isString, contexts: isContexts }, { images: isOptionalStringArray }),
     editAndResendMessage: fields({ messageIndex: isInteger, text: isString }, { contexts: optional(isContexts), images: isOptionalStringArray }),
     openContextReference: fields({ context: isContextItem }),
     insertCode: fields({ code: isString }),
@@ -118,8 +117,7 @@ const validators: Record<WebViewMessage['type'], MessageValidator> = {
     setShowArchived: fields({ show: isBoolean }),
     configureProvider: noFields,
     cancelGeneration: noFields,
-    switchMode: fields({ mode: isAgentMode }),
-    switchAgentProfile: fields({ profile: isAgentProfileSelection }),
+    switchSchedulingDomain: fields({ domain: isOneOf(['paradox', 'general', 'hybrid'] as const) }),
     switchWorkflow: fields({}, { workflowId: optional(nullable(isString)) }),
     openAgentManager: noFields,
     openSettings: noFields,

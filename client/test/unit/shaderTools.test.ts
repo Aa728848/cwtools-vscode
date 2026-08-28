@@ -5,6 +5,7 @@ import * as path from 'path';
 import { TOOL_DEFINITIONS } from '../../extension/ai/tools/definitions';
 import { TOOL_REGISTRY } from '../../extension/ai/tools/registry';
 import { getGameKnowledge } from '../../extension/ai/gameKnowledge';
+import { PARADOX_WRITE } from './schedulingFixtures';
 
 const SHADER_TOOLS = [
     'query_shader_symbol',
@@ -105,7 +106,7 @@ function createExecutor(workspaceRoot: string, handler: (command: string, args: 
 }
 
 const buildContext = {
-    runnerOptions: { mode: 'build' },
+    runnerOptions: { schedulingState: PARADOX_WRITE },
     onPermissionRequest: async () => true,
 } as any;
 

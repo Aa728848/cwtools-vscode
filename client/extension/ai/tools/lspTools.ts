@@ -64,7 +64,7 @@ interface PdxTextSearchResult {
 }
 
 function isAgentTempPath(filePath: string): boolean {
-    return /(?:^|[\\/])\.(?:cwtools|cwtools-ai)[\\/](?:tmp|[^\\/]+[\\/]tmp)(?:[\\/]|$)/i.test(filePath);
+    return /(?:^|[\\/])\.cwtools[\\/](?:tmp|[^\\/]+[\\/]tmp)(?:[\\/]|$)/i.test(filePath);
 }
 
 /** Generated agent state and backup artifacts must never count as project references. */
@@ -73,7 +73,7 @@ export function isExcludedModSearchPath(workspaceRoot: string, filePath: string)
     if (!relative || relative.startsWith('../') || path.isAbsolute(relative)) return true;
     const lower = relative.toLowerCase();
     const segments = lower.split('/');
-    if (segments.some(segment => ['.cwtools', '.cwtools-ai', '.git', 'node_modules', 'release'].includes(segment))) return true;
+    if (segments.some(segment => ['.cwtools', '.git', 'node_modules', 'release'].includes(segment))) return true;
     const base = segments[segments.length - 1] ?? '';
     return base.endsWith('.bak')
         || base.endsWith('.tmp')
@@ -2864,7 +2864,7 @@ export class LspToolHandler {
         severity?: 'error' | 'warning' | 'info' | 'hint' | 'all';
         limit?: number;
     }, context?: import('../types').AgentToolContext): Promise<import('../types').GetDiagnosticsResult> {
-        const generalDomain = context?.runnerOptions?.domain === 'general';
+        const generalDomain = context?.runnerOptions?.schedulingState.domainProfile === 'general';
         const requestedLimit = typeof args.limit === 'number' && Number.isFinite(args.limit)
             ? args.limit
             : 500;
@@ -3156,7 +3156,7 @@ export class LspToolHandler {
 
             const options: any = {
                 include: new vs.RelativePattern(this.ctx.workspaceRoot, includeGlob),
-                exclude: new vs.RelativePattern(this.ctx.workspaceRoot, '**/{.cwtools,.cwtools-ai,.git,node_modules,release}/**'),
+                exclude: new vs.RelativePattern(this.ctx.workspaceRoot, '**/{.cwtools,.git,node_modules,release}/**'),
                 maxResults: limit * 10,
                 previewOptions: { matchLines: 1, charsPerLine: 120 },
             };
@@ -3220,7 +3220,7 @@ export class LspToolHandler {
                     const globPattern = new vs.RelativePattern(this.ctx.workspaceRoot, includeGlob);
                     const uris = (await vs.workspace.findFiles(
                         globPattern,
-                        '**/{.cwtools,.cwtools-ai,.git,node_modules,release}/**',
+                        '**/{.cwtools,.git,node_modules,release}/**',
                         limit * 20,
                     )).filter(uri => !isExcludedModSearchPath(this.ctx.workspaceRoot, uri.fsPath));
                     const regex = new RegExp(finalPattern, args.caseSensitive ? '' : 'i');
@@ -3832,7 +3832,7 @@ export class LspToolHandler {
     }
 
     async searchText(args: import('../types').GrepArgs, context?: import('../types').AgentToolContext): Promise<import('../types').GrepResult> {
-        if (context?.runnerOptions?.domain === 'general') {
+        if (context?.runnerOptions?.schedulingState.domainProfile === 'general') {
             const { query, path: searchPath, isRegex, caseSensitive, include, limit } = args;
             return this.grep({ query, path: searchPath, isRegex, caseSensitive, include, limit }, context);
         }
@@ -3879,7 +3879,7 @@ export class LspToolHandler {
     }
 
     private async grepImpl(args: import('../types').GrepArgs, context?: import('../types').AgentToolContext): Promise<import('../types').GrepResult> {
-        const generalDomain = context?.runnerOptions?.domain === 'general';
+        const generalDomain = context?.runnerOptions?.schedulingState.domainProfile === 'general';
         const limit = Math.min(args.limit ?? 50, 200);
         const matches: Array<{ file: string; line: number; content: string }> = [];
         let totalMatches = 0;
@@ -3917,7 +3917,7 @@ export class LspToolHandler {
 
         const options: any = {
             include: new vs.RelativePattern(this.ctx.workspaceRoot, includePattern),
-            exclude: new vs.RelativePattern(this.ctx.workspaceRoot, '**/{.cwtools,.cwtools-ai,.git,node_modules,release}/**'),
+            exclude: new vs.RelativePattern(this.ctx.workspaceRoot, '**/{.cwtools,.git,node_modules,release}/**'),
             maxResults: limit,
             previewOptions: { matchLines: 1, charsPerLine: 150 },
         };
@@ -3960,7 +3960,7 @@ export class LspToolHandler {
                 const globPattern = new vs.RelativePattern(this.ctx.workspaceRoot, includePattern);
                 const uris = (await vs.workspace.findFiles(
                     globPattern,
-                    '**/{.cwtools,.cwtools-ai,.git,node_modules,release}/**',
+                    '**/{.cwtools,.git,node_modules,release}/**',
                     limit * 20,
                 )).filter(uri => !isExcludedModSearchPath(this.ctx.workspaceRoot, uri.fsPath));
                 const regex = new RegExp(pattern, args.caseSensitive ? '' : 'i');
@@ -4043,7 +4043,7 @@ export class LspToolHandler {
         toolContext?: import('../types').AgentToolContext,
     ): Promise<GetCompletionAtResult> {
         let context: GetCompletionAtResult['context'] | undefined;
-        const generalDomain = toolContext?.runnerOptions?.domain === 'general';
+        const generalDomain = toolContext?.runnerOptions?.schedulingState.domainProfile === 'general';
         try {
             const requestedLimit = Number.isFinite(args.limit) ? Math.trunc(args.limit as number) : 30;
             const limit = Math.max(1, Math.min(200, requestedLimit));
@@ -4231,7 +4231,7 @@ export class LspToolHandler {
             if (!symbols || symbols.length === 0) {
                 const indexed = await this.workspaceSymbolsFromIndex(args.query, limit);
                 if (indexed) return indexed;
-                const generalDomain = context?.runnerOptions?.domain === 'general';
+                const generalDomain = context?.runnerOptions?.schedulingState.domainProfile === 'general';
                 return {
                     symbols: [],
                     _warning: generalDomain

@@ -299,7 +299,7 @@ export class FileToolHandler {
         if (!topicId) return filePath;
 
         const normalized = filePath.trim().replace(/\\/g, '/');
-        const match = normalized.match(/^\.(?:cwtools|cwtools-ai)(?:\/(.*))?$/i);
+        const match = normalized.match(/^\.cwtools(?:\/(.*))?$/i);
         if (!match) return filePath;
 
         const safeTopicId = topicId.replace(/[^a-zA-Z0-9_.-]/g, '_');
@@ -315,9 +315,9 @@ export class FileToolHandler {
         return this.normalizeAgentWorkspacePath(filePath, context);
     }
 
-    private resolveWorkspacePath(filePath: string, preferExistingAiPath: boolean, context?: import('../types').AgentToolContext): WorkspacePathResolution {
+    private resolveWorkspacePath(filePath: string, context?: import('../types').AgentToolContext): WorkspacePathResolution {
         const normalizedInput = this.normalizeAgentWorkspacePath(filePath, context);
-        return resolveWorkspacePathInput(normalizedInput, this.ctx.workspaceRoot, { preferExistingAiPath });
+        return resolveWorkspacePathInput(normalizedInput, this.ctx.workspaceRoot);
     }
 
     private resolveCurrentTopicArtifact(filePath: string, context?: import('../types').AgentToolContext): string | undefined {
@@ -332,7 +332,7 @@ export class FileToolHandler {
     }
 
     private resolveAndAssertInWorkspace(filePath: string, context?: import('../types').AgentToolContext): string {
-        const resolution = this.resolveWorkspacePath(filePath, true, context);
+        const resolution = this.resolveWorkspacePath(filePath, context);
         if (isSecuritySandboxDisabled() || resolution.isWithinAnyWorkspace) {
             return resolution.resolved;
         }
@@ -404,8 +404,8 @@ export class FileToolHandler {
 
     private shouldBypassReadTrackerCheck(filePath: string): boolean {
         const segments = filePath.replace(/\\/g, '/').toLowerCase().split('/').filter(Boolean);
-        // 1. All writes under the .cwtools / .cwtools-ai folder
-        if (segments.includes('.cwtools') || segments.includes('.cwtools-ai')) {
+        // 1. All writes under the canonical .cwtools folder
+        if (segments.includes('.cwtools')) {
             return true;
         }
         // 2. Common command scripts and helper script suffixes
@@ -420,7 +420,7 @@ export class FileToolHandler {
     }
 
     private async resolveAndAuthorizeWrite(filePath: string, toolName: string, context?: import('../types').AgentToolContext): Promise<string> {
-        const resolution = this.resolveWorkspacePath(this.normalizeAgentWorkspaceWritePath(filePath, context), false, context);
+        const resolution = this.resolveWorkspacePath(this.normalizeAgentWorkspaceWritePath(filePath, context), context);
         if (!isSecuritySandboxDisabled()) {
             if (!resolution.isWithinAnyWorkspace) {
                 const topicArtifact = this.resolveCurrentTopicArtifact(filePath, context);
@@ -452,7 +452,7 @@ export class FileToolHandler {
     }
 
     private workspaceRelativePath(filePath: string): string {
-        const resolution = resolveWorkspacePathInput(filePath, this.ctx.workspaceRoot, { preferExistingAiPath: true });
+        const resolution = resolveWorkspacePathInput(filePath, this.ctx.workspaceRoot);
         const root = resolution.workspaceFolder ?? this.ctx.workspaceRoot;
         return path.relative(root, resolution.resolved).replace(/\\/g, '/');
     }
@@ -483,7 +483,7 @@ export class FileToolHandler {
     }
 
     private isPdxStructureGuardedPath(filePath: string, context?: import('../types').AgentToolContext): boolean {
-        if (context?.runnerOptions?.domain === 'general') return false;
+        if (context?.runnerOptions?.schedulingState.domainProfile === 'general') return false;
         return ['.txt', '.gui', '.gfx', '.asset', '.entity'].includes(path.extname(filePath).toLowerCase());
     }
 
@@ -493,7 +493,7 @@ export class FileToolHandler {
      * by the authoritative shader frontend in the language server instead.
      */
     private isPdxSemanticGuardedPath(filePath: string, context?: import('../types').AgentToolContext): boolean {
-        if (context?.runnerOptions?.domain === 'general') return false;
+        if (context?.runnerOptions?.schedulingState.domainProfile === 'general') return false;
         return ['.txt', '.gui', '.gfx', '.asset', '.entity', '.shader', '.fxh']
             .includes(path.extname(filePath).toLowerCase());
     }
@@ -620,7 +620,7 @@ export class FileToolHandler {
                 args.endLine = args.centerLine + 1 + radius;
             }
             args.file = this.resolveAndAssertInWorkspace(args.file, context);
-            const paradoxDomain = context?.runnerOptions?.domain !== 'general';
+            const paradoxDomain = context?.runnerOptions?.schedulingState.domainProfile !== 'general';
             const localisationFile = this.isLocalisationPath(args.file) && matchesExt(args.file, '.yml');
             const readTracker = (context?.agentRunner as any)?.readTracker;
             if (readTracker) { readTracker.markRead(args.file); }
@@ -1463,7 +1463,7 @@ export class FileToolHandler {
         pendingGlobalKinds: string[];
         diagnostics?: ValidationError[];
     } | null> {
-        if (context?.runnerOptions?.domain === 'general') {
+        if (context?.runnerOptions?.schedulingState.domainProfile === 'general') {
             return {
                 freshness: 'fresh',
                 epoch: Date.now(),
@@ -1535,7 +1535,7 @@ export class FileToolHandler {
         epoch: number;
         timedOut?: boolean;
     }> {
-        if (context?.runnerOptions?.domain === 'general') {
+        if (context?.runnerOptions?.schedulingState.domainProfile === 'general') {
             const diagnostics = await this.getLspDiagnosticsForFile(filePath, context);
             return {
                 diagnostics,
@@ -1631,7 +1631,7 @@ export class FileToolHandler {
                 });
             }), 2500, 'Diagnostics panel wait timed out.', context?.runnerOptions?.abortSignal);
             return vs.languages.getDiagnostics(uri)
-                .filter(d => context?.runnerOptions?.domain !== 'general' || !/cwtools/i.test(d.source ?? ''))
+                .filter(d => context?.runnerOptions?.schedulingState.domainProfile !== 'general' || !/cwtools/i.test(d.source ?? ''))
                 .map(d => {
                 const metadata = diagnosticMetadata(d);
                 return {

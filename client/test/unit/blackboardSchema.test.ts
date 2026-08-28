@@ -1,4 +1,5 @@
 import { expect } from 'chai';
+import { GENERAL_PARALLEL } from './schedulingFixtures';
 
 const vscodeStub = {
     workspace: { workspaceFolders: [], getConfiguration: () => ({ get: <T>(_k: string, d?: T): T | undefined => d }) },
@@ -115,7 +116,7 @@ describe('query_blackboard structured parsing', () => {
         const executor = new AgentToolExecutor({} as any, process.cwd());
         executor.blackboard.write('domain:general:topic:session:cfg', JSON.stringify({ a: 1 }), 'free_text', 'test');
         executor.blackboard.write('domain:general:topic:session:note', 'plain text', 'free_text', 'test');
-        const ctx = { runnerOptions: { mode: 'orchestrator', domain: 'general' } } as any;
+        const ctx = { runnerOptions: { schedulingState: GENERAL_PARALLEL } } as any;
 
         const raw = await executor.execute('query_blackboard', { key: 'cfg' }, ctx) as any;
         expect(raw.entry.value).to.equal('{"a":1}');

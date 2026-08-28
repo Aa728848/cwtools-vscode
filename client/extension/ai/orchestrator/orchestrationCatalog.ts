@@ -43,7 +43,6 @@ export interface OrchestrationCatalogNode {
 export interface OrchestrationCatalogEntry {
     graphId: string;
     runId?: string;
-    mode?: string;
     domain: AgentRuntimeDomain;
     nodeCount: number;
     nodes: OrchestrationCatalogNode[];
@@ -117,7 +116,6 @@ export function buildOrchestrationCatalog(
         return {
             graphId: record.graphId,
             runId: record.runId,
-            mode: record.mode,
             domain: record.domain,
             nodeCount: record.graph.nodes.length,
             nodes: record.graph.nodes.map(node => ({

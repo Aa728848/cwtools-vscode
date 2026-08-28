@@ -1,7 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { EventEmitter } from 'events';
-import { getPrivateTopicRootCandidates, getPrivateTopicStorageDir } from '../workspacePaths';
+import { getPrivateTopicRoot, getPrivateTopicStorageDir } from '../workspacePaths';
 import { ErrorReporter } from '../errorReporter';
 import {
     AgentRunRecord,
@@ -15,7 +15,7 @@ import { isPathInsideOrEqual } from '../../pathScope';
 import { isRecord } from '../../../shared/protocolValidation';
 import { atomicWriteJson, atomicWriteText, readJsonWithBackup, sha256Text } from './durableStorage';
 import { getHistoryPolicy } from './historyPolicy';
-import { schedulingStateFromAdmission } from './scheduling';
+import { normalizeSchedulingState, schedulingStateFromAdmission } from './scheduling';
 import {
     applyModelRequestMessageArchive,
     type ModelRequestMessageArchive,
@@ -183,7 +183,7 @@ export class RunLedger {
 
     public async createRun(
         topicId: string,
-        mode: string,
+        schedulingState: AgentSchedulingState,
         userPromptPreview: string,
         parentRunId?: string,
         userPrompt?: string,
@@ -194,7 +194,6 @@ export class RunLedger {
             workflowId?: string | null;
             threadId?: string;
             turnId?: string;
-            schedulingState?: AgentSchedulingState;
         },
     ): Promise<AgentRunRecord> {
         const runId = `run_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
@@ -211,8 +210,7 @@ export class RunLedger {
             threadId: metadata?.threadId,
             turnId: metadata?.turnId,
             status: 'created',
-            mode,
-            schedulingState: metadata?.schedulingState,
+            schedulingState: normalizeSchedulingState(schedulingState),
             workflowId: metadata?.workflowId,
             providerId: metadata?.providerId,
             model: metadata?.model,
@@ -262,7 +260,7 @@ export class RunLedger {
 
         await this.appendEvent(runId, 'run_created', {
             topicId,
-            mode,
+            schedulingState: record.schedulingState,
             userPromptPreview,
             promptRef,
             promptSha256,
@@ -273,7 +271,6 @@ export class RunLedger {
             workflowId: metadata?.workflowId,
             threadId: metadata?.threadId,
             turnId: metadata?.turnId,
-            schedulingState: metadata?.schedulingState,
         }, { agentId: metadata?.agentId });
 
         return record;
@@ -863,7 +860,14 @@ export class RunLedger {
             runId,
             topicId,
             status: 'running',
-            mode: 'unknown',
+            schedulingState: schedulingStateFromAdmission({
+                domainProfile: 'general',
+                authorization: 'read_only',
+                initialPhase: 'inspect',
+                explicitDelegation: false,
+                confidence: 0,
+                evidence: ['large run recovery placeholder'],
+            }),
             userPromptPreview: `Run state is large (${Math.round(size / 1024)} KB); showing a compact recovery view.`,
             startedAt: mtimeMs,
             createdAt: mtimeMs,
@@ -992,9 +996,15 @@ export class RunLedger {
         runDir: string,
     ): Promise<AgentRunRecord | undefined> {
         const stateFile = path.join(runDir, 'run_state.json');
-        const loadedState = readJsonWithBackup<AgentRunRecord>(stateFile, (value): value is AgentRunRecord => (
-            !!value && typeof value === 'object' && typeof (value as AgentRunRecord).runId === 'string'
-        ));
+        const loadedState = readJsonWithBackup<AgentRunRecord>(stateFile, (value): value is AgentRunRecord => {
+            if (!value || typeof value !== 'object' || typeof (value as AgentRunRecord).runId !== 'string') return false;
+            try {
+                normalizeSchedulingState((value as AgentRunRecord).schedulingState);
+                return true;
+            } catch {
+                return false;
+            }
+        });
         if (!loadedState) return undefined;
 
         const stateStat = await fs.promises.stat(loadedState.sourcePath);
@@ -1024,31 +1034,29 @@ export class RunLedger {
             if (fs.existsSync(runDir)) return { topicId, runDir };
         }
 
-        for (const root of getPrivateTopicRootCandidates()) {
-            const topics = await fs.promises.readdir(root, { withFileTypes: true }).catch(() => []);
-            for (const topic of topics) {
-                if (!topic.isDirectory()) continue;
-                const runDir = path.join(root, topic.name, 'runs', runId);
-                if (fs.existsSync(runDir)) return { topicId: topic.name, runDir };
-            }
+        const root = getPrivateTopicRoot();
+        const topics = await fs.promises.readdir(root, { withFileTypes: true }).catch(() => []);
+        for (const topic of topics) {
+            if (!topic.isDirectory()) continue;
+            const runDir = path.join(root, topic.name, 'runs', runId);
+            if (fs.existsSync(runDir)) return { topicId: topic.name, runDir };
         }
         return undefined;
     }
 
     public async listRecentRunsFromDisk(limit = 50): Promise<AgentRunRecord[]> {
         const candidates: Array<{ topicId: string; runId: string; runDir: string; mtimeMs: number }> = [];
-        for (const root of getPrivateTopicRootCandidates()) {
-            const topics = await fs.promises.readdir(root, { withFileTypes: true }).catch(() => []);
-            for (const topic of topics) {
-                if (!topic.isDirectory()) continue;
-                const runsDir = path.join(root, topic.name, 'runs');
-                const runs = await fs.promises.readdir(runsDir, { withFileTypes: true }).catch(() => []);
-                for (const run of runs) {
-                    if (!run.isDirectory()) continue;
-                    const runDir = path.join(runsDir, run.name);
-                    const stat = await fs.promises.stat(runDir).catch(() => undefined);
-                    if (stat) candidates.push({ topicId: topic.name, runId: run.name, runDir, mtimeMs: stat.mtimeMs });
-                }
+        const root = getPrivateTopicRoot();
+        const topics = await fs.promises.readdir(root, { withFileTypes: true }).catch(() => []);
+        for (const topic of topics) {
+            if (!topic.isDirectory()) continue;
+            const runsDir = path.join(root, topic.name, 'runs');
+            const runs = await fs.promises.readdir(runsDir, { withFileTypes: true }).catch(() => []);
+            for (const run of runs) {
+                if (!run.isDirectory()) continue;
+                const runDir = path.join(runsDir, run.name);
+                const stat = await fs.promises.stat(runDir).catch(() => undefined);
+                if (stat) candidates.push({ topicId: topic.name, runId: run.name, runDir, mtimeMs: stat.mtimeMs });
             }
         }
 

@@ -20,7 +20,6 @@ import { ContextLimitTracker } from '../../extension/ai/runner/contextLimitTrack
 import { ConversationUndoCoordinator } from '../../extension/ai/runner/undoCoordinator';
 import { FaultInjector } from '../../extension/ai/runner/faultInjection';
 import { SideQuestionService } from '../../extension/ai/runner/sideQuestionService';
-import { migrateLegacyRuntimeState } from '../../extension/ai/runner/state/migrations';
 import { projectActivities } from '../../extension/ai/runner/activityProjection';
 import { TranscriptStreamBuffer } from '../../extension/ai/runner/transcriptStreamBuffer';
 
@@ -140,26 +139,6 @@ describe('transcript stream buffering', () => {
 });
 
 describe('domain replay', () => {
-    it('migrates legacy runtime state into valid fail-closed domain models', () => {
-        const migrated = migrateLegacyRuntimeState({
-            agentId: 'agent',
-            mode: 'build',
-            schedulingState: { phase: 'execute' },
-            context: { toolSchemas: ['b', 'a', 'b'] },
-        });
-        expect(migrated.models.scheduling).to.deep.equal({
-            revision: 0,
-            state: { phase: 'execute' },
-        });
-        expect(migrated.models.context).to.deep.equal({
-            revision: 0,
-            turns: [],
-            toolSchemas: ['a', 'b'],
-        });
-        expect((migrateLegacyRuntimeState({ agentId: 'agent', schedulingState: 'unsafe' })
-            .models.scheduling as { state: unknown }).state).to.equal(null);
-    });
-
     it('replays pure operations deterministically and fails closed on sequence gaps', () => {
         const registry = new DomainOpRegistry();
         registry.register<{ count: number }, { delta: number }>({

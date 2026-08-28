@@ -4,6 +4,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { Blackboard } from '../../extension/ai/orchestrator/blackboard';
 import type { AgentToolContext } from '../../extension/ai/types';
+import { PARADOX_WRITE } from './schedulingFixtures';
 
 function loadMemoryTools() {
     const moduleLoader = require('module') as { _load: (...args: unknown[]) => unknown };
@@ -37,7 +38,7 @@ describe('MemoryToolHandler file reference safety', () => {
         const blackboard = new Blackboard();
         const handler = new MemoryToolHandler({ workspaceRoot, blackboard });
         const context = {
-            runnerOptions: { mode: 'build', domain: 'paradox', topicId: 'safe-topic' },
+            runnerOptions: { schedulingState: PARADOX_WRITE, topicId: 'safe-topic' },
         } as AgentToolContext;
 
         await handler.setMemory({ key: 'large', value: 'v'.repeat(700) }, context);
@@ -52,7 +53,7 @@ describe('MemoryToolHandler file reference safety', () => {
         const blackboard = new Blackboard();
         const handler = new MemoryToolHandler({ workspaceRoot, blackboard });
         const context = {
-            runnerOptions: { mode: 'build', domain: 'paradox', topicId: 'safe-topic' },
+            runnerOptions: { schedulingState: PARADOX_WRITE, topicId: 'safe-topic' },
         } as AgentToolContext;
         const outsidePath = path.join(workspaceRoot, 'outside-secret.txt');
         fs.writeFileSync(outsidePath, 'DO_NOT_EXPOSE', 'utf8');

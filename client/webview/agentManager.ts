@@ -13,7 +13,7 @@ import { getChatI18n, normalizeChatLocale } from './chat/i18n';
 import { getDiffArtifactFiles } from './chat/artifacts';
 import { svgIcon, svgIconNoMargin } from './svgIcons';
 import type { ManagerSnapshotMessage, OrchestratorProgressMessage } from './chat/messages.manager';
-import type { ManagerAgentProfileView, ManagerRunSnapshotMessage } from './chat/messages.manager';
+import type { ManagerRunSnapshotMessage } from './chat/messages.manager';
 import type { TopicListItem, TopicStats } from './chat/messages.shared';
 import { parseHostMessage } from './chat/hostProtocol';
 
@@ -33,9 +33,7 @@ type ManagerEnhancementState = {
     stats: TopicStats;
     artifacts: ManagerSnapshotMessage['artifacts'];
     todos: Array<{ content: string; status: 'pending' | 'in_progress' | 'done' }>;
-    mode: string;
-    agentProfile: ManagerAgentProfileView;
-    resolvedAgentProfile?: ManagerSnapshotMessage['resolvedAgentProfile'];
+    schedulingState: ManagerSnapshotMessage['schedulingState'];
     workflowId: string | null;
     isGenerating: boolean;
     liveStepCount: number;
@@ -75,9 +73,13 @@ const DEFAULT_STATE: ManagerEnhancementState = {
     stats: { total: 0, visible: 0, archived: 0, currentTopicId: null, currentTopicTitle: null },
     artifacts: [],
     todos: [],
-    mode: 'build',
-    agentProfile: { domain: 'paradox', intent: 'auto', strategy: 'auto' },
-    resolvedAgentProfile: undefined,
+    schedulingState: {
+        profileName: 'paradox-agent',
+        domainProfile: 'paradox',
+        authorization: 'workspace_write',
+        phase: 'execute',
+        dispatch: 'single',
+    },
     workflowId: null,
     isGenerating: false,
     liveStepCount: 0,
@@ -1161,24 +1163,24 @@ const DEFAULT_STATE: ManagerEnhancementState = {
         return n >= 1 ? n.toFixed(2) : n.toFixed(3);
     }
 
-    function profileLabel(profile: ManagerAgentProfileView, resolved?: ManagerSnapshotMessage['resolvedAgentProfile']): string {
+    function schedulingLabel(scheduling: ManagerSnapshotMessage['schedulingState']): string {
         const label = (value: string): string => {
             if (locale !== 'zh-cn') return value === 'general' ? 'General' : value === 'paradox' ? 'Paradox' : value[0]!.toUpperCase() + value.slice(1);
-            return ({ auto: '自动', general: '通用', paradox: 'Paradox', execute: '执行', plan: '规划', explore: '探索', review: '审查', single: '单 Agent', multi: '多 Agent' } as Record<string, string>)[value] ?? value;
+            return ({ general: '通用', paradox: 'Paradox', hybrid: '混合', inspect: '探索', plan: '规划', execute: '执行', verify: '验证', finalize: '收尾', single: '单 Agent', parallel: '并行', specialist: '专家' } as Record<string, string>)[value] ?? value;
         };
-        if (profile.domain === 'auto' && profile.intent === 'auto' && profile.strategy === 'auto' && resolved) {
-            return `${label('auto')} → ${label(resolved.domain)} · ${label(resolved.intent)} · ${label(resolved.strategy)}`;
-        }
-        return [profile.domain, profile.intent, profile.strategy].filter(value => value !== 'auto').map(label).join(' · ') || label('auto');
+        return [scheduling.profileName || scheduling.domainProfile, scheduling.phase, scheduling.dispatch]
+            .map(label)
+            .join(' · ');
     }
 
-    function workflowLabel(mode: string, workflowId: string | null): string {
+    function workflowLabel(scheduling: ManagerSnapshotMessage['schedulingState'], workflowId: string | null): string {
         if (workflowId) return workflowId;
-        if (mode === 'orchestrator') return ui.workflow.orchestrator;
-        if (mode === 'script') return ui.workflow.script;
-        if (mode === 'plan') return ui.workflow.plan;
-        if (mode === 'review') return ui.workflow.review;
-        if (mode === 'explore') return ui.workflow.explore;
+        if (scheduling.dispatch !== 'single') {
+            return scheduling.domainProfile === 'paradox' ? ui.workflow.script : ui.workflow.orchestrator;
+        }
+        if (scheduling.phase === 'plan') return ui.workflow.plan;
+        if (scheduling.phase === 'verify') return ui.workflow.review;
+        if (scheduling.phase === 'inspect') return ui.workflow.explore;
         return ui.workflow.build;
     }
 
@@ -1328,7 +1330,7 @@ const DEFAULT_STATE: ManagerEnhancementState = {
             drawerOpen,
             topicTitleEditing,
             topicTitle,
-            workflow: state.workflowId || state.mode,
+            workflow: state.workflowId || state.schedulingState.profileName || state.schedulingState.phase,
             statusText,
             statusClass,
             activeTab,
@@ -1354,10 +1356,10 @@ const DEFAULT_STATE: ManagerEnhancementState = {
                         <span>${escapeHtml(topicTitle)}</span>
                     </button>
                 `}
-                <button type="button" class="manager-command-workflow" data-manager-jump="activity" title="${escapeHtml(state.workflowId || state.mode)}">
+                <button type="button" class="manager-command-workflow" data-manager-jump="activity" title="${escapeHtml(workflowLabel(state.schedulingState, state.workflowId))}">
                     ${svgIconNoMargin('gitBranch')}
                     <span>${escapeHtml(isActive ? ui.run.currentRound : ui.run.previousRound)}</span>
-                    <small>${escapeHtml(state.workflowId || profileLabel(state.agentProfile, state.resolvedAgentProfile))}</small>
+                    <small>${escapeHtml(state.workflowId || schedulingLabel(state.schedulingState))}</small>
                 </button>
                 <span class="manager-command-status ${statusClass}">
                     ${svgIconNoMargin(isActive ? 'link' : 'check')}
@@ -1462,7 +1464,7 @@ const DEFAULT_STATE: ManagerEnhancementState = {
             artifactListEl.innerHTML = `
                 <div class="manager-workspace-page manager-changes-page">
                     <header class="manager-review-summary">
-                        <span><strong>${state.isGenerating || isRunActive(String(run?.status || '')) ? ui.run.currentRound : ui.run.previousRound}</strong><small>${escapeHtml(state.workflowId || workflowLabel(state.mode, null))}</small></span>
+                        <span><strong>${state.isGenerating || isRunActive(String(run?.status || '')) ? ui.run.currentRound : ui.run.previousRound}</strong><small>${escapeHtml(workflowLabel(state.schedulingState, state.workflowId))}</small></span>
                         <span class="manager-review-delta"><strong>+${additions}</strong><em>-${deletions}</em><i>${workspaceFiles.length} ${ui.metrics.filesChanged}</i></span>
                     </header>
                     <section class="manager-workspace-host-card ${hasExternalWorkspace ? 'has-content' : ''}" ${hasExternalWorkspace ? '' : 'hidden'}>
@@ -1573,7 +1575,7 @@ const DEFAULT_STATE: ManagerEnhancementState = {
                 traceModel.nodes.push({
                     agentId: childRun.agentId,
                     parentAgentId: childRun.parentAgentId || traceModel.rootAgentId,
-                    role: childRun.mode,
+                    role: childRun.schedulingState.profileName || childRun.schedulingState.domainProfile,
                     status: childRun.status === 'completed' || childRun.status === 'done' ? 'done'
                         : childRun.status === 'failed' ? 'failed'
                             : childRun.status === 'cancelled' ? 'cancelled'
@@ -1665,11 +1667,11 @@ const DEFAULT_STATE: ManagerEnhancementState = {
                     <summary>${locale === 'zh-cn' ? '运行时检查器' : 'Runtime Inspector'}</summary>
                     <div class="manager-activity-diagnostics-body">
                         <div class="manager-context-breakdown">
-                            <span>${locale === 'zh-cn' ? '配置' : 'Profile'}: ${escapeHtml(runtime.profile || '-')}</span>
+                            <span>${locale === 'zh-cn' ? '配置' : 'Profile'}: ${escapeHtml(runtime.scheduling?.profileName || '-')}</span>
                             <span>${locale === 'zh-cn' ? '阶段' : 'Phase'}: ${escapeHtml(runtime.scheduling?.phase || '-')}</span>
-                            <span>${locale === 'zh-cn' ? '授权' : 'Authorization'}: ${escapeHtml(runtime.scheduling?.authorization || runtime.tools?.authorization || '-')}</span>
+                            <span>${locale === 'zh-cn' ? '授权' : 'Authorization'}: ${escapeHtml(runtime.scheduling?.authorization || '-')}</span>
                             <span>${locale === 'zh-cn' ? '调度' : 'Dispatch'}: ${escapeHtml(runtime.scheduling?.dispatch || '-')}</span>
-                            <span>${locale === 'zh-cn' ? '叠加能力' : 'Overlays'}: ${escapeHtml(runtime.overlays.join(', ') || '-')}</span>
+                            <span>${locale === 'zh-cn' ? '叠加能力' : 'Overlays'}: ${escapeHtml(runtime.scheduling?.overlays?.join(', ') || '-')}</span>
                             <span>${locale === 'zh-cn' ? '工具' : 'Tools'}: ${runtime.tools?.activated.length ?? 0}/${runtime.tools?.registered.length ?? 0} (${runtime.tools?.disclosed.length ?? 0} ${locale === 'zh-cn' ? '已披露' : 'disclosed'})</span>
                             <span>${locale === 'zh-cn' ? '提示队列' : 'Prompts'}: ${runtime.prompts.running}/${runtime.prompts.total}</span>
                             <span>${locale === 'zh-cn' ? '待交互' : 'Interactions'}: ${runtime.interactions.pending}/${runtime.interactions.total}</span>
@@ -1912,9 +1914,7 @@ const DEFAULT_STATE: ManagerEnhancementState = {
         state.runtimeInspector = snapshot.runtimeInspector;
         state.transcript = snapshot.transcript;
         lastWorkspaceRenderSignature = '';
-        state.mode = snapshot.mode || state.mode;
-        state.agentProfile = snapshot.agentProfile || state.agentProfile;
-        state.resolvedAgentProfile = snapshot.resolvedAgentProfile;
+        state.schedulingState = snapshot.schedulingState || state.schedulingState;
         state.workflowId = snapshot.workflowId || null;
         state.isGenerating = !!snapshot.isGenerating;
         state.liveStepCount = snapshot.liveStepCount || 0;
@@ -2065,11 +2065,6 @@ const DEFAULT_STATE: ManagerEnhancementState = {
                 break;
             case 'startBackgroundGeneration':
                 state.isGenerating = true;
-                renderOverview();
-                break;
-            case 'modeChanged':
-            case 'setMode':
-                state.mode = msg.mode || state.mode;
                 renderOverview();
                 break;
             case 'workflowChanged':

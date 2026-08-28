@@ -2959,7 +2959,7 @@ export interface ToolInvocation {
   name: string;
   originalName: string;
   rawArgs: string;
-  args: Record<string, any>;
+  args: Record<string, unknown>;
   argRepairs: string[];
   parseError?: string;
   effect: ToolEffect;

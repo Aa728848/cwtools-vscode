@@ -56,12 +56,49 @@ function loadAgentRunner(options: { freshLiveContext?: boolean } = {}) {
 describe('AgentRunner 状态机与工具调度测试 (阶段 0 基线)', () => {
     describe('工具结果健康状态', () => {
         it('把带 success=false 或 ok=false 的结构化结果计为失败', () => {
-            const { isToolResultFailure } = loadAgentRunner();
+            const { isToolResultFailure, isToolResultSuccess } = loadAgentRunner();
             expect(isToolResultFailure({ success: false, error: 'denied' })).to.equal(true);
             expect(isToolResultFailure({ ok: false, error: 'invalid args' })).to.equal(true);
             expect(isToolResultFailure({ error: 'thrown error' })).to.equal(true);
             expect(isToolResultFailure({ success: true })).to.equal(false);
             expect(isToolResultFailure({ diagnostics: [] })).to.equal(false);
+            expect(isToolResultSuccess({ ok: false })).to.equal(false);
+            expect(isToolResultSuccess({ success: false })).to.equal(false);
+            expect(isToolResultSuccess({ skipped: true })).to.equal(false);
+            expect(isToolResultSuccess({ success: true })).to.equal(true);
+        });
+
+        it('归档大型结果时保留失败与验证摘要', () => {
+            const { buildArchivedToolResultEnvelope, isToolResultFailure } = loadAgentRunner();
+            const envelope = buildArchivedToolResultEnvelope({
+                toolName: 'get_diagnostics',
+                resultSize: 50_000,
+                preview: '{"success":false',
+                resultRef: 'runs/run/large_results/result.json',
+                resultSha256: 'abc',
+                result: {
+                    success: false,
+                    error: 'diagnostics unavailable',
+                    requiresRepair: true,
+                    freshness: 'fresh',
+                    diagnostics: [
+                        { severity: 'error', message: 'broken' },
+                        { severity: 'warning', message: 'warning' },
+                    ],
+                    diagnosticDelta: {
+                        comparable: true,
+                        added: [{ severity: 'error', message: 'new error' }],
+                        removed: [],
+                    },
+                },
+            });
+
+            expect(isToolResultFailure(envelope)).to.equal(true);
+            expect(envelope.ok).to.equal(false);
+            expect(envelope.requiresRepair).to.equal(true);
+            expect(envelope.diagnosticSummary).to.deep.equal({ total: 2, errors: 1 });
+            expect(envelope.diagnosticDeltaSummary).to.deep.equal({ comparable: true, added: 1, addedErrors: 1, removed: 0 });
+            expect(envelope).not.to.have.property('diagnostics');
         });
     });
     

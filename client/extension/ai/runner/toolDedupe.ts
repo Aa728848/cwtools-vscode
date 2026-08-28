@@ -51,7 +51,6 @@ export interface DedupeResult<T> {
 interface CachedInvocation<T> {
     invocationId: string;
     promise: Promise<T>;
-    successful: boolean;
 }
 
 export class ToolDedupeService {
@@ -81,13 +80,11 @@ export class ToolDedupeService {
         }
         const cached: CachedInvocation<T> = {
             invocationId: request.invocationId,
-            successful: false,
             promise: execute(),
         };
         if (reusable) this.inStep.set(key, cached as CachedInvocation<unknown>);
         try {
             const value = await cached.promise;
-            cached.successful = true;
             return { value, reused: false, sourceInvocationId: request.invocationId };
         } catch (error) {
             if (this.inStep.get(key) === cached) this.inStep.delete(key);

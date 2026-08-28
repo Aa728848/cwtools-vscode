@@ -150,6 +150,10 @@ describe('tool definitions', () => {
         expect(registry!.isWrite).to.equal(false);
         expect(registry!.concurrencyClass).to.equal('lsp-limited');
         expect(registry!.riskLevel).to.equal(0);
+        expect(registry!.stormExempt).to.equal(true);
+        expect(TOOL_REGISTRY.get('query_blackboard')!.stormExempt).to.equal(true);
+        expect(TOOL_REGISTRY.get('get_diagnostics')!.stormExempt).to.equal(false);
+        expect(TOOL_REGISTRY.get('workspace_symbols')!.stormExempt).to.equal(false);
     });
 
     it('registers typed PDX writes and candidate transactions as Paradox write tools', () => {

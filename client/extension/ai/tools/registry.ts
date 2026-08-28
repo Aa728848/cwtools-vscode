@@ -401,15 +401,10 @@ const MUTATING_TOOLS_SET = new Set<string>([
     'manage_process',
 ]);
 
-// Storm-exempt tools: 廉价状态检查 / 协作信号,允许在同一轮反复调用,不计入 doom-loop 窗口。
+// Only live status/collaboration polling is exempt. Ordinary reads stay behind
+// the result-hash loop detector, which already permits calls whose output changes.
 const STORM_EXEMPT_TOOLS_SET = new Set<string>([
-    'get_diagnostics',
     'get_lsp_status',
-    'get_ignored_diagnostics',
-    'query_scope',
-    'document_symbols',
-    'workspace_symbols',
-    'list_directory',
     'query_blackboard',
 ]);
 

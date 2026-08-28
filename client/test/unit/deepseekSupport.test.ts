@@ -10,6 +10,7 @@
 import { expect } from 'chai';
 import {
     RUN_CODE_BLOCKED_TOOLS,
+    buildRunCodePromptAdditions,
     buildRunCodeSdk,
     createRunCodeCapabilitySnapshot,
     executeRunCodeProgram,
@@ -97,6 +98,16 @@ describe('run_code capability snapshot and SDK', () => {
         expect(sdk).to.include('Promise<{ content: string;');
         expect(sdk.indexOf('"edit_file"')).to.be.lessThan(sdk.indexOf('"read_file"'));
         expect(sdk).not.to.include('dispatch_agents');
+    });
+
+    it('generates a compact SDK addition for dynamically disclosed tools', () => {
+        const additions = buildRunCodePromptAdditions([
+            def('read_file', { type: 'object', properties: { file: { type: 'string' } }, required: ['file'] }),
+        ]);
+        expect(additions).to.include('SDK additions');
+        expect(additions).to.include('"read_file"');
+        expect(additions).to.include('file: string;');
+        expect(additions).not.to.include('isolated QuickJS/WASM guest');
     });
 });
 

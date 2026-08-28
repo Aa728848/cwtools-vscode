@@ -57,6 +57,7 @@ const { PromptBuilder } = loadTs('client/extension/ai/promptBuilder.ts');
 const { TOOL_DEFINITIONS } = loadTs('client/extension/ai/tools/definitions.ts');
 const {
   filterToolDefinitionsForMode,
+  shouldAutoDiscloseExecutionTools,
 } = loadTs('client/extension/ai/runnerPolicy.ts');
 const { toolDisclosureService } = loadTs('client/extension/ai/runner/toolDisclosure.ts');
 const { estimateTokenCount } = loadTs('client/extension/ai/agentRunner.ts');
@@ -72,14 +73,23 @@ function measure(label, prompt, tools) {
   return { label, toolCount: tools.length, promptTokens, toolTokens, total: promptTokens + toolTokens };
 }
 
-function toolsForMode(mode, options) {
+function toolsForMode(mode, options, authorization = 'read_only') {
   const modeTools = filterToolDefinitionsForMode(TOOL_DEFINITIONS, mode, options);
-  return toolDisclosureService.initialTools(modeTools, {
+  const disclosureContext = {
     mode,
     domain: 'paradox',
     dynamicSupported: true,
     loaded: new Set(),
-  });
+  };
+  if (shouldAutoDiscloseExecutionTools(mode, authorization)) {
+    toolDisclosureService.select(
+      { groups: ['file_write', 'command', 'git'], reason: 'Runtime-authorized execution surface' },
+      modeTools,
+      disclosureContext,
+      { eligibleTools: modeTools },
+    );
+  }
+  return toolDisclosureService.initialTools(modeTools, disclosureContext);
 }
 
 const workspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'cwtools-ai-baseline-'));
@@ -87,24 +97,28 @@ let report;
 try {
   const builder = new PromptBuilder(workspaceRoot);
 
-  const rows = MODES.map(mode => measure(
-    mode,
+  const coldRows = MODES.map(mode => measure(
+    `${mode} (cold/read-only)`,
     builder.buildSystemPromptForMode(mode, undefined, GAME_ID),
     toolsForMode(mode),
   ));
+  const build = measure(
+    'build (workspace-write)',
+    builder.buildSystemPromptForMode('build', undefined, GAME_ID),
+    toolsForMode('build', undefined, 'workspace_write'),
+  );
   const slimBuild = measure(
-    'build (slim)',
+    'build (workspace-write, slim)',
     builder.buildSlimSystemPromptForMode('build', undefined, GAME_ID),
-    toolsForMode('build', { useSlimPrompt: true }),
+    toolsForMode('build', { useSlimPrompt: true }, 'workspace_write'),
   );
   const blueprintDef = TOOL_DEFINITIONS.find(d => d.function.name === 'write_design_blueprint');
   if (!blueprintDef) throw new Error('write_design_blueprint not found in TOOL_DEFINITIONS');
   const blueprintSchemaTokens = estimateTokenCount(JSON.stringify(blueprintDef));
 
-  const build = rows.find(r => r.label === 'build');
   const slimParallelWorst = slimBuild.total * PARALLEL_SLIM_BUILDERS;
 
-  report = renderReport({ rows, slimBuild, build, blueprintSchemaTokens, slimParallelWorst });
+  report = renderReport({ rows: [...coldRows, build], slimBuild, build, blueprintSchemaTokens, slimParallelWorst });
 } finally {
   fs.rmSync(workspaceRoot, { recursive: true, force: true });
 }
@@ -128,6 +142,7 @@ function renderReport({ rows, slimBuild, build, blueprintSchemaTokens, slimParal
     'client/extension/ai/promptBuilder.ts',
     'client/extension/ai/tools/definitions.ts',
     'client/extension/ai/runnerPolicy.ts',
+    'client/extension/ai/runner/toolDisclosure.ts',
     'client/extension/ai/agentRunner.ts',
   ];
   const inputFingerprint = createHash('sha256');
@@ -152,7 +167,7 @@ function renderReport({ rows, slimBuild, build, blueprintSchemaTokens, slimParal
 - 测量输入 SHA-256：${inputSha256}
 - Token 估算：仓库自身 \`estimateTokenCount\`（\`client/extension/ai/agentRunner.ts\`），适合相对比较，不等同于供应商计费。
 - Fixture：空临时 workspace（无 CWTOOLS.md、project profile、project knowledge、记忆、已安装技能），languageId 固定为 \`${GAME_ID}\`。
-- 工具 Schema 按 mode/domain 过滤后，使用自动披露的首轮工具集并以 \`JSON.stringify\` 估算。
+- 工具 Schema 按 mode/domain 过滤后，以 \`JSON.stringify\` 估算；分模式表同时记录冷启动只读披露与 build 的 workspace-write 自动执行披露。
 - 不含动态上下文（编辑器状态、用户输入、对话历史、注入的记忆/blueprint）；真实项目 workspace 的数字只会更大。
 
 ## 与 §2.1 同构的基线数字（Stellaris build 模式）
@@ -162,7 +177,7 @@ function renderReport({ rows, slimBuild, build, blueprintSchemaTokens, slimParal
 | 系统提示词 | ${fmt(build.promptTokens)} |
 | ${build.toolCount} 个工具定义 | ${fmt(build.toolTokens)} |
 | 首轮静态输入合计 | ${fmt(build.total)} |
-| slim build 静态输入（${slimBuild.toolCount} 个工具） | ${fmt(slimBuild.total)} |
+| workspace-write slim build 静态输入（${slimBuild.toolCount} 个工具） | ${fmt(slimBuild.total)} |
 | ${PARALLEL_SLIM_BUILDERS} 个并行 slim builder 的首轮静态输入 | 最差约 ${fmt(slimParallelWorst)} |
 | \`write_design_blueprint\` 单个工具 Schema | ${fmt(blueprintSchemaTokens)} |
 

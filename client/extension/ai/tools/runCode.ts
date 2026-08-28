@@ -222,13 +222,19 @@ const RUN_CODE_OUTPUT_TYPE_HINTS: Readonly<Record<string, string>> = {
     grep: '{ matches: JsonValue[]; totalMatches?: number; truncated?: boolean }',
 };
 
-export function buildRunCodeSdk(tools: readonly ToolDefinition[]): string {
+function buildRunCodeDeclarations(tools: readonly ToolDefinition[]): { args: string; methods: string } {
     const snapshot = createRunCodeCapabilitySnapshot(tools);
-    const args = snapshot.tools.map(tool => `  ${JSON.stringify(tool.name)}: ${jsonSchemaToType(tool.parameters)};`).join('\n');
-    const methods = snapshot.tools.map(tool => {
-        const outputType = RUN_CODE_OUTPUT_TYPE_HINTS[tool.name] ?? 'JsonValue';
-        return `  ${JSON.stringify(tool.name)}: (args: ToolArgsMap[${JSON.stringify(tool.name)}]) => Promise<${outputType}>;`;
-    }).join('\n');
+    return {
+        args: snapshot.tools.map(tool => `  ${JSON.stringify(tool.name)}: ${jsonSchemaToType(tool.parameters)};`).join('\n'),
+        methods: snapshot.tools.map(tool => {
+            const outputType = RUN_CODE_OUTPUT_TYPE_HINTS[tool.name] ?? 'JsonValue';
+            return `  ${JSON.stringify(tool.name)}: (args: ToolArgsMap[${JSON.stringify(tool.name)}]) => Promise<${outputType}>;`;
+        }).join('\n'),
+    };
+}
+
+export function buildRunCodeSdk(tools: readonly ToolDefinition[]): string {
+    const { args, methods } = buildRunCodeDeclarations(tools);
     return [
         'run_code executes a JavaScript async-function body inside an isolated QuickJS/WASM guest.',
         'Only explicit console.log values and the outer return value reach model context; intermediate tool values stay inside the guest.',
@@ -251,6 +257,12 @@ export function buildRunCodePromptBlock(tools: readonly ToolDefinition[]): strin
     const sdk = buildRunCodeSdk(tools);
     if (!sdk.includes('interface ToolArgsMap {\n  ')) return '';
     return `<system-reminder>\n# CWTools run_code Code Mode SDK\n\n\`\`\`typescript\n${sdk}\n\`\`\`\n</system-reminder>`;
+}
+
+export function buildRunCodePromptAdditions(tools: readonly ToolDefinition[]): string {
+    const { args, methods } = buildRunCodeDeclarations(tools);
+    if (!args || !methods) return '';
+    return `<system-reminder>\n# CWTools run_code SDK additions\n\nThe following methods were dynamically disclosed and are now available in addition to the existing run_code catalog.\n\n\`\`\`typescript\ninterface ToolArgsMap {\n${args}\n}\ndeclare const tools: {\n${methods}\n};\n\`\`\`\n</system-reminder>`;
 }
 
 function makeGuestSource(code: string, toolNames: readonly string[]): string {

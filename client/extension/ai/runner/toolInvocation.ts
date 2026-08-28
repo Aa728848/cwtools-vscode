@@ -53,20 +53,30 @@ export function buildToolInvocation(input: {
     const meta = getToolMetadata(name);
 
     // 3. Robust JSON argument parsing & repair
-    let args: Record<string, any> = {};
+    let args: Record<string, unknown> = {};
     let parseError: string | undefined;
     const argRepairs: string[] = [];
 
-    const rawArgs = rawCall.function.arguments || '{}';
+    const rawArgs = rawCall.function.arguments ?? '';
+    const normalizedRawArgs = rawArgs.trim() ? rawArgs : '{}';
+    let parsedArgs: unknown;
     try {
-        args = JSON.parse(rawArgs);
+        parsedArgs = JSON.parse(normalizedRawArgs) as unknown;
     } catch (e) {
-        const repaired = tryRepairJson(rawArgs);
+        const repaired = tryRepairJson(normalizedRawArgs);
         if (repaired !== null) {
-            args = repaired;
+            parsedArgs = repaired;
             argRepairs.push('JSON syntax repaired');
         } else {
             parseError = `JSON parse failed: ${e instanceof Error ? e.message : String(e)}`;
+        }
+    }
+
+    if (!parseError) {
+        if (!parsedArgs || typeof parsedArgs !== 'object' || Array.isArray(parsedArgs)) {
+            parseError = 'Tool arguments must be a JSON object';
+        } else {
+            args = parsedArgs as Record<string, unknown>;
         }
     }
 

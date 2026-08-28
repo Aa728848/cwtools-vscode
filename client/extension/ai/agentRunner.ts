@@ -24,6 +24,7 @@ import type {
     AgentSchedulingState,
     AgentRuntimeDomain,
     ToolCall,
+    ToolInvocation,
 } from './types';
 import { contentToString } from './types';
 import { estimateTokenCount, estimateChatMessageTokens, hasImageContent, CHARS_PER_TOKEN } from './runner/tokenEstimation';
@@ -69,7 +70,7 @@ import {
 import { getWorkflow } from './workflowRegistry';
 import { TOOL_REGISTRY, WRITE_TOOLS, READ_ONLY_TOOLS } from './tools/registry';
 import { hasAddedErrors, type DiagnosticDelta } from './runner/diagnosticSnapshot';
-import { buildRunCodePromptBlock, createRunCodeCapabilitySnapshot } from './tools/runCode';
+import { buildRunCodePromptAdditions, buildRunCodePromptBlock, createRunCodeCapabilitySnapshot } from './tools/runCode';
 import { globalPartitionedWriteQueue } from './runner/writeCoordinator';
 import { runLedger } from './runner/runLedger';
 import { atomicWriteText, sha256Text } from './runner/durableStorage';
@@ -139,10 +140,111 @@ const reportBestEffortFailure = createBestEffortReporter((message, error) => {
     ErrorReporter.debug(SOURCE.AGENT_RUNNER, message, error);
 });
 
+function toolResultRecord(result: unknown): Record<string, unknown> | undefined {
+    return result && typeof result === 'object' && !Array.isArray(result)
+        ? result as Record<string, unknown>
+        : undefined;
+}
+
 export function isToolResultFailure(result: unknown): boolean {
-    if (!result || typeof result !== 'object' || Array.isArray(result)) return false;
-    const record = result as Record<string, unknown>;
+    const record = toolResultRecord(result);
+    if (!record) return false;
     return record.success === false || record.ok === false || record.error !== undefined;
+}
+
+export function isToolResultSuccess(result: unknown): boolean {
+    if (isToolResultFailure(result)) return false;
+    return toolResultRecord(result)?.skipped !== true;
+}
+
+function compactArchiveControlValue(value: unknown): unknown {
+    if (typeof value === 'string') {
+        return value.length <= 2_000 ? value : `${value.slice(0, 2_000)}…`;
+    }
+    if (value === null || typeof value !== 'object') return value;
+    try {
+        const serialized = JSON.stringify(value);
+        return serialized.length <= 4_000
+            ? value
+            : { truncated: true, preview: serialized.slice(0, 1_000) };
+    } catch {
+        return { truncated: true, preview: String(value).slice(0, 1_000) };
+    }
+}
+
+export function buildArchivedToolResultEnvelope(input: {
+    toolName: string;
+    result: unknown;
+    resultSize: number;
+    preview: string;
+    resultRef?: string;
+    resultSha256?: string;
+}): Record<string, unknown> {
+    const record = toolResultRecord(input.result);
+    const envelope: Record<string, unknown> = {
+        ok: isToolResultSuccess(input.result),
+        truncated: true,
+        message: input.resultRef
+            ? `Tool result for ${input.toolName} was archived because it is large (${input.resultSize} chars). Use the preview and resultRef, or retry with narrower arguments if more detail is needed.`
+            : `Tool result for ${input.toolName} was truncated because it is very large (${input.resultSize} chars). Retry with narrower arguments if more detail is needed.`,
+        preview: input.preview,
+    };
+    if (input.resultRef) {
+        envelope.fullResultLocalPath = input.resultRef;
+        envelope.resultRef = input.resultRef;
+    }
+    if (input.resultSha256) envelope.resultSha256 = input.resultSha256;
+    if (!record) return envelope;
+
+    const controlKeys = [
+        'success',
+        'error',
+        'skipped',
+        'requiresRepair',
+        'requiresValidation',
+        'postWriteValidation',
+        'postWriteValidationPassed',
+        'postWriteEvidence',
+        'freshness',
+    ] as const;
+    for (const key of controlKeys) {
+        if (Object.prototype.hasOwnProperty.call(record, key)) {
+            envelope[key] = compactArchiveControlValue(record[key]);
+        }
+    }
+    if (typeof record.message === 'string') {
+        envelope.toolMessage = compactArchiveControlValue(record.message);
+    }
+    if (Array.isArray(record.diagnostics)) {
+        envelope.diagnosticSummary = {
+            total: record.diagnostics.length,
+            errors: record.diagnostics.filter(item => {
+                if (!item || typeof item !== 'object' || Array.isArray(item)) return false;
+                const severity = (item as Record<string, unknown>).severity;
+                return severity === 'error' || severity === 0;
+            }).length,
+        };
+    }
+    if (record.diagnosticDelta && typeof record.diagnosticDelta === 'object' && !Array.isArray(record.diagnosticDelta)) {
+        const delta = record.diagnosticDelta as Record<string, unknown>;
+        const added = Array.isArray(delta.added) ? delta.added : [];
+        const removed = Array.isArray(delta.removed) ? delta.removed : [];
+        envelope.diagnosticDeltaSummary = {
+            comparable: delta.comparable === true,
+            added: added.length,
+            addedErrors: added.filter(item => !!item
+                && typeof item === 'object'
+                && !Array.isArray(item)
+                && (item as Record<string, unknown>).severity === 'error').length,
+            removed: removed.length,
+        };
+    }
+    return envelope;
+}
+
+interface ProcessedToolResult {
+    readonly modelResult: unknown;
+    readonly stateResult: unknown;
 }
 
 interface NormalizedToolCall {
@@ -167,6 +269,7 @@ function normalizeToolCallBatch(input: {
     globalToolCallIndex: number;
     iteration: number;
     maxToolIterations: number;
+    preparedInvocations?: ReadonlyMap<ToolCall, ToolInvocation>;
     runMetrics?: AgentRunMetrics;
     abortSignal?: AbortSignal;
     emitStep: (step: AgentStep) => void;
@@ -175,7 +278,7 @@ function normalizeToolCallBatch(input: {
     let globalToolCallIndex = input.globalToolCallIndex;
     for (const [toolCallPosition, toolCall] of input.toolCalls.entries()) {
         input.abortSignal?.throwIfAborted();
-        const invocation = buildToolInvocation({
+        const invocation = input.preparedInvocations?.get(toolCall) ?? buildToolInvocation({
             runId: input.runId,
             toolCall,
             availableTools: input.availableTools,
@@ -392,7 +495,7 @@ function foldToolBatchState(input: {
             : diagnosticErrorCount > 0;
         const call = input.calls[index]!;
         const targetKeys = call.targetPaths.length > 0 ? call.targetPaths : [`tool:${call.toolName}`];
-        const resultSucceeded = !isToolResultFailure(record) && record?.skipped !== true;
+        const resultSucceeded = isToolResultSuccess(record);
         if (resultSucceeded && index === input.submittedPlanIndex) interactivePlanApprovalPending = true;
         if (resultSucceeded && isExecutionActionTool(call.toolName)) executionActionObserved = true;
         if (input.terminalValidation) {
@@ -1921,11 +2024,11 @@ export class AgentRunner {
         invocationId: string,
         runId: string,
         topicId: string,
-        result: any,
+        result: unknown,
         providerId?: string,
         model?: string,
-    ): Promise<any> {
-        if (!result) return result;
+    ): Promise<ProcessedToolResult> {
+        if (!result) return { modelResult: result, stateResult: result };
 
         const strContent = this.serializeToolResult(result);
 
@@ -1940,11 +2043,11 @@ export class AgentRunner {
                     resultSize: strContent.length,
                     truncated: false
                 },
-                { invocationId, status: 'done' }
+                { invocationId, status: isToolResultSuccess(result) ? 'done' : 'failed' }
             ).catch(error => {
                 reportBestEffortFailure('ledger.append_tool_output', { runId, toolName, truncated: false }, error);
             });
-            return result;
+            return { modelResult: result, stateResult: result };
         }
 
         try {
@@ -1987,18 +2090,20 @@ export class AgentRunner {
                     truncated: true,
                     resultRef: relativeDiskPath
                 },
-                { invocationId, status: 'done' }
+                { invocationId, status: isToolResultSuccess(result) ? 'done' : 'failed' }
             ).catch(error => {
                 reportBestEffortFailure('ledger.append_tool_output', { runId, toolName, truncated: true }, error);
             });
             return {
-                ok: true,
-                truncated: true,
-                message: `Tool result for ${toolName} was archived because it is large (${strContent.length} chars). Use the preview and resultRef, or retry with narrower arguments if more detail is needed.`,
-                preview,
-                fullResultLocalPath: relativeDiskPath,
-                resultRef: relativeDiskPath,
-                resultSha256,
+                modelResult: buildArchivedToolResultEnvelope({
+                    toolName,
+                    result,
+                    resultSize: strContent.length,
+                    preview,
+                    resultRef: relativeDiskPath,
+                    resultSha256,
+                }),
+                stateResult: result,
             };
         } catch (archiveError) {
             reportBestEffortFailure('tool_result.archive', { runId, toolName }, archiveError);
@@ -2016,10 +2121,13 @@ export class AgentRunner {
                 reportBestEffortFailure('ledger.append_tool_output', { runId, toolName, truncated: true }, error);
             });
             return {
-                ok: true,
-                truncated: true,
-                message: `Tool result for ${toolName} was truncated because it is very large (${strContent.length} chars). Retry with narrower arguments if more detail is needed.`,
-                preview: strContent.substring(0, 1000)
+                modelResult: buildArchivedToolResultEnvelope({
+                    toolName,
+                    result,
+                    resultSize: strContent.length,
+                    preview: strContent.substring(0, 1000),
+                }),
+                stateResult: result,
             };
         }
     }
@@ -2028,17 +2136,17 @@ export class AgentRunner {
         return resolveToolResultArchiveLimit(toolName, providerId, model);
     }
 
-    private serializeToolResult(result: any): string {
+    private serializeToolResult(result: unknown): string {
         if (typeof result === 'string') return result;
         try {
-            return JSON.stringify(result);
+            return JSON.stringify(result) ?? String(result);
         } catch {
             return String(result);
         }
     }
 
-    private summarizeToolResultForLedger(toolName: string, result: any): Record<string, unknown> {
-        const resultRecord = result && typeof result === 'object' ? result as Record<string, any> : undefined;
+    private summarizeToolResultForLedger(toolName: string, result: unknown): Record<string, unknown> {
+        const resultRecord = toolResultRecord(result);
         const strContent = this.serializeToolResult(result);
         const error = resultRecord?.error;
         const skipped = !!resultRecord?.skipped;
@@ -2051,7 +2159,7 @@ export class AgentRunner {
             : [];
         return {
             toolName,
-            success: !error && !skipped && resultRecord?.success !== false,
+            success: isToolResultSuccess(result),
             error,
             skipped,
             truncated: !!resultRecord?.truncated,
@@ -3551,14 +3659,20 @@ export class AgentRunner {
 
             if (!toolCalls) toolCalls = [];
             toolDedupe.nextStep();
+            const preparedInvocations = new Map<ToolCall, ToolInvocation>();
+            const newlyDisclosedToolNames = new Set<string>();
             for (const toolCall of toolCalls) {
-                if (toolCall.function.name !== 'select_tools') continue;
-                let selectionArgs: Record<string, unknown> = {};
-                try {
-                    selectionArgs = JSON.parse(toolCall.function.arguments) as Record<string, unknown>;
-                } catch {
-                    // The normal argument-repair path will report malformed arguments.
-                }
+                if (toolCall.function.name.toLowerCase() !== 'select_tools') continue;
+                const invocation = buildToolInvocation({
+                    runId: runRecord.runId,
+                    toolCall,
+                    availableTools,
+                    workspaceRoot: this.toolExecutor.workspaceRoot,
+                    topicId: options?.topicId,
+                });
+                preparedInvocations.set(toolCall, invocation);
+                if (invocation.parseError) continue;
+                const selectionArgs = { ...invocation.args };
                 const selection = toolDisclosureService.select({
                     tools: Array.isArray(selectionArgs.tools)
                         ? selectionArgs.tools.filter((value): value is string => typeof value === 'string')
@@ -3569,8 +3683,10 @@ export class AgentRunner {
                     reason: typeof selectionArgs.reason === 'string' ? selectionArgs.reason : '',
                 }, eligibleToolPool, disclosureContext, { eligibleTools: eligibleToolPool });
                 selectionArgs._selectionResult = selection;
+                invocation.args = selectionArgs;
                 toolCall.function.arguments = JSON.stringify(selectionArgs);
                 availableTools = refreshAvailableTools();
+                for (const name of selection.loaded) newlyDisclosedToolNames.add(name);
                 await runLedger.appendEvent(runRecord.runId, 'tool_disclosure_changed', {
                     iteration,
                     ...selection,
@@ -3594,6 +3710,7 @@ export class AgentRunner {
                 globalToolCallIndex,
                 iteration,
                 maxToolIterations,
+                preparedInvocations,
                 runMetrics,
                 abortSignal: options?.abortSignal,
                 emitStep,
@@ -3616,7 +3733,8 @@ export class AgentRunner {
                 });
             }
 
-            const toolResults: any[] = new Array(parsedCalls.length);
+            const toolResults: unknown[] = new Array(parsedCalls.length);
+            const toolStateResults: unknown[] = new Array(parsedCalls.length);
             const questionCallIndex = parsedCalls.findIndex(call => call.toolName === 'ask_user_question');
             const submittedPlanIndex = options?.approvedPlanExecution
                 ? -1
@@ -3696,7 +3814,7 @@ export class AgentRunner {
                         runRecord.runId,
                         'tool_call_end',
                         { success: false, error: reason, approvalBoundaryBlocked: true },
-                        { invocationId: ci.invocationId },
+                        { invocationId: ci.invocationId, status: 'failed' },
                     );
                     continue;
                 }
@@ -3722,7 +3840,7 @@ export class AgentRunner {
                     }
                     await Promise.all(batchIndices.map(async idx => {
                         const callInfo = parsedCalls[idx]!;
-                        const runReadTool = async (): Promise<unknown> => {
+                        const runReadTool = async (): Promise<ProcessedToolResult> => {
                             const releaseLock = await toolScheduler.acquireLock(callInfo.concurrencyClass, options?.abortSignal);
                             try {
                                 options?.abortSignal?.throwIfAborted();
@@ -3737,7 +3855,12 @@ export class AgentRunner {
                                     options?.providerId,
                                     options?.model,
                                 );
-                                await runLedger.appendEvent(runRecord.runId, 'tool_call_end', this.summarizeToolResultForLedger(callInfo.toolName, processed), { invocationId: callInfo.invocationId });
+                                await runLedger.appendEvent(
+                                    runRecord.runId,
+                                    'tool_call_end',
+                                    this.summarizeToolResultForLedger(callInfo.toolName, processed.stateResult),
+                                    { invocationId: callInfo.invocationId, status: isToolResultSuccess(processed.stateResult) ? 'done' : 'failed' },
+                                );
                                 return processed;
                             } finally {
                                 releaseLock();
@@ -3766,7 +3889,8 @@ export class AgentRunner {
                                     ? this.writeQueue.afterCurrentWrites(readPaths, runReadTool)
                                     : runReadTool();
                             });
-                            toolResults[idx] = deduped.value;
+                            toolResults[idx] = deduped.value.modelResult;
+                            toolStateResults[idx] = deduped.value.stateResult;
                             if (deduped.reused) {
                                 await runLedger.appendEvent(runRecord.runId, 'tool_call_deduplicated', {
                                     toolName: callInfo.toolName,
@@ -3775,14 +3899,19 @@ export class AgentRunner {
                                 await runLedger.appendEvent(
                                     runRecord.runId,
                                     'tool_call_end',
-                                    this.summarizeToolResultForLedger(callInfo.toolName, toolResults[idx]),
-                                    { invocationId: callInfo.invocationId, status: 'done' },
+                                    this.summarizeToolResultForLedger(callInfo.toolName, toolStateResults[idx]),
+                                    { invocationId: callInfo.invocationId, status: isToolResultSuccess(toolStateResults[idx]) ? 'done' : 'failed' },
                                 );
                             }
                         } catch (e: any) {
                             if (e?.name === 'AbortError') throw e;
                             toolResults[idx] = { error: e instanceof Error ? e.message : String(e) };
-                            await runLedger.appendEvent(runRecord.runId, 'tool_call_end', this.summarizeToolResultForLedger(callInfo.toolName, toolResults[idx]), { invocationId: callInfo.invocationId });
+                            await runLedger.appendEvent(
+                                runRecord.runId,
+                                'tool_call_end',
+                                this.summarizeToolResultForLedger(callInfo.toolName, toolResults[idx]),
+                                { invocationId: callInfo.invocationId, status: 'failed' },
+                            );
                         }
                     }));
                 } else {
@@ -3792,7 +3921,7 @@ export class AgentRunner {
                             options?.abortSignal?.throwIfAborted();
                             await runLedger.appendEvent(runRecord.runId, 'tool_call_start', { toolName: ci.toolName }, { invocationId: ci.invocationId });
                             const rawRes = await this.executeToolPipeline(toolName, toolArgs, agentToolContext);
-                            toolResults[i] = await this.processToolResult(
+                            const processed = await this.processToolResult(
                                 toolName,
                                 ci.invocationId,
                                 runRecord.runId,
@@ -3801,11 +3930,23 @@ export class AgentRunner {
                                 options?.providerId,
                                 options?.model,
                             );
-                            await runLedger.appendEvent(runRecord.runId, 'tool_call_end', this.summarizeToolResultForLedger(ci.toolName, toolResults[i]), { invocationId: ci.invocationId });
+                            toolResults[i] = processed.modelResult;
+                            toolStateResults[i] = processed.stateResult;
+                            await runLedger.appendEvent(
+                                runRecord.runId,
+                                'tool_call_end',
+                                this.summarizeToolResultForLedger(ci.toolName, processed.stateResult),
+                                { invocationId: ci.invocationId, status: isToolResultSuccess(processed.stateResult) ? 'done' : 'failed' },
+                            );
                         } catch (e: any) {
                             if (e?.name === 'AbortError') throw e;
                             toolResults[i] = { error: e instanceof Error ? e.message : String(e) };
-                            await runLedger.appendEvent(runRecord.runId, 'tool_call_end', this.summarizeToolResultForLedger(ci.toolName, toolResults[i]), { invocationId: ci.invocationId });
+                            await runLedger.appendEvent(
+                                runRecord.runId,
+                                'tool_call_end',
+                                this.summarizeToolResultForLedger(ci.toolName, toolResults[i]),
+                                { invocationId: ci.invocationId, status: 'failed' },
+                            );
                         } finally {
                             releaseLock();
                         }
@@ -3873,7 +4014,7 @@ export class AgentRunner {
                                 // tools for no reason.
                                 const args = (confirmedWrittenFiles.has(primaryFilePath) || shouldAutoApplyWrite) ? { ...toolArgs, _autoApply: true } : toolArgs;
                                 const rawRes = await this.executeToolPipeline(toolName, args, agentToolContext);
-                                toolResults[i] = await this.processToolResult(
+                                const processed = await this.processToolResult(
                                     toolName,
                                     ci.invocationId,
                                     runRecord.runId,
@@ -3882,11 +4023,13 @@ export class AgentRunner {
                                     options?.providerId,
                                     options?.model,
                                 );
-                                const r = toolResults[i] as Record<string, unknown>;
+                                toolResults[i] = processed.modelResult;
+                                toolStateResults[i] = processed.stateResult;
+                                const r = toolResultRecord(processed.stateResult);
                                 if (r && (r.success || r.confirmed) && primaryFilePath) confirmedWrittenFiles.add(primaryFilePath);
                             } else if (WRITE_TOOLS.has(toolName) && primaryFilePath && (confirmedWrittenFiles.has(primaryFilePath) || shouldAutoApplyWrite)) {
                                 const rawRes = await this.executeToolPipeline(toolName, { ...toolArgs, _autoApply: true }, agentToolContext);
-                                toolResults[i] = await this.processToolResult(
+                                const processed = await this.processToolResult(
                                     toolName,
                                     ci.invocationId,
                                     runRecord.runId,
@@ -3895,9 +4038,11 @@ export class AgentRunner {
                                     options?.providerId,
                                     options?.model,
                                 );
+                                toolResults[i] = processed.modelResult;
+                                toolStateResults[i] = processed.stateResult;
                             } else {
                                 const rawRes = await this.executeToolPipeline(toolName, toolArgs, agentToolContext);
-                                toolResults[i] = await this.processToolResult(
+                                const processed = await this.processToolResult(
                                     toolName,
                                     ci.invocationId,
                                     runRecord.runId,
@@ -3906,8 +4051,10 @@ export class AgentRunner {
                                     options?.providerId,
                                     options?.model,
                                 );
+                                toolResults[i] = processed.modelResult;
+                                toolStateResults[i] = processed.stateResult;
                                 if (WRITE_TOOLS.has(toolName) && primaryFilePath) {
-                                    const r = toolResults[i] as Record<string, unknown>;
+                                    const r = toolResultRecord(processed.stateResult);
                                     if (r && (r.success || r.confirmed)) confirmedWrittenFiles.add(primaryFilePath);
                                 }
                             }
@@ -3915,13 +4062,13 @@ export class AgentRunner {
                                 if (e?.name === 'AbortError') throw e;
                                 toolResults[i] = { error: e instanceof Error ? e.message : String(e) };
                             } finally {
-                                const res = toolResults[i] as any;
-                                const success = res && !res.error && !res.skipped;
+                                const res = toolStateResults[i] ?? toolResults[i];
+                                const success = isToolResultSuccess(res);
                                 await runLedger.appendEvent(
                                     runRecord.runId,
                                     'tool_call_end',
                                     { ...this.summarizeToolResultForLedger(ci.toolName, res), success },
-                                    { invocationId: ci.invocationId }
+                                    { invocationId: ci.invocationId, status: success ? 'done' : 'failed' }
                                 );
                                 if (success && primaryFilePath) {
                                     const fileChange: Record<string, unknown> = { filePath: primaryFilePath };
@@ -3983,6 +4130,8 @@ export class AgentRunner {
                 }
             }
 
+            const effectiveToolResults = toolResults.map((result, index) => toolStateResults[index] ?? result);
+
             // ── Mutating write progress check ──
             // If a mutating tool call succeeded, clear only the pair entries that
             // reference its target files. Global clear was over-eager: writing file
@@ -3993,11 +4142,8 @@ export class AgentRunner {
                 const pc = parsedCalls[j]!;
                 const reg = TOOL_REGISTRY.get(pc.toolName as import('./tools/registry').AgentToolName);
                 if (!reg?.mutating) continue;
-                const mutationResult = toolResults[j] as Record<string, unknown> | undefined;
-                if (!mutationResult
-                    || mutationResult.success === false
-                    || mutationResult.error !== undefined
-                    || mutationResult.skipped === true) continue;
+                const mutationResult = effectiveToolResults[j];
+                if (!isToolResultSuccess(mutationResult)) continue;
                 if (pc.targetPaths && pc.targetPaths.length > 0) {
                     for (const fp of pc.targetPaths) mutatedFilePaths.add(fp);
                 } else {
@@ -4023,7 +4169,7 @@ export class AgentRunner {
                 for (const j of loopGuardedCallIndices) {
                     const { toolName, toolArgs, targetPaths } = parsedCalls[j]!;
                     const sig = createToolCallSignature(toolName, toolArgs, targetPaths);
-                    const resultHash = fnv32a(normalizeToolResultHash(toolName, toolResults[j]));
+                    const resultHash = fnv32a(normalizeToolResultHash(toolName, effectiveToolResults[j]));
                     const prevHash = doomLoop.lastResultHash.get(sig);
                     if (prevHash !== undefined && prevHash !== resultHash) {
                         // Hash differs — meaningful progress, not a doom-loop.
@@ -4046,7 +4192,7 @@ export class AgentRunner {
                 for (const j of loopGuardedCallIndices) {
                     const { toolName, toolArgs, targetPaths } = parsedCalls[j]!;
                     const sig = createToolCallSignature(toolName, toolArgs, targetPaths);
-                    doomLoop.lastResultHash.set(sig, fnv32a(normalizeToolResultHash(toolName, toolResults[j])));
+                    doomLoop.lastResultHash.set(sig, fnv32a(normalizeToolResultHash(toolName, effectiveToolResults[j])));
                 }
             }
 
@@ -4057,6 +4203,7 @@ export class AgentRunner {
                 // Fix #10: use _prefix for intentionally unused destructured vars
                 const { invocationId, toolName, toolArgs: _toolArgs, toolCall } = parsedCalls[j]!;  
                 const toolResult = toolResults[j];
+                const stateResult = effectiveToolResults[j];
                 if (runMetrics) {
                     runMetrics.maxToolResultChars = Math.max(
                         runMetrics.maxToolResultChars,
@@ -4074,7 +4221,7 @@ export class AgentRunner {
                 });
 
                 // Track consecutive errors
-                if (isToolResultFailure(toolResult)) {
+                if (isToolResultFailure(stateResult)) {
                     consecutiveErrorCount++;
                     const errorLimit = bypassSandbox ? 100 : 10;
                     if (consecutiveErrorCount >= errorLimit) {
@@ -4105,9 +4252,15 @@ export class AgentRunner {
                 }
             }
 
+            if (newlyDisclosedToolNames.size > 0 && availableTools.some(tool => tool.function.name === 'run_code')) {
+                const sdkAdditions = buildRunCodePromptAdditions(availableTools.filter(tool =>
+                    newlyDisclosedToolNames.has(tool.function.name)));
+                if (sdkAdditions) messages.push({ role: 'user', content: sdkAdditions });
+            }
+
             const foldedBatch = foldToolBatchState({
                 calls: parsedCalls,
-                results: toolResults,
+                results: effectiveToolResults,
                 submittedPlanIndex,
                 terminalValidation,
                 completedTodoCount,

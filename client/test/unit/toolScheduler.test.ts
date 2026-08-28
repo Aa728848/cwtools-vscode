@@ -37,6 +37,8 @@ describe('ToolScheduler V2 concurrencyClass Dispatch (P2-3)', () => {
             .to.equal('C:/project/src/main.ts');
         expect(normalize(mod.getAgentToolTargetFiles('read_file', { file: 'src/main.ts' }, 'C:/project')[0]!))
             .to.equal('C:/project/src/main.ts');
+        expect(normalize(mod.getAgentToolTargetFiles('get_diagnostics', { file: 'src/main.ts' }, 'C:/project')[0]!))
+            .to.equal('C:/project/src/main.ts');
         expect(normalize(mod.getAgentToolTargetFiles('get_pdx_block', { file: 'events/test.txt' }, 'C:/project')[0]!))
             .to.equal('C:/project/events/test.txt');
         expect(normalize(mod.getAgentToolTargetFiles('hover_symbol', { file: 'src/main.ts' }, 'C:/project')[0]!))

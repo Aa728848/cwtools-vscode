@@ -57,8 +57,8 @@ describe('dynamic MCP access validation', () => {
 });
 
 describe('MCP capability domains', () => {
-    it('keeps legacy servers Paradox-only and requires an explicit General declaration', () => {
-        expect(isMcpServerAllowedForDomain(undefined, 'paradox')).to.equal(true);
+    it('requires every server to declare its capability domain', () => {
+        expect(isMcpServerAllowedForDomain(undefined, 'paradox')).to.equal(false);
         expect(isMcpServerAllowedForDomain(undefined, 'general')).to.equal(false);
         expect(isMcpServerAllowedForDomain({ capabilityDomain: 'general' }, 'general')).to.equal(true);
         expect(isMcpServerAllowedForDomain({ capabilityDomain: 'general' }, 'paradox')).to.equal(false);

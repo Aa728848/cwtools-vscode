@@ -15,6 +15,18 @@ function canonicalize(value: unknown, key?: string): unknown {
         .map(childKey => [childKey, canonicalize((value as Record<string, unknown>)[childKey], childKey)]));
 }
 
+export function createToolCallSignature(
+    toolName: string,
+    args: Record<string, unknown>,
+    targetPaths: readonly string[] = [],
+): string {
+    return JSON.stringify({
+        toolName,
+        args: canonicalize(args),
+        targetPaths: [...targetPaths].map(value => path.normalize(value).replace(/\\/g, '/')).sort(),
+    });
+}
+
 export function createToolDedupeKey(
     toolName: string,
     args: Record<string, unknown>,
@@ -44,8 +56,6 @@ interface CachedInvocation<T> {
 
 export class ToolDedupeService {
     private readonly inStep = new Map<string, CachedInvocation<unknown>>();
-    private readonly crossStepFrequency = new Map<string, number>();
-    private readonly seenThisStep = new Set<string>();
 
     async execute<T>(
         request: {
@@ -65,10 +75,6 @@ export class ToolDedupeService {
             request.authorizationScope,
             request.targetResourceRevision,
         );
-        if (!this.seenThisStep.has(key)) {
-            this.seenThisStep.add(key);
-            this.crossStepFrequency.set(key, (this.crossStepFrequency.get(key) ?? 0) + 1);
-        }
         const existing = reusable ? this.inStep.get(key) as CachedInvocation<T> | undefined : undefined;
         if (existing) {
             return { value: await existing.promise, reused: true, sourceInvocationId: existing.invocationId };
@@ -89,12 +95,7 @@ export class ToolDedupeService {
         }
     }
 
-    repeatCount(toolName: string, args: Record<string, unknown>, authorizationScope: string, revision: string): number {
-        return this.crossStepFrequency.get(createToolDedupeKey(toolName, args, authorizationScope, revision)) ?? 0;
-    }
-
     nextStep(): void {
         this.inStep.clear();
-        this.seenThisStep.clear();
     }
 }

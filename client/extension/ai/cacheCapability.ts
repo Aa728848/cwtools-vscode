@@ -129,7 +129,7 @@ function normalizedRequestCount(value: number | undefined): number {
 
 function overflowKey(sample: CacheRequestUsage): string {
     return [sample.provider, sample.model, sample.cacheCapable ? '1' : '0', sample.agentMode ?? '',
-        sample.toolStage ?? '', sample.promptFingerprint ?? '', sample.purpose ?? '', sample.invalidationReason ?? ''].join('\u0000');
+        sample.toolFocus ?? '', sample.promptFingerprint ?? '', sample.purpose ?? '', sample.invalidationReason ?? ''].join('\u0000');
 }
 
 export function appendCacheRequestUsage(accumulator: TokenUsage | undefined, sample: CacheRequestUsage): void {

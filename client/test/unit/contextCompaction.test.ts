@@ -254,7 +254,7 @@ describe('compaction efficiency (unified summary plan §5.1)', () => {
             output: 0,
             estimatedCostCny: 0,
             agentMode: 'build',
-            toolStage: 'discovery',
+            toolFocus: 'discovery',
         };
         const { aiService, getCalls } = makeAiServiceStub(4_000, () => ({
             ...defaultResponse(),
@@ -283,7 +283,7 @@ describe('compaction efficiency (unified summary plan §5.1)', () => {
             cachedTokens: 30,
             cacheCapable: true,
             agentMode: 'build',
-            toolStage: 'discovery',
+            toolFocus: 'discovery',
             promptFingerprint: accumulator.cacheRequests?.[0]?.promptFingerprint,
             purpose: 'compaction',
             invalidationReason: undefined,

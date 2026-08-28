@@ -3398,18 +3398,14 @@ export class AgentToolExecutor {
         // Create new connection
         const { MCPClient } = await import('./mcpClient');
         const config = vs.workspace.getConfiguration('stellarisLanguageServices.ai');
-        const servers = config.get<any[]>('mcp.servers') || [];
-        const serverConfig = servers.find((s: any) => s.name === serverName);
+        const servers = config.get<import('./types').MCPServerConfig[]>('mcp.servers') || [];
+        const serverConfig = servers.find(server => server.name === serverName);
         if (!serverConfig) throw new Error(`MCP server "${serverName}" not found in configuration`);
+        if (!['paradox', 'general', 'both'].includes(serverConfig.capabilityDomain)) {
+            throw new Error(`MCP server "${serverName}" must declare capabilityDomain`);
+        }
 
-        const client = new MCPClient({
-            name: serverConfig.name,
-            type: serverConfig.type,
-            command: serverConfig.command,
-            args: serverConfig.args,
-            env: serverConfig.env,
-            url: serverConfig.url,
-        });
+        const client = new MCPClient(serverConfig);
         await client.connect(abortSignal);
 
         const timer = setTimeout(() => this.evictMcpClient(serverName), AgentToolExecutor.MCP_IDLE_TIMEOUT_MS);

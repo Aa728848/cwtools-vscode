@@ -141,7 +141,7 @@ describe('webview smoke checks', () => {
         expect(script).to.include("renderCacheDimension(tr('Provider', '供应商'), cache.byProvider)");
         expect(script).to.include("renderCacheDimension(tr('Model', '模型'), cache.byModel)");
         expect(script).to.include("renderCacheDimension(tr('Agent mode', 'Agent 模式'), cache.byAgentMode)");
-        expect(script).to.include("renderCacheDimension(tr('Tool stage', '工具阶段'), cache.byToolStage)");
+        expect(script).to.include("renderCacheDimension(tr('Tool focus', '工具焦点'), cache.byToolFocus)");
         expect(script).to.include("renderCacheDimension(tr('Prompt variants', '提示词版本'), cache.byPromptFingerprint, true)");
         expect(script).to.include("tr('Zero-hit reasons', '零命中原因')");
         expect(script).to.include('class="usage-cache-overview"');

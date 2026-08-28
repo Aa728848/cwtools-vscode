@@ -3045,7 +3045,10 @@ describe('agent tool progress and aborts', () => {
     });
 
     it('resolves underscore server names through the dynamic registration map', async () => {
-        stubConfigOverrides = { 'mcp.registerDynamicTools': true, 'mcp.servers': [{ name: 'my_server' }] };
+        stubConfigOverrides = {
+            'mcp.registerDynamicTools': true,
+            'mcp.servers': [{ name: 'my_server', type: 'stdio', capabilityDomain: 'paradox' }],
+        };
         const executor = createExecutor();
         const callTool = sinon.stub().resolves({ ok: true });
         const getMcpClient = sinon.stub(executor as any, 'getMcpClient').resolves({

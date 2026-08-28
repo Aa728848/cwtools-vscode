@@ -92,6 +92,7 @@ export function getAgentToolTargetFiles(
         case 'read_file':
         case 'get_pdx_block':
         case 'get_completion_at':
+        case 'get_diagnostics':
         case 'go_to_definition':
         case 'find_references':
         case 'hover_symbol':

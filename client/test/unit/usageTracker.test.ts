@@ -264,16 +264,16 @@ describe('UsageTracker request-level cache metrics (plan §7.3)', () => {
             cacheRequests: [
                 {
                     provider: 'deepseek', model: 'deepseek-chat', inputTokens: 1000, cachedTokens: 800,
-                    cacheCapable: true, agentMode: 'build', toolStage: 'discovery', promptFingerprint: 'fp-a', purpose: 'reasoning',
+                    cacheCapable: true, agentMode: 'build', toolFocus: 'discovery', promptFingerprint: 'fp-a', purpose: 'reasoning',
                 },
                 {
                     provider: 'deepseek', model: 'deepseek-chat', inputTokens: 1000, cachedTokens: 0,
-                    cacheCapable: true, agentMode: 'build', toolStage: 'validation', promptFingerprint: 'fp-b', purpose: 'reasoning',
+                    cacheCapable: true, agentMode: 'build', toolFocus: 'validation', promptFingerprint: 'fp-b', purpose: 'reasoning',
                     invalidationReason: 'toolset_changed',
                 },
                 {
                     provider: 'openai', model: 'gpt-5', inputTokens: 1000, cachedTokens: 700,
-                    cacheCapable: true, agentMode: 'build', toolStage: 'validation', promptFingerprint: 'fp-b', purpose: 'fallback',
+                    cacheCapable: true, agentMode: 'build', toolFocus: 'validation', promptFingerprint: 'fp-b', purpose: 'fallback',
                 },
             ],
         }));
@@ -285,8 +285,8 @@ describe('UsageTracker request-level cache metrics (plan §7.3)', () => {
         expect(cache.byProvider.openai).to.deep.equal({ requests: 1, hitRequests: 1, requestHitRate: 100, cacheHitRate: 70 });
         expect(cache.byModel['deepseek-chat']?.requests).to.equal(2);
         expect(cache.byAgentMode.build?.requests).to.equal(3);
-        expect(cache.byToolStage.discovery?.requests).to.equal(1);
-        expect(cache.byToolStage.validation?.requests).to.equal(2);
+        expect(cache.byToolFocus.discovery?.requests).to.equal(1);
+        expect(cache.byToolFocus.validation?.requests).to.equal(2);
         expect(cache.byPromptFingerprint['fp-a']?.requests).to.equal(1);
         expect(cache.byPromptFingerprint['fp-b']?.requests).to.equal(2);
         expect(cache.invalidationReasons).to.deep.equal({ toolset_changed: 1 });
@@ -319,7 +319,7 @@ describe('UsageTracker request-level cache metrics (plan §7.3)', () => {
                 cachedTokens: i % 2 === 0 ? 5 : 0,
                 cacheCapable: true,
                 agentMode: 'script',
-                toolStage: 'write',
+                toolFocus: 'write',
                 purpose: 'reasoning',
                 invalidationReason: i % 2 === 0 ? undefined : 'provider_miss',
             });

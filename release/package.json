@@ -1745,8 +1745,7 @@
                                         "general",
                                         "both"
                                     ],
-                                    "default": "paradox",
-                                    "description": "Capability domain allowed to receive this server. Missing values remain Paradox-only."
+                                    "description": "Capability domain allowed to receive this server. This declaration is required."
                                 },
                                 "command": {
                                     "type": "string",
@@ -1770,7 +1769,8 @@
                             },
                             "required": [
                                 "name",
-                                "type"
+                                "type",
+                                "capabilityDomain"
                             ]
                         }
                     },
@@ -1798,12 +1798,6 @@
                 "title": "%configuration.category.ai.performance%",
                 "order": 80,
                 "properties": {
-                    "stellarisLanguageServices.ai.performance.legacyFullToolset": {
-                        "scope": "window",
-                        "type": "boolean",
-                        "default": false,
-                        "description": "%configuration.stellarisLanguageServices.ai.performance.legacyFullToolset.description%"
-                    },
                     "stellarisLanguageServices.ai.performance.includeFullSmallFiles": {
                         "scope": "window",
                         "type": "boolean",

@@ -45,6 +45,8 @@ describe('RecoveryCoordinator', () => {
         const coordinator = new RecoveryCoordinator();
         expect(coordinator.claim('permission_denied')).to.equal(undefined);
         expect(coordinator.claim('sandbox_unavailable')).to.equal(undefined);
+        expect(coordinator.claim('tool_validation')).to.equal(undefined);
+        expect(coordinator.claim('provider')).to.equal(undefined);
         expect(coordinator.claim('unknown')).to.equal(undefined);
     });
 });

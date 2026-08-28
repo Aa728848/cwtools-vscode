@@ -624,17 +624,11 @@ export class PromptBuilder {
         }).join('|');
     }
 
-    /**
-     * Feature flags that change prompt or tool message content (plan §7.1).
-     * legacyFullToolset does not alter the prompt text itself but gates the
-     * tool set, so flipping it must rebuild the frozen prompt together with
-     * the toolset hash. Read directly from configuration (no new settings).
-     */
+    /** Feature flags that change prompt or tool message content (plan §7.1). */
     private computePromptFlagsHash(): string {
         const perfConfig = vs.workspace.getConfiguration('stellarisLanguageServices.ai.performance');
         return shortSha256(JSON.stringify({
             includeFullSmallFiles: perfConfig.get<boolean>('includeFullSmallFiles') === true,
-            legacyFullToolset: perfConfig.get<boolean>('legacyFullToolset') === true,
         }));
     }
 

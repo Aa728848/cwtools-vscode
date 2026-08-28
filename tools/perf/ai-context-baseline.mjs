@@ -57,20 +57,13 @@ const { PromptBuilder } = loadTs('client/extension/ai/promptBuilder.ts');
 const { TOOL_DEFINITIONS } = loadTs('client/extension/ai/tools/definitions.ts');
 const {
   filterToolDefinitionsForMode,
-  filterToolDefinitionsForStage,
-  initialToolStageForMode,
 } = loadTs('client/extension/ai/runnerPolicy.ts');
+const { toolDisclosureService } = loadTs('client/extension/ai/runner/toolDisclosure.ts');
 const { estimateTokenCount } = loadTs('client/extension/ai/agentRunner.ts');
 
 // ─── Measurement ─────────────────────────────────────────────────────────────
 const GAME_ID = 'stellaris';
 const MODES = ['build', 'plan', 'explore', 'review'];
-const BUILD_STAGES = ['discovery', 'evidence', 'validation', 'write', 'finalize'];
-const READ_ONLY_MODE_STAGES = {
-  plan: ['discovery', 'design', 'validation', 'finalize'],
-  explore: ['discovery', 'validation', 'finalize'],
-  review: ['discovery', 'validation', 'finalize'],
-};
 const PARALLEL_SLIM_BUILDERS = 8;
 
 function measure(label, prompt, tools) {
@@ -81,17 +74,12 @@ function measure(label, prompt, tools) {
 
 function toolsForMode(mode, options) {
   const modeTools = filterToolDefinitionsForMode(TOOL_DEFINITIONS, mode, options);
-  return filterToolDefinitionsForStage(modeTools, mode, initialToolStageForMode(mode));
-}
-
-function toolsForBuildStage(stage, options) {
-  const modeTools = filterToolDefinitionsForMode(TOOL_DEFINITIONS, 'build', options);
-  return filterToolDefinitionsForStage(modeTools, 'build', stage);
-}
-
-function toolsForModeStage(mode, stage) {
-  const modeTools = filterToolDefinitionsForMode(TOOL_DEFINITIONS, mode);
-  return filterToolDefinitionsForStage(modeTools, mode, stage);
+  return toolDisclosureService.initialTools(modeTools, {
+    mode,
+    domain: 'paradox',
+    dynamicSupported: true,
+    loaded: new Set(),
+  });
 }
 
 const workspaceRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'cwtools-ai-baseline-'));
@@ -109,27 +97,6 @@ try {
     builder.buildSlimSystemPromptForMode('build', undefined, GAME_ID),
     toolsForMode('build', { useSlimPrompt: true }),
   );
-  const buildStageRows = BUILD_STAGES.map(stage => measure(
-    stage,
-    builder.buildSystemPromptForMode('build', undefined, GAME_ID),
-    toolsForBuildStage(stage),
-  ));
-  const slimBuildStageRows = BUILD_STAGES.map(stage => measure(
-    stage,
-    builder.buildSlimSystemPromptForMode('build', undefined, GAME_ID),
-    toolsForBuildStage(stage, { useSlimPrompt: true }),
-  ));
-  const readOnlyStageRows = Object.entries(READ_ONLY_MODE_STAGES).flatMap(([mode, stages]) =>
-    stages.map(stage => ({
-      mode,
-      ...measure(
-        stage,
-        builder.buildSystemPromptForMode(mode, undefined, GAME_ID),
-        toolsForModeStage(mode, stage),
-      ),
-    })),
-  );
-
   const blueprintDef = TOOL_DEFINITIONS.find(d => d.function.name === 'write_design_blueprint');
   if (!blueprintDef) throw new Error('write_design_blueprint not found in TOOL_DEFINITIONS');
   const blueprintSchemaTokens = estimateTokenCount(JSON.stringify(blueprintDef));
@@ -137,7 +104,7 @@ try {
   const build = rows.find(r => r.label === 'build');
   const slimParallelWorst = slimBuild.total * PARALLEL_SLIM_BUILDERS;
 
-  report = renderReport({ rows, slimBuild, build, buildStageRows, slimBuildStageRows, readOnlyStageRows, blueprintSchemaTokens, slimParallelWorst });
+  report = renderReport({ rows, slimBuild, build, blueprintSchemaTokens, slimParallelWorst });
 } finally {
   fs.rmSync(workspaceRoot, { recursive: true, force: true });
 }
@@ -147,7 +114,7 @@ fs.writeFileSync(outPath, report, 'utf8');
 console.log(`Wrote ${path.relative(repoRoot, outPath)}`);
 
 // ─── Report rendering ────────────────────────────────────────────────────────
-function renderReport({ rows, slimBuild, build, buildStageRows, slimBuildStageRows, readOnlyStageRows, blueprintSchemaTokens, slimParallelWorst }) {
+function renderReport({ rows, slimBuild, build, blueprintSchemaTokens, slimParallelWorst }) {
   const fmt = (n) => Math.round(n).toLocaleString('en-US');
   const generatedAt = new Date().toISOString();
   let commit = 'unknown';
@@ -175,14 +142,6 @@ function renderReport({ rows, slimBuild, build, buildStageRows, slimBuildStageRo
   const modeTable = rows.map(r =>
     `| ${r.label} | ${r.toolCount} | ${fmt(r.promptTokens)} | ${fmt(r.toolTokens)} | ${fmt(r.total)} |`,
   ).join('\n');
-  const buildStageTable = buildStageRows.map((r, index) => {
-    const slim = slimBuildStageRows[index];
-    return `| ${r.label} | ${r.toolCount} | ${fmt(r.total)} | ${slim.toolCount} | ${fmt(slim.total)} |`;
-  }).join('\n');
-  const readOnlyStageTable = readOnlyStageRows.map(r =>
-    `| ${r.mode} | ${r.label} | ${r.toolCount} | ${fmt(r.promptTokens)} | ${fmt(r.toolTokens)} | ${fmt(r.total)} |`,
-  ).join('\n');
-
   return `<!-- GENERATED FILE — run \`npm run baseline:ai-context\` to regenerate. -->
 # AI 静态上下文基线 / AI Static-Context Baseline
 
@@ -193,7 +152,7 @@ function renderReport({ rows, slimBuild, build, buildStageRows, slimBuildStageRo
 - 测量输入 SHA-256：${inputSha256}
 - Token 估算：仓库自身 \`estimateTokenCount\`（\`client/extension/ai/agentRunner.ts\`），适合相对比较，不等同于供应商计费。
 - Fixture：空临时 workspace（无 CWTOOLS.md、project profile、project knowledge、记忆、已安装技能），languageId 固定为 \`${GAME_ID}\`。
-- 工具 Schema 按 mode 过滤后，再按当前 build stage 过滤并以 \`JSON.stringify\` 估算。
+- 工具 Schema 按 mode/domain 过滤后，使用自动披露的首轮工具集并以 \`JSON.stringify\` 估算。
 - 不含动态上下文（编辑器状态、用户输入、对话历史、注入的记忆/blueprint）；真实项目 workspace 的数字只会更大。
 
 ## 与 §2.1 同构的基线数字（Stellaris build 模式）
@@ -213,18 +172,6 @@ function renderReport({ rows, slimBuild, build, buildStageRows, slimBuildStageRo
 | --- | ---: | ---: | ---: | ---: |
 ${modeTable}
 | ${slimBuild.label} | ${slimBuild.toolCount} | ${fmt(slimBuild.promptTokens)} | ${fmt(slimBuild.toolTokens)} | ${fmt(slimBuild.total)} |
-
-## Build 阶段化工具明细
-
-| 阶段 | 主 Agent 工具数 | 主 Agent 静态合计 | slim 工具数 | slim 静态合计 |
-| --- | ---: | ---: | ---: | ---: |
-${buildStageTable}
-
-## 只读模式阶段化工具明细
-
-| 模式 | 阶段 | 工具数 | 系统提示词 | 工具 Schema | 静态合计 |
-| --- | --- | ---: | ---: | ---: | ---: |
-${readOnlyStageTable}
 
 ## 与 §6.1 目标预算的差距
 

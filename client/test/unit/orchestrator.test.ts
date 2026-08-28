@@ -867,7 +867,7 @@ describe('approved blueprint dispatch', () => {
                         cachedTokens: 40,
                         cacheCapable: true,
                         agentMode: 'build',
-                        toolStage: 'write',
+                        toolFocus: 'write',
                         promptFingerprint: 'child-fp',
                         purpose: 'reasoning',
                     }],
@@ -1172,7 +1172,7 @@ describe('Orchestrator runtime safety', () => {
                         cachedTokens: 40,
                         cacheCapable: true,
                         agentMode: 'build',
-                        toolStage: 'write',
+                        toolFocus: 'write',
                         promptFingerprint: 'child-fp',
                         purpose: 'reasoning',
                     }],
@@ -1408,7 +1408,7 @@ describe('Orchestrator runtime safety', () => {
         );
 
         expect(result.success).to.equal(true);
-        expect(capturedOptions.initialToolStage).to.equal('write');
+        expect(capturedOptions.initialToolFocus).to.equal('write');
         expect(capturedOptions.useSlimPrompt).to.equal(true);
         expect(capturedOptions.forceAutoApplyWrites).to.equal(true);
         expect(result.writtenFiles).to.deep.equal([
@@ -1622,7 +1622,7 @@ describe('Orchestrator runtime safety', () => {
 
         expect(result.success).to.equal(true);
         expect(capturedOptions.domain).to.equal('general');
-        expect(capturedOptions.initialToolStage).to.equal('write');
+        expect(capturedOptions.initialToolFocus).to.equal('write');
         expect(capturedOptions.useSlimPrompt).to.equal(true);
         expect(capturedOptions.forceAutoApplyWrites).to.equal(true);
         expect(capturedOptions.excludeTools).to.not.include('run_command');
@@ -2224,7 +2224,7 @@ describe('QualityGate', () => {
                         apiCalls: 2,
                         cacheRequests: [{
                             provider: 'deepseek', model: 'deepseek-chat', inputTokens: 100, cachedTokens: 40,
-                            cacheCapable: true, agentMode: 'script_reviewer', toolStage: 'validation',
+                            cacheCapable: true, agentMode: 'script_reviewer', toolFocus: 'validation',
                             promptFingerprint: 'review-fp', purpose: 'reasoning',
                         }],
                     },

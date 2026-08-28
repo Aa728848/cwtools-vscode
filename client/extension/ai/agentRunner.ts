@@ -17,7 +17,7 @@ import type {
     ChatCompletionResponse,
     ContentPart,
     TokenUsage,
-    AgentToolStage,
+    AgentToolFocus,
     AgentRunMetrics,
     ToolDefinition,
     ReasoningEffort,
@@ -41,8 +41,6 @@ import { DEFAULT_REASONING_KEY, detectReasoningKey, reasoningValue } from './pro
 import { getCurrentModelPricing, getCacheDiscountFactor } from './pricing';
 import { buildProviderCallTokenUsage } from './providerCallUsage';
 import { parseDsmlToolCalls as _parseDsmlToolCalls, stripDsmlMarkup as _stripDsmlMarkup, stripThinkBlocks as _stripThinkBlocks, cleanFinalContent as _cleanFinalContent } from './toolCallParser';
-import { tryRepairJson as _tryRepairJson } from './jsonRepair';
-import { repairToolArgs } from './tools/argRepair';
 import { budgetToolResult as _budgetToolResult, compactToolResultForUi, getToolResultBudget } from './contextBudget';
 import type { CompactMessagesOptions } from './contextBudget';
 import { computeLineDiff } from './diffEngine';
@@ -54,7 +52,7 @@ import { MemoryParser } from './memoryParser';
 import { getProjectWorkspaceRoot, getPrivateTopicStorageDir, getPrivateTopicStorageDirCandidates, canonicalPathKey } from './workspacePaths';
 import {
     filterToolDefinitionsForMode,
-    initialToolStageForMode,
+    initialToolFocusForMode,
     buildToolFocusReminder,
     isExecutionActionTool,
     resolveMaxToolIterations,
@@ -96,7 +94,7 @@ import {
     transitionSchedulingState,
 } from './runner/scheduling';
 import { sortToolDefinitionsForStableRequest, toolDisclosureService, type ToolDisclosureContext } from './runner/toolDisclosure';
-import { ToolDedupeService } from './runner/toolDedupe';
+import { createToolCallSignature, ToolDedupeService } from './runner/toolDedupe';
 import { contextLimitTracker } from './runner/contextLimitTracker';
 import { RecoveryCoordinator } from './runner/recoveryCoordinator';
 import { runtimeFaultInjector } from './runner/faultInjection';
@@ -140,6 +138,303 @@ export { estimateTokenCount, estimateChatMessageTokens, estimateChatMessagesToke
 const reportBestEffortFailure = createBestEffortReporter((message, error) => {
     ErrorReporter.debug(SOURCE.AGENT_RUNNER, message, error);
 });
+
+export function isToolResultFailure(result: unknown): boolean {
+    if (!result || typeof result !== 'object' || Array.isArray(result)) return false;
+    const record = result as Record<string, unknown>;
+    return record.success === false || record.ok === false || record.error !== undefined;
+}
+
+interface NormalizedToolCall {
+    invocationId: string;
+    toolName: AgentToolName;
+    toolArgs: Record<string, unknown>;
+    toolArgsParseError?: string;
+    toolCall: ToolCall;
+    concurrencyClass: import('./types').ToolConcurrencyClass;
+    effect: import('./types').ToolEffect;
+    targetPaths: string[];
+}
+
+function normalizeToolCallBatch(input: {
+    runId: string;
+    toolCalls: ToolCall[];
+    availableTools: ToolDefinition[];
+    workspaceRoot: string;
+    topicId?: string;
+    previewInvocationByModelToolCallId: Map<string, string>;
+    previewInvocationByToolIndex: Map<number, string>;
+    globalToolCallIndex: number;
+    iteration: number;
+    maxToolIterations: number;
+    runMetrics?: AgentRunMetrics;
+    abortSignal?: AbortSignal;
+    emitStep: (step: AgentStep) => void;
+}): { calls: NormalizedToolCall[]; globalToolCallIndex: number } {
+    const calls: NormalizedToolCall[] = [];
+    let globalToolCallIndex = input.globalToolCallIndex;
+    for (const [toolCallPosition, toolCall] of input.toolCalls.entries()) {
+        input.abortSignal?.throwIfAborted();
+        const invocation = buildToolInvocation({
+            runId: input.runId,
+            toolCall,
+            availableTools: input.availableTools,
+            workspaceRoot: input.workspaceRoot,
+            topicId: input.topicId,
+        });
+        const invocationId = (toolCall.id && input.previewInvocationByModelToolCallId.get(toolCall.id))
+            ?? input.previewInvocationByToolIndex.get(toolCallPosition)
+            ?? invocation.invocationId;
+        const toolName = invocation.name as AgentToolName;
+        if (invocation.originalName !== invocation.name) {
+            input.emitStep({
+                type: 'thinking',
+                content: aiText(
+                    `Repaired tool name: ${invocation.originalName} -> ${invocation.name}`,
+                    `修复工具名: ${invocation.originalName} -> ${invocation.name}`,
+                ),
+                invocationId,
+                timestamp: Date.now(),
+            });
+            toolCall.function.name = invocation.name;
+        }
+        if (input.runMetrics) {
+            input.runMetrics.toolCallCount++;
+            input.runMetrics.toolCallsByName[toolName] = (input.runMetrics.toolCallsByName[toolName] ?? 0) + 1;
+        }
+        input.emitStep({
+            type: 'tool_call',
+            content: aiText(`Calling tool: ${toolName}`, `调用工具: ${toolName}`),
+            toolName,
+            toolArgs: invocation.args,
+            timestamp: Date.now(),
+            stepIndex: ++globalToolCallIndex,
+            iterationInfo: `Iteration ${input.iteration}/${input.maxToolIterations}`,
+            invocationId,
+        });
+        if (invocation.argRepairs.length > 0) {
+            input.emitStep({
+                type: 'thinking',
+                content: `[Tool Arg Repair] ${invocation.argRepairs.join('; ')}`,
+                invocationId,
+                timestamp: Date.now(),
+            });
+        }
+        calls.push({
+            invocationId,
+            toolName,
+            toolArgs: invocation.args,
+            toolArgsParseError: invocation.parseError,
+            toolCall,
+            concurrencyClass: invocation.concurrencyClass,
+            effect: invocation.effect,
+            targetPaths: invocation.targetPaths,
+        });
+    }
+    return { calls, globalToolCallIndex };
+}
+
+function findSupersededWriteIndices(calls: NormalizedToolCall[]): Map<string, number> {
+    const lastWriteIndexByFile = new Map<string, number>();
+    for (let index = 0; index < calls.length; index++) {
+        const call = calls[index]!;
+        if (!SUPERSEDED_BY_LATER_SAME_FILE_WRITE_TOOLS.has(call.toolName)) continue;
+        for (const filePath of call.targetPaths) lastWriteIndexByFile.set(filePath, index);
+    }
+    return lastWriteIndexByFile;
+}
+
+function observeToolBatchRepetition(
+    calls: NormalizedToolCall[],
+    doomLoop: DoomLoopState,
+    runMetrics?: AgentRunMetrics,
+): { guardedIndices: number[]; softGuidancePending: boolean; needsHashValidation: boolean } {
+    doomLoop.currentPairKey = undefined;
+    const guardedIndices = calls.flatMap((call, index) =>
+        TOOL_REGISTRY.get(call.toolName)?.stormExempt ? [] : [index]);
+    if (guardedIndices.length === 0) {
+        return { guardedIndices, softGuidancePending: false, needsHashValidation: false };
+    }
+
+    const callSignature = guardedIndices.map(index => {
+        const call = calls[index]!;
+        return createToolCallSignature(call.toolName, call.toolArgs, call.targetPaths);
+    }).join('|');
+    let softGuidancePending = false;
+    let needsHashValidation = false;
+    if (doomLoop.prevCallSignature) {
+        const pairKey = `${doomLoop.prevCallSignature}->${callSignature}`;
+        doomLoop.currentPairKey = pairKey;
+        const pairFrequency = (doomLoop.pairFrequency.get(pairKey) ?? 0) + 1;
+        doomLoop.pairFrequency.set(pairKey, pairFrequency);
+        if (runMetrics && pairFrequency > 1) runMetrics.repeatedToolSignatureCount++;
+        softGuidancePending = pairFrequency === DOOM_LOOP_SOFT_THRESHOLD;
+        needsHashValidation = pairFrequency >= DOOM_LOOP_PAIR_THRESHOLD;
+    }
+    doomLoop.prevCallSignature = callSignature;
+    return { guardedIndices, softGuidancePending, needsHashValidation };
+}
+
+function prepareModelRequest(input: {
+    messages: ChatMessage[];
+    tools: ToolDefinition[];
+    providerId: string;
+    model: string;
+    desiredOutputTokens: number;
+    contextLimit: number;
+    reservedTokens: number;
+    calibrateEstimate: (tokens: number) => number;
+    slim: boolean;
+    mode: AgentMode;
+}): {
+    providerId: string;
+    model: string;
+    toolSchemaTokens: number;
+    maxTokens: number;
+    disableThinking: boolean;
+} {
+    const toolSchemaTokens = estimateTokenCount(JSON.stringify(input.tools));
+    const estimatedPromptTokens = input.calibrateEstimate(
+        input.messages.reduce((sum, message) => sum + estimateChatMessageTokens(message), 0)
+        + toolSchemaTokens,
+    );
+    return {
+        providerId: input.providerId,
+        model: input.model,
+        toolSchemaTokens,
+        maxTokens: resolveContextSafeOutputTokens({
+            desiredTokens: input.desiredOutputTokens,
+            contextLimit: input.contextLimit,
+            promptTokens: estimatedPromptTokens,
+            safetyMarginTokens: input.reservedTokens,
+        }),
+        disableThinking: input.slim && (input.mode === 'loc_writer' || input.mode === 'loc_translator'),
+    };
+}
+
+function decideFinalResponse(input: {
+    content: string;
+    mode: AgentMode;
+    approvedPlanExecution?: boolean;
+    interactivePlanApprovalPending: boolean;
+    authorization: AgentSchedulingState['authorization'];
+    executionActionObserved: boolean;
+    terminalValidation?: TerminalValidationState;
+}): {
+    finalContent: string;
+    pauseForInteractivePlan: boolean;
+    continuation: 'authorized_execution' | 'truncation_stop' | 'validation_failed' | 'finish';
+} {
+    const finalContent = _cleanFinalContent(input.content);
+    const pauseForInteractivePlan = shouldPauseForInteractivePlan(finalContent, {
+        mode: input.mode,
+        approvedPlanExecution: input.approvedPlanExecution,
+    });
+    const requiresUserInput = input.interactivePlanApprovalPending
+        || pauseForInteractivePlan
+        || finalResponseRequiresUserInput(finalContent);
+    let continuation: 'authorized_execution' | 'truncation_stop' | 'validation_failed' | 'finish' = 'finish';
+    if (!requiresUserInput && shouldContinueAuthorizedExecution(
+        input.mode,
+        input.authorization,
+        input.executionActionObserved,
+    )) {
+        continuation = 'authorized_execution';
+    } else if (!requiresUserInput
+        && input.authorization === 'workspace_write'
+        && isTruncationInducedStop(finalContent)) {
+        continuation = 'truncation_stop';
+    } else if (!requiresUserInput
+        && input.terminalValidation
+        && terminalValidationOutcome(input.terminalValidation) !== 'allow') {
+        continuation = 'validation_failed';
+    }
+    return { finalContent, pauseForInteractivePlan, continuation };
+}
+
+function foldToolBatchState(input: {
+    calls: NormalizedToolCall[];
+    results: unknown[];
+    submittedPlanIndex: number;
+    terminalValidation?: TerminalValidationState;
+    completedTodoCount: number;
+    diagnosticErrorsByTarget: Map<string, number>;
+    blockingValidationIssues: Set<string>;
+}): {
+    progressDelta: number;
+    completedTodoCount: number;
+    interactivePlanApprovalPending: boolean;
+    executionActionObserved: boolean;
+} {
+    let progressDelta = 0;
+    let completedTodoCount = input.completedTodoCount;
+    let interactivePlanApprovalPending = false;
+    let executionActionObserved = false;
+    for (let index = 0; index < input.calls.length; index++) {
+        const result = input.results[index];
+        const record = result && typeof result === 'object' && !Array.isArray(result)
+            ? result as Record<string, unknown>
+            : undefined;
+        const diagnostics = Array.isArray(record?.diagnostics) ? record.diagnostics : [];
+        const diagnosticErrorCount = diagnostics.filter(item => {
+            if (!item || typeof item !== 'object') return false;
+            const severity = (item as Record<string, unknown>).severity;
+            return severity === 'error' || severity === 0;
+        }).length;
+        const diagnosticDelta = record?.diagnosticDelta && typeof record.diagnosticDelta === 'object'
+            ? record.diagnosticDelta as DiagnosticDelta
+            : undefined;
+        const effectiveDiagnosticErrorCount = diagnosticDelta?.comparable === true
+            ? diagnosticDelta.added.filter(item => item.severity === 'error').length
+            : diagnosticErrorCount;
+        const hasDiagnosticErrors = diagnosticDelta?.comparable === true
+            ? hasAddedErrors(diagnosticDelta)
+            : diagnosticErrorCount > 0;
+        const call = input.calls[index]!;
+        const targetKeys = call.targetPaths.length > 0 ? call.targetPaths : [`tool:${call.toolName}`];
+        const resultSucceeded = !isToolResultFailure(record) && record?.skipped !== true;
+        if (resultSucceeded && index === input.submittedPlanIndex) interactivePlanApprovalPending = true;
+        if (resultSucceeded && isExecutionActionTool(call.toolName)) executionActionObserved = true;
+        if (input.terminalValidation) {
+            updateTerminalValidationState(input.terminalValidation, targetKeys, record);
+        }
+        if (resultSucceeded && call.toolName === 'todo_write') {
+            const todos = Array.isArray(call.toolArgs.todos) ? call.toolArgs.todos : [];
+            const nextCompletedTodoCount = todos.filter(todo =>
+                !!todo && typeof todo === 'object' && (todo as Record<string, unknown>).status === 'done').length;
+            if (nextCompletedTodoCount > completedTodoCount) progressDelta++;
+            completedTodoCount = nextCompletedTodoCount;
+        }
+        if (Array.isArray(record?.diagnostics)) {
+            for (const targetKey of targetKeys) {
+                const currentErrorCount = input.terminalValidation?.introducedErrorsByTarget.get(targetKey)?.length
+                    ?? effectiveDiagnosticErrorCount;
+                const previousErrorCount = input.diagnosticErrorsByTarget.get(targetKey);
+                if (previousErrorCount !== undefined && currentErrorCount < previousErrorCount) progressDelta++;
+                input.diagnosticErrorsByTarget.set(targetKey, currentErrorCount);
+                const hasRunDiagnosticErrors = input.terminalValidation?.diagnosticErrorTargets.has(targetKey)
+                    ?? hasDiagnosticErrors;
+                if (hasRunDiagnosticErrors) input.blockingValidationIssues.add(targetKey);
+                else if (record?.freshness === 'fresh') input.blockingValidationIssues.delete(targetKey);
+            }
+        }
+        if (record?.requiresRepair === true) {
+            for (const targetKey of targetKeys) input.blockingValidationIssues.add(targetKey);
+        } else if (record?.postWriteValidationPassed === true) {
+            for (const targetKey of targetKeys) {
+                if (!input.terminalValidation?.diagnosticErrorTargets.has(targetKey)) {
+                    input.blockingValidationIssues.delete(targetKey);
+                }
+            }
+        }
+    }
+    return {
+        progressDelta,
+        completedTodoCount,
+        interactivePlanApprovalPending,
+        executionActionObserved,
+    };
+}
 // Compact when conversation exceeds this fraction of provider context
 // Default context limit if unknown
 // How many recent messages to keep un-compressed during compaction
@@ -177,8 +472,8 @@ export interface AgentRunnerOptions {
     renewableIterationLimit?: boolean;
     /** Agent mode: build (default), plan (read-only), explore (parallel read), general (research) */
     mode?: AgentMode;
-    /** Main-Agent approved-plan continuation may resume directly at the write stage. */
-    initialToolStage?: AgentToolStage;
+    /** Main-Agent approved-plan continuation may start with write-focused guidance. */
+    initialToolFocus?: AgentToolFocus;
     /** The user approved a design-complete plan; coordinators must execute it without a second design pass. */
     approvedPlanExecution?: boolean;
     /** Original top-level user turn used to preserve user-owned work across orchestration. */
@@ -624,7 +919,7 @@ export class AgentRunner {
         providerId: string | undefined,
         requestedModel: string | undefined,
         metadata: {
-            toolStage?: AgentToolStage;
+            toolFocus?: AgentToolFocus;
             purpose: 'validation' | 'final_summary';
             promptFingerprint?: string;
         },
@@ -663,7 +958,7 @@ export class AgentRunner {
             model: effectiveModel,
             inputTokens: promptTokens,
             cachedTokens,
-            toolStage: metadata.toolStage,
+            toolFocus: metadata.toolFocus,
             purpose: metadata.purpose,
             promptFingerprint: metadata.promptFingerprint,
         });
@@ -676,7 +971,7 @@ export class AgentRunner {
             model: string;
             inputTokens: number;
             cachedTokens: number;
-            toolStage?: AgentToolStage;
+            toolFocus?: AgentToolFocus;
             purpose: 'reasoning' | 'fallback' | 'validation' | 'final_summary';
             promptFingerprint?: string;
             invalidationReason?: string;
@@ -695,7 +990,7 @@ export class AgentRunner {
         let invalidationReason = sample.invalidationReason;
         if (sample.cachedTokens > 0 || !cacheCapable) {
             invalidationReason = undefined;
-        } else if (!invalidationReason && previousComparable?.toolStage !== sample.toolStage) {
+        } else if (!invalidationReason && previousComparable?.toolFocus !== sample.toolFocus) {
             invalidationReason = 'toolset_changed';
         } else if (!invalidationReason && !sample.promptFingerprint) {
             invalidationReason = 'fingerprint_missing';
@@ -863,7 +1158,7 @@ export class AgentRunner {
             output: 0,
             estimatedCostCny: 0,
             agentMode: mode,
-            toolStage: options?.initialToolStage ?? initialToolStageForMode(mode),
+            toolFocus: options?.initialToolFocus ?? initialToolFocusForMode(mode),
         };
         const runMetrics: AgentRunMetrics = {
             iterations: 0,
@@ -1041,15 +1336,12 @@ export class AgentRunner {
         // The model-visible tool set feeds both the frozen prompt fingerprint
         // (plan sec.7.1) and the reserved-token estimate below; mirror the
         // reasoning loop's filter inputs so both describe the real toolset.
-        const promptPerformanceConfig = vs.workspace.getConfiguration('stellarisLanguageServices.ai.performance');
-        const promptLegacyFullToolset = promptPerformanceConfig.get<boolean>('legacyFullToolset') === true;
         const promptModeTools = filterWebToolsForConfiguredAccess(filterToolDefinitionsForMode(TOOL_DEFINITIONS, mode, {
             domain,
             useSlimPrompt: options?.useSlimPrompt,
             excludeTools: options?.excludeTools,
-            legacyFullToolset: promptLegacyFullToolset,
         }));
-        const initialToolStage = options?.initialToolStage ?? initialToolStageForMode(mode);
+        const initialToolFocus = options?.initialToolFocus ?? initialToolFocusForMode(mode);
         const promptToolDefinitions = promptModeTools;
         // DeepSeek prefix-cache optimization: use frozen (session-cached) system prompt
         // to ensure byte-level stability across API calls for cache hits.
@@ -1134,7 +1426,7 @@ export class AgentRunner {
                 }
                 : undefined,
         });
-        const initialStageReminder = buildToolFocusReminder(mode, initialToolStage, domain);
+        const initialFocusReminder = buildToolFocusReminder(mode, initialToolFocus, domain);
         const dynamicBlock: ChatMessage[] = [
             ...promptDynamicBlock,
             ...(options?.useSlimPrompt ? this.promptBuilder.buildSlimDynamicPromptBlock(delegationScopeFacts) : []),
@@ -1151,8 +1443,8 @@ export class AgentRunner {
         if (options?.approvedPlanExecution) {
             dynamicBlock.push({ role: 'user', content: buildApprovedPlanExecutionReminder() });
         }
-        if (initialStageReminder) {
-            dynamicBlock.push({ role: 'user', content: initialStageReminder });
+        if (initialFocusReminder) {
+            dynamicBlock.push({ role: 'user', content: initialFocusReminder });
         }
 
         const contextMessages = this.promptBuilder.buildContextMessages({
@@ -1886,9 +2178,8 @@ export class AgentRunner {
             },
         };
 
-        // Two-phase doom-loop detection (T1.2a — state encapsulated in DoomLoopState):
-        // phase1: track (prevSig → currSig) pair frequency
-        // phase2: compare normalized result hashes for same-name calls
+        // Cross-step repetition requires both a repeated call pattern and
+        // unchanged normalized results before execution is stopped.
         const doomLoop = new DoomLoopState();
         let consecutiveErrorCount = 0;
         // Flag set to true when we need to exit the outer while loop
@@ -1921,9 +2212,8 @@ export class AgentRunner {
         // Track files confirmed-written this session
         const confirmedWrittenFiles = new Set<string>();
         const performanceConfig = vs.workspace.getConfiguration('stellarisLanguageServices.ai.performance');
-        const legacyFullToolset = performanceConfig.get<boolean>('legacyFullToolset') === true;
-        const toolStage = options?.initialToolStage ?? initialToolStageForMode(mode);
-        if (tokenAccumulator) tokenAccumulator.toolStage = toolStage;
+        const toolFocus = options?.initialToolFocus ?? initialToolFocusForMode(mode);
+        if (tokenAccumulator) tokenAccumulator.toolFocus = toolFocus;
         let requestArchiveState: ModelRequestArchiveState | undefined;
         const archivedToolsets = new Map<string, { ref: string; sha256: string }>();
         const archiveModelRequest = async (
@@ -1980,7 +2270,6 @@ export class AgentRunner {
             domain: options?.domain,
             useSlimPrompt: options?.useSlimPrompt,
             excludeTools: options?.excludeTools,
-            legacyFullToolset,
         }));
 
         // 🌟 核心优化：若开启了扁平化并且工具注册了展平 schema，则展现给模型的 availableTools 使用扁平化版本
@@ -2017,10 +2306,8 @@ export class AgentRunner {
         const disclosureContext: ToolDisclosureContext = {
             mode,
             domain: options?.domain ?? defaultDomainForMode(mode),
-            dynamicSupported: !legacyFullToolset
-                && options?.useSlimPrompt !== true
-                && vs.workspace.getConfiguration('stellarisLanguageServices.ai.performance')
-                    .get<boolean>('dynamicToolDisclosure.enabled', true),
+            dynamicSupported: vs.workspace.getConfiguration('stellarisLanguageServices.ai.performance')
+                .get<boolean>('dynamicToolDisclosure.enabled', true),
             loaded: new Set<string>(),
         };
         const toolDedupe = new ToolDedupeService();
@@ -2252,6 +2539,7 @@ export class AgentRunner {
             let toolCalls: ToolCall[] | undefined = undefined;
             let needsHashValidation = false;
             let softLoopGuidancePending = false;
+            let loopGuardedCallIndices: number[] = [];
             const modelCallId = `model_${runRecord.runId}_${iteration}`;
             const streamedToolPreviewIds = new Set<string>();
             const previewInvocationByModelToolCallId = new Map<string, string>();
@@ -2470,20 +2758,23 @@ export class AgentRunner {
                 parentAbortSignal?.addEventListener('abort', abortModelFromParent, { once: true });
             }
             const activeProviderConfig = this.aiService.getConfig();
-            const requestProviderId = options?.providerId ?? activeProviderConfig.provider;
-            const requestModel = options?.model ?? activeProviderConfig.model;
-            const activeToolSchemaTokens = estimateTokenCount(JSON.stringify(availableTools));
-            const estimatedPromptTokens = calibrateLoopEstimate(
-                messages.reduce((sum, message) => sum + estimateChatMessageTokens(message), 0)
-                + activeToolSchemaTokens,
-            );
-            const requestMaxTokens = resolveContextSafeOutputTokens({
-                desiredTokens: desiredRunOutputTokens,
+            const requestPlan = prepareModelRequest({
+                messages,
+                tools: availableTools,
+                providerId: options?.providerId ?? activeProviderConfig.provider,
+                model: options?.model ?? activeProviderConfig.model,
+                desiredOutputTokens: desiredRunOutputTokens,
                 contextLimit,
-                promptTokens: estimatedPromptTokens,
-                safetyMarginTokens: configuredReservedTokens,
+                reservedTokens: configuredReservedTokens,
+                calibrateEstimate: calibrateLoopEstimate,
+                slim: options?.useSlimPrompt === true,
+                mode,
             });
-            const requestDisableThinking = options?.useSlimPrompt === true && (mode === 'loc_writer' || mode === 'loc_translator');
+            const requestProviderId = requestPlan.providerId;
+            const requestModel = requestPlan.model;
+            const activeToolSchemaTokens = requestPlan.toolSchemaTokens;
+            const requestMaxTokens = requestPlan.maxTokens;
+            const requestDisableThinking = requestPlan.disableThinking;
             const appendModelDeltaEvent = (kind: string, text: string) => {
                 const now = Date.now();
                 if (now - lastModelDeltaEventAt < 1000) return;
@@ -2529,7 +2820,7 @@ export class AgentRunner {
                     model: requestModel,
                     messageCount: messages.length,
                     toolCount: availableTools.length,
-                    toolSchemaEstimateTokens: estimateTokenCount(JSON.stringify(availableTools)),
+                    toolSchemaEstimateTokens: requestPlan.toolSchemaTokens,
                     dynamicallyDisclosedToolCount: disclosureContext.loaded.size,
                     requestRef: requestArtifact?.ref,
                     requestSha256: requestArtifact?.sha256,
@@ -2919,7 +3210,7 @@ export class AgentRunner {
                 const requestPromptFingerprint = sha256Text([
                     tokenAccumulator.promptFingerprint ?? sha256Text(systemPrefix),
                     mode,
-                    toolStage ?? 'full',
+                    toolFocus ?? 'full',
                     hashToolDefinitionsForFingerprint(availableTools),
                 ].join('|')).slice(0, 24);
                 const firstReasoningSample = !(tokenAccumulator.cacheRequests ?? [])
@@ -2929,7 +3220,7 @@ export class AgentRunner {
                     model: response.model ?? options?.model ?? 'unknown',
                     inputTokens: promptTokens,
                     cachedTokens,
-                    toolStage,
+                    toolFocus,
                     purpose: fallbackFromError ? 'fallback' : 'reasoning',
                     promptFingerprint: requestPromptFingerprint,
                     invalidationReason: firstReasoningSample ? tokenAccumulator.promptCacheMissReason : undefined,
@@ -3142,13 +3433,16 @@ export class AgentRunner {
 
             // If no tool calls (either format), we're done — the final answer is no emit thinking block
             if (!toolCalls || toolCalls.length === 0) {
-                const finalContent = this.cleanFinalContent(contentToString(assistantMessage.content));
-                const requiresUserInput = finalResponseRequiresUserInput(finalContent)
-                    || interactivePlanApprovalPending
-                    || shouldPauseForInteractivePlan(finalContent, {
-                        mode,
-                        approvedPlanExecution: options?.approvedPlanExecution,
-                    });
+                const finalDecision = decideFinalResponse({
+                    content: contentToString(assistantMessage.content),
+                    mode,
+                    approvedPlanExecution: options?.approvedPlanExecution,
+                    interactivePlanApprovalPending,
+                    authorization: schedulingState.authorization,
+                    executionActionObserved,
+                    terminalValidation,
+                });
+                const { finalContent } = finalDecision;
                 // The input queue is drained only at the top of each iteration,
                 // so a steering message that arrives while the model is producing
                 // its final answer would otherwise never be injected — the run
@@ -3156,11 +3450,7 @@ export class AgentRunner {
                 // here, then continue one more iteration so the model can respond
                 // to the user's intervention. Interactive plan submissions stay a
                 // strict approval boundary and still end the turn.
-                if (!interactivePlanApprovalPending
-                    && !shouldPauseForInteractivePlan(finalContent, {
-                        mode,
-                        approvedPlanExecution: options?.approvedPlanExecution,
-                    })) {
+                if (!interactivePlanApprovalPending && !finalDecision.pauseForInteractivePlan) {
                     const lateInputs = options?.inputQueue?.drain() ?? [];
                     if (lateInputs.length > 0) {
                         for (const input of lateInputs) {
@@ -3193,12 +3483,7 @@ export class AgentRunner {
                         continue;
                     }
                 }
-                if (!requiresUserInput
-                    && shouldContinueAuthorizedExecution(
-                        mode,
-                        schedulingState.authorization,
-                        executionActionObserved,
-                    )) {
+                if (finalDecision.continuation === 'authorized_execution') {
                     const incompleteClaim = recoveryCoordinator.claim('incomplete_execution');
                     if (incompleteClaim) {
                         messages.push({
@@ -3215,9 +3500,7 @@ export class AgentRunner {
                         continue;
                     }
                 }
-                if (!requiresUserInput
-                    && schedulingState.authorization === 'workspace_write'
-                    && isTruncationInducedStop(finalContent)) {
+                if (finalDecision.continuation === 'truncation_stop') {
                     // The model stopped because it misread display-only tool-result
                     // truncation as partial application. Tool results are always
                     // fully applied; only the response text is shortened. Push one
@@ -3235,23 +3518,20 @@ export class AgentRunner {
                     );
                     continue;
                 }
-                if (!requiresUserInput && terminalValidation) {
-                    const validationOutcome = terminalValidationOutcome(terminalValidation);
-                    if (validationOutcome !== 'allow') {
-                        const validationClaim = recoveryCoordinator.claim('validation_failed');
-                        if (validationClaim) {
-                            const feedback = formatTerminalValidationFeedback(terminalValidation);
-                            messages.push({
-                                role: 'user',
-                                content: `<system-reminder>${feedback} Continue in this same loop: inspect the structured tool results, repair the affected targets, and obtain fresh validation before finalizing. Do not merely describe the remaining error.</system-reminder>`,
-                            });
-                            emitStep({
-                                type: 'validation',
-                                content: `Post-write validation returned to the main loop (${validationClaim.attempt}/${validationClaim.limit}).`,
-                                timestamp: Date.now(),
-                            });
-                            continue;
-                        }
+                if (finalDecision.continuation === 'validation_failed' && terminalValidation) {
+                    const validationClaim = recoveryCoordinator.claim('validation_failed');
+                    if (validationClaim) {
+                        const feedback = formatTerminalValidationFeedback(terminalValidation);
+                        messages.push({
+                            role: 'user',
+                            content: `<system-reminder>${feedback} Continue in this same loop: inspect the structured tool results, repair the affected targets, and obtain fresh validation before finalizing. Do not merely describe the remaining error.</system-reminder>`,
+                        });
+                        emitStep({
+                            type: 'validation',
+                            content: `Post-write validation returned to the main loop (${validationClaim.attempt}/${validationClaim.limit}).`,
+                            timestamp: Date.now(),
+                        });
+                        continue;
                     }
                 }
                 return finalContent;
@@ -3267,44 +3547,6 @@ export class AgentRunner {
                 });
             }
 
-            // ── Two-phase doom-loop detection: phase 1 (pre-exec) ──
-            // Track (prevSig → currSig) pairs. If the same pair repeats
-            // ≥ DOOM_LOOP_PAIR_THRESHOLD times, flag for phase-2 hash check.
-            const callSignature = toolCalls.map(tc => `${tc.function.name}:${tc.function.arguments}`).join('|');
-            needsHashValidation = false;
-            softLoopGuidancePending = false;
-            doomLoop.currentPairKey = undefined;
-
-            let hasStormExempt = false;
-            for (const tc of toolCalls) {
-                const reg = TOOL_REGISTRY.get(tc.function.name as import('./tools/registry').AgentToolName);
-                if (reg?.stormExempt) {
-                    hasStormExempt = true;
-                    break;
-                }
-            }
-
-            if (doomLoop.prevCallSignature && !hasStormExempt) {
-                const pairKey = `${doomLoop.prevCallSignature}->${callSignature}`;
-                doomLoop.currentPairKey = pairKey;
-                const pairFreq = (doomLoop.pairFrequency.get(pairKey) || 0) + 1;
-                doomLoop.pairFrequency.set(pairKey, pairFreq);
-                if (runMetrics && pairFreq > 1) {
-                    runMetrics.repeatedToolSignatureCount++;
-                }
-                if (pairFreq === DOOM_LOOP_SOFT_THRESHOLD) {
-                    emitStep({
-                        type: 'validation',
-                        content: 'Repeated tool-call pattern detected; prompting the agent to switch strategy.',
-                        timestamp: Date.now(),
-                    });
-                    softLoopGuidancePending = true;
-                }
-                if (pairFreq >= DOOM_LOOP_PAIR_THRESHOLD) needsHashValidation = true;
-            }
-            if (!hasStormExempt) {
-                doomLoop.prevCallSignature = callSignature;
-            }
             }
 
             if (!toolCalls) toolCalls = [];
@@ -3335,148 +3577,43 @@ export class AgentRunner {
                     activeToolCount: availableTools.length,
                 }, { invocationId: toolCall.id, status: selection.denied.length > 0 ? 'failed' : 'done' });
             }
-            // ── Deduplicate file-write calls ──────────────────────────────────
-            // If the model emitted multiple write/edit calls targeting the same file
-            // in one response, only keep the LAST one for each file.
-            const lastWriteIndexByFile = new Map<string, number>();
-            for (let i = 0; i < toolCalls.length; i++) {
-                const name = toolCalls[i]!.function.name;
-                if (!SUPERSEDED_BY_LATER_SAME_FILE_WRITE_TOOLS.has(name)) continue;
-                try {
-                    const a = JSON.parse(toolCalls[i]!.function.arguments);  
-                    for (const filePath of getAgentToolTargetFiles(name, a, this.toolExecutor.workspaceRoot, options?.topicId)) {
-                        lastWriteIndexByFile.set(filePath, i);
-                    }
-                } catch { /* ignore */ }
-            }
-
             // ── Execute tool calls (parallel for read-only, serial for writes) ──
             // Fix #9: WRITE_TOOLS and READ_ONLY_TOOLS are now module-level constants
 
             // Use pre-fetched provider info from outside the loop
             const useDsmlToolRole = useDsmlToolRole0;
 
-            // Emit all tool_call steps upfront (preserves UI ordering)
-            const parsedCalls: Array<{ 
-                invocationId: string; 
-                toolName: AgentToolName; 
-                toolArgs: Record<string, unknown>; 
-                toolArgsParseError?: string; 
-                toolCall: typeof toolCalls[0];
-                concurrencyClass: import('./types').ToolConcurrencyClass;
-                effect: import('./types').ToolEffect;
-                targetPaths: string[];
-            }> = [];
-            for (const [toolCallPosition, toolCall] of toolCalls.entries()) {
-                options?.abortSignal?.throwIfAborted();
-                // runRecord is resolved at reasoningLoop entry
-                const invocation = buildToolInvocation({
-                    runId: runRecord.runId,
-                    toolCall,
-                    availableTools,
-                    workspaceRoot: this.toolExecutor.workspaceRoot,
-                    topicId: options?.topicId
+            const normalizedBatch = normalizeToolCallBatch({
+                runId: runRecord.runId,
+                toolCalls,
+                availableTools,
+                workspaceRoot: this.toolExecutor.workspaceRoot,
+                topicId: options?.topicId,
+                previewInvocationByModelToolCallId,
+                previewInvocationByToolIndex,
+                globalToolCallIndex,
+                iteration,
+                maxToolIterations,
+                runMetrics,
+                abortSignal: options?.abortSignal,
+                emitStep,
+            });
+            const parsedCalls = normalizedBatch.calls;
+            globalToolCallIndex = normalizedBatch.globalToolCallIndex;
+            const lastWriteIndexByFile = findSupersededWriteIndices(parsedCalls);
+
+            // ToolDedupeService only coalesces identical reads inside this batch;
+            // cross-step stop policy belongs to the single repetition observer.
+            const repetition = observeToolBatchRepetition(parsedCalls, doomLoop, runMetrics);
+            loopGuardedCallIndices = repetition.guardedIndices;
+            softLoopGuidancePending = repetition.softGuidancePending;
+            needsHashValidation = repetition.needsHashValidation;
+            if (softLoopGuidancePending) {
+                emitStep({
+                    type: 'validation',
+                    content: 'Repeated tool-call pattern detected; prompting the agent to switch strategy.',
+                    timestamp: Date.now(),
                 });
-                const invocationId = (toolCall.id && previewInvocationByModelToolCallId.get(toolCall.id))
-                    ?? previewInvocationByToolIndex.get(toolCallPosition)
-                    ?? invocation.invocationId;
-                let toolName = toolCall.function.name as AgentToolName;
-                const knownNames = availableTools.map(t => t.function.name);
-                if (!knownNames.includes(toolName)) {
-                    const matched = knownNames.find(n => n.toLowerCase() === toolName.toLowerCase());
-                    if (matched) {
-                        emitStep({
-                            type: 'thinking',
-                            content: aiText(`Repaired tool name: ${toolName} -> ${matched}`, `修复工具名: ${toolName} -> ${matched}`),
-                            invocationId,
-                            timestamp: Date.now(),
-                        });
-                        toolCall.function.name = matched;
-                        toolName = matched as AgentToolName;
-                    }
-                }
-                if (runMetrics) {
-                    runMetrics.toolCallCount++;
-                    runMetrics.toolCallsByName[toolName] = (runMetrics.toolCallsByName[toolName] ?? 0) + 1;
-                }
-                let toolArgs: Record<string, unknown>;
-                let toolArgsParseError: string | undefined;
-                const rawToolArgs = toolCall.function.arguments;
-                if (!rawToolArgs || !rawToolArgs.trim()) {
-                    // Zero-parameter tool calls legitimately arrive with empty arguments
-                    // (e.g. Anthropic streams no input_json_delta for an empty input) —
-                    // not a parse failure.
-                    toolArgs = {};
-                } else {
-                    try {
-                        toolArgs = JSON.parse(rawToolArgs);
-                    } catch (e) {
-                        // Attempt common JSON repairs before giving up (Issue #2 fix)
-                        const repaired = this.tryRepairJson(rawToolArgs);
-                        if (repaired !== null) {
-                            toolArgs = repaired;
-                        } else {
-                            toolArgs = {};
-                            toolArgsParseError = `JSON parse error: ${e instanceof Error ? e.message : String(e)}. Raw arguments: ${rawToolArgs.substring(0, 200)}`;
-                        }
-                    }
-                }
-
-                // P1-B: Semantic argument repair (fuzzy name match + type coercion)
-                if (!toolArgsParseError) {
-                    const argRepair = repairToolArgs(toolName, toolArgs);
-                    if (argRepair.repaired) {
-                        toolArgs = argRepair.args;
-                        emitStep({
-                            type: 'thinking',
-                            content: `[Tool Arg Repair] ${argRepair.repairs.join('; ')}`,
-                            invocationId,
-                            timestamp: Date.now(),
-                        });
-                    }
-                }
-
-                emitStep({ type: 'tool_call', content: aiText(`Calling tool: ${toolName}`, `调用工具: ${toolName}`), toolName, toolArgs, timestamp: Date.now(), stepIndex: ++globalToolCallIndex, iterationInfo: `Iteration ${iteration}/${maxToolIterations}`, invocationId });
-                if (invocation.argRepairs.length > 0) {
-                    emitStep({
-                        type: 'thinking',
-                        content: `[Tool Arg Repair] ${invocation.argRepairs.join('; ')}`,
-                        invocationId,
-                        timestamp: Date.now(),
-                    });
-                }
-                parsedCalls.push({ 
-                    invocationId, 
-                    toolName, 
-                    toolArgs, 
-                    toolArgsParseError, 
-                    toolCall,
-                    concurrencyClass: invocation.concurrencyClass,
-                    effect: invocation.effect,
-                    targetPaths: invocation.targetPaths
-                });
-            }
-
-            // Tool Call Repair: case-insensitive correction of hallucinated tool names.
-            // Prevents doom-loop false positives when LLM emits slightly misspelled names.
-            const knownNames = availableTools.map(t => t.function.name);
-            for (const tc of [] as any[]) {
-                const raw = tc.function.name;
-                // Quick check: if exact match, skip
-                if (knownNames.includes(raw)) continue;
-                // Case-insensitive match
-                const matched = knownNames.find(n => n.toLowerCase() === raw.toLowerCase());
-                if (matched) {
-                    emitStep({
-                        type: 'tool_call',
-                        content: aiText(`Repaired tool name: ${raw} -> ${matched}`, `修复工具名: ${raw} -> ${matched}`),
-                        toolName: matched as AgentToolName,
-                        timestamp: Date.now(),
-                    });
-                    tc.function.name = matched;
-                }
-                // If completely unmatched, leave as-is — the tool will fail with a clear
-                // error, which can be routed through analyze_diagnostic_error rather than becoming a doom-loop.
             }
 
             const toolResults: any[] = new Array(parsedCalls.length);
@@ -3642,21 +3779,6 @@ export class AgentRunner {
                                     { invocationId: callInfo.invocationId, status: 'done' },
                                 );
                             }
-                            const repeatCount = toolDedupe.repeatCount(
-                                callInfo.toolName,
-                                callInfo.toolArgs,
-                                options?.schedulingState?.authorization ?? mode,
-                                targetResourceRevision,
-                            );
-                            if (repeatCount >= 2) {
-                                await runLedger.appendEvent(runRecord.runId, 'tool_repeat_escalated', {
-                                    toolName: callInfo.toolName,
-                                    repeatCount,
-                                    action: repeatCount >= 5 ? 'stop_or_narrow' : repeatCount >= 3 ? 'change_strategy' : 'observe',
-                                }, { invocationId: callInfo.invocationId, status: repeatCount >= 5 ? 'failed' : 'pending' });
-                                if (repeatCount >= 3) softLoopGuidancePending = true;
-                                if (repeatCount >= 5) needsHashValidation = true;
-                            }
                         } catch (e: any) {
                             if (e?.name === 'AbortError') throw e;
                             toolResults[idx] = { error: e instanceof Error ? e.message : String(e) };
@@ -3691,7 +3813,7 @@ export class AgentRunner {
                     }
 
                     // Write tool: execute serially taking advantage of PartitionedWriteQueue
-                    const filePaths = getAgentToolTargetFiles(toolName, toolArgs, this.toolExecutor.workspaceRoot, options?.topicId);
+                    const filePaths = ci.targetPaths;
                     const primaryFilePath = filePaths[0] ?? '';
                     const shouldAutoApplyWrite = options?.forceAutoApplyWrites === true || options?.useSlimPrompt === true;
                     const isSupersededWrite = SUPERSEDED_BY_LATER_SAME_FILE_WRITE_TOOLS.has(toolName) && primaryFilePath &&
@@ -3898,9 +4020,9 @@ export class AgentRunner {
             // ── Two-phase doom-loop detection: phase 2 (post-exec hash check) ──
             if (needsHashValidation) {
                 let allHashesMatch = true;
-                for (let j = 0; j < parsedCalls.length; j++) {
-                    const { toolName, toolCall } = parsedCalls[j]!;
-                    const sig = `${toolCall.function.name}:${toolCall.function.arguments}`;
+                for (const j of loopGuardedCallIndices) {
+                    const { toolName, toolArgs, targetPaths } = parsedCalls[j]!;
+                    const sig = createToolCallSignature(toolName, toolArgs, targetPaths);
                     const resultHash = fnv32a(normalizeToolResultHash(toolName, toolResults[j]));
                     const prevHash = doomLoop.lastResultHash.get(sig);
                     if (prevHash !== undefined && prevHash !== resultHash) {
@@ -3921,9 +4043,9 @@ export class AgentRunner {
                 }
             } else {
                 // Update result hashes for future comparisons even when not flagged
-                for (let j = 0; j < parsedCalls.length; j++) {
-                    const { toolName, toolCall } = parsedCalls[j]!;
-                    const sig = `${toolCall.function.name}:${toolCall.function.arguments}`;
+                for (const j of loopGuardedCallIndices) {
+                    const { toolName, toolArgs, targetPaths } = parsedCalls[j]!;
+                    const sig = createToolCallSignature(toolName, toolArgs, targetPaths);
                     doomLoop.lastResultHash.set(sig, fnv32a(normalizeToolResultHash(toolName, toolResults[j])));
                 }
             }
@@ -3952,8 +4074,7 @@ export class AgentRunner {
                 });
 
                 // Track consecutive errors
-                if (typeof toolResult === 'object' && toolResult !== null &&
-                    'error' in toolResult && !('success' in toolResult)) {
+                if (isToolResultFailure(toolResult)) {
                     consecutiveErrorCount++;
                     const errorLimit = bypassSandbox ? 100 : 10;
                     if (consecutiveErrorCount >= errorLimit) {
@@ -3984,70 +4105,19 @@ export class AgentRunner {
                 }
             }
 
-            for (let j = 0; j < parsedCalls.length; j++) {
-                const result = toolResults[j];
-                const record = result && typeof result === 'object' && !Array.isArray(result)
-                    ? result as Record<string, unknown>
-                    : undefined;
-                const diagnostics = Array.isArray(record?.diagnostics) ? record.diagnostics : [];
-                const diagnosticErrorCount = diagnostics.filter(item => {
-                    if (!item || typeof item !== 'object') return false;
-                    const severity = (item as Record<string, unknown>).severity;
-                    return severity === 'error' || severity === 0;
-                }).length;
-                const diagnosticDelta = record?.diagnosticDelta && typeof record.diagnosticDelta === 'object'
-                    ? record.diagnosticDelta as DiagnosticDelta
-                    : undefined;
-                const effectiveDiagnosticErrorCount = diagnosticDelta?.comparable === true
-                    ? diagnosticDelta.added.filter(item => item.severity === 'error').length
-                    : diagnosticErrorCount;
-                const hasDiagnosticErrors = diagnosticDelta?.comparable === true
-                    ? hasAddedErrors(diagnosticDelta)
-                    : diagnosticErrorCount > 0;
-                const targetKeys = parsedCalls[j]!.targetPaths.length > 0
-                    ? parsedCalls[j]!.targetPaths
-                    : [`tool:${parsedCalls[j]!.toolName}`];
-                const resultSucceeded = record?.success !== false && record?.error === undefined && record?.skipped !== true;
-                if (resultSucceeded && j === submittedPlanIndex) interactivePlanApprovalPending = true;
-                if (resultSucceeded && isExecutionActionTool(parsedCalls[j]!.toolName)) {
-                    executionActionObserved = true;
-                }
-                if (terminalValidation) {
-                    updateTerminalValidationState(terminalValidation, targetKeys, record);
-                }
-                if (resultSucceeded && parsedCalls[j]!.toolName === 'todo_write') {
-                    const rawTodos: unknown = parsedCalls[j]!.toolArgs.todos;
-                    const todos: unknown[] = Array.isArray(rawTodos) ? rawTodos : [];
-                    const nextCompletedTodoCount = todos.filter(todo =>
-                        !!todo && typeof todo === 'object' && (todo as Record<string, unknown>).status === 'done').length;
-                    if (nextCompletedTodoCount > completedTodoCount) progressRevision++;
-                    completedTodoCount = nextCompletedTodoCount;
-                }
-                if (Array.isArray(record?.diagnostics)) {
-                    for (const targetKey of targetKeys) {
-                        const currentErrorCount = terminalValidation?.introducedErrorsByTarget.get(targetKey)?.length
-                            ?? effectiveDiagnosticErrorCount;
-                        const previousErrorCount = diagnosticErrorsByTarget.get(targetKey);
-                        if (previousErrorCount !== undefined && currentErrorCount < previousErrorCount) {
-                            progressRevision++;
-                        }
-                        diagnosticErrorsByTarget.set(targetKey, currentErrorCount);
-                        const hasRunDiagnosticErrors = terminalValidation?.diagnosticErrorTargets.has(targetKey)
-                            ?? hasDiagnosticErrors;
-                        if (hasRunDiagnosticErrors) blockingValidationIssues.add(targetKey);
-                        else if (record?.freshness === 'fresh') blockingValidationIssues.delete(targetKey);
-                    }
-                }
-                if (record?.requiresRepair === true) {
-                    for (const targetKey of targetKeys) blockingValidationIssues.add(targetKey);
-                } else if (record?.postWriteValidationPassed === true) {
-                    for (const targetKey of targetKeys) {
-                        if (!terminalValidation?.diagnosticErrorTargets.has(targetKey)) {
-                            blockingValidationIssues.delete(targetKey);
-                        }
-                    }
-                }
-            }
+            const foldedBatch = foldToolBatchState({
+                calls: parsedCalls,
+                results: toolResults,
+                submittedPlanIndex,
+                terminalValidation,
+                completedTodoCount,
+                diagnosticErrorsByTarget,
+                blockingValidationIssues,
+            });
+            progressRevision += foldedBatch.progressDelta;
+            completedTodoCount = foldedBatch.completedTodoCount;
+            interactivePlanApprovalPending ||= foldedBatch.interactivePlanApprovalPending;
+            executionActionObserved ||= foldedBatch.executionActionObserved;
 
             if (interactivePlanApprovalPending) {
                 return aiText(
@@ -4237,7 +4307,7 @@ export class AgentRunner {
             reasoningEffort: options?.reasoningEffort,
         });
         this.accumulateAuxiliaryUsage(finalResponse, messages, tokenAccumulator, finalProviderId, finalModel, {
-            toolStage: 'finalize',
+            toolFocus: 'finalize',
             purpose: 'final_summary',
             promptFingerprint: tokenAccumulator?.promptFingerprint,
         });
@@ -4266,10 +4336,6 @@ export class AgentRunner {
 
     private parseDsmlToolCalls(content: string, depth: number = 0): import('./types').ToolCall[] {
         return _parseDsmlToolCalls(content, depth);
-    }
-
-    private tryRepairJson(badJson: string | undefined): Record<string, unknown> | null {
-        return _tryRepairJson(badJson);
     }
 
     private stripDsmlMarkup(content: string): string {

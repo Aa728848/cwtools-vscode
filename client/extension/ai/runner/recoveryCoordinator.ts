@@ -40,14 +40,14 @@ const DEFAULT_LIMITS: Readonly<Record<RecoveryKind, number>> = {
     transport: 1,
     sandbox_unavailable: 0,
     permission_denied: 0,
-    tool_validation: 1,
+    tool_validation: 0,
     output_repetition: 1,
     output_truncated: 1,
     compaction_ineffective: 2,
     incomplete_execution: 1,
     validation_failed: 2,
     provider_fallback: 1,
-    provider: 1,
+    provider: 0,
     unknown: 0,
 };
 
@@ -121,10 +121,6 @@ export class RecoveryCoordinator {
             totalAttempt: this.totalAttempts,
             totalLimit: this.totalLimit,
         };
-    }
-
-    count(kind: RecoveryKind): number {
-        return this.attempts.get(kind) ?? 0;
     }
 
     get total(): number {

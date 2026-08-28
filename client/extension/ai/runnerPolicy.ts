@@ -1,4 +1,4 @@
-import type { AgentMode, AgentRuntimeDomain, AgentToolStage, ToolDefinition } from './types';
+import type { AgentMode, AgentRuntimeDomain, AgentToolFocus, ToolDefinition } from './types';
 import { defaultDomainForMode } from './agentProfile';
 import { TOOL_REGISTRY } from './tools/registry';
 import { evaluateEffectiveToolPolicy } from './runner/effectiveToolPolicy';
@@ -7,10 +7,9 @@ export interface ToolFilterOptions {
     domain?: AgentRuntimeDomain;
     useSlimPrompt?: boolean;
     excludeTools?: string[];
-    legacyFullToolset?: boolean;
 }
 
-export type { AgentToolStage } from './types';
+export type { AgentToolFocus } from './types';
 
 const WRITE_EXECUTION_MODES = new Set<AgentMode>([
     'build',
@@ -35,7 +34,7 @@ const READ_FOCUSED_MODES = new Set<AgentMode>([
     'plan', 'orchestrator', 'explore', 'review', 'script_reviewer', 'general',
 ]);
 
-export function initialToolStageForMode(mode: AgentMode): AgentToolStage | undefined {
+export function initialToolFocusForMode(mode: AgentMode): AgentToolFocus | undefined {
     if (BUILD_LIFECYCLE_MODES.has(mode) || mode === 'utility') return 'write';
     return READ_FOCUSED_MODES.has(mode) ? 'discovery' : undefined;
 }
@@ -106,7 +105,7 @@ export function isTruncationInducedStop(content: string): boolean {
         || /\b(?:cannot|can'?t|unable|not\s+safe|risks?)\b[\s\S]{0,80}\b(?:continue|proceed|batch|apply|safely|modif|writ)/i.test(tail);
 }
 
-const STAGE_GUIDANCE: Record<AgentToolStage, string> = {
+const FOCUS_GUIDANCE: Record<AgentToolFocus, string> = {
     discovery: 'Locate the relevant project area and evidence source; do not attempt writes yet.',
     validation: 'Prove candidate syntax, scope, identifiers, and references before writing.',
     write: 'Apply the narrowest guarded edit; host-side semantic preflight remains authoritative.',
@@ -116,21 +115,21 @@ const STAGE_GUIDANCE: Record<AgentToolStage, string> = {
 /** Advisory focus only; capabilities are controlled by disclosure and the executor. */
 export function buildToolFocusReminder(
     mode: AgentMode,
-    stage: AgentToolStage | undefined,
+    focus: AgentToolFocus | undefined,
     domain: AgentRuntimeDomain = defaultDomainForMode(mode),
 ): string {
-    const normalizedStage = stage;
-    if (!normalizedStage) return '';
+    const normalizedFocus = focus;
+    if (!normalizedFocus) return '';
     const guidance = domain === 'general'
-        ? normalizedStage === 'discovery'
+        ? normalizedFocus === 'discovery'
             ? 'Inspect the repository and identify the exact implementation and verification surface; do not write yet.'
-            : normalizedStage === 'write'
+            : normalizedFocus === 'write'
                 ? 'Implement the scoped change and run relevant commands through the policy engine.'
-                : normalizedStage === 'validation'
+                : normalizedFocus === 'validation'
                         ? 'Cross-check the proposed or reviewed behavior against callers, diagnostics, tests, and current implementation.'
                         : 'Synthesize the evidence, review the diff when applicable, and report verification and remaining risks.'
-        : STAGE_GUIDANCE[normalizedStage];
-    return `<system-reminder>Current ${mode} focus: ${normalizedStage}. ${guidance} `
+        : FOCUS_GUIDANCE[normalizedFocus];
+    return `<system-reminder>Current ${mode} focus: ${normalizedFocus}. ${guidance} `
         + 'This focus is advisory; use select_tools for any capability allowed by the current mode and policy.</system-reminder>';
 }
 
@@ -200,10 +199,6 @@ export function filterToolDefinitionsForMode(
         const entry = TOOL_REGISTRY.get(t.function.name as import('./types').AgentToolName);
         if (!entry) return false;
         if (domain === 'general' && entry.domain === 'paradox') return false;
-        
-        if (options.legacyFullToolset) {
-            return !['dispatch_agents', 'query_blackboard', 'merge_results'].includes(entry.name);
-        }
         
         return evaluateEffectiveToolPolicy(entry.name, {
             mode,

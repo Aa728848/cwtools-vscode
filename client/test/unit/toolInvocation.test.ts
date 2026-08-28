@@ -55,6 +55,27 @@ describe('ToolInvocation & Registry Single Source of Truth Tests', () => {
         expect(invocation.riskLevel).to.equal(0);
         expect(invocation.args).to.deep.equal({ TargetFile: 'a.txt' });
     });
+
+    it('reconstructs flattened model arguments before execution', () => {
+        const { buildToolInvocation } = loadToolInvocationModule();
+        const invocation = buildToolInvocation({
+            runId: 'run123',
+            toolCall: {
+                id: 'call_flat',
+                type: 'function',
+                function: {
+                    name: 'web_search',
+                    arguments: '{"query":"test","location.country":"CN"}',
+                },
+            },
+            availableTools: [{ function: { name: 'web_search' } }],
+            workspaceRoot: 'C:/ws',
+        });
+
+        expect(invocation.parseError).to.equal(undefined);
+        expect(invocation.args).to.deep.include({ query: 'test', location: { country: 'CN' } });
+        expect(invocation.argRepairs).to.include('Nested schema reconstructed');
+    });
 });
 
 function loadToolInvocationModule() {

@@ -190,8 +190,8 @@ export interface FeatureManifest {
 export interface MCPServerConfig {
     name: string;
     type: 'stdio' | 'sse';
-    /** Explicit trust classification. Legacy/missing values are Paradox-only. */
-    capabilityDomain?: 'paradox' | 'general' | 'both';
+    /** Explicit capability domain allowed to receive this server. */
+    capabilityDomain: 'paradox' | 'general' | 'both';
     // For stdio
     command?: string;
     args?: string[];
@@ -2061,7 +2061,7 @@ export interface GetDiagnosticsResult {
 
 // ─── Token Usage & Cost ──────────────────────────────────────────────────────
 
-export type AgentToolStage = 'discovery' | 'validation' | 'write' | 'finalize';
+export type AgentToolFocus = 'discovery' | 'validation' | 'write' | 'finalize';
 
 /** One completed provider request used for request-accurate cache metrics. */
 export interface CacheRequestUsage {
@@ -2071,7 +2071,7 @@ export interface CacheRequestUsage {
     cachedTokens: number;
     cacheCapable: boolean;
     agentMode?: string;
-    toolStage?: AgentToolStage;
+    toolFocus?: AgentToolFocus;
     promptFingerprint?: string;
     purpose?: 'reasoning' | 'compaction' | 'fallback' | 'validation' | 'final_summary'
         | 'routing' | 'approval_review' | 'title';
@@ -2113,7 +2113,7 @@ export interface TokenUsage {
     /** Mode/fingerprint metadata for legacy run-level usage consumers. */
     agentMode?: string;
     promptFingerprint?: string;
-    toolStage?: AgentToolStage;
+    toolFocus?: AgentToolFocus;
     /** Local frozen-prompt lookup miss attached to the first provider request. */
     promptCacheMissReason?: string;
     /** Per-provider-call cache samples; bounded by the request path. */

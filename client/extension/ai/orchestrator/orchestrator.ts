@@ -679,7 +679,7 @@ export class Orchestrator {
             // The parent already approved and decomposed this Execute task.
             // Writer roles start with execution-focused guidance and never reopen
             // the main-Agent design/approval lifecycle.
-            initialToolStage: profile.mode === 'build' || profile.mode === 'utility' ? 'write' : undefined,
+            initialToolFocus: profile.mode === 'build' || profile.mode === 'utility' ? 'write' : undefined,
             domain: childDomain,
             onStep,
             abortSignal, // Replaced below by the child controller with parent/idle guards.

@@ -54,6 +54,16 @@ function loadAgentRunner(options: { freshLiveContext?: boolean } = {}) {
 }
 
 describe('AgentRunner 状态机与工具调度测试 (阶段 0 基线)', () => {
+    describe('工具结果健康状态', () => {
+        it('把带 success=false 或 ok=false 的结构化结果计为失败', () => {
+            const { isToolResultFailure } = loadAgentRunner();
+            expect(isToolResultFailure({ success: false, error: 'denied' })).to.equal(true);
+            expect(isToolResultFailure({ ok: false, error: 'invalid args' })).to.equal(true);
+            expect(isToolResultFailure({ error: 'thrown error' })).to.equal(true);
+            expect(isToolResultFailure({ success: true })).to.equal(false);
+            expect(isToolResultFailure({ diagnostics: [] })).to.equal(false);
+        });
+    });
     
     describe('Token 估算逻辑', () => {
         it('能够对纯 ASCII 文本进行快速估算 (短文本)', () => {

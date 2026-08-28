@@ -13,11 +13,8 @@ export function getToolMetadata(toolName: string): {
     riskLevel: 0 | 1 | 2 | 3;
     concurrencyClass: ToolConcurrencyClass;
 } {
-    const name = toolName.toLowerCase();
-
-    // 先从 TOOL_REGISTRY 单一权威事实源读取，实现零硬编码偏差
-    const regEntry = TOOL_REGISTRY.get(toolName as AgentToolName) || 
-                     [...TOOL_REGISTRY.values()].find(t => t.name.toLowerCase() === name);
+    const regEntry = TOOL_REGISTRY.get(toolName as AgentToolName)
+        ?? [...TOOL_REGISTRY.values()].find(entry => entry.name.toLowerCase() === toolName.toLowerCase());
     if (regEntry) {
         return {
             effect: regEntry.effect,
@@ -25,69 +22,6 @@ export function getToolMetadata(toolName: string): {
             concurrencyClass: regEntry.concurrencyClass
         };
     }
-
-    // 1. Memory tools
-    if (
-        name === 'todo_write' ||
-        name === 'manage_goal' ||
-        name === 'set_memory' ||
-        name === 'query_blackboard'
-    ) {
-        return { effect: 'memory', riskLevel: 0, concurrencyClass: 'parallel' };
-    }
-
-    // 2. Network tools
-    if (name === 'web_search' || name === 'web_open' || name === 'web_fetch' || name === 'search_web' || name === 'codesearch') {
-        return { effect: 'network', riskLevel: 1, concurrencyClass: 'network-limited' };
-    }
-    if (name === 'web_find') return { effect: 'workspace_read', riskLevel: 0, concurrencyClass: 'parallel' };
-
-    // 3. Command execution (shell)
-    if (name === 'run_command' || name === 'dispatch_agents' || name === 'merge_results') {
-        return { effect: 'shell', riskLevel: 2, concurrencyClass: 'interactive' };
-    }
-
-    // 4. Git operations
-    if (name === 'git_ops') {
-        return { effect: 'git', riskLevel: 2, concurrencyClass: 'global-exclusive' };
-    }
-
-    // 5. High-volume read-only LSP tools (limited concurrency to avoid flooding)
-    if (
-        name.startsWith('query_') ||
-        name === 'document_symbols' ||
-        name === 'workspace_symbols' ||
-        name === 'get_diagnostics' ||
-        name === 'verify_pdx_identifier'
-    ) {
-        return { effect: 'workspace_read', riskLevel: 0, concurrencyClass: 'lsp-limited' };
-    }
-
-    // 6. Ordinary read-only file/scan tools (safe for parallel execution)
-    if (
-        name === 'read_file' ||
-        name === 'list_directory' ||
-        name === 'glob_files' ||
-        name === 'grep' ||
-        name === 'get_completion_at' ||
-        name === 'find_sprite_candidates' ||
-        name === 'find_sound_candidates'
-    ) {
-        return { effect: 'workspace_read', riskLevel: 0, concurrencyClass: 'parallel' };
-    }
-
-    // 7. Core writing tools (per-file partitioned queue)
-    if (
-        name === 'write_file' ||
-        name === 'edit_file' ||
-        name === 'replace_lines' ||
-        name === 'write_localisation' ||
-        name === 'write_design_blueprint'
-    ) {
-        return { effect: 'workspace_write', riskLevel: 2, concurrencyClass: 'per-file-write' };
-    }
-
-    // 8. Default fallback for unknown tools (fail-safe global lock + high risk)
     return { effect: 'workspace_write', riskLevel: 2, concurrencyClass: 'global-exclusive' };
 }
 
@@ -136,35 +70,25 @@ export function buildToolInvocation(input: {
         }
     }
 
-    // 🌟 Schema Re-nest 还原管线 (T2.1)
     if (!parseError) {
-        try {
-            const entry = TOOL_REGISTRY.get(name as AgentToolName);
-            if (entry && entry.flatSchema) {
-                args = nestArguments(args);
-                argRepairs.push('Nested schema reconstructed');
-            }
-        } catch { /* ignore */ }
+        const entry = TOOL_REGISTRY.get(name as AgentToolName);
+        if (entry?.flatSchema) {
+            args = nestArguments(args);
+            argRepairs.push('Nested schema reconstructed');
+        }
     }
 
-    // 4. Semantic fuzzy name matching & coercion
     if (!parseError) {
-        try {
-            const semanticResult = repairToolArgs(name as any, args);
-            if (semanticResult.repaired) {
-                args = semanticResult.args;
-                argRepairs.push(...semanticResult.repairs);
-            }
-        } catch { /* ignore */ }
+        const semanticResult = repairToolArgs(name as AgentToolName, args);
+        if (semanticResult.repaired) {
+            args = semanticResult.args;
+            argRepairs.push(...semanticResult.repairs);
+        }
     }
 
-    // 5. Extract affected target paths
-    let targetPaths: string[] = [];
-    if (!parseError) {
-        try {
-            targetPaths = getAgentToolTargetFiles(name, args, input.workspaceRoot, input.topicId);
-        } catch { /* ignore */ }
-    }
+    const targetPaths = parseError
+        ? []
+        : getAgentToolTargetFiles(name, args, input.workspaceRoot, input.topicId);
 
     const invocationId = `inv_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
 

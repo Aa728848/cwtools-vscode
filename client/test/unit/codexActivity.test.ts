@@ -211,17 +211,6 @@ describe('Codex activity view model', () => {
         expect(visibleText).to.not.include('automatically truncated to 1000');
     });
 
-    it('suppresses internal tool-stage telemetry from visible process text', () => {
-        const model = build([
-            { type: 'thinking', content: 'Tool stage advanced: discovery -> validation (15 tools).', timestamp: 1000 },
-            { type: 'tool_call', toolName: 'get_diagnostics', invocationId: '1', toolArgs: {}, timestamp: 1100 },
-        ]);
-        const visibleText = model.items
-            .map(item => item.type === 'text' ? item.text.content : '')
-            .join('\n');
-        expect(visibleText).to.not.include('Tool stage advanced');
-    });
-
     it('renders user-facing narrative thinking as process text between activity rows', () => {
         const model = build([
             { type: 'thinking', content: 'I will inspect the chat UI first.', timestamp: 1000 },

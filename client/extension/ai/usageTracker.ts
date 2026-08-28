@@ -104,7 +104,7 @@ export interface UsageStats {
         byProvider: Record<string, CacheDimensionStats>;
         byModel: Record<string, CacheDimensionStats>;
         byAgentMode: Record<string, CacheDimensionStats>;
-        byToolStage: Record<string, CacheDimensionStats>;
+        byToolFocus: Record<string, CacheDimensionStats>;
         byPromptFingerprint: Record<string, CacheDimensionStats>;
         /** Cache-capable zero-hit request count by explicit invalidation/miss reason. */
         invalidationReasons: Record<string, number>;
@@ -305,7 +305,7 @@ export class UsageTracker {
         const byProviderMap = new Map<string, MutableCacheBucket>();
         const byModelMap = new Map<string, MutableCacheBucket>();
         const byAgentModeMap = new Map<string, MutableCacheBucket>();
-        const byToolStageMap = new Map<string, MutableCacheBucket>();
+        const byToolFocusMap = new Map<string, MutableCacheBucket>();
         const byPromptFingerprintMap = new Map<string, MutableCacheBucket>();
         const invalidationReasons = new Map<string, number>();
         const addBucket = (map: Map<string, MutableCacheBucket>, key: string, sample: CacheRequestUsage, hit: boolean) => {
@@ -330,7 +330,7 @@ export class UsageTracker {
             addBucket(byProviderMap, sample.provider || 'unknown', sample, hit);
             addBucket(byModelMap, sample.model || 'unknown', sample, hit);
             addBucket(byAgentModeMap, sample.agentMode ?? 'unspecified', sample, hit);
-            addBucket(byToolStageMap, sample.toolStage ?? 'unspecified', sample, hit);
+            addBucket(byToolFocusMap, sample.toolFocus ?? 'unspecified', sample, hit);
             addBucket(byPromptFingerprintMap, sample.promptFingerprint ?? 'unspecified', sample, hit);
             const missRequestCount = Math.max(0, requestCount - hitRequestCount);
             if (missRequestCount > 0) {
@@ -367,7 +367,7 @@ export class UsageTracker {
         const cacheByProvider = finishBuckets(byProviderMap);
         const cacheByModel = finishBuckets(byModelMap);
         const cacheByAgentMode = finishBuckets(byAgentModeMap);
-        const cacheByToolStage = finishBuckets(byToolStageMap);
+        const cacheByToolFocus = finishBuckets(byToolFocusMap);
         const cacheByPromptFingerprint = finishBuckets(byPromptFingerprintMap);
         const invalidationReasonCounts: Record<string, number> = {};
         for (const [reason, count] of [...invalidationReasons.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
@@ -413,7 +413,7 @@ export class UsageTracker {
                 byProvider: cacheByProvider,
                 byModel: cacheByModel,
                 byAgentMode: cacheByAgentMode,
-                byToolStage: cacheByToolStage,
+                byToolFocus: cacheByToolFocus,
                 byPromptFingerprint: cacheByPromptFingerprint,
                 invalidationReasons: invalidationReasonCounts,
                 estimatedSavingsCny,

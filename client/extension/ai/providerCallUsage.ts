@@ -17,7 +17,7 @@ export interface ProviderCallUsageOptions {
     endpoint?: string;
     agentMode: string;
     purpose: NonNullable<CacheRequestUsage['purpose']>;
-    toolStage?: CacheRequestUsage['toolStage'];
+    toolFocus?: CacheRequestUsage['toolFocus'];
     promptFingerprint?: string;
 }
 
@@ -88,7 +88,7 @@ export function buildProviderCallTokenUsage(
         cachedTokens,
         cacheCapable,
         agentMode: options.agentMode,
-        toolStage: options.toolStage,
+        toolFocus: options.toolFocus,
         promptFingerprint: options.promptFingerprint,
         purpose: options.purpose,
         invalidationReason: cacheCapable && cachedTokens === 0 ? 'provider_miss' : undefined,

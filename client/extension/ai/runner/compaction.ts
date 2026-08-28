@@ -556,7 +556,7 @@ export async function maybeCompactHistory(
                 cachedTokens,
                 cacheCapable,
                 agentMode: tokenAccumulator.agentMode,
-                toolStage: tokenAccumulator.toolStage,
+                toolFocus: tokenAccumulator.toolFocus,
                 promptFingerprint: fingerprintTranscript(compactionMessages).slice(0, 24),
                 purpose: 'compaction',
                 invalidationReason: cacheCapable && cachedTokens === 0 ? 'provider_miss' : undefined,

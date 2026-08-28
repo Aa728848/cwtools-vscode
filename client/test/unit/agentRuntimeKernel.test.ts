@@ -15,7 +15,7 @@ import {
     filterToolDefinitionsForMode,
     shouldAutoDiscloseExecutionTools,
 } from '../../extension/ai/runnerPolicy';
-import { createToolDedupeKey, ToolDedupeService } from '../../extension/ai/runner/toolDedupe';
+import { createToolCallSignature, createToolDedupeKey, ToolDedupeService } from '../../extension/ai/runner/toolDedupe';
 import { ContextLimitTracker } from '../../extension/ai/runner/contextLimitTracker';
 import { ConversationUndoCoordinator } from '../../extension/ai/runner/undoCoordinator';
 import { FaultInjector } from '../../extension/ai/runner/faultInjection';
@@ -311,6 +311,12 @@ describe('tool disclosure and dedupe', () => {
         expect(executions).to.equal(1);
         expect(first.reused).to.equal(false);
         expect(second).to.include({ reused: true, sourceInvocationId: 'one' });
+    });
+
+    it('builds stable loop signatures from normalized arguments and targets', () => {
+        expect(createToolCallSignature('read_file', { b: 2, file: 'src\\a.ts' }, ['C:\\ws\\src\\a.ts'])).to.equal(
+            createToolCallSignature('read_file', { file: 'src/a.ts', b: 2 }, ['C:/ws/src/a.ts']),
+        );
     });
 });
 

@@ -7007,7 +7007,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                     html += renderCacheDimension(tr('Provider', '供应商'), cache.byProvider);
                     html += renderCacheDimension(tr('Model', '模型'), cache.byModel);
                     html += renderCacheDimension(tr('Agent mode', 'Agent 模式'), cache.byAgentMode);
-                    html += renderCacheDimension(tr('Tool stage', '工具阶段'), cache.byToolStage);
+                    html += renderCacheDimension(tr('Tool focus', '工具焦点'), cache.byToolFocus);
                     html += '</div>';
                     const promptFingerprintCount = Object.keys(cache.byPromptFingerprint || {}).length;
                     if (promptFingerprintCount > 0) {

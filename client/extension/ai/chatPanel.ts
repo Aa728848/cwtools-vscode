@@ -1208,7 +1208,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                     mode: turnMode,
                     schedulingState: resolvedProfile?.schedulingState,
                     approvedPlanExecution,
-                    initialToolStage: approvedPlanExecution && (turnMode === 'build' || turnMode === 'utility')
+                    initialToolFocus: approvedPlanExecution && (turnMode === 'build' || turnMode === 'utility')
                         ? 'write'
                         : undefined,
                     domain: turnDomain,

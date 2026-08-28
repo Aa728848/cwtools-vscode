@@ -5,10 +5,8 @@
  * repeating the same tools with the same args or results) using light-weight FNV hashing
  * and semantic result normalization.
  *
- * T1.2a — DoomLoopState encapsulates the loop state previously held in reasoningLoop
- * local variables. Pure container + a few convenience methods; logic still lives in
- * agentRunner.ts (no behavior change). Lets us test state transitions in isolation
- * and unblocks reducer-driven cache audit (T3.2).
+ * DoomLoopState contains the rolling signatures and hashes used by the runner's
+ * single cross-step repetition policy.
  */
 
 export const DOOM_LOOP_SOFT_THRESHOLD = 4;
@@ -37,7 +35,7 @@ export function normalizeToolResultHash(toolName: string, result: unknown): stri
     const obj = result as Record<string, unknown>;
     // read_file → hash file content
     if (toolName === 'read_file' && typeof obj.content === 'string') {
-        return `read_file:${obj.file ?? ''}:${obj.content.length}`;
+        return `read_file:${obj.file ?? ''}:${obj.content.length}:${fnv32a(obj.content)}`;
     }
     // write_file → hash written content
     if (toolName === 'write_file' && typeof obj.content === 'string') {
@@ -56,8 +54,7 @@ export function normalizeToolResultHash(toolName: string, result: unknown): stri
 }
 
 /**
- * Per-reasoning-loop state container. Holds the two maps and the rolling signature
- * previously declared as local variables in agentRunner.reasoningLoop.
+ * Per-reasoning-loop state container.
  */
 export class DoomLoopState {
     public readonly pairFrequency = new Map<string, number>();
@@ -78,7 +75,8 @@ export class DoomLoopState {
      * paths — used after mutating writes so unrelated loop signals aren't wiped.
      */
     clearForFiles(filePaths: Set<string> | string[]): void {
-        const set = filePaths instanceof Set ? filePaths : new Set(filePaths);
+        const set = new Set([...(filePaths instanceof Set ? filePaths : new Set(filePaths))]
+            .map(filePath => filePath.replace(/\\/g, '/')));
         if (set.size === 0) return;
         for (const key of Array.from(this.pairFrequency.keys())) {
             for (const fp of set) {

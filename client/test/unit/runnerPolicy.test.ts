@@ -3,7 +3,7 @@ import {
     buildToolFocusReminder,
     filterToolDefinitionsForMode,
     finalResponseRequiresUserInput,
-    initialToolStageForMode,
+    initialToolFocusForMode,
     isExecutionActionTool,
     isTruncationInducedStop,
     resolveCompactionOutputReserve,
@@ -61,15 +61,15 @@ describe('runnerPolicy', () => {
 
         for (const mode of ['plan', 'explore', 'review'] as const) {
             const names = filterToolDefinitionsForMode(registeredTools, mode).map(tool => tool.function.name);
-            expect(initialToolStageForMode(mode)).to.equal('discovery');
+            expect(initialToolFocusForMode(mode)).to.equal('discovery');
             expect(names).to.include('read_file');
             expect(names).to.not.include.members(['write_file', 'replace_lines', 'write_localisation']);
         }
-        expect(initialToolStageForMode('build')).to.equal('write');
-        expect(initialToolStageForMode('utility')).to.equal('write');
+        expect(initialToolFocusForMode('build')).to.equal('write');
+        expect(initialToolFocusForMode('utility')).to.equal('write');
     });
 
-    it('uses stage only as advisory focus', () => {
+    it('uses focus only as advisory guidance', () => {
         const reminder = buildToolFocusReminder('build', 'validation');
         expect(reminder).to.include('Current build focus: validation');
         expect(reminder).to.include('advisory');

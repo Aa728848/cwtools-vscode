@@ -550,6 +550,11 @@ let private pathComparison =
     then StringComparison.OrdinalIgnoreCase
     else StringComparison.Ordinal
 
+let private sameFilePath (left: string) (right: string) =
+    try
+        String.Equals(Path.GetFullPath(left), Path.GetFullPath(right), pathComparison)
+    with _ -> false
+
 let private isAllowedDefinitionTarget (sourcePath: string) (targetPath: string) =
     match tryFindProjectRoot sourcePath, tryFindProjectRoot targetPath with
     | Some sourceRoot, Some targetRoot ->
@@ -7197,7 +7202,7 @@ type Server(client: ILanguageClient) =
                                 |> Map.toList
                                 |> Seq.collect (fun (k, vs) ->
                                     vs
-                                    |> Seq.filter (fun tdi -> tdi.range.FileName = filePath)
+                                    |> Seq.filter (fun tdi -> sameFilePath tdi.range.FileName filePath)
                                     |> Seq.map (fun tdi -> createDocumentSymbol tdi.id k (symbolKindForType k) tdi.range))
                                 |> Seq.rev
                                 |> Seq.filter (fun ds -> not (ds.detail.Contains(".")))

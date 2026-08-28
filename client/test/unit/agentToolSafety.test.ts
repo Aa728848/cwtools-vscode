@@ -851,6 +851,23 @@ describe('agent tool file path safety', () => {
         expect(result.content).to.not.include('12 | line 12');
     });
 
+    it('ignores zero window placeholders in a range-based read_file call', async () => {
+        const target = path.join(workspaceRoot, 'large.txt');
+        fs.writeFileSync(target, Array.from({ length: 20 }, (_, index) => `line ${index + 1}`).join('\n'));
+
+        const result = await createFileHandler().readFile({
+            file: target,
+            startLine: 9,
+            endLine: 11,
+            centerLine: 0,
+            radius: 0,
+        });
+
+        expect(result.content).to.include('9 | line 9');
+        expect(result.content).to.include('11 | line 11');
+        expect(result.content).to.not.include('12 | line 12');
+    });
+
     it('allows reads under configured game roots but keeps other external paths blocked', async () => {
         const configuredRoot = makeWorkspace();
         const otherRoot = makeWorkspace();
@@ -895,6 +912,40 @@ describe('agent tool file path safety', () => {
         } finally {
             cleanupWorkspace(configuredRoot);
             cleanupWorkspace(otherRoot);
+        }
+    });
+
+    it('falls back to structural symbols for an external vanilla PDX file', async () => {
+        const configuredRoot = makeWorkspace();
+        const vanillaFile = path.join(configuredRoot, 'common', 'game_rules', '00_rules.txt');
+        fs.mkdirSync(path.dirname(vanillaFile), { recursive: true });
+        fs.writeFileSync(vanillaFile, [
+            'first_rule = {',
+            '    potential = { always = yes }',
+            '}',
+            'can_generate_leader_from_species = {',
+            '    possible = { is_species_class = BIOLOGICAL }',
+            '}',
+        ].join('\n'));
+        stubConfigOverrides['cache.stellaris'] = configuredRoot;
+
+        try {
+            const executor = new AgentToolExecutor({} as any, workspaceRoot);
+            const symbols = await executor.execute('document_symbols', { file: vanillaFile }, makeContext()) as any;
+            const block = await executor.execute('get_pdx_block', {
+                file: vanillaFile,
+                symbol: 'can_generate_leader_from_species',
+            }, makeContext()) as any;
+
+            expect(symbols.symbols.map((symbol: any) => symbol.name)).to.deep.equal([
+                'first_rule',
+                'can_generate_leader_from_species',
+            ]);
+            expect(block.content).to.include('possible = { is_species_class = BIOLOGICAL }');
+            expect(block.startLine).to.equal(4);
+            expect(block.endLine).to.equal(6);
+        } finally {
+            cleanupWorkspace(configuredRoot);
         }
     });
 

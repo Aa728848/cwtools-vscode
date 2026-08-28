@@ -624,10 +624,14 @@ export class FileToolHandler {
 
     async readFile(args: { file: string; startLine?: number; endLine?: number; centerLine?: number; radius?: number }, context?: import('../types').AgentToolContext): Promise<import('../types').ReadFileResult> {
         try {
+            const hasRange = (args.startLine !== undefined && args.startLine > 0)
+                || (args.endLine !== undefined && args.endLine > 0);
             const normalizedArgs = {
                 ...args,
                 startLine: args.startLine === 0 ? undefined : args.startLine,
                 endLine: args.endLine === 0 ? undefined : args.endLine,
+                centerLine: hasRange && args.centerLine === 0 && args.radius === 0 ? undefined : args.centerLine,
+                radius: hasRange && args.centerLine === 0 && args.radius === 0 ? undefined : args.radius,
             };
             if (normalizedArgs.centerLine !== undefined) {
                 if (!Number.isInteger(normalizedArgs.centerLine) || normalizedArgs.centerLine < 0) throw new Error('centerLine must be a non-negative 0-based integer.');

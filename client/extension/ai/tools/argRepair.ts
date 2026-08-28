@@ -122,13 +122,21 @@ export function repairToolArgs(
         }
     }
 
-    // Some providers materialize omitted numeric fields as zero. For read_file,
-    // zero is invalid for the 1-based range but centerLine=0 is meaningful.
-    if (toolName === 'read_file' && args.centerLine !== undefined) {
-        for (const key of ['startLine', 'endLine'] as const) {
-            if (args[key] !== 0) continue;
-            delete args[key];
-            repairs.push(`Removed zero placeholder '${key}' because centerLine selects the read window`);
+    // Some providers materialize omitted numeric fields as zero. Preserve the
+    // locator with real values and remove zero placeholders from the other one.
+    if (toolName === 'read_file') {
+        const hasRange = Number(args.startLine) > 0 || Number(args.endLine) > 0;
+        if (hasRange && args.centerLine === 0 && args.radius === 0) {
+            delete args.centerLine;
+            repairs.push("Removed zero placeholder 'centerLine' because startLine/endLine select the read range");
+            delete args.radius;
+            repairs.push("Removed zero placeholder 'radius' because startLine/endLine select the read range");
+        } else if (args.centerLine !== undefined) {
+            for (const key of ['startLine', 'endLine'] as const) {
+                if (args[key] !== 0) continue;
+                delete args[key];
+                repairs.push(`Removed zero placeholder '${key}' because centerLine selects the read window`);
+            }
         }
     }
 

@@ -138,4 +138,17 @@ describe('repairToolArgs', () => {
         expect(result.repaired).to.equal(false);
         expect(result.args).to.include({ startLine: 10, endLine: 20, centerLine: 15 });
     });
+
+    it('removes provider zero placeholders from a range-based read_file call', () => {
+        const result = repairToolArgs('read_file', {
+            file: 'test.txt',
+            startLine: 430,
+            endLine: 465,
+            centerLine: 0,
+            radius: 0,
+        });
+
+        expect(result.args).to.deep.equal({ file: 'test.txt', startLine: 430, endLine: 465 });
+        expect(result.repairs).to.have.length(2);
+    });
 });

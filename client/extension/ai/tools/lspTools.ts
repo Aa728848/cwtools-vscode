@@ -31,6 +31,7 @@ import { diagnosticMetadata } from './diagnosticMetadata';
 import { diagnosticCodeString, diagnosticMatchesIgnoredKey } from '../../diagnosticI18n';
 import { readProjectProfile } from '../projectProfile';
 import { parsePdxSemanticCatalog } from '../../../shared/pdxSemanticCatalog';
+import { parsePdxDocumentSymbols } from './pdxDocumentSymbols';
 import {
     applyRenameEdits,
     buildRenameExpansionPlan,
@@ -4209,7 +4210,8 @@ export class LspToolHandler {
                 );
 
                 if (!symbols || symbols.length === 0) {
-                    return { symbols: [] };
+                    const fallback = parsePdxDocumentSymbols(fs.readFileSync(args.file, 'utf-8'), args.file);
+                    return { symbols: fallback, lineNumberBase: 0 };
                 }
 
                 const MAX_DEPTH = 2;
@@ -4230,6 +4232,10 @@ export class LspToolHandler {
 
                 return { symbols: symbols.map(s => mapSymbol(s, 0)), lineNumberBase: 0 };
             } catch (e) {
+                try {
+                    const fallback = parsePdxDocumentSymbols(fs.readFileSync(args.file, 'utf-8'), args.file);
+                    if (fallback.length > 0) return { symbols: fallback, lineNumberBase: 0 };
+                } catch { /* Preserve the language-provider error below. */ }
                 return { symbols: [], lineNumberBase: 0, error: e instanceof Error ? e.message : String(e) };
             }
         }, 8000);

@@ -692,6 +692,7 @@ export class Orchestrator {
             threadId: `${orchestratorOptions.parentRunId ?? orchestratorOptions.topicId ?? 'orchestrator'}/${taskNode.id}`,
             turnId: taskNode.id,
             onTodoUpdate: orchestratorOptions.onTodoUpdate,
+            onUserQuestion: orchestratorOptions.onUserQuestion,
             useSlimPrompt: true,
             // Children run exactly one level below this coordinator. The dispatch
             // gate reads this back to refuse a further delegation level.

@@ -153,6 +153,26 @@ describe('enforced central tool policy', () => {
         expect(callbackCalled).to.equal(false);
     });
 
+    it('allows orchestrator sub-agents to route structured user questions', async () => {
+        const executor = new AgentToolExecutor({} as any, workspaceRoot);
+        const result = await executor.execute('ask_user_question', {
+            questions: [{
+                id: 'scope',
+                header: 'Scope',
+                question: 'Which scope should be changed?',
+                options: [
+                    { label: 'Workspace (Recommended)', description: 'Apply the change consistently.' },
+                    { label: 'Active file', description: 'Keep the change narrowly scoped.' },
+                ],
+            }],
+        }, {
+            runnerOptions: { mode: 'plan', useSlimPrompt: true },
+            onUserQuestion: async () => ({ success: true, answers: { scope: 'Active file' } }),
+        } as any) as any;
+
+        expect(result).to.deep.equal({ success: true, answers: { scope: 'Active file' } });
+    });
+
     it('blocks workspace writes when the effective policy preset is read-only', async () => {
         stubConfigOverrides['policy.preset'] = 'read-only';
         const executor = new AgentToolExecutor({} as any, workspaceRoot);
@@ -1134,6 +1154,7 @@ describe('agent tool file path safety', () => {
             'dependencyOrder',
             'featureManifest',
             'taskPlan',
+            'unresolvedCritical',
         ]);
     });
 
@@ -1254,6 +1275,7 @@ describe('agent tool file path safety', () => {
                     { id: 'flag_lifecycle', description: 'The flag is set and read.', type: 'flag_lifecycle', subject: 'test_chain_active' },
                 ],
             }],
+            unresolvedCritical: [],
         }, makeContext('topic-blueprint'));
 
         expect(result.success).to.equal(true);
@@ -1271,6 +1293,30 @@ describe('agent tool file path safety', () => {
         expect(result.writtenFiles).to.deep.equal([planPath]);
         expect(fs.existsSync(path.join(workspaceRoot, '.cwtools', 'topic-blueprint', 'design_blueprint.md'))).to.equal(false);
         expect(fs.existsSync(path.join(workspaceRoot, '.cwtools', 'topic-blueprint', 'design_blueprint.json'))).to.equal(false);
+
+        const blueprintBlock = content.match(/```cwtools-blueprint\n([\s\S]*?)\n```/)?.[1];
+        expect(blueprintBlock).to.not.equal(undefined);
+        const draftBlueprint = JSON.parse(blueprintBlock!);
+        delete draftBlueprint.schemaVersion;
+        delete draftBlueprint.generatedAt;
+        draftBlueprint.entities.push(
+            { ...draftBlueprint.entities[0], id: 'test.2' },
+            { ...draftBlueprint.entities[0], id: 'test.3' },
+        );
+        draftBlueprint.evidence.push({
+            sourceType: 'project_knowledge',
+            source: 'query_project_knowledge(test chain)',
+            insight: 'Current project patterns support the planned event family.',
+        });
+        draftBlueprint.unresolvedCritical = ['Choose the leader eligibility scope.'];
+
+        const draftResult = await handler.writeDesignBlueprint(draftBlueprint, makeContext('topic-blueprint'));
+        const draftContent = fs.readFileSync(planPath, 'utf8');
+        expect(draftResult.success).to.equal(true);
+        expect(draftResult.message).to.include('Blueprint draft saved');
+        expect(draftContent).to.include('## Unresolved Critical Decisions');
+        expect(draftContent).to.include('Choose the leader eligibility scope.');
+        expect(draftContent).to.not.include('```cwtools-plan');
     });
 
     it('lets orchestrator sub-agents write localisation without waiting for pending-write confirmation', async () => {

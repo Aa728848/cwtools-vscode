@@ -1285,19 +1285,6 @@ export class AgentRunner {
             }
         };
 
-        // Context object to be passed to tool executor (replaces old global assignment)
-        const _agentToolContext: import('./types').AgentToolContext = {
-            runnerOptions: options,
-            agentRunner: this,
-            runEventSink: options?.runEventSink,
-            tokenAccumulator: tokenAccumulator,
-            onStep: emitStep,
-            onPermissionRequest: options?.onPermissionRequest,
-            onUserQuestion: options?.onUserQuestion,
-            onBeforeFileWrite: options?.onBeforeFileWrite,
-            onTodoUpdate: options?.onTodoUpdate
-        };
-
         // Vision capability check: if the active provider doesn't support image input,
         // silently drop image attachments and emit a warning so the user knows.
         const _cfgVision = this.aiService.getConfig();
@@ -2257,6 +2244,7 @@ export class AgentRunner {
             tokenAccumulator: tokenAccumulator,
             onStep: emitStep,
             onPermissionRequest: options?.onPermissionRequest,
+            onUserQuestion: options?.onUserQuestion,
             // Per-run scope for the anchor-failure guard: sub-agents share the
             // executor, so each run contributes only its own scoped signatures.
             scopeId: runRecord.runId,

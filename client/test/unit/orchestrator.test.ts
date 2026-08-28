@@ -832,6 +832,7 @@ describe('approved blueprint dispatch', () => {
                 dependencies: [],
                 acceptanceChecks: [{ id: 'event_exists', description: 'Event exists', type: 'entity_exists', subject: 'approved.1' }],
             }],
+            unresolvedCritical: [],
         }, null, 2)}\n\`\`\`\n`, 'utf8');
 
         const { AgentToolExecutor } = require('../../extension/ai/agentTools') as typeof import('../../extension/ai/agentTools');
@@ -896,6 +897,15 @@ describe('approved blueprint dispatch', () => {
             });
             expect(parentUsage.cacheRequests).to.have.length(1);
             expect(parentUsage.cacheRequests?.[0]?.promptFingerprint).to.equal('child-fp');
+
+            const draftContent = fs.readFileSync(blueprintFile, 'utf8')
+                .replace('"unresolvedCritical": []', '"unresolvedCritical": ["Choose the leader scope."]');
+            fs.writeFileSync(blueprintFile, draftContent, 'utf8');
+            const blockedDraft = await executor.execute('dispatch_agents', { blueprintFile }, {
+                runnerOptions: { mode: 'script', abortSignal: new AbortController().signal },
+            } as any) as any;
+            expect(blockedDraft.success).to.equal(false);
+            expect(blockedDraft.error).to.include('unresolvedCritical must be an empty array');
         } finally {
             (Orchestrator.prototype as any).execute = originalExecute;
             fs.rmSync(root, { recursive: true, force: true });

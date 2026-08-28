@@ -1507,7 +1507,7 @@ const RAW_TOOL_DEFINITIONS: ToolDefinition[] = [
         type: 'function',
         function: {
             name: 'write_design_blueprint',
-            description: 'Write the blueprint tier of the unified Implementation Plan for a Paradox game-entity pipeline. Paradox planning and Paradox Multi-Agent execution MUST use it before implementing connected multi-entity work; General Multi-Agent repository work does not require this PDX-specific contract. The single topic-scoped Implementation_Plan.md contains the human-readable topology, approval handoff, featureManifest, and taskPlan so dispatch_agents can load the approved contract without model reinterpretation or sidecar plan files. Research must follow the evidence hierarchy: CWT/LSP and typed indexes first, current project examples second, bounded vanilla archetype evidence third.',
+            description: 'Write the blueprint tier of the unified Implementation Plan for a connected Paradox game-entity pipeline. Load get_design_blueprint_contract once, include every required field, and always pass unresolvedCritical. Use [] only when every design-changing choice is resolved; a non-empty list saves a blocked draft without an approval handoff. Complex plans need CWT/LSP evidence plus either current-project knowledge or a bounded vanilla archetype. General repository work does not use this PDX-specific contract.',
             parameters: {
                 type: 'object',
                 properties: {
@@ -1769,11 +1769,11 @@ const RAW_TOOL_DEFINITIONS: ToolDefinition[] = [
                     unresolvedCritical: {
                         type: 'array',
                         items: { type: 'string' },
-                        description: 'Critical facts still unresolved after query_project_knowledge and exact CWT/LSP verification. Complex blueprints are refused unless this array is present and empty.',
+                        description: 'Always provide this array. Use [] when all design-changing facts are resolved. Otherwise list each exact user decision or missing fact; the tool saves a blocked draft that can be updated after clarification.',
                     },
                     notes: { type: 'string', description: 'Additional design notes: scope chain transition warnings, edge cases, branching logic, or vanilla references studied.' },
                 },
-                required: ['title', 'entities', 'commonDirectoryReview', 'subsystemPlan', 'triggerPlan', 'rewardPlan', 'cleanupPlan', 'evidence', 'dependencyOrder', 'featureManifest', 'taskPlan'],
+                required: ['title', 'entities', 'commonDirectoryReview', 'subsystemPlan', 'triggerPlan', 'rewardPlan', 'cleanupPlan', 'evidence', 'dependencyOrder', 'featureManifest', 'taskPlan', 'unresolvedCritical'],
             },
         },
     },
@@ -2116,7 +2116,7 @@ const COMPACT_BLUEPRINT_WRITE_TOOL: ToolDefinition = {
     type: 'function',
     function: {
         name: 'write_design_blueprint',
-        description: 'Validate and save a complete executable design blueprint. First call get_design_blueprint_contract for the detailed versioned contract, then pass the completed object as blueprint. The host validates required sections, evidence, entity edges, task dependencies, and acceptance criteria.',
+        description: 'Validate and save a design blueprint. First call get_design_blueprint_contract once, then pass the completed object as blueprint. Always include unresolvedCritical: [] for an approval-ready plan, or list exact blockers to save a draft without an approval handoff. The host validates required sections, evidence, entity edges, task dependencies, and acceptance criteria.',
         parameters: {
             type: 'object',
             properties: {

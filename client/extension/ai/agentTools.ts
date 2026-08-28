@@ -2500,10 +2500,6 @@ export class AgentToolExecutor {
             case 'todo_write':
                 result = await this.externalHandler.todoWrite(args as any, context); break;
             case 'ask_user_question': {
-                if (context?.runnerOptions?.useSlimPrompt) {
-                    result = { success: false, error: 'Sub-agents must report blocking ambiguity to the parent Agent.' };
-                    break;
-                }
                 const callback = context?.onUserQuestion;
                 if (!callback) {
                     result = { success: false, error: 'The active host does not support interactive questions. Report the blocked user-owned decision without inventing an answer.' };
@@ -3866,14 +3862,19 @@ export class AgentToolExecutor {
                         schemaVersion?: number;
                         featureManifest?: import('./types').FeatureManifest;
                         taskPlan?: typeof tasks;
+                        unresolvedCritical?: unknown;
                     } | undefined
                     : JSON.parse(fileContent) as {
                         schemaVersion?: number;
                         featureManifest?: import('./types').FeatureManifest;
                         taskPlan?: typeof tasks;
+                        unresolvedCritical?: unknown;
                     };
                 if (approvedBlueprint?.schemaVersion !== 2 || !approvedBlueprint.featureManifest || !Array.isArray(approvedBlueprint.taskPlan)) {
                     return { success: false, error: 'Approved Implementation Plan does not contain a valid schemaVersion 2 executable blueprint contract.' };
+                }
+                if (!Array.isArray(approvedBlueprint.unresolvedCritical) || approvedBlueprint.unresolvedCritical.length > 0) {
+                    return { success: false, error: 'Blueprint is not approval-ready: unresolvedCritical must be an empty array before dispatch.' };
                 }
                 featureManifest = approvedBlueprint.featureManifest;
                 tasks = approvedBlueprint.taskPlan;
@@ -4303,6 +4304,8 @@ export class AgentToolExecutor {
                 onPermissionRequest: context?.onPermissionRequest
                     ?? runnerOpts?.onPermissionRequest
                     ?? this.onPermissionRequest,
+                onUserQuestion: context?.onUserQuestion
+                    ?? runnerOpts?.onUserQuestion,
             };
 
             // Push initial progress

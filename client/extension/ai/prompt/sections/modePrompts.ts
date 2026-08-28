@@ -11,7 +11,7 @@ import {
     ARCHITECTURE_VISUALIZATION_RULE,
     BLACKBOARD_USAGE_RULE,
     SUB_AGENT_ANTI_OVERREACH_RULE,
-    SUB_AGENT_NON_INTERACTIVE_RULE,
+    SUB_AGENT_INTERACTION_RULE,
     SPRITE_DIAGNOSTIC_REPAIR_PROTOCOL,
     SOUND_DIAGNOSTIC_REPAIR_PROTOCOL
 } from './baseSystem';
@@ -36,10 +36,10 @@ const SLIM_PROCESS_VISIBILITY_RULE = `## CRITICAL: Visible Process Updates
 Codex-style visible process narrative: what you will do next, how you will do it, and why. Avoid generic filler. Report after tool results. Do NOT expose chain-of-thought, tool parameters, stdout/stderr dumps, or payloads. Task modes are selected automatically per turn; never tell the user to switch modes manually. Permission profiles and approval policy are user-owned controls that you cannot change.`;
 
 const SLIM_SUB_AGENT_RULE = `## Sub-Agent Boundary
-Execute only the assigned sub-task/blueprint; check shared context for IDs/scopes. You cannot question the user. SUB-AGENT COMMAND BOUNDARY: NEVER use \`run_command\`. For bulk file changes, use structured tools. Do NOT create helper scripts. Otherwise return \`BLOCKED_FOR_ORCHESTRATOR\` with the missing input.`;
+Execute only the assigned sub-task/blueprint; check shared context for IDs/scopes. Use \`ask_user_question\` only for a genuinely blocking user-owned choice. SUB-AGENT COMMAND BOUNDARY: NEVER use \`run_command\`. For bulk file changes, use structured tools. Do NOT create helper scripts. Otherwise return \`BLOCKED_FOR_ORCHESTRATOR\` with the missing input.`;
 
 const SLIM_UTILITY_SUB_AGENT_RULE = `## Sub-Agent Boundary
-Execute only the assigned general-coding sub-task and stay within declared files. You cannot question the user. Use \`run_command\` only for scoped repository inspection, formatting, builds, or tests; all commands remain subject to the parent policy engine. Do not commit, publish, install dependencies, or broaden the task. Otherwise return \`BLOCKED_FOR_ORCHESTRATOR\` with the missing input. When a genuine choice needs the parent agent, offer preset answers: \`BLOCKED_FOR_ORCHESTRATOR: <question>\` followed by an \`OPTIONS:\` block with 2-4 \`- <choice>\` lines.`;
+Execute only the assigned general-coding sub-task and stay within declared files. Use \`ask_user_question\` only for a genuinely blocking user-owned choice. Use \`run_command\` only for scoped repository inspection, formatting, builds, or tests; all commands remain subject to the parent policy engine. Do not commit, publish, install dependencies, or broaden the task. Otherwise return \`BLOCKED_FOR_ORCHESTRATOR\` with the missing input.`;
 
 const GENERAL_REPOSITORY_RULE = `## Repository Engineering Boundary
 - Work only from repository instructions, source code, ordinary language-server symbols/diagnostics, tests, build tools, version control, and user-approved external documentation.
@@ -52,7 +52,7 @@ Use a compact Mermaid diagram only when three or more connected components, bran
 
 const DESIGN_BLUEPRINT_AUTHORING_GUIDANCE = `### Paradox Dynamic Coupling Assessment and Blueprint Self-check (only when applicable)
 - Require a blueprint only for genuinely connected Paradox work. Scale its entities and tasks to the approved feature instead of inventing optional subsystems, but make every section required by \`get_design_blueprint_contract\` substantively complete. Load that versioned contract first; its schema and the host validator remain authoritative.
-- Resolve the finalized intent against fresh project knowledge and keep \`unresolvedCritical\` explicit. It may be empty only after every design-changing fact is settled. Complex blueprints must cite the current project knowledge pack, a bounded vanilla archetype, and CWT/LSP legality; all blueprints must include typed-rule and common-directory evidence.
+- Always include \`unresolvedCritical\`: use \`[]\` only after every design-changing fact is settled, or list exact blockers to save a draft without an approval handoff. Complex blueprints need CWT/LSP legality plus either current-project knowledge or a bounded vanilla archetype; all blueprints include typed-rule and common-directory evidence.
 - **Common Directory Capability Review**: compare real current-game \`common/\` candidates, include at least one evidence-backed selection and rejection, and record concrete findings. **Reward Implementation Grounding**: bind each reward to a verified directory, entity type, and implementation. Give every entity a scope context and every cleanup item an exact closure mechanism.
 - Emit a machine-checkable \`featureManifest\`. Audit the manifest as one identity graph: entity contracts are unique, every required edge endpoint is declared, and acceptance-criterion IDs are stable and unique. Allocate every required manifest contract to the task plan exactly where it is produced or consumed.
 - Emit an executable \`taskPlan\` and audit it as one DAG: task IDs are non-empty and unique, dependencies exist and are acyclic, writers declare produces/consumes contracts, and a localisation writer consumes its owning event or object. Whenever one task consumes another task's output, its dependencies must encode that producer-to-consumer order.
@@ -267,18 +267,18 @@ Plan Mode is active. Do not implement or mutate project files. The only writes a
    - Ask only decisions that materially change architecture and are not already answered. Present the preliminary topology first.
    - When a question is genuinely required, call \`ask_user_question\` as the only tool call. Ask at most three focused questions with two to four concrete options each; the UI adds Other automatically. Never end a turn with plain prose that requests input.
    - After \`ask_user_question\` returns, deliver the complete plan in the same run; do not switch to execution and do not ask again unless the answer still leaves a blocking choice.
-   - Main agents stop for required answers; slim agents report the exact blocker to the orchestrator.
+   - Any Agent may ask a required user-owned decision through \`ask_user_question\`; do not substitute a guessed answer.
 
 2a. **Adaptive planning fan-out**
    - After the request is sufficiently clear, decide whether multiple read-only sub-agents would materially improve coverage or latency. Use them for independent file areas, architecture/dependency tracing, CWT/LSP semantic evidence, or separate risk/review tracks; avoid artificial fan-out for a small cohesive task.
-   - Dispatch only \`explore\`, \`plan\`, and \`review\` roles in Plan Mode. Give each a bounded question, evidence source, and ownership boundary. They may inspect and reason but must not write project files or seek user approval.
+   - Dispatch only \`explore\`, \`plan\`, and \`review\` roles in Plan Mode. Give each a bounded question, evidence source, and ownership boundary. They may inspect and reason but must not write project files; use \`ask_user_question\` only for a genuinely blocking user-owned choice.
    - Merge the returned evidence, resolve contradictions and critical unknowns, and let the main Agent alone author the final Implementation Plan and any required executable blueprint.
 
 3. **Plan architecture**
    - The Implementation Plan is the final design authority, not a preliminary proposal. Before requesting approval, resolve exact target files, operations, interfaces, data flow, compatibility, ownership, dependencies, validation, risks, rollback, and acceptance criteria.
    - For ordinary code, describe those decisions in dependency order. If multiple agents will execute them, include the complete task DAG and assign every file and contract to exactly one owner.
    - A machine-checkable game blueprint is required only for Paradox event chains, cascading triggers, complex entities, or designs with two or more cross-referencing game files.
-   - Re-run project knowledge for the finalized intent and keep critical unknowns in \`unresolvedCritical\`; approval requires an empty list.
+   - Review current project knowledge once for the finalized intent when available, keep critical unknowns in \`unresolvedCritical\`, and use exact CWT/LSP evidence as the legality authority; approval requires an empty list.
    - Approval transitions directly to Write/Execute. There is no post-approval discovery/design stage, blueprint regeneration, architecture reinterpretation, or second approval round.
 
 ${DESIGN_BLUEPRINT_AUTHORING_GUIDANCE}
@@ -291,7 +291,7 @@ ${IMPLEMENTATION_PLAN_AUTHORING_GUIDANCE}
 
 4. **Deliverable**
    - Produce a self-contained, execution-ready plan with objective, exact operations and files in dependency order, ownership, verification, acceptance criteria, risks, and rollback.
-   - Before the first write, run the mandatory pre-write validation in the Approval Handoff against the fully assembled content. Write only to the literal **Implementation Plan File** supplied in Current Editor Context; never probe the guard with partial drafts.
+   - Before the first write, run the mandatory pre-write validation in the Approval Handoff against the fully assembled content. Write only to the literal **Implementation Plan File** supplied in Current Editor Context. If a real user-owned choice remains, ask first or save one explicit blocked draft; never use repeated partial writes to discover validator requirements.
    - The plan write is the only tool call in its submission step. After it succeeds, STOP for approval; do not dispatch or mutate project files in that turn.
    - Do not write implementation code in Plan Mode.
 
@@ -303,7 +303,7 @@ ${gameKnowledge}`;
 
 export function buildExploreModeSystemPrompt(gameKnowledge: string, gameName: string, isSlim: boolean = false): string {
     const rules = isSlim
-        ? `${PROCESS_VISIBILITY_RULE}\n${ANALYSIS_COMPLIANCE_RULE}\n${ARCHITECTURE_VISUALIZATION_RULE}\n${SUB_AGENT_NON_INTERACTIVE_RULE}`
+        ? `${PROCESS_VISIBILITY_RULE}\n${ANALYSIS_COMPLIANCE_RULE}\n${ARCHITECTURE_VISUALIZATION_RULE}\n${SUB_AGENT_INTERACTION_RULE}`
         : `${LANGUAGE_MIRRORING_RULE}\n${PROCESS_VISIBILITY_RULE}\n${ANALYSIS_COMPLIANCE_RULE}\n${ARCHITECTURE_VISUALIZATION_RULE}`;
 
     return `You are Eddy CWTool Code in **Explore Mode** — a read-only codebase exploration agent for the current workspace.
@@ -410,7 +410,7 @@ ${gameKnowledge}`;
 
 export function buildReviewModeSystemPrompt(gameKnowledge: string, gameName: string, isSlim: boolean = false): string {
     const rules = isSlim
-        ? `${PROCESS_VISIBILITY_RULE}\n${ANALYSIS_COMPLIANCE_RULE}\n${ARCHITECTURE_VISUALIZATION_RULE}\n${SUB_AGENT_NON_INTERACTIVE_RULE}`
+        ? `${PROCESS_VISIBILITY_RULE}\n${ANALYSIS_COMPLIANCE_RULE}\n${ARCHITECTURE_VISUALIZATION_RULE}\n${SUB_AGENT_INTERACTION_RULE}`
         : `${LANGUAGE_MIRRORING_RULE}\n${PROCESS_VISIBILITY_RULE}\n${ANALYSIS_COMPLIANCE_RULE}\n${ARCHITECTURE_VISUALIZATION_RULE}`;
 
     return `You are Eddy CWTool Code in **Review Mode** — an expert read-only reviewer for the current workspace.
@@ -560,7 +560,7 @@ ${gameKnowledge}`;
 
 export function buildLocWriterSystemPrompt(gameKnowledge: string, gameName: string, isSlim: boolean = false): string {
     const rules = isSlim 
-        ? `${PROCESS_VISIBILITY_RULE}\n${BLACKBOARD_USAGE_RULE}\n${SUB_AGENT_ANTI_OVERREACH_RULE}\n${SUB_AGENT_NON_INTERACTIVE_RULE}`
+        ? `${PROCESS_VISIBILITY_RULE}\n${BLACKBOARD_USAGE_RULE}\n${SUB_AGENT_ANTI_OVERREACH_RULE}\n${SUB_AGENT_INTERACTION_RULE}`
         : `${LANGUAGE_MIRRORING_RULE}\n${PROCESS_VISIBILITY_RULE}\n${SUB_AGENT_ANTI_OVERREACH_RULE}`;
 
     return `You are Eddy CWTool Code in **Localisation Writer Mode** — a specialized agent for creating new ${gameName} YML localisation entries in a real localisation file.

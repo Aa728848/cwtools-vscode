@@ -36,7 +36,6 @@ import {
     type WorkspacePathResolution,
 } from '../workspaceSandbox';
 import { GRAPHICS_EXTS, matchesExt } from '../../fileExtensions';
-import { queryProjectKnowledge, readProjectKnowledgeManifest } from '../projectKnowledge';
 import { getLocalisationTransactionTargets } from '../runner/toolScheduler';
 import {
     createDiagnosticSnapshot,
@@ -1971,36 +1970,19 @@ export class FileToolHandler {
             const complexBlueprint = args.entities.length >= 3
                 || (args.subsystemPlan?.length ?? 0) >= 2
                 || new Set((args.commonDirectoryReview ?? []).filter(item => item.selected).map(item => item.directory)).size >= 2;
-            const knowledgeManifest = readProjectKnowledgeManifest(this.ctx.workspaceRoot);
-            if (complexBlueprint && !knowledgeManifest) {
-                return failBlueprint('Design blueprint refused: complex plans require the /init project + vanilla semantic knowledge pack. Run /init and wait for the deep phase before approving this blueprint.');
+            if (!Array.isArray(args.unresolvedCritical)) {
+                return failBlueprint('Design blueprint refused: unresolvedCritical must be an array. Use [] for an approval-ready plan or list exact blockers to save a draft.');
             }
-            if (complexBlueprint && knowledgeManifest) {
-                const knowledge = await queryProjectKnowledge(this.ctx.workspaceRoot, {
-                    intent: args.title,
-                    includeProjectPatterns: true,
-                    includeVanillaArchetypes: true,
-                    includeTopology: true,
-                    includeUnresolved: true,
-                    includeEventGraph: true,
-                    limit: 120,
-                });
-                if (knowledge.status !== 'ready') {
-                    return failBlueprint(`Design blueprint refused: project knowledge is ${knowledge.status}${knowledge.staleReasons?.length ? ` (${knowledge.staleReasons.join(', ')})` : ''}. Wait for background refresh or rerun /init.`);
-                }
-                if (!Array.isArray(args.unresolvedCritical)) {
-                    return failBlueprint('Design blueprint refused: complex plans must set unresolvedCritical after reviewing query_project_knowledge results. Use [] only when every critical design fact is resolved.');
-                }
-                if (args.unresolvedCritical.length > 0) {
-                    return failBlueprint(`Design blueprint refused: unresolved critical fact(s): ${args.unresolvedCritical.join('; ')}`);
-                }
+            const unresolvedCritical = args.unresolvedCritical
+                .map(item => String(item).trim())
+                .filter(Boolean);
+            if (complexBlueprint) {
                 const evidenceKinds = (args.evidence ?? []).map(item => `${item.sourceType} ${item.source}`.toLowerCase());
                 const hasKnowledge = evidenceKinds.some(value => value.includes('project_knowledge') || value.includes('query_project_knowledge') || value.includes('.cwtools/project/knowledge'));
                 const hasVanilla = evidenceKinds.some(value => value.includes('vanilla'));
                 const hasCwt = evidenceKinds.some(value => /\b(cwt|lsp|schema|rule)\b/.test(value));
                 const missingEvidence = [
-                    !hasKnowledge ? 'project knowledge pack' : '',
-                    !hasVanilla ? 'vanilla archetype' : '',
+                    !hasKnowledge && !hasVanilla ? 'project knowledge or a bounded vanilla archetype' : '',
                     !hasCwt ? 'CWT/LSP legality' : '',
                 ].filter(Boolean);
                 if (missingEvidence.length > 0) {
@@ -2174,7 +2156,17 @@ export class FileToolHandler {
             lines.push('- [x] Evidence includes CWT/LSP verification and common/ inventory findings');
             lines.push('- [x] Feature manifest defines entity operations and required relationship edges');
             lines.push('- [x] Task DAG assigns every required contract and acceptance criterion before execution');
+            lines.push(unresolvedCritical.length === 0
+                ? '- [x] No design-changing facts remain unresolved'
+                : `- [ ] ${unresolvedCritical.length} design-changing fact(s) remain unresolved; approval handoff is withheld`);
             lines.push('');
+
+            if (unresolvedCritical.length > 0) {
+                lines.push('## Unresolved Critical Decisions');
+                lines.push('');
+                for (const unresolved of unresolvedCritical) lines.push(`- ${unresolved}`);
+                lines.push('');
+            }
 
             const cell = (value: unknown): string => {
                 if (value === undefined || value === null || value === '') return '-';
@@ -2272,7 +2264,9 @@ export class FileToolHandler {
             }
             lines.push('');
 
-            lines.push('## Approved Multi-Agent Task DAG');
+            lines.push(unresolvedCritical.length === 0
+                ? '## Approved Multi-Agent Task DAG'
+                : '## Draft Multi-Agent Task DAG');
             lines.push('');
             lines.push('| Task | Agent | Planned Files | Produces | Consumes | Dependencies | Acceptance Checks |');
             lines.push('|------|-------|---------------|----------|----------|--------------|-------------------|');
@@ -2409,34 +2403,7 @@ export class FileToolHandler {
                 schemaVersion: 2,
                 generatedAt: new Date().toISOString(),
                 ...args,
-            };
-            const targetFiles = Array.from(new Set(args.taskPlan.flatMap(task => task.plannedFiles ?? [])));
-            const operations = args.taskPlan.map(task => ({
-                id: task.id,
-                description: task.prompt,
-                files: task.plannedFiles ?? [],
-                dependsOn: task.dependencies,
-            }));
-            const verification = Array.from(new Set((args.featureManifest.acceptanceCriteria ?? []).map(check => check.description)));
-            const risks = (args.riskRegister ?? []).map(risk => ({
-                risk,
-                mitigation: 'Verify the affected entity contracts and diagnostics before accepting the implementation.',
-            }));
-            const handoff = {
-                version: 1,
-                status: 'ready',
-                tier: 'blueprint',
-                objective: args.featureManifest.objective,
-                targetFiles,
-                operations,
-                verification,
-                acceptanceCriteria: verification,
-                risks: risks.length > 0 ? risks : [{
-                    risk: 'Implementation may diverge from the approved entity and dependency contracts.',
-                    mitigation: 'Dispatch the embedded task DAG verbatim and verify every required acceptance check.',
-                }],
-                rollback: ['Revert the exact target files listed in this plan to their pre-execution contents.'],
-                unresolvedCritical: [],
+                unresolvedCritical,
             };
             lines.push('## Executable Plan Contracts');
             lines.push('');
@@ -2444,10 +2411,43 @@ export class FileToolHandler {
             lines.push(JSON.stringify(executableBlueprint, null, 2));
             lines.push('```');
             lines.push('');
-            lines.push('```cwtools-plan');
-            lines.push(JSON.stringify(handoff, null, 2));
-            lines.push('```');
-            lines.push('');
+            if (unresolvedCritical.length === 0) {
+                const targetFiles = Array.from(new Set(args.taskPlan.flatMap(task => task.plannedFiles ?? [])));
+                const operations = args.taskPlan.map(task => ({
+                    id: task.id,
+                    description: task.prompt,
+                    files: task.plannedFiles ?? [],
+                    dependsOn: task.dependencies,
+                }));
+                const verification = Array.from(new Set((args.featureManifest.acceptanceCriteria ?? []).map(check => check.description)));
+                const risks = (args.riskRegister ?? []).map(risk => ({
+                    risk,
+                    mitigation: 'Verify the affected entity contracts and diagnostics before accepting the implementation.',
+                }));
+                const handoff = {
+                    version: 1,
+                    status: 'ready',
+                    tier: 'blueprint',
+                    objective: args.featureManifest.objective,
+                    targetFiles,
+                    operations,
+                    verification,
+                    acceptanceCriteria: verification,
+                    risks: risks.length > 0 ? risks : [{
+                        risk: 'Implementation may diverge from the approved entity and dependency contracts.',
+                        mitigation: 'Dispatch the embedded task DAG verbatim and verify every required acceptance check.',
+                    }],
+                    rollback: ['Revert the exact target files listed in this plan to their pre-execution contents.'],
+                    unresolvedCritical: [],
+                };
+                lines.push('```cwtools-plan');
+                lines.push(JSON.stringify(handoff, null, 2));
+                lines.push('```');
+                lines.push('');
+            } else {
+                lines.push('> Approval handoff is withheld until the unresolved critical decisions above are answered.');
+                lines.push('');
+            }
 
             const content = lines.join('\n');
             const beforeWrite = context?.onBeforeFileWrite ?? this.ctx.onBeforeFileWrite;
@@ -2456,7 +2456,9 @@ export class FileToolHandler {
 
             return {
                 success: true,
-                message: `Unified Implementation Plan saved to ${blueprintPath}. It contains the human-readable design, approval handoff, and executable Multi-Agent contract.`,
+                message: unresolvedCritical.length === 0
+                    ? `Unified Implementation Plan saved to ${blueprintPath}. It contains the human-readable design, approval handoff, and executable Multi-Agent contract.`
+                    : `Blueprint draft saved to ${blueprintPath}. Resolve ${unresolvedCritical.length} critical decision(s), then write it again with unresolvedCritical: [] to create the approval handoff.`,
                 filePath: blueprintPath,
                 dataFilePath: blueprintPath,
                 writtenFiles: [blueprintPath],

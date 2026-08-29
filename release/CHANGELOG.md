@@ -1,5 +1,39 @@
 # Changelog
 
+## [2.16.2] - 2026-08-29
+
+### 新功能 / New Features
+- **[新增] 计划模式工作区写入守卫与提示词规范加固（Plan Mode Guard & System Prompts）**：
+  - 引入并强化计划模式工作区写入守卫（`planModeGuard.ts`），严格拦截规划阶段对工作区文件的修改，确保只读规划与结构化设计输出。
+  - 完善基础系统提示词（`baseSystem.ts`），规范多语言交互与推理过程可见性约束。
+  - 优化计划交接与执行机制（`executePlanHandoff.ts`）。
+  - English: [New] Plan mode workspace write guard and system prompt compliance — introduced strict plan mode guard (`planModeGuard.ts`) blocking unauthorized workspace mutations during planning; enriched base system prompts (`baseSystem.ts`) for language compliance and reasoning visibility; hardened plan execution handoff (`executePlanHandoff.ts`).
+
+- **[新增] 子 Agent 沙箱隔离与游戏根目录只读访问（Sub-Agent Sandbox & Game Root Access）**：
+  - 增强子代理沙箱隔离（`subAgentSandbox.ts`）与证据门禁（`evidenceGate.ts`），实现精细化文件访问控制。
+  - 允许只读子代理安全访问已配置的游戏原版目录（game roots），支持跨定义查阅与比对。
+  - English: [New] Sub-agent sandbox isolation and game root read access — strengthened sub-agent sandbox isolation (`subAgentSandbox.ts`) and evidence gate (`evidenceGate.ts`) for granular file access control; allowed read-only sub-agents to access configured game roots for broad reference lookup.
+
+- **[新增] Agent Manager 面板后台 Topic 隔离与指标对齐（Agent Manager & Background Topic Isolation）**：
+  - 隔离后台 Topic 执行流，规范运行监控指标网格展示（`agentManager.ts`、`chatPanel.ts`、`topicViews.ts`）。
+  - English: [New] Background topic isolation and metrics alignment in Agent Manager — isolated background topic execution and aligned manager run metrics grid (`agentManager.ts`, `chatPanel.ts`, `topicViews.ts`).
+
+### 优化与修复 / Improvements & Fixes
+- **[优化] 工具调用容错与 Paradox 符号查找增强（Tool Resilience & Symbol Fallbacks）**：
+  - 优化 `read_file` 路径定位与参数自动修复逻辑（`argRepair.ts`），在子任务运行中妥善保留文件变更。
+  - 增强 Paradox 文档符号索引与回退查找（`pdxDocumentSymbols.ts`）。
+  - English: [Improvement] Tool resilience and Paradox symbol lookups — improved `read_file` locator handling and parameter auto-repair (`argRepair.ts`) while preserving child-run file modifications; added Paradox document symbol fallback resolution (`pdxDocumentSymbols.ts`).
+
+- **[优化] Language Server 诊断时效性与语义图优化（Diagnostics Freshness & Semantic Graph）**：
+  - 优化磁盘回读校验诊断合并（`DiagnosticMerge.fs`），解耦诊断模型纪元，避免过期验证循环。
+  - 优化 F# `SemanticGraph.fs` 语义图分析。
+  - English: [Improvement] Language Server diagnostic freshness and semantic graph — hardened disk-backed validation merge (`DiagnosticMerge.fs`), decoupled diagnostic model epochs to avoid stale validation loops; optimized F# semantic graph analysis (`SemanticGraph.fs`).
+
+- **[优化] 跨平台构建与测试基础设施加固（Platform & CI Harness）**：
+  - 客户端扩展适配 macOS arm64 服务端二进制自动解析，清理 rollup typescript 缓存。
+  - 锁定 VS Code 测试套件版本至 1.93.1，修复跨平台路径去重断言与测试环境稳定性。
+  - English: [Improvement] Platform compatibility and test harness — added macOS arm64 server binary resolution; cleaned Rollup TypeScript caches; pinned VS Code test harness to 1.93.1 for cross-platform stability.
+
 ## [2.16.1] - 2026-08-29
 
 ### 新功能 / New Features

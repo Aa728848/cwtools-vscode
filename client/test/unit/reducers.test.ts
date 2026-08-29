@@ -41,13 +41,18 @@ describe('RunReducers — pure event projections (T3.2)', () => {
             ]);
         });
 
-        it('deduplicates separator and case aliases on Windows', () => {
-            const files = reduceRunFamilyWrittenFiles([
+        it('deduplicates separator aliases on all platforms and case aliases on Windows', () => {
+            const separatorFiles = reduceRunFamilyWrittenFiles([
                 { writtenFiles: ['E:\\mod\\common\\rules.txt'] },
                 { writtenFiles: ['E:/mod/common/rules.txt'] },
             ]);
+            expect(separatorFiles).to.have.length(1);
 
-            expect(files).to.have.length(process.platform === 'win32' ? 1 : 2);
+            const caseFiles = reduceRunFamilyWrittenFiles([
+                { writtenFiles: ['E:/mod/common/rules.txt'] },
+                { writtenFiles: ['e:/mod/common/rules.txt'] },
+            ]);
+            expect(caseFiles).to.have.length(process.platform === 'win32' ? 1 : 2);
         });
     });
 

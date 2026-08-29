@@ -530,8 +530,8 @@ const ZH_CN: ChatI18nText = {
             processed: '已处理',
             blocked: '已阻塞',
             shortTask: '短任务',
-            issue: '个问题',
-            issues: '个问题',
+            issue: '审查问题',
+            issues: '审查问题',
         },
         activity: {
             thinking: '思考中',

@@ -1966,6 +1966,8 @@ const DEFAULT_STATE: ManagerEnhancementState = {
             renderInspector();
         } else {
             setActiveTab('changes');
+            renderOverview();
+            renderInspector();
         }
     }
 

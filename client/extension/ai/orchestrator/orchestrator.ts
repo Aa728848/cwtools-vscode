@@ -354,7 +354,16 @@ export class Orchestrator {
                 } else {
                     const recoveryStorm = this.executor.getRecoveryStormBudget();
                     recoveryStorm.record('reviewer_rejection', 'quality_gate_initial', reviewResult.reviewReport);
-                    emitStep({ type: 'error', content: ORCHESTRATOR_MSG.QG_FAIL(reviewResult.logicIssues), timestamp: Date.now() });
+                    const totalProblems = reviewResult.diagnosticErrors + reviewResult.semanticIssues + reviewResult.logicIssues + reviewResult.acceptanceFailures.length;
+                    emitStep({ type: 'error', content: ORCHESTRATOR_MSG.QG_FAIL(totalProblems || 1), timestamp: Date.now() });
+                    if (reviewResult.reviewReport) {
+                        emitStep({
+                            type: 'tool_result',
+                            agentId: 'quality_gate_review',
+                            content: reviewResult.reviewReport,
+                            timestamp: Date.now(),
+                        });
+                    }
                     const config = this.qualityGate.getConfig();
                     const hasRepairableIssues = reviewResult.diagnosticErrors > 0
                         || (reviewResult.evidenceConflicts ?? 0) > 0

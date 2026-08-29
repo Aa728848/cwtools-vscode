@@ -599,21 +599,21 @@ let compareDefinitionWithVanillaWithRuntime (shouldCancel: unit -> bool) freshne
         ordered
         |> Array.tryPick (fun definition -> game.OverrideModeAtPath(logicalPathFor definition.range.FileName) |> Option.map (fun mode -> mode.strategy.ToUpperInvariant()))
     let winner, resolution, ambiguous, ambiguousReason =
-        if active.Length = 1 then Some active.[0], "cwtools_single_active", false, None
-        else
-            match strategy with
-            | Some "LIOS" -> ordered |> Array.tryLast, "last_in_only_served", false, None
-            | Some "FIOS" -> ordered |> Array.tryHead, "first_in_only_served", false, None
-            | Some "NO" ->
-                ordered |> Array.tryHead,
-                "no_individual_override",
-                false,
-                Some "NO does not permit an individual same-key override; the earliest existing candidate remains effective unless the owning file is replaced."
-            | Some "MERGE" -> None, "merged_definitions", false, Some "MERGE combines candidates; no single definition wins."
-            | Some "DUPL" -> None, "duplicate_definitions", false, Some "DUPL preserves multiple candidates; no single definition wins."
-            | Some mode -> None, "ambiguous", true, Some(sprintf "Override mode %s has no deterministic resolver." mode)
-            | None when ordered.Length = 1 -> Some ordered.[0], "single_candidate", false, None
-            | None -> None, "ambiguous", true, Some "No unique CWTools active candidate or recognized override mode was available."
+        match strategy with
+        | Some "LIOS" -> ordered |> Array.tryLast, "last_in_only_served", false, None
+        | Some "FIOS" -> ordered |> Array.tryHead, "first_in_only_served", false, None
+        | Some "NO" ->
+            ordered |> Array.tryHead,
+            "no_individual_override",
+            false,
+            Some "NO does not permit an individual same-key override; the earliest existing candidate remains effective unless the owning file is replaced."
+        | Some "MERGE" -> None, "merged_definitions", false, Some "MERGE combines candidates; no single definition wins."
+        | Some "DUPL" -> None, "duplicate_definitions", false, Some "DUPL preserves multiple candidates; no single definition wins."
+        | Some mode -> None, "ambiguous", true, Some(sprintf "Override mode %s has no deterministic resolver." mode)
+        | None ->
+            if active.Length = 1 then Some active.[0], "cwtools_single_active", false, None
+            elif ordered.Length = 1 then Some ordered.[0], "single_candidate", false, None
+            else None, "ambiguous", true, Some "No unique CWTools active candidate or recognized override mode was available."
     let candidateJson (definition: CWTools.Common.NewScope.TypeDefInfo) =
         let file = definition.range.FileName
         let origin = originForDefinition file

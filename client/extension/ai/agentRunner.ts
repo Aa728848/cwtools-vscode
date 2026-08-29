@@ -708,6 +708,8 @@ export class AgentRunner {
     private readonly turnRunner = new TurnRunner();
     private readonly activeInputQueues = new Map<string, AgentInputQueue>();
     private readonly activeRunEventSinks = new Map<string, RunEventSink>();
+    /** Retains original file contents at run start to preserve cumulative diff across multiple edits to the same file. */
+    private readonly runInitialFileContentsByRunId = new Map<string, Map<string, string | null | undefined>>();
     /** Runs whose normal-looking return is actually a resumable budget/loop pause. */
     private readonly retainedResumeRuns = new Set<string>();
     constructor(
@@ -3881,14 +3883,24 @@ export class AgentRunner {
                             // before image locally so the durable file_change event can
                             // reconstruct line-level details after a manager reload.
                             if (primaryFilePath) {
-                                try {
-                                    const stat = fs.existsSync(primaryFilePath) ? fs.statSync(primaryFilePath) : undefined;
-                                    previousFileContent = stat && stat.size <= 500_000
-                                        ? fs.readFileSync(primaryFilePath, 'utf8')
-                                        : stat ? undefined : null;
-                                } catch {
-                                    previousFileContent = undefined;
+                                const canonicalKey = canonicalPathKey(primaryFilePath, this.toolExecutor.workspaceRoot);
+                                let runInitialContents = this.runInitialFileContentsByRunId.get(runRecord.runId);
+                                if (!runInitialContents) {
+                                    runInitialContents = new Map();
+                                    this.runInitialFileContentsByRunId.set(runRecord.runId, runInitialContents);
                                 }
+                                if (!runInitialContents.has(canonicalKey)) {
+                                    try {
+                                        const stat = fs.existsSync(primaryFilePath) ? fs.statSync(primaryFilePath) : undefined;
+                                        const initialContent = stat && stat.size <= 500_000
+                                            ? fs.readFileSync(primaryFilePath, 'utf8')
+                                            : stat ? undefined : null;
+                                        runInitialContents.set(canonicalKey, initialContent);
+                                    } catch {
+                                        runInitialContents.set(canonicalKey, undefined);
+                                    }
+                                }
+                                previousFileContent = runInitialContents.get(canonicalKey);
                                 if (onFileWrite) {
                                     // Preserve the existing write-ownership hook even when
                                     // the file is too large to retain for a durable inline diff.

@@ -633,9 +633,11 @@ export class QualityGate {
             ...parsed.acceptanceFailures,
             ...missingAcceptanceEvidence,
         ])];
-        const passed = diagnosticErrorCount === 0
+        const hasHardErrors = diagnosticErrorCount > 0
+            || cachedDiagnosticErrorCount > 0
+            || finalEvidence.conflictFiles.length > 0;
+        const passed = !hasHardErrors
             && validationPendingCount === 0
-            && finalEvidence.conflictFiles.length === 0
             && totalLogicIssues === 0
             && semantic.issues.length === 0
             && acceptanceFailures.length === 0;
@@ -696,6 +698,9 @@ export class QualityGate {
             ...writtenFiles.map(f => `- ${f}`),
             '',
             'Fix Requirements:',
+            '- Keep changes minimal and surgically focused on the exact reported errors.',
+            '- Do NOT rewrite or delete working files that have no errors. Do NOT revert valid mod logic.',
+            '- Stale or pending cache notifications are background indexing states, NOT code bugs; do not modify files for pending cache.',
             ...(userExecutionPolicy?.warningHandling === 'ignore'
                 ? ['- Do not repair warning/info/hint diagnostics; only error-severity diagnostics and verified functional defects are blocking.']
                 : []),

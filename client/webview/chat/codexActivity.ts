@@ -258,28 +258,30 @@ function createSpecialEvent(step: StepLike, labels: CodexI18nText, index: number
     const timestamp = timestampOf(step, Date.now() + index);
     const content = asString(step.content);
     if (type === 'validation') {
+        const cleanSubject = (content || '').replace(/\$\([\w-]+\)\s*/g, '').trim();
         return {
             id: `validation-${index}-${timestamp}`,
             kind: 'validation',
             status: /fail|error|失败|错误/i.test(content) ? 'failed' : 'success',
             label: labels.activity.validation,
-            subject: content,
+            subject: cleanSubject || content,
             timestamp,
             sourceStep: step,
             groupKind: 'tool',
-            detailModel: { preview: content },
+            detailModel: { preview: cleanSubject || content },
         };
     }
     if (type === 'error') {
+        const cleanSubject = (content || '').replace(/\$\([\w-]+\)\s*/g, '').trim();
         return {
             id: `error-${index}-${timestamp}`,
             kind: 'tool',
             status: 'failed',
             label: labels.status.issues,
-            subject: content,
+            subject: cleanSubject || content,
             timestamp,
             sourceStep: step,
-            detailModel: { preview: content },
+            detailModel: { preview: cleanSubject || content },
         };
     }
     if (type === 'compaction') {

@@ -2015,23 +2015,31 @@ export class FileToolHandler {
             lines.push(`> Generated: ${new Date().toISOString()}`);
             lines.push('');
 
-            lines.push('## Blueprint Self-Check (Advisory)');
+            const isZh = /[\u4e00-\u9fa5]/.test([
+                args.title,
+                args.featureManifest?.objective,
+                ...unresolvedCritical,
+                ...args.entities.map(e => e.scopeContext || ''),
+            ].join(' '));
+
+            lines.push(isZh ? `## 蓝图自检与就绪评估 (Blueprint Self-Check (Advisory))` : '## Blueprint Self-Check (Advisory)');
             lines.push('');
-            lines.push('These sections are optional authoring aids; omitted sections do not block approval.');
+            lines.push(isZh ? '以下各节为架构设计辅助信息；未提供的可选章节不会阻断审批。' : 'These sections are optional authoring aids; omitted sections do not block approval.');
             lines.push('');
-            const advisory = (included: boolean, label: string) => lines.push(`- ${label}: ${included ? 'included' : 'not supplied (optional)'}`);
-            advisory(args.entities.length > 0, 'Entity topology');
-            advisory(args.evidence.length > 0, 'Semantic evidence');
+            const advisory = (included: boolean, label: string, labelZh: string) =>
+                lines.push(`- ${isZh ? labelZh : label}: ${included ? (isZh ? '已包含' : 'included') : (isZh ? '未提供（可选）' : 'not supplied (optional)')}`);
+            advisory(args.entities.length > 0, 'Entity topology', '实体拓扑 (Entity topology)');
+            advisory(args.evidence.length > 0, 'Semantic evidence', '语义推导证据 (Semantic evidence)');
             advisory(args.featureManifest.entities.length > 0 || args.featureManifest.acceptanceCriteria.length > 0,
-                'Feature manifest');
-            advisory(args.taskPlan.length > 0, 'Execution task plan');
+                'Feature manifest', '特性契约清单 (Feature manifest)');
+            advisory(args.taskPlan.length > 0, 'Execution task plan', '执行任务计划 (Execution task plan)');
             lines.push(approvalReady
-                ? '- Explicit blockers: none; submit for approval'
-                : `- Explicit blockers: ${unresolvedCritical.length}; this version stays a draft`);
+                ? (isZh ? '- 显式阻断项：无；已就绪可提交审批' : '- Explicit blockers: none; submit for approval')
+                : (isZh ? `- 显式阻断项：${unresolvedCritical.length} 项未决；保持草案状态` : `- Explicit blockers: ${unresolvedCritical.length}; this version stays a draft`));
             lines.push('');
 
             if (unresolvedCritical.length > 0) {
-                lines.push('## Unresolved Critical Decisions');
+                lines.push(isZh ? '## 关键未决决策 (Unresolved Critical Decisions)' : '## Unresolved Critical Decisions');
                 lines.push('');
                 for (const unresolved of unresolvedCritical) lines.push(`- ${unresolved}`);
                 lines.push('');
@@ -2045,21 +2053,25 @@ export class FileToolHandler {
 
             // Common directory capability review
             if (args.commonDirectoryReview && args.commonDirectoryReview.length > 0) {
-                lines.push('## Common Directory Capability Review');
+                lines.push(isZh ? '## 通用目录能力审查 (Common Directory Capability Review)' : '## Common Directory Capability Review');
                 lines.push('');
-                lines.push('| Directory | Role Considered | Candidate Types | Used | Rationale | Findings |');
+                lines.push(isZh
+                    ? '| 目录 | 考量职责 | 候选类型 | 已采用 | 理由 | 调研结论 |'
+                    : '| Directory | Role Considered | Candidate Types | Used | Rationale | Findings |');
                 lines.push('|-----------|-----------------|-----------------|------|-----------|----------|');
                 for (const item of args.commonDirectoryReview) {
-                    lines.push(`| \`${cell(item.directory)}\` | ${cell(item.role)} | ${listCell(item.candidateTypes)} | ${item.selected ? 'yes' : 'no'} | ${cell(item.rationale)} | ${cell(item.findings)} |`);
+                    lines.push(`| \`${cell(item.directory)}\` | ${cell(item.role)} | ${listCell(item.candidateTypes)} | ${item.selected ? (isZh ? '是' : 'yes') : (isZh ? '否' : 'no')} | ${cell(item.rationale)} | ${cell(item.findings)} |`);
                 }
                 lines.push('');
             }
 
             // Engine subsystem plan
             if (args.subsystemPlan && args.subsystemPlan.length > 0) {
-                lines.push('## Engine Subsystem Plan');
+                lines.push(isZh ? '## 引擎子系统规划 (Engine Subsystem Plan)' : '## Engine Subsystem Plan');
                 lines.push('');
-                lines.push('| Layer | Common Directories | Entities | Requirement Source | Rationale |');
+                lines.push(isZh
+                    ? '| 层级 | 涉及目录 | 实体 | 需求来源 | 理由 |'
+                    : '| Layer | Common Directories | Entities | Requirement Source | Rationale |');
                 lines.push('|-------|--------------------|----------|--------------------|-----------|');
                 for (const item of args.subsystemPlan) {
                     lines.push(`| ${cell(item.layer)} | ${listCell(item.directories)} | ${listCell(item.entities)} | ${cell(item.requirementSource)} | ${cell(item.rationale)} |`);
@@ -2068,9 +2080,11 @@ export class FileToolHandler {
             }
 
             if (args.entities.length > 0) {
-                lines.push('## Entity Topology (Cascading Trigger Pipeline)');
+                lines.push(isZh ? '## 实体拓扑结构 (Entity Topology)' : '## Entity Topology (Cascading Trigger Pipeline)');
                 lines.push('');
-                lines.push('| # | Entity ID | Type | File | Triggered By | Fires | Scope Context |');
+                lines.push(isZh
+                    ? '| # | 实体 ID | 类型 | 目标文件 | 触发源 | 触发目标 | 作用域上下文 |'
+                    : '| # | Entity ID | Type | File | Triggered By | Fires | Scope Context |');
                 lines.push('|---|-----------|------|------|-------------|-------|---------------|');
                 for (let i = 0; i < args.entities.length; i++) {
                     const e = args.entities[i]!;
@@ -2081,15 +2095,32 @@ export class FileToolHandler {
                 }
                 lines.push('');
 
-                lines.push('### Trigger Flow');
-                lines.push('```');
+                lines.push(isZh ? '### 触发流拓扑图 (Trigger Flow)' : '### Trigger Flow');
+                lines.push('```mermaid');
+                lines.push('flowchart TD');
                 for (let i = 0; i < args.entities.length; i++) {
                     const e = args.entities[i]!;
-                    const prefix = i === 0 ? '[START]' : '  ->';
-                    const scopeNote = e.scopeContext ? ` (${e.scopeContext})` : '';
-                    lines.push(`${prefix} [${e.type}] ${e.id}${scopeNote}`);
+                    const nodeKey = `node_${i}`;
+                    const label = `"[${e.type}] ${e.id}${e.scopeContext ? `\\n(${e.scopeContext})` : ''}"`;
+                    lines.push(`    ${nodeKey}${label}`);
+                }
+                for (let i = 0; i < args.entities.length; i++) {
+                    const e = args.entities[i]!;
                     if (e.fires && e.fires.length > 0) {
-                        for (const target of e.fires) lines.push(`      +-- fires -> ${target}`);
+                        for (const target of e.fires) {
+                            const targetIdx = args.entities.findIndex(t => t.id === target);
+                            if (targetIdx >= 0) {
+                                lines.push(`    node_${i} -->|fires| node_${targetIdx}`);
+                            } else {
+                                const cleanTarget = target.replace(/[^a-zA-Z0-9_]/g, '_');
+                                lines.push(`    node_${i} -->|fires| target_${cleanTarget}["${target}"]`);
+                            }
+                        }
+                    } else if (i < args.entities.length - 1) {
+                        const nextEntityId = args.entities[i + 1]?.id;
+                        if (nextEntityId && !args.entities.some(other => other.fires?.includes(nextEntityId))) {
+                            lines.push(`    node_${i} -.-> node_${i + 1}`);
+                        }
                     }
                 }
                 lines.push('```');
@@ -2102,43 +2133,49 @@ export class FileToolHandler {
                 || (args.featureManifest.invariants?.length ?? 0) > 0
                 || args.featureManifest.acceptanceCriteria.length > 0;
             if (hasFeatureManifest) {
-                lines.push('## Executable Feature Relationship Contract');
+                lines.push(isZh ? '## 特性关系契约 (Executable Feature Relationship Contract)' : '## Executable Feature Relationship Contract');
                 lines.push('');
-                lines.push(`**Objective:** ${cell(args.featureManifest.objective)}`);
+                lines.push(isZh ? `**目标 (Objective):** ${cell(args.featureManifest.objective)}` : `**Objective:** ${cell(args.featureManifest.objective)}`);
                 lines.push('');
                 if (args.featureManifest.entities.length > 0) {
-                    lines.push('### Entity Operations');
+                    lines.push(isZh ? '### 实体操作清单 (Entity Operations)' : '### Entity Operations');
                     lines.push('');
-                    lines.push('| Kind | Entity | Operation | Scope | Required |');
+                    lines.push(isZh
+                        ? '| 种类 | 实体 ID | 操作 | 作用域 | 是否必需 |'
+                        : '| Kind | Entity | Operation | Scope | Required |');
                     lines.push('|------|--------|-----------|-------|----------|');
                     for (const contract of args.featureManifest.entities) {
-                        lines.push(`| ${cell(contract.kind)} | \`${cell(contract.id)}\` | ${cell(contract.operation)} | ${cell(contract.scope)} | ${contract.required === false ? 'no' : 'yes'} |`);
+                        lines.push(`| ${cell(contract.kind)} | \`${cell(contract.id)}\` | ${cell(contract.operation)} | ${cell(contract.scope)} | ${contract.required === false ? (isZh ? '否' : 'no') : (isZh ? '是' : 'yes')} |`);
                     }
                     lines.push('');
                 }
                 if (args.featureManifest.requiredEdges.length > 0) {
-                    lines.push('### Required Edges');
+                    lines.push(isZh ? '### 依赖关系约束 (Required Edges)' : '### Required Edges');
                     lines.push('');
-                    lines.push('| From | Relation | To | Required |');
+                    lines.push(isZh
+                        ? '| 源实体 | 关系类型 | 目标实体 | 是否必需 |'
+                        : '| From | Relation | To | Required |');
                     lines.push('|------|----------|----|----------|');
                     for (const edge of args.featureManifest.requiredEdges) {
-                        lines.push(`| \`${cell(edge.from)}\` | ${cell(edge.relation)} | \`${cell(edge.to)}\` | ${edge.required === false ? 'no' : 'yes'} |`);
+                        lines.push(`| \`${cell(edge.from)}\` | ${cell(edge.relation)} | \`${cell(edge.to)}\` | ${edge.required === false ? (isZh ? '否' : 'no') : (isZh ? '是' : 'yes')} |`);
                     }
                     lines.push('');
                 }
                 if ((args.featureManifest.invariants?.length ?? 0) > 0) {
-                    lines.push('### Invariants');
+                    lines.push(isZh ? '### 架构不变量 (Invariants)' : '### Invariants');
                     lines.push('');
                     for (const invariant of args.featureManifest.invariants ?? []) lines.push(`- ${cell(invariant)}`);
                     lines.push('');
                 }
                 if (args.featureManifest.acceptanceCriteria.length > 0) {
-                    lines.push('### Acceptance Criteria');
+                    lines.push(isZh ? '### 验收标准 (Acceptance Criteria)' : '### Acceptance Criteria');
                     lines.push('');
-                    lines.push('| ID | Type | Subject | Required | Description |');
+                    lines.push(isZh
+                        ? '| 编号 | 类型 | 验证对象 | 是否必需 | 描述 |'
+                        : '| ID | Type | Subject | Required | Description |');
                     lines.push('|----|------|---------|----------|-------------|');
                     for (const check of args.featureManifest.acceptanceCriteria) {
-                        lines.push(`| \`${cell(check.id)}\` | ${cell(check.type)} | \`${cell(check.subject)}\` | ${check.required === false ? 'no' : 'yes'} | ${cell(check.description)} |`);
+                        lines.push(`| \`${cell(check.id)}\` | ${cell(check.type)} | \`${cell(check.subject)}\` | ${check.required === false ? (isZh ? '否' : 'no') : (isZh ? '是' : 'yes')} | ${cell(check.description)} |`);
                     }
                     lines.push('');
                 }
@@ -2146,10 +2183,12 @@ export class FileToolHandler {
 
             if (args.taskPlan.length > 0) {
                 lines.push(approvalReady
-                    ? '## Approved Multi-Agent Task DAG'
-                    : '## Draft Multi-Agent Task DAG');
+                    ? (isZh ? '## 已批准的多智能体协作任务 (Approved Multi-Agent Task DAG)' : '## Approved Multi-Agent Task DAG')
+                    : (isZh ? '## 多智能体协作任务草案 (Draft Multi-Agent Task DAG)' : '## Draft Multi-Agent Task DAG'));
                 lines.push('');
-                lines.push('| Task | Agent | Planned Files | Produces | Consumes | Dependencies | Acceptance Checks |');
+                lines.push(isZh
+                    ? '| 任务 | 负责智能体 | 计划文件 | 生产契约 | 消费契约 | 依赖任务 | 验收检查 |'
+                    : '| Task | Agent | Planned Files | Produces | Consumes | Dependencies | Acceptance Checks |');
                 lines.push('|------|-------|---------------|----------|----------|--------------|-------------------|');
                 const contractCell = (contracts?: import('../types').TaskEntityContract[]) =>
                     contracts?.map(contract => `${contract.kind}:${contract.id}:${contract.operation}`).join(', ') || '-';
@@ -2161,9 +2200,11 @@ export class FileToolHandler {
 
             // Trigger and pacing plan
             if (args.triggerPlan && args.triggerPlan.length > 0) {
-                lines.push('## Trigger and Pacing Plan');
+                lines.push(isZh ? '## 触发与节奏规划 (Trigger and Pacing Plan)' : '## Trigger and Pacing Plan');
                 lines.push('');
-                lines.push('| Node | Mechanism | Scope Bridge | Timing | Rationale |');
+                lines.push(isZh
+                    ? '| 节点 | 机制 | 作用域衔接 | 时机 | 理由 |'
+                    : '| Node | Mechanism | Scope Bridge | Timing | Rationale |');
                 lines.push('|------|-----------|--------------|--------|-----------|');
                 for (const item of args.triggerPlan) {
                     lines.push(`| \`${cell(item.nodeId)}\` | ${cell(item.mechanism)} | ${cell(item.scopeBridge)} | ${cell(item.timing)} | ${cell(item.rationale)} |`);
@@ -2173,9 +2214,11 @@ export class FileToolHandler {
 
             // Branching and convergence plan
             if (args.branchingPlan && args.branchingPlan.length > 0) {
-                lines.push('## Branching and Convergence Plan');
+                lines.push(isZh ? '## 分支与收敛规划 (Branching and Convergence Plan)' : '## Branching and Convergence Plan');
                 lines.push('');
-                lines.push('| Branch | Starts From | Choices | Converges At | Consequences |');
+                lines.push(isZh
+                    ? '| 分支 | 起始实体 | 选项 | 收敛点 | 后续影响 |'
+                    : '| Branch | Starts From | Choices | Converges At | Consequences |');
                 lines.push('|--------|-------------|---------|--------------|--------------|');
                 for (const item of args.branchingPlan) {
                     lines.push(`| \`${cell(item.branchId)}\` | \`${cell(item.fromEntity)}\` | ${listCell(item.choices)} | ${cell(item.convergence)} | ${cell(item.consequences)} |`);
@@ -2185,9 +2228,11 @@ export class FileToolHandler {
 
             // Reward and outcome plan
             if (args.rewardPlan && args.rewardPlan.length > 0) {
-                lines.push('## Reward and Outcome Plan');
+                lines.push(isZh ? '## 奖励与结算规划 (Reward and Outcome Plan)' : '## Reward and Outcome Plan');
                 lines.push('');
-                lines.push('| Reward | Directory | Entity Type | Player Value | Implementation | Balance Notes |');
+                lines.push(isZh
+                    ? '| 奖励 | 目录 | 实体类型 | 玩家收益 | 实现方式 | 平衡性考量 |'
+                    : '| Reward | Directory | Entity Type | Player Value | Implementation | Balance Notes |');
                 lines.push('|--------|-----------|-------------|--------------|----------------|---------------|');
                 for (const item of args.rewardPlan) {
                     lines.push(`| \`${cell(item.rewardId)}\` | \`${cell(item.directory)}\` | ${cell(item.entityType)} | ${cell(item.playerValue)} | ${cell(item.implementation)} | ${cell(item.balanceNotes)} |`);
@@ -2197,16 +2242,16 @@ export class FileToolHandler {
 
             // Event ID Allocation
             if (args.eventIdAllocation) {
-                lines.push('## Event ID Allocation');
+                lines.push(isZh ? '## 事件 ID 分配 (Event ID Allocation)' : '## Event ID Allocation');
                 lines.push('');
-                lines.push(`- **Namespace**: \`${args.eventIdAllocation.namespace}\``);
-                lines.push(`- **Ranges**: ${args.eventIdAllocation.ranges}`);
+                lines.push(`- **${isZh ? '命名空间 (Namespace)' : 'Namespace'}**: \`${args.eventIdAllocation.namespace}\``);
+                lines.push(`- **${isZh ? 'ID 范围 (Ranges)' : 'Ranges'}**: ${args.eventIdAllocation.ranges}`);
                 lines.push('');
             }
 
             // Localisation Keys
             if (args.localisationKeys && args.localisationKeys.length > 0) {
-                lines.push('## Localisation Key Prefixes');
+                lines.push(isZh ? '## 本地化键名前缀 (Localisation Key Prefixes)' : '## Localisation Key Prefixes');
                 lines.push('');
                 for (const key of args.localisationKeys) {
                     lines.push(`- \`${key}\``);
@@ -2215,7 +2260,7 @@ export class FileToolHandler {
             }
 
             if (args.dependencyOrder.length > 0) {
-                lines.push('## File Dependency Order (Write Sequence)');
+                lines.push(isZh ? '## 文件依赖与写入顺序 (File Dependency Order)' : '## File Dependency Order (Write Sequence)');
                 lines.push('');
                 for (let i = 0; i < args.dependencyOrder.length; i++) {
                     lines.push(`${i + 1}. \`${args.dependencyOrder[i]}\``);
@@ -2225,9 +2270,11 @@ export class FileToolHandler {
 
             // Cleanup and lifecycle closure plan
             if (args.cleanupPlan && args.cleanupPlan.length > 0) {
-                lines.push('## Cleanup and Closure Plan');
+                lines.push(isZh ? '## 清理与生命周期闭环规划 (Cleanup and Closure Plan)' : '## Cleanup and Closure Plan');
                 lines.push('');
-                lines.push('| Target | Lifecycle | Cleanup Mechanism | Owner |');
+                lines.push(isZh
+                    ? '| 目标 | 生命周期 | 清理机制 | 责任方 |'
+                    : '| Target | Lifecycle | Cleanup Mechanism | Owner |');
                 lines.push('|--------|-----------|-------------------|-------|');
                 for (const item of args.cleanupPlan) {
                     lines.push(`| \`${cell(item.target)}\` | ${cell(item.lifecycle)} | ${cell(item.cleanup)} | ${cell(item.owner)} |`);

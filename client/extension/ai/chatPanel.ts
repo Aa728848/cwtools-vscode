@@ -1313,18 +1313,18 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             if (hasInteractivePlan
                 && interactivePlanText
             ) {
-                // Chat shows only tool-call steps (no full plan text)
+                // Chat shows tool-call steps and model explanation before the plan card
                 if (isCurrentView) {
-                    this.postMessage({ type: 'generationComplete', result: { ...uiResult, explanation: '', code: '' } });
+                    this.postMessage({ type: 'generationComplete', result: { ...uiResult, explanation: result.explanation || '', code: '' } });
                 }
                 this.topicManager.addHistoryMessage({
                     role: 'assistant',
-                    content: aiText('The plan has been generated and opened in the annotations view.', '计划已生成，已在批注视图中打开'),
+                    content: result.explanation || aiText('The plan has been generated and is awaiting your approval.', '计划方案已准备好，正在等待你的审批。'),
                     timestamp: Date.now(),
                     steps: uiSteps,
                     runId: durableRunId,
                 }, runTopicId);
-                await this.savePlanFile(interactivePlanText, text, uiSteps);
+                await this.savePlanFile(interactivePlanText, text, uiSteps, runTopicId);
             } else {
                 if (isCurrentView) {
                     this.postMessage({ type: 'generationComplete', result: uiResult });
@@ -2022,12 +2022,12 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         return filePath;
     }
 
-    private async savePlanFile(planText: string, userPrompt: string, steps?: any[]): Promise<void> {
+    private async savePlanFile(planText: string, userPrompt: string, steps?: any[], targetTopicId?: string): Promise<void> {
         // ── Persist .md export ──────────────────────────────────────────────
         let filePath = '';
         let relPath = '';
-        const topicId = this.topicManager.currentTopic?.id || 'default';
-        // Put under topic folder to scope "same conversation series" (same conversation series) while keeping exactly "Implementation_Plan.md"
+        const topicId = targetTopicId || this.topicManager.currentTopic?.id || 'default';
+        // Put under topic folder to scope "same conversation series" while keeping exactly "Implementation_Plan.md"
         const planDir = getPrivateTopicStorageDir(topicId, getProjectWorkspaceRoot());
         if (planDir) {
             await fs.promises.mkdir(planDir, { recursive: true });
@@ -2043,7 +2043,9 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
 
         if (filePath) {
             // Post plan file saved card and render interactive annotation UI
-            this.postMessage({ type: 'planFileSaved', filePath, relPath });
+            if (this.topicManager.currentTopic?.id === topicId) {
+                this.postMessage({ type: 'planFileSaved', filePath, relPath });
+            }
             this.upsertArtifact({
                 id: this.artifactId('plan', path.basename(filePath)),
                 kind: 'plan',
@@ -2071,7 +2073,9 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             if (currentSection.trim()) sections.push(currentSection.trim());
             if (sections.length === 0 && planText.trim()) sections.push(planText.trim());
 
-            this.postMessage({ type: 'renderPlan', sections, planText });
+            if (this.topicManager.currentTopic?.id === topicId) {
+                this.postMessage({ type: 'renderPlan', sections, planText });
+            }
 
             if (steps) {
                 steps.push({ type: 'plan_card', content: filePath, toolResult: sections, uiState: 'pending', timestamp: Date.now() });
@@ -2469,6 +2473,111 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                 return;
             }
             this.postMessage({ type: 'generationError', error: aiText('This topic contains an unfinished task snapshot.', '当前会话包含未完成的任务快照。'), canResume: true });
+            return;
+        }
+
+        // If this topic has an unapproved Implementation_Plan.md on disk, restore and render the approval card
+        const workspaceRoot = getProjectWorkspaceRoot();
+        const planCandidates = [
+            getPrivateTopicStorageDir(topicId, workspaceRoot),
+            getTopicStorageDir(topicId, workspaceRoot),
+        ].filter(Boolean).map(dir => path.join(dir!, 'Implementation_Plan.md'));
+        const existingPlanPath = planCandidates.find(p => fs.existsSync(p));
+        if (existingPlanPath) {
+            try {
+                const planContent = (await fs.promises.readFile(existingPlanPath, 'utf-8')).replace(/^\uFEFF/, '');
+                if (planContent.trim().length >= 80) {
+                    const sections: string[] = [];
+                    let currentSection = '';
+                    let inCodeBlock = false;
+                    for (const line of planContent.split(/\r?\n/)) {
+                        if (line.startsWith('```')) {
+                            inCodeBlock = !inCodeBlock;
+                        }
+                        if (!inCodeBlock && line.match(/^#{1,3}\s/)) {
+                            if (currentSection.trim()) sections.push(currentSection.trim());
+                            currentSection = line + '\n';
+                        } else {
+                            currentSection += line + '\n';
+                        }
+                    }
+                    if (currentSection.trim()) sections.push(currentSection.trim());
+                    if (sections.length === 0 && planContent.trim()) sections.push(planContent.trim());
+
+                    const topicMessages = topic?.messages ?? [];
+                    const lastUserMsg = [...topicMessages].reverse().find(m => m.role === 'user');
+                    const lastAssistantMsg = [...topicMessages].reverse().find(m => m.role === 'assistant');
+                    const isAwaitingApproval = !lastUserMsg || (lastAssistantMsg && lastAssistantMsg.timestamp >= lastUserMsg.timestamp);
+                    if (isAwaitingApproval) {
+                        const relPath = this.toArtifactDisplayPath(existingPlanPath);
+                        this.upsertArtifact({
+                            id: this.artifactId('plan', path.basename(existingPlanPath)),
+                            kind: 'plan',
+                            title: 'Implementation Plan',
+                            summary: 'Unified implementation and dispatch plan awaiting approval.',
+                            filePath: existingPlanPath,
+                            relPath,
+                            status: 'pending',
+                        });
+                        this.postMessage({ type: 'planFileSaved', filePath: existingPlanPath, relPath });
+                        this.postMessage({ type: 'renderPlan', sections, planText: planContent });
+                    }
+                }
+            } catch (err) {
+                // Ignore read errors silently
+            }
+        }
+
+        // Restore last run snapshot and diff artifacts for this topic so Changes pane is populated
+        const topicMessages = topic?.messages ?? [];
+        const lastRunId = [...topicMessages].reverse().find(m => m.runId)?.runId;
+        if (lastRunId) {
+            const runMsg = this.buildRunSnapshotMessage(lastRunId);
+            if (runMsg) {
+                this.postMessage(runMsg);
+                const writtenFiles = runMsg.snapshot?.writtenFiles ?? [];
+                if (writtenFiles.length > 0) {
+                    const diffFiles: DiffSummaryFile[] = [];
+                    const artifactFiles: DiffArtifactFile[] = [];
+                    for (const fileRecord of runMsg.events?.filter(e => e.type === 'file_change') ?? []) {
+                        const payload = fileRecord.payload as any;
+                        if (payload?.filePath && !diffFiles.some(f => f.file === payload.filePath)) {
+                            diffFiles.push({
+                                file: payload.filePath,
+                                status: payload.status || 'modified',
+                                additions: payload.additions,
+                                deletions: payload.deletions,
+                                diffPreview: payload.diffPreview,
+                                diffLines: payload.diffLines,
+                            });
+                            artifactFiles.push({
+                                file: payload.filePath,
+                                status: payload.status || 'modified',
+                                additions: payload.additions,
+                                deletions: payload.deletions,
+                                diffPreview: payload.diffPreview,
+                                diffLines: payload.diffLines,
+                            });
+                        }
+                    }
+                    if (diffFiles.length > 0) {
+                        const summaryId = this.artifactId('diff', String(Date.now()));
+                        const additions = diffFiles.reduce((sum, f) => sum + (f.additions ?? 0), 0);
+                        const deletions = diffFiles.reduce((sum, f) => sum + (f.deletions ?? 0), 0);
+                        const data: DiffArtifactData = { files: artifactFiles, additions, deletions };
+                        this.upsertArtifact({
+                            id: summaryId,
+                            kind: 'diff',
+                            title: 'File Changes',
+                            summary: `${diffFiles.length} file(s), +${additions} -${deletions}`,
+                            action: 'openDiff',
+                            status: 'done',
+                            data,
+                        });
+                        this.postMessage({ type: 'diffSummary', files: diffFiles, summaryId });
+                    }
+                }
+            }
         }
     }
 

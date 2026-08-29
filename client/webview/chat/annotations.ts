@@ -1,5 +1,6 @@
 import { svgIcon, svgIconNoMargin } from '../svgIcons';
 import { escapeHtml } from './formatters';
+import { renderMermaidDiagrams } from './mermaidRenderer';
 
 export interface AnnotationLabels {
     title: string;
@@ -137,6 +138,7 @@ export function createAnnotationCard(options: AnnotationCardOptions): HTMLElemen
         })));
     };
     renderSections(options.sections, options.labels, options.renderMarkdown);
+    void renderMermaidDiagrams(wrap);
     wrap.appendChild(sectionsWrap);
     (wrap as HTMLElement & { __cwtoolsUpdateAnnotationCard?: (nextOptions: AnnotationCardOptions) => void }).__cwtoolsUpdateAnnotationCard = (nextOptions: AnnotationCardOptions) => {
         currentOptions = nextOptions;
@@ -159,6 +161,7 @@ export function createAnnotationCard(options: AnnotationCardOptions): HTMLElemen
             header.removeAttribute('aria-expanded');
         }
         renderSections(nextOptions.sections, nextOptions.labels, nextOptions.renderMarkdown);
+        void renderMermaidDiagrams(wrap);
         updateSubmitBtn();
     };
     return wrap;

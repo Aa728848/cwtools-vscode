@@ -58,6 +58,7 @@ import { QuickPickSelectionGuard } from './quickPickSelectionGuard';
 import { getDefaultLocalisationLanguagesForUiLocale } from './localisationLanguagePreference';
 import { handleVanillaCacheGenerated } from './vanillaCacheLifecycle';
 import { parseWorkshopContentAppId, getGameIdForWorkshopAppId } from './workshopDetection';
+import { configureSandboxStorage } from './configuredGameRoots';
 import { inferGameIdFromWorkspace, hasWorkspaceModDescriptor, workspaceHasParadoxStructure as workspaceHasParadoxStructureDetect } from './workspaceGameDetection';
 import { LspFeaturePriorityGate } from './lspFeaturePriority';
 import { LspPerformanceStats, type ValidationDiagnosticCounts } from './lspPerformanceStats';
@@ -803,6 +804,10 @@ async function maybeShowFirstRunExperience(options: InstallHealthOptions): Promi
 
 export async function activate(context: ExtensionContext) {
 	setAiMessageLocale(vs.env.language);
+	configureSandboxStorage({
+		globalStoragePath: context.globalStorageUri.fsPath,
+		extensionPath: context.extensionPath,
+	});
 
 	await migrateLegacyPublisherGlobalStorage(context).catch((e) =>
 		ErrorReporter.warn('Extension', 'Failed to migrate legacy publisher globalStorage', e)

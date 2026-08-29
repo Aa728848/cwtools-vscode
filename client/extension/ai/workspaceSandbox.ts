@@ -1,10 +1,14 @@
 import * as path from 'path';
 import * as vs from 'vscode';
-import { getAiStorageRoot, getPrivateAiStorageRoot, getPrivateTopicRoot } from './workspacePaths';
+import { getAiStorageRoot, getPrivateAiStorageRoot, getPrivateTopicRoot, getProjectWorkspaceRoot } from './workspacePaths';
 import { isPathInsideOrEqual } from '../pathScope';
-import { getProjectWorkspaceRoot } from './workspacePaths';
 import { getSessionPermissionMode } from './runner/sessionPermissions';
-import { getConfiguredGameRoots } from '../configuredGameRoots';
+import {
+    getConfiguredGameRoots,
+    getAuxiliaryReadableRoots,
+    configureSandboxStorage,
+    resetSandboxStorageForTesting,
+} from '../configuredGameRoots';
 
 export type WorkspacePathScope = 'project' | 'ai' | 'workspace' | 'outside';
 
@@ -28,6 +32,7 @@ export interface ReadablePathResolution extends WorkspacePathResolution {
 // re-exported here so existing AI-layer imports keep working unchanged.
 export { foldPathCase } from '../pathScope';
 export { isPathInsideOrEqual };
+export { configureSandboxStorage, resetSandboxStorageForTesting, getAuxiliaryReadableRoots };
 
 /** Keep workspace files compact while preserving usable absolute paths for configured game data. */
 export function formatReadablePathForTool(filePath: string, workspaceRoot: string): string {
@@ -165,9 +170,27 @@ export function resolveReadablePathInput(
     const configuredGameRoot = getConfiguredGameRoots()
         .map(item => item.root)
         .find(root => isPathInsideOrEqual(resolution.resolved, root));
+    if (configuredGameRoot) {
+        return {
+            ...resolution,
+            isWithinReadableRoot: true,
+            configuredGameRoot,
+        };
+    }
+
+    const auxiliaryRoot = getAuxiliaryReadableRoots()
+        .find(root => isPathInsideOrEqual(resolution.resolved, root));
+    if (auxiliaryRoot) {
+        return {
+            ...resolution,
+            isWithinReadableRoot: true,
+            configuredGameRoot: auxiliaryRoot,
+        };
+    }
+
     return {
         ...resolution,
-        isWithinReadableRoot: !!configuredGameRoot,
-        configuredGameRoot,
+        isWithinReadableRoot: false,
     };
 }
+

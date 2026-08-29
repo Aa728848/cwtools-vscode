@@ -82,19 +82,21 @@ function loadToolModules() {
             permissionPolicy: require('../../extension/ai/runner/permissionPolicy') as typeof import('../../extension/ai/runner/permissionPolicy'),
             processRegistry: require('../../extension/ai/runner/processRegistry') as typeof import('../../extension/ai/runner/processRegistry'),
             workspacePaths: require('../../extension/ai/workspacePaths') as typeof import('../../extension/ai/workspacePaths'),
+            configuredGameRoots: require('../../extension/configuredGameRoots') as typeof import('../../extension/configuredGameRoots'),
         };
     } finally {
         moduleLoader._load = originalLoad;
     }
 }
 
-const { fileTools, externalTools, agentTools, agentRunner, permissionPolicy, processRegistry: processRegistryModule, workspacePaths } = loadToolModules();
+const { fileTools, externalTools, agentTools, agentRunner, permissionPolicy, processRegistry: processRegistryModule, workspacePaths, configuredGameRoots } = loadToolModules();
 const { FileToolHandler } = fileTools;
 const { ExternalToolHandler, HeadTailTextBuffer } = externalTools;
 const { AgentToolExecutor, TOOL_DEFINITIONS } = agentTools;
 const { getAgentToolTargetFiles, SUPERSEDED_BY_LATER_SAME_FILE_WRITE_TOOLS } = agentRunner;
 const { PermissionPolicyStore } = permissionPolicy;
 const { processRegistry } = processRegistryModule;
+const { resetSandboxStorageForTesting, configureSandboxStorage } = configuredGameRoots;
 const TEMP_BASE = path.resolve(__dirname, '../../..', '.tmp-test');
 
 describe('enforced central tool policy', () => {
@@ -103,10 +105,12 @@ describe('enforced central tool policy', () => {
     beforeEach(() => {
         workspaceRoot = makeWorkspace();
         stubConfigOverrides = {};
+        resetSandboxStorageForTesting();
     });
 
     afterEach(() => {
         stubConfigOverrides = {};
+        resetSandboxStorageForTesting();
         cleanupWorkspace(workspaceRoot);
     });
 
@@ -959,7 +963,69 @@ describe('agent tool file path safety', () => {
         }
     });
 
+    it('allows reads under globalStorage cache directories (e.g. .cwtools/stellaris)', async () => {
+        const globalStorageDir = makeWorkspace();
+        const cachedRulesFile = path.join(
+            globalStorageDir,
+            '.cwtools',
+            'stellaris',
+            'common',
+            'global_ship_designs',
+            'event_ship_designs_shroud.txt'
+        );
+        fs.mkdirSync(path.dirname(cachedRulesFile), { recursive: true });
+        fs.writeFileSync(cachedRulesFile, 'event_ship_design = { name = "NAME_Shroud" }\n');
+
+        try {
+            const executor = new AgentToolExecutor({} as any, workspaceRoot, undefined, globalStorageDir);
+            const handler = createFileHandler();
+            const readResult = await handler.readFile({ file: cachedRulesFile });
+            expect(readResult.content).to.include('event_ship_design = { name = "NAME_Shroud" }');
+
+            const symbolsResult = await executor.execute('document_symbols', { file: cachedRulesFile }, makeContext());
+            expect(symbolsResult).to.have.property('symbols');
+        } finally {
+            cleanupWorkspace(globalStorageDir);
+        }
+    });
+
+    it('allows reads under custom rules_folder configuration', async () => {
+        const customRulesDir = makeWorkspace();
+        const ruleFile = path.join(customRulesDir, 'common', 'game_rules', 'custom_rules.txt');
+        fs.mkdirSync(path.dirname(ruleFile), { recursive: true });
+        fs.writeFileSync(ruleFile, 'custom_rule = yes\n');
+        stubConfigOverrides['rules_folder'] = customRulesDir;
+
+        try {
+            const handler = createFileHandler();
+            const readResult = await handler.readFile({ file: ruleFile });
+            expect(readResult.content).to.include('custom_rule = yes');
+        } finally {
+            cleanupWorkspace(customRulesDir);
+        }
+    });
+
+    it('rejects writes to globalStorage and auxiliary readable paths', async () => {
+        const globalStorageDir = makeWorkspace();
+        const targetFile = path.join(globalStorageDir, '.cwtools', 'stellaris', 'test_write.txt');
+        fs.mkdirSync(path.dirname(targetFile), { recursive: true });
+
+        try {
+            const executor = new AgentToolExecutor({} as any, workspaceRoot, undefined, globalStorageDir);
+            const handler = createFileHandler();
+            const result = await handler.writeFile({
+                file: targetFile,
+                content: 'should be blocked',
+            });
+            expect(result.success).to.equal(false);
+            expect(result.message).to.include('outside the workspace root');
+        } finally {
+            cleanupWorkspace(globalStorageDir);
+        }
+    });
+
     it('falls back to structural symbols for an external vanilla PDX file', async () => {
+
         const configuredRoot = makeWorkspace();
         const vanillaFile = path.join(configuredRoot, 'common', 'game_rules', '00_rules.txt');
         fs.mkdirSync(path.dirname(vanillaFile), { recursive: true });

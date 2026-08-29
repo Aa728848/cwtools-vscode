@@ -101,7 +101,7 @@ import { goalStore, type DurableGoalStatus } from './runner/goalStore';
 import { goalSupervisor } from './runner/goalSupervisor';
 import { agentTaskManager } from './runner/taskManager';
 import { deriveUserExecutionPolicy } from './orchestrator/userExecutionPolicy';
-import { isSecuritySandboxDisabled, resolveReadablePathInput } from './workspaceSandbox';
+import { isSecuritySandboxDisabled, resolveReadablePathInput, configureSandboxStorage } from './workspaceSandbox';
 
 const MAX_TOOL_RESULT_CHARS = TOOL_RESULT_BUDGET_HARD_STUB;
 const FINAL_EVIDENCE_CONCURRENCY = 4;
@@ -499,6 +499,9 @@ export class AgentToolExecutor {
         this.workspaceRoot = workspaceRoot;
         this.globalStoragePath = globalStoragePath;
         this.extensionPath = extensionPath;
+        if (globalStoragePath || extensionPath) {
+            configureSandboxStorage({ globalStoragePath, extensionPath });
+        }
         this.indexService = indexService;
         this.apiKeyManager = apiKeyManager;
         this.archetypeArtifacts = new HostArchetypeArtifactStore(workspaceRoot);

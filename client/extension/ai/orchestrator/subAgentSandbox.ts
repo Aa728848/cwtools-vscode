@@ -7,7 +7,7 @@ import { FILE_SCOPED_WRITE_TOOLS, MUTATING_TOOLS, TOOL_REGISTRY } from '../tools
 import { isPathInsideOrEqual, foldPathCase } from '../workspaceSandbox';
 import { clampWriteScopeToRoots } from '../runner/policyEngine';
 import { aiText } from '../messages';
-import { getConfiguredGameRoots } from '../../configuredGameRoots';
+import { getConfiguredGameRoots, getAuxiliaryReadableRoots } from '../../configuredGameRoots';
 
 /**
  * Orchestrator 子 Agent 物理沙盒隔离规范 (Sub-Agent Sandbox)
@@ -85,9 +85,11 @@ export function buildSubAgentSandbox(
     }
 
     // ─── 2. 设定读作用域 (Read Scope) ───
-    // Game roots selected in extension settings are readable but remain outside
-    // every child write scope.
-    const readableRoots = [workspaceRoot, ...getConfiguredGameRoots().map(entry => entry.root)];
+    const readableRoots = [
+        workspaceRoot,
+        ...getConfiguredGameRoots().map(entry => entry.root),
+        ...getAuxiliaryReadableRoots(),
+    ];
     const seenReadableRoots = new Set<string>();
     sandbox.readScope = readableRoots
         .map(root => path.resolve(root))

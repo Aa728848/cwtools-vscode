@@ -1,5 +1,14 @@
 # Changelog
 
+## [2.16.3] - 2026-08-29
+
+### 修复与优化 / Fixes & Improvements
+- **[优化] AI 沙箱辅助只读路径支持（Auxiliary Readable Sandbox Roots）**：
+  - 允许 AI 工具在沙箱内安全读取 VSCode `globalStorage` 缓存的规则与数据文件（如 `.cwtools/stellaris/...`）、插件内嵌资源目录及用户配置的自定义规则文件夹（`rules_folder`）。
+  - 严格维持对所有辅助只读路径（auxiliary read-only roots）的写入阻断（fail-closed），杜绝非预期的文件篡改。
+  - 补充针对缓存目录只读与写入拦截的自动化单元测试。
+  - English: [Improvement] Auxiliary readable sandbox roots in AI tools — enabled secure read access within AI sandboxes for VSCode `globalStorage` cached rules/definitions (e.g. `.cwtools/stellaris/...`), extension internal assets, and custom user rule directories (`rules_folder`); strictly maintained fail-closed write protection across all auxiliary read-only paths to prevent unauthorized modifications; added unit test coverage for sandbox path enforcement.
+
 ## [2.16.2] - 2026-08-29
 
 ### 新功能 / New Features

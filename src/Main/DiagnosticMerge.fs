@@ -91,6 +91,14 @@ let planDeferredDynamicRevalidationBatch
 /// complete result visible until a validation pass for that file replaces it.
 let preserveWhilePending (existing: Diagnostic list) = existing
 
+/// Document versions only supersede a diagnostic snapshot when both sides are
+/// editor-backed. Disk revalidation and closed files intentionally have no
+/// document version and must not be treated as stale for that reason alone.
+let isValidatedDocumentVersionStale validatedVersion currentVersion =
+    match validatedVersion, currentVersion with
+    | Some validated, Some current -> validated <> current
+    | _ -> false
+
 /// A per-file lint of a dynamic definition sees the raw template, not every
 /// parameterized call-site expansion. It owns direct/parser diagnostics and
 /// must preserve the expansion diagnostics until deferred validation replaces

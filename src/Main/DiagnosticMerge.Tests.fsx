@@ -27,6 +27,20 @@ let pendingResult = preserveWhilePending previousCompleteResult
 if pendingResult <> previousCompleteResult then
     failwith "Pending global revalidation must preserve parser and semantic diagnostics."
 
+// Agent writes are revalidated from disk and therefore have no editor document
+// version. Opening the same file must not make that completed snapshot stale.
+if isValidatedDocumentVersionStale None (Some 7) then
+    failwith "Disk-backed diagnostics became stale merely because the file is open."
+
+if isValidatedDocumentVersionStale (Some 7) None then
+    failwith "Closing a file made its completed diagnostics stale."
+
+if isValidatedDocumentVersionStale (Some 7) (Some 7) then
+    failwith "Matching editor versions must remain fresh."
+
+if not (isValidatedDocumentVersionStale (Some 7) (Some 8)) then
+    failwith "A newer editor version must supersede the diagnostic snapshot."
+
 if not (pendingResult |> List.exists (fun item -> item.code = Some "CW102")) then
     failwith "Pending global revalidation dropped the last complete semantic diagnostic."
 

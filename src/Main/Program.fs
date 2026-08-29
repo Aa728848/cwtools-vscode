@@ -4338,7 +4338,7 @@ type Server(client: ILanguageClient) =
                                         |> Option.defaultValue []
                                         |> List.filter (fun kind -> kind <> "dynamicParameters")
                                     let freshness =
-                                        if validatedVersion <> docs.GetVersionByPath(filePath) then Stale
+                                        if DiagnosticMerge.isValidatedDocumentVersionStale validatedVersion (docs.GetVersionByPath(filePath)) then Stale
                                         elif pendingKinds.IsEmpty then Fresh
                                         else Pending
                                     setFileDiagnosticStateWithSnapshot
@@ -4835,7 +4835,7 @@ type Server(client: ILanguageClient) =
                         |> Option.defaultValue [ "validation" ]
                         |> List.filter (fun kind -> kind <> "localisation")
                     let freshness =
-                        if validatedVersion <> docs.GetVersionByPath(filePath) then Stale
+                        if DiagnosticMerge.isValidatedDocumentVersionStale validatedVersion (docs.GetVersionByPath(filePath)) then Stale
                         elif pendingKinds.IsEmpty then Fresh
                         else Pending
                     setFileDiagnosticStateWithSnapshot
@@ -5525,7 +5525,7 @@ type Server(client: ILanguageClient) =
                         let isSuperseded =
                             match fileDiagnosticStates.TryGetValue filePath with
                             | true, prior when prior.epoch > publishEpoch -> true
-                            | true, prior when prior.validatedVersion.IsSome && prior.validatedVersion <> currentVersion -> true
+                            | true, prior when DiagnosticMerge.isValidatedDocumentVersionStale prior.validatedVersion currentVersion -> true
                             | _ -> false
 
                         if not isSuperseded then
@@ -5553,7 +5553,7 @@ type Server(client: ILanguageClient) =
                             let isSuperseded =
                                 match fileDiagnosticStates.TryGetValue filePath with
                                 | true, prior when prior.epoch > publishEpoch -> true
-                                | true, prior when prior.validatedVersion.IsSome && prior.validatedVersion <> currentVersion -> true
+                                | true, prior when DiagnosticMerge.isValidatedDocumentVersionStale prior.validatedVersion currentVersion -> true
                                 | _ -> false
                             if not isSuperseded then
                                 let diagnostics = entries |> List.map snd
@@ -12016,7 +12016,7 @@ type Server(client: ILanguageClient) =
                                     let currentVersion = docs.GetVersionByPath(filePath)
                                     let currentModelEpoch = modelEpochSnapshot ()
                                     let effectiveFreshness =
-                                        if state.validatedVersion <> currentVersion
+                                        if DiagnosticMerge.isValidatedDocumentVersionStale state.validatedVersion currentVersion
                                            || not (sameModelEpoch state.modelEpoch currentModelEpoch) then
                                             Stale
                                         else

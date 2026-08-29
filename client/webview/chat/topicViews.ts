@@ -162,21 +162,18 @@ export function buildTopicItem(
     head.appendChild(title);
 
     appendTopicState(head, topic, currentTopicId);
+    main.appendChild(head);
 
-    const metaRow = document.createElement('div');
-    metaRow.className = 'topic-meta-row';
-    const metaBits = [
-        `${text.messages} ${topic.messageCount ?? 0}`,
-        `${text.updated} ${formatTopicMoment(topic.updatedAt, callbacks.formatTime)}`,
-    ];
+    const metaBits: string[] = [];
     if (topic.workspaceLabel || topic.workspaceId) metaBits.push(`${text.group} ${topic.workspaceLabel || topic.workspaceId}`);
-    if (topic.createdAt) metaBits.push(`${text.created} ${formatTopicMoment(topic.createdAt, callbacks.formatTime)}`);
     if (topic.parentTopicId && topic.forkedFromMessageIndex != null) metaBits.push(`${text.forkedFrom} #${topic.forkedFromMessageIndex + 1}`);
     if (topic.score != null) metaBits.push(`${text.relevance} ${Math.round(topic.score)}`);
-    metaRow.innerHTML = metaBits.map(bit => `<span class="topic-meta-chip">${escapeHtml(bit)}</span>`).join('');
-
-    main.appendChild(head);
-    main.appendChild(metaRow);
+    if (metaBits.length > 0) {
+        const metaRow = document.createElement('div');
+        metaRow.className = 'topic-meta-row';
+        metaRow.innerHTML = metaBits.map(bit => `<span class="topic-meta-chip">${escapeHtml(bit)}</span>`).join('');
+        main.appendChild(metaRow);
+    }
 
     if (mode === 'search' && topic.matchContext) {
         const summary = document.createElement('div');

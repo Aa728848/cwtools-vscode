@@ -784,7 +784,7 @@ const DEFAULT_STATE: ManagerEnhancementState = {
     document.body.append(leftResizer, rightResizer);
 
     function clampPaneWidth(side: 'left' | 'right', rawWidth: number): number {
-        if (side === 'left') return Math.max(220, Math.min(380, rawWidth));
+        if (side === 'left') return Math.max(180, Math.min(340, rawWidth));
         const leftWidth = topicsPanel?.getBoundingClientRect().width || 0;
         const maxRight = Math.max(440, window.innerWidth - leftWidth - 520);
         return Math.max(440, Math.min(Math.min(1100, maxRight), rawWidth));
@@ -795,8 +795,8 @@ const DEFAULT_STATE: ManagerEnhancementState = {
         document.body.style.setProperty(side === 'left' ? '--manager-left-width' : '--manager-right-width', `${width}px`);
         const resizer = side === 'left' ? leftResizer : rightResizer;
         resizer.setAttribute('aria-valuenow', String(width));
-        resizer.setAttribute('aria-valuemin', side === 'left' ? '220' : '440');
-        resizer.setAttribute('aria-valuemax', side === 'left' ? '380' : '1100');
+        resizer.setAttribute('aria-valuemin', side === 'left' ? '180' : '440');
+        resizer.setAttribute('aria-valuemax', side === 'left' ? '340' : '1100');
     }
 
     function installPaneResizer(resizer: HTMLElement, side: 'left' | 'right'): void {

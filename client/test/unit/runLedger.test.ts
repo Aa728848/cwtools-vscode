@@ -612,6 +612,27 @@ describe('RunLedger Unit Tests', () => {
         }));
         expect(invalid).to.equal(null);
     });
+
+    it('adds history message to specific targetTopicId even when currentTopic switched', () => {
+        const { ChatTopicManager } = loadChatTopicsModule();
+        const storageRoot = path.join(workspaceRoot, '.chat-target-topic');
+        const storageUri = { fsPath: storageRoot } as ConstructorParameters<typeof ChatTopicManager>[0];
+        const manager = new ChatTopicManager(storageUri, () => {}, 'full');
+        manager.createNewTopic('Topic A', PARADOX_WRITE);
+        const topicAId = manager.currentTopic!.id;
+        manager.addHistoryMessage({ role: 'user', content: 'hello from A', timestamp: Date.now() });
+
+        // User starts a new topic or switches away
+        manager.startNewTopic();
+        expect(manager.currentTopic).to.equal(null);
+
+        // Background task from Topic A finishes and writes assistant message to Topic A
+        manager.addHistoryMessage({ role: 'assistant', content: 'response for A', timestamp: Date.now() }, topicAId);
+
+        const topicA = manager.topics.find(t => t.id === topicAId);
+        expect(topicA?.messages.length).to.equal(2);
+        expect(topicA?.messages[1]?.content).to.equal('response for A');
+    });
 });
 
 function loadRunLedgerModule() {

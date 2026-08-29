@@ -243,6 +243,8 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         return this._isGenerating;
     }
 
+    private activeRunTopicId?: string;
+
     constructor(
         public extensionUri: vs.Uri,
         public agentRunner: AgentRunner,
@@ -996,7 +998,17 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         }
 
         if (this._isGenerating) {
-            await this.submitSteerMessage(text, images, displayText, contexts);
+            if (this.activeRunTopicId && this.activeRunTopicId === this.topicManager.currentTopic?.id) {
+                await this.submitSteerMessage(text, images, displayText, contexts);
+                return;
+            }
+            this.postMessage({
+                type: 'generationError',
+                error: aiText(
+                    'Another topic task is currently running in the background. Please wait for it to complete or cancel it before starting a new one.',
+                    '后台已有正在执行的任务，请等待其完成或取消后再开启新任务。',
+                ),
+            });
             return;
         }
 
@@ -1031,6 +1043,8 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         if (this.topicManager.currentTopic) {
             this.topicManager.currentTopic.schedulingState = schedulingState;
         }
+        const runTopicId = this.topicManager.currentTopic?.id;
+        this.activeRunTopicId = runTopicId;
 
         const normalizedText = text.trim().toLowerCase();
         if (!resumeFromState
@@ -1166,7 +1180,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             this.approvedPlanExecutionPending = false;
             const runPromise = this.agentRuntime.startTurn({
                 userMessage: text,
-                context: { ...context, topicId: this.topicManager.currentTopic?.id },
+                context: { ...context, topicId: runTopicId },
                 conversationHistory: this.conversationMessages,
                 options: {
                     schedulingState,
@@ -1178,10 +1192,10 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                     model: this.aiService.getConfig().model || undefined,
                     reasoningEffort: config.reasoningEffort,
                     streaming: true,  // Enable typewriter text effect
-                    topicId: this.topicManager.currentTopic?.id,
+                    topicId: runTopicId,
                     onStep: (step) => {
                         const uiStep = prepareLiveStepForUi(this._liveSteps, step, UI_REPLAY_STEP_LIMIT * 2);
-                        if (uiStep) this.postMessage({ type: 'agentStep', step: uiStep });
+                        if (uiStep && this.topicManager.currentTopic?.id === runTopicId) this.postMessage({ type: 'agentStep', step: uiStep });
                     },
                     onRunStarted: runId => { this.currentRunId = runId; },
                     abortSignal: this.abortController!.signal,
@@ -1190,7 +1204,9 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                         this.requestPermission(id, tool, description, command, ctx),
                     onBeforeFileWrite,
                     onUserQuestion: (request, questionContext) => this.requestUserQuestion(request, questionContext),
-                    onTodoUpdate: (todos, scope) => this.sendTodoUpdate(todos, scope),
+                    onTodoUpdate: (todos, scope) => {
+                        if (this.topicManager.currentTopic?.id === runTopicId) this.sendTodoUpdate(todos, scope);
+                    },
                     resumeFromState,
                     workflowId: this.currentWorkflowId ?? undefined,
                 },
@@ -1226,24 +1242,28 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             const assistantContent = result.code
                 ? `${result.explanation}\n\`\`\`pdx\n${result.code}\n\`\`\``
                 : result.explanation;
+            const isCurrentView = this.topicManager.currentTopic?.id === runTopicId;
             const lastConversationMessage = this.conversationMessages[this.conversationMessages.length - 1];
             const shouldAppendUserHistory = !resumeFromState
                 || lastConversationMessage?.role !== 'user'
                 || contentToString(lastConversationMessage.content) !== text;
-            if (shouldAppendUserHistory) {
-                this.conversationMessages.push({ role: 'user', content: userHistoryContent });
+            if (isCurrentView) {
+                if (shouldAppendUserHistory) {
+                    this.conversationMessages.push({ role: 'user', content: userHistoryContent });
+                }
+                this.conversationMessages.push({ role: 'assistant', content: assistantContent });
             }
-            this.conversationMessages.push({ role: 'assistant', content: assistantContent });
 
             // ── Plan/multi-Agent mode: suppress explanation in chat, auto-open annotation panel ──
             const uiSteps = compactStepsForUi(result.steps);
             const uiResult = { ...result, steps: uiSteps };
             const durableRunId = result.runId ?? this.currentRunId;
-            const latestUserHistory = [...(this.topicManager.currentTopic?.messages ?? [])]
+            const targetTopic = runTopicId ? this.topicManager.topics.find(t => t.id === runTopicId) : this.topicManager.currentTopic;
+            const latestUserHistory = [...(targetTopic?.messages ?? [])]
                 .reverse()
                 .find(message => message.role === 'user' && !message.runId);
             if (latestUserHistory && durableRunId) latestUserHistory.runId = durableRunId;
-            const topicId = this.topicManager.currentTopic?.id || 'default';
+            const topicId = runTopicId || 'default';
             const generatedPlanPath = this.findGeneratedTopicFile(topicId, 'Implementation_Plan.md');
             const successfulToolInvocations = new Set(result.steps
                 .filter(step => step.type === 'tool_result'
@@ -1286,7 +1306,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                 approvedPlanExecution,
             });
             const wtPath = this.findGeneratedTopicFile(topicId, 'walkthrough.md');
-            if (wtPath) {
+            if (wtPath && isCurrentView) {
                 await this.renderWalkthroughUI(wtPath, topicId, uiSteps);
             }
 
@@ -1294,17 +1314,21 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                 && interactivePlanText
             ) {
                 // Chat shows only tool-call steps (no full plan text)
-                this.postMessage({ type: 'generationComplete', result: { ...uiResult, explanation: '', code: '' } });
+                if (isCurrentView) {
+                    this.postMessage({ type: 'generationComplete', result: { ...uiResult, explanation: '', code: '' } });
+                }
                 this.topicManager.addHistoryMessage({
                     role: 'assistant',
                     content: aiText('The plan has been generated and opened in the annotations view.', '计划已生成，已在批注视图中打开'),
                     timestamp: Date.now(),
                     steps: uiSteps,
                     runId: durableRunId,
-                });
+                }, runTopicId);
                 await this.savePlanFile(interactivePlanText, text, uiSteps);
             } else {
-                this.postMessage({ type: 'generationComplete', result: uiResult });
+                if (isCurrentView) {
+                    this.postMessage({ type: 'generationComplete', result: uiResult });
+                }
                 this.topicManager.addHistoryMessage({
                     role: 'assistant',
                     content: result.explanation,
@@ -1313,9 +1337,12 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                     timestamp: Date.now(),
                     steps: uiSteps,
                     runId: durableRunId,
-                });
+                }, runTopicId);
             }
             this.topicManager.saveTopics();
+            if (runTopicId) {
+                await this.agentRunner.clearResumeState(runTopicId);
+            }
 
             this.collectArtifactsFromResult(uiResult);
 
@@ -1324,47 +1351,50 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                 const config = this.aiService.getConfig();
                 this.usageTracker.addUsage(config.provider, config.model || 'unknown', result.tokenUsage, {
                     toolCalls: result.runMetrics?.toolCallsByName,
-                    topicId: this.topicManager.currentTopic?.id,
+                    topicId: runTopicId,
                     cacheCapable: supportsOpenAiStylePrefixCache(config.provider, config.customApiFormat, config.model, this.aiService.getEndpointForProvider(config.provider)),
                 });
-                this.postMessage({
-                    type: 'tokenUsage',
-                    usage: result.tokenUsage,
-                    model: config.model,
-                });
+                if (isCurrentView) {
+                    this.postMessage({
+                        type: 'tokenUsage',
+                        usage: result.tokenUsage,
+                        model: config.model,
+                    });
+                }
             }
 
             // ── Auto-title: generate a short AI title after the first exchange ─
             // Matches OpenCode's title-agent pattern: fire-and-forget, no blocking
-            const isFirstExchange = this.topicManager.currentTopic &&
-                this.topicManager.currentTopic.messages.filter(m => m.role === 'user').length === 1;
-            if (config.provider !== 'codex-chatgpt' && isFirstExchange && this.topicManager.currentTopic) {
-                const topicId = this.topicManager.currentTopic.id;
+            const isFirstExchange = targetTopic &&
+                targetTopic.messages.filter(m => m.role === 'user').length === 1;
+            if (config.provider !== 'codex-chatgpt' && isFirstExchange && runTopicId) {
                 const replyText = result.explanation || (result.code ? result.code.substring(0, 400) : '');
                 // Non-blocking: run in background, update UI when done
                 this.agentRunner.generateTopicTitle(text, replyText, {
                     onUsage: sample => this.usageTracker.addUsage(sample.providerId, sample.model, sample.usage, {
                         durationMs: sample.durationMs,
-                        topicId,
+                        topicId: runTopicId,
                         cacheCapable: sample.cacheCapable,
                     }),
                 }).then(title => {
                     if (!title) return;
-                    const topic = this.topicManager.topics.find(t => t.id === topicId);
+                    const topic = this.topicManager.topics.find(t => t.id === runTopicId);
                     if (topic) {
                         topic.title = title;
                         this.topicManager.saveTopics();
-                        this.postMessage({ type: 'topicTitleGenerated', topicId, title });
+                        this.postMessage({ type: 'topicTitleGenerated', topicId: runTopicId, title });
                     }
                 }).catch(() => { /* ignore title generation failures silently */ });
             }
         } catch (e) {
             const errorMsg = e instanceof Error ? e.message : String(e);
             let canResume = false;
-            if (this.topicManager.currentTopic?.id) {
-                canResume = await this.agentRunner.hasResumeState(this.topicManager.currentTopic.id);
+            if (runTopicId) {
+                canResume = await this.agentRunner.hasResumeState(runTopicId);
             }
-            this.postMessage({ type: 'generationError', error: errorMsg, canResume });
+            if (this.topicManager.currentTopic?.id === runTopicId) {
+                this.postMessage({ type: 'generationError', error: errorMsg, canResume });
+            }
         } finally {
             // Store file snapshots for this message (keyed by the message index)
             // Also record the conversationMessages length so retractMessage can use the
@@ -1407,14 +1437,17 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             this._currentMessageSnapshots = null;
 
             // Send diff summary if files were changed
-            if (messageSnapshots.length > 0) {
+            if (messageSnapshots.length > 0 && this.topicManager.currentTopic?.id === runTopicId) {
                 await this.sendDiffSummary(messageSnapshots);
             }
 
-            this.abortController = null;
-            this.currentRunId = undefined;
-            this._isGenerating = false;
-            this._liveSteps = [];
+            if (this.activeRunTopicId === runTopicId) {
+                this.abortController = null;
+                this.currentRunId = undefined;
+                this.activeRunTopicId = undefined;
+                this._isGenerating = false;
+                this._liveSteps = [];
+            }
             const activityTopicId = this.topicManager.currentTopic?.id;
             if (activityTopicId) {
                 const activity = await this.agentRuntime.getActivity(activityTopicId, activityTopicId);
@@ -2414,6 +2447,17 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         this.postMessage({ type: 'setSchedulingState', schedulingState: this.session.schedulingState });
         this.sendWorkflowState();
         void this.agentRuntime.resumeThread(topicId, topicId).catch(() => undefined);
+
+        const isCurrentlyRunning = this._isGenerating && (this.activeRunTopicId === topicId || (this.currentRunId && !!activeTurnRegistry.get(this.currentRunId)));
+        if (isCurrentlyRunning) {
+            if (this._liveSteps.length > 0) {
+                this.postMessage({ type: 'replaySteps', steps: compactStepsForUi(this._liveSteps, UI_REPLAY_STEP_LIMIT), isGenerating: true });
+            } else {
+                this.postMessage({ type: 'startBackgroundGeneration' });
+            }
+            return;
+        }
+
         const resumeState = await this.agentRunner.loadResumeState(topicId);
         if (resumeState) {
             const topic = this.topicManager.currentTopic;

@@ -267,10 +267,11 @@ export class ChatTopicManager {
         return true;
     }
 
-    addHistoryMessage(msg: ChatHistoryMessage): void {
-        if (this.currentTopic) {
-            this.currentTopic.messages.push(msg);
-            this.currentTopic.updatedAt = Date.now();
+    addHistoryMessage(msg: ChatHistoryMessage, targetTopicId?: string): void {
+        const topic = targetTopicId ? this.topics.find(t => t.id === targetTopicId) : this.currentTopic;
+        if (topic) {
+            topic.messages.push(msg);
+            topic.updatedAt = Date.now();
         }
     }
 

@@ -1,6 +1,6 @@
 /* Agent Manager shell: keep chat logic, but present as a three-pane workspace. */
 body.agent-manager-shell {
-    --manager-left-width: clamp(260px, 18vw, 320px);
+    --manager-left-width: clamp(210px, 14vw, 250px);
     --manager-active-left-width: var(--manager-left-width);
     --manager-right-width: clamp(520px, 38vw, 760px);
     --manager-active-right-width: 0px;
@@ -393,14 +393,14 @@ body.agent-manager-shell .topics-export-btn {
 
 /* 统一左侧对话项卡片样式以对齐右侧 artifacts/runs 的优雅圆角与边框 */
 body.agent-manager-shell .topic-item {
-    min-height: 32px;
+    min-height: 28px;
     background: transparent;
     border: 1px solid transparent;
     border-radius: 6px;
     grid-template-columns: minmax(0, 1fr) auto;
-    gap: 7px;
-    padding: 7px 8px;
-    margin-bottom: 3px;
+    gap: 5px;
+    padding: 6px 8px;
+    margin-bottom: 2px;
     transition: background 0.15s, border-color 0.15s, box-shadow 0.15s;
 }
 
@@ -419,7 +419,7 @@ body.agent-manager-shell .topic-main {
     min-width: 0;
     display: flex;
     flex-direction: column;
-    gap: 5px;
+    gap: 4px;
 }
 
 body.agent-manager-shell .topic-head {
@@ -435,7 +435,7 @@ body.agent-manager-shell .topic-title {
 }
 
 body.agent-manager-shell .topic-meta-row {
-    gap: 5px;
+    gap: 4px;
     opacity: 0.7;
 }
 
@@ -473,8 +473,8 @@ body.agent-manager-shell .topic-actions {
     display: flex;
     justify-content: flex-start;
     flex-wrap: wrap;
-    gap: 5px;
-    opacity: 0.78;
+    gap: 4px;
+    opacity: 0.72;
 }
 
 body.agent-manager-shell .topic-item:hover .topic-actions,
@@ -483,9 +483,10 @@ body.agent-manager-shell .topic-item-active .topic-actions {
 }
 
 body.agent-manager-shell .topic-action-btn {
-    min-width: 24px;
-    min-height: 24px;
-    padding: 0 6px;
+    min-width: 22px;
+    min-height: 22px;
+    padding: 0 4px;
+    border-radius: 4px;
     border-color: var(--manager-border-soft);
     background: var(--manager-button);
     color: var(--manager-fg);
@@ -1085,12 +1086,6 @@ body.agent-manager-shell .manager-task-mark {
     flex-direction: column;
     gap: 8px;
     box-shadow: none;
-}
-
-@media (max-width: 1500px) {
-    .run-metrics-grid {
-        grid-template-columns: 1fr;
-    }
 }
 
 body.agent-manager-shell .manager-run-summary .artifact-item-title {
@@ -1744,7 +1739,7 @@ body.agent-manager-shell .manager-workspace-external-host .annotatable-plan.ap-c
 
 .run-metrics-grid {
     display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(4, minmax(0, 1fr));
     gap: 6px;
     margin-top: 4px;
 }

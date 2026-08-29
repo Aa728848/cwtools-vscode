@@ -70,6 +70,9 @@ describe('agent manager cross-surface contracts', () => {
         expect(topicViews).to.include("grouping?: 'date' | 'workspace'");
         expect(topicViews).to.include('groupTopicsByWorkspace');
         expect(topicViews).to.include("type: 'setTopicWorkspace'");
+        expect(topicViews).to.not.include("`${text.messages} ${topic.messageCount ?? 0}`");
+        expect(topicViews).to.not.include("`${text.updated} ${formatTopicMoment(topic.updatedAt, callbacks.formatTime)}`");
+        expect(topicViews).to.not.include("`${text.created} ${formatTopicMoment(topic.createdAt, callbacks.formatTime)}`");
 
         expect(contracts).to.include('export type ManagerWebviewMessage');
         expect(contracts).to.include('export interface ManagerSnapshotMessage');

@@ -287,4 +287,31 @@ describe('terminal validation state', () => {
         expect(terminalValidationOutcome(state)).to.equal('pending');
     });
 
+    it('allows clean changes when delta confirms 0 added errors even if freshness is stale', () => {
+        const state = createTerminalValidationState();
+        const oldWarning = { severity: 'warning', message: 'historical warning', code: 'CW101', source: 'cwtools', line: 40, column: 1 };
+        updateTerminalValidationState(state, ['common/scripted_triggers/test.txt'], {
+            diagnostics: [oldWarning],
+            freshness: 'stale',
+            diagnosticSnapshot: { status: 'stale', complete: false, diagnostics: [oldWarning] },
+            diagnosticDelta: { comparable: true, added: [], removed: [] },
+            postWriteValidationPassed: true,
+        });
+        expect(terminalValidationOutcome(state)).to.equal('allow');
+    });
+
+    it('does not treat warnings-only stale diagnostics as blocking pending when post-write passed', () => {
+        const state = createTerminalValidationState();
+        const warnings = [
+            { severity: 'warning', message: 'warning 1', code: 'CW101', source: 'cwtools', line: 40, column: 1 },
+            { severity: 'warning', message: 'warning 2', code: 'CW102', source: 'cwtools', line: 55, column: 1 },
+        ];
+        updateTerminalValidationState(state, ['common/scripted_triggers/test.txt'], {
+            diagnostics: warnings,
+            freshness: 'stale',
+            postWriteValidationPassed: true,
+        });
+        expect(terminalValidationOutcome(state)).to.equal('allow');
+    });
+
 });

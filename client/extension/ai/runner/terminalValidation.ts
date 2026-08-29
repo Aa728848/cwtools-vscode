@@ -84,7 +84,11 @@ export function updateTerminalValidationState(
                     state.pendingTargets.delete(target);
                 }
             } else if (freshness === 'pending' || freshness === 'stale') {
-                state.pendingTargets.add(target);
+                const isComparableClean = diagnosticDelta?.comparable === true
+                    && diagnosticDelta.added.filter(item => item.severity === 'error').length === 0;
+                if (!isComparableClean && fallbackHasErrors) {
+                    state.pendingTargets.add(target);
+                }
             }
         }
     }

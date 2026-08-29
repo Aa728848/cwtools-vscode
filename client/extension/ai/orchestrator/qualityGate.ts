@@ -363,6 +363,7 @@ export class QualityGate {
 
         let preFetchedDiagnostics = '';
         let diagnosticErrorCount = 0;
+        let cachedDiagnosticErrorCount = 0;
         const validationPendingFiles = new Set<string>();
         const freshDiagnosticFiles = new Set<string>();
         try {
@@ -386,12 +387,25 @@ export class QualityGate {
                 const resolvedFile = path.isAbsolute(file) ? path.resolve(file) : path.resolve(workspaceRoot, file);
                 if (res && typeof res === 'object') {
                     const record = res as Record<string, unknown>;
-                    const count = typeof record.totalDiagnosticCount === 'number' ? record.totalDiagnosticCount : 0;
-                    if (record.freshness === 'fresh' && count > 0) {
-                        diagnosticErrorCount += count;
+                    const summary = record.summary && typeof record.summary === 'object'
+                        ? record.summary as Record<string, unknown>
+                        : undefined;
+                    const errorCount = typeof summary?.errors === 'number'
+                        ? summary.errors
+                        : Array.isArray(record.diagnostics)
+                            ? record.diagnostics.filter(item => (item as any)?.severity === 'error').length
+                            : (typeof record.totalDiagnosticCount === 'number' ? record.totalDiagnosticCount : 0);
+                    const totalCount = typeof record.totalDiagnosticCount === 'number' ? record.totalDiagnosticCount : errorCount;
+                    if (record.freshness === 'fresh' && errorCount > 0) {
+                        diagnosticErrorCount += errorCount;
                         diagResults.push(`File: ${file}\n${JSON.stringify(record.diagnostics, null, 2)}`);
-                    } else if (record.freshness !== 'fresh' && count > 0) {
-                        diagResults.push(`File: ${file}\n${count} cached diagnostic(s) are advisory because freshness is ${String(record.freshness ?? 'unavailable')}.`);
+                    } else if (record.freshness !== 'fresh') {
+                        if (errorCount > 0) {
+                            cachedDiagnosticErrorCount += errorCount;
+                            diagResults.push(`File: ${file}\n${errorCount} cached diagnostic error(s) are advisory because freshness is ${String(record.freshness ?? 'unavailable')}.`);
+                        } else if (totalCount > 0) {
+                            diagResults.push(`File: ${file}\n${totalCount} cached diagnostic(s) (non-error) are advisory because freshness is ${String(record.freshness ?? 'unavailable')}.`);
+                        }
                     }
                     if (record.freshness !== 'fresh') {
                         validationPendingFiles.add(resolvedFile);
@@ -432,12 +446,12 @@ export class QualityGate {
 
         // A reviewer cannot make the LSP fresher. If every deterministic logic,
         // semantic, evidence, and acceptance check passed and the only remaining
-        // uncertainty is diagnostic freshness, accept once with an advisory and
-        // skip the token-heavy reviewer/repair stack.
+        // uncertainty is diagnostic freshness without introducing new errors,
+        // accept once with an advisory and skip the token-heavy reviewer/repair stack.
         const freshnessOnlyPending = validationPendingCount > 0
             && unresolvedEvidencePending.length === 0
             && diagnosticErrorCount === 0
-            && !preFetchedDiagnostics.includes('cached diagnostic(s) are advisory')
+            && cachedDiagnosticErrorCount === 0
             && finalEvidence.conflictFiles.length === 0
             && semantic.issues.length === 0
             && semantic.acceptanceFailures.length === 0;

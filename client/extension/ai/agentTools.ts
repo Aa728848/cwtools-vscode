@@ -3308,10 +3308,10 @@ export class AgentToolExecutor {
             case 'stale_lsp_cache':
                 return {
                     recommendedTools: ['get_diagnostics', 'go_to_definition', 'workspace_symbols', ...referenceTools],
-                    avoidTools: ['duplicate localisation/entity creation', 'blind retries'],
+                    avoidTools: ['duplicate localisation/entity creation', 'blind retries', 'no-op dummy edits to force freshness'],
                     nextInstruction: referenceVerificationRequired
                         ? 'Verify whether the concrete referenced entity/key already exists before writing again; wait for fresh diagnostics if global checks are pending.'
-                        : 'No concrete reference was found. Do not search project/vanilla blindly; wait for fresh diagnostics or report degraded validation.',
+                        : 'No concrete syntax or diagnostic errors were introduced. Do not perform dummy or no-op edits to force freshness; accept deterministic validation results if the code is correct.',
                 };
             case 'lsp_no_feedback':
                 return {

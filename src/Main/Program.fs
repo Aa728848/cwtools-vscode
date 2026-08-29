@@ -12015,9 +12015,15 @@ type Server(client: ILanguageClient) =
                                 | true, state ->
                                     let currentVersion = docs.GetVersionByPath(filePath)
                                     let currentModelEpoch = modelEpochSnapshot ()
+                                    let isLocFile = isCurrentGameLocalisationFile filePath
+                                    let isEpochStale =
+                                        if isLocFile then
+                                            not (sameModelEpoch state.modelEpoch currentModelEpoch)
+                                        else
+                                            not (sameIndexModelEpoch state.modelEpoch currentModelEpoch)
                                     let effectiveFreshness =
                                         if DiagnosticMerge.isValidatedDocumentVersionStale state.validatedVersion currentVersion
-                                           || not (sameModelEpoch state.modelEpoch currentModelEpoch) then
+                                           || isEpochStale then
                                             Stale
                                         else
                                             state.freshness

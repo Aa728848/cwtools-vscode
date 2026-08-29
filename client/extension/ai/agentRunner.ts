@@ -547,7 +547,9 @@ function foldToolBatchState(input: {
                 const hasRunDiagnosticErrors = input.terminalValidation?.diagnosticErrorTargets.has(targetKey)
                     ?? hasDiagnosticErrors;
                 if (hasRunDiagnosticErrors) input.blockingValidationIssues.add(targetKey);
-                else if (record?.freshness === 'fresh') input.blockingValidationIssues.delete(targetKey);
+                else if (record?.freshness === 'fresh' || record?.postWriteValidationPassed === true || effectiveDiagnosticErrorCount === 0) {
+                    input.blockingValidationIssues.delete(targetKey);
+                }
             }
         }
         if (record?.requiresRepair === true) {

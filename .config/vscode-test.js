@@ -1,7 +1,7 @@
 
 /** @type {import('@vscode/test-cli').IBaseTestConfiguration} */
 module.exports = {
-  vscode: 'stable',
+  version: '1.93.1',
   extensionDevelopmentPath: "../release",
   files: [
     // The shader contract suite needs its own settings/env (see .vscode-test.shader.js),

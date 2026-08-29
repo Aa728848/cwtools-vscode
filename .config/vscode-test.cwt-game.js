@@ -20,7 +20,7 @@ fs.writeFileSync(path.join(userSettingsDir, 'settings.json'), JSON.stringify({
 }, null, 2));
 
 module.exports = {
-  vscode: 'stable',
+  version: '1.93.1',
   extensionDevelopmentPath: '../release',
   files: '../release/bin/client/test/suite/cwtGameActivation.test.js',
   workspaceFolder: gameSampleRoot,

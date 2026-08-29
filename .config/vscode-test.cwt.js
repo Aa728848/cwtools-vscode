@@ -1,6 +1,6 @@
 /** @type {import('@vscode/test-cli').IBaseTestConfiguration} */
 module.exports = {
-  vscode: 'stable',
+  version: '1.93.1',
   extensionDevelopmentPath: '../release',
   files: '../release/bin/client/test/suite/cwtLanguage.test.js',
   workspaceFolder: '../client/test/cwt-sample',

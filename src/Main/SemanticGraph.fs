@@ -96,20 +96,10 @@ let private originForPath path =
     if String.IsNullOrWhiteSpace value || value = "-1" then "embedded"
     else
         let roots = PdxShaderProject.configuredLoadOrderRoots ()
-        let candidate = PdxShaderProject.canonicalizePath path
-        let belongsToConfiguredRoot =
-            roots
-            |> List.exists (fun root ->
-                candidate = root.path
-                || (candidate.Length > root.path.Length
-                    && candidate.StartsWith(root.path, StringComparison.Ordinal)
-                    && candidate[root.path.Length] = '/'))
-        if not belongsToConfiguredRoot then "vanilla"
-        else
-            match PdxShaderProject.originForResourceWithRoots roots "" path with
-            | PdxShaderProject.Dependency _ -> "dependency"
-            | PdxShaderProject.Vanilla -> "vanilla"
-            | _ -> "workspace"
+        match PdxShaderProject.originForResourceWithRoots roots "" path with
+        | PdxShaderProject.Dependency _ -> "dependency"
+        | PdxShaderProject.Vanilla -> "vanilla"
+        | _ -> "workspace"
 
 let private originForResource scope path =
     match PdxShaderProject.originForResource scope path with
@@ -600,8 +590,18 @@ let compareDefinitionWithVanillaWithRuntime (shouldCancel: unit -> bool) freshne
         |> Array.tryPick (fun definition -> game.OverrideModeAtPath(logicalPathFor definition.range.FileName) |> Option.map (fun mode -> mode.strategy.ToUpperInvariant()))
     let winner, resolution, ambiguous, ambiguousReason =
         match strategy with
-        | Some "LIOS" -> ordered |> Array.tryLast, "last_in_only_served", false, None
-        | Some "FIOS" -> ordered |> Array.tryHead, "first_in_only_served", false, None
+        | Some "LIOS" ->
+            let resolvedWinner =
+                match workspace with
+                | Some ws -> Some ws
+                | None -> ordered |> Array.tryLast
+            resolvedWinner, "last_in_only_served", false, None
+        | Some "FIOS" ->
+            let resolvedWinner =
+                match vanilla with
+                | Some vn -> Some vn
+                | None -> ordered |> Array.tryHead
+            resolvedWinner, "first_in_only_served", false, None
         | Some "NO" ->
             ordered |> Array.tryHead,
             "no_individual_override",

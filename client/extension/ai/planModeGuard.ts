@@ -115,8 +115,10 @@ export function isPlanModeCardArtifactFile(filePath: string, workspaceRoot: stri
     return false;
 }
 
-function isCurrentTopicImplementationPlan(filePath: string, workspaceRoot: string, topicId: string | undefined): boolean {
-    if (!topicId || !EXACT_HANDOFF_PLAN_FILE_RE.test(path.basename(filePath))) return false;
+function isCurrentTopicPermittedArtifact(filePath: string, workspaceRoot: string, topicId: string | undefined): boolean {
+    if (!topicId) return false;
+    const base = path.basename(filePath);
+    if (!EXACT_HANDOFF_PLAN_FILE_RE.test(base) && !/^walkthrough\.md$/i.test(base)) return false;
     const segments = getAiRelativeSegments(filePath, workspaceRoot, topicId);
     if (!segments || segments.length < 2) return false;
     const safeTopicId = topicId.replace(/[^a-zA-Z0-9_.-]/g, '_').toLowerCase();
@@ -155,7 +157,7 @@ export function validatePlanModeToolUse(
     const allowedArtifactTargets = mode === 'plan'
         ? targets.every(target => isPlanModeCardArtifactFile(target, workspaceRoot, topicId))
         : toolName === 'write_file'
-            && targets.every(target => isCurrentTopicImplementationPlan(target, workspaceRoot, topicId));
+            && targets.every(target => isCurrentTopicPermittedArtifact(target, workspaceRoot, topicId));
     if (planFileWriteTools.has(toolName) && targets.length > 0 && allowedArtifactTargets) {
         return { allowed: true, targetPaths: targets };
     }

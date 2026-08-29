@@ -3337,13 +3337,19 @@ export class AgentRunner {
             }
 
             // Add assistant response (cleaned) to conversation history.
-            // Preserve the reasoning field for DeepSeek-R1 API compatibility:
-            // DeepSeek requires it on ALL assistant messages when in thinking
-            // mode, even if null. Without it, after several iterations the API
-            // returns 400: "reasoning_content must be passed back".
-            // The reasoningField was already extracted from the raw response.
-            if (reasoningField !== undefined && assistantMessage.reasoning_content === undefined) {
-                assistantMessage.reasoning_content = reasoningField || null;
+            // Preserve the reasoning field for DeepSeek-R1 / reasoner model API compatibility:
+            // Include reasoning_content when the model emitted reasoning text.
+            // When omitted/empty, do NOT assign null — strict OpenAI-compatible schemas
+            // (e.g. StepFun / Minimax / custom gateways) reject null reasoning_content with 400.
+            const cleanReasoning = typeof reasoningField === 'string' && reasoningField.trim().length > 0
+                ? reasoningField
+                : (typeof assistantMessage.reasoning_content === 'string' && assistantMessage.reasoning_content.trim().length > 0
+                    ? assistantMessage.reasoning_content
+                    : undefined);
+            if (cleanReasoning !== undefined) {
+                assistantMessage.reasoning_content = cleanReasoning;
+            } else {
+                delete assistantMessage.reasoning_content;
             }
             // Remember a non-default reasoning field name so later turns replay
             // the thinking content under the field this provider actually uses.

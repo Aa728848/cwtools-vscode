@@ -103,7 +103,12 @@ function removeUnsupportedOptionalChatFields(
     payload: Record<string, unknown>,
     errorText: string
 ): string[] {
-    if (!/(?:unsupported|not supported|does not support|unknown|unrecognized|unexpected|not permitted|not allowed|invalid parameter)/i.test(errorText)) {
+    const errorPattern = /(?:unsupported|not supported|does not support|unknown|unrecognized|unexpected|not permitted|not allowed|invalid|bad_request|type_error|value_error|schema|validation|类型错误|参数错误|不支持|未知|非法|无效|校验)/i;
+    const mentionsKnownKey = OPTIONAL_CHAT_REQUEST_FIELDS.some(f => new RegExp(`\\b${f}\\b`, 'i').test(errorText))
+        || /\bthinking_config\b/i.test(errorText)
+        || KNOWN_REASONING_KEYS.some(key => new RegExp(`\\b${key}\\b`, 'i').test(errorText));
+
+    if (!errorPattern.test(errorText) && !mentionsKnownKey) {
         return [];
     }
     const removed: string[] = [];
@@ -125,10 +130,11 @@ function removeUnsupportedOptionalChatFields(
             const key = typeof message.reasoning_key === 'string' && message.reasoning_key
                 ? message.reasoning_key
                 : DEFAULT_REASONING_KEY;
-            if (message[key] === undefined && message.reasoning_content === undefined) continue;
-            delete message[key];
-            delete message.reasoning_content;
-            changed = true;
+            if (message[key] !== undefined || message.reasoning_content !== undefined) {
+                delete message[key];
+                delete message.reasoning_content;
+                changed = true;
+            }
         }
         if (changed) removed.push('message.reasoning_content');
     }
@@ -831,20 +837,26 @@ export class AIService {
         // switched or a fallback provider receives the same transcript.
         const chatRequest: ChatCompletionRequest = {
             ...request,
-            messages: request.messages.map(message => ({
-                role: message.role,
-                content: message.content,
-                ...(message.tool_calls ? {
-                    tool_calls: message.tool_calls.map(call => ({
-                        id: call.id,
-                        type: call.type,
-                        function: { ...call.function },
-                    })),
-                } : {}),
-                ...(message.tool_call_id !== undefined ? { tool_call_id: message.tool_call_id } : {}),
-                ...(message.name !== undefined ? { name: message.name } : {}),
-                ...(message.reasoning_content !== undefined ? { [message.reasoning_key ?? DEFAULT_REASONING_KEY]: message.reasoning_content } : {}),
-            })),
+            messages: request.messages.map(message => {
+                const reasoningKey = typeof message.reasoning_key === 'string' && message.reasoning_key
+                    ? message.reasoning_key
+                    : DEFAULT_REASONING_KEY;
+                const hasReasoning = typeof message.reasoning_content === 'string' && message.reasoning_content.trim().length > 0;
+                return {
+                    role: message.role,
+                    content: message.content,
+                    ...(message.tool_calls ? {
+                        tool_calls: message.tool_calls.map(call => ({
+                            id: call.id,
+                            type: call.type,
+                            function: { ...call.function },
+                        })),
+                    } : {}),
+                    ...(message.tool_call_id !== undefined ? { tool_call_id: message.tool_call_id } : {}),
+                    ...(message.name !== undefined ? { name: message.name } : {}),
+                    ...(hasReasoning ? { [reasoningKey]: message.reasoning_content } : {}),
+                };
+            }),
         };
 
         // ── Providers that reject image_url.detail ────────────────────────────
@@ -1325,9 +1337,7 @@ export class AIService {
                     tool_calls: toolCalls,
                     ...(detectedReasoningKey && detectedReasoningKey !== DEFAULT_REASONING_KEY
                         ? { reasoning_key: detectedReasoningKey } : {}),
-                    // DeepSeek-R1 requires the reasoning field on ALL assistant messages
-                    // when thinking mode is active — set to null when absent, not omitted
-                    reasoning_content: reasoningBuf || null,
+                    ...(reasoningBuf && reasoningBuf.trim().length > 0 ? { reasoning_content: reasoningBuf } : {}),
                 } as ChatMessage & { tool_calls?: typeof toolCalls },
                 finish_reason: finishReason ?? 'stop',
             }],
@@ -2244,7 +2254,7 @@ export class AIService {
                 message: {
                     role: 'assistant',
                     content: text || null,
-                    reasoning_content: reasoningParts.join('') || null,
+                    ...(reasoningParts.join('').trim().length > 0 ? { reasoning_content: reasoningParts.join('') } : {}),
                     ...(toolCalls.length > 0 ? { tool_calls: toolCalls } : {}),
                 },
                 finish_reason: toolCalls.length > 0
@@ -2459,7 +2469,7 @@ export class AIService {
                     message: {
                         role: 'assistant',
                         content: textParts.join('') || null,
-                        reasoning_content: reasoningParts.join('') || null,
+                        ...(reasoningParts.join('').trim().length > 0 ? { reasoning_content: reasoningParts.join('') } : {}),
                         ...(thinkingBlocks.length > 0 ? { anthropic_thinking_blocks: thinkingBlocks } : {}),
                         ...(toolCalls.length > 0 ? { tool_calls: toolCalls } : {}),
                     },
@@ -2638,8 +2648,7 @@ export class AIService {
         const message: ChatMessage & { tool_calls?: typeof toolCalls } = {
             role: 'assistant',
             content: textBuf || null,
-            // Include thinking tokens in the response (matches OpenAI path's reasoning_content)
-            reasoning_content: reasoningBuf || null,
+            ...(reasoningBuf && reasoningBuf.trim().length > 0 ? { reasoning_content: reasoningBuf } : {}),
             ...(Object.keys(thinkingBlocks).length > 0
                 ? {
                     anthropic_thinking_blocks: Object.entries(thinkingBlocks)

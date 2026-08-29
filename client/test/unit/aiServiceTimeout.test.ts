@@ -1111,6 +1111,72 @@ describe('AIService OpenAI Chat Completions compatibility', () => {
         expect(bodies[1].messages[0]).to.not.have.property('reasoning_content');
     });
 
+    it('omits reasoning_content from replayed messages when reasoning_content is null or empty', async () => {
+        const { AIService } = loadAIService();
+        const service = new AIService({ secrets: {} } as any) as any;
+        const bodies: any[] = [];
+        service.fetchWithRetry = async (_url: string, init: RequestInit) => {
+            bodies.push(JSON.parse(init.body as string));
+            return chatCompletionsSseResponse([{ choices: [{ delta: { content: 'ok' }, finish_reason: 'stop' }] }]);
+        };
+
+        await service.callOpenAICompatibleStreaming(
+            'https://relay.example/v1',
+            'test-key',
+            {
+                model: 'relay-model',
+                messages: [
+                    { role: 'assistant', content: 'msg1', reasoning_content: null },
+                    { role: 'assistant', content: 'msg2', reasoning_content: '' },
+                    { role: 'assistant', content: 'msg3', reasoning_content: 'valid thinking' },
+                    { role: 'user', content: 'continue' },
+                ],
+            },
+            'custom',
+            undefined,
+            new AbortController(),
+        );
+
+        expect(bodies[0].messages[0]).to.not.have.property('reasoning_content');
+        expect(bodies[0].messages[1]).to.not.have.property('reasoning_content');
+        expect(bodies[0].messages[2].reasoning_content).to.equal('valid thinking');
+    });
+
+    it('can remove reasoning_content and retry when provider returns Chinese type error', async () => {
+        const { AIService } = loadAIService();
+        const service = new AIService({ secrets: {} } as any) as any;
+        const bodies: any[] = [];
+        service.fetchWithRetry = async (_url: string, init: RequestInit) => {
+            bodies.push(JSON.parse(init.body as string));
+            if (bodies.length === 1) {
+                return {
+                    ok: false,
+                    status: 400,
+                    text: async () => '{"code":"BAD_REQUEST","message":"messages.52.reasoning_content 类型错误","traceId":"trace_test"}',
+                };
+            }
+            return chatCompletionsSseResponse([{ choices: [{ delta: { content: 'ok' }, finish_reason: 'stop' }] }]);
+        };
+
+        await service.callOpenAICompatibleStreaming(
+            'https://relay.example/v1',
+            'test-key',
+            {
+                model: 'relay-model',
+                messages: [
+                    { role: 'assistant', content: 'prior', reasoning_content: 'think' },
+                    { role: 'user', content: 'continue' },
+                ],
+            },
+            'custom',
+            undefined,
+            new AbortController(),
+        );
+
+        expect(bodies[0].messages[0].reasoning_content).to.equal('think');
+        expect(bodies[1].messages[0]).to.not.have.property('reasoning_content');
+    });
+
     it('keeps no-index tool argument fragments on the same tool call', async () => {
         const { AIService } = loadAIService();
         const service = new AIService({ secrets: {} } as any) as any;

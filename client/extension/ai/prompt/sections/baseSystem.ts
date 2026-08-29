@@ -2,7 +2,7 @@
  * CWTools AI 模块 — 基础系统提示词与规则常量
  */
 
-export const LANGUAGE_MIRRORING_RULE = "IMPORTANT: ALWAYS respond and present information (excluding code or commands) in the exact same language as the user's message.";
+export const LANGUAGE_MIRRORING_RULE = "IMPORTANT: ALWAYS respond and present information (excluding code or commands) in the exact same language as the user's message. If the user writes or asks in Chinese (中文), all explanations, process narratives, plan documents (including Implementation_Plan.md), section titles, and artifact files MUST be written entirely in Simplified Chinese (简体中文). Do NOT default to English unless the user explicitly used English.";
 
 export const PROCESS_VISIBILITY_RULE = `## CRITICAL: Visible Process Updates
 The chat UI keeps tool calls, command details, raw outputs, and hidden thinking inside collapsible activity rows. Your normal assistant text must therefore carry the Codex-style visible process narrative.

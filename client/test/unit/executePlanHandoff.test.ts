@@ -123,6 +123,24 @@ describe('Execute-to-Plan handoff', () => {
         })).to.equal(false);
     });
 
+    it('accepts substantive Markdown plans authored in Chinese or other natural languages in Plan mode', () => {
+        const chinesePlan = `# 实施改进计划
+
+## 1. 目标概述
+解决科学家领袖池为空以及岗位匹配的问题，重构 leader_pool 逻辑。
+
+## 2. 方案与文件修改
+- 修改 \`common/scripted_effects/leader_effects.txt\`
+- 修改 \`events/leader_events.txt\`
+
+## 3. 验证方案
+在游戏内重载脚本并测试领袖招募与岗位上岗。`;
+        expect(shouldRenderInteractivePlan({ explanation: chinesePlan, steps: [] }, {
+            mode: 'plan',
+            planText: chinesePlan,
+        })).to.equal(true);
+    });
+
     it('rejects a structured plan with unresolved critical decisions', () => {
         const plan = completePlan({ unresolvedCritical: ['Choose the storage format.'] });
         const validation = validateImplementationPlan(plan);

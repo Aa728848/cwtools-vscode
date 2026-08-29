@@ -70,6 +70,7 @@ Mandatory pre-write validation — perform this locally before the FIRST write; 
 8. Submit the plan write by itself and STOP. Do not combine it with project writes, commands, or \`dispatch_agents\` before approval.`;
 
 export const IMPLEMENTATION_PLAN_AUTHORING_GUIDANCE = `Plan authoring guidance — keep the contract strict while adapting the prose to the task:
+- Language fidelity: The human-readable plan body, all headings (#, ##), operations descriptions, and verification criteria MUST strictly follow the user's conversation language (e.g. write in Simplified Chinese if the user prompts in Chinese).
 - Scale the plan to the real work. A cohesive one-file change may have one concise operation; cross-file work should split only at meaningful ownership or dependency boundaries. Do not pad a small task or force every plan into the same large-task template.
 - Make the human-readable body execution-ready without relying on earlier chat. Use only the sections the task needs. Section names and depth should follow the task; do not pad a small plan to satisfy a template.
 - Choose tier by risk: lightweight for cohesive one/two-file local changes, structured for ordinary cross-file work, and blueprint for high-impact or Multi-Agent entity/data-flow changes.
@@ -90,7 +91,8 @@ export function shouldPauseForInteractivePlan(
 ): boolean {
     return !context.approvedPlanExecution
         && EXECUTE_HANDOFF_MODES.has(context.mode)
-        && validateImplementationPlan(content).complete;
+        && (validateImplementationPlan(content).complete
+            || (/^#{1,3}\s+\S+/m.test(content) && content.trim().length >= 80));
 }
 
 export function isCompleteImplementationPlanWrite(
@@ -110,7 +112,8 @@ export function isCompleteImplementationPlanWrite(
         ? targetPaths
         : typeof args.file === 'string' ? [args.file] : [];
     return targets.some(target => PLAN_ARTIFACT_PATTERN.test(target))
-        && validateImplementationPlan(args.content).complete;
+        && (validateImplementationPlan(args.content).complete
+            || (/^#{1,3}\s+\S+/m.test(args.content) && args.content.trim().length >= 80));
 }
 
 /** Runtime-only contract added after the cache-stable system prompt on approval continuations. */
@@ -147,10 +150,19 @@ function isStringArray(value: unknown): value is string[] {
 function parsePlanHandoff(planText: string): { blockCount: number; value?: unknown } {
     const blocks = [...planText.matchAll(PLAN_HANDOFF_BLOCK_PATTERN)];
     if (blocks.length !== 1 || !blocks[0]?.[1]) return { blockCount: blocks.length };
+    const raw = blocks[0][1].trim();
     try {
-        return { blockCount: 1, value: JSON.parse(blocks[0][1]) };
+        return { blockCount: 1, value: JSON.parse(raw) };
     } catch {
-        return { blockCount: 1 };
+        try {
+            const sanitized = raw
+                .replace(/\/\/.*$/gm, '')
+                .replace(/\/\*[\s\S]*?\*\//g, '')
+                .replace(/,\s*([\]}])/g, '$1');
+            return { blockCount: 1, value: JSON.parse(sanitized) };
+        } catch {
+            return { blockCount: 1 };
+        }
     }
 }
 
@@ -416,6 +428,16 @@ export function shouldRenderInteractivePlan(
     if (wroteApprovalReadyBlueprint && wrotePlanArtifact) return true;
 
     const planText = context.planText ?? (context.mode === 'plan' ? result.explanation : '');
-    return (context.mode === 'plan' || wrotePlanArtifact || shouldPauseForInteractivePlan(planText, context))
-        && validateImplementationPlan(planText).complete;
+    if (validateImplementationPlan(planText).complete) return true;
+
+    // Robust fallback for Markdown plan documents:
+    // If the plan was written to Implementation_Plan.md or produced in Plan Mode,
+    // and contains a non-empty structured Markdown document (headings + substantive text),
+    // accept it as an interactive plan so the user gets the approval card.
+    const hasMarkdownPlanStructure = /^#{1,3}\s+\S+/m.test(planText) && planText.trim().length >= 80;
+    if ((context.mode === 'plan' || wrotePlanArtifact || shouldPauseForInteractivePlan(planText, context)) && hasMarkdownPlanStructure) {
+        return true;
+    }
+
+    return false;
 }

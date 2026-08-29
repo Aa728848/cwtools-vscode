@@ -157,7 +157,8 @@ export function enforceSubAgentSafety(
         };
     }
 
-    if (sandbox.writeScope && sandbox.writeScope.length === 0 && MUTATING_TOOLS.has(toolName) && !FILE_SCOPED_WRITE_TOOLS.has(toolName)) {
+    const isBlackboardCommunicationTool = toolName === 'set_memory' || toolName === 'query_blackboard';
+    if (sandbox.writeScope && sandbox.writeScope.length === 0 && MUTATING_TOOLS.has(toolName) && !FILE_SCOPED_WRITE_TOOLS.has(toolName) && !isBlackboardCommunicationTool) {
         return {
             allowed: false,
             reason: aiText(

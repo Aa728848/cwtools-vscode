@@ -614,7 +614,8 @@ export class EvidenceGate {
             const satisfied = hasCall('compare_definition_with_vanilla', args =>
                 typeof args.entityType === 'string'
                 && typeof args.symbolId === 'string'
-                && identifierSet.has(args.symbolId.toLowerCase()));
+                && identifierSet.has(args.symbolId.toLowerCase()))
+                || hasCall('query_override_modes', args => typeof args.path === 'string' || !args.path);
             if (!satisfied) {
             items.push({
                 kind: 'symbol_exists',

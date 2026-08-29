@@ -1690,15 +1690,25 @@ export async function activate(context: ExtensionContext) {
 		// The server is implemented using dotnet core
 		let serverExe: string;
 		if (os.platform() == "win32") {
-			serverExe = context.asAbsolutePath(path.join('bin', 'server', 'win-x64', 'CWTools Server.exe'))
+			const archFolder = process.arch === 'arm64' ? 'win-arm64' : 'win-x64';
+			const candidate = context.asAbsolutePath(path.join('bin', 'server', archFolder, 'CWTools Server.exe'));
+			serverExe = fs.existsSync(candidate) ? candidate : context.asAbsolutePath(path.join('bin', 'server', 'win-x64', 'CWTools Server.exe'));
 		}
 		else if (os.platform() == "darwin") {
-			serverExe = context.asAbsolutePath(path.join('bin', 'server', 'osx-x64', 'CWTools Server'))
-			fs.chmodSync(serverExe, '755');
+			const archFolder = process.arch === 'arm64' ? 'osx-arm64' : 'osx-x64';
+			const candidate = context.asAbsolutePath(path.join('bin', 'server', archFolder, 'CWTools Server'));
+			serverExe = fs.existsSync(candidate) ? candidate : context.asAbsolutePath(path.join('bin', 'server', 'osx-x64', 'CWTools Server'));
+			if (fs.existsSync(serverExe)) {
+				fs.chmodSync(serverExe, '755');
+			}
 		}
 		else {
-			serverExe = context.asAbsolutePath(path.join('bin', 'server', 'linux-x64', 'CWTools Server'))
-			fs.chmodSync(serverExe, '755');
+			const archFolder = process.arch === 'arm64' ? 'linux-arm64' : 'linux-x64';
+			const candidate = context.asAbsolutePath(path.join('bin', 'server', archFolder, 'CWTools Server'));
+			serverExe = fs.existsSync(candidate) ? candidate : context.asAbsolutePath(path.join('bin', 'server', 'linux-x64', 'CWTools Server'));
+			if (fs.existsSync(serverExe)) {
+				fs.chmodSync(serverExe, '755');
+			}
 		}
 		
 		const repoPathStr = getRulesRemoteUrl(language);

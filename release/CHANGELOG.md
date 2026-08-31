@@ -1,5 +1,15 @@
 # Changelog
 
+## [2.16.5] - 2026-08-31
+
+### 权限与安全模型升级 / Security & Permissions Model Upgrade
+- **[优化/重构] AI 权限体系升级为 Antigravity 模型（Upgrade AI Permissions Model to Antigravity Spec）**：
+  - **只读权限全放开**：只读工具（`read_file`、`grep`、`list_directory`、`document_symbols` 等）全面放开对本地任意合法路径的读取支持，彻底消除跨目录、工坊 Mod、系统日志及外部文档访问时的 `Access denied: outside the workspace` 拦截。
+  - **敏感凭据脱敏防护**：底层自动对 `.ssh/`、`.aws/`、`.gnupg/`、`id_rsa` 等系统敏感密钥与凭据路径进行阻断保护。
+  - **工作区外部写入自动驳回与提权审批**：在自动审批模式（`auto` / `auto_review` / 无人值守）下自动驳回针对工作区外部路径的写入操作，杜绝静默篡改外部文件；在人工确认模式下触发提权确认弹窗，由用户显式授权。
+  - **特殊开放路径全量保留**：主工作区、`.cwtools/` AI 项目存储、Topic Artifact 私有卡片、临时执行脚本、本地化 UTF-8 BOM 强制防护机制保持不变。
+  - English: [Improvement/Refactoring] Upgraded AI permissions model to Antigravity specification — unlocked full local read access across any valid filesystem paths for read tools without restrictive directory whitelists while protecting sensitive credentials (`.ssh/`, `.aws/`, `id_rsa`); implemented escalation prompts for outside-workspace writes in confirmation mode with strict automated rejection in unattended auto/review modes; preserved all internal trusted paths (`.cwtools/`, topic artifacts, BOM enforcement).
+
 ## [2.16.4] - 2026-08-31
 
 ### 核心修复与重构 / Core Fixes & Refactoring

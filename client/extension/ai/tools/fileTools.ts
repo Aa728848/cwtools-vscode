@@ -38,6 +38,7 @@ import {
 } from '../workspaceSandbox';
 import { GRAPHICS_EXTS, matchesExt } from '../../fileExtensions';
 import { getLocalisationTransactionTargets } from '../runner/toolScheduler';
+import { getSessionPermissionMode } from '../runner/sessionPermissions';
 import {
     createDiagnosticSnapshot,
     diffDiagnosticSnapshots,
@@ -437,9 +438,24 @@ export class FileToolHandler {
             if (!resolution.isWithinAnyWorkspace) {
                 const topicArtifact = this.resolveCurrentTopicArtifact(filePath, context);
                 if (topicArtifact) return topicArtifact;
-                throw new Error(`Access denied: Path '${filePath}' is outside the workspace root.`);
-            }
-            if (resolution.scope === 'workspace') {
+
+                const sessionMode = getSessionPermissionMode(this.ctx.workspaceRoot);
+                const isAutoMode = sessionMode === 'auto' || sessionMode === 'auto_review' || (context as any)?.reviewerMode === 'auto_review';
+                if (isAutoMode || !context?.onPermissionRequest) {
+                    throw new Error(`Access denied: Automated approval mode cannot write outside the workspace root: '${resolution.resolved}'.`);
+                }
+
+                const allowed = await this.requestPermissionWithAbort(
+                    `perm_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+                    toolName,
+                    `[ESCALATION] AI requests permission to write outside the workspace root: ${resolution.resolved}`,
+                    context ? { ...context, escalation: true } : context,
+                    resolution.resolved
+                );
+                if (!allowed) {
+                    throw new Error(`Access denied: User denied write outside the workspace root for '${resolution.resolved}'.`);
+                }
+            } else if (resolution.scope === 'workspace') {
                 const allowed = await this.requestPermissionWithAbort(
                     `perm_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
                     toolName,

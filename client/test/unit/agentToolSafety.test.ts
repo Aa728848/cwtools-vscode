@@ -96,7 +96,7 @@ const { AgentToolExecutor, TOOL_DEFINITIONS } = agentTools;
 const { getAgentToolTargetFiles, SUPERSEDED_BY_LATER_SAME_FILE_WRITE_TOOLS } = agentRunner;
 const { PermissionPolicyStore } = permissionPolicy;
 const { processRegistry } = processRegistryModule;
-const { resetSandboxStorageForTesting, configureSandboxStorage } = configuredGameRoots;
+const { resetSandboxStorageForTesting, getParadoxUserDataRoots } = configuredGameRoots;
 const TEMP_BASE = path.resolve(__dirname, '../../..', '.tmp-test');
 
 describe('enforced central tool policy', () => {
@@ -932,22 +932,27 @@ describe('agent tool file path safety', () => {
         expect(result.content).to.not.include('12 | line 12');
     });
 
-    it('allows reads under configured game roots but keeps other external paths blocked', async () => {
+    it('allows reading arbitrary local external files in Antigravity model and blocks sensitive credentials', async () => {
         const configuredRoot = makeWorkspace();
         const otherRoot = makeWorkspace();
         const vanillaFile = path.join(configuredRoot, 'common', 'game_rules', '00_rules.txt');
         const otherFile = path.join(otherRoot, 'outside.txt');
+        const sshKeyFile = path.join(otherRoot, '.ssh', 'id_rsa');
         fs.mkdirSync(path.dirname(vanillaFile), { recursive: true });
+        fs.mkdirSync(path.dirname(sshKeyFile), { recursive: true });
         fs.writeFileSync(vanillaFile, 'vanilla_rule = yes\n');
-        fs.writeFileSync(otherFile, 'outside\n');
+        fs.writeFileSync(otherFile, 'outside content\n');
+        fs.writeFileSync(sshKeyFile, 'secret_rsa_key\n');
         stubConfigOverrides['cache.stellaris'] = configuredRoot;
 
         try {
             const handler = createFileHandler();
             const vanilla = await handler.readFile({ file: vanillaFile });
-            const blocked = await handler.readFile({ file: otherFile });
+            const outside = await handler.readFile({ file: otherFile });
+            const blocked = await handler.readFile({ file: sshKeyFile });
 
             expect(vanilla.content).to.include('vanilla_rule = yes');
+            expect(outside.content).to.include('outside content');
             expect(blocked.content).to.include('outside the workspace and configured game directories');
         } finally {
             cleanupWorkspace(configuredRoot);
@@ -955,24 +960,29 @@ describe('agent tool file path safety', () => {
         }
     });
 
-    it('applies the configured-game read boundary to other file-scoped read tools', async () => {
+    it('applies Antigravity read model to file-scoped read tools and protects credentials', async () => {
         const configuredRoot = makeWorkspace();
         const otherRoot = makeWorkspace();
         const vanillaFile = path.join(configuredRoot, 'common', 'game_rules', '00_rules.txt');
         const otherFile = path.join(otherRoot, 'outside.txt');
+        const sshKeyFile = path.join(otherRoot, '.ssh', 'id_rsa');
         fs.mkdirSync(path.dirname(vanillaFile), { recursive: true });
+        fs.mkdirSync(path.dirname(sshKeyFile), { recursive: true });
         fs.writeFileSync(vanillaFile, 'vanilla_rule = yes\n');
-        fs.writeFileSync(otherFile, 'outside\n');
+        fs.writeFileSync(otherFile, 'outside_rule = yes\n');
+        fs.writeFileSync(sshKeyFile, 'secret_key\n');
         stubConfigOverrides['cache.stellaris'] = configuredRoot;
 
         try {
             const executor = new AgentToolExecutor({} as any, workspaceRoot);
-            const allowed = await executor.execute('document_symbols', { file: vanillaFile }, makeContext());
-            const blocked = await executor.execute('document_symbols', { file: otherFile }, makeContext()) as any;
+            const allowedVanilla = await executor.execute('document_symbols', { file: vanillaFile }, makeContext());
+            const allowedOutside = await executor.execute('document_symbols', { file: otherFile }, makeContext());
+            const blockedCredential = await executor.execute('document_symbols', { file: sshKeyFile }, makeContext()) as any;
 
-            expect(allowed).to.have.property('symbols');
-            expect(blocked.success).to.equal(false);
-            expect(blocked.error).to.include('outside the workspace and configured game directories');
+            expect(allowedVanilla).to.have.property('symbols');
+            expect(allowedOutside).to.have.property('symbols');
+            expect(blockedCredential.success).to.equal(false);
+            expect(blockedCredential.error).to.include('outside the workspace and configured game directories');
         } finally {
             cleanupWorkspace(configuredRoot);
             cleanupWorkspace(otherRoot);
@@ -1019,6 +1029,67 @@ describe('agent tool file path safety', () => {
         } finally {
             cleanupWorkspace(customRulesDir);
         }
+    });
+
+    it('handles outside-workspace writes with escalation prompt in confirm mode and auto-denies in auto mode', async () => {
+        const outsideDir = makeWorkspace();
+        const outsideFile = path.join(outsideDir, 'external_config.txt');
+        fs.writeFileSync(outsideFile, 'initial = 1\n');
+
+        try {
+            const handler = createFileHandler();
+
+            // 1. In auto approval mode -> auto denies outside workspace writes
+            const autoDeniedResult = await handler.writeFile({
+                file: outsideFile,
+                content: 'new content auto',
+            }, {
+                reviewerMode: 'auto_review',
+                onPermissionRequest: async () => true,
+            } as any);
+            expect(autoDeniedResult.success).to.equal(false);
+            expect(autoDeniedResult.message).to.include('Automated approval mode cannot write outside the workspace');
+
+            // 2. In confirm mode with user rejection -> denied
+            const userRejectedResult = await handler.writeFile({
+                file: outsideFile,
+                content: 'new content rejected',
+            }, {
+                onPermissionRequest: async () => false,
+            } as any);
+            expect(userRejectedResult.success).to.equal(false);
+            expect(userRejectedResult.message).to.include('User denied write outside the workspace');
+
+            // 3. In confirm mode with user approval -> allows write (after readTracker sync)
+            await handler.readFile({ file: outsideFile });
+            const userApprovedResult = await handler.writeFile({
+                file: outsideFile,
+                content: 'new content approved\n',
+            }, {
+                onPermissionRequest: async () => true,
+            } as any);
+            expect(userApprovedResult.success).to.equal(true);
+            expect(fs.readFileSync(outsideFile, 'utf8')).to.equal('new content approved\n');
+        } finally {
+            cleanupWorkspace(outsideDir);
+        }
+    });
+
+    it('derives expected Paradox Interactive user data roots across platforms', () => {
+        const winRoots = getParadoxUserDataRoots('win32', 'C:\\Users\\TestUser', {
+            USERPROFILE: 'C:\\Users\\TestUser',
+            OneDrive: 'C:\\Users\\TestUser\\OneDrive',
+        } as any);
+        expect(winRoots).to.include(path.resolve('C:\\Users\\TestUser\\Documents\\Paradox Interactive'));
+        expect(winRoots).to.include(path.resolve('C:\\Users\\TestUser\\OneDrive\\Documents\\Paradox Interactive'));
+
+        const linuxRoots = getParadoxUserDataRoots('linux', '/home/testuser', {} as any);
+        expect(linuxRoots).to.include(path.resolve('/home/testuser/.local/share/Paradox Interactive'));
+        expect(linuxRoots).to.include(path.resolve('/home/testuser/.paradoxinteractive'));
+
+        const macRoots = getParadoxUserDataRoots('darwin', '/Users/testuser', {} as any);
+        expect(macRoots).to.include(path.resolve('/Users/testuser/Documents/Paradox Interactive'));
+        expect(macRoots).to.include(path.resolve('/Users/testuser/Library/Application Support/Paradox Interactive'));
     });
 
     it('rejects writes to globalStorage and auxiliary readable paths', async () => {

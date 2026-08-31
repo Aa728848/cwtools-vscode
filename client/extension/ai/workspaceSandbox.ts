@@ -6,6 +6,7 @@ import { getSessionPermissionMode } from './runner/sessionPermissions';
 import {
     getConfiguredGameRoots,
     getAuxiliaryReadableRoots,
+    getParadoxUserDataRoots,
     configureSandboxStorage,
     resetSandboxStorageForTesting,
 } from '../configuredGameRoots';
@@ -32,7 +33,7 @@ export interface ReadablePathResolution extends WorkspacePathResolution {
 // re-exported here so existing AI-layer imports keep working unchanged.
 export { foldPathCase } from '../pathScope';
 export { isPathInsideOrEqual };
-export { configureSandboxStorage, resetSandboxStorageForTesting, getAuxiliaryReadableRoots };
+export { configureSandboxStorage, resetSandboxStorageForTesting, getAuxiliaryReadableRoots, getParadoxUserDataRoots };
 
 /** Keep workspace files compact while preserving usable absolute paths for configured game data. */
 export function formatReadablePathForTool(filePath: string, workspaceRoot: string): string {
@@ -157,6 +158,22 @@ export function resolveWorkspacePathInput(
     };
 }
 
+const SENSITIVE_SEGMENTS = new Set(['.ssh', '.aws', '.gnupg']);
+const SENSITIVE_FILENAMES = new Set(['id_rsa', 'id_ed25519', 'id_ecdsa', 'id_dsa']);
+
+export function isSensitiveCredentialPath(filePath: string): boolean {
+    const normalized = filePath.replace(/\\/g, '/').toLowerCase();
+    const segments = normalized.split('/').filter(Boolean);
+    if (segments.some(seg => SENSITIVE_SEGMENTS.has(seg))) {
+        return true;
+    }
+    const basename = path.basename(normalized);
+    if (SENSITIVE_FILENAMES.has(basename)) {
+        return true;
+    }
+    return false;
+}
+
 /** Resolve a model-supplied read path against the workspace and configured game roots. */
 export function resolveReadablePathInput(
     inputPath: string,
@@ -165,6 +182,13 @@ export function resolveReadablePathInput(
     const resolution = resolveWorkspacePathInput(inputPath, workspaceRoot);
     if (resolution.isWithinAnyWorkspace) {
         return { ...resolution, isWithinReadableRoot: true };
+    }
+
+    if (isSensitiveCredentialPath(resolution.resolved)) {
+        return {
+            ...resolution,
+            isWithinReadableRoot: false,
+        };
     }
 
     const configuredGameRoot = getConfiguredGameRoots()
@@ -188,9 +212,10 @@ export function resolveReadablePathInput(
         };
     }
 
+    // Antigravity model: Allow read access to any valid local file path
     return {
         ...resolution,
-        isWithinReadableRoot: false,
+        isWithinReadableRoot: true,
     };
 }
 

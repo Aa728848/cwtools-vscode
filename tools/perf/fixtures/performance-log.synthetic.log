@@ -1,0 +1,36 @@
+[00:00:00] [内存] 分析周期
+  详情: 本周期分配: 64 MB [cycleAllocMB=64] | 计数: 1 [strings=1]
+  内存: 托管堆: 512MB [heap=512MB] | 累计分配: 2GB [alloc=2GB] | 工作集: 1.5GB [working=1.5GB] | 专用内存: 900MB [private=900MB]
+  诊断: 待校验: 7 [pending=7]
+[00:00:01] [RequestTrace] {"method":"textDocument/hover","totalMs":12.5,"lockWaitMs":2,"methodMs":5,"pendingCount":4,"outcome":"success"}
+[00:00:02] [RequestTrace] {"method":"textDocument/completion","totalMs":8,"lockWaitMs":1,"methodMs":4,"pendingCount":2,"outcome":"success"}
+[00:00:03] [RequestTrace] {"method":"textDocument/hover","totalMs":7.5,"lockWaitMs":1,"methodMs":3,"pendingCount":6,"outcome":"cancelled"}
+[00:00:04] [RequestTrace] {"method":"workspace/symbol","totalMs":"invalid","pendingCount":-1,"outcome":"success"}
+[00:00:05] [RequestTrace] {"method":"truncated"
+[00:00:06] [性能] WriteLock hold budget exceeded
+  详情: 等待写锁: 3ms [wait=3ms] | 持有写锁: 40ms [hold=40ms]
+[00:00:07] [刷新] PrepareIncrementalTypes
+  详情: 等待写锁: 2ms [wait=2ms] | 持有写锁: 25ms [hold=25ms] | 使用 staged 刷新: 是 [staged=True]
+[00:00:08] [刷新] CommitIncrementalTypes
+  详情: 耗时: 4ms [elapsedMs=4]
+[00:00:09] [刷新] 刷新缓存 · 已跳过
+  详情: 待校验: 否 [pending=false]
+[00:00:10] [生命周期] AnalyzeLifecycle
+  详情: stage: prepare-after [stage=prepare-after] | outcome: prepared [outcome=prepared]
+  ↳ 耗时: 1500 ms [elapsedMs=1500] | totalElapsedMs: 1510 [totalElapsedMs=1510]
+[00:00:11] [生命周期] AnalyzeLifecycle
+  详情: stage: commit-after [stage=commit-after] | outcome: committed [outcome=committed]
+  ↳ 耗时: 6 ms [elapsedMs=6]
+[00:00:12] [生命周期] AnalyzeLifecycle
+  详情: stage: prepare-after [stage=prepare-after] | outcome: skipped [outcome=skipped]
+  ↳ 耗时: 9999 ms [elapsedMs=9999]
+[00:00:13] [生命周期] AnalyzeLifecycle
+  详情: stage: incremental-after [stage=incremental-after] | outcome: prepared [outcome=prepared]
+  ↳ 耗时: 8888 ms [elapsedMs=8888]
+[00:00:14] [生命周期] AnalyzeLifecycle
+  详情: stage: commit-after [stage=commit-after] | outcome: skipped [outcome=skipped]
+[00:00:15] [内存] 分析周期
+  详情: 最近操作: refresh [last=refresh] | 全局刷新次数: 3 [refresh=3] | 本地化刷新次数: 2 [refreshLoc=2]
+  ↳ 本周期分配: 128 MB [cycleAllocMB=128]
+  内存: 托管堆: 768MB [heap=768MB] | 累计分配: 3GB [alloc=3GB] | 工作集: 1024MB [working=1024MB] | 专用内存: 1.25GB [private=1.25GB]
+  诊断: 待校验: 0 [pending=0]

@@ -50,6 +50,11 @@
     <Compile Include="SemanticDirectoryCatalog.fs" />
     <Compile Include="PdxFragmentValidation.fs" />
     <Compile Include="OverlayValidation.fs" />
+    <Compile Include="PathIdentity.fs" />
+    <Compile Include="RefreshCoordinator.fs" />
+    <Compile Include="DiagnosticInvalidation.fs" />
+    <Compile Include="SymbolIndex.fs" />
+    <Compile Include="RefreshLockPhases.fs" />
     <Compile Include="Program.fs" />
   </ItemGroup>
   <ItemGroup>

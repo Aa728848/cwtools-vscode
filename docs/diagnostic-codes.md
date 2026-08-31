@@ -624,6 +624,20 @@ should no longer be used. Follow the message text for the replacement.
 
 引用的类型键(type key)已过时,不应再使用。按报错原文中的提示改用新写法。
 
+## CW278
+
+**Same-file scripted-variable arithmetic (E)** — a variable declared in
+`common/scripted_variables` uses another variable from the same file inside an
+`@[ ... ]` arithmetic expression. Stellaris does not evaluate that derived
+constant. Move the referenced constant to a different scripted-variable file or
+replace the expression with a literal value. Cross-file arithmetic references
+remain valid.
+
+**同文件封装常量算术 (E)** — `common/scripted_variables` 中的常量在
+`@[ ... ]` 算术表达式里引用了同一文件中的另一个常量。Stellaris 不会计算
+这个派生常量；请把被引用常量移到另一个封装常量文件，或改用字面量。跨文件
+算术引用仍然合法。
+
 ---
 
 # Shader diagnostics (CWFX) / Shader 诊断

@@ -398,6 +398,7 @@ describe('getProviderApiFormat', () => {
             'codex-chatgpt': 'openai-responses',
             openai: 'openai-responses',
             claude: 'anthropic-messages',
+            tokenrhythm: 'openai-chat-completions',
             deepseek: 'openai-chat-completions',
             minimax: 'openai-chat-completions',
             'minimax-token-plan': 'anthropic-messages',

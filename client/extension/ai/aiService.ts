@@ -89,13 +89,23 @@ function isResponsesFunctionCallItemId(value: unknown): value is string {
     return typeof value === 'string' && value.startsWith('fc_');
 }
 
-function normalizeOpenAIActionUrl(endpoint: string, action: 'chat/completions' | 'responses'): string {
+export function normalizeOpenAIActionUrl(endpoint: string, action: 'chat/completions' | 'responses'): string {
     const trimmed = endpoint.trim();
     const queryIndex = trimmed.indexOf('?');
     const query = queryIndex >= 0 ? trimmed.slice(queryIndex) : '';
-    const base = (queryIndex >= 0 ? trimmed.slice(0, queryIndex) : trimmed)
+    let base = (queryIndex >= 0 ? trimmed.slice(0, queryIndex) : trimmed)
         .replace(/\/+$/, '')
         .replace(/\/(?:chat\/completions|responses)\/?$/i, '');
+    try {
+        const url = new URL(base);
+        if (url.protocol === 'https:' && url.hostname.toLowerCase() === 'tokenrhythm.studio'
+            && (!url.port || url.port === '443') && !url.username && !url.password
+            && /^\/(?:v1(?:\/v1)?)?$/.test(url.pathname)) {
+            base = 'https://tokenrhythm.studio/v1';
+        }
+    } catch {
+        // Preserve the generic endpoint behavior for user-controlled non-URL adapters.
+    }
     return `${base}/${action}${query}`;
 }
 
@@ -841,7 +851,11 @@ export class AIService {
                 const reasoningKey = typeof message.reasoning_key === 'string' && message.reasoning_key
                     ? message.reasoning_key
                     : DEFAULT_REASONING_KEY;
-                const hasReasoning = typeof message.reasoning_content === 'string' && message.reasoning_content.trim().length > 0;
+                const tokenRhythmReasoningReplay = providerId !== 'tokenrhythm'
+                    || /^(?:deepseek-v4-(?:flash|pro)(?:-[a-z0-9.-]+)?|glm-5(?:\.[12])?)$/i.test(request.model.trim());
+                const hasReasoning = tokenRhythmReasoningReplay
+                    && typeof message.reasoning_content === 'string'
+                    && message.reasoning_content.trim().length > 0;
                 return {
                     role: message.role,
                     content: message.content,

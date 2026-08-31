@@ -8,6 +8,11 @@ open System.Collections.Generic
 open System.Text
 open Types
 
+module private PathIdentity =
+    let normalize (path: string) =
+        if isNull path then nullArg (nameof path)
+        if OperatingSystem.IsWindows() then path.Replace('\\', '/').ToUpperInvariant() else path
+
 type private Version =
     { syncRoot: obj
       text: StringBuilder
@@ -114,15 +119,16 @@ type DocumentStore() =
               lineOffsets = offsets
               lineOffsetsDirty = false }
 
-        activeDocuments[file.FullName] <- version
+        activeDocuments[PathIdentity.normalize file.FullName] <- version
 
     member this.Change(doc: DidChangeTextDocumentParams) : unit =
         let file = FileInfo(doc.textDocument.uri.LocalPath)
-        let found, existing = activeDocuments.TryGetValue(file.FullName)
+        let key = PathIdentity.normalize file.FullName
+        let found, existing = activeDocuments.TryGetValue(key)
         if found then
             lock existing.syncRoot (fun () ->
                 let stillCurrent =
-                    match activeDocuments.TryGetValue(file.FullName) with
+                    match activeDocuments.TryGetValue(key) with
                     | true, current -> Object.ReferenceEquals(current, existing)
                     | _ -> false
 
@@ -139,7 +145,7 @@ type DocumentStore() =
 
     /// Get text based on a file path string (avoids creating a FileInfo object)
     member this.GetTextByPath(filePath: string) : string option =
-        let found, value = activeDocuments.TryGetValue(filePath)
+        let found, value = activeDocuments.TryGetValue(PathIdentity.normalize filePath)
         if found then
             lock value.syncRoot (fun () -> Some(getCachedText value))
         else
@@ -149,16 +155,16 @@ type DocumentStore() =
         this.GetTextByPath(file.FullName)
 
     member this.GetVersion(file: FileInfo) : int option =
-        let found, value = activeDocuments.TryGetValue(file.FullName)
+        let found, value = activeDocuments.TryGetValue(PathIdentity.normalize file.FullName)
         if found then lock value.syncRoot (fun () -> Some(value.version)) else None
 
     /// Get the version number based on the file path string
     member this.GetVersionByPath(filePath: string) : int option =
-        let found, value = activeDocuments.TryGetValue(filePath)
+        let found, value = activeDocuments.TryGetValue(PathIdentity.normalize filePath)
         if found then lock value.syncRoot (fun () -> Some(value.version)) else None
 
     member this.Get(file: FileInfo) : option<string * int> =
-        let found, value = activeDocuments.TryGetValue(file.FullName)
+        let found, value = activeDocuments.TryGetValue(PathIdentity.normalize file.FullName)
         if found then
             lock value.syncRoot (fun () -> Some(getCachedText value, value.version))
         else
@@ -166,7 +172,7 @@ type DocumentStore() =
 
     member this.Close(doc: DidCloseTextDocumentParams) : unit =
         let file = FileInfo(doc.textDocument.uri.LocalPath)
-        activeDocuments.TryRemove(file.FullName) |> ignore
+        activeDocuments.TryRemove(PathIdentity.normalize file.FullName) |> ignore
 
     member this.OpenFiles() : FileInfo list =
         [ for file in activeDocuments.Keys do
@@ -174,9 +180,10 @@ type DocumentStore() =
     
     /// Clean up orphan documents that do not exist to prevent memory leaks
     member this.CleanupOrphanedDocuments(existingFiles: Set<string>) : unit =
+        let existingIdentities = existingFiles |> Seq.map PathIdentity.normalize |> Set.ofSeq
         let orphanedFiles =
             activeDocuments.Keys
-            |> Seq.filter (fun filePath -> not (existingFiles.Contains filePath))
+            |> Seq.filter (fun filePath -> not (existingIdentities.Contains filePath))
             |> Seq.toList
 
         for filePath in orphanedFiles do

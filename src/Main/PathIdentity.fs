@@ -1,0 +1,24 @@
+module PathIdentity
+
+open System
+
+/// Platform semantics are explicit so callers and tests do not depend on the host OS.
+type Platform =
+    | Windows
+    | Unix
+
+let currentPlatform =
+    if OperatingSystem.IsWindows() then Windows else Unix
+
+let normalizeFor platform (path: string) =
+    if isNull path then nullArg (nameof path)
+    match platform with
+    | Windows -> path.Replace('\\', '/').ToUpperInvariant()
+    | Unix -> path
+
+let normalize path = normalizeFor currentPlatform path
+
+let equalsFor platform left right =
+    normalizeFor platform left = normalizeFor platform right
+
+let equals left right = equalsFor currentPlatform left right

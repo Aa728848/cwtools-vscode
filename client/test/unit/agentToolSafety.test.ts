@@ -114,6 +114,22 @@ describe('enforced central tool policy', () => {
         cleanupWorkspace(workspaceRoot);
     });
 
+    it('normalizes the common glob alias before capability and policy checks', async () => {
+        const executor = new AgentToolExecutor({} as any, workspaceRoot) as any;
+        executor.fileHandler.globFiles = async (args: unknown) => ({
+            files: ['matched.txt'], truncated: false, hasMore: false, returnedCount: 1, limit: 200, args,
+        });
+
+        const result = await executor.execute(
+            'glob',
+            { pattern: '**/*.txt' },
+            { runnerOptions: { schedulingState: GENERAL_EXPLORE } } as any,
+        );
+
+        expect(result.files).to.deep.equal(['matched.txt']);
+        expect(result.args).to.deep.equal({ pattern: '**/*.txt' });
+    });
+
     it('routes structured user questions through the host callback and preserves answers', async () => {
         const executor = new AgentToolExecutor({} as any, workspaceRoot);
         let received: any;

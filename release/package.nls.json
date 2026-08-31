@@ -96,6 +96,7 @@
   "configuration.stellarisLanguageServices.ai.provider.enum.codex-chatgpt": "Codex (ChatGPT Subscription, browser OAuth and quota)",
   "configuration.stellarisLanguageServices.ai.provider.enum.openai": "OpenAI",
   "configuration.stellarisLanguageServices.ai.provider.enum.claude": "Claude (Anthropic)",
+  "configuration.stellarisLanguageServices.ai.provider.enum.tokenrhythm": "Token Rhythm",
   "configuration.stellarisLanguageServices.ai.provider.enum.deepseek": "DeepSeek",
   "configuration.stellarisLanguageServices.ai.provider.enum.minimax": "MiniMax",
   "configuration.stellarisLanguageServices.ai.provider.enum.glm": "GLM (Zhipu)",

@@ -1823,6 +1823,11 @@ export class AgentToolExecutor {
     }
 
     async execute(toolName: string, args: Record<string, unknown>, context?: import('./types').AgentToolContext): Promise<unknown> {
+        // Accept the concise SDK-style spelling emitted by some compatible models,
+        // but keep one canonical registry entry so policy, scheduling, and dispatch
+        // all evaluate the exact same capability.
+        if (toolName === 'glob') toolName = 'glob_files';
+
         if (toolName === 'web_search' || toolName === 'web_open' || toolName === 'web_find') {
             const webMode = vs.workspace.getConfiguration('stellarisLanguageServices.ai.web')
                 .get<'disabled' | 'indexed' | 'live'>('mode', 'indexed');

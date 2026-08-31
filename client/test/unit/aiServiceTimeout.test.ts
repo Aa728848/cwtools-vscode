@@ -1082,6 +1082,21 @@ describe('AIService OpenAI Chat Completions compatibility', () => {
         });
     }
 
+    it('canonicalizes official TokenRhythm endpoint variants', () => {
+        const { normalizeOpenAIActionUrl } = loadAIService();
+        for (const endpoint of [
+            'https://tokenrhythm.studio',
+            'https://tokenrhythm.studio/v1',
+            'https://tokenrhythm.studio/v1/v1',
+            'https://tokenrhythm.studio/v1/chat/completions',
+        ]) {
+            expect(normalizeOpenAIActionUrl(endpoint, 'chat/completions'))
+                .to.equal('https://tokenrhythm.studio/v1/chat/completions');
+        }
+        expect(normalizeOpenAIActionUrl('https://gateway.example/v1', 'chat/completions'))
+            .to.equal('https://gateway.example/v1/chat/completions');
+    });
+
     it('can remove explicitly rejected reasoning_content from replayed messages', async () => {
         const { AIService } = loadAIService();
         const service = new AIService({ secrets: {} } as any) as any;

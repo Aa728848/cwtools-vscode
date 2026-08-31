@@ -55,10 +55,7 @@ type private RequestTrace =
       mutable queueAddAt: int64
       mutable dequeuedAt: int64 option
       mutable workerStartAt: int64 option
-      mutable lockWaitEndAt: int64 option
-      mutable lockAcquired: bool option
-      mutable methodStartAt: int64 option
-      mutable methodEndAt: int64 option
+      timing: RequestExecutionTiming
       mutable responseSentAt: int64 option
       mutable lockKind: string option
       mutable outcome: string
@@ -328,9 +325,14 @@ let private logRequestTrace send id (trace: RequestTrace) =
     let queueMs = elapsedMs trace.receivedAt trace.queueAddAt
     let processQueueMs = segmentMs (Some trace.queueAddAt) trace.dequeuedAt
     let workerWaitMs = segmentMs trace.dequeuedAt trace.workerStartAt
-    let lockWaitMs = segmentMs trace.workerStartAt trace.lockWaitEndAt
-    let methodMs = segmentMs trace.methodStartAt trace.methodEndAt
-    let responseMs = segmentMs trace.methodEndAt trace.responseSentAt
+    let lockWaitMs = segmentMs trace.workerStartAt trace.timing.lockWaitEndAt
+    let executionSegments = requestExecutionSegments elapsedMs trace.timing
+    let methodMs = executionSegments.methodDuration |> Option.defaultValue 0.0
+    let fallbackMs = executionSegments.fallbackDuration |> Option.defaultValue 0.0
+    let responseStartAt =
+        trace.timing.fallbackEndAt
+        |> Option.orElse trace.timing.methodEndAt
+    let responseMs = segmentMs responseStartAt trace.responseSentAt
 
     let shouldLog =
         totalMs >= traceLogThresholdMs
@@ -351,10 +353,11 @@ let private logRequestTrace send id (trace: RequestTrace) =
                    "workerWaitMs", JsonValue.Number(decimal workerWaitMs)
                    "lockWaitMs", JsonValue.Number(decimal lockWaitMs)
                    "methodMs", JsonValue.Number(decimal methodMs)
+                   "fallbackMs", JsonValue.Number(decimal fallbackMs)
                    "responseMs", JsonValue.Number(decimal responseMs)
                    "lockKind", JsonValue.String(trace.lockKind |> Option.defaultValue "none")
                    "lockAcquired",
-                        (match trace.lockAcquired with
+                        (match trace.timing.lockAcquired with
                          | Some value -> JsonValue.Boolean value
                          | None -> JsonValue.Null)
                    "outcome", JsonValue.String trace.outcome
@@ -638,10 +641,7 @@ let connect (serverFactory: ILanguageClient -> ILanguageServer, receive: BinaryR
                           queueAddAt = receivedAt
                           dequeuedAt = None
                           workerStartAt = None
-                          lockWaitEndAt = None
-                          lockAcquired = None
-                          methodStartAt = None
-                          methodEndAt = None
+                          timing = createRequestExecutionTiming ()
                           responseSentAt = None
                           lockKind = None
                           outcome = "pending"
@@ -653,15 +653,19 @@ let connect (serverFactory: ILanguageClient -> ILanguageServer, receive: BinaryR
                     let immediateFallback =
                         match parsed with
                         | Completion p ->
-                            completionImmediateFallback
-                            |> Option.bind (fun provider -> provider p)
-                            |> serializeCompletionListOption
+                            let fallbackStartAt = timestamp ()
+                            let result =
+                                completionImmediateFallback
+                                |> Option.bind (fun provider -> provider p)
+                                |> serializeCompletionListOption
+                            if result.IsSome then
+                                startFallback fallbackStartAt trace.timing
+                                closeFallback (timestamp ()) trace.timing
+                            result
                         | _ -> None
                     match immediateFallback with
                     | Some result ->
                         trace.lockKind <- Some "reader-immediate-fallback"
-                        trace.methodStartAt <- Some receivedAt
-                        trace.methodEndAt <- Some(timestamp ())
                         respond (send, id, result)
                         trace.responseSentAt <- Some(timestamp ())
                         finishRequestTrace send id "immediate-fallback"
@@ -754,9 +758,33 @@ let connect (serverFactory: ILanguageClient -> ILanguageServer, receive: BinaryR
     // Process messages on main thread
     let mutable quit = false
 
-    let respondRequestCancelled id =
-        let errText = $"""{{"id":%d{id},"error":{{"code":-32800,"message":"RequestCancelled"}}}}"""
+    let respondRequestError id code message =
+        let errText = $"""{{"id":%d{id},"error":{{"code":%d{code},"message":"%s{message}"}}}}"""
         writeClient (send, errText)
+
+    // Removing the trace is the atomic terminal gate. Worker bodies and async
+    // continuations may race, but only the winner sends, disposes, and finalizes.
+    let terminalizeRequest (id: int) cause =
+        tryTerminalizeRequest
+            (fun () ->
+                match requestTraces.TryRemove id with
+                | true, trace -> Some trace
+                | _ -> None)
+            (fun trace decision ->
+                let removed, cancellation = pendingRequests.TryRemove id
+                try
+                    try
+                        match decision.response with
+                        | RequestTerminalResponse.Result result -> respond (send, id, result)
+                        | RequestTerminalResponse.Error(code, message) -> respondRequestError id code message
+                    finally
+                        trace.responseSentAt <- Some(timestamp ())
+                        trace.outcome <- decision.outcome
+                        logRequestTrace send id trace
+                finally
+                    if removed then cancellation.Dispose())
+            cause
+        |> ignore
 
     let startLockFreeRequest
         (id: int)
@@ -770,41 +798,30 @@ let connect (serverFactory: ILanguageClient -> ILanguageServer, receive: BinaryR
                 | true, trace ->
                     trace.workerStartAt <- Some(timestamp ())
                     trace.lockKind <- Some "lock-free"
-                    trace.lockAcquired <- Some true
-                    trace.lockWaitEndAt <- trace.workerStartAt
                     traceRef <- Some trace
                 | _ -> ()
 
                 if not cancel.IsCancellationRequested then
-                    traceRef |> Option.iter (fun t -> t.methodStartAt <- Some(timestamp ()))
-                    try
-                        match! task with
-                        | Some result ->
-                            respond (send, id, result)
-                        | None ->
-                            respond (send, id, "null")
-                    finally
-                        traceRef |> Option.iter (fun t -> t.methodEndAt <- Some(timestamp ()))
-
-                    traceRef |> Option.iter (fun t -> t.responseSentAt <- Some(timestamp ()))
-                    finishRequestTrace send id "success"
+                    traceRef |> Option.iter (fun t -> markLockAcquired (timestamp ()) t.timing)
+                    let! result =
+                        async {
+                            try
+                                return! task
+                            finally
+                                traceRef |> Option.iter (fun t -> closeMethod (timestamp ()) t.timing)
+                        }
+                    terminalizeRequest id (RequestTerminalCause.Success(result |> Option.defaultValue "null"))
                 else
-                    finishRequestTrace send id "cancelled-before-start"
-
-                pendingRequests.TryRemove(id) |> ignore
+                    terminalizeRequest id RequestTerminalCause.Cancelled
             }
 
         Async.StartWithContinuations(
             workflow,
             (fun () -> ()),
             (fun error ->
-                pendingRequests.TryRemove(id) |> ignore
-                finishRequestTrace send id "error"
+                terminalizeRequest id RequestTerminalCause.Exception
                 dprintfn $"Unhandled lock-free request failure %d{id}: %O{error}"),
-            (fun _ ->
-                pendingRequests.TryRemove(id) |> ignore
-                respondRequestCancelled id
-                finishRequestTrace send id "cancelled"),
+            (fun _ -> terminalizeRequest id RequestTerminalCause.Cancelled),
             cancel.Token
         )
 
@@ -819,64 +836,48 @@ let connect (serverFactory: ILanguageClient -> ILanguageServer, receive: BinaryR
         let run () =
             let mutable traceRef = None
             try
-                try
-                    match requestTraces.TryGetValue id with
-                    | true, trace ->
-                        trace.workerStartAt <- Some(timestamp ())
-                        trace.lockKind <- (if lockFallback.IsSome then Some "read-fallback" else Some "read")
-                        traceRef <- Some trace
-                    | _ -> ()
+                match requestTraces.TryGetValue id with
+                | true, trace ->
+                    trace.workerStartAt <- Some(timestamp ())
+                    trace.lockKind <- (if lockFallback.IsSome then Some "read-fallback" else Some "read")
+                    traceRef <- Some trace
+                | _ -> ()
 
-                    let tracedTask =
-                        async {
-                            traceRef |> Option.iter (fun t -> t.methodStartAt <- Some(timestamp ()))
-                            try
-                                return! task
-                            finally
-                                traceRef |> Option.iter (fun t -> t.methodEndAt <- Some(timestamp ()))
-                        }
-
-                    let timeoutMs = lockFallback |> Option.map (fun fallback -> fallback.timeoutMs)
-                    let lockResult = runReadLocked gameStateLock timeoutMs cancel.Token tracedTask
+                let timeoutMs = lockFallback |> Option.map (fun fallback -> fallback.timeoutMs)
+                let timing =
                     traceRef
-                    |> Option.iter (fun t ->
-                        t.lockWaitEndAt <- Some(timestamp ())
-                        t.lockAcquired <- Some(match lockResult with | Acquired _ -> true | TimedOut -> false))
+                    |> Option.map (fun trace -> trace.timing)
+                    |> Option.defaultWith createRequestExecutionTiming
+                let lockResult =
+                    runTracedReadLocked gameStateLock timeoutMs cancel.Token timestamp timing task
 
-                    match lockResult with
-                    | Acquired result when not cancel.IsCancellationRequested ->
-                        match result with
-                        | Some "[[CANCEL]]" -> respondRequestCancelled id
-                        | Some response -> respond (send, id, response)
-                        | None -> respond (send, id, "null")
-                        traceRef |> Option.iter (fun t -> t.responseSentAt <- Some(timestamp ()))
-                        finishRequestTrace send id "success"
-                    | TimedOut when not cancel.IsCancellationRequested ->
-                        traceRef |> Option.iter (fun t -> t.methodStartAt <- Some(timestamp ()))
+                match lockResult with
+                | Acquired result when not cancel.IsCancellationRequested ->
+                    match result with
+                    | Some "[[CANCEL]]" -> terminalizeRequest id RequestTerminalCause.Cancelled
+                    | Some response -> terminalizeRequest id (RequestTerminalCause.Success response)
+                    | None -> terminalizeRequest id (RequestTerminalCause.Success "null")
+                | TimedOut when not cancel.IsCancellationRequested ->
+                    traceRef |> Option.iter (fun t -> startFallback (timestamp ()) t.timing)
+                    let fallbackResult =
                         try
-                            match lockFallback |> Option.bind (fun fallback -> fallback.getResult ()) with
-                            | Some "[[CANCEL]]" -> respondRequestCancelled id
-                            | Some response -> respond (send, id, response)
-                            | None -> respond (send, id, "null")
+                            lockFallback |> Option.bind (fun fallback -> fallback.getResult ())
                         finally
-                            traceRef |> Option.iter (fun t -> t.methodEndAt <- Some(timestamp ()))
-                        traceRef |> Option.iter (fun t -> t.responseSentAt <- Some(timestamp ()))
-                        finishRequestTrace send id "lock-timeout-fallback"
-                    | _ ->
-                        respondRequestCancelled id
-                        finishRequestTrace send id "cancelled"
-                with
-                | :? OperationCanceledException ->
-                    if requestTraces.ContainsKey id then respondRequestCancelled id
-                    finishRequestTrace send id "cancelled"
-                | error ->
-                    // Every request must receive a terminal response. Leaving an
-                    // exception unanswered makes VS Code show an endless loading UI.
-                    if requestTraces.ContainsKey id then respondRequestCancelled id
-                    finishRequestTrace send id "error"
-                    dprintfn $"Unhandled read request failure %d{id}: %O{error}"
-            finally
-                pendingRequests.TryRemove(id) |> ignore
+                            traceRef |> Option.iter (fun t -> closeFallback (timestamp ()) t.timing)
+                    match fallbackResult with
+                    | Some "[[CANCEL]]" -> terminalizeRequest id RequestTerminalCause.Cancelled
+                    | Some response -> terminalizeRequest id (RequestTerminalCause.Success response)
+                    | None -> terminalizeRequest id (RequestTerminalCause.Success "null")
+                | _ ->
+                    terminalizeRequest id RequestTerminalCause.Cancelled
+            with
+            | :? OperationCanceledException ->
+                terminalizeRequest id RequestTerminalCause.Cancelled
+            | :? System.TimeoutException ->
+                terminalizeRequest id RequestTerminalCause.Timeout
+            | error ->
+                terminalizeRequest id RequestTerminalCause.Exception
+                dprintfn $"Unhandled read request failure %d{id}: %O{error}"
 
         System.Threading.Tasks.Task.Run(Action run) |> ignore
 
@@ -890,35 +891,24 @@ let connect (serverFactory: ILanguageClient -> ILanguageServer, receive: BinaryR
             traceRef <- Some trace
         | _ -> ()
 
-        if not cancel.IsCancellationRequested then
-            enterGameStateWriteLock ()
-            traceRef
-            |> Option.iter (fun t ->
-                t.lockWaitEndAt <- Some(timestamp ())
-                t.lockAcquired <- Some true)
-            try
+        let tracedTask =
+            async {
                 try
-                    traceRef |> Option.iter (fun t -> t.methodStartAt <- Some(timestamp ()))
-                    match Async.RunSynchronously(task, cancellationToken = cancel.Token) with
-                    | Some result ->
-                        respond (send, id, result)
-                    | None        ->
-                        respond (send, id, "null")
-                with
-                | :? OperationCanceledException ->
-                    respondRequestCancelled id
-                | :? System.TimeoutException    ->
-                    ()   // guard: should not occur without a timeout arg, but be safe
-            finally
-                traceRef |> Option.iter (fun t -> t.methodEndAt <- Some(timestamp ()))
-                exitGameStateWriteLock ()
+                    return! task
+                finally
+                    traceRef |> Option.iter (fun t -> closeMethod (timestamp ()) t.timing)
+            }
 
-            traceRef |> Option.iter (fun t -> t.responseSentAt <- Some(timestamp ()))
-            finishRequestTrace send id (if cancel.IsCancellationRequested then "cancelled" else "success")
-        else
-            finishRequestTrace send id "cancelled-before-start"
+        let cause =
+            runWriteRequestTerminal
+                (fun () ->
+                    enterGameStateWriteLock ()
+                    traceRef |> Option.iter (fun t -> markLockAcquired (timestamp ()) t.timing))
+                exitGameStateWriteLock
+                cancel.Token
+                tracedTask
 
-        pendingRequests.TryRemove(id) |> ignore
+        terminalizeRequest id cause
 
     while not quit do
         match processQueue.Take() with

@@ -6019,9 +6019,22 @@ type Server(client: ILanguageClient) =
             JsonValue.Record [| "value", JsonValue.String(""); "enable", JsonValue.Boolean(false) |]
         )
 
+    let mutable backgroundValidationCts: System.Threading.CancellationTokenSource option = None
+    let backgroundValidationLock = obj ()
+
     let startFullWorkspaceBackgroundValidation
         (game: IGame)
         (allParserErrors: (string * Severity * string * string * range * int * CWRelatedError list option) list) =
+        let cts =
+            lock backgroundValidationLock (fun () ->
+                backgroundValidationCts |> Option.iter (fun (oldCts: System.Threading.CancellationTokenSource) ->
+                    try oldCts.Cancel(); oldCts.Dispose()
+                    with _ -> ())
+                let newCts = new System.Threading.CancellationTokenSource()
+                backgroundValidationCts <- Some newCts
+                newCts)
+        let ct = cts.Token
+
         Task.Run(fun () ->
             try
                 try
@@ -6068,146 +6081,158 @@ type Server(client: ILanguageClient) =
                     // file switching (didOpen/didChange), and completion to run with zero lag.
                     let mutable completedBatches = 0
                     for batch in batches do
-                        Task.Delay(15).Wait()
+                        if not ct.IsCancellationRequested then
+                            try Task.Delay(15, ct).Wait()
+                            with _ -> ()
+                            if not ct.IsCancellationRequested then
+                                use _heavyAnalysisLease = acquireHeavyAnalysisGate ()
+                                gameStateLock.EnterReadLock()
+                                try
+                                    game.ValidateFilesLocalCancellable(batch, (fun () -> ct.IsCancellationRequested)) |> ignore
+                                finally
+                                    gameStateLock.ExitReadLock()
+                                completedBatches <- completedBatches + 1
+                                let pct = int (float completedBatches / float (batches.Length + 1) * 100.0)
+                                client.CustomNotification(
+                                    "loadingBar",
+                                    JsonValue.Record
+                                        [| "value", JsonValue.String(sprintf "%s (%d/%d)" LangResources.loadingBar_ValidatingFiles completedBatches batches.Length)
+                                           "enable", JsonValue.Boolean(true)
+                                           "percentage", JsonValue.Number(decimal pct) |]
+                                )
+
+                    if not ct.IsCancellationRequested then
+                        // Now that rule validation caches are warmed up in sliced background passes,
+                        // the full workspace consolidation runs in a single short lock window (<100ms).
                         use _heavyAnalysisLease = acquireHeavyAnalysisGate ()
-                        gameStateLock.EnterReadLock()
-                        try
-                            game.ValidateFilesLocalCancellable(batch, (fun () -> false)) |> ignore
-                        finally
-                            gameStateLock.ExitReadLock()
-                        completedBatches <- completedBatches + 1
-                        let pct = int (float completedBatches / float (batches.Length + 1) * 100.0)
-                        client.CustomNotification(
-                            "loadingBar",
-                            JsonValue.Record
-                                [| "value", JsonValue.String(sprintf "%s (%d/%d)" LangResources.loadingBar_ValidatingFiles completedBatches batches.Length)
-                                   "enable", JsonValue.Boolean(true)
-                                   "percentage", JsonValue.Number(decimal pct) |]
-                        )
 
-                    // Now that rule validation caches are warmed up in sliced background passes,
-                    // the full workspace consolidation runs in a single short lock window (<100ms).
-                    use _heavyAnalysisLease = acquireHeavyAnalysisGate ()
+                        let (valErrors, locErrors) =
+                            gameStateLock.EnterReadLock()
+                            try
+                                (try
+                                    let preflightSw = Stopwatch.StartNew()
+                                    let forced =
+                                        game.ForceDynamicParameterData(dynamicPreflightTimeoutMs, dynamicPreflightMaxEntities)
+                                    preflightSw.Stop()
+                                    logDiag
+                                        $"Dynamic parameter preflight forced {forced} entities in {preflightSw.ElapsedMilliseconds}ms (timeout {dynamicPreflightTimeoutMs}ms, cap {dynamicPreflightMaxEntities})"
+                                 with e -> logDiag $"Dynamic parameter preflight error: {e.Message}")
 
-                    let (valErrors, locErrors) =
-                        gameStateLock.EnterReadLock()
-                        try
-                            (try
-                                let preflightSw = Stopwatch.StartNew()
-                                let forced =
-                                    game.ForceDynamicParameterData(dynamicPreflightTimeoutMs, dynamicPreflightMaxEntities)
-                                preflightSw.Stop()
-                                logDiag
-                                    $"Dynamic parameter preflight forced {forced} entities in {preflightSw.ElapsedMilliseconds}ms (timeout {dynamicPreflightTimeoutMs}ms, cap {dynamicPreflightMaxEntities})"
-                             with e -> logDiag $"Dynamic parameter preflight error: {e.Message}")
+                                let valErrorRaw =
+                                    game.ValidationErrors()
+                                    |> correctDynamicParameterValidationErrors "bg-full" game
+                                let valErrors =
+                                    valErrorRaw
+                                    |> List.map (fun e ->
+                                        (e.code, e.severity, e.range.FileName, e.message, e.range, e.keyLength, e.relatedErrors))
 
-                            let valErrorRaw =
-                                game.ValidationErrors()
-                                |> correctDynamicParameterValidationErrors "bg-full" game
-                            let valErrors =
-                                valErrorRaw
-                                |> List.map (fun e ->
-                                    (e.code, e.severity, e.range.FileName, e.message, e.range, e.keyLength, e.relatedErrors))
+                                let locRaw = game.LocalisationErrors(true, true)
+                                clearLocalisationDiagnosticCache ()
+                                cachedLocMap <- None
+                                cachedLocMapCount <- 0
+                                for fileName, errors in locRaw |> List.groupBy _.range.FileName do
+                                    cachePut locCache fileName errors
 
-                            let locRaw = game.LocalisationErrors(true, true)
-                            clearLocalisationDiagnosticCache ()
-                            cachedLocMap <- None
-                            cachedLocMapCount <- 0
-                            for fileName, errors in locRaw |> List.groupBy _.range.FileName do
-                                cachePut locCache fileName errors
+                                let locErrors =
+                                    locRaw
+                                    |> List.map (fun e ->
+                                        (e.code, e.severity, e.range.FileName, e.message, e.range, e.keyLength, e.relatedErrors))
 
-                            let locErrors =
-                                locRaw
-                                |> List.map (fun e ->
-                                    (e.code, e.severity, e.range.FileName, e.message, e.range, e.keyLength, e.relatedErrors))
+                                valErrors, locErrors
+                            finally
+                                gameStateLock.ExitReadLock()
 
-                            valErrors, locErrors
-                        finally
-                            gameStateLock.ExitReadLock()
+                        if not ct.IsCancellationRequested then
+                            let allDiagnostics =
+                                allParserErrors @ valErrors @ locErrors
+                                |> List.map parserErrorToDiagnostics
+                                |> List.filter diagnosticFilter
 
-                    let allDiagnostics =
-                        allParserErrors @ valErrors @ locErrors
-                        |> List.map parserErrorToDiagnostics
-                        |> List.filter diagnosticFilter
+                            let diagnosticsByFile =
+                                allDiagnostics
+                                |> List.groupBy (fun (filePath, _) -> normaliseCachePath filePath)
+                                |> Map.ofList
 
-                    let diagnosticsByFile =
-                        allDiagnostics
-                        |> List.groupBy (fun (filePath, _) -> normaliseCachePath filePath)
-                        |> Map.ofList
+                            let loadedNormalised = fileEntries |> List.map normaliseCachePath |> Set.ofList
+                            let publishEpoch = nextDiagnosticEpoch ()
+                            let backgroundAdmissionIfCurrent filePath =
+                                let pathKey = normaliseCachePath filePath
+                                let domain = diagnosticDomainForPath filePath
+                                let capturedAdmission = bgAdmissions |> Map.tryFind pathKey |> Option.flatten
+                                let currentAdmission = diagnosticInvalidation.TryAdmit(domain, pathKey)
+                                let capturedVersion = bgVersions |> Map.tryFind pathKey |> Option.flatten
+                                if sameInvalidationAdmission capturedAdmission currentAdmission
+                                   && docs.GetVersionByPath filePath = capturedVersion
+                                   && sameEffectiveModelEpoch domain bgModelEpoch (modelEpochSnapshot ()) then
+                                    Some currentAdmission
+                                else None
 
-                    let loadedNormalised = fileEntries |> List.map normaliseCachePath |> Set.ofList
-                    let publishEpoch = nextDiagnosticEpoch ()
-                    let backgroundAdmissionIfCurrent filePath =
-                        let pathKey = normaliseCachePath filePath
-                        let domain = diagnosticDomainForPath filePath
-                        let capturedAdmission = bgAdmissions |> Map.tryFind pathKey |> Option.flatten
-                        let currentAdmission = diagnosticInvalidation.TryAdmit(domain, pathKey)
-                        let capturedVersion = bgVersions |> Map.tryFind pathKey |> Option.flatten
-                        if sameInvalidationAdmission capturedAdmission currentAdmission
-                           && docs.GetVersionByPath filePath = capturedVersion
-                           && sameEffectiveModelEpoch domain bgModelEpoch (modelEpochSnapshot ()) then
-                            Some currentAdmission
-                        else None
+                            for filePath in fileEntries do
+                                let currentVersion = docs.GetVersionByPath filePath
+                                let isSuperseded =
+                                    (backgroundAdmissionIfCurrent filePath).IsNone
+                                    || match fileDiagnosticStates.TryGetValue filePath with
+                                       | true, prior when prior.epoch > publishEpoch -> true
+                                       | true, prior when DiagnosticMerge.isValidatedDocumentVersionStale prior.validatedVersion currentVersion -> true
+                                       | _ -> false
 
-                    for filePath in fileEntries do
-                        let currentVersion = docs.GetVersionByPath filePath
-                        let isSuperseded =
-                            (backgroundAdmissionIfCurrent filePath).IsNone
-                            || match fileDiagnosticStates.TryGetValue filePath with
-                               | true, prior when prior.epoch > publishEpoch -> true
-                               | true, prior when DiagnosticMerge.isValidatedDocumentVersionStale prior.validatedVersion currentVersion -> true
-                               | _ -> false
+                                if not isSuperseded then
+                                    let diagnostics =
+                                        diagnosticsByFile
+                                        |> Map.tryFind (normaliseCachePath filePath)
+                                        |> Option.map (List.map snd)
+                                        |> Option.defaultValue []
+                                    client.PublishDiagnostics { uri = diagnosticUri filePath; diagnostics = diagnostics }
+                                    setFileDiagnosticStateWithSnapshot
+                                        filePath
+                                        publishEpoch
+                                        currentVersion
+                                        bgModelEpoch
+                                        Fresh
+                                        []
+                                        diagnostics
 
-                        if not isSuperseded then
-                            let diagnostics =
-                                diagnosticsByFile
-                                |> Map.tryFind (normaliseCachePath filePath)
-                                |> Option.map (List.map snd)
-                                |> Option.defaultValue []
-                            client.PublishDiagnostics { uri = diagnosticUri filePath; diagnostics = diagnostics }
-                            setFileDiagnosticStateWithSnapshot
-                                filePath
-                                publishEpoch
-                                currentVersion
-                                bgModelEpoch
-                                Fresh
-                                []
-                                diagnostics
-
-                    diagnosticsByFile
-                    |> Map.toSeq
-                    |> Seq.iter (fun (_, entries) ->
-                        match entries with
-                        | (filePath, _) :: _ when not (loadedNormalised.Contains(normaliseCachePath filePath)) ->
-                            let currentVersion = docs.GetVersionByPath filePath
-                            let isSuperseded =
-                                (backgroundAdmissionIfCurrent filePath).IsNone
-                                || match fileDiagnosticStates.TryGetValue filePath with
-                                   | true, prior when prior.epoch > publishEpoch -> true
-                                   | true, prior when DiagnosticMerge.isValidatedDocumentVersionStale prior.validatedVersion currentVersion -> true
-                                   | _ -> false
-                            if not isSuperseded then
-                                let diagnostics = entries |> List.map snd
-                                client.PublishDiagnostics { uri = diagnosticUri filePath; diagnostics = diagnostics }
-                                setFileDiagnosticStateWithSnapshot
-                                    filePath
-                                    publishEpoch
-                                    currentVersion
-                                    bgModelEpoch
-                                    Fresh
-                                    []
-                                    diagnostics
-                                (backgroundAdmissionIfCurrent filePath)
-                                |> Option.flatten
-                                |> Option.iter (fun admission -> diagnosticInvalidation.Complete(true, admission))
-                        | _ -> ())
+                            diagnosticsByFile
+                            |> Map.toSeq
+                            |> Seq.iter (fun (_, entries) ->
+                                match entries with
+                                | (filePath, _) :: _ when not (loadedNormalised.Contains(normaliseCachePath filePath)) ->
+                                    let currentVersion = docs.GetVersionByPath filePath
+                                    let isSuperseded =
+                                        (backgroundAdmissionIfCurrent filePath).IsNone
+                                        || match fileDiagnosticStates.TryGetValue filePath with
+                                           | true, prior when prior.epoch > publishEpoch -> true
+                                           | true, prior when DiagnosticMerge.isValidatedDocumentVersionStale prior.validatedVersion currentVersion -> true
+                                           | _ -> false
+                                    if not isSuperseded then
+                                        let diagnostics = entries |> List.map snd
+                                        client.PublishDiagnostics { uri = diagnosticUri filePath; diagnostics = diagnostics }
+                                        setFileDiagnosticStateWithSnapshot
+                                            filePath
+                                            publishEpoch
+                                            currentVersion
+                                            bgModelEpoch
+                                            Fresh
+                                            []
+                                            diagnostics
+                                        (backgroundAdmissionIfCurrent filePath)
+                                        |> Option.flatten
+                                        |> Option.iter (fun admission -> diagnosticInvalidation.Complete(true, admission))
+                                | _ -> ())
                 with e ->
                     logDiag $"Full workspace background validation error: {e.Message}"
             finally
-                client.CustomNotification(
-                    "loadingBar",
-                    JsonValue.Record [| "value", JsonValue.String(""); "enable", JsonValue.Boolean(false) |]
-                )
+                lock backgroundValidationLock (fun () ->
+                    let isCurrent =
+                        match backgroundValidationCts with
+                        | Some active -> Object.ReferenceEquals(active, cts)
+                        | None -> false
+                    if isCurrent then
+                        backgroundValidationCts <- None
+                        client.CustomNotification(
+                            "loadingBar",
+                            JsonValue.Record [| "value", JsonValue.String(""); "enable", JsonValue.Boolean(false) |]
+                        ))
         ) |> ignore
 
     let prepareWorkspace (uri: option<Uri>) =
@@ -6228,6 +6253,11 @@ type Server(client: ILanguageClient) =
         match uri with
         | None -> ()
         | Some _ ->
+            client.CustomNotification(
+                "loadingBar",
+                JsonValue.Record
+                    [| "value", JsonValue.String LangResources.loadingBar_LoadingProject
+                       "enable", JsonValue.Boolean true |])
             try
                 let serverSettings =
                     { cachePath = cachePath
@@ -6513,9 +6543,10 @@ type Server(client: ILanguageClient) =
                 lastValidationErrorCount = prepared.loading.validationErrorCount
                 lastLocalisationErrorCount = prepared.loading.localisationErrorCount
                 lastError = None })
-        client.CustomNotification(
-            "loadingBar",
-            JsonValue.Record [| "value", JsonValue.String ""; "enable", JsonValue.Boolean false |])
+        if prepared.game.IsNone then
+            client.CustomNotification(
+                "loadingBar",
+                JsonValue.Record [| "value", JsonValue.String ""; "enable", JsonValue.Boolean false |])
         client.CustomNotification(
             "cwtools/serverReady",
             JsonValue.Record

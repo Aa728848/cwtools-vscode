@@ -2646,13 +2646,18 @@ export async function activate(context: ExtensionContext) {
 		await init(CWT_LANGUAGE_ID, isVanillaFolder, 'cwt-only');
 		// Upgrade to full game mode in place (single server process, no second
 		// client) when a game document becomes active later.
-		context.subscriptions.push(window.onDidChangeActiveTextEditor(editor => {
+		let upgraded = false;
+		const upgradeListener = window.onDidChangeActiveTextEditor(editor => {
+			if (upgraded) return;
 			const doc = editor?.document;
 			if (!doc || doc.uri.scheme !== 'file') return;
 			if (isKnownGameLanguageId(doc.languageId) || doc.languageId === 'pdx-shader') {
+				upgraded = true;
+				try { upgradeListener.dispose(); } catch { /* ignore */ }
 				void commands.executeCommand('cwtools.reloadExtension');
 			}
-		}));
+		});
+		context.subscriptions.push(upgradeListener);
 		return extensionApi;
 	}
 

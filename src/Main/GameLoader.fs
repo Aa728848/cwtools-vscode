@@ -535,7 +535,7 @@ let loadSTL serverSettings =
           maxFileSize = Some serverSettings.maxFileSize
           vanillaPath = serverSettings.stlVanillaPath }
 
-    let game = CWTools.Games.Stellaris.STLGame(stlsettings)
+    let game = new CWTools.Games.Stellaris.STLGame(stlsettings)
     
     // Set vanilla scripted variables path for hover and load vanilla FX shader sources
     match serverSettings.stlVanillaPath with

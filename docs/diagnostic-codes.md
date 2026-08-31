@@ -448,7 +448,7 @@ UTF-8 with BOM. Use VS Code's "Save with Encoding → UTF-8 with BOM".
 
 ## CW255
 
-**Loc file name missing language (E)** — the file name must contain (ideally
+**Loc file name missing language (W)** — the file name must contain (ideally
 end with) `l_<language>.yml`, e.g. `my_mod_l_english.yml`.
 
 本地化文件名需要包含语言后缀,例如 `my_mod_l_english.yml`、`my_mod_l_simp_chinese.yml`。

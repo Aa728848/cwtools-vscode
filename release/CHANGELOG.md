@@ -1,5 +1,56 @@
 # Changelog
 
+## [2.16.4] - 2026-08-31
+
+### 核心修复与重构 / Core Fixes & Refactoring
+- **[修复/重构] 彻底移除有缺陷的规则二进制缓存（Permanent Removal of Flawed Rules Binary Cache）**：
+  - 彻底移除了带有进程内动态自增 Token（`StringTokens`）的 `.cwdf` 规则与文档二进制序列化机制（`RulesCache.fs`）。
+  - 彻底根除了因跨进程 Token 编号错位导致的 `has_building` 报 `War`、`AND` 报 `Species`、`NOT` 报 `Planet` 等作用域大面积错乱误报。
+  - 规则与文档全面回归即时源码解析（全量冷启动解析仅 ~800ms），确保作用域与 Trigger/Effect 映射 100% 精准对应。
+  - English: [Fix/Refactoring] Permanent removal of flawed rules binary cache — completely retired `.cwdf` binary AST serialization (`RulesCache.fs`) containing process-local dynamic `StringTokens` intern IDs; fundamentally resolved massive scope drift false positives where `has_building` required `War`, `AND` required `Species`, and `NOT` required `Planet` due to cross-session token ID mismatch; returned to direct source parsing (< 800ms) to ensure 100% deterministic and accurate token-to-scope bindings.
+
+- **[修复] 本地化解析与校验容错增强（Localisation Parsing & Validation Enhancements）**：
+  - 重构 `YAMLLocalisationParser.fs`，合法支持纯由 `#` 注释行或空白构成的本地化文件，消除 `CW001`（`Expecting: comment or key`）语法错误。
+  - 在 `STLLocalisationString.fs` 中放行纯注释文件，不再报 `CW256`（缺少语言头）；修复原版 `languages.yml` 扩展名比对逻辑 Bug。
+  - 将缺少语言后缀规则（`CW255`）由强制 Error 降级为建议性 Warning，更符合实际 Mod 开发容错需求。
+  - English: [Fix] Localisation parsing and validation enhancements — updated `YAMLLocalisationParser.fs` to parse comment-only/empty localisation files cleanly without `CW001` syntax errors; allowed comment-only files without `CW256` missing header errors in `STLLocalisationString.fs` and fixed filename matching for vanilla `languages.yml`; downgraded missing language suffix diagnostic (`CW255`) from Error to Warning.
+
+- **[重构] 原子暂存文件删除与增量本地化日志（Atomic Staged File Deletion & Revisioned Delta Journal）**：
+  - 在底层存储中引入两阶段文件删除机制（`PrepareFileDeletion` / `CommitFileDeletion`），在删除前执行只读快照预检并保证多线程读写隔离。
+  - 引入版本化的本地化增量日志（Localisation Delta Journal），保证本地化词条并发更新时的原子提交，消除词条覆盖与脏读。
+  - English: [Refactoring] Atomic staged file deletion and revisioned localisation journal — implemented two-phase file deletion (`PrepareFileDeletion` / `CommitFileDeletion`) with preflight validation under read-lock snapshot isolation; introduced revisioned localisation delta journal for atomic state commits without dirty reads.
+
+### 性能与并发基础设施 / Performance & Concurrency Infrastructure
+- **[性能] 多阶段无锁发布协调器与读写锁分离（Multi-Phase Refresh Coordinator & Lock Separation）**：
+  - 引入 `RefreshCoordinator.fs` 与 `RefreshLockPhases.fs`，将原本阻塞整个 LSP 线程的全局大粗锁重构为无锁准备阶段、短写锁发布（< 5ms）与无锁后处理阶段。
+  - 废除 LSP 全局同步大写锁，全面提升高频保存与文件编辑时的响应速度。
+  - English: [Performance] Multi-phase refresh coordinator and fine-grained locking — added `RefreshCoordinator.fs` and `RefreshLockPhases.fs` to decouple model refreshes into lock-free preparation, ultra-short write-lock commits (< 5ms), and lock-free post-processing, eliminating global LSP write-lock contention.
+
+- **[性能] 精准诊断失效准入控制（Diagnostic Invalidation Admission Control）**：
+  - 引入 `DiagnosticInvalidation.fs` 与多域失效纪元（Domain Epochs），精准追踪各个文件与其关联域的有效性，杜绝微小修改触发全工作区诊断闪烁与重复清空。
+  - English: [Performance] Diagnostic invalidation admission control — introduced `DiagnosticInvalidation.fs` to track file-domain validity epochs, preventing full-workspace diagnostic wiping and gutter flicker on single-file edits.
+
+- **[性能] 内存缓存生命周期上限与跨平台路径规范化（Bounded Cache Lifecycles & Path Identity）**：
+  - 为后台分析缓存设置容量与生命周期边界（`Bound memory cache lifecycles`），彻底根除长时间运行内存暴涨至数 GB 的问题。
+  - 新增 `PathIdentity.fs` 与 `SymbolIndex.fs`，统一 Windows/POSIX 规范化路径标识与符号快速检索；强化 Windows 大小写不敏感路径在删除与更新时的生命周期一致性。
+  - 新增 `tools/perf/analyze-performance-log.mjs` 性能日志自动化分析工具。
+  - English: [Performance] Bounded cache lifecycles and path identity — enforced memory bounds on background analysis caches to prevent memory leaks during long editing sessions; added `PathIdentity.fs` and `SymbolIndex.fs` for canonical Windows/POSIX path normalization and fast inverted symbol queries; added `analyze-performance-log.mjs` for automated LSP profiling.
+
+### 规则与功能优化 / Rules & Feature Improvements
+- **[优化] 作用域推断与 CWT 规则语法扩充（Scope Inference & CWT Syntax Expansion）**：
+  - 在 `RulesParser.fs` 中完整支持 CWT 规则注释 `## scopes = { all }`、`## scope = all` 与 `any` 展开为全局所有作用域。
+  - 在 `STLProcess.fs` 中完善复合控制流语句（`if`、`else_if`、`else`、`while`、`switch`、`random_list` 等）内部的作用域穿透与递归推断。
+  - English: [Improvement] Scope inference and CWT syntax expansion — added full expansion for `## scopes = { all }`, `## scope = all`, and `any` annotations in `RulesParser.fs`; strengthened recursive scope inheritance across complex control blocks (`if`, `else_if`, `else`, `while`, `switch`, etc.) in `STLProcess.fs`.
+
+- **[优化] 全流程启动与原版缓存生成进度通知（Full Lifecycle Loading Bar Progress Notifications）**：
+  - 在工作区载入（`prepareWorkspace`）与原版缓存生成（`checkOrSetGameCache`）各入口补齐全流程 `loadingBar` 进度事件，消除启动静默等待。
+  - 修复 `extension.ts` 中 `cwt-only` 升级监听器在切换编辑器 Tab 时反复重载工作区的 Bug，根治验证死循环与中断问题。
+  - English: [Improvement] Full lifecycle loading bar progress notifications — injected visible progress events across project preparation (`prepareWorkspace`) and vanilla cache generation (`checkOrSetGameCache`); fixed reload storm in `extension.ts` caused by `cwt-only` upgrade handler firing repeatedly on tab switches.
+
+- **[优化] 全量编译警告清零与代码健壮性（Zero Build Warnings & Hardened Stability）**：
+  - 清理全部 `FS0066`（冗余向上转换）、`FS0760`（IDisposable 显式构造）与 `FS0104`（枚举未穷举匹配）编译器警告，达成 Release 编译 0 警告 0 错误。
+  - English: [Improvement] Zero build warnings and hardened stability — eliminated all compiler warnings (`FS0066`, `FS0760`, `FS0104`) for a clean Release build with hardened resource disposals.
+
 ## [2.16.3] - 2026-08-29
 
 ### 修复与优化 / Fixes & Improvements

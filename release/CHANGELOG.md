@@ -1,5 +1,14 @@
 # Changelog
 
+## [2.16.6] - 2026-09-01
+
+### 交互与执行流程优化 / Interaction & Execution Workflow Improvements
+- **[优化] 提问工具（ask_user_question）交互时机优化与前置澄清（Interactive Question Timing & Pre-Write Clarification）**：
+  - **执行模式提问时机严格前置**：在 Build Mode 和 General Coding Mode 中明确要求，若在探索/读取代码阶段发现需求存在歧义、多种互斥实现方案或缺失关键用户参数，必须在**修改任何文件前**调用 `ask_user_question` 确认方向；禁止“先根据猜测默认值修改代码，最后在任务收尾时才提问”的先斩后奏行为。
+  - **优化执行恢复机制引导**：调整 `agentRunner.ts` 中的 `authorized_execution` 续写恢复提示词，指引模型在发现需求分歧或缺少必要输入时，在写文件前主动调用 `ask_user_question`，消除模型因过度担心被判定为“未完成执行”而被迫使用默认值强行改写代码的问题。
+  - **增强自然语言澄清识别与容错**：扩充 `runnerPolicy.ts` 中的 `finalResponseRequiresUserInput` 正则匹配，覆盖更多中英文方案选择（如“您希望采用哪种方案”、“Which approach do you prefer”等），避免模型在中途停下沟通时被误判并强推写操作。
+  - English: [Improvement] Interactive question timing & pre-write clarification — enforced pre-write clarification via `ask_user_question` in Build and General Coding mode prompt contracts when discovery reveals ambiguous requirements, conflicting implementations, or missing essential user parameters; strictly prohibited guessing default values and asking retrospective questions after file writes are completed; updated `authorized_execution` recovery reminder in `agentRunner.ts` to guide pre-mutation questions; expanded `finalResponseRequiresUserInput` regex patterns in `runnerPolicy.ts` for broader multi-option and clarification detection.
+
 ## [2.16.5] - 2026-08-31
 
 ### 权限与安全模型升级 / Security & Permissions Model Upgrade

@@ -5,6 +5,8 @@ import {
     buildExploreModeSystemPrompt,
     buildReviewModeSystemPrompt,
     buildLocWriterSystemPrompt,
+    buildBuildSystemPrompt,
+    buildGeneralCodingSystemPrompt,
 } from '../../extension/ai/prompt/sections/modePrompts';
 
 describe('plan mode prompts', () => {
@@ -14,6 +16,17 @@ describe('plan mode prompts', () => {
         expect(paradox).to.include('the UI adds Other automatically');
         expect(paradox).to.not.include(':::question');
         expect(paradox).to.include('never switch to execution');
+    });
+
+    it('requires pre-write clarification via ask_user_question in execution mode prompts', () => {
+        const buildPrompt = buildBuildSystemPrompt('', 'Stellaris', false);
+        expect(buildPrompt).to.include('call `ask_user_question` as the only tool call to confirm direction');
+        expect(buildPrompt).to.include('clarify BEFORE making any modifications');
+        expect(buildPrompt).to.include('Never rush to mutate files on guesswork and only ask afterwards');
+
+        const codingPrompt = buildGeneralCodingSystemPrompt(false);
+        expect(codingPrompt).to.include('call `ask_user_question` as the only tool call to clarify BEFORE modifying code');
+        expect(codingPrompt).to.include('Never guess assumptions, perform the mutation, and then ask questions after completion');
     });
 
     it('keeps the general plan boundary on the same structured-tool contract', () => {

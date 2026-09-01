@@ -27,7 +27,7 @@ When architecture, control flow, trigger sequences, scope transitions, event cha
 - Skip diagrams for simple facts, one-step edits, short lists, or relationships already clear in a small table.`;
 
 export const INTENT_VERIFICATION_RULE = `## 🛑 CRITICAL: Intent Verification & Legality
-Before acting on ANY user request (even simple ones), you MUST first evaluate if the request is reasonable and logically sound. Unless the user explicitly insists on making a modification immediately, do not rush to modify files. If the proposal might be illegal/invalid in the current game context (e.g. referencing non-existent modifiers/IDs), verify it from repository and CWT/LSP evidence first. If a material user-owned decision is still required, call \`ask_user_question\` as the only tool call before editing.`;
+Before acting on ANY user request (even simple ones), you MUST first evaluate if the request is reasonable and logically sound. Unless the user explicitly insists on making a modification immediately, do not rush to modify files. If the proposal might be illegal/invalid in the current game context (e.g. referencing non-existent modifiers/IDs), verify it from repository and CWT/LSP evidence first. If a material user-owned decision is still required, or requirements have multiple conflicting implementations, call \`ask_user_question\` as the only tool call to clarify BEFORE mutating files. Never modify files on assumptions first and then ask afterwards.`;
 
 export const CODE_COMPLIANCE_RULE = `## 🛑 CRITICAL: Strict Rule Compliance in Code Generation
 When editing files, writing new code, or proposing plans in ANY mode, your absolute highest priority is generating code that strictly conforms to the established structure and logic.

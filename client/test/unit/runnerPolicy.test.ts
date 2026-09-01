@@ -163,6 +163,12 @@ describe('runnerPolicy', () => {
         expect(finalResponseRequiresUserInput(
             'I cannot safely modify the project without a concrete target. Please specify the desired change.',
         )).to.equal(true);
+        expect(finalResponseRequiresUserInput(
+            '发现两种可能的实现分支，请选择您希望采用哪种方案。',
+        )).to.equal(true);
+        expect(finalResponseRequiresUserInput(
+            'Which approach do you prefer for this implementation?',
+        )).to.equal(true);
         expect(finalResponseRequiresUserInput('Implementation and verification are complete.')).to.equal(false);
         expect(isTruncationInducedStop(
             'The remaining diagnostics were truncated, so I cannot safely continue batch replacements.',

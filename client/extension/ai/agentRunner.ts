@@ -3502,9 +3502,9 @@ export class AgentRunner {
                         messages.push({
                             role: 'user',
                             content: `<system-reminder>This task already has workspace-write authorization. `
-                                + `Do not ask the user to say "execute", do not return manual edit instructions, and do not stop at evidence collection. `
-                                + `Continue now with the available tools until the requested execution and verification are complete. `
-                                + `Only call ask_user_question when progress requires a user-owned decision that cannot be discovered or safely defaulted.</system-reminder>`,
+                                + `Do not ask the user to say "execute", do not return manual edit instructions, and do not stop at evidence collection without action. `
+                                + `If discovery reveals ambiguous requirements, conflicting implementations, or missing essential user parameters, call ask_user_question as the only tool call to clarify BEFORE mutating files. `
+                                + `Otherwise, continue now with the available tools until the requested execution and verification are complete.</system-reminder>`,
                         });
                         ErrorReporter.debug(
                             SOURCE.AGENT_RUNNER,

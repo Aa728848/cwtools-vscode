@@ -51,27 +51,28 @@ export function getParadoxUserDataRoots(
 	env: NodeJS.ProcessEnv = process.env
 ): string[] {
 	const candidates: string[] = [];
+	const pathApi = platform === 'win32' ? path.win32 : (platform === 'linux' || platform === 'darwin' ? path.posix : path);
 
 	if (platform === 'linux') {
-		candidates.push(path.join(homeDir, '.local', 'share', 'Paradox Interactive'));
-		candidates.push(path.join(homeDir, '.paradoxinteractive'));
+		candidates.push(pathApi.join(homeDir, '.local', 'share', 'Paradox Interactive'));
+		candidates.push(pathApi.join(homeDir, '.paradoxinteractive'));
 	} else if (platform === 'darwin') {
-		candidates.push(path.join(homeDir, 'Documents', 'Paradox Interactive'));
-		candidates.push(path.join(homeDir, 'Library', 'Application Support', 'Paradox Interactive'));
+		candidates.push(pathApi.join(homeDir, 'Documents', 'Paradox Interactive'));
+		candidates.push(pathApi.join(homeDir, 'Library', 'Application Support', 'Paradox Interactive'));
 	} else {
 		// win32 and default
-		candidates.push(path.join(homeDir, 'Documents', 'Paradox Interactive'));
+		candidates.push(pathApi.join(homeDir, 'Documents', 'Paradox Interactive'));
 		const userProfile = env.USERPROFILE;
 		if (userProfile && userProfile.toLowerCase() !== homeDir.toLowerCase()) {
-			candidates.push(path.join(userProfile, 'Documents', 'Paradox Interactive'));
+			candidates.push(pathApi.join(userProfile, 'Documents', 'Paradox Interactive'));
 		}
 		const oneDrive = env.OneDrive || env.ONEDRIVE || env.OneDriveConsumer || env.OneDriveCommercial;
 		if (oneDrive) {
-			candidates.push(path.join(oneDrive, 'Documents', 'Paradox Interactive'));
+			candidates.push(pathApi.join(oneDrive, 'Documents', 'Paradox Interactive'));
 		}
-		candidates.push(path.join(homeDir, 'OneDrive', 'Documents', 'Paradox Interactive'));
+		candidates.push(pathApi.join(homeDir, 'OneDrive', 'Documents', 'Paradox Interactive'));
 		if (userProfile && userProfile.toLowerCase() !== homeDir.toLowerCase()) {
-			candidates.push(path.join(userProfile, 'OneDrive', 'Documents', 'Paradox Interactive'));
+			candidates.push(pathApi.join(userProfile, 'OneDrive', 'Documents', 'Paradox Interactive'));
 		}
 	}
 
@@ -79,7 +80,7 @@ export function getParadoxUserDataRoots(
 	const seen = new Set<string>();
 	for (const candidate of candidates) {
 		if (!candidate?.trim()) continue;
-		const resolved = path.resolve(candidate);
+		const resolved = pathApi.resolve(candidate);
 		const key = platform === 'win32' ? resolved.toLowerCase() : resolved;
 		if (!seen.has(key)) {
 			seen.add(key);

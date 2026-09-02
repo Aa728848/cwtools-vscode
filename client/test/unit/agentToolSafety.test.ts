@@ -1080,16 +1080,16 @@ describe('agent tool file path safety', () => {
             USERPROFILE: 'C:\\Users\\TestUser',
             OneDrive: 'C:\\Users\\TestUser\\OneDrive',
         } as any);
-        expect(winRoots).to.include(path.resolve('C:\\Users\\TestUser\\Documents\\Paradox Interactive'));
-        expect(winRoots).to.include(path.resolve('C:\\Users\\TestUser\\OneDrive\\Documents\\Paradox Interactive'));
+        expect(winRoots).to.include(path.win32.resolve('C:\\Users\\TestUser\\Documents\\Paradox Interactive'));
+        expect(winRoots).to.include(path.win32.resolve('C:\\Users\\TestUser\\OneDrive\\Documents\\Paradox Interactive'));
 
         const linuxRoots = getParadoxUserDataRoots('linux', '/home/testuser', {} as any);
-        expect(linuxRoots).to.include(path.resolve('/home/testuser/.local/share/Paradox Interactive'));
-        expect(linuxRoots).to.include(path.resolve('/home/testuser/.paradoxinteractive'));
+        expect(linuxRoots).to.include(path.posix.resolve('/home/testuser/.local/share/Paradox Interactive'));
+        expect(linuxRoots).to.include(path.posix.resolve('/home/testuser/.paradoxinteractive'));
 
         const macRoots = getParadoxUserDataRoots('darwin', '/Users/testuser', {} as any);
-        expect(macRoots).to.include(path.resolve('/Users/testuser/Documents/Paradox Interactive'));
-        expect(macRoots).to.include(path.resolve('/Users/testuser/Library/Application Support/Paradox Interactive'));
+        expect(macRoots).to.include(path.posix.resolve('/Users/testuser/Documents/Paradox Interactive'));
+        expect(macRoots).to.include(path.posix.resolve('/Users/testuser/Library/Application Support/Paradox Interactive'));
     });
 
     it('rejects writes to globalStorage and auxiliary readable paths', async () => {

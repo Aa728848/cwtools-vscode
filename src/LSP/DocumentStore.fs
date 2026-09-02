@@ -30,16 +30,17 @@ module DocumentStoreUtils =
     /// lineOffsets.[0] = 0 always; lineOffsets.[i] = offset of first char on line i.
     let buildLineOffsets (text: StringBuilder) : int[] =
         // Pre-scan to count newlines so we can allocate exactly once
+        let textLen = text.Length
         let mutable nlCount = 0
-        for i = 0 to text.Length - 1 do
-            if text.[i] = '\n' then nlCount <- nlCount + 1
+        for i = 0 to textLen - 1 do
+            if text[i] = '\n' then nlCount <- nlCount + 1
         let offsets = Array.zeroCreate (nlCount + 1)
-        offsets.[0] <- 0
+        offsets[0] <- 0
         let mutable lineIdx = 0
-        for i = 0 to text.Length - 1 do
-            if text.[i] = '\n' && lineIdx < nlCount then
+        for i = 0 to textLen - 1 do
+            if text[i] = '\n' && lineIdx < nlCount then
                 lineIdx <- lineIdx + 1
-                offsets.[lineIdx] <- i + 1
+                offsets[lineIdx] <- i + 1
         offsets
 
     /// O(log n) range-to-offset conversion via a pre-built lineOffsets cache.

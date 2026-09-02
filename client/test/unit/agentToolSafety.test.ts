@@ -836,6 +836,52 @@ describe('agent tool file path safety', () => {
             .to.equal('literal template brace: {\n');
     });
 
+    it('enforces UTF-8 without BOM for new PDXScript files even if utf8bom is requested', async () => {
+        const handler = createFileHandler();
+        const ctx = makeContext();
+        ctx.runnerOptions.schedulingState = PARADOX_WRITE;
+
+        const commonRel = 'common/traits/00_custom_traits.txt';
+        const writeResult = await handler.writeFile({
+            file: commonRel,
+            content: 'trait_custom = {\n\tcost = 1\n}\n',
+            encoding: 'utf8bom',
+        }, ctx);
+        expect(writeResult.success).to.equal(true);
+        const fileBytes = fs.readFileSync(path.join(workspaceRoot, commonRel));
+        expect(fileBytes.subarray(0, 3).equals(Buffer.from([0xEF, 0xBB, 0xBF]))).to.equal(false);
+        expect(fileBytes.toString('utf8')).to.equal('trait_custom = {\n\tcost = 1\n}\n');
+
+        // editFile also must not inject a BOM into a non-BOM file
+        const editResult = await handler.editFile({
+            filePath: commonRel,
+            oldString: 'cost = 1',
+            newString: 'cost = 2',
+            encoding: 'utf8bom',
+        }, ctx) as any;
+        expect(editResult.success).to.equal(true);
+        const editedBytes = fs.readFileSync(path.join(workspaceRoot, commonRel));
+        expect(editedBytes.subarray(0, 3).equals(Buffer.from([0xEF, 0xBB, 0xBF]))).to.equal(false);
+        expect(editedBytes.toString('utf8')).to.include('cost = 2');
+
+        // If existing file has BOM, editing with encoding: 'utf8' strips the BOM
+        const legacyBomFile = 'events/legacy_bom.txt';
+        const legacyAbs = path.join(workspaceRoot, legacyBomFile);
+        fs.mkdirSync(path.dirname(legacyAbs), { recursive: true });
+        fs.writeFileSync(legacyAbs, Buffer.concat([Buffer.from([0xEF, 0xBB, 0xBF]), Buffer.from('namespace = test\n', 'utf8')]));
+
+        const stripResult = await handler.editFile({
+            filePath: legacyBomFile,
+            oldString: 'namespace = test',
+            newString: 'namespace = updated',
+            encoding: 'utf8',
+        }, ctx) as any;
+        expect(stripResult.success).to.equal(true);
+        const strippedBytes = fs.readFileSync(legacyAbs);
+        expect(strippedBytes.subarray(0, 3).equals(Buffer.from([0xEF, 0xBB, 0xBF]))).to.equal(false);
+        expect(strippedBytes.toString('utf8')).to.equal('namespace = updated\n');
+    });
+
     it('serves targeted read_file context consistently across domains', async () => {
         const eventDir = path.join(workspaceRoot, 'events');
         fs.mkdirSync(eventDir, { recursive: true });

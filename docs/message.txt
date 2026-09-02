@@ -1,0 +1,102 @@
+[08:00:57] [Lifecycle] LanguageClientState
+  Details: old: Stopped [old=Stopped] | new: Starting [new=Starting]
+
+[08:00:57] [Lifecycle] ClientServerProcess
+  Details: stage: spawned [stage=spawned] | pid: 17504 [pid=17504] | instance: 4266c70b-6350-4fd4-b3e2-ed70d628eaf0 [instance=4266c70b-6350-4fd4-b3e2-ed70d628eaf0]
+
+[08:00:57] [Lifecycle] LanguageClientState
+  Details: old: Starting [old=Starting] | new: Running [new=Running]
+
+[08:00:57] [Lint] Validation
+  File [file]: c:\Users\sebas\Documents\Paradox Interactive\Stellaris\mod\Lotor [Dev]\lotor\gfx\models\ships\generic_lotor_01\_generic_lotor_01_ships_entities.asset
+  Details: phase: deep-complete [phase=deep-complete] | documentVersion: Some(1) [documentVersion=Some(1)] | modelEpoch: { game = 0L   rules = 0L   types = 0L   localisation = 0L } [modelEpoch={ game = 0L   rules = 0L   types = 0L   localisation = 0L }] | freshness: Fresh [freshness=Fresh]
+  ↳ Diagnostics: 0 [diagnostics=0] | Pending:  [pending=]
+
+[08:01:48] [Heartbeat] Event
+  Details: heartbeatGapMs: 687.6015 [heartbeatGapMs=687.6015] | pendingWorkItems: 0 [pendingWorkItems=0] | availableWorkers: 32761 [availableWorkers=32761] | writerActive: 0 [writerActive=0]
+  ↳ waitingWriters: 0 [waitingWriters=0]
+
+[08:24:45] [Lint] ValidateFile
+  File [file]: c:\Program Files (x86)\Steam\steamapps\workshop\content\281990\1886496498\common\inline_scripts\ships\command_cruiser_xc.txt
+  Details: Shallow validation: false [shallow=False] | Allocated by operation: 2 MB [allocDeltaMB=2]
+  Diagnostics: Files: 16695 [files=16695] | Fresh: 16695 [fresh=16695] | Pending: 0 [pending=0] | Stale: 0 [stale=0]
+  ↳ Errors: 1095 [errors=1095] | Warnings: 7209 [warnings=7209]
+  Caches: Semantic: 0 [semantic=0] | CodeLens cache: 0 [codeLens=0] | Inlay cache: 0 [inlay=0] | Localisation files: 87 [locFiles=87]
+  ↳ Localisation keys: 0 [locKeys=0] | Completion TTL cache: 0 [completionTTL=0] | Type references: 0 [typeRefs=0] | Grouped type files: 0 [groupedTypeFiles=0]
+  ↳ Cache write records: 87 [cacheWriteKeys=87] | resourceEpoch: 3 [resourceEpoch=3] | carrierEpoch: 2 [carrierEpoch=2] | typeRulesEpoch: 1 [typeRulesEpoch=1]
+  ↳ localisationEpoch: 0 [localisationEpoch=0] | fileSetEpoch: 1 [fileSetEpoch=1]
+
+[08:24:45] [Lint] Validation
+  File [file]: c:\Program Files (x86)\Steam\steamapps\workshop\content\281990\1886496498\common\inline_scripts\ships\command_cruiser_xc.txt
+  Details: phase: deep-complete [phase=deep-complete] | documentVersion: Some(1) [documentVersion=Some(1)] | modelEpoch: { game = 1L   rules = 1L   types = 1L   localisation = 1L } [modelEpoch={ game = 1L   rules = 1L   types = 1L   localisation = 1L }] | freshness: Fresh [freshness=Fresh]
+  ↳ Diagnostics: 0 [diagnostics=0] | Pending:  [pending=]
+
+[08:24:45] [Performance] PerfCounters
+  Details: Last operation: lint [last=lint] | Lint count: 2 [lint=2] | Refresh count: 0 [refresh=0] | Localisation refresh count: 0 [refreshLoc=0]
+  ↳ Completion count: 0 [completion=0] | Interned strings: 693667 [strings=693667] | Interned integers: 1016088 [ints=1016088]
+  Memory: Managed heap: 6206MB [heap=6206MB] | Total allocated: 304351MB [alloc=304351MB] | Working set: 8146MB [working=8146MB] | Private memory: 8320MB [private=8320MB]
+  ↳ Fragmented heap: 1630MB [fragmented=1630MB] | Gen 0 GC: 4933 [gc0=4933] | Gen 1 GC: 416 [gc1=416] | Gen 2 GC: 16 [gc2=16]
+  Diagnostics: Files: 16696 [files=16696] | Fresh: 16696 [fresh=16696] | Pending: 0 [pending=0] | Stale: 0 [stale=0]
+  ↳ Errors: 1095 [errors=1095] | Warnings: 7209 [warnings=7209]
+  Caches: Semantic: 0 [semantic=0] | CodeLens cache: 0 [codeLens=0] | Inlay cache: 0 [inlay=0] | Localisation files: 87 [locFiles=87]
+  ↳ Localisation keys: 0 [locKeys=0] | Completion TTL cache: 0 [completionTTL=0] | Type references: 0 [typeRefs=0] | Grouped type files: 0 [groupedTypeFiles=0]
+  ↳ Cache write records: 87 [cacheWriteKeys=87] | resourceEpoch: 3 [resourceEpoch=3] | carrierEpoch: 2 [carrierEpoch=2] | typeRulesEpoch: 1 [typeRulesEpoch=1]
+  ↳ localisationEpoch: 0 [localisationEpoch=0] | fileSetEpoch: 1 [fileSetEpoch=1]
+
+[08:24:45] [Lifecycle] AnalyzeLifecycle
+  Details: stage: analyze-begin [stage=analyze-begin] | pid: 17504 [pid=17504] | instance: 4266c70b-6350-4fd4-b3e2-ed70d628eaf0 [instance=4266c70b-6350-4fd4-b3e2-ed70d628eaf0] | Forced refresh: false [force=False]
+  ↳ Global refresh in this pass: false [doRefresh=False] | Pending:  [pending=]
+  Memory: Managed heap: 6206MB [heap=6206MB] | Total allocated: 304352MB [alloc=304352MB] | Working set: 8146MB [working=8146MB] | Private memory: 8319MB [private=8319MB]
+  ↳ Fragmented heap: 1630MB [fragmented=1630MB] | Gen 0 GC: 4933 [gc0=4933] | Gen 1 GC: 416 [gc1=416] | Gen 2 GC: 16 [gc2=16]
+
+[08:24:46] [Refresh] RefreshCaches · skipped
+  Details: Pending: false [pending=false]
+  Diagnostics: Files: 16696 [files=16696] | Fresh: 16696 [fresh=16696] | Pending: 0 [pending=0] | Stale: 0 [stale=0]
+  ↳ Errors: 1095 [errors=1095] | Warnings: 7209 [warnings=7209]
+  Caches: Semantic: 0 [semantic=0] | CodeLens cache: 0 [codeLens=0] | Inlay cache: 0 [inlay=0] | Localisation files: 87 [locFiles=87]
+  ↳ Localisation keys: 0 [locKeys=0] | Completion TTL cache: 0 [completionTTL=0] | Type references: 0 [typeRefs=0] | Grouped type files: 0 [groupedTypeFiles=0]
+  ↳ Cache write records: 87 [cacheWriteKeys=87] | resourceEpoch: 3 [resourceEpoch=3] | carrierEpoch: 2 [carrierEpoch=2] | typeRulesEpoch: 1 [typeRulesEpoch=1]
+  ↳ localisationEpoch: 0 [localisationEpoch=0] | fileSetEpoch: 1 [fileSetEpoch=1]
+
+[08:24:46] [RequestTrace] {"id":16,"method":"textDocument/inlayHint","totalMs":184.9029,"queueMs":0.0327,"processQueueMs":0.0201,"workerWaitMs":0.2049,"lockWaitMs":184.5947,"methodMs":0.0377,"fallbackMs":0,"responseMs":0.0128,"lockKind":"read-fallback","lockAcquired":true,"outcome":"success","queueDepth":1,"pendingCount":3,"workerThreads":5,"maxWorkerThreads":32767,"minWorkerThreads":16,"availableWorkerThreads":32762,"pendingWorkItems":0,"readerCount":3,"waitingReadCount":0,"waitingWriteCount":0,"writerActivityCount":0,"writerActiveCount":0}
+
+[08:24:46] [RequestTrace] {"id":17,"method":"textDocument/documentLink","totalMs":185.0526,"queueMs":0.0076,"processQueueMs":0.0101,"workerWaitMs":0.2408,"lockWaitMs":184.4664,"methodMs":0.3141,"fallbackMs":0,"responseMs":0.0136,"lockKind":"read-fallback","lockAcquired":true,"outcome":"success","queueDepth":1,"pendingCount":4,"workerThreads":4,"maxWorkerThreads":32767,"minWorkerThreads":16,"availableWorkerThreads":32763,"pendingWorkItems":0,"readerCount":2,"waitingReadCount":0,"waitingWriteCount":0,"writerActivityCount":0,"writerActiveCount":0}
+
+[08:24:46] [RequestTrace] {"id":15,"method":"textDocument/codeAction","totalMs":188.5118,"queueMs":0.0382,"processQueueMs":0.0273,"workerWaitMs":0.0261,"lockWaitMs":187.9264,"methodMs":0.483,"fallbackMs":0,"responseMs":0.0108,"lockKind":"read-fallback","lockAcquired":true,"outcome":"success","queueDepth":1,"pendingCount":2,"workerThreads":3,"maxWorkerThreads":32767,"minWorkerThreads":16,"availableWorkerThreads":32764,"pendingWorkItems":0,"readerCount":1,"waitingReadCount":0,"waitingWriteCount":0,"writerActivityCount":0,"writerActiveCount":0}
+
+[08:24:46] [RequestTrace] {"id":18,"method":"textDocument/documentHighlight","totalMs":159.7316,"queueMs":0.2495,"processQueueMs":0.0312,"workerWaitMs":0.3012,"lockWaitMs":158.3087,"methodMs":0.8316,"fallbackMs":0,"responseMs":0.0094,"lockKind":"read-fallback","lockAcquired":true,"outcome":"success","queueDepth":1,"pendingCount":5,"workerThreads":2,"maxWorkerThreads":32767,"minWorkerThreads":16,"availableWorkerThreads":32765,"pendingWorkItems":0,"readerCount":0,"waitingReadCount":0,"waitingWriteCount":0,"writerActivityCount":0,"writerActiveCount":0}
+
+[08:24:46] [Memory] AnalyzePass
+  Details: Allocated this cycle: 0 MB [cycleAllocMB=0] | Interned strings: 693667 [strings=693667] | Interned integers: 1016088 [ints=1016088]
+  Memory: Managed heap: 6207MB [heap=6207MB] | Total allocated: 304352MB [alloc=304352MB] | Working set: 8146MB [working=8146MB] | Private memory: 8319MB [private=8319MB]
+  ↳ Fragmented heap: 1630MB [fragmented=1630MB] | Gen 0 GC: 4933 [gc0=4933] | Gen 1 GC: 416 [gc1=416] | Gen 2 GC: 16 [gc2=16]
+  Diagnostics: Files: 16696 [files=16696] | Fresh: 16696 [fresh=16696] | Pending: 0 [pending=0] | Stale: 0 [stale=0]
+  ↳ Errors: 1095 [errors=1095] | Warnings: 7209 [warnings=7209]
+  Caches: Semantic: 0 [semantic=0] | CodeLens cache: 0 [codeLens=0] | Inlay cache: 0 [inlay=0] | Localisation files: 87 [locFiles=87]
+  ↳ Localisation keys: 0 [locKeys=0] | Completion TTL cache: 0 [completionTTL=0] | Type references: 0 [typeRefs=0] | Grouped type files: 0 [groupedTypeFiles=0]
+  ↳ Cache write records: 87 [cacheWriteKeys=87] | resourceEpoch: 3 [resourceEpoch=3] | carrierEpoch: 2 [carrierEpoch=2] | typeRulesEpoch: 1 [typeRulesEpoch=1]
+  ↳ localisationEpoch: 0 [localisationEpoch=0] | fileSetEpoch: 1 [fileSetEpoch=1]
+
+[08:24:46] [Lifecycle] AnalyzeLifecycle
+  Details: stage: analyze-complete [stage=analyze-complete] | pid: 17504 [pid=17504] | instance: 4266c70b-6350-4fd4-b3e2-ed70d628eaf0 [instance=4266c70b-6350-4fd4-b3e2-ed70d628eaf0] | Elapsed: 219 ms [elapsedMs=219]
+  ↳ didGlobalWork: false [didGlobalWork=False] | didRefresh: false [didRefresh=False] | Status: not_needed [status=not_needed]
+  Memory: Managed heap: 6207MB [heap=6207MB] | Total allocated: 304352MB [alloc=304352MB] | Working set: 8146MB [working=8146MB] | Private memory: 8319MB [private=8319MB]
+  ↳ Fragmented heap: 1630MB [fragmented=1630MB] | Gen 0 GC: 4933 [gc0=4933] | Gen 1 GC: 416 [gc1=416] | Gen 2 GC: 16 [gc2=16]
+
+[08:24:46] [RequestTrace] {"id":21,"method":"textDocument/hover","totalMs":147.8242,"queueMs":0.188,"processQueueMs":0.0263,"workerWaitMs":0.0219,"lockWaitMs":0.0085,"methodMs":147.5063,"fallbackMs":0,"responseMs":0.0732,"lockKind":"read-fallback","lockAcquired":true,"outcome":"cancelled","queueDepth":1,"pendingCount":1,"workerThreads":2,"maxWorkerThreads":32767,"minWorkerThreads":16,"availableWorkerThreads":32765,"pendingWorkItems":0,"readerCount":1,"waitingReadCount":0,"waitingWriteCount":0,"writerActivityCount":0,"writerActiveCount":0}
+
+[08:24:59] [RequestTrace] {"id":31,"method":"textDocument/hover","totalMs":16.5654,"queueMs":0.0157,"processQueueMs":0.0199,"workerWaitMs":0.0216,"lockWaitMs":0.0077,"methodMs":16.4658,"fallbackMs":0,"responseMs":0.0347,"lockKind":"read-fallback","lockAcquired":true,"outcome":"cancelled","queueDepth":1,"pendingCount":1,"workerThreads":1,"maxWorkerThreads":32767,"minWorkerThreads":16,"availableWorkerThreads":32766,"pendingWorkItems":0,"readerCount":0,"waitingReadCount":0,"waitingWriteCount":0,"writerActivityCount":0,"writerActiveCount":0}
+
+[08:25:11] [Lifecycle] LanguageClientState
+  Details: old: Running [old=Running] | new: Stopped [new=Stopped]
+
+[08:25:11] [Lifecycle] ClientServerProcess
+  Details: stage: force-kill-start [stage=force-kill-start] | pid: 17504 [pid=17504] | instance: 4266c70b-6350-4fd4-b3e2-ed70d628eaf0 [instance=4266c70b-6350-4fd4-b3e2-ed70d628eaf0] | reason: client-stop-left-process-running [reason=client-stop-left-process-running]
+
+[08:25:11] [Lifecycle] ClientServerProcess
+  Details: stage: force-kill-complete [stage=force-kill-complete] | pid: 17504 [pid=17504] | instance: 4266c70b-6350-4fd4-b3e2-ed70d628eaf0 [instance=4266c70b-6350-4fd4-b3e2-ed70d628eaf0] | reason: client-stop-left-process-running [reason=client-stop-left-process-running]
+
+[08:25:12] [Lifecycle] ClientServerProcess
+  Details: stage: exited [stage=exited] | pid: 17504 [pid=17504] | instance: 4266c70b-6350-4fd4-b3e2-ed70d628eaf0 [instance=4266c70b-6350-4fd4-b3e2-ed70d628eaf0] | code: 0 [code=0]
+  ↳ signal: null [signal=null]
+

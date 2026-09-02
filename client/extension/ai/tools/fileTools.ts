@@ -615,14 +615,21 @@ export class FileToolHandler {
         const dir = path.dirname(filePath);
         if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
 
-        let shouldAddBom = hasBom;
-        if (requestedEncoding) {
-            shouldAddBom = requestedEncoding === 'utf8bom';
-        } else if (matchesExt(filePath, '.yml') && this.isLocalisationPath(filePath)) {
+        const isLoc = matchesExt(filePath, '.yml') && this.isLocalisationPath(filePath);
+        let shouldAddBom = false;
+
+        if (isLoc) {
+            // Localisation YAML files require UTF-8 with BOM in Paradox Clausewitz engines.
             shouldAddBom = true;
         } else {
-            shouldAddBom = false; // Fallback to no BOM for all other files if requestedEncoding is not set and hasBom is false for a new file.
-            if (hasBom) shouldAddBom = true; // Preserve an existing BOM
+            // Non-localisation files (common/, events/, interface/, gfx/, etc.) MUST NOT have a BOM when created.
+            // Even if requestedEncoding is 'utf8bom', we enforce no BOM for script files to prevent engine parse errors.
+            // For existing files with a pre-existing BOM, preserve it unless explicitly requested to use 'utf8'.
+            if (hasBom && requestedEncoding !== 'utf8') {
+                shouldAddBom = true;
+            } else {
+                shouldAddBom = false;
+            }
         }
 
         const finalContent = shouldAddBom ? '\uFEFF' + content : content;

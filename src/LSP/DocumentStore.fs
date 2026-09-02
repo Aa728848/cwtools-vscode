@@ -32,15 +32,19 @@ module DocumentStoreUtils =
         // Pre-scan to count newlines so we can allocate exactly once
         let textLen = text.Length
         let mutable nlCount = 0
-        for i = 0 to textLen - 1 do
+        let mutable i = 0
+        while i < textLen do
             if text[i] = '\n' then nlCount <- nlCount + 1
+            i <- i + 1
         let offsets = Array.zeroCreate (nlCount + 1)
         offsets[0] <- 0
         let mutable lineIdx = 0
-        for i = 0 to textLen - 1 do
+        i <- 0
+        while i < textLen do
             if text[i] = '\n' && lineIdx < nlCount then
                 lineIdx <- lineIdx + 1
                 offsets[lineIdx] <- i + 1
+            i <- i + 1
         offsets
 
     /// O(log n) range-to-offset conversion via a pre-built lineOffsets cache.

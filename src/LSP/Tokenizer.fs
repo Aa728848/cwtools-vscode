@@ -60,16 +60,19 @@ let readLine (client: BinaryReader) : string option =
 /// in standalone executables between the header block and the body.
 /// We only eat a single char to avoid consuming content bytes.
 let readLength (byteLength: int, client: BinaryReader) : string =
-    // Peek: if first byte is whitespace (leftover from header terminator), skip it.
-    let head = client.ReadChar()
-    let head, remaining =
-        if Char.IsWhiteSpace(head) then
-            // Skip exactly one whitespace char; read the real first byte.
-            client.ReadChar(), byteLength - 2
+    if byteLength <= 0 then ""
+    else
+        let b0 = client.ReadByte()
+        if b0 = 13uy || b0 = 10uy || b0 = 32uy then
+            // Stray whitespace byte between header and body; body contains byteLength - 1 remaining bytes
+            let remaining = client.ReadBytes(byteLength - 1)
+            Encoding.UTF8.GetString(remaining)
         else
-            head, byteLength - 1
-    let tail = client.ReadBytes(remaining)
-    Convert.ToString(head) + Encoding.UTF8.GetString(tail)
+            let remaining = client.ReadBytes(byteLength - 1)
+            let bytes = Array.zeroCreate<byte> byteLength
+            bytes.[0] <- b0
+            Buffer.BlockCopy(remaining, 0, bytes, 1, remaining.Length)
+            Encoding.UTF8.GetString(bytes)
 
 let tokenize (client: BinaryReader) : seq<string> =
     seq {

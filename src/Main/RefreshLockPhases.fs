@@ -86,16 +86,6 @@ let dispatchLocalisationDeleteFollowup outcome onCommitted onPending =
     | LocalisationDeleteCapabilityUnavailable -> onPending None
     | LocalisationDeleteCommitFailed error -> onPending (Some error)
 
-/// Dispatch the heavy nonincremental localisation follow-up only when the
-/// captured game/model guard is still current. Stale work remains queued.
-let dispatchNonincrementalLocalisationFollowup guardStillCurrent onCurrent onStale =
-    if guardStillCurrent then
-        onCurrent ()
-        true
-    else
-        onStale ()
-        false
-
 /// A known result is safe to publish even when a repeated commit reports that
 /// the stage already completed. Every indeterminate outcome remains pending.
 let resolvePreparedCommitOutcome recoveredResult outcome =
@@ -107,10 +97,6 @@ let resolvePreparedCommitOutcome recoveredResult outcome =
         |> Option.defaultValue KeepCommitPending
     | CommitSuperseded
     | CommitFailed _ -> KeepCommitPending
-
-let assertWithinCommitBudget elapsed =
-    if not (isWithinCommitBudget elapsed) then
-        invalidOp (sprintf "Root write-lock commit took %O; budget is %O." elapsed commitBudget)
 
 let private ownershipInvariant phase actual =
     let expected = isWriteLockHeldForPhase phase
@@ -247,76 +233,3 @@ type TimingCollector(now: unit -> TimeSpan, isWriteLockHeld: unit -> bool, ?capa
     member _.AggregateSnapshot() = lock gate (fun () -> aggregate)
     member _.Capacity = capacity
 
-/// Exact state captured by preparation and checked immediately before commit.
-/// Any newer generation or any epoch difference makes prepared work stale.
-type GuardVector =
-    { Generation: int64
-      Epochs: Map<string, int64> }
-
-let guardVectorsMatch captured live = captured = live
-let isStale captured live = not (guardVectorsMatch captured live)
-
-/// Remove a prepared prefix only when both the state guard and the entire prefix
-/// still match. This prevents stale work from acknowledging newer queue entries.
-let tryAcknowledgeExactPrefix capturedGuard liveGuard (preparedPrefix: 'Item list) (pending: 'Item list) =
-    if isStale capturedGuard liveGuard then None
-    else
-        let rec acknowledge prefix remaining =
-            match prefix, remaining with
-            | [], rest -> Some rest
-            | expected :: expectedTail, actual :: actualTail when expected = actual ->
-                acknowledge expectedTail actualTail
-            | _ -> None
-        acknowledge preparedPrefix pending
-
-/// State updated by the short root-lock commit callback. The immutable return
-/// value makes a rejected plan leave both snapshot and queue unchanged.
-type CommitState<'Snapshot, 'Item> =
-    { Guard: GuardVector
-      Snapshot: 'Snapshot
-      Pending: 'Item list }
-
-/// Closed commit operations prevent prepared work from injecting arbitrary code
-/// into the root-lock callback. The combined case validates guard and prefix
-/// before constructing one state containing both changes.
-type CommitPlan<'Snapshot, 'Item> =
-    | SwapSnapshot of capturedGuard: GuardVector * snapshot: 'Snapshot
-    | AcknowledgeExactPrefix of capturedGuard: GuardVector * preparedPrefix: 'Item list
-    | SwapSnapshotAndAcknowledgeExactPrefix of
-        capturedGuard: GuardVector * preparedPrefix: 'Item list * snapshot: 'Snapshot
-
-let tryApplyCommitPlan plan (state: CommitState<'Snapshot, 'Item>) =
-    match plan with
-    | SwapSnapshot(capturedGuard, snapshot) ->
-        if isStale capturedGuard state.Guard then None
-        else Some { state with Snapshot = snapshot }
-    | AcknowledgeExactPrefix(capturedGuard, preparedPrefix) ->
-        tryAcknowledgeExactPrefix capturedGuard state.Guard preparedPrefix state.Pending
-        |> Option.map (fun remaining -> { state with Pending = remaining })
-    | SwapSnapshotAndAcknowledgeExactPrefix(capturedGuard, preparedPrefix, snapshot) ->
-        tryAcknowledgeExactPrefix capturedGuard state.Guard preparedPrefix state.Pending
-        |> Option.map (fun remaining ->
-            { state with
-                Snapshot = snapshot
-                Pending = remaining })
-
-/// Immutable localisation diagnostics at one exact committed guard vector.
-type LocalisationDiagnosticSnapshot<'File, 'Diagnostic when 'File: comparison> =
-    { Guard: GuardVector
-      Diagnostics: Map<'File, 'Diagnostic list> }
-
-let emptyLocalisationSnapshot guard =
-    { Guard = guard
-      Diagnostics = Map.empty }
-
-/// Purely replace diagnostics for every supplied file. An empty replacement is
-/// significant and clears the old diagnostics for that file.
-let mergeLocalisationDiagnosticReplacements
-    guard
-    (replacements: Map<'File, 'Diagnostic list>)
-    (snapshot: LocalisationDiagnosticSnapshot<'File, 'Diagnostic>)
-    =
-    let merged =
-        replacements
-        |> Map.fold (fun diagnostics file replacement -> Map.add file replacement diagnostics) snapshot.Diagnostics
-    { Guard = guard; Diagnostics = merged }

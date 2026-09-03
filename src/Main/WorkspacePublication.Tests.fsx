@@ -139,7 +139,7 @@ for forbiddenAssignment in
     check (not (preparationSource.Contains(forbiddenAssignment, StringComparison.Ordinal)))
           (sprintf "Detached preparation must not assign %s" forbiddenAssignment)
 
-let publicationSource = between "    let publishPreparedWorkspace " "    let discardPreparedWorkspace "
+let publicationSource = between "    let publishPreparedWorkspace " "    let completePreparedWorkspacePublication "
 for requiredAssignment in [ "gameFieldClearers"; "gameObj <- prepared.game"; "stlGameObj <- Some game"; "customGameObj <- Some game" ] do
     check (publicationSource.Contains(requiredAssignment, StringComparison.Ordinal))
           (sprintf "Atomic publication must retain %s" requiredAssignment)

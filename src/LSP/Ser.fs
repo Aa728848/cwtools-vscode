@@ -84,7 +84,7 @@ let rec private serializer (depth: int, options: JsonWriteOptions, t: Type) : ob
     let custom = findWriter (t, options.customWriters)
 
     if depth >= 20 then
-        fun _ -> ""
+        fun _ -> "null"
     elif custom.IsSome then
         let fObj = custom.Value
         let fType = fObj.GetType()

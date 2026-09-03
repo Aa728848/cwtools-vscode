@@ -357,7 +357,9 @@ let exploreProject (game: IGame<'T>) rawOptions runtime =
         graphGroups
         |> Seq.collect (fun (fileName, entityType) ->
             try game.GetEventGraphData [ fileName ] entityType options.depth :> seq<GraphDataItem>
-            with _ -> Seq.empty)
+            with ex ->
+                eprintfn $"[SemanticGraph] Failed to expand event graph for %s{fileName} (%s{entityType}): %s{ex.Message}"
+                Seq.empty)
         |> Seq.toList
 
     let seedItems = candidates |> List.map candidateToGraphItem

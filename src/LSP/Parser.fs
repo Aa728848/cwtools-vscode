@@ -28,13 +28,6 @@ let parseFileChangeType (i: int) : FileChangeType =
     | 3 -> FileChangeType.Deleted
     | _ -> raise (Exception $"%d{i} is not a known FileChangeType")
 
-let parseTrace (text: string) : Trace =
-    match text with
-    | "off" -> Trace.Off
-    | "messages" -> Trace.Messages
-    | "verbose" -> Trace.Verbose
-    | _ -> raise (Exception $"Unexpected trace %s{text}")
-
 let parseCompletionItemKind (i: int) : CompletionItemKind =
     match i with
     | 1 -> CompletionItemKind.Text
@@ -96,7 +89,6 @@ let private readOptions =
         customReaders =
             [ parseTextDocumentSaveReason
               parseFileChangeType
-              parseTrace
               parseCompletionItemKind
               parseInsertTextFormat
               parseDiagnosticSeverity
@@ -117,7 +109,9 @@ let parseMessage (jsonText: string) : Message =
     match raw.id, raw.method, raw.``params``, raw.result, raw.error with
     | Some id, Some method, Some p, _, _ -> RequestMessage(id, method, p)
     | Some id, _, _, Some r, _ -> ResponseMessage(id, r)
-    | Some id, None, _, _, Some _ -> ResponseMessage(id, JsonValue.Null)
+    | Some id, None, _, _, Some err ->
+        eprintfn $"Client responded to request %d{id} with error: %O{err}"
+        ResponseMessage(id, JsonValue.Null)
     | Some id, None, _, _, _ -> raise (Exception $"Request message with id %d{id} missing params. Text: %s{jsonText}")
     | None, Some m, _, _, _ -> NotificationMessage(m, raw.``params``)
     | Some id, Some method, _, _, _ -> RequestMessage(id, method, JsonValue.Null)
@@ -170,7 +164,6 @@ type InitializeParamsRaw =
       rootUri: Uri option
       initializationOptions: JsonValue option
       capabilities: JsonValue
-      trace: Trace option
       workspaceFolders: WorkspaceFolder list }
 
 let private parseCapabilities (nested: JsonValue) : Map<string, bool> =
@@ -198,7 +191,6 @@ let private parseInitializeParams (raw: InitializeParamsRaw) : InitializeParams 
       rootUri = raw.rootUri
       initializationOptions = raw.initializationOptions
       capabilitiesMap = raw.capabilities |> parseCapabilities
-      trace = raw.trace
       workspaceFolders = raw.workspaceFolders }
 
 let parseInitialize =
@@ -219,7 +211,6 @@ let parseDocumentSymbolParams =
 let parseWorkspaceSymbolParams =
     deserializerFactory<WorkspaceSymbolParams> readOptions
 
-let parseDiagnostic = deserializerFactory<Diagnostic> readOptions
 
 let parseCodeActionParams = deserializerFactory<CodeActionParams> readOptions
 
@@ -252,22 +243,15 @@ let private parseDocumentFormattingOptions (options: JsonValue) =
     { tabSize = options?tabSize.AsInteger()
       insertSpaces = options?insertSpaces.AsBoolean() }
 
-let private parseDocumentFormattingOptionsMap (options: JsonValue) =
-    options.Properties
-    |> Seq.map (fun (key, value) -> (key, value.AsString()))
-    |> Map.ofSeq
-
 let private parseDocumentFormattingParamsRaw (raw: DocumentFormattingParamsRaw) : DocumentFormattingParams =
     { textDocument = raw.textDocument
-      options = parseDocumentFormattingOptions raw.options
-      optionsMap = parseDocumentFormattingOptionsMap raw.options }
+      options = parseDocumentFormattingOptions raw.options }
 
 let private parseDocumentRangeFormattingParamsRaw
     (raw: DocumentRangeFormattingParamsRaw)
     : DocumentRangeFormattingParams =
     { textDocument = raw.textDocument
       options = parseDocumentFormattingOptions raw.options
-      optionsMap = parseDocumentFormattingOptionsMap raw.options
       range = raw.range }
 
 let private parseDocumentOnTypeFormattingParamsRaw
@@ -275,7 +259,6 @@ let private parseDocumentOnTypeFormattingParamsRaw
     : DocumentOnTypeFormattingParams =
     { textDocument = raw.textDocument
       options = parseDocumentFormattingOptions raw.options
-      optionsMap = parseDocumentFormattingOptionsMap raw.options
       position = raw.position
       ch = raw.ch }
 

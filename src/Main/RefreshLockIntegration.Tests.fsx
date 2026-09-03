@@ -19,23 +19,6 @@ let capture<'T when 'T :> exn> action message =
     with
     | :? 'T as error -> error
 
-let guard generation epochs =
-    { Generation = generation
-      Epochs = Map.ofList epochs }
-
-/// Minimal integration abstraction for the incoming migration: preparation owns
-/// an isolated manager value and publication payload; only the immutable manager
-/// state and exact queue prefix are committed while the root lock is held.
-type StagedRefresh =
-    { Guard: GuardVector
-      PreparedPrefix: string list
-      Manager: string
-      Publication: string }
-
-type IntegrationState =
-    { mutable Committed: CommitState<string, string>
-      mutable Published: string option }
-
 let rootLock = new ReaderWriterLockSlim(LockRecursionPolicy.NoRecursion)
 let mutable elapsedMs = 0.0
 let now () = TimeSpan.FromMilliseconds elapsedMs
@@ -48,87 +31,6 @@ let measure phase kind duration callback =
           Run = fun () ->
               elapsedMs <- elapsedMs + duration
               callback () }
-
-let prepare guard prefix manager publication duration =
-    measure PrepareOutsideLock ExpensiveCallback duration (fun () ->
-        check (not rootLock.IsWriteLockHeld) "Preparation must run outside the root write lock"
-        { Guard = guard
-          PreparedPrefix = prefix
-          Manager = manager
-          Publication = publication })
-
-let commit (state: IntegrationState) (staged: StagedRefresh) gapDuration =
-    rootLock.EnterWriteLock()
-    try
-        let scope =
-            timings.MeasureCommitScope(fun () ->
-                let plan =
-                    SwapSnapshotAndAcknowledgeExactPrefix(
-                        staged.Guard,
-                        staged.PreparedPrefix,
-                        staged.Manager)
-
-                let candidate =
-                    measure CommitInsideLock SnapshotSwap 10.0 (fun () ->
-                        tryApplyCommitPlan plan state.Committed)
-
-                // This uninstrumented interval proves the budget covers the total
-                // contiguous lock hold, not merely the sum of measured callbacks.
-                elapsedMs <- elapsedMs + gapDuration
-
-                match candidate with
-                | None -> false
-                | Some next ->
-                    measure CommitInsideLock QueueAcknowledgement 10.0 (fun () ->
-                        state.Committed <- next)
-                    true)
-        match scope.Outcome with
-        | Ok committed -> committed
-        | Error error -> raise error
-    finally
-        rootLock.ExitWriteLock()
-
-let publish (state: IntegrationState) (staged: StagedRefresh) duration =
-    measure FollowupOutsideLock ExpensiveCallback duration (fun () ->
-        check (not rootLock.IsWriteLockHeld) "Publication must run outside the root write lock"
-        state.Published <- Some staged.Publication)
-
-let runRefresh state staged gapDuration =
-    if commit state staged gapDuration then
-        publish state staged 15.0
-        true
-    else
-        false
-
-let initialGuard = guard 7L [ "resource", 11L; "rules", 3L; "files", 5L ]
-let state =
-    { Committed =
-        { Guard = initialGuard
-          Snapshot = "manager-old"
-          Pending = [ "a"; "b"; "newer" ] }
-      Published = None }
-
-// Happy path: isolated preparation, one real write-lock commit, and publication after release.
-let staged = prepare initialGuard [ "a"; "b" ] "manager-new" "publish-new" 40.0
-check (runRefresh state staged 5.0) "A current staged refresh must commit"
-equal "manager-new" state.Committed.Snapshot "Manager state must swap during commit"
-equal [ "newer" ] state.Committed.Pending "Only the exact prepared prefix may be acknowledged"
-equal (Some "publish-new") state.Published "Publication follows a successful commit"
-check (not rootLock.IsWriteLockHeld) "The root write lock must be released after success"
-
-// Prefix mismatch rejects manager swap and publication as one unit.
-let beforeMismatch = state.Committed
-let priorPublication = state.Published
-let mismatched = prepare initialGuard [ "newer"; "missing" ] "manager-bad" "publish-bad" 1.0
-check (not (runRefresh state mismatched 0.0)) "A non-exact prefix must reject the staged commit"
-equal beforeMismatch state.Committed "Prefix rejection must leave manager and queue unchanged"
-equal priorPublication state.Published "Rejected work must not publish"
-
-// Guard mismatch likewise rejects both manager and queue changes.
-let stale = prepare { initialGuard with Generation = 8L } [ "newer" ] "manager-stale" "publish-stale" 1.0
-check (not (runRefresh state stale 0.0)) "A stale guard must reject the staged commit"
-equal beforeMismatch state.Committed "Stale rejection must be atomic"
-equal priorPublication state.Published "Stale work must not publish"
 
 // Callback failures are returned separately and the real lock is still released.
 rootLock.EnterWriteLock()
@@ -169,27 +71,6 @@ equal KeepCommitPending (resolvePreparedCommitOutcome None CommitSuperseded) "Su
 equal KeepCommitPending (resolvePreparedCommitOutcome None (CommitFailed (Exception("indeterminate")))) "Commit exception must retry pending work"
 equal (PublishCommitResult "known") (resolvePreparedCommitOutcome (Some "known") CommitAlreadyCompleted) "Known AlreadyCompleted result is recovered"
 
-// Script-localisation seam: expensive validation observes no write lock, while an
-// epoch change between preparation and commit rejects publication and retains work.
-let mutable scriptValidationSawWriteLock = true
-let scriptGuard = guard 20L [ "game", 4L; "types", 9L; "localisation", 2L ]
-let scriptPrepared =
-    measure PrepareOutsideLock ExpensiveCallback 25.0 (fun () ->
-        scriptValidationSawWriteLock <- rootLock.IsWriteLockHeld
-        { Guard = scriptGuard
-          PreparedPrefix = [ "scripted_effects.txt" ]
-          Manager = "unused"
-          Publication = "script-localisation-errors" })
-check (not scriptValidationSawWriteLock) "Script localisation validation callback must run outside the root write lock"
-let staleScriptState =
-    { Committed =
-        { Guard = { scriptGuard with Epochs = scriptGuard.Epochs |> Map.add "types" 10L }
-          Snapshot = "manager-current"
-          Pending = [ "scripted_effects.txt" ] }
-      Published = None }
-check (not (runRefresh staleScriptState scriptPrepared 0.0)) "Changed model epoch must reject prepared script localisation"
-equal [ "scripted_effects.txt" ] staleScriptState.Committed.Pending "Stale script localisation must retain pending files"
-equal None staleScriptState.Published "Stale script localisation must not publish prepared errors"
 
 // Delete-localisation seam: the model call may hold the lock, but every Program
 // callback is dispatched after release. Unavailable capability stays pending and wakes.
@@ -233,57 +114,6 @@ dispatchLocalisationDeleteFollowup
         failedDeletePending <- true)
 check failedDeletePending "Failed delete commit must retain localisation pending state"
 
-// Nonincremental localisation seam: refresh/epoch capture is the write-lock commit;
-// diagnostics materialize under a read lock, then exact final guard rejection keeps
-// work pending when the epoch changes before publication. Every follow-up callback
-// must observe write-lock-held=false.
-let mutable liveNonincrementalGuard = guard 30L [ "game", 8L; "localisation", 12L ]
-let capturedNonincrementalGuard =
-    rootLock.EnterWriteLock()
-    try
-        check rootLock.IsWriteLockHeld "The model refresh seam must hold the root write lock"
-        liveNonincrementalGuard
-    finally
-        rootLock.ExitWriteLock()
-
-let mutable diagnosticsMaterialized = false
-rootLock.EnterReadLock()
-try
-    check (not rootLock.IsWriteLockHeld) "LocalisationErrors/grouping callback must observe write-lock-held=false"
-    check (guardVectorsMatch capturedNonincrementalGuard liveNonincrementalGuard) "The read-lock guard must initially be current"
-    diagnosticsMaterialized <- true
-finally
-    rootLock.ExitReadLock()
-check diagnosticsMaterialized "Current nonincremental diagnostics must materialize"
-
-let mutable currentPublished = false
-let currentNonincremental =
-    dispatchNonincrementalLocalisationFollowup
-        (guardVectorsMatch capturedNonincrementalGuard liveNonincrementalGuard)
-        (fun () ->
-            check (not rootLock.IsWriteLockHeld) "Cache/invalidation/domain/log publication callback must observe write-lock-held=false"
-            currentPublished <- true)
-        (fun () -> failwith "Current nonincremental localisation must not requeue")
-check currentNonincremental "Current nonincremental localisation must run its follow-up"
-check currentPublished "Current nonincremental localisation must publish diagnostics"
-
-// Simulate a model mutation after read-lock materialization but before the final recheck.
-liveNonincrementalGuard <- { liveNonincrementalGuard with Epochs = liveNonincrementalGuard.Epochs |> Map.add "localisation" 13L }
-let mutable staleNonincrementalPublished = false
-let mutable staleNonincrementalRequeued = false
-let mutable staleNonincrementalWoke = false
-let staleNonincremental =
-    dispatchNonincrementalLocalisationFollowup
-        (guardVectorsMatch capturedNonincrementalGuard liveNonincrementalGuard)
-        (fun () -> staleNonincrementalPublished <- true)
-        (fun () ->
-            check (not rootLock.IsWriteLockHeld) "Stale pending/wake callback must observe write-lock-held=false"
-            staleNonincrementalRequeued <- true
-            staleNonincrementalWoke <- true)
-check (not staleNonincremental) "A stale final guard must reject nonincremental publication"
-check (not staleNonincrementalPublished) "A stale final guard must not replace diagnostics"
-check staleNonincrementalRequeued "Stale nonincremental localisation must retain pending work"
-check staleNonincrementalWoke "Stale nonincremental localisation must wake the refresh loop"
 
 // Source guards: interactive update and incremental type publication locks may
 // invoke only their model commits and compact epoch/token publication.
@@ -389,41 +219,11 @@ for requiredCommit in
     check (configLockSegment.Contains(requiredCommit, StringComparison.Ordinal))
           (sprintf "Configuration write-lock segment must retain %s" requiredCommit)
 
-let configReaderLock = new Threading.ReaderWriterLockSlim()
-let preparationStarted = new Threading.ManualResetEventSlim(false)
-let delayedPreparation =
-    Threading.Tasks.Task.Run(fun () ->
-        preparationStarted.Set()
-        Threading.Thread.Sleep(200))
-check (preparationStarted.Wait(1000)) "Delayed configuration preparation must start"
-let readSw = Diagnostics.Stopwatch.StartNew()
-configReaderLock.EnterReadLock()
-configReaderLock.ExitReadLock()
-readSw.Stop()
-delayedPreparation.GetAwaiter().GetResult()
-check (readSw.ElapsedMilliseconds < 150L)
-      (sprintf "ReaderWriterLockSlim reads must proceed during >150ms preparation; read took %dms" readSw.ElapsedMilliseconds)
-
-let liveConfigGeneration = 42L
-let capturedConfigGeneration = 41L
-let mutable configEpochs = 0
-let mutable configWakeCount = 0
-configReaderLock.EnterWriteLock()
-try
-    if liveConfigGeneration = capturedConfigGeneration then
-        configEpochs <- configEpochs + 1
-        configWakeCount <- configWakeCount + 1
-finally
-    configReaderLock.ExitWriteLock()
-equal 0 configEpochs "Stale configuration preparation must not bump epochs"
-equal 0 configWakeCount "Stale configuration preparation must not clear/wake the coordinator"
-
-
 // Workspace publication seam: candidate construction and diagnostics remain
 // detached; only typed/untyped references are swapped under the root writer.
 let workspacePrepareStart = programSource.IndexOf("    let prepareWorkspace ", StringComparison.Ordinal)
 let workspacePublishStart = programSource.IndexOf("    let publishPreparedWorkspace ", workspacePrepareStart, StringComparison.Ordinal)
-let workspaceDiscardStart = programSource.IndexOf("    let discardPreparedWorkspace ", workspacePublishStart, StringComparison.Ordinal)
+let workspaceDiscardStart = programSource.IndexOf("    let completePreparedWorkspacePublication ", workspacePublishStart, StringComparison.Ordinal)
 check (workspacePrepareStart >= 0 && workspacePublishStart > workspacePrepareStart && workspaceDiscardStart > workspacePublishStart)
       "Workspace preparation/publication segments must remain discoverable"
 let workspacePrepareSegment = programSource.Substring(workspacePrepareStart, workspacePublishStart - workspacePrepareStart)

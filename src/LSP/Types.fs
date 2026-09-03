@@ -161,33 +161,12 @@ type DocumentFilter =
 
 type DocumentSelector = DocumentFilter list
 
-[<RequireQualifiedAccess>]
-type Trace =
-    | Off
-    | Messages
-    | Verbose
-
-let writeTrace i =
-    match i with
-    | Trace.Off -> "off"
-    | Trace.Messages -> "messages"
-    | Trace.Verbose -> "verbose"
-
 type InitializeParams =
     { processId: int option
       rootUri: Uri option
       initializationOptions: JsonValue option
       capabilitiesMap: Map<string, bool>
-      trace: Trace option
       workspaceFolders: WorkspaceFolder list }
-
-let defaultInitializeParams =
-    { processId = None
-      rootUri = None
-      initializationOptions = None
-      capabilitiesMap = Map.empty
-      trace = None
-      workspaceFolders = [] }
 
 [<RequireQualifiedAccess>]
 type InsertTextFormat =
@@ -374,19 +353,16 @@ type DocumentFormattingOptions = { tabSize: int; insertSpaces: bool }
 
 type DocumentFormattingParams =
     { textDocument: TextDocumentIdentifier
-      options: DocumentFormattingOptions
-      optionsMap: Map<string, string> }
+      options: DocumentFormattingOptions }
 
 type DocumentRangeFormattingParams =
     { textDocument: TextDocumentIdentifier
       options: DocumentFormattingOptions
-      optionsMap: Map<string, string>
       range: Range }
 
 type DocumentOnTypeFormattingParams =
     { textDocument: TextDocumentIdentifier
       options: DocumentFormattingOptions
-      optionsMap: Map<string, string>
       position: Position
       ch: char }
 
@@ -613,24 +589,11 @@ type CompletionList =
     { isIncomplete: bool
       items: CompletionItem list }
 
-type MarkedString =
-    | HighlightedString of value: string * language: string
-    // TODO this is very misnamed, this is actually markdown
-    | PlainString of string
-
-let writeMarkedString (s: MarkedString) : JsonValue =
-    match s with
-    | HighlightedString(value, language) ->
-        JsonValue.Record [| "language", (JsonValue.String language); "value", (JsonValue.String value) |]
-    | PlainString value -> JsonValue.String value
-
 type HoverContent =
-    | MarkedStrings of MarkedString[]
     | MarkupContent of kind: string * value: string
 
 let writeHoverContent (s: HoverContent) : JsonValue =
     match s with
-    | MarkedStrings(s) -> JsonValue.Array(s |> Array.map writeMarkedString)
     | MarkupContent(kind, value) ->
         JsonValue.Record [| "kind", (JsonValue.String kind); "value", (JsonValue.String value) |]
 
@@ -792,44 +755,9 @@ type ShowMessageParams =
     { ``type``: MessageType
       message: string }
 
-module WatchKind =
-    let Create = 1
-    let Change = 2
-    let Delete = 4
-    let All = 7 // 1 | 2 | 4
-
-type FileSystemWatcher = { globPattern: string; kind: int }
-
-[<RequireQualifiedAccess>]
-type RegisterCapability = DidChangeWatchedFiles of watchers: FileSystemWatcher list
-
-type DidChangeWatchedFilesOptions = { watchers: FileSystemWatcher list }
-
-let writeRegisterCapability (r: RegisterCapability) =
-    match r with
-    | RegisterCapability.DidChangeWatchedFiles watchers -> { watchers = watchers }
-
-type Registration =
-    { id: string
-      method: string
-      registerOptions: RegisterCapability }
-
-type RegistrationParams = { registrations: Registration list }
-
-type LoadingBarParams = { enable: bool; value: string }
-type CreateVirtualFileParams = { uri: Uri; fileContent: string }
-
 type LogMessageParams =
     { ``type``: MessageType
       message: string }
-
-type ServerNotification =
-    | PublishDiagnostics of PublishDiagnosticsParams
-    | LoadingBar of LoadingBarParams
-    | CreateVirtualFile of CreateVirtualFileParams
-    | LogMessage of LogMessageParams
-
-type GetWordRangeAtPositionParams = { position: Position; uri: Uri }
 
 type ApplyWorkspaceEditParams =
     { label: option<string>
@@ -837,14 +765,9 @@ type ApplyWorkspaceEditParams =
 
 type ApplyWorkspaceEditResponse = { applied: bool }
 
-type ServerRequest =
-    | GetWordRangeAtPosition of GetWordRangeAtPositionParams
-    | ApplyWorkspaceEdit of ApplyWorkspaceEditParams
-
 type ILanguageClient =
     abstract member PublishDiagnostics: PublishDiagnosticsParams -> unit
     abstract member ShowMessage: ShowMessageParams -> unit
-    abstract member RegisterCapability: RegisterCapability -> unit
     abstract member CustomNotification: string * JsonValue -> unit
     abstract member ApplyWorkspaceEdit: ApplyWorkspaceEditParams -> Async<JsonValue>
     abstract member CustomRequest: string * string -> Async<JsonValue>

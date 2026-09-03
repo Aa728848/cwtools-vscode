@@ -338,11 +338,7 @@ type private DefinitionInjectionKeyInfo =
       target: string
       line: int
       keyStart: int
-      keyEnd: int
-      modeStart: int
-      modeEnd: int
-      targetStart: int
-      targetEnd: int }
+      keyEnd: int }
 
 let private tryDefinitionInjectionKeyAtLine (fileText: string) (line: int) =
     let lines = fileText.Replace("\r\n", "\n").Split('\n')
@@ -361,11 +357,7 @@ let private tryDefinitionInjectionKeyAtLine (fileText: string) (line: int) =
                   target = targetGroup.Value
                   line = line
                   keyStart = modeGroup.Index
-                  keyEnd = targetGroup.Index + targetGroup.Length
-                  modeStart = modeGroup.Index
-                  modeEnd = modeGroup.Index + modeGroup.Length
-                  targetStart = targetGroup.Index
-                  targetEnd = targetGroup.Index + targetGroup.Length }
+                  keyEnd = targetGroup.Index + targetGroup.Length }
 
 let private tryFindDefinitionInjectionTarget (game: IGame) (target: string) =
     game.Types()
@@ -954,7 +946,6 @@ let mutable diagnosticLogging = false
 
 type MonitorLogKind =
     | Memory
-    | Cache
     | Performance
     | Lint
     | Refresh
@@ -966,7 +957,6 @@ type MonitorLogKind =
 let private monitorLogKindName =
     function
     | Memory -> "Memory"
-    | Cache -> "Cache"
     | Performance -> "Performance"
     | Lint -> "Lint"
     | Refresh -> "Refresh"
@@ -1365,8 +1355,7 @@ type ValidationModelEpoch =
       localisation: int64 }
 
 type FileDiagnosticState =
-    { version: int option             // Document version (from DidChange)
-      validatedVersion: int option    // Document version that produced these diagnostics
+    { validatedVersion: int option    // Document version that produced these diagnostics
       epoch: int64                     // Increment the counter, lint +1 each time
       updatedAtUnixMs: int64           //Unix millisecond timestamp
       freshness: DiagnosticFreshness   // current status
@@ -1905,9 +1894,6 @@ type Server(client: ILanguageClient) =
     let mutable ck3VanillaPath: string option = None
     let mutable vic3VanillaPath: string option = None
     let mutable eu5VanillaPath: string option = None
-
-    // Getter function for stlVanillaPath
-    let getSTLVanillaPath() = stlVanillaPath
 
     /// Data-driven mapping: config key (getter, setter) for vanilla paths.
     /// Used by the config reader loop and checkOrSetGameCache to eliminate duplication.
@@ -2981,8 +2967,7 @@ type Server(client: ILanguageClient) =
         =
         let errCount, warnCount = diagnosticCounts diagnostics
         let state =
-            { version = validatedVersion
-              validatedVersion = validatedVersion
+            { validatedVersion = validatedVersion
               epoch = epoch
               updatedAtUnixMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
               freshness = freshness
@@ -3163,7 +3148,6 @@ type Server(client: ILanguageClient) =
         // untouched until this file has a complete replacement result.
         let retainedDiagnostics =
             existingDiagnosticsForFile filePath
-            |> DiagnosticMerge.preserveWhilePending
         let pendingKinds =
             let existingPendingKinds =
                 match fileDiagnosticStates.TryGetValue(filePath) with
@@ -3190,7 +3174,6 @@ type Server(client: ILanguageClient) =
             priorState
             |> Option.map _.diagnostics
             |> Option.defaultWith (fun () -> existingDiagnosticsForFile filePath)
-            |> DiagnosticMerge.preserveWhilePending
         let pendingKinds =
             (priorState |> Option.map _.pendingGlobalKinds |> Option.defaultValue [])
             @ [ "dynamicParameters" ]
@@ -4834,7 +4817,6 @@ type Server(client: ILanguageClient) =
             let mutable localisationCommitNeedsRetry = false
             let mutable checkCommittedLocalisationSuffix = false
             let mutable fullLocalisationDiagnosticGuard: (IGame * ValidationModelEpoch) option = None
-            let mutable nonincrementalLocalisationGuard: (IGame * ValidationModelEpoch) option = None
             let scriptLocalisationDue =
                 delayedScriptLocUpdate
                 && not delayedLocUpdate
@@ -5099,63 +5081,6 @@ type Server(client: ILanguageClient) =
             | Some _ ->
                 delayedScriptLocUpdate <- false
                 lastScriptLocUpdateAt <- now
-            | None -> ()
-
-            match nonincrementalLocalisationGuard with
-            | Some(capturedGame, capturedEpoch) ->
-                let mutable groupedErrors = None
-                gameStateLock.EnterReadLock()
-                try
-                    let guardStillCurrent =
-                        RefreshCoordinator.sameGameIdentity (box capturedGame) (gameObj |> Option.map box |> Option.defaultValue null)
-                        && sameModelEpoch capturedEpoch (modelEpochSnapshot ())
-                    if guardStillCurrent then
-                        try
-                            groupedErrors <-
-                                capturedGame.LocalisationErrors(true, true)
-                                |> List.groupBy _.range.FileName
-                                |> Some
-                        with error ->
-                            localisationCommitError <- Some error
-                finally
-                    gameStateLock.ExitReadLock()
-
-                let guardStillCurrent =
-                    RefreshCoordinator.sameGameIdentity (box capturedGame) (gameObj |> Option.map box |> Option.defaultValue null)
-                    && sameModelEpoch capturedEpoch (modelEpochSnapshot ())
-                    && groupedErrors.IsSome
-                RefreshLockPhases.dispatchNonincrementalLocalisationFollowup
-                    guardStillCurrent
-                    (fun () ->
-                        clearLocalisationDiagnosticCache ()
-                        for fileName, errors in groupedErrors.Value do
-                            cachePut locCache fileName errors
-                        cachedLocMap <- None
-                        cachedLocMapCount <- 0
-                        delayedLocUpdate <- false
-                        delayedScriptLocUpdate <- false
-                        pendingScriptLocalisationFiles.Clear()
-                        lastScriptLocUpdateAt <- now
-                        didGlobalWork <- true
-                        diagnosticInvalidation.Invalidate(
-                            CWTools.Main.DiagnosticInvalidation.Domain.Localisation,
-                            CWTools.Main.DiagnosticInvalidation.GlobalUnknown)
-                        completeRefreshDomains [ "localisation" ] "refresh_localisation"
-                        evictIfNeeded locCache
-                        let allocAfterLoc = GC.GetTotalAllocatedBytes(false)
-                        let allocBeforeLoc = incrementalLocAllocBefore |> Option.defaultValue allocBefore
-                        let locErrorCount = locCache.Values |> Seq.sumBy List.length
-                        monitorLog Localisation $"LocErrors allocDeltaMB={(allocAfterLoc - allocBeforeLoc) / 1048576L} locFiles={locCache.Count} locErrors={locErrorCount} cachedLocKeys={cachedLocMapCount}"
-                        perfRefreshLocCount <- perfRefreshLocCount + 1
-                        if allocAfterLoc - allocBeforeLoc > gcThresholdBytes then
-                            gcPendingAfterLoc <- true
-                        inlayHintCache.Clear())
-                    (fun () ->
-                        delayedLocUpdate <- true
-                        didLocRefresh <- false
-                        logDiag "Nonincremental localisation diagnostics became stale outside the write lock; keeping refresh pending"
-                        postRefreshWake None)
-                |> ignore
             | None -> ()
 
             if didRefreshCaches then
@@ -6459,12 +6384,6 @@ type Server(client: ILanguageClient) =
         languages <- prepared.languages
         { prepared = prepared; previousGame = previousGame }
 
-    let discardPreparedWorkspace (_prepared: PreparedWorkspace) =
-        // Dropping the only candidate reference is intentional. CleanupCache may
-        // touch CWTools-wide caches that still serve the published game, so stale
-        // detached candidates are left for normal GC without observable effects.
-        ()
-
     let completePreparedWorkspacePublication (published: PublishedWorkspace) =
         let prepared = published.prepared
         let existingFiles = docs.OpenFiles() |> List.map (fun file -> file.FullName) |> Set.ofList
@@ -6588,7 +6507,7 @@ type Server(client: ILanguageClient) =
             | None, Some _ ->
                 match publish prepared with
                 | Some published -> completePreparedWorkspacePublication published
-                | None -> discardPreparedWorkspace prepared
+                | None -> ()
             | None, None ->
                 updateLoadingRuntime (fun state ->
                     { state with
@@ -6600,7 +6519,6 @@ type Server(client: ILanguageClient) =
                     "loadingBar",
                     JsonValue.Record [| "value", JsonValue.String ""; "enable", JsonValue.Boolean false |])
             | Some error, _ ->
-                discardPreparedWorkspace prepared
                 logError $"Workspace preparation failed: {error}"
                 updateLoadingRuntime (fun state ->
                     { state with
@@ -6777,7 +6695,7 @@ type Server(client: ILanguageClient) =
                 exitGameStateWriteLock ()
             match fallbackPublication with
             | Some publication -> completePreparedWorkspacePublication publication
-            | None -> discardPreparedWorkspace prepared
+            | None -> ()
 
     let startRulesUpdateInBackground
         (generation, startupCachePath, startupRemoteRepoPath, startupUseManualRules, startupRulesChannel, startupGame) =
@@ -6874,14 +6792,6 @@ type Server(client: ILanguageClient) =
 
                 return defaultValue
         }
-
-
-    let parseUri path =
-        let inner p =
-            let uri = filePathToUri p
-            Some(uri.AbsoluteUri |> JsonValue.String)
-
-        memoize id inner path
 
     interface ILanguageServer with
         member this.Initialize(p: InitializeParams) =
@@ -7335,7 +7245,6 @@ type Server(client: ILanguageClient) =
                                 completePreparedWorkspacePublication publication
                                 startRulesUpdateInBackground rulesUpdate
                             | None ->
-                                discardPreparedWorkspace prepared
                                 // A newer reload owns the shared loading state and UI.
                                 // Stale candidates must disappear without overwriting it.
                                 if System.Threading.Volatile.Read(&rulesUpdateGeneration) = configurationGeneration then
@@ -11152,35 +11061,32 @@ type Server(client: ILanguageClient) =
                             | None -> None
                         | { command = "exportTypes"
                             arguments = _ } ->
-                            match gameObj with
-                            | Some game ->
-                                let header = "type,name,file,line" + "\r\n"
+                            let header = "type,name,file,line" + "\r\n"
 
-                                let res =
-                                    game.Types()
-                                    |> Map.toList
-                                    |> Seq.collect (fun (s, vs) -> vs |> Seq.map (fun v -> s, v))
+                            let res =
+                                game.Types()
+                                |> Map.toList
+                                |> Seq.collect (fun (s, vs) -> vs |> Seq.map (fun v -> s, v))
 
-                                let text =
-                                    res
-                                    |> Seq.map (fun (t, td) ->
-                                        sprintf
-                                            "%s,%s,%s,%A"
-                                            t
-                                            td.id
-                                            (td.range.FileName.Replace('\\', '/'))
-                                            td.range.StartLine)
-                                    |> String.concat "\r\n"
+                            let text =
+                                res
+                                |> Seq.map (fun (t, td) ->
+                                    sprintf
+                                        "%s,%s,%s,%A"
+                                        t
+                                        td.id
+                                        (td.range.FileName.Replace('\\', '/'))
+                                        td.range.StartLine)
+                                |> String.concat "\r\n"
 
-                                client.CustomNotification(
-                                    "createVirtualFile",
-                                    JsonValue.Record
-                                        [| "uri", JsonValue.String("cwtools://alltypes")
-                                           "fileContent", JsonValue.String(header + text) |]
-                                )
+                            client.CustomNotification(
+                                "createVirtualFile",
+                                JsonValue.Record
+                                    [| "uri", JsonValue.String("cwtools://alltypes")
+                                       "fileContent", JsonValue.String(header + text) |]
+                            )
 
-                                None
-                            | _ -> None
+                            None
                         // - AI-specific structured query commands -
 
                         | { command = "cwtools.ai.getScopeAtPosition"
@@ -11215,109 +11121,104 @@ type Server(client: ILanguageClient) =
                                     |> Array.tryFind (fun m -> col >= m.Index && col <= m.Index + m.Length)
                                     |> Option.orElseWith (fun () -> if matches.Length = 1 then Some matches.[0] else None)
                                     |> Option.map (fun m -> m.Groups.[1].Value)
-                            let scopeResult =
-                                match gameObj with
-                                | Some g ->
-                                    let eventTarget =
-                                        eventTargetNameAtPosition
-                                        |> Option.map (fun name ->
-                                            let saved =
-                                                match activeGame, stlGameObj with
-                                                | STL, Some stellaris ->
-                                                    stellaris.References().SavedScopes
-                                                    |> Seq.filter (fun (savedName, _, _) ->
-                                                        String.Equals(savedName, name, StringComparison.OrdinalIgnoreCase))
-                                                    |> Seq.toArray
-                                                | _ -> [||]
+                            let g = game
+                            let eventTarget =
+                                eventTargetNameAtPosition
+                                |> Option.map (fun name ->
+                                    let saved =
+                                        match activeGame, stlGameObj with
+                                        | STL, Some stellaris ->
+                                            stellaris.References().SavedScopes
+                                            |> Seq.filter (fun (savedName, _, _) ->
+                                                String.Equals(savedName, name, StringComparison.OrdinalIgnoreCase))
+                                            |> Seq.toArray
+                                        | _ -> [||]
 
-                                            let alternatives =
-                                                saved
-                                                |> Array.map (fun (_, _, scope) -> scope.ToString())
-                                                |> Array.distinct
-                                                |> Array.sort
+                                    let alternatives =
+                                        saved
+                                        |> Array.map (fun (_, _, scope) -> scope.ToString())
+                                        |> Array.distinct
+                                        |> Array.sort
 
-                                            let certainty, resolvedScope, warnings =
-                                                match alternatives with
-                                                | [||] ->
-                                                    "unresolved",
-                                                    "unknown",
-                                                    [| JsonValue.String "No saved scope was found for this event target." |]
-                                                | [| exact |] -> "project_unique", exact, [||]
-                                                | many ->
-                                                    "ambiguous",
-                                                    "unknown",
-                                                    [| JsonValue.String(
-                                                           sprintf
-                                                               "This event target is saved with multiple scopes: %s"
-                                                               (String.concat ", " many)
-                                                       ) |]
+                                    let certainty, resolvedScope, warnings =
+                                        match alternatives with
+                                        | [||] ->
+                                            "unresolved",
+                                            "unknown",
+                                            [| JsonValue.String "No saved scope was found for this event target." |]
+                                        | [| exact |] -> "project_unique", exact, [||]
+                                        | many ->
+                                            "ambiguous",
+                                            "unknown",
+                                            [| JsonValue.String(
+                                                   sprintf
+                                                       "This event target is saved with multiple scopes: %s"
+                                                       (String.concat ", " many)
+                                               ) |]
 
-                                            let definitions =
-                                                saved
-                                                |> Array.truncate 32
-                                                |> Array.map (fun (_, targetRange, scope) ->
-                                                    JsonValue.Record
-                                                        [| "scope", JsonValue.String(scope.ToString())
-                                                           "file", JsonValue.String(targetRange.FileName.Replace('\\', '/'))
-                                                           "line", JsonValue.Number(decimal targetRange.StartLine)
-                                                           "col", JsonValue.Number(decimal (int targetRange.StartColumn)) |])
-
+                                    let definitions =
+                                        saved
+                                        |> Array.truncate 32
+                                        |> Array.map (fun (_, targetRange, scope) ->
                                             JsonValue.Record
-                                                [| "name", JsonValue.String name
-                                                   "scope", JsonValue.String resolvedScope
-                                                   "alternatives", JsonValue.Array(alternatives |> Array.map JsonValue.String)
-                                                   "certainty", JsonValue.String certainty
-                                                   "definitions", JsonValue.Array definitions
-                                                   "warnings", JsonValue.Array warnings |])
-                                        |> Option.defaultValue JsonValue.Null
+                                                [| "scope", JsonValue.String(scope.ToString())
+                                                   "file", JsonValue.String(targetRange.FileName.Replace('\\', '/'))
+                                                   "line", JsonValue.Number(decimal targetRange.StartLine)
+                                                   "col", JsonValue.Number(decimal (int targetRange.StartColumn)) |])
 
-                                    match g.ScopesAtPos position filePath fileContent with
-                                    | Some scopes ->
-                                        let thisScopeStr =
-                                            scopes.Scopes |> List.tryHead |> Option.map string |> Option.defaultValue "unknown"
-                                        let prevChain =
-                                            scopes.Scopes
-                                            |> List.skip 1
-                                            |> List.map string
-                                            |> Array.ofList
-                                        let fromChain =
-                                            scopes.From |> List.map string |> Array.ofList
-                                        let scopeInference =
-                                            match g with
-                                            | :? IScopeInferenceProvider as provider ->
-                                                provider.ScopeInferenceAtPos position filePath fileContent scopes
-                                                |> Option.map (fun inference ->
-                                                    JsonValue.Record
-                                                        [| "kind", JsonValue.String inference.kind
-                                                           "candidates", JsonValue.Array(inference.candidates |> List.map JsonValue.String |> List.toArray)
-                                                           "resolvedScope", JsonValue.String inference.resolvedScope
-                                                           "certainty", JsonValue.String inference.certainty
-                                                           "evidence", JsonValue.Array(inference.evidence |> List.map JsonValue.String |> List.toArray) |])
-                                                |> Option.defaultValue JsonValue.Null
-                                            | _ -> JsonValue.Null
-                                        JsonValue.Record
-                                            [| "thisScope",  JsonValue.String thisScopeStr
-                                               "root",       JsonValue.String (scopes.Root.ToString())
-                                               "currentScope", JsonValue.String thisScopeStr
-                                               "prevChain",  JsonValue.Array(prevChain |> Array.map JsonValue.String)
-                                               "fromChain",  JsonValue.Array(fromChain |> Array.map JsonValue.String)
-                                               "eventTarget", eventTarget
-                                               "scopeInference", scopeInference
-                                               "ok",         JsonValue.Boolean true |]
-                                    | None ->
-                                        JsonValue.Record
-                                            [| "thisScope", JsonValue.String "unknown"
-                                               "root",      JsonValue.String "unknown"
-                                               "currentScope", JsonValue.String "unknown"
-                                               "prevChain", JsonValue.Array [||]
-                                               "fromChain", JsonValue.Array [||]
-                                               "eventTarget", eventTarget
-                                               "scopeInference", JsonValue.Null
-                                               "ok",        JsonValue.Boolean false |]
+                                    JsonValue.Record
+                                        [| "name", JsonValue.String name
+                                           "scope", JsonValue.String resolvedScope
+                                           "alternatives", JsonValue.Array(alternatives |> Array.map JsonValue.String)
+                                           "certainty", JsonValue.String certainty
+                                           "definitions", JsonValue.Array definitions
+                                           "warnings", JsonValue.Array warnings |])
+                                |> Option.defaultValue JsonValue.Null
+
+                            let scopeResult =
+                                match g.ScopesAtPos position filePath fileContent with
+                                | Some scopes ->
+                                    let thisScopeStr =
+                                        scopes.Scopes |> List.tryHead |> Option.map string |> Option.defaultValue "unknown"
+                                    let prevChain =
+                                        scopes.Scopes
+                                        |> List.skip 1
+                                        |> List.map string
+                                        |> Array.ofList
+                                    let fromChain =
+                                        scopes.From |> List.map string |> Array.ofList
+                                    let scopeInference =
+                                        match g with
+                                        | :? IScopeInferenceProvider as provider ->
+                                            provider.ScopeInferenceAtPos position filePath fileContent scopes
+                                            |> Option.map (fun inference ->
+                                                JsonValue.Record
+                                                    [| "kind", JsonValue.String inference.kind
+                                                       "candidates", JsonValue.Array(inference.candidates |> List.map JsonValue.String |> List.toArray)
+                                                       "resolvedScope", JsonValue.String inference.resolvedScope
+                                                       "certainty", JsonValue.String inference.certainty
+                                                       "evidence", JsonValue.Array(inference.evidence |> List.map JsonValue.String |> List.toArray) |])
+                                            |> Option.defaultValue JsonValue.Null
+                                        | _ -> JsonValue.Null
+                                    JsonValue.Record
+                                        [| "thisScope",  JsonValue.String thisScopeStr
+                                           "root",       JsonValue.String (scopes.Root.ToString())
+                                           "currentScope", JsonValue.String thisScopeStr
+                                           "prevChain",  JsonValue.Array(prevChain |> Array.map JsonValue.String)
+                                           "fromChain",  JsonValue.Array(fromChain |> Array.map JsonValue.String)
+                                           "eventTarget", eventTarget
+                                           "scopeInference", scopeInference
+                                           "ok",         JsonValue.Boolean true |]
                                 | None ->
                                     JsonValue.Record
-                                        [| "ok", JsonValue.Boolean false
-                                           "error", JsonValue.String "LSP server not ready" |]
+                                        [| "thisScope", JsonValue.String "unknown"
+                                           "root",      JsonValue.String "unknown"
+                                           "currentScope", JsonValue.String "unknown"
+                                           "prevChain", JsonValue.Array [||]
+                                           "fromChain", JsonValue.Array [||]
+                                           "eventTarget", eventTarget
+                                           "scopeInference", JsonValue.Null
+                                           "ok",        JsonValue.Boolean false |]
                             Some scopeResult
 
 
@@ -11354,26 +11255,23 @@ type Server(client: ILanguageClient) =
                                 elif not (String.IsNullOrWhiteSpace fieldName) then "field_value"
                                 else "unknown"
                             let scopeJson =
-                                match gameObj with
-                                | Some g ->
-                                    match g.ScopesAtPos position filePath fileContent with
-                                    | Some scopes ->
-                                        let thisScopeStr =
-                                            scopes.Scopes |> List.tryHead |> Option.map string |> Option.defaultValue "unknown"
-                                        let prevChain =
-                                            scopes.Scopes
-                                            |> List.skip 1
-                                            |> List.map string
-                                            |> Array.ofList
-                                        let fromChain =
-                                            scopes.From |> List.map string |> Array.ofList
-                                        JsonValue.Record
-                                            [| "thisScope", JsonValue.String thisScopeStr
-                                               "root", JsonValue.String (scopes.Root.ToString())
-                                               "currentScope", JsonValue.String thisScopeStr
-                                               "prevChain", JsonValue.Array(prevChain |> Array.map JsonValue.String)
-                                               "fromChain", JsonValue.Array(fromChain |> Array.map JsonValue.String) |]
-                                    | None -> JsonValue.Null
+                                match game.ScopesAtPos position filePath fileContent with
+                                | Some scopes ->
+                                    let thisScopeStr =
+                                        scopes.Scopes |> List.tryHead |> Option.map string |> Option.defaultValue "unknown"
+                                    let prevChain =
+                                        scopes.Scopes
+                                        |> List.skip 1
+                                        |> List.map string
+                                        |> Array.ofList
+                                    let fromChain =
+                                        scopes.From |> List.map string |> Array.ofList
+                                    JsonValue.Record
+                                        [| "thisScope", JsonValue.String thisScopeStr
+                                           "root", JsonValue.String (scopes.Root.ToString())
+                                           "currentScope", JsonValue.String thisScopeStr
+                                           "prevChain", JsonValue.Array(prevChain |> Array.map JsonValue.String)
+                                           "fromChain", JsonValue.Array(fromChain |> Array.map JsonValue.String) |]
                                 | None -> JsonValue.Null
                             Some(
                                 JsonValue.Record
@@ -11401,48 +11299,42 @@ type Server(client: ILanguageClient) =
                             let vanillaOnly = rest |> List.tryItem 2 |> Option.bind (fun j -> match j with JsonValue.Boolean b -> Some b | _ -> None) |> Option.defaultValue false
 
                             let resultJson =
-                                match gameObj with
-                                | Some g ->
-                                    let typeMap = g.Types()
-                                    match typeMap |> Map.tryFind typeName with
-                                    | None ->
-                                        JsonValue.Record
-                                            [| "typeName",   JsonValue.String typeName
-                                               "instances",  JsonValue.Array [||]
-                                               "totalCount", JsonValue.Number 0m
-                                               "ok",         JsonValue.Boolean true |]
-                                    | Some typeArr ->
-                                        // Single filter pass reuse for both count and truncated result
-                                        let filtered =
-                                            typeArr
-                                            |> Array.filter (fun td ->
-                                                let scopeOk = if vanillaOnly then td.range.FileName.Contains("cache") || td.range.FileName.Contains("vanilla") else true
-                                                let filterOk =
-                                                    match filterStr with
-                                                    | None -> true
-                                                    | Some f -> td.id.StartsWith(f, StringComparison.OrdinalIgnoreCase)
-                                                scopeOk && filterOk)
-                                        let allCount = filtered.Length
-                                        let instances =
-                                            filtered
-                                            |> Array.truncate limitVal
-                                            |> Array.map (fun td ->
-                                                let filePath = td.range.FileName.Replace('\\', '/')
-                                                let isVanilla = filePath.Contains("cache") || filePath.Contains("vanilla")
-                                                JsonValue.Record
-                                                    [| "id",      JsonValue.String td.id
-                                                       "file",    JsonValue.String filePath
-                                                       "line",    JsonValue.Number(decimal (int td.range.StartLine))
-                                                       "vanilla", JsonValue.Boolean isVanilla |])
-                                        JsonValue.Record
-                                            [| "typeName",   JsonValue.String typeName
-                                               "instances",  JsonValue.Array instances
-                                               "totalCount", JsonValue.Number(decimal allCount)
-                                               "ok",         JsonValue.Boolean true |]
+                                let typeMap = game.Types()
+                                match typeMap |> Map.tryFind typeName with
                                 | None ->
                                     JsonValue.Record
-                                        [| "ok", JsonValue.Boolean false
-                                           "error", JsonValue.String "LSP server not ready" |]
+                                        [| "typeName",   JsonValue.String typeName
+                                           "instances",  JsonValue.Array [||]
+                                           "totalCount", JsonValue.Number 0m
+                                           "ok",         JsonValue.Boolean true |]
+                                | Some typeArr ->
+                                    // Single filter pass reuse for both count and truncated result
+                                    let filtered =
+                                        typeArr
+                                        |> Array.filter (fun td ->
+                                            let scopeOk = if vanillaOnly then td.range.FileName.Contains("cache") || td.range.FileName.Contains("vanilla") else true
+                                            let filterOk =
+                                                match filterStr with
+                                                | None -> true
+                                                | Some f -> td.id.StartsWith(f, StringComparison.OrdinalIgnoreCase)
+                                            scopeOk && filterOk)
+                                    let allCount = filtered.Length
+                                    let instances =
+                                        filtered
+                                        |> Array.truncate limitVal
+                                        |> Array.map (fun td ->
+                                            let filePath = td.range.FileName.Replace('\\', '/')
+                                            let isVanilla = filePath.Contains("cache") || filePath.Contains("vanilla")
+                                            JsonValue.Record
+                                                [| "id",      JsonValue.String td.id
+                                                   "file",    JsonValue.String filePath
+                                                   "line",    JsonValue.Number(decimal (int td.range.StartLine))
+                                                   "vanilla", JsonValue.Boolean isVanilla |])
+                                    JsonValue.Record
+                                        [| "typeName",   JsonValue.String typeName
+                                           "instances",  JsonValue.Array instances
+                                           "totalCount", JsonValue.Number(decimal allCount)
+                                           "ok",         JsonValue.Boolean true |]
                             Some resultJson
 
 
@@ -11461,51 +11353,46 @@ type Server(client: ILanguageClient) =
                                 | Some t -> t
                                 | None   -> try File.ReadAllText filePath with _ -> ""
                             let result =
-                                match gameObj with
-                                | Some g ->
-                                    // Try jump-to-definition first
-                                    match
-                                        g.GoToType position filePath fileContent
-                                        |> preferCodeDefinitionOverLocalisation
-                                            gameDispatcher
-                                            g
-                                            filePath
-                                            fileContent
-                                            line
-                                            col
-                                    with
-                                    | Some rng ->
-                                        JsonValue.Record
-                                            [| "kind", JsonValue.String "definition"
-                                               "file", JsonValue.String (rng.FileName.Replace('\\', '/'))
-                                               "line", JsonValue.Number(decimal (int rng.StartLine))
-                                               "col",  JsonValue.Number(decimal (int rng.StartColumn))
-                                               "ok",   JsonValue.Boolean true |]
-                                    | None ->
-                                        // Fall back to find-all-refs
-                                        match g.FindAllRefs position filePath fileContent with
-                                        | Some refs ->
-                                            let refsArr =
-                                                refs
-                                                |> List.map (fun r ->
-                                                    JsonValue.Record
-                                                        [| "file", JsonValue.String (r.FileName.Replace('\\', '/'))
-                                                           "line", JsonValue.Number(decimal (int r.StartLine))
-                                                           "col",  JsonValue.Number(decimal (int r.StartColumn)) |])
-                                                |> Array.ofList
-                                            JsonValue.Record
-                                                [| "kind",  JsonValue.String "references"
-                                                   "refs",  JsonValue.Array refsArr
-                                                   "count", JsonValue.Number(decimal refsArr.Length)
-                                                   "ok",    JsonValue.Boolean true |]
-                                        | None ->
-                                            JsonValue.Record
-                                                [| "kind", JsonValue.String "none"
-                                                   "ok",   JsonValue.Boolean false |]
-                                | None ->
+                                let g = game
+                                // Try jump-to-definition first
+                                match
+                                    g.GoToType position filePath fileContent
+                                    |> preferCodeDefinitionOverLocalisation
+                                        gameDispatcher
+                                        g
+                                        filePath
+                                        fileContent
+                                        line
+                                        col
+                                with
+                                | Some rng ->
                                     JsonValue.Record
-                                        [| "ok", JsonValue.Boolean false
-                                           "error", JsonValue.String "LSP server not ready" |]
+                                        [| "kind", JsonValue.String "definition"
+                                           "file", JsonValue.String (rng.FileName.Replace('\\', '/'))
+                                           "line", JsonValue.Number(decimal (int rng.StartLine))
+                                           "col",  JsonValue.Number(decimal (int rng.StartColumn))
+                                           "ok",   JsonValue.Boolean true |]
+                                | None ->
+                                    // Fall back to find-all-refs
+                                    match g.FindAllRefs position filePath fileContent with
+                                    | Some refs ->
+                                        let refsArr =
+                                            refs
+                                            |> List.map (fun r ->
+                                                JsonValue.Record
+                                                    [| "file", JsonValue.String (r.FileName.Replace('\\', '/'))
+                                                       "line", JsonValue.Number(decimal (int r.StartLine))
+                                                       "col",  JsonValue.Number(decimal (int r.StartColumn)) |])
+                                            |> Array.ofList
+                                        JsonValue.Record
+                                            [| "kind",  JsonValue.String "references"
+                                               "refs",  JsonValue.Array refsArr
+                                               "count", JsonValue.Number(decimal refsArr.Length)
+                                               "ok",    JsonValue.Boolean true |]
+                                    | None ->
+                                        JsonValue.Record
+                                            [| "kind", JsonValue.String "none"
+                                               "ok",   JsonValue.Boolean false |]
                             Some result
 
                         // - cwtools.ai.queryDefinitionByName -
@@ -11588,12 +11475,12 @@ type Server(client: ILanguageClient) =
 
                                     // Try Types() first (fast), then AllEntities (slow)
                                     let found =
-                                        (gameObj |> Option.bind tryFindInTypes)
+                                        tryFindInTypes game
                                         |> Option.orElse (
                                             if expectedTypes.IsEmpty then
                                                 let visitor =
                                                     { new IGameVisitor<_> with
-                                                        member this.Visit game = tryFindInGame game }
+                                                        member this.Visit g = tryFindInGame g }
                                                 gameDispatcher.Dispatch visitor |> Option.flatten
                                             else
                                                 None
@@ -11601,20 +11488,16 @@ type Server(client: ILanguageClient) =
                                     match found with
                                     | Some json -> json
                                     | None ->
-                                        match gameObj with
-                                        | None ->
-                                            JsonValue.Record [| "ok", JsonValue.Boolean false; "error", JsonValue.String "LSP server not ready" |]
-                                        | Some _ ->
-                                            let expectedTypeList =
-                                                expectedTypes
-                                                |> Seq.toList
-                                                |> String.concat ", "
-                                            let expectedHint =
-                                                if expectedTypes.IsEmpty then ""
-                                                else $" with expected type [{expectedTypeList}]"
-                                            JsonValue.Record
-                                                [| "ok",    JsonValue.Boolean false
-                                                   "error", JsonValue.String $"Symbol '{name}' was not found{expectedHint}. Enumerate the current TypeDef with query_types or inspect its CWT schema before retrying." |]
+                                        let expectedTypeList =
+                                            expectedTypes
+                                            |> Seq.toList
+                                            |> String.concat ", "
+                                        let expectedHint =
+                                            if expectedTypes.IsEmpty then ""
+                                            else $" with expected type [{expectedTypeList}]"
+                                        JsonValue.Record
+                                            [| "ok",    JsonValue.Boolean false
+                                               "error", JsonValue.String $"Symbol '{name}' was not found{expectedHint}. Enumerate the current TypeDef with query_types or inspect its CWT schema before retrying." |]
                             Some result
 
                         // - cwtools.ai.exploreProject -
@@ -12173,31 +12056,27 @@ type Server(client: ILanguageClient) =
                                 |> Option.bind (function JsonValue.Number n -> Some(int n) | _ -> None)
                                 |> Option.defaultValue 200
                             let result =
-                                match gameObj with
-                                | Some g ->
-                                    let effects = g.ScriptedEffects()
-                                    // Resolve name once per item via choose (avoids double GetStringForIDs)
-                                    let arr =
-                                        effects
-                                        |> List.choose (fun e ->
-                                            let name = CWTools.Utilities.StringResource.stringManager.GetStringForIDs e.Name
-                                            match filterStr with
-                                            | Some f when not (name.Contains(f, StringComparison.OrdinalIgnoreCase)) -> None
-                                            | _ -> Some (name, e))
-                                        |> List.truncate limitVal
-                                        |> List.map (fun (name, e) ->
-                                            let scopes = e.Scopes |> List.map (fun s -> JsonValue.String(s.ToString())) |> Array.ofList
-                                            JsonValue.Record
-                                                [| "name",   JsonValue.String name
-                                                   "scopes", JsonValue.Array scopes
-                                                   "type",   JsonValue.String (e.Type.ToString()) |])
-                                        |> Array.ofList
-                                    JsonValue.Record
-                                        [| "effects",    JsonValue.Array arr
-                                           "totalCount", JsonValue.Number(decimal (List.length effects))
-                                           "ok",         JsonValue.Boolean true |]
-                                | None ->
-                                    JsonValue.Record [| "ok", JsonValue.Boolean false; "error", JsonValue.String "LSP server not ready" |]
+                                let effects = game.ScriptedEffects()
+                                // Resolve name once per item via choose (avoids double GetStringForIDs)
+                                let arr =
+                                    effects
+                                    |> List.choose (fun e ->
+                                        let name = CWTools.Utilities.StringResource.stringManager.GetStringForIDs e.Name
+                                        match filterStr with
+                                        | Some f when not (name.Contains(f, StringComparison.OrdinalIgnoreCase)) -> None
+                                        | _ -> Some (name, e))
+                                    |> List.truncate limitVal
+                                    |> List.map (fun (name, e) ->
+                                        let scopes = e.Scopes |> List.map (fun s -> JsonValue.String(s.ToString())) |> Array.ofList
+                                        JsonValue.Record
+                                            [| "name",   JsonValue.String name
+                                               "scopes", JsonValue.Array scopes
+                                               "type",   JsonValue.String (e.Type.ToString()) |])
+                                    |> Array.ofList
+                                JsonValue.Record
+                                    [| "effects",    JsonValue.Array arr
+                                       "totalCount", JsonValue.Number(decimal (List.length effects))
+                                       "ok",         JsonValue.Boolean true |]
                             Some result
 
                         // - cwtools.ai.queryScriptedTriggers -
@@ -12212,31 +12091,27 @@ type Server(client: ILanguageClient) =
                                 |> Option.bind (function JsonValue.Number n -> Some(int n) | _ -> None)
                                 |> Option.defaultValue 200
                             let result =
-                                match gameObj with
-                                | Some g ->
-                                    let triggers = g.ScriptedTriggers()
-                                    // Resolve name once per item via choose (avoids double GetStringForIDs)
-                                    let arr =
-                                        triggers
-                                        |> List.choose (fun e ->
-                                            let name = CWTools.Utilities.StringResource.stringManager.GetStringForIDs e.Name
-                                            match filterStr with
-                                            | Some f when not (name.Contains(f, StringComparison.OrdinalIgnoreCase)) -> None
-                                            | _ -> Some (name, e))
-                                        |> List.truncate limitVal
-                                        |> List.map (fun (name, e) ->
-                                            let scopes = e.Scopes |> List.map (fun s -> JsonValue.String(s.ToString())) |> Array.ofList
-                                            JsonValue.Record
-                                                [| "name",   JsonValue.String name
-                                                   "scopes", JsonValue.Array scopes
-                                                   "type",   JsonValue.String (e.Type.ToString()) |])
-                                        |> Array.ofList
-                                    JsonValue.Record
-                                        [| "triggers",   JsonValue.Array arr
-                                           "totalCount", JsonValue.Number(decimal (List.length triggers))
-                                           "ok",         JsonValue.Boolean true |]
-                                | None ->
-                                    JsonValue.Record [| "ok", JsonValue.Boolean false; "error", JsonValue.String "LSP server not ready" |]
+                                let triggers = game.ScriptedTriggers()
+                                // Resolve name once per item via choose (avoids double GetStringForIDs)
+                                let arr =
+                                    triggers
+                                    |> List.choose (fun e ->
+                                        let name = CWTools.Utilities.StringResource.stringManager.GetStringForIDs e.Name
+                                        match filterStr with
+                                        | Some f when not (name.Contains(f, StringComparison.OrdinalIgnoreCase)) -> None
+                                        | _ -> Some (name, e))
+                                    |> List.truncate limitVal
+                                    |> List.map (fun (name, e) ->
+                                        let scopes = e.Scopes |> List.map (fun s -> JsonValue.String(s.ToString())) |> Array.ofList
+                                        JsonValue.Record
+                                            [| "name",   JsonValue.String name
+                                               "scopes", JsonValue.Array scopes
+                                               "type",   JsonValue.String (e.Type.ToString()) |])
+                                    |> Array.ofList
+                                JsonValue.Record
+                                    [| "triggers",   JsonValue.Array arr
+                                       "totalCount", JsonValue.Number(decimal (List.length triggers))
+                                       "ok",         JsonValue.Boolean true |]
                             Some result
 
                         // - cwtools.ai.queryEnums -
@@ -12249,36 +12124,31 @@ type Server(client: ILanguageClient) =
                                 |> Option.bind (function JsonValue.Number n -> Some(int n) | _ -> None)
                                 |> Option.defaultValue 500
                             let result =
-                                match gameObj with
-                                | None ->
-                                    JsonValue.Record [| "ok", JsonValue.Boolean false; "error", JsonValue.String "LSP server not ready" |]
-                                | Some g ->
-                                    // GetEmbeddedMetadata() is on the IGame interface
-                                    let metadata = g.GetEmbeddedMetadata()
-                                    if enumName = "" then
-                                        // Return all available enum names
-                                        let allNames = metadata.enumDefs |> Map.keys |> Seq.toArray
+                                let metadata = game.GetEmbeddedMetadata()
+                                if enumName = "" then
+                                    // Return all available enum names
+                                    let allNames = metadata.enumDefs |> Map.keys |> Seq.toArray
+                                    JsonValue.Record
+                                        [| "allEnumNames", JsonValue.Array(allNames |> Array.map JsonValue.String)
+                                           "ok",           JsonValue.Boolean true |]
+                                else
+                                    match metadata.enumDefs |> Map.tryFind enumName with
+                                    | Some (desc, values) ->
+                                        let valuesArr =
+                                            values
+                                            |> Array.truncate limitVal
+                                            |> Array.map JsonValue.String
                                         JsonValue.Record
-                                            [| "allEnumNames", JsonValue.Array(allNames |> Array.map JsonValue.String)
-                                               "ok",           JsonValue.Boolean true |]
-                                    else
-                                        match metadata.enumDefs |> Map.tryFind enumName with
-                                        | Some (desc, values) ->
-                                            let valuesArr =
-                                                values
-                                                |> Array.truncate limitVal
-                                                |> Array.map JsonValue.String
-                                            JsonValue.Record
-                                                [| "enumName",   JsonValue.String enumName
-                                                   "desc",       JsonValue.String desc
-                                                   "values",     JsonValue.Array valuesArr
-                                                   "totalCount", JsonValue.Number(decimal values.Length)
-                                                   "ok",         JsonValue.Boolean true |]
-                                        | None ->
-                                            JsonValue.Record
-                                                [| "ok",       JsonValue.Boolean false
-                                                   "enumName", JsonValue.String enumName
-                                                   "error",    JsonValue.String $"Enum '{enumName}' not found" |]
+                                            [| "enumName",   JsonValue.String enumName
+                                               "desc",       JsonValue.String desc
+                                               "values",     JsonValue.Array valuesArr
+                                               "totalCount", JsonValue.Number(decimal values.Length)
+                                               "ok",         JsonValue.Boolean true |]
+                                    | None ->
+                                        JsonValue.Record
+                                            [| "ok",       JsonValue.Boolean false
+                                               "enumName", JsonValue.String enumName
+                                               "error",    JsonValue.String $"Enum '{enumName}' not found" |]
                             Some result
 
                         // - cwtools.ai.queryStaticModifiers -
@@ -12293,29 +12163,25 @@ type Server(client: ILanguageClient) =
                                 |> Option.bind (function JsonValue.Number n -> Some(int n) | _ -> None)
                                 |> Option.defaultValue 300
                             let result =
-                                match gameObj with
-                                | Some g ->
-                                    let mods = g.StaticModifiers()
-                                    let filtered =
-                                        mods
-                                        |> Array.filter (fun m ->
-                                            match filterStr with
-                                            | None   -> true
-                                            | Some f -> m.tag.Contains(f, StringComparison.OrdinalIgnoreCase))
-                                        |> Array.truncate limitVal
-                                    let arr =
-                                        filtered
-                                        |> Array.map (fun m ->
-                                            let cats = m.categories |> List.map (fun c -> JsonValue.String(c.ToString())) |> Array.ofList
-                                            JsonValue.Record
-                                                [| "tag",        JsonValue.String m.tag
-                                                   "categories", JsonValue.Array cats |])
-                                    JsonValue.Record
-                                        [| "modifiers",  JsonValue.Array arr
-                                           "totalCount", JsonValue.Number(decimal mods.Length)
-                                           "ok",         JsonValue.Boolean true |]
-                                | None ->
-                                    JsonValue.Record [| "ok", JsonValue.Boolean false; "error", JsonValue.String "LSP server not ready" |]
+                                let mods = game.StaticModifiers()
+                                let filtered =
+                                    mods
+                                    |> Array.filter (fun m ->
+                                        match filterStr with
+                                        | None   -> true
+                                        | Some f -> m.tag.Contains(f, StringComparison.OrdinalIgnoreCase))
+                                    |> Array.truncate limitVal
+                                let arr =
+                                    filtered
+                                    |> Array.map (fun m ->
+                                        let cats = m.categories |> List.map (fun c -> JsonValue.String(c.ToString())) |> Array.ofList
+                                        JsonValue.Record
+                                            [| "tag",        JsonValue.String m.tag
+                                               "categories", JsonValue.Array cats |])
+                                JsonValue.Record
+                                    [| "modifiers",  JsonValue.Array arr
+                                       "totalCount", JsonValue.Number(decimal mods.Length)
+                                       "ok",         JsonValue.Boolean true |]
                             Some result
 
                         // - cwtools.ai.queryVariables -
@@ -12326,28 +12192,24 @@ type Server(client: ILanguageClient) =
                                 rest |> List.tryItem 0
                                 |> Option.bind (function JsonValue.String s when s <> "" -> Some s | _ -> None)
                             let result =
-                                match gameObj with
-                                | Some g ->
-                                    let vars = g.ScriptedVariables()
-                                    let filtered =
-                                        vars
-                                        |> List.filter (fun (name, _) ->
-                                            match filterStr with
-                                            | None   -> true
-                                            | Some f -> name.Contains(f, StringComparison.OrdinalIgnoreCase))
-                                    let arr =
-                                        filtered
-                                        |> List.map (fun (name, value) ->
-                                            JsonValue.Record
-                                                [| "name",  JsonValue.String name
-                                                   "value", JsonValue.String value |])
-                                        |> Array.ofList
-                                    JsonValue.Record
-                                        [| "variables",  JsonValue.Array arr
-                                           "totalCount", JsonValue.Number(decimal (List.length vars))
-                                           "ok",         JsonValue.Boolean true |]
-                                | None ->
-                                    JsonValue.Record [| "ok", JsonValue.Boolean false; "error", JsonValue.String "LSP server not ready" |]
+                                let vars = game.ScriptedVariables()
+                                let filtered =
+                                    vars
+                                    |> List.filter (fun (name, _) ->
+                                        match filterStr with
+                                        | None   -> true
+                                        | Some f -> name.Contains(f, StringComparison.OrdinalIgnoreCase))
+                                let arr =
+                                    filtered
+                                    |> List.map (fun (name, value) ->
+                                        JsonValue.Record
+                                            [| "name",  JsonValue.String name
+                                               "value", JsonValue.String value |])
+                                    |> Array.ofList
+                                JsonValue.Record
+                                    [| "variables",  JsonValue.Array arr
+                                       "totalCount", JsonValue.Number(decimal (List.length vars))
+                                       "ok",         JsonValue.Boolean true |]
                             Some result
 
                         // - cwtools.ai.queryOverrideModes -
@@ -12382,50 +12244,47 @@ type Server(client: ILanguageClient) =
                                        | None -> () |]
 
                             let result =
-                                match gameObj with
-                                | Some g ->
-                                    let modes = g.OverrideModes()
-                                    let modesArr =
-                                        modes
-                                        |> Array.truncate limitVal
-                                        |> Array.map priorityToJson
+                                let g = game
+                                let modes = g.OverrideModes()
+                                let modesArr =
+                                    modes
+                                    |> Array.truncate limitVal
+                                    |> Array.map priorityToJson
 
-                                    let modeInfos = g.OverrideModesInfo()
+                                let modeInfos = g.OverrideModesInfo()
 
-                                    let modeInfoArr =
-                                        modeInfos |> Array.map modeInfoToJson
+                                let modeInfoArr =
+                                    modeInfos |> Array.map modeInfoToJson
 
-                                    let modeInfoByStrategy =
-                                        let table =
-                                            System.Collections.Generic.Dictionary<string, CWTools.Rules.ConfigOverrideModeInfo>(
-                                                StringComparer.OrdinalIgnoreCase)
+                                let modeInfoByStrategy =
+                                    let table =
+                                        System.Collections.Generic.Dictionary<string, CWTools.Rules.ConfigOverrideModeInfo>(
+                                            StringComparer.OrdinalIgnoreCase)
 
-                                        for modeInfo in modeInfos do
-                                            table.[modeInfo.id] <- modeInfo
+                                    for modeInfo in modeInfos do
+                                        table.[modeInfo.id] <- modeInfo
 
-                                        table
+                                    table
 
-                                    let fields =
-                                        [ yield "ok", JsonValue.Boolean true
-                                          yield "source", JsonValue.String "activeRules"
-                                          yield "modes", JsonValue.Array modesArr
-                                          yield "modeInfo", JsonValue.Array modeInfoArr
-                                          yield "totalCount", JsonValue.Number(decimal modes.Length)
-                                          match pathArg with
-                                          | Some path ->
-                                              match g.OverrideModeAtPath path with
-                                              | Some matched ->
-                                                  yield "matched", priorityToJson matched
-                                                  match modeInfoByStrategy.TryGetValue(matched.strategy) with
-                                                  | true, info -> yield "matchedModeInfo", modeInfoToJson info
-                                                  | false, _ -> ()
-                                              | None -> yield "matched", JsonValue.Null
-                                          | None -> () ]
-                                        |> Array.ofList
+                                let fields =
+                                    [ yield "ok", JsonValue.Boolean true
+                                      yield "source", JsonValue.String "activeRules"
+                                      yield "modes", JsonValue.Array modesArr
+                                      yield "modeInfo", JsonValue.Array modeInfoArr
+                                      yield "totalCount", JsonValue.Number(decimal modes.Length)
+                                      match pathArg with
+                                      | Some path ->
+                                          match g.OverrideModeAtPath path with
+                                          | Some matched ->
+                                              yield "matched", priorityToJson matched
+                                              match modeInfoByStrategy.TryGetValue(matched.strategy) with
+                                              | true, info -> yield "matchedModeInfo", modeInfoToJson info
+                                              | false, _ -> ()
+                                          | None -> yield "matched", JsonValue.Null
+                                      | None -> () ]
+                                    |> Array.ofList
 
-                                    JsonValue.Record fields
-                                | None ->
-                                    JsonValue.Record [| "ok", JsonValue.Boolean false; "error", JsonValue.String "LSP server not ready" |]
+                                JsonValue.Record fields
 
                             Some result
 
@@ -12438,111 +12297,100 @@ type Server(client: ILanguageClient) =
                                 let raw = uriArg.AsString()
                                 getPathFromDoc (Uri(raw))
                             let result =
-                                match gameObj with
-                                | None ->
-                                    JsonValue.Record [| "ok", JsonValue.Boolean false; "error", JsonValue.String "LSP server not ready" |]
-                                | Some _g ->
-                                    // Helper to find an entity via IGame<T>.AllEntities() and extract pre-computed data
-                                    // Uses Dictionary for O(1) lookup instead of O(N) Seq.tryFind
-                                    let tryEntityFromGame (g: IGame<'T>) =
-                                        g.AllEntities()
-                                        |> Seq.tryFind (fun struct (e, _) ->
-                                            String.Equals(e.filepath, filePath, pathComparison))
-                                        |> Option.map (fun struct (e, lazyData) ->
-                                            let cd = lazyData.Force()
+                                // Helper to find an entity via IGame<T>.AllEntities() and extract pre-computed data
+                                // Uses Dictionary for O(1) lookup instead of O(N) Seq.tryFind
+                                let tryEntityFromGame (g: IGame<'T>) =
+                                    g.AllEntities()
+                                    |> Seq.tryFind (fun struct (e, _) ->
+                                        String.Equals(e.filepath, filePath, pathComparison))
+                                    |> Option.map (fun struct (e, lazyData) ->
+                                        let cd = lazyData.Force()
 
-                                            // Serialize referenced types (from ComputedData.Referencedtypes)
-                                            let typesArr =
-                                                match cd.Referencedtypes with
-                                                | None -> [||]
-                                                | Some typesMap ->
-                                                    typesMap
-                                                    |> Map.toSeq
-                                                    |> Seq.collect (fun (typeGroup, refList) ->
-                                                        refList |> List.map (fun rd ->
-                                                            let nameStr = CWTools.Utilities.StringResource.stringManager.GetStringForIDs rd.name
-                                                            JsonValue.Record
-                                                                [| "typeGroup", JsonValue.String typeGroup
-                                                                   "name",      JsonValue.String nameStr |]))
-                                                    |> Array.ofSeq
-
-                                            // Serialize defined variables (from ComputedData.Definedvariables)
-                                            let varsArr =
-                                                match cd.Definedvariables with
-                                                | None -> [||]
-                                                | Some varMap ->
-                                                    varMap
-                                                    |> Map.toSeq
-                                                    |> Seq.collect (fun (varType, varList) ->
-                                                        varList |> Seq.map (fun (name, _rng) ->
-                                                            JsonValue.Record
-                                                                [| "varType", JsonValue.String varType
-                                                                   "name",    JsonValue.String name |]))
-                                                    |> Array.ofSeq
-
-                                            // Serialize effect blocks (from ComputedData.EffectBlocks)
-                                            let effectsArr =
-                                                match cd.EffectBlocks with
-                                                | None -> [||]
-                                                | Some nodes ->
-                                                    nodes
-                                                    |> List.map (fun (n: CWTools.Process.Node) ->
+                                        // Serialize referenced types (from ComputedData.Referencedtypes)
+                                        let typesArr =
+                                            match cd.Referencedtypes with
+                                            | None -> [||]
+                                            | Some typesMap ->
+                                                typesMap
+                                                |> Map.toSeq
+                                                |> Seq.collect (fun (typeGroup, refList) ->
+                                                    refList |> List.map (fun rd ->
+                                                        let nameStr = CWTools.Utilities.StringResource.stringManager.GetStringForIDs rd.name
                                                         JsonValue.Record
-                                                            [| "key",  JsonValue.String n.Key
-                                                               "line", JsonValue.Number(decimal (int n.Position.StartLine)) |])
-                                                    |> Array.ofList
+                                                            [| "typeGroup", JsonValue.String typeGroup
+                                                               "name",      JsonValue.String nameStr |]))
+                                                |> Array.ofSeq
 
-                                            // Serialize trigger blocks (from ComputedData.TriggerBlocks)
-                                            let triggersArr =
-                                                match cd.TriggerBlocks with
-                                                | None -> [||]
-                                                | Some nodes ->
-                                                    nodes
-                                                    |> List.map (fun (n: CWTools.Process.Node) ->
+                                        // Serialize defined variables (from ComputedData.Definedvariables)
+                                        let varsArr =
+                                            match cd.Definedvariables with
+                                            | None -> [||]
+                                            | Some varMap ->
+                                                varMap
+                                                |> Map.toSeq
+                                                |> Seq.collect (fun (varType, varList) ->
+                                                    varList |> Seq.map (fun (name, _rng) ->
                                                         JsonValue.Record
-                                                            [| "key",  JsonValue.String n.Key
-                                                               "line", JsonValue.Number(decimal (int n.Position.StartLine)) |])
-                                                    |> Array.ofList
+                                                            [| "varType", JsonValue.String varType
+                                                               "name",    JsonValue.String name |]))
+                                                |> Array.ofSeq
 
-                                            // Serialize saved event targets (from ComputedData.SavedEventTargets)
-                                            let eventTargetsArr =
-                                                match cd.SavedEventTargets with
-                                                | None -> [||]
-                                                | Some targets ->
-                                                    targets
-                                                    |> Seq.map (fun (name, _rng, scope) ->
-                                                        JsonValue.Record
-                                                            [| "name",  JsonValue.String name
-                                                               "scope", JsonValue.String (scope.ToString()) |])
-                                                    |> Array.ofSeq
+                                        // Serialize effect blocks (from ComputedData.EffectBlocks)
+                                        let effectsArr =
+                                            match cd.EffectBlocks with
+                                            | None -> [||]
+                                            | Some nodes ->
+                                                nodes
+                                                |> List.map (fun (n: CWTools.Process.Node) ->
+                                                    JsonValue.Record
+                                                        [| "key",  JsonValue.String n.Key
+                                                           "line", JsonValue.Number(decimal (int n.Position.StartLine)) |])
+                                                |> Array.ofList
 
-                                            JsonValue.Record
-                                                [| "referencedTypes", JsonValue.Array typesArr
-                                                   "definedVars",     JsonValue.Array varsArr
-                                                   "effectBlocks",    JsonValue.Array effectsArr
-                                                   "triggerBlocks",   JsonValue.Array triggersArr
-                                                   "eventTargets",    JsonValue.Array eventTargetsArr
-                                                   "file",            JsonValue.String (filePath.Replace('\\', '/'))
-                                                   "ok",              JsonValue.Boolean true |])
+                                        // Serialize trigger blocks (from ComputedData.TriggerBlocks)
+                                        let triggersArr =
+                                            match cd.TriggerBlocks with
+                                            | None -> [||]
+                                            | Some nodes ->
+                                                nodes
+                                                |> List.map (fun (n: CWTools.Process.Node) ->
+                                                    JsonValue.Record
+                                                        [| "key",  JsonValue.String n.Key
+                                                           "line", JsonValue.Number(decimal (int n.Position.StartLine)) |])
+                                                |> Array.ofList
 
-                                    let entityResult =
-                                        stlGameObj  |> Option.bind tryEntityFromGame
-                                        |> Option.orElse (hoi4GameObj  |> Option.bind tryEntityFromGame)
-                                        |> Option.orElse (eu4GameObj   |> Option.bind tryEntityFromGame)
-                                        |> Option.orElse (ck2GameObj   |> Option.bind tryEntityFromGame)
-                                        |> Option.orElse (irGameObj    |> Option.bind tryEntityFromGame)
-                                        |> Option.orElse (vic2GameObj  |> Option.bind tryEntityFromGame)
-                                        |> Option.orElse (ck3GameObj   |> Option.bind tryEntityFromGame)
-                                        |> Option.orElse (vic3GameObj  |> Option.bind tryEntityFromGame)
-                                        |> Option.orElse (eu5GameObj   |> Option.bind tryEntityFromGame)
-                                        |> Option.orElse (customGameObj|> Option.bind tryEntityFromGame)
+                                        // Serialize saved event targets (from ComputedData.SavedEventTargets)
+                                        let eventTargetsArr =
+                                            match cd.SavedEventTargets with
+                                            | None -> [||]
+                                            | Some targets ->
+                                                targets
+                                                |> Seq.map (fun (name, _rng, scope) ->
+                                                    JsonValue.Record
+                                                        [| "name",  JsonValue.String name
+                                                           "scope", JsonValue.String (scope.ToString()) |])
+                                                |> Array.ofSeq
 
-                                    match entityResult with
-                                    | Some json -> json
-                                    | None ->
                                         JsonValue.Record
-                                            [| "ok",    JsonValue.Boolean false
-                                               "error", JsonValue.String $"No entity found for file: {filePath}" |]
+                                            [| "referencedTypes", JsonValue.Array typesArr
+                                               "definedVars",     JsonValue.Array varsArr
+                                               "effectBlocks",    JsonValue.Array effectsArr
+                                               "triggerBlocks",   JsonValue.Array triggersArr
+                                               "eventTargets",    JsonValue.Array eventTargetsArr
+                                               "file",            JsonValue.String (filePath.Replace('\\', '/'))
+                                               "ok",              JsonValue.Boolean true |])
+
+                                let visitor =
+                                    { new IGameVisitor<_> with
+                                        member this.Visit g = tryEntityFromGame g }
+                                let entityResult = gameDispatcher.Dispatch visitor |> Option.flatten
+
+                                match entityResult with
+                                | Some json -> json
+                                | None ->
+                                    JsonValue.Record
+                                        [| "ok",    JsonValue.Boolean false
+                                           "error", JsonValue.String $"No entity found for file: {filePath}" |]
                             Some result
 
                         // - cwtools.ai.validateOverlay -
@@ -12817,7 +12665,7 @@ type Server(client: ILanguageClient) =
                                         [| "ok",                 JsonValue.Boolean true
                                            "file",              JsonValue.String (filePath.Replace('\\', '/'))
                                            "epoch",             JsonValue.Number(decimal state.epoch)
-                                           "version",           JsonValue.Number(decimal (state.version |> Option.defaultValue -1))
+                                           "version",           JsonValue.Number(decimal (state.validatedVersion |> Option.defaultValue -1))
                                            "currentVersion",    JsonValue.Number(decimal (currentVersion |> Option.defaultValue -1))
                                            "validatedVersion",  JsonValue.Number(decimal (state.validatedVersion |> Option.defaultValue -1))
                                            "modelEpoch",
@@ -12906,11 +12754,6 @@ type Server(client: ILanguageClient) =
 
                         // waitDiagnosticsFresh is kept as a non-blocking compatibility alias.
                         // Actual waiting stays client-side to avoid holding an LSP read lock.
-
-                        // - cwtools.ai.getValidationStatus -
-                        // Return global verification status summary: current epoch, number of pending files, total number of files
-                        | { command = "cwtools.ai.getValidationStatus" } ->
-                            Some(validationStatusResult ())
 
                         | { command = "cwtools.ai.revalidateFiles"
                             arguments = revalArgs } ->

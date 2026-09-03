@@ -87,9 +87,6 @@ let planDeferredDynamicRevalidationBatch
 
     requested @ diagnosticCleanup
 
-/// A model refresh makes diagnostics pending, not disproven. Keep the last
-/// complete result visible until a validation pass for that file replaces it.
-let preserveWhilePending (existing: Diagnostic list) = existing
 
 /// Document versions only supersede a diagnostic snapshot when both sides are
 /// editor-backed. Disk revalidation and closed files intentionally have no

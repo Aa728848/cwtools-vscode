@@ -83,7 +83,6 @@ let useCodes = codesOf refSnap usesPath
 check "defined type reference is clean" (not (Set.contains "CWT301" (codesOf refSnap (Path.Combine(tmpRoot, "defs.cwt")))))
 check "undefined type -> CWT301" (Set.contains "CWT301" useCodes)
 check "defined enum clean" (useCodes |> Set.filter (fun c -> c = "CWT301") |> Set.count >= 1)
-check "built-in scope[any] not reported" (true)
 
 let cwt301names =
     CwtProjectIndex.projectDiagnosticsForFile refSnap usesPath

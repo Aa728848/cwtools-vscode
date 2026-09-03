@@ -15,11 +15,14 @@ let timestamps (values: int64 seq) =
 
 let stateLock = new ReaderWriterLockSlim()
 
+let testTiming = createRequestExecutionTiming ()
 let result =
-    runReadLocked
+    runTracedReadLocked
         stateLock
         (Some 100)
         CancellationToken.None
+        (fun () -> 0L)
+        testTiming
         (async {
             do! Async.Sleep 25
             return 42

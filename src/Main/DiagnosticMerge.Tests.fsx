@@ -22,10 +22,6 @@ let parserDiagnostic = diagnostic "CW001_MISSING_CLOSE_BRACE" "Missing closing b
 let semanticDiagnostic = diagnostic "CW102" "Unknown scripted trigger"
 let previousCompleteResult = [ parserDiagnostic; semanticDiagnostic ]
 
-let pendingResult = preserveWhilePending previousCompleteResult
-
-if pendingResult <> previousCompleteResult then
-    failwith "Pending global revalidation must preserve parser and semantic diagnostics."
 
 // Agent writes are revalidated from disk and therefore have no editor document
 // version. Opening the same file must not make that completed snapshot stale.
@@ -40,9 +36,6 @@ if isValidatedDocumentVersionStale (Some 7) (Some 7) then
 
 if not (isValidatedDocumentVersionStale (Some 7) (Some 8)) then
     failwith "A newer editor version must supersede the diagnostic snapshot."
-
-if not (pendingResult |> List.exists (fun item -> item.code = Some "CW102")) then
-    failwith "Pending global revalidation dropped the last complete semantic diagnostic."
 
 let oldDynamicDiagnostic = diagnostic "CW274D" "Old expanded call-site diagnostic"
 let newDynamicDiagnostic = diagnostic "CW274D" "Corrected expanded call-site diagnostic"

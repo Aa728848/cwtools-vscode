@@ -179,10 +179,3 @@ let runTracedReadLocked
 
     result
 
-let runReadLocked
-    (stateLock: ReaderWriterLockSlim)
-    (timeoutMs: int option)
-    (cancellationToken: CancellationToken)
-    (workflow: Async<'T>)
-    =
-    runReadLockedWithCallbacks stateLock timeoutMs cancellationToken ignore ignore workflow

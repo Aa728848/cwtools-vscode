@@ -48,16 +48,19 @@ let rec initOrUpdateRules repoPath gameCacheDir first =
         let currentHash = git.Head.Tip.Sha
         logInfo $"cwtools current rules version: %A{currentHash}"
 
-        let remoteBranch =
+        let tryFindRemoteDefaultBranch (r: Repository) =
             [ "origin/master"; "origin/main" ]
             |> Seq.tryPick (fun branchName ->
-                match git.Branches[branchName] with
+                match r.Branches[branchName] with
                 | null -> None
                 | branch -> Some branch)
+
+        let remoteBranch =
+            tryFindRemoteDefaultBranch git
             |> Option.defaultWith (fun () ->
                 failwith "Could not find a fetched origin/master or origin/main branch for CWTools rules.")
 
-        // The rules cache always tracks the remote default branch; there is no
+        // The rules cache tracks the remote default branch; there is no
         // separate "stable" (tagged) channel anymore.
         git.Reset(ResetMode.Hard, remoteBranch.Tip)
 
@@ -68,7 +71,9 @@ let rec initOrUpdateRules repoPath gameCacheDir first =
         logError $"cwtools git error, recovering, error: %A{ex}"
         try
             use git = new Repository(gameCacheDir)
-            git.Reset(ResetMode.Hard, git.Branches["origin/master"].Tip)
+            match [ "origin/master"; "origin/main" ] |> Seq.tryPick (fun b -> match git.Branches[b] with null -> None | br -> Some br) with
+            | Some branch -> git.Reset(ResetMode.Hard, branch.Tip)
+            | None -> logError "cwtools git recovery failed: could not find origin/master or origin/main branch"
         with innerEx ->
             logError $"cwtools git recovery failed: %A{innerEx}"
 

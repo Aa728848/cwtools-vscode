@@ -191,7 +191,6 @@ check "symbol modifier category Countries" (symbolNames rootBlocksText CwtSymbol
 
 let subtypesText = readFixture "valid/subtypes.cwt"
 check "symbol subtype power_plant" (symbolNames subtypesText CwtSymbolKind.CwtSubtype |> Set.contains "power_plant")
-check "symbol subtype !power_plant strips bang" (symbolNames subtypesText CwtSymbolKind.CwtSubtype |> Set.contains "power_plant")
 check "symbol subtype habitable (shared_root_blocks)" (symbolNames rootBlocksText CwtSymbolKind.CwtSubtype |> Set.contains "habitable")
 
 // --- completion -----------------------------------------------------------------

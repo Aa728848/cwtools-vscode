@@ -23,13 +23,11 @@ let mutable completionTimeoutFallback: (CompletionParams -> CompletionList optio
 // process-wide state to decide whether completion must return a stale fallback
 // before dispatching work to the thread pool.
 let mutable private gameStateWriterActivityCount = 0
-let mutable private gameStateWriterActiveCount = 0
 
 let enterGameStateWriteLock () =
     Interlocked.Increment(&gameStateWriterActivityCount) |> ignore
     try
         gameStateLock.EnterWriteLock()
-        Interlocked.Increment(&gameStateWriterActiveCount) |> ignore
     with _ ->
         Interlocked.Decrement(&gameStateWriterActivityCount) |> ignore
         reraise ()
@@ -38,7 +36,6 @@ let exitGameStateWriteLock () =
     try
         gameStateLock.ExitWriteLock()
     finally
-        Interlocked.Decrement(&gameStateWriterActiveCount) |> ignore
         Interlocked.Decrement(&gameStateWriterActivityCount) |> ignore
 
 let isGameStateWriteBusy () = Volatile.Read(&gameStateWriterActivityCount) > 0
@@ -92,13 +89,10 @@ let private runtimeSnapshot () =
        minWorkerThreads = minWorker
        availableWorkerThreads = max 0 availWorker
        pendingWorkItems = ThreadPool.PendingWorkItemCount
-       ioThreads = maxIo - availIo
-       maxIoThreads = maxIo
        readerCount = gameStateLock.CurrentReadCount
        waitingReadCount = gameStateLock.WaitingReadCount
        waitingWriteCount = gameStateLock.WaitingWriteCount
-       writerActivityCount = Volatile.Read(&gameStateWriterActivityCount)
-       writerActiveCount = Volatile.Read(&gameStateWriterActiveCount) |}
+       writerActivityCount = Volatile.Read(&gameStateWriterActivityCount) |}
 
 let private heartbeatGapThresholdMs = 500.0
 let mutable private lastHeartbeatAt = timestamp ()
@@ -106,17 +100,11 @@ let mutable private lastHeartbeatAt = timestamp ()
 let private jsonWriteOptions =
     { defaultJsonWriteOptions with
         customWriters =
-            [ writeTextDocumentSaveReason
-              writeFileChangeType
-              writeTextDocumentSyncKind
-              writeDiagnosticSeverity
-              writeTrace
+            [ writeDiagnosticSeverity
               writeInsertTextFormat
               writeCompletionItemKind
-              writeMarkedString
               writeDocumentHighlightKind
               writeSymbolKind
-              writeRegisterCapability
               writeMessageType
               writeMarkupKind
               writeHoverContent ] }
@@ -206,20 +194,8 @@ let private serializePublishDiagnostics =
 let private serializeShowMessage =
     serializerFactory<ShowMessageParams> jsonWriteOptions
 
-let private serializeRegistrationParams =
-    serializerFactory<RegistrationParams> jsonWriteOptions
-
-let private serializeLoadingBarParams =
-    serializerFactory<LoadingBarParams> jsonWriteOptions
-
-let private serializeGetWordRangeAtPosition =
-    serializerFactory<GetWordRangeAtPositionParams> jsonWriteOptions
-
 let private serializeApplyWorkspaceEdit =
     serializerFactory<ApplyWorkspaceEditParams> jsonWriteOptions
-
-let private serializeCreateVirtualFileParams =
-    serializerFactory<CreateVirtualFileParams> jsonWriteOptions
 
 let private serializeLogMessageParams =
     serializerFactory<LogMessageParams> jsonWriteOptions
@@ -267,7 +243,11 @@ let responseAgent =
                     | None -> eprintfn $"Unexpected response %i{id}"
                     return! loop (state |> Map.remove id)
                 | Expire id ->
-                    // If the entry is still present the client never replied - silently drop it.
+                    match state |> Map.tryFind id with
+                    | Some reply ->
+                        eprintfn $"Request %i{id} timed out waiting for client response"
+                        reply.Reply(JsonValue.Null)
+                    | None -> ()
                     return! loop (state |> Map.remove id)
             }
 
@@ -371,8 +351,7 @@ let private logRequestTrace send id (trace: RequestTrace) =
                    "readerCount", JsonValue.Number(decimal snapshot.readerCount)
                    "waitingReadCount", JsonValue.Number(decimal snapshot.waitingReadCount)
                    "waitingWriteCount", JsonValue.Number(decimal snapshot.waitingWriteCount)
-                   "writerActivityCount", JsonValue.Number(decimal snapshot.writerActivityCount)
-                   "writerActiveCount", JsonValue.Number(decimal snapshot.writerActiveCount) |]
+                   "writerActivityCount", JsonValue.Number(decimal snapshot.writerActivityCount) |]
 
         monitorLog send "RequestTrace" (payload.ToString(JsonSaveOptions.DisableFormatting))
 
@@ -395,7 +374,7 @@ let private startHeartbeatThread (send: BinaryWriter) =
                 if gap > heartbeatGapThresholdMs then
                     let snapshot = runtimeSnapshot ()
                     monitorLog send "Heartbeat"
-                        $"heartbeatGapMs={gap} pendingWorkItems={snapshot.pendingWorkItems} availableWorkers={snapshot.availableWorkerThreads} writerActive={snapshot.writerActiveCount} waitingWriters={snapshot.waitingWriteCount}")
+                        $"heartbeatGapMs={gap} pendingWorkItems={snapshot.pendingWorkItems} availableWorkers={snapshot.availableWorkerThreads} waitingWriters={snapshot.waitingWriteCount}")
 
     thread.IsBackground <- true
     thread.Start()
@@ -406,8 +385,11 @@ let private thenMap (f: 'A -> 'B) (result: Async<'A>) : Async<'B> =
         return f a
     }
 
-let private thenSome = thenMap Some
-let private thenNone (result: Async<'A>) : Async<string option> = result |> thenMap (fun _ -> None)
+type private RequestResult =
+    | ResponsePayload of string
+    | RequestCancelled
+
+let private thenPayload = thenMap ResponsePayload
 
 let private notExit (message: Parser.Message) =
     match message with
@@ -433,18 +415,6 @@ type RealClient(send: BinaryWriter) =
             let json = serializeShowMessage p
             notifyClient (send, "window/showMessage", json)
 
-        member this.RegisterCapability(p: RegisterCapability) : unit =
-            match p with
-            | RegisterCapability.DidChangeWatchedFiles _ ->
-                let register =
-                    { id = Guid.NewGuid().ToString()
-                      method = "workspace/didChangeWatchedFiles"
-                      registerOptions = p }
-
-                let message = { registrations = [ register ] }
-                let json = serializeRegistrationParams message
-                notifyClient (send, "client/registerCapability", json)
-
         member this.CustomNotification(method: string, json: JsonValue) : unit =
             let jsonString = json.ToString(JsonSaveOptions.DisableFormatting)
             notifyClient (send, method, jsonString)
@@ -465,14 +435,14 @@ type RealClient(send: BinaryWriter) =
 
 type private ReadLockFallback =
     { timeoutMs: int
-      getResult: unit -> string option }
+      getResult: unit -> RequestResult option }
 
 type private PendingTask =
     | ProcessNotification of method: string * task: Async<unit> * needsWriteLock: bool
-    | ProcessLockFreeRequest of id: int * task: Async<string option> * cancel: CancellationTokenSource
+    | ProcessLockFreeRequest of id: int * task: Async<RequestResult> * cancel: CancellationTokenSource
     | ProcessRequest of
         id: int *
-        task: Async<string option> *
+        task: Async<RequestResult> *
         cancel: CancellationTokenSource *
         isReadOnly: bool *
         lockFallback: ReadLockFallback option
@@ -485,36 +455,44 @@ let connect (serverFactory: ILanguageClient -> ILanguageServer, receive: BinaryR
     /// Returns (serialisedResponseTask, isReadOnly).
     /// isReadOnly = true  -> safe to run concurrently with other reads, holding gameStateLock in read mode.
     /// isReadOnly = false -> must run exclusively, holding gameStateLock in write mode.
-    let processRequest (request: Request) : Async<string option> * bool =
+    let processRequest (request: Request) : Async<RequestResult> * bool =
         match request with
-        | Initialize(p)         -> server.Initialize(p) |> thenMap serializeInitializeResult |> thenSome, false
-        | Shutdown              -> server.Shutdown()     |> thenMap serializeShutdownResponse |> thenSome, false
+        | Initialize(p)         -> server.Initialize(p) |> thenMap serializeInitializeResult |> thenPayload, false
+        | Shutdown              -> server.Shutdown()     |> thenMap serializeShutdownResponse |> thenPayload, false
         | WillSaveWaitUntilTextDocument(p) ->
-            server.WillSaveWaitUntilTextDocument(p) |> thenMap serializeTextEditList |> thenSome, false
+            server.WillSaveWaitUntilTextDocument(p) |> thenMap serializeTextEditList |> thenPayload, false
         // - Read-only requests (concurrent execution) -
-        | Completion(p)         -> server.Completion(p)          |> thenMap serializeCompletionListOption,               true
-        | Hover(p)              -> server.Hover(p)               |> thenMap serializeHoverOption |> thenMap (Option.defaultValue "null") |> thenSome, true
-        | ResolveCompletionItem(p) -> server.ResolveCompletionItem(p) |> thenMap serializeCompletionItem |> thenSome,    true
-        | SignatureHelp(p)      -> server.SignatureHelp(p)        |> thenMap serializeSignatureHelpOption |> thenMap (Option.defaultValue "null") |> thenSome, true
-        | GotoDefinition(p)     -> server.GotoDefinition(p)      |> thenMap serializeLocationList |> thenSome,           true
-        | FindReferences(p)     -> server.FindReferences(p)      |> thenMap serializeLocationList |> thenSome,           true
-        | DocumentHighlight(p)  -> server.DocumentHighlight(p)   |> thenMap serializeDocumentHighlightList |> thenSome,  true
-        | DocumentSymbols(p)    -> server.DocumentSymbols(p)     |> thenMap serializeDocumentSymbolList |> thenSome,     true
-        | WorkspaceSymbols(p)   -> server.WorkspaceSymbols(p)    |> thenMap serializeSymbolInformationList |> thenSome,  true
-        | CodeLens(p)           -> server.CodeLens(p)            |> thenMap serializeCodeLensList |> thenSome,           true
-        | ResolveCodeLens(p)    -> server.ResolveCodeLens(p)     |> thenMap serializeCodeLens |> thenSome,               true
-        | InlayHint(p)          -> server.InlayHint(p)           |> thenMap serializeInlayHintList |> thenSome,          true
-        | DocumentLink(p)       -> server.DocumentLink(p)        |> thenMap serializeDocumentLinkList |> thenSome,       true
-        | ResolveDocumentLink(p)-> server.ResolveDocumentLink(p) |> thenMap serializeDocumentLink |> thenSome,           true
-        | SemanticTokensFull(p) -> server.SemanticTokensFull(p)  |> thenMap serializeSemanticTokensOption |> thenMap (Option.defaultValue "[[CANCEL]]") |> thenSome, true
-        | SemanticTokensFullDelta(p) -> server.SemanticTokensFullDelta(p) |> thenMap serializeSemanticTokensOrDeltaOption |> thenMap (Option.defaultValue "[[CANCEL]]") |> thenSome, true
-        | FoldingRanges(p)      -> server.FoldingRanges(p)       |> thenMap serializeFoldingRangeList |> thenSome, true
-        | SelectionRanges(p)    -> server.SelectionRanges(p)     |> thenMap serializeSelectionRangeList |> thenSome, true
-        | PrepareCallHierarchy(p) -> server.PrepareCallHierarchy(p) |> thenMap serializeCallHierarchyItemList |> thenSome, true
-        | CallHierarchyIncomingCalls(p) -> server.CallHierarchyIncomingCalls(p) |> thenMap serializeCallHierarchyIncomingCallList |> thenSome, true
-        | CallHierarchyOutgoingCalls(p) -> server.CallHierarchyOutgoingCalls(p) |> thenMap serializeCallHierarchyOutgoingCallList |> thenSome, true
+        | Completion(p)         -> server.Completion(p)          |> thenMap (serializeCompletionListOption >> Option.defaultValue "null" >> ResponsePayload), true
+        | Hover(p)              -> server.Hover(p)               |> thenMap serializeHoverOption |> thenMap (Option.defaultValue "null") |> thenPayload, true
+        | ResolveCompletionItem(p) -> server.ResolveCompletionItem(p) |> thenMap serializeCompletionItem |> thenPayload,    true
+        | SignatureHelp(p)      -> server.SignatureHelp(p)        |> thenMap serializeSignatureHelpOption |> thenMap (Option.defaultValue "null") |> thenPayload, true
+        | GotoDefinition(p)     -> server.GotoDefinition(p)      |> thenMap serializeLocationList |> thenPayload,           true
+        | FindReferences(p)     -> server.FindReferences(p)      |> thenMap serializeLocationList |> thenPayload,           true
+        | DocumentHighlight(p)  -> server.DocumentHighlight(p)   |> thenMap serializeDocumentHighlightList |> thenPayload,  true
+        | DocumentSymbols(p)    -> server.DocumentSymbols(p)     |> thenMap serializeDocumentSymbolList |> thenPayload,     true
+        | WorkspaceSymbols(p)   -> server.WorkspaceSymbols(p)    |> thenMap serializeSymbolInformationList |> thenPayload,  true
+        | CodeLens(p)           -> server.CodeLens(p)            |> thenMap serializeCodeLensList |> thenPayload,           true
+        | ResolveCodeLens(p)    -> server.ResolveCodeLens(p)     |> thenMap serializeCodeLens |> thenPayload,               true
+        | InlayHint(p)          -> server.InlayHint(p)           |> thenMap serializeInlayHintList |> thenPayload,          true
+        | DocumentLink(p)       -> server.DocumentLink(p)        |> thenMap serializeDocumentLinkList |> thenPayload,       true
+        | ResolveDocumentLink(p)-> server.ResolveDocumentLink(p) |> thenMap serializeDocumentLink |> thenPayload,           true
+        | SemanticTokensFull(p) ->
+            server.SemanticTokensFull(p)
+            |> thenMap (function
+                | Some tokens -> ResponsePayload (serializeSemanticTokens tokens)
+                | None -> RequestCancelled), true
+        | SemanticTokensFullDelta(p) ->
+            server.SemanticTokensFullDelta(p)
+            |> thenMap (function
+                | Some tokensOrDelta -> ResponsePayload (serializeSemanticTokensOrDelta tokensOrDelta)
+                | None -> RequestCancelled), true
+        | FoldingRanges(p)      -> server.FoldingRanges(p)       |> thenMap serializeFoldingRangeList |> thenPayload, true
+        | SelectionRanges(p)    -> server.SelectionRanges(p)     |> thenMap serializeSelectionRangeList |> thenPayload, true
+        | PrepareCallHierarchy(p) -> server.PrepareCallHierarchy(p) |> thenMap serializeCallHierarchyItemList |> thenPayload, true
+        | CallHierarchyIncomingCalls(p) -> server.CallHierarchyIncomingCalls(p) |> thenMap serializeCallHierarchyIncomingCallList |> thenPayload, true
+        | CallHierarchyOutgoingCalls(p) -> server.CallHierarchyOutgoingCalls(p) |> thenMap serializeCallHierarchyOutgoingCallList |> thenPayload, true
         // CodeActions reads game state but result doesn't mutate; treat as read-only
-        | CodeActions(p)        -> server.CodeActions(p)         |> thenMap serializeCommandList |> thenSome,            true
+        | CodeActions(p)        -> server.CodeActions(p)         |> thenMap serializeCommandList |> thenPayload,            true
         // ExecuteCommand: split into read-only (query/info) and write (etc.)
         | ExecuteCommand(p) ->
             let isReadCmd =
@@ -574,16 +552,16 @@ let connect (serverFactory: ILanguageClient -> ILanguageServer, receive: BinaryR
                         | _ -> None)
                     |> Option.exists (fun mode -> mode = "incremental")
                 | _                  -> false
-            server.ExecuteCommand p |> thenMap serializeExecuteCommandResponseOption, isReadCmd
+            server.ExecuteCommand p |> thenMap (serializeExecuteCommandResponseOption >> Option.defaultValue "null" >> ResponsePayload), isReadCmd
 
 
         // - Write / formatting -
-        | DocumentFormatting(p)     -> server.DocumentFormatting(p)     |> thenMap serializeTextEditList |> thenSome, false
-        | DocumentRangeFormatting(p)-> server.DocumentRangeFormatting(p)|> thenMap serializeTextEditList |> thenSome, false
-        | DocumentOnTypeFormatting(p)->server.DocumentOnTypeFormatting(p)|> thenMap serializeTextEditList |> thenSome, false
-        | PrepareRename(p)          -> server.PrepareRename(p)          |> thenMap serializePrepareRenameResultOption |> thenMap (Option.defaultValue "null") |> thenSome, true
-        | Rename(p)                 -> server.Rename(p)                 |> thenMap serializeWorkspaceEdit |> thenSome, false
-        | DidChangeWorkspaceFolders(p) -> server.DidChangeWorkspaceFolders(p) |> thenNone,                             false
+        | DocumentFormatting(p)     -> server.DocumentFormatting(p)     |> thenMap serializeTextEditList |> thenPayload, false
+        | DocumentRangeFormatting(p)-> server.DocumentRangeFormatting(p)|> thenMap serializeTextEditList |> thenPayload, false
+        | DocumentOnTypeFormatting(p)->server.DocumentOnTypeFormatting(p)|> thenMap serializeTextEditList |> thenPayload, false
+        | PrepareRename(p)          -> server.PrepareRename(p)          |> thenMap serializePrepareRenameResultOption |> thenMap (Option.defaultValue "null") |> thenPayload, true
+        | Rename(p)                 -> server.Rename(p)                 |> thenMap serializeWorkspaceEdit |> thenPayload, false
+        | DidChangeWorkspaceFolders(p) -> server.DidChangeWorkspaceFolders(p) |> thenMap (fun () -> ResponsePayload "null"), false
 
     let processNotification (n: Notification) : Async<unit> * bool =
         match n with
@@ -675,6 +653,11 @@ let connect (serverFactory: ILanguageClient -> ILanguageServer, receive: BinaryR
                         // validation/cache writer. VS Code naturally retries its
                         // background providers; direct navigation gets a bounded
                         // empty response instead of an unbounded loading widget.
+                        let fixedLockFallback timeoutMs response =
+                            Some
+                                { timeoutMs = timeoutMs
+                                  getResult = fun () -> Some response }
+
                         let lockFallback =
                             match parsed with
                             | Completion p ->
@@ -684,15 +667,16 @@ let connect (serverFactory: ILanguageClient -> ILanguageServer, receive: BinaryR
                                         fun () ->
                                             completionTimeoutFallback
                                             |> Option.bind (fun provider -> provider p)
-                                            |> serializeCompletionListOption }
+                                            |> serializeCompletionListOption
+                                            |> Option.map ResponsePayload }
                             | Hover _
                             | SignatureHelp _
                             | PrepareRename _ ->
-                                fixedLockFallback editorRequestLockTimeoutMs "null"
+                                fixedLockFallback editorRequestLockTimeoutMs (ResponsePayload "null")
                             | GotoDefinition _
                             | FindReferences _
                             | DocumentHighlight _ ->
-                                fixedLockFallback editorRequestLockTimeoutMs "[]"
+                                fixedLockFallback editorRequestLockTimeoutMs (ResponsePayload "[]")
                             | DocumentSymbols _
                             | WorkspaceSymbols _
                             | CodeLens _
@@ -703,19 +687,19 @@ let connect (serverFactory: ILanguageClient -> ILanguageServer, receive: BinaryR
                             | CallHierarchyIncomingCalls _
                             | CallHierarchyOutgoingCalls _
                             | CodeActions _ ->
-                                fixedLockFallback editorRequestLockTimeoutMs "[]"
+                                fixedLockFallback editorRequestLockTimeoutMs (ResponsePayload "[]")
                             | ResolveCompletionItem item ->
-                                fixedLockFallback editorRequestLockTimeoutMs (serializeCompletionItem item)
+                                fixedLockFallback editorRequestLockTimeoutMs (ResponsePayload (serializeCompletionItem item))
                             | ResolveCodeLens lens ->
-                                fixedLockFallback editorRequestLockTimeoutMs (serializeCodeLens lens)
+                                fixedLockFallback editorRequestLockTimeoutMs (ResponsePayload (serializeCodeLens lens))
                             | ResolveDocumentLink link ->
-                                fixedLockFallback editorRequestLockTimeoutMs (serializeDocumentLink link)
+                                fixedLockFallback editorRequestLockTimeoutMs (ResponsePayload (serializeDocumentLink link))
                             | SemanticTokensFull _
                             | SemanticTokensFullDelta _ ->
                                 // Never publish ranges from an older document version.
                                 // A prompt cancellation keeps VS Code's shifted tokens
                                 // visible and lets it retry after the writer drains.
-                                fixedLockFallback completionLockTimeoutMs "[[CANCEL]]"
+                                fixedLockFallback completionLockTimeoutMs RequestCancelled
                             | _ -> None
                         let cancel = new CancellationTokenSource()
                         pendingRequests[id] <- cancel
@@ -788,7 +772,7 @@ let connect (serverFactory: ILanguageClient -> ILanguageServer, receive: BinaryR
 
     let startLockFreeRequest
         (id: int)
-        (task: Async<string option>)
+        (task: Async<RequestResult>)
         (cancel: CancellationTokenSource)
         =
         let workflow =
@@ -810,7 +794,9 @@ let connect (serverFactory: ILanguageClient -> ILanguageServer, receive: BinaryR
                             finally
                                 traceRef |> Option.iter (fun t -> closeMethod (timestamp ()) t.timing)
                         }
-                    terminalizeRequest id (RequestTerminalCause.Success(result |> Option.defaultValue "null"))
+                    match result with
+                    | ResponsePayload payload -> terminalizeRequest id (RequestTerminalCause.Success payload)
+                    | RequestCancelled -> terminalizeRequest id RequestTerminalCause.Cancelled
                 else
                     terminalizeRequest id RequestTerminalCause.Cancelled
             }
@@ -829,7 +815,7 @@ let connect (serverFactory: ILanguageClient -> ILanguageServer, receive: BinaryR
     // acquiring a shared read lock so concurrent writes are properly blocked.
     let startReadOnlyRequest
         (id: int)
-        (task: Async<string option>)
+        (task: Async<RequestResult>)
         (cancel: CancellationTokenSource)
         (lockFallback: ReadLockFallback option)
         =
@@ -854,9 +840,8 @@ let connect (serverFactory: ILanguageClient -> ILanguageServer, receive: BinaryR
                 match lockResult with
                 | Acquired result when not cancel.IsCancellationRequested ->
                     match result with
-                    | Some "[[CANCEL]]" -> terminalizeRequest id RequestTerminalCause.Cancelled
-                    | Some response -> terminalizeRequest id (RequestTerminalCause.Success response)
-                    | None -> terminalizeRequest id (RequestTerminalCause.Success "null")
+                    | RequestCancelled -> terminalizeRequest id RequestTerminalCause.Cancelled
+                    | ResponsePayload response -> terminalizeRequest id (RequestTerminalCause.Success response)
                 | TimedOut when not cancel.IsCancellationRequested ->
                     traceRef |> Option.iter (fun t -> startFallback (timestamp ()) t.timing)
                     let fallbackResult =
@@ -865,8 +850,8 @@ let connect (serverFactory: ILanguageClient -> ILanguageServer, receive: BinaryR
                         finally
                             traceRef |> Option.iter (fun t -> closeFallback (timestamp ()) t.timing)
                     match fallbackResult with
-                    | Some "[[CANCEL]]" -> terminalizeRequest id RequestTerminalCause.Cancelled
-                    | Some response -> terminalizeRequest id (RequestTerminalCause.Success response)
+                    | Some RequestCancelled -> terminalizeRequest id RequestTerminalCause.Cancelled
+                    | Some (ResponsePayload response) -> terminalizeRequest id (RequestTerminalCause.Success response)
                     | None -> terminalizeRequest id (RequestTerminalCause.Success "null")
                 | _ ->
                     terminalizeRequest id RequestTerminalCause.Cancelled
@@ -883,7 +868,7 @@ let connect (serverFactory: ILanguageClient -> ILanguageServer, receive: BinaryR
 
     // Helper: run a write-class task serially, acquiring an exclusive write lock.
     // Any in-flight read-only requests will finish before the lock is granted.
-    let runWriteRequest (id: int) (task: Async<string option>) (cancel: CancellationTokenSource) =
+    let runWriteRequest (id: int) (task: Async<RequestResult>) (cancel: CancellationTokenSource) =
         let mutable traceRef = None
         match requestTraces.TryGetValue id with
         | true, trace ->
@@ -894,7 +879,10 @@ let connect (serverFactory: ILanguageClient -> ILanguageServer, receive: BinaryR
         let tracedTask =
             async {
                 try
-                    return! task
+                    let! result = task
+                    match result with
+                    | ResponsePayload payload -> return Some payload
+                    | RequestCancelled -> return None
                 finally
                     traceRef |> Option.iter (fun t -> closeMethod (timestamp ()) t.timing)
             }

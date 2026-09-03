@@ -9,46 +9,6 @@ let throws<'T when 'T :> exn> action message =
     try action (); failwith (message + ": no exception")
     with :? 'T -> ()
 
-let guard generation epochs = { Generation = generation; Epochs = Map.ofList epochs }
-let generation1 = guard 1L [ "workspace", 3L; "localisation", 7L ]
-let generation2 = guard 2L [ "workspace", 3L; "localisation", 7L ]
-let changedEpoch = guard 1L [ "workspace", 4L; "localisation", 7L ]
-
-check (guardVectorsMatch generation1 generation1) "An exact guard vector must match"
-check (isStale generation1 generation2) "A concurrent newer generation must reject prepared work"
-check (isStale generation1 changedEpoch) "Any epoch difference must reject prepared work"
-
-equal None (tryAcknowledgeExactPrefix generation1 generation2 [ "a"; "b" ] [ "a"; "b"; "new" ]) "Stale prefix acknowledgement rejected"
-equal (Some [ "new" ]) (tryAcknowledgeExactPrefix generation1 generation1 [ "a"; "b" ] [ "a"; "b"; "new" ]) "Exact prefix acknowledged"
-equal None (tryAcknowledgeExactPrefix generation1 generation1 [ "a"; "b" ] [ "a"; "changed"; "new" ]) "Non-exact prefix rejected"
-equal (Some [ "a" ]) (tryAcknowledgeExactPrefix generation1 generation1 [] [ "a" ]) "Empty prefix is an exact no-op"
-
-// Snapshot swap and exact-prefix acknowledgement are one pure atomic state transition.
-let initialCommitState =
-    { Guard = generation1
-      Snapshot = "old"
-      Pending = [ "a"; "b"; "newer" ] }
-let atomicPlan = SwapSnapshotAndAcknowledgeExactPrefix(generation1, [ "a"; "b" ], "new")
-let atomicResult = tryApplyCommitPlan atomicPlan initialCommitState
-check (atomicResult.IsSome) "Exact guard and prefix must allow the atomic commit plan"
-equal "new" atomicResult.Value.Snapshot "Atomic commit swaps the snapshot"
-equal [ "newer" ] atomicResult.Value.Pending "Atomic acknowledgement preserves the newer suffix"
-equal "old" initialCommitState.Snapshot "Applying a plan cannot mutate the prior snapshot"
-equal [ "a"; "b"; "newer" ] initialCommitState.Pending "Applying a plan cannot mutate the prior queue"
-equal None (tryApplyCommitPlan (SwapSnapshotAndAcknowledgeExactPrefix(generation1, [ "a"; "changed" ], "bad")) initialCommitState) "Prefix mismatch rejects both operations"
-equal None (tryApplyCommitPlan (SwapSnapshotAndAcknowledgeExactPrefix(generation2, [ "a"; "b" ], "bad")) initialCommitState) "Guard mismatch rejects both operations"
-
-// Localisation diagnostic merges are immutable and empty replacements clear stale diagnostics.
-let original =
-    { Guard = generation1
-      Diagnostics = Map [ "a.yml", [ "old-a" ]; "b.yml", [ "old-b" ] ] }
-let merged =
-    mergeLocalisationDiagnosticReplacements generation2 (Map [ "a.yml", []; "c.yml", [ "new-c" ] ]) original
-equal (Some [ "old-a" ]) (original.Diagnostics |> Map.tryFind "a.yml") "Merge must not mutate the prior snapshot"
-equal (Some []) (merged.Diagnostics |> Map.tryFind "a.yml") "Empty replacement must clear a file"
-equal (Some [ "old-b" ]) (merged.Diagnostics |> Map.tryFind "b.yml") "Unmentioned diagnostics must be preserved"
-equal (Some [ "new-c" ]) (merged.Diagnostics |> Map.tryFind "c.yml") "New diagnostic replacement must be added"
-equal generation2 merged.Guard "Merged snapshot records the committed guard"
 
 let capture<'T when 'T :> exn> action message =
     try action (); failwith (message + ": no exception")

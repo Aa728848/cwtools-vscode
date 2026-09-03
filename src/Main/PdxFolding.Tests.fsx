@@ -1,10 +1,8 @@
+#load "../TestHelpers.fsx"
 #load "PdxFolding.fs"
 
 open Main.PdxFolding
-
-let assertEqual expected actual message =
-    if expected <> actual then
-        failwith $"{message}\nExpected: {expected}\nActual:   {actual}"
+open TestHelpers
 
 let span startLine startCharacter endLine endCharacter =
     { startLine = startLine

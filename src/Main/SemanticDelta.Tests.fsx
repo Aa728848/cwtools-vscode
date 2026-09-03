@@ -1,10 +1,10 @@
+#load "../TestHelpers.fsx"
 #load "SemanticDelta.fs"
 
 open Main.SemanticDelta
+open TestHelpers
 
-let private assertEqual name expected actual =
-    if expected <> actual then
-        failwith $"{name}: expected {expected}, got {actual}"
+let assertEqual = assertEqualNamed
 
 let unknownSemanticDelta =
     { semanticDeltaForPath "common/colony_automation_exceptions/test.txt" with

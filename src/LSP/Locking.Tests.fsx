@@ -1,13 +1,11 @@
+#load "../TestHelpers.fsx"
 #load "Locking.fs"
 
 open System
 open System.Collections.Generic
 open System.Threading
 open LSP.Locking
-
-let assertEqual expected actual message =
-    if expected <> actual then
-        failwith $"{message}: expected {expected}, got {actual}"
+open TestHelpers
 
 let timestamps (values: int64 seq) =
     let remaining = Queue<int64>(values)

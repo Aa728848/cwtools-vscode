@@ -1,10 +1,10 @@
+#load "../TestHelpers.fsx"
 #load "CompletionFallbackPolicy.fs"
 
 open Main.CompletionFallbackPolicy
+open TestHelpers
 
-let private assertEqual name expected actual =
-    if expected <> actual then
-        failwith $"{name}: expected {expected}, got {actual}"
+let assertEqual = assertEqualNamed
 
 assertEqual
     "validation alone does not trigger immediate fallback"

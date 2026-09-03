@@ -1,19 +1,14 @@
 #r "../../artifacts/bin/Main/debug/CWTools.dll"
 #r "../../artifacts/bin/LSP/debug/LSP.dll"
+#load "../TestHelpers.fsx"
 
 open System
 open System.IO
 open LSP
 open LSP.Types
+open TestHelpers
 
-let assertEqual expected actual message =
-    if expected <> actual then
-        failwith $"{message}: expected {expected}, got {actual}"
-
-let tempRoot = Path.Combine(Path.GetTempPath(), "cwtools-document-store-" + Guid.NewGuid().ToString("N"))
-Directory.CreateDirectory(tempRoot) |> ignore
-
-try
+withTempDir "cwtools-document-store" (fun tempRoot ->
     let path = Path.Combine(tempRoot, "Lifecycle.txt")
     let uri = Uri(path)
     let store = DocumentStore()
@@ -57,8 +52,6 @@ try
               version = 3
               text = "orphan" } }
     store.CleanupOrphanedDocuments(Set.empty)
-    assertEqual None (store.GetTextByPath(path)) "cleanup removes orphan"
-finally
-    Directory.Delete(tempRoot, true)
+    assertEqual None (store.GetTextByPath(path)) "cleanup removes orphan")
 
 printfn "DocumentStore platform lifecycle regression tests passed"

@@ -5,14 +5,16 @@
 #r "../../artifacts/bin/Main/debug/FSharp.Data.DesignTime.dll"
 #r "../../artifacts/bin/Main/debug/FSharp.Data.dll"
 
+#load "../TestHelpers.fsx"
+
 open System
 open FSharp.Data
 open CWTools.Process
 open CWTools.Games
 open Main.PdxFlowAnalysis
+open TestHelpers
 
-let private assertTrue name condition =
-    if not condition then failwith $"{name}: expected true"
+let private assertTrue name condition = checkNamed name condition
 
 let parseEntity (content: string) (filePath: string) : Entity =
     let parsed = CWTools.Parser.CKParser.parseString content filePath

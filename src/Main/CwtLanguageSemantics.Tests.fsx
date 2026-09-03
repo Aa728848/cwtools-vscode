@@ -11,25 +11,17 @@
 #r "../../artifacts/bin/Main/debug/FParsecCS.dll"
 #r "../../artifacts/bin/Main/debug/CWTools Server.dll"
 
+#load "../TestHelpers.fsx"
+
 open System
 open System.IO
 open CWTools.CwtLanguage
 open CWTools.Utilities.Position
+open TestHelpers
 
-let mutable failures = 0
-
-let check (name: string) (condition: bool) =
-    if condition then
-        printfn "PASS %s" name
-    else
-        failures <- failures + 1
-        printfn "FAIL %s" name
-
-let checkEq (name: string) (expected: string) (actual: string) =
-    if expected = actual then printfn "PASS %s" name
-    else
-        failures <- failures + 1
-        printfn "FAIL %s: expected %A got %A" name expected actual
+let harness = TestHarness("CwtLanguageSemantics.Tests.fsx")
+let check = harness.Check
+let checkEq = harness.Equal
 
 let corpusRoot =
     Path.GetFullPath(Path.Combine(__SOURCE_DIRECTORY__, "..", "..", "client", "test", "fixtures", "cwt"))
@@ -321,11 +313,4 @@ check "detailed API: empty model on broken input" (brokenDetailed.rules.IsEmpty)
 
 // --- summary ---------------------------------------------------------------------
 
-printfn ""
-
-if failures = 0 then
-    printfn "CwtLanguageSemantics.Tests.fsx: all checks passed."
-    0
-else
-    printfn "CwtLanguageSemantics.Tests.fsx: %d check(s) FAILED." failures
-    1
+harness.Summary()

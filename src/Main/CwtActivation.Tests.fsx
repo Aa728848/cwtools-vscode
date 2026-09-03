@@ -12,6 +12,8 @@
 #r "../../artifacts/bin/LSP/debug/LSP.dll"
 #r "../../artifacts/bin/Main/debug/CWTools Server.dll"
 
+#load "../TestHelpers.fsx"
+
 open System
 open System.Diagnostics
 open System.IO
@@ -19,14 +21,10 @@ open System.Threading
 open CWTools.CwtLanguage
 open LSP
 open Main.Lang
+open TestHelpers
 
-let mutable failures = 0
-
-let check (name: string) (condition: bool) =
-    if condition then printfn "PASS %s" name
-    else
-        failures <- failures + 1
-        printfn "FAIL %s" name
+let harness = TestHarness("CwtActivation.Tests.fsx")
+let check (name: string) (condition: bool) = harness.Check name condition
 
 let tmpRoot =
     let dir = Path.Combine(Path.GetTempPath(), "cwt-activation-tests-" + Guid.NewGuid().ToString("N"))
@@ -247,14 +245,7 @@ check "candidateIsUsable false with parse failure"
 
 // --- summary ----------------------------------------------------------------------
 
-try Directory.Delete(tmpRoot, true) with _ -> ()
-try Directory.Delete(outsideRoot, true) with _ -> ()
+cleanupTempDir tmpRoot
+cleanupTempDir outsideRoot
 
-printfn ""
-
-if failures = 0 then
-    printfn "CwtActivation.Tests.fsx: all checks passed."
-    0
-else
-    printfn "CwtActivation.Tests.fsx: %d check(s) FAILED." failures
-    1
+harness.Summary()

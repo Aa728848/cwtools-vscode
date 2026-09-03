@@ -1,10 +1,11 @@
+#load "../TestHelpers.fsx"
 #load "CompletionText.fs"
 
 open Main.CompletionText
+open TestHelpers
 
-let private assertEqual name expected actual =
-    if expected <> actual then
-        failwith $"{name}: expected {expected}, got {actual}"
+let assertEqual = assertEqualNamed
+let assertNotEqual = assertNotEqualNamed
 
 assertEqual "colon prefix" (Some "modifier:") (prefixFromTextBeforeCursor "d = modifier:")
 assertEqual "namespaced prefix" (Some "modifier:beam") (prefixFromTextBeforeCursor "d = modifier:beam")
@@ -19,9 +20,6 @@ assertEqual
 assertEqual "colon insertion range" (4, 13, 13) (tokenRangeInLine "d = modifier:" 13)
 assertEqual "colon replacement range" (4, 13, 17) (tokenRangeInLine "d = modifier:beam" 13)
 assertEqual "token boundary" (4, 8, 8) (tokenRangeInLine "d = beam" 8)
-
-let private assertNotEqual name left right =
-    if left = right then failwith $"{name}: expected distinct cache identities"
 
 let commonA = completionCacheKey "c:/mod/common/on_actions/a.txt" 17 4 2 false true
 let commonB = completionCacheKey "c:/mod/common/decisions/b.txt" 17 4 2 false true

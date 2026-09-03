@@ -1,14 +1,10 @@
+#load "../TestHelpers.fsx"
+
 open System
 open System.IO
 open System.Threading
 open System.Threading.Tasks
-
-let check condition message =
-    if not condition then failwith message
-
-let equal expected actual message =
-    if expected <> actual then
-        failwithf "%s. Expected %A, got %A" message expected actual
+open TestHelpers
 
 type TypedSlot =
     | NoSlot

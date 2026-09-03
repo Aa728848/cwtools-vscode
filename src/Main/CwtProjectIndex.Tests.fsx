@@ -12,22 +12,16 @@
 #r "../../artifacts/bin/Main/debug/FParsecCS.dll"
 #r "../../artifacts/bin/Main/debug/CWTools Server.dll"
 
+#load "../TestHelpers.fsx"
+
 open System
 open System.IO
 open CWTools.CwtLanguage
+open TestHelpers
 
-let mutable failures = 0
-
-let check (name: string) (condition: bool) =
-    if condition then printfn "PASS %s" name
-    else
-        failures <- failures + 1
-        printfn "FAIL %s" name
-
-let tmpRoot =
-    let dir = Path.Combine(Path.GetTempPath(), "cwt-index-tests-" + Guid.NewGuid().ToString("N"))
-    Directory.CreateDirectory(dir) |> ignore
-    dir
+let harness = TestHarness("CwtProjectIndex.Tests.fsx")
+let check = harness.Check
+let tmpRoot = createTempDir "cwt-index-tests"
 
 let codesOf (snapshot: CwtProjectSnapshot) (filePath: string) =
     CwtProjectIndex.projectDiagnosticsForFile snapshot filePath
@@ -179,13 +173,5 @@ check "file cap -> partial + bounded documents" (cappedSnap.partial && cappedSna
 
 // --- summary -------------------------------------------------------------------
 
-try Directory.Delete(tmpRoot, true) with _ -> ()
-
-printfn ""
-
-if failures = 0 then
-    printfn "CwtProjectIndex.Tests.fsx: all checks passed."
-    0
-else
-    printfn "CwtProjectIndex.Tests.fsx: %d check(s) FAILED." failures
-    1
+cleanupTempDir tmpRoot
+harness.Summary()

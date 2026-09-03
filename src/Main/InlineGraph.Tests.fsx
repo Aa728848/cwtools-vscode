@@ -8,19 +8,19 @@
 #r "../../artifacts/bin/Main/debug/FSharp.Data.DesignTime.dll"
 #r "../../artifacts/bin/Main/debug/FSharp.Data.dll"
 
+#load "../TestHelpers.fsx"
+
 open System
 open FSharp.Data
 open CWTools.Games
 open CWTools.Parser.UtilityParser
 open Main.InlineGraph
+open TestHelpers
 
 SQLitePCL.Batteries_V2.Init()
 
-let private assertTrue name condition =
-    if not condition then failwith $"{name}: expected true"
-
-let private assertEqual name expected actual =
-    if expected <> actual then failwith $"{name}: expected {expected} but got {actual}"
+let private assertTrue name condition = checkNamed name condition
+let private assertEqual name expected actual = assertEqualNamed name expected actual
 
 // ─── inline instantiation graph: template, params, invocation, expansion ────
 // Template declares a $TYPE$ top-level block with a $ID$ parameter; four

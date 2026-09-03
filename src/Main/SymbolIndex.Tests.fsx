@@ -1,14 +1,11 @@
+#load "../TestHelpers.fsx"
 #load "SymbolIndex.fs"
 
 open System
 open System.Threading
 open System.Threading.Tasks
 open SymbolIndex
-
-let equal expected actual message = if expected <> actual then failwithf "%s: expected %A, got %A" message expected actual
-let throws<'T when 'T :> exn> (action: unit -> unit) message =
-    try action (); failwithf "%s: expected %s" message typeof<'T>.Name
-    with :? 'T -> ()
+open TestHelpers
 let p l c = { Line = l; Character = c }
 let r sl sc el ec = { Start = p sl sc; End = p el ec }
 let s name range = { Name = name; Kind = 1; Range = range; SelectionRange = range; Detail = None }

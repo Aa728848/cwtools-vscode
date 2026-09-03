@@ -16,6 +16,7 @@
 #r "../../artifacts/bin/Main/debug/FParsec.dll"
 #r "../../artifacts/bin/Main/debug/FParsecCS.dll"
 #r "../../artifacts/bin/Main/debug/CWTools Server.dll"
+#load "../TestHelpers.fsx"
 
 open System
 open System.IO
@@ -23,6 +24,7 @@ open FParsec
 open CWTools.Common
 open CWTools.Parser
 open CWTools.Rules
+open TestHelpers
 
 let corpusRoot =
     Path.GetFullPath(Path.Combine(__SOURCE_DIRECTORY__, "..", "..", "client", "test", "fixtures", "cwt"))
@@ -61,18 +63,9 @@ let parseWithMetadata (text: string) (name: string) =
     RulesParser.parseConfigWithMetadata parseScope allScopes anyScope scopeGroups name text
 
 // --- Mini test harness ---------------------------------------------------
-let mutable failures = 0
-
-let check (name: string) (condition: bool) =
-    if condition then
-        printfn "PASS %s" name
-    else
-        failures <- failures + 1
-        printfn "FAIL %s" name
-
-let fail name message =
-    failures <- failures + 1
-    printfn "FAIL %s: %s" name message
+let harness = TestHarness("CwtLanguageService.Tests.fsx")
+let check = harness.Check
+let fail name message = harness.Fail(name, message)
 
 // --- Corpus inventory -----------------------------------------------------
 // Any fixture added under client/test/fixtures/cwt must be covered here, so an
@@ -265,11 +258,4 @@ match targetChildren with
     check "inject.cwt: injected child 2 present" (Set.contains "injected2" names)
 
 // --- Summary ---------------------------------------------------------------
-printfn ""
-
-if failures = 0 then
-    printfn "CwtLanguageService.Tests.fsx: all contract checks passed."
-    0
-else
-    printfn "CwtLanguageService.Tests.fsx: %d check(s) FAILED." failures
-    1
+harness.Summary()

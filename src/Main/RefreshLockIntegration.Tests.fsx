@@ -1,23 +1,11 @@
+#load "../TestHelpers.fsx"
 #load "RefreshLockPhases.fs"
 
 open System
 open System.IO
 open System.Threading
 open RefreshLockPhases
-
-let check condition message =
-    if not condition then failwith message
-
-let equal expected actual message =
-    if expected <> actual then
-        failwithf "%s. Expected %A, got %A" message expected actual
-
-let capture<'T when 'T :> exn> action message =
-    try
-        action ()
-        failwith (message + ": no exception")
-    with
-    | :? 'T as error -> error
+open TestHelpers
 
 let rootLock = new ReaderWriterLockSlim(LockRecursionPolicy.NoRecursion)
 let mutable elapsedMs = 0.0

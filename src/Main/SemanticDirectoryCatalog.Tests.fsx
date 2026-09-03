@@ -1,10 +1,10 @@
+#load "../TestHelpers.fsx"
 #load "SemanticDirectoryCatalog.fs"
 
 open Main.SemanticDirectoryCatalog
+open TestHelpers
 
-let private assertEqual expected actual message =
-    if expected <> actual then
-        failwithf "%s. Expected: %A; Actual: %A" message expected actual
+let private assertEqual expected actual message = equal expected actual message
 
 assertEqual
     (Some "common/technologies")

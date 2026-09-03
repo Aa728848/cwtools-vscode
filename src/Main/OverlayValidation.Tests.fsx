@@ -1,11 +1,12 @@
+#load "../TestHelpers.fsx"
 #load "OverlayValidation.fs"
 
 open System
 open System.IO
 open Main.OverlayValidation
+open TestHelpers
 
-let assertEqual name expected actual =
-    if expected <> actual then failwithf "%s: expected %A, got %A" name expected actual
+let assertEqual name expected actual = assertEqualNamed name expected actual
 
 assertEqual "accept" [| Accept; Accept |] (admit [| "a.txt", 1; "b.txt", 2 |])
 assertEqual "duplicate" [| Accept; Duplicate |] (admit [| "a.txt", 1; "a.txt", 1 |])
@@ -51,6 +52,6 @@ try
     if OperatingSystem.IsWindows() then
         assertEqual "device UNC normalization" @"\\server\share\file.txt" (normalizeResolvedPath @"\\?\UNC\server\share\file.txt")
 finally
-    try Directory.Delete(tempRoot, true) with _ -> ()
+    cleanupTempDir tempRoot
 
 printfn "Overlay validation regression tests passed"

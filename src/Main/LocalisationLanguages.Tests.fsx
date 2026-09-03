@@ -7,15 +7,15 @@
 #r "../../artifacts/bin/Main/debug/FSharp.Data.DesignTime.dll"
 #r "../../artifacts/bin/Main/debug/FSharp.Data.dll"
 
+#load "../TestHelpers.fsx"
+
 open System
 open CWTools.Common
 open Main.Lang.GameLoader
+open TestHelpers
 
-let private assertEqual name expected actual =
-    if expected <> actual then failwith $"{name}: expected {expected} but got {actual}"
-
-let private assertTrue name condition =
-    if not condition then failwith $"{name}: expected true"
+let private assertEqual name expected actual = assertEqualNamed name expected actual
+let private assertTrue name condition = checkNamed name condition
 
 let langTag = function
     | Lang.STL l -> $"STL.{l}"

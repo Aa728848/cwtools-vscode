@@ -23,6 +23,7 @@
         "test:unit": "npx ts-mocha -p tsconfig.json \"client/test/unit/**/*.test.ts\" && npm run test:rules-sync",
         "test:rules-sync": "ts-mocha -p tools/rules-sync/tsconfig.test.json \"tools/rules-sync/**/*.test.ts\"",
         "test:coverage": "c8 npm run test:unit",
+        "test:fsx": "node tools/run-all-fsx-tests.cjs",
         "typecheck:test": "tsc -p tsconfig.json --noEmit",
         "baseline:ai-context": "node tools/perf/ai-context-baseline.mjs",
         "lint": "eslint client/",

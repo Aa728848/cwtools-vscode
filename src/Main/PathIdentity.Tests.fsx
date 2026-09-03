@@ -1,14 +1,9 @@
+#load "../TestHelpers.fsx"
 #load "PathIdentity.fs"
 
 open System
 open PathIdentity
-
-let equal expected actual message =
-    if expected <> actual then failwithf "%s. Expected %A, got %A" message expected actual
-
-let throws<'T when 'T :> exn> action message =
-    try action (); failwith (message + ": no exception")
-    with :? 'T -> ()
+open TestHelpers
 
 // Windows alone folds slash direction and case; it does not perform cleanup.
 equal "C:/MOD/FILE.TXT" (normalizeFor Windows @"c:\Mod/file.txt") "Windows identity"

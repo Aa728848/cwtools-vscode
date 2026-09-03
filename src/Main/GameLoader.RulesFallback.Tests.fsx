@@ -2,11 +2,14 @@
 #r "../../artifacts/bin/Main/debug/CWTools Server.dll"
 #r "../../artifacts/bin/Main/debug/LibGit2Sharp.dll"
 
+#load "../TestHelpers.fsx"
+
 open System
 open System.IO
 open System.IO.Compression
 open LibGit2Sharp
 open Main.Lang.GameLoader
+open TestHelpers
 
 let root = Path.Combine(Path.GetTempPath(), $"cwtools-rules-fallback-{Guid.NewGuid():N}")
 let cache = Path.Combine(root, "cache")
@@ -121,5 +124,6 @@ try
     if not missingResources.IsEmpty || not missingFiles.IsEmpty then
         failwith "A missing vanilla cache should fall back to empty cached resources and files."
 finally
-    if Directory.Exists(root) then
-        Directory.Delete(root, true)
+    cleanupTempDir root
+
+printfn "GameLoader rules fallback regression tests passed"

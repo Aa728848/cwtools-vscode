@@ -1,8 +1,10 @@
+#load "../TestHelpers.fsx"
 #load "DiagnosticInvalidation.fs"
 
 open CWTools.Main.DiagnosticInvalidation
+open TestHelpers
 
-let check name condition = if not condition then failwithf "FAILED: %s" name
+let check = checkNamed
 let acknowledge domain path state =
     match tryAdmit domain path state with
     | Some token -> complete true token state

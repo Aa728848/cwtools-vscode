@@ -7,14 +7,15 @@
 #r "../../artifacts/bin/Main/debug/FSharp.Data.DesignTime.dll"
 #r "../../artifacts/bin/Main/debug/FSharp.Data.dll"
 
+#load "../TestHelpers.fsx"
+
 open CWTools.Games
 open CWTools.Localisation
 open CWTools.Utilities.Position
 open Main.Lang.LanguageServerFeatures
+open TestHelpers
 
-let private assertEqual name expected actual =
-    if expected <> actual then
-        failwith $"{name}: expected {expected}, got {actual}"
+let private assertEqual name expected actual = assertEqualNamed name expected actual
 
 let private assertContains name (needle: string) (actual: string) =
     if not (actual.Contains needle) then

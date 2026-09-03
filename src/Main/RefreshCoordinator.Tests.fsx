@@ -1,17 +1,14 @@
+#load "../TestHelpers.fsx"
 #load "RefreshCoordinator.fs"
 
 open System
 open System.Collections.Concurrent
 open System.Threading.Tasks
 open RefreshCoordinator
+open TestHelpers
 
-let check condition message = if not condition then failwith message
-let equal expected actual message = if expected <> actual then failwithf "%s. Expected %A, got %A" message expected actual
 let run = function Run ticket -> ticket | Idle -> failwith "Expected Run"
 let idle = function Idle -> () | Run _ -> failwith "Expected Idle"
-let throws<'T when 'T :> exn> action message =
-    try action (); failwith (message + ": no exception")
-    with :? 'T -> ()
 
 // N+1 survives completion of N, and mixed identities keep exact snapshots.
 let coordinator = Coordinator<string>()

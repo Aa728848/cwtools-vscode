@@ -5,10 +5,12 @@
 #r "../../artifacts/bin/Main/debug/FSharp.Data.DesignTime.dll"
 #r "../../artifacts/bin/Main/debug/FSharp.Data.dll"
 
-open Main.SemanticGraph
+#load "../TestHelpers.fsx"
 
-let private assertTrue name condition =
-    if not condition then failwith name
+open Main.SemanticGraph
+open TestHelpers
+
+let private assertTrue name condition = checkNamed name condition
 
 let content = """sample = {
     modifier = { factor = 1 trigger = { has_country_flag = alpha } }

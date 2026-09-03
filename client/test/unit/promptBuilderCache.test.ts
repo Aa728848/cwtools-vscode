@@ -1,8 +1,9 @@
 import { expect } from 'chai';
 import * as fs from 'fs';
+import * as os from 'os';
 import * as path from 'path';
 
-const TEMP_BASE = path.resolve(__dirname, '../../..', '.tmp-test');
+const TEMP_BASE = path.join(os.tmpdir(), 'cwtools-prompt-cache');
 
 let stubFlags: Record<string, boolean> = {};
 let stubEditorLanguageId: string | undefined;

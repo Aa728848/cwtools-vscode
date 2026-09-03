@@ -12,10 +12,11 @@
 import { expect } from 'chai';
 import sinon from 'sinon';
 import * as fs from 'fs';
+import * as os from 'os';
 import * as path from 'path';
 import { PARADOX_WRITE } from './schedulingFixtures';
 
-const TEMP_BASE = path.resolve(__dirname, '../../..', '.tmp-test');
+const TEMP_BASE = path.join(os.tmpdir(), 'cwtools-evidence-gate');
 
 function makeWorkspace(): string {
     fs.mkdirSync(TEMP_BASE, { recursive: true });

@@ -11,7 +11,7 @@ import {
 } from '../../extension/ai/projectProfile';
 
 describe('ProjectProfile localisation detection', () => {
-    const tempBase = path.resolve(__dirname, '../../..', '.tmp-test-profile');
+    const tempBase = path.join(os.tmpdir(), 'cwtools-project-profile');
 
     function makeWorkspace(): string {
         fs.mkdirSync(tempBase, { recursive: true });

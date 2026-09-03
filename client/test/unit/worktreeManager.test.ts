@@ -5,7 +5,7 @@ import * as path from 'path';
 import { execFileSync } from 'child_process';
 import { WorktreeManager } from '../../extension/ai/orchestrator/worktreeManager';
 
-const TEMP_BASE = path.resolve(__dirname, '../../..', '.tmp-test');
+const TEMP_BASE = path.join(os.tmpdir(), 'cwtools-worktree-manager');
 
 function gitAvailable(): boolean {
     try {

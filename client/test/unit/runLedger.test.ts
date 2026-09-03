@@ -1,5 +1,6 @@
 import { expect } from 'chai';
 import * as fs from 'fs';
+import * as os from 'os';
 import * as path from 'path';
 import { executionModeForSchedulingState, schedulingStateFromAdmission } from '../../extension/ai/runner/scheduling';
 
@@ -16,7 +17,7 @@ const GENERAL_PARALLEL = schedulingStateFromAdmission({
     explicitDelegation: true, confidence: 1, evidence: ['test'],
 });
 
-const TEMP_BASE = path.resolve(__dirname, '../../..', '.tmp-test');
+const TEMP_BASE = path.join(os.tmpdir(), 'cwtools-run-ledger');
 
 describe('RunLedger Unit Tests', () => {
     let workspaceRoot: string;

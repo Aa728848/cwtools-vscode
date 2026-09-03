@@ -1,5 +1,6 @@
 import { expect } from 'chai';
 import * as fs from 'fs';
+import * as os from 'os';
 import * as path from 'path';
 import { EvidenceGate, type GateRuleInfo } from '../../extension/ai/evidence/evidenceGate';
 import type { EvidenceGatePhase } from '../../extension/ai/evidence/evidenceTypes';
@@ -24,7 +25,7 @@ interface GoldenCase {
 }
 
 describe('Paradox semantic reliability golden benchmark', () => {
-    const tempBase = path.resolve(__dirname, '../../..', '.tmp-test');
+    const tempBase = path.join(os.tmpdir(), 'cwtools-golden-benchmark');
     let workspaceRoot: string;
 
     beforeEach(() => {

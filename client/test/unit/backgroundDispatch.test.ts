@@ -1,5 +1,6 @@
 import { expect } from 'chai';
 import * as fs from 'fs';
+import * as os from 'os';
 import * as path from 'path';
 
 /**
@@ -70,7 +71,7 @@ function loadModules() {
 const { agentTools, store, workspace, engine, orchestrator, registry } = loadModules();
 const { AgentToolExecutor } = agentTools;
 const { BackgroundOrchestratorRegistry } = registry;
-const TEMP_BASE = path.resolve(__dirname, '../../..', '.tmp-test');
+const TEMP_BASE = path.join(os.tmpdir(), 'cwtools-bg-dispatch');
 
 function successfulResult() {
     return {

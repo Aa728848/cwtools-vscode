@@ -1,5 +1,6 @@
 import { expect } from 'chai';
 import * as fs from 'fs';
+import * as os from 'os';
 import * as path from 'path';
 import { GENERAL_PARALLEL, PARADOX_PARALLEL } from './schedulingFixtures';
 
@@ -70,7 +71,7 @@ function loadModules() {
 
 const { agentTools, store, workspace, engine, registry } = loadModules();
 const { AgentToolExecutor } = agentTools;
-const TEMP_BASE = path.resolve(__dirname, '../../..', '.tmp-test');
+const TEMP_BASE = path.join(os.tmpdir(), 'cwtools-dispatch-resume');
 
 describe('dispatch_agents resume/append/clarification', () => {
     let workspaceRoot: string;

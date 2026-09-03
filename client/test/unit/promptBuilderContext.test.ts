@@ -1,5 +1,6 @@
 import { expect } from 'chai';
 import * as fs from 'fs';
+import * as os from 'os';
 import * as path from 'path';
 
 const vscodeStub = {
@@ -41,7 +42,7 @@ function withoutRepositoryInstructions(prompt: string): string {
 }
 
 describe('PromptBuilder context budgeting', () => {
-    const tempBase = path.resolve(__dirname, '../../..', '.tmp-test');
+    const tempBase = path.join(os.tmpdir(), 'cwtools-prompt-context');
 
     function makeWorkspace(): string {
         fs.mkdirSync(tempBase, { recursive: true });

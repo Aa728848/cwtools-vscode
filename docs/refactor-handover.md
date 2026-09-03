@@ -24,7 +24,7 @@ description: 代码库精简改进交接文档：冗余清理、重复类型合�
 | 二 死代码 | ✅ 完成（决策点 A 取保守项：policyEngine 维持越界硬拒） | `295b285b` |
 | 三 类型合并 | ✅ 代码完成；⚠️ **子模块 `1bec582` 未推送、npm 未发布** | `7a6c5adc` + 子模块 `1bec582` |
 | 四 安全层收敛 | ✅ **全部完成（4.1 ~ 4.8 均已闭环落地）** | `8cb02b3e`、`b2101cd8`、`533df5aa`、`92c8fb15` |
-| 五 测试治理 | ✅ 5.1/5.2/5.4；⬜ 5.3；5.5 可选 | `75f52f09`、`5204744a`、`0811f3ec`、`908ebe0c`、`952e8b01` |
+| 五 测试治理 | ✅ **全部完成（5.1/5.2/5.3/5.4 均已落地）**；5.5 可选 | `75f52f09`、`5204744a`、`0811f3ec`、`908ebe0c`、`952e8b01`、`bf3043be` |
 | 六 大重构 | 按计划未启动 | — |
 
 验证基线：compile / typecheck:test / test:unit（2314 通过）/ `npm test`（Extension Host 19 用例离线集成）全部绿灯通过。
@@ -129,10 +129,10 @@ description: 代码库精简改进交接文档：冗余清理、重复类型合�
 
 | # | 任务 | 位置与证据 |
 |---|---|---|
-| 5.1 | 拆 `client/test/unit/agentToolSafety.test.ts`（3,570 行） | 名不副实的"厨房水槽"：内含 fileTools、externalTools、agentTools、agentRunner、lspTools、HeadTailTextBuffer、sprite 候选契约、topic artifacts、进度/中止等 7 个不相关 describe。按被测模块归位，并与 policy 簇其余 14 个文件（共 5,901 行测同一条策略链）去重 |
-| 5.2 | 测试临时目录改用 `os.tmpdir()` | `evidenceGate.test.ts:18`、`runLedger.test.ts:19` 的 `TEMP_BASE` 目前在仓库内建 `.tmp-test/`，进程被杀就残留（现有残留即此因）。正确示例：`aiServiceTimeout.test.ts` 已用 `os.tmpdir()` |
-| 5.3 | 审视 runner 状态/resume 测试簇 | 7 个文件 2,165 行（agentRunnerState/agentResumeState/resumeStateV4/dispatchResume/reducers/runLedger/agentRunnerToolRepair）围绕同一 reducer/ledger 模块组，合并重复基建 |
-| 5.4 | 夹具瘦身 | `client/test/sample/` 里 1.7M 的 `faction_room.dds` 和 6 份 32K 同构本地化 yml；确认测试实际需要的分辨率/语言数后裁剪 |
+| 5.1 | ✅ 拆 `client/test/unit/agentToolSafety.test.ts` | 拆分归位并与 policy 测试去重（Commit `75f52f09`） |
+| 5.2 | ✅ 测试临时目录改用 `os.tmpdir()` | 11 个测试文件统一使用 `os.tmpdir()`，清零 `.tmp-test/`（Commit `0811f3ec`） |
+| 5.3 | ✅ 审视 runner 状态/resume 测试簇 | 提取共享 `runnerTestFixtures.ts`，合并消除 `agentResumeState` / `agentRunnerToolRepair` 两个微文件，消减测试脚手架重复（Commit `bf3043be`） |
+| 5.4 | ✅ 夹具瘦身 | `client/test/sample/faction_room.dds` 1.7M → 1KB stub（Commit `908ebe0c`） |
 | 5.5 | （可选，改动大）5 套 vscode-test 配置合并 | cwt/cwt-game/shader 三套可考虑并为一个多 suite 配置；`test:overlay-e2e` 每次全量 `dotnet publish --self-contained`（数百 MB），考虑产物缓存 |
 
 **测试总量不动**：测试/源码比 39% 合理，AGENTS.md "修 bug 加回归测试"策略不变。本阶段只治重复覆盖和超大单体文件。

@@ -30,7 +30,7 @@ export default [
                 tsconfig: ".config/tsconfig.webview.json",
                 clean: true,
                 tsconfigOverride: {
-                    exclude: ["client/test/**/*", "**/*.test.ts", "client/extension/**", "client/common/**"]
+                    exclude: ["client/test/**/*", "**/*.test.ts", "client/extension/**"]
                 }
             }),
             copyFile('client/webview/guiPreview.css', 'release/bin/client/webview/guiPreview.css'),
@@ -50,7 +50,7 @@ export default [
                 tsconfig: ".config/tsconfig.webview-solar.json",
                 clean: true,
                 tsconfigOverride: {
-                    exclude: ["client/test/**/*", "**/*.test.ts", "client/extension/**", "client/common/**"]
+                    exclude: ["client/test/**/*", "**/*.test.ts", "client/extension/**"]
                 }
             }),
             copyFile('client/webview/solarSystemPreview.css', 'release/bin/client/webview/solarSystemPreview.css'),
@@ -70,7 +70,7 @@ export default [
                 tsconfig: ".config/tsconfig.webview-galaxy.json",
                 clean: true,
                 tsconfigOverride: {
-                    exclude: ["client/test/**/*", "**/*.test.ts", "client/extension/**", "client/common/**"]
+                    exclude: ["client/test/**/*", "**/*.test.ts", "client/extension/**"]
                 }
             }),
             copyFile('client/webview/staticGalaxyPreview.css', 'release/bin/client/webview/staticGalaxyPreview.css'),
@@ -90,7 +90,7 @@ export default [
                 tsconfig: ".config/tsconfig.webview-chat.json",
                 clean: true,
                 tsconfigOverride: {
-                    exclude: ["client/test/**/*", "**/*.test.ts", "client/extension/**", "client/common/**"]
+                    exclude: ["client/test/**/*", "**/*.test.ts", "client/extension/**"]
                 }
             }),
             copyFile('client/webview/chatPanel.css', 'release/bin/client/webview/chatPanel.css'),
@@ -111,7 +111,7 @@ export default [
                 tsconfig: ".config/tsconfig.webview-chat.json",
                 clean: true,
                 tsconfigOverride: {
-                    exclude: ["client/test/**/*", "**/*.test.ts", "client/extension/**", "client/common/**"]
+                    exclude: ["client/test/**/*", "**/*.test.ts", "client/extension/**"]
                 }
             }),
             copyFile('client/webview/agentManager.css', 'release/bin/client/webview/agentManager.css'),
@@ -133,7 +133,7 @@ export default [
                 tsconfig: ".config/tsconfig.webview-event.json",
                 clean: true,
                 tsconfigOverride: {
-                    exclude: ["client/test/**/*", "**/*.test.ts", "client/extension/**", "client/common/**"]
+                    exclude: ["client/test/**/*", "**/*.test.ts", "client/extension/**"]
                 }
             }),
             copyFile('client/webview/eventChainPreview.css', 'release/bin/client/webview/eventChainPreview.css'),
@@ -155,7 +155,7 @@ export default [
                 tsconfig: ".config/tsconfig.webview-tech.json",
                 clean: true,
                 tsconfigOverride: {
-                    exclude: ["client/test/**/*", "**/*.test.ts", "client/extension/**", "client/common/**"]
+                    exclude: ["client/test/**/*", "**/*.test.ts", "client/extension/**"]
                 }
             }),
             copyFile('client/webview/techTreePreview.css', 'release/bin/client/webview/techTreePreview.css'),
@@ -177,7 +177,7 @@ export default [
                 tsconfig: ".config/tsconfig.webview-entity.json",
                 clean: true,
                 tsconfigOverride: {
-                    exclude: ["client/test/**/*", "**/*.test.ts", "client/extension/**", "client/common/**"]
+                    exclude: ["client/test/**/*", "**/*.test.ts", "client/extension/**"]
                 }
             }),
             copyFile('client/webview/entityPreview.css', 'release/bin/client/webview/entityPreview.css'),
@@ -199,7 +199,7 @@ export default [
                 tsconfig: ".config/tsconfig.webview-particle.json",
                 clean: true,
                 tsconfigOverride: {
-                    exclude: ["client/test/**/*", "**/*.test.ts", "client/extension/**", "client/common/**"]
+                    exclude: ["client/test/**/*", "**/*.test.ts", "client/extension/**"]
                 }
             }),
             copyFile('client/webview/particlePreview.css', 'release/bin/client/webview/particlePreview.css'),
@@ -219,7 +219,7 @@ export default [
                 tsconfig: ".config/tsconfig.webview-worker.json",
                 clean: true,
                 tsconfigOverride: {
-                    exclude: ["client/test/**/*", "**/*.test.ts", "client/extension/**", "client/common/**"]
+                    exclude: ["client/test/**/*", "**/*.test.ts", "client/extension/**"]
                 }
             }),
         ],

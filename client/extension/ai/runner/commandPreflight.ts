@@ -1,4 +1,5 @@
 import { aiText } from '../messages';
+import { commandMatchesPrefix, normalizeExecutableName } from './policyEngine';
 
 export type CommandPolicyDecision = 'allow' | 'prompt' | 'forbidden';
 
@@ -107,18 +108,11 @@ const DECISION_SEVERITY: Record<CommandPolicyDecision, number> = {
 };
 
 function executableName(raw: string): string {
-    const base = raw.replace(/^.*[\\/]/, '').toLowerCase();
-    return base.replace(/\.(?:exe|cmd|bat|com)$/i, '');
+    return normalizeExecutableName(raw);
 }
 
 function isPrefixMatch(words: string[], prefix: string[]): boolean {
-    return prefix.length > 0
-        && words.length >= prefix.length
-        && prefix.every((part, index) => {
-            const actual = index === 0 ? executableName(words[index]!) : words[index]!.toLowerCase();
-            const expected = index === 0 ? executableName(part) : part.toLowerCase();
-            return actual === expected;
-        });
+    return prefix.length > 0 && commandMatchesPrefix(words, prefix);
 }
 
 function samePrefix(a: string[], b: string[]): boolean {

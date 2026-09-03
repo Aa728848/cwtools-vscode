@@ -55,6 +55,7 @@ import { BUILTIN_PROVIDERS } from './providers/models/defaults';
 import { runAgentHooks } from './runner/hookRunner';
 import { getAgentToolTargetFiles } from './runner/toolScheduler';
 import { buildProfile, resolvePolicy, subjectForEffect, type PolicyPresetId, type PolicyRule } from './runner/policyEngine';
+import { evaluateEffectiveToolPolicy } from './runner/effectiveToolPolicy';
 import { preflightCommand, type ConfiguredCommandPolicyRule } from './runner/commandPreflight';
 import { sessionFileWriteMode, sessionPolicyPreset } from './runner/sessionPermissions';
 import type { ApiKeyManager } from './aiService';
@@ -3474,8 +3475,7 @@ export class AgentToolExecutor {
     ): Promise<import('./types').ToolDefinition[]> {
         const cfg = vs.workspace.getConfiguration('stellarisLanguageServices.ai');
         if (cfg.get<boolean>('mcp.registerDynamicTools', false) !== true) return [];
-        const { isToolAllowedForMode } = require('./tools/permissions') as typeof import('./tools/permissions');
-        if (!isToolAllowedForMode('mcp_call', mode, domain)) return [];
+        if (!evaluateEffectiveToolPolicy('mcp_call', { mode, domain }).allowed) return [];
 
         const runtimeDomain = domain;
         if (this.dynamicMcpToolCache

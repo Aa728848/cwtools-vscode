@@ -10,12 +10,6 @@ import type { AgentRuntimeDomain } from '../types';
 import { evaluateEffectiveToolPolicy } from '../runner/effectiveToolPolicy';
 import { agentProfileCatalog } from '../runner/agentProfileCatalog';
 
-/**
- * Check if a tool is allowed under the current Agent operation mode.
- */
-export function isToolAllowedForMode(toolName: string, mode: AgentMode, domain: AgentRuntimeDomain): boolean {
-    return evaluateEffectiveToolPolicy(toolName, { mode, domain }).allowed;
-}
 
 /**
  * Check if a tool is marked as a write (mutating) operation.

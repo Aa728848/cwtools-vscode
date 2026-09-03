@@ -172,12 +172,21 @@ function matchTargetPaths(glob: string, d: PolicyCallDescriptor): PathMatch {
     return hits === targets.length ? 'all' : hits > 0 ? 'some' : 'none';
 }
 
+export function normalizeExecutableName(raw: string): string {
+    const base = raw.replace(/^.*[\\/]/, '').toLowerCase();
+    return base.replace(/\.(?:exe|cmd|bat|com)$/i, '');
+}
+
 export function commandMatchesPrefix(tokensOrCommand: readonly string[] | string, prefix: readonly string[]): boolean {
     if (!prefix || prefix.length === 0) return true;
     const tokens = typeof tokensOrCommand === 'string' ? tokenizeCommand(tokensOrCommand) : tokensOrCommand;
     if (tokens.length < prefix.length) return false;
     for (let i = 0; i < prefix.length; i++) {
-        if (!commandTokenEquals(tokens[i]!, prefix[i]!)) return false;
+        if (i === 0) {
+            if (normalizeExecutableName(tokens[0]!) !== normalizeExecutableName(prefix[0]!)) return false;
+        } else {
+            if (!commandTokenEquals(tokens[i]!, prefix[i]!)) return false;
+        }
     }
     return true;
 }

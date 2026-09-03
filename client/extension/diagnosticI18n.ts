@@ -522,9 +522,9 @@ export function diagnosticMatchesIgnoredKey(
 
 /**
  * CW codes the F# server classifies as localisation diagnostics. Mirror of
- * `localisationDiagnosticCodes` in src/Main/Program.fs — keep the two in sync.
+ * `localisationDiagnosticCodes` in src/Main/DiagnosticMerge.fs — keep the two in sync.
  */
-const LOCALISATION_CODES = new Set([
+export const LOCALISATION_CODES = new Set([
     'CW100', 'CW225', 'CW226', 'CW234', 'CW254', 'CW255',
     'CW256', 'CW257', 'CW258', 'CW259', 'CW260', 'CW266',
     'CW268', 'CW275',

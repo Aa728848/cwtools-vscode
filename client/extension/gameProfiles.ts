@@ -525,7 +525,7 @@ export function getCacheSettingKey(languageId: string): string {
 	return profile.cacheSettingKey.replace('stellarisLanguageServices.', '');
 }
 
-const VANILLA_CACHE_FILE_NAMES: Readonly<Record<string, string>> = {
+export const VANILLA_CACHE_FILE_NAMES: Readonly<Record<string, string>> = {
 	stellaris: 'stl.cwb',
 	hoi4: 'hoi4.cwb',
 	eu4: 'eu4.cwb',

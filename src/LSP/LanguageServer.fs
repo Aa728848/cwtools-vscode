@@ -496,48 +496,7 @@ let connect (serverFactory: ILanguageClient -> ILanguageServer, receive: BinaryR
         // ExecuteCommand: split into read-only (query/info) and write (etc.)
         | ExecuteCommand(p) ->
             let isReadCmd =
-                match p.command with
-                | "cwtools.ai.getScopeAtPosition"
-                | "cwtools.ai.getCompletionContext"
-                | "cwtools.findTypeReferences"
-                | "cwtools.ai.queryTypes"
-                | "cwtools.ai.queryDefinition"
-                | "cwtools.ai.queryDefinitionByName"
-                | "cwtools.ai.exploreProject"
-                | "cwtools.ai.exploreInlineGraph"
-                | "cwtools.ai.analyzePdxFlow"
-                | "cwtools.ai.queryLocalisationAudit"
-                | "cwtools.ai.compareDefinitionWithVanilla"
-                | "cwtools.ai.queryProjectKnowledgeDb"
-                | "cwtools.ai.getSemanticCatalog"
-                | "cwtools.ai.validateOverlay"
-                | "cwtools.ai.queryScriptedEffects"
-                | "cwtools.ai.queryScriptedTriggers"
-                | "cwtools.ai.queryEnums"
-                | "cwtools.ai.getEntityInfo"
-                | "cwtools.ai.queryStaticModifiers"
-                | "cwtools.ai.queryVariables"
-                | "cwtools.ai.queryOverrideModes"
-                | "cwtools.ai.getDiagnosticsFresh"
-                | "cwtools.ai.getAllDiagnostics"
-                | "cwtools.ai.waitDiagnosticsFresh"
-                | "cwtools.ai.getValidationStatus"
-                | "cwtools.ai.revalidateFiles"
-                | "cwtools.ai.parseFragment"
-                | "cwtools.ai.shader.symbols"
-                | "cwtools.ai.shader.compileUnit"
-                | "cwtools.ai.shader.variants"
-                | "cwtools.ai.shader.callers"
-                | "cwtools.ai.shader.reachability"
-                | "cwtools.ai.shader.validate"
-                | "cwtools.ai.shader.preflightEdit"
-                | "cwtools.ai.shader.compareVanilla"
-                | "cwtools.exportTypes"
-                | "typeGraphInfo"
-                | "getFileTypes"
-                | "getDataForFile"
-                | "getTypesForFile"  -> true
-                | "cwtools.ai.exportProjectKnowledge" ->
+                if p.command = "cwtools.ai.exportProjectKnowledge" then
                     p.arguments
                     |> List.tryHead
                     |> Option.bind (function
@@ -551,7 +510,8 @@ let connect (serverFactory: ILanguageClient -> ILanguageServer, receive: BinaryR
                                 else None)
                         | _ -> None)
                     |> Option.exists (fun mode -> mode = "incremental")
-                | _                  -> false
+                else
+                    Commands.isReadOnly p.command
             server.ExecuteCommand p |> thenMap (serializeExecuteCommandResponseOption >> Option.defaultValue "null" >> ResponsePayload), isReadCmd
 
 

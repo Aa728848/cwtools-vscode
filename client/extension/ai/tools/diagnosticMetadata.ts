@@ -1,5 +1,6 @@
 import * as vs from 'vscode';
 import type { DiagnosticAnalysisCategory } from '../types';
+import { DIAGNOSTIC_ANALYSIS_CATEGORIES } from '../types';
 import { diagnosticCodeString } from '../../diagnosticI18n';
 
 export interface DiagnosticMetadata {
@@ -15,22 +16,7 @@ export interface DiagnosticMetadata {
 }
 
 export function isDiagnosticCategory(value: unknown): value is DiagnosticAnalysisCategory {
-    return typeof value === 'string' && [
-        'stale_lsp_cache',
-        'missing_localisation',
-        'unknown_sprite',
-        'unknown_sound',
-        'scope_mismatch',
-        'unknown_trigger_effect',
-        'brace_or_syntax_error',
-        'invalid_value_type',
-        'missing_definition',
-        'duplicate_definition',
-        'read_tracker_stale',
-        'tool_argument_error',
-        'lsp_no_feedback',
-        'unknown',
-    ].includes(value);
+    return typeof value === 'string' && (DIAGNOSTIC_ANALYSIS_CATEGORIES as readonly string[]).includes(value);
 }
 
 function firstCapture(message: string, patterns: RegExp[]): string | undefined {

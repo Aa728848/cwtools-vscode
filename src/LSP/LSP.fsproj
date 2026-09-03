@@ -13,6 +13,7 @@
     <Compile Include="PathIdentity.fs" />
     <Compile Include="DocumentStore.fs" />
     <Compile Include="Locking.fs" />
+    <Compile Include="Commands.fs" />
     <Compile Include="LanguageServer.fs" />
   </ItemGroup>
   <ItemGroup>

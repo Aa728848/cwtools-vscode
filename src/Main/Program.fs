@@ -7206,55 +7206,7 @@ type Server(client: ILanguageClient) =
                             documentSymbolProvider = true
                             workspaceSymbolProvider = true
                             executeCommandProvider =
-                                Some
-                                    { commands =
-                                        [ "pretriggerThisFile"
-                                          "pretriggerAllFiles"
-                                          "genlocfile"
-                                          "genlocall"
-                                          "debugrules"
-                                          "outputerrors"
-                                          "reloadrulesconfig"
-                                          "cacheVanilla"
-                                          "listAllFiles"
-                                          "listAllLocFiles"
-                                          "gettech"
-                                          "getGraphData"
-                                          "exportTypes"
-                                          "cwtools.findTypeReferences"
-                                          // A2 Fix: declare ALL implemented AI commands so
-                                          // strict LSP clients don't reject them.
-                                          "cwtools.ai.getScopeAtPosition"
-                                          "cwtools.ai.getCompletionContext"
-                                          "cwtools.ai.queryTypes"
-                                          "cwtools.ai.queryDefinition"
-                                          "cwtools.ai.queryDefinitionByName"
-                                          "cwtools.ai.exploreProject"
-                                          "cwtools.ai.exportProjectKnowledge"
-                                          "cwtools.ai.queryProjectKnowledgeDb"
-                                          "cwtools.ai.getSemanticCatalog"
-                                          "cwtools.ai.validateOverlay"
-                                          "cwtools.ai.queryScriptedEffects"
-                                          "cwtools.ai.queryScriptedTriggers"
-                                          "cwtools.ai.queryEnums"
-                                          "cwtools.ai.getEntityInfo"
-                                          "cwtools.ai.queryStaticModifiers"
-                                          "cwtools.ai.queryVariables"
-                                          "cwtools.ai.queryOverrideModes"
-                                          "cwtools.ai.getDiagnosticsFresh"
-                                          "cwtools.ai.waitDiagnosticsFresh"
-                                          "cwtools.ai.getValidationStatus"
-                                          "cwtools.ai.parseFragment"
-                                          "cwtools.ai.shader.symbols"
-                                          "cwtools.ai.shader.compileUnit"
-                                          "cwtools.ai.shader.variants"
-                                          "cwtools.ai.shader.callers"
-                                          "cwtools.ai.shader.reachability"
-                                          "cwtools.ai.shader.validate"
-                                          "cwtools.ai.shader.preflightEdit"
-                                          "cwtools.ai.shader.compareVanilla"
-                                          "cwtools.exportTypes"
-                                          "getFileTypes" ] }
+                                Some { commands = LSP.Commands.allCommandNames }
                             inlayHintProvider = true
                             foldingRangeProvider = true
                             selectionRangeProvider = true

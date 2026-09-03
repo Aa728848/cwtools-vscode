@@ -492,9 +492,12 @@ export interface QueryTypesResult {
     instances: Array<{
         id: string;
         file: string;
+        line?: number;
+        vanilla?: boolean;
         subtypes?: string[];
     }>;
     totalCount: number;
+    ok?: boolean;
 }
 
 export interface QueryLocalisationIndexArgs {
@@ -1936,21 +1939,24 @@ export interface WriteDesignBlueprintResult {
     writtenFiles?: string[];
 }
 
-export type DiagnosticAnalysisCategory =
-    | 'stale_lsp_cache'
-    | 'missing_localisation'
-    | 'unknown_sprite'
-    | 'unknown_sound'
-    | 'scope_mismatch'
-    | 'unknown_trigger_effect'
-    | 'brace_or_syntax_error'
-    | 'invalid_value_type'
-    | 'missing_definition'
-    | 'duplicate_definition'
-    | 'read_tracker_stale'
-    | 'tool_argument_error'
-    | 'lsp_no_feedback'
-    | 'unknown';
+export const DIAGNOSTIC_ANALYSIS_CATEGORIES = [
+    'stale_lsp_cache',
+    'missing_localisation',
+    'unknown_sprite',
+    'unknown_sound',
+    'scope_mismatch',
+    'unknown_trigger_effect',
+    'brace_or_syntax_error',
+    'invalid_value_type',
+    'missing_definition',
+    'duplicate_definition',
+    'read_tracker_stale',
+    'tool_argument_error',
+    'lsp_no_feedback',
+    'unknown',
+] as const;
+
+export type DiagnosticAnalysisCategory = typeof DIAGNOSTIC_ANALYSIS_CATEGORIES[number];
 
 export interface AnalyzeDiagnosticErrorResult {
     success: boolean;
@@ -2003,10 +2009,20 @@ export interface DiagnosticEntry {
 export interface ValidationStatusSnapshot {
     ok?: boolean;
     epoch?: number;
+    modelEpoch?: {
+        game: number;
+        rules: number;
+        types: number;
+        localisation: number;
+    };
     freshness?: 'fresh' | 'pending' | 'stale';
     totalFiles?: number;
     pendingFiles?: number;
     pendingGlobalKinds?: string[];
+    pendingRefreshDomains?: string[];
+    modelReadyForKnowledgeExport?: boolean;
+    cwtReady?: boolean;
+    refreshCoordinatorRunning?: boolean;
     inProgress?: boolean;
     inProgressFile?: string;
     queueDepth?: number;

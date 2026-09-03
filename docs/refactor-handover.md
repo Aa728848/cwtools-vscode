@@ -16,6 +16,28 @@ description: 代码库精简改进交接文档：冗余清理、重复类型合�
 
 ---
 
+## 进度快照（2026-09-03 第二轮核查后更新）
+
+| 阶段 | 状态 | 关键 commit |
+|---|---|---|
+| 一 纯删除 | ✅ 完成 | `ffcb37aa`（另：.vscode-test 旧存档、根 packages/ 等均已清） |
+| 二 死代码 | ✅ 完成（决策点 A 取保守项：policyEngine 维持越界硬拒） | `295b285b` |
+| 三 类型合并 | ✅ 代码完成；⚠️ **子模块 `1bec582` 未推送、npm 未发布** | `7a6c5adc` + 子模块 `1bec582` |
+| 四 安全层收敛 | ✅ 4.1/4.2/4.4/4.5；⬜ 4.3/4.6/4.7/4.8 | `75a22297`、`30c99b31` |
+| 五 测试治理 | ✅ 5.1/5.2/5.4；⬜ 5.3；5.5 可选 | `75f52f09`、`5204744a`、`0811f3ec`、`908ebe0c`、`952e8b01` |
+| 六 大重构 | 按计划未启动 | — |
+
+验证基线：compile / typecheck:test / test:unit（2286 通过）全绿；`npm test` 集成套件需在网络可用时补跑一次（夹具已变更）。
+
+**剩余项重新评估（第二轮审查结论，执行前必读）**：
+
+- **4.6 需重新界定范围**：`lspTools.ts` 内部有 `path.resolve(workspaceRoot, …)`（:576、:808、:1272）但**没有沙箱包含判断**，读沙箱强制目前只来自 `agentTools.ts` 的 READ_PATH_ARGUMENTS 外层门。直接删外层门会给 LSP 读工具开越界洞。正确顺序：先给 lspTools 补工具侧 `resolveReadablePathInput` + `isPathInsideOrEqual` 包含判断，再删外层门。工作量大于原估。
+- **4.8 是产品决策不是纯技术任务**：6 个空层是为 `docs/agent-boundary-permissions-plan.md` 预留的。删层（简化）与接线（实现计划）二选一需所有者拍板；若删层，`policyEngine.test.ts` 约 300 行跨层竞赛/放宽机制测试需同步重写。
+- **4.3 / 4.7 行为可见**：涉及审批卡 UI（3 套 × 4 开关）与"记住选择"持久化（`checkpoint.ts:183/289`），必须单独立项，配 `npm test` 集成套件 + 手动审批冒烟。
+- **5.3 低风险**：纯测试基建整理（7 文件 2,165 行），随时可做，不阻塞收官。
+
+---
+
 ## 阶段一：纯删除（零风险，立省约 4.4 GB）
 
 全部为 git 未跟踪或 gitignored 内容，无源码依赖。
@@ -96,9 +118,9 @@ description: 代码库精简改进交接文档：冗余清理、重复类型合�
 | 4.3 | 双 learned-rule 库合一 | `PermissionPolicyStore`（`runner/permissionPolicy.ts`；唯一 addRule 在 `chatPanel.ts:3716`；只被 run_command 查询 `externalTools.ts:1128`）并入 policyEngine user 层（或反之）。注意 `checkpoint.ts:183/289` 有序列化/恢复逻辑。目标：写工具审批也能学习规则 |
 | 4.4 | 命令前缀匹配 3 份合 1 份 | `commandPreflight.ts:114`、`permissionPolicy.ts:199-213`、`policyEngine.ts:184-190` |
 | 4.5 | 静态能力门去重 | `evaluateEffectiveToolPolicy` 有 4 个调用点：`runnerPolicy.ts:206`（提示过滤）、`agentTools.ts:1859`（分发）、`tools/permissions.ts:16`（薄包装）、`agentProfileCatalog.ts:433`（薄包装）。合并两个薄包装 |
-| 4.6 | 读路径双查留一处 | 删 `agentTools.ts:1950` 的 READ_PATH_ARGUMENTS 门（只覆盖列表内工具，覆盖不全造成"已统一拦截"错觉），保留工具侧 `fileTools.ts:346 resolveAndAssertReadable` |
+| 4.6 | 读路径双查留一处（**已重新界定范围，见"进度快照"**） | 删 `agentTools.ts:1950` 的 READ_PATH_ARGUMENTS 门之前，必须先给 `lspTools.ts` 补工具侧路径解析 + 沙箱包含判断（其内部 `path.resolve` 点 :576/:808/:1272 均无 containment 检查），否则 LSP 读工具失去越界防护 |
 | 4.7 | 审批决策单源化 | 目前 3 套确认 UI（`agentTools.ts:1161` 共享审批卡、`fileTools.ts:388` confirmPendingWrite 5 处调用点、`externalTools.ts:1159` 富 preflight 卡；MCP 另有 `tools/permissions.ts:156`）× 4 个开关（fileWriteMode、sessionPermissionMode、policy preset、selfManaged 直通）决定是否弹卡。归并为一个"写审批决策函数" |
-| 4.8 | policyEngine 8 层决议砍到实际生效的 2 层 | `policyEngine.ts` 的 workspace/mode/workflow/role/task/approvals 6 层永远为空（唯一调用点 `agentTools.ts:1121` 从不传 extraLayers），是为从未接线的 `docs/agent-boundary-permissions-plan.md` 预留的。去掉 `pickWinner`（:244）跨层竞赛和 `LOOSEN_CAPABLE` 放宽表——或者反过来把计划接线做完，二选一，不留半成品 |
+| 4.8 | policyEngine 8 层决议砍到实际生效的 2 层（**需产品决策，见"进度快照"**） | `policyEngine.ts` 的 workspace/mode/workflow/role/task/approvals 6 层永远为空（唯一调用点 `agentTools.ts:1121` 从不传 extraLayers），是为从未接线的 `docs/agent-boundary-permissions-plan.md` 预留的。删层（去 `pickWinner`:244 竞赛和 `LOOSEN_CAPABLE`）vs 接线做完计划，二选一由所有者拍板；删层需同步重写 `policyEngine.test.ts` 约 300 行跨层竞赛测试 |
 
 **验证**：每步 `npm run compile && npm run test:unit`；4.2/4.7 涉及行为变化，补跑 `npm test`（Extension Host 套件）并手动走一次"写文件触发审批"的冒烟。
 

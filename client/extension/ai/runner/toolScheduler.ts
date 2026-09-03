@@ -205,7 +205,7 @@ export class ToolSchedulerV2 {
             return Promise.reject(this.getAbortReason(abortSignal));
         }
 
-        if (concurrencyClass === 'parallel' || concurrencyClass === 'per-file-write') {
+        if (concurrencyClass === 'parallel') {
             // No global rate limit, safe to invoke instantly
             return () => {};
         }

@@ -38,7 +38,6 @@
   "commands.listAllLocFiles.title": "调试：列出所有本地化文件",
   "commands.debugrules.title": "调试：列出所有配置规则",
   "commands.pretriggerAllFiles.title": "将所有触发器优化为预触发器",
-  "commands.startcustomgame.title": "为自定义游戏激活语言服务",
   "commands.showGraph.title": "显示图",
   "commands.graphFromJson.title": "从 JSON 重新创建图",
   "commands.exportTypes.title": "导出：所有类型",

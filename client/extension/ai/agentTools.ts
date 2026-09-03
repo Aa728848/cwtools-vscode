@@ -12,7 +12,6 @@ import * as vs from 'vscode';
 import * as nodeCrypto from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
-import { consumeCapabilityLease } from './runner/capabilityLease';
 import type { LanguageClient } from 'vscode-languageclient/node';
 import type {
     AnalyzeDiagnosticErrorResult,
@@ -1147,10 +1146,7 @@ export class AgentToolExecutor {
         if (decision.action === 'deny' && !decision.denial?.approvalPath) {
             return { allowed: false, error: decision.denial?.whyDenied ?? `Policy '${profile.id}' denied ${toolName}.` };
         }
-        const capabilityLease = consumeCapabilityLease(context?.runnerOptions?.capabilityLeases, {
-            tool: toolName, effect: entry.effect, targetPaths: targets, workspaceRoot: this.workspaceRoot,
-        });
-        if (decision.action === 'allow' || capabilityLease) return { allowed: true };
+        if (decision.action === 'allow') return { allowed: true };
         if (selfManaged) return { allowed: true };
         const requestPermission = context?.onPermissionRequest;
         if (!requestPermission) return { allowed: false, error: `Policy requires approval for ${toolName}, but no permission handler is available.` };

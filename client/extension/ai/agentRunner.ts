@@ -609,8 +609,6 @@ export interface AgentRunnerOptions {
     schedulingState: AgentSchedulingState;
     /** Isolated operating instructions supplied by the concrete scheduler profile. */
     agentProfileInstructions?: string;
-    /** Host-issued, bounded authority grants. They never bypass mode/domain/path guards. */
-    capabilityLeases?: import('./runner/capabilityLease').CapabilityLease[];
     /** Callback for real-time step updates (for UI) */
     onStep?: (step: AgentStep) => void;
     /** Called when an external runtime has allocated a durable run id. */
@@ -904,33 +902,61 @@ export class AgentRunner {
         const workspaceRoot = this.toolExecutor.workspaceRoot;
         const filePaths = getAgentToolTargetFiles(toolName, args, workspaceRoot, nestedContext?.runnerOptions?.topicId);
         const primaryFilePath = filePaths[0] ?? '';
-        const executeWithScheduler = async (): Promise<unknown> => {
-            const releaseScheduler = await toolScheduler.acquireLock(registryEntry.concurrencyClass, signal);
-            try {
-                return await this.executeToolPipeline(toolName, args, nestedContext);
-            } finally {
-                releaseScheduler();
-            }
-        };
         if (WRITE_TOOLS.has(toolName)) {
             if (onFileWrite && primaryFilePath) {
                 const prev = fs.existsSync(primaryFilePath) ? fs.readFileSync(primaryFilePath, 'utf8') : null;
                 onFileWrite(primaryFilePath, prev);
             }
-            const lockPaths = (filePaths.length > 0 ? filePaths : ['__global__'])
-                .map(p => p === '__global__' ? p : canonicalPathKey(p, workspaceRoot));
-            // Match direct calls: write queue first, then scheduler. Reversing
-            // that order can deadlock nested and sibling direct writes.
-            return await this.writeQueue.enqueue(
-                lockPaths,
-                executeWithScheduler,
-                {
-                    waitTimeoutMs: writeQueueWaitTimeoutMs,
-                    timeoutMessage: 'run_code call timed out waiting for the file write queue.',
-                },
+            return await this.enqueueWriteTool(
+                filePaths,
+                registryEntry.concurrencyClass,
+                signal,
+                writeQueueWaitTimeoutMs,
+                'run_code call timed out waiting for the file write queue.',
+                () => this.executeToolPipeline(toolName, args, nestedContext),
             );
         }
-        return await executeWithScheduler();
+        const releaseScheduler = await toolScheduler.acquireLock(registryEntry.concurrencyClass, signal);
+        try {
+            return await this.executeToolPipeline(toolName, args, nestedContext);
+        } finally {
+            releaseScheduler();
+        }
+    }
+
+    /**
+     * Common partitioned write-queue sequence for both direct runner tool execution
+     * and nested run_code guest execution. Write queue locks first, then concurrency
+     * permits are acquired if needed (skipping per-file-write noop).
+     */
+    private async enqueueWriteTool<T>(
+        filePaths: readonly string[],
+        concurrencyClass: import('./types').ToolConcurrencyClass,
+        signal: AbortSignal | undefined,
+        waitTimeoutMs: number | undefined,
+        timeoutMessage: string | undefined,
+        operation: () => Promise<T>,
+    ): Promise<T> {
+        const lockPaths = (filePaths.length > 0 ? filePaths : ['__global__'])
+            .map(p => p === '__global__' ? p : canonicalPathKey(p, this.toolExecutor.workspaceRoot));
+        return await this.writeQueue.enqueue(
+            lockPaths,
+            async () => {
+                const releaseLock = concurrencyClass !== 'per-file-write'
+                    ? await toolScheduler.acquireLock(concurrencyClass, signal)
+                    : () => {};
+                try {
+                    signal?.throwIfAborted();
+                    return await operation();
+                } finally {
+                    releaseLock();
+                }
+            },
+            {
+                waitTimeoutMs,
+                timeoutMessage,
+            },
+        );
     }
 
     private async executeToolPipeline(
@@ -3873,11 +3899,17 @@ export class AgentRunner {
                     let previousFileContent: string | null | undefined;
 
                     try {
-                        await this.writeQueue.enqueue(lockPaths, async () => {
-                                const releaseLock = await toolScheduler.acquireLock(ci.concurrencyClass, options?.abortSignal);
-                            try {
-                                options?.abortSignal?.throwIfAborted();
-                                await runLedger.appendEvent(runRecord.runId, 'tool_call_start', { toolName: ci.toolName }, { invocationId: ci.invocationId });
+                        const timeoutMessage = `Write queue wait timed out for ${toolName} (${(filePaths.length > 0 ? filePaths : ['__global__']).join(', ')}) after ${Math.round(waitTimeoutMs / 1000)}s. Another write or orchestration task is holding the file lock. Report this blocker to the parent agent instead of retrying in a loop.`;
+                        await this.enqueueWriteTool(
+                            filePaths,
+                            ci.concurrencyClass,
+                            options?.abortSignal,
+                            waitTimeoutMs,
+                            timeoutMessage,
+                            async () => {
+                                try {
+                                    options?.abortSignal?.throwIfAborted();
+                                    await runLedger.appendEvent(runRecord.runId, 'tool_call_start', { toolName: ci.toolName }, { invocationId: ci.invocationId });
                             
                             // Sub-agent snapshot isolate hook. Keep the same bounded
                             // before image locally so the durable file_change event can
@@ -4027,11 +4059,7 @@ export class AgentRunner {
                                         { invocationId: ci.invocationId }
                                     );
                                 }
-                                releaseLock();
                             }
-                        }, {
-                            waitTimeoutMs,
-                            timeoutMessage: `Write queue wait timed out for ${toolName} (${lockPaths.join(', ')}) after ${Math.round(waitTimeoutMs / 1000)}s. Another write or orchestration task is holding the file lock. Report this blocker to the parent agent instead of retrying in a loop.`,
                         });
                     } catch (e) {
                         toolResults[i] = {

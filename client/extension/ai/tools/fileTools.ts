@@ -83,7 +83,6 @@ export interface FileToolContext {
     onPendingWrite?: (file: string, newContent: string, messageId: string) => Promise<boolean>;
     onAutoWritten?: (file: string, isNewFile: boolean) => void;
     vfsOverlay?: Map<string, string>;
-    vfsLocks?: Map<string, Promise<void>>;
     /** Step callback for real-time UI events (Fallback, overwritten by AgentToolContext) */
     onStep?: (step: import('../types').AgentStep) => void;
     /** Optional: Get LSP LanguageClient for diagnostic freshness query */
@@ -223,25 +222,6 @@ export class FileToolHandler {
         }
     }
 
-    private async executeWithLock<T>(filePath: string, operation: () => Promise<T> | T): Promise<T> {
-        if (!this.ctx.vfsLocks) return operation();
-
-        // Canonical lock key: relative/absolute/case aliases of the same file
-        // share one lock instead of acquiring independent ones.
-        const lockKey = this.pathKey(filePath);
-        const prevLock = this.ctx.vfsLocks.get(lockKey) || Promise.resolve();
-        let release!: () => void;
-        const newLock = new Promise<void>(resolve => release = resolve);
-
-        this.ctx.vfsLocks.set(lockKey, prevLock.then(() => newLock));
-        await prevLock;
-
-        try {
-            return await operation();
-        } finally {
-            release();
-        }
-    }
 
     private abortError(signal?: AbortSignal): Error {
         const reason = signal?.reason;
@@ -354,36 +334,6 @@ export class FileToolHandler {
         throw new Error(`Access denied: Path '${filePath}' is outside the workspace and configured game directories.`);
     }
 
-    private async requestPermissionWithAbort(
-        id: string,
-        tool: string,
-        description: string,
-        context?: import('../types').AgentToolContext,
-        command?: string
-    ): Promise<boolean> {
-        const onPermissionRequest = context?.onPermissionRequest;
-        if (!onPermissionRequest) return false;
-
-        const abortSignal = context?.runnerOptions?.abortSignal;
-        if (abortSignal?.aborted) return false;
-        if (!abortSignal) {
-            return onPermissionRequest(id, tool, description, command, context);
-        }
-
-        let onAbort: (() => void) | undefined;
-        const abortDeny = new Promise<boolean>((resolve) => {
-            onAbort = () => resolve(false);
-            abortSignal.addEventListener('abort', onAbort, { once: true });
-        });
-        try {
-            return await Promise.race([
-                onPermissionRequest(id, tool, description, command, context),
-                abortDeny,
-            ]);
-        } finally {
-            if (onAbort) abortSignal.removeEventListener('abort', onAbort);
-        }
-    }
 
     private async confirmPendingWrite(
         filePath: string,
@@ -438,34 +388,7 @@ export class FileToolHandler {
             if (!resolution.isWithinAnyWorkspace) {
                 const topicArtifact = this.resolveCurrentTopicArtifact(filePath, context);
                 if (topicArtifact) return topicArtifact;
-
-                const sessionMode = getSessionPermissionMode(this.ctx.workspaceRoot);
-                const isAutoMode = sessionMode === 'auto' || sessionMode === 'auto_review' || (context as any)?.reviewerMode === 'auto_review';
-                if (isAutoMode || !context?.onPermissionRequest) {
-                    throw new Error(`Access denied: Automated approval mode cannot write outside the workspace root: '${resolution.resolved}'.`);
-                }
-
-                const allowed = await this.requestPermissionWithAbort(
-                    `perm_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
-                    toolName,
-                    `[ESCALATION] AI requests permission to write outside the workspace root: ${resolution.resolved}`,
-                    context ? { ...context, escalation: true } : context,
-                    resolution.resolved
-                );
-                if (!allowed) {
-                    throw new Error(`Access denied: User denied write outside the workspace root for '${resolution.resolved}'.`);
-                }
-            } else if (resolution.scope === 'workspace') {
-                const allowed = await this.requestPermissionWithAbort(
-                    `perm_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
-                    toolName,
-                    `[ESCALATION] AI requests permission to modify another workspace root: ${resolution.resolved}`,
-                    context ? { ...context, escalation: true } : context,
-                    resolution.resolved
-                );
-                if (!allowed) {
-                    throw new Error(`Access denied: User denied cross-workspace write for '${resolution.resolved}'.`);
-                }
+                throw new Error(`Access denied: Cannot write outside the workspace root: '${resolution.resolved}'.`);
             }
         }
         // ReadTracker write-gate safety interception (D1)
@@ -913,8 +836,7 @@ export class FileToolHandler {
     // - writeFile -
 
     async writeFile(args: { file: string; content: string; encoding?: string }, context?: import('../types').AgentToolContext): Promise<import('../types').WriteFileResult> {
-        return this.executeWithLock(args.file, async () => {
-            try {
+        try {
                 args.file = await this.resolveAndAuthorizeWrite(args.file, 'write_file', context);
                 const ymlReject = this.rejectGenericYmlWrite('write_file', args.file);
                 if (ymlReject) return ymlReject;
@@ -969,7 +891,6 @@ export class FileToolHandler {
             } catch (e) {
                 return { success: false, message: `Write failed: ${String(e)}` };
             }
-        });
     }
 
 
@@ -981,8 +902,7 @@ export class FileToolHandler {
             return { success: false, message: 'Error: edit_file requires string oldString and newString.' };
         }
 
-        return this.executeWithLock(args.filePath, async () => {
-            try {
+        try {
                 args.filePath = await this.resolveAndAuthorizeWrite(args.filePath, 'edit_file', context);
                 const ymlReject = this.rejectGenericYmlWrite('edit_file', args.filePath);
                 if (ymlReject) return ymlReject as any;
@@ -1090,7 +1010,6 @@ export class FileToolHandler {
                     linesRemoved: Math.max(0, oldLineCount - newLineCount),
                 },
             };
-        });
     }
 
 
@@ -1104,8 +1023,7 @@ export class FileToolHandler {
             } as any;
         }
 
-        return this.executeWithLock(args.filePath, async () => {
-            try {
+        try {
                 args.filePath = await this.resolveAndAuthorizeWrite(args.filePath, 'ast_mutate', context);
             } catch (e) {
                 return { success: false, message: String(e) };
@@ -1224,7 +1142,6 @@ export class FileToolHandler {
                 freshness: freshResult.freshness,
                 pendingGlobalKinds: freshResult.pendingGlobalKinds,
             };
-        });
     }
 
 
@@ -1273,8 +1190,7 @@ export class FileToolHandler {
             return { success: false, message: 'Error: missing or invalid "filePath".' };
         }
 
-        return this.executeWithLock(args.filePath, async () => {
-            try {
+        try {
                 args.filePath = await this.resolveAndAuthorizeWrite(args.filePath, 'replace_lines', context);
                 const ymlReject = this.rejectGenericYmlWrite('replace_lines', args.filePath);
                 if (ymlReject) return ymlReject as any;
@@ -1393,7 +1309,6 @@ export class FileToolHandler {
                 diagnosticSnapshot,
                 diagnosticDelta,
             };
-        });
     }
 
     // - listDirectory -
@@ -1836,8 +1751,7 @@ export class FileToolHandler {
         language: string;
         entries: Array<{ key: string; value: string; number?: number; comment?: string }>;
     }, context?: import('../types').AgentToolContext): Promise<import('../types').EditFileResult> {
-        return this.executeWithLock(args.filePath, async () => {
-            try {
+        try {
                 const filePath = await this.resolveAndAuthorizeWrite(args.filePath, 'write_localisation', context);
                 const targetError = this.validateLocalisationTarget(filePath);
                 if (targetError) {
@@ -1988,7 +1902,6 @@ export class FileToolHandler {
             } catch (e) {
                 return { success: false, message: `write_localisation failed: ${e instanceof Error ? e.message : String(e)}` };
             }
-        });
     }
 
     // - writeDesignBlueprint -

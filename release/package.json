@@ -493,11 +493,7 @@
                 "command": "pretriggerAllFiles",
                 "title": "%commands.pretriggerAllFiles.title%",
                 "category": "Stellaris"
-            },
-            {
-                "command": "startcustomgame",
-                "title": "%commands.startcustomgame.title%",
-                "category": "Stellaris"
+
             },
             {
                 "command": "exportTypes",

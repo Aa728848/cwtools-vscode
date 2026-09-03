@@ -1077,7 +1077,7 @@ describe('agent tool file path safety', () => {
         }
     });
 
-    it('handles outside-workspace writes with escalation prompt in confirm mode and auto-denies in auto mode', async () => {
+    it('strictly denies outside-workspace writes regardless of approval mode', async () => {
         const outsideDir = makeWorkspace();
         const outsideFile = path.join(outsideDir, 'external_config.txt');
         fs.writeFileSync(outsideFile, 'initial = 1\n');
@@ -1085,37 +1085,16 @@ describe('agent tool file path safety', () => {
         try {
             const handler = createFileHandler();
 
-            // 1. In auto approval mode -> auto denies outside workspace writes
-            const autoDeniedResult = await handler.writeFile({
+            const result = await handler.writeFile({
                 file: outsideFile,
-                content: 'new content auto',
+                content: 'new content',
             }, {
                 reviewerMode: 'auto_review',
                 onPermissionRequest: async () => true,
             } as any);
-            expect(autoDeniedResult.success).to.equal(false);
-            expect(autoDeniedResult.message).to.include('Automated approval mode cannot write outside the workspace');
-
-            // 2. In confirm mode with user rejection -> denied
-            const userRejectedResult = await handler.writeFile({
-                file: outsideFile,
-                content: 'new content rejected',
-            }, {
-                onPermissionRequest: async () => false,
-            } as any);
-            expect(userRejectedResult.success).to.equal(false);
-            expect(userRejectedResult.message).to.include('User denied write outside the workspace');
-
-            // 3. In confirm mode with user approval -> allows write (after readTracker sync)
-            await handler.readFile({ file: outsideFile });
-            const userApprovedResult = await handler.writeFile({
-                file: outsideFile,
-                content: 'new content approved\n',
-            }, {
-                onPermissionRequest: async () => true,
-            } as any);
-            expect(userApprovedResult.success).to.equal(true);
-            expect(fs.readFileSync(outsideFile, 'utf8')).to.equal('new content approved\n');
+            expect(result.success).to.equal(false);
+            expect(result.message).to.include('Cannot write outside the workspace root');
+            expect(fs.readFileSync(outsideFile, 'utf8')).to.equal('initial = 1\n');
         } finally {
             cleanupWorkspace(outsideDir);
         }

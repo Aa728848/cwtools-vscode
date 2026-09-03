@@ -1,7 +1,7 @@
 import * as vs from 'vscode';
 import { CacheRequestUsage, TokenUsage } from './types';
 import { ErrorReporter } from './errorReporter';
-import { getModelPricing, getCacheDiscountFactor } from './providers/models/pricing';
+import { getModelPricing, getCacheDiscountFactor } from './pricing';
 import { isCacheCapableUsage } from './cacheCapability';
 
 // ─── Interfaces ──────────────────────────────────────────────────────────────

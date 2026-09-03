@@ -27,7 +27,6 @@
   "commands.listAllLocFiles.title": "Debug: list all loc files",
   "commands.debugrules.title": "Debug: list all config rules",
   "commands.pretriggerAllFiles.title": "Optimise all triggers into pretriggers",
-  "commands.startcustomgame.title": "Activate language service for a custom game",
   "commands.showGraph.title": "Show graph",
   "commands.graphFromJson.title": "Recreate graph from json",
   "commands.exportTypes.title": "Export: all types",

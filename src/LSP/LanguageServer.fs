@@ -59,8 +59,12 @@ type private RequestTrace =
       mutable queueDepth: int
       mutable pendingCount: int }
 
-let private requestTraces =
-    System.Collections.Concurrent.ConcurrentDictionary<int, RequestTrace>()
+type private ActiveRequest =
+    { trace: RequestTrace
+      cancellation: CancellationTokenSource option }
+
+let private activeRequests =
+    System.Collections.Concurrent.ConcurrentDictionary<int, ActiveRequest>()
 
 let private timestamp () = Stopwatch.GetTimestamp()
 
@@ -93,9 +97,6 @@ let private runtimeSnapshot () =
        waitingReadCount = gameStateLock.WaitingReadCount
        waitingWriteCount = gameStateLock.WaitingWriteCount
        writerActivityCount = Volatile.Read(&gameStateWriterActivityCount) |}
-
-let private heartbeatGapThresholdMs = 500.0
-let mutable private lastHeartbeatAt = timestamp ()
 
 let private jsonWriteOptions =
     { defaultJsonWriteOptions with
@@ -356,28 +357,13 @@ let private logRequestTrace send id (trace: RequestTrace) =
         monitorLog send "RequestTrace" (payload.ToString(JsonSaveOptions.DisableFormatting))
 
 let private finishRequestTrace (send: BinaryWriter) (id: int) (outcome: string) =
-    match requestTraces.TryRemove id with
-    | true, trace ->
-        trace.outcome <- outcome
-        if trace.responseSentAt.IsNone then trace.responseSentAt <- Some(timestamp ())
-        logRequestTrace send id trace
+    match activeRequests.TryRemove id with
+    | true, active ->
+        active.trace.outcome <- outcome
+        if active.trace.responseSentAt.IsNone then active.trace.responseSentAt <- Some(timestamp ())
+        logRequestTrace send id active.trace
+        active.cancellation |> Option.iter (fun cts -> cts.Dispose())
     | _ -> ()
-
-let private startHeartbeatThread (send: BinaryWriter) =
-    let thread =
-        Thread(fun () ->
-            while true do
-                Thread.Sleep 100
-                let now = timestamp ()
-                let gap = elapsedMs lastHeartbeatAt now
-                lastHeartbeatAt <- now
-                if gap > heartbeatGapThresholdMs then
-                    let snapshot = runtimeSnapshot ()
-                    monitorLog send "Heartbeat"
-                        $"heartbeatGapMs={gap} pendingWorkItems={snapshot.pendingWorkItems} availableWorkers={snapshot.availableWorkerThreads} waitingWriters={snapshot.waitingWriteCount}")
-
-    thread.IsBackground <- true
-    thread.Start()
 
 let private thenMap (f: 'A -> 'B) (result: Async<'A>) : Async<'B> =
     async {
@@ -449,7 +435,6 @@ type private PendingTask =
     | Quit
 
 let connect (serverFactory: ILanguageClient -> ILanguageServer, receive: BinaryReader, send: BinaryWriter) =
-    startHeartbeatThread send
     let server = serverFactory (RealClient(send))
 
     /// Returns (serialisedResponseTask, isReadOnly).
@@ -537,10 +522,6 @@ let connect (serverFactory: ILanguageClient -> ILanguageServer, receive: BinaryR
         | DidChangeWatchedFiles(p)-> server.DidChangeWatchedFiles(p), false
         | DidFocusFile(p)         -> server.DidFocusFile(p), false
         | OtherNotification _     -> async { () }, false
-    // Read messages and process cancellations on a separate thread
-    let pendingRequests =
-        System.Collections.Concurrent.ConcurrentDictionary<int, CancellationTokenSource>()
-
     let processQueue =
         new System.Collections.Concurrent.BlockingCollection<PendingTask>()
 
@@ -557,14 +538,10 @@ let connect (serverFactory: ILanguageClient -> ILanguageServer, receive: BinaryR
                 match m with
                 | Parser.NotificationMessage("$/cancelRequest", Some json) ->
                     let id = json?id.AsInteger()
-                    let stillRunning, pendingRequest = pendingRequests.TryGetValue(id)
-
-                    if stillRunning then
-                        //dprintfn "Cancelling request %d" id
-                        pendingRequest.Cancel()
-                    else
-                        ()
-                //dprintfn "Request %d has already finished" id
+                    match activeRequests.TryGetValue id with
+                    | true, active ->
+                        active.cancellation |> Option.iter (fun cts -> cts.Cancel())
+                    | _ -> ()
                 // Process other requests on worker thread
                 | Parser.NotificationMessage(method, json) ->
                     let n = Parser.parseNotification (method, json)
@@ -586,7 +563,7 @@ let connect (serverFactory: ILanguageClient -> ILanguageServer, receive: BinaryR
                           queueDepth = 0
                           pendingCount = 0 }
 
-                    requestTraces.[id] <- trace
+                    activeRequests.[id] <- { trace = trace; cancellation = None }
 
                     let immediateFallback =
                         match parsed with
@@ -662,13 +639,13 @@ let connect (serverFactory: ILanguageClient -> ILanguageServer, receive: BinaryR
                                 fixedLockFallback completionLockTimeoutMs RequestCancelled
                             | _ -> None
                         let cancel = new CancellationTokenSource()
-                        pendingRequests[id] <- cancel
+                        activeRequests.[id] <- { trace = trace; cancellation = Some cancel }
                         // Publish the cancellation source before the work item. A
                         // fast worker must never finish/remove the request before
                         // the reader has made it cancellable.
                         trace.queueAddAt <- timestamp ()
                         trace.queueDepth <- processQueue.Count + 1
-                        trace.pendingCount <- pendingRequests.Count
+                        trace.pendingCount <- activeRequests.Count
                         match parsed with
                         | FoldingRanges _ ->
                             // Folding scans only the current DocumentStore text. It
@@ -711,22 +688,21 @@ let connect (serverFactory: ILanguageClient -> ILanguageServer, receive: BinaryR
     let terminalizeRequest (id: int) cause =
         tryTerminalizeRequest
             (fun () ->
-                match requestTraces.TryRemove id with
-                | true, trace -> Some trace
+                match activeRequests.TryRemove id with
+                | true, active -> Some active
                 | _ -> None)
-            (fun trace decision ->
-                let removed, cancellation = pendingRequests.TryRemove id
+            (fun active decision ->
                 try
                     try
                         match decision.response with
                         | RequestTerminalResponse.Result result -> respond (send, id, result)
                         | RequestTerminalResponse.Error(code, message) -> respondRequestError id code message
                     finally
-                        trace.responseSentAt <- Some(timestamp ())
-                        trace.outcome <- decision.outcome
-                        logRequestTrace send id trace
+                        active.trace.responseSentAt <- Some(timestamp ())
+                        active.trace.outcome <- decision.outcome
+                        logRequestTrace send id active.trace
                 finally
-                    if removed then cancellation.Dispose())
+                    active.cancellation |> Option.iter (fun cts -> cts.Dispose()))
             cause
         |> ignore
 
@@ -738,11 +714,11 @@ let connect (serverFactory: ILanguageClient -> ILanguageServer, receive: BinaryR
         let workflow =
             async {
                 let mutable traceRef = None
-                match requestTraces.TryGetValue id with
-                | true, trace ->
-                    trace.workerStartAt <- Some(timestamp ())
-                    trace.lockKind <- Some "lock-free"
-                    traceRef <- Some trace
+                match activeRequests.TryGetValue id with
+                | true, active ->
+                    active.trace.workerStartAt <- Some(timestamp ())
+                    active.trace.lockKind <- Some "lock-free"
+                    traceRef <- Some active.trace
                 | _ -> ()
 
                 if not cancel.IsCancellationRequested then
@@ -782,11 +758,11 @@ let connect (serverFactory: ILanguageClient -> ILanguageServer, receive: BinaryR
         let run () =
             let mutable traceRef = None
             try
-                match requestTraces.TryGetValue id with
-                | true, trace ->
-                    trace.workerStartAt <- Some(timestamp ())
-                    trace.lockKind <- (if lockFallback.IsSome then Some "read-fallback" else Some "read")
-                    traceRef <- Some trace
+                match activeRequests.TryGetValue id with
+                | true, active ->
+                    active.trace.workerStartAt <- Some(timestamp ())
+                    active.trace.lockKind <- (if lockFallback.IsSome then Some "read-fallback" else Some "read")
+                    traceRef <- Some active.trace
                 | _ -> ()
 
                 let timeoutMs = lockFallback |> Option.map (fun fallback -> fallback.timeoutMs)
@@ -830,10 +806,10 @@ let connect (serverFactory: ILanguageClient -> ILanguageServer, receive: BinaryR
     // Any in-flight read-only requests will finish before the lock is granted.
     let runWriteRequest (id: int) (task: Async<RequestResult>) (cancel: CancellationTokenSource) =
         let mutable traceRef = None
-        match requestTraces.TryGetValue id with
-        | true, trace ->
-            trace.lockKind <- Some "write"
-            traceRef <- Some trace
+        match activeRequests.TryGetValue id with
+        | true, active ->
+            active.trace.lockKind <- Some "write"
+            traceRef <- Some active.trace
         | _ -> ()
 
         let tracedTask =
@@ -870,21 +846,21 @@ let connect (serverFactory: ILanguageClient -> ILanguageServer, receive: BinaryR
         | ProcessNotification(_, task, false (* no lock needed *)) ->
             Async.RunSynchronously(task)
         | ProcessLockFreeRequest(id, task, cancel) ->
-            match requestTraces.TryGetValue id with
-            | true, trace -> trace.dequeuedAt <- Some(timestamp ())
+            match activeRequests.TryGetValue id with
+            | true, active -> active.trace.dequeuedAt <- Some(timestamp ())
             | _ -> ()
             startLockFreeRequest id task cancel
         | ProcessRequest(id, task, cancel, true (* isReadOnly *), lockFallback) ->
-            match requestTraces.TryGetValue id with
-            | true, trace -> trace.dequeuedAt <- Some(timestamp ())
+            match activeRequests.TryGetValue id with
+            | true, active -> active.trace.dequeuedAt <- Some(timestamp ())
             | _ -> ()
             startReadOnlyRequest id task cancel lockFallback
         | ProcessRequest(id, task, cancel, false (* isWrite    *), _) ->
-            match requestTraces.TryGetValue id with
-            | true, trace ->
+            match activeRequests.TryGetValue id with
+            | true, active ->
                 let dequeuedAt = timestamp ()
-                trace.dequeuedAt <- Some dequeuedAt
-                trace.workerStartAt <- Some dequeuedAt
+                active.trace.dequeuedAt <- Some dequeuedAt
+                active.trace.workerStartAt <- Some dequeuedAt
             | _ -> ()
             runWriteRequest id task cancel
 

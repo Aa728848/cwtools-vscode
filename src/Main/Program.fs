@@ -1543,16 +1543,7 @@ type Server(client: ILanguageClient) =
     let mutable activeGame = STL
     let mutable isVanillaFolder = false
     let mutable gameObj: option<IGame> = None
-    let mutable stlGameObj: option<IGame<STLComputedData>> = None
-    let mutable hoi4GameObj: option<IGame<HOI4ComputedData>> = None
-    let mutable eu4GameObj: option<IGame<EU4ComputedData>> = None
-    let mutable ck2GameObj: option<IGame<CK2ComputedData>> = None
-    let mutable irGameObj: option<IGame<IRComputedData>> = None
-    let mutable vic2GameObj: option<IGame<VIC2ComputedData>> = None
-    let mutable ck3GameObj: option<IGame<CK3ComputedData>> = None
-    let mutable vic3GameObj: option<IGame<VIC3ComputedData>> = None
-    let mutable eu5GameObj: option<IGame<EU5ComputedData>> = None
-    let mutable customGameObj: option<IGame<JominiComputedData>> = None
+    let mutable typedGame: PreparedTypedGameRefs = NoTypedGame
 
     //-Diagnostic freshness status table-
     /// Global diagnostic epoch: incremented each time lint is completed, used by the client to determine whether the diagnosis has been updated
@@ -1890,32 +1881,19 @@ type Server(client: ILanguageClient) =
     let gameDispatcher =
         { new IGameDispatcher with
             member _.Dispatch visitor =
-                match stlGameObj, hoi4GameObj, eu4GameObj, ck2GameObj, irGameObj, vic2GameObj, ck3GameObj, vic3GameObj, eu5GameObj, customGameObj with
-                | Some game, _, _, _, _, _, _, _, _, _ -> Some(visitor.Visit game)
-                | _, Some game, _, _, _, _, _, _, _, _ -> Some(visitor.Visit game)
-                | _, _, Some game, _, _, _, _, _, _, _ -> Some(visitor.Visit game)
-                | _, _, _, Some game, _, _, _, _, _, _ -> Some(visitor.Visit game)
-                | _, _, _, _, Some game, _, _, _, _, _ -> Some(visitor.Visit game)
-                | _, _, _, _, _, Some game, _, _, _, _ -> Some(visitor.Visit game)
-                | _, _, _, _, _, _, Some game, _, _, _ -> Some(visitor.Visit game)
-                | _, _, _, _, _, _, _, Some game, _, _ -> Some(visitor.Visit game)
-                | _, _, _, _, _, _, _, _, Some game, _ -> Some(visitor.Visit game)
-                | _, _, _, _, _, _, _, _, _, Some game -> Some(visitor.Visit game)
-                | _ -> None
+                match typedGame with
+                | PreparedSTLGame game -> Some(visitor.Visit game)
+                | PreparedHOI4Game game -> Some(visitor.Visit game)
+                | PreparedEU4Game game -> Some(visitor.Visit game)
+                | PreparedCK2Game game -> Some(visitor.Visit game)
+                | PreparedIRGame game -> Some(visitor.Visit game)
+                | PreparedVIC2Game game -> Some(visitor.Visit game)
+                | PreparedCK3Game game -> Some(visitor.Visit game)
+                | PreparedVIC3Game game -> Some(visitor.Visit game)
+                | PreparedEU5Game game -> Some(visitor.Visit game)
+                | PreparedCustomGame game -> Some(visitor.Visit game)
+                | NoTypedGame -> None
         }
-
-    /// Data-driven list of field clearers - keeps cleanupOldGame DRY.
-    let gameFieldClearers =
-        [ (fun () -> stlGameObj <- None)
-          (fun () -> hoi4GameObj <- None)
-          (fun () -> eu4GameObj <- None)
-          (fun () -> ck2GameObj <- None)
-          (fun () -> irGameObj <- None)
-          (fun () -> vic2GameObj <- None)
-          (fun () -> ck3GameObj <- None)
-          (fun () -> vic3GameObj <- None)
-          (fun () -> eu5GameObj <- None)
-          (fun () -> customGameObj <- None) ]
 
     let mutable languages: Lang array = [||]
     /// Raw language names from the client config (game-independent). The parsed
@@ -2314,28 +2292,24 @@ type Server(client: ILanguageClient) =
     let clearTypeIndexCacheForFile (filePath: string) =
         let normalised = normaliseCachePath filePath
         typeDefinitionsByFileCache.TryRemove(normalised) |> ignore
-        let fullPath = fullPathOr filePath
-        typeDefinitionsByFileCache.TryRemove(normaliseCachePath fullPath) |> ignore
 
     //- Cache partition cleaning function -
     // Precise invalidation strategy: avoid unnecessary performance overhead caused by global cleanup
 
     /// Clear the content-related cache of a single file (semanticTokens/codeLens/inlayHint)
     let clearFileCaches (filePath: string) =
-        let fullPath = fullPathOr filePath
-        for key in [ filePath; fullPath ] do
-            (semanticTokensCache :> System.Collections.Generic.IDictionary<_, _>).Remove(key) |> ignore
-            (codeLensCache :> System.Collections.Generic.IDictionary<_, _>).Remove(key) |> ignore
-            (inlayHintCache :> System.Collections.Generic.IDictionary<_, _>).Remove(key) |> ignore
-            clearCompletionListCacheForFile key
+        let cacheKey = normaliseCachePath filePath
+        (semanticTokensCache :> System.Collections.Generic.IDictionary<_, _>).Remove(cacheKey) |> ignore
+        (codeLensCache :> System.Collections.Generic.IDictionary<_, _>).Remove(cacheKey) |> ignore
+        (inlayHintCache :> System.Collections.Generic.IDictionary<_, _>).Remove(cacheKey) |> ignore
+        clearCompletionListCacheForFile cacheKey
         lock typeReferenceResultCacheLock typeReferenceResultCache.Advance |> ignore
 
     let clearFileCachesPreservingSemanticTokens (filePath: string) =
-        let fullPath = fullPathOr filePath
-        for key in [ filePath; fullPath ] do
-            (codeLensCache :> System.Collections.Generic.IDictionary<_, _>).Remove(key) |> ignore
-            (inlayHintCache :> System.Collections.Generic.IDictionary<_, _>).Remove(key) |> ignore
-            clearCompletionListCacheForFile key
+        let cacheKey = normaliseCachePath filePath
+        (codeLensCache :> System.Collections.Generic.IDictionary<_, _>).Remove(cacheKey) |> ignore
+        (inlayHintCache :> System.Collections.Generic.IDictionary<_, _>).Remove(cacheKey) |> ignore
+        clearCompletionListCacheForFile cacheKey
         lock typeReferenceResultCacheLock typeReferenceResultCache.Advance |> ignore
 
     /// Clear the type index related cache (called after the type-defining file changes)
@@ -2476,9 +2450,10 @@ type Server(client: ILanguageClient) =
                 Some result)
 
     let clearCacheWriteTimesForFile (filePath: string) =
-        let fullPath = fullPathOr filePath
-        for key in [ filePath; fullPath ] do
-            cacheWriteTimes.TryRemove(key) |> ignore
+        let cacheKey = normaliseCachePath filePath
+        cacheWriteTimes.TryRemove(cacheKey) |> ignore
+        if not (String.Equals(cacheKey, filePath, StringComparison.Ordinal)) then
+            cacheWriteTimes.TryRemove(filePath) |> ignore
 
     /// Evict ~25% of the least-recently-written entries when a cache exceeds cacheMaxEntries.
     let evictIfNeeded (cache: System.Collections.Concurrent.ConcurrentDictionary<'K, 'V>) =
@@ -6413,22 +6388,9 @@ type Server(client: ILanguageClient) =
         | Some _, _ -> invalidArg (nameof prepared) "Prepared untyped and typed game references must identify the same game."
 
         let previousGame = gameObj
-        gameFieldClearers |> List.iter (fun clear -> clear())
-        match prepared.typedGame with
-        | NoTypedGame -> ()
-        | PreparedSTLGame game -> stlGameObj <- Some game
-        | PreparedHOI4Game game -> hoi4GameObj <- Some game
-        | PreparedEU4Game game -> eu4GameObj <- Some game
-        | PreparedCK2Game game -> ck2GameObj <- Some game
-        | PreparedIRGame game -> irGameObj <- Some game
-        | PreparedVIC2Game game -> vic2GameObj <- Some game
-        | PreparedCK3Game game -> ck3GameObj <- Some game
-        | PreparedVIC3Game game -> vic3GameObj <- Some game
-        | PreparedEU5Game game -> eu5GameObj <- Some game
-        | PreparedCustomGame game -> customGameObj <- Some game
+        typedGame <- prepared.typedGame
         gameObj <- prepared.game
         activeGame <- prepared.effectiveGame
-        languages <- prepared.languages
         { prepared = prepared; previousGame = previousGame }
 
     let completePreparedWorkspacePublication (published: PublishedWorkspace) =
@@ -7592,16 +7554,13 @@ type Server(client: ILanguageClient) =
             let localPath = p.textDocument.uri.LocalPath
             maybeRebuildCwtIndex localPath
             let fullPath = fullPathOr localPath
-            committedTypeIndexVersions.TryRemove(normaliseCachePath localPath) |> ignore
-            committedTypeIndexVersions.TryRemove(normaliseCachePath fullPath) |> ignore
+            let cacheKey = normaliseCachePath localPath
+            committedTypeIndexVersions.TryRemove(cacheKey) |> ignore
             // Clean all file-level caches to prevent memory leaks from closed files
-            forgetFileCaches localPath
-            forgetFileCaches fullPath
-            dirtyDocumentPaths.TryRemove(normaliseCachePath localPath) |> ignore
-            dirtyDocumentPaths.TryRemove(normaliseCachePath fullPath) |> ignore
-            pendingCompletionRefresh.TryRemove(normaliseCachePath localPath) |> ignore
-            pendingCompletionRefresh.TryRemove(normaliseCachePath fullPath) |> ignore
-            committedInteractiveVersions.TryRemove(normaliseCachePath fullPath) |> ignore
+            forgetFileCaches cacheKey
+            dirtyDocumentPaths.TryRemove(cacheKey) |> ignore
+            pendingCompletionRefresh.TryRemove(cacheKey) |> ignore
+            committedInteractiveVersions.TryRemove(cacheKey) |> ignore
             (locCache :> System.Collections.Generic.IDictionary<_, _>).Remove(localPath) |> ignore
             match gameObj with
             | Some game -> game.InvalidateFileCache fullPath
@@ -8397,6 +8356,7 @@ type Server(client: ILanguageClient) =
                     match gameObj with
                     | Some game ->
                         let filePath = FileInfo(p.textDocument.uri.LocalPath).FullName
+                        let cacheKey = normaliseCachePath filePath
                         let readFileText () =
                             match docs.GetTextByPath(filePath) with
                             | Some t -> t
@@ -8408,10 +8368,10 @@ type Server(client: ILanguageClient) =
                                 getTypesForFile cancellationToken game filePath
                                 |> List.map (fun (typeName, id, tdi) -> makeTypeCodeLens (Some fileText) typeName id filePath tdi)
                             cancellationToken.ThrowIfCancellationRequested()
-                            cachePut codeLensCache filePath (hash, lenses)
+                            cachePut codeLensCache cacheKey (hash, lenses)
                             evictIfNeeded codeLensCache
                             lenses
-                        match codeLensCache.TryGetValue(filePath) with
+                        match codeLensCache.TryGetValue(cacheKey) with
                         | true, (cachedHash, cachedLenses) ->
                             let fileText = readFileText ()
                             let hash = contentHash fileText
@@ -8498,6 +8458,7 @@ type Server(client: ILanguageClient) =
                 if not showInlineText then return []
                 else
                     let filePath = FileInfo(p.textDocument.uri.LocalPath).FullName
+                    let cacheKey = normaliseCachePath filePath
                     // Match the hash correctly
                     let fileText = 
                         match docs.GetTextByPath(filePath) with
@@ -8505,7 +8466,7 @@ type Server(client: ILanguageClient) =
                         | None -> try System.IO.File.ReadAllText(filePath) with _ -> ""
                     let hash = contentHash fileText
                     
-                    match inlayHintCache.TryGetValue(filePath) with
+                    match inlayHintCache.TryGetValue(cacheKey) with
                     | true, (cachedHash, cachedHints) when cachedHash = hash -> return cachedHints
                     | _ ->
                         let inlayHintFunction (game: IGame<_>) =
@@ -8764,13 +8725,13 @@ type Server(client: ILanguageClient) =
                         
                         match gameDispatcher.Dispatch visitor |> Option.flatten with
                         | Some generatedHints ->
-                            cachePut inlayHintCache filePath (hash, generatedHints)
+                            cachePut inlayHintCache cacheKey (hash, generatedHints)
                             evictIfNeeded inlayHintCache
                             return generatedHints
                         | None ->
                             // Parse failed (typically mid-edit unbalanced braces). Returning
                             // old hints here makes their old positions attach to the new text.
-                            cachePut inlayHintCache filePath (hash, [])
+                            cachePut inlayHintCache cacheKey (hash, [])
                             evictIfNeeded inlayHintCache
                             return []
             }
@@ -8852,11 +8813,12 @@ type Server(client: ILanguageClient) =
                                 with _ -> ""
                             diskText, None
 
+                    let cacheKey = normaliseCachePath filePath
                     let documentStillCurrent () = docs.GetVersion(fileInfo) = documentVersion
                     let hash = contentHash fileText
-                    match semanticTokensCache.TryGetValue(filePath) with
+                    match semanticTokensCache.TryGetValue(cacheKey) with
                     | true, (_, cachedHash, cachedData, cachedResultId) when cachedHash = hash && documentStillCurrent () ->
-                        cachePut semanticTokensCache filePath (documentVersion, cachedHash, cachedData, cachedResultId)
+                        cachePut semanticTokensCache cacheKey (documentVersion, cachedHash, cachedData, cachedResultId)
                         Some { data = Array.toList cachedData; resultId = Some cachedResultId }
                     | _ when
                         not (PdxShaderFeatures.isShaderFile filePath)
@@ -8873,7 +8835,7 @@ type Server(client: ILanguageClient) =
                             None
                         else
                             let resultId = Guid.NewGuid().ToString()
-                            cachePut semanticTokensCache filePath (documentVersion, hash, dataArray, resultId)
+                            cachePut semanticTokensCache cacheKey (documentVersion, hash, dataArray, resultId)
                             evictIfNeeded semanticTokensCache
                             Some { data = Array.toList dataArray; resultId = Some resultId }
 
@@ -8904,11 +8866,12 @@ type Server(client: ILanguageClient) =
                                 with _ -> ""
                             diskText, None
 
+                    let cacheKey = normaliseCachePath filePath
                     let documentStillCurrent () = docs.GetVersion(fileInfo) = documentVersion
                     let hash = contentHash fileText
-                    match semanticTokensCache.TryGetValue(filePath) with
+                    match semanticTokensCache.TryGetValue(cacheKey) with
                     | true, (_, cachedHash, cachedData, cachedResultId) when cachedHash = hash && documentStillCurrent () ->
-                        cachePut semanticTokensCache filePath (documentVersion, cachedHash, cachedData, cachedResultId)
+                        cachePut semanticTokensCache cacheKey (documentVersion, cachedHash, cachedData, cachedResultId)
                         if p.previousResultId = cachedResultId then
                             Some(Choice2Of2 { resultId = cachedResultId; edits = [] })
                         else
@@ -8934,7 +8897,7 @@ type Server(client: ILanguageClient) =
                         if not (documentStillCurrent ()) then None
                         else
                             let newResultId = Guid.NewGuid().ToString()
-                            cachePut semanticTokensCache filePath (documentVersion, hash, newDataArray, newResultId)
+                            cachePut semanticTokensCache cacheKey (documentVersion, hash, newDataArray, newResultId)
                             evictIfNeeded semanticTokensCache
                             if p.previousResultId = oldResultId then
                                 let edit = computeDelta oldDataArray newDataArray
@@ -8950,7 +8913,7 @@ type Server(client: ILanguageClient) =
                         if not (documentStillCurrent ()) then None
                         else
                             let newResultId = Guid.NewGuid().ToString()
-                            cachePut semanticTokensCache filePath (documentVersion, hash, newDataArray, newResultId)
+                            cachePut semanticTokensCache cacheKey (documentVersion, hash, newDataArray, newResultId)
                             evictIfNeeded semanticTokensCache
                             Some(Choice1Of2 { data = Array.toList newDataArray; resultId = Some newResultId })
                 let visitor =
@@ -10720,22 +10683,22 @@ type Server(client: ILanguageClient) =
                             None
                         | { command = "debugrules"
                             arguments = _ } ->
-                            match irGameObj, hoi4GameObj with
-                            | Some ir, _ ->
+                            match typedGame with
+                            | PreparedIRGame ir ->
                                 let text =
                                     ir.References().ConfigRules
                                     |> Seq.map _.ToString()
                                     |> (fun l -> String.Join('\n', l))
 
                                 showVirtualFile "cwtools://1" text
-                            | _, Some hoi4 ->
+                            | PreparedHOI4Game hoi4 ->
                                 let text =
                                     hoi4.References().ConfigRules
                                     |> Seq.map _.ToString()
                                     |> (fun l -> String.Join('\n', l))
-                                // let text = sprintf "%O" (ir.References().ConfigRules)
+
                                 showVirtualFile "cwtools://1" text
-                            | None, None -> ()
+                            | _ -> ()
 
                             None
 
@@ -10839,8 +10802,8 @@ type Server(client: ILanguageClient) =
                             |> Async.RunSynchronously
                             None
                         | { command = "gettech"; arguments = _ } ->
-                            match stlGameObj with
-                            | Some game ->
+                            match typedGame with
+                            | PreparedSTLGame game ->
                                 let techs = game.References().Technologies
 
                                 let techJson =
@@ -10854,7 +10817,7 @@ type Server(client: ILanguageClient) =
                                     |> JsonValue.Array
 
                                 Some techJson
-                            | None -> None
+                            | _ -> None
                         | { command = "getGraphData"
                             arguments = x :: depth :: _ } ->
                             match lastFocusedFile with
@@ -10991,8 +10954,8 @@ type Server(client: ILanguageClient) =
                                 eventTargetNameAtPosition
                                 |> Option.map (fun name ->
                                     let saved =
-                                        match activeGame, stlGameObj with
-                                        | STL, Some stellaris ->
+                                        match typedGame with
+                                        | PreparedSTLGame stellaris ->
                                             stellaris.References().SavedScopes
                                             |> Seq.filter (fun (savedName, _, _) ->
                                                 String.Equals(savedName, name, StringComparison.OrdinalIgnoreCase))

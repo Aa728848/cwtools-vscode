@@ -215,11 +215,11 @@ let workspaceDiscardStart = programSource.IndexOf("    let completePreparedWorks
 check (workspacePrepareStart >= 0 && workspacePublishStart > workspacePrepareStart && workspaceDiscardStart > workspacePublishStart)
       "Workspace preparation/publication segments must remain discoverable"
 let workspacePrepareSegment = programSource.Substring(workspacePrepareStart, workspacePublishStart - workspacePrepareStart)
-for forbiddenAssignment in [ "gameObj <-"; "stlGameObj <-"; "customGameObj <-"; "activeGame <-" ] do
+for forbiddenAssignment in [ "gameObj <-"; "typedGame <-"; "activeGame <-" ] do
     check (not (workspacePrepareSegment.Contains(forbiddenAssignment, StringComparison.Ordinal)))
           (sprintf "Detached workspace preparation must exclude %s" forbiddenAssignment)
 let workspacePublishSegment = programSource.Substring(workspacePublishStart, workspaceDiscardStart - workspacePublishStart)
-for requiredAtomicAssignment in [ "gameFieldClearers"; "gameObj <- prepared.game"; "stlGameObj <- Some game"; "customGameObj <- Some game" ] do
+for requiredAtomicAssignment in [ "gameObj <- prepared.game"; "typedGame <- prepared.typedGame" ] do
     check (workspacePublishSegment.Contains(requiredAtomicAssignment, StringComparison.Ordinal))
           (sprintf "Workspace writer must retain %s" requiredAtomicAssignment)
 for forbiddenFollowup in [ "CustomNotification"; "PublishDiagnostics"; "sendDiagnostics"; "CleanupCache"; "logInfo" ] do

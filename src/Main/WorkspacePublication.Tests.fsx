@@ -129,14 +129,12 @@ let between (startMarker: string) (endMarker: string) =
 
 let preparationSource = between "    let prepareWorkspace " "    /// Atomically replace"
 for forbiddenAssignment in
-    [ "gameObj <-"; "stlGameObj <-"; "hoi4GameObj <-"; "eu4GameObj <-"
-      "ck2GameObj <-"; "irGameObj <-"; "vic2GameObj <-"; "ck3GameObj <-"
-      "vic3GameObj <-"; "eu5GameObj <-"; "customGameObj <-"; "activeGame <-" ] do
+    [ "gameObj <-"; "typedGame <-"; "activeGame <-" ] do
     check (not (preparationSource.Contains(forbiddenAssignment, StringComparison.Ordinal)))
           (sprintf "Detached preparation must not assign %s" forbiddenAssignment)
 
 let publicationSource = between "    let publishPreparedWorkspace " "    let completePreparedWorkspacePublication "
-for requiredAssignment in [ "gameFieldClearers"; "gameObj <- prepared.game"; "stlGameObj <- Some game"; "customGameObj <- Some game" ] do
+for requiredAssignment in [ "gameObj <- prepared.game"; "typedGame <- prepared.typedGame" ] do
     check (publicationSource.Contains(requiredAssignment, StringComparison.Ordinal))
           (sprintf "Atomic publication must retain %s" requiredAssignment)
 for forbiddenFollowup in [ "CustomNotification"; "PublishDiagnostics"; "sendDiagnostics"; "CleanupCache"; "logInfo" ] do

@@ -1,7 +1,9 @@
 
-/** @type {import('@vscode/test-cli').IBaseTestConfiguration} */
+const localCode = process.env.VSCODE_EXECUTABLE_PATH;
+
+/** @type {import('@vscode/test-cli').IDesktopTestConfiguration} */
 module.exports = {
-  version: '1.93.1',
+  ...(localCode ? { useInstallation: { fromPath: localCode } } : { version: '1.93.1' }),
   extensionDevelopmentPath: "../release",
   files: [
     // The shader contract suite needs its own settings/env (see .vscode-test.shader.js),

@@ -22,6 +22,10 @@ export function setPermissionsConfig(cfg: any): void {
     permissionsConfig = cfg;
 }
 
+export function setStubConfigOverrides(overrides: Record<string, any>): void {
+    stubConfigOverrides = overrides;
+}
+
 export function resetStubState(): void {
     diagnosticPairs = [];
     ignoredDiagnostics = [];

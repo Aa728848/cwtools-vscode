@@ -31,6 +31,7 @@ import {
     makeContext,
     resetStubState,
     stubConfigOverrides,
+    setStubConfigOverrides,
     vscodeStub,
     setDiagnosticPairs,
     setIgnoredDiagnostics,
@@ -46,12 +47,12 @@ describe('enforced central tool policy', () => {
 
     beforeEach(() => {
         workspaceRoot = makeWorkspace();
-        stubConfigOverrides = {};
+        resetStubState();
         resetSandboxStorageForTesting();
     });
 
     afterEach(() => {
-        stubConfigOverrides = {};
+        resetStubState();
         resetSandboxStorageForTesting();
         cleanupWorkspace(workspaceRoot);
     });
@@ -1197,7 +1198,7 @@ describe('agent tool topic artifacts', () => {
 
     afterEach(() => {
         externalTools.useDirectSandboxRunnerForTests(false);
-        stubConfigOverrides = {};
+        resetStubState();
         PermissionPolicyStore.getInstance().clear();
         cleanupWorkspace(workspaceRoot);
     });
@@ -2298,10 +2299,10 @@ describe('agent tool progress and aborts', () => {
     });
 
     it('resolves underscore server names through the dynamic registration map', async () => {
-        stubConfigOverrides = {
+        setStubConfigOverrides({
             'mcp.registerDynamicTools': true,
             'mcp.servers': [{ name: 'my_server', type: 'stdio', capabilityDomain: 'general' }],
-        };
+        });
         const executor = createExecutor();
         const callTool = sinon.stub().resolves({ ok: true });
         const getMcpClient = sinon.stub(executor as any, 'getMcpClient').resolves({

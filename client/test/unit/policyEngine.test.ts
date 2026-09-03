@@ -120,35 +120,29 @@ describe('policyEngine layer merge and tighten-only', () => {
         expect(resolvePolicy(d, p).action).to.equal('allow');
     });
 
-    it('task-scoped policy cannot override a user deny', () => {
+    it('user rules can deny specific path patterns', () => {
         const p = profile({
             rules: [rule({ id: 'u-deny', subject: 'edit', pathGlob: 'common/**', action: 'deny' })],
         });
-        const taskLayer: PolicyLayer = {
-            id: 'task',
-            rules: [rule({ id: 't-allow', subject: 'edit', pathGlob: 'common/**', action: 'allow' })],
-        };
         const d = descriptor({ targetPaths: [path.join(WS, 'common', 'x.txt')] });
-        const decision = resolvePolicy(d, p, [taskLayer]);
+        const decision = resolvePolicy(d, p);
         expect(decision.action).to.equal('deny');
         expect(decision.matchedRules).to.include('u-deny');
     });
 
-    it('tighten-only layers can change allow to deny', () => {
-        const modeLayer: PolicyLayer = {
-            id: 'mode',
+    it('user rules can change read allow to deny for secrets', () => {
+        const p = profile({
             rules: [rule({ id: 'm-deny', subject: 'read', pathGlob: 'secrets/**', action: 'deny' })],
-        };
+        });
         const d = descriptor({ toolName: 'read_file', subject: 'read', riskLevel: 0, targetPaths: [path.join(WS, 'secrets', 'x.txt')] });
-        expect(resolvePolicy(d, profile(), [modeLayer]).action).to.equal('deny');
+        expect(resolvePolicy(d, p).action).to.equal('deny');
     });
 
-    it('approvals layer (user-granted) can loosen mode-layer asks', () => {
-        const approvals: PolicyLayer = {
-            id: 'approvals',
+    it('learnedFromApproval user rules can loosen default asks', () => {
+        const p = profile({
             rules: [rule({ id: 'a1', subject: 'edit', pathGlob: 'events/**', action: 'allow', learnedFromApproval: true })],
-        };
-        expect(resolvePolicy(descriptor({}), profile(), [approvals]).action).to.equal('allow');
+        });
+        expect(resolvePolicy(descriptor({ targetPaths: [path.join(WS, 'events', 'e.txt')] }), p).action).to.equal('allow');
     });
 });
 

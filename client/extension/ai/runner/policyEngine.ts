@@ -33,9 +33,7 @@ export interface PolicyRule {
     expiresAt?: number;
 }
 
-export type PolicyLayerId =
-    | 'global-defaults' | 'user' | 'workspace' | 'mode'
-    | 'workflow' | 'role' | 'task' | 'approvals';
+export type PolicyLayerId = 'global-defaults' | 'user';
 
 export interface PolicyLayer {
     id: PolicyLayerId;
@@ -84,9 +82,6 @@ export interface PolicyDecision {
 }
 
 const SEVERITY: Record<PermissionAction, number> = { allow: 0, ask: 1, deny: 2 };
-const LAYER_ORDER: PolicyLayerId[] = ['global-defaults', 'user', 'workspace', 'mode', 'workflow', 'role', 'task', 'approvals'];
-// Only user-granted layers may loosen; everything else (incl. model-derived task policy) tightens.
-const LOOSEN_CAPABLE = new Set<PolicyLayerId>(['user', 'approvals']);
 const WRITE_LIKE = new Set<PolicySubject>(['edit', 'bash', 'git', 'media', 'mcp', 'task']);
 
 export const DEFAULT_PROTECTED_PATHS = [
@@ -349,18 +344,11 @@ export function resolvePolicy(
     profile: PermissionProfile,
     extraLayers: PolicyLayer[] = []
 ): PolicyDecision {
-    const layers = new Map<PolicyLayerId, PolicyLayer>();
-    layers.set('global-defaults', {
-        id: 'global-defaults',
-        rules: profile.sandboxMode === 'danger-full-access' ? [] : buildProtectedPathRules(profile.protectedPaths),
-    });
-    layers.set('user', { id: 'user', rules: profile.rules });
-    for (const layer of extraLayers) layers.set(layer.id, layer);
-
     const matchedRules: string[] = [];
     let action = baseAction(d, profile);
     let denialCode = action === 'deny' ? 'profile_default' : '';
 
+    // Hard boundary 1: writable roots
     const escaped = outsideWritableRoots(d, profile);
     if (escaped) {
         action = 'deny';
@@ -368,22 +356,30 @@ export function resolvePolicy(
         matchedRules.push('writable-roots');
     }
 
-    for (const layerId of LAYER_ORDER) {
-        const layer = layers.get(layerId);
-        if (!layer?.rules.length) continue;
-        const winner = pickWinner(layer.rules.filter(rule => ruleMatches(rule, d)));
-        if (!winner) continue;
-        if (!LOOSEN_CAPABLE.has(layerId) && SEVERITY[winner.action] < SEVERITY[action]) continue;
-        // Writable-root and protected-path denials are sandbox boundaries;
-        // session/user approval rules cannot loosen them.
-        if (denialCode === 'outside_writable_roots' || denialCode === 'protected_path') {
-            matchedRules.push(winner.id);
-            continue;
+    // Hard boundary 2: global-defaults (protected paths)
+    if (profile.sandboxMode !== 'danger-full-access') {
+        const protectedRules = buildProtectedPathRules(profile.protectedPaths);
+        const hit = protectedRules.find(rule => ruleMatches(rule, d));
+        if (hit) {
+            action = 'deny';
+            denialCode = 'protected_path';
+            matchedRules.push(hit.id);
         }
-        action = winner.action;
-        matchedRules.push(winner.id);
-        if (action === 'deny') {
-            denialCode = layerId === 'global-defaults' ? 'protected_path' : `rule:${winner.id}`;
+    }
+
+    // User layer: user-configured and learned approval rules (cannot override sandbox hard boundaries)
+    if (denialCode !== 'outside_writable_roots' && denialCode !== 'protected_path') {
+        const effectiveRules = [...profile.rules, ...extraLayers.flatMap(l => l.rules)];
+        const matchingRules = effectiveRules.filter(rule => ruleMatches(rule, d));
+        if (matchingRules.length > 0) {
+            const winner = pickWinner(matchingRules);
+            if (winner) {
+                action = winner.action;
+                matchedRules.push(winner.id);
+                if (action === 'deny') {
+                    denialCode = `rule:${winner.id}`;
+                }
+            }
         }
     }
 

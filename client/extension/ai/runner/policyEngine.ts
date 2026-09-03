@@ -399,7 +399,9 @@ export function resolvePolicy(
             matchedRules,
             whyDenied: escaped
                 ? `Target '${escaped}' is outside the writable roots.`
-                : `'${d.toolName}' (${d.subject}, risk ${d.riskLevel}) is denied under profile '${profile.id}'.`,
+                : denialCode === 'protected_path'
+                    ? `Access denied: Path '${d.targetPaths?.[0] ?? d.toolName}' is outside the workspace and configured game directories.`
+                    : `'${d.toolName}' (${d.subject}, risk ${d.riskLevel}) is denied under profile '${profile.id}'.`,
             allowedAlternatives: SUBJECT_ALTERNATIVES[d.subject] ?? [],
             approvalPath: canEscalate
                 ? { reviewer: profile.approvalsReviewer, requestedScope: 'once', summary: `Ask the user to approve '${d.toolName}' for this call.` }

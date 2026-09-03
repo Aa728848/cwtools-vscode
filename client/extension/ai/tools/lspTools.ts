@@ -25,7 +25,7 @@ import type {
     CwtRuleValueReference,
     PdxSemanticCatalog,
 } from '../types';
-import { formatReadablePathForTool, isPathInsideOrEqual } from '../workspaceSandbox';
+import { formatReadablePathForTool, isPathInsideOrEqual, resolveReadablePathInput, isSecuritySandboxDisabled } from '../workspaceSandbox';
 import { getConfiguredGameRoots } from '../../configuredGameRoots';
 import { diagnosticMetadata } from './diagnosticMetadata';
 import { diagnosticCodeString, diagnosticMatchesIgnoredKey } from '../../diagnosticI18n';
@@ -225,6 +225,31 @@ export class LspToolHandler {
         }
     }
 
+    /** Assert that a readable file path is valid and within the allowed workspace/game roots. */
+    guardReadablePath(filePath?: string): { resolved?: string; error?: string } {
+        if (!filePath || typeof filePath !== 'string' || !filePath.trim()) return {};
+        let pathForResolution = filePath;
+        if (/^file:\/\//i.test(filePath)) {
+            try {
+                const uri = new URL(filePath);
+                pathForResolution = decodeURIComponent(uri.pathname);
+                if (/^\/[A-Za-z]:\//.test(pathForResolution)) pathForResolution = pathForResolution.slice(1);
+                if (uri.hostname && uri.hostname !== 'localhost') {
+                    pathForResolution = `\\\\${uri.hostname}${pathForResolution.replace(/\//g, '\\')}`;
+                }
+            } catch {
+                return { error: `Access denied: '${filePath}' is not a valid local file URI.` };
+            }
+        }
+        const resolution = resolveReadablePathInput(pathForResolution, this.ctx.workspaceRoot);
+        if (!isSecuritySandboxDisabled() && !resolution.isWithinReadableRoot) {
+            return {
+                error: `Access denied: Path '${filePath}' is outside the workspace and configured game directories.`,
+            };
+        }
+        return { resolved: resolution.resolved };
+    }
+
     // - Concurrency limiter -
     // The CWTools LSP server is single-threaded (F# async event loop).
     // When the AI agent fires many parallel read-only tool calls, flooding it
@@ -420,8 +445,13 @@ export class LspToolHandler {
             prevChain: [],
             fromChain: [],
         };
+        const guard = this.guardReadablePath(args.file);
+        if (guard.error) {
+            return { ...unknown, error: guard.error, success: false } as any;
+        }
+        const targetFile = guard.resolved ?? args.file;
         try {
-            const uri = vs.Uri.file(args.file);
+            const uri = vs.Uri.file(targetFile);
 
             // Strategy 1: structured LSP command
             try {
@@ -561,6 +591,19 @@ export class LspToolHandler {
                 error: 'explore_pdx_project requires query, file, or typeName.',
             };
         }
+        let targetFileUri = '';
+        if (file) {
+            const guard = this.guardReadablePath(file);
+            if (guard.error) {
+                return {
+                    ok: false,
+                    status: 'error',
+                    error: guard.error,
+                    success: false,
+                } as any;
+            }
+            targetFileUri = vs.Uri.file(guard.resolved ?? file).toString();
+        }
         const relationshipKinds = Array.isArray(args.relationshipKinds)
             ? args.relationshipKinds.filter((kind): kind is string => typeof kind === 'string').slice(0, 8)
             : [];
@@ -573,7 +616,7 @@ export class LspToolHandler {
             try {
                 const raw = await this.lspRequestWithRetry('cwtools.ai.exploreProject', [
                     query,
-                    file ? vs.Uri.file(path.isAbsolute(file) ? file : path.resolve(this.ctx.workspaceRoot, file)).toString() : '',
+                    targetFileUri,
                     typeName,
                     !!args.exact,
                     args.depth ?? 1,
@@ -672,8 +715,11 @@ export class LspToolHandler {
     }
 
     async getEntityInfo(args: { file: string }): Promise<unknown> {
+        const guard = this.guardReadablePath(args.file);
+        if (guard.error) return { ok: false, error: guard.error, success: false };
+        const targetFile = guard.resolved ?? args.file;
         try {
-            const uri = vs.Uri.file(args.file);
+            const uri = vs.Uri.file(targetFile);
             const raw = await this.lspRequest('cwtools.ai.getEntityInfo', [uri.toString()]) as any;
             return raw ?? { ok: false, error: 'No response.' };
         } catch (e) {
@@ -800,12 +846,13 @@ export class LspToolHandler {
     // The structured error is passed through unchanged; transport failures get the
     // same shape with the operation and target filled in so failures keep context.
 
-    /** Normalize an absolute or workspace-relative shader path into a file URI. */
     private shaderFileUri(file: string | undefined): string | undefined {
         const trimmed = file?.trim();
         if (!trimmed) return undefined;
+        const guard = this.guardReadablePath(trimmed);
+        if (guard.error) throw new Error(guard.error);
         if (/^[a-z][a-z0-9+.-]*:\/\//i.test(trimmed)) return trimmed;
-        const absolute = path.isAbsolute(trimmed) ? trimmed : path.resolve(this.ctx.workspaceRoot, trimmed);
+        const absolute = guard.resolved ?? trimmed;
         return vs.Uri.file(absolute).toString();
     }
 
@@ -1269,7 +1316,11 @@ export class LspToolHandler {
 
         const targets = Array.from(new Set(targetFiles
             .filter(file => typeof file === 'string' && file.trim().length > 0)
-            .map(file => path.resolve(this.ctx.workspaceRoot, file))))
+            .map(file => {
+                const guard = this.guardReadablePath(file);
+                if (guard.error) throw new Error(guard.error);
+                return guard.resolved ?? path.resolve(this.ctx.workspaceRoot, file);
+            })))
             .sort((a, b) => a.localeCompare(b))
             .slice(0, 32);
         const definitions = new Map<string, PdxSemanticCatalog['definitionTypes'][number]>();
@@ -1460,8 +1511,13 @@ export class LspToolHandler {
     // - getPdxBlock -
 
     async getPdxBlock(args: { file: string; symbol: string }, context?: import('../types').AgentToolContext): Promise<{ content: string; truncated: boolean; startLine?: number; endLine?: number; lineNumberBase?: 1; error?: string }> {
+        const guard = this.guardReadablePath(args.file);
+        if (guard.error) {
+            return { content: guard.error, truncated: false, error: guard.error, success: false } as any;
+        }
+        const targetFile = guard.resolved ?? args.file;
         try {
-            const symbols = await this.documentSymbols({ file: args.file });
+            const symbols = await this.documentSymbols({ file: targetFile });
             if (symbols.symbols.length === 0) {
                 return { content: `Error: Could not parse symbols in file (or file is empty/invalid).`, truncated: false, error: 'Could not parse symbols in file (or file is empty/invalid).' };
             }
@@ -2862,6 +2918,21 @@ export class LspToolHandler {
         severity?: 'error' | 'warning' | 'info' | 'hint' | 'all';
         limit?: number;
     }, context?: import('../types').AgentToolContext): Promise<import('../types').GetDiagnosticsResult> {
+        if (args.file) {
+            const guard = this.guardReadablePath(args.file);
+            if (guard.error) {
+                return {
+                    summary: { errors: 0, warnings: 0, info: 0, hints: 0 },
+                    total: 0,
+                    filesCount: 0,
+                    entries: [],
+                    truncated: false,
+                    error: guard.error,
+                    success: false,
+                } as any;
+            }
+            args.file = guard.resolved ?? args.file;
+        }
         const generalDomain = context?.runnerOptions?.schedulingState.domainProfile === 'general';
         const requestedLimit = typeof args.limit === 'number' && Number.isFinite(args.limit)
             ? args.limit
@@ -3886,6 +3957,19 @@ export class LspToolHandler {
     }
 
     private async grepImpl(args: import('../types').GrepArgs, context?: import('../types').AgentToolContext): Promise<import('../types').GrepResult> {
+        if (args.path) {
+            const guard = this.guardReadablePath(args.path);
+            if (guard.error) {
+                return {
+                    matches: [],
+                    totalMatches: 0,
+                    truncated: false,
+                    error: guard.error,
+                    success: false,
+                } as any;
+            }
+            args.path = guard.resolved ?? args.path;
+        }
         const generalDomain = context?.runnerOptions?.schedulingState.domainProfile === 'general';
         const limit = Math.min(args.limit ?? 50, 200);
         const matches: Array<{ file: string; line: number; content: string }> = [];
@@ -4057,10 +4141,15 @@ export class LspToolHandler {
     ): Promise<GetCompletionAtResult> {
         let context: GetCompletionAtResult['context'] | undefined;
         const generalDomain = toolContext?.runnerOptions?.schedulingState.domainProfile === 'general';
+        const guard = this.guardReadablePath(args.file);
+        if (guard.error) {
+            return { completions: [], error: guard.error, success: false } as any;
+        }
+        const targetFile = guard.resolved ?? args.file;
         try {
             const requestedLimit = Number.isFinite(args.limit) ? Math.trunc(args.limit as number) : 30;
             const limit = Math.max(1, Math.min(200, requestedLimit));
-            const uri = vs.Uri.file(args.file);
+            const uri = vs.Uri.file(targetFile);
             const document = await vs.workspace.openTextDocument(uri);
             let linePrefix = '';
             let tokenPrefix: string | undefined;
@@ -4198,15 +4287,20 @@ export class LspToolHandler {
     // - documentSymbols -
 
     async documentSymbols(args: { file: string }): Promise<DocumentSymbolsResult> {
-        return this.cachedLspRead(`dsym:${args.file}`, async () => {
+        const guard = this.guardReadablePath(args.file);
+        if (guard.error) {
+            return { symbols: [], lineNumberBase: 0, error: guard.error, success: false } as any;
+        }
+        const resolvedFile = guard.resolved ?? args.file;
+        return this.cachedLspRead(`dsym:${resolvedFile}`, async () => {
             try {
-                const uri = vs.Uri.file(args.file);
+                const uri = vs.Uri.file(resolvedFile);
                 const symbols = await this.vsCommand<vs.DocumentSymbol[]>(
                     'vscode.executeDocumentSymbolProvider', [uri]
                 );
 
                 if (!symbols || symbols.length === 0) {
-                    const fallback = parsePdxDocumentSymbols(fs.readFileSync(args.file, 'utf-8'), args.file);
+                    const fallback = parsePdxDocumentSymbols(fs.readFileSync(resolvedFile, 'utf-8'), resolvedFile);
                     return { symbols: fallback, lineNumberBase: 0 };
                 }
 
@@ -4229,7 +4323,7 @@ export class LspToolHandler {
                 return { symbols: symbols.map(s => mapSymbol(s, 0)), lineNumberBase: 0 };
             } catch (e) {
                 try {
-                    const fallback = parsePdxDocumentSymbols(fs.readFileSync(args.file, 'utf-8'), args.file);
+                    const fallback = parsePdxDocumentSymbols(fs.readFileSync(resolvedFile, 'utf-8'), resolvedFile);
                     if (fallback.length > 0) return { symbols: fallback, lineNumberBase: 0 };
                 } catch { /* Preserve the language-provider error below. */ }
                 return { symbols: [], lineNumberBase: 0, error: e instanceof Error ? e.message : String(e) };
@@ -4538,6 +4632,11 @@ export class LspToolHandler {
     async goToDefinition(args: { symbolName?: string; file?: string; line?: number; column?: number }): Promise<unknown> {
         const symbolName = args.symbolName?.trim();
         if (symbolName) return this.queryDefinitionByName({ symbolName });
+        if (args.file) {
+            const guard = this.guardReadablePath(args.file);
+            if (guard.error) return { locations: [], error: guard.error, success: false };
+            args.file = guard.resolved ?? args.file;
+        }
         const line = args.line;
         const column = args.column;
         if (!args.file || typeof line !== 'number' || !Number.isInteger(line)
@@ -4571,6 +4670,11 @@ export class LspToolHandler {
     }
 
     async findReferences(args: { identifier?: string; file?: string; line?: number; column?: number; limit?: number }): Promise<unknown> {
+        if (args.file) {
+            const guard = this.guardReadablePath(args.file);
+            if (guard.error) return { references: [], total: 0, error: guard.error, success: false };
+            args.file = guard.resolved ?? args.file;
+        }
         const identifier = args.identifier?.trim();
         if (identifier) return this.queryReferences({ identifier, file: args.file, limit: args.limit });
         const line = args.line;
@@ -4602,7 +4706,12 @@ export class LspToolHandler {
     }
 
     async hoverSymbol(args: { file: string; line: number; column: number }): Promise<unknown> {
-        const uri = vs.Uri.file(args.file);
+        const guard = this.guardReadablePath(args.file);
+        if (guard.error) {
+            return { text: '', found: false, error: guard.error, success: false };
+        }
+        const targetFile = guard.resolved ?? args.file;
+        const uri = vs.Uri.file(targetFile);
         const position = new vs.Position(args.line, args.column);
         try {
             const hovers = await this.vsCommand<vs.Hover[]>('vscode.executeHoverProvider', [uri, position]);

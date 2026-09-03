@@ -58,6 +58,7 @@ import { buildProfile, resolvePolicy, subjectForEffect, type PolicyPresetId, typ
 import { evaluateEffectiveToolPolicy } from './runner/effectiveToolPolicy';
 import { preflightCommand, type ConfiguredCommandPolicyRule } from './runner/commandPreflight';
 import { sessionFileWriteMode, sessionPolicyPreset } from './runner/sessionPermissions';
+import { PermissionPolicyStore } from './runner/permissionPolicy';
 import type { ApiKeyManager } from './aiService';
 import type { WebSearchProvider } from './tools/webAccess';
 import { EvidenceGate, type EvidenceCallRecord } from './evidence/evidenceGate';
@@ -1063,6 +1064,8 @@ export class AgentToolExecutor {
         if (subject === 'edit' && effectiveWriteMode === 'auto' && preset !== 'read-only') {
             profileRules.push({ id: 'effective-auto-write', subject: 'edit', pathGlob: '**', action: 'allow', riskMax: 2, scope: 'session' });
         }
+        const learnedRules = PermissionPolicyStore.getInstance().toPolicyRules();
+        profileRules.push(...learnedRules);
         const targets = toolName === 'candidate_transaction' && args.action === 'commit'
             ? this.candidateTransactions.files.map(file => file.path)
             : getAgentToolTargetFiles(toolName, args, this.workspaceRoot, context?.runnerOptions?.topicId);

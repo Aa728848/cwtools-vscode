@@ -102,6 +102,55 @@ describe('PermissionPolicyStore Unit Tests', () => {
             expect(hasInlineEvalPayload(command), command).to.equal(true);
             expect(deriveCommandPrefix(command), command).to.deep.equal([]);
         }
+        expect(hasInlineEvalPayload('python -c "print(1)"')).to.be.true;
+        expect(deriveCommandPrefix('python -c "print(1)"')).to.deep.equal([]);
+    });
+
+    it('toPolicyRules converts permission rules to PolicyRule for policyEngine integration', () => {
+        const { PermissionPolicyStore } = loadPermissionPolicyModule();
+        const store = PermissionPolicyStore.getInstance();
+        store.addRule({
+            tool: 'run_command',
+            cwdScope: 'C:/project',
+            commandPrefix: ['npm', 'test'],
+            riskMax: 2,
+            sessionOnly: false,
+        });
+        store.addRule({
+            tool: 'edit_file',
+            pathGlob: 'common/**',
+            cwdScope: 'C:/project',
+            riskMax: 2,
+            sessionOnly: true,
+        });
+
+        const policyRules = store.toPolicyRules();
+        expect(policyRules).to.have.lengthOf(2);
+        expect(policyRules[0]!.subject).to.equal('bash');
+        expect(policyRules[0]!.action).to.equal('allow');
+        expect(policyRules[0]!.commandPrefix).to.deep.equal(['npm', 'test']);
+        expect(policyRules[0]!.scope).to.equal('global');
+        expect(policyRules[0]!.learnedFromApproval).to.be.true;
+
+        expect(policyRules[1]!.subject).to.equal('edit');
+        expect(policyRules[1]!.action).to.equal('allow');
+        expect(policyRules[1]!.pathGlob).to.equal('common/**');
+        expect(policyRules[1]!.scope).to.equal('session');
+    });
+
+    it('supports pathGlob file write rules and checks them in isApproved', () => {
+        const { PermissionPolicyStore } = loadPermissionPolicyModule();
+        const store = PermissionPolicyStore.getInstance();
+        store.addRule({
+            tool: 'edit_file',
+            cwdScope: 'C:/project',
+            pathGlob: 'events/**',
+            riskMax: 1,
+            sessionOnly: true,
+        });
+
+        expect(store.isApproved('edit_file', { filePath: 'events/test.txt' }, 1)).to.be.true;
+        expect(store.isApproved('edit_file', { filePath: 'common/test.txt' }, 1)).to.be.false;
     });
 });
 

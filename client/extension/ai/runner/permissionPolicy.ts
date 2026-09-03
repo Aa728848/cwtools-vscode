@@ -1,6 +1,7 @@
+import * as path from 'path';
 import { getProjectWorkspaceRoot } from '../workspacePaths';
 import { isPathInsideOrEqual } from '../workspaceSandbox';
-import { commandMatchesPrefix } from './policyEngine';
+import { commandMatchesPrefix, matchPathGlob, type PolicyRule } from './policyEngine';
 
 // Inline-eval flags: prefix matching cannot bound the code payload, so these never learn rules.
 const INLINE_EVAL_FLAGS = new Set(['-c', '-e', '-p', '--eval', '-command', '-encodedcommand']);
@@ -80,6 +81,7 @@ export interface PermissionRule {
     id: string;
     tool: string;
     commandPrefix?: string[];
+    pathGlob?: string;
     cwdScope: string;
     riskMax: 0 | 1 | 2 | 3;
     sessionOnly: boolean;
@@ -147,7 +149,26 @@ export class PermissionPolicyStore {
         return restored;
     }
 
-    private findEquivalent(rule: Pick<PermissionRule, 'tool' | 'cwdScope' | 'riskMax' | 'commandPrefix'>): PermissionRule | undefined {
+    /**
+     * Convert active permission rules into policyEngine PolicyRule objects.
+     */
+    public toPolicyRules(): PolicyRule[] {
+        return this.getRules().map(r => ({
+            id: r.id,
+            subject: (r.tool === 'run_command' || r.tool === 'execute_command') ? 'bash'
+                   : (r.pathGlob || r.tool === 'write_file' || r.tool === 'edit_file') ? 'edit'
+                   : 'bash',
+            action: 'allow' as const,
+            commandPrefix: r.commandPrefix,
+            pathGlob: r.pathGlob,
+            riskMax: r.riskMax,
+            scope: r.sessionOnly ? 'session' as const : 'global' as const,
+            learnedFromApproval: true,
+            expiresAt: r.expiresAt,
+        }));
+    }
+
+    private findEquivalent(rule: Pick<PermissionRule, 'tool' | 'cwdScope' | 'riskMax' | 'commandPrefix' | 'pathGlob'>): PermissionRule | undefined {
         const samePrefix = (a?: string[], b?: string[]): boolean => {
             const x = a ?? [];
             const y = b ?? [];
@@ -156,6 +177,7 @@ export class PermissionPolicyStore {
         return this.rules.find(r => r.tool === rule.tool
             && r.cwdScope === rule.cwdScope
             && r.riskMax === rule.riskMax
+            && r.pathGlob === rule.pathGlob
             && samePrefix(r.commandPrefix, rule.commandPrefix));
     }
 
@@ -182,6 +204,15 @@ export class PermissionPolicyStore {
             // 1. 严格校验 riskMax：如果该命令的风险级别超过了规则豁免的上限，拒绝豁免
             if (riskLevel > rule.riskMax) {
                 continue;
+            }
+
+            // Check pathGlob rules for file write/edit tools
+            if (rule.pathGlob) {
+                const targetPath = (args['file'] ?? args['filePath'] ?? args['path']) as string | undefined;
+                if (targetPath) {
+                    const wsRel = path.relative(wsRoot, path.resolve(wsRoot, targetPath)).replace(/\\/g, '/');
+                    if (!matchPathGlob(rule.pathGlob, wsRel)) continue;
+                }
             }
 
             // Check command prefix rules for run_command tool

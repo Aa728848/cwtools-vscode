@@ -1,56 +1,19 @@
 import { expect } from 'chai';
 import { classifyRecoveryError } from '../../extension/ai/runner/recoveryCoordinator';
+import { createVscodeRunnerStub, loadModuleWithVscodeStub } from './runnerTestFixtures';
 
-const vscodeStub = {
-    workspace: {
-        getConfiguration: () => ({
-            get: <T>(_key: string, defaultValue?: T): T | undefined => defaultValue,
-        }),
-        workspaceFolders: [],
-        textDocuments: [],
-        isTrusted: true,
-    },
-    window: {
-        activeTextEditor: undefined,
-        createOutputChannel: () => ({
-            appendLine: () => undefined,
-            show: () => undefined,
-            clear: () => undefined,
-            dispose: () => undefined,
-        }),
-    },
-    languages: {
-        getDiagnostics: () => [],
-    },
-    DiagnosticSeverity: { Error: 0, Warning: 1 },
-};
+const vscodeStub = createVscodeRunnerStub();
 
 function loadAgentRunner(options: { freshLiveContext?: boolean } = {}) {
-    const moduleLoader = require('module') as { _load: (...args: any[]) => any };
-    const originalLoad = moduleLoader._load;
-    const agentRunnerPath = require.resolve('../../extension/ai/agentRunner');
-    const liveContextPath = require.resolve('../../extension/ai/runner/liveContext');
-    const cachedAgentRunner = require.cache[agentRunnerPath];
-    const cachedLiveContext = require.cache[liveContextPath];
-    if (options.freshLiveContext) {
-        delete require.cache[agentRunnerPath];
-        delete require.cache[liveContextPath];
-    }
-    moduleLoader._load = function (this: unknown, request: string, ...args: any[]) {
-        if (request === 'vscode') return vscodeStub;
-        return originalLoad.apply(this, [request, ...args]);
-    };
-    try {
-        return require('../../extension/ai/agentRunner') as typeof import('../../extension/ai/agentRunner');
-    } finally {
-        moduleLoader._load = originalLoad;
-        if (options.freshLiveContext) {
-            delete require.cache[agentRunnerPath];
-            delete require.cache[liveContextPath];
-            if (cachedAgentRunner) require.cache[agentRunnerPath] = cachedAgentRunner;
-            if (cachedLiveContext) require.cache[liveContextPath] = cachedLiveContext;
-        }
-    }
+    return loadModuleWithVscodeStub<typeof import('../../extension/ai/agentRunner')>(
+        '../../extension/ai/agentRunner',
+        vscodeStub,
+        {
+            freshPaths: options.freshLiveContext
+                ? ['../../extension/ai/agentRunner', '../../extension/ai/runner/liveContext']
+                : ['../../extension/ai/agentRunner'],
+        },
+    );
 }
 
 describe('AgentRunner 状态机与工具调度测试 (阶段 0 基线)', () => {

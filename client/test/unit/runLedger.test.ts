@@ -3,6 +3,9 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { executionModeForSchedulingState, schedulingStateFromAdmission } from '../../extension/ai/runner/scheduling';
+import { createVscodeRunnerStub, loadModuleWithVscodeStub as loadWithStub } from './runnerTestFixtures';
+
+const vscodeStub = createVscodeRunnerStub();
 
 const PARADOX_WRITE = schedulingStateFromAdmission({
     domainProfile: 'paradox', authorization: 'workspace_write', initialPhase: 'execute',
@@ -724,18 +727,7 @@ function loadConflictDetectorModule() {
 }
 
 function loadModuleWithVscodeStub(request: string): unknown {
-    const moduleLoader = require('module') as { _load: (...args: any[]) => any };
-    const originalLoad = moduleLoader._load;
-    moduleLoader._load = function (this: unknown, moduleRequest: string, ...args: any[]) {
-        if (moduleRequest === 'vscode') return vscodeStub;
-        return originalLoad.apply(this, [moduleRequest, ...args]);
-    };
-    try {
-        delete require.cache[require.resolve(request)];
-        return require(request);
-    } finally {
-        moduleLoader._load = originalLoad;
-    }
+    return loadWithStub(request, vscodeStub);
 }
 
 async function waitForEvent(
@@ -748,19 +740,3 @@ async function waitForEvent(
         await new Promise(resolve => setTimeout(resolve, 5));
     }
 }
-
-const vscodeStub = {
-    workspace: {
-        workspaceFolders: [] as Array<{ uri: { fsPath: string } }>,
-    },
-    window: {
-        showInformationMessage: () => undefined,
-        showErrorMessage: () => undefined,
-        createOutputChannel: () => ({
-            appendLine: () => undefined,
-            show: () => undefined,
-            clear: () => undefined,
-            dispose: () => undefined,
-        }),
-    },
-};

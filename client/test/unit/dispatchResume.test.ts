@@ -10,44 +10,11 @@ import { GENERAL_PARALLEL, PARADOX_PARALLEL } from './schedulingFixtures';
  * covered by the orchestrator integration tests.
  */
 
+import { createVscodeRunnerStub } from './runnerTestFixtures';
+
 let stubConfigOverrides: Record<string, any> = {};
 
-const vscodeStub = {
-    workspace: {
-        workspaceFolders: [],
-        isTrusted: true,
-        getConfiguration: () => ({
-            get: <T>(key: string, defaultValue?: T): T | undefined => {
-                if (key in stubConfigOverrides) return stubConfigOverrides[key] as T;
-                return defaultValue;
-            },
-        }),
-    },
-    languages: { getDiagnostics: () => [] },
-    DiagnosticSeverity: { Error: 0, Warning: 1, Information: 2, Hint: 3 },
-    commands: { executeCommand: async () => undefined },
-    Uri: {
-        file: (filePath: string) => ({
-            fsPath: filePath,
-            toString: () => `file://${filePath.replace(/\\/g, '/')}`,
-        }),
-    },
-    CancellationTokenSource: class {
-        token = {};
-        cancel(): void { /* stub */ }
-        dispose(): void { /* stub */ }
-    },
-    window: {
-        showWarningMessage: async () => undefined,
-        showInformationMessage: async () => undefined,
-        createOutputChannel: () => ({
-            appendLine: () => undefined,
-            show: () => undefined,
-            clear: () => undefined,
-            dispose: () => undefined,
-        }),
-    },
-};
+const vscodeStub = createVscodeRunnerStub({ configOverrides: stubConfigOverrides });
 
 function loadModules() {
     const moduleLoader = require('module') as { _load: (...args: any[]) => any };

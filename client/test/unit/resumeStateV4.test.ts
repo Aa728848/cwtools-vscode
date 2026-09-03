@@ -4,6 +4,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { schedulingStateFromAdmission } from '../../extension/ai/runner/scheduling';
 import type { ChatMessage } from '../../extension/ai/types';
+import { createVscodeRunnerStub, loadModuleWithVscodeStub, createTempRunnerWorkspace } from './runnerTestFixtures';
 
 const PARADOX_WRITE = schedulingStateFromAdmission({
     domainProfile: 'paradox', authorization: 'workspace_write', initialPhase: 'execute',
@@ -13,6 +14,16 @@ const GENERAL_PLAN = schedulingStateFromAdmission({
     domainProfile: 'general', authorization: 'plan_write_only', initialPhase: 'plan',
     explicitDelegation: false, confidence: 1, evidence: ['test'],
 });
+
+const vscodeStub = createVscodeRunnerStub();
+
+function loadCheckpointModule() {
+    return loadModuleWithVscodeStub<typeof import('../../extension/ai/runner/checkpoint')>(
+        '../../extension/ai/runner/checkpoint',
+        vscodeStub,
+        { freshPaths: ['../../extension/ai/workspacePaths', '../../extension/ai/runner/checkpoint'] },
+    );
+}
 
 describe('ResumeState V4', () => {
     it('appends interrupted replies only for unanswered tool calls', () => {
@@ -31,6 +42,33 @@ describe('ResumeState V4', () => {
         expect(normalized).to.have.lengthOf(4);
         expect(normalized[3]?.tool_call_id).to.equal('call_2');
         expect(JSON.parse(normalized[3]?.content as string).interrupted).to.equal(true);
+    });
+
+    it('does not duplicate existing tool results when preparing resume messages', () => {
+        const { prepareMessagesForResume } = loadCheckpointModule();
+        const messages = [
+            {
+                role: 'assistant' as const,
+                content: '',
+                tool_calls: [
+                    {
+                        id: 'call_1',
+                        type: 'function' as const,
+                        function: { name: 'grep', arguments: '{"query":"foo"}' },
+                    },
+                ],
+            },
+            {
+                role: 'tool' as const,
+                content: '{"success":true}',
+                tool_call_id: 'call_1',
+                name: 'grep',
+            },
+        ];
+
+        const prepared = prepareMessagesForResume(messages);
+        expect(prepared).to.have.length(2);
+        expect(prepared.filter(message => message.role === 'tool')).to.have.length(1);
     });
 
     it('builds a compact resume transcript from summary plus recent tail', () => {
@@ -188,31 +226,3 @@ describe('ResumeState V4', () => {
         }
     });
 });
-
-function loadCheckpointModule() {
-    const moduleLoader = require('module') as { _load: (...args: any[]) => any };
-    const originalLoad = moduleLoader._load;
-    moduleLoader._load = function (this: unknown, request: string, ...args: any[]) {
-        if (request === 'vscode') return vscodeStub;
-        return originalLoad.apply(this, [request, ...args]);
-    };
-    try {
-        delete require.cache[require.resolve('../../extension/ai/workspacePaths')];
-        delete require.cache[require.resolve('../../extension/ai/runner/checkpoint')];
-        return require('../../extension/ai/runner/checkpoint') as typeof import('../../extension/ai/runner/checkpoint');
-    } finally {
-        moduleLoader._load = originalLoad;
-    }
-}
-
-const vscodeStub = {
-    workspace: { workspaceFolders: [] as Array<{ uri: { fsPath: string } }> },
-    window: {
-        createOutputChannel: () => ({
-            appendLine: () => undefined,
-            show: () => undefined,
-            clear: () => undefined,
-            dispose: () => undefined,
-        }),
-    },
-};

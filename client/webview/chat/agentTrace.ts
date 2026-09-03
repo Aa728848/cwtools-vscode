@@ -1,16 +1,7 @@
 import { escapeHtml } from './formatters';
+import type { AgentRunEvent } from '../../shared/agentRunEvent';
 
-export interface AgentTraceEvent {
-    eventId: string;
-    runId: string;
-    sequence: number;
-    timestamp: number;
-    type: string;
-    status?: string;
-    invocationId?: string;
-    agentId?: string;
-    payload?: unknown;
-}
+export type AgentTraceEvent = AgentRunEvent;
 
 export interface AgentTraceNode {
     agentId: string;

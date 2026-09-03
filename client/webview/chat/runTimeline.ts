@@ -8,17 +8,9 @@
  * - 子 agent lane 按 agentId 分组显示 running/done/failed/cancelled
  */
 
-export interface TimelineEvent {
-    eventId: string;
-    runId: string;
-    sequence: number;
-    timestamp: number;
-    type: string;
-    status?: string;
-    invocationId?: string;
-    agentId?: string;
-    payload: any;
-}
+import type { AgentRunEvent } from '../../shared/agentRunEvent';
+
+export type TimelineEvent = AgentRunEvent;
 
 export type TimelineGroupId = 'model' | 'tools' | 'processes' | 'files' | 'permissions' | 'validation' | 'context' | 'activity' | 'scheduling' | 'subagents' | 'other';
 

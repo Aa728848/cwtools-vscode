@@ -10,6 +10,7 @@ import {
     type ChatMessage,
 } from '../types';
 import { isPathInsideOrEqual } from '../../pathScope';
+import type { AgentRunEvent as BaseAgentRunEvent } from '../../../shared/agentRunEvent';
 import { isRecord } from '../../../shared/protocolValidation';
 import { atomicWriteJson, atomicWriteText, readJsonWithBackup, sha256Text } from './durableStorage';
 import { getHistoryPolicy } from './historyPolicy';
@@ -112,19 +113,9 @@ export type AgentRunEventType =
     | 'side_question_started'
     | 'side_question_completed';
 
-export interface AgentRunEvent {
-    eventId: string;
-    runId: string;
-    sequence: number;
-    timestamp: number;
+export interface AgentRunEvent extends Omit<BaseAgentRunEvent, 'type'> {
     type: AgentRunEventType;
     status?: 'pending' | 'running' | 'done' | 'failed' | 'cancelled';
-    invocationId?: string;
-    agentId?: string;
-    /** Event payloads have many shapes (step/toolArgs/result/diff/…); consumers
-     * narrow each field. Converting this to `unknown` would force ~90 call-site
-     * casts, so the envelope keeps `any` — validate at the consumer boundary. */
-    payload: any;
 }
 
 export interface LargeResultCleanupResult {

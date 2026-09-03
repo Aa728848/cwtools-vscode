@@ -1,4 +1,9 @@
 import type { ChatHistoryMessageView, TopicListItem, TopicStats } from './messages.shared';
+import type { AgentRunEvent } from '../../shared/agentRunEvent';
+import type { ManagerSchedulingStateView } from '../../shared/agentSchedulingProtocol';
+import type { AgentTranscriptSnapshot } from '../../shared/agentTranscript';
+
+export type { ManagerSchedulingStateView };
 
 export type ManagerWebviewMessage =
     | { type: 'ready' }
@@ -11,22 +16,6 @@ export type ManagerWebviewMessage =
     | { type: 'pinTopic'; topicId: string; pinned?: boolean }
     | { type: 'setTopicWorkspace'; topicId: string; workspaceId?: string | null; workspaceLabel?: string | null }
     | { type: 'cancelGeneration' };
-
-export interface ManagerSchedulingStateView {
-    profileName: string;
-    domainProfile: 'paradox' | 'general' | 'hybrid';
-    authorization: 'read_only' | 'plan_write_only' | 'workspace_write';
-    phase: 'inspect' | 'plan' | 'execute' | 'verify' | 'finalize';
-    dispatch: 'single' | 'parallel' | 'specialist';
-    overlays: string[];
-    routeConfidence: number;
-    routeEvidence: string[];
-    awaitingUserDecision?: boolean;
-    routingSource?: 'model' | 'deterministic' | 'workflow' | 'user';
-    phaseReason: string;
-    dispatchReason?: string;
-    revision: number;
-}
 
 export interface ManagerChildRunView {
     runId: string;
@@ -64,17 +53,7 @@ export interface ManagerRunSnapshotMessage {
         writtenFiles: string[];
         [key: string]: unknown;
     };
-    events?: Array<{
-        eventId: string;
-        runId: string;
-        sequence: number;
-        timestamp: number;
-        type: string;
-        status?: string;
-        invocationId?: string;
-        agentId?: string;
-        payload?: unknown;
-    }>;
+    events?: AgentRunEvent[];
     eventCount?: number;
     truncatedEventCount?: number;
     childRuns?: ManagerChildRunView[];
@@ -128,22 +107,5 @@ export interface ManagerSnapshotMessage {
         }>;
         scope: unknown;
     };
-    transcript?: {
-        version: 1;
-        agentId: string;
-        sequence: number;
-        turns: Array<{
-            turnId: string;
-            ordinal: number;
-            state: string;
-            prompt?: string;
-            steps: Array<{
-                stepId: string;
-                ordinal: number;
-                state: string;
-                frames: Array<{ frameId: string; kind: string; text?: string; toolName?: string; status?: string }>;
-            }>;
-        }>;
-        entities: Array<{ id: string; kind: string; state?: string; anchorTurnId?: string; value: unknown }>;
-    };
+    transcript?: AgentTranscriptSnapshot;
 }

@@ -25,37 +25,33 @@ export type { AgentToolName } from './tools/registry';
 export type AgentMode = 'build' | 'plan' | 'explore' | 'utility' | 'review' | 'gui_expert' | 'script_reviewer' | 'loc_translator' | 'loc_writer' | 'orchestrator' | 'script';
 
 /** Transient routing input; never persisted as session or topic state. */
-export type AgentDomain = 'paradox' | 'general' | 'hybrid';
-export type AgentRuntimeDomain = AgentDomain;
+import type {
+    AgentRuntimeDomain,
+    AgentAuthorization,
+    AgentRunPhase,
+    AgentDispatchMode,
+    AgentSchedulingState,
+    ManagerSchedulingStateView,
+    WorkflowPhaseView,
+    WorkflowVerificationView,
+    WorkflowView,
+    WorkflowUiLabels,
+} from '../../shared/agentSchedulingProtocol';
+export type {
+    AgentRuntimeDomain,
+    AgentAuthorization,
+    AgentRunPhase,
+    AgentDispatchMode,
+    AgentSchedulingState,
+    ManagerSchedulingStateView,
+    WorkflowPhaseView,
+    WorkflowVerificationView,
+    WorkflowView,
+    WorkflowUiLabels,
+};
+export type AgentDomain = import('../../shared/agentSchedulingProtocol').AgentRuntimeDomain;
 export type AgentIntent = 'auto' | 'execute' | 'plan' | 'explore' | 'review';
 export type AgentExecutionStrategy = 'auto' | 'single' | 'multi';
-
-/** Maximum effect authority granted by the user for a run. Runtime transitions may only preserve or reduce it. */
-export type AgentAuthorization = 'read_only' | 'plan_write_only' | 'workspace_write';
-/** Evidence-driven runtime phase. */
-export type AgentRunPhase = 'inspect' | 'plan' | 'execute' | 'verify' | 'finalize';
-/** Runtime execution topology. */
-export type AgentDispatchMode = 'single' | 'parallel' | 'specialist';
-
-export interface AgentSchedulingState {
-    /** Concrete runtime profile selected from the catalog. */
-    profileName: string;
-    domainProfile: AgentRuntimeDomain;
-    authorization: AgentAuthorization;
-    phase: AgentRunPhase;
-    dispatch: AgentDispatchMode;
-    /** Orthogonal execution overlays such as planning, verification, and swarm coordination. */
-    overlays: string[];
-    routeConfidence: number;
-    routeEvidence: string[];
-    /** The router found a material choice that must remain with the user. */
-    awaitingUserDecision?: boolean;
-    /** Provenance for the current routing decision. */
-    routingSource?: 'model' | 'deterministic' | 'workflow' | 'user';
-    phaseReason: string;
-    dispatchReason?: string;
-    revision: number;
-}
 
 export interface AdmissionDecision {
     domainProfile: AgentRuntimeDomain;
@@ -1276,7 +1272,12 @@ export interface DocumentSymbolsArgs {
 export interface DocumentSymbolInfo {
     name: string;
     kind: string;
-    range: { startLine: number; endLine: number };
+    range: {
+        startLine: number;
+        endLine: number;
+        startColumn?: number;
+        endColumn?: number;
+    };
     children?: DocumentSymbolInfo[];
     /** True if this node has deeper nested children not shown (depth limit) */
     _hasDeeper?: boolean;
@@ -2268,60 +2269,30 @@ export interface AgentStep {
     streamingPreview?: boolean;
 }
 
-export type AgentArtifactKind =
-    | 'plan'
-    | 'blueprint'
-    | 'walkthrough'
-    | 'diff'
-    | 'diagnostics'
-    | 'validation'
-    | 'media'
-    | 'blackboard';
-
-export type DiffFileStatus = 'created' | 'modified' | 'deleted';
-
-export interface DiffLine {
-    type: 'add' | 'remove' | 'context';
-    content: string;
-    oldLineNo?: number;
-    newLineNo?: number;
-}
-
-export interface DiffSummaryFile {
-    file: string;
-    status: DiffFileStatus;
-    diffPreview: string;
-    additions?: number;
-    deletions?: number;
-    diffLines?: DiffLine[];
-}
-
-export interface DiffArtifactFile extends DiffSummaryFile {
-    previousContent?: string | null;
-    currentContent?: string | null;
-    tooLarge?: boolean;
-    currentTooLarge?: boolean;
-}
-
-export interface DiffArtifactData {
-    files: DiffArtifactFile[];
-    additions: number;
-    deletions: number;
-}
-
-export interface AgentArtifact {
-    id: string;
-    kind: AgentArtifactKind;
-    title: string;
-    summary?: string;
-    filePath?: string;
-    relPath?: string;
-    action?: 'openFile' | 'openDiff' | 'preview';
-    status?: 'pending' | 'running' | 'done' | 'failed';
-    createdAt: number;
-    updatedAt?: number;
-    data?: unknown;
-}
+import type {
+    ArtifactKind,
+    AgentArtifactKind,
+    ArtifactStatus,
+    ArtifactRecord,
+    AgentArtifact,
+    DiffFileStatus,
+    DiffLine,
+    DiffSummaryFile,
+    DiffArtifactFile,
+    DiffArtifactData,
+} from '../../shared/agentArtifact';
+export type {
+    ArtifactKind,
+    AgentArtifactKind,
+    ArtifactStatus,
+    ArtifactRecord,
+    AgentArtifact,
+    DiffFileStatus,
+    DiffLine,
+    DiffSummaryFile,
+    DiffArtifactFile,
+    DiffArtifactData,
+};
 
 export interface GenerationResult {
     /** Durable run id for this generation. */
@@ -2364,6 +2335,35 @@ export interface ChatTopic {
     workflowId?: string;
     /** Scheduler state to restore when the active workflow is disabled. */
     workflowReturnSchedulingState?: AgentSchedulingState;
+}
+
+export interface TopicSummary {
+    id: string;
+    title: string;
+    updatedAt: number;
+    createdAt?: number;
+    archived?: boolean;
+    pinned?: boolean;
+    workspaceId?: string;
+    workspaceLabel?: string;
+    messageCount?: number;
+    parentTopicId?: string;
+    forkedFromMessageIndex?: number;
+}
+
+export type TopicListItem = TopicSummary;
+
+export interface TopicSearchResultItem extends TopicSummary {
+    matchContext?: string;
+    score?: number;
+}
+
+export interface TopicStats {
+    total: number;
+    visible: number;
+    archived: number;
+    currentTopicId?: string | null;
+    currentTopicTitle?: string | null;
 }
 
 export interface ChatHistoryMessage {
@@ -2571,12 +2571,12 @@ export type HostMessage =
     | { type: 'generationComplete'; result: GenerationResult }
     | { type: 'generationError'; error: string; canResume?: boolean }
     | { type: 'insertSelectionReference'; relPath: string; startLine: number; endLine: number }
-    | { type: 'topicList'; topics: Array<{ id: string; title: string; updatedAt: number; createdAt?: number; archived?: boolean; pinned?: boolean; workspaceId?: string; workspaceLabel?: string; messageCount?: number; parentTopicId?: string; forkedFromMessageIndex?: number }>; stats?: { total: number; visible: number; archived: number; currentTopicId?: string | null; currentTopicTitle?: string | null } }
+    | { type: 'topicList'; topics: TopicSummary[]; stats?: TopicStats }
     | { type: 'loadTopicMessages'; messages: ChatHistoryMessage[]; targetSurface?: 'chat' | 'manager' }
     | { type: 'streamToken'; token: string }
     | { type: 'clearChat'; targetSurface?: 'chat' | 'manager' }
-    | { type: 'workflowList'; workflows: Array<{ id: string; title: string; description: string; scheduling: { domain: string; intent: string; strategy: string; profileName?: string }; locale?: string; phases: Array<{ id: string; title: string; description: string }>; verification: Array<{ id: string; description: string; required: boolean; verificationTool?: string }> }>; currentWorkflowId?: string | null; labels?: { selectorPlaceholder: string; noWorkflowSelected: string; phaseUnit: string; phasesUnit: string; requiredCheckUnit: string; requiredChecksUnit: string } }
-    | { type: 'workflowChanged'; workflowId?: string | null; workflow?: { id: string; title: string; description: string; scheduling: { domain: string; intent: string; strategy: string; profileName?: string }; locale?: string; phases: Array<{ id: string; title: string; description: string }>; verification: Array<{ id: string; description: string; required: boolean; verificationTool?: string }> }; labels?: { selectorPlaceholder: string; noWorkflowSelected: string; phaseUnit: string; phasesUnit: string; requiredCheckUnit: string; requiredChecksUnit: string } }
+    | { type: 'workflowList'; workflows: WorkflowView[]; currentWorkflowId?: string | null; labels?: WorkflowUiLabels }
+    | { type: 'workflowChanged'; workflowId?: string | null; workflow?: WorkflowView; labels?: WorkflowUiLabels }
     | { type: 'slashCommandList'; commands: SlashCommandDescriptor[] }
     | { type: 'slashCommandResult'; command: string; status: 'success' | 'error' | 'queued' | 'needsInput'; message: string; uiAction?: 'openModelMenu' | 'openReasoningMenu' | 'openPermissionsMenu' }
     | { type: 'todoUpdate'; todos: TodoItem[]; agentId?: string; threadId?: string; runId?: string }
@@ -2599,10 +2599,12 @@ export type HostMessage =
     | { type: 'replaySteps'; steps: AgentStep[]; isGenerating: boolean }
     /** Plan file saved to disk — tells webview to show the Open/Submit card */
     | { type: 'planFileSaved'; filePath: string; relPath: string }
+    /** Walkthrough file saved to disk — tells webview to show the Open/Submit card */
     | { type: 'walkthroughFileSaved'; filePath: string; relPath: string }
     | { type: 'blueprintFileSaved'; filePath: string; relPath: string }
     /** Send plan sections to webview for interactive inline annotation */
     | { type: 'renderPlan'; sections: string[]; planText?: string }
+    /** Send walkthrough sections to webview for interactive inline annotation */
     | { type: 'renderWalkthrough'; sections: string[] }
     | { type: 'renderBlueprint'; sections: string[]; planText?: string }
     /** Return workspace file list for @ mention popup */
@@ -2612,7 +2614,7 @@ export type HostMessage =
     /** Emit a unified diff summary of all files changed in the message */
     | { type: 'diffSummary'; files: DiffSummaryFile[]; summaryId?: string }
     /** Topic search results */
-    | { type: 'topicSearchResults'; results: Array<{ id: string; title: string; updatedAt: number; createdAt?: number; archived?: boolean; pinned?: boolean; workspaceId?: string; workspaceLabel?: string; messageCount?: number; matchContext?: string; score?: number; parentTopicId?: string; forkedFromMessageIndex?: number }>; query?: string; totalCount?: number; stats?: { total: number; visible: number; archived: number; currentTopicId?: string | null; currentTopicTitle?: string | null } }
+    | { type: 'topicSearchResults'; results: TopicSearchResultItem[]; query?: string; totalCount?: number; stats?: TopicStats }
     /** Topic imported successfully */
     | { type: 'topicImported'; topicId: string; title: string }
     | { type: 'skillsList'; skills: string[] }
@@ -2639,8 +2641,8 @@ export type HostMessage =
     }> }
     | {
         type: 'managerSnapshot';
-        topics: Array<{ id: string; title: string; updatedAt: number; createdAt?: number; archived?: boolean; pinned?: boolean; workspaceId?: string; workspaceLabel?: string; messageCount?: number; parentTopicId?: string; forkedFromMessageIndex?: number }>;
-        stats?: { total: number; visible: number; archived: number; currentTopicId?: string | null; currentTopicTitle?: string | null };
+        topics: TopicSummary[];
+        stats?: TopicStats;
         messages: ChatHistoryMessage[];
         messageCount?: number;
         schedulingState: AgentSchedulingState;
@@ -2834,25 +2836,8 @@ export interface AgentRunRecord {
     error?: string;
 }
 
-export type ToolEffect =
-  | 'none'
-  | 'memory'
-  | 'workspace_read'
-  | 'workspace_write'
-  | 'network'
-  | 'shell'
-  | 'git'
-    | 'media'
-    | 'mcp'
-    | 'process';
-
-export type ToolConcurrencyClass =
-  | 'parallel'
-  | 'lsp-limited'
-  | 'network-limited'
-  | 'per-file-write'
-  | 'global-exclusive'
-  | 'interactive';
+import type { ToolEffect, ToolConcurrencyClass } from './tools/registry';
+export type { ToolEffect, ToolConcurrencyClass };
 
 export interface ToolInvocation {
   invocationId: string;

@@ -1,6 +1,14 @@
 import { expect } from 'chai';
 import * as fs from 'fs';
 import * as path from 'path';
+import type {
+    ManagerSnapshotMessage,
+    ManagerRunSnapshotMessage,
+    ManagerChildRunView,
+    ManagerSchedulingStateView,
+} from '../../webview/chat/messages.manager';
+import type { AgentRunEvent } from '../../shared/agentRunEvent';
+import type { AgentTranscriptSnapshot } from '../../shared/agentTranscript';
 
 // Override fs.readFileSync via CommonJS to support Windows CRLF normalization
 const rawFs = require('fs');
@@ -297,5 +305,16 @@ describe('agent manager cross-surface contracts', () => {
         expect(webview).to.include('if (shouldUseSideWorkspace()) {');
         expect(webview).to.include('openSideWorkspace({');
         expect(webview).to.not.include('if (!panel.content.parentNode) {\n            chatArea.appendChild(panel.content);\n        }\n\n        if (shouldUseSideWorkspace())');
+    });
+
+    it('verifies compile-time type assignability for shared manager contracts', () => {
+        type AssertAssignable<T, Expected> = [T] extends [Expected] ? true : false;
+        type Checks = [
+            AssertAssignable<ManagerChildRunView['schedulingState'], ManagerSchedulingStateView>,
+            AssertAssignable<NonNullable<ManagerRunSnapshotMessage['events']>[number], AgentRunEvent>,
+            AssertAssignable<NonNullable<ManagerSnapshotMessage['transcript']>, AgentTranscriptSnapshot>,
+        ];
+        const allPassed: Checks = [true, true, true];
+        expect(allPassed.every(Boolean)).to.equal(true);
     });
 });

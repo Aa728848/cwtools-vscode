@@ -1,31 +1,17 @@
 import { getDiffArtifactFilesForWebview, type DiffArtifactFileView } from '../artifactPanelModel';
+import type {
+    ArtifactKind,
+    ArtifactStatus,
+    ArtifactFilter,
+    ArtifactRecord,
+} from '../../shared/agentArtifact';
 
-export type ArtifactKind =
-    | 'plan'
-    | 'blueprint'
-    | 'walkthrough'
-    | 'diff'
-    | 'diagnostics'
-    | 'validation'
-    | 'media'
-    | 'blackboard';
-
-export type ArtifactStatus = 'pending' | 'running' | 'done' | 'failed';
-export type ArtifactFilter = 'all' | 'plan' | 'validation' | 'diff';
-
-export interface ArtifactRecord {
-    id: string;
-    kind: ArtifactKind;
-    title: string;
-    summary?: string;
-    filePath?: string;
-    relPath?: string;
-    action?: 'openFile' | 'openDiff' | 'preview';
-    status?: ArtifactStatus;
-    createdAt: number;
-    updatedAt?: number;
-    data?: unknown;
-}
+export type {
+    ArtifactKind,
+    ArtifactStatus,
+    ArtifactFilter,
+    ArtifactRecord,
+};
 
 export type DiffArtifactFileRecord = DiffArtifactFileView;
 

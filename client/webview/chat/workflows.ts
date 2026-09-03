@@ -1,34 +1,16 @@
-export interface WorkflowPhaseView {
-    id: string;
-    title: string;
-    description?: string;
-}
+import type {
+    WorkflowPhaseView,
+    WorkflowVerificationView,
+    WorkflowView,
+    WorkflowUiLabels,
+} from '../../shared/agentSchedulingProtocol';
 
-export interface WorkflowVerificationView {
-    id: string;
-    description: string;
-    required?: boolean;
-    verificationTool?: string;
-}
-
-export interface WorkflowView {
-    id: string;
-    title: string;
-    description: string;
-    scheduling: { domain: string; intent: string; strategy: string; profileName?: string };
-    locale?: string;
-    phases: WorkflowPhaseView[];
-    verification: WorkflowVerificationView[];
-}
-
-export interface WorkflowUiLabels {
-    selectorPlaceholder: string;
-    noWorkflowSelected: string;
-    phaseUnit: string;
-    phasesUnit: string;
-    requiredCheckUnit: string;
-    requiredChecksUnit: string;
-}
+export type {
+    WorkflowPhaseView,
+    WorkflowVerificationView,
+    WorkflowView,
+    WorkflowUiLabels,
+};
 
 export const DEFAULT_WORKFLOW_LABELS: WorkflowUiLabels = {
     selectorPlaceholder: 'Workflow',

@@ -1,15 +1,11 @@
 import * as fs from 'fs';
 import * as path from 'path';
+import { isPathInsideOrEqual } from '../pathScope';
 
 const MAX_INSTRUCTION_FILE_CHARS = 16_000;
 const MAX_INSTRUCTION_PROMPT_CHARS = 32_000;
 
 export const PROJECT_INSTRUCTIONS_FILE = 'CWTOOLS.md';
-
-function isInsideOrEqual(candidate: string, root: string): boolean {
-    const relative = path.relative(root, candidate);
-    return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
-}
 
 function readInstructionFile(filePath: string): string | undefined {
     try {
@@ -48,11 +44,11 @@ export function buildGeneralProjectInstructionsPrompt(
 
     if (targetPath) {
         const resolvedTarget = path.resolve(path.isAbsolute(targetPath) ? targetPath : path.join(root, targetPath));
-        if (isInsideOrEqual(resolvedTarget, root)) {
+        if (isPathInsideOrEqual(resolvedTarget, root)) {
             const targetDirectory = path.extname(resolvedTarget) ? path.dirname(resolvedTarget) : resolvedTarget;
             const ancestors: string[] = [];
             let current = targetDirectory;
-            while (isInsideOrEqual(current, root) && current !== root) {
+            while (isPathInsideOrEqual(current, root) && current !== root) {
                 ancestors.push(current);
                 const parent = path.dirname(current);
                 if (parent === current) break;

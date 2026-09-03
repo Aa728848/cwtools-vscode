@@ -1,4 +1,5 @@
 import * as path from 'path';
+import { isPathInsideOrEqual } from '../pathScope';
 import { getAgentToolTargetFiles } from './runner/toolScheduler';
 import { WRITE_TOOLS } from './tools/registry';
 import type { AgentMode } from './types';
@@ -43,11 +44,6 @@ function normalize(filePath: string): string {
     return path.resolve(filePath).replace(/\\/g, '/').toLowerCase();
 }
 
-function isInside(child: string, parent: string): boolean {
-    const rel = path.relative(parent, child);
-    return !!rel && !rel.startsWith('..') && !path.isAbsolute(rel);
-}
-
 export function isImplementationPlanFile(filePath: string, workspaceRoot: string): boolean {
     if (!filePath) return false;
     const base = path.basename(filePath);
@@ -55,14 +51,14 @@ export function isImplementationPlanFile(filePath: string, workspaceRoot: string
 
     const resolved = path.resolve(filePath);
     const workspace = path.resolve(workspaceRoot);
-    if (isInside(resolved, path.join(workspace, '.cwtools'))) return true;
+    if (isPathInsideOrEqual(resolved, path.join(workspace, '.cwtools'))) return true;
 
     const normalized = normalize(resolved);
     if (normalized.includes('/.cwtools/')) return true;
 
     // When the AI storage folder itself is opened as the workspace root.
     const workspaceName = path.basename(workspace).toLowerCase();
-    if (workspaceName === '.cwtools' && isInside(resolved, workspace)) return true;
+    if (workspaceName === '.cwtools' && isPathInsideOrEqual(resolved, workspace)) return true;
 
     return false;
 }
@@ -76,15 +72,15 @@ function getAiRelativeSegments(filePath: string, workspaceRoot: string, topicId?
     if (topicId) {
         const safeTopicId = topicId.replace(/[^a-zA-Z0-9_.-]/g, '_');
         const currentTopicDir = path.resolve(getPrivateTopicStorageDir(topicId, workspaceRoot));
-        if (isInside(resolved, currentTopicDir)) {
+        if (isPathInsideOrEqual(resolved, currentTopicDir)) {
             relative = path.join(safeTopicId, path.relative(currentTopicDir, resolved));
         }
     }
-    if (!relative && isInside(resolved, aiRoot)) {
+    if (!relative && isPathInsideOrEqual(resolved, aiRoot)) {
         relative = path.relative(aiRoot, resolved);
     } else if (!relative) {
         const workspaceName = path.basename(workspace).toLowerCase();
-        if (workspaceName === '.cwtools' && isInside(resolved, workspace)) {
+        if (workspaceName === '.cwtools' && isPathInsideOrEqual(resolved, workspace)) {
             relative = path.relative(workspace, resolved);
         } else {
             const normalized = normalize(resolved);

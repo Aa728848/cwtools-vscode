@@ -1,5 +1,6 @@
 import { getProjectWorkspaceRoot } from '../workspacePaths';
 import { isPathInsideOrEqual } from '../workspaceSandbox';
+import { commandMatchesPrefix } from './policyEngine';
 
 // Inline-eval flags: prefix matching cannot bound the code payload, so these never learn rules.
 const INLINE_EVAL_FLAGS = new Set(['-c', '-e', '-p', '--eval', '-command', '-encodedcommand']);
@@ -197,19 +198,7 @@ export class PermissionPolicyStore {
                 // Check prefix sequence matching
                 const prefixList = rule.commandPrefix;
                 if (prefixList && prefixList.length > 0) {
-                    const normalizedCmd = command.trim().replace(/\s+/g, ' ');
-                    const words = normalizedCmd.split(' ');
-                    
-                    let matchesPrefix = true;
-                    for (let i = 0; i < prefixList.length; i++) {
-                        const currentWord = words[i];
-                        const prefixWord = prefixList[i];
-                        if (!currentWord || !prefixWord || currentWord.toLowerCase() !== prefixWord.toLowerCase()) {
-                            matchesPrefix = false;
-                            break;
-                        }
-                    }
-                    if (!matchesPrefix) continue;
+                    if (!commandMatchesPrefix(command, prefixList)) continue;
                 }
             }
 

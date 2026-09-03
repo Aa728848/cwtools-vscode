@@ -172,6 +172,16 @@ function matchTargetPaths(glob: string, d: PolicyCallDescriptor): PathMatch {
     return hits === targets.length ? 'all' : hits > 0 ? 'some' : 'none';
 }
 
+export function commandMatchesPrefix(tokensOrCommand: readonly string[] | string, prefix: readonly string[]): boolean {
+    if (!prefix || prefix.length === 0) return true;
+    const tokens = typeof tokensOrCommand === 'string' ? tokenizeCommand(tokensOrCommand) : tokensOrCommand;
+    if (tokens.length < prefix.length) return false;
+    for (let i = 0; i < prefix.length; i++) {
+        if (!commandTokenEquals(tokens[i]!, prefix[i]!)) return false;
+    }
+    return true;
+}
+
 function ruleMatches(rule: PolicyRule, d: PolicyCallDescriptor): boolean {
     if (rule.subject !== d.subject) return false;
     if (rule.expiresAt && rule.expiresAt <= Date.now()) return false;
@@ -183,10 +193,7 @@ function ruleMatches(rule: PolicyRule, d: PolicyCallDescriptor): boolean {
     }
     if (rule.commandPrefix && rule.commandPrefix.length > 0) {
         const tokens = d.commandTokens ?? (d.command ? tokenizeCommand(d.command) : []);
-        if (tokens.length < rule.commandPrefix.length) return false;
-        for (let i = 0; i < rule.commandPrefix.length; i++) {
-            if (!commandTokenEquals(tokens[i]!, rule.commandPrefix[i]!)) return false;
-        }
+        if (!commandMatchesPrefix(tokens, rule.commandPrefix)) return false;
     }
     if (rule.pathGlob !== undefined) {
         const m = matchTargetPaths(rule.pathGlob, d);

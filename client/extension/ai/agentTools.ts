@@ -690,8 +690,7 @@ export class AgentToolExecutor {
 
     private resolveCandidateFile(filePath: string): string {
         const resolved = path.resolve(this.workspaceRoot, filePath);
-        const relative = path.relative(this.workspaceRoot, resolved);
-        if (relative.startsWith('..') || path.isAbsolute(relative)) {
+        if (!isPathInsideOrEqual(resolved, this.workspaceRoot)) {
             throw new Error(`Candidate file is outside the workspace: ${filePath}`);
         }
         const realRoot = fs.realpathSync.native(this.workspaceRoot);
@@ -1737,8 +1736,7 @@ export class AgentToolExecutor {
         let cursor = 0;
         const validateTarget = async (target: string): Promise<TargetOutcome> => {
             if (abortSignal?.aborted) throw abortSignalError(abortSignal);
-            const relative = path.relative(this.workspaceRoot, target);
-            if (relative.startsWith('..') || path.isAbsolute(relative)) {
+            if (!isPathInsideOrEqual(target, this.workspaceRoot)) {
                 return {
                     target,
                     checked: false,
@@ -3861,9 +3859,7 @@ export class AgentToolExecutor {
                 ? path.resolve(blueprintFile)
                 : path.resolve(this.workspaceRoot, blueprintFile);
             const relativeBlueprint = path.relative(this.workspaceRoot, resolvedBlueprint);
-            const insideWorkspace = relativeBlueprint
-                && !relativeBlueprint.startsWith('..')
-                && !path.isAbsolute(relativeBlueprint);
+            const insideWorkspace = isPathInsideOrEqual(resolvedBlueprint, this.workspaceRoot);
             const normalizedRelative = relativeBlueprint.replace(/\\/g, '/').toLowerCase();
             const insideProjectAgentStorage = !!insideWorkspace
                 && (normalizedRelative.includes('/.cwtools/') || normalizedRelative.startsWith('.cwtools/'));

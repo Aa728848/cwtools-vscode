@@ -1,6 +1,7 @@
 import * as path from 'path';
 import * as fs from 'fs';
 import * as vs from 'vscode';
+import { isPathInsideOrEqual } from '../pathScope';
 
 /**
  * Canonical key for file-path- keyed state (locks, failure counters, guard
@@ -78,10 +79,7 @@ export function getProjectWorkspaceRoot(fallback = ''): string {
         ? vs.window.activeTextEditor.document.uri.fsPath
         : undefined;
     if (activePath) {
-        const activeRoot = roots.find(root => {
-            const relative = path.relative(root, activePath);
-            return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
-        });
+        const activeRoot = roots.find(root => isPathInsideOrEqual(activePath, root));
         if (activeRoot) return activeRoot;
     }
     return roots[0]
@@ -94,10 +92,7 @@ export function resolveProjectWorkspacePath(refPath: string, fallback = ''): str
     const roots = getProjectWorkspaceRoots();
     const absolute = path.resolve(refPath);
     if (path.isAbsolute(refPath)) {
-        return roots.some(root => {
-            const relative = path.relative(root, absolute);
-            return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
-        }) ? absolute : undefined;
+        return roots.some(root => isPathInsideOrEqual(absolute, root)) ? absolute : undefined;
     }
     const normalized = refPath.replace(/\\/g, '/');
     const separator = normalized.indexOf('/');
@@ -108,8 +103,7 @@ export function resolveProjectWorkspacePath(refPath: string, fallback = ''): str
             || path.basename(folder.uri.fsPath).toLowerCase() === qualifier);
         if (matched) {
             const resolved = path.resolve(matched.uri.fsPath, normalized.slice(separator + 1));
-            const relative = path.relative(matched.uri.fsPath, resolved);
-            return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative))
+            return isPathInsideOrEqual(resolved, matched.uri.fsPath)
                 ? resolved
                 : undefined;
         }
@@ -117,8 +111,7 @@ export function resolveProjectWorkspacePath(refPath: string, fallback = ''): str
     const root = getProjectWorkspaceRoot(fallback);
     if (!root) return undefined;
     const resolved = path.resolve(root, refPath);
-    const relative = path.relative(root, resolved);
-    return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative))
+    return isPathInsideOrEqual(resolved, root)
         ? resolved
         : undefined;
 }

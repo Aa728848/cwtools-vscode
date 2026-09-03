@@ -7,6 +7,7 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
+import { isPathInsideOrEqual } from '../../pathScope';
 import { getPrivateTopicStorageDir } from '../workspacePaths';
 import { aiText } from '../messages';
 import { normalizeSchedulingState } from '../runner/scheduling';
@@ -55,15 +56,13 @@ export class MemoryToolHandler {
         if (!value.startsWith('file://')) return { content: value, fullLength: value.length };
         const blackboardDir = this.getBlackboardDirectory(context);
         const requestedPath = path.resolve(value.slice(7));
-        const relative = path.relative(blackboardDir, requestedPath);
-        if (relative.startsWith('..') || path.isAbsolute(relative)) {
+        if (!isPathInsideOrEqual(requestedPath, blackboardDir)) {
             return { error: 'Stored memory file reference is outside the current topic blackboard.' };
         }
         try {
             const realDirectory = fs.realpathSync(blackboardDir);
             const realPath = fs.realpathSync(requestedPath);
-            const realRelative = path.relative(realDirectory, realPath);
-            if (realRelative.startsWith('..') || path.isAbsolute(realRelative)) {
+            if (!isPathInsideOrEqual(realPath, realDirectory)) {
                 return { error: 'Stored memory file reference resolves outside the current topic blackboard.' };
             }
             const stat = fs.statSync(realPath);

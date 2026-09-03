@@ -38,6 +38,7 @@ import {
 } from '../workspaceSandbox';
 import { GRAPHICS_EXTS, matchesExt } from '../../fileExtensions';
 import { getLocalisationTransactionTargets } from '../runner/toolScheduler';
+import { shouldBypassWriteConfirmation } from './writeConfirmation';
 import { getSessionPermissionMode } from '../runner/sessionPermissions';
 import {
     createDiagnosticSnapshot,
@@ -269,11 +270,13 @@ export class FileToolHandler {
         });
     }
 
-    private shouldBypassWriteConfirmation(args: unknown, context?: import('../types').AgentToolContext): boolean {
-        const record = (args && typeof args === 'object') ? args as Record<string, unknown> : {};
-        return record._autoApply === true
-            || context?.runnerOptions?.forceAutoApplyWrites === true
-            || context?.runnerOptions?.useSlimPrompt === true;
+    private shouldBypassWriteConfirmation(args: unknown, context?: import('../types').AgentToolContext, vfsOverlay?: boolean | unknown): boolean {
+        return shouldBypassWriteConfirmation({
+            fileWriteMode: this.ctx.fileWriteMode,
+            args,
+            runnerOptions: context?.runnerOptions,
+            vfsOverlay: vfsOverlay ?? context?.runnerOptions?.vfsOverlay ?? this.ctx.vfsOverlay,
+        });
     }
 
     private normalizeAgentWorkspacePath(filePath: string, context?: import('../types').AgentToolContext): string {
@@ -861,7 +864,7 @@ export class FileToolHandler {
                 const _diff = this.buildUnifiedDiff(args.file, originalContent ?? '', args.content);
 
                 const vfsOverlay = context?.runnerOptions?.vfsOverlay ?? this.ctx.vfsOverlay;
-                if (this.ctx.fileWriteMode === 'confirm' && this.ctx.onPendingWrite && !this.shouldBypassWriteConfirmation(args, context) && !vfsOverlay) {
+                if (this.ctx.onPendingWrite && !this.shouldBypassWriteConfirmation(args, context, !!vfsOverlay)) {
                     const messageId = `write_${crypto.randomUUID()}`;
                     const confirmed = await this.confirmPendingWrite(args.file, args.content, messageId, context);
                     if (!confirmed) {
@@ -970,7 +973,7 @@ export class FileToolHandler {
 
             const diff = this.buildUnifiedDiff(filePath, originalContent, newContent);
             const vfsOverlay = context?.runnerOptions?.vfsOverlay ?? this.ctx.vfsOverlay;
-            if (this.ctx.fileWriteMode === 'confirm' && this.ctx.onPendingWrite && !this.shouldBypassWriteConfirmation(args, context) && !vfsOverlay) {
+            if (this.ctx.onPendingWrite && !this.shouldBypassWriteConfirmation(args, context, !!vfsOverlay)) {
                 const confirmed = await this.confirmPendingWrite(filePath, newContent, `edit_${crypto.randomUUID()}`, context);
                 if (!confirmed) {
                     return { success: false, message: 'User cancelled the edit_file operation', pendingDiff: diff, terminalOutcome: 'user_cancelled' };
@@ -1115,7 +1118,7 @@ export class FileToolHandler {
         }
         const diff = this.buildUnifiedDiff(filePath, originalContent, newContent);
 
-        if (this.ctx.fileWriteMode === 'confirm' && this.ctx.onPendingWrite && !this.shouldBypassWriteConfirmation(args, context)) {
+        if (this.ctx.onPendingWrite && !this.shouldBypassWriteConfirmation(args, context)) {
             const confirmed = await this.confirmPendingWrite(filePath, newContent, `ast_${Date.now()}`, context);
             if (!confirmed) {
                 return { success: false, message: 'User cancelled the edit operation', pendingDiff: diff, terminalOutcome: 'user_cancelled' };
@@ -1268,7 +1271,7 @@ export class FileToolHandler {
 
             const diff = this.buildUnifiedDiff(filePath, originalContent, newContent);
             const vfsOverlay = context?.runnerOptions?.vfsOverlay ?? this.ctx.vfsOverlay;
-            if (this.ctx.fileWriteMode === 'confirm' && this.ctx.onPendingWrite && !this.shouldBypassWriteConfirmation(args, context) && !vfsOverlay) {
+            if (this.ctx.onPendingWrite && !this.shouldBypassWriteConfirmation(args, context, !!vfsOverlay)) {
                 const confirmed = await this.confirmPendingWrite(filePath, newContent, `replace_lines_${Date.now()}`, context);
                 if (!confirmed) {
                     return { success: false, message: 'User cancelled the replace_lines operation', pendingDiff: diff, terminalOutcome: 'user_cancelled' };
@@ -1849,7 +1852,7 @@ export class FileToolHandler {
                 }
 
                 // Confirm mode
-                if (this.ctx.fileWriteMode === 'confirm' && this.ctx.onPendingWrite && !this.shouldBypassWriteConfirmation(args, context) && !vfsOverlay) {
+                if (this.ctx.onPendingWrite && !this.shouldBypassWriteConfirmation(args, context, !!vfsOverlay)) {
                     const messageId = `writeloc_${crypto.randomUUID()}`;
                     const confirmed = await this.confirmPendingWrite(filePath, withBom, messageId, context);
                     if (!confirmed) {

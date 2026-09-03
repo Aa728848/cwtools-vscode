@@ -33,6 +33,7 @@ import { MemoryToolHandler, blackboardDomainPrefix } from './tools/memoryTools';
 import { searchAgentHistory } from './tools/historyTool';
 import type { IndexService } from '../indexing/indexService';
 import { validateToolCapability, evaluateMcpPermission } from './tools/permissions';
+import { shouldBypassWriteConfirmation } from './tools/writeConfirmation';
 import { readProjectProfile, queryProjectProfile } from './projectProfile';
 import { queryProjectKnowledge } from './projectKnowledge';
 import { queryInterfaceKnowledge } from './interfaceKnowledge';
@@ -1949,10 +1950,11 @@ export class AgentToolExecutor {
         if (
             timeout > 0
             && WRITE_CONFIRMATION_TOOLS.has(toolName)
-            && this.fileWriteMode === 'confirm'
-            && (args as Record<string, unknown>)?._autoApply !== true
-            && context?.runnerOptions?.forceAutoApplyWrites !== true
-            && context?.runnerOptions?.useSlimPrompt !== true
+            && !shouldBypassWriteConfirmation({
+                fileWriteMode: this.fileWriteMode,
+                args,
+                runnerOptions: context?.runnerOptions,
+            })
         ) {
             timeout = 0;
         }

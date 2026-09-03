@@ -1019,14 +1019,35 @@ export class AIService {
                     throw errorFromReason(originalSignal.reason, 'Aborted');
                 }
 
+                const cause = effectiveError?.cause;
+                const causeMsg = cause instanceof Error ? cause.message : (typeof cause === 'string' ? cause : '');
+                const causeCode = (cause as any)?.code || effectiveError.code;
+                const errMsg = String(effectiveError.message || '');
+                const isNetworkError = effectiveError.name === 'TimeoutError'
+                    || errMsg.includes('timeout')
+                    || errMsg.includes('fetch failed')
+                    || causeMsg.includes('ECONNRESET')
+                    || causeMsg.includes('ETIMEDOUT')
+                    || causeMsg.includes('ECONNREFUSED')
+                    || causeMsg.includes('ENOTFOUND')
+                    || causeMsg.includes('other side closed')
+                    || causeCode === 'ECONNRESET'
+                    || causeCode === 'ETIMEDOUT'
+                    || causeCode === 'ECONNREFUSED'
+                    || causeCode === 'ENOTFOUND';
+
                 // Retry on timeout or network errors
-                if ((effectiveError.name === 'TimeoutError' || effectiveError.message?.includes('timeout') || effectiveError.code === 'ECONNRESET' || effectiveError.code === 'ETIMEDOUT') && retries < maxRetries) {
+                if (isNetworkError && retries < maxRetries) {
                     const delay = delays[retries]! + 1000;
-                    ErrorReporter.warn(SOURCE.AI_SERVICE, `Network error/timeout for ${providerId}: ${effectiveError.message}. Retrying in ${delay}ms...`);
+                    const detail = causeMsg ? `${errMsg} (${causeMsg})` : errMsg;
+                    ErrorReporter.warn(SOURCE.AI_SERVICE, `Network error/timeout for ${providerId}: ${detail}. Retrying in ${delay}ms...`);
                     originalSignal?.removeEventListener('abort', linkAbort);
                     await this.abortableDelay(delay, originalSignal);
                     retries++;
                     continue;
+                }
+                if (causeMsg && !errMsg.includes(causeMsg)) {
+                    effectiveError.message = `${errMsg} (${causeMsg})`;
                 }
                 throw effectiveError;
             }

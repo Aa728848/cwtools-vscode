@@ -41,6 +41,7 @@ describe('context compaction', () => {
         expect(resolveCompactionContextLimit('ollama', 'unknown-local-model', 24_000)).to.equal(24_000);
         expect(resolveCompactionContextLimit('ollama', 'unknown-local-model', 0)).to.equal(32_768);
         expect(resolveCompactionContextLimit('openai', 'gpt-5.5', 0)).to.equal(1_050_000);
+        expect(resolveCompactionContextLimit('openai', 'gpt-test', 5_601_000)).to.equal(2_097_152);
     });
 
     it('replaces an older rolling summary instead of accumulating summary pairs', async () => {

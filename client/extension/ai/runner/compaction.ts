@@ -1,7 +1,7 @@
 import type { AgentMode, AgentToolFocus, ChatMessage, AgentStep, TokenUsage } from '../types';
 import { contentToString } from '../types';
 import { getModelContextTokens, getProvider } from '../providers';
-import { isLowCostPrefixCacheModelOrProvider } from '../providers/models/capabilities';
+import { isLowCostPrefixCacheModelOrProvider, MAX_SAFE_CONTEXT_TOKENS } from '../providers/models/capabilities';
 import { getCacheDiscountFactor, getCurrentModelPricing } from '../pricing';
 import { AGENT } from '../messages';
 import type { AIService } from '../aiService';
@@ -133,11 +133,14 @@ export function resolveCompactionContextLimit(
     model: string | undefined,
     configuredLimit: number | undefined,
 ): number {
-    if (configuredLimit && configuredLimit > 0) return configuredLimit;
-    const provider = getProvider(providerId);
-    const resolvedModel = model || provider.defaultModel;
-    const modelLimit = getModelContextTokens(resolvedModel, providerId);
-    return modelLimit > 0 ? modelLimit : (provider.maxContextTokens || DEFAULT_CONTEXT_LIMIT);
+    const rawLimit = (() => {
+        if (configuredLimit && configuredLimit > 0) return configuredLimit;
+        const provider = getProvider(providerId);
+        const resolvedModel = model || provider.defaultModel;
+        const modelLimit = getModelContextTokens(resolvedModel, providerId);
+        return modelLimit > 0 ? modelLimit : (provider.maxContextTokens || DEFAULT_CONTEXT_LIMIT);
+    })();
+    return Math.min(rawLimit, MAX_SAFE_CONTEXT_TOKENS);
 }
 
 export interface CompactionRatios {

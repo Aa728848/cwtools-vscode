@@ -341,6 +341,8 @@ const TOOL_TIMEOUTS: Record<string, number> = {
     save_workflow: 30_000,
     todo_write: 5_000,
     run_skill: 30_000,
+    // Interactive questions wait indefinitely for user input from the WebView.
+    ask_user_question: 0,
     // run_code owns its bounded guest lifetime and propagates cancellation to
     // every in-flight nested tool call (see executeRunCode).
     run_code: 0,
@@ -2042,7 +2044,7 @@ export class AgentToolExecutor {
 
             const startedAt = Date.now();
             let heartbeatId: ReturnType<typeof setInterval> | undefined;
-            if (context?.onStep) {
+            if (context?.onStep && toolName !== 'ask_user_question') {
                 heartbeatId = setInterval(() => {
                     if (abortSignal.aborted) return;
                     const elapsedSec = Math.max(1, Math.round((Date.now() - startedAt) / 1000));

@@ -504,6 +504,8 @@ export function getModelContextTokens(model: string, providerId?: string): numbe
  * Normalize a user-configured context limit and prevent the fixed ChatGPT
  * Codex service from inheriting a larger public-API limit for the same model.
  */
+export const MAX_SAFE_CONTEXT_TOKENS = 2_097_152;
+
 export function clampConfiguredContextTokens(
     providerId: string,
     model: string,
@@ -512,9 +514,11 @@ export function clampConfiguredContextTokens(
     const normalized = typeof configuredLimit === 'number' && Number.isFinite(configuredLimit) && configuredLimit > 0
         ? Math.floor(configuredLimit)
         : 0;
-    if (normalized === 0 || providerId !== 'codex-chatgpt') return normalized;
+    if (normalized === 0) return 0;
+    const bounded = Math.min(normalized, MAX_SAFE_CONTEXT_TOKENS);
+    if (providerId !== 'codex-chatgpt') return bounded;
     const serviceLimit = getModelContextTokens(model, providerId);
-    return serviceLimit > 0 ? Math.min(normalized, serviceLimit) : normalized;
+    return serviceLimit > 0 ? Math.min(bounded, serviceLimit) : bounded;
 }
 
 /**

@@ -3283,6 +3283,41 @@ describe('agent tool progress and aborts', () => {
         }
     });
 
+    it('allows ask_user_question to wait indefinitely past the default tool timeout without heartbeat noise', async () => {
+        const clock = sinon.useFakeTimers();
+        try {
+            const executor = createExecutor();
+            const steps: any[] = [];
+            const resultPromise = executor.execute('ask_user_question', {
+                questions: [{
+                    id: 'scope',
+                    question: 'Which scope?',
+                    options: [
+                        { label: 'Workspace', description: 'All files.' },
+                        { label: 'Active', description: 'Current file.' },
+                    ],
+                }],
+            }, {
+                runnerOptions: { schedulingState: PARADOX_WRITE },
+                onStep: (step: any) => steps.push(step),
+                onUserQuestion: async () => {
+                    await new Promise(resolve => setTimeout(resolve, 60_000));
+                    return { success: true, answers: { scope: 'Workspace' } };
+                },
+            } as any);
+
+            // Advance past the 30s default tool timeout and past multiple 15s heartbeat intervals
+            await clock.tickAsync(60_000);
+            const result = await resultPromise as any;
+            expect(result).to.deep.equal({ success: true, answers: { scope: 'Workspace' } });
+            // Verify no orchestrator_progress heartbeats were emitted for user interaction
+            const progressSteps = steps.filter(step => step.type === 'orchestrator_progress');
+            expect(progressSteps).to.have.length(0);
+        } finally {
+            clock.restore();
+        }
+    });
+
     it('does not hang a write when diagnostics LSP requests stop responding', async function () {
         this.timeout(5000);
         const clock = sinon.useFakeTimers();

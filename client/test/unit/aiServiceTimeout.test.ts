@@ -1693,6 +1693,35 @@ describe('AIService streaming reasoning detection', () => {
         expect(response.choices[0].message.reasoning_content).to.equal('think ');
         expect(response.choices[0].message.reasoning_key).to.equal(undefined);
     });
+
+    it('retries when global fetch fails with TypeError fetch failed and ECONNRESET cause', async () => {
+        const { AIService } = loadAIService();
+        const service = new AIService({ secrets: {} } as any) as any;
+        let fetchCalls = 0;
+        const originalFetch = globalThis.fetch;
+        try {
+            globalThis.fetch = (async () => {
+                fetchCalls++;
+                if (fetchCalls === 1) {
+                    const fetchError = new TypeError('fetch failed');
+                    (fetchError as any).cause = new Error('read ECONNRESET');
+                    throw fetchError;
+                }
+                return {
+                    ok: true,
+                    status: 200,
+                    text: async () => JSON.stringify({ choices: [{ message: { content: 'ok' } }] }),
+                } as any;
+            }) as any;
+
+            service.abortableDelay = async () => {};
+            const res = await service.fetchWithRetry('https://api.test/v1/chat', { method: 'POST' }, 'test');
+            expect(fetchCalls).to.equal(2);
+            expect(res.ok).to.equal(true);
+        } finally {
+            globalThis.fetch = originalFetch;
+        }
+    });
 });
 
 function chatCompletionsSseResponse(events: Record<string, unknown>[]): Response {

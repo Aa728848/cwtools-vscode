@@ -416,6 +416,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
     let currentTopicId: string | null = null;
     let currentTopicTitle = '';
     let totalConversationTokens = 0;
+    let lastKnownContextTokens = 0;
     let contextLimit = 128000;
     /** Pending images (base64 data URLs) to attach to next sent message */
     let pendingImages: string[] = [];
@@ -4241,6 +4242,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         const info = step.compactionInfo;
         const tokens = info?.state === 'complete' ? info.afterTokens : info?.beforeTokens;
         if (typeof tokens !== 'number' || tokens <= 0) return;
+        lastKnownContextTokens = tokens;
         updateTokenUsage(tokens, contextLimit);
         const label = document.getElementById('tokenUsageLabel');
         if (!label) return;
@@ -6326,7 +6328,8 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
 
                 // Use real tokenUsage from result if available, else fall back to rough estimate
                 if (r.tokenUsage && r.tokenUsage.total > 0) {
-                    const gaugeUsage = r.tokenUsage.contextWindowTokens ?? r.tokenUsage.input ?? r.tokenUsage.total;
+                    const gaugeUsage = r.tokenUsage.contextWindowTokens ?? r.tokenUsage.input ?? (r.tokenUsage.total > contextLimit ? Math.min(r.tokenUsage.input ?? 0, contextLimit) : r.tokenUsage.total);
+                    lastKnownContextTokens = gaugeUsage;
                     totalConversationTokens = r.tokenUsage.total;
                     updateTokenUsage(gaugeUsage, contextLimit);
                     // Show cost badge
@@ -6342,13 +6345,19 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                     }
                 } else {
                     // Rough estimate fallback (no API usage data)
-                    const stepTokens = r.steps ? r.steps.reduce((sum: number, s: any) => {
-                        if (s.type === 'thinking_content' || s.type === 'thinking')
-                            return sum + Math.ceil((s.content || '').length / 4);
-                        return sum;
-                    }, 0) : 0;
-                    totalConversationTokens += Math.ceil((r.explanation || '').length / 4) + stepTokens + 500;
-                    updateTokenUsage(totalConversationTokens, contextLimit);
+                    // Estimate current active context window tokens, NOT accumulating multi-turn cumulative billing totals into the gauge!
+                    let estimatedContext = lastKnownContextTokens;
+                    if (estimatedContext <= 0) {
+                        const msgNodes = chatArea.querySelectorAll('.message-content, .chat-message-text');
+                        let totalChars = 0;
+                        msgNodes.forEach(node => { totalChars += (node.textContent || '').length; });
+                        estimatedContext = Math.ceil(totalChars / 4) + 1500;
+                    } else {
+                        estimatedContext += Math.ceil((r.explanation || '').length / 4) + 500;
+                    }
+                    estimatedContext = Math.min(estimatedContext, contextLimit);
+                    lastKnownContextTokens = estimatedContext;
+                    updateTokenUsage(estimatedContext, contextLimit);
                     const label = document.getElementById('tokenUsageLabel');
                     if (label) label.textContent = `${label.textContent} · ${tr('conversation estimate', '对话估算')}`;
                 }
@@ -6422,6 +6431,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                 currentAssistantDiv = null;
                 streamStates.clear();
                 totalConversationTokens = 0;
+                lastKnownContextTokens = 0;
                 artifacts = [];
                 renderArtifactPanel();
                 updateCurrentTopicHeader(null, null);
@@ -7219,9 +7229,10 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                 const u = msg.usage;
                 if (u && u.total > 0) {
                     const gaugeUsage = u.contextWindowTokens
-                        ?? ((u.compactionCalls ?? 0) > 0 ? undefined : (u.input ?? u.total));
+                        ?? ((u.compactionCalls ?? 0) > 0 ? undefined : (u.input ?? (u.total > contextLimit ? Math.min(u.total, contextLimit) : u.total)));
                     totalConversationTokens = u.total;
                     if (typeof gaugeUsage !== 'number' || gaugeUsage <= 0) break;
+                    lastKnownContextTokens = gaugeUsage;
                     updateTokenUsage(gaugeUsage, contextLimit);
                     // Completely replace the label with token + cost info
                     const label = document.getElementById('tokenUsageLabel');

@@ -11,6 +11,7 @@ open CWTools.Games
 open CWTools.Process
 open CWTools.Utilities.Position
 open CWTools.Utilities.StringResource
+open Main.SemanticGraph
 
 [<Literal>]
 let KnowledgeSchemaVersion = 7
@@ -27,14 +28,6 @@ type ExportOptions =
       workspaceRoot: string option
       vanillaRoot: string option
       generationMode: string }
-
-type RuntimeMetadata =
-    { graphVersion: int64
-      status: string
-      validationInProgress: bool
-      loadingInProgress: bool
-      pendingGlobalKinds: string list
-      lastGlobalRefreshAtUnixMs: int64 }
 
 type QueryOptions =
     { databasePath: string
@@ -858,27 +851,17 @@ let private resolveDefinitionStack (items: DefinitionFact list) =
         |> List.map (fun value -> value.ToUpperInvariant())
         |> List.distinct
     let strategy = strategies |> List.tryHead
-    if overwriteActive.Length = 1 then
-        { ordered = ordered; winner = overwriteActive |> List.tryHead; resolution = "cwtools_single_active"; ambiguousReason = None }
-    else
-        match strategy with
-        | Some "LIOS" ->
-            { ordered = ordered; winner = ordered |> List.tryLast; resolution = "last_in_only_served"; ambiguousReason = None }
-        | Some "FIOS" ->
-            { ordered = ordered; winner = ordered |> List.tryHead; resolution = "first_in_only_served"; ambiguousReason = None }
-        | Some "NO" ->
-            { ordered = ordered
-              winner = ordered |> List.tryHead
-              resolution = "no_individual_override"
-              ambiguousReason = Some "NO does not permit an individual same-key override; the earliest existing candidate remains effective unless the owning file is replaced." }
-        | Some "MERGE" ->
-            { ordered = ordered; winner = None; resolution = "merged_definitions"; ambiguousReason = Some "MERGE keeps contributions from multiple candidates; there is no single winner." }
-        | Some "DUPL" ->
-            { ordered = ordered; winner = None; resolution = "duplicate_definitions"; ambiguousReason = Some "DUPL permits multiple candidates; there is no single winner." }
-        | Some mode ->
-            { ordered = ordered; winner = None; resolution = "ambiguous"; ambiguousReason = Some(sprintf "Override mode %s has no deterministic resolver." mode) }
-        | None ->
-            { ordered = ordered; winner = None; resolution = "ambiguous"; ambiguousReason = Some "No active override mode or unique CWTools overwrite winner was available." }
+    let activeWinner = if overwriteActive.Length = 1 then overwriteActive |> List.tryHead else None
+    let res =
+        OverrideResolver.resolveWinner
+            strategy
+            (overwriteActive.Length = 1)
+            activeWinner
+            ordered
+    { ordered = ordered
+      winner = res.winner
+      resolution = res.resolution
+      ambiguousReason = res.ambiguousReason }
 
 let private definitionStacks (definitions: DefinitionFact seq) =
     definitions
@@ -1766,7 +1749,7 @@ let private executeSql (connection: SqliteConnection) (transaction: SqliteTransa
 let private addParameter (command: SqliteCommand) name (value: obj) =
     command.Parameters.AddWithValue(name, if isNull value then DBNull.Value :> obj else value) |> ignore
 
-let private createKnowledgeSchema connection =
+let createKnowledgeSchema connection =
     executeSql connection None """
 PRAGMA foreign_keys = ON;
 CREATE TABLE metadata (key TEXT PRIMARY KEY, value TEXT NOT NULL);

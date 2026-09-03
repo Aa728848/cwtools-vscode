@@ -14,7 +14,7 @@ open CWTools.Games
 open Main.PdxFlowAnalysis
 open TestHelpers
 
-let private assertTrue name condition = checkNamed name condition
+let assertTrue = assertTrueNamed
 
 let parseEntity (content: string) (filePath: string) : Entity =
     let parsed = CWTools.Parser.CKParser.parseString content filePath

@@ -29,6 +29,67 @@ type RuntimeMetadata =
       pendingGlobalKinds: string list
       lastGlobalRefreshAtUnixMs: int64 }
 
+type OverrideResolution<'T> =
+    { winner: 'T option
+      resolution: string
+      ambiguous: bool
+      ambiguousReason: string option }
+
+module OverrideResolver =
+    let resolveWinner
+        (strategy: string option)
+        (isSingleCwtoolsActive: bool)
+        (activeWinner: 'T option)
+        (orderedCandidates: 'T list) : OverrideResolution<'T> =
+        if isSingleCwtoolsActive && activeWinner.IsSome then
+            { winner = activeWinner
+              resolution = "cwtools_single_active"
+              ambiguous = false
+              ambiguousReason = None }
+        else
+            match strategy with
+            | Some "LIOS" ->
+                { winner = orderedCandidates |> List.tryLast
+                  resolution = "last_in_only_served"
+                  ambiguous = false
+                  ambiguousReason = None }
+            | Some "FIOS" ->
+                { winner = orderedCandidates |> List.tryHead
+                  resolution = "first_in_only_served"
+                  ambiguous = false
+                  ambiguousReason = None }
+            | Some "NO" ->
+                { winner = orderedCandidates |> List.tryHead
+                  resolution = "no_individual_override"
+                  ambiguous = false
+                  ambiguousReason = Some "NO does not permit an individual same-key override; the earliest existing candidate remains effective unless the owning file is replaced." }
+            | Some "MERGE" ->
+                { winner = None
+                  resolution = "merged_definitions"
+                  ambiguous = false
+                  ambiguousReason = Some "MERGE combines candidates; no single definition wins." }
+            | Some "DUPL" ->
+                { winner = None
+                  resolution = "duplicate_definitions"
+                  ambiguous = false
+                  ambiguousReason = Some "DUPL preserves multiple candidates; no single definition wins." }
+            | Some mode ->
+                { winner = None
+                  resolution = "ambiguous"
+                  ambiguous = true
+                  ambiguousReason = Some(sprintf "Override mode %s has no deterministic resolver." mode) }
+            | None ->
+                if orderedCandidates.Length = 1 then
+                    { winner = orderedCandidates |> List.tryHead
+                      resolution = "single_candidate"
+                      ambiguous = false
+                      ambiguousReason = None }
+                else
+                    { winner = None
+                      resolution = "ambiguous"
+                      ambiguous = true
+                      ambiguousReason = Some "No active override mode or unique CWTools overwrite winner was available." }
+
 type private DefinitionCandidate =
     { id: string
       entityType: string
@@ -147,10 +208,16 @@ let private graphItemScore (seedKeys: HashSet<string>) options tokens (item: Gra
     let baseScore = definitionScore options tokens item.entityType item.id file
     baseScore + (if seedKeys.Contains(itemKey item) then 2000 else 0) + (if item.isPrimary then 100 else 0)
 
-let private jsonRecord fields = fields |> List.choose id |> List.toArray |> JsonValue.Record
+let jsonRecord fields = fields |> List.choose id |> List.toArray |> JsonValue.Record
 
-let private jsonStringArray values =
+let jsonStringArray values =
     values |> Seq.map JsonValue.String |> Seq.toArray |> JsonValue.Array
+
+let activeModelFreshnessRecord freshness staleReasons =
+    jsonRecord
+        [ Some("status", JsonValue.String freshness)
+          Some("source", JsonValue.String "active_lsp_model")
+          Some("staleReasons", jsonStringArray staleReasons) ]
 
 let private rangeFields (location: range option) =
     match location with
@@ -590,32 +657,15 @@ let compareDefinitionWithVanillaWithRuntime (shouldCancel: unit -> bool) freshne
     let strategy =
         ordered
         |> Array.tryPick (fun definition -> game.OverrideModeAtPath(logicalPathFor definition.range.FileName) |> Option.map (fun mode -> mode.strategy.ToUpperInvariant()))
+    let activeWinner = if active.Length = 1 then Some active.[0] else None
+    let resolutionResult =
+        OverrideResolver.resolveWinner
+            strategy
+            (active.Length = 1)
+            activeWinner
+            (ordered |> Array.toList)
     let winner, resolution, ambiguous, ambiguousReason =
-        match strategy with
-        | Some "LIOS" ->
-            let resolvedWinner =
-                match workspace with
-                | Some ws -> Some ws
-                | None -> ordered |> Array.tryLast
-            resolvedWinner, "last_in_only_served", false, None
-        | Some "FIOS" ->
-            let resolvedWinner =
-                match vanilla with
-                | Some vn -> Some vn
-                | None -> ordered |> Array.tryHead
-            resolvedWinner, "first_in_only_served", false, None
-        | Some "NO" ->
-            ordered |> Array.tryHead,
-            "no_individual_override",
-            false,
-            Some "NO does not permit an individual same-key override; the earliest existing candidate remains effective unless the owning file is replaced."
-        | Some "MERGE" -> None, "merged_definitions", false, Some "MERGE combines candidates; no single definition wins."
-        | Some "DUPL" -> None, "duplicate_definitions", false, Some "DUPL preserves multiple candidates; no single definition wins."
-        | Some mode -> None, "ambiguous", true, Some(sprintf "Override mode %s has no deterministic resolver." mode)
-        | None ->
-            if active.Length = 1 then Some active.[0], "cwtools_single_active", false, None
-            elif ordered.Length = 1 then Some ordered.[0], "single_candidate", false, None
-            else None, "ambiguous", true, Some "No unique CWTools active candidate or recognized override mode was available."
+        resolutionResult.winner, resolutionResult.resolution, resolutionResult.ambiguous, resolutionResult.ambiguousReason
     let candidateJson (definition: CWTools.Common.NewScope.TypeDefInfo) =
         let file = definition.range.FileName
         let origin = originForDefinition file
@@ -662,10 +712,7 @@ let compareDefinitionWithVanillaWithRuntime (shouldCancel: unit -> bool) freshne
                 Some("truncated", JsonValue.Boolean false)
                 Some("staleReasons", jsonStringArray staleReasons)
                 Some("unsupportedConstructs", jsonStringArray [ "runtime_merge_side_effects" ]) ])
-          Some("freshness", jsonRecord
-              [ Some("status", JsonValue.String freshness)
-                Some("source", JsonValue.String "active_lsp_model")
-                Some("staleReasons", jsonStringArray staleReasons) ])
+          Some("freshness", activeModelFreshnessRecord freshness staleReasons)
           Some("version", JsonValue.Number 2m)
           Some("confidence", JsonValue.String "cwtools-aligned-recursive") ]
 

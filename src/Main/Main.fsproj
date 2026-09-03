@@ -37,7 +37,6 @@
     <Compile Include="CompletionText.fs" />
     <Compile Include="Completion.fs" />
     <Compile Include="CompletionFallbackPolicy.fs" />
-    <Compile Include="GraphTypes.fs" />
     <Compile Include="SemanticGraph.fs" />
     <Compile Include="InlineGraph.fs" />
     <Compile Include="PdxEventSemantics.fs" />
@@ -50,7 +49,6 @@
     <Compile Include="SemanticDirectoryCatalog.fs" />
     <Compile Include="PdxFragmentValidation.fs" />
     <Compile Include="OverlayValidation.fs" />
-    <Compile Include="PathIdentity.fs" />
     <Compile Include="RefreshCoordinator.fs" />
     <Compile Include="DiagnosticInvalidation.fs" />
     <Compile Include="SymbolIndex.fs" />

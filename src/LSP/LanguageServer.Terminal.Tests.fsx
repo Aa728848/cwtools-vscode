@@ -6,7 +6,6 @@ open System.Threading
 open LSP.Locking
 open TestHelpers
 
-let assertEqual expected actual message = equal expected actual message
 
 let assertDecision cause expectedOutcome expectedResponse =
     let actual = decideRequestTerminal cause

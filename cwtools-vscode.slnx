@@ -3,7 +3,6 @@
     <File Path="Directory.Packages.props" />
   </Folder>
   <Folder Name="/src/">
-    <Project Path="src/CSharpExtensions/CSharpExtensions.csproj" />
     <Project Path="src/Languages/Languages.csproj" />
     <Project Path="src/LSP/LSP.fsproj">
     </Project>

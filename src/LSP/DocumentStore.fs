@@ -1,17 +1,55 @@
 namespace LSP
 
 open System
-open CSharpExtensions
 open LSP.Log
 open System.IO
 open System.Collections.Generic
 open System.Text
 open Types
 
-module private PathIdentity =
-    let normalize (path: string) =
-        if isNull path then nullArg (nameof path)
-        if OperatingSystem.IsWindows() then path.Replace('\\', '/').ToUpperInvariant() else path
+module private DocumentStoreHelper =
+    let getTextAtPosition (fileText: string) (line: int) (character: int) : string =
+        if String.IsNullOrEmpty fileText || line < 0 || character < 0 then String.Empty
+        else
+            let mutable currentLine = 0
+            let mutable currentLineText = ReadOnlySpan<char>.Empty
+            let mutable enumerator = fileText.AsSpan().EnumerateLines()
+            let mutable found = false
+            while not found && enumerator.MoveNext() do
+                if currentLine = line then
+                    currentLineText <- enumerator.Current
+                    found <- true
+                else
+                    currentLine <- currentLine + 1
+
+            if currentLineText.IsEmpty then String.Empty
+            else
+                let mutable start = 0
+                let mutable ``end`` = 0
+                let excluded = [| '='; ' '; '{'; '}'; '\t'; '"' |]
+                let adjustedPosition = Math.Min(character, currentLineText.Length - 1)
+
+                let mutable breakDown = false
+                let mutable offset = adjustedPosition
+                while offset >= 0 && not breakDown do
+                    if Array.contains currentLineText.[offset] excluded then
+                        breakDown <- true
+                    else
+                        start <- offset
+                        offset <- offset - 1
+
+                let mutable breakUp = false
+                offset <- adjustedPosition
+                while offset < currentLineText.Length && not breakUp do
+                    if Array.contains currentLineText.[offset] excluded then
+                        breakUp <- true
+                    else
+                        ``end`` <- offset
+                        offset <- offset + 1
+
+                let length = if start = 0 && ``end`` = 0 then 0 else ``end`` - start + 1
+                currentLineText.Slice(start, length).ToString()
+
 
 type private Version =
     { syncRoot: obj
@@ -199,5 +237,5 @@ type DocumentStore() =
 
     member this.GetTextAtPosition(fileUri: Uri, position: Position) : string =
         match this.GetTextByPath(FileInfo(fileUri.LocalPath).FullName) with
-        | Some(text) -> DocumentStoreHelper.GetTextAtPosition(text, position.line, position.character)
+        | Some(text) -> DocumentStoreHelper.getTextAtPosition text position.line position.character
         | None -> String.Empty

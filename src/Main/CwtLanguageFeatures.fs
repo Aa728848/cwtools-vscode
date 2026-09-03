@@ -9,6 +9,7 @@ open CWTools.Games
 open CWTools.Utilities.Position
 open LSP
 open LSP.Types
+open Main
 
 /// Diagnostic tuple consumed by Program.fs's publish pipeline:
 /// (code, severity, fileName, message, range, keyLength, relatedErrors).
@@ -274,13 +275,8 @@ let projectErrorsForFile (filePath: string) : CwtErrorTuple list =
 
         projectErrors @ (activationError |> Option.toList)
 
-/// LSP range conversion (CWTools range -> LSP range).
-let private toLspRange (r: range) : LSP.Types.Range =
-    { start = { line = max 0 (int r.StartLine - 1); character = int r.StartColumn }
-      ``end`` = { line = max 0 (int r.EndLine - 1); character = int r.EndColumn } }
-
-let private filePathToUri (path: string) =
-    Uri(Path.GetFullPath(path))
+let private toLspRange = LspConvert.rangeToLsp
+let private filePathToUri = LspConvert.filePathToUri
 
 /// Finds the structured token at the cursor (`type[pl|anet_class]`,
 /// `<sprite>`, `$x`) and resolves it to (kind, name, range).

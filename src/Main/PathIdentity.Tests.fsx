@@ -1,5 +1,5 @@
 #load "../TestHelpers.fsx"
-#load "PathIdentity.fs"
+#load "../LSP/PathIdentity.fs"
 
 open System
 open PathIdentity

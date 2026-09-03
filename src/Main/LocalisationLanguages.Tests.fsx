@@ -14,8 +14,8 @@ open CWTools.Common
 open Main.Lang.GameLoader
 open TestHelpers
 
-let private assertEqual name expected actual = assertEqualNamed name expected actual
-let private assertTrue name condition = checkNamed name condition
+let assertEqual = assertEqualNamed
+let assertTrue = assertTrueNamed
 
 let langTag = function
     | Lang.STL l -> $"STL.{l}"

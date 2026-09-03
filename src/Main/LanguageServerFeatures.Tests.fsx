@@ -15,7 +15,7 @@ open CWTools.Utilities.Position
 open Main.Lang.LanguageServerFeatures
 open TestHelpers
 
-let private assertEqual name expected actual = assertEqualNamed name expected actual
+let assertEqual = assertEqualNamed
 
 let private assertContains name (needle: string) (actual: string) =
     if not (actual.Contains needle) then

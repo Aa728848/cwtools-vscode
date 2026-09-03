@@ -554,6 +554,50 @@ let private isAllowedDefinitionTarget (sourcePath: string) (targetPath: string) 
         String.Equals(sourceRoot, targetRoot, pathComparison)
     | _ -> true
 
+let private fullPathOr (filePath: string) =
+    try FileInfo(filePath).FullName
+    with _ -> filePath
+
+module private JsonArgs =
+    let tryFirstRecord (args: JsonValue list) =
+        args
+        |> List.tryHead
+        |> Option.bind (function JsonValue.Record fields -> Some fields | _ -> None)
+        |> Option.defaultValue [||]
+
+    let tryProperty (name: string) (fields: (string * JsonValue)[]) =
+        fields |> Array.tryPick (fun (key, value) -> if key = name then Some value else None)
+
+    let stringProperty (name: string) (fields: (string * JsonValue)[]) =
+        match tryProperty name fields with
+        | Some (JsonValue.String value) when not (String.IsNullOrWhiteSpace value) -> Some (value.Trim())
+        | _ -> None
+
+    let rawStringProperty (name: string) (fields: (string * JsonValue)[]) =
+        match tryProperty name fields with
+        | Some (JsonValue.String value) -> Some value
+        | _ -> None
+
+    let boolProperty (name: string) (fallback: bool) (fields: (string * JsonValue)[]) =
+        match tryProperty name fields with
+        | Some (JsonValue.Boolean value) -> value
+        | _ -> fallback
+
+    let intProperty (name: string) (fallback: int) (fields: (string * JsonValue)[]) =
+        match tryProperty name fields with
+        | Some (JsonValue.Number value) -> int value
+        | _ -> fallback
+
+    let stringArray (name: string) (fields: (string * JsonValue)[]) =
+        match tryProperty name fields with
+        | Some (JsonValue.Array values) ->
+            values
+            |> Array.choose (function
+                | JsonValue.String value when not (String.IsNullOrWhiteSpace value) -> Some value
+                | _ -> None)
+            |> Array.toList
+        | _ -> []
+
 let private normalizeDefinitionSymbol (symbol: string) =
     symbol.Trim().Trim('"')
 
@@ -1481,10 +1525,7 @@ type Server(client: ILanguageClient) =
         System.Collections.Concurrent.ConcurrentDictionary<string, struct (int * IGame)>()
 
     let lintGenerationKey filePath =
-        let fullPath =
-            try FileInfo(filePath).FullName
-            with _ -> filePath
-        PathIdentity.normalize fullPath
+        fullPathOr filePath |> PathIdentity.normalize
 
     let advanceLintGeneration filePath =
         latestLintGenerations.AddOrUpdate(lintGenerationKey filePath, 1L, fun _ current -> current + 1L)
@@ -2004,10 +2045,7 @@ type Server(client: ILanguageClient) =
         System.Collections.Concurrent.ConcurrentDictionary<string, CompletionParams * int>()
 
     let normaliseCachePath (filePath: string) =
-        let fullPath =
-            try FileInfo(filePath).FullName
-            with _ -> filePath
-        PathIdentity.normalize fullPath
+        fullPathOr filePath |> PathIdentity.normalize
 
     let symbolCorpusMaxEpochRetries = 2
     let documentSymbolCorpusCache = SymbolIndex.SingleFlightCache<int64 * string, SymbolIndex.DocumentSymbol<SymbolKind> list>(128)
@@ -2276,7 +2314,7 @@ type Server(client: ILanguageClient) =
     let clearTypeIndexCacheForFile (filePath: string) =
         let normalised = normaliseCachePath filePath
         typeDefinitionsByFileCache.TryRemove(normalised) |> ignore
-        let fullPath = try FileInfo(filePath).FullName with _ -> filePath
+        let fullPath = fullPathOr filePath
         typeDefinitionsByFileCache.TryRemove(normaliseCachePath fullPath) |> ignore
 
     //- Cache partition cleaning function -
@@ -2284,7 +2322,7 @@ type Server(client: ILanguageClient) =
 
     /// Clear the content-related cache of a single file (semanticTokens/codeLens/inlayHint)
     let clearFileCaches (filePath: string) =
-        let fullPath = try FileInfo(filePath).FullName with _ -> filePath
+        let fullPath = fullPathOr filePath
         for key in [ filePath; fullPath ] do
             (semanticTokensCache :> System.Collections.Generic.IDictionary<_, _>).Remove(key) |> ignore
             (codeLensCache :> System.Collections.Generic.IDictionary<_, _>).Remove(key) |> ignore
@@ -2293,7 +2331,7 @@ type Server(client: ILanguageClient) =
         lock typeReferenceResultCacheLock typeReferenceResultCache.Advance |> ignore
 
     let clearFileCachesPreservingSemanticTokens (filePath: string) =
-        let fullPath = try FileInfo(filePath).FullName with _ -> filePath
+        let fullPath = fullPathOr filePath
         for key in [ filePath; fullPath ] do
             (codeLensCache :> System.Collections.Generic.IDictionary<_, _>).Remove(key) |> ignore
             (inlayHintCache :> System.Collections.Generic.IDictionary<_, _>).Remove(key) |> ignore
@@ -2397,17 +2435,12 @@ type Server(client: ILanguageClient) =
                 let shouldFallback =
                     Main.CompletionFallbackPolicy.shouldUseImmediateFallback
                         writerBusy
-                        validationInProgress
                         heavyPathWindow
                 if shouldFallback then
                     let fallback =
                         tryBuildStaleCompletionFallback p false
                         |> Option.orElseWith (fun () ->
-                            if
-                                Main.CompletionFallbackPolicy.canReturnEmptyFallback
-                                    writerBusy
-                                    validationInProgress
-                            then
+                            if Main.CompletionFallbackPolicy.canReturnEmptyFallback writerBusy then
                                 Some({ isIncomplete = true; items = [] }, None)
                             else
                                 None)
@@ -2443,7 +2476,7 @@ type Server(client: ILanguageClient) =
                 Some result)
 
     let clearCacheWriteTimesForFile (filePath: string) =
-        let fullPath = try FileInfo(filePath).FullName with _ -> filePath
+        let fullPath = fullPathOr filePath
         for key in [ filePath; fullPath ] do
             cacheWriteTimes.TryRemove(key) |> ignore
 
@@ -2715,6 +2748,14 @@ type Server(client: ILanguageClient) =
         | Severity.Hint -> DiagnosticSeverity.Hint
         | _ -> DiagnosticSeverity.Information
 
+    let diagnosticSeverityToString (s: DiagnosticSeverity option) =
+        match s with
+        | Some DiagnosticSeverity.Error -> "error"
+        | Some DiagnosticSeverity.Warning -> "warning"
+        | Some DiagnosticSeverity.Information -> "info"
+        | Some DiagnosticSeverity.Hint -> "hint"
+        | _ -> "info"
+
     let diagnosticCategoryAndHint (code: string) (message: string) =
         let lower = message.ToLowerInvariant()
         let has (needle: string) = lower.Contains(needle)
@@ -2843,11 +2884,11 @@ type Server(client: ILanguageClient) =
              Uri "/")
 
     let isDynamicParameterError (code: string) (message: string) (related: CWRelatedError list option) =
-        code = "CW274"
-        || message.Contains("results in an error")
-        || (match related with
-            | Some rs -> rs |> List.exists (fun (r: CWRelatedError) -> r.message = "Related source")
-            | None -> false)
+        let relatedMessages =
+            match related with
+            | Some rs -> rs |> Seq.map (fun (r: CWRelatedError) -> r.message)
+            | None -> Seq.empty
+        DiagnosticMerge.isDynamicExpansion (Some code) message relatedMessages
 
     let uncertainGlobalNegativeCodes =
         set
@@ -3027,6 +3068,12 @@ type Server(client: ILanguageClient) =
                     failwith $"%A{e} %A{rs}")
         )
         |> List.iter client.PublishDiagnostics
+
+    let publishFileDiagnostics (filePath: string) (diagnostics: Diagnostic list) =
+        client.PublishDiagnostics { uri = diagnosticUri filePath; diagnostics = diagnostics }
+
+    let clearDiagnostics (uri: Uri) =
+        client.PublishDiagnostics { uri = uri; diagnostics = [] }
 
     let mutable delayedLocUpdate = false
 
@@ -4294,7 +4341,7 @@ type Server(client: ILanguageClient) =
                         | Some _ -> ()
                         | None ->
                             let targetDiagnostics = entries |> List.map snd
-                            client.PublishDiagnostics { uri = diagnosticUri filePath; diagnostics = targetDiagnostics }
+                            publishFileDiagnostics filePath targetDiagnostics
                             setFileDiagnosticStateWithEpoch filePath (nextDiagnosticEpoch ()) freshness pendingKinds targetDiagnostics
 
                     // Always publish the current file, including an empty complete result,
@@ -4476,7 +4523,7 @@ type Server(client: ILanguageClient) =
                                     if sameInvalidationAdmission admitted currentAdmission
                                        && sameIndexModelEpoch validatedModelEpoch (modelEpochSnapshot ())
                                        && docs.GetVersionByPath(filePath) = (batchVersions |> List.tryFind (fst >> normaliseCachePath >> (=) pathKey) |> Option.bind snd) then
-                                        client.PublishDiagnostics { uri = diagnosticUri filePath; diagnostics = merged }
+                                        publishFileDiagnostics filePath merged
 
                                         let validatedVersion =
                                             priorState
@@ -5325,7 +5372,7 @@ type Server(client: ILanguageClient) =
                             locModelEpoch
                             (modelEpochSnapshot ()) then
                         let admission = capturedAdmission.Value
-                        client.PublishDiagnostics { uri = diagnosticUri filePath; diagnostics = merged }
+                        publishFileDiagnostics filePath merged
 
                         let priorState =
                             match fileDiagnosticStates.TryGetValue(filePath) with
@@ -5378,7 +5425,7 @@ type Server(client: ILanguageClient) =
                                 | CWTools.Games.EntityResource(f, _) -> Some f
                                 | CWTools.Games.FileWithContentResource(f, _) -> Some f
                                 | CWTools.Games.FileResource(f, _) -> Some f
-                            filePath |> Option.map (fun f -> try FileInfo(f).FullName with _ -> f))
+                            filePath |> Option.map fullPathOr)
                         |> Set.ofList
                     game.CleanupCache existingFiles
                     let existingNormalised =
@@ -6107,7 +6154,7 @@ type Server(client: ILanguageClient) =
                                         |> Map.tryFind (normaliseCachePath filePath)
                                         |> Option.map (List.map snd)
                                         |> Option.defaultValue []
-                                    client.PublishDiagnostics { uri = diagnosticUri filePath; diagnostics = diagnostics }
+                                    publishFileDiagnostics filePath diagnostics
                                     setFileDiagnosticStateWithSnapshot
                                         filePath
                                         publishEpoch
@@ -6131,7 +6178,7 @@ type Server(client: ILanguageClient) =
                                            | _ -> false
                                     if not isSuperseded then
                                         let diagnostics = entries |> List.map snd
-                                        client.PublishDiagnostics { uri = diagnosticUri filePath; diagnostics = diagnostics }
+                                        publishFileDiagnostics filePath diagnostics
                                         setFileDiagnosticStateWithSnapshot
                                             filePath
                                             publishEpoch
@@ -6394,7 +6441,7 @@ type Server(client: ILanguageClient) =
 
         for entry in fileDiagnosticStates |> Seq.toArray do
             if entry.Value.diagnostics.Length > 0 then
-                client.PublishDiagnostics { uri = diagnosticUri entry.Key; diagnostics = [] }
+                publishFileDiagnostics entry.Key []
         clearFileDiagnosticStates ()
         latestLintGenerations.Clear()
         committedInteractiveVersions.Clear()
@@ -6777,6 +6824,240 @@ type Server(client: ILanguageClient) =
         && (range.``end``.line > inner.``end``.line
             || (range.``end``.line = inner.``end``.line
                 && range.``end``.character >= inner.``end``.character))
+
+
+    let showVirtualFile (uri: string) (content: string) =
+        client.CustomNotification(
+            "createVirtualFile",
+            JsonValue.Record
+                [| "uri", JsonValue.String uri
+                   "fileContent", JsonValue.String content |]
+        )
+
+    let readDocumentText (filePath: string) =
+        docs.GetText(FileInfo(filePath))
+        |> Option.defaultValue (try File.ReadAllText filePath with _ -> "")
+
+    let sameFile left right =
+        String.Equals(left, right, pathComparison)
+
+    let sameRange (left: range) (right: range) =
+        sameFile left.FileName right.FileName
+        && left.StartLine = right.StartLine
+        && left.StartColumn = right.StartColumn
+        && left.EndLine = right.EndLine
+        && left.EndColumn = right.EndColumn
+
+    let rangeKey (r: range) =
+        (r.FileName.ToLowerInvariant(), r.StartLine, r.StartColumn, r.EndLine, r.EndColumn)
+
+    let isIdentifierChar (c: char) =
+        Char.IsLetterOrDigit c
+        || c = '_'
+        || c = '$'
+        || c = ':'
+        || c = '@'
+        || c = '-'
+        || c = '/'
+
+    let isDottedCandidateChar (c: char) =
+        isIdentifierChar c || c = '.'
+
+    let tryGetSingleLineTextInText (text: string) (target: range) =
+        let lines = text.Split('\n')
+        let startLine = int target.StartLine - 1
+        let endLine = int target.EndLine - 1
+        if startLine <> endLine || startLine < 0 || startLine >= lines.Length then None
+        else
+            let line = lines.[startLine].TrimEnd('\r')
+            let startColumn = int target.StartColumn |> max 0 |> min line.Length
+            let endColumn = int target.EndColumn |> max startColumn |> min line.Length
+            Some(line.Substring(startColumn, endColumn - startColumn))
+
+    let tryGetSingleLineTextInRange (target: range) =
+        let text = readDocumentText target.FileName
+        tryGetSingleLineTextInText text target
+
+    let tryFindDottedCandidateRangeAtPosition filePath (text: string) (position: pos) =
+        let lines = text.Split('\n')
+        let lineIndex = int position.Line - 1
+        if lineIndex < 0 || lineIndex >= lines.Length then None
+        else
+            let line = lines.[lineIndex].TrimEnd('\r')
+            let column = position.Column |> int |> max 0 |> min line.Length
+
+            let seedIndex =
+                if column < line.Length && isDottedCandidateChar line.[column] then Some column
+                elif column > 0 && isDottedCandidateChar line.[column - 1] then Some(column - 1)
+                else None
+
+            seedIndex
+            |> Option.map (fun index ->
+                let mutable startIndex = index
+                while startIndex > 0 && isDottedCandidateChar line.[startIndex - 1] do
+                    startIndex <- startIndex - 1
+
+                let mutable endIndex = index + 1
+                while endIndex < line.Length && isDottedCandidateChar line.[endIndex] do
+                    endIndex <- endIndex + 1
+
+                mkRange filePath (mkPos (lineIndex + 1) startIndex) (mkPos (lineIndex + 1) endIndex))
+
+    let tryFindIdentifierRangeInText (text: string) (target: range) (symbol: string) =
+        let needle = normalizeDefinitionSymbol symbol
+        if String.IsNullOrWhiteSpace needle then None
+        else
+            let lines = text.Split('\n')
+            let startLine = max 0 (int target.StartLine - 1)
+            let endLine = min (lines.Length - 1) (max startLine (int target.EndLine - 1))
+
+            let tryFindOnLine lineIndex =
+                if lineIndex < 0 || lineIndex >= lines.Length then None
+                else
+                    let line = lines.[lineIndex].TrimEnd('\r')
+                    let minColumn = if lineIndex = startLine then int target.StartColumn |> max 0 |> min line.Length else 0
+                    let maxColumn = if lineIndex = endLine then int target.EndColumn |> max minColumn |> min line.Length else line.Length
+
+                    let rec loop startIndex =
+                        let index = line.IndexOf(needle, startIndex, StringComparison.Ordinal)
+                        if index < 0 || index + needle.Length > maxColumn then None
+                        elif index < minColumn then loop (index + 1)
+                        else
+                            let beforeOk = index = 0 || not (isIdentifierChar line.[index - 1])
+                            let afterIndex = index + needle.Length
+                            let afterOk = afterIndex >= line.Length || not (isIdentifierChar line.[afterIndex])
+                            if beforeOk && afterOk then
+                                Some(mkRange target.FileName (mkPos (lineIndex + 1) index) (mkPos (lineIndex + 1) afterIndex))
+                            else
+                                loop (index + 1)
+
+                    loop minColumn
+
+            if startLine > endLine then None
+            else [ startLine .. endLine ] |> List.tryPick tryFindOnLine
+
+    let tryFindIdentifierRangeInRange (target: range) (symbol: string) =
+        let text = readDocumentText target.FileName
+        tryFindIdentifierRangeInText text target symbol
+
+    let tryFindIdentifierRangeInDefinition (definitionRange: range) (symbol: string) =
+        let needle = normalizeDefinitionSymbol symbol
+        if String.IsNullOrWhiteSpace needle then None
+        else
+            let text = readDocumentText definitionRange.FileName
+            let lines = text.Split('\n')
+            let startLine = max 0 (int definitionRange.StartLine - 1)
+            let rangeEndLine = max startLine (int definitionRange.EndLine - 1)
+            let endLine = min (lines.Length - 1) (min rangeEndLine (startLine + 120))
+
+            let tryFindOnLine lineIndex =
+                if lineIndex < 0 || lineIndex >= lines.Length then None
+                else
+                    let line = lines.[lineIndex].TrimEnd('\r')
+
+                    let rec loop startIndex =
+                        let index = line.IndexOf(needle, startIndex, StringComparison.Ordinal)
+                        if index < 0 then None
+                        else
+                            let beforeOk = index = 0 || not (isIdentifierChar line.[index - 1])
+                            let afterIndex = index + needle.Length
+                            let afterOk = afterIndex >= line.Length || not (isIdentifierChar line.[afterIndex])
+                            if beforeOk && afterOk then
+                                Some(mkRange definitionRange.FileName (mkPos (lineIndex + 1) index) (mkPos (lineIndex + 1) afterIndex))
+                            else
+                                loop (index + 1)
+
+                    loop 0
+
+            if startLine > endLine then None
+            else [ startLine .. endLine ] |> List.tryPick tryFindOnLine
+
+    let tryFindIdentifierRangeAtPosition filePath (text: string) (position: pos) =
+        let lines = text.Split('\n')
+        let lineIndex = int position.Line - 1
+        if lineIndex < 0 || lineIndex >= lines.Length then None
+        else
+            let line = lines.[lineIndex].TrimEnd('\r')
+            let column = position.Column |> int |> max 0 |> min line.Length
+
+            let seedIndex =
+                if column < line.Length && isIdentifierChar line.[column] then Some column
+                elif column > 0 && isIdentifierChar line.[column - 1] then Some(column - 1)
+                else None
+
+            seedIndex
+            |> Option.map (fun index ->
+                let mutable startIndex = index
+                while startIndex > 0 && isIdentifierChar line.[startIndex - 1] do
+                    startIndex <- startIndex - 1
+
+                let mutable endIndex = index + 1
+                while endIndex < line.Length && isIdentifierChar line.[endIndex] do
+                    endIndex <- endIndex + 1
+
+                mkRange filePath (mkPos (lineIndex + 1) startIndex) (mkPos (lineIndex + 1) endIndex))
+
+    let tryFindLocalisationKeyRange (entry: Entry) (expectedKey: string) =
+        let text = readDocumentText entry.position.FileName
+        let lines = text.Split('\n')
+        let lineIndex = int entry.position.StartLine - 1
+
+        if lineIndex < 0 || lineIndex >= lines.Length then
+            None
+        else
+            let line = lines.[lineIndex].TrimEnd('\r')
+            let entryMatch = localisationEntryPattern.Match(line)
+
+            if entryMatch.Success
+               && String.Equals(entryMatch.Groups.[2].Value, expectedKey, StringComparison.Ordinal) then
+                let keyGroup = entryMatch.Groups.[2]
+                Some(
+                    mkRange
+                        entry.position.FileName
+                        (mkPos (lineIndex + 1) keyGroup.Index)
+                        (mkPos (lineIndex + 1) (keyGroup.Index + keyGroup.Length))
+                )
+            else
+                let minColumn = int entry.position.StartColumn |> max 0 |> min line.Length
+                let maxColumn = int entry.position.EndColumn |> max minColumn |> min line.Length
+                let index = line.IndexOf(expectedKey, minColumn, StringComparison.Ordinal)
+
+                if index >= 0 && index + expectedKey.Length <= maxColumn then
+                    let afterIndex = index + expectedKey.Length
+                    let beforeOk = index = 0 || Char.IsWhiteSpace(line.[index - 1])
+                    let afterOk = afterIndex < line.Length && line.[afterIndex] = ':'
+
+                    if beforeOk && afterOk then
+                        Some(
+                            mkRange
+                                entry.position.FileName
+                                (mkPos (lineIndex + 1) index)
+                                (mkPos (lineIndex + 1) afterIndex)
+                        )
+                    else
+                        None
+                else
+                    None
+
+    let allTypeDefinitions (game: IGame) =
+        game.Types()
+        |> Map.toSeq
+        |> Seq.collect (fun (typeName, infos) -> infos |> Seq.map (fun tdi -> typeName, tdi))
+
+    let tryTypeDefinitionAtPosition (game: IGame) filePath position =
+        allTypeDefinitions game
+        |> Seq.tryFind (fun (_, tdi) ->
+            sameFile tdi.range.FileName filePath
+            && (tryFindIdentifierRangeInDefinition tdi.range tdi.id
+                |> Option.exists (fun identifierRange -> rangeContainsPos identifierRange position)))
+
+    let tryTypeDefinitionForRange (game: IGame) (target: range) =
+        allTypeDefinitions game
+        |> Seq.tryFind (fun (_, tdi) ->
+            sameFile tdi.range.FileName target.FileName
+            && (sameRange tdi.range target
+                || rangeContainsRange tdi.range target
+                || rangeContainsRange target tdi.range))
 
     let catchError defaultValue (a: Async<_>) =
         async {
@@ -7305,7 +7586,7 @@ type Server(client: ILanguageClient) =
                 markFileStale path "edit"
                 // Diagnostics from the previous document version are not safe to
                 // retain while the new version is waiting in the debounce queue.
-                client.PublishDiagnostics { uri = p.textDocument.uri; diagnostics = [] }
+                clearDiagnostics p.textDocument.uri
                 monitorLog Lint
                     $"Validation phase=diagnostics-cleared file={path} documentVersion={p.textDocument.version} modelEpoch={modelEpochSnapshot ()} freshness=stale"
 
@@ -7358,7 +7639,7 @@ type Server(client: ILanguageClient) =
             docs.Close p 
             let localPath = p.textDocument.uri.LocalPath
             maybeRebuildCwtIndex localPath
-            let fullPath = try FileInfo(localPath).FullName with _ -> localPath
+            let fullPath = fullPathOr localPath
             committedTypeIndexVersions.TryRemove(normaliseCachePath localPath) |> ignore
             committedTypeIndexVersions.TryRemove(normaliseCachePath fullPath) |> ignore
             // Clean all file-level caches to prevent memory leaks from closed files
@@ -7548,7 +7829,7 @@ type Server(client: ILanguageClient) =
                             clearTypeCaches ()
                             monitorLog Refresh
                                 $"RemoveIncrementalTypes decision=full file={path} reason=capability_unavailable"
-                        client.PublishDiagnostics { uri = change.uri; diagnostics = [] }
+                        clearDiagnostics change.uri
                         forgetFileCaches path
                         removeFileDiagnosticState path |> ignore
                         diagnosticInvalidation.Delete(normaliseCachePath path)
@@ -9013,112 +9294,6 @@ type Server(client: ILanguageClient) =
         member this.DidChangeWorkspaceFolders(_: DidChangeWorkspaceFoldersParams) = async { () }
 
         member this.PrepareRename(p: TextDocumentPositionParams) =
-            let sameFile left right =
-                String.Equals(left, right, pathComparison)
-
-            let isSymbolBoundaryChar (c: char) =
-                Char.IsLetterOrDigit c
-                || c = '_'
-                || c = '$'
-                || c = ':'
-                || c = '@'
-                || c = '-'
-                || c = '/'
-
-            let isDottedCandidateChar (c: char) =
-                isSymbolBoundaryChar c || c = '.'
-
-            let readDocumentText filePath =
-                docs.GetText(FileInfo(filePath))
-                |> Option.defaultValue (try File.ReadAllText filePath with _ -> "")
-
-            let tryGetSingleLineTextInRange (text: string) (target: range) =
-                let lines = text.Split('\n')
-                let startLine = int target.StartLine - 1
-                let endLine = int target.EndLine - 1
-                if startLine <> endLine || startLine < 0 || startLine >= lines.Length then None
-                else
-                    let line = lines.[startLine].TrimEnd('\r')
-                    let startColumn = int target.StartColumn |> max 0 |> min line.Length
-                    let endColumn = int target.EndColumn |> max startColumn |> min line.Length
-                    Some(line.Substring(startColumn, endColumn - startColumn))
-
-            let tryFindDottedCandidateRangeAtPosition filePath (text: string) (position: pos) =
-                let lines = text.Split('\n')
-                let lineIndex = int position.Line - 1
-                if lineIndex < 0 || lineIndex >= lines.Length then None
-                else
-                    let line = lines.[lineIndex].TrimEnd('\r')
-                    let column = position.Column |> int |> max 0 |> min line.Length
-
-                    let seedIndex =
-                        if column < line.Length && isDottedCandidateChar line.[column] then Some column
-                        elif column > 0 && isDottedCandidateChar line.[column - 1] then Some(column - 1)
-                        else None
-
-                    seedIndex
-                    |> Option.map (fun index ->
-                        let mutable startIndex = index
-                        while startIndex > 0 && isDottedCandidateChar line.[startIndex - 1] do
-                            startIndex <- startIndex - 1
-
-                        let mutable endIndex = index + 1
-                        while endIndex < line.Length && isDottedCandidateChar line.[endIndex] do
-                            endIndex <- endIndex + 1
-
-                        mkRange filePath (mkPos (lineIndex + 1) startIndex) (mkPos (lineIndex + 1) endIndex))
-
-            let tryFindIdentifierRangeInRange (text: string) (target: range) (symbol: string) =
-                let needle = normalizeDefinitionSymbol symbol
-                if String.IsNullOrWhiteSpace needle then None
-                else
-                    let lines = text.Split('\n')
-                    let startLine = max 0 (int target.StartLine - 1)
-                    let endLine = min (lines.Length - 1) (max startLine (int target.EndLine - 1))
-
-                    let tryFindOnLine lineIndex =
-                        if lineIndex < 0 || lineIndex >= lines.Length then None
-                        else
-                            let line = lines.[lineIndex].TrimEnd('\r')
-                            let minColumn = if lineIndex = startLine then int target.StartColumn |> max 0 |> min line.Length else 0
-                            let maxColumn = if lineIndex = endLine then int target.EndColumn |> max minColumn |> min line.Length else line.Length
-
-                            let rec loop startIndex =
-                                let index = line.IndexOf(needle, startIndex, StringComparison.Ordinal)
-                                if index < 0 || index + needle.Length > maxColumn then None
-                                elif index < minColumn then loop (index + 1)
-                                else
-                                    let beforeOk = index = 0 || not (isSymbolBoundaryChar line.[index - 1])
-                                    let afterIndex = index + needle.Length
-                                    let afterOk = afterIndex >= line.Length || not (isSymbolBoundaryChar line.[afterIndex])
-                                    if beforeOk && afterOk then
-                                        Some(mkRange target.FileName (mkPos (lineIndex + 1) index) (mkPos (lineIndex + 1) afterIndex))
-                                    else
-                                        loop (index + 1)
-
-                            loop minColumn
-
-                    if startLine > endLine then None
-                    else [ startLine .. endLine ] |> List.tryPick tryFindOnLine
-
-            let allTypeDefinitions (game: IGame) =
-                game.Types()
-                |> Map.toSeq
-                |> Seq.collect (fun (typeName, infos) -> infos |> Seq.map (fun tdi -> typeName, tdi))
-
-            let tryTypeDefinitionAtPosition (game: IGame) filePath text position =
-                allTypeDefinitions game
-                |> Seq.tryFind (fun (_, tdi) ->
-                    sameFile tdi.range.FileName filePath
-                    && (tryFindIdentifierRangeInRange text tdi.range tdi.id
-                        |> Option.exists (fun identifierRange -> rangeContainsPos identifierRange position)))
-
-            let tryTypeDefinitionForRange (game: IGame) (target: range) =
-                allTypeDefinitions game
-                |> Seq.tryFind (fun (_, tdi) ->
-                    sameFile tdi.range.FileName target.FileName
-                    && (rangeContainsRange tdi.range target || rangeContainsRange target tdi.range))
-
             let shaderPrepareResult =
                 match gameObj with
                 | Some game ->
@@ -9166,7 +9341,7 @@ type Server(client: ILanguageClient) =
                                 let line = lines.[lineIndex].TrimEnd('\r')
                                 Some(mkRange path (mkPos (lineIndex + 1) 0) (mkPos (lineIndex + 1) line.Length))
 
-                        let typeInfoAtCursor = tryTypeDefinitionAtPosition game path sourceText position
+                        let typeInfoAtCursor = tryTypeDefinitionAtPosition game path position
 
                         let typeInfoFromDefinition =
                             match typeInfoAtCursor with
@@ -9186,7 +9361,7 @@ type Server(client: ILanguageClient) =
                             typeInfoAtCursor
                             |> Option.orElse typeInfoFromDefinition
                             |> Option.bind (fun (_, tdi) ->
-                                lineRange |> Option.bind (fun r -> tryFindIdentifierRangeInRange sourceText r tdi.id))
+                                lineRange |> Option.bind (fun r -> tryFindIdentifierRangeInText sourceText r tdi.id))
 
                         let textRange =
                             semanticRange
@@ -9194,7 +9369,7 @@ type Server(client: ILanguageClient) =
 
                         textRange
                         |> Option.bind (fun r ->
-                            tryGetSingleLineTextInRange sourceText r
+                            tryGetSingleLineTextInText sourceText r
                             |> Option.map (fun placeholder ->
                                 { range = convRangeToLSPRange r
                                   placeholder = placeholder }))
@@ -9203,225 +9378,6 @@ type Server(client: ILanguageClient) =
             |> catchError None
 
         member this.Rename(p: RenameParams) =
-            let sameFile left right =
-                String.Equals(left, right, pathComparison)
-
-            let sameRange (left: range) (right: range) =
-                sameFile left.FileName right.FileName
-                && left.StartLine = right.StartLine
-                && left.StartColumn = right.StartColumn
-                && left.EndLine = right.EndLine
-                && left.EndColumn = right.EndColumn
-
-            let rangeKey (r: range) =
-                (r.FileName.ToLowerInvariant(), r.StartLine, r.StartColumn, r.EndLine, r.EndColumn)
-
-            let isIdentifierChar (c: char) =
-                Char.IsLetterOrDigit c
-                || c = '_'
-                || c = '$'
-                || c = ':'
-                || c = '@'
-                || c = '-'
-                || c = '/'
-
-            let isDottedCandidateChar (c: char) =
-                isIdentifierChar c || c = '.'
-
-            let readDocumentText filePath =
-                docs.GetText(FileInfo(filePath))
-                |> Option.defaultValue (try File.ReadAllText filePath with _ -> "")
-
-            let tryFindIdentifierRangeInDefinition (definitionRange: range) (symbol: string) =
-                let needle = normalizeDefinitionSymbol symbol
-                if String.IsNullOrWhiteSpace needle then None
-                else
-                    let text = readDocumentText definitionRange.FileName
-                    let lines = text.Split('\n')
-                    let startLine = max 0 (int definitionRange.StartLine - 1)
-                    let rangeEndLine = max startLine (int definitionRange.EndLine - 1)
-                    let endLine = min (lines.Length - 1) (min rangeEndLine (startLine + 120))
-
-                    let tryFindOnLine lineIndex =
-                        if lineIndex < 0 || lineIndex >= lines.Length then None
-                        else
-                            let line = lines.[lineIndex].TrimEnd('\r')
-
-                            let rec loop startIndex =
-                                let index = line.IndexOf(needle, startIndex, StringComparison.Ordinal)
-                                if index < 0 then None
-                                else
-                                    let beforeOk = index = 0 || not (isIdentifierChar line.[index - 1])
-                                    let afterIndex = index + needle.Length
-                                    let afterOk = afterIndex >= line.Length || not (isIdentifierChar line.[afterIndex])
-                                    if beforeOk && afterOk then
-                                        Some(mkRange definitionRange.FileName (mkPos (lineIndex + 1) index) (mkPos (lineIndex + 1) afterIndex))
-                                    else
-                                        loop (index + 1)
-
-                            loop 0
-
-                    if startLine > endLine then None
-                    else [ startLine .. endLine ] |> List.tryPick tryFindOnLine
-
-            let tryFindIdentifierRangeAtPosition filePath (text: string) (position: pos) =
-                let lines = text.Split('\n')
-                let lineIndex = int position.Line - 1
-                if lineIndex < 0 || lineIndex >= lines.Length then None
-                else
-                    let line = lines.[lineIndex].TrimEnd('\r')
-                    let column = position.Column |> int |> max 0 |> min line.Length
-
-                    let seedIndex =
-                        if column < line.Length && isIdentifierChar line.[column] then Some column
-                        elif column > 0 && isIdentifierChar line.[column - 1] then Some(column - 1)
-                        else None
-
-                    seedIndex
-                    |> Option.map (fun index ->
-                        let mutable startIndex = index
-                        while startIndex > 0 && isIdentifierChar line.[startIndex - 1] do
-                            startIndex <- startIndex - 1
-
-                        let mutable endIndex = index + 1
-                        while endIndex < line.Length && isIdentifierChar line.[endIndex] do
-                            endIndex <- endIndex + 1
-
-                        mkRange filePath (mkPos (lineIndex + 1) startIndex) (mkPos (lineIndex + 1) endIndex))
-
-            let tryFindDottedCandidateRangeAtPosition filePath (text: string) (position: pos) =
-                let lines = text.Split('\n')
-                let lineIndex = int position.Line - 1
-                if lineIndex < 0 || lineIndex >= lines.Length then None
-                else
-                    let line = lines.[lineIndex].TrimEnd('\r')
-                    let column = position.Column |> int |> max 0 |> min line.Length
-
-                    let seedIndex =
-                        if column < line.Length && isDottedCandidateChar line.[column] then Some column
-                        elif column > 0 && isDottedCandidateChar line.[column - 1] then Some(column - 1)
-                        else None
-
-                    seedIndex
-                    |> Option.map (fun index ->
-                        let mutable startIndex = index
-                        while startIndex > 0 && isDottedCandidateChar line.[startIndex - 1] do
-                            startIndex <- startIndex - 1
-
-                        let mutable endIndex = index + 1
-                        while endIndex < line.Length && isDottedCandidateChar line.[endIndex] do
-                            endIndex <- endIndex + 1
-
-                        mkRange filePath (mkPos (lineIndex + 1) startIndex) (mkPos (lineIndex + 1) endIndex))
-
-            let tryGetSingleLineTextInRange (target: range) =
-                let text = readDocumentText target.FileName
-                let lines = text.Split('\n')
-                let startLine = int target.StartLine - 1
-                let endLine = int target.EndLine - 1
-                if startLine <> endLine || startLine < 0 || startLine >= lines.Length then None
-                else
-                    let line = lines.[startLine].TrimEnd('\r')
-                    let startColumn = int target.StartColumn |> max 0 |> min line.Length
-                    let endColumn = int target.EndColumn |> max startColumn |> min line.Length
-                    Some(line.Substring(startColumn, endColumn - startColumn))
-
-            let tryFindLocalisationKeyRange (entry: Entry) (expectedKey: string) =
-                let text = readDocumentText entry.position.FileName
-                let lines = text.Split('\n')
-                let lineIndex = int entry.position.StartLine - 1
-
-                if lineIndex < 0 || lineIndex >= lines.Length then
-                    None
-                else
-                    let line = lines.[lineIndex].TrimEnd('\r')
-                    let entryMatch = localisationEntryPattern.Match(line)
-
-                    if entryMatch.Success
-                       && String.Equals(entryMatch.Groups.[2].Value, expectedKey, StringComparison.Ordinal) then
-                        let keyGroup = entryMatch.Groups.[2]
-                        Some(
-                            mkRange
-                                entry.position.FileName
-                                (mkPos (lineIndex + 1) keyGroup.Index)
-                                (mkPos (lineIndex + 1) (keyGroup.Index + keyGroup.Length))
-                        )
-                    else
-                        let minColumn = int entry.position.StartColumn |> max 0 |> min line.Length
-                        let maxColumn = int entry.position.EndColumn |> max minColumn |> min line.Length
-                        let index = line.IndexOf(expectedKey, minColumn, StringComparison.Ordinal)
-
-                        if index >= 0 && index + expectedKey.Length <= maxColumn then
-                            let afterIndex = index + expectedKey.Length
-                            let beforeOk = index = 0 || Char.IsWhiteSpace(line.[index - 1])
-                            let afterOk = afterIndex < line.Length && line.[afterIndex] = ':'
-
-                            if beforeOk && afterOk then
-                                Some(
-                                    mkRange
-                                        entry.position.FileName
-                                        (mkPos (lineIndex + 1) index)
-                                        (mkPos (lineIndex + 1) afterIndex)
-                                )
-                            else
-                                None
-                        else
-                            None
-
-            let tryFindIdentifierRangeInRange (target: range) (symbol: string) =
-                let needle = normalizeDefinitionSymbol symbol
-                if String.IsNullOrWhiteSpace needle then None
-                else
-                    let text = readDocumentText target.FileName
-                    let lines = text.Split('\n')
-                    let startLine = max 0 (int target.StartLine - 1)
-                    let endLine = min (lines.Length - 1) (max startLine (int target.EndLine - 1))
-
-                    let tryFindOnLine lineIndex =
-                        if lineIndex < 0 || lineIndex >= lines.Length then None
-                        else
-                            let line = lines.[lineIndex].TrimEnd('\r')
-                            let minColumn = if lineIndex = startLine then int target.StartColumn |> max 0 |> min line.Length else 0
-                            let maxColumn = if lineIndex = endLine then int target.EndColumn |> max minColumn |> min line.Length else line.Length
-
-                            let rec loop startIndex =
-                                let index = line.IndexOf(needle, startIndex, StringComparison.Ordinal)
-                                if index < 0 || index + needle.Length > maxColumn then None
-                                elif index < minColumn then loop (index + 1)
-                                else
-                                    let beforeOk = index = 0 || not (isIdentifierChar line.[index - 1])
-                                    let afterIndex = index + needle.Length
-                                    let afterOk = afterIndex >= line.Length || not (isIdentifierChar line.[afterIndex])
-                                    if beforeOk && afterOk then
-                                        Some(mkRange target.FileName (mkPos (lineIndex + 1) index) (mkPos (lineIndex + 1) afterIndex))
-                                    else
-                                        loop (index + 1)
-
-                            loop minColumn
-
-                    if startLine > endLine then None
-                    else [ startLine .. endLine ] |> List.tryPick tryFindOnLine
-
-            let allTypeDefinitions (game: IGame) =
-                game.Types()
-                |> Map.toSeq
-                |> Seq.collect (fun (typeName, infos) -> infos |> Seq.map (fun tdi -> typeName, tdi))
-
-            let tryTypeDefinitionAtPosition (game: IGame) filePath position =
-                allTypeDefinitions game
-                |> Seq.tryFind (fun (_, tdi) ->
-                    sameFile tdi.range.FileName filePath
-                    && (tryFindIdentifierRangeInDefinition tdi.range tdi.id
-                        |> Option.exists (fun identifierRange -> rangeContainsPos identifierRange position)))
-
-            let tryTypeDefinitionForRange (game: IGame) (target: range) =
-                allTypeDefinitions game
-                |> Seq.tryFind (fun (_, tdi) ->
-                    sameFile tdi.range.FileName target.FileName
-                    && (sameRange tdi.range target
-                        || rangeContainsRange tdi.range target
-                        || rangeContainsRange target tdi.range))
-
             let shaderRenameResult =
                 match gameObj with
                 | Some game ->
@@ -9682,24 +9638,11 @@ type Server(client: ILanguageClient) =
                        "caches",             getCacheSnapshotJson () |]
 
             let queryProjectKnowledgeDbCommand args =
-                let optionsRecord =
-                    args
-                    |> List.tryHead
-                    |> Option.bind (function JsonValue.Record fields -> Some fields | _ -> None)
-                    |> Option.defaultValue [||]
-                let tryProperty name = optionsRecord |> Array.tryPick (fun (key, value) -> if key = name then Some value else None)
-                let stringProperty name =
-                    match tryProperty name with
-                    | Some (JsonValue.String value) when not (String.IsNullOrWhiteSpace value) -> Some value
-                    | _ -> None
-                let stringArray name =
-                    match tryProperty name with
-                    | Some (JsonValue.Array values) -> values |> Array.choose (function JsonValue.String value -> Some value | _ -> None) |> Array.toList
-                    | _ -> []
-                let boolProperty name fallback =
-                    match tryProperty name with Some (JsonValue.Boolean value) -> value | _ -> fallback
-                let intProperty name fallback =
-                    match tryProperty name with Some (JsonValue.Number value) -> int value | _ -> fallback
+                let optionsRecord = JsonArgs.tryFirstRecord args
+                let stringProperty name = JsonArgs.stringProperty name optionsRecord
+                let stringArray name = JsonArgs.stringArray name optionsRecord
+                let boolProperty name fallback = JsonArgs.boolProperty name fallback optionsRecord
+                let intProperty name fallback = JsonArgs.intProperty name fallback optionsRecord
                 match stringProperty "databasePath" with
                 | None ->
                     JsonValue.Record [| "ok", JsonValue.Boolean false; "status", JsonValue.String "error"; "error", JsonValue.String "databasePath is required." |]
@@ -9762,27 +9705,14 @@ type Server(client: ILanguageClient) =
                                    "target", JsonValue.String target
                                    "error", JsonValue.String message |]
 
-                        let shaderArgsRecord (args: JsonValue list) =
-                            args
-                            |> List.tryHead
-                            |> Option.bind (function JsonValue.Record fields -> Some fields | _ -> None)
-                            |> Option.defaultValue [||]
+                        let shaderArgsRecord = JsonArgs.tryFirstRecord
 
-                        let shaderTryProperty name (fields: (string * JsonValue) array) =
-                            fields |> Array.tryPick (fun (key, value) -> if key = name then Some value else None)
+                        let shaderStringProperty = JsonArgs.stringProperty
 
-                        let shaderStringProperty name fields =
-                            match shaderTryProperty name fields with
-                            | Some (JsonValue.String value) when not (String.IsNullOrWhiteSpace value) -> Some value
-                            | _ -> None
-
-                        let shaderRawStringProperty name fields =
-                            match shaderTryProperty name fields with
-                            | Some (JsonValue.String value) -> Some value
-                            | _ -> None
+                        let shaderRawStringProperty = JsonArgs.rawStringProperty
 
                         let shaderIntProperty name fields =
-                            match shaderTryProperty name fields with
+                            match JsonArgs.tryProperty name fields with
                             | Some (JsonValue.Number value) -> Some(int value)
                             | _ -> None
 
@@ -10818,12 +10748,7 @@ type Server(client: ILanguageClient) =
 
                             let text = String.Join("\r\n", keys)
 
-                            client.CustomNotification(
-                                "createVirtualFile",
-                                JsonValue.Record
-                                    [| "uri", JsonValue.String("cwtools://1")
-                                       "fileContent", JsonValue.String(text) |]
-                            )
+                            showVirtualFile "cwtools://1" text
 
                             None
                         | { command = "genlocall"; arguments = _ } ->
@@ -10838,12 +10763,7 @@ type Server(client: ILanguageClient) =
 
                             let text = String.Join("\r\n", keys)
 
-                            client.CustomNotification(
-                                "createVirtualFile",
-                                JsonValue.Record
-                                    [| "uri", JsonValue.String("cwtools://1")
-                                       "fileContent", JsonValue.String(text) |]
-                            )
+                            showVirtualFile "cwtools://1" text
 
                             None
                         | { command = "debugrules"
@@ -10855,24 +10775,14 @@ type Server(client: ILanguageClient) =
                                     |> Seq.map _.ToString()
                                     |> (fun l -> String.Join('\n', l))
 
-                                client.CustomNotification(
-                                    "createVirtualFile",
-                                    JsonValue.Record
-                                        [| "uri", JsonValue.String("cwtools://1")
-                                           "fileContent", JsonValue.String(text) |]
-                                )
+                                showVirtualFile "cwtools://1" text
                             | _, Some hoi4 ->
                                 let text =
                                     hoi4.References().ConfigRules
                                     |> Seq.map _.ToString()
                                     |> (fun l -> String.Join('\n', l))
                                 // let text = sprintf "%O" (ir.References().ConfigRules)
-                                client.CustomNotification(
-                                    "createVirtualFile",
-                                    JsonValue.Record
-                                        [| "uri", JsonValue.String("cwtools://1")
-                                           "fileContent", JsonValue.String(text) |]
-                                )
+                                showVirtualFile "cwtools://1" text
                             | None, None -> ()
 
                             None
@@ -10888,12 +10798,7 @@ type Server(client: ILanguageClient) =
 
                             let text = String.Join("\r\n", texts)
 
-                            client.CustomNotification(
-                                "createVirtualFile",
-                                JsonValue.Record
-                                    [| "uri", JsonValue.String("cwtools://errors.csv")
-                                       "fileContent", JsonValue.String(text) |]
-                            )
+                            showVirtualFile "cwtools://errors.csv" text
 
                             None
                         | { command = "reloadrulesconfig"
@@ -10943,12 +10848,7 @@ type Server(client: ILanguageClient) =
 
                             let text = String.Join("\r\n", text)
 
-                            client.CustomNotification(
-                                "createVirtualFile",
-                                JsonValue.Record
-                                    [| "uri", JsonValue.String("cwtools://allfiles")
-                                       "fileContent", JsonValue.String(text) |]
-                            )
+                            showVirtualFile "cwtools://allfiles" text
 
                             None
                         | { command = "listAllLocFiles"
@@ -10956,12 +10856,7 @@ type Server(client: ILanguageClient) =
                             let locs = game.AllLoadedLocalisation()
                             let text = String.Join("\r\n", locs)
 
-                            client.CustomNotification(
-                                "createVirtualFile",
-                                JsonValue.Record
-                                    [| "uri", JsonValue.String("cwtools://alllocfiles")
-                                       "fileContent", JsonValue.String(text) |]
-                            )
+                            showVirtualFile "cwtools://alllocfiles" text
 
                             None
                         | { command = "pretriggerAllFiles"
@@ -11015,26 +10910,49 @@ type Server(client: ILanguageClient) =
                                 let events =
                                     game.GetEventGraphData [ lastFile ] (x.AsString()) (depth.AsString() |> int)
 
-                                let graphData: GraphTypes.GraphData =
-                                    events
-                                    |> List.map (fun e ->
-                                        { GraphTypes.GraphNode.id = e.id
-                                          displayName = e.displayName
-                                          references =
-                                            e.references
-                                            |> List.map (fun (name, isOutgoing, label) ->
-                                                { GraphTypes.GraphReference.key = name
-                                                  isOutgoing = isOutgoing
-                                                  label = label })
-                                          location = e.location
-                                          documentation = e.documentation
-                                          details = e.details
-                                          isPrimary = e.isPrimary
-                                          entityType = e.entityType
-                                          entityTypeDisplayName = e.entityTypeDisplayName
-                                          abbreviation = e.abbreviation })
+                                let convRangeToJson (loc: range) =
+                                    [| "filename", JsonValue.String(loc.FileName.Replace("\\", "/"))
+                                       "line", JsonValue.Number(decimal loc.StartLine)
+                                       "column", JsonValue.Number(decimal loc.StartColumn) |]
+                                    |> JsonValue.Record
 
-                                Some(GraphTypes.graphDataToJson graphData)
+                                let referenceToJson (name, isOutgoing, label) =
+                                    [| Some("key", JsonValue.String name)
+                                       Some("isOutgoing", JsonValue.Boolean isOutgoing)
+                                       label |> Option.map (fun l -> "label", JsonValue.String l) |]
+                                    |> Array.choose id
+                                    |> JsonValue.Record
+
+                                let detailsToJson (details: Map<string, string list>) =
+                                    details
+                                    |> Map.toArray
+                                    |> Array.map (fun (k, vs) ->
+                                        JsonValue.Record
+                                            [| "key", JsonValue.String k
+                                               "values", (vs |> Array.ofList |> Array.map JsonValue.String |> JsonValue.Array) |])
+                                    |> JsonValue.Array
+
+                                let graphNodeToJson (node: CWTools.Games.GraphDataItem) =
+                                    [| Some("id", JsonValue.String node.id)
+                                       node.displayName |> Option.map (fun s -> ("name", JsonValue.String s))
+                                       Some("references", JsonValue.Array(node.references |> Array.ofList |> Array.map referenceToJson))
+                                       node.location |> Option.map (fun loc -> "location", convRangeToJson loc)
+                                       node.documentation |> Option.map (fun s -> "documentation", JsonValue.String s)
+                                       node.details |> Option.map (fun m -> "details", detailsToJson m)
+                                       Some("isPrimary", JsonValue.Boolean node.isPrimary)
+                                       Some("entityType", JsonValue.String node.entityType)
+                                       node.entityTypeDisplayName |> Option.map (fun s -> ("entityTypeDisplayName", JsonValue.String s))
+                                       node.abbreviation |> Option.map (fun s -> ("abbreviation", JsonValue.String s)) |]
+                                    |> Array.choose id
+                                    |> JsonValue.Record
+
+                                let json =
+                                    events
+                                    |> List.map graphNodeToJson
+                                    |> Array.ofList
+                                    |> JsonValue.Array
+
+                                Some json
                             | None -> None
                         | { command = "getFileTypes"
                             arguments = _ } ->
@@ -11079,12 +10997,7 @@ type Server(client: ILanguageClient) =
                                         td.range.StartLine)
                                 |> String.concat "\r\n"
 
-                            client.CustomNotification(
-                                "createVirtualFile",
-                                JsonValue.Record
-                                    [| "uri", JsonValue.String("cwtools://alltypes")
-                                       "fileContent", JsonValue.String(header + text) |]
-                            )
+                            showVirtualFile "cwtools://alltypes" (header + text)
 
                             None
                         // - AI-specific structured query commands -
@@ -11769,33 +11682,11 @@ type Server(client: ILanguageClient) =
                         // active override modes cannot drift between separate tool calls.
                         | { command = "cwtools.ai.exportProjectKnowledge"
                             arguments = args } ->
-                            let optionsRecord =
-                                args
-                                |> List.tryHead
-                                |> Option.bind (function JsonValue.Record fields -> Some fields | _ -> None)
-                                |> Option.defaultValue [||]
-                            let tryProperty name =
-                                optionsRecord
-                                |> Array.tryPick (fun (key, value) -> if key = name then Some value else None)
-                            let stringArray name =
-                                match tryProperty name with
-                                | Some (JsonValue.Array values) ->
-                                    values
-                                    |> Array.choose (function JsonValue.String value when not (String.IsNullOrWhiteSpace value) -> Some value | _ -> None)
-                                    |> Array.toList
-                                | _ -> []
-                            let intProperty name fallback =
-                                match tryProperty name with
-                                | Some (JsonValue.Number value) -> int value
-                                | _ -> fallback
-                            let stringProperty name =
-                                match tryProperty name with
-                                | Some (JsonValue.String value) when not (String.IsNullOrWhiteSpace value) -> Some value
-                                | _ -> None
-                            let boolProperty name fallback =
-                                match tryProperty name with
-                                | Some (JsonValue.Boolean value) -> value
-                                | _ -> fallback
+                            let optionsRecord = JsonArgs.tryFirstRecord args
+                            let stringProperty name = JsonArgs.stringProperty name optionsRecord
+                            let stringArray name = JsonArgs.stringArray name optionsRecord
+                            let boolProperty name fallback = JsonArgs.boolProperty name fallback optionsRecord
+                            let intProperty name fallback = JsonArgs.intProperty name fallback optionsRecord
                             let exportOptions: Main.ProjectKnowledge.ExportOptions =
                                 { domains = stringArray "domains"
                                   changedFiles = stringArray "changedFiles"
@@ -11839,7 +11730,7 @@ type Server(client: ILanguageClient) =
                                 if loading.inProgress then "loading"
                                 elif validation.inProgress || not pendingKinds.IsEmpty then "stale"
                                 else "ready"
-                            let runtime: Main.ProjectKnowledge.RuntimeMetadata =
+                            let runtime: RuntimeMetadata =
                                 { graphVersion = diagnosticEpoch.Value
                                   status = status
                                   validationInProgress = validation.inProgress
@@ -12650,7 +12541,7 @@ type Server(client: ILanguageClient) =
                                             JsonValue.Record
                                                 ([ "code", JsonValue.String codeText
                                                    "message", JsonValue.String d.message
-                                                   "severity", JsonValue.String (match d.severity with Some DiagnosticSeverity.Error -> "error" | Some DiagnosticSeverity.Warning -> "warning" | Some DiagnosticSeverity.Information -> "info" | Some DiagnosticSeverity.Hint -> "hint" | _ -> "info")
+                                                   "severity", JsonValue.String (diagnosticSeverityToString d.severity)
                                                    "category", JsonValue.String (dataString "category" "unknown")
                                                    "repairHint", JsonValue.String (dataString "repairHint" "")
                                                    "confidence", JsonValue.String (dataString "confidence" "low")
@@ -12704,13 +12595,6 @@ type Server(client: ILanguageClient) =
                                 allDiagArgs |> List.tryItem 1
                                 |> Option.bind (function JsonValue.Number n -> Some(int n) | _ -> None)
                                 |> Option.defaultValue 1000
-                            let sevName (s: DiagnosticSeverity option) =
-                                match s with
-                                | Some DiagnosticSeverity.Error -> "error"
-                                | Some DiagnosticSeverity.Warning -> "warning"
-                                | Some DiagnosticSeverity.Information -> "info"
-                                | Some DiagnosticSeverity.Hint -> "hint"
-                                | _ -> "info"
                             // Severity is a minimum threshold: "warning" => errors + warnings, etc.
                             let severityOk sev =
                                 match severityArg with
@@ -12726,7 +12610,7 @@ type Server(client: ILanguageClient) =
                             for kvp in fileDiagnosticStates do
                                 let filePath = kvp.Key.Replace('\\', '/')
                                 for d in kvp.Value.diagnostics do
-                                    let sev = sevName d.severity
+                                    let sev = diagnosticSeverityToString d.severity
                                     if sev = "error" then totalErrors <- totalErrors + 1
                                     elif sev = "warning" then totalWarnings <- totalWarnings + 1
                                     if severityOk sev then

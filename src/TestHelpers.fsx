@@ -19,6 +19,12 @@ let checkNamed (name: string) (condition: bool) =
 let assertTrue (condition: bool) (message: string) =
     check condition message
 
+let assertTrueNamed (name: string) (condition: bool) =
+    if not condition then failwith $"{name}: expected true"
+
+let assertFalseNamed (name: string) (condition: bool) =
+    if condition then failwith $"{name}: expected false"
+
 let equal (expected: 'T) (actual: 'T) (message: string) =
     if expected <> actual then
         failwithf "%s. Expected %A, got %A" message expected actual

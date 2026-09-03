@@ -50,7 +50,11 @@ withTempDir "cwtools-document-store" (fun tempRoot ->
             { uri = uri
               languageId = "stellaris"
               version = 3
-              text = "orphan" } }
+              text = "foo = bar_baz {\n  key = \"val\"\n}" } }
+
+    assertEqual "bar_baz" (store.GetTextAtPosition(uri, { line = 0; character = 7 })) "GetTextAtPosition middle word"
+    assertEqual "key" (store.GetTextAtPosition(uri, { line = 1; character = 2 })) "GetTextAtPosition start of line"
+    assertEqual "" (store.GetTextAtPosition(uri, { line = 0; character = 4 })) "GetTextAtPosition on delimiter"
     store.CleanupOrphanedDocuments(Set.empty)
     assertEqual None (store.GetTextByPath(path)) "cleanup removes orphan")
 

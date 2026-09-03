@@ -21,15 +21,17 @@ let isParserDiagnostic (diagnostic: Diagnostic) =
     diagnostic.code
     |> Option.exists (fun code -> code.StartsWith("CW001", StringComparison.OrdinalIgnoreCase))
 
-let isDynamicExpansionDiagnostic (diagnostic: Diagnostic) =
+let isDynamicExpansion (code: string option) (message: string) (relatedMessages: string seq) =
     let hasDynamicCode =
-        diagnostic.code
-        |> Option.exists (fun code -> code.StartsWith("CW274", StringComparison.OrdinalIgnoreCase))
+        code
+        |> Option.exists (fun c -> c.StartsWith("CW274", StringComparison.OrdinalIgnoreCase))
 
     hasDynamicCode
-    || diagnostic.message.Contains("results in an error", StringComparison.OrdinalIgnoreCase)
-    || (diagnostic.relatedInformation
-        |> List.exists (fun related -> related.message = "Related source"))
+    || message.Contains("results in an error", StringComparison.OrdinalIgnoreCase)
+    || (relatedMessages |> Seq.exists (fun m -> m = "Related source"))
+
+let isDynamicExpansionDiagnostic (diagnostic: Diagnostic) =
+    isDynamicExpansion diagnostic.code diagnostic.message (diagnostic.relatedInformation |> Seq.map (fun r -> r.message))
 
 /// CW codes whose diagnostics are produced by localisation validation. Keep
 /// this list synchronized with LOCALISATION_CODES in client diagnosticI18n.ts.

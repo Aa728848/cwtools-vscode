@@ -19,8 +19,8 @@ open TestHelpers
 
 SQLitePCL.Batteries_V2.Init()
 
-let private assertTrue name condition = checkNamed name condition
-let private assertEqual name expected actual = assertEqualNamed name expected actual
+let assertTrue = assertTrueNamed
+let assertEqual = assertEqualNamed
 
 // ─── inline instantiation graph: template, params, invocation, expansion ────
 // Template declares a $TYPE$ top-level block with a $ID$ parameter; four

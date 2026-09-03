@@ -6,6 +6,7 @@ open System.Text.RegularExpressions
 open FSharp.Data
 open CWTools.Games
 open CWTools.Process
+open Main.SemanticGraph
 
 /// Static cost model and gameplay-relationship analysis.
 ///
@@ -81,8 +82,6 @@ type FlowQuery =
 let private normalizePath (value: string) =
     value.Replace('\\', '/').Trim().TrimStart('/').ToLowerInvariant()
 
-let private jsonRecord fields = fields |> List.choose id |> List.toArray |> JsonValue.Record
-let private jsonStringArray values = values |> Seq.map JsonValue.String |> Seq.toArray |> JsonValue.Array
 
 /// Cost weights are relative, not runtime predictions: a galaxy traversal is
 /// more expensive than a country one, a while loop more than a bounded if.
@@ -1190,10 +1189,7 @@ let flowAnalysisJsonWithFreshness (facts: FlowAnalysisFacts) freshness staleReas
         [ Some("ok", JsonValue.Boolean true)
           Some("source", JsonValue.String "cwtools-pdx-flow-analysis")
           Some("version", JsonValue.Number 4m)
-          Some("freshness", jsonRecord
-              [ Some("status", JsonValue.String freshness)
-                Some("source", JsonValue.String "active_lsp_model")
-                Some("staleReasons", jsonStringArray staleReasons) ])
+          Some("freshness", activeModelFreshnessRecord freshness staleReasons)
           Some("costModel", jsonRecord
               [ Some("relativeWeights", jsonRecord
                   [ Some("galaxy", JsonValue.Number 100m)

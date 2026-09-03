@@ -10,7 +10,7 @@
 open Main.SemanticGraph
 open TestHelpers
 
-let private assertTrue name condition = checkNamed name condition
+let assertTrue = assertTrueNamed
 
 let content = """sample = {
     modifier = { factor = 1 trigger = { has_country_flag = alpha } }

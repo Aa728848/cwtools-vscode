@@ -4,7 +4,6 @@
 open Main.SemanticDirectoryCatalog
 open TestHelpers
 
-let private assertEqual expected actual message = equal expected actual message
 
 assertEqual
     (Some "common/technologies")

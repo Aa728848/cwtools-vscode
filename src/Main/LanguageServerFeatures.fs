@@ -2,6 +2,7 @@ namespace Main.Lang
 
 open LSP
 open LSP.Types
+open Main
 open System
 open System.Runtime.InteropServices
 open CWTools.Utilities.Position
@@ -29,13 +30,7 @@ module LanguageServerFeatures =
             System.Text.RegularExpressions.RegexOptions.Compiled)
 
     
-    let convRangeToLSPRange (range: range) =
-        { start =
-            { line = max 0 (int range.StartLine - 1)
-              character = (int range.StartColumn) }
-          ``end`` =
-            { line = max 0 (int range.EndLine - 1)
-              character = (int range.EndColumn) } }
+    let convRangeToLSPRange = LspConvert.rangeToLsp
 
     /// Windows URI path correction tool function (eliminate duplicate code)
     let getPathFromDoc (doc: Uri) =
@@ -44,9 +39,7 @@ module LanguageServerFeatures =
             p.Substring(1)
         else p
 
-    let filePathToUri (path: string) =
-        let filePrefix = if path.StartsWith('/') then "file://" else "file:///"
-        Uri(filePrefix + path.Replace('\\', '/'))
+    let filePathToUri = LspConvert.filePathToUri
 
     let private normaliseLocalisationLookupKey (value: string) =
         let trimmed = if isNull value then "" else value.Trim()

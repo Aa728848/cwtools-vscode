@@ -6,6 +6,7 @@ open System.Text.RegularExpressions
 open FSharp.Data
 open CWTools.Games
 open CWTools.Process
+open Main.SemanticGraph
 
 /// Inline-script instantiation graph.
 ///
@@ -697,18 +698,12 @@ let filterInlineGraph (query: InlineGraphQuery) (facts: InlineGraphFacts) =
           problems = facts.problems |> List.filter (fun item -> invocationIds.Contains item.invocationId) }
     filtered, matchingInvocations.Length > selectedInvocations.Length, matchingInvocations.Length
 
-let private jsonRecord fields = fields |> List.choose id |> List.toArray |> JsonValue.Record
-let private jsonStringArray values = values |> Seq.map JsonValue.String |> Seq.toArray |> JsonValue.Array
-
 let inlineGraphJsonWithCoverageAndFreshness (facts: InlineGraphFacts) (truncated: bool) (consideredInvocations: int) freshness staleReasons =
     jsonRecord
         [ Some("ok", JsonValue.Boolean true)
           Some("source", JsonValue.String "cwtools-inline-instantiation")
           Some("version", JsonValue.Number 3m)
-          Some("freshness", jsonRecord
-              [ Some("status", JsonValue.String freshness)
-                Some("source", JsonValue.String "active_lsp_model")
-                Some("staleReasons", jsonStringArray staleReasons) ])
+          Some("freshness", activeModelFreshnessRecord freshness staleReasons)
           Some("templates", facts.templates
               |> List.sortBy (fun item -> item.templateId)
               |> List.map (fun item ->

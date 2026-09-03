@@ -1,5 +1,25 @@
 # Changelog
 
+## [2.16.7] - 2026-09-03
+
+### AI 运行时稳定性与上下文度量优化 / AI Runtime Resilience & Context Meter Calibration
+- **[修复] AI 对话上下文估算与展示修正（AI Conversation Context Estimation & Meter Calibration）**：
+  - **解耦活跃上下文与累计计费消耗**：严格区分模型单次请求的活跃上下文窗口（Context Window Tokens）与整个会话多轮迭代累积的总计费 Token（Billing Cumulative Tokens）。
+  - **修复流式无 Usage 下的估算溢出**：修复 Webview 在流式 API 未返回 usage 时误将多轮累加的计费总 Token 传给单次上下文进度条的缺陷，彻底消除状态栏出现类似 `~4932k / 1049k tokens` 虚假爆满变红的显示问题。
+  - **上下文上限安全钳位保护**：为上下文上限引入 `MAX_SAFE_CONTEXT_TOKENS`（2M tokens）硬保护，防止因用户配置或输入异常偏高导致后端自动上下文压缩（Compaction）阈值被推高而失效。
+  - English: [Fix] AI conversation context estimation & meter calibration — decoupled single-turn active context window tokens from multi-turn cumulative billing totals; fixed webview fallback estimation when streaming APIs omit usage trailers, preventing multi-turn totals from overflowing the single-turn meter and eliminating false `~4932k / 1049k` gauge overflows; clamped context limits to `MAX_SAFE_CONTEXT_TOKENS` (2M tokens) to protect automatic compaction watermarks.
+
+- **[修复] 接口异常捕获与网络重试韧性增强（Network Error Handling & Fetch Retry Resilience）**：
+  - **深入解析 Node 原生 Fetch 异常**：针对 Node 18+ 原生 fetch 抛出的 `TypeError: fetch failed`，深度解析其底层 `error.cause` 中的网络错误代码（包括 `ECONNRESET`、`ETIMEDOUT`、`UND_ERR_SOCKET`、`ECONNREFUSED` 等）。
+  - **自动指数退避重试**：将服务端连接重置、TCP 握手闪断等网络层瞬断纳入 `fetchWithRetry` 自动重试流程（最多 3 次），显著提升第三方代理与中转端点的网络韧性。
+  - **展示底层诊断明细**：在重试耗尽抛出异常时，自动将底层错误原因拼接入报错提示（如 `fetch failed (read ECONNRESET)`），避免无信息的裸报错。
+  - English: [Fix] Network error handling & fetch retry resilience — inspected `TypeError: fetch failed` and extracted underlying `error.cause` codes (`ECONNRESET`, `ETIMEDOUT`, `UND_ERR_SOCKET`, `ECONNREFUSED`); enabled exponential backoff retry for socket resets and transient network drops up to 3 times, improving relay reliability; surfaced detailed root causes on terminal errors.
+
+- **[优化] 用户交互提问等待机制与心跳降噪（Indefinite User Question Wait & Heartbeat De-noising）**：
+  - **用户提问无超时等待**：将 `ask_user_question` 交互等待超时设为无限制（0），允许用户根据需要随时作答，彻底消除超过 30 秒默认工具超时导致 AI 自行重发重复提问打断思考的问题。
+  - **交互期间心跳降噪**：在等待用户交互输入期间屏蔽每 15 秒的心跳进度日志（`orchestrator_progress`），避免日志噪音刷屏。
+  - English: [Improvement] Indefinite user question wait & heartbeat de-noising — set `ask_user_question` timeout to 0 (indefinite) to allow users unlimited time to respond without triggering 30s timeout cancellations or model question loops; suppressed heartbeat logging while awaiting user input.
+
 ## [2.16.6] - 2026-09-01
 
 ### 交互与执行流程优化 / Interaction & Execution Workflow Improvements

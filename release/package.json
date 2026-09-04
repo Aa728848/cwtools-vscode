@@ -5,7 +5,7 @@
     "description": "%extension.description%",
     "author": "Eddy",
     "license": "MIT",
-    "version": "2.16.7",
+    "version": "2.16.8",
     "preview": true,
     "publisher": "ForeverSkywalker",
     "icon": "docs/stellaris.png",
@@ -493,7 +493,6 @@
                 "command": "pretriggerAllFiles",
                 "title": "%commands.pretriggerAllFiles.title%",
                 "category": "Stellaris"
-
             },
             {
                 "command": "exportTypes",

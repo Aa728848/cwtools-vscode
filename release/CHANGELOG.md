@@ -1,5 +1,14 @@
 # Changelog
 
+## [2.16.8] - 2026-09-04
+
+### 服务端内存治理与 GC 架构优化 / Language Server Memory Governance & GC Architecture
+- **[优化/重构] 语言服务器 GC 架构调整与大对象堆压缩收缩（Language Server GC Architecture & Milestone Compaction）**：
+  - **切换至 Workstation GC 模式**：将 .NET 语言服务器的垃圾收集器模式由 Server GC 切换为桌面 IDE 专用的 Workstation GC。彻底杜绝多 CPU 逻辑核心导致每个核心独立分配堆段的乘数膨胀，阻止 CLR 在未达系统物理内存临界压力前扣留空闲段，释放约 5.5 GB 闲置 Committed 内存，使虚拟内存页可积极退还 Windows 操作系统。
+  - **三大生命周期里程碑深度收缩**：引入显式的 `forceTrimMemory` 机制，在“工作区初始化发布完成”、“后台全量规则批处理校验结束”以及“原版二进制缓存重新生成完毕”三大关键业务转折点触发 `CompactOnce` 深度堆压缩与强力回收，彻底消除大对象堆（LOH）中积累的约 1.63 GB 不可复用内存碎片孔洞，使整体物理工作集内存从 12.6 GB 断崖式压降超 60% 至 4.5~5.2 GB 真实存活基线。
+  - **常规交互后台回收防空转**：优化平缓交互时的 `maybeCollectGarbage` 机制，将触发模式从可能被运行时跳过的 `Optimized` 调整为 `Forced`，同时保持非阻塞并发模式，确保日常代码补全、打字与悬停体验零卡顿。
+  - English: [Optimization/Refactoring] Language server GC architecture & milestone memory compaction — switched .NET language server runtime from Server GC to desktop-focused Workstation GC, eliminating multi-core per-heap segment multiplier blowup and preventing CLR from withholding committed segments before reaching system-wide critical memory pressure, reclaiming ~5.5 GB unused committed virtual memory; implemented explicit `forceTrimMemory` with `CompactOnce` invoked strictly at three milestone boundaries (post-workspace publication, post-background validation, and post-vanilla-cache generation) to eliminate ~1.63 GB non-reusable LOH fragmentation, slashing physical working set memory from 12.6 GB by over 60% to the 4.5~5.2 GB live-data baseline; promoted interactive `maybeCollectGarbage` from runtime-droppable `Optimized` mode to `Forced` background mode for non-blocking yet responsive everyday editor performance.
+
 ## [2.16.7] - 2026-09-03
 
 ### AI 运行时稳定性与上下文度量优化 / AI Runtime Resilience & Context Meter Calibration

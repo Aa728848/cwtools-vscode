@@ -2684,8 +2684,24 @@ type Server(client: ILanguageClient) =
     let maybeCollectGarbage () =
         let currentBytes = GC.GetTotalAllocatedBytes(false)
         if currentBytes - lastGCAllocBytes > gcThresholdBytes then
-            GC.Collect(2, GCCollectionMode.Optimized, false, false)
+            GC.Collect(2, GCCollectionMode.Forced, false, false)
             lastGCAllocBytes <- GC.GetTotalAllocatedBytes(false)
+
+    /// Explicitly forces a compacting Gen2 and LOH collection and trims the process working set.
+    /// This is invoked only at milestone boundaries (after initial project publication,
+    /// after background full-workspace validation, or after vanilla cache generation) so interactive
+    /// typing/completion is unaffected.
+    let forceTrimMemory (reason: string) =
+        try
+            System.Runtime.GCSettings.LargeObjectHeapCompactionMode <-
+                System.Runtime.GCLargeObjectHeapCompactionMode.CompactOnce
+            GC.Collect(2, GCCollectionMode.Aggressive, true, true)
+            GC.WaitForPendingFinalizers()
+            GC.Collect(2, GCCollectionMode.Aggressive, true, true)
+            lastGCAllocBytes <- GC.GetTotalAllocatedBytes(false)
+            monitorLog Memory $"Memory trimmed ({reason}): {getPerfMemorySnapshot ()}"
+        with e ->
+            logDiag $"forceTrimMemory failed ({reason}): {e.Message}"
 
     let mutable lastFocusedFile: string option = None
 
@@ -5312,7 +5328,7 @@ type Server(client: ILanguageClient) =
             // reads are not blocked by GC. Skip when a completion window is
             // active to avoid stalling the editor.
             if (gcPendingAfterRefresh || gcPendingAfterLoc) && not (isCompletionActive ()) then
-                GC.Collect(2, GCCollectionMode.Optimized, false, false)
+                GC.Collect(2, GCCollectionMode.Forced, false, false)
                 lastGCAllocBytes <- GC.GetTotalAllocatedBytes(false)
                 monitorLog Memory "GC after global refresh (idle)"
             elif gcPendingAfterRefresh || gcPendingAfterLoc then
@@ -5972,6 +5988,7 @@ type Server(client: ILanguageClient) =
                             serializeFn vp gameCachePath
                             writeVanillaCacheMetadata cacheFilePath activeGame vp
                             cacheStatus <- "generated"
+                            forceTrimMemory "post-vanilla-cache-generation"
                             let text = String.Format(LangResources.vanillaCacheUpdated, activeGame)
                             client.CustomNotification(
                                 "vanillaCacheGenerated",
@@ -6222,6 +6239,7 @@ type Server(client: ILanguageClient) =
                             "loadingBar",
                             JsonValue.Record [| "value", JsonValue.String(""); "enable", JsonValue.Boolean(false) |]
                         ))
+                forceTrimMemory "post-full-background-validation"
         ) |> ignore
 
     let prepareWorkspace (uri: option<Uri>) =
@@ -6497,7 +6515,7 @@ type Server(client: ILanguageClient) =
                 setFileDiagnosticStateWithEpoch filePath loadEpoch Fresh [] (entries |> List.map snd)
             | _ -> ())
 
-        maybeCollectGarbage ()
+        forceTrimMemory "post-workspace-publication"
         prepared.game
         |> Option.iter (fun game -> startFullWorkspaceBackgroundValidation game prepared.parserErrors)
 

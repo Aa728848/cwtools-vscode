@@ -2731,6 +2731,13 @@ type Server(client: ILanguageClient) =
         | Some DiagnosticSeverity.Hint -> "hint"
         | _ -> "info"
 
+    let cwSeverityName (severity: Severity) =
+        match severity with
+        | Severity.Error -> "error"
+        | Severity.Warning -> "warning"
+        | Severity.Information -> "info"
+        | _ -> "hint"
+
     let diagnosticCategoryAndHint (code: string) (message: string) =
         let lower = message.ToLowerInvariant()
         let has (needle: string) = lower.Contains(needle)
@@ -8357,10 +8364,7 @@ type Server(client: ILanguageClient) =
                     | Some game ->
                         let filePath = FileInfo(p.textDocument.uri.LocalPath).FullName
                         let cacheKey = normaliseCachePath filePath
-                        let readFileText () =
-                            match docs.GetTextByPath(filePath) with
-                            | Some t -> t
-                            | None -> try System.IO.File.ReadAllText(filePath) with _ -> ""
+                        let readFileText () = readDocumentText filePath
                         let buildLenses fileText =
                             cancellationToken.ThrowIfCancellationRequested()
                             let hash = contentHash fileText
@@ -8460,10 +8464,7 @@ type Server(client: ILanguageClient) =
                     let filePath = FileInfo(p.textDocument.uri.LocalPath).FullName
                     let cacheKey = normaliseCachePath filePath
                     // Match the hash correctly
-                    let fileText = 
-                        match docs.GetTextByPath(filePath) with
-                        | Some t -> t
-                        | None -> try System.IO.File.ReadAllText(filePath) with _ -> ""
+                    let fileText = readDocumentText filePath
                     let hash = contentHash fileText
                     
                     match inlayHintCache.TryGetValue(cacheKey) with
@@ -10365,17 +10366,10 @@ type Server(client: ILanguageClient) =
                                         let diagnostics =
                                             PdxShaderFeatures.validateFromResources (game.AllFiles()) filePath fileText
 
-                                        let severityName (severity: Severity) =
-                                            match severity with
-                                            | Severity.Error -> "error"
-                                            | Severity.Warning -> "warning"
-                                            | Severity.Information -> "info"
-                                            | _ -> "hint"
-
                                         let diagnosticJson (error: CWError) =
                                             JsonValue.Record
                                                 [| "code", JsonValue.String error.code
-                                                   "severity", JsonValue.String(severityName error.severity)
+                                                   "severity", JsonValue.String(cwSeverityName error.severity)
                                                    "message", JsonValue.String error.message
                                                    "range", locationToJson error.range |]
 
@@ -12241,17 +12235,11 @@ type Server(client: ILanguageClient) =
                             // Keep the production command's bounded/duplicate policy identical to the
                             // independently regression-tested admission helper.
                             let admissionDecisions = Main.OverlayValidation.admit admissionInputs
-                            let severityName (severity: Severity) =
-                                match severity with
-                                | Severity.Error -> "error"
-                                | Severity.Warning -> "warning"
-                                | Severity.Information -> "info"
-                                | _ -> "hint"
                             let diagnosticJson (error: CWError) =
                                 let lspRange = convRangeToLSPRange error.range
                                 JsonValue.Record
                                     [| "code", JsonValue.String error.code
-                                       "severity", JsonValue.String(severityName error.severity)
+                                       "severity", JsonValue.String(cwSeverityName error.severity)
                                        "message", JsonValue.String error.message
                                        "line", JsonValue.Number(decimal lspRange.start.line)
                                        "column", JsonValue.Number(decimal lspRange.start.character)

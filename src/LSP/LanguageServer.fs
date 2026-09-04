@@ -171,8 +171,6 @@ let private serializePrepareRenameResultOption =
 let private serializeSemanticTokens =
     serializerFactory<SemanticTokens> jsonWriteOptions
 
-let private serializeSemanticTokensOption = Option.map serializeSemanticTokens
-
 let private serializeSemanticTokensDelta =
     serializerFactory<SemanticTokensDelta> jsonWriteOptions
 
@@ -180,9 +178,6 @@ let private serializeSemanticTokensOrDelta (c: Choice<SemanticTokens, SemanticTo
     match c with
     | Choice1Of2 t -> serializeSemanticTokens t
     | Choice2Of2 d -> serializeSemanticTokensDelta d
-
-let private serializeSemanticTokensOrDeltaOption =
-    Option.map serializeSemanticTokensOrDelta
 
 let private serializeFoldingRangeList = serializerFactory<FoldingRange list> jsonWriteOptions
 let private serializeSelectionRangeList = serializerFactory<SelectionRange list> jsonWriteOptions
@@ -591,11 +586,6 @@ let connect (serverFactory: ILanguageClient -> ILanguageServer, receive: BinaryR
                         // validation/cache writer. VS Code naturally retries its
                         // background providers; direct navigation gets a bounded
                         // empty response instead of an unbounded loading widget.
-                        let fixedLockFallback timeoutMs response =
-                            Some
-                                { timeoutMs = timeoutMs
-                                  getResult = fun () -> Some response }
-
                         let lockFallback =
                             match parsed with
                             | Completion p ->

@@ -28,11 +28,7 @@ module Commands =
 
             // Query / file inspection commands
             readCmd "cwtools.findTypeReferences"
-            readCmd "cwtools.exportTypes"
             readCmd "getFileTypes"
-            readCmd "typeGraphInfo"
-            readCmd "getDataForFile"
-            readCmd "getTypesForFile"
 
             // AI Read-only commands
             readCmd "cwtools.ai.getScopeAtPosition"

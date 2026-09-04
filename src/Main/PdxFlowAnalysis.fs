@@ -7,6 +7,7 @@ open FSharp.Data
 open CWTools.Games
 open CWTools.Process
 open Main.SemanticGraph
+open Main.EventAstWalk
 
 /// Static cost model and gameplay-relationship analysis.
 ///
@@ -127,18 +128,7 @@ let private frequencyOf (node: Node) =
     elif key = "while" then "per_tick_while_running"
     else "event_or_effect"
 
-let private phaseOf (node: Node) =
-    let key = node.Key.ToLowerInvariant()
-    if key = "trigger" then "trigger"
-    elif key = "immediate" then "immediate"
-    elif key = "option" then "option"
-    elif key = "hidden_effect" then "hidden_effect"
-    elif key = "after" then "after"
-    elif key = "on_success" then "on_success"
-    elif key = "on_fail" then "on_fail"
-    elif key = "potential" then "potential"
-    elif key = "allow" then "allow"
-    else ""
+let private phaseOf = EventAstWalk.phaseOf
 
 let private isTraversal (key: string) =
     let lower = key.ToLowerInvariant()
@@ -481,20 +471,9 @@ let private collectStateAccesses (root: Node) =
     visit root false ""
     accesses |> Seq.distinctBy (fun item -> item.operation, item.subject, item.line) |> Seq.sortBy _.line |> Seq.toList
 
-let private eventScopeFromKey (key: string) =
-    let lower = key.ToLowerInvariant()
-    if lower.EndsWith("_event", StringComparison.Ordinal) then Some(lower.Substring(0, lower.Length - 6))
-    else None
+let private eventScopeFromKey = EventAstWalk.eventScopeFromKey
 
-let private conditionPathText path =
-    match path |> List.rev with
-    | [] -> None
-    | ordered ->
-        let relation =
-            if ordered |> List.exists (fun value -> value = "not" || value = "nor" || value = "else") then "blocks"
-            elif ordered |> List.exists (fun value -> value = "or" || value = "random_list" || value = "switch" || value = "else_if") then "alternative"
-            else "requires"
-        Some(relation + ":" + String.concat ">" ordered)
+let private conditionPathText = EventAstWalk.conditionPathOf
 
 let private collectEventCalls (eventCallOperators: Set<string>) definitionId file (root: Node) =
     let calls = ResizeArray<EventCall>()

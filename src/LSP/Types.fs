@@ -44,12 +44,6 @@ type TextDocumentSaveReason =
     | AfterDelay
     | FocusOut
 
-let writeTextDocumentSaveReason i =
-    match i with
-    | TextDocumentSaveReason.Manual -> 1
-    | TextDocumentSaveReason.AfterDelay -> 2
-    | TextDocumentSaveReason.FocusOut -> 3
-
 type WillSaveTextDocumentParams =
     { textDocument: TextDocumentIdentifier
       reason: TextDocumentSaveReason }
@@ -66,12 +60,6 @@ type FileChangeType =
     | Created
     | Changed
     | Deleted
-
-let writeFileChangeType i =
-    match i with
-    | FileChangeType.Created -> 1
-    | FileChangeType.Changed -> 2
-    | FileChangeType.Deleted -> 3
 
 type FileEvent = { uri: Uri; ``type``: FileChangeType }
 

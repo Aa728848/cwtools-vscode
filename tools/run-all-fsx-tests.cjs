@@ -50,19 +50,22 @@ for (const testPath of testsToRun) {
         cwd: testDir,
         encoding: 'utf-8',
         env: { ...process.env },
+        timeout: 60000,
     });
     const durationMs = Date.now() - testStart;
 
-    if (result.status === 0) {
+    if (result.status === 0 && !result.error) {
         passed++;
         console.log(`PASS (${(durationMs / 1000).toFixed(2)}s)`);
     } else {
         failed++;
-        console.log(`FAIL (${(durationMs / 1000).toFixed(2)}s)`);
+        const isTimeout = result.error && /** @type {any} */ (result.error).code === 'ETIMEDOUT';
+        console.log(`${isTimeout ? 'TIMEOUT' : 'FAIL'} (${(durationMs / 1000).toFixed(2)}s)`);
         failures.push({
             file: relPath,
             stdout: result.stdout,
             stderr: result.stderr,
+            error: result.error ? result.error.message : undefined,
         });
     }
 }

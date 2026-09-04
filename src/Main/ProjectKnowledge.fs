@@ -12,6 +12,7 @@ open CWTools.Process
 open CWTools.Utilities.Position
 open CWTools.Utilities.StringResource
 open Main.SemanticGraph
+open Main.EventAstWalk
 
 [<Literal>]
 let KnowledgeSchemaVersion = 7
@@ -1437,27 +1438,8 @@ let private collectEventGraphWithKnownIds (knownEventIds: Set<string>) (options:
           "create_megastructure", "last_created_megastructure" ]
         |> dict
     let eventCallOperators = PdxEventSemantics.eventCallOperators game
-    let phaseOf (node: Node) =
-        let key = node.Key.ToLowerInvariant()
-        if key = "trigger" then "trigger"
-        elif key = "immediate" then "immediate"
-        elif key = "option" then "option"
-        elif key = "hidden_effect" then "hidden_effect"
-        elif key = "after" then "after"
-        elif key = "on_success" then "on_success"
-        elif key = "on_fail" then "on_fail"
-        elif key = "potential" then "potential"
-        elif key = "allow" then "allow"
-        else ""
-    let conditionPathOf (path: string list) =
-        if path.IsEmpty then None
-        else
-            let ordered = path |> List.rev
-            let role =
-                if ordered |> List.exists (fun item -> item = "not" || item = "nor" || item = "else") then "blocks"
-                elif ordered |> List.exists (fun item -> item = "or" || item = "random_list" || item = "switch" || item = "else_if") then "alternative"
-                else "requires"
-            Some(role + ":" + String.concat ">" ordered)
+    let phaseOf = EventAstWalk.phaseOf
+    let conditionPathOf = EventAstWalk.conditionPathOf
 
     let subjectFromNode (node: Node) =
         node.Leaves

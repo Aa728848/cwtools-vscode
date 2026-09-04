@@ -48,6 +48,11 @@ description: 上游 cwtools 子模块审查交接文档：复制粘贴重复、�
 | `locStaticSettings` 5 份 | 在 `ChangeLocScope.fs` 提取 `createDefaultLegacyLocStaticSettings`，VIC2/HOI4/IR/CK2/EU4 全量接入单源委托。 | ✅ 已完成落地（净减 ~100 行） |
 | 2.6 剩余装置登记 | `CWToolsCLI`/`CWToolsPerformanceCLI`/`CWToolsScripts`/`docker-regression-runner` 定位与用途已登记入 `submodules/cwtools/README.md`。 | ✅ 已完成落地 |
 | VIC3Constants = EU5Constants | 阶段一后各仅余 13 行活动常量，影响可忽略。 | 明确关闭 |
+| `STLGame.fs:2266` 的 `createEmbeddedSettings` | 未接入共享实现，保留 ~70 行本地特化版（与 `createClausewitzEmbeddedSettings` 仍有结构重叠）；7 个老游戏已接入，此行仅覆盖不足非错误 | 明确关闭（STL 特化保留） |
+| `Lookups.fs` provinces 4 字段 + 按游戏快照分支；CK2 vs VIC2 Localisation 服务骨架 | 两轮收尾均未触及，也未列入闭环表 | 明确关闭（量小、风险收益比低） |
+| `LanguageFeatures.fs` scripted_variables 守卫形状 | :116-117 / :1626 / :1986-1989 三处 Contains 写法仍不一致（分隔符与大小写策略各异），行为差异在 Windows 上基本无实际影响 | 明确关闭（风格残留） |
+
+> 核查说明（2026-09-04 第三轮）：上表 4.4 的"架构核验闭环"结论经抽查属实——`RuleValidationService.fs:157` 与 `InfoService.fs:194` 的 `memoizeRulesWith` 投影函数确实不同（一个消费 subtypes、一个忽略），`MemoryLifecycleTests.fs:88` 存在对 `preparedTypeIndexServiceCache` 生命周期的专项契约测试；4.5 的 `File.ReadAllText` 9→3 已确认，余 3 处为缓存读/跨文件读/带日志预览读，属合理残留。全量验证：CWToolsTests 280 通过 0 失败、`src/Main` 构建 0 警告、fsx 30/30。
 
 决策点闭环记录：A 取"保留+去重"（已执行）；B/C 取"保留"；D 取 (c) 冻结基线；E 取"改诊断"（`CommonValidation.fs:578-582` 现产出 `Internal error ... Severity.Warning` 而非静默 OK）。
 

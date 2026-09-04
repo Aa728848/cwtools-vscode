@@ -7,6 +7,7 @@ open FSharp.Data
 open CWTools.Games
 open CWTools.Process
 open Main.SemanticGraph
+open Main.EventAstWalk
 
 /// Inline-script instantiation graph.
 ///
@@ -227,12 +228,7 @@ let private renderedReferences (template: Node) args =
         elif lower.Contains("system") then "system"
         else "current_scope"
     let subjectFromNode (node: Node) =
-        node.Values
-        |> Seq.tryFind (fun value ->
-            let key = value.Key.ToLowerInvariant()
-            key = "which" || key = "name" || key = "flag" || key = "id" || key = "target")
-        |> Option.orElseWith (fun () -> node.Values |> Seq.tryHead)
-        |> Option.map (fun value -> renderExpandedId (string value.Value) args |> fun raw -> raw.Trim().Trim('"'))
+        EventAstWalk.subjectFromNodeWith (fun raw -> renderExpandedId raw args) node
     let rec visit (node: Node) =
         let nodeKey = renderExpandedId node.Key args
         match stateOperation nodeKey, subjectFromNode node with

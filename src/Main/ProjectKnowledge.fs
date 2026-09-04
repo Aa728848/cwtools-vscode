@@ -1441,21 +1441,7 @@ let private collectEventGraphWithKnownIds (knownEventIds: Set<string>) (options:
     let phaseOf = EventAstWalk.phaseOf
     let conditionPathOf = EventAstWalk.conditionPathOf
 
-    let subjectFromNode (node: Node) =
-        node.Leaves
-        |> Seq.tryFind (fun leaf ->
-            leaf.Key.Equals("which", StringComparison.OrdinalIgnoreCase)
-            || leaf.Key.Equals("name", StringComparison.OrdinalIgnoreCase)
-            || leaf.Key.Equals("flag", StringComparison.OrdinalIgnoreCase)
-            || leaf.Key.Equals("target", StringComparison.OrdinalIgnoreCase)
-            || leaf.Key.Equals("technology", StringComparison.OrdinalIgnoreCase)
-            || leaf.Key.Equals("tech", StringComparison.OrdinalIgnoreCase)
-            || leaf.Key.Equals("project", StringComparison.OrdinalIgnoreCase)
-            || leaf.Key.Equals("situation", StringComparison.OrdinalIgnoreCase)
-            || leaf.Key.Equals("type", StringComparison.OrdinalIgnoreCase))
-        |> Option.orElseWith (fun () -> node.Leaves |> Seq.tryHead)
-        |> Option.map (fun leaf -> string leaf.Value |> fun value -> value.Trim().Trim('"'))
-        |> Option.orElseWith (fun () -> node.Values |> Seq.tryHead |> Option.map (fun leaf -> string leaf.Value |> fun value -> value.Trim().Trim('"')))
+    let subjectFromNode = EventAstWalk.subjectFromNode
 
     let scopeForCallOperator (operator: string) =
         if operator.EndsWith("_event", StringComparison.OrdinalIgnoreCase) then

@@ -31,3 +31,18 @@ let eventScopeFromKey (key: string) : string option =
         Some(lower.Substring(0, lower.Length - 6))
     else
         None
+
+let preferredSubjectKeys =
+    Set.ofList [ "which"; "name"; "flag"; "id"; "target"; "technology"; "tech"; "project"; "situation"; "type" ]
+
+let rawSubjectLeafFromNode (node: Node) : Leaf option =
+    node.Leaves
+    |> Seq.tryFind (fun leaf -> preferredSubjectKeys.Contains(leaf.Key.ToLowerInvariant()))
+    |> Option.orElseWith (fun () -> node.Leaves |> Seq.tryHead)
+
+let subjectFromNodeWith (transform: string -> string) (node: Node) : string option =
+    rawSubjectLeafFromNode node
+    |> Option.map (fun leaf -> transform (string leaf.Value) |> fun raw -> raw.Trim().Trim('"'))
+
+let subjectFromNode (node: Node) : string option =
+    subjectFromNodeWith id node

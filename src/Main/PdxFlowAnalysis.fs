@@ -419,11 +419,7 @@ let private stateScope (key: string) =
     else "current_scope"
 
 let private subjectFromNode (node: Node) =
-    let preferred = Set.ofList [ "which"; "name"; "flag"; "id"; "target" ]
-    node.Values
-    |> Seq.tryFind (fun value -> preferred.Contains(value.Key.ToLowerInvariant()))
-    |> Option.orElseWith (fun () -> node.Values |> Seq.tryHead)
-    |> Option.map (fun value -> string value.Value |> fun raw -> raw.Trim().Trim('"'))
+    EventAstWalk.subjectFromNode node
     |> Option.defaultValue "<dynamic>"
 
 let private stateSubjectFromKeyOrNode (key: string) (node: Node) =

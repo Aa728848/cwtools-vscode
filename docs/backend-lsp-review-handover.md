@@ -217,3 +217,41 @@ npm test   # 含 completion/hover/folding/extension 集成套件;需 Stellaris v
 
 - 每完成一个子项,除 build + fsx 外,**必须实测一次服务器 initialize**(本次 P0 的教训:反射期失败只有运行期能抓)。
 - `npm run test:fsx` 现可信任(exit code 已修复);建议给 runner 加每脚本超时。
+
+---
+
+## 终审记录(阶段 0–6 全部落地后,2026-06-06)
+
+全量验证:`dotnet build` LSP/Main 0 错误、TS compile + typecheck:test 通过、**30/30 .fsx 通过**(新增 JsonRpcProtocol.Tests.fsx)、服务器 initialize 冒烟正常。
+
+### 终审中又发现并修复一个回归(工作区未提交)
+
+3. **publish 丢失 `languages` 更新(已修复)**:阶段 5(192c0215)收敛 10 游戏槽位时删掉了 publish 路径的 `languages <- prepared.languages`(旧 Program.fs:6431),导致该字段只剩 DidChangeConfiguration 一个写入点;游戏切换/初始发布时 `languages` 为旧游戏解析结果或空,`getOrBuildLocMap`(Program.fs:1976)的多语言优先级合并失效(hover/inlay 本地化管理退化为默认解析),直到下一次配置变更。伴随症状:`PreparedWorkspace.languages` 沦为只写死字段。已在 publish(Program.fs:6401)恢复该行,build + initialize + 相关 fsx 全过。当时同步放宽的两个源码断言测试(WorkspacePublication/RefreshLockIntegration)恰好放过了这个遗漏——源码 grep 式测试的固有弱点再次实证。
+
+### 阶段 5 评分(192c0215)
+
+- ✅ unified active requests:requestTraces+pendingRequests 两账合一为 activeRequests,取消/超时/终止门语义经逐路径核对保持。
+- ✅ cache key 空间统一:normaliseCachePath 幂等,读写闭环一致;残留 locCache 裸 key。
+- ⚠️ 10-game slots:存储收敛为单一 `PreparedTypedGameRefs` ✅ 且 publish 新增引用一致性校验;但 game→名字/loader 表未做,10/11 臂枚举点几乎没降(gameName 仍逐字两遍),并附带上述 languages 回归。
+- ❌ 刷新脏状态 5 套整项未动;tracing 只收敛一半(heartbeat 已删、两账合一;monitorLog 双份、tryTerminalizeRequest 泛型间接、计时脚手架仍在)。
+
+### 阶段 6 评分(5a3821f9 + cec87896)
+
+- ✅ JsonRpcProtocol.Tests.fsx:非 ASCII 分帧、转义、畸形输入、**`serializerFactory<InitializeResult>` 构造即断言 smoke(P0 教训已落实)**。
+- ✅ 幻影命令 4 条删除,注册表与 dispatch 双向核对一致。
+- ✅ 死 writer/死序列化器清理正确(writeTextDocumentSyncKind 不删是对的);severityName/readDocumentText 残留已收口。
+- ✅ p95 硬断言改打印;runner 加 60s 每脚本超时 + 自动发现。
+- ⚠️ EventAstWalk 半成品:phaseOf/conditionPathOf 已统一且等价;但 `subjectFromNode` 仍 3 份语义分歧实现,且新模块引入 3 个 0 调用死函数(subjectFromNode/isConditionBranchKey/isBranchConditional,语义与现存任何一份都不同,误接即改行为);模块体异常缩进。
+- ❌ 测试重组主体未做:源码 grep 式测试仍在 3 个文件原位、Phases↔Integration 重叠断言未删、CwtLanguageService.Tests 未裁、PdxFragmentValidation/Completion 微文件微测试未并——提交信息声称 "complete phase 6" 名不副实。
+
+### 收口清单(供后续小步跟进,按优先级)
+
+1. EventAstWalk:删掉 3 个 0 调用死函数,或完成 subjectFromNode 三方统一(先裁决语义)。
+2. responseAgent 超时测试(连续两轮复核未补;修复在 LanguageServer.fs:244-252,零覆盖)。
+3. Tokenizer readLength 截断风险(跳字节后只读 byteLength-1)+ Ser.fs:86 超限静默 "null" 无日志;新测试恰好都没覆盖这两处。
+4. 散项:normalizePath 4 份 lowercase 副本、types.ts `QueryTypesResult.subtypes` 幽灵字段、agentTools.ts:3089-3104 与 3321-3342 两套硬编码、ARCHITECTURE.md 跨层大小写约定、SymbolIndex Position/Range 重复、JsonArgs 2 处内联(Program.fs:11410/11509)、Git.fs 恢复分支 helper 复用、微文件合并。
+5. 测试重组主体(阶段 6 A1/A2)。
+
+### 总结
+
+六阶段累计:删死代码/重复约 2600+ 行,修复 1 个泄漏 + 1 个控制流隐患,命令表/override resolver/缓存 key/请求生命周期等核心重复已收敛,测试基建(TestHelpers + runner + JSON 栈覆盖)从无到有。三轮复核共抓出 3 个落地期引入的缺陷(2 个 P0 级:启动崩溃、测试静默通过;1 个窄回归:languages),均已当场修复。**遗留均为低优先级卫生项,无阻塞性问题;当前工作区 1 个未提交修改(Program.fs languages 修复),建议提交后收尾。**

@@ -6398,6 +6398,7 @@ type Server(client: ILanguageClient) =
         typedGame <- prepared.typedGame
         gameObj <- prepared.game
         activeGame <- prepared.effectiveGame
+        languages <- prepared.languages
         { prepared = prepared; previousGame = previousGame }
 
     let completePreparedWorkspacePublication (published: PublishedWorkspace) =

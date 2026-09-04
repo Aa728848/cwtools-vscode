@@ -298,11 +298,7 @@ let getRootDirectories (serverSettings: ServerSettings) =
             rawdirs |> Array.collect (CWTools.Serializer.addDLCs "integrated_dlc") ]
 
 
-let applyRulesCacheDir (serverSettings: ServerSettings) =
-    CWTools.Rules.RulesCache.globalRulesCacheDir <- serverSettings.cachePath
-
 let loadEU4 (serverSettings: ServerSettings) =
-    applyRulesCacheDir serverSettings
     let cached, cachedFiles =
         getCachedFiles EU4 serverSettings.cachePath serverSettings.isVanillaFolder
 
@@ -337,7 +333,6 @@ let loadEU4 (serverSettings: ServerSettings) =
 
 
 let loadHOI4 serverSettings =
-    applyRulesCacheDir serverSettings
     let cached, cachedFiles =
         getCachedFiles HOI4 serverSettings.cachePath serverSettings.isVanillaFolder
 
@@ -372,7 +367,6 @@ let loadHOI4 serverSettings =
     game
 
 let loadCK2 serverSettings =
-    applyRulesCacheDir serverSettings
     let cached, cachedFiles =
         getCachedFiles CK2 serverSettings.cachePath serverSettings.isVanillaFolder
 
@@ -407,7 +401,6 @@ let loadCK2 serverSettings =
     game
 
 let loadIR serverSettings =
-    applyRulesCacheDir serverSettings
     let cached, cachedFiles =
         getCachedFiles IR serverSettings.cachePath serverSettings.isVanillaFolder
 
@@ -443,7 +436,6 @@ let loadIR serverSettings =
     game
 
 let loadVIC2 serverSettings =
-    applyRulesCacheDir serverSettings
     let cached, cachedFiles =
         getCachedFiles VIC2 serverSettings.cachePath serverSettings.isVanillaFolder
 
@@ -502,7 +494,6 @@ let reloadStellarisShaderRuleCatalogs (configs: (string * string) list) =
             CWTools.Games.PdxShaderRuntime.loadSpriteRendererContracts stlGameVersion rendererContractsPath)
 
 let loadSTL serverSettings =
-    applyRulesCacheDir serverSettings
     stlGameVersion <- None
     let cached, cachedFiles =
         getCachedFiles STL serverSettings.cachePath serverSettings.isVanillaFolder
@@ -552,7 +543,6 @@ let loadSTL serverSettings =
     game
 
 let loadCK3 serverSettings =
-    applyRulesCacheDir serverSettings
     let cached, cachedFiles =
         getCachedFiles CK3 serverSettings.cachePath serverSettings.isVanillaFolder
 
@@ -589,7 +579,6 @@ let loadCK3 serverSettings =
 
 
 let loadVIC3 serverSettings =
-    applyRulesCacheDir serverSettings
     let cached, cachedFiles =
         getCachedFiles VIC3 serverSettings.cachePath serverSettings.isVanillaFolder
 
@@ -624,7 +613,6 @@ let loadVIC3 serverSettings =
     game
 
 let loadEU5 serverSettings =
-    applyRulesCacheDir serverSettings
     let cached, cachedFiles =
         getCachedFiles EU5 serverSettings.cachePath serverSettings.isVanillaFolder
 
@@ -659,7 +647,6 @@ let loadEU5 serverSettings =
     game
 
 let loadCustom serverSettings =
-    applyRulesCacheDir serverSettings
     // let cached, cachedFiles = getCachedFiles STL serverSettings.cachePath serverSettings.isVanillaFolder
     let configs =
         getConfigFiles serverSettings.cachePath serverSettings.useManualRules serverSettings.manualRulesFolder serverSettings.bundledRulesPath serverSettings.preferBundledRules

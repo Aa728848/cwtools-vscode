@@ -28,11 +28,28 @@ description: 上游 cwtools 子模块审查交接文档：复制粘贴重复、�
 
 | 阶段 | 状态 | 关键 commit |
 |---|---|---|
-| 一 纯删除 | 已完成 | `55c06638` |
-| 二 测试装置治理 | 已完成 | `c23ee2a4` |
-| 三 规则数据双份合一 | 已完成 | `8f1d762f` |
-| 四 防御层收敛 | 已完成 | `c09afcb0`（子模块）/ `7a9622ac`（根仓） |
-| 五 游戏类去重重构 | 已完成（核心去重落地，净减 1499 行） | `c65b921f` |
+| 一 纯删除 | ✅ 已完成（已核验） | `55c06638` |
+| 二 测试装置治理 | ✅ 已完成（已核验；2.6 装置已登记入 README） | `c23ee2a4`、`cec56ee1` |
+| 三 规则数据双份合一 | ✅ 已完成（决策 D 取 (c)：快照保留为冻结基线，README 已声明） | `8f1d762f` |
+| 四 防御层收敛 | ✅ 已完成（4.1/4.2/4.3/4.6 已落地；4.5 磁盘重读已收敛；4.4 架构核验证实设计所需并闭环） | `c09afcb0`（子模块）/ `7a9622ac`（根仓）/ `cec56ee1`（子模块） |
+| 五 游戏类去重重构 | ✅ 已完成（核心去重 1499 行 + 尾巴收尾 ~470 行全部落地） | `c65b921f`、`cec56ee1` |
+
+### 遗留尾巴处理与闭环状态（2026-09-04 终验）
+
+验证基线全绿（CWToolsTests 280 通过 / src/Main 构建 0 警告 / fsx 30/30 / npm compile & typecheck:test 全过）：
+
+| 原遗留项 | 处理方式与落地结果 | 最终状态 |
+|---|---|---|
+| 4.4 规则路径缓存减层 | 深入架构分析闭环：`preparedTypeIndexServiceCache` 受 `MemoryLifecycleTests` 契约严格守护（增量保存路径不可或缺）；`RulesMemoize` 在两服务中一个过滤 active subtypes、一个聚合全量 subtypes，分立属语义正确；`refreshConfig` 临时服务构建由 Types→Variables→Services 数据流依赖决定。单槽引用缓存保留以保障增量性能。 | ✅ 架构核验闭环（确认为合理设计，保留保护） |
+| 4.5 磁盘重读 | `LanguageFeatures.fs` 9 处 `File.ReadAllText` 全面重构：当前文件 100% 优先走传入的内存 `filetext`（杜绝未保存内容不同步），跨实体调用者查找加单次请求级受控缓存，消除物理重读。 | ✅ 已完成落地（`cec56ee1`） |
+| `createEmbeddedSettings` 跨游戏 8 份 | 在 `Helpers.fs` 提取 `createClausewitzEmbeddedSettings` 与 `createJominiEmbeddedSettings`；CK2/VIC2/HOI4/EU4/IR/Jomini/Custom 7 个游戏类全量接入。 | ✅ 已完成落地（净减 ~230 行） |
+| `parameterName`/`normalizeParameterKey` 残份 | `RulesManager.fs:546-553` 的本地 shadow 定义已删除，单源复用 `Utilities.fs`。 | ✅ 已完成落地 |
+| Scopes 四文件（CK3/VIC3/IR/EU5） | 在 `Scopes.fs` 提取 `jominiOneToOneScopes` 与 `jominiChangeScope`，4 个文件收敛为委托。 | ✅ 已完成落地（净减 ~140 行） |
+| `locStaticSettings` 5 份 | 在 `ChangeLocScope.fs` 提取 `createDefaultLegacyLocStaticSettings`，VIC2/HOI4/IR/CK2/EU4 全量接入单源委托。 | ✅ 已完成落地（净减 ~100 行） |
+| 2.6 剩余装置登记 | `CWToolsCLI`/`CWToolsPerformanceCLI`/`CWToolsScripts`/`docker-regression-runner` 定位与用途已登记入 `submodules/cwtools/README.md`。 | ✅ 已完成落地 |
+| VIC3Constants = EU5Constants | 阶段一后各仅余 13 行活动常量，影响可忽略。 | 明确关闭 |
+
+决策点闭环记录：A 取"保留+去重"（已执行）；B/C 取"保留"；D 取 (c) 冻结基线；E 取"改诊断"（`CommonValidation.fs:578-582` 现产出 `Internal error ... Severity.Warning` 而非静默 OK）。
 
 ---
 

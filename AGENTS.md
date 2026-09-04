@@ -34,6 +34,10 @@ Read supporting documents by task:
   and `release/package.json` are the sources of truth.
 - Keep comments and changelog entries concise and explain only non-obvious
   constraints or user-visible behavior.
+- Record an Agent Note in `.agents/notes/` for every non-trivial change (features,
+  bug fixes, simplifications, architecture adjustments, testing or process changes)
+  within the same change. Follow the closed 6-class taxonomy and template in
+  `.agents/notes/README.md`.
 
 ## Coding Rules
 

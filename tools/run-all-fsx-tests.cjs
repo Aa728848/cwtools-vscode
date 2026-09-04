@@ -1,4 +1,3 @@
-// @ts-check
 const fs = require('node:fs');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
@@ -6,7 +5,12 @@ const { spawnSync } = require('node:child_process');
 const rootDir = path.resolve(__dirname, '..');
 const srcDir = path.join(rootDir, 'src');
 
+/**
+ * @param {string} dir
+ * @returns {string[]}
+ */
 function findTestScripts(dir) {
+    /** @type {string[]} */
     const results = [];
     const entries = fs.readdirSync(dir, { withFileTypes: true });
     for (const entry of entries) {
@@ -36,6 +40,7 @@ console.log('='.repeat(70));
 
 let passed = 0;
 let failed = 0;
+/** @type {Array<{ file: string, stdout?: string | Buffer, stderr?: string | Buffer, error?: string }>} */
 const failures = [];
 const startTime = Date.now();
 

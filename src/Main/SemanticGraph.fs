@@ -108,8 +108,7 @@ let normalizeOptions options =
       maxEdges = clamp 1 300 options.maxEdges
       includeMetadata = options.includeMetadata }
 
-let private normalizePath (value: string) =
-    value.Replace('\\', '/').Trim().TrimStart('/').ToLowerInvariant()
+let private normalizePath = PathIdentity.normalizeLogicalPath
 
 let private pathMatches filterValue candidate =
     let filterPath = normalizePath filterValue

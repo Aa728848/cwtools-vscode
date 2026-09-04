@@ -84,6 +84,7 @@ let rec private serializer (depth: int, options: JsonWriteOptions, t: Type) : ob
     let custom = findWriter (t, options.customWriters)
 
     if depth >= 20 then
+        eprintfn $"Warning: JSON serialization depth exceeded limit (20) for type %s{t.FullName}"
         fun _ -> "null"
     elif custom.IsSome then
         let fObj = custom.Value

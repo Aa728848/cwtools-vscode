@@ -22,3 +22,9 @@ let equalsFor platform left right =
     normalizeFor platform left = normalizeFor platform right
 
 let equals left right = equalsFor currentPlatform left right
+
+/// Normalizes a relative or logical PDX path for case-insensitive graph and lookup keys.
+/// Normalizes backslashes to forward slashes, trims whitespace, drops leading slash, and folds to lowercase.
+let normalizeLogicalPath (path: string) =
+    if isNull path then ""
+    else path.Replace('\\', '/').Trim().TrimStart('/').ToLowerInvariant()

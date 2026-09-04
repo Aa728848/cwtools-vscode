@@ -494,7 +494,6 @@ export interface QueryTypesResult {
         file: string;
         line?: number;
         vanilla?: boolean;
-        subtypes?: string[];
     }>;
     totalCount: number;
     ok?: boolean;

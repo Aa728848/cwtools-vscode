@@ -241,17 +241,24 @@ npm test   # 含 completion/hover/folding/extension 集成套件;需 Stellaris v
 - ✅ 幻影命令 4 条删除,注册表与 dispatch 双向核对一致。
 - ✅ 死 writer/死序列化器清理正确(writeTextDocumentSyncKind 不删是对的);severityName/readDocumentText 残留已收口。
 - ✅ p95 硬断言改打印;runner 加 60s 每脚本超时 + 自动发现。
-- ⚠️ EventAstWalk 半成品:phaseOf/conditionPathOf 已统一且等价;但 `subjectFromNode` 仍 3 份语义分歧实现,且新模块引入 3 个 0 调用死函数(subjectFromNode/isConditionBranchKey/isBranchConditional,语义与现存任何一份都不同,误接即改行为);模块体异常缩进。
+- ✅ EventAstWalk 落地完成(6907fd3e): 删除了 3 个死函数，修复异常缩进，并在 EventAstWalk.fs 统合 preferredSubjectKeys 提取 subjectFromNode / subjectFromNodeWith，InlineGraph/PdxFlowAnalysis/ProjectKnowledge 三方 AST 遍历全部接入。
 - ❌ 测试重组主体未做:源码 grep 式测试仍在 3 个文件原位、Phases↔Integration 重叠断言未删、CwtLanguageService.Tests 未裁、PdxFragmentValidation/Completion 微文件微测试未并——提交信息声称 "complete phase 6" 名不副实。
 
 ### 收口清单(供后续小步跟进,按优先级)
 
-1. EventAstWalk:删掉 3 个 0 调用死函数,或完成 subjectFromNode 三方统一(先裁决语义)。
-2. responseAgent 超时测试(连续两轮复核未补;修复在 LanguageServer.fs:244-252,零覆盖)。
-3. Tokenizer readLength 截断风险(跳字节后只读 byteLength-1)+ Ser.fs:86 超限静默 "null" 无日志;新测试恰好都没覆盖这两处。
-4. 散项:normalizePath 4 份 lowercase 副本、types.ts `QueryTypesResult.subtypes` 幽灵字段、agentTools.ts:3089-3104 与 3321-3342 两套硬编码、ARCHITECTURE.md 跨层大小写约定、SymbolIndex Position/Range 重复、JsonArgs 2 处内联(Program.fs:11410/11509)、Git.fs 恢复分支 helper 复用、微文件合并。
+1. ~~EventAstWalk:删掉 3 个 0 调用死函数,或完成 subjectFromNode 三方统一(先裁决语义)。~~ ✅ **已完成(提交 6907fd3e + ac0e532b)**: 3 个死函数已删，三方 subject 提取统一并接入。
+2. ~~responseAgent 超时测试(连续两轮复核未补;修复在 LanguageServer.fs:244-252,零覆盖)。~~ ✅ **已完成**: 在 LanguageServer.fs 暴露 createResponseAgent，JsonRpcProtocol.Tests.fsx 补全超时返回 Null 与正常响应断言。
+3. ~~Tokenizer readLength 截断风险(跳字节后只读 byteLength-1)+ Ser.fs:86 超限静默 "null" 无日志;新测试恰好都没覆盖这两处。~~ ✅ **已完成**: Tokenizer 删去首字节空白跳过 hack，Ser.fs depth>=20 增加 eprintfn 警告日志，JsonRpcProtocol.Tests.fsx 补全前缀空格帧完整性测试。
+4. 散项推进:
+   - ~~types.ts `QueryTypesResult.subtypes` 幽灵字段~~: ✅ **已完成**，从 TS interface 移除。
+   - ~~ARCHITECTURE.md 跨层大小写约定~~: ✅ **已完成**，中英双语补全 F# (ToUpper) 与 TS (lowercase) 规范。
+   - ~~Git.fs 恢复分支 helper 复用~~: ✅ **已完成**，提取 `tryFindRemoteDefaultBranch` 主流程与恢复分支统一复用。
+   - ~~微文件合并~~: ✅ **已完成**，`CompletionFallbackPolicy` 与 `PdxFragmentValidation` 合并入 `PureDecisions.fs` / `PureDecisions.Tests.fsx`。
+   - ~~normalizePath 副本收敛~~: ✅ **已完成**，在 `PathIdentity` 暴露 `normalizeLogicalPath` 并由各图分析模块复用。
+   - ~~JsonArgs 内联收敛~~: ✅ **已完成**，在 `JsonArgs` 补全位置参数 helper，收敛 `queryTypes` 与 `queryDefinitionByName`。
+   - 剩余暂缓/待决策散项: agentTools.ts:3089-3104 与 3321-3342 两套硬编码、SymbolIndex Position/Range 重复(Struct 阻力暂缓)。
 5. 测试重组主体(阶段 6 A1/A2)。
 
 ### 总结
 
-六阶段累计:删死代码/重复约 2600+ 行,修复 1 个泄漏 + 1 个控制流隐患,命令表/override resolver/缓存 key/请求生命周期等核心重复已收敛,测试基建(TestHelpers + runner + JSON 栈覆盖)从无到有。三轮复核共抓出 3 个落地期引入的缺陷(2 个 P0 级:启动崩溃、测试静默通过;1 个窄回归:languages),均已当场修复。**遗留均为低优先级卫生项,无阻塞性问题;当前工作区 1 个未提交修改(Program.fs languages 修复),建议提交后收尾。**
+六阶段累计:删死代码/重复约 2600+ 行,修复 1 个泄漏 + 1 个控制流隐患,命令表/override resolver/缓存 key/请求生命周期等核心重复已收敛,测试基建(TestHelpers + runner + JSON 栈覆盖)从无到有。三轮复核共抓出 3 个落地期引入的缺陷(2 个 P0 级:启动崩溃、测试静默通过;1 个窄回归:languages),均已当场修复。**遗留均为低优先级卫生项与深水区结构重构/测试重组项,无阻塞性问题;languages 修复与 EventAstWalk 统一已分别随 ac0e532b、6907fd3e 入库。**

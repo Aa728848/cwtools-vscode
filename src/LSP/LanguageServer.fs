@@ -219,7 +219,7 @@ let private nextRequestId () = System.Threading.Interlocked.Increment(requestIdC
 /// we drop the channel to prevent the Map from growing without bound.
 let private requestTimeoutMs = 30_000
 
-let responseAgent =
+let createResponseAgent (timeoutMs: int) =
     MailboxProcessor.Start(fun agent ->
         let rec loop (state: Map<int, AsyncReplyChannel<JsonValue>>) =
             async {
@@ -228,11 +228,12 @@ let responseAgent =
                 match msg with
                 | Request(id, reply) ->
                     // Schedule an expiry message so stale channels get cleaned up.
-                    Async.Start(
-                        async {
-                            do! Async.Sleep requestTimeoutMs
-                            agent.Post(Expire id)
-                        })
+                    if timeoutMs > 0 then
+                        Async.Start(
+                            async {
+                                do! Async.Sleep timeoutMs
+                                agent.Post(Expire id)
+                            })
                     return! loop (state |> Map.add id reply)
                 | Response(id, value) ->
                     match state |> Map.tryFind id with
@@ -249,6 +250,8 @@ let responseAgent =
             }
 
         loop Map.empty)
+
+let responseAgent = createResponseAgent requestTimeoutMs
 
 let monitor = Lock()
 

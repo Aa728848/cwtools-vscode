@@ -54,6 +54,15 @@ let malformedHeader = "Invalid-Header: 123\r\n\r\nSome body"
 let malformedResults = tokenizeBytes (Encoding.UTF8.GetBytes(malformedHeader))
 harness.Equal "Malformed headers yield 0 frames" 0 malformedResults.Length
 
+// Case 1.4: Body starting with whitespace (should not be dropped or truncate body length)
+let whitespaceBody = " {\"jsonrpc\":\"2.0\",\"id\":100}"
+let wsBytes = Encoding.UTF8.GetBytes(whitespaceBody)
+let wsHeader = sprintf "Content-Length: %d\r\n\r\n" wsBytes.Length
+let wsFullBytes = Array.append (Encoding.UTF8.GetBytes(wsHeader)) wsBytes
+let wsResults = tokenizeBytes wsFullBytes
+harness.Equal "Whitespace-prefixed body frame count" 1 wsResults.Length
+harness.Equal "Whitespace-prefixed body content intact" whitespaceBody wsResults.[0]
+
 // ============================================================================
 // 2. Ser (Serialization Factory, Reflection Smoke, Escaping, and Recursion)
 // ============================================================================
@@ -172,5 +181,30 @@ let caught =
     with _ ->
         true
 harness.Check "Malformed JSON must throw exception or be caught" caught
+
+// ============================================================================
+// 4. ResponseAgent (Timeout Expire & Normal Response)
+// ============================================================================
+open LSP.LanguageServer
+
+// Case 4.1: Expire on timeout returns JsonValue.Null
+let shortTimeoutAgent = createResponseAgent 40
+let timeoutReply =
+    shortTimeoutAgent.PostAndAsyncReply(fun reply -> Request(101, reply))
+    |> Async.RunSynchronously
+harness.Equal "Timed-out request replies with JsonValue.Null" JsonValue.Null timeoutReply
+
+// Case 4.2: Normal response before timeout returns expected payload
+let normalAgent = createResponseAgent 1000
+let expectedVal = JsonValue.Record [| "ok", JsonValue.Boolean true |]
+let asyncResponse =
+    async {
+        let replyAsync = normalAgent.PostAndAsyncReply(fun reply -> Request(102, reply))
+        do! Async.Sleep 20
+        normalAgent.Post(Response(102, expectedVal))
+        return! replyAsync
+    }
+    |> Async.RunSynchronously
+harness.Equal "Normal response replies with payload" expectedVal asyncResponse
 
 harness.Summary()

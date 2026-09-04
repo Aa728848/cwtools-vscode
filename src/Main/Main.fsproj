@@ -36,7 +36,7 @@
     <Compile Include="GameLoader.fs" />
     <Compile Include="CompletionText.fs" />
     <Compile Include="Completion.fs" />
-    <Compile Include="CompletionFallbackPolicy.fs" />
+    <Compile Include="PureDecisions.fs" />
     <Compile Include="SemanticGraph.fs" />
     <Compile Include="EventAstWalk.fs" />
     <Compile Include="InlineGraph.fs" />
@@ -48,7 +48,6 @@
     <Compile Include="LocalisationPreview.fs" />
     <Compile Include="SemanticDelta.fs" />
     <Compile Include="SemanticDirectoryCatalog.fs" />
-    <Compile Include="PdxFragmentValidation.fs" />
     <Compile Include="OverlayValidation.fs" />
     <Compile Include="RefreshCoordinator.fs" />
     <Compile Include="DiagnosticInvalidation.fs" />

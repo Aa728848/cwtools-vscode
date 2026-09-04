@@ -80,8 +80,7 @@ type FlowQuery =
       entityType: string option
       limit: int }
 
-let private normalizePath (value: string) =
-    value.Replace('\\', '/').Trim().TrimStart('/').ToLowerInvariant()
+let private normalizePath = PathIdentity.normalizeLogicalPath
 
 
 /// Cost weights are relative, not runtime predictions: a galaxy traversal is

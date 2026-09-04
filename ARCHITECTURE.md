@@ -61,6 +61,11 @@ Useful entry points:
 
 Host code must validate Webview messages and other external input before acting on it. Path operations should use the shared containment and case-handling helpers rather than open-coded prefix checks.
 
+**Cross-layer path casing convention**:
+- **F# server (`src/LSP/`, `src/Main/`)**: Normalizes internal comparison and cache keys to uppercase (`ToUpperInvariant()`, see `PathIdentity.normalizePath`), following the CWTools upstream engine convention.
+- **TypeScript client (`client/extension/`)**: Normalizes internal indexing and lookup keys to lowercase (`toLowerCase()`, see `pathScope.ts`).
+- Display paths and paths passed to OS filesystem APIs preserve their original casing.
+
 ### Shared game profiles and indexes
 
 `gameProfiles.ts` describes differences between supported games: language IDs, folders, localisation formats, installation hints, feature flags, and generated metadata. A feature that varies by game should ask the active profile instead of assuming Stellaris conventions.
@@ -358,6 +363,11 @@ Extension Host 是最重要的边界：VS Code API、文件访问、进程启动
 | AI 运行时 | `client/extension/ai/` |
 
 宿主代码执行操作前必须校验 Webview 消息和其他外部输入。路径判断应使用共享的包含关系与大小写 helper，不要自行写字符串前缀判断。
+
+**跨层路径大小写约定**：
+- **F# 服务端（`src/LSP/`、`src/Main/`）**：内部字典索引键与比较键统一折叠为大写（`ToUpperInvariant()`，见 `PathIdentity.normalizePath`），遵循上游 CWTools 引擎约定。
+- **TypeScript 客户端（`client/extension/`）**：内部路径规范化与集合查找统一折叠为小写（`toLowerCase()`，见 `pathScope.ts`）。
+- 面向用户展示或传递给操作系统文件系统 API 时，必须保留原始路径大小写。
 
 ### 共享游戏 Profile 与索引
 

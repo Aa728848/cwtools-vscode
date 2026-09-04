@@ -598,6 +598,41 @@ module private JsonArgs =
             |> Array.toList
         | _ -> []
 
+    let tryStringItem (index: int) (args: JsonValue list) =
+        args
+        |> List.tryItem index
+        |> Option.bind (function
+            | JsonValue.String s when not (String.IsNullOrWhiteSpace s) -> Some (s.Trim())
+            | _ -> None)
+
+    let intItem (index: int) (fallback: int) (args: JsonValue list) =
+        args
+        |> List.tryItem index
+        |> Option.bind (function JsonValue.Number n -> Some (int n) | _ -> None)
+        |> Option.defaultValue fallback
+
+    let boolItem (index: int) (fallback: bool) (args: JsonValue list) =
+        args
+        |> List.tryItem index
+        |> Option.bind (function JsonValue.Boolean b -> Some b | _ -> None)
+        |> Option.defaultValue fallback
+
+    let stringSetItem (index: int) (args: JsonValue list) =
+        args
+        |> List.tryItem index
+        |> Option.map (function
+            | JsonValue.Array values ->
+                values
+                |> Array.choose (function
+                    | JsonValue.String value when not (String.IsNullOrWhiteSpace value) ->
+                        Some (value.Trim().ToLowerInvariant())
+                    | _ -> None)
+                |> Set.ofArray
+            | JsonValue.String value when not (String.IsNullOrWhiteSpace value) ->
+                Set.singleton (value.Trim().ToLowerInvariant())
+            | _ -> Set.empty)
+        |> Option.defaultValue Set.empty
+
 let private normalizeDefinitionSymbol (symbol: string) =
     symbol.Trim().Trim('"')
 
@@ -11117,9 +11152,9 @@ type Server(client: ILanguageClient) =
                             arguments = typeNameArg :: rest } ->
                             // Query type instances from game's type map (includes vanilla cache)
                             let typeName    = typeNameArg.AsString()
-                            let filterStr   = rest |> List.tryItem 0 |> Option.bind (fun j -> match j with JsonValue.String s when s <> "" -> Some s | _ -> None)
-                            let limitVal    = rest |> List.tryItem 1 |> Option.bind (fun j -> match j with JsonValue.Number n -> Some(int n) | _ -> None) |> Option.defaultValue 50
-                            let vanillaOnly = rest |> List.tryItem 2 |> Option.bind (fun j -> match j with JsonValue.Boolean b -> Some b | _ -> None) |> Option.defaultValue false
+                            let filterStr   = JsonArgs.tryStringItem 0 rest
+                            let limitVal    = JsonArgs.intItem 1 50 rest
+                            let vanillaOnly = JsonArgs.boolItem 2 false rest
 
                             let resultJson =
                                 let typeMap = game.Types()
@@ -11227,31 +11262,8 @@ type Server(client: ILanguageClient) =
                         // for O(1) lookup. Phase 2 falls back to AllEntities scan only if Types() misses.
                         | { command = "cwtools.ai.queryDefinitionByName"
                             arguments = args } ->
-                            // Safely extract symbolName from first arg (handles empty args list)
-                            let symbolName =
-                                args
-                                |> List.tryItem 0
-                                |> Option.bind (function
-                                    | JsonValue.String s when s.Trim() <> "" -> Some (s.Trim())
-                                    | _ -> None)
-                            // Optional second argument narrows the lookup to concrete CWT
-                            // entity types. This prevents any same-named definition from
-                            // another active TypeDef being accepted as typed proof.
-                            let expectedTypes =
-                                args
-                                |> List.tryItem 1
-                                |> Option.map (function
-                                    | JsonValue.Array values ->
-                                        values
-                                        |> Array.choose (function
-                                            | JsonValue.String value when value.Trim() <> "" ->
-                                                Some(value.Trim().ToLowerInvariant())
-                                            | _ -> None)
-                                        |> Set.ofArray
-                                    | JsonValue.String value when value.Trim() <> "" ->
-                                        Set.singleton (value.Trim().ToLowerInvariant())
-                                    | _ -> Set.empty)
-                                |> Option.defaultValue Set.empty
+                            let symbolName = JsonArgs.tryStringItem 0 args
+                            let expectedTypes = JsonArgs.stringSetItem 1 args
                             let result =
                                 match symbolName with
                                 | None ->

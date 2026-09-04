@@ -115,8 +115,7 @@ let private inferredTypeFor usages =
     | [] -> "unknown"
     | _ -> "incompatible"
 
-let private normalizePath (value: string) =
-    value.Replace('\\', '/').Trim().TrimStart('/').ToLowerInvariant()
+let private normalizePath = PathIdentity.normalizeLogicalPath
 
 let private templateIdFor (logicalPath: string) =
     let normalized = normalizePath logicalPath

@@ -6,6 +6,13 @@ open System.IO
 open System.Linq
 open CWTools.Utilities.Utils
 
+let private tryFindRemoteDefaultBranch (r: Repository) =
+    [ "origin/master"; "origin/main" ]
+    |> Seq.tryPick (fun branchName ->
+        match r.Branches[branchName] with
+        | null -> None
+        | branch -> Some branch)
+
 let rec initOrUpdateRules repoPath gameCacheDir first =
     if Directory.Exists gameCacheDir then
         ()
@@ -48,13 +55,6 @@ let rec initOrUpdateRules repoPath gameCacheDir first =
         let currentHash = git.Head.Tip.Sha
         logInfo $"cwtools current rules version: %A{currentHash}"
 
-        let tryFindRemoteDefaultBranch (r: Repository) =
-            [ "origin/master"; "origin/main" ]
-            |> Seq.tryPick (fun branchName ->
-                match r.Branches[branchName] with
-                | null -> None
-                | branch -> Some branch)
-
         let remoteBranch =
             tryFindRemoteDefaultBranch git
             |> Option.defaultWith (fun () ->
@@ -71,7 +71,7 @@ let rec initOrUpdateRules repoPath gameCacheDir first =
         logError $"cwtools git error, recovering, error: %A{ex}"
         try
             use git = new Repository(gameCacheDir)
-            match [ "origin/master"; "origin/main" ] |> Seq.tryPick (fun b -> match git.Branches[b] with null -> None | br -> Some br) with
+            match tryFindRemoteDefaultBranch git with
             | Some branch -> git.Reset(ResetMode.Hard, branch.Tip)
             | None -> logError "cwtools git recovery failed: could not find origin/master or origin/main branch"
         with innerEx ->

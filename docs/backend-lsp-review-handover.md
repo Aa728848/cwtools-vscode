@@ -192,3 +192,28 @@ npm test   # 含 completion/hover/folding/extension 集成套件;需 Stellaris v
 | 6 | -400 行测试 + 补齐 718 行高危零覆盖 | 低 |
 
 **给接手者的三条忠告**:① 每阶段独立 PR,Program.fs 改动用 `git diff --stat` 控制在审阅友好范围;② 涉及 Stellaris 增量刷新的改动(阶段 5)必须对照全量刷新结果(AGENTS.md 明示);③ 不要顺手"重写 JSON 栈/换 StreamJsonRpc"——自洽可用的旧代码重写收益不抵风险,补测试即可。
+
+---
+
+## 复核记录(阶段 0–4 落地后,2026-06-06)
+
+复核方式:三路并行核对清单 + 关键结论人工复验 + 全量验证(`dotnet build` LSP/Main 0 错误、服务器 initialize 实测、29/29 .fsx 通过、`npm run compile` 通过)。
+
+### 复核中发现并已修复的两个缺陷(工作区未提交)
+
+1. **P0 启动崩溃(已修复)**:阶段 0 删除"死 writer"时误删了活写入器 `writeTextDocumentSyncKind` 的注册(`src/LSP/LanguageServer.fs` customWriters),而 `ServerCapabilities.change: TextDocumentSyncKind` 是纯 DU、Ser.fs 无 union 序列化路径,模块急求值初始化即在 Ser.fs:168 抛 `TypeInitializationException`,**服务器进程启动即崩**。"build 全绿 + fsx 全过"天然抓不到反射期失败。修复:恢复该 writer 注册(1 行),实测 initialize 正常返回。
+   - 教训:阶段 6 补 JSON 栈测试时应包含 `serializerFactory<InitializeResult>` 构造即断言的 smoke 测试。
+2. **测试失败被静默 PASS(已修复)**:`src/TestHelpers.fsx` 的 `TestHarness.Summary()` 返回 int 但脚本未接 `exit`,实证 `dotnet fsi` 丢弃脚本末尾值(末尾 `1` 仍 exit 0)。4 个 harness 制脚本(CwtActivation/CwtProjectIndex/CwtLanguageService/CwtLanguageSemantics)断言失败时进程仍 exit 0,新 runner `npm run test:fsx` 纯靠 exit code 判定。该缺陷重构前就存在(旧脚本末尾 `if failures = 0 then 0 else 1` 同样无效),重构原样保留并被 runner 放大。修复:Summary() 失败分支改 `exit 1`(1 行),实测失败探测脚本 exit=1,4 个 harness 套件真实通过。
+
+### 阶段落地评分
+
+- **阶段 0**:删除清单基本全部落地(grep 无残留);代价是上述 P0。另有 3 个真死 writer 定义残留(Types.fs:47/70/476,全仓 0 调用)。
+- **阶段 1**:responseAgent 泄漏修复正确(Expire 现 Reply Null,单循环无新竞态)但**超时测试未补**;`[[CANCEL]]` 五处全消、改显式 `RequestResult` DU ✅,但引入 3 处新死代码(外层 `fixedLockFallback` 被内层同名遮蔽、2 个未使用 Option 序列化器);Ser 超限改返回 "null"(合法但静默,未按方案记录日志);Tokenizer 空白跳过 hack 未删(改为字节安全版,注释已过时);Git.fs 恢复分支仍内联复制未复用新 helper。
+- **阶段 2**:TestHelpers/schema 提取/PrepareRename/fullPathOr/showVirtualFile/freshness ✅;残留:JsonArgs 只接线 3 处(还有 ~5 处内联)、`severityName` 仍逐字两份(Program.fs:10368 vs 12244)、readDocumentText 内联残留 ~12 处、runner 无每脚本超时。
+- **阶段 3**:OverrideResolver 合一(语义裁决与上游 ResourceManager.fs:687-713 一致 ✅,注意三处行为变化:SG 报 cwtools_single_active、PK 文案换措辞、极端 load-order 下 LIOS 命中变化)、GraphTypes.fs 删除 ✅、isDynamicExpansion 合一 ✅、CSharpExtensions 下线(F# 移植比旧 C# 更安全)✅;**未做**:EventAstWalk(事件遍历仍两份,PdxFlowAnalysis:130/431/489 vs ProjectKnowledge:1440/1452/1462/1512,另有 InlineGraph:229 第三份)、Completion.fs 内部三处重复、SymbolIndex Position/Range 重复(有 Struct 比较阻力)、normalizePath 仍 4 份 lowercase 副本、ARCHITECTURE.md 未写跨层大小写约定、filePathToUri 合并对 CwtLanguageFeatures 有低风险行为变化(去 GetFullPath/转义)。
+- **阶段 4**:Commands.fs 单一表驱动通告+isReadCmd ✅、6 个漂移命令补齐 ✅、LOCALISATION_CODES 双向相等测试 ✅、MCP 无需同步 ✅;**残留**:①通告 ⊋ dispatch,4 条幻影命令无处理器(`cwtools.exportTypes` 前缀别名、`typeGraphInfo`、`getDataForFile`、`getTypesForFile`,后 3 条是本次新增,TS 侧零调用,建议从 Commands.fs 删除);②TS classifyDiagnosticFallback 未缩减,另发现 agentTools.ts:3089-3104 第三套 regex 启发式与 3321-3342 第四处分类字面量硬编码;③QueryTypesResult 幽灵字段 `subtypes` 仍在、ValidationStatusSnapshot 仍全可选,响应形状仍无运行时/schema 级校验(新增契约测试只是静态 regex 扫描且只测 ⊆);④缓存文件名防漂移靠测试而非服务器下发。
+
+### 给阶段 5/6 的增量忠告
+
+- 每完成一个子项,除 build + fsx 外,**必须实测一次服务器 initialize**(本次 P0 的教训:反射期失败只有运行期能抓)。
+- `npm run test:fsx` 现可信任(exit code 已修复);建议给 runner 加每脚本超时。

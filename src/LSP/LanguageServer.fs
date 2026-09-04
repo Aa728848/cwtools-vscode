@@ -108,7 +108,8 @@ let private jsonWriteOptions =
               writeSymbolKind
               writeMessageType
               writeMarkupKind
-              writeHoverContent ] }
+              writeHoverContent
+              writeTextDocumentSyncKind ] }
 
 let private serializeInitializeResult =
     serializerFactory<InitializeResult> jsonWriteOptions

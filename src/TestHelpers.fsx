@@ -90,7 +90,7 @@ type TestHarness(suiteName: string) =
             0
         else
             printfn "%s: %d check(s) FAILED (out of %d total)." suiteName failures (passes + failures)
-            1
+            exit 1
 
 // ----------------------------------------------------------------------------
 // Temp directory helpers

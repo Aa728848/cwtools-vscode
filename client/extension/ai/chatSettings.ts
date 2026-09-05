@@ -15,6 +15,7 @@ import type { ConnectionTestSettings, PanelSettings, HostMessage, CustomApiForma
 import { isCodexServiceTier, isReasoningEffort, isResponseVerbosity } from './types';
 import type { AIService } from './aiService';
 import type { AntigravityLogin } from './antigravity/oauthService';
+import type { SubscriptionProxyMode } from '../../shared/subscriptionProxy';
 import { aiText } from './messages';
 import { getProjectWorkspaceRoot } from './workspacePaths';
 import {
@@ -281,6 +282,9 @@ export class ChatSettingsManager {
         const antigravityAccount = showPanel || config.provider === 'antigravity'
             ? await this.aiService.getAntigravityOAuthService().getAccountStatus()
             : undefined;
+        const subscriptionProxy = showPanel || config.provider === 'codex-chatgpt' || config.provider === 'antigravity'
+            ? await this.aiService.getSubscriptionProxyService().getStatus()
+            : undefined;
 
         const providers = Object.values(BUILTIN_PROVIDERS).map(p => {
             const customNonFim = p.id === 'custom' && config.customApiFormat !== 'openai-chat-completions';
@@ -435,6 +439,7 @@ export class ChatSettingsManager {
             reasoningCapabilities,
             codexAccount,
             antigravityAccount,
+            subscriptionProxy,
         });
     }
 
@@ -913,6 +918,22 @@ export class ChatSettingsManager {
             }
             this.postMessage({ type: 'testConnectionResult', ok: false, message: aiText('Connection failed: ', '连接失败: ') + friendly });
         }
+    }
+
+    async saveSubscriptionProxy(mode: SubscriptionProxyMode, url?: string, targetSurface?: 'chat' | 'manager'): Promise<void> {
+        const service = this.aiService.getSubscriptionProxyService();
+        try {
+            await service.save(mode, url);
+            this.postMessage({ type: 'subscriptionProxyStatus', status: await service.getStatus(), saved: true, targetSurface });
+        } catch (error) {
+            const status = await service.getStatus();
+            this.postMessage({ type: 'subscriptionProxyStatus', status: { ...status, error: settingsErrorMessage(error) }, targetSurface });
+        }
+    }
+
+    async refreshSubscriptionProxy(targetSurface?: 'chat' | 'manager'): Promise<void> {
+        const status = await this.aiService.getSubscriptionProxyService().getStatus(true);
+        this.postMessage({ type: 'subscriptionProxyStatus', status, targetSurface });
     }
 
     async loginAntigravity(targetSurface: 'chat' | 'manager' = 'chat'): Promise<void> {

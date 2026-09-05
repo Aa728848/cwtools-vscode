@@ -3,6 +3,7 @@
  */
 
 import type { SlashCommandDescriptor } from './slashCommands';
+import type { SubscriptionProxyMode, SubscriptionProxyStatus } from '../../shared/subscriptionProxy';
 import type { CwtRuleValueReference } from '../../shared/pdxSemanticCatalog';
 import type { AgentToolName } from './tools/registry';
 export type { CwtRuleValueReference, CwtShaderReference, PdxRuleCategory, PdxSemanticCatalog } from '../../shared/pdxSemanticCatalog';
@@ -2553,6 +2554,8 @@ export type WebViewMessage =
     | { type: 'antigravityLogin' }
     | { type: 'antigravityRefreshAccount' }
     | { type: 'antigravityLogout' }
+    | { type: 'saveSubscriptionProxy'; mode: SubscriptionProxyMode; url?: string }
+    | { type: 'refreshSubscriptionProxy' }
     | { type: 'installSkill'; source: string }
     | { type: 'deleteSkill'; skill: string }
     | { type: 'retractMessage'; messageIndex: number }
@@ -2617,7 +2620,8 @@ export type HostMessage =
     | { type: 'slashCommandList'; commands: SlashCommandDescriptor[] }
     | { type: 'slashCommandResult'; command: string; status: 'success' | 'error' | 'queued' | 'needsInput'; message: string; uiAction?: 'openModelMenu' | 'openReasoningMenu' | 'openPermissionsMenu' }
     | { type: 'todoUpdate'; todos: TodoItem[]; agentId?: string; threadId?: string; runId?: string }
-    | { type: 'settingsData'; providers: ProviderMeta[]; current: PanelSettings; ollamaModels?: OllamaModelInfo[]; showPanel?: boolean; targetSurface?: 'chat' | 'manager'; modelContextTokens?: Record<string, number>; thinkingModelPrefixes?: string[]; reasoningCapabilities?: Record<string, ModelReasoningCapability>; codexAccount?: CodexAccountStatus; antigravityAccount?: AntigravityAccountStatus }
+    | { type: 'settingsData'; providers: ProviderMeta[]; current: PanelSettings; ollamaModels?: OllamaModelInfo[]; showPanel?: boolean; targetSurface?: 'chat' | 'manager'; modelContextTokens?: Record<string, number>; thinkingModelPrefixes?: string[]; reasoningCapabilities?: Record<string, ModelReasoningCapability>; codexAccount?: CodexAccountStatus; antigravityAccount?: AntigravityAccountStatus; subscriptionProxy?: SubscriptionProxyStatus }
+    | { type: 'subscriptionProxyStatus'; status: SubscriptionProxyStatus; saved?: boolean; targetSurface?: 'chat' | 'manager' }
     | { type: 'ollamaModels'; models: OllamaModelInfo[]; error?: string }
     | { type: 'apiModelsFetched'; providerId: string; models: Array<{ id: string }>; dynContexts?: Record<string, number>; reasoningCapabilities?: Record<string, ModelReasoningCapability>; error?: string; ctxNote?: string }
     | { type: 'testConnectionResult'; ok: boolean; message: string }

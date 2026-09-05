@@ -1,6 +1,7 @@
 import { Icons, svgIcon, svgIconNoMargin } from './svgIcons';
 import type { AntigravityAccountStatus } from '../extension/ai/types';
 import { buildAntigravityAccountHtml, isAntigravityAccountStatus } from './chat/antigravityAccount';
+import { isSubscriptionProxyMode, isSubscriptionProxyStatus, type SubscriptionProxyStatus } from '../shared/subscriptionProxy';
 import { routeLiveStep, buildToolPairHtml, buildToolGroupHtml, buildLocalisationPromptCardHtml, escapeHtml as mrEscapeHtml, type RendererStep } from './messageRenderer';
 import { groupToolCalls } from './chat/toolPhrases';
 import {
@@ -366,6 +367,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
     let settingsOllamaModels: any[] = [];
     let settingsCodexAccount: any = undefined;
     let settingsAntigravityAccount: AntigravityAccountStatus | undefined;
+    let settingsSubscriptionProxy: SubscriptionProxyStatus | undefined;
     let cachedSettingsData: { providers: any[]; current: any; ollamaModels: any[] } | undefined;
     type ReasoningEffortValue = 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
     type ReasoningCapabilityView = {
@@ -2954,6 +2956,19 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
     bindBtn('antigravityLoginBtn', () => vscode.postMessage({ type: 'antigravityLogin' }));
     bindBtn('antigravityRefreshBtn', () => vscode.postMessage({ type: 'antigravityRefreshAccount' }));
     bindBtn('antigravityLogoutBtn', () => vscode.postMessage({ type: 'antigravityLogout' }));
+    document.getElementById('subscriptionProxyMode')?.addEventListener('change', updateSubscriptionProxyUrlVisibility);
+    bindBtn('subscriptionProxySaveBtn', () => {
+        const mode = document.getElementById('subscriptionProxyMode');
+        const input = document.getElementById('subscriptionProxyUrl');
+        if (!(mode instanceof HTMLSelectElement) || !isSubscriptionProxyMode(mode.value)) return;
+        const url = input instanceof HTMLInputElement && mode.value === 'custom' ? input.value.trim() : '';
+        setSubscriptionProxyBusy(true);
+        vscode.postMessage({ type: 'saveSubscriptionProxy', mode: mode.value, url: url || undefined });
+    });
+    bindBtn('subscriptionProxyRefreshBtn', () => {
+        setSubscriptionProxyBusy(true);
+        vscode.postMessage({ type: 'refreshSubscriptionProxy' });
+    });
     bindBtn('detectBtn', detectOllamaModels);
     
     bindBtn('installSkillBtn', () => {
@@ -6794,6 +6809,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
             case 'settingsData':
                 settingsCodexAccount = msg.codexAccount;
                 settingsAntigravityAccount = isAntigravityAccountStatus(msg.antigravityAccount) ? msg.antigravityAccount : undefined;
+                if (isSubscriptionProxyStatus(msg.subscriptionProxy)) settingsSubscriptionProxy = msg.subscriptionProxy;
                 cachedSettingsData = {
                     providers: msg.providers,
                     current: msg.current,
@@ -6827,6 +6843,22 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                     }
                 }
                 break;
+
+            case 'subscriptionProxyStatus': {
+                if (!isSubscriptionProxyStatus(msg.status)) break;
+                settingsSubscriptionProxy = msg.status;
+                if (!isCurrentSurface(msg.targetSurface)) break;
+                setSubscriptionProxyBusy(false);
+                renderSubscriptionProxyStatus(msg.saved === true);
+                if (msg.saved === true) {
+                    const input = document.getElementById('subscriptionProxyUrl');
+                    if (input instanceof HTMLInputElement) input.value = '';
+                    const mode = document.getElementById('subscriptionProxyMode');
+                    if (mode instanceof HTMLSelectElement) mode.value = msg.status.mode;
+                    updateSubscriptionProxyUrlVisibility();
+                }
+                break;
+            }
 
             case 'ollamaModels': {
                 const db = document.getElementById('detectBtn') as HTMLButtonElement | null;
@@ -7676,6 +7708,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
             })),
             codexAccount: settingsCodexAccount,
             antigravityAccount: settingsAntigravityAccount,
+            subscriptionProxy: settingsSubscriptionProxy,
             current,
             customApiFormat: current.customApiFormat,
             ollamaModels: (ollamaModels || []).map((m: any) => ({ name: m.name, size: m.size, parameterSize: m.parameterSize })),
@@ -7725,6 +7758,10 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                 ? current.responseVerbosity
                 : 'default';
         }
+        const proxyMode = document.getElementById('subscriptionProxyMode');
+        if (proxyMode instanceof HTMLSelectElement) proxyMode.value = settingsSubscriptionProxy?.mode ?? 'auto';
+        updateSubscriptionProxyUrlVisibility();
+        renderSubscriptionProxyStatus();
         const codexServiceTierSelect = document.getElementById('settingsCodexServiceTier') as HTMLSelectElement | null;
         if (codexServiceTierSelect) {
             codexServiceTierSelect.value = current.codexServiceTier === 'fast' ? 'fast' : 'default';
@@ -7957,6 +7994,42 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         if (todoPanel) todoPanel.style.display = '';
     }
 
+    function updateSubscriptionProxyUrlVisibility(): void {
+        const mode = document.getElementById('subscriptionProxyMode');
+        const group = document.getElementById('subscriptionProxyUrlGroup');
+        if (group) group.style.display = mode instanceof HTMLSelectElement && mode.value === 'custom' ? '' : 'none';
+    }
+
+    function setSubscriptionProxyBusy(busy: boolean): void {
+        for (const id of ['subscriptionProxySaveBtn', 'subscriptionProxyRefreshBtn']) {
+            const button = document.getElementById(id);
+            if (button instanceof HTMLButtonElement) button.disabled = busy;
+        }
+        const status = document.getElementById('subscriptionProxyStatus');
+        if (busy && status) status.textContent = tr('Updating proxy settings…', '正在更新代理设置…');
+    }
+
+    function renderSubscriptionProxyStatus(saved = false): void {
+        const element = document.getElementById('subscriptionProxyStatus');
+        if (!element) return;
+        const status = settingsSubscriptionProxy;
+        if (!status) {
+            element.textContent = tr('Refresh detection to view the active proxy.', '刷新检测以查看当前代理。');
+            return;
+        }
+        const sources = {
+            vscode: 'VS Code http.proxy', environment: tr('environment', '环境变量'),
+            system: tr('system', '系统'), custom: tr('custom', '自定义'),
+        };
+        const active = status.activeProxyUrl
+            ? `${tr('Proxy', '代理')} (${status.source ? sources[status.source] : ''}): ${status.activeProxyUrl}`
+            : status.mode === 'auto' ? tr('No proxy detected; using a direct connection.', '未检测到代理，将使用直连。')
+                : tr('Direct connection.', '直连。');
+        const stored = status.customProxyUrl ? tr(` Saved address: ${status.customProxyUrl}`, ` 已保存地址：${status.customProxyUrl}`) : '';
+        element.textContent = status.error || (saved ? tr('Saved. ', '已保存。') : '') + active + stored;
+        element.style.color = status.error ? 'var(--vscode-errorForeground)' : '';
+    }
+
     function updateApiKeyStatus(providerId: string, providers?: any[]) {
         const p = (providers || settingsProviders).find((x: any) => x.id === providerId);
         const status = document.getElementById('apiKeyStatus')!;
@@ -7970,6 +8043,8 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         const isCodex = p?.authKind === 'chatgpt-oauth';
         const isAntigravity = p?.authKind === 'antigravity-oauth';
         const antigravityGroup = document.getElementById('antigravityAccountGroup');
+        const proxyGroup = document.getElementById('subscriptionProxyGroup');
+        if (proxyGroup) proxyGroup.style.display = isCodex || isAntigravity ? '' : 'none';
         if (antigravityGroup) antigravityGroup.style.display = isAntigravity ? '' : 'none';
         if (codexGroup) codexGroup.style.display = isCodex ? '' : 'none';
         if (codexSpeedGroup) codexSpeedGroup.style.display = isCodex ? '' : 'none';

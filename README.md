@@ -67,6 +67,8 @@ The ChatGPT-subscription-compatible Codex provider uses a browser sign-in flow a
 
 Antigravity is also available in AI Settings. Select **Antigravity (Google OAuth)**, sign in with Google, then refresh the account to load its models and quota. The extension stores OAuth tokens in VS Code SecretStorage and supports streaming text, image input, and tool calls through Antigravity's Gemini transport. Complete account setup in Antigravity first. This provider uses fixed upstream compatibility endpoints; API keys, custom endpoints, FIM, and utility calls are unavailable.
 
+Codex subscription and Antigravity (Gemini OAuth) share **AI Settings → Subscription channel proxy**. Choose **Auto detect**, **Custom proxy**, or **Direct connection**, then click **Save proxy** before signing in or testing. Custom mode accepts HTTP, HTTPS, and SOCKS5 addresses (for example `http://127.0.0.1:7890` or `socks5://127.0.0.1:1080`), with optional `username:password@` authentication stored in VS Code SecretStorage. Leave the address empty to keep the saved proxy. Auto mode checks VS Code `http.proxy`, `HTTPS_PROXY` / `HTTP_PROXY` / `ALL_PROXY` (including lowercase variants), then Windows/macOS manual system proxy settings; PAC is not evaluated. Without a detected proxy it connects directly. A configured proxy failure is reported without a direct fallback. Changes apply to subsequent token, account, quota and chat requests; active streams continue with their existing connection. Browser sign-in uses the browser's own proxy settings.
+
 #### Connect an external MCP client
 
 `cwtools-mcp` is maintained and released separately. It exposes read-only semantic queries and normally reuses the language server already running in VS Code.
@@ -192,6 +194,8 @@ Stellaris Language Serves 是一款面向 Paradox Mod 开发的 VS Code 扩展�
 兼容 ChatGPT 订阅的 Codex Provider 通过浏览器登录，并使用插件自己的 Agent 运行时。它依赖上游兼容端点，不属于公开稳定 API；如果上游流程变化，插件可能需要同步更新。
 
 AI 设置也支持 Antigravity。选择 **Antigravity (Google OAuth)**，使用 Google 登录后刷新账户，即可加载模型和额度。扩展将 OAuth Token 存入 VS Code SecretStorage，通过 Antigravity 的 Gemini 协议支持流式文本、图片输入和工具调用。请先在 Antigravity 中完成账户设置。该供应商使用固定的上游兼容端点，不提供 API Key、自定义端点、FIM 或辅助调用。
+
+Codex 订阅与 Antigravity（Gemini OAuth）共用 **AI 设置 → 订阅渠道代理**。选择 **自动检测**、**自定义代理** 或 **直连**，登录或测试前点击 **保存代理**。自定义模式支持 HTTP、HTTPS、SOCKS5 地址（例如 `http://127.0.0.1:7890` 或 `socks5://127.0.0.1:1080`），可用 `用户名:密码@` 提供认证，凭据保存在 VS Code SecretStorage。地址留空会保留已保存的代理。自动模式依次检测 VS Code `http.proxy`、`HTTPS_PROXY` / `HTTP_PROXY` / `ALL_PROXY`（含小写形式）、Windows/macOS 系统手动代理；不解析 PAC。未检测到代理时直连，已配置的代理连接失败时会报错，不会回退直连。修改对后续令牌、账户、额度和聊天请求生效，进行中的流式回复继续使用原连接。浏览器登录页面遵循浏览器自身的代理设置。
 
 #### 连接外部 MCP 客户端
 

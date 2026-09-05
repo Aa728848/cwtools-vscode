@@ -16,6 +16,7 @@ import {
 } from '../../shared/protocolValidation';
 
 import { isAntigravityAccountStatus } from './antigravityAccount';
+import { isSubscriptionProxyStatus } from '../../shared/subscriptionProxy';
 
 const isSurface = isOneOf(['chat', 'manager'] as const);
 const isRecordArray = isArrayOf(isObject);
@@ -64,7 +65,9 @@ const validators = {
         modelContextTokens: optional(isObject), thinkingModelPrefixes: optional(isStringArray),
         reasoningCapabilities: optional(isObject), codexAccount: optional(isObject),
         antigravityAccount: optional(isAntigravityAccountStatus),
+        subscriptionProxy: optional(isSubscriptionProxyStatus),
     }),
+    subscriptionProxyStatus: fields({ status: isSubscriptionProxyStatus }, { saved: optional(isBoolean), targetSurface: optional(isSurface) }),
     ollamaModels: fields({ models: isRecordArray }, { error: optional(isString) }),
     apiModelsFetched: fields({ providerId: isString, models: isRecordArray }, {
         dynContexts: optional(isObject), reasoningCapabilities: optional(isObject), error: optional(isString), ctxNote: optional(isString),

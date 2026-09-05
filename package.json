@@ -35,7 +35,9 @@
     "dependencies": {
         "google-translate-api-x": "^10.7.2",
         "quickjs-emscripten": "^0.31.0",
+        "socks": "^2.8.10",
         "sql.js": "^1.14.1",
+        "undici": "^6.28.1",
         "vscode-languageclient": "^9.0.1"
     },
     "devDependencies": {

@@ -6,6 +6,7 @@ import {
     type PanelSettings,
     type WebViewMessage,
 } from '../types';
+import { isSubscriptionProxyMode } from '../../../shared/subscriptionProxy';
 import {
     fields,
     isArrayOf,
@@ -133,6 +134,8 @@ const validators: Record<WebViewMessage['type'], MessageValidator> = {
     antigravityLogin: noFields,
     antigravityRefreshAccount: noFields,
     antigravityLogout: noFields,
+    saveSubscriptionProxy: fields({ mode: isSubscriptionProxyMode }, { url: optional(value => typeof value === 'string' && value.length <= 2048) }),
+    refreshSubscriptionProxy: noFields,
     installSkill: fields({ source: isString }),
     deleteSkill: fields({ skill: isString }),
     retractMessage: fields({ messageIndex: isInteger }),

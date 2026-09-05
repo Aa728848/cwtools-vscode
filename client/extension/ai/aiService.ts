@@ -45,6 +45,7 @@ import { SOURCE, aiText } from './messages';
 import { ChatGptOAuthService } from './codex/oauthService';
 import { AntigravityOAuthService } from './antigravity/oauthService';
 import { callAntigravity } from './antigravity/completion';
+import { SubscriptionProxyService } from './subscriptionProxy';
 import { isRecord } from '../../shared/protocolValidation';
 import { getCachedInputTokens, getCacheCreationInputTokens } from './providerUsage';
 import { resolveEffectiveCacheCapability } from './cacheCapability';
@@ -285,6 +286,7 @@ export class AIService {
     private keyManager: ApiKeyManager;
     private readonly chatGptOAuth: ChatGptOAuthService;
     private readonly antigravityOAuth: AntigravityOAuthService;
+    private readonly subscriptionProxy: SubscriptionProxyService;
     /**
      * C1 Fix: Use a Set instead of a single instance so that concurrent
      * chatCompletion calls (e.g. compaction + main loop running in parallel)
@@ -299,18 +301,30 @@ export class AIService {
 
     constructor(private context: vs.ExtensionContext) {
         this.keyManager = new ApiKeyManager(context.secrets);
+        this.subscriptionProxy = new SubscriptionProxyService({
+            secrets: context.secrets,
+            readMode: () => vs.workspace.getConfiguration('stellarisLanguageServices.ai').inspect?.('subscriptionProxy.mode')?.globalValue ?? 'auto',
+            writeMode: mode => vs.workspace.getConfiguration('stellarisLanguageServices.ai').update('subscriptionProxy.mode', mode, vs.ConfigurationTarget.Global),
+            readVsCodeProxy: () => vs.workspace.getConfiguration('http').inspect?.('proxy')?.globalValue ?? '',
+            reportError: message => ErrorReporter.warn(SOURCE.AI_SERVICE, message),
+        });
+        context.subscriptions?.push(this.subscriptionProxy);
         this.chatGptOAuth = new ChatGptOAuthService(
             context.secrets,
-            fetch,
+            this.subscriptionProxy.fetch,
             String(context.extension?.packageJSON?.version ?? 'unknown'),
         );
         context.subscriptions?.push(this.chatGptOAuth);
-        this.antigravityOAuth = new AntigravityOAuthService(context.secrets);
+        this.antigravityOAuth = new AntigravityOAuthService(context.secrets, this.subscriptionProxy.fetch);
         context.subscriptions?.push(this.antigravityOAuth);
     }
 
     getKeyManager(): ApiKeyManager {
         return this.keyManager;
+    }
+
+    getSubscriptionProxyService(): SubscriptionProxyService {
+        return this.subscriptionProxy;
     }
 
     getChatGptOAuthService(): ChatGptOAuthService {
@@ -615,7 +629,7 @@ export class AIService {
                         controller.signal, {
                             onThinking: options?.onThinking, onTextDelta: options?.onTextDelta,
                             onToolCallDelta: options?.onToolCallDelta,
-                        });
+                        }, this.subscriptionProxy.fetch);
                 }
                 if (effectiveApiFormat === 'openai-responses') {
                     return await this.callOpenAIResponses(requestEndpoint, apiKey, requestBody, providerId, controller, {
@@ -994,7 +1008,8 @@ export class AIService {
             }, 300000);
 
             try {
-                const response = await fetch(url, { ...init, signal: fetchController.signal });
+                const fetchFn = providerId === 'codex-chatgpt' ? this.subscriptionProxy.fetch : fetch;
+                const response = await fetchFn(url, { ...init, signal: fetchController.signal });
                 
                 if (fetchTimeoutId) {
                     clearTimeout(fetchTimeoutId);

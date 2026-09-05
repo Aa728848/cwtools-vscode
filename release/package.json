@@ -1332,6 +1332,18 @@
                         "default": "default",
                         "description": "%configuration.stellarisLanguageServices.ai.codexServiceTier.description%"
                     },
+                    "stellarisLanguageServices.ai.subscriptionProxy.mode": {
+                        "scope": "machine",
+                        "type": "string",
+                        "enum": ["auto", "custom", "direct"],
+                        "enumDescriptions": [
+                            "%configuration.stellarisLanguageServices.ai.subscriptionProxy.mode.auto%",
+                            "%configuration.stellarisLanguageServices.ai.subscriptionProxy.mode.custom%",
+                            "%configuration.stellarisLanguageServices.ai.subscriptionProxy.mode.direct%"
+                        ],
+                        "default": "auto",
+                        "description": "%configuration.stellarisLanguageServices.ai.subscriptionProxy.mode.description%"
+                    },
                     "stellarisLanguageServices.ai.maxContextTokens": {
                         "scope": "window",
                         "type": "integer",
@@ -2417,7 +2429,9 @@
     "dependencies": {
         "executable": "4.1.1",
         "quickjs-emscripten": "^0.31.0",
+        "socks": "^2.8.10",
         "sql.js": "^1.14.1",
+        "undici": "^6.28.1",
         "vscode-languageclient": "^9.0.1"
     },
     "extensionPack": [

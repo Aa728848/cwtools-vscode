@@ -112,6 +112,12 @@ export async function routeWebviewMessage(
         case 'antigravityLogout':
             await provider.settingsManager.logoutAntigravity(sourceSurface);
             break;
+        case 'saveSubscriptionProxy':
+            await provider.settingsManager.saveSubscriptionProxy(msg.mode, msg.url, sourceSurface);
+            break;
+        case 'refreshSubscriptionProxy':
+            await provider.settingsManager.refreshSubscriptionProxy(sourceSurface);
+            break;
         case 'codexRefreshAccount':
             await provider.settingsManager.refreshCodexAccount();
             break;

@@ -2,8 +2,69 @@ import { expect } from 'chai';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+import { Dispatcher } from 'undici';
 
 const ONE_PIXEL_PNG_BASE64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=';
+
+describe('AIService subscription proxy integration', () => {
+    it('routes both OAuth channels through the shared transport while leaving API-key providers unchanged', async () => {
+        const { AIService } = loadAIService();
+        const originalFetch = globalThis.fetch;
+        const requests: string[] = [];
+        const dispatchers = new Set<Dispatcher>();
+        const secrets = new Map<string, string>([
+            ['cwtools.ai.codexChatgpt.oauth.v1', JSON.stringify({ accessToken: 'old', refreshToken: 'codex-refresh', expiresAt: 0, accountId: 'account-test' })],
+            ['cwtools.ai.antigravity.oauth.v1', JSON.stringify({ accessToken: 'old', refreshToken: 'google-refresh', expiresAt: 0 })],
+        ]);
+        const subscriptions: Array<{ dispose(): void }> = [];
+        const context: Pick<import('vscode').ExtensionContext, 'secrets' | 'subscriptions'> = {
+            secrets: {
+                get: async key => secrets.get(key), store: async (key, value) => { secrets.set(key, value); },
+                delete: async key => { secrets.delete(key); }, onDidChange: () => ({ dispose() {} }),
+            }, subscriptions,
+        };
+        const service = new AIService(context as import('vscode').ExtensionContext);
+        // Set fetch after construction to check all entry points share the live transport.
+        globalThis.fetch = async (input, init) => {
+            const url = String(input);
+            requests.push(url);
+            if (url.startsWith('https://api.openai.com/')) {
+                expect(init).not.to.have.property('dispatcher');
+            } else {
+                const dispatcher: unknown = init && 'dispatcher' in init ? init.dispatcher : undefined;
+                expect(dispatcher).to.be.instanceOf(Dispatcher);
+                if (dispatcher instanceof Dispatcher) dispatchers.add(dispatcher);
+            }
+            if (url.endsWith('/token')) return new Response(JSON.stringify({ access_token: 'refreshed', expires_in: 3600 }));
+            if (url.endsWith('/usage')) return new Response(JSON.stringify({ plan_type: 'plus' }));
+            if (url.endsWith('loadCodeAssist')) return new Response(JSON.stringify({ cloudaicompanionProject: 'project-test' }));
+            if (url.endsWith('fetchAvailableModels')) return new Response(JSON.stringify({ models: { 'gemini-3-flash': {} } }));
+            if (url.endsWith('retrieveUserQuotaSummary')) return new Response(JSON.stringify({ buckets: [] }));
+            if (url.includes('/userinfo')) return new Response(JSON.stringify({ email: 'user@example.test' }));
+            if (url.includes('streamGenerateContent')) return geminiSseResponse([{ response: { candidates: [{ content: { parts: [{ text: 'google reply' }] }, finishReason: 'STOP' }] } }]);
+            if (url.endsWith('/responses')) return responsesSseResponse([{ type: 'response.completed', response: { id: 'r1', output: [{ type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'reply' }] }] } }]);
+            throw new Error(`Unexpected test route: ${url}`);
+        };
+        try {
+            expect((await service.getChatGptOAuthService().getAccountStatus(true)).signedIn).to.equal(true);
+            expect((await service.getAntigravityOAuthService().getAccountStatus(true)).signedIn).to.equal(true);
+            await service.chatCompletion([{ role: 'user', content: 'Hello' }], { providerId: 'codex-chatgpt', model: 'gpt-5.6-sol' });
+            await service.chatCompletion([{ role: 'user', content: 'Hello' }], { providerId: 'antigravity', model: 'gemini-3-flash' });
+            await service.chatCompletion([{ role: 'user', content: 'Hello' }], { providerId: 'openai', model: 'gpt-5.6-sol', apiKey: 'api-key-test' });
+            expect(requests).to.include.members([
+                'https://auth.openai.com/oauth/token', 'https://oauth2.googleapis.com/token',
+                'https://chatgpt.com/backend-api/wham/usage', 'https://chatgpt.com/backend-api/codex/responses',
+                'https://www.googleapis.com/oauth2/v1/userinfo?alt=json',
+            ]);
+            expect(requests.some(url => url.endsWith('fetchAvailableModels'))).to.equal(true);
+            expect(requests.some(url => url.endsWith('retrieveUserQuotaSummary'))).to.equal(true);
+            expect(dispatchers.size).to.equal(1);
+        } finally {
+            subscriptions.forEach(subscription => subscription.dispose());
+            globalThis.fetch = originalFetch;
+        }
+    });
+});
 
 describe('AIService request timeout policy', () => {
     it('normalizes missing and invalid request timeouts to 20 minutes', () => {

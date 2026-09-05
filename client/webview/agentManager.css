@@ -1,8 +1,8 @@
 /* Agent Manager shell: keep chat logic, but present as a three-pane workspace. */
 body.agent-manager-shell {
-    --manager-left-width: clamp(210px, 14vw, 250px);
+    --manager-left-width: clamp(224px, 17vw, 280px);
     --manager-active-left-width: var(--manager-left-width);
-    --manager-right-width: clamp(520px, 38vw, 760px);
+    --manager-right-width: clamp(360px, 30vw, 520px);
     --manager-active-right-width: 0px;
     --codex-chat-column: min(100%, 840px);
     --manager-bg: var(--vscode-editor-background, #1e1e1e);
@@ -28,7 +28,7 @@ body.agent-manager-shell {
     background: var(--manager-bg);
     color: var(--manager-fg);
     font-family: var(--vscode-font-family, "Segoe UI", sans-serif);
-    font-size: 12px;
+    font-size: 14px;
 }
 
 body.agent-manager-shell .header {
@@ -704,7 +704,6 @@ body.agent-manager-shell .manager-command-stop:disabled {
 
 body.agent-manager-shell .manager-inspector-tabs {
     display: grid;
-    grid-template-columns: repeat(5, minmax(0, auto));
     justify-content: start;
     gap: 22px;
     margin: 0;
@@ -804,9 +803,14 @@ body.agent-manager-shell .input-wrapper {
     padding: 12px 18px 14px;
     left: auto;
     right: auto;
-    bottom: auto;
-    transform: none !important;
-    transition: none;
+    bottom: 0;
+    transform: translateY(0);
+    transition: transform 0.34s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+body.agent-manager-shell.chat-empty .input-wrapper {
+    bottom: 0;
+    transform: translateY(calc(-50vh + 50%));
 }
 
 body.agent-manager-shell .floating-card-area {
@@ -929,11 +933,6 @@ body.agent-manager-shell .settings-footer {
     max-width: 1040px;
 }
 
-body.agent-manager-shell .settings-overview {
-    width: min(calc(100% - 24px), 1016px);
-    max-width: 1016px;
-}
-
 body.agent-manager-shell .settings-body {
     padding-bottom: 24px;
 }
@@ -950,11 +949,6 @@ body.agent-manager-shell .side-workspace-body .settings-header,
 body.agent-manager-shell .side-workspace-body .settings-body,
 body.agent-manager-shell .side-workspace-body .settings-footer {
     width: 100%;
-    max-width: none;
-}
-
-body.agent-manager-shell .side-workspace-body .settings-overview {
-    width: calc(100% - 24px);
     max-width: none;
 }
 
@@ -1474,11 +1468,6 @@ body.agent-manager-shell .manager-workspace-external-host .annotatable-plan.ap-c
 .manager-settings-host .settings-body,
 .manager-settings-host .settings-footer {
     width: 100%;
-    max-width: none;
-}
-
-.manager-settings-host .settings-overview {
-    width: calc(100% - 24px);
     max-width: none;
 }
 
@@ -2266,7 +2255,7 @@ body.agent-manager-shell .manager-file-delta em {
 }
 
 body.agent-manager-shell .manager-inspector-tabs {
-    grid-template-columns: repeat(2, minmax(80px, auto));
+    grid-template-columns: repeat(3, minmax(0, 1fr));
     min-height: 43px;
     gap: 24px;
     padding: 0 18px;
@@ -3224,24 +3213,24 @@ body.agent-manager-shell .manager-trajectory-empty strong { color: var(--manager
 
 /* Compact task-tree treatment: hierarchy first, cards second. */
 body.agent-manager-shell .manager-agent-explorer { padding: 10px 12px; }
-body.agent-manager-shell .manager-agent-explorer-hint { margin-bottom: 6px; font-size: 9px; }
+body.agent-manager-shell .manager-agent-explorer-hint { margin-bottom: 6px; font-size: 12px; }
 body.agent-manager-shell .manager-agent-explorer-grid { grid-template-columns: minmax(190px, 29%) minmax(0, 1fr); min-height: 210px; max-height: min(48vh, 480px); border-radius: 4px; }
 body.agent-manager-shell .manager-agent-tree-pane { padding: 5px; }
 body.agent-manager-shell .agent-tree-node { grid-template-columns: 7px minmax(0, 1fr) auto 7px; gap: 5px; margin: 0; padding: 4px 5px 4px 3px; border-radius: 3px; }
 body.agent-manager-shell .agent-tree-state { width: 6px; height: 6px; box-shadow: none; }
-body.agent-manager-shell .agent-tree-copy strong { font-size: 9px; font-weight: 600; }
+body.agent-manager-shell .agent-tree-copy strong { font-size: 12px; font-weight: 600; }
 body.agent-manager-shell .agent-tree-copy small,
 body.agent-manager-shell .agent-tree-stats small,
-body.agent-manager-shell .agent-tree-stats em { font-size: 7px; }
+body.agent-manager-shell .agent-tree-stats em { font-size: 11px; }
 body.agent-manager-shell .agent-tree-stats { max-width: 58px; }
 body.agent-manager-shell .agent-tree-enter { font-size: 11px; }
 body.agent-manager-shell .agent-run-tree ul { margin-left: 9px; padding-left: 8px; }
-body.agent-manager-shell .manager-agent-breadcrumb { min-height: 28px; padding: 0 8px; font-size: 9px; }
+body.agent-manager-shell .manager-agent-breadcrumb { min-height: 28px; padding: 0 8px; font-size: 12px; }
 body.agent-manager-shell .manager-agent-conversation { padding: 5px 8px 10px; }
 body.agent-manager-shell .agent-conversation-entry { grid-template-columns: 9px minmax(0, 1fr); gap: 5px; padding: 3px 2px; }
 body.agent-manager-shell .agent-conversation-head strong,
-body.agent-manager-shell .agent-conversation-text { font-size: 8px; }
-body.agent-manager-shell .agent-conversation-head time { font-size: 7px; }
+body.agent-manager-shell .agent-conversation-text { font-size: 12px; }
+body.agent-manager-shell .agent-conversation-head time { font-size: 11px; }
 
 @media (max-width: 960px) {
     body.agent-manager-shell .manager-trajectory-details { width: 42vw; min-width: 260px; }
@@ -3556,6 +3545,7 @@ body.agent-manager-shell .artifact-drawer { grid-row: 4 / 8; }
 body.agent-manager-shell .manager-trajectory-view { grid-row: 4 / 8; }
 
 @media (prefers-reduced-motion: reduce) {
+    body.agent-manager-shell .input-wrapper,
     body.agent-manager-shell .manager-file-chevron,
     body.agent-manager-shell .artifact-drawer,
     body.agent-manager-shell .artifact-scrim {
@@ -3566,3 +3556,65 @@ body.agent-manager-shell .manager-trajectory-view { grid-row: 4 / 8; }
         animation: none !important;
     }
 }
+
+/* Readable manager panels share the sidebar's controls and theme. */
+body.agent-manager-shell .chat-area { font-size: 14px; line-height: 1.65; }
+body.agent-manager-shell .manager-command-topic-title { font-size: 14px; }
+body.agent-manager-shell .manager-command-actions button, body.agent-manager-shell .manager-main-tab,
+body.agent-manager-shell .manager-inspector-tabs button { font-size: 12px; min-height: 32px; }
+body.agent-manager-shell .manager-command-actions button.active { color: var(--vscode-foreground); background: var(--vscode-list-activeSelectionBackground); border-color: var(--vscode-focusBorder); }
+body.agent-manager-shell .manager-command-workflow, body.agent-manager-shell .manager-command-workflow small,
+body.agent-manager-shell .manager-command-status, body.agent-manager-shell .topic-meta-chip { font-size: 11px; }
+body.agent-manager-shell .manager-settings-page { padding: 0; }
+body.agent-manager-shell .manager-settings-host { min-height: 0; }
+body.agent-manager-shell .manager-trajectory-shell { grid-template-rows: auto auto auto minmax(0, 1fr); }
+body.agent-manager-shell .manager-trajectory-toolbar { min-height: 40px; padding: 8px 14px; flex-wrap: wrap; gap: 8px 18px; font-size: 12px; }
+body.agent-manager-shell .manager-trajectory-toolbar strong, body.agent-manager-shell .manager-trajectory-toolbar b { font-size: 13px; }
+body.agent-manager-shell .manager-trajectory-filters { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 10px 14px; border-bottom: 1px solid var(--manager-border-soft); }
+body.agent-manager-shell .manager-trajectory-filters select, body.agent-manager-shell .manager-trajectory-filters input[type="search"],
+body.agent-manager-shell #trajectoryDetailEvent { min-width: 0; max-width: 180px; height: 30px; padding: 3px 6px; border: 1px solid var(--manager-border); border-radius: 5px; background: var(--vscode-input-background); color: var(--vscode-input-foreground); font: inherit; font-size: 12px; }
+body.agent-manager-shell .manager-trajectory-filters input[type="search"] { flex: 1 1 170px; max-width: none; }
+body.agent-manager-shell .manager-trajectory-filters label { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; }
+body.agent-manager-shell .manager-trajectory-table { grid-template-rows: 34px minmax(0, 1fr); }
+body.agent-manager-shell .manager-trajectory-table > header, body.agent-manager-shell .manager-trajectory-record { grid-template-columns: 72px minmax(100px, 1fr) minmax(65px, 14%) 96px; gap: 10px; padding-left: 14px; font-size: 12px; }
+body.agent-manager-shell .manager-trajectory-record { min-height: 48px; padding-top: 8px; padding-bottom: 8px; }
+body.agent-manager-shell .manager-trajectory-record-main strong { font-size: 13px; }
+body.agent-manager-shell .manager-trajectory-record-main small, body.agent-manager-shell .manager-trajectory-record time,
+body.agent-manager-shell .manager-trajectory-record-agent, body.agent-manager-shell .manager-trajectory-record-status { font-size: 11px; }
+body.agent-manager-shell .manager-trajectory-record-status { display: flex; flex-direction: column; gap: 3px; }
+body.agent-manager-shell .manager-trajectory-record-status small { font-size: 11px; font-variant-numeric: tabular-nums; }
+body.agent-manager-shell .manager-trajectory-group { display: flex; justify-content: space-between; gap: 10px; padding: 9px 14px; background: var(--manager-panel-soft); border-bottom: 1px solid var(--manager-border-soft); font-size: 12px; }
+body.agent-manager-shell .manager-trajectory-group span { color: var(--manager-muted); }
+body.agent-manager-shell .manager-trajectory-more { margin: 8px 14px; }
+body.agent-manager-shell .manager-trajectory-details { grid-template-rows: 52px auto minmax(0, 1fr); }
+body.agent-manager-shell .manager-trajectory-details > header strong { font-size: 13px; }
+body.agent-manager-shell .manager-trajectory-details > header small { font-size: 11px; }
+body.agent-manager-shell .manager-trajectory-details > nav { padding: 8px 12px; font-size: 12px; }
+body.agent-manager-shell .manager-trajectory-details > nav label { display: flex; align-items: center; gap: 8px; min-width: 0; }
+body.agent-manager-shell .manager-trajectory-overview .agent-trace-scale, body.agent-manager-shell .manager-trajectory-overview .agent-trace-label { font-size: 11px; }
+body.agent-manager-shell .manager-trajectory-overview .agent-trace-lane { min-height: 18px; }
+body.agent-manager-shell .manager-activity-section-title, body.agent-manager-shell .artifact-item-title { font-size: 13px; }
+body.agent-manager-shell .artifact-item-summary, body.agent-manager-shell .run-metric-cell,
+body.agent-manager-shell .manager-context-breakdown, body.agent-manager-shell .manager-task-item,
+body.agent-manager-shell .manager-activity-diagnostics > summary { font-size: 12px; }
+body.agent-manager-shell .manager-activity-diagnostics > summary { cursor: pointer; }
+body.agent-manager-shell .manager-context-breakdown { overflow-wrap: anywhere; }
+@media (max-width: 1100px) {
+    body.agent-manager-shell .manager-trajectory-ledger:has(.manager-trajectory-details) .manager-trajectory-table { display: none; }
+    body.agent-manager-shell .manager-trajectory-details { flex: 1; width: 100%; min-width: 0; border-left: 0; }
+    body.agent-manager-shell .manager-trajectory-table > header span:last-child { display: block; }
+}
+body.agent-manager-shell .artifact-drawer-header { display: none; }
+@media (min-width: 1000px) {
+    body.agent-manager-shell .manager-command-settings { width: auto; padding: 0 9px; }
+    body.agent-manager-shell .manager-command-settings span { display: inline; }
+}
+@media (max-width: 1360px) {
+    body.agent-manager-shell .artifact-drawer,
+    body.agent-manager-shell.artifact-drawer-open .artifact-drawer { width: min(520px, calc(100vw - 24px)); }
+}
+body.agent-manager-shell .msg-bubble { font-size: 14px; line-height: 1.65; }
+body.agent-manager-shell .manager-agent-task-list .agent-tree-copy strong { font-size: 13px; }
+body.agent-manager-shell .manager-agent-task-list .agent-tree-copy small,
+body.agent-manager-shell .manager-agent-task-list .agent-tree-copy em,
+body.agent-manager-shell .manager-agent-task-list .agent-tree-copy span { font-size: 11px; }

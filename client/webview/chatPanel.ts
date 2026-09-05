@@ -495,8 +495,10 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
     }
 
     function setChatEmptyState(isEmpty = !hasConversationContent()) {
+        const changed = document.body.classList.contains('chat-empty') !== isEmpty;
         document.body.classList.toggle('chat-empty', isEmpty);
         chatArea.classList.toggle('is-empty', isEmpty);
+        if (changed) requestAnimationFrame(updateComposerStackHeight);
     }
 
     const chatContentObserver = new MutationObserver(() => setChatEmptyState());
@@ -2872,14 +2874,23 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
             }
         });
     });
+    const headerMore = document.getElementById('headerMore');
+    headerMore?.addEventListener('click', event => {
+        if (event.target instanceof Element && event.target.closest('button')) headerMore.removeAttribute('open');
+    });
     document.addEventListener('click', e => {
         const target = e.target as Element | null;
+        if (!target?.closest('#headerMore')) headerMore?.removeAttribute('open');
         if (!target?.closest('#composerMenu') && !target?.closest('#composerAddBtn') && !target?.closest('#domainMenu') && !target?.closest('#quickDomainTrigger') && !target?.closest('#modelMenu') && !target?.closest('#quickModelTrigger') && !target?.closest('#reasoningMenu') && !target?.closest('#quickReasoningTrigger') && !target?.closest('#writeModeMenu') && !target?.closest('#quickWriteModeTrigger')) {
             closeComposerMenus();
         }
     });
     document.addEventListener('keydown', e => {
         if (e.key === 'Escape') closeComposerMenus();
+        if (e.key === 'Escape' && headerMore?.hasAttribute('open')) {
+            headerMore.removeAttribute('open');
+            headerMore.querySelector('summary')?.focus();
+        }
     });
 
     bindBtn('btnNewTopic', () => vscode.postMessage({ type: 'newTopic' }));
@@ -3139,6 +3150,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         popup.style.width = `${Math.max(0, rect.width)}px`;
         popup.style.top = 'auto';
         popup.style.bottom = `${Math.max(12, window.innerHeight - rect.top + 8)}px`;
+        popup.style.maxHeight = `${Math.min(360, Math.max(80, rect.top - 20))}px`;
     }
 
     function setSlashPopupOpen(open: boolean): void {
@@ -3465,6 +3477,12 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
     }
 
     window.addEventListener('resize', () => {
+        if (slashPopup?.classList.contains('show')) positionComposerSuggestionPopup(slashPopup);
+        if (_atPopupVisible && atPopup) positionComposerSuggestionPopup(atPopup);
+    });
+    inputWrapper?.addEventListener('transitionend', event => {
+        if (event.target !== inputWrapper) return;
+        updateComposerStackHeight();
         if (slashPopup?.classList.contains('show')) positionComposerSuggestionPopup(slashPopup);
         if (_atPopupVisible && atPopup) positionComposerSuggestionPopup(atPopup);
     });
@@ -6538,6 +6556,17 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                 startPlaceholderRotation();
                 break;
 
+            case 'managerSnapshot': {
+                if (!isManagerShell()) break;
+                updateCurrentTopicHeader(msg.stats?.currentTopicId ?? null, msg.stats?.currentTopicTitle ?? null);
+                // Snapshots are the manager's initial topic source. Do not replace active search results.
+                const search = document.getElementById('topicsSearch');
+                if (!(search instanceof HTMLInputElement) || !search.value.trim()) {
+                    renderTopics(msg.topics, msg.stats);
+                }
+                break;
+            }
+
             case 'topicList': {
                 const currentFromList = msg.stats?.currentTopicId
                     ? (msg.topics || []).find((t: TopicPanelItem) => t.id === msg.stats.currentTopicId)
@@ -7110,31 +7139,25 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                     html += '</div>';
                 }
 
-                // ── Daily trend (last 14 days) ──
+                // Daily totals share the full chart width; exact values remain keyboard accessible.
                 if (stats.dailyStats && stats.dailyStats.length > 0) {
-                    const recent = stats.dailyStats.slice(0, 14);
-                    const maxTokens = Math.max(...recent.map((d: any) => d.tokens), 1);
-                    html += '<div style="border-top: 1px dashed var(--border); padding-top: 6px;">';
-                    html += `<div style="font-size:11px; opacity:0.5; margin-bottom:4px;">${tr('Recent trend (daily)', '近期趋势 (每日)')}</div>`;
-                    html += '<div style="display:flex; justify-content:flex-end; align-items:flex-end; gap:4px; height:60px;">';
-                    // Show in chronological order (reverse since dailyStats is desc)
-                    for (const d of [...recent].reverse()) {
-                        const h = Math.max(3, Math.round((d.tokens / maxTokens) * 56));
-                        const dayLabel = d.date.slice(5); // MM-DD
-                        html += `<div title="${d.date}: ${d.tokens.toLocaleString()} tokens, ${tr(`${d.callCount} calls`, `${d.callCount} 次调用`)}, ¥${d.costCny.toFixed(2)}" style="flex:1; min-width:12px; max-width:28px;">
-                            <div style="background:var(--accent); opacity:0.7; height:${h}px; border-radius:2px 2px 0 0;"></div>
-                            <div style="font-size:7px; text-align:center; opacity:0.4; margin-top:1px; overflow:hidden; white-space:nowrap;">${dayLabel}</div>
-                        </div>`;
+                    const recent = stats.dailyStats.slice(0, 14).reverse();
+                    const maxTokens = Math.max(...recent.map((day: { tokens: number }) => day.tokens), 1);
+                    html += `<div class="usage-trend"><div class="usage-trend-heading"><strong>${tr('Daily usage', '每日用量')}</strong><span>Tokens · ${tr('Peak', '峰值')} ${maxTokens.toLocaleString()}</span></div><div class="usage-trend-bars">`;
+                    for (const day of recent) {
+                        const height = Math.max(2, Math.round(day.tokens / maxTokens * 100));
+                        const label = `${day.date}: ${day.tokens.toLocaleString()} tokens · ${tr(`${day.callCount} calls`, `${day.callCount} 次调用`)} · ¥${day.costCny.toFixed(2)}`;
+                        html += `<div class="usage-trend-day" tabindex="0" title="${escapeHtml(label)}" aria-label="${escapeHtml(label)}"><span style="height:${height}%"></span></div>`;
                     }
-                    html += '</div></div>';
+                    html += `</div><div class="usage-trend-dates"><span>${escapeHtml(recent[0].date)}</span><span>${escapeHtml(recent[recent.length - 1].date)}</span></div></div>`;
                 }
 
                 // ── Batch 4.2: Tool frequency ──
                 if (stats.toolFrequency && stats.toolFrequency.length > 0) {
                     html += '<div style="border-top: 1px dashed var(--border); padding-top: 6px; margin-bottom: 10px;">';
                     html += `<div style="font-size:11px; opacity:0.5; margin-bottom:4px;">${tr('Tool usage frequency', '工具使用频率')}</div>`;
-                    const topTools = stats.toolFrequency.slice(0, 8);
-                    for (const t of topTools) {
+                    for (const [index, t] of stats.toolFrequency.entries()) {
+                        if (index === 5) html += `<details class="usage-tools-more"><summary>${tr(`Show ${stats.toolFrequency.length - 5} more tools`, `展开其余 ${stats.toolFrequency.length - 5} 个工具`)}</summary>`;
                         const barW = Math.max(2, t.percentage);
                         html += `<div style="margin-bottom: 4px;">
                             <div style="display:flex; justify-content:space-between; font-size:11px; margin-bottom:2px;">
@@ -7146,6 +7169,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                             </div>
                         </div>`;
                     }
+                    if (stats.toolFrequency.length > 5) html += '</details>';
                     html += '</div>';
                 }
 
@@ -7548,8 +7572,11 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         input.setAttribute('aria-label', tr('Topic name', '话题名称'));
 
         let cancelled = false;
+        let finished = false;
         const finish = (commit: boolean) => {
-            if (!input.isConnected) return;
+            if (finished || !input.isConnected) return;
+            // Replacing a focused input can synchronously dispatch blur.
+            finished = true;
             const parent = input.parentElement;
             if (commit && !cancelled) {
                 commitTopicRename(topicId, input.value, originalTitle);
@@ -7734,6 +7761,18 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         const inlineProviderName = inlineProviderSel?.value
             ? (settingsProviders.find((p: any) => p.id === inlineProviderSel.value)?.name || inlineProviderSel.value)
             : undefined;
+        const inlineSummary = document.getElementById('inlineSectionSummary');
+        if (inlineSummary) inlineSummary.textContent = inlineEnabled?.checked
+            ? `${tr('On', '已开启')} · ${inlineProviderName || tr('Same as chat', '与对话相同')}` : tr('Off', '已关闭');
+        const mcpSummary = document.getElementById('mcpSectionSummary');
+        const mcpCount = document.querySelectorAll('#mcpServersList .mcp-server-block').length;
+        if (mcpSummary) mcpSummary.textContent = tr(`${mcpCount} configured`, `已配置 ${mcpCount} 个`);
+        const profilesSummary = document.getElementById('profilesSectionSummary');
+        const customProfiles = Array.from(document.querySelectorAll<HTMLElement>('.agent-model-row'))
+            .filter(row => Array.from(row.querySelectorAll<HTMLSelectElement>('select'))
+                .some(select => select.value && select.value !== '__inherit__')).length;
+        if (profilesSummary) profilesSummary.textContent = customProfiles
+            ? tr(`${customProfiles} customized`, `${customProfiles} 个独立配置`) : tr('Inherit main model', '继承主模型');
         applySettingsOverview(
             {
                 title: titleEl,

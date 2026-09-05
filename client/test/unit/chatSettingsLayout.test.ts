@@ -33,6 +33,7 @@ describe('sidebar settings layout', () => {
             const html = renderSettings(locale);
             const requiredControls: Record<string, string[]> = {
                 models: [
+                    'settingsOverview', 'settingsOverviewTitle', 'settingsOverviewSubtitle', 'settingsOverviewChips',
                     'settingsProvider', 'customApiFormat', 'settingsModelInput', 'delModelBtn', 'detectBtn',
                     'settingsCtx', 'settingsReasoningEffort', 'settingsCodexServiceTier', 'settingsResponseVerbosity',
                     'settingsApiKey', 'keyToggleBtn', 'fetchApiModelsBtn', 'deleteApiKeyBtn',
@@ -64,6 +65,10 @@ describe('sidebar settings layout', () => {
                 expect(html).to.include(`aria-controls="settingsPanel-${category}"`);
                 expect(html).to.include(`aria-labelledby="settingsTab-${category}"`);
             }
+            expect(html.indexOf('id="settingsOverview"')).to.be.lessThan(html.indexOf('id="chatModelSection"'));
+            expect(html).to.include(`id="settingsOverviewHeading">${locale === 'en' ? 'Configuration overview' : '配置概述'}</h3>`);
+            expect(html).to.include('class="accordion-section" id="chatModelSection"');
+            expect(html).to.include('id="accChat" aria-expanded="false"');
             expect(html).to.include('id="testConnBtn"');
             expect(html).to.include('id="saveSettingsBtn"');
             expect(html).to.include('value="disabled"');

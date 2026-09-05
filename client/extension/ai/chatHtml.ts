@@ -75,19 +75,24 @@ ${stylesheetLinks}
         </div>
     </div>
     <div class="header-actions">
-        <button class="artifact-toggle" id="btnArtifacts" title="${t('View artifacts', '查看 Artifacts')}" aria-label="${t('Open artifact center', '打开产物中心')}">
-            ${svgIconNoMargin('layers')}
-            <span class="artifact-toggle-text">Artifacts</span>
-            <span class="artifact-badge" id="artifactCount">0</span>
-        </button>
-        <button class="workspace-toggle" id="btnWorkspace" title="${t('Open workspace', '打开工作区')}" aria-label="${t('Open side workspace', '打开右侧工作区')}">
-            ${svgIconNoMargin('folder')}
-            <span class="workspace-toggle-text">${t('Workspace', '工作区')}</span>
-        </button>
-        <button class="icon-btn" id="btnAgentManager" title="${t('Open Agent Manager', '打开 Agent Manager')}" aria-label="${t('Open detached Agent Manager', '打开独立 Agent Manager')}">${svgIconNoMargin('bot')}</button>
         <button class="icon-btn" id="btnNewTopic" title="${t('New topic', '新话题')}" aria-label="${t('Create new chat topic', '新建对话话题')}">${svgIconNoMargin('plus')}</button>
         <button class="icon-btn" id="btnTopics" title="${t('Topic history', '历史话题')}" aria-label="${t('Expand topic history panel', '展开历史话题面板')}">≡</button>
         <button class="icon-btn" id="btnSettings" title="${t('Settings', '设置')}" aria-label="${t('Open AI settings', '打开 AI 设置')}">${svgIconNoMargin('gear')}</button>
+        <details class="header-more" id="headerMore">
+            <summary class="icon-btn" title="${t('More actions', '更多操作')}" aria-label="${t('More actions', '更多操作')}">⋯</summary>
+            <div class="header-more-menu">
+                <button class="artifact-toggle" id="btnArtifacts" title="${t('View artifacts', '查看产物')}" aria-label="${t('Open artifact center', '打开产物中心')}">
+                    ${svgIconNoMargin('layers')}
+                    <span class="artifact-toggle-text">${t('Artifacts', '产物')}</span>
+                    <span class="artifact-badge" id="artifactCount">0</span>
+                </button>
+                <button class="workspace-toggle" id="btnWorkspace" title="${t('Open workspace', '打开工作区')}" aria-label="${t('Open side workspace', '打开右侧工作区')}">
+                    ${svgIconNoMargin('folder')}
+                    <span class="workspace-toggle-text">${t('Workspace', '工作区')}</span>
+                </button>
+                <button class="icon-btn" id="btnAgentManager" title="${t('Open Agent Manager', '打开 Agent Manager')}" aria-label="${t('Open detached Agent Manager', '打开独立 Agent Manager')}">${svgIconNoMargin('bot')}<span>${t('Agent Manager', '独立工作台')}</span></button>
+            </div>
+        </details>
     </div>
 </div>
 
@@ -111,13 +116,13 @@ ${stylesheetLinks}
 </details>
 
 <div class="artifact-scrim" id="artifactScrim" aria-hidden="true"></div>
-<aside class="artifact-drawer" id="artifactDrawer" aria-label="Artifacts" aria-hidden="true">
+<aside class="artifact-drawer" id="artifactDrawer" aria-label="${t('Artifacts', '产物')}" aria-hidden="true">
     <div class="artifact-drawer-header">
         <div>
-            <div class="artifact-drawer-title">${svgIcon('layers')}Artifacts</div>
+            <div class="artifact-drawer-title">${svgIcon('layers')}${t('Artifacts', '产物')}</div>
             <div class="artifact-drawer-subtitle">${t('Artifacts, validation, and file changes for this run', '本轮产物、验证和文件变更')}</div>
         </div>
-        <button class="icon-btn artifact-close-btn" id="btnCloseArtifacts" title="${t('Close artifacts', '关闭 Artifacts')}" aria-label="${t('Close artifact center', '关闭产物中心')}">${svgIconNoMargin('x')}</button>
+        <button class="icon-btn artifact-close-btn" id="btnCloseArtifacts" title="${t('Back to conversation', '返回对话')}" aria-label="${t('Back to conversation', '返回对话')}">← <span>${t('Back', '返回')}</span></button>
     </div>
     <div class="artifact-filter-row" aria-label="Artifact filters">
         <button type="button" class="artifact-filter active" data-artifact-filter="all">${t('All', '全部')}</button>
@@ -139,7 +144,7 @@ ${stylesheetLinks}
     <div class="sw-tabs" id="swTabs" style="display:none">
         <button class="sw-tab active" data-sw-tab="changes">${svgIconNoMargin('pencil')}<span>${t('Changes', '变更')}</span><span class="sw-tab-badge" id="swBadgeChanges"></span></button>
         <button class="sw-tab" data-sw-tab="files">${svgIconNoMargin('folder')}<span>${t('Files', '文件')}</span><span class="sw-tab-badge" id="swBadgeFiles"></span></button>
-        <button class="sw-tab" data-sw-tab="artifacts">${svgIconNoMargin('layers')}<span>Artifacts</span><span class="sw-tab-badge" id="swBadgeArtifacts"></span></button>
+        <button class="sw-tab" data-sw-tab="artifacts">${svgIconNoMargin('layers')}<span>${t('Artifacts', '产物')}</span><span class="sw-tab-badge" id="swBadgeArtifacts"></span></button>
     </div>
     <div class="side-workspace-body" id="sideWorkspaceBody"></div>
 </aside>
@@ -153,11 +158,11 @@ ${stylesheetLinks}
 
 <div class="input-wrapper">
     <div id="composerMenu" class="composer-menu" aria-hidden="true">
-        <button class="composer-menu-item" data-composer-action="media">${svgIconNoMargin('upload')}<span>Media</span></button>
-        <button class="composer-menu-item" data-composer-action="mentions">${svgIconNoMargin('tag')}<span>Mentions</span></button>
-        <button class="composer-menu-item" data-composer-action="workflows">${svgIconNoMargin('sparkles')}<span>Workflows</span></button>
+        <button class="composer-menu-item" data-composer-action="media">${svgIconNoMargin('upload')}<span>${t('Images and files', '图片与文件')}</span></button>
+        <button class="composer-menu-item" data-composer-action="mentions">${svgIconNoMargin('tag')}<span>${t('Add context', '添加上下文')}</span></button>
+        <button class="composer-menu-item" data-composer-action="workflows">${svgIconNoMargin('sparkles')}<span>${t('Workflows', '工作流')}</span></button>
         <div class="composer-menu-divider"></div>
-        <button class="composer-menu-item" data-composer-action="goal">${svgIconNoMargin('flag')}<span>${t('Set goal', '设置 Goal')}</span></button>
+        <button class="composer-menu-item" data-composer-action="goal">${svgIconNoMargin('flag')}<span>${t('Set goal', '设置目标')}</span></button>
     </div>
     <div id="domainMenu" class="composer-menu domain-menu" aria-hidden="true">
         <div class="composer-menu-section">
@@ -247,8 +252,16 @@ ${stylesheetLinks}
     </div>
     <div class="settings-body">
         <div class="settings-tab-panel" id="settingsPanel-models" role="tabpanel" aria-labelledby="settingsTab-models" data-settings-panel="models">
-        <div class="accordion-section open" id="chatModelSection">
-            <button type="button" class="accordion-header" id="accChat" aria-expanded="true"><span>${svgIcon('bot')} ${t('Chat model', '对话模型')}</span><span class="accordion-arrow" aria-hidden="true">▶</span></button>
+        <section class="settings-overview" id="settingsOverview" aria-labelledby="settingsOverviewHeading">
+            <h3 class="settings-overview-heading" id="settingsOverviewHeading">${t('Configuration overview', '配置概述')}</h3>
+            <div class="settings-overview-main">
+                <div class="settings-overview-title" id="settingsOverviewTitle">—</div>
+                <div class="settings-overview-subtitle" id="settingsOverviewSubtitle">—</div>
+            </div>
+            <div class="settings-overview-chips" id="settingsOverviewChips"></div>
+        </section>
+        <div class="accordion-section" id="chatModelSection">
+            <button type="button" class="accordion-header" id="accChat" aria-expanded="false"><span>${svgIcon('bot')} ${t('Chat model', '对话模型')}</span><span class="accordion-arrow" aria-hidden="true">▶</span></button>
             <div class="accordion-body">
                 <div class="settings-group">
                     <label class="settings-label">${t('Provider', '提供商')}</label>
@@ -365,7 +378,7 @@ ${stylesheetLinks}
             </div>
         </div>
         <div class="accordion-section" id="inlineSection">
-            <button type="button" class="accordion-header" id="accInline" aria-expanded="false"><span>${svgIcon('edit')} ${t('Completion model', '补全模型')}</span><span class="accordion-arrow">▶</span></button>
+            <button type="button" class="accordion-header" id="accInline" aria-expanded="false"><span>${svgIcon('edit')} ${t('Completion model', '补全模型')}</span><span class="settings-section-summary" id="inlineSectionSummary"></span><span class="accordion-arrow">▶</span></button>
             <div class="accordion-body">
                 <div class="settings-toggle-row">
                     <span class="settings-toggle-label">${t('Enable AI completion', '启用 AI 补全')}</span>
@@ -444,18 +457,6 @@ ${stylesheetLinks}
                 </div>
             </div>
         </div>
-        <details class="settings-advanced">
-                    <summary>${t('Configuration overview', '配置概览')}</summary>
-                    <div class="settings-advanced-body">
-                        <div class="settings-overview" id="settingsOverview">
-        <div class="settings-overview-main">
-            <div class="settings-overview-title" id="settingsOverviewTitle">—</div>
-            <div class="settings-overview-subtitle" id="settingsOverviewSubtitle">—</div>
-        </div>
-        <div class="settings-overview-chips" id="settingsOverviewChips"></div>
-    </div>
-                    </div>
-                </details>
         </div>
         <div class="settings-tab-panel" id="settingsPanel-agent" role="tabpanel" aria-labelledby="settingsTab-agent" data-settings-panel="agent" hidden>
         <div class="accordion-section open" id="agentSection">
@@ -476,7 +477,7 @@ ${stylesheetLinks}
             </div>
         </div>
         <div class="accordion-section" id="agentProfilesSection">
-            <button type="button" class="accordion-header" id="accAgentProfiles" aria-expanded="false"><span>${svgIcon('bot')} ${t('Profile models', 'Profile 模型')}</span><span class="accordion-arrow" aria-hidden="true">▶</span></button>
+            <button type="button" class="accordion-header" id="accAgentProfiles" aria-expanded="false"><span>${svgIcon('bot')} ${t('Profile models', 'Profile 模型')}</span><span class="settings-section-summary" id="profilesSectionSummary"></span><span class="accordion-arrow" aria-hidden="true">▶</span></button>
             <div class="accordion-body">
                 <div class="settings-group">
                     <label class="settings-label">${svgIcon('bot')} ${t('Multi-Agent profile model settings', '多 Agent Profile 模型配置')}</label>
@@ -578,7 +579,7 @@ ${stylesheetLinks}
             </div>
         </div>
         <div class="accordion-section" id="mcpSection">
-            <button type="button" class="accordion-header" id="accMcp" aria-expanded="false"><span>${svgIcon('plugin')} ${t('MCP (Model Context Protocol)', 'MCP (模型上下文协议)')}</span><span class="accordion-arrow">▶</span></button>
+            <button type="button" class="accordion-header" id="accMcp" aria-expanded="false"><span>${svgIcon('plugin')} MCP</span><span class="settings-section-summary" id="mcpSectionSummary"></span><span class="accordion-arrow">▶</span></button>
             <div class="accordion-body">
                 <div class="settings-hint" style="margin-bottom: 5px;">${t('Configure external data sources that inject additional context into the AI agent.', '配置外部数据源为 AI 代理注入额外的上下文信息。')}</div>
                 <div id="mcpServersList" style="display:flex; flex-direction:column; gap:8px;"></div>

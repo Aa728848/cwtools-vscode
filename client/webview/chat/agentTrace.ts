@@ -27,6 +27,8 @@ export interface TraceSpan {
     id: string;
     kind: 'model' | 'tool' | 'process' | 'permission' | 'file' | 'agent' | 'event';
     label: string;
+    agentId?: string;
+    summary: string;
     status: string;
     startedAt: number;
     endedAt: number;
@@ -241,7 +243,7 @@ function earlierStartForSameInvocation(events: readonly AgentTraceEvent[], index
     if (event.type !== 'tool_call_start') return false;
     const key = correlationKey(event);
     return events.slice(0, index).some(candidate =>
-        candidate.type === 'tool_call_created' && correlationKey(candidate) === key);
+        candidate.type === 'tool_call_created' && candidate.agentId === event.agentId && correlationKey(candidate) === key);
 }
 
 export function buildTraceSpans(events: readonly AgentTraceEvent[], now = Date.now()): TraceSpan[] {
@@ -258,24 +260,38 @@ export function buildTraceSpans(events: readonly AgentTraceEvent[], now = Date.n
             endEvent = ordered.slice(index + 1).find(candidate =>
                 !consumed.has(candidate.eventId)
                 && candidate.type === endType
-                && (correlationKey(candidate) === key || (!event.invocationId && candidate.agentId === event.agentId)));
+                && candidate.agentId === event.agentId
+                && (correlationKey(candidate) === key
+                    || (key === event.eventId && correlationKey(candidate) === candidate.eventId)));
         }
         if (endEvent) consumed.add(endEvent.eventId);
         consumed.add(event.eventId);
+        const members = event.type === 'tool_call_created' ? ordered.slice(index + 1).filter(candidate =>
+            candidate.type === 'tool_call_start' && candidate.agentId === event.agentId
+            && correlationKey(candidate) === correlationKey(event)
+            && (!endEvent || candidate.sequence < endEvent.sequence)) : [];
+        members.forEach(member => consumed.add(member.eventId));
         const endedAt = endEvent?.timestamp ?? (startEvent(event) ? now : event.timestamp);
+        const outcome = eventPayload(endEvent ?? event);
+        const label = spanLabel(event);
+        const summaries = [eventSummary(event), endEvent ? eventSummary(endEvent) : '']
+            .filter(summary => summary && summary !== label);
         const status = endEvent?.status
-            ?? stringValue(eventPayload(endEvent ?? event).status)
+            ?? stringValue(outcome.status)
+            ?? (outcome.success === false || stringValue(outcome.error) ? 'failed' : undefined)
             ?? event.status
             ?? (endEvent ? 'done' : startEvent(event) ? 'running' : 'done');
         spans.push({
             id: event.eventId,
             kind: spanKind(event),
-            label: spanLabel(event),
+            label,
+            agentId: event.agentId,
+            summary: [...new Set(summaries)].join(' · '),
             status,
             startedAt: event.timestamp,
             endedAt: Math.max(event.timestamp, endedAt),
             durationMs: Math.max(0, endedAt - event.timestamp),
-            eventIds: endEvent ? [event.eventId, endEvent.eventId] : [event.eventId],
+            eventIds: [event.eventId, ...members.map(member => member.eventId), ...(endEvent ? [endEvent.eventId] : [])],
         });
     }
     return spans;
@@ -349,11 +365,16 @@ export function renderAgentTreeHTML(
 function eventSummary(event: AgentTraceEvent): string {
     const payload = eventPayload(event);
     const step = asRecord(payload.step);
+    const args = asRecord(payload.arguments ?? payload.input);
     return stringValue(step.content)
         ?? stringValue(payload.description)
         ?? stringValue(payload.error)
         ?? stringValue(payload.reason)
         ?? stringValue(payload.filePath)
+        ?? stringValue(payload.path)
+        ?? stringValue(args.filePath)
+        ?? stringValue(args.path)
+        ?? stringValue(args.file_path)
         ?? stringValue(payload.model)
         ?? stringValue(payload.toolName)
         ?? '';

@@ -120,6 +120,32 @@ describe('agent trace view model', () => {
         expect(html).to.not.include('agent-trace-list');
     });
 
+    it('keeps all invocation records inspectable and exposes a failed file operation', () => {
+        const spans = buildTraceSpans([
+            event(1, 'tool_call_created', 1_000, { agentId: 'coder', invocationId: 'read_1', payload: { toolName: 'read_file', arguments: { path: 'common/test.txt' } } }),
+            event(2, 'tool_call_start', 1_100, { agentId: 'coder', invocationId: 'read_1' }),
+            event(3, 'tool_call_end', 1_400, { agentId: 'coder', invocationId: 'read_1', payload: { success: false } }),
+        ], 2_000);
+        expect(spans).to.have.length(1);
+        expect(spans[0]).to.include({ agentId: 'coder', summary: 'common/test.txt', status: 'failed', durationMs: 400 });
+        expect(spans[0]?.eventIds).to.deep.equal(['evt_1', 'evt_2', 'evt_3']);
+    });
+
+    it('does not pair concurrent processes or different agents with the wrong completion', () => {
+        const spans = buildTraceSpans([
+            event(1, 'process_started', 1_000, { agentId: 'coder', payload: { processId: 'a' } }),
+            event(2, 'process_started', 1_100, { agentId: 'coder', payload: { processId: 'b' } }),
+            event(3, 'process_completed', 1_300, { agentId: 'coder', payload: { processId: 'b' } }),
+            event(4, 'process_completed', 1_500, { agentId: 'coder', payload: { processId: 'a' } }),
+            event(5, 'model_call_start', 2_000, { agentId: 'a', invocationId: 'shared' }),
+            event(6, 'model_call_start', 2_100, { agentId: 'b', invocationId: 'shared' }),
+            event(7, 'model_call_end', 2_400, { agentId: 'b', invocationId: 'shared' }),
+            event(8, 'model_call_end', 2_600, { agentId: 'a', invocationId: 'shared' }),
+        ]);
+        expect(spans.map(span => span.durationMs)).to.deep.equal([500, 200, 600, 300]);
+        expect(spans.map(span => span.eventIds)).to.deep.equal([['evt_1', 'evt_4'], ['evt_2', 'evt_3'], ['evt_5', 'evt_8'], ['evt_6', 'evt_7']]);
+    });
+
     it('keeps run duration stable across UI-only interactions', () => {
         const events = [
             event(1, 'run_created', 1_000),

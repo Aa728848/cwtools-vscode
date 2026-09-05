@@ -62,6 +62,7 @@ function topicUi() {
             workspacePrompt: '输入话题分组名（留空清除）',
             delete: '删除',
             ungrouped: '未分组',
+            moreActions: '话题操作',
             currentArchived: '当前归档: ',
             hiddenTopic: '当前: 会话已隐藏',
             currentNone: '当前: 无活动会话',
@@ -101,6 +102,7 @@ function topicUi() {
             workspacePrompt: 'Enter a topic group name (leave empty to clear)',
             delete: 'Delete',
             ungrouped: 'Ungrouped',
+            moreActions: 'Topic actions',
             currentArchived: 'Current archived: ',
             hiddenTopic: 'Current: hidden topic',
             currentNone: 'Current: none',
@@ -165,6 +167,10 @@ export function buildTopicItem(
     main.appendChild(head);
 
     const metaBits: string[] = [];
+    if (typeof topic.updatedAt === 'number' && Number.isFinite(topic.updatedAt)) {
+        const date = new Date(topic.updatedAt).toLocaleDateString(document.documentElement.lang || undefined, { month: 'short', day: 'numeric' });
+        metaBits.push(`${date} ${callbacks.formatTime(topic.updatedAt)}`);
+    }
     if (topic.workspaceLabel || topic.workspaceId) metaBits.push(`${text.group} ${topic.workspaceLabel || topic.workspaceId}`);
     if (topic.parentTopicId && topic.forkedFromMessageIndex != null) metaBits.push(`${text.forkedFrom} #${topic.forkedFromMessageIndex + 1}`);
     if (topic.score != null) metaBits.push(`${text.relevance} ${Math.round(topic.score)}`);
@@ -182,13 +188,42 @@ export function buildTopicItem(
         main.appendChild(summary);
     }
 
+    const actionMenu = document.createElement('details');
+    actionMenu.className = 'topic-action-menu';
+    const actionToggle = document.createElement('summary');
+    actionToggle.textContent = '⋯';
+    actionToggle.title = text.moreActions;
+    actionToggle.setAttribute('aria-label', `${text.moreActions}: ${topic.title}`);
+    actionMenu.appendChild(actionToggle);
+    actionMenu.addEventListener('click', event => event.stopPropagation());
+    actionMenu.addEventListener('keydown', event => {
+        if (event.key === 'Escape') {
+            actionMenu.open = false;
+            actionToggle.focus();
+        }
+    });
     const actions = document.createElement('div');
     actions.className = 'topic-actions';
     appendTopicActions(actions, topic, mode, title, callbacks);
+    actions.querySelectorAll('button').forEach(button => {
+        const label = document.createElement('span');
+        label.textContent = button.title;
+        button.appendChild(label);
+        button.addEventListener('click', () => { actionMenu.open = false; });
+    });
+    actionMenu.appendChild(actions);
 
     item.appendChild(main);
-    item.appendChild(actions);
+    item.appendChild(actionMenu);
     item.addEventListener('click', () => callbacks.postMessage({ type: 'loadTopic', topicId: topic.id }));
+    main.tabIndex = 0;
+    main.setAttribute('role', 'button');
+    main.addEventListener('keydown', event => {
+        if ((event.key === 'Enter' || event.key === ' ') && event.target === main) {
+            event.preventDefault();
+            callbacks.postMessage({ type: 'loadTopic', topicId: topic.id });
+        }
+    });
     return item;
 }
 
@@ -293,7 +328,7 @@ function appendTopicActions(
     const text = topicUi();
     const pinBtn = document.createElement('button');
     pinBtn.className = 'topic-action-btn topic-pin-btn';
-    pinBtn.textContent = topic.pinned ? '📌' : '📍';
+    pinBtn.innerHTML = svgIconNoMargin('bookmark');
     pinBtn.title = topic.pinned ? text.unpin : text.pin;
     pinBtn.addEventListener('click', event => {
         event.stopPropagation();
@@ -320,7 +355,7 @@ function appendTopicActions(
 
     const archiveBtn = document.createElement('button');
     archiveBtn.className = 'topic-action-btn topic-archive-btn';
-    archiveBtn.innerHTML = topic.archived ? `${svgIconNoMargin('refresh')} ${text.restore}` : svgIconNoMargin('bookmark');
+    archiveBtn.innerHTML = svgIconNoMargin(topic.archived ? 'refresh' : 'bookmark');
     archiveBtn.title = topic.archived ? text.unarchive : text.archived;
     archiveBtn.addEventListener('click', event => {
         event.stopPropagation();

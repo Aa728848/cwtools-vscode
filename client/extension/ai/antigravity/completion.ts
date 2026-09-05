@@ -12,14 +12,6 @@ export interface AntigravityCallbacks {
     onToolCallDelta?: (name: string, args: string, metadata?: { id?: string; index?: number }) => void;
 }
 
-function stripSchemaMetadata(value: unknown): unknown {
-    if (Array.isArray(value)) return value.map(stripSchemaMetadata);
-    if (!isRecord(value)) return value;
-    return Object.fromEntries(Object.entries(value)
-        .filter(([key]) => !['$schema', '$id', '$anchor', '$dynamicAnchor', '$vocabulary', '$comment'].includes(key))
-        .map(([key, entry]) => [key, stripSchemaMetadata(entry)]));
-}
-
 export function buildAntigravityRequest(
     request: ChatCompletionRequest, geminiPayload: Record<string, unknown>,
     projectId: string, effort: ReasoningEffort,
@@ -52,7 +44,6 @@ export function buildAntigravityRequest(
         request: {
             ...geminiPayload,
             systemInstruction: { ...instruction, role: 'user', parts: instruction.parts ?? [{ text: 'You are a coding assistant.' }] },
-            ...(geminiPayload.tools ? { tools: stripSchemaMetadata(geminiPayload.tools) } : {}),
             ...(request.tools?.length ? { toolConfig: { functionCallingConfig: {
                 mode: request.tool_choice === 'none' ? 'NONE' : typeof request.tool_choice === 'object' ? 'ANY' : 'AUTO',
                 ...(typeof request.tool_choice === 'object' ? { allowedFunctionNames: [request.tool_choice.function.name] } : {}),

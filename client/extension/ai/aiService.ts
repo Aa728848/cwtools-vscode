@@ -2129,7 +2129,8 @@ export class AIService {
                 functionDeclarations: request.tools.map(t => ({
                     name: t.function.name,
                     description: t.function.description,
-                    parameters: t.function.parameters,
+                    // Code Assist's JSON Schema field preserves constraints such as propertyNames without typed-Schema parsing.
+                    [antigravity ? 'parametersJsonSchema' : 'parameters']: t.function.parameters,
                 })),
             }];
             payload.toolConfig = {

@@ -3,6 +3,9 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { Dispatcher } from 'undici';
+import { isRecord } from '../../shared/protocolValidation';
+import { DESIGN_BLUEPRINT_DISCLOSED_TOOL, TOOL_DEFINITIONS } from '../../extension/ai/tools/definitions';
+import type { ToolDefinition } from '../../extension/ai/types';
 
 const ONE_PIXEL_PNG_BASE64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=';
 
@@ -1807,6 +1810,75 @@ describe('AIService streaming reasoning detection', () => {
 });
 
 describe('AIService Antigravity integration', () => {
+    for (const model of ['gemini-3.8-flash-tiered', 'claude-opus-4-6']) it(`sends complete JSON tool schemas through Antigravity for ${model}`, async () => {
+        const originalFetch = globalThis.fetch;
+        const subscriptions: Array<{ dispose(): void }> = [];
+        const externalTool: ToolDefinition = { type: 'function', function: {
+            name: 'external_schema_tool', description: 'Inspect structured values', parameters: {
+                $schema: 'https://json-schema.org/draft/2020-12/schema',
+                $id: 'https://example.test/tool.schema.json',
+                $defs: { value: { oneOf: [{ const: 'default' }, { type: 'integer', minimum: 0 }] } },
+                type: 'object',
+                properties: {
+                    propertyNames: { type: 'string' },
+                    $id: { type: 'string' },
+                    values: { type: 'object', propertyNames: { pattern: '^[a-z]+$' }, additionalProperties: { $ref: '#/$defs/value' } },
+                    entries: { type: 'array', items: { $ref: '#/$defs/value' } },
+                    settings: { type: 'object', default: { $id: 'literal-data', propertyNames: 'literal-data' } },
+                },
+                required: ['values'], additionalProperties: false,
+            },
+        } };
+        const tools = [...TOOL_DEFINITIONS, externalTool];
+        const before = JSON.stringify(tools);
+        let expectedTools = tools;
+        let requests = 0;
+        globalThis.fetch = async (input, init) => {
+            if (String(input).includes('loadCodeAssist')) return new Response(JSON.stringify({ cloudaicompanionProject: 'p' }));
+            const body: unknown = JSON.parse(String(init?.body));
+            if (!isRecord(body) || !isRecord(body.request) || !Array.isArray(body.request.tools)) throw new Error('Missing request tools');
+            const group: unknown = body.request.tools[0];
+            if (!isRecord(group) || !Array.isArray(group.functionDeclarations)) throw new Error('Missing function declarations');
+            requests++;
+            for (const declaration of group.functionDeclarations) {
+                if (!isRecord(declaration)) throw new Error('Invalid function declaration');
+                // The typed parameters field rejects JSON Schema keywords before generation starts.
+                if ('parameters' in declaration) return new Response(JSON.stringify({ error: {
+                    message: 'Invalid JSON payload received. Unknown name "propertyNames" at request.tools[0].function_declarations.parameters: Cannot find field.',
+                } }), { status: 400 });
+            }
+            expect(group.functionDeclarations).to.deep.equal(expectedTools.map(tool => ({
+                name: tool.function.name,
+                description: tool.function.description,
+                parametersJsonSchema: tool.function.parameters,
+            })));
+            return geminiSseResponse([{ response: { candidates: [{ content: { parts: [{ text: 'ok' }] }, finishReason: 'STOP' }] } }]);
+        };
+        try {
+            const { AIService } = loadAIService();
+            const context: Pick<import('vscode').ExtensionContext, 'secrets' | 'subscriptions'> = {
+                secrets: {
+                    get: async (key: string) => key === 'cwtools.ai.antigravity.oauth.v1' ? JSON.stringify({
+                        accessToken: 'test-access', refreshToken: 'test-refresh', expiresAt: Date.now() + 3600_000,
+                    }) : undefined,
+                    store: async () => {}, delete: async () => {}, onDidChange: () => ({ dispose() {} }),
+                }, subscriptions,
+            };
+            const service = new AIService(context as import('vscode').ExtensionContext);
+            const options = { providerId: 'antigravity', model, tools };
+            const response = await service.chatCompletion([{ role: 'user', content: 'Inspect the mod' }], options);
+            expect(response.choices[0]?.message.content).to.equal('ok');
+            expectedTools = [DESIGN_BLUEPRINT_DISCLOSED_TOOL];
+            const disclosed = await service.chatCompletion([{ role: 'user', content: 'Inspect the blueprint' }], { ...options, tools: expectedTools });
+            expect(disclosed.choices[0]?.message.content).to.equal('ok');
+            expect(requests).to.equal(2);
+            expect(JSON.stringify(tools)).to.equal(before);
+        } finally {
+            subscriptions.forEach(subscription => subscription.dispose());
+            globalThis.fetch = originalFetch;
+        }
+    });
+
     for (const nativeIds of [true, false]) it(`continues Gemini 3.8 parallel tools ${nativeIds ? 'with native IDs' : 'without upstream IDs'}`, async () => {
         const originalFetch = globalThis.fetch;
         const requests: Array<Record<string, unknown>> = [];

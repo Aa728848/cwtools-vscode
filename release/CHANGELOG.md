@@ -1,5 +1,23 @@
 # Changelog
 
+## [2.16.9] - 2026-09-05
+
+### AI 提供商与模型扩展 / AI Providers & Model Capabilities
+- **[特性] 新增 GPT-6 Astra 提供商支持与多模型思考参数优化（GPT-6 Astra Provider Support & Reasoning Controls）**：
+  - **支持 GPT-6 Astra 模型**：在 OpenAI API 与 ChatGPT Codex 订阅模型目录中新增 `gpt-6-astra` 模型，允许在模型选择器与提供商配置中自由切换。
+  - **完备能力与上下文注册**：注册多模态图像输入能力、1,050,000 Token API 上下文窗口（Codex 订阅继承 272,000 上限）以及 128,000 Token 输出上限。
+  - **灵活的推理努力级别**：支持从 `low` 到 `max` 级别的原生推理控制；降级模式自动采用 `low` 并省略 sampling temperature，确保与官方推理模型调用协议完全对齐。
+  - **定价与计费换算支持**：补充标准 API 价格（$10 输入 / $50 输出每百万 Token，按 6.82 汇率折算）及 10% 缓存输入比率。
+  - English: [Feature] GPT-6 Astra provider support & reasoning controls — added `gpt-6-astra` to both OpenAI API and ChatGPT Codex catalogs; registered multimodal image inputs, 1,050,000-token API context window (Codex subscription inherits 272,000-token limit), 128,000-token output capacity, and native reasoning effort levels ranging from `low` to `max`; aligned reduced-thinking fallbacks to `low` while omitting temperature; added standard token pricing and cache ratio mappings; verified through full unit test suites.
+
+### 语言服务器与序列化稳定性 / Language Server & Serialization Resilience
+- **[修复] 递归 LSP 响应序列化与内联模板符号范围收敛（Recursive LSP Response Serialization & Inline Symbol Scope Containment）**：
+  - **根除内联模板大纲深度膨胀**：修复重度复用内联模板（Inline Template）展开时因范围相同导致的大纲（Document Symbols）递归嵌套深度持续膨胀问题，消除了前端解析坐标异常引起的 `asRange / Invalid arguments` 崩溃。
+  - **工厂级延迟序列化写入器缓存**：在 `Ser.fs` 中为每类递归类型（Record、List、Option）在工厂内建立类型级 Writer 缓存，确保深层嵌套递归类型能复用完整初始化的序列化器，杜绝因未完成展开而回退填充 null 损坏必需字段。
+  - **运行期遍历深度保护**：在序列化层引入运行时遍历深度安全阈值，超限时触发可恢复异常由请求层捕获并返回内部错误，防止破坏语言服务器主进程可用性。
+  - **符号索引严格父子区间收敛**：在 `SymbolIndex.fs` 中自动去除完全重叠的相同符号，并严格要求区间真包含作为父子级联关系，同范围不同符号保持兄弟关系。
+  - English: [Fix] Recursive LSP response serialization & inline symbol scope containment — resolved artificial outline depth explosion on heavily reused inline templates that caused client-side `asRange / Invalid arguments` failures; introduced per-factory deferred writer caching in `Ser.fs` for recursive record, list, and option types, preventing deeper required fields from degrading to null; implemented runtime traversal depth guard to safeguard server availability with recoverable internal errors; enforced strict range containment and deduplication in `SymbolIndex.fs`.
+
 ## [2.16.8] - 2026-09-04
 
 ### 服务端内存治理与 GC 架构优化 / Language Server Memory Governance & GC Architecture

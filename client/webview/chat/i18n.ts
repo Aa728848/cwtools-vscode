@@ -18,6 +18,9 @@ export interface ChatI18nText {
         waitingForChoice: string;
     };
     settings: {
+        saved: string;
+        unsaved: string;
+        saveRequested: string;
         unselectedProvider: string;
         unsetModel: string;
         defaultEndpoint: string;
@@ -239,6 +242,9 @@ const EN: ChatI18nText = {
         waitingForChoice: 'Waiting for your choice...',
     },
     settings: {
+        saved: 'Saved',
+        unsaved: 'Unsaved changes',
+        saveRequested: 'Saving…',
         unselectedProvider: 'No provider selected',
         unsetModel: 'No model configured',
         defaultEndpoint: 'Default endpoint',
@@ -484,6 +490,9 @@ const ZH_CN: ChatI18nText = {
         waitingForChoice: '等待你的选择...',
     },
     settings: {
+        saved: '已保存',
+        unsaved: '未保存',
+        saveRequested: '正在保存…',
         unselectedProvider: '未选择 Provider',
         unsetModel: '未设置模型',
         defaultEndpoint: '默认端点',

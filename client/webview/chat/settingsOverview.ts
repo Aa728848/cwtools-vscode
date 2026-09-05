@@ -47,13 +47,17 @@ function findModelContextTokens(
     return 0;
 }
 
-/** Resolve settings context with provider-scoped metadata taking precedence. */
+/** Preserve a configured limit; otherwise resolve provider-scoped model metadata. */
 export function resolveSettingsModelContextTokens(
     model: string,
     providerId: string,
     modelContextTokens: Readonly<Record<string, number>>,
     providerFallback = 0,
+    configuredTokens?: unknown,
 ): number {
+    if (typeof configuredTokens === 'number' && Number.isFinite(configuredTokens) && configuredTokens >= 0) {
+        return configuredTokens;
+    }
     if (!model) return 0;
     const providerPrefix = `${providerId}:`;
     const entries = Object.entries(modelContextTokens);

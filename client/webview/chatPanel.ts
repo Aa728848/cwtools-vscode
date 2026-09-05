@@ -323,6 +323,13 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
     const emptyState = document.getElementById('emptyState') as HTMLDivElement;
     const topicsPanel = document.getElementById('topicsPanel') as HTMLDivElement;
     const settingsPage = document.getElementById('settingsPage') as HTMLDivElement;
+    const settingsTabs = Array.from(settingsPage.querySelectorAll<HTMLButtonElement>('[data-settings-tab]'));
+    const settingsBody = settingsPage.querySelector<HTMLElement>('.settings-body');
+    let activeSettingsTab = 'models';
+    const settingsTabScroll: Record<string, number> = {};
+    let settingsFormBaseline: string | null = null;
+    let settingsSavePending = false;
+    let settingsModelInputTimer: ReturnType<typeof setTimeout> | undefined;
     const chatHeader = document.querySelector('.header') as HTMLElement;
     const inputWrapper = document.querySelector('.input-wrapper') as HTMLElement;
     const todoPanel = document.getElementById('todoPanel') as HTMLDivElement;
@@ -2940,6 +2947,11 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
     bindBtn('sideWorkspaceClose', closeSideWorkspace);
     bindBtn('testConnBtn', testConnection);
     bindBtn('saveSettingsBtn', saveSettings);
+    bindBtn('resetSettingsBtn', () => {
+        if (!cachedSettingsData) return;
+        lastSettingsPageSignature = '';
+        showSettingsPage(cachedSettingsData.providers, cachedSettingsData.current, cachedSettingsData.ollamaModels);
+    });
     bindBtn('keyToggleBtn', () => { const k = document.getElementById('settingsApiKey') as HTMLInputElement | null; if (k) k.type = k.type === 'password' ? 'text' : 'password'; });
     bindBtn('fetchApiModelsBtn', () => { fetchApiModels(); });
     bindBtn('deleteApiKeyBtn', () => { deleteApiKey(); });
@@ -2984,6 +2996,9 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
     bindBtn('accInline', () => toggleAccordion('inlineSection'));
     bindBtn('accMcp', () => toggleAccordion('mcpSection'));
     bindBtn('accAgent', () => toggleAccordion('agentSection'));
+    bindBtn('accAgentProfiles', () => toggleAccordion('agentProfilesSection'));
+    bindBtn('accWeb', () => toggleAccordion('webSection'));
+    bindBtn('accSkills', () => toggleAccordion('skillsSection'));
     bindBtn('addMcpServerBtn', () => addMcpServerBlock());
     bindBtn('accUsage', () => { toggleAccordion('usageSection'); vscode.postMessage({ type: 'requestUsageStats' }); });
     bindBtn('refreshUsageBtn', () => vscode.postMessage({ type: 'requestUsageStats' }));
@@ -2992,7 +3007,33 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
     });
 
     if (settingsPage) {
-        settingsPage.addEventListener('input', () => { if (settingsPage.classList.contains('active')) refreshSettingsOverview(); });
+        settingsTabs.forEach(tab => {
+            tab.addEventListener('click', () => selectSettingsTab(tab));
+            tab.addEventListener('keydown', event => {
+                const index = settingsTabs.indexOf(tab);
+                const nextIndex = event.key === 'Home' ? 0
+                    : event.key === 'End' ? settingsTabs.length - 1
+                    : event.key === 'ArrowRight' ? (index + 1) % settingsTabs.length
+                    : event.key === 'ArrowLeft' ? (index + settingsTabs.length - 1) % settingsTabs.length
+                    : -1;
+                const next = settingsTabs[nextIndex];
+                if (!next) return;
+                event.preventDefault();
+                selectSettingsTab(next);
+                next.focus();
+            });
+        });
+        settingsPage.addEventListener('click', event => {
+            if (!(event.target instanceof Element)) return;
+            const toggle = event.target.closest<HTMLButtonElement>('[data-settings-key-toggle]');
+            const input = toggle?.dataset.settingsKeyToggle ? document.getElementById(toggle.dataset.settingsKeyToggle) : null;
+            if (input instanceof HTMLInputElement) input.type = input.type === 'password' ? 'text' : 'password';
+        });
+        settingsPage.addEventListener('input', () => {
+            if (settingsPage.classList.contains('active')) refreshSettingsOverview();
+            settingsSavePending = false;
+            refreshSettingsDraftStatus();
+        });
         settingsPage.addEventListener('change', event => {
             const targetId = (event.target as HTMLElement | null)?.id;
             if (targetId === 'settingsReasoningEffort') {
@@ -3008,7 +3049,44 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                 updateQuickWriteModeSelector(base === 'auto' && autoReviewEl?.checked ? 'auto_review' : base);
             }
             if (settingsPage.classList.contains('active')) refreshSettingsOverview();
+            settingsSavePending = false;
+            refreshSettingsDraftStatus();
         });
+    }
+
+    function selectSettingsTab(tab: HTMLButtonElement): void {
+        const category = tab.dataset.settingsTab;
+        if (!category) return;
+        if (settingsBody) settingsTabScroll[activeSettingsTab] = settingsBody.scrollTop;
+        activeSettingsTab = category;
+        settingsTabs.forEach(button => {
+            const selected = button === tab;
+            button.setAttribute('aria-selected', String(selected));
+            button.tabIndex = selected ? 0 : -1;
+        });
+        settingsPage.querySelectorAll<HTMLElement>('[data-settings-panel]').forEach(panel => {
+            panel.hidden = panel.dataset.settingsPanel !== category;
+        });
+        const testButton = document.getElementById('testConnBtn');
+        if (testButton) testButton.hidden = category !== 'models';
+        if (settingsBody) settingsBody.scrollTop = settingsTabScroll[category] ?? 0;
+        if (category === 'usage') vscode.postMessage({ type: 'requestUsageStats' });
+    }
+
+    function settingsFormSignature(): string {
+        return JSON.stringify(Array.from(settingsPage.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>('input, select, textarea'))
+            .filter(field => field.id !== 'skillSourceInput' && !field.closest('#subscriptionProxyGroup'))
+            .map(field => [field.id || field.className, field instanceof HTMLInputElement && field.type === 'checkbox' ? field.checked : field.value]));
+    }
+
+    function refreshSettingsDraftStatus(): void {
+        if (settingsFormBaseline === null) return;
+        const dirty = settingsFormSignature() !== settingsFormBaseline;
+        const status = document.getElementById('settingsSaveStatus');
+        const actions = document.getElementById('settingsSaveActions');
+        if (actions) actions.hidden = !dirty;
+        if (status) status.textContent = settingsSavePending ? chatI18n.settings.saveRequested
+            : dirty ? chatI18n.settings.unsaved : chatI18n.settings.saved;
     }
 
     // ── Topic search (debounced 300ms) ─────────────────────────────────────────
@@ -6959,19 +7037,18 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                 };
 
                 // ── Summary ──
-                html += `<div style="margin-bottom: 10px; font-weight: 600; font-size: 13px;">
-                    ${tr('Total tokens', '总计消耗')}: <span style="color:var(--accent);">${stats.totalTokens.toLocaleString()}</span> tokens<br>
-                    ${tr('Estimated cost', '预估成本')}: <span style="color:#4caf50;">¥${typeof stats.totalCostCny === 'number' ? stats.totalCostCny.toFixed(2) : '0.00'}</span><br>
-                    ${cache ? `${tr('Cache requests', '缓存请求')}: <span style="color:var(--vscode-charts-green, #388a34);">${Number(cache.requestHitRate || 0).toFixed(1)}%</span><br>` : ''}
-                    <span style="font-size:11px; opacity:0.6;">${tr(`${stats.totalCalls ?? 0} call(s)`, `共 ${stats.totalCalls ?? 0} 次调用`)}</span>
-                </div>`;
+                html += `<div class="settings-usage-summary">
+                    <div><span>${tr('Total tokens', '消耗 tokens')}</span><strong title="${escapeHtml(stats.totalTokens.toLocaleString())}">${new Intl.NumberFormat(chatI18n.locale, { notation: 'compact', maximumFractionDigits: 0 }).format(stats.totalTokens)}</strong></div>
+                    <div><span>${tr('Estimated cost', '估算费用')}</span><strong>¥${typeof stats.totalCostCny === 'number' ? stats.totalCostCny.toFixed(2) : '0.00'}</strong></div>
+                    ${cache ? `<div><span>${tr('Request hit rate', '请求命中率')}</span><strong>${Number(cache.requestHitRate || 0).toFixed(1)}%</strong></div>` : ''}
+                </div><div class="settings-hint settings-usage-calls">${tr(`${stats.totalCalls ?? 0} call(s)`, `共 ${stats.totalCalls ?? 0} 次调用`)}</div>`;
 
                 if (cache) {
-                    html += '<section class="usage-cache-panel">';
-                    html += `<div class="usage-cache-heading">
+                    html += '<details class="usage-cache-panel">';
+                    html += `<summary class="usage-cache-heading">
                         <span>${tr('Cache request breakdown', '缓存请求分组')}</span>
                         <small>${tr('Request-level hit rate', '按请求统计命中率')}</small>
-                    </div>`;
+                    </summary>`;
                     html += `<div class="usage-cache-overview">
                         <div class="usage-cache-metric"><span>${tr('Cache requests', '缓存请求')}</span><strong>${Number(cache.requestHitRate || 0).toFixed(1)}%</strong></div>
                         <div class="usage-cache-metric"><span>${tr('cached input tokens', '缓存输入 token')}</span><strong>${Number(cache.cachedInputTokenRatio || 0).toFixed(1)}%</strong></div>
@@ -6999,7 +7076,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                             <div>${invalidations.map(([reason, count]) => `<span title="${escapeHtml(reason)}">${escapeHtml(reason.replace(/_/g, ' '))}<strong>${Number(count)}</strong></span>`).join('')}</div>
                         </div>`;
                     }
-                    html += '</section>';
+                    html += '</details>';
                 }
 
                 // ── Provider breakdown ──
@@ -7724,6 +7801,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
             return;
         }
         lastSettingsPageSignature = settingsPageSignature;
+        settingsFormBaseline = null;
         const sel = document.getElementById('settingsProvider') as HTMLSelectElement;
         sel.innerHTML = providers.map((p: any) => '<option value="' + p.id + '"' + (p.id === current.provider ? ' selected' : '') + '>' + escapeHtml(p.name) + '</option>').join('');
         const inlineSel = document.getElementById('inlineProvider') as HTMLSelectElement;
@@ -7746,9 +7824,9 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         if (customFormatSel) customFormatSel.value = current.customApiFormat || 'openai-chat-completions';
         const reasoningKeyInput = document.getElementById('settingsReasoningKey') as HTMLInputElement | null;
         if (reasoningKeyInput) reasoningKeyInput.value = current.reasoningKey || '';
-        // Auto-fill context size: prefer per-model lookup, then user-saved value
-        const initCtx = autoFillContextForModel(current.model, current.provider) || current.maxContextTokens || 0;
-        (document.getElementById('settingsCtx') as HTMLInputElement).value = initCtx;
+        // Reopening settings must preserve an explicitly saved context limit, including 0.
+        const initCtx = autoFillContextForModel(current.model, current.provider, current.maxContextTokens);
+        (document.getElementById('settingsCtx') as HTMLInputElement).value = String(initCtx);
         (document.getElementById('settingsReasoningEffort') as HTMLSelectElement).dataset.requested =
             current.reasoningEffort || 'high';
         const responseVerbositySelect = document.getElementById('settingsResponseVerbosity') as HTMLSelectElement | null;
@@ -7966,16 +8044,20 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         const _tr = document.getElementById('testResult');
         if (_tr) { _tr.className = 'test-result'; _tr.textContent = ''; }
         refreshSettingsOverview();
+        settingsSavePending = false;
+        settingsFormBaseline = settingsFormSignature();
+        refreshSettingsDraftStatus();
     }
 
     /** Look up per-model context size with fallback to provider level */
-    function autoFillContextForModel(model: string, providerId: string) {
+    function autoFillContextForModel(model: string, providerId: string, configuredTokens?: unknown) {
         const provider = settingsProviders.find(p => p.id === providerId);
         return resolveSettingsModelContextTokens(
             model,
             providerId,
             settingsModelContextTokens,
             provider?.maxContextTokens || 0,
+            configuredTokens,
         );
     }
 
@@ -8157,11 +8239,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         updateModelUI(id, '', settingsOllamaModels);
         updateEndpointHint(id);
         updateApiKeyStatus(id, settingsProviders);
-        // Auto-fill context with provider default when user switches provider
         const provider = settingsProviders.find(p => p.id === id);
-        if (provider && provider.maxContextTokens > 0) {
-            (document.getElementById('settingsCtx') as HTMLInputElement).value = provider.maxContextTokens;
-        }
         const inlineSel = document.getElementById('inlineProvider') as HTMLSelectElement | null;
         if (inlineSel) {
             const selected = inlineSel.value;
@@ -8190,15 +8268,20 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
     }
 
     function updateModelUI(providerId: string, currentModel: string, ollamaModels: any[] | null) {
+        clearTimeout(settingsModelInputTimer);
         const provider = settingsProviders.find((p: any) => p.id === providerId);
         const modelInput = document.getElementById('settingsModelInput') as HTMLInputElement;
         const detectBtn = document.getElementById('detectBtn') as HTMLButtonElement;
         const modelHint = document.getElementById('modelHint')!;
 
-        /** Auto-fill settingsCtx when a model is chosen */
+        let contextModel = currentModel;
+        /** Auto-fill only for a changed model; refreshes retain manual context limits. */
         function onModelSelected(model: string) {
-            const ctx = autoFillContextForModel(model, providerId);
-            if (ctx > 0) (document.getElementById('settingsCtx') as HTMLInputElement).value = String(ctx);
+            clearTimeout(settingsModelInputTimer);
+            if (model !== contextModel) {
+                (document.getElementById('settingsCtx') as HTMLInputElement).value = String(autoFillContextForModel(model, providerId));
+                contextModel = model;
+            }
             const reasoningSelect = document.getElementById('settingsReasoningEffort') as HTMLSelectElement | null;
             updateSettingsReasoningControls(
                 providerId,
@@ -8206,6 +8289,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                 reasoningSelect?.dataset.requested || reasoningSelect?.value
             );
             refreshSettingsOverview();
+            refreshSettingsDraftStatus();
         }
 
         let currentDropdownOpts: string[] = [];
@@ -8234,13 +8318,13 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         modelInput.value = currentModel || provider?.defaultModel || currentDropdownOpts[0] || '';
 
         // Bind auto-fill to model input changes
-        let _modelInputTimer: ReturnType<typeof setTimeout> | undefined;
         modelInput.oninput = () => {
-            clearTimeout(_modelInputTimer);
-            _modelInputTimer = setTimeout(() => onModelSelected(modelInput.value.trim()), 400);
+            clearTimeout(settingsModelInputTimer);
+            settingsModelInputTimer = setTimeout(() => onModelSelected(modelInput.value.trim()), 400);
             const evt = new Event('input_ap');
             modelInput.dispatchEvent(evt); // trigger dropdown render
         };
+        modelInput.onchange = () => onModelSelected(modelInput.value.trim());
         // Auto-fill immediately for current selection
         if (modelInput.value) onModelSelected(modelInput.value);
 
@@ -8277,7 +8361,6 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         if (providerId && epField) settingsProviderEndpoints[providerId] = epField.value;
         if (providerId === 'ollama') {
             settingsOllamaModels = [];
-            document.getElementById('settingsModelSelect')!.style.display = 'none';
             document.getElementById('settingsModelInput')!.style.display = '';
             document.getElementById('modelHint')!.textContent = tr('Endpoint changed. Click "Detect" to fetch models again.', '端点已更改，点击「检测」重新获取模型');
         }
@@ -8369,12 +8452,11 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         div.querySelector('.mcp-delete-btn')!.addEventListener('click', () => {
             div.remove();
             refreshSettingsOverview();
+            refreshSettingsDraftStatus();
         });
         refreshSettingsOverview();
+        refreshSettingsDraftStatus();
     }
-
-    document.getElementById('detectBtn')!.addEventListener('click', detectOllamaModels);
-    document.getElementById('fetchApiModelsBtn')!.addEventListener('click', fetchApiModels);
 
     function deleteApiKey() {
         const providerId = (document.getElementById('settingsProvider') as HTMLSelectElement).value;
@@ -8414,19 +8496,18 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         return Number.isFinite(parsed) ? parsed : fallback;
     }
 
-    function toggleAccordion(id: string) { document.getElementById(id)!.classList.toggle('open'); }
+    function toggleAccordion(id: string) {
+        const section = document.getElementById(id);
+        if (!section) return;
+        const expanded = section.classList.toggle('open');
+        section.querySelector('.accordion-header')?.setAttribute('aria-expanded', String(expanded));
+    }
 
     function saveSettings() {
-        const btn = document.getElementById('saveSettingsBtn') as HTMLButtonElement | null;
-        if (btn) {
-            const originalText = btn.textContent;
-            btn.textContent = tr('✔ Saved', '✔ 已保存');
-            btn.style.backgroundColor = '#28a745';
-            setTimeout(() => {
-                btn.textContent = originalText;
-                btn.style.backgroundColor = '';
-            }, 1500);
-        }
+        clearTimeout(settingsModelInputTimer);
+        settingsSavePending = true;
+        lastSettingsPageSignature = '';
+        refreshSettingsDraftStatus();
 
         // Build flat MCPServerConfig objects (matching backend types.ts interface)
         const mcpServers = Array.from(document.querySelectorAll('.mcp-server-block')).map(block => {

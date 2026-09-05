@@ -232,30 +232,31 @@ ${stylesheetLinks}
 <!-- Settings Page -->
 <div class="settings-page" id="settingsPage">
     <div class="settings-header">
-        <button class="settings-back-btn" id="settingsBackBtn">←</button>
+        <button class="settings-back-btn" id="settingsBackBtn" type="button" aria-label="${t('Back to chat', '返回对话')}">←</button>
         <div class="settings-header-text">
-            <span class="settings-title">${svgIcon('gear')} ${t('AI Settings', 'AI 设置')}</span>
-            <span class="settings-header-subtitle" id="settingsHeaderSubtitle">${t('View main model, context, API, and MCP status', '查看主模型、上下文、API 和 MCP 状态')}</span>
+            <span class="settings-title">${t('AI Settings', 'AI 设置')}</span>
+            <span class="settings-header-subtitle" id="settingsHeaderSubtitle">${t('Models, context, accounts and tools', '模型、上下文、账户与工具')}</span>
         </div>
+        <span class="settings-save-status" id="settingsSaveStatus" role="status" aria-live="polite"></span>
     </div>
-    <div class="settings-overview" id="settingsOverview">
-        <div class="settings-overview-main">
-            <div class="settings-overview-title" id="settingsOverviewTitle">—</div>
-            <div class="settings-overview-subtitle" id="settingsOverviewSubtitle">—</div>
-        </div>
-        <div class="settings-overview-chips" id="settingsOverviewChips"></div>
+    <div class="settings-tabs" role="tablist" aria-label="${t('Settings categories', '设置分类')}">
+        <button type="button" class="settings-tab" id="settingsTab-models" role="tab" aria-controls="settingsPanel-models" aria-selected="true" tabindex="0" data-settings-tab="models">${svgIconNoMargin('bot')}<span>${t('Models', '模型')}</span></button>
+        <button type="button" class="settings-tab" id="settingsTab-agent" role="tab" aria-controls="settingsPanel-agent" aria-selected="false" tabindex="-1" data-settings-tab="agent">${svgIconNoMargin('shield')}<span>${t('Agent', 'Agent')}</span></button>
+        <button type="button" class="settings-tab" id="settingsTab-tools" role="tab" aria-controls="settingsPanel-tools" aria-selected="false" tabindex="-1" data-settings-tab="tools">${svgIconNoMargin('plugin')}<span>${t('Tools', '工具')}</span></button>
+        <button type="button" class="settings-tab" id="settingsTab-usage" role="tab" aria-controls="settingsPanel-usage" aria-selected="false" tabindex="-1" data-settings-tab="usage">${svgIconNoMargin('chart')}<span>${t('Usage', '用量')}</span></button>
     </div>
     <div class="settings-body">
+        <div class="settings-tab-panel" id="settingsPanel-models" role="tabpanel" aria-labelledby="settingsTab-models" data-settings-panel="models">
         <div class="accordion-section open" id="chatModelSection">
-            <div class="accordion-header" id="accChat"><span>${svgIcon('bot')} ${t('Chat model', '对话模型')}</span><span class="accordion-arrow">▶</span></div>
+            <button type="button" class="accordion-header" id="accChat" aria-expanded="true"><span>${svgIcon('bot')} ${t('Chat model', '对话模型')}</span><span class="accordion-arrow" aria-hidden="true">▶</span></button>
             <div class="accordion-body">
                 <div class="settings-group">
-                    <label class="settings-label">Provider</label>
+                    <label class="settings-label">${t('Provider', '提供商')}</label>
                     <select class="settings-select" id="settingsProvider"></select>
                     <div class="settings-hint" id="providerHint" style="margin-top: 4px;"></div>
                 </div>
                 <div class="settings-group" id="customApiFormatGroup" style="display:none">
-                    <label class="settings-label">Custom API Format</label>
+                    <label class="settings-label">${t('Custom API format', '自定义 API 格式')}</label>
                     <select class="settings-select" id="customApiFormat">
                         <option value="openai-chat-completions">OpenAI Chat Completions</option>
                         <option value="openai-responses">OpenAI Responses API</option>
@@ -264,13 +265,8 @@ ${stylesheetLinks}
                     </select>
                     <div class="settings-hint" id="customApiFormatHint"></div>
                 </div>
-                <div class="settings-group" id="reasoningKeyGroup">
-                    <label class="settings-label">Reasoning field name</label>
-                    <input class="settings-input" id="settingsReasoningKey" type="text" placeholder="${t('Auto-detect (default)', '自动探测（默认）')}" autocomplete="off" />
-                    <div class="settings-hint" id="reasoningKeyHint">${t('Empty = auto-detect. Set only when the gateway returns thinking content under a non-standard field name.', '留空自动探测；仅当网关用非标准字段名返回思考内容时填写。')}</div>
-                </div>
                 <div class="settings-group">
-                    <label class="settings-label">Model</label>
+                    <label class="settings-label">${t('Model', '模型')}</label>
                     <div class="model-row" style="position:relative">
                         <input class="settings-input" id="settingsModelInput" type="text" placeholder="${t('Enter a model name, or use the dropdown on the right', '输入模型名，或点右侧下拉框搜索')}" autocomplete="off" />
                         <div id="settingsModelDatalist" class="ap-dropdown"></div>
@@ -279,59 +275,10 @@ ${stylesheetLinks}
                     </div>
                     <div class="settings-hint" id="modelHint"></div>
                 </div>
-                <div class="settings-group" id="apiKeyGroup">
-                    <label class="settings-label">${svgIcon('key')} API Key</label>
-                    <div class="settings-hint" id="apiKeyStatus" style="color:#4caf50;margin-bottom:3px;"></div>
-                    <div class="settings-key-row">
-                        <input class="settings-input" id="settingsApiKey" type="password" placeholder="${t('Enter a new key (leave empty to keep existing)', '输入新 Key（留空保留已有）')}" autocomplete="off" />
-                        <button class="key-toggle-btn" id="keyToggleBtn">${svgIconNoMargin('eye')}</button>
-                        <button class="detect-btn" id="fetchApiModelsBtn" style="margin-left:4px; padding:0 8px; width:auto; border-radius:4px" title="${t('Use this key to fetch models from the endpoint', '用此 Key 去对应端点拉取模型')}">${svgIcon('cloud')}${t('Fetch models', '获取模型')}</button>
-                        <button class="detect-btn" id="deleteApiKeyBtn" style="margin-left:4px; padding:0 8px; width:auto; border-radius:4px" title="${t('Remove the saved API key for the current provider', '移除当前 Provider 已保存的 API Key')}">${svgIcon('trash')}${t('Remove key', '移除 Key')}</button>
-                    </div>
-                </div>
-                <div class="settings-group" id="codexAccountGroup" style="display:none">
-                    <label class="settings-label">${svgIcon('key')} ${t('ChatGPT OAuth account', 'ChatGPT OAuth 账户')}</label>
-                    <div class="settings-hint" id="codexAccountStatus"></div>
-                    <div class="settings-key-row" style="margin-top:6px">
-                        <button class="detect-btn" id="codexLoginBtn" style="padding:0 8px; width:auto; border-radius:4px">${svgIcon('link')}${t('Sign in with ChatGPT', '使用 ChatGPT 登录')}</button>
-                        <button class="detect-btn" id="codexRefreshBtn" style="margin-left:4px; padding:0 8px; width:auto; border-radius:4px">${svgIcon('refresh')}${t('Refresh status', '刷新状态')}</button>
-                        <button class="detect-btn" id="codexLogoutBtn" style="margin-left:4px; padding:0 8px; width:auto; border-radius:4px; display:none">${svgIcon('trash')}${t('Sign out', '退出账号')}</button>
-                    </div>
-                    <div class="codex-quota-status" id="codexQuotaStatus"></div>
-                </div>
-                <div class="settings-group" id="antigravityAccountGroup" style="display:none">
-                    <label class="settings-label">${svgIcon('key')} ${t('Antigravity account', 'Antigravity 账户')}</label>
-                    <div id="antigravityAccountStatus"></div>
-                    <div class="settings-key-row" style="margin-top:6px">
-                        <button class="detect-btn" id="antigravityLoginBtn" style="padding:0 8px; width:auto; border-radius:4px">${svgIcon('link')}${t('Sign in with Google', '使用 Google 登录')}</button>
-                        <button class="detect-btn" id="antigravityRefreshBtn" style="margin-left:4px; padding:0 8px; width:auto; border-radius:4px">${svgIcon('refresh')}${t('Refresh account and models', '刷新账户与模型')}</button>
-                        <button class="detect-btn" id="antigravityLogoutBtn" style="margin-left:4px; padding:0 8px; width:auto; border-radius:4px; display:none">${svgIcon('trash')}${t('Sign out', '退出账号')}</button>
-                    </div>
-                </div>
-                <div class="settings-group" id="subscriptionProxyGroup" style="display:none">
-                    <label class="settings-label" for="subscriptionProxyMode">${svgIcon('link')} ${t('Subscription channel proxy', '订阅渠道代理')}</label>
-                    <select class="settings-select" id="subscriptionProxyMode">
-                        <option value="auto">${t('Auto detect', '自动检测')}</option>
-                        <option value="custom">${t('Custom proxy', '自定义代理')}</option>
-                        <option value="direct">${t('Direct connection', '直连')}</option>
-                    </select>
-                    <div id="subscriptionProxyUrlGroup" style="display:none; margin-top:6px">
-                        <input class="settings-input" id="subscriptionProxyUrl" type="password" autocomplete="off" maxlength="2048" aria-label="${t('Proxy address', '代理地址')}" placeholder="http://proxy.example:7890" />
-                    </div>
-                    <div class="settings-key-row" style="margin-top:6px">
-                        <button class="detect-btn" id="subscriptionProxySaveBtn" style="padding:0 8px; width:auto; border-radius:4px">${t('Save proxy', '保存代理')}</button>
-                        <button class="detect-btn" id="subscriptionProxyRefreshBtn" style="margin-left:4px; padding:0 8px; width:auto; border-radius:4px">${t('Refresh detection', '刷新检测')}</button>
-                    </div>
-                    <div class="settings-hint" id="subscriptionProxyStatus" role="status" aria-live="polite"></div>
-                </div>
-                <div class="settings-group" id="endpointGroup">
-                    <label class="settings-label">${svgIcon('link')} Endpoint <span style="opacity:0.5;font-weight:400">${t('(optional)', '(可选)')}</span></label>
-                    <input class="settings-input" id="settingsEndpoint" type="text" placeholder="${t('Leave empty to use default', '留空使用默认')}" />
-                    <div class="settings-hint" id="endpointHint"></div>
-                </div>
                 <div class="settings-group">
-                    <label class="settings-label">${svgIcon('ruler')} ${t('Context size (tokens)', '上下文大小 (tokens)')}</label>
-                    <input class="settings-input" id="settingsCtx" type="number" min="0" placeholder="${t('0 = provider default', '0 = provider 默认')}" />
+                    <label class="settings-label" for="settingsCtx">${svgIcon('ruler')} ${t('Context size (tokens)', '上下文大小 (tokens)')}</label>
+                    <input class="settings-input" id="settingsCtx" type="number" min="0" placeholder="${t('0 = provider default', '0 = provider 默认')}" aria-describedby="settingsCtxHint" />
+                    <div class="settings-hint" id="settingsCtxHint">${t('Set a custom context limit, or use 0 for the provider default.', '可手动设置上下文上限；0 表示使用提供商默认值。')}</div>
                 </div>
                 <div class="settings-group" id="settingsReasoningGroup">
                     <label class="settings-label">${svgIcon('stethoscope')} <span id="settingsReasoningLabel">${t('Reasoning effort', '推理强度')}</span> <span id="settingsReasoningHint" style="opacity:0.5;font-weight:400"></span></label>
@@ -355,33 +302,77 @@ ${stylesheetLinks}
                     </select>
                     <div class="settings-hint">${t('Controls visible reply detail for Codex subscription models; reasoning effort is configured separately.', '控制 Codex 订阅模型可见回复的详细程度；推理强度单独设置。')}</div>
                 </div>
-            </div>
-        </div>
-        <div class="accordion-section" id="translationPreviewSection">
-            <div class="accordion-header" id="accTranslationPreview"><span>${svgIcon('book')} ${t('Translation preview', '翻译预览')}</span><span class="accordion-arrow">▶</span></div>
-            <div class="accordion-body">
-                <div class="settings-group">
-                    <label class="settings-label">${t('Provider', '提供商')}</label>
-                    <select class="settings-select" id="translationPreviewProvider"><option value="">${t('- Same as chat -', '- 与对话相同 -')}</option></select>
-                </div>
-                <div class="settings-group">
-                    <label class="settings-label">${t('Model', '模型')}</label>
-                    <div class="model-row" style="position:relative">
-                        <input class="settings-input" id="translationPreviewModelInput" type="text" placeholder="${t('Leave empty to match chat', '留空与对话相同')}" autocomplete="off" />
-                        <div id="translationPreviewModelDatalist" class="ap-dropdown"></div>
+                <div class="settings-group" id="apiKeyGroup">
+                    <label class="settings-label">${svgIcon('key')} API Key</label>
+                    <div class="settings-hint" id="apiKeyStatus" style="color:#4caf50;margin-bottom:3px;"></div>
+                    <div class="settings-key-row">
+                        <input class="settings-input" id="settingsApiKey" type="password" placeholder="${t('Enter a new key (leave empty to keep existing)', '输入新 Key（留空保留已有）')}" autocomplete="off" />
+                        <button class="key-toggle-btn" id="keyToggleBtn">${svgIconNoMargin('eye')}</button>
+                        <button class="detect-btn" id="fetchApiModelsBtn" style="margin-left:4px; padding:0 8px; width:auto; border-radius:4px" title="${t('Use this key to fetch models from the endpoint', '用此 Key 去对应端点拉取模型')}">${svgIcon('cloud')}${t('Fetch models', '获取模型')}</button>
+                        <button class="detect-btn" id="deleteApiKeyBtn" style="margin-left:4px; padding:0 8px; width:auto; border-radius:4px" title="${t('Remove the saved API key for the current provider', '移除当前 Provider 已保存的 API Key')}">${svgIcon('trash')}${t('Remove key', '移除 Key')}</button>
                     </div>
                 </div>
+                <details class="settings-group settings-account" id="codexAccountGroup" style="display:none">
+                    <summary class="settings-account-summary"><span>${svgIcon('key')} ${t('ChatGPT OAuth account', 'ChatGPT OAuth 账户')}</span></summary>
+                    <div class="settings-hint" id="codexAccountStatus"></div>
+                    <div class="settings-key-row" style="margin-top:6px">
+                        <button class="detect-btn" id="codexLoginBtn" style="padding:0 8px; width:auto; border-radius:4px">${svgIcon('link')}${t('Sign in with ChatGPT', '使用 ChatGPT 登录')}</button>
+                        <button class="detect-btn" id="codexRefreshBtn" style="margin-left:4px; padding:0 8px; width:auto; border-radius:4px">${svgIcon('refresh')}${t('Refresh status', '刷新状态')}</button>
+                        <button class="detect-btn" id="codexLogoutBtn" style="margin-left:4px; padding:0 8px; width:auto; border-radius:4px; display:none">${svgIcon('trash')}${t('Sign out', '退出账号')}</button>
+                    </div>
+                    <div class="codex-quota-status" id="codexQuotaStatus"></div>
+                </details>
+                <details class="settings-group settings-account" id="antigravityAccountGroup" style="display:none">
+                    <summary class="settings-account-summary"><span>${svgIcon('key')} ${t('Antigravity account', 'Antigravity 账户')}</span></summary>
+                    <div id="antigravityAccountStatus"></div>
+                    <div class="settings-key-row" style="margin-top:6px">
+                        <button class="detect-btn" id="antigravityLoginBtn" style="padding:0 8px; width:auto; border-radius:4px">${svgIcon('link')}${t('Sign in with Google', '使用 Google 登录')}</button>
+                        <button class="detect-btn" id="antigravityRefreshBtn" style="margin-left:4px; padding:0 8px; width:auto; border-radius:4px">${svgIcon('refresh')}${t('Refresh account and models', '刷新账户与模型')}</button>
+                        <button class="detect-btn" id="antigravityLogoutBtn" style="margin-left:4px; padding:0 8px; width:auto; border-radius:4px; display:none">${svgIcon('trash')}${t('Sign out', '退出账号')}</button>
+                    </div>
+                </details>
+                <details class="settings-advanced">
+                    <summary>${t('Advanced connection settings', '高级连接设置')}</summary>
+                    <div class="settings-advanced-body">
+                        <div class="settings-group" id="reasoningKeyGroup">
+                    <label class="settings-label">${t('Reasoning field name', '推理字段名')}</label>
+                    <input class="settings-input" id="settingsReasoningKey" type="text" placeholder="${t('Auto-detect (default)', '自动探测（默认）')}" autocomplete="off" />
+                    <div class="settings-hint" id="reasoningKeyHint">${t('Empty = auto-detect. Set only when the gateway returns thinking content under a non-standard field name.', '留空自动探测；仅当网关用非标准字段名返回思考内容时填写。')}</div>
+                </div>
+                <div class="settings-group" id="endpointGroup">
+                    <label class="settings-label">${svgIcon('link')} Endpoint <span style="opacity:0.5;font-weight:400">${t('(optional)', '(可选)')}</span></label>
+                    <input class="settings-input" id="settingsEndpoint" type="text" placeholder="${t('Leave empty to use default', '留空使用默认')}" />
+                    <div class="settings-hint" id="endpointHint"></div>
+                </div>
+                <div class="settings-group" id="subscriptionProxyGroup" style="display:none">
+                    <label class="settings-label" for="subscriptionProxyMode">${svgIcon('link')} ${t('Subscription channel proxy', '订阅渠道代理')}</label>
+                    <select class="settings-select" id="subscriptionProxyMode">
+                        <option value="auto">${t('Auto detect', '自动检测')}</option>
+                        <option value="custom">${t('Custom proxy', '自定义代理')}</option>
+                        <option value="direct">${t('Direct connection', '直连')}</option>
+                    </select>
+                    <div id="subscriptionProxyUrlGroup" style="display:none; margin-top:6px">
+                        <input class="settings-input" id="subscriptionProxyUrl" type="password" autocomplete="off" maxlength="2048" aria-label="${t('Proxy address', '代理地址')}" placeholder="http://proxy.example:7890" />
+                    </div>
+                    <div class="settings-key-row" style="margin-top:6px">
+                        <button class="detect-btn" id="subscriptionProxySaveBtn" style="padding:0 8px; width:auto; border-radius:4px">${t('Save proxy', '保存代理')}</button>
+                        <button class="detect-btn" id="subscriptionProxyRefreshBtn" style="margin-left:4px; padding:0 8px; width:auto; border-radius:4px">${t('Refresh detection', '刷新检测')}</button>
+                    </div>
+                    <div class="settings-hint" id="subscriptionProxyStatus" role="status" aria-live="polite"></div>
+                </div>
+                    </div>
+                </details>
             </div>
         </div>
         <div class="accordion-section" id="inlineSection">
-            <div class="accordion-header" id="accInline"><span>${svgIcon('edit')} ${t('Completion model', '补全模型')}</span><span class="accordion-arrow">▶</span></div>
+            <button type="button" class="accordion-header" id="accInline" aria-expanded="false"><span>${svgIcon('edit')} ${t('Completion model', '补全模型')}</span><span class="accordion-arrow">▶</span></button>
             <div class="accordion-body">
                 <div class="settings-toggle-row">
                     <span class="settings-toggle-label">${t('Enable AI completion', '启用 AI 补全')}</span>
                     <label class="toggle-switch"><input type="checkbox" id="inlineEnabled"><span class="toggle-track"></span></label>
                 </div>
                 <div class="settings-group">
-                    <label class="settings-label">Provider</label>
+                    <label class="settings-label">${t('Provider', '提供商')}</label>
                     <select class="settings-select" id="inlineProvider"><option value="">${t('- Same as chat -', '- 与对话相同 -')}</option></select>
                 </div>
                 <div class="settings-group">
@@ -394,7 +385,10 @@ ${stylesheetLinks}
                     <label class="settings-label">Endpoint</label>
                     <input class="settings-input" id="inlineEndpoint" type="text" placeholder="${t('Leave empty to match chat', '留空与对话相同')}" />
                 </div>
-                <div class="settings-group">
+                <details class="settings-advanced">
+                    <summary>${t('Completion parameters', '补全参数')}</summary>
+                    <div class="settings-advanced-body">
+                        <div class="settings-group">
                     <label class="settings-label">${t('Debounce delay (ms)', '防抖延迟 (ms)')}</label>
                     <input class="settings-input" id="inlineDebounce" type="number" min="100" step="100" placeholder="200" />
                 </div>
@@ -430,21 +424,42 @@ ${stylesheetLinks}
                     <span class="settings-toggle-label">${t('Overlap stripping', '防重叠代码修剪 (Overlap Stripping)')}</span>
                     <label class="toggle-switch"><input type="checkbox" id="inlineOverlapStripping"><span class="toggle-track"></span></label>
                 </div>
+                    </div>
+                </details>
             </div>
         </div>
-        <div style="border-top: 1px solid var(--border); margin: 12px 0 8px; padding-top: 6px;">
-            <span style="font-size:11px; opacity:0.5; letter-spacing:0.05em;">${t('Behavior and tools', '行为与工具')}</span>
-        </div>
-        <div class="accordion-section" id="mcpSection" style="margin-top: 12px;">
-            <div class="accordion-header" id="accMcp"><span>${svgIcon('plugin')} ${t('MCP (Model Context Protocol)', 'MCP (模型上下文协议)')}</span><span class="accordion-arrow">▶</span></div>
+        <div class="accordion-section" id="translationPreviewSection">
+            <button type="button" class="accordion-header" id="accTranslationPreview" aria-expanded="false"><span>${svgIcon('book')} ${t('Translation preview', '翻译预览')}</span><span class="accordion-arrow">▶</span></button>
             <div class="accordion-body">
-                <div class="settings-hint" style="margin-bottom: 5px;">${t('Configure external data sources that inject additional context into the AI agent.', '配置外部数据源为 AI 代理注入额外的上下文信息。')}</div>
-                <div id="mcpServersList" style="display:flex; flex-direction:column; gap:8px;"></div>
-                <button class="settings-test-btn" id="addMcpServerBtn" style="margin-top: 4px;">${svgIcon('plus')}${t('Add MCP Server', '新增 MCP Server')}</button>
+                <div class="settings-group">
+                    <label class="settings-label">${t('Provider', '提供商')}</label>
+                    <select class="settings-select" id="translationPreviewProvider"><option value="">${t('- Same as chat -', '- 与对话相同 -')}</option></select>
+                </div>
+                <div class="settings-group">
+                    <label class="settings-label">${t('Model', '模型')}</label>
+                    <div class="model-row" style="position:relative">
+                        <input class="settings-input" id="translationPreviewModelInput" type="text" placeholder="${t('Leave empty to match chat', '留空与对话相同')}" autocomplete="off" />
+                        <div id="translationPreviewModelDatalist" class="ap-dropdown"></div>
+                    </div>
+                </div>
             </div>
         </div>
-        <div class="accordion-section" id="agentSection" style="margin-top: 12px;">
-            <div class="accordion-header" id="accAgent"><span>${svgIcon('shield')} ${t('Agent settings', 'Agent 设置')}</span><span class="accordion-arrow">▶</span></div>
+        <details class="settings-advanced">
+                    <summary>${t('Configuration overview', '配置概览')}</summary>
+                    <div class="settings-advanced-body">
+                        <div class="settings-overview" id="settingsOverview">
+        <div class="settings-overview-main">
+            <div class="settings-overview-title" id="settingsOverviewTitle">—</div>
+            <div class="settings-overview-subtitle" id="settingsOverviewSubtitle">—</div>
+        </div>
+        <div class="settings-overview-chips" id="settingsOverviewChips"></div>
+    </div>
+                    </div>
+                </details>
+        </div>
+        <div class="settings-tab-panel" id="settingsPanel-agent" role="tabpanel" aria-labelledby="settingsTab-agent" data-settings-panel="agent" hidden>
+        <div class="accordion-section open" id="agentSection">
+            <button type="button" class="accordion-header" id="accAgent" aria-expanded="true"><span>${svgIcon('shield')} ${t('Agent settings', 'Agent 设置')}</span><span class="accordion-arrow">▶</span></button>
             <div class="accordion-body">
                 <div class="settings-group">
                     <label class="settings-label">${t('File write mode', '文件写入模式')}</label>
@@ -458,6 +473,45 @@ ${stylesheetLinks}
                     <label class="toggle-switch"><input type="checkbox" id="approvalsAutoReview"><span class="toggle-track"></span></label>
                 </div>
                 <div class="settings-hint">${t('When enabled, a read-only reviewer model approves most commands first. Unclear, escalated, or destructive actions still ask you.', '开启后由只读评审模型先行审批大部分命令；拿不准、升级请求或破坏性操作仍会询问用户。')}</div>
+            </div>
+        </div>
+        <div class="accordion-section" id="agentProfilesSection">
+            <button type="button" class="accordion-header" id="accAgentProfiles" aria-expanded="false"><span>${svgIcon('bot')} ${t('Profile models', 'Profile 模型')}</span><span class="accordion-arrow" aria-hidden="true">▶</span></button>
+            <div class="accordion-body">
+                <div class="settings-group">
+                    <label class="settings-label">${svgIcon('bot')} ${t('Multi-Agent profile model settings', '多 Agent Profile 模型配置')}</label>
+                    <div class="settings-hint" style="margin-bottom:8px;">${t('Set a provider/model per runtime profile. Leave as "Inherit main settings" to use the main model configured above.', '为每个运行时 Profile 单独指定供应商/模型。留为“继承主设置”则使用上方配置的主模型。')}</div>
+                    <div id="agentModelRows" style="display:flex;flex-direction:column;gap:8px;">
+                        ${[
+                                `explore|${t('Explorer', '探索 Profile')}`,
+                                `planner|${t('Planner', '规划 Profile')}`,
+                                `general-coder|${t('General coder', '通用编码 Profile')}`,
+                                `paradox-coder|${t('Paradox coder', 'Paradox 编码 Profile')}`,
+                                `localization-writer|${t('Localisation writer', '本地化写入 Profile')}`,
+                                `reviewer|${t('Reviewer', '审查者 (Reviewer)')}`,
+                                `gui-expert|${t('GUI expert', 'GUI 专家 Profile')}`,
+                            ]
+                            .map(item => {
+                                const [role, label] = item.split('|');
+                                return `<div class="agent-model-row" data-role="${role}">
+                                    <span class="settings-label">${label}</span>
+                                    <select class="settings-select agent-model-provider" data-role="${role}">
+                                        <option value="__inherit__">${t('Inherit main settings', '继承主设置')}</option>
+                                    </select>
+                                    <select class="settings-select agent-model-model" data-role="${role}">
+                                        <option value="__inherit__">${t('Inherit main settings', '继承主设置')}</option>
+                                    </select>
+                                </div>`;
+                            }).join('\n')}
+                    </div>
+                </div>
+            </div>
+        </div>
+        </div>
+        <div class="settings-tab-panel" id="settingsPanel-tools" role="tabpanel" aria-labelledby="settingsTab-tools" data-settings-panel="tools" hidden>
+        <div class="accordion-section open" id="webSection">
+            <button type="button" class="accordion-header" id="accWeb" aria-expanded="true"><span>${svgIcon('search')} ${t('Web search and network', '网页搜索与网络')}</span><span class="accordion-arrow" aria-hidden="true">▶</span></button>
+            <div class="accordion-body">
                 <div class="settings-group">
                     <label class="settings-label">${svgIcon('search')} ${t('Web access mode', '网页访问模式')}</label>
                     <select class="settings-select" id="webAccessMode">
@@ -466,11 +520,6 @@ ${stylesheetLinks}
                         <option value="live">${t('Live search and page access', '实时搜索和网页访问')}</option>
                     </select>
                     <div class="settings-hint">${t('Web tools are separate from shell-command networking. Live mode opens only public HTTP(S) pages through SSRF and redirect checks.', '网页工具与 Shell 命令联网权限相互独立。实时模式仅通过 SSRF 与重定向检查访问公开 HTTP(S) 网页。')}</div>
-                    <div class="settings-toggle-row" style="margin-top:12px;">
-                        <span class="settings-toggle-label">${t('Allow controlled synthetic DNS proxy addresses', '允许受控的合成 DNS 代理地址')}</span>
-                        <label class="toggle-switch"><input type="checkbox" id="webAllowSyntheticProxy"><span class="toggle-track"></span></label>
-                    </div>
-                    <div class="settings-hint">${t('Enable only in a sandbox or enterprise network that maps public hostnames into 198.18.0.0/15. Direct IP access and every other private range remain blocked.', '仅在沙箱或企业网络把公开域名映射到 198.18.0.0/15 时启用。直接 IP 访问和其他所有私有地址段仍会被阻止。')}</div>
                     <label class="settings-label">${t('Search provider', '搜索供应商')}</label>
                     <select class="settings-select" id="webSearchProvider">
                         <option value="auto">${t('Auto (configured providers, then DuckDuckGo)', '自动（已配置供应商，最后 DuckDuckGo）')}</option>
@@ -487,6 +536,14 @@ ${stylesheetLinks}
                     <select class="settings-select" id="webContextSize">
                         <option value="low">${t('Low', '低')}</option><option value="medium">${t('Medium', '中')}</option><option value="high">${t('High', '高')}</option>
                     </select>
+</div><details class="settings-advanced">
+                    <summary>${t('Advanced search settings', '高级搜索设置')}</summary>
+                    <div class="settings-advanced-body">
+                                            <div class="settings-toggle-row" style="margin-top:12px;">
+                        <span class="settings-toggle-label">${t('Allow controlled synthetic DNS proxy addresses', '允许受控的合成 DNS 代理地址')}</span>
+                        <label class="toggle-switch"><input type="checkbox" id="webAllowSyntheticProxy"><span class="toggle-track"></span></label>
+                    </div>
+                    <div class="settings-hint">${t('Enable only in a sandbox or enterprise network that maps public hostnames into 198.18.0.0/15. Direct IP access and every other private range remain blocked.', '仅在沙箱或企业网络把公开域名映射到 198.18.0.0/15 时启用。直接 IP 访问和其他所有私有地址段仍会被阻止。')}</div>
                     <label class="settings-label">${t('Fallback providers', '备用供应商')}</label>
                     <input class="settings-input" id="webFallbackProviders" type="text" placeholder="brave, exa, tavily" />
                     <div class="settings-hint">${t('Comma-separated provider IDs. OpenAI is never used automatically unless selected or listed here.', '以逗号分隔供应商 ID。除非明确选择或列在这里，否则不会自动使用 OpenAI。')}</div>
@@ -507,7 +564,7 @@ ${stylesheetLinks}
                     <label class="settings-label">${provider === 'serpapi' ? 'SerpAPI' : provider.charAt(0).toUpperCase() + provider.slice(1)} API Key <span style="opacity:0.5;font-weight:400">${t('(optional)', '（可选）')}</span></label>
                     <div class="settings-key-row">
                         <input class="settings-input" id="webKey-${provider}" type="password" autocomplete="off" />
-                        <button class="key-toggle-btn" onclick="var k=document.getElementById('webKey-${provider}');k.type=k.type==='password'?'text':'password';">${svgIconNoMargin('eye')}</button>
+                        <button class="key-toggle-btn" data-settings-key-toggle="webKey-${provider}">${svgIconNoMargin('eye')}</button>
                     </div>`).join('')}
                     <div class="settings-hint">${t('Provider dashboards:', '供应商控制台：')}
                         <a href="https://api.search.brave.com/" target="_blank" rel="noopener">Brave</a> ·
@@ -516,8 +573,22 @@ ${stylesheetLinks}
                         <a href="https://serper.dev/" target="_blank" rel="noopener">Serper</a> ·
                         <a href="https://serpapi.com/manage-api-key" target="_blank" rel="noopener">SerpAPI</a>
                     </div>
-                </div>
-                <div class="settings-group" style="border-top: 1px solid rgba(255,255,255,0.1); padding-top: 10px; margin-top: 10px;">
+                    </div>
+                </details>
+            </div>
+        </div>
+        <div class="accordion-section" id="mcpSection">
+            <button type="button" class="accordion-header" id="accMcp" aria-expanded="false"><span>${svgIcon('plugin')} ${t('MCP (Model Context Protocol)', 'MCP (模型上下文协议)')}</span><span class="accordion-arrow">▶</span></button>
+            <div class="accordion-body">
+                <div class="settings-hint" style="margin-bottom: 5px;">${t('Configure external data sources that inject additional context into the AI agent.', '配置外部数据源为 AI 代理注入额外的上下文信息。')}</div>
+                <div id="mcpServersList" style="display:flex; flex-direction:column; gap:8px;"></div>
+                <button class="settings-test-btn" id="addMcpServerBtn" style="margin-top: 4px;">${svgIcon('plus')}${t('Add MCP Server', '新增 MCP Server')}</button>
+            </div>
+        </div>
+        <div class="accordion-section" id="skillsSection">
+            <button type="button" class="accordion-header" id="accSkills" aria-expanded="false"><span>${svgIcon('plugin')} ${t('Agent Skills', 'Agent 技能')}</span><span class="accordion-arrow" aria-hidden="true">▶</span></button>
+            <div class="accordion-body">
+                <div class="settings-group">
                     <label class="settings-label">${svgIcon('plugin')} ${t('Agent Skills (experimental)', 'Agent Skills (实验性)')}</label>
                     <div class="settings-hint">
                         ${t('Agents can extend capabilities by loading community packages through', 'Agent 可以通过加载')} <code>npx skills</code> ${t('community skills, such as MiniMax CLI.', '社区技能包来扩展能力（例如 MiniMax CLI）。')}<br>
@@ -529,37 +600,12 @@ ${stylesheetLinks}
                     </div>
                     <div id="installedSkillsList" style="margin-top: 10px; display: flex; flex-direction: column; gap: 6px;"></div>
                 </div>
-                <div class="settings-group" style="border-top: 1px solid rgba(255,255,255,0.1); padding-top: 10px; margin-top: 10px;">
-                    <label class="settings-label">${svgIcon('bot')} ${t('Multi-Agent profile model settings', '多 Agent Profile 模型配置')}</label>
-                    <div class="settings-hint" style="margin-bottom:8px;">${t('Set a provider/model per runtime profile. Leave as "Inherit main settings" to use the main model configured above.', '为每个运行时 Profile 单独指定供应商/模型。留为“继承主设置”则使用上方配置的主模型。')}</div>
-                    <div id="agentModelRows" style="display:flex;flex-direction:column;gap:8px;">
-                        ${[
-                                `explore|${t('Explorer', '探索 Profile')}`,
-                                `planner|${t('Planner', '规划 Profile')}`,
-                                `general-coder|${t('General coder', '通用编码 Profile')}`,
-                                `paradox-coder|${t('Paradox coder', 'Paradox 编码 Profile')}`,
-                                `localization-writer|${t('Localisation writer', '本地化写入 Profile')}`,
-                                `reviewer|${t('Reviewer', '审查者 (Reviewer)')}`,
-                                `gui-expert|${t('GUI expert', 'GUI 专家 Profile')}`,
-                            ]
-                            .map(item => {
-                                const [role, label] = item.split('|');
-                                return `<div class="agent-model-row" data-role="${role}" style="display:flex;align-items:center;gap:6px;">
-                                    <span style="font-size:11px;opacity:0.75;min-width:120px;flex-shrink:0;">${label}</span>
-                                    <select class="settings-select agent-model-provider" data-role="${role}" style="flex:1;max-width:120px;font-size:11px;padding:3px 5px;">
-                                        <option value="__inherit__">${t('Inherit main settings', '继承主设置')}</option>
-                                    </select>
-                                    <select class="settings-select agent-model-model" data-role="${role}" style="flex:1;max-width:160px;font-size:11px;padding:3px 5px;">
-                                        <option value="__inherit__">${t('Inherit main settings', '继承主设置')}</option>
-                                    </select>
-                                </div>`;
-                            }).join('\n')}
-                    </div>
-                </div>
             </div>
         </div>
-        <div class="accordion-section" id="usageSection" style="margin-top: 12px; border-color: rgba(100,149,237,0.3);">
-            <div class="accordion-header" id="accUsage"><span>${svgIcon('chart')} ${t('Token usage stats', 'Token 消耗统计')}</span><span class="accordion-arrow">▶</span></div>
+        </div>
+        <div class="settings-tab-panel" id="settingsPanel-usage" role="tabpanel" aria-labelledby="settingsTab-usage" data-settings-panel="usage" hidden>
+        <div class="accordion-section open" id="usageSection">
+            <button type="button" class="accordion-header" id="accUsage" aria-expanded="true"><span>${svgIcon('chart')} ${t('Token usage stats', 'Token 消耗统计')}</span><span class="accordion-arrow">▶</span></button>
             <div class="accordion-body">
                 <div class="settings-group">
                     <div id="usageStatsContent" style="font-size:12px; line-height: 1.6; opacity: 0.9;">
@@ -570,12 +616,16 @@ ${stylesheetLinks}
                 </div>
             </div>
         </div>
+        </div>
     </div>
     <div class="settings-footer">
-        <div class="test-result" id="testResult"></div>
+        <div class="test-result" id="testResult" role="status" aria-live="polite"></div>
         <div class="settings-footer-actions">
             <button class="settings-test-btn" id="testConnBtn">${svgIcon('info')}${t('Test connection', '测试连接')}</button>
-            <button class="settings-save-btn" id="saveSettingsBtn">${svgIcon('save')}${t('Save settings', '保存设置')}</button>
+            <div class="settings-save-actions" id="settingsSaveActions" hidden>
+                <button class="settings-reset-btn" id="resetSettingsBtn" type="button">${t('Discard', '撤销')}</button>
+                <button class="settings-save-btn" id="saveSettingsBtn">${svgIcon('save')}${t('Save settings', '保存设置')}</button>
+            </div>
         </div>
     </div>
 </div>

@@ -113,6 +113,20 @@ describe('settings model context resolution', () => {
         expect(resolveSettingsModelContextTokens('unknown-model', 'codex-chatgpt', contexts, 272000))
             .to.equal(272000);
     });
+
+    it('retains saved manual context limits and explicit provider-default zero when reopening settings', () => {
+        expect(resolveSettingsModelContextTokens('gpt-5.6-sol', 'codex-chatgpt', contexts, 272000, 131072))
+            .to.equal(131072);
+        expect(resolveSettingsModelContextTokens('gpt-5.6-sol', 'codex-chatgpt', contexts, 272000, 0))
+            .to.equal(0);
+    });
+
+    it('uses model metadata when a stored context limit is invalid', () => {
+        for (const invalid of [-1, Number.NaN, Number.POSITIVE_INFINITY, '131072', null]) {
+            expect(resolveSettingsModelContextTokens('gpt-5.6-sol', 'codex-chatgpt', contexts, 272000, invalid))
+                .to.equal(272000);
+        }
+    });
 });
 
 describe('Codex quota presentation', () => {

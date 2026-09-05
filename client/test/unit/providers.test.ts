@@ -27,6 +27,32 @@ import {
 } from '../../extension/ai/providers';
 import type { ChatCompletionRequest, ChatMessage } from '../../extension/ai/types';
 
+describe('GPT-6 Astra provider support', () => {
+    it('offers Astra on both providers while preserving their defaults and context limits', () => {
+        for (const providerId of ['openai', 'codex-chatgpt']) {
+            expect(getProvider(providerId).models).to.include('gpt-6-astra');
+            expect(getProviderApiFormat(providerId, 'gpt-6-astra')).to.equal('openai-responses');
+            expect(getModelOutputTokens('gpt-6-astra', providerId)).to.equal(128000);
+        }
+        expect(getEffectiveModel('openai')).to.equal('gpt-5.5');
+        expect(getEffectiveModel('codex-chatgpt')).to.equal('gpt-5.6-sol');
+        expect(getModelContextTokens('gpt-6-astra', 'openai')).to.equal(1050000);
+        expect(getModelContextTokens('gpt-6-astra', 'codex-chatgpt')).to.equal(272000);
+        expect(clampConfiguredContextTokens('codex-chatgpt', 'gpt-6-astra', 1050000)).to.equal(272000);
+    });
+
+    it('recognizes vision and output limits for direct and namespaced Astra IDs', () => {
+        for (const model of ['gpt-6-astra', 'openai/gpt-6-astra']) {
+            expect(isModelVisionCapable(model), model).to.equal(true);
+            expect(getModelOutputTokens(model), model).to.equal(128000);
+            expect(getEffectiveTemperature(model, 0.2), model).to.equal(undefined);
+            expect(getEffectiveReasoningEffort(model, 'max', 'openai-responses'), model).to.equal('max');
+            expect(getEffectiveReasoningEffort(model, 'minimal', 'openai-responses'), model).to.equal('low');
+            expect(getEffectiveReasoningEffort(model, 'none', 'openai-responses'), model).to.equal('low');
+        }
+    });
+});
+
 // ─── isModelVisionCapable ────────────────────────────────────────────────────
 
 describe('isModelVisionCapable', () => {

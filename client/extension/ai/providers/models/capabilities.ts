@@ -9,6 +9,7 @@ import { CODEX_CHATGPT_CONTEXT_TOKENS, CODEX_CHATGPT_MODELS } from '../../codex/
  * Model-level vision capability map.
  */
 export const VISION_CAPABLE_MODELS: Record<string, boolean> = {
+    'gpt-6-astra': true,
     'gpt-5.6': true,
     'gpt-5.6-sol': true,
     'gpt-5.6-terra': true,
@@ -176,6 +177,7 @@ export function isModelFIMCapable(model: string, providerId: string): boolean {
  * Single source of truth for thinking models that CANNOT disable thinking.
  */
 export const ALWAYS_THINKING_PREFIXES: string[] = [
+    'gpt-6-astra',
     'deepseek-r1', 'DeepSeek-R1',
     'o1', 'o3', 'o4-mini',
     'glm-z1', 'GLM-Z1',
@@ -278,6 +280,7 @@ export const MODEL_CONTEXT_TOKENS: Record<string, number> = {
         `codex-chatgpt:${model}`,
         CODEX_CHATGPT_CONTEXT_TOKENS,
     ])),
+    'gpt-6-astra': 1050000,
     'gpt-5.6': 1050000,
     'gpt-5.6-sol': 1050000,
     'gpt-5.6-terra': 1050000,
@@ -575,7 +578,7 @@ export function getModelOutputTokens(model: string, providerId?: string): number
     if (lower.includes('deepseek') || lower.includes('r1')) {
         return 65536;
     }
-    if (lower.includes('gpt-5')) {
+    if (lower.includes('gpt-5') || lower.includes('gpt-6-astra')) {
         return 128000;
     }
     if (lower.includes('gemini')) {

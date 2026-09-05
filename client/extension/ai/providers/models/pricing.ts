@@ -125,6 +125,7 @@ export function getCacheDiscountFactor(model: string, providerId?: string): numb
     // Anthropic Claude
     if (lower.includes('claude')) return 0.1;
     // OpenAI GPT series
+    if (lower.includes('gpt-6-astra')) return 0.1;
     if (lower.startsWith('gpt-5.6')) return 0.1; // Sol/Terra/Luna all cache at 10% (BenchLM 2026-08)
     if (lower.includes('gpt-') || lower.includes('gpt5')) return 0.5;
     // Google Gemini

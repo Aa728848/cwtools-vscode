@@ -14,6 +14,13 @@ describe('getModelPricing', () => {
         expect(getModelPricing('gpt-5.5')).to.deep.equal([34.10, 204.59]);
     });
 
+    it('estimates Astra token and cache costs using the existing CNY conversion', () => {
+        for (const model of ['gpt-6-astra', 'openai/gpt-6-astra']) {
+            expect(getModelPricing(model, 'openai')).to.deep.equal([68.20, 341.00]);
+            expect(getCacheDiscountFactor(model, 'openai')).to.equal(0.1);
+        }
+    });
+
     it('exact match: deepseek-v4-pro', () => {
         expect(getModelPricing('deepseek-v4-pro')).to.deep.equal([9.00, 27.01]);
     });

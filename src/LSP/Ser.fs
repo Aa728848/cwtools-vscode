@@ -1,6 +1,7 @@
 module LSP.Json.Ser
 
 open System
+open System.Collections.Generic
 open System.Reflection
 open Microsoft.FSharp.Reflection
 open System.Text.RegularExpressions
@@ -80,33 +81,48 @@ let private makeMap (t: Type, kvs: (string * obj) seq) =
 let private makeOption (t: Type, item: obj option) =
     typeof<MakeHelpers>.GetMethod("MakeOption").MakeGenericMethod([| t |]).Invoke(null, [| item |])
 
-let rec private serializer (depth: int, options: JsonWriteOptions, t: Type) : obj -> string =
+type private JsonSerializer = int -> obj -> string
+
+let private maxSerializationDepth = 256
+
+let rec private serializer (writers: Dictionary<Type, JsonSerializer>, options: JsonWriteOptions, t: Type) : JsonSerializer =
+    match writers.TryGetValue t with
+    | true, write -> write
+    | _ ->
+        let mutable write: JsonSerializer = fun _ _ -> invalidOp $"JSON writer for {t.FullName} is not initialized"
+        let deferred depth value =
+            if depth >= maxSerializationDepth then
+                invalidOp $"JSON serialization depth exceeded limit ({maxSerializationDepth}) for type {t.FullName}"
+            write depth value
+        // Recursive records reuse this writer; only runtime value depth is bounded.
+        writers.Add(t, deferred)
+        write <- buildSerializer (writers, options, t)
+        deferred
+
+and private buildSerializer (writers: Dictionary<Type, JsonSerializer>, options: JsonWriteOptions, t: Type) : JsonSerializer =
     let custom = findWriter (t, options.customWriters)
 
-    if depth >= 20 then
-        eprintfn $"Warning: JSON serialization depth exceeded limit (20) for type %s{t.FullName}"
-        fun _ -> "null"
-    elif custom.IsSome then
+    if custom.IsSome then
         let fObj = custom.Value
         let fType = fObj.GetType()
         let _, range = FSharpType.GetFunctionElements(fType)
-        let serialize = serializer (depth, options, range)
+        let serialize = serializer (writers, options, range)
         let transform = asFun fObj
-        fun o -> serialize (transform o)
+        fun depth o -> serialize (depth + 1) (transform o)
     elif t = typeof<bool> then
-        fun o -> $"%b{unbox<bool> o}"
+        fun _ o -> $"%b{unbox<bool> o}"
     elif t = typeof<int> then
-        fun o -> $"%d{unbox<int> o}"
+        fun _ o -> $"%d{unbox<int> o}"
     elif t = typeof<char> then
-        fun o -> $"%c{unbox<char> o}" |> escapeStr
+        fun _ o -> $"%c{unbox<char> o}" |> escapeStr
     elif t = typeof<string> then
-        fun o -> escapeStr (o :?> string)
+        fun _ o -> escapeStr (o :?> string)
     elif t = typeof<Uri> then
-        fun o ->
+        fun _ o ->
             let uri = o :?> Uri
             escapeStr (uri.ToString())
     elif t = typeof<JsonValue> then
-        fun o ->
+        fun _ o ->
             let asJson = o :?> JsonValue
             asJson.ToString(JsonSaveOptions.DisableFormatting)
     elif FSharpType.IsRecord t then
@@ -114,21 +130,21 @@ let rec private serializer (depth: int, options: JsonWriteOptions, t: Type) : ob
 
         let serializers =
             [| for f in fields do
-                   yield fieldSerializer (depth, options, f) |]
+                   yield fieldSerializer (writers, options, f) |]
 
-        fun outer ->
+        fun depth outer ->
             let fieldStrings =
                 [| for f in serializers do
-                       yield f outer |]
+                       yield f depth outer |]
 
             let innerString = String.concat "," fieldStrings
             $"{{%s{innerString}}}"
     elif isMap t then
         let arguments = t.GetGenericArguments()
         let valueType = arguments[1]
-        let serializeValue = serializer (depth, options, valueType)
+        let serializeValue = serializer (writers, options, valueType)
 
-        fun outer ->
+        fun depth outer ->
             let asEnum = outer :?> System.Collections.IEnumerable
             let kvPairs =
                 Seq.cast<obj> asEnum
@@ -136,17 +152,17 @@ let rec private serializer (depth: int, options: JsonWriteOptions, t: Type) : ob
                     let kvType = kv.GetType()
                     let key = kvType.GetProperty("Key").GetValue(kv) :?> string
                     let value = kvType.GetProperty("Value").GetValue(kv)
-                    $"{escapeStr key}:{serializeValue value}")
+                    $"{escapeStr key}:{serializeValue (depth + 1) value}")
             let join = String.Join(",", kvPairs)
             $"{{{join}}}"
     elif implementsSeq t then
         let innerType = t.GetGenericArguments()
-        let serializeInner = serializer (depth, options, innerType[0])
+        let serializeInner = serializer (writers, options, innerType[0])
 
-        fun outer ->
+        fun depth outer ->
             let asEnum = outer :?> System.Collections.IEnumerable
             let asSeq = Seq.cast<obj> asEnum
-            let inners = Seq.map serializeInner asSeq
+            let inners = Seq.map (serializeInner (depth + 1)) asSeq
             let join = String.Join(",", inners)
             $"[%s{join}]"
     elif isOption t then
@@ -157,27 +173,29 @@ let rec private serializer (depth: int, options: JsonWriteOptions, t: Type) : ob
             isSomeProp.GetValue(None, [| outer |]) :?> bool
 
         let valueProp = t.GetProperty("Value")
-        let serializeInner = serializer (depth, options, innerType[0])
+        let serializeInner = serializer (writers, options, innerType[0])
 
-        fun outer ->
+        fun depth outer ->
             if isSome outer then
                 let value = valueProp.GetValue outer
-                serializeInner value
+                serializeInner depth value
             else
                 "null"
     else
         raise (Exception $"Don't know how to serialize %s{t.ToString()} to JSON")
 
-and fieldSerializer (depth: int, options: JsonWriteOptions, field: PropertyInfo) : obj -> string =
+and private fieldSerializer (writers: Dictionary<Type, JsonSerializer>, options: JsonWriteOptions, field: PropertyInfo) : JsonSerializer =
     let name = escapeStr field.Name
-    let innerSerializer = serializer (depth + 1, options, field.PropertyType)
+    let innerSerializer = serializer (writers, options, field.PropertyType)
 
-    fun outer ->
+    fun depth outer ->
         let value = field.GetValue(outer)
-        let json = innerSerializer value
+        let json = innerSerializer (depth + 1) value
         $"%s{name}:%s{json}"
 
-let serializerFactory<'T> (options: JsonWriteOptions) : 'T -> string = serializer (1, options, typeof<'T>)
+let serializerFactory<'T> (options: JsonWriteOptions) : 'T -> string =
+    let write = serializer (Dictionary<Type, JsonSerializer>(), options, typeof<'T>)
+    fun value -> write 0 (box value)
 
 type JsonReadOptions = { customReaders: obj list }
 

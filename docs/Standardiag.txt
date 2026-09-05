@@ -1,0 +1,2989 @@
+Warning: JSON serialization depth exceeded limit (20) for type System.Int32
+Warning: JSON serialization depth exceeded limit (20) for type System.Int32
+Warning: JSON serialization depth exceeded limit (20) for type System.Int32
+Warning: JSON serialization depth exceeded limit (20) for type System.Int32
+Warning: JSON serialization depth exceeded limit (20) for type System.Int32
+Warning: JSON serialization depth exceeded limit (20) for type System.Int32
+Warning: JSON serialization depth exceeded limit (20) for type System.Int32
+Warning: JSON serialization depth exceeded limit (20) for type System.Int32
+Warning: JSON serialization depth exceeded limit (20) for type LSP.Types+Position
+Warning: JSON serialization depth exceeded limit (20) for type LSP.Types+Position
+Warning: JSON serialization depth exceeded limit (20) for type LSP.Types+Position
+Warning: JSON serialization depth exceeded limit (20) for type LSP.Types+Position
+Warning: JSON serialization depth exceeded limit (20) for type System.String
+Warning: JSON serialization depth exceeded limit (20) for type System.String
+Warning: JSON serialization depth exceeded limit (20) for type LSP.Types+SymbolKind
+Warning: JSON serialization depth exceeded limit (20) for type System.Boolean
+Warning: JSON serialization depth exceeded limit (20) for type LSP.Types+Range
+Warning: JSON serialization depth exceeded limit (20) for type LSP.Types+Range
+Warning: JSON serialization depth exceeded limit (20) for type Microsoft.FSharp.Collections.FSharpList`1[[LSP.Types+DocumentSymbol, LSP, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null]]
+Warning: JSON serialization depth exceeded limit (20) for type System.Int32
+Warning: JSON serialization depth exceeded limit (20) for type System.Int32
+Warning: JSON serialization depth exceeded limit (20) for type System.Int32
+Warning: JSON serialization depth exceeded limit (20) for type System.Int32
+Warning: JSON serialization depth exceeded limit (20) for type LSP.Types+Position
+Warning: JSON serialization depth exceeded limit (20) for type LSP.Types+Position
+Warning: JSON serialization depth exceeded limit (20) for type LSP.Types+Range
+Warning: JSON serialization depth exceeded limit (20) for type Microsoft.FSharp.Core.FSharpOption`1[[LSP.Types+SelectionRange, LSP, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null]]
+[Info  - 7:58:28 PM] default repo path "https://github.com/Aa728848/cwtools-stellaris-config"
+[Info  - 7:58:28 PM] repo path "https://github.com/Aa728848/cwtools-stellaris-config"
+[Info  - 7:58:28 PM] bundled rules path "c:\Users\sebas\.vscode\extensions\foreverskywalker.foreverskywalker-stellaris-cwtools-2.16.8\rules\stellaris-rules.zip"
+[Info  - 7:58:28 PM] New init { processId = Some 5864
+  rootUri =
+   Some
+     file:///c:/Users/sebas/Documents/Paradox Interactive/Stellaris/mod/Lotor [Dev]/lotor
+  initializationOptions =
+   Some
+     {
+  "language": "stellaris",
+  "uiLanguage": "en",
+  "isVanillaFolder": false,
+  "rulesCache": "c:\\Users\\sebas\\AppData\\Roaming\\Code\\User\\globalStorage\\foreverskywalker.foreverskywalker-stellaris-cwtools\\.cwtools",
+  "bundledRulesPath": "c:\\Users\\sebas\\.vscode\\extensions\\foreverskywalker.foreverskywalker-stellaris-cwtools-2.16.8\\rules\\stellaris-rules.zip",
+  "rules_version": "latest",
+  "defaultRepoPath": "https://github.com/Aa728848/cwtools-stellaris-config",
+  "repoPath": "https:...
+  capabilitiesMap =
+   map
+     [("general.staleRequestSupport.cancel", true);
+      ("notebookDocument.synchronization.dynamicRegistration", true);
+      ("notebookDocument.synchronization.executionSummarySupport", true);
+      ("textDocument.callHierarchy.dynamicRegistration", true);
+      ("textDocument.codeAction.dataSupport", true);
+      ("textDocument.codeAction.disabledSupport", true);
+      ("textDocument.codeAction.dynamicRegistration", true);
+      ("textDocument.codeAction.honorsChangeAnnotations", true);
+      ("textDocument.codeAction.isPreferredSupport", true); ...]
+  workspaceFolders =
+   [{ uri =
+       file:///c:/Users/sebas/Documents/Paradox Interactive/Stellaris/mod/Lotor [Dev]/lotor
+      name = "lotor" }] }
+[Info  - 7:58:28 PM] Server initializing. Completion trigger chars configured: ["."; "|"; "$"; """; "="; "{"; ":"]
+[Info  - 7:58:28 PM] Sending capabilities with completion trigger chars: ["."; "|"; "$"; "="]
+[Info  - 7:58:28 PM] New configuration { settings =
+   {
+  "stellarisLanguageServices": {
+    "editor": {
+      "formatIndentOnPaste": true,
+      "codeLens": {
+        "enabled": true
+      },
+      "semanticHighlighting": {
+        "enabled": true
+      },
+      "backgroundFeaturesDelayMs": 250
+    },
+    "trace": {
+      "server": "off"
+    },
+    "localisation": {
+      "languages": [
+        "English"
+      ],
+      "generated_strings": ": \"wip\""
+    },
+    "errors": {
+      "vanilla": true,
+      "localisationFilter": "off",
+ ...} - requiresReload: true
+[Info  - 7:58:28 PM] Cache exists and is up-to-date at c:\Users\sebas\AppData\Roaming\Code\User\globalStorage\foreverskywalker.foreverskywalker-stellaris-cwtools\.cwtools/stl.cwb
+[Info  - 7:58:33 PM] Cache loaded from c:\Users\sebas\AppData\Roaming\Code\User\globalStorage\foreverskywalker.foreverskywalker-stellaris-cwtools\.cwtools\stl.cwb: 4723 resources, 34637 files
+[Info  - 7:58:33 PM] Parse cache time: 5179ms, cached resources: 4723, cached files: 34637
+[Info  - 7:58:34 PM] Unexpected scope galactic_community
+[Info  - 7:58:34 PM] Unexpected modifier category Galactic Community
+[Info  - 7:58:34 PM] Unexpected modifier category Galactic Community
+[Info  - 7:58:34 PM] Workspace roots:
+[Info  - 7:58:34 PM] root c:\Users\sebas\Documents\Paradox Interactive\Stellaris\mod\Lotor [Dev]\lotor, exists: true
+[Info  - 7:58:34 PM] embedded folder Some "C:/Program Files (x86)/Steam/steamapps/common/Stellaris/"
+[Info  - 7:58:34 PM] normalised C:/Program Files (x86)/Steam/steamapps/common/Stellaris/
+[Info  - 7:58:34 PM] normalised c:/Users/sebas/Documents/Paradox Interactive/Stellaris/mod/Lotor [Dev]/lotor
+[Info  - 7:58:34 PM] Parsed embedded in 423L
+[Info  - 7:58:35 PM] Parsing 11981 files
+[Info  - 7:58:41 PM] Parsed files in 6545L
+[Info  - 7:58:42 PM] Initial config rules update
+[Info  - 7:58:44 PM] Loc updated in 2428L
+[Info  - 7:58:44 PM] Unexpected scope any].enum[exe_set_variable
+[Info  - 7:58:44 PM] Unexpected scope any].enum[exe_set_variable
+[Warn  - 7:58:44 PM] Failed to parse cardinality '1..1 # this has to be there or it won't work': The input string '1 # this has to be there or it won't work' was not in a correct format.
+[Info  - 7:58:45 PM] Rules loaded in 1306L
+[Info  - 7:58:50 PM] CarrierSnapshot miss resourceEpoch=2 carrierEpoch=2 generation=0 hits=0 misses=16
+[Info  - 7:58:50 PM] CarrierSnapshot build-start build=1 resourceEpoch=2 carrierEpoch=2 generation=0 entities=1612
+[Info  - 7:58:51 PM] CarrierSnapshot build-end build=1 resourceEpoch=2 carrierEpoch=2 generation=0 entities=1612 elapsedMs=895 allocDeltaMB=661
+[Info  - 7:59:03 PM] Refresh all lookups: 17.913s
+[Info  - 7:59:03 PM] Type counts: scripted_trigger=1942, scripted_effect=2108, total types=1063
+[Info  - 7:59:03 PM] [LazyRefresh] before=0 afterRefresh=127 afterRecompute=0 newlyCreated=127 total=6098
+[Info  - 7:59:03 PM] Rules cache updated and resources reset in 17920L
+[Info  - 7:59:08 PM] validateFilesLocalCancellable count=30
+[Info  - 7:59:08 PM] Local validating 30 files
+[Info  - 7:59:08 PM] cwtools current rules version: "4700e4679e109e7307e85ec459aa6777eab1fa35"
+[Info  - 7:59:08 PM] cwtools new rules version: "4700e4679e109e7307e85ec459aa6777eab1fa35"
+[Info  - 7:59:08 PM] CarrierSnapshot miss resourceEpoch=3 carrierEpoch=2 generation=1 hits=1617656 misses=17
+[Info  - 7:59:08 PM] CarrierSnapshot build-start build=2 resourceEpoch=3 carrierEpoch=2 generation=1 entities=1612
+[Info  - 7:59:08 PM] Localisation check 30 files
+[Info  - 7:59:09 PM] Localisation check took 171ms
+[Info  - 7:59:09 PM] Validate local files time: 517 files=30
+[Info  - 7:59:09 PM] validateFilesLocalCancellable count=30
+[Info  - 7:59:09 PM] Local validating 30 files
+[Info  - 7:59:09 PM] Unexpected scope any].enum[exe_set_variable
+[Info  - 7:59:09 PM] Unexpected scope any].enum[exe_set_variable
+[Warn  - 7:59:09 PM] Failed to parse cardinality '1..1 # this has to be there or it won't work': The input string '1 # this has to be there or it won't work' was not in a correct format.
+[Info  - 7:59:09 PM] Localisation check 30 files
+[Info  - 7:59:09 PM] Localisation check took 40ms
+[Info  - 7:59:09 PM] Validate local files time: 541 files=30
+[Info  - 7:59:09 PM] validateFilesLocalCancellable count=30
+[Info  - 7:59:09 PM] Local validating 30 files
+[Info  - 7:59:10 PM] Localisation check 30 files
+[Info  - 7:59:10 PM] Localisation check took 6ms
+[Info  - 7:59:10 PM] Validate local files time: 804 files=30
+[Info  - 7:59:10 PM] validateFilesLocalCancellable count=30
+[Info  - 7:59:10 PM] Local validating 30 files
+[Info  - 7:59:11 PM] Localisation check 30 files
+[Info  - 7:59:11 PM] Localisation check took 11ms
+[Info  - 7:59:11 PM] Validate local files time: 1393 files=30
+[Info  - 7:59:11 PM] validateFilesLocalCancellable count=30
+[Info  - 7:59:11 PM] Local validating 30 files
+[Info  - 7:59:12 PM] Localisation check 30 files
+[Info  - 7:59:12 PM] Localisation check took 1ms
+[Info  - 7:59:12 PM] Validate local files time: 341 files=30
+[Info  - 7:59:12 PM] validateFilesLocalCancellable count=30
+[Info  - 7:59:12 PM] Local validating 30 files
+[Info  - 7:59:12 PM] Localisation check 30 files
+[Info  - 7:59:12 PM] Localisation check took 8ms
+[Info  - 7:59:12 PM] Validate local files time: 266 files=30
+[Info  - 7:59:12 PM] validateFilesLocalCancellable count=30
+[Info  - 7:59:12 PM] Local validating 30 files
+[Info  - 7:59:13 PM] Localisation check 30 files
+[Info  - 7:59:13 PM] Localisation check took 21ms
+[Info  - 7:59:13 PM] Validate local files time: 923 files=30
+[Info  - 7:59:13 PM] validateFilesLocalCancellable count=30
+[Info  - 7:59:13 PM] Local validating 30 files
+[Info  - 7:59:14 PM] Localisation check 30 files
+[Info  - 7:59:14 PM] Localisation check took 3ms
+[Info  - 7:59:14 PM] Validate local files time: 678 files=30
+[Info  - 7:59:14 PM] validateFilesLocalCancellable count=30
+[Info  - 7:59:14 PM] Local validating 30 files
+[Info  - 7:59:15 PM] Localisation check 30 files
+[Info  - 7:59:15 PM] Localisation check took 11ms
+[Info  - 7:59:15 PM] Validate local files time: 851 files=30
+[Info  - 7:59:15 PM] validateFilesLocalCancellable count=30
+[Info  - 7:59:15 PM] Local validating 30 files
+[Info  - 7:59:15 PM] Localisation check 30 files
+[Info  - 7:59:15 PM] Localisation check took 8ms
+[Info  - 7:59:15 PM] Validate local files time: 245 files=30
+[Info  - 7:59:15 PM] validateFilesLocalCancellable count=30
+[Info  - 7:59:15 PM] Local validating 30 files
+[Info  - 7:59:15 PM] Localisation check 30 files
+[Info  - 7:59:15 PM] Localisation check took 13ms
+[Info  - 7:59:15 PM] Validate local files time: 486 files=30
+[Info  - 7:59:15 PM] validateFilesLocalCancellable count=30
+[Info  - 7:59:15 PM] Local validating 30 files
+[Info  - 7:59:16 PM] Localisation check 30 files
+[Info  - 7:59:16 PM] Localisation check took 6ms
+[Info  - 7:59:16 PM] Validate local files time: 306 files=30
+[Info  - 7:59:16 PM] validateFilesLocalCancellable count=30
+[Info  - 7:59:16 PM] Local validating 30 files
+[Info  - 7:59:16 PM] Localisation check 30 files
+[Info  - 7:59:16 PM] Localisation check took 5ms
+[Info  - 7:59:16 PM] Validate local files time: 132 files=30
+[Info  - 7:59:16 PM] validateFilesLocalCancellable count=30
+[Info  - 7:59:16 PM] Local validating 30 files
+[Info  - 7:59:17 PM] Localisation check 30 files
+[Info  - 7:59:17 PM] Localisation check took 48ms
+[Info  - 7:59:17 PM] Validate local files time: 1230 files=30
+[Info  - 7:59:17 PM] validateFilesLocalCancellable count=30
+[Info  - 7:59:17 PM] Local validating 30 files
+[Info  - 7:59:18 PM] Localisation check 30 files
+[Info  - 7:59:18 PM] Localisation check took 23ms
+[Info  - 7:59:18 PM] Validate local files time: 778 files=30
+[Info  - 7:59:18 PM] validateFilesLocalCancellable count=30
+[Info  - 7:59:18 PM] Local validating 30 files
+[Info  - 7:59:18 PM] Localisation check 30 files
+[Info  - 7:59:18 PM] Localisation check took 26ms
+[Info  - 7:59:18 PM] Validate local files time: 385 files=30
+[Info  - 7:59:18 PM] validateFilesLocalCancellable count=30
+[Info  - 7:59:18 PM] Local validating 30 files
+[Info  - 7:59:19 PM] Localisation check 30 files
+[Info  - 7:59:19 PM] Localisation check took 7ms
+[Info  - 7:59:19 PM] Validate local files time: 179 files=30
+[Info  - 7:59:19 PM] validateFilesLocalCancellable count=30
+[Info  - 7:59:19 PM] Local validating 30 files
+[Info  - 7:59:19 PM] Localisation check 30 files
+[Info  - 7:59:19 PM] Localisation check took 16ms
+[Info  - 7:59:19 PM] Validate local files time: 341 files=30
+[Info  - 7:59:19 PM] validateFilesLocalCancellable count=30
+[Info  - 7:59:19 PM] Local validating 30 files
+[Info  - 7:59:19 PM] Localisation check 30 files
+[Info  - 7:59:19 PM] Localisation check took 5ms
+[Info  - 7:59:19 PM] Validate local files time: 185 files=30
+[Info  - 7:59:19 PM] validateFilesLocalCancellable count=30
+[Info  - 7:59:19 PM] Local validating 30 files
+[Info  - 7:59:19 PM] Localisation check 30 files
+[Info  - 7:59:19 PM] Localisation check took 15ms
+[Info  - 7:59:19 PM] Validate local files time: 231 files=30
+[Info  - 7:59:19 PM] validateFilesLocalCancellable count=30
+[Info  - 7:59:19 PM] Local validating 30 files
+[Info  - 7:59:25 PM] Localisation check 30 files
+[Info  - 7:59:25 PM] Localisation check took 56ms
+[Info  - 7:59:25 PM] Validate local files time: 5344 files=30
+[Info  - 7:59:25 PM] validateFilesLocalCancellable count=30
+[Info  - 7:59:25 PM] Local validating 30 files
+[Info  - 7:59:25 PM] Localisation check 30 files
+[Info  - 7:59:25 PM] Localisation check took 9ms
+[Info  - 7:59:25 PM] Validate local files time: 202 files=30
+[Info  - 7:59:25 PM] validateFilesLocalCancellable count=30
+[Info  - 7:59:25 PM] Local validating 30 files
+[Info  - 7:59:26 PM] Localisation check 30 files
+[Info  - 7:59:26 PM] Localisation check took 12ms
+[Info  - 7:59:26 PM] Validate local files time: 707 files=30
+[Info  - 7:59:26 PM] validateFilesLocalCancellable count=30
+[Info  - 7:59:26 PM] Local validating 30 files
+[Info  - 7:59:27 PM] Localisation check 30 files
+[Info  - 7:59:27 PM] Localisation check took 18ms
+[Info  - 7:59:27 PM] Validate local files time: 954 files=30
+[Info  - 7:59:27 PM] validateFilesLocalCancellable count=30
+[Info  - 7:59:27 PM] Local validating 30 files
+[Info  - 7:59:27 PM] Localisation check 30 files
+[Info  - 7:59:27 PM] Localisation check took 5ms
+[Info  - 7:59:27 PM] Validate local files time: 223 files=30
+[Info  - 7:59:27 PM] validateFilesLocalCancellable count=30
+[Info  - 7:59:27 PM] Local validating 30 files
+[Info  - 7:59:27 PM] Localisation check 30 files
+[Info  - 7:59:27 PM] Localisation check took 18ms
+[Info  - 7:59:27 PM] Validate local files time: 327 files=30
+[Info  - 7:59:27 PM] validateFilesLocalCancellable count=30
+[Info  - 7:59:27 PM] Local validating 30 files
+[Info  - 7:59:28 PM] CarrierSnapshot build-end build=2 resourceEpoch=3 carrierEpoch=2 generation=1 entities=1612 elapsedMs=19351 allocDeltaMB=41956
+[Info  - 7:59:28 PM] Localisation check 30 files
+[Info  - 7:59:28 PM] Localisation check took 14ms
+[Info  - 7:59:28 PM] Validate local files time: 668 files=30
+[Info  - 7:59:28 PM] validateFilesLocalCancellable count=30
+[Info  - 7:59:28 PM] Local validating 30 files
+[Info  - 7:59:28 PM] Localisation check 30 files
+[Info  - 7:59:28 PM] Localisation check took 5ms
+[Info  - 7:59:28 PM] Validate local files time: 201 files=30
+[Info  - 7:59:28 PM] validateFilesLocalCancellable count=30
+[Info  - 7:59:28 PM] Local validating 30 files
+[Info  - 7:59:28 PM] Localisation check 30 files
+[Info  - 7:59:28 PM] Localisation check took 5ms
+[Info  - 7:59:28 PM] Validate local files time: 284 files=30
+[Info  - 7:59:29 PM] validateFilesLocalCancellable count=30
+[Info  - 7:59:29 PM] Local validating 30 files
+[Info  - 7:59:29 PM] Localisation check 30 files
+[Info  - 7:59:29 PM] Localisation check took 10ms
+[Info  - 7:59:29 PM] Validate local files time: 483 files=30
+[Info  - 7:59:29 PM] validateFilesLocalCancellable count=30
+[Info  - 7:59:29 PM] Local validating 30 files
+[Info  - 7:59:29 PM] Localisation check 30 files
+[Info  - 7:59:29 PM] Localisation check took 16ms
+[Info  - 7:59:29 PM] Validate local files time: 422 files=30
+[Info  - 7:59:29 PM] validateFilesLocalCancellable count=30
+[Info  - 7:59:29 PM] Local validating 30 files
+[Info  - 7:59:30 PM] Localisation check 30 files
+[Info  - 7:59:30 PM] Localisation check took 14ms
+[Info  - 7:59:30 PM] Validate local files time: 401 files=30
+[Info  - 7:59:30 PM] validateFilesLocalCancellable count=30
+[Info  - 7:59:30 PM] Local validating 30 files
+[Info  - 7:59:30 PM] Localisation check 30 files
+[Info  - 7:59:30 PM] Localisation check took 19ms
+[Info  - 7:59:30 PM] Validate local files time: 396 files=30
+[Info  - 7:59:30 PM] validateFilesLocalCancellable count=30
+[Info  - 7:59:30 PM] Local validating 30 files
+[Info  - 7:59:32 PM] Localisation check 30 files
+[Info  - 7:59:32 PM] Localisation check took 65ms
+[Info  - 7:59:32 PM] Validate local files time: 1648 files=30
+[Info  - 7:59:32 PM] validateFilesLocalCancellable count=30
+[Info  - 7:59:32 PM] Local validating 30 files
+[Info  - 7:59:33 PM] Localisation check 30 files
+[Info  - 7:59:33 PM] Localisation check took 11ms
+[Info  - 7:59:33 PM] Validate local files time: 1181 files=30
+[Info  - 7:59:33 PM] validateFilesLocalCancellable count=30
+[Info  - 7:59:33 PM] Local validating 30 files
+[Info  - 7:59:34 PM] Localisation check 30 files
+[Info  - 7:59:34 PM] Localisation check took 20ms
+[Info  - 7:59:34 PM] Validate local files time: 1115 files=30
+[Info  - 7:59:34 PM] validateFilesLocalCancellable count=30
+[Info  - 7:59:34 PM] Local validating 30 files
+[Info  - 7:59:35 PM] Localisation check 30 files
+[Info  - 7:59:35 PM] Localisation check took 4ms
+[Info  - 7:59:35 PM] Validate local files time: 953 files=30
+[Info  - 7:59:35 PM] validateFilesLocalCancellable count=30
+[Info  - 7:59:35 PM] Local validating 30 files
+[Info  - 7:59:35 PM] Refresh all lookups: 23.816s
+[Info  - 7:59:35 PM] Type counts: scripted_trigger=1942, scripted_effect=2108, total types=1063
+[Info  - 7:59:36 PM] Localisation check 30 files
+[Info  - 7:59:36 PM] Localisation check took 3ms
+[Info  - 7:59:36 PM] Validate local files time: 460 files=30
+[Info  - 7:59:36 PM] CWTools rules are already up-to-date.
+[Info  - 7:59:36 PM] validateFilesLocalCancellable count=30
+[Info  - 7:59:36 PM] Local validating 30 files
+[Info  - 7:59:36 PM] Localisation check 30 files
+[Info  - 7:59:36 PM] Localisation check took 2ms
+[Info  - 7:59:36 PM] Validate local files time: 332 files=30
+[Info  - 7:59:36 PM] validateFilesLocalCancellable count=30
+[Info  - 7:59:36 PM] Local validating 30 files
+[Info  - 7:59:37 PM] Localisation check 30 files
+[Info  - 7:59:37 PM] Localisation check took 6ms
+[Info  - 7:59:37 PM] Validate local files time: 395 files=30
+[Info  - 7:59:37 PM] validateFilesLocalCancellable count=30
+[Info  - 7:59:37 PM] Local validating 30 files
+[Info  - 7:59:37 PM] Localisation check 30 files
+[Info  - 7:59:37 PM] Localisation check took 6ms
+[Info  - 7:59:37 PM] Validate local files time: 395 files=30
+[Info  - 7:59:37 PM] validateFilesLocalCancellable count=30
+[Info  - 7:59:37 PM] Local validating 30 files
+[Info  - 7:59:37 PM] Localisation check 30 files
+[Info  - 7:59:37 PM] Localisation check took 2ms
+[Info  - 7:59:37 PM] Validate local files time: 342 files=30
+[Info  - 7:59:37 PM] validateFilesLocalCancellable count=30
+[Info  - 7:59:37 PM] Local validating 30 files
+[Info  - 7:59:38 PM] Localisation check 30 files
+[Info  - 7:59:38 PM] Localisation check took 8ms
+[Info  - 7:59:38 PM] Validate local files time: 373 files=30
+[Info  - 7:59:38 PM] validateFilesLocalCancellable count=30
+[Info  - 7:59:38 PM] Local validating 30 files
+[Info  - 7:59:38 PM] Localisation check 30 files
+[Info  - 7:59:38 PM] Localisation check took 3ms
+[Info  - 7:59:38 PM] Validate local files time: 419 files=30
+[Info  - 7:59:38 PM] validateFilesLocalCancellable count=30
+[Info  - 7:59:38 PM] Local validating 30 files
+[Info  - 7:59:39 PM] Localisation check 30 files
+[Info  - 7:59:39 PM] Localisation check took 3ms
+[Info  - 7:59:39 PM] Validate local files time: 409 files=30
+[Info  - 7:59:39 PM] validateFilesLocalCancellable count=30
+[Info  - 7:59:39 PM] Local validating 30 files
+[Info  - 7:59:39 PM] Localisation check 30 files
+[Info  - 7:59:39 PM] Localisation check took 15ms
+[Info  - 7:59:39 PM] Validate local files time: 562 files=30
+[Info  - 7:59:39 PM] validateFilesLocalCancellable count=30
+[Info  - 7:59:39 PM] Local validating 30 files
+[Info  - 7:59:40 PM] Localisation check 30 files
+[Info  - 7:59:40 PM] Localisation check took 5ms
+[Info  - 7:59:40 PM] Validate local files time: 356 files=30
+[Info  - 7:59:40 PM] validateFilesLocalCancellable count=30
+[Info  - 7:59:40 PM] Local validating 30 files
+[Info  - 7:59:40 PM] Localisation check 30 files
+[Info  - 7:59:40 PM] Localisation check took 3ms
+[Info  - 7:59:40 PM] Validate local files time: 376 files=30
+[Info  - 7:59:40 PM] validateFilesLocalCancellable count=30
+[Info  - 7:59:40 PM] Local validating 30 files
+[Info  - 7:59:40 PM] Localisation check 30 files
+[Info  - 7:59:40 PM] Localisation check took 1ms
+[Info  - 7:59:40 PM] Validate local files time: 327 files=30
+[Info  - 7:59:40 PM] validateFilesLocalCancellable count=30
+[Info  - 7:59:40 PM] Local validating 30 files
+[Info  - 7:59:41 PM] Localisation check 30 files
+[Info  - 7:59:41 PM] Localisation check took 0ms
+[Info  - 7:59:41 PM] Validate local files time: 303 files=30
+[Info  - 7:59:41 PM] validateFilesLocalCancellable count=30
+[Info  - 7:59:41 PM] Local validating 30 files
+[Info  - 7:59:41 PM] Localisation check 30 files
+[Info  - 7:59:41 PM] Localisation check took 3ms
+[Info  - 7:59:41 PM] Validate local files time: 314 files=30
+[Info  - 7:59:41 PM] validateFilesLocalCancellable count=30
+[Info  - 7:59:41 PM] Local validating 30 files
+[Info  - 7:59:41 PM] Localisation check 30 files
+[Info  - 7:59:41 PM] Localisation check took 6ms
+[Info  - 7:59:41 PM] Validate local files time: 396 files=30
+[Info  - 7:59:41 PM] validateFilesLocalCancellable count=30
+[Info  - 7:59:41 PM] Local validating 30 files
+[Info  - 7:59:42 PM] Localisation check 30 files
+[Info  - 7:59:42 PM] Localisation check took 3ms
+[Info  - 7:59:42 PM] Validate local files time: 408 files=30
+[Info  - 7:59:42 PM] validateFilesLocalCancellable count=30
+[Info  - 7:59:42 PM] Local validating 30 files
+[Info  - 7:59:43 PM] Localisation check 30 files
+[Info  - 7:59:43 PM] Localisation check took 10ms
+[Info  - 7:59:43 PM] Validate local files time: 762 files=30
+[Info  - 7:59:43 PM] validateFilesLocalCancellable count=30
+[Info  - 7:59:43 PM] Local validating 30 files
+[Info  - 7:59:43 PM] Localisation check 30 files
+[Info  - 7:59:43 PM] Localisation check took 13ms
+[Info  - 7:59:43 PM] Validate local files time: 424 files=30
+[Info  - 7:59:43 PM] validateFilesLocalCancellable count=30
+[Info  - 7:59:43 PM] Local validating 30 files
+[Info  - 7:59:43 PM] Localisation check 30 files
+[Info  - 7:59:43 PM] Localisation check took 5ms
+[Info  - 7:59:43 PM] Validate local files time: 376 files=30
+[Info  - 7:59:43 PM] validateFilesLocalCancellable count=30
+[Info  - 7:59:43 PM] Local validating 30 files
+[Info  - 7:59:44 PM] Localisation check 30 files
+[Info  - 7:59:44 PM] Localisation check took 2ms
+[Info  - 7:59:44 PM] Validate local files time: 333 files=30
+[Info  - 7:59:44 PM] validateFilesLocalCancellable count=30
+[Info  - 7:59:44 PM] Local validating 30 files
+[Info  - 7:59:44 PM] Localisation check 30 files
+[Info  - 7:59:44 PM] Localisation check took 3ms
+[Info  - 7:59:44 PM] Validate local files time: 341 files=30
+[Info  - 7:59:44 PM] validateFilesLocalCancellable count=30
+[Info  - 7:59:44 PM] Local validating 30 files
+[Info  - 7:59:45 PM] Localisation check 30 files
+[Info  - 7:59:45 PM] Localisation check took 4ms
+[Info  - 7:59:45 PM] Validate local files time: 343 files=30
+[Info  - 7:59:45 PM] validateFilesLocalCancellable count=30
+[Info  - 7:59:45 PM] Local validating 30 files
+[Info  - 7:59:45 PM] Localisation check 30 files
+[Info  - 7:59:45 PM] Localisation check took 2ms
+[Info  - 7:59:45 PM] Validate local files time: 306 files=30
+[Info  - 7:59:45 PM] validateFilesLocalCancellable count=30
+[Info  - 7:59:45 PM] Local validating 30 files
+[Info  - 7:59:45 PM] Localisation check 30 files
+[Info  - 7:59:45 PM] Localisation check took 3ms
+[Info  - 7:59:45 PM] Validate local files time: 331 files=30
+[Info  - 7:59:45 PM] validateFilesLocalCancellable count=30
+[Info  - 7:59:45 PM] Local validating 30 files
+[Info  - 7:59:46 PM] Localisation check 30 files
+[Info  - 7:59:46 PM] Localisation check took 1ms
+[Info  - 7:59:46 PM] Validate local files time: 299 files=30
+[Info  - 7:59:46 PM] validateFilesLocalCancellable count=30
+[Info  - 7:59:46 PM] Local validating 30 files
+[Info  - 7:59:46 PM] Localisation check 30 files
+[Info  - 7:59:46 PM] Localisation check took 0ms
+[Info  - 7:59:46 PM] Validate local files time: 302 files=30
+[Info  - 7:59:46 PM] validateFilesLocalCancellable count=30
+[Info  - 7:59:46 PM] Local validating 30 files
+[Info  - 7:59:46 PM] Localisation check 30 files
+[Info  - 7:59:46 PM] Localisation check took 5ms
+[Info  - 7:59:46 PM] Validate local files time: 370 files=30
+[Info  - 7:59:46 PM] validateFilesLocalCancellable count=30
+[Info  - 7:59:46 PM] Local validating 30 files
+[Info  - 7:59:47 PM] Localisation check 30 files
+[Info  - 7:59:47 PM] Localisation check took 0ms
+[Info  - 7:59:47 PM] Validate local files time: 309 files=30
+[Info  - 7:59:47 PM] validateFilesLocalCancellable count=30
+[Info  - 7:59:47 PM] Local validating 30 files
+[Info  - 7:59:47 PM] Localisation check 30 files
+[Info  - 7:59:47 PM] Localisation check took 0ms
+[Info  - 7:59:47 PM] Validate local files time: 303 files=30
+[Info  - 7:59:47 PM] validateFilesLocalCancellable count=30
+[Info  - 7:59:47 PM] Local validating 30 files
+[Info  - 7:59:47 PM] Localisation check 30 files
+[Info  - 7:59:47 PM] Localisation check took 0ms
+[Info  - 7:59:47 PM] Validate local files time: 296 files=30
+[Info  - 7:59:47 PM] validateFilesLocalCancellable count=30
+[Info  - 7:59:47 PM] Local validating 30 files
+[Info  - 7:59:48 PM] Localisation check 30 files
+[Info  - 7:59:48 PM] Localisation check took 2ms
+[Info  - 7:59:48 PM] Validate local files time: 318 files=30
+[Info  - 7:59:48 PM] validateFilesLocalCancellable count=30
+[Info  - 7:59:48 PM] Local validating 30 files
+[Info  - 7:59:48 PM] Localisation check 30 files
+[Info  - 7:59:48 PM] Localisation check took 8ms
+[Info  - 7:59:48 PM] Validate local files time: 380 files=30
+[Info  - 7:59:48 PM] validateFilesLocalCancellable count=30
+[Info  - 7:59:48 PM] Local validating 30 files
+[Info  - 7:59:48 PM] Localisation check 30 files
+[Info  - 7:59:48 PM] Localisation check took 10ms
+[Info  - 7:59:48 PM] Validate local files time: 457 files=30
+[Info  - 7:59:48 PM] validateFilesLocalCancellable count=30
+[Info  - 7:59:48 PM] Local validating 30 files
+[Info  - 7:59:49 PM] Localisation check 30 files
+[Info  - 7:59:49 PM] Localisation check took 1ms
+[Info  - 7:59:49 PM] Validate local files time: 294 files=30
+[Info  - 7:59:49 PM] validateFilesLocalCancellable count=30
+[Info  - 7:59:49 PM] Local validating 30 files
+[Info  - 7:59:49 PM] Localisation check 30 files
+[Info  - 7:59:49 PM] Localisation check took 0ms
+[Info  - 7:59:49 PM] Validate local files time: 341 files=30
+[Info  - 7:59:49 PM] validateFilesLocalCancellable count=30
+[Info  - 7:59:49 PM] Local validating 30 files
+[Info  - 7:59:49 PM] Localisation check 30 files
+[Info  - 7:59:49 PM] Localisation check took 8ms
+[Info  - 7:59:49 PM] Validate local files time: 245 files=30
+[Info  - 7:59:49 PM] validateFilesLocalCancellable count=30
+[Info  - 7:59:49 PM] Local validating 30 files
+[Info  - 7:59:50 PM] Localisation check 30 files
+[Info  - 7:59:50 PM] Localisation check took 9ms
+[Info  - 7:59:50 PM] Validate local files time: 177 files=30
+[Info  - 7:59:50 PM] validateFilesLocalCancellable count=30
+[Info  - 7:59:50 PM] Local validating 30 files
+[Info  - 7:59:50 PM] Localisation check 30 files
+[Info  - 7:59:50 PM] Localisation check took 13ms
+[Info  - 7:59:50 PM] Validate local files time: 530 files=30
+[Info  - 7:59:50 PM] validateFilesLocalCancellable count=30
+[Info  - 7:59:50 PM] Local validating 30 files
+[Info  - 7:59:51 PM] Localisation check 30 files
+[Info  - 7:59:51 PM] Localisation check took 2ms
+[Info  - 7:59:51 PM] Validate local files time: 452 files=30
+[Info  - 7:59:51 PM] validateFilesLocalCancellable count=30
+[Info  - 7:59:51 PM] Local validating 30 files
+[Info  - 7:59:51 PM] Localisation check 30 files
+[Info  - 7:59:51 PM] Localisation check took 1ms
+[Info  - 7:59:51 PM] Validate local files time: 338 files=30
+[Info  - 7:59:51 PM] validateFilesLocalCancellable count=30
+[Info  - 7:59:51 PM] Local validating 30 files
+[Info  - 7:59:52 PM] Localisation check 30 files
+[Info  - 7:59:52 PM] Localisation check took 0ms
+[Info  - 7:59:52 PM] Validate local files time: 578 files=30
+[Info  - 7:59:52 PM] validateFilesLocalCancellable count=30
+[Info  - 7:59:52 PM] Local validating 30 files
+[Info  - 7:59:52 PM] Localisation check 30 files
+[Info  - 7:59:52 PM] Localisation check took 13ms
+[Info  - 7:59:52 PM] Validate local files time: 690 files=30
+[Info  - 7:59:52 PM] validateFilesLocalCancellable count=30
+[Info  - 7:59:52 PM] Local validating 30 files
+[Info  - 7:59:53 PM] Localisation check 30 files
+[Info  - 7:59:53 PM] Localisation check took 2ms
+[Info  - 7:59:53 PM] Validate local files time: 368 files=30
+[Info  - 7:59:53 PM] validateFilesLocalCancellable count=30
+[Info  - 7:59:53 PM] Local validating 30 files
+[Info  - 7:59:53 PM] Localisation check 30 files
+[Info  - 7:59:53 PM] Localisation check took 5ms
+[Info  - 7:59:53 PM] Validate local files time: 196 files=30
+[Info  - 7:59:53 PM] validateFilesLocalCancellable count=30
+[Info  - 7:59:53 PM] Local validating 30 files
+[Info  - 7:59:53 PM] Localisation check 30 files
+[Info  - 7:59:53 PM] Localisation check took 6ms
+[Info  - 7:59:53 PM] Validate local files time: 249 files=30
+[Info  - 7:59:53 PM] validateFilesLocalCancellable count=30
+[Info  - 7:59:53 PM] Local validating 30 files
+[Info  - 7:59:54 PM] Localisation check 30 files
+[Info  - 7:59:54 PM] Localisation check took 37ms
+[Info  - 7:59:54 PM] Validate local files time: 658 files=30
+[Info  - 7:59:54 PM] validateFilesLocalCancellable count=30
+[Info  - 7:59:54 PM] Local validating 30 files
+[Info  - 7:59:54 PM] Localisation check 30 files
+[Info  - 7:59:54 PM] Localisation check took 14ms
+[Info  - 7:59:54 PM] Validate local files time: 286 files=30
+[Info  - 7:59:54 PM] validateFilesLocalCancellable count=30
+[Info  - 7:59:54 PM] Local validating 30 files
+[Info  - 7:59:55 PM] Localisation check 30 files
+[Info  - 7:59:55 PM] Localisation check took 23ms
+[Info  - 7:59:55 PM] Validate local files time: 557 files=30
+[Info  - 7:59:55 PM] validateFilesLocalCancellable count=30
+[Info  - 7:59:55 PM] Local validating 30 files
+[Info  - 7:59:55 PM] Localisation check 30 files
+[Info  - 7:59:55 PM] Localisation check took 4ms
+[Info  - 7:59:55 PM] Validate local files time: 176 files=30
+[Info  - 7:59:55 PM] validateFilesLocalCancellable count=30
+[Info  - 7:59:55 PM] Local validating 30 files
+[Info  - 7:59:55 PM] Localisation check 30 files
+[Info  - 7:59:55 PM] Localisation check took 2ms
+[Info  - 7:59:55 PM] Validate local files time: 103 files=30
+[Info  - 7:59:55 PM] validateFilesLocalCancellable count=30
+[Info  - 7:59:55 PM] Local validating 30 files
+[Info  - 7:59:55 PM] Localisation check 30 files
+[Info  - 7:59:55 PM] Localisation check took 2ms
+[Info  - 7:59:55 PM] Validate local files time: 102 files=30
+[Info  - 7:59:55 PM] validateFilesLocalCancellable count=30
+[Info  - 7:59:55 PM] Local validating 30 files
+[Info  - 7:59:55 PM] Localisation check 30 files
+[Info  - 7:59:55 PM] Localisation check took 3ms
+[Info  - 7:59:55 PM] Validate local files time: 152 files=30
+[Info  - 7:59:55 PM] validateFilesLocalCancellable count=30
+[Info  - 7:59:55 PM] Local validating 30 files
+[Info  - 7:59:56 PM] Localisation check 30 files
+[Info  - 7:59:56 PM] Localisation check took 3ms
+[Info  - 7:59:56 PM] Validate local files time: 115 files=30
+[Info  - 7:59:56 PM] validateFilesLocalCancellable count=30
+[Info  - 7:59:56 PM] Local validating 30 files
+[Info  - 7:59:56 PM] Localisation check 30 files
+[Info  - 7:59:56 PM] Localisation check took 12ms
+[Info  - 7:59:56 PM] Validate local files time: 328 files=30
+[Info  - 7:59:56 PM] validateFilesLocalCancellable count=30
+[Info  - 7:59:56 PM] Local validating 30 files
+[Info  - 7:59:56 PM] Localisation check 30 files
+[Info  - 7:59:56 PM] Localisation check took 25ms
+[Info  - 7:59:56 PM] Validate local files time: 517 files=30
+[Info  - 7:59:56 PM] validateFilesLocalCancellable count=30
+[Info  - 7:59:56 PM] Local validating 30 files
+[Info  - 7:59:57 PM] Localisation check 30 files
+[Info  - 7:59:57 PM] Localisation check took 32ms
+[Info  - 7:59:57 PM] Validate local files time: 581 files=30
+[Info  - 7:59:57 PM] validateFilesLocalCancellable count=30
+[Info  - 7:59:57 PM] Local validating 30 files
+[Info  - 7:59:57 PM] Localisation check 30 files
+[Info  - 7:59:57 PM] Localisation check took 10ms
+[Info  - 7:59:57 PM] Validate local files time: 163 files=30
+[Info  - 7:59:57 PM] validateFilesLocalCancellable count=30
+[Info  - 7:59:57 PM] Local validating 30 files
+[Info  - 7:59:57 PM] Localisation check 30 files
+[Info  - 7:59:57 PM] Localisation check took 6ms
+[Info  - 7:59:57 PM] Validate local files time: 178 files=30
+[Info  - 7:59:57 PM] validateFilesLocalCancellable count=30
+[Info  - 7:59:57 PM] Local validating 30 files
+[Info  - 7:59:58 PM] Localisation check 30 files
+[Info  - 7:59:58 PM] Localisation check took 13ms
+[Info  - 7:59:58 PM] Validate local files time: 434 files=30
+[Info  - 7:59:58 PM] validateFilesLocalCancellable count=30
+[Info  - 7:59:58 PM] Local validating 30 files
+[Info  - 7:59:58 PM] Localisation check 30 files
+[Info  - 7:59:58 PM] Localisation check took 12ms
+[Info  - 7:59:58 PM] Validate local files time: 433 files=30
+[Info  - 7:59:58 PM] validateFilesLocalCancellable count=30
+[Info  - 7:59:58 PM] Local validating 30 files
+[Info  - 7:59:59 PM] Localisation check 30 files
+[Info  - 7:59:59 PM] Localisation check took 6ms
+[Info  - 7:59:59 PM] Validate local files time: 155 files=30
+[Info  - 7:59:59 PM] validateFilesLocalCancellable count=30
+[Info  - 7:59:59 PM] Local validating 30 files
+[Info  - 7:59:59 PM] Localisation check 30 files
+[Info  - 7:59:59 PM] Localisation check took 5ms
+[Info  - 7:59:59 PM] Validate local files time: 144 files=30
+[Info  - 7:59:59 PM] validateFilesLocalCancellable count=30
+[Info  - 7:59:59 PM] Local validating 30 files
+[Info  - 7:59:59 PM] Localisation check 30 files
+[Info  - 7:59:59 PM] Localisation check took 1ms
+[Info  - 7:59:59 PM] Validate local files time: 90 files=30
+[Info  - 7:59:59 PM] validateFilesLocalCancellable count=30
+[Info  - 7:59:59 PM] Local validating 30 files
+[Info  - 7:59:59 PM] Localisation check 30 files
+[Info  - 7:59:59 PM] Localisation check took 8ms
+[Info  - 7:59:59 PM] Validate local files time: 190 files=30
+[Info  - 7:59:59 PM] validateFilesLocalCancellable count=30
+[Info  - 7:59:59 PM] Local validating 30 files
+[Info  - 7:59:59 PM] Localisation check 30 files
+[Info  - 7:59:59 PM] Localisation check took 6ms
+[Info  - 7:59:59 PM] Validate local files time: 209 files=30
+[Info  - 7:59:59 PM] validateFilesLocalCancellable count=30
+[Info  - 7:59:59 PM] Local validating 30 files
+[Info  - 7:59:59 PM] Localisation check 30 files
+[Info  - 7:59:59 PM] Localisation check took 4ms
+[Info  - 7:59:59 PM] Validate local files time: 137 files=30
+[Info  - 7:59:59 PM] validateFilesLocalCancellable count=30
+[Info  - 7:59:59 PM] Local validating 30 files
+[Info  - 8:00:00 PM] Localisation check 30 files
+[Info  - 8:00:00 PM] Localisation check took 6ms
+[Info  - 8:00:00 PM] Validate local files time: 234 files=30
+[Info  - 8:00:00 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:00 PM] Local validating 30 files
+[Info  - 8:00:00 PM] Localisation check 30 files
+[Info  - 8:00:00 PM] Localisation check took 3ms
+[Info  - 8:00:00 PM] Validate local files time: 175 files=30
+[Info  - 8:00:00 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:00 PM] Local validating 30 files
+[Info  - 8:00:00 PM] Localisation check 30 files
+[Info  - 8:00:00 PM] Localisation check took 10ms
+[Info  - 8:00:00 PM] Validate local files time: 282 files=30
+[Info  - 8:00:00 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:00 PM] Local validating 30 files
+[Info  - 8:00:00 PM] Localisation check 30 files
+[Info  - 8:00:00 PM] Localisation check took 6ms
+[Info  - 8:00:00 PM] Validate local files time: 228 files=30
+[Info  - 8:00:00 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:00 PM] Local validating 30 files
+[Info  - 8:00:01 PM] Localisation check 30 files
+[Info  - 8:00:01 PM] Localisation check took 12ms
+[Info  - 8:00:01 PM] Validate local files time: 412 files=30
+[Info  - 8:00:01 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:01 PM] Local validating 30 files
+[Info  - 8:00:01 PM] Localisation check 30 files
+[Info  - 8:00:01 PM] Localisation check took 4ms
+[Info  - 8:00:01 PM] Validate local files time: 175 files=30
+[Info  - 8:00:01 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:01 PM] Local validating 30 files
+[Info  - 8:00:01 PM] Localisation check 30 files
+[Info  - 8:00:01 PM] Localisation check took 20ms
+[Info  - 8:00:01 PM] Validate local files time: 382 files=30
+[Info  - 8:00:01 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:01 PM] Local validating 30 files
+[Info  - 8:00:02 PM] Localisation check 30 files
+[Info  - 8:00:02 PM] Localisation check took 19ms
+[Info  - 8:00:02 PM] Validate local files time: 706 files=30
+[Info  - 8:00:02 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:02 PM] Local validating 30 files
+[Info  - 8:00:03 PM] Localisation check 30 files
+[Info  - 8:00:03 PM] Localisation check took 17ms
+[Info  - 8:00:03 PM] Validate local files time: 650 files=30
+[Info  - 8:00:03 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:03 PM] Local validating 30 files
+[Info  - 8:00:03 PM] Localisation check 30 files
+[Info  - 8:00:03 PM] Localisation check took 9ms
+[Info  - 8:00:03 PM] Validate local files time: 244 files=30
+[Info  - 8:00:03 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:03 PM] Local validating 30 files
+[Info  - 8:00:04 PM] Localisation check 30 files
+[Info  - 8:00:04 PM] Localisation check took 22ms
+[Info  - 8:00:04 PM] Validate local files time: 656 files=30
+[Info  - 8:00:04 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:04 PM] Local validating 30 files
+[Info  - 8:00:04 PM] Localisation check 30 files
+[Info  - 8:00:04 PM] Localisation check took 10ms
+[Info  - 8:00:04 PM] Validate local files time: 471 files=30
+[Info  - 8:00:04 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:04 PM] Local validating 30 files
+[Info  - 8:00:05 PM] Localisation check 30 files
+[Info  - 8:00:05 PM] Localisation check took 9ms
+[Info  - 8:00:05 PM] Validate local files time: 929 files=30
+[Info  - 8:00:05 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:05 PM] Local validating 30 files
+[Info  - 8:00:06 PM] Localisation check 30 files
+[Info  - 8:00:06 PM] Localisation check took 6ms
+[Info  - 8:00:06 PM] Validate local files time: 603 files=30
+[Info  - 8:00:06 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:06 PM] Local validating 30 files
+[Info  - 8:00:07 PM] Localisation check 30 files
+[Info  - 8:00:07 PM] Localisation check took 12ms
+[Info  - 8:00:07 PM] Validate local files time: 874 files=30
+[Info  - 8:00:07 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:07 PM] Local validating 30 files
+[Info  - 8:00:07 PM] Localisation check 30 files
+[Info  - 8:00:07 PM] Localisation check took 25ms
+[Info  - 8:00:07 PM] Validate local files time: 443 files=30
+[Info  - 8:00:07 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:07 PM] Local validating 30 files
+[Info  - 8:00:07 PM] Localisation check 30 files
+[Info  - 8:00:07 PM] Localisation check took 1ms
+[Info  - 8:00:07 PM] Validate local files time: 100 files=30
+[Info  - 8:00:07 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:07 PM] Local validating 30 files
+[Info  - 8:00:08 PM] Localisation check 30 files
+[Info  - 8:00:08 PM] Localisation check took 12ms
+[Info  - 8:00:08 PM] Validate local files time: 292 files=30
+[Info  - 8:00:08 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:08 PM] Local validating 30 files
+[Info  - 8:00:09 PM] Localisation check 30 files
+[Info  - 8:00:09 PM] Localisation check took 32ms
+[Info  - 8:00:09 PM] Validate local files time: 1108 files=30
+[Info  - 8:00:09 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:09 PM] Local validating 30 files
+[Info  - 8:00:09 PM] Localisation check 30 files
+[Info  - 8:00:09 PM] Localisation check took 3ms
+[Info  - 8:00:09 PM] Validate local files time: 121 files=30
+[Info  - 8:00:09 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:09 PM] Local validating 30 files
+[Info  - 8:00:09 PM] Localisation check 30 files
+[Info  - 8:00:09 PM] Localisation check took 3ms
+[Info  - 8:00:09 PM] Validate local files time: 311 files=30
+[Info  - 8:00:09 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:09 PM] Local validating 30 files
+[Info  - 8:00:10 PM] Localisation check 30 files
+[Info  - 8:00:10 PM] Localisation check took 7ms
+[Info  - 8:00:10 PM] Validate local files time: 313 files=30
+[Info  - 8:00:10 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:10 PM] Local validating 30 files
+[Info  - 8:00:11 PM] Localisation check 30 files
+[Info  - 8:00:11 PM] Localisation check took 46ms
+[Info  - 8:00:11 PM] Validate local files time: 1445 files=30
+[Info  - 8:00:11 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:11 PM] Local validating 30 files
+[Info  - 8:00:12 PM] Localisation check 30 files
+[Info  - 8:00:12 PM] Localisation check took 14ms
+[Info  - 8:00:12 PM] Validate local files time: 516 files=30
+[Info  - 8:00:12 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:12 PM] Local validating 30 files
+[Info  - 8:00:12 PM] Localisation check 30 files
+[Info  - 8:00:12 PM] Localisation check took 14ms
+[Info  - 8:00:12 PM] Validate local files time: 515 files=30
+[Info  - 8:00:12 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:12 PM] Local validating 30 files
+[Info  - 8:00:13 PM] Localisation check 30 files
+[Info  - 8:00:13 PM] Localisation check took 13ms
+[Info  - 8:00:13 PM] Validate local files time: 450 files=30
+[Info  - 8:00:13 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:13 PM] Local validating 30 files
+[Info  - 8:00:13 PM] Localisation check 30 files
+[Info  - 8:00:13 PM] Localisation check took 5ms
+[Info  - 8:00:13 PM] Validate local files time: 108 files=30
+[Info  - 8:00:13 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:13 PM] Local validating 30 files
+[Info  - 8:00:14 PM] Localisation check 30 files
+[Info  - 8:00:14 PM] Localisation check took 48ms
+[Info  - 8:00:14 PM] Validate local files time: 1286 files=30
+[Info  - 8:00:14 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:14 PM] Local validating 30 files
+[Info  - 8:00:14 PM] Localisation check 30 files
+[Info  - 8:00:14 PM] Localisation check took 15ms
+[Info  - 8:00:14 PM] Validate local files time: 304 files=30
+[Info  - 8:00:14 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:14 PM] Local validating 30 files
+[Info  - 8:00:15 PM] Localisation check 30 files
+[Info  - 8:00:15 PM] Localisation check took 29ms
+[Info  - 8:00:15 PM] Validate local files time: 439 files=30
+[Info  - 8:00:15 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:15 PM] Local validating 30 files
+[Info  - 8:00:15 PM] Localisation check 30 files
+[Info  - 8:00:15 PM] Localisation check took 23ms
+[Info  - 8:00:15 PM] Validate local files time: 404 files=30
+[Info  - 8:00:15 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:15 PM] Local validating 30 files
+[Info  - 8:00:16 PM] Localisation check 30 files
+[Info  - 8:00:16 PM] Localisation check took 7ms
+[Info  - 8:00:16 PM] Validate local files time: 203 files=30
+[Info  - 8:00:16 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:16 PM] Local validating 30 files
+[Info  - 8:00:16 PM] Localisation check 30 files
+[Info  - 8:00:16 PM] Localisation check took 7ms
+[Info  - 8:00:16 PM] Validate local files time: 247 files=30
+[Info  - 8:00:16 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:16 PM] Local validating 30 files
+[Info  - 8:00:17 PM] Localisation check 30 files
+[Info  - 8:00:17 PM] Localisation check took 25ms
+[Info  - 8:00:17 PM] Validate local files time: 943 files=30
+[Info  - 8:00:17 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:17 PM] Local validating 30 files
+[Info  - 8:00:17 PM] Localisation check 30 files
+[Info  - 8:00:17 PM] Localisation check took 17ms
+[Info  - 8:00:17 PM] Validate local files time: 547 files=30
+[Info  - 8:00:17 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:17 PM] Local validating 30 files
+[Info  - 8:00:18 PM] Localisation check 30 files
+[Info  - 8:00:18 PM] Localisation check took 28ms
+[Info  - 8:00:18 PM] Validate local files time: 813 files=30
+[Info  - 8:00:18 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:18 PM] Local validating 30 files
+[Info  - 8:00:19 PM] Localisation check 30 files
+[Info  - 8:00:19 PM] Localisation check took 23ms
+[Info  - 8:00:19 PM] Validate local files time: 937 files=30
+[Info  - 8:00:19 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:19 PM] Local validating 30 files
+[Info  - 8:00:21 PM] Localisation check 30 files
+[Info  - 8:00:21 PM] Localisation check took 46ms
+[Info  - 8:00:21 PM] Validate local files time: 1552 files=30
+[Info  - 8:00:21 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:21 PM] Local validating 30 files
+[Info  - 8:00:22 PM] Localisation check 30 files
+[Info  - 8:00:22 PM] Localisation check took 29ms
+[Info  - 8:00:22 PM] Validate local files time: 1147 files=30
+[Info  - 8:00:22 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:22 PM] Local validating 30 files
+[Info  - 8:00:22 PM] Localisation check 30 files
+[Info  - 8:00:22 PM] Localisation check took 13ms
+[Info  - 8:00:22 PM] Validate local files time: 447 files=30
+[Info  - 8:00:22 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:22 PM] Local validating 30 files
+[Info  - 8:00:22 PM] Localisation check 30 files
+[Info  - 8:00:22 PM] Localisation check took 1ms
+[Info  - 8:00:22 PM] Validate local files time: 53 files=30
+[Info  - 8:00:22 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:22 PM] Local validating 30 files
+[Info  - 8:00:22 PM] Localisation check 30 files
+[Info  - 8:00:22 PM] Localisation check took 2ms
+[Info  - 8:00:22 PM] Validate local files time: 56 files=30
+[Info  - 8:00:23 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:23 PM] Local validating 30 files
+[Info  - 8:00:23 PM] Localisation check 30 files
+[Info  - 8:00:23 PM] Localisation check took 35ms
+[Info  - 8:00:23 PM] Validate local files time: 550 files=30
+[Info  - 8:00:23 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:23 PM] Local validating 30 files
+[Info  - 8:00:24 PM] Localisation check 30 files
+[Info  - 8:00:24 PM] Localisation check took 28ms
+[Info  - 8:00:24 PM] Validate local files time: 1035 files=30
+[Info  - 8:00:24 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:24 PM] Local validating 30 files
+[Info  - 8:00:26 PM] Localisation check 30 files
+[Info  - 8:00:26 PM] Localisation check took 63ms
+[Info  - 8:00:26 PM] Validate local files time: 1620 files=30
+[Info  - 8:00:26 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:26 PM] Local validating 30 files
+[Info  - 8:00:27 PM] Localisation check 30 files
+[Info  - 8:00:27 PM] Localisation check took 25ms
+[Info  - 8:00:27 PM] Validate local files time: 754 files=30
+[Info  - 8:00:27 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:27 PM] Local validating 30 files
+[Info  - 8:00:27 PM] Localisation check 30 files
+[Info  - 8:00:27 PM] Localisation check took 2ms
+[Info  - 8:00:27 PM] Validate local files time: 106 files=30
+[Info  - 8:00:27 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:27 PM] Local validating 30 files
+[Info  - 8:00:27 PM] Localisation check 30 files
+[Info  - 8:00:27 PM] Localisation check took 21ms
+[Info  - 8:00:27 PM] Validate local files time: 326 files=30
+[Info  - 8:00:27 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:27 PM] Local validating 30 files
+[Info  - 8:00:27 PM] Localisation check 30 files
+[Info  - 8:00:27 PM] Localisation check took 10ms
+[Info  - 8:00:27 PM] Validate local files time: 271 files=30
+[Info  - 8:00:27 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:27 PM] Local validating 30 files
+[Info  - 8:00:29 PM] Localisation check 30 files
+[Info  - 8:00:29 PM] Localisation check took 68ms
+[Info  - 8:00:29 PM] Validate local files time: 1281 files=30
+[Info  - 8:00:29 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:29 PM] Local validating 30 files
+[Info  - 8:00:30 PM] Localisation check 30 files
+[Info  - 8:00:30 PM] Localisation check took 27ms
+[Info  - 8:00:30 PM] Validate local files time: 938 files=30
+[Info  - 8:00:30 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:30 PM] Local validating 30 files
+[Info  - 8:00:31 PM] Localisation check 30 files
+[Info  - 8:00:31 PM] Localisation check took 45ms
+[Info  - 8:00:31 PM] Validate local files time: 1735 files=30
+[Info  - 8:00:31 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:31 PM] Local validating 30 files
+[Info  - 8:00:32 PM] Localisation check 30 files
+[Info  - 8:00:32 PM] Localisation check took 32ms
+[Info  - 8:00:32 PM] Validate local files time: 706 files=30
+[Info  - 8:00:32 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:32 PM] Local validating 30 files
+[Info  - 8:00:34 PM] Localisation check 30 files
+[Info  - 8:00:34 PM] Localisation check took 47ms
+[Info  - 8:00:34 PM] Validate local files time: 1739 files=30
+[Info  - 8:00:34 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:34 PM] Local validating 13 files
+[Info  - 8:00:35 PM] Localisation check 13 files
+[Info  - 8:00:35 PM] Localisation check took 27ms
+[Info  - 8:00:35 PM] Validate local files time: 766 files=13
+[Info  - 8:00:35 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:35 PM] Local validating 0 files
+[Info  - 8:00:35 PM] Localisation check 0 files
+[Info  - 8:00:35 PM] Localisation check took 0ms
+[Info  - 8:00:35 PM] Validate local files time: 50 files=0
+[Info  - 8:00:35 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:35 PM] Local validating 0 files
+[Info  - 8:00:35 PM] Localisation check 0 files
+[Info  - 8:00:35 PM] Localisation check took 0ms
+[Info  - 8:00:35 PM] Validate local files time: 45 files=0
+[Info  - 8:00:35 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:35 PM] Local validating 0 files
+[Info  - 8:00:35 PM] Localisation check 0 files
+[Info  - 8:00:35 PM] Localisation check took 0ms
+[Info  - 8:00:35 PM] Validate local files time: 38 files=0
+[Info  - 8:00:35 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:35 PM] Local validating 0 files
+[Info  - 8:00:35 PM] Localisation check 0 files
+[Info  - 8:00:35 PM] Localisation check took 0ms
+[Info  - 8:00:35 PM] Validate local files time: 37 files=0
+[Info  - 8:00:35 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:35 PM] Local validating 0 files
+[Info  - 8:00:35 PM] Localisation check 0 files
+[Info  - 8:00:35 PM] Localisation check took 0ms
+[Info  - 8:00:35 PM] Validate local files time: 39 files=0
+[Info  - 8:00:35 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:35 PM] Local validating 0 files
+[Info  - 8:00:35 PM] Localisation check 0 files
+[Info  - 8:00:35 PM] Localisation check took 0ms
+[Info  - 8:00:35 PM] Validate local files time: 37 files=0
+[Info  - 8:00:35 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:35 PM] Local validating 0 files
+[Info  - 8:00:35 PM] Localisation check 0 files
+[Info  - 8:00:35 PM] Localisation check took 0ms
+[Info  - 8:00:35 PM] Validate local files time: 37 files=0
+[Info  - 8:00:35 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:35 PM] Local validating 0 files
+[Info  - 8:00:35 PM] Localisation check 0 files
+[Info  - 8:00:35 PM] Localisation check took 0ms
+[Info  - 8:00:35 PM] Validate local files time: 35 files=0
+[Info  - 8:00:35 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:35 PM] Local validating 0 files
+[Info  - 8:00:35 PM] Localisation check 0 files
+[Info  - 8:00:35 PM] Localisation check took 0ms
+[Info  - 8:00:35 PM] Validate local files time: 38 files=0
+[Info  - 8:00:35 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:35 PM] Local validating 0 files
+[Info  - 8:00:35 PM] Localisation check 0 files
+[Info  - 8:00:35 PM] Localisation check took 0ms
+[Info  - 8:00:35 PM] Validate local files time: 36 files=0
+[Info  - 8:00:35 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:35 PM] Local validating 0 files
+[Info  - 8:00:35 PM] Localisation check 0 files
+[Info  - 8:00:35 PM] Localisation check took 0ms
+[Info  - 8:00:35 PM] Validate local files time: 37 files=0
+[Info  - 8:00:35 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:35 PM] Local validating 0 files
+[Info  - 8:00:35 PM] Localisation check 0 files
+[Info  - 8:00:35 PM] Localisation check took 0ms
+[Info  - 8:00:35 PM] Validate local files time: 36 files=0
+[Info  - 8:00:35 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:35 PM] Local validating 0 files
+[Info  - 8:00:35 PM] Localisation check 0 files
+[Info  - 8:00:35 PM] Localisation check took 0ms
+[Info  - 8:00:35 PM] Validate local files time: 43 files=0
+[Info  - 8:00:35 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:35 PM] Local validating 0 files
+[Info  - 8:00:36 PM] Localisation check 0 files
+[Info  - 8:00:36 PM] Localisation check took 0ms
+[Info  - 8:00:36 PM] Validate local files time: 37 files=0
+[Info  - 8:00:36 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:36 PM] Local validating 0 files
+[Info  - 8:00:36 PM] Localisation check 0 files
+[Info  - 8:00:36 PM] Localisation check took 0ms
+[Info  - 8:00:36 PM] Validate local files time: 35 files=0
+[Info  - 8:00:36 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:36 PM] Local validating 0 files
+[Info  - 8:00:36 PM] Localisation check 0 files
+[Info  - 8:00:36 PM] Localisation check took 0ms
+[Info  - 8:00:36 PM] Validate local files time: 37 files=0
+[Info  - 8:00:36 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:36 PM] Local validating 0 files
+[Info  - 8:00:36 PM] Localisation check 0 files
+[Info  - 8:00:36 PM] Localisation check took 0ms
+[Info  - 8:00:36 PM] Validate local files time: 39 files=0
+[Info  - 8:00:36 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:36 PM] Local validating 0 files
+[Info  - 8:00:36 PM] Localisation check 0 files
+[Info  - 8:00:36 PM] Localisation check took 0ms
+[Info  - 8:00:36 PM] Validate local files time: 36 files=0
+[Info  - 8:00:36 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:36 PM] Local validating 0 files
+[Info  - 8:00:36 PM] Localisation check 0 files
+[Info  - 8:00:36 PM] Localisation check took 0ms
+[Info  - 8:00:36 PM] Validate local files time: 39 files=0
+[Info  - 8:00:36 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:36 PM] Local validating 0 files
+[Info  - 8:00:36 PM] Localisation check 0 files
+[Info  - 8:00:36 PM] Localisation check took 0ms
+[Info  - 8:00:36 PM] Validate local files time: 38 files=0
+[Info  - 8:00:36 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:36 PM] Local validating 0 files
+[Info  - 8:00:36 PM] Localisation check 0 files
+[Info  - 8:00:36 PM] Localisation check took 0ms
+[Info  - 8:00:36 PM] Validate local files time: 36 files=0
+[Info  - 8:00:36 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:36 PM] Local validating 0 files
+[Info  - 8:00:36 PM] Localisation check 0 files
+[Info  - 8:00:36 PM] Localisation check took 0ms
+[Info  - 8:00:36 PM] Validate local files time: 38 files=0
+[Info  - 8:00:36 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:36 PM] Local validating 0 files
+[Info  - 8:00:36 PM] Localisation check 0 files
+[Info  - 8:00:36 PM] Localisation check took 0ms
+[Info  - 8:00:36 PM] Validate local files time: 39 files=0
+[Info  - 8:00:36 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:36 PM] Local validating 0 files
+[Info  - 8:00:36 PM] Localisation check 0 files
+[Info  - 8:00:36 PM] Localisation check took 0ms
+[Info  - 8:00:36 PM] Validate local files time: 40 files=0
+[Info  - 8:00:36 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:36 PM] Local validating 0 files
+[Info  - 8:00:36 PM] Localisation check 0 files
+[Info  - 8:00:36 PM] Localisation check took 0ms
+[Info  - 8:00:36 PM] Validate local files time: 38 files=0
+[Info  - 8:00:36 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:36 PM] Local validating 0 files
+[Info  - 8:00:36 PM] Localisation check 0 files
+[Info  - 8:00:36 PM] Localisation check took 0ms
+[Info  - 8:00:36 PM] Validate local files time: 37 files=0
+[Info  - 8:00:36 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:36 PM] Local validating 0 files
+[Info  - 8:00:36 PM] Localisation check 0 files
+[Info  - 8:00:36 PM] Localisation check took 0ms
+[Info  - 8:00:36 PM] Validate local files time: 38 files=0
+[Info  - 8:00:36 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:36 PM] Local validating 0 files
+[Info  - 8:00:36 PM] Localisation check 0 files
+[Info  - 8:00:36 PM] Localisation check took 0ms
+[Info  - 8:00:36 PM] Validate local files time: 38 files=0
+[Info  - 8:00:36 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:36 PM] Local validating 0 files
+[Info  - 8:00:36 PM] Localisation check 0 files
+[Info  - 8:00:36 PM] Localisation check took 0ms
+[Info  - 8:00:36 PM] Validate local files time: 38 files=0
+[Info  - 8:00:36 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:36 PM] Local validating 0 files
+[Info  - 8:00:37 PM] Localisation check 0 files
+[Info  - 8:00:37 PM] Localisation check took 0ms
+[Info  - 8:00:37 PM] Validate local files time: 37 files=0
+[Info  - 8:00:37 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:37 PM] Local validating 0 files
+[Info  - 8:00:37 PM] Localisation check 0 files
+[Info  - 8:00:37 PM] Localisation check took 0ms
+[Info  - 8:00:37 PM] Validate local files time: 35 files=0
+[Info  - 8:00:37 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:37 PM] Local validating 0 files
+[Info  - 8:00:37 PM] Localisation check 0 files
+[Info  - 8:00:37 PM] Localisation check took 0ms
+[Info  - 8:00:37 PM] Validate local files time: 36 files=0
+[Info  - 8:00:37 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:37 PM] Local validating 0 files
+[Info  - 8:00:37 PM] Localisation check 0 files
+[Info  - 8:00:37 PM] Localisation check took 0ms
+[Info  - 8:00:37 PM] Validate local files time: 35 files=0
+[Info  - 8:00:37 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:37 PM] Local validating 0 files
+[Info  - 8:00:37 PM] Localisation check 0 files
+[Info  - 8:00:37 PM] Localisation check took 0ms
+[Info  - 8:00:37 PM] Validate local files time: 37 files=0
+[Info  - 8:00:37 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:37 PM] Local validating 0 files
+[Info  - 8:00:37 PM] Localisation check 0 files
+[Info  - 8:00:37 PM] Localisation check took 0ms
+[Info  - 8:00:37 PM] Validate local files time: 37 files=0
+[Info  - 8:00:37 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:37 PM] Local validating 0 files
+[Info  - 8:00:37 PM] Localisation check 0 files
+[Info  - 8:00:37 PM] Localisation check took 0ms
+[Info  - 8:00:37 PM] Validate local files time: 36 files=0
+[Info  - 8:00:37 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:37 PM] Local validating 0 files
+[Info  - 8:00:37 PM] Localisation check 0 files
+[Info  - 8:00:37 PM] Localisation check took 0ms
+[Info  - 8:00:37 PM] Validate local files time: 37 files=0
+[Info  - 8:00:37 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:37 PM] Local validating 0 files
+[Info  - 8:00:37 PM] Localisation check 0 files
+[Info  - 8:00:37 PM] Localisation check took 0ms
+[Info  - 8:00:37 PM] Validate local files time: 36 files=0
+[Info  - 8:00:37 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:37 PM] Local validating 0 files
+[Info  - 8:00:37 PM] Localisation check 0 files
+[Info  - 8:00:37 PM] Localisation check took 0ms
+[Info  - 8:00:37 PM] Validate local files time: 37 files=0
+[Info  - 8:00:37 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:37 PM] Local validating 0 files
+[Info  - 8:00:37 PM] Localisation check 0 files
+[Info  - 8:00:37 PM] Localisation check took 0ms
+[Info  - 8:00:37 PM] Validate local files time: 36 files=0
+[Info  - 8:00:37 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:37 PM] Local validating 0 files
+[Info  - 8:00:37 PM] Localisation check 0 files
+[Info  - 8:00:37 PM] Localisation check took 0ms
+[Info  - 8:00:37 PM] Validate local files time: 35 files=0
+[Info  - 8:00:37 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:37 PM] Local validating 0 files
+[Info  - 8:00:37 PM] Localisation check 0 files
+[Info  - 8:00:37 PM] Localisation check took 0ms
+[Info  - 8:00:37 PM] Validate local files time: 37 files=0
+[Info  - 8:00:37 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:37 PM] Local validating 0 files
+[Info  - 8:00:37 PM] Localisation check 0 files
+[Info  - 8:00:37 PM] Localisation check took 0ms
+[Info  - 8:00:37 PM] Validate local files time: 36 files=0
+[Info  - 8:00:37 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:37 PM] Local validating 0 files
+[Info  - 8:00:37 PM] Localisation check 0 files
+[Info  - 8:00:37 PM] Localisation check took 0ms
+[Info  - 8:00:37 PM] Validate local files time: 38 files=0
+[Info  - 8:00:37 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:37 PM] Local validating 0 files
+[Info  - 8:00:37 PM] Localisation check 0 files
+[Info  - 8:00:37 PM] Localisation check took 0ms
+[Info  - 8:00:37 PM] Validate local files time: 60 files=0
+[Info  - 8:00:37 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:38 PM] Local validating 0 files
+[Info  - 8:00:38 PM] Localisation check 0 files
+[Info  - 8:00:38 PM] Localisation check took 0ms
+[Info  - 8:00:38 PM] Validate local files time: 43 files=0
+[Info  - 8:00:38 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:38 PM] Local validating 0 files
+[Info  - 8:00:38 PM] Localisation check 0 files
+[Info  - 8:00:38 PM] Localisation check took 0ms
+[Info  - 8:00:38 PM] Validate local files time: 39 files=0
+[Info  - 8:00:38 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:38 PM] Local validating 0 files
+[Info  - 8:00:38 PM] Localisation check 0 files
+[Info  - 8:00:38 PM] Localisation check took 0ms
+[Info  - 8:00:38 PM] Validate local files time: 48 files=0
+[Info  - 8:00:38 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:38 PM] Local validating 0 files
+[Info  - 8:00:38 PM] Localisation check 0 files
+[Info  - 8:00:38 PM] Localisation check took 0ms
+[Info  - 8:00:38 PM] Validate local files time: 39 files=0
+[Info  - 8:00:38 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:38 PM] Local validating 0 files
+[Info  - 8:00:38 PM] Localisation check 0 files
+[Info  - 8:00:38 PM] Localisation check took 0ms
+[Info  - 8:00:38 PM] Validate local files time: 40 files=0
+[Info  - 8:00:38 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:38 PM] Local validating 0 files
+[Info  - 8:00:38 PM] Localisation check 0 files
+[Info  - 8:00:38 PM] Localisation check took 0ms
+[Info  - 8:00:38 PM] Validate local files time: 39 files=0
+[Info  - 8:00:38 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:38 PM] Local validating 0 files
+[Info  - 8:00:38 PM] Localisation check 0 files
+[Info  - 8:00:38 PM] Localisation check took 0ms
+[Info  - 8:00:38 PM] Validate local files time: 41 files=0
+[Info  - 8:00:38 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:38 PM] Local validating 0 files
+[Info  - 8:00:38 PM] Localisation check 0 files
+[Info  - 8:00:38 PM] Localisation check took 0ms
+[Info  - 8:00:38 PM] Validate local files time: 45 files=0
+[Info  - 8:00:38 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:38 PM] Local validating 0 files
+[Info  - 8:00:38 PM] Localisation check 0 files
+[Info  - 8:00:38 PM] Localisation check took 0ms
+[Info  - 8:00:38 PM] Validate local files time: 38 files=0
+[Info  - 8:00:38 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:38 PM] Local validating 0 files
+[Info  - 8:00:38 PM] Localisation check 0 files
+[Info  - 8:00:38 PM] Localisation check took 0ms
+[Info  - 8:00:38 PM] Validate local files time: 39 files=0
+[Info  - 8:00:38 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:38 PM] Local validating 0 files
+[Info  - 8:00:38 PM] Localisation check 0 files
+[Info  - 8:00:38 PM] Localisation check took 0ms
+[Info  - 8:00:38 PM] Validate local files time: 39 files=0
+[Info  - 8:00:38 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:38 PM] Local validating 0 files
+[Info  - 8:00:38 PM] Localisation check 0 files
+[Info  - 8:00:38 PM] Localisation check took 0ms
+[Info  - 8:00:38 PM] Validate local files time: 42 files=0
+[Info  - 8:00:38 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:38 PM] Local validating 0 files
+[Info  - 8:00:38 PM] Localisation check 0 files
+[Info  - 8:00:38 PM] Localisation check took 0ms
+[Info  - 8:00:38 PM] Validate local files time: 36 files=0
+[Info  - 8:00:38 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:38 PM] Local validating 0 files
+[Info  - 8:00:38 PM] Localisation check 0 files
+[Info  - 8:00:38 PM] Localisation check took 0ms
+[Info  - 8:00:38 PM] Validate local files time: 36 files=0
+[Info  - 8:00:38 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:38 PM] Local validating 0 files
+[Info  - 8:00:38 PM] Localisation check 0 files
+[Info  - 8:00:38 PM] Localisation check took 0ms
+[Info  - 8:00:38 PM] Validate local files time: 43 files=0
+[Info  - 8:00:38 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:38 PM] Local validating 0 files
+[Info  - 8:00:38 PM] Localisation check 0 files
+[Info  - 8:00:38 PM] Localisation check took 0ms
+[Info  - 8:00:38 PM] Validate local files time: 41 files=0
+[Info  - 8:00:38 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:39 PM] Local validating 0 files
+[Info  - 8:00:39 PM] Localisation check 0 files
+[Info  - 8:00:39 PM] Localisation check took 0ms
+[Info  - 8:00:39 PM] Validate local files time: 49 files=0
+[Info  - 8:00:39 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:39 PM] Local validating 0 files
+[Info  - 8:00:39 PM] Localisation check 0 files
+[Info  - 8:00:39 PM] Localisation check took 0ms
+[Info  - 8:00:39 PM] Validate local files time: 39 files=0
+[Info  - 8:00:39 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:39 PM] Local validating 0 files
+[Info  - 8:00:39 PM] Localisation check 0 files
+[Info  - 8:00:39 PM] Localisation check took 0ms
+[Info  - 8:00:39 PM] Validate local files time: 40 files=0
+[Info  - 8:00:39 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:39 PM] Local validating 0 files
+[Info  - 8:00:39 PM] Localisation check 0 files
+[Info  - 8:00:39 PM] Localisation check took 0ms
+[Info  - 8:00:39 PM] Validate local files time: 39 files=0
+[Info  - 8:00:39 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:39 PM] Local validating 0 files
+[Info  - 8:00:39 PM] Localisation check 0 files
+[Info  - 8:00:39 PM] Localisation check took 0ms
+[Info  - 8:00:39 PM] Validate local files time: 37 files=0
+[Info  - 8:00:39 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:39 PM] Local validating 0 files
+[Info  - 8:00:39 PM] Localisation check 0 files
+[Info  - 8:00:39 PM] Localisation check took 0ms
+[Info  - 8:00:39 PM] Validate local files time: 38 files=0
+[Info  - 8:00:39 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:39 PM] Local validating 0 files
+[Info  - 8:00:39 PM] Localisation check 0 files
+[Info  - 8:00:39 PM] Localisation check took 0ms
+[Info  - 8:00:39 PM] Validate local files time: 39 files=0
+[Info  - 8:00:39 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:39 PM] Local validating 0 files
+[Info  - 8:00:39 PM] Localisation check 0 files
+[Info  - 8:00:39 PM] Localisation check took 0ms
+[Info  - 8:00:39 PM] Validate local files time: 36 files=0
+[Info  - 8:00:39 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:39 PM] Local validating 0 files
+[Info  - 8:00:39 PM] Localisation check 0 files
+[Info  - 8:00:39 PM] Localisation check took 0ms
+[Info  - 8:00:39 PM] Validate local files time: 37 files=0
+[Info  - 8:00:39 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:39 PM] Local validating 0 files
+[Info  - 8:00:39 PM] Localisation check 0 files
+[Info  - 8:00:39 PM] Localisation check took 0ms
+[Info  - 8:00:39 PM] Validate local files time: 37 files=0
+[Info  - 8:00:39 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:39 PM] Local validating 0 files
+[Info  - 8:00:39 PM] Localisation check 0 files
+[Info  - 8:00:39 PM] Localisation check took 0ms
+[Info  - 8:00:39 PM] Validate local files time: 35 files=0
+[Info  - 8:00:39 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:39 PM] Local validating 0 files
+[Info  - 8:00:39 PM] Localisation check 0 files
+[Info  - 8:00:39 PM] Localisation check took 0ms
+[Info  - 8:00:39 PM] Validate local files time: 44 files=0
+[Info  - 8:00:39 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:39 PM] Local validating 0 files
+[Info  - 8:00:39 PM] Localisation check 0 files
+[Info  - 8:00:39 PM] Localisation check took 0ms
+[Info  - 8:00:39 PM] Validate local files time: 49 files=0
+[Info  - 8:00:39 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:39 PM] Local validating 0 files
+[Info  - 8:00:39 PM] Localisation check 0 files
+[Info  - 8:00:39 PM] Localisation check took 0ms
+[Info  - 8:00:39 PM] Validate local files time: 40 files=0
+[Info  - 8:00:39 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:39 PM] Local validating 0 files
+[Info  - 8:00:39 PM] Localisation check 0 files
+[Info  - 8:00:39 PM] Localisation check took 0ms
+[Info  - 8:00:39 PM] Validate local files time: 45 files=0
+[Info  - 8:00:39 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:39 PM] Local validating 0 files
+[Info  - 8:00:39 PM] Localisation check 0 files
+[Info  - 8:00:39 PM] Localisation check took 0ms
+[Info  - 8:00:39 PM] Validate local files time: 40 files=0
+[Info  - 8:00:40 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:40 PM] Local validating 0 files
+[Info  - 8:00:40 PM] Localisation check 0 files
+[Info  - 8:00:40 PM] Localisation check took 0ms
+[Info  - 8:00:40 PM] Validate local files time: 39 files=0
+[Info  - 8:00:40 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:40 PM] Local validating 0 files
+[Info  - 8:00:40 PM] Localisation check 0 files
+[Info  - 8:00:40 PM] Localisation check took 0ms
+[Info  - 8:00:40 PM] Validate local files time: 44 files=0
+[Info  - 8:00:40 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:40 PM] Local validating 0 files
+[Info  - 8:00:40 PM] Localisation check 0 files
+[Info  - 8:00:40 PM] Localisation check took 0ms
+[Info  - 8:00:40 PM] Validate local files time: 41 files=0
+[Info  - 8:00:40 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:40 PM] Local validating 0 files
+[Info  - 8:00:40 PM] Localisation check 0 files
+[Info  - 8:00:40 PM] Localisation check took 0ms
+[Info  - 8:00:40 PM] Validate local files time: 37 files=0
+[Info  - 8:00:40 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:40 PM] Local validating 0 files
+[Info  - 8:00:40 PM] Localisation check 0 files
+[Info  - 8:00:40 PM] Localisation check took 0ms
+[Info  - 8:00:40 PM] Validate local files time: 40 files=0
+[Info  - 8:00:40 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:40 PM] Local validating 0 files
+[Info  - 8:00:40 PM] Localisation check 0 files
+[Info  - 8:00:40 PM] Localisation check took 0ms
+[Info  - 8:00:40 PM] Validate local files time: 41 files=0
+[Info  - 8:00:40 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:40 PM] Local validating 0 files
+[Info  - 8:00:40 PM] Localisation check 0 files
+[Info  - 8:00:40 PM] Localisation check took 0ms
+[Info  - 8:00:40 PM] Validate local files time: 47 files=0
+[Info  - 8:00:40 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:40 PM] Local validating 0 files
+[Info  - 8:00:40 PM] Localisation check 0 files
+[Info  - 8:00:40 PM] Localisation check took 0ms
+[Info  - 8:00:40 PM] Validate local files time: 47 files=0
+[Info  - 8:00:40 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:40 PM] Local validating 0 files
+[Info  - 8:00:40 PM] Localisation check 0 files
+[Info  - 8:00:40 PM] Localisation check took 0ms
+[Info  - 8:00:40 PM] Validate local files time: 55 files=0
+[Info  - 8:00:40 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:40 PM] Local validating 0 files
+[Info  - 8:00:40 PM] Localisation check 0 files
+[Info  - 8:00:40 PM] Localisation check took 0ms
+[Info  - 8:00:40 PM] Validate local files time: 51 files=0
+[Info  - 8:00:40 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:40 PM] Local validating 0 files
+[Info  - 8:00:40 PM] Localisation check 0 files
+[Info  - 8:00:40 PM] Localisation check took 0ms
+[Info  - 8:00:40 PM] Validate local files time: 40 files=0
+[Info  - 8:00:40 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:40 PM] Local validating 0 files
+[Info  - 8:00:40 PM] Localisation check 0 files
+[Info  - 8:00:40 PM] Localisation check took 0ms
+[Info  - 8:00:40 PM] Validate local files time: 40 files=0
+[Info  - 8:00:40 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:40 PM] Local validating 0 files
+[Info  - 8:00:40 PM] Localisation check 0 files
+[Info  - 8:00:40 PM] Localisation check took 0ms
+[Info  - 8:00:40 PM] Validate local files time: 37 files=0
+[Info  - 8:00:40 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:40 PM] Local validating 0 files
+[Info  - 8:00:40 PM] Localisation check 0 files
+[Info  - 8:00:40 PM] Localisation check took 0ms
+[Info  - 8:00:40 PM] Validate local files time: 38 files=0
+[Info  - 8:00:40 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:40 PM] Local validating 0 files
+[Info  - 8:00:40 PM] Localisation check 0 files
+[Info  - 8:00:40 PM] Localisation check took 0ms
+[Info  - 8:00:40 PM] Validate local files time: 36 files=0
+[Info  - 8:00:40 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:41 PM] Local validating 0 files
+[Info  - 8:00:41 PM] Localisation check 0 files
+[Info  - 8:00:41 PM] Localisation check took 0ms
+[Info  - 8:00:41 PM] Validate local files time: 39 files=0
+[Info  - 8:00:41 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:41 PM] Local validating 0 files
+[Info  - 8:00:41 PM] Localisation check 0 files
+[Info  - 8:00:41 PM] Localisation check took 0ms
+[Info  - 8:00:41 PM] Validate local files time: 38 files=0
+[Info  - 8:00:41 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:41 PM] Local validating 0 files
+[Info  - 8:00:41 PM] Localisation check 0 files
+[Info  - 8:00:41 PM] Localisation check took 0ms
+[Info  - 8:00:41 PM] Validate local files time: 39 files=0
+[Info  - 8:00:41 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:41 PM] Local validating 0 files
+[Info  - 8:00:41 PM] Localisation check 0 files
+[Info  - 8:00:41 PM] Localisation check took 0ms
+[Info  - 8:00:41 PM] Validate local files time: 39 files=0
+[Info  - 8:00:41 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:41 PM] Local validating 0 files
+[Info  - 8:00:41 PM] Localisation check 0 files
+[Info  - 8:00:41 PM] Localisation check took 0ms
+[Info  - 8:00:41 PM] Validate local files time: 36 files=0
+[Info  - 8:00:41 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:41 PM] Local validating 0 files
+[Info  - 8:00:41 PM] Localisation check 0 files
+[Info  - 8:00:41 PM] Localisation check took 0ms
+[Info  - 8:00:41 PM] Validate local files time: 37 files=0
+[Info  - 8:00:41 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:41 PM] Local validating 0 files
+[Info  - 8:00:41 PM] Localisation check 0 files
+[Info  - 8:00:41 PM] Localisation check took 0ms
+[Info  - 8:00:41 PM] Validate local files time: 36 files=0
+[Info  - 8:00:41 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:41 PM] Local validating 0 files
+[Info  - 8:00:41 PM] Localisation check 0 files
+[Info  - 8:00:41 PM] Localisation check took 0ms
+[Info  - 8:00:41 PM] Validate local files time: 41 files=0
+[Info  - 8:00:41 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:41 PM] Local validating 0 files
+[Info  - 8:00:41 PM] Localisation check 0 files
+[Info  - 8:00:41 PM] Localisation check took 0ms
+[Info  - 8:00:41 PM] Validate local files time: 46 files=0
+[Info  - 8:00:41 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:41 PM] Local validating 0 files
+[Info  - 8:00:41 PM] Localisation check 0 files
+[Info  - 8:00:41 PM] Localisation check took 0ms
+[Info  - 8:00:41 PM] Validate local files time: 45 files=0
+[Info  - 8:00:41 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:41 PM] Local validating 0 files
+[Info  - 8:00:41 PM] Localisation check 0 files
+[Info  - 8:00:41 PM] Localisation check took 0ms
+[Info  - 8:00:41 PM] Validate local files time: 45 files=0
+[Info  - 8:00:41 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:41 PM] Local validating 0 files
+[Info  - 8:00:41 PM] Localisation check 0 files
+[Info  - 8:00:41 PM] Localisation check took 0ms
+[Info  - 8:00:41 PM] Validate local files time: 55 files=0
+[Info  - 8:00:41 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:41 PM] Local validating 0 files
+[Info  - 8:00:41 PM] Localisation check 0 files
+[Info  - 8:00:41 PM] Localisation check took 0ms
+[Info  - 8:00:41 PM] Validate local files time: 43 files=0
+[Info  - 8:00:41 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:41 PM] Local validating 0 files
+[Info  - 8:00:41 PM] Localisation check 0 files
+[Info  - 8:00:41 PM] Localisation check took 0ms
+[Info  - 8:00:41 PM] Validate local files time: 43 files=0
+[Info  - 8:00:41 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:41 PM] Local validating 0 files
+[Info  - 8:00:41 PM] Localisation check 0 files
+[Info  - 8:00:41 PM] Localisation check took 0ms
+[Info  - 8:00:41 PM] Validate local files time: 52 files=0
+[Info  - 8:00:41 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:41 PM] Local validating 0 files
+[Info  - 8:00:42 PM] Localisation check 0 files
+[Info  - 8:00:42 PM] Localisation check took 0ms
+[Info  - 8:00:42 PM] Validate local files time: 42 files=0
+[Info  - 8:00:42 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:42 PM] Local validating 0 files
+[Info  - 8:00:42 PM] Localisation check 0 files
+[Info  - 8:00:42 PM] Localisation check took 0ms
+[Info  - 8:00:42 PM] Validate local files time: 46 files=0
+[Info  - 8:00:42 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:42 PM] Local validating 0 files
+[Info  - 8:00:42 PM] Localisation check 0 files
+[Info  - 8:00:42 PM] Localisation check took 0ms
+[Info  - 8:00:42 PM] Validate local files time: 43 files=0
+[Info  - 8:00:42 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:42 PM] Local validating 0 files
+[Info  - 8:00:42 PM] Localisation check 0 files
+[Info  - 8:00:42 PM] Localisation check took 0ms
+[Info  - 8:00:42 PM] Validate local files time: 42 files=0
+[Info  - 8:00:42 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:42 PM] Local validating 0 files
+[Info  - 8:00:42 PM] Localisation check 0 files
+[Info  - 8:00:42 PM] Localisation check took 0ms
+[Info  - 8:00:42 PM] Validate local files time: 43 files=0
+[Info  - 8:00:42 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:42 PM] Local validating 0 files
+[Info  - 8:00:42 PM] Localisation check 0 files
+[Info  - 8:00:42 PM] Localisation check took 0ms
+[Info  - 8:00:42 PM] Validate local files time: 48 files=0
+[Info  - 8:00:42 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:42 PM] Local validating 0 files
+[Info  - 8:00:42 PM] Localisation check 0 files
+[Info  - 8:00:42 PM] Localisation check took 0ms
+[Info  - 8:00:42 PM] Validate local files time: 42 files=0
+[Info  - 8:00:42 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:42 PM] Local validating 0 files
+[Info  - 8:00:42 PM] Localisation check 0 files
+[Info  - 8:00:42 PM] Localisation check took 0ms
+[Info  - 8:00:42 PM] Validate local files time: 42 files=0
+[Info  - 8:00:42 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:42 PM] Local validating 0 files
+[Info  - 8:00:42 PM] Localisation check 0 files
+[Info  - 8:00:42 PM] Localisation check took 0ms
+[Info  - 8:00:42 PM] Validate local files time: 43 files=0
+[Info  - 8:00:42 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:42 PM] Local validating 0 files
+[Info  - 8:00:42 PM] Localisation check 0 files
+[Info  - 8:00:42 PM] Localisation check took 0ms
+[Info  - 8:00:42 PM] Validate local files time: 42 files=0
+[Info  - 8:00:42 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:42 PM] Local validating 0 files
+[Info  - 8:00:42 PM] Localisation check 0 files
+[Info  - 8:00:42 PM] Localisation check took 0ms
+[Info  - 8:00:42 PM] Validate local files time: 50 files=0
+[Info  - 8:00:42 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:42 PM] Local validating 0 files
+[Info  - 8:00:42 PM] Localisation check 0 files
+[Info  - 8:00:42 PM] Localisation check took 0ms
+[Info  - 8:00:42 PM] Validate local files time: 95 files=0
+[Info  - 8:00:42 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:42 PM] Local validating 2 files
+[Info  - 8:00:42 PM] Localisation check 2 files
+[Info  - 8:00:42 PM] Localisation check took 0ms
+[Info  - 8:00:42 PM] Validate local files time: 61 files=2
+[Info  - 8:00:42 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:42 PM] Local validating 0 files
+[Info  - 8:00:42 PM] Localisation check 0 files
+[Info  - 8:00:42 PM] Localisation check took 0ms
+[Info  - 8:00:42 PM] Validate local files time: 43 files=0
+[Info  - 8:00:42 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:43 PM] Local validating 0 files
+[Info  - 8:00:43 PM] Localisation check 0 files
+[Info  - 8:00:43 PM] Localisation check took 0ms
+[Info  - 8:00:43 PM] Validate local files time: 61 files=0
+[Info  - 8:00:43 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:43 PM] Local validating 0 files
+[Info  - 8:00:43 PM] Localisation check 0 files
+[Info  - 8:00:43 PM] Localisation check took 0ms
+[Info  - 8:00:43 PM] Validate local files time: 48 files=0
+[Info  - 8:00:43 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:43 PM] Local validating 0 files
+[Info  - 8:00:43 PM] Localisation check 0 files
+[Info  - 8:00:43 PM] Localisation check took 0ms
+[Info  - 8:00:43 PM] Validate local files time: 45 files=0
+[Info  - 8:00:43 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:43 PM] Local validating 0 files
+[Info  - 8:00:43 PM] Localisation check 0 files
+[Info  - 8:00:43 PM] Localisation check took 0ms
+[Info  - 8:00:43 PM] Validate local files time: 47 files=0
+[Info  - 8:00:43 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:43 PM] Local validating 0 files
+[Info  - 8:00:43 PM] Localisation check 0 files
+[Info  - 8:00:43 PM] Localisation check took 0ms
+[Info  - 8:00:43 PM] Validate local files time: 47 files=0
+[Info  - 8:00:43 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:43 PM] Local validating 0 files
+[Info  - 8:00:43 PM] Localisation check 0 files
+[Info  - 8:00:43 PM] Localisation check took 0ms
+[Info  - 8:00:43 PM] Validate local files time: 58 files=0
+[Info  - 8:00:43 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:43 PM] Local validating 0 files
+[Info  - 8:00:43 PM] Localisation check 0 files
+[Info  - 8:00:43 PM] Localisation check took 0ms
+[Info  - 8:00:43 PM] Validate local files time: 42 files=0
+[Info  - 8:00:43 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:43 PM] Local validating 0 files
+[Info  - 8:00:43 PM] Localisation check 0 files
+[Info  - 8:00:43 PM] Localisation check took 0ms
+[Info  - 8:00:43 PM] Validate local files time: 51 files=0
+[Info  - 8:00:43 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:43 PM] Local validating 3 files
+[Info  - 8:00:43 PM] Localisation check 3 files
+[Info  - 8:00:43 PM] Localisation check took 0ms
+[Info  - 8:00:43 PM] Validate local files time: 44 files=3
+[Info  - 8:00:43 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:43 PM] Local validating 3 files
+[Info  - 8:00:43 PM] Localisation check 3 files
+[Info  - 8:00:43 PM] Localisation check took 1ms
+[Info  - 8:00:43 PM] Validate local files time: 44 files=3
+[Info  - 8:00:43 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:43 PM] Local validating 0 files
+[Info  - 8:00:43 PM] Localisation check 0 files
+[Info  - 8:00:43 PM] Localisation check took 0ms
+[Info  - 8:00:43 PM] Validate local files time: 64 files=0
+[Info  - 8:00:43 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:43 PM] Local validating 1 files
+[Info  - 8:00:43 PM] Localisation check 1 files
+[Info  - 8:00:43 PM] Localisation check took 0ms
+[Info  - 8:00:43 PM] Validate local files time: 55 files=1
+[Info  - 8:00:43 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:43 PM] Local validating 6 files
+[Info  - 8:00:43 PM] Localisation check 6 files
+[Info  - 8:00:43 PM] Localisation check took 0ms
+[Info  - 8:00:43 PM] Validate local files time: 39 files=6
+[Info  - 8:00:43 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:43 PM] Local validating 2 files
+[Info  - 8:00:43 PM] Localisation check 2 files
+[Info  - 8:00:43 PM] Localisation check took 0ms
+[Info  - 8:00:43 PM] Validate local files time: 63 files=2
+[Info  - 8:00:44 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:44 PM] Local validating 2 files
+[Info  - 8:00:44 PM] Localisation check 2 files
+[Info  - 8:00:44 PM] Localisation check took 0ms
+[Info  - 8:00:44 PM] Validate local files time: 80 files=2
+[Info  - 8:00:44 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:44 PM] Local validating 0 files
+[Info  - 8:00:44 PM] Localisation check 0 files
+[Info  - 8:00:44 PM] Localisation check took 0ms
+[Info  - 8:00:44 PM] Validate local files time: 44 files=0
+[Info  - 8:00:44 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:44 PM] Local validating 0 files
+[Info  - 8:00:44 PM] Localisation check 0 files
+[Info  - 8:00:44 PM] Localisation check took 0ms
+[Info  - 8:00:44 PM] Validate local files time: 42 files=0
+[Info  - 8:00:44 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:44 PM] Local validating 2 files
+[Info  - 8:00:44 PM] Localisation check 2 files
+[Info  - 8:00:44 PM] Localisation check took 0ms
+[Info  - 8:00:44 PM] Validate local files time: 42 files=2
+[Info  - 8:00:44 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:44 PM] Local validating 0 files
+[Info  - 8:00:44 PM] Localisation check 0 files
+[Info  - 8:00:44 PM] Localisation check took 0ms
+[Info  - 8:00:44 PM] Validate local files time: 41 files=0
+[Info  - 8:00:44 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:44 PM] Local validating 2 files
+[Info  - 8:00:44 PM] Localisation check 2 files
+[Info  - 8:00:44 PM] Localisation check took 0ms
+[Info  - 8:00:44 PM] Validate local files time: 43 files=2
+[Info  - 8:00:44 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:44 PM] Local validating 0 files
+[Info  - 8:00:44 PM] Localisation check 0 files
+[Info  - 8:00:44 PM] Localisation check took 0ms
+[Info  - 8:00:44 PM] Validate local files time: 48 files=0
+[Info  - 8:00:44 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:44 PM] Local validating 3 files
+[Info  - 8:00:44 PM] Localisation check 3 files
+[Info  - 8:00:44 PM] Localisation check took 0ms
+[Info  - 8:00:44 PM] Validate local files time: 39 files=3
+[Info  - 8:00:44 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:44 PM] Local validating 0 files
+[Info  - 8:00:44 PM] Localisation check 0 files
+[Info  - 8:00:44 PM] Localisation check took 0ms
+[Info  - 8:00:44 PM] Validate local files time: 37 files=0
+[Info  - 8:00:44 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:44 PM] Local validating 1 files
+[Info  - 8:00:44 PM] Localisation check 1 files
+[Info  - 8:00:44 PM] Localisation check took 0ms
+[Info  - 8:00:44 PM] Validate local files time: 37 files=1
+[Info  - 8:00:44 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:44 PM] Local validating 5 files
+[Info  - 8:00:44 PM] Localisation check 5 files
+[Info  - 8:00:44 PM] Localisation check took 0ms
+[Info  - 8:00:44 PM] Validate local files time: 36 files=5
+[Info  - 8:00:44 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:44 PM] Local validating 5 files
+[Info  - 8:00:44 PM] Localisation check 5 files
+[Info  - 8:00:44 PM] Localisation check took 0ms
+[Info  - 8:00:44 PM] Validate local files time: 37 files=5
+[Info  - 8:00:44 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:44 PM] Local validating 2 files
+[Info  - 8:00:44 PM] Localisation check 2 files
+[Info  - 8:00:44 PM] Localisation check took 0ms
+[Info  - 8:00:44 PM] Validate local files time: 38 files=2
+[Info  - 8:00:44 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:44 PM] Local validating 3 files
+[Info  - 8:00:44 PM] Localisation check 3 files
+[Info  - 8:00:44 PM] Localisation check took 0ms
+[Info  - 8:00:44 PM] Validate local files time: 35 files=3
+[Info  - 8:00:44 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:44 PM] Local validating 5 files
+[Info  - 8:00:44 PM] Localisation check 5 files
+[Info  - 8:00:44 PM] Localisation check took 0ms
+[Info  - 8:00:44 PM] Validate local files time: 37 files=5
+[Info  - 8:00:44 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:45 PM] Local validating 1 files
+[Info  - 8:00:45 PM] Localisation check 1 files
+[Info  - 8:00:45 PM] Localisation check took 0ms
+[Info  - 8:00:45 PM] Validate local files time: 40 files=1
+[Info  - 8:00:45 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:45 PM] Local validating 1 files
+[Info  - 8:00:45 PM] Localisation check 1 files
+[Info  - 8:00:45 PM] Localisation check took 0ms
+[Info  - 8:00:45 PM] Validate local files time: 41 files=1
+[Info  - 8:00:45 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:45 PM] Local validating 2 files
+[Info  - 8:00:45 PM] Localisation check 2 files
+[Info  - 8:00:45 PM] Localisation check took 1ms
+[Info  - 8:00:45 PM] Validate local files time: 58 files=2
+[Info  - 8:00:45 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:45 PM] Local validating 0 files
+[Info  - 8:00:45 PM] Localisation check 0 files
+[Info  - 8:00:45 PM] Localisation check took 0ms
+[Info  - 8:00:45 PM] Validate local files time: 43 files=0
+[Info  - 8:00:45 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:45 PM] Local validating 2 files
+[Info  - 8:00:45 PM] Localisation check 2 files
+[Info  - 8:00:45 PM] Localisation check took 0ms
+[Info  - 8:00:45 PM] Validate local files time: 39 files=2
+[Info  - 8:00:45 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:45 PM] Local validating 0 files
+[Info  - 8:00:45 PM] Localisation check 0 files
+[Info  - 8:00:45 PM] Localisation check took 0ms
+[Info  - 8:00:45 PM] Validate local files time: 40 files=0
+[Info  - 8:00:45 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:45 PM] Local validating 0 files
+[Info  - 8:00:45 PM] Localisation check 0 files
+[Info  - 8:00:45 PM] Localisation check took 0ms
+[Info  - 8:00:45 PM] Validate local files time: 38 files=0
+[Info  - 8:00:45 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:45 PM] Local validating 0 files
+[Info  - 8:00:45 PM] Localisation check 0 files
+[Info  - 8:00:45 PM] Localisation check took 0ms
+[Info  - 8:00:45 PM] Validate local files time: 38 files=0
+[Info  - 8:00:45 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:45 PM] Local validating 0 files
+[Info  - 8:00:45 PM] Localisation check 0 files
+[Info  - 8:00:45 PM] Localisation check took 0ms
+[Info  - 8:00:45 PM] Validate local files time: 37 files=0
+[Info  - 8:00:45 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:45 PM] Local validating 0 files
+[Info  - 8:00:45 PM] Localisation check 0 files
+[Info  - 8:00:45 PM] Localisation check took 0ms
+[Info  - 8:00:45 PM] Validate local files time: 38 files=0
+[Info  - 8:00:45 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:45 PM] Local validating 0 files
+[Info  - 8:00:45 PM] Localisation check 0 files
+[Info  - 8:00:45 PM] Localisation check took 0ms
+[Info  - 8:00:45 PM] Validate local files time: 39 files=0
+[Info  - 8:00:45 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:45 PM] Local validating 0 files
+[Info  - 8:00:45 PM] Localisation check 0 files
+[Info  - 8:00:45 PM] Localisation check took 0ms
+[Info  - 8:00:45 PM] Validate local files time: 41 files=0
+[Info  - 8:00:45 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:45 PM] Local validating 3 files
+[Info  - 8:00:45 PM] Localisation check 3 files
+[Info  - 8:00:45 PM] Localisation check took 0ms
+[Info  - 8:00:45 PM] Validate local files time: 39 files=3
+[Info  - 8:00:45 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:45 PM] Local validating 0 files
+[Info  - 8:00:45 PM] Localisation check 0 files
+[Info  - 8:00:45 PM] Localisation check took 0ms
+[Info  - 8:00:45 PM] Validate local files time: 37 files=0
+[Info  - 8:00:45 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:45 PM] Local validating 2 files
+[Info  - 8:00:45 PM] Localisation check 2 files
+[Info  - 8:00:45 PM] Localisation check took 1ms
+[Info  - 8:00:45 PM] Validate local files time: 42 files=2
+[Info  - 8:00:45 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:45 PM] Local validating 0 files
+[Info  - 8:00:45 PM] Localisation check 0 files
+[Info  - 8:00:45 PM] Localisation check took 0ms
+[Info  - 8:00:45 PM] Validate local files time: 37 files=0
+[Info  - 8:00:46 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:46 PM] Local validating 5 files
+[Info  - 8:00:46 PM] Localisation check 5 files
+[Info  - 8:00:46 PM] Localisation check took 0ms
+[Info  - 8:00:46 PM] Validate local files time: 36 files=5
+[Info  - 8:00:46 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:46 PM] Local validating 4 files
+[Info  - 8:00:46 PM] Localisation check 4 files
+[Info  - 8:00:46 PM] Localisation check took 0ms
+[Info  - 8:00:46 PM] Validate local files time: 38 files=4
+[Info  - 8:00:46 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:46 PM] Local validating 4 files
+[Info  - 8:00:46 PM] Localisation check 4 files
+[Info  - 8:00:46 PM] Localisation check took 0ms
+[Info  - 8:00:46 PM] Validate local files time: 37 files=4
+[Info  - 8:00:46 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:46 PM] Local validating 4 files
+[Info  - 8:00:46 PM] Localisation check 4 files
+[Info  - 8:00:46 PM] Localisation check took 0ms
+[Info  - 8:00:46 PM] Validate local files time: 35 files=4
+[Info  - 8:00:46 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:46 PM] Local validating 3 files
+[Info  - 8:00:46 PM] Localisation check 3 files
+[Info  - 8:00:46 PM] Localisation check took 0ms
+[Info  - 8:00:46 PM] Validate local files time: 55 files=3
+[Info  - 8:00:46 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:46 PM] Local validating 7 files
+[Info  - 8:00:46 PM] Localisation check 7 files
+[Info  - 8:00:46 PM] Localisation check took 0ms
+[Info  - 8:00:46 PM] Validate local files time: 59 files=7
+[Info  - 8:00:46 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:46 PM] Local validating 5 files
+[Info  - 8:00:46 PM] Localisation check 5 files
+[Info  - 8:00:46 PM] Localisation check took 0ms
+[Info  - 8:00:46 PM] Validate local files time: 42 files=5
+[Info  - 8:00:46 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:46 PM] Local validating 5 files
+[Info  - 8:00:46 PM] Localisation check 5 files
+[Info  - 8:00:46 PM] Localisation check took 0ms
+[Info  - 8:00:46 PM] Validate local files time: 45 files=5
+[Info  - 8:00:46 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:46 PM] Local validating 4 files
+[Info  - 8:00:46 PM] Localisation check 4 files
+[Info  - 8:00:46 PM] Localisation check took 0ms
+[Info  - 8:00:46 PM] Validate local files time: 52 files=4
+[Info  - 8:00:46 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:46 PM] Local validating 2 files
+[Info  - 8:00:46 PM] Localisation check 2 files
+[Info  - 8:00:46 PM] Localisation check took 0ms
+[Info  - 8:00:46 PM] Validate local files time: 46 files=2
+[Info  - 8:00:46 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:46 PM] Local validating 1 files
+[Info  - 8:00:46 PM] Localisation check 1 files
+[Info  - 8:00:46 PM] Localisation check took 0ms
+[Info  - 8:00:46 PM] Validate local files time: 42 files=1
+[Info  - 8:00:46 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:46 PM] Local validating 1 files
+[Info  - 8:00:46 PM] Localisation check 1 files
+[Info  - 8:00:46 PM] Localisation check took 0ms
+[Info  - 8:00:46 PM] Validate local files time: 50 files=1
+[Info  - 8:00:46 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:46 PM] Local validating 1 files
+[Info  - 8:00:46 PM] Localisation check 1 files
+[Info  - 8:00:46 PM] Localisation check took 0ms
+[Info  - 8:00:46 PM] Validate local files time: 45 files=1
+[Info  - 8:00:46 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:46 PM] Local validating 2 files
+[Info  - 8:00:46 PM] Localisation check 2 files
+[Info  - 8:00:46 PM] Localisation check took 0ms
+[Info  - 8:00:46 PM] Validate local files time: 43 files=2
+[Info  - 8:00:46 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:46 PM] Local validating 3 files
+[Info  - 8:00:46 PM] Localisation check 3 files
+[Info  - 8:00:46 PM] Localisation check took 0ms
+[Info  - 8:00:46 PM] Validate local files time: 36 files=3
+[Info  - 8:00:47 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:47 PM] Local validating 2 files
+[Info  - 8:00:47 PM] Localisation check 2 files
+[Info  - 8:00:47 PM] Localisation check took 0ms
+[Info  - 8:00:47 PM] Validate local files time: 37 files=2
+[Info  - 8:00:47 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:47 PM] Local validating 4 files
+[Info  - 8:00:47 PM] Localisation check 4 files
+[Info  - 8:00:47 PM] Localisation check took 0ms
+[Info  - 8:00:47 PM] Validate local files time: 36 files=4
+[Info  - 8:00:47 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:47 PM] Local validating 3 files
+[Info  - 8:00:47 PM] Localisation check 3 files
+[Info  - 8:00:47 PM] Localisation check took 0ms
+[Info  - 8:00:47 PM] Validate local files time: 34 files=3
+[Info  - 8:00:47 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:47 PM] Local validating 1 files
+[Info  - 8:00:47 PM] Localisation check 1 files
+[Info  - 8:00:47 PM] Localisation check took 0ms
+[Info  - 8:00:47 PM] Validate local files time: 45 files=1
+[Info  - 8:00:47 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:47 PM] Local validating 5 files
+[Info  - 8:00:47 PM] Localisation check 5 files
+[Info  - 8:00:47 PM] Localisation check took 0ms
+[Info  - 8:00:47 PM] Validate local files time: 44 files=5
+[Info  - 8:00:47 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:47 PM] Local validating 1 files
+[Info  - 8:00:47 PM] Localisation check 1 files
+[Info  - 8:00:47 PM] Localisation check took 0ms
+[Info  - 8:00:47 PM] Validate local files time: 43 files=1
+[Info  - 8:00:47 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:47 PM] Local validating 0 files
+[Info  - 8:00:47 PM] Localisation check 0 files
+[Info  - 8:00:47 PM] Localisation check took 0ms
+[Info  - 8:00:47 PM] Validate local files time: 49 files=0
+[Info  - 8:00:47 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:47 PM] Local validating 10 files
+[Info  - 8:00:47 PM] Localisation check 10 files
+[Info  - 8:00:47 PM] Localisation check took 0ms
+[Info  - 8:00:47 PM] Validate local files time: 43 files=10
+[Info  - 8:00:47 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:47 PM] Local validating 8 files
+[Info  - 8:00:47 PM] Localisation check 8 files
+[Info  - 8:00:47 PM] Localisation check took 0ms
+[Info  - 8:00:47 PM] Validate local files time: 48 files=8
+[Info  - 8:00:47 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:47 PM] Local validating 5 files
+[Info  - 8:00:47 PM] Localisation check 5 files
+[Info  - 8:00:47 PM] Localisation check took 0ms
+[Info  - 8:00:47 PM] Validate local files time: 37 files=5
+[Info  - 8:00:47 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:47 PM] Local validating 4 files
+[Info  - 8:00:47 PM] Localisation check 4 files
+[Info  - 8:00:47 PM] Localisation check took 0ms
+[Info  - 8:00:47 PM] Validate local files time: 41 files=4
+[Info  - 8:00:47 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:47 PM] Local validating 5 files
+[Info  - 8:00:47 PM] Localisation check 5 files
+[Info  - 8:00:47 PM] Localisation check took 0ms
+[Info  - 8:00:47 PM] Validate local files time: 36 files=5
+[Info  - 8:00:47 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:47 PM] Local validating 7 files
+[Info  - 8:00:47 PM] Localisation check 7 files
+[Info  - 8:00:47 PM] Localisation check took 0ms
+[Info  - 8:00:47 PM] Validate local files time: 40 files=7
+[Info  - 8:00:47 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:47 PM] Local validating 1 files
+[Info  - 8:00:47 PM] Localisation check 1 files
+[Info  - 8:00:47 PM] Localisation check took 0ms
+[Info  - 8:00:47 PM] Validate local files time: 38 files=1
+[Info  - 8:00:47 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:47 PM] Local validating 2 files
+[Info  - 8:00:47 PM] Localisation check 2 files
+[Info  - 8:00:47 PM] Localisation check took 0ms
+[Info  - 8:00:47 PM] Validate local files time: 40 files=2
+[Info  - 8:00:47 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:47 PM] Local validating 3 files
+[Info  - 8:00:48 PM] Localisation check 3 files
+[Info  - 8:00:48 PM] Localisation check took 0ms
+[Info  - 8:00:48 PM] Validate local files time: 36 files=3
+[Info  - 8:00:48 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:48 PM] Local validating 5 files
+[Info  - 8:00:48 PM] Localisation check 5 files
+[Info  - 8:00:48 PM] Localisation check took 0ms
+[Info  - 8:00:48 PM] Validate local files time: 39 files=5
+[Info  - 8:00:48 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:48 PM] Local validating 23 files
+[Info  - 8:00:48 PM] Localisation check 23 files
+[Info  - 8:00:48 PM] Localisation check took 9ms
+[Info  - 8:00:48 PM] Validate local files time: 209 files=23
+[Info  - 8:00:48 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:48 PM] Local validating 30 files
+[Info  - 8:00:48 PM] Localisation check 30 files
+[Info  - 8:00:48 PM] Localisation check took 11ms
+[Info  - 8:00:48 PM] Validate local files time: 178 files=30
+[Info  - 8:00:48 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:48 PM] Local validating 2 files
+[Info  - 8:00:48 PM] Localisation check 2 files
+[Info  - 8:00:48 PM] Localisation check took 5ms
+[Info  - 8:00:48 PM] Validate local files time: 62 files=2
+[Info  - 8:00:48 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:48 PM] Local validating 0 files
+[Info  - 8:00:48 PM] Localisation check 0 files
+[Info  - 8:00:48 PM] Localisation check took 0ms
+[Info  - 8:00:48 PM] Validate local files time: 46 files=0
+[Info  - 8:00:48 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:48 PM] Local validating 0 files
+[Info  - 8:00:48 PM] Localisation check 0 files
+[Info  - 8:00:48 PM] Localisation check took 0ms
+[Info  - 8:00:48 PM] Validate local files time: 39 files=0
+[Info  - 8:00:48 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:48 PM] Local validating 0 files
+[Info  - 8:00:48 PM] Localisation check 0 files
+[Info  - 8:00:48 PM] Localisation check took 0ms
+[Info  - 8:00:48 PM] Validate local files time: 36 files=0
+[Info  - 8:00:48 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:48 PM] Local validating 0 files
+[Info  - 8:00:48 PM] Localisation check 0 files
+[Info  - 8:00:48 PM] Localisation check took 0ms
+[Info  - 8:00:48 PM] Validate local files time: 37 files=0
+[Info  - 8:00:48 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:48 PM] Local validating 0 files
+[Info  - 8:00:48 PM] Localisation check 0 files
+[Info  - 8:00:48 PM] Localisation check took 0ms
+[Info  - 8:00:48 PM] Validate local files time: 35 files=0
+[Info  - 8:00:48 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:48 PM] Local validating 0 files
+[Info  - 8:00:48 PM] Localisation check 0 files
+[Info  - 8:00:48 PM] Localisation check took 0ms
+[Info  - 8:00:48 PM] Validate local files time: 37 files=0
+[Info  - 8:00:48 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:49 PM] Local validating 0 files
+[Info  - 8:00:49 PM] Localisation check 0 files
+[Info  - 8:00:49 PM] Localisation check took 0ms
+[Info  - 8:00:49 PM] Validate local files time: 40 files=0
+[Info  - 8:00:49 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:49 PM] Local validating 0 files
+[Info  - 8:00:49 PM] Localisation check 0 files
+[Info  - 8:00:49 PM] Localisation check took 0ms
+[Info  - 8:00:49 PM] Validate local files time: 39 files=0
+[Info  - 8:00:49 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:49 PM] Local validating 0 files
+[Info  - 8:00:49 PM] Localisation check 0 files
+[Info  - 8:00:49 PM] Localisation check took 0ms
+[Info  - 8:00:49 PM] Validate local files time: 38 files=0
+[Info  - 8:00:49 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:49 PM] Local validating 0 files
+[Info  - 8:00:49 PM] Localisation check 0 files
+[Info  - 8:00:49 PM] Localisation check took 0ms
+[Info  - 8:00:49 PM] Validate local files time: 37 files=0
+[Info  - 8:00:49 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:49 PM] Local validating 0 files
+[Info  - 8:00:49 PM] Localisation check 0 files
+[Info  - 8:00:49 PM] Localisation check took 0ms
+[Info  - 8:00:49 PM] Validate local files time: 36 files=0
+[Info  - 8:00:49 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:49 PM] Local validating 0 files
+[Info  - 8:00:49 PM] Localisation check 0 files
+[Info  - 8:00:49 PM] Localisation check took 0ms
+[Info  - 8:00:49 PM] Validate local files time: 37 files=0
+[Info  - 8:00:49 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:49 PM] Local validating 0 files
+[Info  - 8:00:49 PM] Localisation check 0 files
+[Info  - 8:00:49 PM] Localisation check took 0ms
+[Info  - 8:00:49 PM] Validate local files time: 36 files=0
+[Info  - 8:00:49 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:49 PM] Local validating 0 files
+[Info  - 8:00:49 PM] Localisation check 0 files
+[Info  - 8:00:49 PM] Localisation check took 0ms
+[Info  - 8:00:49 PM] Validate local files time: 34 files=0
+[Info  - 8:00:49 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:49 PM] Local validating 0 files
+[Info  - 8:00:49 PM] Localisation check 0 files
+[Info  - 8:00:49 PM] Localisation check took 0ms
+[Info  - 8:00:49 PM] Validate local files time: 36 files=0
+[Info  - 8:00:49 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:49 PM] Local validating 0 files
+[Info  - 8:00:49 PM] Localisation check 0 files
+[Info  - 8:00:49 PM] Localisation check took 0ms
+[Info  - 8:00:49 PM] Validate local files time: 36 files=0
+[Info  - 8:00:49 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:49 PM] Local validating 0 files
+[Info  - 8:00:49 PM] Localisation check 0 files
+[Info  - 8:00:49 PM] Localisation check took 0ms
+[Info  - 8:00:49 PM] Validate local files time: 35 files=0
+[Info  - 8:00:49 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:49 PM] Local validating 0 files
+[Info  - 8:00:49 PM] Localisation check 0 files
+[Info  - 8:00:49 PM] Localisation check took 0ms
+[Info  - 8:00:49 PM] Validate local files time: 38 files=0
+[Info  - 8:00:49 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:49 PM] Local validating 0 files
+[Info  - 8:00:49 PM] Localisation check 0 files
+[Info  - 8:00:49 PM] Localisation check took 0ms
+[Info  - 8:00:49 PM] Validate local files time: 38 files=0
+[Info  - 8:00:49 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:49 PM] Local validating 0 files
+[Info  - 8:00:49 PM] Localisation check 0 files
+[Info  - 8:00:49 PM] Localisation check took 0ms
+[Info  - 8:00:49 PM] Validate local files time: 36 files=0
+[Info  - 8:00:49 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:49 PM] Local validating 0 files
+[Info  - 8:00:49 PM] Localisation check 0 files
+[Info  - 8:00:49 PM] Localisation check took 0ms
+[Info  - 8:00:49 PM] Validate local files time: 42 files=0
+[Info  - 8:00:49 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:49 PM] Local validating 0 files
+[Info  - 8:00:49 PM] Localisation check 0 files
+[Info  - 8:00:49 PM] Localisation check took 0ms
+[Info  - 8:00:49 PM] Validate local files time: 49 files=0
+[Info  - 8:00:49 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:50 PM] Local validating 1 files
+[Info  - 8:00:50 PM] Localisation check 1 files
+[Info  - 8:00:50 PM] Localisation check took 0ms
+[Info  - 8:00:50 PM] Validate local files time: 36 files=1
+[Info  - 8:00:50 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:50 PM] Local validating 3 files
+[Info  - 8:00:50 PM] Localisation check 3 files
+[Info  - 8:00:50 PM] Localisation check took 0ms
+[Info  - 8:00:50 PM] Validate local files time: 36 files=3
+[Info  - 8:00:50 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:50 PM] Local validating 7 files
+[Info  - 8:00:50 PM] Localisation check 7 files
+[Info  - 8:00:50 PM] Localisation check took 2ms
+[Info  - 8:00:50 PM] Validate local files time: 53 files=7
+[Info  - 8:00:50 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:50 PM] Local validating 15 files
+[Info  - 8:00:50 PM] Localisation check 15 files
+[Info  - 8:00:50 PM] Localisation check took 6ms
+[Info  - 8:00:50 PM] Validate local files time: 115 files=15
+[Info  - 8:00:50 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:50 PM] Local validating 0 files
+[Info  - 8:00:50 PM] Localisation check 0 files
+[Info  - 8:00:50 PM] Localisation check took 0ms
+[Info  - 8:00:50 PM] Validate local files time: 39 files=0
+[Info  - 8:00:50 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:50 PM] Local validating 0 files
+[Info  - 8:00:50 PM] Localisation check 0 files
+[Info  - 8:00:50 PM] Localisation check took 0ms
+[Info  - 8:00:50 PM] Validate local files time: 41 files=0
+[Info  - 8:00:50 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:50 PM] Local validating 0 files
+[Info  - 8:00:50 PM] Localisation check 0 files
+[Info  - 8:00:50 PM] Localisation check took 0ms
+[Info  - 8:00:50 PM] Validate local files time: 39 files=0
+[Info  - 8:00:50 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:50 PM] Local validating 0 files
+[Info  - 8:00:50 PM] Localisation check 0 files
+[Info  - 8:00:50 PM] Localisation check took 0ms
+[Info  - 8:00:50 PM] Validate local files time: 38 files=0
+[Info  - 8:00:50 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:50 PM] Local validating 0 files
+[Info  - 8:00:50 PM] Localisation check 0 files
+[Info  - 8:00:50 PM] Localisation check took 0ms
+[Info  - 8:00:50 PM] Validate local files time: 41 files=0
+[Info  - 8:00:50 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:50 PM] Local validating 0 files
+[Info  - 8:00:50 PM] Localisation check 0 files
+[Info  - 8:00:50 PM] Localisation check took 0ms
+[Info  - 8:00:50 PM] Validate local files time: 38 files=0
+[Info  - 8:00:50 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:50 PM] Local validating 0 files
+[Info  - 8:00:50 PM] Localisation check 0 files
+[Info  - 8:00:50 PM] Localisation check took 0ms
+[Info  - 8:00:50 PM] Validate local files time: 41 files=0
+[Info  - 8:00:50 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:50 PM] Local validating 0 files
+[Info  - 8:00:50 PM] Localisation check 0 files
+[Info  - 8:00:50 PM] Localisation check took 0ms
+[Info  - 8:00:50 PM] Validate local files time: 39 files=0
+[Info  - 8:00:50 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:50 PM] Local validating 0 files
+[Info  - 8:00:50 PM] Localisation check 0 files
+[Info  - 8:00:50 PM] Localisation check took 0ms
+[Info  - 8:00:50 PM] Validate local files time: 42 files=0
+[Info  - 8:00:50 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:50 PM] Local validating 0 files
+[Info  - 8:00:50 PM] Localisation check 0 files
+[Info  - 8:00:50 PM] Localisation check took 0ms
+[Info  - 8:00:50 PM] Validate local files time: 40 files=0
+[Info  - 8:00:50 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:50 PM] Local validating 0 files
+[Info  - 8:00:50 PM] Localisation check 0 files
+[Info  - 8:00:50 PM] Localisation check took 0ms
+[Info  - 8:00:50 PM] Validate local files time: 39 files=0
+[Info  - 8:00:51 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:51 PM] Local validating 0 files
+[Info  - 8:00:51 PM] Localisation check 0 files
+[Info  - 8:00:51 PM] Localisation check took 0ms
+[Info  - 8:00:51 PM] Validate local files time: 39 files=0
+[Info  - 8:00:51 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:51 PM] Local validating 0 files
+[Info  - 8:00:51 PM] Localisation check 0 files
+[Info  - 8:00:51 PM] Localisation check took 0ms
+[Info  - 8:00:51 PM] Validate local files time: 39 files=0
+[Info  - 8:00:51 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:51 PM] Local validating 0 files
+[Info  - 8:00:51 PM] Localisation check 0 files
+[Info  - 8:00:51 PM] Localisation check took 0ms
+[Info  - 8:00:51 PM] Validate local files time: 45 files=0
+[Info  - 8:00:51 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:51 PM] Local validating 0 files
+[Info  - 8:00:51 PM] Localisation check 0 files
+[Info  - 8:00:51 PM] Localisation check took 0ms
+[Info  - 8:00:51 PM] Validate local files time: 37 files=0
+[Info  - 8:00:51 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:51 PM] Local validating 0 files
+[Info  - 8:00:51 PM] Localisation check 0 files
+[Info  - 8:00:51 PM] Localisation check took 0ms
+[Info  - 8:00:51 PM] Validate local files time: 40 files=0
+[Info  - 8:00:51 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:51 PM] Local validating 2 files
+[Info  - 8:00:51 PM] Localisation check 2 files
+[Info  - 8:00:51 PM] Localisation check took 0ms
+[Info  - 8:00:51 PM] Validate local files time: 35 files=2
+[Info  - 8:00:51 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:51 PM] Local validating 1 files
+[Info  - 8:00:51 PM] Localisation check 1 files
+[Info  - 8:00:51 PM] Localisation check took 0ms
+[Info  - 8:00:51 PM] Validate local files time: 39 files=1
+[Info  - 8:00:51 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:51 PM] Local validating 6 files
+[Info  - 8:00:51 PM] Localisation check 6 files
+[Info  - 8:00:51 PM] Localisation check took 0ms
+[Info  - 8:00:51 PM] Validate local files time: 39 files=6
+[Info  - 8:00:51 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:51 PM] Local validating 0 files
+[Info  - 8:00:51 PM] Localisation check 0 files
+[Info  - 8:00:51 PM] Localisation check took 0ms
+[Info  - 8:00:51 PM] Validate local files time: 37 files=0
+[Info  - 8:00:51 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:51 PM] Local validating 26 files
+[Info  - 8:00:51 PM] Localisation check 26 files
+[Info  - 8:00:51 PM] Localisation check took 0ms
+[Info  - 8:00:51 PM] Validate local files time: 20 files=26
+[Info  - 8:00:51 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:51 PM] Local validating 25 files
+[Info  - 8:00:51 PM] Localisation check 25 files
+[Info  - 8:00:51 PM] Localisation check took 0ms
+[Info  - 8:00:51 PM] Validate local files time: 26 files=25
+[Info  - 8:00:51 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:51 PM] Local validating 2 files
+[Info  - 8:00:51 PM] Localisation check 2 files
+[Info  - 8:00:51 PM] Localisation check took 0ms
+[Info  - 8:00:51 PM] Validate local files time: 38 files=2
+[Info  - 8:00:51 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:51 PM] Local validating 4 files
+[Info  - 8:00:51 PM] Localisation check 4 files
+[Info  - 8:00:51 PM] Localisation check took 0ms
+[Info  - 8:00:51 PM] Validate local files time: 36 files=4
+[Info  - 8:00:51 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:51 PM] Local validating 0 files
+[Info  - 8:00:51 PM] Localisation check 0 files
+[Info  - 8:00:51 PM] Localisation check took 0ms
+[Info  - 8:00:51 PM] Validate local files time: 38 files=0
+[Info  - 8:00:51 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:51 PM] Local validating 4 files
+[Info  - 8:00:51 PM] Localisation check 4 files
+[Info  - 8:00:51 PM] Localisation check took 0ms
+[Info  - 8:00:51 PM] Validate local files time: 43 files=4
+[Info  - 8:00:51 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:51 PM] Local validating 8 files
+[Info  - 8:00:51 PM] Localisation check 8 files
+[Info  - 8:00:51 PM] Localisation check took 0ms
+[Info  - 8:00:51 PM] Validate local files time: 35 files=8
+[Info  - 8:00:51 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:51 PM] Local validating 14 files
+[Info  - 8:00:52 PM] Localisation check 14 files
+[Info  - 8:00:52 PM] Localisation check took 0ms
+[Info  - 8:00:52 PM] Validate local files time: 34 files=14
+[Info  - 8:00:52 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:52 PM] Local validating 17 files
+[Info  - 8:00:52 PM] Localisation check 17 files
+[Info  - 8:00:52 PM] Localisation check took 0ms
+[Info  - 8:00:52 PM] Validate local files time: 38 files=17
+[Info  - 8:00:52 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:52 PM] Local validating 25 files
+[Info  - 8:00:52 PM] Localisation check 25 files
+[Info  - 8:00:52 PM] Localisation check took 2ms
+[Info  - 8:00:52 PM] Validate local files time: 47 files=25
+[Info  - 8:00:52 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:52 PM] Local validating 11 files
+[Info  - 8:00:52 PM] Localisation check 11 files
+[Info  - 8:00:52 PM] Localisation check took 0ms
+[Info  - 8:00:52 PM] Validate local files time: 42 files=11
+[Info  - 8:00:52 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:52 PM] Local validating 0 files
+[Info  - 8:00:52 PM] Localisation check 0 files
+[Info  - 8:00:52 PM] Localisation check took 0ms
+[Info  - 8:00:52 PM] Validate local files time: 45 files=0
+[Info  - 8:00:52 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:52 PM] Local validating 0 files
+[Info  - 8:00:52 PM] Localisation check 0 files
+[Info  - 8:00:52 PM] Localisation check took 0ms
+[Info  - 8:00:52 PM] Validate local files time: 38 files=0
+[Info  - 8:00:52 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:52 PM] Local validating 0 files
+[Info  - 8:00:52 PM] Localisation check 0 files
+[Info  - 8:00:52 PM] Localisation check took 0ms
+[Info  - 8:00:52 PM] Validate local files time: 36 files=0
+[Info  - 8:00:52 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:52 PM] Local validating 0 files
+[Info  - 8:00:52 PM] Localisation check 0 files
+[Info  - 8:00:52 PM] Localisation check took 0ms
+[Info  - 8:00:52 PM] Validate local files time: 38 files=0
+[Info  - 8:00:52 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:52 PM] Local validating 0 files
+[Info  - 8:00:52 PM] Localisation check 0 files
+[Info  - 8:00:52 PM] Localisation check took 0ms
+[Info  - 8:00:52 PM] Validate local files time: 39 files=0
+[Info  - 8:00:52 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:52 PM] Local validating 0 files
+[Info  - 8:00:52 PM] Localisation check 0 files
+[Info  - 8:00:52 PM] Localisation check took 0ms
+[Info  - 8:00:52 PM] Validate local files time: 38 files=0
+[Info  - 8:00:52 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:52 PM] Local validating 0 files
+[Info  - 8:00:52 PM] Localisation check 0 files
+[Info  - 8:00:52 PM] Localisation check took 0ms
+[Info  - 8:00:52 PM] Validate local files time: 36 files=0
+[Info  - 8:00:52 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:52 PM] Local validating 0 files
+[Info  - 8:00:52 PM] Localisation check 0 files
+[Info  - 8:00:52 PM] Localisation check took 0ms
+[Info  - 8:00:52 PM] Validate local files time: 37 files=0
+[Info  - 8:00:52 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:52 PM] Local validating 0 files
+[Info  - 8:00:52 PM] Localisation check 0 files
+[Info  - 8:00:52 PM] Localisation check took 0ms
+[Info  - 8:00:52 PM] Validate local files time: 36 files=0
+[Info  - 8:00:52 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:52 PM] Local validating 0 files
+[Info  - 8:00:52 PM] Localisation check 0 files
+[Info  - 8:00:52 PM] Localisation check took 0ms
+[Info  - 8:00:52 PM] Validate local files time: 40 files=0
+[Info  - 8:00:52 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:52 PM] Local validating 0 files
+[Info  - 8:00:52 PM] Localisation check 0 files
+[Info  - 8:00:52 PM] Localisation check took 0ms
+[Info  - 8:00:52 PM] Validate local files time: 39 files=0
+[Info  - 8:00:52 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:52 PM] Local validating 0 files
+[Info  - 8:00:52 PM] Localisation check 0 files
+[Info  - 8:00:52 PM] Localisation check took 0ms
+[Info  - 8:00:52 PM] Validate local files time: 36 files=0
+[Info  - 8:00:52 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:53 PM] Local validating 0 files
+[Info  - 8:00:53 PM] Localisation check 0 files
+[Info  - 8:00:53 PM] Localisation check took 0ms
+[Info  - 8:00:53 PM] Validate local files time: 36 files=0
+[Info  - 8:00:53 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:53 PM] Local validating 0 files
+[Info  - 8:00:53 PM] Localisation check 0 files
+[Info  - 8:00:53 PM] Localisation check took 0ms
+[Info  - 8:00:53 PM] Validate local files time: 35 files=0
+[Info  - 8:00:53 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:53 PM] Local validating 0 files
+[Info  - 8:00:53 PM] Localisation check 0 files
+[Info  - 8:00:53 PM] Localisation check took 0ms
+[Info  - 8:00:53 PM] Validate local files time: 39 files=0
+[Info  - 8:00:53 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:53 PM] Local validating 0 files
+[Info  - 8:00:53 PM] Localisation check 0 files
+[Info  - 8:00:53 PM] Localisation check took 0ms
+[Info  - 8:00:53 PM] Validate local files time: 38 files=0
+[Info  - 8:00:53 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:53 PM] Local validating 0 files
+[Info  - 8:00:53 PM] Localisation check 0 files
+[Info  - 8:00:53 PM] Localisation check took 0ms
+[Info  - 8:00:53 PM] Validate local files time: 35 files=0
+[Info  - 8:00:53 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:53 PM] Local validating 0 files
+[Info  - 8:00:53 PM] Localisation check 0 files
+[Info  - 8:00:53 PM] Localisation check took 0ms
+[Info  - 8:00:53 PM] Validate local files time: 38 files=0
+[Info  - 8:00:53 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:53 PM] Local validating 0 files
+[Info  - 8:00:53 PM] Localisation check 0 files
+[Info  - 8:00:53 PM] Localisation check took 0ms
+[Info  - 8:00:53 PM] Validate local files time: 38 files=0
+[Info  - 8:00:53 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:53 PM] Local validating 0 files
+[Info  - 8:00:53 PM] Localisation check 0 files
+[Info  - 8:00:53 PM] Localisation check took 0ms
+[Info  - 8:00:53 PM] Validate local files time: 38 files=0
+[Info  - 8:00:53 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:53 PM] Local validating 0 files
+[Info  - 8:00:53 PM] Localisation check 0 files
+[Info  - 8:00:53 PM] Localisation check took 0ms
+[Info  - 8:00:53 PM] Validate local files time: 37 files=0
+[Info  - 8:00:53 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:53 PM] Local validating 0 files
+[Info  - 8:00:53 PM] Localisation check 0 files
+[Info  - 8:00:53 PM] Localisation check took 0ms
+[Info  - 8:00:53 PM] Validate local files time: 38 files=0
+[Info  - 8:00:53 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:53 PM] Local validating 3 files
+[Info  - 8:00:53 PM] Localisation check 3 files
+[Info  - 8:00:53 PM] Localisation check took 0ms
+[Info  - 8:00:53 PM] Validate local files time: 39 files=3
+[Info  - 8:00:53 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:53 PM] Local validating 7 files
+[Info  - 8:00:53 PM] Localisation check 7 files
+[Info  - 8:00:53 PM] Localisation check took 0ms
+[Info  - 8:00:53 PM] Validate local files time: 38 files=7
+[Info  - 8:00:53 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:53 PM] Local validating 16 files
+[Info  - 8:00:53 PM] Localisation check 16 files
+[Info  - 8:00:53 PM] Localisation check took 5ms
+[Info  - 8:00:53 PM] Validate local files time: 80 files=16
+[Info  - 8:00:53 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:53 PM] Local validating 0 files
+[Info  - 8:00:53 PM] Localisation check 0 files
+[Info  - 8:00:53 PM] Localisation check took 0ms
+[Info  - 8:00:53 PM] Validate local files time: 40 files=0
+[Info  - 8:00:53 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:53 PM] Local validating 0 files
+[Info  - 8:00:53 PM] Localisation check 0 files
+[Info  - 8:00:53 PM] Localisation check took 0ms
+[Info  - 8:00:53 PM] Validate local files time: 37 files=0
+[Info  - 8:00:53 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:53 PM] Local validating 2 files
+[Info  - 8:00:54 PM] Localisation check 2 files
+[Info  - 8:00:54 PM] Localisation check took 0ms
+[Info  - 8:00:54 PM] Validate local files time: 38 files=2
+[Info  - 8:00:54 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:54 PM] Local validating 16 files
+[Info  - 8:00:54 PM] Localisation check 16 files
+[Info  - 8:00:54 PM] Localisation check took 1ms
+[Info  - 8:00:54 PM] Validate local files time: 71 files=16
+[Info  - 8:00:54 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:54 PM] Local validating 0 files
+[Info  - 8:00:54 PM] Localisation check 0 files
+[Info  - 8:00:54 PM] Localisation check took 0ms
+[Info  - 8:00:54 PM] Validate local files time: 38 files=0
+[Info  - 8:00:54 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:54 PM] Local validating 0 files
+[Info  - 8:00:54 PM] Localisation check 0 files
+[Info  - 8:00:54 PM] Localisation check took 0ms
+[Info  - 8:00:54 PM] Validate local files time: 36 files=0
+[Info  - 8:00:54 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:54 PM] Local validating 4 files
+[Info  - 8:00:54 PM] Localisation check 4 files
+[Info  - 8:00:54 PM] Localisation check took 10ms
+[Info  - 8:00:54 PM] Validate local files time: 140 files=4
+[Info  - 8:00:54 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:54 PM] Local validating 3 files
+[Info  - 8:00:54 PM] Localisation check 3 files
+[Info  - 8:00:54 PM] Localisation check took 0ms
+[Info  - 8:00:54 PM] Validate local files time: 38 files=3
+[Info  - 8:00:54 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:54 PM] Local validating 0 files
+[Info  - 8:00:54 PM] Localisation check 0 files
+[Info  - 8:00:54 PM] Localisation check took 0ms
+[Info  - 8:00:54 PM] Validate local files time: 37 files=0
+[Info  - 8:00:54 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:54 PM] Local validating 1 files
+[Info  - 8:00:54 PM] Localisation check 1 files
+[Info  - 8:00:54 PM] Localisation check took 0ms
+[Info  - 8:00:54 PM] Validate local files time: 37 files=1
+[Info  - 8:00:54 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:54 PM] Local validating 2 files
+[Info  - 8:00:54 PM] Localisation check 2 files
+[Info  - 8:00:54 PM] Localisation check took 0ms
+[Info  - 8:00:54 PM] Validate local files time: 41 files=2
+[Info  - 8:00:54 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:54 PM] Local validating 6 files
+[Info  - 8:00:54 PM] Localisation check 6 files
+[Info  - 8:00:54 PM] Localisation check took 0ms
+[Info  - 8:00:54 PM] Validate local files time: 34 files=6
+[Info  - 8:00:54 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:54 PM] Local validating 2 files
+[Info  - 8:00:54 PM] Localisation check 2 files
+[Info  - 8:00:54 PM] Localisation check took 0ms
+[Info  - 8:00:54 PM] Validate local files time: 38 files=2
+[Info  - 8:00:54 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:54 PM] Local validating 1 files
+[Info  - 8:00:54 PM] Localisation check 1 files
+[Info  - 8:00:54 PM] Localisation check took 2ms
+[Info  - 8:00:54 PM] Validate local files time: 53 files=1
+[Info  - 8:00:54 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:54 PM] Local validating 12 files
+[Info  - 8:00:54 PM] Localisation check 12 files
+[Info  - 8:00:54 PM] Localisation check took 0ms
+[Info  - 8:00:54 PM] Validate local files time: 35 files=12
+[Info  - 8:00:54 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:54 PM] Local validating 4 files
+[Info  - 8:00:54 PM] Localisation check 4 files
+[Info  - 8:00:54 PM] Localisation check took 0ms
+[Info  - 8:00:54 PM] Validate local files time: 38 files=4
+[Info  - 8:00:54 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:55 PM] Local validating 3 files
+[Info  - 8:00:55 PM] Localisation check 3 files
+[Info  - 8:00:55 PM] Localisation check took 0ms
+[Info  - 8:00:55 PM] Validate local files time: 36 files=3
+[Info  - 8:00:55 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:55 PM] Local validating 5 files
+[Info  - 8:00:55 PM] Localisation check 5 files
+[Info  - 8:00:55 PM] Localisation check took 0ms
+[Info  - 8:00:55 PM] Validate local files time: 36 files=5
+[Info  - 8:00:55 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:55 PM] Local validating 3 files
+[Info  - 8:00:55 PM] Localisation check 3 files
+[Info  - 8:00:55 PM] Localisation check took 0ms
+[Info  - 8:00:55 PM] Validate local files time: 38 files=3
+[Info  - 8:00:55 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:55 PM] Local validating 6 files
+[Info  - 8:00:55 PM] Localisation check 6 files
+[Info  - 8:00:55 PM] Localisation check took 0ms
+[Info  - 8:00:55 PM] Validate local files time: 33 files=6
+[Info  - 8:00:55 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:55 PM] Local validating 7 files
+[Info  - 8:00:55 PM] Localisation check 7 files
+[Info  - 8:00:55 PM] Localisation check took 0ms
+[Info  - 8:00:55 PM] Validate local files time: 33 files=7
+[Info  - 8:00:55 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:55 PM] Local validating 2 files
+[Info  - 8:00:55 PM] Localisation check 2 files
+[Info  - 8:00:55 PM] Localisation check took 0ms
+[Info  - 8:00:55 PM] Validate local files time: 36 files=2
+[Info  - 8:00:55 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:55 PM] Local validating 1 files
+[Info  - 8:00:55 PM] Localisation check 1 files
+[Info  - 8:00:55 PM] Localisation check took 0ms
+[Info  - 8:00:55 PM] Validate local files time: 36 files=1
+[Info  - 8:00:55 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:55 PM] Local validating 30 files
+[Info  - 8:00:55 PM] Localisation check 30 files
+[Info  - 8:00:55 PM] Localisation check took 1ms
+[Info  - 8:00:55 PM] Validate local files time: 60 files=30
+[Info  - 8:00:55 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:55 PM] Local validating 30 files
+[Info  - 8:00:55 PM] Localisation check 30 files
+[Info  - 8:00:55 PM] Localisation check took 2ms
+[Info  - 8:00:55 PM] Validate local files time: 55 files=30
+[Info  - 8:00:55 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:55 PM] Local validating 18 files
+[Info  - 8:00:55 PM] Localisation check 18 files
+[Info  - 8:00:55 PM] Localisation check took 2ms
+[Info  - 8:00:55 PM] Validate local files time: 66 files=18
+[Info  - 8:00:55 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:55 PM] Local validating 0 files
+[Info  - 8:00:55 PM] Localisation check 0 files
+[Info  - 8:00:55 PM] Localisation check took 0ms
+[Info  - 8:00:55 PM] Validate local files time: 38 files=0
+[Info  - 8:00:55 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:55 PM] Local validating 0 files
+[Info  - 8:00:55 PM] Localisation check 0 files
+[Info  - 8:00:55 PM] Localisation check took 0ms
+[Info  - 8:00:55 PM] Validate local files time: 38 files=0
+[Info  - 8:00:55 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:55 PM] Local validating 0 files
+[Info  - 8:00:55 PM] Localisation check 0 files
+[Info  - 8:00:55 PM] Localisation check took 0ms
+[Info  - 8:00:55 PM] Validate local files time: 40 files=0
+[Info  - 8:00:55 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:55 PM] Local validating 0 files
+[Info  - 8:00:55 PM] Localisation check 0 files
+[Info  - 8:00:55 PM] Localisation check took 0ms
+[Info  - 8:00:55 PM] Validate local files time: 38 files=0
+[Info  - 8:00:55 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:55 PM] Local validating 0 files
+[Info  - 8:00:55 PM] Localisation check 0 files
+[Info  - 8:00:55 PM] Localisation check took 0ms
+[Info  - 8:00:55 PM] Validate local files time: 38 files=0
+[Info  - 8:00:55 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:56 PM] Local validating 0 files
+[Info  - 8:00:56 PM] Localisation check 0 files
+[Info  - 8:00:56 PM] Localisation check took 0ms
+[Info  - 8:00:56 PM] Validate local files time: 37 files=0
+[Info  - 8:00:56 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:56 PM] Local validating 0 files
+[Info  - 8:00:56 PM] Localisation check 0 files
+[Info  - 8:00:56 PM] Localisation check took 0ms
+[Info  - 8:00:56 PM] Validate local files time: 37 files=0
+[Info  - 8:00:56 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:56 PM] Local validating 0 files
+[Info  - 8:00:56 PM] Localisation check 0 files
+[Info  - 8:00:56 PM] Localisation check took 0ms
+[Info  - 8:00:56 PM] Validate local files time: 36 files=0
+[Info  - 8:00:56 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:56 PM] Local validating 0 files
+[Info  - 8:00:56 PM] Localisation check 0 files
+[Info  - 8:00:56 PM] Localisation check took 0ms
+[Info  - 8:00:56 PM] Validate local files time: 36 files=0
+[Info  - 8:00:56 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:56 PM] Local validating 0 files
+[Info  - 8:00:56 PM] Localisation check 0 files
+[Info  - 8:00:56 PM] Localisation check took 0ms
+[Info  - 8:00:56 PM] Validate local files time: 38 files=0
+[Info  - 8:00:56 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:56 PM] Local validating 0 files
+[Info  - 8:00:56 PM] Localisation check 0 files
+[Info  - 8:00:56 PM] Localisation check took 0ms
+[Info  - 8:00:56 PM] Validate local files time: 38 files=0
+[Info  - 8:00:56 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:56 PM] Local validating 0 files
+[Info  - 8:00:56 PM] Localisation check 0 files
+[Info  - 8:00:56 PM] Localisation check took 0ms
+[Info  - 8:00:56 PM] Validate local files time: 40 files=0
+[Info  - 8:00:56 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:56 PM] Local validating 0 files
+[Info  - 8:00:56 PM] Localisation check 0 files
+[Info  - 8:00:56 PM] Localisation check took 0ms
+[Info  - 8:00:56 PM] Validate local files time: 38 files=0
+[Info  - 8:00:56 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:56 PM] Local validating 0 files
+[Info  - 8:00:56 PM] Localisation check 0 files
+[Info  - 8:00:56 PM] Localisation check took 0ms
+[Info  - 8:00:56 PM] Validate local files time: 36 files=0
+[Info  - 8:00:56 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:56 PM] Local validating 0 files
+[Info  - 8:00:56 PM] Localisation check 0 files
+[Info  - 8:00:56 PM] Localisation check took 0ms
+[Info  - 8:00:56 PM] Validate local files time: 38 files=0
+[Info  - 8:00:56 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:56 PM] Local validating 0 files
+[Info  - 8:00:56 PM] Localisation check 0 files
+[Info  - 8:00:56 PM] Localisation check took 0ms
+[Info  - 8:00:56 PM] Validate local files time: 38 files=0
+[Info  - 8:00:56 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:56 PM] Local validating 0 files
+[Info  - 8:00:56 PM] Localisation check 0 files
+[Info  - 8:00:56 PM] Localisation check took 0ms
+[Info  - 8:00:56 PM] Validate local files time: 36 files=0
+[Info  - 8:00:56 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:56 PM] Local validating 0 files
+[Info  - 8:00:56 PM] Localisation check 0 files
+[Info  - 8:00:56 PM] Localisation check took 0ms
+[Info  - 8:00:56 PM] Validate local files time: 37 files=0
+[Info  - 8:00:56 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:56 PM] Local validating 0 files
+[Info  - 8:00:56 PM] Localisation check 0 files
+[Info  - 8:00:56 PM] Localisation check took 0ms
+[Info  - 8:00:56 PM] Validate local files time: 38 files=0
+[Info  - 8:00:56 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:56 PM] Local validating 0 files
+[Info  - 8:00:56 PM] Localisation check 0 files
+[Info  - 8:00:56 PM] Localisation check took 0ms
+[Info  - 8:00:56 PM] Validate local files time: 49 files=0
+[Info  - 8:00:56 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:56 PM] Local validating 1 files
+[Info  - 8:00:56 PM] Localisation check 1 files
+[Info  - 8:00:56 PM] Localisation check took 0ms
+[Info  - 8:00:56 PM] Validate local files time: 40 files=1
+[Info  - 8:00:56 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:56 PM] Local validating 21 files
+[Info  - 8:00:57 PM] Localisation check 21 files
+[Info  - 8:00:57 PM] Localisation check took 4ms
+[Info  - 8:00:57 PM] Validate local files time: 139 files=21
+[Info  - 8:00:57 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:57 PM] Local validating 1 files
+[Info  - 8:00:57 PM] Localisation check 1 files
+[Info  - 8:00:57 PM] Localisation check took 1ms
+[Info  - 8:00:57 PM] Validate local files time: 46 files=1
+[Info  - 8:00:57 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:57 PM] Local validating 19 files
+[Info  - 8:00:57 PM] Localisation check 19 files
+[Info  - 8:00:57 PM] Localisation check took 0ms
+[Info  - 8:00:57 PM] Validate local files time: 36 files=19
+[Info  - 8:00:57 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:57 PM] Local validating 30 files
+[Info  - 8:00:57 PM] Localisation check 30 files
+[Info  - 8:00:57 PM] Localisation check took 5ms
+[Info  - 8:00:57 PM] Validate local files time: 208 files=30
+[Info  - 8:00:57 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:57 PM] Local validating 30 files
+[Info  - 8:00:57 PM] Localisation check 30 files
+[Info  - 8:00:57 PM] Localisation check took 6ms
+[Info  - 8:00:57 PM] Validate local files time: 254 files=30
+[Info  - 8:00:57 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:57 PM] Local validating 8 files
+[Info  - 8:00:58 PM] Localisation check 8 files
+[Info  - 8:00:58 PM] Localisation check took 39ms
+[Info  - 8:00:58 PM] Validate local files time: 389 files=8
+[Info  - 8:00:58 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:58 PM] Local validating 3 files
+[Info  - 8:00:58 PM] Localisation check 3 files
+[Info  - 8:00:58 PM] Localisation check took 1ms
+[Info  - 8:00:58 PM] Validate local files time: 49 files=3
+[Info  - 8:00:58 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:58 PM] Local validating 20 files
+[Info  - 8:00:58 PM] Localisation check 20 files
+[Info  - 8:00:58 PM] Localisation check took 28ms
+[Info  - 8:00:58 PM] Validate local files time: 337 files=20
+[Info  - 8:00:58 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:58 PM] Local validating 30 files
+[Info  - 8:00:59 PM] Localisation check 30 files
+[Info  - 8:00:59 PM] Localisation check took 36ms
+[Info  - 8:00:59 PM] Validate local files time: 893 files=30
+[Info  - 8:00:59 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:59 PM] Local validating 30 files
+[Info  - 8:00:59 PM] Localisation check 30 files
+[Info  - 8:00:59 PM] Localisation check took 0ms
+[Info  - 8:00:59 PM] Validate local files time: 302 files=30
+[Info  - 8:00:59 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:59 PM] Local validating 30 files
+[Info  - 8:00:59 PM] Localisation check 30 files
+[Info  - 8:00:59 PM] Localisation check took 1ms
+[Info  - 8:00:59 PM] Validate local files time: 53 files=30
+[Info  - 8:00:59 PM] validateFilesLocalCancellable count=30
+[Info  - 8:00:59 PM] Local validating 30 files
+[Info  - 8:01:00 PM] Localisation check 30 files
+[Info  - 8:01:00 PM] Localisation check took 2ms
+[Info  - 8:01:00 PM] Validate local files time: 56 files=30
+[Info  - 8:01:00 PM] validateFilesLocalCancellable count=30
+[Info  - 8:01:00 PM] Local validating 30 files
+[Info  - 8:01:00 PM] Localisation check 30 files
+[Info  - 8:01:00 PM] Localisation check took 2ms
+[Info  - 8:01:00 PM] Validate local files time: 57 files=30
+[Info  - 8:01:00 PM] validateFilesLocalCancellable count=30
+[Info  - 8:01:00 PM] Local validating 4 files
+[Info  - 8:01:00 PM] Localisation check 4 files
+[Info  - 8:01:00 PM] Localisation check took 1ms
+[Info  - 8:01:00 PM] Validate local files time: 52 files=4
+[Info  - 8:01:00 PM] validateFilesLocalCancellable count=30
+[Info  - 8:01:00 PM] Local validating 24 files
+[Info  - 8:01:00 PM] Localisation check 24 files
+[Info  - 8:01:00 PM] Localisation check took 9ms
+[Info  - 8:01:00 PM] Validate local files time: 178 files=24
+[Info  - 8:01:00 PM] validateFilesLocalCancellable count=30
+[Info  - 8:01:00 PM] Local validating 3 files
+[Info  - 8:01:00 PM] Localisation check 3 files
+[Info  - 8:01:00 PM] Localisation check took 0ms
+[Info  - 8:01:00 PM] Validate local files time: 50 files=3
+[Info  - 8:01:00 PM] validateFilesLocalCancellable count=30
+[Info  - 8:01:00 PM] Local validating 1 files
+[Info  - 8:01:00 PM] Localisation check 1 files
+[Info  - 8:01:00 PM] Localisation check took 0ms
+[Info  - 8:01:00 PM] Validate local files time: 39 files=1
+[Info  - 8:01:00 PM] validateFilesLocalCancellable count=30
+[Info  - 8:01:00 PM] Local validating 7 files
+[Info  - 8:01:00 PM] Localisation check 7 files
+[Info  - 8:01:00 PM] Localisation check took 3ms
+[Info  - 8:01:00 PM] Validate local files time: 68 files=7
+[Info  - 8:01:00 PM] validateFilesLocalCancellable count=30
+[Info  - 8:01:00 PM] Local validating 0 files
+[Info  - 8:01:00 PM] Localisation check 0 files
+[Info  - 8:01:00 PM] Localisation check took 0ms
+[Info  - 8:01:00 PM] Validate local files time: 37 files=0
+[Info  - 8:01:00 PM] validateFilesLocalCancellable count=30
+[Info  - 8:01:00 PM] Local validating 3 files
+[Info  - 8:01:00 PM] Localisation check 3 files
+[Info  - 8:01:00 PM] Localisation check took 0ms
+[Info  - 8:01:00 PM] Validate local files time: 37 files=3
+[Info  - 8:01:00 PM] validateFilesLocalCancellable count=30
+[Info  - 8:01:00 PM] Local validating 0 files
+[Info  - 8:01:00 PM] Localisation check 0 files
+[Info  - 8:01:00 PM] Localisation check took 0ms
+[Info  - 8:01:00 PM] Validate local files time: 38 files=0
+[Info  - 8:01:00 PM] validateFilesLocalCancellable count=30
+[Info  - 8:01:00 PM] Local validating 11 files
+[Info  - 8:01:01 PM] Localisation check 11 files
+[Info  - 8:01:01 PM] Localisation check took 139ms
+[Info  - 8:01:01 PM] Validate local files time: 484 files=11
+[Info  - 8:01:01 PM] validateFilesLocalCancellable count=30
+[Info  - 8:01:01 PM] Local validating 30 files
+[Info  - 8:01:03 PM] Localisation check 30 files
+[Info  - 8:01:03 PM] Localisation check took 14ms
+[Info  - 8:01:03 PM] Validate local files time: 2218 files=30
+[Info  - 8:01:03 PM] validateFilesLocalCancellable count=30
+[Info  - 8:01:03 PM] Local validating 23 files
+[Info  - 8:01:04 PM] Localisation check 23 files
+[Info  - 8:01:04 PM] Localisation check took 20ms
+[Info  - 8:01:04 PM] Validate local files time: 455 files=23
+[Info  - 8:01:04 PM] validateFilesLocalCancellable count=30
+[Info  - 8:01:04 PM] Local validating 9 files
+[Info  - 8:01:04 PM] Localisation check 9 files
+[Info  - 8:01:04 PM] Localisation check took 11ms
+[Info  - 8:01:04 PM] Validate local files time: 134 files=9
+[Info  - 8:01:04 PM] validateFilesLocalCancellable count=30
+[Info  - 8:01:04 PM] Local validating 30 files
+[Info  - 8:01:05 PM] Localisation check 30 files
+[Info  - 8:01:05 PM] Localisation check took 61ms
+[Info  - 8:01:05 PM] Validate local files time: 1519 files=30
+[Info  - 8:01:05 PM] validateFilesLocalCancellable count=30
+[Info  - 8:01:05 PM] Local validating 29 files
+[Info  - 8:01:06 PM] Localisation check 29 files
+[Info  - 8:01:06 PM] Localisation check took 14ms
+[Info  - 8:01:06 PM] Validate local files time: 600 files=29
+[Info  - 8:01:06 PM] validateFilesLocalCancellable count=30
+[Info  - 8:01:06 PM] Local validating 30 files
+[Info  - 8:01:06 PM] Localisation check 30 files
+[Info  - 8:01:06 PM] Localisation check took 7ms
+[Info  - 8:01:06 PM] Validate local files time: 442 files=30
+[Info  - 8:01:06 PM] validateFilesLocalCancellable count=30
+[Info  - 8:01:06 PM] Local validating 30 files
+[Info  - 8:01:08 PM] Localisation check 30 files
+[Info  - 8:01:08 PM] Localisation check took 44ms
+[Info  - 8:01:08 PM] Validate local files time: 1447 files=30
+[Info  - 8:01:08 PM] validateFilesLocalCancellable count=30
+[Info  - 8:01:08 PM] Local validating 30 files
+[Info  - 8:01:08 PM] Localisation check 30 files
+[Info  - 8:01:08 PM] Localisation check took 16ms
+[Info  - 8:01:08 PM] Validate local files time: 441 files=30
+[Info  - 8:01:08 PM] validateFilesLocalCancellable count=30
+[Info  - 8:01:08 PM] Local validating 30 files
+[Info  - 8:01:09 PM] Localisation check 30 files
+[Info  - 8:01:09 PM] Localisation check took 16ms
+[Info  - 8:01:09 PM] Validate local files time: 456 files=30
+[Info  - 8:01:09 PM] validateFilesLocalCancellable count=30
+[Info  - 8:01:09 PM] Local validating 30 files
+[Info  - 8:01:09 PM] Localisation check 30 files
+[Info  - 8:01:09 PM] Localisation check took 5ms
+[Info  - 8:01:09 PM] Validate local files time: 168 files=30
+[Info  - 8:01:09 PM] validateFilesLocalCancellable count=30
+[Info  - 8:01:09 PM] Local validating 30 files
+[Info  - 8:01:09 PM] Localisation check 30 files
+[Info  - 8:01:09 PM] Localisation check took 8ms
+[Info  - 8:01:09 PM] Validate local files time: 198 files=30
+[Info  - 8:01:09 PM] validateFilesLocalCancellable count=30
+[Info  - 8:01:09 PM] Local validating 30 files
+[Info  - 8:01:10 PM] Localisation check 30 files
+[Info  - 8:01:10 PM] Localisation check took 6ms
+[Info  - 8:01:10 PM] Validate local files time: 377 files=30
+[Info  - 8:01:10 PM] validateFilesLocalCancellable count=30
+[Info  - 8:01:10 PM] Local validating 30 files
+[Info  - 8:01:11 PM] Localisation check 30 files
+[Info  - 8:01:11 PM] Localisation check took 25ms
+[Info  - 8:01:11 PM] Validate local files time: 989 files=30
+[Info  - 8:01:11 PM] validateFilesLocalCancellable count=30
+[Info  - 8:01:11 PM] Local validating 30 files
+[Info  - 8:01:13 PM] Localisation check 30 files
+[Info  - 8:01:13 PM] Localisation check took 42ms
+[Info  - 8:01:13 PM] Validate local files time: 2586 files=30
+[Info  - 8:01:13 PM] validateFilesLocalCancellable count=30
+[Info  - 8:01:13 PM] Local validating 30 files
+[Info  - 8:01:14 PM] Localisation check 30 files
+[Info  - 8:01:14 PM] Localisation check took 40ms
+[Info  - 8:01:14 PM] Validate local files time: 542 files=30
+[Info  - 8:01:14 PM] validateFilesLocalCancellable count=30
+[Info  - 8:01:14 PM] Local validating 30 files
+[Info  - 8:01:15 PM] Localisation check 30 files
+[Info  - 8:01:15 PM] Localisation check took 30ms
+[Info  - 8:01:15 PM] Validate local files time: 924 files=30
+[Info  - 8:01:15 PM] validateFilesLocalCancellable count=30
+[Info  - 8:01:15 PM] Local validating 30 files
+[Info  - 8:01:16 PM] Localisation check 30 files
+[Info  - 8:01:16 PM] Localisation check took 36ms
+[Info  - 8:01:16 PM] Validate local files time: 1328 files=30
+[Info  - 8:01:16 PM] validateFilesLocalCancellable count=30
+[Info  - 8:01:16 PM] Local validating 30 files
+[Info  - 8:01:17 PM] Localisation check 30 files
+[Info  - 8:01:17 PM] Localisation check took 14ms
+[Info  - 8:01:17 PM] Validate local files time: 622 files=30
+[Info  - 8:01:17 PM] validateFilesLocalCancellable count=30
+[Info  - 8:01:17 PM] Local validating 30 files
+[Info  - 8:01:18 PM] Localisation check 30 files
+[Info  - 8:01:18 PM] Localisation check took 14ms
+[Info  - 8:01:18 PM] Validate local files time: 1223 files=30
+[Info  - 8:01:18 PM] validateFilesLocalCancellable count=30
+[Info  - 8:01:18 PM] Local validating 30 files
+[Info  - 8:01:18 PM] Localisation check 30 files
+[Info  - 8:01:18 PM] Localisation check took 19ms
+[Info  - 8:01:18 PM] Validate local files time: 507 files=30
+[Info  - 8:01:18 PM] validateFilesLocalCancellable count=30
+[Info  - 8:01:18 PM] Local validating 30 files
+[Info  - 8:01:19 PM] Localisation check 30 files
+[Info  - 8:01:19 PM] Localisation check took 11ms
+[Info  - 8:01:19 PM] Validate local files time: 220 files=30
+[Info  - 8:01:19 PM] validateFilesLocalCancellable count=30
+[Info  - 8:01:19 PM] Local validating 30 files
+[Info  - 8:01:19 PM] Localisation check 30 files
+[Info  - 8:01:19 PM] Localisation check took 3ms
+[Info  - 8:01:19 PM] Validate local files time: 122 files=30
+[Info  - 8:01:19 PM] validateFilesLocalCancellable count=30
+[Info  - 8:01:19 PM] Local validating 30 files
+[Info  - 8:01:19 PM] Localisation check 30 files
+[Info  - 8:01:19 PM] Localisation check took 11ms
+[Info  - 8:01:19 PM] Validate local files time: 226 files=30
+[Info  - 8:01:19 PM] validateFilesLocalCancellable count=30
+[Info  - 8:01:19 PM] Local validating 30 files
+[Info  - 8:01:19 PM] Localisation check 30 files
+[Info  - 8:01:19 PM] Localisation check took 20ms
+[Info  - 8:01:19 PM] Validate local files time: 417 files=30
+[Info  - 8:01:20 PM] validateFilesLocalCancellable count=30
+[Info  - 8:01:20 PM] Local validating 30 files
+[Info  - 8:01:20 PM] Localisation check 30 files
+[Info  - 8:01:20 PM] Localisation check took 2ms
+[Info  - 8:01:20 PM] Validate local files time: 65 files=30
+[Info  - 8:01:20 PM] validateFilesLocalCancellable count=30
+[Info  - 8:01:20 PM] Local validating 30 files
+[Info  - 8:01:20 PM] Localisation check 30 files
+[Info  - 8:01:20 PM] Localisation check took 5ms
+[Info  - 8:01:20 PM] Validate local files time: 190 files=30
+[Info  - 8:01:20 PM] validateFilesLocalCancellable count=30
+[Info  - 8:01:20 PM] Local validating 30 files
+[Info  - 8:01:21 PM] Localisation check 30 files
+[Info  - 8:01:21 PM] Localisation check took 29ms
+[Info  - 8:01:21 PM] Validate local files time: 779 files=30
+[Info  - 8:01:21 PM] validateFilesLocalCancellable count=30
+[Info  - 8:01:21 PM] Local validating 30 files
+[Info  - 8:01:21 PM] Localisation check 30 files
+[Info  - 8:01:21 PM] Localisation check took 12ms
+[Info  - 8:01:21 PM] Validate local files time: 540 files=30
+[Info  - 8:01:21 PM] validateFilesLocalCancellable count=30
+[Info  - 8:01:21 PM] Local validating 30 files
+[Info  - 8:01:22 PM] Localisation check 30 files
+[Info  - 8:01:22 PM] Localisation check took 14ms
+[Info  - 8:01:22 PM] Validate local files time: 472 files=30
+[Info  - 8:01:22 PM] validateFilesLocalCancellable count=30
+[Info  - 8:01:22 PM] Local validating 30 files
+[Info  - 8:01:22 PM] Localisation check 30 files
+[Info  - 8:01:22 PM] Localisation check took 4ms
+[Info  - 8:01:22 PM] Validate local files time: 418 files=30
+[Info  - 8:01:22 PM] validateFilesLocalCancellable count=30
+[Info  - 8:01:22 PM] Local validating 30 files
+[Info  - 8:01:24 PM] Localisation check 30 files
+[Info  - 8:01:24 PM] Localisation check took 41ms
+[Info  - 8:01:24 PM] Validate local files time: 1634 files=30
+[Info  - 8:01:24 PM] validateFilesLocalCancellable count=30
+[Info  - 8:01:24 PM] Local validating 30 files
+[Info  - 8:01:26 PM] Localisation check 30 files
+[Info  - 8:01:26 PM] Localisation check took 66ms
+[Info  - 8:01:26 PM] Validate local files time: 1950 files=30
+[Info  - 8:01:26 PM] validateFilesLocalCancellable count=30
+[Info  - 8:01:26 PM] Local validating 30 files
+[Info  - 8:01:26 PM] Localisation check 30 files
+[Info  - 8:01:26 PM] Localisation check took 21ms
+[Info  - 8:01:26 PM] Validate local files time: 530 files=30
+[Info  - 8:01:26 PM] validateFilesLocalCancellable count=30
+[Info  - 8:01:26 PM] Local validating 30 files
+[Info  - 8:01:27 PM] Localisation check 30 files
+[Info  - 8:01:27 PM] Localisation check took 6ms
+[Info  - 8:01:27 PM] Validate local files time: 230 files=30
+[Info  - 8:01:27 PM] validateFilesLocalCancellable count=30
+[Info  - 8:01:27 PM] Local validating 21 files
+[Info  - 8:01:27 PM] Localisation check 21 files
+[Info  - 8:01:27 PM] Localisation check took 4ms
+[Info  - 8:01:27 PM] Validate local files time: 273 files=21
+[Info  - 8:01:27 PM] validateFilesLocalCancellable count=30
+[Info  - 8:01:27 PM] Local validating 0 files
+[Info  - 8:01:27 PM] Localisation check 0 files
+[Info  - 8:01:27 PM] Localisation check took 0ms
+[Info  - 8:01:27 PM] Validate local files time: 37 files=0
+[Info  - 8:01:27 PM] validateFilesLocalCancellable count=30
+[Info  - 8:01:27 PM] Local validating 0 files
+[Info  - 8:01:27 PM] Localisation check 0 files
+[Info  - 8:01:27 PM] Localisation check took 0ms
+[Info  - 8:01:27 PM] Validate local files time: 36 files=0
+[Info  - 8:01:27 PM] validateFilesLocalCancellable count=30
+[Info  - 8:01:27 PM] Local validating 0 files
+[Info  - 8:01:27 PM] Localisation check 0 files
+[Info  - 8:01:27 PM] Localisation check took 0ms
+[Info  - 8:01:27 PM] Validate local files time: 34 files=0
+[Info  - 8:01:27 PM] validateFilesLocalCancellable count=30
+[Info  - 8:01:27 PM] Local validating 0 files
+[Info  - 8:01:27 PM] Localisation check 0 files
+[Info  - 8:01:27 PM] Localisation check took 0ms
+[Info  - 8:01:27 PM] Validate local files time: 36 files=0
+[Info  - 8:01:27 PM] validateFilesLocalCancellable count=30
+[Info  - 8:01:27 PM] Local validating 8 files
+[Info  - 8:01:27 PM] Localisation check 8 files
+[Info  - 8:01:27 PM] Localisation check took 0ms
+[Info  - 8:01:27 PM] Validate local files time: 37 files=8
+[Info  - 8:01:27 PM] validateFilesLocalCancellable count=30
+[Info  - 8:01:27 PM] Local validating 17 files
+[Info  - 8:01:27 PM] Localisation check 17 files
+[Info  - 8:01:27 PM] Localisation check took 1ms
+[Info  - 8:01:27 PM] Validate local files time: 38 files=17
+[Info  - 8:01:27 PM] validateFilesLocalCancellable count=30
+[Info  - 8:01:27 PM] Local validating 15 files
+[Info  - 8:01:27 PM] Localisation check 15 files
+[Info  - 8:01:27 PM] Localisation check took 0ms
+[Info  - 8:01:27 PM] Validate local files time: 37 files=15
+[Info  - 8:01:27 PM] validateFilesLocalCancellable count=30
+[Info  - 8:01:27 PM] Local validating 0 files
+[Info  - 8:01:27 PM] Localisation check 0 files
+[Info  - 8:01:27 PM] Localisation check took 0ms
+[Info  - 8:01:27 PM] Validate local files time: 39 files=0
+[Info  - 8:01:27 PM] validateFilesLocalCancellable count=30
+[Info  - 8:01:27 PM] Local validating 0 files
+[Info  - 8:01:27 PM] Localisation check 0 files
+[Info  - 8:01:27 PM] Localisation check took 0ms
+[Info  - 8:01:27 PM] Validate local files time: 36 files=0
+[Info  - 8:01:27 PM] validateFilesLocalCancellable count=30
+[Info  - 8:01:27 PM] Local validating 0 files
+[Info  - 8:01:27 PM] Localisation check 0 files
+[Info  - 8:01:27 PM] Localisation check took 0ms
+[Info  - 8:01:27 PM] Validate local files time: 37 files=0
+[Info  - 8:01:27 PM] validateFilesLocalCancellable count=30
+[Info  - 8:01:27 PM] Local validating 0 files
+[Info  - 8:01:27 PM] Localisation check 0 files
+[Info  - 8:01:27 PM] Localisation check took 0ms
+[Info  - 8:01:27 PM] Validate local files time: 37 files=0
+[Info  - 8:01:28 PM] validateFilesLocalCancellable count=24
+[Info  - 8:01:28 PM] Local validating 0 files
+[Info  - 8:01:28 PM] Localisation check 0 files
+[Info  - 8:01:28 PM] Localisation check took 0ms
+[Info  - 8:01:28 PM] Validate local files time: 33 files=0
+[Info  - 8:01:28 PM] Validating 1973 files
+[Info  - 8:01:46 PM] validateFilesLocalCancellable count=96
+[Info  - 8:01:46 PM] Local validating 96 files
+[Info  - 8:01:49 PM] Localisation check 96 files
+[Info  - 8:01:49 PM] Localisation check took 105ms
+[Info  - 8:01:49 PM] Validate local files time: 2909 files=96
+[Info  - 8:01:49 PM] Localisation check 1973 files
+[Info  - 8:01:51 PM] Localisation check took 1490ms
+[Info  - 8:03:30 PM] symbolInfoAtPos common/anomalies/103_anomaly_categories_unplugged.txt c:\Users\sebas\Documents\Paradox Interactive\Stellaris\mod\Lotor [Dev]\lotor\common\anomalies\103_anomaly_categories_unplugged.txt
+[Info  - 8:03:46 PM] symbolInfoAtPos common/governments/civics/00_origins.txt c:\Users\sebas\Documents\Paradox Interactive\Stellaris\mod\Lotor [Dev]\lotor\common\governments\civics\00_origins.txt
+[Info  - 8:03:55 PM] symbolInfoAtPos common/random_names/lotor_empire_names.txt c:\Users\sebas\Documents\Paradox Interactive\Stellaris\mod\Lotor [Dev]\lotor\common\random_names\lotor_empire_names.txt
+[Info  - 8:04:00 PM] symbolInfoAtPos common/random_names/lotor_empire_names.txt c:\Users\sebas\Documents\Paradox Interactive\Stellaris\mod\Lotor [Dev]\lotor\common\random_names\lotor_empire_names.txt
+[Info  - 8:04:03 PM] symbolInfoAtPos common/random_names/lotor_empire_names.txt c:\Users\sebas\Documents\Paradox Interactive\Stellaris\mod\Lotor [Dev]\lotor\common\random_names\lotor_empire_names.txt
+[Info  - 8:04:04 PM] symbolInfoAtPos common/random_names/lotor_empire_names.txt c:\Users\sebas\Documents\Paradox Interactive\Stellaris\mod\Lotor [Dev]\lotor\common\random_names\lotor_empire_names.txt
+[Info  - 8:04:18 PM] symbolInfoAtPos common/resolutions/00_resolutions.txt c:\Users\sebas\Documents\Paradox Interactive\Stellaris\mod\Lotor [Dev]\lotor\common\resolutions\00_resolutions.txt
+[Info  - 8:04:19 PM] symbolInfoAtPos common/resolutions/00_resolutions.txt c:\Users\sebas\Documents\Paradox Interactive\Stellaris\mod\Lotor [Dev]\lotor\common\resolutions\00_resolutions.txt
+[Info  - 8:04:20 PM] symbolInfoAtPos common/resolutions/00_resolutions.txt c:\Users\sebas\Documents\Paradox Interactive\Stellaris\mod\Lotor [Dev]\lotor\common\resolutions\00_resolutions.txt
+[Info  - 8:04:27 PM] symbolInfoAtPos common/resolutions/00_resolutions.txt c:\Users\sebas\Documents\Paradox Interactive\Stellaris\mod\Lotor [Dev]\lotor\common\resolutions\00_resolutions.txt
+[Info  - 8:04:27 PM] symbolInfoAtPos common/resolutions/00_resolutions.txt c:\Users\sebas\Documents\Paradox Interactive\Stellaris\mod\Lotor [Dev]\lotor\common\resolutions\00_resolutions.txt
+[Info  - 8:04:40 PM] symbolInfoAtPos common/section_templates/global_ship_designs.txt c:\Users\sebas\Documents\Paradox Interactive\Stellaris\mod\Lotor [Dev]\lotor\common\section_templates\global_ship_designs.txt
+[Info  - 8:04:48 PM] symbolInfoAtPos common/ship_sizes/lotor_01_republic_ship_sizes.txt c:\Users\sebas\Documents\Paradox Interactive\Stellaris\mod\Lotor [Dev]\lotor\common\ship_sizes\lotor_01_republic_ship_sizes.txt
+[Error - 8:05:11 PM] Request textDocument/documentSymbol failed.
+Error: Invalid arguments
+	at new ve (file:///c:/Users/sebas/AppData/Local/Programs/Microsoft%20VS%20Code/a44adf7f53/resources/app/out/vs/workbench/api/node/extensionHostProcess.js:540:68938)
+	at asRange (c:\Users\sebas\.vscode\extensions\foreverskywalker.foreverskywalker-stellaris-cwtools-2.16.8\node_modules\vscode-languageclient\lib\common\protocolConverter.js:140:24)
+	at asDocumentSymbol (c:\Users\sebas\.vscode\extensions\foreverskywalker.foreverskywalker-stellaris-cwtools-2.16.8\node_modules\vscode-languageclient\lib\common\protocolConverter.js:604:104)
+	at asDocumentSymbol (c:\Users\sebas\.vscode\extensions\foreverskywalker.foreverskywalker-stellaris-cwtools-2.16.8\node_modules\vscode-languageclient\lib\common\protocolConverter.js:609:31)
+	at asDocumentSymbol (c:\Users\sebas\.vscode\extensions\foreverskywalker.foreverskywalker-stellaris-cwtools-2.16.8\node_modules\vscode-languageclient\lib\common\protocolConverter.js:609:31)
+	at asDocumentSymbol (c:\Users\sebas\.vscode\extensions\foreverskywalker.foreverskywalker-stellaris-cwtools-2.16.8\node_modules\vscode-languageclient\lib\common\protocolConverter.js:609:31)
+	at asDocumentSymbol (c:\Users\sebas\.vscode\extensions\foreverskywalker.foreverskywalker-stellaris-cwtools-2.16.8\node_modules\vscode-languageclient\lib\common\protocolConverter.js:609:31)
+	at asDocumentSymbol (c:\Users\sebas\.vscode\extensions\foreverskywalker.foreverskywalker-stellaris-cwtools-2.16.8\node_modules\vscode-languageclient\lib\common\protocolConverter.js:609:31)
+	at asDocumentSymbol (c:\Users\sebas\.vscode\extensions\foreverskywalker.foreverskywalker-stellaris-cwtools-2.16.8\node_modules\vscode-languageclient\lib\common\protocolConverter.js:609:31)
+	at asDocumentSymbol (c:\Users\sebas\.vscode\extensions\foreverskywalker.foreverskywalker-stellaris-cwtools-2.16.8\node_modules\vscode-languageclient\lib\common\protocolConverter.js:609:31)
+	at asDocumentSymbol (c:\Users\sebas\.vscode\extensions\foreverskywalker.foreverskywalker-stellaris-cwtools-2.16.8\node_modules\vscode-languageclient\lib\common\protocolConverter.js:609:31)
+	at asDocumentSymbol (c:\Users\sebas\.vscode\extensions\foreverskywalker.foreverskywalker-stellaris-cwtools-2.16.8\node_modules\vscode-languageclient\lib\common\protocolConverter.js:609:31)
+	at asDocumentSymbol (c:\Users\sebas\.vscode\extensions\foreverskywalker.foreverskywalker-stellaris-cwtools-2.16.8\node_modules\vscode-languageclient\lib\common\protocolConverter.js:609:31)
+	at asDocumentSymbol (c:\Users\sebas\.vscode\extensions\foreverskywalker.foreverskywalker-stellaris-cwtools-2.16.8\node_modules\vscode-languageclient\lib\common\protocolConverter.js:609:31)
+	at asDocumentSymbol (c:\Users\sebas\.vscode\extensions\foreverskywalker.foreverskywalker-stellaris-cwtools-2.16.8\node_modules\vscode-languageclient\lib\common\protocolConverter.js:609:31)
+	at asDocumentSymbol (c:\Users\sebas\.vscode\extensions\foreverskywalker.foreverskywalker-stellaris-cwtools-2.16.8\node_modules\vscode-languageclient\lib\common\protocolConverter.js:609:31)
+	at asDocumentSymbol (c:\Users\sebas\.vscode\extensions\foreverskywalker.foreverskywalker-stellaris-cwtools-2.16.8\node_modules\vscode-languageclient\lib\common\protocolConverter.js:609:31)
+	at asDocumentSymbol (c:\Users\sebas\.vscode\extensions\foreverskywalker.foreverskywalker-stellaris-cwtools-2.16.8\node_modules\vscode-languageclient\lib\common\protocolConverter.js:609:31)
+	at asDocumentSymbol (c:\Users\sebas\.vscode\extensions\foreverskywalker.foreverskywalker-stellaris-cwtools-2.16.8\node_modules\vscode-languageclient\lib\common\protocolConverter.js:609:31)
+	at convertBatch (c:\Users\sebas\.vscode\extensions\foreverskywalker.foreverskywalker-stellaris-cwtools-2.16.8\node_modules\vscode-languageclient\lib\common\utils\async.js:193:25)
+	at Object.map (c:\Users\sebas\.vscode\extensions\foreverskywalker.foreverskywalker-stellaris-cwtools-2.16.8\node_modules\vscode-languageclient\lib\common\utils\async.js:202:17)
+	at Object.asDocumentSymbols (c:\Users\sebas\.vscode\extensions\foreverskywalker.foreverskywalker-stellaris-cwtools-2.16.8\node_modules\vscode-languageclient\lib\common\protocolConverter.js:601:22)
+	at _provideDocumentSymbols (c:\Users\sebas\.vscode\extensions\foreverskywalker.foreverskywalker-stellaris-cwtools-2.16.8\node_modules\vscode-languageclient\lib\common\documentSymbol.js:83:76)
+	at async i.provideDocumentSymbols (file:///c:/Users/sebas/AppData/Local/Programs/Microsoft%20VS%20Code/a44adf7f53/resources/app/out/vs/workbench/api/node/extensionHostProcess.js:569:133610)
+[Error - 8:05:11 PM] Request textDocument/documentSymbol failed.
+Error: Invalid arguments
+	at ve (file:///c:/Users/sebas/AppData/Local/Programs/Microsoft%20VS%20Code/a44adf7f53/resources/app/out/vs/workbench/api/node/extensionHostProcess.js:540:68938)
+	at asRange (c:\Users\sebas\.vscode\extensions\foreverskywalker.foreverskywalker-stellaris-cwtools-2.16.8\node_modules\vscode-languageclient\lib\common\protocolConverter.js:140:24)
+	at asDocumentSymbol (c:\Users\sebas\.vscode\extensions\foreverskywalker.foreverskywalker-stellaris-cwtools-2.16.8\node_modules\vscode-languageclient\lib\common\protocolConverter.js:604:104)
+	at asDocumentSymbol (c:\Users\sebas\.vscode\extensions\foreverskywalker.foreverskywalker-stellaris-cwtools-2.16.8\node_modules\vscode-languageclient\lib\common\protocolConverter.js:609:31)
+	at asDocumentSymbol (c:\Users\sebas\.vscode\extensions\foreverskywalker.foreverskywalker-stellaris-cwtools-2.16.8\node_modules\vscode-languageclient\lib\common\protocolConverter.js:609:31)
+	at asDocumentSymbol (c:\Users\sebas\.vscode\extensions\foreverskywalker.foreverskywalker-stellaris-cwtools-2.16.8\node_modules\vscode-languageclient\lib\common\protocolConverter.js:609:31)
+	at asDocumentSymbol (c:\Users\sebas\.vscode\extensions\foreverskywalker.foreverskywalker-stellaris-cwtools-2.16.8\node_modules\vscode-languageclient\lib\common\protocolConverter.js:609:31)
+	at asDocumentSymbol (c:\Users\sebas\.vscode\extensions\foreverskywalker.foreverskywalker-stellaris-cwtools-2.16.8\node_modules\vscode-languageclient\lib\common\protocolConverter.js:609:31)
+	at asDocumentSymbol (c:\Users\sebas\.vscode\extensions\foreverskywalker.foreverskywalker-stellaris-cwtools-2.16.8\node_modules\vscode-languageclient\lib\common\protocolConverter.js:609:31)
+	at asDocumentSymbol (c:\Users\sebas\.vscode\extensions\foreverskywalker.foreverskywalker-stellaris-cwtools-2.16.8\node_modules\vscode-languageclient\lib\common\protocolConverter.js:609:31)
+	at asDocumentSymbol (c:\Users\sebas\.vscode\extensions\foreverskywalker.foreverskywalker-stellaris-cwtools-2.16.8\node_modules\vscode-languageclient\lib\common\protocolConverter.js:609:31)
+	at asDocumentSymbol (c:\Users\sebas\.vscode\extensions\foreverskywalker.foreverskywalker-stellaris-cwtools-2.16.8\node_modules\vscode-languageclient\lib\common\protocolConverter.js:609:31)
+	at asDocumentSymbol (c:\Users\sebas\.vscode\extensions\foreverskywalker.foreverskywalker-stellaris-cwtools-2.16.8\node_modules\vscode-languageclient\lib\common\protocolConverter.js:609:31)
+	at asDocumentSymbol (c:\Users\sebas\.vscode\extensions\foreverskywalker.foreverskywalker-stellaris-cwtools-2.16.8\node_modules\vscode-languageclient\lib\common\protocolConverter.js:609:31)
+	at asDocumentSymbol (c:\Users\sebas\.vscode\extensions\foreverskywalker.foreverskywalker-stellaris-cwtools-2.16.8\node_modules\vscode-languageclient\lib\common\protocolConverter.js:609:31)
+	at asDocumentSymbol (c:\Users\sebas\.vscode\extensions\foreverskywalker.foreverskywalker-stellaris-cwtools-2.16.8\node_modules\vscode-languageclient\lib\common\protocolConverter.js:609:31)
+	at asDocumentSymbol (c:\Users\sebas\.vscode\extensions\foreverskywalker.foreverskywalker-stellaris-cwtools-2.16.8\node_modules\vscode-languageclient\lib\common\protocolConverter.js:609:31)
+	at asDocumentSymbol (c:\Users\sebas\.vscode\extensions\foreverskywalker.foreverskywalker-stellaris-cwtools-2.16.8\node_modules\vscode-languageclient\lib\common\protocolConverter.js:609:31)
+	at asDocumentSymbol (c:\Users\sebas\.vscode\extensions\foreverskywalker.foreverskywalker-stellaris-cwtools-2.16.8\node_modules\vscode-languageclient\lib\common\protocolConverter.js:609:31)
+	at convertBatch (c:\Users\sebas\.vscode\extensions\foreverskywalker.foreverskywalker-stellaris-cwtools-2.16.8\node_modules\vscode-languageclient\lib\common\utils\async.js:193:25)
+	at Object.map (c:\Users\sebas\.vscode\extensions\foreverskywalker.foreverskywalker-stellaris-cwtools-2.16.8\node_modules\vscode-languageclient\lib\common\utils\async.js:202:17)
+	at Object.asDocumentSymbols (c:\Users\sebas\.vscode\extensions\foreverskywalker.foreverskywalker-stellaris-cwtools-2.16.8\node_modules\vscode-languageclient\lib\common\protocolConverter.js:601:22)
+	at _provideDocumentSymbols (c:\Users\sebas\.vscode\extensions\foreverskywalker.foreverskywalker-stellaris-cwtools-2.16.8\node_modules\vscode-languageclient\lib\common\documentSymbol.js:83:76)
+	at async i.provideDocumentSymbols (file:///c:/Users/sebas/AppData/Local/Programs/Microsoft%20VS%20Code/a44adf7f53/resources/app/out/vs/workbench/api/node/extensionHostProcess.js:569:133610)
+[Info  - 8:05:11 PM] symbolInfoAtPos common/inline_scripts/ship_sizes/lotor_ship_size_corvette.txt c:\Users\sebas\Documents\Paradox Interactive\Stellaris\mod\Lotor [Dev]\lotor\common\inline_scripts\ship_sizes\lotor_ship_size_corvette.txt
+[Info  - 8:05:12 PM] symbolInfoAtPos common/inline_scripts/ship_sizes/lotor_ship_size_corvette.txt c:\Users\sebas\Documents\Paradox Interactive\Stellaris\mod\Lotor [Dev]\lotor\common\inline_scripts\ship_sizes\lotor_ship_size_corvette.txt
+[Info  - 8:05:12 PM] symbolInfoAtPos common/inline_scripts/ship_sizes/lotor_ship_size_corvette.txt c:\Users\sebas\Documents\Paradox Interactive\Stellaris\mod\Lotor [Dev]\lotor\common\inline_scripts\ship_sizes\lotor_ship_size_corvette.txt
+[Info  - 8:05:38 PM] symbolInfoAtPos common/ship_sizes/00_ship_sizes.txt c:\Users\sebas\Documents\Paradox Interactive\Stellaris\mod\Lotor [Dev]\lotor\common\ship_sizes\00_ship_sizes.txt
+[Info  - 8:05:46 PM] symbolInfoAtPos common/ship_sizes/00_ship_sizes.txt c:\Users\sebas\Documents\Paradox Interactive\Stellaris\mod\Lotor [Dev]\lotor\common\ship_sizes\00_ship_sizes.txt

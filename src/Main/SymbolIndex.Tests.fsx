@@ -14,8 +14,30 @@ let corpus = documentCorpus [ s "child" (r 1 0 2 0); s "root" (r 0 0 5 0); s "pe
 equal ["root"; "peer"] (corpus |> List.map (fun x -> x.Symbol.Name)) "deterministic roots"
 equal ["child"] (corpus.Head.Children |> List.map (fun x -> x.Symbol.Name)) "range nesting"
 let equalRanges = documentCorpus [s "z-first" (r 0 0 3 0); s "a-second" (r 0 0 3 0)]
-equal "z-first" equalRanges.Head.Symbol.Name "equal ranges preserve input order"
-equal ["a-second"] (equalRanges.Head.Children |> List.map (fun x -> x.Symbol.Name)) "equal ranges nest in input order"
+equal ["z-first"; "a-second"] (equalRanges |> List.map (fun x -> x.Symbol.Name)) "equal ranges remain siblings in input order"
+check (equalRanges |> List.forall (fun x -> x.Children.IsEmpty)) "equal ranges do not invent nesting"
+
+let inlineRange = r 1 0 3 0
+let inlineInstances = [for i in 1..2000 -> s (sprintf "inline_%d" i) inlineRange]
+let inlineCorpus = documentCorpus inlineInstances
+equal 2000 inlineCorpus.Length "all distinct inline instances remain visible"
+check (inlineCorpus |> List.forall (fun x -> x.Children.IsEmpty)) "inline instance count does not increase outline depth"
+let duplicateInline = documentCorpus (Seq.replicate 2000 (s "shared_inline" inlineRange))
+equal 1 duplicateInline.Length "identical inline symbols are deduplicated"
+check duplicateInline.Head.Children.IsEmpty "duplicate inline symbols do not become descendants"
+
+let colocated = s "same_name" inlineRange
+let colocatedKinds = documentCorpus [colocated; { colocated with Kind = 2 }; { colocated with Detail = Some "another_type" }]
+equal 3 colocatedKinds.Length "different symbol kinds and type details at one location survive deduplication"
+let nestedPeers =
+    documentCorpus
+        [ s "parent" (r 0 0 5 0)
+          s "first" inlineRange
+          s "second" inlineRange
+          s "child" (r 2 0 2 1)
+          s "crossing" (r 2 2 4 0) ]
+equal ["first"; "second"; "crossing"] (nestedPeers.Head.Children |> List.map (fun x -> x.Symbol.Name)) "equal and crossing ranges remain siblings under their parent"
+equal ["child"] (nestedPeers.Head.Children[1].Children |> List.map (fun x -> x.Symbol.Name)) "strictly contained child is retained once beneath colocated peers"
 
 let epochs = EpochCache<string, int>(2)
 epochs.Set("a", 1); epochs.Set("a", 2); epochs.Set("a", 3)

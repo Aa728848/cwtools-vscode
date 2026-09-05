@@ -50,6 +50,33 @@ describe('provider thinking params', () => {
         expect(result).to.deep.equal({ reasoningEffort: 'none' });
     });
 
+    it('exposes Astra reasoning levels and preserves native max on API and subscription calls', () => {
+        const { getModelReasoningCapability, getThinkingParams, getReducedThinkingParams } = loadProviders();
+        for (const providerId of ['openai', 'codex-chatgpt']) {
+            expect(getModelReasoningCapability(providerId, 'gpt-6-astra')).to.deep.equal({
+                kind: 'effort',
+                options: ['low', 'medium', 'high', 'xhigh', 'max'],
+                defaultValue: 'high',
+            });
+            expect(getThinkingParams('gpt-6-astra', providerId, 'openai-responses', 'max'))
+                .to.deep.equal({ reasoningEffort: 'max' });
+            expect(getThinkingParams('gpt-6-astra', providerId, 'openai-responses', 'minimal'))
+                .to.deep.equal({ reasoningEffort: 'low' });
+            expect(getReducedThinkingParams('gpt-6-astra', providerId, 'openai-responses'))
+                .to.deep.equal({ reasoningEffort: 'low' });
+        }
+    });
+
+    it('preserves Astra max for namespaced and custom API model IDs', () => {
+        const { getThinkingParams } = loadProviders();
+        expect(getThinkingParams('openai/gpt-6-astra', 'custom', 'openai-responses', 'max'))
+            .to.deep.equal({ reasoningEffort: 'max' });
+        expect(getThinkingParams('gpt-6-astra', 'custom', 'openai-chat-completions', 'max'))
+            .to.deep.equal({ reasoningEffort: 'max' });
+        expect(getThinkingParams('openai/gpt-6-astra', 'openrouter', 'openai-chat-completions', 'max'))
+            .to.deep.equal({ extraBody: { reasoning: { effort: 'max' } } });
+    });
+
     it('lowers DeepSeek reasoning effort when thinking cannot be fully disabled', () => {
         const { getReducedThinkingParams } = loadProviders();
         const result = getReducedThinkingParams('deepseek-v4-pro', 'deepseek', 'openai-chat-completions');

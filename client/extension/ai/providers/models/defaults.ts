@@ -35,6 +35,7 @@ export const BUILTIN_PROVIDERS: Record<string, AIProviderConfig> = {
         endpoint: 'https://api.openai.com/v1',
         defaultModel: 'gpt-5.5',
         models: [
+            'gpt-6-astra',
             'gpt-5.6',
             'gpt-5.6-sol',
             'gpt-5.6-terra',

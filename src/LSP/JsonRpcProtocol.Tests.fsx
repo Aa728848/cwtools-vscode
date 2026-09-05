@@ -120,6 +120,71 @@ harness.Check "Quotes are escaped" (serializedItem.Contains("\\\"World\\\""))
 harness.Check "Newlines are escaped" (serializedItem.Contains("\\n"))
 harness.Check "Backslashes are escaped" (serializedItem.Contains("\\\\"))
 
+// Recursive protocol types must retain required fields beyond the old outline limit.
+let symbolSerializer = serializerFactory<DocumentSymbol list> writeOptions
+let makeSymbolChain count =
+    [count .. -1 .. 1]
+    |> List.fold (fun children level ->
+        [{ name = sprintf "symbol_%d" level
+           detail = "inline instance"
+           kind = SymbolKind.Class
+           deprecated = false
+           range = sampleRange
+           selectionRange = sampleRange
+           children = children }]) []
+
+let expectedRangeJson = JsonValue.Parse serializedRange
+let validSymbolChain count (json: JsonValue) =
+    let rec checkChain level (items: JsonValue array) =
+        if level > count then items.Length = 0
+        elif items.Length <> 1 then false
+        else
+            let item = items[0]
+            item.GetProperty("name").AsString() = sprintf "symbol_%d" level
+            && item.GetProperty("kind").AsInteger() = writeSymbolKind SymbolKind.Class
+            && item.GetProperty("range") = expectedRangeJson
+            && item.GetProperty("selectionRange") = expectedRangeJson
+            && checkChain (level + 1) (item.GetProperty("children").AsArray())
+    checkChain 1 (json.AsArray())
+
+for depth in [0; 1; 16; 17; 64] do
+    let json = makeSymbolChain depth |> symbolSerializer |> JsonValue.Parse
+    harness.Check (sprintf "DocumentSymbol depth %d keeps all symbols and numeric ranges" depth) (validSymbolChain depth json)
+
+let selectionSerializer = serializerFactory<SelectionRange list> writeOptions
+let selectionChain =
+    [1..64]
+    |> List.fold (fun parent _ -> Some { range = sampleRange; parent = parent }) None
+    |> Option.toList
+let selectionJson = selectionSerializer selectionChain |> JsonValue.Parse
+let rec validSelectionChain remaining (json: JsonValue) =
+    if remaining = 0 then json = JsonValue.Null
+    else json.GetProperty("range") = expectedRangeJson && validSelectionChain (remaining - 1) (json.GetProperty("parent"))
+harness.Check "SelectionRange keeps all 64 parents and numeric ranges" (validSelectionChain 64 (selectionJson.AsArray()[0]))
+
+let excessiveDepthRejected =
+    try
+        makeSymbolChain 512 |> symbolSerializer |> ignore
+        false
+    with :? InvalidOperationException -> true
+harness.Check "Excessive serialization depth raises a recoverable error" excessiveDepthRejected
+harness.Check "Serializer remains usable after a rejected response" (makeSymbolChain 1 |> symbolSerializer |> JsonValue.Parse |> validSymbolChain 1)
+
+type CyclicRecord = { value: int; mutable next: CyclicRecord option }
+let cyclicRecord = { value = 1; next = None }
+cyclicRecord.next <- Some cyclicRecord
+let cycleRejected =
+    try
+        serializerFactory<CyclicRecord> writeOptions cyclicRecord |> ignore
+        false
+    with :? InvalidOperationException -> true
+harness.Check "Cyclic values raise a recoverable error instead of truncating fields" cycleRejected
+
+let mappedPositions = Map.ofList [("start", Some samplePos); ("missing", None)]
+let mapJson = serializerFactory<Map<string, Position option>> writeOptions mappedPositions |> JsonValue.Parse
+harness.Equal "Map values retain nested record serialization" (JsonValue.Parse (posSerializer samplePos)) (mapJson.GetProperty "start")
+harness.Equal "Map values retain absent option serialization" JsonValue.Null (mapJson.GetProperty "missing")
+
 // ============================================================================
 // 3. Parser (JSON-RPC Protocol Message Parsing)
 // ============================================================================

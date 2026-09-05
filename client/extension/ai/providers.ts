@@ -226,7 +226,8 @@ export function getEffectiveModel(providerId: string, userModel?: string): strin
 }
 
 /** Apply provider-enforced sampling constraints while preserving normal user overrides. */
-export function getEffectiveTemperature(model: string, requested?: number): number {
+export function getEffectiveTemperature(model: string, requested?: number): number | undefined {
+    if (isGpt6AstraModel(model)) return undefined;
     const lower = model.toLowerCase();
     if (lower.includes('kimi-k2.7-code') || lower.includes('kimi-k3')
         || lower === 'k3' || lower.includes('kimi-for-coding')) return 1.0;
@@ -283,8 +284,11 @@ export function getEffectiveReasoningEffort(
     requested: ChatCompletionRequest['reasoning_effort'],
     apiFormat: CustomApiFormat
 ): ChatCompletionRequest['reasoning_effort'] {
-    if (apiFormat !== 'openai-responses' || requested !== 'max') return requested;
-    return 'xhigh';
+    if (apiFormat !== 'openai-responses') return requested;
+    if (isGpt6AstraModel(model)) {
+        return requested === 'none' || requested === 'minimal' ? 'low' : requested;
+    }
+    return requested === 'max' ? 'xhigh' : requested;
 }
 
 const NO_REASONING: ModelReasoningCapability = {
@@ -302,6 +306,9 @@ function reasoningCapability(
 }
 
 function openAiReasoningCapability(model: string): ModelReasoningCapability {
+    if (isGpt6AstraModel(model)) {
+        return reasoningCapability('effort', ['low', 'medium', 'high', 'xhigh', 'max'], 'high');
+    }
     const modelId = modelName(model).split('/').pop() ?? '';
     if (!/^(?:gpt-5|o[134](?:-|$))/.test(modelId)) return NO_REASONING;
     if (/-pro(?:-|$)/.test(modelId)) return reasoningCapability('fixed', ['high'], 'high');
@@ -357,7 +364,7 @@ function geminiReasoningCapability(model: string): ModelReasoningCapability {
 
 function upstreamGatewayCapability(providerId: string, model: string): ModelReasoningCapability | undefined {
     const lower = modelName(model);
-    if (lower.includes('openai/') || /(?:^|\/)(?:gpt-5|o[134](?:-|$))/.test(lower)) {
+    if (lower.includes('openai/') || isGpt6AstraModel(lower) || /(?:^|\/)(?:gpt-5|o[134](?:-|$))/.test(lower)) {
         return openAiReasoningCapability(lower);
     }
     if (lower.includes('anthropic/') || lower.includes('claude-')) {
@@ -443,7 +450,7 @@ export function getModelReasoningCapability(
         return upstreamGatewayCapability(provider, lower) ?? NO_REASONING;
     }
     if (provider === 'openai' || provider === 'codex-chatgpt'
-        || (apiFormat === 'openai-responses' && /(?:^|\/)(?:gpt-5|o[134](?:-|$))/.test(lower))) {
+        || (apiFormat === 'openai-responses' && (isGpt6AstraModel(lower) || /(?:^|\/)(?:gpt-5|o[134](?:-|$))/.test(lower)))) {
         return openAiReasoningCapability(lower);
     }
     if (provider === 'claude') return claudeReasoningCapability(lower);
@@ -574,9 +581,13 @@ function modelName(model: string): string {
     return model.toLowerCase().replace(/\s*\([^)]*\)$/i, '');
 }
 
+function isGpt6AstraModel(model: string): boolean {
+    return /(?:^|\/)gpt-6-astra(?:-|$)/.test(modelName(model));
+}
+
 const QWEN_THINKING_MODEL_RE = /(?:^|\/)qwen3(?:[.-]|$)|(?:^|\/)qwen(?:-max|-plus|-flash|-turbo|-long)(?:[-.]|$)/;
 
-const KNOWN_REASONING_MODEL_RE = /(?:^|\/)(?:gpt-5|o[134](?:-|$)|claude-|deepseek-(?:r1|v3|v4|reasoner)|glm-(?:4[.]?[5-9]|5)|qwen3|qwq|gemini-(?:2[.]5|3)|kimi-k2|kimi-k3|minimax-m2|minimax-m3|mimo-v2|gpt-oss)/;
+const KNOWN_REASONING_MODEL_RE = /(?:^|\/)(?:gpt-5|gpt-6-astra|o[134](?:-|$)|claude-|deepseek-(?:r1|v3|v4|reasoner)|glm-(?:4[.]?[5-9]|5)|qwen3|qwq|gemini-(?:2[.]5|3)|kimi-k2|kimi-k3|minimax-m2|minimax-m3|mimo-v2|gpt-oss)/;
 
 function isQwenThinkingModel(model: string): boolean {
     return QWEN_THINKING_MODEL_RE.test(model);
@@ -715,6 +726,7 @@ export function getReducedThinkingParams(
             ? { extraBody: { reasoning: { enabled: false } } }
             : undefined;
     }
+    if (isGpt6AstraModel(model)) return { reasoningEffort: 'low' };
     if (lowerProvider === 'together' && isKnownReasoningModel(lowerModel)) {
         return { extraBody: { reasoning: { enabled: false } } };
     }
@@ -797,8 +809,7 @@ function gemini25ThinkingBudgetParams(ctx: ThinkingBuildContext): EnableThinking
  * Add a new model family by appending a rule here instead of editing aiService.
  */
 const THINKING_RULES: ThinkingRule[] = [
-    // OpenAI Responses API carries reasoning_effort on the wire; max → xhigh for
-    // models that expose xhigh.
+    // Preserve Astra's native max; older OpenAI models use xhigh.
     { apiFormats: ['openai-responses'], build: ctx => ({ reasoningEffort: getEffectiveReasoningEffort(ctx.model, ctx.requested, ctx.apiFormat) }) },
 
     // OpenRouter normalizes request shapes; the upstream model decides whether an
@@ -849,6 +860,7 @@ const THINKING_RULES: ThinkingRule[] = [
 
     // Custom OpenAI-compatible endpoints can still benefit from well-known model conventions.
     { providers: ['custom'], model: QWEN_THINKING_MODEL_RE, build: ctx => ({ extraBody: { enable_thinking: true, thinking_budget: qwenBudgetFor(ctx.lowerModel, ctx.requested) } }) },
+    { providers: ['custom'], model: /(?:^|\/)gpt-6-astra(?:-|$)/, build: ctx => ({ reasoningEffort: ctx.requested }) },
     { providers: ['custom'], model: /(?:^|\/)(?:gpt-5|o[134](?:-|$)|deepseek-|glm-5[.]2|gpt-oss)/, build: ctx => ({ reasoningEffort: withoutMax(ctx.requested) }) },
 
     // Generic fallback: provider-specific on/off switches only.

@@ -90,32 +90,44 @@ describe('AIService provider protocol routing', () => {
     it('routes the built-in OpenAI provider through the Responses API', async () => {
         const { AIService } = loadAIService();
         const service = new AIService({ secrets: {} } as any) as any;
-        const routes: Array<{ endpoint: string; providerId: string; model: string }> = [];
+        const routes: Array<{ endpoint: string; providerId: string; model: string; reasoning?: string; temperature?: number }> = [];
         service.callOpenAIResponses = async (endpoint: string, _apiKey: string, request: any, providerId: string) => {
-            routes.push({ endpoint, providerId, model: request.model });
+            routes.push({ endpoint, providerId, model: request.model, reasoning: request.reasoning_effort, temperature: request.temperature });
             return completionResponse(request.model);
         };
         service.callOpenAICompatibleStreaming = async () => {
             throw new Error('OpenAI must not use Chat Completions.');
         };
 
-        const response = await service.chatCompletion(
-            [{ role: 'user', content: 'Hello' }],
-            {
-                providerId: 'openai',
-                model: 'gpt-5.5',
-                apiKey: 'test-key',
-                endpoint: 'https://api.openai.com/v1',
-                customApiFormat: 'openai-chat-completions',
-            },
-        );
+        for (const model of ['gpt-5.5', 'gpt-6-astra']) {
+            const response = await service.chatCompletion(
+                [{ role: 'user', content: 'Hello' }],
+                {
+                    providerId: 'openai',
+                    model,
+                    apiKey: 'test-key',
+                    endpoint: 'https://api.openai.com/v1',
+                    customApiFormat: 'openai-chat-completions',
+                    reasoningEffort: 'max',
+                    temperature: 0.2,
+                },
+            );
+            expect(response.choices[0].message.content).to.equal('ok');
+        }
 
         expect(routes).to.deep.equal([{
             endpoint: 'https://api.openai.com/v1',
             providerId: 'openai',
             model: 'gpt-5.5',
+            reasoning: 'xhigh',
+            temperature: 0.2,
+        }, {
+            endpoint: 'https://api.openai.com/v1',
+            providerId: 'openai',
+            model: 'gpt-6-astra',
+            reasoning: 'max',
+            temperature: undefined,
         }]);
-        expect(response.choices[0].message.content).to.equal('ok');
     });
 
     it('routes the ChatGPT subscription provider through the fixed Codex Responses endpoint', async () => {
@@ -136,19 +148,28 @@ describe('AIService provider protocol routing', () => {
             return completionResponse(request.model);
         };
 
-        await service.chatCompletion([{ role: 'user', content: 'Hello' }], {
-            providerId: 'codex-chatgpt',
-            model: 'gpt-5.6-sol',
-            reasoningEffort: 'max',
-            responseVerbosity: 'high',
-            endpoint: 'https://malicious-relay.example/v1',
-        });
+        for (const model of ['gpt-5.6-sol', 'gpt-6-astra']) {
+            await service.chatCompletion([{ role: 'user', content: 'Hello' }], {
+                providerId: 'codex-chatgpt',
+                model,
+                reasoningEffort: 'max',
+                responseVerbosity: 'high',
+                endpoint: 'https://malicious-relay.example/v1',
+            });
+        }
 
         expect(routes).to.deep.equal([{
             endpoint: 'https://chatgpt.com/backend-api/codex',
             providerId: 'codex-chatgpt',
             model: 'gpt-5.6-sol',
             reasoning: 'xhigh',
+            verbosity: 'high',
+            serviceTier: 'fast',
+        }, {
+            endpoint: 'https://chatgpt.com/backend-api/codex',
+            providerId: 'codex-chatgpt',
+            model: 'gpt-6-astra',
+            reasoning: 'max',
             verbosity: 'high',
             serviceTier: 'fast',
         }]);

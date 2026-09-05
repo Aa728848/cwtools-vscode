@@ -30,17 +30,18 @@ type WorkspaceSymbol<'File, 'Kind> =
       Symbol: Symbol<'Kind> }
 
 let private validRange range = range.Start <= range.End
-let private contains outer inner = outer.Start <= inner.Start && inner.End <= outer.End
+let private contains outer inner = outer <> inner && outer.Start <= inner.Start && inner.End <= outer.End
 let private spanKey range = range.End.Line - range.Start.Line, range.End.Character - range.Start.Character
 let private symbolOrder (index, symbol: Symbol<'Kind>) =
     // The original position is deliberately the final discriminator for non-equal
     // ranges, but the first discriminator once the ranges are identical.
     symbol.Range.Start, (spanKey symbol.Range |> fun (l, c) -> -l, -c), symbol.Range.End, index
 
-/// Builds a deterministic hierarchy. Equal ranges nest by input order; crossing ranges remain siblings.
+/// Builds a deterministic hierarchy. Equal and crossing ranges remain siblings.
 let documentCorpus (symbols: seq<Symbol<'Kind>>) : DocumentSymbol<'Kind> list =
     let ordered =
         symbols
+        |> Seq.distinct
         |> Seq.mapi (fun i symbol -> i, symbol)
         |> Seq.filter (fun (_, symbol) -> not (isNull symbol.Name) && validRange symbol.Range && validRange symbol.SelectionRange)
         |> Seq.sortBy symbolOrder

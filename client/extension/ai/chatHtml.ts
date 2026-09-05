@@ -299,6 +299,15 @@ ${stylesheetLinks}
                     </div>
                     <div class="codex-quota-status" id="codexQuotaStatus"></div>
                 </div>
+                <div class="settings-group" id="antigravityAccountGroup" style="display:none">
+                    <label class="settings-label">${svgIcon('key')} ${t('Antigravity account', 'Antigravity 账户')}</label>
+                    <div class="settings-hint" id="antigravityAccountStatus"></div>
+                    <div class="settings-key-row" style="margin-top:6px">
+                        <button class="detect-btn" id="antigravityLoginBtn" style="padding:0 8px; width:auto; border-radius:4px">${svgIcon('link')}${t('Sign in with Google', '使用 Google 登录')}</button>
+                        <button class="detect-btn" id="antigravityRefreshBtn" style="margin-left:4px; padding:0 8px; width:auto; border-radius:4px">${svgIcon('refresh')}${t('Refresh account and models', '刷新账户与模型')}</button>
+                        <button class="detect-btn" id="antigravityLogoutBtn" style="margin-left:4px; padding:0 8px; width:auto; border-radius:4px; display:none">${svgIcon('trash')}${t('Sign out', '退出账号')}</button>
+                    </div>
+                </div>
                 <div class="settings-group" id="endpointGroup">
                     <label class="settings-label">${svgIcon('link')} Endpoint <span style="opacity:0.5;font-weight:400">${t('(optional)', '(可选)')}</span></label>
                     <input class="settings-input" id="settingsEndpoint" type="text" placeholder="${t('Leave empty to use default', '留空使用默认')}" />

@@ -3,6 +3,7 @@
  */
 
 import type { AIProviderConfig } from '../../types';
+import { ANTIGRAVITY_ENDPOINTS, ANTIGRAVITY_MODELS } from '../../antigravity/models';
 import {
     CODEX_CHATGPT_API_BASE,
     CODEX_CHATGPT_CONTEXT_TOKENS,
@@ -10,6 +11,24 @@ import {
 } from '../../codex/oauthService';
 
 export const BUILTIN_PROVIDERS: Record<string, AIProviderConfig> = {
+    antigravity: {
+        id: 'antigravity',
+        name: 'Antigravity (Google OAuth)',
+        endpoint: ANTIGRAVITY_ENDPOINTS[0],
+        defaultModel: ANTIGRAVITY_MODELS[0],
+        models: [...ANTIGRAVITY_MODELS],
+        supportsToolUse: true,
+        requiresApiKey: false,
+        supportsStreaming: true,
+        maxContextTokens: 1_048_576,
+        isOpenAICompatible: false,
+        toolCallStyle: 'openai',
+        supportsFIM: false,
+        supportsVision: true,
+        runtimeKind: 'http',
+        authKind: 'antigravity-oauth',
+        supportsUtilityCalls: false,
+    },
     'codex-chatgpt': {
         id: 'codex-chatgpt',
         name: 'Codex (ChatGPT Subscription)',

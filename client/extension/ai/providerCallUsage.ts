@@ -28,6 +28,9 @@ function finiteNonNegative(value: unknown): number | undefined {
 }
 
 function estimateMessageTokens(message: ChatMessage): number {
+    if (message.antigravity_content?.parts.length) {
+        return Math.ceil(JSON.stringify(message.antigravity_content.parts).length / 4) + 4;
+    }
     const parts = [contentToString(message.content)];
     if (message.tool_calls?.length) parts.push(JSON.stringify(message.tool_calls));
     if (message.responses_output_items?.length) parts.push(JSON.stringify(message.responses_output_items));

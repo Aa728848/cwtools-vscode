@@ -3,6 +3,7 @@
  */
 
 import { BUILTIN_PROVIDERS } from './defaults';
+import { ANTIGRAVITY_MODELS, antigravityContextTokens, antigravityOutputTokens } from '../../antigravity/models';
 import { CODEX_CHATGPT_CONTEXT_TOKENS, CODEX_CHATGPT_MODELS } from '../../codex/oauthService';
 
 /**
@@ -276,6 +277,7 @@ export const MODEL_CONTEXT_TOKENS: Record<string, number> = {
     // ChatGPT OAuth uses the Codex service catalog, whose active windows can
     // differ from the same model IDs exposed through the public API.
     'codex-chatgpt:gpt-5.6': CODEX_CHATGPT_CONTEXT_TOKENS,
+    ...Object.fromEntries(ANTIGRAVITY_MODELS.map(model => [`antigravity:${model}`, antigravityContextTokens(model)])),
     ...Object.fromEntries(CODEX_CHATGPT_MODELS.map(model => [
         `codex-chatgpt:${model}`,
         CODEX_CHATGPT_CONTEXT_TOKENS,
@@ -473,6 +475,7 @@ export const MODEL_CONTEXT_TOKENS: Record<string, number> = {
  * Get the context window size for a specific model.
  */
 export function getModelContextTokens(model: string, providerId?: string): number {
+    if (providerId === 'antigravity') return antigravityContextTokens(model);
     if (!model) return 0;
     const providerKey = providerId ? `${providerId}:${model}` : '';
     if (providerKey && providerKey in MODEL_CONTEXT_TOKENS) return MODEL_CONTEXT_TOKENS[providerKey]!;
@@ -528,6 +531,7 @@ export function clampConfiguredContextTokens(
  * Dynamic output token limits for API calls to prevent self-truncation.
  */
 export function getModelOutputTokens(model: string, providerId?: string): number {
+    if (providerId === 'antigravity') return antigravityOutputTokens(model);
     if (!model) return 16384;
     const lower = model.toLowerCase();
     const modelId = lower.replace(/\s*\([^)]*\)$/i, '');

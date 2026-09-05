@@ -93,6 +93,7 @@
   "configuration.stellarisLanguageServices.checkForUpdates.description": "启用通过 GitHub Releases 对插件进行自动更新检查。",
   "configuration.stellarisLanguageServices.ai.enabled.description": "启用AI辅助代码生成与补全",
   "configuration.stellarisLanguageServices.ai.provider.enum.codex-chatgpt": "Codex（ChatGPT 订阅，浏览器 OAuth 与额度）",
+  "configuration.stellarisLanguageServices.ai.provider.enum.antigravity": "Antigravity（Google OAuth、模型与额度）",
   "configuration.stellarisLanguageServices.ai.provider.enum.openai": "OpenAI",
   "configuration.stellarisLanguageServices.ai.provider.enum.claude": "Claude(Anthropic)",
   "configuration.stellarisLanguageServices.ai.provider.enum.tokenrhythm": "基元律动 (Token Rhythm)",

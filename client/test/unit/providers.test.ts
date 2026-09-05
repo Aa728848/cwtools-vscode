@@ -27,6 +27,18 @@ import {
 } from '../../extension/ai/providers';
 import type { ChatCompletionRequest, ChatMessage } from '../../extension/ai/types';
 
+describe('Antigravity provider support', () => {
+    it('registers OAuth chat with provider-scoped limits and no utility/FIM use', () => {
+        const provider = getProvider('antigravity');
+        expect(provider).to.include({ authKind: 'antigravity-oauth', requiresApiKey: false, supportsFIM: false, supportsUtilityCalls: false });
+        expect(provider.models).to.include(provider.defaultModel);
+        expect(getProviderApiFormat('antigravity', 'claude-opus-4-6')).to.equal('gemini-generate-content');
+        expect(getModelContextTokens('claude-opus-4-6', 'antigravity')).to.equal(1048576);
+        expect(getModelContextTokens('gpt-oss-120b', 'antigravity')).to.equal(262144);
+        expect(getModelOutputTokens('claude-opus-4-6', 'antigravity')).to.equal(64000);
+    });
+});
+
 describe('GPT-6 Astra provider support', () => {
     it('offers Astra on both providers while preserving their defaults and context limits', () => {
         for (const providerId of ['openai', 'codex-chatgpt']) {
@@ -422,6 +434,7 @@ describe('getProviderApiFormat', () => {
     it('covers every built-in provider with its effective default-model protocol', () => {
         const expected = {
             'codex-chatgpt': 'openai-responses',
+            antigravity: 'gemini-generate-content',
             openai: 'openai-responses',
             claude: 'anthropic-messages',
             tokenrhythm: 'openai-chat-completions',

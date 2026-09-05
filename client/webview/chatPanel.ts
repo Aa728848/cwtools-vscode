@@ -1,4 +1,6 @@
 import { Icons, svgIcon, svgIconNoMargin } from './svgIcons';
+import type { AntigravityAccountStatus } from '../extension/ai/types';
+import { buildAntigravityAccountHtml, isAntigravityAccountStatus } from './chat/antigravityAccount';
 import { routeLiveStep, buildToolPairHtml, buildToolGroupHtml, buildLocalisationPromptCardHtml, escapeHtml as mrEscapeHtml, type RendererStep } from './messageRenderer';
 import { groupToolCalls } from './chat/toolPhrases';
 import {
@@ -363,6 +365,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
     let settingsProviders: any[] = [];
     let settingsOllamaModels: any[] = [];
     let settingsCodexAccount: any = undefined;
+    let settingsAntigravityAccount: AntigravityAccountStatus | undefined;
     let cachedSettingsData: { providers: any[]; current: any; ollamaModels: any[] } | undefined;
     type ReasoningEffortValue = 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
     type ReasoningCapabilityView = {
@@ -2948,6 +2951,9 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
     bindBtn('codexLogoutBtn', () => {
         vscode.postMessage({ type: 'codexLogout' });
     });
+    bindBtn('antigravityLoginBtn', () => vscode.postMessage({ type: 'antigravityLogin' }));
+    bindBtn('antigravityRefreshBtn', () => vscode.postMessage({ type: 'antigravityRefreshAccount' }));
+    bindBtn('antigravityLogoutBtn', () => vscode.postMessage({ type: 'antigravityLogout' }));
     bindBtn('detectBtn', detectOllamaModels);
     
     bindBtn('installSkillBtn', () => {
@@ -6787,6 +6793,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
 
             case 'settingsData':
                 settingsCodexAccount = msg.codexAccount;
+                settingsAntigravityAccount = isAntigravityAccountStatus(msg.antigravityAccount) ? msg.antigravityAccount : undefined;
                 cachedSettingsData = {
                     providers: msg.providers,
                     current: msg.current,
@@ -7630,6 +7637,8 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                 providers: settingsProviders,
                 providerId,
                 model: modelInput?.value.trim() || provider?.defaultModel,
+                accountStatus: providerId === 'antigravity'
+                    ? (settingsAntigravityAccount?.signedIn ? tr('Signed in', '已登录') : tr('Not signed in', '未登录')) : undefined,
                 endpoint: endpointInput?.value.trim() || provider?.defaultEndpoint,
                 contextTokens: parseInt(ctxInput?.value || '0', 10) || 0,
                 inlineEnabled: !!inlineEnabled?.checked,
@@ -7666,6 +7675,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                 maxContextTokens: p.maxContextTokens,
             })),
             codexAccount: settingsCodexAccount,
+            antigravityAccount: settingsAntigravityAccount,
             current,
             customApiFormat: current.customApiFormat,
             ollamaModels: (ollamaModels || []).map((m: any) => ({ name: m.name, size: m.size, parameterSize: m.parameterSize })),
@@ -7958,10 +7968,26 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         const providerHint = document.getElementById('providerHint')!;
         const deleteBtn = document.getElementById('deleteApiKeyBtn') as HTMLButtonElement | null;
         const isCodex = p?.authKind === 'chatgpt-oauth';
+        const isAntigravity = p?.authKind === 'antigravity-oauth';
+        const antigravityGroup = document.getElementById('antigravityAccountGroup');
+        if (antigravityGroup) antigravityGroup.style.display = isAntigravity ? '' : 'none';
         if (codexGroup) codexGroup.style.display = isCodex ? '' : 'none';
         if (codexSpeedGroup) codexSpeedGroup.style.display = isCodex ? '' : 'none';
         if (responseVerbosityGroup) responseVerbosityGroup.style.display = isCodex ? '' : 'none';
-        if (endpointGroup) endpointGroup.style.display = isCodex ? 'none' : '';
+        if (endpointGroup) endpointGroup.style.display = isCodex || isAntigravity ? 'none' : '';
+        if (isAntigravity) {
+            group.style.display = 'none';
+            providerHint.textContent = '';
+            if (deleteBtn) deleteBtn.disabled = true;
+            const accountStatus = document.getElementById('antigravityAccountStatus');
+            if (accountStatus) accountStatus.innerHTML = buildAntigravityAccountHtml(settingsAntigravityAccount, chatI18n.locale === 'zh-cn');
+            const loginBtn = document.getElementById('antigravityLoginBtn');
+            const logoutBtn = document.getElementById('antigravityLogoutBtn');
+            if (loginBtn) loginBtn.style.display = settingsAntigravityAccount?.signedIn ? 'none' : '';
+            if (logoutBtn) logoutBtn.style.display = settingsAntigravityAccount?.hasCredentials ? '' : 'none';
+            refreshSettingsOverview();
+            return;
+        }
         if (isCodex) {
             group.style.display = 'none';
             providerHint.innerHTML = '';

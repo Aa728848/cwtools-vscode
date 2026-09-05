@@ -103,6 +103,15 @@ export async function routeWebviewMessage(
         case 'codexLogin':
             await provider.settingsManager.loginCodex();
             break;
+        case 'antigravityLogin':
+            await provider.settingsManager.loginAntigravity(sourceSurface);
+            break;
+        case 'antigravityRefreshAccount':
+            await provider.settingsManager.refreshAntigravityAccount(sourceSurface);
+            break;
+        case 'antigravityLogout':
+            await provider.settingsManager.logoutAntigravity(sourceSurface);
+            break;
         case 'codexRefreshAccount':
             await provider.settingsManager.refreshCodexAccount();
             break;

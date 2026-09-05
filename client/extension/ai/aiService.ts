@@ -43,6 +43,9 @@ import { DEFAULT_REASONING_KEY, detectReasoningKey, KNOWN_REASONING_KEYS, reason
 import { ErrorReporter } from './errorReporter';
 import { SOURCE, aiText } from './messages';
 import { ChatGptOAuthService } from './codex/oauthService';
+import { AntigravityOAuthService } from './antigravity/oauthService';
+import { callAntigravity } from './antigravity/completion';
+import { isRecord } from '../../shared/protocolValidation';
 import { getCachedInputTokens, getCacheCreationInputTokens } from './providerUsage';
 import { resolveEffectiveCacheCapability } from './cacheCapability';
 
@@ -281,6 +284,7 @@ export class ApiKeyManager {
 export class AIService {
     private keyManager: ApiKeyManager;
     private readonly chatGptOAuth: ChatGptOAuthService;
+    private readonly antigravityOAuth: AntigravityOAuthService;
     /**
      * C1 Fix: Use a Set instead of a single instance so that concurrent
      * chatCompletion calls (e.g. compaction + main loop running in parallel)
@@ -301,6 +305,8 @@ export class AIService {
             String(context.extension?.packageJSON?.version ?? 'unknown'),
         );
         context.subscriptions?.push(this.chatGptOAuth);
+        this.antigravityOAuth = new AntigravityOAuthService(context.secrets);
+        context.subscriptions?.push(this.antigravityOAuth);
     }
 
     getKeyManager(): ApiKeyManager {
@@ -309,6 +315,10 @@ export class AIService {
 
     getChatGptOAuthService(): ChatGptOAuthService {
         return this.chatGptOAuth;
+    }
+
+    getAntigravityOAuthService(): AntigravityOAuthService {
+        return this.antigravityOAuth;
     }
 
     /** Set model without persisting to workspace config (no LS restart side-effect) */
@@ -483,9 +493,8 @@ export class AIService {
             }
         }
 
-        // OAuth bearer tokens must only ever be sent to the fixed ChatGPT Codex
-        // backend. Ignore endpoint overrides for this provider.
-        const endpoint = providerId === 'codex-chatgpt'
+        // Subscription OAuth credentials stay on each provider's fixed backend.
+        const endpoint = providerId === 'codex-chatgpt' || providerId === 'antigravity'
             ? provider.endpoint
             : options?.endpoint || getEffectiveEndpoint(providerId, config.endpoint);
         if (!endpoint) {
@@ -600,6 +609,14 @@ export class AIService {
                 requestEndpoint: string,
                 requestBody: ChatCompletionRequest,
             ): Promise<ChatCompletionResponse> => {
+                if (providerId === 'antigravity') {
+                    return callAntigravity(this.antigravityOAuth, requestBody,
+                        this.buildGeminiPayload(requestBody, true), disableThinking ? 'none' : requestedEffort,
+                        controller.signal, {
+                            onThinking: options?.onThinking, onTextDelta: options?.onTextDelta,
+                            onToolCallDelta: options?.onToolCallDelta,
+                        });
+                }
                 if (effectiveApiFormat === 'openai-responses') {
                     return await this.callOpenAIResponses(requestEndpoint, apiKey, requestBody, providerId, controller, {
                         onThinking: options?.onThinking,
@@ -652,7 +669,7 @@ export class AIService {
         const config = this.getConfig();
         const providerId = options?.providerId || config.inlineCompletion.provider || config.provider;
         const provider = getProvider(providerId);
-        if (providerId === 'codex-chatgpt') {
+        if (providerId === 'codex-chatgpt' || providerId === 'antigravity') {
             throw new Error(`${provider.name} does not support inline completion. Select a FIM-capable provider for inline completion.`);
         }
 
@@ -2004,7 +2021,7 @@ export class AIService {
         return url;
     }
 
-    private buildGeminiPayload(request: ChatCompletionRequest): Record<string, unknown> {
+    private buildGeminiPayload(request: ChatCompletionRequest, antigravity = false): Record<string, unknown> {
         const systemParts: Array<Record<string, unknown>> = [];
         const contents: Array<Record<string, unknown>> = [];
         const toolCallNames = new Map<string, string>();
@@ -2027,22 +2044,33 @@ export class AIService {
                 appendContent('user', [{
                         functionResponse: {
                             name,
+                            ...(antigravity && !request.model.startsWith('gemini-') ? { id: msg.tool_call_id } : {}),
                             response: { result: this.messageContentToText(msg.content) },
                         },
                     }]);
                 continue;
             }
 
+            if (antigravity && msg.role === 'assistant' && msg.antigravity_content?.model === request.model
+                && Array.isArray(msg.antigravity_content.parts) && msg.antigravity_content.parts.every(isRecord)) {
+                for (const call of msg.tool_calls ?? []) toolCallNames.set(call.id, call.function.name);
+                appendContent('model', structuredClone(msg.antigravity_content.parts));
+                continue;
+            }
             const parts = this.toGeminiParts(msg.content);
             if (msg.role === 'assistant' && msg.tool_calls && msg.tool_calls.length > 0) {
                 for (const tc of msg.tool_calls) {
                     toolCallNames.set(tc.id, tc.function.name);
+                    const thoughtSignature = antigravity && msg.antigravity_content
+                        && msg.antigravity_content.model !== request.model ? undefined : tc.thoughtSignature;
                     parts.push({
                         functionCall: {
                             name: tc.function.name,
                             args: this.parseJsonObject(tc.function.arguments, tc.function.name),
+                            ...(antigravity && !request.model.startsWith('gemini-') ? { id: tc.id } : {}),
                         },
-                        ...(tc.thoughtSignature ? { thoughtSignature: tc.thoughtSignature } : {}),
+                        ...(thoughtSignature ? { thoughtSignature }
+                            : antigravity ? { thoughtSignature: 'skip_thought_signature_validator' } : {}),
                     });
                 }
             }

@@ -93,6 +93,7 @@
   "configuration.stellarisLanguageServices.checkForUpdates.description": "Enable automatic checking for extension updates via GitHub Releases.",
   "configuration.stellarisLanguageServices.ai.enabled.description": "Enable AI-assisted code generation and completion",
   "configuration.stellarisLanguageServices.ai.provider.enum.codex-chatgpt": "Codex (ChatGPT Subscription, browser OAuth and quota)",
+  "configuration.stellarisLanguageServices.ai.provider.enum.antigravity": "Antigravity (Google OAuth, models and quota)",
   "configuration.stellarisLanguageServices.ai.provider.enum.openai": "OpenAI",
   "configuration.stellarisLanguageServices.ai.provider.enum.claude": "Claude (Anthropic)",
   "configuration.stellarisLanguageServices.ai.provider.enum.tokenrhythm": "Token Rhythm",

@@ -21,6 +21,7 @@ export interface SettingsOverviewInput {
     mcpCount?: number;
     writeMode?: 'auto' | 'confirm' | 'auto_review' | 'full' | string;
     reasoningEffort?: string;
+    accountStatus?: string;
 }
 
 export interface SettingsOverviewModel {
@@ -73,9 +74,9 @@ export function buildSettingsOverviewModel(input: SettingsOverviewInput, i18n: C
     const endpoint = input.endpoint?.trim() || provider?.defaultEndpoint || labels.defaultEndpoint;
     const contextTokens = input.contextTokens || 0;
     const contextLabel = contextTokens > 0 ? `${formatNum(contextTokens)} tokens` : labels.automatic;
-    const apiState = provider?.requiresApiKey === false
+    const apiState = input.accountStatus ?? (provider?.requiresApiKey === false
         ? labels.localModel
-        : (provider?.hasKey ? labels.apiKeyConfigured : labels.apiKeyMissing);
+        : (provider?.hasKey ? labels.apiKeyConfigured : labels.apiKeyMissing));
     const inlineState = input.inlineEnabled
         ? `${labels.inlinePrefix}: ${input.inlineProviderName || labels.inlineSameProvider}`
         : labels.inlineOff;

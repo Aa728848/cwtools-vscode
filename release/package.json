@@ -1028,6 +1028,7 @@
                         "type": "string",
                         "enum": [
                             "codex-chatgpt",
+                            "antigravity",
                             "openai",
                             "claude",
                             "tokenrhythm",
@@ -1053,6 +1054,7 @@
                         ],
                         "enumDescriptions": [
                             "%configuration.stellarisLanguageServices.ai.provider.enum.codex-chatgpt%",
+                            "%configuration.stellarisLanguageServices.ai.provider.enum.antigravity%",
                             "%configuration.stellarisLanguageServices.ai.provider.enum.openai%",
                             "%configuration.stellarisLanguageServices.ai.provider.enum.claude%",
                             "%configuration.stellarisLanguageServices.ai.provider.enum.tokenrhythm%",

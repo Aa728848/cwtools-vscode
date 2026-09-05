@@ -45,6 +45,8 @@ Run `AI: Open Chat Panel` to use the built-in agent workspace. It supports gener
 
 AI providers are configured separately. Credentials are stored with VS Code SecretStorage, and tool calls remain subject to the selected sandbox and approval policy. The ChatGPT-subscription-compatible Codex provider relies on an upstream compatibility endpoint and may need updates when that endpoint changes.
 
+Antigravity supports Google browser sign-in, account model and quota discovery, streaming replies, image input, and tool calls. Select it in AI Settings after completing account setup in Antigravity.
+
 ### External agents through MCP
 
 The separately released [`cwtools-mcp`](https://github.com/Aa728848/cwtools-mcp) package gives MCP clients read-only access to CWTools semantic queries. It normally connects to the active extension instead of starting another language server.
@@ -110,6 +112,8 @@ If something behaves unexpectedly, please include the game profile, extension ve
 运行 `AI: Open Chat Panel` 打开内置 Agent 工作区。它可以处理通用编码或 Paradox/CWTools 任务，并提供项目索引、计划和工作流、明确的工具权限，以及可选 MCP 服务。
 
 AI Provider 需要单独配置。凭据通过 VS Code SecretStorage 保存，工具调用仍受当前沙盒和审批策略限制。兼容 ChatGPT 订阅的 Codex Provider 依赖上游兼容端点；上游变化时，扩展可能需要同步更新。
+
+Antigravity 支持 Google 浏览器登录、账户模型与额度查询、流式回复、图片输入和工具调用。先在 Antigravity 中完成账户设置，再到 AI 设置中选择该供应商。
 
 ### 通过 MCP 连接外部 Agent
 

@@ -261,6 +261,8 @@ export function getProviderApiFormat(
     customApiFormat: CustomApiFormat = 'openai-chat-completions'
 ): CustomApiFormat {
     switch (providerId.toLowerCase()) {
+        case 'antigravity':
+            return 'gemini-generate-content';
         case 'openai':
         case 'codex-chatgpt':
             return 'openai-responses';
@@ -424,6 +426,13 @@ export function getModelReasoningCapability(
 
     if (!model) return NO_REASONING;
     if (provider === 'github') return NO_REASONING;
+    if (provider === 'antigravity') {
+        if (lower.includes('flash-image')) return NO_REASONING;
+        if (lower.startsWith('claude-') || lower.startsWith('gpt-oss-')) {
+            return reasoningCapability('effort', ['low', 'medium', 'high'], 'high');
+        }
+        return geminiReasoningCapability(lower);
+    }
 
     if (provider === 'openrouter') {
         return upstreamGatewayCapability(provider, lower) ?? NO_REASONING;

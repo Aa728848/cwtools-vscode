@@ -233,7 +233,7 @@ export interface AIProviderConfig {
     /** Transport used for primary chat turns. */
     runtimeKind?: 'http';
     /** Credential mechanism used by this provider. */
-    authKind?: 'api-key' | 'none' | 'chatgpt-oauth';
+    authKind?: 'api-key' | 'none' | 'chatgpt-oauth' | 'antigravity-oauth';
     /** Whether stateless utility calls (translation, titles, routing) are supported. */
     supportsUtilityCalls?: boolean;
 }
@@ -263,6 +263,23 @@ export interface CodexAccountStatus {
     planType?: string | null;
     models: string[];
     rateLimits: CodexRateLimitBucket[];
+    error?: string;
+}
+
+export interface AntigravityQuotaBucket {
+    name: string;
+    remainingPercent: number;
+    resetsAt?: string;
+}
+
+/** Host-sanitized account details; OAuth credentials never cross the Webview boundary. */
+export interface AntigravityAccountStatus {
+    signedIn: boolean;
+    hasCredentials: boolean;
+    email?: string;
+    projectId?: string;
+    models: string[];
+    quota: AntigravityQuotaBucket[];
     error?: string;
 }
 
@@ -367,6 +384,8 @@ export interface ChatMessage {
     responses_output_items?: Array<Record<string, unknown>>;
     /** Signed Anthropic thinking blocks required when continuing a tool-use turn. */
     anthropic_thinking_blocks?: Array<Record<string, unknown>>;
+    /** Signed Antigravity content, replayed only with the same model. */
+    antigravity_content?: { model: string; parts: Array<Record<string, unknown>> };
 }
 
 export interface ToolCall {
@@ -2531,6 +2550,9 @@ export type WebViewMessage =
     | { type: 'codexLogin' }
     | { type: 'codexRefreshAccount' }
     | { type: 'codexLogout' }
+    | { type: 'antigravityLogin' }
+    | { type: 'antigravityRefreshAccount' }
+    | { type: 'antigravityLogout' }
     | { type: 'installSkill'; source: string }
     | { type: 'deleteSkill'; skill: string }
     | { type: 'retractMessage'; messageIndex: number }
@@ -2595,7 +2617,7 @@ export type HostMessage =
     | { type: 'slashCommandList'; commands: SlashCommandDescriptor[] }
     | { type: 'slashCommandResult'; command: string; status: 'success' | 'error' | 'queued' | 'needsInput'; message: string; uiAction?: 'openModelMenu' | 'openReasoningMenu' | 'openPermissionsMenu' }
     | { type: 'todoUpdate'; todos: TodoItem[]; agentId?: string; threadId?: string; runId?: string }
-    | { type: 'settingsData'; providers: ProviderMeta[]; current: PanelSettings; ollamaModels?: OllamaModelInfo[]; showPanel?: boolean; targetSurface?: 'chat' | 'manager'; modelContextTokens?: Record<string, number>; thinkingModelPrefixes?: string[]; reasoningCapabilities?: Record<string, ModelReasoningCapability>; codexAccount?: CodexAccountStatus }
+    | { type: 'settingsData'; providers: ProviderMeta[]; current: PanelSettings; ollamaModels?: OllamaModelInfo[]; showPanel?: boolean; targetSurface?: 'chat' | 'manager'; modelContextTokens?: Record<string, number>; thinkingModelPrefixes?: string[]; reasoningCapabilities?: Record<string, ModelReasoningCapability>; codexAccount?: CodexAccountStatus; antigravityAccount?: AntigravityAccountStatus }
     | { type: 'ollamaModels'; models: OllamaModelInfo[]; error?: string }
     | { type: 'apiModelsFetched'; providerId: string; models: Array<{ id: string }>; dynContexts?: Record<string, number>; reasoningCapabilities?: Record<string, ModelReasoningCapability>; error?: string; ctxNote?: string }
     | { type: 'testConnectionResult'; ok: boolean; message: string }
@@ -2690,7 +2712,7 @@ export interface ProviderMeta {
     maxContextTokens?: number;
     registerUrl?: string;
     runtimeKind?: 'http';
-    authKind?: 'api-key' | 'none' | 'chatgpt-oauth';
+    authKind?: 'api-key' | 'none' | 'chatgpt-oauth' | 'antigravity-oauth';
     supportsUtilityCalls?: boolean;
 }
 

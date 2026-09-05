@@ -194,6 +194,10 @@ check('No hardcoded localhost URLs or API keys in extension source', () => {
                 if (rel.replace(/\\/g, '/') === 'client/extension/ai/codex/oauthService.ts'
                     && content.includes('OAUTH_CALLBACK_PATH')
                     && content.includes('OAUTH_REDIRECT_URI')) continue;
+                if (rel.replace(/\\/g, '/') === 'client/extension/ai/antigravity/oauthService.ts'
+                    && pattern.test('http://localhost')
+                    && content.includes("server.listen(this.callbackPort, '127.0.0.1'")
+                    && content.includes("url.searchParams.get('state') !== state")) continue;
                 console.log(`    Found: ${pattern.source} in ${rel}`);
                 return false;
             }

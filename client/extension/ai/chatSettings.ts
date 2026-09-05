@@ -14,6 +14,7 @@ import { promisify } from 'util';
 import type { ConnectionTestSettings, PanelSettings, HostMessage, CustomApiFormat, ModelReasoningCapability, ReasoningEffort } from './types';
 import { isCodexServiceTier, isReasoningEffort, isResponseVerbosity } from './types';
 import type { AIService } from './aiService';
+import type { AntigravityLogin } from './antigravity/oauthService';
 import { aiText } from './messages';
 import { getProjectWorkspaceRoot } from './workspacePaths';
 import {
@@ -277,10 +278,14 @@ export class ChatSettingsManager {
         const codexAccount = showPanel || config.provider === 'codex-chatgpt'
             ? await this.aiService.getChatGptOAuthService().getAccountStatus()
             : undefined;
+        const antigravityAccount = showPanel || config.provider === 'antigravity'
+            ? await this.aiService.getAntigravityOAuthService().getAccountStatus()
+            : undefined;
 
         const providers = Object.values(BUILTIN_PROVIDERS).map(p => {
             const customNonFim = p.id === 'custom' && config.customApiFormat !== 'openai-chat-completions';
-            const codexModels = p.id === 'codex-chatgpt' ? (codexAccount?.models ?? []) : undefined;
+            const codexModels = p.id === 'codex-chatgpt' ? (codexAccount?.models ?? [])
+                : p.id === 'antigravity' ? antigravityAccount?.models : undefined;
             return {
                 id: p.id,
                 name: p.id === 'codex-chatgpt'
@@ -302,7 +307,7 @@ export class ChatSettingsManager {
 
         const hasKeyMap: Record<string, boolean> = {};
         for (const p of providers) {
-            hasKeyMap[p.id] = p.authKind === 'chatgpt-oauth'
+            hasKeyMap[p.id] = p.authKind === 'chatgpt-oauth' || p.authKind === 'antigravity-oauth'
                 ? false
                 : !!(await this.aiService.getKeyForProvider(p.id));
         }
@@ -429,6 +434,7 @@ export class ChatSettingsManager {
             thinkingModelPrefixes: ALWAYS_THINKING_PREFIXES,
             reasoningCapabilities,
             codexAccount,
+            antigravityAccount,
         });
     }
 
@@ -660,6 +666,15 @@ export class ChatSettingsManager {
     }
 
     async fetchApiModels(providerId: string, endpointOverride: string, apiKeyOverride: string, customApiFormatOverride?: CustomApiFormat): Promise<void> {
+        if (providerId === 'antigravity') {
+            const account = await this.aiService.getAntigravityOAuthService().getAccountStatus(true);
+            this.postMessage({
+                type: 'apiModelsFetched', providerId,
+                models: account.models.map(id => ({ id })),
+                ...(!account.signedIn || account.error ? { error: account.error || aiText('Sign in to Antigravity first.', '请先登录 Antigravity。') } : {}),
+            });
+            return;
+        }
         const { getEffectiveEndpoint, getProvider } = await import('./providers');
         const saved = this.aiService.getConfig();
         const provider = getProvider(providerId);
@@ -898,6 +913,39 @@ export class ChatSettingsManager {
             }
             this.postMessage({ type: 'testConnectionResult', ok: false, message: aiText('Connection failed: ', '连接失败: ') + friendly });
         }
+    }
+
+    async loginAntigravity(targetSurface: 'chat' | 'manager' = 'chat'): Promise<void> {
+        let login: AntigravityLogin | undefined;
+        try {
+            login = await this.aiService.getAntigravityOAuthService().startLogin();
+            const completion = login.completion.then(() => ({ ok: true as const }), error => ({ ok: false as const, error }));
+            if (!await vs.env.openExternal(vs.Uri.parse(login.authUrl))) {
+                login.cancel();
+                throw new Error(aiText('Could not open the Google sign-in page.', '无法打开 Google 登录页面。'));
+            }
+            this.postMessage({ type: 'testConnectionResult', ok: true, message: aiText('Continue Antigravity sign-in in your browser.', '请在浏览器中继续登录 Antigravity。') });
+            void completion.then(async outcome => {
+                if (!outcome.ok) throw outcome.error;
+                await this.buildAndSendSettingsData(true, targetSurface);
+                this.postMessage({ type: 'testConnectionResult', ok: true, message: aiText('Antigravity sign-in completed.', 'Antigravity 登录完成。') });
+            }).catch(error => {
+                this.postMessage({ type: 'testConnectionResult', ok: false, message: settingsErrorMessage(error) });
+            });
+        } catch (error) {
+            login?.cancel();
+            this.postMessage({ type: 'testConnectionResult', ok: false, message: settingsErrorMessage(error) });
+        }
+    }
+
+    async refreshAntigravityAccount(targetSurface: 'chat' | 'manager' = 'chat'): Promise<void> {
+        await this.aiService.getAntigravityOAuthService().getAccountStatus(true);
+        await this.buildAndSendSettingsData(true, targetSurface);
+    }
+
+    async logoutAntigravity(targetSurface: 'chat' | 'manager' = 'chat'): Promise<void> {
+        await this.aiService.getAntigravityOAuthService().logout();
+        await this.buildAndSendSettingsData(true, targetSurface);
     }
 
     async loginCodex(): Promise<void> {

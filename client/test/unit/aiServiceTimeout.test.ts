@@ -1745,6 +1745,82 @@ describe('AIService streaming reasoning detection', () => {
     });
 });
 
+describe('AIService Antigravity integration', () => {
+    it('ignores endpoint/key overrides and replays signed parallel tool calls with image input', async () => {
+        const originalFetch = globalThis.fetch;
+        const requests: Array<Record<string, unknown>> = [];
+        const secrets = new Map<string, string>([['cwtools.ai.antigravity.oauth.v1', JSON.stringify({
+            accessToken: 'antigravity-test-access', refreshToken: 'antigravity-test-refresh', expiresAt: Date.now() + 3600_000,
+        })]]);
+        const subscriptions: Array<{ dispose(): void }> = [];
+        globalThis.fetch = async (input, init) => {
+            const url = new URL(String(input));
+            expect(url.origin).to.equal('https://daily-cloudcode-pa.googleapis.com');
+            expect(new Headers(init?.headers).get('Authorization')).to.equal('Bearer antigravity-test-access');
+            expect(init?.redirect).to.equal('error');
+            if (url.pathname.endsWith('loadCodeAssist')) return new Response(JSON.stringify({ cloudaicompanionProject: 'p' }));
+            const body: unknown = JSON.parse(String(init?.body));
+            if (typeof body !== 'object' || body === null || Array.isArray(body)) throw new Error('Invalid request');
+            requests.push(Object.fromEntries(Object.entries(body)));
+            expect(new Headers(init?.headers).get('anthropic-beta')).to.equal('interleaved-thinking-2025-05-14');
+            return geminiSseResponse([{ response: { candidates: [{ content: { parts: requests.length === 1 ? [
+                { thought: true, text: 'Thinking', thoughtSignature: 'thought-signature' },
+                { functionCall: { id: 'call_a', name: 'read_file', args: { path: 'a' } }, thoughtSignature: 'signature-a' },
+                { functionCall: { id: 'call_b', name: 'read_file', args: { path: 'b' } }, thoughtSignature: 'signature-b' },
+            ] : [{ text: 'done' }] }, finishReason: 'STOP' }] } }]);
+        };
+        try {
+            const { AIService } = loadAIService();
+            const context: Pick<import('vscode').ExtensionContext, 'secrets' | 'subscriptions'> = {
+                secrets: {
+                    get: async (key: string) => secrets.get(key),
+                    store: async (key: string, value: string) => { secrets.set(key, value); },
+                    delete: async (key: string) => { secrets.delete(key); },
+                    onDidChange: () => ({ dispose() {} }),
+                }, subscriptions,
+            };
+            const service = new AIService(context as import('vscode').ExtensionContext);
+            const messages: import('../../extension/ai/types').ChatMessage[] = [
+                { role: 'system', content: 'Use tools to inspect the mod.' },
+                { role: 'user', content: [{ type: 'text', text: 'Inspect' }, { type: 'image_url', image_url: { url: 'data:image/png;base64,dGVzdA==' } }] },
+            ];
+            const options = {
+                providerId: 'antigravity', model: 'claude-opus-4-6', endpoint: 'https://untrusted.example', apiKey: 'must-not-send',
+                tools: [{ type: 'function' as const, function: { name: 'read_file', description: 'Read', parameters: { type: 'object', properties: { path: { type: 'string' } } } } }],
+            };
+            const first = await service.chatCompletion(messages, options);
+            const assistant = first.choices[0]?.message;
+            if (!assistant) throw new Error('Missing assistant message');
+            const beforeReplay = JSON.stringify(assistant);
+            const second = await service.chatCompletion([...messages, assistant,
+                { role: 'tool', tool_call_id: 'call_a', content: 'a result' },
+                { role: 'tool', tool_call_id: 'call_b', content: 'b result' },
+            ], options);
+            expect(second.choices[0]?.message.content).to.equal('done');
+            expect(JSON.stringify(assistant)).to.equal(beforeReplay);
+            expect(requests[0]).to.include({ model: 'claude-opus-4-6-thinking', project: 'p' });
+            expect(requests[1]?.request).to.deep.include({ contents: [
+                { role: 'user', parts: [{ text: 'Inspect' }, { inlineData: { mimeType: 'image/png', data: 'dGVzdA==' } }] },
+                { role: 'model', parts: assistant.antigravity_content?.parts },
+                { role: 'user', parts: [
+                    { functionResponse: { name: 'read_file', id: 'call_a', response: { result: 'a result' } } },
+                    { functionResponse: { name: 'read_file', id: 'call_b', response: { result: 'b result' } } },
+                ] },
+            ] });
+            await service.chatCompletion([...messages, assistant,
+                { role: 'tool', tool_call_id: 'call_a', content: 'a result' },
+                { role: 'tool', tool_call_id: 'call_b', content: 'b result' },
+            ], { ...options, model: 'claude-sonnet-4-6' });
+            expect(JSON.stringify(requests[2])).not.to.contain('signature-a');
+            expect(JSON.stringify(requests[2])).not.to.contain('thought-signature');
+            expect(JSON.stringify(requests[2])).to.contain('skip_thought_signature_validator');
+        } finally {
+            subscriptions.forEach(subscription => subscription.dispose());
+            globalThis.fetch = originalFetch;
+        }
+    });
+});
+
 function chatCompletionsSseResponse(events: Record<string, unknown>[]): Response {
     const encoder = new TextEncoder();
     const chunks = events.map(event => `data:${JSON.stringify(event)}\n\n`);

@@ -82,6 +82,9 @@ export function estimateTokenCount(text: string): number {
 
 /** Include provider-native continuation state in context-window estimates. */
 export function estimateChatMessageTokens(message: ChatMessage): number {
+    if (message.antigravity_content?.parts.length) {
+        return estimateTokenCount(JSON.stringify(message.antigravity_content.parts)) + 4;
+    }
     if (message.responses_output_items?.length) {
         return estimateTokenCount(JSON.stringify(message.responses_output_items)) + 4;
     }

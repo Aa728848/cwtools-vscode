@@ -15,6 +15,8 @@ import {
     type MessageValidator,
 } from '../../shared/protocolValidation';
 
+import { isAntigravityAccountStatus } from './antigravityAccount';
+
 const isSurface = isOneOf(['chat', 'manager'] as const);
 const isRecordArray = isArrayOf(isObject);
 const isQuestionOption = (value: unknown): boolean => {
@@ -61,6 +63,7 @@ const validators = {
         ollamaModels: optional(isRecordArray), showPanel: optional(isBoolean), targetSurface: optional(isSurface),
         modelContextTokens: optional(isObject), thinkingModelPrefixes: optional(isStringArray),
         reasoningCapabilities: optional(isObject), codexAccount: optional(isObject),
+        antigravityAccount: optional(isAntigravityAccountStatus),
     }),
     ollamaModels: fields({ models: isRecordArray }, { error: optional(isString) }),
     apiModelsFetched: fields({ providerId: isString, models: isRecordArray }, {

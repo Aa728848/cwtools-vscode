@@ -65,6 +65,8 @@ Eligible Build and Utility stages can use programmable `run_code`: a stage-speci
 
 The ChatGPT-subscription-compatible Codex provider uses a browser sign-in flow and the extension's own agent runtime. It is an integration with an upstream compatibility endpoint, not a public stable API, so upstream changes can require extension updates.
 
+Antigravity is also available in AI Settings. Select **Antigravity (Google OAuth)**, sign in with Google, then refresh the account to load its models and quota. The extension stores OAuth tokens in VS Code SecretStorage and supports streaming text, image input, and tool calls through Antigravity's Gemini transport. Complete account setup in Antigravity first. This provider uses fixed upstream compatibility endpoints; API keys, custom endpoints, FIM, and utility calls are unavailable.
+
 #### Connect an external MCP client
 
 `cwtools-mcp` is maintained and released separately. It exposes read-only semantic queries and normally reuses the language server already running in VS Code.
@@ -188,6 +190,8 @@ Stellaris Language Serves 是一款面向 Paradox Mod 开发的 VS Code 扩展�
 符合条件的 Build 与 Utility 阶段可以使用可编程 `run_code`：模型通过当前阶段的类型化 SDK，按 Paradox/CWTools 或通用工具结果分支、筛选中间证据，并对有界的独立读取并发执行。程序运行在不具备 Node 或 VS Code 权限的 QuickJS/WASM guest 中；每个内部工具调用仍经过 mode/domain/stage、权限、策略、调度和写队列检查，只有显式日志与最终返回值进入模型上下文。
 
 兼容 ChatGPT 订阅的 Codex Provider 通过浏览器登录，并使用插件自己的 Agent 运行时。它依赖上游兼容端点，不属于公开稳定 API；如果上游流程变化，插件可能需要同步更新。
+
+AI 设置也支持 Antigravity。选择 **Antigravity (Google OAuth)**，使用 Google 登录后刷新账户，即可加载模型和额度。扩展将 OAuth Token 存入 VS Code SecretStorage，通过 Antigravity 的 Gemini 协议支持流式文本、图片输入和工具调用。请先在 Antigravity 中完成账户设置。该供应商使用固定的上游兼容端点，不提供 API Key、自定义端点、FIM 或辅助调用。
 
 #### 连接外部 MCP 客户端
 

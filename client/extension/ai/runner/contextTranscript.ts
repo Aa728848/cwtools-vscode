@@ -37,6 +37,8 @@ export function cloneChatMessage(message: ChatMessage): ChatMessage {
         anthropic_thinking_blocks: message.anthropic_thinking_blocks
             ? JSON.parse(JSON.stringify(message.anthropic_thinking_blocks)) as Array<Record<string, unknown>>
             : undefined,
+        antigravity_content: message.antigravity_content
+            ? structuredClone(message.antigravity_content) : undefined,
     };
 }
 

@@ -34,8 +34,10 @@ export function buildAntigravityRequest(
             includeThoughts: !off,
         };
     } else if (model.endsWith('-tiered') || model === 'gemini-3-flash') {
+        // Gemini 3.7/3.8 tiered runtimes reject MINIMAL, including routing calls with thinking disabled.
+        const minimumLevel = model.endsWith('-tiered') ? 'LOW' : 'MINIMAL';
         thinkingConfig = {
-            thinkingLevel: off || effort === 'minimal' ? 'MINIMAL' : effort === 'high' || effort === 'xhigh' || effort === 'max' ? 'HIGH' : effort === 'medium' ? 'MEDIUM' : 'LOW',
+            thinkingLevel: off || effort === 'minimal' ? minimumLevel : effort === 'high' || effort === 'xhigh' || effort === 'max' ? 'HIGH' : effort === 'medium' ? 'MEDIUM' : 'LOW',
             includeThoughts: !off,
         };
     } else if (model.startsWith('gemini-')) {

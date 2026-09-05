@@ -2040,6 +2040,7 @@ export class AIService {
         const systemParts: Array<Record<string, unknown>> = [];
         const contents: Array<Record<string, unknown>> = [];
         const toolCallNames = new Map<string, string>();
+        const nativeToolCallIds = new Set<string>();
         const appendContent = (role: 'user' | 'model', parts: Array<Record<string, unknown>>) => {
             if (parts.length === 0) return;
             const previous = contents[contents.length - 1] as { role?: string; parts?: Array<Record<string, unknown>> } | undefined;
@@ -2059,7 +2060,8 @@ export class AIService {
                 appendContent('user', [{
                         functionResponse: {
                             name,
-                            ...(antigravity && !request.model.startsWith('gemini-') ? { id: msg.tool_call_id } : {}),
+                            ...(antigravity && (!request.model.startsWith('gemini-') || nativeToolCallIds.has(msg.tool_call_id ?? ''))
+                                ? { id: msg.tool_call_id } : {}),
                             response: { result: this.messageContentToText(msg.content) },
                         },
                     }]);
@@ -2069,6 +2071,11 @@ export class AIService {
             if (antigravity && msg.role === 'assistant' && msg.antigravity_content?.model === request.model
                 && Array.isArray(msg.antigravity_content.parts) && msg.antigravity_content.parts.every(isRecord)) {
                 for (const call of msg.tool_calls ?? []) toolCallNames.set(call.id, call.function.name);
+                // Echo upstream IDs, but keep locally generated IDs out of ID-less Gemini turns.
+                for (const part of msg.antigravity_content.parts) {
+                    const call = part.functionCall;
+                    if (isRecord(call) && typeof call.id === 'string' && call.id) nativeToolCallIds.add(call.id);
+                }
                 appendContent('model', structuredClone(msg.antigravity_content.parts));
                 continue;
             }

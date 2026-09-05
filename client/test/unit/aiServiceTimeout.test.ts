@@ -1807,6 +1807,66 @@ describe('AIService streaming reasoning detection', () => {
 });
 
 describe('AIService Antigravity integration', () => {
+    for (const nativeIds of [true, false]) it(`continues Gemini 3.8 parallel tools ${nativeIds ? 'with native IDs' : 'without upstream IDs'}`, async () => {
+        const originalFetch = globalThis.fetch;
+        const requests: Array<Record<string, unknown>> = [];
+        const subscriptions: Array<{ dispose(): void }> = [];
+        const signedParts = [
+            { text: 'I will read both files.' },
+            { functionCall: { ...(nativeIds ? { id: 'native-a' } : {}), name: 'read_file', args: { path: 'a' } }, thoughtSignature: 'signed-call' },
+            { functionCall: { ...(nativeIds ? { id: 'native-b' } : {}), name: 'read_file', args: { path: 'b' } } },
+        ];
+        globalThis.fetch = async (input, init) => {
+            if (String(input).includes('loadCodeAssist')) return new Response(JSON.stringify({ cloudaicompanionProject: 'p' }));
+            const body: unknown = JSON.parse(String(init?.body));
+            if (typeof body !== 'object' || body === null || Array.isArray(body)) throw new Error('Invalid request');
+            requests.push(Object.fromEntries(Object.entries(body)));
+            return geminiSseResponse([{ response: { candidates: [{ content: { parts: requests.length === 2 ? signedParts : [{ text: 'done' }] }, finishReason: 'STOP' }] } }]);
+        };
+        try {
+            const { AIService } = loadAIService();
+            const context: Pick<import('vscode').ExtensionContext, 'secrets' | 'subscriptions'> = {
+                secrets: {
+                    get: async (key: string) => key === 'cwtools.ai.antigravity.oauth.v1' ? JSON.stringify({
+                        accessToken: 'test-access', refreshToken: 'test-refresh', expiresAt: Date.now() + 3600_000,
+                    }) : undefined,
+                    store: async () => {}, delete: async () => {}, onDidChange: () => ({ dispose() {} }),
+                }, subscriptions,
+            };
+            const service = new AIService(context as import('vscode').ExtensionContext);
+            const messages: import('../../extension/ai/types').ChatMessage[] = [{ role: 'user', content: 'Read both files' }];
+            const options = { providerId: 'antigravity', model: 'gemini-3.8-flash', reasoningEffort: 'medium' as const };
+            await service.chatCompletion(messages, { ...options, maxTokens: 180, disableThinking: true });
+            expect(requests[0]).to.have.nested.property('request.generationConfig.maxOutputTokens', 180);
+            expect(requests[0]).to.have.deep.nested.property('request.generationConfig.thinkingConfig', {
+                thinkingLevel: 'LOW', includeThoughts: false,
+            });
+            const tools = [{ type: 'function' as const, function: {
+                name: 'read_file', description: 'Read', parameters: { type: 'object', properties: { path: { type: 'string' } } },
+            } }];
+            const first = await service.chatCompletion(messages, { ...options, tools });
+            const assistant = first.choices[0]?.message;
+            if (!assistant?.tool_calls || assistant.tool_calls.length !== 2) throw new Error('Expected two tool calls');
+            const before = JSON.stringify(assistant);
+            const second = await service.chatCompletion([...messages, assistant, ...assistant.tool_calls.map(call => ({
+                role: 'tool' as const, tool_call_id: call.id, content: `result-${call.id}`,
+            }))], { ...options, tools });
+            expect(second.choices[0]?.message.content).to.equal('done');
+            expect(requests[2]).to.include({ model: 'gemini-3.8-flash-tiered' });
+            expect(requests[2]?.request).to.deep.include({ contents: [
+                { role: 'user', parts: [{ text: 'Read both files' }] },
+                { role: 'model', parts: signedParts },
+                { role: 'user', parts: assistant.tool_calls.map(call => ({ functionResponse: {
+                    name: 'read_file', ...(nativeIds ? { id: call.id } : {}), response: { result: `result-${call.id}` },
+                } })) },
+            ] });
+            expect(JSON.stringify(assistant)).to.equal(before);
+        } finally {
+            subscriptions.forEach(subscription => subscription.dispose());
+            globalThis.fetch = originalFetch;
+        }
+    });
+
     it('ignores endpoint/key overrides and replays signed parallel tool calls with image input', async () => {
         const originalFetch = globalThis.fetch;
         const requests: Array<Record<string, unknown>> = [];

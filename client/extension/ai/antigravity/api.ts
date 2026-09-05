@@ -18,10 +18,48 @@ export function antigravityHeaders(token: string): Record<string, string> {
 }
 
 export class AntigravityApiError extends Error {
-    constructor(readonly status: number, operation: string) {
-        super(status === 429
+    constructor(readonly status: number, operation: string, detail?: string) {
+        super((status === 429
             ? aiText('Antigravity quota exhausted or rate limited (429).', 'Antigravity 额度已耗尽或请求受限（429）。')
-            : aiText(`Antigravity ${operation} failed (${status}).`, `Antigravity ${operation} 失败（${status}）。`));
+            : aiText(`Antigravity ${operation} failed (${status}).`, `Antigravity ${operation} 失败（${status}）。`))
+            + (detail ? ` ${detail}` : ''));
+    }
+}
+
+/** Diagnostics must not consume an unlimited body or delay endpoint failover indefinitely. */
+async function readErrorDetail(response: Response, token: string, signal: AbortSignal): Promise<string | undefined> {
+    if (!response.body) return undefined;
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let remaining = 16 * 1024;
+    let body = '';
+    let rejectRead: (reason: unknown) => void = () => {};
+    const interrupted = new Promise<never>((_, reject) => { rejectRead = reject; });
+    const timeout = setTimeout(() => rejectRead(new Error('Antigravity error response timed out.')), 5_000);
+    const onAbort = () => rejectRead(signal.reason);
+    signal.addEventListener('abort', onAbort, { once: true });
+    try {
+        signal.throwIfAborted();
+        while (remaining > 0) {
+            const chunk = await Promise.race([reader.read(), interrupted]);
+            if (chunk.done) break;
+            const accepted = chunk.value.subarray(0, remaining);
+            body += decoder.decode(accepted, { stream: true });
+            remaining -= accepted.byteLength;
+        }
+        body += decoder.decode();
+        let data: unknown;
+        try { data = JSON.parse(body); } catch { return undefined; }
+        if (!isRecord(data)) return undefined;
+        const error = isRecord(data.error) ? data.error : data;
+        if (typeof error.message !== 'string') return undefined;
+        const message = token ? error.message.split(token).join('[REDACTED]') : error.message;
+        return message.replace(/Bearer\s+\S+/gi, 'Bearer [REDACTED]')
+            .replace(/\s+/g, ' ').trim().slice(0, 1500) || undefined;
+    } finally {
+        clearTimeout(timeout);
+        signal.removeEventListener('abort', onAbort);
+        try { await reader.cancel(); } finally { reader.releaseLock(); }
     }
 }
 
@@ -48,8 +86,12 @@ export async function postAntigravity(
                 body: JSON.stringify(body),
             });
             if (response.ok) return response;
-            await response.body?.cancel();
-            failure = new AntigravityApiError(response.status, action);
+            let detail: string | undefined;
+            let diagnosticError: unknown;
+            try { detail = await readErrorDetail(response, token, signal); }
+            catch (error) { signal.throwIfAborted(); diagnosticError = error; }
+            failure = Object.assign(new AntigravityApiError(response.status, action, detail),
+                diagnosticError ? { cause: diagnosticError } : {});
             if (![404, 408, 429].includes(response.status) && response.status < 500) throw failure;
         } catch (error) {
             signal.throwIfAborted();

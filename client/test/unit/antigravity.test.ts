@@ -6,6 +6,7 @@ import {
 } from '../../extension/ai/antigravity/oauthService';
 import { ANTIGRAVITY_ENDPOINTS, antigravityRuntimeModel } from '../../extension/ai/antigravity/models';
 import { buildAntigravityRequest, callAntigravity, consumeAntigravityResponse } from '../../extension/ai/antigravity/completion';
+import { AntigravityApiError, postAntigravity } from '../../extension/ai/antigravity/api';
 import { buildAntigravityAccountHtml, isAntigravityAccountStatus } from '../../webview/chat/antigravityAccount';
 import { cloneChatMessage } from '../../extension/ai/runner/contextTranscript';
 import { estimateChatMessageTokens } from '../../extension/ai/runner/tokenEstimation';
@@ -202,9 +203,92 @@ describe('Antigravity OAuth and account boundary', () => {
         expect(parseHostMessage({ type: 'settingsData', providers: [], current: {}, antigravityAccount: account })).not.to.equal(null);
         expect(parseHostMessage({ type: 'settingsData', providers: [], current: {}, antigravityAccount: { signedIn: 'true' } })).to.equal(null);
     });
+
+    it('renders each quota bucket with the Codex usage bar, remaining quota and reset time', () => {
+        const account = { signedIn: true, hasCredentials: true, models: [], quota: [
+            { name: 'Gemini <weekly>', remainingPercent: 97, resetsAt: '2026-09-11T06:56:36Z' },
+            { name: 'Gemini 5h', remainingPercent: 99 },
+            { name: 'Claude weekly', remainingPercent: 13 },
+            { name: 'Claude 5h', remainingPercent: 0 },
+        ] };
+        for (const chinese of [true, false]) {
+            const html = buildAntigravityAccountHtml(account, chinese);
+            expect(html.match(/role="progressbar"/g)).to.have.length(4);
+            for (const used of [3, 1, 87, 100]) {
+                expect(html).to.include(`aria-valuenow="${used}"`);
+                expect(html).to.include(`style="width:${used}%"`);
+            }
+            expect(html).to.include(chinese ? '3% 已用' : '3% used');
+            expect(html).to.include(chinese ? '97% 剩余' : '97% remaining');
+            expect(html).to.include(new Date('2026-09-11T06:56:36Z').toLocaleString(chinese ? 'zh-CN' : 'en'));
+            expect(html).to.include(chinese ? '重置时间未知' : 'unknown reset time');
+            expect(html).to.include('Gemini &lt;weekly&gt;');
+            expect(html).to.include('codex-quota-fill-warning');
+            expect(html).to.include('codex-quota-fill-critical');
+        }
+        expect(buildAntigravityAccountHtml({ ...account, quota: [] }, true)).to.include('暂未返回额度详情');
+        expect(buildAntigravityAccountHtml(undefined, false)).not.to.include('role="progressbar"');
+    });
 });
 
 describe('Antigravity completion transport', () => {
+    it('uses LOW for disabled or minimal thinking on tiered Flash models', () => {
+        for (const model of ['gemini-3.8-flash', 'gemini-3.8-flash-tiered', 'gemini-3.7-flash', 'gemini-3.7-flash-tiered']) {
+            for (const effort of ['none', 'minimal', 'low', 'medium', 'high'] as const) {
+                const body = buildAntigravityRequest({ model, messages: [], max_tokens: 180 }, { contents: [] }, 'project', effort);
+                expect(body.request).to.deep.include({ generationConfig: {
+                    maxOutputTokens: 180,
+                    thinkingConfig: { thinkingLevel: effort === 'high' ? 'HIGH' : effort === 'medium' ? 'MEDIUM' : 'LOW', includeThoughts: effort !== 'none' },
+                } });
+            }
+        }
+        const legacy = buildAntigravityRequest({ model: 'gemini-3-flash', messages: [] }, {}, 'project', 'none');
+        expect(legacy.request).to.deep.include({ generationConfig: {
+            maxOutputTokens: 65_536, thinkingConfig: { thinkingLevel: 'MINIMAL', includeThoughts: false },
+        } });
+    });
+
+    it('reports upstream validation details without leaking the access token or retrying 400', async () => {
+        let calls = 0;
+        const error: unknown = await postAntigravity(async () => {
+            calls++;
+            return json({ error: { code: 400, status: 'INVALID_ARGUMENT', message: 'Unsupported thinking level MINIMAL. Bearer test-access-token' } }, 400);
+        }, 'test-access-token', 'streamGenerateContent', {}, new AbortController().signal).catch(error => error);
+        expect(error).to.be.instanceOf(AntigravityApiError);
+        if (!(error instanceof AntigravityApiError)) throw new Error('Expected API error');
+        expect(error.status).to.equal(400);
+        expect(error.message).to.include('Unsupported thinking level MINIMAL');
+        expect(error.message).not.to.include('test-access-token');
+        expect(calls).to.equal(1);
+    });
+
+    it('bounds error response reads and retains the status when the body is malformed', async () => {
+        let cancelled = false;
+        const response = new Response(new ReadableStream<Uint8Array>({
+            start(controller) { controller.enqueue(new TextEncoder().encode('x'.repeat(128 * 1024))); },
+            cancel() { cancelled = true; },
+        }), { status: 400 });
+        await rejected(postAntigravity(async () => response, 'token', 'streamGenerateContent', {}, new AbortController().signal), /400/);
+        expect(cancelled).to.equal(true);
+        expect(response.body?.locked).to.equal(false);
+    });
+
+    it('cancels a stalled error response and releases the reader', async () => {
+        let cancelled = false;
+        let started: () => void = () => {};
+        const reading = new Promise<void>(resolve => { started = resolve; });
+        const response = new Response(new ReadableStream<Uint8Array>({
+            pull() { started(); }, cancel() { cancelled = true; },
+        }), { status: 400 });
+        const controller = new AbortController();
+        const outcome = rejected(postAntigravity(async () => response, 'token', 'streamGenerateContent', {}, controller.signal), /cancelled/);
+        await reading;
+        controller.abort(new Error('cancelled'));
+        await outcome;
+        expect(cancelled).to.equal(true);
+        expect(response.body?.locked).to.equal(false);
+    });
+
     it('routes the reference model aliases and caps output without adding Anthropic thinking fields', () => {
         expect(antigravityRuntimeModel('gemini-3.6-flash', 'medium')).to.equal('gemini-3.6-flash-medium');
         expect(antigravityRuntimeModel('gemini-3.1-pro', 'high')).to.equal('gemini-pro-agent');

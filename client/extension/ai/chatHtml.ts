@@ -301,7 +301,7 @@ ${stylesheetLinks}
                 </div>
                 <div class="settings-group" id="antigravityAccountGroup" style="display:none">
                     <label class="settings-label">${svgIcon('key')} ${t('Antigravity account', 'Antigravity 账户')}</label>
-                    <div class="settings-hint" id="antigravityAccountStatus"></div>
+                    <div id="antigravityAccountStatus"></div>
                     <div class="settings-key-row" style="margin-top:6px">
                         <button class="detect-btn" id="antigravityLoginBtn" style="padding:0 8px; width:auto; border-radius:4px">${svgIcon('link')}${t('Sign in with Google', '使用 Google 登录')}</button>
                         <button class="detect-btn" id="antigravityRefreshBtn" style="margin-left:4px; padding:0 8px; width:auto; border-radius:4px">${svgIcon('refresh')}${t('Refresh account and models', '刷新账户与模型')}</button>
@@ -317,14 +317,12 @@ ${stylesheetLinks}
                     </select>
                     <div id="subscriptionProxyUrlGroup" style="display:none; margin-top:6px">
                         <input class="settings-input" id="subscriptionProxyUrl" type="password" autocomplete="off" maxlength="2048" aria-label="${t('Proxy address', '代理地址')}" placeholder="http://proxy.example:7890" />
-                        <div class="settings-hint">${t('HTTP, HTTPS or SOCKS5. Leave empty to keep the saved address. Credentials are stored securely.', '支持 HTTP、HTTPS、SOCKS5。留空保留已保存的地址，账号密码会安全保存。')}</div>
                     </div>
                     <div class="settings-key-row" style="margin-top:6px">
                         <button class="detect-btn" id="subscriptionProxySaveBtn" style="padding:0 8px; width:auto; border-radius:4px">${t('Save proxy', '保存代理')}</button>
                         <button class="detect-btn" id="subscriptionProxyRefreshBtn" style="margin-left:4px; padding:0 8px; width:auto; border-radius:4px">${t('Refresh detection', '刷新检测')}</button>
                     </div>
                     <div class="settings-hint" id="subscriptionProxyStatus" role="status" aria-live="polite"></div>
-                    <div class="settings-hint">${t('Shared by Codex subscription and Antigravity (Gemini OAuth). Save before signing in or testing. Auto mode checks VS Code http.proxy, proxy environment variables, then the manual system proxy. Browser sign-in follows your browser proxy settings.', 'Codex 订阅与 Antigravity（Gemini OAuth）共用。登录或测试前请先保存。自动模式依次检测 VS Code http.proxy、代理环境变量、系统手动代理。浏览器登录页面遵循浏览器的代理设置。')}</div>
                 </div>
                 <div class="settings-group" id="endpointGroup">
                     <label class="settings-label">${svgIcon('link')} Endpoint <span style="opacity:0.5;font-weight:400">${t('(optional)', '(可选)')}</span></label>

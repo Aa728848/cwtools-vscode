@@ -1,6 +1,5 @@
 import { Icons, svgIcon, svgIconNoMargin } from './svgIcons';
-import type { AntigravityAccountStatus } from '../extension/ai/types';
-import { buildAntigravityAccountHtml, isAntigravityAccountStatus } from './chat/antigravityAccount';
+import { buildAntigravityAccountHtml, isAntigravityAccountStatus, type AntigravityAccountStatus } from './chat/antigravityAccount';
 import { isSubscriptionProxyMode, isSubscriptionProxyStatus, type SubscriptionProxyStatus } from '../shared/subscriptionProxy';
 import { routeLiveStep, buildToolPairHtml, buildToolGroupHtml, buildLocalisationPromptCardHtml, escapeHtml as mrEscapeHtml, type RendererStep } from './messageRenderer';
 import { groupToolCalls } from './chat/toolPhrases';

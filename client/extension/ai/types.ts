@@ -267,22 +267,9 @@ export interface CodexAccountStatus {
     error?: string;
 }
 
-export interface AntigravityQuotaBucket {
-    name: string;
-    remainingPercent: number;
-    resetsAt?: string;
-}
-
-/** Host-sanitized account details; OAuth credentials never cross the Webview boundary. */
-export interface AntigravityAccountStatus {
-    signedIn: boolean;
-    hasCredentials: boolean;
-    email?: string;
-    projectId?: string;
-    models: string[];
-    quota: AntigravityQuotaBucket[];
-    error?: string;
-}
+import type { AntigravityQuotaBucket, AntigravityAccountStatus } from '../../shared/antigravityAccount';
+export type { AntigravityQuotaBucket, AntigravityAccountStatus };
+export { isAntigravityAccountStatus } from '../../shared/antigravityAccount';
 
 export type CustomApiFormat =
     | 'openai-chat-completions'

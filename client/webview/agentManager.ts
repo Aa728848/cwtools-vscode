@@ -855,6 +855,7 @@ const DEFAULT_STATE: ManagerEnhancementState = {
     installPaneResizer(rightResizer, 'right');
 
     function suggestedPrimaryTab(): Exclude<ManagerTab, 'settings'> {
+        if (currentWorkspaceEntries().length > 0) return 'changes';
         return collectWorkspaceFiles(state.run).length > 0 ? 'changes' : 'activity';
     }
 
@@ -1491,7 +1492,9 @@ const DEFAULT_STATE: ManagerEnhancementState = {
             const workspaceFiles = collectWorkspaceFiles(run);
             const workspaceEntries = currentWorkspaceEntries();
             const signature = workspaceRenderSignature(workspaceFiles, workspaceEntries);
-            if (signature === lastWorkspaceRenderSignature && artifactListEl.querySelector('.manager-workspace-page')) {
+            const existingHost = artifactListEl.querySelector<HTMLElement>('#managerWorkspaceExternalHost');
+            const hostHasAllEntries = !workspaceEntries.length || (!!existingHost && workspaceEntries.every(entry => existingHost.contains(entry.content)));
+            if (signature === lastWorkspaceRenderSignature && artifactListEl.querySelector('.manager-workspace-page') && hostHasAllEntries) {
                 return;
             }
             lastWorkspaceRenderSignature = signature;
@@ -2011,10 +2014,8 @@ const DEFAULT_STATE: ManagerEnhancementState = {
                 || previousEntry.sourceKey !== nextEntry.sourceKey;
             if (existingIndex >= 0) entries[existingIndex] = nextEntry;
             else entries.push(nextEntry);
-            if (changedEntry) {
-                workspaceRenderRevision++;
-                lastWorkspaceRenderSignature = '';
-            }
+            workspaceRenderRevision++;
+            lastWorkspaceRenderSignature = '';
             state.workspaceEntries = entries;
             state.workspaceContent = content;
             state.workspaceTitle = nextEntry.title;

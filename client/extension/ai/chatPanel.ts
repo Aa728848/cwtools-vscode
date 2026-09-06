@@ -1287,10 +1287,15 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                 && typeof step.invocationId === 'string'
                 && successfulToolInvocations.has(step.invocationId)
                 && approvalReadyInvocations.has(step.invocationId));
-            const hasCurrentPlanArtifact = !!generatedPlanPath && (wroteUnifiedBlueprintPlan || hasImplementationPlanArtifact(result.steps, {
-                expectedPath: generatedPlanPath,
-                workspaceRoot: getProjectWorkspaceRoot(),
-            }));
+            const hasCurrentPlanArtifact = !!generatedPlanPath && (
+                wroteUnifiedBlueprintPlan
+                || hasImplementationPlanArtifact(result.steps, {
+                    expectedPath: generatedPlanPath,
+                    workspaceRoot: getProjectWorkspaceRoot(),
+                })
+                || hasImplementationPlanArtifact(result.steps)
+                || turnMode === 'plan'
+            );
             let interactivePlanText = result.explanation;
             if (generatedPlanPath && hasCurrentPlanArtifact) {
                 try {
@@ -1944,13 +1949,39 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
     }
 
     private findGeneratedTopicFile(topicId: string, fileName: string): string | null {
-        const topicDir = getPrivateTopicStorageDir(topicId, getProjectWorkspaceRoot());
-        if (!topicDir) return null;
-        const expectedPath = path.normalize(path.join(topicDir, fileName)).toLowerCase();
-        const written = this._currentMessageSnapshots?.find(snapshot =>
-            path.normalize(snapshot.filePath).toLowerCase() === expectedPath
-        );
-        return written?.filePath ?? null;
+        const workspaceRoot = getProjectWorkspaceRoot();
+        const candidateDirs = [
+            getPrivateTopicStorageDir(topicId, workspaceRoot),
+            getTopicStorageDir(topicId, workspaceRoot),
+        ].filter((dir): dir is string => typeof dir === 'string' && dir.trim().length > 0);
+
+        const expectedFileNameLower = fileName.toLowerCase();
+        const expectedTopicLower = topicId.toLowerCase();
+
+        // 1. Check current message written file snapshots first
+        if (this._currentMessageSnapshots && this._currentMessageSnapshots.length > 0) {
+            for (const snapshot of this._currentMessageSnapshots) {
+                const norm = path.normalize(snapshot.filePath).toLowerCase();
+                for (const dir of candidateDirs) {
+                    const expected = path.normalize(path.join(dir, fileName)).toLowerCase();
+                    if (norm === expected) return snapshot.filePath;
+                }
+                const baseName = path.basename(norm);
+                if (baseName === expectedFileNameLower) {
+                    if (norm.includes(expectedTopicLower) || candidateDirs.some(dir => norm.startsWith(path.normalize(dir).toLowerCase()))) {
+                        return snapshot.filePath;
+                    }
+                }
+            }
+        }
+
+        // 2. Fall back to existing file on disk in any candidate directory
+        for (const dir of candidateDirs) {
+            const candidate = path.join(dir, fileName);
+            if (fs.existsSync(candidate)) return candidate;
+        }
+
+        return null;
     }
 
     /** Paths injected into the approval continuation so execution consumes the approved contract verbatim. */
@@ -1958,10 +1989,16 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         const topicId = this.topicManager.currentTopic?.id;
         if (!topicId) return '';
         const workspaceRoot = getProjectWorkspaceRoot();
-        const topicDir = getPrivateTopicStorageDir(topicId, workspaceRoot);
+        const candidateDirs = [
+            getPrivateTopicStorageDir(topicId, workspaceRoot),
+            getTopicStorageDir(topicId, workspaceRoot),
+        ].filter((dir): dir is string => typeof dir === 'string' && dir.trim().length > 0);
         const findExisting = (fileName: string) => {
-            const candidate = topicDir ? path.join(topicDir, fileName) : '';
-            return candidate && fs.existsSync(candidate) ? candidate : undefined;
+            for (const dir of candidateDirs) {
+                const candidate = path.join(dir, fileName);
+                if (fs.existsSync(candidate)) return candidate;
+            }
+            return undefined;
         };
         const implementationPlan = findExisting('Implementation_Plan.md');
         if (!implementationPlan) return '';

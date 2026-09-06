@@ -696,4 +696,28 @@ describe('webview smoke checks', () => {
         expect(script).to.include('rerenderScrollableBody(state.liveThinkBody, renderMarkdown(clipLiveMarkdownContent(state.liveThinkContent)));');
         expect(script).to.include('rerenderScrollableBody(state.liveTextProcessBody, renderMarkdown(clipLiveMarkdownContent(state.liveTextContent)));');
     });
+
+    it('plan approval cards render reliably without race-condition dismissal across chat and manager views', () => {
+        const chatWebview = fs.readFileSync(path.join(root, 'client/webview/chatPanel.ts'), 'utf8');
+        const agentManager = fs.readFileSync(path.join(root, 'client/webview/agentManager.ts'), 'utf8');
+        const hostChatPanel = fs.readFileSync(path.join(root, 'client/extension/ai/chatPanel.ts'), 'utf8');
+
+        // Verify synchronous removal of outdated cards avoiding delayed dismiss race condition
+        expect(chatWebview).to.include('const cachedContent = responsiveWorkspacePanelCache.get(sourceKey)?.content;');
+        expect(chatWebview).to.include('if (el !== cachedContent) {');
+        expect(chatWebview).to.include('forgetResponsiveWorkspaceContent(el as HTMLElement);');
+
+        // Verify cached card reuse resets visibility styles
+        expect(chatWebview).to.include("cached.content.style.opacity = '1';");
+        expect(chatWebview).to.include("cached.content.style.display = '';");
+
+        // Verify host finds plan artifacts in both private and shared topic storage
+        expect(hostChatPanel).to.include('getPrivateTopicStorageDir(topicId, workspaceRoot)');
+        expect(hostChatPanel).to.include('getTopicStorageDir(topicId, workspaceRoot)');
+
+        // Verify agent manager displays changes tab when workspace entries exist and ensures host contains all entries
+        expect(agentManager).to.include("if (currentWorkspaceEntries().length > 0) return 'changes';");
+        expect(agentManager).to.include('const existingHost = artifactListEl.querySelector<HTMLElement>');
+        expect(agentManager).to.include('hostHasAllEntries');
+    });
 });

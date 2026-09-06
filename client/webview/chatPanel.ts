@@ -690,6 +690,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         }
 
         activeResponsiveWorkspace = null;
+        (window as any).__cwtoolsPendingManagerWorkspaceContent = null;
         updateWorkspaceToggleState();
     }
 
@@ -796,6 +797,10 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                 cached.content.className = panel.content.className;
                 cached.content.replaceChildren(...Array.from(panel.content.childNodes));
             }
+            cached.content.style.transition = '';
+            cached.content.style.opacity = '1';
+            cached.content.style.transform = '';
+            cached.content.style.display = '';
             const header = cached.content.querySelector<HTMLElement>('.ap-header');
             if (header && isManagerShell()) {
                 header.tabIndex = 0;
@@ -6633,6 +6638,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
             case 'loadTopicMessages':
                 if (!isCurrentSurface(msg.targetSurface)) break;
                 clearActiveSubagentViews();
+                clearTopicWorkspaceState();
                 cancelInlineEdit();
                 clearQueuedComposerInputs();
                 currentGoalActivity = null;
@@ -7214,7 +7220,13 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                 const sourceKey = 'plan';
                 const signature = JSON.stringify(msg.sections || []);
                 if (!isManagerShell()) {
-                    document.querySelectorAll('.annotatable-plan.plan-card-wrap').forEach(el => dismissCard(el as HTMLElement, 0));
+                    const cachedContent = responsiveWorkspacePanelCache.get(sourceKey)?.content;
+                    document.querySelectorAll('.annotatable-plan.plan-card-wrap').forEach(el => {
+                        if (el !== cachedContent) {
+                            (el as HTMLElement).remove();
+                            forgetResponsiveWorkspaceContent(el as HTMLElement);
+                        }
+                    });
                 }
                 const cardOptions: AnnotationCardOptions = {
                     className: 'plan-card-wrap',
@@ -7286,9 +7298,16 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
             }
 
             case 'renderWalkthrough': {
+                const sourceKey = 'walkthrough';
                 const signature = JSON.stringify(msg.sections || []);
                 if (!isManagerShell()) {
-                    document.querySelectorAll('.annotatable-plan.walkthrough-card-wrap').forEach(el => dismissCard(el as HTMLElement, 0));
+                    const cachedContent = responsiveWorkspacePanelCache.get(sourceKey)?.content;
+                    document.querySelectorAll('.annotatable-plan.walkthrough-card-wrap').forEach(el => {
+                        if (el !== cachedContent) {
+                            (el as HTMLElement).remove();
+                            forgetResponsiveWorkspaceContent(el as HTMLElement);
+                        }
+                    });
                 }
                 const cardOptions: AnnotationCardOptions = {
                     className: 'walkthrough-card-wrap',
@@ -7318,9 +7337,16 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
             }
 
             case 'renderBlueprint': {
+                const sourceKey = 'blueprint';
                 const signature = JSON.stringify(msg.sections || []);
                 if (!isManagerShell()) {
-                    document.querySelectorAll('.annotatable-plan.blueprint-card-wrap').forEach(el => dismissCard(el as HTMLElement, 0));
+                    const cachedContent = responsiveWorkspacePanelCache.get(sourceKey)?.content;
+                    document.querySelectorAll('.annotatable-plan.blueprint-card-wrap').forEach(el => {
+                        if (el !== cachedContent) {
+                            (el as HTMLElement).remove();
+                            forgetResponsiveWorkspaceContent(el as HTMLElement);
+                        }
+                    });
                 }
                 const cardOptions: AnnotationCardOptions = {
                     className: 'blueprint-card-wrap',

@@ -1,33 +1,21 @@
-# Agent Note: Model settings overview card
+# Agent Note: 模型设置概览卡片优化
 
 Status: implemented
 
 ## Problem
-
-The configuration overview was hidden in a disclosure below the model forms.
-Opening settings expanded the chat form before showing the current configuration.
+此前配置概览被深埋在各个模型表单下方的折叠面板中；每次打开设置面板时，都会先展开聊天配置表单，而将用户最关心的当前生效配置信息挤出可视区域。
 
 ## Decision
-
-Moved the existing overview to a persistent card at the top of the Models tab.
-The card uses VS Code theme colors and the existing live summary renderer. Chat,
-completion, and translation details start collapsed and remain keyboard accessible.
-All settings controls and their IDs stay in their original categories.
-
-Removed obsolete manager-specific overview widths so the card fills the same
-content column in sidebar and detached settings. Updated the existing layout
-regression checks to cover the overview location and collapsed chat default.
+1. **常驻置顶概览卡片**：将原有的概览信息提炼为“模型”（Models）Tab 顶部的常驻概览卡片。
+2. **主题适配与实时摘要渲染**：卡片严格遵循 VS Code 主题色彩变量，复用现有的实时摘要渲染器；聊天、补全和翻译的细项默认保持折叠，并支持全键盘无障碍访问。
+3. **统一侧边栏与独立管理器列宽**：移除独立管理器专属的过时概览宽度定义，使概览卡片在侧边栏和独立管理器中始终保持一致的列宽和留白。
+4. **测试回归覆盖**：更新现有的布局回归检查，覆盖概览卡片置顶展示以及聊天表单默认折叠行为。
 
 ## Alternatives considered
-
-- Keeping the overview folded would continue hiding the information needed first.
-- Wrapping all settings in another disclosure would add an unnecessary navigation
-  level to the existing category accordions.
+- **保持概览处于折叠状态**：否决。用户进入设置后无法在首屏第一时间获取关键运行配置。
+- **在最外层再套一层折叠块**：否决。在现有的分类折叠手风琴之上增加不必要的导航层级。
 
 ## Consequences
-
-No settings values, save payloads, or host behavior changed. Compile, strict type
-checking, and 55 targeted tests pass. Headless Edge verification covers 24
-locale/theme/width combinations, keyboard expansion, live context summary updates,
-collapsed-state draft retention, context saves including zero, and access to
-completion and translation settings on both surfaces.
+- 未改变任何设置持久化数值、保存载荷或宿主处理逻辑。
+- 编译、严格类型检查和 55 个针对性测试全部通过。
+- Headless Edge 自动化检查覆盖 24 种语言/主题/宽度组合、键盘操作展开、实时上下文摘要联动、折叠状态草稿保留及上下文设置为 0 等边界场景。

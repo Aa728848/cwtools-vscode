@@ -1,17 +1,21 @@
-# Agent Note: Antigravity quota presentation
+# Agent Note: 统一 Antigravity 渠道配额进度条渲染与排版精简
 
 Status: implemented
 
 ## Problem
-Antigravity displayed quota buckets as small text lines, unlike the Codex subscription progress bars. The subscription proxy section also included explanatory fine print that the user asked to remove.
+Antigravity此前以纯小号文本行的形式罗列配额桶（quota buckets），与 Codex 订阅渠道直观的视觉进度条形式不一致。此外，订阅代理区域原先包含了冗长的静态说明细则文字，造成视觉噪点。
 
 ## Decision
-Adapted Antigravity remaining percentages and reset timestamps to the existing Codex quota renderer. Both providers now use the same accessible usage bars, remaining percentages, reset labels, and warning colors. Limited the subdued settings-hint styling to account identity so quota bars retain normal contrast. Removed both static proxy explanations and retained the controls and live connection status. Added English and Chinese rendering regression coverage.
+1. **适配 Codex 统一配额进度条渲染器**：将 Antigravity 剩余百分比与重置时间戳适配接入现有的 Codex 配额渲染组件。两者统一采用无障碍友好的用量进度条、剩余百分比、重置倒计时标签及告警阈值配色。
+2. **样式对比度收拢**：将弱化提示样式收拢至账号标识行，使配额进度条本身保持清晰对比度。
+3. **剔除冗余静态说明**：移除了订阅代理下方的两段冗长静态说明文字，保留核心配置控件与实时连接状态指示灯。
+4. **双语回归测试**：补充针对英文与简体中文渲染的回归测试。
 
 ## Alternatives considered
-- Duplicating the progress-bar markup and styles would create two implementations of the same display.
-- Filling the bars with remaining quota would reverse the meaning and warning thresholds relative to Codex.
-- Removing the live proxy status would hide useful connection and error feedback.
+- **全套复制一份进度条 HTML/CSS**：否决。会导致同一套视觉呈现出现两份重复的维护代码。
+- **进度条填充剩余比例而非已用比例**：否决。会与 Codex 现有的用量认知方向及告警阈值判定完全相反。
+- **直接移除实时代理状态指示**：否决。会剥夺用户诊断代理连通性及错误排查的关键反馈。
 
 ## Consequences
-Antigravity quota presentation matches Codex without new CSS or changes to account/proxy transport. Existing HTML escaping, bounded quota rendering, unknown reset handling, and bilingual labels remain in use. Tests cover multiple buckets, usage conversion, warning colors, reset times, escaped names, and missing account/quota data.
+- Antigravity 配额视觉规范与 Codex 保持高度一致，未引入任何额外 CSS 或底层数据协议改动。
+- 完整的 HTML 转义、有界渲染、未知重置时间处理和双语标签依然生效。

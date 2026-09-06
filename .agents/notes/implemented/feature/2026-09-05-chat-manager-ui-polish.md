@@ -1,49 +1,21 @@
-# Agent Note: Compact chat navigation and readable manager inspection
+# Agent Note: 紧凑型聊天导航与可读性 Agent 管理器审查面板优化
 
 Status: implemented
 
 ## Problem
-
-A fixed 420 px chat minimum clipped sidebar navigation and Send. The empty composer
-named a fixed project. Topic actions crowded each row. The
-manager received topic snapshots without rendering the shared list and displayed
-tiny, repetitive trajectory records and redundant settings headings.
+此前聊天界面存在 420px 的固定最小宽度限制，在较窄的侧边栏中会导致导航项与发送按钮被遮挡裁剪；空白状态下的输入框写死了固定的项目名称；主题列表操作项拥挤地堆叠在每一行；独立管理器虽然接收到了主题快照数据，但未能渲染共享列表，且展示的轨迹记录字体过小、重复且冗余。
 
 ## Decision
-
-Removed the chat minimum and allowed composer controls to wrap at narrow widths.
-The empty composer centers and animates down when a conversation starts, on both
-surfaces. Model controls keep stable spacing; context mentions remain in the Add
-menu. Secondary header and topic actions
-use labeled disclosures. All topic commands remain accessible. Rename completion
-prevents synchronous blur from submitting/replacing the input twice.
-
-Manager snapshots hydrate the shared topic list without replacing active search
-results. Changes, Run, and Settings share one row of peer tabs.
-The inspector initially stays closed until file changes need it, and retains user
-choices. Settings retain context limits, advanced controls, drafts, and host payloads;
-folded sections summarize completion, MCP, and customized profile configuration.
-
-Trajectory groups calls by invocation and agent, with search, filters, duration, and
-a chronological raw view. Grouped calls retain created/start/end event inspection.
-Correlation respects agent and process identity; raw records expand in batches of
-300. Finished-run duration uses the same stable clock in both views. Diagnostics
-and transcripts are disclosures. Conversation and inspection typography is larger;
-usage charts fill the available width and tool rankings expose all entries.
+1. **解除固定宽度限制并支持自动换行**：彻底移除聊天面板 420px 最小宽度限制，允许输入框控件在狭窄视口下自动优雅折行。
+2. **居中输入框与折叠菜单收拢**：侧边栏与独立管理器在空状态下均将输入框居中，对话产生后平滑下落；次要头部操作与主题命令统一收拢到具名折叠菜单（disclosures）中；重命名操作增加防重复提交保护。
+3. **管理器主题列表注水与平级 Tab 审查面板**：管理器快照直接注水共享主题列表，而不破坏当前活跃的搜索结果；“修改”（Changes）、“运行”（Run）和“设置”（Settings）统一呈现在单行等宽的并列 Tab 中。
+4. **结构化轨迹树与可读性提升**：运行轨迹（Trajectory）按调用与 Agent 进行层级聚合，提供搜索、状态筛选、精确耗时和时间线原始视图（Raw view），默认聚合视图展示核心指标，展开单条记录可深挖创建、启动及结束详情；正文与审查字体适度放大，资源使用图表撑满可用宽度，工具排名完整展示。
 
 ## Alternatives considered
-
-- Removing advanced controls would lose configuration and diagnostic capabilities.
-- Separate chat implementations would duplicate host routing and draft state.
-- Keeping start/end records expanded would preserve clutter; the raw view retains
-  chronological detail while grouping is the default.
+- **直接移除高级配置控件**：否决。会丢失关键的配置与深度诊断能力。
+- **侧边栏与管理器独立维护两套聊天 UI**：否决。会导致宿主路由分发与草稿状态维护逻辑双倍冗余。
+- **将所有起止日志始终全量展开**：否决。会导致界面极其混乱；默认聚合排版、提供原始视图深挖是更好的折中方案。
 
 ## Consequences
-
-No dependencies or host protocol changes are required. Unit tests cover invocation
-correlation, failure summaries, and event retention. Headless Edge checks exercise
-localized/themed narrow layouts, snapshot topic rendering, search/rename/archive,
-trajectory filtering and event inspection, stable clocks, and settings drafts across
-panel tabs. Existing settings checks cover context save/reopen/default zero,
-profiles, MCP, keys, account and proxy actions. Installed extensions still require
-the normal packaging/reload flow to pick up source changes.
+- 未引入任何新的外部依赖，未更改宿主通信协议。
+- 单元测试与 Headless Edge 端到端回归测试全部通过，覆盖中英文双语、极窄主题排版、轨迹过滤、审查展开及跨面板草稿保留等场景。

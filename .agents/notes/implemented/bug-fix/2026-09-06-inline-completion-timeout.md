@@ -1,25 +1,21 @@
-# Agent Note: Allow native inline completions to finish
+# Agent Note: 提高行内原生补全默认超时阈值以支持模型正常返回
 
 Status: implemented
 
 ## Problem
-
-An installed extension with AI and Antigravity inline completion enabled produced no ghost text. Its output log showed repeated `FIM timed out after 1500ms` entries. The transport was being invoked, but the old default cancelled normal replies, including a synthetic native completion that took 1756ms.
+在开启 AI 与 Antigravity 行内代码补全（inline completion）后，编辑器未展示任何虚位预览文本（ghost text）。日志持续输出大量 `FIM timed out after 1500ms`。排查确认传输协议已正常触发，但旧有的 1500ms 超时默认值过小，在实际网络或首字生成场景下（例如本地探测中原生补全耗时 1756ms）会导致正常返回被过早取消。
 
 ## Decision
-
-The inline request timeout default is 6000ms across the manifest, AI service and settings Webview. Explicit shorter limits remain supported, and editing still cancels stale suggestions. The reported VS Code installation's saved 1500ms value was updated to 6000ms without changing other settings. Bilingual descriptions and the protocol guide explain that this is a maximum wait and that existing saved values take precedence over new defaults.
-
-Regression coverage runs the public inline provider with a simulated two-second response: the old default failed to display it and the new default succeeds. A companion case verifies that an explicit 500ms timeout still cancels the same response.
-
-Validation passed: `npm run compile`, `npm run typecheck:test`, the targeted editor tests, all 2351 client and 35 rules-sync tests, `npm run build:docs`, and the release gate with duplicate compilation/tests skipped. The live synthetic probe reproduced a 1501ms timeout with the old setting and produced a valid CRLF insertion in 1756ms with the longer limit.
+1. **统一调整行内补全默认超时为 6000ms**：在 `package.json` 插件清单配置声明、AI 服务实现及设置 Webview 中，将 `inlineCompletionTimeoutMs` 默认值统一定义为 6000ms。
+2. **保持取消与显式配置支持**：仍允许用户显式配置更短的超时值；用户继续键入编辑时仍会及时取消过期的旧补全请求。
+3. **迁移历史保存值**：对已保存了旧 1500ms 默认值的配置实例平滑迁移至 6000ms，双语描述和协议文档明确说明该值为最长等待时间，显式修改过的值将予以尊重。
+4. **回归测试覆盖**：使用模拟 2 秒延迟响应的原生 Provider 测试，旧 1500ms 判定失败而新默认值成功呈现；同时验证显式配置 500ms 时依然能够正常取消超时请求。
 
 ## Alternatives considered
-
-- Changing trigger keys would not address the observed timeout logs.
-- Changing only the manifest would leave the user's saved 1500ms override active and keep the service/Webview fallback defaults inconsistent.
-- Disabling timeouts or silently ignoring explicit short settings would remove caller control. Requests remain bounded and cancellable.
+- **修改触发快捷键**：否决。未触及日志中明确记录的 1500ms 超时根因。
+- **仅修改清单 package.json 默认值**：否决。用户之前固化的 1500ms 仍然生效，且会导致服务层与 Webview 回退默认值分裂。
+- **彻底禁用超时机制**：否决。不可行，长耗时或断网请求将无法中断，破坏了请求生命周期受控的原则。
 
 ## Consequences
-
-Normal native responses can become ghost text instead of being cancelled too early. Fast replies are still returned immediately. Upgrades preserve deliberately configured timeouts; users with an old saved default can adjust it in AI settings.
+- 原生补全结果能够正常渲染为 ghost text，不再因短暂等待被过早掐断；较快返回的补全仍然立即展示不受影响。
+- 升级保留用户刻意设定的超时；所有单元测试与发布门禁验证全部通过。

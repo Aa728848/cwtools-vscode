@@ -62,3 +62,4 @@ Status: <proposed | implemented | rejected | archived>
 2. **禁止全局 INDEX 文件**：不要维护集中的 `INDEX.md` 或 `TABLE_OF_CONTENTS.md`。目录树即天然索引，避免多分支并行合并时的文件冲突。
 3. **强制备选方案（Alternatives considered）**：技术决策必须有对比，明确记录被否决的方案及其理由。
 4. **交付态写事实**：`implemented` 目录下的笔记是交付物的一部分，必须如实反映实际落地的代码、测试与验证基线。
+5. **必须使用中文书写**：所有 Agent Note 的标题与正文必须使用规范的简体中文书写（代码符号、配置项、API 名称、文件路径及文件名 slug 等除外）。必要时应补充 Mermaid 流程图与输入输出图辅助阐述系统流转。

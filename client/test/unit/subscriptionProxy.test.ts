@@ -258,7 +258,15 @@ describe('subscription proxy network transport', function () {
     it('reports proxy failure without falling back to the reachable destination or exposing credentials', async () => {
         let directCalls = 0;
         const port = await listen(http.createServer((_request, response) => { directCalls++; response.end('direct'); }));
-        const proxyPort = await listen(net.createServer(socket => socket.destroy()));
+        const proxyPort = await new Promise<number>((resolve, reject) => {
+            const probe = net.createServer();
+            probe.listen(0, '127.0.0.1', () => {
+                const address = probe.address();
+                if (!address || typeof address === 'string') return reject(new Error('Missing fixture port'));
+                const assigned = address.port;
+                probe.close(error => error ? reject(error) : resolve(assigned));
+            });
+        });
         const service = await transport(`http://alice:secret@127.0.0.1:${proxyPort}`);
         const error: unknown = await service.fetch(`http://127.0.0.1:${port}`).catch(reason => reason);
         expect(error).to.be.instanceOf(Error);

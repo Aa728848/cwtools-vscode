@@ -1,29 +1,20 @@
-# Agent Note: Manager inspector tabs remain peers on one row
+# Agent Note: 独立管理器审查面板 Tab 保持单行等权重并列布局
 
 Status: implemented
 
 ## Problem
-
-The detached manager moved the shared sidebar return button into its tab list.
-An older two-column grid placed Settings and Return below Changes and Run,
-incorrectly suggesting a navigation hierarchy.
+在独立窗口 Agent 管理器（detached manager）中，侧边栏共享的“返回聊天”按钮被错误移动到了审查面板（inspector）的 Tab 列表中；且旧有的双列网格将“设置”（Settings）与“返回”（Return）折叠排列在“修改”（Changes）与“运行”（Run）下方，在视觉上制造了错误的导航层级。
 
 ## Decision
-
-Kept the shared return button in its original header, which the manager hides,
-and removed the manager-only relocation and styling. The inspector grid now has
-three equal columns for Changes, Run, and Settings. The existing top-level panel
-toggle closes the manager inspector; sidebar return behavior is preserved.
+1. **移除 Tab 列表中的返回按钮**：返回按钮保留在其原生的头部容器中（管理器中默认隐藏头部），彻底清理管理器专用的迁移逻辑与样式覆盖。
+2. **重塑等宽三列网格布局**：审查面板顶部 Tab 调整为三列等宽网格，使“修改”（Changes）、“运行”（Run）与“设置”（Settings）在单行中完全平级展示。
+3. **保留关闭行为**：通过现有顶栏的面板开关即可直接展开/关闭管理器审查面板，完全不影响侧边栏环境原有的返回行为。
 
 ## Alternatives considered
-
-Renaming or shrinking Return would keep a redundant action in the tab list.
-Hiding Settings in a menu would misrepresent its peer relationship to Run and Changes.
+- **重命名或缩小返回按钮并保留在 Tab 列**：否决。在独立管理器中 Tab 列表应仅承载面板视图切换，塞入“返回”属于多余的冗余动作。
+- **将“设置”隐藏在次级菜单中**：否决。歪曲了“设置”与“运行”、“修改”之间的平级视图关系。
 
 ## Consequences
-
-No settings controls or host messages changed. Compilation, type checking, and
-13 manager contract tests pass. A headless Edge regression checks Chinese and
-English at panel widths 260, 294, 320, 380, and 520 px: all three tabs share a row,
-Return is absent from the manager navigation, keyboard/click selection and the
-panel toggle work, and the sidebar still exposes its original return action.
+- 宿主通信协议与设置项完全不变。
+- 编译、类型检查及管理器契约测试全部通过。
+- Headless Edge 测试在 260px、294px、320px、380px 及 520px 面板宽度下验证：三项 Tab 稳定处于同一单行，管理器 Tab 栏中不再混入“返回”按钮，键盘/点击切换与面板折叠均正常运作。

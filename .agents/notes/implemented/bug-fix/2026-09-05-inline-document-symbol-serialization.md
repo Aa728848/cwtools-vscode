@@ -1,52 +1,23 @@
-# Agent Note: Preserve inline symbol ranges in recursive LSP responses
+# Agent Note: 递归 LSP 响应中保留 inline 符号范围与序列化深度保护
 
 Status: implemented
 
 ## Problem
-
-Repeated inline expansions retain the template's source range. The document
-symbol corpus nested equal ranges, so a flat template could produce an outline
-whose depth grew with its number of callers. The JSON writer stopped expanding
-recursive types at factory depth 20 and replaced deeper required fields with
-`null`. At document-symbol level 17 this corrupted line and character values,
-matching the reported client-side `asRange` / `Invalid arguments` failure.
+重复的内联展开（inline expansions）保留了模板的原始源码范围。文档符号语料库此前嵌套了相同范围的符号，导致扁平模板生成的符号大纲（outline）深度随着调用者数量线性膨胀。此外，F# 后端的 JSON 写入器在工厂递归深度达到 20 时停止展开递归类型，并将更深层的必填字段直接替换为 `null`。在文档符号层级达到 17 层时，该行为导致行号和字符位置字段被写入 `null`，引发前端报告的 `asRange` / `Invalid arguments` 崩溃异常。
 
 ## Decision
-
-- The document corpus removes identical symbols and requires strict range
-  containment for parenting. Different symbols at the same range remain siblings
-  in input order; genuine descendants and crossing ranges retain their behavior.
-- JSON writer factories cache deferred writers by type within each factory, so
-  recursive record, list, and option types reuse fully initialized writers. The
-  cache is limited to the factory's type graph and is not shared across options.
-- Serialization tracks runtime traversal depth and throws a recoverable
-  `InvalidOperationException` at its safety limit. It does not return a partial
-  response containing null required fields. Existing request exception handling
-  returns an internal error and keeps the server available.
-- Regression tests cover 2000 colocated or identical inline symbols, preserved
-  type distinctions and genuine nesting, complete 17- and 64-level document
-  symbols, 64 selection-range parents, cycles, excessive depth, and reuse after
-  failure. Both changed suites failed against the original code and pass after
-  the fix. LSP and Main builds pass with no warnings. All 29 F# regression
-  scripts pass; the rules-fallback and overlay-containment suites needed an
-  unsandboxed rerun for temporary Git repositories and filesystem link access.
-- The minimal Stellaris-model reproduction now returns a one-level outline with
-  valid coordinates for 16 and 17 inline invocations. Its erroneous-template
-  variant still reports all 17 validation errors while preserving the outline.
+1. **符号去重与父子层级规则**：文档语料库移除完全相同的符号，并要求父子层级间具备严格的范围包含关系（strict range containment）。相同范围的不同符号按输入顺序保持平级兄弟关系；合法的后代符号和跨范围符号保持原有处理。
+2. **递归序列化缓存**：JSON 写入器工厂在每个工厂内部按类型缓存延迟写入器，使递归 record、list 与 option 类型能够复用已完全初始化的写入器。缓存作用域严格限定在当前工厂的类型图中，不在不同 options 间共享。
+3. **序列化深度安全边界**：序列化过程追踪运行时遍历深度，达到安全限制时抛出可恢复的 `InvalidOperationException`，杜绝返回包含 `null` 必填字段的畸变响应；上层现有请求异常处理机制捕获后返回内部错误（InternalError），确保 Language Server 进程保持可用。
+4. **回归测试覆盖**：新增回归测试覆盖 2000 个同位置或完全相同的 inline 符号、类型区分与合法嵌套、完整的 17 层与 64 层文档符号、64 个选择范围父级、循环引用、超额深度限制及失败后复用等场景。
+5. **最小复现验证**：针对群星（Stellaris）模型的最小复现案例，在 16 次和 17 次 inline 调用下均稳定返回单层有效坐标大纲；带有模板错误的变体在保留大纲的同时如实报告了全部 17 处校验错误。
 
 ## Alternatives considered
-
-- Raising the old factory-depth limit would still manufacture malformed responses
-  at another depth and would repeatedly expand the recursive type graph.
-- Fixing only equal-range parenting would leave genuinely deep document symbols
-  and selection ranges vulnerable to the serializer defect.
-- Suppressing client conversion errors would hide broken protocol data.
-- Changing inline source positions would disrupt navigation and error provenance.
+- **单纯调高旧工厂的深度限制**：否决。在更深层依然会制造畸变数据，且会引起递归类型图的无谓反复展开。
+- **仅修复相同范围的父子判定**：否决。无法解决真实深层文档符号和选择范围（selection ranges）被序列化器损坏的问题。
+- **在客户端静默吞掉坐标转换错误**：否决。会掩盖底层协议数据的破坏。
+- **篡改内联源码位置坐标**：否决。会破坏代码跳转、导航与错误溯源。
 
 ## Consequences
-
-Opening frequently reused inline templates no longer creates artificial outline
-depth. Normal recursive responses retain their required fields, while pathological
-depth fails as a single request. The separate client-stop event in the supplied
-memory log does not establish its initiating cause; this change addresses the
-reproduced outline and serialization defects without changing lifecycle policy.
+- 打开频繁复用的内联模板不再会产生虚假的大纲层级深度。
+- 常规递归响应能完整保留其必填字段，而极端病态深度的请求被优雅隔离为单次请求报错，不再导致 LSP 连接断开。

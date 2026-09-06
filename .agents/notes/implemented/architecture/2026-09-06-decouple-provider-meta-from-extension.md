@@ -1,21 +1,21 @@
-# Agent Note: Decouple ProviderMeta from Extension Types to Fix Webview Bundling
+# Agent Note: 解耦 ProviderMeta 接口以修复 Webview 打包依赖泄漏
 
 Status: implemented
 
 ## Problem
-During extension packaging (`npm run pack:install` / `npx rollup -c`), Rollup emitted extensive unresolved external dependency warnings (`crypto`, `fs`, `path`, `vscode`, `http`, `child_process`, `undici`, etc.) when bundling `client/webview/chatPanel.ts` and `client/webview/agentManager.ts`.
-Investigation revealed that `chatPanel.ts` imported `ProviderMeta` directly from `client/extension/ai/types.ts`. Even with `import type`, `rollup-plugin-typescript2` and Rollup traced the module tree of `types.ts`, which exported `AgentToolName` from `client/extension/ai/tools/registry.ts`. That brought in executable runtime code (`definitions.ts` and over 60 Extension Host files) into the browser-targeted IIFE bundle, violating the webview architectural boundary documented in `AGENTS.md`.
+在插件打包或执行 Rollup 构建（`npm run pack:install` / `npx rollup -c`）期间，Rollup 在为 `client/webview/chatPanel.ts` 和 `client/webview/agentManager.ts` 打包时抛出大量未解析外部依赖警告（涉及 `crypto`、`fs`、`path`、`vscode`、`http`、`child_process`、`undici` 等 Node 模块）。
+排查发现 `chatPanel.ts` 直接从 `client/extension/ai/types.ts` 导入了 `ProviderMeta`。即使使用了 `import type`，`rollup-plugin-typescript2` 与 Rollup 仍然遍历追踪了 `types.ts` 的依赖模块树，该文件导出了来自 `client/extension/ai/tools/registry.ts` 的 `AgentToolName`，导致可执行的 Extension Host 运行时代码（包括 `definitions.ts` 及 60 余个宿主环境文件）被意外带入面向浏览器沙箱环境的 IIFE Webview bundle 中，严重违反了 `AGENTS.md` 中定义的 Webview 架构边界规则。
 
 ## Decision
-1. Extracted `ProviderMeta` interface into a standalone shared module `client/shared/providerMeta.ts`.
-2. Updated `client/extension/ai/types.ts` to re-export `ProviderMeta` from `../../shared/providerMeta`, maintaining 100% backward compatibility for Extension Host modules.
-3. Updated `client/webview/chatPanel.ts` to import `ProviderMeta` from `../shared/providerMeta` instead of `../extension/ai/types`.
+1. 将 `ProviderMeta` 接口抽取为独立的跨端共享模块：`client/shared/providerMeta.ts`。
+2. 更新 `client/extension/ai/types.ts`，使其从 `../../shared/providerMeta` re-export 该类型，保持 Extension Host 各模块 100% 向后兼容。
+3. 更新 `client/webview/chatPanel.ts`，直接从 `../shared/providerMeta` 导入，彻底切断对 `../extension/ai/types` 的反向引用。
 
 ## Alternatives considered
-1. **Adding Node modules to Rollup `external` in `rollup.config.mjs`**: Rejected. This would merely silence the warnings while leaving webviews importing Extension Host internals and pulling dead Node polyfill references into the browser bundle.
-2. **Duplicating `ProviderMeta` in `client/webview/chatPanel.ts`**: Rejected. Duplicating communication interfaces across boundaries leads to silent type drift between the Extension Host and Webviews.
+1. **在 `rollup.config.mjs` 中将 Node 模块配置为 `external`**：否决。这种方式仅仅屏蔽了告警，未能阻止 Webview 引用宿主层内部实现，并且会残留无效的 Node polyfill 依赖。
+2. **在 Webview 端重复定义一份 `ProviderMeta`**：否决。在跨端通信边界重复维护接口会导致宿主与 Webview 类型默默发生漂移。
 
 ## Consequences
-- Completely eliminated all unresolved dependency warnings during Rollup webview bundling.
-- Webview bundle time dropped significantly (~11s down to ~2s for `chatPanel.js` and `agentManager.js`).
-- Restored strict boundary separation where Webview code never references `client/extension/`.
+- 彻底消除了 Webview Rollup 打包过程中的所有未解析外部依赖告警。
+- Webview 打包构建速度显著提升（`chatPanel.js` 与 `agentManager.js` 打包耗时从约 11s 下降至约 2s）。
+- 严格恢复了 Webview 代码绝不依赖 `client/extension/` 宿主实现的架构分层红线。

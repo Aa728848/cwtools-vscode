@@ -1,41 +1,22 @@
-# Agent Note: Restore centered composers and stable model selection
+# Agent Note: 恢复居中输入框动画与稳定的模型选择器布局
 
 Status: implemented
 
 ## Problem
-
-The empty sidebar composer was moved to the bottom and gained an unwanted welcome
-section. The detached manager disabled the composer transition entirely. Model
-names stretched their toolbar slot, changing spacing between controls.
+在侧边栏聊天空白状态下，输入框（composer）被错误固定在底部并展示了非预期的欢迎引导模块；独立窗口管理器（manager）则完全禁用了输入框过渡动画；工具栏中的模型名称长度会撑大其所在槽位，破坏了与相邻控件的间距排版。
 
 ## Decision
-
-Removed the welcome heading, workspace label, suggestions, and their listeners.
-Both surfaces center the empty composer and animate it to the bottom when the
-conversation gains content; clearing a topic returns it to the center. The manager
-keeps its existing grid column and bottom row, translating only the composer.
-Reduced-motion preferences disable the movement.
-
-The model selector uses a 200 px slot that can shrink in narrow layouts. Its label
-aligns to the dropdown arrow and truncates long names; adjacent controls keep fixed
-gaps. Context, permissions, domains, reasoning, and sending retain their controls.
-
-Composer state changes and completed transitions refresh floating popup offsets.
-Model, permission, slash, and mention menus stay scrollable within the available
-space above the centered composer.
+1. **移除冗余欢迎模块**：彻底删除欢迎标题、工作区标签、预置建议列表及其对应事件监听。
+2. **恢复初始居中动画**：侧边栏与独立管理器在空对话状态下统一将输入框垂直居中；当对话产生内容时，平滑过渡到底部；清空当前主题或新建对话时平滑回正到中心。在独立管理器中保持现有的网格布局与底部行结构，仅对输入框执行 transform 位移。系统开启“减弱动态效果”（prefers-reduced-motion）时自动禁用动画。
+3. **固定模型选择器尺寸与自适应截断**：模型选择器分配 200px 槽位，在极窄布局下允许收缩；文字靠下拉箭头对齐，超长模型名称自动截断；保持上下文、权限、推理档位及发送按钮等相邻控件之间的间距固定。
+4. **弹窗浮动定位刷新**：输入框状态改变及动画完成后自动刷新浮动弹窗偏移量。模型选择菜单、权限弹窗、斜杠命令与引用菜单在居中输入框上方的剩余空间内保持正常滚动。
 
 ## Alternatives considered
-
-- Keeping a bottom-only composer or welcome suggestions contradicts the requested
-  empty-state behavior.
-- Moving the manager composer outside its grid would duplicate panel-width and
-  responsive-column logic.
-- Sizing the model button to its text would keep shifting neighboring controls.
+- **保持输入框底部固定并保留欢迎建议**：否决。违背了空白状态下的极简与居中设计诉求。
+- **将管理器输入框移出 Grid 布局之外**：否决。会造成面板宽度与响应式列宽计算逻辑的重复维护。
+- **让模型选择按钮按文字宽度自适应伸缩**：否决。会导致切换不同模型时相邻工具栏按钮不断发生跳动。
 
 ## Consequences
-
-No host protocol, settings data, dependencies, or backend behavior changed. Compile,
-strict type checking, and targeted settings/model/manager/Webview unit checks pass.
-Headless Edge checks cover short and long names, Chinese/English sidebar and manager
-layouts, center-to-bottom transitions, clearing/history, reduced motion, popup
-anchors, inspector alignment, context-limit saves, and short-window model menus.
+- 宿主通信协议、配置格式及后端行为完全不变。
+- 编译、严格类型检查以及单元测试全部通过。
+- Headless Edge 测试覆盖中英双语、侧边栏及独立管理器布局、居中到底部过渡、清空/历史回放、减弱动画、弹窗针点锚定及视口空间不足时的菜单滚动。

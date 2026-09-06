@@ -1,20 +1,25 @@
-# Agent Note: Antigravity Gemini request validation
+# Agent Note: Antigravity 渠道 Gemini 请求校验与错误诊断改进
 
 Status: implemented
 
 ## Problem
-Gemini 3.8 Flash failed with HTTP 400 during routing and tool continuation. Antigravity sent the unsupported MINIMAL thinking level for disabled/minimal thinking on tiered Gemini 3.7/3.8 runtimes. Replayed Gemini function calls retained upstream IDs, but their function responses omitted those IDs. HTTP failures also discarded the upstream validation message.
+在请求路由与工具调用续接过程中，Gemini 3.8 Flash 出现 HTTP 400 校验错误。原因是 Antigravity 适配层在分级 Gemini 3.7/3.8 运行时中，对于“禁用/极简思考”（disabled/minimal thinking）发送了上游不接受的 `MINIMAL` 思考档位；此外，在回放 Gemini 函数调用时保留了上游生成的 ID，但在函数执行结果（function response）中却遗漏了这些 ID；而在发生 HTTP 错误时，原有逻辑直接丢弃了上游返回的具体校验错误信息。
 
 ## Decision
-Mapped disabled/minimal thinking to LOW on tiered runtimes while keeping includeThoughts false for disabled thinking. Echoed native function-call IDs in matching Antigravity tool results without sending locally generated IDs for older ID-less Gemini responses. Retained signed replay parts and existing Claude behavior. Added bounded, cancellable error-body reading with a five-second diagnostic deadline, a 16 KiB read limit, a 1,500-character message limit, and access-token redaction. Failed diagnostic reads preserve the HTTP status and attach their cause.
+1. 在分级运行时上，将“禁用/极简思考”映射为 `LOW`，同时对于禁用思考模式保持 `includeThoughts: false`。
+2. 在工具执行结果中透传回显原生的 function-call ID，对于较早版本无 ID 的 Gemini 响应则避免传递本地生成的伪 ID。
+3. 保持带签名的回放分块（signed replay parts）以及现有的 Claude 适配行为不变。
+4. 引入有界、可取消的错误响应体读取机制：设置 5 秒诊断读取超时限制、16 KiB 读取上限、1,500 字符错误消息截断，并对敏感的 access token 进行脱敏保护；即使诊断读取失败，也会保留原始 HTTP 状态码并附加对应原因。
 
-The model constraints were checked against Google's Gemini 3.8 guide: https://docs.cloud.google.com/gemini-enterprise-agent-platform/models/guides/gemini-3-8-flash.
+参考规范：Google Gemini 3.8 指南文档：https://docs.cloud.google.com/gemini-enterprise-agent-platform/models/guides/gemini-3-8-flash。
 
 ## Alternatives considered
-- Retrying all 400 responses would resend invalid payloads and obscure deterministic validation failures.
-- Removing function-call IDs or thought signatures would lose native replay information required by tool continuation.
-- Sending all locally generated IDs would change ID-less Gemini history without a matching upstream call ID.
-- Showing entire error bodies would permit unbounded or credential-bearing diagnostics.
+- **对所有 400 响应盲目重试**：否决。这会重复发送无效载荷，掩盖确定性的校验失败。
+- **剥离所有 function-call ID 或思考签名**：否决。会丢失工具调用连续性所必需的原生回放上下文字段。
+- **向所有请求发送本地伪造的 ID**：否决。会导致上游没有 call ID 的旧版 Gemini 历史记录格式发生非预期改变。
+- **直接透传展示全部未截断的错误响应体**：否决。会导致错误输出无界膨胀，并带来敏感凭据泄漏风险。
 
 ## Consequences
-Routing and tool-result requests follow the model's supported thinking levels and ID matching rules. Errors include upstream validation details when available, while endpoint failover and one-time OAuth refresh retain their status-based behavior. Regression coverage includes tiered aliases, parallel calls with and without native IDs, signed replay, diagnostic bounds, token redaction, cancellation, and other provider paths. Live Google-account generation was not exercised by automated tests.
+- 请求路由和工具执行结果严格遵循模型支持的思考档位与 ID 匹配规则。
+- 错误信息在可用时完整包含上游返回的校验诊断明细，同时保持端点故障转移（failover）与 OAuth token 一次性刷新的状态码触发机制不变。
+- 回归测试覆盖了分级别名、带与不带原生 ID 的并行调用、签名回放、诊断截断限制、Token 脱敏、请求取消及其它 Provider 分支。

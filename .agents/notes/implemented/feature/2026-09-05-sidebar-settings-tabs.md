@@ -1,44 +1,21 @@
-# Agent Note: Sidebar settings categories with complete configuration controls
+# Agent Note: 侧边栏设置分类 Tab 化与配置项完整保留
 
 Status: implemented
 
 ## Problem
-
-AI settings used one long sidebar form containing model configuration, account quotas,
-completion parameters, permissions, web search, MCP, skills, profile models, and usage
-statistics. Common controls were hard to find. Opening settings also replaced a saved
-context limit with model metadata, and delayed model updates could overwrite a manual edit.
+此前 AI 设置采用单页长表单排版，杂糅了模型配置、账号配额、补全参数、工具权限、网络搜索、MCP 服务、Skills、Profile 多模型分工及用量统计，关键配置极难查找。此外，打开设置面板时会意外将已保存的手动上下文上限重置为模型元数据默认值，延迟返回的模型列表刷新还可能覆盖用户的手动编辑。
 
 ## Decision
-
-Grouped the existing form into Models, Agent, Tools, and Usage tabs within the same
-Webview. Tab changes retain the original form elements, draft values, and per-tab scroll
-positions. All existing static control IDs, provider choices, dynamic profile/MCP
-configuration, account actions, and settings payload fields remain available.
-
-Kept the editable context limit in the primary model section, including provider-default
-zero. Model metadata fills the context field when the model changes, while settings and
-model-list refreshes retain an explicit value. Model input changes finish on blur so a
-pending update cannot subsequently replace a manual context edit.
-
-Added draft status and discard/save actions. Connection and account operations retain
-their existing independent actions. Quotas, connection details, completion parameters,
-and cache analysis use local disclosure controls. English and Chinese labels and native
-VS Code theme colors are supported. Search key visibility uses event listeners compatible
-with the Webview CSP, and discovery buttons have one request handler each.
+1. **重构为四大分类 Tab 导航**：在同一个 Webview 内将长表单划分为“模型”（Models）、“智能体”（Agent）、“工具”（Tools）与“用量”（Usage）四个 Tab。切换 Tab 时完整保留 DOM 元素、草稿值与各自独立的滚动位置。
+2. **完整保留原有控件契约**：所有静态控件 ID、Provider 选项、动态 Profile/MCP 配置、账号操作按钮及保存载荷字段保持 100% 兼容。
+3. **保护上下文上限手动设置**：仅在用户主动切换模型时使用模型元数据预填上下文，设置刷新和模型目录拉取时严格保留用户的显式数值（包括代表 Provider 默认的 0）；模型输入变更在失去焦点（blur）时结算，避免竞态覆盖。
+4. **草稿状态与局部折叠**：引入修改草稿状态标识及保存/放弃修改操作；账号与连接性操作保持独立即时生效；配额、高级参数与缓存分析收拢到具名折叠块中；API Key 显隐切换逻辑严格适配 Webview CSP 安全限制。
 
 ## Alternatives considered
-
-- A separate full settings window would make a wider layout possible, but the primary
-  workflow needs complete configuration within the VS Code sidebar.
-- Keeping the long form and changing only colors would leave the navigation problem.
-- Rebuilding settings from a reduced form schema would risk losing provider-specific
-  fields and dynamic controls; the existing form and serialization are retained.
+- **拆分为独立的独立全屏设置窗口**：否决。核心日常工作流要求在 VS Code 侧边栏内即可完成完整的 AI 参数调整。
+- **仅优化颜色排版而保留长表单**：否决。未解决深层次的导航和快速定位痛点。
+- **使用极简化 Schema 彻底重写表单**：否决。极易丢失各 Provider 专属的细粒度字段与动态控制项。
 
 ## Consequences
-
-The shared settings surface remains usable in the detached Agent Manager. Narrow layouts
-wrap API actions, MCP transport controls, and profile selectors without reducing available
-configuration. Template contract tests cover bilingual category placement, existing
-controls and profiles, the editable context field, and CSP-compatible key actions.
-Future settings must be placed in a category and included in the existing save payload.
+- 共享的设置面板在独立 Agent 管理器中同样可用，狭窄宽度下各项操作控件自适应折行。
+- 模板契约测试覆盖双语分类排布、现有控件及 Profile、上下文编辑字段及 CSP 兼容的交互逻辑。

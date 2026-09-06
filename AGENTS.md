@@ -37,7 +37,8 @@ Read supporting documents by task:
 - Record an Agent Note in `.agents/notes/` for every non-trivial change (features,
   bug fixes, simplifications, architecture adjustments, testing or process changes)
   within the same change. Follow the closed 6-class taxonomy and template in
-  `.agents/notes/README.md`.
+  `.agents/notes/README.md`, writing all notes in Simplified Chinese (supplementing
+  with flowcharts and I/O diagrams where necessary).
 
 ## Coding Rules
 

@@ -1,27 +1,22 @@
-# Agent Note: Antigravity native Tab completion and manual next-edit jump
+# Agent Note: Antigravity 原生 Tab 代码补全与手动下一处编辑跳转
 
 Status: implemented
 
 ## Problem
-
-The OAuth model directory exposed two editor models, but ordinary prefix/suffix chat requests returned escaped text, echoed suffixes or incorrect predictions. The project already had a FIM insertion path; treating native edit output as plain insertion text would corrupt suggestions.
+OAuth 模型目录中暴露了两个编辑器模型，但如果作为常规的前缀/后缀（prefix/suffix）聊天模型调用，会返回转义文本、后缀回显或错误预测。CWTools 已有一套标准的 FIM（Fill-in-the-Middle）插入机制，若直接将原生的编辑差异输出视作普通插入文本，会导致代码补全建议发生错乱。
 
 ## Decision
-
-An authorized synthetic-code probe captured the official IDE's `tab` and `tab_jump` requests. Native replies continue a prefilled XML-wrapped JSON edit call. The direct adapter uses that format with a concise instruction, decodes one uniquely matching replacement, and never executes model-emitted calls. No official language-server binary is required at runtime.
-
-Antigravity exposes a separate inline model catalog. Its FIM adapter accepts only edits that preserve the prefix and suffix, keeping the resulting whitespace intact. The manual next-edit command predicts within a bounded current-file window and only moves the cursor. Cancellation, document versions, cursor changes, disposal and provider/model cache identity prevent stale results. The optional previous-edit snapshot is bounded and held in memory.
-
-Five live adapter checks passed: addition, indentation, Stellaris resources, suffix preservation and locating an outdated variable after a rename. Targeted tests cover native framing, JSON escapes, CRLF, Unicode, ambiguous targets, credential refresh, cancellation, FIM isolation and stale editor state. README, the protocol document, command translations and the release manifest describe the delivered behavior in both languages.
-
-Validation passed: extension/Webview compilation, strict test type checking, 2,349 client unit tests and 35 rules-sync tests, bilingual documentation generation and the release quality gate. The release gate skipped its duplicate compile/test steps because those had already passed separately.
+1. **原生 XML/JSON 编辑协议接入**：通过官方客户端探测抓包确认，原生 Tab 编辑请求采用预填的 XML 包装 JSON 差异补全调用。适配器直接使用该格式并注入简洁指令，解码唯一的精准替换块，绝不盲目执行模型生成的外部调用，运行时无需依赖官方 Language Server 二进制。
+2. **Tab 专属目录与 FIM 边界守卫**：Antigravity 对外暴露独立的行内补全模型目录；FIM 适配器严格要求模型编辑必须保留前缀与后缀，维持缩进与空白结构完整。
+3. **手动“下一处编辑”（Next Edit）跳转命令**：在当前文件的限定滑动窗口内预测下一处可能需要改动的位置，且该命令仅移动光标位置，不执行侵入式写入。
+4. **防过期与并发控制**：通过请求取消、文档版本比对、光标位移检测、上下文销毁及模型缓存标识，确保过期响应不会被意外渲染。
 
 ## Alternatives considered
-
-- Generic chat/FIM prompts were rejected after inconsistent live outputs.
-- Bundling or depending on the official language server would add installation and lifecycle complexity; it was used only for protocol validation.
-- Automatically applying arbitrary edits or binding Tab to cursor jumps would broaden the editing behavior. Existing ghost text handles insertion; an explicit command handles jumps.
+- **使用通用 Chat/FIM Prompt**：否决。实测生成输出极不稳定且格式错乱。
+- **打包或依赖官方语言服务器**：否决。引入巨大的安装与进程生命周期复杂度；仅将其用于协议抓包比对即可。
+- **自动应用任意编辑或将 Tab 直接绑定为跳转光标**：否决。会过度干预用户的正常编码；标准的 ghost text 负责插入补全，独立的显式命令负责跳转定位更为克制可靠。
 
 ## Consequences
-
-Both editor models can be used through the existing OAuth/proxy without exposing them as chat models. Responses outside the validated contract are discarded. The adapter supports one nearby edit in the current file, with no general file-edit execution or cross-file jump. Upstream compatibility-protocol changes may require updating the adapter.
+- 两个编辑器模型可通过现有 OAuth/代理链路稳定运行，且不会被误暴露在聊天列表中。
+- 适配器安全支持当前文件就近的局部编辑建议，无全局文件修改或跨文件跳转副作用。
+- 单元测试与端到端回归覆盖原生封装、JSON 转义、CRLF 换行、Unicode 字符、模糊匹配、凭据刷新与文档过期保护。

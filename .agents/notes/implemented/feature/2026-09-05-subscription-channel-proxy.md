@@ -1,25 +1,21 @@
-# Agent Note: Subscription channel proxy
+# Agent Note: 订阅渠道代理（Subscription Channel Proxy）
 
 Status: implemented
 
 ## Problem
-
-Codex subscription and Antigravity (Gemini OAuth) needed configurable proxy routing for OAuth and provider traffic, following the interaction in `dsh-chatgpt-subscription`.
+Codex 订阅渠道与 Antigravity（Gemini OAuth）在企业内网或特定网络环境下，需要为 OAuth 认证和 Provider 流量提供可配置的代理路由，参考 `dsh-chatgpt-subscription` 的交互模型。
 
 ## Decision
-
-Added a shared auto/custom/direct proxy setting in both providers' AI settings. The machine-scoped mode uses user configuration; custom HTTP, HTTPS and SOCKS5 addresses, including authentication, live in SecretStorage. Status messages redact credentials. Auto detection prioritizes user-level VS Code `http.proxy`, proxy environment variables, then Windows/macOS manual system proxy settings with a five-second cache. PAC is not evaluated.
-
-Both OAuth services and their completion paths receive one transport. Per-request Undici dispatchers preserve native fetch streaming and cancellation without changing the process-wide dispatcher. SOCKS5 uses the `socks` connector with remote destination DNS and Undici's normal TLS validation. Undici 6 retains compatibility with the extension's supported Node runtime. Configured proxy failures do not fall back to direct connections. Pool retirement waits for active streams and limits simultaneous old pools; extension disposal destroys owned pools.
+1. **多模式代理配置**：在双方 AI 设置中增加共享的“自动（auto）/自定义（custom）/直连（direct）”代理设置。机器级模式遵循用户配置；自定义 HTTP、HTTPS 和 SOCKS5 地址（含账号密码鉴权）存储于 `SecretStorage` 中；状态展示与上报时对敏感凭据进行严格脱敏。
+2. **自动探测优先级**：自动模式优先读取用户级 VS Code `http.proxy`，其次检查环境变量代理（`HTTPS_PROXY` 等），最后拉取 Windows/macOS 手动系统代理（具有 5 秒检测缓存）；暂不解析复杂 PAC 脚本。
+3. **隔离的 Undici 传输通道**：基于 Undici 的单请求分发器（Dispatcher）保留原生的 fetch 流式响应与 AbortSignal 取消能力，绝不篡改全局 Node 进程分发器；SOCKS5 支持远程 DNS 解析及标准 TLS 校验；配置了代理的请求若失败绝不静默回退至直连；旧连接池在活跃流结束后安全退役并限制最大并发闲置连接池数量。
 
 ## Alternatives considered
-
-- A global dispatcher would also redirect unrelated providers and extension traffic.
-- Plain settings URLs would expose authenticated proxy credentials in configuration and Webview state.
-- The reference's HTTP-only ProxyAgent cannot implement SOCKS5 by accepting a SOCKS URL. The newer Undici SOCKS agent requires a newer Node runtime; the compatible connector avoids changing the VS Code support baseline.
+- **修改全局 Dispatcher**：否决。会导致与订阅渠道无关的其他 Provider 及插件普通网络请求被意外代理劫持。
+- **将带密码的代理明文保存在普通配置中**：否决。会导致认证凭据在明文配置和 Webview 状态中泄漏。
+- **直接使用 Undici 新版 SOCKS agent**：否决。新版需要更高版本的 Node 运行时，使用兼容的 SOCKS 连接器可避免强行抬高 VS Code 运行环境基线。
 
 ## Consequences
-
-The shared setting covers token exchange and refresh, model/account/quota queries, and chat. Changes affect subsequent requests. Browser sign-in keeps browser proxy settings and local OAuth callbacks stay on loopback. English and Chinese UI, settings descriptions and docs are synchronized.
-
-Regression tests cover validation/redaction, detection precedence, secret persistence, invalid/missing proxies, real HTTP CONNECT and SOCKS5 routing, credential separation, streaming cancellation, in-flight configuration changes, and both providers' integration with API-key provider isolation. A local TLS smoke check also verified HTTP/HTTPS proxies and authenticated SOCKS5 against HTTPS targets using an ephemeral test CA. Compile, strict typecheck, targeted lint, docs generation and full unit/rules-sync tests were run; release validation includes the resulting package and bilingual catalogs.
+- 共享代理通道全面覆盖 Token 交换与刷新、模型/账号/配额查询及聊天流式交互。
+- 代理变更即时对后续新请求生效；浏览器端 OAuth 登录遵循系统浏览器自身代理，本地回调绑定 loopback。
+- 回归测试覆盖脱敏校验、探测优先级、Secret 持久化、非法/丢失代理降级保护、真实 HTTP CONNECT 与 SOCKS5 路由、流式取消及并发配置切换。

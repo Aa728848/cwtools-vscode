@@ -1,17 +1,17 @@
-# Agent Note: Remove Redundant UTF-16 Surrogate Pair Checks and Irrelevant Emoji Tests
+# Agent Note: 移除冗余的 UTF-16 代理对检查及无关 Emoji 测试
 
 Status: implemented
 
 ## Problem
-In `tabCompletion.ts`, `parseAntigravityTabEdit` contained defensive regex checks to adjust prefix/suffix offsets if they fell inside a surrogate pair (`/[\uD800-\uDBFF]/`). In JavaScript and VS Code, strings, offsets, and editor ranges are natively UTF-16 code units, making this manual adjustment unnecessary. A synthetic unit test was added solely to hit this defensive branch with dummy emojis (`😀`, `😁`), providing no real regression protection while polluting tests with non-Paradox artifacts.
+在 `tabCompletion.ts` 中，`parseAntigravityTabEdit` 包含了一段防御性的正则检测代码，当截断位置落在代理对（surrogate pair，`[\uD800-\uDBFF]`）内部时强行微调前缀/后缀偏移量。然而在 JavaScript 与 VS Code 中，字符串、偏移量以及编辑器 Range 本身就是原生基于 UTF-16 代码单元（code units）进行计量的，因此该手动干预属于冗余逻辑。此前甚至为了覆盖该防御分支而特意添加了使用虚构 Emoji 表情（`😀`、`😁`）的人工合成单测，不仅无法提供真正的回归防护，反而在 PdxScript 游戏脚本测试套件中引入了无关噪点。
 
 ## Decision
-1. Removed manual surrogate pair regex adjustments (`/[\uD800-\uDBFF]/` and `/[\uDC00-\uDFFF]/`) from `parseAntigravityTabEdit`.
-2. Removed `it('does not split Unicode characters when finding an edit boundary')` and cleaned emojis from the CRLF offset restoration test in `antigravityTab.test.ts`.
+1. **移除手动代理对正则调整**：从 `parseAntigravityTabEdit` 中彻底删除针对 `[\uD800-\uDBFF]` 与 `[\uDC00-\uDFFF]` 的手动正则修正逻辑，恢复为直观的前缀/后缀切片。
+2. **清理无关 Emoji 单测**：移除 `it('does not split Unicode characters when finding an edit boundary')`，并在 `antigravityTab.test.ts` 的 CRLF 换行偏移恢复测试中清理非必要的 Emoji 夹具。
 
 ## Alternatives considered
-1. **Keeping the surrogate checks**: Rejected. It added code complexity and artificial test cases for an impossible boundary in Paradox script editing.
+- **保留代理对检查**：否决。为 Paradox 游戏脚本编辑中不可能出现的极端边界增加了虚假复杂度与维护负担。
 
 ## Consequences
-- Code in `parseAntigravityTabEdit` is simplified to straightforward common prefix/suffix slicing.
-- Irrelevant emoji-based test cases were eliminated. All 2351 unit tests continue to pass.
+- `parseAntigravityTabEdit` 的逻辑精简为清晰直接的公共前后缀切片。
+- 消除了无关的 Emoji 测试用例，全部 2351 个单元测试持续稳定通过。

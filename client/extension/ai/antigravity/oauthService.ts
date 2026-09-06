@@ -4,7 +4,7 @@ import type * as vscode from 'vscode';
 import { isRecord } from '../../../shared/protocolValidation';
 import type { AntigravityAccountStatus, AntigravityQuotaBucket } from '../types';
 import { aiText } from '../messages';
-import { ANTIGRAVITY_MODELS } from './models';
+import { ANTIGRAVITY_MODELS, antigravityDisplayModel } from './models';
 import { AntigravityApiError, extractAntigravityProject, postAntigravity } from './api';
 
 export const ANTIGRAVITY_SECRET_KEY = 'cwtools.ai.antigravity.oauth.v1';
@@ -49,9 +49,12 @@ async function waitWithSignal<T>(promise: Promise<T>, signal: AbortSignal): Prom
 
 export function parseAntigravityModels(data: unknown): string[] {
     if (!isRecord(data) || !isRecord(data.models)) return [];
-    return Object.entries(data.models)
-        .filter(([id, model]) => id.trim() && !id.startsWith('chat_') && isRecord(model) && !model.isInternal)
-        .map(([id]) => id).sort().slice(0, 500);
+    const models = Object.entries(data.models)
+        .filter(([, model]) => isRecord(model) && !model.isInternal)
+        .map(([id]) => id.trim())
+        .filter(id => id && !id.startsWith('chat_') && !id.startsWith('tab_'))
+        .map(antigravityDisplayModel);
+    return [...new Set(models)].sort().slice(0, 500);
 }
 
 export function parseAntigravityQuota(data: unknown): AntigravityQuotaBucket[] {
@@ -207,9 +210,8 @@ export class AntigravityOAuthService implements vscode.Disposable {
                 }),
             ]);
             const [models, quota, identity] = results;
-            if (models?.status === 'fulfilled') {
-                const discovered = parseAntigravityModels(models.value);
-                if (discovered.length) value.models = discovered;
+            if (models?.status === 'fulfilled' && isRecord(models.value) && isRecord(models.value.models)) {
+                value.models = parseAntigravityModels(models.value);
             }
             if (quota?.status === 'fulfilled') value.quota = parseAntigravityQuota(quota.value);
             if (identity?.status === 'fulfilled' && isRecord(identity.value) && nonempty(identity.value.email)) value.email = identity.value.email;

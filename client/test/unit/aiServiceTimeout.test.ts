@@ -85,6 +85,27 @@ describe('AIService request timeout policy', () => {
 });
 
 describe('AIService session overrides', () => {
+    it('normalizes Antigravity Pro selections without changing other providers', () => {
+        const { AIService } = loadAIService();
+        const originalConfiguration = vscodeStub.workspace.getConfiguration;
+        vscodeStub.workspace.getConfiguration = () => ({
+            get: <T>(key: string, defaultValue?: T): T | undefined => (key === 'provider' ? 'antigravity' : defaultValue) as T | undefined,
+        });
+        const service = new AIService({ secrets: {} } as import('vscode').ExtensionContext);
+        try {
+            for (const model of ['gemini-pro-agent', 'gemini-3.1-pro-low', 'gemini-3.1-pro-high']) {
+                service.setModelOverride(model);
+                expect(service.getConfig().model).to.equal('gemini-3.1-pro');
+            }
+            vscodeStub.workspace.getConfiguration = originalConfiguration;
+            expect(service.getConfig().model).to.equal('gemini-3.1-pro-high');
+        } finally {
+            vscodeStub.workspace.getConfiguration = originalConfiguration;
+            service.getAntigravityOAuthService().dispose();
+            service.getSubscriptionProxyService().dispose();
+        }
+    });
+
     it('applies model and reasoning overrides without persisting configuration', () => {
         const { AIService } = loadAIService();
         const service = new AIService({ secrets: {} } as any);
@@ -101,6 +122,36 @@ describe('AIService session overrides', () => {
 });
 
 describe('AIService inline provider isolation', () => {
+    it('adapts Antigravity edits to insertion-only FIM and rejects chat or jump models', async () => {
+        const { AIService } = loadAIService();
+        const service = new AIService({ secrets: {} } as import('vscode').ExtensionContext);
+        const originalFetch = globalThis.fetch;
+        const oauth = service.getAntigravityOAuthService();
+        oauth.getRequestContext = async () => ({ token: 'test-token', projectId: 'test-project' });
+        const outputs = ['prefix INSERT suffix', 'CHANGED prefix suffix'];
+        let count = 0;
+        globalThis.fetch = async (url, init) => {
+            expect(String(url)).to.include('cloudcode-pa.googleapis.com/v1internal:streamGenerateContent');
+            const body: unknown = JSON.parse(String(init?.body));
+            expect(body).to.include({ model: 'tab_flash_lite_preview', requestType: 'tab', project: 'test-project' });
+            const output = '": ' + JSON.stringify(outputs[count++]) + '}]}</replace_file_content>';
+            return geminiSseResponse([{ response: { candidates: [{ content: { parts: [{ text: output }] }, finishReason: 'STOP' }] } }]);
+        };
+        try {
+            expect(await service.fimCompletion('prefix', 'suffix', { providerId: 'antigravity', endpoint: 'https://override.invalid' })).to.equal(' INSERT ');
+            expect(await service.fimCompletion('prefix', 'suffix', { providerId: 'antigravity' })).to.equal('');
+            for (const model of ['gemini-pro-agent', 'tab_jump_flash_lite_preview']) {
+                const error: unknown = await service.fimCompletion('prefix', 'suffix', { providerId: 'antigravity', model }).catch(error => error);
+                expect(error).to.be.instanceOf(Error);
+            }
+            expect(count).to.equal(2);
+        } finally {
+            globalThis.fetch = originalFetch;
+            oauth.dispose();
+            service.getSubscriptionProxyService().dispose();
+        }
+    });
+
     it('uses the inline provider default instead of leaking the chat model into FIM', async () => {
         const { AIService } = loadAIService();
         const service = new AIService({ secrets: {} } as any) as any;

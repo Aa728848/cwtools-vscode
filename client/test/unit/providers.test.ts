@@ -28,9 +28,15 @@ import {
 import type { ChatCompletionRequest, ChatMessage } from '../../extension/ai/types';
 
 describe('Antigravity provider support', () => {
-    it('registers OAuth chat with provider-scoped limits and no utility/FIM use', () => {
+    it('keeps OAuth chat and editor model catalogs separate', () => {
         const provider = getProvider('antigravity');
-        expect(provider).to.include({ authKind: 'antigravity-oauth', requiresApiKey: false, supportsFIM: false, supportsUtilityCalls: false });
+        expect(provider).to.include({ authKind: 'antigravity-oauth', requiresApiKey: false, supportsFIM: true, supportsUtilityCalls: false });
+        expect(provider.inlineModels).to.deep.equal(['tab_flash_lite_preview']);
+        expect(provider.models).not.to.include('tab_flash_lite_preview');
+        expect(isModelFIMCapable('', 'antigravity')).to.equal(true);
+        expect(isModelFIMCapable('tab_flash_lite_preview', 'antigravity')).to.equal(true);
+        expect(isModelFIMCapable('tab_jump_flash_lite_preview', 'antigravity')).to.equal(false);
+        expect(isModelFIMCapable('gemini-3.1-pro', 'antigravity')).to.equal(false);
         expect(provider.models).to.include(provider.defaultModel);
         expect(getProviderApiFormat('antigravity', 'claude-opus-4-6')).to.equal('gemini-generate-content');
         expect(getModelContextTokens('claude-opus-4-6', 'antigravity')).to.equal(1048576);

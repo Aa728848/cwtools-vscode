@@ -31,6 +31,7 @@ import { AgentRunner } from './ai/agentRunner';
 import { PromptBuilder } from './ai/promptBuilder';
 import { AIChatPanelProvider } from './ai/chatPanel';
 import { AIInlineCompletionProvider } from './ai/inlineProvider';
+import { AntigravityTabJump } from './ai/antigravity/tabJump';
 import { UsageTracker } from './ai/usageTracker';
 import { lastAISettingsWriteTime } from './ai/chatSettings';
 import { checkForUpdates } from './updateChecker';
@@ -1320,11 +1321,14 @@ export async function activate(context: ExtensionContext) {
 	// Fix #8: reuse shared gameLanguages instead of duplicate gameLanguages2
 	const docSelector2 = gameLanguages.map(lang => ({ scheme: 'file', language: lang }));
 	const inlineProvider = new AIInlineCompletionProvider(aiService, promptBuilder, usageTracker);
+	const antigravityTabJump = new AntigravityTabJump(aiService);
 	context.subscriptions.push(
 		inlineProvider,
+		antigravityTabJump,
 		chatPanelProvider,
 		vs.languages.registerInlineCompletionItemProvider(docSelector2, inlineProvider)
 	);
+	safeRegisterCommand(context, 'cwtools.ai.antigravityTabJump', () => antigravityTabJump.jump());
 	safeRegisterCommand(context, "cwtools.ai.configure", async () => {
 		await aiService.quickConfigureProvider();
 	});

@@ -205,6 +205,8 @@ export interface AIProviderConfig {
     endpoint: string;
     defaultModel: string;
     models: string[];
+    /** Separate catalog when inline completion uses editor-only models. */
+    inlineModels?: string[];
     supportsToolUse: boolean;
     /** Whether this provider supports API keys */
     requiresApiKey: boolean;
@@ -213,7 +215,7 @@ export interface AIProviderConfig {
     maxContextTokens: number;
     /** Whether this provider conforms strictly to OpenAI API response formats (determines adapter usage) */
     isOpenAICompatible: boolean;
-    /** Whether this provider supports generic FIM API (typically /completions with prompt+suffix) */
+    /** Whether this provider supports inline insertion, natively or through an adapter. */
     supportsFIM: boolean;
     /**
      * Expected tool call OUTPUT format from the model.
@@ -2694,6 +2696,7 @@ export interface ProviderMeta {
     id: string;
     name: string;
     models: string[];
+    inlineModels?: string[];
     defaultModel: string;
     requiresApiKey: boolean;
     defaultEndpoint: string;

@@ -296,6 +296,7 @@ export class ChatSettingsManager {
                     ? aiText('Codex (ChatGPT Subscription)', 'Codex（ChatGPT 订阅）')
                     : p.name,
                 models: codexModels ?? p.models,
+                inlineModels: p.inlineModels,
                 defaultModel: codexModels?.[0] ?? p.defaultModel,
                 requiresApiKey: p.requiresApiKey,
                 defaultEndpoint: p.endpoint,

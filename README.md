@@ -65,7 +65,9 @@ Eligible Build and Utility stages can use programmable `run_code`: a stage-speci
 
 The ChatGPT-subscription-compatible Codex provider uses a browser sign-in flow and the extension's own agent runtime. It is an integration with an upstream compatibility endpoint, not a public stable API, so upstream changes can require extension updates.
 
-Antigravity is also available in AI Settings. Select **Antigravity (Google OAuth)**, sign in with Google, then refresh the account to load its models and quota. The extension stores OAuth tokens in VS Code SecretStorage and supports streaming text, image input, and tool calls through Antigravity's Gemini transport. Complete account setup in Antigravity first. This provider uses fixed upstream compatibility endpoints; API keys, custom endpoints, FIM, and utility calls are unavailable.
+Antigravity is also available in AI Settings. Select **Antigravity (Google OAuth)**, sign in with Google, then refresh the account to load its models and quota. The extension stores OAuth tokens in VS Code SecretStorage and supports streaming text, image input, and tool calls through Antigravity's Gemini transport. Complete account setup in Antigravity first. This provider uses fixed upstream compatibility endpoints; API keys, custom endpoints, and utility calls are unavailable.
+
+The chat catalog combines Gemini 3.1 Pro runtime aliases into `gemini-3.1-pro` and hides editor-only `tab_` models. The Pro reasoning setting still selects the runtime model. For inline completion, enable it in AI Settings and select Antigravity with `tab_flash_lite_preview`. The extension adapts native next-edit output to insertion-only ghost text. Run **Stellaris AI: Jump to Next Edit (Antigravity)** from the Command Palette to use `tab_jump_flash_lite_preview` without applying its predicted edit. See [setup and protocol details](docs/antigravity-tab-protocol.md).
 
 Codex subscription and Antigravity (Gemini OAuth) share **AI Settings → Subscription channel proxy**. Choose **Auto detect**, **Custom proxy**, or **Direct connection**, then click **Save proxy** before signing in or testing. Custom mode accepts HTTP, HTTPS, and SOCKS5 addresses (for example `http://127.0.0.1:7890` or `socks5://127.0.0.1:1080`), with optional `username:password@` authentication stored in VS Code SecretStorage. Leave the address empty to keep the saved proxy. Auto mode checks VS Code `http.proxy`, `HTTPS_PROXY` / `HTTP_PROXY` / `ALL_PROXY` (including lowercase variants), then Windows/macOS manual system proxy settings; PAC is not evaluated. Without a detected proxy it connects directly. A configured proxy failure is reported without a direct fallback. Changes apply to subsequent token, account, quota and chat requests; active streams continue with their existing connection. Browser sign-in uses the browser's own proxy settings.
 
@@ -193,7 +195,9 @@ Stellaris Language Serves 是一款面向 Paradox Mod 开发的 VS Code 扩展�
 
 兼容 ChatGPT 订阅的 Codex Provider 通过浏览器登录，并使用插件自己的 Agent 运行时。它依赖上游兼容端点，不属于公开稳定 API；如果上游流程变化，插件可能需要同步更新。
 
-AI 设置也支持 Antigravity。选择 **Antigravity (Google OAuth)**，使用 Google 登录后刷新账户，即可加载模型和额度。扩展将 OAuth Token 存入 VS Code SecretStorage，通过 Antigravity 的 Gemini 协议支持流式文本、图片输入和工具调用。请先在 Antigravity 中完成账户设置。该供应商使用固定的上游兼容端点，不提供 API Key、自定义端点、FIM 或辅助调用。
+AI 设置也支持 Antigravity。选择 **Antigravity (Google OAuth)**，使用 Google 登录后刷新账户，即可加载模型和额度。扩展将 OAuth Token 存入 VS Code SecretStorage，通过 Antigravity 的 Gemini 协议支持流式文本、图片输入和工具调用。请先在 Antigravity 中完成账户设置。该供应商使用固定的上游兼容端点，不提供 API Key、自定义端点或辅助调用。
+
+聊天模型列表将 Gemini 3.1 Pro 的后台别名合并为 `gemini-3.1-pro`，隐藏仅供编辑器使用的 `tab_` 模型；推理强度仍决定实际后台模型。在 AI 设置中启用行内补全，选择 Antigravity 和 `tab_flash_lite_preview`，即可将原生下一次编辑输出适配为光标处的灰字补全。在命令面板运行 **Stellaris AI：跳转到下一处编辑（Antigravity）**，可使用 `tab_jump_flash_lite_preview` 定位下一处编辑，只移动光标。详见[配置与协议说明](docs/antigravity-tab-protocol.md)。
 
 Codex 订阅与 Antigravity（Gemini OAuth）共用 **AI 设置 → 订阅渠道代理**。选择 **自动检测**、**自定义代理** 或 **直连**，登录或测试前点击 **保存代理**。自定义模式支持 HTTP、HTTPS、SOCKS5 地址（例如 `http://127.0.0.1:7890` 或 `socks5://127.0.0.1:1080`），可用 `用户名:密码@` 提供认证，凭据保存在 VS Code SecretStorage。地址留空会保留已保存的代理。自动模式依次检测 VS Code `http.proxy`、`HTTPS_PROXY` / `HTTP_PROXY` / `ALL_PROXY`（含小写形式）、Windows/macOS 系统手动代理；不解析 PAC。未检测到代理时直连，已配置的代理连接失败时会报错，不会回退直连。修改对后续令牌、账户、额度和聊天请求生效，进行中的流式回复继续使用原连接。浏览器登录页面遵循浏览器自身的代理设置。
 

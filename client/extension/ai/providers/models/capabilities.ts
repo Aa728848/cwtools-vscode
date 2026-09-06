@@ -160,6 +160,8 @@ export const FIM_CAPABLE_MODELS: Record<string, boolean> = {
  * Check if a specific model name is FIM-capable.
  */
 export function isModelFIMCapable(model: string, providerId: string): boolean {
+    const inlineModels = BUILTIN_PROVIDERS[providerId]?.inlineModels;
+    if (inlineModels) return !model || inlineModels.includes(model);
     if (!model) {
         const provider = BUILTIN_PROVIDERS[providerId];
         return provider ? provider.supportsFIM : false;

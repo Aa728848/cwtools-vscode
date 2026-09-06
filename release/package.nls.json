@@ -1,4 +1,5 @@
 {
+  "commands.stellarisLanguageServices.ai.antigravityTabJump.title": "Jump to Next Edit (Antigravity)",
   "extension.displayName": "Stellaris Language Serves",
   "extension.description": "Language services, previews, validation, and AI-assisted tooling for Stellaris mod development.",
   "views.loadedFiles.name": "Loaded files",

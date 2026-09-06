@@ -160,6 +160,9 @@ export class AIInlineCompletionProvider implements vs.InlineCompletionItemProvid
 
     /** Fix #1: release event listeners */
     dispose(): void {
+        this.clearPendingDebounce();
+        this.abortCurrentRequest();
+        this.lastRequestId++;
         this.markPendingTelemetryStale('dispose', true);
         this.reportInlineTelemetry(true);
         this._disposables.forEach(d => d.dispose());
@@ -338,6 +341,10 @@ export class AIInlineCompletionProvider implements vs.InlineCompletionItemProvid
     }
 
     private updateEnabled(): void {
+        this.clearPendingDebounce();
+        this.abortCurrentRequest();
+        this.lastRequestId++;
+        this.completionCache.clear();
         const config = this.aiService.getConfig();
         this.isEnabled = config.enabled && config.inlineCompletion.enabled;
 
@@ -404,6 +411,7 @@ export class AIInlineCompletionProvider implements vs.InlineCompletionItemProvid
         const config = this.aiService.getConfig();
         const inlineProvider = config.inlineCompletion.provider || config.provider;
         const inlineModel = config.inlineCompletion.model
+            || BUILTIN_PROVIDERS[inlineProvider]?.inlineModels?.[0]
             || getEffectiveModel(inlineProvider, undefined);
         if (isAlwaysThinkingModel(inlineModel)) {
             // Log and silently skip — these models are too slow for inline use
@@ -439,7 +447,7 @@ export class AIInlineCompletionProvider implements vs.InlineCompletionItemProvid
 
                 try {
                     const completion = await this.getCompletion(document, position, token);
-                    if (token.isCancellationRequested || requestId !== this.lastRequestId) {
+                    if (token.isCancellationRequested || requestId !== this.lastRequestId || document.version !== docVersionAtCapture) {
                         resolve(undefined);
                         return;
                     }
@@ -613,8 +621,9 @@ export class AIInlineCompletionProvider implements vs.InlineCompletionItemProvid
         const config = this.aiService.getConfig();
 
         // ── Build cache key from context ──
-        const linePrefix = document.lineAt(position.line).text.substring(0, position.character).trim();
-        const cacheKey = `${document.uri.fsPath}:${position.line}:${linePrefix}`;
+        const docVersion = document.version;
+        const linePrefix = document.lineAt(position.line).text.substring(0, position.character);
+        const cacheKey = `${config.inlineCompletion.provider || config.provider}:${config.inlineCompletion.model}:${document.uri.fsPath}:${position.line}:${position.character}:${linePrefix}`;
         const cached = this.completionCache.get(cacheKey, document.version);
         if (cached) {
             this.cacheHits++;
@@ -638,7 +647,7 @@ export class AIInlineCompletionProvider implements vs.InlineCompletionItemProvid
         this.currentAbortController = abortController;
 
         // Link VS Code cancellation token to our AbortController
-        token.onCancellationRequested(() => abortController.abort());
+        const cancellation = token.onCancellationRequested(() => abortController.abort());
 
         try {
             let completionText = '';
@@ -689,6 +698,7 @@ export class AIInlineCompletionProvider implements vs.InlineCompletionItemProvid
                     model: inlineModel,
                     temperature: 0.2,
                     maxTokens: Math.max(16, config.inlineCompletion.maxTokens),
+                    languageId: document.languageId,
                     abortSignal: abortController.signal
                 });
                 ErrorReporter.debug(SOURCE.INLINE_PROVIDER, `FIM completed in ${Date.now() - fimStart}ms, text=${contentStr.length}`);
@@ -702,13 +712,14 @@ export class AIInlineCompletionProvider implements vs.InlineCompletionItemProvid
                 clearTimeout(timeoutTimer);
             }
 
-            if (token.isCancellationRequested || abortController.signal.aborted) return undefined;
+            if (token.isCancellationRequested || abortController.signal.aborted || document.version !== docVersion) return undefined;
 
-            if (!contentStr.trim()) {
+            if (!contentStr.trim() && inlineProvider !== 'antigravity') {
                 ErrorReporter.warn('InlineProvider', `Model ${inlineModel} returned empty FIM completion`);
             }
 
-            completionText = contentStr.trim();
+            const nativeTab = inlineProvider === 'antigravity';
+            completionText = nativeTab ? contentStr : contentStr.trim();
 
             if (!completionText || completionText.length === 0) return undefined;
 
@@ -716,7 +727,7 @@ export class AIInlineCompletionProvider implements vs.InlineCompletionItemProvid
             // AI sometimes echoes the current line prefix (e.g. "limit = {" when cursor is after "limit = {")
             const linePrefix = document.lineAt(position.line).text.substring(0, position.character);
             const trimmedPrefix = linePrefix.trimStart();
-            if (trimmedPrefix.length > 0) {
+            if (!nativeTab && trimmedPrefix.length > 0) {
                 // Check if completion starts with the full prefix (or its trimmed version)
                 if (completionText.startsWith(trimmedPrefix)) {
                     completionText = completionText.substring(trimmedPrefix.length);
@@ -733,7 +744,7 @@ export class AIInlineCompletionProvider implements vs.InlineCompletionItemProvid
             }
 
             // ── Overlap stripping: prevent collision with existing suffix after cursor ──
-            if (config.inlineCompletion.overlapStripping) {
+            if (!nativeTab && config.inlineCompletion.overlapStripping) {
                 const lineSuffix = document.lineAt(position.line).text.substring(position.character);
                 if (lineSuffix) {
                     const firstLine = completionText.split('\n')[0]!;  
@@ -767,6 +778,7 @@ export class AIInlineCompletionProvider implements vs.InlineCompletionItemProvid
             }
             return undefined;
         } finally {
+            cancellation.dispose();
             if (this.currentAbortController === abortController) {
                 this.currentAbortController = null;
             }

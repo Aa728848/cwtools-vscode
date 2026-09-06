@@ -601,6 +601,12 @@
                 "icon": "$(layout)"
             },
             {
+                "command": "cwtools.ai.antigravityTabJump",
+                "title": "%commands.stellarisLanguageServices.ai.antigravityTabJump.title%",
+                "category": "Stellaris AI",
+                "enablement": "editorLangId == stellaris || editorLangId == paradox"
+            },
+            {
                 "command": "cwtools.ai.selectModel",
                 "title": "%commands.stellarisLanguageServices.ai.selectModel.title%",
                 "category": "Stellaris AI"
@@ -1435,6 +1441,7 @@
                         "scope": "window",
                         "type": "string",
                         "enum": [
+                            "antigravity",
                             "openai",
                             "claude",
                             "tokenrhythm",
@@ -1457,6 +1464,7 @@
                             "opencode-go"
                         ],
                         "enumDescriptions": [
+                            "%configuration.stellarisLanguageServices.ai.provider.enum.antigravity%",
                             "%configuration.stellarisLanguageServices.ai.provider.enum.openai%",
                             "%configuration.stellarisLanguageServices.ai.provider.enum.claude%",
                             "%configuration.stellarisLanguageServices.ai.provider.enum.tokenrhythm%",

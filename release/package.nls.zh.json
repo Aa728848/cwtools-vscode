@@ -1,4 +1,5 @@
 {
+  "commands.stellarisLanguageServices.ai.antigravityTabJump.title": "跳转到下一处编辑（Antigravity）",
   "configuration.category.editor": "CWTools：编辑器体验",
   "configuration.category.language": "CWTools：语言与诊断",
   "configuration.category.rules": "CWTools：规则与游戏数据",

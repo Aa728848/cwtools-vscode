@@ -1,4 +1,5 @@
 import { Icons, svgIcon, svgIconNoMargin } from './svgIcons';
+import type { ProviderMeta } from '../extension/ai/types';
 import { buildAntigravityAccountHtml, isAntigravityAccountStatus, type AntigravityAccountStatus } from './chat/antigravityAccount';
 import { isSubscriptionProxyMode, isSubscriptionProxyStatus, type SubscriptionProxyStatus } from '../shared/subscriptionProxy';
 import { routeLiveStep, buildToolPairHtml, buildToolGroupHtml, buildLocalisationPromptCardHtml, escapeHtml as mrEscapeHtml, type RendererStep } from './messageRenderer';
@@ -8011,13 +8012,13 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
 
             // If the current selection is invalid (e.g., "Same as chat" but chat doesn't support FIM, or the provider was removed), auto-select a valid one.
             if ((currentPid === '' && !chatSupportsFIM) || (currentPid !== '' && !filteredProviders.find((p: any) => p.id === currentPid))) {
-                inlineSel.value = filteredProviders.length > 0 ? filteredProviders[0].id : '';
+                inlineSel.value = filteredProviders.find((p: ProviderMeta) => p.authKind !== 'antigravity-oauth')?.id || '';
             }
         }
 
         function updateInlineModelSelect(pid: string, selectedModel: string, ollamaModels: any[]) {
             const p2 = providers.find((p: any) => p.id === (pid || current.provider));
-            let ms: string[] = (pid || current.provider) === 'ollama' ? (ollamaModels || []).map((m: any) => m.name) : (p2 ? p2.models : []);
+            let ms: string[] = (pid || current.provider) === 'ollama' ? (ollamaModels || []).map((m: any) => m.name) : (p2 ? p2.inlineModels ?? p2.models : []);
             // Filter out thinking/reasoning models — they can't do inline completion
             ms = ms.filter((m: string) => !settingsThinkingPrefixes.some(prefix => m.toLowerCase().includes(prefix.toLowerCase())));
 
@@ -8046,7 +8047,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
             }
 
             const inp = document.getElementById('inlineModelInput') as HTMLInputElement;
-            inp.value = selectedModel || '';
+            inp.value = p2?.inlineModels ? (ms.includes(selectedModel) ? selectedModel : ms[0] || '') : selectedModel || '';
 
             setupApDropdown('inlineModelInput', 'inlineModelDatalist', () => ms);
         }
@@ -8288,7 +8289,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                 + fimProviders.map((candidate: any) => `<option value="${candidate.id}">${escapeHtml(candidate.name)}</option>`).join('');
             inlineSel.value = (selected && fimProviders.some((candidate: any) => candidate.id === selected))
                 ? selected
-                : (chatSupportsFim ? '' : (fimProviders[0]?.id || ''));
+                : (chatSupportsFim ? '' : (fimProviders.find((candidate: ProviderMeta) => candidate.authKind !== 'antigravity-oauth')?.id || ''));
             inlineSel.dispatchEvent(new Event('change'));
         }
         const translationSel = document.getElementById('translationPreviewProvider') as HTMLSelectElement | null;

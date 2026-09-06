@@ -12,6 +12,15 @@ export const ANTIGRAVITY_MODELS = [
     'claude-opus-4-6', 'claude-sonnet-4-6', 'gpt-oss-120b',
 ] as const;
 
+export function antigravityDisplayModel(model: string): string {
+    switch (model) {
+        case 'gemini-pro-agent':
+        case 'gemini-3.1-pro-low':
+        case 'gemini-3.1-pro-high': return 'gemini-3.1-pro';
+        default: return model;
+    }
+}
+
 export function antigravityRuntimeModel(model: string, effort: ReasoningEffort): string {
     const low = effort === 'none' || effort === 'minimal' || effort === 'low';
     switch (model) {

@@ -44,7 +44,9 @@ import { ErrorReporter } from './errorReporter';
 import { SOURCE, aiText } from './messages';
 import { ChatGptOAuthService } from './codex/oauthService';
 import { AntigravityOAuthService } from './antigravity/oauthService';
+import { antigravityDisplayModel } from './antigravity/models';
 import { callAntigravity } from './antigravity/completion';
+import { antigravityInlineModel, callAntigravityTab } from './antigravity/tabCompletion';
 import { SubscriptionProxyService } from './subscriptionProxy';
 import { isRecord } from '../../shared/protocolValidation';
 import { getCachedInputTokens, getCacheCreationInputTokens } from './providerUsage';
@@ -359,7 +361,8 @@ export class AIService {
         const cfg = vs.workspace.getConfiguration('stellarisLanguageServices.ai');
         const provider = cfg.get<string>('provider', 'openai');
         const providerEndpoints = cfg.get<Record<string, string>>('providerEndpoints', {}) || {};
-        const model = this.modelOverride ?? cfg.get<string>('model', '');
+        const rawModel = this.modelOverride ?? cfg.get<string>('model', '');
+        const model = provider === 'antigravity' ? antigravityDisplayModel(rawModel) : rawModel;
         const endpoint = (providerEndpoints[provider] || '').trim();
         return {
             enabled: cfg.get<boolean>('enabled', false),
@@ -678,12 +681,13 @@ export class AIService {
             temperature?: number;
             maxTokens?: number;
             abortSignal?: AbortSignal;
+            languageId?: string;
         }
     ): Promise<string> {
         const config = this.getConfig();
         const providerId = options?.providerId || config.inlineCompletion.provider || config.provider;
         const provider = getProvider(providerId);
-        if (providerId === 'codex-chatgpt' || providerId === 'antigravity') {
+        if (providerId === 'codex-chatgpt') {
             throw new Error(`${provider.name} does not support inline completion. Select a FIM-capable provider for inline completion.`);
         }
 
@@ -705,7 +709,9 @@ export class AIService {
         // Inline completion owns its provider/model selection. In particular, do not
         // fall back to the chat model while settings are switching providers: a Codex
         // chat model is not a valid DeepSeek (or other FIM provider) model.
-        const rawModel = options?.model ?? getEffectiveModel(providerId, config.inlineCompletion.model);
+        const rawModel = providerId === 'antigravity'
+            ? antigravityInlineModel(options?.model ?? config.inlineCompletion.model)
+            : options?.model ?? getEffectiveModel(providerId, config.inlineCompletion.model);
         const model = rawModel.replace(/\s*\(免费\)$/i, '');
 
         const controller = new AbortController();
@@ -719,6 +725,16 @@ export class AIService {
         this.activeControllers.add(controller);
 
         try {
+            if (providerId === 'antigravity') {
+                const edit = await callAntigravityTab(this.antigravityOAuth, this.subscriptionProxy.fetch,
+                    { prefix, suffix, languageId: options?.languageId }, controller.signal, false, options?.maxTokens);
+                if (!edit) return '';
+                const source = prefix + suffix;
+                const replacement = source.slice(0, edit.start) + edit.text + source.slice(edit.end);
+                // The FIM contract permits insertion at the cursor only.
+                if (replacement.length <= source.length || !replacement.startsWith(prefix) || !replacement.endsWith(suffix)) return '';
+                return replacement.slice(prefix.length, replacement.length - suffix.length);
+            }
             if (providerId === 'ollama') {
                 // Ollama uses /api/generate instead of /v1/completions for its FIM support
                 const url = `${endpoint.replace(/\/v1\/?$/, '')}/api/generate`;

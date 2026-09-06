@@ -165,17 +165,45 @@ describe('Antigravity OAuth and account boundary', () => {
         const service = new AntigravityOAuthService(secrets, async input => {
             const url = String(input);
             if (url.includes('loadCodeAssist')) return json({ cloudaicompanionProject: 'project-test' });
-            if (url.includes('fetchAvailableModels')) return json({ models: { 'gemini-3.8-flash-tiered': {}, internal: { isInternal: true } } });
+            if (url.includes('fetchAvailableModels')) return json({ models: {
+                'gemini-3.8-flash-tiered': {}, 'gemini-pro-agent': {},
+                tab_flash_lite_preview: {}, tab_jump_flash_lite_preview: {}, internal: { isInternal: true },
+            } });
             if (url.includes('retrieveUserQuotaSummary')) return json({ groups: [{ buckets: [{ displayName: 'Daily', remainingFraction: 0.42 }] }] });
             return json({ email: 'test@example.com' });
         });
         const account = await service.getAccountStatus();
         expect(account).to.include({ signedIn: true, email: 'test@example.com', projectId: 'project-test' });
-        expect(account.models).to.deep.equal(['gemini-3.8-flash-tiered']);
+        expect(account.models).to.deep.equal(['gemini-3.1-pro', 'gemini-3.8-flash-tiered']);
         expect(account.quota[0]?.remainingPercent).to.equal(42);
         expect(JSON.stringify(account)).not.to.match(/access-test|refresh-test/);
         expect(isAntigravityAccountStatus(account)).to.equal(true);
         service.dispose();
+    });
+
+    it('does not replace an account with only Tab models with the default chat catalog', async () => {
+        const secrets = new Secrets(); credentials(secrets);
+        const service = new AntigravityOAuthService(secrets, async input => {
+            const url = String(input);
+            if (url.includes('loadCodeAssist')) return json({ cloudaicompanionProject: 'project-test' });
+            if (url.includes('fetchAvailableModels')) return json({ models: { tab_flash_lite_preview: {}, tab_jump_flash_lite_preview: {} } });
+            return json({});
+        });
+        try {
+            expect((await service.getAccountStatus()).models).to.deep.equal([]);
+        } finally {
+            service.dispose();
+        }
+    });
+
+    it('deduplicates Pro runtime aliases and excludes editor models from chat discovery', () => {
+        expect(parseAntigravityModels({ models: {
+            'gemini-pro-agent': {}, 'gemini-3.1-pro': {}, 'gemini-3.1-pro-low': {}, 'gemini-3.1-pro-high': {},
+            'gpt-oss-120b-medium': {}, 'tab_flash_lite_preview': {}, ' tab_jump_flash_lite_preview ': {},
+            'chat_hidden': {}, ' ': {}, internal: { isInternal: true }, invalid: null,
+        } })).to.deep.equal(['gemini-3.1-pro', 'gpt-oss-120b-medium']);
+        expect(antigravityRuntimeModel('gemini-3.1-pro', 'high')).to.equal('gemini-pro-agent');
+        expect(antigravityRuntimeModel('gemini-3.1-pro', 'low')).to.equal('gemini-3.1-pro-low');
     });
 
     it('rejects malformed credentials and does not invent a project', async () => {

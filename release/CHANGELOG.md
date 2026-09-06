@@ -1,5 +1,37 @@
 # Changelog
 
+## [2.17.0] - 2026-09-06
+
+### AI 提供商扩展与原生智能补全 / AI Providers & Intelligent Tab Completion
+- **[特性] 深度集成 Antigravity AI 提供商与 OAuth 账户服务（Antigravity AI Provider Integration & OAuth Service）**：
+  - **支持 Antigravity 官方代理模型**：新增 Antigravity 提供商，集成 Claude 3.5 Sonnet、Claude 3.7 Sonnet、Claude Opus / Haiku 与 Gemini 2.5 Flash / Pro 等核心模型，支持模型目录与别名动态解析。
+  - **OAuth 本地服务鉴权与多账号状态管理**：实现本地临时服务器 OAuth 回调认证流程与账号状态同步协议，在会话面板直观展示多账户配额、订阅层级与调用诊断信息。
+  - **完备的工具调用与参数对齐**：完整保留 Antigravity 工具的 JSON Schema 定义，支持 Gemini 思考等级映射与工具执行回放机制。
+  - English: [Feature] Antigravity AI provider integration & OAuth service — integrated Antigravity provider supporting Claude 3.5/3.7 Sonnet, Claude Opus/Haiku, and Gemini 2.5 Flash/Pro models; built local OAuth loopback authentication and account status sync protocol surfacing account tiers and quota telemetry; preserved full tool JSON schemas while aligning Gemini thinking levels and tool replay pipelines.
+
+- **[特性] Antigravity 行内代码补全与智能光标跳转（Antigravity Tab Completion & Cursor Jumping）**：
+  - **原生行内补全（Inline Completion）**：新增专属 Tab 补全通道，基于编辑器上下文提供低延迟、高精度的多行代码预测。
+  - **智能光标跳转（Tab Jump）**：基于预测标记支持智能光标跨块快速跳跃，加速括号、控制块与语法结构的闭合与编辑。
+  - English: [Feature] Antigravity Tab completion & cursor jumping — added dedicated inline completion channel providing low-latency multi-line code predictions; introduced intelligent cursor jump recommendations to accelerate structure closing and syntax block navigation.
+
+### 网络韧性与代理治理 / Network Resilience & Shared Proxy
+- **[特性] 订阅渠道共享网络代理支持（Shared Proxy for Subscription Providers）**：
+  - **全面支持 SOCKS5 / HTTP / HTTPS 代理**：允许为 Codex、Copilot 与 Antigravity 等订阅提供商配置独立的网络代理，支持用户名与密码鉴权。
+  - **网络受限环境穿透能力**：将订阅凭证拉取、流式调用与令牌刷新流量通过统一代理网关转发，显著提高在特定网络隔离环境下的稳定性与响应率。
+  - English: [Feature] Shared network proxy for subscription providers — added SOCKS5 / HTTP / HTTPS proxy support with optional credentials for subscription channels (Codex, Copilot, Antigravity); routed authentication, streaming, and token refresh through a unified proxy gateway to enhance reliability across restricted network environments.
+
+### AI 会话架构与交互体验 / AI Chat Architecture & Workspace Experience
+- **[重构/优化] 会话面板架构重塑与话题视图管理（Chat Panel Architecture & Topic Views）**：
+  - **独立话题（Topic Views）生命周期**：支持对话面板内的话题独立管理、检查器（Inspector）与同行标签切换。
+  - **设置侧边栏重构**：统一模型总览卡片、提供商折叠卡片与布局间距，提升设置面板在窄侧边栏与多窗口下的响应式表现。
+  - English: [Refactoring/Improvement] Chat panel architecture & topic view management — restructured chat panel with independent topic views, inspector peer tabs, and model settings overview card; streamlined sidebar layouts for improved responsiveness across narrow editor splits.
+
+### 图形与编辑器体验 / Graphics & Editor Features
+- **[修复] 图形悬停预览缓存自动失效与临时资源清理（Graphics Hover Preview Cache Invalidation & Cleanup）**：
+  - **图片修改即时刷新**：修复在工作区外部或内部修改 DDS/TGA 纹理文件后，VS Code 悬停预览依然加载旧缓存图像的缺陷。
+  - **变动自动失效与陈旧文件清理**：通过文件监听器在文件保存与变更时主动使对应缓存条目失效，并清理残留的陈旧临时缩略图。
+  - English: [Fix] Graphics hover preview cache invalidation & cleanup — resolved stale DDS/TGA hover preview images by automatically invalidating preview caches on file changes and purging orphaned temporary preview files.
+
 ## [2.16.9] - 2026-09-05
 
 ### AI 提供商与模型扩展 / AI Providers & Model Capabilities

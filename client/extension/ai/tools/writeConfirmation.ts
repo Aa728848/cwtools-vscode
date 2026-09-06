@@ -24,7 +24,7 @@ export interface WriteConfirmationDecisionParams {
  */
 export function shouldBypassWriteConfirmation(params: WriteConfirmationDecisionParams): boolean {
     if (params.fileWriteMode === 'auto') return true;
-    if (Boolean(params.vfsOverlay)) return true;
+    if (params.vfsOverlay) return true;
     const record = (params.args && typeof params.args === 'object') ? params.args as Record<string, unknown> : {};
     if (record._autoApply === true) return true;
     if (params.runnerOptions?.forceAutoApplyWrites === true) return true;

@@ -40,6 +40,10 @@ class LRUCache<K, V> {
         }
     }
 
+    delete(key: K): boolean {
+        return this.map.delete(key);
+    }
+
     clear(): void { this.map.clear(); }
 }
 
@@ -138,7 +142,14 @@ function getSearchRoots(): string[] {
 
 // ─── Image Hover Provider ───────────────────────────────────────────────────
 
-const imageCache = new LRUCache<string, DdsResult | null>(64);
+interface CachedImage {
+    result: DdsResult | null;
+    mtimeMs: number;
+    size: number;
+    tempFilePath?: string;
+}
+
+const imageCache = new LRUCache<string, CachedImage>(64);
 
 /**
  * Provides hover image previews for .dds / .tga / .png paths.
@@ -364,6 +375,9 @@ async function scanDirForGfx(
 export const __test = {
     parseGfxFile,
     scanDirForGfx,
+    createImageHover,
+    imageCache,
+    cleanupOldTempFiles,
 };
 
 /** Get the GFX index, with promise-based deduplication to prevent concurrent rebuilds */
@@ -734,10 +748,31 @@ function createImageHover(
     range: vs.Range,
     label?: string,
 ): vs.Hover | null {
-    const ext = path.extname(fullPath).toLowerCase();
-    let result = imageCache.get(fullPath);
+    let stat: fs.Stats;
+    try {
+        stat = fs.statSync(fullPath);
+    } catch {
+        const cached = imageCache.get(fullPath);
+        if (cached?.tempFilePath) {
+            try { fs.unlinkSync(cached.tempFilePath); } catch {}
+        }
+        imageCache.delete(fullPath);
+        return null;
+    }
 
-    if (result === undefined) {
+    const ext = path.extname(fullPath).toLowerCase();
+    const cached = imageCache.get(fullPath);
+    let result: DdsResult | null | undefined;
+    let tempFilePath: string | undefined = cached?.tempFilePath;
+
+    if (cached && cached.mtimeMs === stat.mtimeMs && cached.size === stat.size) {
+        result = cached.result;
+    } else {
+        if (cached?.tempFilePath) {
+            try { fs.unlinkSync(cached.tempFilePath); } catch {}
+            tempFilePath = undefined;
+        }
+
         if (ext === '.dds') {
             result = decodeDds(fullPath);
         } else if (ext === '.tga') {
@@ -761,11 +796,13 @@ function createImageHover(
                 const base64Data = result.dataUri.split(',')[1];
                 if (base64Data && base64Data.length > 50000) { // ~37KB decoded
                     const buffer = Buffer.from(base64Data, 'base64');
-                    const hash = crypto.createHash('md5').update(fullPath).digest('hex');
-                    const tempPath = path.join(os.tmpdir(), `cwt_prev_${hash}.png`);
+                    const pathHash = crypto.createHash('md5').update(fullPath).digest('hex').slice(0, 16);
+                    const versionHash = crypto.createHash('md5').update(`${stat.mtimeMs}:${stat.size}`).digest('hex').slice(0, 16);
+                    const tempPath = path.join(os.tmpdir(), `cwt_prev_${pathHash}_${versionHash}.png`);
                     if (!fs.existsSync(tempPath)) {
                         fs.writeFileSync(tempPath, buffer);
                     }
+                    tempFilePath = tempPath;
                     result.dataUri = vs.Uri.file(tempPath).toString();
                 }
             } catch (e) {
@@ -773,7 +810,12 @@ function createImageHover(
             }
         }
 
-        imageCache.set(fullPath, result);
+        imageCache.set(fullPath, {
+            result,
+            mtimeMs: stat.mtimeMs,
+            size: stat.size,
+            tempFilePath,
+        });
     }
 
     if (!result) return null;
@@ -803,11 +845,15 @@ function cleanupOldTempFiles() {
         const now = Date.now();
         for (const file of files) {
             if (file.startsWith('cwt_prev_') && matchesExt(file, '.png')) {
-                const fullPath = path.join(tmp, file);
-                const stat = fs.statSync(fullPath);
-                // Delete if older than 24 hours
-                if (now - stat.mtimeMs > 24 * 60 * 60 * 1000) {
-                    fs.unlinkSync(fullPath);
+                try {
+                    const fullPath = path.join(tmp, file);
+                    const stat = fs.statSync(fullPath);
+                    // Delete if older than 24 hours
+                    if (now - stat.mtimeMs > 24 * 60 * 60 * 1000) {
+                        fs.unlinkSync(fullPath);
+                    }
+                } catch {
+                    // Ignore transient lock or removed files
                 }
             }
         }
@@ -870,6 +916,20 @@ export function registerGraphicsFeatures(context: vs.ExtensionContext): void {
     roomWatcher.onDidChange(() => { roomCacheDirty = true; });
     roomWatcher.onDidCreate(() => { roomCacheDirty = true; });
     roomWatcher.onDidDelete(() => { roomCacheDirty = true; });
+
+    // Image file system watcher for real-time preview cache invalidation
+    const imageWatcher = vs.workspace.createFileSystemWatcher('**/*.{dds,tga,png,DDS,TGA,PNG}');
+    context.subscriptions.push(imageWatcher);
+    const invalidateImage = (uri: vs.Uri) => {
+        const cached = imageCache.get(uri.fsPath);
+        if (cached?.tempFilePath) {
+            try { fs.unlinkSync(cached.tempFilePath); } catch {}
+        }
+        imageCache.delete(uri.fsPath);
+    };
+    imageWatcher.onDidChange(invalidateImage);
+    imageWatcher.onDidCreate(invalidateImage);
+    imageWatcher.onDidDelete(invalidateImage);
 
     // Clear image cache when workspace changes significantly
     const textWatcher = vs.workspace.onDidSaveTextDocument(doc => {

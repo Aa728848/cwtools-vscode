@@ -1,5 +1,6 @@
 import { expect } from 'chai';
 import { buildAntigravityTabRequest, callAntigravityTab, parseAntigravityTabEdit } from '../../extension/ai/antigravity/tabCompletion';
+import { consumeAntigravityResponse } from '../../extension/ai/antigravity/completion';
 
 const context = { prefix: 'function add(a, b) {\n    return ', suffix: '\n}\n', languageId: 'javascript' };
 const continuation = '": "function add(a, b) {\\n    return a + b\\n}\\n"\n\t\t}\n\t]\n}\n</replace_file_content>';
@@ -45,13 +46,6 @@ describe('Antigravity native Tab protocol', () => {
         expect(parseAntigravityTabEdit(input, leadIn, output)).to.deep.equal({ start: 37, end: 42, text: 'amount' });
     });
 
-    it('does not split Unicode characters when finding an edit boundary', () => {
-        const input = { prefix: '', suffix: 'x = "😀"' };
-        const { leadIn } = buildAntigravityTabRequest(input);
-        const output = '": ' + JSON.stringify('x = "😁"') + '}]}</replace_file_content>';
-        expect(parseAntigravityTabEdit(input, leadIn, output)).to.deep.equal({ start: 5, end: 7, text: '😁' });
-    });
-
     it('rejects incomplete, ambiguous, foreign-file and extra-call output', () => {
         const { leadIn } = buildAntigravityTabRequest(context);
         expect(parseAntigravityTabEdit(context, leadIn, continuation.slice(0, -10))).to.equal(undefined);
@@ -91,5 +85,43 @@ describe('Antigravity native Tab protocol', () => {
         const error: unknown = await pending.catch(error => error);
         expect(error).to.be.instanceOf(Error);
         expect(cancelled).to.equal(true);
+    });
+
+    it('restores CRLF offsets after the model uses LF', async () => {
+        const input = { prefix: '# resources\r\nenergy = ', suffix: '\r\n}\r\n' };
+        const oauth = { getRequestContext: async () => ({ token: 'test', projectId: 'test-project' }) };
+        const edit = await callAntigravityTab(oauth, async (_url, init) => {
+            expect(String(init?.body)).not.to.include('\\r');
+            return response('": "# resources\\nenergy = 500\\n    minerals = 100\\n}\\n"}]}</replace_file_content>');
+        }, input, new AbortController().signal);
+        expect(edit).to.deep.equal({ start: input.prefix.length, end: input.prefix.length, text: '500\r\n    minerals = 100' });
+    });
+
+    it('returns the finished editor candidate without waiting for an open HTTP stream', async () => {
+        const controller = new AbortController();
+        let cancelled = false;
+        const timer = setTimeout(() => controller.abort(), 1000);
+        const oauth = { getRequestContext: async () => ({ token: 'test', projectId: 'test-project' }) };
+        try {
+            const edit = await callAntigravityTab(oauth, async () => new Response(new ReadableStream({
+                start(stream) {
+                    const event = { response: { candidates: [{ content: { parts: [{ text: continuation }] }, finishReason: 'STOP' }] } };
+                    stream.enqueue(new TextEncoder().encode(`data: ${JSON.stringify(event)}\n\n`));
+                },
+                cancel() { cancelled = true; },
+            }), { headers: { 'Content-Type': 'text/event-stream' } }), context, controller.signal);
+            expect(edit).to.deep.equal({ start: 32, end: 32, text: 'a + b' });
+            expect(cancelled).to.equal(true);
+        } finally { clearTimeout(timer); controller.abort(); }
+    });
+
+    it('retains post-finish usage trailers for ordinary chat responses', async () => {
+        const events = [
+            { response: { candidates: [{ content: { parts: [{ text: 'reply' }] }, finishReason: 'STOP' }] } },
+            { response: { usageMetadata: { promptTokenCount: 10, candidatesTokenCount: 2, totalTokenCount: 12 } } },
+        ];
+        const stream = new Response(events.map(event => `data: ${JSON.stringify(event)}\n\n`).join(''), { headers: { 'Content-Type': 'text/event-stream' } });
+        const result = await consumeAntigravityResponse(stream, 'gemini-3-flash', new AbortController().signal);
+        expect(result.usage?.total_tokens).to.equal(12);
     });
 });

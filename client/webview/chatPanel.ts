@@ -1,5 +1,5 @@
 import { Icons, svgIcon, svgIconNoMargin } from './svgIcons';
-import type { ProviderMeta } from '../extension/ai/types';
+import type { ProviderMeta } from '../shared/providerMeta';
 import { buildAntigravityAccountHtml, isAntigravityAccountStatus, type AntigravityAccountStatus } from './chat/antigravityAccount';
 import { isSubscriptionProxyMode, isSubscriptionProxyStatus, type SubscriptionProxyStatus } from '../shared/subscriptionProxy';
 import { routeLiveStep, buildToolPairHtml, buildToolGroupHtml, buildLocalisationPromptCardHtml, escapeHtml as mrEscapeHtml, type RendererStep } from './messageRenderer';
@@ -7895,7 +7895,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         (document.getElementById('inlineMaxTokens') as HTMLInputElement).value = String(current.inlineCompletion?.maxTokens ?? 128);
         (document.getElementById('inlineContextBefore') as HTMLInputElement).value = String(current.inlineCompletion?.contextBeforeLines ?? 20);
         (document.getElementById('inlineContextAfter') as HTMLInputElement).value = String(current.inlineCompletion?.contextAfterLines ?? 10);
-        (document.getElementById('inlineRequestTimeout') as HTMLInputElement).value = String(current.inlineCompletion?.requestTimeoutMs ?? 1500);
+        (document.getElementById('inlineRequestTimeout') as HTMLInputElement).value = String(current.inlineCompletion?.requestTimeoutMs ?? 6000);
         (document.getElementById('inlineMcpCacheTtl') as HTMLInputElement).value = String(current.inlineCompletion?.mcpCacheTtlMs ?? 30000);
         (document.getElementById('agentWriteMode') as HTMLSelectElement).value = current.agentFileWriteMode || 'auto';
         updateQuickWriteModeSelector(deriveWriteTier(current));
@@ -8612,7 +8612,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                     contextAfterLines: parseInlineNumber('inlineContextAfter', 10),
                     includeMcpContext: (document.getElementById('inlineIncludeMcp') as HTMLInputElement | null)?.checked ?? false,
                     mcpCacheTtlMs: parseInlineNumber('inlineMcpCacheTtl', 30000),
-                    requestTimeoutMs: parseInlineNumber('inlineRequestTimeout', 1500),
+                    requestTimeoutMs: parseInlineNumber('inlineRequestTimeout', 6000),
                     lspFastPath: (document.getElementById('inlineLspFastPath') as HTMLInputElement | null)?.checked ?? true,
                     overlapStripping: (document.getElementById('inlineOverlapStripping') as HTMLInputElement | null)?.checked ?? true,
                 },

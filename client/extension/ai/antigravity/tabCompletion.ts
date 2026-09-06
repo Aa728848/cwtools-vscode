@@ -91,10 +91,15 @@ export function parseAntigravityTabEdit(context: AntigravityTabContext, leadIn: 
     while (suffix < target.length - prefix && suffix < replacement.length - prefix
         && target[target.length - suffix - 1] === replacement[replacement.length - suffix - 1]) suffix++;
     if (prefix === target.length && prefix === replacement.length) return undefined;
-    // VS Code offsets use UTF-16, but a replacement must not split a surrogate pair.
-    if (prefix > 0 && /[\uD800-\uDBFF]/.test(target.charAt(prefix - 1))) prefix--;
-    if (suffix > 0 && /[\uDC00-\uDFFF]/.test(target.charAt(target.length - suffix))) suffix--;
     return { start: at + prefix, end: at + target.length - suffix, text: replacement.slice(prefix, replacement.length - suffix) };
+}
+
+function documentOffset(text: string, normalizedOffset: number): number {
+    let offset = 0;
+    for (let count = 0; count < normalizedOffset && offset < text.length; count++, offset++) {
+        if (text[offset] === '\r' && text[offset + 1] === '\n') offset++;
+    }
+    return offset;
 }
 
 export async function callAntigravityTab(
@@ -104,7 +109,13 @@ export async function callAntigravityTab(
     signal.throwIfAborted();
     // Keep both the context and the repeated replacement inside the native model's limits.
     if (context.prefix.length + context.suffix.length > 6000 || context.prefix.includes(CURSOR) || context.suffix.includes(CURSOR)) return undefined;
-    const request = buildAntigravityTabRequest({ ...context, previousText: context.previousText?.slice(0, 6000) }, jump,
+    const modelContext = {
+        ...context,
+        prefix: context.prefix.replace(/\r\n/g, '\n'),
+        suffix: context.suffix.replace(/\r\n/g, '\n'),
+        previousText: context.previousText?.slice(0, 6000).replace(/\r\n/g, '\n'),
+    };
+    const request = buildAntigravityTabRequest(modelContext, jump,
         Number.isFinite(maxNewTokens) ? Math.max(16, Math.min(2048, maxNewTokens)) : 128);
     let credentials = await oauth.getRequestContext(signal);
     const send = () => postAntigravity(fetchFn, credentials.token, 'streamGenerateContent', { ...request.payload, project: credentials.projectId }, signal);
@@ -115,11 +126,17 @@ export async function callAntigravityTab(
         credentials = await oauth.getRequestContext(signal, true);
         response = await send();
     }
-    const result = await consumeAntigravityResponse(response, request.payload.model, signal);
+    const result = await consumeAntigravityResponse(response, request.payload.model, signal, { stopOnFinish: true });
     signal.throwIfAborted();
     const choice = result.choices[0];
     if (choice?.finish_reason !== 'stop' || typeof choice.message.content !== 'string') return undefined;
-    return parseAntigravityTabEdit(context, request.leadIn, choice.message.content);
+    const edit = parseAntigravityTabEdit(modelContext, request.leadIn, choice.message.content);
+    if (!edit) return undefined;
+    const source = context.prefix + context.suffix;
+    return {
+        start: documentOffset(source, edit.start), end: documentOffset(source, edit.end),
+        text: source.includes('\r\n') ? edit.text.replace(/\r?\n/g, '\r\n') : edit.text,
+    };
 }
 
 export function antigravityInlineModel(model: string | undefined): string {

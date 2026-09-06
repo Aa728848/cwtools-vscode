@@ -6,8 +6,10 @@ import type { SlashCommandDescriptor } from './slashCommands';
 import type { SubscriptionProxyMode, SubscriptionProxyStatus } from '../../shared/subscriptionProxy';
 import type { CwtRuleValueReference } from '../../shared/pdxSemanticCatalog';
 import type { AgentToolName } from './tools/registry';
+import type { ProviderMeta } from '../../shared/providerMeta';
 export type { CwtRuleValueReference, CwtShaderReference, PdxRuleCategory, PdxSemanticCatalog } from '../../shared/pdxSemanticCatalog';
 export type { AgentToolName } from './tools/registry';
+export type { ProviderMeta };
 
 // ─── Agent Execution Labels ──────────────────────────────────────────────────
 
@@ -2691,24 +2693,6 @@ export type HostMessage =
     | { type: 'runArtifactsCleanupResult'; deletedCount: number; keptCount: number; reclaimedBytes: number }
     | { type: 'scratchFiles'; files: Array<{ name: string; relPath: string; size: number }> };
 
-/** Provider metadata sent to the settings WebView */
-export interface ProviderMeta {
-    id: string;
-    name: string;
-    models: string[];
-    inlineModels?: string[];
-    defaultModel: string;
-    requiresApiKey: boolean;
-    defaultEndpoint: string;
-    /** User-saved endpoint override for this provider (empty if none). */
-    userEndpoint?: string;
-    supportsFIM: boolean;
-    maxContextTokens?: number;
-    registerUrl?: string;
-    runtimeKind?: 'http';
-    authKind?: 'api-key' | 'none' | 'chatgpt-oauth' | 'antigravity-oauth';
-    supportsUtilityCalls?: boolean;
-}
 
 /** Ollama model info for the settings UI */
 export interface OllamaModelInfo {

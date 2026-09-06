@@ -155,7 +155,7 @@
   "configuration.stellarisLanguageServices.ai.inlineCompletion.contextAfterLines.description": "行内 FIM 上下文中包含的光标后行数。",
   "configuration.stellarisLanguageServices.ai.inlineCompletion.includeMcpContext.description": "在行内补全请求中注入 MCP 资源上下文。默认关闭以降低延迟并减少质量干扰。",
   "configuration.stellarisLanguageServices.ai.inlineCompletion.mcpCacheTtlMs.description": "行内补全使用的 MCP 上下文缓存 TTL（毫秒）。",
-  "configuration.stellarisLanguageServices.ai.inlineCompletion.requestTimeoutMs.description": "单次行内 FIM 补全请求的硬超时（毫秒）。",
+  "configuration.stellarisLanguageServices.ai.inlineCompletion.requestTimeoutMs.description": "单次行内 FIM 补全请求的最长等待时间（毫秒），默认 6000。收到有效建议后立即显示，不会固定等待 6 秒。",
   "configuration.stellarisLanguageServices.ai.inlineCompletion.lspFastPath.description": "发送 AI FIM 请求前优先使用本地/LSP 快路径补全。",
   "configuration.stellarisLanguageServices.ai.inlineCompletion.overlapStripping.description": "启用自动检测并修剪重叠的后缀代码以防止重复。",
   "configuration.stellarisLanguageServices.ai.inlineCompletion.provider.description": "行内补全的提供商（留空则使用全局默认提供商）",

@@ -1420,7 +1420,7 @@
                     "stellarisLanguageServices.ai.inlineCompletion.requestTimeoutMs": {
                         "scope": "window",
                         "type": "integer",
-                        "default": 1500,
+                        "default": 6000,
                         "minimum": 500,
                         "maximum": 30000,
                         "description": "%configuration.stellarisLanguageServices.ai.inlineCompletion.requestTimeoutMs.description%"

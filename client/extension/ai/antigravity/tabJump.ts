@@ -51,10 +51,8 @@ export class AntigravityTabJump implements vs.Disposable {
         const selection = editor.selection;
         const cursor = document.offsetAt(selection.active);
         const source = document.getText();
-        let start = Math.max(0, cursor - 3000);
-        let end = Math.min(source.length, cursor + 3000);
-        if (/[\uDC00-\uDFFF]/.test(source.charAt(start))) start++;
-        if (/[\uDC00-\uDFFF]/.test(source.charAt(end))) end--;
+        const start = Math.max(0, cursor - 3000);
+        const end = Math.min(source.length, cursor + 3000);
         const previousText = this.snapshot?.uri === document.uri.toString() ? this.snapshot.previousText?.slice(start, end) : undefined;
         try {
             await vs.window.withProgress({

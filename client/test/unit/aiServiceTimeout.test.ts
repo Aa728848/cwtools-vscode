@@ -1682,6 +1682,7 @@ function loadAIService() {
         return originalLoad.apply(this, [request, ...args]);
     };
     try {
+        delete require.cache[require.resolve('../../extension/ai/aiService')];
         return require('../../extension/ai/aiService') as typeof import('../../extension/ai/aiService');
     } finally {
         moduleLoader._load = originalLoad;

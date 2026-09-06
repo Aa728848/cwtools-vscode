@@ -396,7 +396,7 @@ export class AIService {
                 contextAfterLines: cfg.get<number>('inlineCompletion.contextAfterLines', 10),
                 includeMcpContext: cfg.get<boolean>('inlineCompletion.includeMcpContext', false),
                 mcpCacheTtlMs: cfg.get<number>('inlineCompletion.mcpCacheTtlMs', 30_000),
-                requestTimeoutMs: cfg.get<number>('inlineCompletion.requestTimeoutMs', 1_500),
+                requestTimeoutMs: cfg.get<number>('inlineCompletion.requestTimeoutMs', 6_000),
                 lspFastPath: cfg.get<boolean>('inlineCompletion.lspFastPath', true),
                 provider: cfg.get<string>('inlineCompletion.provider', ''),
                 model: cfg.get<string>('inlineCompletion.model', ''),
@@ -682,6 +682,7 @@ export class AIService {
             maxTokens?: number;
             abortSignal?: AbortSignal;
             languageId?: string;
+            previousText?: string;
         }
     ): Promise<string> {
         const config = this.getConfig();
@@ -727,7 +728,7 @@ export class AIService {
         try {
             if (providerId === 'antigravity') {
                 const edit = await callAntigravityTab(this.antigravityOAuth, this.subscriptionProxy.fetch,
-                    { prefix, suffix, languageId: options?.languageId }, controller.signal, false, options?.maxTokens);
+                    { prefix, suffix, languageId: options?.languageId, previousText: options?.previousText }, controller.signal, false, options?.maxTokens);
                 if (!edit) return '';
                 const source = prefix + suffix;
                 const replacement = source.slice(0, edit.start) + edit.text + source.slice(edit.end);

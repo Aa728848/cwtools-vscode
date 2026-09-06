@@ -7,6 +7,8 @@ import { AntigravityApiError, postAntigravity } from './api';
 import type { AntigravityOAuthService } from './oauthService';
 
 export interface AntigravityCallbacks {
+    /** Editor requests do not need the chat usage trailer after the final candidate. */
+    stopOnFinish?: boolean;
     onTextDelta?: (text: string) => void;
     onThinking?: (text: string) => void;
     onToolCallDelta?: (name: string, args: string, metadata?: { id?: string; index?: number }) => void;
@@ -133,7 +135,7 @@ export async function consumeAntigravityResponse(
         };
         let completed = false;
         try {
-            while (!doneMarker) {
+            while (!doneMarker && !(callbacks.stopOnFinish && finish)) {
                 signal.throwIfAborted();
                 let rejectRead: (error: unknown) => void = () => {};
                 const timeout = setTimeout(() => rejectRead(new Error(aiText('Antigravity stream timed out.', 'Antigravity 响应流超时。'))), 300_000);
@@ -149,7 +151,10 @@ export async function consumeAntigravityResponse(
                     buffer += decoder.decode(read.value, { stream: true });
                     const records = buffer.split(/\r?\n\r?\n/);
                     buffer = records.pop() ?? '';
-                    for (const record of records) processRecord(record);
+                    for (const record of records) {
+                        processRecord(record);
+                        if (callbacks.stopOnFinish && finish) { buffer = ''; break; }
+                    }
                 } finally {
                     clearTimeout(timeout);
                     signal.removeEventListener('abort', onAbort);

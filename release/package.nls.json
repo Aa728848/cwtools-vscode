@@ -155,7 +155,7 @@
   "configuration.stellarisLanguageServices.ai.inlineCompletion.contextAfterLines.description": "Number of lines after the cursor to include in inline FIM context.",
   "configuration.stellarisLanguageServices.ai.inlineCompletion.includeMcpContext.description": "Include MCP resource context in inline completion requests. Disabled by default for latency and quality.",
   "configuration.stellarisLanguageServices.ai.inlineCompletion.mcpCacheTtlMs.description": "TTL for cached MCP context used by inline completion (ms).",
-  "configuration.stellarisLanguageServices.ai.inlineCompletion.requestTimeoutMs.description": "Hard timeout for one inline FIM completion request (ms).",
+  "configuration.stellarisLanguageServices.ai.inlineCompletion.requestTimeoutMs.description": "Maximum wait for one inline FIM completion request (ms), default 6000. Valid suggestions are shown as soon as they arrive.",
   "configuration.stellarisLanguageServices.ai.inlineCompletion.lspFastPath.description": "Use fast local/LSP inline completion before sending an AI FIM request.",
   "configuration.stellarisLanguageServices.ai.inlineCompletion.overlapStripping.description": "Enable automatic detection and trimming of overlapping suffix code to prevent duplication.",
   "configuration.stellarisLanguageServices.ai.inlineCompletion.provider.description": "Provider for inline completion (leave empty to use main provider)",

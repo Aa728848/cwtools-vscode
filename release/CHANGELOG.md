@@ -1,5 +1,15 @@
 # Changelog
 
+## [2.17.1] - 2026-09-07
+
+### AI 计划审批与工作区展示 / AI Plan Approval & Workspace Presentation
+- **[修复] 计划审批卡弹出竞态与独立界面右侧展示异常（Plan Approval Card Display & Dismiss Race Condition）**：
+  - **消除异步清理销毁竞态**：修复前端收到 `renderPlan`、`renderWalkthrough` 和 `renderBlueprint` 时因调用异步延时 `dismissCard` 导致刚挂载的新审批卡在 260ms 后被意外移出 DOM 树的竞态缺陷；重构为安全的同步去重清理，确保当前复用卡片与新卡片稳定呈现。
+  - **复用卡片样式重置**：在复用既有审批卡片时强制重置内联透明度与过渡样式，防止卡片因残留动画状态不可见。
+  - **服务端话题计划文件双目录兼容检索**：修复服务端仅检索私有话题目录的问题，同时支持私有与标准话题目录检索，并在当前步骤与消息快照中多阶段精准匹配 `Implementation_Plan.md`。
+  - **独立界面右侧审查区联动与挂载兜底**：优化独立管理器工作区 Tab 推荐逻辑，存在审批卡片等工作区条目时优先切换至审查面板，并引入容器完整性检查杜绝假性命中缓存导致的空界面。
+  - English: [Fix] Plan approval card display & dismiss race condition — eliminated the asynchronous `dismissCard` race where freshly mounted or reused plan approval cards were prematurely removed from the DOM after 260ms; refactored card lifecycle to perform deterministic synchronous cleanup of non-reused cards while resetting inline opacity/transition styles on reused cards; expanded host-side topic plan discovery across both private and shared topic storage directories with multi-stage snapshot resolution; enhanced agent manager workspace tab selection to prioritize changes view on active workspace entries and added DOM integrity verification to prevent empty inspector renders.
+
 ## [2.17.0] - 2026-09-06
 
 ### AI 提供商扩展与原生智能补全 / AI Providers & Intelligent Tab Completion

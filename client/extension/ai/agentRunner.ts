@@ -84,6 +84,7 @@ import { SUPERSEDED_BY_LATER_SAME_FILE_WRITE_TOOLS, getAgentToolTargetFiles, too
 import { buildToolInvocation } from './runner/toolInvocation';
 import { DOOM_LOOP_SOFT_THRESHOLD, DOOM_LOOP_PAIR_THRESHOLD, fnv32a, normalizeToolResultHash, DoomLoopState } from './runner/doomLoopDetector';
 import { OutputRepetitionDetector, type OutputRepetitionMatch } from './runner/outputRepetitionDetector';
+import { planOutputRepetitionRetry } from './runner/outputRepetitionRecovery';
 import { ReadTracker } from './runner/readTracker';
 import { TurnRunner } from './runner/turnRunner';
 import type { AgentInputQueue, AgentQueuedInputKind } from './runner/inputQueue';
@@ -2185,6 +2186,10 @@ export class AgentRunner {
             tokens,
         );
         const recoveryCoordinator = new RecoveryCoordinator();
+        // One-shot override consumed by the next model request: a reasoning-stream
+        // repetition retry must run with the lowest thinking shape, otherwise the
+        // model re-enters the same reasoning loop and the run is terminated.
+        let repetitionRetryLowThinking = false;
 
         const agentToolContext: import('./types').AgentToolContext = {
             runnerOptions: options,
@@ -2806,7 +2811,9 @@ export class AgentRunner {
             const requestModel = requestPlan.model;
             const activeToolSchemaTokens = requestPlan.toolSchemaTokens;
             const requestMaxTokens = requestPlan.maxTokens;
-            const requestDisableThinking = requestPlan.disableThinking;
+            const requestDisableThinking = requestPlan.disableThinking || repetitionRetryLowThinking;
+            // One-shot: only the retry that consumed the override runs without thinking.
+            repetitionRetryLowThinking = false;
             const appendModelDeltaEvent = (kind: string, text: string) => {
                 const now = Date.now();
                 if (now - lastModelDeltaEventAt < 1000) return;
@@ -3029,23 +3036,29 @@ export class AgentRunner {
                     );
                     const repetitionClaim = recoveryCoordinator.claim('output_repetition');
                     if (repetitionClaim) {
+                        const retryPlan = planOutputRepetitionRetry(outputRepetition.kind);
+                        repetitionRetryLowThinking = retryPlan.lowThinking;
                         emitStep({
                             type: 'validation',
-                            content: AGENT.OUTPUT_REPETITION_RETRY(outputRepetition.kind, outputRepetition.match.cycleChars),
+                            content: AGENT.OUTPUT_REPETITION_RETRY(outputRepetition.kind, outputRepetition.match.cycleChars, retryPlan.lowThinking),
                             timestamp: Date.now(),
                         });
-                        messages.push({
-                            role: 'user',
-                            content: '[SYSTEM] Your previous stream entered an exact repeated-output cycle and was stopped. Do not restate the abandoned reasoning. Re-evaluate from the latest verified state, then either make one concrete tool call or return one concise final answer. If context is insufficient, say what is missing instead of repeating.',
-                        });
+                        messages.push({ role: 'user', content: retryPlan.directive });
                         continue;
                     }
+                    // The claim is also denied when the shared recovery budget is spent,
+                    // which is not a second repetition; name the real cause.
+                    const repetitionRetried = recoveryCoordinator.attemptsFor('output_repetition') > 0;
                     emitStep({
                         type: 'error',
-                        content: AGENT.OUTPUT_REPETITION_STOP(outputRepetition.kind),
+                        content: repetitionRetried
+                            ? AGENT.OUTPUT_REPETITION_STOP(outputRepetition.kind)
+                            : AGENT.OUTPUT_REPETITION_BUDGET(outputRepetition.kind),
                         timestamp: Date.now(),
                     });
-                    return '[Agent Execution Terminated]: Repeated model output was detected twice; generation stopped safely.';
+                    return repetitionRetried
+                        ? '[Agent Execution Terminated]: Repeated model output was detected twice; generation stopped safely.'
+                        : '[Agent Execution Terminated]: Repeated model output was detected and the shared recovery budget is exhausted; generation stopped safely.';
                 }
                 if (slimThinkingBudgetExceeded) {
                     await runLedger.appendEvent(
@@ -3306,23 +3319,26 @@ export class AgentRunner {
                 if (repetition) {
                     const repetitionClaim = recoveryCoordinator.claim('output_repetition');
                     if (repetitionClaim) {
+                        const retryPlan = planOutputRepetitionRetry('response');
                         emitStep({
                             type: 'validation',
-                            content: AGENT.OUTPUT_REPETITION_RETRY('response', repetition.cycleChars),
+                            content: AGENT.OUTPUT_REPETITION_RETRY('response', repetition.cycleChars, retryPlan.lowThinking),
                             timestamp: Date.now(),
                         });
-                        messages.push({
-                            role: 'user',
-                            content: '[SYSTEM] Your previous response entered an exact repeated-output cycle and was discarded. Do not restate it. Make one concrete tool call or return one concise final answer; report missing context instead of repeating.',
-                        });
+                        messages.push({ role: 'user', content: retryPlan.directive });
                         continue;
                     }
+                    const repetitionRetried = recoveryCoordinator.attemptsFor('output_repetition') > 0;
                     emitStep({
                         type: 'error',
-                        content: AGENT.OUTPUT_REPETITION_STOP('response'),
+                        content: repetitionRetried
+                            ? AGENT.OUTPUT_REPETITION_STOP('response')
+                            : AGENT.OUTPUT_REPETITION_BUDGET('response'),
                         timestamp: Date.now(),
                     });
-                    return '[Agent Execution Terminated]: Repeated model output was detected twice; generation stopped safely.';
+                    return repetitionRetried
+                        ? '[Agent Execution Terminated]: Repeated model output was detected twice; generation stopped safely.'
+                        : '[Agent Execution Terminated]: Repeated model output was detected and the shared recovery budget is exhausted; generation stopped safely.';
                 }
             }
 

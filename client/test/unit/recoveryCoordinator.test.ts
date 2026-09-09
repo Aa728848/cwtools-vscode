@@ -41,6 +41,22 @@ describe('RecoveryCoordinator', () => {
         expect(coordinator.total).to.equal(2);
     });
 
+    it('reports consumed attempts so a denied retry can name the real cause', () => {
+        const coordinator = new RecoveryCoordinator();
+        expect(coordinator.attemptsFor('output_repetition')).to.equal(0);
+        expect(coordinator.claim('output_repetition')).to.not.equal(undefined);
+        expect(coordinator.attemptsFor('output_repetition')).to.equal(1);
+        expect(coordinator.claim('output_repetition')).to.equal(undefined);
+    });
+
+    it('denies the first repetition retry when the shared budget is already spent', () => {
+        const coordinator = new RecoveryCoordinator(1, { transport: 1 });
+        expect(coordinator.claim('transport')?.totalAttempt).to.equal(1);
+        expect(coordinator.claim('output_repetition')).to.equal(undefined);
+        // No repetition retry was consumed, so the run must not claim a second repetition.
+        expect(coordinator.attemptsFor('output_repetition')).to.equal(0);
+    });
+
     it('does not grant recovery to terminal safety failures', () => {
         const coordinator = new RecoveryCoordinator();
         expect(coordinator.claim('permission_denied')).to.equal(undefined);

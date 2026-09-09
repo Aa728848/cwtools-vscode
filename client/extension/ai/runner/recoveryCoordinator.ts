@@ -123,6 +123,14 @@ export class RecoveryCoordinator {
         };
     }
 
+    /**
+     * Attempts already consumed for one kind. Used to distinguish "this kind was
+     * already retried" from "the shared budget denied the first retry".
+     */
+    attemptsFor(kind: RecoveryKind): number {
+        return this.attempts.get(kind) ?? 0;
+    }
+
     get total(): number {
         return this.totalAttempts;
     }

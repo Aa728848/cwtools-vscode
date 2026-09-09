@@ -77,10 +77,14 @@ const AGENT_TEXT = {
             `Context pruned in place; no summarization needed (${beforeTokens} -> ${afterTokens} tokens)`,
         COMPACTION_THRASHING:
             'Context remained over budget after repeated compaction. The run stopped to avoid a compaction/retry loop. Narrow the task or start a new topic.',
-        OUTPUT_REPETITION_RETRY: (kind: string, cycleChars: number) =>
-            `Detected a repeated ${outputKind(kind)} loop (cycle around ${cycleChars} characters). This output was stopped and one controlled retry will run.`,
+        OUTPUT_REPETITION_RETRY: (kind: string, cycleChars: number, lowThinking = false) =>
+            lowThinking
+                ? `Detected a repeated ${outputKind(kind)} loop (cycle around ${cycleChars} characters). This output was stopped; the retry runs with thinking disabled so the loop cannot resume.`
+                : `Detected a repeated ${outputKind(kind)} loop (cycle around ${cycleChars} characters). This output was stopped and one controlled retry will run.`,
         OUTPUT_REPETITION_STOP: (kind: string) =>
             `The model repeated its ${outputKind(kind)} again, so generation stopped to avoid wasting context and quota.`,
+        OUTPUT_REPETITION_BUDGET: (kind: string) =>
+            `The model repeated its ${outputKind(kind)} and the shared recovery budget is exhausted, so generation stopped to avoid wasting context and quota.`,
         FILE_LOCKING: (filePath: string) =>
             `\n> Parsing edit strategy... locked target file: \`${filePath}\`\n`,
         TOOL_RESULT_PREFIX: 'Tool result',
@@ -120,10 +124,14 @@ const AGENT_TEXT = {
             `上下文已就地裁剪，无需调用摘要 (${beforeTokens} -> ${afterTokens} tokens)`,
         COMPACTION_THRASHING:
             '上下文连续压缩后仍无法释放足够空间，已停止运行以避免压缩/重试死循环。请缩小任务范围或新建话题。',
-        OUTPUT_REPETITION_RETRY: (kind: string, cycleChars: number) =>
-            `检测到模型${kind}进入重复循环（循环片段约 ${cycleChars} 字符），已中止本次输出并进行一次受控重试。`,
+        OUTPUT_REPETITION_RETRY: (kind: string, cycleChars: number, lowThinking = false) =>
+            lowThinking
+                ? `检测到模型${kind}进入重复循环（循环片段约 ${cycleChars} 字符），已中止本次输出；重试将关闭思考以避免再次进入该循环。`
+                : `检测到模型${kind}进入重复循环（循环片段约 ${cycleChars} 字符），已中止本次输出并进行一次受控重试。`,
         OUTPUT_REPETITION_STOP: (kind: string) =>
             `模型${kind}再次进入重复循环，已停止生成以避免继续消耗上下文与额度。`,
+        OUTPUT_REPETITION_BUDGET: (kind: string) =>
+            `模型${kind}进入重复循环，且共享恢复预算已用尽，已停止生成以避免继续消耗上下文与额度。`,
         FILE_LOCKING: (filePath: string) =>
             `\n> 正在解析修改策略... 锁定目标文件: \`${filePath}\`\n`,
         TOOL_RESULT_PREFIX: '工具结果',
@@ -158,9 +166,10 @@ export const AGENT = {
     COMPACTION_PRUNED: (beforeTokens: number, afterTokens: number) =>
         AGENT_TEXT[currentLocale].COMPACTION_PRUNED(beforeTokens, afterTokens),
     get COMPACTION_THRASHING() { return AGENT_TEXT[currentLocale].COMPACTION_THRASHING; },
-    OUTPUT_REPETITION_RETRY: (kind: string, cycleChars: number) =>
-        AGENT_TEXT[currentLocale].OUTPUT_REPETITION_RETRY(kind, cycleChars),
+    OUTPUT_REPETITION_RETRY: (kind: string, cycleChars: number, lowThinking = false) =>
+        AGENT_TEXT[currentLocale].OUTPUT_REPETITION_RETRY(kind, cycleChars, lowThinking),
     OUTPUT_REPETITION_STOP: (kind: string) => AGENT_TEXT[currentLocale].OUTPUT_REPETITION_STOP(kind),
+    OUTPUT_REPETITION_BUDGET: (kind: string) => AGENT_TEXT[currentLocale].OUTPUT_REPETITION_BUDGET(kind),
     FILE_LOCKING: (filePath: string) => AGENT_TEXT[currentLocale].FILE_LOCKING(filePath),
     get TOOL_RESULT_PREFIX() { return AGENT_TEXT[currentLocale].TOOL_RESULT_PREFIX; },
 };

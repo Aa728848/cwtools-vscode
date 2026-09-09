@@ -12,8 +12,8 @@ const SECRET_KEY = 'cwtools.ai.codexChatgpt.oauth.v1';
 describe('ChatGptOAuthService', () => {
     it('tracks the current ChatGPT Codex subscription model catalog', () => {
         expect([...CODEX_CHATGPT_MODELS]).to.deep.equal([
-            'gpt-5.6-sol',
             'gpt-6-astra',
+            'gpt-5.6-sol',
             'gpt-5.6-terra',
             'gpt-5.6-luna',
             'gpt-5.5',

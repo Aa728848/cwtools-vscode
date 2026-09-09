@@ -278,6 +278,7 @@ export const OPENCODE_GO_MODEL_LIMITS: Record<string, { context: number; output:
 export const MODEL_CONTEXT_TOKENS: Record<string, number> = {
     // ChatGPT OAuth uses the Codex service catalog, whose active windows can
     // differ from the same model IDs exposed through the public API.
+    'codex-chatgpt:gpt-6-astra': CODEX_CHATGPT_CONTEXT_TOKENS,
     'codex-chatgpt:gpt-5.6': CODEX_CHATGPT_CONTEXT_TOKENS,
     ...Object.fromEntries(ANTIGRAVITY_MODELS.map(model => [`antigravity:${model}`, antigravityContextTokens(model)])),
     ...Object.fromEntries(CODEX_CHATGPT_MODELS.map(model => [
@@ -514,6 +515,15 @@ export function getModelContextTokens(model: string, providerId?: string): numbe
  */
 export const MAX_SAFE_CONTEXT_TOKENS = 2_097_152;
 
+/**
+ * True when the model is in the GPT-5.6 or GPT-6 family and supports extended 1M context in Codex.
+ */
+export function isCodexExtendedContextModel(model: string): boolean {
+    if (!model) return false;
+    const lower = model.toLowerCase().replace(/\s*\([^)]*\)$/i, '');
+    return /(?:^|\/)(?:gpt-6(?:-astra)?|gpt-5\.6)(?:-|$)/i.test(lower);
+}
+
 export function clampConfiguredContextTokens(
     providerId: string,
     model: string,
@@ -525,6 +535,13 @@ export function clampConfiguredContextTokens(
     if (normalized === 0) return 0;
     const bounded = Math.min(normalized, MAX_SAFE_CONTEXT_TOKENS);
     if (providerId !== 'codex-chatgpt') return bounded;
+
+    // GPT-5.6 and GPT-6 models in Codex default to 272K, but support user configuration up to 1M (or model ceiling).
+    if (isCodexExtendedContextModel(model)) {
+        const extendedLimit = getModelContextTokens(model, 'openai') || 1_050_000;
+        return Math.min(bounded, extendedLimit);
+    }
+
     const serviceLimit = getModelContextTokens(model, providerId);
     return serviceLimit > 0 ? Math.min(bounded, serviceLimit) : bounded;
 }

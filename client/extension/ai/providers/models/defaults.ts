@@ -53,7 +53,7 @@ export const BUILTIN_PROVIDERS: Record<string, AIProviderConfig> = {
         registerUrl: 'https://platform.openai.com/api-keys',
         name: 'OpenAI',
         endpoint: 'https://api.openai.com/v1',
-        defaultModel: 'gpt-5.5',
+        defaultModel: 'gpt-6-astra',
         models: [
             'gpt-6-astra',
             'gpt-5.6',

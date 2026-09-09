@@ -7893,6 +7893,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         // Reopening settings must preserve an explicitly saved context limit, including 0.
         const initCtx = autoFillContextForModel(current.model, current.provider, current.maxContextTokens);
         (document.getElementById('settingsCtx') as HTMLInputElement).value = String(initCtx);
+        updateContextControls(current.provider, current.model);
         (document.getElementById('settingsReasoningEffort') as HTMLSelectElement).dataset.requested =
             current.reasoningEffort || 'high';
         const responseVerbositySelect = document.getElementById('settingsResponseVerbosity') as HTMLSelectElement | null;
@@ -8127,6 +8128,58 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         );
     }
 
+    function isCodexExtendedModel(model: string): boolean {
+        return /(?:^|\/)(?:gpt-6(?:-astra)?|gpt-5\.6)(?:-|$)/i.test((model || '').trim());
+    }
+
+    function updateContextControls(providerId: string, model: string) {
+        const isExtended = providerId === 'codex-chatgpt' && isCodexExtendedModel(model);
+        const presetGroup = document.getElementById('codexContextPresetGroup');
+        const hintEl = document.getElementById('settingsCtxHint');
+        if (presetGroup) {
+            presetGroup.style.display = isExtended ? 'inline-flex' : 'none';
+        }
+        if (hintEl) {
+            if (isExtended) {
+                hintEl.textContent = tr(
+                    'Codex subscription defaults to 272K; GPT-5.6 and 6 series support up to 1M (1,050,000 tokens).',
+                    'Codex 订阅渠道默认为 272K；GPT-5.6 及 6 系列支持调整为最高 1M (1,050,000 tokens)。'
+                );
+            } else {
+                hintEl.textContent = tr(
+                    'Set a custom context limit, or use 0 for the provider default.',
+                    '可手动设置上下文上限；0 表示使用提供商默认值。'
+                );
+            }
+        }
+        const btn272k = document.getElementById('codexCtx272kBtn');
+        if (btn272k && !(btn272k as any).__bound) {
+            (btn272k as any).__bound = true;
+            btn272k.addEventListener('click', () => {
+                const ctxInput = document.getElementById('settingsCtx') as HTMLInputElement | null;
+                if (ctxInput) {
+                    ctxInput.value = '272000';
+                    ctxInput.dispatchEvent(new Event('input'));
+                    refreshSettingsDraftStatus();
+                    refreshSettingsOverview();
+                }
+            });
+        }
+        const btn1m = document.getElementById('codexCtx1mBtn');
+        if (btn1m && !(btn1m as any).__bound) {
+            (btn1m as any).__bound = true;
+            btn1m.addEventListener('click', () => {
+                const ctxInput = document.getElementById('settingsCtx') as HTMLInputElement | null;
+                if (ctxInput) {
+                    ctxInput.value = '1050000';
+                    ctxInput.dispatchEvent(new Event('input'));
+                    refreshSettingsDraftStatus();
+                    refreshSettingsOverview();
+                }
+            });
+        }
+    }
+
     function closeSettings() {
         if (settingsInSideWorkspace) {
             closeSideWorkspace({ preserveResponsivePin: true });
@@ -8354,6 +8407,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                 model,
                 reasoningSelect?.dataset.requested || reasoningSelect?.value
             );
+            updateContextControls(providerId, model);
             refreshSettingsOverview();
             refreshSettingsDraftStatus();
         }

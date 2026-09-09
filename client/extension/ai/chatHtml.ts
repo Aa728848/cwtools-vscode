@@ -290,7 +290,13 @@ ${stylesheetLinks}
                 </div>
                 <div class="settings-group">
                     <label class="settings-label" for="settingsCtx">${svgIcon('ruler')} ${t('Context size (tokens)', '上下文大小 (tokens)')}</label>
-                    <input class="settings-input" id="settingsCtx" type="number" min="0" placeholder="${t('0 = provider default', '0 = provider 默认')}" aria-describedby="settingsCtxHint" />
+                    <div class="context-input-row" style="display:flex; gap:6px; align-items:center;">
+                        <input class="settings-input" id="settingsCtx" type="number" min="0" placeholder="${t('0 = provider default', '0 = provider 默认')}" aria-describedby="settingsCtxHint" style="flex:1;" />
+                        <div id="codexContextPresetGroup" style="display:none; gap:4px;">
+                            <button type="button" class="detect-btn preset-btn" id="codexCtx272kBtn" style="padding:0 8px; width:auto; font-size:11px;" title="${t('Default Codex context (272K)', '默认 Codex 上下文 (272K)')}">272K</button>
+                            <button type="button" class="detect-btn preset-btn" id="codexCtx1mBtn" style="padding:0 8px; width:auto; font-size:11px;" title="${t('Extended 1M context (1,050,000 tokens)', '扩展 1M 上下文 (1,050,000 tokens)')}">1M</button>
+                        </div>
+                    </div>
                     <div class="settings-hint" id="settingsCtxHint">${t('Set a custom context limit, or use 0 for the provider default.', '可手动设置上下文上限；0 表示使用提供商默认值。')}</div>
                 </div>
                 <div class="settings-group" id="settingsReasoningGroup">

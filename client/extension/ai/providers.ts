@@ -27,6 +27,7 @@ import {
     MODEL_CONTEXT_TOKENS,
     getModelContextTokens,
     clampConfiguredContextTokens,
+    isCodexExtendedContextModel,
     getModelOutputTokens,
     getAnthropicModelFeatures
 } from './providers/models/capabilities';
@@ -44,6 +45,7 @@ export {
     MODEL_CONTEXT_TOKENS,
     getModelContextTokens,
     clampConfiguredContextTokens,
+    isCodexExtendedContextModel,
     getModelOutputTokens,
     getAnthropicModelFeatures
 };

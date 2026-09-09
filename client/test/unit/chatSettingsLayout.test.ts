@@ -87,6 +87,9 @@ describe('sidebar settings layout', () => {
         expect(chat).to.include('aria-describedby="settingsCtxHint"');
         expect(chat).to.include('可手动设置上下文上限');
         expect(chat).not.to.match(/id="settingsCtx"[^>]+(?:readonly|disabled)/);
+        expect(chat).to.include('id="codexContextPresetGroup"');
+        expect(chat).to.include('id="codexCtx272kBtn"');
+        expect(chat).to.include('id="codexCtx1mBtn"');
     });
 
     it('uses CSP-compatible search-key actions and keyboard-accessible category controls', () => {

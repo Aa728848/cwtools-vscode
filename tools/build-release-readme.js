@@ -39,5 +39,5 @@ const source = readRequired(sourceReadmePath);
 validateBilingualReadme(source);
 
 fs.mkdirSync(releaseDir, { recursive: true });
-fs.writeFileSync(releaseReadmePath, normalize(source).replace(/\n/g, '\r\n'), 'utf8');
+fs.writeFileSync(releaseReadmePath, normalize(source), 'utf8');
 console.log(`Built release README from Marketplace source: ${path.relative(root, sourceReadmePath)}`);

@@ -26,6 +26,12 @@ import {
     applyWorldDeltaToLocalTransform,
     getSelectionWorldCenter,
 } from './locatorMultiTransform';
+import {
+    getLocatorRotationDegrees,
+    pdxScriptEuler,
+    setLocatorRotationDegrees,
+    toPdxScriptRotation,
+} from './pdxLocatorRotation';
 import { decompressBC1, decompressBC3, rgb565 } from './bcDecode';
 import { SkyboxEnvironment } from './skyboxEnvironment';
 import { EnvironmentUi, DEFAULT_ENV_STATE, type EnvironmentUiState } from './environmentUi';
@@ -1128,46 +1134,6 @@ function updateLocatorLabels() {
 // Shared invisible sphere geometry for locator hit targets
 const _locatorHitGeo = new THREE.SphereGeometry(0.25, 8, 6);
 const _locatorHitMat = new THREE.MeshBasicMaterial({ visible: false });
-
-/**
- * Convert PDX script rotation (degrees) to a Three.js Euler.
- *
- * PDX/Clausewitz rotation format: { ry, rx, rz } (Yaw, Pitch, Roll)
- *   - First value  = rotation around Y axis (yaw)
- *   - Second value = rotation around X axis (pitch)
- *   - Third value  = rotation around Z axis (roll)
- *
- * modelGroup has a PI rotation around Y, which negates local X and Z axes.
- * Therefore X and Z rotations must be negated to preserve world-space orientation.
- * Y axis is unchanged by PI rotation, so Y rotation is applied as-is.
- */
-function pdxScriptEuler(ryDeg: number, rxDeg: number, rzDeg: number): THREE.Euler {
-    return new THREE.Euler(
-        -rxDeg * Math.PI / 180,
-         ryDeg * Math.PI / 180,
-        -rzDeg * Math.PI / 180,
-        'YXZ',
-    );
-}
-
-/** Return the locator's logical X/Y/Z rotation in degrees. */
-function getLocatorRotationDegrees(obj: THREE.Object3D): LocatorVector3 {
-    const euler = new THREE.Euler().setFromQuaternion(obj.quaternion, 'YXZ');
-    return [
-        -euler.x * 180 / Math.PI,
-         euler.y * 180 / Math.PI,
-        -euler.z * 180 / Math.PI,
-    ];
-}
-
-function setLocatorRotationDegrees(obj: THREE.Object3D, rotation: LocatorVector3) {
-    obj.setRotationFromEuler(pdxScriptEuler(rotation[1], rotation[0], rotation[2]));
-}
-
-/** Convert logical X/Y/Z UI rotation to the PDX script's Y/X/Z storage order. */
-function toPdxScriptRotation(rotation: LocatorVector3): LocatorVector3 {
-    return [rotation[1], rotation[0], rotation[2]];
-}
 
 function getLocatorTransform(obj: THREE.Object3D): LocatorTransform {
     return {

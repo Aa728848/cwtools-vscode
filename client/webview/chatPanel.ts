@@ -8052,6 +8052,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
             // Always filter out non-FIM models since fallback Chat Mode is removed
             if (p2) {
                 const fimRules = [
+                    { key: 'deepseek-flash', capable: true },
                     { key: 'deepseek-v4-pro', capable: true },
                     { key: 'deepseek-v4-flash', capable: true },
                     { key: 'deepseek-coder', capable: true },

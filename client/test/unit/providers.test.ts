@@ -102,6 +102,11 @@ describe('isModelVisionCapable', () => {
         expect(isModelVisionCapable('deepseek-v4-pro')).to.equal(false);
     });
 
+    it('tracks DeepSeek V4.1 Flash native vision', () => {
+        expect(isModelVisionCapable('deepseek-flash')).to.equal(true);
+        expect(isModelVisionCapable('deepseek-v4-flash')).to.equal(true);
+    });
+
     it('is case insensitive', () => {
         expect(isModelVisionCapable('GPT-4O')).to.equal(true);
     });
@@ -138,6 +143,7 @@ describe('isModelVisionCapable', () => {
 describe('isModelFIMCapable', () => {
     it('returns true for deepseek-v4-pro (explicit FIM model)', () => {
         expect(isModelFIMCapable('deepseek-v4-pro', 'deepseek')).to.equal(true);
+        expect(isModelFIMCapable('deepseek-flash', 'deepseek')).to.equal(true);
     });
 
     it('returns true for deepseek-coder', () => {
@@ -224,6 +230,7 @@ describe('getModelContextTokens', () => {
 
     it('uses current direct-provider context metadata', () => {
         expect(getModelContextTokens('deepseek-v4-pro', 'deepseek')).to.equal(1000000);
+        expect(getModelContextTokens('deepseek-flash', 'deepseek')).to.equal(1000000);
         expect(getModelContextTokens('claude-sonnet-5', 'claude')).to.equal(1000000);
         expect(getModelContextTokens('MiniMax-M2.7', 'minimax')).to.equal(204800);
         expect(getModelContextTokens('glm-4.7-flashx', 'glm')).to.equal(200000);
@@ -250,6 +257,8 @@ describe('getModelOutputTokens', () => {
     it('returns high value for deepseek provider', () => {
         const result = getModelOutputTokens('deepseek-v4-pro', 'deepseek');
         expect(result).to.be.a('number').and.greaterThan(100000);
+        expect(getModelOutputTokens('deepseek-flash', 'deepseek')).to.equal(384000);
+        expect(getModelOutputTokens('deepseek-flash', 'custom')).to.equal(384000);
     });
 
     it('returns the supported Kimi K2.7 output budget', () => {
@@ -933,6 +942,16 @@ describe('BUILTIN_PROVIDERS', () => {
         expect(isModelVisionCapable('kimi-for-coding')).to.equal(true);
         expect(getModelContextTokens('kimi-for-coding', 'kimi-code-plan')).to.equal(1048576);
         expect(getModelOutputTokens('kimi-for-coding', 'kimi-code-plan')).to.equal(131072);
+    });
+
+    it('matches the DeepSeek V4.1 Flash catalog', () => {
+        const deepseek = BUILTIN_PROVIDERS['deepseek']!;
+        expect(deepseek.endpoint).to.equal('https://api.deepseek.com/v1');
+        expect(deepseek.defaultModel).to.equal('deepseek-flash');
+        expect(deepseek.models).to.deep.equal(['deepseek-flash', 'deepseek-v4-pro']);
+        expect(deepseek.supportsVision).to.equal(true);
+        expect(deepseek.supportsFIM).to.equal(true);
+        expect(deepseek.maxContextTokens).to.equal(1000000);
     });
 
     it('uses the current GitHub Models inference endpoint and catalog IDs', () => {

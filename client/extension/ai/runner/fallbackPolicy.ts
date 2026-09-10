@@ -10,13 +10,13 @@ import type { AIService } from '../aiService';
 
 export const PROVIDER_FALLBACK: Record<string, { providerId: string; model: string }[]> = {
     // If the primary provider fails, try these in order:
-    openai:     [{ providerId: 'deepseek', model: 'deepseek-v4-flash' }],
+    openai:     [{ providerId: 'deepseek', model: 'deepseek-flash' }],
     deepseek:   [{ providerId: 'minimax-token-plan',  model: 'MiniMax-M3' }],
-    claude:     [{ providerId: 'deepseek', model: 'deepseek-v4-flash' }],
-    qwen:       [{ providerId: 'deepseek', model: 'deepseek-v4-flash' }],
-    glm:        [{ providerId: 'deepseek', model: 'deepseek-v4-flash' }],
-    google:     [{ providerId: 'deepseek', model: 'deepseek-v4-flash' }],
-    minimax:    [{ providerId: 'deepseek', model: 'deepseek-v4-flash' }],
+    claude:     [{ providerId: 'deepseek', model: 'deepseek-flash' }],
+    qwen:       [{ providerId: 'deepseek', model: 'deepseek-flash' }],
+    glm:        [{ providerId: 'deepseek', model: 'deepseek-flash' }],
+    google:     [{ providerId: 'deepseek', model: 'deepseek-flash' }],
+    minimax:    [{ providerId: 'deepseek', model: 'deepseek-flash' }],
 };
 
 export async function executeFallbackRetry(

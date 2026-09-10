@@ -25,6 +25,10 @@ describe('getModelPricing', () => {
         expect(getModelPricing('deepseek-v4-pro')).to.deep.equal([9.00, 27.01]);
     });
 
+    it('exact match: deepseek-flash', () => {
+        expect(getModelPricing('deepseek-flash')).to.deep.equal([2.00, 8.00]);
+    });
+
     it('uses current direct-provider pricing', () => {
         expect(getModelPricing('claude-sonnet-5')).to.deep.equal([13.64, 68.20]);
         expect(getModelPricing('glm-5.2')).to.deep.equal([9.56, 30.05]);
@@ -44,18 +48,28 @@ describe('getModelPricing', () => {
         expect(getModelPricing('kimi-k3')).to.deep.equal([20.00, 100.00]);
     });
 
-    it('uses DeepSeek peak pricing by default and off-peak pricing when timestamped', () => {
-        const peak = new Date('2026-08-16T02:30:00.000Z');
-        const offPeak = new Date('2026-08-16T05:00:00.000Z');
+    it('applies the V4.1 Flash price list to the new and retired Flash ids', () => {
+        const peak = new Date('2026-08-17T02:30:00.000Z');
+        const offPeak = new Date('2026-08-17T05:00:00.000Z');
+        for (const model of ['deepseek-flash', 'deepseek-v4-flash', 'deepseek-v4-flash-vision-exp']) {
+            expect(getModelPricing(model, 'deepseek', peak)).to.deep.equal([2.00, 8.00]);
+            expect(getModelPricing(model, 'deepseek', offPeak)).to.deep.equal([1.00, 4.00]);
+        }
         expect(getModelPricing('deepseek-v4-pro', 'deepseek', peak)).to.deep.equal([9.00, 27.01]);
         expect(getModelPricing('deepseek-v4-pro', 'deepseek', offPeak)).to.deep.equal([4.50, 13.50]);
-        expect(getModelPricing('deepseek-v4-flash', 'deepseek', peak)).to.deep.equal([3.00, 9.00]);
-        expect(getModelPricing('deepseek-v4-flash', 'deepseek', offPeak)).to.deep.equal([1.50, 4.50]);
+    });
+
+    it('treats DeepSeek weekends as off-peak', () => {
+        // 2026-08-16 is a Sunday: the same clock time is peak on a weekday.
+        expect(getModelPricing('deepseek-flash', 'deepseek', new Date('2026-08-16T02:30:00.000Z'))).to.deep.equal([1.00, 4.00]);
+        expect(getModelPricing('deepseek-flash', 'deepseek', new Date('2026-08-17T02:30:00.000Z'))).to.deep.equal([2.00, 8.00]);
+        expect(getModelPricing('deepseek-v4-pro', 'deepseek', new Date('2026-08-16T06:30:00.000Z'))).to.deep.equal([4.50, 13.50]);
     });
 
     it('uses the supplied clock for every live pricing lookup', () => {
         const offPeak = new Date('2026-08-16T05:00:00.000Z');
         expect(getCurrentModelPricing('deepseek-v4-pro', 'deepseek', offPeak)).to.deep.equal([4.50, 13.50]);
+        expect(getCurrentModelPricing('deepseek-flash', 'deepseek', offPeak)).to.deep.equal([1.00, 4.00]);
         expect(getCurrentModelPricing('gpt-5.5', 'openai', offPeak)).to.deep.equal([34.10, 204.59]);
     });
 
@@ -102,9 +116,10 @@ describe('getModelPricing', () => {
 });
 
 describe('getCacheDiscountFactor', () => {
-    it('returns current DeepSeek GA cache pricing ratios', () => {
+    it('returns current DeepSeek cache pricing ratios', () => {
         expect(getCacheDiscountFactor('deepseek-v4-pro')).to.equal(1 / 30);
-        expect(getCacheDiscountFactor('deepseek-v4-flash')).to.equal(7 / 220);
+        expect(getCacheDiscountFactor('deepseek-flash')).to.equal(0.02);
+        expect(getCacheDiscountFactor('deepseek-v4-flash')).to.equal(0.02);
         expect(getCacheDiscountFactor('deepseek-chat')).to.equal(7 / 220);
     });
 

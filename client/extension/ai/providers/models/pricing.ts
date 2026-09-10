@@ -8,7 +8,7 @@ export const MODEL_PRICING: Record<string, number[]> = pricingData;
 
 const DEEPSEEK_OFF_PEAK_PRICING: Record<string, [number, number]> = {
     'deepseek-v4-pro': [4.50, 13.50],
-    'deepseek-v4-flash': [1.50, 4.50],
+    'deepseek-flash': [1.00, 4.00],
 };
 
 function directDeepSeekModelKey(model: string, providerId?: string): keyof typeof DEEPSEEK_OFF_PEAK_PRICING | undefined {
@@ -16,12 +16,17 @@ function directDeepSeekModelKey(model: string, providerId?: string): keyof typeo
     if (provider && provider !== 'deepseek') return undefined;
     const lower = model.toLowerCase();
     if (lower.startsWith('deepseek-v4-pro')) return 'deepseek-v4-pro';
-    if (lower.startsWith('deepseek-v4-flash')) return 'deepseek-v4-flash';
+    // `deepseek-flash` is the V4.1 Flash id; the retired `deepseek-v4-flash*`
+    // names are still accepted, served by V4.1 Flash and billed at its rate.
+    if (lower.startsWith('deepseek-flash') || lower.startsWith('deepseek-v4-flash')) return 'deepseek-flash';
     return undefined;
 }
 
 export function isDeepSeekPeakPricingWindow(at: Date = new Date()): boolean {
     if (!Number.isFinite(at.getTime())) return true;
+    // Peak hours are 01:00-04:00 and 06:00-10:00 UTC, Monday through Friday.
+    const utcDay = at.getUTCDay();
+    if (utcDay === 0 || utcDay === 6) return false;
     const utcMinutes = at.getUTCHours() * 60 + at.getUTCMinutes();
     return (utcMinutes >= 60 && utcMinutes < 240)
         || (utcMinutes >= 360 && utcMinutes < 600);
@@ -81,8 +86,9 @@ export function getCurrentModelPricing(
  * The factor represents the fraction of full input price charged for cached tokens.
  * e.g. 0.1 means cached tokens cost 10% of full price, saving 90%.
  *
- * Sources (2026-08):
- *  - DeepSeek V4:  cache hit ≈ 3.2-3.3% of full price after GA peak/off-peak pricing
+ * Sources (2026-09):
+ *  - DeepSeek V4.1 Flash: cache hit = 2% of the cache-miss input rate (¥0.02/¥1.00)
+ *  - DeepSeek V4 Pro: cache hit ≈ 3.3% of full price under peak/off-peak pricing
  *  - Claude:       cache_read = 10% of input price → 0.1
  *  - OpenAI GPT:   cached = 50% of input price → 0.5
  *  - Gemini:       current text models cache input at 10% → 0.1
@@ -119,9 +125,10 @@ export function getCacheDiscountFactor(model: string, providerId?: string): numb
         if (lower.startsWith('glm')) return 0.19;
         return 0.1;
     }
-    // DeepSeek — GA peak/off-peak cache ratios are stable across both windows.
+    // DeepSeek — V4.1 Flash bills cache hits at 2% in both windows; V4 Pro keeps 1/30.
     if (lower.includes('deepseek-v4-pro')) return 1 / 30;
-    if (lower.includes('deepseek-v4-flash') || lower.includes('deepseek')) return 7 / 220;
+    if (lower.includes('deepseek-flash') || lower.includes('deepseek-v4-flash')) return 0.02;
+    if (lower.includes('deepseek')) return 7 / 220;
     // Anthropic Claude
     if (lower.includes('claude')) return 0.1;
     // OpenAI GPT series

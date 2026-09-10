@@ -366,6 +366,12 @@ function geminiReasoningCapability(model: string): ModelReasoningCapability {
     return NO_REASONING;
 }
 
+/**
+ * DeepSeek V4-family ids: the retired `deepseek-v4*` names and the
+ * `deepseek-flash` alias that now serves V4.1 Flash on the same wire format.
+ */
+const DEEPSEEK_V4_FAMILY_MODEL_RE = /(?:deepseek-v4|deepseek-flash)/;
+
 function upstreamGatewayCapability(providerId: string, model: string): ModelReasoningCapability | undefined {
     const lower = modelName(model);
     if (lower.includes('openai/') || isGpt6AstraModel(lower) || /(?:^|\/)(?:gpt-5|o[134](?:-|$))/.test(lower)) {
@@ -380,7 +386,7 @@ function upstreamGatewayCapability(providerId: string, model: string): ModelReas
     if (lower.includes('qwen')) {
         return reasoningCapability('budget', ['none', 'minimal', 'low', 'medium', 'high', 'max'], 'high');
     }
-    if (/deepseek-v4/.test(lower)) {
+    if (DEEPSEEK_V4_FAMILY_MODEL_RE.test(lower)) {
         return reasoningCapability('effort', ['none', 'low', 'high', 'max'], 'high');
     }
     if (/glm-5[.]2/.test(lower)) {
@@ -445,7 +451,7 @@ export function getModelReasoningCapability(
             : NO_REASONING;
     }
     if (provider === 'together') {
-        if (/deepseek-v4/.test(lower)) return reasoningCapability('effort', ['none', 'low', 'high', 'max'], 'high');
+        if (DEEPSEEK_V4_FAMILY_MODEL_RE.test(lower)) return reasoningCapability('effort', ['none', 'low', 'high', 'max'], 'high');
         if (/gpt-oss/.test(lower)) return reasoningCapability('effort', ['low', 'medium', 'high'], 'medium');
         if (isKnownReasoningModel(lower)) return reasoningCapability('toggle', ['none', 'high'], 'high');
         return NO_REASONING;
@@ -466,7 +472,7 @@ export function getModelReasoningCapability(
     }
     if (provider === 'claude') return claudeReasoningCapability(lower);
     if (provider === 'google') return geminiReasoningCapability(lower);
-    if (provider === 'deepseek') return /deepseek-v4/.test(lower)
+    if (provider === 'deepseek') return DEEPSEEK_V4_FAMILY_MODEL_RE.test(lower)
         ? reasoningCapability('effort', ['none', 'low', 'high', 'max'], 'high')
         : reasoningCapability('fixed', ['high'], 'high');
     if (provider === 'glm') {
@@ -598,7 +604,7 @@ function isGpt6AstraModel(model: string): boolean {
 
 const QWEN_THINKING_MODEL_RE = /(?:^|\/)qwen3(?:[.-]|$)|(?:^|\/)qwen(?:-max|-plus|-flash|-turbo|-long)(?:[-.]|$)/;
 
-const KNOWN_REASONING_MODEL_RE = /(?:^|\/)(?:gpt-5|gpt-6-astra|o[134](?:-|$)|claude-|deepseek-(?:r1|v3|v4|reasoner)|glm-(?:4[.]?[5-9]|5)|qwen3|qwq|gemini-(?:2[.]5|3)|kimi-k2|kimi-k3|minimax-m2|minimax-m3|mimo-v2|gpt-oss)/;
+const KNOWN_REASONING_MODEL_RE = /(?:^|\/)(?:gpt-5|gpt-6-astra|o[134](?:-|$)|claude-|deepseek-(?:r1|v3|v4|reasoner|flash)|glm-(?:4[.]?[5-9]|5)|qwen3|qwq|gemini-(?:2[.]5|3)|kimi-k2|kimi-k3|minimax-m2|minimax-m3|mimo-v2|gpt-oss)/;
 
 function isQwenThinkingModel(model: string): boolean {
     return QWEN_THINKING_MODEL_RE.test(model);
@@ -655,7 +661,7 @@ const DISABLE_THINKING_PARAMS: Array<{
     result: DisableThinkingResult;
 }> = [
     {
-        match: (m) => /(?:^|\/)deepseek-v4(?:-|$)/.test(m),
+        match: (m) => /(?:^|\/)(?:deepseek-v4|deepseek-flash)(?:-|$)/.test(m),
         result: { extraBody: { thinking: { type: 'disabled' } } },
     },
     {
@@ -826,7 +832,7 @@ const THINKING_RULES: ThinkingRule[] = [
     // OpenRouter normalizes request shapes; the upstream model decides whether an
     // effort selector exists and which values are meaningful.
     { providers: ['openrouter'], model: /(?:^|\/)(?:moonshotai\/kimi-k2|minimax\/minimax-m[23])/, build: () => ({ extraBody: { reasoning: { enabled: true } } }) },
-    { providers: ['openrouter'], model: /deepseek-v4/, build: ctx => ({ extraBody: { reasoning: { effort: deepSeekV4Effort(ctx.requested) } } }) },
+    { providers: ['openrouter'], model: DEEPSEEK_V4_FAMILY_MODEL_RE, build: ctx => ({ extraBody: { reasoning: { effort: deepSeekV4Effort(ctx.requested) } } }) },
     { providers: ['openrouter'], model: /glm-5[.]2/, build: ctx => ({ extraBody: { reasoning: { effort: highOrMaxEffort(ctx.requested) } } }) },
     { providers: ['openrouter'], model: /(?:^|\/)moonshotai\/kimi-k3(?:-|$)/, build: ctx => ({ extraBody: { reasoning: { effort: kimiK3Effort(ctx.requested) } } }) },
     { providers: ['openrouter'], model: KNOWN_REASONING_MODEL_RE, build: ctx => ({ extraBody: { reasoning: { effort: ctx.requested } } }) },
@@ -861,9 +867,9 @@ const THINKING_RULES: ThinkingRule[] = [
     { providers: ['glm', 'opencode', 'opencode-go'], model: /(?:^|\/)glm-5[.]2(?:-|$)/, build: ctx => ({ extraBody: { thinking: { type: 'enabled' } }, reasoningEffort: highOrMaxEffort(ctx.requested) }) },
     { providers: ['glm', 'opencode', 'opencode-go'], model: /(?:^|\/)glm-(?:4[.]?[5-9]|5)(?:[-.]|$)/, build: () => ({ extraBody: { thinking: { type: 'enabled' } } }) },
 
-    { providers: ['deepseek', 'opencode', 'opencode-go'], model: /deepseek-v4/, build: ctx => ({ extraBody: { thinking: { type: 'enabled' } }, reasoningEffort: deepSeekV4Effort(ctx.requested) }) },
+    { providers: ['deepseek', 'opencode', 'opencode-go'], model: DEEPSEEK_V4_FAMILY_MODEL_RE, build: ctx => ({ extraBody: { thinking: { type: 'enabled' } }, reasoningEffort: deepSeekV4Effort(ctx.requested) }) },
 
-    { providers: ['together'], model: /deepseek-(?:ai\/)?deepseek-v4|deepseek-v4/, build: ctx => ({ extraBody: { reasoning: { enabled: true } }, reasoningEffort: deepSeekV4Effort(ctx.requested) }) },
+    { providers: ['together'], model: DEEPSEEK_V4_FAMILY_MODEL_RE, build: ctx => ({ extraBody: { reasoning: { enabled: true } }, reasoningEffort: deepSeekV4Effort(ctx.requested) }) },
     { providers: ['together'], model: KNOWN_REASONING_MODEL_RE, build: () => ({ extraBody: { reasoning: { enabled: true } } }) },
 
     { providers: ['deepinfra'], model: KNOWN_REASONING_MODEL_RE, build: ctx => ({ reasoningEffort: withoutMax(ctx.requested) }) },

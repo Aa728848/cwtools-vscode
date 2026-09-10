@@ -81,6 +81,8 @@ describe('provider thinking params', () => {
         const { getReducedThinkingParams } = loadProviders();
         const result = getReducedThinkingParams('deepseek-v4-pro', 'deepseek', 'openai-chat-completions');
         expect(result).to.deep.equal({ extraBody: { thinking: { type: 'disabled' } } });
+        expect(getReducedThinkingParams('deepseek-flash', 'deepseek', 'openai-chat-completions'))
+            .to.deep.equal({ extraBody: { thinking: { type: 'disabled' } } });
     });
 
     it('keeps older Claude models fast by omitting optional thinking params', () => {
@@ -160,6 +162,10 @@ describe('provider thinking params', () => {
         expect(getThinkingParams('deepseek-v4-pro', 'deepseek', 'openai-chat-completions', 'high'))
             .to.deep.equal({ extraBody: { thinking: { type: 'enabled' } }, reasoningEffort: 'high' });
         expect(getThinkingParams('deepseek-v4-pro', 'deepseek', 'openai-chat-completions', 'max'))
+            .to.deep.equal({ extraBody: { thinking: { type: 'enabled' } }, reasoningEffort: 'max' });
+        expect(getThinkingParams('deepseek-flash', 'deepseek', 'openai-chat-completions', 'medium'))
+            .to.deep.equal({ extraBody: { thinking: { type: 'enabled' } }, reasoningEffort: 'high' });
+        expect(getThinkingParams('deepseek-flash', 'deepseek', 'openai-chat-completions', 'max'))
             .to.deep.equal({ extraBody: { thinking: { type: 'enabled' } }, reasoningEffort: 'max' });
     });
 

@@ -367,12 +367,14 @@ describe('resolveCompactionRatios / resolveToolResultArchiveLimit', () => {
     it('raises the watermarks for DeepSeek providers and relay-hosted DeepSeek models', () => {
         const expected = { thresholdRatio: 0.85, targetRatio: 0.65, midLoopRatio: 0.80 };
         expect(compaction.resolveCompactionRatios('deepseek', 'deepseek-v4-pro')).to.deep.equal(expected);
+        expect(compaction.resolveCompactionRatios('deepseek', 'deepseek-flash')).to.deep.equal(expected);
         expect(compaction.resolveCompactionRatios('openrouter', 'deepseek/deepseek-v4-pro')).to.deep.equal(expected);
         expect(compaction.resolveCompactionRatios(undefined, 'siliconflow:deepseek-ai/DeepSeek-V4-Flash')).to.deep.equal(expected);
     });
 
     it('doubles tool-result archive limits for DeepSeek and keeps defaults elsewhere', () => {
         expect(compaction.resolveToolResultArchiveLimit('read_file', 'deepseek', 'deepseek-v4-pro')).to.equal(32_000);
+        expect(compaction.resolveToolResultArchiveLimit('read_file', 'deepseek', 'deepseek-flash')).to.equal(32_000);
         expect(compaction.resolveToolResultArchiveLimit('query_rules', 'deepseek', 'deepseek-v4-pro')).to.equal(120_000);
         expect(compaction.resolveToolResultArchiveLimit('read_file', 'claude', 'claude-opus-4-8')).to.equal(16_000);
         expect(compaction.resolveToolResultArchiveLimit('query_rules', undefined, undefined)).to.equal(60_000);

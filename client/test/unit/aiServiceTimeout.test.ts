@@ -187,7 +187,7 @@ describe('AIService inline provider isolation', () => {
             expect(requests).to.deep.equal([{
                 url: 'https://api.deepseek.com/beta/completions',
                 body: {
-                    model: 'deepseek-v4-pro',
+                    model: 'deepseek-flash',
                     prompt: 'prefix',
                     suffix: 'suffix',
                     max_tokens: 256,

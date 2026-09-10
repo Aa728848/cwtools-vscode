@@ -91,8 +91,9 @@ export const VISION_CAPABLE_MODELS: Record<string, boolean> = {
     'qwen2-vl': true,
     'qwen2.5-vl': true,
     'qwen3-vl': true,
+    'deepseek-flash': true,
+    'deepseek-v4-flash': true,
     'deepseek-v4-pro': false,
-    'deepseek-v4-flash': false,
     'mimo-v2.5-pro': false,
     'mimo-v2.5-free': true,
     'mimo-v2.5': true,
@@ -145,6 +146,7 @@ export function isLowCostPrefixCacheModelOrProvider(providerId?: string, model?:
  * Model-level FIM (Fill-in-the-Middle) capability map.
  */
 export const FIM_CAPABLE_MODELS: Record<string, boolean> = {
+    'deepseek-flash': true,
     'deepseek-v4-pro': true,
     'deepseek-v4-flash': true,
     'deepseek-coder': true,
@@ -374,6 +376,7 @@ export const MODEL_CONTEXT_TOKENS: Record<string, number> = {
     'DeepSeek-R1': 128000,
     'DeepSeek-Coder': 128000,
     'DeepSeek-OCR': 32000,
+    'deepseek-flash': 1000000,
     'deepseek-v4-pro': 1000000,
     'deepseek-v4-flash': 1000000,
     'deepseek': 128000,
@@ -595,7 +598,7 @@ export function getModelOutputTokens(model: string, providerId?: string): number
         return 32768;
     }
 
-    if (lower.includes('deepseek') && lower.includes('v4')) {
+    if (lower.includes('deepseek') && (lower.includes('v4') || lower.includes('flash'))) {
         return 384000;
     }
     if (lower.includes('deepseek') || lower.includes('r1')) {

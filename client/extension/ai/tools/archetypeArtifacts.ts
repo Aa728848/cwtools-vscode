@@ -46,7 +46,14 @@ function fail(message: string): never {
 export class HostArchetypeArtifactStore {
     private readonly artifacts = new Map<string, StoredArtifact>();
 
-    constructor(private readonly workspaceRoot: string, private readonly now: () => number = Date.now) {}
+    constructor(private workspaceRoot: string, private readonly now: () => number = Date.now) {}
+
+    /** Re-point path resolution after the active project root changes (multi-root workspace). */
+    public setWorkspaceRoot(workspaceRoot: string): void {
+        const next = workspaceRoot ? path.resolve(workspaceRoot) : '';
+        if (!next) return;
+        this.workspaceRoot = next;
+    }
 
     async extract(
         args: HostArchetypeExtractArgs,

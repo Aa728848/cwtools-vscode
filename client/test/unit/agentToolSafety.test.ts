@@ -57,6 +57,22 @@ describe('enforced central tool policy', () => {
         cleanupWorkspace(workspaceRoot);
     });
 
+    it('re-points every tool handler at the active project root between turns', () => {
+        const secondRoot = makeWorkspace();
+        try {
+            const executor = new AgentToolExecutor({} as any, workspaceRoot) as any;
+            expect(executor.setWorkspaceRoot(workspaceRoot)).to.equal(false);
+            expect(executor.setWorkspaceRoot('')).to.equal(false);
+            expect(executor.setWorkspaceRoot(secondRoot)).to.equal(true);
+            expect(executor.workspaceRoot).to.equal(path.resolve(secondRoot));
+            // Handlers read the root at call time, so they must follow the switch.
+            expect(executor.fileHandler.ctx.workspaceRoot).to.equal(path.resolve(secondRoot));
+            expect(executor.setWorkspaceRoot(secondRoot)).to.equal(false);
+        } finally {
+            cleanupWorkspace(secondRoot);
+        }
+    });
+
     it('normalizes the common glob alias before capability and policy checks', async () => {
         const executor = new AgentToolExecutor({} as any, workspaceRoot) as any;
         executor.fileHandler.globFiles = async (args: unknown) => ({

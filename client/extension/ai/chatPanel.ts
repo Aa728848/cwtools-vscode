@@ -1178,6 +1178,9 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         try {
             const approvedPlanExecution = this.approvedPlanExecutionPending;
             this.approvedPlanExecutionPending = false;
+            // Multi-root workspaces: bind this turn to the mod that owns the
+            // frontmost file before the run starts (never mid-run).
+            this.agentRunner.refreshWorkspaceRoots();
             const runPromise = this.agentRuntime.startTurn({
                 userMessage: text,
                 context: { ...context, topicId: runTopicId },

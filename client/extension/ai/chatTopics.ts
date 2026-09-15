@@ -64,6 +64,16 @@ function readStoredTopic(value: unknown): ChatTopic | undefined {
 /** Callback type for sending messages to the WebView */
 type PostMessageFn = (msg: HostMessage) => void;
 
+/**
+ * Folder name of the project root that owns the active editor. Multi-root
+ * workspaces use it so a new topic is grouped with the mod it was started from
+ * instead of falling into "Ungrouped".
+ */
+function activeWorkspaceLabel(): string | undefined {
+    const root = getProjectWorkspaceRoot();
+    return root ? path.basename(root) : undefined;
+}
+
 export class ChatTopicManager {
     currentTopic: ChatTopic | null = null;
     topics: ChatTopic[] = [];
@@ -120,12 +130,15 @@ export class ChatTopicManager {
 
     createNewTopic(firstMessage: string, schedulingState: ChatTopic['schedulingState']): void {
         const title = firstMessage.substring(0, 40) + (firstMessage.length > 40 ? '...' : '');
+        const workspaceLabel = activeWorkspaceLabel();
         this.currentTopic = {
             id: `topic_${Date.now()}`,
             title,
             createdAt: Date.now(),
             updatedAt: Date.now(),
             messages: [],
+            workspaceId: workspaceLabel,
+            workspaceLabel,
             schedulingState: normalizeSchedulingState(schedulingState),
         };
         this.topics.unshift(this.currentTopic);
@@ -207,6 +220,8 @@ export class ChatTopicManager {
             parentTopicId: topicId,
             forkedFromMessageIndex: messageIndex,
             schedulingState: normalizeSchedulingState(source.schedulingState),
+            workspaceId: source.workspaceId,
+            workspaceLabel: source.workspaceLabel,
             workflowId: source.workflowId,
             workflowReturnSchedulingState: readSchedulingState(source.workflowReturnSchedulingState),
         };

@@ -456,7 +456,7 @@ export class AgentToolExecutor {
     private evidenceGate?: EvidenceGate;
 
     private readonly clientGetter: () => LanguageClient;
-    public readonly workspaceRoot: string;
+    public workspaceRoot: string;
     public readonly globalStoragePath?: string;
     public readonly extensionPath?: string;
     public readonly indexService?: IndexService;
@@ -518,6 +518,27 @@ export class AgentToolExecutor {
         tryRegisterNotif();
         setTimeout(tryRegisterNotif, 2000);
         setTimeout(tryRegisterNotif, 5000);
+    }
+
+    /**
+     * Re-point this executor at the project root that owns the active editor.
+     * Multi-root workspaces call this once per user turn, never during a run:
+     * relative paths, file locks, and approval previews must all resolve against
+     * one root for the whole run. Root-scoped state derived from the previous
+     * root is reset so a mod cannot inherit its session write mode or artifacts.
+     */
+    public setWorkspaceRoot(nextWorkspaceRoot: string): boolean {
+        const next = typeof nextWorkspaceRoot === 'string' && nextWorkspaceRoot
+            ? path.resolve(nextWorkspaceRoot)
+            : '';
+        if (!next || next === this.workspaceRoot) return false;
+        this.workspaceRoot = next;
+        // fileWriteMode caches the resolved session mode of the previous root.
+        this.fileWriteMode = vs.workspace
+            .getConfiguration('stellarisLanguageServices.ai')
+            .get<'confirm' | 'auto'>('agentFileWriteMode', 'auto');
+        this.archetypeArtifacts.setWorkspaceRoot(next);
+        return true;
     }
 
     get client(): LanguageClient {

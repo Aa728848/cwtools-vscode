@@ -73,6 +73,40 @@ describe('workspace AI storage paths', () => {
         }
     });
 
+    it('follows the root that owns the active editor instead of a pinned .cwtools folder', () => {
+        const secondRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'cwtools-second-root-'));
+        fs.mkdirSync(path.join(projectRoot, '.cwtools'));
+        workspaceFolders = [
+            { name: 'first', uri: { fsPath: projectRoot } },
+            { name: 'second', uri: { fsPath: secondRoot } },
+        ];
+        try {
+            const workspacePaths = loadWorkspacePaths();
+            vscodeStub.window.activeTextEditor = {
+                document: { uri: { fsPath: path.join(secondRoot, 'common', 'traits.txt') } },
+            };
+            expect(workspacePaths.getProjectWorkspaceRoot(projectRoot)).to.equal(secondRoot);
+            expect(workspacePaths.getAiStorageRoot(projectRoot)).to.equal(path.join(secondRoot, '.cwtools'));
+        } finally {
+            vscodeStub.window.activeTextEditor = undefined;
+            fs.rmSync(secondRoot, { recursive: true, force: true });
+        }
+    });
+
+    it('uses the first root when no editor is active', () => {
+        const secondRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'cwtools-second-root-'));
+        workspaceFolders = [
+            { name: 'first', uri: { fsPath: projectRoot } },
+            { name: 'second', uri: { fsPath: secondRoot } },
+        ];
+        try {
+            const workspacePaths = loadWorkspacePaths();
+            expect(workspacePaths.getAiStorageRoot()).to.equal(path.join(projectRoot, '.cwtools'));
+        } finally {
+            fs.rmSync(secondRoot, { recursive: true, force: true });
+        }
+    });
+
     it('uses the configured workspace cache root and otherwise uses .cwtools', () => {
         const workspacePaths = loadWorkspacePaths();
         const configuredRoot = path.join(projectRoot, 'extension-storage');

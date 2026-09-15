@@ -247,6 +247,25 @@ export class PromptBuilder {
         this.memoryParser = new MemoryParser(workspaceRoot);
     }
 
+    /**
+     * Follow the project root that owns the active editor (multi-root workspace).
+     * Profile, CWTOOLS.md, and long-term memory are root-relative, and cached
+     * prompts embed the root path, so both memory and the frozen prompt caches
+     * are rebuilt when the root changes.
+     */
+    public setWorkspaceRoot(nextWorkspaceRoot: string): boolean {
+        const next = typeof nextWorkspaceRoot === 'string' && nextWorkspaceRoot
+            ? path.resolve(nextWorkspaceRoot)
+            : '';
+        if (!next || next === this.workspaceRoot) return false;
+        this.workspaceRoot = next;
+        this.memoryParser = new MemoryParser(next);
+        this._frozenPromptCache.clear();
+        this._frozenSlimPromptCache.clear();
+        this._frozenFingerprintHistory.clear();
+        return true;
+    }
+
     /** Invalidate project-derived long-term memory after project/rule mutations. */
     public markProjectMemoryStale(): number {
         return MemoryParser.markWorkspaceProjectFactsStale(this.workspaceRoot);

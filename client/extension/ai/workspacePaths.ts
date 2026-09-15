@@ -1,5 +1,4 @@
 import * as path from 'path';
-import * as fs from 'fs';
 import * as vs from 'vscode';
 import { isPathInsideOrEqual } from '../pathScope';
 
@@ -121,20 +120,23 @@ export function getAiStorageRoot(fallbackWorkspaceRoot = ''): string {
     const aiFolder = folders.find(folder => path.basename(folder.uri.fsPath).toLowerCase() === '.cwtools');
     if (aiFolder) return aiFolder.uri.fsPath;
 
-    for (const folder of folders) {
-        const name = path.basename(folder.uri.fsPath).toLowerCase();
-        if (name === '.cwtools') continue;
-        const childAiRoot = path.join(folder.uri.fsPath, '.cwtools');
-        if (fs.existsSync(childAiRoot)) return childAiRoot;
+    // Follow the root that owns the active editor. Choosing the first root that
+    // merely contains a .cwtools directory pinned one unrelated multi-root folder
+    // and kept writing shared AI data (project profile, hooks, caches) into it.
+    const workspaceRoot = getProjectWorkspaceRoot(fallbackWorkspaceRoot);
+    if (workspaceRoot) {
+        return path.basename(workspaceRoot).toLowerCase() === '.cwtools'
+            ? workspaceRoot
+            : path.join(workspaceRoot, '.cwtools');
     }
 
     if (fallbackWorkspaceRoot) {
-        const fallbackName = path.basename(fallbackWorkspaceRoot).toLowerCase();
-        if (fallbackName === '.cwtools') return fallbackWorkspaceRoot;
+        return path.basename(fallbackWorkspaceRoot).toLowerCase() === '.cwtools'
+            ? fallbackWorkspaceRoot
+            : path.join(fallbackWorkspaceRoot, '.cwtools');
     }
 
-    const workspaceRoot = getProjectWorkspaceRoot(fallbackWorkspaceRoot);
-    return workspaceRoot ? path.join(workspaceRoot, '.cwtools') : '';
+    return '';
 }
 
 export function getTopicStorageDir(topicId: string | undefined, fallbackWorkspaceRoot = ''): string {

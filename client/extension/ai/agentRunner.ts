@@ -720,6 +720,22 @@ export class AgentRunner {
         this.toolExecutor.parentAgentRunner = this;
     }
 
+    /**
+     * Bind the next turn to the project root that owns the active editor.
+     * Called once per user turn so a multi-root workspace follows the frontmost
+     * file without ever switching roots in the middle of a run.
+     */
+    public refreshWorkspaceRoots(): string {
+        // Never move the root while another run is in flight: its remaining tool
+        // calls must keep resolving against the root that run started on.
+        if (this.activeRunEventSinks.size > 0) return this.toolExecutor.workspaceRoot;
+        const next = getProjectWorkspaceRoot();
+        if (!next) return this.toolExecutor.workspaceRoot;
+        this.toolExecutor.setWorkspaceRoot(next);
+        this.promptBuilder.setWorkspaceRoot(next);
+        return next;
+    }
+
     /** Response-side calibration key: fallback samples never hit the primary key. */
     private calibrationKeyFor(providerId: string, model: string | undefined): string {
         const config = this.aiService.getConfig();

@@ -1,5 +1,52 @@
 # Changelog
 
+## [2.18.0] - 2026-09-16
+
+### 多根工作区架构适配 / Multi-root Workspace Architecture
+- **[特性] AI 根目录动态跟随活动编辑器（Multi-root Workspace Root Alignment）**：
+  - **动态感知活动工作区**：重构 AI 调度器（Agent Runner）、工具链沙箱（Agent Tools）与提示词构建器（Prompt Builder），支持根据用户当前活动编辑器文件所属的工作区文件夹动态切换 `aiRoot`。
+  - **跨工作区路径校验与沙箱强化**：放宽并完善工作区相对路径解析，确保多根工作区环境下跨目录的只读/写入工具权限准确判定，彻底杜绝路径误判为工作区外非法访问的问题。
+  - **话题与本地制品隔离**：支持针对各独立工作区根目录隔离存储会话记录与本地生成制品（Archetype Artifacts）。
+  - English: [Feature] Multi-root workspace root alignment — refactored Agent Runner, Agent Tools sandbox, and Prompt Builder to dynamically resolve `aiRoot` based on the active editor document's workspace folder; expanded workspace path validation to safely support multi-root directories without false positive sandbox violations; isolated topic storage and archetype artifacts per workspace folder.
+
+### CommandCode 供应商与配额监控 / CommandCode Provider & Quota Tracking
+- **[特性] 新增 CommandCode 供应商接入与账户额度可视化（CommandCode Provider & Quota Tracking）**：
+  - **支持双接入协议**：深度集成 CommandCode 官方通道，支持标准版与 Messages 协议双接入模式（`commandcode` 与 `commandcode-messages`），共享 API 凭据与模型目录。
+  - **账户状态与用量数据流**：Extension Host 统一聚合用户画像、用量汇总、积分余额及 5 小时/每周滑动窗口限额；实现 60 秒内存缓存与并发请求防抖。
+  - **可视化配额进度条卡片**：在 AI 设置面板新增专属配额卡片，展示当前套餐、积分余额、用量百分比及重置时间倒计时；引入危险（>=90%）/警告（>=70%）动态色阶，并支持一键手动刷新。
+  - English: [Feature] CommandCode provider & quota tracking — integrated official CommandCode channels supporting both standard and Messages protocols (`commandcode` & `commandcode-messages`) with shared credentials; built Extension Host account service pulling user info, usage summaries, credit balances, and 5-hour / weekly sliding window limits with in-memory caching; added dedicated quota telemetry card in AI settings featuring real-time percentage progress bars, color-coded tiers, and manual refresh triggers.
+
+### AI 运行时韧性与思考自愈 / AI Runtime Resilience & Repetition Recovery
+- **[特性] 推理死循环检测与动态降级重试自愈（Agent Repetition Loop Recovery & Thinking Backoff）**：
+  - **输出模式僵化与重复检测**：引入 `OutputRepetitionRecovery` 机制，实时监测模型在复杂长链思考中陷入固定输出模式或工具调用重复死锁的情况。
+  - **协调器动态介入重试**：当检测到推理死锁时，`RecoveryCoordinator` 自动接管，采用降低思考等级（Low Thinking）配合定向引导词进行现场重试，有效突破推理停滞并恢复任务执行。
+  - English: [Feature] Agent repetition loop recovery & thinking backoff — introduced `OutputRepetitionRecovery` to detect output stagnation and tool call repetition loops during extended reasoning traces; coordinated dynamic recovery via `RecoveryCoordinator` to retry with reduced thinking levels and targeted guidance, successfully recovering from model deadlock.
+
+### 模型目录与默认配置全面升级 / Models & Default Catalogs Refresh
+- **[特性] 默认模型升级至 GPT-6 Astra（Default Model Upgrade to GPT-6 Astra）**：
+  - **全渠道默认模型升级**：OpenAI API 与 ChatGPT Codex 订阅渠道的默认推荐模型均统一升级为 `gpt-6-astra`。
+  - **Codex 1M 超大上下文支持**：为 ChatGPT Codex 订阅渠道中的 GPT-5.6 与 GPT-6 系列模型开放最高 1,050,000 Token（1M）上下文窗口，保留 272K 默认安全窗口，并在设置面板提供 272K / 1M 快捷预设按钮与动态提示。
+  - English: [Feature] Default model upgrade to GPT-6 Astra — promoted `gpt-6-astra` to the default model for both OpenAI API and ChatGPT Codex subscription providers; unlocked up to 1,050,000-token (1M) context windows for Codex GPT-5.6 and GPT-6 models while maintaining the 272K default preset, complete with quick-preset buttons in the settings UI.
+
+- **[特性] DeepSeek 模型目录与 V4.1 Flash 刷新（DeepSeek Catalog Refresh & V4.1 Flash）**：
+  - **支持 V4.1 Flash 模型**：默认模型更新为 `deepseek-flash`，原生支持视觉多模态、1M 上下文及 384K 输出预算。
+  - **工作日峰谷阶梯费率**：配套上线官方 V4.1 Flash 阶梯计费算法（区分工作日白天高峰期与夜间/周末低谷期）。
+  - English: [Feature] DeepSeek catalog refresh & V4.1 Flash — upgraded default model to `deepseek-flash` with vision support, 1M context, and a 384K output budget; implemented official weekday peak and off-peak tiered pricing calculations.
+
+### 图形与语言服务缺陷修复 / Graphics & Language Server Fixes
+- **[修复] 实体预览 3D 脚本定位器旋转修正（Entity Preview Locator Pitch/Roll Fix）**：
+  - **消除 180° 反转镜像缺陷**：移除 `pdxScriptEuler` 中多余的 pitch/roll 取反补偿（该补偿曾导致挂接特效朝向颠倒 180°），使脚本定位器在 3D 视口中与模型骨骼、模型定位器完全对齐。
+  - English: [Fix] Entity preview locator pitch/roll fix — removed redundant script pitch/roll inversion in `pdxScriptEuler` that previously flipped attached locators by 180 degrees, restoring faithful visual alignment for effect locators in the 3D entity preview.
+
+- **[修复] CW226 本地化事件目标作用域验证修复（CW226 Localisation Event Target Scope Validation）**：
+  - **同步上游 cwtools 引擎**：更新 `submodules/cwtools` 子模块，修复 Stellaris 本地化代码中事件目标引用的作用域校验缺陷。
+  - English: [Fix] CW226 localisation event target scope validation — updated `submodules/cwtools` submodule to resolve scope validation errors on event target references within localisation files.
+
+### 工程维护与代码规范 / Repository Maintenance
+- **[维护] 仓库换行符归一化与 EditorConfig 配置（Line Endings Normalization & EditorConfig）**：
+  - **统一 LF 换行风格**：规范化仓库内现有文件的换行符为 LF，并补充 `.editorconfig` 配置，防止跨平台开发出现 CRLF 污染。
+  - English: [Maintenance] Line endings normalization & EditorConfig — normalized repository text files to standard LF endings and configured `.editorconfig` to enforce consistent cross-platform line formatting.
+
 ## [2.17.1] - 2026-09-07
 
 ### AI 计划审批与工作区展示 / AI Plan Approval & Workspace Presentation

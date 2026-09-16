@@ -131,6 +131,7 @@ const validators: Record<WebViewMessage['type'], MessageValidator> = {
     codexLogin: noFields,
     codexRefreshAccount: noFields,
     codexLogout: noFields,
+    refreshCommandCodeQuota: noFields,
     antigravityLogin: noFields,
     antigravityRefreshAccount: noFields,
     antigravityLogout: noFields,

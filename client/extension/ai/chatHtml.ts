@@ -350,6 +350,14 @@ ${stylesheetLinks}
                         <button class="detect-btn" id="antigravityLogoutBtn" style="margin-left:4px; padding:0 8px; width:auto; border-radius:4px; display:none">${svgIcon('trash')}${t('Sign out', '退出账号')}</button>
                     </div>
                 </details>
+                <details class="settings-group settings-account" id="commandcodeAccountGroup" style="display:none" open>
+                    <summary class="settings-account-summary"><span>${svgIcon('key')} ${t('Command Code account & quota', 'Command Code 账户与额度')}</span></summary>
+                    <div class="settings-hint" id="commandcodeAccountStatus"></div>
+                    <div class="settings-key-row" style="margin-top:6px">
+                        <button class="detect-btn" id="commandcodeRefreshBtn" style="padding:0 8px; width:auto; border-radius:4px">${svgIcon('refresh')}${t('Refresh quota', '刷新额度')}</button>
+                    </div>
+                    <div class="codex-quota-status" id="commandcodeQuotaStatus"></div>
+                </details>
                 <details class="settings-advanced">
                     <summary>${t('Advanced connection settings', '高级连接设置')}</summary>
                     <div class="settings-advanced-body">

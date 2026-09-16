@@ -24,6 +24,7 @@ import {
     ALWAYS_THINKING_PREFIXES,
     OPENCODE_MODEL_LIMITS,
     OPENCODE_GO_MODEL_LIMITS,
+    COMMANDCODE_MODEL_CONTEXT_TOKENS,
     MODEL_CONTEXT_TOKENS,
     getModelContextTokens,
     clampConfiguredContextTokens,
@@ -42,6 +43,7 @@ export {
     ALWAYS_THINKING_PREFIXES,
     OPENCODE_MODEL_LIMITS,
     OPENCODE_GO_MODEL_LIMITS,
+    COMMANDCODE_MODEL_CONTEXT_TOKENS,
     MODEL_CONTEXT_TOKENS,
     getModelContextTokens,
     clampConfiguredContextTokens,
@@ -270,6 +272,7 @@ export function getProviderApiFormat(
             return 'openai-responses';
         case 'claude':
         case 'minimax-token-plan':
+        case 'commandcode-messages':
             return 'anthropic-messages';
         case 'opencode':
             return getOpenCodeApiFormat(model);
@@ -470,7 +473,7 @@ export function getModelReasoningCapability(
         || (apiFormat === 'openai-responses' && (isGpt6AstraModel(lower) || /(?:^|\/)(?:gpt-5|o[134](?:-|$))/.test(lower)))) {
         return openAiReasoningCapability(lower);
     }
-    if (provider === 'claude') return claudeReasoningCapability(lower);
+    if (provider === 'claude' || provider === 'commandcode-messages') return claudeReasoningCapability(lower);
     if (provider === 'google') return geminiReasoningCapability(lower);
     if (provider === 'deepseek') return DEEPSEEK_V4_FAMILY_MODEL_RE.test(lower)
         ? reasoningCapability('effort', ['none', 'low', 'high', 'max'], 'high')
@@ -503,6 +506,9 @@ export function getModelReasoningCapability(
         return NO_REASONING;
     }
     if (provider === 'opencode' || provider === 'opencode-go') {
+        return upstreamGatewayCapability(provider, lower) ?? NO_REASONING;
+    }
+    if (provider === 'commandcode') {
         return upstreamGatewayCapability(provider, lower) ?? NO_REASONING;
     }
     return NO_REASONING;
@@ -879,6 +885,10 @@ const THINKING_RULES: ThinkingRule[] = [
     { providers: ['custom'], model: QWEN_THINKING_MODEL_RE, build: ctx => ({ extraBody: { enable_thinking: true, thinking_budget: qwenBudgetFor(ctx.lowerModel, ctx.requested) } }) },
     { providers: ['custom'], model: /(?:^|\/)gpt-6-astra(?:-|$)/, build: ctx => ({ reasoningEffort: ctx.requested }) },
     { providers: ['custom'], model: /(?:^|\/)(?:gpt-5|o[134](?:-|$)|deepseek-|glm-5[.]2|gpt-oss)/, build: ctx => ({ reasoningEffort: withoutMax(ctx.requested) }) },
+
+    // Command Code's Provider API normalizes per-model reasoning controls
+    // behind a single top-level reasoning_effort field.
+    { providers: ['commandcode'], build: ctx => ({ reasoningEffort: ctx.requested }) },
 
     // Generic fallback: provider-specific on/off switches only.
     { build: ctx => getEnableThinkingParams(ctx.model, ctx.providerId) },

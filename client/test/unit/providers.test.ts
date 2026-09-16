@@ -24,6 +24,9 @@ import {
     ALWAYS_THINKING_PREFIXES,
     OPENCODE_MODEL_LIMITS,
     OPENCODE_GO_MODEL_LIMITS,
+    COMMANDCODE_MODEL_CONTEXT_TOKENS,
+    getModelReasoningCapability,
+    getThinkingParams,
 } from '../../extension/ai/providers';
 import type { ChatCompletionRequest, ChatMessage } from '../../extension/ai/types';
 
@@ -69,6 +72,109 @@ describe('GPT-6 Astra provider support', () => {
             expect(getEffectiveReasoningEffort(model, 'minimal', 'openai-responses'), model).to.equal('low');
             expect(getEffectiveReasoningEffort(model, 'none', 'openai-responses'), model).to.equal('low');
         }
+    });
+});
+
+describe('Command Code provider support', () => {
+    it('registers the Provider API endpoint with the full published catalog', () => {
+        const provider = getProvider('commandcode');
+        expect(provider).to.include({
+            endpoint: 'https://api.commandcode.ai/provider/v1',
+            requiresApiKey: true,
+            isOpenAICompatible: true,
+            supportsToolUse: true,
+            supportsStreaming: true,
+            supportsFIM: false,
+            supportsVision: true,
+        });
+        expect(provider.models).to.include(provider.defaultModel);
+        expect(provider.models.length).to.equal(Object.keys(COMMANDCODE_MODEL_CONTEXT_TOKENS).length);
+        expect(provider.models).to.include('moonshotai/Kimi-K3');
+        expect(provider.models).to.include('zai-org/GLM-5.2');
+        expect(provider.models).to.include('xai/grok-4.6');
+    });
+
+    it('uses the OpenAI chat-completions wire format', () => {
+        expect(getProviderApiFormat('commandcode', 'zai-org/GLM-5.2')).to.equal('openai-chat-completions');
+        expect(getProviderApiFormat('commandcode', 'claude-opus-5')).to.equal('openai-chat-completions');
+    });
+
+    it('resolves catalog context windows with provider-scoped keys', () => {
+        expect(getModelContextTokens('zai-org/GLM-5.2', 'commandcode')).to.equal(1000000);
+        expect(getModelContextTokens('moonshotai/Kimi-K2.7-Code', 'commandcode')).to.equal(256000);
+        expect(getModelContextTokens('xai/grok-4.6', 'commandcode')).to.equal(500000);
+        expect(getModelContextTokens('claude-haiku-4-5-20251001', 'commandcode')).to.equal(200000);
+        expect(getModelContextTokens('Qwen/Qwen3.8-27B', 'commandcode')).to.equal(262144);
+    });
+
+    it('derives output limits from the underlying model family', () => {
+        expect(getModelOutputTokens('deepseek/deepseek-v4-pro', 'commandcode')).to.equal(384000);
+        expect(getModelOutputTokens('moonshotai/Kimi-K3', 'commandcode')).to.equal(131072);
+        expect(getModelOutputTokens('MiniMaxAI/MiniMax-M3', 'commandcode')).to.equal(128000);
+    });
+
+    it('exposes upstream reasoning controls and sends reasoning_effort', () => {
+        expect(getModelReasoningCapability('commandcode', 'zai-org/GLM-5.2')).to.deep.equal({
+            kind: 'effort',
+            options: ['none', 'high', 'max'],
+            defaultValue: 'max',
+        });
+        expect(getModelReasoningCapability('commandcode', 'moonshotai/Kimi-K3')).to.deep.equal({
+            kind: 'effort',
+            options: ['low', 'high', 'max'],
+            defaultValue: 'high',
+        });
+        expect(getModelReasoningCapability('commandcode', 'sakana/fugu-ultra').kind).to.equal('none');
+        expect(getThinkingParams('zai-org/GLM-5.2', 'commandcode', 'openai-chat-completions', 'high'))
+            .to.deep.equal({ reasoningEffort: 'high' });
+    });
+});
+
+describe('Command Code Messages provider support', () => {
+    it('registers the Anthropic Messages endpoint with the 8 Claude models', () => {
+        const provider = getProvider('commandcode-messages');
+        expect(provider).to.include({
+            endpoint: 'https://api.commandcode.ai/provider/v1',
+            requiresApiKey: true,
+            isOpenAICompatible: false,
+            supportsToolUse: true,
+            supportsStreaming: true,
+            supportsFIM: false,
+            supportsVision: true,
+            defaultModel: 'claude-sonnet-5',
+        });
+        expect(provider.models).to.deep.equal([
+            'claude-sonnet-5',
+            'claude-sonnet-4-6',
+            'claude-fable-5-1',
+            'claude-fable-5',
+            'claude-opus-5',
+            'claude-opus-4-8',
+            'claude-opus-4-7',
+            'claude-haiku-4-5-20251001',
+        ]);
+        expect(provider.models).to.include(provider.defaultModel);
+    });
+
+    it('uses the Anthropic messages wire format', () => {
+        expect(getProviderApiFormat('commandcode-messages', 'claude-sonnet-5')).to.equal('anthropic-messages');
+        expect(getProviderApiFormat('commandcode-messages', 'claude-haiku-4-5-20251001')).to.equal('anthropic-messages');
+    });
+
+    it('resolves catalog context windows with provider-scoped keys', () => {
+        expect(getModelContextTokens('claude-sonnet-5', 'commandcode-messages')).to.equal(1000000);
+        expect(getModelContextTokens('claude-haiku-4-5-20251001', 'commandcode-messages')).to.equal(200000);
+    });
+
+    it('derives output limits from the underlying Claude model family', () => {
+        expect(getModelOutputTokens('claude-sonnet-5', 'commandcode-messages')).to.equal(128000);
+        expect(getModelOutputTokens('claude-haiku-4-5-20251001', 'commandcode-messages')).to.equal(64000);
+    });
+
+    it('exposes Claude reasoning controls', () => {
+        const capability = getModelReasoningCapability('commandcode-messages', 'claude-sonnet-5');
+        expect(capability.kind).to.not.equal('none');
+        expect(capability.kind).to.equal('effort');
     });
 });
 
@@ -474,6 +580,8 @@ describe('getProviderApiFormat', () => {
             deepinfra: 'openai-chat-completions',
             opencode: 'openai-chat-completions',
             'opencode-go': 'openai-chat-completions',
+            commandcode: 'openai-chat-completions',
+            'commandcode-messages': 'anthropic-messages',
             kimi: 'openai-chat-completions',
             'kimi-code-plan': 'openai-chat-completions',
         } as const;

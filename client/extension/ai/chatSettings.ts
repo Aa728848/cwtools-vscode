@@ -13,6 +13,7 @@ import * as cp from 'child_process';
 import { promisify } from 'util';
 import type { ConnectionTestSettings, PanelSettings, HostMessage, CustomApiFormat, ModelReasoningCapability, ReasoningEffort } from './types';
 import { isCodexServiceTier, isReasoningEffort, isResponseVerbosity } from './types';
+import { getCommandCodeAccountStatus, type CommandCodeAccountStatus } from './commandcode/accountService';
 import type { AIService } from './aiService';
 import type { AntigravityLogin } from './antigravity/oauthService';
 import type { SubscriptionProxyMode } from '../../shared/subscriptionProxy';
@@ -285,6 +286,9 @@ export class ChatSettingsManager {
         const subscriptionProxy = showPanel || config.provider === 'codex-chatgpt' || config.provider === 'antigravity'
             ? await this.aiService.getSubscriptionProxyService().getStatus()
             : undefined;
+        const commandcodeAccount = showPanel || config.provider === 'commandcode' || config.provider === 'commandcode-messages'
+            ? await this.getCommandCodeAccountStatus()
+            : undefined;
 
         const providers = Object.values(BUILTIN_PROVIDERS).map(p => {
             const customNonFim = p.id === 'custom' && config.customApiFormat !== 'openai-chat-completions';
@@ -312,9 +316,15 @@ export class ChatSettingsManager {
 
         const hasKeyMap: Record<string, boolean> = {};
         for (const p of providers) {
-            hasKeyMap[p.id] = p.authKind === 'chatgpt-oauth' || p.authKind === 'antigravity-oauth'
-                ? false
-                : !!(await this.aiService.getKeyForProvider(p.id));
+            let hasKey = false;
+            if (p.authKind !== 'chatgpt-oauth' && p.authKind !== 'antigravity-oauth') {
+                if (p.id === 'commandcode' || p.id === 'commandcode-messages') {
+                    hasKey = !!((await this.aiService.getKeyForProvider('commandcode')) || (await this.aiService.getKeyForProvider('commandcode-messages')));
+                } else {
+                    hasKey = !!(await this.aiService.getKeyForProvider(p.id));
+                }
+            }
+            hasKeyMap[p.id] = hasKey;
         }
 
         const webConfig = vs.workspace.getConfiguration('stellarisLanguageServices.ai.web');
@@ -440,6 +450,7 @@ export class ChatSettingsManager {
             reasoningCapabilities,
             codexAccount,
             antigravityAccount,
+            commandcodeAccount,
             subscriptionProxy,
         });
     }
@@ -696,7 +707,8 @@ export class ChatSettingsManager {
             return;
         }
 
-        if (provider.requiresApiKey && !apiKey && providerId !== 'custom' && providerId !== 'opencode' && providerId !== 'opencode-go') {
+        // Command Code's /models catalog is public, so no API key is needed to list models.
+        if (provider.requiresApiKey && !apiKey && providerId !== 'custom' && providerId !== 'opencode' && providerId !== 'opencode-go' && providerId !== 'commandcode' && providerId !== 'commandcode-messages') {
             this.postMessage({ type: 'apiModelsFetched', providerId, models: [], error: 'API Key is required to fetch models' });
             return;
         }
@@ -840,9 +852,12 @@ export class ChatSettingsManager {
         const providerId = settings?.provider ?? saved.provider;
         const provider = getProvider(providerId);
         const rawSettingsKey = settings?.apiKey ?? '';
-        const apiKey = (rawSettingsKey && !rawSettingsKey.startsWith('\u2022'))
+        let apiKey = (rawSettingsKey && !rawSettingsKey.startsWith('\u2022'))
             ? rawSettingsKey
             : await this.aiService.getKeyForProvider(providerId);
+        if (!apiKey && (providerId === 'commandcode' || providerId === 'commandcode-messages')) {
+            apiKey = (await this.aiService.getKeyForProvider('commandcode')) || (await this.aiService.getKeyForProvider('commandcode-messages'));
+        }
         const endpoint = settings?.endpoint || getEffectiveEndpoint(providerId, this.aiService.getEndpointForProvider(providerId));
         const customApiFormat = normalizeCustomApiFormatSetting(settings?.customApiFormat ?? saved.customApiFormat);
         const model = settings?.model || undefined;
@@ -999,6 +1014,17 @@ export class ChatSettingsManager {
         } catch (error) {
             this.postMessage({ type: 'testConnectionResult', ok: false, message: settingsErrorMessage(error) });
         }
+    }
+
+    async refreshCommandCodeQuota(targetSurface: 'chat' | 'manager' = 'chat'): Promise<void> {
+        await this.getCommandCodeAccountStatus(true);
+        await this.buildAndSendSettingsData(true, targetSurface);
+    }
+
+    private async getCommandCodeAccountStatus(force = false): Promise<CommandCodeAccountStatus | undefined> {
+        const apiKey = (await this.aiService.getKeyForProvider('commandcode'))
+            || (await this.aiService.getKeyForProvider('commandcode-messages'));
+        return getCommandCodeAccountStatus(apiKey, force);
     }
 
     async refreshCodexAccount(): Promise<void> {

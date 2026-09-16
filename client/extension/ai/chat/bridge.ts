@@ -121,6 +121,9 @@ export async function routeWebviewMessage(
         case 'codexRefreshAccount':
             await provider.settingsManager.refreshCodexAccount();
             break;
+        case 'refreshCommandCodeQuota':
+            await provider.settingsManager.refreshCommandCodeQuota(sourceSurface);
+            break;
         case 'codexLogout':
             await provider.settingsManager.logoutCodex();
             break;

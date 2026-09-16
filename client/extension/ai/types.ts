@@ -274,6 +274,8 @@ export interface CodexAccountStatus {
 import type { AntigravityQuotaBucket, AntigravityAccountStatus } from '../../shared/antigravityAccount';
 export type { AntigravityQuotaBucket, AntigravityAccountStatus };
 export { isAntigravityAccountStatus } from '../../shared/antigravityAccount';
+import type { CommandCodeAccountStatus, CommandCodeWindowLimit, CommandCodeCredits, CommandCodeUsageSummary, CommandCodeSubscription, CommandCodeUser } from './commandcode/accountService';
+export type { CommandCodeAccountStatus, CommandCodeWindowLimit, CommandCodeCredits, CommandCodeUsageSummary, CommandCodeSubscription, CommandCodeUser };
 
 export type CustomApiFormat =
     | 'openai-chat-completions'
@@ -2542,6 +2544,7 @@ export type WebViewMessage =
     | { type: 'codexLogin' }
     | { type: 'codexRefreshAccount' }
     | { type: 'codexLogout' }
+    | { type: 'refreshCommandCodeQuota' }
     | { type: 'antigravityLogin' }
     | { type: 'antigravityRefreshAccount' }
     | { type: 'antigravityLogout' }
@@ -2611,7 +2614,7 @@ export type HostMessage =
     | { type: 'slashCommandList'; commands: SlashCommandDescriptor[] }
     | { type: 'slashCommandResult'; command: string; status: 'success' | 'error' | 'queued' | 'needsInput'; message: string; uiAction?: 'openModelMenu' | 'openReasoningMenu' | 'openPermissionsMenu' }
     | { type: 'todoUpdate'; todos: TodoItem[]; agentId?: string; threadId?: string; runId?: string }
-    | { type: 'settingsData'; providers: ProviderMeta[]; current: PanelSettings; ollamaModels?: OllamaModelInfo[]; showPanel?: boolean; targetSurface?: 'chat' | 'manager'; modelContextTokens?: Record<string, number>; thinkingModelPrefixes?: string[]; reasoningCapabilities?: Record<string, ModelReasoningCapability>; codexAccount?: CodexAccountStatus; antigravityAccount?: AntigravityAccountStatus; subscriptionProxy?: SubscriptionProxyStatus }
+    | { type: 'settingsData'; providers: ProviderMeta[]; current: PanelSettings; ollamaModels?: OllamaModelInfo[]; showPanel?: boolean; targetSurface?: 'chat' | 'manager'; modelContextTokens?: Record<string, number>; thinkingModelPrefixes?: string[]; reasoningCapabilities?: Record<string, ModelReasoningCapability>; codexAccount?: CodexAccountStatus; antigravityAccount?: AntigravityAccountStatus; commandcodeAccount?: CommandCodeAccountStatus; subscriptionProxy?: SubscriptionProxyStatus }
     | { type: 'subscriptionProxyStatus'; status: SubscriptionProxyStatus; saved?: boolean; targetSurface?: 'chat' | 'manager' }
     | { type: 'ollamaModels'; models: OllamaModelInfo[]; error?: string }
     | { type: 'apiModelsFetched'; providerId: string; models: Array<{ id: string }>; dynContexts?: Record<string, number>; reasoningCapabilities?: Record<string, ModelReasoningCapability>; error?: string; ctxNote?: string }

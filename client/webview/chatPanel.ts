@@ -48,6 +48,7 @@ import {
     resolveSettingsModelContextTokens,
 } from './chat/settingsOverview';
 import { buildCodexQuotaHtml } from './chat/codexQuota';
+import { buildCommandCodeQuotaHtml } from './chat/commandcodeQuota';
 import {
     renderTopicSearchResults as renderTopicSearchResultsView,
     renderTopics as renderTopicsView,
@@ -374,6 +375,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
     let settingsOllamaModels: any[] = [];
     let settingsCodexAccount: any = undefined;
     let settingsAntigravityAccount: AntigravityAccountStatus | undefined;
+    let settingsCommandCodeAccount: any = undefined;
     let settingsSubscriptionProxy: SubscriptionProxyStatus | undefined;
     let cachedSettingsData: { providers: any[]; current: any; ollamaModels: any[] } | undefined;
     type ReasoningEffortValue = 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
@@ -2977,6 +2979,9 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
     });
     bindBtn('codexRefreshBtn', () => {
         vscode.postMessage({ type: 'codexRefreshAccount' });
+    });
+    bindBtn('commandcodeRefreshBtn', () => {
+        vscode.postMessage({ type: 'refreshCommandCodeQuota' });
     });
     bindBtn('codexLogoutBtn', () => {
         vscode.postMessage({ type: 'codexLogout' });
@@ -6921,6 +6926,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
 
             case 'settingsData':
                 settingsCodexAccount = msg.codexAccount;
+                settingsCommandCodeAccount = msg.commandcodeAccount;
                 settingsAntigravityAccount = isAntigravityAccountStatus(msg.antigravityAccount) ? msg.antigravityAccount : undefined;
                 if (isSubscriptionProxyStatus(msg.subscriptionProxy)) settingsSubscriptionProxy = msg.subscriptionProxy;
                 cachedSettingsData = {
@@ -7850,6 +7856,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
             })),
             codexAccount: settingsCodexAccount,
             antigravityAccount: settingsAntigravityAccount,
+            commandcodeAccount: settingsCommandCodeAccount,
             subscriptionProxy: settingsSubscriptionProxy,
             current,
             customApiFormat: current.customApiFormat,
@@ -8243,10 +8250,13 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         const deleteBtn = document.getElementById('deleteApiKeyBtn') as HTMLButtonElement | null;
         const isCodex = p?.authKind === 'chatgpt-oauth';
         const isAntigravity = p?.authKind === 'antigravity-oauth';
+        const isCommandCode = p?.id === 'commandcode' || p?.id === 'commandcode-messages';
         const antigravityGroup = document.getElementById('antigravityAccountGroup');
+        const commandcodeGroup = document.getElementById('commandcodeAccountGroup');
         const proxyGroup = document.getElementById('subscriptionProxyGroup');
         if (proxyGroup) proxyGroup.style.display = isCodex || isAntigravity ? '' : 'none';
         if (antigravityGroup) antigravityGroup.style.display = isAntigravity ? '' : 'none';
+        if (commandcodeGroup) commandcodeGroup.style.display = isCommandCode ? '' : 'none';
         if (codexGroup) codexGroup.style.display = isCodex ? '' : 'none';
         if (codexSpeedGroup) codexSpeedGroup.style.display = isCodex ? '' : 'none';
         if (responseVerbosityGroup) responseVerbosityGroup.style.display = isCodex ? '' : 'none';
@@ -8305,6 +8315,41 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
             }
             refreshSettingsOverview();
             return;
+        }
+        if (isCommandCode) {
+            const accountStatus = document.getElementById('commandcodeAccountStatus');
+            const quotaStatus = document.getElementById('commandcodeQuotaStatus');
+            const account = settingsCommandCodeAccount;
+            if (accountStatus) {
+                if (account?.available && account.hasKey) {
+                    const identity = [account.user?.name || account.user?.userName, account.planId].filter(Boolean).join(' · ');
+                    accountStatus.innerHTML = svgIcon('check') + escapeHtml(tr(`Active${identity ? ` · ${identity}` : ''}`, `已就绪${identity ? ` · ${identity}` : ''}`));
+                    accountStatus.style.color = '#4caf50';
+                } else if (account?.error) {
+                    accountStatus.innerHTML = svgIcon('warning') + escapeHtml(account.error);
+                    accountStatus.style.color = '#ff9800';
+                } else if (!p?.hasKey) {
+                    accountStatus.innerHTML = svgIcon('warning') + escapeHtml(tr('API key not configured', '尚未配置 API Key'));
+                    accountStatus.style.color = '#ff9800';
+                } else {
+                    accountStatus.innerHTML = '';
+                }
+            }
+            if (quotaStatus) {
+                quotaStatus.innerHTML = buildCommandCodeQuotaHtml(account, {
+                    used: tr('used', '已用'),
+                    remaining: tr('remaining', '剩余'),
+                    resets: tr('Resets', '重置'),
+                    unknownReset: tr('unknown reset time', '重置时间未知'),
+                    unavailable: tr('Quota details are unavailable for this account.', '当前账户暂未返回额度详情。'),
+                    fiveHourLimit: tr('5-hour limit', '5 小时额度'),
+                    weeklyLimit: tr('Weekly limit', '周额度'),
+                    plan: tr('Plan', '套餐'),
+                    monthlyCredits: tr('Monthly credits', '月度额度'),
+                    purchasedCredits: tr('Purchased credits', '已购额度'),
+                    freeCredits: tr('Free credits', '免费额度'),
+                }, chatI18n.locale === 'zh-cn' ? 'zh-CN' : 'en');
+            }
         }
         if (p && p.requiresApiKey === false) {
             group.style.display = 'none';

@@ -17,6 +17,7 @@ const OFFICIAL_OPENAI_PREFIX_PROVIDERS = new Set([
 const ANTHROPIC_BREAKPOINT_PROVIDERS = new Set(['claude', 'minimax-token-plan']);
 const GATEWAY_PROVIDERS = new Set([
     'openrouter', 'siliconflow', 'github', 'together', 'deepinfra', 'opencode', 'opencode-go',
+    'commandcode', 'commandcode-messages',
 ]);
 
 function normalizedEndpointHost(endpoint?: string): string {

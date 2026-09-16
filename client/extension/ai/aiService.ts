@@ -2432,7 +2432,7 @@ export class AIService {
         const buildClaudeHeaders = (authMode: 'x-api-key' | 'bearer'): Record<string, string> => ({
             'Content-Type': 'application/json',
             'anthropic-version': '2023-06-01',
-            ...(providerId === 'opencode' || providerId === 'opencode-go'
+            ...(providerId === 'opencode' || providerId === 'opencode-go' || providerId === 'commandcode-messages'
                 ? this.buildAuthHeaders(providerId, apiKey)
                 : authMode === 'bearer'
                     ? this.buildAuthHeaders(providerId, apiKey)

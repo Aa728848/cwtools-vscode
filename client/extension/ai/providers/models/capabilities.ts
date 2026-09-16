@@ -274,6 +274,80 @@ export const OPENCODE_GO_MODEL_LIMITS: Record<string, { context: number; output:
     'deepseek-v4-flash': { context: 1000000, output: 384000 },
 };
 
+
+/** Command Code Provider API catalog limits (https://api.commandcode.ai/provider/v1/models). */
+export const COMMANDCODE_MODEL_CONTEXT_TOKENS: Record<string, number> = {
+    'claude-sonnet-5': 1000000,
+    'claude-sonnet-4-6': 1000000,
+    'claude-fable-5-1': 1000000,
+    'claude-fable-5': 1000000,
+    'claude-opus-5': 1000000,
+    'claude-opus-4-8': 1000000,
+    'claude-opus-4-7': 1000000,
+    'claude-haiku-4-5-20251001': 200000,
+    'gpt-5.6-sol': 1050000,
+    'gpt-5.6-terra': 1050000,
+    'gpt-5.6-luna': 1050000,
+    'gpt-5.5': 400000,
+    'gpt-5.4': 400000,
+    'gpt-5.3-codex': 400000,
+    'gpt-5.4-mini': 400000,
+    'deepseek/deepseek-v4-pro': 1000000,
+    'deepseek/deepseek-v4-flash': 1000000,
+    'deepseek/deepseek-v4-flash-vision-exp': 1000000,
+    'deepseek/deepseek-v4-flash-fast': 1000000,
+    'deepseek/deepseek-v4.1-flash': 1000000,
+    'moonshotai/Kimi-K3': 1000000,
+    'moonshotai/Kimi-K2.7-Code': 256000,
+    'moonshotai/Kimi-K2.7-Code-Highspeed': 262000,
+    'moonshotai/Kimi-K2.6': 256000,
+    'moonshotai/Kimi-K2.5': 256000,
+    'z-ai/glm-5.3-flash': 1048576,
+    'zai-org/GLM-5.3': 1000000,
+    'zai-org/GLM-5.2': 1000000,
+    'zai-org/GLM-5.2-Fast': 1000000,
+    'zai-org/GLM-5.1': 200000,
+    'zai-org/GLM-5': 200000,
+    'MiniMaxAI/MiniMax-M3': 1000000,
+    'MiniMaxAI/MiniMax-M2.7': 200000,
+    'MiniMaxAI/MiniMax-M2.5': 200000,
+    'xiaomi/mimo-v2.5-pro': 1000000,
+    'xiaomi/mimo-v2.5': 1000000,
+    'Qwen/Qwen3.8-Max-0902': 1000000,
+    'Qwen/Qwen3.8-Max': 1000000,
+    'Qwen/Qwen3.8-27B': 262144,
+    'Qwen/Qwen3.8-Flash': 1000000,
+    'Qwen/Qwen3.7-Max': 1000000,
+    'Qwen/Qwen3.7-Plus': 1000000,
+    'Qwen/Qwen3.7-Flash': 1000000,
+    'Qwen/Qwen3.6-Max-Preview': 200000,
+    'Qwen/Qwen3.6-Plus': 200000,
+    'meituan/LongCat-2.0:free': 1048576,
+    'stepfun/Step-3.7-Flash': 256000,
+    'stepfun/Step-3.5-Flash': 1000000,
+    'tencent/hy3-paid': 262144,
+    'tencent/hy4-preview': 1048576,
+    'google/gemini-3.8-flash': 1000000,
+    'google/gemini-3.7-flash': 1048576,
+    'google/gemini-3.6-flash': 1000000,
+    'google/gemini-3.5-flash': 1000000,
+    'google/gemini-3.5-flash-lite': 1000000,
+    'google/gemini-3.1-flash-lite': 1000000,
+    'sakana/fugu-ultra': 1000000,
+    'nvidia/nemotron-3-ultra-550b-a55b': 1000000,
+    'thinkingmachines/inkling': 256000,
+    'thinkingmachines/inkling-small': 1000000,
+    'poolside/laguna-s-2.1-free': 256000,
+    'inclusionai/ling-3.0-flash-sante:free': 262144,
+    'meta/muse-spark-1.1': 1048576,
+    'meta/muse-spark-1.2': 1048576,
+    'meta/muse-spark-1.2-contributor': 1048576,
+    'meta/muse-spark-1.3': 1048576,
+    'meta/muse-spark-1.3-contributor': 1048576,
+    'xai/grok-4.5': 500000,
+    'xai/grok-4.6': 500000,
+};
+
 /**
  * Per-model context window sizes (tokens).
  */
@@ -475,6 +549,17 @@ export const MODEL_CONTEXT_TOKENS: Record<string, number> = {
     ...Object.fromEntries(
         Object.entries(OPENCODE_GO_MODEL_LIMITS).map(([model, limits]) => [`opencode-go:${model}`, limits.context])
     ),
+    ...Object.fromEntries(
+        Object.entries(COMMANDCODE_MODEL_CONTEXT_TOKENS).map(([model, context]) => [`commandcode:${model}`, context])
+    ),
+    'commandcode-messages:claude-sonnet-5': 1000000,
+    'commandcode-messages:claude-sonnet-4-6': 1000000,
+    'commandcode-messages:claude-fable-5-1': 1000000,
+    'commandcode-messages:claude-fable-5': 1000000,
+    'commandcode-messages:claude-opus-5': 1000000,
+    'commandcode-messages:claude-opus-4-8': 1000000,
+    'commandcode-messages:claude-opus-4-7': 1000000,
+    'commandcode-messages:claude-haiku-4-5-20251001': 200000,
 };
 
 /**

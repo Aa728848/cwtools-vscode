@@ -65,6 +65,7 @@ const validators = {
         modelContextTokens: optional(isObject), thinkingModelPrefixes: optional(isStringArray),
         reasoningCapabilities: optional(isObject), codexAccount: optional(isObject),
         antigravityAccount: optional(isAntigravityAccountStatus),
+        commandcodeAccount: optional(isObject),
         subscriptionProxy: optional(isSubscriptionProxyStatus),
     }),
     subscriptionProxyStatus: fields({ status: isSubscriptionProxyStatus }, { saved: optional(isBoolean), targetSurface: optional(isSurface) }),

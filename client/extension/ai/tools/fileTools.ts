@@ -1662,13 +1662,7 @@ export class FileToolHandler {
 
     // - write_localisation -
 
-    async writeLocalisation(args: {
-        filePath: string;
-        language: string;
-        entries: Array<{ key: string; value: string; number?: number; comment?: string }>;
-        /** Explicit multi-file transaction: sibling language files to write in lockstep. */
-        languages?: string[];
-    }, context?: import('../types').AgentToolContext): Promise<import('../types').EditFileResult> {
+    async writeLocalisation(args: import('../types').WriteLocalisationArgs, context?: import('../types').AgentToolContext): Promise<import('../types').EditFileResult> {
         // Explicit multi-file transaction: validate every target first; if any
         // target is invalid, reject the whole transaction with no partial writes.
         const languages = Array.isArray(args.languages) && args.languages.length > 0
@@ -1711,6 +1705,7 @@ export class FileToolHandler {
             }
             const results: string[] = [];
             const written: string[] = [];
+            const stagedFiles: import('../types').LocalisationStageRecord[] = [];
             for (const target of targets) {
                 written.push(target.filePath);
                 const result = await this.writeSingleLocalisation({
@@ -1718,6 +1713,7 @@ export class FileToolHandler {
                     language: target.languageTag,
                     entries: args.entries,
                 }, context);
+                if (result.success && result.stagedFiles) stagedFiles.push(...result.stagedFiles);
                 if (!result.success) {
                     const rollbackErrors: string[] = [];
                     for (const writtenPath of [...written].reverse()) {
@@ -1744,7 +1740,7 @@ export class FileToolHandler {
                 }
                 results.push(`${target.languageTag}: ${result.message ?? 'ok'}`);
             }
-            return { success: true, message: results.join(' | ') };
+            return { success: true, message: results.join(' | '), ...(stagedFiles.length > 0 ? { stagedFiles } : {}) };
         }
         return this.writeSingleLocalisation(args, context);
     }
@@ -1754,6 +1750,11 @@ export class FileToolHandler {
         language: string;
         entries: Array<{ key: string; value: string; number?: number; comment?: string }>;
     }, context?: import('../types').AgentToolContext): Promise<import('../types').EditFileResult> {
+        // Hash of the bytes this call built from, captured before the overlay is
+        // mutated. Overlay-resident content is hashed without its BOM, matching
+        // the base-hash convention the candidate transaction and LSP both use.
+        const pureSha256 = (value: string): string =>
+            crypto.createHash('sha256').update(value, 'utf8').digest('hex');
         try {
                 const filePath = await this.resolveAndAuthorizeWrite(args.filePath, 'write_localisation', context);
                 const targetError = this.validateLocalisationTarget(filePath);
@@ -1846,6 +1847,11 @@ export class FileToolHandler {
                 }
                 const finalContent = lines.join('\n') + '\n';
                 const withBom = (hasBom ? BOM : '') + finalContent;
+                // Hash the prior bytes exactly as they were read, BOM included:
+                // the LSP base-hash check hashes the whole file (and separately
+                // accepts BOM-prefixed content), so normalizing here would only
+                // create a mismatch for existing localisation files.
+                const baseHash = vfsOverlay && originalContent ? pureSha256(originalContent) : undefined;
 
                 if (fs.existsSync(filePath)) {
                     (context?.onBeforeFileWrite ?? this.ctx.onBeforeFileWrite)?.(filePath, originalContent);
@@ -1901,6 +1907,9 @@ export class FileToolHandler {
                     localKeyIndexed,
                     globalLocalisationFresh,
                     stats: { linesAdded: added, linesRemoved: 0 },
+                    // Only meaningful for speculative writes: the caller owns the
+                    // overlay and is the one that can register these candidates.
+                    ...(vfsOverlay ? { stagedFiles: [{ path: filePath, content: withBom, baseHash }] } : {}),
                 };
             } catch (e) {
                 return { success: false, message: `write_localisation failed: ${e instanceof Error ? e.message : String(e)}` };

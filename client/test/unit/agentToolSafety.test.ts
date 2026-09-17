@@ -2352,6 +2352,112 @@ describe('agent tool progress and aborts', () => {
         expect(executeInternal.called).to.equal(false);
     });
 
+    it('stages write_localisation candidates into the active transaction instead of leaking them to disk', async () => {
+        stubConfigOverrides['policy.preset'] = 'workspace-auto';
+        const locDir = path.join(workspaceRoot, 'localisation', 'english');
+        fs.mkdirSync(locDir, { recursive: true });
+        const target = path.join(locDir, 'star_events_l_english.yml');
+        const existing = '\uFEFFl_english:\n existing.1:0 "Existing"\n';
+        fs.writeFileSync(target, existing, 'utf8');
+
+        let overlayCalls = 0;
+        const client = {
+            sendRequest: async (_method: string, request: any) => {
+                if (request.command === 'cwtools.ai.validateOverlay') {
+                    overlayCalls++;
+                    const file = request.arguments[0].files[0];
+                    return {
+                        ok: true,
+                        validationLevel: 'catalog-overlay-batch',
+                        files: [{
+                            ok: true,
+                            uri: file.uri,
+                            validationLevel: 'catalog-overlay-batch',
+                            contentHash: require('crypto').createHash('sha256').update(file.content, 'utf8').digest('hex'),
+                            diagnostics: [],
+                        }],
+                    };
+                }
+                return { ok: true };
+            },
+        };
+        const executor = new AgentToolExecutor(client as any, workspaceRoot);
+        const context = { runnerOptions: { schedulingState: PARADOX_WRITE }, scopeId: 'loc-run' } as any;
+
+        const begin = await executor.execute('candidate_transaction', { action: 'begin' }, context) as any;
+        expect(begin.success).to.equal(true);
+
+        const written = await executor.execute('write_localisation', {
+            filePath: target,
+            language: 'l_english',
+            entries: [{ key: 'star_oth.1.title', value: 'New Title' }],
+        }, context) as any;
+        expect(written.success).to.equal(true);
+
+        // The whole point of the fix: the transaction now knows the file, and
+        // nothing has reached disk yet.
+        const status = await executor.execute('candidate_transaction', { action: 'status', transactionId: begin.transactionId }, context) as any;
+        expect(status.files).to.deep.equal([target]);
+        expect(status.bytes).to.be.greaterThan(0);
+        expect(fs.readFileSync(target, 'utf8')).to.equal(existing);
+
+        const validated = await executor.execute('candidate_transaction', { action: 'validate', transactionId: begin.transactionId }, context) as any;
+        expect(validated.success).to.equal(true);
+        expect(validated.infrastructureError).to.equal(undefined);
+        expect(overlayCalls).to.equal(1);
+
+        // The overlay content and the staged candidate must be the same bytes.
+        const candidate = (executor as any).candidateTransactions.files[0];
+        expect(candidate.content).to.equal((executor as any).vfsOverlay.get(target));
+    });
+
+    it('rejects a localisation transaction when the overlay validator cannot run, without claiming the content was bad', async () => {
+        stubConfigOverrides['policy.preset'] = 'workspace-auto';
+        const locDir = path.join(workspaceRoot, 'localisation', 'english');
+        fs.mkdirSync(locDir, { recursive: true });
+        const target = path.join(locDir, 'broken_l_english.yml');
+        const existing = '\uFEFFl_english:\n broken.1:0 "Existing"\n';
+        fs.writeFileSync(target, existing, 'utf8');
+
+        const client = { sendRequest: async () => ({ ok: true, files: [] }) };
+        const executor = new AgentToolExecutor(client as any, workspaceRoot);
+        const context = { runnerOptions: { schedulingState: PARADOX_WRITE }, scopeId: 'loc-run' } as any;
+
+        const begin = await executor.execute('candidate_transaction', { action: 'begin' }, context) as any;
+        await executor.execute('write_localisation', {
+            filePath: target,
+            language: 'l_english',
+            entries: [{ key: 'broken.2.title', value: 'Another' }],
+        }, context);
+
+        const validated = await executor.execute('candidate_transaction', { action: 'validate', transactionId: begin.transactionId }, context) as any;
+        expect(validated.success).to.equal(false);
+        // Distinguishable from a content rejection, and the transaction stays usable.
+        expect(validated.infrastructureError).to.be.a('string');
+        expect(validated.state).to.equal('active');
+        expect(fs.readFileSync(target, 'utf8')).to.equal(existing);
+    });
+
+    it('lets an empty candidate transaction commit as a no-op', async () => {
+        stubConfigOverrides['policy.preset'] = 'workspace-auto';
+        const executor = new AgentToolExecutor({} as any, workspaceRoot);
+        const context = { runnerOptions: { schedulingState: PARADOX_WRITE }, scopeId: 'empty-run' } as any;
+
+        const begin = await executor.execute('candidate_transaction', { action: 'begin' }, context) as any;
+        // An empty batch must not be sent to the LSP validator: it rejects empty
+        // requests, which used to strand the transaction before commit.
+        const validated = await executor.execute('candidate_transaction', { action: 'validate', transactionId: begin.transactionId }, context) as any;
+        expect(validated.success).to.equal(true);
+        expect(validated.infrastructureError).to.equal(undefined);
+
+        const committed = await executor.execute('candidate_transaction', { action: 'commit', transactionId: begin.transactionId }, context) as any;
+
+        expect(committed.success).to.equal(true);
+        expect(committed.state).to.equal('committed');
+        expect(committed.files).to.deep.equal([]);
+        expect(committed.commit.rollback.attempted).to.equal(false);
+    });
+
     it('keeps sub-agent git and command tools out of the runtime', async () => {
         const executor = createExecutor();
         const executeInternal = sinon.stub(executor as any, 'executeInternal').resolves({ success: true });

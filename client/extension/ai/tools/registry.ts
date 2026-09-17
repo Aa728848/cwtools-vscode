@@ -418,6 +418,10 @@ const LOC_MODES = new Set([
     'list_directory', 'glob_files', 'find_sprite_candidates', 'find_sound_candidates', 'grep',
     'workspace_symbols', 'document_symbols', 'go_to_definition', 'find_references', 'verify_pdx_identifier', 'get_lsp_status', 'get_diagnostics',
     'query_types', 'query_rules', 'query_cwt_schema', 'query_override_modes', 'search_rule_capabilities', 'explain_scope', 'parse_pdx_fragment', 'todo_write', 'write_localisation', 'git_ops',
+    // Localisation runs must be able to manage the candidate transaction that
+    // `write_localisation` stages into; otherwise their writes can only land in
+    // an overlay they have no way to validate or commit.
+    'candidate_transaction',
     'analyze_diagnostic_error', 'save_workflow', ...INTERACTION
 ]);
 const ORCHESTRATOR_MODES = new Set([...BASE_READ, ...INTERACTION, ...NETWORK, ..._MCP, 'set_memory', 'todo_write', 'write_file', 'write_design_blueprint', ...ORCHESTRATION, 'git_ops', 'analyze_diagnostic_error', 'save_workflow']);

@@ -671,14 +671,18 @@ export class AgentToolExecutor {
         return active;
     }
 
+    /**
+     * Binds the active candidate transaction's overlay to the exact context a
+     * nested tool executes with. Write paths read
+     * `context.runnerOptions.vfsOverlay` before falling back to the handler's
+     * own context, so without this every staged candidate would leak to disk.
+     */
     private candidateContext(context?: import('./types').AgentToolContext): import('./types').AgentToolContext {
-        if (!context?.runnerOptions) throw new Error('Candidate transactions require an active scheduler context.');
+        const overlay = this.candidateOverlay;
+        if (!overlay || !context?.runnerOptions) return context ?? {};
         return {
             ...context,
-            runnerOptions: {
-                ...context.runnerOptions,
-                vfsOverlay: this.candidateOverlay ?? new Map<string, string>(),
-            },
+            runnerOptions: { ...context.runnerOptions, vfsOverlay: overlay },
         };
     }
 
@@ -716,12 +720,49 @@ export class AgentToolExecutor {
             return { success: true, mode: 'preview', candidate };
         }
         const transactionId = this.requireCandidateTransaction(args.transactionId, context);
-        if (this.candidateTransactions.state !== 'active') throw new Error('Candidate transaction is not active.');
+        if (!this.candidateTransactions.canValidate) throw new Error('Candidate transaction is not active.');
         this.candidateTransactions.stage(filePath, candidate.content, candidate.beforeHash);
         const overlay = this.vfsOverlay;
         if (!overlay) throw new Error('Candidate overlay is unavailable.');
         overlay.set(filePath, candidate.content);
         return { success: true, mode: 'stage', transactionId, candidate, message: candidate.summary };
+    }
+
+    /**
+     * Runs `write_localisation` inside an active candidate transaction and
+     * registers every file it touched with the transaction manager.
+     *
+     * Without this, the localisation path wrote only to the overlay while the
+     * manager stayed empty, so `validate`/commit were unreachable for mods that
+     * never use `typed_pdx_write`.
+     */
+    private async executeWriteLocalisation(
+        args: import('./types').WriteLocalisationArgs,
+        context?: import('./types').AgentToolContext,
+    ): Promise<import('./types').EditFileResult> {
+        const transactionContext = this.candidateContext(context);
+        const result = await this.fileHandler.writeLocalisation(args, transactionContext);
+        if (!result.success || !Array.isArray(result.stagedFiles) || result.stagedFiles.length === 0) return result;
+
+        const transactionId = this.candidateTransactions.id;
+        if (this.candidateTransactions.state !== 'active' || !transactionId) {
+            // The overlay this result reports no longer belongs to a live
+            // transaction, so the write never reached disk.
+            return {
+                success: false,
+                message: `write_localisation staged ${result.stagedFiles.length} file(s) into a candidate overlay, but no active transaction could own them. No files were written.`,
+            };
+        }
+        const overlay = this.vfsOverlay;
+        if (!overlay) return result;
+        for (const staged of result.stagedFiles) {
+            const baseHash = typeof staged.baseHash === 'string' && /^[a-f0-9]{64}$/i.test(staged.baseHash)
+                ? staged.baseHash
+                : undefined;
+            this.candidateTransactions.stage(staged.path, staged.content, baseHash);
+            overlay.set(staged.path, staged.content);
+        }
+        return { ...result, message: `${result.message ?? ''} (staged ${result.stagedFiles.length} file(s) in transaction ${transactionId}.)`.trim() };
     }
 
     private async validateCandidateOverlay(
@@ -815,7 +856,7 @@ export class AgentToolExecutor {
             }
             const transactionId = this.requireCandidateTransaction(args.transactionId, context);
             if (args.action === 'status') {
-                return { success: true, action: args.action, transactionId, state: this.candidateTransactions.state, files: this.candidateTransactions.files.map(file => file.path), bytes: this.candidateTransactions.bytes };
+                return { success: true, action: args.action, transactionId, state: this.candidateTransactions.state, files: this.candidateTransactions.paths, bytes: this.candidateTransactions.bytes };
             }
             if (args.action === 'discard') {
                 this.candidateTransactions.discard();
@@ -825,9 +866,17 @@ export class AgentToolExecutor {
                 return { success: true, action: args.action, transactionId, state: this.candidateTransactions.state };
             }
             if (args.action === 'validate') {
-                if (this.candidateTransactions.state !== 'active') throw new Error('Candidate transaction is not active.');
+                if (!this.candidateTransactions.canValidate) throw new Error('Candidate transaction is not active.');
                 let validationPassed = args.validationPassed !== false;
                 let validationError: string | undefined;
+                let infrastructureError: string | undefined;
+                if (this.candidateTransactions.files.length === 0) {
+                    // Nothing staged: validation is vacuously satisfied. Calling the
+                    // detached overlay validator with an empty batch is rejected as
+                    // an invalid request, which would strand the transaction.
+                    this.candidateTransactions.validate(true, this.candidateTransactions.fingerprint());
+                    return { success: true, action: args.action, transactionId, state: this.candidateTransactions.state, files: [], bytes: 0 };
+                }
                 const preflight = context?.onBeforePdxWrite;
                 if (preflight) {
                     for (const file of this.candidateTransactions.files) {
@@ -855,7 +904,25 @@ export class AgentToolExecutor {
                     }
                 }
                 if (validationPassed) {
-                    overlayValidation = await this.validateCandidateOverlay();
+                    try {
+                        overlayValidation = await this.validateCandidateOverlay();
+                    } catch (error) {
+                        // Transport/response failure: the candidates were never
+                        // judged. Keep the transaction active and report the cause
+                        // instead of leaving the caller unable to tell whether the
+                        // content or the validation interface failed.
+                        infrastructureError = error instanceof Error ? error.message : String(error);
+                        return {
+                            success: false,
+                            action: args.action,
+                            transactionId,
+                            state: this.candidateTransactions.state,
+                            files: this.candidateTransactions.paths,
+                            bytes: this.candidateTransactions.bytes,
+                            infrastructureError,
+                            error: `Candidate overlay validation could not run: ${infrastructureError}`,
+                        };
+                    }
                     const invalidFile = overlayValidation.files.find(file =>
                         file.ok !== true
                         || file.contentHash !== this.candidateTransactions.files.find(candidate => vs.Uri.file(candidate.path).toString() === file.uri)?.contentHash
@@ -866,7 +933,7 @@ export class AgentToolExecutor {
                     }
                 }
                 this.candidateTransactions.validate(validationPassed, this.candidateTransactions.fingerprint());
-                return { success: validationPassed, action: args.action, transactionId, state: this.candidateTransactions.state, files: this.candidateTransactions.files.map(file => file.path), bytes: this.candidateTransactions.bytes, overlayValidation, error: validationError };
+                return { success: validationPassed, action: args.action, transactionId, state: this.candidateTransactions.state, files: this.candidateTransactions.paths, bytes: this.candidateTransactions.bytes, overlayValidation, error: validationError };
             }
             const files = this.candidateTransactions.files;
             const baselineDiagnostics = new Map<string, import('./runner/diagnosticSnapshot').DiagnosticSnapshot>();
@@ -2461,7 +2528,7 @@ export class AgentToolExecutor {
             case 'glob_files':
                 result = await this.fileHandler.globFiles(args as any, context); break;
             case 'write_localisation':
-                result = await this.fileHandler.writeLocalisation(args as any, context); break;
+                result = await this.executeWriteLocalisation(args as any, context); break;
             case 'write_design_blueprint':
                 result = await this.fileHandler.writeDesignBlueprint(args as any, context); break;
             case 'save_workflow':

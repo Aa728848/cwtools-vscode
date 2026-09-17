@@ -1707,6 +1707,28 @@ export interface EditFileResult {
     stats?: { linesAdded: number; linesRemoved: number };
     /** If agentFileWriteMode === 'confirm', write was queued, not yet applied */
     pendingDiff?: string;
+    /**
+     * Exact bytes this call produced for each file it touched. Present when the
+     * write went to an in-memory overlay instead of disk, so the caller can
+     * register the candidates with a candidate transaction.
+     */
+    stagedFiles?: LocalisationStageRecord[];
+}
+
+/** One file's speculative content produced by `write_localisation`. */
+export interface LocalisationStageRecord {
+    path: string;
+    content: string;
+    /** SHA-256 of the content the candidate was built from, when it already existed. */
+    baseHash?: string;
+}
+
+export interface WriteLocalisationArgs {
+    filePath: string;
+    language: string;
+    entries: Array<{ key: string; value: string; number?: number; comment?: string }>;
+    /** Explicit multi-file transaction: sibling language files to write in lockstep. */
+    languages?: string[];
 }
 
 export interface ReplaceLinesArgs {
@@ -1794,6 +1816,12 @@ export interface CandidateTransactionResult {
         limitations?: string[];
         files: Array<{ uri?: string; ok?: boolean; validationLevel?: string; contentHash?: string; diagnostics?: ValidationError[]; error?: string; status?: string }>;
     };
+    /**
+     * Set when validation could not run at all (LSP transport, malformed or
+     * incomplete response). Distinguishes an infrastructure failure from a
+     * genuine candidate rejection, which leaves `error` populated instead.
+     */
+    infrastructureError?: string;
     error?: string;
 }
 

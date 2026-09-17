@@ -78,6 +78,11 @@ export class CandidateTransactionManager {
     public get id(): string | undefined { return this._id; }
     public get files(): readonly CandidateFile[] { return this.sortedFiles(); }
     public get bytes(): number { return this.stagedBytes; }
+    /** Staged paths, in the same sorted order as `files`. */
+    public get paths(): string[] { return this.sortedFiles().map(file => file.path); }
+    /** True while `validate` may still be called. */
+    public get canValidate(): boolean { return this._state === 'active'; }
+
 
     public begin(): string {
         if (this._state === 'active' || this._state === 'validated') throw new Error('A transaction is already active');
@@ -135,6 +140,19 @@ export class CandidateTransactionManager {
         if (this._state !== 'validated') throw new Error('Transaction must be validated before commit');
         const files = this.sortedFiles();
         const paths = files.map(file => file.path);
+        // The empty transaction is a no-op, not a drift risk: the host's
+        // post-commit diagnostic validation would compare a file against its own
+        // baseline and can never establish freshness, so it must not run.
+        if (files.length === 0) {
+            this._state = 'committed';
+            return {
+                committed: true,
+                state: this._state,
+                transactionId: this._id,
+                files: paths,
+                rollback: { attempted: false, succeeded: true, paths: [], errors: [] },
+            };
+        }
         if (!this.validationOk) return this.fail('Validation failed before commit', paths);
         if (this.validationHash !== undefined && this.validationHash !== this.fingerprint()) {
             return this.fail('Validation hash does not match staged candidates', paths);

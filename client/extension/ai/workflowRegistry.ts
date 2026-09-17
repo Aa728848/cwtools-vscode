@@ -169,6 +169,9 @@ registerWorkflow({
 			// Write
 			'write_file', 'edit_file', 'replace_lines',
 			'write_localisation',
+			// Speculative localisation writes are staged in a candidate
+			// transaction, so the managing tool must be reachable here too.
+			'candidate_transaction',
 			// Reflection
 			'analyze_diagnostic_error',
 			// Task tracking
@@ -236,6 +239,7 @@ registerWorkflow({
 			'query_types', 'go_to_definition',
 			// Write (localisation only)
 			'write_localisation', 'write_file',
+			'candidate_transaction',
 			// Task tracking
 			'todo_write',
 		],

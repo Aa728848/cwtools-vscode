@@ -1846,7 +1846,7 @@ const RAW_TOOL_DEFINITIONS: ToolDefinition[] = [
         type: 'function',
         function: {
             name: 'dispatch_agents',
-            description: 'Dispatch a bounded task DAG using only runtime profiles authorized by the current scheduler profile. Declare dependencies, planned files, and explicit userConstraints. Each wave persists and can be resumed via resumeGraphId.',
+            description: 'Dispatch work to sub-agents using only runtime profiles authorized by the current scheduler profile. Two shapes: pass "tasks" for a bounded task DAG with dependencies (each wave persists and resumes via resumeGraphId), or pass "members" for a peer team whose named members share a mailbox and a CAS task board (they steer each other mid-run and report to you as "lead"). Peer teams return a teamId immediately; the settle summary arrives as a background task result.',
             parameters: {
                 type: 'object',
                 properties: {
@@ -2035,6 +2035,74 @@ const RAW_TOOL_DEFINITIONS: ToolDefinition[] = [
                         type: 'boolean',
                         description: 'Run the wave in the background and return immediately; completion arrives as a BACKGROUND TASK RESULT in the next turn. General domain: any authorized profile. Paradox domain: read-only profiles only.',
                     },
+                    teamName: { type: 'string', description: 'Peer-team mode only: optional human-readable team label.' },
+                    maxConcurrency: { type: 'integer', minimum: 1, maximum: 4, description: 'Peer-team mode only: max members running at once (default 3).' },
+                    members: {
+                        type: 'array',
+                        minItems: 2,
+                        maxItems: 6,
+                        description: 'Peer-team mode: a roster of named peers who collaborate through a shared mailbox (team_send_message) and a compare-and-set task board (team_task_create/team_task_list/team_task_update) instead of a fixed DAG. Use this when the work needs mid-run coordination, dynamic task claiming, or member-to-member messages. Mutually exclusive with tasks.',
+                        items: {
+                            type: 'object',
+                            properties: {
+                                name: { type: 'string', pattern: '^[a-z][a-z0-9-]{0,39}$', description: 'Unique kebab-case member name, e.g. "script-writer".' },
+                                profileName: { type: 'string', enum: ['explore', 'planner', 'general-coder', 'reviewer', 'paradox-coder', 'localization-writer', 'gui-expert'], description: 'Runtime profile for this member.' },
+                                brief: { type: 'string', description: 'Initial task brief. Keep it concise; use set_memory or the board for large payloads.' },
+                                plannedFiles: {
+                                    type: 'array',
+                                    items: { type: 'string' },
+                                    description: 'Files this member expects to modify; used for sandboxing and conflict warnings.',
+                                },
+                                writeScopes: {
+                                    type: 'array',
+                                    items: { type: 'string' },
+                                    description: 'Advisory workspace-relative write prefixes (e.g. "common/events/").',
+                                },
+                            },
+                            required: ['name', 'profileName', 'brief'],
+                        },
+                    },
+                    memberContracts: {
+                        type: 'array',
+                        description: 'Peer-team mode, Paradox write teams: per-member entity contracts. Required for every writing member so ordering and the settlement quality gate stay machine-checkable.',
+                        items: {
+                            type: 'object',
+                            properties: {
+                                member: { type: 'string', description: 'Member name from members[].' },
+                                produces: {
+                                    type: 'array',
+                                    description: 'Machine-checkable entity operations created by this member.',
+                                    items: {
+                                        type: 'object',
+                                        properties: {
+                                            kind: { type: 'string', description: 'Exact TypeDef or CWT reference type from active semantic evidence.' },
+                                            id: { type: 'string' },
+                                            operation: { type: 'string', enum: ['define', 'call', 'save', 'read', 'set', 'clear', 'localise', 'reference'] },
+                                            scope: { type: 'string' },
+                                            required: { type: 'boolean' },
+                                        },
+                                        required: ['kind', 'id', 'operation'],
+                                    },
+                                },
+                                consumes: {
+                                    type: 'array',
+                                    description: 'Machine-checkable entity operations used by this member.',
+                                    items: {
+                                        type: 'object',
+                                        properties: {
+                                            kind: { type: 'string', description: 'Exact TypeDef or CWT reference type from active semantic evidence.' },
+                                            id: { type: 'string' },
+                                            operation: { type: 'string', enum: ['define', 'call', 'save', 'read', 'set', 'clear', 'localise', 'reference'] },
+                                            scope: { type: 'string' },
+                                            required: { type: 'boolean' },
+                                        },
+                                        required: ['kind', 'id', 'operation'],
+                                    },
+                                },
+                            },
+                            required: ['member'],
+                        },
+                    },
                 },
                 required: [],
             },
@@ -2082,48 +2150,6 @@ const RAW_TOOL_DEFINITIONS: ToolDefinition[] = [
                     },
                 },
                 required: [],
-            },
-        },
-    },
-    // - Agent Teams (peer collaboration: mailbox + shared CAS task board) -
-    {
-        type: 'function',
-        function: {
-            name: 'dispatch_team',
-            description: 'Start a bounded Agent Team whose named members collaborate as peers through a shared mailbox and CAS task board: members steer each other mid-run, wake idle teammates with messages, and report to you as "lead". Returns a teamId immediately; the settle summary arrives as a background task result. Prefer dispatch_agents for a static one-shot DAG.',
-            parameters: {
-                type: 'object',
-                properties: {
-                    teamName: { type: 'string', description: 'Optional human-readable label.' },
-                    objective: { type: 'string', description: 'Shared objective visible to every member. Keep it concise; per-member detail goes into briefs.' },
-                    maxConcurrency: { type: 'integer', minimum: 1, maximum: 4, description: 'Max members running at once (default 3).' },
-                    members: {
-                        type: 'array',
-                        minItems: 2,
-                        maxItems: 6,
-                        description: 'Team roster (2-6 members).',
-                        items: {
-                            type: 'object',
-                            properties: {
-                                name: { type: 'string', pattern: '^[a-z][a-z0-9-]{0,39}$', description: 'Unique kebab-case member name, e.g. "script-writer".' },
-                                profileName: { type: 'string', enum: ['explore', 'planner', 'general-coder', 'reviewer', 'paradox-coder', 'localization-writer', 'gui-expert'], description: 'Runtime profile for this member.' },
-                                brief: { type: 'string', description: 'Initial task brief. Keep it concise; use set_memory or the board for large payloads.' },
-                                plannedFiles: {
-                                    type: 'array',
-                                    items: { type: 'string' },
-                                    description: 'Files this member expects to modify; used for sandboxing and conflict warnings.',
-                                },
-                                writeScopes: {
-                                    type: 'array',
-                                    items: { type: 'string' },
-                                    description: 'Advisory workspace-relative write prefixes (e.g. "common/events/").',
-                                },
-                            },
-                            required: ['name', 'profileName', 'brief'],
-                        },
-                    },
-                },
-                required: ['objective', 'members'],
             },
         },
     },

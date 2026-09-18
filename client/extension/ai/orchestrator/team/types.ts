@@ -51,6 +51,10 @@ export interface TeamMemberState {
     /** Number of activations (initial + cold-resume wakes). */
     activations: number;
     tokenUsage: TokenUsage;
+    /** Union of files written across all activations (settlement/merge source). */
+    writtenFiles: string[];
+    /** Latest validated structured handoff, when the member produced one. */
+    lastHandoff?: import('../../runner/agentHandoff').AgentHandoff;
     lastActivityAt: number;
 }
 
@@ -162,8 +166,10 @@ export interface TeamSummary {
         profileName: string;
         activations: number;
         tokenUsage: TokenUsage;
+        writtenFiles: string[];
         lastOutput?: string;
         lastError?: string;
+        lastHandoff?: import('../../runner/agentHandoff').AgentHandoff;
     }>;
     tasks: {
         total: number;
@@ -184,7 +190,7 @@ export interface TeamSnapshot {
     topicId?: string;
     domain: string;
     createdAt: number;
-    members: Array<Pick<TeamMemberState, 'name' | 'profileName' | 'brief' | 'status' | 'activations' | 'lastOutput' | 'lastError' | 'lastRunId'>>;
+    members: Array<Pick<TeamMemberState, 'name' | 'profileName' | 'brief' | 'status' | 'activations' | 'writtenFiles' | 'lastOutput' | 'lastError' | 'lastHandoff' | 'lastRunId'>>;
     messages: TeamMessage[];
     tasks: TeamTask[];
     summary?: TeamSummary;

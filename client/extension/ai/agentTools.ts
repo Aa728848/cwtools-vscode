@@ -74,6 +74,7 @@ import { backgroundOrchestrators } from './orchestrator/backgroundOrchestrators'
 import { evaluateDelegationBudget } from './orchestrator/delegationDepth';
 import { buildOrchestrationCatalog as projectOrchestrationCatalog } from './orchestrator/orchestrationCatalog';
 import { normalizeResumedGraph } from './orchestrator/resumeNormalization';
+import { TaskGraphEngine } from './orchestrator/taskGraphEngine';
 import { BLACKBOARD_KEY_PREFIXES } from './orchestrator/blackboardSchema';
 import { normalizeEvidenceGateMode, type EvidenceClaimKind, type EvidenceGateDecision, type EvidenceGateMode, type EvidenceGatePhase } from './evidence/evidenceTypes';
 import { isPdxScriptTarget } from './evidence/claimExtractor';
@@ -2781,7 +2782,11 @@ export class AgentToolExecutor {
 
             // - Orchestrator tools -
             case 'dispatch_agents': {
-                result = await this.executeDispatchAgents(args, context);
+                // One entry, two shapes: a member roster means peer-team mode
+                // (mailbox + CAS board), otherwise it is a bounded DAG wave.
+                result = Array.isArray(args.members)
+                    ? await this.executeDispatchTeam(args, context)
+                    : await this.executeDispatchAgents(args, context);
                 break;
             }
             case 'query_blackboard':
@@ -2795,11 +2800,7 @@ export class AgentToolExecutor {
                 break;
             }
 
-            // - Agent Teams (peer collaboration) -
-            case 'dispatch_team': {
-                result = await this.executeDispatchTeam(args, context);
-                break;
-            }
+            // - Agent Teams (peer collaboration inside a member run) -
             case 'team_send_message': {
                 result = this.executeTeamSendMessage(args, context);
                 break;
@@ -4759,16 +4760,16 @@ export class AgentToolExecutor {
     // ─── Agent Teams ────────────────────────────────────────────────────────
 
     /**
-     * Execute the dispatch_team tool: validate the roster against the same
-     * profile/depth/containment gates as dispatch_agents, then run the team
-     * in the background. Members collaborate through the team mailbox and the
-     * CAS task board until the team settles; the lead receives the settle
-     * summary through the standard background-task notification channel.
+     * Peer-team mode of dispatch_agents: validate the roster against the same
+     * profile/depth/containment gates as a DAG wave, then run the team in the
+     * background. Members collaborate through the team mailbox and the CAS task
+     * board until the team settles; the lead receives the settle summary plus a
+     * shared quality-gate verdict through the standard background-task channel.
      */
     private async executeDispatchTeam(args: Record<string, unknown>, context?: import('./types').AgentToolContext): Promise<unknown> {
         const runnerOpts = context?.runnerOptions;
         if (!runnerOpts?.schedulingState) {
-            return { success: false, error: 'dispatch_team requires an active scheduler context.' };
+            return { success: false, error: 'Peer-team dispatch requires an active scheduler context.' };
         }
         const schedulingState = runnerOpts.schedulingState;
         const runtimeDomain = schedulingState.domainProfile;
@@ -4793,20 +4794,20 @@ export class AgentToolExecutor {
 
         const objective = typeof args.objective === 'string' ? args.objective.trim() : '';
         if (!objective) {
-            return { success: false, error: 'dispatch_team requires a non-empty objective.' };
+            return { success: false, error: 'Peer-team dispatch requires a non-empty objective.' };
         }
         const teamName = typeof args.teamName === 'string' && args.teamName.trim() ? args.teamName.trim().slice(0, 80) : undefined;
 
         const rawMembers = Array.isArray(args.members) ? args.members : [];
         if (rawMembers.length < TEAM_MIN_MEMBERS || rawMembers.length > TEAM_MAX_MEMBERS) {
-            return { success: false, error: 'dispatch_team requires between ' + TEAM_MIN_MEMBERS + ' and ' + TEAM_MAX_MEMBERS + ' members; received ' + rawMembers.length + '.' };
+            return { success: false, error: 'Peer-team dispatch requires between ' + TEAM_MIN_MEMBERS + ' and ' + TEAM_MAX_MEMBERS + ' members; received ' + rawMembers.length + '.' };
         }
 
         const runtimeProfile = schedulingState.profileName
             ? agentProfileCatalog.get(schedulingState.profileName)
             : undefined;
         if (!runtimeProfile) {
-            return { success: false, error: "dispatch_team requires a known scheduler profile; received '" + schedulingState.profileName + "'." };
+            return { success: false, error: "Peer-team dispatch requires a known scheduler profile; received '" + schedulingState.profileName + "'." };
         }
         const allowedProfileNames = new Set(runtimeProfile.subagents ?? []);
         if (schedulingState.authorization !== 'workspace_write') {
@@ -4890,6 +4891,117 @@ export class AgentToolExecutor {
             };
         }
 
+        // ─── Runtime dispatch admission ───
+        // Same gate as dispatch_agents, scored over the member roster: a team is
+        // still a delegation, and a single-member or duplicate-objective roster
+        // must be rejected here instead of becoming an expensive no-op.
+        const featureManifest = args.featureManifest as import('./types').FeatureManifest | undefined;
+        const isScriptMode = runtimeDomain === 'paradox'
+            && schedulingState.authorization === 'workspace_write'
+            && schedulingState.dispatch !== 'single';
+        const hasWriteMembers = members.some(member =>
+            agentProfileCatalog.getRequired(member.profileName).authorizationCeiling === 'workspace_write'
+            || (member.plannedFiles?.length ?? 0) > 0);
+        const dispatchAdmission = evaluateDispatchAdmission(
+            members.map(member => ({
+                id: member.name,
+                objective: member.brief,
+                expectedWrites: member.plannedFiles,
+                profileName: member.profileName,
+            })),
+            {
+                explicitDelegation: schedulingState.dispatch === 'parallel'
+                    || schedulingState.dispatch === 'specialist',
+                availableTokenBudget: runnerOpts.tokenBudget,
+            },
+        );
+        if (!dispatchAdmission.accepted) {
+            runnerOpts.runEventSink?.appendSoon('dispatch_evaluated', {
+                accepted: false,
+                score: dispatchAdmission.score,
+                reason: dispatchAdmission.reason,
+                taskCount: members.length,
+                conflicts: dispatchAdmission.conflicts,
+                mode: 'team',
+            }, { status: 'failed' });
+            return {
+                success: false,
+                error: 'Runtime dispatch admission rejected this team: ' + dispatchAdmission.reason,
+                dispatchAdmission,
+            };
+        }
+        runnerOpts.runEventSink?.appendSoon('dispatch_evaluated', {
+            accepted: true,
+            state: schedulingState,
+            score: dispatchAdmission.score,
+            reason: dispatchAdmission.reason,
+            taskCount: members.length,
+            conflicts: dispatchAdmission.conflicts,
+            mode: 'team',
+        }, { status: 'done' });
+
+        // ─── Paradox write contract ───
+        // A peer team whose members write must declare the same machine-checkable
+        // feature contract as a DAG write wave: an objective with acceptance
+        // criteria plus per-member produces/consumes entity contracts. Peer briefs
+        // are free text, so the contract is the only machine-readable anchor the
+        // settlement quality gate can validate against.
+        const memberContracts = Array.isArray(args.memberContracts) ? args.memberContracts : [];
+        const contractByMember = new Map<string, { produces: unknown[]; consumes: unknown[] }>();
+        for (const raw of memberContracts) {
+            const entry = raw as Record<string, unknown>;
+            const memberName = typeof entry?.member === 'string' ? entry.member.trim() : '';
+            if (!memberName || !seenNames.has(memberName)) {
+                return { success: false, error: "memberContracts entry references unknown member '" + memberName + "'." };
+            }
+            if (contractByMember.has(memberName)) {
+                return { success: false, error: "memberContracts lists member '" + memberName + "' more than once." };
+            }
+            contractByMember.set(memberName, {
+                produces: Array.isArray(entry.produces) ? entry.produces : [],
+                consumes: Array.isArray(entry.consumes) ? entry.consumes : [],
+            });
+        }
+        if (isScriptMode && hasWriteMembers) {
+            if (!featureManifest?.objective || (featureManifest.acceptanceCriteria?.length ?? 0) === 0) {
+                return {
+                    success: false,
+                    error: aiText(
+                        'Paradox Multi-Agent write teams require featureManifest with an objective and at least one acceptance criterion. Declare the required entities and edges before dispatching writers.',
+                        'Paradox 多 Agent 写入团队必须提供 featureManifest，其中包含目标和至少一条验收条件。请先声明所需实体与关联边。',
+                    ),
+                };
+            }
+            for (const member of members) {
+                const isWriter = agentProfileCatalog.getRequired(member.profileName).authorizationCeiling === 'workspace_write'
+                    || (member.plannedFiles?.length ?? 0) > 0;
+                if (!isWriter) continue;
+                const contract = contractByMember.get(member.name);
+                const produces = (contract?.produces ?? []).filter(entry => !!entry && typeof entry === 'object');
+                const consumes = (contract?.consumes ?? []).filter(entry => !!entry && typeof entry === 'object');
+                if (produces.length === 0 && consumes.length === 0) {
+                    return {
+                        success: false,
+                        error: aiText(
+                            "Paradox Multi-Agent writer '" + member.name + "' must declare produces and/or consumes entity contracts through memberContracts.",
+                            "Paradox 多 Agent 写入成员“" + member.name + "”必须通过 memberContracts 声明 produces 和/或 consumes 实体契约。",
+                        ),
+                    };
+                }
+                if (member.profileName === 'localization-writer'
+                    && produces.some(entry => (entry as { kind?: unknown }).kind === 'localisation')
+                    && !consumes.some(entry => (entry as { kind?: unknown }).kind !== 'localisation')) {
+                    return {
+                        success: false,
+                        error: aiText(
+                            "Localisation member '" + member.name + "' must consume its owning event/object entity so ordering and orphan checks can be enforced.",
+                            "本地化成员“" + member.name + "”必须通过 consumes 声明其所属事件或对象，系统才能强制依赖顺序并检查孤立本地化。",
+                        ),
+                    };
+                }
+            }
+        }
+
         if (!this.parentAgentRunner) {
             return { success: false, error: 'Orchestrator is not ready: missing AgentRunner instance. Run in a coordinator-capable mode.' };
         }
@@ -4963,6 +5075,8 @@ export class AgentToolExecutor {
                 tokenUsage: result.tokenUsage,
                 needsClarification: result.needsClarification,
                 clarification: result.clarification,
+                writtenFiles: result.writtenFiles,
+                handoff: result.handoff,
             };
         };
 
@@ -5022,8 +5136,102 @@ export class AgentToolExecutor {
             run: async (bgAbortSignal) => {
                 try {
                     const summary = await runtime.run(bgAbortSignal);
-                    const summaryText = this.formatTeamSettleSummary(summary);
-                    await this.persistTeamSnapshot(runtime, summary);
+                    let summaryText = this.formatTeamSettleSummary(summary);
+
+                    // ─── Shared quality gate ───
+                    // A team whose members wrote files settles through the same
+                    // reviewer/admission/auto-fix path as a DAG write wave. Without
+                    // this the peer mode would be the one multi-agent entry that can
+                    // land unreviewed writes.
+                    const project = this.projectTeamOutcome(summary);
+                    let settlementGraph: import('./orchestrator/types').TaskGraph | undefined;
+                    let settlementQualityGate: import('./orchestrator/types').QualityGateResult | undefined;
+                    if (project.hasWriteMembers && project.writtenFiles.length > 0) {
+                        const taskGraph = TaskGraphEngine.createGraph(objective, featureManifest);
+                        for (const member of members) {
+                            const contract = contractByMember.get(member.name);
+                            TaskGraphEngine.addNode(
+                                taskGraph,
+                                member.name,
+                                member.profileName,
+                                member.brief,
+                                {
+                                    plannedFiles: member.plannedFiles,
+                                    produces: isScriptMode ? (contract?.produces as never) : undefined,
+                                    consumes: isScriptMode ? (contract?.consumes as never) : undefined,
+                                },
+                            );
+                        }
+                        TaskGraphEngine.linkEntityDependencies(taskGraph);
+                        settlementGraph = taskGraph;
+                        const outcome: import('./orchestrator/types').OrchestratorResult = {
+                            success: true,
+                            summary: summaryText,
+                            agentResults: project.agentResults,
+                            totalTokenUsage: summary.totalTokenUsage,
+                            failedNodes: project.failedMembers,
+                            cancelledNodes: [],
+                        };
+                        const gateOptions: import('./orchestrator/types').OrchestratorOptions = {
+                            schedulingState,
+                            topicId: runnerOpts.topicId,
+                            parentRunId,
+                            runEventSink: parentRunSink,
+                            originalUserMessage,
+                            userExecutionPolicy,
+                        };
+                        try {
+                            await orchestrator.runQualityGatePhase(
+                                taskGraph,
+                                outcome,
+                                gateOptions,
+                                (step) => parentRunSink?.appendSoon('step_appended', {
+                                    step: {
+                                        type: step.type,
+                                        content: step.content,
+                                        timestamp: step.timestamp,
+                                        agentId: step.agentId,
+                                        source: 'team',
+                                    },
+                                }),
+                            );
+                        } catch (error) {
+                            ErrorReporter.debug(
+                                'AgentTeams',
+                                'Team settlement quality gate failed: '
+                                    + (error instanceof Error ? error.message : String(error)),
+                            );
+                        }
+                        settlementQualityGate = outcome.qualityGate;
+                        if (settlementQualityGate && !settlementQualityGate.passed) {
+                            outcome.success = false;
+                            summaryText += aiText(
+                                '\n- Settlement quality gate: failed (' + settlementQualityGate.diagnosticErrors
+                                    + ' diagnostics, ' + settlementQualityGate.semanticIssues + ' semantic issues, '
+                                    + settlementQualityGate.logicIssues + ' review issues)',
+                                '\n- 结算质量门：未通过（' + settlementQualityGate.diagnosticErrors + ' 个诊断、'
+                                    + settlementQualityGate.semanticIssues + ' 个语义问题、'
+                                    + settlementQualityGate.logicIssues + ' 个审查问题）',
+                            );
+                        } else if (settlementQualityGate) {
+                            outcome.success = true;
+                        }
+                    }
+
+                    const persisted = await this.persistTeamOutcome(runtime, summary, {
+                        domain: runtimeDomain,
+                        topicId: runnerOpts.topicId,
+                        runId: parentRunId,
+                        delegationDepth: delegationBudget.parentDepth,
+                        objective,
+                        featureManifest,
+                        graph: settlementGraph,
+                        agentResults: project.agentResults,
+                        writtenFiles: project.writtenFiles,
+                        summaryText,
+                        qualityGate: settlementQualityGate,
+                        hasWriteMembers: project.hasWriteMembers,
+                    });
                     if (teamTask) {
                         await agentTaskManager.transition(
                             teamTask.taskId,
@@ -5034,6 +5242,18 @@ export class AgentToolExecutor {
                                 lastMessage: summaryText,
                             },
                         ).catch(() => {});
+                    }
+                    if (persisted) {
+                        parentRunSink?.appendSoon('step_appended', {
+                            step: {
+                                type: 'validation',
+                                content: aiText(
+                                    'Team outcome persisted as orchestration ' + teamId + ': merge_results(graphId="' + teamId + '") returns every member result.',
+                                    '团队结果已持久化为编排 ' + teamId + '：merge_results(graphId="' + teamId + '") 可取出全部成员结果。',
+                                ),
+                                timestamp: Date.now(),
+                            },
+                        });
                     }
                 } finally {
                     teamRegistry.remove(teamId);
@@ -5070,7 +5290,7 @@ export class AgentToolExecutor {
         if (!team) {
             return { error: requested
                 ? "Team '" + requested + "' is not active (it may have settled). Dispatch a new team for follow-up work."
-                : 'No active team found for this topic. Start one with dispatch_team.' };
+                : 'No active team found for this topic. Start one with dispatch_agents(members=[...]).' };
         }
         if (boundTeamId && memberName && team.teamId === boundTeamId) {
             return { team, caller: memberName, isLead: false };
@@ -5210,19 +5430,132 @@ export class AgentToolExecutor {
         return lines.join('\n');
     }
 
-    /** Best-effort team snapshot persistence under the topic's private storage. */
-    private async persistTeamSnapshot(runtime: TeamRuntime, summary: TeamSummary): Promise<void> {
+    /**
+     * Project one settled team into the shared orchestration vocabulary: one
+     * agent result per member, so merge_results, the catalog, and the quality
+     * gate treat a team and a DAG wave identically.
+     */
+    private projectTeamOutcome(summary: TeamSummary): {
+        agentResults: Map<string, import('./orchestrator/types').SubAgentResult>;
+        writtenFiles: string[];
+        failedMembers: string[];
+        hasWriteMembers: boolean;
+    } {
+        const agentResults = new Map<string, import('./orchestrator/types').SubAgentResult>();
+        const writtenFiles = new Set<string>();
+        const failedMembers: string[] = [];
+        let hasWriteMembers = false;
+        for (const member of summary.members) {
+            if (agentProfileCatalog.get(member.profileName)?.authorizationCeiling === 'workspace_write'
+                || member.writtenFiles.length > 0) {
+                hasWriteMembers = true;
+            }
+            for (const file of member.writtenFiles) writtenFiles.add(file);
+            if (member.lastError) failedMembers.push(member.name);
+            agentResults.set(member.name, {
+                nodeId: member.name,
+                success: !member.lastError,
+                output: member.lastOutput ?? member.lastError ?? '',
+                error: member.lastError,
+                tokenUsage: { ...member.tokenUsage },
+                writtenFiles: [...member.writtenFiles],
+                stepCount: member.activations,
+                handoff: member.lastHandoff,
+                preservedAfterFailure: !!member.lastError && member.writtenFiles.length > 0,
+            });
+        }
+        return {
+            agentResults,
+            writtenFiles: [...writtenFiles].sort(),
+            failedMembers,
+            hasWriteMembers,
+        };
+    }
+
+    /**
+     * Persist a settled team as a regular orchestration record plus its team
+     * audit payload, so both multi-agent modes share one durable store, one
+     * listing surface, and one merge path.
+     */
+    private async persistTeamOutcome(
+        runtime: TeamRuntime,
+        summary: TeamSummary,
+        input: {
+            domain: import('./types').AgentRuntimeDomain;
+            topicId?: string;
+            runId?: string;
+            delegationDepth: number;
+            objective: string;
+            featureManifest?: import('./types').FeatureManifest;
+            graph?: import('./orchestrator/types').TaskGraph;
+            agentResults: Map<string, import('./orchestrator/types').SubAgentResult>;
+            writtenFiles: string[];
+            summaryText: string;
+            qualityGate?: import('./orchestrator/types').QualityGateResult;
+            hasWriteMembers: boolean;
+        },
+    ): Promise<boolean> {
+        if (!input.topicId) return false;
         try {
-            const topicId = runtime.topicId;
-            if (!topicId) return;
-            const topicDir = getPrivateTopicStorageDir(topicId, this.workspaceRoot);
-            const teamDir = path.join(topicDir, 'teams');
-            await fs.promises.mkdir(teamDir, { recursive: true });
+            const graph = input.graph ?? TaskGraphEngine.createGraph(input.objective, input.featureManifest);
+            if (!input.graph) {
+                // Read-only team: still record every member as a node so the
+                // catalog and merge_results can list the run.
+                for (const member of summary.members) {
+                    TaskGraphEngine.addNode(
+                        graph,
+                        member.name,
+                        member.profileName,
+                        'Team member ' + member.name + (runtime.teamName ? ' of team "' + runtime.teamName + '"' : '')
+                            + ' — objective: ' + input.objective,
+                        { plannedFiles: member.writtenFiles },
+                    );
+                    const node = graph.nodes.get(member.name);
+                    if (node) {
+                        node.status = member.lastError ? 'failed' : 'done';
+                        node.error = member.lastError;
+                        node.result = member.lastOutput;
+                        node.tokenUsage = member.tokenUsage;
+                        node.completedAt = summary.settledAt;
+                    }
+                }
+            }
+            if (input.qualityGate) {
+                for (const member of summary.members) {
+                    if (!member.lastHandoff) continue;
+                    const node = graph.nodes.get(member.name);
+                    if (node) node.status = node.status === 'failed' ? 'failed' : 'done';
+                }
+            }
             const snapshot = runtime.snapshot();
             snapshot.summary = summary;
-            await atomicWriteJson(path.join(teamDir, runtime.teamId + '.json'), snapshot);
+            const saved = await saveOrchestration({
+                workspaceRoot: this.workspaceRoot,
+                topicId: input.topicId,
+                runId: input.runId,
+                domain: input.domain,
+                delegationDepth: input.delegationDepth,
+                graph,
+                agentResults: input.agentResults,
+                blackboard: { entries: [], timestamp: Date.now() },
+                summary: input.summaryText,
+                totalTokenUsage: summary.totalTokenUsage,
+                qualityGate: input.qualityGate,
+                teamSnapshot: snapshot,
+            });
+            if (!saved) {
+                // Fall back to the legacy team-scoped file so an unavailable
+                // orchestration store never loses the audit trail entirely.
+                const topicDir = getPrivateTopicStorageDir(input.topicId, this.workspaceRoot);
+                const teamDir = path.join(topicDir, 'teams');
+                await fs.promises.mkdir(teamDir, { recursive: true });
+                await atomicWriteJson(path.join(teamDir, runtime.teamId + '.json'), snapshot);
+                return false;
+            }
+            return true;
         } catch (error) {
-            ErrorReporter.debug('AgentTeams', 'Team snapshot persistence failed: ' + (error instanceof Error ? error.message : String(error)));
+            ErrorReporter.debug('AgentTeams', 'Team outcome persistence failed: ' + (error instanceof Error ? error.message : String(error)));
+            return false;
         }
     }
 

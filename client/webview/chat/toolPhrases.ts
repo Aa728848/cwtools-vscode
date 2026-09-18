@@ -71,7 +71,7 @@ const TOOL_PHRASES: Record<string, ToolPhraseEntry> = {
     dispatch_agents:           { category: 'orchestrate', icon: '🎯', en: 'Dispatch subtasks', zh: '分派子任务' },
     merge_results:             { category: 'orchestrate', icon: '🎯', en: 'Merge results', zh: '合并结果' },
 
-    dispatch_team:             { category: 'orchestrate', icon: '👥', en: 'Start agent team', zh: '启动 Agent 团队' },
+
     team_send_message:         { category: 'orchestrate', icon: '✉️', en: 'Send team message', zh: '发送团队消息' },
     team_members:              { category: 'orchestrate', icon: '👥', en: 'List team members', zh: '查看团队成员' },
     team_close:                { category: 'orchestrate', icon: '🏁', en: 'Close team', zh: '关闭团队' },
@@ -239,14 +239,7 @@ export function getToolDynamicPhrase(
             }
             return dualPhrase(meta.phrase, locale);
         }
-        case 'dispatch_team': {
-            const objective = args.objective ?? args.teamName;
-            if (typeof objective === 'string') {
-                const short = truncateStr(objective, 60);
-                return zh ? dualPhrase(`组建团队 ${short}`, locale) : dualPhrase(`Start team ${short}`, locale, `Starting team ${short}...`);
-            }
-            return dualPhrase(meta.phrase, locale);
-        }
+
         case 'team_send_message': {
             const target = args.target;
             if (typeof target === 'string') {

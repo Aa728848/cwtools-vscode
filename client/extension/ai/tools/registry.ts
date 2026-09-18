@@ -19,7 +19,7 @@ export type AgentToolName =
     | 'convert_image_to_dds' | 'convert_audio' | 'deploy_mod_asset' | 'mcp_call'
     | 'write_localisation' | 'write_design_blueprint' | 'save_workflow' | 'git_ops' | 'dispatch_agents'
     | 'query_blackboard' | 'merge_results' | 'cancel_dispatch'
-    | 'dispatch_team' | 'team_send_message' | 'team_members' | 'team_close'
+    | 'team_send_message' | 'team_members' | 'team_close'
     | 'team_task_create' | 'team_task_list' | 'team_task_update'
     | 'query_shader_symbol' | 'query_shader_compile_unit' | 'query_shader_platform_variants' | 'query_shader_callers'
     | 'explain_shader_reachability' | 'validate_shader' | 'compare_shader_with_vanilla' | 'run_code';
@@ -162,7 +162,6 @@ const TOOL_DOMAINS = {
     query_blackboard: 'shared',
     merge_results: 'shared',
     cancel_dispatch: 'shared',
-    dispatch_team: 'shared',
     team_send_message: 'shared',
     team_members: 'shared',
     team_close: 'shared',
@@ -183,10 +182,36 @@ const GENERAL_DISPATCH_SCHEMA: ToolDefinition = {
     type: 'function',
     function: {
         name: 'dispatch_agents',
-        description: 'Dispatch up to four ordinary repository tasks as a bounded dependency graph. Declare dependencies and planned files so overlapping writes are serialized safely.',
+        description: 'Dispatch work to sub-agents. Pass "tasks" for up to four ordinary repository tasks as a bounded dependency graph (declare dependencies and planned files so overlapping writes are serialized), or "members" for a peer team that coordinates through a shared mailbox and task board.',
         parameters: {
             type: 'object',
             properties: {
+                members: {
+                    type: 'array',
+                    minItems: 2,
+                    maxItems: 6,
+                    description: 'Peer-team roster (2-6). Members share a mailbox and a CAS task board and report to you as "lead". Mutually exclusive with tasks.',
+                    items: {
+                        type: 'object',
+                        properties: {
+                            name: { type: 'string', pattern: '^[a-z][a-z0-9-]{0,39}$', description: 'Unique kebab-case member name.' },
+                            profileName: {
+                                type: 'string',
+                                enum: ['explore', 'planner', 'general-coder', 'reviewer'],
+                                description: 'Registered runtime profile for this member.',
+                            },
+                            brief: { type: 'string', description: 'Concise initial brief.' },
+                            plannedFiles: {
+                                type: 'array',
+                                items: { type: 'string' },
+                                description: 'Expected files this member may modify.',
+                            },
+                        },
+                        required: ['name', 'profileName', 'brief'],
+                    },
+                },
+                teamName: { type: 'string', description: 'Peer-team mode: optional human-readable label.' },
+                objective: { type: 'string', description: 'Peer-team mode: shared objective visible to every member.' },
                 tasks: {
                     type: 'array',
                     maxItems: 4,
@@ -226,7 +251,7 @@ const GENERAL_DISPATCH_SCHEMA: ToolDefinition = {
                     },
                 },
             },
-            required: ['tasks'],
+            required: [],
         },
     },
 };
@@ -328,11 +353,12 @@ const NETWORK: AgentToolName[] = ['web_search', 'web_open'];
 const UTILITY: AgentToolName[] = ['run_command', 'manage_process', 'git_ops', 'analyze_diagnostic_error'];
 const MEDIA: AgentToolName[] = ['convert_image_to_dds', 'convert_audio', 'deploy_mod_asset'];
 const _MCP: AgentToolName[] = ['mcp_call'];
-const ORCHESTRATION: AgentToolName[] = ['dispatch_agents', 'query_blackboard', 'merge_results', 'cancel_dispatch'];
-// Agent Teams: peer messaging + shared CAS task board. Member-facing team
-// tools stay available inside team member runs; dispatch_team is lead-only.
-const TEAM: AgentToolName[] = ['dispatch_team', 'team_send_message', 'team_members', 'team_close', 'team_task_create', 'team_task_list', 'team_task_update'];
+// Orchestration surface. dispatch_agents is the single entry for both shapes
+// (tasks = DAG wave, members = peer team); the team_* tools are the peer
+// collaboration vocabulary that stays available *inside* member runs.
 const TEAM_MEMBER_TOOLS: AgentToolName[] = ['team_send_message', 'team_members', 'team_task_create', 'team_task_list', 'team_task_update'];
+const ORCHESTRATION: AgentToolName[] = ['dispatch_agents', 'query_blackboard', 'merge_results', 'cancel_dispatch', 'team_close'];
+const TEAM: AgentToolName[] = [...TEAM_MEMBER_TOOLS, 'team_close'];
 const INTERACTION: AgentToolName[] = ['ask_user_question'];
 
 const GENERIC_FILE_WRITE_TOOLS = new Set<AgentToolName>([
@@ -379,9 +405,8 @@ const ALWAYS_DISCLOSED_TOOLS = new Set<AgentToolName>([
 const WRITE_TOOLS_SET = new Set<string>([...EDIT, 'deploy_mod_asset', 'git_ops']);
 const SUB_AGENT_EXCLUDES_SET = new Set<string>([
     'ask_user_question',
-    // Team creation is a lead capability; members collaborate through the
-    // board and mailbox of their own team only.
-    'dispatch_team',
+    // web/process/media and orchestration are lead capabilities; members
+    // collaborate through the board and mailbox of their own team only.
     'web_search', 'web_open', 'web_find',
     'run_command', 'manage_process',
     'git_ops', 'save_workflow',
@@ -416,7 +441,6 @@ const MUTATING_TOOLS_SET = new Set<string>([
     'manage_goal',
     'merge_results',
     'manage_process',
-    'dispatch_team',
     'team_send_message',
     'team_close',
     'team_task_create',

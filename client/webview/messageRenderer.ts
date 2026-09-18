@@ -97,7 +97,7 @@ const TOOL_ICON_LABELS: Record<string, string> = {
     permission_request: '🔑',
     // Coordinator tool
     dispatch_agents: '🎯', query_blackboard: '📋', merge_results: '🔗',
-    dispatch_team: '👥', team_send_message: '✉️', team_members: '👥', team_close: '🏁',
+    team_send_message: '✉️', team_members: '👥', team_close: '🏁',
     team_task_create: '🗂️', team_task_list: '🗂️', team_task_update: '🗂️',
 };
 

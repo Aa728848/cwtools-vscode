@@ -19,6 +19,7 @@ import type {
     SerializedBlackboard,
 } from './types';
 import type { UserExecutionPolicy } from './userExecutionPolicy';
+import type { TeamSnapshot } from './team/types';
 import type { AgentRuntimeDomain, TokenUsage, FeatureManifest, ReasoningEffort } from '../types';
 import type { AgentHandoff } from '../runner/agentHandoff';
 import { atomicWriteJson, readJsonWithBackup } from '../runner/durableStorage';
@@ -105,6 +106,13 @@ export interface StoredOrchestration {
     complete: boolean;
     createdAt: number;
     updatedAt: number;
+    /**
+     * Audit payload for a settled Agent Team run. Both multi-agent modes share
+     * this one record: a team persists its graph view (one node per member) so
+     * merge_results and the catalog work identically, plus the full board and
+     * mailbox history here for post-hoc inspection.
+     */
+    teamSnapshot?: TeamSnapshot;
 }
 
 export interface SaveOrchestrationInput {
@@ -119,6 +127,7 @@ export interface SaveOrchestrationInput {
     summary: string;
     totalTokenUsage: TokenUsage;
     qualityGate?: QualityGateResult;
+    teamSnapshot?: TeamSnapshot;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -399,6 +408,7 @@ export async function saveOrchestration(input: SaveOrchestrationInput): Promise<
             summary: input.summary,
             totalTokenUsage: { ...input.totalTokenUsage },
             qualityGate: input.qualityGate,
+            teamSnapshot: input.teamSnapshot,
             complete: isGraphComplete(input.graph),
             createdAt: input.graph.metadata.createdAt,
             updatedAt: Date.now(),

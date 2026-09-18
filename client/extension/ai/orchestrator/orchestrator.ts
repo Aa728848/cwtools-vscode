@@ -227,6 +227,29 @@ export class Orchestrator {
         const result = await this.executor.executeGraph(
             taskGraph, this.blackboard, subAgentExecutor, options,
         );
+        await this.runQualityGatePhase(taskGraph, result, options, emitStep);
+        // final report
+        emitStep({
+            type: 'orchestrator_progress',
+            content: result.summary,
+            timestamp: Date.now(),
+        });
+
+        return result;
+    }
+
+    /**
+     * Quality-gate phase: review successful builder output and preserved failed
+     * writes, then run bounded auto-fix cycles. Shared by the DAG wave path
+     * (execute) and by peer-team settlement so every multi-agent mode enforces
+     * the same write-quality contract over the same reviewer.
+     */
+    public async runQualityGatePhase(
+        taskGraph: TaskGraph,
+        result: OrchestratorResult,
+        options: OrchestratorOptions,
+        emitStep: (step: AgentStep) => void,
+    ): Promise<void> {
         const preservedFailureResults = this.getPreservedFailureResults(result);
         const hasPreservedFailures = preservedFailureResults.length > 0;
         if (hasPreservedFailures) {
@@ -506,14 +529,6 @@ export class Orchestrator {
             }
         }
 
-        // final report
-        emitStep({
-            type: 'orchestrator_progress',
-            content: result.summary,
-            timestamp: Date.now(),
-        });
-
-        return result;
     }
 
     private extractSubAgentClarification(output: string): { clarification: string; options?: string[] } | undefined {

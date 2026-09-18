@@ -70,7 +70,7 @@ export const WRITE_TOOL_NAMES = new Set(['edit_file', 'write_file', 'multiedit',
 export const READ_TOOL_NAMES = new Set(['read_file', 'list_directory', 'glob_files', 'grep', 'web_search', 'web_open', 'web_find', 'document_symbols', 'workspace_symbols']);
 export const VALIDATION_TOOL_NAMES = new Set(['validate_code', 'get_diagnostics']);
 export const ORCHESTRATOR_TOOL_NAMES = new Set(['dispatch_agents', 'query_blackboard', 'merge_results',
-    'dispatch_team', 'team_send_message', 'team_members', 'team_close', 'team_task_create', 'team_task_list', 'team_task_update']);
+    'team_send_message', 'team_members', 'team_close', 'team_task_create', 'team_task_list', 'team_task_update']);
 
 /** Summary of an agent run, extracted from steps. */
 export interface RunSummary {

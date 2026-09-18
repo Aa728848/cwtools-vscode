@@ -166,6 +166,59 @@ describe('orchestrationStore', () => {
         expect(restoredResults.get('n2')!.writtenFiles).to.deep.equal(['events/preserved.txt']);
     });
 
+    it('roundtrips an Agent Team snapshot on the shared orchestration record', async () => {
+        // Peer teams persist through the same store as DAG waves; the team
+        // payload rides along so board/mailbox history survives a reload.
+        const { graph, topicId } = makeGraph('team-snapshot');
+        const graphEngine = new engine.TaskGraphEngine();
+        graphEngine.markComplete(graph, 'n1', 'member output');
+        const teamSnapshot = {
+            version: 1 as const,
+            teamId: graph.id,
+            teamName: 'peers',
+            objective: 'Objective team-snapshot',
+            topicId,
+            domain: 'general',
+            createdAt: 1,
+            members: [{
+                name: 'n1',
+                profileName: 'general-coder',
+                brief: 'do work',
+                status: 'idle' as const,
+                activations: 2,
+                writtenFiles: ['src/a.ts'],
+                lastOutput: 'done',
+                lastRunId: 'run-x',
+            }],
+            messages: [{
+                id: 'm1', teamId: graph.id, from: 'n1', to: 'lead',
+                content: 'blocked on a decision', timestamp: 2, delivery: 'steered' as const,
+            }],
+            tasks: [{
+                id: 't1', subject: 'do work', description: '', status: 'completed' as const,
+                revision: 2, blockedBy: [], writeScopes: ['src/'], createdBy: 'lead',
+                createdAt: 1, updatedAt: 2,
+            }],
+        };
+
+        const saved = await store.saveOrchestration({
+            topicId, domain: 'general', graph,
+            agentResults: new Map(),
+            blackboard: { entries: [], timestamp: 1 },
+            summary: 'Team settled (quiet).',
+            totalTokenUsage: { total: 0, input: 0, output: 0, estimatedCostCny: 0 },
+            teamSnapshot,
+        });
+        expect(saved).to.equal(true);
+
+        const loaded = store.loadOrchestration(graph.id, { topicId, domain: 'general' });
+        expect(loaded).to.not.equal(undefined);
+        expect(loaded!.teamSnapshot?.teamName).to.equal('peers');
+        expect(loaded!.teamSnapshot?.members[0]!.writtenFiles).to.deep.equal(['src/a.ts']);
+        expect(loaded!.teamSnapshot?.messages[0]!.content).to.equal('blocked on a decision');
+        expect(loaded!.teamSnapshot?.tasks[0]!.status).to.equal('completed');
+    });
+
     it('skips corrupted files and domain mismatches', async () => {
         const { graph, topicId } = makeGraph('corrupt');
         await store.saveOrchestration({

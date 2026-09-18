@@ -36,6 +36,10 @@ export interface TeamMemberRunResult {
     tokenUsage?: TokenUsage;
     needsClarification?: boolean;
     clarification?: string;
+    /** Files this activation wrote (merged into the member's cumulative set). */
+    writtenFiles?: string[];
+    /** Validated structured handoff produced by this activation. */
+    handoff?: import('../../runner/agentHandoff').AgentHandoff;
 }
 
 export interface TeamMemberActivation {
@@ -137,6 +141,7 @@ export class TeamRuntime {
                 status: 'provisioning',
                 activations: 0,
                 tokenUsage: emptyUsage(),
+                writtenFiles: [],
                 lastActivityAt: this.createdAt,
             });
         }
@@ -186,6 +191,7 @@ export class TeamRuntime {
             status: member.status,
             activations: member.activations,
             unread: this.mailbox.countPendingFor(member.name),
+            writtenFiles: [...member.writtenFiles],
             activeRunId: member.activeRunId,
             lastOutput: member.lastOutput,
             lastError: member.lastError,
@@ -358,6 +364,14 @@ export class TeamRuntime {
                 member.lastOutput = (result.output || '').slice(0, MAX_OUTPUT_PREVIEW_CHARS) || member.lastOutput;
                 member.lastError = result.success ? undefined : (result.error ?? 'unknown failure');
                 mergeUsage(member.tokenUsage, result.tokenUsage);
+                // Cumulative across activations: a member that wrote files in an
+                // earlier wake still owns them for settlement reporting.
+                for (const file of result.writtenFiles ?? []) {
+                    if (typeof file === 'string' && file && !member.writtenFiles.includes(file)) {
+                        member.writtenFiles.push(file);
+                    }
+                }
+                if (result.handoff) member.lastHandoff = result.handoff;
                 this.options.onEvent?.({
                     kind: 'team_member_idle',
                     member: member.name,
@@ -511,8 +525,10 @@ export class TeamRuntime {
                 profileName: member.profileName,
                 activations: member.activations,
                 tokenUsage: member.tokenUsage,
+                writtenFiles: [...member.writtenFiles],
                 lastOutput: member.lastOutput,
                 lastError: member.lastError,
+                lastHandoff: member.lastHandoff,
             };
         });
         return {
@@ -549,8 +565,10 @@ export class TeamRuntime {
                 brief: member.brief,
                 status: member.status,
                 activations: member.activations,
+                writtenFiles: [...member.writtenFiles],
                 lastOutput: member.lastOutput,
                 lastError: member.lastError,
+                lastHandoff: member.lastHandoff,
                 lastRunId: member.lastRunId,
             })),
             messages: this.mailbox.snapshot().slice(-SETTLE_SNAPSHOT_MESSAGES_CAP),

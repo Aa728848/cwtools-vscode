@@ -2059,6 +2059,38 @@ describe('agent tool progress and aborts', () => {
         expect(result.error).to.include('explore, planner, reviewer');
     });
 
+    it('routes a dispatch_agents call with a member roster into peer-team mode', async () => {
+        const executor = createExecutor();
+        // A roster instead of tasks selects the team path; the roster is then
+        // validated against the same scheduler-profile gate as a DAG wave, so a
+        // profile outside the scheduler's allowance is rejected before any run.
+        const result = await executor.execute('dispatch_agents', {
+            objective: 'coordinate a peer team',
+            members: [{ name: 'writer', profileName: 'paradox-coder', brief: 'Modify a project file.' }],
+        }, {
+            runnerOptions: { schedulingState: PARADOX_PLAN },
+        } as any) as any;
+
+        expect(result.success).to.equal(false);
+        expect(result.error).to.include('Peer-team dispatch requires between');
+    });
+
+    it('rejects a peer roster whose profiles the scheduler does not allow', async () => {
+        const executor = createExecutor();
+        const result = await executor.execute('dispatch_agents', {
+            objective: 'coordinate a peer team',
+            members: [
+                { name: 'reader', profileName: 'explore', brief: 'Scan the project.' },
+                { name: 'writer', profileName: 'paradox-coder', brief: 'Modify a project file.' },
+            ],
+        }, {
+            runnerOptions: { schedulingState: PARADOX_PLAN },
+        } as any) as any;
+
+        expect(result.success).to.equal(false);
+        expect(result.error).to.include("Member 'writer' uses profile 'paradox-coder'");
+    });
+
     it('does not expose dispatch_agents to an Explore scheduler', async () => {
         const executor = createExecutor();
         const result = await executor.execute('dispatch_agents', {

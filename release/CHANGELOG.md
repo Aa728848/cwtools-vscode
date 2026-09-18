@@ -1,5 +1,45 @@
 # Changelog
 
+## [2.19.0] - 2026-09-18
+
+### Agent Teams 同行协作与统一看板底座 / Agent Teams Peer Collaboration & Unified Multi-Agent Board Substrate
+- **[特性] 新增 Agent Teams 同行协作机制与团队工具集（Agent Teams Peer Collaboration）**：
+  - **同行消息传递与冷启动唤醒**：引入 `TeamMailbox` 支持同级 Agent 间的精准消息路由、定向 steer 优先级交付与待机休眠/冷启动唤醒机制。
+  - **CAS 并发任务看板**：引入 `TeamTaskBoard`，支持乐观并发控制（CAS）、`blockedBy` 依赖图分析与基于文件的建议性写入范围锁定（advisory write scopes）。
+  - **团队调度与生命周期管理**：新增 `dispatch_team`、`team_send_message`、`team_task_create/list/update`、`team_members`、`team_close` 等团队工具；支持静默检测、团队主动关闭与会话快照持久化。
+  - **Webview 双语呈现与状态监控**：在聊天面板完整呈现团队协作图标、双语动作短语及成员参数状态。
+  - English: [Feature] Agent Teams peer collaboration — introduced `TeamMailbox` with targeted steer routing and cold-start wake, `TeamTaskBoard` featuring CAS concurrency control, `blockedBy` DAG task dependencies, and advisory write scopes; added 7 dedicated team tools (`dispatch_team`, `team_send_message`, `team_task_*`, etc.) with quiet/close settlement and persistent snapshots; enhanced Webview chat UI with bilingual phrases and team telemetry.
+
+- **[重构] 统一多智能体入口、存储与质量门禁（Unified Multi-Agent Substrate & DAG Convergence）**：
+  - **统一调度入口**：将多智能体入口统一为 `dispatch_agents`（`tasks` 参数驱动 DAG 波次协作，`members` 参数驱动同行团队），统一底层存储至 `orchestration/<id>.json`。
+  - **收敛至团队看板底座**：将 DAG 任务执行平滑收敛到 Agent Teams 看板底座，共享统一的执行看板引擎。
+  - **统一质量门禁检查**：将 Orchestrator 约 260 行质量门禁逻辑提取为通用的 `runQualityGatePhase`，使同行协作团队与 DAG 波次执行共享严格的代码审查与有界自动修复闭环。
+  - English: [Refactor] Unified multi-agent substrate & DAG convergence — unified multi-agent dispatch into `dispatch_agents` and consolidated execution storage under `orchestration/<id>.json`; converged DAG wave execution onto the Agent Teams board substrate; unified quality-gate review and bounded auto-repair cycles across both DAG and peer-team flows.
+
+### 任务模式自主决策与状态持久化 / Agent-Decided Task Mode & State Persistence
+- **[特性] Agent 自主决定任务模式与用户覆盖控制（Agent-Decided Task Mode & User Override）**：
+  - **自主流转工具**：新增 `enter_plan_mode` 与 `exit_plan_mode` 工具，允许模型根据任务复杂度自主决策是否进入规划阶段；进入 Plan 模式后即刻锁定写权限（`plan_write_only`），防范未授权修改。
+  - **用户手动覆盖控制**：新增 `/plan`、`/execute`、`/explore`、`/review` 及 `/mode [auto|plan|execute|explore|review]` 快捷斜杠指令，用户可显式置顶工作模式并立即在状态栏与输入框体现。
+  - **审批边界安全强化**：用户审批（`beginApprovedPlanExecution`）是唯一解除计划模式并恢复工作区写入权限的路径，模型无法单方面通过退出工具规避用户审查。
+  - English: [Feature] Agent-decided task mode & user override — added `enter_plan_mode` and `exit_plan_mode` tools enabling agents to escalate to planning autonomously with strict write locking; introduced user slash commands (`/plan`, `/execute`, `/explore`, `/review`, `/mode`) to pin task modes; hardened approval boundaries ensuring workspace write permissions can only be unlocked via explicit user plan approval.
+
+- **[重构] 任务模式状态持久化与语义分类器退役（Mode State Persistence & Router Retirement）**：
+  - **会话与分叉状态持久化**：将模式置顶与已审批计划制品（`approvedPlanArtifact`）持久化存储于 `ChatTopic`，在跨话题切换、窗口重新加载及话题分叉时完整保留。
+  - **退役逐轮语义分类器**：彻底移除原有基于单轮 Prompt 的 LLM 意图分类模型调用，消除了分类延迟与决策不确定性，精简历史代码。
+  - English: [Refactor] Mode state persistence & router retirement — persisted mode overrides and approved plan artifacts across topic switches, window reloads, and forks; retired the legacy per-turn LLM semantic intent classifier and cleaned up dead routing logic.
+
+### 候选事务与本地化写入增强 / Candidate Transaction & Localisation Staging
+- **[修复] 本地化文件纳入候选事务与空事务提交保护（Localisation Writes in Candidate Transaction）**：
+  - **完整生命周期纳入**：解决 `write_localisation` 仅修改内存覆盖层未注册至 `CandidateTransactionManager` 的缺陷，确保纯本地化任务能够正确暂存、参与 LSP 验证与原子提交。
+  - **网络与验证层故障解耦**：将语言服务器传输异常（`infrastructureError`）与内容语法错误分离，避免模型陷入无谓的事务重试或跳过；支持空修改事务作为 no-op 安全提交。
+  - English: [Fix] Localisation writes in candidate transaction — resolved an issue where `write_localisation` bypassed candidate staging, ensuring pure localisation edits stage files, validate against LSP, and commit atomically; isolated LSP transport errors from candidate validation errors and allowed empty transactions to commit safely as no-ops.
+
+### 语言服务器与原版校验优化 / Language Server & Vanilla Validation Optimization
+- **[优化] 原版错误跳过设置与跨平台路径判定（Vanilla Validation Skip Settings & PathIdentity）**：
+  - **跨平台路径精准识别**：在 F# 后端引入标准化的 `PathIdentity` 处理，确保在 Windows 与类 Unix 系统上精确比对原版安装目录与模组路径。
+  - **错误跳过逻辑优化**：完善 `errors.vanilla` 与 `skip_validation` 配置项对原版文件的错误抑制逻辑，提升大型模组环境下的验证效率与诊断清晰度。
+  - English: [Optimization] Vanilla validation skip settings & PathIdentity — introduced robust cross-platform path identity normalization in the F# LSP backend, optimizing `errors.vanilla` and `skip_validation` rules to eliminate spurious validation warnings on vanilla assets.
+
 ## [2.18.0] - 2026-09-16
 
 ### 多根工作区架构适配 / Multi-root Workspace Architecture

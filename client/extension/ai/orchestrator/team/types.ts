@@ -69,8 +69,37 @@ export interface TeamMessage {
     delivery?: 'steered' | 'wake' | 'lead_notification' | 'settle_summary';
 }
 
-/** Shared task board status set (deleted tasks are removed from the board). */
-export type TeamTaskStatus = 'pending' | 'in_progress' | 'completed';
+/**
+ * Shared task board status set (deleted tasks are removed from the board).
+ * 'failed' and 'cancelled' are reachable only on pipeline boards driven by
+ * GraphTeamExecutor; the peer-facing CAS tool never sets them.
+ */
+export type TeamTaskStatus = 'pending' | 'in_progress' | 'completed' | 'failed' | 'cancelled';
+
+/**
+ * Static execution contract of a pipeline (compiled-DAG) board task. These
+ * fields mirror the dispatch_agents TaskNode declaration so one board task
+ * carries everything a one-shot sub-agent activation needs. Peer-collaboration
+ * tasks leave this undefined; the peer CAS tool never populates it.
+ */
+export interface TeamPipelineContract {
+    /** Runtime Agent profile that performs this task. */
+    profileName: string;
+    /** Full subtask prompt (unbounded; tool-facing caps do not apply here). */
+    prompt: string;
+    contextFiles?: string[];
+    plannedFiles?: string[];
+    plannedEntities?: string[];
+    produces?: import('../types').TaskEntityContract[];
+    consumes?: import('../types').TaskEntityContract[];
+    acceptanceChecks?: import('../../types').AcceptanceCheck[];
+    priority?: import('../types').TaskPriority;
+    maxIterations?: number;
+    maxRetries?: number;
+    modelOverride?: string;
+    providerOverride?: string;
+    reasoningEffort?: import('../../types').ReasoningEffort;
+}
 
 /** CAS actions accepted by team_task_update. */
 export type TeamTaskAction = 'claim' | 'release' | 'complete' | 'edit';
@@ -89,6 +118,8 @@ export interface TeamTask {
     blockedBy: string[];
     /** Advisory workspace-relative write-scope prefixes (not locks). */
     writeScopes: string[];
+    /** Pipeline execution contract; present only on compiled-DAG boards. */
+    pipeline?: TeamPipelineContract;
     createdBy: string;
     createdAt: number;
     updatedAt: number;

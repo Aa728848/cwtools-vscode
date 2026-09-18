@@ -381,7 +381,7 @@ describe('ConflictDetector', () => {
     });
 });
 
-// ── ParallelExecutor / Orchestrator Runtime Safety ───────────────────────────
+// ── GraphTeamExecutor / Orchestrator Runtime Safety ────────────────────────
 
 // -- dispatch_agents wiring ---------------------------------------------------
 
@@ -884,20 +884,20 @@ describe('approved blueprint dispatch', () => {
 });
 
 describe('Orchestrator runtime safety', () => {
-    let ParallelExecutor: typeof import('../../extension/ai/orchestrator/parallelExecutor').ParallelExecutor;
+    let GraphTeamExecutor: typeof import('../../extension/ai/orchestrator/team/graphTeamExecutor').GraphTeamExecutor;
     let Orchestrator: typeof import('../../extension/ai/orchestrator/orchestrator').Orchestrator;
     let TaskGraphEngine: typeof import('../../extension/ai/orchestrator/taskGraphEngine').TaskGraphEngine;
     let Blackboard: typeof import('../../extension/ai/orchestrator/blackboard').Blackboard;
 
     before(() => {
-        ParallelExecutor = require('../../extension/ai/orchestrator/parallelExecutor').ParallelExecutor;
+        GraphTeamExecutor = require('../../extension/ai/orchestrator/team/graphTeamExecutor').GraphTeamExecutor;
         Orchestrator = require('../../extension/ai/orchestrator/orchestrator').Orchestrator;
         TaskGraphEngine = require('../../extension/ai/orchestrator/taskGraphEngine').TaskGraphEngine;
         Blackboard = require('../../extension/ai/orchestrator/blackboard').Blackboard;
     });
 
     it('executeGraph: reports missing dependencies instead of silently completing', async () => {
-        const executor = new ParallelExecutor({ maxConcurrency: 1 });
+        const executor = new GraphTeamExecutor({ maxConcurrency: 1 });
         const graph = TaskGraphEngine.createGraph('missing dependency');
         TaskGraphEngine.addNode(graph, 'A', 'paradox-coder', 'build', { dependencies: ['missing_node'] });
 
@@ -916,7 +916,7 @@ describe('Orchestrator runtime safety', () => {
     });
 
     it('executeGraph: never heals a misspelled dependency to the node itself', async () => {
-        const executor = new ParallelExecutor({ maxConcurrency: 1 });
+        const executor = new GraphTeamExecutor({ maxConcurrency: 1 });
         const graph = TaskGraphEngine.createGraph('self dependency healing');
         TaskGraphEngine.addNode(graph, 'build_ui', 'paradox-coder', 'build', { dependencies: ['build_u1'] });
 
@@ -930,7 +930,7 @@ describe('Orchestrator runtime safety', () => {
     });
 
     it('executeGraph: rejects ambiguous dependency healing matches', async () => {
-        const executor = new ParallelExecutor({ maxConcurrency: 1 });
+        const executor = new GraphTeamExecutor({ maxConcurrency: 1 });
         const graph = TaskGraphEngine.createGraph('ambiguous dependency healing');
         TaskGraphEngine.addNode(graph, 'build_ui', 'paradox-coder', 'build');
         TaskGraphEngine.addNode(graph, 'build_ux', 'paradox-coder', 'build');
@@ -946,7 +946,7 @@ describe('Orchestrator runtime safety', () => {
     });
 
     it('executeGraph: rechecks cycles introduced by dependency healing', async () => {
-        const executor = new ParallelExecutor({ maxConcurrency: 1 });
+        const executor = new GraphTeamExecutor({ maxConcurrency: 1 });
         const graph = TaskGraphEngine.createGraph('healed dependency cycle');
         TaskGraphEngine.addNode(graph, 'compile', 'paradox-coder', 'build', { dependencies: ['consumr'] });
         TaskGraphEngine.addNode(graph, 'consumer', 'paradox-coder', 'build', { dependencies: ['compile'] });
@@ -961,7 +961,7 @@ describe('Orchestrator runtime safety', () => {
     });
 
     it('executeGraph: does not retry timeout-like sub-agent failures', async () => {
-        const executor = new ParallelExecutor({ maxConcurrency: 1 });
+        const executor = new GraphTeamExecutor({ maxConcurrency: 1 });
         const graph = TaskGraphEngine.createGraph('timeout');
         TaskGraphEngine.addNode(graph, 'A', 'paradox-coder', 'build', { maxRetries: 2 });
         let calls = 0;
@@ -990,7 +990,7 @@ describe('Orchestrator runtime safety', () => {
     });
 
     it('executeGraph: does not retry failures after preserving written files', async () => {
-        const executor = new ParallelExecutor({ maxConcurrency: 1 });
+        const executor = new GraphTeamExecutor({ maxConcurrency: 1 });
         const graph = TaskGraphEngine.createGraph('preserved failure');
         TaskGraphEngine.addNode(graph, 'A', 'paradox-coder', 'build', { maxRetries: 2 });
         const steps: any[] = [];
@@ -1023,7 +1023,7 @@ describe('Orchestrator runtime safety', () => {
     });
 
     it('executeGraph: serializes ready nodes that declare the same planned file', async () => {
-        const executor = new ParallelExecutor({ maxConcurrency: 2 });
+        const executor = new GraphTeamExecutor({ maxConcurrency: 2 });
         const graph = TaskGraphEngine.createGraph('file conflict');
         TaskGraphEngine.addNode(graph, 'A', 'paradox-coder', 'build A', { plannedFiles: ['events/shared.txt'] });
         TaskGraphEngine.addNode(graph, 'B', 'paradox-coder', 'build B', { plannedFiles: ['events/shared.txt'] });
@@ -1051,7 +1051,7 @@ describe('Orchestrator runtime safety', () => {
     });
 
     it('executeGraph: persists and injects structured dependency handoffs', async () => {
-        const executor = new ParallelExecutor({ maxConcurrency: 2 });
+        const executor = new GraphTeamExecutor({ maxConcurrency: 2 });
         const graph = TaskGraphEngine.createGraph('handoff propagation');
         TaskGraphEngine.addNode(graph, 'A', 'explore', 'inspect source');
         TaskGraphEngine.addNode(graph, 'B', 'paradox-coder', 'implement result', { dependencies: ['A'] });
@@ -1090,7 +1090,7 @@ describe('Orchestrator runtime safety', () => {
     });
 
     it('executeGraph: keeps non-conflicting planned files in the same batch', async () => {
-        const executor = new ParallelExecutor({ maxConcurrency: 2 });
+        const executor = new GraphTeamExecutor({ maxConcurrency: 2 });
         const graph = TaskGraphEngine.createGraph('no file conflict');
         TaskGraphEngine.addNode(graph, 'A', 'paradox-coder', 'build A', { plannedFiles: ['events/a.txt'] });
         TaskGraphEngine.addNode(graph, 'B', 'paradox-coder', 'build B', { plannedFiles: ['events/b.txt'] });
@@ -1122,7 +1122,7 @@ describe('Orchestrator runtime safety', () => {
     });
 
     it('executeGraph: preserves child cache and request-level usage in totals', async () => {
-        const executor = new ParallelExecutor({ maxConcurrency: 1 });
+        const executor = new GraphTeamExecutor({ maxConcurrency: 1 });
         const graph = TaskGraphEngine.createGraph('usage aggregation');
         TaskGraphEngine.addNode(graph, 'A', 'paradox-coder', 'build A');
 
@@ -1181,7 +1181,7 @@ describe('Orchestrator runtime safety', () => {
     });
 
     it('executeGraph: serializes ready nodes that declare the same planned entity', async () => {
-        const executor = new ParallelExecutor({ maxConcurrency: 2 });
+        const executor = new GraphTeamExecutor({ maxConcurrency: 2 });
         const graph = TaskGraphEngine.createGraph('entity conflict');
         TaskGraphEngine.addNode(graph, 'A', 'paradox-coder', 'build A', { plannedEntities: ['event:foo.1'] });
         TaskGraphEngine.addNode(graph, 'B', 'paradox-coder', 'build B', { plannedEntities: ['event:foo.1'] });
@@ -1696,7 +1696,7 @@ describe('Orchestrator runtime safety', () => {
     it('executeGraph: suspends and requeues a rate-limited child before retrying', async function () {
         this.timeout(5_000);
         const eventTypes: string[] = [];
-        const executor = new ParallelExecutor({
+        const executor = new GraphTeamExecutor({
             maxConcurrency: 2,
             eventSink: {
                 appendSoon: (type: string) => {

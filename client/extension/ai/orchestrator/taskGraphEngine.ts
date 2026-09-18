@@ -1,8 +1,9 @@
 /** 
 * Eddy CWTool Code — DAG task graph engine 
 * 
-* Manage TaskGraph's topological sorting, ready node calculations, state transitions, and circular dependency detection. 
-* This is the scheduling core of the multi-Agent collaboration system. 
+* Manage TaskGraph construction helpers, circular dependency detection, entity
+* dependency linking, and progress accounting. Wave scheduling itself lives in
+* team/graphTeamExecutor.ts on the shared Agent Teams task board. 
 */
 
 import type {
@@ -16,13 +17,17 @@ import type {
 import { isReasoningEffort } from '../types';
 
 /** 
-* DAG task graph engine. 
-* 
-* Provides the following capabilities: 
-* 1. Topological sorting - layer DAG, and nodes on the same layer can be parallelized without dependencies 
-* 2. Ready node query - obtain all pending nodes whose dependencies have been completed 
-* 3. State transition - mark completion/failure, and cascade cancellation of downstream nodes 
-* 4. Circular dependency detection - verify the legality of the graph before execution 
+* DAG task graph construction/validation utility.
+*
+* Provides the following capabilities:
+* 1. Topological sorting - layer DAG, and nodes on the same layer can be parallelized without dependencies
+* 2. Ready node query - obtain all pending nodes whose dependencies have been completed
+* 3. State transition - mark completion/failure, and cascade cancellation of downstream nodes
+* 4. Circular dependency detection - verify the legality of the graph before execution
+*
+* Note: production scheduling no longer routes through these transition
+* helpers; GraphTeamExecutor mirrors the same semantics onto the shared task
+* board. They remain for the quality-gate repair path and direct unit tests.
 */
 export class TaskGraphEngine {
 

@@ -3,7 +3,7 @@
 * 
 * Top-level entrance to multi-Agent collaboration system. Receive user requests and determine complexity, 
 * Simple requests can go directly to the agent, and complex requests can generate TaskGraph and pass it through. 
-* ParallelExecutor schedules multiple expert Agents to complete the task collaboratively. 
+* GraphTeamExecutor (on the shared Agent Teams task board) schedules multiple expert Agents collaboratively. 
 * 
 * Model selection strategy: By default, the supplier/model configured by the user in the settings panel will be inherited. 
 */
@@ -27,7 +27,7 @@ import type {
 import { TaskGraphEngine } from './taskGraphEngine';
 import { Blackboard } from './blackboard';
 import { BLACKBOARD_KEY_PREFIXES } from './blackboardSchema';
-import { ParallelExecutor, type SubAgentExecutor } from './parallelExecutor';
+import { GraphTeamExecutor, type SubAgentExecutor } from './team/graphTeamExecutor';
 import { QualityGate, PDX_DIAGNOSTIC_EXTENSIONS, isPdxDiagnosticFile } from './qualityGate';
 import { ErrorReporter } from '../errorReporter';
 import { SOURCE, ORCHESTRATOR_MSG, aiText } from '../messages';
@@ -112,13 +112,13 @@ export function parseClarificationOptions(text: string): string[] | undefined {
 * Responsibilities: 
 * 1. Request analysis: determine whether multi-Agent collaboration is required 
 * 2. Task decomposition: Decompose complex requests into TaskGraph (DAG) 
-* 3. Scheduling execution: Manage Agent life cycle through ParallelExecutor 
+* 3. Scheduling execution: Manage Agent life cycle through GraphTeamExecutor 
 * 4. Result synthesis: Summarize the output of each Agent into the final deliverable 
 * 5. Quality control: run the quality gate after writable child profiles complete
 */
 export class Orchestrator {
     private blackboard: Blackboard;
-    private executor: ParallelExecutor;
+    private executor: GraphTeamExecutor;
     private qualityGate: QualityGate;
     private graphEngine: TaskGraphEngine;
 
@@ -130,7 +130,7 @@ export class Orchestrator {
         },
     ) {
         this.blackboard = new Blackboard();
-        this.executor = new ParallelExecutor({
+        this.executor = new GraphTeamExecutor({
             maxConcurrency: options?.maxConcurrency,
             globalTokenBudget: options?.globalTokenBudget,
         });

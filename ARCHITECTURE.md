@@ -249,7 +249,7 @@ Programmable `run_code` is an authority-neutral transport, not a write permissio
 
 The runner records typed events for streaming, replay, checkpoints, and resume. Adding an event requires matching reducer and Webview support. Resume accepts only the current V4 snapshot contract; older snapshots are rejected instead of migrated.
 
-Long runs use bounded context compaction, checkpoints, budgets, loop detection, and child-agent activity monitoring. Multi-agent coordination uses `dispatch_agents`, `query_blackboard`, and `merge_results` with a shared typed Blackboard. Child tasks name a registered runtime `profileName` directly; there is no separate role registry, alias mapping, or default writer fallback. Persisted orchestration graphs accept only the current V3 contract.
+Long runs use bounded context compaction, checkpoints, budgets, loop detection, and child-agent activity monitoring. Multi-agent coordination uses `dispatch_agents`, `query_blackboard`, and `merge_results` with a shared typed Blackboard. Child tasks name a registered runtime `profileName` directly; there is no separate role registry, alias mapping, or default writer fallback. Persisted orchestration graphs accept only the current V3 contract. DAG waves are scheduled by `GraphTeamExecutor`, which seeds the graph onto the shared Agent Teams task board (task id = node id, `blockedBy` = dependencies), so readiness, cascade cancellation, and write-conflict avoidance have exactly one implementation across both multi-agent modes.
 
 Agent Teams add a peer-collaboration alternative to the static DAG: `dispatch_team` starts a bounded background team whose named members share a durable mailbox and a CAS task board (`team_send_message`, `team_task_create`/`team_task_list`/`team_task_update`, `team_members`, `team_close`). A message to a running member is steered into its next model step through the active-turn registry; a message to an idle member cold-resumes it with its preserved transcript and the queued mail. Board updates are compare-and-set on the task revision, and `writeScopes` are advisory prefixes, never locks. The team settles when no member is running, no message is undelivered, and the quiet window elapses (or the lead closes the team); the settle summary reaches the lead through the standard background-task notification channel.
 
@@ -540,7 +540,7 @@ sequenceDiagram
 
 Runner 用类型化事件支持流式展示、replay、checkpoint 和恢复。新增事件必须同步 reducer 与 Webview。恢复只接受当前 V4 快照合同；旧快照会被拒绝，不再迁移。
 
-长任务使用有界上下文压缩、checkpoint、预算、循环检测和子 Agent 活动监控。多 Agent 通过 `dispatch_agents`、`query_blackboard`、`merge_results` 与共享类型化 Blackboard 协作。子任务直接引用已注册的运行时 `profileName`；不再存在第二套角色注册表、别名映射或默认写入 Profile 回退。持久化任务图只接受当前 V3 契约。
+长任务使用有界上下文压缩、checkpoint、预算、循环检测和子 Agent 活动监控。多 Agent 通过 `dispatch_agents`、`query_blackboard`、`merge_results` 与共享类型化 Blackboard 协作。子任务直接引用已注册的运行时 `profileName`；不再存在第二套角色注册表、别名映射或默认写入 Profile 回退。持久化任务图只接受当前 V3 契约。DAG 波次由 `GraphTeamExecutor` 调度：它把图播种到共享的 Agent Teams 任务看板（任务 id = 节点 id，`blockedBy` = 依赖），两种多 Agent 模式共用同一套就绪判定、级联取消与写冲突避让实现。
 
 Agent Teams 提供静态 DAG 之外的对等协作模式：`dispatch_team` 在后台启动一个有界团队，具名成员共享持久化邮箱与 CAS 任务看板（`team_send_message`、`team_task_create`/`team_task_list`/`team_task_update`、`team_members`、`team_close`）。发送给运行中成员的消息经由活动回合注册表注入其下一个模型步骤；发送给空闲成员的消息会带着其保留的转录上下文冷启动唤醒该成员。看板更新以任务 revision 做比较并交换（CAS），`writeScopes` 只是咨询性前缀而非锁。当没有成员在运行、没有未投递消息且静默窗口结束（或 Lead 关闭团队）时团队结算，结算摘要经由标准后台任务通知通道送达 Lead。
 

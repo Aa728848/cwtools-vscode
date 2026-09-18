@@ -472,14 +472,14 @@ describe('normalizeResumedGraph', () => {
 
 // ── 6. Executor-level resume bookkeeping ─────────────────────────────────────
 
-describe('ParallelExecutor — clarification resume bookkeeping', () => {
-    let ParallelExecutor: typeof import('../../extension/ai/orchestrator/parallelExecutor').ParallelExecutor;
+describe('GraphTeamExecutor — clarification resume bookkeeping', () => {
+    let GraphTeamExecutor: typeof import('../../extension/ai/orchestrator/team/graphTeamExecutor').GraphTeamExecutor;
     let TaskGraphEngine: typeof import('../../extension/ai/orchestrator/taskGraphEngine').TaskGraphEngine;
     let Blackboard: typeof import('../../extension/ai/orchestrator/blackboard').Blackboard;
     type SubAgentResult = import('../../extension/ai/orchestrator/types').SubAgentResult;
 
     before(() => {
-        ParallelExecutor = require('../../extension/ai/orchestrator/parallelExecutor').ParallelExecutor;
+        GraphTeamExecutor = require('../../extension/ai/orchestrator/team/graphTeamExecutor').GraphTeamExecutor;
         TaskGraphEngine = require('../../extension/ai/orchestrator/taskGraphEngine').TaskGraphEngine;
         Blackboard = require('../../extension/ai/orchestrator/blackboard').Blackboard;
     });
@@ -495,7 +495,7 @@ describe('ParallelExecutor — clarification resume bookkeeping', () => {
     });
 
     it('澄清结果记录 resumeContextRef 与问题，供下一波恢复', async () => {
-        const executor = new ParallelExecutor({ maxConcurrency: 1 });
+        const executor = new GraphTeamExecutor({ maxConcurrency: 1 });
         const graph = TaskGraphEngine.createGraph('clarification anchor');
         TaskGraphEngine.addNode(graph, 'A', 'explore', 'scan');
 
@@ -514,7 +514,7 @@ describe('ParallelExecutor — clarification resume bookkeeping', () => {
     });
 
     it('成功结算清空恢复元数据，避免下一波误用陈旧上下文', async () => {
-        const executor = new ParallelExecutor({ maxConcurrency: 1 });
+        const executor = new GraphTeamExecutor({ maxConcurrency: 1 });
         const graph = TaskGraphEngine.createGraph('anchor cleared on success');
         TaskGraphEngine.addNode(graph, 'A', 'explore', 'scan');
         const node = graph.nodes.get('A')!;
@@ -528,7 +528,7 @@ describe('ParallelExecutor — clarification resume bookkeeping', () => {
     });
 
     it('resumeAnswer 只对本波有效：子代理拿到它，节点上随即清空', async () => {
-        const executor = new ParallelExecutor({ maxConcurrency: 1 });
+        const executor = new GraphTeamExecutor({ maxConcurrency: 1 });
         const graph = TaskGraphEngine.createGraph('one-wave answer');
         TaskGraphEngine.addNode(graph, 'A', 'explore', 'scan');
         const node = graph.nodes.get('A')!;

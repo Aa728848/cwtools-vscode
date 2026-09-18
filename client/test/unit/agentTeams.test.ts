@@ -365,3 +365,105 @@ describe('TeamRuntime', () => {
         expect(roster.every(entry => entry.unread === 0)).to.be.true;
     });
 });
+
+
+// ── TeamTaskBoard pipeline driver API (GraphTeamExecutor substrate) ─────────
+
+describe('TeamTaskBoard pipeline driver API', () => {
+    const pipeline = (profileName = 'explore') => ({ profileName, prompt: 'do the thing' });
+
+    it('seedPipeline keeps explicit node ids and exposes readiness via blockedBy', () => {
+        const board = new TeamTaskBoard('team-p1');
+        const error = board.seedPipeline('graph', [
+            { id: 'scan', subject: 'scan', pipeline: pipeline() },
+            { id: 'build', subject: 'build', blockedBy: ['scan'], pipeline: pipeline('paradox-coder') },
+            { id: 'verify', subject: 'verify', blockedBy: ['build'], pipeline: pipeline('reviewer') },
+        ]);
+        expect(error).to.be.undefined;
+        expect(board.size).to.equal(3);
+        expect(board.readyPendingTasks().map(task => task.id)).to.deep.equal(['scan']);
+        board.forceStatus('scan', 'completed');
+        expect(board.readyPendingTasks().map(task => task.id)).to.deep.equal(['build']);
+    });
+
+    it('seedPipeline rejects duplicates, unknown blockers and cycles atomically', () => {
+        const board = new TeamTaskBoard('team-p2');
+        expect(board.seedPipeline('graph', [
+            { id: 'a', subject: 'a' },
+            { id: 'a', subject: 'dup' },
+        ])).to.contain('Duplicate');
+        expect(board.size).to.equal(0);
+
+        expect(board.seedPipeline('graph', [
+            { id: 'a', subject: 'a', blockedBy: ['ghost'] },
+        ])).to.contain('unknown task');
+        expect(board.size).to.equal(0);
+
+        expect(board.seedPipeline('graph', [
+            { id: 'a', subject: 'a', blockedBy: ['b'] },
+            { id: 'b', subject: 'b', blockedBy: ['a'] },
+        ])).to.contain('cycle');
+        expect(board.size).to.equal(0);
+    });
+
+    it('seedPipeline preserves initial statuses for resumed graphs', () => {
+        const board = new TeamTaskBoard('team-p3');
+        const error = board.seedPipeline('graph', [
+            { id: 'done-node', subject: 'd', status: 'completed', pipeline: pipeline() },
+            { id: 'failed-node', subject: 'f', status: 'failed', pipeline: pipeline() },
+            { id: 'fresh', subject: 'n', pipeline: pipeline() },
+        ]);
+        expect(error).to.be.undefined;
+        expect(board.get('done-node')?.status).to.equal('completed');
+        expect(board.get('failed-node')?.status).to.equal('failed');
+        expect(board.readyPendingTasks().map(task => task.id)).to.deep.equal(['fresh']);
+    });
+
+    it('forceStatus transitions and bumps the CAS revision', () => {
+        const board = new TeamTaskBoard('team-p4');
+        board.seedPipeline('graph', [{ id: 'a', subject: 'a', pipeline: pipeline() }]);
+        const before = board.get('a')!.revision;
+        expect(board.forceStatus('a', 'in_progress')).to.be.true;
+        expect(board.get('a')!.revision).to.equal(before + 1);
+        expect(board.isSettledBoard()).to.be.false;
+        board.forceStatus('a', 'completed');
+        expect(board.isSettledBoard()).to.be.true;
+        expect(board.get('a')!.completedAt).to.be.a('number');
+    });
+
+    it('cancelDownstream cascades to pending tasks only, in BFS order', () => {
+        const board = new TeamTaskBoard('team-p5');
+        board.seedPipeline('graph', [
+            { id: 'root', subject: 'root', pipeline: pipeline() },
+            { id: 'mid', subject: 'mid', blockedBy: ['root'], pipeline: pipeline() },
+            { id: 'leaf', subject: 'leaf', blockedBy: ['mid'], pipeline: pipeline() },
+            { id: 'running-branch', subject: 'rb', blockedBy: ['root'], pipeline: pipeline() },
+        ]);
+        board.forceStatus('root', 'failed');
+        board.forceStatus('running-branch', 'in_progress');
+        const cancelled = board.cancelDownstream('root');
+        expect(cancelled).to.deep.equal(['mid', 'leaf']);
+        expect(board.get('mid')?.status).to.equal('cancelled');
+        expect(board.get('leaf')?.status).to.equal('cancelled');
+        expect(board.get('running-branch')?.status).to.equal('in_progress');
+    });
+
+    it('pipeline contracts ride the snapshot untouched', () => {
+        const board = new TeamTaskBoard('team-p6');
+        board.seedPipeline('graph', [{
+            id: 'build',
+            subject: 'build',
+            pipeline: {
+                profileName: 'paradox-coder',
+                prompt: 'write events',
+                plannedFiles: ['events/x.txt'],
+                maxRetries: 2,
+                produces: [{ kind: 'event', id: 'evt_1', operation: 'define' }],
+            },
+        }]);
+        const snap = board.snapshot();
+        expect(snap[0]!.pipeline?.profileName).to.equal('paradox-coder');
+        expect(snap[0]!.pipeline?.plannedFiles).to.deep.equal(['events/x.txt']);
+        expect(snap[0]!.pipeline?.produces?.[0]?.id).to.equal('evt_1');
+    });
+});

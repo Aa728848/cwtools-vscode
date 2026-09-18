@@ -14,6 +14,7 @@ import type {
     TeamTask,
     TeamTaskAction,
     TeamTaskListFilter,
+    TeamTaskStatus,
     TeamTaskUpdateResult,
     TeamTaskView,
 } from './types';
@@ -36,6 +37,20 @@ export interface TeamTaskEditPayload {
     description?: string;
     blockedBy?: string[];
     writeScopes?: string[];
+}
+
+/** One entry of a compiled-DAG board seed (internal; not model-facing). */
+export interface TeamPipelineSeedEntry {
+    /** Explicit id: pipeline tasks keep their dispatch_agents node id so
+     *  persisted graphs, run events, and answerClarifications stay stable. */
+    id: string;
+    subject: string;
+    description?: string;
+    blockedBy?: string[];
+    writeScopes?: string[];
+    pipeline?: import('./types').TeamPipelineContract;
+    /** Initial status; resumed graphs seed completed/failed/cancelled tasks. */
+    status?: TeamTaskStatus;
 }
 
 /**
@@ -236,6 +251,123 @@ export class TeamTaskBoard {
         return { success: true, task: this.toView(task) };
     }
 
+    /**
+     * Bulk-seed a pipeline board from a compiled task graph. Two phases: insert
+     * every task with its explicit id first, then validate blocker references
+     * and acyclicity. Internal driver API — bypasses the model-facing subject/
+     * description caps (the full prompt lives in the pipeline contract).
+     * Returns an error string on rejection; the board stays untouched then.
+     */
+    seedPipeline(caller: string, entries: readonly TeamPipelineSeedEntry[]): string | undefined {
+        if (!Array.isArray(entries) || entries.length === 0) return 'seedPipeline requires at least one entry.';
+        const ids = new Set<string>();
+        for (const entry of entries) {
+            const id = typeof entry?.id === 'string' ? entry.id.trim() : '';
+            if (!id) return 'Pipeline entries require a non-empty id.';
+            if (ids.has(id) || this.tasks.has(id)) return "Duplicate task id '" + id + "'.";
+            ids.add(id);
+        }
+        for (const entry of entries) {
+            for (const raw of entry.blockedBy ?? []) {
+                const dep = typeof raw === 'string' ? raw.trim() : '';
+                if (!dep || !ids.has(dep)) return "Task '" + entry.id + "' is blocked by unknown task '" + raw + "'.";
+                if (dep === entry.id.trim()) return "Task '" + entry.id + "' cannot block itself.";
+            }
+        }
+        const prepared: TeamTask[] = [];
+        const now = Date.now();
+        for (const entry of entries) {
+            const writeScopes = this.normalizeScopes(entry.writeScopes);
+            if (typeof writeScopes === 'string') return "Task '" + entry.id + "': " + writeScopes;
+            prepared.push({
+                id: entry.id.trim(),
+                subject: (entry.subject || entry.id).slice(0, TEAM_MAX_SUBJECT_CHARS),
+                description: typeof entry.description === 'string' ? entry.description : '',
+                status: entry.status ?? 'pending',
+                revision: 1,
+                blockedBy: (entry.blockedBy ?? []).map((raw: string) => raw.trim()),
+                writeScopes,
+                pipeline: entry.pipeline,
+                createdBy: caller,
+                createdAt: now,
+                updatedAt: now,
+                completedAt: entry.status === 'completed' ? now : undefined,
+            });
+        }
+        // Acyclicity across the whole seeded edge set (checked pre-insert so a
+        // rejected seed leaves the board untouched).
+        const seeded = new Map(prepared.map(task => [task.id, task] as const));
+        for (const task of prepared) {
+            for (const blocker of task.blockedBy) {
+                if (this.reachesViaBlockers(blocker, task.id, seeded)) {
+                    return "blockedBy would create a dependency cycle: '" + blocker + "' already depends on '" + task.id + "'.";
+                }
+            }
+        }
+        for (const task of prepared) this.tasks.set(task.id, task);
+        return undefined;
+    }
+
+    /**
+     * Executor-driven status transition for pipeline boards. The team runtime /
+     * graph executor is the trusted scheduler; peer members keep using the CAS
+     * update() path. Bumps revision so concurrent CAS readers observe the move.
+     */
+    forceStatus(taskId: string, status: TeamTaskStatus): boolean {
+        const task = this.tasks.get(taskId);
+        if (!task) return false;
+        if (task.status === status) return true;
+        task.status = status;
+        task.revision += 1;
+        task.updatedAt = Date.now();
+        if (status === 'completed') task.completedAt = Date.now();
+        return true;
+    }
+
+    /** Pending tasks whose blockers are all completed, in creation order. */
+    readyPendingTasks(): TeamTask[] {
+        return [...this.tasks.values()]
+            .filter(task => task.status === 'pending' && this.isReady(task));
+    }
+
+    /** True when no task is pending or in progress. */
+    isSettledBoard(): boolean {
+        for (const task of this.tasks.values()) {
+            if (task.status === 'pending' || task.status === 'in_progress') return false;
+        }
+        return true;
+    }
+
+    /**
+     * Cascade-cancel every pending downstream task reachable through blockedBy
+     * edges starting at a failed task. Running tasks finish; only pending tasks
+     * are cancelled. Returns the cancelled ids in deterministic order.
+     */
+    cancelDownstream(taskId: string): string[] {
+        const toCancel = new Set<string>();
+        const queue = [taskId];
+        while (queue.length > 0) {
+            const currentId = queue.shift()!;
+            for (const other of this.tasks.values()) {
+                if (other.blockedBy.includes(currentId) && !toCancel.has(other.id)) {
+                    toCancel.add(other.id);
+                    queue.push(other.id);
+                }
+            }
+        }
+        // Set iteration order is the BFS discovery order above, matching the
+        // legacy graph engine's cascade output byte-for-byte.
+        const cancelled: string[] = [];
+        for (const cancelId of toCancel) {
+            const task = this.tasks.get(cancelId);
+            if (task && task.status === 'pending') {
+                this.forceStatus(cancelId, 'cancelled');
+                cancelled.push(cancelId);
+            }
+        }
+        return cancelled;
+    }
+
     list(filter: TeamTaskListFilter = {}): TeamTaskView[] {
         const rows = [...this.tasks.values()]
             .filter(task => (!filter.status || task.status === filter.status)
@@ -305,7 +437,7 @@ export class TeamTaskBoard {
         return normalized;
     }
 
-    private reachesViaBlockers(fromId: string, targetId: string): boolean {
+    private reachesViaBlockers(fromId: string, targetId: string, lookup?: ReadonlyMap<string, TeamTask>): boolean {
         const visited = new Set<string>();
         const stack = [fromId];
         while (stack.length > 0) {
@@ -313,7 +445,7 @@ export class TeamTaskBoard {
             if (current === targetId) return true;
             if (visited.has(current)) continue;
             visited.add(current);
-            const task = this.tasks.get(current);
+            const task = (lookup ?? this.tasks).get(current);
             if (task) stack.push(...task.blockedBy);
         }
         return false;

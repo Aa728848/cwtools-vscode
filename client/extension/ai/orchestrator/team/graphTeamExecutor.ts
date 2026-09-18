@@ -1,8 +1,16 @@
 /**
- * Eddy CWTool Code - Parallel Executor
+ * Eddy CWTool Code — Graph Team Executor
  *
- * Schedules multiple agent nodes with bounded concurrency, token-budget checks,
- * retry/cascade behavior, and planned write-target conflict avoidance.
+ * The single DAG execution engine of the multi-Agent system, running on the
+ * shared Agent Teams substrate. A dispatch_agents task graph is seeded onto a
+ * per-run TeamTaskBoard (task id = node id, blockedBy = dependencies); wave
+ * scheduling, retry/storm bookkeeping, and write-conflict avoidance all read
+ * board state, while TaskNode objects remain the bookkeeping and persistence
+ * mirror (orchestrationStore resumes from them unchanged).
+ *
+ * Wave semantics are preserved from the legacy ParallelExecutor: each wave
+ * collects ready tasks, selects a conflict-free batch under the adaptive
+ * capacity, runs it to completion, then recomputes readiness.
  */
 
 import * as os from 'os';
@@ -12,20 +20,23 @@ import type {
     SubAgentResult,
     OrchestratorResult,
     OrchestratorOptions,
-} from './types';
-import type { TokenUsage, AgentStep } from '../types';
-import { mergeTokenUsageTotals } from '../cacheCapability';
-import { TaskGraphEngine } from './taskGraphEngine';
-import { Blackboard } from './blackboard';
-import { ConflictDetector } from './conflictDetector';
-import { BLACKBOARD_KEY_PREFIXES } from './blackboardSchema';
-import { ErrorReporter } from '../errorReporter';
-import { SOURCE, aiText } from '../messages';
-import type { RunEventSink } from '../runner/runContext';
-import { AdaptiveConcurrencyController, isProviderRateLimit } from '../runner/scheduling';
-import { agentTaskManager, type AgentTaskStatus } from '../runner/taskManager';
-import { agentProfileCatalog } from '../runner/agentProfileCatalog';
-import { RecoveryStormBudget, classifyStormFailure } from './recoveryStormBudget';
+    TaskPriority,
+} from '../types';
+import type { TokenUsage, AgentStep } from '../../types';
+import { mergeTokenUsageTotals } from '../../cacheCapability';
+import { TaskGraphEngine } from '../taskGraphEngine';
+import { Blackboard } from '../blackboard';
+import { ConflictDetector } from '../conflictDetector';
+import { BLACKBOARD_KEY_PREFIXES } from '../blackboardSchema';
+import { ErrorReporter } from '../../errorReporter';
+import { SOURCE, aiText } from '../../messages';
+import type { RunEventSink } from '../../runner/runContext';
+import { AdaptiveConcurrencyController, isProviderRateLimit } from '../../runner/scheduling';
+import { agentTaskManager, type AgentTaskStatus } from '../../runner/taskManager';
+import { agentProfileCatalog } from '../../runner/agentProfileCatalog';
+import { RecoveryStormBudget, classifyStormFailure } from '../recoveryStormBudget';
+import { TeamTaskBoard } from './teamTaskBoard';
+import type { TeamTask, TeamTaskStatus } from './types';
 
 /** Sub-agent executor injected by Orchestrator. */
 export type SubAgentExecutor = (
@@ -92,11 +103,31 @@ function findDependencyHealCandidate(
         .filter(match => match.distance <= threshold)
         .sort((left, right) => left.distance - right.distance
             || (left.candidate < right.candidate ? -1 : left.candidate > right.candidate ? 1 : 0));
-    if (ranked.length === 0 || (ranked[1] && ranked[1].distance === ranked[0]!.distance)) return undefined;
+    if (ranked.length === 0 || (ranked[1] && ranked[1]!.distance === ranked[0]!.distance)) return undefined;
     return ranked[0]!.candidate;
 }
 
-export class ParallelExecutor {
+/** Priority weight (critical > normal > low), identical to the legacy engine. */
+function priorityWeight(priority: TaskPriority | undefined): number {
+    switch (priority) {
+        case 'critical': return 3;
+        case 'low': return 1;
+        default: return 2;
+    }
+}
+
+function toBoardStatus(status: TaskNode['status']): TeamTaskStatus {
+    switch (status) {
+        case 'done': return 'completed';
+        case 'failed': return 'failed';
+        case 'cancelled': return 'cancelled';
+        // 'running' nodes re-queue as pending: a wave that threw mid-flight is
+        // re-seeded so interrupted work is scheduled again (resume parity).
+        default: return 'pending';
+    }
+}
+
+export class GraphTeamExecutor {
     private readonly maxConcurrency: number;
     private globalTokenBudget: number;
     private consumedTokens: TokenUsage;
@@ -219,31 +250,73 @@ export class ParallelExecutor {
             emitStep({ type: 'thinking', content: healMsg, timestamp: Date.now() });
         }
 
+        // Seed the shared task board: one board task per graph node, task id
+        // identical to the node id, blockedBy from (healed) dependencies.
+        const board = new TeamTaskBoard(graph.id);
+        const seedError = board.seedPipeline('graph', [...graph.nodes.values()].map(node => ({
+            id: node.id,
+            subject: node.id,
+            description: node.prompt.slice(0, 500),
+            blockedBy: [...node.dependencies],
+            status: toBoardStatus(node.status),
+            pipeline: {
+                profileName: node.profileName,
+                prompt: node.prompt,
+                contextFiles: node.contextFiles,
+                plannedFiles: node.plannedFiles,
+                plannedEntities: node.plannedEntities,
+                produces: node.produces,
+                consumes: node.consumes,
+                acceptanceChecks: node.acceptanceChecks,
+                priority: node.priority,
+                maxIterations: node.maxIterations,
+                maxRetries: node.maxRetries,
+                modelOverride: node.modelOverride,
+                providerOverride: node.providerOverride,
+                reasoningEffort: node.reasoningEffort,
+            },
+        })));
+        if (seedError) {
+            return {
+                success: false,
+                summary: `Task graph failed board seeding: ${seedError}`,
+                agentResults,
+                totalTokenUsage,
+                failedNodes: [],
+                cancelledNodes: [],
+            };
+        }
+
         emitStep({
             type: 'orchestrator_progress',
             content: `$(chart) Task graph scheduling started: ${graph.nodes.size} nodes, max concurrency ${this.maxConcurrency}`,
             timestamp: Date.now(),
         });
 
-        while (!this.graphEngine.isComplete(graph)) {
+        while (!board.isSettledBoard()) {
             options.abortSignal?.throwIfAborted();
 
-            const allReadyNodes = this.graphEngine.getReadyNodes(graph);
+            const allReadyTasks = this.sortedReadyTasks(board);
             if (this.recoveryStorm.decision) {
-                for (const node of allReadyNodes) {
-                    const profile = agentProfileCatalog.getRequired(node.profileName);
-                    if (profile.authorizationCeiling === 'workspace_write') node.status = 'cancelled';
+                for (const task of allReadyTasks) {
+                    const profile = agentProfileCatalog.getRequired(task.pipeline!.profileName);
+                    if (profile.authorizationCeiling === 'workspace_write') {
+                        this.setNodeStatus(board, graph, task.id, 'cancelled');
+                    }
                 }
             }
             const now = Date.now();
-            const readyNodes = allReadyNodes.filter(node => node.status === 'pending'
-                && (this.retryEligibleAt.get(node.id) ?? 0) <= now);
-            if (readyNodes.length === 0 && allReadyNodes.length > 0) {
-                const nextEligibleAt = Math.min(...allReadyNodes.map(node => this.retryEligibleAt.get(node.id) ?? now));
+            const readyTasks = allReadyTasks.filter(task => {
+                const live = board.get(task.id);
+                return live?.status === 'pending' && (this.retryEligibleAt.get(task.id) ?? 0) <= now;
+            });
+            if (readyTasks.length === 0 && allReadyTasks.some(task => board.get(task.id)?.status === 'pending')) {
+                const pendingReady = allReadyTasks.filter(task => board.get(task.id)?.status === 'pending');
+                const nextEligibleAt = Math.min(...pendingReady.map(task => this.retryEligibleAt.get(task.id) ?? now));
                 await this.waitForRetry(Math.max(0, Math.min(30_000, nextEligibleAt - now)), options.abortSignal);
                 continue;
             }
-            if (readyNodes.length === 0) {
+            if (readyTasks.length === 0) {
                 const summary = 'Task graph stalled: no executable nodes remain, but the graph is incomplete.';
                 emitStep({ type: 'error', content: summary, timestamp: Date.now() });
                 return {
@@ -262,10 +335,10 @@ export class ParallelExecutor {
                     content: `Global token budget exceeded (${this.consumedTokens.total}/${this.globalTokenBudget}); falling back to serial execution`,
                     timestamp: Date.now(),
                 });
-                readyNodes.splice(1);
+                readyTasks.splice(1);
             }
 
-            const { batch, deferred } = this.selectConflictAwareBatch(readyNodes);
+            const { batch, deferred } = this.selectConflictAwareBatch(readyTasks);
             if (deferred.length > 0) {
                 emitStep({
                     type: 'orchestrator_progress',
@@ -276,12 +349,12 @@ export class ParallelExecutor {
 
             emitStep({
                 type: 'orchestrator_progress',
-                content: `$(zap) Executing batch: ${batch.map(n => `${n.id}(${n.profileName})`).join(', ')}`,
+                content: `$(zap) Executing batch: ${batch.map(task => `${task.id}(${task.pipeline!.profileName})`).join(', ')}`,
                 timestamp: Date.now(),
             });
 
             const batchResults = await this.executeBatch(
-                batch, graph, blackboard, executor, totalTokenUsage, options
+                batch, board, graph, blackboard, executor, totalTokenUsage, options
             );
 
             for (const [nodeId, result] of batchResults) {
@@ -322,8 +395,51 @@ export class ParallelExecutor {
         };
     }
 
+    /** Ready tasks sorted by pipeline priority (critical first). */
+    private sortedReadyTasks(board: TeamTaskBoard): TeamTask[] {
+        return board.readyPendingTasks()
+            .sort((left, right) => priorityWeight(right.pipeline?.priority) - priorityWeight(left.pipeline?.priority));
+    }
+
+    /** Mirror one status transition onto the board task and the graph node. */
+    private setNodeStatus(
+        board: TeamTaskBoard,
+        graph: TaskGraph,
+        nodeId: string,
+        status: TaskNode['status'],
+    ): void {
+        const node = graph.nodes.get(nodeId);
+        if (node) node.status = status;
+        board.forceStatus(nodeId, toBoardStatus(status));
+    }
+
+    /** Mark failed and cascade-cancel pending downstream tasks. */
+    private markFailed(
+        board: TeamTaskBoard,
+        graph: TaskGraph,
+        nodeId: string,
+        error: string,
+    ): string[] {
+        const node = graph.nodes.get(nodeId);
+        if (!node) return [];
+        node.status = 'failed';
+        node.error = error;
+        node.completedAt = Date.now();
+        board.forceStatus(nodeId, 'failed');
+        const cancelled = board.cancelDownstream(nodeId);
+        for (const cancelId of cancelled) {
+            const cancelNode = graph.nodes.get(cancelId);
+            if (cancelNode) {
+                cancelNode.status = 'cancelled';
+                cancelNode.error = `前置任务 ${nodeId} 失败，已取消`;
+            }
+        }
+        return cancelled;
+    }
+
     private async executeBatch(
-        nodes: TaskNode[],
+        tasks: TeamTask[],
+        board: TeamTaskBoard,
         graph: TaskGraph,
         blackboard: Blackboard,
         executor: SubAgentExecutor,
@@ -332,11 +448,17 @@ export class ParallelExecutor {
     ): Promise<Map<string, SubAgentResult>> {
         const results = new Map<string, SubAgentResult>();
 
-        for (const node of nodes) {
-            this.graphEngine.markRunning(graph, node.id);
+        for (const task of tasks) {
+            const node = graph.nodes.get(task.id);
+            if (node) {
+                node.status = 'running';
+                node.startedAt = Date.now();
+            }
+            board.forceStatus(task.id, 'in_progress');
         }
 
-        const promises = nodes.map(async (node) => {
+        const promises = tasks.map(async (task) => {
+            const node = graph.nodes.get(task.id)!;
             const agentId = node.agentId ?? `agent_${graph.id}_${node.id}`;
             node.agentId = agentId;
             const previousTaskId = node.lastTaskId;
@@ -476,7 +598,10 @@ export class ParallelExecutor {
                             node.id,
                         );
                     }
-                    this.graphEngine.markComplete(graph, node.id, result.handoff?.summary ?? result.output);
+                    node.status = 'done';
+                    node.result = result.handoff?.summary ?? result.output;
+                    node.completedAt = Date.now();
+                    board.forceStatus(node.id, 'completed');
                     this.conflictDetector.clearIntent(agentId, blackboard);
                 } else {
                     const stormCategory = classifyStormFailure(result.error, result.output);
@@ -491,9 +616,9 @@ export class ParallelExecutor {
                         options.onStep?.({ type: 'error', content: stormDecision.reason!, timestamp: Date.now() });
                     }
                     if (options.abortSignal?.aborted || result.error === 'User cancelled') {
-                        node.status = 'cancelled';
+                        this.setNodeStatus(board, graph, node.id, 'cancelled');
                     } else if (stormDecision?.tripped) {
-                        this.graphEngine.markFailed(graph, node.id, stormDecision.reason ?? 'Parent recovery storm tripped');
+                        this.markFailed(board, graph, node.id, stormDecision.reason ?? 'Parent recovery storm tripped');
                     } else if (result.needsClarification) {
                         // The child is blocked on a decision, not broken: keep an
                         // anchor to its transcript so the answering wave can resume
@@ -502,7 +627,8 @@ export class ParallelExecutor {
                         node.pendingClarification = result.clarification
                             ?? result.error
                             ?? 'Sub-task needs parent-agent clarification';
-                        const cancelled = this.graphEngine.markFailed(
+                        const cancelled = this.markFailed(
+                            board,
                             graph,
                             node.id,
                             result.error ?? result.clarification ?? 'Sub-task needs parent-agent clarification'
@@ -516,7 +642,8 @@ export class ParallelExecutor {
                             timestamp: Date.now(),
                         });
                     } else if (result.preservedAfterFailure) {
-                        const cancelled = this.graphEngine.markFailed(
+                        const cancelled = this.markFailed(
+                            board,
                             graph,
                             node.id,
                             result.error ?? 'Sub-task failed after writing files; changes were preserved for parent repair'
@@ -530,9 +657,10 @@ export class ParallelExecutor {
                             timestamp: Date.now(),
                         });
                     } else if (isProviderRateLimit(result.error) && node.retryCount < node.maxRetries) {
-                        this.requeueRateLimitedNode(node, result.error);
+                        this.requeueRateLimitedNode(board, graph, node, result.error);
                     } else if (isTimeoutLikeError(result.error)) {
-                        const cancelled = this.graphEngine.markFailed(
+                        const cancelled = this.markFailed(
+                            board,
                             graph,
                             node.id,
                             result.error ?? 'Sub-task timed out'
@@ -544,11 +672,11 @@ export class ParallelExecutor {
                         });
                     } else if (node.retryCount < node.maxRetries) {
                         node.retryCount++;
-                        node.status = 'pending';
+                        this.setNodeStatus(board, graph, node.id, 'pending');
                         ErrorReporter.debug(SOURCE.ORCHESTRATOR, `Node ${node.id} failed, retry ${node.retryCount}/${node.maxRetries}`);
                     } else {
-                        const cancelled = this.graphEngine.markFailed(
-                            graph, node.id, result.error ?? 'Unknown error'
+                        const cancelled = this.markFailed(
+                            board, graph, node.id, result.error ?? 'Unknown error'
                         );
                         if (cancelled.length > 0) {
                             options.onStep?.({
@@ -625,18 +753,18 @@ export class ParallelExecutor {
                 }
 
                 if (options.abortSignal?.aborted) {
-                    node.status = 'cancelled';
+                    this.setNodeStatus(board, graph, node.id, 'cancelled');
                 } else if (stormDecision?.tripped) {
-                    this.graphEngine.markFailed(graph, node.id, stormDecision.reason ?? 'Parent recovery storm tripped');
+                    this.markFailed(board, graph, node.id, stormDecision.reason ?? 'Parent recovery storm tripped');
                 } else if (isProviderRateLimit(error) && node.retryCount < node.maxRetries) {
-                    this.requeueRateLimitedNode(node, error);
+                    this.requeueRateLimitedNode(board, graph, node, error);
                 } else if (isTimeoutLikeError(error)) {
-                    this.graphEngine.markFailed(graph, node.id, error);
+                    this.markFailed(board, graph, node.id, error);
                 } else if (node.retryCount < node.maxRetries) {
                     node.retryCount++;
-                    node.status = 'pending';
+                    this.setNodeStatus(board, graph, node.id, 'pending');
                 } else {
-                    this.graphEngine.markFailed(graph, node.id, error);
+                    this.markFailed(board, graph, node.id, error);
                 }
 
                 this.conflictDetector.clearIntent(agentId, blackboard);
@@ -674,29 +802,29 @@ export class ParallelExecutor {
         return results;
     }
 
-    private selectConflictAwareBatch(readyNodes: TaskNode[]): { batch: TaskNode[]; deferred: string[] } {
-        const batch: TaskNode[] = [];
+    private selectConflictAwareBatch(readyTasks: TeamTask[]): { batch: TeamTask[]; deferred: string[] } {
+        const batch: TeamTask[] = [];
         const deferred: string[] = [];
         const fileOwners = new Map<string, string>();
         const entityOwners = new Map<string, string>();
 
-        for (const node of readyNodes) {
+        for (const task of readyTasks) {
             if (batch.length >= this.adaptiveCapacity.current) break;
 
-            const conflict = this.findPlannedTargetConflict(node, fileOwners, entityOwners);
+            const conflict = this.findPlannedTargetConflict(task, fileOwners, entityOwners);
             if (conflict) {
-                deferred.push(`${node.id} (${conflict})`);
+                deferred.push(`${task.id} (${conflict})`);
                 continue;
             }
 
-            batch.push(node);
-            for (const file of node.plannedFiles ?? []) {
+            batch.push(task);
+            for (const file of task.pipeline?.plannedFiles ?? []) {
                 const key = this.normalizeFileTarget(file);
-                if (key) fileOwners.set(key, node.id);
+                if (key) fileOwners.set(key, task.id);
             }
-            for (const entity of node.plannedEntities ?? []) {
+            for (const entity of task.pipeline?.plannedEntities ?? []) {
                 const key = this.normalizeEntityTarget(entity);
-                if (key) entityOwners.set(key, node.id);
+                if (key) entityOwners.set(key, task.id);
             }
         }
 
@@ -704,16 +832,16 @@ export class ParallelExecutor {
     }
 
     private findPlannedTargetConflict(
-        node: TaskNode,
+        task: TeamTask,
         fileOwners: Map<string, string>,
         entityOwners: Map<string, string>,
     ): string | undefined {
-        for (const file of node.plannedFiles ?? []) {
+        for (const file of task.pipeline?.plannedFiles ?? []) {
             const key = this.normalizeFileTarget(file);
             const owner = key ? fileOwners.get(key) : undefined;
             if (owner) return `file ${file} already planned by ${owner}`;
         }
-        for (const entity of node.plannedEntities ?? []) {
+        for (const entity of task.pipeline?.plannedEntities ?? []) {
             const key = this.normalizeEntityTarget(entity);
             const owner = key ? entityOwners.get(key) : undefined;
             if (owner) return `entity ${entity} already planned by ${owner}`;
@@ -733,9 +861,9 @@ export class ParallelExecutor {
         return { ...this.consumedTokens };
     }
 
-    private requeueRateLimitedNode(node: TaskNode, error: string | undefined): void {
+    private requeueRateLimitedNode(board: TeamTaskBoard, graph: TaskGraph, node: TaskNode, error: string | undefined): void {
         node.retryCount++;
-        node.status = 'pending';
+        this.setNodeStatus(board, graph, node.id, 'pending');
         const delayMs = Math.min(30_000, 1_000 * (2 ** Math.max(0, node.retryCount - 1)));
         const eligibleAt = Date.now() + delayMs;
         this.retryEligibleAt.set(node.id, eligibleAt);

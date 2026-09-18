@@ -280,6 +280,15 @@ export interface OrchestratorOptions {
     originalUserMessage?: string;
     /** Host-enforced user ownership and warning policy. */
     userExecutionPolicy?: UserExecutionPolicy;
+    /**
+     * Agent Teams binding: present when this graph runs team member
+     * activations. Members keep their team tools, run with a team-bound
+     * identity, and report their durable run id back to the team runtime.
+     */
+    team?: {
+        teamId: string;
+        onMemberRunStarted?: (memberName: string, runId: string) => void;
+    };
     /** Explicit parent event sink for orchestration events. */
     runEventSink?: import('../runner/runContext').RunEventSink;
     /** Step callback */

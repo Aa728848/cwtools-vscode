@@ -19,6 +19,8 @@ export type AgentToolName =
     | 'convert_image_to_dds' | 'convert_audio' | 'deploy_mod_asset' | 'mcp_call'
     | 'write_localisation' | 'write_design_blueprint' | 'save_workflow' | 'git_ops' | 'dispatch_agents'
     | 'query_blackboard' | 'merge_results' | 'cancel_dispatch'
+    | 'dispatch_team' | 'team_send_message' | 'team_members' | 'team_close'
+    | 'team_task_create' | 'team_task_list' | 'team_task_update'
     | 'query_shader_symbol' | 'query_shader_compile_unit' | 'query_shader_platform_variants' | 'query_shader_callers'
     | 'explain_shader_reachability' | 'validate_shader' | 'compare_shader_with_vanilla' | 'run_code';
 
@@ -160,6 +162,13 @@ const TOOL_DOMAINS = {
     query_blackboard: 'shared',
     merge_results: 'shared',
     cancel_dispatch: 'shared',
+    dispatch_team: 'shared',
+    team_send_message: 'shared',
+    team_members: 'shared',
+    team_close: 'shared',
+    team_task_create: 'shared',
+    team_task_list: 'shared',
+    team_task_update: 'shared',
     query_shader_symbol: 'paradox',
     query_shader_compile_unit: 'paradox',
     query_shader_platform_variants: 'paradox',
@@ -320,6 +329,10 @@ const UTILITY: AgentToolName[] = ['run_command', 'manage_process', 'git_ops', 'a
 const MEDIA: AgentToolName[] = ['convert_image_to_dds', 'convert_audio', 'deploy_mod_asset'];
 const _MCP: AgentToolName[] = ['mcp_call'];
 const ORCHESTRATION: AgentToolName[] = ['dispatch_agents', 'query_blackboard', 'merge_results', 'cancel_dispatch'];
+// Agent Teams: peer messaging + shared CAS task board. Member-facing team
+// tools stay available inside team member runs; dispatch_team is lead-only.
+const TEAM: AgentToolName[] = ['dispatch_team', 'team_send_message', 'team_members', 'team_close', 'team_task_create', 'team_task_list', 'team_task_update'];
+const TEAM_MEMBER_TOOLS: AgentToolName[] = ['team_send_message', 'team_members', 'team_task_create', 'team_task_list', 'team_task_update'];
 const INTERACTION: AgentToolName[] = ['ask_user_question'];
 
 const GENERIC_FILE_WRITE_TOOLS = new Set<AgentToolName>([
@@ -366,6 +379,9 @@ const ALWAYS_DISCLOSED_TOOLS = new Set<AgentToolName>([
 const WRITE_TOOLS_SET = new Set<string>([...EDIT, 'deploy_mod_asset', 'git_ops']);
 const SUB_AGENT_EXCLUDES_SET = new Set<string>([
     'ask_user_question',
+    // Team creation is a lead capability; members collaborate through the
+    // board and mailbox of their own team only.
+    'dispatch_team',
     'web_search', 'web_open', 'web_find',
     'run_command', 'manage_process',
     'git_ops', 'save_workflow',
@@ -400,6 +416,11 @@ const MUTATING_TOOLS_SET = new Set<string>([
     'manage_goal',
     'merge_results',
     'manage_process',
+    'dispatch_team',
+    'team_send_message',
+    'team_close',
+    'team_task_create',
+    'team_task_update',
 ]);
 
 // Only live status/collaboration polling is exempt. Ordinary reads stay behind
@@ -407,12 +428,14 @@ const MUTATING_TOOLS_SET = new Set<string>([
 const STORM_EXEMPT_TOOLS_SET = new Set<string>([
     'get_lsp_status',
     'query_blackboard',
+    'team_task_list',
+    'team_members',
 ]);
 
-const PLAN_MODES = new Set([...BASE_READ, ...INTERACTION, ...NETWORK, ..._MCP, ...ORCHESTRATION, 'run_code', 'todo_write', 'write_file', 'edit_file', 'replace_lines', 'typed_pdx_write', 'candidate_transaction', 'write_design_blueprint', 'save_workflow', 'set_memory', 'git_ops']);
-const EXPLORE_MODES = new Set([...BASE_READ, ...INTERACTION, ...NETWORK, ..._MCP, ...ORCHESTRATION, 'run_code', 'git_ops', 'save_workflow']);
+const PLAN_MODES = new Set([...BASE_READ, ...INTERACTION, ...NETWORK, ..._MCP, ...ORCHESTRATION, ...TEAM, 'run_code', 'todo_write', 'write_file', 'edit_file', 'replace_lines', 'typed_pdx_write', 'candidate_transaction', 'write_design_blueprint', 'save_workflow', 'set_memory', 'git_ops']);
+const EXPLORE_MODES = new Set([...BASE_READ, ...INTERACTION, ...NETWORK, ..._MCP, ...ORCHESTRATION, ...TEAM, 'run_code', 'git_ops', 'save_workflow']);
 const REVIEW_MODES = new Set([...BASE_READ, ...INTERACTION, ...NETWORK, ..._MCP, 'run_code', 'git_ops', 'save_workflow']);
-const BUILD_MODES = new Set([...BASE_READ, ...INTERACTION, ...EDIT, ...MEMORY, ...NETWORK, ...UTILITY, ...MEDIA, ..._MCP, ...ORCHESTRATION, 'run_code']);
+const BUILD_MODES = new Set([...BASE_READ, ...INTERACTION, ...EDIT, ...MEMORY, ...NETWORK, ...UTILITY, ...MEDIA, ..._MCP, ...ORCHESTRATION, ...TEAM, 'run_code']);
 const LOC_MODES = new Set([
     'select_tools', 'read_file', 'write_file',
     'list_directory', 'glob_files', 'find_sprite_candidates', 'find_sound_candidates', 'grep',
@@ -424,9 +447,9 @@ const LOC_MODES = new Set([
     'candidate_transaction',
     'analyze_diagnostic_error', 'save_workflow', ...INTERACTION
 ]);
-const ORCHESTRATOR_MODES = new Set([...BASE_READ, ...INTERACTION, ...NETWORK, ..._MCP, 'set_memory', 'todo_write', 'write_file', 'write_design_blueprint', ...ORCHESTRATION, 'git_ops', 'analyze_diagnostic_error', 'save_workflow']);
-const SCRIPT_MODES = new Set([...BASE_READ, ...INTERACTION, ...NETWORK, ..._MCP, 'set_memory', 'todo_write', 'write_file', 'write_design_blueprint', ...ORCHESTRATION, 'git_ops', 'analyze_diagnostic_error', 'save_workflow']);
-const UTILITY_MODES = new Set([...BASE_READ, ...INTERACTION, ...EDIT, ...MEMORY, ...NETWORK, ...UTILITY, ...MEDIA, ...ORCHESTRATION, 'mcp_call', 'run_code']);
+const ORCHESTRATOR_MODES = new Set([...BASE_READ, ...INTERACTION, ...NETWORK, ..._MCP, 'set_memory', 'todo_write', 'write_file', 'write_design_blueprint', ...ORCHESTRATION, ...TEAM, 'git_ops', 'analyze_diagnostic_error', 'save_workflow']);
+const SCRIPT_MODES = new Set([...BASE_READ, ...INTERACTION, ...NETWORK, ..._MCP, 'set_memory', 'todo_write', 'write_file', 'write_design_blueprint', ...ORCHESTRATION, ...TEAM, 'git_ops', 'analyze_diagnostic_error', 'save_workflow']);
+const UTILITY_MODES = new Set([...BASE_READ, ...INTERACTION, ...EDIT, ...MEMORY, ...NETWORK, ...UTILITY, ...MEDIA, ...ORCHESTRATION, ...TEAM, 'mcp_call', 'run_code']);
 
 for (const schema of SCHEMA_DEFINITIONS) {
     const name = schema.function.name as AgentToolName;
@@ -497,7 +520,7 @@ for (const schema of SCHEMA_DEFINITIONS) {
         effect = 'mcp';
         riskLevel = 1;
         concurrencyClass = 'interactive';
-    } else if (ORCHESTRATION.includes(name)) {
+    } else if (ORCHESTRATION.includes(name) || TEAM.includes(name)) {
         effect = 'none';
         riskLevel = 0;
         concurrencyClass = 'parallel';
@@ -520,7 +543,7 @@ for (const schema of SCHEMA_DEFINITIONS) {
     const mutating = MUTATING_TOOLS_SET.has(name);
     const stormExempt = STORM_EXEMPT_TOOLS_SET.has(name);
 
-    const noFlatten = ['dispatch_agents', 'merge_results', 'query_blackboard', 'todo_write', 'run_code', 'typed_pdx_write', 'extract_archetype_slots', 'instantiate_archetype'].includes(name);
+    const noFlatten = ['dispatch_agents', 'merge_results', 'query_blackboard', 'todo_write', 'run_code', 'typed_pdx_write', 'extract_archetype_slots', 'instantiate_archetype', ...TEAM].includes(name);
     let flatSchema: ToolDefinition | undefined = undefined;
     if (!noFlatten) {
         const analysis = analyzeSchema(schema);
@@ -531,7 +554,9 @@ for (const schema of SCHEMA_DEFINITIONS) {
 
     const isReadOnly = name !== 'ask_user_question' && (effect === 'workspace_read'
         || effect === 'network'
-        || (effect === 'none' && !mutating && !ORCHESTRATION.includes(name)));
+        || (effect === 'none' && !mutating && !ORCHESTRATION.includes(name) && !TEAM.includes(name))
+        || name === 'team_task_list'
+        || name === 'team_members');
     const disclosure: ToolDisclosure = ALWAYS_DISCLOSED_TOOLS.has(name) ? 'always' : 'deferred';
     const group = GENERIC_FILE_WRITE_TOOLS.has(name) ? 'file_write'
         : PDX_WRITE_TOOLS.has(name) ? 'pdx_write'
@@ -547,7 +572,7 @@ for (const schema of SCHEMA_DEFINITIONS) {
                     : effect === 'git' ? 'git'
                         : effect === 'media' ? 'media'
                             : effect === 'mcp' ? 'mcp'
-                                : ORCHESTRATION.includes(name) ? 'orchestrator'
+                                : ORCHESTRATION.includes(name) || TEAM.includes(name) ? 'orchestrator'
                                     : MEMORY.includes(name) || name === 'query_blackboard' || name === 'history' ? 'memory'
                                         : effect === 'workspace_read' ? 'workspace_read'
                                             : 'support';
@@ -595,4 +620,6 @@ export const WRITE_TOOLS = WRITE_TOOLS_SET;
 export const MUTATING_TOOLS = MUTATING_TOOLS_SET;
 export const FILE_SCOPED_WRITE_TOOLS = FILE_SCOPED_WRITE_TOOLS_SET;
 export const SUB_AGENT_EXCLUDES = SUB_AGENT_EXCLUDES_SET;
+export const TEAM_TOOLS = TEAM;
+export const TEAM_MEMBER_TOOL_NAMES = TEAM_MEMBER_TOOLS;
 export const READ_ONLY_TOOLS = new Set([...TOOL_REGISTRY.values()].filter(entry => entry.isReadOnly).map(entry => entry.name));

@@ -70,6 +70,14 @@ const TOOL_PHRASES: Record<string, ToolPhraseEntry> = {
 
     dispatch_agents:           { category: 'orchestrate', icon: '🎯', en: 'Dispatch subtasks', zh: '分派子任务' },
     merge_results:             { category: 'orchestrate', icon: '🎯', en: 'Merge results', zh: '合并结果' },
+
+    dispatch_team:             { category: 'orchestrate', icon: '👥', en: 'Start agent team', zh: '启动 Agent 团队' },
+    team_send_message:         { category: 'orchestrate', icon: '✉️', en: 'Send team message', zh: '发送团队消息' },
+    team_members:              { category: 'orchestrate', icon: '👥', en: 'List team members', zh: '查看团队成员' },
+    team_close:                { category: 'orchestrate', icon: '🏁', en: 'Close team', zh: '关闭团队' },
+    team_task_create:          { category: 'orchestrate', icon: '🗂️', en: 'Create team task', zh: '创建团队任务' },
+    team_task_list:            { category: 'orchestrate', icon: '🗂️', en: 'List team tasks', zh: '查看团队任务' },
+    team_task_update:          { category: 'orchestrate', icon: '🗂️', en: 'Update team task', zh: '更新团队任务' },
 };
 
 function normalizeLocale(locale?: string | null): ToolPhraseLocale {
@@ -228,6 +236,31 @@ export function getToolDynamicPhrase(
             if (typeof query === 'string') {
                 const short = truncateStr(query, 50);
                 return zh ? dualPhrase(`查索引 "${short}"`, locale) : dualPhrase(`Search index "${short}"`, locale, `Searching index "${short}"...`);
+            }
+            return dualPhrase(meta.phrase, locale);
+        }
+        case 'dispatch_team': {
+            const objective = args.objective ?? args.teamName;
+            if (typeof objective === 'string') {
+                const short = truncateStr(objective, 60);
+                return zh ? dualPhrase(`组建团队 ${short}`, locale) : dualPhrase(`Start team ${short}`, locale, `Starting team ${short}...`);
+            }
+            return dualPhrase(meta.phrase, locale);
+        }
+        case 'team_send_message': {
+            const target = args.target;
+            if (typeof target === 'string') {
+                const short = truncateStr(target, 40);
+                return zh ? dualPhrase(`团队消息 → ${short}`, locale) : dualPhrase(`Message → ${short}`, locale, `Messaging ${short}...`);
+            }
+            return dualPhrase(meta.phrase, locale);
+        }
+        case 'team_task_create':
+        case 'team_task_update': {
+            const subject = args.subject ?? args.taskId;
+            if (typeof subject === 'string') {
+                const short = truncateStr(subject, 50);
+                return zh ? dualPhrase(`团队任务 ${short}`, locale) : dualPhrase(`Team task ${short}`, locale, `Updating team task ${short}...`);
             }
             return dualPhrase(meta.phrase, locale);
         }

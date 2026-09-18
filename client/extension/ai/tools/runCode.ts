@@ -36,6 +36,9 @@ export const RUN_CODE_BLOCKED_TOOLS: ReadonlySet<string> = new Set([
     'select_tools',
     'run_skill',
     'dispatch_agents',
+    // Team creation starts a background orchestration; member-facing team
+    // tools (messaging, board) stay available to guests.
+    'dispatch_team',
     'merge_results',
     'query_blackboard',
     'cancel_dispatch',

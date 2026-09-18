@@ -6,6 +6,7 @@
 */
 
 import type { QualityGateResult, TaskGraph } from './types';
+import { TEAM_MEMBER_TOOL_NAMES } from '../tools/registry';
 import * as path from 'path';
 import type { AgentStep, GenerationResult, TokenUsage } from '../types';
 import { aiText } from '../messages';
@@ -537,6 +538,9 @@ export class QualityGate {
                     ...options,
                     schedulingState: reviewSchedulingState,
                     useSlimPrompt: true,
+                    // The reviewer is not a team member; hide peer-collaboration
+                    // tools even when a team is active in the same topic.
+                    excludeTools: [...TEAM_MEMBER_TOOL_NAMES],
                     maxIterations: QUALITY_GATE_REVIEW_MAX_ITERATIONS,
                     deferTerminalValidationToParent: true,
                     agentId: QUALITY_GATE_REVIEW_AGENT_ID,

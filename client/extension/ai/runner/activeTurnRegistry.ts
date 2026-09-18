@@ -1,4 +1,5 @@
 import type { AgentRunner } from '../agentRunner';
+import type { AgentQueuedInputKind } from './inputQueue';
 import type { RunEventSink } from './runContext';
 
 export interface ActiveTurnRecord {
@@ -33,10 +34,10 @@ export class ActiveTurnRegistry {
         };
     }
 
-    steer(runId: string, message: string, clientUserMessageId?: string, images?: string[]): boolean {
+    steer(runId: string, message: string, clientUserMessageId?: string, images?: string[], kind: AgentQueuedInputKind = 'steer'): boolean {
         const record = this.turns.get(runId);
         if (!record) return false;
-        return record.runner.submitInput(runId, message, clientUserMessageId, images);
+        return record.runner.submitInput(runId, message, clientUserMessageId, images, kind);
     }
 
     interrupt(runId: string, reason = 'Interrupted by user'): boolean {

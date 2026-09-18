@@ -631,6 +631,13 @@ export interface AgentRunnerOptions {
     parentRunId?: string;
     /** Stable agent id inside a multi-agent graph. */
     agentId?: string;
+    /**
+     * Agent Teams binding: the team this run belongs to. Set only for team
+     * member activations; team tools resolve their runtime from it.
+     */
+    teamId?: string;
+    /** Agent Teams member name for this run (the TaskNode id of the member). */
+    teamMemberName?: string;
     /** Durable provider thread id for protocol-backed runtimes. */
     threadId?: string;
     /** Durable provider turn id for protocol-backed runtimes. */
@@ -1343,6 +1350,11 @@ export class AgentRunner {
         });
         this.activeRunEventSinks.set(runId, turnRuntime.eventSink);
         this.activeInputQueues.set(runId, turnRuntime.inputQueue);
+        try {
+            options?.onRunStarted?.(runId);
+        } catch {
+            // A listener exception must never break turn registration.
+        }
         unregisterActiveTurn = activeTurnRegistry.register({
             runId,
             threadId: options.threadId,
@@ -2628,15 +2640,18 @@ export class AgentRunner {
                 const pendingInputs = options?.inputQueue?.drain() ?? [];
                 if (pendingInputs.length > 0) {
                     for (const input of pendingInputs) {
+                        const inputPrefix = input.kind === 'team_message'
+                            ? '[Team message received while running]'
+                            : '[User steering input queued during run]';
                         const content: ChatMessage['content'] = input.images && input.images.length > 0
                             ? [
-                                { type: 'text' as const, text: `[User steering input queued during run]\n${input.message}` },
+                                { type: 'text' as const, text: `${inputPrefix}\n${input.message}` },
                                 ...input.images.map(url => ({
                                     type: 'image_url' as const,
                                     image_url: { url, detail: 'auto' as const },
                                 })),
                             ]
-                            : `[User steering input queued during run]\n${input.message}`;
+                            : `${inputPrefix}\n${input.message}`;
                         messages.push({
                             role: 'user',
                             content,
@@ -3525,15 +3540,18 @@ export class AgentRunner {
                     const lateInputs = options?.inputQueue?.drain() ?? [];
                     if (lateInputs.length > 0) {
                         for (const input of lateInputs) {
+                            const inputPrefix = input.kind === 'team_message'
+                                ? '[Team message received while running]'
+                                : '[User steering input queued during run]';
                             const steerContent: ChatMessage['content'] = input.images && input.images.length > 0
                                 ? [
-                                    { type: 'text' as const, text: `[User steering input queued during run]\n${input.message}` },
+                                    { type: 'text' as const, text: `${inputPrefix}\n${input.message}` },
                                     ...input.images.map(url => ({
                                         type: 'image_url' as const,
                                         image_url: { url, detail: 'auto' as const },
                                     })),
                                 ]
-                                : `[User steering input queued during run]\n${input.message}`;
+                                : `${inputPrefix}\n${input.message}`;
                             messages.push({ role: 'user', content: steerContent });
                             options?.runEventSink?.appendSoon('input_injected', {
                                 inputId: input.id,

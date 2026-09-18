@@ -212,6 +212,39 @@ const ORCHESTRATOR_TEXT = {
     },
 } as const;
 
+const TEAM_TEXT = {
+    en: {
+        START: (teamId: string, memberCount: number) =>
+            'Agent Team ' + teamId + ' started with ' + memberCount + ' member(s).',
+        MEMBER_STARTED: (name: string, profile: string, reason: string) =>
+            'Team member ' + name + ' (' + profile + ') activated: ' + reason + '.',
+        MEMBER_IDLE: (name: string, success: boolean) =>
+            'Team member ' + name + (success ? ' finished an activation.' : ' ended an activation with an error.'),
+        MESSAGE: (from: string, to: string, delivery: string) =>
+            'Team message ' + from + ' → ' + to + ' (' + delivery + ').',
+        SETTLING: (reason: string) => 'Agent Team settling: ' + reason + '.',
+    },
+    'zh-cn': {
+        START: (teamId: string, memberCount: number) =>
+            'Agent 团队 ' + teamId + ' 已启动，共 ' + memberCount + ' 名成员。',
+        MEMBER_STARTED: (name: string, profile: string, reason: string) =>
+            '团队成员 ' + name + '（' + profile + '）已激活：' + reason + '。',
+        MEMBER_IDLE: (name: string, success: boolean) =>
+            '团队成员 ' + name + (success ? ' 完成了一次激活。' : ' 本次激活出错。'),
+        MESSAGE: (from: string, to: string, delivery: string) =>
+            '团队消息 ' + from + ' → ' + to + '（' + delivery + '）。',
+        SETTLING: (reason: string) => 'Agent 团队正在结算：' + reason + '。',
+    },
+} as const;
+
+export const TEAM_MSG = {
+    START: (teamId: string, memberCount: number) => TEAM_TEXT[currentLocale].START(teamId, memberCount),
+    MEMBER_STARTED: (name: string, profile: string, reason: string) => TEAM_TEXT[currentLocale].MEMBER_STARTED(name, profile, reason),
+    MEMBER_IDLE: (name: string, success: boolean) => TEAM_TEXT[currentLocale].MEMBER_IDLE(name, success),
+    MESSAGE: (from: string, to: string, delivery: string) => TEAM_TEXT[currentLocale].MESSAGE(from, to, delivery),
+    SETTLING: (reason: string) => TEAM_TEXT[currentLocale].SETTLING(reason),
+};
+
 export const ORCHESTRATOR_MSG = {
     START: (nodeCount: number) => ORCHESTRATOR_TEXT[currentLocale].START(nodeCount),
     CYCLE_ERROR: (cycles: string) => ORCHESTRATOR_TEXT[currentLocale].CYCLE_ERROR(cycles),

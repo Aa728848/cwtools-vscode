@@ -32,7 +32,7 @@ import { QualityGate, PDX_DIAGNOSTIC_EXTENSIONS, isPdxDiagnosticFile } from './q
 import { ErrorReporter } from '../errorReporter';
 import { SOURCE, ORCHESTRATOR_MSG, aiText } from '../messages';
 import { getAgentToolTargetFiles } from '../runner/toolScheduler';
-import { MUTATING_TOOLS, WRITE_TOOLS } from '../tools/registry';
+import { MUTATING_TOOLS, WRITE_TOOLS, TEAM_MEMBER_TOOL_NAMES } from '../tools/registry';
 import { mergeTokenUsageTotals } from '../cacheCapability';
 import { schedulingStateFromAdmission } from '../runner/scheduling';
 import { agentProfileCatalog } from '../runner/agentProfileCatalog';
@@ -141,6 +141,31 @@ export class Orchestrator {
     /** Obtain the blackboard instance (for external modules to read shared data between Agents) */
     getBlackboard(): Blackboard {
         return this.blackboard;
+    }
+
+    /**
+     * Run one Agent Teams member activation. The team runtime owns member
+     * lifecycle; this call reuses the full sub-agent path (profile sandbox,
+     * permission forwarding, idle guards, handoff parsing) with the team
+     * binding attached. The caller supplies the wake prompt and, when
+     * available, the member's preserved transcript for context-preserving
+     * resume. Cross-member knowledge flows through the team mailbox, the
+     * task board, and the executor-level blackboard behind query_blackboard.
+     */
+    public async runTeamMember(
+        taskNode: TaskNode,
+        options: OrchestratorOptions,
+        resumeHistory?: ChatMessage[],
+    ): Promise<SubAgentResult> {
+        return this.executeSubAgent(
+            taskNode,
+            this.blackboard,
+            { total: 0, input: 0, output: 0, estimatedCostCny: 0 },
+            options.abortSignal ?? new AbortController().signal,
+            options.onStep ?? (() => {}),
+            options,
+            resumeHistory,
+        );
     }
 
     /** 
@@ -625,6 +650,7 @@ export class Orchestrator {
         abortSignal: AbortSignal,
         onStep: (step: AgentStep) => void,
         orchestratorOptions: OrchestratorOptions,
+        resumeHistoryOverride?: ChatMessage[],
     ): Promise<SubAgentResult> {
         const profile = agentProfileCatalog.getRequired(taskNode.profileName);
         const childDomain = profile.domain ?? orchestratorOptions.schedulingState.domainProfile;
@@ -670,6 +696,9 @@ export class Orchestrator {
             ...(orchestratorOptions.schedulingState.authorization !== 'workspace_write'
                 ? [...MUTATING_TOOLS, 'dispatch_agents', 'merge_results']
                 : []),
+            // Team tools are only meaningful inside a team run; ordinary
+            // sub-agents get the orchestration-free tool set.
+            ...(orchestratorOptions.team ? [] : [...TEAM_MEMBER_TOOL_NAMES]),
         ];
 
         const childAuthorization = profile.authorizationCeiling;
@@ -703,6 +732,9 @@ export class Orchestrator {
             // the main-Agent design/approval lifecycle.
             initialToolFocus: profile.authorizationCeiling === 'workspace_write' ? 'write' : undefined,
             onStep,
+            onRunStarted: orchestratorOptions.team?.onMemberRunStarted
+                ? (runId: string) => orchestratorOptions.team?.onMemberRunStarted?.(taskNode.id, runId)
+                : undefined,
             abortSignal, // Replaced below by the child controller with parent/idle guards.
             streaming: true, // Enable streaming output to visualize the progress of deep thinking
             topicId: orchestratorOptions.topicId,
@@ -710,6 +742,8 @@ export class Orchestrator {
             durableGoal: orchestratorOptions.durableGoal,
             originalUserMessage: orchestratorOptions.originalUserMessage,
             agentId: taskNode.id,
+            teamId: orchestratorOptions.team?.teamId,
+            teamMemberName: orchestratorOptions.team ? taskNode.id : undefined,
             threadId: `${orchestratorOptions.parentRunId ?? orchestratorOptions.topicId ?? 'orchestrator'}/${taskNode.id}`,
             turnId: taskNode.id,
             onTodoUpdate: orchestratorOptions.onTodoUpdate,
@@ -857,7 +891,11 @@ export class Orchestrator {
 
         // ─── Context-preserving resume (clarification answers) ───
         let resumedHistory: ChatMessage[] = [];
-        if (taskNode.resumeAnswer && taskNode.resumeContextRef) {
+        if (resumeHistoryOverride && resumeHistoryOverride.length > 0) {
+            // Agent Teams cold-resume: the caller already restored the member
+            // transcript; the wake prompt carries the new peer messages.
+            resumedHistory = resumeHistoryOverride;
+        } else if (taskNode.resumeAnswer && taskNode.resumeContextRef) {
             try {
                 const transcript = await runLedger.readResumeTranscript(
                     taskNode.resumeContextRef,
@@ -886,7 +924,7 @@ export class Orchestrator {
 
         // Pre-read and inject contextFiles
         let effectivePrompt = taskNode.prompt;
-        if (isResuming) {
+        if (isResuming && taskNode.resumeAnswer) {
             effectivePrompt = [
                 '## Parent clarification answer',
                 taskNode.resumeAnswer,

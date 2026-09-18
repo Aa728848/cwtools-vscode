@@ -5,7 +5,9 @@ export type AgentQueuedInputKind =
     | 'retry'
     | 'continuation'
     | 'pending'
-    | 'background_result';
+    | 'background_result'
+    /** Peer message delivered into a running team member (Agent Teams). */
+    | 'team_message';
 
 export interface AgentQueuedInput {
     id: string;
@@ -71,6 +73,8 @@ function inputPriority(kind: AgentQueuedInputKind): number {
     switch (kind) {
         case 'interrupt': return 0;
         case 'approval': return 1;
+        // Team peer mail shares the steer tier; FIFO order disambiguates ties.
+        case 'team_message':
         case 'steer': return 2;
         case 'retry': return 3;
         case 'continuation': return 4;

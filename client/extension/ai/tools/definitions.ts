@@ -2085,6 +2085,148 @@ const RAW_TOOL_DEFINITIONS: ToolDefinition[] = [
             },
         },
     },
+    // - Agent Teams (peer collaboration: mailbox + shared CAS task board) -
+    {
+        type: 'function',
+        function: {
+            name: 'dispatch_team',
+            description: 'Start a bounded Agent Team whose named members collaborate as peers through a shared mailbox and CAS task board: members steer each other mid-run, wake idle teammates with messages, and report to you as "lead". Returns a teamId immediately; the settle summary arrives as a background task result. Prefer dispatch_agents for a static one-shot DAG.',
+            parameters: {
+                type: 'object',
+                properties: {
+                    teamName: { type: 'string', description: 'Optional human-readable label.' },
+                    objective: { type: 'string', description: 'Shared objective visible to every member. Keep it concise; per-member detail goes into briefs.' },
+                    maxConcurrency: { type: 'integer', minimum: 1, maximum: 4, description: 'Max members running at once (default 3).' },
+                    members: {
+                        type: 'array',
+                        minItems: 2,
+                        maxItems: 6,
+                        description: 'Team roster (2-6 members).',
+                        items: {
+                            type: 'object',
+                            properties: {
+                                name: { type: 'string', pattern: '^[a-z][a-z0-9-]{0,39}$', description: 'Unique kebab-case member name, e.g. "script-writer".' },
+                                profileName: { type: 'string', enum: ['explore', 'planner', 'general-coder', 'reviewer', 'paradox-coder', 'localization-writer', 'gui-expert'], description: 'Runtime profile for this member.' },
+                                brief: { type: 'string', description: 'Initial task brief. Keep it concise; use set_memory or the board for large payloads.' },
+                                plannedFiles: {
+                                    type: 'array',
+                                    items: { type: 'string' },
+                                    description: 'Files this member expects to modify; used for sandboxing and conflict warnings.',
+                                },
+                                writeScopes: {
+                                    type: 'array',
+                                    items: { type: 'string' },
+                                    description: 'Advisory workspace-relative write prefixes (e.g. "common/events/").',
+                                },
+                            },
+                            required: ['name', 'profileName', 'brief'],
+                        },
+                    },
+                },
+                required: ['objective', 'members'],
+            },
+        },
+    },
+    {
+        type: 'function',
+        function: {
+            name: 'team_send_message',
+            description: 'Send a peer message inside an Agent Team: a running teammate is steered at its next step, an idle teammate wakes with the message, and "lead" reaches the coordinator. teamId defaults to the caller team (members) or the topic active team (lead).',
+            parameters: {
+                type: 'object',
+                properties: {
+                    teamId: { type: 'string', description: 'Target team id (optional for members).' },
+                    target: { type: 'string', description: 'Teammate member name, or "lead".' },
+                    message: { type: 'string', description: 'Message body (max 8000 chars).' },
+                },
+                required: ['target', 'message'],
+            },
+        },
+    },
+    {
+        type: 'function',
+        function: {
+            name: 'team_task_create',
+            description: 'Create a task on the shared team board. Declare blockedBy dependencies and advisory writeScopes so teammates can sequence and deconflict work.',
+            parameters: {
+                type: 'object',
+                properties: {
+                    teamId: { type: 'string', description: 'Target team id (optional for members).' },
+                    subject: { type: 'string', description: 'Short imperative subject (max 200 chars).' },
+                    description: { type: 'string', description: 'Acceptance detail and context (max 4000 chars).' },
+                    blockedBy: { type: 'array', items: { type: 'string' }, description: 'Existing task ids that must complete first.' },
+                    writeScopes: { type: 'array', items: { type: 'string' }, description: 'Advisory workspace-relative write prefixes.' },
+                },
+                required: ['subject'],
+            },
+        },
+    },
+    {
+        type: 'function',
+        function: {
+            name: 'team_task_list',
+            description: 'List team board tasks with revisions, owners, readiness, and write-scope overlap warnings. Updates are compare-and-set on the listed revision.',
+            parameters: {
+                type: 'object',
+                properties: {
+                    teamId: { type: 'string', description: 'Target team id (optional for members).' },
+                    status: { type: 'string', enum: ['pending', 'in_progress', 'completed'], description: 'Optional status filter.' },
+                    owner: { type: 'string', description: 'Optional owner member filter.' },
+                },
+                required: [],
+            },
+        },
+    },
+    {
+        type: 'function',
+        function: {
+            name: 'team_task_update',
+            description: 'Compare-and-set mutation on a team task: claim (requires completed blockers), release, complete (owner or lead), or edit fields. On revision conflict re-read and retry.',
+            parameters: {
+                type: 'object',
+                properties: {
+                    teamId: { type: 'string', description: 'Target team id (optional for members).' },
+                    taskId: { type: 'string', description: 'Task id, e.g. "task-1".' },
+                    expectedRevision: { type: 'integer', minimum: 1, description: 'The revision you last observed.' },
+                    action: { type: 'string', enum: ['claim', 'release', 'complete', 'edit'] },
+                    subject: { type: 'string', description: 'edit only: new subject.' },
+                    description: { type: 'string', description: 'edit only: new description.' },
+                    blockedBy: { type: 'array', items: { type: 'string' }, description: 'edit only: replacement blocker list.' },
+                    writeScopes: { type: 'array', items: { type: 'string' }, description: 'edit only: replacement write-scope list.' },
+                },
+                required: ['taskId', 'expectedRevision', 'action'],
+            },
+        },
+    },
+    {
+        type: 'function',
+        function: {
+            name: 'team_members',
+            description: 'List the team roster: member status, unread message counts, activation counts, token usage, and last output preview.',
+            parameters: {
+                type: 'object',
+                properties: {
+                    teamId: { type: 'string', description: 'Target team id (optional for members).' },
+                },
+                required: [],
+            },
+        },
+    },
+    {
+        type: 'function',
+        function: {
+            name: 'team_close',
+            description: 'Lead-only: close the team to new work. Running members finish their current activation; the settle summary reports the remaining board state.',
+            parameters: {
+                type: 'object',
+                properties: {
+                    teamId: { type: 'string', description: 'Target team id (optional when one team is active).' },
+                    reason: { type: 'string', description: 'Optional close reason recorded in the settle summary.' },
+                },
+                required: [],
+            },
+        },
+    },
     {
         type: 'function',
         function: {

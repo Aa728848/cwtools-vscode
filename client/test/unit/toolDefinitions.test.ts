@@ -13,10 +13,15 @@ describe('tool definitions', () => {
             'get_file_context', 'search_mod_files',
             'query_definition', 'query_definition_by_name', 'query_references',
         ]);
-        expect(names.length).to.be.lessThan(91);
+        // Budget headroom: 86 base tools + 7 Agent Teams peer-collaboration
+        // tools (dispatch_team + team_*). All seven are deferred-disclosure,
+        // so the always-visible prompt budget is unchanged.
+        expect(names.length).to.be.lessThan(96);
         const schemaTokens = [...TOOL_REGISTRY.values()]
             .reduce((total, entry) => total + entry.estimatedSchemaTokens, 0);
-        expect(schemaTokens).to.be.lessThan(30_000);
+        // Budget headroom: Agent Teams added seven deferred-disclosure
+        // orchestration schemas (~1.4k tokens) on top of the 28.8k baseline.
+        expect(schemaTokens).to.be.lessThan(31_000);
     });
 
     it('registers structured user questions as a host interaction', () => {

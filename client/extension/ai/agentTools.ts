@@ -42,7 +42,7 @@ import { loadSkill } from './skills';
 import { isPlanModeCardArtifactFile, validateGitOpsForMode, validatePlanModeToolUse } from './planModeGuard';
 import { saveProjectWorkflow } from './workflowRegistry';
 import { budgetToolResult, TOOL_RESULT_BUDGET_HARD_STUB } from './contextBudget';
-import { aiText, EVIDENCE_GATE_MSG } from './messages';
+import { aiText, EVIDENCE_GATE_MSG, TEAM_MSG } from './messages';
 import { getPrivateAiStorageRoot, getPrivateTopicStorageDir } from './workspacePaths';
 import { isPathInsideOrEqual } from '../pathScope';
 import { TOOL_REGISTRY, WRITE_TOOLS } from './tools/registry';
@@ -102,6 +102,21 @@ import {
 import { goalStore, type DurableGoalStatus } from './runner/goalStore';
 import { goalSupervisor } from './runner/goalSupervisor';
 import { agentTaskManager } from './runner/taskManager';
+import { activeTurnRegistry } from './runner/activeTurnRegistry';
+import { atomicWriteJson } from './runner/durableStorage';
+import { teamRegistry } from './orchestrator/team/teamRegistry';
+import { TeamRuntime, type TeamMemberLauncher, type TeamRuntimeEvent } from './orchestrator/team/teamRuntime';
+import {
+    TEAM_LEAD,
+    TEAM_MAX_BRIEF_CHARS,
+    TEAM_MAX_MEMBERS,
+    TEAM_MAX_MESSAGE_CHARS,
+    TEAM_MEMBER_NAME_PATTERN,
+    TEAM_MIN_MEMBERS,
+    type TeamMemberSpec,
+    type TeamSummary,
+} from './orchestrator/team/types';
+import { normalizeTeamWriteScope } from './orchestrator/team/teamTaskBoard';
 import { deriveUserExecutionPolicy } from './orchestrator/userExecutionPolicy';
 import { configureSandboxStorage } from './workspaceSandbox';
 
@@ -2780,6 +2795,36 @@ export class AgentToolExecutor {
                 break;
             }
 
+            // - Agent Teams (peer collaboration) -
+            case 'dispatch_team': {
+                result = await this.executeDispatchTeam(args, context);
+                break;
+            }
+            case 'team_send_message': {
+                result = this.executeTeamSendMessage(args, context);
+                break;
+            }
+            case 'team_task_create': {
+                result = this.executeTeamTaskCreate(args, context);
+                break;
+            }
+            case 'team_task_list': {
+                result = this.executeTeamTaskList(args, context);
+                break;
+            }
+            case 'team_task_update': {
+                result = this.executeTeamTaskUpdate(args, context);
+                break;
+            }
+            case 'team_members': {
+                result = this.executeTeamMembers(args, context);
+                break;
+            }
+            case 'team_close': {
+                result = this.executeTeamClose(args, context);
+                break;
+            }
+
             default:
                 // Check if this is a dynamically registered MCP tool (mcp_<server>_<tool>)
                 if (this.dynamicMcpToolNames.has(toolName)) {
@@ -4708,6 +4753,476 @@ export class AgentToolExecutor {
         }).catch(() => false);
         if (!saved) {
             throw new Error(`Failed to persist orchestration '${graph.id}'.`);
+        }
+    }
+
+    // ─── Agent Teams ────────────────────────────────────────────────────────
+
+    /**
+     * Execute the dispatch_team tool: validate the roster against the same
+     * profile/depth/containment gates as dispatch_agents, then run the team
+     * in the background. Members collaborate through the team mailbox and the
+     * CAS task board until the team settles; the lead receives the settle
+     * summary through the standard background-task notification channel.
+     */
+    private async executeDispatchTeam(args: Record<string, unknown>, context?: import('./types').AgentToolContext): Promise<unknown> {
+        const runnerOpts = context?.runnerOptions;
+        if (!runnerOpts?.schedulingState) {
+            return { success: false, error: 'dispatch_team requires an active scheduler context.' };
+        }
+        const schedulingState = runnerOpts.schedulingState;
+        const runtimeDomain = schedulingState.domainProfile;
+        const originalUserMessage = runnerOpts.originalUserMessage;
+        const userExecutionPolicy = deriveUserExecutionPolicy(originalUserMessage, undefined);
+
+        const delegationBudget = evaluateDelegationBudget({
+            parentDepth: runnerOpts.delegationDepth,
+            persistedFloor: undefined,
+            maxDepth: vs.workspace
+                .getConfiguration('stellarisLanguageServices.ai.orchestrator')
+                .get<number>('maxDelegationDepth'),
+        });
+        if (!delegationBudget.allowed) {
+            return {
+                success: false,
+                error: delegationBudget.reason,
+                delegationDepth: delegationBudget.parentDepth,
+                maxDelegationDepth: delegationBudget.maxDepth,
+            };
+        }
+
+        const objective = typeof args.objective === 'string' ? args.objective.trim() : '';
+        if (!objective) {
+            return { success: false, error: 'dispatch_team requires a non-empty objective.' };
+        }
+        const teamName = typeof args.teamName === 'string' && args.teamName.trim() ? args.teamName.trim().slice(0, 80) : undefined;
+
+        const rawMembers = Array.isArray(args.members) ? args.members : [];
+        if (rawMembers.length < TEAM_MIN_MEMBERS || rawMembers.length > TEAM_MAX_MEMBERS) {
+            return { success: false, error: 'dispatch_team requires between ' + TEAM_MIN_MEMBERS + ' and ' + TEAM_MAX_MEMBERS + ' members; received ' + rawMembers.length + '.' };
+        }
+
+        const runtimeProfile = schedulingState.profileName
+            ? agentProfileCatalog.get(schedulingState.profileName)
+            : undefined;
+        if (!runtimeProfile) {
+            return { success: false, error: "dispatch_team requires a known scheduler profile; received '" + schedulingState.profileName + "'." };
+        }
+        const allowedProfileNames = new Set(runtimeProfile.subagents ?? []);
+        if (schedulingState.authorization !== 'workspace_write') {
+            for (const profileName of [...allowedProfileNames]) {
+                if (agentProfileCatalog.get(profileName)?.authorizationCeiling === 'workspace_write') {
+                    allowedProfileNames.delete(profileName);
+                }
+            }
+        }
+
+        const seenNames = new Set<string>();
+        const members: TeamMemberSpec[] = [];
+        for (const raw of rawMembers) {
+            const member = raw as Record<string, unknown>;
+            const name = typeof member?.name === 'string' ? member.name.trim() : '';
+            if (!TEAM_MEMBER_NAME_PATTERN.test(name)) {
+                return { success: false, error: "Member name '" + name + "' must match " + TEAM_MEMBER_NAME_PATTERN.source + '.' };
+            }
+            if (name === TEAM_LEAD || seenNames.has(name)) {
+                return { success: false, error: "Member name '" + name + "' is reserved or duplicated." };
+            }
+            seenNames.add(name);
+            const profileName = typeof member.profileName === 'string' ? member.profileName.trim() : '';
+            if (!allowedProfileNames.has(profileName) || !agentProfileCatalog.get(profileName)) {
+                return {
+                    success: false,
+                    error: "Member '" + name + "' uses profile '" + profileName + "', which is not allowed by scheduler profile '" + runtimeProfile.name + "'. Allowed profiles: " + [...allowedProfileNames].join(', ') + '.',
+                };
+            }
+            const brief = typeof member.brief === 'string' ? member.brief.trim() : '';
+            if (!brief) {
+                return { success: false, error: "Member '" + name + "' requires a non-empty brief." };
+            }
+            if (brief.length > TEAM_MAX_BRIEF_CHARS) {
+                return { success: false, error: "Member '" + name + "' brief exceeds " + TEAM_MAX_BRIEF_CHARS + " characters." };
+            }
+            const plannedFiles = Array.isArray(member.plannedFiles)
+                ? member.plannedFiles.filter((file): file is string => typeof file === 'string' && file.trim().length > 0)
+                : [];
+            if (plannedFiles.length > 0) {
+                const { clampWriteScopeToRoots } = require('./runner/policyEngine') as typeof import('./runner/policyEngine');
+                const { rejected } = clampWriteScopeToRoots(plannedFiles, [this.workspaceRoot], this.workspaceRoot);
+                if (rejected.length > 0) {
+                    return { success: false, error: "Member '" + name + "' plans writes outside the workspace sandbox: " + rejected.join(', ') + '.' };
+                }
+            }
+            const writeScopes: string[] = [];
+            if (Array.isArray(member.writeScopes)) {
+                for (const rawScope of member.writeScopes) {
+                    const scope = normalizeTeamWriteScope(rawScope);
+                    if (!scope) {
+                        return { success: false, error: "Member '" + name + "' has an invalid write scope '" + String(rawScope) + "': use workspace-relative prefixes without drive letters, leading slashes, or '..'." };
+                    }
+                    writeScopes.push(scope);
+                }
+            }
+            members.push({ name, profileName, brief, plannedFiles, writeScopes });
+        }
+
+        // Mirror dispatch_agents localisation ownership rules.
+        if (userExecutionPolicy.localisationOwnership === 'user') {
+            const localisationMember = members.find(member =>
+                member.profileName === 'localization-writer'
+                || member.plannedFiles?.some(isLocalisationYmlPath));
+            if (localisationMember) {
+                return {
+                    success: false,
+                    error: aiText(
+                        'Team member "' + localisationMember.name + '" conflicts with the user retained ownership of localisation. Remove localisation writes from the team and dispatch only the work the user delegated.',
+                        '团队成员“' + localisationMember.name + '”与用户保留的本地化所有权冲突。请从团队中移除本地化写入，只调度用户已经委派的工作。',
+                    ),
+                };
+            }
+        }
+        const localisationProfileMismatch = members.find(member =>
+            (member.plannedFiles ?? []).some(isLocalisationYmlPath) && member.profileName !== 'localization-writer');
+        if (localisationProfileMismatch) {
+            return {
+                success: false,
+                error: "Member '" + localisationProfileMismatch.name + "' targets localisation YML but uses profile '" + localisationProfileMismatch.profileName + "'. Use profileName='localization-writer'.",
+            };
+        }
+
+        if (!this.parentAgentRunner) {
+            return { success: false, error: 'Orchestrator is not ready: missing AgentRunner instance. Run in a coordinator-capable mode.' };
+        }
+
+        const teamId = 'team-' + Date.now().toString(36) + '-' + nodeCrypto.randomBytes(3).toString('hex');
+        const parentRunSink = context?.runEventSink ?? runnerOpts.runEventSink;
+        const parentRunPromise = context?.agentRunner?.getActiveRunRecordPromise?.()
+            ?? this.parentAgentRunner.getActiveRunRecordPromise?.();
+        const parentRun = runnerOpts.runRecord
+            ?? await parentRunPromise?.catch(() => undefined);
+        const parentRunId = parentRun?.runId ?? parentRunSink?.runId;
+
+        const { Orchestrator } = await import('./orchestrator/orchestrator');
+        const orchestrator = new Orchestrator(this.parentAgentRunner, {});
+
+        const runtimeRef: { current?: TeamRuntime } = {};
+        const launcher: TeamMemberLauncher = async (activation) => {
+            const taskNode: import('./orchestrator/types').TaskNode = {
+                id: activation.member.name,
+                profileName: activation.member.profileName,
+                prompt: activation.prompt,
+                plannedFiles: activation.member.plannedFiles,
+                dependencies: [],
+                priority: 'normal',
+                status: 'pending',
+                retryCount: 0,
+                maxRetries: 0,
+            };
+            const memberOptions: import('./orchestrator/types').OrchestratorOptions = {
+                schedulingState,
+                providerId: runnerOpts.providerId,
+                model: runnerOpts.model,
+                reasoningEffort: runnerOpts.reasoningEffort,
+                agentModelOverrides: vs.workspace.getConfiguration('stellarisLanguageServices.ai')
+                    .get<Record<string, { provider: string; model: string }>>('orchestrator.agentModels'),
+                abortSignal: activation.signal,
+                topicId: runnerOpts.topicId,
+                parentRunId,
+                delegationDepth: delegationBudget.parentDepth,
+                durableGoal: runnerOpts.durableGoal,
+                originalUserMessage,
+                userExecutionPolicy,
+                runEventSink: parentRunSink,
+                onStep: parentRunSink
+                    ? (step) => {
+                        parentRunSink.appendSoon('step_appended', {
+                            step: {
+                                type: step.type,
+                                content: step.content,
+                                timestamp: step.timestamp,
+                                agentId: step.agentId,
+                                source: 'team',
+                            },
+                        });
+                    }
+                    : undefined,
+                onBeforeFileWrite: context?.onBeforeFileWrite ?? runnerOpts.onBeforeFileWrite,
+                onTodoUpdate: context?.onTodoUpdate ?? runnerOpts.onTodoUpdate,
+                onPermissionRequest: context?.onPermissionRequest ?? runnerOpts.onPermissionRequest,
+                team: {
+                    teamId,
+                    onMemberRunStarted: (memberName, runId) => runtimeRef.current?.markMemberRunStarted(memberName, runId),
+                },
+            };
+            const result = await orchestrator.runTeamMember(taskNode, memberOptions, activation.resumeMessages);
+            return {
+                success: result.success,
+                output: result.output,
+                error: result.error,
+                runId: result.runId,
+                tokenUsage: result.tokenUsage,
+                needsClarification: result.needsClarification,
+                clarification: result.clarification,
+            };
+        };
+
+        const emitTeamEvent = (event: TeamRuntimeEvent) => {
+            const content = event.kind === 'team_message'
+                ? TEAM_MSG.MESSAGE(event.from, event.to, event.delivery)
+                : event.kind === 'team_member_started'
+                    ? TEAM_MSG.MEMBER_STARTED(event.member, event.profileName, event.reason)
+                    : event.kind === 'team_member_idle'
+                        ? TEAM_MSG.MEMBER_IDLE(event.member, event.success)
+                        : TEAM_MSG.SETTLING(event.reason);
+            parentRunSink?.appendSoon('step_appended', {
+                step: { type: 'orchestrator_progress', content, timestamp: Date.now() },
+            });
+        };
+
+        const maxConcurrency = Math.max(1, Math.min(4, typeof args.maxConcurrency === 'number' ? Math.floor(args.maxConcurrency) : 3));
+        const runtime = new TeamRuntime({
+            teamId,
+            teamName,
+            objective,
+            topicId: runnerOpts.topicId,
+            domain: runtimeDomain,
+            members,
+            maxConcurrency,
+            leadRunId: parentRunId,
+            launcher,
+            steer: (runId, message) => activeTurnRegistry.steer(runId, message, undefined, undefined, 'team_message'),
+            readResumeTranscript: (runId) => runLedger.readResumeTranscript(runId, runnerOpts.topicId),
+            onEvent: emitTeamEvent,
+        });
+        runtimeRef.current = runtime;
+        teamRegistry.register(runtime);
+
+        let teamTask: import('./runner/taskManager').AgentTaskRecord | undefined;
+        if (runnerOpts.topicId && parentRunId) {
+            try {
+                agentTaskManager.configure(runnerOpts.topicId);
+                teamTask = await agentTaskManager.create({
+                    kind: 'subagent',
+                    agentId: 'team:' + teamId,
+                    topicId: runnerOpts.topicId,
+                    runId: parentRunId,
+                    threadId: runnerOpts.topicId,
+                });
+            } catch {
+                teamTask = undefined;
+            }
+        }
+
+        const globalSignal = runnerOpts.abortSignal;
+        backgroundOrchestrators.start({
+            graphId: teamId,
+            topicId: runnerOpts.topicId,
+            runId: parentRunId,
+            parentAbortSignal: globalSignal,
+            run: async (bgAbortSignal) => {
+                try {
+                    const summary = await runtime.run(bgAbortSignal);
+                    const summaryText = this.formatTeamSettleSummary(summary);
+                    await this.persistTeamSnapshot(runtime, summary);
+                    if (teamTask) {
+                        await agentTaskManager.transition(
+                            teamTask.taskId,
+                            summary.settleReason === 'aborted' ? 'killed' : 'completed',
+                            summaryText,
+                            {
+                                stopReason: summary.settleReason === 'aborted' ? 'cancelled_by_parent' : 'team_settled_' + summary.settleReason,
+                                lastMessage: summaryText,
+                            },
+                        ).catch(() => {});
+                    }
+                } finally {
+                    teamRegistry.remove(teamId);
+                }
+            },
+        });
+
+        parentRunSink?.appendSoon('step_appended', {
+            step: { type: 'thinking', content: TEAM_MSG.START(teamId, members.length), timestamp: Date.now() },
+        });
+
+        return {
+            success: true,
+            background: true,
+            teamId,
+            members: members.map(member => ({ name: member.name, profileName: member.profileName })),
+            hint: 'Team started in the background. Members collaborate through team_send_message and the shared board (team_task_*). You can steer any member with team_send_message, inspect with team_members / team_task_list, and close the team with team_close. The settle summary arrives as a BACKGROUND TASK RESULT.',
+        };
+    }
+
+    /** Resolve the team a team tool call belongs to, plus the caller identity. */
+    private resolveTeamCall(args: Record<string, unknown>, context?: import('./types').AgentToolContext):
+        { team: TeamRuntime; caller: string; isLead: boolean } | { error: string } {
+        const boundTeamId = context?.runnerOptions?.teamId;
+        const memberName = context?.runnerOptions?.teamMemberName;
+        const requested = typeof args.teamId === 'string' && args.teamId.trim() ? args.teamId.trim() : undefined;
+        if (boundTeamId && requested && requested !== boundTeamId) {
+            return { error: "Team members can only address their own team ('" + boundTeamId + "'), not '" + requested + "'." };
+        }
+        const team = teamRegistry.resolve({
+            teamId: requested ?? boundTeamId,
+            topicId: context?.runnerOptions?.topicId,
+        });
+        if (!team) {
+            return { error: requested
+                ? "Team '" + requested + "' is not active (it may have settled). Dispatch a new team for follow-up work."
+                : 'No active team found for this topic. Start one with dispatch_team.' };
+        }
+        if (boundTeamId && memberName && team.teamId === boundTeamId) {
+            return { team, caller: memberName, isLead: false };
+        }
+        if (!boundTeamId) {
+            // Only top-level runs may act as the lead. Sub-agents without a
+            // team binding (e.g. the quality-gate reviewer) must not steer or
+            // close a team that happens to be active in the same topic.
+            if (context?.runnerOptions?.useSlimPrompt) {
+                return { error: 'Team tools are only available to team members and the dispatching lead.' };
+            }
+            const callerTopic = context?.runnerOptions?.topicId;
+            if (team.topicId && callerTopic && team.topicId !== callerTopic) {
+                return { error: "Team '" + team.teamId + "' belongs to a different topic." };
+            }
+            return { team, caller: TEAM_LEAD, isLead: true };
+        }
+        return { error: 'Team call context is incomplete: missing member identity.' };
+    }
+
+    private executeTeamSendMessage(args: Record<string, unknown>, context?: import('./types').AgentToolContext): unknown {
+        const resolved = this.resolveTeamCall(args, context);
+        if ('error' in resolved) return { success: false, error: resolved.error };
+        const target = typeof args.target === 'string' ? args.target.trim() : '';
+        if (!target) return { success: false, error: 'team_send_message requires a target member name or "lead".' };
+        const message = typeof args.message === 'string' ? args.message : '';
+        if (message.trim().length === 0) return { success: false, error: 'team_send_message requires a non-empty message.' };
+        if (message.length > TEAM_MAX_MESSAGE_CHARS) {
+            return { success: false, error: 'message exceeds ' + TEAM_MAX_MESSAGE_CHARS + ' characters.' };
+        }
+        const result = resolved.team.sendMessage(resolved.caller, target, message);
+        return result.success
+            ? { ...result, hint: result.delivery === 'steered' ? 'Delivered into the running teammate immediately.' : 'Queued; the teammate receives it on its next activation.' }
+            : result;
+    }
+
+    private executeTeamTaskCreate(args: Record<string, unknown>, context?: import('./types').AgentToolContext): unknown {
+        const resolved = this.resolveTeamCall(args, context);
+        if ('error' in resolved) return { success: false, error: resolved.error };
+        return resolved.team.board.create(resolved.caller, {
+            subject: typeof args.subject === 'string' ? args.subject : '',
+            description: typeof args.description === 'string' ? args.description : undefined,
+            blockedBy: Array.isArray(args.blockedBy) ? args.blockedBy : undefined,
+            writeScopes: Array.isArray(args.writeScopes) ? args.writeScopes : undefined,
+        });
+    }
+
+    private executeTeamTaskList(args: Record<string, unknown>, context?: import('./types').AgentToolContext): unknown {
+        const resolved = this.resolveTeamCall(args, context);
+        if ('error' in resolved) return { success: false, error: resolved.error };
+        const status = typeof args.status === 'string' ? args.status : undefined;
+        if (status && !['pending', 'in_progress', 'completed'].includes(status)) {
+            return { success: false, error: "status must be one of pending | in_progress | completed." };
+        }
+        const tasks = resolved.team.board.list({
+            status: status as 'pending' | 'in_progress' | 'completed' | undefined,
+            owner: typeof args.owner === 'string' ? args.owner : undefined,
+        });
+        return { success: true, teamId: resolved.team.teamId, tasks };
+    }
+
+    private executeTeamTaskUpdate(args: Record<string, unknown>, context?: import('./types').AgentToolContext): unknown {
+        const resolved = this.resolveTeamCall(args, context);
+        if ('error' in resolved) return { success: false, error: resolved.error };
+        const taskId = typeof args.taskId === 'string' ? args.taskId.trim() : '';
+        const action = typeof args.action === 'string' ? args.action : '';
+        if (!['claim', 'release', 'complete', 'edit'].includes(action)) {
+            return { success: false, error: "action must be one of claim | release | complete | edit." };
+        }
+        const expectedRevision = typeof args.expectedRevision === 'number' ? args.expectedRevision : NaN;
+        return resolved.team.board.update(
+            resolved.caller,
+            resolved.isLead,
+            taskId,
+            expectedRevision,
+            action as 'claim' | 'release' | 'complete' | 'edit',
+            {
+                subject: typeof args.subject === 'string' ? args.subject : undefined,
+                description: typeof args.description === 'string' ? args.description : undefined,
+                blockedBy: Array.isArray(args.blockedBy) ? args.blockedBy : undefined,
+                writeScopes: Array.isArray(args.writeScopes) ? args.writeScopes : undefined,
+            },
+        );
+    }
+
+    private executeTeamMembers(args: Record<string, unknown>, context?: import('./types').AgentToolContext): unknown {
+        const resolved = this.resolveTeamCall(args, context);
+        if ('error' in resolved) return { success: false, error: resolved.error };
+        return {
+            success: true,
+            teamId: resolved.team.teamId,
+            teamName: resolved.team.teamName,
+            objective: resolved.team.objective,
+            closing: resolved.team.isClosing(),
+            members: resolved.team.roster(),
+        };
+    }
+
+    private executeTeamClose(args: Record<string, unknown>, context?: import('./types').AgentToolContext): unknown {
+        const resolved = this.resolveTeamCall(args, context);
+        if ('error' in resolved) return { success: false, error: resolved.error };
+        if (!resolved.isLead) {
+            return { success: false, error: 'Only the lead can close a team. Members can report completion with team_send_message to "lead".' };
+        }
+        resolved.team.requestClose('closed', typeof args.reason === 'string' ? args.reason : undefined);
+        return {
+            success: true,
+            teamId: resolved.team.teamId,
+            hint: 'Team is closing: running members finish their current activation, then the settle summary arrives as a BACKGROUND TASK RESULT.',
+        };
+    }
+
+    /** Compact model-facing summary of a settled team (background task record). */
+    private formatTeamSettleSummary(summary: TeamSummary): string {
+        const lines = [
+            'Team ' + summary.teamId + (summary.teamName ? ' "' + summary.teamName + '"' : '') + ' settled (' + summary.settleReason + ').',
+            'Objective: ' + summary.objective,
+            'Members: ' + summary.members.map(member => member.name + ' (' + member.activations + ' activation(s))').join(', '),
+            'Board: ' + summary.tasks.completed + '/' + summary.tasks.total + ' task(s) completed.',
+        ];
+        if (summary.tasks.open.length > 0) {
+            lines.push('Open tasks: ' + summary.tasks.open.map(task => task.id + ' "' + task.subject + '" (' + task.status + (task.owner ? ', owner ' + task.owner : '') + ')').join('; '));
+        }
+        for (const member of summary.members) {
+            if (member.lastError) {
+                lines.push('[' + member.name + '] ended with error: ' + member.lastError.slice(0, 300));
+            } else if (member.lastOutput) {
+                lines.push('[' + member.name + '] ' + member.lastOutput.slice(0, 400));
+            }
+        }
+        if (summary.undeliveredMessages.length > 0) {
+            lines.push('Undelivered messages:');
+            for (const message of summary.undeliveredMessages) {
+                lines.push('- ' + message.from + ' → ' + message.to + ': ' + message.preview);
+            }
+        }
+        return lines.join('\n');
+    }
+
+    /** Best-effort team snapshot persistence under the topic's private storage. */
+    private async persistTeamSnapshot(runtime: TeamRuntime, summary: TeamSummary): Promise<void> {
+        try {
+            const topicId = runtime.topicId;
+            if (!topicId) return;
+            const topicDir = getPrivateTopicStorageDir(topicId, this.workspaceRoot);
+            const teamDir = path.join(topicDir, 'teams');
+            await fs.promises.mkdir(teamDir, { recursive: true });
+            const snapshot = runtime.snapshot();
+            snapshot.summary = summary;
+            await atomicWriteJson(path.join(teamDir, runtime.teamId + '.json'), snapshot);
+        } catch (error) {
+            ErrorReporter.debug('AgentTeams', 'Team snapshot persistence failed: ' + (error instanceof Error ? error.message : String(error)));
         }
     }
 

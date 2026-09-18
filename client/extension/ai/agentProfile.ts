@@ -34,21 +34,6 @@ export interface AgentProfileResolveHints {
     previousUserRequests?: readonly string[];
 }
 
-export interface ModelAgentProfileDecision {
-    intent: Exclude<AgentIntent, 'auto'>;
-    strategy: Exclude<AgentExecutionStrategy, 'auto'>;
-    requiresUserDecision: boolean;
-    /** Semantic confirmation that the user explicitly asked to start or continue execution. */
-    explicitExecutionRequest?: boolean;
-    /** Semantic confirmation that the user explicitly prohibited writes or execution. */
-    explicitNoWriteRequest?: boolean;
-    /** Semantic confirmation that the user explicitly requested multiple Agents. */
-    explicitDelegationRequest?: boolean;
-    reason: string;
-    confidence?: number;
-    evidence?: string[];
-}
-
 export function cloneAgentProfile(profile: AgentProfileSelection = DEFAULT_AGENT_PROFILE): AgentProfileSelection {
     return {
         domain: profile.domain,
@@ -92,110 +77,6 @@ export function normalizeAgentProfile(value: unknown): AgentProfileSelection {
     return isAgentProfileSelection(value) ? cloneAgentProfile(value) : cloneAgentProfile();
 }
 
-export function parseModelAgentProfileDecision(raw: string): ModelAgentProfileDecision | undefined {
-    const fenced = /```(?:json)?\s*([\s\S]*?)```/i.exec(raw)?.[1];
-    const objectText = fenced ?? /\{[\s\S]*\}/.exec(raw)?.[0];
-    if (!objectText) return undefined;
-    try {
-        const parsed: unknown = JSON.parse(objectText);
-        if (!parsed || typeof parsed !== 'object') return undefined;
-        const candidate = parsed as Partial<ModelAgentProfileDecision>;
-        if (!['execute', 'plan', 'explore', 'review'].includes(candidate.intent ?? '')
-            || (candidate.strategy !== 'single' && candidate.strategy !== 'multi')) {
-            return undefined;
-        }
-        if (candidate.requiresUserDecision !== undefined && typeof candidate.requiresUserDecision !== 'boolean') {
-            return undefined;
-        }
-        if (candidate.explicitExecutionRequest !== undefined && typeof candidate.explicitExecutionRequest !== 'boolean') {
-            return undefined;
-        }
-        if (candidate.explicitNoWriteRequest !== undefined && typeof candidate.explicitNoWriteRequest !== 'boolean') {
-            return undefined;
-        }
-        if (candidate.explicitDelegationRequest !== undefined && typeof candidate.explicitDelegationRequest !== 'boolean') {
-            return undefined;
-        }
-        const confidence = typeof candidate.confidence === 'number'
-            ? Math.max(0, Math.min(1, candidate.confidence))
-            : undefined;
-        const evidence = Array.isArray(candidate.evidence)
-            ? candidate.evidence.filter((item): item is string => typeof item === 'string').map(item => item.slice(0, 240)).slice(0, 8)
-            : undefined;
-        return {
-            intent: candidate.intent as ModelAgentProfileDecision['intent'],
-            strategy: candidate.strategy,
-            requiresUserDecision: candidate.requiresUserDecision === true,
-            explicitExecutionRequest: candidate.explicitExecutionRequest === true,
-            explicitNoWriteRequest: candidate.explicitNoWriteRequest === true,
-            explicitDelegationRequest: candidate.explicitDelegationRequest === true,
-            reason: typeof candidate.reason === 'string' ? candidate.reason.trim().slice(0, 240) : '',
-            ...(confidence !== undefined ? { confidence } : {}),
-            ...(evidence !== undefined ? { evidence } : {}),
-        };
-    } catch {
-        return undefined;
-    }
-}
-
-export function resolveAgentProfileFromModelDecision(
-    _text: string,
-    profile: AgentProfileSelection,
-    decision: ModelAgentProfileDecision,
-    _hints: AgentProfileResolveHints = {},
-): ResolvedSchedulingDecision {
-    const selection = normalizeAgentProfile(profile);
-    const routeConfidence = decision.confidence ?? 0.65;
-    // Capability domain is user-owned. Semantic routing may change task intent
-    // and execution topology, but never Paradox/General capabilities.
-    const domain: AgentRuntimeDomain = selection.domain === 'general'
-        ? 'general'
-        : selection.domain === 'hybrid' ? 'hybrid' : 'paradox';
-    // Once semantic routing succeeds, no keyword classifier may override it.
-    // Regex admission remains only in resolveAgentProfile(), the unavailable-
-    // router fallback path.
-    const routedIntent = decision.requiresUserDecision
-        ? 'plan'
-        : decision.explicitNoWriteRequest === true
-            ? (decision.intent === 'execute' ? 'explore' : decision.intent)
-            : decision.intent;
-    // A material unresolved choice is a hard read/plan boundary even when the
-    // request also contains mutation verbs. Only a later user answer may admit
-    // execution.
-    const intent = decision.requiresUserDecision
-        ? 'plan'
-        : selection.intent === 'auto' ? routedIntent : selection.intent;
-    // Existing multi-Agent modes are execution coordinators. Keep read-only and
-    // plan turns on their dedicated safety modes even if a router returns multi.
-    // Multi-Agent is a runtime optimization. Automatic model routing may
-    // recommend it, but only an explicit user request commits at admission;
-    // broad tasks can still dispatch after repository-backed decomposition.
-    const strategy = selection.strategy === 'auto'
-        ? (decision.explicitDelegationRequest === true ? 'multi' : 'single')
-        : selection.strategy;
-    const base = {
-        selection,
-        intent,
-        strategy,
-        reason: decision.reason || 'Semantic routing completed.',
-        requiresUserDecision: decision.requiresUserDecision,
-        routingSource: 'model' as const,
-    };
-    const admission = admissionFromResolvedProfile(
-        { ...base, domain },
-        routeConfidence,
-        decision.evidence ?? [decision.reason || 'model-assisted routing'],
-    );
-    return {
-        schedulingState: {
-            ...schedulingForSelection(admission, selection),
-            awaitingUserDecision: decision.requiresUserDecision || undefined,
-            routingSource: 'model',
-            phaseReason: base.reason,
-        },
-    };
-}
-
 export function resolveAgentProfile(
     text: string,
     profile: AgentProfileSelection = cloneAgentProfile(),
@@ -215,10 +96,12 @@ export function resolveAgentProfile(
             return !previousNoWrite && WRITE_INTENT_RE.test(previous);
         });
     const hasWriteIntent = !explicitNoWrite && (WRITE_INTENT_RE.test(request) || inheritedWriteIntent);
-    // A failed semantic router must not turn every ordinary mutation into a
-    // planning round-trip. Only explicit planning or broad/coupled scope keeps
-    // the deterministic fallback in Plan; Execute may inspect the repository
-    // within the user's requested scope before applying the change.
+    // Deterministic resolution is the only resolver now, so it must not turn
+    // every ordinary mutation into a planning round-trip. Only an explicit plan
+    // request or broad/coupled scope resolves to Plan; Execute may inspect the
+    // repository within the user's requested scope before applying the change.
+    // The Agent escalates to Plan itself (enter_plan_mode) when it finds a
+    // user-owned decision that inspection cannot settle.
     const fallbackWriteIntent: Exclude<AgentIntent, 'auto'> = PLAN_INTENT_RE.test(request)
         || BROAD_TASK_RE.test(request)
         ? 'plan'
@@ -273,7 +156,3 @@ export function resolveAgentProfile(
     };
 }
 
-/** Automatic task intent is semantic; deterministic admission is only its bounded fallback. */
-export function shouldUseSemanticAgentRouting(profile: AgentProfileSelection): boolean {
-    return normalizeAgentProfile(profile).intent === 'auto';
-}

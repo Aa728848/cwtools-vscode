@@ -214,7 +214,7 @@ Users can pin a mode for the session with `/plan`, `/execute`, `/explore`, `/rev
 
 Plan is the Agent's own escalation, not a classifier's guess. It calls `enter_plan_mode` before its first project write when the user asked for a plan or a materially user-owned choice is still open; that narrows authorization to `plan_write_only` and the per-call plan guard then blocks project writes for the rest of the turn. `exit_plan_mode` leaves Plan without restoring write access, so a model can never bypass the approval it just requested — only the user's approval does that. Bounded repository inspection settles ordinary changes, so Execute remains the default.
 
-`AgentSchedulingState` is the only persisted and host-to-Webview scheduling state. Prompt/tool execution labels such as Build, Plan, or Orchestrator are projections derived at the call boundary and are never restored independently.
+`AgentSchedulingState` is the only persisted and host-to-Webview scheduling state. Prompt/tool execution labels such as Build, Plan, or Orchestrator are projections derived at the call boundary and are never restored independently. A run's post-run state is read back from the scheduling domain store, a Plan turn is not rewritten to `finalize` (Plan means waiting on the user, not finished), and a topic carries the user's pinned `modeOverride` plus any approved plan artifact so both survive a topic switch, a reload, and a fork.
 
 General coding loads normal repository instructions and cannot use Paradox-only semantic capabilities. The Paradox domain can query the active profile, CWT rules, indexes, and LSP evidence. `CWTOOLS.md` remains user-owned and is only scaffolded when absent.
 
@@ -507,7 +507,7 @@ CWT-only 工作区只索引当前工作区,不激活游戏模型。候选可用�
 
 Plan 是 Agent 自己的升级决策，不是分类器的猜测。当用户明确要求方案，或仍存在属于用户的重大未决选择时，它会在首次项目写入前调用 `enter_plan_mode`：该调用把授权收窄为 `plan_write_only`，随后每次工具调用实时读取该状态的 plan guard 会拦截本回合剩余的项目写入。`exit_plan_mode` 只离开 Plan、不恢复写权限，因此模型无法绕过它刚刚请求的审批——只有用户的批准才能恢复。有界仓库检查足以确定的普通改动保持默认走 Execute。
 
-`AgentSchedulingState` 是唯一会持久化、并在宿主与 Webview 间传递的调度状态。Build、Plan、Orchestrator 等 Prompt/工具执行标签只在调用边界由它派生，不会被独立恢复。
+`AgentSchedulingState` 是唯一会持久化、并在宿主与 Webview 间传递的调度状态。Build、Plan、Orchestrator 等 Prompt/工具执行标签只在调用边界由它派生，不会被独立恢复。回合结束后的状态会从调度 domain store 回流；处于 Plan 的回合不会被改写成 `finalize`（Plan 表示等待用户，而非已完成）；话题会保存用户钉住的 `modeOverride` 与已批准的 plan 产物，因此两者都能跨话题切换、重载与分叉存续。
 
 通用编码会读取常规仓库指令，但不能调用 Paradox 专用语义能力。Paradox 领域可以查询当前 Profile、CWT 规则、索引和 LSP 证据。`CWTOOLS.md` 属于用户，只有缺失时才创建最小模板。
 

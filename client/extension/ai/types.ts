@@ -2393,6 +2393,19 @@ export interface ChatTopic {
     workspaceLabel?: string;
     /** Canonical scheduler state for the topic. */
     schedulingState: AgentSchedulingState;
+    /**
+     * User-pinned task mode for this topic ('auto' or absent means the Agent
+     * decides per request). Persisted with the topic so a pin outlives a topic
+     * switch, a reload, and a fork instead of living only in memory.
+     */
+    modeOverride?: AgentModeOverride;
+    /**
+     * Plan artifact the user approved, consumed by the next execution turn.
+     * Persisting it replaces the previous in-memory one-shot flag, so an
+     * approval survives a topic switch or extension reload between the card
+     * click and the continuation.
+     */
+    approvedPlanArtifact?: string;
     /** Optional active workflow restored with this topic. */
     workflowId?: string;
     /** Scheduler state to restore when the active workflow is disabled. */

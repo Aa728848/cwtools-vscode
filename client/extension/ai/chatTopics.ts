@@ -8,7 +8,7 @@
 import * as vs from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
-import type { ChatTopic, ChatHistoryMessage, HostMessage, ChatMessage } from './types';
+import type { AgentModeOverride, ChatTopic, ChatHistoryMessage, HostMessage, ChatMessage } from './types';
 import { UI, aiText, getAiMessageLocale } from './messages';
 import { getPrivateAiStorageRoot, getProjectWorkspaceRoot } from './workspacePaths';
 import { normalizeSchedulingState } from './runner/scheduling';
@@ -23,6 +23,19 @@ function readSchedulingState(value: unknown) {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
     return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+const MODE_OVERRIDES = new Set<AgentModeOverride>(['auto', 'execute', 'plan', 'explore', 'review']);
+
+/**
+ * Read the persisted user-pinned task mode. Unknown or malformed values fall
+ * back to 'auto' (the Agent decides), never to a pinned mode: a corrupted field
+ * must not silently restrict what the Agent may do.
+ */
+export function readModeOverride(value: unknown): AgentModeOverride {
+    return typeof value === 'string' && MODE_OVERRIDES.has(value as AgentModeOverride)
+        ? value as AgentModeOverride
+        : 'auto';
 }
 
 function readStoredTopic(value: unknown): ChatTopic | undefined {
@@ -56,6 +69,10 @@ function readStoredTopic(value: unknown): ChatTopic | undefined {
         workspaceId: typeof value.workspaceId === 'string' ? value.workspaceId : undefined,
         workspaceLabel: typeof value.workspaceLabel === 'string' ? value.workspaceLabel : undefined,
         schedulingState,
+        modeOverride: readModeOverride(value.modeOverride),
+        approvedPlanArtifact: typeof value.approvedPlanArtifact === 'string' && value.approvedPlanArtifact
+            ? value.approvedPlanArtifact
+            : undefined,
         workflowId,
         workflowReturnSchedulingState,
     };
@@ -220,6 +237,9 @@ export class ChatTopicManager {
             parentTopicId: topicId,
             forkedFromMessageIndex: messageIndex,
             schedulingState: normalizeSchedulingState(source.schedulingState),
+            // A fork inherits the parent's pinned mode: the user's choice was
+            // about how this work is done, not about one particular topic id.
+            modeOverride: readModeOverride(source.modeOverride),
             workspaceId: source.workspaceId,
             workspaceLabel: source.workspaceLabel,
             workflowId: source.workflowId,

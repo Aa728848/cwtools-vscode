@@ -617,6 +617,36 @@ describe('RunLedger Unit Tests', () => {
         expect(invalid).to.equal(null);
     });
 
+    it('persists the user-pinned task mode and the approved plan across a reload', async () => {
+        const { ChatTopicManager } = loadChatTopicsModule();
+        const storageRoot = path.join(workspaceRoot, '.chat-mode-pin');
+        const storageUri = { fsPath: storageRoot } as ConstructorParameters<typeof ChatTopicManager>[0];
+        const manager = new ChatTopicManager(storageUri, () => {}, 'full');
+        manager.createNewTopic('pin the mode', PARADOX_WRITE);
+        if (!manager.currentTopic) throw new Error('Expected the topic to be created.');
+        manager.currentTopic.modeOverride = 'plan';
+        manager.currentTopic.approvedPlanArtifact = 'pending';
+        manager.saveTopics();
+
+        const restored = new ChatTopicManager(storageUri, () => {}, 'full');
+        expect(restored.topics[0]?.modeOverride).to.equal('plan');
+        expect(restored.topics[0]?.approvedPlanArtifact).to.equal('pending');
+
+        // A fork inherits the pin: the choice was about how the work is done.
+        const restoredTopic = restored.topics[0];
+        if (!restoredTopic) throw new Error('Expected the topic to be restored.');
+        restored.forkTopic(restoredTopic.id, 0);
+        expect(restored.currentTopic?.modeOverride).to.equal('plan');
+
+        // A malformed or unknown pin must fall back to automatic, never to a
+        // pinned mode that would silently restrict the Agent.
+        const stored = JSON.parse(fs.readFileSync(path.join(storageRoot, 'ai-chat-topics.json'), 'utf8'));
+        stored[0].modeOverride = 'not-a-mode';
+        fs.writeFileSync(path.join(storageRoot, 'ai-chat-topics.json'), JSON.stringify(stored), 'utf8');
+        const rebuilt = new ChatTopicManager(storageUri, () => {}, 'full');
+        expect(rebuilt.topics[0]?.modeOverride).to.equal('auto');
+    });
+
     it('adds history message to specific targetTopicId even when currentTopic switched', () => {
         const { ChatTopicManager } = loadChatTopicsModule();
         const storageRoot = path.join(workspaceRoot, '.chat-target-topic');

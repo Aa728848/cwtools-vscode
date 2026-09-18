@@ -193,8 +193,6 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
     private readonly lastRunSnapshotSentAt = new Map<string, number>();
     private readonly queuedSlashCommands: string[] = [];
     private flushingSlashCommands = false;
-    /** One-shot main-Agent continuation set only by approving an interactive plan card. */
-    private approvedPlanExecutionPending = false;
     public topicManager!: ChatTopicManager;
     public settingsManager!: ChatSettingsManager;
     public contextReferences: ContextReferenceManager;
@@ -203,13 +201,38 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         return executionModeForSchedulingState(this.session.schedulingState);
     }
 
+    /**
+     * Approve the pending plan: widen authorization back to execution and mark
+     * the approval on the topic so the continuation survives a topic switch or
+     * a reload between the card click and the next turn.
+     */
     public beginApprovedPlanExecution(): void {
         const domain = this.session.schedulingState.domainProfile;
         this.switchWorkflow(null);
         this.session.schedulingState = resolveAgentProfile('', { domain, intent: 'execute', strategy: 'multi' }).schedulingState;
-        this.approvedPlanExecutionPending = true;
+        // An approval outranks a /plan pin for the continuation turn, otherwise
+        // the pinned Plan mode would re-narrow the very execution just approved.
+        if (this.session.modeOverride === 'plan') this.session.modeOverride = 'auto';
+        const topic = this.topicManager.currentTopic;
+        if (topic) {
+            topic.approvedPlanArtifact = this.findGeneratedTopicFile(topic.id, 'Implementation_Plan.md') ?? 'pending';
+        }
         this.persistSchedulingStateForCurrentTopic();
         this.postMessage({ type: 'setSchedulingState', schedulingState: this.session.schedulingState });
+    }
+
+    /** True when an approved plan artifact is waiting for its continuation turn. */
+    private hasPendingApprovedPlan(): boolean {
+        return !!this.topicManager.currentTopic?.approvedPlanArtifact;
+    }
+
+    /** Consume the pending approval; the next turn is the one that executes it. */
+    private consumeApprovedPlan(): boolean {
+        const topic = this.topicManager.currentTopic;
+        if (!topic?.approvedPlanArtifact) return false;
+        delete topic.approvedPlanArtifact;
+        this.topicManager.saveTopics();
+        return true;
     }
 
     private get currentWorkflowId(): string | null {
@@ -897,12 +920,13 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             }
             return continued;
         }
-        // Task mode is decided by the Agent, not by a routing model: the
-        // request classifies deterministically here (plan/explore/review/execute),
-        // and the Agent escalates into Plan mode through `enter_plan_mode` when it
-        // finds a user-owned decision that bounded inspection cannot settle. That
-        // keeps one decision-maker with full repository context instead of a
-        // separate classifier that only sees the last few chat turns.
+        // Task mode is decided by the Agent, not by a routing model: the request
+        // resolves deterministically here (plan/explore/review/execute), and the
+        // Agent escalates into Plan mode through `enter_plan_mode` when it finds
+        // a user-owned decision that bounded inspection cannot settle. That keeps
+        // one decision-maker with full repository context instead of a separate
+        // classifier that only sees the last few chat turns. A user-pinned mode
+        // (checked above) overrides even this resolution.
         const resolved = resolveAgentProfile(text, selection, hints);
         if (showRoutingStatus) {
             this.postMessageToSurface('chat', { type: 'agentRoutingStatus', phase: 'resolved', schedulingState: resolved.schedulingState });
@@ -917,7 +941,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
      * plan blueprint and approval card entirely).
      */
     private isPendingPlanContinuation(text: string): boolean {
-        if (this.approvedPlanExecutionPending) return false;
+        if (this.hasPendingApprovedPlan()) return false;
         if (this.session.schedulingState.phase !== 'plan') return false;
         const lower = text.trim().toLowerCase();
         if (!lower) return false;
@@ -984,7 +1008,6 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             this.session.schedulingState = schedulingState;
         }
         let turnMode = executionModeForSchedulingState(schedulingState);
-        let turnDomain = schedulingState.domainProfile;
 
         // Ensure we have a topic
         const visibleUserText = displayText ?? text;
@@ -994,6 +1017,9 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         }
         if (this.topicManager.currentTopic) {
             this.topicManager.currentTopic.schedulingState = schedulingState;
+            // Keep the topic's persisted mode in step with the session pin so a
+            // reload restores exactly what the user chose.
+            this.topicManager.currentTopic.modeOverride = this.session.modeOverride;
         }
         const runTopicId = this.topicManager.currentTopic?.id;
         this.activeRunTopicId = runTopicId;
@@ -1011,7 +1037,6 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                 schedulingState = resumeState.schedulingState;
                 this.session.schedulingState = schedulingState;
                 turnMode = executionModeForSchedulingState(schedulingState);
-                turnDomain = schedulingState.domainProfile;
             }
         }
 
@@ -1128,8 +1153,9 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         };
 
         try {
-            const approvedPlanExecution = this.approvedPlanExecutionPending;
-            this.approvedPlanExecutionPending = false;
+            // Consumed exactly once: this is the continuation turn for the plan
+            // the user approved, so the approval must not fire again afterwards.
+            const approvedPlanExecution = this.consumeApprovedPlan();
             // Multi-root workspaces: bind this turn to the mod that owns the
             // frontmost file before the run starts (never mid-run).
             this.agentRunner.refreshWorkspaceRoots();
@@ -1302,6 +1328,25 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             this.topicManager.saveTopics();
             if (runTopicId) {
                 await this.agentRunner.clearResumeState(runTopicId);
+            }
+
+            // The Agent may have changed the task mode mid-run (enter_plan_mode).
+            // The domain store holds the authoritative post-run state, so pull it
+            // back into the session and topic: without this a plan escalation is
+            // forgotten the moment the turn ends.
+            if (runTopicId) {
+                try {
+                    const snapshot = await this.agentRuntime.getConversationUndoState(runTopicId, runTopicId);
+                    const finalState = snapshot.schedulingState;
+                    if (finalState && finalState.phase !== 'finalize') {
+                        this.session.schedulingState = normalizeSchedulingState(finalState);
+                        this.persistSchedulingStateForCurrentTopic();
+                        this.postMessage({ type: 'setSchedulingState', schedulingState: this.session.schedulingState });
+                    }
+                } catch (error) {
+                    ErrorReporter.debug(SOURCE.CHAT_PANEL, 'Post-run scheduling state sync failed: '
+                        + (error instanceof Error ? error.message : String(error)));
+                }
             }
 
             this.collectArtifactsFromResult(uiResult);
@@ -2437,6 +2482,9 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         this.session.schedulingState = topic?.schedulingState
             ? normalizeSchedulingState(topic.schedulingState)
             : resolveAgentProfile('', { domain: 'paradox', intent: 'execute', strategy: 'single' }).schedulingState;
+        // Restore the user's pinned mode with the topic. Without this a /plan pin
+        // would silently reset to automatic whenever the user switched topics.
+        this.session.modeOverride = topic?.modeOverride ?? 'auto';
         this.session.previousSchedulingState = topic?.workflowReturnSchedulingState
             ? normalizeSchedulingState(topic.workflowReturnSchedulingState)
             : this.session.schedulingState;
@@ -2768,6 +2816,12 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
      */
     private applyModeOverride(mode: AgentModeOverride): void {
         this.session.modeOverride = mode;
+        // Persist with the topic so a pin survives a topic switch, a reload, and
+        // a fork instead of resetting to automatic on the next activation.
+        if (this.topicManager.currentTopic) {
+            this.topicManager.currentTopic.modeOverride = mode;
+            this.topicManager.saveTopics();
+        }
         // Reflect the pinned mode in the session scheduling state immediately so
         // /status, the composer chip, and the next turn agree without waiting
         // for the next message.

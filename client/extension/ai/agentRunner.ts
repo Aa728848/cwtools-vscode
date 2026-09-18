@@ -1196,7 +1196,13 @@ export class AgentRunner {
         const updateRunStatus = (status: import('./types').AgentRunStatus) => {
             runRecordPromise!.then(async r => {
                 const currentSchedulingState = options?.schedulingState;
-                if (status === 'completed' && currentSchedulingState && currentSchedulingState.phase !== 'finalize') {
+                // Plan is a waiting-on-the-user state, not a finished one: a turn
+                // that escalated into plan mode must stay in plan so the next turn
+                // still knows the approval card is outstanding. Finalizing it
+                // would silently drop the escalation.
+                const planAwaitingApproval = currentSchedulingState?.phase === 'plan';
+                if (status === 'completed' && currentSchedulingState
+                    && currentSchedulingState.phase !== 'finalize' && !planAwaitingApproval) {
                     const previousPhase = currentSchedulingState.phase;
                     const finalized = transitionSchedulingState(currentSchedulingState, {
                         phase: 'finalize',

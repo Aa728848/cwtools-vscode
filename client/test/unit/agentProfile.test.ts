@@ -2,11 +2,8 @@ import { expect } from 'chai';
 import {
     DEFAULT_AGENT_PROFILE,
     isAgentProfileSelection,
-    parseModelAgentProfileDecision,
     profileForUserDomain,
     resolveAgentProfile,
-    resolveAgentProfileFromModelDecision,
-    shouldUseSemanticAgentRouting,
 } from '../../extension/ai/agentProfile';
 import { agentProfileCatalog } from '../../extension/ai/runner/agentProfileCatalog';
 import { executionModeForSchedulingState } from '../../extension/ai/runner/scheduling';
@@ -29,30 +26,34 @@ describe('agent routing', () => {
         expect(isAgentProfileSelection({ domain: 'general', intent: 'build', strategy: 'single' })).to.equal(false);
     });
 
-    it('keeps capability domain user-owned while intent and strategy remain automatic', () => {
+    it('keeps capability domain user-owned while the Agent decides the mode', () => {
         expect(profileForUserDomain('paradox')).to.deep.equal({ domain: 'paradox', intent: 'auto', strategy: 'auto' });
         expect(profileForUserDomain('general')).to.deep.equal({ domain: 'general', intent: 'auto', strategy: 'auto' });
         expect(profileForUserDomain('hybrid')).to.deep.equal({ domain: 'hybrid', intent: 'auto', strategy: 'auto' });
 
-        const general = resolveAgentProfileFromModelDecision('change the webview', profileForUserDomain('general'), {
-            intent: 'execute', strategy: 'single', requiresUserDecision: false, reason: 'implementation request',
-        });
+        // The domain stays user-owned: a general request resolves to the general
+        // domain and its utility execution label without any routing model.
+        const general = resolveAgentProfile('change the webview', profileForUserDomain('general'));
         expect(general.schedulingState.domainProfile).to.equal('general');
         expect(executionModeForSchedulingState(general.schedulingState)).to.equal('utility');
     });
 
-    it('parses strict model routing decisions from plain or fenced JSON', () => {
-        expect(parseModelAgentProfileDecision(
-            '```json\n{"domain":"paradox","intent":"execute","strategy":"multi","reason":" broad task "}\n```',
-        )).to.deep.equal({
-            intent: 'execute', strategy: 'multi', requiresUserDecision: false,
-            explicitExecutionRequest: false, explicitNoWriteRequest: false, explicitDelegationRequest: false,
-            reason: 'broad task',
+    it('pins an explicit user mode instead of consulting a router', () => {
+        // A user-pinned intent short-circuits automatic resolution: it is the
+        // session-level override that routing must respect.
+        const pinnedPlan = resolveAgentProfile('implement the importer', {
+            domain: 'paradox', intent: 'plan', strategy: 'auto',
         });
-        expect(parseModelAgentProfileDecision('{"intent":"build","strategy":"single"}')).to.equal(undefined);
-        expect(parseModelAgentProfileDecision(
-            '{"intent":"execute","strategy":"single","requiresUserDecision":"yes"}',
-        )).to.equal(undefined);
+        expect(pinnedPlan.schedulingState).to.include({
+            authorization: 'plan_write_only', phase: 'plan', dispatch: 'single',
+        });
+        expect(executionModeForSchedulingState(pinnedPlan.schedulingState)).to.equal('plan');
+
+        const pinnedExplore = resolveAgentProfile('implement the importer', {
+            domain: 'general', intent: 'explore', strategy: 'auto',
+        });
+        expect(pinnedExplore.schedulingState.authorization).to.equal('read_only');
+        expect(executionModeForSchedulingState(pinnedExplore.schedulingState)).to.equal('explore');
     });
 
     it('derives execution labels only from canonical scheduling state', () => {
@@ -68,41 +69,28 @@ describe('agent routing', () => {
     });
 
     it('uses scheduling authorization as the single write-admission state', () => {
-        const plan = resolveAgentProfileFromModelDecision('refactor the runner', DEFAULT_AGENT_PROFILE, {
-            intent: 'plan', strategy: 'multi', requiresUserDecision: false, reason: 'coupled change',
-        });
+        const plan = resolveAgentProfile('refactor the runner', {
+            domain: 'paradox', intent: 'plan', strategy: 'auto',
+        }, { previousUserRequests: ['refactor the runner'] });
         expect(plan.schedulingState).to.include({
             domainProfile: 'paradox', authorization: 'plan_write_only', phase: 'plan', dispatch: 'single',
         });
         expect(executionModeForSchedulingState(plan.schedulingState)).to.equal('plan');
 
-        const execute = resolveAgentProfileFromModelDecision('方案没问题，就这么做', DEFAULT_AGENT_PROFILE, {
-            intent: 'execute', strategy: 'single', explicitExecutionRequest: true,
-            requiresUserDecision: false, reason: 'approved plan',
+        const execute = resolveAgentProfile('方案没问题，就这么做', {
+            domain: 'paradox', intent: 'execute', strategy: 'single',
         });
         expect(execute.schedulingState).to.include({ authorization: 'workspace_write', phase: 'execute' });
         expect(executionModeForSchedulingState(execute.schedulingState)).to.equal('build');
     });
 
-    it('keeps unresolved user decisions out of execution', () => {
-        const routed = resolveAgentProfileFromModelDecision('实现导入功能，格式你看着选', DEFAULT_AGENT_PROFILE, {
-            intent: 'execute', strategy: 'multi', explicitExecutionRequest: true,
-            explicitDelegationRequest: true, requiresUserDecision: true,
-            reason: 'the file format changes public behavior',
+    it('keeps an explicit no-write request read-only', () => {
+        const noWrite = resolveAgentProfile('算了，先不改', {
+            domain: 'paradox', intent: 'explore', strategy: 'auto',
         });
-        expect(routed.schedulingState).to.include({
-            authorization: 'plan_write_only', phase: 'plan', dispatch: 'parallel', awaitingUserDecision: true,
-        });
-    });
-
-    it('keeps explicit no-write decisions read-only', () => {
-        const routed = resolveAgentProfileFromModelDecision('算了，先不改', DEFAULT_AGENT_PROFILE, {
-            intent: 'execute', strategy: 'single', explicitNoWriteRequest: true,
-            requiresUserDecision: false, reason: 'user cancelled changes',
-        });
-        expect(routed.schedulingState.authorization).to.equal('read_only');
-        expect(routed.schedulingState.phase).to.equal('inspect');
-        expect(executionModeForSchedulingState(routed.schedulingState)).to.equal('explore');
+        expect(noWrite.schedulingState.authorization).to.equal('read_only');
+        expect(noWrite.schedulingState.phase).to.equal('inspect');
+        expect(executionModeForSchedulingState(noWrite.schedulingState)).to.equal('explore');
     });
 
     it('retains deterministic routing when semantic routing is unavailable', () => {
@@ -125,7 +113,6 @@ describe('agent routing', () => {
     });
 
     it('accepts explicit workflow profiles without storing a second state', () => {
-        expect(shouldUseSemanticAgentRouting({ domain: 'paradox', intent: 'plan', strategy: 'single' })).to.equal(false);
         expect(agentProfileCatalog.get('hybrid-agent')?.domain).to.equal('hybrid');
     });
 });

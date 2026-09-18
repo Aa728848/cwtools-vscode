@@ -2060,6 +2060,22 @@ type Server(client: ILanguageClient) =
     let normaliseCachePath (filePath: string) =
         fullPathOr filePath |> PathIdentity.normalize
 
+    /// True when the path lives under a configured vanilla (game install)
+    /// directory. Cached resources lose their "vanilla" scope (it becomes
+    /// "embedded"), so vanilla identity must be path-based.
+    let isVanillaFilePath (filePath: string) =
+        vanillaPathMap
+        |> List.exists (fun (_, getter, _) ->
+            match getter () with
+            | Some root -> PathIdentity.isUnderRoot filePath root
+            | None -> false)
+
+    /// Gate for `errors.vanilla` (off by default): vanilla files are skipped by
+    /// background validation and never publish diagnostics. Never applies when
+    /// the workspace itself is the game folder.
+    let shouldSkipVanillaFile (filePath: string) =
+        not validateVanilla && not isVanillaFolder && isVanillaFilePath filePath
+
     let symbolCorpusMaxEpochRetries = 2
     let documentSymbolCorpusCache = SymbolIndex.SingleFlightCache<int64 * string, SymbolIndex.DocumentSymbol<SymbolKind> list>(128)
     let workspaceScriptCorpusCache = SymbolIndex.SingleFlightCache<int64 * unit, LSP.Types.SymbolInformation list>(1)
@@ -3012,6 +3028,7 @@ type Server(client: ILanguageClient) =
 
     let diagnosticFilter (f: string, d) =
         match (f, d) with
+        | f, _ when shouldSkipVanillaFile f -> false
         | _, { Diagnostic.code = Some code } when Array.contains code ignoreCodes -> false
         | f, _ when Array.contains (Path.GetFileName f) ignoreFiles -> false
         | _, diagnostic
@@ -3103,6 +3120,9 @@ type Server(client: ILanguageClient) =
         |> List.iter client.PublishDiagnostics
 
     let publishFileDiagnostics (filePath: string) (diagnostics: Diagnostic list) =
+        // `errors.vanilla` off: publish empty rather than nothing so stale vanilla
+        // diagnostics from earlier in the session are cleared client-side.
+        let diagnostics = if shouldSkipVanillaFile filePath then [] else diagnostics
         client.PublishDiagnostics { uri = diagnosticUri filePath; diagnostics = diagnostics }
 
     let clearDiagnostics (uri: Uri) =
@@ -6072,7 +6092,15 @@ type Server(client: ILanguageClient) =
                             pathKey, diagnosticInvalidation.TryAdmit(diagnosticDomainForPath filePath, pathKey))
                         |> Map.ofList
                     let batchSize = 30
-                    let batches = fileEntries |> List.chunkBySize batchSize
+                    // `errors.vanilla` off: vanilla game files (the bulk of
+                    // fileEntries) are excluded from the warm-up sweep; they
+                    // remain indexed for navigation and reference resolution.
+                    let validationFileEntries =
+                        fileEntries |> List.filter (fun f -> not (shouldSkipVanillaFile f))
+                    if validationFileEntries.Length <> fileEntries.Length then
+                        logDiag
+                            $"Background validation skips {fileEntries.Length - validationFileEntries.Length} vanilla files (errors.vanilla off)"
+                    let batches = validationFileEntries |> List.chunkBySize batchSize
 
                     client.CustomNotification(
                         "loadingBar",
@@ -6174,29 +6202,39 @@ type Server(client: ILanguageClient) =
                                 else None
 
                             for filePath in fileEntries do
-                                let currentVersion = docs.GetVersionByPath filePath
-                                let isSuperseded =
-                                    (backgroundAdmissionIfCurrent filePath).IsNone
-                                    || match fileDiagnosticStates.TryGetValue filePath with
-                                       | true, prior when prior.epoch > publishEpoch -> true
-                                       | true, prior when DiagnosticMerge.isValidatedDocumentVersionStale prior.validatedVersion currentVersion -> true
-                                       | _ -> false
+                                if shouldSkipVanillaFile filePath then
+                                    // `errors.vanilla` off: never validated, so drop tracking and
+                                    // clear diagnostics published earlier this session.
+                                    match fileDiagnosticStates.TryGetValue filePath with
+                                    | true, prior when not (List.isEmpty prior.diagnostics) ->
+                                        publishFileDiagnostics filePath []
+                                    | _ -> ()
+                                    removeFileDiagnosticState filePath |> ignore
+                                    diagnosticInvalidation.Delete(normaliseCachePath filePath)
+                                else
+                                    let currentVersion = docs.GetVersionByPath filePath
+                                    let isSuperseded =
+                                        (backgroundAdmissionIfCurrent filePath).IsNone
+                                        || match fileDiagnosticStates.TryGetValue filePath with
+                                           | true, prior when prior.epoch > publishEpoch -> true
+                                           | true, prior when DiagnosticMerge.isValidatedDocumentVersionStale prior.validatedVersion currentVersion -> true
+                                           | _ -> false
 
-                                if not isSuperseded then
-                                    let diagnostics =
-                                        diagnosticsByFile
-                                        |> Map.tryFind (normaliseCachePath filePath)
-                                        |> Option.map (List.map snd)
-                                        |> Option.defaultValue []
-                                    publishFileDiagnostics filePath diagnostics
-                                    setFileDiagnosticStateWithSnapshot
-                                        filePath
-                                        publishEpoch
-                                        currentVersion
-                                        bgModelEpoch
-                                        Fresh
-                                        []
-                                        diagnostics
+                                    if not isSuperseded then
+                                        let diagnostics =
+                                            diagnosticsByFile
+                                            |> Map.tryFind (normaliseCachePath filePath)
+                                            |> Option.map (List.map snd)
+                                            |> Option.defaultValue []
+                                        publishFileDiagnostics filePath diagnostics
+                                        setFileDiagnosticStateWithSnapshot
+                                            filePath
+                                            publishEpoch
+                                            currentVersion
+                                            bgModelEpoch
+                                            Fresh
+                                            []
+                                            diagnostics
 
                             diagnosticsByFile
                             |> Map.toSeq
@@ -6373,7 +6411,9 @@ type Server(client: ILanguageClient) =
 
                     let priorityFilePaths =
                         loadedFilePaths
-                        |> List.filter (fun path -> openFileSet.Contains(normaliseCachePath path))
+                        |> List.filter (fun path ->
+                            openFileSet.Contains(normaliseCachePath path)
+                            && not (shouldSkipVanillaFile path))
 
                     let priorityValidationErrors =
                         if priorityFilePaths.IsEmpty then []

@@ -30,4 +30,21 @@ throws<ArgumentNullException> (fun () -> equals "x" null |> ignore) "Current nul
 equal "" (normalize "") "Current empty path"
 equal true (equals "" "") "Current empty equality"
 
+// isUnderRootFor: directory-boundary prefix with platform case semantics.
+equal true (isUnderRootFor Windows @"D:\Games\Stellaris\common\a.txt" @"D:\Games\Stellaris") "Windows child"
+equal true (isUnderRootFor Windows @"d:\games\stellaris\common\a.txt" @"D:\Games\Stellaris") "Windows case folding"
+equal true (isUnderRootFor Windows @"D:\Games\Stellaris\common\a.txt" @"D:\Games\Stellaris\") "Windows trailing slash root"
+equal true (isUnderRootFor Windows "D:/Games/Stellaris/common/a.txt" @"D:\Games\Stellaris") "Windows slash unification"
+equal true (isUnderRootFor Windows @"D:\Games\Stellaris" @"D:\Games\Stellaris") "Windows root equality"
+equal false (isUnderRootFor Windows @"D:\Games\Stellaris2\common\a.txt" @"D:\Games\Stellaris") "Windows sibling prefix rejected"
+equal false (isUnderRootFor Windows @"C:\Elsewhere\a.txt" @"D:\Games\Stellaris") "Windows unrelated rejected"
+equal false (isUnderRootFor Windows @"D:\Games\Stellaris" @"D:\Games\Stellaris\common") "Windows parent rejected"
+equal true (isUnderRootFor Unix "/games/stellaris/common/a.txt" "/games/stellaris") "Unix child"
+equal false (isUnderRootFor Unix "/Games/Stellaris/common/a.txt" "/games/stellaris") "Unix case sensitive"
+equal false (isUnderRootFor Unix "/games/stellaris2/common/a.txt" "/games/stellaris") "Unix sibling prefix rejected"
+equal false (isUnderRootFor Windows @"D:\Games\Stellaris\a.txt" "") "Empty root rejected"
+equal false (isUnderRootFor Unix "/a/b" "/") "Filesystem root rejected"
+throws<ArgumentNullException> (fun () -> isUnderRootFor Windows null "x" |> ignore) "Null path rejected"
+throws<ArgumentNullException> (fun () -> isUnderRootFor Windows "x" null |> ignore) "Null root rejected"
+
 printfn "PathIdentity tests passed"

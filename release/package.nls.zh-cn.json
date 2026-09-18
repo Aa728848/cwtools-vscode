@@ -59,7 +59,7 @@
   "configuration.stellarisLanguageServices.editor.formatIndentOnPaste.description": "粘贴 PDX 代码块时按括号层级自动适配缩进。",
   "configuration.stellarisLanguageServices.localisation.languages.description": "用于验证本地化的语言列表。",
   "configuration.stellarisLanguageServices.localisation.generated_strings.description": "生成缺失本地化字符串时使用的占位符字符串。",
-  "configuration.stellarisLanguageServices.errors.vanilla.description": "是否显示原版文件的错误",
+  "configuration.stellarisLanguageServices.errors.vanilla.description": "是否校验原版（游戏安装目录）文件并显示其错误。默认关闭：后台校验跳过原版文件，且不显示其诊断。",
   "configuration.stellarisLanguageServices.errors.localisationFilter.description": "控制如何过滤 CWTools 本地化诊断。",
   "configuration.stellarisLanguageServices.errors.localisationFilter.enum.off": "不过滤本地化诊断。",
   "configuration.stellarisLanguageServices.errors.localisationFilter.enum.problems": "仅在“问题”面板中隐藏本地化诊断；语言服务器和 AI 诊断查询仍可使用这些诊断。",

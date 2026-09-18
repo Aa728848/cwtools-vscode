@@ -28,3 +28,24 @@ let equals left right = equalsFor currentPlatform left right
 let normalizeLogicalPath (path: string) =
     if isNull path then ""
     else path.Replace('\\', '/').Trim().TrimStart('/').ToLowerInvariant()
+
+/// True when `path` equals `root` or lives under it on a directory boundary.
+/// Slash direction is unified first; case folding follows the platform, so a
+/// root never matches a sibling that merely shares a prefix (".../stellaris2").
+/// An empty/whitespace root matches nothing: the root must be a real directory.
+let isUnderRootFor platform (path: string) (root: string) =
+    if isNull path then nullArg (nameof path)
+    if isNull root then nullArg (nameof root)
+    let unify (value: string) = value.Replace('\\', '/').TrimEnd('/')
+    let unifiedPath, unifiedRoot = unify path, unify root
+    if String.IsNullOrWhiteSpace unifiedRoot then
+        false
+    else
+        let comparison =
+            match platform with
+            | Windows -> StringComparison.OrdinalIgnoreCase
+            | Unix -> StringComparison.Ordinal
+        String.Equals(unifiedPath, unifiedRoot, comparison)
+        || unifiedPath.StartsWith(unifiedRoot + "/", comparison)
+
+let isUnderRoot path root = isUnderRootFor currentPlatform path root

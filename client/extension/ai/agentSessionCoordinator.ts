@@ -1,4 +1,4 @@
-import type { AgentArtifact, AgentSchedulingState, AgentStep } from './types';
+import type { AgentArtifact, AgentIntent, AgentModeOverride, AgentSchedulingState, AgentStep } from './types';
 import { schedulingStateFromAdmission } from './runner/scheduling';
 
 function initialSchedulingState(): AgentSchedulingState {
@@ -28,6 +28,13 @@ export class AgentSessionCoordinator {
     private _schedulingState: AgentSchedulingState = initialSchedulingState();
     private _previousSchedulingState: AgentSchedulingState = initialSchedulingState();
     private _currentWorkflowId: string | null = null;
+    /**
+     * User-selected task mode for this session. 'auto' lets the Agent decide per
+     * request; any other value pins the intent and stops routing from
+     * reclassifying it. Set by /mode, /plan, /execute, /explore, /review and
+     * cleared by /mode auto.
+     */
+    private _modeOverride: AgentModeOverride = 'auto';
     private _liveSteps: AgentStep[] = [];
     private _isGenerating = false;
     private _artifacts = new Map<string, AgentArtifact>();
@@ -40,6 +47,10 @@ export class AgentSessionCoordinator {
 
     get currentWorkflowId(): string | null { return this._currentWorkflowId; }
     set currentWorkflowId(workflowId: string | null) { this._currentWorkflowId = workflowId; }
+
+    /** User-owned task mode. 'auto' means the Agent routes per request. */
+    get modeOverride(): AgentModeOverride { return this._modeOverride; }
+    set modeOverride(mode: AgentModeOverride) { this._modeOverride = mode; }
 
     /**
      * Let a workflow temporarily own the execution profile. Switching directly

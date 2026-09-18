@@ -350,6 +350,23 @@ describe('chat i18n and command helpers', () => {
         expect(suggestSlashCommands('/compcat')[0]?.command).to.equal('/compact');
     });
 
+    it('exposes user-owned task-mode commands that pin the session mode', () => {
+        // /plan, /execute, /explore, /review are the user's escape hatch from
+        // automatic routing; /mode reports or sets any of them.
+        expect(resolveSlashCommand('/plan')?.definition.id).to.equal('modePlan');
+        expect(resolveSlashCommand('/execute')?.definition.id).to.equal('modeExecute');
+        expect(resolveSlashCommand('/explore')?.definition.id).to.equal('modeExplore');
+        expect(resolveSlashCommand('/review')?.definition.id).to.equal('modeReview');
+        expect(resolveSlashCommand('/mode')?.definition.id).to.equal('modeAuto');
+        expect(resolveSlashCommand('/mode plan')?.argument).to.equal('plan');
+        expect(resolveSlashCommand('/mode:explore')?.argument).to.equal('explore');
+        // A pinned mode must outlive the current turn, so it queues rather than
+        // being dropped while the Agent is working.
+        for (const command of ['/plan', '/execute', '/explore', '/review']) {
+            expect(resolveSlashCommand(command)?.definition.duringRun).to.equal('queue');
+        }
+    });
+
     it('publishes explicit completion and running policies from the Host catalog', () => {
         const commands = getSlashCommandDescriptors('en');
         expect(commands.find(command => command.command === '/goal')).to.include({

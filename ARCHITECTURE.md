@@ -208,9 +208,11 @@ Shader edits are conservative because some Effects are called by the executable 
 
 #### Turn routing
 
-The composer selects a capability domain: automatic, Paradox/CWTools, or general coding. Routing resolves the task intent and execution strategy for the turn. Once admitted, a run cannot broaden its domain; profiles, workflows, and child agents may only narrow it.
+The composer selects a capability domain: automatic, Paradox/CWTools, or general coding. The task mode for a turn resolves deterministically from the request (plus an explicit user pin), and no separate routing model is consulted: the Agent itself decides when a request needs user-owned design decisions resolved, and escalates through the `enter_plan_mode` tool. Once admitted, a run cannot broaden its domain; profiles, workflows, and child agents may only narrow it.
 
-Routing uses risk and unresolved user ownership rather than repository reads as the Plan boundary. Execute may perform bounded inspection and validation needed for a concrete requested change in the same run. Plan is reserved for explicit planning, material user-owned choices, or high-impact design that should be reviewed before writes.
+Users can pin a mode for the session with `/plan`, `/execute`, `/explore`, `/review`, or `/mode <value>`; a pinned mode bypasses automatic resolution entirely for later turns.
+
+Plan is the Agent's own escalation, not a classifier's guess. It calls `enter_plan_mode` before its first project write when the user asked for a plan or a materially user-owned choice is still open; that narrows authorization to `plan_write_only` and the per-call plan guard then blocks project writes for the rest of the turn. `exit_plan_mode` leaves Plan without restoring write access, so a model can never bypass the approval it just requested — only the user's approval does that. Bounded repository inspection settles ordinary changes, so Execute remains the default.
 
 `AgentSchedulingState` is the only persisted and host-to-Webview scheduling state. Prompt/tool execution labels such as Build, Plan, or Orchestrator are projections derived at the call boundary and are never restored independently.
 
@@ -499,9 +501,11 @@ CWT-only 工作区只索引当前工作区,不激活游戏模型。候选可用�
 
 #### 单轮路由
 
-输入区选择能力领域：自动、Paradox/CWTools 或通用编码。路由器据此确定当前轮任务意图和执行策略。Run 一旦准入，不能扩大领域；Profile、Workflow 和子 Agent 只能进一步收窄。
+输入区选择能力领域：自动、Paradox/CWTools 或通用编码。当前轮任务模式由请求确定性解析（并可被用户显式钉住），不再调用任何独立路由模型：由 Agent 自己判断何时需要在写入前先解决属于用户的设计决策，并通过 `enter_plan_mode` 工具升级。Run 一旦准入，不能扩大领域；Profile、Workflow 和子 Agent 只能进一步收窄。
 
-Plan 边界由风险和仍属于用户的未决选择决定，而不是由“是否需要读取仓库”决定。面对具体修改请求，Execute 可以在同一轮完成有界调查与验证；只有显式计划请求、重要用户选择或需要写前评审的高影响设计才进入 Plan。
+用户可用 `/plan`、`/execute`、`/explore`、`/review` 或 `/mode <值>` 为整个会话钉住模式；被钉住的模式会让后续轮次完全跳过自动解析。
+
+Plan 是 Agent 自己的升级决策，不是分类器的猜测。当用户明确要求方案，或仍存在属于用户的重大未决选择时，它会在首次项目写入前调用 `enter_plan_mode`：该调用把授权收窄为 `plan_write_only`，随后每次工具调用实时读取该状态的 plan guard 会拦截本回合剩余的项目写入。`exit_plan_mode` 只离开 Plan、不恢复写权限，因此模型无法绕过它刚刚请求的审批——只有用户的批准才能恢复。有界仓库检查足以确定的普通改动保持默认走 Execute。
 
 `AgentSchedulingState` 是唯一会持久化、并在宿主与 Webview 间传递的调度状态。Build、Plan、Orchestrator 等 Prompt/工具执行标签只在调用边界由它派生，不会被独立恢复。
 

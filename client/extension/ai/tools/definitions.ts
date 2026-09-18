@@ -2270,6 +2270,41 @@ const RAW_TOOL_DEFINITIONS: ToolDefinition[] = [
             },
         },
     },
+    // - Task mode control (the Agent decides when planning is warranted) -
+    {
+        type: 'function',
+        function: {
+            name: 'enter_plan_mode',
+            description: 'Switch this turn to Plan mode before making any project change, when a material choice is still user-owned: materially different outcomes, targets, scope, product/gameplay behavior, or architecture; or when the user explicitly asked for a plan or design. Plan mode is read-only for project files: investigate, then produce the complete Implementation Plan and stop for approval. Do NOT use it when the implementation is determined by bounded repository inspection — just do the work. Prefer calling it early, before writing anything.',
+            parameters: {
+                type: 'object',
+                properties: {
+                    reason: {
+                        type: 'string',
+                        description: 'One sentence, in the user\'s language, naming the user-owned decision that blocks direct execution. This becomes the plan card subtitle.',
+                    },
+                },
+                required: ['reason'],
+            },
+        },
+    },
+    {
+        type: 'function',
+        function: {
+            name: 'exit_plan_mode',
+            description: 'Leave Plan mode without an approved plan. Use only when the investigation proved no planning was needed after all (for example the change is trivial and fully determined), so this turn may continue in Execute mode. Never use it to skip approval for a plan you already produced — that plan must go through the approval card.',
+            parameters: {
+                type: 'object',
+                properties: {
+                    reason: {
+                        type: 'string',
+                        description: 'One sentence explaining why planning turned out to be unnecessary.',
+                    },
+                },
+                required: ['reason'],
+            },
+        },
+    },
 ];
 
 const detailedBlueprintTool = RAW_TOOL_DEFINITIONS.find(tool => tool.function.name === 'write_design_blueprint');

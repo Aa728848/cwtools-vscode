@@ -31,7 +31,12 @@ export type SlashCommandId =
     | 'status'
     | 'model'
     | 'reasoning'
-    | 'permissions';
+    | 'permissions'
+    | 'modePlan'
+    | 'modeExecute'
+    | 'modeExplore'
+    | 'modeReview'
+    | 'modeAuto';
 
 export interface SlashCommandDefinition extends Omit<SlashCommandDescriptor, 'description' | 'argumentHint'> {
     id: SlashCommandId;
@@ -112,6 +117,27 @@ const DEFINITIONS: readonly SlashCommandDefinition[] = [
     {
         id: 'permissions', command: '/permissions', argumentMode: 'none', completion: 'execute', duringRun: 'immediate', risk: 'safe', category: 'configuration',
         description: { en: 'Choose the permission profile for this session', zh: '选择当前会话的权限配置' },
+    },
+    {
+        id: 'modeAuto', command: '/mode', argumentMode: 'optional', completion: 'execute', duringRun: 'immediate', risk: 'safe', category: 'configuration', acceptsColonArgument: true,
+        argumentHint: { en: '[auto|plan|execute|explore|review]', zh: '[auto|plan|execute|explore|review]' },
+        description: { en: 'Set this session task mode (default auto: the Agent decides per request)', zh: '设置当前会话的任务模式（默认 auto：由 Agent 按请求自行判断）' },
+    },
+    {
+        id: 'modePlan', command: '/plan', argumentMode: 'none', completion: 'execute', duringRun: 'queue', risk: 'safe', category: 'configuration',
+        description: { en: 'Force Plan mode: investigate and produce a plan for approval', zh: '强制进入计划模式：调研并产出待批准的计划' },
+    },
+    {
+        id: 'modeExecute', command: '/execute', argumentMode: 'none', completion: 'execute', duringRun: 'queue', risk: 'safe', category: 'configuration',
+        description: { en: 'Force Execute mode: apply changes directly', zh: '强制进入执行模式：直接应用改动' },
+    },
+    {
+        id: 'modeExplore', command: '/explore', argumentMode: 'none', completion: 'execute', duringRun: 'queue', risk: 'safe', category: 'configuration',
+        description: { en: 'Force Explore mode: read-only investigation', zh: '强制进入探索模式：只读调研' },
+    },
+    {
+        id: 'modeReview', command: '/review', argumentMode: 'none', completion: 'execute', duringRun: 'queue', risk: 'safe', category: 'configuration',
+        description: { en: 'Force Review mode: read-only audit and diagnosis', zh: '强制进入审查模式：只读审计与诊断' },
     },
 ] as const;
 

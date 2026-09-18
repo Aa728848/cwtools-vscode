@@ -63,10 +63,24 @@ const PARADOX_DISPATCH_AUTHORING_GUIDANCE = `### Structured dispatch preflight f
 - Before each call, check the current scheduler profile's allowed child profiles and wave-size limit, then cross-check task IDs, files, entity contracts, dependencies, and acceptance checks as one payload. Read-only discovery waves stay free of writer profiles and write intent.
 - User scope is authoritative. If the user retains localisation work or explicitly ignores warnings, encode that decision in \`userConstraints\`; never create a localisation task for user-owned work. Error-severity diagnostics remain blocking even when warnings are ignored.`;
 
+/**
+ * Plan escalation: the Agent, not a routing classifier, decides when a request
+ * needs user-owned design decisions resolved before any write. Shared by every
+ * mode that can write, because that is exactly when it matters.
+ */
+const PLAN_ESCALATION_RULE = `## Plan Escalation (enter_plan_mode)
+You decide whether planning is needed; nothing routes you into it. Call \`enter_plan_mode({ reason })\` **before your first project write** when either:
+- the user explicitly asked for a plan, design, proposal, or blueprint; or
+- a materially user-owned choice is still open — different outcomes, targets, scope, product/gameplay behavior, or architecture, with no defensible default.
+
+Plan mode blocks project writes; investigate with read-only tools, then produce the complete Implementation Plan and stop for the approval card. The user approves (which resumes execution) or annotates it for revision.
+
+Do **not** escalate when bounded repository inspection settles the implementation — locate the symbols, read the surrounding code, then just make the change. Do not use \`exit_plan_mode\` to escape an approval you already requested: it never restores write access, and only the user's approval does.`;
+
 function generalRules(isSlim: boolean): string {
     return isSlim
         ? `${SLIM_PROCESS_VISIBILITY_RULE}\n${SLIM_UTILITY_SUB_AGENT_RULE}`
-        : `${LANGUAGE_MIRRORING_RULE}\n${PROCESS_VISIBILITY_RULE}\n${GENERAL_ARCHITECTURE_RULE}`;
+        : `${LANGUAGE_MIRRORING_RULE}\n${PROCESS_VISIBILITY_RULE}\n${GENERAL_ARCHITECTURE_RULE}\n\n${PLAN_ESCALATION_RULE}`;
 }
 
 export function buildGeneralCodingSystemPrompt(isSlim: boolean = false): string {
@@ -197,7 +211,7 @@ Do not modify project files directly. Build a bounded dependency graph, dispatch
 export function buildBuildSystemPrompt(gameKnowledge: string, gameName: string, isSlim: boolean = false): string {
     const rules = isSlim
         ? `${SLIM_PROCESS_VISIBILITY_RULE}\n${SLIM_SUB_AGENT_RULE}`
-        : `${LANGUAGE_MIRRORING_RULE}\n${PROCESS_VISIBILITY_RULE}\n${CODE_COMPLIANCE_RULE}\n${ARCHITECTURE_VISUALIZATION_RULE}`;
+        : `${LANGUAGE_MIRRORING_RULE}\n${PROCESS_VISIBILITY_RULE}\n${CODE_COMPLIANCE_RULE}\n${ARCHITECTURE_VISUALIZATION_RULE}\n\n${PLAN_ESCALATION_RULE}`;
 
     const executionContract = isSlim
         ? `## Slim Build Contract

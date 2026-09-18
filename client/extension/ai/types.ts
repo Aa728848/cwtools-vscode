@@ -54,6 +54,12 @@ export type {
 };
 export type AgentDomain = import('../../shared/agentSchedulingProtocol').AgentRuntimeDomain;
 export type AgentIntent = 'auto' | 'execute' | 'plan' | 'explore' | 'review';
+/**
+ * User-owned task mode for a session. Identical to AgentIntent; named
+ * separately so a session-level user pin is never confused with the intent of
+ * one turn.
+ */
+export type AgentModeOverride = AgentIntent;
 export type AgentExecutionStrategy = 'auto' | 'single' | 'multi';
 
 export interface AdmissionDecision {

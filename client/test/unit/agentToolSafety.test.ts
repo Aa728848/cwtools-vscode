@@ -2059,6 +2059,65 @@ describe('agent tool progress and aborts', () => {
         expect(result.error).to.include('explore, planner, reviewer');
     });
 
+    it('enter_plan_mode narrows the shared scheduling state and blocks later writes', async () => {
+        const executor = createExecutor();
+        // Copy the shared fixture: the mode tools mutate the scheduling state that
+        // the per-call guards read, and a shared object would leak across tests.
+        const runnerOptions = { schedulingState: { ...PARADOX_WRITE } } as any;
+
+        const entered = await executor.execute('enter_plan_mode', {
+            reason: 'the target file set is a user-owned choice',
+        }, { runnerOptions } as any) as any;
+
+        expect(entered.success).to.equal(true);
+        expect(entered.phase).to.equal('plan');
+        // Narrowing only: the plan phase may write just the plan artifact.
+        expect(runnerOptions.schedulingState.phase).to.equal('plan');
+        expect(runnerOptions.schedulingState.authorization).to.equal('plan_write_only');
+        // The guard reads this state per call, so an ordinary project write is
+        // rejected immediately in the same turn.
+        const blocked = await executor.execute('write_file', {
+            filePath: path.join(workspaceRoot, 'events', 'blocked.txt'),
+            content: 'nope',
+        }, { runnerOptions } as any) as any;
+        expect(blocked.success).to.equal(false);
+        expect(blocked.planModeBlocked).to.equal(true);
+    });
+
+    it('enter_plan_mode requires a reason and is idempotent while active', async () => {
+        const executor = createExecutor();
+        // Copy the shared fixture: the mode tools mutate the scheduling state that
+        // the per-call guards read, and a shared object would leak across tests.
+        const runnerOptions = { schedulingState: { ...PARADOX_WRITE } } as any;
+        const missing = await executor.execute('enter_plan_mode', {}, { runnerOptions } as any) as any;
+        expect(missing.success).to.equal(false);
+        expect(missing.error).to.include('requires a reason');
+
+        await executor.execute('enter_plan_mode', { reason: 'ambiguous scope' }, { runnerOptions } as any);
+        const again = await executor.execute('enter_plan_mode', { reason: 'ambiguous scope' }, { runnerOptions } as any) as any;
+        expect(again.success).to.equal(true);
+        expect(again.alreadyActive).to.equal(true);
+    });
+
+    it('exit_plan_mode leaves plan mode but never widens authorization', async () => {
+        const executor = createExecutor();
+        // Copy the shared fixture: the mode tools mutate the scheduling state that
+        // the per-call guards read, and a shared object would leak across tests.
+        const runnerOptions = { schedulingState: { ...PARADOX_WRITE } } as any;
+        // Not valid outside plan mode.
+        const outside = await executor.execute('exit_plan_mode', { reason: 'nothing to plan' }, { runnerOptions } as any) as any;
+        expect(outside.success).to.equal(false);
+        expect(outside.error).to.include('only valid while Plan mode is active');
+
+        await executor.execute('enter_plan_mode', { reason: 'looked risky' }, { runnerOptions } as any);
+        const exited = await executor.execute('exit_plan_mode', { reason: 'turned out trivial' }, { runnerOptions } as any) as any;
+        expect(exited.success).to.equal(true);
+        expect(runnerOptions.schedulingState.phase).to.equal('inspect');
+        // A model must never talk itself out of the approval gate, so writes stay
+        // blocked until the user approves through the card.
+        expect(runnerOptions.schedulingState.authorization).to.equal('plan_write_only');
+    });
+
     it('routes a dispatch_agents call with a member roster into peer-team mode', async () => {
         const executor = createExecutor();
         // A roster instead of tasks selects the team path; the roster is then

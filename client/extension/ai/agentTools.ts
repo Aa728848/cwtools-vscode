@@ -95,6 +95,7 @@ import { canonicalPathKey } from './workspacePaths';
 import { agentProfileCatalog } from './runner/agentProfileCatalog';
 import { isMcpServerAllowedForDomain } from './mcpCapability';
 import {
+    AUTHORITY_RANK,
     authorizationAllowsEffect,
     evaluateDispatchAdmission,
     executionModeForSchedulingState,
@@ -2797,6 +2798,14 @@ export class AgentToolExecutor {
             }
             case 'cancel_dispatch': {
                 result = this.executeCancelDispatch(args, context);
+                break;
+            }
+            case 'enter_plan_mode': {
+                result = this.executeEnterPlanMode(args, context);
+                break;
+            }
+            case 'exit_plan_mode': {
+                result = this.executeExitPlanMode(args, context);
                 break;
             }
 
@@ -5557,6 +5566,115 @@ export class AgentToolExecutor {
             ErrorReporter.debug('AgentTeams', 'Team outcome persistence failed: ' + (error instanceof Error ? error.message : String(error)));
             return false;
         }
+    }
+
+    /**
+     * Execute enter_plan_mode: narrow this turn to Plan before any project
+     * change. Planning is the safe direction — authorization only ever narrows
+     * here (workspace_write -> plan_write_only) — and the transition is applied
+     * to the shared runner scheduling state, so the per-call plan guard and the
+     * post-run durable state both observe it immediately.
+     */
+    private executeEnterPlanMode(args: Record<string, unknown>, context?: import('./types').AgentToolContext): unknown {
+        const runnerState = context?.runnerOptions?.schedulingState;
+        if (!runnerState) {
+            return { success: false, error: 'enter_plan_mode requires an active scheduler context.' };
+        }
+        const reason = typeof args.reason === 'string' ? args.reason.trim().slice(0, 400) : '';
+        if (!reason) {
+            return { success: false, error: 'enter_plan_mode requires a reason naming the user-owned decision.' };
+        }
+        if (runnerState.phase === 'plan') {
+            return {
+                success: true,
+                alreadyActive: true,
+                message: aiText(
+                    'Plan mode is already active for this turn. Investigate and produce the complete Implementation Plan, then stop for approval.',
+                    '本回合已处于计划模式。请完成调研并产出完整的 Implementation Plan，然后停止等待批准。',
+                ),
+            };
+        }
+        // Narrowing only. transitionSchedulingState itself refuses to widen, so
+        // the explicit rank check documents the invariant at this boundary too.
+        const next = transitionSchedulingState(runnerState, {
+            phase: 'plan',
+            authorization: 'plan_write_only',
+            reason: 'agent entered plan mode: ' + reason,
+        });
+        if (AUTHORITY_RANK[next.authorization] > AUTHORITY_RANK[runnerState.authorization]) {
+            return { success: false, error: 'enter_plan_mode cannot widen authorization.' };
+        }
+        // execute() hands each call a COPY of runnerOptions whose schedulingState
+        // field points at the runner's live state object. Assigning to
+        // context.runnerOptions would only swap the reference inside that copy,
+        // so patch the live object in place: the per-call plan guard reads it and
+        // the runner keeps the same reference for its durable phase.
+        Object.assign(runnerState, next);
+        context?.runnerOptions?.runEventSink?.appendSoon('phase_changed', {
+            previousPhase: runnerState.phase,
+            state: next,
+            enteredBy: 'enter_plan_mode',
+            reason,
+        }, { status: 'done' });
+        return {
+            success: true,
+            phase: 'plan',
+            authorization: next.authorization,
+            message: aiText(
+                'Plan mode is active from the next step. Project writes are blocked; the only allowed write is the topic-scoped Implementation Plan artifact. Investigate first, then produce the complete plan and stop for approval.',
+                '计划模式将从下一步生效。项目写入被阻止，唯一允许的写入是话题范围内的 Implementation Plan 产物。请先完成调研，再产出完整计划并停止等待批准。',
+            ),
+            reason,
+        };
+    }
+
+    /**
+     * Execute exit_plan_mode: leave Plan without an approved plan, for the case
+     * where investigation proved planning unnecessary. Widening back to
+     * workspace_write is deliberately NOT done here: the approval path
+     * (beginApprovedPlanExecution) owns that, so a model can never talk itself
+     * out of the approval gate it just entered.
+     */
+    private executeExitPlanMode(args: Record<string, unknown>, context?: import('./types').AgentToolContext): unknown {
+        const runnerState = context?.runnerOptions?.schedulingState;
+        if (!runnerState) {
+            return { success: false, error: 'exit_plan_mode requires an active scheduler context.' };
+        }
+        const reason = typeof args.reason === 'string' ? args.reason.trim().slice(0, 400) : '';
+        if (runnerState.phase !== 'plan') {
+            return {
+                success: false,
+                error: aiText(
+                    'exit_plan_mode is only valid while Plan mode is active.',
+                    'exit_plan_mode 仅在计划模式生效期间可用。',
+                ),
+            };
+        }
+        // Authorization stays exactly as-is (plan_write_only). The turn may keep
+        // investigating and report findings, but it cannot start writing project
+        // files: only an explicit user approval widens the authorization again.
+        const next = transitionSchedulingState(runnerState, {
+            phase: 'inspect',
+            reason: 'agent left plan mode without an approved plan: ' + (reason || 'not needed'),
+        });
+        // In place for the same reason as enter_plan_mode: the call context holds
+        // a per-call copy, but the state object inside it is the runner's own.
+        Object.assign(runnerState, next);
+        context?.runnerOptions?.runEventSink?.appendSoon('phase_changed', {
+            previousPhase: runnerState.phase,
+            state: next,
+            enteredBy: 'exit_plan_mode',
+            reason,
+        }, { status: 'done' });
+        return {
+            success: true,
+            phase: 'inspect',
+            authorization: next.authorization,
+            message: aiText(
+                'Plan mode ended. Project writes remain blocked for this turn because no plan was approved; report your findings and what you would do, then let the user decide.',
+                '计划模式已结束。由于没有计划获得批准，本回合项目写入仍被阻止；请报告你的发现和建议的做法，然后交由用户决定。',
+            ),
+        };
     }
 
     /**

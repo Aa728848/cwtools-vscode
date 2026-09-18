@@ -11,7 +11,8 @@ import type {
     ToolEffect,
 } from '../types';
 
-const AUTHORITY_RANK: Record<AgentAuthorization, number> = {
+/** Monotone authorization ladder. Transitions may narrow, never widen. */
+export const AUTHORITY_RANK: Record<AgentAuthorization, number> = {
     read_only: 0,
     plan_write_only: 1,
     workspace_write: 2,

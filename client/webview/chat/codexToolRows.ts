@@ -110,7 +110,8 @@ export function renderActivityRow(event: CodexActivityEvent, options: CodexRende
     const detail = event.detail ? `<span class="codex-activity-detail">${escapeHtml(event.detail)}</span>` : '';
     const invocationAttr = event.invocationId ? ` data-invocation-id="${escapeHtml(event.invocationId)}"` : '';
     const toolAttr = event.toolName ? ` data-tool-name="${escapeHtml(event.toolName)}"` : '';
-    const nestedClass = nested ? ' codex-activity-child-row' : '';
+    const subcallClass = event.subcall ? ' codex-activity-subcall' : '';
+    const nestedClass = (nested && !event.subcall) ? ' codex-activity-child-row' : '';
     const details = renderActivityDetails(event, options);
     const detailsClass = details ? ' codex-activity-row-collapsed' : '';
     const summaryTag = details ? 'button' : 'div';
@@ -118,7 +119,7 @@ export function renderActivityRow(event: CodexActivityEvent, options: CodexRende
         ? ' type="button" data-codex-activity-row-toggle aria-expanded="false"'
         : '';
     const disclosure = details ? '<span class="codex-activity-disclosure" aria-hidden="true">›</span>' : '';
-    return `<div class="codex-activity-row${nestedClass}${detailsClass} codex-activity-${event.kind} codex-status-${event.status}" data-activity-id="${escapeHtml(event.id)}" data-activity-kind="${escapeHtml(event.kind)}"${invocationAttr}${toolAttr}>
+    return `<div class="codex-activity-row${nestedClass}${subcallClass}${detailsClass} codex-activity-${event.kind} codex-status-${event.status}" data-activity-id="${escapeHtml(event.id)}" data-activity-kind="${escapeHtml(event.kind)}"${invocationAttr}${toolAttr}>
         <${summaryTag}${summaryAttrs} class="codex-activity-summary${details ? ' codex-activity-row-toggle' : ''}">
             <span class="codex-activity-icon">${svgIconNoMargin(iconNameFor(event))}</span>
             <span class="codex-activity-main">

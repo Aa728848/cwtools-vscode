@@ -300,6 +300,8 @@ export interface AIProviderUserConfig {
     hasKey?: boolean;
 }
 
+export type ToolPresentationMode = 'ptc' | 'native' | 'hybrid';
+
 export interface AIUserConfig {
     enabled: boolean;
     provider: string;
@@ -316,6 +318,8 @@ export interface AIUserConfig {
     maxContextTokens: number;
     /** Agent file write mode */
     agentFileWriteMode: 'confirm' | 'auto';
+    /** Tool invocation presentation: 'ptc' (Programmatic Tool Calling), 'native' (Standard Function Calling), or 'hybrid' (both). */
+    toolPresentationMode: ToolPresentationMode;
     /** Reasoning effort / thinking mode selected for the active model. */
     reasoningEffort: ReasoningEffort;
     /** Visible-answer detail for the Codex ChatGPT subscription provider. */
@@ -2329,6 +2333,10 @@ export interface AgentStep {
     uiState?: 'pending' | 'approved';
     /** A tool row emitted while the provider is still streaming its call arguments. */
     streamingPreview?: boolean;
+    /** Subcall metadata for nested tool calls executed inside run_code (PTC mode). */
+    subcall?: boolean;
+    /** Name of the parent container tool (typically 'run_code'). */
+    parentToolName?: string;
 }
 
 import type {
@@ -2410,6 +2418,8 @@ export interface ChatTopic {
     workflowId?: string;
     /** Scheduler state to restore when the active workflow is disabled. */
     workflowReturnSchedulingState?: AgentSchedulingState;
+    /** Tool invocation presentation mode chosen for this topic: 'ptc' or 'native'. Locked once conversation starts. */
+    toolPresentationMode?: ToolPresentationMode;
 }
 
 export interface TopicSummary {
@@ -2424,6 +2434,7 @@ export interface TopicSummary {
     messageCount?: number;
     parentTopicId?: string;
     forkedFromMessageIndex?: number;
+    toolPresentationMode?: ToolPresentationMode;
 }
 
 export type TopicListItem = TopicSummary;
@@ -2439,6 +2450,7 @@ export interface TopicStats {
     archived: number;
     currentTopicId?: string | null;
     currentTopicTitle?: string | null;
+    currentTopicToolPresentationMode?: ToolPresentationMode | null;
 }
 
 export interface ChatHistoryMessage {
@@ -2605,6 +2617,7 @@ export type WebViewMessage =
     | { type: 'quickChangeModel'; model: string }
     | { type: 'quickChangeReasoningEffort'; effort: ReasoningEffort }
     | { type: 'quickChangeWriteMode'; mode: 'confirm' | 'auto' | 'auto_review' | 'full' }
+    | { type: 'quickChangeToolPresentationMode'; mode: ToolPresentationMode }
     | { type: 'slashCommand'; command: string }
     | { type: 'permissionResponse'; permissionId: string; decision?: PermissionDecision; allowed?: boolean; alwaysAllow?: boolean }
     | { type: 'questionResponse'; questionId: string; answers?: Record<string, string | string[]>; cancelled?: boolean }
@@ -2653,7 +2666,7 @@ export type HostMessage =
     | { type: 'generationError'; error: string; canResume?: boolean }
     | { type: 'insertSelectionReference'; relPath: string; startLine: number; endLine: number }
     | { type: 'topicList'; topics: TopicSummary[]; stats?: TopicStats }
-    | { type: 'loadTopicMessages'; messages: ChatHistoryMessage[]; targetSurface?: 'chat' | 'manager' }
+    | { type: 'loadTopicMessages'; messages: ChatHistoryMessage[]; toolPresentationMode?: ToolPresentationMode; targetSurface?: 'chat' | 'manager' }
     | { type: 'streamToken'; token: string }
     | { type: 'clearChat'; targetSurface?: 'chat' | 'manager' }
     | { type: 'workflowList'; workflows: WorkflowView[]; currentWorkflowId?: string | null; labels?: WorkflowUiLabels }
@@ -2677,6 +2690,7 @@ export type HostMessage =
     | { type: 'questionResolved'; questionId: string; cancelled?: boolean }
     | { type: 'floatingCardResolved'; card: 'permission' | 'question' | 'write' | 'plan' | 'walkthrough' | 'blueprint'; id?: string }
     | { type: 'setSchedulingState'; schedulingState: AgentSchedulingState }
+    | { type: 'setToolPresentationMode'; mode: ToolPresentationMode; locked: boolean }
     /** Replay all AI steps accumulated while the panel was hidden; isGenerating=true means still running */
     | { type: 'replaySteps'; steps: AgentStep[]; isGenerating: boolean }
     /** Plan file saved to disk — tells webview to show the Open/Submit card */
@@ -2760,6 +2774,8 @@ export interface PanelSettings {
     customApiFormat?: CustomApiFormat;
     maxContextTokens: number;
     agentFileWriteMode: 'confirm' | 'auto';
+    /** Tool presentation mode: 'ptc' (Programmatic Tool Calling) or 'native' (Standard Function Calling). */
+    toolPresentationMode?: ToolPresentationMode;
     /** Approval reviewer: 'user' shows cards; 'auto_review' routes to the read-only LLM reviewer first. */
     approvals?: { reviewer?: 'user' | 'auto_review' };
     /** Mirror of stellarisLanguageServices.ai.developer.disableSecuritySandbox — the 'full' write tier. */

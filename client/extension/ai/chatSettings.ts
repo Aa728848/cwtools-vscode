@@ -344,6 +344,7 @@ export class ChatSettingsManager {
             customApiFormat: config.customApiFormat,
             maxContextTokens: config.maxContextTokens,
             agentFileWriteMode: sessionFileWriteMode(getProjectWorkspaceRoot()) ?? config.agentFileWriteMode,
+            toolPresentationMode: config.toolPresentationMode,
             approvals: {
                 reviewer: sessionApprovalsReviewer(getProjectWorkspaceRoot())
                     ?? vs.workspace.getConfiguration('stellarisLanguageServices.ai').get<'user' | 'auto_review'>('approvals.reviewer', 'user'),
@@ -575,6 +576,10 @@ export class ChatSettingsManager {
         }
         await cfg.update('maxContextTokens', effectiveMaxContextTokens, vs.ConfigurationTarget.Global);
         await cfg.update('agentFileWriteMode', settings.agentFileWriteMode, vs.ConfigurationTarget.Global);
+        if (settings.toolPresentationMode) {
+            await cfg.update('toolPresentationMode', settings.toolPresentationMode, vs.ConfigurationTarget.Global);
+            this.aiService.setToolPresentationModeOverride(settings.toolPresentationMode);
+        }
         if (settings.approvals?.reviewer) {
             await cfg.update('approvals.reviewer', settings.approvals.reviewer, vs.ConfigurationTarget.Global);
         }

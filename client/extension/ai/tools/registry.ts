@@ -406,7 +406,7 @@ const ASSET_TOOLS = new Set<AgentToolName>([
     'find_sprite_candidates', 'find_sound_candidates',
 ]);
 const ALWAYS_DISCLOSED_TOOLS = new Set<AgentToolName>([
-    'ask_user_question', 'todo_write', 'read_file', 'grep', 'manage_goal', 'select_tools',
+    'ask_user_question', 'todo_write', 'read_file', 'grep', 'manage_goal', 'select_tools', 'run_code',
 ]);
 const WRITE_TOOLS_SET = new Set<string>([...EDIT, 'deploy_mod_asset', 'git_ops']);
 const SUB_AGENT_EXCLUDES_SET = new Set<string>([

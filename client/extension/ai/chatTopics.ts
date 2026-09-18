@@ -8,7 +8,7 @@
 import * as vs from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
-import type { AgentModeOverride, ChatTopic, ChatHistoryMessage, HostMessage, ChatMessage } from './types';
+import type { AgentModeOverride, ChatTopic, ChatHistoryMessage, HostMessage, ChatMessage, ToolPresentationMode } from './types';
 import { UI, aiText, getAiMessageLocale } from './messages';
 import { getPrivateAiStorageRoot, getProjectWorkspaceRoot } from './workspacePaths';
 import { normalizeSchedulingState } from './runner/scheduling';
@@ -70,6 +70,9 @@ function readStoredTopic(value: unknown): ChatTopic | undefined {
         workspaceLabel: typeof value.workspaceLabel === 'string' ? value.workspaceLabel : undefined,
         schedulingState,
         modeOverride: readModeOverride(value.modeOverride),
+        toolPresentationMode: (value.toolPresentationMode === 'ptc' || value.toolPresentationMode === 'native' || value.toolPresentationMode === 'hybrid')
+            ? value.toolPresentationMode
+            : undefined,
         approvedPlanArtifact: typeof value.approvedPlanArtifact === 'string' && value.approvedPlanArtifact
             ? value.approvedPlanArtifact
             : undefined,
@@ -145,7 +148,7 @@ export class ChatTopicManager {
 
     // ─── Topic CRUD ──────────────────────────────────────────────────────────
 
-    createNewTopic(firstMessage: string, schedulingState: ChatTopic['schedulingState']): void {
+    createNewTopic(firstMessage: string, schedulingState: ChatTopic['schedulingState'], toolPresentationMode?: ToolPresentationMode): void {
         const title = firstMessage.substring(0, 40) + (firstMessage.length > 40 ? '...' : '');
         const workspaceLabel = activeWorkspaceLabel();
         this.currentTopic = {
@@ -157,6 +160,7 @@ export class ChatTopicManager {
             workspaceId: workspaceLabel,
             workspaceLabel,
             schedulingState: normalizeSchedulingState(schedulingState),
+            toolPresentationMode,
         };
         this.topics.unshift(this.currentTopic);
         this.sendTopicList();
@@ -185,7 +189,7 @@ export class ChatTopicManager {
             }));
 
         this.postMessage({ type: 'clearChat' });
-        this.postMessage({ type: 'loadTopicMessages', messages: webviewMessages ?? topic.messages });
+        this.postMessage({ type: 'loadTopicMessages', messages: webviewMessages ?? topic.messages, toolPresentationMode: topic.toolPresentationMode });
         this.sendTopicList();
         return conversationMessages;
     }
@@ -240,6 +244,7 @@ export class ChatTopicManager {
             // A fork inherits the parent's pinned mode: the user's choice was
             // about how this work is done, not about one particular topic id.
             modeOverride: readModeOverride(source.modeOverride),
+            toolPresentationMode: source.toolPresentationMode,
             workspaceId: source.workspaceId,
             workspaceLabel: source.workspaceLabel,
             workflowId: source.workflowId,
@@ -330,6 +335,7 @@ export class ChatTopicManager {
                 messageCount: t.messages.length,
                 parentTopicId: t.parentTopicId,
                 forkedFromMessageIndex: t.forkedFromMessageIndex,
+                toolPresentationMode: t.toolPresentationMode,
             })),
             stats: {
                 total: this.topics.length,
@@ -337,6 +343,7 @@ export class ChatTopicManager {
                 archived: archivedCount,
                 currentTopicId: this.currentTopic?.id ?? null,
                 currentTopicTitle: this.currentTopic?.title ?? null,
+                currentTopicToolPresentationMode: this.currentTopic?.toolPresentationMode ?? null,
             },
         });
     }
@@ -581,6 +588,9 @@ export class ChatTopicManager {
                 messages: data.messages as ChatHistoryMessage[],
                 archived: false,
                 schedulingState,
+                toolPresentationMode: (data.toolPresentationMode === 'ptc' || data.toolPresentationMode === 'native' || data.toolPresentationMode === 'hybrid')
+                    ? data.toolPresentationMode
+                    : undefined,
                 workflowId: typeof data.workflowId === 'string' ? data.workflowId : undefined,
                 workflowReturnSchedulingState: readSchedulingState(data.workflowReturnSchedulingState),
             };

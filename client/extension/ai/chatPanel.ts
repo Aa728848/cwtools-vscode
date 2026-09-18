@@ -38,6 +38,7 @@ import type {
     AgentModeOverride,
     ResolvedSchedulingDecision,
     TodoUpdateScope,
+    ToolPresentationMode,
 } from './types';
 import { contentToString } from './types';
 import { AgentRunner } from './agentRunner';
@@ -196,6 +197,23 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
     public topicManager!: ChatTopicManager;
     public settingsManager!: ChatSettingsManager;
     public contextReferences: ContextReferenceManager;
+    public pendingToolPresentationMode: ToolPresentationMode | null = null;
+
+    public setToolPresentationMode(mode: ToolPresentationMode): void {
+        this.pendingToolPresentationMode = mode;
+        this.aiService.setToolPresentationModeOverride(mode);
+        const currentTopic = this.topicManager.currentTopic;
+        if (currentTopic && currentTopic.messages.length === 0) {
+            currentTopic.toolPresentationMode = mode;
+            this.topicManager.saveTopics();
+            this.topicManager.sendTopicList();
+        }
+        this.postMessage({
+            type: 'setToolPresentationMode',
+            mode,
+            locked: (currentTopic?.messages.length ?? 0) > 0,
+        });
+    }
 
     private get currentMode(): AgentMode {
         return executionModeForSchedulingState(this.session.schedulingState);
@@ -369,8 +387,16 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         // 1. Restore persisted topic messages with compacted step payloads.
         // Full tool/result history can grow large enough to block WebView startup.
         if (this.topicManager.currentTopic && this.topicManager.currentTopic.messages.length > 0) {
-            send({ type: 'loadTopicMessages', messages: compactMessagesForWebview(this.topicManager.currentTopic.messages), targetSurface });
+            send({ type: 'loadTopicMessages', messages: compactMessagesForWebview(this.topicManager.currentTopic.messages), toolPresentationMode: this.topicManager.currentTopic.toolPresentationMode, targetSurface });
         }
+        const activeTopicMode = this.topicManager.currentTopic?.toolPresentationMode
+            ?? this.pendingToolPresentationMode
+            ?? this.aiService.getConfig().toolPresentationMode;
+        send({
+            type: 'setToolPresentationMode',
+            mode: activeTopicMode,
+            locked: (this.topicManager.currentTopic?.messages.length ?? 0) > 0,
+        });
         // 2. Restore the canonical scheduler state.
         send({ type: 'setSchedulingState', schedulingState: this.session.schedulingState });
         send({ type: 'slashCommandList', commands: getSlashCommandDescriptors(vs.env.language) });
@@ -1013,9 +1039,13 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         const visibleUserText = displayText ?? text;
 
         if (!this.topicManager.currentTopic) {
-            this.topicManager.createNewTopic(visibleUserText, schedulingState);
+            const initialMode = this.pendingToolPresentationMode ?? config.toolPresentationMode;
+            this.topicManager.createNewTopic(visibleUserText, schedulingState, initialMode);
         }
         if (this.topicManager.currentTopic) {
+            if (!this.topicManager.currentTopic.toolPresentationMode) {
+                this.topicManager.currentTopic.toolPresentationMode = this.pendingToolPresentationMode ?? config.toolPresentationMode;
+            }
             this.topicManager.currentTopic.schedulingState = schedulingState;
             // Keep the topic's persisted mode in step with the session pin so a
             // reload restores exactly what the user chose.
@@ -1172,6 +1202,9 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                     providerId: config.provider,
                     model: this.aiService.getConfig().model || undefined,
                     reasoningEffort: config.reasoningEffort,
+                    toolPresentationMode: this.topicManager.currentTopic?.toolPresentationMode
+                        ?? this.pendingToolPresentationMode
+                        ?? config.toolPresentationMode,
                     streaming: true,  // Enable typewriter text effect
                     topicId: runTopicId,
                     onStep: (step) => {
@@ -2465,6 +2498,13 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         this._messageFileSnapshots.clear();
         this._currentMessageSnapshots = null;
         this.clearArtifacts();
+        this.pendingToolPresentationMode = null;
+        this.aiService.setToolPresentationModeOverride(null);
+        this.postMessage({
+            type: 'setToolPresentationMode',
+            mode: this.aiService.getConfig().toolPresentationMode,
+            locked: false,
+        });
         this.postMessage({ type: 'setSchedulingState', schedulingState: this.session.schedulingState });
         this.sendWorkflowState();
     }
@@ -2488,6 +2528,12 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         this.session.previousSchedulingState = topic?.workflowReturnSchedulingState
             ? normalizeSchedulingState(topic.workflowReturnSchedulingState)
             : this.session.schedulingState;
+        const effectiveTopicMode = topic?.toolPresentationMode ?? this.aiService.getConfig().toolPresentationMode;
+        this.postMessage({
+            type: 'setToolPresentationMode',
+            mode: effectiveTopicMode,
+            locked: (topic?.messages.length ?? 0) > 0,
+        });
         this.postMessage({ type: 'setSchedulingState', schedulingState: this.session.schedulingState });
         this.sendWorkflowState();
         void this.agentRuntime.resumeThread(topicId, topicId).catch(() => undefined);

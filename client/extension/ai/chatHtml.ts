@@ -73,6 +73,10 @@ ${stylesheetLinks}
             <button class="current-topic-title" id="currentTopicTitle" type="button">${t('New topic', '新话题')}</button>
             <button class="current-topic-rename" id="currentTopicRename" type="button" title="${t('Rename current topic', '重命名当前话题')}" aria-label="${t('Rename current topic', '重命名当前话题')}">${svgIconNoMargin('edit')}</button>
         </div>
+        <div class="header-mode-badge mode-ptc" id="headerModeBadge" title="${t('Current tool presentation mode (locked after first turn)', '当前工具调用模式（对话开始后锁定）')}">
+            <span class="header-mode-icon" aria-hidden="true">${svgIconNoMargin('code')}</span>
+            <span id="headerModeBadgeText">PTC</span>
+        </div>
     </div>
     <div class="header-actions">
         <button class="icon-btn" id="btnNewTopic" title="${t('New topic', '新话题')}" aria-label="${t('Create new chat topic', '新建对话话题')}">${svgIconNoMargin('plus')}</button>
@@ -184,7 +188,33 @@ ${stylesheetLinks}
         <div class="model-menu-title" id="writeModeMenuTitle">${t('Permission profile', '权限配置')}</div>
         <div id="writeModeMenuList" class="model-menu-list"></div>
     </div>
+    <div id="preflightModeMenu" class="model-menu" aria-hidden="true">
+        <div class="model-menu-title">${t('Tool presentation mode', '工具调用模式')}</div>
+        <div id="preflightModeMenuList" class="model-menu-list" role="listbox">
+            <button class="model-menu-item active" data-mode="ptc">
+                <div class="model-menu-item-primary">
+                    <span class="model-menu-item-name">PTC</span>
+                    <span class="model-menu-item-badge">${t('Code mode', '代码模式')}</span>
+                </div>
+                <div class="model-menu-item-desc">${t('Programmatic tool calling via run_code; saves schema tokens and runs scripted loops', '通过 run_code 编写脚本调度工具，大幅节省 Schema Token 并支持循环与并发')}</div>
+            </button>
+            <button class="model-menu-item" data-mode="native">
+                <div class="model-menu-item-primary">
+                    <span class="model-menu-item-name">NATIVE</span>
+                    <span class="model-menu-item-badge">${t('Standard', '标准模式')}</span>
+                </div>
+                <div class="model-menu-item-desc">${t('Standard function calling with individual tool schemas', '传统标准函数调用，每轮直接调用单个工具')}</div>
+            </button>
+        </div>
+    </div>
     <div class="input-container">
+        <div class="composer-preflight-bar" id="composerPreflightBar">
+            <button class="composer-model-trigger preflight-mode-trigger mode-ptc" id="preflightModeTrigger" title="${t('Select tool presentation mode before conversation starts', '在对话开始前选择工具调用模式')}" aria-haspopup="listbox" aria-expanded="false">
+                <span class="composer-trigger-icon" aria-hidden="true">${svgIconNoMargin('code')}</span>
+                <span id="preflightModeLabel">${t('PTC mode', 'PTC 模式')}</span>
+                <span class="composer-chevron" aria-hidden="true">v</span>
+            </button>
+        </div>
         <div class="file-badge-area" id="fileBadgeArea"></div>
         <div class="image-preview-area" id="imagePreviewArea"></div>
         <div class="input-row">
@@ -482,6 +512,15 @@ ${stylesheetLinks}
                         <option value="confirm">${t('Confirm mode - review diff before writes (recommended)', '确认模式 — 写操作前 diff 确认（推荐）')}</option>
                         <option value="auto">${t('Auto mode - write directly (advanced)', '自动模式 — 直接写入（高级）')}</option>
                     </select>
+                </div>
+                <div class="settings-group">
+                    <label class="settings-label">${t('Tool presentation mode', '工具调用模式')}</label>
+                    <select class="settings-select" id="toolPresentationMode">
+                        <option value="ptc">${t('PTC mode - programmatic tool calling via run_code (recommended)', 'PTC 模式 — 通过 run_code 编写代码调度工具（推荐）')}</option>
+                        <option value="native">${t('NATIVE mode - standard tool calling (classic)', 'NATIVE 模式 — 标准原生函数调用（传统）')}</option>
+                        <option value="hybrid">${t('HYBRID mode - both native tools and run_code', 'HYBRID 模式 — 同时提供原生工具与 run_code')}</option>
+                    </select>
+                    <div class="settings-hint">${t('PTC mode sends only run_code and an SDK to the model, drastically saving schema tokens and enabling multi-step scripted workflows. NATIVE mode sends standard function schemas.', 'PTC 模式仅向模型暴露 run_code 与代码 SDK，大幅节省 Schema Token 并支持脚本化批量调用；NATIVE 模式则发送标准函数定义。')}</div>
                 </div>
                 <div class="settings-row" style="display:flex; align-items:center; justify-content:space-between; gap:8px;">
                     <span class="settings-toggle-label">${t('Auto-review approval requests', '自动审核审批请求 (Auto-review)')}</span>

@@ -168,6 +168,9 @@ export async function routeWebviewMessage(
         case 'quickChangeWriteMode':
             await provider.settingsManager.quickChangeWriteMode(msg.mode);
             break;
+        case 'quickChangeToolPresentationMode':
+            await provider.setToolPresentationMode(msg.mode);
+            break;
         case 'slashCommand':
             await provider.handleComposerSubmission(msg.command);
             break;

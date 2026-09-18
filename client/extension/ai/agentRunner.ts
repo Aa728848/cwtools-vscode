@@ -26,6 +26,7 @@ import type {
     ToolCall,
     ToolInvocation,
     ToolTerminalOutcome,
+    ToolPresentationMode,
 } from './types';
 import { contentToString } from './types';
 import { estimateTokenCount, estimateChatMessageTokens, hasImageContent, BASE64_CHARS_PER_TOKEN_ESTIMATE } from './runner/tokenEstimation';
@@ -70,7 +71,7 @@ import {
 import { getWorkflow } from './workflowRegistry';
 import { TOOL_REGISTRY, WRITE_TOOLS, READ_ONLY_TOOLS } from './tools/registry';
 import { hasAddedErrors, type DiagnosticDelta } from './runner/diagnosticSnapshot';
-import { buildRunCodePromptAdditions, buildRunCodePromptBlock, createRunCodeCapabilitySnapshot } from './tools/runCode';
+import { buildRunCodePromptAdditions, buildRunCodePromptBlock, createRunCodeCapabilitySnapshot, PTC_ONLY_INSTRUCTION } from './tools/runCode';
 import { globalPartitionedWriteQueue } from './runner/writeCoordinator';
 import { runLedger } from './runner/runLedger';
 import { atomicWriteText, sha256Text } from './runner/durableStorage';
@@ -581,11 +582,31 @@ const RESUME_SNAPSHOT_MIN_INTERVAL_MS = 30_000;
 
 
 
+/**
+ * Projects available tool definitions to the model-facing schema array
+ * based on the selected presentation mode (PTC vs Native vs Hybrid).
+ */
+export function projectModelFacingTools(
+    tools: readonly ToolDefinition[],
+    mode: ToolPresentationMode,
+): ToolDefinition[] {
+    const hasRunCode = tools.some(t => t.function.name === 'run_code');
+    if (mode === 'ptc' && hasRunCode) {
+        return tools.filter(t => t.function.name === 'run_code');
+    }
+    if (mode === 'native') {
+        return tools.filter(t => t.function.name !== 'run_code');
+    }
+    return [...tools];
+}
+
 export interface AgentRunnerOptions {
     /** Override provider for this run */
     providerId?: string;
     /** Override model for this run */
     model?: string;
+    /** Tool invocation presentation: 'ptc' (Programmatic Tool Calling), 'native' (Standard Function Calling), or 'hybrid' (both). */
+    toolPresentationMode?: ToolPresentationMode;
     /** Override reasoning effort for external runtimes. */
     reasoningEffort?: ReasoningEffort;
     /** Dynamic maximum context tokens for this run */
@@ -1184,6 +1205,8 @@ export class AgentRunner {
         const emitStep = (step: AgentStep) => {
             steps.push(step);
             options?.onStep?.(step);
+            // Subcall steps are streaming UI progress within run_code; skip per-subcall disk ledger writes
+            if (step.subcall === true) return;
             // runRecordPromise is assigned just before this closure is defined.
             runRecordPromise!.then(r => {
                 runLedger.appendEvent(r.runId, 'step_appended', { step }).catch(error => {
@@ -2242,6 +2265,18 @@ export class AgentRunner {
             // guest starts. Nested calls still recheck the live catalog.
             runCodeToolDefinitions: () => availableTools.filter(tool => TOOL_REGISTRY.has(tool.function.name as AgentToolName)),
             runNestedTool: async (toolName, args, signal, writeQueueWaitTimeoutMs) => {
+                const subcallInvocationId = `subcall_${runRecord.runId}_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+                const startTime = Date.now();
+                emitStep({
+                    type: 'tool_call',
+                    content: aiText(`[PTC] Calling tool: ${toolName}`, `[PTC] 调用子工具: ${toolName}`),
+                    toolName,
+                    toolArgs: args,
+                    timestamp: startTime,
+                    invocationId: subcallInvocationId,
+                    subcall: true,
+                    parentToolName: 'run_code',
+                });
                 const result = await this.runNestedToolStep(
                     toolName,
                     args,
@@ -2251,6 +2286,18 @@ export class AgentRunner {
                     signal,
                     writeQueueWaitTimeoutMs,
                 );
+                const durationMs = Date.now() - startTime;
+                emitStep({
+                    type: 'tool_result',
+                    content: aiText(`[PTC] ${toolName} completed`, `[PTC] ${toolName} 完成`),
+                    toolName,
+                    toolResult: result,
+                    timestamp: Date.now(),
+                    durationMs,
+                    invocationId: subcallInvocationId,
+                    subcall: true,
+                    parentToolName: 'run_code',
+                });
                 const files = getAgentToolTargetFiles(toolName, args, this.toolExecutor.workspaceRoot, options?.topicId);
                 if (WRITE_TOOLS.has(toolName) && files[0]) {
                     const record = result as Record<string, unknown> | undefined;
@@ -2406,11 +2453,36 @@ export class AgentRunner {
             return toolDisclosureService.initialTools(eligibleToolPool, disclosureContext);
         };
         availableTools = refreshAvailableTools();
-        const initialRunCodeSdk = buildRunCodePromptBlock(
-            availableTools.filter(tool => TOOL_REGISTRY.has(tool.function.name as AgentToolName)),
-        );
-        if (initialRunCodeSdk && availableTools.some(tool => tool.function.name === 'run_code')) {
-            messages.push({ role: 'user', content: initialRunCodeSdk });
+        const effectivePresentationMode: ToolPresentationMode = options?.toolPresentationMode
+            ?? this.aiService.getConfig().toolPresentationMode
+            ?? 'ptc';
+        let modelFacingTools = projectModelFacingTools(availableTools, effectivePresentationMode);
+
+        const hasRunCode = availableTools.some(tool => tool.function.name === 'run_code');
+        if (effectivePresentationMode === 'ptc' && !hasRunCode) {
+            reportBestEffortFailure('agentRunner.ptc_invariant', { topicId: options?.topicId, threadId: options?.threadId }, new Error('PTC mode requested but run_code is missing from available tools.'));
+        }
+        if (effectivePresentationMode === 'ptc' && hasRunCode) {
+            const initialRunCodeSdk = buildRunCodePromptBlock(
+                availableTools.filter(tool => TOOL_REGISTRY.has(tool.function.name as AgentToolName)),
+            );
+            if (initialRunCodeSdk) {
+                const ptcBlock = [
+                    '<system-reminder>',
+                    '# PTC (Programmatic Tool Calling) Mode',
+                    PTC_ONLY_INSTRUCTION,
+                    '</system-reminder>',
+                    initialRunCodeSdk,
+                ].filter(Boolean).join('\n\n');
+                messages.push({ role: 'user', content: ptcBlock });
+            }
+        } else if (effectivePresentationMode === 'hybrid' && hasRunCode) {
+            const initialRunCodeSdk = buildRunCodePromptBlock(
+                availableTools.filter(tool => TOOL_REGISTRY.has(tool.function.name as AgentToolName)),
+            );
+            if (initialRunCodeSdk) {
+                messages.push({ role: 'user', content: initialRunCodeSdk });
+            }
         }
 
         // M3 Fix: remove per-call dynamic import — getProvider is already statically
@@ -2834,7 +2906,7 @@ export class AgentRunner {
             const activeProviderConfig = this.aiService.getConfig();
             const requestPlan = prepareModelRequest({
                 messages,
-                tools: availableTools,
+                tools: modelFacingTools,
                 providerId: options?.providerId ?? activeProviderConfig.provider,
                 model: options?.model ?? activeProviderConfig.model,
                 desiredOutputTokens: desiredRunOutputTokens,
@@ -2913,7 +2985,7 @@ export class AgentRunner {
                     .get<boolean>('faultInjection', false));
                 await runtimeFaultInjector.hit('before_model', modelAbortController.signal);
                 response = await this.aiService.chatCompletion(messages, {
-                    tools: availableTools,
+                    tools: modelFacingTools,
                     providerId: options?.providerId,
                     model: options?.model,
                     reasoningEffort: options?.reasoningEffort,
@@ -3177,7 +3249,7 @@ export class AgentRunner {
                         messages,
                         _providerId0,
                         {
-                            tools: availableTools,
+                            tools: modelFacingTools,
                             onAttempt: () => {
                                 if (!tokenAccumulator) return;
                                 tokenAccumulator.apiCalls = (tokenAccumulator.apiCalls ?? 0) + 1;
@@ -3673,6 +3745,7 @@ export class AgentRunner {
                 invocation.args = selectionArgs;
                 toolCall.function.arguments = JSON.stringify(selectionArgs);
                 availableTools = refreshAvailableTools();
+                modelFacingTools = projectModelFacingTools(availableTools, effectivePresentationMode);
                 for (const name of selection.loaded) newlyDisclosedToolNames.add(name);
                 await runLedger.appendEvent(runRecord.runId, 'tool_disclosure_changed', {
                     iteration,
@@ -3689,7 +3762,7 @@ export class AgentRunner {
             const normalizedBatch = normalizeToolCallBatch({
                 runId: runRecord.runId,
                 toolCalls,
-                availableTools,
+                availableTools: modelFacingTools,
                 workspaceRoot: this.toolExecutor.workspaceRoot,
                 topicId: options?.topicId,
                 previewInvocationByModelToolCallId,
@@ -3772,6 +3845,24 @@ export class AgentRunner {
                     }
                 }
                 const { toolName, toolArgs } = ci;
+
+                if (effectivePresentationMode === 'ptc' && toolName !== 'run_code') {
+                    const reason = `Tool '${toolName}' cannot be called directly in PTC mode. In PTC mode, only 'run_code' is available — write a program to call tools via await tools.${toolName}(...). ${PTC_ONLY_INSTRUCTION}`;
+                    emitStep({
+                        type: 'validation',
+                        content: reason,
+                        timestamp: Date.now(),
+                        invocationId: ci.invocationId,
+                    });
+                    toolResults[i] = { success: false, error: reason };
+                    await runLedger.appendEvent(
+                        runRecord.runId,
+                        'tool_call_end',
+                        toolResults[i],
+                        { invocationId: ci.invocationId, status: 'failed' },
+                    );
+                    continue;
+                }
 
                 if (questionCallIndex >= 0 && parsedCalls.length > 1) {
                     const reason = 'ask_user_question must be the only tool call in a model response. Retry with only the structured question call.';
@@ -4254,7 +4345,7 @@ export class AgentRunner {
                 }
             }
 
-            if (newlyDisclosedToolNames.size > 0 && availableTools.some(tool => tool.function.name === 'run_code')) {
+            if (newlyDisclosedToolNames.size > 0 && availableTools.some(tool => tool.function.name === 'run_code') && effectivePresentationMode !== 'native') {
                 const sdkAdditions = buildRunCodePromptAdditions(availableTools.filter(tool =>
                     newlyDisclosedToolNames.has(tool.function.name)));
                 if (sdkAdditions) messages.push({ role: 'user', content: sdkAdditions });

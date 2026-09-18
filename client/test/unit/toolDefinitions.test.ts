@@ -65,7 +65,7 @@ describe('tool definitions', () => {
     it('keeps expensive specialist schemas behind focused disclosure groups', () => {
         expect(TOOL_REGISTRY.get('typed_pdx_write')?.group).to.equal('pdx_write');
         expect(TOOL_REGISTRY.get('typed_pdx_write')?.disclosure).to.equal('deferred');
-        expect(TOOL_REGISTRY.get('run_code')?.disclosure).to.equal('deferred');
+        expect(TOOL_REGISTRY.get('run_code')?.disclosure).to.equal('always');
         expect(TOOL_REGISTRY.get('query_shader_symbol')?.group).to.equal('shader');
         expect(TOOL_REGISTRY.get('query_shader_symbol')?.disclosure).to.equal('deferred');
         expect(TOOL_REGISTRY.get('write_file')?.group).to.equal('file_write');

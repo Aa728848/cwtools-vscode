@@ -2275,17 +2275,31 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         if (quickDomainLabel) quickDomainLabel.textContent = getSchedulingDomainSummary();
     }
 
+    function setPreflightModeMenuOpen(open: boolean) {
+        const preflightModeMenu = document.getElementById('preflightModeMenu');
+        const preflightModeTrigger = document.getElementById('preflightModeTrigger');
+        if (!preflightModeMenu || !preflightModeTrigger) return;
+        if (open) closeComposerMenus();
+        preflightModeMenu.classList.toggle('show', open);
+        preflightModeMenu.setAttribute('aria-hidden', open ? 'false' : 'true');
+        preflightModeTrigger.classList.toggle('active', open);
+        preflightModeTrigger.setAttribute('aria-expanded', open ? 'true' : 'false');
+        if (open) positionComposerMenus();
+    }
+
     function closeComposerMenus() {
         const composerMenu = document.getElementById('composerMenu');
         const domainMenu = document.getElementById('domainMenu');
         const modelMenu = document.getElementById('modelMenu');
         const reasoningMenu = document.getElementById('reasoningMenu');
         const writeModeMenu = document.getElementById('writeModeMenu');
+        const preflightModeMenu = document.getElementById('preflightModeMenu');
         const composerAddBtn = document.getElementById('composerAddBtn');
         const quickDomainTrigger = document.getElementById('quickDomainTrigger');
         const quickModelTrigger = document.getElementById('quickModelTrigger');
         const quickReasoningTrigger = document.getElementById('quickReasoningTrigger');
         const quickWriteModeTrigger = document.getElementById('quickWriteModeTrigger');
+        const preflightModeTrigger = document.getElementById('preflightModeTrigger');
         composerMenu?.classList.remove('show');
         composerMenu?.setAttribute('aria-hidden', 'true');
         domainMenu?.classList.remove('show');
@@ -2296,6 +2310,8 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         reasoningMenu?.setAttribute('aria-hidden', 'true');
         writeModeMenu?.classList.remove('show');
         writeModeMenu?.setAttribute('aria-hidden', 'true');
+        preflightModeMenu?.classList.remove('show');
+        preflightModeMenu?.setAttribute('aria-hidden', 'true');
         composerAddBtn?.classList.remove('active');
         quickDomainTrigger?.classList.remove('active');
         quickDomainTrigger?.setAttribute('aria-expanded', 'false');
@@ -2305,6 +2321,59 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         quickReasoningTrigger?.setAttribute('aria-expanded', 'false');
         quickWriteModeTrigger?.classList.remove('active');
         quickWriteModeTrigger?.setAttribute('aria-expanded', 'false');
+        preflightModeTrigger?.classList.remove('active');
+        preflightModeTrigger?.setAttribute('aria-expanded', 'false');
+    }
+
+    let currentToolPresentationMode: 'ptc' | 'native' | 'hybrid' = 'ptc';
+    let isToolPresentationModeLocked = false;
+
+    function updateToolPresentationModeUi(mode: 'ptc' | 'native' | 'hybrid', locked: boolean) {
+        currentToolPresentationMode = mode;
+        isToolPresentationModeLocked = locked;
+
+        const headerBadge = document.getElementById('headerModeBadge');
+        const headerBadgeText = document.getElementById('headerModeBadgeText');
+        if (headerBadge && headerBadgeText) {
+            headerBadgeText.textContent = mode.toUpperCase();
+            headerBadge.classList.toggle('mode-ptc', mode === 'ptc');
+            headerBadge.classList.toggle('mode-native', mode === 'native');
+            headerBadge.title = locked
+                ? (chatI18n.locale === 'zh-cn' ? `工具调用模式: ${mode.toUpperCase()} (当前对话已锁定)` : `Tool presentation mode: ${mode.toUpperCase()} (locked for this topic)`)
+                : (chatI18n.locale === 'zh-cn' ? `工具调用模式: ${mode.toUpperCase()}` : `Tool presentation mode: ${mode.toUpperCase()}`);
+        }
+
+        const preflightBar = document.getElementById('composerPreflightBar');
+        const preflightTrigger = document.getElementById('preflightModeTrigger');
+        const preflightLabel = document.getElementById('preflightModeLabel');
+        if (preflightBar) {
+            if (locked) {
+                preflightBar.classList.add('hidden');
+                setPreflightModeMenuOpen(false);
+            } else {
+                preflightBar.classList.remove('hidden');
+            }
+        }
+        if (preflightTrigger && preflightLabel) {
+            preflightLabel.textContent = mode === 'ptc'
+                ? (chatI18n.locale === 'zh-cn' ? 'PTC 模式' : 'PTC mode')
+                : (mode === 'hybrid'
+                    ? (chatI18n.locale === 'zh-cn' ? 'HYBRID 模式' : 'HYBRID mode')
+                    : (chatI18n.locale === 'zh-cn' ? 'NATIVE 模式' : 'NATIVE mode'));
+            preflightTrigger.classList.toggle('mode-ptc', mode === 'ptc');
+        }
+
+        const menuList = document.getElementById('preflightModeMenuList');
+        if (menuList) {
+            menuList.querySelectorAll<HTMLButtonElement>('button[data-mode]').forEach(btn => {
+                btn.classList.toggle('active', btn.getAttribute('data-mode') === mode);
+            });
+        }
+
+        const settingsSelect = document.getElementById('toolPresentationMode') as HTMLSelectElement | null;
+        if (settingsSelect) {
+            settingsSelect.value = mode;
+        }
     }
 
     function setComposerMenuOpen(open: boolean) {
@@ -2466,6 +2535,9 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         positionMenu(modelMenu, quickModelTrigger);
         positionMenu(reasoningMenu, quickReasoningTrigger, 'end');
         positionMenu(writeModeMenu, quickWriteModeTrigger);
+        const preflightModeMenu = document.getElementById('preflightModeMenu');
+        const preflightModeTrigger = document.getElementById('preflightModeTrigger');
+        positionMenu(preflightModeMenu, preflightModeTrigger);
     }
 
     function renderComposerChips() {
@@ -2882,6 +2954,34 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
             }
         });
     });
+
+    const preflightModeTrigger = document.getElementById('preflightModeTrigger');
+    preflightModeTrigger?.addEventListener('click', e => {
+        e.stopPropagation();
+        const preflightModeMenu = document.getElementById('preflightModeMenu');
+        setPreflightModeMenuOpen(!preflightModeMenu?.classList.contains('show'));
+    });
+
+    document.querySelectorAll<HTMLElement>('#preflightModeMenuList .model-menu-item[data-mode]').forEach(item => {
+        item.addEventListener('click', () => {
+            const mode = item.dataset.mode as 'ptc' | 'native';
+            if ((mode === 'ptc' || mode === 'native') && !isToolPresentationModeLocked) {
+                updateToolPresentationModeUi(mode, false);
+                vscode.postMessage({ type: 'quickChangeToolPresentationMode', mode });
+                setPreflightModeMenuOpen(false);
+            }
+        });
+    });
+
+    const settingsToolModeSel = document.getElementById('toolPresentationMode') as HTMLSelectElement | null;
+    settingsToolModeSel?.addEventListener('change', () => {
+        const mode = settingsToolModeSel.value as 'ptc' | 'native' | 'hybrid';
+        if (!isToolPresentationModeLocked && (mode === 'ptc' || mode === 'native' || mode === 'hybrid')) {
+            updateToolPresentationModeUi(mode, false);
+            vscode.postMessage({ type: 'quickChangeToolPresentationMode', mode });
+        }
+    });
+
     const headerMore = document.getElementById('headerMore');
     headerMore?.addEventListener('click', event => {
         if (event.target instanceof Element && event.target.closest('button')) headerMore.removeAttribute('open');
@@ -2889,7 +2989,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
     document.addEventListener('click', e => {
         const target = e.target as Element | null;
         if (!target?.closest('#headerMore')) headerMore?.removeAttribute('open');
-        if (!target?.closest('#composerMenu') && !target?.closest('#composerAddBtn') && !target?.closest('#domainMenu') && !target?.closest('#quickDomainTrigger') && !target?.closest('#modelMenu') && !target?.closest('#quickModelTrigger') && !target?.closest('#reasoningMenu') && !target?.closest('#quickReasoningTrigger') && !target?.closest('#writeModeMenu') && !target?.closest('#quickWriteModeTrigger')) {
+        if (!target?.closest('#composerMenu') && !target?.closest('#composerAddBtn') && !target?.closest('#domainMenu') && !target?.closest('#quickDomainTrigger') && !target?.closest('#modelMenu') && !target?.closest('#quickModelTrigger') && !target?.closest('#reasoningMenu') && !target?.closest('#quickReasoningTrigger') && !target?.closest('#writeModeMenu') && !target?.closest('#quickWriteModeTrigger') && !target?.closest('#preflightModeMenu') && !target?.closest('#preflightModeTrigger')) {
             closeComposerMenus();
         }
     });
@@ -5595,6 +5695,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
 
     function addUserMessage(text: string, msgIdx: number, images?: string[], contexts?: ActiveContext[], state?: unknown) {
         clearAgentRoutingStatus();
+        updateToolPresentationModeUi(currentToolPresentationMode, true);
         emptyState.style.display = 'none';
         const div = document.createElement('div');
         div.className = 'message user codex-user-message';
@@ -6562,6 +6663,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                 artifacts = [];
                 renderArtifactPanel();
                 updateCurrentTopicHeader(null, null);
+                updateToolPresentationModeUi(currentToolPresentationMode, false);
                 { const bar = document.getElementById('tokenUsageBar'); if (bar) bar.style.display = 'none'; }
                 setChatEmptyState(true);
                 startPlaceholderRotation();
@@ -6640,7 +6742,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                 break;
             }
 
-            case 'loadTopicMessages':
+            case 'loadTopicMessages': {
                 if (!isCurrentSurface(msg.targetSurface)) break;
                 clearActiveSubagentViews();
                 clearTopicWorkspaceState();
@@ -6652,6 +6754,12 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                 messageIndexMap.clear();
                 userMessagePayloadMap.clear();
                 restoreArtifactsFromMessages(msg.messages || []);
+                const hasTopicMsgs = (msg.messages || []).length > 0;
+                const rawTopicMode = (msg as Record<string, unknown>).toolPresentationMode;
+                const loadedTopicMode = (rawTopicMode === 'ptc' || rawTopicMode === 'native' || rawTopicMode === 'hybrid')
+                    ? rawTopicMode
+                    : currentToolPresentationMode;
+                updateToolPresentationModeUi(loadedTopicMode, hasTopicMsgs);
                 msg.messages.forEach((m: any, idx: number) => {
                     if (m.isHidden === true) return;
                     
@@ -6665,6 +6773,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                     }
                 });
                 break;
+            }
 
             case 'messageRetracted': {
                 if (inlineEditSession && inlineEditSession.messageIndex >= msg.messageIndex) {
@@ -6766,6 +6875,10 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
 
             case 'setSchedulingState':
                 applySchedulingState(msg.schedulingState);
+                break;
+
+            case 'setToolPresentationMode':
+                updateToolPresentationModeUi((msg as any).mode || 'ptc', (msg as any).locked === true);
                 break;
 
             case 'runtimeInspectorSnapshot': {
@@ -7932,6 +8045,10 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         (document.getElementById('inlineRequestTimeout') as HTMLInputElement).value = String(current.inlineCompletion?.requestTimeoutMs ?? 6000);
         (document.getElementById('inlineMcpCacheTtl') as HTMLInputElement).value = String(current.inlineCompletion?.mcpCacheTtlMs ?? 30000);
         (document.getElementById('agentWriteMode') as HTMLSelectElement).value = current.agentFileWriteMode || 'auto';
+        const toolPresSel = document.getElementById('toolPresentationMode') as HTMLSelectElement | null;
+        if (toolPresSel && current.toolPresentationMode) {
+            toolPresSel.value = current.toolPresentationMode;
+        }
         updateQuickWriteModeSelector(deriveWriteTier(current));
         const autoReviewEl = document.getElementById('approvalsAutoReview') as HTMLInputElement | null;
         if (autoReviewEl) autoReviewEl.checked = current.approvals?.reviewer === 'auto_review';
@@ -8702,6 +8819,10 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
                 customApiFormat: getCustomApiFormat(),
                 maxContextTokens: parseInt((document.getElementById('settingsCtx') as HTMLInputElement).value) || 0,
                 agentFileWriteMode: (document.getElementById('agentWriteMode') as HTMLSelectElement).value,
+                toolPresentationMode: (() => {
+                    const v = (document.getElementById('toolPresentationMode') as HTMLSelectElement | null)?.value;
+                    return (v === 'ptc' || v === 'native' || v === 'hybrid') ? v : 'ptc';
+                })(),
                 approvals: {
                     reviewer: ((document.getElementById('approvalsAutoReview') as HTMLInputElement | null)?.checked ? 'auto_review' : 'user'),
                 },

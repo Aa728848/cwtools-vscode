@@ -210,11 +210,13 @@ function createToolEvent(step: StepLike, labels: CodexI18nText, index: number): 
         label = labels.activity.validation;
     }
 
+    const isSubcall = step.subcall === true;
+    const resolvedLabel = step.type === 'permission_request' ? labels.activity.waitingPermission : (isSubcall ? `[PTC] ${label}` : label);
     return {
         id: invocationIdOf(step) || `tool-${index}-${timestamp}`,
         kind,
         status: step.type === 'permission_request' ? 'waiting' : 'running',
-        label: step.type === 'permission_request' ? labels.activity.waitingPermission : label,
+        label: resolvedLabel,
         subject: toolSubject(toolName, args, step),
         timestamp,
         toolName,
@@ -222,6 +224,8 @@ function createToolEvent(step: StepLike, labels: CodexI18nText, index: number): 
         agentId: asString(step.agentId) || undefined,
         groupKind,
         sourceStep: step,
+        subcall: isSubcall || undefined,
+        parentToolName: asString(step.parentToolName) || undefined,
         detailModel: {
             args,
             targetPath: targetPath || undefined,

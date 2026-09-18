@@ -36,7 +36,7 @@ function loadPromptBudgetModules() {
 
 describe('AI static prompt budgets', () => {
     const coreTools = new Set([
-        'ask_user_question', 'grep', 'manage_goal', 'read_file', 'select_tools', 'todo_write',
+        'ask_user_question', 'grep', 'manage_goal', 'read_file', 'run_code', 'select_tools', 'todo_write',
     ]);
 
     it('keeps the disclosed build and slim surfaces inside prompt budgets', () => {

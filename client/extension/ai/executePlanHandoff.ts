@@ -91,8 +91,7 @@ export function shouldPauseForInteractivePlan(
 ): boolean {
     return !context.approvedPlanExecution
         && EXECUTE_HANDOFF_MODES.has(context.mode)
-        && (validateImplementationPlan(content).complete
-            || (/^#{1,3}\s+\S+/m.test(content) && content.trim().length >= 80));
+        && validateImplementationPlan(content).complete;
 }
 
 export function isCompleteImplementationPlanWrite(
@@ -431,11 +430,10 @@ export function shouldRenderInteractivePlan(
     if (validateImplementationPlan(planText).complete) return true;
 
     // Robust fallback for Markdown plan documents:
-    // If the plan was written to Implementation_Plan.md or produced in Plan Mode,
-    // and contains a non-empty structured Markdown document (headings + substantive text),
-    // accept it as an interactive plan so the user gets the approval card.
+    // ONLY when explicitly in Plan mode or when an Implementation_Plan.md artifact was actually written.
+    // Prose with Markdown headings in execution/chat modes (build, utility, script) must stay as normal chat.
     const hasMarkdownPlanStructure = /^#{1,3}\s+\S+/m.test(planText) && planText.trim().length >= 80;
-    if ((context.mode === 'plan' || wrotePlanArtifact || shouldPauseForInteractivePlan(planText, context)) && hasMarkdownPlanStructure) {
+    if ((context.mode === 'plan' || wrotePlanArtifact) && hasMarkdownPlanStructure) {
         return true;
     }
 

@@ -109,9 +109,22 @@ describe('runnerPolicy', () => {
             expect(shouldAutoDiscloseExecutionTools(mode, 'workspace_write'), mode).to.equal(false);
         }
         expect(shouldAutoDiscloseExecutionTools('build', 'read_only')).to.equal(false);
-        expect(shouldContinueAuthorizedExecution('build', 'workspace_write', false)).to.equal(true);
-        expect(shouldContinueAuthorizedExecution('build', 'workspace_write', true)).to.equal(false);
-        expect(shouldContinueAuthorizedExecution('plan', 'workspace_write', false)).to.equal(false);
+    });
+
+    it('restricts authorized execution continuation to approved-plan continuations', () => {
+        // Regular conversation turns (even in build/workspace_write mode) must finish
+        // cleanly when the model provides a final text response without tool calls.
+        // Forcing continuation on regular questions causes the agent to run random
+        // discovery tools and overwrite the actual answer.
+        expect(shouldContinueAuthorizedExecution('build', 'workspace_write', false, undefined)).to.equal(false);
+        expect(shouldContinueAuthorizedExecution('build', 'workspace_write', false, false)).to.equal(false);
+        expect(shouldContinueAuthorizedExecution('build', 'workspace_write', false)).to.equal(false);
+
+        // Only explicitly approved plan continuations are forced to execute until an action is observed.
+        expect(shouldContinueAuthorizedExecution('build', 'workspace_write', false, true)).to.equal(true);
+        expect(shouldContinueAuthorizedExecution('build', 'workspace_write', true, true)).to.equal(false);
+        expect(shouldContinueAuthorizedExecution('utility', 'workspace_write', false, true)).to.equal(true);
+        expect(shouldContinueAuthorizedExecution('plan', 'workspace_write', false, true)).to.equal(false);
     });
 
     it('keeps guard decisions at the effective mode/domain boundary', () => {

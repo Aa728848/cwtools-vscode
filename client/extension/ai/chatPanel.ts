@@ -901,18 +901,6 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         showRoutingStatus = true,
         extra: { planContinuationPending?: boolean } = {},
     ): Promise<ResolvedSchedulingDecision> {
-        const activeFile = vs.window.activeTextEditor?.document.uri.fsPath;
-        const recentConversation = this.conversationMessages
-            .filter(message => message.role === 'user' || message.role === 'assistant')
-            .slice(-6)
-            .map(message => ({
-                role: message.role,
-                content: contentToString(message.content).slice(0, 900),
-            }));
-        const previousUserRequests = recentConversation
-            .filter(message => message.role === 'user')
-            .map(message => message.content);
-        const hints = { previousUserRequests };
         const activeScheduling = this.session.schedulingState;
         // A user-pinned mode is authoritative and skips automatic classification
         // entirely: /plan, /execute, /explore, /review are explicit instructions,
@@ -923,7 +911,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                 domain: activeScheduling.domainProfile,
                 intent: modeOverride,
                 strategy: 'auto',
-            }, hints);
+            });
             if (showRoutingStatus) {
                 this.postMessageToSurface('chat', { type: 'agentRoutingStatus', phase: 'resolved', schedulingState: pinned.schedulingState });
             }
@@ -940,20 +928,19 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         // the planner can hand over the full Implementation Plan. Routing it as
         // "execute" is what used to skip the plan blueprint entirely.
         if (extra.planContinuationPending === true) {
-            const continued = resolveAgentProfile(text, { ...selection, intent: 'plan' }, hints);
+            const continued = resolveAgentProfile(text, { ...selection, intent: 'plan' });
             if (showRoutingStatus) {
                 this.postMessageToSurface('chat', { type: 'agentRoutingStatus', phase: 'resolved', schedulingState: continued.schedulingState });
             }
             return continued;
         }
-        // Task mode is decided by the Agent, not by a routing model: the request
-        // resolves deterministically here (plan/explore/review/execute), and the
+        // Task mode is decided by the Agent, not by a router: no keyword or
+        // classifier here may turn this turn into Plan, Explore, or Review. The
+        // resolution below keeps only the user-owned capability domain, and the
         // Agent escalates into Plan mode through `enter_plan_mode` when it finds
-        // a user-owned decision that bounded inspection cannot settle. That keeps
-        // one decision-maker with full repository context instead of a separate
-        // classifier that only sees the last few chat turns. A user-pinned mode
-        // (checked above) overrides even this resolution.
-        const resolved = resolveAgentProfile(text, selection, hints);
+        // a user-owned decision that bounded inspection cannot settle. A
+        // user-pinned mode (checked above) is the other explicit source.
+        const resolved = resolveAgentProfile(text, selection);
         if (showRoutingStatus) {
             this.postMessageToSurface('chat', { type: 'agentRoutingStatus', phase: 'resolved', schedulingState: resolved.schedulingState });
         }

@@ -112,6 +112,7 @@ export function renderActivityRow(event: CodexActivityEvent, options: CodexRende
     const toolAttr = event.toolName ? ` data-tool-name="${escapeHtml(event.toolName)}"` : '';
     const subcallClass = event.subcall ? ' codex-activity-subcall' : '';
     const nestedClass = (nested && !event.subcall) ? ' codex-activity-child-row' : '';
+    const subcallTag = event.subcall ? '<span class="codex-subcall-pill" title="PTC subcall">PTC</span>' : '';
     const details = renderActivityDetails(event, options);
     const detailsClass = details ? ' codex-activity-row-collapsed' : '';
     const summaryTag = details ? 'button' : 'div';
@@ -123,7 +124,7 @@ export function renderActivityRow(event: CodexActivityEvent, options: CodexRende
         <${summaryTag}${summaryAttrs} class="codex-activity-summary${details ? ' codex-activity-row-toggle' : ''}">
             <span class="codex-activity-icon">${svgIconNoMargin(iconNameFor(event))}</span>
             <span class="codex-activity-main">
-                <span class="codex-activity-title">${escapeHtml(event.label)}${subject}</span>
+                <span class="codex-activity-title">${subcallTag}${escapeHtml(event.label)}${subject}</span>
                 ${detail}
             </span>
             ${duration ? `<span class="codex-activity-duration">${escapeHtml(duration)}</span>` : ''}

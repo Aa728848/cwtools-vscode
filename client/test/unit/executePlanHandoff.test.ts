@@ -375,4 +375,18 @@ describe('Execute-to-Plan handoff', () => {
         expect(reminder).to.include('Do not re-enter discovery or design');
         expect(reminder).to.include('request approval again');
     });
+
+    it('does not turn ordinary explanatory Markdown answers into an approval plan in execute modes', () => {
+        const explanatoryAnswer = `# 结论\n\n本项目所谓的动态修正不是一个单独的引擎目录，而是 exe_dynamic 命名空间下的一套运行时读值机制。\n\n## 1. 入口：每次进入战斗触发\n\n内容详尽解析。\n\n## 2. 控制事件\n\n周期性重新计算。`;
+        expect(shouldPauseForInteractivePlan(explanatoryAnswer, { mode: 'utility' })).to.equal(false);
+        expect(shouldPauseForInteractivePlan(explanatoryAnswer, { mode: 'script' })).to.equal(false);
+        expect(shouldRenderInteractivePlan({ explanation: explanatoryAnswer, steps: [] }, {
+            mode: 'utility',
+            planText: explanatoryAnswer,
+        })).to.equal(false);
+        expect(shouldRenderInteractivePlan({ explanation: explanatoryAnswer, steps: [] }, {
+            mode: 'script',
+            planText: explanatoryAnswer,
+        })).to.equal(false);
+    });
 });

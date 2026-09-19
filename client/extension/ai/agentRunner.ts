@@ -470,6 +470,7 @@ function decideFinalResponse(input: {
         input.mode,
         input.authorization,
         input.executionActionObserved,
+        input.approvedPlanExecution,
     )) {
         continuation = 'authorized_execution';
     } else if (!requiresUserInput

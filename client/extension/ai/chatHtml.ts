@@ -73,10 +73,6 @@ ${stylesheetLinks}
             <button class="current-topic-title" id="currentTopicTitle" type="button">${t('New topic', '新话题')}</button>
             <button class="current-topic-rename" id="currentTopicRename" type="button" title="${t('Rename current topic', '重命名当前话题')}" aria-label="${t('Rename current topic', '重命名当前话题')}">${svgIconNoMargin('edit')}</button>
         </div>
-        <div class="header-mode-badge mode-ptc" id="headerModeBadge" title="${t('Current tool presentation mode (locked after first turn)', '当前工具调用模式（对话开始后锁定）')}">
-            <span class="header-mode-icon" aria-hidden="true">${svgIconNoMargin('code')}</span>
-            <span id="headerModeBadgeText">PTC</span>
-        </div>
     </div>
     <div class="header-actions">
         <button class="icon-btn" id="btnNewTopic" title="${t('New topic', '新话题')}" aria-label="${t('Create new chat topic', '新建对话话题')}">${svgIconNoMargin('plus')}</button>
@@ -208,13 +204,6 @@ ${stylesheetLinks}
         </div>
     </div>
     <div class="input-container">
-        <div class="composer-preflight-bar" id="composerPreflightBar">
-            <button class="composer-model-trigger preflight-mode-trigger mode-ptc" id="preflightModeTrigger" title="${t('Select tool presentation mode before conversation starts', '在对话开始前选择工具调用模式')}" aria-haspopup="listbox" aria-expanded="false">
-                <span class="composer-trigger-icon" aria-hidden="true">${svgIconNoMargin('code')}</span>
-                <span id="preflightModeLabel">${t('PTC mode', 'PTC 模式')}</span>
-                <span class="composer-chevron" aria-hidden="true">v</span>
-            </button>
-        </div>
         <div class="file-badge-area" id="fileBadgeArea"></div>
         <div class="image-preview-area" id="imagePreviewArea"></div>
         <div class="input-row">
@@ -227,6 +216,11 @@ ${stylesheetLinks}
         <div class="input-controls">
             <div class="composer-toolbar">
                 <button class="composer-add-btn" id="composerAddBtn" title="${t('Add context', '添加上下文')}" aria-label="${t('Add context', '添加上下文')}">${svgIconNoMargin('plus')}</button>
+                <button class="composer-model-trigger composer-tool-mode-trigger" id="preflightModeTrigger" title="${t('Select tool presentation mode before conversation starts', '在对话开始前选择工具调用模式')}" aria-haspopup="listbox" aria-expanded="false">
+                    <span class="composer-trigger-icon" aria-hidden="true">${svgIconNoMargin('code')}</span>
+                    <span id="preflightModeLabel">PTC</span>
+                    <span class="composer-chevron" id="preflightModeChevron" aria-hidden="true">v</span>
+                </button>
                 <select class="hidden-composer-select" id="quickWriteModeSelect" title="${t('Permission profile', '权限配置')}" aria-hidden="true" tabindex="-1">
                     <option value="confirm">${t('Confirm writes', '确认写入')}</option>
                     <option value="auto" selected>${t('Auto writes', '自动写入')}</option>

@@ -95,6 +95,8 @@ export interface ChatI18nText {
             artifact: string;
             subtask: string;
             stepsCount: string;
+            runScript: string;
+            subcallsCount: string;
         };
         details: {
             arguments: string;
@@ -319,6 +321,8 @@ const EN: ChatI18nText = {
             artifact: 'Artifact',
             subtask: 'Subtask',
             stepsCount: 'Ran {count} steps',
+            runScript: 'Run script',
+            subcallsCount: '{count} subcalls',
         },
         details: {
             arguments: 'IN',
@@ -567,6 +571,8 @@ const ZH_CN: ChatI18nText = {
             artifact: '产物',
             subtask: '子任务',
             stepsCount: '已执行 {count} 个步骤',
+            runScript: '运行脚本',
+            subcallsCount: '已执行 {count} 次子调用',
         },
         details: {
             arguments: 'IN',

@@ -56,13 +56,36 @@ describe('agent routing', () => {
         expect(executionModeForSchedulingState(pinnedExplore.schedulingState)).to.equal('explore');
     });
 
-    it('derives execution labels only from canonical scheduling state', () => {
+    it('never routes an unpinned request into plan mode from its wording', () => {
+        // Keyword routing used to run here. A request that merely mentioned a
+        // plan — or any of 设计/方案/规划/蓝图/路线图 — silently became
+        // plan_write_only and blocked the write the user had actually asked for.
+        const planWorded = resolveAgentProfile('refactor the runner', profileForUserDomain('paradox'));
+        expect(planWorded.schedulingState.authorization).to.equal('workspace_write');
+        expect(planWorded.schedulingState.phase).to.equal('execute');
+        expect(executionMode(planWorded)).to.equal('build');
+
+        for (const request of [
+            '设计一个新的系统',
+            '给我一个实施方案',
+            '规划一下本地化路线图',
+            '修复所有本地化错误',
+            'Implement a new scripted effect',
+        ]) {
+            const resolved = resolveAgentProfile(request, profileForUserDomain('paradox'));
+            expect(resolved.schedulingState.authorization, request).to.equal('workspace_write');
+            expect(resolved.schedulingState.phase, request).to.equal('execute');
+            expect(executionMode(resolved), request).to.equal('build');
+        }
+    });
+
+    it('resolves an ordinary unpinned request as a writable execution turn', () => {
         const explore = resolveAgentProfile('Explain this API', profileForUserDomain('general'));
         const build = resolveAgentProfile('Implement a new scripted effect');
         const review = resolveAgentProfile('Review the cancellation logic', profileForUserDomain('general'));
-        expect(executionMode(explore)).to.equal('explore');
+        expect(executionMode(explore)).to.equal('utility');
         expect(executionMode(build)).to.equal('build');
-        expect(executionMode(review)).to.equal('review');
+        expect(executionMode(review)).to.equal('utility');
         expect(build).not.to.have.property('mode');
         expect(build).not.to.have.property('domain');
         expect(build).not.to.have.property('admission');
@@ -71,7 +94,7 @@ describe('agent routing', () => {
     it('uses scheduling authorization as the single write-admission state', () => {
         const plan = resolveAgentProfile('refactor the runner', {
             domain: 'paradox', intent: 'plan', strategy: 'auto',
-        }, { previousUserRequests: ['refactor the runner'] });
+        });
         expect(plan.schedulingState).to.include({
             domainProfile: 'paradox', authorization: 'plan_write_only', phase: 'plan', dispatch: 'single',
         });
@@ -93,23 +116,16 @@ describe('agent routing', () => {
         expect(executionModeForSchedulingState(noWrite.schedulingState)).to.equal('explore');
     });
 
-    it('retains deterministic routing when semantic routing is unavailable', () => {
-        const replacement = resolveAgentProfile(
-            '帮我把 executor_build.23 改成 executor_build.X',
-            undefined,
-            { activeFile: 'events/samplemod_executor_events.txt' },
-        );
+    it('keeps deterministic domain ownership without reading prior turns for intent', () => {
+        const replacement = resolveAgentProfile('帮我把 executor_build.23 改成 executor_build.X');
         expect(replacement.schedulingState.domainProfile).to.equal('paradox');
         expect(executionMode(replacement)).to.equal('build');
 
-        const inherited = resolveAgentProfile('只改一处', undefined, {
-            previousUserRequests: ['把选中的名称改成新的名称'],
-        });
-        expect(executionMode(inherited)).to.equal('build');
+        const singleEdit = resolveAgentProfile('只改一处');
+        expect(executionMode(singleEdit)).to.equal('build');
 
-        const broad = resolveAgentProfile('修复所有本地化错误');
-        expect(executionMode(broad)).to.equal('plan');
-        expect(broad.schedulingState.phaseReason).to.contain('runtime dispatch evaluation requested');
+        const explicitMulti = resolveAgentProfile('用多个 agent 并行处理');
+        expect(explicitMulti.schedulingState.dispatch).to.equal('parallel');
     });
 
     it('accepts explicit workflow profiles without storing a second state', () => {

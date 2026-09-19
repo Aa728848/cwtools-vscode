@@ -21,18 +21,7 @@ const DOMAINS = new Set<AgentDomain>(['paradox', 'general', 'hybrid']);
 const INTENTS = new Set<AgentIntent>(['auto', 'execute', 'plan', 'explore', 'review']);
 const STRATEGIES = new Set<AgentExecutionStrategy>(['auto', 'single', 'multi']);
 
-const WRITE_INTENT_RE = /\b(fix|repair|implement|add|create|generate|update|edit|modify|write|remove|delete|replace|rename|wire|migrate|refactor|apply|build|change|convert)\b|修复|实现|添加|新增|创建|生成|更新|修改|写入|移除|删除|接入|补齐|迁移|调整|执行|构建|替换|重命名|改名|换成|改成|改为|调整为|设为|改一下|改好|补上|加上|删掉/i;
-const PLAN_INTENT_RE = /\b(plan|design|blueprint|proposal|architecture|roadmap)\b|计划|规划|方案|设计|蓝图|路线图|实施步骤/i;
-const REVIEW_INTENT_RE = /\b(review|audit|triage|inspect|diagnose|diagnostic report|check for (?:issues|problems|bugs))\b|审查|评审|巡检|诊断报告|检查|核查|排查|评估|找问题|找出问题|有没有问题|是否有问题|看看.*问题/i;
-const EXPLORE_INTENT_RE = /\b(explain|what is|how does|where is|find|search|locate|trace|analy[sz]e|investigate|understand|describe)\b|解释|说明|查找|搜索|定位|追踪|梳理|看看|了解|理解|分析|告诉我|是什么|为什么|怎么|如何|在哪里/i;
-const NO_WRITE_INTENT_RE = /\b(?:do not|don't|without|no need to)\s+(?:change|edit|modify|write|implement)|\b(?:read[ -]?only|analysis only|review only|plan only)\b|(?:不要|无需|不需要|请勿|禁止)(?:[^，。；\n]{0,12})?(?:修改|改动|更改|写入|执行|实现|动代码)|(?:只|仅)(?:做|进行|需要)?(?:分析|解释|说明|审查|评审|检查|核查|排查|规划|计划|给方案|查看)(?:即可|就好|就行|，|。|；|$)|(?:算了|不改了|取消修改|先不改)/i;
-const DIRECT_WRITE_OVERRIDE_RE = /\b(?:but|then)\s+(?:please\s+)?(?:change|edit|modify|write|implement)|\b(?:directly|immediately)\s+(?:change|edit|modify|write|implement)|(?:但|不过|然后|接着|之后|并且)[^，。；\n]{0,8}(?:修改|改动|更改|写入|执行|实现|修复)|(?:直接|马上|立即)(?:修改|改动|更改|写入|执行|实现|修复)/i;
 const MULTI_AGENT_RE = /\b(multi(?:ple)?[-\s]?agents?|sub[-\s]?agents?|dispatch_agents|parallel agents?|in parallel)\b|多\s*agent|子\s*agent|并行.*agent|并行处理/i;
-const BROAD_TASK_RE = /\b(all|every|entire|whole|across the (?:project|repository|workspace)|multi[-\s]?file|event chain|migration|large refactor)\b|全部|所有|整个项目|整个仓库|全项目|跨文件|多文件|事件链|批量|整套|大型重构|全面修复/i;
-export interface AgentProfileResolveHints {
-    activeFile?: string;
-    previousUserRequests?: readonly string[];
-}
 
 export function cloneAgentProfile(profile: AgentProfileSelection = DEFAULT_AGENT_PROFILE): AgentProfileSelection {
     return {
@@ -77,76 +66,67 @@ export function normalizeAgentProfile(value: unknown): AgentProfileSelection {
     return isAgentProfileSelection(value) ? cloneAgentProfile(value) : cloneAgentProfile();
 }
 
+/**
+ * Resolve the turn's scheduling state from the user-owned selection alone.
+ *
+ * Task mode is decided by the Agent, not by a classifier: nothing here reads
+ * the request text to route the turn into Plan, Explore, or Review. Mode
+ * selection has exactly two legitimate sources, and both of them are explicit:
+ *
+ * - the user pins a mode for the topic (`/plan`, `/execute`, `/explore`,
+ *   `/review`, the mode control, or a rehydrated topic pin), which arrives here
+ *   as a non-`auto` `selection.intent`; and
+ * - the Agent escalates by calling `enter_plan_mode` (or `exit_plan_mode`)
+ *   during the run, which the runner applies as a scheduling transition.
+ *
+ * Keyword routing used to run here as a third, implicit source. It has been
+ * removed: a request that merely mentioned a plan produced plan mode, and an
+ * ordinary question that happened to contain 设计/方案 produced
+ * `plan_write_only`, which silently blocked the write the user had asked for.
+ * With an explicit user intent the resolution is fully determined, so there is
+ * no ambiguity left for a keyword heuristic to arbitrate. The Agent still
+ * inspects the repository within the resolved authorization and escalates to
+ * Plan itself when it finds a user-owned decision inspection cannot settle.
+ *
+ * Only the capability domain and the exploration/execution axis remain
+ * derived: a non-`auto` intent keeps its own authorization and phase, while
+ * `auto` resolves to an ordinary writable turn.
+ */
 export function resolveAgentProfile(
-    text: string,
+    _text: string,
     profile: AgentProfileSelection = cloneAgentProfile(),
-    hints: AgentProfileResolveHints = {},
 ): ResolvedSchedulingDecision {
     const selection = normalizeAgentProfile(profile);
-    const request = text.trim();
     const domain: AgentRuntimeDomain = selection.domain;
 
-    const explicitNoWrite = NO_WRITE_INTENT_RE.test(request) && !DIRECT_WRITE_OVERRIDE_RE.test(request);
-    const explicitReadOnlyIntent = PLAN_INTENT_RE.test(request) || REVIEW_INTENT_RE.test(request) || EXPLORE_INTENT_RE.test(request);
-    const inheritedWriteIntent = request.length <= 80
-        && !explicitNoWrite
-        && !explicitReadOnlyIntent
-        && (hints.previousUserRequests ?? []).slice(-3).some(previous => {
-            const previousNoWrite = NO_WRITE_INTENT_RE.test(previous) && !DIRECT_WRITE_OVERRIDE_RE.test(previous);
-            return !previousNoWrite && WRITE_INTENT_RE.test(previous);
-        });
-    const hasWriteIntent = !explicitNoWrite && (WRITE_INTENT_RE.test(request) || inheritedWriteIntent);
-    // Deterministic resolution is the only resolver now, so it must not turn
-    // every ordinary mutation into a planning round-trip. Only an explicit plan
-    // request or broad/coupled scope resolves to Plan; Execute may inspect the
-    // repository within the user's requested scope before applying the change.
-    // The Agent escalates to Plan itself (enter_plan_mode) when it finds a
-    // user-owned decision that inspection cannot settle.
-    const fallbackWriteIntent: Exclude<AgentIntent, 'auto'> = PLAN_INTENT_RE.test(request)
-        || BROAD_TASK_RE.test(request)
-        ? 'plan'
-        : 'execute';
-    let intent: Exclude<AgentIntent, 'auto'>;
-    if (selection.intent !== 'auto') {
-        intent = selection.intent;
-    } else if (!hasWriteIntent && PLAN_INTENT_RE.test(request)) {
-        intent = 'plan';
-    } else if (!hasWriteIntent && REVIEW_INTENT_RE.test(request)) {
-        intent = 'review';
-    } else if (!hasWriteIntent && EXPLORE_INTENT_RE.test(request)) {
-        intent = 'explore';
-    } else {
-        intent = hasWriteIntent ? fallbackWriteIntent : 'explore';
-    }
+    // 'auto' is only reachable on the normal composer path, where no explicit
+    // user pin exists. It means "let the run start writable and let the Agent
+    // decide", so it resolves to an ordinary execution turn.
+    const intent: Exclude<AgentIntent, 'auto'> = selection.intent === 'auto' ? 'execute' : selection.intent;
 
     let strategy: Exclude<AgentExecutionStrategy, 'auto'>;
     if (selection.strategy !== 'auto') {
         strategy = selection.strategy;
     } else {
-        const explicitMulti = MULTI_AGENT_RE.test(request);
-        strategy = explicitMulti ? 'multi' : 'single';
+        strategy = MULTI_AGENT_RE.test(_text) ? 'multi' : 'single';
     }
 
-    const domainReason = 'user selection';
-    const intentReason = selection.intent === 'auto' ? 'request intent' : 'user selection';
+    const intentReason = selection.intent === 'auto' ? 'user selection (auto)' : 'user selection';
     const strategyReason = selection.strategy === 'auto' ? 'task scope' : 'user selection';
-
     const base = {
         selection,
         intent,
         strategy,
-        reason: `domain: ${domainReason}; intent: ${intentReason}; strategy: ${strategyReason}${BROAD_TASK_RE.test(request) ? '; runtime dispatch evaluation requested' : ''}`,
+        reason: `domain: user selection; intent: ${intentReason}; strategy: ${strategyReason}`,
         requiresUserDecision: false,
         routingSource: selection.intent === 'auto' ? 'deterministic' as const : 'manual' as const,
     };
-    const confidence = 1;
     const evidence = [
-        `domain: ${domainReason}`,
+        'domain: user selection',
         `intent: ${intentReason}`,
         `strategy: ${strategyReason}`,
-        ...(BROAD_TASK_RE.test(request) ? ['broad task requires runtime decomposition'] : []),
     ];
-    const admission = admissionFromResolvedProfile({ ...base, domain }, confidence, evidence);
+    const admission = admissionFromResolvedProfile({ ...base, domain }, 1, evidence);
     return {
         schedulingState: {
             ...schedulingForSelection(admission, selection),
@@ -155,4 +135,3 @@ export function resolveAgentProfile(
         },
     };
 }
-

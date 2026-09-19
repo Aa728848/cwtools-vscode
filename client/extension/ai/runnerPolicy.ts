@@ -59,8 +59,10 @@ export function shouldContinueAuthorizedExecution(
     mode: AgentMode,
     authorization: import('./types').AgentAuthorization,
     executionActionObserved: boolean,
+    approvedPlanExecution?: boolean,
 ): boolean {
-    return authorization === 'workspace_write'
+    return approvedPlanExecution === true
+        && authorization === 'workspace_write'
         && WRITE_EXECUTION_MODES.has(mode)
         && !executionActionObserved;
 }

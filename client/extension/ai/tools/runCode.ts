@@ -6,10 +6,20 @@
  * only host capability is a bounded tools.call(name, args) bridge. Every
  * bridged call is checked against the current model-visible snapshot and then
  * re-enters the ordinary runner policy/scheduler/write-queue pipeline.
+ *
+ * Model-authored TypeScript is erased by `./typeErasure` before evaluation.
+ * That step is token-aware on purpose: a regex pass cannot tell an object
+ * literal's `key: value` from a type annotation, and silently rewrote
+ * `{ isRegex: false }` into `{ isRegex }`, which then threw
+ * "ReferenceError: isRegex is not defined" inside the guest.
  */
 
 import { getQuickJS } from 'quickjs-emscripten';
+import { eraseTypeScript, stripTypeScriptTypes, type TypeErasureResult } from './typeErasure';
 import type { ToolDefinition } from '../types';
+
+export { eraseTypeScript, stripTypeScriptTypes };
+export type { TypeErasureResult };
 
 export type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue };
 
@@ -31,56 +41,6 @@ export const RUN_CODE_FANOUT_TIMEOUT_MS = 300_000;
 
 /** Prompt statement when running in exclusive PTC mode. */
 export const PTC_ONLY_INSTRUCTION = '`run_code` is the only tool you can call directly — a tool call naming any other tool fails. Reach every tool the SDK declares below from inside the program.';
-
-/**
- * Strip basic TypeScript type annotations and declarations so model-authored code
- * with erasable types can safely execute inside the pure JavaScript QuickJS guest.
- */
-export function stripTypeScriptTypes(source: string): string {
-    if (!source) return '';
-    // 0. Mask string literals so regex transforms cannot touch string contents
-    const stringPool: string[] = [];
-    let result = source.replace(/("(?:\[\s\S]|[^"\\])*"|'(?:\[\s\S]|[^'\\])*'|`(?:\[\s\S]|[^`\\])*`)/g, match => {
-        stringPool.push(match);
-        return `__CWTOOLS_STR_${stringPool.length - 1}__`;
-    });
-    // 1. Remove type-only imports and exports
-    result = result.replace(/^\s*import\s+type\s+[^;]+;?/gm, '');
-    result = result.replace(/^\s*export\s+type\s+[^;]+;?/gm, '');
-    result = result.replace(/^\s*export\s+interface\s+[^{]+{[^}]*}/gm, '');
-    // 2. Remove interface declarations
-    result = result.replace(/\binterface\s+[A-Za-z_$][\w$]*(?:\s*<[^>]*>)?(?:\s+extends\s+[^{]+)?\s*\{[^}]*\}/g, '');
-    // 3. Remove type aliases
-    result = result.replace(/\btype\s+[A-Za-z_$][\w$]*(?:\s*<[^>]*>)?\s*=[^;]+;/g, '');
-    // 4. Remove generic call type arguments on tools: tools.read_file<MyType>(args) -> tools.read_file(args)
-    result = result.replace(/(\btools\.[A-Za-z_$][\w$]*)\s*<[^>]+>\s*\(/g, '$1(');
-    // 5. Remove generic parameter declarations on functions: function foo<T, U>(...) -> function foo(...)
-    result = result.replace(/(\bfunction\s+[A-Za-z_$][\w$]*)\s*<[^>]+>\s*\(/g, '$1(');
-    // 6. Remove type assertions: expr as unknown as SomeType / expr as const
-    result = result.replace(/\s+as\s+(?:const|[A-Za-z_$][\w$]*(?:<[^>]*>)?(?:\s*\|\s*[A-Za-z_$][\w$]*(?:<[^>]*>)?)*(?:\[\])?)/g, '');
-    // 7. Remove non-null assertion before dot: x!.y -> x.y
-    result = result.replace(/([A-Za-z0-9_$\])])!\s*\./g, '$1.');
-    // 8. Remove variable type annotations: (const|let|var) foo: Type = ...
-    result = result.replace(/\b(const|let|var)\s+([A-Za-z_$][\w$]*)\s*:\s*(?:[A-Za-z_$][\w$]*(?:<[^>]*>)?(?:\s*\|\s*[A-Za-z_$][\w$]*(?:<[^>]*>)?)*(?:\[\])?)\s*(=)/g, '$1 $2 $3');
-    // 9. Remove function return type annotations: ): Type => or ): Type {
-    result = result.replace(/\)\s*:\s*(?:void|Promise<[^>]+>|[A-Za-z_$][\w$]*(?:<[^>]*>)?(?:\[\])?)\s*(?=[=>{])/g, ') ');
-    // 10. Remove function parameter type annotations: (param: Type, ...)
-    result = result.replace(/([(,]\s*[A-Za-z_$][\w$]*)\s*:\s*(?:string|number|boolean|any|unknown|void|null|undefined|Record<[^>]+>|Array<[^>]+>|[A-Za-z_$][\w$]*)(?:\[\])?\s*(?=[=,)])/g, '$1');
-    // 11. Transform simple enums into frozen JS objects
-    result = result.replace(/\benum\s+([A-Za-z_$][\w$]*)\s*\{([^}]+)\}/g, (_match, name, body) => {
-        const entries = body.split(',').map((entry: string) => {
-            const trimmed = entry.trim();
-            if (!trimmed) return '';
-            const [k, v] = trimmed.split('=').map((s: string) => s.trim());
-            if (v !== undefined) return `${k}: ${v}`;
-            return `${k}: ${JSON.stringify(k)}`;
-        }).filter(Boolean).join(', ');
-        return `const ${name} = Object.freeze({ ${entries} });`;
-    });
-    // 12. Restore masked string literals
-    result = result.replace(/__CWTOOLS_STR_(\d+)__/g, (_, idx) => stringPool[Number(idx)] || '');
-    return result;
-}
 
 /** Turn-driven or streaming capabilities cannot safely execute inside one tool call. */
 export const RUN_CODE_BLOCKED_TOOLS: ReadonlySet<string> = new Set([
@@ -204,8 +164,8 @@ function toLosslessJson(value: unknown, label: string): JsonValue {
                 Object.defineProperty(result, key, {
                     value: visit(descriptor.value, depth + 1),
                     enumerable: true,
-                    configurable: false,
-                    writable: false,
+                    configurable: true,
+                    writable: true,
                 });
             }
             return result;
@@ -438,7 +398,8 @@ export async function executeRunCodeProgram(
                     await acquireCallSlot();
                     try {
                         signal.throwIfAborted();
-                        const raw = await runTool(parsed.tool, argsValue, signal, Math.max(1, deadline - Date.now()));
+                        const mutableArgs: Record<string, unknown> = { ...argsValue };
+                        const raw = await runTool(parsed.tool, mutableArgs, signal, Math.max(1, deadline - Date.now()));
                         const value = toLosslessJson(raw, `Result from ${parsed.tool}`);
                         if (serializedLength(value) > RUN_CODE_MAX_RESULT_CHARS) throw new Error(`Result from '${parsed.tool}' exceeds the guest transfer bound; narrow the tool query.`);
                         if (!runCodeToolSucceeded(value)) {

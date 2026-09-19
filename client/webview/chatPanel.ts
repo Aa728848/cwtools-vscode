@@ -2344,23 +2344,29 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         }
 
         const preflightBar = document.getElementById('composerPreflightBar');
+        if (preflightBar) {
+            preflightBar.classList.add('hidden');
+        }
         const preflightTrigger = document.getElementById('preflightModeTrigger');
         const preflightLabel = document.getElementById('preflightModeLabel');
-        if (preflightBar) {
-            if (locked) {
-                preflightBar.classList.add('hidden');
-                setPreflightModeMenuOpen(false);
-            } else {
-                preflightBar.classList.remove('hidden');
-            }
-        }
+        const preflightChevron = document.getElementById('preflightModeChevron');
         if (preflightTrigger && preflightLabel) {
-            preflightLabel.textContent = mode === 'ptc'
-                ? (chatI18n.locale === 'zh-cn' ? 'PTC 模式' : 'PTC mode')
-                : (mode === 'hybrid'
-                    ? (chatI18n.locale === 'zh-cn' ? 'HYBRID 模式' : 'HYBRID mode')
-                    : (chatI18n.locale === 'zh-cn' ? 'NATIVE 模式' : 'NATIVE mode'));
+            preflightLabel.textContent = mode.toUpperCase();
             preflightTrigger.classList.toggle('mode-ptc', mode === 'ptc');
+            preflightTrigger.classList.toggle('mode-native', mode === 'native');
+            preflightTrigger.classList.toggle('is-locked', locked);
+            if (locked) {
+                setPreflightModeMenuOpen(false);
+                preflightTrigger.title = chatI18n.locale === 'zh-cn'
+                    ? `工具调用模式: ${mode.toUpperCase()}（首轮对话后已锁定）`
+                    : `Tool presentation mode: ${mode.toUpperCase()} (locked for this topic)`;
+                if (preflightChevron) preflightChevron.style.display = 'none';
+            } else {
+                preflightTrigger.title = chatI18n.locale === 'zh-cn'
+                    ? `选择工具调用模式（当前: ${mode.toUpperCase()}）`
+                    : `Select tool presentation mode (current: ${mode.toUpperCase()})`;
+                if (preflightChevron) preflightChevron.style.display = '';
+            }
         }
 
         const menuList = document.getElementById('preflightModeMenuList');
@@ -2378,44 +2384,20 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
 
     function setComposerMenuOpen(open: boolean) {
         const composerMenu = document.getElementById('composerMenu');
-        const domainMenu = document.getElementById('domainMenu');
-        const modelMenu = document.getElementById('modelMenu');
-        const reasoningMenu = document.getElementById('reasoningMenu');
-        const writeModeMenu = document.getElementById('writeModeMenu');
         const composerAddBtn = document.getElementById('composerAddBtn');
-        const quickDomainTrigger = document.getElementById('quickDomainTrigger');
-        const quickModelTrigger = document.getElementById('quickModelTrigger');
-        const quickReasoningTrigger = document.getElementById('quickReasoningTrigger');
-        const quickWriteModeTrigger = document.getElementById('quickWriteModeTrigger');
-        composerMenu?.classList.toggle('show', open);
-        composerMenu?.setAttribute('aria-hidden', open ? 'false' : 'true');
-        composerAddBtn?.classList.toggle('active', open);
+        if (!composerMenu || !composerAddBtn) return;
+        if (open) closeComposerMenus();
+        composerMenu.classList.toggle('show', open);
+        composerMenu.setAttribute('aria-hidden', open ? 'false' : 'true');
+        composerAddBtn.classList.toggle('active', open);
         if (open) positionComposerMenus();
-        if (open) {
-            domainMenu?.classList.remove('show');
-            domainMenu?.setAttribute('aria-hidden', 'true');
-            modelMenu?.classList.remove('show');
-            modelMenu?.setAttribute('aria-hidden', 'true');
-            reasoningMenu?.classList.remove('show');
-            reasoningMenu?.setAttribute('aria-hidden', 'true');
-            writeModeMenu?.classList.remove('show');
-            writeModeMenu?.setAttribute('aria-hidden', 'true');
-            quickModelTrigger?.classList.remove('active');
-            quickModelTrigger?.setAttribute('aria-expanded', 'false');
-            quickReasoningTrigger?.classList.remove('active');
-            quickReasoningTrigger?.setAttribute('aria-expanded', 'false');
-            quickDomainTrigger?.classList.remove('active');
-            quickDomainTrigger?.setAttribute('aria-expanded', 'false');
-            quickWriteModeTrigger?.classList.remove('active');
-            quickWriteModeTrigger?.setAttribute('aria-expanded', 'false');
-        }
     }
 
     function setDomainMenuOpen(open: boolean) {
         const domainMenu = document.getElementById('domainMenu');
         const quickDomainTrigger = document.getElementById('quickDomainTrigger');
         if (!domainMenu || !quickDomainTrigger) return;
-        closeComposerMenus();
+        if (open) closeComposerMenus();
         domainMenu.classList.toggle('show', open);
         domainMenu.setAttribute('aria-hidden', open ? 'false' : 'true');
         quickDomainTrigger.classList.toggle('active', open);
@@ -2424,45 +2406,22 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
     }
 
     function setModelMenuOpen(open: boolean) {
-        const composerMenu = document.getElementById('composerMenu');
-        const domainMenu = document.getElementById('domainMenu');
         const modelMenu = document.getElementById('modelMenu');
-        const reasoningMenu = document.getElementById('reasoningMenu');
-        const writeModeMenu = document.getElementById('writeModeMenu');
-        const composerAddBtn = document.getElementById('composerAddBtn');
-        const quickDomainTrigger = document.getElementById('quickDomainTrigger');
         const quickModelTrigger = document.getElementById('quickModelTrigger');
-        const quickReasoningTrigger = document.getElementById('quickReasoningTrigger');
-        const quickWriteModeTrigger = document.getElementById('quickWriteModeTrigger');
-        modelMenu?.classList.toggle('show', open);
-        modelMenu?.setAttribute('aria-hidden', open ? 'false' : 'true');
-        quickModelTrigger?.classList.toggle('active', open);
-        quickModelTrigger?.setAttribute('aria-expanded', open ? 'true' : 'false');
+        if (!modelMenu || !quickModelTrigger) return;
+        if (open) closeComposerMenus();
+        modelMenu.classList.toggle('show', open);
+        modelMenu.setAttribute('aria-hidden', open ? 'false' : 'true');
+        quickModelTrigger.classList.toggle('active', open);
+        quickModelTrigger.setAttribute('aria-expanded', open ? 'true' : 'false');
         if (open) positionComposerMenus();
-        if (open) {
-            composerMenu?.classList.remove('show');
-            composerMenu?.setAttribute('aria-hidden', 'true');
-            domainMenu?.classList.remove('show');
-            domainMenu?.setAttribute('aria-hidden', 'true');
-            reasoningMenu?.classList.remove('show');
-            reasoningMenu?.setAttribute('aria-hidden', 'true');
-            writeModeMenu?.classList.remove('show');
-            writeModeMenu?.setAttribute('aria-hidden', 'true');
-            composerAddBtn?.classList.remove('active');
-            quickDomainTrigger?.classList.remove('active');
-            quickDomainTrigger?.setAttribute('aria-expanded', 'false');
-            quickReasoningTrigger?.classList.remove('active');
-            quickReasoningTrigger?.setAttribute('aria-expanded', 'false');
-            quickWriteModeTrigger?.classList.remove('active');
-            quickWriteModeTrigger?.setAttribute('aria-expanded', 'false');
-        }
     }
 
     function setReasoningMenuOpen(open: boolean) {
         const reasoningMenu = document.getElementById('reasoningMenu');
         const quickReasoningTrigger = document.getElementById('quickReasoningTrigger');
         if (!reasoningMenu || !quickReasoningTrigger) return;
-        closeComposerMenus();
+        if (open) closeComposerMenus();
         reasoningMenu.classList.toggle('show', open);
         reasoningMenu.setAttribute('aria-hidden', open ? 'false' : 'true');
         quickReasoningTrigger.classList.toggle('active', open);
@@ -2471,38 +2430,15 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
     }
 
     function setWriteModeMenuOpen(open: boolean) {
-        const composerMenu = document.getElementById('composerMenu');
-        const domainMenu = document.getElementById('domainMenu');
-        const modelMenu = document.getElementById('modelMenu');
-        const reasoningMenu = document.getElementById('reasoningMenu');
         const writeModeMenu = document.getElementById('writeModeMenu');
-        const composerAddBtn = document.getElementById('composerAddBtn');
-        const quickDomainTrigger = document.getElementById('quickDomainTrigger');
-        const quickModelTrigger = document.getElementById('quickModelTrigger');
-        const quickReasoningTrigger = document.getElementById('quickReasoningTrigger');
         const quickWriteModeTrigger = document.getElementById('quickWriteModeTrigger');
-        writeModeMenu?.classList.toggle('show', open);
-        writeModeMenu?.setAttribute('aria-hidden', open ? 'false' : 'true');
-        quickWriteModeTrigger?.classList.toggle('active', open);
-        quickWriteModeTrigger?.setAttribute('aria-expanded', open ? 'true' : 'false');
+        if (!writeModeMenu || !quickWriteModeTrigger) return;
+        if (open) closeComposerMenus();
+        writeModeMenu.classList.toggle('show', open);
+        writeModeMenu.setAttribute('aria-hidden', open ? 'false' : 'true');
+        quickWriteModeTrigger.classList.toggle('active', open);
+        quickWriteModeTrigger.setAttribute('aria-expanded', open ? 'true' : 'false');
         if (open) positionComposerMenus();
-        if (open) {
-            composerMenu?.classList.remove('show');
-            composerMenu?.setAttribute('aria-hidden', 'true');
-            domainMenu?.classList.remove('show');
-            domainMenu?.setAttribute('aria-hidden', 'true');
-            modelMenu?.classList.remove('show');
-            modelMenu?.setAttribute('aria-hidden', 'true');
-            reasoningMenu?.classList.remove('show');
-            reasoningMenu?.setAttribute('aria-hidden', 'true');
-            composerAddBtn?.classList.remove('active');
-            quickDomainTrigger?.classList.remove('active');
-            quickDomainTrigger?.setAttribute('aria-expanded', 'false');
-            quickModelTrigger?.classList.remove('active');
-            quickModelTrigger?.setAttribute('aria-expanded', 'false');
-            quickReasoningTrigger?.classList.remove('active');
-            quickReasoningTrigger?.setAttribute('aria-expanded', 'false');
-        }
     }
 
     function positionComposerMenus(): void {
@@ -2958,6 +2894,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
     const preflightModeTrigger = document.getElementById('preflightModeTrigger');
     preflightModeTrigger?.addEventListener('click', e => {
         e.stopPropagation();
+        if (isToolPresentationModeLocked) return;
         const preflightModeMenu = document.getElementById('preflightModeMenu');
         setPreflightModeMenuOpen(!preflightModeMenu?.classList.contains('show'));
     });
@@ -5676,9 +5613,9 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         const label = document.createElement('span');
         const resolved = parseSchedulingStateView(state);
         if (phase === 'classifying') {
-            label.textContent = tr('Judging the task mode from its meaning…', '正在根据需求语义判断任务模式…');
+            label.textContent = tr('Resolving the turn mode…', '正在解析本轮任务模式…');
         } else if (phase === 'fallback') {
-            label.textContent = tr('Semantic routing was unavailable; using the safe rule fallback…', '语义路由暂不可用，正在使用安全规则回退…');
+            label.textContent = tr('The Agent decides the mode through the conversation.', '任务模式由智能体在对话中自行决定。');
         } else if (resolved) {
             label.textContent = resolved.awaitingUserDecision
                 ? tr('A user decision is required; execution remains blocked.', '需要用户敲定关键选择，本轮不会进入执行。')
@@ -5766,13 +5703,15 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
             routing.className = `agent-routing-status agent-routing-${resolved.phase}`;
             const summary = document.createElement('summary');
             summary.className = 'agent-routing-summary';
-            const sourceLabel = resolved.routingSource === 'model'
-                ? tr('Semantic routing', '语义路由')
-                : resolved.routingSource === 'workflow'
-                    ? tr('Workflow scheduling', '工作流调度')
-                    : resolved.routingSource === 'user'
-                        ? tr('User scheduling', '用户调度')
-                        : tr('Rule routing', '规则路由');
+            // Only two sources remain: the user pinning a mode, and the Agent's
+            // own mode escalation. The keyword router is gone, so neither the
+            // 'model' (semantic classifier) nor the 'deterministic' (rule)
+            // label describes a real path any more; both read as "Agent".
+            const sourceLabel = resolved.routingSource === 'workflow'
+                ? tr('Workflow scheduling', '工作流调度')
+                : resolved.routingSource === 'user'
+                    ? tr('User scheduling', '用户调度')
+                    : tr('Agent scheduling', '智能体调度');
             summary.textContent = resolved.awaitingUserDecision
                 ? `${sourceLabel} · ${tr('Awaiting your decision', '等待用户敲定')} · ${schedulingPhaseLabel(resolved.phase)}`
                 : `${sourceLabel} · ${schedulingPhaseLabel(resolved.phase)} · ${schedulingDispatchLabel(resolved.dispatch)} · ${schedulingAuthorizationLabel(resolved.authorization)}`;

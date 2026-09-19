@@ -1,5 +1,30 @@
 # Changelog
 
+## [2.20.0] - 2026-09-19
+
+### PTC 与 NATIVE 工具呈现模式及子调用流式可视化 / Tool Presentation Modes & Streaming Subcalls
+- **[特性] 新增 PTC 与 NATIVE 工具呈现分流机制（Tool Presentation Modes）**：
+  - **呈现分流体系**：引入 `ToolPresentationMode = 'ptc' | 'native' | 'hybrid'`，支持在 AI 设置中全局配置并在 `ChatTopic` 中持久化；在话题首轮输入前支持自由选择，发送后即刻随话题锁定，保证上下文一致性。
+  - **Schema 载荷投影与冷启动死锁消除**：在 `ptc` 模式下，大模型 API 载荷仅暴露唯一的 `run_code` 工具，其余原生工具全量收敛为沙箱内可编程能力池，大幅削减 Schema 占用的 Token 开销；同时将 `run_code` 加入 `ALWAYS_DISCLOSED_TOOLS`，彻底杜绝动态工具披露策略下的首轮死锁隐患。
+  - **子调用（Subcall）实时流式呈现**：执行脚本期间，沙箱内部发起的每次工具调用均以独立 `subcall` 步骤实时发射；活动流水线将其渲染为带有微型 `<span class="codex-subcall-pill">PTC</span>` 徽标的独立活动项，结果摘要展示双语执行次数统计，彻底杜绝原始 JSON 暴露。
+  - **输入栏与顶部栏交互重构**：废除输入框上方生硬的预选横条与顶部红色冲突徽章，将模式切换按钮以 `.composer-tool-mode-trigger` 优雅嵌入底部工具栏（30px 通用规格、中轴基线像素级对齐），并构建严格的下拉菜单互斥机制。
+  - English: [Feature] Tool presentation modes & streaming subcalls — introduced `ToolPresentationMode` (`ptc` | `native` | `hybrid`) with per-topic lifecycle persistence and topic-bound locking; projected model-facing tools in PTC mode to expose only `run_code` to save massive schema tokens while keeping all tools callable in sandbox; marked `run_code` always disclosed to eliminate cold-start deadlocks; streamed nested subcalls in real time with dedicated `<span class="codex-subcall-pill">PTC</span>` badges and bilingual execution counts without exposing raw JSON; embedded the mode trigger into composer bottom bar with pixel-perfect baseline alignment and strict menu mutual exclusion.
+
+### 纯词法感知的 TypeScript 类型擦除引擎与沙箱加固 / Lexical Type Erasure & Sandbox Hardening
+- **[重构] 全新纯分词词法感知类型擦除引擎（Lexical Type Erasure Engine）**：
+  - **分词隔离与零污染**：新增独立分词擦除引擎 `typeErasure.ts`，彻底替代易误伤代码的复杂正则匹配；独立扫描并保护字符串字面量、嵌套模板、正则字面量与注释，杜绝源码内容被误伤改写。
+  - **修复对象字面量布尔值误删缺陷**：彻底修复旧正则将 `{ isRegex: false, limit: 40 }` 误改写为 `{ isRegex, limit: 40 }` 导致 QuickJS 严格模式抛出 `ReferenceError: isRegex is not defined` 的致命问题，使带布尔及可选参数的脚本调用完全恢复可用。
+  - **真实运行时语义保留与常量计算**：数值枚举支持常量表达式（`1 + 2`/`1 << 2`）求值与自引用（IIFE 作用域包裹）；构造函数参数属性（`constructor(private x: number)`）自动补全字段初始化赋值（`this.x = x`）；泛型与比较运算符通过内容守卫消歧；完整保留 ECMAScript 运行时修饰符与语法。
+  - **彻底解决沙箱对象只读报错**：将沙箱属性生成调整为 `writable: true` 并在宿主工具分发层进行浅拷贝解构，彻底杜绝工具就地重写属性时触发严格模式只读锁定（`Cannot assign to read only property`）。
+  - English: [Refactor] Lexical type erasure engine & sandbox hardening — replaced brittle regexes with a dedicated tokenizer in `typeErasure.ts` that safely masks string literals, nested template interpolations, regexes, and comments; resolved a critical bug where object literal values (`{ isRegex: false }`) were deleted causing `ReferenceError: isRegex is not defined`; evaluated enum constant expressions and self-references within IIFEs; restored constructor parameter properties via automatic field assignments (`this.x = x`); resolved generic vs. comparison ambiguities; eliminated `Cannot assign to read only property` errors by enabling `writable: true` and shallow argument cloning.
+
+### 确定性任务模式调度与计划审批边界收敛 / Deterministic Intent & Plan Boundary
+- **[重构] 彻底退役关键词自动路由并收敛计划审批判定边界（Deterministic Intent & Plan Boundary）**：
+  - **移除关键词自动路由**：彻底移除 `agentProfile.ts` 中的全部关键词正则路由（`PLAN_INTENT_RE`、`WRITE_INTENT_RE` 等），普通对话中出现“方案/规划/设计”等词汇不再被误判为计划模式，彻底杜绝工作区写入权限被静默剥夺的问题。
+  - **确定性任务模式调度**：任务模式来源完全收敛为两处确定性入口：用户显式指定（如 `/plan`）与 Agent 运行中显式调用 `enter_plan_mode` 升级；未指定时默认解析为可写 `execute`。
+  - **严格收敛计划审批卡弹出边界**：在 `executePlanHandoff` 中彻底移除非计划模式下的宽泛 Markdown 标题检测，确立严格守卫条件——只有在显式处于 `plan` 模式、工具调用了 `write_design_blueprint`、或正文包含完整计划合约块时才触发计划审批卡，普通技术长文解答恢复正常流畅回复。
+  - English: [Refactor] Deterministic intent & plan boundary — retired all keyword regex matching from `agentProfile.ts`, ensuring regular queries mentioning "plan/design" are never silently downgraded to read-only plan mode; converged task mode resolution strictly to user explicit pins or agent `enter_plan_mode` upgrades; removed loose heading heuristics from `executePlanHandoff` so plan approval cards only render for explicit plan modes or formal contract blocks, allowing lengthy technical explanations to stream smoothly.
+
 ## [2.19.0] - 2026-09-18
 
 ### Agent Teams 同行协作与统一看板底座 / Agent Teams Peer Collaboration & Unified Multi-Agent Board Substrate

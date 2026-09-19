@@ -9,7 +9,8 @@ the task needs it.
 Before editing:
 
 1. Run `git status --short` and preserve unrelated working-tree changes.
-2. Use targeted `rg` searches; do not dump the entire repository tree unless
+2. For non-trivial modifications to existing subsystems, features, or architectures, search `.agents/notes/implemented/` for the note owning that decision (Owning Note) to review past constraints, design rationale, and rejected alternatives before modifying code.
+3. Use targeted `rg` searches; do not dump the entire repository tree unless
    it is genuinely needed.
 
 Read supporting documents by task:
@@ -34,11 +35,17 @@ Read supporting documents by task:
   and `release/package.json` are the sources of truth.
 - Keep comments and changelog entries concise and explain only non-obvious
   constraints or user-visible behavior.
-- Record an Agent Note in `.agents/notes/` for every non-trivial change (features,
+- One home per fact: product behavior and user-facing features belong in `README.md` / docs,
+  architecture boundaries and data flows belong in `ARCHITECTURE.md`, and design rationale,
+  rejected alternatives, and trade-offs belong in Agent Notes. Link across tiers; do not
+  duplicate rules.
+- Record or update an Agent Note in `.agents/notes/` for every non-trivial change (features,
   bug fixes, simplifications, architecture adjustments, testing or process changes)
-  within the same change. Follow the closed 6-class taxonomy and template in
-  `.agents/notes/README.md`, writing all notes in Simplified Chinese (supplementing
-  with flowcharts and I/O diagrams where necessary).
+  within the same change. Follow the closed 6-class taxonomy, format, and Owning Note
+  rules in `.agents/notes/README.md` and `.agents/notes/implemented/AGENTS.md`, writing all
+  notes in Simplified Chinese (supplementing with flowcharts and I/O diagrams where necessary).
+  Updating the note that already owns the decision satisfies the rule; a new note is required
+  only when no note owns it or when an explicit successor is needed.
 
 ## Coding Rules
 

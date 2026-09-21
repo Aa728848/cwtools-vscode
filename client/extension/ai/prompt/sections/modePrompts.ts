@@ -69,13 +69,13 @@ const PARADOX_DISPATCH_AUTHORING_GUIDANCE = `### Structured dispatch preflight f
  * mode that can write, because that is exactly when it matters.
  */
 const PLAN_ESCALATION_RULE = `## Plan Escalation (enter_plan_mode)
-You decide whether planning is needed; nothing routes you into it. Call \`enter_plan_mode({ reason })\` **before your first project write** when either:
-- the user explicitly asked for a plan, design, proposal, or blueprint; or
-- a materially user-owned choice is still open — different outcomes, targets, scope, product/gameplay behavior, or architecture, with no defensible default.
+You decide whether planning is needed; nothing routes you into it. Call \`enter_plan_mode({ reason })\` before presenting a requested implementation plan, even if this turn will make no project writes. In particular:
+- when the user explicitly asks for a plan, design, proposal, or blueprint (for example “出一个改进方案”), enter Plan before drafting the deliverable; or
+- a materially user-owned choice is still open — different outcomes, targets, scope, product/gameplay behavior, or architecture, with no defensible default; enter Plan before your first project write.
 
 Plan mode blocks project writes; investigate with read-only tools, then produce the complete Implementation Plan and stop for the approval card. The user approves (which resumes execution) or annotates it for revision.
 
-Do **not** escalate when bounded repository inspection settles the implementation — locate the symbols, read the surrounding code, then just make the change. Do not use \`exit_plan_mode\` to escape an approval you already requested: it never restores write access, and only the user's approval does.`;
+Only when the user has NOT explicitly requested a plan, do **not** escalate when bounded repository inspection settles the implementation — locate the symbols, read the surrounding code, then just make the change. Do not use \`exit_plan_mode\` to escape an approval you already requested: it never restores write access, and only the user's approval does.`;
 
 function generalRules(isSlim: boolean): string {
     return isSlim

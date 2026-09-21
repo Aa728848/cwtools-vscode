@@ -18,7 +18,7 @@ Status: implemented
 
 新增两个模型可见工具：
 
-- **`enter_plan_mode({ reason })`**：模型在**首次项目写入之前**调用，把本回合切到 Plan。实现上通过 `transitionSchedulingState` 把授权从 `workspace_write` 收窄到 `plan_write_only`、phase 切到 `plan`。
+- **`enter_plan_mode({ reason })`**：用户明确要求实施方案时，模型在产出方案之前调用，即使本轮不写项目文件；否则在发现未决的用户选择后、首次项目写入之前调用，把本回合切到 Plan。实现上通过 `transitionSchedulingState` 把授权从 `workspace_write` 收窄到 `plan_write_only`、phase 切到 `plan`。
 - **`exit_plan_mode({ reason })`**：仅在调查证明"确实不需要规划"时使用，phase 回到 `inspect`。**
 
 **关键实现细节（本次踩到并修正的真实缺陷）**：`AgentToolExecutor.execute` 为每次调用构造一份 **runnerOptions 拷贝**，并把 `schedulingState` **冻结在入口值**（`agentTools.ts` 的 `toolContext`）。因此 `context.runnerOptions.schedulingState = next` 只会改到那份拷贝，状态变更无法回流。改为 `Object.assign(runnerState, next)` —— **原地改写 state 对象**，这样每次工具调用实时读取 `schedulingState.phase` 的 plan guard（`agentTools.ts` 的 `runtimePlanPhase` 判定）立刻生效，runner 也保留同一引用用于回合结束后的持久化 phase。
@@ -38,7 +38,7 @@ Status: implemented
 ### 4. 提示词与审批链路
 
 - 新增 `PLAN_ESCALATION_RULE` 共享段落，挂到 `buildBuildSystemPrompt`（Paradox build）与 `generalRules`（general-coder/utility）：明确"由你决定是否需要规划""有用户拥有的未决选择或用户明确要方案时先调 `enter_plan_mode`""仓库检查即可确定实现时不要升级""不得用 `exit_plan_mode` 逃避已请求的审批"。
-- **审批 UI 与链路一行未动**：计划卡片（`plan_card` 渲染）、双按钮（批准 → `submitPlanAnnotations` → `beginApprovedPlanExecution`；批注 → `revisePlanWithAnnotations` → 改计划后重新出卡）完全复用现有实现。本次只替换了"谁触发进入计划模式"。
+- 计划卡片（`plan_card` 渲染）及批准/批注入口保持不变；提交凭据交接和失败处理由[审批卡说明](../bug-fix/2026-09-07-plan-approval-card-display-and-dismiss-race.md)拥有。明确要求方案优先于“检查即可确定实现”的不升级例外；不恢复关键词路由。
 
 ```mermaid
 flowchart TD

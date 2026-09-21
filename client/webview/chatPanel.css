@@ -695,6 +695,47 @@ body.side-workspace-wide { --active-side-workspace-width: var(--side-workspace-w
 .md-codeblock-copy:hover { opacity:1 !important; background:rgba(255,255,255,0.15); }
 .md-codeblock-copy.copied { color:var(--success); }
 
+/* ── Mathematical formula rendering (MathML) ── */
+.msg-bubble .md-math-block,
+.md-math-block {
+    display: block;
+    margin: 8px 0;
+    padding: 8px 12px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    text-align: center;
+    background: var(--code-bg, rgba(255, 255, 255, 0.03));
+    border: 1px solid var(--border, rgba(255, 255, 255, 0.08));
+    border-radius: 6px;
+    font-size: 1.05em;
+    line-height: 1.5;
+    color: var(--fg, inherit);
+}
+.msg-bubble .md-math-block math,
+.md-math-block math {
+    display: inline-block;
+    vertical-align: middle;
+}
+.msg-bubble .md-math-inline,
+.md-math-inline {
+    display: inline;
+    padding: 0 2px;
+    font-size: 1em;
+    vertical-align: baseline;
+}
+.msg-bubble .md-math-inline math,
+.md-math-inline math {
+    display: inline;
+}
+.msg-bubble .md-math-fallback,
+.md-math-fallback {
+    font-family: var(--vscode-editor-font-family, monospace);
+    font-size: 0.9em;
+    background: rgba(255, 255, 255, 0.08);
+    border-radius: 3px;
+    padding: 2px 6px;
+}
+
 /* Mermaid diagrams emitted by architecture/analysis responses. The source stays
    in the DOM for copy/error fallback while the rendered SVG is isolated here. */
 .md-mermaid {

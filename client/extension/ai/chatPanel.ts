@@ -89,7 +89,7 @@ import {
     prepareLiveStepForUi,
     UI_TOOL_RESULT_BUDGET,
 } from './chat/uiStepCompaction';
-import { hasImplementationPlanArtifact, parseImplementationPlanBlueprint, shouldRenderInteractivePlan } from './executePlanHandoff';
+import { hasImplementationPlanArtifact, loadPendingPlanText, parseImplementationPlanBlueprint, shouldRenderInteractivePlan } from './executePlanHandoff';
 import {
     getSlashCommandDescriptors,
     resolveSlashCommand,
@@ -1265,7 +1265,13 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                 .find(message => message.role === 'user' && !message.runId);
             if (latestUserHistory && durableRunId) latestUserHistory.runId = durableRunId;
             const topicId = runTopicId || 'default';
-            const generatedPlanPath = this.findGeneratedTopicFile(topicId, 'Implementation_Plan.md');
+            // Use the final mode before deciding whether a plan should be presented.
+            if (result.finalSchedulingState) {
+                turnMode = executionModeForSchedulingState(result.finalSchedulingState);
+            }
+            const pendingPlan = approvedPlanExecution ? undefined : result.pendingPlanApproval;
+            const generatedPlanPath = pendingPlan?.filePath
+                ?? this.findGeneratedTopicFile(topicId, 'Implementation_Plan.md');
             const successfulToolInvocations = new Set(result.steps
                 .filter(step => step.type === 'tool_result'
                     && typeof step.invocationId === 'string'
@@ -1289,7 +1295,8 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                 && successfulToolInvocations.has(step.invocationId)
                 && approvalReadyInvocations.has(step.invocationId));
             const hasCurrentPlanArtifact = !!generatedPlanPath && (
-                wroteUnifiedBlueprintPlan
+                !!pendingPlan
+                || wroteUnifiedBlueprintPlan
                 || hasImplementationPlanArtifact(result.steps, {
                     expectedPath: generatedPlanPath,
                     workspaceRoot: getProjectWorkspaceRoot(),
@@ -1297,15 +1304,23 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                 || hasImplementationPlanArtifact(result.steps)
                 || turnMode === 'plan'
             );
-            let interactivePlanText = result.explanation;
+            let interactivePlanText = pendingPlan?.planText ?? result.explanation;
             if (generatedPlanPath && hasCurrentPlanArtifact) {
                 try {
-                    interactivePlanText = (await fs.promises.readFile(generatedPlanPath, 'utf-8')).replace(/^\uFEFF/, '');
+                    interactivePlanText = pendingPlan
+                        ? await loadPendingPlanText(pendingPlan, file => fs.promises.readFile(file, 'utf-8'))
+                        : (await fs.promises.readFile(generatedPlanPath, 'utf-8')).replace(/^\uFEFF/, '');
                 } catch (error) {
                     ErrorReporter.warn(SOURCE.CHAT_PANEL, 'Failed to read the generated Implementation_Plan.md; using the response text', error);
+                    if (pendingPlan) {
+                        throw new Error(aiText(
+                            'The submitted plan could not be loaded. No approval card was created; ask the agent to resubmit the plan. Execution has not been approved.',
+                            '无法读取已提交的计划，审批卡未生成；请让 Agent 重新提交计划。执行尚未获批。',
+                        ));
+                    }
                 }
             }
-            const hasInteractivePlan = shouldRenderInteractivePlan(result, {
+            const hasInteractivePlan = !!pendingPlan || shouldRenderInteractivePlan(result, {
                 mode: turnMode,
                 planText: interactivePlanText,
                 hasCurrentPlanArtifact,

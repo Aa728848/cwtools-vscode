@@ -10,6 +10,14 @@ import {
 } from '../../extension/ai/prompt/sections/modePrompts';
 
 describe('plan mode prompts', () => {
+    it('requires explicit plan requests to enter Plan even without project writes', () => {
+        for (const prompt of [buildBuildSystemPrompt('', 'Stellaris', false), buildGeneralCodingSystemPrompt(false)]) {
+            expect(prompt).to.include('even if this turn will make no project writes');
+            expect(prompt).to.include('before drafting the deliverable');
+            expect(prompt).to.include('Only when the user has NOT explicitly requested a plan');
+        }
+    });
+
     it('uses the structured question tool for blocking plan decisions', () => {
         const paradox = buildPlanModeSystemPrompt('', 'Stellaris');
         expect(paradox).to.include('call `ask_user_question` as the only tool call');

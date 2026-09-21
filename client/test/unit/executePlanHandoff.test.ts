@@ -1,6 +1,8 @@
 import { expect } from 'chai';
 import {
     buildApprovedPlanExecutionReminder,
+    getPendingPlanApproval,
+    loadPendingPlanText,
     isCompleteImplementationPlanWrite,
     shouldRenderInteractivePlan,
     shouldPauseForInteractivePlan,
@@ -86,6 +88,53 @@ ${JSON.stringify({
 }
 
 describe('Execute-to-Plan handoff', () => {
+    it('preserves the submitted plan text for direct and PTC calls', () => {
+        for (const subcall of [false, true]) {
+            const plan = completePlan();
+            const call = { ...toolCall('write_file', '.cwtools/topic/Implementation_Plan.md'),
+                toolArgs: { file: '.cwtools/topic/Implementation_Plan.md', content: plan }, subcall };
+            const receipt = getPendingPlanApproval([call, { ...successfulToolResult('write_file'), subcall }]);
+            expect(receipt).to.deep.equal({ invocationId: 'write_file-1',
+                filePath: '.cwtools/topic/Implementation_Plan.md', planText: plan });
+        }
+    });
+
+    it('rejects failed, skipped and uncorrelated submissions', () => {
+        const call = { ...toolCall('write_file', '.cwtools/topic/Implementation_Plan.md'),
+            toolArgs: { file: '.cwtools/topic/Implementation_Plan.md', content: completePlan() } };
+        for (const toolResult of [{ success: false }, { success: true, skipped: true }, { ok: false }, { error: 'denied' }]) {
+            expect(getPendingPlanApproval([call, { ...successfulToolResult('write_file'), toolResult }])).to.equal(undefined);
+        }
+        expect(getPendingPlanApproval([call])).to.equal(undefined);
+        expect(getPendingPlanApproval([call, successfulToolResult('write_file', 'other')])).to.equal(undefined);
+        expect(getPendingPlanApproval([])).to.equal(undefined);
+    });
+
+    it('uses submitted content even when the file cannot be read', async () => {
+        const planText = completePlan();
+        const text = await loadPendingPlanText({ invocationId: 'submit', filePath: '/missing', planText },
+            async () => { throw new Error('missing'); });
+        expect(text).to.equal(planText);
+    });
+
+    it('propagates unreadable and empty blueprint artifacts instead of a waiting message', async () => {
+        for (const readText of [async () => { throw new Error('missing'); }, async () => '   ']) {
+            let failure: unknown;
+            try {
+                await loadPendingPlanText({ invocationId: 'submit', filePath: '/missing' }, readText);
+            } catch (error) { failure = error; }
+            expect(failure).to.be.instanceOf(Error);
+        }
+    });
+
+    it('accepts only approval-ready blueprint artifacts', () => {
+        const call = { ...toolCall('write_design_blueprint'), toolArgs: { blueprint: {} } };
+        const result = { ...successfulToolResult('write_design_blueprint'),
+            toolResult: { success: true, approvalReady: true, filePath: '/topic/Implementation_Plan.md' } };
+        expect(getPendingPlanApproval([call, result])?.filePath).to.equal('/topic/Implementation_Plan.md');
+        expect(getPendingPlanApproval([call, { ...result, toolResult: { ...result.toolResult, approvalReady: false } }])).to.equal(undefined);
+    });
+
     it('never turns Explore prose into an approvable plan', () => {
         const explanation = 'The implementation plan is ready for approval. Confirm and I will execute it.';
         expect(shouldRenderInteractivePlan({ explanation, steps: [] }, {

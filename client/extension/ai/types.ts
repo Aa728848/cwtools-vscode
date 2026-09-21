@@ -2364,7 +2364,16 @@ export type {
     DiffArtifactData,
 };
 
+/** Host-authored receipt for a successfully submitted plan (including PTC subcalls). */
+export interface PendingPlanApproval {
+    invocationId: string;
+    filePath: string;
+    planText?: string;
+}
+
 export interface GenerationResult {
+    pendingPlanApproval?: PendingPlanApproval;
+    finalSchedulingState?: AgentSchedulingState;
     /** Durable run id for this generation. */
     runId?: string;
     code: string;

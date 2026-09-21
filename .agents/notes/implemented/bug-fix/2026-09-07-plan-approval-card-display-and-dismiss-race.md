@@ -17,6 +17,9 @@ Status: implemented
    - 在 `renderInspector` 的签名比对中，增加 `hostHasAllEntries` 校验，确保宿主容器内确实已挂载所有条目节点，防止假性命中缓存导致的空界面。
    - `applyEmbeddedWorkbenchContent` 收到条目更新时，强制递增工作区渲染版本并清空缓存签名，确保立即触发重绘挂载。
 
+5. **运行结果显式交接计划**：`GenerationResult.pendingPlanApproval` 携带本轮成功且 invocationId 匹配的提交凭据、产物路径及普通计划写入正文，原生调用和 PTC 子调用共用识别逻辑。界面先读取 `finalSchedulingState` 再判定卡片；有提交凭据时不再依据旧模式、等待文案或磁盘目录猜测。蓝图读取失败显式报错并要求重新提交，不留下不可操作的等待提示。
+6. **PTC 审批边界**：嵌套计划写入成功后设置运行级待审批状态，后续执行类子调用被拒绝，外层程序结束后停止等待用户。
+
 ## Alternatives considered
 - **仅延长 `dismissCard` 的定时器延时**：否决。异步定时器本质上属于不可控的竞态隐患，在快速消息交互或重渲染流中依然可能在卡片复用之后触发。
 - **将计划审批卡改为弹窗 Modal 拦截**：否决。破坏了现有的可注释（Annotatable）设计规范与平铺审查交互模式。

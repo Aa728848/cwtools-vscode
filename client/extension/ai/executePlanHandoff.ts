@@ -1,5 +1,5 @@
 import * as path from 'path';
-import type { AgentMode, AgentStep } from './types';
+import type { AgentMode, AgentStep, PendingPlanApproval } from './types';
 import { WRITE_TOOLS } from './tools/registry';
 
 const PLAN_ARTIFACT_PATTERN = /(?:^|[\\/])implementation_plan\.md$/i;
@@ -356,11 +356,13 @@ export function validateImplementationPlan(planText: string): ImplementationPlan
     };
 }
 
-function toolResultSucceeded(step: AgentStep): boolean {
+function toolResultSucceeded(step: AgentStep): step is AgentStep & { toolResult: Record<string, unknown> } {
     if (step.type !== 'tool_result' || !step.toolResult
         || typeof step.toolResult !== 'object' || Array.isArray(step.toolResult)) return false;
     const result = step.toolResult as Record<string, unknown>;
-    return result.success !== false && result.ok !== false && result.error === undefined;
+    return result.success !== false && result.ok !== false && result.error === undefined
+        && result.skipped !== true
+        && (typeof result.exitCode !== 'number' || result.exitCode === 0);
 }
 
 function sameArtifactPath(target: string, expectedPath: string, workspaceRoot?: string): boolean {
@@ -371,6 +373,39 @@ function sameArtifactPath(target: string, expectedPath: string, workspaceRoot?: 
     return process.platform === 'win32'
         ? resolvedTarget.toLowerCase() === resolvedExpected.toLowerCase()
         : resolvedTarget === resolvedExpected;
+}
+
+/** Recover only successful, correlated submissions, never prose or stale disk files. */
+export function getPendingPlanApproval(steps: readonly AgentStep[]): PendingPlanApproval | undefined {
+    for (const step of [...steps].reverse()) {
+        if (!toolResultSucceeded(step) || !step.invocationId) continue;
+        const call = steps.find(candidate => candidate.type === 'tool_call'
+            && candidate.invocationId === step.invocationId && candidate.toolName === step.toolName);
+        if (!call?.toolName || !call.toolArgs) continue;
+        const result = step.toolResult;
+        if (call.toolName === 'write_design_blueprint') {
+            if (result.approvalReady === true && typeof result.filePath === 'string'
+                && PLAN_ARTIFACT_PATTERN.test(result.filePath)) {
+                return { invocationId: step.invocationId, filePath: result.filePath };
+            }
+        } else if (isCompleteImplementationPlanWrite(call.toolName, call.toolArgs, [])) {
+            const content = call.toolArgs.content;
+            if (typeof content === 'string') {
+                return { invocationId: step.invocationId, filePath: targetPath(call), planText: content };
+            }
+        }
+    }
+    return undefined;
+}
+
+/** Resolve a host receipt without falling back to a waiting-for-approval message. */
+export async function loadPendingPlanText(
+    pending: PendingPlanApproval,
+    readText: (filePath: string) => Promise<string>,
+): Promise<string> {
+    const text = (pending.planText ?? await readText(pending.filePath)).replace(/^\uFEFF/, '');
+    if (!text.trim()) throw new Error('Submitted plan is empty.');
+    return text;
 }
 
 export function hasImplementationPlanArtifact(

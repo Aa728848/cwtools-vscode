@@ -1,4 +1,7 @@
 import { escapeHtml } from './formatters';
+import { renderDisplayMath, renderInlineMath } from './math';
+
+export { renderDisplayMath, renderInlineMath } from './math';
 
 export interface MarkdownLabels {
     waitingForChoice?: string;
@@ -24,9 +27,23 @@ export function renderMarkdown(rawText: string, labels: MarkdownLabels = {}): st
     if (!rawText) return '';
 
     const blocks: MarkdownBlock[] = [];
-    const text = rawText.replace(/```([^\n]*)\n([\s\S]*?)```/g, (_, lang, code) => {
+    let text = rawText.replace(/```([^\n]*)\n([\s\S]*?)```/g, (_, lang, code) => {
         const i = blocks.length;
         blocks.push({ lang: String(lang).trim(), code: String(code) });
+        return '\n\x00BLOCK' + i + '\x00\n';
+    });
+
+    text = text.replace(/```([^\n]*)\n([\s\S]*)$/, (_match: string, lang: string, code: string) => {
+        const index = blocks.length;
+        blocks.push({ lang: lang.trim(), code });
+        return '\n\x00BLOCK' + index + '\x00\n';
+    });
+
+    // Protect code spans and unmatched streaming fences before scanning display math.
+    text = text.replace(/```[\s\S]*$|(`+)[^`]*?\1|(?<!\\)\$\$([\s\S]*?)\$\$/g, (match: string, code: string | undefined, math: string | undefined) => {
+        if (math === undefined || !math.includes('\n')) return match;
+        const i = blocks.length;
+        blocks.push({ lang: 'math', code: math.trim() });
         return '\n\x00BLOCK' + i + '\x00\n';
     });
 
@@ -59,6 +76,9 @@ export function renderMarkdown(rawText: string, labels: MarkdownLabels = {}): st
                 '<div class="md-mermaid-output"></div>' +
                 '<pre class="md-mermaid-source"><code>' + escapeHtml(block.code) + '</code></pre>' +
                 '</div>';
+        }
+        if (language === 'math' || language === 'latex' || language === 'katex') {
+            return renderDisplayMath(block.code);
         }
         return '<div class="md-codeblock"><div class="md-codeblock-lang">' +
             escapeHtml(block.lang) +
@@ -161,12 +181,34 @@ export function renderInlineMarkdown(raw: string): string {
         return '\x01MEDIA' + (mediaBlocks.length - 1) + '\x01';
     });
 
-    s = escapeHtml(s);
+    // Extract inline code blocks first so code like `$var` is protected
     const codeBlocks: string[] = [];
     s = s.replace(/`([^`]+)`/g, (_match: string, code: string) => {
-        codeBlocks.push('<code>' + code + '</code>');
+        codeBlocks.push('<code>' + escapeHtml(code) + '</code>');
         return '\x01CODE' + (codeBlocks.length - 1) + '\x01';
     });
+
+    // Extract math blocks before escaping and inline markdown formatting
+    const mathBlocks: string[] = [];
+    // Display math if present in inline strings
+    s = s.replace(/(?<!\\)\$\$([\s\S]*?)\$\$/g, (_match: string, math: string) => {
+        // A span keeps inline/list/table HTML valid while CSS provides block layout.
+        const rendered = renderDisplayMath(math).replace(/^<div /, '<span ').replace(/<\/div>$/, '</span>');
+        mathBlocks.push(rendered);
+        return '\x01MATH' + (mathBlocks.length - 1) + '\x01';
+    });
+
+    // Inline math $...$
+    s = s.replace(/(?<![\\$])\$(?![\s$])([^$\n\r]+?)(?<![\s\\$])\$(?![\d$])/g, (_match: string, math: string) => {
+        const rendered = renderInlineMath(math);
+        mathBlocks.push(rendered);
+        return '\x01MATH' + (mathBlocks.length - 1) + '\x01';
+    });
+
+    // Unescape literal \$ -> $
+    s = s.replace(/\\\$/g, '$');
+
+    s = escapeHtml(s);
 
     s = s.replace(/\*\*\*([^*]+)\*\*\*/g, '<strong><em>$1</em></strong>');
     s = s.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
@@ -187,6 +229,8 @@ export function renderInlineMarkdown(raw: string): string {
     s = s.replace(/\x01CODE(\d+)\x01/g, (_match: string, index: string) => codeBlocks[parseInt(index)]!);
     // eslint-disable-next-line no-control-regex
     s = s.replace(/\x01MEDIA(\d+)\x01/g, (_match: string, index: string) => mediaBlocks[parseInt(index)]!);
+    // eslint-disable-next-line no-control-regex
+    s = s.replace(/\x01MATH(\d+)\x01/g, (_match: string, index: string) => mathBlocks[parseInt(index)]!);
     return s;
 }
 

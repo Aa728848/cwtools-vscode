@@ -105,6 +105,7 @@ import { runtimeFaultInjector } from './runner/faultInjection';
 import { threadStore } from './runner/threadStore';
 import {
     buildApprovedPlanExecutionReminder,
+    getPendingPlanApproval,
     isCompleteImplementationPlanWrite,
     shouldPauseForInteractivePlan,
 } from './executePlanHandoff';
@@ -1811,6 +1812,8 @@ export class AgentRunner {
                 runId,
                 code: code ?? '',
                 explanation: code ? this.extractExplanation(finalMessage) : finalMessage,
+                pendingPlanApproval: options?.approvedPlanExecution ? undefined : getPendingPlanApproval(steps),
+                finalSchedulingState: normalizeSchedulingState(options?.schedulingState ?? schedulingState),
                 validationErrors,
                 isValid: !validationPending && !validationFailed,
                 retryCount: 0,
@@ -2266,6 +2269,12 @@ export class AgentRunner {
             // guest starts. Nested calls still recheck the live catalog.
             runCodeToolDefinitions: () => availableTools.filter(tool => TOOL_REGISTRY.has(tool.function.name as AgentToolName)),
             runNestedTool: async (toolName, args, signal, writeQueueWaitTimeoutMs) => {
+                if ((interactivePlanApprovalPending || planSubmissionInFlight) && isExecutionActionTool(toolName)) {
+                    return { success: false, planApprovalPending: true, error: aiText(
+                        'A submitted plan requires user approval before further execution.',
+                        '计划已提交，必须等待用户批准后才能继续执行。',
+                    ) };
+                }
                 const subcallInvocationId = `subcall_${runRecord.runId}_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
                 const startTime = Date.now();
                 emitStep({
@@ -2278,15 +2287,17 @@ export class AgentRunner {
                     subcall: true,
                     parentToolName: 'run_code',
                 });
-                const result = await this.runNestedToolStep(
-                    toolName,
-                    args,
-                    agentToolContext,
-                    onFileWrite,
-                    availableTools,
-                    signal,
-                    writeQueueWaitTimeoutMs,
-                );
+                const submittingPlan = !options?.approvedPlanExecution
+                    && isCompleteImplementationPlanWrite(toolName, args, []);
+                if (submittingPlan) planSubmissionInFlight = true;
+                let result: unknown;
+                try {
+                    result = await this.runNestedToolStep(
+                        toolName, args, agentToolContext, onFileWrite, availableTools, signal, writeQueueWaitTimeoutMs,
+                    );
+                } finally {
+                    if (submittingPlan) planSubmissionInFlight = false;
+                }
                 const durationMs = Date.now() - startTime;
                 emitStep({
                     type: 'tool_result',
@@ -2300,6 +2311,11 @@ export class AgentRunner {
                     parentToolName: 'run_code',
                 });
                 const files = getAgentToolTargetFiles(toolName, args, this.toolExecutor.workspaceRoot, options?.topicId);
+                if (!options?.approvedPlanExecution && isToolResultSuccess(result)
+                    && (isCompleteImplementationPlanWrite(toolName, args, files)
+                        || (toolName === 'write_design_blueprint' && toolResultRecord(result)?.approvalReady === true))) {
+                    interactivePlanApprovalPending = true;
+                }
                 if (WRITE_TOOLS.has(toolName) && files[0]) {
                     const record = result as Record<string, unknown> | undefined;
                     if (record && (record.success === true || record.confirmed === true)) {
@@ -2318,6 +2334,7 @@ export class AgentRunner {
         let forceStop = false;
         let executionActionObserved = false;
         let interactivePlanApprovalPending = false;
+        let planSubmissionInFlight = false;
         const updateFinalPromptMetric = () => {
             if (!runMetrics) return;
             runMetrics.finalPromptTokens = messages.reduce((s, m) => {

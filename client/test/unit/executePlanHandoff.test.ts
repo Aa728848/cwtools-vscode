@@ -119,7 +119,7 @@ describe('Execute-to-Plan handoff', () => {
         expect(receipt?.planText).to.equal(planText);
     });
 
-    it('rejects a whitespace-only plan body as an unusable receipt', () => {
+    it('does not treat a whitespace-only body as a submission', () => {
         const receipt = getPendingPlanApproval([
             { ...toolCall('write_file', '.cwtools/topic/Implementation_Plan.md'),
                 toolArgs: { file: '.cwtools/topic/Implementation_Plan.md', content: '   \n ' } },

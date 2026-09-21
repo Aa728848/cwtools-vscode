@@ -1307,7 +1307,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             // A receipt carries the submitted text; otherwise read the artifact the
             // run actually wrote. Losing the submitted body must never end as a
             // silent 'waiting for approval' message with no card.
-            let interactivePlanText = pendingPlan?.planText ?? result.explanation;
+            let interactivePlanText = pendingPlan?.planText?.replace(/^\uFEFF/, '') ?? result.explanation;
             if (!pendingPlan?.planText && generatedPlanPath && hasCurrentPlanArtifact) {
                 try {
                     interactivePlanText = (await fs.promises.readFile(generatedPlanPath, 'utf-8')).replace(/^\uFEFF/, '');

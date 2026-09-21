@@ -389,9 +389,10 @@ export function getPendingPlanApproval(steps: readonly AgentStep[]): PendingPlan
                 return { invocationId: step.invocationId, filePath: result.filePath };
             }
         } else if (isCompleteImplementationPlanWrite(call.toolName, call.toolArgs, [])) {
+            // isCompleteImplementationPlanWrite already required a non-empty,
+            // complete body; the typeof is only here to narrow the unknown arg.
             const content = call.toolArgs.content;
-            // An empty body is not a usable receipt; treat it as no submission.
-            if (typeof content === 'string' && content.trim()) {
+            if (typeof content === 'string') {
                 return { invocationId: step.invocationId, filePath: targetPath(call), planText: content };
             }
         }

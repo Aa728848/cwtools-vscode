@@ -89,6 +89,10 @@ flowchart TD
 - 擦除边界由 token 保证：字符串、模板、正则、注释内容零污染；`import { a as b }`、`static`/`async` 等运行时语法保留；`a < b`、`cond ? a : b` 不再有被误判的路径。
 - 验证：`npx tsc -p tsconfig.json --noEmit` 与 `.config/tsconfig.test-build.json` 均 0 错误；全量单测 2503 通过 + 既有 flaky 2 例（`agentToolSafety` 后台命令超时与临时目录 EPERM 清理，改动前即存在）。`toolPresentationMode.test.ts` 现包含 113 项测试（多轮针对性回归），全面覆盖类型擦除、执行与对抗边界；`agentProfile.test.ts` 覆盖“未 pin 请求绝不进入 plan 模式”的契约断言。
 
+### 门禁修复（后续）
+
+上述对抗夹具中的 6 处不必要转义（`\"` 写在字符串字面量内部）会以 error 级别触发 `no-useless-escape`，导致 `npm run verify` 在 `lint` 阶段即中止、`test:unit` 从未执行。修复与排障线索见 `../testing/2026-09-21-adversarial-erasure-fixtures-pass-eslint-gate.md`。
+
 ### 迭代验证与缺陷收敛记录
 
 - **第一轮验证**：确认原始 PTC 参数损坏（`{ isRegex: false }` 变成 `{ isRegex }` 导致 `isRegex is not defined`）已修复，端到端执行通过。

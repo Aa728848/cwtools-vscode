@@ -818,7 +818,7 @@ return res;
         it('keeps a regex containing a quote inside a template substitution', () => {
             // The quote inside /\"/g used to open a bogus string in the template
             // skipper, desynchronising every later token.
-            const src = 'const t = `a${v.replace(/\\/g, \'\\\\\').replace(/\"/g, \'\\"\')} as b`;';
+            const src = 'const t = `a${v.replace(/\\/g, \'\\\\\').replace(/"/g, \'\\"\')} as b`;';
             expect(erased(src)).to.equal(src);
         });
 
@@ -892,7 +892,7 @@ return res;
         });
 
         it('keeps a regex containing a quote inside a template substitution', () => {
-            const source = 'const t = `a${v.replace(/\\/g, \'x\').replace(/\"/g, \'y\')} as b`;';
+            const source = 'const t = `a${v.replace(/\\/g, \'x\').replace(/"/g, \'y\')} as b`;';
             expect(erased(source)).to.equal(source);
         });
 
@@ -1025,8 +1025,8 @@ return res;
             // and the ':' belongs to the ternary.
             const sources = [
                 '(0?{}[e]: [2,2[null]]);',
-                '(e?{}[\"\"] : 2).v;',
-                '(l?{}[k] : o(0)[false << -1]) / [false | -1,\"\"];',
+                '(e?{}[""] : 2).v;',
+                '(l?{}[k] : o(0)[false << -1]) / [false | -1,""];',
             ];
             for (const source of sources) expect(erased(source), source).to.equal(source);
         });

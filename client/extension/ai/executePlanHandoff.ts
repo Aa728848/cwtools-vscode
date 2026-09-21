@@ -390,22 +390,13 @@ export function getPendingPlanApproval(steps: readonly AgentStep[]): PendingPlan
             }
         } else if (isCompleteImplementationPlanWrite(call.toolName, call.toolArgs, [])) {
             const content = call.toolArgs.content;
-            if (typeof content === 'string') {
+            // An empty body is not a usable receipt; treat it as no submission.
+            if (typeof content === 'string' && content.trim()) {
                 return { invocationId: step.invocationId, filePath: targetPath(call), planText: content };
             }
         }
     }
     return undefined;
-}
-
-/** Resolve a host receipt without falling back to a waiting-for-approval message. */
-export async function loadPendingPlanText(
-    pending: PendingPlanApproval,
-    readText: (filePath: string) => Promise<string>,
-): Promise<string> {
-    const text = (pending.planText ?? await readText(pending.filePath)).replace(/^\uFEFF/, '');
-    if (!text.trim()) throw new Error('Submitted plan is empty.');
-    return text;
 }
 
 export function hasImplementationPlanArtifact(

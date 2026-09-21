@@ -2,7 +2,6 @@ import { expect } from 'chai';
 import {
     buildApprovedPlanExecutionReminder,
     getPendingPlanApproval,
-    loadPendingPlanText,
     isCompleteImplementationPlanWrite,
     shouldRenderInteractivePlan,
     shouldPauseForInteractivePlan,
@@ -110,21 +109,23 @@ describe('Execute-to-Plan handoff', () => {
         expect(getPendingPlanApproval([])).to.equal(undefined);
     });
 
-    it('uses submitted content even when the file cannot be read', async () => {
+    it('carries the submitted body so a failed file read cannot lose the plan', () => {
         const planText = completePlan();
-        const text = await loadPendingPlanText({ invocationId: 'submit', filePath: '/missing', planText },
-            async () => { throw new Error('missing'); });
-        expect(text).to.equal(planText);
+        const receipt = getPendingPlanApproval([
+            { ...toolCall('write_file', '.cwtools/topic/Implementation_Plan.md'),
+                toolArgs: { file: '.cwtools/topic/Implementation_Plan.md', content: planText } },
+            successfulToolResult('write_file'),
+        ]);
+        expect(receipt?.planText).to.equal(planText);
     });
 
-    it('propagates unreadable and empty blueprint artifacts instead of a waiting message', async () => {
-        for (const readText of [async () => { throw new Error('missing'); }, async () => '   ']) {
-            let failure: unknown;
-            try {
-                await loadPendingPlanText({ invocationId: 'submit', filePath: '/missing' }, readText);
-            } catch (error) { failure = error; }
-            expect(failure).to.be.instanceOf(Error);
-        }
+    it('rejects a whitespace-only plan body as an unusable receipt', () => {
+        const receipt = getPendingPlanApproval([
+            { ...toolCall('write_file', '.cwtools/topic/Implementation_Plan.md'),
+                toolArgs: { file: '.cwtools/topic/Implementation_Plan.md', content: '   \n ' } },
+            successfulToolResult('write_file'),
+        ]);
+        expect(receipt).to.equal(undefined);
     });
 
     it('accepts only approval-ready blueprint artifacts', () => {

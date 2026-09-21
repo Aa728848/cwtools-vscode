@@ -2287,8 +2287,9 @@ export class AgentRunner {
                     subcall: true,
                     parentToolName: 'run_code',
                 });
+                const files = getAgentToolTargetFiles(toolName, args, this.toolExecutor.workspaceRoot, options?.topicId);
                 const submittingPlan = !options?.approvedPlanExecution
-                    && isCompleteImplementationPlanWrite(toolName, args, []);
+                    && isCompleteImplementationPlanWrite(toolName, args, files);
                 if (submittingPlan) planSubmissionInFlight = true;
                 let result: unknown;
                 try {
@@ -2310,10 +2311,11 @@ export class AgentRunner {
                     subcall: true,
                     parentToolName: 'run_code',
                 });
-                const files = getAgentToolTargetFiles(toolName, args, this.toolExecutor.workspaceRoot, options?.topicId);
-                if (!options?.approvedPlanExecution && isToolResultSuccess(result)
-                    && (isCompleteImplementationPlanWrite(toolName, args, files)
-                        || (toolName === 'write_design_blueprint' && toolResultRecord(result)?.approvalReady === true))) {
+                if (isToolResultSuccess(result)
+                    && (submittingPlan
+                        || (!options?.approvedPlanExecution
+                            && toolName === 'write_design_blueprint'
+                            && toolResultRecord(result)?.approvalReady === true))) {
                     interactivePlanApprovalPending = true;
                 }
                 if (WRITE_TOOLS.has(toolName) && files[0]) {

@@ -89,7 +89,7 @@ import {
     prepareLiveStepForUi,
     UI_TOOL_RESULT_BUDGET,
 } from './chat/uiStepCompaction';
-import { hasImplementationPlanArtifact, loadPendingPlanText, parseImplementationPlanBlueprint, shouldRenderInteractivePlan } from './executePlanHandoff';
+import { hasImplementationPlanArtifact, parseImplementationPlanBlueprint, shouldRenderInteractivePlan } from './executePlanHandoff';
 import {
     getSlashCommandDescriptors,
     resolveSlashCommand,
@@ -1304,20 +1304,22 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                 || hasImplementationPlanArtifact(result.steps)
                 || turnMode === 'plan'
             );
+            // A receipt carries the submitted text; otherwise read the artifact the
+            // run actually wrote. Losing the submitted body must never end as a
+            // silent 'waiting for approval' message with no card.
             let interactivePlanText = pendingPlan?.planText ?? result.explanation;
-            if (generatedPlanPath && hasCurrentPlanArtifact) {
+            if (!pendingPlan?.planText && generatedPlanPath && hasCurrentPlanArtifact) {
                 try {
-                    interactivePlanText = pendingPlan
-                        ? await loadPendingPlanText(pendingPlan, file => fs.promises.readFile(file, 'utf-8'))
-                        : (await fs.promises.readFile(generatedPlanPath, 'utf-8')).replace(/^\uFEFF/, '');
+                    interactivePlanText = (await fs.promises.readFile(generatedPlanPath, 'utf-8')).replace(/^\uFEFF/, '');
+                    if (!interactivePlanText.trim()) throw new Error('The plan artifact is empty.');
                 } catch (error) {
-                    ErrorReporter.warn(SOURCE.CHAT_PANEL, 'Failed to read the generated Implementation_Plan.md; using the response text', error);
                     if (pendingPlan) {
                         throw new Error(aiText(
-                            'The submitted plan could not be loaded. No approval card was created; ask the agent to resubmit the plan. Execution has not been approved.',
-                            '无法读取已提交的计划，审批卡未生成；请让 Agent 重新提交计划。执行尚未获批。',
+                            'The submitted plan could not be loaded. No approval card was created; ask the agent to resubmit the plan.',
+                            '无法读取已提交的计划，审批卡未生成；请让 Agent 重新提交计划。',
                         ));
                     }
+                    ErrorReporter.warn(SOURCE.CHAT_PANEL, 'Failed to read the generated Implementation_Plan.md; using the response text', error);
                 }
             }
             const hasInteractivePlan = !!pendingPlan || shouldRenderInteractivePlan(result, {

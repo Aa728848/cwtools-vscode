@@ -48,6 +48,15 @@ describe('getModelPricing', () => {
         expect(getModelPricing('kimi-k3')).to.deep.equal([20.00, 100.00]);
     });
 
+    it('prices the MiMo V2.6 series from the official list', () => {
+        expect(getModelPricing('mimo-v2.6-pro')).to.deep.equal([3.00, 6.00]);
+        expect(getModelPricing('mimo-v2.6-flash')).to.deep.equal([1.00, 2.00]);
+        expect(getModelPricing('mimo-v2.6-pro-ultraspeed')).to.deep.equal([30.00, 60.00]);
+        // Longest-id-first table ordering keeps dated tags on the right price tier.
+        expect(getModelPricing('mimo-v2.6-pro-2026-09-01')).to.deep.equal([3.00, 6.00]);
+        expect(getModelPricing('mimo-v2.6-pro-ultraspeed-2026-09-01')).to.deep.equal([30.00, 60.00]);
+    });
+
     it('applies the V4.1 Flash price list to the new and retired Flash ids', () => {
         const peak = new Date('2026-08-17T02:30:00.000Z');
         const offPeak = new Date('2026-08-17T05:00:00.000Z');
@@ -156,6 +165,9 @@ describe('getCacheDiscountFactor', () => {
         expect(getCacheDiscountFactor('minimax-m2.7')).to.equal(0.2);
         expect(getCacheDiscountFactor('mimo-v2.5-pro')).to.equal(0.0083);
         expect(getCacheDiscountFactor('mimo-v2.5')).to.equal(0.02);
+        expect(getCacheDiscountFactor('mimo-v2.6-pro')).to.equal(0.0083);
+        expect(getCacheDiscountFactor('mimo-v2.6-pro-ultraspeed')).to.equal(0.0083);
+        expect(getCacheDiscountFactor('mimo-v2.6-flash')).to.equal(0.02);
     });
 
     it('uses OpenCode provider-specific cache rates', () => {

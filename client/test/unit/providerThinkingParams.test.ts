@@ -198,6 +198,23 @@ describe('provider thinking params', () => {
             .to.equal(undefined);
     });
 
+    it('routes MiMo V2.6 thinking controls through the same switch protocol', () => {
+        const { getModelReasoningCapability, getThinkingParams, getReducedThinkingParams } = loadProviders();
+        for (const model of ['mimo-v2.6-pro', 'mimo-v2.6-flash', 'mimo-v2.6-pro-ultraspeed']) {
+            expect(getModelReasoningCapability('mimo', model, 'openai-chat-completions')).to.deep.equal({
+                kind: 'toggle',
+                options: ['none', 'high'],
+                defaultValue: 'high',
+            });
+            expect(getThinkingParams(model, 'mimo', 'openai-chat-completions', 'low'))
+                .to.deep.equal({ extraBody: { thinking: { type: 'enabled' } } });
+            expect(getReducedThinkingParams(model, 'mimo', 'openai-chat-completions'))
+                .to.deep.equal({ extraBody: { thinking: { type: 'disabled' } } });
+        }
+        expect(getThinkingParams('mimo-v2.6-flash', 'mimo-token-plan', 'openai-chat-completions', 'high'))
+            .to.deep.equal({ extraBody: { thinking: { type: 'enabled' } } });
+    });
+
     it('maps Kimi controls by model family', () => {
         const { getThinkingParams, getReducedThinkingParams } = loadProviders();
         expect(getThinkingParams('kimi-k3', 'kimi', 'openai-chat-completions', 'low'))

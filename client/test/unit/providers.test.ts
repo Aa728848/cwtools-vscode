@@ -223,6 +223,12 @@ describe('isModelVisionCapable', () => {
         expect(isModelVisionCapable('mimo-v2.5')).to.equal(true);
     });
 
+    it('tracks MiMo V2.6 full-modal vision', () => {
+        expect(isModelVisionCapable('mimo-v2.6-pro')).to.equal(true);
+        expect(isModelVisionCapable('mimo-v2.6-flash')).to.equal(true);
+        expect(isModelVisionCapable('mimo-v2.6-pro-ultraspeed')).to.equal(true);
+    });
+
     it('returns false for deprecated mimo-v2-flash', () => {
         expect(isModelVisionCapable('mimo-v2-flash')).to.equal(false);
     });
@@ -342,6 +348,9 @@ describe('getModelContextTokens', () => {
         expect(getModelContextTokens('glm-4.7-flashx', 'glm')).to.equal(200000);
         expect(getModelContextTokens('glm-4.6v', 'glm')).to.equal(128000);
         expect(getModelContextTokens('mimo-v2.5', 'mimo')).to.equal(1048576);
+        expect(getModelContextTokens('mimo-v2.6-pro', 'mimo')).to.equal(1048576);
+        expect(getModelContextTokens('mimo-v2.6-flash', 'mimo-token-plan')).to.equal(1048576);
+        expect(getModelContextTokens('mimo-v2.6-pro-ultraspeed', 'mimo')).to.equal(1048576);
     });
 
     it('returns 0 for completely unknown model and provider', () => {
@@ -390,6 +399,8 @@ describe('getModelOutputTokens', () => {
         expect(getModelOutputTokens('claude-sonnet-5', 'claude')).to.equal(128000);
         expect(getModelOutputTokens('MiniMax-M2.7', 'minimax')).to.equal(131072);
         expect(getModelOutputTokens('mimo-v2.5-pro', 'mimo')).to.equal(131072);
+        expect(getModelOutputTokens('mimo-v2.6-pro', 'mimo')).to.equal(131072);
+        expect(getModelOutputTokens('mimo-v2.6-pro-ultraspeed', 'mimo')).to.equal(131072);
     });
 
     it('returns reasonable default for unknown provider', () => {
@@ -453,6 +464,28 @@ describe('getProvider', () => {
             'qwen3.5-plus',
             'hy3-preview',
         ]);
+    });
+
+    it('exposes the MiMo V2.6 catalog on both MiMo providers', () => {
+        const mimo = BUILTIN_PROVIDERS['mimo']!;
+        expect(mimo.defaultModel).to.equal('mimo-v2.6-pro');
+        expect(mimo.models).to.deep.equal([
+            'mimo-v2.6-pro',
+            'mimo-v2.6-flash',
+            'mimo-v2.6-pro-ultraspeed',
+            'mimo-v2.5-pro',
+            'mimo-v2.5',
+        ]);
+        // Token Plan covers only the flagship Pro/Flash pair plus the V2.5 suite.
+        const plan = BUILTIN_PROVIDERS['mimo-token-plan']!;
+        expect(plan.defaultModel).to.equal('mimo-v2.6-pro');
+        expect(plan.models).to.deep.equal([
+            'mimo-v2.6-pro',
+            'mimo-v2.6-flash',
+            'mimo-v2.5-pro',
+            'mimo-v2.5',
+        ]);
+        expect(plan.models).to.not.include('mimo-v2.6-pro-ultraspeed');
     });
 });
 

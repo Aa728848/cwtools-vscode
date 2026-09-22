@@ -96,7 +96,7 @@ export function getCurrentModelPricing(
  *  - GLM (Zhipu):  GLM-5.2 cached input $0.26/$1.40 → 0.19
  *  - Kimi:         model-specific cache read ratio → 0.17–0.20
  *  - MiniMax:      M3/M2.7 = 20%, M2.5 and older = 10%
- *  - MiMo:         V2.5 Pro ≈ 0.8%, V2.5 = 2%
+ *  - MiMo:         V2.6 Pro/UltraSpeed ≈ 0.8%, V2.6 Flash = 2% (same ratios as the V2.5 series)
  */
 export function getCacheDiscountFactor(model: string, providerId?: string): number {
     if (!model) return 1.0;
@@ -151,8 +151,8 @@ export function getCacheDiscountFactor(model: string, providerId?: string): numb
     if (lower.includes('minimax-m3') || lower.includes('minimax-m2.7')) return 0.2;
     if (lower.includes('minimax')) return 0.1;
     // Xiaomi MiMo — extremely aggressive cache pricing
-    if (lower.includes('mimo-v2.5-pro')) return 0.0083;
-    if (lower.includes('mimo-v2.5')) return 0.02;
+    if (lower.includes('mimo-v2.6-pro') || lower.includes('mimo-v2.5-pro')) return 0.0083;
+    if (lower.includes('mimo-v2.6') || lower.includes('mimo-v2.5')) return 0.02;
     if (lower.includes('mimo')) return 0.01;
     // Unknown model — assume no discount (conservative)
     return 1.0;

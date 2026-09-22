@@ -413,7 +413,7 @@ function upstreamGatewayCapability(providerId: string, model: string): ModelReas
     if (/minimax-m2/.test(lower)) {
         return reasoningCapability('fixed', ['high'], 'high');
     }
-    if (/mimo-v2[.]5/.test(lower)) {
+    if (/mimo-v2[.](?:5|6)/.test(lower)) {
         return reasoningCapability('toggle', ['none', 'high'], 'high');
     }
     if (/gpt-oss/.test(lower)) {
@@ -489,7 +489,7 @@ export function getModelReasoningCapability(
     if (provider === 'siliconflow') return isKnownReasoningModel(lower)
         ? reasoningCapability('budget', ['none', 'low', 'medium', 'high', 'max'], 'high')
         : NO_REASONING;
-    if (provider === 'mimo' || provider === 'mimo-token-plan') return /mimo-v2[.]5/.test(lower)
+    if (provider === 'mimo' || provider === 'mimo-token-plan') return /mimo-v2[.](?:5|6)/.test(lower)
         ? reasoningCapability('toggle', ['none', 'high'], 'high')
         : NO_REASONING;
     if (provider === 'minimax' || provider === 'minimax-token-plan') {
@@ -675,7 +675,7 @@ const DISABLE_THINKING_PARAMS: Array<{
         result: { extraBody: { thinking: { type: 'disabled' } } },
     },
     {
-        match: (m) => /(?:^|\/)(?:mimo-v2[.]5|minimax-m3)(?:-|$)/.test(m),
+        match: (m) => /(?:^|\/)(?:mimo-v2[.](?:5|6)|minimax-m3)(?:-|$)/.test(m),
         result: { extraBody: { thinking: { type: 'disabled' } } },
     },
     // Claude Sonnet 5 thinks by default and requires an explicit disable switch.

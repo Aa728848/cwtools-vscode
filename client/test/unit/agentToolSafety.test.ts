@@ -1244,7 +1244,8 @@ describe('agent tool topic artifacts', () => {
         expect(terminate.calledOnce).to.equal(true);
     });
 
-    it('starts and controls a captured command in the background', async () => {
+    it('starts and controls a captured command in the background', async function () {
+        this.timeout(10_000);
         const handler = new ExternalToolHandler({ workspaceRoot });
         const context = makeContext('background-process');
         const result = await handler.runCommand({

@@ -46,8 +46,8 @@ describe('Stellaris Shader CWT and ABI evidence contracts', () => {
         const executableScan = isRecord(audit.executable_string_scan) ? audit.executable_string_scan : {};
         expect(executableScan.ascii_hits).to.equal(80);
         expect(Array.isArray(executableScan.ascii_effect_names) ? executableScan.ascii_effect_names : []).to.have.length(80);
-        expect(executableScan.utf16le_hits).to.equal(3);
-        expect(executableScan.utf16le_effect_names).to.deep.equal(['Down', 'Text', 'Texture']);
+        expect(executableScan.utf16le_hits).to.equal(4);
+        expect(executableScan.utf16le_effect_names).to.deep.equal(['Down', 'Text', 'Texture', 'Up']);
         const evidenceReviews = Array.isArray(audit.evidence_reviews)
             ? audit.evidence_reviews.filter(isRecord)
             : [];

@@ -1,5 +1,36 @@
 # Changelog
 
+## [2.21.0] - 2026-09-23
+
+### 聊天面板 LaTeX 数学公式渲染与计划审批稳健性 / Chat LaTeX Math Formula Rendering & Plan Approval Robustness
+- **[特性] 新增纯前端轻量级 LaTeX 数学公式解析与排版引擎（Chat Math Formula Rendering）**：
+  - **行内与块级公式支持**：在 Webview 聊天面板中实现无外部重型依赖的 LaTeX 解析引擎（`client/webview/chat/math.ts`），支持行内 `$...$` 与独立块级 `$$...$$` 语法，完美支持分数（`\frac{a}{b}`）、根号（`\sqrt{x}`）、上下标（`x^2`、`a_i`）、希腊字母（`\alpha`、`\beta` 等）、数学运算符及自适应缩放括号。
+  - **定制数学排版与主题融合**：结合 `client/webview/chatPanel.css` 实现了精美的衬线数学字体、居中块级容器、上下标相对基准线偏移及分数排版，在 VS Code 各种亮色与暗色主题下均获得原生级阅读体验。
+  - **计划审批交接稳健性提升**：修复 `executePlanHandoff` 在处理包含 UTF-8 BOM 字符时的收据解析异常；去除非计划模式下冗余的前置守卫，确保审批计划在跨会话、分叉与持久化加载时的稳定传递与执行。
+  - English: [Feature/Fix] Chat LaTeX math formula rendering & plan approval robustness — added a zero-dependency client-side LaTeX rendering engine in `chat/math.ts` supporting inline (`$...$`) and block-level (`$$...$$`) expressions, fractions, square roots, sub/superscripts, Greek letters, math symbols, and adaptive brackets; styled with specialized serif math typography and seamless dark/light theme integration; hardened plan approval handoff by properly handling UTF-8 BOMs and removing unreachable guards for bulletproof receipt processing.
+
+### 新一代 AI 模型生态全面支持：GPT-6 系列与小米 Mimo 2.6 / Next-Gen AI Models: GPT-6 Series & Xiaomi Mimo 2.6
+- **[特性] 全面支持 OpenAI GPT-6 旗舰家族（GPT-6 Series Integration）**：
+  - **完整系列支持**：在 Provider 模型注册表中完整集成 `gpt-6-sol`（旗舰推理）、`gpt-6-luna`（全能平衡）与 `gpt-6-astra`（轻量高性价比）三款全新一代模型。
+  - **参数与计费配置**：精确配置了各型号的上下文窗口（Context Window）、最大输出 Token、思维链推理（Thinking）参数及计费价格数据；扩展 Codex OAuth 服务以支持 GPT-6 动态 Token 授权与无缝刷新。
+  - English: [Feature] OpenAI GPT-6 family integration — comprehensively added `gpt-6-sol`, `gpt-6-luna`, and `gpt-6-astra` into the AI provider matrix with complete context windows, output limits, thinking parameters, pricing tables, and Codex OAuth dynamic token refresh support.
+
+- **[特性] 新增小米 Mimo 2.6 系列支持（Xiaomi Mimo 2.6 Integration）**：
+  - **Mimo 2.6 接入**：引入小米全新 Mimo 2.6 与 Turbo 系列模型（`mimo-v2-turbo`、`mimo-v2.6` 等），提供对应的思维预算控制、模型能力描述与计费配置，为模组作者提供更高性价比的推理选择。
+  - English: [Feature] Xiaomi Mimo 2.6 integration — added Xiaomi's latest Mimo 2.6 and Turbo models with thinking budget controls, capability tags, and pricing data.
+
+### 群星 Stellaris v4.5 规则库同步与自动化技能体系 / Stellaris v4.5 Rules Sync & Skill SOP
+- **[特性] 同步 Stellaris v4.5 语法规则库与 MCP 子模块（Stellaris v4.5 Rules Sync）**：
+  - **规则库同步**：依据群星官方 v4.5 脚本更新同步最新 CWT 规则定义，更新 `submodules/cwtools-stellaris-config` 与 `submodules/cwtools-mcp` 子模块指针，保持游戏语法补全、校验及悬停提示与最新游戏版本一致。
+  - **自动化规则同步技能 SOP**：沉淀并引入 `stellaris-rules-sync` 技能，明确从游戏脚本文档日志提取、规则比对、防范 scalar 滥用、原版深度反查强类型到自动化门禁测试的标准化流程规范。
+  - English: [Feature] Stellaris v4.5 rules sync & dedicated skill SOP — synchronized CWT grammar rules and submodules (`cwtools-stellaris-config` and `cwtools-mcp`) with Stellaris v4.5 official script logs; established the `stellaris-rules-sync` agent skill defining standardized pipelines for log ingestion, anti-scalar validation, vanilla type cross-referencing, and contract regression checks.
+
+### 工程治理与构建加固 / Engineering Governance & CI Hardening
+- **[维护] 对齐 DSH 文档标准与修复 ESLint 门禁（Governance & CI Hardening）**：
+  - **文档治理对齐**：按照 DSH 标准体系规范了 Agent Notes 的分类归档标准与维护责任（Owning Note）。
+  - **ESLint 修复**：清理测试夹具中无用的正则转义字符，确保 CI 检查与静态分析全绿通过。
+  - English: [Maintenance] Governance & CI hardening — aligned Agent Notes governance with DSH documentation standards; fixed redundant escape characters in adversarial test fixtures to ensure green CI and clean lint gates.
+
 ## [2.20.0] - 2026-09-19
 
 ### PTC 与 NATIVE 工具呈现模式及子调用流式可视化 / Tool Presentation Modes & Streaming Subcalls

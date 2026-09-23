@@ -11,6 +11,8 @@ import { CODEX_CHATGPT_CONTEXT_TOKENS, CODEX_CHATGPT_MODELS } from '../../codex/
  */
 export const VISION_CAPABLE_MODELS: Record<string, boolean> = {
     'gpt-6-astra': true,
+    'gpt-6-sol': true,
+    'gpt-6-luna': true,
     'gpt-5.6': true,
     'gpt-5.6-sol': true,
     'gpt-5.6-terra': true,
@@ -365,6 +367,8 @@ export const MODEL_CONTEXT_TOKENS: Record<string, number> = {
         CODEX_CHATGPT_CONTEXT_TOKENS,
     ])),
     'gpt-6-astra': 1050000,
+    'gpt-6-sol': 1050000,
+    'gpt-6-luna': 1050000,
     'gpt-5.6': 1050000,
     'gpt-5.6-sol': 1050000,
     'gpt-5.6-terra': 1050000,
@@ -530,6 +534,9 @@ export const MODEL_CONTEXT_TOKENS: Record<string, number> = {
     'openrouter:anthropic/claude-haiku-4.5': 200000,
     'openrouter:google/gemini-3.1-pro-preview': 1048576,
     'openrouter:google/gemini-3.5-flash': 1048576,
+    'openrouter:openai/gpt-6-astra': 1050000,
+    'openrouter:openai/gpt-6-sol': 1050000,
+    'openrouter:openai/gpt-6-luna': 1050000,
     'openrouter:openai/gpt-5.5': 1050000,
     'openrouter:qwen/qwen3.7-max': 1000000,
     'openrouter:qwen/qwen3.7-plus': 1000000,
@@ -611,11 +618,13 @@ export const MAX_SAFE_CONTEXT_TOKENS = 2_097_152;
 
 /**
  * True when the model is in the GPT-5.6 or GPT-6 family and supports extended 1M context in Codex.
+ * Matching the bare GPT-6 family prefix also covers GPT-6 tiers added later,
+ * while legacy GPT-5.3/5.5 Codex ids still fall back to the 272K service window.
  */
 export function isCodexExtendedContextModel(model: string): boolean {
     if (!model) return false;
     const lower = model.toLowerCase().replace(/\s*\([^)]*\)$/i, '');
-    return /(?:^|\/)(?:gpt-6(?:-astra)?|gpt-5\.6)(?:-|$)/i.test(lower);
+    return /(?:^|\/)(?:gpt-6|gpt-5\.6)(?:-|$)/i.test(lower);
 }
 
 export function clampConfiguredContextTokens(
@@ -695,7 +704,7 @@ export function getModelOutputTokens(model: string, providerId?: string): number
     if (lower.includes('deepseek') || lower.includes('r1')) {
         return 65536;
     }
-    if (lower.includes('gpt-5') || lower.includes('gpt-6-astra')) {
+    if (lower.includes('gpt-5') || lower.includes('gpt-6')) {
         return 128000;
     }
     if (lower.includes('gemini')) {

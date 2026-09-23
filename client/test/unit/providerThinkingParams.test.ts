@@ -67,6 +67,26 @@ describe('provider thinking params', () => {
         }
     });
 
+    it('gives GPT-6 Sol/Luna the full reasoning ladder while Astra omits none', () => {
+        const { getModelReasoningCapability, getThinkingParams, getReducedThinkingParams } = loadProviders();
+        for (const providerId of ['openai', 'codex-chatgpt']) {
+            for (const model of ['gpt-6-sol', 'gpt-6-luna']) {
+                expect(getModelReasoningCapability(providerId, model), model).to.deep.equal({
+                    kind: 'effort',
+                    options: ['none', 'low', 'medium', 'high', 'xhigh', 'max'],
+                    defaultValue: 'high',
+                });
+                expect(getThinkingParams(model, providerId, 'openai-responses', 'max'), model)
+                    .to.deep.equal({ reasoningEffort: 'max' });
+                expect(getThinkingParams(model, providerId, 'openai-responses', 'none'), model)
+                    .to.deep.equal({ reasoningEffort: 'none' });
+                expect(getReducedThinkingParams(model, providerId, 'openai-responses'), model)
+                    .to.deep.equal({ reasoningEffort: 'none' });
+            }
+            expect(getModelReasoningCapability(providerId, 'gpt-6-astra').options).to.not.include('none');
+        }
+    });
+
     it('preserves Astra max for namespaced and custom API model IDs', () => {
         const { getThinkingParams } = loadProviders();
         expect(getThinkingParams('openai/gpt-6-astra', 'custom', 'openai-responses', 'max'))

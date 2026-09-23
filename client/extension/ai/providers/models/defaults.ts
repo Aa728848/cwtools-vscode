@@ -56,6 +56,8 @@ export const BUILTIN_PROVIDERS: Record<string, AIProviderConfig> = {
         defaultModel: 'gpt-6-astra',
         models: [
             'gpt-6-astra',
+            'gpt-6-sol',
+            'gpt-6-luna',
             'gpt-5.6',
             'gpt-5.6-sol',
             'gpt-5.6-terra',
@@ -355,6 +357,9 @@ export const BUILTIN_PROVIDERS: Record<string, AIProviderConfig> = {
             'anthropic/claude-haiku-4.5',
             'google/gemini-3.1-pro-preview',
             'google/gemini-3.5-flash',
+            'openai/gpt-6-astra',
+            'openai/gpt-6-sol',
+            'openai/gpt-6-luna',
             'openai/gpt-5.5',
             'qwen/qwen3.7-max',
             'qwen/qwen3.7-plus',

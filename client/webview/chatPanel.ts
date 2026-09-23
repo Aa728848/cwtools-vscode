@@ -8193,7 +8193,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
     }
 
     function isCodexExtendedModel(model: string): boolean {
-        return /(?:^|\/)(?:gpt-6(?:-astra)?|gpt-5\.6)(?:-|$)/i.test((model || '').trim());
+        return /(?:^|\/)(?:gpt-6|gpt-5\.6)(?:-|$)/i.test((model || '').trim());
     }
 
     function updateContextControls(providerId: string, model: string) {
@@ -8206,8 +8206,8 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         if (hintEl) {
             if (isExtended) {
                 hintEl.textContent = tr(
-                    'Codex subscription defaults to 272K; GPT-5.6 and 6 series support up to 1M (1,050,000 tokens).',
-                    'Codex 订阅渠道默认为 272K；GPT-5.6 及 6 系列支持调整为最高 1M (1,050,000 tokens)。'
+                    'Codex subscription defaults to 272K; the GPT-6 (Astra/Sol/Luna) and GPT-5.6 series support up to 1M (1,050,000 tokens).',
+                    'Codex 订阅渠道默认为 272K；GPT-6（Astra/Sol/Luna）及 GPT-5.6 系列支持调整为最高 1M (1,050,000 tokens)。'
                 );
             } else {
                 hintEl.textContent = tr(

@@ -292,8 +292,11 @@ export function getEffectiveReasoningEffort(
     apiFormat: CustomApiFormat
 ): ChatCompletionRequest['reasoning_effort'] {
     if (apiFormat !== 'openai-responses') return requested;
-    if (isGpt6AstraModel(model)) {
-        return requested === 'none' || requested === 'minimal' ? 'low' : requested;
+    if (isGpt6ReasoningFamilyModel(model)) {
+        // GPT-6 has no `minimal` effort; Astra additionally rejects `none`.
+        if (requested === 'minimal') return 'low';
+        if (isGpt6AstraModel(model) && requested === 'none') return 'low';
+        return requested;
     }
     return requested === 'max' ? 'xhigh' : requested;
 }
@@ -313,8 +316,11 @@ function reasoningCapability(
 }
 
 function openAiReasoningCapability(model: string): ModelReasoningCapability {
-    if (isGpt6AstraModel(model)) {
-        return reasoningCapability('effort', ['low', 'medium', 'high', 'xhigh', 'max'], 'high');
+    if (isGpt6ReasoningFamilyModel(model)) {
+        // Astra rejects `none`; Sol and Luna accept it along with `max`.
+        return isGpt6AstraModel(model)
+            ? reasoningCapability('effort', ['low', 'medium', 'high', 'xhigh', 'max'], 'high')
+            : reasoningCapability('effort', ['none', 'low', 'medium', 'high', 'xhigh', 'max'], 'high');
     }
     const modelId = modelName(model).split('/').pop() ?? '';
     if (!/^(?:gpt-5|o[134](?:-|$))/.test(modelId)) return NO_REASONING;
@@ -377,7 +383,7 @@ const DEEPSEEK_V4_FAMILY_MODEL_RE = /(?:deepseek-v4|deepseek-flash)/;
 
 function upstreamGatewayCapability(providerId: string, model: string): ModelReasoningCapability | undefined {
     const lower = modelName(model);
-    if (lower.includes('openai/') || isGpt6AstraModel(lower) || /(?:^|\/)(?:gpt-5|o[134](?:-|$))/.test(lower)) {
+    if (lower.includes('openai/') || isGpt6ReasoningFamilyModel(lower) || /(?:^|\/)(?:gpt-5|o[134](?:-|$))/.test(lower)) {
         return openAiReasoningCapability(lower);
     }
     if (lower.includes('anthropic/') || lower.includes('claude-')) {
@@ -470,7 +476,7 @@ export function getModelReasoningCapability(
         return upstreamGatewayCapability(provider, lower) ?? NO_REASONING;
     }
     if (provider === 'openai' || provider === 'codex-chatgpt'
-        || (apiFormat === 'openai-responses' && (isGpt6AstraModel(lower) || /(?:^|\/)(?:gpt-5|o[134](?:-|$))/.test(lower)))) {
+        || (apiFormat === 'openai-responses' && (isGpt6ReasoningFamilyModel(lower) || /(?:^|\/)(?:gpt-5|o[134](?:-|$))/.test(lower)))) {
         return openAiReasoningCapability(lower);
     }
     if (provider === 'claude' || provider === 'commandcode-messages') return claudeReasoningCapability(lower);
@@ -608,9 +614,14 @@ function isGpt6AstraModel(model: string): boolean {
     return /(?:^|\/)gpt-6-astra(?:-|$)/.test(modelName(model));
 }
 
+/** GPT-6 reasoning tiers that control depth through the Responses `reasoning.effort` field. */
+function isGpt6ReasoningFamilyModel(model: string): boolean {
+    return /(?:^|\/)gpt-6-(?:astra|sol|luna)(?:-|$)/.test(modelName(model));
+}
+
 const QWEN_THINKING_MODEL_RE = /(?:^|\/)qwen3(?:[.-]|$)|(?:^|\/)qwen(?:-max|-plus|-flash|-turbo|-long)(?:[-.]|$)/;
 
-const KNOWN_REASONING_MODEL_RE = /(?:^|\/)(?:gpt-5|gpt-6-astra|o[134](?:-|$)|claude-|deepseek-(?:r1|v3|v4|reasoner|flash)|glm-(?:4[.]?[5-9]|5)|qwen3|qwq|gemini-(?:2[.]5|3)|kimi-k2|kimi-k3|minimax-m2|minimax-m3|mimo-v2|gpt-oss)/;
+const KNOWN_REASONING_MODEL_RE = /(?:^|\/)(?:gpt-5|gpt-6-(?:astra|sol|luna)|o[134](?:-|$)|claude-|deepseek-(?:r1|v3|v4|reasoner|flash)|glm-(?:4[.]?[5-9]|5)|qwen3|qwq|gemini-(?:2[.]5|3)|kimi-k2|kimi-k3|minimax-m2|minimax-m3|mimo-v2|gpt-oss)/;
 
 function isQwenThinkingModel(model: string): boolean {
     return QWEN_THINKING_MODEL_RE.test(model);
@@ -883,7 +894,7 @@ const THINKING_RULES: ThinkingRule[] = [
 
     // Custom OpenAI-compatible endpoints can still benefit from well-known model conventions.
     { providers: ['custom'], model: QWEN_THINKING_MODEL_RE, build: ctx => ({ extraBody: { enable_thinking: true, thinking_budget: qwenBudgetFor(ctx.lowerModel, ctx.requested) } }) },
-    { providers: ['custom'], model: /(?:^|\/)gpt-6-astra(?:-|$)/, build: ctx => ({ reasoningEffort: ctx.requested }) },
+    { providers: ['custom'], model: /(?:^|\/)gpt-6-(?:astra|sol|luna)(?:-|$)/, build: ctx => ({ reasoningEffort: ctx.requested }) },
     { providers: ['custom'], model: /(?:^|\/)(?:gpt-5|o[134](?:-|$)|deepseek-|glm-5[.]2|gpt-oss)/, build: ctx => ({ reasoningEffort: withoutMax(ctx.requested) }) },
 
     // Command Code's Provider API normalizes per-model reasoning controls

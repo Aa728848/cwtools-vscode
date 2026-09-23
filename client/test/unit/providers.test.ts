@@ -61,6 +61,12 @@ describe('GPT-6 Astra provider support', () => {
         expect(getModelContextTokens('gpt-6-astra', 'codex-chatgpt')).to.equal(272000);
         expect(clampConfiguredContextTokens('codex-chatgpt', 'gpt-6-astra', 1050000)).to.equal(1050000);
         expect(clampConfiguredContextTokens('codex-chatgpt', 'gpt-6-astra', 272000)).to.equal(272000);
+        for (const model of ['gpt-6-sol', 'gpt-6-luna']) {
+            // Enumerated above for every provider id; the loop varies only per-model limits.
+            expect(getProvider('openai').models, model).to.include(model);
+            expect(getModelOutputTokens(model, 'openai'), model).to.equal(128000);
+            expect(clampConfiguredContextTokens('codex-chatgpt', model, 1050000), model).to.equal(1050000);
+        }
     });
 
     it('recognizes vision and output limits for direct and namespaced Astra IDs', () => {
@@ -196,6 +202,13 @@ describe('isModelVisionCapable', () => {
         expect(isModelVisionCapable('gpt-5.6-luna')).to.equal(true);
     });
 
+    it('returns true for every GPT-6 tier', () => {
+        expect(isModelVisionCapable('gpt-6-astra')).to.equal(true);
+        expect(isModelVisionCapable('gpt-6-sol')).to.equal(true);
+        expect(isModelVisionCapable('gpt-6-luna')).to.equal(true);
+        expect(isModelVisionCapable('openai/gpt-6-sol')).to.equal(true);
+    });
+
     it('returns true for claude model with vision', () => {
         expect(isModelVisionCapable('claude-opus-4-7')).to.equal(true);
     });
@@ -313,6 +326,12 @@ describe('getModelContextTokens', () => {
     });
 
     it('keeps ChatGPT Codex context separate from the public API model limit while supporting manual expansion to 1M for GPT-5.6/6', () => {
+        // GPT-6 Sol/Luna ship with the same 1,050,000 window as Astra.
+        expect(getModelContextTokens('gpt-6-sol', 'openai')).to.equal(1050000);
+        expect(getModelContextTokens('gpt-6-luna', 'openai')).to.equal(1050000);
+        expect(getModelContextTokens('gpt-6-sol', 'codex-chatgpt')).to.equal(272000);
+        expect(clampConfiguredContextTokens('codex-chatgpt', 'gpt-6-sol', 1050000)).to.equal(1050000);
+        expect(clampConfiguredContextTokens('codex-chatgpt', 'gpt-6-luna', 1050000)).to.equal(1050000);
         expect(getModelContextTokens('gpt-5.6-sol', 'codex-chatgpt')).to.equal(272000);
         expect(getModelContextTokens('gpt-5.6-sol', 'openai')).to.equal(1050000);
         expect(clampConfiguredContextTokens('codex-chatgpt', 'gpt-5.6-sol', 1050000)).to.equal(1050000);
@@ -643,6 +662,17 @@ describe('getEffectiveReasoningEffort', () => {
         expect(getEffectiveReasoningEffort('gpt-5.6', 'max', 'openai-responses')).to.equal('xhigh');
         expect(getEffectiveReasoningEffort('gpt-5.6-sol', 'max', 'openai-responses')).to.equal('xhigh');
         expect(getEffectiveReasoningEffort('gpt-5.5', 'max', 'openai-responses')).to.equal('xhigh');
+    });
+
+    it('keeps GPT-6 Sol/Luna max native and Astra on its documented ladder', () => {
+        expect(getEffectiveReasoningEffort('gpt-6-sol', 'max', 'openai-responses')).to.equal('max');
+        expect(getEffectiveReasoningEffort('gpt-6-luna', 'none', 'openai-responses')).to.equal('none');
+        expect(getEffectiveReasoningEffort('gpt-6-astra', 'max', 'openai-responses')).to.equal('max');
+        expect(getEffectiveReasoningEffort('gpt-6-astra', 'none', 'openai-responses')).to.equal('low');
+        // GPT-6 has no `minimal` effort, so it must never reach the wire.
+        for (const model of ['gpt-6-astra', 'gpt-6-sol', 'gpt-6-luna']) {
+            expect(getEffectiveReasoningEffort(model, 'minimal', 'openai-responses'), model).to.equal('low');
+        }
     });
 
     it('does not alter other protocols or supported values', () => {
@@ -1030,6 +1060,8 @@ describe('BUILTIN_PROVIDERS', () => {
     it('uses current direct-provider defaults and supported model IDs', () => {
         expect(BUILTIN_PROVIDERS['openai']!.models).to.include.members([
             'gpt-6-astra',
+            'gpt-6-sol',
+            'gpt-6-luna',
             'gpt-5.6',
             'gpt-5.6-sol',
             'gpt-5.6-terra',
@@ -1037,6 +1069,8 @@ describe('BUILTIN_PROVIDERS', () => {
             'gpt-5.4-pro',
         ]);
         expect(BUILTIN_PROVIDERS['openai']!.defaultModel).to.equal('gpt-6-astra');
+        expect(getModelContextTokens('gpt-6-sol')).to.equal(1050000);
+        expect(getModelContextTokens('gpt-6-luna')).to.equal(1050000);
         expect(getModelContextTokens('gpt-5.6')).to.equal(1050000);
         expect(getModelContextTokens('gpt-5.6-sol')).to.equal(1050000);
         expect(getModelContextTokens('gpt-5.6-terra')).to.equal(1050000);

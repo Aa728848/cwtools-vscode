@@ -10,6 +10,17 @@ describe('getModelPricing', () => {
         expect(getModelPricing('claude-sonnet-4-6')).to.deep.equal([20.46, 102.30]);
     });
 
+    it('prices the GPT-6 Sol and Luna API IDs from the official list', () => {
+        for (const model of ['gpt-6-sol', 'openai/gpt-6-sol']) {
+            expect(getModelPricing(model, 'openai')).to.deep.equal([13.64, 68.20]);
+            expect(getCacheDiscountFactor(model, 'openai')).to.equal(0.1);
+        }
+        for (const model of ['gpt-6-luna', 'openai/gpt-6-luna']) {
+            expect(getModelPricing(model, 'openai')).to.deep.equal([0.68, 3.41]);
+            expect(getCacheDiscountFactor(model, 'openai')).to.equal(0.1);
+        }
+    });
+
     it('exact match: gpt-5.5', () => {
         expect(getModelPricing('gpt-5.5')).to.deep.equal([34.10, 204.59]);
     });

@@ -8,8 +8,15 @@ import type {
 } from '../types';
 import { aiText } from '../messages';
 
+/**
+ * Models selectable in the Codex (ChatGPT subscription) channel. GPT-6 Sol and
+ * Luna joined Astra in the Codex rollout; GPT-5.6 and GPT-5.5 remain as
+ * transitional entries until their announced retirements.
+ */
 export const CODEX_CHATGPT_MODELS = [
     'gpt-6-astra',
+    'gpt-6-sol',
+    'gpt-6-luna',
     'gpt-5.6-sol',
     'gpt-5.6-terra',
     'gpt-5.6-luna',

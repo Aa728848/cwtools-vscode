@@ -13,6 +13,8 @@ describe('ChatGptOAuthService', () => {
     it('tracks the current ChatGPT Codex subscription model catalog', () => {
         expect([...CODEX_CHATGPT_MODELS]).to.deep.equal([
             'gpt-6-astra',
+            'gpt-6-sol',
+            'gpt-6-luna',
             'gpt-5.6-sol',
             'gpt-5.6-terra',
             'gpt-5.6-luna',
@@ -72,6 +74,8 @@ describe('ChatGptOAuthService', () => {
         expect(status).to.include({ available: true, signedIn: true, email: 'plus@example.com', planType: 'plus' });
         expect(status.models).to.include('gpt-5.6-sol');
         expect(status.models).to.include('gpt-6-astra');
+        expect(status.models).to.include('gpt-6-sol');
+        expect(status.models).to.include('gpt-6-luna');
         expect(status.rateLimits[0]!.primary?.usedPercent).to.equal(12);
         expect(requests[0]!.url).to.equal(CODEX_CHATGPT_USAGE_URL);
         expect(new Headers(requests[0]!.init?.headers).get('ChatGPT-Account-Id')).to.equal('acct-1');

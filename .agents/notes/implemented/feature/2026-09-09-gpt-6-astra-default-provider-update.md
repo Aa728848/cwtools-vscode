@@ -1,4 +1,4 @@
-﻿# Agent Note: 将 OpenAI 供应商与 ChatGPT 订阅渠道默认模型更新为 GPT-6 Astra 并支持订阅渠道 GPT-5.6/6 系列 1M 扩展上下文
+# Agent Note: 将 OpenAI 供应商与 ChatGPT 订阅渠道默认模型更新为 GPT-6 Astra 并支持订阅渠道 GPT-5.6/6 系列 1M 扩展上下文
 
 Status: implemented
 
@@ -14,8 +14,8 @@ OpenAI 近期正式发布了旗舰前沿模型 GPT-6 Astra。在先前的支持�
    - 双渠道默认上下文保持差异：OpenAI 官方 API 默认 1,050,000 Token；ChatGPT 订阅渠道未配置时默认 272,000 Token。
 
 2. **Codex 订阅渠道 1M 扩展上下文与安全裁剪支持**：
-   - 新增 `isCodexExtendedContextModel(model)` 判定函数，识别 GPT-5.6 与 GPT-6 系列模型。
-   - 优化 `clampConfiguredContextTokens`：对于属于上述系列的模型，放宽用户配置上限至模型的完整能力（如 `gpt-6-astra`、`gpt-5.6-sol` 为 1,050,000；`gpt-5.6-luna` 为 400,000）；未配置（0）时仍回退至 272,000 默认值；对非扩展模型（如 `gpt-5.3-codex-spark`）仍严格安全限制在 272K。
+   - 新增 `isCodexExtendedContextModel(model)` 判定函数，按 `gpt-6` 家族前缀与 `gpt-5.6` 识别 GPT-5.6 与 GPT-6 系列模型（新增 GPT-6 档位自动继承该能力，见 [GPT-6 Sol / Luna 供应商目录与能力刷新](./2026-09-23-gpt-6-sol-luna-provider-refresh.md)）。
+   - 优化 `clampConfiguredContextTokens`：对于属于上述系列的模型，放宽用户配置上限至模型的完整能力（如 `gpt-6-astra`、`gpt-6-sol`、`gpt-6-luna`、`gpt-5.6-sol` 为 1,050,000；`gpt-5.6-luna` 为 400,000）；未配置（0）时仍回退至 272,000 默认值；对非扩展模型（如 `gpt-5.3-codex-spark`）仍严格安全限制在 272K。
 
 ```mermaid
 flowchart TD

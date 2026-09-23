@@ -1,0 +1,53 @@
+utility_component_template = {
+	key = "SRA_AURA_5_1"
+	size = aux
+	icon = "GFX_ship_part_aura"
+
+	friendly_aura = {
+		name = "SRA_Aura_5_1"
+		radius = 2000
+		system_wide = yes
+		apply_on = ships
+
+		stack_info = {
+			id = SRA_Aura_5_1
+			priority = 200
+		}
+
+		modifier = {
+			ship_shield_damage_mult = 0.5
+			ship_armor_damage_mult = 0.5
+			ship_hull_damage_mult = 0.5
+		}
+	}
+}
+
+utility_component_template = {
+	key = "SRA_AURA_HOSTILE_1"
+	size = aux
+	icon = "GFX_ship_part_aura"
+
+	hostile_aura = {
+		name = "SRA_Aura_Hostile_1"
+		radius = 1500
+		apply_on = ships
+
+		stack_info = {
+			id = SRA_Aura_Hostile_1
+			priority = 100
+		}
+
+		modifier = {
+			custom_tooltip = SRA_Aura_Hostile_1_tooltip
+			show_only_custom_tooltip = yes
+			ship_tracking_add = 10
+			ship_fire_rate_mult = 0.25
+		}
+
+		damage_per_day = {
+			damage = { min = 1 max = 2 }
+			shield_damage = 0.5
+			hull_damage = 0.25
+		}
+	}
+}

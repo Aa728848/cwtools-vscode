@@ -186,6 +186,8 @@
   "commands.stellarisLanguageServices.ai.previewSelectionTranslation.title": "AI: Toggle Comment Translation",
   "commands.stellarisLanguageServices.localisation.translateSelection.title": "AI: Translate Localisation Selection",
   "commands.stellarisLanguageServices.localisation.polishSelection.title": "AI: Polish Localisation Selection",
+  "commands.stellarisLanguageServices.localisation.generateAuraForBlock.title": "Generate Aura Localisation for This Block",
+  "commands.stellarisLanguageServices.localisation.generateAuraForFile.title": "Generate Aura Localisation for All Auras in This File",
   "commands.stellarisLanguageServices.ai.reviewFile.title": "AI: Review Current File",
   "commands.stellarisLanguageServices.ai.explainSelection.title": "AI: Explain Selected Code",
   "commands.stellarisLanguageServices.ai.sendSelectionToChat.title": "AI: Send Selection to Chat",

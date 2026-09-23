@@ -22,7 +22,10 @@ fs.writeFileSync(path.join(userSettingsDir, 'settings.json'), JSON.stringify({
 module.exports = {
   version: '1.93.1',
   extensionDevelopmentPath: '../release',
-  files: '../release/bin/client/test/suite/cwtGameActivation.test.js',
+  files: [
+    '../release/bin/client/test/suite/cwtGameActivation.test.js',
+    '../release/bin/client/test/suite/auraLocalisation.test.js',
+  ],
   workspaceFolder: gameSampleRoot,
   launchArgs: [
     // A `.txt` game-script file opens first; the workspace has a game exe, so

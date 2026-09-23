@@ -186,6 +186,8 @@
   "commands.stellarisLanguageServices.ai.previewSelectionTranslation.title": "AI: 切换注释翻译",
   "commands.stellarisLanguageServices.localisation.translateSelection.title": "AI: 翻译选中的本地化",
   "commands.stellarisLanguageServices.localisation.polishSelection.title": "AI: 润色选中的本地化",
+  "commands.stellarisLanguageServices.localisation.generateAuraForBlock.title": "生成光环本地化（光标所在块）",
+  "commands.stellarisLanguageServices.localisation.generateAuraForFile.title": "生成光环本地化（当前文件全部光环）",
   "commands.stellarisLanguageServices.ai.reviewFile.title": "AI: 审查当前文件",
   "commands.stellarisLanguageServices.ai.explainSelection.title": "AI: 解释选中代码",
   "commands.stellarisLanguageServices.ai.sendSelectionToChat.title": "AI: 发送选中内容到对话面板",

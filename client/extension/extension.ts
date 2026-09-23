@@ -47,6 +47,7 @@ import { registerRelatedResourceFeatures } from './relatedResources';
 import { registerRulesConfigGroupCommands } from './rulesConfigGroups';
 import { registerImageTools } from './imageTools';
 import { registerLocalisationAiCommands } from './localisationAiCommands';
+import { registerAuraLocalisationCommands } from './auraLocalisation';
 import { registerTranslationPreviewCommands } from './translationPreview';
 import { registerSpecialPathCommands } from './specialPaths';
 import { registerInspectionOverviewCommand } from './inspectionOverview';
@@ -1342,6 +1343,7 @@ export async function activate(context: ExtensionContext) {
 		await aiService.selectModelCommand();
 	});
 	registerLocalisationAiCommands(context, (message: string) => chatPanelProvider.sendProgrammaticMessage(message));
+	registerAuraLocalisationCommands(context, () => defaultClient);
 	registerTranslationPreviewCommands(context, aiService);
 
 	// ── Quick AI commands (keyboard shortcuts / command palette) ──────────
@@ -2215,11 +2217,16 @@ export async function activate(context: ExtensionContext) {
 		};
 		client.onNotification(createVirtualFile, async (param: CreateVirtualFile) => {
 			const uri = Uri.parse(param.uri);
-			const doc = await workspace.openTextDocument(uri);
-			const edit = new WorkspaceEdit();
-			const range = new Range(0, 0, doc.lineCount, doc.getText().length);
-			edit.set(uri, [new TextEdit(range, param.fileContent)]);
-			await workspace.applyEdit(edit);
+			// A content-provider backed document can drop an edit when another update
+			// lands in between ("has changed in the meantime"). Re-read the buffer and
+			// retry with a fresh range so the content survives repeated generations.
+			let doc = await workspace.openTextDocument(uri);
+			for (let attempt = 0; attempt < 3 && doc.getText() !== param.fileContent; attempt++) {
+				const edit = new WorkspaceEdit();
+				edit.set(uri, [new TextEdit(new Range(doc.positionAt(0), doc.positionAt(doc.getText().length)), param.fileContent)]);
+				await workspace.applyEdit(edit);
+				doc = await workspace.openTextDocument(uri);
+			}
 			await window.showTextDocument(uri);
 		})
 		client.onNotification(promptReload, async (param: string) => {

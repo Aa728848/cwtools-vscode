@@ -19,6 +19,7 @@ The extension package includes the language-server binaries for Windows, macOS, 
 - Diagnostics, completion, hover information, definitions, references, symbols, CodeLens, and inlay hints
 - Paradox script, localisation, assets, GUI files, and compile-unit-aware `.shader` / `.fxh` editing
 - Profiles for Stellaris, Hearts of Iron IV, Europa Universalis IV and V, Crusader Kings II and III, Imperator: Rome, Victoria II and 3, and custom CWT projects
+- Aura tooltip localisation for `friendly_aura` / `hostile_aura` blocks in `common/component_templates`, generated from their modifiers and `damage_per_day`
 - Incremental project and vanilla indexes for larger workspaces
 
 Coverage depends on the active game profile and its CWT rules. Stellaris is the primary target for the bundled rules and visual tools.
@@ -89,6 +90,7 @@ If something behaves unexpectedly, please include the game profile, extension ve
 - 诊断、补全、悬停信息、定义、引用、符号、CodeLens 和嵌入提示
 - Paradox 脚本、本地化、资产、GUI，以及按真实编译单元工作的 `.shader` / `.fxh` 编辑
 - 支持 Stellaris、Hearts of Iron IV、Europa Universalis IV 和 V、Crusader Kings II 和 III、Imperator: Rome、Victoria II 和 3，以及自定义 CWT 项目
+- 按 `common/component_templates` 中 `friendly_aura` / `hostile_aura` 的 modifier 与 `damage_per_day` 自动生成光环 Tooltip 本地化
 - 面向大型工作区的项目与原版增量索引
 
 具体覆盖范围取决于当前游戏 Profile 及其 CWT 规则。随扩展提供的规则和可视化工具主要面向 Stellaris。

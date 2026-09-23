@@ -57,6 +57,20 @@ Edits made by a visual editor use VS Code workspace edits, so they participate i
 
 Use the `Compare with Vanilla` CodeLens on a matching mod file. `Migrate Block from Vanilla` replaces the current block while preserving the coordinates of other pending edits.
 
+#### Generate aura localisation
+
+Auras in `common/component_templates/*.txt` need a tooltip string of their own. Put the cursor inside a `friendly_aura` or `hostile_aura` block and run `Generate Aura Localisation for This Block`, or run `Generate Aura Localisation for All Auras in This File` to convert every aura in the file at once. Both commands are available from the Command Palette, the editor context menu, and the lightbulb.
+
+The generated lines open in a read-only `cwtools://auraloc` buffer, ready to paste into the matching localisation `.yml`:
+
+```yaml
+SRA_Aura_5_1:0 "§Y防御性光环§!\n对盟友舰船效果：\n $MOD_SHIP_SHIELD_DAMAGE_MULT$：§G+50%§!\n $MOD_SHIP_ARMOR_DAMAGE_MULT$：§G+50%§!\n $MOD_SHIP_HULL_DAMAGE_MULT$：§G+50%§!"
+```
+
+Every `modifier` entry becomes `$MOD_<KEY>$` followed by its value: `_mult` keys and fractional values are rendered as percentages (`0.5` → `§G+50%§!`), other values keep their written form, and negative values are shown in red. `damage_per_day` follows as labelled lines (daily damage, shield/armor/hull damage, accuracy, penetration, size factor). The localisation key is taken from `stack_info.id`, falling back to `name`.
+
+Nothing is written to disk, and the aura script is not modified: paste the lines yourself, and reference the generated key from the aura's `modifier` (`custom_tooltip = <KEY>`) if you want to replace the auto-generated tooltip. When nothing can be generated (the cursor is outside every aura block, the block has no key, or the file does not parse), the same buffer shows the reason as `#` comment lines.
+
 #### Use the AI panel
 
 Open `AI: Open Chat Panel` from the Command Palette. The composer lets you keep routing automatic or restrict a turn to the Paradox/CWTools or general-coding domain. Provider credentials are stored through VS Code SecretStorage; tool access still follows the selected sandbox and approval policy.
@@ -186,6 +200,20 @@ Stellaris Language Serves 是一款面向 Paradox Mod 开发的 VS Code 扩展�
 #### 与原版对比
 
 在有原版对应文件的 Mod 文件中使用 `Compare with Vanilla` CodeLens。`Migrate Block from Vanilla` 会替换当前代码块，并避免其他待处理修改的行号失效。
+
+#### 生成光环本地化
+
+`common/component_templates/*.txt` 中的光环需要自己的 Tooltip 文本。把光标放在 `friendly_aura` 或 `hostile_aura` 块内，运行 `生成光环本地化（光标所在块）`；或运行 `生成光环本地化（当前文件全部光环）`，一次转换文件中的全部光环。两个命令都可以从命令面板、编辑器右键菜单和灯泡菜单调用。
+
+生成结果会显示在只读的 `cwtools://auraloc` 缓冲区中，可直接粘贴进对应的本地化 `.yml`：
+
+```yaml
+SRA_Aura_5_1:0 "§Y防御性光环§!\n对盟友舰船效果：\n $MOD_SHIP_SHIELD_DAMAGE_MULT$：§G+50%§!\n $MOD_SHIP_ARMOR_DAMAGE_MULT$：§G+50%§!\n $MOD_SHIP_HULL_DAMAGE_MULT$：§G+50%§!"
+```
+
+`modifier` 中的每条修正都会生成 `$MOD_<键名>$` 加数值：`_mult` 结尾的键和小数值按百分比渲染（`0.5` → `§G+50%§!`），其余按原值输出，负值使用红色。随后是 `damage_per_day` 的逐项标签（每日伤害、护盾/装甲/船体伤害、命中率、穿透、体积伤害系数）。本地化键取自 `stack_info.id`，缺失时回退到 `name`。
+
+该功能不会写入任何文件，也不会修改光环脚本：请自行粘贴生成的行；如果想覆盖自动生成的 Tooltip，可在光环的 `modifier` 中用 `custom_tooltip = <键名>` 引用它。当无法生成时（光标不在任何光环块内、光环块没有键名、文件语法有误），同一个缓冲区会以 `#` 注释行显示原因。
 
 #### 使用 AI 面板
 

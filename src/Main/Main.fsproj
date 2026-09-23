@@ -39,6 +39,7 @@
     <Compile Include="PureDecisions.fs" />
     <Compile Include="SemanticGraph.fs" />
     <Compile Include="EventAstWalk.fs" />
+    <Compile Include="AuraLocalisation.fs" />
     <Compile Include="InlineGraph.fs" />
     <Compile Include="PdxEventSemantics.fs" />
     <Compile Include="PdxFlowAnalysis.fs" />

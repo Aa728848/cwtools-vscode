@@ -32,6 +32,8 @@ open CWTools.Localisation
 open LSP.LanguageServer   // brings gameStateLock into scope
 open RefreshLockPhases
 
+module Aura = Main.AuraLocalisation
+
 // Precompile regular to avoid InlayHint / precache allocation every time on the hot path
 let private inlayLocalVarPattern =
     System.Text.RegularExpressions.Regex(
@@ -1539,6 +1541,65 @@ type CompletionRuntimeState =
 /// SemanticDelta.fs. Path routing identifies the candidate domains; exact type
 /// keys and semantic equality are supplied by the staged CWTools type index
 /// before a global refresh is queued.
+
+/// Generates aura localisation lines from the buffer text alone, so the command
+/// also works in CWT-only mode where no game model is loaded. `readText` and
+/// `show` are supplied by the server, which keeps this independent of the class
+/// state and reachable from the pre-interface part of the server.
+let private auraLocalisationCommand
+    (p: ExecuteCommandParams)
+    (readText: string -> string)
+    (show: string -> unit)
+    : JsonValue option =
+    match p.arguments with
+    | uriArg :: rest ->
+        let filePath =
+            let raw = uriArg.AsString()
+            getPathFromDoc (Uri(raw))
+
+        let scope =
+            match rest with
+            | scopeArg :: _ -> scopeArg.AsString()
+            | [] -> Aura.scopeBlock
+
+        let position =
+            match rest with
+            | _ :: lineArg :: colArg :: _ -> Some(PosHelper.fromZ (lineArg.AsInteger()) (colArg.AsInteger()))
+            | _ -> None
+
+        let result = Aura.collect filePath (readText filePath) scope position
+
+        // Show the generated lines, or the failure notes as comments so the code
+        // action path (which has no other channel) is never silent.
+        show (
+            match result.Lines, result.Messages with
+            | lines, _ when not lines.IsEmpty -> String.Join("\r\n", lines)
+            | [], messages -> messages |> List.map (fun message -> "# " + message) |> String.concat "\r\n"
+            | _ -> ""
+        )
+
+        Some(
+            JsonValue.Record
+                [| "ok", JsonValue.Boolean result.Ok
+                   "scope", JsonValue.String result.Scope
+                   "count", JsonValue.Number(decimal result.Entries.Length)
+                   "lines", JsonValue.Array(result.Lines |> List.map JsonValue.String |> Array.ofList)
+                   "message",
+                   (match result.Messages with
+                    | [] -> JsonValue.Null
+                    | messages -> JsonValue.String(String.Join("；", messages)))
+                   "entries",
+                   JsonValue.Array(
+                       result.Entries
+                       |> List.map (fun entry ->
+                           JsonValue.Record
+                               [| "key", JsonValue.String entry.Key
+                                  "kind", JsonValue.String(Aura.kindName entry.Kind)
+                                  "startLine", JsonValue.Number(decimal entry.StartLine) |])
+                       |> Array.ofList
+                   ) |]
+        )
+    | [] -> None
 
 type Server(client: ILanguageClient) =
     do setupLogger client
@@ -8412,8 +8473,9 @@ type Server(client: ILanguageClient) =
                             else
                                 []
 
+                        let fileText = docs.GetText(FileInfo(path)) |> Option.defaultValue ""
+
                         let definitionInjectionModeActions =
-                            let fileText = docs.GetText(FileInfo(path)) |> Option.defaultValue ""
                             match tryDefinitionInjectionKeyAtLine fileText p.range.start.line with
                             | Some info when p.range.start.character <= info.keyEnd && p.range.``end``.character >= info.keyStart ->
                                 [ "INJECT"
@@ -8432,14 +8494,41 @@ type Server(client: ILanguageClient) =
                                           JsonValue.String mode ] })
                             | _ -> []
 
+                        let auraLocalisationActions =
+                            if not (Aura.isComponentTemplatePath path) then
+                                []
+                            elif not (Aura.containsAuraKey fileText) then
+                                []
+                            else
+                                let uri = p.textDocument.uri.ToString()
+
+                                let blockAction =
+                                    if Aura.hasAuraAt path fileText (PosHelper.fromZ p.range.start.line p.range.start.character) then
+                                        [ { title = "Generate aura localisation for this aura block"
+                                            command = "cwtools.localisation.generateAura"
+                                            arguments =
+                                              [ JsonValue.String uri
+                                                JsonValue.String Aura.scopeBlock
+                                                JsonValue.Number(decimal p.range.start.line)
+                                                JsonValue.Number(decimal p.range.start.character) ] } ]
+                                    else
+                                        []
+
+                                blockAction
+                                @ [ { title = "Generate aura localisation for all auras in this file"
+                                      command = "cwtools.localisation.generateAura"
+                                      arguments =
+                                        [ JsonValue.String uri; JsonValue.String Aura.scopeFile ] } ]
+
                         match shaderActions with
                         | Some actions -> actions
                         | None ->
                             match les with
-                            | [] -> ces @ definitionInjectionModeActions
+                            | [] -> ces @ definitionInjectionModeActions @ auraLocalisationActions
                             | _ ->
                                 ces
                                 @ definitionInjectionModeActions
+                                @ auraLocalisationActions
                                 @ [ { title = "Generate localisation .yml for this file"
                                       command = "genlocfile"
                                       arguments = [ p.textDocument.uri.LocalPath |> JsonValue.String ] }
@@ -10769,6 +10858,8 @@ type Server(client: ILanguageClient) =
                             showVirtualFile "cwtools://1" text
 
                             None
+                        | { command = "cwtools.localisation.generateAura"; arguments = _ } ->
+                            auraLocalisationCommand p readDocumentText (showVirtualFile "cwtools://auraloc")
                         | { command = "debugrules"
                             arguments = _ } ->
                             match typedGame with
@@ -12703,6 +12794,8 @@ type Server(client: ILanguageClient) =
 
                     | None ->
                         match p with
+                        | { command = "cwtools.localisation.generateAura"; arguments = _ } ->
+                            auraLocalisationCommand p readDocumentText (showVirtualFile "cwtools://auraloc")
                         | { command = "cwtools.ai.queryProjectKnowledgeDb"
                             arguments = args } -> Some(queryProjectKnowledgeDbCommand args)
                         | _ -> None

@@ -29,6 +29,7 @@ module Commands =
             // Query / file inspection commands
             readCmd "cwtools.findTypeReferences"
             readCmd "getFileTypes"
+            readCmd "cwtools.localisation.generateAura"
 
             // AI Read-only commands
             readCmd "cwtools.ai.getScopeAtPosition"

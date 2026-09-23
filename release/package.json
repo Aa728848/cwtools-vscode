@@ -297,6 +297,16 @@
                     "group": "stellaris@6"
                 },
                 {
+                    "command": "cwtools.localisation.generateAuraForBlock",
+                    "when": "resourceExtname == .txt && resourcePath =~ /component_templates/",
+                    "group": "stellaris@7"
+                },
+                {
+                    "command": "cwtools.localisation.generateAuraForFile",
+                    "when": "resourceExtname == .txt && resourcePath =~ /component_templates/",
+                    "group": "stellaris@8"
+                },
+                {
                     "command": "cwtools.csv.insertRowAbove",
                     "when": "resourceExtname == .csv",
                     "group": "paradoxCsv@1"
@@ -628,6 +638,16 @@
                 "title": "%commands.stellarisLanguageServices.localisation.polishSelection.title%",
                 "category": "Stellaris AI",
                 "icon": "$(sparkle)"
+            },
+            {
+                "command": "cwtools.localisation.generateAuraForBlock",
+                "title": "%commands.stellarisLanguageServices.localisation.generateAuraForBlock.title%",
+                "category": "Stellaris"
+            },
+            {
+                "command": "cwtools.localisation.generateAuraForFile",
+                "title": "%commands.stellarisLanguageServices.localisation.generateAuraForFile.title%",
+                "category": "Stellaris"
             },
             {
                 "command": "cwtools.ai.reviewFile",

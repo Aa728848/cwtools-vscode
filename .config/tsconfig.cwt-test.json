@@ -2,7 +2,8 @@
 	"extends": "../tsconfig.json",
 	"include": [
 		"../client/test/suite/cwtLanguage.test.ts",
-		"../client/test/suite/cwtGameActivation.test.ts"
+		"../client/test/suite/cwtGameActivation.test.ts",
+		"../client/test/suite/auraLocalisation.test.ts"
 	],
 	"exclude": [
 		"../client/test/unit/**",

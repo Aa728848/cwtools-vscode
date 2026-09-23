@@ -1,5 +1,21 @@
 # Changelog
 
+## [2.22.0] - 2026-09-23
+
+### 光环本地化自动导出与虚拟缓冲区更新修复 / Aura Localisation Generator & Virtual Buffer Refresh Fix
+- **[特性] 光环（friendly_aura / hostile_aura）Tooltip 本地化自动导出（Aura Localisation Generator）**：
+  - **一键生成 Tooltip 文本**：把 `common/component_templates/*.txt` 中 `friendly_aura` / `hostile_aura` 块的 `modifier` 与 `damage_per_day` 自动转换为可直接粘贴进本地化 `.yml` 的行，例如 `SRA_Aura_5_1:0 "§Y防御性光环§!\n对盟友舰船效果：\n $MOD_SHIP_SHIELD_DAMAGE_MULT$：§G+50%§!\n ..."`。
+  - **两种范围 + 三处入口**：可选择"光标所在块"或"当前文件全部光环"，两者均可从命令面板、编辑器右键菜单（`component_templates` 下的 `.txt`）以及编辑器灯泡菜单调用。
+  - **修正与伤害渲染规则**：修正使用 `$MOD_<键名大写>$` 引用对应本地化；`_mult`/`_mult_base`/`_perc`/`_percent` 结尾或字面量含小数按百分比渲染（`0.5` → `§G+50%§!`，负值红色 `§R-50%§!`），其余按写入原值输出；`damage_per_day` 逐项输出每日伤害、护盾/装甲/船体伤害、命中率、护盾/装甲穿透、体积伤害系数等中文标签；本地化键取 `stack_info.id`（缺失时回退 `name`，重复键保留首个并提示）。
+  - **只读交付**：结果写入只读虚拟文档 `cwtools://auraloc`，不写盘、不修改光环脚本；无法生成时以 `# 原因` 注释行反馈，并给出可直接使用的本地化键。
+  - English: [Feature] Aura localisation generator — turns `friendly_aura` / `hostile_aura` modifiers and `damage_per_day` in `common/component_templates/*.txt` into paste-ready localisation lines through a new read-only language-server command exposed from the Command Palette, the editor context menu and the lightbulb (cursor block or every aura in the file); emits `$MOD_<KEY>$` references with percent/sign/colour formatting, labelled daily-damage fields and `stack_info.id`-based keys, writes nothing to disk, and reports failures as `#` comment lines in the read-only `cwtools://auraloc` buffer.
+- **[修复] 只读虚拟文档连续更新被丢弃（Virtual Buffer Refresh Fix）**：
+  - 修复 `cwtools://` 虚拟文档在连续生成时因 `has changed in the meantime` 被 VS Code 忽略编辑、导致缓冲区停留在上一次内容的问题；现按缓冲区当前位置重新计算替换范围，并在内容不一致时重读重试（最多 3 次）。既有的 `Generate missing loc` 与各类 `List all …` 虚拟文件同样受益。
+  - English: [Fix] Virtual buffer refresh — repeated updates of a content-provider backed `cwtools://` buffer are no longer dropped ("has changed in the meantime"), so the buffer always shows the newest content; the existing `genlocfile` / `genlocall` and `List all …` buffers benefit as well.
+- **[维护] 更新内置 Stellaris 规则包（Bundled Stellaris Rules Update）**：
+  - 刷新 `release/rules/stellaris-rules.zip` 内置规则包。
+  - English: [Maintenance] Refreshed the bundled `release/rules/stellaris-rules.zip`.
+
 ## [2.21.0] - 2026-09-23
 
 ### 聊天面板 LaTeX 数学公式渲染与计划审批稳健性 / Chat LaTeX Math Formula Rendering & Plan Approval Robustness

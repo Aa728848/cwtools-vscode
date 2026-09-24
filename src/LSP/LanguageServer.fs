@@ -32,6 +32,23 @@ let enterGameStateWriteLock () =
         Interlocked.Decrement(&gameStateWriterActivityCount) |> ignore
         reraise ()
 
+/// How long a background cycle may poll for the root writer before it gives up and keeps
+/// its work pending. A writer that parks while waiting blocks every concurrent editor
+/// read, so cycles that can defer must bound that wait instead of stalling the editor.
+let mutable gameStateWriteLockPollBudgetMs = 10000
+let private gameStateWriteLockPollIntervalMs = 1
+
+/// Reader-friendly writer acquisition for cycles that may keep their pending state and
+/// retry later. Returns false when the budget elapsed without acquiring the lock.
+let tryEnterGameStateWriteLock (budgetMs: int) =
+    if tryAcquireWriteLockPolling gameStateLock budgetMs gameStateWriteLockPollIntervalMs then
+        // Report activity for the real hold only: isGameStateWriteBusy gates the
+        // completion fallback, and merely waiting must not degrade completions.
+        Interlocked.Increment(&gameStateWriterActivityCount) |> ignore
+        true
+    else
+        false
+
 let exitGameStateWriteLock () =
     try
         gameStateLock.ExitWriteLock()
@@ -509,8 +526,10 @@ let connect (serverFactory: ILanguageClient -> ILanguageServer, receive: BinaryR
 
     let processNotification (n: Notification) : Async<unit> * bool =
         match n with
-        // These two mutate gameObj / start processWorkspace -> need exclusive Write Lock
-        | Initialized            -> server.Initialized(), true
+        // DidChangeConfiguration mutates shared model state -> needs the exclusive Write Lock.
+        // Initialized only completes a handshake (its body is a no-op), so it must not take a
+        // writer: a queued writer blocks every concurrent editor read.
+        | Initialized            -> server.Initialized(), false
         | DidChangeConfiguration(p) -> server.DidChangeConfiguration(p), true
         // All others only touch DocumentStore + MailboxProcessor (both thread-safe) -> no lock needed
         | DidOpenTextDocument(p)  -> server.DidOpenTextDocument(p), false
@@ -820,7 +839,11 @@ let connect (serverFactory: ILanguageClient -> ILanguageServer, receive: BinaryR
         let cause =
             runWriteRequestTerminal
                 (fun () ->
-                    enterGameStateWriteLock ()
+                    // Never park in the writer-waiting state: a parked writer blocks every
+                    // concurrent editor read, so a writer that stays busy past the budget
+                    // becomes a bounded timeout instead of a multi-second freeze.
+                    if not (tryEnterGameStateWriteLock gameStateWriteLockPollBudgetMs) then
+                        raise (System.TimeoutException("root writer busy"))
                     traceRef |> Option.iter (fun t -> markLockAcquired (timestamp ()) t.timing))
                 exitGameStateWriteLock
                 cancel.Token
@@ -828,15 +851,34 @@ let connect (serverFactory: ILanguageClient -> ILanguageServer, receive: BinaryR
 
         terminalizeRequest id cause
 
+    // A model-mutating notification must not be dropped, and parking a writer would block
+    // every concurrent editor read. Re-queue it instead: the mailbox stays free and the
+    // notification is applied as soon as the current readers release the root writer.
+    let notificationRequeueDelayMs = 250
+    let mutable notificationRequeueAttempts = 0
+
+    let requeueNotification (method: string) (item: PendingTask) =
+        notificationRequeueAttempts <- notificationRequeueAttempts + 1
+        if notificationRequeueAttempts = 1 || notificationRequeueAttempts % 40 = 0 then
+            dprintfn
+                $"Deferring notification {method}: root writer busy (attempt={notificationRequeueAttempts})"
+        System.Threading.Tasks.Task.Run(fun () ->
+            Thread.Sleep notificationRequeueDelayMs
+            processQueue.Add item)
+        |> ignore
+
     while not quit do
         match processQueue.Take() with
         | Quit -> quit <- true
-        | ProcessNotification(_, task, true  (* needsWriteLock *)) ->
-            enterGameStateWriteLock ()
-            try
-                Async.RunSynchronously(task)
-            finally
-                exitGameStateWriteLock ()
+        | ProcessNotification(method, task, true (* needsWriteLock *)) ->
+            if tryEnterGameStateWriteLock gameStateWriteLockPollBudgetMs then
+                notificationRequeueAttempts <- 0
+                try
+                    Async.RunSynchronously(task)
+                finally
+                    exitGameStateWriteLock ()
+            else
+                requeueNotification method (ProcessNotification(method, task, true))
         | ProcessNotification(_, task, false (* no lock needed *)) ->
             Async.RunSynchronously(task)
         | ProcessLockFreeRequest(id, task, cancel) ->

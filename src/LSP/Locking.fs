@@ -1,5 +1,6 @@
 module LSP.Locking
 
+open System.Diagnostics
 open System.Threading
 
 type ReadLockResult<'T> =
@@ -178,4 +179,30 @@ let runTracedReadLocked
         markLockTimedOut (timestamp ()) timing
 
     result
+
+/// Acquires the writer by polling instead of parking in the lock's waiting state.
+///
+/// ReaderWriterLockSlim blocks every new reader while a writer is waiting, so a writer
+/// that parks behind a long read hold - bulk model validation keeps the read lock for
+/// seconds - locks out all concurrent editor reads for that entire period. A zero
+/// timeout never enters the writer-waiting state: readers keep working while the writer
+/// waits, and the writer is granted as soon as the current readers release the lock.
+/// Returns false when the budget elapses so the caller can keep its work pending.
+let tryAcquireWriteLockPolling
+    (stateLock: ReaderWriterLockSlim)
+    (budgetMs: int)
+    (pollIntervalMs: int)
+    =
+    let interval = max 1 pollIntervalMs
+    let elapsed = Stopwatch.StartNew()
+    let mutable acquired = false
+    let mutable expired = false
+    while not acquired && not expired do
+        // A writer that is already queued owns the next grant; polling must not overtake it.
+        if stateLock.WaitingWriteCount = 0 then
+            acquired <- stateLock.TryEnterWriteLock(0)
+        if not acquired then
+            if elapsed.ElapsedMilliseconds >= int64 (max 0 budgetMs) then expired <- true
+            else Thread.Sleep interval
+    acquired
 

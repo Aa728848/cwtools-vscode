@@ -44,6 +44,22 @@ describe('MemDiag locale-aware formatter', () => {
 		expect(skipped.some(line => line.includes('Quiet period reached: false [quiet=False]'))).to.equal(true);
 	});
 
+	it('translates the write-lock-busy refresh deferral', () => {
+		const zh = formatMemDiagEntry({
+			category: 'Refresh',
+			message: 'RefreshCaches write_lock_busy wait=1200ms skip=3',
+		}, '10:00:02', 'zh');
+		const en = formatMemDiagEntry({
+			category: 'Refresh',
+			message: 'RefreshCaches write_lock_busy wait=1200ms skip=3',
+		}, '10:00:02', 'en');
+
+		expect(zh[0]).to.include('写锁忙');
+		expect(zh[0]).not.to.include('write lock busy');
+		expect(en[0]).to.include('write lock busy');
+		expect(en[0]).not.to.include('写锁忙');
+	});
+
 	it('removes injected line breaks while retaining unknown fields', () => {
 		const lines = formatMemDiagEntry({
 			category: 'Custom',

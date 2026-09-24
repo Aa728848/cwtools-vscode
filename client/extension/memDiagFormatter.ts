@@ -56,6 +56,7 @@ const DESCRIPTION_LABELS: Readonly<Record<string, string>> = {
 	'ttl-hit': 'TTL 缓存命中 / TTL cache hit',
 	'immediate fallback': '立即回退 / immediate fallback',
 	'lock-timeout fallback': '锁等待超时回退 / lock-timeout fallback',
+	'write_lock_busy': '写锁忙，保留待处理下一轮重试 / write lock busy, kept pending for retry',
 	'staged result superseded; retrying after quiet period': 'staged 结果已过期，静默期后重试 / staged result superseded; retrying after quiet period',
 };
 

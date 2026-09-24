@@ -136,4 +136,107 @@ assertAcquiredFailureClosesMethod
     (fun error -> error :? InvalidOperationException)
     (async { return raise (InvalidOperationException("boom")) })
 
+// A writer that parks in the waiting state blocks every new reader. Bulk model
+// validation keeps the root read lock for seconds, so a parked writer turned that
+// hold into a total freeze of hover/completion/semantic tokens. Polling acquisition
+// must therefore keep readers working while it waits.
+let startReadHold (target: ReaderWriterLockSlim) (holdMs: int) =
+    let entered = new ManualResetEventSlim(false)
+    let reader =
+        Thread(fun () ->
+            target.EnterReadLock()
+            try
+                entered.Set()
+                Thread.Sleep holdMs
+            finally
+                target.ExitReadLock())
+    reader.IsBackground <- true
+    reader.Start()
+    if not (entered.Wait(2000)) then failwith "long read holder did not enter"
+    reader
+
+let measureReadWait (target: ReaderWriterLockSlim) =
+    let wait = Diagnostics.Stopwatch.StartNew()
+    let acquired = target.TryEnterReadLock(500)
+    wait.Stop()
+    if acquired then target.ExitReadLock()
+    acquired, wait.ElapsedMilliseconds
+
+// Hazard being fixed: a parked writer blocks readers for the whole wait.
+let parkedLock = new ReaderWriterLockSlim()
+let parkedReader = startReadHold parkedLock 1500
+let parkedWriter =
+    Thread(fun () ->
+        parkedLock.EnterWriteLock()
+        parkedLock.ExitWriteLock())
+parkedWriter.IsBackground <- true
+parkedWriter.Start()
+Thread.Sleep 100
+let parkedReadAcquired, parkedReadWaitMs = measureReadWait parkedLock
+check (not parkedReadAcquired)
+      $"a parked writer must block concurrent readers (waited {parkedReadWaitMs}ms)"
+parkedReader.Join()
+parkedWriter.Join()
+
+// Fixed behaviour: a polling writer leaves readers unblocked while it waits.
+let pollingLock = new ReaderWriterLockSlim()
+let pollingReader = startReadHold pollingLock 800
+let mutable pollingAcquired = true
+let poller =
+    Thread(fun () -> pollingAcquired <- tryAcquireWriteLockPolling pollingLock 400 1)
+poller.IsBackground <- true
+poller.Start()
+Thread.Sleep 100
+let polledReadAcquired, polledReadWaitMs = measureReadWait pollingLock
+check polledReadAcquired "readers must still be served while a writer polls"
+check (polledReadWaitMs < 200L)
+      $"a polling writer must not make readers wait (observed {polledReadWaitMs}ms)"
+poller.Join()
+check (not pollingAcquired) "polling must report the expired budget instead of acquiring"
+pollingReader.Join()
+
+// The poller still wins the lock once the reader releases inside its budget.
+let handoffLock = new ReaderWriterLockSlim()
+let handoffReader = startReadHold handoffLock 300
+let mutable handoffAcquired = false
+let handoff =
+    Thread(fun () ->
+        // ReaderWriterLockSlim ownership is thread-affine: the acquiring thread releases.
+        handoffAcquired <- tryAcquireWriteLockPolling handoffLock 3000 1
+        if handoffAcquired then handoffLock.ExitWriteLock())
+handoff.IsBackground <- true
+handoff.Start()
+handoffReader.Join()
+handoff.Join()
+check handoffAcquired "polling must acquire the writer once readers release within the budget"
+
+// A queued writer owns the next grant: polling must not overtake it.
+let queueLock = new ReaderWriterLockSlim()
+let queueReader = startReadHold queueLock 500
+let queuedWriter =
+    Thread(fun () ->
+        queueLock.EnterWriteLock()
+        queueLock.ExitWriteLock())
+queuedWriter.IsBackground <- true
+queuedWriter.Start()
+Thread.Sleep 100
+check (queueLock.WaitingWriteCount > 0) "the queued writer must be observable"
+let overtook = tryAcquireWriteLockPolling queueLock 200 1
+check (not overtook) "polling must not overtake an already queued writer"
+queueReader.Join()
+queuedWriter.Join()
+
+// A zero budget makes exactly one attempt and never spins.
+let zeroBudgetLock = new ReaderWriterLockSlim()
+let zeroBudgetReader = startReadHold zeroBudgetLock 200
+let zeroBudgetWait = Diagnostics.Stopwatch.StartNew()
+let zeroBudgetAcquired = tryAcquireWriteLockPolling zeroBudgetLock 0 1
+zeroBudgetWait.Stop()
+check (not zeroBudgetAcquired) "a zero budget must not acquire a held lock"
+check (zeroBudgetWait.ElapsedMilliseconds < 100L)
+      $"a zero budget must return without polling (observed {zeroBudgetWait.ElapsedMilliseconds}ms)"
+zeroBudgetReader.Join()
+check (zeroBudgetLock.TryEnterWriteLock(100)) "a zero budget attempt must not leak a lock waiter"
+zeroBudgetLock.ExitWriteLock()
+
 printfn "LSP lock and request timing regression tests passed"

@@ -112,6 +112,27 @@ check (updateLockStart >= 0 && updateLockEnd > updateLockStart) "Program update 
 let updateWriteLockSegment = programSource.Substring(updateLockStart, updateLockEnd - updateLockStart)
 check (not (updateWriteLockSegment.Contains("game.UpdateFile", StringComparison.Ordinal)))
       "Program update write-lock segment must not call game.UpdateFile"
+// A writer that parks in the waiting state blocks every new reader. The update commit
+// runs while bulk validation can hold the read lock for seconds, so it must poll with a
+// budget and defer instead of freezing editor reads.
+check (updateWriteLockSegment.Contains("tryEnterGameStateWriteLock", StringComparison.Ordinal))
+      "Interactive update commit must acquire the root writer without parking"
+check (not (updateWriteLockSegment.Contains("enterGameStateWriteLock ()", StringComparison.Ordinal)))
+      "Interactive update commit must not park in the writer-waiting state"
+
+// The analyze/refresh cycle must acquire the root writer only when the pass can mutate
+// the model, and never by parking: an idle cycle used to wait behind a bulk read hold
+// and thereby froze every editor read for that whole wait.
+let refreshLockStart = programSource.IndexOf("let refreshWriteWaitSw = Stopwatch.StartNew()", StringComparison.Ordinal)
+let refreshLockEnd = programSource.IndexOf("postLockMonitorLogs |> List.rev", refreshLockStart, StringComparison.Ordinal)
+check (refreshLockStart >= 0 && refreshLockEnd > refreshLockStart) "Refresh write-lock segment must remain discoverable"
+let refreshLockSegment = programSource.Substring(refreshLockStart, refreshLockEnd - refreshLockStart)
+check (refreshLockSegment.Contains("refreshNeedsRootWriter", StringComparison.Ordinal))
+      "Refresh cycle must gate the root writer on work that actually needs it"
+check (refreshLockSegment.Contains("tryEnterGameStateWriteLock", StringComparison.Ordinal))
+      "Refresh cycle must acquire the root writer without parking"
+check (not (refreshLockSegment.Contains("enterGameStateWriteLock ()", StringComparison.Ordinal)))
+      "Refresh cycle must not park in the writer-waiting state"
 
 let incrementalLockStart = programSource.IndexOf("let commitWriteWaitSw = Stopwatch.StartNew()", StringComparison.Ordinal)
 let incrementalReleaseMarker = "exitGameStateWriteLock ()"
@@ -139,6 +160,59 @@ for forbiddenFollowup in
       "logDiag" ] do
     check (not (incrementalLockSegment.Contains(forbiddenFollowup, StringComparison.Ordinal)))
           (sprintf "Incremental type lock must not execute follow-up %s" forbiddenFollowup)
+// The incremental type commit runs on the automatic open/edit/save path, where bulk
+// validation can hold the read lock for seconds: it must poll and defer, never park.
+check (incrementalLockSegment.Contains("tryEnterGameStateWriteLock", StringComparison.Ordinal))
+      "Incremental type commit must acquire the root writer without parking"
+check (not (incrementalLockSegment.Contains("enterGameStateWriteLock ()", StringComparison.Ordinal)))
+      "Incremental type commit must not park in the writer-waiting state"
+check (incrementalLockSegment.Contains("TypeCommitDeferred", StringComparison.Ordinal))
+      "Incremental type commit must keep the staged commit pending when the writer stays busy"
+
+// The inline_script caller commit shares the interactive edit path and has the same hazard.
+let inlineLockStart = programSource.IndexOf("let inlineWriteWaitSw = Stopwatch.StartNew()", StringComparison.Ordinal)
+let inlineLockEnd = programSource.IndexOf(incrementalReleaseMarker, inlineLockStart, StringComparison.Ordinal)
+check (inlineLockStart >= 0 && inlineLockEnd > inlineLockStart) "Inline caller write-lock segment must remain discoverable"
+let inlineLockSegment = programSource.Substring(inlineLockStart, inlineLockEnd - inlineLockStart)
+check (inlineLockSegment.Contains("tryEnterGameStateWriteLock", StringComparison.Ordinal))
+      "Inline caller commit must acquire the root writer without parking"
+check (not (inlineLockSegment.Contains("enterGameStateWriteLock ()", StringComparison.Ordinal)))
+      "Inline caller commit must not park in the writer-waiting state"
+check (inlineLockSegment.Contains("RefreshInlineScriptCallers deferred", StringComparison.Ordinal))
+      "Inline caller commit must fall back conservatively when the writer stays busy"
+
+// File deletion shares the watcher path with editor traffic (git checkout, build tools,
+// agent file writes). Both delete commits must poll, and keep their pending path.
+let localisationDeleteStart = programSource.IndexOf("let deleteWriteWaitSw = Stopwatch.StartNew()", StringComparison.Ordinal)
+let localisationDeleteEnd = programSource.IndexOf(incrementalReleaseMarker, localisationDeleteStart, StringComparison.Ordinal)
+check (localisationDeleteStart >= 0 && localisationDeleteEnd > localisationDeleteStart)
+      "Localisation delete write-lock segment must remain discoverable"
+let localisationDeleteSegment = programSource.Substring(localisationDeleteStart, localisationDeleteEnd - localisationDeleteStart)
+check (localisationDeleteSegment.Contains("tryEnterGameStateWriteLock", StringComparison.Ordinal))
+      "Localisation delete commit must acquire the root writer without parking"
+check (not (localisationDeleteSegment.Contains("enterGameStateWriteLock ()", StringComparison.Ordinal)))
+      "Localisation delete commit must not park in the writer-waiting state"
+check (localisationDeleteSegment.Contains("LocalisationDeleteCapabilityUnavailable", StringComparison.Ordinal))
+      "Localisation delete commit must keep the deletion pending when the writer stays busy"
+
+let stagedDeleteStart = programSource.IndexOf("let deleteWriteWaitSw = Stopwatch.StartNew()", localisationDeleteStart + 1, StringComparison.Ordinal)
+let stagedDeleteEnd = programSource.IndexOf(incrementalReleaseMarker, stagedDeleteStart, StringComparison.Ordinal)
+check (stagedDeleteStart > localisationDeleteStart && stagedDeleteEnd > stagedDeleteStart)
+      "Staged delete write-lock segment must remain discoverable"
+let stagedDeleteSegment = programSource.Substring(stagedDeleteStart, stagedDeleteEnd - stagedDeleteStart)
+check (stagedDeleteSegment.Contains("tryEnterGameStateWriteLock", StringComparison.Ordinal))
+      "Staged delete commit must acquire the root writer without parking"
+check (not (stagedDeleteSegment.Contains("enterGameStateWriteLock ()", StringComparison.Ordinal)))
+      "Staged delete commit must not park in the writer-waiting state"
+check (stagedDeleteSegment.Contains("Incremental staged delete deferred", StringComparison.Ordinal))
+      "Staged delete commit must report its deferral and leave the deletion pending"
+
+// Only the startup/command paths that cannot contend with a bulk validation read hold may
+// still park: rules candidate activation, the startup rules commit, the detached
+// workspace publication, and the settings-driven workspace reload.
+let parkedWriterCalls = programSource.Split("enterGameStateWriteLock ()").Length - 1
+check (parkedWriterCalls <= 4)
+      (sprintf "Program.fs must not add parked root-writer acquisitions on interactive paths; found %d (expected <= 4)" parkedWriterCalls)
 
 let semanticPlanStart = programSource.IndexOf("let incrementalSemanticChangedCandidate", StringComparison.Ordinal)
 check (semanticPlanStart >= 0 && semanticPlanStart < incrementalLockStart) "Semantic delta and decision candidates must be prepared before the incremental writer"

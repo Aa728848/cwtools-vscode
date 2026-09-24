@@ -1156,6 +1156,9 @@ type private IncrementalTypeStage =
 type private IncrementalTypeCommitOutcome =
     | TypeCommitNotAttempted
     | TypeCommitSucceeded
+    /// The root writer stayed busy for the whole poll budget, so the staged commit is kept
+    /// pending instead of parking a writer (which would block every concurrent editor read).
+    | TypeCommitDeferred
     | TypeCommitSuperseded
     | TypeCommitFailed of exn option
 
@@ -1868,6 +1871,11 @@ type Server(client: ILanguageClient) =
     let mutable perfLastReportTime = DateTime.UtcNow
     let perfReportIntervalSeconds = 30.0
     let writeLockHoldBudgetMs = 100L
+    // A writer that parks in the waiting state blocks every concurrent editor read, so model
+    // commits poll for the root writer instead. They must not be skipped, so the budget is
+    // generous: the longest observed bulk validation read hold is ~38s.
+    let commitWriteLockPollBudgetMs = 45000
+    let writeLockWaitBudgetMs = 1000L
     let mutable getPerfCacheSnapshot: unit -> string = fun () -> ""
     let mutable getPerfDiagnosticSnapshot: unit -> string = fun () -> ""
 
@@ -3949,7 +3957,7 @@ type Server(client: ILanguageClient) =
                         | None -> false
 
                     let updateWriteWaitSw = Stopwatch.StartNew()
-                    enterGameStateWriteLock ()
+                    let updateWriterAcquired = tryEnterGameStateWriteLock gameStateWriteLockPollBudgetMs
                     updateWriteWaitSw.Stop()
                     let updateWriteHoldSw = Stopwatch.StartNew()
                     let mutable nonTypeSemanticChanged = false
@@ -3959,45 +3967,55 @@ type Server(client: ILanguageClient) =
                          gameRefAtUpdate,
                          preparedUpdateCommitted,
                          updateSuperseded) =
-                        try
-                            let gameStillCurrent =
-                                match gameObj with
-                                | Some current -> System.Object.ReferenceEquals(current, game)
-                                | None -> false
-                            let indexSnapshotStillCurrent =
-                                not canTryIncrementalTypeRefresh
-                                || sameIndexModelEpoch priorIndexEpoch (modelEpochSnapshot ())
-
-                            if not gameStillCurrent
-                               || not indexSnapshotStillCurrent
-                               || not (lintSnapshotStillCurrent ()) then
-                                [], [], true, game, false, true
-                            else
-                                let priorDefs = priorDefsSnapshot
-
-                                let prior =
-                                    if canTryIncrementalTypeRefresh then priorDefs else []
-
-                                if interactiveResourceAlreadyCurrent then
-                                    [], prior, identityUnchanged, game, false, false
-                                else
-                                    match stagedEditorUpdate with
-                                    | Some staged when game.CommitUpdateFileInteractive staged ->
-                                        if staged.kind = LocalisationFile then bumpLocalisationModelEpoch ()
-                                        if isIncrementalContributionCandidate name then
-                                            validatedDocumentVersion
-                                            |> Option.iter (fun version ->
-                                                committedInteractiveVersions.[normaliseCachePath name] <- struct (version, game))
-                                        [], prior, identityUnchanged, game, true, false
-                                    | _ ->
-                                        // Never invoke the legacy UpdateFile callback while holding the root write lock.
-                                        [], prior, identityUnchanged, game, false, true
-                        finally
+                        if not updateWriterAcquired then
+                            // Parking in the writer-waiting state here blocks every concurrent
+                            // editor read for the whole wait, so a contended bulk read hold
+                            // turned an edit into a freeze. Keep the staged editor update
+                            // pending instead; the prepared-commit retry path re-drives it.
                             updateWriteHoldSw.Stop()
-                            exitGameStateWriteLock ()
-                            if updateWriteHoldSw.ElapsedMilliseconds > writeLockHoldBudgetMs then
-                                monitorLog Performance
-                                    $"WriteLock hold budget exceeded file={name} phase=update hold={updateWriteHoldSw.ElapsedMilliseconds}ms"
+                            logDiag
+                                $"Interactive update commit deferred: root writer busy wait={updateWriteWaitSw.ElapsedMilliseconds}ms file={name}"
+                            [], [], true, game, false, true
+                        else
+                            try
+                                let gameStillCurrent =
+                                    match gameObj with
+                                    | Some current -> System.Object.ReferenceEquals(current, game)
+                                    | None -> false
+                                let indexSnapshotStillCurrent =
+                                    not canTryIncrementalTypeRefresh
+                                    || sameIndexModelEpoch priorIndexEpoch (modelEpochSnapshot ())
+
+                                if not gameStillCurrent
+                                   || not indexSnapshotStillCurrent
+                                   || not (lintSnapshotStillCurrent ()) then
+                                    [], [], true, game, false, true
+                                else
+                                    let priorDefs = priorDefsSnapshot
+
+                                    let prior =
+                                        if canTryIncrementalTypeRefresh then priorDefs else []
+
+                                    if interactiveResourceAlreadyCurrent then
+                                        [], prior, identityUnchanged, game, false, false
+                                    else
+                                        match stagedEditorUpdate with
+                                        | Some staged when game.CommitUpdateFileInteractive staged ->
+                                            if staged.kind = LocalisationFile then bumpLocalisationModelEpoch ()
+                                            if isIncrementalContributionCandidate name then
+                                                validatedDocumentVersion
+                                                |> Option.iter (fun version ->
+                                                    committedInteractiveVersions.[normaliseCachePath name] <- struct (version, game))
+                                            [], prior, identityUnchanged, game, true, false
+                                        | _ ->
+                                            // Never invoke the legacy UpdateFile callback while holding the root write lock.
+                                            [], prior, identityUnchanged, game, false, true
+                            finally
+                                updateWriteHoldSw.Stop()
+                                exitGameStateWriteLock ()
+                                if updateWriteHoldSw.ElapsedMilliseconds > writeLockHoldBudgetMs then
+                                    monitorLog Performance
+                                        $"WriteLock hold budget exceeded file={name} phase=update hold={updateWriteHoldSw.ElapsedMilliseconds}ms"
 
                     // Compare non-TypeDef global contributions outside the write
                     // lock so completion/hover remain available during the fold.
@@ -4132,44 +4150,48 @@ type Server(client: ILanguageClient) =
                     let mutable incrementalSemanticChanged = false
                     if not updateSuperseded && canTryIncrementalTypeRefresh && not skipIncrementalRefresh then
                         let commitWriteWaitSw = Stopwatch.StartNew()
-                        enterGameStateWriteLock ()
+                        let commitWriterAcquired = tryEnterGameStateWriteLock commitWriteLockPollBudgetMs
                         commitWriteWaitSw.Stop()
                         let commitWriteHoldSw = Stopwatch.StartNew()
-                        try
-                            let gameStillCurrent =
-                                match gameObj with
-                                | Some g -> System.Object.ReferenceEquals(g, gameRefAtUpdate)
-                                | None -> false
-                            if not gameStillCurrent || not (lintSnapshotStillCurrent ()) then
-                                incrementalCommitOutcome <- TypeCommitSuperseded
-                            else
-                                let committed =
-                                    try
-                                        match staged with
-                                        | Some (ScriptedServices s) -> game.CommitScriptedTypes s
-                                        | Some (TypeIndexOnly(index, s)) -> index.CommitTypeIndex s
-                                        | None -> false
-                                    with e ->
-                                        incrementalCommitOutcome <- TypeCommitFailed(Some e)
-                                        false
-
-                                if committed then
-                                    incrementalCommitOutcome <- TypeCommitSucceeded
-                                    validatedDocumentVersion
-                                    |> Option.iter (fun version ->
-                                        committedTypeIndexVersions.[normaliseCachePath name] <- struct (version, game))
-                                    // Epochs are the compact publication/cache-generation token.
-                                    // Advance them atomically with the model commit; cache walks and
-                                    // every other follow-up are deliberately deferred until release.
-                                    match incrementalSemanticDecisionCandidate with
-                                    | Some SemanticDecision.ScriptedServices ->
-                                        bumpTypesModelEpoch ()
-                                        bumpRulesModelEpoch ()
-                                    | Some _ -> bumpTypesModelEpoch ()
-                                    | None -> ()
-                        finally
+                        if not commitWriterAcquired then
                             commitWriteHoldSw.Stop()
-                            exitGameStateWriteLock ()
+                            incrementalCommitOutcome <- TypeCommitDeferred
+                        else
+                            try
+                                let gameStillCurrent =
+                                    match gameObj with
+                                    | Some g -> System.Object.ReferenceEquals(g, gameRefAtUpdate)
+                                    | None -> false
+                                if not gameStillCurrent || not (lintSnapshotStillCurrent ()) then
+                                    incrementalCommitOutcome <- TypeCommitSuperseded
+                                else
+                                    let committed =
+                                        try
+                                            match staged with
+                                            | Some (ScriptedServices s) -> game.CommitScriptedTypes s
+                                            | Some (TypeIndexOnly(index, s)) -> index.CommitTypeIndex s
+                                            | None -> false
+                                        with e ->
+                                            incrementalCommitOutcome <- TypeCommitFailed(Some e)
+                                            false
+
+                                    if committed then
+                                        incrementalCommitOutcome <- TypeCommitSucceeded
+                                        validatedDocumentVersion
+                                        |> Option.iter (fun version ->
+                                            committedTypeIndexVersions.[normaliseCachePath name] <- struct (version, game))
+                                        // Epochs are the compact publication/cache-generation token.
+                                        // Advance them atomically with the model commit; cache walks and
+                                        // every other follow-up are deliberately deferred until release.
+                                        match incrementalSemanticDecisionCandidate with
+                                        | Some SemanticDecision.ScriptedServices ->
+                                            bumpTypesModelEpoch ()
+                                            bumpRulesModelEpoch ()
+                                        | Some _ -> bumpTypesModelEpoch ()
+                                        | None -> ()
+                            finally
+                                commitWriteHoldSw.Stop()
+                                exitGameStateWriteLock ()
 
                         incrementalCommitSucceeded <- incrementalCommitOutcome = TypeCommitSucceeded
                         incrementalSemanticChanged <-
@@ -4178,6 +4200,9 @@ type Server(client: ILanguageClient) =
                         match incrementalCommitOutcome with
                         | TypeCommitFailed(Some error) ->
                             logDiag $"Incremental type commit failed for {name}: {error.Message}"
+                        | TypeCommitDeferred ->
+                            logDiag
+                                $"Incremental type commit deferred: root writer busy wait={commitWriteWaitSw.ElapsedMilliseconds}ms file={name}; staged commit stays pending"
                         | _ -> ()
 
                         if incrementalCommitSucceeded then
@@ -4232,7 +4257,9 @@ type Server(client: ILanguageClient) =
                                 $"RefreshIncrementalTypes commit superseded file={name} reason=stage_guard_superseded; newer snapshot will decide refresh domains"
                         else
                             let fallbackReason =
-                                if staged.IsNone then "stage_prepare_failed" else "stage_commit_failed"
+                                if staged.IsNone then "stage_prepare_failed"
+                                elif incrementalCommitOutcome = TypeCommitDeferred then "commit_write_lock_busy"
+                                else "stage_commit_failed"
                             needsTypeRefresh <- true
                             lastTypeRefreshRequestAt <- DateTime.UtcNow
                             addPendingRefreshDomains [ "types"; "rules" ]
@@ -4242,6 +4269,9 @@ type Server(client: ILanguageClient) =
                             monitorLog Refresh
                                 $"RefreshIncrementalTypes decision=full file={name} reason={fallbackReason}"
 
+                        if commitWriteWaitSw.ElapsedMilliseconds > writeLockWaitBudgetMs then
+                            monitorLog Performance
+                                $"WriteLock wait budget exceeded file={name} phase=commitIncremental wait={commitWriteWaitSw.ElapsedMilliseconds}ms acquired={commitWriterAcquired}"
                         if commitWriteHoldSw.ElapsedMilliseconds > writeLockHoldBudgetMs then
                             monitorLog Performance
                                 $"WriteLock hold budget exceeded file={name} phase=commitIncremental hold={commitWriteHoldSw.ElapsedMilliseconds}ms committed={incrementalCommitSucceeded}"
@@ -4781,20 +4811,34 @@ type Server(client: ILanguageClient) =
                     try
                         let staged = game.PrepareInlineScriptCallers [ scriptName ]
                         let inlineWriteWaitSw = Stopwatch.StartNew()
-                        enterGameStateWriteLock ()
+                        let inlineWriterAcquired = tryEnterGameStateWriteLock commitWriteLockPollBudgetMs
                         inlineWriteWaitSw.Stop()
                         let inlineWriteHoldSw = Stopwatch.StartNew()
                         let refreshed =
-                            try
-                                match staged with
-                                | Some candidate when game.CommitInlineScriptCallers candidate -> candidate.callerFiles
-                                | _ -> []
-                            finally
-                                exitGameStateWriteLock ()
+                            if not inlineWriterAcquired then
+                                // Polling the writer keeps editor reads alive; the caller list
+                                // must not be published from an unacquired commit, so fall back
+                                // to the conservative full type refresh for this definition.
                                 inlineWriteHoldSw.Stop()
-                                if inlineWriteHoldSw.ElapsedMilliseconds > writeLockHoldBudgetMs then
-                                    monitorLog Performance
-                                        $"WriteLock hold budget exceeded file={defFile} phase=inlineCaller wait={inlineWriteWaitSw.ElapsedMilliseconds}ms hold={inlineWriteHoldSw.ElapsedMilliseconds}ms"
+                                clearTypeCaches ()
+                                needsTypeRefresh <- true
+                                lastTypeRefreshRequestAt <- DateTime.UtcNow
+                                addPendingRefreshDomains [ "types"; "rules" ]
+                                markFileStale defFile "types"
+                                monitorLog Refresh
+                                    $"RefreshInlineScriptCallers deferred: root writer busy wait={inlineWriteWaitSw.ElapsedMilliseconds}ms file={defFile}"
+                                []
+                            else
+                                try
+                                    match staged with
+                                    | Some candidate when game.CommitInlineScriptCallers candidate -> candidate.callerFiles
+                                    | _ -> []
+                                finally
+                                    exitGameStateWriteLock ()
+                                    inlineWriteHoldSw.Stop()
+                                    if inlineWriteHoldSw.ElapsedMilliseconds > writeLockHoldBudgetMs then
+                                        monitorLog Performance
+                                            $"WriteLock hold budget exceeded file={defFile} phase=inlineCaller wait={inlineWriteWaitSw.ElapsedMilliseconds}ms hold={inlineWriteHoldSw.ElapsedMilliseconds}ms"
 
                         for file in refreshed do
                             clearFileCaches file
@@ -5053,12 +5097,40 @@ type Server(client: ILanguageClient) =
                         logDiag $"Incremental localisation prepare threw; keeping refresh pending: {e.Message}"
                 | None -> ()
 
+            // The root writer is required only when this pass can mutate the model or publish
+            // a prepared stage. Acquiring it unconditionally made an idle cycle wait behind a
+            // bulk read hold, and because a waiting writer blocks every new reader, that one
+            // unneeded acquisition froze all editor reads for the entire wait.
+            let refreshNeedsRootWriter =
+                doRefresh || needsTypeRefresh || delayedLocUpdate || scriptLocalisationDue
             let refreshWriteWaitSw = Stopwatch.StartNew()
-            enterGameStateWriteLock ()
+            // Never park in the writer-waiting state: poll with a budget and keep the pending
+            // domains for the next wake when the budget expires.
+            let refreshWriterAcquired =
+                refreshNeedsRootWriter && tryEnterGameStateWriteLock gameStateWriteLockPollBudgetMs
             refreshWriteWaitSw.Stop()
             let refreshWriteHoldSw = Stopwatch.StartNew()
             try
-                if doRefresh then
+                if not refreshNeedsRootWriter then
+                    refreshSkipCount <- 0
+                    refreshStatus <- "not_needed"
+                    logDiag "LocErrors skipped: no localisation or type refresh"
+                    postLockMonitorLogs <-
+                        (fun () -> monitorLog Refresh $"RefreshCaches skipped pending=false{getPerfDiagnosticSnapshot()}{getPerfCacheSnapshot()}")
+                        :: postLockMonitorLogs
+                elif not refreshWriterAcquired then
+                    // Discard the staged candidates rather than retaining them across cycles;
+                    // the pending flags below keep the work scheduled for the next wake.
+                    stagedRefresh <- None
+                    stagedLocalisationRefresh
+                    |> Option.iter (fun staged -> abandonedLocalisationStage <- Some staged)
+                    refreshSkipCount <- refreshSkipCount + 1
+                    let capturedWaitMs = refreshWriteWaitSw.ElapsedMilliseconds
+                    refreshStatus <- "write_lock_busy"
+                    postLockMonitorLogs <-
+                        (fun () -> monitorLog Refresh $"RefreshCaches write_lock_busy wait={capturedWaitMs}ms skip={refreshSkipCount}{getPerfDiagnosticSnapshot()}{getPerfCacheSnapshot()}")
+                        :: postLockMonitorLogs
+                elif doRefresh then
                     let hadStagedRefresh = stagedRefresh.IsSome
                     let resourceEpochStillCurrent =
                         stagedResourceEpoch = ResourceManagerEager.currentResource ()
@@ -5230,7 +5302,8 @@ type Server(client: ILanguageClient) =
                 else
                     logDiag "LocErrors skipped: no localisation or type refresh"
             finally
-                exitGameStateWriteLock ()
+                if refreshWriterAcquired then
+                    exitGameStateWriteLock ()
                 refreshWriteHoldSw.Stop()
                 if refreshWriteHoldSw.ElapsedMilliseconds > writeLockHoldBudgetMs then
                     monitorLog Performance
@@ -6644,11 +6717,6 @@ type Server(client: ILanguageClient) =
                    "vanillaLoaded", JsonValue.Boolean(not isVanillaFolder)
                    "timestamp", JsonValue.Number(decimal (DateTimeOffset.UtcNow.ToUnixTimeMilliseconds())) |])
 
-    let publishPreparedWorkspaceUnderRootLock prepared =
-        enterGameStateWriteLock ()
-        try Some(publishPreparedWorkspace prepared)
-        finally exitGameStateWriteLock ()
-
     /// Normal startup keeps the historical UI/diagnostic behavior by preparing
     /// first, invoking the optional publication callback, then running follow-up
     /// outside the root lock. Passing None returns a fully detached candidate and
@@ -7775,19 +7843,28 @@ type Server(client: ILanguageClient) =
                                 match gameObj with
                                 | Some (:? IIncrementalLocalisation as incremental) ->
                                     let deleteWriteWaitSw = Stopwatch.StartNew()
-                                    enterGameStateWriteLock ()
+                                    let deleteWriterAcquired = tryEnterGameStateWriteLock commitWriteLockPollBudgetMs
                                     deleteWriteWaitSw.Stop()
-                                    let deleteWriteHoldSw = Stopwatch.StartNew()
-                                    let outcome =
-                                        try
-                                            let result = incremental.RemoveLocalisationFile path
-                                            bumpLocalisationModelEpoch ()
-                                            LocalisationDeleteCommitted(result, modelEpochSnapshot ())
-                                        with e ->
-                                            LocalisationDeleteCommitFailed e
-                                    exitGameStateWriteLock ()
-                                    deleteWriteHoldSw.Stop()
-                                    outcome, deleteWriteWaitSw.ElapsedMilliseconds, deleteWriteHoldSw.ElapsedMilliseconds
+                                    if not deleteWriterAcquired then
+                                        // Keep the delete pending through the existing
+                                        // capability-unavailable path instead of parking a writer.
+                                        monitorLog Localisation
+                                            $"RemoveLocalisation deferred: root writer busy wait={deleteWriteWaitSw.ElapsedMilliseconds}ms file={path}"
+                                        LocalisationDeleteCapabilityUnavailable,
+                                        deleteWriteWaitSw.ElapsedMilliseconds,
+                                        0L
+                                    else
+                                        let deleteWriteHoldSw = Stopwatch.StartNew()
+                                        let outcome =
+                                            try
+                                                let result = incremental.RemoveLocalisationFile path
+                                                bumpLocalisationModelEpoch ()
+                                                LocalisationDeleteCommitted(result, modelEpochSnapshot ())
+                                            with e ->
+                                                LocalisationDeleteCommitFailed e
+                                        exitGameStateWriteLock ()
+                                        deleteWriteHoldSw.Stop()
+                                        outcome, deleteWriteWaitSw.ElapsedMilliseconds, deleteWriteHoldSw.ElapsedMilliseconds
                                 | _ ->
                                     LocalisationDeleteCapabilityUnavailable, 0L, 0L
 
@@ -7842,24 +7919,31 @@ type Server(client: ILanguageClient) =
                                         logDiag $"Prepare file deletion failed for {path}: {error.Message}"
                                         None
                                 let deleteWriteWaitSw = Stopwatch.StartNew()
-                                enterGameStateWriteLock ()
+                                let deleteWriterAcquired = tryEnterGameStateWriteLock commitWriteLockPollBudgetMs
                                 deleteWriteWaitSw.Stop()
-                                let deleteWriteHoldSw = Stopwatch.StartNew()
-                                try
+                                if not deleteWriterAcquired then
+                                    // Leave the deletion pending (handled=false) so the existing
+                                    // type-refresh fallback re-drives it, rather than parking a
+                                    // writer that would block every concurrent editor read.
+                                    monitorLog Refresh
+                                        $"Incremental staged delete deferred: root writer busy wait={deleteWriteWaitSw.ElapsedMilliseconds}ms file={path}"
+                                else
+                                    let deleteWriteHoldSw = Stopwatch.StartNew()
                                     try
-                                        handled <-
-                                            match stagedDeletion with
-                                            | Some staged -> game.CommitFileDeletion staged
-                                            | None -> false
-                                    with e ->
-                                        logDiag $"Incremental staged delete failed for {path}: reason=stage_commit_failed error={e.Message}"
-                                        handled <- false
-                                finally
-                                    exitGameStateWriteLock ()
-                                    deleteWriteHoldSw.Stop()
-                                    if deleteWriteHoldSw.ElapsedMilliseconds > writeLockHoldBudgetMs then
-                                        monitorLog Performance
-                                            $"WriteLock hold budget exceeded file={path} phase=delete wait={deleteWriteWaitSw.ElapsedMilliseconds}ms hold={deleteWriteHoldSw.ElapsedMilliseconds}ms"
+                                        try
+                                            handled <-
+                                                match stagedDeletion with
+                                                | Some staged -> game.CommitFileDeletion staged
+                                                | None -> false
+                                        with e ->
+                                            logDiag $"Incremental staged delete failed for {path}: reason=stage_commit_failed error={e.Message}"
+                                            handled <- false
+                                    finally
+                                        exitGameStateWriteLock ()
+                                        deleteWriteHoldSw.Stop()
+                                        if deleteWriteHoldSw.ElapsedMilliseconds > writeLockHoldBudgetMs then
+                                            monitorLog Performance
+                                                $"WriteLock hold budget exceeded file={path} phase=delete wait={deleteWriteWaitSw.ElapsedMilliseconds}ms hold={deleteWriteHoldSw.ElapsedMilliseconds}ms"
 
                                 if handled then
                                     bumpTypesModelEpoch ()
@@ -10901,21 +10985,28 @@ type Server(client: ILanguageClient) =
                             let configs = getConfigFiles cachePath useManualRules manualRulesFolder bundledRulesPath preferBundledRules
                             let staged = game.PrepareConfigRules configs
                             let mutable committed = false
-                            enterGameStateWriteLock ()
-                            try
-                                let sameGame =
-                                    gameObj
-                                    |> Option.exists (fun current -> Object.ReferenceEquals(current, game))
-                                if sameGame then committed <- staged |> Option.exists game.CommitConfigRules
-                                if committed then
-                                    bumpGameModelEpoch ()
-                                    bumpRulesModelEpoch ()
-                                    bumpTypesModelEpoch ()
-                                    diagnosticInvalidation.Invalidate(
-                                        CWTools.Main.DiagnosticInvalidation.Domain.NonLocalisation,
-                                        CWTools.Main.DiagnosticInvalidation.GlobalUnknown)
-                            finally
-                                exitGameStateWriteLock ()
+                            // The LSP dispatches this command as a write request, so the
+                            // mailbox thread already holds the root writer (re-entering it
+                            // would raise LockRecursionException); only acquire it when this
+                            // handler runs without it, and never park.
+                            let configWriterOwnedHere = not gameStateLock.IsWriteLockHeld
+                            let configWriterAcquired =
+                                configWriterOwnedHere && tryEnterGameStateWriteLock commitWriteLockPollBudgetMs
+                            if (not configWriterOwnedHere) || configWriterAcquired then
+                                try
+                                    let sameGame =
+                                        gameObj
+                                        |> Option.exists (fun current -> Object.ReferenceEquals(current, game))
+                                    if sameGame then committed <- staged |> Option.exists game.CommitConfigRules
+                                    if committed then
+                                        bumpGameModelEpoch ()
+                                        bumpRulesModelEpoch ()
+                                        bumpTypesModelEpoch ()
+                                        diagnosticInvalidation.Invalidate(
+                                            CWTools.Main.DiagnosticInvalidation.Domain.NonLocalisation,
+                                            CWTools.Main.DiagnosticInvalidation.GlobalUnknown)
+                                finally
+                                    if configWriterAcquired then exitGameStateWriteLock ()
                             if committed then
                                 game.ForceRecompute()
                                 if activeGame = STL then reloadStellarisShaderRuleCatalogs configs

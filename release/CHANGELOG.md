@@ -1,5 +1,20 @@
 # Changelog
 
+## [2.22.1] - 2026-09-25
+
+### 编辑器读操作卡死修复与 Stellaris 规则同步 / Editor Read Freeze Fix & Stellaris Rules Sync
+- **[修复] 后台写锁等待不再冻结悬停、补全与高亮（Writer Wait Lock Starvation Fix）**：
+  - **根因**：根读写锁 `gameStateLock` 是写者优先的——只要有一个写者在等待，所有新的读者都会被阻塞；而批量校验会连续持有读锁 6–37 秒，于是排队等待的写者让这段时间内所有悬停/补全/高亮/语义着色请求读锁超时并静默返回空结果。
+  - **轮询式获取写锁**：新增 `tryAcquireWriteLockPolling`，以零超时轮询获取写锁，不再进入“写者等待”状态；读者在写者等待期间照常服务，写者在当前读者释放后立即获得锁，超出预算则保留待处理状态留待下一轮唤醒。
+  - **写请求与通知收敛**：LSP 写请求改为轮询获取，超时返回明确超时错误而不是长时间卡住；修改模型的通知改为重新入队（每 250ms 重试）而不是阻塞消息邮箱；`Initialized` 握手不再获取写锁。
+  - **修复 `reloadrulesconfig`**：该命令此前重复进入 LSP 写请求路径已持有的写锁，因此始终以 `-32603` 失败。
+  - **覆盖与观测**：新增 `Locking.Tests.fsx` 锁原语行为测试与 `RefreshLockIntegration.Tests.fsx` 刷新锁集成测试；内存诊断新增 `write_lock_busy` 原因标签。挂起等待的写者由 `Program.fs` 10 处降至 4 处、`LanguageServer.fs` 2 处降至 0 处。
+  - English: [Fix] Writer wait lock starvation — `ReaderWriterLockSlim` blocks every new reader while a writer is waiting, and bulk validation holds the model read lock for 6–37s, so a queued writer silently timed out every hover/completion/highlight/semantic-token request for tens of seconds. Added `tryAcquireWriteLockPolling` (zero-timeout polling never enters the writer-waiting state, so readers stay served) and used it for LSP write requests and model-mutating notifications, which now answer a bounded timeout or re-queue instead of stalling the mailbox; `Initialized` no longer takes the writer; fixed `reloadrulesconfig`, which re-entered the writer already held by the write-request path and therefore always failed with `-32603`; added lock-primitive and refresh-lock integration tests plus a `write_lock_busy` memory-diagnostic label. Parked writer acquisitions: `Program.fs` 10 -> 4, `LanguageServer.fs` 2 -> 0.
+- **[维护] 同步内置 Stellaris 规则包（Bundled Stellaris Rules Update）**：
+  - 刷新 `release/rules/stellaris-rules.zip` 内置规则包，并同步 `submodules/cwtools-stellaris-config` 与 `submodules/cwtools-mcp` 子模块指针。
+  - 规则内容：`pop_force_add_ethic` / `pop_remove_ethic` 的 `amount`、`random` 由 `int` 放宽为 `float`；`rename_species` 的 `name` 由 `scalar` 收紧为 `localisation`；武器偏好效果与触发器改用 `enum[weapon_type]`；新增 `create_rebels.nomadic`、`spawn_random_anomaly.surveyor`、`pop_ethic_amount` 的 `limit` 触发器块与 `harvesting_rights` 情报等级；修正 `prevent_anomaly` 的可用作用域。
+  - English: [Maintenance] Refreshed the bundled `release/rules/stellaris-rules.zip` and synced the `cwtools-stellaris-config` / `cwtools-mcp` submodule pointers — `amount`/`random` of `pop_force_add_ethic`/`pop_remove_ethic` widened to `float`, `rename_species.name` narrowed to `localisation`, weapon-preference effects and triggers switched to `enum[weapon_type]`, added `create_rebels.nomadic`, `spawn_random_anomaly.surveyor`, a `limit` trigger block for `pop_ethic_amount` and the `harvesting_rights` intel level, and corrected the `prevent_anomaly` scope list.
+
 ## [2.22.0] - 2026-09-23
 
 ### 光环本地化自动导出与虚拟缓冲区更新修复 / Aura Localisation Generator & Virtual Buffer Refresh Fix

@@ -21,6 +21,9 @@ Modes:
           auto-merged into config/shader before the report is generated.
   contracts  Extract Scope/ROOT/FROM contracts from vanilla comments and emit
              reviewable CWT candidates. Read-only unless --apply is passed.
+  optional-fields
+             Report alias fields the script documentation marks optional while
+             the rule still requires them (false CW242). Also a check/report step.
 
 Options:
   --docs <path>              Stellaris script_documentation directory.
@@ -47,8 +50,8 @@ function parseArgs(argv) {
     let mode = 'check';
     if (args[0] && !args[0].startsWith('-')) mode = args.shift();
     if (mode === 'help' || mode === '--help' || mode === '-h') return { help: true };
-    if (!['scan', 'check', 'update', 'report', 'contracts'].includes(mode)) {
-        throw new Error(`Unknown mode "${mode}". Expected scan, check, update, report, or contracts.`);
+    if (!['scan', 'check', 'update', 'report', 'contracts', 'optional-fields'].includes(mode)) {
+        throw new Error(`Unknown mode "${mode}". Expected scan, check, update, report, contracts, or optional-fields.`);
     }
 
     const opts = {
@@ -285,6 +288,16 @@ function main() {
 
     assertDir('Config', opts.config);
     fs.mkdirSync(opts.out, { recursive: true });
+
+    if (opts.mode === 'optional-fields') {
+        const auditScript = path.join(repoRoot, 'tools', 'rules-sync', 'optional-fields.ts');
+        console.log('[rules-sync] mode=optional-fields');
+        console.log(`[rules-sync] config=${opts.config}`);
+        const auditArgs = ['--config', opts.config];
+        if (opts.ci) auditArgs.push('--ci');
+        runTsNode(auditScript, auditArgs, false, opts.ci);
+        return;
+    }
 
     if (opts.mode === 'contracts') {
         const vanillaCommon = opts.vanillaCommon || defaultVanillaCommonDir();

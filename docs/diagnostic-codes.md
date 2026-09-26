@@ -364,7 +364,18 @@ rules; usually a typo or a field placed in the wrong block.
 means a required field is absent; `Too many X, expecting at most N` means a
 field appears too often.
 
+If the reported field is optional in the game's own script documentation
+(`(optional)`, `if not specified…`, `(default)…`), the rule is missing an
+explicit `## cardinality = 0..1`; see
+[Documented-Optional Fields](cwt-rule-config.md#documented-optional-fields) and
+`npm run rules:stellaris:optional-fields`.
+
 字段数量不符:`Missing X` 表示缺少必填字段;`Too many X` 表示字段重复次数超限,删除多余项。
+
+如果报错字段在原版脚本文档里本身就是可选的(`(optional)`、`if not specified…`、
+`(default)…`),说明规则漏写了 `## cardinality = 0..1`;参见
+[文档标注的可选字段](cwt-rule-config.md#文档标注的可选字段)与
+`npm run rules:stellaris:optional-fields`。
 
 ## CW243
 

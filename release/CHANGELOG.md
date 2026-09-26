@@ -1,5 +1,18 @@
 # Changelog
 
+## [Unreleased]
+
+### 文档可选字段自动探测与 CW242 误报修复 / Documented-Optional Field Detection & CW242 Fix
+- **[修复] `num_pops_assigned_to_job` 省略 `pop_group` 时误报 CW242（Optional Field False Positive Fix）**：
+  - **根因**：原版脚本文档把 `pop_group` 标注为可选（`pop_group = <target> (if not specified, check total number)`），而 `triggers.cwt` 中的 alias 字段没有 `## cardinality`，CWT 默认基数 `1..1`；于是 `num_pops_assigned_to_job = { value > 0 }` 这类合法写法每个都报 `Missing pop_group, expecting at least 1`（CW242）。
+  - **同类修复**：自动探测同时发现 `has_opinion_modifier` 的 `who` 被文档标注为 `<target (optional)>` 却仍是必填，一并补上 `## cardinality = 0..1`。
+  - **自动探测取代人工穷举**：新增 `tools/rules-sync/optional-fields.ts`，从 `config/logs/trigger_docs.log`（及 `effect_docs.log`）解析行内可选标注（`(optional)`、`if not specified`、`(default)`），与 `triggers.cwt`/`effects.cwt` 中每个 alias 变体的字段基数比对，列出「文档说可选、规则仍必填」的字段。新增 `npm run rules:stellaris:optional-fields` 独立审计，`check`/`update` 以 action `optional_field` 报告并在 `--ci` 下以退出码 2 拦截，`report` 新增「可选字段契约」页签。
+  - **验证**：用 CWToolsCLI 对同一 mod 事件做实机对照——修复前 `CW242 Missing pop_group`（1 条），修复后该诊断消失；`npm run test:rules-sync` 新增 9 条回归用例。
+  - English: [Fix] The script documentation marks `num_pops_assigned_to_job.pop_group` optional ("if not specified, check total number") and `has_opinion_modifier.who` as `<target (optional)>`, but without an explicit `## cardinality` a CWT alias field defaults to `1..1`, so every legal usage that omitted the field reported `Missing <field>, expecting at least 1` (CW242). Both fields now declare `## cardinality = 0..1`, and the drift is detected automatically instead of by hand: `tools/rules-sync/optional-fields.ts` derives documented-optional fields from `config/logs/*_docs.log` and compares them against every alias variant, exposed as `npm run rules:stellaris:optional-fields`, an `optional_field` action in `check`/`update` that fails `--ci`, and a new "可选字段契约" report tab. Verified against CWToolsCLI on a probe event: the CW242 disappears while the surrounding diagnostics stay unchanged; 9 regression tests were added.
+- **[维护] 刷新内置 Stellaris 规则包（Bundled Stellaris Rules Update）**：
+  - 刷新 `release/rules/stellaris-rules.zip` 内置规则包，并同步 `submodules/cwtools-stellaris-config` 与 `submodules/cwtools-mcp` 子模块指针。
+  - English: [Maintenance] Refreshed the bundled `release/rules/stellaris-rules.zip` and synced the `cwtools-stellaris-config` / `cwtools-mcp` submodule pointers.
+
 ## [2.22.1] - 2026-09-25
 
 ### 编辑器读操作卡死修复与 Stellaris 规则同步 / Editor Read Freeze Fix & Stellaris Rules Sync

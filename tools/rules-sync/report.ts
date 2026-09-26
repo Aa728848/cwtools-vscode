@@ -1,6 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { scanScopeContracts, type ScopeContractReport } from './scope-contracts';
+import { auditOptionalFields, type OptionalFieldAudit } from './optional-fields';
 
 // Visual comparison report: fresh game script_documentation + vanilla common
 // versus the rules config baseline (config/logs/* + CWT files).
@@ -100,6 +101,7 @@ interface ReportData {
     diffs: KindDiff[];
     folders: FolderFieldReport[];
     scopeContracts: ScopeContractReport;
+    optionalFields: OptionalFieldAudit;
     shaderAbi: ShaderAbiMergeInfo | null;
 }
 
@@ -1090,6 +1092,7 @@ for (const diff of DATA.diffs) {
 }
 tabs.push({ id: 'fields', label: 'Common 字段级参数', count: DATA.folders.reduce((n, f) => n + f.newFields.length + (f.missingSubtypes || []).length + (f.staleSubtypes || []).length + (f.covered ? 0 : 1), 0), render: renderFolders });
 tabs.push({ id: 'scope-contracts', label: 'Scope 契约', count: DATA.scopeContracts.findings.length, render: renderScopeContracts });
+tabs.push({ id: 'optional-fields', label: '可选字段契约', count: DATA.optionalFields.findings.length, render: renderOptionalFields });
 if (DATA.shaderAbi) {
   tabs.push({ id: 'shader-abi', label: 'Shader ABI', count: DATA.shaderAbi.added.length + DATA.shaderAbi.dropped.length + DATA.shaderAbi.contractsDropped.length, render: renderShaderAbi });
 }
@@ -1114,6 +1117,7 @@ function cards() {
   if (scopeSummary.missing) items.push({ tab: 'scope-contracts', cls: 'add', num: scopeSummary.missing, lbl: 'Scope 元数据缺失' });
   if (scopeSummary.mismatch) items.push({ tab: 'scope-contracts', cls: 'chg', num: scopeSummary.mismatch, lbl: 'Scope 契约冲突' });
   if (scopeSummary.unresolved) items.push({ tab: 'scope-contracts', cls: 'del', num: scopeSummary.unresolved, lbl: 'Scope 注释待复核' });
+  if (DATA.optionalFields.findings.length) items.push({ tab: 'optional-fields', cls: 'del', num: DATA.optionalFields.findings.length, lbl: '可选字段误报 CW242' });
   const abi = DATA.shaderAbi;
   if (abi) {
     if (abi.executableChanged) items.push({ tab: 'shader-abi', cls: 'chg', num: 'EXE', lbl: '引擎可执行文件已变化' });
@@ -1320,6 +1324,29 @@ function renderScopeContracts() {
   paint();
 }
 
+function renderOptionalFields() {
+  const main = document.getElementById('main');
+  const wrap = document.createElement('div');
+  const audit = DATA.optionalFields;
+  const modelFile = file => String(file).split(/[\\/]/).slice(-1)[0];
+  const findingRows = audit.findings.map(finding =>
+    '<tr><td class="name">' + esc(finding.rule) + '.' + esc(finding.field) + '<span class="badge del">CW242</span></td>'
+    + '<td>' + esc(finding.declaredCardinality) + ' → 0..1</td>'
+    + '<td><div class="desc">' + esc(finding.evidence) + '</div></td>'
+    + '<td class="src">' + esc(modelFile(finding.file)) + ':' + finding.line + '</td></tr>').join('');
+  const unmodeledRows = audit.unmodeled.map(entry =>
+    '<tr><td class="name">' + esc(entry.rule) + '.' + esc(entry.field) + '<span class="badge chg">未建模</span></td>'
+    + '<td>—</td><td><div class="desc">' + esc(entry.evidence) + '</div></td><td class="src">文档</td></tr>').join('');
+  const rows = findingRows + unmodeledRows;
+  wrap.innerHTML = '<div class="desc" style="margin-bottom:10px">脚本文档把字段标注为可选（括号内的 optional / if not specified / default），'
+    + '而 CWT alias 字段默认 cardinality 为 1..1，于是所有省略该字段的合法用法都会误报 CW242。下表由文档自动推导，'
+    + '应补 <code>## cardinality = 0..1</code>；「未建模」表示文档提到的可选字段在规则里根本没有声明。</div>'
+    + (rows
+      ? '<table><thead><tr><th style="width:26%">规则字段</th><th style="width:12%">基数</th><th>文档证据</th><th style="width:16%">位置</th></tr></thead><tbody>' + rows + '</tbody></table>'
+      : '<div class="empty">没有检测到可选字段契约漂移</div>');
+  main.appendChild(wrap);
+}
+
 function renderShaderAbi() {
   const main = document.getElementById('main');
   const abi = DATA.shaderAbi;
@@ -1436,6 +1463,9 @@ function main() {
         scopeContracts: args.vanillaCommon && fs.existsSync(args.vanillaCommon)
             ? scanScopeContracts(args.vanillaCommon, args.config)
             : { gameVersion: '', contracts: [], findings: [], summary: { extracted: 0, highConfidence: 0, missing: 0, mismatch: 0, unresolved: 0 } },
+        // Documentation-optional fields that the rules still require would
+        // report a false CW242 for every legal usage that omits them.
+        optionalFields: auditOptionalFields(args.config),
         shaderAbi: args.shaderAbi ? readShaderAbiMergeReport(args.shaderAbi) : null,
     };
 
@@ -1450,6 +1480,7 @@ function main() {
     }
     console.log(`[report] folders with findings: ${folders.length}`);
     console.log(`[report] scope contracts: extracted=${data.scopeContracts.summary.extracted} high=${data.scopeContracts.summary.highConfidence} missing=${data.scopeContracts.summary.missing} mismatch=${data.scopeContracts.summary.mismatch} unresolved=${data.scopeContracts.summary.unresolved}`);
+    console.log(`[report] optional fields: documented-but-required=${data.optionalFields.findings.length} documented-but-unmodeled=${data.optionalFields.unmodeled.length}`);
     if (data.shaderAbi) {
         const abi = data.shaderAbi;
         console.log(`[report] shader-abi: ${abi.fromVersion} -> ${abi.toVersion}, catalog carried=${abi.carried.length} added=${abi.added.length} dropped=${abi.dropped.length}, contracts kept=${abi.contractsKept} dropped=${abi.contractsDropped.length}`);

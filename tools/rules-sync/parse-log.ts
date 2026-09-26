@@ -1,6 +1,7 @@
 import * as crypto from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
+import { documentedOptionalFields } from './optional-fields';
 
 type RuleKind = 'effect' | 'trigger' | 'modifier' | 'scope' | 'localisation_command' | 'common_definition';
 type Confidence = 'high' | 'medium' | 'low';
@@ -12,6 +13,8 @@ interface GeneratedRule {
     scopes: string[];
     targetScopes: string[];
     parameters: Array<{ name: string; type: string }>;
+    /** Fields the script documentation explicitly marks optional. */
+    optionalFields?: string[];
     description: string;
     source: string;
     sourceLine: number;
@@ -155,6 +158,7 @@ function addRule(map: Map<string, GeneratedRule>, rule: GeneratedRule) {
     existing.scopes = Array.from(new Set([...existing.scopes, ...rule.scopes]));
     existing.targetScopes = Array.from(new Set([...existing.targetScopes, ...rule.targetScopes]));
     existing.parameters = mergeParameters(existing.parameters, rule.parameters);
+    existing.optionalFields = Array.from(new Set([...(existing.optionalFields ?? []), ...(rule.optionalFields ?? [])]));
     existing.sourceKind = mergeSourceKind(existing.sourceKind, rule.sourceKind);
     if (!existing.description && rule.description) existing.description = rule.description;
     if (confidenceRank(rule.confidence) > confidenceRank(existing.confidence)) existing.confidence = rule.confidence;
@@ -252,6 +256,7 @@ function parseScriptDocSection(source: string, lines: string[], map: Map<string,
             scopes: supportedScopes,
             targetScopes: [],
             parameters: inferParameters(usage),
+            optionalFields: extractOptionalFields(usage),
             description,
             source,
             sourceLine: i + 1,
@@ -593,6 +598,16 @@ function toPosix(filePath: string): string {
     return filePath.replace(/\\/g, '/');
 }
 
+/**
+ * Keys the usage block annotates as optional, for example
+ * `pop_group = <target> (if not specified, check total number)`. This scanner
+ * cannot infer types, so it only emits a cardinality hint; the maintained rule
+ * still gets the authoritative type from the manual CWT file.
+ */
+function extractOptionalFields(usage: string): string[] {
+    return Array.from(documentedOptionalFields(usage).keys());
+}
+
 function inferParameters(usage: string): Array<{ name: string; type: string }> {
     const params = new Map<string, string>();
     for (const match of usage.matchAll(/([A-Za-z_][A-Za-z0-9_]*)\s*=\s*<([^>]+)>/g)) {
@@ -662,6 +677,9 @@ function renderAliasRules(kind: 'effect' | 'trigger', rules: GeneratedRule[]): s
         if (rule.scopes.length) lines.push(`## supported_scopes = ${rule.scopes.join(' ')}`);
         if (rule.needsManualReview) lines.push('## needs_manual_review = yes');
         lines.push(`alias[${kind}:${rule.name}] = {`);
+        if (rule.optionalFields?.length) {
+            lines.push(`\t# documentation marks these fields optional; keep them out of the required count: ${rule.optionalFields.join(', ')}`);
+        }
         if (rule.parameters.length) {
             for (const param of rule.parameters) lines.push(`\t## parameter ${param.name}: ${param.type}`);
         }

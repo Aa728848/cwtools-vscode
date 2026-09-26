@@ -21,6 +21,7 @@ npm run rules:stellaris:check
 npm run rules:stellaris:update
 npm run rules:stellaris:report
 npm run rules:stellaris:contracts
+npm run rules:stellaris:optional-fields
 ```
 
 ## Inputs and output
@@ -41,8 +42,11 @@ npm run rules:stellaris:contracts
 | `update` | Writes append-only candidates under `update\generated` for manual review. It does not silently replace maintained rules. |
 | `report` | Writes a self-contained HTML report to `report\rules-sync-report.html` and opens it unless `--no-open` is supplied. |
 | `contracts` | Compares vanilla scope comments with CWT scope annotations and writes review material under `scope-contracts`. |
+| `optional-fields` | Audits `config/logs/*_docs.log` against the CWT aliases and reports fields the documentation marks optional while the rule still requires them (CW242 false positives). Standalone; `check` and `report` run it as well. |
 
 `contracts` is read-only by default. `--apply` adds only missing, high-confidence annotations. Existing conflicts require the separately reviewed `--apply-conflicts` option.
+
+`check` reports documented-optional field drift as action `optional_field` and exits with code 2 while any remains (see `--ci`). A CWT alias field defaults to cardinality `1..1`, so a field the script documentation marks optional ("if not specified…", "(optional)", "(default)…") would report `Missing <field>, expecting at least 1` (CW242) for every legal usage that omits it. Add `## cardinality = 0..1` above such a field; the audit is derived from the documentation rather than a hand-maintained list.
 
 Only effects and triggers become generated CWT candidates. Modifiers and scopes remain in `rules.generated.json` because the server loads them from game logs. The vanilla scan also reports `common_missing_rule` when a populated `common/` folder has no matching CWT type path.
 
@@ -67,6 +71,8 @@ The scanner intentionally reuses the F# Shader parser. Do not add a second TypeS
 - `update` 只把候选内容追加到 `update\generated`，需要人工审阅。
 - `report` 生成可独立打开的 HTML 报告；加 `--no-open` 可禁止自动打开。
 - `contracts` 对比原版作用域注释与 CWT 标注；默认只读，`--apply` 只补充缺失且高置信的内容。
+
+`check` 会把「文档标注可选、CWT 规则仍必填」的字段报告为 `optional_field`，只要还有残留就以退出码 2 结束（配合 `--ci`）。CWT alias 字段默认基数为 `1..1`，所以脚本文档标注为可选的字段（"if not specified…"、"(optional)"、"(default)…"）会在所有合法省略写法上误报 `Missing <field>, expecting at least 1`（CW242）。在该字段上方补 `## cardinality = 0..1` 即可；该审计从文档自动推导，不依赖人工维护清单。
 
 `report` 在找到 Stellaris 安装时还会刷新 Shader ABI 数据，这一步会修改 `config/shader/` 下的维护文件。需要完全只读的报告时，请传入 `--no-shader-abi`。合并前文件会备份到 `.rules-sync/stellaris/shader-abi/previous/`，结果同时写入 HTML 和 JSON 报告。
 

@@ -1,5 +1,6 @@
 import * as fs from 'fs';
 import * as path from 'path';
+import { auditOptionalFields } from './optional-fields';
 
 type RuleKind = 'effect' | 'trigger' | 'modifier' | 'scope' | 'localisation_command' | 'common_definition';
 type GeneratableRuleKind = Extract<RuleKind, 'effect' | 'trigger'>;
@@ -10,6 +11,7 @@ type ReportAction =
     | 'conflict'
     | 'manual_review'
     | 'common_missing_rule'
+    | 'optional_field'
     | 'definition_added'
     | 'definition_changed'
     | 'definition_removed';
@@ -176,6 +178,7 @@ function createReport(generatedJson: string, existingRulesDir: string, checkOnly
             conflict: 0,
             manual_review: 0,
             common_missing_rule: 0,
+            optional_field: 0,
             definition_added: 0,
             definition_changed: 0,
             definition_removed: 0,
@@ -250,6 +253,7 @@ function run(generatedJson: string, existingRulesDir: string, outDir: string, ch
 
     recordDefinitionChanges(report, previousRules, rules);
     recordCommonCoverage(report, rules, existingRulesDir);
+    recordOptionalFieldDrift(report, existingRulesDir);
 
     for (const rule of candidateRules(rules)) {
         if (rule.kind === 'common_definition') continue;
@@ -348,6 +352,37 @@ function recordCommonCoverage(report: UpdateReport, rules: RulesGenerated, exist
     }
 }
 
+/**
+ * Script documentation marks some trigger/effect fields optional, while a CWT
+ * alias field defaults to cardinality 1..1. Such a field reports a false
+ * "Missing <field>, expecting at least 1" (CW242) for every legal usage that
+ * omits it, so treat the drift as check drift instead of hand-annotating rules.
+ */
+function recordOptionalFieldDrift(report: UpdateReport, existingRulesDir: string) {
+    const audit = auditOptionalFields(existingRulesDir);
+    for (const finding of audit.findings) {
+        record(report, {
+            kind: finding.kind,
+            name: finding.rule,
+            action: 'optional_field',
+            targetFile: finding.file,
+            reason: `${finding.field} declares cardinality ${finding.declaredCardinality} but the documentation marks it optional; add "## cardinality = 0..1". Evidence: ${finding.evidence}`,
+            source: 'logs',
+            sourceLine: finding.line,
+        });
+    }
+    for (const entry of audit.unmodeled) {
+        record(report, {
+            kind: entry.kind,
+            name: entry.rule,
+            action: 'manual_review',
+            reason: `${entry.field} is documented optional but no alias variant models the field. Evidence: ${entry.evidence}`,
+            source: 'logs',
+            sourceLine: 0,
+        });
+    }
+}
+
 function scanExistingCommonPaths(dir: string): Set<string> {
     const paths = new Set<string>();
     for (const file of walkCwtFiles(dir)) {
@@ -384,7 +419,7 @@ function parseArgs(argv: string[]) {
 }
 
 function hasCheckDrift(report: UpdateReport): boolean {
-    return ['added', 'common_missing_rule', 'definition_added', 'definition_changed', 'definition_removed']
+    return ['added', 'common_missing_rule', 'optional_field', 'definition_added', 'definition_changed', 'definition_removed']
         .some(action => (report.summary[action] ?? 0) > 0);
 }
 

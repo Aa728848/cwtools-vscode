@@ -16,6 +16,7 @@
         "rules:stellaris:update": "node tools/rules-sync/stellaris-rules-sync.js update",
         "rules:stellaris:report": "node tools/rules-sync/stellaris-rules-sync.js report",
         "rules:stellaris:contracts": "node tools/rules-sync/stellaris-rules-sync.js contracts",
+        "rules:stellaris:optional-fields": "node tools/rules-sync/stellaris-rules-sync.js optional-fields",
         "test": "npm run compile && tsc -p ./.config/tsconfig.test-build.json && node tools/copy-test-fixtures.js && vscode-test --config ./.config/vscode-test.js",
         "test:shader-lsp": "npm run compile && tsc -p ./.config/tsconfig.shader-test.json && vscode-test --config ./.config/vscode-test.shader.js",
         "test:overlay-e2e": "node tools/run-overlay-e2e.cjs",

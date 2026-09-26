@@ -705,6 +705,28 @@ database_object_types = {
 7. Avoid `scalar` fallbacks beside real references unless arbitrary text is valid.
 8. Run rule checks and builds.
 
+### Documented-Optional Fields
+
+Script documentation states optionality inline: `pop_group = <target> (if not
+specified, check total number)`, `who = <target (optional)>`, `disabled =
+<any(default)/yes(only)>`. A rule field with no `## cardinality` defaults to
+`1..1`, so a documented-optional field that stays required reports
+`Missing <field>, expecting at least 1` (CW242) for every legal usage that
+omits it.
+
+Do not hand-maintain this by reading every comment. Derive it:
+
+```powershell
+node tools/rules-sync/stellaris-rules-sync.js check   # reports action "optional_field" and exits 2 on drift
+npm run rules:stellaris:report                        # renders the "可选字段契约" tab
+npm run rules:stellaris:optional-fields               # standalone audit
+```
+
+The detector reads `config/logs/trigger_docs.log` (and `effect_docs.log`) and
+flags any alias field the documentation marks optional while the rule still
+requires it. Add `## cardinality = 0..1` above that field. Only the
+cardinality is derived; the field type stays hand-written.
+
 ### Common Patterns
 
 Optional field:
@@ -760,6 +782,10 @@ For Stellaris rule changes:
 npm run rules:stellaris:check
 dotnet build src/Main/
 ```
+
+`npm run rules:stellaris:check` also reports documented-optional field
+drift (action `optional_field`) and exits with code 2 while any remains, so a
+rules refresh cannot silently reintroduce a CW242 false positive.
 
 For parser or field semantics changes:
 
@@ -1546,6 +1572,26 @@ database_object_types = {
 7. 除非任意文本真的合法，否则不要用 `scalar` 作为真实引用旁边的兜底。
 8. 运行规则检查和构建。
 
+### 文档标注的可选字段
+
+脚本文档用行内标注说明可选性:`pop_group = <target> (if not specified,
+check total number)`、`who = <target (optional)>`、`disabled =
+<any(default)/yes(only)>`。没有 `## cardinality` 的规则字段默认是 `1..1`,
+因此「文档说可选、规则却必填」的字段会在所有合法省略写法上报
+`Missing <field>, expecting at least 1`(CW242)。
+
+不要靠人肉读注释维护这件事,而是让它自动探测:
+
+```powershell
+node tools/rules-sync/stellaris-rules-sync.js check   # 报告 action "optional_field",漂移时退出码 2
+npm run rules:stellaris:report                        # 渲染「可选字段契约」页签
+npm run rules:stellaris:optional-fields               # 独立审计
+```
+
+探测器读取 `config/logs/trigger_docs.log`(以及 `effect_docs.log`),把「文档标注为可选、
+规则仍然必填」的 alias 字段全部列出。在该字段上方补 `## cardinality = 0..1` 即可。
+推导出来的只有基数,字段类型仍由人工规则维护。
+
 ### 常见模式
 
 可选字段：
@@ -1601,6 +1647,10 @@ Stellaris 规则改动：
 npm run rules:stellaris:check
 dotnet build src/Main/
 ```
+
+`npm run rules:stellaris:check` 同时会报告「文档标注可选、规则仍必填」的字段
+(action `optional_field`),只要还有残留就以退出码 2 结束,因此规则刷新不会再悄悄
+引入 CW242 误报。
 
 解析器或字段语义改动：
 

@@ -300,7 +300,7 @@ function buildSpraySystemsEdit(
         assertLegalValue(x, 'x');
         assertLegalValue(y, 'y');
         requestIds.add(sys.id);
-        declarations.push(`system = { id = ${sys.id} position = { x = ${formatInt(x)} y = ${formatInt(y)} } }`);
+        declarations.push(`system = { id = ${formatPdxId(sys.id)} position = { x = ${formatInt(x)} y = ${formatInt(y)} } }`);
     }
 
     const insertion = buildHyperlaneInsertion(scenario, declarations, context.text);
@@ -454,7 +454,7 @@ function buildHyperlaneEdit(
 
     const insertion = buildHyperlaneInsertion(
         from.scenario,
-        [`${desiredKey} = { from = ${formatPdxScalar(from.system.id)} to = ${formatPdxScalar(to.system.id)} }`],
+        [`${desiredKey} = { from = ${formatPdxId(from.system.id)} to = ${formatPdxId(to.system.id)} }`],
         context.text,
     );
     const verb = update.connected ? 'Connect' : 'Disconnect';
@@ -511,7 +511,7 @@ function buildAddLanesEdit(
             }
             continue;
         }
-        const declaration = `add_hyperlane = { from = ${formatPdxScalar(from.system.id)} to = ${formatPdxScalar(to.system.id)} }`;
+        const declaration = `add_hyperlane = { from = ${formatPdxId(from.system.id)} to = ${formatPdxId(to.system.id)} }`;
         const list = insertionsByScenario.get(from.scenario) ?? [];
         list.push(declaration);
         insertionsByScenario.set(from.scenario, list);
@@ -655,8 +655,14 @@ function lineIndentAt(text: string, offset: number): string {
     return match?.[0] ?? '';
 }
 
-function formatPdxScalar(value: string): string {
-    if (/^-?\d+$/.test(value) || /^[A-Za-z_][A-Za-z0-9_.-]*$/.test(value)) return value;
+/**
+ * System ids are written as quoted strings, matching vanilla
+ * `map/setup_scenarios` (e.g. `add_hyperlane = { from = "0" to = "9" }`).
+ * `map.cwt` types endpoints and `system.id` as `int`, which accepts the
+ * quoted form as well, so the generated declaration stays byte-identical in
+ * style to the game's own static galaxy files.
+ */
+function formatPdxId(value: string): string {
     return `"${value.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
 }
 

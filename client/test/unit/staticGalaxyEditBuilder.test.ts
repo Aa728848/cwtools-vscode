@@ -305,8 +305,50 @@ describe('staticGalaxyEditBuilder', () => {
             update: { fromNodeKey: systems[0]!.nodeKey, toNodeKey: systems[1]!.nodeKey, connected: true },
         }, text);
         const next = applyReplacements(text, built.replacements);
-        expect(next).to.include('    add_hyperlane = { from = 1 to = 2 }\r\n}\r\n');
+        expect(next).to.include('    add_hyperlane = { from = "1" to = "2" }\r\n}\r\n');
         expect(next.replace(/\r\n/g, '')).to.not.include('\n');
+    });
+
+    it('writes quoted system ids and endpoints, matching vanilla setup_scenarios', () => {
+        const text = `static_galaxy_scenario = {
+    system = { id = "3215" position = { x = 0 y = 0 } }
+    system = { id = "2834" position = { x = 10 y = 0 } }
+}
+`;
+        const systems = contextFor(text).scenarios[0]!.systems;
+        const built = build({
+            kind: 'hyperlane',
+            update: { fromNodeKey: systems[0]!.nodeKey, toNodeKey: systems[1]!.nodeKey, connected: true },
+        }, text);
+        const next = applyReplacements(text, built.replacements);
+        // The generated declaration must keep the game's quoted id form
+        // (vanilla: add_hyperlane = { from = "0" to = "9" }), not a bare int.
+        expect(next).to.include('add_hyperlane = { from = "3215" to = "2834" }');
+        expect(next).to.not.include('from = 3215');
+
+        // Round-trip: the written declaration re-parses to the same endpoints,
+        // so the lane is idempotent instead of being duplicated on re-draw.
+        const reparsed = contextFor(next).scenarios[0]!;
+        expect(reparsed.hyperlanes).to.have.lengthOf(1);
+        expect(reparsed.hyperlanes[0]!.fromId).to.equal('3215');
+        expect(reparsed.hyperlanes[0]!.toId).to.equal('2834');
+    });
+
+    it('sprays new random systems with quoted ids readable by the parser', () => {
+        const text = `static_galaxy_scenario = {
+    system = { id = "5" position = { x = 0 y = 0 } }
+}
+`;
+        const scenario = contextFor(text).scenarios[0]!;
+        const built = build({
+            kind: 'spraySystems',
+            scenarioKey: scenario.scenarioKey,
+            systems: [{ id: '6', x: 10, y: 12 }],
+        }, text);
+        const next = applyReplacements(text, built.replacements);
+        expect(next).to.include('system = { id = "6" position = { x = 10 y = 12 } }');
+        const reparsed = contextFor(next).scenarios[0]!;
+        expect(reparsed.systems.map(s => s.id).sort()).to.deep.equal(['5', '6']);
     });
 
     it('disconnects and reconnects an existing lane by changing only its declaration key', () => {
@@ -559,8 +601,8 @@ static_galaxy_scenario = {
         // Both declarations merge into a single anchored insertion.
         expect(built.replacements).to.have.lengthOf(1);
         const next = applyReplacements(text, built.replacements);
-        expect(next).to.include('add_hyperlane = { from = 1 to = 2 }');
-        expect(next).to.include('add_hyperlane = { from = 2 to = 3 }');
+        expect(next).to.include('add_hyperlane = { from = "1" to = "2" }');
+        expect(next).to.include('add_hyperlane = { from = "2" to = "3" }');
         // Existing content and order are untouched.
         expect(next.indexOf('system = { id = 1')).to.be.lessThan(next.indexOf('add_hyperlane'));
     });
@@ -586,7 +628,7 @@ static_galaxy_scenario = {
         // remove_hyperlane renamed in place; only one new declaration for 2↔3.
         expect(next).to.not.include('remove_hyperlane');
         expect(next.match(/add_hyperlane/g)).to.have.lengthOf(2);
-        expect(next).to.include('add_hyperlane = { from = 2 to = 3 }');
+        expect(next).to.include('add_hyperlane = { from = "2" to = "3" }');
     });
 
     it('rejects chained lanes across scenarios or onto the same system', () => {
@@ -622,8 +664,8 @@ static_galaxy_scenario = {
         }, text);
         expect(built.replacements).to.have.lengthOf(1);
         const next = applyReplacements(text, built.replacements);
-        expect(next).to.include('system = { id = 6 position = { x = 10 y = 12 } }');
-        expect(next).to.include('system = { id = 7 position = { x = -3 y = 4 } }');
+        expect(next).to.include('system = { id = "6" position = { x = 10 y = 12 } }');
+        expect(next).to.include('system = { id = "7" position = { x = -3 y = 4 } }');
         expect(next).to.include('system = { id = 5 position = { x = 0 y = 0 } }');
     });
 

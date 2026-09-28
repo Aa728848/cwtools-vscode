@@ -321,6 +321,28 @@ module LanguageServerFeatures =
 
                 let docStringOrEffect = Option.orElse (docstringFromInfo uiText symbolInfo) effect
 
+                // Engine cost / hardcoded-behaviour annotation. The facts are authored
+                // in the CWT rules (## cost / ## engine / ## engine_evidence), so this
+                // block only presents what the rule file declared. Kept separate from
+                // the rule description so it renders even when the command has no
+                // ### description of its own.
+                let performanceHover =
+                    let declared =
+                        symbolInfo
+                        |> Option.bind (fun info ->
+                            info.engineCost
+                            |> Option.bind HoverPerformance.tryParseClass
+                            |> Option.map (fun cls ->
+                                HoverPerformance.fromRule unescapedWord cls info.engineNote info.engineEvidence))
+
+                    let lookup (name: string) =
+                        // Only the hovered word can be matched against the symbol we
+                        // already resolved, so a rule fact applies to that word alone.
+                        if String.Equals(name, unescapedWord, StringComparison.OrdinalIgnoreCase) then declared else None
+
+                    HoverPerformance.resolve lookup unescapedWord
+                    |> Option.map (HoverPerformance.describe uiText)
+
                 let inlineScriptPreview =
                     symbolInfo
                     |> Option.bind (fun info ->
@@ -342,6 +364,7 @@ module LanguageServerFeatures =
                 let text =
                     [| overrideModeHover
                        (inlineScriptPreview |> Option.orElse docStringOrEffect)
+                       performanceHover
                        lochover
                        nonEmptyString scopesExtra
                        carrierHostHover

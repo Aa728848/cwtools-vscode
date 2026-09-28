@@ -39,7 +39,10 @@ let quotedTitleInfo =
       name = "mod_event.1"
       localisation = [ { key = "title"; value = "\"mod_event.1.name\"" } ]
       ruleDescription = None
-      ruleRequiredScopes = [] }
+      ruleRequiredScopes = []
+      engineCost = None
+      engineNote = None
+      engineEvidence = None }
 
 assertEqual
     "quoted symbol localisation"

@@ -37,6 +37,9 @@ const CONTROL_FLOW = new Set([
 ]);
 
 const CHAIN_WALK = /^(CFixedPointVariableValue|CIntVariableValue|CScriptableValue|CVariableValue|CBooleanVariableValue|CStringVariableValue)::/;
+// Text and formatting utilities loop over characters, not over game
+// containers, so their loops are not container-scan evidence.
+const TEXT_PROCESS = /^(CTextBase|CGameText|CString|CPdxString|CPdxLocalize|PdxLocalize)/;
 const INFRA = /^(CPdxLog|CScopedStartProfile|CScopedProfile|CProfileManager|CPdxProfiler|operator_new|memset|memcpy|CPdxCommonStringAllocator|CString|CPdxString|std::|PdxLocalize|CPdxTemporaryLocalization|CStackTrace|CPdxAssert|CPdxHashTable|CPdxLogFileAndLine|CLogStream)/;
 const NON_EVAL = /::(GetToolTip|GetDesc|GetName|GetErrorFlag|Create|ReadMember|WriteMembers|PostValidate|~|GetSupportedScopes|GetSupportedScopeTargets|AsString|GetTriggeredByIcon|GetDlcRecommendation)/;
 const EVAL = /::(ActualEvaluate|ExecuteActual|GetTriggerValue|Evaluate|Execute|GetValue)\b/;
@@ -210,7 +213,7 @@ async function main() {
             if (!found) continue;
             const fn = qual(found.ev.name);
             const self = ownByQual.get(fn);
-            const looping = calleesOf(fn).filter((c) => (ownByQual.get(c) || {}).loops > 0 && !CHAIN_WALK.test(c));
+            const looping = calleesOf(fn).filter((c) => (ownByQual.get(c) || {}).loops > 0 && !CHAIN_WALK.test(c) && !TEXT_PROCESS.test(c));
             const ownLoops = self ? self.loops : 0;
             const ownNest = self ? self.maxNest : 0;
 

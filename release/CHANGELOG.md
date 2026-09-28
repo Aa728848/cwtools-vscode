@@ -1,6 +1,23 @@
 # Changelog
 
-## [Unreleased]
+## [2.23.0] - 2026-09-28
+
+### 脚本命令引擎开销悬停与静态银河编辑修复 / Engine Cost Hover & Static Galaxy Edit Fix
+- **[特性] 悬停显示脚本命令的引擎开销与硬编码行为（Engine Cost Hover）**：
+  - **解决什么**：悬停此前只展示规则能描述的**语法**，不展示**引擎实现**。于是 `has_tradition` 与 `num_ships` 写法几乎一样、引擎代价却相差一个数量级，写进逐日 `on_action` 后性能后果完全不同；同时 `set_update_modifiers_batch` 的 begin/end 语义、`is_designable` 对自动设计生成的门控、`has_any_flag` 只读计数不做搜索这类反常识行为对作者完全不可见。
+  - **覆盖范围**：为 **1248 / 1657** 条 trigger/effect 标注引擎开销（`O(n)` 718、`O(1)` 523、`O(n²)` 2、`O(log n)` 2、其余 3）。悬停额外显示开销等级、硬编码行为一句话，以及**已确认时的引擎函数与 dump 行号**。
+  - **事实写在 CWT 而非代码里**：新增 `## cost` / `## engine` / `## engine_evidence` 三个规则指令，事实由规则维护者拥有，**新增条目无需改代码、无需发版**。`## cost` 取值非法时只会退化为"无标注"，不会输出错误结论；无 `## engine_evidence` 的条目显式标注"未确认，仅作提示"。
+  - **推导可复现**：新增 `tools/engine-cost/extract-engine-cost.cjs`，从反编译结果链接命令与其引擎实现类、按花括号深度统计循环嵌套，且**只在有正面证据时才给出等级**。它排除日志/计时器等基础设施自身循环与 mod 自撰的事件目标链，并跳过 `if`/`switch`/`while` 等控制流关键字（其 "n" 是嵌套子句数，不是引擎扫描的容器）。
+  - **纠正了流传的结论**：`has_tradition` 实为 **O(n)**（`CCountry::HasTradition` 线性扫描，dump L2079989），并非 O(1)；`num_researched_techs` 亦为 **O(n)**（`CalcTotalTechLevels`，L1504171）；`has_any_flag` 才是 **O(1)**（只比较数组长度，L6773819）；所有 `*_flag` 命令共用同一实现，作用域家族只决定虚调用返回哪个数组。
+  - **未覆盖的部分**：其余 409 条命令保持未标注——dump 中其注册虚表不含类名，无法定位实现，猜测一个等级比留白更糟。
+  - English: [Feature] Hover now shows reverse-engineered engine cost and hardcoded behaviour for the command under the cursor. Hover previously described only syntax, so it was impossible to tell that `has_tradition` is O(n) while `has_technology` is O(1), or that `has_any_flag` merely reads the flag count. **1248 of 1657** triggers/effects are annotated (O(n) 718, O(1) 523, O(n²) 2, O(log n) 2, 3 other); hover adds the cost class, a one-line behaviour note, and - when confirmed - the engine function and dump line. Facts live in CWT (`## cost` / `## engine` / `## engine_evidence`), so adding more needs no code change and no release; an unrecognised `## cost` value degrades to no annotation rather than a wrong claim, and entries without `## engine_evidence` are explicitly marked unconfirmed. `tools/engine-cost/extract-engine-cost.cjs` derives them from the decompilation, linking each command to its implementation class and tracking loop nesting by brace depth, and only emits a class with positive evidence - excluding logging/profiling infrastructure and mod-authored event-target chains that would otherwise mark nearly everything O(n), and skipping control-flow keywords whose "n" is the number of nested clauses. Corrects the record: `has_tradition` is O(n) (linear scan, dump L2079989), `num_researched_techs` is O(n) (L1504171), `has_any_flag` is O(1) (L6773819), and all `*_flag` commands share one implementation. The remaining 409 commands stay undeclared because the dump labels their registration vtables without a class name.
+- **[修复] 静态银河新增连线的 ID 引号形式（Static Galaxy ID Quoting Fix）**：
+  - 预览/编辑器右键新增 Hyperlane 时，此前写出裸整数（`add_hyperlane = { from = 3215 to = 2834 }`），与官方 `static_galaxy_example.txt` 的带引号形式不一致；现统一按 vanilla 风格写出 `from = "3215"`。仅改"写出"而非"解析"，重新解析后 ID 仍归一化为数字，端点匹配与"重连不产生重复声明"的既有契约不变。
+  - 同类修复：`specimens.cwt` 的 `resources.category` 补上 `## cardinality = 0..1`，消除原版 `common/specimens/specimens.txt` 上的 **64 条** CW242 误报（该文件诊断数 64 → 0）。
+  - English: [Fix] Adding a hyperlane from the static galaxy preview/editor now writes IDs in vanilla's quoted form (`from = "3215"`) instead of a bare integer. Only the writer changed, not the parser, so re-parsing still yields numeric IDs and endpoint matching plus the "no duplicate declarations on reconnect" contract are unchanged. Also declares `resources.category` in `specimens.cwt` as `## cardinality = 0..1`, removing **64** CW242 false positives on vanilla `common/specimens/specimens.txt` (64 -> 0).
+- **[维护] 内置 Stellaris 规则包同步（Bundled Stellaris Rules Update）**：
+  - 刷新 `release/rules/stellaris-rules.zip` 内置规则包，包含本次 1248 条引擎开销标注与标本规则修复。
+  - English: [Maintenance] Refreshed the bundled `release/rules/stellaris-rules.zip`, including the 1248 engine-cost annotations and the specimen rule fix.
 
 ### 文档可选字段自动探测与 CW242 误报修复 / Documented-Optional Field Detection & CW242 Fix
 - **[修复] `num_pops_assigned_to_job` 省略 `pop_group` 时误报 CW242（Optional Field False Positive Fix）**：

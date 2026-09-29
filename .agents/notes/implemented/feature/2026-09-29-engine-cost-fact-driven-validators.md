@@ -35,7 +35,7 @@ flowchart TD
    - 在 `RulesTypes.fs` 的 `Options` 添加 `syncEffect: string option`。
    - `RulesParser.fs` 解析 `## sync_effect = ...` 并加入 `isEngineFactKey` 避免泄漏至描述；`CwtLanguageSchema.fs` 注册该指令。
    - `effects.cwt` 对 6 个岗位重排 effect 标注 `## sync_effect = pop_jobs`，对 `create_country` 标注 `## sync_effect = heavy`。
-   - `validateSyncEffectsInLoop`：在循环块（`every_*`, `while`, `for_each_*`）内调用报 **CW282**（Warning）与 **CW283**（单层 Warning，两层及以上嵌套循环 Error）。
+   - `validateSyncEffectsInLoop`：在循环块（`every_*`, `while`, `for_each_*`）内调用报 **CW282**（Information）与 **CW283**（单层 Information，两层及以上嵌套循环升级为 Warning 防止主线程卡死）。
 3. **反模式校验器矩阵（任务 B3–B7）**：
    - **CW284 `NestedScopeIteration`**（Information）：检测人口组/星球迭代器内通过 `owner`/`overlord` 等上行跳转再次嵌套同族迭代器。
    - **CW285 `ZeroFactorInWeightModifier`**（Information）：检测 `weight`/`weight_modifier` 等权重块的 `modifier` 节点内设置 `factor = 0`。
@@ -54,6 +54,7 @@ flowchart TD
 ## Alternatives considered
 
 - **在循环内一律禁止任何 effect**：否决。普通加减变量或标志是常见模式，只对反编译确认有严重同步副作用（同步全星岗位分配或强制数据库全量重建）的 effect 进行靶向告警。
+- **CW282/CW283 采用高警报级别（Warning/Error）**：否决。根据实操体验调整梯度，避免强阻断日常编写：CW282 与单层 CW283 降为 Information，仅对深层嵌套循环（主线程卡死风险）升级为 Warning，移除了阻塞性的 Error。
 - **将 inline_script 调用次数阈值设为 5**：否决。很多正常 mod 存在十余次模板复用，阈值设为 20 能更精准定位真正产生巨大解析开销的滥用。
 - **将 factor=0 的检查放入已有的 CW235**：否决。CW235 是针对 modifiers 静态属性中的加法 0，而这是权重几率块中的 factor 乘数未短路机制，分离码号便于规则过滤。
 

@@ -689,7 +689,7 @@ produce the same name. Rename so the base part does not end in a digit.
 
 ## CW282
 
-**Pop job sync effect in loop (W)** — an effect that synchronously triggers
+**Pop job sync effect in loop (I)** — an effect that synchronously triggers
 the planet pop job re-assignment pipeline (`EnsurePopJobsAreUpToDate`, such as
 `add_building`, `remove_building`, `add_district`, `remove_district`,
 `set_controller`, or `create_pop_group`) appears inside an iteration loop
@@ -703,13 +703,14 @@ Avoid calling these effects inside frequent loops or batch them outside.
 
 ## CW283
 
-**create_country in loop (W/E)** — `create_country` is the heaviest single
+**create_country in loop (I/W)** — `create_country` is the heaviest single
 effect in the engine (synchronously contacts all galactic countries and updates
-database arrays). Calling it inside a loop causes severe game freezes.
+database arrays). Calling it inside a loop causes severe game freezes; nested
+loops escalate this to a warning (W).
 
 `create_country` 出现在循环体内：`create_country` 是引擎中最沉重的单个 effect
 （新建国家时同步与全银河所有国家建立外交联络并强制重建数据库数组）。在循环中
-调用会导致游戏极度卡顿甚至冻结。嵌套循环内出现将视为严重错误。
+调用会导致游戏极度卡顿甚至冻结。两层及以上嵌套循环内调用将升级为警告（W）。
 
 ## CW284
 

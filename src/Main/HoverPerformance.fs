@@ -6,9 +6,10 @@ open System.Collections.Generic
 /// Reverse-engineered engine facts for Stellaris script commands.
 ///
 /// One home per fact: the facts themselves live in the CWT rules
-/// (`submodules/cwtools-stellaris-config/config/engine_cost.cwt`) as
-/// `## cost = ...` / `## engine = ...` comments on each trigger and effect,
-/// so rules authors own them and no fact is hardcoded in this backend.
+/// (`submodules/cwtools-stellaris-config/config/triggers.cwt` and
+/// `effects.cwt`) as `## cost = ...` / `## engine = ...` comments on each
+/// trigger and effect alias, so rules authors own them and no fact is
+/// hardcoded in this backend.
 ///
 /// This module only carries the presentation vocabulary - the cost classes and
 /// their localised descriptions - plus the small amount of matching needed to

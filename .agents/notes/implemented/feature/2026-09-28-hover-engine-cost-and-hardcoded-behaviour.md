@@ -75,5 +75,6 @@ CWTools 的悬停此前只展示规则文件能提供的信息（`##` 描述、�
 - **新增事实无需改代码**：在 CWT 写 `## cost` / `## engine` / `## engine_evidence` 即可。
 - 提取器可复现：`node tools/engine-cost/extract-engine-cost.cjs <dump> --rules <config>` 输出与规则文件中的标注**逐条一致**（已验证 0 差异，14 条人工覆盖除外）。
 - 回归测试：[HoverPerformance.Tests.fsx](../../../../src/Main/HoverPerformance.Tests.fsx)（59 项：词表/解析/渲染/回退）与 [EngineCostRuleParsing.Tests.fsx](../../../../src/Main/EngineCostRuleParsing.Tests.fsx)（26 项：**解析真实规则文件**，断言 1248 条 `## cost` 全部为合法类别、证据行不泄漏进描述、未标注命令保持未标注）。均由 `npm run test:fsx` 自动发现。
+- 后续延伸：同一事实管道已驱动诊断码 CW279/CW280/CW281 与 `set_design_flag` 规则错误升级，见 [2026-09-29 引擎事实驱动校验器](2026-09-29-engine-cost-fact-driven-validators.md)。
 - `Options` 与 `SymbolInformation` 是跨仓库共享类型，**cwtools 与 cwtools-stellaris-config 两个子模块必须先行提交，再更新根指针**。
 - 已知局限：复杂度是**实现形态**的推断而非基准测试；调用深度 1 之外若有扫描会被漏判为 O(1)（实测该比例约 35%，故对"O(1)"保守取"命令及其直接调用者均无循环"）。

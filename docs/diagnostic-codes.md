@@ -649,6 +649,44 @@ remain valid.
 这个派生常量；请把被引用常量移到另一个封装常量文件，或改用字面量。跨文件
 算术引用仍然合法。
 
+## CW279
+
+**Expensive command in a hot block (I)** — a command with galaxy-scale engine
+cost (rule `## cost` metadata: `o(n)_galaxy` / `o(n^2)` / `combat`) appears in
+a block the engine evaluates frequently: job `weight` / `possible`, decision
+`potential` / `allow`, casus belli `potential`, triggered modifier blocks on
+buildings/districts, or `mean_time_to_happen` modifier blocks. Check the
+command's `## engine` note for a cheaper alternative, or move the check to a
+lower-frequency context.
+
+命令的引擎开销达到全银河级（规则 `## cost` 元数据：`o(n)_galaxy` /
+`o(n^2)` / `combat`），而所在块会被引擎高频求值：岗位 `weight` /
+`possible`、决议 `potential` / `allow`、宣战理由 `potential`、建筑/区段的
+triggered modifier 块，或 `mean_time_to_happen` 的 modifier 块。请查看该
+命令的 `## engine` 说明换用更便宜的替代写法，或把检查移到更低频的位置。
+
+## CW280
+
+**MTTH with modifier blocks (I)** — the event's `mean_time_to_happen` has
+`modifier` blocks, so the engine evaluates the whole trigger before rolling the
+dice. Consider `is_triggered_only = yes` plus a periodic `on_action` pulse
+instead.
+
+事件的 `mean_time_to_happen` 带 `modifier` 块：引擎会在掷骰之前先完整求值
+整个 trigger。考虑改用 `is_triggered_only = yes` 加周期性 `on_action`
+pulse。
+
+## CW281
+
+**Dynamic name ends with a digit (W)** — a dynamic flag / event-target name
+ends with a digit. Dynamic names are formed as `base + decimal ID` with no
+separator (`name@123`), so a trailing digit can collide: `a1@23` and `a12@3`
+produce the same name. Rename so the base part does not end in a digit.
+
+动态 flag/事件目标名以数字结尾：动态名是「基础名 + 十进制 ID」无分隔符
+拼接（`name@123`），结尾数字会撞名——`a1@23` 与 `a12@3` 生成同一个名字。
+请改名，让基础名部分不以数字结尾。
+
 ---
 
 # Shader diagnostics (CWFX) / Shader 诊断

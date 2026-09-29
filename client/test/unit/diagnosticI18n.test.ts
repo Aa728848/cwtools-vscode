@@ -92,6 +92,17 @@ describe('diagnostic i18n enrichment', () => {
             expect(hint).to.include('CW274');
         });
 
+        it('translates hot-context cost, MTTH modifier, and dynamic-name digit-suffix hints', () => {
+            const hotCost = zh("'num_ships' has o(n)_galaxy engine cost and this block (job weight) is evaluated frequently; consider a cheaper alternative or moving the check to a lower-frequency context", 'CW279');
+            expect(hotCost).to.include('num_ships').and.to.include('o(n)_galaxy').and.to.include('job weight');
+            expect(hotCost).to.include('高频求值');
+            const mtth = zh('Events whose mean_time_to_happen has modifier blocks evaluate the whole trigger before the dice roll; consider is_triggered_only plus a periodic on_action pulse instead', 'CW280');
+            expect(mtth).to.include('mean_time_to_happen').and.to.include('is_triggered_only');
+            const digit = zh("Dynamic name 'army1' ends with a digit; dynamic flag/event-target names are 'base + decimal ID' with no separator, so trailing digits can collide (a1@23 vs a12@3)", 'CW281');
+            expect(digit).to.include('army1').and.to.include('a1@23');
+            expect(digit).to.include('撞名');
+        });
+
         it('translates brace/parse recovery errors', () => {            expect(zh("Missing '}' for '{' opened at line 12 col 4", 'CW001_MISSING_CLOSE_BRACE'))
                 .to.include('12');
             expect(zh("Unmatched '}' - no matching '{' found", 'CW001_UNMATCHED_CLOSE_BRACE'))

@@ -397,7 +397,7 @@ const RULES: DiagnosticRule[] = [
         zh: m => `"${m[1]}" 未定义。`,
     },
 
-    // ---- Performance / style hints (CW107/121/223/224/235/236/238/251/274) ----
+    // ---- Performance / style hints (CW107/121/223/224/235/236/238/251/274/279/280/281) ----
     {
         codes: ['CW107'],
         pattern: /runs on every tick/,
@@ -446,6 +446,21 @@ const RULES: DiagnosticRule[] = [
         codes: ['CW220', 'CW221'],
         pattern: /require the event target\(s\) (\S+) but they (?:are|may) not/,
         zh: m => `事件目标 ${m[1]} 在到达此处的事件链中未必已通过 save_event_target_as 设置,使用前先确保已保存。`,
+    },
+    {
+        codes: ['CW279'],
+        pattern: /^'(.+)' has (\S+) engine cost and this block \(([^)]+)\) is evaluated frequently/,
+        zh: m => `'${m[1]}' 是 ${m[2]} 级引擎开销,而所在块(${m[3]})会被高频求值:考虑更便宜的替代写法,或把检查移到更低频的位置。`,
+    },
+    {
+        codes: ['CW280'],
+        pattern: /^Events whose mean_time_to_happen has modifier blocks/,
+        zh: () => '该事件的 mean_time_to_happen 带 modifier 块:引擎会先完整求值整个 trigger 再掷骰。考虑改用 is_triggered_only 加周期性 on_action pulse。',
+    },
+    {
+        codes: ['CW281'],
+        pattern: /^Dynamic name '(.+)' ends with a digit/,
+        zh: m => `动态名 '${m[1]}' 以数字结尾:动态 flag/事件目标名是「基础名+十进制ID」无分隔符拼接,结尾数字会撞名(a1@23 与 a12@3 生成同一个名字)。`,
     },
 ];
 

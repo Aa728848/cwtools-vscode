@@ -30,6 +30,8 @@ module HoverPerformance =
         | RefreshBatch
         | LoadScale
         | Quirk
+        | ScriptEval
+        | ScopeCopy
 
     /// Parse a `## cost = ...` value. Unknown values yield None so a typo in a
     /// rule file degrades to "no annotation" instead of a wrong claim.
@@ -63,6 +65,9 @@ module HoverPerformance =
             | "load_scale" -> Some LoadScale
             | "semantics"
             | "quirk" -> Some Quirk
+            | "script_eval"
+            | "eval" -> Some ScriptEval
+            | "scope_copy" -> Some ScopeCopy
             | _ -> None
 
     /// Stable token for a class, used by tests and diagnostics.
@@ -78,6 +83,8 @@ module HoverPerformance =
         | RefreshBatch -> "refresh_batch"
         | LoadScale -> "load"
         | Quirk -> "semantics"
+        | ScriptEval -> "script_eval"
+        | ScopeCopy -> "scope_copy"
 
     let private classInfo (cls: PerfClass) =
         match cls with
@@ -91,6 +98,8 @@ module HoverPerformance =
         | RefreshBatch -> "O(1) + saved refresh", "O(1) flag that skips one full modifier refresh", "O(1) 开关，省掉一次全量修正刷新"
         | LoadScale -> "load time", "load-time and memory cost, not a per-tick cost", "加载耗时与内存开销，非每 tick 开销"
         | Quirk -> "semantics", "engine behaviour differs from what the docs imply", "引擎行为与文档暗示不同"
+        | ScriptEval -> "eval", "re-evaluates script or complex derived state", "脚本求值或派生状态重算"
+        | ScopeCopy -> "O(1) + scope copy", "allocates and deep-copies scope and event targets", "深拷贝作用域与事件目标"
 
     /// A resolved engine-cost annotation for the word under the cursor.
     type Fact =

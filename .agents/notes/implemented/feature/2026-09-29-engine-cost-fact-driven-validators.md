@@ -1,39 +1,64 @@
-# Agent Note: 引擎事实驱动校验器 CW279/CW280/CW281 与规则注释增强
+# Agent Note: 引擎事实驱动校验器 CW279-CW289 与规则注释细分（落实交接文档 A/B/C/D）
 
 Status: implemented
 
 ## Problem
 
-[2026-09-28 悬停引擎开销 note](2026-09-28-hover-engine-cost-and-hardcoded-behaviour.md) 把引擎事实（`## cost` / `## engine` / `## engine_evidence`）呈现给了 mod 作者，但存在三个覆盖缺口：
-
-1. **被动呈现不拦截错误写法**：作者不会逐行悬停；把全银河级开销命令写进逐日/逐月求值块（岗位 weight、决议 potential 等）时没有任何主动警告。
-2. **MTTH modifier 语义陷阱**：事件的 `mean_time_to_happen` 带 `modifier` 块时，引擎会在掷骰**之前**完整求值整个 trigger，再按修正后的 MTTH 掷骰。作者普遍误以为 modifier 是"掷骰后的概率微调"，在高频事件里堆叠昂贵 trigger。
-3. **动态名静默碰撞**：`set_*_flag` / `save_event_target_as` / `save_scope_as` 写入的名字是「基础名 + 十进制 ID」无分隔符拼接（`name@123`）。基础名以数字结尾时不同 ID 可生成同一名字（`a1@23` 与 `a12@3`），属静默正确性 bug，此前无任何检查。
-
-另有一条规则侧增强动机：`set_design_flag` / `has_design_flag` 存在引擎 bug（`CAccessFlags` 把 design 作用域 0x2000 的 flag 请求落到全局 flag 容器，原版中曾因此删除无关舰船设计），规则此前仅标 `## severity = warning`，不足以阻止使用。
+在初步实现 CW279–CW281 之后，[docs/engine-perf-lint-handoff.md](../../../../docs/engine-perf-lint-handoff.md) 梳理了 Stellaris 4.5 反编译性能分析转化为规则配置与插件功能的剩余工作：
+1. **任务 A（复杂度细分）**：714 条初版标注为笼统 `o(n)` 的命令缺少粒度，无法区分遍历本对象还是全银河；且缺少“复杂脚本求值（`script_eval`）”与“作用域深拷贝（`scope_copy`）”词汇，使 `opinion`、`habitability` 等沉重命令逃逸了 CW279 检查。
+2. **任务 B（结构反模式）**：
+   - B1/B2：`add_building`/`remove_building`/`add_district`/`remove_district`/`set_controller`/`create_pop_group` 同步触发全星岗位重排（`EnsurePopJobsAreUpToDate`），`create_country` 同步全图联络并重建数据库；若出现在循环体内导致严重掉帧/冻结，此前无 `## sync_effect` 规则通道与校验器。
+   - B3：$O(G^2)$ 嵌套迭代器（人口组/星球迭代器内通过 `owner` 向上跳转后再嵌套同族迭代器）。
+   - B4：权重块内堆 `modifier = { factor = 0 ... }`，引擎在 factor=0 后仍不提前退出。
+   - B5：高频循环体内跨作用域读取变量（`owner.var`），每次迭代深拷贝事件作用域。
+   - B6：同一 block 内重复出现完全相同的长链作用域跳转（`prev.prev.from`），重复构造栈帧。
+   - B7：高频宿主上下文内可能失败的作用域跳转（`owner = { ... }`）未加 `?` 安全导航操作符，失效时整作用域序列化写日志。
+3. **任务 C（CW279 宿主扩展）**：高频轮询宿主缺少派生、法令、特殊项目、局势、考古、科技、自动化与 game_rules 等极高频上下文。
+4. **任务 D（inline_script 复用提示）**：`inline_script` 在每个调用点都会全文复制并重解析 AST，无实例共享，缺少复用次数过高提示。
 
 ## Decision
 
-沿用悬停 note 确立的分工：**事实声明在 CWT 规则，代码只做分类与匹配**，不硬编码任何具体命令的事实。cwtools 子模块新增三个校验器，cwtools-stellaris-config 子模块增强注释与严重度：
+严格恪守“**事实住规则文件，后端只做分类与匹配**”与“性能类一律 Information，次要风险 Warning，破坏性 Error”原则，全面落地四大任务：
 
-1. **CW279 `HotContextCost`（Information，参数化消息）**：昂贵类别集合 `hotContextExpensiveCosts = { o(n)_galaxy, o(n^2), combat }` 硬编码在 [STLValidation.fs](../../../../submodules/cwtools/CWTools/Validation/Stellaris/STLValidation.fs)（仅是事实的"分类"，不是事实本身）；逐命令成本事实来自 `engineCostMap`——扫描已加载规则中 trigger/effect alias 的 `## cost` 元数据构建。命中块（结构性事实，硬编码）：`common/jobs` 的 `weight`/`possible`、`common/decisions` 的 `potential`/`allow`、`common/casus_belli` 的 `potential`、`common/buildings`/`common/districts` 中含 `trigger` 的 `triggered_*` modifier 块、事件的 `mean_time_to_happen` 的 `modifier` 块。规则未标注任何 cost 时校验器静默返回 OK；inline_script 文件整体排除。
-2. **CW280 `MtthWithModifier`（Information）**：事件含带 `modifier` 块的 `mean_time_to_happen` 即在该块上报，建议 `is_triggered_only` 加周期性 `on_action` pulse。
-3. **CW281 `DynamicNameDigitSuffix`（Warning，参数化消息）**：`foldNode7` 全实体一次扫描，凡叶子键以 `_flag` 结尾、含 `event_target`、或为 `save_scope_as`，且值为 `base@id` 形式而 `base` 以数字结尾即报警。
-4. **规则侧（cwtools-stellaris-config）**：`set_design_flag`（effect）与 `has_design_flag`（trigger）升级为 `## severity = error` + `## error_if_only_match`（证据指向 `docs/better_stellaris/15_silent_corruption_bugs.md` C2）；`triggers.cwt` / `effects.cwt` / `scope_changes.cwt` 共 31 处 `## engine` 注释增强，其中 17 处追加 Cheaper 替代建议（如 `any_neighbor_country` / `any_species_pop_group` 的全银河扫描警告），全部只改 `##` 注释与 severity，未动 alias 语义。
+```mermaid
+flowchart TD
+    Rules["CWT Rules (config/*.cwt)"] -->|"## cost, ## sync_effect"| Parser["RulesParser / RulesTypes"]
+    Parser -->|"engineCostMap, syncEffectMap"| Validators["STLValidation (CW279, CW282-CW289)"]
+    Validators -->|"CW Diagnostics"| Client["Language Client & diagnosticI18n (zh/en)"]
+```
 
-三个新错误码定义在 cwtools 子模块 [Validation.fs](../../../../submodules/cwtools/CWTools/Validation/Validation.fs) 的 `ErrorCodes`（CW279/280/281），根仓库侧仅做消费方配套：登记 [diagnostic-codes.md](../../../../docs/diagnostic-codes.md) 并接入 [diagnosticI18n.ts](../../../../client/extension/diagnosticI18n.ts) 中文翻译。
+1. **词汇表扩展与任务 A（复杂度细分）**：
+   - `HoverPerformance.fs` 增加 `ScriptEval` (`script_eval`) 与 `ScopeCopy` (`scope_copy`) 两大类别，提供完整中英文悬停展示。
+   - `STLValidation.fs` 将 `"script_eval"` 纳入 `hotContextExpensiveCosts` 集合，使 `opinion`、`habitability`、`has_valid_civic` 等在高频宿主内自动受报 CW279。
+   - 对 `config/triggers.cwt`、`effects.cwt`、`scope_changes.cwt` 精准更新：将重点命令细分为 `script_eval`、`o(n)_galaxy`、`o(n)_owned`、`o(n^2)`、`o(1)`、`o(log n)`。
+2. **规则元数据通道与副作用校验器（任务 B1/B2）**：
+   - 在 `RulesTypes.fs` 的 `Options` 添加 `syncEffect: string option`。
+   - `RulesParser.fs` 解析 `## sync_effect = ...` 并加入 `isEngineFactKey` 避免泄漏至描述；`CwtLanguageSchema.fs` 注册该指令。
+   - `effects.cwt` 对 6 个岗位重排 effect 标注 `## sync_effect = pop_jobs`，对 `create_country` 标注 `## sync_effect = heavy`。
+   - `validateSyncEffectsInLoop`：在循环块（`every_*`, `while`, `for_each_*`）内调用报 **CW282**（Warning）与 **CW283**（单层 Warning，两层及以上嵌套循环 Error）。
+3. **反模式校验器矩阵（任务 B3–B7）**：
+   - **CW284 `NestedScopeIteration`**（Information）：检测人口组/星球迭代器内通过 `owner`/`overlord` 等上行跳转再次嵌套同族迭代器。
+   - **CW285 `ZeroFactorInWeightModifier`**（Information）：检测 `weight`/`weight_modifier` 等权重块的 `modifier` 节点内设置 `factor = 0`。
+   - **CW286 `CrossScopeVariableInLoop`**（Information）：检测循环块内跨作用域读取变量（`owner.var`）。
+   - **CW287 `DuplicateScopeChaining`**（Information）：检测同一节点下出现 $\ge 2$ 次完全相同的多级链式跳转（如 `prev.prev.from`）。
+   - **CW288 `UnsafeScopeSwitchInHotContext`**（Information）：检测高频宿主上下文内未加 `?` 的作用域切换。
+4. **CW279 高频宿主扩展（任务 C）**：
+   - 提取公共 `collectHotBlocks`，将 `common/pop_faction_types`、`common/edicts`、`common/special_projects`、`common/situations`、`common/archaeological_site_types`、`common/technology`、`common/colony_automation` 及 `common/game_rules` 全部纳入高频块。
+5. **全局 inline_script 复用提示（任务 D）**：
+   - **CW289 `InlineScriptHighUsage`**（Information）：全局统计每个 inline_script 路径的调用点数，超过 20 次报 Information。
+6. **配套落地**：
+   - 在 `Validation.fs` 定义 CW282–CW289 错误码构造器；在 `STLGame.fs` 注册所有新校验器。
+   - 在 `docs/diagnostic-codes.md` 和 `docs/cwt-rule-config.md` 完整登记中英文说明。
+   - 在 `client/extension/diagnosticI18n.ts` 接入中文本地化，并在 `diagnosticI18n.test.ts` 与 `FolderValidationTests.fs` 编写完整回归测试。
 
 ## Alternatives considered
 
-- **在每处高频块用 `## error_if_only_match` 手写警告**：否决。块清单与成本分级是结构性事实，在 26+ 个 alias 处复制会随游戏版本漂移；集中在分类集合一处维护，新增命令只需在规则补 `## cost` 即自动纳入检查。
-- **把昂贵类别集合也搬进 CWT 规则**：否决。与悬停模块保持同一分工（事实在规则、分类在代码）；该集合当前仅 3 类，为它设计规则 DSL 与解析路径的收益低于成本。
-- **CW281 只对显式 `set_*_flag` 键报警**：否决。`save_event_target_as` / `save_scope_as` / event_target 系列同样生成「基础名+ID」名字；`foldNode7` 一次全实体扫描即可覆盖所有动态名写入键，按键名白名单反而会漏。
-- **把 CW280 并入 CW279 的 MTTH modifier 上下文**：否决。「先求值后掷骰」是独立于开销的语义陷阱，单独码号便于按码过滤与忽略管理。
-- **CW279 覆盖全部 `o(n)` 类开销**：否决。`o(n)_owned` 等 owned 级扫描在高频块中的代价通常可接受，全银河级（`o(n)_galaxy` / `o(n^2)` / `combat`）才是主要热点；全量告警会淹没真正昂贵的写法（误报优先于漏报的方向选择）。
+- **在循环内一律禁止任何 effect**：否决。普通加减变量或标志是常见模式，只对反编译确认有严重同步副作用（同步全星岗位分配或强制数据库全量重建）的 effect 进行靶向告警。
+- **将 inline_script 调用次数阈值设为 5**：否决。很多正常 mod 存在十余次模板复用，阈值设为 20 能更精准定位真正产生巨大解析开销的滥用。
+- **将 factor=0 的检查放入已有的 CW235**：否决。CW235 是针对 modifiers 静态属性中的加法 0，而这是权重几率块中的 factor 乘数未短路机制，分离码号便于规则过滤。
 
 ## Consequences
 
-- 诊断码 CW279/280/281 已登记 [diagnostic-codes.md](../../../../docs/diagnostic-codes.md)，中文翻译与单元测试同步加入 [diagnosticI18n.test.ts](../../../../client/test/unit/diagnosticI18n.test.ts)；`Performance / style hints` 分组的码列表注释同步更新。
-- 校验器消费规则 `## cost` 元数据：规则作者为新命令标注 cost 即自动进入 CW279 检查，无需改代码；规则未标注时校验器静默通过，不会误报。
-- `Options.cost` 等共享类型跨仓库：cwtools 与 cwtools-stellaris-config 两个子模块必须先行提交，再更新根指针（与悬停 note 同一约束）。
-- 已知局限：CW279 的昂贵集合是硬编码分类（暂不含 `o(n)_owned`）；CW281 只识别字面 `base@id` 形式，经变量/拼接构造的动态名不在检查范围。
+- 诊断码 CW282 至 CW289 全部落地并完成双语文档与国际化，单元测试全部通过。
+- 校验器与规则数据分工清晰：子模块 `submodules/cwtools` 与 `submodules/cwtools-stellaris-config` 先行提交，再更新根指针。
+- 验收指标完全达成：`triggers.cwt`/`effects.cwt` 笼统 `o(n)` 显著下降，`EngineCostRuleParsing.Tests.fsx` 与 `HoverPerformance.Tests.fsx` 全部通过，所有新反模式均有对应测试覆盖。

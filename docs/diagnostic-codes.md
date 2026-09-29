@@ -687,6 +687,93 @@ produce the same name. Rename so the base part does not end in a digit.
 拼接（`name@123`），结尾数字会撞名——`a1@23` 与 `a12@3` 生成同一个名字。
 请改名，让基础名部分不以数字结尾。
 
+## CW282
+
+**Pop job sync effect in loop (W)** — an effect that synchronously triggers
+the planet pop job re-assignment pipeline (`EnsurePopJobsAreUpToDate`, such as
+`add_building`, `remove_building`, `add_district`, `remove_district`,
+`set_controller`, or `create_pop_group`) appears inside an iteration loop
+(`every_owned_planet`, `while`, `for_each_*`). This causes severe frame lag.
+Avoid calling these effects inside frequent loops or batch them outside.
+
+同步重排岗位的 effect 出现在循环体内：`add_building`、`remove_building`、
+`add_district`、`remove_district`、`set_controller`、`create_pop_group`
+等 effect 每次调用都会同步重跑整星球的岗位分配流程（`EnsurePopJobsAreUpToDate`）。
+在循环内（如 `every_owned_planet`、`while` 等）高频调用会导致严重掉帧。
+
+## CW283
+
+**create_country in loop (W/E)** — `create_country` is the heaviest single
+effect in the engine (synchronously contacts all galactic countries and updates
+database arrays). Calling it inside a loop causes severe game freezes.
+
+`create_country` 出现在循环体内：`create_country` 是引擎中最沉重的单个 effect
+（新建国家时同步与全银河所有国家建立外交联络并强制重建数据库数组）。在循环中
+调用会导致游戏极度卡顿甚至冻结。嵌套循环内出现将视为严重错误。
+
+## CW284
+
+**Nested scope iteration (I)** — iterating over owned pop groups or planets
+inside another iteration via an upward scope hop (`owner`, `overlord`, etc.)
+creates quadratic scaling ($O(N^2)$) and deep-copies scope frames on each step.
+Consolidate the check or cache references first.
+
+嵌套迭代器：在人口组或星球级迭代器内通过 `owner` 等上行作用域切换再次嵌套同族
+迭代器，会产生 $O(N^2)$ 级别的计算开销与重复作用域深拷贝。建议在外层提取或缓存。
+
+## CW285
+
+**factor = 0 in weight modifier does not early-exit (I)** — inside a weight or
+weight_modifier block, a modifier clause with `factor = 0` does not abort
+evaluating remaining modifiers. Hard exclusions should be placed in `potential`,
+`allow`, or `limit` blocks instead.
+
+权重 modifier 中的 factor = 0 不会提前退出：在权重或几率块中，`factor = 0`
+并不会提前中断求值，引擎仍会完整求值后续所有的 modifier。硬性排除应放进
+`potential`、`allow` 或 `limit` 块。
+
+## CW286
+
+**Cross-scope variable read in loop (I)** — reading variables across scopes
+(such as `owner.variable`) inside a loop triggers a deep copy of the event
+scope container on every iteration. Cache the variable outside the loop.
+
+高频循环内跨作用域读变量：在循环体内通过 `owner.var` 等跨作用域读取变量，
+引擎在每次求值时都会深拷贝整个事件作用域。建议在循环外先存入局部变量。
+
+## CW287
+
+**Duplicate chained scope transition in block (I)** — identical multi-step
+scope transitions (e.g. `prev.prev.from`) appear multiple times in the same
+block, repeatedly constructing and copying 1.8KB scope frames. Consolidate into
+a single nested block.
+
+同一块内重复链式作用域跳转：在同一个块内多次写出完全相同的多段作用域跳转
+（如 `prev.prev.from = { ... }` 出现多次），每次都会重复构造并递归深拷贝
+1.8KB 栈帧。建议合并为一个嵌套块。
+
+## CW288
+
+**Unsafe scope switch in hot context (I)** — a scope switch in a hot context
+(jobs, decisions, triggered modifiers) does not use the `?` safe navigation
+operator (e.g. `owner = { ... }` instead of `owner? = { ... }`). If the target
+is invalid, the entire scope is serialized into the error log on every tick.
+
+高频上下文中可能失败的作用域切换未加 `?`：在岗位、决议等极高频求值的块内，
+若切换目标不存在且未加 `?`（例如写了 `owner = {` 而不是 `owner? = {`），
+每次求值都会把整个作用域序列化并记录进错误日志。
+
+## CW289
+
+**High inline_script usage count (I)** — the inline script is invoked many
+times. Every inline script call point duplicates the full AST and re-parses it
+without instance sharing. Consider parameterized scripted triggers/effects or
+reducing argument variants.
+
+inline_script 高复用次数提示：`inline_script` 每个调用点都会完整复制并重新解析
+整棵语法树且不去重。当复用次数较多时会显著增加游戏加载耗时与内存，建议改用带参数
+的 scripted_trigger/effect。
+
 ---
 
 # Shader diagnostics (CWFX) / Shader 诊断

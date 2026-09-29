@@ -462,6 +462,46 @@ const RULES: DiagnosticRule[] = [
         pattern: /^Dynamic name '(.+)' ends with a digit/,
         zh: m => `动态名 '${m[1]}' 以数字结尾:动态 flag/事件目标名是「基础名+十进制ID」无分隔符拼接,结尾数字会撞名(a1@23 与 a12@3 生成同一个名字)。`,
     },
+    {
+        codes: ['CW282'],
+        pattern: /^Effect '(.+)' synchronously re-runs planet pop job assignments \(EnsurePopJobsAreUpToDate\); calling it inside a loop \(([^)]+)\) causes severe lag/,
+        zh: m => `Effect '${m[1]}' 会同步重跑整星球的岗位分配流程(EnsurePopJobsAreUpToDate):在循环(${m[2]})内频繁调用会引起严重卡顿,应移至循环外或减少调用频次。`,
+    },
+    {
+        codes: ['CW283'],
+        pattern: /^create_country is the heaviest engine effect .+?; calling it inside a loop \(([^)]+)\) causes severe freezing/,
+        zh: m => `create_country 是引擎中最沉重的单个 effect(同步与全银河所有国家建立外交联络并全量重建数据库):在循环(${m[1]})内调用会导致游戏严重冻结!`,
+    },
+    {
+        codes: ['CW284'],
+        pattern: /^Nested iteration over owned container '(.+)' inside '(.+)' via '(.+)' creates O\(N\^2\) scaling/,
+        zh: m => `在迭代器 '${m[2]}' 内部通过 '${m[3]}' 再次嵌套自有对象迭代器 '${m[1]}',将导致 O(N²) 复杂度爆炸:考虑先过滤或缓存到事件目标。`,
+    },
+    {
+        codes: ['CW285'],
+        pattern: /^Setting factor = 0 inside a weight modifier does not early-exit/,
+        zh: () => '权重 modifier 中设置 factor = 0 引擎并不会提前跳出求值,后续的 modifier 仍会完整计算。硬性排除应移至 potential/allow/limit 块。',
+    },
+    {
+        codes: ['CW286'],
+        pattern: /^Cross-scope variable read '(.+)' inside a loop \(([^)]+)\) triggers a deep copy/,
+        zh: m => `在循环(${m[2]})内跨作用域读取变量 '${m[1]}' 会在每次迭代时深拷贝事件作用域:建议在循环外先将变量读到临时变量中。`,
+    },
+    {
+        codes: ['CW287'],
+        pattern: /^Duplicate chained scope transition '(.+)' \(appears (\d+) times in the same block\)/,
+        zh: m => `同一块内重复出现完全相同的多段链式作用域跳转 '${m[1]}'(重复了 ${m[2]} 次):建议合并为一个嵌套块,避免重复构建和深拷贝作用域帧。`,
+    },
+    {
+        codes: ['CW288'],
+        pattern: /^Scope switch '(.+)' in hot context \(([^)]+)\) does not use the '\?' safe-navigation operator/,
+        zh: m => `高频上下文(${m[2]})内的作用域切换 '${m[1]}' 未使用 '?' 安全导航操作符:若目标无效,引擎每次求值都会把完整作用域序列化并写入错误日志。`,
+    },
+    {
+        codes: ['CW289'],
+        pattern: /^Inline script '(.+)' is invoked (\d+) times; each call point duplicates and re-parses the AST/,
+        zh: m => `Inline script '${m[1]}' 已被调用 ${m[2]} 次:每个调用点都会全文复制并完整重解析 AST(无实例共享)。建议改用带参数的 scripted_trigger/effect 或减少展开组合。`,
+    },
 ];
 
 function codeOf(diag: EnrichableDiagnostic): string | undefined {

@@ -30,7 +30,9 @@ let parseCases =
       "combat", CombatScale
       "refresh_batch", RefreshBatch
       "load", LoadScale
-      "semantics", Quirk ]
+      "semantics", Quirk
+      "script_eval", ScriptEval
+      "scope_copy", ScopeCopy ]
 
 for (raw, expected) in parseCases do
     harness.Equal (sprintf "## cost = %s parses" raw) (Some expected) (tryParseClass raw)
@@ -43,7 +45,7 @@ harness.Check "whitespace cost value yields None" (tryParseClass "   " |> Option
 
 // every class must round-trip through its token
 let allClasses =
-    [ Constant; Logarithmic; LinearContainer; LinearOwned; LinearGalaxy; Quadratic; CombatScale; RefreshBatch; LoadScale; Quirk ]
+    [ Constant; Logarithmic; LinearContainer; LinearOwned; LinearGalaxy; Quadratic; CombatScale; RefreshBatch; LoadScale; Quirk; ScriptEval; ScopeCopy ]
 
 for cls in allClasses do
     harness.Equal (sprintf "class token round-trips (%A)" cls) (Some cls) (tryParseClass (classToken cls))
@@ -63,6 +65,8 @@ harness.Check "CombatScale renders O(combatants)" ((symbolOf CombatScale).Contai
 harness.Check "RefreshBatch renders the saved refresh" ((symbolOf RefreshBatch).Contains "saved refresh")
 harness.Check "LoadScale renders load time" ((symbolOf LoadScale).Contains "`load time`")
 harness.Check "Quirk renders semantics" ((symbolOf Quirk).Contains "`semantics`")
+harness.Check "ScriptEval renders eval" ((symbolOf ScriptEval).Contains "`eval`")
+harness.Check "ScopeCopy renders scope copy" ((symbolOf ScopeCopy).Contains "scope copy")
 
 // --- evidence handling -----------------------------------------------------
 

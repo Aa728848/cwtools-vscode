@@ -103,6 +103,32 @@ describe('diagnostic i18n enrichment', () => {
             expect(digit).to.include('撞名');
         });
 
+        it('translates engine anti-pattern diagnostics CW282 through CW289', () => {
+            const cw282 = zh("Effect 'add_building' synchronously re-runs planet pop job assignments (EnsurePopJobsAreUpToDate); calling it inside a loop (every_owned_planet) causes severe lag", 'CW282');
+            expect(cw282).to.include('add_building').and.to.include('every_owned_planet').and.to.include('EnsurePopJobsAreUpToDate');
+
+            const cw283 = zh("create_country is the heaviest engine effect (synchronously contacts all countries and updates database arrays); calling it inside a loop (every_country) causes severe freezing", 'CW283');
+            expect(cw283).to.include('create_country').and.to.include('every_country').and.to.include('冻结');
+
+            const cw284 = zh("Nested iteration over owned container 'any_owned_pop_group' inside 'every_owned_pop_group' via 'owner' creates O(N^2) scaling; consider filtering or caching to an event target first", 'CW284');
+            expect(cw284).to.include('any_owned_pop_group').and.to.include('every_owned_pop_group').and.to.include('O(N²)');
+
+            const cw285 = zh("Setting factor = 0 inside a weight modifier does not early-exit; subsequent modifiers are still fully evaluated. Move hard exclusions to potential/allow/limit blocks instead", 'CW285');
+            expect(cw285).to.include('factor = 0').and.to.include('potential/allow/limit');
+
+            const cw286 = zh("Cross-scope variable read 'owner.my_var' inside a loop (while) triggers a deep copy of the event scope on each iteration. Cache the variable outside the loop first", 'CW286');
+            expect(cw286).to.include('owner.my_var').and.to.include('深拷贝');
+
+            const cw287 = zh("Duplicate chained scope transition 'prev.prev.from' (appears 3 times in the same block); consolidate into a single nested block to avoid repeated scope frame construction", 'CW287');
+            expect(cw287).to.include('prev.prev.from').and.to.include('3 次');
+
+            const cw288 = zh("Scope switch 'owner' in hot context (job weight) does not use the '?' safe-navigation operator; if the target is invalid, the engine serializes the entire scope into error logs on every tick", 'CW288');
+            expect(cw288).to.include('owner').and.to.include('job weight').and.to.include('?');
+
+            const cw289 = zh("Inline script 'events/my_script' is invoked 25 times; each call point duplicates and re-parses the AST. Consider parameterized scripted_trigger/effect or reducing unique argument expansions", 'CW289');
+            expect(cw289).to.include('events/my_script').and.to.include('25 次');
+        });
+
         it('translates brace/parse recovery errors', () => {            expect(zh("Missing '}' for '{' opened at line 12 col 4", 'CW001_MISSING_CLOSE_BRACE'))
                 .to.include('12');
             expect(zh("Unmatched '}' - no matching '{' found", 'CW001_UNMATCHED_CLOSE_BRACE'))

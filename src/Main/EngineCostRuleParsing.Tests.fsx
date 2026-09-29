@@ -81,7 +81,9 @@ match rulesDir with
     harness.Equal "has_active_tradition declares ## cost" (Some "o(n)") (costOf "has_active_tradition" triggers)
     harness.Equal "has_any_flag declares ## cost" (Some "o(1)") (costOf "has_any_flag" triggers)
     harness.Equal "has_technology declares ## cost" (Some "o(1)") (costOf "has_technology" triggers)
-    harness.Equal "num_researched_techs declares ## cost" (Some "o(n)") (costOf "num_researched_techs" triggers)
+    harness.Equal "num_researched_techs declares ## cost" (Some "script_eval") (costOf "num_researched_techs" triggers)
+    harness.Equal "opinion declares ## cost" (Some "script_eval") (costOf "opinion" triggers)
+    harness.Equal "habitability declares ## cost" (Some "script_eval") (costOf "habitability" triggers)
     harness.Equal "last_increased_tech declares ## cost" (Some "o(1)") (costOf "last_increased_tech" triggers)
     harness.Equal "is_designable declares ## cost" (Some "semantics") (costOf "is_designable" triggers)
     harness.Equal "set_update_modifiers_batch declares ## cost" (Some "refresh_batch") (costOf "set_update_modifiers_batch" effects)
@@ -90,6 +92,9 @@ match rulesDir with
     harness.Equal "set_variable declares ## cost" (Some "o(1)") (costOf "set_variable" effects)
     harness.Equal "save_global_event_target_as declares ## cost" (Some "o(log n)") (costOf "save_global_event_target_as" effects)
     harness.Equal "clear_global_event_target declares ## cost" (Some "o(log n)") (costOf "clear_global_event_target" effects)
+    let syncOf name table = pick (fun (o: Options) -> o.syncEffect) name table
+    harness.Equal "create_country declares ## sync_effect" (Some "heavy") (syncOf "create_country" effects)
+    harness.Equal "add_building declares ## sync_effect" (Some "pop_jobs") (syncOf "add_building" effects)
 
     // --- mechanism and evidence survive too -------------------------------
     harness.Check "num_ships declares ## engine" (engineOf "num_ships" triggers |> Option.isSome)

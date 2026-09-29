@@ -203,6 +203,10 @@ Rule options are `##` comments attached to the following rule.
 | `## inject` | `## inject = common/foo.cwt@type/path` | Inject child rules from another rule file. | Advanced |
 | `## incomingReferenceLabel` | `## incomingReferenceLabel = uses` | Label incoming reference relationships. | Advanced |
 | `## outgoingReferenceLabel` | `## outgoingReferenceLabel = references` | Label outgoing reference relationships. | Advanced |
+| `## cost` | `## cost = o(n)` | Engine complexity class (`o(1)`, `o(log n)`, `o(n)`, `o(n)_owned`, `o(n)_galaxy`, `o(n^2)`, `combat`, `script_eval`, `scope_copy`, `refresh_batch`, `load`, `semantics`). | Shared |
+| `## engine` | `## engine = Scans container` | Reverse-engineered hardcoded engine behaviour. | Shared |
+| `## engine_evidence` | `## engine_evidence = CFoo::Bar` | Function citation and dump location where claim was verified. | Shared |
+| `## sync_effect` | `## sync_effect = pop_jobs` | Synchronous engine side-effect classification (e.g. `pop_jobs`, `heavy`). | Shared |
 
 `## cardinality = ~1..1` uses a non-strict minimum. This is supported for compatibility but should be rare.
 
@@ -1070,6 +1074,10 @@ subtype[!planet] = {
 | `## inject` | `## inject = common/foo.cwt@type/path` | 从另一个规则文件注入子规则。 | Advanced |
 | `## incomingReferenceLabel` | `## incomingReferenceLabel = uses` | 给入向引用关系加标签。 | Advanced |
 | `## outgoingReferenceLabel` | `## outgoingReferenceLabel = references` | 给出向引用关系加标签。 | Advanced |
+| `## cost` | `## cost = o(n)` | 引擎复杂度等级（`o(1)`、`o(log n)`、`o(n)`、`o(n)_owned`、`o(n)_galaxy`、`o(n^2)`、`combat`、`script_eval`、`scope_copy`、`refresh_batch`、`load`、`semantics`）。 | Shared |
+| `## engine` | `## engine = Scans container` | 反编译确认的硬编码行为描述。 | Shared |
+| `## engine_evidence` | `## engine_evidence = CFoo::Bar` | 验证函数与反编译行号证据。 | Shared |
+| `## sync_effect` | `## sync_effect = pop_jobs` | 同步引擎副作用分类（例如 `pop_jobs`、`heavy`）。 | Shared |
 
 `## cardinality = ~1..1` 表示非严格最小值。支持它是为了兼容，正常规则中应少用。
 

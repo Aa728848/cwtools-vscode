@@ -6,10 +6,12 @@ export const ANTIGRAVITY_ENDPOINTS = [
     'https://cloudcode-pa.googleapis.com',
 ] as const;
 
+// Fallback catalog for signed-out accounts and for a failed discovery refresh; a successful
+// fetchAvailableModels response always wins. This static list is not plan-filtered (see README).
 export const ANTIGRAVITY_MODELS = [
     'gemini-3.8-flash', 'gemini-3.7-flash', 'gemini-3.6-flash', 'gemini-3.5-flash',
     'gemini-3.1-pro', 'gemini-3-flash', 'gemini-2.5-pro', 'gemini-2.5-flash',
-    'claude-opus-4-6', 'claude-sonnet-4-6', 'gpt-oss-120b',
+    'claude-opus-5-5', 'claude-sonnet-5-5', 'claude-opus-4-6', 'claude-sonnet-4-6', 'gpt-oss-120b',
 ] as const;
 
 export function antigravityDisplayModel(model: string): string {

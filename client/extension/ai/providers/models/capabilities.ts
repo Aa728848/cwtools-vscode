@@ -11,6 +11,7 @@ import { CODEX_CHATGPT_CONTEXT_TOKENS, CODEX_CHATGPT_MODELS } from '../../codex/
  */
 export const VISION_CAPABLE_MODELS: Record<string, boolean> = {
     'gpt-6-astra': true,
+    'gpt-6.1-sol': true,
     'gpt-6-sol': true,
     'gpt-6-luna': true,
     'gpt-5.6': true,
@@ -188,6 +189,7 @@ export function isModelFIMCapable(model: string, providerId: string): boolean {
  */
 export const ALWAYS_THINKING_PREFIXES: string[] = [
     'gpt-6-astra',
+    'gpt-6.1-sol',
     'deepseek-r1', 'DeepSeek-R1',
     'o1', 'o3', 'o4-mini',
     'glm-z1', 'GLM-Z1',
@@ -367,6 +369,7 @@ export const MODEL_CONTEXT_TOKENS: Record<string, number> = {
         CODEX_CHATGPT_CONTEXT_TOKENS,
     ])),
     'gpt-6-astra': 1050000,
+    'gpt-6.1-sol': 1050000,
     'gpt-6-sol': 1050000,
     'gpt-6-luna': 1050000,
     'gpt-5.6': 1050000,
@@ -618,14 +621,24 @@ export const MAX_SAFE_CONTEXT_TOKENS = 2_097_152;
 
 /**
  * True when the model is in the GPT-5.6 or GPT-6 family and supports extended 1M context in Codex.
- * Matching the bare GPT-6 family prefix also covers GPT-6 tiers added later,
- * while legacy GPT-5.3/5.5 Codex ids still fall back to the 272K service window.
+ * The dotted minor is pinned to the only shipped one (`gpt-6.1`) so a future
+ * `gpt-6.2` cannot inherit a context ceiling the Codex service never promised.
  */
 export function isCodexExtendedContextModel(model: string): boolean {
     if (!model) return false;
     const lower = model.toLowerCase().replace(/\s*\([^)]*\)$/i, '');
-    return /(?:^|\/)(?:gpt-6|gpt-5\.6)(?:-|$)/i.test(lower);
+    return /(?:^|\/)(?:gpt-6(?:[.]1)?|gpt-5\.6)(?:-|$)/i.test(lower);
 }
+
+/**
+ * Codex service ceilings that are lower than the same model's public API
+ * window. The Codex catalog publishes `max_context_window` per slug; GPT-6.1
+ * Sol is 872,000 there while the API advertises 1,050,000, so the subscription
+ * channel must not offer a limit the service would reject.
+ */
+export const CODEX_CHATGPT_MAX_CONTEXT_TOKENS: Record<string, number> = {
+    'gpt-6.1-sol': 872_000,
+};
 
 export function clampConfiguredContextTokens(
     providerId: string,
@@ -641,7 +654,11 @@ export function clampConfiguredContextTokens(
 
     // GPT-5.6 and GPT-6 models in Codex default to 272K, but support user configuration up to 1M (or model ceiling).
     if (isCodexExtendedContextModel(model)) {
-        const extendedLimit = getModelContextTokens(model, 'openai') || 1_050_000;
+        // Normalize like isCodexExtendedContextModel: case, `(tag)` suffix and
+        // an `openai/` namespace must all resolve to the same known slug.
+        const slug = model.toLowerCase().replace(/\s*\([^)]*\)$/i, '').split('/').pop() ?? '';
+        const ceiling = CODEX_CHATGPT_MAX_CONTEXT_TOKENS[slug];
+        const extendedLimit = ceiling ?? (getModelContextTokens(model, 'openai') || 1_050_000);
         return Math.min(bounded, extendedLimit);
     }
 

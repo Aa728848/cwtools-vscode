@@ -56,6 +56,7 @@ export const BUILTIN_PROVIDERS: Record<string, AIProviderConfig> = {
         defaultModel: 'gpt-6-astra',
         models: [
             'gpt-6-astra',
+            'gpt-6.1-sol',
             'gpt-6-sol',
             'gpt-6-luna',
             'gpt-5.6',

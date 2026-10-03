@@ -8192,12 +8192,18 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         );
     }
 
+    // Mirrors isCodexExtendedContextModel in the extension host; the dotted minor
+    // is pinned to the shipped `gpt-6.1` id.
     function isCodexExtendedModel(model: string): boolean {
-        return /(?:^|\/)(?:gpt-6|gpt-5\.6)(?:-|$)/i.test((model || '').trim());
+        return /(?:^|\/)(?:gpt-6(?:[.]1)?|gpt-5\.6)(?:-|$)/i.test((model || '').trim());
     }
 
     function updateContextControls(providerId: string, model: string) {
         const isExtended = providerId === 'codex-chatgpt' && isCodexExtendedModel(model);
+        // The Codex catalog caps GPT-6.1 Sol at 872K, so the preset must carry the
+        // per-model ceiling instead of a fixed 1M value.
+        const modelSlug = model.trim().toLowerCase().replace(/\s*\([^)]*\)$/, '').split('/').pop() ?? '';
+        const extendedMax = modelSlug === 'gpt-6.1-sol' ? 872_000 : 1_050_000;
         const presetGroup = document.getElementById('codexContextPresetGroup');
         const hintEl = document.getElementById('settingsCtxHint');
         if (presetGroup) {
@@ -8205,10 +8211,15 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         }
         if (hintEl) {
             if (isExtended) {
-                hintEl.textContent = tr(
-                    'Codex subscription defaults to 272K; the GPT-6 (Astra/Sol/Luna) and GPT-5.6 series support up to 1M (1,050,000 tokens).',
-                    'Codex 订阅渠道默认为 272K；GPT-6（Astra/Sol/Luna）及 GPT-5.6 系列支持调整为最高 1M (1,050,000 tokens)。'
-                );
+                hintEl.textContent = extendedMax === 872_000
+                    ? tr(
+                        'Codex subscription defaults to 272K; GPT-6.1 Sol supports up to 872K (872,000 tokens).',
+                        'Codex 订阅渠道默认为 272K；GPT-6.1 Sol 支持调整为最高 872K (872,000 tokens)。'
+                    )
+                    : tr(
+                        'Codex subscription defaults to 272K; the GPT-6 (Astra/Sol/Luna) and GPT-5.6 series support up to 1M (1,050,000 tokens).',
+                        'Codex 订阅渠道默认为 272K；GPT-6（Astra/Sol/Luna）及 GPT-5.6 系列支持调整为最高 1M (1,050,000 tokens)。'
+                    );
             } else {
                 hintEl.textContent = tr(
                     'Set a custom context limit, or use 0 for the provider default.',
@@ -8230,12 +8241,20 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
             });
         }
         const btn1m = document.getElementById('codexCtx1mBtn');
+        if (btn1m) {
+            // Reassigned on every update: the listener below is bound only once,
+            // so it must read the current model's ceiling from the dataset at
+            // click time instead of closing over a stale value.
+            btn1m.dataset.contextTokens = String(extendedMax);
+            btn1m.textContent = extendedMax === 872_000 ? '872K' : '1M';
+        }
         if (btn1m && !(btn1m as any).__bound) {
             (btn1m as any).__bound = true;
             btn1m.addEventListener('click', () => {
+                const target = btn1m.dataset.contextTokens;
                 const ctxInput = document.getElementById('settingsCtx') as HTMLInputElement | null;
-                if (ctxInput) {
-                    ctxInput.value = '1050000';
+                if (ctxInput && target) {
+                    ctxInput.value = target;
                     ctxInput.dispatchEvent(new Event('input'));
                     refreshSettingsDraftStatus();
                     refreshSettingsOverview();

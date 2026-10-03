@@ -91,6 +91,7 @@ export function getCurrentModelPricing(
  *  - DeepSeek V4 Pro: cache hit ≈ 3.3% of full price under peak/off-peak pricing
  *  - Claude:       cache_read = 10% of input price → 0.1
  *  - OpenAI GPT-6/GPT-5.6: cached = 10% of input price → 0.1
+ *  - OpenAI GPT-6.1 Sol: cached = 5% of input price → 0.05 ($0.10 of $2)
  *  - OpenAI GPT (older): cached = 50% of input price → 0.5
  *  - Gemini:       current text models cache input at 10% → 0.1
  *  - Qwen:         implicit cache = 20% of input price → 0.2
@@ -133,6 +134,8 @@ export function getCacheDiscountFactor(model: string, providerId?: string): numb
     // Anthropic Claude
     if (lower.includes('claude')) return 0.1;
     // OpenAI GPT series
+    // GPT-6.1 Sol is priced at 5% ($0.10 of $2), unlike the rest of the family.
+    if (lower.includes('gpt-6.1-sol')) return 0.05;
     if (lower.includes('gpt-6-')) return 0.1; // GPT-6 Astra/Sol/Luna cached input = 10% of input
     if (lower.startsWith('gpt-5.6')) return 0.1; // Sol/Terra/Luna all cache at 10% (BenchLM 2026-08)
     if (lower.includes('gpt-') || lower.includes('gpt5')) return 0.5;

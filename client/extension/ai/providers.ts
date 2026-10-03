@@ -231,7 +231,10 @@ export function getEffectiveModel(providerId: string, userModel?: string): strin
 
 /** Apply provider-enforced sampling constraints while preserving normal user overrides. */
 export function getEffectiveTemperature(model: string, requested?: number): number | undefined {
-    if (isGpt6AstraModel(model)) return undefined;
+    // OpenAI's GPT-6 guide: when reasoning effort is not `none`, drop
+    // `temperature`/`top_p`/`top_logprobs`. Astra and GPT-6.1 Sol have no `none`
+    // effort, so sampling is unsupported for them in every request.
+    if (isGpt6NoNoneEffortModel(model)) return undefined;
     const lower = model.toLowerCase();
     if (lower.includes('kimi-k2.7-code') || lower.includes('kimi-k3')
         || lower === 'k3' || lower.includes('kimi-for-coding')) return 1.0;
@@ -293,9 +296,9 @@ export function getEffectiveReasoningEffort(
 ): ChatCompletionRequest['reasoning_effort'] {
     if (apiFormat !== 'openai-responses') return requested;
     if (isGpt6ReasoningFamilyModel(model)) {
-        // GPT-6 has no `minimal` effort; Astra additionally rejects `none`.
+        // GPT-6 has no `minimal` effort; Astra and GPT-6.1 additionally reject `none`.
         if (requested === 'minimal') return 'low';
-        if (isGpt6AstraModel(model) && requested === 'none') return 'low';
+        if (isGpt6NoNoneEffortModel(model) && requested === 'none') return 'low';
         return requested;
     }
     return requested === 'max' ? 'xhigh' : requested;
@@ -315,12 +318,22 @@ function reasoningCapability(
     return { kind, options, defaultValue };
 }
 
-function openAiReasoningCapability(model: string): ModelReasoningCapability {
+function openAiReasoningCapability(model: string, providerId?: string): ModelReasoningCapability {
     if (isGpt6ReasoningFamilyModel(model)) {
-        // Astra rejects `none`; Sol and Luna accept it along with `max`.
-        return isGpt6AstraModel(model)
-            ? reasoningCapability('effort', ['low', 'medium', 'high', 'xhigh', 'max'], 'high')
-            : reasoningCapability('effort', ['none', 'low', 'medium', 'high', 'xhigh', 'max'], 'high');
+        // Astra and GPT-6.1 Sol reject `none`; Sol and Luna accept it with `max`.
+        if (!isGpt6NoNoneEffortModel(model)) {
+            return reasoningCapability('effort', ['none', 'low', 'medium', 'high', 'xhigh', 'max'], 'high');
+        }
+        if (!isGpt6DotOneModel(model)) {
+            return reasoningCapability('effort', ['low', 'medium', 'high', 'xhigh', 'max'], 'high');
+        }
+        // GPT-6.1 Sol defaults to `medium` on the API but to `low` in the Codex
+        // service catalog, so the two channels resolve different defaults.
+        return reasoningCapability(
+            'effort',
+            ['low', 'medium', 'high', 'xhigh', 'max'],
+            providerId?.toLowerCase() === 'codex-chatgpt' ? 'low' : 'medium',
+        );
     }
     const modelId = modelName(model).split('/').pop() ?? '';
     if (!/^(?:gpt-5|o[134](?:-|$))/.test(modelId)) return NO_REASONING;
@@ -384,7 +397,7 @@ const DEEPSEEK_V4_FAMILY_MODEL_RE = /(?:deepseek-v4|deepseek-flash)/;
 function upstreamGatewayCapability(providerId: string, model: string): ModelReasoningCapability | undefined {
     const lower = modelName(model);
     if (lower.includes('openai/') || isGpt6ReasoningFamilyModel(lower) || /(?:^|\/)(?:gpt-5|o[134](?:-|$))/.test(lower)) {
-        return openAiReasoningCapability(lower);
+        return openAiReasoningCapability(lower, providerId);
     }
     if (lower.includes('anthropic/') || lower.includes('claude-')) {
         return claudeReasoningCapability(lower);
@@ -477,7 +490,7 @@ export function getModelReasoningCapability(
     }
     if (provider === 'openai' || provider === 'codex-chatgpt'
         || (apiFormat === 'openai-responses' && (isGpt6ReasoningFamilyModel(lower) || /(?:^|\/)(?:gpt-5|o[134](?:-|$))/.test(lower)))) {
-        return openAiReasoningCapability(lower);
+        return openAiReasoningCapability(lower, providerId);
     }
     if (provider === 'claude' || provider === 'commandcode-messages') return claudeReasoningCapability(lower);
     if (provider === 'google') return geminiReasoningCapability(lower);
@@ -610,18 +623,32 @@ function modelName(model: string): string {
     return model.toLowerCase().replace(/\s*\([^)]*\)$/i, '');
 }
 
-function isGpt6AstraModel(model: string): boolean {
-    return /(?:^|\/)gpt-6-astra(?:-|$)/.test(modelName(model));
+/**
+ * GPT-6 tiers that reject the `none` reasoning effort. OpenAI documents that
+ * GPT-6 Astra and GPT-6.1 Sol do not support `none`, while GPT-6 Sol/Luna do.
+ * The list enumerates documented ids only, so an unreleased tier never inherits
+ * a contract nobody published.
+ */
+function isGpt6NoNoneEffortModel(model: string): boolean {
+    return /(?:^|\/)(?:gpt-6-astra|gpt-6[.]1-sol)(?:-|$)/.test(modelName(model));
 }
 
-/** GPT-6 reasoning tiers that control depth through the Responses `reasoning.effort` field. */
+/** GPT-6.1 Sol, whose documented default reasoning effort is `medium`. */
+function isGpt6DotOneModel(model: string): boolean {
+    return /(?:^|\/)gpt-6[.]1-sol(?:-|$)/.test(modelName(model));
+}
+
+/**
+ * GPT-6 reasoning tiers that control depth through the Responses
+ * `reasoning.effort` field.
+ */
 function isGpt6ReasoningFamilyModel(model: string): boolean {
-    return /(?:^|\/)gpt-6-(?:astra|sol|luna)(?:-|$)/.test(modelName(model));
+    return /(?:^|\/)(?:gpt-6-(?:astra|sol|luna)|gpt-6[.]1-sol)(?:-|$)/.test(modelName(model));
 }
 
 const QWEN_THINKING_MODEL_RE = /(?:^|\/)qwen3(?:[.-]|$)|(?:^|\/)qwen(?:-max|-plus|-flash|-turbo|-long)(?:[-.]|$)/;
 
-const KNOWN_REASONING_MODEL_RE = /(?:^|\/)(?:gpt-5|gpt-6-(?:astra|sol|luna)|o[134](?:-|$)|claude-|deepseek-(?:r1|v3|v4|reasoner|flash)|glm-(?:4[.]?[5-9]|5)|qwen3|qwq|gemini-(?:2[.]5|3)|kimi-k2|kimi-k3|minimax-m2|minimax-m3|mimo-v2|gpt-oss)/;
+const KNOWN_REASONING_MODEL_RE = /(?:^|\/)(?:gpt-5|gpt-6-(?:astra|sol|luna)|gpt-6[.]1-sol|o[134](?:-|$)|claude-|deepseek-(?:r1|v3|v4|reasoner|flash)|glm-(?:4[.]?[5-9]|5)|qwen3|qwq|gemini-(?:2[.]5|3)|kimi-k2|kimi-k3|minimax-m2|minimax-m3|mimo-v2|gpt-oss)/;
 
 function isQwenThinkingModel(model: string): boolean {
     return QWEN_THINKING_MODEL_RE.test(model);
@@ -760,7 +787,8 @@ export function getReducedThinkingParams(
             ? { extraBody: { reasoning: { enabled: false } } }
             : undefined;
     }
-    if (isGpt6AstraModel(model)) return { reasoningEffort: 'low' };
+    // Astra and GPT-6.1 Sol cannot disable reasoning, so reduction bottoms out at `low`.
+    if (isGpt6NoNoneEffortModel(model)) return { reasoningEffort: 'low' };
     if (lowerProvider === 'together' && isKnownReasoningModel(lowerModel)) {
         return { extraBody: { reasoning: { enabled: false } } };
     }

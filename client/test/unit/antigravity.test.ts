@@ -4,7 +4,7 @@ import {
     ANTIGRAVITY_SECRET_KEY, ANTIGRAVITY_TOKEN_URL, AntigravityOAuthService,
     parseAntigravityModels, parseAntigravityQuota,
 } from '../../extension/ai/antigravity/oauthService';
-import { ANTIGRAVITY_ENDPOINTS, antigravityRuntimeModel } from '../../extension/ai/antigravity/models';
+import { ANTIGRAVITY_ENDPOINTS, ANTIGRAVITY_MODELS, antigravityDisplayModel, antigravityRuntimeModel } from '../../extension/ai/antigravity/models';
 import { buildAntigravityRequest, callAntigravity, consumeAntigravityResponse } from '../../extension/ai/antigravity/completion';
 import { AntigravityApiError, postAntigravity } from '../../extension/ai/antigravity/api';
 import { buildAntigravityAccountHtml, isAntigravityAccountStatus } from '../../webview/chat/antigravityAccount';
@@ -206,6 +206,17 @@ describe('Antigravity OAuth and account boundary', () => {
         expect(antigravityRuntimeModel('gemini-3.1-pro', 'low')).to.equal('gemini-3.1-pro-low');
     });
 
+    it('keeps discovered Claude 5.5 ids and any unknown backend suffix verbatim', () => {
+        const discovered = ['claude-opus-5-5', 'claude-sonnet-5-5', 'claude-opus-5-5-thinking', 'chat_claude-opus-5-5', 'claude-sonnet-5-5-internal'];
+        expect(parseAntigravityModels({ models: Object.fromEntries(
+            discovered.map(id => [id, id === 'claude-sonnet-5-5-internal' ? { isInternal: true } : {}]),
+        ) })).to.deep.equal(['claude-opus-5-5', 'claude-opus-5-5-thinking', 'claude-sonnet-5-5']);
+        for (const model of ['claude-opus-5-5', 'claude-sonnet-5-5', 'claude-opus-5-5-thinking']) {
+            expect(antigravityDisplayModel(model)).to.equal(model);
+            expect(antigravityRuntimeModel(model, 'high')).to.equal(model);
+        }
+    });
+
     it('rejects malformed credentials and does not invent a project', async () => {
         const secrets = new Secrets();
         await secrets.store(ANTIGRAVITY_SECRET_KEY, '{"accessToken":42,"refreshToken":{},"expiresAt":0}');
@@ -326,6 +337,32 @@ describe('Antigravity completion transport', () => {
         expect(body.request).to.deep.include({ generationConfig: { maxOutputTokens: 65_536, thinkingConfig: { thinkingLevel: 'HIGH', includeThoughts: true } } });
         const limited = buildAntigravityRequest({ model: 'gemini-2.5-pro', messages: [], max_tokens: 2048 }, { contents: [] }, 'project', 'high');
         expect(limited.request).to.deep.include({ generationConfig: { maxOutputTokens: 2048, thinkingConfig: { thinkingBudget: 2047, includeThoughts: true } } });
+    });
+
+    it('offers Claude 5.5 in the signed-out fallback catalog and passes its runtime id through', () => {
+        // Plan-gated per account; the 4.6 and gpt-oss entries stay until Google retires them.
+        expect(ANTIGRAVITY_MODELS).to.include.members(['claude-opus-5-5', 'claude-sonnet-5-5', 'claude-opus-4-6', 'claude-sonnet-4-6', 'gpt-oss-120b']);
+        for (const model of ['claude-opus-5-5', 'claude-sonnet-5-5']) {
+            for (const effort of ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'] as const) {
+                expect(antigravityRuntimeModel(model, effort)).to.equal(model);
+            }
+            const body = buildAntigravityRequest({ model, messages: [], max_tokens: 200_000 }, { contents: [] }, 'project', 'high');
+            expect(body.model).to.equal(model);
+            expect(body.request).to.deep.include({ generationConfig: { maxOutputTokens: 64_000 } });
+        }
+    });
+
+    it('preserves the existing gateway-shaped forced tool choice for Claude 5.5', () => {
+        // Pins current behavior only: the gateway accepts Gemini-shaped functionCallingConfig, and a forced
+        // choice must never be downgraded to AUTO behind the user's back.
+        const request = {
+            model: 'claude-opus-5-5', messages: [],
+            tools: [{ type: 'function' as const, function: { name: 'read_file', description: 'Read', parameters: { type: 'object', properties: { path: { type: 'string' } } } } }],
+            tool_choice: { type: 'function' as const, function: { name: 'read_file' } },
+        };
+        expect(buildAntigravityRequest(request, { contents: [] }, 'project', 'high').request).to.deep.include({
+            toolConfig: { functionCallingConfig: { mode: 'ANY', allowedFunctionNames: ['read_file'] } },
+        });
     });
 
     it('parses split wrapped SSE, preserves signed tool turns, and counts thinking/cache usage', async () => {

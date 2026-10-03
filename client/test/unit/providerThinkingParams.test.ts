@@ -87,6 +87,32 @@ describe('provider thinking params', () => {
         }
     });
 
+    it('gives GPT-6.1 Sol the Astra ladder with per-channel defaults', () => {
+        const { getModelReasoningCapability, getThinkingParams, getReducedThinkingParams } = loadProviders();
+        const ladder = ['low', 'medium', 'high', 'xhigh', 'max'];
+        // API documents `medium`; the Codex service catalog documents `low`.
+        expect(getModelReasoningCapability('openai', 'gpt-6.1-sol')).to.deep.equal({
+            kind: 'effort', options: ladder, defaultValue: 'medium',
+        });
+        expect(getModelReasoningCapability('codex-chatgpt', 'gpt-6.1-sol')).to.deep.equal({
+            kind: 'effort', options: ladder, defaultValue: 'low',
+        });
+        for (const providerId of ['openai', 'codex-chatgpt']) {
+            const fallback = providerId === 'codex-chatgpt' ? 'low' : 'medium';
+            expect(getThinkingParams('gpt-6.1-sol', providerId, 'openai-responses', 'max'), providerId)
+                .to.deep.equal({ reasoningEffort: 'max' });
+            // `minimal` is absent from the GPT-6.1 ladder and normalizes down to `low`.
+            expect(getThinkingParams('gpt-6.1-sol', providerId, 'openai-responses', 'minimal'), providerId)
+                .to.deep.equal({ reasoningEffort: 'low' });
+            // `none` is also unsupported and has no ladder mapping, so the request
+            // falls back to the channel's documented default effort.
+            expect(getThinkingParams('gpt-6.1-sol', providerId, 'openai-responses', 'none'), providerId)
+                .to.deep.equal({ reasoningEffort: fallback });
+            expect(getReducedThinkingParams('gpt-6.1-sol', providerId, 'openai-responses'), providerId)
+                .to.deep.equal({ reasoningEffort: 'low' });
+        }
+    });
+
     it('preserves Astra max for namespaced and custom API model IDs', () => {
         const { getThinkingParams } = loadProviders();
         expect(getThinkingParams('openai/gpt-6-astra', 'custom', 'openai-responses', 'max'))

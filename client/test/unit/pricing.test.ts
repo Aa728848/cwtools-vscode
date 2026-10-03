@@ -10,6 +10,16 @@ describe('getModelPricing', () => {
         expect(getModelPricing('claude-sonnet-4-6')).to.deep.equal([20.46, 102.30]);
     });
 
+    it('prices GPT-6.1 Sol at the official $2/$10 rate with a 5% cached-input discount', () => {
+        for (const model of ['gpt-6.1-sol', 'openai/gpt-6.1-sol']) {
+            expect(getModelPricing(model, 'openai'), model).to.deep.equal([13.64, 68.20]);
+            expect(getCacheDiscountFactor(model, 'openai'), model).to.equal(0.05);
+        }
+        // The rest of the GPT-6 family keeps the 10% cached-input rate.
+        expect(getCacheDiscountFactor('gpt-6-sol', 'openai')).to.equal(0.1);
+        expect(getCacheDiscountFactor('gpt-6-astra', 'openai')).to.equal(0.1);
+    });
+
     it('prices the GPT-6 Sol and Luna API IDs from the official list', () => {
         for (const model of ['gpt-6-sol', 'openai/gpt-6-sol']) {
             expect(getModelPricing(model, 'openai')).to.deep.equal([13.64, 68.20]);

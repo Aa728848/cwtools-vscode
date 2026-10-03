@@ -3,6 +3,7 @@ import {
     isModelVisionCapable,
     isModelFIMCapable,
     clampConfiguredContextTokens,
+    isCodexExtendedContextModel,
     getModelContextTokens,
     getModelOutputTokens,
     getProvider,
@@ -204,6 +205,7 @@ describe('isModelVisionCapable', () => {
 
     it('returns true for every GPT-6 tier', () => {
         expect(isModelVisionCapable('gpt-6-astra')).to.equal(true);
+        expect(isModelVisionCapable('gpt-6.1-sol')).to.equal(true);
         expect(isModelVisionCapable('gpt-6-sol')).to.equal(true);
         expect(isModelVisionCapable('gpt-6-luna')).to.equal(true);
         expect(isModelVisionCapable('openai/gpt-6-sol')).to.equal(true);
@@ -670,9 +672,30 @@ describe('getEffectiveReasoningEffort', () => {
         expect(getEffectiveReasoningEffort('gpt-6-astra', 'max', 'openai-responses')).to.equal('max');
         expect(getEffectiveReasoningEffort('gpt-6-astra', 'none', 'openai-responses')).to.equal('low');
         // GPT-6 has no `minimal` effort, so it must never reach the wire.
-        for (const model of ['gpt-6-astra', 'gpt-6-sol', 'gpt-6-luna']) {
+        for (const model of ['gpt-6-astra', 'gpt-6.1-sol', 'gpt-6-sol', 'gpt-6-luna']) {
             expect(getEffectiveReasoningEffort(model, 'minimal', 'openai-responses'), model).to.equal('low');
         }
+        expect(getEffectiveReasoningEffort('gpt-6.1-sol', 'max', 'openai-responses')).to.equal('max');
+        expect(getEffectiveReasoningEffort('gpt-6.1-sol', 'none', 'openai-responses')).to.equal('low');
+    });
+
+    it('does not extend documented GPT-6 contracts to unreleased dotted tiers', () => {
+        expect(isCodexExtendedContextModel('gpt-6.1-sol')).to.equal(true);
+        expect(isCodexExtendedContextModel('gpt-6.2-sol')).to.equal(false);
+        expect(getEffectiveReasoningEffort('gpt-6.2-sol', 'max', 'openai-responses')).to.equal('xhigh');
+    });
+
+    it('caps GPT-6.1 Sol at the Codex service ceiling while the API keeps 1,050,000', () => {
+        expect(getModelContextTokens('gpt-6.1-sol', 'openai')).to.equal(1050000);
+        expect(getModelContextTokens('gpt-6.1-sol', 'codex-chatgpt')).to.equal(272000);
+        // Codex catalog max_context_window is 872,000, so 1M must not be offered.
+        expect(clampConfiguredContextTokens('codex-chatgpt', 'gpt-6.1-sol', 1050000)).to.equal(872000);
+        expect(clampConfiguredContextTokens('codex-chatgpt', 'gpt-6.1-sol', 872000)).to.equal(872000);
+        expect(clampConfiguredContextTokens('codex-chatgpt', 'gpt-6.1-sol', 272000)).to.equal(272000);
+        // The direct API channel is unaffected by the Codex ceiling.
+        expect(clampConfiguredContextTokens('openai', 'gpt-6.1-sol', 1050000)).to.equal(1050000);
+        // Older GPT-6 tiers keep their existing 1M policy.
+        expect(clampConfiguredContextTokens('codex-chatgpt', 'gpt-6-astra', 1050000)).to.equal(1050000);
     });
 
     it('does not alter other protocols or supported values', () => {
@@ -1060,6 +1083,7 @@ describe('BUILTIN_PROVIDERS', () => {
     it('uses current direct-provider defaults and supported model IDs', () => {
         expect(BUILTIN_PROVIDERS['openai']!.models).to.include.members([
             'gpt-6-astra',
+            'gpt-6.1-sol',
             'gpt-6-sol',
             'gpt-6-luna',
             'gpt-5.6',

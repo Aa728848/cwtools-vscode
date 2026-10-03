@@ -77,9 +77,11 @@ Open `AI: Open Chat Panel` from the Command Palette. The composer lets you keep 
 
 Eligible Build and Utility stages can use programmable `run_code`: a stage-specific typed SDK lets the model branch on Paradox/CWTools or general-tool results, filter intermediate evidence, and run bounded independent reads concurrently. Programs execute in a QuickJS/WASM guest without Node or VS Code authority. Every nested tool call still passes the normal mode/domain/stage, permission, policy, scheduler, and write-queue gates; only explicit logs and the final return value enter model context.
 
-The ChatGPT-subscription-compatible Codex provider uses a browser sign-in flow and the extension's own agent runtime. It is an integration with an upstream compatibility endpoint, not a public stable API, so upstream changes can require extension updates.
+The ChatGPT-subscription-compatible Codex provider uses a browser sign-in flow and the extension's own agent runtime. It is an integration with an upstream compatibility endpoint, not a public stable API, so upstream changes can require extension updates. The Codex picker uses a built-in model catalog, not an account entitlement list; OpenAI API and Codex subscription availability can differ.
 
 Antigravity is also available in AI Settings. Select **Antigravity (Google OAuth)**, sign in with Google, then refresh the account to load its models and quota. The extension stores OAuth tokens in VS Code SecretStorage and supports streaming text, image input, and tool calls through Antigravity's Gemini transport. Complete account setup in Antigravity first. This provider uses fixed upstream compatibility endpoints; API keys, custom endpoints, and utility calls are unavailable.
+
+According to the [Antigravity model availability table](https://antigravity.google/docs/models), Claude Opus 5.5 and Sonnet 5.5 (Thinking) require Google AI Ultra or a non-trial Google AI Pro subscription. Claude 4.6 and GPT-OSS remain available to eligible accounts until their announced removal on November 2, 2026. Refresh the account after a plan change; the built-in model list does not bypass upstream access checks.
 
 The chat catalog combines Gemini 3.1 Pro runtime aliases into `gemini-3.1-pro` and hides editor-only `tab_` models. The Pro reasoning setting still selects the runtime model. For inline completion, enable it in AI Settings and select Antigravity with `tab_flash_lite_preview`. The extension adapts native next-edit output to insertion-only ghost text. Run **Stellaris AI: Jump to Next Edit (Antigravity)** from the Command Palette to use `tab_jump_flash_lite_preview` without applying its predicted edit. See [setup and protocol details](docs/antigravity-tab-protocol.md).
 
@@ -221,9 +223,11 @@ SRA_Aura_5_1:0 "§Y防御性光环§!\n对盟友舰船效果：\n $MOD_SHIP_SHIE
 
 符合条件的 Build 与 Utility 阶段可以使用可编程 `run_code`：模型通过当前阶段的类型化 SDK，按 Paradox/CWTools 或通用工具结果分支、筛选中间证据，并对有界的独立读取并发执行。程序运行在不具备 Node 或 VS Code 权限的 QuickJS/WASM guest 中；每个内部工具调用仍经过 mode/domain/stage、权限、策略、调度和写队列检查，只有显式日志与最终返回值进入模型上下文。
 
-兼容 ChatGPT 订阅的 Codex Provider 通过浏览器登录，并使用插件自己的 Agent 运行时。它依赖上游兼容端点，不属于公开稳定 API；如果上游流程变化，插件可能需要同步更新。
+兼容 ChatGPT 订阅的 Codex Provider 通过浏览器登录，并使用插件自己的 Agent 运行时。它依赖上游兼容端点，不属于公开稳定 API；如果上游流程变化，插件可能需要同步更新。Codex 选择器使用内置模型目录，不代表账户已获授权；OpenAI API 与 Codex 订阅的可用模型可能不同。
 
 AI 设置也支持 Antigravity。选择 **Antigravity (Google OAuth)**，使用 Google 登录后刷新账户，即可加载模型和额度。扩展将 OAuth Token 存入 VS Code SecretStorage，通过 Antigravity 的 Gemini 协议支持流式文本、图片输入和工具调用。请先在 Antigravity 中完成账户设置。该供应商使用固定的上游兼容端点，不提供 API Key、自定义端点或辅助调用。
+
+根据 [Antigravity 官方模型可用性表](https://antigravity.google/docs/models)，Claude Opus 5.5 和 Sonnet 5.5（Thinking）需要 Google AI Ultra 或非试用的 Google AI Pro 订阅。Claude 4.6 和 GPT-OSS 在官方公告的 2026 年 11 月 2 日下线前仍向符合条件的账户开放。变更套餐后请刷新账户；内置模型列表不会绕过上游权限检查。
 
 聊天模型列表将 Gemini 3.1 Pro 的后台别名合并为 `gemini-3.1-pro`，隐藏仅供编辑器使用的 `tab_` 模型；推理强度仍决定实际后台模型。在 AI 设置中启用行内补全，选择 Antigravity 和 `tab_flash_lite_preview`，即可将原生下一次编辑输出适配为光标处的灰字补全。在命令面板运行 **Stellaris AI：跳转到下一处编辑（Antigravity）**，可使用 `tab_jump_flash_lite_preview` 定位下一处编辑，只移动光标。详见[配置与协议说明](docs/antigravity-tab-protocol.md)。
 

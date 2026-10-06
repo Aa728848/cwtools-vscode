@@ -186,5 +186,10 @@ Antigravity 也改为复用同一工厂，删掉了它自己那份等价实现�
   读取上选择不伪造第一方身份。属产品决策，需用户拍板。**WorkBuddy 的签到已实现**（用诚实请求头）。
 - 额度与图片预算是**按线路**的，不是一条通用上限：各线路的额度互不通用，一刀切会拒绝掉
   其它线路上的合法请求（见 `requestImageBudget.ts` / `subscriptionFailure.ts`）。
+- 线路的**身份键必须覆盖它的每一条来源**：WorkBuddy 从令牌 claim 回填 uid（资料端点是
+  best-effort），Kimi 同样只有令牌里的身份。身份键缺失时 seed 行与登录行无法互认，一个账号
+  会被存成两行。
+- 单次使用的 refresh token 需要**按 token 单飞 + 拒绝墓碑**（MiniMax）：并发轮换会让除第一个
+  之外全部拿到 `invalid_grant`，读起来像账号被吊销。
 - **仍未做的**：真机验证。所有线路的 OAuth 流程与多账号轮转都由单元测试（mock transport）
   锁定契约，尚未在真实订阅账号上端到端跑过。

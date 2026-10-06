@@ -437,6 +437,14 @@ ${stylesheetLinks}
                         <button class="detect-btn" id="kimiLogoutBtn" style="margin-left:4px; padding:0 8px; width:auto; border-radius:4px; display:none">${svgIcon('trash')}${t('Sign out', '退出账号')}</button>
                     </div>
                     <div class="settings-hint">${t('Signs in with the Kimi Code subscription (device code). The pasted API key above is used only when no subscription session is stored.', '使用 Kimi Code 订阅登录（设备码）。仅当未保存订阅会话时才使用上方粘贴的 API Key。')}</div>
+                    <div class="settings-group" style="margin-top:6px">
+                        <label class="settings-label" for="kimiRegionSelect">${t('Sign-in region', '登录区域')}</label>
+                        <select class="settings-select" id="kimiRegionSelect">
+                            <option value="mainland-cn">${t('China (auth.kimi.com)', '国区（auth.kimi.com）')}</option>
+                            <option value="global">${t('Global (auth.kimi.ai)', '国际区（auth.kimi.ai）')}</option>
+                        </select>
+                        <div class="settings-hint">${t('The OAuth host is per region: a global account must authorize against the .ai properties.', 'OAuth 主机按区域划分：国际区账号必须在 .ai 属性上完成授权。')}</div>
+                    </div>
                 </details>
                 <details class="settings-group settings-account" id="commandcodeAccountGroup" style="display:none" open>
                     <summary class="settings-account-summary"><span>${svgIcon('key')} ${t('Command Code account & quota', 'Command Code 账户与额度')}</span></summary>

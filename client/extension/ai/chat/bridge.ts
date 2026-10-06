@@ -128,7 +128,7 @@ export async function routeWebviewMessage(
             await provider.settingsManager.loginCommandCode(sourceSurface);
             break;
         case 'kimiLogin':
-            await provider.settingsManager.loginKimiCode(sourceSurface);
+            await provider.settingsManager.loginKimiCode(msg.region ?? 'mainland-cn', sourceSurface);
             break;
         case 'kimiLogout':
             await provider.settingsManager.logoutKimiCode(sourceSurface);

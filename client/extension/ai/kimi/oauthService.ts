@@ -322,18 +322,25 @@ export class KimiCodeOAuthService {
 
     constructor(private readonly options: KimiCodeOAuthOptions) {}
 
-    async startLogin(): Promise<KimiLogin> {
+    /**
+     * Start a sign-in.
+     *
+     * The OAuth host is per-REGION: a global account must authorize against the .ai
+     * properties, otherwise the code it receives is never accepted. An explicit region
+     * wins over the configured default so the card can sign into either one.
+     */
+    async startLogin(region: 'mainland-cn' | 'global' = this.options.region ?? 'mainland-cn'): Promise<KimiLogin> {
         this.activeCancel?.(new Error(aiText(
             'A newer Kimi Code sign-in was started.',
             '已开始新的 Kimi Code 登录。',
         )));
 
         const fetchFn = this.options.fetchFn ?? fetch;
-        const region = this.options.region ?? 'mainland-cn';
+        const activeRegion = region;
         const deviceId = await readOrCreateKimiDeviceId(this.options.storageDir);
         const authorization = await requestKimiDeviceAuthorization({
             fetchFn,
-            host: KIMI_REGION_OAUTH_HOSTS[region],
+            host: KIMI_REGION_OAUTH_HOSTS[activeRegion],
             deviceId,
         });
 
@@ -395,7 +402,7 @@ export class KimiCodeOAuthService {
                         // 不是终局：用一份新的设备码重新开始。
                         current = await requestKimiDeviceAuthorization({
                             fetchFn,
-                            host: KIMI_REGION_OAUTH_HOSTS[region],
+                            host: KIMI_REGION_OAUTH_HOSTS[activeRegion],
                             deviceId,
                         });
                         this.options.onUserCode?.(current);

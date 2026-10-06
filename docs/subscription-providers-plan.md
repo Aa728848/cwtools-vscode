@@ -358,12 +358,12 @@ commandcode（静态 API Key）。
 
 **仍未做（按影响排序）：**
 
-- **MED**　kimi 国际区（`.ai`）不可达：登录固定走国区主机，配置端点也不参与解析。
-- **MED**　MiniMax 轮换竞争：refresh token 单次使用，但同进程并发续期没有去重、没有墓碑、
-  拒绝后不回读。
-- **MED**　Claude 工具名词表（出站改名 + 入站回映射）与逐请求碰撞检测。
-- **MED**　Command Code ZDR 路由与 1 token 探活。
-- **LOW**　kimi 视频模态与 `kimi_attach_video` 工具；各线路缓存 TTL 分档、命中最优化与冷缓存提示。
+- **MED**　Claude 工具名词表：出站把工具名改成 Claude Code 的词汇、入站再映射回来，
+  缺失的代价是**部分**供应商工具的原生能力（调度本身不受影响，名字会原样往返）。
+- **MED**　Command Code ZDR 路由（`x-cmd-zdr`）与 1 token 探活。
+- **MED**　MiniMax 轮换拒绝后**不回读**桌面文件：并发下若别人已经轮换过，本进程仍会判死。
+- **LOW**　kimi 视频模态与 `kimi_attach_video` 工具；各线路缓存 TTL 分档、命中最优化与冷缓存提示；
+  额度读取的「上次有效值 / 失败原因」区分。
 
 > MiniMax 的**每日签到**未做，且是**刻意的**：参照实现自己记录（`checkin-gateway.ts:14-23`）
 > 该网关**拒绝**不带 `yy`/`x-timestamp`/`x-signature` 的请求，也就是必须伪造官方客户端的第一方

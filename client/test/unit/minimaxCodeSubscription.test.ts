@@ -30,6 +30,7 @@ import {
     minimaxCodeMessagesUrl,
     minimaxCodeNeedsRefresh,
     pollMinimaxCodeDeviceToken,
+    clearMinimaxCodeRefreshRejection,
     refreshMinimaxCodeCredentials,
     requestMinimaxCodeDeviceAuthorization,
 } from '../../extension/ai/minimaxcode/oauthService';
@@ -322,8 +323,40 @@ describe('MiniMax Code token refresh', () => {
         expect(await rejectionOf(refreshMinimaxCodeCredentials(credentials, {
             fetchFn: async () => json({}, 401),
         }))).to.match(/Sign in again/);
-        expect(await rejectionOf(refreshMinimaxCodeCredentials(credentials, {
+        // A DIFFERENT token: the tombstone is per token, because a refusal of one says
+        // nothing about another. A server fault is transient and must not be final.
+        expect(await rejectionOf(refreshMinimaxCodeCredentials({ ...credentials, refreshToken: 'r2' }, {
             fetchFn: async () => json({}, 500),
         }))).to.match(/token refresh failed \(500\)/);
+    });
+
+    // Spending a refused token again only earns another refusal, and a burst of callers
+    // would each pay a round trip to rediscover the same dead fact.
+    it('refuses to re-spend a token the service already rejected', async () => {
+        let calls = 0;
+        const fetchFn = async () => { calls += 1; return json({}, 401); };
+        await rejectionOf(refreshMinimaxCodeCredentials({ ...credentials, refreshToken: 'r3' }, { fetchFn }));
+        expect(await rejectionOf(refreshMinimaxCodeCredentials({ ...credentials, refreshToken: 'r3' }, { fetchFn })))
+            .to.match(/waiting before retrying/);
+        expect(calls).to.equal(1);
+        clearMinimaxCodeRefreshRejection('r3');
+    });
+
+    // The refresh token is single-use, so two concurrent turns must share one rotation
+    // rather than each spending it and the second earning invalid_grant.
+    it('shares one rotation between concurrent callers', async () => {
+        let calls = 0;
+        const fetchFn = async () => {
+            calls += 1;
+            await new Promise(resolve => setTimeout(resolve, 5));
+            return json({ access_token: 'rotated', expires_in: 3600 });
+        };
+        const results = await Promise.all([
+            refreshMinimaxCodeCredentials({ ...credentials, refreshToken: 'r4' }, { fetchFn }),
+            refreshMinimaxCodeCredentials({ ...credentials, refreshToken: 'r4' }, { fetchFn }),
+        ]);
+        expect(calls).to.equal(1);
+        expect(results[0]!.accessToken).to.equal('rotated');
+        expect(results[1]!.accessToken).to.equal('rotated');
     });
 });

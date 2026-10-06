@@ -2678,7 +2678,7 @@ export type WebViewMessage =
     | { type: 'codexLogout' }
     | { type: 'refreshCommandCodeQuota' }
     | { type: 'commandcodeLogin' }
-    | { type: 'kimiLogin' }
+    | { type: 'kimiLogin'; region?: 'mainland-cn' | 'global' }
     | { type: 'kimiLogout' }
     | { type: 'workbuddyLogin'; region: 'cn' | 'intl' }
     | { type: 'workbuddyRefreshAccounts' }

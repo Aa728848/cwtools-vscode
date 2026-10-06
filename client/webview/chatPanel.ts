@@ -3033,7 +3033,11 @@ let settingsSubscriptionPools: Record<string, any> = {};
         vscode.postMessage({ type: 'commandcodeLogin' });
     });
     bindBtn('kimiLoginBtn', () => {
-        vscode.postMessage({ type: 'kimiLogin' });
+        const region = (document.getElementById('kimiRegionSelect') as HTMLSelectElement | null)?.value;
+        vscode.postMessage({
+            type: 'kimiLogin',
+            region: region === 'global' ? 'global' : 'mainland-cn',
+        });
     });
     bindBtn('kimiLogoutBtn', () => {
         vscode.postMessage({ type: 'kimiLogout' });

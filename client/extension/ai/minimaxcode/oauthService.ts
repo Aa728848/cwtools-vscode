@@ -24,6 +24,7 @@ import {
     MINIMAX_CODE_MESSAGES_PATH,
     MINIMAX_CODE_OAUTH_TIMEOUT_MS,
     MINIMAX_CODE_OAUTH_TOKEN_PATH,
+    MINIMAX_CODE_REJECTED_COOLDOWN_MS,
     MINIMAX_CODE_PKCE_CHALLENGE_METHOD,
     MINIMAX_CODE_PRE_EXPIRY_REFRESH_MS,
     MINIMAX_CODE_PROVIDER_NAME,
@@ -337,9 +338,53 @@ export function minimaxCodeMessagesUrl(region: MinimaxCodeRegion): string {
  * - 轮换按凭据单飞（同进程并发调用共用一次），否则除第一个之外全部拿到 `invalid_grant`；
  * - 桌面端凭据轮换后原子写回原文件，桌面端不会手里剩一个已作废的 token。
  */
+/**
+ * One in-flight rotation per refresh token, shared by every concurrent caller.
+ *
+ * The token is single-use, so spending it twice makes every call but the first fail
+ * with `invalid_grant` - and that reads as a revoked account after what was really a race.
+ * Keyed by the token being rotated rather than globally, so a second account rotates on its
+ * own schedule.
+ */
+const rotations = new Map<string, Promise<MinimaxCodeCredentials>>();
+
+/**
+ * Refresh tokens the service has already refused, with the moment it may be retried.
+ *
+ * A rejected token is a tombstone rather than an immediate retry: sending it again in the
+ * same window only earns another refusal, and a burst of callers would each spend a round
+ * trip discovering the same dead fact.
+ */
+const rejectedTokens = new Map<string, number>();
+
 export async function refreshMinimaxCodeCredentials(
     credentials: MinimaxCodeCredentials,
     options: { fetchFn?: typeof fetch; signal?: AbortSignal } = {},
+): Promise<MinimaxCodeCredentials> {
+    const inFlight = rotations.get(credentials.refreshToken);
+    if (inFlight !== undefined) return inFlight;
+    const rejectedUntil = rejectedTokens.get(credentials.refreshToken);
+    if (rejectedUntil !== undefined) {
+        if (Date.now() < rejectedUntil) {
+            throw Object.assign(new Error(MINIMAX_CODE_PROVIDER_NAME + ' rejected this refresh token; waiting before retrying.'), { status: 401 });
+        }
+        rejectedTokens.delete(credentials.refreshToken);
+    }
+    const task = performMinimaxCodeRefresh(credentials, options).finally(() => {
+        if (rotations.get(credentials.refreshToken) === task) rotations.delete(credentials.refreshToken);
+    });
+    rotations.set(credentials.refreshToken, task);
+    return await task;
+}
+
+/** Forget a tombstone, e.g. once a fresh credential has been stored for this account. */
+export function clearMinimaxCodeRefreshRejection(refreshToken: string): void {
+    rejectedTokens.delete(refreshToken);
+}
+
+async function performMinimaxCodeRefresh(
+    credentials: MinimaxCodeCredentials,
+    options: { fetchFn?: typeof fetch; signal?: AbortSignal },
 ): Promise<MinimaxCodeCredentials> {
     const fetchFn = options.fetchFn ?? fetch;
     const host = MINIMAX_CODE_REGION_HOSTS[credentials.region].account;
@@ -356,6 +401,10 @@ export async function refreshMinimaxCodeCredentials(
     const payload: unknown = await response.json().catch(() => undefined);
     const record = isRecord(payload) ? payload : {};
     if (response.status === 401 || response.status === 403) {
+        // A refusal is a tombstone, not an immediate retry: sending this token again
+        // inside the same window only earns another refusal, and a burst of callers would
+        // each spend a round trip rediscovering the same dead fact.
+        rejectedTokens.set(credentials.refreshToken, Date.now() + MINIMAX_CODE_REJECTED_COOLDOWN_MS);
         // The status travels with the error: the pool reads it to decide this credential
         // is DEAD. Without it a rejected refresh is treated as a transient failure, the
         // account keeps its place, and every later turn 401s against the same token.

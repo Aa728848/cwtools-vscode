@@ -1831,9 +1831,15 @@ export class AIService {
         headers: Record<string, string>,
     ): Record<string, string> {
         if (providerId !== 'workbuddy-subscription') return headers;
-        return Object.keys(this.workBuddyIdentityHeaders).length > 0
-            ? { ...headers, ...this.workBuddyIdentityHeaders }
-            : headers;
+        if (Object.keys(this.workBuddyIdentityHeaders).length === 0) return headers;
+        // The identity set carries `accept: application/json` because the catalog read is
+        // a plain JSON GET. Merging it over a STREAM request would ask the gateway for
+        // JSON on a body it is streaming, so the stream Accept wins.
+        return {
+            ...headers,
+            ...this.workBuddyIdentityHeaders,
+            ...(headers.accept === undefined ? {} : { accept: headers.accept }),
+        };
     }
 
     private buildAuthHeaders(providerId: string, apiKey: string): Record<string, string> {
@@ -3629,6 +3635,9 @@ export class AIService {
 
         const buildClaudeHeaders = (authMode: 'x-api-key' | 'bearer'): Record<string, string> => ({
             'Content-Type': 'application/json',
+            // This route is always a stream; a relay that switches on Accept would answer
+            // a stream request as JSON otherwise, and the client would see no events at all.
+            accept: 'text/event-stream',
             'anthropic-version': '2023-06-01',
             // A subscription request must carry the Claude Code identity: the
             // bearer, the claude-cli user agent, `x-app: cli`, and the beta set

@@ -1255,9 +1255,14 @@ export class ChatSettingsManager {
      * The device flow needs no callback port, so the user code and one-time link
      * are shown directly and the browser is opened as a convenience.
      */
-    async loginKimiCode(targetSurface: 'chat' | 'manager' = 'chat'): Promise<void> {
+    async loginKimiCode(
+        region: 'mainland-cn' | 'global' = 'mainland-cn',
+        targetSurface: 'chat' | 'manager' = 'chat',
+    ): Promise<void> {
         try {
-            const login = await this.aiService.getKimiCodeOAuthService().startLogin();
+            // The OAuth host is per-region: a global account has to authorize against
+            // the .ai properties or the code it receives is never accepted.
+            const login = await this.aiService.getKimiCodeOAuthService().startLogin(region);
             const { userCode, verificationUriComplete } = login.authorization;
             this.postMessage({
                 type: 'testConnectionResult',

@@ -380,7 +380,9 @@ let settingsKimiAccount: any = undefined;
 let settingsWorkBuddyAccount: any = undefined;
 let settingsMinimaxCodeAccount: any = undefined;
 let settingsClaudeSubscriptionAccount: any = undefined;
-let settingsSubscriptionPool: any = undefined;
+// One pool view per subscription line, keyed by provider id: the settings form
+// is a draft, so the section follows the selected provider, not the saved one.
+let settingsSubscriptionPools: Record<string, any> = {};
     let settingsSubscriptionProxy: SubscriptionProxyStatus | undefined;
     let cachedSettingsData: { providers: any[]; current: any; ollamaModels: any[] } | undefined;
     type ReasoningEffortValue = 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
@@ -3073,22 +3075,29 @@ let settingsSubscriptionPool: any = undefined;
         if (button.dataset.act === 'primary') vscode.postMessage({ type: 'setAntigravityPrimary', accountId });
         else if (button.dataset.act === 'cooldown') vscode.postMessage({ type: 'clearAntigravityCooldown', accountId });
     });
+    /** The line whose pool the account-pool section is currently showing. */
+    function selectedPoolProviderId(): string {
+        return (document.getElementById('settingsProvider') as HTMLSelectElement | null)?.value || '';
+    }
     const subscriptionPoolStrategy = document.getElementById('subscriptionPoolStrategy') as HTMLSelectElement | null;
     subscriptionPoolStrategy?.addEventListener('change', () => {
         const value = subscriptionPoolStrategy.value;
+        const providerId = selectedPoolProviderId();
+        if (!providerId) return;
         if (value === 'sequential' || value === 'round-robin' || value === 'sticky') {
-            vscode.postMessage({ type: 'setSubscriptionPoolStrategy', strategy: value });
+            vscode.postMessage({ type: 'setSubscriptionPoolStrategy', providerId, strategy: value });
         }
     });
     document.getElementById('subscriptionPoolAccounts')?.addEventListener('click', event => {
         const target = event.target as HTMLElement | null;
         const button = target?.closest('.pool-act') as HTMLElement | null;
         const accountId = button?.dataset.id;
-        if (!button || !accountId) return;
+        const providerId = selectedPoolProviderId();
+        if (!button || !accountId || !providerId) return;
         const act = button.dataset.act;
-        if (act === 'primary') vscode.postMessage({ type: 'setSubscriptionPoolPrimary', accountId });
-        else if (act === 'cooldown') vscode.postMessage({ type: 'clearSubscriptionPoolCooldown', accountId });
-        else if (act === 'remove') vscode.postMessage({ type: 'removeSubscriptionPoolAccount', accountId });
+        if (act === 'primary') vscode.postMessage({ type: 'setSubscriptionPoolPrimary', providerId, accountId });
+        else if (act === 'cooldown') vscode.postMessage({ type: 'clearSubscriptionPoolCooldown', providerId, accountId });
+        else if (act === 'remove') vscode.postMessage({ type: 'removeSubscriptionPoolAccount', providerId, accountId });
     });
     bindBtn('antigravityLoginBtn', () => vscode.postMessage({ type: 'antigravityLogin' }));
     bindBtn('antigravityRefreshBtn', () => vscode.postMessage({ type: 'antigravityRefreshAccount' }));
@@ -7050,7 +7059,7 @@ let settingsSubscriptionPool: any = undefined;
         settingsWorkBuddyAccount = msg.workbuddyAccount;
         settingsMinimaxCodeAccount = msg.minimaxCodeAccount;
         settingsClaudeSubscriptionAccount = msg.claudeSubscriptionAccount;
-        settingsSubscriptionPool = msg.subscriptionPool;
+        settingsSubscriptionPools = msg.subscriptionPools ?? {};
                 settingsAntigravityAccount = isAntigravityAccountStatus(msg.antigravityAccount) ? msg.antigravityAccount : undefined;
                 if (isSubscriptionProxyStatus(msg.subscriptionProxy)) settingsSubscriptionProxy = msg.subscriptionProxy;
                 cachedSettingsData = {
@@ -7985,7 +7994,7 @@ let settingsSubscriptionPool: any = undefined;
             workbuddyAccount: settingsWorkBuddyAccount,
             minimaxCodeAccount: settingsMinimaxCodeAccount,
             claudeSubscriptionAccount: settingsClaudeSubscriptionAccount,
-            subscriptionPool: settingsSubscriptionPool,
+            subscriptionPools: settingsSubscriptionPools,
             subscriptionProxy: settingsSubscriptionProxy,
             current,
             customApiFormat: current.customApiFormat,
@@ -8425,6 +8434,9 @@ let settingsSubscriptionPool: any = undefined;
         if (codexSpeedGroup) codexSpeedGroup.style.display = isCodex ? '' : 'none';
         if (responseVerbosityGroup) responseVerbosityGroup.style.display = isCodex ? '' : 'none';
         if (endpointGroup) endpointGroup.style.display = isCodex || isAntigravity ? 'none' : '';
+        // Rendered once, before any per-line early return: every subscription line
+        // can own an account pool, and each of those branches returns early.
+        renderSubscriptionPool(p?.id ?? '');
         if (isAntigravity) {
             group.style.display = 'none';
             providerHint.textContent = '';
@@ -8509,9 +8521,6 @@ let settingsSubscriptionPool: any = undefined;
             refreshSettingsOverview();
             return;
         }
-            // The generic pool section renders for whichever subscription line is
-            // selected, so multi-account does not need one bespoke card per line.
-            renderSubscriptionPool();
         if (isClaudeSubscription) {
             // The risk notice is stated BEFORE the button, because the terms
             // conflict is a fact about using this route, not a footnote.
@@ -8699,9 +8708,11 @@ let settingsSubscriptionPool: any = undefined;
     }
 
     /** Render the selected line's account pool: strategy selector plus one row per account. */
-    function renderSubscriptionPool() {
+    function renderSubscriptionPool(providerId: string) {
         const group = document.getElementById('subscriptionPoolGroup');
-        const pool = settingsSubscriptionPool;
+        // Follow the provider selected in the form, not the saved one: switching
+        // lines without saving must not keep the previous line's accounts on screen.
+        const pool = settingsSubscriptionPools[providerId];
         const accounts: any[] = Array.isArray(pool?.accounts) ? pool.accounts : [];
         // Hidden only when the line has no accounts at all: with one account the
         // section still tells the user it is scheduled and which strategy applies.

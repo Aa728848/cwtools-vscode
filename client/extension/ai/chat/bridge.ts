@@ -161,16 +161,16 @@ export async function routeWebviewMessage(
             await provider.settingsManager.clearAntigravityCooldown(msg.accountId, sourceSurface);
             break;
         case 'setSubscriptionPoolStrategy':
-            await provider.settingsManager.setSubscriptionPoolStrategy(msg.strategy, sourceSurface);
+            await provider.settingsManager.setSubscriptionPoolStrategy(msg.providerId, msg.strategy, sourceSurface);
             break;
         case 'setSubscriptionPoolPrimary':
-            await provider.settingsManager.setSubscriptionPoolPrimary(msg.accountId, sourceSurface);
+            await provider.settingsManager.setSubscriptionPoolPrimary(msg.providerId, msg.accountId, sourceSurface);
             break;
         case 'clearSubscriptionPoolCooldown':
-            await provider.settingsManager.clearSubscriptionPoolCooldown(msg.accountId, sourceSurface);
+            await provider.settingsManager.clearSubscriptionPoolCooldown(msg.providerId, msg.accountId, sourceSurface);
             break;
         case 'removeSubscriptionPoolAccount':
-            await provider.settingsManager.removeSubscriptionPoolAccount(msg.accountId, sourceSurface);
+            await provider.settingsManager.removeSubscriptionPoolAccount(msg.providerId, msg.accountId, sourceSurface);
             break;
         case 'codexLogout':
             await provider.settingsManager.logoutCodex();

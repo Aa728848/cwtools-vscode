@@ -70,7 +70,7 @@ const validators = {
         workbuddyAccount: optional(isObject),
         minimaxCodeAccount: optional(isObject),
         claudeSubscriptionAccount: optional(isObject),
-        subscriptionPool: optional(isObject),
+        subscriptionPools: optional(isObject),
         subscriptionProxy: optional(isSubscriptionProxyStatus),
     }),
     subscriptionProxyStatus: fields({ status: isSubscriptionProxyStatus }, { saved: optional(isBoolean), targetSurface: optional(isSurface) }),

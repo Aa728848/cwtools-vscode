@@ -11,7 +11,7 @@ import * as path from 'path';
 import * as fs from 'fs';
 import * as cp from 'child_process';
 import { promisify } from 'util';
-import type { ConnectionTestSettings, PanelSettings, HostMessage, CustomApiFormat, ModelReasoningCapability, ReasoningEffort } from './types';
+import type { ConnectionTestSettings, PanelSettings, HostMessage, CustomApiFormat, ModelReasoningCapability, ReasoningEffort, SubscriptionPoolView } from './types';
 import { isCodexServiceTier, isReasoningEffort, isResponseVerbosity } from './types';
 import { COMMANDCODE_API_BASE, getCommandCodeAccountStatus, type CommandCodeAccountStatus } from './commandcode/accountService';
 import type { AIService } from './aiService';
@@ -349,20 +349,23 @@ export class ChatSettingsManager {
                 accountKey => this.aiService.isWorkBuddyAccountHidden(accountKey),
             )
             : undefined;
-        // The gateway's own /v3/config is the authority on each model's window;
-        // a failed read keeps the previous snapshot rather than emptying the card.
-        const workBuddyWindows = showPanel || config.provider === 'workbuddy-subscription'
+        // The gateway's own /v3/config is the authority on both the model list and
+        // each model's window. The shipped table names no WorkBuddy model, so the
+        // live catalog is what fills the dropdown; a failed read keeps the last
+        // snapshot rather than emptying it.
+        const workBuddyCatalog = showPanel || config.provider === 'workbuddy-subscription'
             ? await (async () => {
                 const selection = await this.aiService.getWorkBuddyCredential();
-                if (!selection) return {};
-                return workBuddyContextWindows(await loadWorkBuddyCatalog({
+                if (!selection) return [];
+                return await loadWorkBuddyCatalog({
                     backend: selection.credentials.backend,
                     region: selection.credentials.region,
                     headers: workBuddyHeaders(selection.credentials),
                     fetchFn: this.aiService.getSubscriptionProxyService().fetch,
-                }).catch(() => []));
+                }).catch(() => []);
             })()
-            : {};
+            : [];
+        const workBuddyWindows = workBuddyContextWindows(workBuddyCatalog);
         const commandCodeWindows = showPanel || config.provider === 'commandcode' || config.provider === 'commandcode-messages'
             ? commandCodeContextWindows(await loadCommandCodeCatalog({
                 baseUrl: COMMANDCODE_API_BASE,
@@ -370,35 +373,51 @@ export class ChatSettingsManager {
             }).catch(() => []))
             : {};
 
-        // A single pool view for whichever subscription line is selected, so the
-        // card can show account count, strategy and cooldowns without one bespoke
-        // payload per line.
-        const poolProviderId = config.provider;
+        // Every line's pool travels in one payload, keyed by the line's own id.
+        //
+        // The settings form is a DRAFT: the user can switch the provider dropdown
+        // without saving, so a payload carrying only the saved provider's pool
+        // would leave the account-pool section showing (or hiding) the wrong
+        // line's accounts. One view per line also removes the need for a bespoke
+        // card per subscription line.
         const poolRegistry = this.aiService.getSubscriptionPoolRegistry();
-        const subscriptionPool = poolRegistry.has(poolProviderId)
-            ? {
-                providerId: poolProviderId,
-                strategy: await poolRegistry.strategy(poolProviderId) ?? 'sequential',
-                // `ok` is the kernel's "usable" status; the card only models the two
-                // failure states, so a usable row carries no status at all.
-                accounts: (await poolRegistry.listAccounts(poolProviderId)).map(account => ({
-                    id: account.id,
-                    alias: account.alias,
-                    isPrimary: account.isPrimary,
-                    ...(account.authStatus === 'invalid_credential' || account.authStatus === 'rate_limited'
-                        ? { authStatus: account.authStatus } : {}),
-                    ...(account.authFailedReason === undefined ? {} : { authFailedReason: account.authFailedReason }),
-                    ...(account.cooldownUntil === undefined ? {} : { cooldownUntil: account.cooldownUntil }),
-                    ...(account.cooldownReason === undefined ? {} : { cooldownReason: account.cooldownReason }),
-                    ...(account.expiresAt === undefined ? {} : { expiresAt: account.expiresAt }),
-                })),
+        const subscriptionPools: Record<string, SubscriptionPoolView> = {};
+        // Only the settings panel needs every line at once, because it lets the user
+        // switch the dropdown without saving. A background settings refresh (a quick
+        // model switch) stays on the active line, so it does not pay for seven
+        // SecretStorage reads plus the desktop scans behind seeding.
+        const poolProviderIds = showPanel
+            ? poolRegistry.providerIds()
+            : (poolRegistry.has(config.provider) ? [config.provider] : []);
+        {
+            for (const poolProviderId of poolProviderIds) {
+                const accounts = await poolRegistry.listAccounts(poolProviderId);
+                subscriptionPools[poolProviderId] = {
+                    providerId: poolProviderId,
+                    strategy: await poolRegistry.strategy(poolProviderId) ?? 'sequential',
+                    // `ok` is the kernel's "usable" status; the card only models the two
+                    // failure states, so a usable row carries no status at all.
+                    accounts: accounts.map(account => ({
+                        id: account.id,
+                        alias: account.alias,
+                        isPrimary: account.isPrimary,
+                        ...(account.authStatus === 'invalid_credential' || account.authStatus === 'rate_limited'
+                            ? { authStatus: account.authStatus } : {}),
+                        ...(account.authFailedReason === undefined ? {} : { authFailedReason: account.authFailedReason }),
+                        ...(account.cooldownUntil === undefined ? {} : { cooldownUntil: account.cooldownUntil }),
+                        ...(account.cooldownReason === undefined ? {} : { cooldownReason: account.cooldownReason }),
+                        ...(account.expiresAt === undefined ? {} : { expiresAt: account.expiresAt }),
+                    })),
+                };
             }
-            : undefined;
+        }
 
         const providers = Object.values(BUILTIN_PROVIDERS).map(p => {
             const customNonFim = p.id === 'custom' && config.customApiFormat !== 'openai-chat-completions';
             const codexModels = p.id === 'codex-chatgpt' ? (codexAccount?.models ?? [])
-                : p.id === 'antigravity' ? antigravityAccount?.models : undefined;
+                : p.id === 'antigravity' ? antigravityAccount?.models
+                : p.id === 'workbuddy-subscription' ? workBuddyCatalog.map(model => model.id)
+                : undefined;
             return {
                 id: p.id,
                 name: p.id === 'codex-chatgpt'
@@ -594,7 +613,7 @@ export class ChatSettingsManager {
             workbuddyAccount: workBuddyAccount,
             minimaxCodeAccount,
             claudeSubscriptionAccount,
-            subscriptionPool,
+            subscriptionPools,
             subscriptionProxy,
         });
     }
@@ -1389,24 +1408,28 @@ export class ChatSettingsManager {
         await this.buildAndSendSettingsData(true, targetSurface);
     }
 
-    /** Switch how the selected subscription line rotates between its accounts. */
+    /**
+     * Switch how one subscription line rotates between its accounts.
+     *
+     * The line is named by the message rather than read from the saved config: the
+     * settings form is a draft, so the user may be editing a provider they have not
+     * saved yet, and acting on the saved one would change a different line's pool.
+     */
     async setSubscriptionPoolStrategy(
+        providerId: string,
         strategy: 'sequential' | 'round-robin' | 'sticky',
         targetSurface: 'chat' | 'manager' = 'chat',
     ): Promise<void> {
-        const providerId = this.aiService.getConfig().provider;
         await this.aiService.getSubscriptionPoolRegistry().setStrategy(providerId, strategy);
         await this.buildAndSendSettingsData(true, targetSurface);
     }
 
-    async setSubscriptionPoolPrimary(accountId: string, targetSurface: 'chat' | 'manager' = 'chat'): Promise<void> {
-        const providerId = this.aiService.getConfig().provider;
+    async setSubscriptionPoolPrimary(providerId: string, accountId: string, targetSurface: 'chat' | 'manager' = 'chat'): Promise<void> {
         await this.aiService.getSubscriptionPoolRegistry().setPrimary(providerId, accountId);
         await this.buildAndSendSettingsData(true, targetSurface);
     }
 
-    async clearSubscriptionPoolCooldown(accountId: string, targetSurface: 'chat' | 'manager' = 'chat'): Promise<void> {
-        const providerId = this.aiService.getConfig().provider;
+    async clearSubscriptionPoolCooldown(providerId: string, accountId: string, targetSurface: 'chat' | 'manager' = 'chat'): Promise<void> {
         await this.aiService.getSubscriptionPoolRegistry().clearCooldown(providerId, accountId);
         await this.buildAndSendSettingsData(true, targetSurface);
     }
@@ -1418,11 +1441,8 @@ export class ChatSettingsManager {
      * application (a desktop sign-in) is deliberately not offered for deletion,
      * because this extension does not own it.
      */
-    async removeSubscriptionPoolAccount(accountId: string, targetSurface: 'chat' | 'manager' = 'chat'): Promise<void> {
-        const providerId = this.aiService.getConfig().provider;
-        const pool = this.aiService.getSubscriptionPoolRegistry();
-        await (pool as unknown as { pool?: (id: string) => { removeAccount(id: string): Promise<void> } | undefined })
-            .pool?.(providerId)?.removeAccount(accountId);
+    async removeSubscriptionPoolAccount(providerId: string, accountId: string, targetSurface: 'chat' | 'manager' = 'chat'): Promise<void> {
+        await this.aiService.getSubscriptionPoolRegistry().removeAccount(providerId, accountId);
         await this.buildAndSendSettingsData(true, targetSurface);
     }
 

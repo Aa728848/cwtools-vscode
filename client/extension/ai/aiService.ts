@@ -185,6 +185,22 @@ const WORKBUDDY_POOL_KEY = 'cwtools.ai.workbuddy.pool.v1';
 const COMMANDCODE_POOL_KEY = 'cwtools.ai.commandcode.pool.v1';
 
 /**
+ * 有号池的 provider id。
+ *
+ * 设置页要一次拿到**全部**线路的池：用户在未保存的表单里切到另一条线路时，只推送已保存
+ * provider 的池会让号池区停在上一条线路上。列表在注册表构造时注入，不在这里现场推导。
+ */
+const SUBSCRIPTION_POOL_PROVIDER_IDS = [
+    'codex-chatgpt',
+    'commandcode',
+    'commandcode-messages',
+    'kimi-code-plan',
+    'claude-subscription',
+    'minimax-code',
+    'workbuddy-subscription',
+] as const;
+
+/**
  * Whether this request must carry the reasoning field on every assistant message.
  *
  * Kimi Code's subscription route is the case: the K3 family reasons by default
@@ -504,6 +520,14 @@ export class AIService {
                 read: () => Promise.resolve(context.globalState?.get<unknown>(CODEX_CATALOG_SNAPSHOT_KEY)),
                 write: async value => { await context.globalState?.update(CODEX_CATALOG_SNAPSHOT_KEY, value); },
             },
+            // Codex is the one line whose sign-in path does not otherwise touch the
+            // pool, so it registers here for the same reason the others do: a second
+            // ChatGPT account must join rotation instead of replacing the first.
+            async credentials => {
+                await this.subscriptionPools
+                    .addAccount('codex-chatgpt', credentials as unknown as PooledOAuthCredentials)
+                    .catch(() => undefined);
+            },
         );
         context.subscriptions?.push(this.chatGptOAuth);
         this.antigravityOAuth = new AntigravityOAuthService(context.secrets, this.subscriptionProxy.fetch);
@@ -590,6 +614,7 @@ export class AIService {
         context.subscriptions?.push({ dispose: () => this.claudeSubscriptionOAuth.dispose() });
         this.subscriptionPools = new SubscriptionPoolRegistry(
             providerId => this.buildSubscriptionPool(providerId),
+            SUBSCRIPTION_POOL_PROVIDER_IDS,
         );
     }
 
@@ -781,6 +806,10 @@ export class AIService {
             case 'commandcode':
             case 'commandcode-messages':
                 return {
+                    // Both lines read and write the same API-key slot; two pool
+                    // instances would each hold a private copy of the document and
+                    // the later write would drop the earlier line's account.
+                    poolId: 'commandcode',
                     spec: {
                         displayName: 'Command Code',
                         parseCredentials: commandCodePoolCredentials as (v: unknown) => PooledOAuthCredentials | undefined,

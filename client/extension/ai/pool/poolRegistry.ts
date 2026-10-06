@@ -38,6 +38,13 @@ export interface SubscriptionPoolEntry<TCredentials extends PooledOAuthCredentia
      * 刚扫描到的账号这一轮用不上。
      */
     seed?(): Promise<TCredentials[]>;
+    /**
+     * 共用一个池的规范 id。
+     *
+     * 两个 provider id 指向同一份凭据时（Command Code 的两条线路共用一把 Key），各自建池会
+     * 得到两个内存队列写同一个存储，一次并发写入就会丢账号。都归到同一个池实例即可。
+     */
+    poolId?: string;
 }
 
 /** 一次账号选择的上下文，供请求路径做重试换号。 */
@@ -61,7 +68,19 @@ export class SubscriptionPoolRegistry {
     constructor(
         /** 按 provider id 惰性构造线路的池子；返回 undefined 表示该线路还没有池。 */
         private readonly resolve: (providerId: string) => SubscriptionPoolEntry<PooledOAuthCredentials> | undefined,
+        /**
+         * 本注册表覆盖的全部 provider id。
+         *
+         * 设置页要在**一次**数据推送里带上所有线路的池：用户在未保存的表单里切换 provider
+         * 时，只有已保存 provider 的池会被渲染，号池区就会停留在上一个线路。
+         */
+        private readonly providerIdList: readonly string[] = [],
     ) {}
+
+    /** 本注册表覆盖的全部 provider id。 */
+    providerIds(): readonly string[] {
+        return this.providerIdList;
+    }
 
     /** 该 provider 是否已经配置号池。 */
     has(providerId: string): boolean {
@@ -72,26 +91,39 @@ export class SubscriptionPoolRegistry {
         return this.resolve(providerId);
     }
 
+    /**
+     * 把 provider id 归一到它共用的池 id。
+     *
+     * 别名 id（Command Code 的两条线路）必须落到同一个 OAuthAccountPool 实例上，否则两个实例
+     * 各自持有一份内存文档与写队列却写同一个存储槽位，后一次写入会覆盖掉前一次新增的账号。
+     */
+    private canonical(providerId: string): string {
+        return this.entry(providerId)?.poolId ?? providerId;
+    }
+
     /** 取（或建）一条线路的号池。 */
     pool(providerId: string): OAuthAccountPool<PooledOAuthCredentials> | undefined {
-        const existing = this.pools.get(providerId);
+        const id = this.canonical(providerId);
+        const existing = this.pools.get(id);
         if (existing !== undefined) return existing;
-        const entry = this.entry(providerId);
+        const entry = this.entry(providerId) ?? this.entry(id);
         if (entry === undefined) return undefined;
         const created = new OAuthAccountPool(entry.spec, entry.ports);
-        this.pools.set(providerId, created);
+        this.pools.set(id, created);
         return created;
     }
 
     /** 把线路自己的账号来源并入号池；失败只记日志，不该让一次选择失败。 */
     private async seedOnce(providerId: string): Promise<void> {
-        if (this.seeded.has(providerId)) return;
-        const inflight = this.seeding.get(providerId);
+        const id = this.canonical(providerId);
+        if (this.seeded.has(id)) return;
+        const inflight = this.seeding.get(id);
         if (inflight !== undefined) { await inflight; return; }
         const entry = this.entry(providerId);
+        // 别名 id 与规范 id 共用同一个池；种子只跑一次，记录在规范 id 上。
         const pool = this.pool(providerId);
         if (entry?.seed === undefined || pool === undefined) {
-            this.seeded.add(providerId);
+            this.seeded.add(id);
             return;
         }
         const task = (async () => {
@@ -99,14 +131,14 @@ export class SubscriptionPoolRegistry {
                 for (const credentials of await entry.seed!()) {
                     await pool.addAccount(credentials);
                 }
-                this.seeded.add(providerId);
+                this.seeded.add(id);
             } catch (error) {
                 // 扫描失败只让这一轮少几个账号；下一次选择会重试。
                 ErrorReporter.debug(SOURCE.AI_SERVICE, 'Failed to seed the subscription account pool.', error);
             }
         })();
-        this.seeding.set(providerId, task);
-        try { await task; } finally { this.seeding.delete(providerId); }
+        this.seeding.set(id, task);
+        try { await task; } finally { this.seeding.delete(id); }
     }
 
     /**
@@ -168,6 +200,15 @@ export class SubscriptionPoolRegistry {
 
     async noteStatus(providerId: string, accountId: string, status: AccountAuthStatus, reason: string): Promise<void> {
         await this.pool(providerId)?.noteAuthFailure(accountId, status, reason);
+    }
+
+    /**
+     * 从号池里移除一个账号。
+     *
+     * 只删号池自己那一行：来自其他应用的账号（桌面端登录态）不归本扩展所有，因此不提供删除。
+     */
+    async removeAccount(providerId: string, accountId: string): Promise<void> {
+        await this.pool(providerId)?.removeAccount(accountId);
     }
 
     /** 登录/重新授权之后把账号并入池子。 */

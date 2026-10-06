@@ -2687,10 +2687,10 @@ export type WebViewMessage =
     | { type: 'setAntigravityPoolStrategy'; strategy: 'sequential' | 'round-robin' | 'sticky' }
     | { type: 'setAntigravityPrimary'; accountId: string }
     | { type: 'clearAntigravityCooldown'; accountId: string }
-    | { type: 'setSubscriptionPoolStrategy'; strategy: 'sequential' | 'round-robin' | 'sticky' }
-    | { type: 'setSubscriptionPoolPrimary'; accountId: string }
-    | { type: 'clearSubscriptionPoolCooldown'; accountId: string }
-    | { type: 'removeSubscriptionPoolAccount'; accountId: string }
+    | { type: 'setSubscriptionPoolStrategy'; providerId: string; strategy: 'sequential' | 'round-robin' | 'sticky' }
+    | { type: 'setSubscriptionPoolPrimary'; providerId: string; accountId: string }
+    | { type: 'clearSubscriptionPoolCooldown'; providerId: string; accountId: string }
+    | { type: 'removeSubscriptionPoolAccount'; providerId: string; accountId: string }
     | { type: 'antigravityLogin' }
     | { type: 'antigravityRefreshAccount' }
     | { type: 'antigravityLogout' }
@@ -2761,7 +2761,7 @@ export type HostMessage =
     | { type: 'slashCommandList'; commands: SlashCommandDescriptor[] }
     | { type: 'slashCommandResult'; command: string; status: 'success' | 'error' | 'queued' | 'needsInput'; message: string; uiAction?: 'openModelMenu' | 'openReasoningMenu' | 'openPermissionsMenu' }
     | { type: 'todoUpdate'; todos: TodoItem[]; agentId?: string; threadId?: string; runId?: string }
-    | { type: 'settingsData'; providers: ProviderMeta[]; current: PanelSettings; ollamaModels?: OllamaModelInfo[]; showPanel?: boolean; targetSurface?: 'chat' | 'manager'; modelContextTokens?: Record<string, number>; thinkingModelPrefixes?: string[]; reasoningCapabilities?: Record<string, ModelReasoningCapability>; codexAccount?: CodexAccountStatus; antigravityAccount?: AntigravityAccountStatus; commandcodeAccount?: CommandCodeAccountStatus; kimiAccount?: KimiCodeAccountStatus; workbuddyAccount?: WorkBuddyAccountStatus; minimaxCodeAccount?: MinimaxCodeAccountStatus; claudeSubscriptionAccount?: ClaudeSubscriptionAccountStatus; subscriptionPool?: SubscriptionPoolView; subscriptionProxy?: SubscriptionProxyStatus }
+    | { type: 'settingsData'; providers: ProviderMeta[]; current: PanelSettings; ollamaModels?: OllamaModelInfo[]; showPanel?: boolean; targetSurface?: 'chat' | 'manager'; modelContextTokens?: Record<string, number>; thinkingModelPrefixes?: string[]; reasoningCapabilities?: Record<string, ModelReasoningCapability>; codexAccount?: CodexAccountStatus; antigravityAccount?: AntigravityAccountStatus; commandcodeAccount?: CommandCodeAccountStatus; kimiAccount?: KimiCodeAccountStatus; workbuddyAccount?: WorkBuddyAccountStatus; minimaxCodeAccount?: MinimaxCodeAccountStatus; claudeSubscriptionAccount?: ClaudeSubscriptionAccountStatus; subscriptionPools?: Record<string, SubscriptionPoolView>; subscriptionProxy?: SubscriptionProxyStatus }
     | { type: 'subscriptionProxyStatus'; status: SubscriptionProxyStatus; saved?: boolean; targetSurface?: 'chat' | 'manager' }
     | { type: 'ollamaModels'; models: OllamaModelInfo[]; error?: string }
     | { type: 'apiModelsFetched'; providerId: string; models: Array<{ id: string }>; dynContexts?: Record<string, number>; reasoningCapabilities?: Record<string, ModelReasoningCapability>; error?: string; ctxNote?: string }

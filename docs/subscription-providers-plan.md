@@ -249,7 +249,9 @@
 
 > 唯一**非阻塞**待办仍是真机验证：三条新 OAuth 流程（workbuddy / minimax-code /
 > claude-subscription）、kimi 设备码、桌面凭据复用与多账号轮转均以单元测试锁定契约，
-> 但尚未在真实订阅账号上端到端跑过。### 号池全线路接入（本轮）
+> 但尚未在真实订阅账号上端到端跑过。
+
+### 号池全线路接入（本轮）
 
 P4 的内核此前只接了 Antigravity（计划里的起点）。本轮把**其余全部线路**接上：
 codex-chatgpt、kimi-code-plan、workbuddy-subscription、minimax-code、claude-subscription、
@@ -268,11 +270,12 @@ commandcode（静态 API Key）。
   账号集合排除本次已尝试的账号；`Retry-After` 被解析并夹取上限。
 - **设置面**：新增通用「账号池」区块（策略选择器 + 账号行：主账号标记、冷却倒计时、失效
   提示，以及「设为主账号」/「清除冷却」/「移除」），对任何已接池的线路生效。
-- **测试**：新增 `subscriptionPools.test.ts`（24 例）；总计 **2804 + 44 passing，0 failing**。
+- **测试**：新增 `subscriptionPools.test.ts`（24 例）、`poolSeeding.test.ts`（3 例）、
+  `poolRegistry.test.ts`（4 例）；总计 **2811 + 44 passing，0 failing**。
 - **验证**：`npm run lint`（0 error）、`npm run compile`、`npm run typecheck:test`、
-  `npm run test:unit`、`npm run build:docs` 全通过。
+  `npm run test:unit` 全通过。
 
-#### 本轮修复的两处真实缺陷（接入多账号时暴露）
+#### 修复的真实缺陷（接入多账号时暴露，含实机反馈定位的四处）
 
 1. **续期单飞是全局的，不是按凭据的**：Codex 与 Claude 的 store 用一个全局 promise 槽位，
    单账号时无害；一旦池里有第二个账号，账号 B 会拿到账号 A 的续期 promise 并**收到 A 的
@@ -280,6 +283,20 @@ commandcode（静态 API Key）。
    （否则会覆盖另一个账号）。
 2. **`expiresAt: 0` 被误读为「永不过期」**：epoch 0 是**过去**，而 Antigravity 的测试凭据
    正是用它表示已过期。误读会让一个死令牌继续服役。改为只把「未声明到期」视为不过期。
+3. **seed 漏掉托管存储**：WorkBuddy / MiniMax Code 的 seed 只扫描桌面端文件，因此「只用本
+   插件登录过」的情形读出**空池**——卡片照常显示该账号，号池区却隐藏，且该账号从不参与
+   调度。改为两个来源合并（桌面扫描 + 托管存储）。
+4. **设置面只推送已保存 provider 的池**：在未保存的表单里切换 provider 时，号池区停留在
+   上一条线路上。改为一次推送全部线路，并按**下拉框当前值**取用；池动作（策略/主账号/清除
+   冷却/移除）也随之带上 `providerId`，避免改动已保存的另一条线路。
+5. **Codex 登录不入池**：其余线路都在登录回调里入池，Codex 只写单凭据槽位，第二个 ChatGPT
+   账号因此存下来却永远无法参与轮转。已补上登录后入池。
+6. **Codex 的号池区永不可见**：区块渲染调用位于 `isCodex` 分支的提前 `return` 之后，改为
+   在所有分线路分支之前渲染。
+7. **别名 id 各建一个池**：Command Code 两条线路共用一把 Key，却各自建池写同一槽位，后写
+   的那次会丢掉前一条线路刚加的账号。新增 `poolId` 让它们共用一个池实例。
+8. **WorkBuddy 模型下拉框为空**：内置表不列该线路模型，而实时目录此前只被用来取上下文
+   窗口。改为用目录同时填充模型列表。
 
 ### 全部剩余项状态（本轮结束后）
 
@@ -289,7 +306,8 @@ commandcode（静态 API Key）。
 | P4 号池：内核 | ✅ 完成 |
 | P4 号池：antigravity | ✅ 完成 |
 | P4 号池：codex / kimi / claude / minimax / workbuddy / commandcode | ✅ 完成 |
-| P4 号池：设置面（通用账号池区块） | ✅ 完成 |
+| P4 号池：设置面（通用账号池区块，按选中线路渲染） | ✅ 完成 |
+| WorkBuddy 实时目录填充模型列表 | ✅ 完成 |
 
 > 唯一**非阻塞**待办仍是真机验证：各线路的 OAuth 流程、桌面凭据复用与多账号轮转均以单元
 > 测试（mock transport）锁定契约，尚未在真实订阅账号上端到端跑过。

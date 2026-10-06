@@ -251,6 +251,14 @@ export class ChatGptOAuthService implements vscode.Disposable {
         private readonly fetchFn: FetchLike = fetch,
         private readonly clientVersion = 'unknown',
         private readonly catalogSnapshot?: CodexCatalogSnapshotStore,
+        /**
+         * Called after a browser sign-in stored a credential.
+         *
+         * The account pool needs to learn about a new sign-in here: the pool keeps
+         * its own document, so writing only the legacy slot leaves a second account
+         * stored but unschedulable — it would never join rotation.
+         */
+        private readonly onSignedIn?: (credentials: StoredOAuthCredentials) => Promise<void>,
     ) {}
 
     /** User agent every subscription request carries; kept in one place so the wire identity cannot drift. */
@@ -508,7 +516,11 @@ export class ChatGptOAuthService implements vscode.Disposable {
         }
         try {
             const tokens = await this.exchangeCode(code, verifier);
-            await this.storeTokenResponse(tokens);
+            const credentials = await this.storeTokenResponse(tokens);
+            // Joining the pool is what makes a second sign-in a second account
+            // rather than a replacement; the dedupe key keeps a repeat sign-in on
+            // the same row. A failure here must not fail the sign-in itself.
+            await this.onSignedIn?.(credentials).catch(() => undefined);
             response.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
             response.end(successPage());
             return true;

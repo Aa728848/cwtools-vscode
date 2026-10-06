@@ -194,7 +194,13 @@ export class AccountPoolCore<
         return task;
     }
 
-    /** 读取并归一化号池；损坏的存储按空池处理而不是抛错。 */
+    /**
+     * 读取并归一化号池；损坏的存储按空池处理而不是抛错。
+     *
+     * 同时**按去重键收敛重复行**。一个池子里同一个上游账号只能有一行：否则调度会在两个
+     * 几乎相同的凭据之间来回，而冷却、失效与计数都被记成两半。这条规则顺带修复旧文档——
+     * 在身份键还不完整的版本里写下的重复行，会在下一次写入时被自动合并掉。
+     */
     async read(): Promise<PoolData<TAccount>> {
         let raw: unknown;
         try { raw = await this.store.read(); } catch { return emptyPool<TAccount>(); }
@@ -206,10 +212,49 @@ export class AccountPoolCore<
         }
         try {
             const parsed = this.hooks.parsePoolData(raw);
-            return { ...parsed, rotationStrategy: normalizeRotationStrategy(parsed.rotationStrategy) };
+            const accounts = this.collapseDuplicateAccounts(parsed.accounts);
+            if (accounts === parsed.accounts) {
+                return { ...parsed, rotationStrategy: normalizeRotationStrategy(parsed.rotationStrategy) };
+            }
+            const keptIds = new Set(accounts.map(account => account.id));
+            return {
+                ...parsed,
+                rotationStrategy: normalizeRotationStrategy(parsed.rotationStrategy),
+                accounts,
+                // 粘性策略记的「上一个服务的账号」不能指向已被合并掉的行。
+                ...(parsed.activeAccountId !== undefined && !keptIds.has(parsed.activeAccountId)
+                    ? { activeAccountId: undefined } : {}),
+            };
         } catch {
             return emptyPool<TAccount>();
         }
+    }
+
+    /**
+     * 同一去重键只保留第一行；若被丢弃的那行是主账号，主账号标记转移给留下的那行。
+     *
+     * 没有去重键的行一律保留：无法证明它们是同一个账号，合并掉等于让用户丢一个仍然有效的
+     * 套餐。
+     */
+    private collapseDuplicateAccounts(accounts: TAccount[]): TAccount[] {
+        if (accounts.length < 2) return accounts;
+        const seen = new Set<string>();
+        const kept: TAccount[] = [];
+        let sawPrimary = false;
+        for (const account of accounts) {
+            if (account.isPrimary === true) sawPrimary = true;
+            const key = this.hooks.dedupeKey?.(account.credentials);
+            if (key === undefined) { kept.push(account); continue; }
+            if (seen.has(key)) continue;
+            seen.add(key);
+            kept.push(account);
+        }
+        if (kept.length === accounts.length) return accounts;
+        // 主账号标记不能随被丢弃的行一起消失。
+        if (sawPrimary && !kept.some(account => account.isPrimary === true) && kept.length > 0) {
+            kept[0] = { ...kept[0]!, isPrimary: true };
+        }
+        return kept;
     }
 
     /** 对外摘要；已过期的冷却按「不存在」汇报。 */

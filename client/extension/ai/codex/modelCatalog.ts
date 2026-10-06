@@ -151,6 +151,20 @@ function parseEfforts(value: unknown): string[] | null {
 }
 
 /**
+ * 某个目录 slug 是否是可以拿来对话的模型。
+ *
+ * 订阅目录里会混进**代码评审**专用 slug（`codex-auto-review`）。它出现在目录里只是因为
+ * 该套餐拥有这条额度线，它不是一个对话模型：把它放进模型选择器会得到一个永远不可用的
+ * 选项。因此评审类 slug 一律排除。
+ *
+ * 排除后目录可能变空。那**不是**「这个账号没有模型」，而是这份目录回答不了选择器——某些
+ * 套餐的目录只带评审 slug 而不带任何对话模型。此时由内置表作答（见 getAccountStatus）。
+ */
+export function isCodexChatModelSlug(slug: string): boolean {
+    return !/auto[-_]?review|[-_]review$|^review$/.test(slug.toLowerCase());
+}
+
+/**
  * 单个目录条目。
  *
  * 只读取后端确实声明的字段。从未见过的模型 id 也会产生条目——目录是「账号能
@@ -161,6 +175,8 @@ function parseCatalogEntry(value: unknown): CodexCatalogEntry[] {
     if (record === undefined) return [];
     const id = asString(record.slug) ?? asString(record.id);
     if (id === undefined) return [];
+    // 评审类 slug 不是对话模型，混入选择器只会得到一个不可用的选项。
+    if (!isCodexChatModelSlug(id)) return [];
     const contextWindow = asNumber(record.context_window) ?? asNumber(record.contextWindow);
     const modalities = parseModalities(record.input_modalities);
     const efforts = parseEfforts(record.supported_reasoning_levels);

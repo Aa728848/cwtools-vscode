@@ -379,6 +379,12 @@ export class ChatGptOAuthService implements vscode.Disposable {
                 : claims.chatgpt_plan_type ?? nested?.chatgpt_plan_type ?? null;
             // The listing is the authority on what this account may call; the
             // shipped table only stands in when it named nothing usable.
+            //
+            // A listing must never be able to EMPTY the picker: on some plans the
+            // subscription listing carries only the account's code-review slug and no
+            // chat model at all. Honouring that literally would delete every model the
+            // user can actually call, so a listing that cannot answer the picker is
+            // not a narrower view - the shipped table answers instead.
             const live = catalog.length > 0;
             const value: CodexAccountStatus = {
                 available: true,

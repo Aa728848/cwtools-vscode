@@ -53,6 +53,9 @@ Status: implemented
   线路共用一把 Key）落到同一个池实例上。各自建池会得到两个内存文档与写队列却写同一槽位，
   后写的那次会丢掉前一条线路刚加的账号；
 - **`providerIds()`**：对外枚举本注册表覆盖的线路，供设置页一次取全部线路的池；
+- **一个池子里同一个账号只能有一行**：`read()` 按去重键收敛重复行，主账号标记转移到留下的
+  那一行，粘性策略记的 `activeAccountId` 若指向被合并掉的行则清除。这条规则同时**修复旧
+  文档**：在身份键还不完整的版本里写下的重复行，会在下一次写入时被自动合并。
 - 统一暴露 select / recordUsage / noteRateLimited / noteAuthFailure / listAccounts /
   strategy / setPrimary / clearCooldown / addAccount / removeAccount / providerIds。
 

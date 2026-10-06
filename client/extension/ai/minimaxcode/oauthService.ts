@@ -356,10 +356,16 @@ export async function refreshMinimaxCodeCredentials(
     const payload: unknown = await response.json().catch(() => undefined);
     const record = isRecord(payload) ? payload : {};
     if (response.status === 401 || response.status === 403) {
-        throw new Error(aiText(
-            'MiniMax Code rejected the stored refresh token. Sign in again.',
-            'MiniMax Code 拒绝了已保存的 refresh token，请重新登录。',
-        ));
+        // The status travels with the error: the pool reads it to decide this credential
+        // is DEAD. Without it a rejected refresh is treated as a transient failure, the
+        // account keeps its place, and every later turn 401s against the same token.
+        throw Object.assign(
+            new Error(aiText(
+                'MiniMax Code rejected the stored refresh token. Sign in again.',
+                'MiniMax Code 拒绝了已保存的 refresh token，请重新登录。',
+            )),
+            { status: response.status },
+        );
     }
     if (!response.ok) {
         const { description } = oauthErrorFields(payload);

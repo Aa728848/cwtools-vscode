@@ -10,6 +10,9 @@
 
 export const KNOWN_REASONING_KEYS = [
     'reasoning_content',
+    // A live dialect on the Kimi route: a peer that answers under this name must be
+    // asked under it again, and an unrecognised key reads as "no reasoning at all".
+    'reasoning_details',
     'reasoning',
     'reasoning_text',
     'thinking',

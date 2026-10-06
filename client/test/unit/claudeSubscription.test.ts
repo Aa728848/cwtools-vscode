@@ -84,6 +84,9 @@ describe('Claude subscription model catalog', () => {
         // it. Without this the model answers 400 on every retry afterwards.
         expect(thinking.thinking).to.deep.equal({
             type: 'adaptive',
+            // Restores thinking text on models that omit it by default; without it the
+            // thinking UI stays empty while the tokens are still billed.
+            display: 'summarized',
             block_binding: { prefix_mismatch_behavior: 'drop_block' },
         });
     });
@@ -93,6 +96,7 @@ describe('Claude subscription model catalog', () => {
         const thinking = claudeThinkingFor(resolveClaudeModel('claude-sonnet-5-5'), undefined, undefined);
         expect(thinking.thinking).to.deep.equal({
             type: 'adaptive',
+            display: 'summarized',
             block_binding: { prefix_mismatch_behavior: 'drop_block' },
         });
         expect(thinking.outputConfig).to.deep.equal({ effort: 'high' });

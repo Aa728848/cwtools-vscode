@@ -3957,7 +3957,18 @@ export class AIService {
                         const d = evt.delta as Record<string, unknown> | undefined;
                         if (d?.stop_reason) stopReason = d.stop_reason as string;
                         const u = evt.usage as Record<string, number> | undefined;
-                        if (u) outputTokens = u.output_tokens ?? 0;
+                        // output_tokens is CUMULATIVE and must replace, never add.
+                        if (u?.output_tokens !== undefined) outputTokens = u.output_tokens;
+                        // Some deployments (the MiniMax subscription among them) send a
+                        // ZERO-FILLED usage on message_start and the real counters in this
+                        // terminal frame, so reading only the start event reports ~0 tokens
+                        // for every turn and mis-sizes compaction. Absent fields keep what is
+                        // already known rather than erasing it.
+                        if (u?.input_tokens !== undefined) inputTokens = u.input_tokens;
+                        if (u?.cache_read_input_tokens !== undefined) cachedTokens = u.cache_read_input_tokens;
+                        if (u?.cache_creation_input_tokens !== undefined) {
+                            cacheCreationTokens = u.cache_creation_input_tokens;
+                        }
                         break;
                     }
                     case 'error': {
@@ -3973,6 +3984,18 @@ export class AIService {
         let finishReason: 'stop' | 'tool_calls' | 'length' = 'stop';
         if (stopReason === 'tool_use') finishReason = 'tool_calls';
         else if (stopReason === 'max_tokens') finishReason = 'length';
+        // The service's own wording for a context-exceeded turn. The vendor says to treat
+        // the response as truncated, and a length finish is what lets compaction recover it
+        // instead of the turn looking like a success.
+        else if (stopReason === 'model_context_window_exceeded') finishReason = 'length';
+        // A refusal reported as a clean stop would end the turn as if it had worked - and
+        // beside a tool_use it would RUN the refused turn's tool calls.
+        else if (stopReason === 'refusal' || stopReason === 'sensitive') {
+            throw new Error(aiText(
+                'The model refused this request (stop_reason: ' + stopReason + ').',
+                '模型拒绝了本次请求（stop_reason: ' + stopReason + '）。',
+            ));
+        }
 
         // Build synthetic tool_calls array from accumulated blocks.
         // A tool call with no parameters streams zero input_json_delta events, so

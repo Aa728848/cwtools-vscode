@@ -14,7 +14,6 @@ export interface EffectiveCacheCapability {
 const OFFICIAL_OPENAI_PREFIX_PROVIDERS = new Set([
     'deepseek', 'qwen', 'glm', 'mimo', 'mimo-token-plan', 'kimi', 'kimi-code-plan', 'minimax',
 ]);
-const ANTHROPIC_BREAKPOINT_PROVIDERS = new Set(['claude', 'minimax-token-plan']);
 const GATEWAY_PROVIDERS = new Set([
     'openrouter', 'siliconflow', 'github', 'together', 'deepinfra', 'opencode', 'opencode-go',
     'commandcode', 'commandcode-messages',
@@ -62,6 +61,13 @@ export function resolveEffectiveCacheCapability(options: {
     if (provider === 'claude') {
         const official = officialTransportOrUnspecified(host, /(^|\.)api\.anthropic\.com$/);
         return { status: official ? 'supported' : 'unknown', requestMode: 'anthropic-breakpoints', supportsUsageTrailer: false };
+    }
+    if (provider === 'minimax-code') {
+        // Prompt-cache markers are the ONLY thing that creates a cache on this endpoint:
+        // a request with no breakpoint gets no cache_read_input_tokens no matter how
+        // identical the bytes are. Its cache mode is implicit prefix, so breakpoints are
+        // the right control rather than a prompt-cache key.
+        return { status: 'supported', requestMode: 'anthropic-breakpoints', supportsUsageTrailer: false };
     }
     if (provider === 'minimax-token-plan') {
         const official = officialTransportOrUnspecified(host, /(^|\.)api\.minimaxi\.com$/);

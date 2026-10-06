@@ -421,6 +421,9 @@ export function claudeThinkingFor(
         return {
             thinking: {
                 type: 'adaptive',
+                // Restores thinking text on models that omit it by default; without it
+                // the thinking UI simply stays empty while tokens are being billed.
+                display: 'summarized',
                 block_binding: { prefix_mismatch_behavior: 'drop_block' },
             },
             outputConfig: { effort: requestedEffort ?? 'high' },
@@ -433,6 +436,7 @@ export function claudeThinkingFor(
         return {
             thinking: {
                 type: 'adaptive',
+                display: 'summarized',
                 ...(model.bindsThinkingToPrefix
                     ? { block_binding: { prefix_mismatch_behavior: 'drop_block' } }
                     : {}),
@@ -444,5 +448,5 @@ export function claudeThinkingFor(
         return { thinking: { type: 'disabled' } };
     }
     const budget = typeof thinkingBudget === 'number' && thinkingBudget >= 1024 ? thinkingBudget : 8192;
-    return { thinking: { type: 'enabled', budget_tokens: budget } };
+    return { thinking: { type: 'enabled', display: 'summarized', budget_tokens: budget } };
 }

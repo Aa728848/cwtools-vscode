@@ -34,7 +34,7 @@ import {
     getModelOutputTokens,
     getAnthropicModelFeatures
 } from './providers/models/capabilities';
-import { minimaxCodeOutputConfig } from './minimaxcode/types';
+import { minimaxCodeModelDef, minimaxCodeOutputConfig } from './minimaxcode/types';
 import { commandCodeReasoningEfforts, commandCodeWireEffort } from './commandcode/modelCapabilities';
 import {
     CLAUDE_CODE_IDENTITY_TEXT,
@@ -370,6 +370,59 @@ function openAiReasoningCapability(model: string, providerId?: string): ModelRea
     return reasoningCapability('effort', ['minimal', 'low', 'medium', 'high'], 'medium');
 }
 
+/**
+ * 给「会思考」的请求调整输出上限。
+ *
+ * 思考预算计入 `max_tokens`，因此两件事必须同时成立：
+ * - 上限要**装得下**这个预算，否则一个超预算的请求是 400；
+ * - 预算要为回答**留出至少 1024 token**，否则模型想完就没有额度说结论。
+ *
+ * 调用方没给上限时用该线路公布的声明值，而不是一个硬编码的小数字：后者会让一次长回合
+ * 在思考结束时被截断。
+ */
+function claudeThinkingAwareMaxTokens(
+    requested: number | undefined,
+    thinking: Record<string, unknown> | undefined,
+    declaredCeiling: number | undefined,
+): number | undefined {
+    const budget = typeof thinking?.budget_tokens === 'number' ? thinking.budget_tokens : undefined;
+    if (budget === undefined) {
+        // Not a budget form: the ceiling is whatever the caller or the catalog says.
+        return requested ?? declaredCeiling;
+    }
+    const cap = requested ?? declaredCeiling ?? budget + MIN_THINKING_ANSWER_TOKENS;
+    if (budget + MIN_THINKING_ANSWER_TOKENS > cap) {
+        return budget + MIN_THINKING_ANSWER_TOKENS;
+    }
+    return cap;
+}
+
+/** Answer room a thinking budget must always leave behind. */
+const MIN_THINKING_ANSWER_TOKENS = 1024;
+
+/** One model needs a floor: below it the answer comes back empty (measured). */
+const MINIMAX_FORCED_THINKING_FLOOR_TOKENS = 512;
+
+/**
+ * MiniMax 的输出上限。
+ *
+ * 强制思考的模型有一个实测下限：`max_tokens: 64` 回来的是 `max_tokens` 结束原因、一个思考块、
+ * **没有正文**；512 才正常结束。给一个小上限的调用方（会话标题、探针）一个空的答案。
+ */
+function minimaxCodeThinkingAwareMaxTokens(
+    requested: number | undefined,
+    effort: string | undefined,
+    model: string,
+): number | undefined {
+    const entry = minimaxCodeModelDef(model);
+    if (entry === undefined) return requested;
+    // Only the shapes that FORCE thinking have the floor: a disabled switch already
+    // produces text without it.
+    const forced = entry.thinking === 'forced-effort' && effort !== 'none';
+    const floor = forced ? MINIMAX_FORCED_THINKING_FLOOR_TOKENS : 0;
+    if (requested !== undefined) return Math.max(requested, floor);
+    return Math.max(entry.maxTokens, floor);
+}
 function claudeReasoningCapability(model: string): ModelReasoningCapability {
     const lower = modelName(model);
     const features = getAnthropicModelFeatures(lower);
@@ -1292,6 +1345,20 @@ export function toClaudeRequest(
         const thinking = claudeThinkingFor(entry, request.reasoning_effort, request.thinking_budget);
         if (thinking.thinking !== undefined) claudeRequest.thinking = thinking.thinking;
         if (thinking.outputConfig !== undefined) claudeRequest.output_config = thinking.outputConfig;
+        // Sampling and thinking are mutually exclusive on this wire. A budget-form model
+        // that keeps its temperature is a 400, and this branch returns before the generic
+        // rule below could drop it.
+        if (claudeRequest.thinking !== undefined && request.reasoning_effort !== 'none') {
+            delete claudeRequest.temperature;
+        }
+        // The thinking budget is billed as OUTPUT, so it lives inside max_tokens. A budget
+        // larger than the answer room is a 400, and a caller that states no cap at all
+        // would otherwise get a hard-coded 4096 that truncates a long turn.
+        claudeRequest.max_tokens = claudeThinkingAwareMaxTokens(
+            typeof claudeRequest.max_tokens === 'number' ? claudeRequest.max_tokens : undefined,
+            thinking.thinking,
+            entry.maxTokens,
+        );
         return claudeRequest;
     }
     if (options.minimaxCodeModel !== undefined) {
@@ -1300,6 +1367,14 @@ export function toClaudeRequest(
             request.reasoning_effort ?? null,
         );
         if (outputConfig !== undefined) claudeRequest.output_config = outputConfig;
+        // This endpoint has no temperature field at all, and an explicit one is rejected -
+        // so a request that will think must not carry it.
+        delete claudeRequest.temperature;
+        claudeRequest.max_tokens = minimaxCodeThinkingAwareMaxTokens(
+            typeof claudeRequest.max_tokens === 'number' ? claudeRequest.max_tokens : undefined,
+            request.reasoning_effort,
+            options.minimaxCodeModel,
+        );
         return claudeRequest;
     }
     if (request.reasoning_effort) {

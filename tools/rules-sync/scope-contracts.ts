@@ -598,6 +598,11 @@ function normalizeScopeDescription(value: string, aliases: ReadonlyMap<string, s
     if (hasAlternativeConnector && mentioned.size > 1) {
         return POLYMORPHIC_SCOPE_COMBINATIONS.get(Array.from(mentioned).sort().join('|'));
     }
+    // A relative clause describes the head noun ("starbase that changed
+    // controller"); ownership words inside the clause do not make it a country.
+    const relativeHead = phrase.match(/^(.+?) (?:that|which|who|whose) /)?.[1];
+    const relativeScope = relativeHead ? aliases.get(relativeHead) : undefined;
+    if (relativeScope) return relativeScope;
     // In Stellaris, ownership and control roles resolve to a country even when
     // the described object is a planet, fleet, ship, or army.
     if (isOwnershipRole) return 'country';

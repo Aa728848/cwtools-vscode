@@ -1,8 +1,10 @@
 import { expect } from 'chai';
 import {
+    collectDefinitionFields,
     descriptionChangeWindow,
     diffKind,
     type DocRule,
+    type FolderFieldStats,
     type RuleKind,
 } from './report';
 
@@ -48,5 +50,28 @@ describe('Stellaris rules sync report', () => {
         const diff = diffKind('trigger', game, baseline, new Map());
 
         expect(diff.changed).to.have.length(0);
+    });
+
+    it('does not count inline_script parameters after a multi-line quoted TRIGGER as definition fields', () => {
+        const script = [
+            'building_test = {',
+            '\tinline_script = {',
+            '\t\tscript = output/bonus_pop_growth',
+            '\t\tTRIGGER = "owner? = {',
+            '\t\t\thas_cloning_tradition = no # not a comment',
+            '\t\t}"',
+            '\t\tAMOUNT = 1.5',
+            '\t}',
+            '\tcategory = test',
+            '}',
+            'building_next = {',
+            '\tupkeep = 1',
+            '}',
+        ].join('\n');
+        const stats: FolderFieldStats = { folder: 'buildings', definitionCount: 0, fields: new Map(), defNames: new Set() };
+        collectDefinitionFields(script, 'buildings/test.txt', stats);
+
+        expect(stats.definitionCount).to.equal(2);
+        expect([...stats.fields.keys()].sort()).to.deep.equal(['category', 'inline_script', 'upkeep']);
     });
 });

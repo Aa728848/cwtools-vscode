@@ -1,4 +1,4 @@
-# Agent Note: Stellaris v4.5.0 规则同步与 CWT 规则补全
+# Agent Note: Stellaris v4.5.x 规则同步与 CWT 规则补全
 
 Status: implemented
 
@@ -49,12 +49,36 @@ Status: implemented
       - `common/starbases_consolidated.cwt`：补齐 `triggered_component_set`；
       - `common/defines.cwt`：在 `NGraphics`、`NCombat`、`NGameplay`、`NAI` 各模块补齐 28 项全局参数。
 
+### v4.5.2 增量同步
+
+```mermaid
+flowchart LR
+    A["script_documentation 4.5.2"] --> B["rules-sync report"]
+    B --> C["阶段一：logs 仅改差异项"]
+    C --> D["阶段二：triggers/effects/localisation/common CWT"]
+    B -. "误报" .-> E["修扫描器 + 回归测试"]
+    D --> F["report 全零"]
+    E --> F
+```
+
+- **命令**：新增 `pop_ethics_divergence`、`is_preferred_platform_weapons` 与 6 个 `set_/clear_ai_platform_*` effect，类型与同族 starbase 命令一致（`enum[weapon_type]`、`value_field[0.0..1.0]`、`bool`）。`ethos` 原版仍可解析，仅在描述中标注废弃，不删除。
+- **作用域收窄只改 log**：`is_archetype`、`is_ship_category/class/size`、`prevent_anomaly` 的 `Supported Scopes` 变化只写入 `trigger_docs.log`，CWT alias 不加 `## scopes`，保持由 log 驱动。
+- **本地化**：`GetPopsGuidingEthic` 迁至 `pop_faction`；`Faction` 提升不再接受 `pop_group`（原版文档与本地化均无此用法）；`GetIcon`、`GetNamePlural` 在 log 中按原版移除/收窄，但 `localisation.cwt` 中手工维护的 `GetIcon = any` 与宽范围 `GetNamePlural` 保留，因为原版大量使用 `[job.GetIcon]` 等职业目标写法。
+- **Common**：`on_actions.cwt` 补 `on_arkship_knights_detox{,_start,_cancelled}`（`this/root = planet, from = fleet`）；`defines.cwt` 补 `NShip.DESIGNER_STARBASE_WEAPON_PREF_MUL = float`；`num_buildings` 补可选 `category = any | enum[building_categories]`。
+- **扫描器误报改修工具而不是改规则**：
+  - `report.ts` 字段扫描跨行追踪双引号状态：`inline_script` 的 `TRIGGER = "...{` 多行字符串曾让括号深度少算一层，把 `AMOUNT` 及若干修饰符误报为建筑/职业字段。只跨行携带 `"`，避免裸撇号吞掉后续内容。
+  - `scope-contracts.ts` 中“中心名词 + 关系从句”（`starbase that changed controller`）优先解析为中心名词，不再因从句中的 `controller` 被判为 `country`；现有 `on_starbase_occupied` 的 `from = starbase` 本就正确。
+
 ## Alternatives considered
 
 1. **将 `overclock` / `role` / `action` 保持为 `scalar`**：
    - 被否决。原版 `common/` 目录下存在明确的类型系统支持（`<mega_overclock>`、`<tradable_actions>` 与 `value_set[ship_size_ship_roles]`），使用精确引用才能发挥 LSP 补全与校验的最大价值。
 2. **忽略 Common 字段级报告**：
    - 被否决。Common 参数漂移会导致语言服务器报出未知属性假阳性警告，覆盖至 0 findings 能确保规则库与 v4.5.0 原版完全同步。
+3. **为 `amount` 等误报字段补 CWT 规则，或为 `on_starbase_occupied` 加 errata**：
+   - 被否决。前者会在规则中写入并不存在的定义字段；后者只掩盖单点，同类关系从句注释仍会误判。修正扫描器并加回归测试才能根治。
+4. **从 `localisation.cwt` 同步删除 `GetIcon` / 收窄 `GetNamePlural`**：
+   - 被否决。原版本地化在职业等动态目标上广泛使用这两个命令，删除会产生大量假阳性。
 
 ## Verification
 
@@ -66,3 +90,4 @@ Status: implemented
   - `scope: +0 -0 ~0`。
 - 运行 `npm run compile`：前端 Webview 与 Extension Host 编译全部通过。
 - 运行 `npm run typecheck:test`：全量 TypeScript 类型检查通过。
+- v4.5.2：`report --no-open` 所有 diff 均为 `+0 -0 ~0`，`folders with findings: 0`，`scope contracts missing=0 mismatch=0`，`documented-but-unmodeled=0`；`npm run test:rules-sync` 通过（新增多行字符串字段扫描与关系从句作用域两条回归测试）；规则 diff 中无新增 `scalar`。

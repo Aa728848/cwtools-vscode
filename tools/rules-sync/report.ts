@@ -203,6 +203,28 @@ function countBraceDelta(line: string): number {
     return delta;
 }
 
+/** Brace delta for one line that may start inside a double-quoted string.
+ *  PDX strings can span lines (inline_script TRIGGER = "owner = {\n...}"), so
+ *  the open-quote state is carried between lines. Only `"` is carried: a stray
+ *  apostrophe in an unquoted token must not swallow the rest of the file. */
+function scanBraceLine(line: string, inQuote: boolean): { delta: number; inQuote: boolean } {
+    let quoted = inQuote;
+    let delta = 0;
+    for (let i = 0; i < line.length; i++) {
+        const ch = line[i]!;
+        if (quoted) {
+            if (ch === '\\') i++;
+            else if (ch === '"') quoted = false;
+            continue;
+        }
+        if (ch === '#') break;
+        if (ch === '"') quoted = true;
+        else if (ch === '{') delta++;
+        else if (ch === '}') delta--;
+    }
+    return { delta, inQuote: quoted };
+}
+
 // ---------- script_documentation parsing (same formats as parse-log.ts) ----------
 
 function addDocRule(map: Map<string, DocRule>, rule: DocRule) {
@@ -561,7 +583,7 @@ function toPosix(filePath: string): string {
 
 // ---------- vanilla common field-level scan ----------
 
-interface FolderFieldStats {
+export interface FolderFieldStats {
     folder: string;
     definitionCount: number;
     fields: Map<string, { count: number; example: string; exampleLine: number }>;
@@ -601,14 +623,17 @@ function isScriptContentFolder(folder: string): boolean {
     return SCRIPT_COMMON_CONTENT_FOLDERS.has(folder.split('/')[0]!);
 }
 
-function collectDefinitionFields(content: string, relPath: string, stats: FolderFieldStats) {
+export function collectDefinitionFields(content: string, relPath: string, stats: FolderFieldStats) {
     const lines = content.split('\n');
     let depth = 0;
     let inDefinition = false;
+    let inQuote = false;
     for (let i = 0; i < lines.length; i++) {
         const line = lines[i] ?? '';
+        // A line that starts inside a multi-line string is string content, never a key.
+        const startsInQuote = inQuote;
         const stripped = stripLineComment(line);
-        if (depth === 0) {
+        if (!startsInQuote && depth === 0) {
             const match = stripped.match(TOP_LEVEL_PDX_PATTERN);
             if (match && match[1] !== 'namespace' && stripped.includes('{')) {
                 // Top-level inline_script blocks are invocations carrying custom
@@ -622,7 +647,7 @@ function collectDefinitionFields(content: string, relPath: string, stats: Folder
                     inDefinition = true;
                 }
             }
-        } else if (depth === 1 && inDefinition) {
+        } else if (!startsInQuote && depth === 1 && inDefinition) {
             const match = stripped.match(TOP_LEVEL_PDX_PATTERN);
             if (match) {
                 const field = match[1]!.toLowerCase();
@@ -631,7 +656,9 @@ function collectDefinitionFields(content: string, relPath: string, stats: Folder
                 else stats.fields.set(field, { count: 1, example: relPath, exampleLine: i + 1 });
             }
         }
-        depth += countBraceDelta(line);
+        const scanned = scanBraceLine(line, inQuote);
+        inQuote = scanned.inQuote;
+        depth += scanned.delta;
         if (depth <= 0) {
             depth = 0;
             inDefinition = false;

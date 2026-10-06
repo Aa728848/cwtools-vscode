@@ -315,6 +315,17 @@ on_army_killed_in_combat = { }
         expect(contract!.confidence).to.equal('high');
     });
 
+    it('resolves a relative clause to its head noun instead of an ownership role inside it', () => {
+        const [contract] = extractScopeContractsFromText(`
+# This = occupying country
+# From = starbase that changed controller
+on_starbase_occupied = { }
+`, 'on_actions/00_on_actions.txt', 'on_actions', new Map([...aliases, ['starbase', 'starbase']]));
+
+        expect(contract!.scope).to.deep.equal({ this: 'country', root: 'country', from: ['starbase'] });
+        expect(contract!.confidence).to.equal('high');
+    });
+
     it('applies the on_ship_built comment errata instead of reporting a mismatch', () => {
         const [contract] = extractScopeContractsFromText(`
 # Scope: Ship Event

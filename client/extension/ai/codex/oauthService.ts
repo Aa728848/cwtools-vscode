@@ -7,6 +7,12 @@ import type {
     CodexRateLimitWindow,
 } from '../types';
 import { aiText } from '../messages';
+import {
+    CODEX_OPENAI_BETA,
+    type CodexCatalogEntry,
+    type CodexCatalogSnapshotStore,
+    loadCodexCatalog,
+} from './modelCatalog';
 
 /**
  * Models selectable in the Codex (ChatGPT subscription) channel. GPT-6.1 Sol is
@@ -27,8 +33,26 @@ export const CODEX_CHATGPT_MODELS = [
     'gpt-5.3-codex-spark',
 ] as const;
 
-/** Active context window advertised by the ChatGPT Codex model catalog. */
+/**
+ * Context window the ChatGPT Codex service serves for the GPT-5.6 family.
+ *
+ * The listing publishes `context_window: 272000` per slug; this is the value a
+ * shipped-table answer falls back to, and the ceiling
+ * `clampConfiguredContextTokens` enforces for these models.
+ */
 export const CODEX_CHATGPT_CONTEXT_TOKENS = 272_000;
+
+/**
+ * Effective context window for the GPT-6 family.
+ *
+ * The Codex listing states 272K for these slugs and 872K as their ceiling. The
+ * official client's own model manager reads the larger figure, so the shipped
+ * default here is the window the service actually serves rather than the
+ * conservative floor the listing prints. This number only feeds local
+ * compaction and overflow decisions — it never reaches the wire, because the
+ * subscription Responses endpoint rejects `max_output_tokens`.
+ */
+export const CODEX_CHATGPT_EFFECTIVE_CONTEXT_TOKENS = 384_000;
 
 export const CODEX_CHATGPT_API_BASE = 'https://chatgpt.com/backend-api/codex';
 export const CODEX_CHATGPT_USAGE_URL = 'https://chatgpt.com/backend-api/wham/usage';
@@ -166,6 +190,25 @@ export function mapCodexUsage(data: UsageResponse | undefined): CodexRateLimitBu
     return result;
 }
 
+/**
+ * The subscription backend is served under a beta flag, not as stable API.
+ * Without `openai-beta` the endpoint is a different surface; the official Codex
+ * CLI has always sent it, so omitting it is the line that turns into a 400/403
+ * once the backend tightens.
+ */
+export function codexSubscriptionHeaders(
+    credentials: Pick<StoredOAuthCredentials, 'accessToken' | 'accountId'>,
+    userAgent: string,
+): Record<string, string> {
+    return {
+        Authorization: `Bearer ${credentials.accessToken}`,
+        ...(credentials.accountId ? { 'ChatGPT-Account-Id': credentials.accountId } : {}),
+        'openai-beta': CODEX_OPENAI_BETA,
+        originator: 'opencode',
+        'User-Agent': userAgent,
+    };
+}
+
 function authUrl(verifier: string, state: string): string {
     const challenge = crypto.createHash('sha256').update(verifier).digest('base64url');
     const params = new URLSearchParams({
@@ -199,14 +242,93 @@ function errorPage(): string {
  */
 export class ChatGptOAuthService implements vscode.Disposable {
     private cachedStatus?: { value: CodexAccountStatus; at: number };
-    private refreshPromise?: Promise<StoredOAuthCredentials>;
+    /** In-flight rotations, keyed by the refresh token they belong to. */
+    private readonly refreshPromises = new Map<string, Promise<StoredOAuthCredentials>>();
     private activeLoginCancel?: (reason?: Error) => void;
 
     constructor(
         private readonly secrets: vscode.SecretStorage,
         private readonly fetchFn: FetchLike = fetch,
         private readonly clientVersion = 'unknown',
+        private readonly catalogSnapshot?: CodexCatalogSnapshotStore,
     ) {}
+
+    /** User agent every subscription request carries; kept in one place so the wire identity cannot drift. */
+    get userAgent(): string {
+        return `cwtools-vscode/${this.clientVersion}`;
+    }
+
+    /**
+     * Read the live subscription model catalog for the signed-in account.
+     *
+     * The shipped table stays the floor: it answers before the first sign-in and
+     * when a listing call fails. Only a live listing is persisted.
+     */
+    async getModelCatalog(force = false): Promise<readonly CodexCatalogEntry[]> {
+        const stored = await this.readCredentials();
+        if (!stored) return [];
+        try {
+            const credentials = await this.ensureCredentials(stored);
+            return await loadCodexCatalog({
+                fetchFn: this.fetchFn,
+                headers: codexSubscriptionHeaders(credentials, this.userAgent),
+                accountKey: credentials.accountId ?? 'default',
+                force,
+                ...(this.catalogSnapshot ? { snapshot: this.catalogSnapshot } : {}),
+            });
+        } catch {
+            return [];
+        }
+    }
+
+    /**
+     * Credential accessors for the account pool.
+     *
+     * The pool owns account selection and rotation bookkeeping, so it needs to
+     * read, refresh and write the stored credential directly rather than going
+     * through the single-account request path.
+     */
+    async readStoredCredentials(): Promise<StoredOAuthCredentials | undefined> {
+        return this.readCredentials();
+    }
+
+    async saveStoredCredentials(credentials: StoredOAuthCredentials): Promise<void> {
+        await this.storeCredentials(credentials);
+    }
+
+    async clearStoredCredentials(): Promise<void> {
+        await this.secrets.delete(SECRET_KEY);
+        this.cachedStatus = undefined;
+    }
+
+    /**
+     * Rotate one credential for the account pool.
+     *
+     * Persistence is left to the pool: it writes the rotation into its own
+     * document and mirrors only the primary account into the legacy slot.
+     */
+    async refreshStoredCredentials(credentials: StoredOAuthCredentials): Promise<StoredOAuthCredentials> {
+        return this.refreshCredentials(credentials, false);
+    }
+
+    /**
+     * Access token + account id for the account-scoped turn-state tracker.
+     *
+     * The tracker keys its entries by an opaque digest of these two values, so a
+     * rotation or a sign-in change invalidates state minted by the previous
+     * signer without ever putting that fact on the wire.
+     */
+    async getTurnStateCredentials(forceRefresh = false): Promise<{ accessToken: string; accountId?: string }> {
+        const stored = await this.readCredentials();
+        if (!stored) return { accessToken: '' };
+        const credentials = forceRefresh
+            ? await this.refreshCredentials(stored)
+            : await this.ensureCredentials(stored);
+        return {
+            accessToken: credentials.accessToken,
+            ...(credentials.accountId ? { accountId: credentials.accountId } : {}),
+        };
+    }
 
     async getAccountStatus(force = false): Promise<CodexAccountStatus> {
         if (!force && this.cachedStatus && Date.now() - this.cachedStatus.at < STATUS_CACHE_MS) {
@@ -227,10 +349,16 @@ export class ChatGptOAuthService implements vscode.Disposable {
             const credentials = await this.ensureCredentials(stored);
             const claims = accountClaims(credentials);
             const nested = claims['https://api.openai.com/auth'];
-            const usage = await this.fetchUsage(credentials).catch(() => undefined);
+            const [usage, catalog] = await Promise.all([
+                this.fetchUsage(credentials).catch(() => undefined),
+                this.getModelCatalog(force).catch(() => [] as readonly CodexCatalogEntry[]),
+            ]);
             const planType = typeof usage?.plan_type === 'string'
                 ? usage.plan_type
                 : claims.chatgpt_plan_type ?? nested?.chatgpt_plan_type ?? null;
+            // The listing is the authority on what this account may call; the
+            // shipped table only stands in when it named nothing usable.
+            const live = catalog.length > 0;
             const value: CodexAccountStatus = {
                 available: true,
                 signedIn: true,
@@ -238,7 +366,15 @@ export class ChatGptOAuthService implements vscode.Disposable {
                 accountType: 'chatgpt',
                 email: claims.email ?? null,
                 planType,
-                models: [...CODEX_CHATGPT_MODELS],
+                models: live ? catalog.map(entry => entry.id) : [...CODEX_CHATGPT_MODELS],
+                ...(live ? {
+                    modelContextWindows: Object.fromEntries(
+                        catalog
+                            .filter(entry => entry.contextWindow !== null && entry.contextWindow! > 0)
+                            .map(entry => [entry.id, entry.contextWindow!]),
+                    ),
+                    catalogLive: true,
+                } : {}),
                 rateLimits: mapCodexUsage(usage),
             };
             this.cachedStatus = { value, at: Date.now() };
@@ -267,12 +403,7 @@ export class ChatGptOAuthService implements vscode.Disposable {
         const credentials = forceRefresh
             ? await this.refreshCredentials(stored)
             : await this.ensureCredentials(stored);
-        return {
-            Authorization: `Bearer ${credentials.accessToken}`,
-            ...(credentials.accountId ? { 'ChatGPT-Account-Id': credentials.accountId } : {}),
-            originator: 'opencode',
-            'User-Agent': `cwtools-vscode/${this.clientVersion}`,
-        };
+        return codexSubscriptionHeaders(credentials, this.userAgent);
     }
 
     async startLogin(): Promise<ChatGptOAuthLogin> {
@@ -426,10 +557,17 @@ export class ChatGptOAuthService implements vscode.Disposable {
         this.cachedStatus = undefined;
     }
 
-    private async storeTokenResponse(
+    /**
+     * Turn a token response into a credential.
+     *
+     * Split out from persistence because the pool owns writing its own accounts:
+     * it needs the rotated credential without it also landing in the single
+     * legacy slot, where it would overwrite whichever account lives there.
+     */
+    private buildCredentials(
         tokens: OAuthTokenResponse,
         previous?: StoredOAuthCredentials,
-    ): Promise<StoredOAuthCredentials> {
+    ): StoredOAuthCredentials {
         if (!tokens.access_token || (!tokens.refresh_token && !previous?.refreshToken)) {
             throw new Error(aiText(
                 'ChatGPT did not return complete OAuth credentials.',
@@ -444,6 +582,14 @@ export class ChatGptOAuthService implements vscode.Disposable {
             accountId: previous?.accountId,
         };
         credentials.accountId = extractAccountId(credentials) ?? credentials.accountId;
+        return credentials;
+    }
+
+    private async storeTokenResponse(
+        tokens: OAuthTokenResponse,
+        previous?: StoredOAuthCredentials,
+    ): Promise<StoredOAuthCredentials> {
+        const credentials = this.buildCredentials(tokens, previous);
         await this.storeCredentials(credentials);
         return credentials;
     }
@@ -454,9 +600,22 @@ export class ChatGptOAuthService implements vscode.Disposable {
             : this.refreshCredentials(credentials);
     }
 
-    private refreshCredentials(credentials: StoredOAuthCredentials): Promise<StoredOAuthCredentials> {
-        if (this.refreshPromise) return this.refreshPromise;
-        this.refreshPromise = this.fetchFn(`${CHATGPT_OAUTH_ISSUER}/oauth/token`, {
+    /**
+     * Rotate one credential, single-flighted **per credential**.
+     *
+     * Keying the in-flight promise by refresh token matters once a pool holds
+     * several accounts: a global slot would hand account B the promise belonging
+     * to account A and return A's rotated credential for B's request.
+     *
+     * @param persist - false when the account pool owns persistence; the pool
+     *   writes the rotation back into its own document, and writing it to the
+     *   single legacy slot as well would overwrite another account's credential.
+     */
+    private refreshCredentials(credentials: StoredOAuthCredentials, persist = true): Promise<StoredOAuthCredentials> {
+        const key = credentials.refreshToken;
+        const inFlight = this.refreshPromises.get(key);
+        if (inFlight !== undefined) return inFlight;
+        const task = this.fetchFn(`${CHATGPT_OAUTH_ISSUER}/oauth/token`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
             body: new URLSearchParams({
@@ -466,29 +625,33 @@ export class ChatGptOAuthService implements vscode.Disposable {
             }).toString(),
         }).then(async response => {
             if (!response.ok) {
-                if (response.status === 400 || response.status === 401) {
-                    await this.secrets.delete(SECRET_KEY);
+                if ((response.status === 400 || response.status === 401) && persist) {
+                    // Only clear the slot this credential actually occupies; a
+                    // pooled account's rejection is the pool's to record.
+                    const stored = await this.readCredentials();
+                    if (stored?.refreshToken === credentials.refreshToken) {
+                        await this.secrets.delete(SECRET_KEY);
+                    }
                 }
-                throw new Error(aiText(
+                throw Object.assign(new Error(aiText(
                     `ChatGPT OAuth refresh failed (${response.status}). Sign in again.`,
                     `ChatGPT OAuth 刷新失败（${response.status}）。请重新登录。`,
-                ));
+                )), { status: response.status });
             }
-            return this.storeTokenResponse(await response.json() as OAuthTokenResponse, credentials);
+            const tokens = await response.json() as OAuthTokenResponse;
+            return persist
+                ? this.storeTokenResponse(tokens, credentials)
+                : this.buildCredentials(tokens, credentials);
         }).finally(() => {
-            this.refreshPromise = undefined;
+            if (this.refreshPromises.get(key) === task) this.refreshPromises.delete(key);
         });
-        return this.refreshPromise;
+        this.refreshPromises.set(key, task);
+        return task;
     }
 
     private async fetchUsage(credentials: StoredOAuthCredentials): Promise<UsageResponse> {
         const response = await this.fetchFn(CODEX_CHATGPT_USAGE_URL, {
-            headers: {
-                Authorization: `Bearer ${credentials.accessToken}`,
-                ...(credentials.accountId ? { 'ChatGPT-Account-Id': credentials.accountId } : {}),
-                originator: 'opencode',
-                'User-Agent': `cwtools-vscode/${this.clientVersion}`,
-            },
+            headers: codexSubscriptionHeaders(credentials, this.userAgent),
         });
         if (!response.ok) throw new Error(`Codex usage request failed (${response.status}).`);
         return response.json() as Promise<UsageResponse>;

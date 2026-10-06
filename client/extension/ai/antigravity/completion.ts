@@ -3,7 +3,7 @@ import { isRecord } from '../../../shared/protocolValidation';
 import type { ChatCompletionRequest, ChatCompletionResponse, ChatMessage, ReasoningEffort, ToolCall } from '../types';
 import { aiText } from '../messages';
 import { antigravityOutputTokens, antigravityRuntimeModel } from './models';
-import { AntigravityApiError, postAntigravity } from './api';
+import { AntigravityApiError, postAntigravity, type AntigravityRequestContextSource } from './api';
 import type { AntigravityOAuthService } from './oauthService';
 
 export interface AntigravityCallbacks {
@@ -194,22 +194,79 @@ export async function consumeAntigravityResponse(
     };
 }
 
+/** Attempts one turn may spend: the first plus a 401 refresh and a 429 failover. */
+const ANTIGRAVITY_MAX_ATTEMPTS = 3;
+
+/**
+ * What the chat path needs from the OAuth service.
+ *
+ * The account-aware methods are optional so a test double can supply only
+ * `getRequestContext`; the real service implements all of them, which is what
+ * makes 429 failover and usage recording observable in production.
+ */
+export interface AntigravityChatOAuthSource extends AntigravityRequestContextSource {
+    recordAccountUse?(accountId: string): Promise<void>;
+    noteAccountRateLimited?(accountId: string, retryAfterMs?: number): Promise<void>;
+    noteAccountAuthFailure?(accountId: string, reason: string): Promise<void>;
+}
+
 export async function callAntigravity(
-    oauth: Pick<AntigravityOAuthService, 'getRequestContext'>,
+    oauth: AntigravityChatOAuthSource,
     request: ChatCompletionRequest, payload: Record<string, unknown>, effort: ReasoningEffort,
     signal: AbortSignal, callbacks: AntigravityCallbacks, fetchFn: typeof fetch = fetch,
 ): Promise<ChatCompletionResponse> {
-    for (let attempt = 0; attempt < 2; attempt++) {
+    // Accounts already tried for THIS request. A retry must land on a different
+    // one: retrying a 429 against the same account just spends the wait twice.
+    const tried = new Set<string>();
+    let forceRefresh = false;
+    let lastError: unknown;
+    for (let attempt = 0; attempt < ANTIGRAVITY_MAX_ATTEMPTS; attempt++) {
         try {
-            const { token, projectId } = await oauth.getRequestContext(signal, attempt > 0);
-            const response = await postAntigravity(fetchFn, token, 'streamGenerateContent',
-                buildAntigravityRequest(request, payload, projectId, effort), signal, request.model.startsWith('claude-'));
-            return await consumeAntigravityResponse(response, request.model, signal, callbacks);
+            const context = await oauth.getRequestContext(signal, forceRefresh, tried);
+            // One forced refresh per request: the retry after a 401 is what
+            // distinguishes "our token is stale" from "the credential is dead".
+            forceRefresh = false;
+            const accountId = context.accountId;
+            if (accountId !== undefined) tried.add(accountId);
+            const response = await postAntigravity(fetchFn, context.token, 'streamGenerateContent',
+                buildAntigravityRequest(request, payload, context.projectId, effort), signal, request.model.startsWith('claude-'));
+            const result = await consumeAntigravityResponse(response, request.model, signal, callbacks);
+            if (accountId !== undefined) void oauth.recordAccountUse?.(accountId).catch(() => undefined);
+            return result;
         } catch (error) {
             signal.throwIfAborted();
-            if (attempt === 0 && error instanceof AntigravityApiError && error.status === 401) continue;
+            lastError = error;
+            if (!(error instanceof AntigravityApiError)) throw error;
+            // A stale token is worth exactly one forced refresh and replay. The
+            // account is NOT marked failed here: a single 401 is far more often
+            // an expired token than a revoked credential, and the pool's forced
+            // refresh already promotes another account if the refresh is refused.
+            if (error.status === 401 && attempt === 0) {
+                forceRefresh = true;
+                continue;
+            }
+            // A rate limit rotates to another account while this one cools down.
+            if (error.status === 429) {
+                const cooling = lastTried(tried);
+                if (cooling !== undefined) {
+                    await oauth.noteAccountRateLimited?.(cooling).catch(() => undefined);
+                }
+                continue;
+            }
             throw error;
         }
     }
-    throw new Error('Antigravity authentication failed.');
+    throw lastError instanceof Error ? lastError : new Error('Antigravity request failed after retries.');
+}
+
+/**
+ * The account id most recently attempted.
+ *
+ * Insertion order is the attempt order, so the last entry is the account the
+ * failure came from — the one a 429 should cool down.
+ */
+function lastTried(tried: ReadonlySet<string>): string | undefined {
+    let last: string | undefined;
+    for (const id of tried) last = id;
+    return last;
 }

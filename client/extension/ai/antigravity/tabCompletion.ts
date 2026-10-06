@@ -1,7 +1,7 @@
 import { randomUUID } from 'crypto';
 import { isRecord } from '../../../shared/protocolValidation';
 import { aiText } from '../messages';
-import { AntigravityApiError, postAntigravity } from './api';
+import { AntigravityApiError, postAntigravity, type AntigravityRequestContextSource } from './api';
 import { consumeAntigravityResponse } from './completion';
 import type { AntigravityOAuthService } from './oauthService';
 
@@ -103,7 +103,7 @@ function documentOffset(text: string, normalizedOffset: number): number {
 }
 
 export async function callAntigravityTab(
-    oauth: Pick<AntigravityOAuthService, 'getRequestContext'>, fetchFn: typeof fetch, context: AntigravityTabContext,
+    oauth: AntigravityRequestContextSource, fetchFn: typeof fetch, context: AntigravityTabContext,
     signal: AbortSignal, jump = false, maxNewTokens = 128,
 ): Promise<{ start: number; end: number; text: string } | undefined> {
     signal.throwIfAborted();

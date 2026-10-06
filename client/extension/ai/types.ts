@@ -244,7 +244,7 @@ export interface AIProviderConfig {
     /** Transport used for primary chat turns. */
     runtimeKind?: 'http';
     /** Credential mechanism used by this provider. */
-    authKind?: 'api-key' | 'none' | 'chatgpt-oauth' | 'antigravity-oauth';
+    authKind?: 'api-key' | 'none' | 'chatgpt-oauth' | 'antigravity-oauth' | 'workbuddy-oauth' | 'minimax-code-oauth' | 'claude-subscription-oauth';
     /** Whether stateless utility calls (translation, titles, routing) are supported. */
     supportsUtilityCalls?: boolean;
 }
@@ -273,6 +273,14 @@ export interface CodexAccountStatus {
     email?: string | null;
     planType?: string | null;
     models: string[];
+    /**
+     * Per-model context windows the subscription listing stated, keyed by model id.
+     * Absent entries fall back to the shipped table; the map is empty when the
+     * listing could not be read.
+     */
+    modelContextWindows?: Record<string, number>;
+    /** True when `models` came from the live listing rather than the shipped table. */
+    catalogLive?: boolean;
     rateLimits: CodexRateLimitBucket[];
     error?: string;
 }
@@ -281,6 +289,60 @@ import type { AntigravityQuotaBucket, AntigravityAccountStatus } from '../../sha
 export type { AntigravityQuotaBucket, AntigravityAccountStatus };
 export { isAntigravityAccountStatus } from '../../shared/antigravityAccount';
 import type { CommandCodeAccountStatus, CommandCodeWindowLimit, CommandCodeCredits, CommandCodeUsageSummary, CommandCodeSubscription, CommandCodeUser } from './commandcode/accountService';
+import type { KimiCodeAccountStatus } from './kimi/accountStatus';
+export type { KimiCodeAccountStatus } from './kimi/accountStatus';
+/**
+ * Multi-account view for whichever subscription line is selected.
+ *
+ * Credentials never cross this boundary: the rows carry aliases, routing state
+ * and expiry instants only.
+ */
+export interface SubscriptionPoolView {
+    providerId: string;
+    strategy: 'sequential' | 'round-robin' | 'sticky';
+    accounts: Array<{
+        id: string;
+        alias: string;
+        isPrimary: boolean;
+        authStatus?: 'invalid_credential' | 'rate_limited';
+        authFailedReason?: string;
+        cooldownUntil?: number;
+        cooldownReason?: string;
+        expiresAt?: number;
+    }>;
+}
+
+import type { WorkBuddyAccountStatus } from './workbuddy/accountStatus';
+export type { WorkBuddyAccountStatus } from './workbuddy/accountStatus';
+
+/**
+ * MiniMax Code session status shown on the settings card.
+ *
+ * Only counts and flags cross the boundary: no credential material ever reaches
+ * the webview.
+ */
+/**
+ * Claude subscription session status shown on the settings card.
+ *
+ * Only counts and non-secret account facts cross the boundary.
+ */
+export interface ClaudeSubscriptionAccountStatus {
+    signedIn: boolean;
+    email: string | null;
+    uuid: string | null;
+    scopes: string[];
+    fresh: boolean;
+}
+
+export interface MinimaxCodeAccountStatus {
+    signedIn: boolean;
+    desktopCount: number;
+    managedCount: number;
+    /** At least one credential is still comfortably valid. */
+    fresh: boolean;
+    /** Only this extension's own credential can be signed out of. */
+    canSignOut: boolean;
+}
 export type { CommandCodeAccountStatus, CommandCodeWindowLimit, CommandCodeCredits, CommandCodeUsageSummary, CommandCodeSubscription, CommandCodeUser };
 
 export type CustomApiFormat =
@@ -2613,6 +2675,22 @@ export type WebViewMessage =
     | { type: 'codexRefreshAccount' }
     | { type: 'codexLogout' }
     | { type: 'refreshCommandCodeQuota' }
+    | { type: 'commandcodeLogin' }
+    | { type: 'kimiLogin' }
+    | { type: 'kimiLogout' }
+    | { type: 'workbuddyLogin'; region: 'cn' | 'intl' }
+    | { type: 'workbuddyRefreshAccounts' }
+    | { type: 'minimaxCodeLogin' }
+    | { type: 'minimaxCodeLogout' }
+    | { type: 'claudeSubscriptionLogin' }
+    | { type: 'claudeSubscriptionLogout' }
+    | { type: 'setAntigravityPoolStrategy'; strategy: 'sequential' | 'round-robin' | 'sticky' }
+    | { type: 'setAntigravityPrimary'; accountId: string }
+    | { type: 'clearAntigravityCooldown'; accountId: string }
+    | { type: 'setSubscriptionPoolStrategy'; strategy: 'sequential' | 'round-robin' | 'sticky' }
+    | { type: 'setSubscriptionPoolPrimary'; accountId: string }
+    | { type: 'clearSubscriptionPoolCooldown'; accountId: string }
+    | { type: 'removeSubscriptionPoolAccount'; accountId: string }
     | { type: 'antigravityLogin' }
     | { type: 'antigravityRefreshAccount' }
     | { type: 'antigravityLogout' }
@@ -2683,7 +2761,7 @@ export type HostMessage =
     | { type: 'slashCommandList'; commands: SlashCommandDescriptor[] }
     | { type: 'slashCommandResult'; command: string; status: 'success' | 'error' | 'queued' | 'needsInput'; message: string; uiAction?: 'openModelMenu' | 'openReasoningMenu' | 'openPermissionsMenu' }
     | { type: 'todoUpdate'; todos: TodoItem[]; agentId?: string; threadId?: string; runId?: string }
-    | { type: 'settingsData'; providers: ProviderMeta[]; current: PanelSettings; ollamaModels?: OllamaModelInfo[]; showPanel?: boolean; targetSurface?: 'chat' | 'manager'; modelContextTokens?: Record<string, number>; thinkingModelPrefixes?: string[]; reasoningCapabilities?: Record<string, ModelReasoningCapability>; codexAccount?: CodexAccountStatus; antigravityAccount?: AntigravityAccountStatus; commandcodeAccount?: CommandCodeAccountStatus; subscriptionProxy?: SubscriptionProxyStatus }
+    | { type: 'settingsData'; providers: ProviderMeta[]; current: PanelSettings; ollamaModels?: OllamaModelInfo[]; showPanel?: boolean; targetSurface?: 'chat' | 'manager'; modelContextTokens?: Record<string, number>; thinkingModelPrefixes?: string[]; reasoningCapabilities?: Record<string, ModelReasoningCapability>; codexAccount?: CodexAccountStatus; antigravityAccount?: AntigravityAccountStatus; commandcodeAccount?: CommandCodeAccountStatus; kimiAccount?: KimiCodeAccountStatus; workbuddyAccount?: WorkBuddyAccountStatus; minimaxCodeAccount?: MinimaxCodeAccountStatus; claudeSubscriptionAccount?: ClaudeSubscriptionAccountStatus; subscriptionPool?: SubscriptionPoolView; subscriptionProxy?: SubscriptionProxyStatus }
     | { type: 'subscriptionProxyStatus'; status: SubscriptionProxyStatus; saved?: boolean; targetSurface?: 'chat' | 'manager' }
     | { type: 'ollamaModels'; models: OllamaModelInfo[]; error?: string }
     | { type: 'apiModelsFetched'; providerId: string; models: Array<{ id: string }>; dynContexts?: Record<string, number>; reasoningCapabilities?: Record<string, ModelReasoningCapability>; error?: string; ctxNote?: string }

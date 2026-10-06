@@ -43,7 +43,74 @@ import {
 import { DEFAULT_REASONING_KEY, detectReasoningKey, KNOWN_REASONING_KEYS, reasoningValue } from './providers/reasoningKey';
 import { ErrorReporter } from './errorReporter';
 import { SOURCE, aiText } from './messages';
-import { ChatGptOAuthService } from './codex/oauthService';
+import { ChatGptOAuthService, codexSubscriptionHeaders } from './codex/oauthService';
+import {
+    CODEX_OPENAI_BETA,
+    CODEX_TURN_STATE_HEADER,
+    codexDefaultOutputVerbosity,
+} from './codex/modelCatalog';
+import { CodexTurnStateTracker } from './codex/turnState';
+import { CommandCodeOAuthService } from './commandcode/oauthService';
+import { offloadAntigravityRequestImages } from './antigravity/imageBudget';
+import { KimiCodeOAuthService, kimiIdentityHeaders, readOrCreateKimiDeviceId, KIMI_REGION_OAUTH_HOSTS } from './kimi/oauthService';
+import { KimiCodeTokenStore, KimiUnauthorizedError } from './kimi/tokenStore';
+import {
+    WorkBuddyCredentialStore,
+    mergeWorkBuddyAccounts,
+    isWorkBuddyCredentialFresh,
+    scanWorkBuddyDesktopCredentials,
+    workBuddyAccountKey,
+    type WorkBuddyCredentials,
+} from './workbuddy/credentials';
+import { WorkBuddyOAuthService, refreshWorkBuddyCredentials, workBuddyHeaders } from './workbuddy/client';
+import {
+    MinimaxCodeCredentialStore,
+    isMinimaxCodeCredentialFresh,
+    mergeMinimaxCodeCredentials,
+    scanMinimaxCodeDesktopCredentials,
+    minimaxCodeAgentHost,
+    type MinimaxCodeCredentials,
+} from './minimaxcode/credentials';
+import {
+    MinimaxCodeOAuthService,
+    refreshMinimaxCodeCredentials,
+} from './minimaxcode/oauthService';
+import { MINIMAX_CODE_AGENT_LLM_PREFIX } from './minimaxcode/types';
+import {
+    SubscriptionPoolRegistry,
+    type SubscriptionPoolEntry,
+} from './pool/poolRegistry';
+import {
+    claudePoolCredentials,
+    claudePoolIdentityKey,
+    codexPoolCredentials,
+    codexPoolIdentityKey,
+    commandCodePoolCredentials,
+    commandCodePoolIdentityKey,
+    kimiPoolCredentials,
+    kimiPoolIdentityKey,
+    minimaxCodePoolCredentials,
+    minimaxCodePoolIdentityKey,
+    subscriptionRefreshFailureStatus,
+    workBuddyPoolCredentials,
+    workBuddyPoolIdentityKey,
+} from './pool/subscriptionPools';
+import type { PooledOAuthCredentials } from './pool/oauthAccountPool';
+import {
+    ClaudeSubscriptionCredentialStore,
+    type ClaudeSubscriptionCredentials,
+} from './claudesub/credentials';
+import {
+    ClaudeSubscriptionOAuthService,
+    claudeSubscriptionHeaders,
+    refreshClaudeAccessToken,
+} from './claudesub/oauthService';
+import {
+    CLAUDE_API_BASE,
+    CLAUDE_MESSAGES_PATH,
+    CLAUDE_SUBSCRIPTION_CACHE_TTL,
+} from './claudesub/types';
+import { getCommandCodeAccountStatus } from './commandcode/accountService';
 import { AntigravityOAuthService } from './antigravity/oauthService';
 import { antigravityDisplayModel } from './antigravity/models';
 import { callAntigravity } from './antigravity/completion';
@@ -57,6 +124,16 @@ import { resolveEffectiveCacheCapability } from './cacheCapability';
 
 /** Providers that reject the `detail` sub-field inside `image_url` objects. */
 const STRIP_IMAGE_DETAIL_PROVIDERS = new Set(['minimax', 'glm', 'qwen']);
+
+/**
+ * System prompt a WorkBuddy request opens with when the caller supplied none.
+ *
+ * The subscription's international backend requires the first message to be a
+ * system turn (400 code 11128 otherwise). Neutral wording, because it stands in
+ * only to satisfy the shape — it is not a policy the model should follow.
+ */
+const WORKBUDDY_IMPLICIT_SYSTEM_PROMPT =
+    'You are a helpful coding assistant. Follow the user instructions and use the provided tools when they help.';
 function shouldRequestStreamUsage(providerId: string, model: string, endpoint: string): boolean {
     return resolveEffectiveCacheCapability({
         providerId,
@@ -91,6 +168,68 @@ interface ToolCallDeltaMetadata {
     index?: number;
 }
 const DEFAULT_CUSTOM_API_FORMAT: CustomApiFormat = 'openai-chat-completions';
+/** Where the live Codex model listing is persisted so a restart renders the picker from disk. */
+const CODEX_CATALOG_SNAPSHOT_KEY = 'cwtools.ai.codexChatgpt.catalog.v1';
+
+/**
+ * Account-pool storage keys, one per line.
+ *
+ * Each line keeps its own document so a corrupted or oversized pool on one line
+ * cannot affect another, and so removing a line's accounts is a single delete.
+ */
+const CODEX_POOL_KEY = 'cwtools.ai.codexChatgpt.pool.v1';
+const KIMI_CODE_POOL_KEY = 'cwtools.ai.kimiCode.pool.v1';
+const CLAUDE_SUBSCRIPTION_POOL_KEY = 'cwtools.ai.claudeSubscription.pool.v1';
+const MINIMAX_CODE_POOL_KEY = 'cwtools.ai.minimaxCode.pool.v1';
+const WORKBUDDY_POOL_KEY = 'cwtools.ai.workbuddy.pool.v1';
+const COMMANDCODE_POOL_KEY = 'cwtools.ai.commandcode.pool.v1';
+
+/**
+ * Whether this request must carry the reasoning field on every assistant message.
+ *
+ * Kimi Code's subscription route is the case: the K3 family reasons by default
+ * and the service keeps ("preserved thinking") the whole chain, so it rejects a
+ * tool-call turn whose assistant message omits `reasoning_content` with
+ * "thinking is enabled but reasoning_content is missing". A turn that genuinely
+ * produced no reasoning must therefore send an empty string instead of nothing.
+ * K2-family models on the same route have no such requirement.
+ */
+function requiresReasoningOnEveryAssistantMessage(providerId: string, model: string): boolean {
+    if (providerId !== 'kimi-code-plan') return false;
+    return /(?:^|\/)(?:kimi-)?k3(?:-|$)/i.test(model.trim());
+}
+
+/**
+ * Read an upstream `Retry-After` as milliseconds.
+ *
+ * Both spellings the RFC allows are accepted (seconds, or an HTTP date), and the
+ * value is capped so a hostile header cannot park an account for hours.
+ */
+export function retryAfterMsFromHeaders(headers: { get(name: string): string | null } | undefined): number | undefined {
+    const raw = headers?.get('retry-after')?.trim();
+    if (!raw) return undefined;
+    const seconds = Number(raw);
+    if (Number.isFinite(seconds) && seconds >= 0) return Math.min(seconds * 1000, 10 * 60_000);
+    const timestamp = Date.parse(raw);
+    if (!Number.isFinite(timestamp)) return undefined;
+    return Math.min(Math.max(0, timestamp - Date.now()), 10 * 60_000);
+}
+
+/**
+ * Opaque local identity of whoever signs a Codex request.
+ *
+ * Turn state is account-scoped, so the client has to notice when the signer
+ * changed without ever putting that fact on the wire. The digest is computed and
+ * compared locally: it is not a header, not a credential, and never logged.
+ */
+function codexAuthOwnerKey(credentials: { accessToken: string; accountId?: string }): string {
+    return crypto.createHash('sha256')
+        .update(credentials.accountId ?? '')
+        .update('\0')
+        .update(credentials.accessToken)
+        .digest('hex')
+        .slice(0, 32);
+}
 
 function isResponsesFunctionCallItemId(value: unknown): value is string {
     return typeof value === 'string' && value.startsWith('fc_');
@@ -313,6 +452,38 @@ export class AIService {
     private reasoningEffortOverride: AIUserConfig['reasoningEffort'] | null = null;
     /** In-memory tool presentation mode override for the active extension session. */
     private toolPresentationModeOverride: ToolPresentationMode | null = null;
+    /**
+     * Account-scoped `x-codex-turn-state` for in-flight subscription turns.
+     *
+     * The tracker is deliberately process-local: the token is opaque, short-lived
+     * and never persisted, so a restart simply starts a fresh turn.
+     */
+    private readonly codexTurnStates = new CodexTurnStateTracker();
+    private readonly commandCodeOAuth: CommandCodeOAuthService;
+    private readonly kimiCodeOAuth: KimiCodeOAuthService;
+    private readonly kimiCodeTokens: KimiCodeTokenStore;
+    private readonly workBuddyCredentials: WorkBuddyCredentialStore;
+    private readonly workBuddyOAuth: WorkBuddyOAuthService;
+    private readonly minimaxCodeCredentials: MinimaxCodeCredentialStore;
+    private readonly minimaxCodeOAuth: MinimaxCodeOAuthService;
+    private readonly claudeSubscriptionCredentials: ClaudeSubscriptionCredentialStore;
+    private readonly claudeSubscriptionOAuth: ClaudeSubscriptionOAuthService;
+    /**
+     * Account pools for every subscription line that can hold more than one
+     * credential. One registry so the selection, cooldown and account-retention
+     * rules are the same everywhere.
+     */
+    private readonly subscriptionPools: SubscriptionPoolRegistry;
+    /** Desktop accounts this extension has been asked to hide from its own scheduling. */
+    private readonly hiddenWorkBuddyAccounts = new Set<string>();
+    /**
+     * Identity headers of the credential the in-flight WorkBuddy request uses.
+     *
+     * Resolved once per `chatCompletion` (the bearer and these headers must come
+     * from the same account) and read by the request builders, which keeps their
+     * signatures unchanged.
+     */
+    private workBuddyIdentityHeaders: Record<string, string> = {};
 
 
     constructor(private context: vs.ExtensionContext) {
@@ -329,10 +500,431 @@ export class AIService {
             context.secrets,
             this.subscriptionProxy.fetch,
             String(context.extension?.packageJSON?.version ?? 'unknown'),
+            {
+                read: () => Promise.resolve(context.globalState?.get<unknown>(CODEX_CATALOG_SNAPSHOT_KEY)),
+                write: async value => { await context.globalState?.update(CODEX_CATALOG_SNAPSHOT_KEY, value); },
+            },
         );
         context.subscriptions?.push(this.chatGptOAuth);
         this.antigravityOAuth = new AntigravityOAuthService(context.secrets, this.subscriptionProxy.fetch);
         context.subscriptions?.push(this.antigravityOAuth);
+        this.commandCodeOAuth = new CommandCodeOAuthService({
+            // The browser callback hands us a freshly minted key; it is only
+            // stored after the account API accepts it, so an unusable key never
+            // replaces a working one.
+            verifyKey: async apiKey => {
+                const status = await getCommandCodeAccountStatus(apiKey, true, this.subscriptionProxy.fetch);
+                if (!status.available) {
+                    throw new Error(aiText(
+                        'Command Code rejected the API key returned by the browser.',
+                        'Command Code 拒绝了浏览器返回的 API Key。',
+                    ));
+                }
+            },
+            saveKey: async apiKey => {
+                await this.keyManager.setKey('commandcode', apiKey);
+                await this.keyManager.setKey('commandcode-messages', apiKey);
+            },
+            openBrowser: url => { void vs.env.openExternal(vs.Uri.parse(url)); },
+        });
+        context.subscriptions?.push({ dispose: () => this.commandCodeOAuth.dispose() });
+        const kimiStorageDir = context.globalStorageUri?.fsPath ?? context.globalStoragePath ?? process.cwd();
+        this.kimiCodeTokens = new KimiCodeTokenStore(
+            context.secrets,
+            this.subscriptionProxy.fetch,
+            extra => readOrCreateKimiDeviceId(kimiStorageDir).then(deviceId => kimiIdentityHeaders(deviceId, extra)),
+            KIMI_REGION_OAUTH_HOSTS['mainland-cn'],
+        );
+        this.kimiCodeOAuth = new KimiCodeOAuthService({
+            storageDir: kimiStorageDir,
+            fetchFn: this.subscriptionProxy.fetch,
+            saveToken: async token => {
+                // A device-code sign-in writes the OAuth slot; the manually pasted
+                // API key lives in its own slot and is untouched.
+                await this.kimiCodeTokens.save(token);
+                // Joining the pool is what makes a second sign-in a second account
+                // rather than a replacement; the dedupe key keeps a repeat sign-in
+                // on the same row.
+                await this.subscriptionPools
+                    .addAccount('kimi-code-plan', token as unknown as PooledOAuthCredentials)
+                    .catch(() => undefined);
+            },
+            openBrowser: url => { void vs.env.openExternal(vs.Uri.parse(url)); },
+        });
+        context.subscriptions?.push({ dispose: () => this.kimiCodeOAuth.dispose() });
+        this.workBuddyCredentials = new WorkBuddyCredentialStore(context.secrets);
+        this.workBuddyOAuth = new WorkBuddyOAuthService({
+            fetchFn: this.subscriptionProxy.fetch,
+            saveCredentials: async credentials => {
+                await this.workBuddyCredentials.addManaged(credentials);
+                await this.subscriptionPools
+                    .addAccount('workbuddy-subscription', credentials as unknown as PooledOAuthCredentials)
+                    .catch(() => undefined);
+            },
+            openBrowser: url => { void vs.env.openExternal(vs.Uri.parse(url)); },
+        });
+        context.subscriptions?.push({ dispose: () => this.workBuddyOAuth.dispose() });
+        this.minimaxCodeCredentials = new MinimaxCodeCredentialStore(context.secrets);
+        this.minimaxCodeOAuth = new MinimaxCodeOAuthService({
+            fetchFn: this.subscriptionProxy.fetch,
+            saveCredentials: async credentials => {
+                await this.minimaxCodeCredentials.save(credentials);
+                await this.subscriptionPools
+                    .addAccount('minimax-code', credentials as unknown as PooledOAuthCredentials)
+                    .catch(() => undefined);
+            },
+            openBrowser: url => { void vs.env.openExternal(vs.Uri.parse(url)); },
+        });
+        context.subscriptions?.push({ dispose: () => this.minimaxCodeOAuth.dispose() });
+        this.claudeSubscriptionCredentials = new ClaudeSubscriptionCredentialStore(context.secrets);
+        this.claudeSubscriptionOAuth = new ClaudeSubscriptionOAuthService({
+            fetchFn: this.subscriptionProxy.fetch,
+            saveCredentials: async credentials => {
+                await this.claudeSubscriptionCredentials.save(credentials);
+                await this.subscriptionPools
+                    .addAccount('claude-subscription', credentials as unknown as PooledOAuthCredentials)
+                    .catch(() => undefined);
+            },
+            openBrowser: url => { void vs.env.openExternal(vs.Uri.parse(url)); },
+        });
+        context.subscriptions?.push({ dispose: () => this.claudeSubscriptionOAuth.dispose() });
+        this.subscriptionPools = new SubscriptionPoolRegistry(
+            providerId => this.buildSubscriptionPool(providerId),
+        );
+    }
+
+    /**
+     * Build the descriptor for one line's pool.
+     *
+     * Every line shares the same kernel; only the credential shape, identity key,
+     * refresh call and seeding source differ. Returning undefined means the line
+     * has no pool (its credential is a single, non-rotating key).
+     */
+    private buildSubscriptionPool(providerId: string): SubscriptionPoolEntry<PooledOAuthCredentials> | undefined {
+        const secrets = this.context.secrets;
+        const hiddenWorkBuddy = this.hiddenWorkBuddyAccounts;
+        switch (providerId) {
+            case 'claude-subscription':
+                return {
+                    spec: {
+                        displayName: 'Claude 订阅',
+                        parseCredentials: claudePoolCredentials as (v: unknown) => PooledOAuthCredentials | undefined,
+                        identityKey: c => claudePoolIdentityKey(c as never),
+                        defaultAlias: (c, position) => (c as never as { accountEmail?: string }).accountEmail ?? ('Account ' + position),
+                        refresh: async credentials => {
+                            const next = await refreshClaudeAccessToken(credentials.refreshToken, {
+                                fetchFn: this.subscriptionProxy.fetch,
+                            });
+                            return next as unknown as PooledOAuthCredentials;
+                        },
+                        refreshFailureStatus: subscriptionRefreshFailureStatus,
+                    },
+                    ports: {
+                        store: {
+                            read: () => secrets.get(CLAUDE_SUBSCRIPTION_POOL_KEY),
+                            write: async value => { await secrets.store(CLAUDE_SUBSCRIPTION_POOL_KEY, JSON.stringify(value)); },
+                        },
+                        legacy: {
+                            read: async () => {
+                                const stored = await this.claudeSubscriptionCredentials.read();
+                                return stored === undefined ? null : stored as unknown as PooledOAuthCredentials;
+                            },
+                            write: async credentials => {
+                                if (credentials === null) await this.claudeSubscriptionCredentials.clear();
+                                else await this.claudeSubscriptionCredentials.save(credentials as never);
+                            },
+                        },
+                        fetchFn: this.subscriptionProxy.fetch,
+                    },
+                };
+            case 'minimax-code':
+                return {
+                    spec: {
+                        displayName: 'MiniMax Code',
+                        parseCredentials: minimaxCodePoolCredentials as (v: unknown) => PooledOAuthCredentials | undefined,
+                        identityKey: c => minimaxCodePoolIdentityKey(c as never),
+                        defaultAlias: (c, position) => {
+                            const creds = c as never as { region?: string; sourceFile?: string };
+                            return creds.sourceFile ? 'Desktop account' : ('Account ' + position);
+                        },
+                        refresh: async credentials => {
+                            const next = await refreshMinimaxCodeCredentials(credentials as never, {
+                                fetchFn: this.subscriptionProxy.fetch,
+                            });
+                            return next as unknown as PooledOAuthCredentials;
+                        },
+                        refreshFailureStatus: subscriptionRefreshFailureStatus,
+                    },
+                    ports: {
+                        store: {
+                            read: () => secrets.get(MINIMAX_CODE_POOL_KEY),
+                            write: async value => { await secrets.store(MINIMAX_CODE_POOL_KEY, JSON.stringify(value)); },
+                        },
+                        // Desktop accounts are read-only members of the pool: they
+                        // are seeded in, and their rotations are written back into
+                        // their own file by the refresh call rather than mirrored.
+                        fetchFn: this.subscriptionProxy.fetch,
+                    },
+                    seed: async () => scanMinimaxCodeDesktopCredentials() as unknown as PooledOAuthCredentials[],
+                };
+            case 'workbuddy-subscription':
+                return {
+                    spec: {
+                        displayName: 'WorkBuddy',
+                        parseCredentials: workBuddyPoolCredentials as (v: unknown) => PooledOAuthCredentials | undefined,
+                        identityKey: c => workBuddyPoolIdentityKey(c as never),
+                        defaultAlias: (c, position) => {
+                            const creds = c as never as { nickname?: string; uid?: string };
+                            return creds.nickname ?? creds.uid ?? ('Account ' + position);
+                        },
+                        refresh: async credentials => {
+                            const next = await refreshWorkBuddyCredentials(credentials as never, {
+                                fetchFn: this.subscriptionProxy.fetch,
+                            });
+                            return next as unknown as PooledOAuthCredentials;
+                        },
+                        refreshFailureStatus: subscriptionRefreshFailureStatus,
+                    },
+                    ports: {
+                        store: {
+                            read: () => secrets.get(WORKBUDDY_POOL_KEY),
+                            write: async value => { await secrets.store(WORKBUDDY_POOL_KEY, JSON.stringify(value)); },
+                        },
+                        fetchFn: this.subscriptionProxy.fetch,
+                    },
+                    seed: async () => scanWorkBuddyDesktopCredentials()
+                        .filter(credentials => !hiddenWorkBuddy.has(workBuddyAccountKey(credentials)))
+                        .map(credentials => ({
+                            ...credentials,
+                            // The pool stores a stable domain/region with the
+                            // credential: a model asked of the wrong region is a 400.
+                            domain: credentials.domain,
+                            backend: credentials.backend,
+                            region: credentials.region,
+                        })) as unknown as PooledOAuthCredentials[],
+                };
+            case 'kimi-code-plan':
+                return {
+                    spec: {
+                        displayName: 'Kimi Code',
+                        parseCredentials: kimiPoolCredentials as (v: unknown) => PooledOAuthCredentials | undefined,
+                        identityKey: c => kimiPoolIdentityKey(c as never),
+                        defaultAlias: (c, position) => (c as never as { email?: string }).email ?? ('Account ' + position),
+                        refresh: async credentials => {
+                            const next = await this.kimiCodeTokens.refreshStored(credentials as never);
+                            return next as unknown as PooledOAuthCredentials;
+                        },
+                        refreshFailureStatus: subscriptionRefreshFailureStatus,
+                    },
+                    ports: {
+                        store: {
+                            read: () => secrets.get(KIMI_CODE_POOL_KEY),
+                            write: async value => { await secrets.store(KIMI_CODE_POOL_KEY, JSON.stringify(value)); },
+                        },
+                        legacy: {
+                            read: async () => {
+                                const stored = await this.kimiCodeTokens.read();
+                                return stored === undefined ? null : stored as unknown as PooledOAuthCredentials;
+                            },
+                            write: async credentials => {
+                                if (credentials === null) await this.kimiCodeTokens.clear();
+                                else await this.kimiCodeTokens.save(credentials as never);
+                            },
+                        },
+                        fetchFn: this.subscriptionProxy.fetch,
+                    },
+                };
+            case 'codex-chatgpt':
+                return {
+                    spec: {
+                        displayName: 'Codex (ChatGPT 订阅)',
+                        parseCredentials: codexPoolCredentials as (v: unknown) => PooledOAuthCredentials | undefined,
+                        identityKey: c => codexPoolIdentityKey(c as never),
+                        defaultAlias: (c, position) => (c as never as { accountId?: string }).accountId ?? ('Account ' + position),
+                        refresh: async credentials => {
+                            const next = await this.chatGptOAuth.refreshStoredCredentials(credentials as never);
+                            return next as unknown as PooledOAuthCredentials;
+                        },
+                        refreshFailureStatus: subscriptionRefreshFailureStatus,
+                    },
+                    ports: {
+                        store: {
+                            read: () => secrets.get(CODEX_POOL_KEY),
+                            write: async value => { await secrets.store(CODEX_POOL_KEY, JSON.stringify(value)); },
+                        },
+                        legacy: {
+                            read: async () => {
+                                const stored = await this.chatGptOAuth.readStoredCredentials();
+                                return stored === undefined ? null : stored as unknown as PooledOAuthCredentials;
+                            },
+                            write: async credentials => {
+                                if (credentials === null) await this.chatGptOAuth.clearStoredCredentials();
+                                else await this.chatGptOAuth.saveStoredCredentials(credentials as never);
+                            },
+                        },
+                        fetchFn: this.subscriptionProxy.fetch,
+                    },
+                };
+            case 'commandcode':
+            case 'commandcode-messages':
+                return {
+                    spec: {
+                        displayName: 'Command Code',
+                        parseCredentials: commandCodePoolCredentials as (v: unknown) => PooledOAuthCredentials | undefined,
+                        identityKey: c => commandCodePoolIdentityKey(c as never),
+                        defaultAlias: (c, position) => {
+                            const creds = c as never as { userName?: string; keyName?: string };
+                            return creds.userName ?? creds.keyName ?? ('Key ' + position);
+                        },
+                        // A static API key never expires, so there is no refresh to
+                        // wire; rotation, cooldown and parking still apply.
+                        refreshFailureStatus: subscriptionRefreshFailureStatus,
+                    },
+                    ports: {
+                        store: {
+                            read: () => secrets.get(COMMANDCODE_POOL_KEY),
+                            write: async value => { await secrets.store(COMMANDCODE_POOL_KEY, JSON.stringify(value)); },
+                        },
+                    },
+                };
+            default:
+                return undefined;
+        }
+    }
+
+    /**
+     * A usable Claude subscription credential, refreshed when near expiry.
+     *
+     * The refresh is single-flighted inside the store, so a burst of requests at
+     * expiry shares one rotation instead of invalidating all but the first.
+     */
+    async getClaudeSubscriptionCredential(
+        force = false,
+        excludeIds?: ReadonlySet<string>,
+    ): Promise<{ credentials: ClaudeSubscriptionCredentials; accountId: string } | undefined> {
+        const selected = await this.subscriptionPools.select('claude-subscription', excludeIds, force);
+        if (selected === undefined) return undefined;
+        return { credentials: selected.credentials as unknown as ClaudeSubscriptionCredentials, accountId: selected.accountId };
+    }
+
+    /** Selection for the request path: account id plus the pool's routing hooks. */
+    async selectSubscriptionAccount(providerId: string, excludeIds?: ReadonlySet<string>, force = false) {
+        return this.subscriptionPools.select(providerId, excludeIds, force);
+    }
+
+    getSubscriptionPoolRegistry(): SubscriptionPoolRegistry {
+        return this.subscriptionPools;
+    }
+
+    getClaudeSubscriptionCredentialStore(): ClaudeSubscriptionCredentialStore {
+        return this.claudeSubscriptionCredentials;
+    }
+
+    getClaudeSubscriptionOAuthService(): ClaudeSubscriptionOAuthService {
+        return this.claudeSubscriptionOAuth;
+    }
+
+    /**
+     * A usable MiniMax Code credential.
+     *
+     * A desktop credential is read-only while it is comfortably valid; inside the
+     * pre-expiry window it is rotated and written back atomically, because the
+     * desktop app's own refresh token rotates and leaving it stale would sign the
+     * user out of the running IDE.
+     */
+    async getMinimaxCodeCredential(
+        excludeIds?: ReadonlySet<string>,
+        force = false,
+    ): Promise<{ credentials: MinimaxCodeCredentials; accountId: string } | undefined> {
+        const selected = await this.subscriptionPools.select('minimax-code', excludeIds, force);
+        if (selected === undefined) return undefined;
+        return {
+            credentials: selected.credentials as unknown as MinimaxCodeCredentials,
+            accountId: selected.accountId,
+        };
+    }
+
+    /** All MiniMax Code credentials, desktop first then the managed one. */
+    async listMinimaxCodeCredentials(): Promise<MinimaxCodeCredentials[]> {
+        return mergeMinimaxCodeCredentials(
+            scanMinimaxCodeDesktopCredentials(),
+            await this.minimaxCodeCredentials.readManaged(),
+        );
+    }
+
+    getMinimaxCodeCredentialStore(): MinimaxCodeCredentialStore {
+        return this.minimaxCodeCredentials;
+    }
+
+    getMinimaxCodeOAuthService(): MinimaxCodeOAuthService {
+        return this.minimaxCodeOAuth;
+    }
+
+    /**
+     * Every WorkBuddy account this extension can use.
+     *
+     * Desktop accounts are scanned read-only and merged with the managed ones;
+     * a managed sign-in for the same account wins, because it is the explicit
+     * one. Hidden desktop accounts stay out of scheduling.
+     */
+    async listWorkBuddyAccounts(): Promise<WorkBuddyCredentials[]> {
+        const managed = await this.workBuddyCredentials.readManaged();
+        const desktop = scanWorkBuddyDesktopCredentials()
+            .filter(credentials => !this.hiddenWorkBuddyAccounts.has(workBuddyAccountKey(credentials)));
+        return mergeWorkBuddyAccounts(desktop, managed);
+    }
+
+    /** The pool's view of one line, for the settings card. */
+    async listSubscriptionPoolAccounts(providerId: string) {
+        return this.subscriptionPools.listAccounts(providerId);
+    }
+
+    /**
+     * A usable WorkBuddy credential, refreshing in place when it is near expiry.
+     *
+     * A desktop account's rotated refresh token is written back to its own file,
+     * so the IDE does not end up holding one the service has already retired.
+     */
+    async getWorkBuddyCredential(
+        excludeIds?: ReadonlySet<string>,
+        force = false,
+    ): Promise<{ credentials: WorkBuddyCredentials; accountId: string } | undefined> {
+        const selected = await this.subscriptionPools.select('workbuddy-subscription', excludeIds, force);
+        if (selected === undefined) return undefined;
+        return {
+            credentials: selected.credentials as unknown as WorkBuddyCredentials,
+            accountId: selected.accountId,
+        };
+    }
+
+    getWorkBuddyCredentialStore(): WorkBuddyCredentialStore {
+        return this.workBuddyCredentials;
+    }
+
+    getWorkBuddyOAuthService(): WorkBuddyOAuthService {
+        return this.workBuddyOAuth;
+    }
+
+    /** Hide or restore a desktop account for this extension only; the file is never touched. */
+    setWorkBuddyAccountHidden(accountKey: string, hidden: boolean): void {
+        if (hidden) this.hiddenWorkBuddyAccounts.add(accountKey);
+        else this.hiddenWorkBuddyAccounts.delete(accountKey);
+    }
+
+    isWorkBuddyAccountHidden(accountKey: string): boolean {
+        return this.hiddenWorkBuddyAccounts.has(accountKey);
+    }
+
+    /** Headers for one WorkBuddy request; exported for the settings card's tests. */
+    async workBuddyRequestHeaders(): Promise<Record<string, string>> {
+        const selected = await this.getWorkBuddyCredential();
+        if (!selected) {
+            throw new Error(aiText(
+                'Add a WorkBuddy account in Settings before using this provider.',
+                '请先在设置中添加 WorkBuddy 账号，再使用该 Provider。',
+            ));
+        }
+        return workBuddyHeaders(selected.credentials);
     }
 
     getKeyManager(): ApiKeyManager {
@@ -349,6 +941,18 @@ export class AIService {
 
     getAntigravityOAuthService(): AntigravityOAuthService {
         return this.antigravityOAuth;
+    }
+
+    getCommandCodeOAuthService(): CommandCodeOAuthService {
+        return this.commandCodeOAuth;
+    }
+
+    getKimiCodeOAuthService(): KimiCodeOAuthService {
+        return this.kimiCodeOAuth;
+    }
+
+    getKimiCodeTokenStore(): KimiCodeTokenStore {
+        return this.kimiCodeTokens;
     }
 
     /** Set model without persisting to workspace config (no LS restart side-effect) */
@@ -447,9 +1051,28 @@ export class AIService {
         return (map[providerId] || '').trim();
     }
 
-    /** Get the provider API key from SecretStorage. */
+    /**
+     * Get the credential for a provider.
+     *
+     * Most providers keep a static API key in SecretStorage. `kimi-code-plan`
+     * can instead hold an expiring OAuth credential from the device-code login,
+     * so an empty key slot falls back to a freshly renewed access token.
+     */
     async getKeyForProvider(providerId: string): Promise<string> {
-        return await this.keyManager.getKey(providerId) ?? '';
+        const stored = await this.keyManager.getKey(providerId);
+        if (stored) return stored;
+        if (providerId === 'kimi-code-plan') {
+            try {
+                // Read through the pool so a multi-account Kimi setup rotates
+                // here too, not only on the chat path.
+                const selected = await this.subscriptionPools.select('kimi-code-plan');
+                return (selected?.credentials.accessToken) ?? '';
+            } catch (error) {
+                if (error instanceof KimiUnauthorizedError) return '';
+                return '';
+            }
+        }
+        return '';
     }
 
     /**
@@ -515,7 +1138,96 @@ export class AIService {
 
         // Some providers (for example Ollama) do not require an API key.
         let apiKey = '';
-        if (provider.requiresApiKey) {
+        /** Region of the MiniMax Code credential this request uses, when applicable. */
+        let minimaxCodeRegion: MinimaxCodeCredentials['region'] | undefined;
+        /** Claude subscription credential this request uses, when applicable. */
+        let claudeSubscriptionCredentials: ClaudeSubscriptionCredentials | undefined;
+        /** Account that credential came from, so a 429 can cool it down. */
+        let claudeSubscriptionAccountId: string | undefined;
+        /** MiniMax Code account, for the same reason. */
+        let minimaxCodeAccountId: string | undefined;
+        /** WorkBuddy selection, so the endpoint and headers share one account. */
+        let workBuddySelection: { credentials: WorkBuddyCredentials; accountId: string } | undefined;
+        /**
+         * Pooled account this request used, for whichever line has a pool.
+         *
+         * It is what lets a 429 cool the account that answered and retry on
+         * another; lines without a pool leave it undefined and are unaffected.
+         */
+        let subscriptionAccountId: string | undefined;
+        this.workBuddyIdentityHeaders = {};
+        if (providerId === 'claude-subscription') {
+            // The subscription authenticates with a bearer OAuth token, never with
+            // a static API key; the key slot is deliberately not consulted.
+            const credentials = await this.getClaudeSubscriptionCredential();
+            if (!credentials) {
+                throw new Error(aiText(
+                    'Sign in to Claude in Settings before using the subscription provider.',
+                    '请先在设置中登录 Claude，再使用订阅 Provider。',
+                ));
+            }
+            apiKey = credentials.credentials.accessToken;
+            claudeSubscriptionCredentials = credentials.credentials;
+            claudeSubscriptionAccountId = credentials.accountId;
+            subscriptionAccountId = credentials.accountId;
+        } else if (providerId === 'minimax-code') {
+            // The subscription authenticates with a bearer from its own credential
+            // (desktop sign-in or device code), never with a static API key.
+            const credentials = await this.getMinimaxCodeCredential();
+            if (!credentials) {
+                throw new Error(aiText(
+                    'Sign in to MiniMax Code in Settings, or sign in with the MiniMax Code desktop app, before using this provider.',
+                    '请先在设置中登录 MiniMax Code，或先登录 MiniMax Code 桌面端，再使用该 Provider。',
+                ));
+            }
+            apiKey = credentials.credentials.accessToken;
+            minimaxCodeRegion = credentials.credentials.region;
+            minimaxCodeAccountId = credentials.accountId;
+            subscriptionAccountId = credentials.accountId;
+        } else if (providerId === 'workbuddy-subscription') {
+            // The subscription backend does not use a static key: its bearer and
+            // its account-identity headers both come from the stored credential.
+            // Resolving them here keeps every downstream call site synchronous,
+            // and the API-key slot is deliberately not consulted so a stale key
+            // can never be sent to this backend.
+            const credentials = await this.getWorkBuddyCredential();
+            if (!credentials) {
+                throw new Error(aiText(
+                    'Add a WorkBuddy account in Settings before using this provider.',
+                    '请先在设置中添加 WorkBuddy 账号，再使用该 Provider。',
+                ));
+            }
+            apiKey = credentials.credentials.accessToken;
+            workBuddySelection = credentials;
+            subscriptionAccountId = credentials.accountId;
+            // The bearer and these headers must come from the same account.
+            this.workBuddyIdentityHeaders = workBuddyHeaders(credentials.credentials);
+        } else if (providerId === 'commandcode' || providerId === 'commandcode-messages') {
+            // Command Code keys can be pooled: several keys of the same account or
+            // of different accounts then rotate, cool down after a 429 and park
+            // after a revocation. The key slot stays the fallback, so a fresh
+            // install (no pool yet) is unchanged.
+            if (options?.apiKey) {
+                apiKey = options.apiKey;
+            } else {
+                const selected = await this.subscriptionPools.select(providerId).catch(() => undefined);
+                if (selected !== undefined) {
+                    apiKey = selected.credentials.accessToken;
+                    subscriptionAccountId = selected.accountId;
+                } else {
+                    const key = await this.getKeyForProvider(providerId);
+                    if (!key) {
+                        const entered = await this.keyManager.promptForKey(providerId);
+                        if (!entered) {
+                            throw new Error(`No API key configured for ${provider.name}. Please configure it in the AI Settings panel.`);
+                        }
+                        apiKey = entered;
+                    } else {
+                        apiKey = key;
+                    }
+                }
+            }
+        } else if (provider.requiresApiKey) {
             // Priority: options override (for tests) > SecretStorage.
             if (options?.apiKey) {
                 apiKey = options.apiKey;
@@ -535,9 +1247,18 @@ export class AIService {
         }
 
         // Subscription OAuth credentials stay on each provider's fixed backend.
+        // WorkBuddy's backend is a property of the account's region, so it comes
+        // from the credential rather than the provider default.
         const endpoint = providerId === 'codex-chatgpt' || providerId === 'antigravity'
+            || providerId === 'claude-subscription'
             ? provider.endpoint
-            : options?.endpoint || getEffectiveEndpoint(providerId, config.endpoint);
+            : workBuddySelection
+                ? workBuddySelection.credentials.backend
+                // The subscription's Messages endpoint is a property of the
+                // account's region, not of the provider default.
+                : minimaxCodeRegion
+                    ? minimaxCodeAgentHost({ region: minimaxCodeRegion }) + MINIMAX_CODE_AGENT_LLM_PREFIX
+                    : options?.endpoint || getEffectiveEndpoint(providerId, config.endpoint);
         if (!endpoint) {
             throw new Error(`${provider.name} endpoint is not configured. Please set an API endpoint in the AI Settings panel.`);
         }
@@ -651,8 +1372,16 @@ export class AIService {
                 requestBody: ChatCompletionRequest,
             ): Promise<ChatCompletionResponse> => {
                 if (providerId === 'antigravity') {
-                    return callAntigravity(this.antigravityOAuth, requestBody,
-                        this.buildGeminiPayload(requestBody, true), disableThinking ? 'none' : requestedEffort,
+                    // Google caps a request carrying inline data, and an
+                    // image-heavy session would otherwise grow the body until it
+                    // is rejected. The oldest images are replaced with a visible
+                    // placeholder; durable history is untouched.
+                    const boundedBody = {
+                        ...requestBody,
+                        messages: offloadAntigravityRequestImages(requestBody.messages),
+                    };
+                    return callAntigravity(this.antigravityOAuth, boundedBody,
+                        this.buildGeminiPayload(boundedBody, true), disableThinking ? 'none' : requestedEffort,
                         controller.signal, {
                             onThinking: options?.onThinking, onTextDelta: options?.onTextDelta,
                             onToolCallDelta: options?.onToolCallDelta,
@@ -671,10 +1400,10 @@ export class AIService {
                     return await this.callGeminiGenerateContent(requestEndpoint, apiKey, requestBody, providerId, controller, options?.onTextDelta, options?.onToolCallDelta, options?.onThinking);
                 }
                 if (effectiveApiFormat === 'anthropic-messages') {
-                    return await this.callClaude(requestEndpoint, apiKey, requestBody, controller, options?.onThinking, options?.onTextDelta, options?.onToolCallDelta, providerId);
+                    return await this.callClaude(requestEndpoint, apiKey, requestBody, controller, options?.onThinking, options?.onTextDelta, options?.onToolCallDelta, providerId, claudeSubscriptionCredentials, claudeSubscriptionAccountId);
                 }
                 if (provider.supportsStreaming) {
-                    return await this.callOpenAICompatibleStreaming(requestEndpoint, apiKey, { ...requestBody, stream: true }, providerId, options?.onThinking, controller, options?.onTextDelta, options?.onToolCallDelta, config.reasoningKey);
+                    return await this.callOpenAICompatibleStreaming(requestEndpoint, apiKey, { ...requestBody, stream: true }, providerId, options?.onThinking, controller, options?.onTextDelta, options?.onToolCallDelta, config.reasoningKey, subscriptionAccountId);
                 }
                 return await this.callOpenAICompatible(requestEndpoint, apiKey, requestBody, providerId, controller);
             };
@@ -849,6 +1578,24 @@ export class AIService {
      *   If the key doesn't contain ".", it is used as-is (standard Token Plan JWT).
      * - All other providers: standard "Bearer {apiKey}".
      */
+    /**
+     * Add the account-identity headers a subscription gateway gates on.
+     *
+     * WorkBuddy reads the account from these headers rather than deriving it
+     * from the bearer token alone, so a request carrying only `Authorization`
+     * is not the same request the official IDE makes. Every other provider is
+     * returned unchanged.
+     */
+    private withSubscriptionIdentityHeaders(
+        providerId: string,
+        headers: Record<string, string>,
+    ): Record<string, string> {
+        if (providerId !== 'workbuddy-subscription') return headers;
+        return Object.keys(this.workBuddyIdentityHeaders).length > 0
+            ? { ...headers, ...this.workBuddyIdentityHeaders }
+            : headers;
+    }
+
     private buildAuthHeaders(providerId: string, apiKey: string): Record<string, string> {
         if (!apiKey.trim()) {
             return {};
@@ -928,6 +1675,13 @@ export class AIService {
                 const hasReasoning = tokenRhythmReasoningReplay
                     && typeof message.reasoning_content === 'string'
                     && message.reasoning_content.trim().length > 0;
+                // Kimi K3 with thinking on (kept by default) requires the reasoning
+                // field on EVERY assistant message, including turns that produced
+                // none — the service asks for an empty string, and omitting it is
+                // the documented cause of "thinking is enabled but reasoning_content
+                // is missing in assistant tool call message at index N".
+                const kimiPreservedThinking = message.role === 'assistant'
+                    && requiresReasoningOnEveryAssistantMessage(providerId, request.model);
                 return {
                     role: message.role,
                     content: message.content,
@@ -940,7 +1694,9 @@ export class AIService {
                     } : {}),
                     ...(message.tool_call_id !== undefined ? { tool_call_id: message.tool_call_id } : {}),
                     ...(message.name !== undefined ? { name: message.name } : {}),
-                    ...(hasReasoning ? { [reasoningKey]: message.reasoning_content } : {}),
+                    ...(hasReasoning
+                        ? { [reasoningKey]: message.reasoning_content }
+                        : kimiPreservedThinking ? { [reasoningKey]: '' } : {}),
                 };
             }),
         };
@@ -977,6 +1733,29 @@ export class AIService {
             return {
                 ...sanitized,
                 messages: this.stripImageDetail(mergedMsgs),
+            };
+        }
+
+        // ── WorkBuddy subscription: stream-only and a mandatory leading system ──
+        // Two measured constraints, both of which turn into a 400 otherwise:
+        //   * `stream: false` answers 400 code 11101, so there is no
+        //     non-streaming shape to keep in sync;
+        //   * the international backend answers 400 code 11128 unless the first
+        //     message is a system turn.
+        // A neutral system prompt is injected when the caller supplied none,
+        // rather than sending a request the endpoint is known to reject.
+        if (providerId === 'workbuddy-subscription') {
+            const existingSystem = chatRequest.messages.filter(message => message.role === 'system');
+            const rest = chatRequest.messages.filter(message => message.role !== 'system');
+            return {
+                ...chatRequest,
+                stream: true,
+                messages: [
+                    ...(existingSystem.length > 0
+                        ? existingSystem
+                        : [{ role: 'system' as const, content: WORKBUDDY_IMPLICIT_SYSTEM_PROMPT }]),
+                    ...rest,
+                ],
             };
         }
 
@@ -1183,7 +1962,7 @@ export class AIService {
         const requestPayload = this.sanitizeRequest(providerId, request) as ChatCompletionRequest & Record<string, unknown>;
         const send = () => this.fetchWithRetry(url, {
             method: 'POST',
-            headers,
+            headers: this.withSubscriptionIdentityHeaders(providerId, headers),
             body: JSON.stringify(requestPayload),
             signal: controller.signal,   // C1 Fix: use local per-call controller
         }, providerId);
@@ -1220,7 +1999,9 @@ export class AIService {
         controller: AbortController,
         onTextDelta?: (text: string) => void,
         onToolCallDelta?: (toolName: string, argsBuf: string, metadata?: ToolCallDeltaMetadata) => void,
-        reasoningKey?: string
+        reasoningKey?: string,
+        /** Pooled account this request used, when the line has a pool. */
+        accountIdForPool?: string,
     ): Promise<ChatCompletionResponse> {
         const url = normalizeOpenAIActionUrl(endpoint, 'chat/completions');
         const headers: Record<string, string> = {
@@ -1238,12 +2019,37 @@ export class AIService {
 
         const send = () => this.fetchWithRetry(url, {
             method: 'POST',
-            headers,
+            headers: this.withSubscriptionIdentityHeaders(providerId, headers),
             body: JSON.stringify(requestPayload),
             signal: controller.signal,
         }, providerId);
 
         let response = await send();
+        // A pooled subscription line rotates on a rate limit: cool the account
+        // that answered 429 and retry the SAME body on another eligible account.
+        // The account id is carried by the request options, so a line without a
+        // pool is unaffected.
+        if (response.status === 429 && accountIdForPool !== undefined) {
+            const retryAfterMs = retryAfterMsFromHeaders(response.headers);
+            await this.subscriptionPools.noteRateLimited(providerId, accountIdForPool, retryAfterMs);
+            const next = await this.subscriptionPools
+                .select(providerId, new Set([accountIdForPool]), false)
+                .catch(() => undefined);
+            if (next !== undefined) {
+                await response.body?.cancel().catch(() => undefined);
+                const nextKey = next.credentials.accessToken;
+                const nextHeaders: Record<string, string> = {
+                    'Content-Type': 'application/json',
+                    ...this.buildAuthHeaders(providerId, nextKey),
+                };
+                response = await this.fetchWithRetry(url, {
+                    method: 'POST',
+                    headers: this.withSubscriptionIdentityHeaders(providerId, nextHeaders),
+                    body: JSON.stringify(requestPayload),
+                    signal: controller.signal,
+                }, providerId);
+            }
+        }
         if (!response.ok) {
             let errorText = await response.text();
             const removed = response.status === 400 || response.status === 422
@@ -1475,6 +2281,18 @@ export class AIService {
                 .filter(Boolean)
                 .join('\n\n')
             : undefined;
+        // "Follow the provider" is the default, and the provider's own client
+        // sends the catalog's `default_verbosity` (low) on every request.
+        // Omitting the field is NOT the same thing: the server then applies its
+        // implicit medium, so a user who never opened this setting gets answers
+        // more verbose — and more expensive — than the official client does.
+        //
+        // A model whose verbosity support this line cannot establish gets no
+        // `text` field at all, because the catalog gates it per model and an
+        // unsupported verbosity is a request the model may reject.
+        const resolvedVerbosity = options?.codexCompatibility
+            ? request.response_verbosity ?? codexDefaultOutputVerbosity(request.model)
+            : request.response_verbosity;
         const payload: Record<string, unknown> = {
             model: request.model,
             ...(systemInstructions ? { instructions: systemInstructions } : {}),
@@ -1488,8 +2306,8 @@ export class AIService {
                 store: false,
                 include: ['reasoning.encrypted_content'],
             } : {}),
-            ...(request.response_verbosity ? {
-                text: { verbosity: request.response_verbosity },
+            ...(resolvedVerbosity ? {
+                text: { verbosity: resolvedVerbosity },
             } : {}),
             service_tier: request.service_tier,
         };
@@ -1618,14 +2436,49 @@ export class AIService {
             ? crypto.createHash('sha256').update(callbacks.promptCacheKey).digest('hex').slice(0, 32)
             : crypto.randomUUID();
         let promptCacheKeyEnabled = true;
+        // Turn-scoped routing state, keyed by the stable session id: the backend
+        // hands it back per response and expects it on the same turn's next
+        // request. The tracker drops a token minted by a different signer, so an
+        // OAuth rotation mid-turn degrades to a full resend rather than to a
+        // replay of another account's state.
+        const turnKey = sessionId;
+        // Owner of the credentials used by the most recent attempt, so the
+        // response's turn state is filed under the signer that minted it.
+        let lastAuthOwner = '';
+        // Accounts already attempted for this request, so a 429 failover lands on
+        // a different one instead of re-spending the same wait.
+        const codexTriedAccounts = new Set<string>();
+        let codexAccountId: string | undefined;
         const send = async (
             reasoningSummary: 'auto' | 'concise' | 'detailed' | undefined,
             includeReasoning = true,
             forceOAuthRefresh = false,
         ) => {
-            const authHeaders = codexCompatibility
-                ? await this.chatGptOAuth.getRequestHeaders(forceOAuthRefresh)
-                : this.buildAuthHeaders(providerId, apiKey);
+            let authHeaders: Record<string, string>;
+            let turnState: string | undefined;
+            if (codexCompatibility) {
+                // Read through the pool so a second signed-in ChatGPT account
+                // actually rotates. Falling back to the single-credential accessor
+                // keeps a fresh install (no pool yet) working unchanged.
+                const selected = await this.subscriptionPools
+                    .select('codex-chatgpt', codexTriedAccounts, forceOAuthRefresh)
+                    .catch(() => undefined);
+                const credentials = selected?.credentials as unknown as
+                    { accessToken: string; accountId?: string } | undefined
+                    ?? await this.chatGptOAuth.getTurnStateCredentials(forceOAuthRefresh);
+                if (selected !== undefined) {
+                    codexTriedAccounts.add(selected.accountId);
+                    codexAccountId = selected.accountId;
+                }
+                lastAuthOwner = codexAuthOwnerKey(credentials);
+                turnState = this.codexTurnStates.take(turnKey, lastAuthOwner);
+                authHeaders = {
+                    ...codexSubscriptionHeaders(credentials, this.chatGptOAuth.userAgent),
+                    ...(turnState ? { [CODEX_TURN_STATE_HEADER]: turnState } : {}),
+                };
+            } else {
+                authHeaders = this.buildAuthHeaders(providerId, apiKey);
+            }
             return this.fetchWithRetry(url, {
                 method: 'POST',
                 headers: {
@@ -1650,6 +2503,23 @@ export class AIService {
         if (codexCompatibility && response.status === 401) {
             await response.body?.cancel().catch(() => undefined);
             response = await send(callbacks?.reasoningSummary, true, true);
+        }
+        // A rate limit rotates to another signed-in ChatGPT account: cool the one
+        // that answered 429 and replay the same turn on a different one.
+        if (codexCompatibility && response.status === 429 && codexAccountId !== undefined) {
+            const cooling = codexAccountId;
+            await this.subscriptionPools
+                .noteRateLimited(providerId, cooling, retryAfterMsFromHeaders(response.headers))
+                .catch(() => undefined);
+            const next = await this.subscriptionPools
+                .select('codex-chatgpt', codexTriedAccounts)
+                .catch(() => undefined);
+            if (next !== undefined) {
+                await response.body?.cancel().catch(() => undefined);
+                codexAccountId = next.accountId;
+                codexTriedAccounts.add(next.accountId);
+                response = await send(callbacks?.reasoningSummary);
+            }
         }
         if (!response.ok) {
             let errorText = await response.text();
@@ -1697,9 +2567,16 @@ export class AIService {
             if (response.ok) {
                 // Continue through the normal JSON/SSE response handling below.
             } else {
+                this.codexTurnStates.forget(turnKey);
                 throw new Error(`${getProvider(providerId).name} Responses API error (${response.status}): ${errorText}`);
             }
         }
+
+        // A response that carries no turn state clears the stored value: a
+        // backend that stopped sending the header has stopped honouring it, and
+        // replaying a stale value would be guessing. An empty header counts as
+        // absent. This is a pure optimization, so a miss only costs a resend.
+        if (codexCompatibility) this.codexTurnStates.remember(turnKey, response, lastAuthOwner);
 
         const contentType = response.headers?.get?.('content-type') ?? '';
         if (!useOpenAIFastPath || !response.body || /application\/json/i.test(contentType)) {
@@ -2437,16 +3314,49 @@ export class AIService {
         onThinking?: (text: string) => void,
         onTextDelta?: (text: string) => void,
         onToolCallDelta?: (toolName: string, argsBuf: string) => void,
-        providerId: string = 'claude'
+        providerId: string = 'claude',
+        /**
+         * Credential the Claude subscription route authenticates with.
+         *
+         * Resolved once by the caller, because the bearer and the request body's
+         * thinking form must come from the same account.
+         */
+        subscriptionCredentials?: ClaudeSubscriptionCredentials,
+        /** Pool account the credential came from, so a 429 can cool it down. */
+        subscriptionAccountId?: string,
     ): Promise<ChatCompletionResponse> {
-        const url = `${normalizeAnthropicMessagesEndpoint(endpoint)}/messages`;
+        // Reassigned by the forced-refresh step below, so it is a local binding
+        // rather than a read of the parameter on every use.
+        let claudeSubscriptionCredentials = subscriptionCredentials;
+        let claudeSubscriptionAccountId = subscriptionAccountId;
+        // The subscription's beta route is part of its contract, not an alias of
+        // the plain one, so the path is used verbatim for that provider.
+        const url = providerId === 'claude-subscription'
+            ? CLAUDE_API_BASE + CLAUDE_MESSAGES_PATH
+            : `${normalizeAnthropicMessagesEndpoint(endpoint)}/messages`;
         // Force stream=true so we get SSE — enables thinking tokens and unblocks UI.
         const cacheCapability = resolveEffectiveCacheCapability({
             providerId, model: request.model, endpoint, apiFormat: 'anthropic-messages',
         });
+        // The MiniMax Code subscription declares its own thinking shape (a
+        // top-level output_config.effort, never a thinking object), so the model
+        // table — not a name heuristic — decides what this request carries.
+        const minimaxCodeModel = providerId === 'minimax-code' ? request.model : undefined;
+        // The subscription's thinking form and its mandatory leading identity
+        // block both come from the catalog, not from a model-name heuristic.
+        const claudeSubscriptionModel = providerId === 'claude-subscription' ? request.model : undefined;
+        // A subscription token's main conversation uses the one-hour cache tier
+        // while it draws on included plan usage, which is what the official
+        // client does; the header follows the body so the two cannot disagree.
+        const claudeCacheTtl = CLAUDE_SUBSCRIPTION_CACHE_TTL;
         const claudeRequest = toClaudeRequest(
             { ...request, stream: true },
-            { cacheControl: cacheCapability.requestMode === 'anthropic-breakpoints' }
+            {
+                cacheControl: cacheCapability.requestMode === 'anthropic-breakpoints',
+                ...(minimaxCodeModel !== undefined ? { minimaxCodeModel } : {}),
+                ...(claudeSubscriptionModel !== undefined ? { claudeSubscriptionModel } : {}),
+                ...(claudeSubscriptionModel !== undefined ? { claudeCacheTtl } : {}),
+            }
         );
         // Claude Code-style relays often expose models that reject temperature entirely.
         if (providerId === 'custom') {
@@ -2456,11 +3366,34 @@ export class AIService {
         const buildClaudeHeaders = (authMode: 'x-api-key' | 'bearer'): Record<string, string> => ({
             'Content-Type': 'application/json',
             'anthropic-version': '2023-06-01',
-            ...(providerId === 'opencode' || providerId === 'opencode-go' || providerId === 'commandcode-messages'
-                ? this.buildAuthHeaders(providerId, apiKey)
-                : authMode === 'bearer'
+            // A subscription request must carry the Claude Code identity: the
+            // bearer, the claude-cli user agent, `x-app: cli`, and the beta set
+            // that licenses the fields its body uses. `x-api-key` is dropped by
+            // that builder, since carrying both is a documented 401 cause.
+            ...(providerId === 'claude-subscription' && claudeSubscriptionCredentials
+                ? claudeSubscriptionHeaders(claudeSubscriptionCredentials.accessToken, {
+                    model: request.model,
+                    thinking: claudeRequest.thinking !== undefined,
+                    thinkingBinding: isRecord(claudeRequest.thinking)
+                        && 'block_binding' in claudeRequest.thinking,
+                    cacheTtl: claudeCacheTtl,
+                })
+                : {}),
+            // Measured: this route authenticates with the bearer only, and
+            // x-api-key answers 401 {"code":401,"message":"token is required"}.
+            // There is deliberately no x-api-key fallback here, because it would
+            // only spend a round trip per request to learn that.
+            // The subscription route owns its whole header set above, so it must
+            // not also receive the generic auth spread — that would reintroduce
+            // `x-api-key` and override the bearer.
+            ...(providerId === 'claude-subscription'
+                ? {}
+                : providerId === 'opencode' || providerId === 'opencode-go'
+                    || providerId === 'commandcode-messages' || providerId === 'minimax-code'
                     ? this.buildAuthHeaders(providerId, apiKey)
-                    : (apiKey ? { 'x-api-key': apiKey } : {})),
+                    : authMode === 'bearer'
+                        ? this.buildAuthHeaders(providerId, apiKey)
+                        : (apiKey ? { 'x-api-key': apiKey } : {})),
         });
 
         const sendClaudeRequest = (authMode: 'x-api-key' | 'bearer' = 'x-api-key'): Promise<Response> => this.fetchWithRetry(url, {
@@ -2470,8 +3403,36 @@ export class AIService {
             signal: controller.signal,
         }, providerId);
 
-        let authMode: 'x-api-key' | 'bearer' = 'x-api-key';
+        // This route has no x-api-key shape at all, so it starts on the bearer
+        // it actually uses instead of spending a request to discover that.
+        let authMode: 'x-api-key' | 'bearer' =
+            providerId === 'minimax-code' || providerId === 'claude-subscription' ? 'bearer' : 'x-api-key';
         let response = await sendClaudeRequest(authMode);
+        // A subscription token can be refused while it still looks valid locally
+        // (revoked elsewhere, clock skew, the server already rotated it), and that
+        // is indistinguishable from "sign in again" on the status alone. So the
+        // first 401 forces exactly one refresh and replays the SAME body; only a
+        // second refusal is final.
+        if (providerId === 'claude-subscription'
+            && response.status === 401
+            && claudeSubscriptionCredentials !== undefined) {
+            const refused = claudeSubscriptionCredentials;
+            await response.body?.cancel().catch(() => undefined);
+            // A forced refresh is tried against the SAME account first. If that
+            // account's credential is dead the pool parks it and hands back a
+            // different eligible account, which is what makes the retry useful.
+            const refreshed = await this.getClaudeSubscriptionCredential(
+                true,
+                claudeSubscriptionAccountId === undefined ? undefined : new Set([claudeSubscriptionAccountId]),
+            ).catch(() => undefined);
+            if (refreshed !== undefined
+                && (refreshed.credentials.accessToken !== refused.accessToken
+                    || refreshed.accountId !== claudeSubscriptionAccountId)) {
+                claudeSubscriptionCredentials = refreshed.credentials;
+                claudeSubscriptionAccountId = refreshed.accountId;
+                response = await sendClaudeRequest(authMode);
+            }
+        }
         if (providerId === 'custom' && apiKey && (response.status === 401 || response.status === 403)) {
             const authStatus = response.status;
             authMode = 'bearer';

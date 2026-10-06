@@ -376,6 +376,11 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
     let settingsCodexAccount: any = undefined;
     let settingsAntigravityAccount: AntigravityAccountStatus | undefined;
     let settingsCommandCodeAccount: any = undefined;
+let settingsKimiAccount: any = undefined;
+let settingsWorkBuddyAccount: any = undefined;
+let settingsMinimaxCodeAccount: any = undefined;
+let settingsClaudeSubscriptionAccount: any = undefined;
+let settingsSubscriptionPool: any = undefined;
     let settingsSubscriptionProxy: SubscriptionProxyStatus | undefined;
     let cachedSettingsData: { providers: any[]; current: any; ollamaModels: any[] } | undefined;
     type ReasoningEffortValue = 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
@@ -3020,8 +3025,70 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
     bindBtn('commandcodeRefreshBtn', () => {
         vscode.postMessage({ type: 'refreshCommandCodeQuota' });
     });
+    bindBtn('commandcodeLoginBtn', () => {
+        vscode.postMessage({ type: 'commandcodeLogin' });
+    });
+    bindBtn('kimiLoginBtn', () => {
+        vscode.postMessage({ type: 'kimiLogin' });
+    });
+    bindBtn('kimiLogoutBtn', () => {
+        vscode.postMessage({ type: 'kimiLogout' });
+    });
+    bindBtn('workbuddyLoginCnBtn', () => {
+        vscode.postMessage({ type: 'workbuddyLogin', region: 'cn' });
+    });
+    bindBtn('workbuddyLoginIntlBtn', () => {
+        vscode.postMessage({ type: 'workbuddyLogin', region: 'intl' });
+    });
+    bindBtn('workbuddyRefreshBtn', () => {
+        vscode.postMessage({ type: 'workbuddyRefreshAccounts' });
+    });
+    bindBtn('minimaxCodeLoginBtn', () => {
+        vscode.postMessage({ type: 'minimaxCodeLogin' });
+    });
+    bindBtn('minimaxCodeLogoutBtn', () => {
+        vscode.postMessage({ type: 'minimaxCodeLogout' });
+    });
+    bindBtn('claudeSubscriptionLoginBtn', () => {
+        vscode.postMessage({ type: 'claudeSubscriptionLogin' });
+    });
+    bindBtn('claudeSubscriptionLogoutBtn', () => {
+        vscode.postMessage({ type: 'claudeSubscriptionLogout' });
+    });
     bindBtn('codexLogoutBtn', () => {
         vscode.postMessage({ type: 'codexLogout' });
+    });
+    const poolStrategySelect = document.getElementById('antigravityPoolStrategy') as HTMLSelectElement | null;
+    poolStrategySelect?.addEventListener('change', () => {
+        const value = poolStrategySelect.value;
+        if (value === 'sequential' || value === 'round-robin' || value === 'sticky') {
+            vscode.postMessage({ type: 'setAntigravityPoolStrategy', strategy: value });
+        }
+    });
+    document.getElementById('antigravityPoolAccounts')?.addEventListener('click', event => {
+        const target = event.target as HTMLElement | null;
+        const button = target?.closest('.pool-act') as HTMLElement | null;
+        const accountId = button?.dataset.id;
+        if (!button || !accountId) return;
+        if (button.dataset.act === 'primary') vscode.postMessage({ type: 'setAntigravityPrimary', accountId });
+        else if (button.dataset.act === 'cooldown') vscode.postMessage({ type: 'clearAntigravityCooldown', accountId });
+    });
+    const subscriptionPoolStrategy = document.getElementById('subscriptionPoolStrategy') as HTMLSelectElement | null;
+    subscriptionPoolStrategy?.addEventListener('change', () => {
+        const value = subscriptionPoolStrategy.value;
+        if (value === 'sequential' || value === 'round-robin' || value === 'sticky') {
+            vscode.postMessage({ type: 'setSubscriptionPoolStrategy', strategy: value });
+        }
+    });
+    document.getElementById('subscriptionPoolAccounts')?.addEventListener('click', event => {
+        const target = event.target as HTMLElement | null;
+        const button = target?.closest('.pool-act') as HTMLElement | null;
+        const accountId = button?.dataset.id;
+        if (!button || !accountId) return;
+        const act = button.dataset.act;
+        if (act === 'primary') vscode.postMessage({ type: 'setSubscriptionPoolPrimary', accountId });
+        else if (act === 'cooldown') vscode.postMessage({ type: 'clearSubscriptionPoolCooldown', accountId });
+        else if (act === 'remove') vscode.postMessage({ type: 'removeSubscriptionPoolAccount', accountId });
     });
     bindBtn('antigravityLoginBtn', () => vscode.postMessage({ type: 'antigravityLogin' }));
     bindBtn('antigravityRefreshBtn', () => vscode.postMessage({ type: 'antigravityRefreshAccount' }));
@@ -6979,6 +7046,11 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
             case 'settingsData':
                 settingsCodexAccount = msg.codexAccount;
                 settingsCommandCodeAccount = msg.commandcodeAccount;
+        settingsKimiAccount = msg.kimiAccount;
+        settingsWorkBuddyAccount = msg.workbuddyAccount;
+        settingsMinimaxCodeAccount = msg.minimaxCodeAccount;
+        settingsClaudeSubscriptionAccount = msg.claudeSubscriptionAccount;
+        settingsSubscriptionPool = msg.subscriptionPool;
                 settingsAntigravityAccount = isAntigravityAccountStatus(msg.antigravityAccount) ? msg.antigravityAccount : undefined;
                 if (isSubscriptionProxyStatus(msg.subscriptionProxy)) settingsSubscriptionProxy = msg.subscriptionProxy;
                 cachedSettingsData = {
@@ -7909,6 +7981,11 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
             codexAccount: settingsCodexAccount,
             antigravityAccount: settingsAntigravityAccount,
             commandcodeAccount: settingsCommandCodeAccount,
+            kimiAccount: settingsKimiAccount,
+            workbuddyAccount: settingsWorkBuddyAccount,
+            minimaxCodeAccount: settingsMinimaxCodeAccount,
+            claudeSubscriptionAccount: settingsClaudeSubscriptionAccount,
+            subscriptionPool: settingsSubscriptionPool,
             subscriptionProxy: settingsSubscriptionProxy,
             current,
             customApiFormat: current.customApiFormat,
@@ -8328,10 +8405,22 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         const isCommandCode = p?.id === 'commandcode' || p?.id === 'commandcode-messages';
         const antigravityGroup = document.getElementById('antigravityAccountGroup');
         const commandcodeGroup = document.getElementById('commandcodeAccountGroup');
+        const kimiGroup = document.getElementById('kimiAccountGroup');
+        const isKimiCodePlan = p?.id === 'kimi-code-plan';
+        const workbuddyGroup = document.getElementById('workbuddyAccountGroup');
+        const isWorkBuddy = p?.id === 'workbuddy-subscription';
+        const minimaxCodeGroup = document.getElementById('minimaxCodeAccountGroup');
+        const isMinimaxCode = p?.id === 'minimax-code';
+        const claudeSubscriptionGroup = document.getElementById('claudeSubscriptionAccountGroup');
+        const isClaudeSubscription = p?.id === 'claude-subscription';
         const proxyGroup = document.getElementById('subscriptionProxyGroup');
         if (proxyGroup) proxyGroup.style.display = isCodex || isAntigravity ? '' : 'none';
         if (antigravityGroup) antigravityGroup.style.display = isAntigravity ? '' : 'none';
         if (commandcodeGroup) commandcodeGroup.style.display = isCommandCode ? '' : 'none';
+        if (kimiGroup) kimiGroup.style.display = isKimiCodePlan ? '' : 'none';
+        if (workbuddyGroup) workbuddyGroup.style.display = isWorkBuddy ? '' : 'none';
+        if (minimaxCodeGroup) minimaxCodeGroup.style.display = isMinimaxCode ? '' : 'none';
+        if (claudeSubscriptionGroup) claudeSubscriptionGroup.style.display = isClaudeSubscription ? '' : 'none';
         if (codexGroup) codexGroup.style.display = isCodex ? '' : 'none';
         if (codexSpeedGroup) codexSpeedGroup.style.display = isCodex ? '' : 'none';
         if (responseVerbosityGroup) responseVerbosityGroup.style.display = isCodex ? '' : 'none';
@@ -8342,6 +8431,35 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
             if (deleteBtn) deleteBtn.disabled = true;
             const accountStatus = document.getElementById('antigravityAccountStatus');
             if (accountStatus) accountStatus.innerHTML = buildAntigravityAccountHtml(settingsAntigravityAccount, chatI18n.locale === 'zh-cn');
+            const pool = settingsAntigravityAccount?.pool;
+            const poolGroup = document.getElementById('antigravityPoolGroup');
+            const poolAccounts = document.getElementById('antigravityPoolAccounts');
+            const strategySelect = document.getElementById('antigravityPoolStrategy') as HTMLSelectElement | null;
+            if (poolGroup) poolGroup.style.display = pool && pool.accounts.length > 1 ? '' : 'none';
+            if (strategySelect && pool) strategySelect.value = pool.strategy;
+            if (poolAccounts && pool) {
+                const rows = pool.accounts.map(entry => {
+                    const badges: string[] = [];
+                    if (entry.isPrimary) badges.push(tr('primary', '主账号'));
+                    if (entry.authStatus) badges.push(tr('needs sign-in', '需重新登录'));
+                    if (entry.cooldownUntil && entry.cooldownUntil > Date.now()) {
+                        const minutes = Math.max(1, Math.ceil((entry.cooldownUntil - Date.now()) / 60000));
+                        badges.push(tr('cooling ~' + minutes + 'm', '冷却约 ' + minutes + ' 分钟'));
+                    }
+                    const actions: string[] = [];
+                    if (!entry.isPrimary) {
+                        actions.push('<button type="button" class="detect-btn pool-act" data-act="primary" data-id="' + escapeHtml(entry.id) + '" style="padding:0 6px;width:auto;font-size:11px;">' + tr('Make primary', '设为主账号') + '</button>');
+                    }
+                    if (entry.cooldownUntil) {
+                        actions.push('<button type="button" class="detect-btn pool-act" data-act="cooldown" data-id="' + escapeHtml(entry.id) + '" style="padding:0 6px;width:auto;font-size:11px;">' + tr('Clear cooldown', '清除冷却') + '</button>');
+                    }
+                    return '<div class="pool-row" style="display:flex;align-items:center;gap:6px;margin-top:4px;">'
+                        + '<span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escapeHtml(entry.alias)
+                        + (badges.length ? ' <span style="opacity:0.7">(' + escapeHtml(badges.join(', ')) + ')</span>' : '') + '</span>'
+                        + actions.join('') + '</div>';
+                });
+                poolAccounts.innerHTML = rows.join('');
+            }
             const loginBtn = document.getElementById('antigravityLoginBtn');
             const logoutBtn = document.getElementById('antigravityLogoutBtn');
             if (loginBtn) loginBtn.style.display = settingsAntigravityAccount?.signedIn ? 'none' : '';
@@ -8390,6 +8508,139 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
             }
             refreshSettingsOverview();
             return;
+        }
+            // The generic pool section renders for whichever subscription line is
+            // selected, so multi-account does not need one bespoke card per line.
+            renderSubscriptionPool();
+        if (isClaudeSubscription) {
+            // The risk notice is stated BEFORE the button, because the terms
+            // conflict is a fact about using this route, not a footnote.
+            const risk = document.getElementById('claudeSubscriptionRisk');
+            if (risk) {
+                risk.textContent = tr(
+                    'The Anthropic terms of service do not permit third-party apps to relay requests under Claude subscription credentials, and this extension is not authorized by Anthropic. Accounts have been restricted for doing so. Use at your own risk.',
+                    'Anthropic 现行条款不允许第三方应用以 Claude 订阅凭据转发请求，且本扩展未获 Anthropic 授权；已有账号因此被限制的公开报告。请自行评估风险后使用。',
+                );
+            }
+            const accountStatus = document.getElementById('claudeSubscriptionAccountStatus');
+            const account = settingsClaudeSubscriptionAccount;
+            if (accountStatus) {
+                if (account?.signedIn && account?.fresh) {
+                    const identity = [account.email, account.uuid ? '…' + String(account.uuid).slice(-6) : '']
+                        .filter(Boolean).join(' · ');
+                    accountStatus.innerHTML = svgIcon('check') + escapeHtml(tr(
+                        `Active${identity ? ` · ${identity}` : ''}`,
+                        `已就绪${identity ? ` · ${identity}` : ''}`,
+                    ));
+                    accountStatus.style.color = '#4caf50';
+                } else if (account?.signedIn) {
+                    accountStatus.innerHTML = svgIcon('warning') + escapeHtml(tr(
+                        'The stored Claude credential has expired. Sign in again.',
+                        '已保存的 Claude 凭据已过期，请重新登录。',
+                    ));
+                    accountStatus.style.color = '#ff9800';
+                } else {
+                    accountStatus.innerHTML = svgIcon('warning') + escapeHtml(tr(
+                        'Not signed in. The pay-as-you-go Claude provider (API key) is unaffected.',
+                        '尚未登录。按量计费的 Claude 线路（API Key）不受影响。',
+                    ));
+                    accountStatus.style.color = '#ff9800';
+                }
+            }
+            const loginBtn = document.getElementById('claudeSubscriptionLoginBtn');
+            const logoutBtn = document.getElementById('claudeSubscriptionLogoutBtn');
+            if (loginBtn) loginBtn.style.display = account?.signedIn ? 'none' : '';
+            if (logoutBtn) logoutBtn.style.display = account?.signedIn ? '' : 'none';
+            refreshSettingsOverview();
+            return;
+        }
+        if (isMinimaxCode) {
+            const accountStatus = document.getElementById('minimaxCodeAccountStatus');
+            const account = settingsMinimaxCodeAccount;
+            if (accountStatus) {
+                if (account?.signedIn && account?.fresh) {
+                    const parts = [
+                        account.desktopCount > 0 ? tr(`${account.desktopCount} desktop`, `${account.desktopCount} 个桌面端账号`) : '',
+                        account.managedCount > 0 ? tr(`${account.managedCount} added here`, `${account.managedCount} 个本插件账号`) : '',
+                    ].filter(Boolean).join(' · ');
+                    accountStatus.innerHTML = svgIcon('check') + escapeHtml(tr(`Active · ${parts}`, `已就绪 · ${parts}`));
+                    accountStatus.style.color = '#4caf50';
+                } else if (account?.signedIn) {
+                    accountStatus.innerHTML = svgIcon('warning') + escapeHtml(tr(
+                        'The stored MiniMax Code credential has expired. Sign in again.',
+                        '已保存的 MiniMax Code 凭据已过期，请重新登录。',
+                    ));
+                    accountStatus.style.color = '#ff9800';
+                } else {
+                    accountStatus.innerHTML = svgIcon('warning') + escapeHtml(tr(
+                        'No MiniMax Code session found. Sign in with the desktop app, or use device code sign-in.',
+                        '未找到 MiniMax Code 会话。请登录桌面端，或使用设备码登录。',
+                    ));
+                    accountStatus.style.color = '#ff9800';
+                }
+            }
+            const loginBtn = document.getElementById('minimaxCodeLoginBtn');
+            const logoutBtn = document.getElementById('minimaxCodeLogoutBtn');
+            if (loginBtn) loginBtn.style.display = account?.signedIn ? 'none' : '';
+            if (logoutBtn) logoutBtn.style.display = account?.canSignOut ? '' : 'none';
+            refreshSettingsOverview();
+            return;
+        }
+        if (isWorkBuddy) {
+            const accountStatus = document.getElementById('workbuddyAccountStatus');
+            const account = settingsWorkBuddyAccount;
+            if (accountStatus) {
+                const accounts: any[] = Array.isArray(account?.accounts) ? account.accounts : [];
+                const active = accounts.filter(entry => !entry.hidden);
+                if (account?.available) {
+                    const labels = active
+                        .map(entry => tr(`${entry.label} (${entry.source === 'managed' ? 'added here' : 'desktop'})`,
+                            `${entry.label}（${entry.source === 'managed' ? '本插件添加' : '桌面端'}）`))
+                        .join(' · ');
+                    accountStatus.innerHTML = svgIcon('check') + escapeHtml(tr(`Active · ${labels}`, `已就绪 · ${labels}`));
+                    accountStatus.style.color = '#4caf50';
+                } else if (account?.error) {
+                    accountStatus.innerHTML = svgIcon('warning') + escapeHtml(account.error);
+                    accountStatus.style.color = '#ff9800';
+                } else if (active.length > 0) {
+                    accountStatus.innerHTML = svgIcon('warning') + escapeHtml(tr(
+                        'The stored WorkBuddy credential has expired. Sign in again.',
+                        '已保存的 WorkBuddy 凭据已过期，请重新登录。',
+                    ));
+                    accountStatus.style.color = '#ff9800';
+                } else {
+                    accountStatus.innerHTML = svgIcon('warning') + escapeHtml(tr(
+                        'No WorkBuddy account found. Sign in with the CodeBuddy desktop app, or use a button above.',
+                        '未找到 WorkBuddy 账号。请先登录 CodeBuddy 桌面端，或使用上方按钮登录。',
+                    ));
+                    accountStatus.style.color = '#ff9800';
+                }
+            }
+            refreshSettingsOverview();
+            return;
+        }
+        if (isKimiCodePlan) {
+            const accountStatus = document.getElementById('kimiAccountStatus');
+            const account = settingsKimiAccount;
+            if (accountStatus) {
+                if (account?.needsRelogin) {
+                    accountStatus.innerHTML = svgIcon('warning') + escapeHtml(tr('The stored Kimi Code session was rejected. Sign in again.', '已保存的 Kimi Code 会话被拒绝，请重新登录。'));
+                    accountStatus.style.color = '#ff9800';
+                } else if (account?.signedIn) {
+                    accountStatus.innerHTML = svgIcon('check') + escapeHtml(tr('Signed in with the Kimi Code subscription.', '已使用 Kimi Code 订阅登录。'));
+                    accountStatus.style.color = '#4caf50';
+                } else if (account?.error) {
+                    accountStatus.innerHTML = svgIcon('warning') + escapeHtml(account.error);
+                    accountStatus.style.color = '#ff9800';
+                } else {
+                    accountStatus.innerHTML = svgIcon('warning') + escapeHtml(tr('Not signed in. Use device code sign-in, or paste an API key above.', '尚未登录。请使用设备码登录，或在上方粘贴 API Key。'));
+                    accountStatus.style.color = '#ff9800';
+                }
+            }
+            const loginBtn = document.getElementById('kimiLoginBtn');
+            const logoutBtn = document.getElementById('kimiLogoutBtn');
+            if (loginBtn) loginBtn.style.display = account?.signedIn ? 'none' : '';
+            if (logoutBtn) logoutBtn.style.display = account?.signedIn ? '' : 'none';
         }
         if (isCommandCode) {
             const accountStatus = document.getElementById('commandcodeAccountStatus');
@@ -8447,6 +8698,50 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         refreshSettingsOverview();
     }
 
+    /** Render the selected line's account pool: strategy selector plus one row per account. */
+    function renderSubscriptionPool() {
+        const group = document.getElementById('subscriptionPoolGroup');
+        const pool = settingsSubscriptionPool;
+        const accounts: any[] = Array.isArray(pool?.accounts) ? pool.accounts : [];
+        // One account is not a pool worth managing; hide the whole section then.
+        if (!pool || accounts.length === 0) {
+            if (group) group.style.display = 'none';
+            return;
+        }
+        if (group) group.style.display = '';
+        const hint = document.getElementById('subscriptionPoolHint');
+        if (hint) {
+            hint.textContent = tr(
+                accounts.length + ' account(s) rotate for this provider. A rate-limited account cools down and another serves instead.',
+                accounts.length + ' 个账号参与该线路的调度。被限流的账号会进入冷却，由另一个账号接手。',
+            );
+        }
+        const select = document.getElementById('subscriptionPoolStrategy') as HTMLSelectElement | null;
+        if (select) select.value = pool.strategy;
+        const list = document.getElementById('subscriptionPoolAccounts');
+        if (!list) return;
+        list.innerHTML = accounts.map(entry => {
+            const badges: string[] = [];
+            if (entry.isPrimary) badges.push(tr('primary', '主账号'));
+            if (entry.authStatus) badges.push(tr('needs sign-in', '需重新登录'));
+            if (entry.cooldownUntil && entry.cooldownUntil > Date.now()) {
+                const minutes = Math.max(1, Math.ceil((entry.cooldownUntil - Date.now()) / 60000));
+                badges.push(tr('cooling ~' + minutes + 'm', '冷却约 ' + minutes + ' 分钟'));
+            }
+            const actions: string[] = [];
+            if (!entry.isPrimary) {
+                actions.push('<button type="button" class="detect-btn pool-act" data-act="primary" data-id="' + escapeHtml(entry.id) + '" style="padding:0 6px;width:auto;font-size:11px;">' + tr('Make primary', '设为主账号') + '</button>');
+            }
+            if (entry.cooldownUntil) {
+                actions.push('<button type="button" class="detect-btn pool-act" data-act="cooldown" data-id="' + escapeHtml(entry.id) + '" style="padding:0 6px;width:auto;font-size:11px;">' + tr('Clear cooldown', '清除冷却') + '</button>');
+            }
+            actions.push('<button type="button" class="detect-btn pool-act" data-act="remove" data-id="' + escapeHtml(entry.id) + '" style="padding:0 6px;width:auto;font-size:11px;">' + tr('Remove', '移除') + '</button>');
+            return '<div class="pool-row" style="display:flex;align-items:center;gap:6px;margin-top:4px;">'
+                + '<span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escapeHtml(entry.alias)
+                + (badges.length ? ' <span style="opacity:0.7">(' + escapeHtml(badges.join(', ')) + ')</span>' : '') + '</span>'
+                + actions.join('') + '</div>';
+        }).join('');
+    }
     function getCustomApiFormat() {
         return (document.getElementById('customApiFormat') as HTMLSelectElement | null)?.value || 'openai-chat-completions';
     }

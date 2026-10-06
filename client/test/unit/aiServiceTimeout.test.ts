@@ -127,7 +127,7 @@ describe('AIService inline provider isolation', () => {
         const service = new AIService({ secrets: {} } as import('vscode').ExtensionContext);
         const originalFetch = globalThis.fetch;
         const oauth = service.getAntigravityOAuthService();
-        oauth.getRequestContext = async () => ({ token: 'test-token', projectId: 'test-project' });
+        oauth.getRequestContext = async () => ({ token: 'test-token', projectId: 'test-project', accountId: 'test-account' });
         const outputs = ['prefix INSERT suffix', 'CHANGED prefix suffix'];
         let count = 0;
         globalThis.fetch = async (url, init) => {
@@ -449,6 +449,34 @@ describe('AIService OpenAI Responses payload', () => {
         }, { fastPath: true, codexCompatibility: true });
 
         expect(payload).to.not.have.property('temperature');
+    });
+
+    // "Follow the provider" must mean the provider's own default, not the
+    // server's implicit medium: the official Codex client sends the catalog's
+    // default_verbosity (low) on every request.
+    it('sends the Codex catalog default verbosity when the user left it unset', () => {
+        const { AIService } = loadAIService();
+        const service = new AIService({ secrets: {} } as any) as any;
+
+        const payload = service.buildOpenAIResponsesPayload({
+            model: 'gpt-5.6-sol',
+            messages: [{ role: 'user', content: 'Implement the change.' }],
+        }, { fastPath: true, codexCompatibility: true });
+
+        expect(payload.text).to.deep.equal({ verbosity: 'low' });
+    });
+
+    // A model whose verbosity support this line cannot establish gets no text
+    // field at all, because the catalog gates it per model.
+    it('omits the verbosity field for a model the catalog does not establish', () => {
+        const { AIService } = loadAIService();
+        const service = new AIService({ secrets: {} } as any) as any;
+
+        const payload = service.buildOpenAIResponsesPayload({
+            model: 'gpt-6-unknown-preview',
+            messages: [{ role: 'user', content: 'Implement the change.' }],
+        }, { fastPath: true, codexCompatibility: true });
+
         expect(payload).to.not.have.property('text');
     });
 
@@ -503,17 +531,20 @@ describe('AIService OpenAI Responses payload', () => {
         const { AIService } = loadAIService();
         const service = new AIService({ secrets: {} } as any) as any;
         const refreshFlags: boolean[] = [];
-        const requests: Array<{ url: string; authorization: string | null }> = [];
+        const requests: Array<{ url: string; authorization: string | null; beta: string | null }> = [];
         service.chatGptOAuth = {
-            getRequestHeaders: async (forceRefresh: boolean) => {
+            userAgent: 'cwtools-vscode/test',
+            getTurnStateCredentials: async (forceRefresh: boolean) => {
                 refreshFlags.push(forceRefresh);
-                return { Authorization: forceRefresh ? 'Bearer fresh' : 'Bearer stale' };
+                return { accessToken: forceRefresh ? 'fresh' : 'stale', accountId: 'acct-1' };
             },
         };
         service.fetchWithRetry = async (url: string, init: RequestInit) => {
+            const headers = new Headers(init.headers);
             requests.push({
                 url,
-                authorization: new Headers(init.headers).get('Authorization'),
+                authorization: headers.get('Authorization'),
+                beta: headers.get('openai-beta'),
             });
             if (requests.length === 1) {
                 return {
@@ -539,9 +570,11 @@ describe('AIService OpenAI Responses payload', () => {
         );
 
         expect(refreshFlags).to.deep.equal([false, true]);
+        // Every attempt carries the beta gate the official Codex CLI sends;
+        // without it the subscription backend is a different surface.
         expect(requests).to.deep.equal([
-            { url: 'https://chatgpt.com/backend-api/codex/responses', authorization: 'Bearer stale' },
-            { url: 'https://chatgpt.com/backend-api/codex/responses', authorization: 'Bearer fresh' },
+            { url: 'https://chatgpt.com/backend-api/codex/responses', authorization: 'Bearer stale', beta: 'responses=experimental' },
+            { url: 'https://chatgpt.com/backend-api/codex/responses', authorization: 'Bearer fresh', beta: 'responses=experimental' },
         ]);
         expect(response.choices[0].message.content).to.equal('ok');
     });
@@ -2063,6 +2096,38 @@ describe('AIService Antigravity integration', () => {
             subscriptions.forEach(subscription => subscription.dispose());
             globalThis.fetch = originalFetch;
         }
+    });
+});
+
+describe('AIService Kimi Code K3 reasoning replay', () => {
+    // Kimi Code's subscription route keeps the whole thinking chain, so a
+    // tool-call turn whose assistant message omits reasoning_content is rejected
+    // with a missing-reasoning_content error naming the message index.
+    it('requires the reasoning field on every Kimi K3 assistant message', () => {
+        const { AIService } = loadAIService();
+        const service = new AIService({ secrets: {} } as any) as any;
+        const messages = [
+            { role: 'assistant', content: null, tool_calls: [{ id: 'c1', type: 'function', function: { name: 'read', arguments: '{}' } }] },
+            { role: 'tool', tool_call_id: 'c1', content: 'ok' },
+        ];
+
+        const k3 = service.sanitizeRequest('kimi-code-plan', { model: 'k3', messages });
+        expect(k3.messages[0]).to.have.property('reasoning_content', '');
+
+        // A turn that did produce reasoning still replays its own text.
+        const withReasoning = service.sanitizeRequest('kimi-code-plan', {
+            model: 'k3',
+            messages: [{ role: 'assistant', content: 'hi', reasoning_content: 'thought' }],
+        });
+        expect(withReasoning.messages[0]).to.have.property('reasoning_content', 'thought');
+
+        // The K2 family on the same route has no such requirement.
+        const k2 = service.sanitizeRequest('kimi-code-plan', { model: 'kimi-for-coding', messages });
+        expect(k2.messages[0]).to.not.have.property('reasoning_content');
+
+        // Nor does another provider's K3 model.
+        const other = service.sanitizeRequest('openrouter', { model: 'moonshotai/kimi-k3', messages });
+        expect(other.messages[0]).to.not.have.property('reasoning_content');
     });
 });
 

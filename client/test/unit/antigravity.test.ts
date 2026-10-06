@@ -7,6 +7,11 @@ import {
 import { ANTIGRAVITY_ENDPOINTS, ANTIGRAVITY_MODELS, antigravityDisplayModel, antigravityRuntimeModel } from '../../extension/ai/antigravity/models';
 import { buildAntigravityRequest, callAntigravity, consumeAntigravityResponse } from '../../extension/ai/antigravity/completion';
 import { AntigravityApiError, postAntigravity } from '../../extension/ai/antigravity/api';
+import {
+    ANTIGRAVITY_MAX_REQUEST_IMAGE_BYTES,
+    ANTIGRAVITY_OMITTED_IMAGE_TEXT,
+    offloadAntigravityRequestImages,
+} from '../../extension/ai/antigravity/imageBudget';
 import { buildAntigravityAccountHtml, isAntigravityAccountStatus } from '../../webview/chat/antigravityAccount';
 import { cloneChatMessage } from '../../extension/ai/runner/contextTranscript';
 import { estimateChatMessageTokens } from '../../extension/ai/runner/tokenEstimation';
@@ -26,6 +31,15 @@ function credentials(secrets: Secrets, expiresAt = Date.now() + 3600_000) {
 
 function json(data: unknown, status = 200): Response {
     return new Response(JSON.stringify(data), { status, headers: { 'Content-Type': 'application/json' } });
+}
+
+/** One inline-data image block carrying `bytes` base64 characters. */
+function imagePart(bytes: number) {
+    return { type: 'image_url' as const, image_url: { url: `data:image/png;base64,${'A'.repeat(bytes)}` } };
+}
+
+function textPart(text: string) {
+    return { type: 'text' as const, text };
 }
 
 async function rejected(promise: Promise<unknown>, pattern: RegExp): Promise<void> {
@@ -94,7 +108,13 @@ describe('Antigravity OAuth and account boundary', () => {
             return json({ cloudaicompanionProject: { id: 'project-test' } });
         });
         const contexts = await Promise.all([service.getRequestContext(new AbortController().signal), service.getRequestContext(new AbortController().signal)]);
-        expect(contexts).to.deep.equal([{ token: 'rotated', projectId: 'project-test' }, { token: 'rotated', projectId: 'project-test' }]);
+        // Both callers get the same token and project, and both are told which
+        // account served them — that identity is what lets a 429 cool one
+        // account down and retry the turn on another.
+        expect(contexts).to.deep.equal([
+            { token: 'rotated', projectId: 'project-test', accountId: 'legacy-primary' },
+            { token: 'rotated', projectId: 'project-test', accountId: 'legacy-primary' },
+        ]);
         expect(refreshes).to.equal(1);
         expect(projects).to.equal(1);
         expect(await secrets.get(ANTIGRAVITY_SECRET_KEY)).to.contain('refresh-test');
@@ -420,5 +440,51 @@ describe('Antigravity completion transport', () => {
         await outcome;
         expect(cancelled).to.equal(true);
         expect(response.body?.locked).to.equal(false);
+    });
+});
+describe('Antigravity request image budget', () => {
+    it('leaves a request that already fits untouched', () => {
+        const messages = [{ role: 'user' as const, content: [textPart('hi'), imagePart(1024)] }];
+        expect(offloadAntigravityRequestImages(messages)).to.equal(messages);
+    });
+
+    // Google caps a request carrying inline data, and an image-heavy session
+    // would otherwise grow the body until the whole turn is rejected.
+    it('replaces the oldest images first once the budget is exceeded', () => {
+        const half = Math.floor(ANTIGRAVITY_MAX_REQUEST_IMAGE_BYTES / 2) + 10;
+        const messages = [
+            { role: 'user' as const, content: [imagePart(half)] },
+            { role: 'user' as const, content: [textPart('middle')] },
+            { role: 'user' as const, content: [imagePart(half)] },
+        ];
+        const bounded = offloadAntigravityRequestImages(messages);
+        expect(bounded).to.not.equal(messages);
+        expect(bounded[0]!.content).to.deep.equal([{ type: 'text', text: ANTIGRAVITY_OMITTED_IMAGE_TEXT }]);
+        // The newest image is the one the model most likely needs.
+        expect(bounded[2]!.content).to.deep.equal(messages[2]!.content);
+        expect(bounded[1]!.content).to.deep.equal(messages[1]!.content);
+    });
+
+    // A silently missing image is far harder to diagnose than one that says so.
+    it('keeps the omission visible to the model instead of dropping the turn', () => {
+        const messages = [{ role: 'user' as const, content: [imagePart(ANTIGRAVITY_MAX_REQUEST_IMAGE_BYTES + 1)] }];
+        const bounded = offloadAntigravityRequestImages(messages);
+        expect(JSON.stringify(bounded)).to.contain('image omitted');
+        expect(bounded[0]!.content).to.have.length(1);
+    });
+
+    it('does not touch the durable history it was handed', () => {
+        const oversized = imagePart(ANTIGRAVITY_MAX_REQUEST_IMAGE_BYTES + 1);
+        const messages = [{ role: 'user' as const, content: [oversized] }];
+        offloadAntigravityRequestImages(messages);
+        expect(messages[0]!.content![0]).to.deep.equal(oversized);
+    });
+
+    it('ignores string content and non-data image URLs', () => {
+        const messages = [
+            { role: 'user' as const, content: 'plain text' },
+            { role: 'user' as const, content: [{ type: 'image_url' as const, image_url: { url: 'https://example.test/a.png' } }] },
+        ];
+        expect(offloadAntigravityRequestImages(messages)).to.equal(messages);
     });
 });

@@ -1,9 +1,11 @@
 import { expect } from 'chai';
 import {
     isModelVisionCapable,
+    isModelVisionCapableFor,
     isModelFIMCapable,
     clampConfiguredContextTokens,
     isCodexExtendedContextModel,
+    isCodexGpt6FamilyModel,
     getModelContextTokens,
     getModelOutputTokens,
     getProvider,
@@ -59,14 +61,16 @@ describe('GPT-6 Astra provider support', () => {
         expect(getEffectiveModel('openai')).to.equal('gpt-6-astra');
         expect(getEffectiveModel('codex-chatgpt')).to.equal('gpt-6-astra');
         expect(getModelContextTokens('gpt-6-astra', 'openai')).to.equal(1050000);
-        expect(getModelContextTokens('gpt-6-astra', 'codex-chatgpt')).to.equal(272000);
-        expect(clampConfiguredContextTokens('codex-chatgpt', 'gpt-6-astra', 1050000)).to.equal(1050000);
+        // The Codex listing prints 272K but the service serves the GPT-6 family
+        // at 384K by default; the ceiling stays 872K.
+        expect(getModelContextTokens('gpt-6-astra', 'codex-chatgpt')).to.equal(384000);
+        expect(clampConfiguredContextTokens('codex-chatgpt', 'gpt-6-astra', 1050000)).to.equal(872000);
         expect(clampConfiguredContextTokens('codex-chatgpt', 'gpt-6-astra', 272000)).to.equal(272000);
         for (const model of ['gpt-6-sol', 'gpt-6-luna']) {
             // Enumerated above for every provider id; the loop varies only per-model limits.
             expect(getProvider('openai').models, model).to.include(model);
             expect(getModelOutputTokens(model, 'openai'), model).to.equal(128000);
-            expect(clampConfiguredContextTokens('codex-chatgpt', model, 1050000), model).to.equal(1050000);
+            expect(clampConfiguredContextTokens('codex-chatgpt', model, 1050000), model).to.equal(872000);
         }
     });
 
@@ -120,20 +124,51 @@ describe('Command Code provider support', () => {
         expect(getModelOutputTokens('MiniMaxAI/MiniMax-M3', 'commandcode')).to.equal(128000);
     });
 
-    it('exposes upstream reasoning controls and sends reasoning_effort', () => {
+    // The ladders come from the official CLI's model registry, not from the
+    // model's name: within this gateway a vendor prefix says nothing, so these
+    // are the transcribed values rather than a family guess.
+    it('exposes the registry reasoning ladder per model', () => {
         expect(getModelReasoningCapability('commandcode', 'zai-org/GLM-5.2')).to.deep.equal({
             kind: 'effort',
-            options: ['none', 'high', 'max'],
-            defaultValue: 'max',
+            options: ['high', 'max'],
+            defaultValue: 'high',
         });
         expect(getModelReasoningCapability('commandcode', 'moonshotai/Kimi-K3')).to.deep.equal({
             kind: 'effort',
             options: ['low', 'high', 'max'],
-            defaultValue: 'high',
+            defaultValue: 'low',
         });
-        expect(getModelReasoningCapability('commandcode', 'sakana/fugu-ultra').kind).to.equal('none');
+        // Fugu Ultra declares a ladder, so it is not a no-reasoning model.
+        expect(getModelReasoningCapability('commandcode', 'sakana/fugu-ultra').options)
+            .to.deep.equal(['high', 'xhigh']);
         expect(getThinkingParams('zai-org/GLM-5.2', 'commandcode', 'openai-chat-completions', 'high'))
             .to.deep.equal({ reasoningEffort: 'high' });
+    });
+
+    // "Do not think" is spelled `off` in the registry and `none` in DSH; the
+    // registry value must never reach the OpenAI-family wire, which has no such
+    // level. Omitting the field is exactly what the official CLI does.
+    it('translates the registry off level and never sends it', () => {
+        const withOff = getModelReasoningCapability('commandcode', 'deepseek/deepseek-v4.1-flash');
+        expect(withOff.options).to.include('none');
+        expect(withOff.options).to.not.include('off' as never);
+        // Undefined means "send no field at all", which is the wire behaviour
+        // the official CLI produces for its own `off` level.
+        expect(getThinkingParams('deepseek/deepseek-v4.1-flash', 'commandcode', 'openai-chat-completions', 'none'))
+            .to.equal(undefined);
+    });
+
+    // Modalities are per exact id: this gateway serves a text-only model and a
+    // vision model under the same vendor, so a prefix test cannot decide it.
+    it('decides image support per exact model id', () => {
+        expect(isModelVisionCapableFor('commandcode', 'deepseek/deepseek-v4.1-flash')).to.equal(true);
+        expect(isModelVisionCapableFor('commandcode', 'deepseek/deepseek-v4-flash')).to.equal(false);
+        expect(isModelVisionCapableFor('commandcode', 'z-ai/glm-5.3-flash')).to.equal(true);
+        expect(isModelVisionCapableFor('commandcode', 'zai-org/GLM-5.3')).to.equal(false);
+        // An id the registry does not describe answers text-only: a false "no
+        // images" is a visible placeholder, a false "images accepted" is a
+        // rejected request.
+        expect(isModelVisionCapableFor('commandcode', 'unlisted/vendor-model')).to.equal(false);
     });
 });
 
@@ -331,9 +366,9 @@ describe('getModelContextTokens', () => {
         // GPT-6 Sol/Luna ship with the same 1,050,000 window as Astra.
         expect(getModelContextTokens('gpt-6-sol', 'openai')).to.equal(1050000);
         expect(getModelContextTokens('gpt-6-luna', 'openai')).to.equal(1050000);
-        expect(getModelContextTokens('gpt-6-sol', 'codex-chatgpt')).to.equal(272000);
-        expect(clampConfiguredContextTokens('codex-chatgpt', 'gpt-6-sol', 1050000)).to.equal(1050000);
-        expect(clampConfiguredContextTokens('codex-chatgpt', 'gpt-6-luna', 1050000)).to.equal(1050000);
+        expect(getModelContextTokens('gpt-6-sol', 'codex-chatgpt')).to.equal(384000);
+        expect(clampConfiguredContextTokens('codex-chatgpt', 'gpt-6-sol', 1050000)).to.equal(872000);
+        expect(clampConfiguredContextTokens('codex-chatgpt', 'gpt-6-luna', 1050000)).to.equal(872000);
         expect(getModelContextTokens('gpt-5.6-sol', 'codex-chatgpt')).to.equal(272000);
         expect(getModelContextTokens('gpt-5.6-sol', 'openai')).to.equal(1050000);
         expect(clampConfiguredContextTokens('codex-chatgpt', 'gpt-5.6-sol', 1050000)).to.equal(1050000);
@@ -616,10 +651,16 @@ describe('getProviderApiFormat', () => {
             antigravity: 'gemini-generate-content',
             openai: 'openai-responses',
             claude: 'anthropic-messages',
+            // The subscription speaks Anthropic Messages with an OAuth bearer,
+            // unlike the API-key line above.
+            'claude-subscription': 'anthropic-messages',
             tokenrhythm: 'openai-chat-completions',
             deepseek: 'openai-chat-completions',
             minimax: 'openai-chat-completions',
             'minimax-token-plan': 'anthropic-messages',
+            // The programming subscription speaks Anthropic Messages with a
+            // bearer token, unlike the platform API-key line above.
+            'minimax-code': 'anthropic-messages',
             glm: 'openai-chat-completions',
             qwen: 'openai-chat-completions',
             mimo: 'openai-chat-completions',
@@ -638,6 +679,9 @@ describe('getProviderApiFormat', () => {
             'commandcode-messages': 'anthropic-messages',
             kimi: 'openai-chat-completions',
             'kimi-code-plan': 'openai-chat-completions',
+            // The WorkBuddy subscription is an OpenAI-compatible gateway whose
+            // default model comes from the live /v3/config listing.
+            'workbuddy-subscription': 'openai-chat-completions',
         } as const;
 
         const httpProviderIds = Object.values(BUILTIN_PROVIDERS).map(provider => provider.id).sort();
@@ -687,15 +731,15 @@ describe('getEffectiveReasoningEffort', () => {
 
     it('caps GPT-6.1 Sol at the Codex service ceiling while the API keeps 1,050,000', () => {
         expect(getModelContextTokens('gpt-6.1-sol', 'openai')).to.equal(1050000);
-        expect(getModelContextTokens('gpt-6.1-sol', 'codex-chatgpt')).to.equal(272000);
+        expect(getModelContextTokens('gpt-6.1-sol', 'codex-chatgpt')).to.equal(384000);
         // Codex catalog max_context_window is 872,000, so 1M must not be offered.
         expect(clampConfiguredContextTokens('codex-chatgpt', 'gpt-6.1-sol', 1050000)).to.equal(872000);
         expect(clampConfiguredContextTokens('codex-chatgpt', 'gpt-6.1-sol', 872000)).to.equal(872000);
         expect(clampConfiguredContextTokens('codex-chatgpt', 'gpt-6.1-sol', 272000)).to.equal(272000);
         // The direct API channel is unaffected by the Codex ceiling.
         expect(clampConfiguredContextTokens('openai', 'gpt-6.1-sol', 1050000)).to.equal(1050000);
-        // Older GPT-6 tiers keep their existing 1M policy.
-        expect(clampConfiguredContextTokens('codex-chatgpt', 'gpt-6-astra', 1050000)).to.equal(1050000);
+        // The whole GPT-6 family shares the 872K Codex ceiling.
+        expect(clampConfiguredContextTokens('codex-chatgpt', 'gpt-6-astra', 1050000)).to.equal(872000);
     });
 
     it('does not alter other protocols or supported values', () => {
@@ -1051,8 +1095,10 @@ describe('BUILTIN_PROVIDERS', () => {
             }
             expect(p.maxContextTokens, `${key}.maxContextTokens`).to.be.a('number');
             expect(p.maxContextTokens, `${key}.maxContextTokens`).to.be.greaterThan(0);
-            // ollama is auto-detected; custom is user-entered.
-            if (key !== 'ollama' && key !== 'custom') {
+            // ollama is auto-detected, custom is user-entered, and the WorkBuddy
+            // subscription is catalogued live by the gateway (its shipped list is
+            // intentionally empty until an account's /v3/config answers).
+            if (key !== 'ollama' && key !== 'custom' && key !== 'workbuddy-subscription') {
                 expect(p.defaultModel, `${key}.defaultModel`).to.be.a('string').with.length.greaterThan(0);
                 expect(p.models, `${key}.models`).to.be.an('array').with.length.greaterThan(0);
             }
@@ -1067,9 +1113,13 @@ describe('BUILTIN_PROVIDERS', () => {
         expect(codex.requiresApiKey).to.equal(false);
         expect(codex.supportsFIM).to.equal(false);
         expect(codex.supportsUtilityCalls).to.equal(false);
+        // The adapter's declared default is the conservative shipped floor; the
+        // live listing raises it per model once an account is signed in.
         expect(codex.maxContextTokens).to.equal(272000);
         for (const model of codex.models) {
-            expect(getModelContextTokens(model, codex.id), model).to.equal(272000);
+            // Only the GPT-6 family starts above the listing's 272K floor.
+            const expected = isCodexGpt6FamilyModel(model) ? 384000 : 272000;
+            expect(getModelContextTokens(model, codex.id), model).to.equal(expected);
         }
         expect(getProviderApiFormat(codex.id, codex.defaultModel)).to.equal('openai-responses');
     });

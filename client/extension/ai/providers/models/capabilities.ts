@@ -4,7 +4,12 @@
 
 import { BUILTIN_PROVIDERS } from './defaults';
 import { ANTIGRAVITY_MODELS, antigravityContextTokens, antigravityOutputTokens } from '../../antigravity/models';
-import { CODEX_CHATGPT_CONTEXT_TOKENS, CODEX_CHATGPT_MODELS } from '../../codex/oauthService';
+import { commandCodeModelSupportsImage } from '../../commandcode/modelCapabilities';
+import {
+    CODEX_CHATGPT_CONTEXT_TOKENS,
+    CODEX_CHATGPT_EFFECTIVE_CONTEXT_TOKENS,
+    CODEX_CHATGPT_MODELS,
+} from '../../codex/oauthService';
 
 /**
  * Model-level vision capability map.
@@ -125,6 +130,23 @@ export function isModelVisionCapable(model: string): boolean {
         if (lower.includes(key.toLowerCase())) return capable;
     }
     return false;
+}
+
+/**
+ * Vision capability for one provider/model pair.
+ *
+ * Command Code is answered from the official CLI's own registry rather than the
+ * substring table above, because within that gateway a prefix says nothing about
+ * modalities: `deepseek/deepseek-v4-flash` is text-only while
+ * `deepseek/deepseek-v4.1-flash` takes images. An id the registry omits answers
+ * text-only — a false "no images" is a visible placeholder the user can correct,
+ * while a false "images accepted" sends bytes to a request the endpoint rejects.
+ */
+export function isModelVisionCapableFor(providerId: string | undefined, model: string): boolean {
+    if (providerId === 'commandcode' || providerId === 'commandcode-messages') {
+        return commandCodeModelSupportsImage(model);
+    }
+    return isModelVisionCapable(model);
 }
 
 /**
@@ -360,13 +382,20 @@ export const COMMANDCODE_MODEL_CONTEXT_TOKENS: Record<string, number> = {
  */
 export const MODEL_CONTEXT_TOKENS: Record<string, number> = {
     // ChatGPT OAuth uses the Codex service catalog, whose active windows can
-    // differ from the same model IDs exposed through the public API.
-    'codex-chatgpt:gpt-6-astra': CODEX_CHATGPT_CONTEXT_TOKENS,
+    // differ from the same model IDs exposed through the public API. The live
+    // listing (see codex/modelCatalog.ts) overrides these when it is available;
+    // this table answers before the first sign-in and when a listing call fails.
+    'codex-chatgpt:gpt-6-astra': CODEX_CHATGPT_EFFECTIVE_CONTEXT_TOKENS,
+    'codex-chatgpt:gpt-6.1-sol': CODEX_CHATGPT_EFFECTIVE_CONTEXT_TOKENS,
+    'codex-chatgpt:gpt-6-sol': CODEX_CHATGPT_EFFECTIVE_CONTEXT_TOKENS,
+    'codex-chatgpt:gpt-6-luna': CODEX_CHATGPT_EFFECTIVE_CONTEXT_TOKENS,
     'codex-chatgpt:gpt-5.6': CODEX_CHATGPT_CONTEXT_TOKENS,
     ...Object.fromEntries(ANTIGRAVITY_MODELS.map(model => [`antigravity:${model}`, antigravityContextTokens(model)])),
     ...Object.fromEntries(CODEX_CHATGPT_MODELS.map(model => [
         `codex-chatgpt:${model}`,
-        CODEX_CHATGPT_CONTEXT_TOKENS,
+        isCodexGpt6FamilyModel(model)
+            ? CODEX_CHATGPT_EFFECTIVE_CONTEXT_TOKENS
+            : CODEX_CHATGPT_CONTEXT_TOKENS,
     ])),
     'gpt-6-astra': 1050000,
     'gpt-6.1-sol': 1050000,
@@ -624,6 +653,20 @@ export const MAX_SAFE_CONTEXT_TOKENS = 2_097_152;
  * The dotted minor is pinned to the only shipped one (`gpt-6.1`) so a future
  * `gpt-6.2` cannot inherit a context ceiling the Codex service never promised.
  */
+/**
+ * True for the GPT-6 family (6 Astra / 6.1 Sol / 6 Sol / 6 Luna).
+ *
+ * Only this family starts at the 384K effective window; the GPT-5.6 family keeps
+ * the 272K the subscription listing states. Kept separate from
+ * {@link isCodexExtendedContextModel}, which answers the different question of
+ * whether a model may be configured above the shipped default.
+ */
+export function isCodexGpt6FamilyModel(model: string): boolean {
+    if (!model) return false;
+    const lower = model.toLowerCase().replace(/\s*\([^)]*\)$/i, '');
+    return /(?:^|\/)(?:gpt-6)(?:[.]\d+)?(?:-|$)/i.test(lower);
+}
+
 export function isCodexExtendedContextModel(model: string): boolean {
     if (!model) return false;
     const lower = model.toLowerCase().replace(/\s*\([^)]*\)$/i, '');
@@ -638,6 +681,9 @@ export function isCodexExtendedContextModel(model: string): boolean {
  */
 export const CODEX_CHATGPT_MAX_CONTEXT_TOKENS: Record<string, number> = {
     'gpt-6.1-sol': 872_000,
+    'gpt-6-astra': 872_000,
+    'gpt-6-sol': 872_000,
+    'gpt-6-luna': 872_000,
 };
 
 export function clampConfiguredContextTokens(

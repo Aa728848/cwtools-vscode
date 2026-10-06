@@ -63,6 +63,21 @@ async function readErrorDetail(response: Response, token: string, signal: AbortS
     }
 }
 
+/**
+ * What a caller needs to get a token and project for one Antigravity request.
+ *
+ * `accountId` is optional so a test double can return just a token and a
+ * project; the real service always names the account, which is what lets the
+ * chat path cool one account down and retry the turn on another.
+ */
+export interface AntigravityRequestContextSource {
+    getRequestContext(
+        signal: AbortSignal,
+        forceRefresh?: boolean,
+        excludeIds?: ReadonlySet<string>,
+    ): Promise<{ token: string; projectId: string; accountId?: string }>;
+}
+
 export type AntigravityAction = 'loadCodeAssist' | 'listCloudAICompanionProjects'
     | 'fetchAvailableModels' | 'retrieveUserQuotaSummary' | 'streamGenerateContent';
 

@@ -12,13 +12,14 @@ import type {
 } from './types';
 import { ErrorReporter } from './errorReporter';
 import { SOURCE, aiText } from './messages';
-import { contentToString } from './types';
+import { contentToString, isReasoningEffort } from './types';
 
 // Import core settings and capabilities from partitioned sub-modules
 import { BUILTIN_PROVIDERS } from './providers/models/defaults';
 import {
     VISION_CAPABLE_MODELS,
     isModelVisionCapable,
+    isModelVisionCapableFor,
     FIM_CAPABLE_MODELS,
     isModelFIMCapable,
     ALWAYS_THINKING_PREFIXES,
@@ -29,15 +30,27 @@ import {
     getModelContextTokens,
     clampConfiguredContextTokens,
     isCodexExtendedContextModel,
+    isCodexGpt6FamilyModel,
     getModelOutputTokens,
     getAnthropicModelFeatures
 } from './providers/models/capabilities';
+import { minimaxCodeOutputConfig } from './minimaxcode/types';
+import { commandCodeReasoningEfforts, commandCodeWireEffort } from './commandcode/modelCapabilities';
+import {
+    CLAUDE_CODE_IDENTITY_TEXT,
+    CLAUDE_DEFAULT_CACHE_TTL,
+    claudeCacheControlFor,
+    claudeThinkingFor,
+    resolveClaudeModel,
+    type ClaudeCacheTtl,
+} from './claudesub/types';
 
 // Public provider surface shared by the extension and tests.
 export {
     BUILTIN_PROVIDERS,
     VISION_CAPABLE_MODELS,
     isModelVisionCapable,
+    isModelVisionCapableFor,
     FIM_CAPABLE_MODELS,
     isModelFIMCapable,
     ALWAYS_THINKING_PREFIXES,
@@ -48,6 +61,7 @@ export {
     getModelContextTokens,
     clampConfiguredContextTokens,
     isCodexExtendedContextModel,
+    isCodexGpt6FamilyModel,
     getModelOutputTokens,
     getAnthropicModelFeatures
 };
@@ -274,7 +288,9 @@ export function getProviderApiFormat(
         case 'codex-chatgpt':
             return 'openai-responses';
         case 'claude':
+        case 'claude-subscription':
         case 'minimax-token-plan':
+        case 'minimax-code':
         case 'commandcode-messages':
             return 'anthropic-messages';
         case 'opencode':
@@ -516,6 +532,26 @@ export function getModelReasoningCapability(
         if (/minimax-m2/.test(lower)) return reasoningCapability('fixed', ['high'], 'high');
         return NO_REASONING;
     }
+    if (provider === 'claude-subscription') {
+        // The subscription catalog is the authority: an unknown id declares no
+        // ladder rather than inheriting a neighbour's.
+        const entry = resolveClaudeModel(model);
+        const efforts = entry.reasoningEfforts.filter(isReasoningEffort);
+        if (efforts.length === 0) return NO_REASONING;
+        return reasoningCapability('effort', efforts, efforts[0]!);
+    }
+    if (provider === 'minimax-code') {
+        // The subscription's thinking shape is a three-state table, not a
+        // gradient: M2.7 always thinks with no selectable level, M3 is a plain
+        // on/off switch, and M3.1 Flash forces thinking on with a selectable
+        // effort. Exposing a level a model does not have would be a request the
+        // service answers with a 400.
+        if (/minimax-m3[.]1/.test(lower)) {
+            return reasoningCapability('effort', ['none', 'low', 'medium', 'high', 'xhigh', 'max'], 'max');
+        }
+        if (/minimax-m3/.test(lower)) return reasoningCapability('toggle', ['none', 'high'], 'high');
+        return reasoningCapability('fixed', ['high'], 'high');
+    }
     if (provider === 'kimi' || provider === 'kimi-code-plan') {
         if (/(?:^|\/)(?:kimi-)?k3(?:-|$)/.test(lower)) {
             return reasoningCapability('effort', ['low', 'high', 'max'], 'high');
@@ -528,7 +564,13 @@ export function getModelReasoningCapability(
         return upstreamGatewayCapability(provider, lower) ?? NO_REASONING;
     }
     if (provider === 'commandcode') {
-        return upstreamGatewayCapability(provider, lower) ?? NO_REASONING;
+        // The official CLI's own model registry is the authority on which levels a
+        // model exposes. A family heuristic cannot stand in for it: within one
+        // vendor the split is not derivable from the id, and an id the table
+        // omits must not silently inherit a neighbour's ladder.
+        const efforts = commandCodeReasoningEfforts(model).filter(isReasoningEffort);
+        if (efforts.length === 0) return NO_REASONING;
+        return reasoningCapability('effort', efforts, efforts[0]!);
     }
     return NO_REASONING;
 }
@@ -926,8 +968,17 @@ const THINKING_RULES: ThinkingRule[] = [
     { providers: ['custom'], model: /(?:^|\/)(?:gpt-5|o[134](?:-|$)|deepseek-|glm-5[.]2|gpt-oss)/, build: ctx => ({ reasoningEffort: withoutMax(ctx.requested) }) },
 
     // Command Code's Provider API normalizes per-model reasoning controls
-    // behind a single top-level reasoning_effort field.
-    { providers: ['commandcode'], build: ctx => ({ reasoningEffort: ctx.requested }) },
+    // behind a single top-level reasoning_effort field. The "do not think" level
+    // is expressed by OMITTING the field, exactly as the official CLI does when
+    // its effort is `off`: the OpenAI-family wire has no such level, so sending
+    // the literal would be a value the endpoint does not accept.
+    {
+        providers: ['commandcode'],
+        build: ctx => {
+            const wire = commandCodeWireEffort(ctx.requested);
+            return wire === undefined ? {} : { reasoningEffort: wire as typeof ctx.requested };
+        },
+    },
 
     // Generic fallback: provider-specific on/off switches only.
     { build: ctx => getEnableThinkingParams(ctx.model, ctx.providerId) },
@@ -997,7 +1048,21 @@ function toClaudeContentBlocks(content: ContentPart[]): Array<Record<string, unk
  */
 export function toClaudeRequest(
     request: ChatCompletionRequest,
-    options: { cacheControl?: boolean } = {}
+    options: {
+        cacheControl?: boolean;
+        /**
+         * Set to the model id when the request targets the MiniMax Code
+         * subscription, which has its own documented thinking shape.
+         */
+        minimaxCodeModel?: string;
+        /**
+         * Set to the model id when the request targets the Claude subscription,
+         * whose thinking form is per-model.
+         */
+        claudeSubscriptionModel?: string;
+        /** Prompt-cache tier to write for the subscription route. */
+        claudeCacheTtl?: ClaudeCacheTtl;
+    } = {}
 ): Record<string, unknown> {
     const enableCacheControl = options.cacheControl !== false;
     // Extract system message
@@ -1073,7 +1138,24 @@ export function toClaudeRequest(
     // 🌟 自动注入 Anthropic cache_control 断点 (T3.1)
     // breakpoint 1: System prompt 末尾
     let claudeSystem: any = undefined;
-    if (systemPrompt) {
+    if (options.claudeSubscriptionModel !== undefined) {
+        // A subscription request's system array MUST open with the Claude Code
+        // identity line, verbatim; the caller's prompt (if any) becomes the
+        // second block. The cache marker goes on the LAST block, which is the
+        // Anthropic-recommended shape: a breakpoint at the end of the prompt
+        // caches everything above it.
+        const blocks: Array<Record<string, unknown>> = [
+            { type: 'text', text: CLAUDE_CODE_IDENTITY_TEXT },
+        ];
+        if (systemPrompt) blocks.push({ type: 'text', text: systemPrompt });
+        if (enableCacheControl) {
+            const last = blocks[blocks.length - 1]!;
+            last.cache_control = claudeCacheControlFor(
+                options.claudeCacheTtl ?? CLAUDE_DEFAULT_CACHE_TTL,
+            );
+        }
+        claudeSystem = blocks;
+    } else if (systemPrompt) {
         claudeSystem = enableCacheControl
             ? [
                 {
@@ -1190,6 +1272,30 @@ export function toClaudeRequest(
         // Anthropic-compatible non-Claude gateways (currently MiniMax M3).
         claudeRequest.thinking = { type: 'adaptive' };
         delete claudeRequest.temperature;
+    }
+    // The MiniMax Code subscription's thinking control is its own documented
+    // shape, and it is NOT a `thinking` object: the depth level belongs at the
+    // top level in `output_config.effort`, whose vocabulary has no `default`
+    // member (omitting it means max). The table decides per model, so a model
+    // that cannot take a level is sent no field rather than one it rejects.
+    // The Claude subscription's thinking shape is per-model (mid-convo / adaptive
+    // / budget / none) and its system array MUST open with the Claude Code
+    // identity block; both come from the catalog rather than a name heuristic.
+    if (options.claudeSubscriptionModel !== undefined) {
+        const entry = resolveClaudeModel(options.claudeSubscriptionModel);
+        if (!entry.supportsTemperature) delete claudeRequest.temperature;
+        const thinking = claudeThinkingFor(entry, request.reasoning_effort, request.thinking_budget);
+        if (thinking.thinking !== undefined) claudeRequest.thinking = thinking.thinking;
+        if (thinking.outputConfig !== undefined) claudeRequest.output_config = thinking.outputConfig;
+        return claudeRequest;
+    }
+    if (options.minimaxCodeModel !== undefined) {
+        const outputConfig = minimaxCodeOutputConfig(
+            options.minimaxCodeModel,
+            request.reasoning_effort ?? null,
+        );
+        if (outputConfig !== undefined) claudeRequest.output_config = outputConfig;
+        return claudeRequest;
     }
     if (request.reasoning_effort) {
         if (anthropicFeatures.effort) {

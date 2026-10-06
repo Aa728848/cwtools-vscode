@@ -6,6 +6,12 @@ import type { AntigravityAccountStatus, AntigravityQuotaBucket } from '../types'
 import { aiText } from '../messages';
 import { ANTIGRAVITY_MODELS, antigravityDisplayModel } from './models';
 import { AntigravityApiError, extractAntigravityProject, postAntigravity } from './api';
+import {
+    ANTIGRAVITY_POOL_KEY,
+    AntigravityAccountPool,
+    type AntigravityPoolCredentials,
+} from './accountPool';
+import { DEFAULT_COOLDOWN_MS } from '../pool/accountPool';
 
 export const ANTIGRAVITY_SECRET_KEY = 'cwtools.ai.antigravity.oauth.v1';
 export const ANTIGRAVITY_TOKEN_URL = 'https://oauth2.googleapis.com/token';
@@ -21,6 +27,14 @@ interface Credentials {
     refreshToken: string;
     expiresAt: number;
     email?: string;
+    /**
+     * Stable identity of one sign-in session.
+     *
+     * Used as the pool's dedupe key when the credential names no email: the same
+     * slot rotating its token is the same account, so a refresh updates the row
+     * in place instead of growing a ghost account.
+     */
+    recordKey?: string;
 }
 
 export interface AntigravityLogin {
@@ -80,15 +94,105 @@ export class AntigravityOAuthService implements vscode.Disposable {
     private session = new AbortController();
     private refreshPromise?: Promise<Credentials>;
     private projectPromise?: Promise<string>;
+    /** Account the cached project belongs to; a change invalidates the cache. */
+    private projectAccountId?: string;
     private cachedStatus?: { value: AntigravityAccountStatus; at: number };
     private activeLogin?: AntigravityLogin;
     private secretWrites: Promise<void> = Promise.resolve();
+    /**
+     * Multi-account pool over the same credentials this service refreshes.
+     *
+     * It exists so that several signed-in Google accounts rotate (sequential /
+     * round-robin / sticky), a 429 cools one account down while another serves,
+     * and a revoked credential leaves its row in place for a re-login to restore.
+     * The single-credential slot stays a mirror of the primary account, so every
+     * existing reader of that slot keeps working.
+     */
+    private readonly pool: AntigravityAccountPool;
 
     constructor(
         private readonly secrets: Pick<vscode.SecretStorage, 'get' | 'store' | 'delete'>,
         private readonly fetchFn: typeof fetch = fetch,
         private readonly callbackPort = 51121,
-    ) {}
+    ) {
+        this.pool = new AntigravityAccountPool({
+            store: {
+                read: () => this.secrets.get(ANTIGRAVITY_POOL_KEY),
+                write: async value => { await this.secrets.store(ANTIGRAVITY_POOL_KEY, JSON.stringify(value)); },
+            },
+            refresh: (credentials, fetchFn) => this.refreshPoolCredentials(credentials, fetchFn),
+            fetchFn: this.fetchFn,
+            // The pre-pool single credential becomes the primary account, and the
+            // primary mirrors back into that slot, so an upgrade is never
+            // "everything is gone" and every existing reader keeps working.
+            legacy: {
+                read: async () => (await this.readCredentials()) ?? null,
+                write: credentials => this.mirrorPrimary(credentials),
+            },
+        });
+    }
+
+    /**
+     * Refresh one pooled credential.
+     *
+     * Reuses the same token endpoint and client identity as the single-credential
+     * path, and surfaces the HTTP status on the error so the pool can classify a
+     * revoked credential as final and a transport failure as transient.
+     */
+    private async refreshPoolCredentials(
+        credentials: AntigravityPoolCredentials,
+        fetchFn: typeof fetch,
+    ): Promise<AntigravityPoolCredentials> {
+        // Tied to the session so a sign-out aborts an in-flight rotation instead
+        // of letting it finish and write a credential back after the user left.
+        const response = await fetchFn(ANTIGRAVITY_TOKEN_URL, {
+            method: 'POST',
+            redirect: 'error',
+            signal: AbortSignal.any([this.session.signal, AbortSignal.timeout(30_000)]),
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: new URLSearchParams({
+                client_id: CLIENT_ID,
+                client_secret: CLIENT_SECRET,
+                grant_type: 'refresh_token',
+                refresh_token: credentials.refreshToken,
+            }).toString(),
+        });
+        if (!response.ok) {
+            await response.body?.cancel().catch(() => undefined);
+            throw Object.assign(
+                new Error(aiText(
+                    `Antigravity OAuth refresh failed (${response.status}).`,
+                    `Antigravity OAuth 续期失败（${response.status}）。`,
+                )),
+                { status: response.status },
+            );
+        }
+        const data: unknown = await response.json();
+        if (!isRecord(data) || !nonempty(data.access_token)) {
+            throw new Error(aiText('Antigravity returned invalid OAuth credentials.', 'Antigravity 返回了无效的 OAuth 凭据。'));
+        }
+        const expiresIn = typeof data.expires_in === 'number' && Number.isFinite(data.expires_in) && data.expires_in > 0
+            ? data.expires_in
+            : 3600;
+        return {
+            accessToken: data.access_token,
+            // A rotated refresh token replaces the old one; an omission keeps it.
+            refreshToken: nonempty(data.refresh_token) ? data.refresh_token : credentials.refreshToken,
+            expiresAt: Date.now() + expiresIn * 1000,
+            ...(credentials.email === undefined ? {} : { email: credentials.email }),
+            ...(credentials.recordKey === undefined ? {} : { recordKey: credentials.recordKey }),
+        };
+    }
+
+    /** Mirror the primary account into the single-credential slot. */
+    private async mirrorPrimary(credentials: AntigravityPoolCredentials | null): Promise<void> {
+        const epoch = this.epoch;
+        await this.mutateSecret(async () => {
+            if (epoch !== this.epoch) return;
+            if (credentials === null) await this.secrets.delete(ANTIGRAVITY_SECRET_KEY);
+            else await this.secrets.store(ANTIGRAVITY_SECRET_KEY, JSON.stringify(credentials));
+        });
+    }
 
     private mutateSecret(action: () => PromiseLike<void>): Promise<void> {
         const task = this.secretWrites.then(action);
@@ -155,20 +259,51 @@ export class AntigravityOAuthService implements vscode.Disposable {
         return this.refreshPromise;
     }
 
-    async getRequestContext(signal: AbortSignal, forceRefresh = false): Promise<{ token: string; projectId: string }> {
+    /**
+     * Token plus project for the next request.
+     *
+     * The account comes from the pool, so a 429 can cool one account down while
+     * another serves the turn, and a revoked credential is parked until a
+     * re-login restores it. The project cache is keyed by account: a single
+     * unkeyed cache would hand the previous account's project to the next one,
+     * which is a request the service rejects.
+     *
+     * @param excludeIds - accounts already tried for this request, so a retry
+     *   lands on a different one.
+     */
+    async getRequestContext(
+        signal: AbortSignal,
+        forceRefresh = false,
+        excludeIds?: ReadonlySet<string>,
+    ): Promise<{ token: string; projectId: string; accountId: string }> {
         signal.throwIfAborted();
         this.session.signal.throwIfAborted();
         const epoch = this.epoch;
-        const credentials = await waitWithSignal(this.credentials(forceRefresh), signal);
+        const pooled = await waitWithSignal(
+            this.pool.getEffectiveAccount(excludeIds, forceRefresh),
+            signal,
+        ).catch(error => {
+            // A sign-out during the pool's rotation invalidates the account row,
+            // so the pool reports what looks like a missing account. The session
+            // changed, and that is the real, actionable reason.
+            if (epoch !== this.epoch) throw new Error(aiText('Antigravity session changed.', 'Antigravity 会话已更改。'));
+            throw error;
+        });
         signal.throwIfAborted();
         if (epoch !== this.epoch) throw new Error(aiText('Antigravity session changed.', 'Antigravity 会话已更改。'));
+        const accountId = pooled.account.id;
+        const token = pooled.credentials.accessToken;
+        if (this.projectAccountId !== accountId) {
+            this.projectPromise = undefined;
+            this.projectAccountId = accountId;
+        }
         if (!this.projectPromise) {
             const discoverySignal = AbortSignal.any([this.session.signal, AbortSignal.timeout(20_000)]);
             const task = (async () => {
-                const response = await postAntigravity(this.fetchFn, credentials.accessToken, 'loadCodeAssist', { metadata: METADATA }, discoverySignal);
+                const response = await postAntigravity(this.fetchFn, token, 'loadCodeAssist', { metadata: METADATA }, discoverySignal);
                 let project = extractAntigravityProject(await response.json());
                 if (!project) {
-                    const listed = await postAntigravity(this.fetchFn, credentials.accessToken, 'listCloudAICompanionProjects', {}, discoverySignal);
+                    const listed = await postAntigravity(this.fetchFn, token, 'listCloudAICompanionProjects', {}, discoverySignal);
                     project = extractAntigravityProject(await listed.json());
                 }
                 if (!project) throw new Error(aiText('No Antigravity project found. Complete account setup in Antigravity and refresh status.', '未找到 Antigravity 项目。请先在 Antigravity 中完成账户设置，再刷新状态。'));
@@ -181,7 +316,31 @@ export class AntigravityOAuthService implements vscode.Disposable {
         }
         const projectId = await waitWithSignal(this.projectPromise, signal);
         if (epoch !== this.epoch) throw new Error(aiText('Antigravity session changed.', 'Antigravity 会话已更改。'));
-        return { token: credentials.accessToken, projectId };
+        return { token, projectId, accountId };
+    }
+
+    /** Record a successful use, so the round-robin strategy can order by age. */
+    async recordAccountUse(accountId: string): Promise<void> {
+        await this.pool.recordUsage(accountId);
+    }
+
+    /** Cool one account down after an upstream 429 and return which one. */
+    async noteAccountRateLimited(accountId: string, retryAfterMs?: number): Promise<void> {
+        await this.pool.markCooldown(accountId, retryAfterMs ?? DEFAULT_COOLDOWN_MS, '429');
+    }
+
+    /** Park one account after a credential failure; the row is kept for a re-login. */
+    async noteAccountAuthFailure(accountId: string, reason: string): Promise<void> {
+        await this.pool.noteAuthFailure(accountId, 'invalid_credential', reason);
+    }
+
+    /** Every pooled account, as non-secret summaries. */
+    listPoolAccounts() {
+        return this.pool.listAccounts();
+    }
+
+    getPool(): AntigravityAccountPool {
+        return this.pool;
     }
 
     async getAccountStatus(force = false): Promise<AntigravityAccountStatus> {
@@ -191,6 +350,29 @@ export class AntigravityOAuthService implements vscode.Disposable {
         const value: AntigravityAccountStatus = {
             signedIn: false, hasCredentials: !!stored, models: [...ANTIGRAVITY_MODELS], quota: [],
         };
+        // The pool view is read first and unconditionally: a parked or cooling
+        // account is worth showing even when the single-credential probe below
+        // fails, and the card needs the strategy to render its selector.
+        try {
+            value.pool = {
+                strategy: await this.pool.strategy(),
+                // `ok` is the summary's "usable" status; the card only models the
+                // two failure states, so a usable row carries no status at all.
+                accounts: (await this.pool.listAccounts()).map(account => ({
+                    id: account.id,
+                    alias: account.alias,
+                    isPrimary: account.isPrimary,
+                    ...(account.authStatus === 'invalid_credential' || account.authStatus === 'rate_limited'
+                        ? { authStatus: account.authStatus } : {}),
+                    ...(account.authFailedReason === undefined ? {} : { authFailedReason: account.authFailedReason }),
+                    ...(account.cooldownUntil === undefined ? {} : { cooldownUntil: account.cooldownUntil }),
+                    ...(account.cooldownReason === undefined ? {} : { cooldownReason: account.cooldownReason }),
+                    ...(account.expiresAt === undefined ? {} : { expiresAt: account.expiresAt }),
+                })),
+            };
+        } catch {
+            // A pool read failure only costs the card its account list.
+        }
         if (!stored) return value;
         const epoch = this.epoch;
         try {
@@ -252,10 +434,20 @@ export class AntigravityOAuthService implements vscode.Disposable {
                 return;
             }
             handling = true;
-            void this.exchange({ grant_type: 'authorization_code', code, code_verifier: verifier, redirect_uri: redirectUri }, epoch, undefined, loginController.signal).then(() => {
+            void this.exchange({ grant_type: 'authorization_code', code, code_verifier: verifier, redirect_uri: redirectUri }, epoch, undefined, loginController.signal).then(async credentials => {
                 response.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
                 response.end('<!doctype html><meta charset="utf-8"><h1>Antigravity sign-in completed / Antigravity 登录完成</h1><p>Return to VS Code / 请返回 VS Code。</p>');
                 this.projectPromise = undefined;
+                this.projectAccountId = undefined;
+                // A completed sign-in joins the pool, so several accounts can
+                // rotate; the dedupe key makes a repeat sign-in re-authorize the
+                // same row instead of adding a second one.
+                if (epoch === this.epoch) {
+                    await this.pool.addAccount({
+                        ...credentials,
+                        recordKey: credentials.recordKey ?? 'login-' + Date.now().toString(36),
+                    }).catch(() => undefined);
+                }
                 complete();
             }, error => {
                 response.writeHead(400).end('Sign-in failed. Return to VS Code / 登录失败，请返回 VS Code。');
@@ -299,7 +491,12 @@ export class AntigravityOAuthService implements vscode.Disposable {
     async logout(): Promise<void> {
         this.dispose();
         const epoch = this.epoch;
-        await this.mutateSecret(() => this.secrets.delete(ANTIGRAVITY_SECRET_KEY));
+        await this.mutateSecret(async () => {
+            await this.secrets.delete(ANTIGRAVITY_SECRET_KEY);
+            // Signing out clears every pooled account: leaving rows behind would
+            // keep serving requests from credentials the user just removed.
+            await this.secrets.delete(ANTIGRAVITY_POOL_KEY);
+        });
         if (epoch === this.epoch) {
             this.session = new AbortController();
             this.cachedStatus = undefined;
@@ -312,6 +509,7 @@ export class AntigravityOAuthService implements vscode.Disposable {
         this.session.abort();
         this.cachedStatus = undefined;
         this.projectPromise = undefined;
+        this.projectAccountId = undefined;
         this.refreshPromise = undefined;
     }
 }

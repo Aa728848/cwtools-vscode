@@ -124,6 +124,54 @@ export async function routeWebviewMessage(
         case 'refreshCommandCodeQuota':
             await provider.settingsManager.refreshCommandCodeQuota(sourceSurface);
             break;
+        case 'commandcodeLogin':
+            await provider.settingsManager.loginCommandCode(sourceSurface);
+            break;
+        case 'kimiLogin':
+            await provider.settingsManager.loginKimiCode(sourceSurface);
+            break;
+        case 'kimiLogout':
+            await provider.settingsManager.logoutKimiCode(sourceSurface);
+            break;
+        case 'workbuddyLogin':
+            await provider.settingsManager.loginWorkBuddy(msg.region, sourceSurface);
+            break;
+        case 'workbuddyRefreshAccounts':
+            await provider.settingsManager.refreshWorkBuddyAccounts(sourceSurface);
+            break;
+        case 'minimaxCodeLogin':
+            await provider.settingsManager.loginMinimaxCode(sourceSurface);
+            break;
+        case 'minimaxCodeLogout':
+            await provider.settingsManager.logoutMinimaxCode(sourceSurface);
+            break;
+        case 'claudeSubscriptionLogin':
+            await provider.settingsManager.loginClaudeSubscription(sourceSurface);
+            break;
+        case 'claudeSubscriptionLogout':
+            await provider.settingsManager.logoutClaudeSubscription(sourceSurface);
+            break;
+        case 'setAntigravityPoolStrategy':
+            await provider.settingsManager.setAntigravityPoolStrategy(msg.strategy, sourceSurface);
+            break;
+        case 'setAntigravityPrimary':
+            await provider.settingsManager.setAntigravityPrimary(msg.accountId, sourceSurface);
+            break;
+        case 'clearAntigravityCooldown':
+            await provider.settingsManager.clearAntigravityCooldown(msg.accountId, sourceSurface);
+            break;
+        case 'setSubscriptionPoolStrategy':
+            await provider.settingsManager.setSubscriptionPoolStrategy(msg.strategy, sourceSurface);
+            break;
+        case 'setSubscriptionPoolPrimary':
+            await provider.settingsManager.setSubscriptionPoolPrimary(msg.accountId, sourceSurface);
+            break;
+        case 'clearSubscriptionPoolCooldown':
+            await provider.settingsManager.clearSubscriptionPoolCooldown(msg.accountId, sourceSurface);
+            break;
+        case 'removeSubscriptionPoolAccount':
+            await provider.settingsManager.removeSubscriptionPoolAccount(msg.accountId, sourceSurface);
+            break;
         case 'codexLogout':
             await provider.settingsManager.logoutCodex();
             break;

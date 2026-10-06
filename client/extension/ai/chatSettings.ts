@@ -13,9 +13,23 @@ import * as cp from 'child_process';
 import { promisify } from 'util';
 import type { ConnectionTestSettings, PanelSettings, HostMessage, CustomApiFormat, ModelReasoningCapability, ReasoningEffort } from './types';
 import { isCodexServiceTier, isReasoningEffort, isResponseVerbosity } from './types';
-import { getCommandCodeAccountStatus, type CommandCodeAccountStatus } from './commandcode/accountService';
+import { COMMANDCODE_API_BASE, getCommandCodeAccountStatus, type CommandCodeAccountStatus } from './commandcode/accountService';
 import type { AIService } from './aiService';
 import type { AntigravityLogin } from './antigravity/oauthService';
+import type { CommandCodeLogin } from './commandcode/oauthService';
+import { getKimiCodeAccountStatus } from './kimi/accountStatus';
+import { summarizeWorkBuddyAccounts } from './workbuddy/accountStatus';
+import { loadWorkBuddyCatalog, workBuddyContextWindows } from './workbuddy/modelCatalog';
+import { workBuddyHeaders } from './workbuddy/client';
+import type { WorkBuddyLogin } from './workbuddy/client';
+import { isMinimaxCodeCredentialFresh } from './minimaxcode/credentials';
+import { MINIMAX_CODE_MODELS } from './minimaxcode/types';
+import { isClaudeSubscriptionCredentialFresh } from './claudesub/credentials';
+import { CLAUDE_MODELS } from './claudesub/types';
+import {
+    commandCodeContextWindows,
+    loadCommandCodeCatalog,
+} from './commandcode/modelCatalog';
 import type { SubscriptionProxyMode } from '../../shared/subscriptionProxy';
 import { aiText } from './messages';
 import { getProjectWorkspaceRoot } from './workspacePaths';
@@ -289,6 +303,97 @@ export class ChatSettingsManager {
         const commandcodeAccount = showPanel || config.provider === 'commandcode' || config.provider === 'commandcode-messages'
             ? await this.getCommandCodeAccountStatus()
             : undefined;
+        // The public Command Code catalog states each model's real window, so it
+        // answers the context defaults instead of the shipped table guessing.
+        // A failed read returns the held snapshot (possibly empty) rather than
+        // throwing, because this only fills defaults.
+        const kimiAccount = showPanel || config.provider === 'kimi-code-plan'
+            ? await getKimiCodeAccountStatus(this.aiService.getKimiCodeTokenStore())
+            : undefined;
+        const claudeSubscriptionSelection = showPanel || config.provider === 'claude-subscription'
+            ? await this.aiService.getClaudeSubscriptionCredential().catch(() => undefined)
+            : undefined;
+        const claudeSubscriptionCredential = claudeSubscriptionSelection?.credentials;
+        const claudeSubscriptionAccount = showPanel || config.provider === 'claude-subscription'
+            ? {
+                signedIn: claudeSubscriptionCredential !== undefined,
+                email: claudeSubscriptionCredential?.accountEmail ?? null,
+                uuid: claudeSubscriptionCredential?.accountUuid ?? null,
+                scopes: claudeSubscriptionCredential?.scopes ?? [],
+                fresh: claudeSubscriptionCredential !== undefined
+                    && isClaudeSubscriptionCredentialFresh(claudeSubscriptionCredential),
+                // The card shows how many accounts the pool holds, so a second
+                // sign-in is visibly a second account rather than a replacement.
+                accountCount: (await this.aiService.getSubscriptionPoolRegistry()
+                    .listAccounts('claude-subscription')).length,
+                poolStrategy: await this.aiService.getSubscriptionPoolRegistry()
+                    .strategy('claude-subscription') ?? 'sequential',
+            }
+            : undefined;
+        const minimaxCodeAccounts = showPanel || config.provider === 'minimax-code'
+            ? await this.aiService.listMinimaxCodeCredentials()
+            : [];
+        const minimaxCodeAccount = showPanel || config.provider === 'minimax-code'
+            ? {
+                signedIn: minimaxCodeAccounts.length > 0,
+                desktopCount: minimaxCodeAccounts.filter(entry => entry.source === 'desktop').length,
+                managedCount: minimaxCodeAccounts.filter(entry => entry.source === 'managed').length,
+                fresh: minimaxCodeAccounts.some(entry => isMinimaxCodeCredentialFresh(entry)),
+                // Only this extension's own credential can be signed out of.
+                canSignOut: minimaxCodeAccounts.some(entry => entry.source === 'managed'),
+            }
+            : undefined;
+        const workBuddyAccount = showPanel || config.provider === 'workbuddy-subscription'
+            ? summarizeWorkBuddyAccounts(
+                await this.aiService.listWorkBuddyAccounts(),
+                accountKey => this.aiService.isWorkBuddyAccountHidden(accountKey),
+            )
+            : undefined;
+        // The gateway's own /v3/config is the authority on each model's window;
+        // a failed read keeps the previous snapshot rather than emptying the card.
+        const workBuddyWindows = showPanel || config.provider === 'workbuddy-subscription'
+            ? await (async () => {
+                const selection = await this.aiService.getWorkBuddyCredential();
+                if (!selection) return {};
+                return workBuddyContextWindows(await loadWorkBuddyCatalog({
+                    backend: selection.credentials.backend,
+                    region: selection.credentials.region,
+                    headers: workBuddyHeaders(selection.credentials),
+                    fetchFn: this.aiService.getSubscriptionProxyService().fetch,
+                }).catch(() => []));
+            })()
+            : {};
+        const commandCodeWindows = showPanel || config.provider === 'commandcode' || config.provider === 'commandcode-messages'
+            ? commandCodeContextWindows(await loadCommandCodeCatalog({
+                baseUrl: COMMANDCODE_API_BASE,
+                fetchFn: this.aiService.getSubscriptionProxyService().fetch,
+            }).catch(() => []))
+            : {};
+
+        // A single pool view for whichever subscription line is selected, so the
+        // card can show account count, strategy and cooldowns without one bespoke
+        // payload per line.
+        const poolProviderId = config.provider;
+        const poolRegistry = this.aiService.getSubscriptionPoolRegistry();
+        const subscriptionPool = poolRegistry.has(poolProviderId)
+            ? {
+                providerId: poolProviderId,
+                strategy: await poolRegistry.strategy(poolProviderId) ?? 'sequential',
+                // `ok` is the kernel's "usable" status; the card only models the two
+                // failure states, so a usable row carries no status at all.
+                accounts: (await poolRegistry.listAccounts(poolProviderId)).map(account => ({
+                    id: account.id,
+                    alias: account.alias,
+                    isPrimary: account.isPrimary,
+                    ...(account.authStatus === 'invalid_credential' || account.authStatus === 'rate_limited'
+                        ? { authStatus: account.authStatus } : {}),
+                    ...(account.authFailedReason === undefined ? {} : { authFailedReason: account.authFailedReason }),
+                    ...(account.cooldownUntil === undefined ? {} : { cooldownUntil: account.cooldownUntil }),
+                    ...(account.cooldownReason === undefined ? {} : { cooldownReason: account.cooldownReason }),
+                    ...(account.expiresAt === undefined ? {} : { expiresAt: account.expiresAt }),
+                })),
+            }
+            : undefined;
 
         const providers = Object.values(BUILTIN_PROVIDERS).map(p => {
             const customNonFim = p.id === 'custom' && config.customApiFormat !== 'openai-chat-completions';
@@ -446,12 +551,50 @@ export class ChatSettingsManager {
             ollamaModels,
             showPanel,
             targetSurface,
-            modelContextTokens: { ...MODEL_CONTEXT_TOKENS, ...dynamicContexts },
+            // The live Codex listing states each model's real window; it wins over
+            // the shipped table so compaction and overflow checks use the number
+            // the subscription service actually serves.
+            modelContextTokens: {
+                ...MODEL_CONTEXT_TOKENS,
+                ...dynamicContexts,
+                ...Object.fromEntries(
+                    Object.entries(codexAccount?.modelContextWindows ?? {}).map(
+                        ([model, window]) => [`codex-chatgpt:${model}`, window],
+                    ),
+                ),
+                ...Object.fromEntries(
+                    Object.entries(commandCodeWindows).map(
+                        ([model, window]) => [`commandcode:${model}`, window],
+                    ),
+                ),
+                ...Object.fromEntries(
+                    Object.entries(workBuddyWindows).map(
+                        ([model, window]) => [`workbuddy-subscription:${model}`, window],
+                    ),
+                ),
+                // The subscription catalog is hardcoded on purpose (its /v1/models
+                // route is not configured for subscription traffic), so these
+                // windows are transcribed rather than discovered.
+                ...Object.fromEntries(
+                    MINIMAX_CODE_MODELS.map(model => [`minimax-code:${model.id}`, model.contextWindow]),
+                ),
+                // The Claude subscription catalog is a transcription too: the
+                // server's own listing narrows it but is not the authority on
+                // capabilities.
+                ...Object.fromEntries(
+                    CLAUDE_MODELS.map(model => [`claude-subscription:${model.id}`, model.contextWindow]),
+                ),
+            },
             thinkingModelPrefixes: ALWAYS_THINKING_PREFIXES,
             reasoningCapabilities,
             codexAccount,
             antigravityAccount,
             commandcodeAccount,
+            kimiAccount,
+            workbuddyAccount: workBuddyAccount,
+            minimaxCodeAccount,
+            claudeSubscriptionAccount,
+            subscriptionPool,
             subscriptionProxy,
         });
     }
@@ -1019,6 +1162,289 @@ export class ChatSettingsManager {
         } catch (error) {
             this.postMessage({ type: 'testConnectionResult', ok: false, message: settingsErrorMessage(error) });
         }
+    }
+
+    /**
+     * Start the browser sign-in for Command Code.
+     *
+     * The callback contract (loopback POST from the studio page) lives in
+     * `commandcode/oauthService.ts`; this method only drives the UI. The key is
+     * verified against `/alpha/whoami` before it is stored, so a key the account
+     * API rejects never replaces a working one.
+     */
+    async loginCommandCode(targetSurface: 'chat' | 'manager' = 'chat'): Promise<void> {
+        let login: CommandCodeLogin | undefined;
+        try {
+            login = await this.aiService.getCommandCodeOAuthService().startLogin();
+            const opened = await vs.env.openExternal(vs.Uri.parse(login.authUrl));
+            if (!opened) {
+                login.cancel();
+                login = undefined;
+                throw new Error(aiText(
+                    'Could not open the browser. Sign in from Command Code Studio and paste the API key instead.',
+                    '无法打开浏览器。请在 Command Code Studio 中登录后改为粘贴 API Key。',
+                ));
+            }
+            this.postMessage({
+                type: 'testConnectionResult',
+                ok: true,
+                message: aiText(
+                    'Continue signing in in your browser. The key is saved after Command Code confirms it.',
+                    '请在浏览器中继续登录；Command Code 确认后会自动保存该 Key。',
+                ),
+            });
+            const completion = login.completion;
+            void completion.then(async () => {
+                await this.buildAndSendSettingsData(true, targetSurface);
+                this.postMessage({
+                    type: 'testConnectionResult',
+                    ok: true,
+                    message: aiText('Command Code sign-in completed.', 'Command Code 登录完成。'),
+                });
+            }, (error: unknown) => {
+                this.postMessage({ type: 'testConnectionResult', ok: false, message: settingsErrorMessage(error) });
+            });
+        } catch (error) {
+            login?.cancel();
+            this.postMessage({ type: 'testConnectionResult', ok: false, message: settingsErrorMessage(error) });
+        }
+    }
+
+    /**
+     * Start the Kimi Code device-code sign-in.
+     *
+     * The device flow needs no callback port, so the user code and one-time link
+     * are shown directly and the browser is opened as a convenience.
+     */
+    async loginKimiCode(targetSurface: 'chat' | 'manager' = 'chat'): Promise<void> {
+        try {
+            const login = await this.aiService.getKimiCodeOAuthService().startLogin();
+            const { userCode, verificationUriComplete } = login.authorization;
+            this.postMessage({
+                type: 'testConnectionResult',
+                ok: true,
+                message: aiText(
+                    `Enter code ${userCode} at ${verificationUriComplete} to finish signing in.`,
+                    `请在 ${verificationUriComplete} 输入代码 ${userCode} 完成登录。`,
+                ),
+            });
+            void login.completion.then(async () => {
+                await this.buildAndSendSettingsData(true, targetSurface);
+                this.postMessage({
+                    type: 'testConnectionResult',
+                    ok: true,
+                    message: aiText('Kimi Code sign-in completed.', 'Kimi Code 登录完成。'),
+                });
+            }, (error: unknown) => {
+                this.postMessage({ type: 'testConnectionResult', ok: false, message: settingsErrorMessage(error) });
+            });
+        } catch (error) {
+            this.postMessage({ type: 'testConnectionResult', ok: false, message: settingsErrorMessage(error) });
+        }
+    }
+
+    async logoutKimiCode(targetSurface: 'chat' | 'manager' = 'chat'): Promise<void> {
+        await this.aiService.getKimiCodeTokenStore().clear();
+        await this.buildAndSendSettingsData(true, targetSurface);
+        this.postMessage({
+            type: 'testConnectionResult',
+            ok: true,
+            message: aiText('Signed out of Kimi Code in this extension.', '已在本插件中退出 Kimi Code。'),
+        });
+    }
+
+    /**
+     * Start the WorkBuddy browser authorization for one region.
+     *
+     * The credential is only persisted once the account endpoint has named the
+     * account, so the same account cannot be stored twice under a name and a uid.
+     */
+    async loginWorkBuddy(region: 'cn' | 'intl', targetSurface: 'chat' | 'manager' = 'chat'): Promise<void> {
+        let login: WorkBuddyLogin | undefined;
+        try {
+            login = await this.aiService.getWorkBuddyOAuthService().startLogin(region);
+            this.postMessage({
+                type: 'testConnectionResult',
+                ok: true,
+                message: aiText(
+                    'Continue the WorkBuddy sign-in in your browser. The account is saved once the service confirms it.',
+                    '请在浏览器中继续完成 WorkBuddy 登录；服务确认账号后会自动保存。',
+                ),
+            });
+            void login.completion.then(async () => {
+                await this.buildAndSendSettingsData(true, targetSurface);
+                this.postMessage({
+                    type: 'testConnectionResult',
+                    ok: true,
+                    message: aiText('WorkBuddy sign-in completed.', 'WorkBuddy 登录完成。'),
+                });
+            }, (error: unknown) => {
+                this.postMessage({ type: 'testConnectionResult', ok: false, message: settingsErrorMessage(error) });
+            });
+        } catch (error) {
+            login?.cancel();
+            this.postMessage({ type: 'testConnectionResult', ok: false, message: settingsErrorMessage(error) });
+        }
+    }
+
+    /**
+     * Start the MiniMax Code device-code sign-in.
+     *
+     * The desktop app's own sign-in is reused when one exists, so this is only
+     * reached when there is nothing to reuse; the desktop credential itself is
+     * never revoked or deleted here.
+     */
+    async loginMinimaxCode(targetSurface: 'chat' | 'manager' = 'chat'): Promise<void> {
+        try {
+            const login = await this.aiService.getMinimaxCodeOAuthService().startLogin();
+            const { userCode, verificationUriComplete } = login.authorization;
+            this.postMessage({
+                type: 'testConnectionResult',
+                ok: true,
+                message: aiText(
+                    `Enter code ${userCode} at ${verificationUriComplete} to finish signing in.`,
+                    `请在 ${verificationUriComplete} 输入代码 ${userCode} 完成登录。`,
+                ),
+            });
+            void login.completion.then(async () => {
+                await this.buildAndSendSettingsData(true, targetSurface);
+                this.postMessage({
+                    type: 'testConnectionResult',
+                    ok: true,
+                    message: aiText('MiniMax Code sign-in completed.', 'MiniMax Code 登录完成。'),
+                });
+            }, (error: unknown) => {
+                this.postMessage({ type: 'testConnectionResult', ok: false, message: settingsErrorMessage(error) });
+            });
+        } catch (error) {
+            this.postMessage({ type: 'testConnectionResult', ok: false, message: settingsErrorMessage(error) });
+        }
+    }
+
+    /**
+     * Sign out of MiniMax Code in this extension.
+     *
+     * Only this extension's own credential is removed. The desktop app's login
+     * survives (it is only ever read and renewed in place), because revoking it
+     * would sign the user out of a running MiniMax Code.
+     */
+    async logoutMinimaxCode(targetSurface: 'chat' | 'manager' = 'chat'): Promise<void> {
+        await this.aiService.getMinimaxCodeCredentialStore().clear();
+        await this.buildAndSendSettingsData(true, targetSurface);
+        this.postMessage({
+            type: 'testConnectionResult',
+            ok: true,
+            message: aiText(
+                'Signed out of MiniMax Code in this extension. A desktop app sign-in, if any, is unaffected.',
+                '已在本插件中退出 MiniMax Code；桌面端登录态（如有）不受影响。',
+            ),
+        });
+    }
+
+    /**
+     * Start the Claude subscription (Pro/Max) sign-in.
+     *
+     * ⚠️ Anthropic's terms do not permit third-party apps to relay requests under
+     * subscription credentials; this extension is not authorized by Anthropic.
+     * The card states that plainly before the button.
+     */
+    async loginClaudeSubscription(targetSurface: 'chat' | 'manager' = 'chat'): Promise<void> {
+        try {
+            const login = await this.aiService.getClaudeSubscriptionOAuthService().startLogin();
+            this.postMessage({
+                type: 'testConnectionResult',
+                ok: true,
+                message: aiText(
+                    'Continue signing in in your browser. Credentials are saved after the callback.',
+                    '请在浏览器中继续登录；回调完成后会自动保存凭据。',
+                ),
+            });
+            void login.completion.then(async () => {
+                await this.buildAndSendSettingsData(true, targetSurface);
+                this.postMessage({
+                    type: 'testConnectionResult',
+                    ok: true,
+                    message: aiText('Claude subscription sign-in completed.', 'Claude 订阅登录完成。'),
+                });
+            }, (error: unknown) => {
+                this.postMessage({ type: 'testConnectionResult', ok: false, message: settingsErrorMessage(error) });
+            });
+        } catch (error) {
+            this.postMessage({ type: 'testConnectionResult', ok: false, message: settingsErrorMessage(error) });
+        }
+    }
+
+    async logoutClaudeSubscription(targetSurface: 'chat' | 'manager' = 'chat'): Promise<void> {
+        await this.aiService.getClaudeSubscriptionCredentialStore().clear();
+        await this.buildAndSendSettingsData(true, targetSurface);
+        this.postMessage({
+            type: 'testConnectionResult',
+            ok: true,
+            message: aiText('Signed out of Claude in this extension.', '已在本插件中退出 Claude。'),
+        });
+    }
+
+    /** Re-scan desktop accounts and re-render the WorkBuddy card. */
+    async refreshWorkBuddyAccounts(targetSurface: 'chat' | 'manager' = 'chat'): Promise<void> {
+        await this.buildAndSendSettingsData(true, targetSurface);
+    }
+
+    /** Switch how the selected subscription line rotates between its accounts. */
+    async setSubscriptionPoolStrategy(
+        strategy: 'sequential' | 'round-robin' | 'sticky',
+        targetSurface: 'chat' | 'manager' = 'chat',
+    ): Promise<void> {
+        const providerId = this.aiService.getConfig().provider;
+        await this.aiService.getSubscriptionPoolRegistry().setStrategy(providerId, strategy);
+        await this.buildAndSendSettingsData(true, targetSurface);
+    }
+
+    async setSubscriptionPoolPrimary(accountId: string, targetSurface: 'chat' | 'manager' = 'chat'): Promise<void> {
+        const providerId = this.aiService.getConfig().provider;
+        await this.aiService.getSubscriptionPoolRegistry().setPrimary(providerId, accountId);
+        await this.buildAndSendSettingsData(true, targetSurface);
+    }
+
+    async clearSubscriptionPoolCooldown(accountId: string, targetSurface: 'chat' | 'manager' = 'chat'): Promise<void> {
+        const providerId = this.aiService.getConfig().provider;
+        await this.aiService.getSubscriptionPoolRegistry().clearCooldown(providerId, accountId);
+        await this.buildAndSendSettingsData(true, targetSurface);
+    }
+
+    /**
+     * Remove one pooled account.
+     *
+     * Only the pool's own row is removed; a credential that came from another
+     * application (a desktop sign-in) is deliberately not offered for deletion,
+     * because this extension does not own it.
+     */
+    async removeSubscriptionPoolAccount(accountId: string, targetSurface: 'chat' | 'manager' = 'chat'): Promise<void> {
+        const providerId = this.aiService.getConfig().provider;
+        const pool = this.aiService.getSubscriptionPoolRegistry();
+        await (pool as unknown as { pool?: (id: string) => { removeAccount(id: string): Promise<void> } | undefined })
+            .pool?.(providerId)?.removeAccount(accountId);
+        await this.buildAndSendSettingsData(true, targetSurface);
+    }
+
+    /** Switch how Antigravity rotates between its pooled accounts. */
+    async setAntigravityPoolStrategy(
+        strategy: 'sequential' | 'round-robin' | 'sticky',
+        targetSurface: 'chat' | 'manager' = 'chat',
+    ): Promise<void> {
+        await this.aiService.getAntigravityOAuthService().getPool().setStrategy(strategy);
+        await this.buildAndSendSettingsData(true, targetSurface);
+    }
+
+    /** Pin one Antigravity account as the primary the sequential strategy prefers. */
+    async setAntigravityPrimary(accountId: string, targetSurface: 'chat' | 'manager' = 'chat'): Promise<void> {
+        await this.aiService.getAntigravityOAuthService().getPool().setPrimary(accountId);
+        await this.buildAndSendSettingsData(true, targetSurface);
+    }
+
+    /** Lift a cooldown early, so a user does not have to wait it out. */
+    async clearAntigravityCooldown(accountId: string, targetSurface: 'chat' | 'manager' = 'chat'): Promise<void> {
+        await this.aiService.getAntigravityOAuthService().getPool().clearCooldown(accountId);
+        await this.buildAndSendSettingsData(true, targetSurface);
     }
 
     async refreshCommandCodeQuota(targetSurface: 'chat' | 'manager' = 'chat'): Promise<void> {

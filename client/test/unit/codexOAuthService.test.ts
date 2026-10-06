@@ -6,10 +6,15 @@ import {
     CODEX_CHATGPT_USAGE_URL,
     mapCodexUsage,
 } from '../../extension/ai/codex/oauthService';
+import { clearCachedCodexCatalog } from '../../extension/ai/codex/modelCatalog';
 
 const SECRET_KEY = 'cwtools.ai.codexChatgpt.oauth.v1';
 
 describe('ChatGptOAuthService', () => {
+    // The live listing is cached per account for the whole process, so a test
+    // that loaded one would otherwise answer this suite's status call.
+    beforeEach(() => clearCachedCodexCatalog());
+
     it('tracks the current ChatGPT Codex subscription model catalog', () => {
         expect([...CODEX_CHATGPT_MODELS]).to.deep.equal([
             'gpt-6-astra',
@@ -112,6 +117,69 @@ describe('ChatGptOAuthService', () => {
         const stored = JSON.parse((await secrets.get(SECRET_KEY))!);
         expect(stored.refreshToken).to.equal('refresh-old');
         expect(stored.accessToken).to.equal(refreshedAccess);
+    });
+
+    // The subscription listing is the authority on what the account may call,
+    // and it carries the real per-model window the picker must not guess.
+    it('serves the live model listing and its context windows', async () => {
+        const secrets = new FakeSecrets();
+        const writes: unknown[] = [];
+        await secrets.store(SECRET_KEY, JSON.stringify({
+            accessToken: jwt({ email: 'plus@example.com', chatgpt_account_id: 'acct-1' }),
+            refreshToken: 'refresh-1',
+            expiresAt: Date.now() + 3600_000,
+            accountId: 'acct-1',
+        }));
+        const service = new ChatGptOAuthService(secrets as any, async (input, init) => {
+            const url = String(input);
+            if (url.includes('/backend-api/codex/models')) {
+                expect(new Headers(init?.headers).get('openai-beta')).to.equal('responses=experimental');
+                return fakeResponse(200, {
+                    models: [
+                        { slug: 'gpt-6-astra', display_name: '6 Astra', context_window: 384000 },
+                        { slug: 'gpt-5.6-sol', context_window: 272000 },
+                    ],
+                });
+            }
+            if (url === CODEX_CHATGPT_USAGE_URL) {
+                return fakeResponse(200, { plan_type: 'plus' });
+            }
+            throw new Error(`Unexpected test route: ${url}`);
+        }, '2.8.27', {
+            read: async () => undefined,
+            write: async value => { writes.push(value); },
+        });
+
+        const status = await service.getAccountStatus(true);
+        expect(status.models).to.deep.equal(['gpt-6-astra', 'gpt-5.6-sol']);
+        expect(status.catalogLive).to.equal(true);
+        expect(status.modelContextWindows).to.deep.equal({
+            'gpt-6-astra': 384000,
+            'gpt-5.6-sol': 272000,
+        });
+        expect(writes).to.have.length(1);
+    });
+
+    // A listing that names nothing usable must leave the shipped table answering,
+    // not leave the picker empty.
+    it('falls back to the shipped table when the listing names no models', async () => {
+        const secrets = new FakeSecrets();
+        await secrets.store(SECRET_KEY, JSON.stringify({
+            accessToken: jwt({ email: 'plus@example.com' }),
+            refreshToken: 'refresh-1',
+            expiresAt: Date.now() + 3600_000,
+        }));
+        const service = new ChatGptOAuthService(secrets as any, async (input) => {
+            const url = String(input);
+            if (url.includes('/backend-api/codex/models')) return fakeResponse(200, { models: [] });
+            if (url === CODEX_CHATGPT_USAGE_URL) return fakeResponse(200, { plan_type: 'plus' });
+            throw new Error(`Unexpected test route: ${url}`);
+        });
+
+        const status = await service.getAccountStatus(true);
+        expect(status.models).to.deep.equal([...CODEX_CHATGPT_MODELS]);
+        expect(status).to.not.have.property('catalogLive');
+        expect(status).to.not.have.property('modelContextWindows');
     });
 
     it('deletes only this extension OAuth secret on logout', async () => {

@@ -373,13 +373,74 @@ ${stylesheetLinks}
                         <button class="detect-btn" id="antigravityRefreshBtn" style="margin-left:4px; padding:0 8px; width:auto; border-radius:4px">${svgIcon('refresh')}${t('Refresh account and models', '刷新账户与模型')}</button>
                         <button class="detect-btn" id="antigravityLogoutBtn" style="margin-left:4px; padding:0 8px; width:auto; border-radius:4px; display:none">${svgIcon('trash')}${t('Sign out', '退出账号')}</button>
                     </div>
+                    <div class="settings-group" id="antigravityPoolGroup" style="display:none; margin-top:8px">
+                        <label class="settings-label" for="antigravityPoolStrategy">${svgIcon('layers')}${t('Account rotation', '账号调度')}</label>
+                        <select class="settings-select" id="antigravityPoolStrategy">
+                            <option value="sequential">${t('Sequential - exhaust the primary first', '顺序耗尽 — 先用满主账号')}</option>
+                            <option value="round-robin">${t('Round-robin - spread over every account', '轮询 — 摊到全部账号')}</option>
+                            <option value="sticky">${t('Sticky - keep one account per conversation', '粘性 — 同一会话固定账号')}</option>
+                        </select>
+                        <div class="settings-hint">${t('Sticky protects the upstream prompt cache across turns; round-robin spreads load. A rate-limited account cools down and another one serves instead.', '粘性可跨轮保护上游提示缓存；轮询则摊平负载。被限流的账号会进入冷却，由另一个账号接手。')}</div>
+                        <div id="antigravityPoolAccounts" style="margin-top:6px"></div>
+                    </div>
+                </details>
+                <details class="settings-group settings-account" id="subscriptionPoolGroup" style="display:none" open>
+                    <summary class="settings-account-summary"><span>${svgIcon('layers')} ${t('Account pool', '账号池')}</span></summary>
+                    <div class="settings-hint" id="subscriptionPoolHint"></div>
+                    <label class="settings-label" for="subscriptionPoolStrategy">${t('Rotation', '调度')}</label>
+                    <select class="settings-select" id="subscriptionPoolStrategy">
+                        <option value="sequential">${t('Sequential - exhaust the primary first', '顺序耗尽 — 先用满主账号')}</option>
+                        <option value="round-robin">${t('Round-robin - spread over every account', '轮询 — 摊到全部账号')}</option>
+                        <option value="sticky">${t('Sticky - keep one account per conversation', '粘性 — 同一会话固定账号')}</option>
+                    </select>
+                    <div id="subscriptionPoolAccounts" style="margin-top:6px"></div>
+                </details>
+                <details class="settings-group settings-account" id="claudeSubscriptionAccountGroup" style="display:none" open>
+                    <summary class="settings-account-summary"><span>${svgIcon('warning')} ${t('Claude subscription (risk)', 'Claude 订阅（风险）')}</span></summary>
+                    <div class="settings-hint" id="claudeSubscriptionRisk" style="color:#ff9800; border-left:3px solid #ff9800; padding:6px 8px; margin-bottom:6px;"></div>
+                    <div class="settings-hint" id="claudeSubscriptionAccountStatus"></div>
+                    <div class="settings-key-row" style="margin-top:6px">
+                        <button class="detect-btn" id="claudeSubscriptionLoginBtn" style="padding:0 8px; width:auto; border-radius:4px">${svgIcon('link')}${t('Sign in with Claude', '使用 Claude 登录')}</button>
+                        <button class="detect-btn" id="claudeSubscriptionLogoutBtn" style="margin-left:4px; padding:0 8px; width:auto; border-radius:4px; display:none">${svgIcon('trash')}${t('Sign out', '退出账号')}</button>
+                    </div>
+                </details>
+                <details class="settings-group settings-account" id="minimaxCodeAccountGroup" style="display:none" open>
+                    <summary class="settings-account-summary"><span>${svgIcon('key')} ${t('MiniMax Code sign-in', 'MiniMax Code 登录')}</span></summary>
+                    <div class="settings-hint" id="minimaxCodeAccountStatus"></div>
+                    <div class="settings-key-row" style="margin-top:6px">
+                        <button class="detect-btn" id="minimaxCodeLoginBtn" style="padding:0 8px; width:auto; border-radius:4px">${svgIcon('link')}${t('Device code sign-in', '设备码登录')}</button>
+                        <button class="detect-btn" id="minimaxCodeLogoutBtn" style="margin-left:4px; padding:0 8px; width:auto; border-radius:4px; display:none">${svgIcon('trash')}${t('Sign out', '退出账号')}</button>
+                    </div>
+                    <div class="settings-hint">${t('Reads the MiniMax Code desktop app sign-in when one exists; otherwise this starts a device-code sign-in. The desktop app\'s own login is never revoked or deleted here.', '存在 MiniMax Code 桌面端登录态时直接复用；否则发起设备码登录。此处的退出绝不会撤销或删除桌面端自己的登录态。')}</div>
+                </details>
+                <details class="settings-group settings-account" id="workbuddyAccountGroup" style="display:none" open>
+                    <summary class="settings-account-summary"><span>${svgIcon('key')} ${t('WorkBuddy account', 'WorkBuddy 账户')}</span></summary>
+                    <div class="settings-hint" id="workbuddyAccountStatus"></div>
+                    <div class="settings-key-row" style="margin-top:6px">
+                        <button class="detect-btn" id="workbuddyLoginCnBtn" style="padding:0 8px; width:auto; border-radius:4px">${svgIcon('link')}${t('Sign in (China)', '登录（国区）')}</button>
+                        <button class="detect-btn" id="workbuddyLoginIntlBtn" style="margin-left:4px; padding:0 8px; width:auto; border-radius:4px">${svgIcon('link')}${t('Sign in (International)', '登录（国际区）')}</button>
+                        <button class="detect-btn" id="workbuddyRefreshBtn" style="margin-left:4px; padding:0 8px; width:auto; border-radius:4px">${svgIcon('refresh')}${t('Rescan accounts', '重新扫描账号')}</button>
+                    </div>
+                    <div class="settings-hint">${t('Reads accounts already signed in by the CodeBuddy desktop app, or adds one through the official browser authorization. Desktop accounts are never modified or deleted here.', '读取 CodeBuddy 桌面端已登录的账号，或通过官方浏览器授权添加一个。桌面账号在此不会被修改或删除。')}</div>
+                    <div class="codex-quota-status" id="workbuddyQuotaStatus"></div>
+                </details>
+                <details class="settings-group settings-account" id="kimiAccountGroup" style="display:none" open>
+                    <summary class="settings-account-summary"><span>${svgIcon('key')} ${t('Kimi Code sign-in', 'Kimi Code 登录')}</span></summary>
+                    <div class="settings-hint" id="kimiAccountStatus"></div>
+                    <div class="settings-key-row" style="margin-top:6px">
+                        <button class="detect-btn" id="kimiLoginBtn" style="padding:0 8px; width:auto; border-radius:4px">${svgIcon('link')}${t('Device code sign-in', '设备码登录')}</button>
+                        <button class="detect-btn" id="kimiLogoutBtn" style="margin-left:4px; padding:0 8px; width:auto; border-radius:4px; display:none">${svgIcon('trash')}${t('Sign out', '退出账号')}</button>
+                    </div>
+                    <div class="settings-hint">${t('Signs in with the Kimi Code subscription (device code). The pasted API key above is used only when no subscription session is stored.', '使用 Kimi Code 订阅登录（设备码）。仅当未保存订阅会话时才使用上方粘贴的 API Key。')}</div>
                 </details>
                 <details class="settings-group settings-account" id="commandcodeAccountGroup" style="display:none" open>
                     <summary class="settings-account-summary"><span>${svgIcon('key')} ${t('Command Code account & quota', 'Command Code 账户与额度')}</span></summary>
                     <div class="settings-hint" id="commandcodeAccountStatus"></div>
                     <div class="settings-key-row" style="margin-top:6px">
-                        <button class="detect-btn" id="commandcodeRefreshBtn" style="padding:0 8px; width:auto; border-radius:4px">${svgIcon('refresh')}${t('Refresh quota', '刷新额度')}</button>
+                        <button class="detect-btn" id="commandcodeLoginBtn" style="padding:0 8px; width:auto; border-radius:4px">${svgIcon('link')}${t('Sign in with browser', '浏览器登录')}</button>
+                        <button class="detect-btn" id="commandcodeRefreshBtn" style="margin-left:4px; padding:0 8px; width:auto; border-radius:4px">${svgIcon('refresh')}${t('Refresh quota', '刷新额度')}</button>
                     </div>
+                    <div class="settings-hint">${t('Browser sign-in opens Command Code Studio and saves the key after it is verified. You can also paste an API key above.', '浏览器登录会打开 Command Code Studio，并在验证通过后保存 Key；也可以在上方直接粘贴 API Key。')}</div>
                     <div class="codex-quota-status" id="commandcodeQuotaStatus"></div>
                 </details>
                 <details class="settings-advanced">

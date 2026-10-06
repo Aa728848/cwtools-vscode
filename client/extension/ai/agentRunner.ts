@@ -38,7 +38,7 @@ import * as path from 'path';
 import { AIService } from './aiService';
 import { AgentToolExecutor, TOOL_DEFINITIONS } from './agentTools';
 import { PromptBuilder, hashToolDefinitionsForFingerprint, orderMessagesForStablePrefix } from './promptBuilder';
-import { getEffectiveEndpoint, getModelOutputTokens, getProvider, getProviderApiFormat, isModelVisionCapable } from './providers';
+import { getEffectiveEndpoint, getModelOutputTokens, getProvider, getProviderApiFormat, isModelVisionCapableFor } from './providers';
 import { DEFAULT_REASONING_KEY, detectReasoningKey, reasoningValue } from './providers/reasoningKey';
 import { getCurrentModelPricing, getCacheDiscountFactor } from './pricing';
 import { buildProviderCallTokenUsage } from './providerCallUsage';
@@ -1312,7 +1312,10 @@ export class AgentRunner {
         const _providerIdVision = options?.providerId ?? _cfgVision.provider;
         const _providerVision = getProvider(_providerIdVision);
         const modelVision = _cfgVision.model || _providerVision.defaultModel;
-        const visionSupported = _providerVision.supportsVision && isModelVisionCapable(modelVision);
+        // Provider-aware: Command Code answers from the official CLI's registry,
+        // where a model-name prefix says nothing about modalities.
+        const visionSupported = _providerVision.supportsVision
+            && isModelVisionCapableFor(_providerIdVision, modelVision);
 
         let effectiveUserMessage = userMessage;
         let effectiveImages = images && images.length > 0 ? images : undefined;

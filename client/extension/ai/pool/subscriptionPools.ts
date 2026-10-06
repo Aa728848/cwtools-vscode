@@ -107,11 +107,18 @@ export function minimaxCodePoolCredentials(value: unknown): MinimaxCodePoolCrede
     };
 }
 
-/** MiniMax Code 的身份键：桌面记录槽优先，其次托管登录的 epoch。 */
+/**
+ * MiniMax Code 的身份键：桌面记录槽优先，其次托管存储的槽位。
+ *
+ * 托管凭据必须**有**身份键：本插件的托管存储是**单个**槽位（一个扩展只有一个 MiniMax
+ * 账号），因此这个槽本身就是账号身份。此前托管凭据没有身份键，于是 seed 进来的那一行与登录
+ * 时 addAccount 进来的那一行无法互相匹配——一次登录凭空变成两个账号。
+ */
 export function minimaxCodePoolIdentityKey(credentials: MinimaxCodePoolCredentials): string | undefined {
     if (nonempty(credentials.recordKey)) return 'record:' + credentials.recordKey.trim();
     if (nonempty(credentials.sourceFile)) return 'file:' + credentials.sourceFile.trim();
-    return undefined;
+    // 区域也是凭据属性：同一个槽在两个区域是两个不同的账号。
+    return 'managed:' + credentials.region;
 }
 
 // ─── Kimi Code 订阅 ──────────────────────────────────────────────────────────

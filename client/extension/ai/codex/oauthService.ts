@@ -228,6 +228,19 @@ function authUrl(verifier: string, state: string): string {
     return `${CHATGPT_OAUTH_ISSUER}/oauth/authorize?${params.toString()}`;
 }
 
+/**
+ * Release the loopback callback server so a fresh sign-in can bind the same port.
+ *
+ * `close()` only stops accepting connections; sockets the browser still holds keep the server
+ * open, so the NEXT sign-in on port 1455 can fail with EADDRINUSE. Adding a second account is
+ * exactly that next sign-in, so the held sockets are released with it.
+ */
+function closeCallbackServer(server: http.Server): void {
+    server.close();
+    server.closeIdleConnections?.();
+    server.closeAllConnections?.();
+}
+
 function successPage(): string {
     return '<!doctype html><meta charset="utf-8"><title>CWTools</title><h1>ChatGPT sign-in completed / ChatGPT 登录完成</h1><p>You can close this window. / 可以关闭此窗口。</p>';
 }
@@ -434,7 +447,7 @@ export class ChatGptOAuthService implements vscode.Disposable {
                 if (settled) return;
                 settled = true;
                 if (timer.current) clearTimeout(timer.current);
-                server.close();
+                closeCallbackServer(server);
                 this.activeLoginCancel = undefined;
                 this.cachedStatus = undefined;
                 resolveCompletion();
@@ -442,7 +455,7 @@ export class ChatGptOAuthService implements vscode.Disposable {
                 if (settled) return;
                 settled = true;
                 if (timer.current) clearTimeout(timer.current);
-                server.close();
+                closeCallbackServer(server);
                 this.activeLoginCancel = undefined;
                 rejectCompletion(error instanceof Error ? error : new Error(String(error)));
             });
@@ -456,7 +469,7 @@ export class ChatGptOAuthService implements vscode.Disposable {
                 resolve();
             });
         }).catch(error => {
-            server.close();
+            closeCallbackServer(server);
             throw new Error(aiText(
                 `Could not start the ChatGPT OAuth callback on port ${OAUTH_PORT}: ${error instanceof Error ? error.message : String(error)}`,
                 `无法在端口 ${OAUTH_PORT} 启动 ChatGPT OAuth 回调：${error instanceof Error ? error.message : String(error)}`,
@@ -467,7 +480,7 @@ export class ChatGptOAuthService implements vscode.Disposable {
             if (settled) return;
             settled = true;
             if (timer.current) clearTimeout(timer.current);
-            server.close();
+            closeCallbackServer(server);
             this.activeLoginCancel = undefined;
             rejectCompletion(reason);
         };

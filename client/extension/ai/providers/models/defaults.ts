@@ -695,12 +695,14 @@ export const BUILTIN_PROVIDERS: Record<string, AIProviderConfig> = {
         id: 'minimax-code',
         name: 'MiniMax Code (编程订阅)',
         endpoint: 'https://agent.minimax.cn/mavis/api/v1/llm/v1',
-        defaultModel: 'MiniMax-M3',
-        models: ['MiniMax-M3', 'MiniMax-M3.1-Flash-Preview', 'MiniMax-M2.7', 'MiniMax-M2.7-highspeed'],
+        // M3.1 Flash is the current flagship on this line and the one the plan
+        // documents at 1M; M3 stays selectable at its own 512K serving window.
+        defaultModel: 'MiniMax-M3.1-Flash-Preview',
+        models: ['MiniMax-M3.1-Flash-Preview', 'MiniMax-M3', 'MiniMax-M2.7', 'MiniMax-M2.7-highspeed'],
         supportsToolUse: true,
         requiresApiKey: false,
         supportsStreaming: true,
-        maxContextTokens: 512_000,
+        maxContextTokens: 1_000_000,
         isOpenAICompatible: false,
         toolCallStyle: 'openai',
         supportsFIM: false,

@@ -74,6 +74,9 @@ const validators = {
         subscriptionProxy: optional(isSubscriptionProxyStatus),
     }),
     subscriptionProxyStatus: fields({ status: isSubscriptionProxyStatus }, { saved: optional(isBoolean), targetSurface: optional(isSurface) }),
+    subscriptionPoolQuota: fields({ providerId: isString, accountId: isString }, {
+        quota: optional(isObject), targetSurface: optional(isSurface),
+    }),
     ollamaModels: fields({ models: isRecordArray }, { error: optional(isString) }),
     apiModelsFetched: fields({ providerId: isString, models: isRecordArray }, {
         dynContexts: optional(isObject), reasoningCapabilities: optional(isObject), error: optional(isString), ctxNote: optional(isString),

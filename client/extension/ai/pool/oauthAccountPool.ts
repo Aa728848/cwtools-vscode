@@ -13,6 +13,7 @@
  */
 
 import { isRecord } from '../../../shared/protocolValidation';
+import type { SubscriptionAccountQuota } from '../../../shared/subscriptionQuota';
 import {
     AccountPoolCore,
     finitePositive,
@@ -66,6 +67,13 @@ export interface OAuthPoolSpec<TCredentials extends PooledOAuthCredentials> {
     refreshFailureStatus?(error: unknown): AccountAuthStatus | undefined;
     /** 凭据已知不可用的原因（只读上报，不写任何东西）。 */
     rejectedReason?(credentials: TCredentials): string | undefined;
+    /**
+     * 读取一个账号的额度用量。
+     *
+     * 额度是**展示数据**而不是路由状态，因此不写进号池文档：它每次都从上游重读，读失败也
+     * 绝不影响账号的可调度性。不提供该钩子的线路只是卡片上没有数字，而不是报错。
+     */
+    quota?(credentials: TCredentials, fetchFn: typeof fetch): Promise<SubscriptionAccountQuota | undefined>;
     /** 号池文档损坏或首次运行时的兜底文档。 */
     emptyStrategy?: AccountRotationStrategy;
 }
@@ -136,7 +144,7 @@ export class OAuthAccountPool<TCredentials extends PooledOAuthCredentials> {
     private readonly core: AccountPoolCore<TCredentials, PooledOAuthAccount<TCredentials>>;
 
     constructor(
-        spec: OAuthPoolSpec<TCredentials>,
+        private readonly spec: OAuthPoolSpec<TCredentials>,
         private readonly ports: OAuthPoolPorts<TCredentials>,
     ) {
         const parse = (value: unknown) => parseOAuthPoolData(value, spec);
@@ -228,6 +236,24 @@ export class OAuthAccountPool<TCredentials extends PooledOAuthCredentials> {
     /** 凭据失效后停用该账号，但**保留**它的行以便重新登录恢复。 */
     noteAuthFailure(accountId: string, status: AccountAuthStatus, reason: string): Promise<void> {
         return this.core.noteAuthFailure(accountId, status, reason);
+    }
+
+    /**
+     * 读取一个账号的额度。
+     *
+     * 额度不是路由状态，因此不进号池文档，也不在这里缓存：线路自己的钩子按账号缓存
+     * （切换账号不能拿到上一个账号的数字）。线路没接这个面就返回 undefined，卡片上只是
+     * 没有数字；读取失败同样返回 undefined——一次额度读取失败不该让账号看起来不可用。
+     */
+    async quotaFor(accountId: string): Promise<SubscriptionAccountQuota | undefined> {
+        if (this.spec.quota === undefined) return undefined;
+        const account = (await this.core.read()).accounts.find(entry => entry.id === accountId);
+        if (account === undefined) return undefined;
+        try {
+            return await this.spec.quota(account.credentials, this.ports.fetchFn ?? fetch);
+        } catch {
+            return undefined;
+        }
     }
 }
 

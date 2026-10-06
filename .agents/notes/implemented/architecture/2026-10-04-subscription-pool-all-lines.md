@@ -88,6 +88,29 @@ Antigravity 也改为复用同一工厂，删掉了它自己那份等价实现�
 
 区块只在**该线路账号数为 0** 时隐藏：1 个账号也照常显示，好让用户知道它在参与调度。
 
+### 账号额度的展示
+
+每个账号行下面画它自己的额度。额度是**非机密的账号事实**（能随号池摘要过 Webview 边界），
+但它是**展示数据而不是路由状态**：不进号池文档、不影响可调度性，读取失败只让这一行没有数字，
+绝不把账号停用。
+
+- **按需读取**：额度要打上游请求，因此在区块真正上屏后才问一次（`requestSubscriptionPoolQuota`），
+  而不是随每次设置刷新一起取，也不与账号摘要捆绑；
+- **按账号缓存与单飞**：缓存键是账号身份，否则切换账号会拿到上一个账号的数字；
+- **各线路自己的面**（均在参照实现里实测过）：
+
+| 线路 | 额度面 | 备注 |
+| --- | --- | --- |
+| `workbuddy-subscription` | `POST /billing/meter/get-user-resource` | `data.Response.Data.Accounts[]`；多套餐**求和**；容量与周期计数是两套独立数字，各成一个仪表 |
+| `kimi-code-plan` | `GET {coding}/v1/usages` | coding 主机（非 OAuth 主机）；兼容 `usages{}` 与 `usage`+`limits[]` 两种形状 |
+| `claude-subscription` | `GET /api/oauth/usage` | `utilization` 在这个面上是 **0-100 的百分数**（响应头里同名字段是 0-1） |
+| `codex-chatgpt` | 复用账号状态里的 `rateLimits` | 不额外发请求 |
+| `commandcode` | 复用账号状态（`/alpha/billing/credits` 等） | 额度**按 Key** 记账；只报余额时就画成数值 |
+| `minimax-code` | `GET /v1/api/openplatform/coding_plan/remains` | **只带 bearer**：不伪造官方客户端的 `yy`/`x-signature` 第一方标记（冒用官方应用是封号理由） |
+
+`pool/quotaWindows.ts` 把各线路的形状收敛成统一仪表，其中**比例缺失但报金额**的窗口仍然产出仪表
+（画成数值）：一个只报余额的额度是真实事实，丢掉它会显示成「什么都没有」。
+
 ### 回归测试
 
 新增 `client/test/unit/subscriptionPools.test.ts`（24 例）：工厂的文档解析与坏行跳过、
@@ -103,6 +126,10 @@ Antigravity 也改为复用同一工厂，删掉了它自己那份等价实现�
 `client/test/unit/poolRegistry.test.ts`（4 例）：`poolId` 使**别名 id 共用一个池实例**（否则
 后写覆盖先写）、未声明 `poolId` 的线路**各自独立**（WorkBuddy 账号不得被 MiniMax 选中）、
 `providerIds()` 枚举、别名线路只 seed 一次。
+
+`client/test/unit/subscriptionQuota.test.ts`（11 例）：WorkBuddy 账单的嵌套形状与多套餐求和、
+容量与周期各成一个仪表、无时区周期时间按本地时间解析、只有余额的额度画成数值而不编造比例、
+边界校验丢弃无名称的仪表并夹取比例。
 
 ## Alternatives considered
 
@@ -147,5 +174,9 @@ Antigravity 也改为复用同一工厂，删掉了它自己那份等价实现�
   该线路。
 - WorkBuddy 的模型下拉框由网关 `/v3/config` 的实时目录填充（内置表不列该线路模型）；读取
   失败保留上一次快照而不是清空。
+- **登录控件在有账号之后仍然可用**（改称「再添加一个账号」）：此前它被隐藏，使得一个账号
+  登录之后**再也加不了第二个**，多账号在这几条线路上实际不可达。WorkBuddy 与 MiniMax Code
+  本来就没隐藏，因此只有它们能加第二个账号。
+- 号池的每行下方显示该账号的额度（能读到才显示；读不到就只是没有数字）。
 - **仍未做的**：真机验证。所有线路的 OAuth 流程与多账号轮转都由单元测试（mock transport）
   锁定契约，尚未在真实订阅账号上端到端跑过。

@@ -172,6 +172,9 @@ export async function routeWebviewMessage(
         case 'removeSubscriptionPoolAccount':
             await provider.settingsManager.removeSubscriptionPoolAccount(msg.providerId, msg.accountId, sourceSurface);
             break;
+        case 'requestSubscriptionPoolQuota':
+            await provider.settingsManager.sendSubscriptionPoolQuota(msg.providerId, sourceSurface);
+            break;
         case 'codexLogout':
             await provider.settingsManager.logoutCodex();
             break;

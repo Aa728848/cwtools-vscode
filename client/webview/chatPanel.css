@@ -1595,6 +1595,12 @@ body.chat-empty .slash-popup { max-height: min(360px, calc(50vh - 28px)); }
 .codex-quota-fill-normal { background: var(--vscode-progressBar-background, var(--accent)); }
 .codex-quota-fill-warning { background: var(--vscode-charts-yellow, #cca700); }
 .codex-quota-fill-critical { background: var(--vscode-errorForeground, #f14c4c); }
+/* One pooled account: its row, then the usage meters that belong to that account. */
+.pool-entry { border-bottom: 1px solid var(--border); padding-bottom: 4px; }
+.pool-entry:last-child { border-bottom: 0; }
+.pool-quota { display: flex; flex-direction: column; gap: 6px; margin: 2px 0 6px 8px; padding-left: 8px; border-left: 2px solid var(--border); }
+.pool-quota .codex-quota-item { gap: 3px; }
+.pool-quota-error { font-size: 10px; opacity: 0.52; margin: 0 0 6px 16px; }
 .settings-footer { width: min(100%, var(--chat-column-width)); max-width: var(--chat-column-width); padding: 10px 12px 12px; display: flex; flex-direction: column; gap: 8px; border-top: 1px solid rgba(255,255,255,0.06); flex-shrink: 0; background: rgba(255,255,255,0.02); }
 .settings-footer-actions { display: flex; gap: 8px; }
 .settings-footer-actions .settings-test-btn,

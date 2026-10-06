@@ -12,6 +12,7 @@
  * seed 的合并是幂等的：身份键相同即原地更新，不会每次选择都长出新行。
  */
 
+import type { SubscriptionAccountQuota } from '../../../shared/subscriptionQuota';
 import { ErrorReporter } from '../errorReporter';
 import { SOURCE } from '../messages';
 import {
@@ -180,6 +181,15 @@ export class SubscriptionPoolRegistry {
         if (pool === undefined) return [];
         await this.seedOnce(providerId);
         return pool.listAccounts();
+    }
+
+    /**
+     * 读取一个账号的额度；线路未接额度面时返回 undefined。
+     *
+     * 按需调用而不是随账号摘要一起取：额度要打上游请求，而账号摘要在设置页刷新得很频繁。
+     */
+    async accountQuota(providerId: string, accountId: string): Promise<SubscriptionAccountQuota | undefined> {
+        return await this.pool(providerId)?.quotaFor(accountId);
     }
 
     async strategy(providerId: string): Promise<AccountRotationStrategy | undefined> {

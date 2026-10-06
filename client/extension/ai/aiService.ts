@@ -53,7 +53,7 @@ import { CodexTurnStateTracker } from './codex/turnState';
 import { CommandCodeOAuthService } from './commandcode/oauthService';
 import { offloadAntigravityRequestImages } from './antigravity/imageBudget';
 import { KimiCodeOAuthService, kimiIdentityHeaders, readOrCreateKimiDeviceId, KIMI_REGION_OAUTH_HOSTS } from './kimi/oauthService';
-import { KimiCodeTokenStore, KimiUnauthorizedError } from './kimi/tokenStore';
+import { KimiCodeTokenStore, KimiUnauthorizedError, type KimiCredentials } from './kimi/tokenStore';
 import {
     WorkBuddyCredentialStore,
     mergeWorkBuddyAccounts,
@@ -63,6 +63,12 @@ import {
     type WorkBuddyCredentials,
 } from './workbuddy/credentials';
 import { WorkBuddyOAuthService, refreshWorkBuddyCredentials, workBuddyHeaders } from './workbuddy/client';
+import { fetchWorkBuddyQuota } from './workbuddy/quota';
+import { fetchClaudeSubscriptionQuota } from './claudesub/quota';
+import { commandCodeQuotaFromStatus } from './commandcode/quota';
+import { fetchMinimaxCodeQuota } from './minimaxcode/quota';
+import { fetchKimiQuota } from './kimi/quota';
+import { codexQuotaFromRateLimits } from './codex/quota';
 import {
     MinimaxCodeCredentialStore,
     isMinimaxCodeCredentialFresh,
@@ -75,7 +81,7 @@ import {
     MinimaxCodeOAuthService,
     refreshMinimaxCodeCredentials,
 } from './minimaxcode/oauthService';
-import { MINIMAX_CODE_AGENT_LLM_PREFIX } from './minimaxcode/types';
+import { MINIMAX_CODE_AGENT_LLM_PREFIX, type MinimaxCodeRegion } from './minimaxcode/types';
 import {
     SubscriptionPoolRegistry,
     type SubscriptionPoolEntry,
@@ -643,6 +649,10 @@ export class AIService {
                             return next as unknown as PooledOAuthCredentials;
                         },
                         refreshFailureStatus: subscriptionRefreshFailureStatus,
+                        quota: async (credentials, fetchFn) => await fetchClaudeSubscriptionQuota(
+                            credentials as unknown as { accessToken: string },
+                            { fetchFn },
+                        ),
                     },
                     ports: {
                         store: {
@@ -679,6 +689,13 @@ export class AIService {
                             return next as unknown as PooledOAuthCredentials;
                         },
                         refreshFailureStatus: subscriptionRefreshFailureStatus,
+                        // Token Plan allowance, read per account against the API hosts.
+                        // The read is sent with the bearer alone: this extension does
+                        // not forge the official client's first-party attribution.
+                        quota: async (credentials, fetchFn) => {
+                            const creds = credentials as never as { accessToken: string; region: MinimaxCodeRegion };
+                            return await fetchMinimaxCodeQuota(creds, { region: creds.region, fetchFn });
+                        },
                     },
                     ports: {
                         store: {
@@ -714,6 +731,13 @@ export class AIService {
                             return next as unknown as PooledOAuthCredentials;
                         },
                         refreshFailureStatus: subscriptionRefreshFailureStatus,
+                        // Billing allowance for one account, so the pool card can draw
+                        // each row's usage. It is a read: a failure yields no numbers
+                        // and never parks the account.
+                        quota: async (credentials, fetchFn) => {
+                            const creds = credentials as unknown as WorkBuddyCredentials;
+                            return await fetchWorkBuddyQuota(creds, workBuddyAccountKey(creds), { fetchFn });
+                        },
                     },
                     ports: {
                         store: {
@@ -753,6 +777,17 @@ export class AIService {
                             return next as unknown as PooledOAuthCredentials;
                         },
                         refreshFailureStatus: subscriptionRefreshFailureStatus,
+                        // The usage surface sits on the coding host, not the OAuth host,
+                        // and the token has to be fresh or a recently expired account
+                        // reads as "no quota".
+                        quota: async (credentials, fetchFn) => {
+                            // The usage surface hangs off the coding endpoint the line
+                            // actually serves, so the configured endpoint is the source of
+                            // truth rather than a second hardcoded host mapping.
+                            const codingBase = getEffectiveEndpoint('kimi-code-plan', this.getEndpointForProvider('kimi-code-plan'))
+                                .replace(/\/v1\/?$/, '');
+                            return await fetchKimiQuota(credentials as unknown as KimiCredentials, { codingBase, fetchFn });
+                        },
                     },
                     ports: {
                         store: {
@@ -784,6 +819,12 @@ export class AIService {
                             return next as unknown as PooledOAuthCredentials;
                         },
                         refreshFailureStatus: subscriptionRefreshFailureStatus,
+                        // Codex ships its usage beside the account status, so this reuses
+                        // that read instead of issuing a second usage request.
+                        quota: async () => {
+                            const status = await this.chatGptOAuth.getAccountStatus();
+                            return codexQuotaFromRateLimits(status.rateLimits);
+                        },
                     },
                     ports: {
                         store: {
@@ -821,6 +862,12 @@ export class AIService {
                         // A static API key never expires, so there is no refresh to
                         // wire; rotation, cooldown and parking still apply.
                         refreshFailureStatus: subscriptionRefreshFailureStatus,
+                        // Allowance is booked per key, so each row reads its own status.
+                        quota: async (credentials, fetchFn) => {
+                            const apiKey = (credentials as unknown as { accessToken: string }).accessToken;
+                            const status = await getCommandCodeAccountStatus(apiKey, false, fetchFn);
+                            return commandCodeQuotaFromStatus(status);
+                        },
                     },
                     ports: {
                         store: {
@@ -919,6 +966,11 @@ export class AIService {
     /** The pool's view of one line, for the settings card. */
     async listSubscriptionPoolAccounts(providerId: string) {
         return this.subscriptionPools.listAccounts(providerId);
+    }
+
+    /** One pooled account's quota; undefined when the line has no quota surface. */
+    async getSubscriptionPoolAccountQuota(providerId: string, accountId: string) {
+        return await this.subscriptionPools.accountQuota(providerId, accountId);
     }
 
     /**

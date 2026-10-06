@@ -297,6 +297,26 @@ commandcode（静态 API Key）。
    的那次会丢掉前一条线路刚加的账号。新增 `poolId` 让它们共用一个池实例。
 8. **WorkBuddy 模型下拉框为空**：内置表不列该线路模型，而实时目录此前只被用来取上下文
    窗口。改为用目录同时填充模型列表。
+9. **登录控件在有账号后被隐藏**（用户实机反馈：除 WorkBuddy / MiniMax 外，其余线路登录一个
+   账号后无法再登录第二个）。多账号池要求登录控件保持可用，现在它改称「再添加一个账号」。
+   WorkBuddy / MiniMax 本来就没隐藏，这正是只有它们能加第二个账号的原因。
+10. **额度从未展示**：`workbuddyQuotaStatus` 元素一直存在却无人渲染，号池行也没有额度。
+   已接入六条线路各自的额度面（见下）。
+
+### 账号额度展示（本轮）
+
+号池的每个账号行下方画该账号自己的额度。额度是展示数据而不是路由状态：不进号池文档、
+不影响可调度性，读取失败只让这一行没有数字。按需读取（区块上屏后才发一次请求），按账号
+缓存与单飞。
+
+| 线路 | 额度面 | 备注 |
+| --- | --- | --- |
+| workbuddy-subscription | `POST /billing/meter/get-user-resource` | 多套餐求和；容量与周期计数各成一个仪表 |
+| kimi-code-plan | `GET {coding}/v1/usages` | coding 主机；兼容两种形状 |
+| claude-subscription | `GET /api/oauth/usage` | `utilization` 是 0-100 百分数 |
+| codex-chatgpt | 复用账号状态 `rateLimits` | 不额外发请求 |
+| commandcode | 复用账号状态 | 按 Key 记账；只报余额时画成数值 |
+| minimax-code | `GET /v1/api/openplatform/coding_plan/remains` | **只带 bearer**，不伪造官方客户端第一方标记 |
 
 ### 全部剩余项状态（本轮结束后）
 
@@ -308,6 +328,8 @@ commandcode（静态 API Key）。
 | P4 号池：codex / kimi / claude / minimax / workbuddy / commandcode | ✅ 完成 |
 | P4 号池：设置面（通用账号池区块，按选中线路渲染） | ✅ 完成 |
 | WorkBuddy 实时目录填充模型列表 | ✅ 完成 |
+| 登录控件在有账号后仍可用（可加第二个账号） | ✅ 完成 |
+| 各线路账号额度展示（六条线路） | ✅ 完成 |
 
 > 唯一**非阻塞**待办仍是真机验证：各线路的 OAuth 流程、桌面凭据复用与多账号轮转均以单元
 > 测试（mock transport）锁定契约，尚未在真实订阅账号上端到端跑过。

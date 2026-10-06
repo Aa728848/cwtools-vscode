@@ -149,6 +149,7 @@ const validators: Record<WebViewMessage['type'], MessageValidator> = {
     setSubscriptionPoolPrimary: fields({ providerId: isString, accountId: isString }),
     clearSubscriptionPoolCooldown: fields({ providerId: isString, accountId: isString }),
     removeSubscriptionPoolAccount: fields({ providerId: isString, accountId: isString }),
+    requestSubscriptionPoolQuota: fields({ providerId: isString }),
     antigravityLogin: noFields,
     antigravityRefreshAccount: noFields,
     antigravityLogout: noFields,

@@ -1409,6 +1409,27 @@ export class ChatSettingsManager {
     }
 
     /**
+     * Read every account's quota for one line and push the result to the card.
+     *
+     * Quota needs an upstream request per account, so it is fetched on demand (when the card
+     * asks) rather than bundled into every settings refresh. One account's failure must not
+     * blank the others', so each is read and sent independently.
+     */
+    async sendSubscriptionPoolQuota(providerId: string, targetSurface: 'chat' | 'manager' = 'chat'): Promise<void> {
+        const accounts = await this.aiService.listSubscriptionPoolAccounts(providerId);
+        for (const account of accounts) {
+            const quota = await this.aiService.getSubscriptionPoolAccountQuota(providerId, account.id);
+            this.postMessage({
+                type: 'subscriptionPoolQuota',
+                providerId,
+                accountId: account.id,
+                ...(quota === undefined ? {} : { quota }),
+                targetSurface,
+            });
+        }
+    }
+
+    /**
      * Switch how one subscription line rotates between its accounts.
      *
      * The line is named by the message rather than read from the saved config: the

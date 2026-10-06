@@ -49,6 +49,7 @@ import {
 } from './chat/settingsOverview';
 import { buildCodexQuotaHtml } from './chat/codexQuota';
 import { buildCommandCodeQuotaHtml } from './chat/commandcodeQuota';
+import { buildSubscriptionQuotaHtml } from './chat/subscriptionQuota';
 import {
     renderTopicSearchResults as renderTopicSearchResultsView,
     renderTopics as renderTopicsView,
@@ -7096,6 +7097,18 @@ let settingsSubscriptionPools: Record<string, any> = {};
                 }
                 break;
 
+            case 'subscriptionPoolQuota': {
+                if (typeof msg.providerId !== 'string' || typeof msg.accountId !== 'string') break;
+                settingsSubscriptionPoolQuota.set(msg.providerId + '\u0000' + msg.accountId, msg.quota);
+                if (!isCurrentSurface(msg.targetSurface)) break;
+                // Repaint only the line the answer belongs to; the section may be showing
+                // a different provider by now, and its own rows are already correct.
+                if (settingsPage.classList.contains('active') && selectedPoolProviderId() === msg.providerId) {
+                    renderSubscriptionPool(msg.providerId);
+                }
+                break;
+            }
+
             case 'subscriptionProxyStatus': {
                 if (!isSubscriptionProxyStatus(msg.status)) break;
                 settingsSubscriptionProxy = msg.status;
@@ -8399,6 +8412,25 @@ let settingsSubscriptionPools: Record<string, any> = {};
         element.style.color = status.error ? 'var(--vscode-errorForeground)' : '';
     }
 
+    /**
+     * Keep a line's sign-in control usable once an account exists.
+     *
+     * Hiding it made a second account unreachable: the pool supports several per line,
+     * so the control has to stay for the user to add one (its label says so).
+     */
+    function setAddAccountControl(
+        button: HTMLElement | null,
+        label: string,
+        labelZh: string,
+        signedIn: boolean,
+    ): void {
+        if (!button) return;
+        button.style.display = '';
+        if (button instanceof HTMLButtonElement) button.disabled = false;
+        button.innerHTML = svgIcon('link') + escapeHtml(signedIn
+            ? tr('Add another account', '再添加一个账号')
+            : tr(label, labelZh));
+    }
     function updateApiKeyStatus(providerId: string, providers?: any[]) {
         const p = (providers || settingsProviders).find((x: any) => x.id === providerId);
         const status = document.getElementById('apiKeyStatus')!;
@@ -8474,7 +8506,7 @@ let settingsSubscriptionPools: Record<string, any> = {};
             }
             const loginBtn = document.getElementById('antigravityLoginBtn');
             const logoutBtn = document.getElementById('antigravityLogoutBtn');
-            if (loginBtn) loginBtn.style.display = settingsAntigravityAccount?.signedIn ? 'none' : '';
+            setAddAccountControl(loginBtn, 'Sign in with Google', '使用 Google 登录', settingsAntigravityAccount?.signedIn === true);
             if (logoutBtn) logoutBtn.style.display = settingsAntigravityAccount?.hasCredentials ? '' : 'none';
             refreshSettingsOverview();
             return;
@@ -8499,10 +8531,7 @@ let settingsSubscriptionPools: Record<string, any> = {};
                     accountStatus.style.color = '#ff9800';
                 }
             }
-            if (loginBtn) {
-                loginBtn.disabled = account?.signedIn === true;
-                loginBtn.style.display = account?.signedIn ? 'none' : '';
-            }
+            setAddAccountControl(loginBtn, 'Sign in with ChatGPT', '使用 ChatGPT 登录', account?.signedIn === true);
             if (logoutBtn) {
                 logoutBtn.disabled = !hasCodexAccount;
                 logoutBtn.style.display = hasCodexAccount ? '' : 'none';
@@ -8558,7 +8587,7 @@ let settingsSubscriptionPools: Record<string, any> = {};
             }
             const loginBtn = document.getElementById('claudeSubscriptionLoginBtn');
             const logoutBtn = document.getElementById('claudeSubscriptionLogoutBtn');
-            if (loginBtn) loginBtn.style.display = account?.signedIn ? 'none' : '';
+            setAddAccountControl(loginBtn, 'Sign in with Claude', '使用 Claude 登录', account?.signedIn === true);
             if (logoutBtn) logoutBtn.style.display = account?.signedIn ? '' : 'none';
             refreshSettingsOverview();
             return;
@@ -8590,7 +8619,7 @@ let settingsSubscriptionPools: Record<string, any> = {};
             }
             const loginBtn = document.getElementById('minimaxCodeLoginBtn');
             const logoutBtn = document.getElementById('minimaxCodeLogoutBtn');
-            if (loginBtn) loginBtn.style.display = account?.signedIn ? 'none' : '';
+            setAddAccountControl(loginBtn, 'Device code sign-in', '设备码登录', account?.signedIn === true);
             if (logoutBtn) logoutBtn.style.display = account?.canSignOut ? '' : 'none';
             refreshSettingsOverview();
             return;
@@ -8648,7 +8677,7 @@ let settingsSubscriptionPools: Record<string, any> = {};
             }
             const loginBtn = document.getElementById('kimiLoginBtn');
             const logoutBtn = document.getElementById('kimiLogoutBtn');
-            if (loginBtn) loginBtn.style.display = account?.signedIn ? 'none' : '';
+            setAddAccountControl(loginBtn, 'Device code sign-in', '设备码登录', account?.signedIn === true);
             if (logoutBtn) logoutBtn.style.display = account?.signedIn ? '' : 'none';
         }
         if (isCommandCode) {
@@ -8707,6 +8736,23 @@ let settingsSubscriptionPools: Record<string, any> = {};
         refreshSettingsOverview();
     }
 
+    /** Quota per `<providerId>\u0000<accountId>`; absent until the host answers. */
+    const settingsSubscriptionPoolQuota = new Map<string, any>();
+    /** Lines already asked for quota, so switching providers does not re-ask on every repaint. */
+    const settingsSubscriptionQuotaRequested = new Set<string>();
+
+    function poolQuotaLabels() {
+        return {
+            creditsUsed: tr('used', '已用'),
+            creditsRemaining: tr('remaining', '剩余'),
+            resets: tr('Resets', '重置'),
+            cycle: tr('Billing cycle', '计费周期'),
+            package: tr('Package credits', '套餐额度'),
+            unavailable: tr('Usage details are unavailable for this account.', '当前账号暂未返回用量详情。'),
+            unknownReset: tr('unknown reset time', '重置时间未知'),
+        };
+    }
+
     /** Render the selected line's account pool: strategy selector plus one row per account. */
     function renderSubscriptionPool(providerId: string) {
         const group = document.getElementById('subscriptionPoolGroup');
@@ -8748,11 +8794,30 @@ let settingsSubscriptionPools: Record<string, any> = {};
                 actions.push('<button type="button" class="detect-btn pool-act" data-act="cooldown" data-id="' + escapeHtml(entry.id) + '" style="padding:0 6px;width:auto;font-size:11px;">' + tr('Clear cooldown', '清除冷却') + '</button>');
             }
             actions.push('<button type="button" class="detect-btn pool-act" data-act="remove" data-id="' + escapeHtml(entry.id) + '" style="padding:0 6px;width:auto;font-size:11px;">' + tr('Remove', '移除') + '</button>');
-            return '<div class="pool-row" style="display:flex;align-items:center;gap:6px;margin-top:4px;">'
+            const row = '<div class="pool-row" style="display:flex;align-items:center;gap:6px;margin-top:4px;">'
                 + '<span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escapeHtml(entry.alias)
                 + (badges.length ? ' <span style="opacity:0.7">(' + escapeHtml(badges.join(', ')) + ')</span>' : '') + '</span>'
                 + actions.join('') + '</div>';
+            // The account's usage sits under its own row, so several accounts can be
+            // compared without opening anything.
+            return '<div class="pool-entry">' + row
+                + buildSubscriptionQuotaHtml(
+                    settingsSubscriptionPoolQuota.get(providerId + '\u0000' + entry.id),
+                    poolQuotaLabels(),
+                    chatI18n.locale === 'zh-cn' ? 'zh-CN' : 'en',
+                ) + '</div>';
         }).join('');
+        // Quota needs an upstream request per account, so it is asked for once the
+        // section is actually on screen rather than on every settings build.
+        ensureSubscriptionPoolQuota(providerId, accounts.map(entry => entry.id));
+    }
+
+    /** Ask the host for each account's quota once per line per session. */
+    function ensureSubscriptionPoolQuota(providerId: string, accountIds: string[]): void {
+        const known = accountIds.every(id => settingsSubscriptionPoolQuota.has(providerId + '\u0000' + id));
+        if (known || settingsSubscriptionQuotaRequested.has(providerId)) return;
+        settingsSubscriptionQuotaRequested.add(providerId);
+        vscode.postMessage({ type: 'requestSubscriptionPoolQuota', providerId });
     }
     function getCustomApiFormat() {
         return (document.getElementById('customApiFormat') as HTMLSelectElement | null)?.value || 'openai-chat-completions';

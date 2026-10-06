@@ -4,6 +4,7 @@
 
 import type { SlashCommandDescriptor } from './slashCommands';
 import type { SubscriptionProxyMode, SubscriptionProxyStatus } from '../../shared/subscriptionProxy';
+import type { SubscriptionAccountQuota } from '../../shared/subscriptionQuota';
 import type { CwtRuleValueReference } from '../../shared/pdxSemanticCatalog';
 import type { AgentToolName } from './tools/registry';
 import type { ProviderMeta } from '../../shared/providerMeta';
@@ -2691,6 +2692,7 @@ export type WebViewMessage =
     | { type: 'setSubscriptionPoolPrimary'; providerId: string; accountId: string }
     | { type: 'clearSubscriptionPoolCooldown'; providerId: string; accountId: string }
     | { type: 'removeSubscriptionPoolAccount'; providerId: string; accountId: string }
+    | { type: 'requestSubscriptionPoolQuota'; providerId: string }
     | { type: 'antigravityLogin' }
     | { type: 'antigravityRefreshAccount' }
     | { type: 'antigravityLogout' }
@@ -2763,6 +2765,7 @@ export type HostMessage =
     | { type: 'todoUpdate'; todos: TodoItem[]; agentId?: string; threadId?: string; runId?: string }
     | { type: 'settingsData'; providers: ProviderMeta[]; current: PanelSettings; ollamaModels?: OllamaModelInfo[]; showPanel?: boolean; targetSurface?: 'chat' | 'manager'; modelContextTokens?: Record<string, number>; thinkingModelPrefixes?: string[]; reasoningCapabilities?: Record<string, ModelReasoningCapability>; codexAccount?: CodexAccountStatus; antigravityAccount?: AntigravityAccountStatus; commandcodeAccount?: CommandCodeAccountStatus; kimiAccount?: KimiCodeAccountStatus; workbuddyAccount?: WorkBuddyAccountStatus; minimaxCodeAccount?: MinimaxCodeAccountStatus; claudeSubscriptionAccount?: ClaudeSubscriptionAccountStatus; subscriptionPools?: Record<string, SubscriptionPoolView>; subscriptionProxy?: SubscriptionProxyStatus }
     | { type: 'subscriptionProxyStatus'; status: SubscriptionProxyStatus; saved?: boolean; targetSurface?: 'chat' | 'manager' }
+    | { type: 'subscriptionPoolQuota'; providerId: string; accountId: string; quota?: SubscriptionAccountQuota; targetSurface?: 'chat' | 'manager' }
     | { type: 'ollamaModels'; models: OllamaModelInfo[]; error?: string }
     | { type: 'apiModelsFetched'; providerId: string; models: Array<{ id: string }>; dynContexts?: Record<string, number>; reasoningCapabilities?: Record<string, ModelReasoningCapability>; error?: string; ctxNote?: string }
     | { type: 'testConnectionResult'; ok: boolean; message: string }

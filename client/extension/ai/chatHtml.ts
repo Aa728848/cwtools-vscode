@@ -421,7 +421,12 @@ ${stylesheetLinks}
                         <button class="detect-btn" id="workbuddyLoginIntlBtn" style="margin-left:4px; padding:0 8px; width:auto; border-radius:4px">${svgIcon('link')}${t('Sign in (International)', '登录（国际区）')}</button>
                         <button class="detect-btn" id="workbuddyRefreshBtn" style="margin-left:4px; padding:0 8px; width:auto; border-radius:4px">${svgIcon('refresh')}${t('Rescan accounts', '重新扫描账号')}</button>
                     </div>
+                    <div class="settings-hint" id="workbuddyCheckinStatus"></div>
+                    <div class="settings-key-row" style="margin-top:4px">
+                        <button class="detect-btn" id="workbuddyCheckinBtn" style="padding:0 8px; width:auto; border-radius:4px">${svgIcon('refresh')}${t('Check in now', '立即签到')}</button>
+                    </div>
                     <div class="settings-hint">${t('Reads accounts already signed in by the CodeBuddy desktop app, or adds one through the official browser authorization. Desktop accounts are never modified or deleted here.', '读取 CodeBuddy 桌面端已登录的账号，或通过官方浏览器授权添加一个。桌面账号在此不会被修改或删除。')}</div>
+                    <div class="settings-hint">${t('The daily check-in runs on its own for China-region accounts and claims the free credit; a manual run ignores the daily attempt cap. International accounts have no such activity.', '每日签到会自动为国区账号执行并领取免费额度；手动执行不受当日次数上限限制。国际区账号没有该活动。')}</div>
                     <div class="codex-quota-status" id="workbuddyQuotaStatus"></div>
                 </details>
                 <details class="settings-group settings-account" id="kimiAccountGroup" style="display:none" open>

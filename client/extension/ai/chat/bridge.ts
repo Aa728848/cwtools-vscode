@@ -139,6 +139,9 @@ export async function routeWebviewMessage(
         case 'workbuddyRefreshAccounts':
             await provider.settingsManager.refreshWorkBuddyAccounts(sourceSurface);
             break;
+        case 'workbuddyCheckin':
+            await provider.settingsManager.runWorkBuddyCheckin(sourceSurface);
+            break;
         case 'minimaxCodeLogin':
             await provider.settingsManager.loginMinimaxCode(sourceSurface);
             break;

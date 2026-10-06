@@ -68,6 +68,7 @@ const validators = {
         commandcodeAccount: optional(isObject),
         kimiAccount: optional(isObject),
         workbuddyAccount: optional(isObject),
+        workbuddyCheckin: optional(isObject),
         minimaxCodeAccount: optional(isObject),
         claudeSubscriptionAccount: optional(isObject),
         subscriptionPools: optional(isObject),

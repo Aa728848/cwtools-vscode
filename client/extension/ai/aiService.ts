@@ -23,6 +23,7 @@ import type {
     ResponseVerbosity,
     ToolPresentationMode,
 } from './types';
+import { isReasoningEffort } from './types';
 import {
     getProvider,
     getEffectiveEndpoint,
@@ -53,6 +54,9 @@ import { CodexTurnStateTracker } from './codex/turnState';
 import { CommandCodeOAuthService } from './commandcode/oauthService';
 import { commandCodeWantsCompletionTokens } from './commandcode/modelCapabilities';
 import { offloadAntigravityRequestImages } from './antigravity/imageBudget';
+import { imageBudgetForProvider, offloadRequestImages } from './requestImageBudget';
+import { enforceRequestImageEdge } from './requestImageEdge';
+import { classifyFailedResponse, shouldRotateAccount } from './subscriptionFailure';
 import { KimiCodeOAuthService, kimiIdentityHeaders, readOrCreateKimiDeviceId, KIMI_REGION_OAUTH_HOSTS } from './kimi/oauthService';
 import { KimiCodeTokenStore, KimiUnauthorizedError, type KimiCredentials } from './kimi/tokenStore';
 import {
@@ -65,6 +69,8 @@ import {
 } from './workbuddy/credentials';
 import { WorkBuddyOAuthService, refreshWorkBuddyCredentials, workBuddyHeaders } from './workbuddy/client';
 import { fetchWorkBuddyQuota } from './workbuddy/quota';
+import { WorkBuddyCheckinService } from './workbuddy/checkinService';
+import { workBuddyEffortForRequest, workBuddyMaxOutputTokens } from './workbuddy/modelCatalog';
 import { fetchClaudeSubscriptionQuota } from './claudesub/quota';
 import { commandCodeQuotaFromStatus } from './commandcode/quota';
 import { fetchMinimaxCodeQuota } from './minimaxcode/quota';
@@ -527,6 +533,8 @@ export class AIService {
      * rules are the same everywhere.
      */
     private readonly subscriptionPools: SubscriptionPoolRegistry;
+    /** Daily WorkBuddy sign-in, which grants the subscription's free credit. */
+    private readonly workBuddyCheckin: WorkBuddyCheckinService;
     /** Desktop accounts this extension has been asked to hide from its own scheduling. */
     private readonly hiddenWorkBuddyAccounts = new Set<string>();
     /**
@@ -653,6 +661,28 @@ export class AIService {
             providerId => this.buildSubscriptionPool(providerId),
             SUBSCRIPTION_POOL_PROVIDER_IDS,
         );
+        // The daily credit is granted by signing in once a day, so it needs a scheduler
+        // rather than a settings read. It is CN-only: an international account has no
+        // activity to claim, and a card that said "signed in" for one would be claiming
+        // something that never happened.
+        this.workBuddyCheckin = new WorkBuddyCheckinService({
+            storageDir: context.globalStorageUri?.fsPath ?? context.globalStoragePath ?? process.cwd(),
+            accounts: () => this.listWorkBuddyAccounts().then(accounts => accounts
+                .filter(credentials => !this.hiddenWorkBuddyAccounts.has(workBuddyAccountKey(credentials)))
+                .map(credentials => ({ id: workBuddyAccountKey(credentials), credentials }))),
+            // Rotating a desktop credential writes the new token back to the IDE's own
+            // file, which is what keeps the running IDE signed in; the check-in itself
+            // never handles rotation.
+            ensureFresh: async credentials => refreshWorkBuddyCredentials(credentials, {
+                fetchFn: this.subscriptionProxy.fetch,
+            }),
+            fetchFn: this.subscriptionProxy.fetch,
+        });
+        context.subscriptions?.push({ dispose: () => this.workBuddyCheckin.dispose() });
+        // Start the scheduler. The first tick is the day's own run, so a host that starts
+        // after the activity opened still claims it; later ticks cost nothing because an
+        // already-confirmed day short-circuits before any request.
+        this.workBuddyCheckin.start();
     }
 
     /**
@@ -939,6 +969,10 @@ export class AIService {
 
     getSubscriptionPoolRegistry(): SubscriptionPoolRegistry {
         return this.subscriptionPools;
+    }
+
+    getWorkBuddyCheckinService(): WorkBuddyCheckinService {
+        return this.workBuddyCheckin;
     }
 
     getClaudeSubscriptionCredentialStore(): ClaudeSubscriptionCredentialStore {
@@ -1459,6 +1493,12 @@ export class AIService {
             // The output-cap FIELD is not universal: the Command Code GPT family takes
             // `max_completion_tokens` and rejects the legacy `max_tokens` outright, so
             // the choice follows the model id rather than the provider.
+            // The WorkBuddy catalog publishes each model's real output ceiling. A request
+            // capped above it truncates the answer, and a model whose ceiling is LOWER than
+            // the generic value is worse: the answer is cut at the server, silently.
+            max_tokens: options?.maxTokens ?? (providerId === 'workbuddy-subscription'
+                ? workBuddyMaxOutputTokens(model) ?? getModelOutputTokens(model, providerId)
+                : getModelOutputTokens(model, providerId)),
             ...(commandCodeWantsCompletionTokens(model) && (providerId === 'commandcode' || providerId === 'commandcode-messages')
                 ? { max_completion_tokens: options?.maxTokens ?? getModelOutputTokens(model, providerId) }
                 : { max_tokens: options?.maxTokens ?? getModelOutputTokens(model, providerId) }),
@@ -1479,6 +1519,10 @@ export class AIService {
             if (enabledThinkingParams?.reasoningEffort) {
                 request.reasoning_effort = enabledThinkingParams.reasoningEffort;
             }
+        }
+        if (providerId === 'workbuddy-subscription') {
+            const effort = workBuddyEffortForRequest(model, request.reasoning_effort);
+            request.reasoning_effort = effort === undefined || !isReasoningEffort(effort) ? undefined : effort;
         }
 
         // C1 Fix: create a per-call controller; register it so cancel() can abort it.
@@ -1505,8 +1549,23 @@ export class AIService {
         try {
             const execute = async (
                 requestEndpoint: string,
-                requestBody: ChatCompletionRequest,
+                incomingBody: ChatCompletionRequest,
             ): Promise<ChatCompletionResponse> => {
+                // One image budget per line, applied at the single place the body is
+                // finalized. The limits differ per line and none of them is "what the
+                // transport accepts", so they cannot be a blanket cap; but the rule is
+                // the same everywhere: past it the OLDEST images become a visible
+                // placeholder and durable history is untouched.
+                const imageBudget = imageBudgetForProvider(providerId);
+                const withBudget = imageBudget === undefined
+                    ? incomingBody.messages
+                    : offloadRequestImages(incomingBody.messages, imageBudget);
+                // The long-edge ceiling is a separate rule: it is per IMAGE, not a total,
+                // and it tightens once a request carries many images.
+                const requestBody: ChatCompletionRequest = {
+                    ...incomingBody,
+                    messages: enforceRequestImageEdge(withBudget, providerId),
+                };
                 if (providerId === 'antigravity') {
                     // Google caps a request carrying inline data, and an
                     // image-heavy session would otherwise grow the body until it
@@ -2158,12 +2217,6 @@ export class AIService {
         }
         // Same local size guard as the non-streaming path (see above).
         assertKimiCodeRequestSize(providerId, JSON.stringify(requestPayload));
-        
-        // Inject stream_options for providers that need it to return usage in streams.
-        // OpenAI, DeepSeek, GLM, Qwen require it. We omit it for minimax (strict schema).
-        if (shouldRequestStreamUsage(providerId, request.model, endpoint)) {
-            requestPayload.stream_options = { include_usage: true };
-        }
 
         const send = () => this.fetchWithRetry(url, {
             method: 'POST',
@@ -2173,29 +2226,38 @@ export class AIService {
         }, providerId);
 
         let response = await send();
-        // A pooled subscription line rotates on a rate limit: cool the account
-        // that answered 429 and retry the SAME body on another eligible account.
-        // The account id is carried by the request options, so a line without a
-        // pool is unaffected.
-        if (response.status === 429 && accountIdForPool !== undefined) {
-            const retryAfterMs = retryAfterMsFromHeaders(response.headers);
-            await this.subscriptionPools.noteRateLimited(providerId, accountIdForPool, retryAfterMs);
-            const next = await this.subscriptionPools
-                .select(providerId, new Set([accountIdForPool]), false)
-                .catch(() => undefined);
-            if (next !== undefined) {
-                await response.body?.cancel().catch(() => undefined);
-                const nextKey = next.credentials.accessToken;
-                const nextHeaders: Record<string, string> = {
-                    'Content-Type': 'application/json',
-                    ...this.buildAuthHeaders(providerId, nextKey),
-                };
-                response = await this.fetchWithRetry(url, {
-                    method: 'POST',
-                    headers: this.withSubscriptionIdentityHeaders(providerId, nextHeaders),
-                    body: JSON.stringify(requestPayload),
-                    signal: controller.signal,
-                }, providerId);
+        // A pooled subscription line rotates on any ACCOUNT-scoped refusal, not just a
+        // 429: a dead credential and an account-level limit are just as un-retryable on the
+        // same account, and without this the dead one keeps being selected. The account id
+        // is carried by the request options, so a line without a pool is unaffected.
+        if (!response.ok && accountIdForPool !== undefined) {
+            const { failure } = await classifyFailedResponse(response.clone());
+            if (shouldRotateAccount(failure.kind)) {
+                const retryAfterMs = failure.cooldownMs ?? retryAfterMsFromHeaders(response.headers);
+                if (failure.kind === 'invalid_credential') {
+                    await this.subscriptionPools.noteAuthFailure(
+                        providerId, accountIdForPool,
+                        failure.code === undefined ? 'credential rejected' : `credential rejected (code ${failure.code})`);
+                } else {
+                    await this.subscriptionPools.noteRateLimited(providerId, accountIdForPool, retryAfterMs);
+                }
+                const next = await this.subscriptionPools
+                    .select(providerId, new Set([accountIdForPool]), false)
+                    .catch(() => undefined);
+                if (next !== undefined) {
+                    await response.body?.cancel().catch(() => undefined);
+                    const nextKey = next.credentials.accessToken;
+                    const nextHeaders: Record<string, string> = {
+                        'Content-Type': 'application/json',
+                        ...this.buildAuthHeaders(providerId, nextKey),
+                    };
+                    response = await this.fetchWithRetry(url, {
+                        method: 'POST',
+                        headers: this.withSubscriptionIdentityHeaders(providerId, nextHeaders),
+                        body: JSON.stringify(requestPayload),
+                        signal: controller.signal,
+                    }, providerId);
+                }
             }
         }
         if (!response.ok) {
@@ -2349,7 +2411,10 @@ export class AIService {
                         if (tc.type) toolCallMap[idx].type = tc.type as string;
                         const fn = tc.function as Record<string, string> | undefined;
                         if (fn) {
-                            if (fn.name) toolCallMap[idx].function.name += fn.name;
+                            // The name is ONE whole token, unlike the arguments: a gateway
+                            // that repeats it on a later delta must replace, not append, or
+                            // the call is named after nothing and never dispatches.
+                            if (fn.name) toolCallMap[idx].function.name = fn.name;
                             if (fn.arguments) {
                                 toolCallMap[idx].function.arguments += fn.arguments;
                                 if (onToolCallDelta) {
@@ -2401,7 +2466,10 @@ export class AIService {
                         ? { reasoning_key: detectedReasoningKey } : {}),
                     ...(reasoningBuf && reasoningBuf.trim().length > 0 ? { reasoning_content: reasoningBuf } : {}),
                 } as ChatMessage & { tool_calls?: typeof toolCalls },
-                finish_reason: finishReason ?? 'stop',
+                // A stream that never reached a terminal frame was CUT. Reporting it as a
+                // clean stop hands the user half a reply that looks complete, with no clue
+                // anything went wrong - so it is reported as a length instead.
+                finish_reason: finishReason ?? (terminalFrameSeen ? 'stop' : 'length'),
             }],
             usage: usageBuf ? {
                 prompt_tokens: usageBuf.prompt_tokens,
@@ -3602,6 +3670,31 @@ export class AIService {
             if (refreshed !== undefined && refreshed.credentials.accessToken !== refusedToken) {
                 apiKey = refreshed.credentials.accessToken;
                 response = await sendClaudeRequest(authMode);
+            }
+        }
+        if (!response.ok && subscriptionAccountId !== undefined) {
+            // This route had no account-scoped handling at all, so a rate-limited or
+            // exhausted account kept being selected and every later turn hit the same
+            // wall. Rotation is only correct for ACCOUNT-scoped refusals: a global rate
+            // limit rotated against would just burn the pool.
+            const { failure } = await classifyFailedResponse(response.clone());
+            if (shouldRotateAccount(failure.kind) || failure.kind === 'rate_limit') {
+                const account = providerId === 'claude-subscription' ? claudeSubscriptionAccountId : subscriptionAccountId;
+                if (account !== undefined) {
+                    await this.subscriptionPools.noteRateLimited(
+                        providerId, account, failure.cooldownMs ?? retryAfterMsFromHeaders(response.headers));
+                    const next = await this.subscriptionPools.select(providerId, new Set([account]), true)
+                        .catch(() => undefined);
+                    if (next !== undefined) {
+                        await response.body?.cancel().catch(() => undefined);
+                        apiKey = next.credentials.accessToken;
+                        if (providerId === 'claude-subscription') {
+                            claudeSubscriptionCredentials = next.credentials as unknown as ClaudeSubscriptionCredentials;
+                            claudeSubscriptionAccountId = next.accountId;
+                        }
+                        response = await sendClaudeRequest(authMode);
+                    }
+                }
             }
         }
         if (providerId === 'custom' && apiKey && (response.status === 401 || response.status === 403)) {

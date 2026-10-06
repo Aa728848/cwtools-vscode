@@ -41,6 +41,7 @@ import {
     type WorkBuddyRegion,
 } from './types';
 import { writeBackWorkBuddyDesktopCredential, type WorkBuddyCredentials } from './credentials';
+import { withResolvedIdentity } from './identity';
 
 export interface WorkBuddyRequestOptions {
     fetchFn?: typeof fetch;
@@ -261,7 +262,9 @@ export function parseWorkBuddyLoginCredential(payload: unknown, attempt: WorkBud
     const uin = asString(account.uin) ?? asString(data.uin);
     const enterpriseId = asString(account.enterpriseId) ?? asString(data.enterpriseId);
     const accountType = asString(account.type) ?? asString(data.accountType);
-    return {
+    // The login response carries only the auth block, so the account may still be unnamed
+    // here; the token's own claims name it either way.
+    return withResolvedIdentity({
         accessToken,
         refreshToken: asString(auth.refreshToken) ?? asString(auth.refresh_token)
             ?? asString(data.refreshToken) ?? asString(data.refresh_token) ?? '',
@@ -277,7 +280,7 @@ export function parseWorkBuddyLoginCredential(payload: unknown, attempt: WorkBud
         source: 'managed',
         sourceFile: '',
         sourceMtimeMs: 0,
-    };
+    });
 }
 
 /** 轮询一次令牌。 */
@@ -371,9 +374,8 @@ export class WorkBuddyOAuthService {
                     const credentials = await pollWorkBuddyLogin(attempt, { fetchFn, signal: controller.signal });
                     if (credentials === null) continue;
                     const identity = await fetchWorkBuddyIdentity(credentials, { fetchFn, signal: controller.signal });
-                    const resolved: WorkBuddyCredentials = identity === undefined
-                        ? credentials
-                        : { ...credentials, ...identity };
+                    const resolved: WorkBuddyCredentials = withResolvedIdentity(
+                        identity === undefined ? credentials : { ...credentials, ...identity });
                     await this.options.saveCredentials(resolved);
                     finish();
                     return;

@@ -212,3 +212,35 @@ async function performCatalogLoad(options: WorkBuddyCatalogLoadOptions): Promise
 export function workBuddyEffortsFor(model: string): readonly string[] {
     return catalogCache?.models.find(entry => entry.id === model)?.reasoningEfforts ?? [];
 }
+
+
+/**
+ * 为一个请求选一个该模型真的接受的思考档位。
+ *
+ * 两个约束都是实测的：
+ * - **不发 effort 时上游返回空的 `reasoning_content`**，即使模型是纯思考模型（实测 0 字符
+ *   对比 130-215 字符），所以思考档位必须**物化**出来，不能留给默认值；
+ * - 模型没有的档位是 `code 11150`，因此候选里不存在的取值会被丢弃而不是原样发出。
+ *
+ * 候选顺序是：用户显式选择 → 目录声明的默认档。两者都不被接受时返回 undefined，交给调用方
+ * 决定是否省略该字段。
+ */
+export function workBuddyEffortForRequest(model: string, requested?: string): string | undefined {
+    const entry = catalogCache?.models.find(candidate => candidate.id === model);
+    if (entry === undefined) return requested;
+    if (entry.reasoningEfforts.length === 0) return undefined;
+    for (const candidate of [requested, entry.defaultReasoningEffort ?? undefined]) {
+        if (candidate !== undefined && candidate !== null && entry.reasoningEfforts.includes(candidate)) {
+            return candidate;
+        }
+    }
+    return undefined;
+}
+/**
+ * 某个模型在这个区实际服务的输出上限；目录未给出时返回 undefined。
+ *
+ * 用它替代通用上限：按模型名推断出的数字要么过早截断，要么高过服务真正接受的值。
+ */
+export function workBuddyMaxOutputTokens(model: string): number | undefined {
+    return catalogCache?.models.find(entry => entry.id === model)?.maxTokens;
+}

@@ -138,6 +138,7 @@ const validators: Record<WebViewMessage['type'], MessageValidator> = {
     kimiLogout: noFields,
     workbuddyLogin: fields({ region: isOneOf(['cn', 'intl'] as const) }),
     workbuddyRefreshAccounts: noFields,
+    workbuddyCheckin: noFields,
     minimaxCodeLogin: noFields,
     minimaxCodeLogout: noFields,
     claudeSubscriptionLogin: noFields,

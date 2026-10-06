@@ -379,6 +379,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
     let settingsCommandCodeAccount: any = undefined;
 let settingsKimiAccount: any = undefined;
 let settingsWorkBuddyAccount: any = undefined;
+let settingsWorkBuddyCheckin: any = undefined;
 let settingsMinimaxCodeAccount: any = undefined;
 let settingsClaudeSubscriptionAccount: any = undefined;
 // One pool view per subscription line, keyed by provider id: the settings form
@@ -3045,6 +3046,9 @@ let settingsSubscriptionPools: Record<string, any> = {};
     });
     bindBtn('workbuddyRefreshBtn', () => {
         vscode.postMessage({ type: 'workbuddyRefreshAccounts' });
+    });
+    bindBtn('workbuddyCheckinBtn', () => {
+        vscode.postMessage({ type: 'workbuddyCheckin' });
     });
     bindBtn('minimaxCodeLoginBtn', () => {
         vscode.postMessage({ type: 'minimaxCodeLogin' });
@@ -7058,6 +7062,7 @@ let settingsSubscriptionPools: Record<string, any> = {};
                 settingsCommandCodeAccount = msg.commandcodeAccount;
         settingsKimiAccount = msg.kimiAccount;
         settingsWorkBuddyAccount = msg.workbuddyAccount;
+        settingsWorkBuddyCheckin = msg.workbuddyCheckin;
         settingsMinimaxCodeAccount = msg.minimaxCodeAccount;
         settingsClaudeSubscriptionAccount = msg.claudeSubscriptionAccount;
         settingsSubscriptionPools = msg.subscriptionPools ?? {};
@@ -8652,6 +8657,30 @@ let settingsSubscriptionPools: Record<string, any> = {};
                         '未找到 WorkBuddy 账号。请先登录 CodeBuddy 桌面端，或使用上方按钮登录。',
                     ));
                     accountStatus.style.color = '#ff9800';
+                }
+            }
+            // The check-in status lives with the account it belongs to: the credit it
+            // claims is per account, and "signed in" for a line with no activity would be
+            // claiming something that never happened.
+            {
+                const checkin = document.getElementById('workbuddyCheckinStatus');
+                if (checkin) {
+                    const summary = settingsWorkBuddyCheckin;
+                    if (!summary || summary.accountCount === 0) {
+                        checkin.textContent = tr(
+                            'No China-region account to check in.',
+                            '没有可签到的国区账号。',
+                        );
+                    } else if (summary.signedInToday) {
+                        checkin.textContent = tr(
+                            `Checked in today · ${summary.signedInCount} of ${summary.accountCount} account(s).`,
+                            `今日已签到 · ${summary.accountCount} 个账号中 ${summary.signedInCount} 个已领取。`,
+                        );
+                    } else {
+                        checkin.textContent = summary.lastError
+                            ? tr(`Check-in pending: ${summary.lastError}`, `签到待重试：${summary.lastError}`)
+                            : tr('Not checked in today yet.', '今日尚未签到。');
+                    }
                 }
             }
             refreshSettingsOverview();

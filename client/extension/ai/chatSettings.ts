@@ -611,6 +611,9 @@ export class ChatSettingsManager {
             commandcodeAccount,
             kimiAccount,
             workbuddyAccount: workBuddyAccount,
+            workbuddyCheckin: showPanel || config.provider === 'workbuddy-subscription'
+                ? this.aiService.getWorkBuddyCheckinService().summary()
+                : undefined,
             minimaxCodeAccount,
             claudeSubscriptionAccount,
             subscriptionPools,
@@ -1406,6 +1409,24 @@ export class ChatSettingsManager {
     /** Re-scan desktop accounts and re-render the WorkBuddy card. */
     async refreshWorkBuddyAccounts(targetSurface: 'chat' | 'manager' = 'chat'): Promise<void> {
         await this.buildAndSendSettingsData(true, targetSurface);
+    }
+
+    /**
+     * Run the day's WorkBuddy check-in now.
+     *
+     * A manual pass deliberately ignores the daily attempt cap - the user asked for it - but
+     * it is queued behind an in-flight run rather than merged into it, because a check-in is
+     * a once-a-day credit action and a duplicate submit is just a wasted round trip.
+     */
+    async runWorkBuddyCheckin(targetSurface: 'chat' | 'manager' = 'chat'): Promise<void> {
+        const service = this.aiService.getWorkBuddyCheckinService();
+        await service.run();
+        await this.buildAndSendSettingsData(true, targetSurface);
+        this.postMessage({
+            type: 'testConnectionResult',
+            ok: true,
+            message: aiText('WorkBuddy check-in finished.', 'WorkBuddy 签到已执行。'),
+        });
     }
 
     /**

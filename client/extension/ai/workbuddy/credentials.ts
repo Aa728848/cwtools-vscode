@@ -20,6 +20,7 @@ import {
     workBuddyRegionForDomain,
     type WorkBuddyRegion,
 } from './types';
+import { withResolvedIdentity } from './identity';
 
 /** SecretStorage 里托管账号的键。 */
 export const WORKBUDDY_SECRET_KEY = 'cwtools.ai.workbuddy.credentials.v1';
@@ -67,7 +68,13 @@ function asNumber(value: unknown): number | undefined {
     return undefined;
 }
 
-/** 解析一个凭据对象（桌面端 `auth` 块或托管存储），形状不合法时返回 undefined。 */
+/**
+ * 解析一个凭据对象（桌面端 `auth` 块或托管存储），形状不合法时返回 undefined。
+ *
+ * 令牌里的 `sub` 是账号的 uid，因此解析完成后立刻回填身份事实（见 `identity.ts`）。这必须
+ * 发生在**身份键被计算之前**：否则凭据只有在 `/v2/plugin/account` 成功时才带上 uid，同一个
+ * 账号会以 `name:<域>:<昵称>` 和 `uid:<uuid>` 各存一行。
+ */
 export function parseWorkBuddyCredentials(
     value: unknown,
     source: WorkBuddyCredentialSource,
@@ -83,7 +90,10 @@ export function parseWorkBuddyCredentials(
     const expiresAt = asNumber(auth.expiresAt) ?? asNumber(auth.expires_at)
         ?? (expiresIn === undefined ? 0 : Date.now() + expiresIn * 1000);
     const account = isRecord(value.account) ? value.account : isRecord(auth.account) ? auth.account : {};
-    return {
+    // The token's `sub` is the account's uid. Resolving it HERE - before any caller can
+    // compute the account key - is what keeps one account from being stored twice, once
+    // under a display name and once under its uid.
+    return withResolvedIdentity({
         accessToken,
         refreshToken: asString(auth.refreshToken) ?? asString(auth.refresh_token) ?? '',
         expiresAt,
@@ -98,7 +108,7 @@ export function parseWorkBuddyCredentials(
         source,
         sourceFile,
         sourceMtimeMs,
-    };
+    });
 }
 
 /**

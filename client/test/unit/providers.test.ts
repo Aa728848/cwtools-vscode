@@ -845,7 +845,12 @@ describe('toClaudeRequest', () => {
         const msgs = result.messages as Array<Record<string, unknown>>;
         expect(msgs).to.have.length(1);
         expect(msgs[0]!.role).to.equal('user');
-        expect(msgs[0]!.content).to.equal('Hi');
+        // A plain string becomes a one-block array because the cache breakpoint goes on
+        // the LAST user turn - the one that carries history into the next request.
+        const blocks = msgs[0]!.content as Array<Record<string, unknown>>;
+        expect(blocks).to.have.length(1);
+        expect(blocks[0]!.text).to.equal('Hi');
+        expect(blocks[0]!.cache_control).to.deep.equal({ type: 'ephemeral' });
     });
 
     it('converts assistant text message', () => {

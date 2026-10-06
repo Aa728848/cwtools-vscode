@@ -6,6 +6,7 @@
  */
 
 import { isRecord } from '../../../shared/protocolValidation';
+import { commandCodePlanLabel } from './plans';
 
 export interface CommandCodeWindowLimit {
     used: number;
@@ -18,6 +19,13 @@ export interface CommandCodeCredits {
     monthlyCredits?: number;
     purchasedCredits?: number;
     freeCredits?: number;
+    /**
+     * The three pools summed.
+     *
+     * They are separate allowances, so a user can hold any combination; showing one of
+     * them alone understates the balance they can actually spend.
+     */
+    totalCredits?: number;
     planId?: string;
 }
 
@@ -48,13 +56,18 @@ export interface CommandCodeUser {
 export interface CommandCodeAccountStatus {
     available: boolean;
     hasKey: boolean;
+    /**
+     * The plan's human name.
+     *
+     * Resolved on the host because the table is a Node-side module: the service only ever
+     * reports a machine id (`individual-goat`), which tells the user nothing.
+     */
+    planLabel?: string;
     user?: CommandCodeUser;
     orgId?: string;
     credits?: CommandCodeCredits;
-    windowLimits?: {
-        fiveHour?: CommandCodeWindowLimit;
-        weekly?: CommandCodeWindowLimit;
-    };
+    /** Every window the service names, keyed by its own key. */
+    windowLimits?: Record<string, CommandCodeWindowLimit>;
     usageSummary?: CommandCodeUsageSummary;
     subscription?: CommandCodeSubscription;
     planId?: string;
@@ -122,31 +135,35 @@ export function parseCommandCodeUsageSummary(data: unknown): CommandCodeUsageSum
 
 export function parseCommandCodeCredits(data: unknown): {
     credits?: CommandCodeCredits;
-    windowLimits?: {
-        fiveHour?: CommandCodeWindowLimit;
-        weekly?: CommandCodeWindowLimit;
-    };
+    /** Every window the service names, keyed by its own key. */
+    windowLimits?: Record<string, CommandCodeWindowLimit>;
 } | undefined {
     if (!isRecord(data)) return undefined;
     let credits: CommandCodeCredits | undefined;
     if (isRecord(data.credits)) {
+        const monthlyCredits = finiteNumber(data.credits.monthlyCredits);
+        const purchasedCredits = finiteNumber(data.credits.purchasedCredits);
+        const freeCredits = finiteNumber(data.credits.freeCredits);
+        const parts = [monthlyCredits, purchasedCredits, freeCredits].filter((v): v is number => v !== undefined);
         credits = {
-            monthlyCredits: finiteNumber(data.credits.monthlyCredits),
-            purchasedCredits: finiteNumber(data.credits.purchasedCredits),
-            freeCredits: finiteNumber(data.credits.freeCredits),
+            monthlyCredits,
+            purchasedCredits,
+            freeCredits,
+            ...(parts.length > 0 ? { totalCredits: parts.reduce((sum, value) => sum + value, 0) } : {}),
             planId: typeof data.credits.planId === 'string' ? data.credits.planId : undefined,
         };
     }
-    let windowLimits: { fiveHour?: CommandCodeWindowLimit; weekly?: CommandCodeWindowLimit } | undefined;
+    // The service names its windows, and a plan may meter more than the two the first
+    // reader knew about. Every named window is kept, so a plan that adds one does not
+    // silently show a blank balance.
+    let windowLimits: Record<string, CommandCodeWindowLimit> | undefined;
     if (isRecord(data.windowLimits)) {
-        const fiveHour = parseCommandCodeWindowLimit(data.windowLimits.fiveHour);
-        const weekly = parseCommandCodeWindowLimit(data.windowLimits.weekly);
-        if (fiveHour !== undefined || weekly !== undefined) {
-            windowLimits = {
-                ...(fiveHour !== undefined ? { fiveHour } : {}),
-                ...(weekly !== undefined ? { weekly } : {}),
-            };
+        const parsed: Record<string, CommandCodeWindowLimit> = {};
+        for (const [key, value] of Object.entries(data.windowLimits)) {
+            const limit = parseCommandCodeWindowLimit(value);
+            if (limit !== undefined) parsed[key] = limit;
         }
+        if (Object.keys(parsed).length > 0) windowLimits = parsed;
     }
     return { credits, windowLimits };
 }
@@ -251,6 +268,7 @@ export class CommandCodeAccountService {
         const creditsData = creditsRes.ok ? parseCommandCodeCredits(creditsRes.data) : undefined;
         const subscription = subRes.ok ? parseCommandCodeSubscription(subRes.data) : undefined;
         const planId = subscription?.planId || creditsData?.credits?.planId;
+        const planLabel = commandCodePlanLabel(planId) ?? undefined;
 
         const value: CommandCodeAccountStatus = {
             available: true,
@@ -262,6 +280,7 @@ export class CommandCodeAccountService {
             usageSummary: summary,
             subscription,
             planId,
+            planLabel,
         };
 
         this.cachedStatus = { apiKey, value, at: Date.now() };

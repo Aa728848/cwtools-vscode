@@ -13,6 +13,8 @@ import type {
 import { ErrorReporter } from './errorReporter';
 import { SOURCE, aiText } from './messages';
 import { contentToString, isReasoningEffort } from './types';
+import { sanitizeOutboundText } from './outboundText';
+import { stripToolMetaSchema } from './toolSchemaOutbound';
 
 // Import core settings and capabilities from partitioned sub-modules
 import { BUILTIN_PROVIDERS } from './providers/models/defaults';
@@ -1094,7 +1096,9 @@ function toClaudeContentBlocks(content: ContentPart[]): Array<Record<string, unk
     const blocks: Array<Record<string, unknown>> = [];
     for (const part of content) {
         if (part.type === 'text') {
-            if (part.text) blocks.push({ type: 'text', text: part.text });
+            // A NUL or an unpaired surrogate makes the whole body invalid JSON, and it
+            // stays in history, so it would fail every later request the same way.
+            if (part.text) blocks.push({ type: 'text', text: sanitizeOutboundText(part.text) });
             continue;
         }
         const url = part.image_url.url;
@@ -1247,7 +1251,9 @@ export function toClaudeRequest(
     const claudeTools = request.tools?.map(t => ({
         name: t.function.name,
         description: t.function.description,
-        input_schema: t.function.parameters,
+        // `$schema` is a meta-key about the schema itself, not a parameter, and several
+        // gateways reject a tool definition that carries one.
+        input_schema: stripToolMetaSchema(t.function.parameters),
         cache_control: undefined as any
     }));
 
@@ -1288,15 +1294,17 @@ export function toClaudeRequest(
         }
     }
 
-    // breakpoint 4: 滚动历史前缀。在 claudeMessages 倒数第二条 user 消息（非最新 user 消息）上打 breakpoint
+    // breakpoint 4: 滚动历史前缀。打在**最后一条 user 消息**的最后一个块上。
+    //
+    // 断点必须落在把历史带到下一轮的那个位置上：打在倒数第二条上，下一轮它就变成了最后一条，
+    // 于是那一整段历史被当成新输入重新计费——缓存命中率为零而看不出任何异常。
     if (enableCacheControl) {
-        let userCount = 0;
         for (let i = claudeMessages.length - 1; i >= 0; i--) {
             const m = claudeMessages[i];
             if (m && m.role === 'user') {
-                userCount++;
-                // 倒数第二条 user 消息，且其索引必须大于 recoveryIdx（避免与 breakpoint 3 碰撞）
-                if (userCount === 2 && i > recoveryIdx) {
+                // Skip the one breakpoint 3 already claimed, so a recovery marker does not
+                // end up carrying two.
+                if (i !== recoveryIdx) {
                     if (typeof m.content === 'string') {
                         m.content = [
                             {

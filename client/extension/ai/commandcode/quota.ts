@@ -41,7 +41,8 @@ export function commandCodeQuotaFromStatus(status: CommandCodeAccountStatus): Su
     if (credits !== undefined) {
         // A bare balance with no stated cap is still worth one meter, so it is drawn
         // as a value rather than as a fraction of an amount we were not told.
-        const balance = credits.monthlyCredits ?? credits.purchasedCredits ?? credits.freeCredits;
+        // The three pools are additive, so the spendable balance is their sum.
+        const balance = credits.totalCredits ?? credits.monthlyCredits ?? credits.purchasedCredits ?? credits.freeCredits;
         if (typeof balance === 'number' && Number.isFinite(balance)) {
             windows.push({ id: 'credits', label: 'Remaining credits', used: String(balance) });
         }

@@ -52,7 +52,7 @@ import {
 } from './codex/modelCatalog';
 import { CodexTurnStateTracker } from './codex/turnState';
 import { CommandCodeOAuthService } from './commandcode/oauthService';
-import { commandCodeWantsCompletionTokens } from './commandcode/modelCapabilities';
+import { commandCodeModelDef, commandCodeWantsCompletionTokens } from './commandcode/modelCapabilities';
 import { offloadAntigravityRequestImages } from './antigravity/imageBudget';
 import { imageBudgetForProvider, offloadRequestImages } from './requestImageBudget';
 import { enforceRequestImageEdge } from './requestImageEdge';
@@ -260,6 +260,22 @@ function assertKimiCodeRequestSize(providerId: string, payload: string): void {
     ));
 }
 
+/**
+ * 一个请求的输出上限。
+ *
+ * 通用表之外，有两条线路的**逐模型**上限才是真的：WorkBuddy 的网关目录公布每个模型真实的
+ * 输出上限，Command Code 的注册表逐条转录了观测到的值。按通用值发，答案要么在服务端被截断
+ * （上限低于通用值），要么按一个模型并不接受的额度请求。
+ */
+function subscriptionOutputCap(providerId: string, model: string): number {
+    if (providerId === 'workbuddy-subscription') {
+        return workBuddyMaxOutputTokens(model) ?? getModelOutputTokens(model, providerId);
+    }
+    if (providerId === 'commandcode' || providerId === 'commandcode-messages') {
+        return commandCodeModelDef(model)?.maxTokens ?? getModelOutputTokens(model, providerId);
+    }
+    return getModelOutputTokens(model, providerId);
+}
 /**
  * Read an upstream `Retry-After` as milliseconds.
  *
@@ -1522,15 +1538,12 @@ export class AIService {
             // The output-cap FIELD is not universal: the Command Code GPT family takes
             // `max_completion_tokens` and rejects the legacy `max_tokens` outright, so
             // the choice follows the model id rather than the provider.
-            // The WorkBuddy catalog publishes each model's real output ceiling. A request
-            // capped above it truncates the answer, and a model whose ceiling is LOWER than
-            // the generic value is worse: the answer is cut at the server, silently.
-            max_tokens: options?.maxTokens ?? (providerId === 'workbuddy-subscription'
-                ? workBuddyMaxOutputTokens(model) ?? getModelOutputTokens(model, providerId)
-                : getModelOutputTokens(model, providerId)),
+            // The output-cap FIELD is not universal: the Command Code GPT family takes
+            // `max_completion_tokens` and rejects the legacy `max_tokens` outright, so the
+            // choice follows the model id rather than the provider.
             ...(commandCodeWantsCompletionTokens(model) && (providerId === 'commandcode' || providerId === 'commandcode-messages')
-                ? { max_completion_tokens: options?.maxTokens ?? getModelOutputTokens(model, providerId) }
-                : { max_tokens: options?.maxTokens ?? getModelOutputTokens(model, providerId) }),
+                ? { max_completion_tokens: options?.maxTokens ?? subscriptionOutputCap(providerId, model) }
+                : { max_tokens: options?.maxTokens ?? subscriptionOutputCap(providerId, model) }),
             stream: false,
             response_verbosity: providerId === 'codex-chatgpt' && responseVerbosity !== 'default'
                 ? responseVerbosity

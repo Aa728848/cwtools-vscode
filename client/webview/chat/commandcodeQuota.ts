@@ -90,7 +90,10 @@ export function buildCommandCodeQuotaHtml(
     const sub = isRecord(account.subscription) ? account.subscription : undefined;
     const subPlan = typeof sub?.planId === 'string' ? sub.planId.trim() : '';
     const subStatus = typeof sub?.status === 'string' ? sub.status.trim() : '';
-    const effectivePlan = planId || subPlan;
+    // The host already resolved the plan's human name; the raw machine id is the fallback
+    // rather than the primary, because `individual-goat` tells a user nothing.
+    const planLabel = typeof account.planLabel === 'string' ? account.planLabel.trim() : '';
+    const effectivePlan = planLabel || planId || subPlan;
     if (effectivePlan || subStatus) {
         const planDisplay = [effectivePlan, subStatus].filter(Boolean).join(' · ');
         items.push(

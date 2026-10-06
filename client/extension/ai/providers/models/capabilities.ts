@@ -396,6 +396,7 @@ export const MODEL_CONTEXT_TOKENS: Record<string, number> = {
     // a compaction, so the entitlement is the number the local budget has to use; 1M is
     // the Allegretto unlock behind a deliberate override.
     'kimi-code-plan:k3': 262144,
+    'kimi-code-plan:k3-256k': 262144,
     'kimi-code-plan:kimi-for-coding-highspeed': 262144,
     ...Object.fromEntries(ANTIGRAVITY_MODELS.map(model => [`antigravity:${model}`, antigravityContextTokens(model)])),
     ...Object.fromEntries(CODEX_CHATGPT_MODELS.map(model => [

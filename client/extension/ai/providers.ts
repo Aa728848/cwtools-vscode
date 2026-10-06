@@ -984,6 +984,24 @@ const THINKING_RULES: ThinkingRule[] = [
 
     // Kimi K3 exposes named effort levels through the reasoning_effort field.
     { providers: ['kimi', 'kimi-code-plan'], model: /(?:^|\/)(?:kimi-)?k3(?:-|$)/, build: ctx => ({ reasoningEffort: kimiK3Effort(ctx.requested) }) },
+{
+    // Scoped to the models that reason BY DEFAULT. k3 already has its own rule that
+    // narrows the effort for this line's three-rung wire, and a provider-wide rule would
+    // shadow it.
+    providers: ['kimi', 'kimi-code-plan'],
+    // Matched against the NORMALIZED name (modelName strips a `kimi-` prefix), so the
+    // ids appear here as the service spells them. A loose pattern also caught unrelated
+    // Kimi families (k2.6, k2.7-code) that have their own rules further down.
+    model: /^for-coding(-highspeed)?$/,
+    build: ctx => ({
+        // `keep: "all"` is the official CLI's default and the reason the service echoes
+        // reasoning back on the next turn. Without it the chain is dropped and the
+        // following tool turn is rejected for a missing reasoning field.
+        extraBody: { thinking: { type: 'enabled', keep: 'all' } },
+        reasoningEffort: kimiK3Effort(ctx.requested),
+    }),
+},
+
 
     // MiniMax M3 exposes adaptive on/off control, but no named effort levels.
     { providers: ['minimax', 'minimax-token-plan', 'opencode', 'opencode-go'], model: /(?:^|\/)minimax-m3(?:-|$)/, build: () => ({ extraBody: { thinking: { type: 'adaptive' } } }) },

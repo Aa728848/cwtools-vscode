@@ -75,6 +75,8 @@ import { fetchClaudeSubscriptionQuota } from './claudesub/quota';
 import { commandCodeQuotaFromStatus } from './commandcode/quota';
 import { fetchMinimaxCodeQuota } from './minimaxcode/quota';
 import { fetchKimiQuota } from './kimi/quota';
+import { identityFromKimiToken } from './kimi/identity';
+import { getCachedKimiCatalog, loadKimiCatalog, type KimiCodeCatalogModel } from './kimi/catalog';
 import { codexQuotaFromRateLimits } from './codex/quota';
 import {
     MinimaxCodeCredentialStore,
@@ -613,9 +615,17 @@ export class AIService {
                 await this.kimiCodeTokens.save(token);
                 // Joining the pool is what makes a second sign-in a second account
                 // rather than a replacement; the dedupe key keeps a repeat sign-in
-                // on the same row.
+                // on the same row. The key comes from the token because Kimi has no
+                // profile endpoint: without it every re-sign-in is a NEW row and the
+                // alias is only "Account N".
+                const identity = identityFromKimiToken(token.accessToken);
+                const alias = identity.email ?? identity.userId;
                 await this.subscriptionPools
-                    .addAccount('kimi-code-plan', token as unknown as PooledOAuthCredentials)
+                    .addAccount(
+                        'kimi-code-plan',
+                        { ...token, ...identity } as unknown as PooledOAuthCredentials,
+                        alias,
+                    )
                     .catch(() => undefined);
             },
             openBrowser: url => { void vs.env.openExternal(vs.Uri.parse(url)); },
@@ -969,6 +979,25 @@ export class AIService {
 
     getSubscriptionPoolRegistry(): SubscriptionPoolRegistry {
         return this.subscriptionPools;
+    }
+
+    /**
+     * The models this Kimi account may call, from the service's own listing.
+     *
+     * Read with the account the request path would use, because the listing is
+     * **per account**: another account's answer would offer models this plan cannot call.
+     * An unsigned-in or unreadable case yields the shipped table rather than an empty list.
+     */
+    async listKimiCodeModels(): Promise<readonly KimiCodeCatalogModel[]> {
+        const selected = await this.subscriptionPools.select('kimi-code-plan').catch(() => undefined);
+        if (selected === undefined) return getCachedKimiCatalog() ?? [];
+        return await loadKimiCatalog({
+            codingBase: getEffectiveEndpoint('kimi-code-plan', this.getEndpointForProvider('kimi-code-plan'))
+                .replace(/\/v1\/?$/, ''),
+            headers: { authorization: 'Bearer ' + selected.credentials.accessToken, accept: 'application/json' },
+            accountKey: selected.accountId,
+            fetchFn: this.subscriptionProxy.fetch,
+        });
     }
 
     getWorkBuddyCheckinService(): WorkBuddyCheckinService {

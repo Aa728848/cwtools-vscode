@@ -30,8 +30,9 @@ function loadProviders() {
 describe('provider thinking params', () => {
     it('exposes every current Kimi Code Plan model', () => {
         const { BUILTIN_PROVIDERS, getModelOutputTokens } = loadProviders();
+        // k3-256k is a served model; leaving it out made it unreachable.
         expect(BUILTIN_PROVIDERS['kimi-code-plan']!.models)
-            .to.deep.equal(['k3', 'kimi-for-coding', 'kimi-for-coding-highspeed']);
+            .to.deep.equal(['k3', 'k3-256k', 'kimi-for-coding', 'kimi-for-coding-highspeed']);
         expect(getModelOutputTokens('k3', 'kimi-code-plan')).to.equal(131072);
     });
 

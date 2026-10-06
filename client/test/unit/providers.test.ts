@@ -1189,7 +1189,8 @@ describe('BUILTIN_PROVIDERS', () => {
         const plan = BUILTIN_PROVIDERS['kimi-code-plan']!;
         expect(plan.endpoint).to.equal('https://api.kimi.com/coding/v1');
         expect(plan.defaultModel).to.equal('kimi-for-coding');
-        expect(plan.models).to.deep.equal(['k3', 'kimi-for-coding', 'kimi-for-coding-highspeed']);
+        // k3-256k is a served model; leaving it out made it unreachable.
+        expect(plan.models).to.deep.equal(['k3', 'k3-256k', 'kimi-for-coding', 'kimi-for-coding-highspeed']);
         expect(plan.isOpenAICompatible).to.equal(true);
         expect(ALWAYS_THINKING_PREFIXES).to.include('kimi-for-coding');
         expect(isModelVisionCapable('kimi-for-coding')).to.equal(true);

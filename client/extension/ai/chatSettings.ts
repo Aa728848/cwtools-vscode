@@ -48,6 +48,14 @@ import {
     parseAdvertisedReasoningCapability,
 } from './providers';
 
+/**
+ * 读取当前 Kimi 账号的实时模型目录。
+ *
+ * 读不到就返回空数组：设置页随后用随包发出的表作答，一份读不到的目录不该让选择器变空。
+ */
+async function loadKimiCodeCatalog(aiService: AIService) {
+    return await aiService.listKimiCodeModels().catch(() => []);
+}
 const execAsync = promisify(cp.exec);
 
 type PostMessageFn = (msg: HostMessage) => void;
@@ -372,6 +380,12 @@ export class ChatSettingsManager {
                 fetchFn: this.aiService.getSubscriptionProxyService().fetch,
             }).catch(() => []))
             : {};
+        // The live listing is the authority on what this Kimi account may call, so it
+        // fills BOTH the model list and the per-model window. The shipped table cannot
+        // know about a model added after release, nor which ones this plan unlocks.
+        const kimiCatalog = showPanel || config.provider === 'kimi-code-plan'
+            ? await loadKimiCodeCatalog(this.aiService)
+            : [];
 
         // Every line's pool travels in one payload, keyed by the line's own id.
         //
@@ -585,6 +599,9 @@ export class ChatSettingsManager {
                     Object.entries(commandCodeWindows).map(
                         ([model, window]) => [`commandcode:${model}`, window],
                     ),
+                ),
+                ...Object.fromEntries(
+                    kimiCatalog.map(model => [`kimi-code-plan:${model.id}`, model.contextWindow]),
                 ),
                 ...Object.fromEntries(
                     Object.entries(workBuddyWindows).map(

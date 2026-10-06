@@ -665,7 +665,12 @@ export class AIService {
                         // their own file by the refresh call rather than mirrored.
                         fetchFn: this.subscriptionProxy.fetch,
                     },
-                    seed: async () => scanMinimaxCodeDesktopCredentials() as unknown as PooledOAuthCredentials[],
+                    // Both sources, for the same reason as WorkBuddy: a managed
+                    // device-code sign-in is a real account and must be scheduled.
+                    seed: async () => mergeMinimaxCodeCredentials(
+                        scanMinimaxCodeDesktopCredentials(),
+                        await this.minimaxCodeCredentials.readManaged(),
+                    ) as unknown as PooledOAuthCredentials[],
                 };
             case 'workbuddy-subscription':
                 return {
@@ -692,16 +697,24 @@ export class AIService {
                         },
                         fetchFn: this.subscriptionProxy.fetch,
                     },
-                    seed: async () => scanWorkBuddyDesktopCredentials()
-                        .filter(credentials => !hiddenWorkBuddy.has(workBuddyAccountKey(credentials)))
-                        .map(credentials => ({
-                            ...credentials,
-                            // The pool stores a stable domain/region with the
-                            // credential: a model asked of the wrong region is a 400.
-                            domain: credentials.domain,
-                            backend: credentials.backend,
-                            region: credentials.region,
-                        })) as unknown as PooledOAuthCredentials[],
+                    // Seeding must cover BOTH credential sources. Scanning only the
+                    // desktop files leaves a plugin-managed sign-in out of the pool
+                    // entirely, so a managed-only setup reads as an empty pool and
+                    // the account the card shows is never scheduled.
+                    seed: async () => {
+                        const desktop = scanWorkBuddyDesktopCredentials()
+                            .filter(credentials => !hiddenWorkBuddy.has(workBuddyAccountKey(credentials)));
+                        const managed = await this.workBuddyCredentials.readManaged();
+                        return mergeWorkBuddyAccounts(desktop, managed)
+                            .map(credentials => ({
+                                ...credentials,
+                                // The pool stores a stable domain/region with the
+                                // credential: a model asked of the wrong region is a 400.
+                                domain: credentials.domain,
+                                backend: credentials.backend,
+                                region: credentials.region,
+                            })) as unknown as PooledOAuthCredentials[];
+                    },
                 };
             case 'kimi-code-plan':
                 return {

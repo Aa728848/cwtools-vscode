@@ -8703,7 +8703,8 @@ let settingsSubscriptionPool: any = undefined;
         const group = document.getElementById('subscriptionPoolGroup');
         const pool = settingsSubscriptionPool;
         const accounts: any[] = Array.isArray(pool?.accounts) ? pool.accounts : [];
-        // One account is not a pool worth managing; hide the whole section then.
+        // Hidden only when the line has no accounts at all: with one account the
+        // section still tells the user it is scheduled and which strategy applies.
         if (!pool || accounts.length === 0) {
             if (group) group.style.display = 'none';
             return;

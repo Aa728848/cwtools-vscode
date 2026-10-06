@@ -390,6 +390,13 @@ export const MODEL_CONTEXT_TOKENS: Record<string, number> = {
     'codex-chatgpt:gpt-6-sol': CODEX_CHATGPT_EFFECTIVE_CONTEXT_TOKENS,
     'codex-chatgpt:gpt-6-luna': CODEX_CHATGPT_EFFECTIVE_CONTEXT_TOKENS,
     'codex-chatgpt:gpt-5.6': CODEX_CHATGPT_CONTEXT_TOKENS,
+    // Kimi Code's k3 serves a 1M window, but the plan's entitlement on the Moderato
+    // tier is 256K and the service answers **401** past it - not a truncation and not a
+    // 400. Budgeting at 1M therefore turns a long session into a hard failure instead of
+    // a compaction, so the entitlement is the number the local budget has to use; 1M is
+    // the Allegretto unlock behind a deliberate override.
+    'kimi-code-plan:k3': 262144,
+    'kimi-code-plan:kimi-for-coding-highspeed': 262144,
     ...Object.fromEntries(ANTIGRAVITY_MODELS.map(model => [`antigravity:${model}`, antigravityContextTokens(model)])),
     ...Object.fromEntries(CODEX_CHATGPT_MODELS.map(model => [
         `codex-chatgpt:${model}`,

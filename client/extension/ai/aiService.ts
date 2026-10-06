@@ -43,7 +43,7 @@ import {
 import { DEFAULT_REASONING_KEY, detectReasoningKey, KNOWN_REASONING_KEYS, reasoningValue } from './providers/reasoningKey';
 import { ErrorReporter } from './errorReporter';
 import { SOURCE, aiText } from './messages';
-import { ChatGptOAuthService, codexSubscriptionHeaders } from './codex/oauthService';
+import { ChatGptOAuthService, codexSubscriptionHeaders, codexWireReasoningEffort } from './codex/oauthService';
 import {
     CODEX_OPENAI_BETA,
     CODEX_TURN_STATE_HEADER,
@@ -51,6 +51,7 @@ import {
 } from './codex/modelCatalog';
 import { CodexTurnStateTracker } from './codex/turnState';
 import { CommandCodeOAuthService } from './commandcode/oauthService';
+import { commandCodeWantsCompletionTokens } from './commandcode/modelCapabilities';
 import { offloadAntigravityRequestImages } from './antigravity/imageBudget';
 import { KimiCodeOAuthService, kimiIdentityHeaders, readOrCreateKimiDeviceId, KIMI_REGION_OAUTH_HOSTS } from './kimi/oauthService';
 import { KimiCodeTokenStore, KimiUnauthorizedError, type KimiCredentials } from './kimi/tokenStore';
@@ -81,7 +82,7 @@ import {
     MinimaxCodeOAuthService,
     refreshMinimaxCodeCredentials,
 } from './minimaxcode/oauthService';
-import { MINIMAX_CODE_AGENT_LLM_PREFIX, type MinimaxCodeRegion } from './minimaxcode/types';
+import { MINIMAX_CODE_AGENT_LLM_PREFIX, MINIMAX_CODE_PRE_EXPIRY_REFRESH_MS, type MinimaxCodeRegion } from './minimaxcode/types';
 import {
     SubscriptionPoolRegistry,
     type SubscriptionPoolEntry,
@@ -219,6 +220,36 @@ const SUBSCRIPTION_POOL_PROVIDER_IDS = [
 function requiresReasoningOnEveryAssistantMessage(providerId: string, model: string): boolean {
     if (providerId !== 'kimi-code-plan') return false;
     return /(?:^|\/)(?:kimi-)?k3(?:-|$)/i.test(model.trim());
+}
+
+/**
+ * Message-body ceiling for one Kimi Code request.
+ *
+ * This is the endpoint's own documented limit: an oversized request is refused with
+ * `total message size N exceeds limit 2097152`, which is the most common 400 on the route.
+ * The bound is checked locally so the user gets an actionable message instead of a 400 they
+ * cannot act on — image bytes, conversation text, tool schemas and the system prompt all share
+ * the same budget.
+ *
+ * It is deliberately NOT reused by the MiniMax line, whose own ceiling is far larger; one
+ * line's limit says nothing about another's.
+ */
+const KIMI_CODE_MAX_BODY_BYTES = 2_097_152;
+
+/**
+ * Reject a Kimi Code request that the endpoint would refuse for its size.
+ *
+ * Only this line is bounded: the check belongs to the line that documented the ceiling, and a
+ * blanket body cap would reject a legal request on every other route.
+ */
+function assertKimiCodeRequestSize(providerId: string, payload: string): void {
+    if (providerId !== 'kimi-code-plan') return;
+    const bytes = Buffer.byteLength(payload, 'utf8');
+    if (bytes <= KIMI_CODE_MAX_BODY_BYTES) return;
+    throw new Error(aiText(
+        `This Kimi Code request is ${(bytes / 1024 / 1024).toFixed(1)} MB, over the ${KIMI_CODE_MAX_BODY_BYTES / 1024 / 1024} MB the Kimi Code endpoint accepts. Remove or shrink attached images, start a new topic, or switch to a provider with a larger request budget.`,
+        `本次 Kimi Code 请求为 ${(bytes / 1024 / 1024).toFixed(1)} MB，超过该端点允许的 ${KIMI_CODE_MAX_BODY_BYTES / 1024 / 1024} MB。请删除或缩小附件图片、开启新话题，或改用请求预算更大的供应商。`,
+    ));
 }
 
 /**
@@ -678,6 +709,11 @@ export class AIService {
                         displayName: 'MiniMax Code',
                         parseCredentials: minimaxCodePoolCredentials as (v: unknown) => PooledOAuthCredentials | undefined,
                         identityKey: c => minimaxCodePoolIdentityKey(c as never),
+                        // The access token lives about an hour. Without the margin the
+                        // kernel would only rotate once the service has already refused
+                        // it, so the boundary turned into a failed turn rather than a
+                        // transparent rotation.
+                        refreshMarginMs: MINIMAX_CODE_PRE_EXPIRY_REFRESH_MS,
                         defaultAlias: (c, position) => {
                             const creds = c as never as { region?: string; sourceFile?: string };
                             return creds.sourceFile ? 'Desktop account' : ('Account ' + position);
@@ -1417,9 +1453,15 @@ export class AIService {
             tool_choice: options?.tools && options.tools.length > 0 ? 'auto' : undefined,
             temperature: getEffectiveTemperature(model, options?.temperature),
             // M5 Fix: dynamically set maxTokens based on model/provider.
-            // Reasoning models (like DeepSeek-R1) generate >20K thinking tokens 
+            // Reasoning models (like DeepSeek-R1) generate >20K thinking tokens
             // and will self-truncate if capped at 8192.
-            max_tokens: options?.maxTokens ?? getModelOutputTokens(model, providerId),
+            //
+            // The output-cap FIELD is not universal: the Command Code GPT family takes
+            // `max_completion_tokens` and rejects the legacy `max_tokens` outright, so
+            // the choice follows the model id rather than the provider.
+            ...(commandCodeWantsCompletionTokens(model) && (providerId === 'commandcode' || providerId === 'commandcode-messages')
+                ? { max_completion_tokens: options?.maxTokens ?? getModelOutputTokens(model, providerId) }
+                : { max_tokens: options?.maxTokens ?? getModelOutputTokens(model, providerId) }),
             stream: false,
             response_verbosity: providerId === 'codex-chatgpt' && responseVerbosity !== 'default'
                 ? responseVerbosity
@@ -1494,7 +1536,10 @@ export class AIService {
                     return await this.callGeminiGenerateContent(requestEndpoint, apiKey, requestBody, providerId, controller, options?.onTextDelta, options?.onToolCallDelta, options?.onThinking);
                 }
                 if (effectiveApiFormat === 'anthropic-messages') {
-                    return await this.callClaude(requestEndpoint, apiKey, requestBody, controller, options?.onThinking, options?.onTextDelta, options?.onToolCallDelta, providerId, claudeSubscriptionCredentials, claudeSubscriptionAccountId);
+                    // The account id is carried for every pooled Anthropic-route line, not
+                    // only the Claude subscription: it is what lets a 429 cool the exact
+                    // account and a 401 force one rotation against it.
+                    return await this.callClaude(requestEndpoint, apiKey, requestBody, controller, options?.onThinking, options?.onTextDelta, options?.onToolCallDelta, providerId, claudeSubscriptionCredentials, claudeSubscriptionAccountId ?? subscriptionAccountId);
                 }
                 if (provider.supportsStreaming) {
                     return await this.callOpenAICompatibleStreaming(requestEndpoint, apiKey, { ...requestBody, stream: true }, providerId, options?.onThinking, controller, options?.onTextDelta, options?.onToolCallDelta, config.reasoningKey, subscriptionAccountId);
@@ -2054,6 +2099,9 @@ export class AIService {
         };
 
         const requestPayload = this.sanitizeRequest(providerId, request) as ChatCompletionRequest & Record<string, unknown>;
+        // The Kimi Code endpoint refuses an oversized body with a 400 the user cannot
+        // act on; catching it here turns that into an actionable local message.
+        assertKimiCodeRequestSize(providerId, JSON.stringify(requestPayload));
         const send = () => this.fetchWithRetry(url, {
             method: 'POST',
             headers: this.withSubscriptionIdentityHeaders(providerId, headers),
@@ -2104,6 +2152,12 @@ export class AIService {
         };
 
         const requestPayload = this.sanitizeRequest(providerId, { ...request, stream: true }) as ChatCompletionRequest & Record<string, unknown>;
+
+        if (shouldRequestStreamUsage(providerId, request.model, endpoint)) {
+            requestPayload.stream_options = { include_usage: true };
+        }
+        // Same local size guard as the non-streaming path (see above).
+        assertKimiCodeRequestSize(providerId, JSON.stringify(requestPayload));
         
         // Inject stream_options for providers that need it to return usage in streams.
         // OpenAI, DeepSeek, GLM, Qwen require it. We omit it for minimax (strict schema).
@@ -2420,9 +2474,15 @@ export class AIService {
             if (options?.fastPath) payload.parallel_tool_calls = true;
         }
         const reasoningSummary = options?.fastPath ? options.reasoningSummary : undefined;
-        if (request.reasoning_effort || reasoningSummary) {
+        // The picker already omits an effort the family rejects; this is the wire-level
+        // guard for a session that still carries one (started on an older model, or a
+        // hand-edited setting), where the endpoint would refuse the request outright.
+        const wireEffort = request.reasoning_effort
+            ? codexWireReasoningEffort(request.model, request.reasoning_effort)
+            : undefined;
+        if (wireEffort || reasoningSummary) {
             payload.reasoning = {
-                ...(request.reasoning_effort ? { effort: request.reasoning_effort } : {}),
+                ...(wireEffort ? { effort: wireEffort } : {}),
                 ...(reasoningSummary ? { summary: reasoningSummary } : {}),
             };
         }
@@ -3524,6 +3584,23 @@ export class AIService {
                     || refreshed.accountId !== claudeSubscriptionAccountId)) {
                 claudeSubscriptionCredentials = refreshed.credentials;
                 claudeSubscriptionAccountId = refreshed.accountId;
+                response = await sendClaudeRequest(authMode);
+            }
+        }
+        if (providerId === 'minimax-code'
+            && response.status === 401
+            && subscriptionAccountId !== undefined) {
+            const refusedToken = apiKey;
+            await response.body?.cancel().catch(() => undefined);
+            // The access token lives about an hour and the pool now rotates it before
+            // expiry, so a 401 here means the stored token died early. Force one
+            // rotation against the SAME account first; if that account is genuinely
+            // dead the pool parks it and hands back another eligible one, which is
+            // what makes the replay useful rather than a second failure.
+            const refreshed = await this.getMinimaxCodeCredential(new Set([subscriptionAccountId]), true)
+                .catch(() => undefined);
+            if (refreshed !== undefined && refreshed.credentials.accessToken !== refusedToken) {
+                apiKey = refreshed.credentials.accessToken;
                 response = await sendClaudeRequest(authMode);
             }
         }

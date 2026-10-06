@@ -31,7 +31,7 @@ const LIMITS: Record<RecoveryStormCategory, { count: number; distinctNodes: numb
 
 export function classifyStormFailure(error: string | undefined, output = ''): RecoveryStormCategory | undefined {
     const text = `${error ?? ''}\n${output}`;
-    if (/context(?:_| )length|context window|maximum context|too many tokens/i.test(text)) return 'context_overflow';
+    if (/context(?:_| )length|context window|maximum context|too many tokens|exceeded model token limit/i.test(text)) return 'context_overflow';
     if (/429|rate.?limit|too many requests/i.test(text)) return 'rate_limit';
     if (/socket hang up|ECONNRESET|ETIMEDOUT|unexpected EOF|network|fetch failed|provider unavailable/i.test(text)) return 'provider_transport';
     if (/already stopped|operation stopped|repeatedly refused|permission denied|approval denied/i.test(text)) return 'stopped_operation';

@@ -427,7 +427,17 @@ export function claudeThinkingFor(
         };
     }
     if (model.thinkingMode === 'adaptive') {
-        return { thinking: { type: 'adaptive' } };
+        // 一个把思考绑定到前缀的模型同样需要 block_binding：它会校验重放思考块所依赖的
+        // 前缀，而压缩、工具列表变化或图片降级都会编辑那个前缀。没有它，这类模型在
+        // 任何一次前缀编辑之后都会对每一轮重试都答 400。
+        return {
+            thinking: {
+                type: 'adaptive',
+                ...(model.bindsThinkingToPrefix
+                    ? { block_binding: { prefix_mismatch_behavior: 'drop_block' } }
+                    : {}),
+            },
+        };
     }
     // budget：思考预算计入 max_tokens，所以必须为回答留出至少 1024 token。
     if (requestedEffort === 'none' && model.canDisableThinking) {

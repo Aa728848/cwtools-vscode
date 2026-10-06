@@ -610,9 +610,13 @@ describe('getEffectiveTemperature', () => {
         expect(getEffectiveTemperature('moonshotai/kimi-k2.7-code-highspeed')).to.equal(1.0);
     });
 
-    it('enforces Kimi K3 fixed sampling temperature', () => {
-        expect(getEffectiveTemperature('kimi-k3', 0.2)).to.equal(1.0);
-        expect(getEffectiveTemperature('kimi-for-coding', 0.2)).to.equal(1.0);
+    // The Kimi Code subscription endpoint fixes sampling itself and REJECTS an
+    // explicit value instead of clamping it, so these models must send none at all:
+    // a temperature here costs a 400 round-trip on every single turn.
+    it('sends no sampling parameter on the Kimi Code subscription models', () => {
+        expect(getEffectiveTemperature('kimi-k3', 0.2)).to.equal(undefined);
+        expect(getEffectiveTemperature('k3', 0.2)).to.equal(undefined);
+        expect(getEffectiveTemperature('kimi-for-coding', 0.2)).to.equal(undefined);
     });
 
     it('preserves normal model overrides and defaults', () => {

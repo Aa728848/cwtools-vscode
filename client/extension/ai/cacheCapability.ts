@@ -18,6 +18,10 @@ const ANTHROPIC_BREAKPOINT_PROVIDERS = new Set(['claude', 'minimax-token-plan'])
 const GATEWAY_PROVIDERS = new Set([
     'openrouter', 'siliconflow', 'github', 'together', 'deepinfra', 'opencode', 'opencode-go',
     'commandcode', 'commandcode-messages',
+    // The WorkBuddy gateway serves a standard OpenAI-compatible stream and honours
+    // `stream_options.include_usage`. Without this the line matched no branch at all,
+    // so it was asked for nothing and reported no tokens or cost whatsoever.
+    'workbuddy-subscription',
 ]);
 
 function normalizedEndpointHost(endpoint?: string): string {

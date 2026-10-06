@@ -82,7 +82,10 @@ export function classifyRecoveryError(
         && options.estimatedTokens >= options.contextLimit * 0.75;
     let kind: RecoveryErrorKind = 'unknown';
     if (isAbortError(error)) kind = 'cancelled';
-    else if (/context(?:_| )length|context window|maximum context|too many tokens/i.test(message)
+    // `exceeded model token limit` is Kimi Code's own wording; the subscription route
+    // is the one that answers with it, and without it an overflow is a plain provider
+    // error that fails the turn instead of compacting.
+    else if (/context(?:_| )length|context window|maximum context|too many tokens|exceeded model token limit/i.test(message)
         || (statusCode === 413 && contextNearLimit)) kind = 'context_overflow';
     else if (statusCode === 429 || /rate.?limit|too many requests/i.test(message)) kind = 'rate_limit';
     else if (/terminated|timed? out|timeout|socket hang up|ECONNRESET|ETIMEDOUT|ENOTFOUND|EAI_AGAIN|unexpected EOF|network|fetch failed/i.test(message)) kind = 'transport';

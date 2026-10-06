@@ -78,7 +78,14 @@ describe('Claude subscription model catalog', () => {
         expect(entry.thinkingMode).to.equal('adaptive');
         const thinking = claudeThinkingFor(entry, undefined, undefined);
         expect(thinking.outputConfig).to.equal(undefined);
-        expect(thinking.thinking).to.deep.equal({ type: 'adaptive' });
+        // Opus 5.5 binds thinking to the prefix, so the adaptive form carries
+        // block_binding too: the service validates the prefix a replayed thinking block
+        // depends on, and compaction / a tool-list change / an image offload all edit
+        // it. Without this the model answers 400 on every retry afterwards.
+        expect(thinking.thinking).to.deep.equal({
+            type: 'adaptive',
+            block_binding: { prefix_mismatch_behavior: 'drop_block' },
+        });
     });
 
     // The identity block and block_binding are both mandatory on mid-convo.

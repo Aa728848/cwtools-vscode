@@ -250,8 +250,13 @@ export function getEffectiveTemperature(model: string, requested?: number): numb
     // effort, so sampling is unsupported for them in every request.
     if (isGpt6NoNoneEffortModel(model)) return undefined;
     const lower = model.toLowerCase();
-    if (lower.includes('kimi-k2.7-code') || lower.includes('kimi-k3')
-        || lower === 'k3' || lower.includes('kimi-for-coding')) return 1.0;
+    // The Kimi Code *subscription* endpoint fixes sampling itself and **rejects** an
+    // explicit value instead of clamping it, so any temperature on this route costs a
+    // 400 round-trip every turn. Scoped to the models that route actually serves: the
+    // open-platform `kimi-k2.7-code` is a different service and keeps its fixed value.
+    if (lower.includes('kimi-k3') || lower === 'k3'
+        || lower.includes('kimi-for-coding')) return undefined;
+    if (lower.includes('kimi-k2.7-code')) return 1.0;
     return requested ?? 0.3;
 }
 

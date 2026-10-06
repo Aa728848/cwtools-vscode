@@ -732,6 +732,17 @@ const COMMAND_CODE_BY_ID = new Map(COMMAND_CODE_MODELS.map(model => [model.id, m
 const COMMAND_CODE_FREE_SUFFIX = ':free';
 
 /**
+ * Whether this model takes `max_completion_tokens` rather than the legacy `max_tokens`.
+ *
+ * The GPT family on this line rejects the legacy field outright, so sending it is a 400 on
+ * every request. The id decides, exactly as the rest of this table does — never a provider-level
+ * guess.
+ */
+export function commandCodeWantsCompletionTokens(modelId: string): boolean {
+    return /^(?:gpt-5|gpt-6|o[1-9])/i.test(modelId.trim());
+}
+
+/**
  * 某个模型 id 的注册表条目；未描述该模型时返回 undefined。
  *
  * 精确 id 优先；未命中时按免费档后缀重试一次（见 {@link COMMAND_CODE_FREE_SUFFIX}）。

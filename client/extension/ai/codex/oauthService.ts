@@ -5,6 +5,7 @@ import type {
     CodexAccountStatus,
     CodexRateLimitBucket,
     CodexRateLimitWindow,
+    ReasoningEffort,
 } from '../types';
 import { aiText } from '../messages';
 import {
@@ -239,6 +240,19 @@ function closeCallbackServer(server: http.Server): void {
     server.close();
     server.closeIdleConnections?.();
     server.closeAllConnections?.();
+}
+
+/**
+ * The effort one Codex model actually accepts on the wire.
+ *
+ * The GPT-6 family dropped `none` and `minimal`. The picker already omits them, but a session
+ * that was started on an older model — or a hand-edited setting — can still carry one, and the
+ * subscription endpoint answers that with a rejection. `low` is the family's floor, so an
+ * unsupported rung is sent as `low` rather than as a request that fails.
+ */
+export function codexWireReasoningEffort(model: string, effort: ReasoningEffort): ReasoningEffort {
+    if (!/(?:^|\/)(?:gpt-6)(?:[.]\d+)?(?:-|$)/i.test(model.trim())) return effort;
+    return effort === 'none' || effort === 'minimal' ? 'low' : effort;
 }
 
 function successPage(): string {

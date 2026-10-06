@@ -119,8 +119,13 @@ export async function refreshWorkBuddyCredentials(
     const text = await response.text().catch(() => '');
     // 被服务端拒绝的续期对该账号是**终局**；传输失败是临时的，必须让账号留在原地。
     if (!response.ok) {
-        throw new Error(WORKBUDDY_PROVIDER_NAME + ' token refresh failed (' + response.status + ')'
-            + (text ? ': ' + text.slice(0, 200) : ''));
+        // 状态码随错误一起抛出：号池据此把这次续期判为「凭据已死」并停用该账号。
+        // 丢了它，一次被拒的刷新会被当成临时故障，账号会一直留在轮转里被选中。
+        throw Object.assign(
+            new Error(WORKBUDDY_PROVIDER_NAME + ' token refresh failed (' + response.status + ')'
+                + (text ? ': ' + text.slice(0, 200) : '')),
+            { status: response.status },
+        );
     }
     let payload: unknown;
     try { payload = JSON.parse(text); } catch { throw new Error(WORKBUDDY_PROVIDER_NAME + ' token refresh returned non-JSON.'); }

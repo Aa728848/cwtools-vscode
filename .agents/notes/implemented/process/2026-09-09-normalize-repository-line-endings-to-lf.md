@@ -23,6 +23,7 @@ Status: implemented
    - 否决。虽然仓库已配置 `* text=auto eol=lf`，但已提交历史或未重新规范化的工作区文件依然驻留 CRLF，在 Windows 本地编辑或运行脚本时若不改变磁盘上的实际字节，Agent 工具和本地测试仍会持续遭遇混合行尾问题。
 2. **同时处理外部 Git 子模块（`submodules/*`）**：
    - 否决。`.gitmodules` 中管理的子模块（如 `cwtools`、`cwtools-stellaris-config`）属于独立仓库，其维护生命周期与提交策略独立，跨子模块无差别修改会导致外部仓库工作区脏污，根据本仓库 `AGENTS.md` 规范必须保持子模块独立管理。
+   - 后续：`cwtools` 子模块独立推行了自身的行尾规范化并写入其自有 `.gitattributes`（`eol=lf`），由此暴露的夹具切分问题在该子模块仓库内单独修复，见 [2026-10-07-cwtools-embedded-fixture-newline-agnostic-parse.md](../bug-fix/2026-10-07-cwtools-embedded-fixture-newline-agnostic-parse.md)。
 
 ## Consequences
 - 彻底消除了主仓库内全部 26 处单文件混合换行与 36 处纯 CRLF 文本文件，全仓 843 个文本文件达到 100% 统一为 LF。

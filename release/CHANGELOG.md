@@ -1,5 +1,26 @@
 # Changelog
 
+## [2.26.0] - 2026-10-07
+
+### Steam 创意工坊 Mod 上传 / Steam Workshop Mod Upload
+- **[特性] 扩展内创意工坊直传面板（In-Extension Workshop Upload Panel）**：
+  - **解决什么**：此前 Mod 创作者新建或更新工坊物品必须依赖外部工具或官方启动器，扩展内仅具备工坊路径感知能力，缺乏直接发布的闭环。
+  - **全流程集成**：集成 `steamworks.js` 原生 SDK（Node-API 稳定绑定），提供独立的侧边栏上传视图（活动栏专属容器 `cwtools-workshop-panel`）与命令面板入口（`cwtools.workshop.upload`）。支持创建新工坊条目或更新既有条目，涵盖标题、描述、可见性、标签集、更新说明及内容目录的完整发布。
+  - **双向同步与智能预填**：更新已有条目时通过 Steam UGC API 读回工坊上的实时长文本描述并预填表单；首次创建成功后自动将新分配的 `remote_file_id` 原子回写至 `descriptor.mod`。
+  - **上传状态与可靠性保障**：支持详细阶段划分（配置就绪、内容预备、内容上传、缩略图上传、最终提交）与字节级传输进度百分比，具备进程内单飞行互斥与错误码语义化解析，且通过按需懒加载（Lazy Require）确保原生库不影响扩展常规激活性能。
+  - English: [Feature] In-extension Steam Workshop upload panel. Mod authors can now create and update Steam Workshop items directly within VS Code without switching to external tools. Powered by `steamworks.js` (Node-API bindings), the new dedicated sidebar panel and `cwtools.workshop.upload` command support editing titles, descriptions, visibility, tags, change notes, and content folders. Existing items automatically prefill with their current Steam description via UGC APIs, and newly created item IDs are atomically written back to `descriptor.mod`. Features multi-stage progress reporting (configuration, content preparation, content upload, preview upload, and committing) with single-flight mutex protection and lazy-loaded native bindings.
+
+### 底层 CWTools 引擎与 CLI / CWTools Core & CLI Fixes
+- **[修复] CLI 解析与列表子命令输出（CLI Parse & List Subcommands）**：
+  - 将 CLI `parse` 子命令正确接入 `CKParser`，修复此前命令未触发实际解析的问题；
+  - 调整 `list` 子命令的输出管道，确保其扫描到的文件清单与条目能够被调用方完整捕获与观测。
+  - English: [Fix] CLI parse and list subcommands. Wires the `parse` CLI subcommand into `CKParser` for actual file parsing, and fixes the output stream of the `list` subcommand to ensure scanned files and entries are fully observable.
+- **[工程] 子模块构建与元数据对齐（Submodule Build & Metadata Alignment）**：
+  - 将 `cwtools` 子模块的发布流水线对齐至 `.NET 10` SDK，消除版本漂移引起的构建中断；
+  - 修复 LF 换行格式下测试 fixture 的解析兼容性；
+  - 同步 fork 仓库相关元数据与文档说明。
+  - English: [Chore] Submodule build and metadata alignment. Updates the `cwtools` submodule release workflow to `.NET 10` SDK, resolves LF line-ending test fixture parsing differences, and aligns fork repository metadata and documentation.
+
 ## [2.25.0] - 2026-10-06
 
 ### AI 订阅账号池与供应商扩展 / Subscription Account Pools & Provider Expansion

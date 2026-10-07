@@ -22,6 +22,7 @@ Most language features work across supported Paradox game profiles. The visual t
 | Shader editing | Work with `.shader` and `.fxh` files using compile-unit-aware diagnostics, navigation, completion, formatting, rename, and semantic highlighting. |
 | CWT rule editing | Edit `.cwt` rule files with their own language id: parser/structure diagnostics (CWT0xx), directive and field-expression validation (CWT1xx/CWT2xx), project-wide undefined-reference and duplicate-type checks (CWT3xx), context completion for root blocks/directives/field expressions/symbols, cross-file navigation, and safe hot-swap of validated edits from the configured manual rules folder into the game model (CWT9xx). A rules-only repository starts the server in CWT-only mode without a game install and never activates a game model; a game workspace keeps full mode. |
 | Vanilla comparison | Compare a mod file with its vanilla counterpart and migrate the block under the cursor. |
+| Steam Workshop | Upload the current mod to the Steam Workshop: create a new item or update an existing one, with tags, preview image, visibility, and change note. Requires the Steam client running and signed in to an account that owns the game. |
 | AI workspace | Use a general coding agent or a Paradox/CWTools-aware agent with explicit permissions, project indexing, workflows, and optional MCP servers. |
 | External MCP | Connect Codex, Claude Code, or another MCP client to the separate read-only `cwtools-mcp` package. |
 
@@ -56,6 +57,12 @@ Edits made by a visual editor use VS Code workspace edits, so they participate i
 #### Compare with vanilla
 
 Use the `Compare with Vanilla` CodeLens on a matching mod file. `Migrate Block from Vanilla` replaces the current block while preserving the coordinates of other pending edits.
+
+#### Upload to the Steam Workshop
+
+Open a mod workspace (a folder with a `descriptor.mod`), then run `Upload Mod to Steam Workshop` from the Command Palette or the editor title button. The form opens in the dedicated `Steam Workshop` view in the activity bar, pre-filled from `descriptor.mod`; for an update, the current description is also read back from the Workshop page. Confirm the title, description, tags, preview image, visibility, and change note, then upload.
+
+A mod whose `descriptor.mod` has no `remote_file_id` is uploaded as a new Workshop item (private by default), and the new item id is written back to `remote_file_id`; later uploads update that item. The Steam client must be running and signed in to an account that owns the game. For games whose Steam App ID is not known to the extension, set `stellarisLanguageServices.workshop.appIdOverride`.
 
 #### Generate aura localisation
 
@@ -168,6 +175,7 @@ Stellaris Language Serves 是一款面向 Paradox Mod 开发的 VS Code 扩展�
 | Shader 编辑 | 按真实编译单元处理 `.shader` 和 `.fxh`，提供诊断、跳转、补全、格式化、重命名和语义高亮。 |
 | CWT 规则编辑 | 用独立的 `cwt` 语言编辑 `.cwt` 规则文件:解析/结构诊断(CWT0xx)、指令与字段表达式校验(CWT1xx/CWT2xx)、项目级未定义引用与重复类型检查(CWT3xx)、根块/指令/字段表达式/符号的上下文补全、跨文件跳转,以及把当前配置的手动规则目录中验证通过的编辑安全热替换进游戏模型(CWT9xx)。纯规则仓库以 CWT-only 模式启动服务,无需游戏安装且不会激活游戏模型;游戏工作区保持 full mode。 |
 | 原版对比 | 将 Mod 文件与原版对应文件对比，并迁移光标所在的代码块。 |
+| Steam 创意工坊 | 把当前 Mod 上传到 Steam 创意工坊：可新建物品或更新已有物品，支持标签、预览图、可见性与更新说明。需要 Steam 客户端已运行并登录拥有该游戏的账号。 |
 | AI 工作区 | 使用通用编码 Agent 或了解 Paradox/CWTools 的 Agent，并通过权限、项目索引、工作流和可选 MCP 服务控制执行范围。 |
 | 外部 MCP | 通过独立发布的只读 `cwtools-mcp`，让 Codex、Claude Code 等客户端查询 CWTools 语义信息。 |
 
@@ -202,6 +210,12 @@ Stellaris Language Serves 是一款面向 Paradox Mod 开发的 VS Code 扩展�
 #### 与原版对比
 
 在有原版对应文件的 Mod 文件中使用 `Compare with Vanilla` CodeLens。`Migrate Block from Vanilla` 会替换当前代码块，并避免其他待处理修改的行号失效。
+
+#### 上传到 Steam 创意工坊
+
+打开 Mod 工作区（包含 `descriptor.mod` 的文件夹），然后从命令面板或编辑器标题按钮运行 `上传 Mod 到 Steam 创意工坊`。表单位于活动栏独立的 `Steam 创意工坊` 视图中，会按 `descriptor.mod` 预填；更新已有物品时还会从工坊页面读出当前描述一并预填。确认标题、描述、标签、预览图、可见性与更新说明后即可上传。
+
+`descriptor.mod` 没有 `remote_file_id` 的 Mod 会作为新工坊物品上传（默认私有），新物品 id 会回写到 `remote_file_id`，之后的上传即为更新该物品。上传要求 Steam 客户端已运行并登录拥有该游戏的账号。对于扩展尚未内置 Steam App ID 的游戏，可设置 `stellarisLanguageServices.workshop.appIdOverride`。
 
 #### 生成光环本地化
 

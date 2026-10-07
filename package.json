@@ -38,6 +38,7 @@
         "quickjs-emscripten": "^0.31.0",
         "socks": "^2.8.10",
         "sql.js": "^1.14.1",
+        "steamworks.js": "0.4.0",
         "undici": "^6.28.1",
         "vscode-languageclient": "^9.0.1"
     },

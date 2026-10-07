@@ -3,3 +3,7 @@
 bin/client/test
 .vsixmanifest
 *.vsix
+# Type-only packages staged solely so `vsce package`'s `npm list --production`
+# check sees a complete tree for steamworks.js. Nothing loads them at runtime.
+node_modules/@types
+node_modules/undici-types

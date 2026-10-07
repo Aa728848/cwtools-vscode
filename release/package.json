@@ -89,6 +89,13 @@
                     "id": "cwtools.aiChat",
                     "name": "%views.stellarisLanguageServices.aiChat.name%"
                 }
+            ],
+            "cwtools-workshop-panel": [
+                {
+                    "type": "webview",
+                    "id": "cwtools.workshopUpload",
+                    "name": "%views.stellarisLanguageServices.workshopUpload.name%"
+                }
             ]
         },
         "viewsContainers": {
@@ -97,6 +104,11 @@
                     "id": "cwtools-ai-panel",
                     "title": "%viewsContainers.stellarisAiPanel.title%",
                     "icon": "$(circuit-board)"
+                },
+                {
+                    "id": "cwtools-workshop-panel",
+                    "title": "%viewsContainers.stellarisWorkshopPanel.title%",
+                    "icon": "$(cloud-upload)"
                 }
             ]
         },
@@ -218,6 +230,11 @@
                     "command": "cwtools.openSpecialPath",
                     "when": "true",
                     "group": "navigation@5"
+                },
+                {
+                    "command": "cwtools.workshop.upload",
+                    "when": "cwtools.workspaceIsMod",
+                    "group": "navigation"
                 },
                 {
                     "command": "cwtools.diagnostics.openInspectionOverview",
@@ -609,6 +626,12 @@
                 "title": "%commands.stellarisLanguageServices.ai.openAgentManager.title%",
                 "category": "Stellaris AI",
                 "icon": "$(layout)"
+            },
+            {
+                "command": "cwtools.workshop.upload",
+                "title": "%commands.stellarisLanguageServices.workshop.upload.title%",
+                "category": "CWTools",
+                "icon": "$(cloud-upload)"
             },
             {
                 "command": "cwtools.ai.antigravityTabJump",
@@ -2019,6 +2042,19 @@
                         "description": "%configuration.stellarisLanguageServices.ai.performance.subAgentUncachedInputTokenBudget.description%"
                     }
                 }
+            },
+            {
+                "type": "object",
+                "title": "%configuration.category.workshop%",
+                "order": 90,
+                "properties": {
+                    "stellarisLanguageServices.workshop.appIdOverride": {
+                        "scope": "window",
+                        "type": "string",
+                        "default": "",
+                        "description": "%configuration.stellarisLanguageServices.workshop.appIdOverride.description%"
+                    }
+                }
             }
         ],
         "languages": [
@@ -2475,6 +2511,7 @@
         "quickjs-emscripten": "^0.31.0",
         "socks": "^2.8.10",
         "sql.js": "^1.14.1",
+        "steamworks.js": "0.4.0",
         "undici": "^6.28.1",
         "vscode-languageclient": "^9.0.1"
     },

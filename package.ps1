@@ -168,6 +168,50 @@ if (-not $SkipClient) {
     Write-Host "[3/6 & 4/6] (SKIPPED) Skip Webview compilation and asset copying." -ForegroundColor Gray
 }
 
+# 4b. Stage native runtime dependencies into release/node_modules.
+# steamworks.js is an N-API package shipping prebuilt .node binaries and Steam
+# redistributables (dist/win64, dist/linux64, dist/osx). It cannot be bundled;
+# the Extension Host requires it at runtime, and Node resolves it from the
+# release/node_modules tree that vsce packages into the VSIX.
+Write-Host "[*] Staging native runtime dependencies (release/node_modules/steamworks.js)..." -ForegroundColor Yellow
+$SteamworksSource = Join-Path $PSScriptRoot "node_modules/steamworks.js"
+$SteamworksDest = Join-Path $PSScriptRoot "release/node_modules/steamworks.js"
+if (-not (Test-Path $SteamworksSource)) {
+    Write-Error "steamworks.js not found at $SteamworksSource. Run 'npm install' at the repository root before packaging."
+    exit 1
+}
+New-Item -ItemType Directory -Path $SteamworksDest -Force | Out-Null
+# Copy children individually so an already-staged destination is merged in place
+# rather than nesting a second steamworks.js directory inside it.
+Get-ChildItem -LiteralPath $SteamworksSource -Force | ForEach-Object {
+    Copy-Item -LiteralPath $_.FullName -Destination $SteamworksDest -Recurse -Force
+}
+if (-not (Test-Path (Join-Path $SteamworksDest "dist/win64/steamworksjs.win32-x64-msvc.node"))) {
+    Write-Error "steamworks.js staged without its win64 native binary: $SteamworksDest"
+    exit 1
+}
+Write-Host "[OK] steamworks.js staged into release/node_modules (native binaries included)." -ForegroundColor Green
+
+# steamworks.js declares "@types/node": "*" as a (type-only) production dependency,
+# and `vsce package` validates the release tree with `npm list --production` before
+# packing, which fails with ELSPROBLEMS when it is absent. Stage it (and its own
+# dependency) from the root tree so that check passes; release/.vscodeignore then
+# keeps these type-only packages out of the shipped VSIX.
+$ReleaseTypeOnlyDeps = @("@types/node", "undici-types")
+foreach ($TypeDep in $ReleaseTypeOnlyDeps) {
+    $TypeDepSource = Join-Path $PSScriptRoot "node_modules/$TypeDep"
+    if (-not (Test-Path $TypeDepSource)) {
+        Write-Error "$TypeDep not found at $TypeDepSource. It is required by steamworks.js for the vsce dependency check. Run 'npm install' at the repository root before packaging."
+        exit 1
+    }
+    $TypeDepDest = Join-Path $PSScriptRoot "release/node_modules/$TypeDep"
+    New-Item -ItemType Directory -Path $TypeDepDest -Force | Out-Null
+    Get-ChildItem -LiteralPath $TypeDepSource -Force | ForEach-Object {
+        Copy-Item -LiteralPath $_.FullName -Destination $TypeDepDest -Recurse -Force
+    }
+}
+Write-Host "[OK] Staged steamworks.js type-only dependency closure (@types/node, undici-types) for the vsce dependency check." -ForegroundColor Green
+
 # 5. (Opt-in) Build and bundle the MCP server (shipped inside the extension at bin/mcp)
 # The MCP server moved to the submodules/cwtools-mcp repository and is installed
 # standalone (npx -y cwtools-mcp); the VSIX no longer carries it by default.
@@ -191,7 +235,9 @@ if ($IncludeMcp) {
     if (-not (Test-Path $McpOutDir)) {
         New-Item -ItemType Directory -Path $McpOutDir -Force | Out-Null
     }
-    npx esbuild submodules/cwtools-mcp/packages/cwtools-mcp/dist/cli.js --bundle --platform=node --format=cjs --target=node18 --outfile=$McpOut
+    # --external:steamworks.js keeps the N-API package (and its prebuilt .node
+    # binaries under dist/) out of the bundle; it is loaded at runtime instead.
+    npx esbuild submodules/cwtools-mcp/packages/cwtools-mcp/dist/cli.js --bundle --platform=node --format=cjs --target=node18 --external:steamworks.js --outfile=$McpOut
     if ($LASTEXITCODE -ne 0) {
         Write-Error "MCP bundling failed!"
         exit $LASTEXITCODE

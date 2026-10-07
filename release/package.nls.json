@@ -175,6 +175,7 @@
   "commands.stellarisLanguageServices.ai.replayRun.title": "Replay Recorded Run (with optional override)",
   "commands.stellarisLanguageServices.ai.openAgentManager.title": "Open Agent Manager",
   "viewsContainers.stellarisAiPanel.title": "Stellaris AI",
+    "viewsContainers.stellarisWorkshopPanel.title": "Steam Workshop",
   "commands.stellarisLanguageServices.toggleInlineTextOn.title": "Enable Inline Text",
   "commands.stellarisLanguageServices.toggleInlineTextOff.title": "Disable Inline Text",
   "commands.stellarisLanguageServices.previewGUI.title": "Preview GUI Layout",
@@ -277,5 +278,9 @@
   "commands.stellarisLanguageServices.vanillaCompare.migrateBlockFromVanilla.title": "Migrate Block from Vanilla",
   "commands.stellarisLanguageServices.vanillaCompare.migrateChangedFromVanilla.title": "Migrate Changed Blocks from Vanilla",
   "commands.stellarisLanguageServices.previewEntity.title": "Preview Entity Model",
-  "commands.stellarisLanguageServices.previewParticle.title": "Preview Particle Effect"
+  "commands.stellarisLanguageServices.previewParticle.title": "Preview Particle Effect",
+  "views.stellarisLanguageServices.workshopUpload.name": "Steam Workshop Upload",
+  "commands.stellarisLanguageServices.workshop.upload.title": "Upload Mod to Steam Workshop",
+  "configuration.category.workshop": "CWTools: Steam Workshop",
+  "configuration.stellarisLanguageServices.workshop.appIdOverride.description": "Steam App ID used for Workshop uploads when the mod's game profile has no App ID or the App ID is a placeholder (for example Europa Universalis V). Leave empty to use the detected game."
 }

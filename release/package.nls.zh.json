@@ -175,6 +175,7 @@
   "commands.stellarisLanguageServices.ai.replayRun.title": "重放录制的 AI 运行会话 (支持自定义覆盖)",
   "commands.stellarisLanguageServices.ai.openAgentManager.title": "打开 Agent 运行管理器",
   "viewsContainers.stellarisAiPanel.title": "Stellaris AI 助手",
+    "viewsContainers.stellarisWorkshopPanel.title": "Steam 创意工坊",
   "commands.stellarisLanguageServices.toggleInlineTextOn.title": "启用内联文本显示",
   "commands.stellarisLanguageServices.toggleInlineTextOff.title": "禁用内联文本显示",
   "commands.stellarisLanguageServices.previewGUI.title": "预览 GUI 布局",
@@ -277,5 +278,9 @@
   "commands.stellarisLanguageServices.vanillaCompare.migrateBlockFromVanilla.title": "从原版迁移当前代码块",
   "commands.stellarisLanguageServices.vanillaCompare.migrateChangedFromVanilla.title": "从原版迁移所有变更块",
   "commands.stellarisLanguageServices.previewEntity.title": "预览模型资产",
-  "commands.stellarisLanguageServices.previewParticle.title": "预览粒子特效"
+  "commands.stellarisLanguageServices.previewParticle.title": "预览粒子特效",
+  "views.stellarisLanguageServices.workshopUpload.name": "Steam 创意工坊上传",
+  "commands.stellarisLanguageServices.workshop.upload.title": "上传 Mod 到 Steam 创意工坊",
+  "configuration.category.workshop": "CWTools：Steam 创意工坊",
+  "configuration.stellarisLanguageServices.workshop.appIdOverride.description": "当 Mod 所属游戏的 App ID 缺失或为占位值（例如 Europa Universalis V）时，用于创意工坊上传的 Steam App ID。留空则使用自动识别到的游戏。"
 }

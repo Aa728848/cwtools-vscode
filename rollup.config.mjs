@@ -15,6 +15,14 @@ function copyFile(src, dest) {
     };
 }
 
+/**
+ * Native N-API modules that must never be inlined into a bundle.
+ * `steamworks.js` ships prebuilt `.node` binaries and Steam redistributables in
+ * `dist/{win64,linux64,osx}`; a bundler cannot inline those, and the Extension
+ * Host loads the package from `release/node_modules/steamworks.js` at runtime.
+ */
+const EXTERNAL_NATIVE_MODULES = ['steamworks.js'];
+
 export default [
     // GUI Preview webview bundle
     {
@@ -205,6 +213,29 @@ export default [
             copyFile('client/webview/particlePreview.css', 'release/bin/client/webview/particlePreview.css'),
         ],
     },
+    // Steam Workshop Upload webview bundle
+    {
+        input: './client/webview/workshopUpload.ts',
+        output: {
+            file: './release/bin/client/webview/workshopUpload.js',
+            format: "iife",
+            name: "cwtoolsworkshopupload",
+            indent: false,
+        },
+        plugins: [
+            typescript({
+                tsconfig: ".config/tsconfig.webview.json",
+                clean: true,
+                tsconfigOverride: {
+                    // Single-file webview: point the program at this entry plus the ambient
+                    // `acquireVsCodeApi` declaration. Both slots of the base config's
+                    // `include` are overridden, so the merge replaces it wholesale.
+                    include: ["../client/webview/workshopUpload.ts", "../client/webview/vscode.d.ts"],
+                    exclude: ["client/test/**/*", "**/*.test.ts", "client/extension/**"]
+                }
+            }),
+        ],
+    },
     // Skybox environment decode worker (fetched as text, instantiated as Blob worker)
     {
         input: './client/webview/skyboxEnvWorker.ts',
@@ -224,4 +255,4 @@ export default [
             }),
         ],
     },
-];
+].map((config) => ({ external: EXTERNAL_NATIVE_MODULES, ...config }));

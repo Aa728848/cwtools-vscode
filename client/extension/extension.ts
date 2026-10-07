@@ -46,6 +46,7 @@ import { registerParadoxCsvFeatures } from './paradoxCsvFeatures';
 import { registerRelatedResourceFeatures } from './relatedResources';
 import { registerRulesConfigGroupCommands } from './rulesConfigGroups';
 import { registerImageTools } from './imageTools';
+import { registerWorkshopUpload } from './workshopUploadView';
 import { registerLocalisationAiCommands } from './localisationAiCommands';
 import { registerAuraLocalisationCommands } from './auraLocalisation';
 import { registerTranslationPreviewCommands } from './translationPreview';
@@ -1684,6 +1685,9 @@ export async function activate(context: ExtensionContext) {
 	registerStaticGalaxyEditor(context);
 	registerGraphicsFeatures(context);
 	registerImageTools(context);
+
+	// ── Steam Workshop: upload the current mod to the Workshop ───────────────
+	registerWorkshopUpload(context);
 
 	// ── Vanilla Code Comparison: block-level and file-level diff against vanilla game ──
 	registerVanillaCompare(context);

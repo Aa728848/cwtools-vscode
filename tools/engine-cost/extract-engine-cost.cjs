@@ -4,8 +4,10 @@
  *
  *   node tools/engine-cost/extract-engine-cost.cjs <dump.cpp> [--out <file>]
  *
- * The output is a JSON array of { command, kind, cost, cls, evidence, basis,
- * strength } records consumed by tools/engine-cost/apply-engine-cost.cjs.
+ * The output is a JSON array of { command, kind, cost, cls, evidence, line,
+ * basis, strength } records. `line` is the 1-based line of the evidence
+ * function's signature in the dump that was scanned, so every claim can be
+ * re-checked by opening that line.
  *
  * Evidence policy (this is what makes the result trustworthy):
  *   - A cost class is only emitted with POSITIVE evidence: a loop found in the
@@ -229,7 +231,10 @@ async function main() {
                 rec = { cost: 'o(1)', evidence: fn, basis: 'no scan in the command or its direct callees', strength: 'local' };
             }
             if (!rec) continue;
-            rows.push({ command: cmd, kind, cls: found.cls, ...rec });
+            // The evidence function's signature line in this dump, so a reader
+            // can open the claim instead of trusting the class name.
+            const evBlock = ownByQual.get(qual(rec.evidence));
+            rows.push({ command: cmd, kind, cls: found.cls, line: evBlock ? evBlock.start : null, ...rec });
         }
     }
 

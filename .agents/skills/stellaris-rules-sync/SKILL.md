@@ -30,7 +30,13 @@ description: >-
      - 若为精灵图标键名（如 `icon = "trade_protection"`），定义为 `<sprite>`；
      - 若仅为数值计算或布尔开关，使用 `value_field` / `int` / `float` / `bool`。
 
-4. **严格核实属性层级结构**：
+4. **引擎事实注释必须原样保留（禁止手改行号）**：
+   - `triggers.cwt` / `effects.cwt` 中的 `## cost` / `## engine` / `## engine_evidence` **不是文档注释，而是反编译派生的引擎事实**，由 `tools/engine-cost/` 单独维护，与规则同步是两条链路。
+   - 同步规则时：新增 alias **不强制**补标注（覆盖率由成本工具单独负责）；**严禁删除或改写已有的 `## engine_evidence`**。
+   - 其中的 `dump L<行号>` 指向 `anti_stellaris` 仓库某个**特定 dump 版本**。游戏更新后这些行号会整体失效，但**不能手改单条**——必须用 `merge-engine-cost.cjs` 整批重锚（见 [docs/engine-perf-lint-handoff.md](../../../docs/engine-perf-lint-handoff.md)）。
+   - 成本类标注只允许经 `tools/engine-cost/merge-engine-cost.cjs` 写入：它会在反编译结论与人工细分冲突时**保留人工值**，直接覆盖会把 `o(n)_galaxy`/`script_eval` 等细分降级为普通 `o(n)`。
+
+5. **严格核实属性层级结构**：
    - 在复杂定义（如 `megastructures`、`planet_classes`、`ship_sizes` 等）中添加字段时，必须核实该字段属于根级属性还是子块属性。
    - 例如：巨构的 `nomad_reactivatable`、`custom_tooltip_with_modifiers`、`overclock_loc_key`、`overclock_cooldown` 均为 `megastructure` 的**顶层属性**，绝不可错误嵌套入 `overclock_types = { ... }` 列表子块内。
 

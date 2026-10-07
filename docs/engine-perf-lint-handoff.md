@@ -204,6 +204,28 @@ npx ts-mocha -p tsconfig.json client/test/unit/diagnosticI18n.test.ts
 npm run build:docs
 ```
 
+## 工具链（成本标注专用，与规则同步是两条链路）
+
+| 工具 | 用途 |
+|---|---|
+| `tools/engine-cost/extract-engine-cost.cjs` | 从反编译 dump 提取每条命令的成本等级，输出携带 `line`（证据函数签名行） |
+| `tools/engine-cost/merge-engine-cost.cjs` | **唯一允许写入 `## cost` 的入口**。逐条比较，反编译更具体才改；冲突保留人工值并报告 |
+
+> 文档日志（`config/logs/*`）的漂移审计**不在这里**：它已由 `tools/rules-sync` 的 `report` 命令覆盖
+> （`report.ts:1441-1477` 读同一组 `config/logs`，并用 `inferGeneratedTemplates` 从游戏全量名单反推生成族，
+> 比只读 `.cwt` 的独立脚本更全）。不要再写第二个审计脚本。
+
+**重锚流程**（游戏更新后）：
+
+```powershell
+# 1) 用新 dump 重新提取（会带上新行号）
+node tools/engine-cost/extract-engine-cost.cjs <new-dump.cpp> --rules submodules/cwtools-stellaris-config/config --out .rules-sync/engine-cost.json
+# 2) 保守合并（先 dry-run 看 conflicts / upgraded）
+npm run engine:cost:merge -- .rules-sync/engine-cost.json --rules submodules/cwtools-stellaris-config/config
+```
+
+同步规则时**不得**手改这些注释，见 `.agents/skills/stellaris-rules-sync/SKILL.md` 核心原则第 4 条。
+
 ## 相关文档索引
 
 - 分析源：`docs/better_stellaris/`（README 有 Top 18 + 补充发现汇总表）

@@ -212,6 +212,22 @@ foreach ($TypeDep in $ReleaseTypeOnlyDeps) {
 }
 Write-Host "[OK] Staged steamworks.js type-only dependency closure (@types/node, undici-types) for the vsce dependency check." -ForegroundColor Green
 
+# `ignore` is a pure-JS runtime dependency of the Workshop upload filtering
+# (workshopIgnore.ts). It has no native binaries, but it must be present in the
+# release tree at runtime because the Extension Host resolves it from
+# release/node_modules exactly like steamworks.js does.
+$IgnoreSource = Join-Path $PSScriptRoot "node_modules/ignore"
+if (-not (Test-Path $IgnoreSource)) {
+    Write-Error "ignore not found at $IgnoreSource. It is required by Steam Workshop upload filtering. Run npm install at the repository root before packaging."
+    exit 1
+}
+$IgnoreDest = Join-Path $PSScriptRoot "release/node_modules/ignore"
+New-Item -ItemType Directory -Path $IgnoreDest -Force | Out-Null
+Get-ChildItem -LiteralPath $IgnoreSource -Force | ForEach-Object {
+    Copy-Item -LiteralPath $_.FullName -Destination $IgnoreDest -Recurse -Force
+}
+Write-Host "[OK] Staged ignore (Workshop upload file filtering) into release/node_modules." -ForegroundColor Green
+
 # 5. (Opt-in) Build and bundle the MCP server (shipped inside the extension at bin/mcp)
 # The MCP server moved to the submodules/cwtools-mcp repository and is installed
 # standalone (npx -y cwtools-mcp); the VSIX no longer carries it by default.

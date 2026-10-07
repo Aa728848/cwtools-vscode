@@ -25,6 +25,7 @@ const VISIBILITIES: readonly Visibility[] = ['unchanged', 'public', 'friends', '
 type UploadStage =
     | 'connecting'
     | 'creating'
+    | 'staging'
     | 'preparingConfig'
     | 'preparingContent'
     | 'uploadingContent'
@@ -35,6 +36,7 @@ type UploadStage =
 const UPLOAD_STAGES: readonly UploadStage[] = [
     'connecting',
     'creating',
+    'staging',
     'preparingConfig',
     'preparingContent',
     'uploadingContent',
@@ -177,6 +179,7 @@ const VISIBILITY_LABEL: Record<Visibility, Record<Locale, string>> = {
 const STAGE_LABEL: Record<UploadStage, Record<Locale, string>> = {
     connecting: { en: 'Connecting to Steam', zh: '正在连接 Steam' },
     creating: { en: 'Creating Workshop item', zh: '正在创建工坊物品' },
+    staging: { en: 'Filtering mod files', zh: '正在按忽略规则筛选文件' },
     preparingConfig: { en: 'Preparing mod config', zh: '正在准备 Mod 配置' },
     preparingContent: { en: 'Preparing mod content', zh: '正在准备 Mod 内容' },
     uploadingContent: { en: 'Uploading mod content', zh: '正在上传 Mod 内容' },

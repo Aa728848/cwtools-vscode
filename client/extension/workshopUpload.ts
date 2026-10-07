@@ -13,12 +13,14 @@
  */
 
 import * as fs from 'fs';
+import * as os from 'os';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import { ErrorReporter } from './ai/errorReporter';
 import { getAllProfiles, getCacheSettingKey } from './gameProfiles';
 import { getDescriptorPath, readDescriptor, writeRemoteFileId, type ModDescriptor } from './modDescriptor';
 import { localize } from './panelI18n';
+import { removeStagingRoot, stageUploadContent, type StagedContent } from './workshopIgnore';
 import { hasWorkspaceModDescriptor, inferGameIdFromWorkspace } from './workspaceGameDetection';
 
 /** Command that reveals the upload form for a mod folder. */
@@ -66,6 +68,7 @@ export function toSteamVisibility(visibility: WorkshopVisibility): number | unde
 export type WorkshopUploadStage =
     | 'connecting'
     | 'creating'
+    | 'staging'
     | 'preparingConfig'
     | 'preparingContent'
     | 'uploadingContent'
@@ -600,6 +603,12 @@ export interface WorkshopUploadRequest {
     previewPath?: string;
     /** Present for an update; absent creates a new workshop item. */
     remoteFileId?: string;
+    /** Where the filtered staging copy is created; defaults to the OS temp dir. */
+    stagingParent?: string;
+    /** Extra gitignore-style exclusions from settings. */
+    extraIgnorePatterns?: readonly string[];
+    /** Set false to upload the mod folder verbatim, ignoring every rule. */
+    applyIgnoreRules?: boolean;
     onProgress?: (progress: WorkshopUploadProgress) => void;
 }
 
@@ -639,12 +648,14 @@ export function workshopItemUrl(itemId: string): string {
     return `https://steamcommunity.com/sharedfiles/filedetails/?id=${itemId}`;
 }
 
-function buildUpdate(request: WorkshopUploadRequest): SteamUgcUpdate {
+function buildUpdate(request: WorkshopUploadRequest, contentPath: string): SteamUgcUpdate {
     const update: SteamUgcUpdate = {
         title: request.title,
         description: request.description,
         changeNote: request.changeNote,
-        contentPath: request.modRoot,
+        // The content path is the staging copy when the mod was filtered, and
+        // the mod folder itself when nothing had to be excluded.
+        contentPath,
         tags: request.tags,
     };
     if (request.previewPath) {
@@ -669,9 +680,10 @@ function commitUpload(
     itemId: string,
     appId: number,
     request: WorkshopUploadRequest,
+    contentPath: string,
     emit: (stage: WorkshopUploadStage, done: number, total: number) => void,
 ): Promise<CommitOutcome> {
-    const update = buildUpdate(request);
+    const update = buildUpdate(request, contentPath);
     return new Promise<CommitOutcome>(resolve => {
         const finish = (outcome: CommitOutcome): void => resolve(outcome);
         try {
@@ -711,6 +723,34 @@ function writeBackRemoteFileId(modRoot: string, itemId: string): string | undefi
             `上传成功，但未能回写 descriptor.mod。请手动在其中添加 remote_file_id="${itemId}"。`
         );
     }
+}
+
+/**
+ * Summarises what the ignore rules removed, so a filtered upload is visibly
+ * different from an unfiltered one instead of silently shipping less.
+ */
+function describeStagedContent(staged: StagedContent | undefined): string | undefined {
+    if (!staged) return undefined;
+    const parts = [
+        localize(
+            `Uploaded ${staged.fileCount} file(s); ${staged.excludedCount} excluded by ignore rules.`,
+            `已上传 ${staged.fileCount} 个文件；忽略规则排除了 ${staged.excludedCount} 项。`
+        ),
+    ];
+    if (staged.skipped.length > 0) {
+        const examples = staged.skipped
+            .slice(0, 3)
+            .map(entry => entry.relativePath)
+            .join(', ');
+        const more = staged.skipped.length > 3 ? `, +${staged.skipped.length - 3}` : '';
+        parts.push(
+            localize(
+                `Skipped ${staged.skipped.length} link(s) or special file(s) that cannot be copied: ${examples}${more}.`,
+                `跳过了 ${staged.skipped.length} 个无法复制的链接或特殊文件：${examples}${more}。`
+            )
+        );
+    }
+    return parts.join(' ');
 }
 
 async function performUpload(request: WorkshopUploadRequest): Promise<WorkshopUploadResult> {
@@ -761,34 +801,61 @@ async function performUpload(request: WorkshopUploadRequest): Promise<WorkshopUp
             created = true;
         }
 
-        const outcome = await commitUpload(client, itemId, appId, request, emit);
-        if (!outcome.ok) {
-            const result: WorkshopUploadResult = {
-                ok: false,
-                created,
-                itemId,
-                needsAgreement: false,
-                error: outcome.error ?? localize('Steam rejected the upload.', 'Steam 拒绝了此次上传。'),
-            };
-            if (created) {
-                result.warning = localize(
-                    `A new empty Workshop item (${itemId}) was created before the failure; it stays unpublished unless you finish it on Steam.`,
-                    `失败前已创建新的空白创意工坊物品（${itemId}）；除非你在 Steam 上补完内容，否则它不会发布。`
-                );
+        let contentPath = request.modRoot;
+        let staged: StagedContent | undefined;
+        try {
+            emit('staging', 0, 0);
+            // With filtering switched off the mod folder itself is uploaded,
+            // exactly as it was before ignore support existed.
+            if (request.applyIgnoreRules !== false) {
+                staged = stageUploadContent(request.modRoot, {
+                    stagingParent: request.stagingParent ?? os.tmpdir(),
+                    extraPatterns: request.extraIgnorePatterns,
+                    onProgress: (done, total) => emit('staging', done, total),
+                });
             }
-            return result;
-        }
+            contentPath = staged?.contentPath ?? request.modRoot;
 
-        const warning = created ? writeBackRemoteFileId(request.modRoot, outcome.itemId) : undefined;
-        emit('done', 1, 1);
-        return {
-            ok: true,
-            created,
-            itemId: outcome.itemId,
-            url: workshopItemUrl(outcome.itemId),
-            needsAgreement: outcome.needsAgreement,
-            warning,
-        };
+            const outcome = await commitUpload(client, itemId, appId, request, contentPath, emit);
+            if (!outcome.ok) {
+                const result: WorkshopUploadResult = {
+                    ok: false,
+                    created,
+                    itemId,
+                    needsAgreement: false,
+                    error: outcome.error ?? localize('Steam rejected the upload.', 'Steam 拒绝了此次上传。'),
+                };
+                if (created) {
+                    result.warning = localize(
+                        `A new empty Workshop item (${itemId}) was created before the failure; it stays unpublished unless you finish it on Steam.`,
+                        `失败前已创建新的空白创意工坊物品（${itemId}）；除非你在 Steam 上补完内容，否则它不会发布。`
+                    );
+                }
+                return result;
+            }
+
+            // The staging copy is disposable, but the numbers it produced are
+            // the only record of what actually shipped.
+            const warning = [
+                created ? writeBackRemoteFileId(request.modRoot, outcome.itemId) : undefined,
+                describeStagedContent(staged),
+            ]
+                .filter((message): message is string => message !== undefined)
+                .join(' ');
+            emit('done', 1, 1);
+            return {
+                ok: true,
+                created,
+                itemId: outcome.itemId,
+                url: workshopItemUrl(outcome.itemId),
+                needsAgreement: outcome.needsAgreement,
+                warning: warning.length > 0 ? warning : undefined,
+            };
+        } finally {
+            // Always reclaim the copy: a failed or cancelled upload must not
+            // leave a full duplicate of the mod in the temp directory.
+            removeStagingRoot(staged?.stagingRoot);
+        }
     } catch (error) {
         ErrorReporter.warn('WorkshopUpload', `Workshop upload failed for ${request.modRoot}`, error);
         return {

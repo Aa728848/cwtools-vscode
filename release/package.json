@@ -5,7 +5,7 @@
     "description": "%extension.description%",
     "author": "Eddy",
     "license": "MIT",
-    "version": "2.26.0",
+    "version": "2.27.0",
     "preview": true,
     "publisher": "ForeverSkywalker",
     "icon": "docs/stellaris.png",
@@ -2053,6 +2053,21 @@
                         "type": "string",
                         "default": "",
                         "description": "%configuration.stellarisLanguageServices.workshop.appIdOverride.description%"
+                    },
+                    "stellarisLanguageServices.workshop.useIgnoreFiles": {
+                        "scope": "window",
+                        "type": "boolean",
+                        "default": true,
+                        "description": "%configuration.stellarisLanguageServices.workshop.useIgnoreFiles.description%"
+                    },
+                    "stellarisLanguageServices.workshop.extraIgnorePatterns": {
+                        "scope": "window",
+                        "type": "array",
+                        "default": [],
+                        "items": {
+                            "type": "string"
+                        },
+                        "description": "%configuration.stellarisLanguageServices.workshop.extraIgnorePatterns.description%"
                     }
                 }
             }
@@ -2508,6 +2523,7 @@
     },
     "dependencies": {
         "executable": "4.1.1",
+        "ignore": "^5.3.2",
         "quickjs-emscripten": "^0.31.0",
         "socks": "^2.8.10",
         "sql.js": "^1.14.1",

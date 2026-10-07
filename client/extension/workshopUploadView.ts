@@ -144,6 +144,21 @@ function describeError(error: unknown): string {
     return typeof error === 'string' ? error : String(error);
 }
 
+/** Extra gitignore-style exclusions the user configured for Workshop uploads. */
+function extraIgnorePatterns(): string[] {
+    const configured = vscode.workspace
+        .getConfiguration('stellarisLanguageServices')
+        .get<string[]>('workshop.extraIgnorePatterns', []);
+    return Array.isArray(configured) ? configured.filter(pattern => typeof pattern === 'string' && pattern.trim().length > 0) : [];
+}
+
+/** Whether the mod's ignore files should filter the uploaded content. */
+function useIgnoreFiles(): boolean {
+    return vscode.workspace
+        .getConfiguration('stellarisLanguageServices')
+        .get<boolean>('workshop.useIgnoreFiles', true);
+}
+
 export class WorkshopUploadViewProvider implements vscode.WebviewViewProvider {
     public static readonly viewType = WORKSHOP_UPLOAD_VIEW_ID;
 
@@ -151,7 +166,14 @@ export class WorkshopUploadViewProvider implements vscode.WebviewViewProvider {
     private modRoot?: string;
     private disposables: vscode.Disposable[] = [];
 
-    constructor(private readonly extensionUri: vscode.Uri) {}
+    /** Where filtered staging copies are built; undefined uses the OS temp dir. */
+    private readonly stagingParent?: string;
+
+    constructor(private readonly extensionUri: vscode.Uri, globalStoragePath?: string) {
+        // Extension storage is preferred over the OS temp directory so the staged
+        // copy is not swept away mid-upload by a system temp cleaner.
+        this.stagingParent = globalStoragePath ? path.join(globalStoragePath, 'workshop-staging') : undefined;
+    }
 
     resolveWebviewView(
         webviewView: vscode.WebviewView,
@@ -387,6 +409,9 @@ export class WorkshopUploadViewProvider implements vscode.WebviewViewProvider {
                 visibility: data.visibility,
                 previewPath: data.previewPath,
                 remoteFileId: target.descriptor.remoteFileId,
+                stagingParent: this.stagingParent,
+                applyIgnoreRules: useIgnoreFiles(),
+                extraIgnorePatterns: extraIgnorePatterns(),
                 onProgress: progress =>
                     this.post({
                         type: 'progress',
@@ -428,7 +453,7 @@ export class WorkshopUploadViewProvider implements vscode.WebviewViewProvider {
  */
 export function registerWorkshopUpload(context: vscode.ExtensionContext): void {
     registerWorkshopUploadCommands(context);
-    const provider = new WorkshopUploadViewProvider(context.extensionUri);
+    const provider = new WorkshopUploadViewProvider(context.extensionUri, context.globalStorageUri.fsPath);
     context.subscriptions.push(
         vscode.window.registerWebviewViewProvider(WorkshopUploadViewProvider.viewType, provider, {
             webviewOptions: { retainContextWhenHidden: true },

@@ -282,5 +282,7 @@
   "views.stellarisLanguageServices.workshopUpload.name": "Steam 创意工坊上传",
   "commands.stellarisLanguageServices.workshop.upload.title": "上传 Mod 到 Steam 创意工坊",
   "configuration.category.workshop": "CWTools：Steam 创意工坊",
-  "configuration.stellarisLanguageServices.workshop.appIdOverride.description": "当 Mod 所属游戏的 App ID 缺失或为占位值（例如 Europa Universalis V）时，用于创意工坊上传的 Steam App ID。留空则使用自动识别到的游戏。"
+  "configuration.stellarisLanguageServices.workshop.appIdOverride.description": "当 Mod 所属游戏的 App ID 缺失或为占位值（例如 Europa Universalis V）时，用于创意工坊上传的 Steam App ID。留空则使用自动识别到的游戏。",
+  "configuration.stellarisLanguageServices.workshop.useIgnoreFiles.description": "使用 Mod 文件夹中的 .gitignore 与 .steamignore 过滤创意工坊上传内容，被忽略的文件不会被上传。版本控制与编辑器元数据（.git、.github、.vscode 等）始终会被排除。关闭后将上传 Mod 文件夹中的全部文件。",
+  "configuration.stellarisLanguageServices.workshop.extraIgnorePatterns.description": "除 Mod 自带的忽略文件外，额外用于排除创意工坊上传内容的 .gitignore 风格规则。适用于没有写进任何忽略文件的构建产物或仅本地使用的文件。"
 }

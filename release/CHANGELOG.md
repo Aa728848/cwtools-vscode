@@ -1,5 +1,21 @@
 # Changelog
 
+## [2.27.0] - 2026-10-08
+
+### Steam 创意工坊上传文件过滤 / Steam Workshop Upload File Filtering
+- **[特性] 按忽略规则过滤上传内容（Ignore-Aware Upload Filtering）**：
+  - **解决什么**：此前上传会把 Mod 文件夹里的每个文件一并交给 Steam——包括 `.git` 对象库、编辑器目录和构建产物，导致工坊物品体积虚胖甚至超出 Steam 限制。
+  - **为何不能交给 Steam**：Steam 的内容接口只接受目录、没有逐文件过滤参数，也不读取任何忽略文件，因此过滤必须在扩展侧完成：先按忽略规则生成一份暂存副本，再把副本目录交给 Steam。
+  - **gitignore 语义**：Mod 自带的 `.gitignore` 与 `.steamignore` 按 git 自身规则生效，支持否定规则（`!keep.log`）与按目录作用域（子目录的 `.steamignore` 只影响自身所在目录）。版本控制与编辑器元数据（`.git`、`.github`、`.vscode`、`.idea` 等）始终排除。
+  - **零拷贝快路径**：没有任何内容需要排除时直接上传原目录，完全不做拷贝——无忽略文件的 Mod 行为与成本与该功能存在前完全一致。
+  - **可见与可控**：上传结果报告实际上传与排除的数量；符号链接等无法逐字复制的条目会被跳过并在结果中列出，而非静默损坏。暂存副本在上传结束、失败或取消后必定清理。
+  - **新设置项**：`workshop.useIgnoreFiles`（默认开启）与 `workshop.extraIgnorePatterns`（补充构建产物等忽略文件未覆盖的规则）。
+  - English: [Feature] Ignore-aware Workshop upload filtering. Steam's content API only accepts a directory and applies no filtering of its own, so the extension now builds a filtered staging copy first. The mod's `.gitignore` and `.steamignore` are honoured with git semantics, including negation and per-directory scoping, and VCS/editor metadata (`.git`, `.github`, `.vscode`, `.idea`) is always excluded. A mod with nothing to exclude is uploaded directly with no copy at all. The result reports how many files were uploaded and excluded, symlinks are skipped and surfaced rather than silently corrupted, and the staging copy is always cleaned up. Adds `workshop.useIgnoreFiles` (on by default) and `workshop.extraIgnorePatterns`.
+
+### 代码清理 / Code Cleanup
+- **[工程] 移除未使用的文件与目录结构整理（Unused File Removal）**：清理仓库中未被引用的冗余文件。
+  - English: [Chore] Remove unused files and tidy up directory structure.
+
 ## [2.26.0] - 2026-10-07
 
 ### Steam 创意工坊 Mod 上传 / Steam Workshop Mod Upload

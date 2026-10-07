@@ -64,6 +64,8 @@ Open a mod workspace (a folder with a `descriptor.mod`), then run `Upload Mod to
 
 A mod whose `descriptor.mod` has no `remote_file_id` is uploaded as a new Workshop item (private by default), and the new item id is written back to `remote_file_id`; later uploads update that item. The Steam client must be running and signed in to an account that owns the game. For games whose Steam App ID is not known to the extension, set `stellarisLanguageServices.workshop.appIdOverride`.
 
+Steam uploads everything in the folder it is given, so the extension first builds a filtered copy of the mod in a temporary staging directory and uploads that. The mod's own `.gitignore` and `.steamignore` files are applied with git's own rules, including negation and per-directory scoping; version-control and editor metadata (`.git`, `.github`, `.vscode`, `.idea`, and similar) is always excluded. Add patterns to `stellarisLanguageServices.workshop.extraIgnorePatterns` for build output or local-only files that no ignore file covers, or set `stellarisLanguageServices.workshop.useIgnoreFiles` to false to upload the mod folder verbatim. The result reports how many files were uploaded and how many the rules kept out; a mod with nothing to exclude is uploaded directly, with no copy at all.
+
 #### Generate aura localisation
 
 Auras in `common/component_templates/*.txt` need a tooltip string of their own. Put the cursor inside a `friendly_aura` or `hostile_aura` block and run `Generate Aura Localisation for This Block`, or run `Generate Aura Localisation for All Auras in This File` to convert every aura in the file at once. Both commands are available from the Command Palette, the editor context menu, and the lightbulb.
@@ -216,6 +218,8 @@ Stellaris Language Serves 是一款面向 Paradox Mod 开发的 VS Code 扩展�
 打开 Mod 工作区（包含 `descriptor.mod` 的文件夹），然后从命令面板或编辑器标题按钮运行 `上传 Mod 到 Steam 创意工坊`。表单位于活动栏独立的 `Steam 创意工坊` 视图中，会按 `descriptor.mod` 预填；更新已有物品时还会从工坊页面读出当前描述一并预填。确认标题、描述、标签、预览图、可见性与更新说明后即可上传。
 
 `descriptor.mod` 没有 `remote_file_id` 的 Mod 会作为新工坊物品上传（默认私有），新物品 id 会回写到 `remote_file_id`，之后的上传即为更新该物品。上传要求 Steam 客户端已运行并登录拥有该游戏的账号。对于扩展尚未内置 Steam App ID 的游戏，可设置 `stellarisLanguageServices.workshop.appIdOverride`。
+
+Steam 会把它拿到的整个文件夹一并上传，因此扩展会先在临时暂存目录中生成一份过滤后的副本，再上传该副本。Mod 自带的 `.gitignore` 与 `.steamignore` 会按 git 自身的规则生效，包括否定规则与按目录作用域的规则；版本控制与编辑器元数据（`.git`、`.github`、`.vscode`、`.idea` 等）始终被排除。对于任何忽略文件都未覆盖的构建产物或仅本地使用的文件，可在 `stellarisLanguageServices.workshop.extraIgnorePatterns` 中追加规则；也可将 `stellarisLanguageServices.workshop.useIgnoreFiles` 设为 false 以原样上传整个 Mod 文件夹。上传结果会报告实际上传了多少文件、规则排除了多少项；没有任何可排除内容的 Mod 会直接上传原目录，完全不做拷贝。
 
 #### 生成光环本地化
 

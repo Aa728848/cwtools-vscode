@@ -24,7 +24,13 @@ Status: implemented
 2. **工具披露与投影保证 (`registry.ts`, `agentRunner.ts`)**：
    - 将 `run_code` 加入 `ALWAYS_DISCLOSED_TOOLS`，确保在开启动态工具披露的默认配置下首轮即永久可用，彻底消除 PTC 首轮死锁风险。
    - 实现 `projectModelFacingTools` 投影路由：
-     - 在 `ptc` 模式下，大模型 API 载荷的 `tools` 仅保留唯一一个 `run_code` 工具，其余所有工具全部收敛为内部能力池；同时在 System Prompt 中注入 `PTC_ONLY_INSTRUCTION` 和工具 TypeScript SDK 定义。模型直接发起原生工具调用时被拦截并生成失败结果，由统一发射循环输出标准 `tool_result`，避免多重重复发射。
+     - 在 `ptc` 模式下，大模型 API 载荷的 `tools` 保留 `run_code` 作为唯一的程序化入口（`ask_user_question` 作为第二个可直连工具一并保留，见下方修正），其余所有工具全部收敛为内部能力池；同时在 System Prompt 中注入 `PTC_ONLY_INSTRUCTION` 和工具 TypeScript SDK 定义。模型直接发起原生工具调用时被拦截并生成失败结果，由统一发射循环输出标准 `tool_result`，避免多重重复发射。
+
+### 后续修正：PTC 投影不再严格等于单工具
+
+`ptc` 的模型可见工具集现为 `run_code` + `ask_user_question`。`ask_user_question` 会无限等待人类作答，而 `run_code` 有 `RUN_CODE_FANOUT_TIMEOUT_MS` 硬预算，把它放进脚本会让一次正常提问变成一次超时失败；因此它作为唯一例外保持直连，同时继续留在 `RUN_CODE_BLOCKED_TOOLS` 中，脚本内不可调用。投影与直连拦截统一由 `agentRunner.ts` 的 `PTC_DIRECT_TOOLS` 单一常量驱动，`native` / `hybrid` 行为不变。
+
+完整根因、备选方案与验证契约见 `../bug-fix/2026-10-08-ptc-mode-ask-user-question-direct-call-restoration.md`。
      - 在 `native` 模式下，过滤掉 `run_code`，仅向模型暴露标准原生工具 Schema，且不注入任何 SDK 提示词。
      - 在 `hybrid` 模式下，保留原有的混合共存行为作为兼容选项。
 3. **QuickJS 代码沙箱深度类型擦除 (`runCode.ts`)**：

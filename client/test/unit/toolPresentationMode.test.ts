@@ -33,7 +33,11 @@ moduleLoader._load = function (this: unknown, request: string, ...args: any[]) {
 };
 
 import { normalizeToolPresentationMode } from '../../extension/ai/aiService';
-import { projectModelFacingTools } from '../../extension/ai/agentRunner';
+import {
+    projectModelFacingTools,
+    isPtcDirectCallBlocked,
+    questionCallViolatesSoleCallRule,
+} from '../../extension/ai/agentRunner';
 import {
     stripTypeScriptTypes,
     PTC_ONLY_INSTRUCTION,
@@ -76,8 +80,33 @@ describe('ToolPresentationMode and PTC/NATIVE routing', () => {
                 function: { name: 'run_code', description: 'Run code', parameters: {} },
             },
         ];
+        const askUserQuestionTool: ToolDefinition = {
+            type: 'function',
+            function: { name: 'ask_user_question', description: 'Ask the user', parameters: {} },
+        };
+        const selectToolsTool: ToolDefinition = {
+            type: 'function',
+            function: { name: 'select_tools', description: 'Select tools', parameters: {} },
+        };
 
-        it('projects only run_code when mode is ptc and run_code is present', () => {
+        it('projects run_code and ask_user_question when mode is ptc and run_code is present', () => {
+            const tools = [...sampleTools, askUserQuestionTool];
+            const projected = projectModelFacingTools(tools, 'ptc');
+            // Filter preserves input order, so the result is deterministic.
+            expect(projected.map(t => t.function.name)).to.deep.equal(['run_code', 'ask_user_question']);
+        });
+
+        it('never leaks any other capability into the ptc projection', () => {
+            const tools = [...sampleTools, askUserQuestionTool, selectToolsTool];
+            const projected = projectModelFacingTools(tools, 'ptc');
+            expect(projected.map(t => t.function.name)).to.have.members(['run_code', 'ask_user_question']);
+            expect(projected.some(t => t.function.name === 'read_file')).to.be.false;
+            expect(projected.some(t => t.function.name === 'select_tools')).to.be.false;
+        });
+
+        it('projects run_code alone when ptc has no ask_user_question available', () => {
+            // The exemption is conditional on the tool actually being present, so a
+            // mode/domain/profile that filters it out still projects a valid surface.
             const projected = projectModelFacingTools(sampleTools, 'ptc');
             expect(projected.map(t => t.function.name)).to.deep.equal(['run_code']);
         });
@@ -97,6 +126,27 @@ describe('ToolPresentationMode and PTC/NATIVE routing', () => {
         it('preserves all tools when mode is hybrid', () => {
             const projected = projectModelFacingTools(sampleTools, 'hybrid');
             expect(projected.map(t => t.function.name)).to.deep.equal(['read_file', 'edit_file', 'run_code']);
+        });
+
+        it('leaves native and hybrid byte-identical to their pre-ptc-exemption behavior', () => {
+            // Regression guard for the PTC ask_user_question exemption: those two
+            // modes must project exactly what they always did, for the same input.
+            const tools = [...sampleTools, askUserQuestionTool, selectToolsTool];
+            const nativeLegacy = tools.filter(t => t.function.name !== 'run_code');
+            expect(projectModelFacingTools(tools, 'native')).to.deep.equal(nativeLegacy);
+
+            const hybridLegacy = [...tools];
+            expect(projectModelFacingTools(tools, 'hybrid')).to.deep.equal(hybridLegacy);
+            expect(projectModelFacingTools(tools, 'hybrid').map(t => t.function.name))
+                .to.deep.equal(['read_file', 'edit_file', 'run_code', 'ask_user_question', 'select_tools']);
+        });
+
+        it('never blocks a direct call in native or hybrid mode', () => {
+            for (const mode of ['native', 'hybrid'] as const) {
+                for (const toolName of ['run_code', 'ask_user_question', 'read_file', 'edit_file', 'select_tools']) {
+                    expect(isPtcDirectCallBlocked(mode, toolName), mode + '/' + toolName).to.be.false;
+                }
+            }
         });
     });
 
@@ -315,9 +365,13 @@ return res;
             const hasRunCode = initialTools.some(t => t.function.name === 'run_code');
             expect(hasRunCode).to.be.true;
 
-            // In PTC mode, projectModelFacingTools must project ONLY run_code
+            // ask_user_question must also be available from turn 1, or the PTC
+            // model would have no way to reach the tool that is projected to it.
+            expect(initialTools.some(t => t.function.name === 'ask_user_question')).to.be.true;
+
+            // In PTC mode the model-facing surface is run_code + ask_user_question
             const ptcModelFacing = projectModelFacingTools(initialTools, 'ptc');
-            expect(ptcModelFacing.map(t => t.function.name)).to.deep.equal(['run_code']);
+            expect(ptcModelFacing.map(t => t.function.name)).to.have.members(['run_code', 'ask_user_question']);
 
             // In NATIVE mode, projectModelFacingTools must exclude run_code
             const nativeModelFacing = projectModelFacingTools(initialTools, 'native');
@@ -325,31 +379,48 @@ return res;
             expect(nativeModelFacing.length).to.be.greaterThan(1);
         });
 
-        it('PTC rejection logic produces failed result for direct tool calls', () => {
-            const effectivePresentationMode: ToolPresentationMode = 'ptc';
-            const toolName: string = 'read_file';
-            const ci = { invocationId: 'inv_test_123', toolName, toolArgs: { file_path: 'foo.txt' } };
-            const steps: any[] = [];
-            const emitStep = (s: any) => steps.push(s);
+        it('blocks non-exempt direct tool calls in ptc mode', () => {
+            // These assertions run the same exported predicate the reasoning loop
+            // gates on, so a regression in the gate itself fails here.
+            expect(isPtcDirectCallBlocked('ptc', 'read_file')).to.be.true;
+            expect(isPtcDirectCallBlocked('ptc', 'edit_file')).to.be.true;
+            expect(isPtcDirectCallBlocked('ptc', 'run_command')).to.be.true;
+            expect(isPtcDirectCallBlocked('ptc', 'select_tools')).to.be.true;
+            expect(isPtcDirectCallBlocked('ptc', 'dispatch_agents')).to.be.true;
+        });
 
-            let toolResult: any;
-            if (effectivePresentationMode === 'ptc' && toolName !== 'run_code') {
-                const reason = `Tool '${toolName}' cannot be called directly in PTC mode. In PTC mode, only 'run_code' is available — write a program to call tools via await tools.${toolName}(...). ${PTC_ONLY_INSTRUCTION}`;
-                emitStep({
-                    type: 'validation',
-                    content: reason,
-                    timestamp: Date.now(),
-                    invocationId: ci.invocationId,
-                });
-                toolResult = { success: false, error: reason };
-            }
+        it('lets ptc mode reach ask_user_question directly, without the run_code hop', () => {
+            // ask_user_question waits on a human with no time budget, so it cannot
+            // be routed through a bounded run_code program; it stays directly
+            // callable in ptc while every other capability still requires run_code.
+            expect(isPtcDirectCallBlocked('ptc', 'ask_user_question')).to.be.false;
+            expect(isPtcDirectCallBlocked('ptc', 'run_code')).to.be.false;
+        });
 
-            expect(toolResult).to.deep.equal({
-                success: false,
-                error: "Tool 'read_file' cannot be called directly in PTC mode. In PTC mode, only 'run_code' is available — write a program to call tools via await tools.read_file(...). " + PTC_ONLY_INSTRUCTION,
-            });
-            expect(steps.map(s => s.type)).to.deep.equal(['validation']);
-            expect(steps[0].invocationId).to.equal('inv_test_123');
+        it('keeps ask_user_question out of the run_code capability pool', () => {
+            // The direct call is the ONLY route: a program must still not be able
+            // to call it, otherwise the exemption would not bound the wait.
+            const tools: ToolDefinition[] = [{
+                type: 'function',
+                function: {
+                    name: 'ask_user_question',
+                    description: 'Ask the user',
+                    parameters: { type: 'object', properties: {} },
+                },
+            }];
+            const snapshot = createRunCodeCapabilitySnapshot(tools);
+            expect(snapshot.names.has('ask_user_question')).to.be.false;
+        });
+
+        it('still rejects a ptc step that mixes a question with another call', () => {
+            // The sole-call rule is the pre-existing correctness constraint and
+            // must survive the exemption: asking and acting in one step would let
+            // the model act before the answer arrives.
+            expect(questionCallViolatesSoleCallRule(0, 1)).to.be.false;
+            expect(questionCallViolatesSoleCallRule(0, 2)).to.be.true;
+            expect(questionCallViolatesSoleCallRule(1, 2)).to.be.true;
+            expect(questionCallViolatesSoleCallRule(-1, 2)).to.be.false;
+            expect(questionCallViolatesSoleCallRule(-1, 1)).to.be.false;
         });
     });
 

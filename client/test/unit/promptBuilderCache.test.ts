@@ -5,8 +5,12 @@ import * as path from 'path';
 
 const TEMP_BASE = path.join(os.tmpdir(), 'cwtools-prompt-cache');
 
-let stubFlags: Record<string, boolean> = {};
+let stubFlags: Record<string, unknown> = {};
 let stubEditorLanguageId: string | undefined;
+const STELLARIS_CACHE_KEY = 'cache.stellaris';
+const GAME_ROOT_SECTION = '## Configured vanilla read roots';
+const OLD_VANILLA_ROOT = 'D:\\Games\\Stellaris';
+const NEW_VANILLA_ROOT = 'E:\\Games\\Stellaris';
 
 const vscodeStub = {
     workspace: {
@@ -31,6 +35,20 @@ const vscodeStub = {
     },
 };
 
+/**
+ * Every module that reads this stub's configuration through the frozen prompt
+ * path. A module keeps the vscode object it was bound to for the rest of the
+ * process, so whichever suite loaded them first would otherwise decide which
+ * configuration these tests see. They are reloaded together here and their
+ * previous cache entries restored afterwards, so this suite neither depends on
+ * load order nor leaves a stub-bound copy behind.
+ */
+const RELOADED_MODULES = [
+    '../../extension/configuredGameRoots',
+    '../../extension/ai/prompt/sections/gameRoots',
+    '../../extension/ai/promptBuilder',
+];
+
 function loadPromptBuilderModule() {
     const moduleLoader = require('module') as { _load: (...args: any[]) => any };
     const originalLoad = moduleLoader._load;
@@ -38,11 +56,22 @@ function loadPromptBuilderModule() {
         if (request === 'vscode') return vscodeStub;
         return originalLoad.apply(this, [request, ...args]);
     };
+    const saved = new Map<string, NodeModule | undefined>();
     try {
-        delete require.cache[require.resolve('../../extension/ai/promptBuilder')];
+        for (const id of RELOADED_MODULES) {
+            const resolved = require.resolve(id);
+            saved.set(resolved, require.cache[resolved]);
+            delete require.cache[resolved];
+        }
         return require('../../extension/ai/promptBuilder') as typeof import('../../extension/ai/promptBuilder');
     } finally {
         moduleLoader._load = originalLoad;
+        for (const id of RELOADED_MODULES) {
+            const resolved = require.resolve(id);
+            delete require.cache[resolved];
+            const previous = saved.get(resolved);
+            if (previous) require.cache[resolved] = previous;
+        }
     }
 }
 
@@ -131,6 +160,99 @@ describe('PromptBuilder frozen prompt fingerprint cache (plan §7.1)', () => {
         builder.buildFrozenSystemPrompt('build', 'deepseek', undefined, { toolsetHash: 'tools-b', domain: 'paradox' });
 
         expect(builder.getFrozenPromptCacheStats().missReasons.toolset_changed).to.equal(1);
+    });
+
+
+    it('invalidates with game_roots_changed when a configured vanilla root moves', () => {
+        stubFlags[STELLARIS_CACHE_KEY] = OLD_VANILLA_ROOT;
+        const builder = makeBuilder();
+        const first = builder.buildFrozenSystemPrompt('build', 'deepseek', 'stellaris', { toolsetHash: 'tools-a', domain: 'paradox' });
+        expect(first).to.include(GAME_ROOT_SECTION);
+        expect(first).to.include(OLD_VANILLA_ROOT);
+        const firstHash = builder.getLastFrozenPromptFingerprintHash();
+
+        stubFlags[STELLARIS_CACHE_KEY] = NEW_VANILLA_ROOT;
+        const rebuilt = builder.buildFrozenSystemPrompt('build', 'deepseek', 'stellaris', { toolsetHash: 'tools-a', domain: 'paradox' });
+
+        // The cached prompt named the previous install path, so the model would
+        // hand a dead path to read_file; the new entry must name the new one.
+        expect(rebuilt).to.include(NEW_VANILLA_ROOT);
+        expect(rebuilt).to.not.include(OLD_VANILLA_ROOT);
+        expect(builder.getLastFrozenPromptFingerprintHash()).to.not.equal(firstHash);
+        expect(builder.getLastFrozenPromptLookup()).to.deep.equal({ hit: false, missReason: 'game_roots_changed' });
+        const stats = builder.getFrozenPromptCacheStats();
+        expect(stats.missReasons.game_roots_changed).to.equal(1);
+        expect(stats.hits).to.equal(0);
+    });
+
+    it('invalidates with game_roots_changed when a root is added and again when it is removed', () => {
+        stubFlags[STELLARIS_CACHE_KEY] = OLD_VANILLA_ROOT;
+        const builder = makeBuilder();
+        builder.buildFrozenSystemPrompt('build', 'deepseek', 'stellaris', { toolsetHash: 'tools-a', domain: 'paradox' });
+
+        stubFlags['cache.eu4'] = NEW_VANILLA_ROOT;
+        const withTwoRoots = builder.buildFrozenSystemPrompt('build', 'deepseek', 'stellaris', { toolsetHash: 'tools-a', domain: 'paradox' });
+        expect(withTwoRoots).to.include(OLD_VANILLA_ROOT);
+        expect(withTwoRoots).to.include(NEW_VANILLA_ROOT);
+
+        stubFlags[STELLARIS_CACHE_KEY] = undefined;
+        stubFlags['cache.eu4'] = undefined;
+        const withoutRoots = builder.buildFrozenSystemPrompt('build', 'deepseek', 'stellaris', { toolsetHash: 'tools-a', domain: 'paradox' });
+        expect(withoutRoots).to.not.include(GAME_ROOT_SECTION);
+        expect(withoutRoots).to.not.include(OLD_VANILLA_ROOT);
+
+        expect(builder.getFrozenPromptCacheStats().missReasons.game_roots_changed).to.equal(2);
+    });
+
+    it('keeps hitting the cache while the configured vanilla root is unchanged', () => {
+        stubFlags[STELLARIS_CACHE_KEY] = OLD_VANILLA_ROOT;
+        const builder = makeBuilder();
+        const first = builder.buildFrozenSystemPrompt('build', 'deepseek', 'stellaris', { toolsetHash: 'tools-a', domain: 'paradox' });
+        const firstHash = builder.getLastFrozenPromptFingerprintHash();
+
+        const second = builder.buildFrozenSystemPrompt('build', 'deepseek', 'stellaris', { toolsetHash: 'tools-a', domain: 'paradox' });
+        const third = builder.buildFrozenSystemPrompt('build', 'deepseek', 'stellaris', { toolsetHash: 'tools-a', domain: 'paradox' });
+
+        expect(second).to.equal(first);
+        expect(third).to.equal(first);
+        expect(builder.getLastFrozenPromptFingerprintHash()).to.equal(firstHash);
+        const stats = builder.getFrozenPromptCacheStats();
+        expect(stats.hits).to.equal(2);
+        expect(stats.misses).to.equal(1);
+        expect(stats.missReasons.cold).to.equal(1);
+        expect(stats.missReasons.game_roots_changed).to.equal(undefined);
+        expect(stats.size).to.equal(1);
+    });
+
+    it('adds neither prompt bytes nor misses when no vanilla root is configured', () => {
+        const builder = makeBuilder();
+        const frozen = builder.buildFrozenSystemPrompt('build', 'deepseek', 'stellaris', { toolsetHash: 'tools-a', domain: 'paradox' });
+        // The direct build is what a cold build produces: the new fingerprint
+        // component must not reach the prompt text.
+        const direct = builder.buildSystemPromptForMode('build', 'deepseek', 'stellaris', undefined, undefined, undefined, false, false, 'paradox');
+
+        expect(frozen).to.equal(direct);
+        expect(frozen).to.not.include(GAME_ROOT_SECTION);
+        expect(frozen).to.include('Eddy CWTool Code');
+
+        expect(builder.buildFrozenSystemPrompt('build', 'deepseek', 'stellaris', { toolsetHash: 'tools-a', domain: 'paradox' })).to.equal(frozen);
+        const stats = builder.getFrozenPromptCacheStats();
+        expect(stats.hits).to.equal(1);
+        expect(stats.misses).to.equal(1);
+        expect(stats.missReasons.cold).to.equal(1);
+    });
+
+    it('leaves general-domain prompts cached when a Paradox vanilla root changes', () => {
+        stubFlags[STELLARIS_CACHE_KEY] = OLD_VANILLA_ROOT;
+        const builder = makeBuilder();
+        const first = builder.buildFrozenSystemPrompt('plan', 'deepseek', undefined, { toolsetHash: 'general-tools', domain: 'general' });
+
+        stubFlags[STELLARIS_CACHE_KEY] = NEW_VANILLA_ROOT;
+        const second = builder.buildFrozenSystemPrompt('plan', 'deepseek', undefined, { toolsetHash: 'general-tools', domain: 'general' });
+
+        expect(second).to.equal(first);
+        expect(second).to.not.include(GAME_ROOT_SECTION);
+        expect(builder.getFrozenPromptCacheStats().hits).to.equal(1);
     });
 
     it('rebuild:true forces a rebuild and counts a rebuild miss', () => {

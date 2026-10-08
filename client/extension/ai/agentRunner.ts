@@ -585,6 +585,32 @@ const RESUME_SNAPSHOT_MIN_INTERVAL_MS = 30_000;
 
 
 /**
+ * Tools the model may call directly while in PTC mode. run_code is the
+ * programmatic surface for everything else; ask_user_question is exempt
+ * because it waits on a human indefinitely, so it cannot live inside a
+ * bounded run_code execution window.
+ */
+const PTC_DIRECT_TOOLS = new Set(['run_code', 'ask_user_question']);
+
+/**
+ * Whether PTC mode rejects a direct tool call before it reaches the executor.
+ * Only the tools in PTC_DIRECT_TOOLS survive; everything else must be reached
+ * through a run_code program. Native and hybrid never block.
+ */
+export function isPtcDirectCallBlocked(mode: ToolPresentationMode, toolName: string): boolean {
+    return mode === 'ptc' && !PTC_DIRECT_TOOLS.has(toolName);
+}
+
+/**
+ * Whether a model step that contains an ask_user_question must be rejected
+ * because the question was not the only tool call in the response. Asking and
+ * acting in the same step would make the answer arrive too late to steer it.
+ */
+export function questionCallViolatesSoleCallRule(questionCallIndex: number, callCount: number): boolean {
+    return questionCallIndex >= 0 && callCount > 1;
+}
+
+/**
  * Projects available tool definitions to the model-facing schema array
  * based on the selected presentation mode (PTC vs Native vs Hybrid).
  */
@@ -594,7 +620,13 @@ export function projectModelFacingTools(
 ): ToolDefinition[] {
     const hasRunCode = tools.some(t => t.function.name === 'run_code');
     if (mode === 'ptc' && hasRunCode) {
-        return tools.filter(t => t.function.name === 'run_code');
+        // run_code carries the whole capability pool, so PTC keeps the schema
+        // surface to one tool. ask_user_question stays directly callable: it
+        // blocks on a human with no budget of its own, so routing it through a
+        // run_code program would put an unbounded wait inside a bounded
+        // execution window. It remains absent from the run_code capability
+        // snapshot (RUN_CODE_BLOCKED_TOOLS), so this is the only way to reach it.
+        return tools.filter(t => PTC_DIRECT_TOOLS.has(t.function.name));
     }
     if (mode === 'native') {
         return tools.filter(t => t.function.name !== 'run_code');
@@ -3869,7 +3901,7 @@ export class AgentRunner {
                 }
                 const { toolName, toolArgs } = ci;
 
-                if (effectivePresentationMode === 'ptc' && toolName !== 'run_code') {
+                if (isPtcDirectCallBlocked(effectivePresentationMode, toolName)) {
                     const reason = `Tool '${toolName}' cannot be called directly in PTC mode. In PTC mode, only 'run_code' is available — write a program to call tools via await tools.${toolName}(...). ${PTC_ONLY_INSTRUCTION}`;
                     emitStep({
                         type: 'validation',
@@ -3887,7 +3919,7 @@ export class AgentRunner {
                     continue;
                 }
 
-                if (questionCallIndex >= 0 && parsedCalls.length > 1) {
+                if (questionCallViolatesSoleCallRule(questionCallIndex, parsedCalls.length)) {
                     const reason = 'ask_user_question must be the only tool call in a model response. Retry with only the structured question call.';
                     toolResults[i] = { success: false, error: reason };
                     await runLedger.appendEvent(

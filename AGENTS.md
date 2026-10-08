@@ -100,6 +100,8 @@ changing these docs; it also regenerates `release/README.md` from `README.md`.
 
 Reuse shared platform helpers such as `gameProfiles.ts`, `indexing/`,
 `pathScope.ts`, and `fileExtensions.ts` rather than duplicating them.
+`pathScope.ts` holds only the pure path primitives; the read-path policy that
+applies them lives in `ai/workspaceSandbox.ts`.
 
 Submodules have separate ownership. Commit a `submodules/cwtools` change inside
 that submodule first, then update the root pointer. Treat

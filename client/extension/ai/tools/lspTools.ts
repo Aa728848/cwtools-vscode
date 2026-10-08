@@ -56,9 +56,17 @@ interface PdxTextSearchArgs {
 interface PdxTextSearchResult {
     files: Array<{
         logicalPath: string;
+        /**
+         * Absolute root `logicalPath` is relative to. Set only for vanilla hits:
+         * a workspace hit is already workspace-relative, a vanilla hit is not,
+         * and without the root the model cannot rebuild a readable path.
+         */
+        searchRoot?: string;
         matchingLines: Array<{ line: number; content: string }>;
     }>;
     searchedRoot?: string;
+    /** Structured form of `searchedRoot`; never re-parse the joined string. */
+    searchedRoots?: string[];
     totalFound?: number;
     _warning?: string;
     _nextSteps?: string[];
@@ -3448,6 +3456,7 @@ export class LspToolHandler {
                                 if (results.length < limit) {
                                     results.push({
                                         logicalPath: path.relative(searchRoot, file).replace(/\\/g, '/'),
+                                        searchRoot,
                                         matchingLines,
                                     });
                                 } else {
@@ -3460,9 +3469,14 @@ export class LspToolHandler {
             }
         }
 
+        // Sorted + deduplicated so the list is byte-stable across runs
+        // (prompt text and grep results must not depend on scan order).
+        const scannedRoots = [...new Set(searchedRoots.map(root => root.trim()).filter(Boolean))]
+            .sort((left, right) => left.localeCompare(right));
         const returnObj: any = {
             files: results,
-            searchedRoot: searchedRoots.join(', '),
+            searchedRoot: scannedRoots.join(', '),
+            searchedRoots: scannedRoots,
             totalFound: results.length,
         };
         if (results.length === 0) {
@@ -3927,18 +3941,27 @@ export class LspToolHandler {
             limit: args.limit,
             fileExtensions: args.fileExtensions,
         });
+        // A vanilla logicalPath is relative to its game root, so handing it to
+        // read_file as-is anchors it at the workspace root and ENOENTs. Rebuild the
+        // absolute path here and ship the scanned roots with the result.
+        const hasVanillaMatches = result.files.some(file => !!file.searchRoot);
         const matches = result.files.flatMap(file => file.matchingLines.map(line => ({
-            file: file.logicalPath,
+            file: file.searchRoot ? path.join(file.searchRoot, file.logicalPath) : file.logicalPath,
             line: line.line,
             content: line.content,
         })));
+        const searchedRoots = result.searchedRoots ?? [];
+        const rootHint = hasVanillaMatches
+            ? ' Vanilla matches are returned as absolute paths under a configured game root, and the scanned roots are listed in `searchedRoots`; pass such a `file` to `read_file`, `document_symbols`, or `get_pdx_block` unchanged instead of guessing a drive letter.'
+            : '';
         return {
             matches,
             totalMatches: result.totalFound ?? matches.length,
             truncated: !!result._warning?.toLowerCase().includes('limit'),
+            ...(searchedRoots.length > 0 ? { searchedRoots } : {}),
             ...(result._warning ? { _warning: result._warning } : {}),
             ...(result._nextSteps ? { _nextSteps: result._nextSteps } : {}),
-            ...(result._hint ? { _hint: result._hint } : {}),
+            ...(result._hint || rootHint ? { _hint: result._hint ? result._hint + rootHint : rootHint.trim() } : {}),
         };
     }
 

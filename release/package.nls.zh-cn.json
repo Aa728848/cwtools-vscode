@@ -128,7 +128,7 @@
   "configuration.stellarisLanguageServices.ai.agentFileWriteMode.enum.confirm": "写操作前弹出 diff 确认（默认，安全）",
   "configuration.stellarisLanguageServices.ai.agentFileWriteMode.enum.auto": "自动写入，无需确认（高级用户）",
   "configuration.stellarisLanguageServices.ai.agentFileWriteMode.description": "Agent 文件写入模式：confirm=弹出diff确认后写入，auto=直接写入",
-  "configuration.stellarisLanguageServices.ai.toolPresentationMode.enum.ptc": "PTC (代码模式) - 仅向模型暴露 run_code 与 Prompt SDK；通过编写脚本批量编排与执行工具调用，大幅减少上下文开销（推荐）",
+  "configuration.stellarisLanguageServices.ai.toolPresentationMode.enum.ptc": "PTC (代码模式) - 向模型暴露 run_code 与 Prompt SDK；通过编写脚本批量编排与执行工具调用，大幅减少上下文开销。ask_user_question 保持可直接调用，因为它会无限期等待你作答（推荐）",
   "configuration.stellarisLanguageServices.ai.toolPresentationMode.enum.native": "NATIVE (标准模式) - 向模型暴露全部原生工具 Schema；每轮直接进行标准函数调用",
   "configuration.stellarisLanguageServices.ai.toolPresentationMode.enum.hybrid": "HYBRID (混合模式) - 同时暴露原生工具 Schema 与 run_code",
   "configuration.stellarisLanguageServices.ai.toolPresentationMode.description": "智能体工具调用模式：'ptc'（代码模式/程序化调用）、'native'（标准函数调用）或 'hybrid'（混合模式）。",

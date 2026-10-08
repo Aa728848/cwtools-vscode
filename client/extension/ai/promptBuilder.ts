@@ -71,6 +71,8 @@ import {
     buildGeneralOrchestratorSystemPrompt,
 } from './prompt/sections/modePrompts';
 import { buildDelegationScopeStatement, type DelegationScopeFacts } from './prompt/sections/delegationScope';
+import { buildConfiguredGameRootReadScopeStatement } from './prompt/sections/gameRoots';
+import { getConfiguredGameRoots } from '../configuredGameRoots';
 import { buildSkillIndexPrompt, listSkills } from './skills';
 
 // ─── Frozen prompt fingerprint (plan §7.1) ──────────────────────────────────
@@ -81,7 +83,7 @@ import { buildSkillIndexPrompt, listSkills } from './skills';
  * shared policy text edited) so prompts cached by older builds are never
  * reused across extension updates (plan §7.1).
  */
-export const PROMPT_TEMPLATE_VERSION = 5;
+export const PROMPT_TEMPLATE_VERSION = 6;
 
 /**
  * Why a frozen system prompt lookup missed. Process-local diagnostics only —
@@ -95,6 +97,7 @@ export type FrozenPromptMissReason =
     | 'skills_changed'     // installed skill index changed
     | 'toolset_changed'    // filtered tool definition set changed
     | 'flag_changed'       // prompt-affecting feature flag changed
+    | 'game_roots_changed' // configured vanilla roots (cache.<gameId>) changed
     | 'fingerprint_missing'// a fingerprint component could not be computed
     | 'evicted'            // same fingerprint but the LRU entry was gone
     | 'rebuild';           // explicit AgentRunnerOptions.rebuildSystemPrompt
@@ -111,6 +114,8 @@ interface FrozenPromptFingerprintComponents {
     skillsHash: string;
     toolsetHash: string;
     flagsHash: string;
+    /** Configured vanilla roots: the main-agent read-scope statement bakes them in. */
+    gameRootsHash: string;
 }
 
 interface FrozenPromptFingerprint {
@@ -214,8 +219,8 @@ export class PromptBuilder {
     /** Frozen system prompt cache for prefix-cache optimization (DeepSeek etc.).
      *  Key: sha256 over the structured prompt fingerprint (template version,
      *  mode, provider, resolved game id, locale, CWTOOLS.md / project profile
-     *  content hashes, skill index hash, toolset hash, prompt-affecting flags)
-     *  — value is the cached prompt string (plan §7.1).
+     *  content hashes, skill index hash, toolset hash, prompt-affecting flags,
+     *  configured vanilla roots) — value is the cached prompt string (plan §7.1).
      *  Bounded by FROZEN_PROMPT_CACHE_MAX to guard against runaway growth from
      *  unexpected key explosion (e.g. providerId variations). LRU eviction relies
      *  on Map's insertion-order semantics. */
@@ -430,6 +435,13 @@ export class PromptBuilder {
         const skillsPrompt = this.getAgentSkillsPrompt(runtimeDomain);
         if (skillsPrompt) finalPrompt += '\n' + skillsPrompt;
 
+        // Configured vanilla roots reach delegated children through their sandbox;
+        // the coordinating agent needs the same statement in its own prompt.
+        if (runtimeDomain === 'paradox') {
+            const gameRootScope = buildConfiguredGameRootReadScopeStatement();
+            if (gameRootScope) finalPrompt += '\n\n' + gameRootScope;
+        }
+
         return finalPrompt;
     }
 
@@ -444,9 +456,10 @@ export class PromptBuilder {
      * PROMPT_TEMPLATE_VERSION, mode, providerId, the RESOLVED game language id
      * (never undefined — auto-detection used to leave the key segment empty),
      * locale, CWTOOLS.md and project-profile content hashes, skill index hash,
-     * the filtered toolset hash, and prompt-affecting feature flags. Any
-     * component change therefore produces a distinct entry instead of reusing a
-     * stale prompt.
+     * the filtered toolset hash, prompt-affecting feature flags, and the
+     * configured vanilla roots. Any component change therefore produces a
+     * distinct entry instead of reusing a stale prompt — including a moved game
+     * install, whose read-scope statement is part of the cached string.
      *
      * @param options.toolsetHash - hashToolDefinitionsForFingerprint() of the run's tool set
      * @param options.rebuild - AgentRunnerOptions.rebuildSystemPrompt: drop this
@@ -533,6 +546,7 @@ export class PromptBuilder {
         if (previous.skillsHash !== fingerprint.components.skillsHash) return 'skills_changed';
         if (previous.toolsetHash !== fingerprint.components.toolsetHash) return 'toolset_changed';
         if (previous.flagsHash !== fingerprint.components.flagsHash) return 'flag_changed';
+        if (previous.gameRootsHash !== fingerprint.components.gameRootsHash) return 'game_roots_changed';
         // Identical fingerprint but no cache entry: the LRU evicted it (or it was cleared).
         return 'evicted';
     }
@@ -551,6 +565,7 @@ export class PromptBuilder {
         let profileHash = 'unknown';
         let skillsHash = 'unknown';
         let flagsHash = 'unknown';
+        let gameRootsHash = 'unknown';
         try { gameId = domain === 'paradox' ? languageId ?? this.detectGameLanguageId() : 'general'; } catch { incomplete = true; }
         try { locale = getAiMessageLocale(); } catch { incomplete = true; }
         if (domain === 'paradox') {
@@ -563,6 +578,7 @@ export class PromptBuilder {
                 profileHash = profile ? shortSha256(JSON.stringify(profile)) : 'none';
             } catch { incomplete = true; }
             try { skillsHash = this.computeSkillsIndexHash(domain); } catch { incomplete = true; }
+            try { gameRootsHash = this.computeGameRootsHash(); } catch { incomplete = true; }
         } else {
             try {
                 const instructions = buildGeneralProjectInstructionsPrompt(this.workspaceRoot);
@@ -570,6 +586,9 @@ export class PromptBuilder {
             } catch { incomplete = true; }
             profileHash = 'none';
             try { skillsHash = this.computeSkillsIndexHash(domain); } catch { incomplete = true; }
+            // No read-root statement is injected for the general domain, so its
+            // fingerprints must not move when a Paradox install path changes.
+            gameRootsHash = 'none';
         }
         try { flagsHash = this.computePromptFlagsHash(); } catch { incomplete = true; }
         const components: FrozenPromptFingerprintComponents = {
@@ -584,6 +603,7 @@ export class PromptBuilder {
             skillsHash,
             toolsetHash: toolsetHash ?? '',
             flagsHash,
+            gameRootsHash,
         };
         return {
             hash: shortSha256(JSON.stringify(components), 24),
@@ -638,6 +658,18 @@ export class PromptBuilder {
                 return 'unreadable';
             }
         }).join('|');
+    }
+
+    /**
+     * Hash the vanilla roots configured under `stellarisLanguageServices.cache.<gameId>`.
+     * buildSystemPromptForMode appends their read-scope statement to the Paradox
+     * prompt, so a moved install must invalidate the frozen entry instead of
+     * leaving the model with a path that ENOENTs. getConfiguredGameRoots() already
+     * resolves, sorts, and deduplicates, so the serialization is stable.
+     */
+    private computeGameRootsHash(): string {
+        const roots = getConfiguredGameRoots().map(entry => `${entry.gameId}|${entry.root}`);
+        return roots.length > 0 ? shortSha256(roots.join('\n')) : 'none';
     }
 
     /** Feature flags that change prompt or tool message content (plan §7.1). */

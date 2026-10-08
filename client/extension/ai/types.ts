@@ -1331,6 +1331,13 @@ export interface GrepResult {
     matches: Array<{ file: string; line: number; content: string }>;
     totalMatches: number;
     truncated: boolean;
+    /**
+     * Absolute roots this search actually scanned, sorted and deduplicated.
+     * A vanilla match is reported as an absolute path already; workspace
+     * matches stay workspace-relative. Without this the model can only guess
+     * which root a relative `file` belongs to, and a guess fails in read_file.
+     */
+    searchedRoots?: string[];
     _warning?: string;
     _nextSteps?: string[];
     _hint?: string;

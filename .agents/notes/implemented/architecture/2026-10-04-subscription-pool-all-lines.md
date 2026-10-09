@@ -1,4 +1,4 @@
-# Agent Note: 号池接入全部订阅线路
+# Agent Note: 号池接入全部订阅线路与设置页草稿保护
 
 Status: implemented
 
@@ -78,6 +78,37 @@ Antigravity 也改为复用同一工厂，删掉了它自己那份等价实现�
 账号行（主账号标记、冷却倒计时、失效提示），以及「设为主账号」/「清除冷却」/「移除」。
 凭据材料不越过 Webview 边界——行里只有别名、路由状态与到期时刻。
 
+### 设置表单是草稿
+
+设置页的整张表单是一个**未保存草稿**：`settingsFormSignature()` 与 `settingsFormBaseline`
+（`client/webview/chatPanel.ts`）判定「有没有未保存改动」，账号状态与草稿的基线是分开的两回事。
+`showSettingsPage` 的调用者因此分成两类，由 `keepDraft`
+（`!reloadForm && !settingsSavePending && settingsHasUnsavedDraft()`）在**同一处**判定：
+
+- **可以丢草稿**：保存（`saveSettings` 置 `settingsSavePending`）、撤销（"Discard"）、首次打开
+  设置页（这两处调用点传 `reloadForm = true`）。这一路照旧从 `current` 整体重建表单，并在末尾
+  重新取基线。`reloadForm` 是**显式**信号而不是「有没有草稿」的推论：撤销按钮正是在用户有草稿
+  时才按的，靠推论会让它变成空操作；
+- **不能丢草稿**：其余每一次 `settingsData` 推送。登录完成、刷新账号、签到、号池变化都会调用
+  `buildAndSendSettingsData(true, ...)`，**一次推送同时带来账号状态与已保存配置**，而账号状态
+  只是又一份待展示数据。这一路**只**重画账号状态：短路的提前 `return` 位于全部表单字段写入之前，
+  于是 provider 下拉、endpoint、model、上下文、档位、草稿基线一律原样保留，也不重取基线。
+
+两条由此得出的规则：
+
+1. **重画账号状态必须按「下拉框当前值」而不是已保存的 provider 进行**。短路分支因此调用
+   `updateApiKeyStatus(selectedPoolProviderId() || savedProviderId, providers)`；否则用户在下拉里
+   选中 B 线后登录，会看到 A 线的账号卡片亮起「已登录」。各线路分支内的
+   `setAddAccountControl` / 账号状态 HTML 也就只作用于正在看的那条线路；
+2. **仅被表单编辑的字段才受草稿保护**。inline 补全与工具调用路由是**已保存偏好**而非
+   draft 字段（保存时从 DOM 读回，打开设置页时也由 `current` 重画并写回 DOM），所以草稿保护要
+   把 inline provider / inline model / translation provider / translation model 的当前值**跨重建
+   读回并复原**；`#settingsProvider` 的选项集合则照旧按最新的 provider 数据重建（它的取值来自
+   `current`），**只有选中项**遵循草稿；草稿选中的线路真的消失时回落到已保存线路。
+   由此 `updateTranslationModelSelect` / `updateInlineProviderSelect` / `updateInlineModelSelect`
+   提到模块级并显式接收 `providers` / `ollamaModels` / `savedProviderId`，不再从 `showSettingsPage`
+   的闭包里隐式取当前配置。
+
 三条必须一起遵守的渲染约束：
 
 1. **一次推送带上全部线路的池**（`subscriptionPools`，按 provider id 归类，而非单个
@@ -134,10 +165,27 @@ Antigravity 也改为复用同一工厂，删掉了它自己那份等价实现�
 容量与周期各成一个仪表、无时区周期时间按本地时间解析、只有余额的额度画成数值而不编造比例、
 边界校验丢弃无名称的仪表并夹取比例。
 
+`client/test/unit/settingsPageDraft.test.ts`（6 例）：设置页草稿保护。测试**不复制被测逻辑**——
+它用 TypeScript AST 从 `client/webview/chatPanel.ts` 里把 `showSettingsPage` 与
+`settingsFormSignature` / `settingsHasUnsavedDraft` / `renderSettingsProviderOptions` 的原函数体
+取出来，配一套最小 DOM 桩直接执行，因此断言的是随包发布的那条渲染路径。用例覆盖：草稿线路在
+带账号状态的 `settingsData` 重渲染后仍然是下拉框的选中项、账号状态按草稿线路重画（区分不同线路
+的账号卡片）、未改过 provider 时仍跟随已保存线路、保存后表单切换为已保存值且重取基线、
+provider 数据变化时选项集合更新而草稿选中项保留、草稿线路消失时回落到已保存线路、显式重载（撤销 / 打开设置页）确实丢弃草稿。
+
 ## Alternatives considered
 
 1. **为每条线路各写一份适配器**：否决。差异很小而共享规则很多，重复六遍必然漂移；
    工厂让差异集中在一处，可以被读出来。
+1b. **把「账号状态」从设置页签名里拆出去，签名不变就只重画账号区**：否决。签名里
+   `providers` / `current` / `ollamaModels` 都会随真实变化（拉取到模型目录、别处切换线路）
+   而变，签名相等只覆盖很小一部分刷新；据此分流会让「该重画却没重画」的路径变多。判定
+   「这次能不能丢草稿」的正确依据是**用户有没有草稿**，与账号状态怎么变无关。
+1c. **把「撤销」也交给 `settingsHasUnsavedDraft()` 推断**：否决。撤销按钮正是在有草稿时才按，
+   靠草稿存在来推断「这次要重建表单」会让撤销什么都不做；重载意图必须由调用点显式声明。
+1d. **在完整重渲染后显式复原全部草稿字段**：否决。要复原的字段清单会随表单增长而腐化，
+   而且 `settingsFormBaseline` 在重渲染开头被置空，复原时还得连着基线语义一起伪造；
+   与其枚举所有字段，不如不进入那段代码。
 2. **把线路特有的凭据字段丢掉，只存 token**：否决。区域、域、scope 都是**凭据属性**，
    丢掉它们会让请求发错区/失去订阅判据。
 3. **用令牌做身份键**：否决。令牌每次轮换都变，会产生幽灵账号。
@@ -165,6 +213,16 @@ Antigravity 也改为复用同一工厂，删掉了它自己那份等价实现�
 5. **Codex 登录不入池**。其余五条线路在登录回调里 `addAccount`，Codex 只写单凭据槽位，因此
    第二个 ChatGPT 账号存下来了却永远无法参与轮转。补上登录后入池的回调。
 6. **Codex 的号池区永不可见**：区块渲染调用位于 `isCodex` 分支的提前 `return` 之后。
+7. **登录完成把用户未保存的 provider 选择冲掉**。签名里混了「账号状态」与「表单/当前配置」
+   两类输入，于是只改变账号状态的一次推送也会让签名变化并走完整重渲染，从 `sel.innerHTML` 起
+   把整张表单按 `current` 重置回已保存线路——用户在下拉里选中 B 线登录，界面跳回 A 线。修复即
+   上面的「设置表单是草稿」：重画账号状态与重建表单分开，且账号状态按当前下拉值重画。
+   只修下拉框的选中项是不够的——那样 endpoint / model / 上下文 / 档位会停留在已保存线路的值，
+   表单会**自相矛盾**。
+8. **模型目录拉取后重建选项集合会丢掉草稿**：`apiModelsFetched` 就地更新
+   `settingsProviders` 的 `models` 并调用 `updateModelUI`，但下一次 `settingsData` 会带着
+   **新的 models 数组**回来，签名因此变化并触发整体重建。草稿保护把「选项集合跟着 provider
+   数据走、选中项跟着草稿走」拆开，这一条与上一条同因。
 
 ## Consequences
 
@@ -175,6 +233,13 @@ Antigravity 也改为复用同一工厂，删掉了它自己那份等价实现�
 - 摘要只含非凭据信息，卡片拿不到凭据材料。
 - 设置页按**当前选中的供应商**显示号池，切换下拉框立即跟随（无需先保存）；池动作也只作用于
   该线路。
+- 账号状态刷新（登录、刷新、签到、号池变化）**不再改动用户未保存的表单草稿**：下拉框、各字段与
+  「有未保存改动」提示都原样保留，而账号卡片仍按当前选中的线路即时更新。
+- 表单的草稿判定只有一处（`keepDraft`，基于 `reloadForm` / `settingsSavePending` /
+  `settingsHasUnsavedDraft()`），且「有未保存改动」的判定复用同一个签名函数，两处不会漂移。
+- 页面显隐收进 `presentSettingsPage(shouldShow)`（打开/重建与关闭共用一份实现），
+  `showSettingsPage` 本身**不再直接增删 `settingsPage` 的 `active` 类**：草稿短路分支只重画账号区，
+  不重新布局整张页面。
 - WorkBuddy 的模型下拉框由网关 `/v3/config` 的实时目录填充（内置表不列该线路模型）；读取
   失败保留上一次快照而不是清空。
 - **登录控件在有账号之后仍然可用**（改称「再添加一个账号」）：此前它被隐藏，使得一个账号

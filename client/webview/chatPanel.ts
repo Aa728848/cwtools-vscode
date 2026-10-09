@@ -3003,7 +3003,9 @@ let settingsSubscriptionPools: Record<string, any> = {};
             document.body.classList.add('artifact-drawer-open');
         }
         if (cachedSettingsData) {
-            showSettingsPage(cachedSettingsData.providers, cachedSettingsData.current, cachedSettingsData.ollamaModels);
+            // Opening the page always shows the saved configuration; a draft belongs
+            // to the visit that produced it.
+            showSettingsPage(cachedSettingsData.providers, cachedSettingsData.current, cachedSettingsData.ollamaModels, true);
         }
         vscode.postMessage({ type: 'openSettings' });
         topicsPanel.classList.remove('show');
@@ -3015,7 +3017,7 @@ let settingsSubscriptionPools: Record<string, any> = {};
     bindBtn('resetSettingsBtn', () => {
         if (!cachedSettingsData) return;
         lastSettingsPageSignature = '';
-        showSettingsPage(cachedSettingsData.providers, cachedSettingsData.current, cachedSettingsData.ollamaModels);
+        showSettingsPage(cachedSettingsData.providers, cachedSettingsData.current, cachedSettingsData.ollamaModels, true);
     });
     bindBtn('keyToggleBtn', () => { const k = document.getElementById('settingsApiKey') as HTMLInputElement | null; if (k) k.type = k.type === 'password' ? 'text' : 'password'; });
     bindBtn('fetchApiModelsBtn', () => { fetchApiModels(); });
@@ -3221,6 +3223,32 @@ let settingsSubscriptionPools: Record<string, any> = {};
         return JSON.stringify(Array.from(settingsPage.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>('input, select, textarea'))
             .filter(field => field.id !== 'skillSourceInput' && !field.closest('#subscriptionProxyGroup'))
             .map(field => [field.id || field.className, field instanceof HTMLInputElement && field.type === 'checkbox' ? field.checked : field.value]));
+    }
+
+    /**
+     * True when the form holds provider-line edits the user has not saved.
+     *
+     * `settingsFormSignature` is the same predicate the unsaved-changes indicator
+     * uses, so "the user has a draft" cannot drift between the two.
+     */
+    function settingsHasUnsavedDraft(): boolean {
+        return settingsFormBaseline !== null && settingsFormSignature() !== settingsFormBaseline;
+    }
+
+    /**
+     * Repaint #settingsProvider. `keepSelection` keeps whatever line the user has
+     * already picked in the dropdown, so the option list can follow the provider
+     * data without discarding an unsaved choice; a selection that no longer
+     * exists falls back to the saved line.
+     */
+    function renderSettingsProviderOptions(providers: any[], savedProviderId: string | undefined, keepSelection: boolean): void {
+        const sel = document.getElementById('settingsProvider') as HTMLSelectElement | null;
+        if (!sel) return;
+        const draftProviderId = keepSelection ? sel.value : '';
+        const target = draftProviderId && (providers || []).some((p: any) => p.id === draftProviderId)
+            ? draftProviderId
+            : savedProviderId;
+        sel.innerHTML = (providers || []).map((p: any) => '<option value="' + p.id + '"' + (p.id === target ? ' selected' : '') + '>' + escapeHtml(p.name) + '</option>').join('');
     }
 
     function refreshSettingsDraftStatus(): void {
@@ -7990,7 +8018,149 @@ let settingsSubscriptionPools: Record<string, any> = {};
         );
     }
 
-    function showSettingsPage(providers: any[], current: any, ollamaModels: any[]) {
+    /** Show the settings page on its surface, or hide it when it is being closed. */
+    function presentSettingsPage(shouldShow: boolean): void {
+        if (shouldShow) {
+            settingsPage.classList.add('active');
+            if (shouldUseSideWorkspace()) {
+                settingsInSideWorkspace = true;
+                responsiveWorkspacePinnedClosed = !!activeResponsiveWorkspace;
+                openSideWorkspace({
+                    title: chatI18n.locale === 'zh-cn' ? 'AI 设置' : 'AI Settings',
+                    subtitle: chatI18n.locale === 'zh-cn' ? '模型、上下文、API 和工具' : 'Models, context, API, and tools',
+                    content: settingsPage,
+                });
+            } else {
+                settingsInSideWorkspace = false;
+                closeSideWorkspace({ preserveResponsivePin: true });
+                chatHeader.style.display = 'none';
+                document.getElementById('chatArea')!.style.display = 'none';
+                if (inputWrapper) inputWrapper.style.display = 'none';
+                if (todoPanel) todoPanel.style.display = 'none';
+            }
+            const result = document.getElementById('testResult');
+            if (result) { result.className = 'test-result'; result.textContent = ''; }
+            return;
+        }
+        settingsPage.classList.remove('active');
+        chatHeader.style.display = '';
+        document.getElementById('chatArea')!.style.display = 'flex';
+        if (inputWrapper) inputWrapper.style.display = '';
+        if (todoPanel) todoPanel.style.display = '';
+    }
+
+    /** Paint the utility-line dropdown and its model field for one selection. */
+    function updateTranslationModelSelect(
+        sel: HTMLSelectElement | null,
+        pid: string,
+        selectedModel: string,
+        providers: any[],
+        ollamaModels: any[],
+        fallbackProviderId: string,
+    ): void {
+        const inheritChat = !pid;
+        const effectiveProvider = pid || fallbackProviderId;
+        const providerDef = providers.find((p: any) => p.id === effectiveProvider);
+        const models: string[] = inheritChat ? [] : effectiveProvider === 'ollama'
+            ? (ollamaModels || []).map((m: any) => m.name)
+            : (providerDef ? providerDef.models : []);
+        const input = document.getElementById('translationPreviewModelInput') as HTMLInputElement | null;
+        if (sel) sel.value = pid;
+        if (!input) return;
+        input.disabled = inheritChat;
+        input.value = inheritChat ? '' : (selectedModel || '');
+        input.placeholder = inheritChat
+            ? tr('Inherits the chat model', '继承对话模型')
+            : tr('Leave empty to use provider default', '留空使用提供商默认模型');
+        setupApDropdown('translationPreviewModelInput', 'translationPreviewModelDatalist', () => models);
+    }
+
+    /** Paint #inlineProvider from the FIM-capable lines, keeping the current choice. */
+    function updateInlineProviderSelect(providers: any[], savedProviderId: string): void {
+        const sel = document.getElementById('inlineProvider') as HTMLSelectElement | null;
+        if (!sel) return;
+        const currentPid = sel.value;
+        // Only FIM-capable providers can be used for inline completion
+        const filteredProviders = providers.filter((p: any) => p.supportsFIM);
+        // Can we allow "Same as chat"? Only if the chat provider supports FIM.
+        const chatProviderDef = providers.find((p: any) => p.id === savedProviderId);
+        const chatSupportsFIM = chatProviderDef ? chatProviderDef.supportsFIM : false;
+
+        let html = '';
+        if (chatSupportsFIM) {
+            html += `<option value="">${tr('- Same as chat -', '- 与对话相同 -')}</option>`;
+        }
+        html += filteredProviders.map((p: any) => '<option value="' + p.id + '"' + (p.id === currentPid ? ' selected' : '') + '>' + escapeHtml(p.name) + '</option>').join('');
+
+        sel.innerHTML = html;
+
+        // If the current selection is invalid (e.g., "Same as chat" but chat doesn't support FIM, or the provider was removed), auto-select a valid one.
+        if ((currentPid === '' && !chatSupportsFIM) || (currentPid !== '' && !filteredProviders.find((p: any) => p.id === currentPid))) {
+            sel.value = filteredProviders.find((p: ProviderMeta) => p.authKind !== 'antigravity-oauth')?.id || '';
+        }
+    }
+
+    /** Paint #inlineModelInput for one inline line, keeping the model the user has. */
+    function updateInlineModelSelect(pid: string, selectedModel: string, providers: any[], ollamaModels: any[], fallbackProviderId: string): void {
+        const p2 = providers.find((p: any) => p.id === (pid || fallbackProviderId));
+        let ms: string[] = (pid || fallbackProviderId) === 'ollama' ? (ollamaModels || []).map((m: any) => m.name) : (p2 ? p2.inlineModels ?? p2.models : []);
+        // Filter out thinking/reasoning models — they can't do inline completion
+        ms = ms.filter((m: string) => !settingsThinkingPrefixes.some(prefix => m.toLowerCase().includes(prefix.toLowerCase())));
+
+        // Always filter out non-FIM models since fallback Chat Mode is removed
+        if (p2) {
+            const fimRules = [
+                { key: 'deepseek-flash', capable: true },
+                { key: 'deepseek-v4-pro', capable: true },
+                { key: 'deepseek-v4-flash', capable: true },
+                { key: 'deepseek-coder', capable: true },
+                { key: 'qwen2.5-coder', capable: true },
+                { key: 'codellama', capable: true },
+                { key: 'starcoder', capable: true },
+                { key: 'qwen', capable: false }, // Catch-all for non-coder qwen
+                { key: 'gpt-', capable: false },
+                { key: 'claude-', capable: false },
+                { key: 'gemini-', capable: false }
+            ];
+            ms = ms.filter((m: string) => {
+                if (!m) return p2.supportsFIM;
+                const lower = m.toLowerCase();
+                for (const rule of fimRules) {
+                    if (lower.includes(rule.key)) return rule.capable;
+                }
+                return p2.supportsFIM;
+            });
+        }
+
+        const inp = document.getElementById('inlineModelInput') as HTMLInputElement;
+        inp.value = p2?.inlineModels ? (ms.includes(selectedModel) ? selectedModel : ms[0] || '') : selectedModel || '';
+
+        setupApDropdown('inlineModelInput', 'inlineModelDatalist', () => ms);
+    }
+
+    /**
+     * Paint the settings page from a settingsData payload.
+     *
+     * `reloadForm` is the caller saying "start over from `current`" (opening the
+     * page, discarding the draft); a save says the same by setting
+     * `settingsSavePending`. Without either, the push is treated as what it
+     * usually is — account state that happened to travel with the saved
+     * configuration — and the user's unsaved edits are left alone.
+     */
+    function showSettingsPage(providers: any[], current: any, ollamaModels: any[], reloadForm = false) {
+        const keepDraft = !reloadForm && !settingsSavePending && settingsHasUnsavedDraft();
+        const inlineDraftProviderId = keepDraft
+            ? (document.getElementById('inlineProvider') as HTMLSelectElement | null)?.value
+            : undefined;
+        const inlineDraftModel = keepDraft
+            ? (document.getElementById('inlineModelInput') as HTMLInputElement | null)?.value
+            : undefined;
+        const translationDraftProviderId = keepDraft
+            ? (document.getElementById('translationPreviewProvider') as HTMLSelectElement | null)?.value
+            : undefined;
+        const translationDraftModel = keepDraft
+            ? (document.getElementById('translationPreviewModelInput') as HTMLInputElement | null)?.value
+            : undefined;
         settingsProviders = providers;
         settingsOllamaModels = ollamaModels || [];
         // Seed the per-provider endpoint map so switching providers swaps the field value.
@@ -8034,11 +8204,41 @@ let settingsSubscriptionPools: Record<string, any> = {};
             return;
         }
         lastSettingsPageSignature = settingsPageSignature;
+        const savedProviderIdSafe = (current?.provider as string | undefined) || '';
+        const savedInlineProviderId = (current?.inlineCompletion?.provider as string | undefined) || '';
+        const savedTranslationProviderId = (current?.translationPreview?.provider as string | undefined) || '';
+        if (keepDraft) {
+            // Nothing belongs to this push except the account state; keep every
+            // field and the unsaved-changes baseline exactly as the user left them.
+            renderSettingsProviderOptions(providers, savedProviderIdSafe, true);
+            updateInlineProviderSelect(providers, savedInlineProviderId);
+            const inlineSelInDraft = document.getElementById('inlineProvider') as HTMLSelectElement | null;
+            const inlineAvailable = inlineSelInDraft ? Array.from(inlineSelInDraft.options).map(option => option.value) : [];
+            if (inlineSelInDraft && inlineDraftProviderId !== undefined && inlineAvailable.includes(inlineDraftProviderId)) {
+                inlineSelInDraft.value = inlineDraftProviderId;
+            }
+            updateInlineModelSelect(inlineSelInDraft?.value || savedInlineProviderId, inlineDraftModel ?? '', providers, ollamaModels, savedProviderIdSafe);
+            updateTranslationModelSelect(
+                document.getElementById('translationPreviewProvider') as HTMLSelectElement | null,
+                translationDraftProviderId !== undefined && translationDraftProviderId !== savedTranslationProviderId
+                    ? translationDraftProviderId
+                    : savedTranslationProviderId,
+                translationDraftModel ?? '',
+                providers,
+                ollamaModels,
+                savedProviderIdSafe,
+            );
+            updateApiKeyStatus(selectedPoolProviderId() || savedProviderIdSafe, providers);
+            refreshSettingsOverview();
+            refreshSettingsDraftStatus();
+            return;
+        }
         settingsFormBaseline = null;
-        const sel = document.getElementById('settingsProvider') as HTMLSelectElement;
-        sel.innerHTML = providers.map((p: any) => '<option value="' + p.id + '"' + (p.id === current.provider ? ' selected' : '') + '>' + escapeHtml(p.name) + '</option>').join('');
+        renderSettingsProviderOptions(providers, savedProviderIdSafe, false);
         const inlineSel = document.getElementById('inlineProvider') as HTMLSelectElement;
-        inlineSel.innerHTML = `<option value="">${tr('- Same as chat -', '- 与对话相同 -')}</option>` + providers.map((p: any) => '<option value="' + p.id + '"' + (p.id === current.inlineCompletion?.provider ? ' selected' : '') + '>' + escapeHtml(p.name) + '</option>').join('');
+        // The inline line is a saved preference rather than a field the form edits,
+        // so it is painted from `current` and read back by saveSettings.
+        inlineSel.innerHTML = `<option value="">${tr('- Same as chat -', '- 与对话相同 -')}</option>` + providers.map((p: any) => '<option value="' + p.id + '"' + (p.id === savedInlineProviderId ? ' selected' : '') + '>' + escapeHtml(p.name) + '</option>').join('');
         const translationProviderSel = document.getElementById('translationPreviewProvider') as HTMLSelectElement;
         if (translationProviderSel) {
             const utilityProviders = providers.filter((p: any) => p.supportsUtilityCalls !== false);
@@ -8174,114 +8374,20 @@ let settingsSubscriptionPools: Record<string, any> = {};
             };
         });
 
-        function updateTranslationModelSelect(pid: string, selectedModel: string, ollamaModels: any[]) {
-            const inheritChat = !pid;
-            const effectiveProvider = pid || current.provider;
-            const providerDef = providers.find((p: any) => p.id === effectiveProvider);
-            const models: string[] = inheritChat ? [] : effectiveProvider === 'ollama'
-                ? (ollamaModels || []).map((m: any) => m.name)
-                : (providerDef ? providerDef.models : []);
-            const input = document.getElementById('translationPreviewModelInput') as HTMLInputElement | null;
-            if (!input) return;
-            input.disabled = inheritChat;
-            input.value = inheritChat ? '' : (selectedModel || '');
-            input.placeholder = inheritChat
-                ? tr('Inherits the chat model', '继承对话模型')
-                : tr('Leave empty to use provider default', '留空使用提供商默认模型');
-            setupApDropdown('translationPreviewModelInput', 'translationPreviewModelDatalist', () => models);
-        }
-
-        function updateInlineProviderSelect() {
-            const currentPid = inlineSel.value;
-            // Only FIM-capable providers can be used for inline completion
-            const filteredProviders = providers.filter((p: any) => p.supportsFIM);
-            
-            // Can we allow "Same as chat"? Only if the chat provider supports FIM.
-            const chatProviderDef = providers.find((p: any) => p.id === current.provider);
-            const chatSupportsFIM = chatProviderDef ? chatProviderDef.supportsFIM : false;
-            
-            let html = '';
-            if (chatSupportsFIM) {
-                html += `<option value="">${tr('- Same as chat -', '- 与对话相同 -')}</option>`;
-            }
-            html += filteredProviders.map((p: any) => '<option value="' + p.id + '"' + (p.id === currentPid ? ' selected' : '') + '>' + escapeHtml(p.name) + '</option>').join('');
-            
-            inlineSel.innerHTML = html;
-
-            // If the current selection is invalid (e.g., "Same as chat" but chat doesn't support FIM, or the provider was removed), auto-select a valid one.
-            if ((currentPid === '' && !chatSupportsFIM) || (currentPid !== '' && !filteredProviders.find((p: any) => p.id === currentPid))) {
-                inlineSel.value = filteredProviders.find((p: ProviderMeta) => p.authKind !== 'antigravity-oauth')?.id || '';
-            }
-        }
-
-        function updateInlineModelSelect(pid: string, selectedModel: string, ollamaModels: any[]) {
-            const p2 = providers.find((p: any) => p.id === (pid || current.provider));
-            let ms: string[] = (pid || current.provider) === 'ollama' ? (ollamaModels || []).map((m: any) => m.name) : (p2 ? p2.inlineModels ?? p2.models : []);
-            // Filter out thinking/reasoning models — they can't do inline completion
-            ms = ms.filter((m: string) => !settingsThinkingPrefixes.some(prefix => m.toLowerCase().includes(prefix.toLowerCase())));
-
-            // Always filter out non-FIM models since fallback Chat Mode is removed
-            if (p2) {
-                const fimRules = [
-                    { key: 'deepseek-flash', capable: true },
-                    { key: 'deepseek-v4-pro', capable: true },
-                    { key: 'deepseek-v4-flash', capable: true },
-                    { key: 'deepseek-coder', capable: true },
-                    { key: 'qwen2.5-coder', capable: true },
-                    { key: 'codellama', capable: true },
-                    { key: 'starcoder', capable: true },
-                    { key: 'qwen', capable: false }, // Catch-all for non-coder qwen
-                    { key: 'gpt-', capable: false },
-                    { key: 'claude-', capable: false },
-                    { key: 'gemini-', capable: false }
-                ];
-                ms = ms.filter((m: string) => {
-                    if (!m) return p2.supportsFIM;
-                    const lower = m.toLowerCase();
-                    for (const rule of fimRules) {
-                        if (lower.includes(rule.key)) return rule.capable;
-                    }
-                    return p2.supportsFIM;
-                });
-            }
-
-            const inp = document.getElementById('inlineModelInput') as HTMLInputElement;
-            inp.value = p2?.inlineModels ? (ms.includes(selectedModel) ? selectedModel : ms[0] || '') : selectedModel || '';
-
-            setupApDropdown('inlineModelInput', 'inlineModelDatalist', () => ms);
-        }
         const inlineProviderSel = document.getElementById('inlineProvider') as HTMLSelectElement;
         const translationPreviewProviderSel = document.getElementById('translationPreviewProvider') as HTMLSelectElement | null;
 
-        updateTranslationModelSelect(translationProviderSel?.value || '', current.translationPreview?.model, ollamaModels);
+        updateTranslationModelSelect(translationProviderSel, translationProviderSel?.value || '', current.translationPreview?.model, providers, ollamaModels, savedProviderIdSafe);
         if (translationPreviewProviderSel) {
-            translationPreviewProviderSel.onchange = () => updateTranslationModelSelect(translationPreviewProviderSel.value, '', ollamaModels);
+            translationPreviewProviderSel.onchange = () => updateTranslationModelSelect(translationPreviewProviderSel, translationPreviewProviderSel.value, '', providers, ollamaModels, savedProviderIdSafe);
         }
-        updateInlineProviderSelect();
-        updateInlineModelSelect(current.inlineCompletion?.provider, current.inlineCompletion?.model, ollamaModels);
-        inlineProviderSel.onchange = () => updateInlineModelSelect(inlineProviderSel.value, '', ollamaModels);
+        updateInlineProviderSelect(providers, savedInlineProviderId);
+        updateInlineModelSelect(current.inlineCompletion?.provider, current.inlineCompletion?.model, providers, ollamaModels, savedProviderIdSafe);
+        inlineProviderSel.onchange = () => updateInlineModelSelect(inlineProviderSel.value, '', providers, ollamaModels, savedProviderIdSafe);
         updateCustomApiFormatUI(current.provider);
         updateModelUI(current.provider, current.model, ollamaModels);
         updateApiKeyStatus(current.provider, providers);
-        settingsPage.classList.add('active');
-        if (shouldUseSideWorkspace()) {
-            settingsInSideWorkspace = true;
-            responsiveWorkspacePinnedClosed = !!activeResponsiveWorkspace;
-            openSideWorkspace({
-                title: chatI18n.locale === 'zh-cn' ? 'AI 设置' : 'AI Settings',
-                subtitle: chatI18n.locale === 'zh-cn' ? '模型、上下文、API 和工具' : 'Models, context, API, and tools',
-                content: settingsPage,
-            });
-        } else {
-            settingsInSideWorkspace = false;
-            closeSideWorkspace({ preserveResponsivePin: true });
-            chatHeader.style.display = 'none';
-            document.getElementById('chatArea')!.style.display = 'none';
-            if (inputWrapper) inputWrapper.style.display = 'none';
-            if (todoPanel) todoPanel.style.display = 'none';
-        }
-        const _tr = document.getElementById('testResult');
-        if (_tr) { _tr.className = 'test-result'; _tr.textContent = ''; }
+        presentSettingsPage(true);
         refreshSettingsOverview();
         settingsSavePending = false;
         settingsFormBaseline = settingsFormSignature();
@@ -8378,11 +8484,7 @@ let settingsSubscriptionPools: Record<string, any> = {};
             syncResponsiveWorkspaceLayout();
             return;
         }
-        settingsPage.classList.remove('active');
-        chatHeader.style.display = '';
-        document.getElementById('chatArea')!.style.display = 'flex';
-        if (inputWrapper) inputWrapper.style.display = '';
-        if (todoPanel) todoPanel.style.display = '';
+        presentSettingsPage(false);
     }
 
     function updateSubscriptionProxyUrlVisibility(): void {

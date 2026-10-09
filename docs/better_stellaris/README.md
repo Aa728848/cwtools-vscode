@@ -27,6 +27,7 @@
 | [15_silent_corruption_bugs.md](15_silent_corruption_bugs.md) | ⚠️ **静默数据损坏类 bug**（不是性能问题）：flag 名字表耗尽、`set_design_flag` 写进全局 flag（原版专家特权会删错设计）、TPdxRef 代号回绕、空对象被污染、AI 结果不可复现 |
 | [14_trigger_cost_catalog.md](14_trigger_cost_catalog.md) | **trigger 开销速查表**（约 100 个常用 trigger，按 O(1) / 线性 / 隐藏循环 / 求值脚本分级，附"贵 → 便宜"替换表） |
 | [10_effect_side_costs.md](10_effect_side_costs.md) | 约 40 个常用 effect 的直接开销与隐藏副作用（同步/延后），含物种爆炸、延迟事件队列、建筑与岗位重算 |
+| [16_combat_damage_resolution.md](16_combat_damage_resolution.md) | ⚠️ **伤害结算公式**（不是性能问题）：4.5.2 `CalcDamage` 三层分配模型、武器字段 ↔ 结构偏移对照、23 组算例；2026-10-08 已完成逐条源码核验 |
 | [tools/](tools/) | 分析工具：建索引、按函数名提取函数体或调用序列 |
 
 ## Top 18 汇总（按估计的实际影响排序）

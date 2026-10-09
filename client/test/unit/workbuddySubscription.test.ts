@@ -394,7 +394,7 @@ describe('WorkBuddy model catalog', () => {
 
     it('maps the listing to the context windows DSH uses for compaction', () => {
         expect(workBuddyContextWindows([
-            { id: 'a', name: 'a', contextWindow: 100, maxContextWindow: 200, maxTokens: 1, supportsImage: false, reasoningEfforts: [], defaultReasoningEffort: null, canDisableThinking: false, description: '' },
+            { id: 'a', name: 'a', contextWindow: 100, maxContextWindow: 200, maxTokens: 1, regions: ['cn'], supportsImage: false, reasoningEfforts: [], defaultReasoningEffort: null, canDisableThinking: false, description: '' },
         ])).to.deep.equal({ a: 100 });
     });
 
@@ -407,8 +407,12 @@ describe('WorkBuddy model catalog', () => {
             backend: 'https://www.workbuddy.ai', region: 'intl', headers: {},
             fetchFn: async () => json({ data: { models: [{ id: 'intl-model', maxAllowedSize: 2000 }] } }),
         });
-        expect(intl.map(model => model.id)).to.deep.equal(['intl-model']);
+        // The intl snapshot carries its own model plus the served-but-unpublished rows of
+        // that region, and never the other region's model.
+        expect(intl.map(model => model.id)).to.include('intl-model');
+        expect(intl.map(model => model.id)).to.not.include('cn-model');
         expect(workBuddyEffortsFor('intl-model')).to.deep.equal([]);
+        expect(workBuddyEffortsFor('cn-model')).to.deep.equal([]);
     });
 
     it('keeps the previous snapshot when a refresh fails', async () => {

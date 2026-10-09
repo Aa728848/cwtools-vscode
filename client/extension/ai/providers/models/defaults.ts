@@ -716,7 +716,12 @@ export const BUILTIN_PROVIDERS: Record<string, AIProviderConfig> = {
         registerUrl: 'https://www.codebuddy.cn/',
         name: 'WorkBuddy (CodeBuddy 订阅)',
         endpoint: 'https://copilot.tencent.com',
-        defaultModel: '',
+        // glm-5.3 leads the shipped selection and is the one flagship both regions serve,
+        // so it is the only id safe to name before an account's region is known: asking a
+        // region for a model it does not serve answers 400 code 11102. The list stays
+        // empty because the runtime fills it from the live /v3/config listing, falling
+        // back to the shipped table when the gateway cannot be reached.
+        defaultModel: 'glm-5.3',
         models: [],
         supportsToolUse: true,
         requiresApiKey: false,

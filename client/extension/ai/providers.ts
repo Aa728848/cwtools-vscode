@@ -37,6 +37,7 @@ import {
     getAnthropicModelFeatures
 } from './providers/models/capabilities';
 import { minimaxCodeModelDef, minimaxCodeOutputConfig } from './minimaxcode/types';
+import { resolveWorkBuddyCatalogEntry } from './workbuddy/modelCatalog';
 import { commandCodeReasoningEfforts, commandCodeWireEffort } from './commandcode/modelCapabilities';
 import {
     CLAUDE_CODE_IDENTITY_TEXT,
@@ -611,6 +612,33 @@ export function getModelReasoningCapability(
         }
         if (/minimax-m3/.test(lower)) return reasoningCapability('toggle', ['none', 'high'], 'high');
         return reasoningCapability('fixed', ['high'], 'high');
+    }
+    if (provider === 'workbuddy-subscription') {
+        // The gateway's catalog is the authority on a model's ladder, with the shipped
+        // table as the offline fallback. One shared resolver answers both, so the
+        // settings card and the request path can never disagree about a level, and an
+        // id neither source describes declares no ladder rather than inheriting a
+        // neighbour's capabilities.
+        //
+        // `none` means "skip thinking" and is offered only when the catalog says this
+        // model can be asked to skip it: the gateway answers an unsupported level with
+        // 400 code 11150. Every other level passes the ReasoningEffort filter, which is
+        // the vocabulary the control can express.
+        //
+        // The default comes resolved from the same read-time convergence the request
+        // path uses. The gateway names it from a wider vocabulary than the ladder it
+        // publishes (`medium` on a `low`/`high`/`max` model), and a capability whose
+        // defaultValue is absent from its own options renders a dead control —
+        // normalizeReasoningEffort would silently snap it to options[0].
+        const entry = resolveWorkBuddyCatalogEntry(model);
+        const efforts = (entry?.reasoningEfforts ?? []).filter(isReasoningEffort);
+        if (efforts.length === 0) return NO_REASONING;
+        const options: ReasoningEffort[] = entry?.canDisableThinking === true ? ['none', ...efforts] : efforts;
+        const declared = entry?.defaultReasoningEffort;
+        const defaultValue = declared !== null && declared !== undefined && options.includes(declared as ReasoningEffort)
+            ? declared as ReasoningEffort
+            : options[0]!;
+        return reasoningCapability('effort', options, defaultValue);
     }
     if (provider === 'kimi' || provider === 'kimi-code-plan') {
         if (/(?:^|\/)(?:kimi-)?k3(?:-|$)/.test(lower)) {

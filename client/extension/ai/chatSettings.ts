@@ -19,7 +19,8 @@ import type { AntigravityLogin } from './antigravity/oauthService';
 import type { CommandCodeLogin } from './commandcode/oauthService';
 import { getKimiCodeAccountStatus } from './kimi/accountStatus';
 import { summarizeWorkBuddyAccounts } from './workbuddy/accountStatus';
-import { loadWorkBuddyCatalog, workBuddyContextWindows } from './workbuddy/modelCatalog';
+import { loadWorkBuddyCatalog, workBuddyCatalogForSettings, workBuddyContextWindows } from './workbuddy/modelCatalog';
+import { DEFAULT_VISIBLE_MODEL_IDS } from './workbuddy/fallbackModels';
 import { workBuddyHeaders } from './workbuddy/client';
 import type { WorkBuddyLogin } from './workbuddy/client';
 import { isMinimaxCodeCredentialFresh } from './minimaxcode/credentials';
@@ -358,22 +359,39 @@ export class ChatSettingsManager {
             )
             : undefined;
         // The gateway's own /v3/config is the authority on both the model list and
-        // each model's window. The shipped table names no WorkBuddy model, so the
-        // live catalog is what fills the dropdown; a failed read keeps the last
-        // snapshot rather than emptying it.
-        const workBuddyCatalog = showPanel || config.provider === 'workbuddy-subscription'
-            ? await (async () => {
-                const selection = await this.aiService.getWorkBuddyCredential();
-                if (!selection) return [];
-                return await loadWorkBuddyCatalog({
-                    backend: selection.credentials.backend,
-                    region: selection.credentials.region,
-                    headers: workBuddyHeaders(selection.credentials),
-                    fetchFn: this.aiService.getSubscriptionProxyService().fetch,
-                }).catch(() => []);
-            })()
-            : [];
-        const workBuddyWindows = workBuddyContextWindows(workBuddyCatalog);
+        // each model's window; a failed read keeps the last snapshot rather than
+        // emptying it. Before sign-in there is no account to ask about, so the
+        // dropdown falls back to the shipped table filtered by region — an empty
+        // list would leave the user unable to see, let alone pick, a model.
+        const workBuddySelection = showPanel || config.provider === 'workbuddy-subscription'
+            ? await this.aiService.getWorkBuddyCredential()
+            : undefined;
+        const workBuddyRegion = workBuddySelection?.credentials.region;
+        // The load warms the module cache that workBuddyCatalogForSettings reads next.
+        // Its own failure path already substitutes this region's previous snapshot, so the
+        // catch here only covers a total failure and still leaves the shipped table to
+        // answer.
+        if (workBuddySelection) {
+            await loadWorkBuddyCatalog({
+                backend: workBuddySelection.credentials.backend,
+                region: workBuddySelection.credentials.region,
+                headers: workBuddyHeaders(workBuddySelection.credentials),
+                fetchFn: this.aiService.getSubscriptionProxyService().fetch,
+            }).catch(() => []);
+        }
+        // Region unknown (no credential yet) is the two-region union: the region lists
+        // are not nested, so naming only one would hide the models the other region's
+        // account can actually call.
+        const workBuddySettings = workBuddyCatalogForSettings(workBuddyRegion);
+        const workBuddyModels = workBuddySettings.models;
+        // The card's first option would otherwise become the default, and the list leads
+        // with the gateway's own routing aliases (`default` / `default-model`) rather than
+        // a flagship. Naming the shipped default here keeps the card and the request path
+        // agreeing on which model a fresh profile is actually calling.
+        const workBuddyDefaultModel = DEFAULT_VISIBLE_MODEL_IDS
+            .map(id => workBuddyModels.find(model => model.id === id)?.id)
+            .find(id => id !== undefined) ?? workBuddyModels[0]?.id;
+        const workBuddyWindows = workBuddyContextWindows(workBuddyModels);
         const commandCodeWindows = showPanel || config.provider === 'commandcode' || config.provider === 'commandcode-messages'
             ? commandCodeContextWindows(await loadCommandCodeCatalog({
                 baseUrl: COMMANDCODE_API_BASE,
@@ -430,7 +448,7 @@ export class ChatSettingsManager {
             const customNonFim = p.id === 'custom' && config.customApiFormat !== 'openai-chat-completions';
             const codexModels = p.id === 'codex-chatgpt' ? (codexAccount?.models ?? [])
                 : p.id === 'antigravity' ? antigravityAccount?.models
-                : p.id === 'workbuddy-subscription' ? workBuddyCatalog.map(model => model.id)
+                : p.id === 'workbuddy-subscription' ? workBuddyModels.map(model => model.id)
                 : undefined;
             return {
                 id: p.id,
@@ -439,7 +457,9 @@ export class ChatSettingsManager {
                     : p.name,
                 models: codexModels ?? p.models,
                 inlineModels: p.inlineModels,
-                defaultModel: codexModels?.[0] ?? p.defaultModel,
+                defaultModel: p.id === 'workbuddy-subscription'
+                    ? workBuddyDefaultModel ?? p.defaultModel
+                    : codexModels?.[0] ?? p.defaultModel,
                 requiresApiKey: p.requiresApiKey,
                 defaultEndpoint: p.endpoint,
                 userEndpoint: this.aiService.getEndpointForProvider(p.id),

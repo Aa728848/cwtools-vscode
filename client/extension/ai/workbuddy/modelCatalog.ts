@@ -7,6 +7,10 @@
  *
  * 目录不是快变数据，且重启后第一个选择器不该等网络，因此读取顺序是：
  * 内存缓存 → 上次成功快照 → 网络；失败时保留上一次快照而不是清空。
+ *
+ * **未登录或网关不可达时目录为空**，此时模型清单、上下文窗口、输出上限与思考档位都由
+ * fallbackModels.ts 的内置表回答。因此本模块的每次查询都是「实时缓存优先 → 内置表兜底」，
+ * 而不是把缓存当成唯一来源。
  */
 
 import { isRecord } from '../../../shared/protocolValidation';
@@ -18,6 +22,11 @@ import {
     convergeWorkBuddyEffort,
     type WorkBuddyRegion,
 } from './types';
+import {
+    builtinWorkBuddyModelsForRegion,
+    resolveWorkBuddyModelEntry,
+    withUnpublishedWorkBuddyModels,
+} from './fallbackModels';
 
 /** 目录里的一个模型。 */
 export interface WorkBuddyModelEntry {
@@ -33,6 +42,13 @@ export interface WorkBuddyModelEntry {
     /** 模型允许的最大上下文。 */
     maxContextWindow: number;
     maxTokens: number;
+    /**
+     * 服务该 id 的区域。
+     *
+     * 这是**路由事实**而不是偏好：向不服务某模型的一区发请求返回 400 code 11102。
+     * 实时解析出的条目带上本次加载的区域（一次读取只问一个区）；内置表条目按实测标注。
+     */
+    regions: WorkBuddyRegion[];
     supportsImage: boolean;
     reasoningEfforts: string[];
     defaultReasoningEffort: string | null;
@@ -107,6 +123,8 @@ export function parseWorkBuddyConfigModels(payload: unknown, region: WorkBuddyRe
             contextWindow: servedDefault ?? maxContextWindow,
             maxContextWindow,
             maxTokens: asNumber(item.maxOutputTokens) ?? 32768,
+            // 一次读取只问一个区，所以这条目录声明的服务区域就是本次加载的区域。
+            regions: [region],
             supportsImage: item.supportsImages === true,
             reasoningEfforts: efforts,
             defaultReasoningEffort: modelDefault,
@@ -197,22 +215,39 @@ async function performCatalogLoad(options: WorkBuddyCatalogLoadOptions): Promise
         signal,
     });
     if (!response.ok) throw new Error('WorkBuddy model catalog failed: ' + response.status);
-    const models = parseWorkBuddyConfigModels(await response.json().catch(() => undefined), options.region);
-    if (models.length === 0) throw new Error('WorkBuddy model catalog named no models.');
+    const parsed = parseWorkBuddyConfigModels(await response.json().catch(() => undefined), options.region);
+    if (parsed.length === 0) throw new Error('WorkBuddy model catalog named no models.');
+    // 网关服务却不公布的模型（UNPUBLISHED_MODELS）在这里并入快照：可达的网关会用自己公布的
+    // 清单替换内置表，不并的话 gpt-6-sol / gpt-6-luna / gemini-3.8-flash 会在目录加载完成的
+    // 瞬间从选择器里消失。合并发生在快照上，因此后续所有查询看到的都是同一份清单。
+    const models = withUnpublishedWorkBuddyModels(parsed, options.region);
     catalogCache = { at: Date.now(), region: options.region, models };
     return models;
 }
 
 /**
- * 某个模型在本区可用的思考档位；未在目录中时返回空数组。
+ * 解析一个 id 的能力：**实时目录缓存优先，内置表兜底**。
+ *
+ * 这是本模块唯一的解析入口，思考档位、默认档与输出上限都从它派生，因此不会出现「卡片按一份
+ * 表显示、请求按另一份表校验」的错位。两个来源都不认识该 id 时返回 `undefined`：未知模型
+ * 借用一个邻居的能力会把请求路由到 400 code 11150（档位）或 11102（跨区）。
+ *
+ * 实时目录里的条目已经带上了本次加载的区域，内置表条目按实测标注，所以返回的 `regions`
+ * 在一处即可读到。
+ */
+export function resolveWorkBuddyCatalogEntry(model: string): WorkBuddyModelEntry | undefined {
+    return resolveWorkBuddyModelEntry(model, catalogCache?.models);
+}
+
+/**
+ * 某个模型在本区可用的思考档位；两个来源都不认识它时返回空数组。
  *
  * 调用方据此决定是否发送 reasoning_effort：不在该模型档位集合内的取值会被**忽略而
  * 不是发出去**（上游对不支持的档位返回 code 11150）。
  */
 export function workBuddyEffortsFor(model: string): readonly string[] {
-    return catalogCache?.models.find(entry => entry.id === model)?.reasoningEfforts ?? [];
+    return resolveWorkBuddyCatalogEntry(model)?.reasoningEfforts ?? [];
 }
-
 
 /**
  * 为一个请求选一个该模型真的接受的思考档位。
@@ -222,12 +257,16 @@ export function workBuddyEffortsFor(model: string): readonly string[] {
  *   对比 130-215 字符），所以思考档位必须**物化**出来，不能留给默认值；
  * - 模型没有的档位是 `code 11150`，因此候选里不存在的取值会被丢弃而不是原样发出。
  *
- * 候选顺序是：用户显式选择 → 目录声明的默认档。两者都不被接受时返回 undefined，交给调用方
+ * 候选顺序是：用户显式选择 → 表声明的默认档。两者都不被接受时返回 undefined，交给调用方
  * 决定是否省略该字段。
+ *
+ * **未知模型返回 undefined 而不是把请求原样放行**：档位表来自网关，一个它没描述的 id 也就
+ * 没有可校验的档位集合，把任意取值发出去正是 11150 的成因。实时目录命中时行为与本函数
+ * 引入内置表之前一致（那时缓存未命中会直接 return requested，等于不校验）。
  */
 export function workBuddyEffortForRequest(model: string, requested?: string): string | undefined {
-    const entry = catalogCache?.models.find(candidate => candidate.id === model);
-    if (entry === undefined) return requested;
+    const entry = resolveWorkBuddyCatalogEntry(model);
+    if (entry === undefined) return undefined;
     if (entry.reasoningEfforts.length === 0) return undefined;
     for (const candidate of [requested, entry.defaultReasoningEffort ?? undefined]) {
         if (candidate !== undefined && candidate !== null && entry.reasoningEfforts.includes(candidate)) {
@@ -236,11 +275,50 @@ export function workBuddyEffortForRequest(model: string, requested?: string): st
     }
     return undefined;
 }
+
 /**
- * 某个模型在这个区实际服务的输出上限；目录未给出时返回 undefined。
+ * 某个模型在这个区实际服务的输出上限；两个来源都不认识它时返回 undefined。
  *
  * 用它替代通用上限：按模型名推断出的数字要么过早截断，要么高过服务真正接受的值。
  */
 export function workBuddyMaxOutputTokens(model: string): number | undefined {
-    return catalogCache?.models.find(entry => entry.id === model)?.maxTokens;
+    return resolveWorkBuddyCatalogEntry(model)?.maxTokens;
+}
+
+/** 全部区域。区域未知时的并集就是按它们各取一次。 */
+const WORKBUDDY_REGIONS: readonly WorkBuddyRegion[] = ['cn', 'intl'];
+
+/**
+ * 设置卡片要展示的模型清单与窗口来源。
+ *
+ * 这是「实时目录优先、内置表兜底、未公布模型并入」三条规则唯一的落地处：
+ *
+ * - 实时目录命中时用它，并把网关服务却不公布的模型并入
+ *   （`withUnpublishedWorkBuddyModels`），否则这些模型会在目录加载的瞬间从选择器里消失；
+ * - 目录为空（未登录 / 网关不可达）时退回**内置表按区域过滤**，而不是空清单——空清单会让
+ *   模型下拉没有任何选项，用户连自己能调用哪个模型都看不到；
+ * - `region` 为 `undefined` 表示区域未知，此时按**两区并集**给出。两区清单不是包含关系，
+ *   只给一区会让另一区的账号在登录前看不到自己唯一能用的模型。
+ *
+ * 一旦区域确定（凭据在手），必须按该区域过滤：跨区发模型会被网关以 400 code 11102 拒绝。
+ */
+export function workBuddyCatalogForSettings(
+    region?: WorkBuddyRegion,
+): { models: readonly WorkBuddyModelEntry[]; source: 'live' | 'builtin' } {
+    if (region !== undefined && catalogCache?.region === region && catalogCache.models.length > 0) {
+        return { models: withUnpublishedWorkBuddyModels(catalogCache.models, region), source: 'live' };
+    }
+    // 区域未知时并集只在**没有实时目录**时使用：它可能把跨区模型塞进下拉，而一次
+    // 400 code 11102 就是由此而来。
+    const regions = region === undefined ? WORKBUDDY_REGIONS : [region];
+    const seen = new Set<string>();
+    const models: WorkBuddyModelEntry[] = [];
+    for (const candidate of regions) {
+        for (const model of builtinWorkBuddyModelsForRegion(candidate)) {
+            if (seen.has(model.id)) continue;
+            seen.add(model.id);
+            models.push(model);
+        }
+    }
+    return { models, source: 'builtin' };
 }

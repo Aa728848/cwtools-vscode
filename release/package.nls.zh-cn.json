@@ -202,6 +202,8 @@
   "configuration.stellarisLanguageServices.ai.reasoningEffort.enum.xhigh": "超高",
   "configuration.stellarisLanguageServices.ai.reasoningEffort.enum.max": "最大",
   "configuration.stellarisLanguageServices.ai.reasoningEffort.description": "首选推理级别。Agent 会根据所选供应商和模型实际支持的档位或思考开关自动收敛。",
+  "configuration.stellarisLanguageServices.ai.reasoningKey.description": "高级自定义网关选项。供应商返回思考内容所用的字段名（如 reasoning_content）。留空表示自动识别。",
+  "configuration.stellarisLanguageServices.ai.endpoint.description": "旧版单供应商 Endpoint。仅为兼容旧版本写入的配置而保留，可被清除；请在 AI 设置中按供应商配置 Endpoint。",
   "configuration.stellarisLanguageServices.ai.responseVerbosity.enum.default": "模型默认",
   "configuration.stellarisLanguageServices.ai.responseVerbosity.enum.low": "低 — 保持回复简洁",
   "configuration.stellarisLanguageServices.ai.responseVerbosity.enum.medium": "中 — 兼顾细节与简洁",

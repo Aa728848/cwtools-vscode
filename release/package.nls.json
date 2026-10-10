@@ -202,6 +202,8 @@
   "configuration.stellarisLanguageServices.ai.reasoningEffort.enum.xhigh": "Extra high",
   "configuration.stellarisLanguageServices.ai.reasoningEffort.enum.max": "Maximum",
   "configuration.stellarisLanguageServices.ai.reasoningEffort.description": "Preferred reasoning level. The Agent clamps it to the levels or thinking switch supported by the selected provider and model.",
+  "configuration.stellarisLanguageServices.ai.reasoningKey.description": "Advanced custom gateway option. Name of the field the provider uses to return thinking content (for example reasoning_content). Leave empty to auto-detect.",
+  "configuration.stellarisLanguageServices.ai.endpoint.description": "Legacy single-provider endpoint. Kept only so a setting written by older versions still resolves and can be cleared; configure endpoints per provider in AI Settings.",
   "configuration.stellarisLanguageServices.ai.responseVerbosity.enum.default": "Model default",
   "configuration.stellarisLanguageServices.ai.responseVerbosity.enum.low": "Low — keep replies concise",
   "configuration.stellarisLanguageServices.ai.responseVerbosity.enum.medium": "Medium — balance detail and brevity",

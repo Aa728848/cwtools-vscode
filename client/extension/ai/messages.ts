@@ -367,6 +367,7 @@ export const SOURCE = {
     MCP_CLIENT: 'MCP',
     INLINE_PROVIDER: 'InlineProvider',
     CHAT_PANEL: 'ChatPanel',
+    CHAT_SETTINGS: 'ChatSettings',
     AI_SERVICE: 'AIService',
     UPDATE_CHECKER: 'UpdateChecker',
     ORCHESTRATOR: 'Orchestrator',

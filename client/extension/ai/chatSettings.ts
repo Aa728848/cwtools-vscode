@@ -32,7 +32,8 @@ import {
     loadCommandCodeCatalog,
 } from './commandcode/modelCatalog';
 import type { SubscriptionProxyMode } from '../../shared/subscriptionProxy';
-import { aiText } from './messages';
+import { ErrorReporter } from './errorReporter';
+import { SOURCE, aiText } from './messages';
 import { getProjectWorkspaceRoot } from './workspacePaths';
 import {
     getSessionPermissionMode,
@@ -695,8 +696,36 @@ export class ChatSettingsManager {
         await this.buildAndSendSettingsData();
     }
 
+    /**
+     * 把一条配置写失败收窄到「键本身」。
+     *
+     * VS Code 只在键已注册时接受写入，否则抛 ERROR_UNKNOWN_KEY；未注册的键是不该被
+     * 整段保存拖垮的编程错误，因此这里报告并跳过，让其余设置照常落盘。
+     */
+    private async updateConfig(
+        cfg: vs.WorkspaceConfiguration,
+        key: string,
+        value: unknown,
+    ): Promise<boolean> {
+        try {
+            await cfg.update(key, value, vs.ConfigurationTarget.Global);
+            return true;
+        } catch (error) {
+            const detail = error instanceof Error ? error.message : String(error);
+            ErrorReporter.warn(
+                SOURCE.CHAT_SETTINGS,
+                aiText(
+                    `Skipped unregistered AI setting '${key}': ${detail}`,
+                    `已跳过未注册的 AI 设置项 '${key}'：${detail}`,
+                ),
+            );
+            return false;
+        }
+    }
+
     async saveSettings(settings: PanelSettings, targetSurface?: 'chat' | 'manager'): Promise<void> {
         const cfg = vs.workspace.getConfiguration('stellarisLanguageServices.ai');
+        const update = (key: string, value: unknown) => this.updateConfig(cfg, key, value);
         const { BUILTIN_PROVIDERS, clampConfiguredContextTokens } = await import('./providers');
         const effectiveMaxContextTokens = clampConfiguredContextTokens(
             settings.provider,
@@ -713,13 +742,13 @@ export class ChatSettingsManager {
                     if (!providerDyns.includes(modelId)) {
                         providerDyns.push(modelId);
                         currentDynamic = { ...currentDynamic, [providerId]: providerDyns };
-                        await cfg.update('dynamicModels', currentDynamic, vs.ConfigurationTarget.Global);
+                        await update('dynamicModels', currentDynamic);
                     }
                     if (contextTokens > 0) {
                         let currContexts = cfg.get<Record<string, number>>('dynamicModelsContext') || {};
                         if (currContexts[modelId] !== contextTokens) {
                             currContexts = { ...currContexts, [modelId]: contextTokens };
-                            await cfg.update('dynamicModelsContext', currContexts, vs.ConfigurationTarget.Global);
+                            await update('dynamicModelsContext', currContexts);
                         }
                     }
                 }
@@ -737,12 +766,16 @@ export class ChatSettingsManager {
         }
 
         lastAISettingsWriteTime = Date.now();
-        await cfg.update('provider', settings.provider, vs.ConfigurationTarget.Global);
-        await cfg.update('model', settings.model, vs.ConfigurationTarget.Global);
-        await cfg.update('customApiFormat', normalizeCustomApiFormatSetting(settings.customApiFormat), vs.ConfigurationTarget.Global);
-        await cfg.update('reasoningKey', settings.reasoningKey?.trim() || undefined, vs.ConfigurationTarget.Global);
+        await update('provider', settings.provider);
+        await update('model', settings.model);
+        await update('customApiFormat', normalizeCustomApiFormatSetting(settings.customApiFormat));
+        // An empty box clears the entry; a defined empty string would fail
+        // nothing but would leave a useless blank key behind.
+        await update('reasoningKey', settings.reasoningKey?.trim() || undefined);
         if (settings.apiKey !== undefined) {
             const trimmedKey = settings.apiKey.trim();
+            // Left to reject on purpose: a key that silently failed to persist
+            // would leave the user believing the provider is configured.
             if (trimmedKey.length > 0 && !trimmedKey.startsWith('•')) {
                 await this.aiService.getKeyManager().setKey(settings.provider, trimmedKey);
             }
@@ -750,17 +783,18 @@ export class ChatSettingsManager {
         if (settings.webAccess) {
             const webCfg = vs.workspace.getConfiguration('stellarisLanguageServices.ai.web');
             const splitList = (value: string) => Array.from(new Set(value.split(/[\s,;]+/).map(item => item.trim()).filter(Boolean)));
-            await webCfg.update('mode', settings.webAccess.mode, vs.ConfigurationTarget.Global);
-            await webCfg.update('provider', settings.webAccess.provider, vs.ConfigurationTarget.Global);
-            await webCfg.update('contextSize', settings.webAccess.contextSize, vs.ConfigurationTarget.Global);
-            await webCfg.update('fallbackProviders', splitList(settings.webAccess.fallbackProviders), vs.ConfigurationTarget.Global);
-            await webCfg.update('allowedDomains', splitList(settings.webAccess.allowedDomains), vs.ConfigurationTarget.Global);
-            await webCfg.update('blockedDomains', splitList(settings.webAccess.blockedDomains), vs.ConfigurationTarget.Global);
-            await webCfg.update('country', settings.webAccess.country.trim(), vs.ConfigurationTarget.Global);
-            await webCfg.update('searxngEndpoint', settings.webAccess.searxngEndpoint.trim(), vs.ConfigurationTarget.Global);
-            await webCfg.update('openaiModel', settings.webAccess.openaiModel.trim(), vs.ConfigurationTarget.Global);
-            await webCfg.update('cacheTtlMs', Math.max(0, settings.webAccess.cacheTtlMs || 0), vs.ConfigurationTarget.Global);
-            await webCfg.update('allowSyntheticProxyAddresses', settings.webAccess.allowSyntheticProxyAddresses === true, vs.ConfigurationTarget.Global);
+            const updateWeb = (key: string, value: unknown) => this.updateConfig(webCfg, key, value);
+            await updateWeb('mode', settings.webAccess.mode);
+            await updateWeb('provider', settings.webAccess.provider);
+            await updateWeb('contextSize', settings.webAccess.contextSize);
+            await updateWeb('fallbackProviders', splitList(settings.webAccess.fallbackProviders));
+            await updateWeb('allowedDomains', splitList(settings.webAccess.allowedDomains));
+            await updateWeb('blockedDomains', splitList(settings.webAccess.blockedDomains));
+            await updateWeb('country', settings.webAccess.country.trim());
+            await updateWeb('searxngEndpoint', settings.webAccess.searxngEndpoint.trim());
+            await updateWeb('openaiModel', settings.webAccess.openaiModel.trim());
+            await updateWeb('cacheTtlMs', Math.max(0, settings.webAccess.cacheTtlMs || 0));
+            await updateWeb('allowSyntheticProxyAddresses', settings.webAccess.allowSyntheticProxyAddresses === true);
             for (const provider of ['brave', 'exa', 'tavily', 'serper', 'serpapi'] as const) {
                 const key = settings.webAccess.keys?.[provider]?.trim() ?? '';
                 if (key === '__DELETE__') await this.aiService.getKeyManager().deleteKey(`web.${provider}`);
@@ -773,17 +807,19 @@ export class ChatSettingsManager {
             const map = { ...(cfg.get<Record<string, string>>('providerEndpoints', {}) || {}) };
             const trimmed = (settings.endpoint || '').trim();
             if (trimmed) map[settings.provider] = trimmed; else delete map[settings.provider];
-            await cfg.update('providerEndpoints', map, vs.ConfigurationTarget.Global);
-            await cfg.update('endpoint', undefined, vs.ConfigurationTarget.Global);
+            await update('providerEndpoints', map);
+            // Historical single-endpoint key: clear it so a stale value cannot
+            // shadow the per-provider map read above.
+            await update('endpoint', undefined);
         }
-        await cfg.update('maxContextTokens', effectiveMaxContextTokens, vs.ConfigurationTarget.Global);
-        await cfg.update('agentFileWriteMode', settings.agentFileWriteMode, vs.ConfigurationTarget.Global);
+        await update('maxContextTokens', effectiveMaxContextTokens);
+        await update('agentFileWriteMode', settings.agentFileWriteMode);
         if (settings.toolPresentationMode) {
-            await cfg.update('toolPresentationMode', settings.toolPresentationMode, vs.ConfigurationTarget.Global);
+            await update('toolPresentationMode', settings.toolPresentationMode);
             this.aiService.setToolPresentationModeOverride(settings.toolPresentationMode);
         }
         if (settings.approvals?.reviewer) {
-            await cfg.update('approvals.reviewer', settings.approvals.reviewer, vs.ConfigurationTarget.Global);
+            await update('approvals.reviewer', settings.approvals.reviewer);
         }
         const reasoningCapability = getModelReasoningCapability(
             settings.provider,
@@ -797,61 +833,71 @@ export class ChatSettingsManager {
         const requestedReasoning = isReasoningEffort(settings.reasoningEffort)
             ? settings.reasoningEffort
             : reasoningCapability.defaultValue;
-        await cfg.update(
+        await update(
             'reasoningEffort',
             normalizeReasoningEffort(reasoningCapability, requestedReasoning),
-            vs.ConfigurationTarget.Global
         );
-        await cfg.update(
+        await update(
             'responseVerbosity',
             isResponseVerbosity(settings.responseVerbosity) ? settings.responseVerbosity : 'default',
-            vs.ConfigurationTarget.Global,
         );
-        await cfg.update(
+        await update(
             'codexServiceTier',
             isCodexServiceTier(settings.codexServiceTier) ? settings.codexServiceTier : 'default',
-            vs.ConfigurationTarget.Global,
         );
-        await cfg.update('enabled', true, vs.ConfigurationTarget.Global);
+        await update('enabled', true);
         if (settings.inlineCompletion) {
-            await cfg.update('inlineCompletion.enabled', settings.inlineCompletion.enabled, vs.ConfigurationTarget.Global);
-            await cfg.update('inlineCompletion.provider', settings.inlineCompletion.provider, vs.ConfigurationTarget.Global);
-            await cfg.update('inlineCompletion.model', settings.inlineCompletion.model, vs.ConfigurationTarget.Global);
-            await cfg.update('inlineCompletion.endpoint', settings.inlineCompletion.endpoint, vs.ConfigurationTarget.Global);
-            await cfg.update('inlineCompletion.debounceMs', settings.inlineCompletion.debounceMs, vs.ConfigurationTarget.Global);
-            await cfg.update('inlineCompletion.maxTokens', settings.inlineCompletion.maxTokens, vs.ConfigurationTarget.Global);
-            await cfg.update('inlineCompletion.contextBeforeLines', settings.inlineCompletion.contextBeforeLines, vs.ConfigurationTarget.Global);
-            await cfg.update('inlineCompletion.contextAfterLines', settings.inlineCompletion.contextAfterLines, vs.ConfigurationTarget.Global);
-            await cfg.update('inlineCompletion.includeMcpContext', settings.inlineCompletion.includeMcpContext, vs.ConfigurationTarget.Global);
-            await cfg.update('inlineCompletion.mcpCacheTtlMs', settings.inlineCompletion.mcpCacheTtlMs, vs.ConfigurationTarget.Global);
-            await cfg.update('inlineCompletion.requestTimeoutMs', settings.inlineCompletion.requestTimeoutMs, vs.ConfigurationTarget.Global);
-            await cfg.update('inlineCompletion.lspFastPath', settings.inlineCompletion.lspFastPath, vs.ConfigurationTarget.Global);
-            await cfg.update('inlineCompletion.overlapStripping', settings.inlineCompletion.overlapStripping, vs.ConfigurationTarget.Global);
+            await update('inlineCompletion.enabled', settings.inlineCompletion.enabled);
+            await update('inlineCompletion.provider', settings.inlineCompletion.provider);
+            await update('inlineCompletion.model', settings.inlineCompletion.model);
+            await update('inlineCompletion.endpoint', settings.inlineCompletion.endpoint);
+            await update('inlineCompletion.debounceMs', settings.inlineCompletion.debounceMs);
+            await update('inlineCompletion.maxTokens', settings.inlineCompletion.maxTokens);
+            await update('inlineCompletion.contextBeforeLines', settings.inlineCompletion.contextBeforeLines);
+            await update('inlineCompletion.contextAfterLines', settings.inlineCompletion.contextAfterLines);
+            await update('inlineCompletion.includeMcpContext', settings.inlineCompletion.includeMcpContext);
+            await update('inlineCompletion.mcpCacheTtlMs', settings.inlineCompletion.mcpCacheTtlMs);
+            await update('inlineCompletion.requestTimeoutMs', settings.inlineCompletion.requestTimeoutMs);
+            await update('inlineCompletion.lspFastPath', settings.inlineCompletion.lspFastPath);
+            await update('inlineCompletion.overlapStripping', settings.inlineCompletion.overlapStripping);
         }
         if (settings.translationPreview) {
             const translationProvider = settings.translationPreview.provider || '';
-            await cfg.update('translationPreview.provider', translationProvider, vs.ConfigurationTarget.Global);
-            await cfg.update('translationPreview.model', translationProvider ? (settings.translationPreview.model || '') : '', vs.ConfigurationTarget.Global);
+            await update('translationPreview.provider', translationProvider);
+            await update('translationPreview.model', translationProvider ? (settings.translationPreview.model || '') : '');
         }
 
         if (settings.mcp?.servers) {
-            await cfg.update('mcp.servers', settings.mcp.servers, vs.ConfigurationTarget.Global);
+            await update('mcp.servers', settings.mcp.servers);
         }
 
         //Coordination mode sub-Agent model configuration persistence
         if (settings.orchestrator?.agentModels) {
-            await cfg.update('orchestrator.agentModels', settings.orchestrator.agentModels, vs.ConfigurationTarget.Global);
+            await update('orchestrator.agentModels', settings.orchestrator.agentModels);
         } else {
             //Clear existing configurations (users revert to all inheritance)
-            await cfg.update('orchestrator.agentModels', undefined, vs.ConfigurationTarget.Global);
+            await update('orchestrator.agentModels', undefined);
         }
 
         lastAISettingsWriteTime = Date.now();
+        // A paid sign-in can put the account's own message on screen before this
+        // one; an information notification never replaces a warning or error.
         vs.window.showInformationMessage(aiText(
             'Eddy CWTool Code settings saved. Some MCP connection changes may require reloading the window.',
             'Eddy CWTool Code 设置已保存，部分 MCP 连接更改可能需要重载窗口生效',
         ));
-        await this.openSettingsPage(targetSurface);
+        // The repaint reads every line's SecretStorage state. A failure there is
+        // not a failure to save, so it must not be reported as one.
+        await this.openSettingsPage(targetSurface).catch(error => {
+            ErrorReporter.warn(
+                SOURCE.CHAT_SETTINGS,
+                aiText(
+                    'Settings were saved, but the settings page could not be repainted.',
+                    '设置已保存，但设置页面重绘失败。',
+                ),
+                error,
+            );
+        });
     }
 
     async deleteApiKey(providerId: string, targetSurface?: 'chat' | 'manager'): Promise<void> {

@@ -23,7 +23,7 @@ export type AgentToolName =
     | 'team_send_message' | 'team_members' | 'team_close'
     | 'team_task_create' | 'team_task_list' | 'team_task_update'
     | 'query_shader_symbol' | 'query_shader_compile_unit' | 'query_shader_platform_variants' | 'query_shader_callers'
-    | 'explain_shader_reachability' | 'validate_shader' | 'compare_shader_with_vanilla' | 'run_code';
+    | 'explain_shader_reachability' | 'validate_shader' | 'compare_shader_with_vanilla';
 
 export type ToolEffect =
     | 'none'
@@ -178,7 +178,6 @@ const TOOL_DOMAINS = {
     explain_shader_reachability: 'paradox',
     validate_shader: 'paradox',
     compare_shader_with_vanilla: 'paradox',
-    run_code: 'shared',
 } satisfies Record<AgentToolName, ToolDomain>;
 
 const GENERAL_DISPATCH_SCHEMA: ToolDefinition = {
@@ -406,7 +405,7 @@ const ASSET_TOOLS = new Set<AgentToolName>([
     'find_sprite_candidates', 'find_sound_candidates',
 ]);
 const ALWAYS_DISCLOSED_TOOLS = new Set<AgentToolName>([
-    'ask_user_question', 'todo_write', 'read_file', 'grep', 'manage_goal', 'select_tools', 'run_code',
+    'ask_user_question', 'todo_write', 'read_file', 'grep', 'manage_goal', 'select_tools',
 ]);
 const WRITE_TOOLS_SET = new Set<string>([...EDIT, 'deploy_mod_asset', 'git_ops']);
 const SUB_AGENT_EXCLUDES_SET = new Set<string>([
@@ -462,10 +461,10 @@ const STORM_EXEMPT_TOOLS_SET = new Set<string>([
     'team_members',
 ]);
 
-const PLAN_MODES = new Set([...BASE_READ, ...INTERACTION, ...NETWORK, ..._MCP, ...ORCHESTRATION, ...TEAM, ...MODE_CONTROL, 'run_code', 'todo_write', 'write_file', 'edit_file', 'replace_lines', 'typed_pdx_write', 'candidate_transaction', 'write_design_blueprint', 'save_workflow', 'set_memory', 'git_ops']);
-const EXPLORE_MODES = new Set([...BASE_READ, ...INTERACTION, ...NETWORK, ..._MCP, ...ORCHESTRATION, ...TEAM, ...MODE_CONTROL, 'run_code', 'git_ops', 'save_workflow']);
-const REVIEW_MODES = new Set([...BASE_READ, ...INTERACTION, ...NETWORK, ..._MCP, 'run_code', 'git_ops', 'save_workflow']);
-const BUILD_MODES = new Set([...BASE_READ, ...INTERACTION, ...EDIT, ...MEMORY, ...NETWORK, ...UTILITY, ...MEDIA, ..._MCP, ...ORCHESTRATION, ...TEAM, ...MODE_CONTROL, 'run_code']);
+const PLAN_MODES = new Set([...BASE_READ, ...INTERACTION, ...NETWORK, ..._MCP, ...ORCHESTRATION, ...TEAM, ...MODE_CONTROL, 'todo_write', 'write_file', 'edit_file', 'replace_lines', 'typed_pdx_write', 'candidate_transaction', 'write_design_blueprint', 'save_workflow', 'set_memory', 'git_ops']);
+const EXPLORE_MODES = new Set([...BASE_READ, ...INTERACTION, ...NETWORK, ..._MCP, ...ORCHESTRATION, ...TEAM, ...MODE_CONTROL, 'git_ops', 'save_workflow']);
+const REVIEW_MODES = new Set([...BASE_READ, ...INTERACTION, ...NETWORK, ..._MCP, 'git_ops', 'save_workflow']);
+const BUILD_MODES = new Set([...BASE_READ, ...INTERACTION, ...EDIT, ...MEMORY, ...NETWORK, ...UTILITY, ...MEDIA, ..._MCP, ...ORCHESTRATION, ...TEAM, ...MODE_CONTROL]);
 const LOC_MODES = new Set([
     'select_tools', 'read_file', 'write_file',
     'list_directory', 'glob_files', 'find_sprite_candidates', 'find_sound_candidates', 'grep',
@@ -479,7 +478,7 @@ const LOC_MODES = new Set([
 ]);
 const ORCHESTRATOR_MODES = new Set([...BASE_READ, ...INTERACTION, ...NETWORK, ..._MCP, 'set_memory', 'todo_write', 'write_file', 'write_design_blueprint', ...ORCHESTRATION, ...TEAM, ...MODE_CONTROL, 'git_ops', 'analyze_diagnostic_error', 'save_workflow']);
 const SCRIPT_MODES = new Set([...BASE_READ, ...INTERACTION, ...NETWORK, ..._MCP, 'set_memory', 'todo_write', 'write_file', 'write_design_blueprint', ...ORCHESTRATION, ...TEAM, 'git_ops', 'analyze_diagnostic_error', 'save_workflow']);
-const UTILITY_MODES = new Set([...BASE_READ, ...INTERACTION, ...EDIT, ...MEMORY, ...NETWORK, ...UTILITY, ...MEDIA, ...ORCHESTRATION, ...TEAM, ...MODE_CONTROL, 'mcp_call', 'run_code']);
+const UTILITY_MODES = new Set([...BASE_READ, ...INTERACTION, ...EDIT, ...MEMORY, ...NETWORK, ...UTILITY, ...MEDIA, ...ORCHESTRATION, ...TEAM, ...MODE_CONTROL, 'mcp_call']);
 
 for (const schema of SCHEMA_DEFINITIONS) {
     const name = schema.function.name as AgentToolName;
@@ -558,12 +557,6 @@ for (const schema of SCHEMA_DEFINITIONS) {
         effect = 'none';
         riskLevel = 0;
         concurrencyClass = 'interactive';
-    } else if (name === 'run_code') {
-        // Capability-only transport. It grants no authority itself; each guest
-        // call is scheduled and authorized from the nested tool's registry entry.
-        effect = 'none';
-        riskLevel = 0;
-        concurrencyClass = 'parallel';
     } else {
         effect = 'none';
         riskLevel = 2;
@@ -573,7 +566,7 @@ for (const schema of SCHEMA_DEFINITIONS) {
     const mutating = MUTATING_TOOLS_SET.has(name);
     const stormExempt = STORM_EXEMPT_TOOLS_SET.has(name);
 
-    const noFlatten = ['dispatch_agents', 'merge_results', 'query_blackboard', 'todo_write', 'run_code', 'typed_pdx_write', 'enter_plan_mode', 'exit_plan_mode', 'extract_archetype_slots', 'instantiate_archetype', ...TEAM].includes(name);
+    const noFlatten = ['dispatch_agents', 'merge_results', 'query_blackboard', 'todo_write', 'typed_pdx_write', 'enter_plan_mode', 'exit_plan_mode', 'extract_archetype_slots', 'instantiate_archetype', ...TEAM].includes(name);
     let flatSchema: ToolDefinition | undefined = undefined;
     if (!noFlatten) {
         const analysis = analyzeSchema(schema);

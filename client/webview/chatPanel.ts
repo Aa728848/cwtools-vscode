@@ -2284,31 +2284,17 @@ let settingsSubscriptionPools: Record<string, any> = {};
         if (quickDomainLabel) quickDomainLabel.textContent = getSchedulingDomainSummary();
     }
 
-    function setPreflightModeMenuOpen(open: boolean) {
-        const preflightModeMenu = document.getElementById('preflightModeMenu');
-        const preflightModeTrigger = document.getElementById('preflightModeTrigger');
-        if (!preflightModeMenu || !preflightModeTrigger) return;
-        if (open) closeComposerMenus();
-        preflightModeMenu.classList.toggle('show', open);
-        preflightModeMenu.setAttribute('aria-hidden', open ? 'false' : 'true');
-        preflightModeTrigger.classList.toggle('active', open);
-        preflightModeTrigger.setAttribute('aria-expanded', open ? 'true' : 'false');
-        if (open) positionComposerMenus();
-    }
-
     function closeComposerMenus() {
         const composerMenu = document.getElementById('composerMenu');
         const domainMenu = document.getElementById('domainMenu');
         const modelMenu = document.getElementById('modelMenu');
         const reasoningMenu = document.getElementById('reasoningMenu');
         const writeModeMenu = document.getElementById('writeModeMenu');
-        const preflightModeMenu = document.getElementById('preflightModeMenu');
         const composerAddBtn = document.getElementById('composerAddBtn');
         const quickDomainTrigger = document.getElementById('quickDomainTrigger');
         const quickModelTrigger = document.getElementById('quickModelTrigger');
         const quickReasoningTrigger = document.getElementById('quickReasoningTrigger');
         const quickWriteModeTrigger = document.getElementById('quickWriteModeTrigger');
-        const preflightModeTrigger = document.getElementById('preflightModeTrigger');
         composerMenu?.classList.remove('show');
         composerMenu?.setAttribute('aria-hidden', 'true');
         domainMenu?.classList.remove('show');
@@ -2319,8 +2305,6 @@ let settingsSubscriptionPools: Record<string, any> = {};
         reasoningMenu?.setAttribute('aria-hidden', 'true');
         writeModeMenu?.classList.remove('show');
         writeModeMenu?.setAttribute('aria-hidden', 'true');
-        preflightModeMenu?.classList.remove('show');
-        preflightModeMenu?.setAttribute('aria-hidden', 'true');
         composerAddBtn?.classList.remove('active');
         quickDomainTrigger?.classList.remove('active');
         quickDomainTrigger?.setAttribute('aria-expanded', 'false');
@@ -2330,65 +2314,6 @@ let settingsSubscriptionPools: Record<string, any> = {};
         quickReasoningTrigger?.setAttribute('aria-expanded', 'false');
         quickWriteModeTrigger?.classList.remove('active');
         quickWriteModeTrigger?.setAttribute('aria-expanded', 'false');
-        preflightModeTrigger?.classList.remove('active');
-        preflightModeTrigger?.setAttribute('aria-expanded', 'false');
-    }
-
-    let currentToolPresentationMode: 'ptc' | 'native' | 'hybrid' = 'ptc';
-    let isToolPresentationModeLocked = false;
-
-    function updateToolPresentationModeUi(mode: 'ptc' | 'native' | 'hybrid', locked: boolean) {
-        currentToolPresentationMode = mode;
-        isToolPresentationModeLocked = locked;
-
-        const headerBadge = document.getElementById('headerModeBadge');
-        const headerBadgeText = document.getElementById('headerModeBadgeText');
-        if (headerBadge && headerBadgeText) {
-            headerBadgeText.textContent = mode.toUpperCase();
-            headerBadge.classList.toggle('mode-ptc', mode === 'ptc');
-            headerBadge.classList.toggle('mode-native', mode === 'native');
-            headerBadge.title = locked
-                ? (chatI18n.locale === 'zh-cn' ? `工具调用模式: ${mode.toUpperCase()} (当前对话已锁定)` : `Tool presentation mode: ${mode.toUpperCase()} (locked for this topic)`)
-                : (chatI18n.locale === 'zh-cn' ? `工具调用模式: ${mode.toUpperCase()}` : `Tool presentation mode: ${mode.toUpperCase()}`);
-        }
-
-        const preflightBar = document.getElementById('composerPreflightBar');
-        if (preflightBar) {
-            preflightBar.classList.add('hidden');
-        }
-        const preflightTrigger = document.getElementById('preflightModeTrigger');
-        const preflightLabel = document.getElementById('preflightModeLabel');
-        const preflightChevron = document.getElementById('preflightModeChevron');
-        if (preflightTrigger && preflightLabel) {
-            preflightLabel.textContent = mode.toUpperCase();
-            preflightTrigger.classList.toggle('mode-ptc', mode === 'ptc');
-            preflightTrigger.classList.toggle('mode-native', mode === 'native');
-            preflightTrigger.classList.toggle('is-locked', locked);
-            if (locked) {
-                setPreflightModeMenuOpen(false);
-                preflightTrigger.title = chatI18n.locale === 'zh-cn'
-                    ? `工具调用模式: ${mode.toUpperCase()}（首轮对话后已锁定）`
-                    : `Tool presentation mode: ${mode.toUpperCase()} (locked for this topic)`;
-                if (preflightChevron) preflightChevron.style.display = 'none';
-            } else {
-                preflightTrigger.title = chatI18n.locale === 'zh-cn'
-                    ? `选择工具调用模式（当前: ${mode.toUpperCase()}）`
-                    : `Select tool presentation mode (current: ${mode.toUpperCase()})`;
-                if (preflightChevron) preflightChevron.style.display = '';
-            }
-        }
-
-        const menuList = document.getElementById('preflightModeMenuList');
-        if (menuList) {
-            menuList.querySelectorAll<HTMLButtonElement>('button[data-mode]').forEach(btn => {
-                btn.classList.toggle('active', btn.getAttribute('data-mode') === mode);
-            });
-        }
-
-        const settingsSelect = document.getElementById('toolPresentationMode') as HTMLSelectElement | null;
-        if (settingsSelect) {
-            settingsSelect.value = mode;
-        }
     }
 
     function setComposerMenuOpen(open: boolean) {
@@ -2480,9 +2405,6 @@ let settingsSubscriptionPools: Record<string, any> = {};
         positionMenu(modelMenu, quickModelTrigger);
         positionMenu(reasoningMenu, quickReasoningTrigger, 'end');
         positionMenu(writeModeMenu, quickWriteModeTrigger);
-        const preflightModeMenu = document.getElementById('preflightModeMenu');
-        const preflightModeTrigger = document.getElementById('preflightModeTrigger');
-        positionMenu(preflightModeMenu, preflightModeTrigger);
     }
 
     function renderComposerChips() {
@@ -2900,34 +2822,6 @@ let settingsSubscriptionPools: Record<string, any> = {};
         });
     });
 
-    const preflightModeTrigger = document.getElementById('preflightModeTrigger');
-    preflightModeTrigger?.addEventListener('click', e => {
-        e.stopPropagation();
-        if (isToolPresentationModeLocked) return;
-        const preflightModeMenu = document.getElementById('preflightModeMenu');
-        setPreflightModeMenuOpen(!preflightModeMenu?.classList.contains('show'));
-    });
-
-    document.querySelectorAll<HTMLElement>('#preflightModeMenuList .model-menu-item[data-mode]').forEach(item => {
-        item.addEventListener('click', () => {
-            const mode = item.dataset.mode as 'ptc' | 'native';
-            if ((mode === 'ptc' || mode === 'native') && !isToolPresentationModeLocked) {
-                updateToolPresentationModeUi(mode, false);
-                vscode.postMessage({ type: 'quickChangeToolPresentationMode', mode });
-                setPreflightModeMenuOpen(false);
-            }
-        });
-    });
-
-    const settingsToolModeSel = document.getElementById('toolPresentationMode') as HTMLSelectElement | null;
-    settingsToolModeSel?.addEventListener('change', () => {
-        const mode = settingsToolModeSel.value as 'ptc' | 'native' | 'hybrid';
-        if (!isToolPresentationModeLocked && (mode === 'ptc' || mode === 'native' || mode === 'hybrid')) {
-            updateToolPresentationModeUi(mode, false);
-            vscode.postMessage({ type: 'quickChangeToolPresentationMode', mode });
-        }
-    });
-
     const headerMore = document.getElementById('headerMore');
     headerMore?.addEventListener('click', event => {
         if (event.target instanceof Element && event.target.closest('button')) headerMore.removeAttribute('open');
@@ -2935,7 +2829,7 @@ let settingsSubscriptionPools: Record<string, any> = {};
     document.addEventListener('click', e => {
         const target = e.target as Element | null;
         if (!target?.closest('#headerMore')) headerMore?.removeAttribute('open');
-        if (!target?.closest('#composerMenu') && !target?.closest('#composerAddBtn') && !target?.closest('#domainMenu') && !target?.closest('#quickDomainTrigger') && !target?.closest('#modelMenu') && !target?.closest('#quickModelTrigger') && !target?.closest('#reasoningMenu') && !target?.closest('#quickReasoningTrigger') && !target?.closest('#writeModeMenu') && !target?.closest('#quickWriteModeTrigger') && !target?.closest('#preflightModeMenu') && !target?.closest('#preflightModeTrigger')) {
+        if (!target?.closest('#composerMenu') && !target?.closest('#composerAddBtn') && !target?.closest('#domainMenu') && !target?.closest('#quickDomainTrigger') && !target?.closest('#modelMenu') && !target?.closest('#quickModelTrigger') && !target?.closest('#reasoningMenu') && !target?.closest('#quickReasoningTrigger') && !target?.closest('#writeModeMenu') && !target?.closest('#quickWriteModeTrigger')) {
             closeComposerMenus();
         }
     });
@@ -5745,7 +5639,6 @@ let settingsSubscriptionPools: Record<string, any> = {};
 
     function addUserMessage(text: string, msgIdx: number, images?: string[], contexts?: ActiveContext[], state?: unknown) {
         clearAgentRoutingStatus();
-        updateToolPresentationModeUi(currentToolPresentationMode, true);
         emptyState.style.display = 'none';
         const div = document.createElement('div');
         div.className = 'message user codex-user-message';
@@ -6715,7 +6608,6 @@ let settingsSubscriptionPools: Record<string, any> = {};
                 artifacts = [];
                 renderArtifactPanel();
                 updateCurrentTopicHeader(null, null);
-                updateToolPresentationModeUi(currentToolPresentationMode, false);
                 { const bar = document.getElementById('tokenUsageBar'); if (bar) bar.style.display = 'none'; }
                 setChatEmptyState(true);
                 startPlaceholderRotation();
@@ -6806,12 +6698,6 @@ let settingsSubscriptionPools: Record<string, any> = {};
                 messageIndexMap.clear();
                 userMessagePayloadMap.clear();
                 restoreArtifactsFromMessages(msg.messages || []);
-                const hasTopicMsgs = (msg.messages || []).length > 0;
-                const rawTopicMode = (msg as Record<string, unknown>).toolPresentationMode;
-                const loadedTopicMode = (rawTopicMode === 'ptc' || rawTopicMode === 'native' || rawTopicMode === 'hybrid')
-                    ? rawTopicMode
-                    : currentToolPresentationMode;
-                updateToolPresentationModeUi(loadedTopicMode, hasTopicMsgs);
                 msg.messages.forEach((m: any, idx: number) => {
                     if (m.isHidden === true) return;
                     
@@ -6927,10 +6813,6 @@ let settingsSubscriptionPools: Record<string, any> = {};
 
             case 'setSchedulingState':
                 applySchedulingState(msg.schedulingState);
-                break;
-
-            case 'setToolPresentationMode':
-                updateToolPresentationModeUi((msg as any).mode || 'ptc', (msg as any).locked === true);
                 break;
 
             case 'runtimeInspectorSnapshot': {
@@ -8292,10 +8174,6 @@ let settingsSubscriptionPools: Record<string, any> = {};
         (document.getElementById('inlineRequestTimeout') as HTMLInputElement).value = String(current.inlineCompletion?.requestTimeoutMs ?? 6000);
         (document.getElementById('inlineMcpCacheTtl') as HTMLInputElement).value = String(current.inlineCompletion?.mcpCacheTtlMs ?? 30000);
         (document.getElementById('agentWriteMode') as HTMLSelectElement).value = current.agentFileWriteMode || 'auto';
-        const toolPresSel = document.getElementById('toolPresentationMode') as HTMLSelectElement | null;
-        if (toolPresSel && current.toolPresentationMode) {
-            toolPresSel.value = current.toolPresentationMode;
-        }
         updateQuickWriteModeSelector(deriveWriteTier(current));
         const autoReviewEl = document.getElementById('approvalsAutoReview') as HTMLInputElement | null;
         if (autoReviewEl) autoReviewEl.checked = current.approvals?.reviewer === 'auto_review';
@@ -9284,10 +9162,6 @@ let settingsSubscriptionPools: Record<string, any> = {};
                 customApiFormat: getCustomApiFormat(),
                 maxContextTokens: parseInt((document.getElementById('settingsCtx') as HTMLInputElement).value) || 0,
                 agentFileWriteMode: (document.getElementById('agentWriteMode') as HTMLSelectElement).value,
-                toolPresentationMode: (() => {
-                    const v = (document.getElementById('toolPresentationMode') as HTMLSelectElement | null)?.value;
-                    return (v === 'ptc' || v === 'native' || v === 'hybrid') ? v : 'ptc';
-                })(),
                 approvals: {
                     reviewer: ((document.getElementById('approvalsAutoReview') as HTMLInputElement | null)?.checked ? 'auto_review' : 'user'),
                 },

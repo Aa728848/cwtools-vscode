@@ -503,7 +503,6 @@ export class ChatSettingsManager {
             customApiFormat: config.customApiFormat,
             maxContextTokens: config.maxContextTokens,
             agentFileWriteMode: sessionFileWriteMode(getProjectWorkspaceRoot()) ?? config.agentFileWriteMode,
-            toolPresentationMode: config.toolPresentationMode,
             approvals: {
                 reviewer: sessionApprovalsReviewer(getProjectWorkspaceRoot())
                     ?? vs.workspace.getConfiguration('stellarisLanguageServices.ai').get<'user' | 'auto_review'>('approvals.reviewer', 'user'),
@@ -814,10 +813,6 @@ export class ChatSettingsManager {
         }
         await update('maxContextTokens', effectiveMaxContextTokens);
         await update('agentFileWriteMode', settings.agentFileWriteMode);
-        if (settings.toolPresentationMode) {
-            await update('toolPresentationMode', settings.toolPresentationMode);
-            this.aiService.setToolPresentationModeOverride(settings.toolPresentationMode);
-        }
         if (settings.approvals?.reviewer) {
             await update('approvals.reviewer', settings.approvals.reviewer);
         }

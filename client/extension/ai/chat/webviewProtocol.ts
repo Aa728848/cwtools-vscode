@@ -25,7 +25,6 @@ import {
 
 const isReasoningEffort = isOneOf(['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'] as const);
 const isWriteMode = isOneOf(['confirm', 'auto', 'auto_review', 'full'] as const);
-const isToolPresentationMode = isOneOf(['ptc', 'native', 'hybrid'] as const);
 const isPermissionDecision = isOneOf(['accept', 'acceptForSession', 'decline', 'cancel'] as const);
 const isCustomApiFormat = isOneOf([
     'openai-chat-completions',
@@ -164,7 +163,6 @@ const validators: Record<WebViewMessage['type'], MessageValidator> = {
     quickChangeModel: fields({ model: isString }),
     quickChangeReasoningEffort: fields({ effort: isReasoningEffort }),
     quickChangeWriteMode: fields({ mode: isWriteMode }),
-    quickChangeToolPresentationMode: fields({ mode: isToolPresentationMode }),
     slashCommand: fields({ command: isString }),
     permissionResponse: fields({ permissionId: isString }, {
         decision: optional(isPermissionDecision),

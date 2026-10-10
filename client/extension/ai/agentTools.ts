@@ -46,12 +46,6 @@ import { aiText, EVIDENCE_GATE_MSG, TEAM_MSG } from './messages';
 import { getPrivateAiStorageRoot, getPrivateTopicStorageDir } from './workspacePaths';
 import { isPathInsideOrEqual } from '../pathScope';
 import { TOOL_REGISTRY, WRITE_TOOLS } from './tools/registry';
-import {
-    createRunCodeCapabilitySnapshot,
-    executeRunCodeProgram,
-    validateRunCodeProgram,
-    RUN_CODE_FANOUT_TIMEOUT_MS,
-} from './tools/runCode';
 import { BUILTIN_PROVIDERS } from './providers/models/defaults';
 import { runAgentHooks } from './runner/hookRunner';
 import { getAgentToolTargetFiles } from './runner/toolScheduler';
@@ -332,9 +326,6 @@ const TOOL_TIMEOUTS: Record<string, number> = {
     run_skill: 30_000,
     // Interactive questions wait indefinitely for user input from the WebView.
     ask_user_question: 0,
-    // run_code owns its bounded guest lifetime and propagates cancellation to
-    // every in-flight nested tool call (see executeRunCode).
-    run_code: 0,
     // Child activity/idle guards and run budgets own orchestration lifetime.
     // A fixed tool timeout would kill healthy long-running child graphs.
     dispatch_agents: 0,
@@ -2556,8 +2547,6 @@ export class AgentToolExecutor {
             // - External / agent tools -
             case 'web_open':
                 result = await this.externalHandler.webOpen(args as any, context); break;
-            case 'run_code':
-                result = await this.executeRunCode(args, context); break;
             case 'run_command':
                 result = await this.externalHandler.runCommand(args as any, context); break;
             case 'manage_process':
@@ -3758,57 +3747,6 @@ export class AgentToolExecutor {
         summary: string;
         pendingOnly?: boolean;
     }>();
-
-    /**
-     * Execute model-authored JavaScript in the isolated QuickJS/WASM guest.
-     * The capability snapshot is immutable for the program lifetime, while
-     * every nested call is revalidated and dispatched by the runner hook.
-     */
-    private async executeRunCode(args: Record<string, unknown>, context?: import('./types').AgentToolContext): Promise<unknown> {
-        const runNestedTool = context?.runNestedTool;
-        const modelVisibleTools = context?.runCodeToolDefinitions?.();
-        if (!runNestedTool || !modelVisibleTools) {
-            return {
-                success: false,
-                error: 'run_code is only available when the runner provides its nested-tool pipeline and capability snapshot.',
-            };
-        }
-        const validated = validateRunCodeProgram(args);
-        if (!validated.ok) return { success: false, error: validated.error };
-        const snapshot = createRunCodeCapabilitySnapshot(modelVisibleTools);
-        if (snapshot.tools.length === 0) {
-            return { success: false, error: 'run_code has no callable tools in the current mode, domain, or disclosed toolset.' };
-        }
-
-        const controller = new AbortController();
-        const parentSignal = context?.runnerOptions?.abortSignal;
-        const onParentAbort = () => controller.abort(parentSignal?.reason);
-        if (parentSignal) {
-            if (parentSignal.aborted) controller.abort(parentSignal.reason);
-            else parentSignal.addEventListener('abort', onParentAbort, { once: true });
-        }
-        const timeoutId = setTimeout(() => {
-            controller.abort(new Error(`run_code exceeded the ${RUN_CODE_FANOUT_TIMEOUT_MS / 1000}s budget.`));
-        }, RUN_CODE_FANOUT_TIMEOUT_MS);
-        const deadline = Date.now() + RUN_CODE_FANOUT_TIMEOUT_MS;
-        try {
-            return await executeRunCodeProgram(
-                validated.request,
-                snapshot,
-                (tool, toolArgs, signal, requestedWaitMs) => runNestedTool(
-                    tool,
-                    toolArgs,
-                    signal,
-                    Math.min(requestedWaitMs, Math.max(1, deadline - Date.now())),
-                ),
-                controller.signal,
-                deadline,
-            );
-        } finally {
-            clearTimeout(timeoutId);
-            if (parentSignal) parentSignal.removeEventListener('abort', onParentAbort);
-        }
-    }
 
     /** 
 * Execute the dispatch_agents tool: convert the task array built by AI into TaskGraph, 

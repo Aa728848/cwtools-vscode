@@ -1,6 +1,9 @@
 # Agent Note: 类型擦除对抗夹具的转义写法必须通过 ESLint 门禁
 
-Status: implemented
+Status: archived
+
+> 已被 `../../implemented/architecture/2026-10-10-ptc-mode-removal-and-native-unification.md` 取代：本笔记针对的对抗性夹具 `client/test/unit/toolPresentationMode.test.ts` 已随 PTC 模式一并删除，该文件与本节讨论的 lint 门禁场景均不再存在。
+
 
 ## Problem
 

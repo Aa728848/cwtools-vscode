@@ -53,8 +53,6 @@ export interface CodexActivityEvent {
     sourceStep?: unknown;
     sourceEvent?: unknown;
     detailModel?: CodexActivityDetail;
-    subcall?: boolean;
-    parentToolName?: string;
 }
 
 export interface CodexActivityGroup {

@@ -24,7 +24,7 @@ import { toolDisclosureService } from '../../extension/ai/runner/toolDisclosure'
 const toolDefinitions = [
     'ask_user_question', 'select_tools', 'read_file', 'replace_lines', 'query_workspace_index',
     'dispatch_agents', 'query_blackboard', 'mcp_call', 'run_command',
-    'write_file', 'write_localisation', 'run_code',
+    'write_file', 'write_localisation',
 ].map(name => ({
     type: 'function',
     function: { name, description: '', parameters: {} },

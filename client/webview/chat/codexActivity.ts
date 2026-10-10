@@ -41,6 +41,14 @@ const READ_LIKE_TOOL_NAMES = new Set([
 
 type StepLike = Record<string, unknown>;
 
+// Retired programmatic-tool-calling steps: the sandbox script tool and the
+// script subcalls it emitted are never rendered, so they are dropped before
+// the activity pipeline sees them.
+function isRetiredToolStep(step: StepLike): boolean {
+    if (step.subcall === true) return true;
+    return asString(step.toolName || step.name) === 'run_code';
+}
+
 function asString(value: unknown): string {
     return typeof value === 'string' ? value : value == null ? '' : String(value);
 }
@@ -100,18 +108,7 @@ function compactPreview(value: unknown, max = 220): string {
     return normalized.length > max ? normalized.slice(0, max - 3) + '...' : normalized;
 }
 
-function resultSummary(result: Record<string, unknown>, isCommand: boolean, toolName?: string, labels?: CodexI18nText): string {
-    if (toolName === 'run_code') {
-        if (result.success === false) {
-            return compactPreview(result.error || result.message || 'Script failed');
-        }
-        if (typeof result.callsExecuted === 'number' && result.callsExecuted > 0) {
-            const tmpl = labels?.activity.subcallsCount ?? '{count} subcalls';
-            return tmpl.replace('{count}', String(result.callsExecuted));
-        }
-        if (result.outputTruncated) return 'Output truncated';
-        return '';
-    }
+function resultSummary(result: Record<string, unknown>, isCommand: boolean): string {
     if (isCommand) {
         const exitCode = result.exitCode ?? result.exit_code ?? result.code;
         if (exitCode !== undefined && exitCode !== null && String(exitCode) !== '0') return `exit ${exitCode}`;
@@ -187,12 +184,6 @@ function commandDetailFrom(args: Record<string, unknown>, result: Record<string,
 }
 
 function toolSubject(toolName: string, args: Record<string, unknown>, _step: StepLike): string {
-    if (toolName === 'run_code') {
-        if (typeof args.description === 'string' && args.description.trim()) {
-            return args.description.trim();
-        }
-        return '';
-    }
     if (COMMAND_TOOL_NAMES.has(toolName)) return '';
     const target = targetPathFromArgs(args);
     if (target) return fileBaseName(target);
@@ -211,10 +202,7 @@ function createToolEvent(step: StepLike, labels: CodexI18nText, index: number): 
     let label = labels.activity.tool;
     let groupKind: CodexGroupKind = 'tool';
 
-    if (toolName === 'run_code') {
-        kind = 'tool';
-        label = labels.activity.runScript;
-    } else if (COMMAND_TOOL_NAMES.has(toolName)) {
+    if (COMMAND_TOOL_NAMES.has(toolName)) {
         kind = 'command';
         label = labels.activity.ranCommand;
         groupKind = 'command';
@@ -230,7 +218,6 @@ function createToolEvent(step: StepLike, labels: CodexI18nText, index: number): 
         label = labels.activity.validation;
     }
 
-    const isSubcall = step.subcall === true;
     const resolvedLabel = step.type === 'permission_request' ? labels.activity.waitingPermission : label;
     return {
         id: invocationIdOf(step) || `tool-${index}-${timestamp}`,
@@ -244,8 +231,6 @@ function createToolEvent(step: StepLike, labels: CodexI18nText, index: number): 
         agentId: asString(step.agentId) || undefined,
         groupKind,
         sourceStep: step,
-        subcall: isSubcall || undefined,
-        parentToolName: asString(step.parentToolName) || undefined,
         detailModel: {
             args,
             targetPath: targetPath || undefined,
@@ -254,13 +239,13 @@ function createToolEvent(step: StepLike, labels: CodexI18nText, index: number): 
     };
 }
 
-function applyToolResult(event: CodexActivityEvent, resultStep: StepLike, labels?: CodexI18nText): void {
+function applyToolResult(event: CodexActivityEvent, resultStep: StepLike): void {
     const result = getResultObject(resultStep);
     const args = asRecord((event.detailModel?.args as Record<string, unknown>) || {});
     const isCommand = COMMAND_TOOL_NAMES.has(event.toolName || '');
     event.status = statusFromResult(result);
     event.durationMs = Number(resultStep.durationMs || 0) || Math.max(0, timestampOf(resultStep, event.timestamp) - event.timestamp);
-    event.detail = resultSummary(result, isCommand, event.toolName, labels);
+    event.detail = resultSummary(result, isCommand);
     event.sourceStep = event.sourceStep || resultStep;
     event.detailModel = {
         ...event.detailModel,
@@ -273,7 +258,7 @@ function applyToolResult(event: CodexActivityEvent, resultStep: StepLike, labels
 
 function createStandaloneResult(step: StepLike, labels: CodexI18nText, index: number): CodexActivityEvent {
     const event = createToolEvent({ ...step, type: 'tool_call' }, labels, index);
-    applyToolResult(event, step, labels);
+    applyToolResult(event, step);
     return event;
 }
 
@@ -571,7 +556,7 @@ function summarize(items: CodexTurnItem[], finalText: string, options: CodexBuil
 
 export function buildCodexTurnModel(content: string, steps: StepLike[] | undefined, options: CodexBuildOptions): CodexTurnModel {
     const labels = options.labels;
-    const sorted = [...(steps || [])].sort((a, b) => timestampOf(a, 0) - timestampOf(b, 0));
+    const sorted = [...(steps || [])].filter(step => !isRetiredToolStep(step)).sort((a, b) => timestampOf(a, 0) - timestampOf(b, 0));
     const rawItems: CodexTurnItem[] = [];
     const pendingByInvocation = new Map<string, CodexActivityEvent>();
     const pendingByTool = new Map<string, CodexActivityEvent[]>();
@@ -763,7 +748,7 @@ export function buildCodexTurnModel(content: string, steps: StepLike[] | undefin
         if (type === 'tool_result') {
             const event = takePending(step);
             if (event) {
-                applyToolResult(event, step, labels);
+                applyToolResult(event, step);
             } else {
                 rawItems.push({ type: 'activity', event: createStandaloneResult(step, labels, index) });
             }

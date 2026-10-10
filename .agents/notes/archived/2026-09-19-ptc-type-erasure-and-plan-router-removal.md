@@ -1,6 +1,8 @@
 # Agent Note: PTC 类型擦除改为词法感知与计划模式关键词自动路由移除
 
-Status: implemented
+Status: archived
+> 已被 `../../implemented/architecture/2026-10-10-ptc-mode-removal-and-native-unification.md` 取代：PTC 模式已整体移除，本笔记描述的机制不再存在于代码库中。
+
 
 ## Problem
 

@@ -363,33 +363,6 @@ body.side-workspace-wide { --active-side-workspace-width: var(--side-workspace-w
 .codex-activity-child-row .codex-activity-summary { min-height: 22px; padding: 1px 0; }
 .codex-activity-child-row .codex-activity-row-details { margin-left: 22px; padding-left: 10px; }
 .codex-activity-child-row .codex-activity-summary:hover { background: color-mix(in srgb, var(--codex-row-hover) 58%, transparent); }
-.codex-activity-row.codex-activity-subcall {
-    margin-left: 14px;
-    border-left: 2px solid color-mix(in srgb, var(--vscode-charts-blue, #58a6ff) 45%, transparent);
-    padding-left: 8px;
-    background: rgba(255, 255, 255, 0.02);
-    border-radius: 0 4px 4px 0;
-}
-.codex-activity-row.codex-activity-subcall:hover {
-    background: rgba(255, 255, 255, 0.045);
-}
-.codex-subcall-pill {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 9.5px;
-    font-weight: 700;
-    line-height: 1;
-    padding: 1.5px 4.5px;
-    margin-right: 6px;
-    border-radius: 4px;
-    color: var(--vscode-charts-blue, #58a6ff);
-    background: color-mix(in srgb, var(--vscode-charts-blue, #58a6ff) 14%, transparent);
-    border: 1px solid color-mix(in srgb, var(--vscode-charts-blue, #58a6ff) 26%, transparent);
-    letter-spacing: 0.3px;
-    vertical-align: 1px;
-    user-select: none;
-}
 .codex-final-answer { line-height: 1.68; font-size: 13px; padding-top: 2px; }
 @media (max-width: 520px) {
     .codex-chat-shell .codex-user-bubble { max-width: 88%; }
@@ -1061,19 +1034,6 @@ body.chat-empty .input-container { box-shadow: 0 16px 38px rgba(0,0,0,0.22); }
     box-shadow: none !important;
 }
 .composer-domain-trigger { max-width: 116px; flex: 0 1 auto; }
-.composer-tool-mode-trigger {
-    max-width: 96px;
-    flex: 0 0 auto;
-    box-shadow: none !important;
-}
-.composer-tool-mode-trigger.is-locked {
-    opacity: 0.62;
-    cursor: default;
-}
-.composer-tool-mode-trigger.is-locked:hover {
-    background: transparent !important;
-    opacity: 0.62;
-}
 .composer-reasoning-trigger { width: max-content; min-width: 0; max-width: 132px; flex: 0 0 auto; justify-content: space-between; }
 #quickWriteModeTrigger.write-mode-elevated,
 #quickWriteModeTrigger.write-mode-danger {

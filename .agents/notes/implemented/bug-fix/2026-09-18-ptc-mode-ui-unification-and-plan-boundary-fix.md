@@ -2,6 +2,8 @@
 
 Status: implemented
 
+> **部分事实已失效**：本笔记的第 2 节（QuickJS 沙箱对象只读修复）与第 1 节中关于 `[PTC]` 子调用徽标的呈现规范，均随 PTC 模式整体移除而失效——`run_code`、`typeErasure.ts` 与子调用流水线已不存在，见 `../../architecture/2026-10-10-ptc-mode-removal-and-native-unification.md`。第 3 节（输入栏与顶部栏视觉规范、菜单互斥、像素级基线对齐）与第 4 节（计划审批判定边界）描述的行为仍然成立。
+
 ## Problem
 近期为 AI 运行时引入的 PTC（Programmatic Tool Calling，代码化工具调用）与 NATIVE 模式在实际使用中暴露出四类核心体验与稳定性缺陷：
 1. **工具活动流呈现与多语言不统一**：

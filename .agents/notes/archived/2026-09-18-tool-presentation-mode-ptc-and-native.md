@@ -1,6 +1,8 @@
 # Agent Note: 智能体工具调用模式 (PTC 与 NATIVE) 支持与子调用流式可视化
 
-Status: implemented
+Status: archived
+> 已被 `../../implemented/architecture/2026-10-10-ptc-mode-removal-and-native-unification.md` 取代：PTC 模式已整体移除，本笔记描述的机制不再存在于代码库中。
+
 
 ## Problem
 

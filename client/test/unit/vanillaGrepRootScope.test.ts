@@ -31,11 +31,11 @@ type LspToolsModule = typeof import('../../extension/ai/tools/lspTools');
  * when it was first loaded, so the shared fixture's setStubConfigOverrides()
  * only reaches them when they happen to be loaded under the fixture's stub.
  * That is not guaranteed in a mixed run: an earlier test file that imports an
- * AI module with its own vscode stub (toolPresentationMode.test.ts pulls
- * aiService -> fileTools -> workspaceSandbox -> configuredGameRoots) leaves a
- * foreign instance in the process-wide require cache, and this suite would
- * then configure roots nobody reads. Reloading them here makes that binding
- * explicit instead of load-order dependent.
+ * AI module with its own vscode stub (aiService pulls fileTools ->
+ * workspaceSandbox -> configuredGameRoots) leaves a foreign instance in the
+ * process-wide require cache, and this suite would then configure roots nobody
+ * reads. Reloading them here makes that binding explicit instead of
+ * load-order dependent.
  */
 const RELOADED_MODULES = [
     '../../extension/configuredGameRoots',

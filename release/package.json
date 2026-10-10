@@ -1177,22 +1177,6 @@
                         "default": "auto",
                         "description": "%configuration.stellarisLanguageServices.ai.agentFileWriteMode.description%"
                     },
-                    "stellarisLanguageServices.ai.toolPresentationMode": {
-                        "scope": "window",
-                        "type": "string",
-                        "enum": [
-                            "ptc",
-                            "native",
-                            "hybrid"
-                        ],
-                        "enumDescriptions": [
-                            "%configuration.stellarisLanguageServices.ai.toolPresentationMode.enum.ptc%",
-                            "%configuration.stellarisLanguageServices.ai.toolPresentationMode.enum.native%",
-                            "%configuration.stellarisLanguageServices.ai.toolPresentationMode.enum.hybrid%"
-                        ],
-                        "default": "ptc",
-                        "description": "%configuration.stellarisLanguageServices.ai.toolPresentationMode.description%"
-                    },
                     "stellarisLanguageServices.ai.evidenceGate.mode": {
                         "scope": "window",
                         "type": "string",
@@ -2539,7 +2523,6 @@
     "dependencies": {
         "executable": "4.1.1",
         "ignore": "^5.3.2",
-        "quickjs-emscripten": "^0.31.0",
         "socks": "^2.8.10",
         "sql.js": "^1.14.1",
         "steamworks.js": "0.4.0",

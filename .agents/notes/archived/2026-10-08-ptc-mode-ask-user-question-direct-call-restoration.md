@@ -1,6 +1,8 @@
 # Agent Note: PTC 模式下恢复 ask_user_question 直连调用
 
-Status: implemented
+Status: archived
+> 已被 `../../implemented/architecture/2026-10-10-ptc-mode-removal-and-native-unification.md` 取代：PTC 模式已整体移除，本笔记描述的机制不再存在于代码库中。
+
 
 ## Problem
 

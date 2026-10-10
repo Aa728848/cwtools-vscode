@@ -87,15 +87,13 @@ ${JSON.stringify({
 }
 
 describe('Execute-to-Plan handoff', () => {
-    it('preserves the submitted plan text for direct and PTC calls', () => {
-        for (const subcall of [false, true]) {
-            const plan = completePlan();
-            const call = { ...toolCall('write_file', '.cwtools/topic/Implementation_Plan.md'),
-                toolArgs: { file: '.cwtools/topic/Implementation_Plan.md', content: plan }, subcall };
-            const receipt = getPendingPlanApproval([call, { ...successfulToolResult('write_file'), subcall }]);
-            expect(receipt).to.deep.equal({ invocationId: 'write_file-1',
-                filePath: '.cwtools/topic/Implementation_Plan.md', planText: plan });
-        }
+    it('preserves the submitted plan text for the direct call', () => {
+        const plan = completePlan();
+        const call = { ...toolCall('write_file', '.cwtools/topic/Implementation_Plan.md'),
+            toolArgs: { file: '.cwtools/topic/Implementation_Plan.md', content: plan } };
+        const receipt = getPendingPlanApproval([call, successfulToolResult('write_file')]);
+        expect(receipt).to.deep.equal({ invocationId: 'write_file-1',
+            filePath: '.cwtools/topic/Implementation_Plan.md', planText: plan });
     });
 
     it('rejects failed, skipped and uncorrelated submissions', () => {

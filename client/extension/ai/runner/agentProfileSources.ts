@@ -60,8 +60,7 @@ function parseAgentMarkdown(content: string, fallbackName: string): RuntimeAgent
         tools: readList('tools'),
         disallowedTools: readList('disallowedTools'),
         subagents: readList('subagents'),
-        subagentCapabilities: frontmatter.has('subagentRunCode') || frontmatter.has('subagentCommand') ? {
-            runCode: scalar(frontmatter.get('subagentRunCode') ?? 'false') === true,
+        subagentCapabilities: frontmatter.has('subagentCommand') ? {
             command: scalar(frontmatter.get('subagentCommand') ?? 'false') === true,
         } : undefined,
         maxIterations: frontmatter.has('maxIterations')

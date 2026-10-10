@@ -39,7 +39,6 @@
   "dependencies": {
     "google-translate-api-x": "^10.7.2",
     "ignore": "^5.3.2",
-    "quickjs-emscripten": "^0.31.0",
     "socks": "^2.8.10",
     "sql.js": "^1.14.1",
     "steamworks.js": "0.4.0",

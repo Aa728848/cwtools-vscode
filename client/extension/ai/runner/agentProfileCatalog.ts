@@ -26,7 +26,7 @@ export interface RuntimeAgentProfile {
     disallowedTools?: string[];
     subagents?: string[];
     /** Declarative child capability exceptions. Web remains denied by the registry. */
-    subagentCapabilities?: { runCode?: boolean; command?: boolean };
+    subagentCapabilities?: { command?: boolean };
     /** Healthy-progress iteration window for child runs using this profile. */
     maxIterations?: number;
     summaryPolicy?: AgentSummaryPolicy;
@@ -82,8 +82,7 @@ const BUILTIN_PROFILES: RuntimeAgentProfile[] = [
         name: 'explore',
         description: 'Read-only repository and semantic exploration.',
         authorizationCeiling: 'read_only',
-        tools: ['ask_user_question', 'select_tools', 'run_code', 'read_file', 'list_directory', 'glob_files', 'grep', 'document_symbols', 'workspace_symbols', 'go_to_definition', 'find_references', 'hover_symbol', 'query_*', 'search_*', 'get_*', 'web_*', 'set_memory', 'query_blackboard', 'team_send_message', 'team_members', 'team_task_*'],
-        subagentCapabilities: { runCode: true },
+        tools: ['ask_user_question', 'select_tools', 'read_file', 'list_directory', 'glob_files', 'grep', 'document_symbols', 'workspace_symbols', 'go_to_definition', 'find_references', 'hover_symbol', 'query_*', 'search_*', 'get_*', 'web_*', 'set_memory', 'query_blackboard', 'team_send_message', 'team_members', 'team_task_*'],
         maxIterations: 40,
         disallowedTools: ['write_*', 'edit_file', 'replace_lines', 'run_command', 'git_ops', 'dispatch_agents'],
         summaryPolicy: {
@@ -96,8 +95,7 @@ const BUILTIN_PROFILES: RuntimeAgentProfile[] = [
         name: 'planner',
         description: 'Plan-only Agent that may write guarded design blueprints.',
         authorizationCeiling: 'plan_write_only',
-        tools: ['ask_user_question', 'select_tools', 'run_code', 'read_file', 'list_directory', 'glob_files', 'grep', 'document_symbols', 'workspace_symbols', 'go_to_definition', 'find_references', 'hover_symbol', 'query_*', 'search_*', 'get_*', 'write_design_blueprint', 'set_memory', 'query_blackboard', 'team_send_message', 'team_members', 'team_task_*'],
-        subagentCapabilities: { runCode: true },
+        tools: ['ask_user_question', 'select_tools', 'read_file', 'list_directory', 'glob_files', 'grep', 'document_symbols', 'workspace_symbols', 'go_to_definition', 'find_references', 'hover_symbol', 'query_*', 'search_*', 'get_*', 'write_design_blueprint', 'set_memory', 'query_blackboard', 'team_send_message', 'team_members', 'team_task_*'],
         maxIterations: 30,
         disallowedTools: ['edit_file', 'replace_lines', 'run_command', 'git_ops', 'dispatch_agents'],
         summaryPolicy: {
@@ -110,8 +108,7 @@ const BUILTIN_PROFILES: RuntimeAgentProfile[] = [
         name: 'reviewer',
         description: 'Read-only verification and review Agent.',
         authorizationCeiling: 'read_only',
-        tools: ['ask_user_question', 'select_tools', 'run_code', 'read_file', 'glob_files', 'grep', 'document_symbols', 'workspace_symbols', 'go_to_definition', 'find_references', 'hover_symbol', 'query_*', 'get_*', 'validate_*', 'compare_*', 'git_ops', 'set_memory', 'query_blackboard', 'team_send_message', 'team_members', 'team_task_*'],
-        subagentCapabilities: { runCode: true },
+        tools: ['ask_user_question', 'select_tools', 'read_file', 'glob_files', 'grep', 'document_symbols', 'workspace_symbols', 'go_to_definition', 'find_references', 'hover_symbol', 'query_*', 'get_*', 'validate_*', 'compare_*', 'git_ops', 'set_memory', 'query_blackboard', 'team_send_message', 'team_members', 'team_task_*'],
         maxIterations: 30,
         disallowedTools: ['write_*', 'edit_file', 'replace_lines', 'dispatch_agents'],
         summaryPolicy: {
@@ -126,7 +123,7 @@ const BUILTIN_PROFILES: RuntimeAgentProfile[] = [
         domain: 'general',
         authorizationCeiling: 'workspace_write',
         tools: ['*'],
-        subagentCapabilities: { runCode: true, command: true },
+        subagentCapabilities: { command: true },
         maxIterations: 80,
         summaryPolicy: {
             minCharacters: 240,
@@ -140,7 +137,6 @@ const BUILTIN_PROFILES: RuntimeAgentProfile[] = [
         domain: 'paradox',
         authorizationCeiling: 'workspace_write',
         tools: ['*'],
-        subagentCapabilities: { runCode: true },
         maxIterations: 80,
         summaryPolicy: {
             minCharacters: 240,
@@ -154,7 +150,6 @@ const BUILTIN_PROFILES: RuntimeAgentProfile[] = [
         domain: 'paradox',
         authorizationCeiling: 'workspace_write',
         tools: ['*'],
-        subagentCapabilities: { runCode: true },
         maxIterations: 50,
     },
     {
@@ -163,7 +158,6 @@ const BUILTIN_PROFILES: RuntimeAgentProfile[] = [
         domain: 'paradox',
         authorizationCeiling: 'workspace_write',
         tools: ['*'],
-        subagentCapabilities: { runCode: true },
         maxIterations: 50,
     },
     {
@@ -172,7 +166,6 @@ const BUILTIN_PROFILES: RuntimeAgentProfile[] = [
         domain: 'paradox',
         authorizationCeiling: 'workspace_write',
         tools: ['*'],
-        subagentCapabilities: { runCode: true },
         maxIterations: 60,
     },
 ];

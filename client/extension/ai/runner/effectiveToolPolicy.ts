@@ -56,11 +56,8 @@ export function evaluateEffectiveToolPolicy(
         }
     }
 
-    const declaredChildCapability = entry.name === 'run_code'
-        ? context.profile?.subagentCapabilities?.runCode === true
-        : entry.name === 'run_command'
-            ? context.profile?.subagentCapabilities?.command === true
-            : false;
+    const declaredChildCapability = entry.name === 'run_command'
+        && context.profile?.subagentCapabilities?.command === true;
     if (context.isSubAgent && !entry.allowSubAgent && !declaredChildCapability) {
         return { allowed: false, reason: 'subagent' };
     }

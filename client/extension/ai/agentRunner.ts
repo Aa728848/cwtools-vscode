@@ -26,7 +26,6 @@ import type {
     ToolCall,
     ToolInvocation,
     ToolTerminalOutcome,
-    ToolPresentationMode,
 } from './types';
 import { contentToString } from './types';
 import { estimateTokenCount, estimateChatMessageTokens, hasImageContent, BASE64_CHARS_PER_TOKEN_ESTIMATE } from './runner/tokenEstimation';
@@ -71,7 +70,6 @@ import {
 import { getWorkflow } from './workflowRegistry';
 import { TOOL_REGISTRY, WRITE_TOOLS, READ_ONLY_TOOLS } from './tools/registry';
 import { hasAddedErrors, type DiagnosticDelta } from './runner/diagnosticSnapshot';
-import { buildRunCodePromptAdditions, buildRunCodePromptBlock, createRunCodeCapabilitySnapshot, PTC_ONLY_INSTRUCTION } from './tools/runCode';
 import { globalPartitionedWriteQueue } from './runner/writeCoordinator';
 import { runLedger } from './runner/runLedger';
 import { atomicWriteText, sha256Text } from './runner/durableStorage';
@@ -585,23 +583,6 @@ const RESUME_SNAPSHOT_MIN_INTERVAL_MS = 30_000;
 
 
 /**
- * Tools the model may call directly while in PTC mode. run_code is the
- * programmatic surface for everything else; ask_user_question is exempt
- * because it waits on a human indefinitely, so it cannot live inside a
- * bounded run_code execution window.
- */
-const PTC_DIRECT_TOOLS = new Set(['run_code', 'ask_user_question']);
-
-/**
- * Whether PTC mode rejects a direct tool call before it reaches the executor.
- * Only the tools in PTC_DIRECT_TOOLS survive; everything else must be reached
- * through a run_code program. Native and hybrid never block.
- */
-export function isPtcDirectCallBlocked(mode: ToolPresentationMode, toolName: string): boolean {
-    return mode === 'ptc' && !PTC_DIRECT_TOOLS.has(toolName);
-}
-
-/**
  * Whether a model step that contains an ask_user_question must be rejected
  * because the question was not the only tool call in the response. Asking and
  * acting in the same step would make the answer arrive too late to steer it.
@@ -610,37 +591,11 @@ export function questionCallViolatesSoleCallRule(questionCallIndex: number, call
     return questionCallIndex >= 0 && callCount > 1;
 }
 
-/**
- * Projects available tool definitions to the model-facing schema array
- * based on the selected presentation mode (PTC vs Native vs Hybrid).
- */
-export function projectModelFacingTools(
-    tools: readonly ToolDefinition[],
-    mode: ToolPresentationMode,
-): ToolDefinition[] {
-    const hasRunCode = tools.some(t => t.function.name === 'run_code');
-    if (mode === 'ptc' && hasRunCode) {
-        // run_code carries the whole capability pool, so PTC keeps the schema
-        // surface to one tool. ask_user_question stays directly callable: it
-        // blocks on a human with no budget of its own, so routing it through a
-        // run_code program would put an unbounded wait inside a bounded
-        // execution window. It remains absent from the run_code capability
-        // snapshot (RUN_CODE_BLOCKED_TOOLS), so this is the only way to reach it.
-        return tools.filter(t => PTC_DIRECT_TOOLS.has(t.function.name));
-    }
-    if (mode === 'native') {
-        return tools.filter(t => t.function.name !== 'run_code');
-    }
-    return [...tools];
-}
-
 export interface AgentRunnerOptions {
     /** Override provider for this run */
     providerId?: string;
     /** Override model for this run */
     model?: string;
-    /** Tool invocation presentation: 'ptc' (Programmatic Tool Calling), 'native' (Standard Function Calling), or 'hybrid' (both). */
-    toolPresentationMode?: ToolPresentationMode;
     /** Override reasoning effort for external runtimes. */
     reasoningEffort?: ReasoningEffort;
     /** Dynamic maximum context tokens for this run */
@@ -942,71 +897,9 @@ export class AgentRunner {
     }
 
     /**
-     * One run_code step through the same gates as a direct model tool call:
-     * the model-visible catalog decides the allowlist (domain isolation),
-     * writes take the partitioned per-file queue, and execution goes through
-     * the authoritative executor (policy, plan guard, git guard). The
-     * guest signal replaces the run-level signal for this nested call so a
-     * timed-out program aborts in-flight work instead of leaking it.
-     */
-    private async runNestedToolStep(
-        toolName: string,
-        args: Record<string, unknown>,
-        context: import('./types').AgentToolContext,
-        onFileWrite: ((filePath: string, previousContent: string | null) => void) | undefined,
-        modelVisibleTools: readonly import('./types').ToolDefinition[],
-        signal?: AbortSignal,
-        writeQueueWaitTimeoutMs?: number,
-    ): Promise<unknown> {
-        if (!createRunCodeCapabilitySnapshot(modelVisibleTools).names.has(toolName)) {
-            return {
-                success: false,
-                stepBlocked: true,
-                error: `Tool '${toolName}' is not available to run_code in the current mode, domain, or disclosed toolset.`,
-            };
-        }
-        const registryEntry = TOOL_REGISTRY.get(toolName as AgentToolName);
-        if (!registryEntry) {
-            return { success: false, stepBlocked: true, error: `Tool '${toolName}' is not registered.` };
-        }
-        const nestedContext: import('./types').AgentToolContext = signal
-            ? {
-                ...context,
-                runnerOptions: {
-                    ...(context.runnerOptions ?? {}),
-                    abortSignal: signal,
-                } as import('./types').AgentToolContext['runnerOptions'],
-            }
-            : context;
-        const workspaceRoot = this.toolExecutor.workspaceRoot;
-        const filePaths = getAgentToolTargetFiles(toolName, args, workspaceRoot, nestedContext?.runnerOptions?.topicId);
-        const primaryFilePath = filePaths[0] ?? '';
-        if (WRITE_TOOLS.has(toolName)) {
-            if (onFileWrite && primaryFilePath) {
-                const prev = fs.existsSync(primaryFilePath) ? fs.readFileSync(primaryFilePath, 'utf8') : null;
-                onFileWrite(primaryFilePath, prev);
-            }
-            return await this.enqueueWriteTool(
-                filePaths,
-                registryEntry.concurrencyClass,
-                signal,
-                writeQueueWaitTimeoutMs,
-                'run_code call timed out waiting for the file write queue.',
-                () => this.executeToolPipeline(toolName, args, nestedContext),
-            );
-        }
-        const releaseScheduler = await toolScheduler.acquireLock(registryEntry.concurrencyClass, signal);
-        try {
-            return await this.executeToolPipeline(toolName, args, nestedContext);
-        } finally {
-            releaseScheduler();
-        }
-    }
-
-    /**
-     * Common partitioned write-queue sequence for both direct runner tool execution
-     * and nested run_code guest execution. Write queue locks first, then concurrency
-     * permits are acquired if needed (skipping per-file-write noop).
+     * Common partitioned write-queue sequence for runner tool execution:
+     * write queue locks first, then concurrency permits are acquired if
+     * needed (skipping per-file-write noop).
      */
     private async enqueueWriteTool<T>(
         filePaths: readonly string[],
@@ -1239,8 +1132,6 @@ export class AgentRunner {
         const emitStep = (step: AgentStep) => {
             steps.push(step);
             options?.onStep?.(step);
-            // Subcall steps are streaming UI progress within run_code; skip per-subcall disk ledger writes
-            if (step.subcall === true) return;
             // runRecordPromise is assigned just before this closure is defined.
             runRecordPromise!.then(r => {
                 runLedger.appendEvent(r.runId, 'step_appended', { step }).catch(error => {
@@ -2300,67 +2191,6 @@ export class AgentRunner {
             scopeId: runRecord.runId,
             onBeforeFileWrite: onFileWrite,
             onTodoUpdate: options?.onTodoUpdate,
-            // run_code snapshots the current model-visible catalog when its
-            // guest starts. Nested calls still recheck the live catalog.
-            runCodeToolDefinitions: () => availableTools.filter(tool => TOOL_REGISTRY.has(tool.function.name as AgentToolName)),
-            runNestedTool: async (toolName, args, signal, writeQueueWaitTimeoutMs) => {
-                if ((interactivePlanApprovalPending || planSubmissionInFlight) && isExecutionActionTool(toolName)) {
-                    return { success: false, planApprovalPending: true, error: aiText(
-                        'A submitted plan requires user approval before further execution.',
-                        '计划已提交，必须等待用户批准后才能继续执行。',
-                    ) };
-                }
-                const subcallInvocationId = `subcall_${runRecord.runId}_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
-                const startTime = Date.now();
-                emitStep({
-                    type: 'tool_call',
-                    content: aiText(`[PTC] Calling tool: ${toolName}`, `[PTC] 调用子工具: ${toolName}`),
-                    toolName,
-                    toolArgs: args,
-                    timestamp: startTime,
-                    invocationId: subcallInvocationId,
-                    subcall: true,
-                    parentToolName: 'run_code',
-                });
-                const files = getAgentToolTargetFiles(toolName, args, this.toolExecutor.workspaceRoot, options?.topicId);
-                const submittingPlan = !options?.approvedPlanExecution
-                    && isCompleteImplementationPlanWrite(toolName, args, files);
-                if (submittingPlan) planSubmissionInFlight = true;
-                let result: unknown;
-                try {
-                    result = await this.runNestedToolStep(
-                        toolName, args, agentToolContext, onFileWrite, availableTools, signal, writeQueueWaitTimeoutMs,
-                    );
-                } finally {
-                    if (submittingPlan) planSubmissionInFlight = false;
-                }
-                const durationMs = Date.now() - startTime;
-                emitStep({
-                    type: 'tool_result',
-                    content: aiText(`[PTC] ${toolName} completed`, `[PTC] ${toolName} 完成`),
-                    toolName,
-                    toolResult: result,
-                    timestamp: Date.now(),
-                    durationMs,
-                    invocationId: subcallInvocationId,
-                    subcall: true,
-                    parentToolName: 'run_code',
-                });
-                if (isToolResultSuccess(result)
-                    && (submittingPlan
-                        || (!options?.approvedPlanExecution
-                            && toolName === 'write_design_blueprint'
-                            && toolResultRecord(result)?.approvalReady === true))) {
-                    interactivePlanApprovalPending = true;
-                }
-                if (WRITE_TOOLS.has(toolName) && files[0]) {
-                    const record = result as Record<string, unknown> | undefined;
-                    if (record && (record.success === true || record.confirmed === true)) {
-                        confirmedWrittenFiles.add(files[0]);
-                    }
-                }
-                return result;
-            },
         };
 
         // Cross-step repetition requires both a repeated call pattern and
@@ -2371,7 +2201,6 @@ export class AgentRunner {
         let forceStop = false;
         let executionActionObserved = false;
         let interactivePlanApprovalPending = false;
-        let planSubmissionInFlight = false;
         const updateFinalPromptMetric = () => {
             if (!runMetrics) return;
             runMetrics.finalPromptTokens = messages.reduce((s, m) => {
@@ -2508,37 +2337,10 @@ export class AgentRunner {
             return toolDisclosureService.initialTools(eligibleToolPool, disclosureContext);
         };
         availableTools = refreshAvailableTools();
-        const effectivePresentationMode: ToolPresentationMode = options?.toolPresentationMode
-            ?? this.aiService.getConfig().toolPresentationMode
-            ?? 'ptc';
-        let modelFacingTools = projectModelFacingTools(availableTools, effectivePresentationMode);
-
-        const hasRunCode = availableTools.some(tool => tool.function.name === 'run_code');
-        if (effectivePresentationMode === 'ptc' && !hasRunCode) {
-            reportBestEffortFailure('agentRunner.ptc_invariant', { topicId: options?.topicId, threadId: options?.threadId }, new Error('PTC mode requested but run_code is missing from available tools.'));
-        }
-        if (effectivePresentationMode === 'ptc' && hasRunCode) {
-            const initialRunCodeSdk = buildRunCodePromptBlock(
-                availableTools.filter(tool => TOOL_REGISTRY.has(tool.function.name as AgentToolName)),
-            );
-            if (initialRunCodeSdk) {
-                const ptcBlock = [
-                    '<system-reminder>',
-                    '# PTC (Programmatic Tool Calling) Mode',
-                    PTC_ONLY_INSTRUCTION,
-                    '</system-reminder>',
-                    initialRunCodeSdk,
-                ].filter(Boolean).join('\n\n');
-                messages.push({ role: 'user', content: ptcBlock });
-            }
-        } else if (effectivePresentationMode === 'hybrid' && hasRunCode) {
-            const initialRunCodeSdk = buildRunCodePromptBlock(
-                availableTools.filter(tool => TOOL_REGISTRY.has(tool.function.name as AgentToolName)),
-            );
-            if (initialRunCodeSdk) {
-                messages.push({ role: 'user', content: initialRunCodeSdk });
-            }
-        }
+        // PTC (programmatic tool calling) is gone: the model always receives the
+        // standard function-calling schema array, so the model-facing surface is
+        // a snapshot of the disclosed catalog.
+        let modelFacingTools = [...availableTools];
 
         // M3 Fix: remove per-call dynamic import — getProvider is already statically
         // imported at the top of this file; dynamic import added latency for nothing.
@@ -3800,7 +3602,7 @@ export class AgentRunner {
                 invocation.args = selectionArgs;
                 toolCall.function.arguments = JSON.stringify(selectionArgs);
                 availableTools = refreshAvailableTools();
-                modelFacingTools = projectModelFacingTools(availableTools, effectivePresentationMode);
+                modelFacingTools = [...availableTools];
                 for (const name of selection.loaded) newlyDisclosedToolNames.add(name);
                 await runLedger.appendEvent(runRecord.runId, 'tool_disclosure_changed', {
                     iteration,
@@ -3900,24 +3702,6 @@ export class AgentRunner {
                     }
                 }
                 const { toolName, toolArgs } = ci;
-
-                if (isPtcDirectCallBlocked(effectivePresentationMode, toolName)) {
-                    const reason = `Tool '${toolName}' cannot be called directly in PTC mode. In PTC mode, only 'run_code' is available — write a program to call tools via await tools.${toolName}(...). ${PTC_ONLY_INSTRUCTION}`;
-                    emitStep({
-                        type: 'validation',
-                        content: reason,
-                        timestamp: Date.now(),
-                        invocationId: ci.invocationId,
-                    });
-                    toolResults[i] = { success: false, error: reason };
-                    await runLedger.appendEvent(
-                        runRecord.runId,
-                        'tool_call_end',
-                        toolResults[i],
-                        { invocationId: ci.invocationId, status: 'failed' },
-                    );
-                    continue;
-                }
 
                 if (questionCallViolatesSoleCallRule(questionCallIndex, parsedCalls.length)) {
                     const reason = 'ask_user_question must be the only tool call in a model response. Retry with only the structured question call.';
@@ -4398,12 +4182,6 @@ export class AgentRunner {
                         name: toolName,
                     });
                 }
-            }
-
-            if (newlyDisclosedToolNames.size > 0 && availableTools.some(tool => tool.function.name === 'run_code') && effectivePresentationMode !== 'native') {
-                const sdkAdditions = buildRunCodePromptAdditions(availableTools.filter(tool =>
-                    newlyDisclosedToolNames.has(tool.function.name)));
-                if (sdkAdditions) messages.push({ role: 'user', content: sdkAdditions });
             }
 
             const foldedBatch = foldToolBatchState({

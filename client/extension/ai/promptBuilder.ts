@@ -83,7 +83,7 @@ import { buildSkillIndexPrompt, listSkills } from './skills';
  * shared policy text edited) so prompts cached by older builds are never
  * reused across extension updates (plan §7.1).
  */
-export const PROMPT_TEMPLATE_VERSION = 6;
+export const PROMPT_TEMPLATE_VERSION = 7;
 
 /**
  * Why a frozen system prompt lookup missed. Process-local diagnostics only —
@@ -199,7 +199,7 @@ When multiple independent pieces of information are needed, batch your tool call
 /** DeepSeek: use the long output window — batch edits and chain scripted steps */
 const DEEPSEEK_SUPPLEMENT = `
 <system-reminder>
-You are using DeepSeek. Use the long output window: when several edits are independent and their targets are known, emit them in a single response as parallel edit_file calls instead of splitting them across turns. When run_code is available, use its stage-specific typed SDK for data-dependent Paradox/general evidence chains, bounded loops, result filtering, and read → edit → verify programs; use Promise.all only for independent calls. Only explicit logs and the returned value reach context, so return a concise evidence summary. Keep reasoning between tool calls concise.
+You are using DeepSeek. Use the long output window: when several edits are independent and their targets are known, emit them in a single response as parallel edit_file calls instead of splitting them across turns. Keep reasoning between tool calls concise.
 </system-reminder>`;
 
 /** Resolve the per-provider model supplement; exported for direct unit testing. */

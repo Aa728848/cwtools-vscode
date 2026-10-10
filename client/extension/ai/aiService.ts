@@ -21,7 +21,6 @@ import type {
     CodexServiceTier,
     ReasoningEffort,
     ResponseVerbosity,
-    ToolPresentationMode,
 } from './types';
 import { isReasoningEffort } from './types';
 import {
@@ -439,17 +438,6 @@ function normalizeConfiguredCodexServiceTier(value: unknown): CodexServiceTier {
     return value === 'fast' ? 'fast' : 'default';
 }
 
-export function normalizeToolPresentationMode(value: unknown): ToolPresentationMode {
-    switch (value) {
-        case 'ptc':
-        case 'native':
-        case 'hybrid':
-            return value;
-        default:
-            return 'ptc';
-    }
-}
-
 function normalizeAnthropicMessagesEndpoint(endpoint: string): string {
     const cleanEndpoint = endpoint
         .replace(/\/messages\/?(?:\?.*)?$/i, '')
@@ -527,8 +515,6 @@ export class AIService {
     private modelOverride: string | null = null;
     /** In-memory reasoning override for the active extension session. */
     private reasoningEffortOverride: AIUserConfig['reasoningEffort'] | null = null;
-    /** In-memory tool presentation mode override for the active extension session. */
-    private toolPresentationModeOverride: ToolPresentationMode | null = null;
     /**
      * Account-scoped `x-codex-turn-state` for in-flight subscription turns.
      *
@@ -1181,14 +1167,6 @@ export class AIService {
         return this.reasoningEffortOverride;
     }
 
-    setToolPresentationModeOverride(mode: ToolPresentationMode | null): void {
-        this.toolPresentationModeOverride = mode;
-    }
-
-    getToolPresentationModeOverride(): ToolPresentationMode | null {
-        return this.toolPresentationModeOverride;
-    }
-
     /**
      * Read the current user configuration for AI.
      */
@@ -1215,8 +1193,6 @@ export class AIService {
                 cfg.get<number>('maxContextTokens', 0),
             ),
             agentFileWriteMode: cfg.get<'confirm' | 'auto'>('agentFileWriteMode', 'auto'),
-            toolPresentationMode: this.toolPresentationModeOverride
-                ?? normalizeToolPresentationMode(cfg.get<unknown>('toolPresentationMode', 'ptc')),
             reasoningEffort: this.reasoningEffortOverride
                 ?? normalizeConfiguredReasoningEffort(cfg.get<unknown>('reasoningEffort', 'high')),
             responseVerbosity: normalizeConfiguredResponseVerbosity(

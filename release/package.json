@@ -5,7 +5,7 @@
     "description": "%extension.description%",
     "author": "Eddy",
     "license": "MIT",
-    "version": "2.27.0",
+    "version": "2.28.0",
     "preview": true,
     "publisher": "ForeverSkywalker",
     "icon": "docs/stellaris.png",
@@ -1365,6 +1365,12 @@
                         "default": "high",
                         "description": "%configuration.stellarisLanguageServices.ai.reasoningEffort.description%"
                     },
+                    "stellarisLanguageServices.ai.reasoningKey": {
+                        "scope": "window",
+                        "type": "string",
+                        "default": "",
+                        "description": "%configuration.stellarisLanguageServices.ai.reasoningKey.description%"
+                    },
                     "stellarisLanguageServices.ai.responseVerbosity": {
                         "scope": "window",
                         "type": "string",
@@ -1383,6 +1389,11 @@
                         "default": "default",
                         "description": "%configuration.stellarisLanguageServices.ai.responseVerbosity.description%"
                     },
+                    "stellarisLanguageServices.ai.endpoint": {
+                        "scope": "window",
+                        "type": "string",
+                        "markdownDescription": "%configuration.stellarisLanguageServices.ai.endpoint.description%"
+                    },
                     "stellarisLanguageServices.ai.codexServiceTier": {
                         "scope": "window",
                         "type": "string",
@@ -1400,7 +1411,11 @@
                     "stellarisLanguageServices.ai.subscriptionProxy.mode": {
                         "scope": "machine",
                         "type": "string",
-                        "enum": ["auto", "custom", "direct"],
+                        "enum": [
+                            "auto",
+                            "custom",
+                            "direct"
+                        ],
                         "enumDescriptions": [
                             "%configuration.stellarisLanguageServices.ai.subscriptionProxy.mode.auto%",
                             "%configuration.stellarisLanguageServices.ai.subscriptionProxy.mode.custom%",

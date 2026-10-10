@@ -1,5 +1,47 @@
 # Changelog
 
+## [2.28.0] - 2026-10-10
+
+### 原版读取链路修复 / Vanilla Read Path Fixes
+- **[修复] PTC 模式提问与原版脚本读取（PTC Questions & Vanilla Reads）**：
+  - **PTC 模式下无法提问**：三道闸门同时关掉了 `ask_user_question`——面向模型的工具面收窄到只剩 `run_code`、PTC 直调守卫拒绝其它工具、`RUN_CODE_BLOCKED_TOOLS` 又把它排除在 `run_code` 能力池外。第三道必须保留：该工具等待人类、没有超时，而 `run_code` 有 300 秒预算，塞进程序里会掐断用户的长考。改为把它暴露为第二个直调工具，`PTC_DIRECT_TOOLS` 成为投影与守卫共用的唯一真相来源。
+  - **原版文件搜得到读不到**：grep 从 `getConfiguredGameRoots()` 解析自己的根并返回相对路径，而 `read_file` 把相对路径锚在工作区根，绝对根在 `GrepResult` 投影时被丢弃；同时已配置的原版根只下发给委派的子代理，主 Agent 只能猜盘符然后收到 ENOENT。这从来不是沙箱拒绝——`resolveReadablePathInput` 接受任何可读本地路径。现在原版命中返回绝对路径并附上扫描根，主 Agent 的提示词也会陈述由 cwtools 自己解析出的根。
+  - English: [Fix] PTC user questions and vanilla read paths. `ask_user_question` was unreachable in PTC mode (the default) because three independent gates each closed it; the `run_code` exclusion must stay (a human wait has no timeout while `run_code` has a 300s budget), so it is now a second direct-call tool with `PTC_DIRECT_TOOLS` as the single source of truth. Separately, vanilla files could be searched but never read: grep returned paths relative to roots that `read_file` does not anchor to, and the configured game roots reached delegated children only. Vanilla matches now carry absolute paths plus the scanned roots, and the main agent prompt states the roots cwtools itself resolved. This was never a sandbox refusal.
+
+### 设置页草稿保护 / Settings Draft Preservation
+- **[修复] 登录刷新不再重置未保存的设置草稿（Draft-Safe Repaint）**：
+  - 为订阅线路登录时，设置页会退回已保存的供应商：负责重绘的签名把账号状态和表单输入混在一起，因此一次只改账号状态的推送也会用 `current` 重建整个表单，把供应商下拉、Endpoint、模型、上下文窗口与推理档位一起冲掉。
+  - 现在把「重建表单」与「重绘账号卡」拆开：`keepDraft` 在一处判定（`!reloadForm && !settingsSavePending && settingsHasUnsavedDraft()`）并在写入任何字段前短路，草稿、字段值与未保存基线一并保留；只重绘账号卡，且按当前选中的线路绘制而非已保存的线路。
+  - 同时修掉同一渲染路径上的两个相邻缺陷：内联补全供应商把 `current.inlineCompletion?.provider` 与 `''` 比较，导致「- 与对话相同 -」永远选不中；页面的显示/隐藏逻辑原本重复在两处，现由 `presentSettingsPage` 共用。
+  - English: [Fix] Keep the settings draft when a sign-in refresh repaints. The re-render signature mixed account state with the form's own inputs, so a push that changed only account state rebuilt the whole form from `current` — resetting the provider, endpoint, model, context window and reasoning effort together. The form rebuild is now split from the account repaint, with `keepDraft` decided in one place and short-circuiting before any field is written. Two adjacent defects are fixed with it: "- Same as chat -" could never be selected for inline completion, and the page's show/hide was duplicated across two call sites.
+
+### WorkBuddy 离线模型表与推理档位 / WorkBuddy Offline Catalog & Reasoning Depth
+- **[特性] 登录前即可选择模型、并暴露推理深度（Offline Model Table & Thinking Depth）**：
+  - **模型列表为空**：此前 `defaultModel: ''` 且 `models: []`，设置页又把网关上实时拉取的 `/v3/config` 目录当成唯一来源，于是网关不可达或尚无凭据时下拉框空空如也。新增随包发出的离线表（网关目录逐字转录：30 个国区、25 个国际区、8 个共享，共 47 个唯一 id），并让每次查找都「实时缓存优先、离线表兜底」。
+  - **区域语义**：无区域信息时返回两区并集（两区列表并非嵌套）；凭据给出区域后按区过滤——向一个不提供该模型的区域请求会返回 400 code 11102。
+  - **推理深度被隐藏**：`getModelReasoningCapability` 没有 workbuddy-subscription 分支，回落到 `NO_REASONING`，Webview 据此渲染成 `display:none`。新增分支复用与请求路径相同的解析器，保证卡片与请求对某一档位的判断永远一致；只有网关声明可跳过思考的模型才提供 `none`，非推理模型仍然不显示控件。
+  - **两处实测陷阱**：13 条随包条目在自己的 low/high/max 阶梯之外声明了 `medium` 默认值，因此在读取时收敛默认值（不收敛就发送会丢掉该字段，网关随即返回空的 `reasoning_content`）；两个来源都不认识的 id 现在返回 `undefined`，而不是把一个未经验证的档位放行。
+  - English: [Feature] WorkBuddy offline model table and reasoning depth. The dropdown was empty before sign-in because the shipped provider had no models and the settings page treated the live gateway catalog as its only source; a verbatim transcription of that catalog (47 unique ids) now backs every lookup as a fallback. A region-less lookup yields the two-region union, and once a credential names the region the list is filtered, since asking a region for a model it does not serve answers 400 code 11102. The thinking-depth control was hidden because the capability resolver had no branch for this line and fell through to `NO_REASONING`; it now shares the request path's resolver, so the card and the request can never disagree. Two measured traps are handled rather than transcribed away: 13 entries declare a `medium` default outside their own ladder (converged at read time, since sending it unconverged drops the field), and an unknown id now returns `undefined` instead of passing an unvalidated level through.
+
+### 引擎成本与规则锚定 / Engine Cost & Rule Anchoring
+- **[修复] 成本注解重新锚定到 4.5.2 dump 并防止被规则同步冲掉（Re-anchored With Line Evidence）**：
+  - `extract-engine-cost.cjs` 现在记录证据函数所在的签名行，每条断言都能在 dump 里打开核对，而不是按类名取信。
+  - 新增 `merge-engine-cost.cjs` 作为 `## cost:` 的唯一写入方：逐命令比较，当提取器更粗糙时保留人工维护值（提取器能证明是循环，但分不清「全银河扫描」与「只扫描作用域对象的容器」）。
+  - 子模块提升到重新锚定后的规则（1,224 条注解带行级证据）；新增回归测试锁定精选基线，让未来的日志 dump 大声失败而不是静默漂移。
+  - English: [Fix] Re-anchor cost annotations to the 4.5.2 dump with line evidence. `extract-engine-cost.cjs` now records the evidence function's signature line so each claim can be opened in the dump instead of trusted by class name, and the new `merge-engine-cost.cjs` is the only writer for `## cost:`, keeping the maintained value whenever the extractor is coarser. The submodule is bumped to 1,224 re-anchored annotations, and a new regression test pins the curated baseline so a future log dump fails loudly. Also removes a one-off `test-server-initialize.cjs` probe and wires the perf tool tests into `test:perf`, which were never in any suite.
+
+### 文档 / Documentation
+- **[文档] Stellaris 战斗伤害结算文档（Combat Damage Resolution）**：新增 `docs/better_stellaris/16_combat_damage_resolution.md`（1,047 行）并接入文档索引。
+  - English: [Docs] Add the combat damage resolution reference for Stellaris and link it from the documentation index.
+
+### AI 设置保存健壮性 / AI Settings Save Resilience
+- **[修复] 单个未注册配置项不再中断整次保存（Per-Key Configuration Writes）**：
+  - **解决什么**：Linux 用户点「保存设置」后只看到输出通道里的 `Error handling webview message 'saveSettings'`，既没有「设置已保存」，其余设置也没有落盘，设置页卡在「正在保存…」。根因是保存流程由四十余次直写串成且没有 try：VS Code 只接受**已注册**的配置键写入，未注册的键会抛 `ERROR_UNKNOWN_KEY`，于是一行失败就带走了整次保存。
+  - **补上缺失的注册**：`stellarisLanguageServices.ai.reasoningKey`（推理字段名覆盖，此前界面可改却写不进 `settings.json`）与 `stellarisLanguageServices.ai.endpoint`（历史单端点键的清理壳）此前未在扩展清单中声明，现已注册并补齐中英三份本地化描述。
+  - **逐键容错**：每条配置写入各自 try/catch，失败只跳过该键并在输出通道点名报出，其余设置照常保存、成功提示照常给出。
+  - **SecretStorage 写入刻意不吞**：钥匙串真的拒绝写入 API Key 时保存仍然中止——不能让用户以为供应商已经配置好。
+  - English: [Fix] Per-key AI configuration writes. Saving settings used to be one un-guarded chain of `workspace.getConfiguration().update()` calls, so a single unregistered key (`ai.reasoningKey`, `ai.endpoint`) threw VS Code's `ERROR_UNKNOWN_KEY` and aborted the whole save — no success notification, no persisted settings, and a settings page stuck on "Saving…". Both keys are now registered with English and Chinese descriptions, every configuration write is individually guarded and reports the offending key in the output channel, and only the SecretStorage write for the API key is still allowed to abort the save so a keyring failure can never look like success.
+
 ## [2.27.0] - 2026-10-08
 
 ### Steam 创意工坊上传文件过滤 / Steam Workshop Upload File Filtering

@@ -2407,7 +2407,7 @@ export type {
     DiffArtifactData,
 };
 
-/** Host-authored receipt for a successfully submitted plan (including PTC subcalls). */
+/** Host-authored receipt for a successfully submitted plan. */
 export interface PendingPlanApproval {
     invocationId: string;
     filePath: string;

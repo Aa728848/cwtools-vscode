@@ -301,6 +301,9 @@ const STYLES = [
     '.wu-error { margin: 0; color: var(--vscode-errorForeground); font-size: 0.85em; }',
     '.wu-preview-row { display: flex; gap: 6px; align-items: center; }',
     '.wu-preview-row .wu-input { flex: 1 1 auto; min-width: 0; }',
+    // The sidebar is narrow: without these the button label wraps onto two lines
+    // (and "浏览…" breaks after the ellipsis), which reads as misalignment.
+    '.wu-preview-row .wu-browse-button { flex: 0 0 auto; white-space: nowrap; text-align: center; }',
     '.wu-button { font-family: inherit; font-size: inherit; color: var(--vscode-button-foreground);',
     '  background: var(--vscode-button-background); border: 1px solid transparent; border-radius: 2px;',
     '  padding: 4px 10px; cursor: pointer; }',
@@ -384,7 +387,7 @@ const SHELL = [
     '    <label class="wu-label" for="wu-preview" data-wu="labelPreview"></label>',
     '    <div class="wu-preview-row">',
     '      <input class="wu-input" id="wu-preview" type="text" readonly />',
-    '      <button class="wu-button wu-button-secondary" type="button" data-wu="browse"></button>',
+    '      <button class="wu-button wu-button-secondary wu-browse-button" type="button" data-wu="browse"></button>',
     '    </div>',
     '    <img class="wu-preview-thumb" data-wu="previewThumb" alt="" hidden />',
     '  </div>',

@@ -17,7 +17,7 @@ export type AgentToolName =
     | 'query_static_modifiers' | 'query_variables' | 'set_memory'
     | 'history' | 'save_memory' | 'forget_memory' | 'memory_recall_trace'
     | 'convert_image_to_dds' | 'convert_audio' | 'deploy_mod_asset' | 'mcp_call'
-    | 'write_localisation' | 'write_design_blueprint' | 'save_workflow' | 'git_ops' | 'dispatch_agents'
+    | 'write_localisation' | 'write_design_blueprint' | 'save_skill' | 'git_ops' | 'dispatch_agents'
     | 'query_blackboard' | 'merge_results' | 'cancel_dispatch'
     | 'enter_plan_mode' | 'exit_plan_mode'
     | 'team_send_message' | 'team_members' | 'team_close'
@@ -157,7 +157,7 @@ const TOOL_DOMAINS = {
     mcp_call: 'shared',
     write_localisation: 'paradox',
     write_design_blueprint: 'paradox',
-    save_workflow: 'shared',
+    save_skill: 'shared',
     git_ops: 'shared',
     dispatch_agents: 'shared',
     query_blackboard: 'shared',
@@ -302,33 +302,32 @@ const GENERAL_GREP_SCHEMA: ToolDefinition = {
     },
 };
 
-const GENERAL_WORKFLOW_SCHEMA: ToolDefinition = {
+const GENERAL_SAVE_SKILL_SCHEMA: ToolDefinition = {
     type: 'function',
     function: {
-        name: 'save_workflow',
-        description: 'Save a reusable ordinary repository workflow when the user asks to preserve the process.',
+        name: 'save_skill',
+        description: 'Save a reusable ordinary repository Agent Skill; once saved it is loadable through run_skill.',
         parameters: {
             type: 'object',
             properties: {
-                id: { type: 'string', description: 'Optional stable lowercase/kebab-case workflow id.' },
-                title: { type: 'string', description: 'User-facing workflow title.' },
-                description: { type: 'string', description: 'Short summary shown in the workflow picker.' },
-                mode: {
+                name: { type: 'string', description: 'Skill directory name; lowercased, ^[a-z0-9][a-z0-9._-]{0,63}$.' },
+                description: { type: 'string', description: 'One-line summary shown in the skill index.' },
+                body: { type: 'string', description: 'Markdown body of SKILL.md with the reusable instructions.' },
+                capability_domain: {
                     type: 'string',
-                    enum: ['plan', 'explore', 'utility', 'review', 'orchestrator'],
-                    description: 'Ordinary repository Agent mode. Defaults to utility in General Coding.',
+                    enum: ['general', 'both'],
+                    description: 'Optional domain gate. General Coding cannot save paradox-only skills.',
                 },
-                promptSupplement: { type: 'string', description: 'Reusable objective, phases, constraints, and verification steps.' },
-                allowedTools: { type: 'array', items: { type: 'string' } },
-                blockedTools: { type: 'array', items: { type: 'string' } },
-                requiredContext: {
-                    type: 'array',
-                    items: { type: 'string', enum: ['activeFile', 'activeFile!', 'diagnostics', 'diagnostics!', 'selection', 'selection!', 'workspace', 'workspace!'] },
+                run_as: { type: 'string' },
+                allowed_tools: { type: 'array', items: { type: 'string' } },
+                scope: {
+                    type: 'string',
+                    enum: ['project', 'user'],
+                    description: 'project = <workspace>/.agents/skills; user = ~/.cwtools/skills.',
                 },
-                verificationTool: { type: 'string' },
                 overwrite: { type: 'boolean' },
             },
-            required: ['title', 'description', 'promptSupplement'],
+            required: ['name', 'description', 'body', 'scope'],
         },
     },
 };
@@ -348,7 +347,7 @@ const BASE_READ: AgentToolName[] = [
 ];
 const EDIT: AgentToolName[] = [
     'write_file', 'edit_file', 'replace_lines', 'typed_pdx_write', 'candidate_transaction', 'rename_symbol',
-    'write_localisation', 'write_design_blueprint', 'save_workflow', 'remove_ignored_diagnostic'
+    'write_localisation', 'write_design_blueprint', 'save_skill', 'remove_ignored_diagnostic'
 ];
 const MEMORY: AgentToolName[] = ['todo_write', 'manage_goal', 'set_memory', 'save_memory', 'forget_memory', 'memory_recall_trace'];
 const NETWORK: AgentToolName[] = ['web_search', 'web_open'];
@@ -414,7 +413,7 @@ const SUB_AGENT_EXCLUDES_SET = new Set<string>([
     // collaborate through the board and mailbox of their own team only.
     'web_search', 'web_open', 'web_find',
     'run_command', 'manage_process',
-    'git_ops', 'save_workflow',
+    'git_ops', 'save_skill',
     'rename_symbol',
     // Candidate transaction state is parent-run owned; slim sub-agents must
     // report typed intents to the parent instead of sharing its overlay.
@@ -431,7 +430,7 @@ const FILE_SCOPED_WRITE_TOOLS_SET = new Set<string>([
     'write_localisation',
     'write_design_blueprint',
     'deploy_mod_asset',
-    'save_workflow',
+    'save_skill',
 ]);
 
 // Mutating tools: 改变工作区 / 记忆 / 黑板状态的工具。doom-loop 检测见到 mutating 成功
@@ -461,9 +460,9 @@ const STORM_EXEMPT_TOOLS_SET = new Set<string>([
     'team_members',
 ]);
 
-const PLAN_MODES = new Set([...BASE_READ, ...INTERACTION, ...NETWORK, ..._MCP, ...ORCHESTRATION, ...TEAM, ...MODE_CONTROL, 'todo_write', 'write_file', 'edit_file', 'replace_lines', 'typed_pdx_write', 'candidate_transaction', 'write_design_blueprint', 'save_workflow', 'set_memory', 'git_ops']);
-const EXPLORE_MODES = new Set([...BASE_READ, ...INTERACTION, ...NETWORK, ..._MCP, ...ORCHESTRATION, ...TEAM, ...MODE_CONTROL, 'git_ops', 'save_workflow']);
-const REVIEW_MODES = new Set([...BASE_READ, ...INTERACTION, ...NETWORK, ..._MCP, 'git_ops', 'save_workflow']);
+const PLAN_MODES = new Set([...BASE_READ, ...INTERACTION, ...NETWORK, ..._MCP, ...ORCHESTRATION, ...TEAM, ...MODE_CONTROL, 'todo_write', 'write_file', 'edit_file', 'replace_lines', 'typed_pdx_write', 'candidate_transaction', 'write_design_blueprint', 'save_skill', 'set_memory', 'git_ops']);
+const EXPLORE_MODES = new Set([...BASE_READ, ...INTERACTION, ...NETWORK, ..._MCP, ...ORCHESTRATION, ...TEAM, ...MODE_CONTROL, 'git_ops', 'save_skill']);
+const REVIEW_MODES = new Set([...BASE_READ, ...INTERACTION, ...NETWORK, ..._MCP, 'git_ops', 'save_skill']);
 const BUILD_MODES = new Set([...BASE_READ, ...INTERACTION, ...EDIT, ...MEMORY, ...NETWORK, ...UTILITY, ...MEDIA, ..._MCP, ...ORCHESTRATION, ...TEAM, ...MODE_CONTROL]);
 const LOC_MODES = new Set([
     'select_tools', 'read_file', 'write_file',
@@ -474,10 +473,10 @@ const LOC_MODES = new Set([
     // `write_localisation` stages into; otherwise their writes can only land in
     // an overlay they have no way to validate or commit.
     'candidate_transaction',
-    'analyze_diagnostic_error', 'save_workflow', ...INTERACTION
+    'analyze_diagnostic_error', 'save_skill', ...INTERACTION
 ]);
-const ORCHESTRATOR_MODES = new Set([...BASE_READ, ...INTERACTION, ...NETWORK, ..._MCP, 'set_memory', 'todo_write', 'write_file', 'write_design_blueprint', ...ORCHESTRATION, ...TEAM, ...MODE_CONTROL, 'git_ops', 'analyze_diagnostic_error', 'save_workflow']);
-const SCRIPT_MODES = new Set([...BASE_READ, ...INTERACTION, ...NETWORK, ..._MCP, 'set_memory', 'todo_write', 'write_file', 'write_design_blueprint', ...ORCHESTRATION, ...TEAM, 'git_ops', 'analyze_diagnostic_error', 'save_workflow']);
+const ORCHESTRATOR_MODES = new Set([...BASE_READ, ...INTERACTION, ...NETWORK, ..._MCP, 'set_memory', 'todo_write', 'write_file', 'write_design_blueprint', ...ORCHESTRATION, ...TEAM, ...MODE_CONTROL, 'git_ops', 'analyze_diagnostic_error', 'save_skill']);
+const SCRIPT_MODES = new Set([...BASE_READ, ...INTERACTION, ...NETWORK, ..._MCP, 'set_memory', 'todo_write', 'write_file', 'write_design_blueprint', ...ORCHESTRATION, ...TEAM, 'git_ops', 'analyze_diagnostic_error', 'save_skill']);
 const UTILITY_MODES = new Set([...BASE_READ, ...INTERACTION, ...EDIT, ...MEMORY, ...NETWORK, ...UTILITY, ...MEDIA, ...ORCHESTRATION, ...TEAM, ...MODE_CONTROL, 'mcp_call']);
 
 for (const schema of SCHEMA_DEFINITIONS) {
@@ -623,8 +622,8 @@ for (const schema of SCHEMA_DEFINITIONS) {
                 ? GENERAL_BLACKBOARD_SCHEMA
                 : name === 'grep'
                     ? GENERAL_GREP_SCHEMA
-                    : name === 'save_workflow'
-                        ? GENERAL_WORKFLOW_SCHEMA
+                    : name === 'save_skill'
+                        ? GENERAL_SAVE_SKILL_SCHEMA
                         : undefined,
         disclosure,
         group,

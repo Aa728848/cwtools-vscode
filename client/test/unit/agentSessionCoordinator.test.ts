@@ -23,7 +23,6 @@ describe('AgentSessionCoordinator', () => {
         const session = new AgentSessionCoordinator();
         expect(executionModeForSchedulingState(session.schedulingState)).to.equal('build');
         expect(session.schedulingState).to.include({ domainProfile: 'paradox', authorization: 'workspace_write', phase: 'execute' });
-        expect(session.currentWorkflowId).to.equal(null);
         expect(session.liveSteps).to.deep.equal([]);
         expect(session.isGenerating).to.equal(false);
     });
@@ -43,30 +42,27 @@ describe('AgentSessionCoordinator', () => {
         expect(session.artifacts.get('a1')?.title).to.equal('Plan');
     });
 
-    it('restores the original scheduler after switching workflows', () => {
+    it('keeps the pre-override scheduler so an explicit override can be undone', () => {
         const session = new AgentSessionCoordinator();
-        session.schedulingState = schedulingState('general', 'workspace_write', 'execute');
+        session.previousSchedulingState = schedulingState('general', 'workspace_write', 'execute');
 
-        session.activateWorkflow(
-            'diagnostic-fix',
-            schedulingState('paradox', 'workspace_write', 'execute'),
-        );
-        session.activateWorkflow(
-            'event-chain-design',
-            schedulingState('paradox', 'plan_write_only', 'plan'),
-        );
-
-        expect(session.currentWorkflowId).to.equal('event-chain-design');
+        session.schedulingState = schedulingState('paradox', 'plan_write_only', 'plan');
         expect(executionModeForSchedulingState(session.schedulingState)).to.equal('plan');
-        expect(session.deactivateWorkflow()).to.equal(true);
-        expect(session.currentWorkflowId).to.equal(null);
+
+        // Restoring is a plain assignment: the stored snapshot survives untouched
+        // while the live state moved on, which is what approving a walkthrough
+        // relies on to hand the scheduler back to the user-owned state.
+        session.schedulingState = session.previousSchedulingState;
         expect(executionModeForSchedulingState(session.schedulingState)).to.equal('utility');
+        expect(session.previousSchedulingState.domainProfile).to.equal('general');
     });
 
-    it('does not alter state when no workflow is active', () => {
+    it('pins the user-owned task mode independently of the scheduler', () => {
         const session = new AgentSessionCoordinator();
+        expect(session.modeOverride).to.equal('auto');
+        session.modeOverride = 'plan';
         session.schedulingState = schedulingState('paradox', 'read_only', 'verify');
-        expect(session.deactivateWorkflow()).to.equal(false);
+        expect(session.modeOverride).to.equal('plan');
         expect(executionModeForSchedulingState(session.schedulingState)).to.equal('script_reviewer');
     });
 });

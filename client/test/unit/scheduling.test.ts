@@ -51,6 +51,35 @@ describe('Agent runtime scheduling', () => {
         });
     });
 
+    it('degrades a persisted routingSource:workflow to unknown instead of throwing', () => {
+        // Topics written while the AI Workflow subsystem was active still carry
+        // this origin. The concept is gone, but the conversation is not: a legacy
+        // value must not make the whole topic unreadable.
+        const legacy = normalizeSchedulingState({
+            profileName: 'paradox-agent',
+            domainProfile: 'paradox',
+            authorization: 'workspace_write',
+            phase: 'execute',
+            dispatch: 'single',
+            overlays: [],
+            routeConfidence: 1,
+            routeEvidence: [],
+            routingSource: 'workflow',
+            phaseReason: 'AI workflow diagnostic-fix active',
+            revision: 3,
+        });
+        expect(legacy.routingSource).to.equal(undefined);
+        expect(legacy).to.include({ domainProfile: 'paradox', phase: 'execute', revision: 3 });
+
+        // Everything the surviving origins declare still round-trips untouched.
+        for (const source of ['model', 'deterministic', 'user'] as const) {
+            expect(normalizeSchedulingState({ ...legacy, routingSource: source }).routingSource).to.equal(source);
+        }
+
+        // A value that was never a routing origin is still rejected outright.
+        expect(() => normalizeSchedulingState({ ...legacy, routingSource: 'telepathy' })).to.throw('invalid');
+    });
+
     it('never expands authorization during a runtime transition', () => {
         const readOnly = schedulingStateFromAdmission({
             domainProfile: 'general', authorization: 'read_only', initialPhase: 'verify',

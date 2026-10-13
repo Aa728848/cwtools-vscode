@@ -21,6 +21,14 @@ export const AUTHORITY_RANK: Record<AgentAuthorization, number> = {
 const PHASES = new Set<AgentRunPhase>(['inspect', 'plan', 'execute', 'verify', 'finalize']);
 const AUTHORIZATIONS = new Set<AgentAuthorization>(['read_only', 'plan_write_only', 'workspace_write']);
 const DISPATCH_MODES = new Set<AgentDispatchMode>(['single', 'parallel', 'specialist']);
+const ROUTING_SOURCES = new Set<string>(['model', 'deterministic', 'user']);
+/**
+ * Topics persisted while the removed AI Workflow subsystem was still active can
+ * carry `routingSource: 'workflow'`. The origin no longer exists, so such a
+ * value is tolerated on read and degraded to "unknown" instead of rejecting
+ * the whole topic.
+ */
+const LEGACY_ROUTING_SOURCES = new Set<string>(['workflow']);
 
 export function admissionFromResolvedProfile(profile: {
     domain: AgentRuntimeDomain;
@@ -111,10 +119,8 @@ export function normalizeSchedulingState(
         || revision < 0
         || (candidate.awaitingUserDecision !== undefined && typeof candidate.awaitingUserDecision !== 'boolean')
         || (candidate.routingSource !== undefined
-            && candidate.routingSource !== 'model'
-            && candidate.routingSource !== 'deterministic'
-            && candidate.routingSource !== 'workflow'
-            && candidate.routingSource !== 'user')
+            && !ROUTING_SOURCES.has(candidate.routingSource as string)
+            && !LEGACY_ROUTING_SOURCES.has(candidate.routingSource))
         || (candidate.dispatchReason !== undefined && typeof candidate.dispatchReason !== 'string')) {
         throw new Error('Agent scheduling state is invalid.');
     }
@@ -133,10 +139,7 @@ export function normalizeSchedulingState(
         routeConfidence: clampConfidence(candidate.routeConfidence),
         routeEvidence: uniqueEvidence(candidate.routeEvidence),
         awaitingUserDecision: candidate.awaitingUserDecision === true ? true : undefined,
-        routingSource: candidate.routingSource === 'model'
-            || candidate.routingSource === 'deterministic'
-            || candidate.routingSource === 'workflow'
-            || candidate.routingSource === 'user'
+        routingSource: ROUTING_SOURCES.has(candidate.routingSource as string)
             ? candidate.routingSource
             : undefined,
         phaseReason: candidate.phaseReason.slice(0, 500),

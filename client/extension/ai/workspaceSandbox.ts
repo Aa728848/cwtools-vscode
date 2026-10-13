@@ -73,10 +73,10 @@ export function sanitizePathInput(inputPath: string): string {
     return value.replace(/[.,;，。；]+$/g, '').trim();
 }
 
-// Shared artifacts (project profile, workflows) intentionally stay in the
-// project .cwtools directory; topic-scoped private data lives in the private
-// agent storage root.
-const SHARED_AI_STORAGE_SEGMENTS = new Set(['project', 'workflows']);
+// Shared artifacts (the project profile) intentionally stay in the project
+// .cwtools directory; topic-scoped private data lives in the private agent
+// storage root.
+const SHARED_AI_STORAGE_SEGMENTS = new Set(['project']);
 
 function resolveAiStorageAlias(filePath: string, workspaceRoot: string): string | undefined {
     const normalized = filePath.trim().replace(/\\/g, '/');

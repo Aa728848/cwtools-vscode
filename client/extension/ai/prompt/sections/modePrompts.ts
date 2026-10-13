@@ -22,14 +22,14 @@ import {
 
 const IS_WINDOWS = process.platform === 'win32';
 
-/** Platform-specific shell note for run_command (PowerShell on Windows, POSIX sh on macOS/Linux). */
+/** Platform-specific shell note for run_command (PowerShell family on Windows, POSIX shells on macOS/Linux). */
 const RUN_COMMAND_SHELL_NOTE = IS_WINDOWS
-    ? 'On Windows, `run_command` shell=auto executes through PowerShell in every mode; do not wrap commands in another Windows shell or launcher script just to run a file. `shell=sh` and `shell=bash` are not valid on Windows.'
-    : 'On macOS/Linux, `run_command` shell=auto executes through POSIX `/bin/sh` (`sh -c`); use standard POSIX shell syntax (commands like `ls`, `grep`, `find`, `cp`), not PowerShell cmdlets. `shell=sh` and `shell=bash` are valid here; `shell=pwsh/powershell` is Windows-only.';
+    ? 'On Windows, `run_command` shell=auto resolves to PowerShell 7 (`pwsh`) when it is installed and falls back to Windows PowerShell 5.1 (`powershell.exe`) otherwise; either way the command runs in a PowerShell-family shell, so do not wrap commands in another Windows shell or launcher script just to run a file. `shell=sh` and `shell=bash` are not valid on Windows.'
+    : 'On macOS/Linux, `run_command` shell=auto resolves to `bash -c` when bash is installed and falls back to POSIX `/bin/sh` (`sh -c`) otherwise; use standard POSIX shell syntax (commands like `ls`, `grep`, `find`, `cp`), not PowerShell cmdlets. `shell=sh` and `shell=bash` are valid here; `shell=pwsh/powershell` is Windows-only.';
 
 /** Platform-specific environment-variable reference syntax for run_command. */
 const ENV_VAR_SYNTAX_NOTE = IS_WINDOWS
-    ? 'use PowerShell syntax such as `$env:CWT_AGENT_SCRATCH_DIR` and `$env:CWT_AGENT_HELPER_SCRIPT`; do not use percent-style environment variable syntax'
+    ? 'shell=auto always resolves to a PowerShell-family shell (pwsh or powershell) on Windows, so use PowerShell syntax such as `$env:CWT_AGENT_SCRATCH_DIR` and `$env:CWT_AGENT_HELPER_SCRIPT`; do not use percent-style environment variable syntax'
     : 'use POSIX shell syntax such as `$CWT_AGENT_SCRATCH_DIR` and `$CWT_AGENT_HELPER_SCRIPT` (or `${CWT_AGENT_SCRATCH_DIR}`); do not use PowerShell `$env:` syntax';
 
 const SLIM_PROCESS_VISIBILITY_RULE = `## CRITICAL: Visible Process Updates
@@ -77,10 +77,18 @@ Plan mode blocks project writes; investigate with read-only tools, then produce 
 
 Only when the user has NOT explicitly requested a plan, do **not** escalate when bounded repository inspection settles the implementation — locate the symbols, read the surrounding code, then just make the change. Do not use \`exit_plan_mode\` to escape an approval you already requested: it never restores write access, and only the user's approval does.`;
 
+/**
+ * Recalled task experience: completed runs distill reusable lessons into a
+ * workspace experience store, recalled as a dynamic <task-experience> block.
+ * The default is to reuse what already worked instead of reinventing it.
+ */
+const TASK_EXPERIENCE_USAGE_RULE = `## Recalled Task Experience
+When a \`<task-experience>\` block lists lessons from similar past tasks, prefer its validated approach and heed its pitfalls; deviate only with an explicit reason in your visible process updates.`;
+
 function generalRules(isSlim: boolean): string {
     return isSlim
         ? `${SLIM_PROCESS_VISIBILITY_RULE}\n${SLIM_UTILITY_SUB_AGENT_RULE}`
-        : `${LANGUAGE_MIRRORING_RULE}\n${PROCESS_VISIBILITY_RULE}\n${GENERAL_ARCHITECTURE_RULE}\n\n${PLAN_ESCALATION_RULE}`;
+        : `${LANGUAGE_MIRRORING_RULE}\n${PROCESS_VISIBILITY_RULE}\n${GENERAL_ARCHITECTURE_RULE}\n\n${PLAN_ESCALATION_RULE}\n\n${TASK_EXPERIENCE_USAGE_RULE}`;
 }
 
 export function buildGeneralCodingSystemPrompt(isSlim: boolean = false): string {
@@ -211,7 +219,7 @@ Do not modify project files directly. Build a bounded dependency graph, dispatch
 export function buildBuildSystemPrompt(gameKnowledge: string, gameName: string, isSlim: boolean = false): string {
     const rules = isSlim
         ? `${SLIM_PROCESS_VISIBILITY_RULE}\n${SLIM_SUB_AGENT_RULE}`
-        : `${LANGUAGE_MIRRORING_RULE}\n${PROCESS_VISIBILITY_RULE}\n${CODE_COMPLIANCE_RULE}\n${ARCHITECTURE_VISUALIZATION_RULE}\n\n${PLAN_ESCALATION_RULE}`;
+        : `${LANGUAGE_MIRRORING_RULE}\n${PROCESS_VISIBILITY_RULE}\n${CODE_COMPLIANCE_RULE}\n${ARCHITECTURE_VISUALIZATION_RULE}\n\n${PLAN_ESCALATION_RULE}\n\n${TASK_EXPERIENCE_USAGE_RULE}`;
 
     const executionContract = isSlim
         ? `## Slim Build Contract
@@ -246,7 +254,7 @@ ${gameKnowledge}`;
 export function buildPlanModeSystemPrompt(gameKnowledge: string, gameName: string, isSlim: boolean = false): string {
     const rules = isSlim
         ? `${SLIM_PROCESS_VISIBILITY_RULE}\n${ANALYSIS_COMPLIANCE_RULE}\n${ARCHITECTURE_VISUALIZATION_RULE}\n${SLIM_SUB_AGENT_RULE}`
-        : `${LANGUAGE_MIRRORING_RULE}\n${PROCESS_VISIBILITY_RULE}\n${ANALYSIS_COMPLIANCE_RULE}\n${ARCHITECTURE_VISUALIZATION_RULE}`;
+        : `${LANGUAGE_MIRRORING_RULE}\n${PROCESS_VISIBILITY_RULE}\n${ANALYSIS_COMPLIANCE_RULE}\n${ARCHITECTURE_VISUALIZATION_RULE}\n${TASK_EXPERIENCE_USAGE_RULE}`;
     const approvalContract = isSlim
         ? 'Return the verified blueprint or `BLOCKED_FOR_ORCHESTRATOR`; never question or wait for the user.'
         : 'Conclude every Plan Mode turn with the complete self-contained Implementation Plan plus exactly one valid `cwtools-plan` block, then STOP and wait for user approval to enter Write/Execute directly. If a user-owned decision materially changes file layout or architecture and has no reasonable default, call `ask_user_question` as the only tool call; never request input in plain prose. After the tool returns, deliver the complete plan in the same run; never switch to execution. Do not defer any design work until after approval.';
@@ -311,7 +319,7 @@ ${gameKnowledge}`;
 export function buildExploreModeSystemPrompt(gameKnowledge: string, gameName: string, isSlim: boolean = false): string {
     const rules = isSlim
         ? `${SLIM_PROCESS_VISIBILITY_RULE}\n${ANALYSIS_COMPLIANCE_RULE}\n${ARCHITECTURE_VISUALIZATION_RULE}\n${SUB_AGENT_INTERACTION_RULE}`
-        : `${LANGUAGE_MIRRORING_RULE}\n${PROCESS_VISIBILITY_RULE}\n${ANALYSIS_COMPLIANCE_RULE}\n${ARCHITECTURE_VISUALIZATION_RULE}`;
+        : `${LANGUAGE_MIRRORING_RULE}\n${PROCESS_VISIBILITY_RULE}\n${ANALYSIS_COMPLIANCE_RULE}\n${ARCHITECTURE_VISUALIZATION_RULE}\n${TASK_EXPERIENCE_USAGE_RULE}`;
 
     return `You are Eddy CWTool Code in **Explore Mode** — a read-only codebase exploration agent for the current workspace.
 ${rules}
@@ -350,7 +358,7 @@ ${gameKnowledge}`;
 export function buildUtilityModeSystemPrompt(gameKnowledge: string, gameName: string, isSlim: boolean = false): string {
     const rules = isSlim
         ? `${SLIM_PROCESS_VISIBILITY_RULE}\n${SLIM_UTILITY_SUB_AGENT_RULE}`
-        : `${LANGUAGE_MIRRORING_RULE}\n${PROCESS_VISIBILITY_RULE}\n${ARCHITECTURE_VISUALIZATION_RULE}`;
+        : `${LANGUAGE_MIRRORING_RULE}\n${PROCESS_VISIBILITY_RULE}\n${ARCHITECTURE_VISUALIZATION_RULE}\n${TASK_EXPERIENCE_USAGE_RULE}`;
     return `You are Eddy CWTool Code in **General Coding Mode** — a full workspace coding agent comparable to a conventional repository coding assistant.
 ${rules}
 
@@ -388,7 +396,7 @@ ${gameKnowledge}`;
 export function buildReviewModeSystemPrompt(gameKnowledge: string, gameName: string, isSlim: boolean = false): string {
     const rules = isSlim
         ? `${SLIM_PROCESS_VISIBILITY_RULE}\n${ANALYSIS_COMPLIANCE_RULE}\n${ARCHITECTURE_VISUALIZATION_RULE}\n${SUB_AGENT_INTERACTION_RULE}`
-        : `${LANGUAGE_MIRRORING_RULE}\n${PROCESS_VISIBILITY_RULE}\n${ANALYSIS_COMPLIANCE_RULE}\n${ARCHITECTURE_VISUALIZATION_RULE}`;
+        : `${LANGUAGE_MIRRORING_RULE}\n${PROCESS_VISIBILITY_RULE}\n${ANALYSIS_COMPLIANCE_RULE}\n${ARCHITECTURE_VISUALIZATION_RULE}\n${TASK_EXPERIENCE_USAGE_RULE}`;
 
     return `You are Eddy CWTool Code in **Review Mode** — an expert read-only reviewer for the current workspace.
 ${rules}
@@ -595,6 +603,7 @@ ${PROCESS_VISIBILITY_RULE}
 ${INTENT_VERIFICATION_RULE}
 ${ANALYSIS_COMPLIANCE_RULE}
 ${ARCHITECTURE_VISUALIZATION_RULE}
+${TASK_EXPERIENCE_USAGE_RULE}
 
 <system-reminder>
 Paradox Multi-Agent Mode is for high-throughput Paradox script work: diagnostics, scope/rule repair, asset wiring, localisation gaps, rules-sync review, and multi-file PDXScript changes.
@@ -643,7 +652,7 @@ ${PARADOX_DISPATCH_AUTHORING_GUIDANCE}
 - Paradox Multi-Agent Mode supports up to 8 tasks per \`dispatch_agents\` wave.
 - Use up to 8 tasks only when the approved plan already defines fully disjoint write slices.
 - Prefer 2-4 tasks for file writes, localisation writes, GUI edits, and event-chain implementation.
-- Do not use \`run_command\` or direct shell helpers for PDXScript analysis. Use the built-in structured tools.
+- Prefer the built-in structured tools over \`run_command\` for PDXScript analysis; when bulk scripted processing is genuinely needed (large-scale mechanical rewrites, batch validation), \`run_command\` is available through the policy engine.
 
 ${SPRITE_DIAGNOSTIC_REPAIR_PROTOCOL}
 
@@ -658,6 +667,7 @@ export function buildOrchestratorSystemPrompt(gameKnowledge: string, gameName: s
 ${LANGUAGE_MIRRORING_RULE}
 ${PROCESS_VISIBILITY_RULE}
 ${ARCHITECTURE_VISUALIZATION_RULE}
+${TASK_EXPERIENCE_USAGE_RULE}
 
 <system-reminder>
 You are the central coordinator. You do not modify project files directly. Decompose work into a bounded DAG, dispatch sub-agents, monitor results, and synthesize the verified outcome.

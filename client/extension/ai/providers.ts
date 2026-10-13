@@ -18,6 +18,7 @@ import { stripToolMetaSchema } from './toolSchemaOutbound';
 
 // Import core settings and capabilities from partitioned sub-modules
 import { BUILTIN_PROVIDERS } from './providers/models/defaults';
+import { getHomeProviders } from './providerConfig';
 import {
     VISION_CAPABLE_MODELS,
     isModelVisionCapable,
@@ -71,12 +72,17 @@ export {
 
 /**
  * Get a provider config by ID, falling back to OpenAI.
+ * User-level providers from ~/.cwtools/providers.json resolve before the
+ * fallback; built-in ids always win over the file (name clashes are rejected
+ * at load time).
  */
 export function getProvider(id: string): AIProviderConfig {
     if (id && !(id in BUILTIN_PROVIDERS)) {
+        const home = getHomeProviders()[id];
+        if (home) return home;
         ErrorReporter.debug(SOURCE.AI_SERVICE, `Unknown provider "${id}", falling back to openai.`);
     }
-     
+
     return BUILTIN_PROVIDERS[id] ?? BUILTIN_PROVIDERS['openai']!;
 }
 
@@ -289,6 +295,10 @@ export function getProviderApiFormat(
     model: string,
     customApiFormat: CustomApiFormat = 'openai-chat-completions'
 ): CustomApiFormat {
+    // A home provider carries its wire protocol in the file (apiFormatHint);
+    // it wins over the id switch, which only knows built-in lines.
+    const apiFormatHint = getHomeProviders()[providerId]?.apiFormatHint;
+    if (apiFormatHint) return apiFormatHint;
     switch (providerId.toLowerCase()) {
         case 'antigravity':
             return 'gemini-generate-content';

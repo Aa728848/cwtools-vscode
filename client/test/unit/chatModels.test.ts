@@ -31,7 +31,6 @@ import {
 } from '../../webview/chat/userMessagePresentation';
 import { buildSlashCommands, filterSlashCommands, getSlashCommandFilter, renderSlashCommandItems } from '../../webview/chat/slashCommands';
 import { getSlashCommandDescriptors, resolveSlashCommand, suggestSlashCommands } from '../../extension/ai/slashCommands';
-import { buildWorkflowSummary, getWorkflowSlashCommand, normalizeWorkflowLabels, type WorkflowView } from '../../webview/chat/workflows';
 import { buildExploreModeSystemPrompt, buildPlanModeSystemPrompt } from '../../extension/ai/prompt/sections/modePrompts';
 
 describe('long user message presentation', () => {
@@ -272,67 +271,22 @@ describe('chat topic model helpers', () => {
     });
 });
 
-describe('chat workflow model helpers', () => {
-    const workflow: WorkflowView = {
-        id: 'diagnostic-fix',
-        title: 'Diagnostic Fix',
-        description: 'Fix diagnostics',
-        scheduling: { domain: 'paradox', intent: 'execute', strategy: 'single' },
-        phases: [{ id: 'collect', title: 'Collect' }],
-        verification: [{ id: 'zero', description: 'No errors', required: true }],
-    };
-
-    it('summarizes workflow metadata', () => {
-        expect(buildWorkflowSummary(workflow)).to.include('Diagnostic Fix');
-        expect(buildWorkflowSummary(workflow)).to.include('1 phase');
-    });
-
-    it('builds workflow slash commands', () => {
-        expect(getWorkflowSlashCommand('diagnostic-fix')).to.equal('/workflow:diagnostic-fix');
-    });
-
-    it('builds localized workflow summaries', () => {
-        const labels = normalizeWorkflowLabels({
-            noWorkflowSelected: '未选择工作流',
-            phaseUnit: '阶段',
-            phasesUnit: '阶段',
-            requiredCheckUnit: '必需检查',
-            requiredChecksUnit: '必需检查',
-        });
-
-        expect(buildWorkflowSummary(undefined, labels)).to.equal('未选择工作流');
-        expect(buildWorkflowSummary(workflow, labels)).to.include('1 阶段');
-        expect(buildWorkflowSummary(workflow, labels)).to.include('1 必需检查');
-    });
-});
-
 describe('chat i18n and command helpers', () => {
     it('returns localized chat text', () => {
         expect(getChatI18n('en').buttons.send).to.equal('Send');
-        expect(getSlashCommandDescriptors('zh-cn').find(command => command.command === '/workflow:off')?.description).to.equal('关闭当前 AI 工作流');
+        expect(getSlashCommandDescriptors('zh-cn').find(command => command.command === '/compact')?.description).to.equal('压缩 Agent 活动上下文，同时保留话题记录');
     });
 
-    it('builds slash commands with localized workflow descriptions', () => {
-        const workflow: WorkflowView = {
-            id: 'diagnostic-fix',
-            title: '诊断修复',
-            description: '自动修复诊断',
-            scheduling: { domain: 'paradox', intent: 'execute', strategy: 'single' },
-            phases: [],
-            verification: [],
-        };
-        const commands = buildSlashCommands(getSlashCommandDescriptors('zh-cn'), [workflow]);
+    it('builds the Webview slash catalog from the Host commands', () => {
+        const commands = buildSlashCommands(getSlashCommandDescriptors('zh-cn'));
 
-        expect(commands.find(command => command.command === '/workflow:off')!.description).to.equal('关闭当前 AI 工作流');
         expect(commands.find(command => command.command === '/compact')!.description).to.equal('压缩 Agent 活动上下文，同时保留话题记录');
-        expect(commands.find(command => command.command === '/workflow:diagnostic-fix')!.description).to.equal('自动修复诊断');
-        expect(filterSlashCommands(commands, '/workflow')).to.have.length.greaterThan(1);
-        expect(renderSlashCommandItems(commands)).to.include('/workflow:diagnostic-fix');
+        expect(commands.find(command => command.command === '/status')!.description).to.equal('显示当前模型、调度状态与权限配置');
         expect(renderSlashCommandItems(commands)).to.include('role="option"');
     });
 
     it('ranks exact and prefix slash matches and stops completion at arguments', () => {
-        const commands = buildSlashCommands(getSlashCommandDescriptors('en'), []);
+        const commands = buildSlashCommands(getSlashCommandDescriptors('en'));
         expect(filterSlashCommands(commands, '/co')[0]?.command).to.equal('/compact');
         expect(filterSlashCommands(commands, '/goal')[0]?.command).to.equal('/goal');
         expect(getSlashCommandFilter('/goal')).to.equal('/goal');
@@ -340,12 +294,10 @@ describe('chat i18n and command helpers', () => {
         expect(getSlashCommandFilter('explain /goal')).to.equal(null);
     });
 
-    it('parses canonical, colon-argument, and dynamic workflow commands', () => {
+    it('parses canonical and colon-argument commands', () => {
         expect(resolveSlashCommand('/goal write tests')?.definition.id).to.equal('goal');
         expect(resolveSlashCommand('/goal:1200:write tests')?.argument).to.equal('1200:write tests');
         expect(resolveSlashCommand('/goal:complete')?.definition.id).to.equal('goalComplete');
-        expect(resolveSlashCommand('/workflow:diagnostic-fix')?.definition.id).to.equal('workflowSelect');
-        expect(resolveSlashCommand('/workflow:diagnostic-fix')?.argument).to.equal('diagnostic-fix');
         expect(resolveSlashCommand('/does-not-exist')).to.equal(undefined);
         expect(suggestSlashCommands('/compcat')[0]?.command).to.equal('/compact');
     });
@@ -365,6 +317,98 @@ describe('chat i18n and command helpers', () => {
         for (const command of ['/plan', '/execute', '/explore', '/review']) {
             expect(resolveSlashCommand(command)?.definition.duringRun).to.equal('queue');
         }
+    });
+
+    it('parses /skill in both space and colon form into the same definition', () => {
+        const space = resolveSlashCommand('/skill release-extension');
+        const colon = resolveSlashCommand('/skill:release-extension');
+        expect(space?.definition.id).to.equal('skill');
+        expect(colon?.definition.id).to.equal('skill');
+        expect(space?.definition).to.equal(colon?.definition);
+        expect(space?.skillName).to.equal('release-extension');
+        expect(space?.argument).to.equal('');
+        expect(colon?.skillName).to.equal('release-extension');
+        expect(colon?.argument).to.equal('');
+
+        // Colon form carries trailing skill arguments separately from the name.
+        const withArgs = resolveSlashCommand('/skill:stellaris-rules-sync foo');
+        expect(withArgs?.definition.id).to.equal('skill');
+        expect(withArgs?.skillName).to.equal('stellaris-rules-sync');
+        expect(withArgs?.argument).to.equal('foo');
+
+        // The space form behaves identically, and the name is left untouched so
+        // loadSkill keeps owning the case-insensitive match.
+        const spaced = resolveSlashCommand('/skill release-extension target');
+        expect(spaced?.skillName).to.equal('release-extension');
+        expect(spaced?.argument).to.equal('target');
+        expect(resolveSlashCommand('/skill RELEASE-Extension')?.skillName).to.equal('RELEASE-Extension');
+
+        // No payload at all stays empty so the Host can answer needsInput.
+        const bare = resolveSlashCommand('/skill');
+        expect(bare?.definition.id).to.equal('skill');
+        expect(bare?.skillName).to.equal(undefined);
+        expect(bare?.argument).to.equal('');
+    });
+
+    it('leaves every other command argument untouched by the skill split', () => {
+        expect(resolveSlashCommand('/goal write tests')?.argument).to.equal('write tests');
+        expect(resolveSlashCommand('/goal write tests')?.skillName).to.equal(undefined);
+        expect(resolveSlashCommand('/mode:plan')?.argument).to.equal('plan');
+    });
+
+    it('publishes /skill and one /skill:<name> row per installed skill', () => {
+        const skills = [
+            { name: 'release-extension', description: 'Release SOP' },
+            { name: 'Stellaris-Rules-Sync', description: 'Rules SOP' },
+        ];
+        const commands = getSlashCommandDescriptors('en', skills);
+        const staticSkill = commands.find(command => command.command === '/skill');
+        expect(staticSkill).to.include({
+            argumentMode: 'required',
+            completion: 'execute',
+            duringRun: 'immediate',
+            risk: 'safe',
+            category: 'skill',
+        });
+        expect(commands.find(command => command.command === '/skill:release-extension')?.description)
+            .to.equal('Load Agent skill "release-extension": Release SOP');
+        // Names round-trip through the colon form regardless of case.
+        expect(commands.map(command => command.command)).to.include('/skill:Stellaris-Rules-Sync');
+        // Without installed skills the catalog is exactly the static table.
+        expect(getSlashCommandDescriptors('en').map(command => command.command)).to.not.include('/skill:release-extension');
+        expect(getSlashCommandDescriptors('en').map(command => command.command)).to.include('/skill');
+    });
+
+    it('localizes skill catalog rows and drops names that cannot be re-parsed', () => {
+        const zh = getSlashCommandDescriptors('zh-cn', [
+            { name: 'release-extension', description: '发布 SOP' },
+            { name: 'Release-Extension', description: 'Duplicate of the previous row' },
+            { name: 'has space', description: 'Unparseable in colon form' },
+            { name: 'weird:name', description: 'Colon inside the name' },
+            { name: '', description: 'Empty name' },
+            // parseFrontmatter now folds `description: >-`; the row shows the
+            // resolved text with its line breaks collapsed.
+            { name: 'folded', description: 'Release SOP\n  folded across lines' },
+        ]);
+        const skillRows = zh.filter(command => command.category === 'skill' && command.command !== '/skill');
+        expect(skillRows.map(command => command.command)).to.deep.equal([
+            '/skill:release-extension',
+            '/skill:folded',
+        ]);
+        expect(skillRows[0]?.description).to.equal('载入 Agent 技能“release-extension”：发布 SOP');
+        expect(skillRows[1]?.description).to.equal('载入 Agent 技能“folded”：Release SOP folded across lines');
+    });
+
+    it('completes and renders /skill rows through the Webview catalog unchanged', () => {
+        const commands = buildSlashCommands(getSlashCommandDescriptors('en', [
+            { name: 'release-extension', description: 'Release SOP' },
+        ]));
+        // Exact match ranks first, then the prefix-expanded skill row.
+        expect(filterSlashCommands(commands, '/skill').map(command => command.command))
+            .to.deep.equal(['/skill', '/skill:release-extension']);
+        const html = renderSlashCommandItems(filterSlashCommands(commands, '/skill:release-extension'));
+        expect(html).to.include('/skill:release-extension');
+        expect(html).to.include('role="option"');
     });
 
     it('publishes explicit completion and running policies from the Host catalog', () => {

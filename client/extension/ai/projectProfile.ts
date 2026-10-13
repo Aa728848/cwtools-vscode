@@ -65,7 +65,6 @@ export function isProjectProfile(value: unknown): value is ProjectProfile {
         || !isStringArray(value.identifiers.variablePrefixes)
         || !isStringArrayRecord(value.identifiers.byType)
         || !isRecord(value.routing)
-        || !Array.isArray(value.routing.recommendedWorkflowByIntent)
         || !isStringArray(value.routing.preferredReadTools)
         || !isStringArray(value.routing.avoidPatterns)
         || !isRecord(value.validation)
@@ -84,13 +83,6 @@ export function isProjectProfile(value: unknown): value is ProjectProfile {
         && typeof directory.exists === 'boolean'
         && (directory.fileCount === undefined
             || (typeof directory.fileCount === 'number' && Number.isFinite(directory.fileCount) && directory.fileCount >= 0)))) {
-        return false;
-    }
-    if (!value.routing.recommendedWorkflowByIntent.every(route =>
-        isRecord(route)
-        && typeof route.intent === 'string'
-        && typeof route.workflowId === 'string'
-        && typeof route.reason === 'string')) {
         return false;
     }
     if (value.modInfo !== undefined
@@ -262,33 +254,6 @@ export function buildProjectProfile(workspaceRoot: string): ProjectProfile {
             byType: {},
         },
         routing: {
-            recommendedWorkflowByIntent: [
-                {
-                    intent: 'Fix CWTools diagnostics',
-                    workflowId: 'diagnostic-fix',
-                    reason: 'Starts from get_diagnostics and verifies zero real errors after edits.',
-                },
-                {
-                    intent: 'Generate missing localisation',
-                    workflowId: 'loc-generation',
-                    reason: 'Uses write_localisation and the detected language/encoding profile.',
-                },
-                {
-                    intent: 'Design event chains',
-                    workflowId: 'event-chain-design',
-                    reason: 'Studies vanilla archetypes and writes a reusable design blueprint.',
-                },
-                {
-                    intent: 'Review rules or cache updates',
-                    workflowId: 'rules-sync-review',
-                    reason: 'Triages diagnostics after CWTools rule updates.',
-                },
-                {
-                    intent: 'Fix sprite or sound references',
-                    workflowId: 'asset-wiring',
-                    reason: 'Uses verified project/vanilla asset candidates instead of guessed IDs.',
-                },
-            ],
             preferredReadTools,
             avoidPatterns: [
                 'Do not broad grep before checking query_project_profile, explore_pdx_project, and query_workspace_index.',
@@ -509,7 +474,7 @@ function buildGuidanceCards(profile: Omit<ProjectProfile, 'guidanceCards' | 'eff
         ].join('\n'),
         paradox_coordination: [
             'Paradox Multi-Agent guidance:',
-            '- Use dynamic workflow waves: preflight, read fanout, classify, write batches, verify, summarize.',
+            '- Use dynamic coordination waves: preflight, read fanout, classify, write batches, verify, summarize.',
             '- Start with project profile, workspace index, diagnostics, scope/rule queries, and asset candidates.',
             '- Dispatch up to 8 concise read-heavy tasks, but keep write waves narrow and always set plannedFiles.',
             '- Use reviewer/diagnostics verification after every write wave before summarizing.',

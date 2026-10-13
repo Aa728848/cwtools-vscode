@@ -40,6 +40,16 @@ export async function routeWebviewMessage(
         case 'openContextReference':
             await provider.contextReferences.openReference(msg.context);
             break;
+        case 'openFileAtLine':
+            await provider.contextReferences.openReference({
+                type: 'file',
+                id: msg.filePath,
+                label: msg.filePath,
+                uri: msg.filePath,
+                startLine: msg.startLine,
+                endLine: msg.endLine,
+            });
+            break;
         case 'insertCode':
             await provider.insertCodeWithDiff(msg.code);
             break;
@@ -195,9 +205,6 @@ export async function routeWebviewMessage(
             break;
         case 'switchSchedulingDomain':
             provider.switchSchedulingDomain(msg.domain);
-            break;
-        case 'switchWorkflow':
-            provider.switchWorkflow(msg.workflowId);
             break;
         case 'openAgentManager':
             await provider.openAgentManager();

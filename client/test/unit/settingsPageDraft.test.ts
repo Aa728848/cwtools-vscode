@@ -194,6 +194,7 @@ function createHarness(): Harness {
         settingsProviders: [],
         settingsOllamaModels: [],
         settingsProviderEndpoints: {},
+        settingsAgentModelHomeRoles: new Set<string>(),
         settingsThinkingPrefixes: [],
         settingsReasoningCapabilities: {},
         settingsModelContextTokens: {},

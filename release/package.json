@@ -1863,6 +1863,18 @@
                             ]
                         }
                     },
+                    "stellarisLanguageServices.ai.autoInitProjectKnowledge": {
+                        "scope": "window",
+                        "type": "boolean",
+                        "default": true,
+                        "description": "%configuration.stellarisLanguageServices.ai.autoInitProjectKnowledge.description%"
+                    },
+                    "stellarisLanguageServices.ai.experience.enabled": {
+                        "scope": "window",
+                        "type": "boolean",
+                        "default": true,
+                        "description": "%configuration.stellarisLanguageServices.ai.experience.enabled.description%"
+                    },
                     "stellarisLanguageServices.ai.orchestrator.agentModels": {
                         "scope": "window",
                         "type": "object",

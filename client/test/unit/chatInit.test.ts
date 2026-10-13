@@ -298,4 +298,74 @@ describe('/init artifact generation', () => {
             delete require.cache[modulePath];
         }
     });
+
+    it('auto mode skips opening CWTOOLS.md while manual mode opens it', async () => {
+        const manifestPath = path.join(workspaceRoot, '.cwtools', 'project', 'knowledge', 'manifest.json');
+        let openTextDocumentCalls = 0;
+        let showTextDocumentCalls = 0;
+        const stepTypes: string[] = [];
+        const vscodeStub = {
+            workspace: {
+                workspaceFolders: [{ uri: { fsPath: workspaceRoot } }],
+                openTextDocument: async (uri: unknown) => { openTextDocumentCalls += 1; return { uri }; },
+            },
+            window: {
+                showWarningMessage: async () => undefined,
+                showInformationMessage: async () => undefined,
+                showTextDocument: async () => { showTextDocumentCalls += 1; },
+                withProgress: async (_options: unknown, task: (progress: { report(): void }) => Promise<unknown>) => task({ report: () => undefined }),
+            },
+            ProgressLocation: { Window: 10 },
+            Uri: { file: (filePath: string) => ({ fsPath: filePath }) },
+        };
+        const projectKnowledgeStub = {
+            generateProjectKnowledge: async () => ({
+                status: 'ready' as const,
+                game: 'stellaris',
+                generatedAt: new Date().toISOString(),
+                counts: { vanillaDefinitions: 1 },
+                staleReasons: [],
+            }),
+            getProjectKnowledgeManifestPath: () => manifestPath,
+            writeUnavailableProjectKnowledge: () => { throw new Error('ready knowledge must not be replaced'); },
+        };
+        const moduleLoader = require('module') as { _load: (...args: any[]) => any };
+        const originalLoad = moduleLoader._load;
+        const modulePath = require.resolve('../../extension/ai/chatInit');
+        delete require.cache[modulePath];
+        moduleLoader._load = function (this: unknown, request: string, ...args: any[]) {
+            if (request === 'vscode') return vscodeStub;
+            if (request === './projectKnowledge') return projectKnowledgeStub;
+            if (request === './errorReporter') return { ErrorReporter: { debug: () => undefined, warn: () => undefined } };
+            return originalLoad.apply(this, [request, ...args]);
+        };
+
+        try {
+            const { generateInitFile } = require('../../extension/ai/chatInit') as typeof import('../../extension/ai/chatInit');
+            const autoResult = await generateInitFile(
+                (msg) => { if (msg.type === 'agentStep') stepTypes.push(msg.step.type); },
+                () => undefined,
+                undefined,
+                { auto: true },
+            );
+
+            expect(autoResult.success).to.equal(true);
+            expect(autoResult.knowledgeReady).to.equal(true);
+            expect(openTextDocumentCalls).to.equal(0);
+            expect(showTextDocumentCalls).to.equal(0);
+            // Auto mode keeps the same artifact set and chat progress feedback.
+            expect(fs.existsSync(path.join(workspaceRoot, 'CWTOOLS.md'))).to.equal(true);
+            expect(fs.existsSync(path.join(workspaceRoot, '.cwtools', 'project', 'profile.json'))).to.equal(true);
+            expect(stepTypes).to.include('thinking');
+            expect(stepTypes).to.include('validation');
+
+            const manualResult = await generateInitFile(() => undefined, () => undefined);
+            expect(manualResult.success).to.equal(true);
+            expect(openTextDocumentCalls).to.equal(1);
+            expect(showTextDocumentCalls).to.equal(1);
+        } finally {
+            moduleLoader._load = originalLoad;
+            delete require.cache[modulePath];
+        }
+    });
 });

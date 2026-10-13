@@ -30,6 +30,21 @@ describe('AI chat protocol boundaries', () => {
             questionId: 'question-1',
             answers: { scope: 'workspace', checks: ['compile', 'test'] },
         })).to.not.equal(null);
+        expect(parseWebviewMessage({
+            type: 'openFileAtLine',
+            filePath: 'events/kuat_missions_events.txt',
+            startLine: 399,
+            endLine: 414,
+        })).to.deep.equal({
+            type: 'openFileAtLine',
+            filePath: 'events/kuat_missions_events.txt',
+            startLine: 399,
+            endLine: 414,
+        });
+        expect(parseWebviewMessage({ type: 'openFileAtLine', filePath: 'exe_feature_l_simp_chinese.yml' })).to.deep.equal({
+            type: 'openFileAtLine',
+            filePath: 'exe_feature_l_simp_chinese.yml',
+        });
     });
 
     it('rejects unknown or malformed Webview messages', () => {
@@ -37,6 +52,10 @@ describe('AI chat protocol boundaries', () => {
         expect(parseWebviewMessage({ type: 'unknown-command' })).to.equal(null);
         expect(parseWebviewMessage({ type: 'sendMessage', text: 42 })).to.equal(null);
         expect(parseWebviewMessage({ type: 'openContextReference', context: { type: 'file' } })).to.equal(null);
+        expect(parseWebviewMessage({ type: 'openFileAtLine' })).to.equal(null);
+        expect(parseWebviewMessage({ type: 'openFileAtLine', filePath: 42 })).to.equal(null);
+        expect(parseWebviewMessage({ type: 'openFileAtLine', filePath: 'a.txt', startLine: 1.5 })).to.equal(null);
+        expect(parseWebviewMessage({ type: 'openFileAtLine', filePath: 'a.txt', endLine: '9' })).to.equal(null);
         expect(parseWebviewMessage({
             type: 'submitPlanAnnotations',
             annotations: [{ section: 'one', note: 1 }],

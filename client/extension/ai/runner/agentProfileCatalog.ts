@@ -137,6 +137,7 @@ const BUILTIN_PROFILES: RuntimeAgentProfile[] = [
         domain: 'paradox',
         authorizationCeiling: 'workspace_write',
         tools: ['*'],
+        subagentCapabilities: { command: true },
         maxIterations: 80,
         summaryPolicy: {
             minCharacters: 240,

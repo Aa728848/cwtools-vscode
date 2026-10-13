@@ -7,6 +7,7 @@
  */
 
 import * as vs from 'vscode';
+import * as os from 'os';
 import * as path from 'path';
 import * as fs from 'fs';
 import * as cp from 'child_process';
@@ -35,6 +36,17 @@ import type { SubscriptionProxyMode } from '../../shared/subscriptionProxy';
 import { ErrorReporter } from './errorReporter';
 import { SOURCE, aiText } from './messages';
 import { getProjectWorkspaceRoot } from './workspacePaths';
+import { getCwtoolsHomeDir } from './homeConfig';
+import {
+    loadMcpServerFileConfigs,
+    mcpServerSource,
+    type SourcedMCPServerConfig,
+} from './mcpConfig';
+import {
+    getAgentModelOverrides,
+    isHomeProviderId,
+    loadHomeProviderConfigs,
+} from './providerConfig';
 import {
     getSessionPermissionMode,
     isSessionFullAccess,
@@ -62,6 +74,31 @@ const execAsync = promisify(cp.exec);
 
 type PostMessageFn = (msg: HostMessage) => void;
 const DEFAULT_CUSTOM_API_FORMAT: CustomApiFormat = 'openai-chat-completions';
+
+/**
+ * The provider rows sent to the settings webview. Built-ins come from
+ * BUILTIN_PROVIDERS; `source: 'home'` marks an entry declared in
+ * ~/.cwtools/providers.json, whose endpoint/key are file-owned (read-only UI).
+ */
+interface SettingsProviderView {
+    id: string;
+    name: string;
+    models: string[];
+    inlineModels?: string[];
+    defaultModel: string;
+    requiresApiKey: boolean;
+    defaultEndpoint: string;
+    userEndpoint: string;
+    maxContextTokens: number;
+    supportsFIM: boolean;
+    registerUrl?: string;
+    runtimeKind?: 'http';
+    authKind?: import('./types').AIProviderConfig['authKind'];
+    supportsUtilityCalls: boolean;
+    source?: 'home';
+    apiKeyEnv?: string;
+}
+
 function reasoningCapabilityKey(providerId: string, model: string): string {
     return `${providerId}:${model}`;
 }
@@ -294,6 +331,9 @@ export class ChatSettingsManager {
         private aiService: AIService,
         private postMessage: PostMessageFn,
         private globalStoragePath?: string,
+        /** Called after a successful install/delete so the host can resend the
+         *  `/skill:<name>` command catalog. Optional: two-argument callers keep working. */
+        private onSkillCatalogChanged?: () => void,
     ) {}
 
     /** Build the settingsData payload and send it to the WebView */
@@ -445,7 +485,7 @@ export class ChatSettingsManager {
             }
         }
 
-        const providers = Object.values(BUILTIN_PROVIDERS).map(p => {
+        const providers: SettingsProviderView[] = Object.values(BUILTIN_PROVIDERS).map(p => {
             const customNonFim = p.id === 'custom' && config.customApiFormat !== 'openai-chat-completions';
             const codexModels = p.id === 'codex-chatgpt' ? (codexAccount?.models ?? [])
                 : p.id === 'antigravity' ? antigravityAccount?.models
@@ -473,10 +513,39 @@ export class ChatSettingsManager {
             };
         });
 
+        // Home providers (~/.cwtools/providers.json) ride the same list, badged
+        // with their source; their endpoint and credential live in the file, so
+        // the settings form renders them read-only (see the webview).
+        const homeProviderFile = loadHomeProviderConfigs();
+        for (const p of Object.values(homeProviderFile.providers)) {
+            providers.push({
+                id: p.id,
+                name: p.name,
+                models: p.models,
+                inlineModels: undefined,
+                defaultModel: p.defaultModel,
+                requiresApiKey: p.requiresApiKey,
+                defaultEndpoint: p.endpoint,
+                userEndpoint: '',
+                maxContextTokens: p.maxContextTokens,
+                supportsFIM: p.supportsFIM,
+                registerUrl: undefined,
+                runtimeKind: p.runtimeKind,
+                authKind: p.authKind,
+                supportsUtilityCalls: p.supportsUtilityCalls ?? true,
+                source: 'home',
+                ...(p.apiKeyEnv !== undefined ? { apiKeyEnv: p.apiKeyEnv } : {}),
+            });
+        }
+
         const hasKeyMap: Record<string, boolean> = {};
         for (const p of providers) {
             let hasKey = false;
-            if (p.authKind !== 'chatgpt-oauth' && p.authKind !== 'antigravity-oauth') {
+            if (p.source === 'home' && p.apiKeyEnv) {
+                // The file names an environment variable; the badge answers
+                // whether that variable is set, not whether a key was stored.
+                hasKey = !!(process.env[p.apiKeyEnv]?.trim());
+            } else if (p.authKind !== 'chatgpt-oauth' && p.authKind !== 'antigravity-oauth') {
                 if (p.id === 'commandcode' || p.id === 'commandcode-messages') {
                     hasKey = !!((await this.aiService.getKeyForProvider('commandcode')) || (await this.aiService.getKeyForProvider('commandcode-messages')));
                 } else {
@@ -495,6 +564,16 @@ export class ChatSettingsManager {
         const selectedModel = config.provider === 'codex-chatgpt' && codexAccount?.models.length
             ? (codexAccount.models.includes(config.model) ? config.model : codexAccount.models[0] || config.model)
             : config.model;
+        // Split the merged MCP server list by origin: only settings-sourced
+        // servers are editable in the panel (the webview rebuilds the saved
+        // list from those blocks); file-based servers ride along read-only as
+        // mcpFileServers so the UI can badge their source.
+        const settingsMcpServers: SourcedMCPServerConfig[] = config.mcp.servers
+            .filter(server => mcpServerSource(server) === 'settings')
+            .map(server => ({ ...server, source: 'settings' as const }));
+        const fileMcpServers = config.mcp.servers
+            .filter((server): server is SourcedMCPServerConfig => mcpServerSource(server) !== 'settings');
+        const mcpConfigWarnings = loadMcpServerFileConfigs(getProjectWorkspaceRoot() || undefined).warnings;
         const current: PanelSettings = {
             provider: config.provider,
             model: selectedModel,
@@ -553,10 +632,15 @@ export class ChatSettingsManager {
                 model: config.translationPreview.model,
             },
             mcp: {
-                servers: config.mcp.servers
+                servers: settingsMcpServers
             },
             orchestrator: {
-                agentModels: vs.workspace.getConfiguration('stellarisLanguageServices.ai').get<Record<string, { provider: string; model: string }>>('orchestrator.agentModels') || undefined,
+                // Merged view: the VS Code setting is the base layer,
+                // ~/.cwtools/agent-models.json overrides same-named roles and
+                // each entry carries its source so the webview can badge it.
+                agentModels: getAgentModelOverrides(
+                    vs.workspace.getConfiguration('stellarisLanguageServices.ai').get<Record<string, { provider: string; model: string }>>('orchestrator.agentModels'),
+                ),
             },
         };
 
@@ -597,8 +681,11 @@ export class ChatSettingsManager {
         );
         current.reasoningEffort = normalizeReasoningEffort(currentCapability, current.reasoningEffort);
 
-        this.postMessage({
-            type: 'settingsData',
+        // The widened literal keeps `type` literal so the object stays
+        // assignable to HostMessage while carrying the extra MCP source fields
+        // (the webview protocol validator tolerates undeclared fields).
+        const settingsMessage = {
+            type: 'settingsData' as const,
             providers: providerPayload as any,
             current,
             ollamaModels,
@@ -655,7 +742,11 @@ export class ChatSettingsManager {
             claudeSubscriptionAccount,
             subscriptionPools,
             subscriptionProxy,
-        });
+            mcpFileServers: fileMcpServers.length > 0 ? fileMcpServers : undefined,
+            mcpConfigWarnings: mcpConfigWarnings.length > 0 ? mcpConfigWarnings : undefined,
+            providerFileWarnings: homeProviderFile.warnings.length > 0 ? homeProviderFile.warnings : undefined,
+        };
+        this.postMessage(settingsMessage);
     }
 
     async openSettingsPage(targetSurface?: 'chat' | 'manager'): Promise<void> {
@@ -771,7 +862,11 @@ export class ChatSettingsManager {
         // An empty box clears the entry; a defined empty string would fail
         // nothing but would leave a useless blank key behind.
         await update('reasoningKey', settings.reasoningKey?.trim() || undefined);
-        if (settings.apiKey !== undefined) {
+        // Home providers (~/.cwtools/providers.json) own their endpoint and
+        // credential in the file; the settings form renders them read-only and
+        // saving must not copy file values into settings or SecretStorage.
+        const homeProviderSelected = isHomeProviderId(settings.provider);
+        if (settings.apiKey !== undefined && !homeProviderSelected) {
             const trimmedKey = settings.apiKey.trim();
             // Left to reject on purpose: a key that silently failed to persist
             // would leave the user believing the provider is configured.
@@ -802,7 +897,7 @@ export class ChatSettingsManager {
         }
         // Endpoints are stored per-provider so switching providers cannot leak an
         // endpoint into another provider. Endpoints are provider-specific.
-        {
+        if (!homeProviderSelected) {
             const map = { ...(cfg.get<Record<string, string>>('providerEndpoints', {}) || {}) };
             const trimmed = (settings.endpoint || '').trim();
             if (trimmed) map[settings.provider] = trimmed; else delete map[settings.provider];
@@ -1628,54 +1723,118 @@ export class ChatSettingsManager {
         }
     }
 
+    /** User-level skills directory (`~/.cwtools/skills`) — the install target. */
+    private homeSkillsDir(): string {
+        return path.join(getCwtoolsHomeDir(), 'skills');
+    }
+
+    /** Legacy user-level skills directory (pre-home-dir installs), read/delete only. */
+    private legacySkillsDir(): string | undefined {
+        return this.globalStoragePath ? path.join(this.globalStoragePath, '.agents', 'skills') : undefined;
+    }
+
+    /** Resolve a skill directory inside a base dir, rejecting path traversal. */
+    private resolveSkillDir(baseDir: string, skill: string): string | undefined {
+        if (!/^[\w.-]+$/.test(skill)) return undefined;
+        const resolved = path.resolve(baseDir, skill);
+        const relative = path.relative(baseDir, resolved);
+        if (!relative || relative.startsWith('..') || path.isAbsolute(relative)) return undefined;
+        return resolved;
+    }
+
     async getSkillsList(): Promise<void> {
-        if (!this.globalStoragePath) {
-            this.postMessage({ type: 'skillsList', skills: [] });
-            return;
-        }
         try {
-            const skillsDir = path.join(this.globalStoragePath, '.agents', 'skills');
-            if (!fs.existsSync(skillsDir)) {
-                this.postMessage({ type: 'skillsList', skills: [] });
-                return;
+            // List the home dir, the legacy globalStorage dir (pre-migration
+            // installs stay visible and deletable), and the project-level dirs
+            // (save_skill writes `.agents/skills`; `.cwtools/skills` is the
+            // paradox-scoped scan source).
+            const membership = new Map<string, Set<'home' | 'legacy' | 'project'>>();
+            const readInto = async (dir: string | undefined, tag: 'home' | 'legacy' | 'project'): Promise<void> => {
+                if (!dir || !fs.existsSync(dir)) return;
+                const dirs = await fs.promises.readdir(dir, { withFileTypes: true });
+                for (const entry of dirs) {
+                    if (!entry.isDirectory()) continue;
+                    const tags = membership.get(entry.name) ?? new Set();
+                    tags.add(tag);
+                    membership.set(entry.name, tags);
+                }
+            };
+            await readInto(this.homeSkillsDir(), 'home');
+            await readInto(this.legacySkillsDir(), 'legacy');
+            const workspaceRoot = getProjectWorkspaceRoot();
+            if (workspaceRoot) {
+                await readInto(path.join(workspaceRoot, '.agents', 'skills'), 'project');
+                await readInto(path.join(workspaceRoot, '.cwtools', 'skills'), 'project');
             }
-            const dirs = await fs.promises.readdir(skillsDir, { withFileTypes: true });
-            const skills = dirs.filter(d => d.isDirectory()).map(d => d.name);
-            this.postMessage({ type: 'skillsList', skills });
+            const skills = [...membership.keys()].sort((a, b) => a.localeCompare(b));
+            const sources: Record<string, string> = {};
+            for (const [name, tags] of membership) {
+                if (tags.size > 1) sources[name] = 'multiple';
+                else if (tags.has('project')) sources[name] = 'project';
+                else if (tags.has('home')) sources[name] = 'home';
+                else sources[name] = 'legacy';
+            }
+            // Widened literal: `skillSources` rides along for the webview's
+            // source badges (protocol validation tolerates undeclared fields).
+            const message = { type: 'skillsList' as const, skills, skillSources: sources };
+            this.postMessage(message);
         } catch {
             this.postMessage({ type: 'skillsList', skills: [] });
         }
     }
 
     async installSkill(source: string): Promise<void> {
-        if (!this.globalStoragePath) {
-            vs.window.showErrorMessage(aiText('Could not access extension storage path; installation failed', '无法获取插件存储路径，安装失败'));
-            this.postMessage({ type: 'skillInstallComplete', success: false });
-            return;
-        }
         try {
-            // Ensure global storage exists
-            const agentsSkillsDir = path.join(this.globalStoragePath, '.agents', 'skills');
-            if (!fs.existsSync(agentsSkillsDir)) {
-                await fs.promises.mkdir(agentsSkillsDir, { recursive: true });
-            }
+            const homeSkillsDir = this.homeSkillsDir();
+            await fs.promises.mkdir(homeSkillsDir, { recursive: true });
 
             if (path.isAbsolute(source) && fs.existsSync(source)) {
                 const stat = await fs.promises.stat(source);
                 if (stat.isDirectory()) {
                     const skillName = path.basename(source);
-                    const destDir = path.join(agentsSkillsDir, skillName);
+                    const destDir = this.resolveSkillDir(homeSkillsDir, skillName);
+                    if (!destDir) {
+                        throw new Error(aiText('Invalid skill folder name', '无效的技能文件夹名称'));
+                    }
                     await fs.promises.cp(source, destDir, { recursive: true, force: true });
                     vs.window.showInformationMessage(aiText(`Local agent skill [${skillName}] installed`, `本地 Agent 技能 [${skillName}] 已成功安装`));
                 } else {
                     throw new Error(aiText('Local path must be a folder containing SKILL.md', '本地路径必须是一个包含 SKILL.md 的文件夹'));
                 }
             } else {
-                // Run npx skills add. npx will create .agents/skills in the cwd (without -g)
-                await execAsync(`npx skills add ${source} -y`, { cwd: this.globalStoragePath });
+                // `npx skills add` cannot target ~/.cwtools/skills directly, so the
+                // install is staged (universal agent layout = .agents/skills under
+                // the cwd, real file copies) into a temp dir and then copied into
+                // the home skills dir. The whitelist keeps shell metacharacters
+                // out of the interpolated command.
+                if (!/^[\w@./:\\?#=+\-~]+$/.test(source)) {
+                    throw new Error(aiText('Invalid skill source (unsupported characters)', '无效的技能来源（包含不支持的字符）'));
+                }
+                const stagingDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'cwtools-skill-install-'));
+                try {
+                    await execAsync(`npx skills add ${source} -y -a universal --copy`, { cwd: stagingDir });
+                    const stagedSkillsDir = path.join(stagingDir, '.agents', 'skills');
+                    const staged = await fs.promises.readdir(stagedSkillsDir, { withFileTypes: true }).catch(() => {
+                        throw new Error(aiText('npx skills add produced no .agents/skills output', 'npx skills add 没有产出 .agents/skills 目录'));
+                    });
+                    let installed = 0;
+                    for (const entry of staged) {
+                        if (!entry.isDirectory()) continue;
+                        const destDir = this.resolveSkillDir(homeSkillsDir, entry.name);
+                        if (!destDir) continue;
+                        await fs.promises.cp(path.join(stagedSkillsDir, entry.name), destDir, { recursive: true, force: true });
+                        installed++;
+                    }
+                    if (installed === 0) {
+                        throw new Error(aiText('npx skills add installed no skill directories', 'npx skills add 未安装任何技能目录'));
+                    }
+                } finally {
+                    await fs.promises.rm(stagingDir, { recursive: true, force: true }).catch(() => undefined);
+                }
                 vs.window.showInformationMessage(aiText(`Agent skill ${source} installed`, `Agent 技能 ${source} 已成功安装`));
             }
             this.postMessage({ type: 'skillInstallComplete', success: true });
+            this.onSkillCatalogChanged?.();
             await this.getSkillsList();
         } catch (e) {
             const msg = e instanceof Error ? e.message : String(e);
@@ -1685,14 +1844,31 @@ export class ChatSettingsManager {
     }
 
     async deleteSkill(skill: string): Promise<void> {
-        if (!this.globalStoragePath) return;
         try {
-            const skillPath = path.join(this.globalStoragePath, '.agents', 'skills', skill);
-            if (fs.existsSync(skillPath)) {
-                await fs.promises.rm(skillPath, { recursive: true, force: true });
-                vs.window.showInformationMessage(aiText(`Agent skill ${skill} deleted`, `Agent 技能 ${skill} 已删除`));
-                await this.getSkillsList();
+            // Delete from the home dir, the legacy globalStorage dir, and the
+            // project-level dirs — a skill listed from any location stays deletable.
+            const targets: string[] = [];
+            const homeDir = this.resolveSkillDir(this.homeSkillsDir(), skill);
+            if (homeDir && fs.existsSync(homeDir)) targets.push(homeDir);
+            const legacyBase = this.legacySkillsDir();
+            if (legacyBase) {
+                const legacyDir = this.resolveSkillDir(legacyBase, skill);
+                if (legacyDir && fs.existsSync(legacyDir)) targets.push(legacyDir);
             }
+            const workspaceRoot = getProjectWorkspaceRoot();
+            if (workspaceRoot) {
+                for (const base of [path.join(workspaceRoot, '.agents', 'skills'), path.join(workspaceRoot, '.cwtools', 'skills')]) {
+                    const projectDir = this.resolveSkillDir(base, skill);
+                    if (projectDir && fs.existsSync(projectDir)) targets.push(projectDir);
+                }
+            }
+            if (targets.length === 0) return;
+            for (const target of targets) {
+                await fs.promises.rm(target, { recursive: true, force: true });
+            }
+            vs.window.showInformationMessage(aiText(`Agent skill ${skill} deleted`, `Agent 技能 ${skill} 已删除`));
+            this.onSkillCatalogChanged?.();
+            await this.getSkillsList();
         } catch (e) {
             vs.window.showErrorMessage(aiText(`Delete failed: ${e}`, `删除失败: ${e}`));
         }

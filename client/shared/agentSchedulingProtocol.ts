@@ -1,7 +1,7 @@
 /**
- * CWTools — Agent Scheduling & Workflow Protocol
+ * CWTools — Agent Scheduling Protocol
  *
- * Canonical scheduling state and workflow DTOs shared across Extension Host and Webviews.
+ * Canonical scheduling state shared across Extension Host and Webviews.
  */
 
 export type AgentRuntimeDomain = 'paradox' | 'general' | 'hybrid';
@@ -19,42 +19,10 @@ export interface AgentSchedulingState {
     routeConfidence: number;
     routeEvidence: string[];
     awaitingUserDecision?: boolean;
-    routingSource?: 'model' | 'deterministic' | 'workflow' | 'user';
+    routingSource?: 'model' | 'deterministic' | 'user';
     phaseReason: string;
     dispatchReason?: string;
     revision: number;
 }
 
 export type ManagerSchedulingStateView = AgentSchedulingState;
-
-export interface WorkflowPhaseView {
-    id: string;
-    title: string;
-    description?: string;
-}
-
-export interface WorkflowVerificationView {
-    id: string;
-    description: string;
-    required?: boolean;
-    verificationTool?: string;
-}
-
-export interface WorkflowView {
-    id: string;
-    title: string;
-    description: string;
-    scheduling: { domain: string; intent: string; strategy: string; profileName?: string };
-    locale?: string;
-    phases: WorkflowPhaseView[];
-    verification: WorkflowVerificationView[];
-}
-
-export interface WorkflowUiLabels {
-    selectorPlaceholder: string;
-    noWorkflowSelected: string;
-    phaseUnit: string;
-    phasesUnit: string;
-    requiredCheckUnit: string;
-    requiredChecksUnit: string;
-}

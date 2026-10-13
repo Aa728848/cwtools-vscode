@@ -26,7 +26,7 @@ describe('toolDisclosure', () => {
         expect(sortToolDefinitionsForStableRequest([makeTool('z'), makeTool('a')])
             .map(tool => tool.function.name)).to.deep.equal(['a', 'z']);
     });
-    it('reports tools excluded by the effective workflow pool as unavailable', () => {
+    it('reports tools excluded by the effective mode pool as unavailable', () => {
         const result = service.select(
             { tools: ['edit_file', 'replace_lines', 'manage_goal'], reason: 'test' },
             [],
@@ -41,7 +41,7 @@ describe('toolDisclosure', () => {
         expect(result.alreadyLoaded).to.deep.equal([]);
     });
 
-    it('loads deferred tools from the effective mode/domain/workflow pool', () => {
+    it('loads deferred tools from the effective mode/domain pool', () => {
         const ctx = context('build');
         const result = service.select(
             { tools: ['edit_file', 'replace_lines'], reason: 'continue task' },

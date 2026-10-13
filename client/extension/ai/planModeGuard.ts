@@ -137,7 +137,9 @@ export function validatePlanModeToolUse(
         return { allowed: true };
     }
 
-    if (toolName === 'save_workflow') {
+    // Skill saves write only the validated <skills-root>/<name>/SKILL.md target
+    // (project `.agents/skills` or the user home skills dir), never plan code.
+    if (toolName === 'save_skill') {
         return { allowed: true };
     }
 

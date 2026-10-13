@@ -142,7 +142,7 @@ function testProjectProfile(workspaceRoot: string): import('../../extension/ai/t
         keyDirectories: [],
         localisation: { roots: [], languages: [], encoding: 'UTF-8 with BOM', sampleFiles: [] },
         identifiers: { namespaces: [], variablePrefixes: [], byType: {} },
-        routing: { recommendedWorkflowByIntent: [], preferredReadTools: [], avoidPatterns: [] },
+        routing: { preferredReadTools: [], avoidPatterns: [] },
         validation: { lspReady: 'ready', indexStatus: 'ready', vanillaCache: 'configured' },
         guidanceCards: {},
         efficiencyHints: [],

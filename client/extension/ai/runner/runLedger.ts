@@ -180,7 +180,6 @@ export class RunLedger {
             agentId?: string;
             providerId?: string;
             model?: string;
-            workflowId?: string | null;
             threadId?: string;
             turnId?: string;
         },
@@ -200,7 +199,6 @@ export class RunLedger {
             turnId: metadata?.turnId,
             status: 'created',
             schedulingState: normalizeSchedulingState(schedulingState),
-            workflowId: metadata?.workflowId,
             providerId: metadata?.providerId,
             model: metadata?.model,
             userPromptPreview,
@@ -256,7 +254,6 @@ export class RunLedger {
             agentId: metadata?.agentId,
             providerId: metadata?.providerId,
             model: metadata?.model,
-            workflowId: metadata?.workflowId,
             threadId: metadata?.threadId,
             turnId: metadata?.turnId,
         }, { agentId: metadata?.agentId });

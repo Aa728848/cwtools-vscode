@@ -48,6 +48,7 @@ import {
 import { agentProfileCatalog, ToolActivationService, type ToolActivationSnapshot } from './agentProfileCatalog';
 import { createDirectoryAgentProfileSource } from './agentProfileSources';
 import { getProjectWorkspaceRoots } from '../workspacePaths';
+import { getAgentModelOverrides } from '../providerConfig';
 import { normalizeSchedulingState, schedulingStateFromAdmission } from './scheduling';
 import { ErrorReporter } from '../errorReporter';
 
@@ -251,8 +252,8 @@ export class AgentRuntime {
             ? schedulingState.dispatch
             : 'single';
         const configuredModels = typeof vs.workspace?.getConfiguration === 'function'
-            ? vs.workspace.getConfiguration('stellarisLanguageServices.ai')
-                .get<Record<string, { provider: string; model: string }>>('orchestrator.agentModels')
+            ? getAgentModelOverrides(vs.workspace.getConfiguration('stellarisLanguageServices.ai')
+                .get<Record<string, { provider: string; model: string }>>('orchestrator.agentModels'))
             : undefined;
         const modelBinding = configuredModels?.[profile.name];
         const priorOnStep = request.options?.onStep;

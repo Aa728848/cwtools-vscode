@@ -1,5 +1,4 @@
 import { escapeHtml } from './formatters';
-import { getWorkflowSlashCommand, type WorkflowView } from './workflows';
 
 export interface SlashCommandView {
     command: string;
@@ -9,24 +8,13 @@ export interface SlashCommandView {
     completion: 'execute' | 'insert';
     duringRun: 'immediate' | 'queue' | 'deny';
     risk: 'safe' | 'stateful' | 'destructive';
-    category: 'session' | 'goal' | 'mode' | 'workflow' | 'configuration';
+    category: 'session' | 'goal' | 'mode' | 'configuration' | 'skill';
 }
 
-export function buildSlashCommands(
-    hostCommands: SlashCommandView[],
-    workflows: WorkflowView[],
-): SlashCommandView[] {
-    const workflowCommands = workflows.map(workflow => ({
-        command: getWorkflowSlashCommand(workflow.id),
-        description: workflow.description || workflow.title,
-        argumentMode: 'none' as const,
-        completion: 'execute' as const,
-        duringRun: 'immediate' as const,
-        risk: 'safe' as const,
-        category: 'workflow' as const,
-    }));
+/** Collapse the Host catalog so the popup can never show one command twice. */
+export function buildSlashCommands(hostCommands: SlashCommandView[]): SlashCommandView[] {
     const unique = new Map<string, SlashCommandView>();
-    for (const command of [...hostCommands, ...workflowCommands]) {
+    for (const command of hostCommands) {
         unique.set(command.command.toLowerCase(), command);
     }
     return [...unique.values()];

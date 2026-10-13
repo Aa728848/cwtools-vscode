@@ -30,15 +30,37 @@ function loadPromptBuilder() {
         if (request === 'vscode') return vscodeStub;
         return originalLoad.apply(this, [request, ...args]);
     };
+    // The skills index is a filesystem projection of whatever is installed in
+    // the checkout (${cwd}/.agents/skills), not a property of the mode template
+    // under test. Pin it to nothing so a developer's installed skills cannot
+    // decide these assertions; the index itself is covered by skills.test.ts.
+    const skillsModulePath = require.resolve('../../extension/ai/skills');
+    const cachedSkills = require.cache[skillsModulePath];
     try {
+        delete require.cache[skillsModulePath];
+        require.cache[skillsModulePath] = {
+            id: skillsModulePath,
+            filename: skillsModulePath,
+            loaded: true,
+            exports: { buildSkillIndexPrompt: () => '', listSkills: () => [], skillsDirectorySignature: () => '' },
+        } as never;
         return require('../../extension/ai/promptBuilder') as typeof import('../../extension/ai/promptBuilder');
     } finally {
         moduleLoader._load = originalLoad;
+        if (cachedSkills) require.cache[skillsModulePath] = cachedSkills;
+        else delete require.cache[skillsModulePath];
     }
 }
 
+/**
+ * Strip the checkout's own repository instructions and the filesystem-derived
+ * skills index, matching the sections this suite means to assert nothing about
+ * (the remainder of the prompt is generated purely from the mode template).
+ */
 function withoutRepositoryInstructions(prompt: string): string {
-    return prompt.replace(/<project-instructions>[\s\S]*?<\/project-instructions>/g, '');
+    return prompt
+        .replace(/<project-instructions>[\s\S]*?<\/project-instructions>/g, '')
+        .replace(/\n## Installed Agent Skills\n[\s\S]*$/g, '');
 }
 
 describe('PromptBuilder context budgeting', () => {
@@ -102,11 +124,6 @@ describe('PromptBuilder context budgeting', () => {
                     byType: {},
                 },
                 routing: {
-                    recommendedWorkflowByIntent: [{
-                        intent: 'Fix CWTools diagnostics',
-                        workflowId: 'diagnostic-fix',
-                        reason: 'test',
-                    }],
                     preferredReadTools: ['query_project_profile'],
                     avoidPatterns: [],
                 },
@@ -283,7 +300,7 @@ describe('PromptBuilder context budgeting', () => {
         const prompt = builder.buildSystemPromptForMode('utility', undefined, undefined, undefined, undefined, undefined, true, true, 'general');
 
         if (process.platform === 'win32') {
-            expect(prompt).to.include('PowerShell in every mode');
+            expect(prompt).to.include('falls back to Windows PowerShell 5.1');
         } else {
             expect(prompt).to.include('/bin/sh');
         }

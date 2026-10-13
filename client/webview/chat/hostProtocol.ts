@@ -55,8 +55,6 @@ const validators = {
     loadTopicMessages: fields({ messages: isRecordArray }, { targetSurface: optional(isSurface) }),
     streamToken: fields({ token: isString }),
     clearChat: fields({}, { targetSurface: optional(isSurface) }),
-    workflowList: fields({ workflows: isRecordArray }, { currentWorkflowId: optional(value => value === null || typeof value === 'string'), labels: optional(isObject) }),
-    workflowChanged: fields({}, { workflowId: optional(value => value === null || typeof value === 'string'), workflow: optional(isObject), labels: optional(isObject) }),
     slashCommandList: fields({ commands: isRecordArray }),
     slashCommandResult: fields({ command: isString, status: isString, message: isString }, { uiAction: optional(isString) }),
     todoUpdate: fields({ todos: isRecordArray }, { agentId: optional(isString), threadId: optional(isString), runId: optional(isString) }),
@@ -132,8 +130,7 @@ const validators = {
         topics: isRecordArray, messages: isRecordArray, schedulingState: isObject,
         isGenerating: isBoolean, liveStepCount: isFiniteNumber, artifacts: isRecordArray,
     }, {
-        stats: optional(isObject), messageCount: optional(isFiniteNumber),
-        workflowId: optional(value => value === null || typeof value === 'string'), todos: optional(isRecordArray),
+        stats: optional(isObject), messageCount: optional(isFiniteNumber), todos: optional(isRecordArray),
         activity: optional(isObject), runtimeInspector: optional(isObject), transcript: optional(isObject),
     }),
     activitySnapshot: fields({ activity: isObject }),

@@ -50,6 +50,13 @@ import { describeImagesWithMinimaxCli } from './visionAdapter';
 import { ErrorReporter } from './errorReporter';
 import { createBestEffortReporter } from './runner/bestEffortDiagnostics';
 import { MemoryParser } from './memoryParser';
+import {
+    distillRunExperience,
+    experienceRequesterFromChatCompletion,
+    isExperienceEnabled,
+    shouldDistillExperience,
+} from './experienceStore';
+import { getHistoryPolicy } from './runner/historyPolicy';
 import { getProjectWorkspaceRoot, getPrivateTopicStorageDir, canonicalPathKey } from './workspacePaths';
 import {
     filterToolDefinitionsForMode,
@@ -67,7 +74,6 @@ import {
     shouldRenewIterationLimit,
     SLIM_SUB_AGENT_THINKING_CHAR_LIMIT,
 } from './runnerPolicy';
-import { getWorkflow } from './workflowRegistry';
 import { TOOL_REGISTRY, WRITE_TOOLS, READ_ONLY_TOOLS } from './tools/registry';
 import { hasAddedErrors, type DiagnosticDelta } from './runner/diagnosticSnapshot';
 import { globalPartitionedWriteQueue } from './runner/writeCoordinator';
@@ -701,10 +707,13 @@ export interface AgentRunnerOptions {
 */
     resumeFromState?: boolean;
     /**
-     * If set, the agent run is executing within a specific workflow.
-     * The runner will apply the workflow's tool policy and prompt supplement.
+     * Skill the Host already injected into this turn's user message via
+     * `/skill <name>`. The runner only uses it to arm the same `allowed-tools`
+     * policy `run_skill` installs, keyed by this run's id. It is never persisted
+     * in `AgentResumeState`, so a resumed turn cannot inherit a dead run's
+     * policy and must be re-issued by the user.
      */
-    workflowId?: string;
+    preloadedSkillName?: string;
 }
 
 function filterWebToolsForConfiguredAccess(tools: ToolDefinition[]): ToolDefinition[] {
@@ -728,6 +737,9 @@ export class AgentRunner {
     private readonly runInitialFileContentsByRunId = new Map<string, Map<string, string | null | undefined>>();
     /** Runs whose normal-looking return is actually a resumable budget/loop pause. */
     private readonly retainedResumeRuns = new Set<string>();
+    /** Run ids already distilled into the workspace experience store (bounded LRU). */
+    private readonly experienceDistilledRunIds = new Set<string>();
+    private static readonly EXPERIENCE_DISTILLED_RUN_IDS_MAX = 256;
     constructor(
         private aiService: AIService,
         public readonly toolExecutor: AgentToolExecutor,
@@ -1122,7 +1134,6 @@ export class AgentRunner {
             agentId: options?.agentId,
             providerId: options?.providerId,
             model: options?.model,
-            workflowId: options?.workflowId,
             threadId,
             turnId,
         });
@@ -1291,6 +1302,28 @@ export class AgentRunner {
         if (mode === 'script' || mode === 'orchestrator') {
             this.toolExecutor.clearOrchestratorValidation(runId);
         }
+        // The `/skill` slash path embeds the SKILL.md body in the user message
+        // before the run starts; arm its `allowed-tools` policy here, the first
+        // point where the run id is known and still before any tool can execute.
+        // A failure is reported rather than swallowed: the turn would otherwise
+        // run unconstrained while the skill's frontmatter promised otherwise.
+        if (options?.preloadedSkillName) {
+            const preload = this.toolExecutor.preloadSkillPolicy(
+                runId,
+                options.preloadedSkillName,
+                schedulingState.domainProfile,
+            );
+            // A skill that declares no allowed-tools narrows nothing, which is the
+            // normal case and must stay silent. Every other reason means the turn
+            // would run under a policy the user was not told about.
+            if (!preload.applied && preload.reason !== 'no-allowed-tools') {
+                ErrorReporter.warn(
+                    SOURCE.AGENT_RUNNER,
+                    `Skill policy not armed for preloaded skill '${options.preloadedSkillName}' `
+                    + `(reason: ${preload.reason ?? 'unknown'}${preload.detail ? `, ${preload.detail}` : ''}).`,
+                );
+            }
+        }
         options = {
             ...options,
             topicId,
@@ -1428,7 +1461,6 @@ export class AgentRunner {
             ? this.promptBuilder.getLastFrozenPromptLookup()?.missReason
             : undefined;
 
-        const activeWorkflowForPrompt = options?.workflowId ? getWorkflow(options.workflowId) : undefined;
         const workspaceRoot = getProjectWorkspaceRoot();
         const memoryPathScope = [...new Set([
             context.activeFile,
@@ -1451,13 +1483,6 @@ export class AgentRunner {
             domain,
             taskText: userMessage,
             pathScope: memoryPathScope,
-            workflow: activeWorkflowForPrompt
-                ? {
-                    id: activeWorkflowForPrompt.id,
-                    title: activeWorkflowForPrompt.title,
-                    promptSupplement: activeWorkflowForPrompt.promptSupplement,
-                }
-                : undefined,
         });
         const initialFocusReminder = buildToolFocusReminder(mode, initialToolFocus, domain);
         const dynamicBlock: ChatMessage[] = [
@@ -1717,7 +1742,18 @@ export class AgentRunner {
                 updateRunStatus('paused');
             } else {
                 updateRunStatus(validationFailed ? 'failed' : 'completed');
-                if (!validationFailed) this.autoCompleteTodos(options);
+                if (!validationFailed) {
+                    this.autoCompleteTodos(options);
+                    this.distillExperienceFromCompletedRun({
+                        runId,
+                        userMessage: options?.originalUserMessage ?? userMessage,
+                        finalMessage,
+                        runMetrics,
+                        runRecord,
+                        options,
+                        emitStep,
+                    });
+                }
             }
             await clearResumeStateIfComplete();
             const validationErrors = validationPending || validationFailed ? [{
@@ -1799,6 +1835,81 @@ export class AgentRunner {
 
 
 
+
+    /**
+     * Run-end experience distillation (经验沉淀). Strictly best-effort and
+     * fire-and-forget: it never blocks the completed run, and any failure is
+     * reported to ErrorReporter only — the run state machine, the returned
+     * result, and the ledger are never affected.
+     */
+    private distillExperienceFromCompletedRun(args: {
+        runId: string;
+        userMessage: string;
+        finalMessage: string;
+        runMetrics: AgentRunMetrics;
+        runRecord: import('./types').AgentRunRecord;
+        options?: AgentRunnerOptions;
+        emitStep: (step: AgentStep) => void;
+    }): void {
+        try {
+            if (!shouldDistillExperience({
+                status: 'completed',
+                toolCallCount: args.runMetrics.toolCallCount,
+                toolCallsByName: args.runMetrics.toolCallsByName,
+                writtenFiles: args.runRecord.writtenFiles,
+                persistence: getHistoryPolicy().persistence,
+                isSubAgentRun: !!args.options?.parentRunId || args.options?.useSlimPrompt === true,
+                alreadyDistilled: this.experienceDistilledRunIds.has(args.runId),
+                enabled: isExperienceEnabled(),
+            })) return;
+            this.rememberExperienceDistilledRun(args.runId);
+            const config = this.aiService.getConfig();
+            const providerId = args.options?.providerId ?? config.provider;
+            const model = args.options?.model ?? config.model;
+            // Same paid request channel as compaction (aiService.chatCompletion),
+            // narrowed to the text the distiller needs.
+            const requester = experienceRequesterFromChatCompletion(messages =>
+                this.aiService.chatCompletion(messages, {
+                    temperature: 0.1,
+                    maxTokens: 1024,
+                    providerId,
+                    model,
+                }));
+            const workspaceRoot = getProjectWorkspaceRoot(this.toolExecutor.workspaceRoot);
+            void distillRunExperience(workspaceRoot, {
+                goal: args.userMessage,
+                finalAnswer: args.finalMessage,
+                toolCallsByName: args.runMetrics.toolCallsByName,
+                failedToolCount: args.runRecord.metrics?.failedToolCount,
+                writtenFiles: args.runRecord.writtenFiles,
+                sourceRunId: args.runId,
+            }, requester).then(result => {
+                if (result.stored <= 0) return;
+                args.emitStep({
+                    type: 'thinking',
+                    content: aiText(
+                        `Distilled ${result.stored} workspace experience(s): ${result.titles.join(', ')}`,
+                        `已沉淀 ${result.stored} 条经验：${result.titles.join('、')}`,
+                    ),
+                    timestamp: Date.now(),
+                });
+            }).catch(error => {
+                ErrorReporter.debug(SOURCE.AGENT_RUNNER, 'Experience distillation failed', error);
+            });
+        } catch (error) {
+            ErrorReporter.debug(SOURCE.AGENT_RUNNER, 'Failed to schedule experience distillation', error);
+        }
+    }
+
+    private rememberExperienceDistilledRun(runId: string): void {
+        this.experienceDistilledRunIds.delete(runId);
+        this.experienceDistilledRunIds.add(runId);
+        while (this.experienceDistilledRunIds.size > AgentRunner.EXPERIENCE_DISTILLED_RUN_IDS_MAX) {
+            const oldest = this.experienceDistilledRunIds.keys().next().value;
+            if (oldest === undefined) break;
+            this.experienceDistilledRunIds.delete(oldest);
+        }
+    }
 
     /**
      * Auto-mark remaining in-progress todos as done when the run completes successfully.
@@ -2302,21 +2413,6 @@ export class AgentRunner {
             } catch { /* best effort */ }
         }
 
-        // Apply workflow tool policy if running within a workflow
-        const activeWorkflow = options?.workflowId ? getWorkflow(options.workflowId) : undefined;
-        if (activeWorkflow) {
-            const policy = activeWorkflow.toolPolicy;
-            const workflowRuntimeSupportTools = new Set<string>(['ask_user_question', 'run_skill']);
-            if (policy.strategy === 'allowlist') {
-                const allowed = new Set<string>(policy.tools);
-                availableTools = availableTools.filter(t => allowed.has(t.function.name) || workflowRuntimeSupportTools.has(t.function.name));
-            } else {
-                // blocklist
-                const blocked = new Set<string>(policy.tools);
-                availableTools = availableTools.filter(t => !blocked.has(t.function.name) || workflowRuntimeSupportTools.has(t.function.name));
-            }
-            ErrorReporter.debug('AgentRunner', `Workflow "${activeWorkflow.id}" tool policy applied: ${availableTools.length} tools available`);
-        }
         availableTools = sortToolDefinitionsForStableRequest(availableTools);
         const eligibleToolPool = availableTools;
         const disclosureContext: ToolDisclosureContext = {
@@ -2806,7 +2902,6 @@ export class AgentRunner {
                         maxTokens: requestMaxTokens,
                         disableThinking: requestDisableThinking,
                         useSlimPrompt: options?.useSlimPrompt === true,
-                        workflowId: options?.workflowId,
                         replayOf: options?.replayOf,
                     },
                 },
@@ -4364,7 +4459,6 @@ export class AgentRunner {
                 providerId: finalProviderId,
                 model: finalModel,
                 options: {
-                    workflowId: options?.workflowId,
                     replayOf: options?.replayOf,
                 },
             },

@@ -178,7 +178,7 @@ function activeProjectKnowledgeRefresh(workspaceRoot: string): PendingRootRefres
         : undefined;
 }
 
-function findKnowledgeOwnerRoot(sourceWorkspaceRoot: string): string | undefined {
+export function findKnowledgeOwnerRoot(sourceWorkspaceRoot: string): string | undefined {
     const sourceKey = workspaceRootKey(sourceWorkspaceRoot);
     for (const folder of vs.workspace.workspaceFolders ?? []) {
         const candidateRoot = folder.uri.fsPath;

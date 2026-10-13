@@ -128,7 +128,7 @@ describe('agent routing', () => {
         expect(explicitMulti.schedulingState.dispatch).to.equal('parallel');
     });
 
-    it('accepts explicit workflow profiles without storing a second state', () => {
+    it('registers the hybrid profile without storing a second state', () => {
         expect(agentProfileCatalog.get('hybrid-agent')?.domain).to.equal('hybrid');
     });
 });

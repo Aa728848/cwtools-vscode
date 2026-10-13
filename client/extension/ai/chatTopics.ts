@@ -51,11 +51,10 @@ function readStoredTopic(value: unknown): ChatTopic | undefined {
         && (message.role === 'user' || message.role === 'assistant')
         && typeof message.content === 'string'
         && typeof message.timestamp === 'number')) return undefined;
-    const workflowId = typeof value.workflowId === 'string' ? value.workflowId : undefined;
-    const workflowReturnSchedulingState = value.workflowReturnSchedulingState === undefined
-        ? undefined
-        : readSchedulingState(value.workflowReturnSchedulingState);
-    if (workflowId && !workflowReturnSchedulingState) return undefined;
+    // Topics written before the AI Workflow subsystem was removed may still
+    // carry `workflowId` / `workflowReturnSchedulingState`. They are dropped
+    // here rather than rejected: a legacy field must not make a whole topic
+    // unreadable, and the removed concept has nothing left to restore.
     return {
         id: value.id,
         title: value.title,
@@ -73,8 +72,6 @@ function readStoredTopic(value: unknown): ChatTopic | undefined {
         approvedPlanArtifact: typeof value.approvedPlanArtifact === 'string' && value.approvedPlanArtifact
             ? value.approvedPlanArtifact
             : undefined,
-        workflowId,
-        workflowReturnSchedulingState,
     };
 }
 
@@ -242,8 +239,6 @@ export class ChatTopicManager {
             modeOverride: readModeOverride(source.modeOverride),
             workspaceId: source.workspaceId,
             workspaceLabel: source.workspaceLabel,
-            workflowId: source.workflowId,
-            workflowReturnSchedulingState: readSchedulingState(source.workflowReturnSchedulingState),
         };
 
         this.topics.unshift(forked);
@@ -581,8 +576,6 @@ export class ChatTopicManager {
                 messages: data.messages as ChatHistoryMessage[],
                 archived: false,
                 schedulingState,
-                workflowId: typeof data.workflowId === 'string' ? data.workflowId : undefined,
-                workflowReturnSchedulingState: readSchedulingState(data.workflowReturnSchedulingState),
             };
 
             // Validate messages

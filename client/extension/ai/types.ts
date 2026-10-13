@@ -36,10 +36,6 @@ import type {
     AgentDispatchMode,
     AgentSchedulingState,
     ManagerSchedulingStateView,
-    WorkflowPhaseView,
-    WorkflowVerificationView,
-    WorkflowView,
-    WorkflowUiLabels,
 } from '../../shared/agentSchedulingProtocol';
 export type {
     AgentRuntimeDomain,
@@ -48,10 +44,6 @@ export type {
     AgentDispatchMode,
     AgentSchedulingState,
     ManagerSchedulingStateView,
-    WorkflowPhaseView,
-    WorkflowVerificationView,
-    WorkflowView,
-    WorkflowUiLabels,
 };
 export type AgentDomain = import('../../shared/agentSchedulingProtocol').AgentRuntimeDomain;
 export type AgentIntent = 'auto' | 'execute' | 'plan' | 'explore' | 'review';
@@ -242,6 +234,12 @@ export interface AIProviderConfig {
     supportsVision: boolean;
     /** URL to register an API key for this provider (displayed in Settings UI) */
     registerUrl?: string;
+    /**
+     * Wire protocol declared by a user-level provider file
+     * (~/.cwtools/providers.json). When present it wins over the provider-id
+     * switch in getProviderApiFormat; built-in providers never set it.
+     */
+    apiFormatHint?: CustomApiFormat;
     /** Transport used for primary chat turns. */
     runtimeKind?: 'http';
     /** Credential mechanism used by this provider. */
@@ -901,11 +899,6 @@ export interface ProjectProfile {
         byTypeCounts?: Record<string, number>;
     };
     routing: {
-        recommendedWorkflowByIntent: Array<{
-            intent: string;
-            workflowId: string;
-            reason: string;
-        }>;
         preferredReadTools: string[];
         avoidPatterns: string[];
     };
@@ -2314,6 +2307,26 @@ export interface AgentResumeState {
     };
 }
 
+/**
+ * Outcome of arming a Host-preloaded skill's `allowed-tools` policy for one run.
+ * Produced by `AgentToolExecutor.preloadSkillPolicy` so the runner can report a
+ * failure instead of silently starting an unconstrained turn.
+ */
+export interface SkillPolicyPreloadResult {
+    /** True when the run is now constrained by the skill's `allowed-tools`. */
+    applied: boolean;
+    /** Canonical skill name that resolved, when lookup succeeded. */
+    skillName?: string;
+    /** Skills constraining this run after the merge (intersection semantics). */
+    activeSkills?: string[];
+    /** Effective tool allow-list for this run, sorted. */
+    allowedTools?: string[];
+    /** Machine-readable reason the policy was not armed. */
+    reason?: 'empty-request' | 'unknown-skill' | 'no-allowed-tools' | 'unknown-tool';
+    /** Diagnostic detail for logs only; never surfaced to the model. */
+    detail?: string;
+}
+
 // ─── Agent Execution ─────────────────────────────────────────────────────────
 
 export interface AgentStep {
@@ -2466,10 +2479,6 @@ export interface ChatTopic {
      * click and the continuation.
      */
     approvedPlanArtifact?: string;
-    /** Optional active workflow restored with this topic. */
-    workflowId?: string;
-    /** Scheduler state to restore when the active workflow is disabled. */
-    workflowReturnSchedulingState?: AgentSchedulingState;
 }
 
 export interface TopicSummary {
@@ -2545,6 +2554,9 @@ export interface CodeSelectionContext extends BaseContextItem {
 export interface FileContext extends BaseContextItem {
     type: 'file';
     uri: string;
+    /** 1-based inclusive range to reveal when the reference points at lines. */
+    startLine?: number;
+    endLine?: number;
 }
 
 export interface FolderContext extends BaseContextItem {
@@ -2623,6 +2635,7 @@ export type WebViewMessage =
     | { type: 'sendMessageWithReference'; text: string; contexts: ContextItem[]; images?: string[] }
     | { type: 'editAndResendMessage'; messageIndex: number; text: string; contexts?: ContextItem[]; images?: string[] }
     | { type: 'openContextReference'; context: ContextItem }
+    | { type: 'openFileAtLine'; filePath: string; startLine?: number; endLine?: number }
     | { type: 'insertCode'; code: string }
     | { type: 'copyCode'; code: string }
     | { type: 'regenerate' }
@@ -2639,7 +2652,6 @@ export type WebViewMessage =
     | { type: 'configureProvider' }
     | { type: 'cancelGeneration' }
     | { type: 'switchSchedulingDomain'; domain: AgentRuntimeDomain }
-    | { type: 'switchWorkflow'; workflowId?: string | null }
     | { type: 'openAgentManager' }
     | { type: 'openSettings' }
     | { type: 'saveSettings'; settings: PanelSettings }
@@ -2734,8 +2746,6 @@ export type HostMessage =
     | { type: 'loadTopicMessages'; messages: ChatHistoryMessage[]; targetSurface?: 'chat' | 'manager' }
     | { type: 'streamToken'; token: string }
     | { type: 'clearChat'; targetSurface?: 'chat' | 'manager' }
-    | { type: 'workflowList'; workflows: WorkflowView[]; currentWorkflowId?: string | null; labels?: WorkflowUiLabels }
-    | { type: 'workflowChanged'; workflowId?: string | null; workflow?: WorkflowView; labels?: WorkflowUiLabels }
     | { type: 'slashCommandList'; commands: SlashCommandDescriptor[] }
     | { type: 'slashCommandResult'; command: string; status: 'success' | 'error' | 'queued' | 'needsInput'; message: string; uiAction?: 'openModelMenu' | 'openReasoningMenu' | 'openPermissionsMenu' }
     | { type: 'todoUpdate'; todos: TodoItem[]; agentId?: string; threadId?: string; runId?: string }
@@ -2807,7 +2817,6 @@ export type HostMessage =
         messages: ChatHistoryMessage[];
         messageCount?: number;
         schedulingState: AgentSchedulingState;
-        workflowId?: string | null;
         isGenerating: boolean;
         liveStepCount: number;
         todos?: TodoItem[];
@@ -2890,8 +2899,11 @@ export interface PanelSettings {
     };
     /** Coordination mode sub-Agent model coverage configuration */
     orchestrator?: {
-        /** Role → { provider, model } mapping ('__inherit__' means inheriting the main settings) */
-        agentModels?: Record<string, { provider: string; model: string }>;
+        /**
+         * Role → { provider, model } mapping ('__inherit__' means inheriting the main settings).
+         * `source` marks entries that came from ~/.cwtools/agent-models.json (read-only provenance badge).
+         */
+        agentModels?: Record<string, { provider: string; model: string; source?: 'settings' | 'home' }>;
     };
 }
 
@@ -2940,7 +2952,6 @@ export interface AgentRunRecord {
     turnId?: string;
     status: AgentRunStatus;
     schedulingState: AgentSchedulingState;
-    workflowId?: string | null;
     providerId?: string;
     model?: string;
     userPromptPreview: string;

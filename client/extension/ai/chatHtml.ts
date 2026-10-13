@@ -160,7 +160,6 @@ ${stylesheetLinks}
     <div id="composerMenu" class="composer-menu" aria-hidden="true">
         <button class="composer-menu-item" data-composer-action="media">${svgIconNoMargin('upload')}<span>${t('Images and files', '图片与文件')}</span></button>
         <button class="composer-menu-item" data-composer-action="mentions">${svgIconNoMargin('tag')}<span>${t('Add context', '添加上下文')}</span></button>
-        <button class="composer-menu-item" data-composer-action="workflows">${svgIconNoMargin('sparkles')}<span>${t('Workflows', '工作流')}</span></button>
         <div class="composer-menu-divider"></div>
         <button class="composer-menu-item" data-composer-action="goal">${svgIconNoMargin('flag')}<span>${t('Set goal', '设置目标')}</span></button>
     </div>
@@ -267,6 +266,7 @@ ${stylesheetLinks}
                     <label class="settings-label">${t('Provider', '提供商')}</label>
                     <select class="settings-select" id="settingsProvider"></select>
                     <div class="settings-hint" id="providerHint" style="margin-top: 4px;"></div>
+                    <div class="settings-hint" id="providerFileWarnings" style="display:none;margin-top:4px;"></div>
                 </div>
                 <div class="settings-group" id="customApiFormatGroup" style="display:none">
                     <label class="settings-label">${t('Custom API format', '自定义 API 格式')}</label>

@@ -50,7 +50,13 @@ import { parseWebviewMessage } from './chat/webviewProtocol';
 import { getChatPanelHtml } from './chatHtml';
 import { getAgentManagerHtml } from './agentManagerHtml';
 import { ChatTopicManager } from './chatTopics';
-import { generateInitFile } from './chatInit';
+import {
+    generateInitFile,
+    isProjectKnowledgeDatabaseReady,
+    type InitGenerationOptions,
+    type InitGenerationResult,
+} from './chatInit';
+import { findKnowledgeOwnerRoot } from './projectKnowledge';
 import { ChatSettingsManager } from './chatSettings';
 import { ErrorReporter } from './errorReporter';
 import { UI, SOURCE, aiText } from './messages';
@@ -71,9 +77,6 @@ import { isSecuritySandboxDisabled } from './workspaceSandbox';
 import { AutoReviewer } from './runner/autoReviewer';
 import { AgentUiBroadcaster } from './agentUiBroadcaster';
 import { ArtifactStore } from './artifactStore';
-import { getAllWorkflows, getWorkflow } from './workflowRegistry';
-import { toWorkflowViewModel } from './workflowViewModel';
-import { getWorkflowUiLabels } from './workflowI18n';
 import { resolveAgentProfile } from './agentProfile';
 import { AUTHORITY_RANK, executionModeForSchedulingState, normalizeSchedulingState, schedulingStateFromAdmission } from './runner/scheduling';
 import { computeLineDiff } from './diffEngine';
@@ -94,7 +97,10 @@ import {
     resolveSlashCommand,
     suggestSlashCommands,
     type ResolvedSlashCommand,
+    type SkillSlashCatalogEntry,
 } from './slashCommands';
+import { buildSkillSlashTurnBody, listSkills, loadSkill } from './skills';
+import { getCwtoolsHomeDir } from './homeConfig';
 import {
     getPrivateTopicStorageDir,
     getProjectWorkspaceRoot,
@@ -193,6 +199,11 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
     private readonly lastRunSnapshotSentAt = new Map<string, number>();
     private readonly queuedSlashCommands: string[] = [];
     private flushingSlashCommands = false;
+    /** Workspace roots already auto-initialized this session (fires once per root). */
+    private readonly autoInitAttemptedRoots = new Set<string>();
+    private autoInitInFlight = false;
+    /** Latest token-usage state actually displayed, replayed to surfaces (re)created mid-session. */
+    private lastTokenUsageMessage?: Extract<HostMessage, { type: 'tokenUsage' }>;
     public topicManager!: ChatTopicManager;
     public settingsManager!: ChatSettingsManager;
     public contextReferences: ContextReferenceManager;
@@ -208,7 +219,6 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
      */
     public beginApprovedPlanExecution(): void {
         const domain = this.session.schedulingState.domainProfile;
-        this.switchWorkflow(null);
         this.session.schedulingState = resolveAgentProfile('', { domain, intent: 'execute', strategy: 'multi' }).schedulingState;
         // An approval outranks a /plan pin for the continuation turn, otherwise
         // the pinned Plan mode would re-narrow the very execution just approved.
@@ -233,14 +243,6 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         delete topic.approvedPlanArtifact;
         this.topicManager.saveTopics();
         return true;
-    }
-
-    private get currentWorkflowId(): string | null {
-        return this.session.currentWorkflowId;
-    }
-
-    private set currentWorkflowId(workflowId: string | null) {
-        this.session.currentWorkflowId = workflowId;
     }
 
     private get _liveSteps(): AgentStep[] {
@@ -275,9 +277,11 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
     ) {
         this.agentRuntime = new AgentRuntime(agentRunner);
         this.topicManager = new ChatTopicManager(storageUri, (msg) => this.postMessage(msg), historyPersistence);
-        this.settingsManager = new ChatSettingsManager(aiService, (msg) => this.postMessage(msg), storageUri?.fsPath);
+        this.settingsManager = new ChatSettingsManager(aiService, (msg) => this.postMessage(msg), storageUri?.fsPath, () => this.sendSlashCommandCatalog());
         this.contextReferences = new ContextReferenceManager(() => this.agentRunner.toolExecutor.blackboard);
-        this.agentRunner.toolExecutor.onWorkflowSaved = () => this.sendWorkflowState();
+        // Skills appearing or disappearing change the `/skill:<name>` catalog, so
+        // every write path resends it instead of waiting for a panel reopen.
+        this.agentRunner.toolExecutor.onSkillSaved = () => this.sendSlashCommandCatalog();
         runLedger.onChange((runId) => this.queueRunSnapshot(runId));
         agentProfileCatalog.startWatching();
     }
@@ -373,7 +377,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         }
         // 2. Restore the canonical scheduler state.
         send({ type: 'setSchedulingState', schedulingState: this.session.schedulingState });
-        send({ type: 'slashCommandList', commands: getSlashCommandDescriptors(vs.env.language) });
+        this.sendSlashCommandCatalog(send);
         // 3. If a generation was running when the panel was hidden, replay steps
         //    so the user can see what the AI has done so far and cancel if needed
         if (replayLiveSteps && this._isGenerating && this._liveSteps.length > 0) {
@@ -382,7 +386,6 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         if (this.artifactStore.size > 0) {
             send({ type: 'artifactList', artifacts: this.artifactStore.list() });
         }
-        this.sendWorkflowState(send);
         // 4. Restore model lists and settings bindings
         void this.settingsManager.buildAndSendSettingsData(false, targetSurface);
         if (targetSurface === 'manager' && this.topicManager.currentTopic?.id) {
@@ -394,6 +397,20 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             }).catch(() => {});
         }
         this.restorePendingInteractionCards(send);
+        // 5. Catch up one-shot state messages that are never re-sent on their
+        //    own, so a surface (re)created mid-session matches what the other
+        //    surface currently shows. The routing indicator exists only once a
+        //    conversation has messages; an empty panel keeps its empty state.
+        if (this.topicManager.currentTopic && this.topicManager.currentTopic.messages.length > 0) {
+            send({ type: 'agentRoutingStatus', phase: 'resolved', schedulingState: this.session.schedulingState });
+        }
+        if (this.lastTokenUsageMessage) {
+            send(this.lastTokenUsageMessage);
+        }
+        const restoredTodos = this.agentRunner.toolExecutor.getTodos();
+        if (restoredTodos.length > 0) {
+            send({ type: 'todoUpdate', todos: restoredTodos });
+        }
     }
 
     private restorePendingInteractionCards(send: (msg: HostMessage) => void): void {
@@ -534,11 +551,10 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             }
         };
         send({ type: 'setSchedulingState', schedulingState: this.session.schedulingState });
-        send({ type: 'slashCommandList', commands: getSlashCommandDescriptors(vs.env.language) });
+        this.sendSlashCommandCatalog(send);
         if (this.artifactStore.size > 0) {
             send({ type: 'artifactList', artifacts: this.artifactStore.list() });
         }
-        this.sendWorkflowState(send);
         void this.settingsManager.buildAndSendSettingsData(false, targetSurface);
         if (targetSurface === 'manager') {
             void this.sendManagerSnapshot();
@@ -887,7 +903,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                 strategy: 'auto',
             });
             if (showRoutingStatus) {
-                this.postMessageToSurface('chat', { type: 'agentRoutingStatus', phase: 'resolved', schedulingState: pinned.schedulingState });
+                this.postMessage({ type: 'agentRoutingStatus', phase: 'resolved', schedulingState: pinned.schedulingState });
             }
             return pinned;
         }
@@ -904,7 +920,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         if (extra.planContinuationPending === true) {
             const continued = resolveAgentProfile(text, { ...selection, intent: 'plan' });
             if (showRoutingStatus) {
-                this.postMessageToSurface('chat', { type: 'agentRoutingStatus', phase: 'resolved', schedulingState: continued.schedulingState });
+                this.postMessage({ type: 'agentRoutingStatus', phase: 'resolved', schedulingState: continued.schedulingState });
             }
             return continued;
         }
@@ -916,7 +932,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         // user-pinned mode (checked above) is the other explicit source.
         const resolved = resolveAgentProfile(text, selection);
         if (showRoutingStatus) {
-            this.postMessageToSurface('chat', { type: 'agentRoutingStatus', phase: 'resolved', schedulingState: resolved.schedulingState });
+            this.postMessage({ type: 'agentRoutingStatus', phase: 'resolved', schedulingState: resolved.schedulingState });
         }
         return resolved;
     }
@@ -941,7 +957,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         return !topicDir || !fs.existsSync(path.join(topicDir, 'Implementation_Plan.md'));
     }
 
-    public async handleUserMessage(text: string, images?: string[], _attachedFiles?: string[], _skipAutoModeSwitch = false, isBackground = false, resumeFromState = false, displayText?: string, contexts?: import('./types').ContextItem[]): Promise<void> {
+    public async handleUserMessage(text: string, images?: string[], _attachedFiles?: string[], _skipAutoModeSwitch = false, isBackground = false, resumeFromState = false, displayText?: string, contexts?: import('./types').ContextItem[], preloadedSkillName?: string): Promise<void> {
         if (!text.trim() && (!images || images.length === 0)) return;
 
         if (text.trim().startsWith('/')) {
@@ -985,9 +1001,13 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             return;
         }
 
+        // Fire-and-forget: when no project knowledge database exists, build it
+        // in the background; the current turn proceeds without waiting.
+        this.ensureProjectKnowledgeInitialized();
+
         let schedulingState = this.session.schedulingState;
         let resolvedProfile: ResolvedSchedulingDecision | undefined;
-        if (!_skipAutoModeSwitch && text.trim() && !this.currentWorkflowId) {
+        if (!_skipAutoModeSwitch && text.trim()) {
             resolvedProfile = await this.resolveTurnAgentProfile(text, !isBackground, {
                 planContinuationPending: this.isPendingPlanContinuation(text),
             });
@@ -1176,7 +1196,9 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                         if (this.topicManager.currentTopic?.id === runTopicId) this.sendTodoUpdate(todos, scope);
                     },
                     resumeFromState,
-                    workflowId: this.currentWorkflowId ?? undefined,
+                    // Set by `/skill`; arms the skill's allowed-tools policy for
+                    // this run. Undefined on every other path.
+                    preloadedSkillName,
                 },
                 images,  // pass images to build ContentPart[] user turn
             }).then(turn => {
@@ -1364,11 +1386,13 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                     cacheCapable: supportsOpenAiStylePrefixCache(config.provider, config.customApiFormat, config.model, this.aiService.getEndpointForProvider(config.provider)),
                 });
                 if (isCurrentView) {
-                    this.postMessage({
+                    const usageMessage: Extract<HostMessage, { type: 'tokenUsage' }> = {
                         type: 'tokenUsage',
                         usage: result.tokenUsage,
                         model: config.model,
-                    });
+                    };
+                    this.lastTokenUsageMessage = usageMessage;
+                    this.postMessage(usageMessage);
                 }
             }
 
@@ -2463,14 +2487,14 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         this.topicManager.startNewTopic();
         const initialScheduling = resolveAgentProfile('', { domain: 'paradox', intent: 'execute', strategy: 'single' }).schedulingState;
         this.session.schedulingState = initialScheduling;
+        // Reset the walkthrough/domain "back" anchor too, so approving a
+        // walkthrough in this topic cannot restore a previous topic's state.
         this.session.previousSchedulingState = initialScheduling;
-        this.currentWorkflowId = null;
         this.conversationMessages = [];
         this._messageFileSnapshots.clear();
         this._currentMessageSnapshots = null;
         this.clearArtifacts();
         this.postMessage({ type: 'setSchedulingState', schedulingState: this.session.schedulingState });
-        this.sendWorkflowState();
     }
 
     public async loadTopic(topicId: string): Promise<void> {
@@ -2481,19 +2505,13 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             topicId,
             topic ? compactMessagesForWebview(topic.messages) as any : undefined
         );
-        const restoredWorkflow = topic?.workflowId ? getWorkflow(topic.workflowId) : undefined;
-        this.currentWorkflowId = restoredWorkflow?.id ?? null;
         this.session.schedulingState = topic?.schedulingState
             ? normalizeSchedulingState(topic.schedulingState)
             : resolveAgentProfile('', { domain: 'paradox', intent: 'execute', strategy: 'single' }).schedulingState;
         // Restore the user's pinned mode with the topic. Without this a /plan pin
         // would silently reset to automatic whenever the user switched topics.
         this.session.modeOverride = topic?.modeOverride ?? 'auto';
-        this.session.previousSchedulingState = topic?.workflowReturnSchedulingState
-            ? normalizeSchedulingState(topic.workflowReturnSchedulingState)
-            : this.session.schedulingState;
         this.postMessage({ type: 'setSchedulingState', schedulingState: this.session.schedulingState });
-        this.sendWorkflowState();
         void this.agentRuntime.resumeThread(topicId, topicId).catch(() => undefined);
 
         const isCurrentlyRunning = this._isGenerating && (this.activeRunTopicId === topicId || (this.currentRunId && !!activeTurnRegistry.get(this.currentRunId)));
@@ -2804,8 +2822,45 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         this.pendingDiffTempFiles.clear();
     }
 
-    private emitSlashCommandResult(
-        command: string,
+    /**
+     * Command catalog delivered to the Webview: the static slash table plus one
+     * `/skill:<name>` row per installed skill. Skill lookup reuses the executor's
+     * roots so the slash path and `run_skill` always see the same skills, and a
+     * lookup failure degrades to the static table instead of breaking the popup.
+     */
+    private slashCommandCatalog(): import('./slashCommands').SlashCommandDescriptor[] {
+        return getSlashCommandDescriptors(vs.env.language, this.skillSlashCatalogEntries());
+    }
+
+    /**
+     * Deliver the command catalog to the Webview. Used by the two bootstrap sends
+     * (view-state restore, ready sync) and by every path that changes the installed
+     * skill set, so an open popup recomputes its completion list from the fresh
+     * catalog instead of the one captured when the popup opened.
+     */
+    private sendSlashCommandCatalog(send: (msg: HostMessage) => void = (msg) => this.postMessage(msg)): void {
+        send({ type: 'slashCommandList', commands: this.slashCommandCatalog() });
+    }
+
+    private skillSlashCatalogEntries(): SkillSlashCatalogEntry[] {
+        const executor = this.agentRunner.toolExecutor;
+        try {
+            return listSkills({
+                workspaceRoot: executor.workspaceRoot,
+                globalStoragePath: executor.globalStoragePath,
+                extensionPath: executor.extensionPath,
+                homeDir: getCwtoolsHomeDir(),
+            }, this.session.schedulingState.domainProfile).map(skill => ({
+                name: skill.name,
+                description: skill.description,
+            }));
+        } catch (error) {
+            ErrorReporter.warn(SOURCE.CHAT_PANEL, 'Failed to list Agent skills for the /skill command catalog.', error);
+            return [];
+        }
+    }
+
+    private emitSlashCommandResult(        command: string,
         status: 'success' | 'error' | 'queued' | 'needsInput',
         message: string,
         uiAction?: 'openModelMenu' | 'openReasoningMenu' | 'openPermissionsMenu',
@@ -2841,7 +2896,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         } else {
             this.session.schedulingState = { ...resolved.schedulingState, authorization: current.authorization };
         }
-        this.postMessageToSurface('chat', {
+        this.postMessage({
             type: 'agentRoutingStatus',
             phase: 'resolved',
             schedulingState: this.session.schedulingState,
@@ -2873,7 +2928,9 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             return;
         }
 
-        if (resolved.definition.argumentMode === 'required' && !resolved.argument) {
+        // `/skill` reports the requested name in `skillName` and only the skill
+        // arguments in `argument`, so either field satisfies its required input.
+        if (resolved.definition.argumentMode === 'required' && !resolved.argument && !resolved.skillName) {
             const hint = getSlashCommandDescriptors(vs.env.language)
                 .find(item => item.command === resolved.definition.command)?.argumentHint;
             this.emitSlashCommandResult(
@@ -2974,7 +3031,9 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                         topicId: this.topicManager.currentTopic?.id,
                         cacheCapable: supportsOpenAiStylePrefixCache(config.provider, config.customApiFormat, config.model, this.aiService.getEndpointForProvider(config.provider)),
                     });
-                    this.postMessage({ type: 'tokenUsage', usage: compactionUsage, model: config.model });
+                    const usageMessage: Extract<HostMessage, { type: 'tokenUsage' }> = { type: 'tokenUsage', usage: compactionUsage, model: config.model };
+                    this.lastTokenUsageMessage = usageMessage;
+                    this.postMessage(usageMessage);
                 }
                 if (result.compacted && this.topicManager.currentTopic?.id) {
                     const topicId = this.topicManager.currentTopic.id;
@@ -3080,28 +3139,9 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                 }
                 return;
             }
-            case 'workflowOff':
-                this.switchWorkflow(null);
-                this.emitSlashCommandResult(raw, 'success', aiText('AI workflow turned off.', '已关闭 AI 工作流。'));
+            case 'skill':
+                await this.runSkillSlashCommand(raw, resolved.skillName ?? '', resolved.argument);
                 return;
-            case 'workflowList':
-                this.sendWorkflowState();
-                this.emitSlashCommandResult(raw, 'success', aiText('Workflow list refreshed.', '工作流列表已刷新。'));
-                return;
-            case 'workflowSave':
-                await this.saveWorkflowFromSlash(argument ? `/workflow:save:${argument}` : '/workflow:save');
-                this.emitSlashCommandResult(raw, 'success', aiText('Workflow save request completed.', '工作流保存请求已完成。'));
-                return;
-            case 'workflowSelect': {
-                const workflow = getWorkflow(argument);
-                if (!workflow) {
-                    this.emitSlashCommandResult(raw, 'error', aiText(`Unknown AI workflow: ${argument}`, `未知 AI 工作流：${argument}`));
-                    return;
-                }
-                this.switchWorkflow(workflow.id);
-                this.emitSlashCommandResult(raw, 'success', aiText(`Workflow selected: ${workflow.title}`, `已选择工作流：${workflow.title}`));
-                return;
-            }
             case 'fork': {
                 const topic = this.topicManager.currentTopic;
                 if (!topic || topic.messages.length === 0) {
@@ -3157,8 +3197,8 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                     raw,
                     'success',
                     aiText(
-                        `Model ${config.model || '(not set)'} · reasoning ${config.reasoningEffort} · scheduling ${scheduling.domainProfile}/${scheduling.phase}/${scheduling.dispatch}/${scheduling.authorization} · workflow ${this.currentWorkflowId || 'off'} · permissions ${permission}`,
-                        `模型 ${config.model || '（未设置）'} · 推理 ${config.reasoningEffort} · 调度 ${scheduling.domainProfile}/${scheduling.phase}/${scheduling.dispatch}/${scheduling.authorization} · 工作流 ${this.currentWorkflowId || '关闭'} · 权限 ${permission}`,
+                        `Model ${config.model || '(not set)'} · reasoning ${config.reasoningEffort} · scheduling ${scheduling.domainProfile}/${scheduling.phase}/${scheduling.dispatch}/${scheduling.authorization} · permissions ${permission}`,
+                        `模型 ${config.model || '（未设置）'} · 推理 ${config.reasoningEffort} · 调度 ${scheduling.domainProfile}/${scheduling.phase}/${scheduling.dispatch}/${scheduling.authorization} · 权限 ${permission}`,
                     ),
                 );
                 return;
@@ -3214,40 +3254,135 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
     }
 
     /**
+     * `/skill <name> [args]` — load an installed skill into this turn.
+     *
+     * The SKILL.md body travels in the user message so the turn is an ordinary
+     * one (no special runner mode, no mode/permission change), and the
+     * skill name rides along on the run options so the runner arms the same
+     * `allowed-tools` policy `run_skill` installs.
+     */
+    private async runSkillSlashCommand(raw: string, requestedName: string, skillArguments: string): Promise<void> {
+        const executor = this.agentRunner.toolExecutor;
+        const loaded = loadSkill(requestedName, {
+            workspaceRoot: executor.workspaceRoot,
+            globalStoragePath: executor.globalStoragePath,
+            extensionPath: executor.extensionPath,
+            homeDir: getCwtoolsHomeDir(),
+        }, this.session.schedulingState.domainProfile);
+        if (!loaded.success) {
+            const available = loaded.availableSkills;
+            this.emitSlashCommandResult(
+                raw,
+                'error',
+                available.length > 0
+                    ? aiText(
+                        `Unknown skill: ${requestedName}. Available skills: ${available.join(', ')}.`,
+                        `未知技能：${requestedName}。可用技能：${available.join('、')}。`,
+                    )
+                    : aiText(
+                        `Unknown skill: ${requestedName}. No Agent skills are installed.`,
+                        `未知技能：${requestedName}。当前没有已安装的 Agent 技能。`,
+                    ),
+            );
+            return;
+        }
+
+        const name = loaded.skill.name;
+        const prompt = [
+            buildSkillSlashTurnBody(name, loaded.content, skillArguments),
+            '',
+            aiText(
+                `The user invoked /skill ${name}. Follow the SKILL.md above for the current task.`,
+                `用户调用了 /skill ${name}。请按上面的 SKILL.md 执行当前任务。`,
+            ),
+        ].join('\n');
+        this.emitSlashCommandResult(
+            raw,
+            'success',
+            aiText(
+                `Loaded skill "${name}" into this turn${loaded.truncated ? ' (body truncated)' : ''}.`,
+                `已将技能“${name}”载入本轮对话${loaded.truncated ? '（正文已截断）' : ''}。`,
+            ),
+        );
+        await this.handleUserMessage(prompt, undefined, undefined, true, false, false, raw, undefined, name);
+    }
+
+    /**
      * /init — scans the workspace and generates a CWTOOLS.md project rules file.
      * Mirrors OpenCode's /init command which generates CLAUDE.md.
      * The file is written to the workspace root and loaded into every future session.
      */
-    private async saveWorkflowFromSlash(command: string): Promise<void> {
-        const visibleCommand = command.trim();
-        const normalized = visibleCommand.replace(/^\//, '');
-        const parts = normalized.split(':');
-        const requestedId = parts.length > 2
-            ? parts.slice(2).join(':').trim().replace(/[^a-zA-Z0-9_.-]+/g, '-').replace(/^[.-]+|[.-]+$/g, '').slice(0, 80)
-            : '';
-        const idInstruction = requestedId
-            ? `Use workflow id "${requestedId}" unless it is unsafe; if you need to sanitize it, preserve its meaning.`
-            : 'Choose a short kebab-case id.';
-        const prompt = [
-            `The user invoked ${visibleCommand} to save the reusable process from this conversation as a project workflow.`,
-            idInstruction,
-            'Extract only the repeatable workflow: objective, phases, constraints, useful tools, required context, and verification.',
-            'Then call save_workflow with title, description, domain, intent, strategy, promptSupplement, and any narrow allowedTools/blockedTools that make the workflow safer.',
-            'After saving, briefly tell the user the workflow id and slash command to run it.',
-        ].join('\n');
-        await this.handleUserMessage(prompt, undefined, undefined, true, false, false, visibleCommand);
-    }
-
-    private async generateInitFile(): Promise<Awaited<ReturnType<typeof generateInitFile>>> {
+    private async generateInitFile(options?: InitGenerationOptions): Promise<Awaited<ReturnType<typeof generateInitFile>>> {
         const result = await generateInitFile(
             (msg) => this.postMessage(msg),
             (filePath) => this._recordFileSnapshot(filePath),
             this.agentRunner.toolExecutor.indexService,
+            options,
         );
         if (result.success) {
             this.agentRunner.clearPromptCache();
         }
         return result;
+    }
+
+    /**
+     * Background auto-init: when a task starts without a usable project
+     * knowledge database, run /init once per session without blocking the turn.
+     * A root covered by another folder's knowledge manifest (multi-root
+     * ownership) counts as initialized and never triggers a duplicate run.
+     */
+    private ensureProjectKnowledgeInitialized(): void {
+        const enabled = vs.workspace.getConfiguration('stellarisLanguageServices.ai')
+            .get<boolean>('autoInitProjectKnowledge', true);
+        if (!enabled || this.autoInitInFlight) return;
+        const folders = vs.workspace.workspaceFolders;
+        if (!folders || folders.length === 0) return;
+
+        const missing = new Set<string>();
+        for (const folder of folders) {
+            const ownerRoot = findKnowledgeOwnerRoot(folder.uri.fsPath) ?? folder.uri.fsPath;
+            if (isProjectKnowledgeDatabaseReady(ownerRoot)) continue;
+            if (this.autoInitAttemptedRoots.has(ownerRoot)) continue;
+            missing.add(ownerRoot);
+        }
+        if (missing.size === 0) return;
+        for (const root of missing) this.autoInitAttemptedRoots.add(root);
+
+        this.autoInitInFlight = true;
+        this.postMessage({
+            type: 'agentStep',
+            step: {
+                type: 'thinking',
+                content: aiText(
+                    'No project knowledge database found; auto-initializing in the background (/init)…',
+                    '未检测到项目知识库，正在后台自动初始化（/init）…',
+                ),
+                timestamp: Date.now(),
+            },
+        });
+        void this.generateInitFile({ auto: true })
+            .then(result => this.emitAutoInitResult(result))
+            .catch((error: unknown) => {
+                this.emitAutoInitResult({ success: false, message: error instanceof Error ? error.message : String(error) });
+            })
+            .finally(() => { this.autoInitInFlight = false; });
+    }
+
+    private emitAutoInitResult(result: InitGenerationResult): void {
+        const knowledgeReady = result.success && result.knowledgeReady === true;
+        this.emitSlashCommandResult(
+            '/init (auto)',
+            knowledgeReady ? 'success' : 'error',
+            knowledgeReady
+                ? aiText(
+                    'Project knowledge database was initialized automatically; future tasks will use it for project-aware answers.',
+                    '项目知识库已自动初始化完成，后续任务将基于它理解当前项目。',
+                )
+                : aiText(
+                    `Automatic project initialization did not complete${result.message ? `: ${result.message}` : '.'} You can run /init manually to retry.`,
+                    `项目自动初始化未完成${result.message ? `：${result.message}` : '。'}可手动执行 /init 重试。`,
+                ),
+        );
     }
 
 
@@ -3866,24 +4001,13 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         const topic = this.topicManager.currentTopic;
         if (!topic) return;
         topic.schedulingState = this.session.schedulingState;
-        if (this.currentWorkflowId) topic.workflowId = this.currentWorkflowId;
-        else delete topic.workflowId;
-        if (this.currentWorkflowId) {
-            topic.workflowReturnSchedulingState = this.session.previousSchedulingState;
-        } else {
-            delete topic.workflowReturnSchedulingState;
-        }
         this.topicManager.saveTopics();
     }
 
     public switchSchedulingDomain(domain: AgentSchedulingState['domainProfile']): void {
         if (domain !== 'paradox' && domain !== 'general' && domain !== 'hybrid') return;
-        if (domain === this.session.schedulingState.domainProfile && !this.currentWorkflowId) return;
+        if (domain === this.session.schedulingState.domainProfile) return;
         this.session.previousSchedulingState = this.session.schedulingState;
-        if (this.currentWorkflowId) {
-            this.currentWorkflowId = null;
-            this.sendWorkflowState();
-        }
         const current = this.session.schedulingState;
         const profileName = schedulingStateFromAdmission({
             domainProfile: domain,
@@ -3910,54 +4034,6 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         this.session.schedulingState = this.session.previousSchedulingState;
         this.persistSchedulingStateForCurrentTopic();
         this.postMessage({ type: 'setSchedulingState', schedulingState: this.session.schedulingState });
-    }
-
-    public switchWorkflow(workflowId?: string | null): void {
-        const normalized = (workflowId || '').trim();
-        if (!normalized) {
-            if (!this.session.deactivateWorkflow()) {
-                this.sendWorkflowState();
-                return;
-            }
-            this.persistSchedulingStateForCurrentTopic();
-            this.postMessage({ type: 'setSchedulingState', schedulingState: this.session.schedulingState });
-            this.sendWorkflowState();
-            return;
-        }
-
-        const workflow = getWorkflow(normalized);
-        if (!workflow) {
-            vs.window.showWarningMessage(`Unknown AI workflow: ${normalized}`);
-            this.sendWorkflowState();
-            return;
-        }
-
-        const workflowScheduling = {
-            ...resolveAgentProfile('', workflow.scheduling).schedulingState,
-            routingSource: 'workflow' as const,
-        };
-        this.session.activateWorkflow(workflow.id, workflowScheduling);
-        this.persistSchedulingStateForCurrentTopic();
-        this.postMessage({ type: 'setSchedulingState', schedulingState: this.session.schedulingState });
-        this.sendWorkflowState();
-    }
-
-    private sendWorkflowState(postMessage: (msg: HostMessage) => void = (msg) => this.postMessage(msg)): void {
-        const workflowLocale = vs.env.language;
-        const workflows = getAllWorkflows().map(workflow => toWorkflowViewModel(workflow, workflowLocale));
-        const labels = getWorkflowUiLabels(workflowLocale);
-        postMessage({
-            type: 'workflowList',
-            workflows,
-            currentWorkflowId: this.currentWorkflowId,
-            labels,
-        });
-        postMessage({
-            type: 'workflowChanged',
-            workflowId: this.currentWorkflowId,
-            workflow: this.currentWorkflowId ? workflows.find(w => w.id === this.currentWorkflowId) : undefined,
-            labels,
-        });
     }
 
     public async sendManagerSnapshot(): Promise<void> {
@@ -4000,7 +4076,6 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             messages: [],
             messageCount: (this.topicManager.currentTopic?.messages ?? []).filter(message => !message.isHidden).length,
             schedulingState: this.session.schedulingState,
-            workflowId: this.currentWorkflowId,
             isGenerating: this._isGenerating,
             liveStepCount: this._liveSteps.length,
             todos: this.agentRunner.toolExecutor.getTodos(),

@@ -527,17 +527,6 @@ describe('enforced central tool policy', () => {
             runnerOptions: { schedulingState: PARADOX_PARALLEL, topicId: 'other-topic' },
         } as any) as any;
         expect(otherTopicBlackboard).to.deep.equal({ found: false });
-
-        const workflowCall = await executor.execute('save_workflow', {
-            title: 'bad domain switch',
-            description: 'should not save',
-            domain: 'paradox',
-            intent: 'execute',
-            strategy: 'single',
-            promptSupplement: 'do work',
-        }, context) as any;
-        expect(workflowCall.success).to.equal(false);
-        expect(workflowCall.error).to.include("domain 'paradox'");
     });
 
     it('limits coordinator write_file calls to the current plan artifact', async () => {
@@ -1057,7 +1046,6 @@ describe('agent sprite candidate tool contract', () => {
                 byType: {},
             },
             routing: {
-                recommendedWorkflowByIntent: [],
                 preferredReadTools: ['query_project_profile'],
                 avoidPatterns: [],
             },
@@ -1613,6 +1601,10 @@ describe('agent tool topic artifacts', () => {
         expect(shell.enum).to.deep.equal(['auto', 'sh', 'bash', 'pwsh', 'powershell']);
         expect(shell.description).to.include('sh/bash are valid on macOS/Linux only');
         expect(shell.description).to.include('pwsh/powershell are valid on Windows only');
+        // shell=auto resolution priority is part of the model-visible contract.
+        expect(shell.description).to.include('pwsh (PowerShell 7+) then powershell on Windows');
+        expect(shell.description).to.include('bash then sh on macOS/Linux');
+        expect(tool.function.description).to.include('falls back to Windows PowerShell');
     });
 
     it('rejects explicit run_command shells that do not match the host platform', async () => {

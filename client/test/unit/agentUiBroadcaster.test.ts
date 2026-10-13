@@ -117,4 +117,43 @@ describe('AgentUiBroadcaster', () => {
         expect(receivedChat).to.deep.equal([payload]);
         expect(receivedManager).to.deep.equal([]);
     });
+
+    it('delivers an agentRoutingStatus broadcast to both chat and manager surfaces', () => {
+        // Regression: the turn-routing indicator used to be sent only to the
+        // sidebar, so a detached manager opened mid-session never caught up.
+        const broadcaster = new AgentUiBroadcaster();
+        const receivedChat: HostMessage[] = [];
+        const receivedManager: HostMessage[] = [];
+
+        const chatWebview = {
+            postMessage: (msg: HostMessage) => {
+                receivedChat.push(msg);
+                return Promise.resolve(true);
+            },
+        } as any;
+        const managerWebview = {
+            postMessage: (msg: HostMessage) => {
+                receivedManager.push(msg);
+                return Promise.resolve(true);
+            },
+        } as any;
+
+        broadcaster.register(chatWebview, 'chat');
+        broadcaster.register(managerWebview, 'manager');
+
+        const payload: HostMessage = {
+            type: 'agentRoutingStatus',
+            phase: 'resolved',
+            schedulingState: {
+                profileName: 'paradox-agent',
+                domainProfile: 'paradox', authorization: 'workspace_write', phase: 'execute', dispatch: 'single',
+                overlays: [],
+                routeConfidence: 1, routeEvidence: ['test'], phaseReason: 'test', revision: 0,
+            },
+        };
+        broadcaster.postMessage(payload);
+
+        expect(receivedChat).to.deep.equal([payload]);
+        expect(receivedManager).to.deep.equal([payload]);
+    });
 });

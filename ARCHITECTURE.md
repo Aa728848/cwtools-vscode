@@ -204,11 +204,11 @@ Shader edits are conservative because some Effects are called by the executable 
 
 ### AI subsystem
 
-`client/extension/ai/` runs inside the Extension Host. It owns provider clients, chat state, prompt construction, tool dispatch, permission policy, workflows, memory, and multi-agent coordination.
+`client/extension/ai/` runs inside the Extension Host. It owns provider clients, chat state, prompt construction, tool dispatch, permission policy, Agent skills, memory, and multi-agent coordination.
 
 #### Turn routing
 
-The composer selects a capability domain: automatic, Paradox/CWTools, or general coding. The task mode for a turn resolves deterministically from the request (plus an explicit user pin), and no separate routing model is consulted: the Agent itself decides when a request needs user-owned design decisions resolved, and escalates through the `enter_plan_mode` tool. Once admitted, a run cannot broaden its domain; profiles, workflows, and child agents may only narrow it.
+The composer selects a capability domain: automatic, Paradox/CWTools, or general coding. The task mode for a turn resolves deterministically from the request (plus an explicit user pin), and no separate routing model is consulted: the Agent itself decides when a request needs user-owned design decisions resolved, and escalates through the `enter_plan_mode` tool. Once admitted, a run cannot broaden its domain; profiles and child agents may only narrow it.
 
 Users can pin a mode for the session with `/plan`, `/execute`, `/explore`, `/review`, or `/mode <value>`; a pinned mode bypasses automatic resolution entirely for later turns.
 
@@ -498,11 +498,11 @@ CWT-only 工作区只索引当前工作区,不激活游戏模型。候选可用�
 
 ### AI 子系统
 
-`client/extension/ai/` 运行在 Extension Host 中，负责 Provider、聊天状态、Prompt、工具 dispatch、权限策略、工作流、记忆和多 Agent 编排。
+`client/extension/ai/` 运行在 Extension Host 中，负责 Provider、聊天状态、Prompt、工具 dispatch、权限策略、Agent 技能、记忆和多 Agent 编排。
 
 #### 单轮路由
 
-输入区选择能力领域：自动、Paradox/CWTools 或通用编码。当前轮任务模式由请求确定性解析（并可被用户显式钉住），不再调用任何独立路由模型：由 Agent 自己判断何时需要在写入前先解决属于用户的设计决策，并通过 `enter_plan_mode` 工具升级。Run 一旦准入，不能扩大领域；Profile、Workflow 和子 Agent 只能进一步收窄。
+输入区选择能力领域：自动、Paradox/CWTools 或通用编码。当前轮任务模式由请求确定性解析（并可被用户显式钉住），不再调用任何独立路由模型：由 Agent 自己判断何时需要在写入前先解决属于用户的设计决策，并通过 `enter_plan_mode` 工具升级。Run 一旦准入，不能扩大领域；Profile 和子 Agent 只能进一步收窄。
 
 用户可用 `/plan`、`/execute`、`/explore`、`/review` 或 `/mode <值>` 为整个会话钉住模式；被钉住的模式会让后续轮次完全跳过自动解析。
 

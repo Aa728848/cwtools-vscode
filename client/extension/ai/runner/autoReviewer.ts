@@ -67,7 +67,7 @@ const REVIEWER_SYSTEM_PROMPT = [
 
 const ROUTINE_WRITE_TOOLS = new Set([
     'write_file', 'edit_file', 'replace_lines',
-    'write_localisation', 'write_design_blueprint', 'save_workflow',
+    'write_localisation', 'write_design_blueprint', 'save_skill',
 ]);
 
 const RISK_LEVELS = new Set<ReviewerRiskLevel>(['low', 'medium', 'high', 'critical']);

@@ -240,7 +240,7 @@ const RAW_TOOL_DEFINITIONS: ToolDefinition[] = [
         type: 'function',
         function: {
             name: 'query_project_profile',
-            description: 'Read the /init-generated Agent project profile from .cwtools/project/profile.json. Use this before broad scans to get workspace type, key directories, localisation languages/encoding, namespaces, workflow routing, validation hints, and targeted guidance cards.',
+            description: 'Read the /init-generated Agent project profile from .cwtools/project/profile.json. Use this before broad scans to get workspace type, key directories, localisation languages/encoding, namespaces, routing hints, validation hints, and targeted guidance cards.',
             parameters: {
                 type: 'object',
                 properties: {
@@ -373,6 +373,39 @@ const RAW_TOOL_DEFINITIONS: ToolDefinition[] = [
                     },
                 },
                 required: ['name'],
+            },
+        },
+    },
+    {
+        type: 'function',
+        function: {
+            name: 'save_skill',
+            description: 'Save an Agent Skill as a SKILL.md directory; once saved it appears in the Installed Agent Skills index and is loadable through run_skill. Use when the user asks to preserve a reusable procedure as a skill. Project scope writes <workspace>/.agents/skills/<name>/SKILL.md (Kimi Code layout, also discoverable by external agents); user scope writes ~/.cwtools/skills/<name>/SKILL.md.',
+            parameters: {
+                type: 'object',
+                properties: {
+                    name: { type: 'string', description: 'Skill directory name. Lowercased; must match ^[a-z0-9][a-z0-9._-]{0,63}$.' },
+                    description: { type: 'string', description: 'One-line summary shown in the skill index. Required, max 500 characters.' },
+                    body: { type: 'string', description: 'Markdown body of SKILL.md: the reusable instructions. Required, max 30000 characters. Do not include one-off conversation details unless needed for reuse.' },
+                    capability_domain: {
+                        type: 'string',
+                        enum: ['general', 'paradox', 'both'],
+                        description: 'Optional runtime domain gate. Omit to inherit the target root default (both for project .agents/skills and user skills).',
+                    },
+                    run_as: { type: 'string', description: 'Optional execution hint recorded in frontmatter (e.g. subagent).' },
+                    allowed_tools: {
+                        type: 'array',
+                        items: { type: 'string' },
+                        description: 'Optional tool allowlist narrowing the run while this skill is active. Leave empty for no narrowing.',
+                    },
+                    scope: {
+                        type: 'string',
+                        enum: ['project', 'user'],
+                        description: 'project = <workspace>/.agents/skills/<name>/SKILL.md; user = ~/.cwtools/skills/<name>/SKILL.md.',
+                    },
+                    overwrite: { type: 'boolean', description: 'Replace an existing skill with the same name at the target scope. Default false.' },
+                },
+                required: ['name', 'description', 'body', 'scope'],
             },
         },
     },
@@ -1042,12 +1075,12 @@ const RAW_TOOL_DEFINITIONS: ToolDefinition[] = [
         type: 'function',
         function: {
             name: 'run_command',
-            description: 'Run a shell command from the project workspace root by default. Use shell=auto unless you are deliberately targeting a platform shell. auto uses PowerShell on Windows and POSIX /bin/sh on macOS/Linux; sh/bash are macOS/Linux-only; pwsh/powershell are Windows-only. Do not wrap commands in another shell. Prefer existing project scripts and direct commands; keep temporary helpers in the topic scratch directory and reuse one helper per task. Read-only commands may auto-run, while writes, network access, inline interpreter payloads, and sensitive operations remain subject to the policy and approval engine.',
+            description: 'Run a shell command from the project workspace root by default. Use shell=auto unless you are deliberately targeting a platform shell. auto resolves to the best available shell on the host: on Windows it uses pwsh (PowerShell 7+) when installed and falls back to Windows PowerShell (powershell.exe); on macOS/Linux it uses bash when installed and falls back to POSIX /bin/sh. sh/bash are valid on macOS/Linux only; pwsh/powershell are valid on Windows only. Do not wrap commands in another shell. Prefer existing project scripts and direct commands; keep temporary helpers in the topic scratch directory and reuse one helper per task. Read-only commands may auto-run, while writes, network access, inline interpreter payloads, and sensitive operations remain subject to the policy and approval engine.',
             parameters: {
                 type: 'object',
                 properties: {
                     command: { type: 'string', description: 'The shell command to execute' },
-                    shell: { type: 'string', enum: ['auto', 'sh', 'bash', 'pwsh', 'powershell'], description: 'Target shell/platform. auto preserves the host default. sh/bash are valid on macOS/Linux only. pwsh/powershell are valid on Windows only.' },
+                    shell: { type: 'string', enum: ['auto', 'sh', 'bash', 'pwsh', 'powershell'], description: 'Target shell/platform. auto (recommended) resolves per host: pwsh (PowerShell 7+) then powershell on Windows, bash then sh on macOS/Linux. sh runs POSIX /bin/sh -c and bash runs a login shell (bash -lc); sh/bash are valid on macOS/Linux only. pwsh/powershell are valid on Windows only; shell=pwsh falls back to powershell.exe with a notice when PowerShell 7+ is not installed.' },
                     cwd: { type: 'string', description: 'Working directory (defaults to workspace root)' },
                     timeoutMs: { type: 'number', description: 'Timeout in milliseconds for captured execution (default 30000, max 3600000)' },
                     background: { type: 'boolean', description: 'Start a captured sandboxed process and return its processId immediately. Use manage_process to inspect or control it.' },
@@ -1360,7 +1393,7 @@ const RAW_TOOL_DEFINITIONS: ToolDefinition[] = [
         type: 'function',
         function: {
             name: 'save_memory',
-            description: 'Persist a private structured memory with provenance, confidence, usage tracking, secret redaction, expiry, and bounded consolidation. Use sparingly for reusable rules or preferences. Revalidate stale project facts from an authoritative current repository source before saving them. Project-shareable rules belong in repository instructions or an explicit workflow; do not save transient task state.',
+            description: 'Persist a private structured memory with provenance, confidence, usage tracking, secret redaction, expiry, and bounded consolidation. Use sparingly for reusable rules or preferences. Revalidate stale project facts from an authoritative current repository source before saving them. Project-shareable rules belong in repository instructions or an explicit Agent skill; do not save transient task state.',
             parameters: {
                 type: 'object',
                 properties: {
@@ -1758,68 +1791,6 @@ const RAW_TOOL_DEFINITIONS: ToolDefinition[] = [
                     notes: { type: 'string', description: 'Additional design notes: scope chain transition warnings, edge cases, branching logic, or vanilla references studied.' },
                 },
                 required: ['title'],
-            },
-        },
-    },
-    {
-        type: 'function',
-        function: {
-            name: 'save_workflow',
-            description: 'Save a reusable project workflow from the current conversation or task process. Use only when the user asks to save the process/workflow or when preserving a clearly reusable workflow is the task. Writes .cwtools/workflows/<id>.md and makes it available through /workflow:<id>.',
-            parameters: {
-                type: 'object',
-                properties: {
-                    id: { type: 'string', description: 'Optional stable workflow id, lowercase/kebab-case preferred. If omitted, it is derived from the title.' },
-                    title: { type: 'string', description: 'User-facing workflow title.' },
-                    description: { type: 'string', description: 'Short one-sentence summary shown in the workflow picker and slash command list.' },
-                    domain: {
-                        type: 'string',
-                        enum: ['paradox', 'general', 'hybrid'],
-                        description: 'Capability domain for the workflow.',
-                    },
-                    intent: {
-                        type: 'string',
-                        enum: ['execute', 'plan', 'explore', 'review'],
-                        description: 'Explicit workflow intent used by the scheduler.',
-                    },
-                    strategy: {
-                        type: 'string',
-                        enum: ['single', 'multi'],
-                        description: 'Execution topology requested by the workflow.',
-                    },
-                    profileName: {
-                        type: 'string',
-                        description: 'Optional registered runtime profile name.',
-                    },
-                    promptSupplement: {
-                        type: 'string',
-                        description: 'The reusable workflow instructions. Include objective, phases/checklist, important constraints, expected tools, and verification steps. Do not include private one-off conversation details unless they are needed for reuse.',
-                    },
-                    allowedTools: {
-                        type: 'array',
-                        items: { type: 'string' },
-                        description: 'Optional tool allowlist. Use this for narrow workflows; leave empty to use the scheduled profile default tools.',
-                    },
-                    blockedTools: {
-                        type: 'array',
-                        items: { type: 'string' },
-                        description: 'Optional tools to block when no allowlist is provided.',
-                    },
-                    requiredContext: {
-                        type: 'array',
-                        items: { type: 'string', enum: ['activeFile', 'activeFile!', 'diagnostics', 'diagnostics!', 'selection', 'selection!', 'workspace', 'workspace!'] },
-                        description: 'Context needed before starting. Add ! for required context. Default: workspace!.',
-                    },
-                    verificationTool: {
-                        type: 'string',
-                        description: 'Optional single verification tool, e.g. get_diagnostics.',
-                    },
-                    overwrite: {
-                        type: 'boolean',
-                        description: 'If true, replace an existing workflow with the same id. Default false.',
-                    },
-                },
-                required: ['title', 'description', 'domain', 'intent', 'strategy', 'promptSupplement'],
             },
         },
     },

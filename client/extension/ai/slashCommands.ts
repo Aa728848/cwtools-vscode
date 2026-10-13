@@ -11,7 +11,19 @@ export interface SlashCommandDescriptor {
     completion: SlashCommandCompletion;
     duringRun: SlashCommandDuringRun;
     risk: SlashCommandRisk;
-    category: 'session' | 'goal' | 'workflow' | 'configuration';
+    category: 'session' | 'goal' | 'configuration' | 'skill';
+}
+
+/**
+ * An installed Agent skill offered as `/skill:<name>`. The Host builds these
+ * from `listSkills` when it delivers the command catalog, so a skill saved in the
+ * current session shows up without reloading the Webview.
+ */
+export interface SkillSlashCatalogEntry {
+    /** Skill name as reported by `listSkills`; `loadSkill` matches it case-insensitively. */
+    name: string;
+    /** Frontmatter description (or first body line). Untrusted SKILL.md text. */
+    description: string;
 }
 
 export type SlashCommandId =
@@ -24,10 +36,7 @@ export type SlashCommandId =
     | 'goalBlocked'
     | 'fork'
     | 'archive'
-    | 'workflowList'
-    | 'workflowSave'
-    | 'workflowOff'
-    | 'workflowSelect'
+    | 'skill'
     | 'status'
     | 'model'
     | 'reasoning'
@@ -46,8 +55,20 @@ export interface SlashCommandDefinition extends Omit<SlashCommandDescriptor, 'de
     visible?: boolean;
 }
 
-const DEFINITIONS: readonly SlashCommandDefinition[] = [
-    {
+/** Shared by `/skill` and every generated `/skill:<name>` entry. */
+const SKILL_ARGUMENT_HINT: { en: string; zh: string } = {
+    en: '<skill-name> [arguments]',
+    zh: '<技能名> [参数]',
+};
+
+/**
+ * A skill is only advertised as `/skill:<name>` when its name survives the round
+ * trip through the colon form, i.e. it carries no whitespace or separator that
+ * would make the parser read part of the name back as skill arguments.
+ */
+const SKILL_COMMAND_NAME = /^[A-Za-z0-9._-]+$/;
+
+const DEFINITIONS: readonly SlashCommandDefinition[] = [    {
         id: 'init', command: '/init', argumentMode: 'none', completion: 'execute', duringRun: 'deny', risk: 'destructive', category: 'session',
         description: { en: 'Initialize user-owned CWTOOLS.md instructions and build the project semantic knowledge pack', zh: '初始化用户维护的 CWTOOLS.md 指令并构建项目语义知识包' },
     },
@@ -86,25 +107,13 @@ const DEFINITIONS: readonly SlashCommandDefinition[] = [
         description: { en: 'Archive the current topic', zh: '归档当前话题' },
     },
     {
-        id: 'workflowList', command: '/workflow:list', argumentMode: 'none', completion: 'execute', duringRun: 'immediate', risk: 'safe', category: 'workflow',
-        description: { en: 'Refresh the available AI workflows', zh: '刷新可用的 AI 工作流' },
-    },
-    {
-        id: 'workflowSave', command: '/workflow:save', argumentMode: 'optional', completion: 'execute', duringRun: 'queue', risk: 'stateful', category: 'workflow', acceptsColonArgument: true,
-        argumentHint: { en: '[workflow-id]', zh: '[工作流 ID]' },
-        description: { en: 'Save this process as a reusable AI workflow', zh: '将当前过程保存为可复用 AI 工作流' },
-    },
-    {
-        id: 'workflowOff', command: '/workflow:off', argumentMode: 'none', completion: 'execute', duringRun: 'immediate', risk: 'safe', category: 'workflow',
-        description: { en: 'Turn off the active AI workflow', zh: '关闭当前 AI 工作流' },
-    },
-    {
-        id: 'workflowSelect', command: '/workflow', argumentMode: 'required', completion: 'insert', duringRun: 'immediate', risk: 'safe', category: 'workflow', acceptsColonArgument: true, visible: false,
-        description: { en: 'Select an AI workflow', zh: '选择 AI 工作流' },
+        id: 'skill', command: '/skill', argumentMode: 'required', completion: 'execute', duringRun: 'immediate', risk: 'safe', category: 'skill', acceptsColonArgument: true,
+        argumentHint: SKILL_ARGUMENT_HINT,
+        description: { en: 'Load an installed Agent skill into this turn and work under its SKILL.md', zh: '将已安装的 Agent 技能载入本轮对话并按其 SKILL.md 执行' },
     },
     {
         id: 'status', command: '/status', argumentMode: 'none', completion: 'execute', duringRun: 'immediate', risk: 'safe', category: 'configuration',
-        description: { en: 'Show the current model, scheduling state, workflow, and permissions', zh: '显示当前模型、调度状态、工作流与权限配置' },
+        description: { en: 'Show the current model, scheduling state, and permissions', zh: '显示当前模型、调度状态与权限配置' },
     },
     {
         id: 'model', command: '/model', argumentMode: 'none', completion: 'execute', duringRun: 'immediate', risk: 'safe', category: 'configuration',
@@ -144,15 +153,78 @@ const DEFINITIONS: readonly SlashCommandDefinition[] = [
 export interface ResolvedSlashCommand {
     definition: SlashCommandDefinition;
     raw: string;
+    /**
+     * Text supplied after the command token. For `/skill` this is only the
+     * skill arguments: the name itself is reported through `skillName` so a
+     * colon-form invocation like `/skill:<name> [arguments]` keeps the same
+     * shape as the space form `/skill <name> [arguments]`.
+     */
     argument: string;
+    /** Skill name requested by `/skill`; undefined for every other command. */
+    skillName?: string;
 }
 
 function localized(value: { en: string; zh: string }, locale?: string): string {
     return (locale || '').toLowerCase().startsWith('zh') ? value.zh : value.en;
 }
 
-export function getSlashCommandDescriptors(locale?: string): SlashCommandDescriptor[] {
-    return DEFINITIONS
+/**
+ * Split the `/skill` payload into the skill name and its arguments. Every other
+ * command keeps the generic "everything after the command token" semantics.
+ */
+function splitSkillInvocation(
+    definition: SlashCommandDefinition,
+    argument: string,
+): { argument: string; skillName?: string } {
+    if (definition.id !== 'skill' || !argument) return { argument };
+    const separator = argument.search(/\s/);
+    if (separator < 0) return { argument: '', skillName: argument };
+    return { skillName: argument.slice(0, separator), argument: argument.slice(separator).trim() };
+}
+
+/**
+ * Expand the installed skills into `/skill:<name>` catalog rows. They are
+ * appended to the static table rather than parsed from it, so the Webview
+ * completion picks them up with no Webview-side command synthesis.
+ */
+function buildSkillSlashDescriptors(
+    skills: readonly SkillSlashCatalogEntry[],
+    locale?: string,
+): SlashCommandDescriptor[] {
+    const descriptors: SlashCommandDescriptor[] = [];
+    const seen = new Set<string>();
+    for (const skill of skills) {
+        const name = skill.name.trim();
+        if (!name || !SKILL_COMMAND_NAME.test(name)) continue;
+        const key = name.toLowerCase();
+        if (seen.has(key)) continue;
+        seen.add(key);
+        const descriptionText = (skill.description ?? '').trim();
+        const summary = descriptionText.replace(/\s+/g, ' ').slice(0, 160);
+        const label = localized(
+            { en: `Load Agent skill "${name}"`, zh: `载入 Agent 技能“${name}”` },
+            locale,
+        );
+        const separator = localized({ en: ': ', zh: '：' }, locale);
+        descriptors.push({
+            command: `/skill:${name}`,
+            description: summary ? `${label}${separator}${summary}` : label,
+            argumentHint: localized(SKILL_ARGUMENT_HINT, locale),
+            argumentMode: 'required',
+            completion: 'execute',
+            duringRun: 'immediate',
+            risk: 'safe',
+            category: 'skill',
+        });
+    }
+    return descriptors;
+}
+
+export function getSlashCommandDescriptors(
+    locale?: string,
+    skills: readonly SkillSlashCatalogEntry[] = [],
+): SlashCommandDescriptor[] {
+    const staticCommands = DEFINITIONS
         .filter(definition => definition.visible !== false)
         .map(definition => ({
             command: definition.command,
@@ -164,6 +236,7 @@ export function getSlashCommandDescriptors(locale?: string): SlashCommandDescrip
             risk: definition.risk,
             category: definition.category,
         }));
+    return [...staticCommands, ...buildSkillSlashDescriptors(skills, locale)];
 }
 
 export function resolveSlashCommand(raw: string): ResolvedSlashCommand | undefined {
@@ -173,24 +246,17 @@ export function resolveSlashCommand(raw: string): ResolvedSlashCommand | undefin
     const lowerBody = body.toLowerCase();
     const ordered = [...DEFINITIONS].sort((a, b) => b.command.length - a.command.length);
 
+    const normalizedRaw = trimmed.startsWith('/') ? trimmed : `/${trimmed}`;
     for (const definition of ordered) {
         const name = definition.command.slice(1).toLowerCase();
         if (lowerBody === name) {
-            return { definition, raw: trimmed.startsWith('/') ? trimmed : `/${trimmed}`, argument: '' };
+            return { definition, raw: normalizedRaw, ...splitSkillInvocation(definition, '') };
         }
         if (definition.argumentMode !== 'none' && lowerBody.startsWith(`${name} `)) {
-            return {
-                definition,
-                raw: trimmed.startsWith('/') ? trimmed : `/${trimmed}`,
-                argument: body.slice(name.length).trim(),
-            };
+            return { definition, raw: normalizedRaw, ...splitSkillInvocation(definition, body.slice(name.length).trim()) };
         }
         if (definition.acceptsColonArgument && lowerBody.startsWith(`${name}:`)) {
-            return {
-                definition,
-                raw: trimmed.startsWith('/') ? trimmed : `/${trimmed}`,
-                argument: body.slice(name.length + 1).trim(),
-            };
+            return { definition, raw: normalizedRaw, ...splitSkillInvocation(definition, body.slice(name.length + 1).trim()) };
         }
     }
     return undefined;

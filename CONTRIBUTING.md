@@ -103,7 +103,7 @@ The schema command writes into the MCP submodule. Review and commit that reposit
 | Path | Ownership |
 | --- | --- |
 | `client/extension/` | VS Code Extension Host, filesystem access, commands, LSP client, AI host |
-| `client/extension/ai/` | AI providers, runner, tools, permissions, workflows, memory, and orchestration |
+| `client/extension/ai/` | AI providers, runner, tools, permissions, Agent skills, memory, and orchestration |
 | `client/webview/` | Browser-sandboxed panels and visual editors |
 | `src/LSP/`, `src/Main/` | F#/.NET protocol layer and language-server executable |
 | `submodules/cwtools/` | Upstream CWTools parser, validation, game model, and Shader semantics |
@@ -149,10 +149,9 @@ Incremental scripted-type refresh spans the server and the CWTools submodule. Co
 
 #### Localisation and documentation
 
-Update English and Chinese together for user-visible commands, settings, diagnostics, chat/workflow UI, Webviews, and release-facing docs. Existing catalogs include:
+Update English and Chinese together for user-visible commands, settings, diagnostics, chat UI, Webviews, and release-facing docs. Existing catalogs include:
 
 - `client/extension/ai/messages.ts`
-- `client/extension/ai/workflowI18n.ts`
 - `client/webview/chat/i18n.ts`
 
 `README.md`, this guide, `ARCHITECTURE.md`, and `docs/cwt-rule-config.md` are bilingual single-source documents. Do not create separate `_EN` or `_ZH` copies. `npm run build:docs` validates them and generates `release/README.md` from `docs/marketplace-readme.md`.
@@ -349,10 +348,9 @@ scripted type 增量刷新横跨服务端和 CWTools 子模块。请把增量结
 
 #### 本地化与文档
 
-用户可见的命令、设置、诊断、聊天/工作流 UI、Webview 和发布文档需要同时更新英文和中文。常用文案目录包括：
+用户可见的命令、设置、诊断、聊天 UI、Webview 和发布文档需要同时更新英文和中文。常用文案目录包括：
 
 - `client/extension/ai/messages.ts`
-- `client/extension/ai/workflowI18n.ts`
 - `client/webview/chat/i18n.ts`
 
 `README.md`、本文、`ARCHITECTURE.md` 和 `docs/cwt-rule-config.md` 都是双语单一来源，不要新增 `_EN` 或 `_ZH` 副本。`npm run build:docs` 会校验这些文件，并从 `docs/marketplace-readme.md` 生成 `release/README.md`。

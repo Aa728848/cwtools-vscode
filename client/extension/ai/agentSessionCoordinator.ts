@@ -27,7 +27,6 @@ function cloneSchedulingState(state: AgentSchedulingState): AgentSchedulingState
 export class AgentSessionCoordinator {
     private _schedulingState: AgentSchedulingState = initialSchedulingState();
     private _previousSchedulingState: AgentSchedulingState = initialSchedulingState();
-    private _currentWorkflowId: string | null = null;
     /**
      * User-selected task mode for this session. 'auto' lets the Agent decide per
      * request; any other value pins the intent and stops routing from
@@ -42,35 +41,13 @@ export class AgentSessionCoordinator {
     get schedulingState(): AgentSchedulingState { return cloneSchedulingState(this._schedulingState); }
     set schedulingState(state: AgentSchedulingState) { this._schedulingState = cloneSchedulingState(state); }
 
+    /** Scheduling state captured before the last explicit user override. */
     get previousSchedulingState(): AgentSchedulingState { return cloneSchedulingState(this._previousSchedulingState); }
     set previousSchedulingState(state: AgentSchedulingState) { this._previousSchedulingState = cloneSchedulingState(state); }
-
-    get currentWorkflowId(): string | null { return this._currentWorkflowId; }
-    set currentWorkflowId(workflowId: string | null) { this._currentWorkflowId = workflowId; }
 
     /** User-owned task mode. 'auto' means the Agent routes per request. */
     get modeOverride(): AgentModeOverride { return this._modeOverride; }
     set modeOverride(mode: AgentModeOverride) { this._modeOverride = mode; }
-
-    /**
-     * Let a workflow temporarily own the execution profile. Switching directly
-     * between workflows keeps the original pre-workflow return state.
-     */
-    activateWorkflow(workflowId: string, schedulingState: AgentSchedulingState): void {
-        if (!this._currentWorkflowId) {
-            this._previousSchedulingState = cloneSchedulingState(this._schedulingState);
-        }
-        this._currentWorkflowId = workflowId;
-        this._schedulingState = cloneSchedulingState(schedulingState);
-    }
-
-    /** Restore the state captured when the active workflow was first entered. */
-    deactivateWorkflow(): boolean {
-        if (!this._currentWorkflowId) return false;
-        this._currentWorkflowId = null;
-        this._schedulingState = cloneSchedulingState(this._previousSchedulingState);
-        return true;
-    }
 
     get liveSteps(): AgentStep[] { return this._liveSteps; }
     set liveSteps(steps: AgentStep[]) { this._liveSteps = steps; }

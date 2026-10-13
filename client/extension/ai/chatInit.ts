@@ -12,9 +12,12 @@ import type { HostMessage } from './types';
 import { UI, aiText } from './messages';
 import {
     generateProjectKnowledge,
+    getProjectKnowledgeDatabasePath,
     getProjectKnowledgeManifestPath,
+    PROJECT_KNOWLEDGE_SCHEMA_VERSION,
     ProjectKnowledgeModelNotReadyError,
     queryProjectKnowledge,
+    readProjectKnowledgeManifest,
     writeUnavailableProjectKnowledge,
 } from './projectKnowledge';
 import { getKnownProfileByLanguageId } from '../gameProfiles';
@@ -43,6 +46,26 @@ export interface InitGenerationResult {
     knowledgeManifestPath?: string;
     workspaceIndexPath?: string;
     message?: string;
+}
+
+export interface InitGenerationOptions {
+    /**
+     * Background auto-init (/init triggered without a user command): identical
+     * artifact generation, but never steals focus by opening CWTOOLS.md.
+     */
+    auto?: boolean;
+}
+
+/**
+ * True when the root owns a usable project knowledge database: the manifest
+ * and knowledge.sqlite both exist and match the current schema version.
+ */
+export function isProjectKnowledgeDatabaseReady(root: string): boolean {
+    const manifest = readProjectKnowledgeManifest(root);
+    if (!manifest) return false;
+    if (!fs.existsSync(getProjectKnowledgeDatabasePath(root))) return false;
+    return Number(manifest.schemaVersion) === PROJECT_KNOWLEDGE_SCHEMA_VERSION
+        && Number(manifest.database?.schemaVersion) === PROJECT_KNOWLEDGE_SCHEMA_VERSION;
 }
 
 function isDeepKnowledgeReady(status: unknown): boolean {
@@ -124,6 +147,7 @@ async function generateInitFileCore(
     recordFileSnapshot: RecordSnapshotFn,
     progress: InitProgress,
     indexService?: IndexService,
+    options?: InitGenerationOptions,
 ): Promise<InitGenerationResult> {
     const folders = vs.workspace.workspaceFolders;
     if (!folders || folders.length === 0) {
@@ -303,8 +327,10 @@ async function generateInitFileCore(
         writeProjectProfile(root, profile);
 
         stage = 'open_project_instructions';
-        const doc = await vs.workspace.openTextDocument(vs.Uri.file(rulesPath));
-        await vs.window.showTextDocument(doc, { preview: false });
+        if (options?.auto !== true) {
+            const doc = await vs.workspace.openTextDocument(vs.Uri.file(rulesPath));
+            await vs.window.showTextDocument(doc, { preview: false });
+        }
 
         postMessage({
             type: 'agentStep',
@@ -384,8 +410,9 @@ export async function generateInitFile(
     postMessage: PostMessageFn,
     recordFileSnapshot: RecordSnapshotFn,
     indexService?: IndexService,
+    options?: InitGenerationOptions,
 ): Promise<InitGenerationResult> {
-    const run = (progress: InitProgress) => generateInitFileCore(postMessage, recordFileSnapshot, progress, indexService);
+    const run = (progress: InitProgress) => generateInitFileCore(postMessage, recordFileSnapshot, progress, indexService, options);
     if (typeof vs.window.withProgress === 'function' && vs.ProgressLocation?.Window !== undefined) {
         return vs.window.withProgress(
             {

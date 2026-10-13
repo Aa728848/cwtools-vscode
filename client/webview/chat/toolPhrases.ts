@@ -41,7 +41,6 @@ const TOOL_PHRASES: Record<string, ToolPhraseEntry> = {
     apply_patch:               { category: 'write',       icon: '✏️', en: 'Apply patch', zh: '应用补丁' },
     delete_file:               { category: 'write',       icon: '✏️', en: 'Delete file', zh: '删除文件' },
     write_localisation:        { category: 'write',       icon: '✏️', en: 'Write localisation', zh: '写入本地化' },
-    save_workflow:             { category: 'write',       icon: '✏️', en: 'Save workflow', zh: '保存工作流' },
     todo_write:                { category: 'write',       icon: '✏️', en: 'Update todos', zh: '更新待办' },
 
     query_workspace_index:     { category: 'query',       icon: '🔍', en: 'Search symbol index', zh: '搜索符号索引' },
@@ -283,14 +282,6 @@ export function getToolDynamicPhrase(
             if (typeof key === 'string') {
                 const short = truncateStr(key, 50);
                 return zh ? dualPhrase(`写入本地化 ${short}`, locale) : dualPhrase(`Write localisation ${short}`, locale, `Writing localisation ${short}...`);
-            }
-            return dualPhrase(meta.phrase, locale);
-        }
-        case 'save_workflow': {
-            const title = args.title ?? args.id;
-            if (typeof title === 'string') {
-                const short = truncateStr(title, 50);
-                return zh ? dualPhrase(`保存工作流 ${short}`, locale) : dualPhrase(`Save workflow ${short}`, locale, `Saving workflow ${short}...`);
             }
             return dualPhrase(meta.phrase, locale);
         }

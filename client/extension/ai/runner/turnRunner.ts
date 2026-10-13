@@ -13,7 +13,6 @@ export interface TurnStartOptions {
     agentId?: string;
     providerId?: string;
     model?: string;
-    workflowId?: string | null;
     threadId?: string;
     turnId?: string;
 }
@@ -42,7 +41,6 @@ export class TurnRunner {
                 agentId: options.agentId,
                 providerId: options.providerId,
                 model: options.model,
-                workflowId: options.workflowId,
                 threadId,
                 turnId: options.turnId,
             },

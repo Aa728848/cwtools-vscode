@@ -24,7 +24,7 @@ const WRITE_EXECUTION_MODES = new Set<AgentMode>([
 
 const NON_DELIVERY_WRITE_TOOLS = new Set([
     'write_design_blueprint',
-    'save_workflow',
+    'save_skill',
 ]);
 
 const BUILD_LIFECYCLE_MODES = new Set<AgentMode>([

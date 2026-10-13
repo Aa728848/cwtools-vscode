@@ -42,7 +42,7 @@ Use `Compare with Vanilla` on a matching mod file to open a diff. `Migrate Block
 
 ### Optional AI workspace
 
-Run `AI: Open Chat Panel` to use the built-in agent workspace. It supports general coding and Paradox/CWTools-aware tasks, project indexing, plans and workflows, explicit tool permissions, and optional MCP servers.
+Run `AI: Open Chat Panel` to use the built-in agent workspace. It supports general coding and Paradox/CWTools-aware tasks, project indexing, plans and Agent skills, explicit tool permissions, and optional MCP servers.
 
 AI providers are configured separately. Credentials are stored with VS Code SecretStorage, and tool calls remain subject to the selected sandbox and approval policy. The ChatGPT-subscription-compatible Codex provider relies on an upstream compatibility endpoint and may need updates when that endpoint changes.
 

@@ -39,8 +39,8 @@ import { queryProjectKnowledge } from './projectKnowledge';
 import { queryInterfaceKnowledge } from './interfaceKnowledge';
 import { validateOffCanvasGuiPreservation } from '../guiSafety';
 import { loadSkill } from './skills';
+import { saveSkill as saveSkillFile } from './skillsWriter';
 import { isPlanModeCardArtifactFile, validateGitOpsForMode, validatePlanModeToolUse } from './planModeGuard';
-import { saveProjectWorkflow } from './workflowRegistry';
 import { budgetToolResult, TOOL_RESULT_BUDGET_HARD_STUB } from './contextBudget';
 import { aiText, EVIDENCE_GATE_MSG, TEAM_MSG } from './messages';
 import { getPrivateAiStorageRoot, getPrivateTopicStorageDir } from './workspacePaths';
@@ -88,6 +88,14 @@ import { HostArchetypeArtifactStore } from './tools/archetypeArtifacts';
 import { canonicalPathKey } from './workspacePaths';
 import { agentProfileCatalog } from './runner/agentProfileCatalog';
 import { isMcpServerAllowedForDomain } from './mcpCapability';
+import { getCwtoolsHomeDir } from './homeConfig';
+import {
+    loadMcpServerFileConfigs,
+    mergeMcpServerConfigs,
+    mcpServerSource,
+    type SourcedMCPServerConfig,
+} from './mcpConfig';
+import { getAgentModelOverrides, getHomeProviders } from './providerConfig';
 import {
     AUTHORITY_RANK,
     authorizationAllowsEffect,
@@ -321,7 +329,7 @@ const TOOL_TIMEOUTS: Record<string, number> = {
     deploy_mod_asset: 0,
     git_ops: 30_000,
     write_localisation: SEMANTIC_WRITE_TOOL_TIMEOUT,
-    save_workflow: 30_000,
+    save_skill: 30_000,
     todo_write: 5_000,
     run_skill: 30_000,
     // Interactive questions wait indefinitely for user input from the WebView.
@@ -438,8 +446,8 @@ export class AgentToolExecutor {
     public onPendingWrite?: (file: string, newContent: string, messageId: string) => Promise<boolean>;
     /** Callback when a file is automatically written (auto mode). */
     public onAutoWritten?: (file: string, isNewFile: boolean) => void;
-    /** Callback when a project workflow is saved. */
-    public onWorkflowSaved?: () => void;
+    /** Callback when a skill is saved: the `/skill:<name>` catalog changed. */
+    public onSkillSaved?: () => void;
     /** Agent file write mode from config */
     public fileWriteMode: 'confirm' | 'auto' = 'confirm';
 
@@ -1171,9 +1179,9 @@ export class AgentToolExecutor {
         if (subject === 'edit' && topicId && targets.length > 0) {
             const topicRoot = path.resolve(getPrivateTopicStorageDir(topicId, this.workspaceRoot));
             const targetsCurrentPrivateTopic = targets.every(target => isPathInsideOrEqual(path.resolve(target), topicRoot));
-            const targetsAreWorkflowArtifacts = targets.every(target =>
+            const targetsArePlanArtifacts = targets.every(target =>
                 isPlanModeCardArtifactFile(target, this.workspaceRoot, topicId));
-            if (targetsCurrentPrivateTopic && targetsAreWorkflowArtifacts) {
+            if (targetsCurrentPrivateTopic && targetsArePlanArtifacts) {
                 profile.writableRoots.push(topicRoot);
             }
         }
@@ -1942,23 +1950,27 @@ export class AgentToolExecutor {
                 allowedTools: [...skillPolicy.allowedTools].sort(),
             };
         }
-        if (runtimeDomain === 'general' && toolName === 'save_workflow') {
-            const workflowDomain = typeof args.domain === 'string' ? args.domain : '';
-            if (workflowDomain !== 'general') {
+        if (runtimeDomain === 'general' && toolName === 'save_skill') {
+            if (args.capability_domain === 'paradox') {
                 return {
                     success: false,
-                    error: `General Coding cannot save a workflow for domain '${workflowDomain || '(missing)'}'.`,
+                    error: aiText(
+                        `General Coding cannot save a paradox-domain skill.`,
+                        `通用编码模式不能保存 paradox 域技能。`,
+                    ),
                 };
             }
-            const requestedTools = [args.allowedTools, args.blockedTools]
-                .flatMap(value => Array.isArray(value) ? value : [])
+            const requestedTools = (Array.isArray(args.allowed_tools) ? args.allowed_tools : [])
                 .filter((value): value is string => typeof value === 'string');
             const domainSpecificTool = requestedTools.find(name =>
                 TOOL_REGISTRY.get(name as import('./types').AgentToolName)?.domain === 'paradox');
             if (domainSpecificTool) {
                 return {
                     success: false,
-                    error: `General Coding cannot save a workflow containing domain-specific tool '${domainSpecificTool}'.`,
+                    error: aiText(
+                        `General Coding cannot save a skill declaring paradox-domain tool '${domainSpecificTool}'.`,
+                        `通用编码模式不能保存声明了 paradox 域工具“${domainSpecificTool}”的技能。`,
+                    ),
                 };
             }
         }
@@ -2539,8 +2551,8 @@ export class AgentToolExecutor {
                 result = await this.executeWriteLocalisation(args as any, context); break;
             case 'write_design_blueprint':
                 result = await this.fileHandler.writeDesignBlueprint(args as any, context); break;
-            case 'save_workflow':
-                result = this.saveWorkflow(args, context); break;
+            case 'save_skill':
+                result = this.saveSkill(args, context); break;
             case 'git_ops':
                 result = await this.fileHandler.gitOps(args as any); break; // git ops uses workspace wide state mostly
 
@@ -2622,8 +2634,8 @@ export class AgentToolExecutor {
                         success: true,
                         ...args._selectionResult as Record<string, unknown>,
                         message: aiText(
-                            'Loaded schemas are now visible. loaded/alreadyLoaded = usable now; unavailable = excluded by the active workflow; denied = blocked by domain or mode policy. Execution still respects mode, policy, and permission checks.',
-                            '已加载的工具现在可见。loaded/alreadyLoaded = 当前即可使用；unavailable = 被当前工作流排除；denied = 被域或模式策略阻止。执行时仍会遵守模式、策略与权限检查。',
+                            'Loaded schemas are now visible. loaded/alreadyLoaded = usable now; unavailable = excluded by the active mode or domain policy; denied = blocked by domain or mode policy. Execution still respects mode, policy, and permission checks.',
+                            '已加载的工具现在可见。loaded/alreadyLoaded = 当前即可使用；unavailable = 被当前模式或域策略排除；denied = 被域或模式策略阻止。执行时仍会遵守模式、策略与权限检查。',
                         ),
                     }
                     : {
@@ -2878,6 +2890,93 @@ export class AgentToolExecutor {
         return result;
     }
 
+    /**
+     * Arm one run's `allowed-tools` policy for a skill. A skill that is already
+     * active on the same key intersects with the new declaration instead of
+     * widening it, so the turn can never gain tools by loading a second skill.
+     * Declared tools are validated against the registry and the map stays bounded
+     * by evicting the oldest key, matching the previous inline `run_skill` logic.
+     */
+    private mergeSkillPolicy(
+        policyKey: string,
+        skillName: string,
+        declaredTools: readonly string[],
+    ): { ok: true; skillNames: string[]; allowedTools: string[] } | { ok: false; unknownTool: string } {
+        const unknownTool = declaredTools.find(tool => !TOOL_REGISTRY.has(tool as import('./types').AgentToolName));
+        if (unknownTool) return { ok: false, unknownTool };
+        const previous = this.activeSkillPolicies.get(policyKey);
+        const declared = new Set(declaredTools);
+        const effectiveAllowedTools = previous
+            ? new Set([...previous.allowedTools].filter(tool => declared.has(tool)))
+            : declared;
+        const skillNames = previous?.skillNames.includes(skillName)
+            ? previous.skillNames
+            : [...(previous?.skillNames ?? []), skillName];
+        // Re-insert so the bounded map evicts the oldest key first under load.
+        this.activeSkillPolicies.delete(policyKey);
+        this.activeSkillPolicies.set(policyKey, { skillNames, allowedTools: effectiveAllowedTools });
+        while (this.activeSkillPolicies.size > AgentToolExecutor.ACTIVE_SKILL_POLICY_LIMIT) {
+            const oldest = this.activeSkillPolicies.keys().next().value as string | undefined;
+            if (oldest === undefined) break;
+            this.activeSkillPolicies.delete(oldest);
+        }
+        return {
+            ok: true,
+            skillNames: [...skillNames],
+            allowedTools: [...effectiveAllowedTools].sort(),
+        };
+    }
+
+    /**
+     * Arm the `allowed-tools` policy for a skill the Host preloaded into this
+     * turn's user message (`/skill <name>`). The turn behaves as if the model had
+     * called `run_skill` for the same name: identical skill lookup and matching,
+     * identical registry validation of the declared tools, and the same
+     * intersection rule when the run already carries a skill policy.
+     *
+     * The policy is keyed `run:<runId>`, which is exactly what
+     * `getSkillPolicyKey` resolves for a tool call made by this run, and is
+     * cleared by the existing `clearSkillPolicyForRun` cleanup.
+     */
+    public preloadSkillPolicy(
+        runId: string,
+        name: string,
+        domain?: import('./types').AgentRuntimeDomain,
+    ): import('./types').SkillPolicyPreloadResult {
+        const skillName = name.trim();
+        if (!runId || !skillName) {
+            return { applied: false, reason: 'empty-request', detail: 'A run id and a skill name are required.' };
+        }
+        const loaded = loadSkill(skillName, {
+            workspaceRoot: this.workspaceRoot,
+            globalStoragePath: this.globalStoragePath,
+            extensionPath: this.extensionPath,
+            homeDir: getCwtoolsHomeDir(),
+        }, domain);
+        if (!loaded.success) {
+            return { applied: false, reason: 'unknown-skill', detail: loaded.error };
+        }
+        const declaredTools = loaded.skill.allowedTools;
+        if (!declaredTools?.length) {
+            return { applied: false, reason: 'no-allowed-tools', skillName: loaded.skill.name };
+        }
+        const merged = this.mergeSkillPolicy(`run:${runId}`, loaded.skill.name, declaredTools);
+        if (!merged.ok) {
+            return {
+                applied: false,
+                reason: 'unknown-tool',
+                skillName: loaded.skill.name,
+                detail: merged.unknownTool,
+            };
+        }
+        return {
+            applied: true,
+            skillName: loaded.skill.name,
+            activeSkills: merged.skillNames,
+            allowedTools: merged.allowedTools,
+        };
+    }
+
     private runSkill(args: Record<string, unknown>, context?: import('./types').AgentToolContext): unknown {
         const name = typeof args.name === 'string' ? args.name.trim() : '';
         if (!name) {
@@ -2891,36 +2990,20 @@ export class AgentToolExecutor {
             workspaceRoot: this.workspaceRoot,
             globalStoragePath: this.globalStoragePath,
             extensionPath: this.extensionPath,
+            homeDir: getCwtoolsHomeDir(),
         }, context?.runnerOptions?.schedulingState.domainProfile);
         if (!loaded.success) return loaded;
 
         const declaredTools = loaded.skill.allowedTools;
         if (declaredTools?.length) {
-            const unknownTool = declaredTools.find(tool => !TOOL_REGISTRY.has(tool as import('./types').AgentToolName));
-            if (unknownTool) {
-                return {
-                    success: false,
-                    error: `Skill '${loaded.skill.name}' declares unknown allowed-tool '${unknownTool}'. Fix its SKILL.md frontmatter before use.`,
-                };
-            }
             const policyKey = this.getSkillPolicyKey(context);
             if (policyKey) {
-                const previous = this.activeSkillPolicies.get(policyKey);
-                const declared = new Set(declaredTools);
-                const effectiveAllowedTools = previous
-                    ? new Set([...previous.allowedTools].filter(tool => declared.has(tool)))
-                    : declared;
-                this.activeSkillPolicies.delete(policyKey);
-                this.activeSkillPolicies.set(policyKey, {
-                    skillNames: previous?.skillNames.includes(loaded.skill.name)
-                        ? previous.skillNames
-                        : [...(previous?.skillNames ?? []), loaded.skill.name],
-                    allowedTools: effectiveAllowedTools,
-                });
-                while (this.activeSkillPolicies.size > AgentToolExecutor.ACTIVE_SKILL_POLICY_LIMIT) {
-                    const oldest = this.activeSkillPolicies.keys().next().value as string | undefined;
-                    if (oldest === undefined) break;
-                    this.activeSkillPolicies.delete(oldest);
+                const merged = this.mergeSkillPolicy(policyKey, loaded.skill.name, declaredTools);
+                if (!merged.ok) {
+                    return {
+                        success: false,
+                        error: `Skill '${loaded.skill.name}' declares unknown allowed-tool '${merged.unknownTool}'. Fix its SKILL.md frontmatter before use.`,
+                    };
                 }
             }
         }
@@ -2992,14 +3075,55 @@ export class AgentToolExecutor {
         return threadId ? `thread:${threadId}` : undefined;
     }
 
-    private saveWorkflow(args: Record<string, unknown>, context?: import('./types').AgentToolContext): unknown {
-        const result = saveProjectWorkflow(
-            args as any,
-            this.workspaceRoot,
-            (filePath, previousContent) => context?.onBeforeFileWrite?.(filePath, previousContent)
-        );
+    private saveSkill(args: Record<string, unknown>, context?: import('./types').AgentToolContext): unknown {
+        const scope = args.scope === 'project' || args.scope === 'user' ? args.scope : undefined;
+        if (!scope) {
+            return { success: false, error: `save_skill requires scope 'project' or 'user'.` };
+        }
+        const capabilityDomain = args.capability_domain === 'general'
+            || args.capability_domain === 'paradox'
+            || args.capability_domain === 'both'
+            ? args.capability_domain
+            : undefined;
+        const allowedTools = Array.isArray(args.allowed_tools)
+            ? args.allowed_tools
+                .filter((value): value is string => typeof value === 'string')
+                .map(value => value.trim())
+                .filter(Boolean)
+            : undefined;
+        const unknownTool = allowedTools?.find(tool => !TOOL_REGISTRY.has(tool as import('./types').AgentToolName));
+        if (unknownTool) {
+            return {
+                success: false,
+                error: `save_skill: unknown allowed_tools entry '${unknownTool}'. Use tool names from the registry.`,
+            };
+        }
+
+        const result = saveSkillFile({
+            name: typeof args.name === 'string' ? args.name : '',
+            description: typeof args.description === 'string' ? args.description : '',
+            body: typeof args.body === 'string' ? args.body : '',
+            capabilityDomain,
+            runAs: typeof args.run_as === 'string' ? args.run_as : undefined,
+            allowedTools,
+            scope,
+            workspaceRoot: this.workspaceRoot,
+            homeDir: getCwtoolsHomeDir(),
+            overwrite: args.overwrite === true,
+            onBeforeWrite: (filePath, previousContent) => context?.onBeforeFileWrite?.(filePath, previousContent),
+        });
         if (result.success) {
-            this.onWorkflowSaved?.();
+            context?.onStep?.({
+                type: 'thinking',
+                content: aiText(
+                    `Skill saved: ${result.name} (${result.scope === 'project' ? 'project' : 'user'}-level). It is now available through run_skill.`,
+                    `技能已保存：${result.name}（${result.scope === 'project' ? '项目级' : '用户级'}），可用 run_skill 调用。`,
+                ),
+                timestamp: Date.now(),
+            });
+            // Saving a skill changes the `/skill:<name>` catalog; the panel must
+            // resend it so an open popup sees the new command immediately.
+            this.onSkillSaved?.();
         }
         return result;
     }
@@ -3476,37 +3600,126 @@ export class AgentToolExecutor {
     // - MCP Connection Pool -
 
     /** Per-server MCP connection pool.  Avoids re-connecting on every tool call
-     *  during a reasoning loop (connect + initialize handshake can take 500ms+). */
-    private mcpPool = new Map<string, { client: import('./mcpClient').MCPClient; lastUsed: number; timer: ReturnType<typeof setTimeout> }>();
+     *  during a reasoning loop (connect + initialize handshake can take 500ms+).
+     *  The fingerprint detects config edits (settings or mcp.json) so a changed
+     *  server is reconnected instead of reused. */
+    private mcpPool = new Map<string, { client: import('./mcpClient').MCPClient; lastUsed: number; timer: ReturnType<typeof setTimeout>; fingerprint: string }>();
     /** Idle timeout before an MCP connection is automatically disconnected (ms). */
     private static readonly MCP_IDLE_TIMEOUT_MS = 60_000;
 
+    /** Version token of the last mcp.json warning set we logged (log once per file change). */
+    private lastLoggedMcpConfigVersion?: string;
+
+    /**
+     * Merge MCP servers from VS Code settings (lowest priority), the user-level
+     * ~/.cwtools/mcp.json, and the project-level .cwtools/mcp.json (highest
+     * priority, untrusted — see ensureProjectMcpServerApproved).
+     */
+    private getMergedMcpServers(): SourcedMCPServerConfig[] {
+        const config = vs.workspace.getConfiguration('stellarisLanguageServices.ai');
+        const settingsServers = config.get<import('./types').MCPServerConfig[]>('mcp.servers') || [];
+        const fileConfigs = loadMcpServerFileConfigs(this.workspaceRoot || undefined);
+        if (fileConfigs.warnings.length > 0 && fileConfigs.version !== this.lastLoggedMcpConfigVersion) {
+            this.lastLoggedMcpConfigVersion = fileConfigs.version;
+            for (const warning of fileConfigs.warnings) {
+                ErrorReporter.warn('mcp', warning);
+            }
+        }
+        return mergeMcpServerConfigs(settingsServers, fileConfigs.home, fileConfigs.project);
+    }
+
+    /** Project-sourced MCP servers approved for connection this session (name → config fingerprint). */
+    private approvedProjectMcpServers = new Map<string, string>();
+
+    private static mcpServerFingerprint(server: SourcedMCPServerConfig): string {
+        return JSON.stringify(server);
+    }
+
+    /** An approved project server stays approved until its file entry changes. */
+    private isProjectMcpServerApproved(server: SourcedMCPServerConfig): boolean {
+        return this.approvedProjectMcpServers.get(server.name) === AgentToolExecutor.mcpServerFingerprint(server);
+    }
+
+    /**
+     * `.cwtools/mcp.json` inside a workspace is untrusted repository input, so a
+     * project-sourced server requires explicit one-time approval before the
+     * first connection (re-prompted when its config changes). Settings/home
+     * servers are user-level configuration and keep the enable-and-go behavior.
+     */
+    private async ensureProjectMcpServerApproved(
+        server: SourcedMCPServerConfig,
+        context?: import('./types').AgentToolContext,
+    ): Promise<{ ok: true } | { ok: false; error: string }> {
+        if (mcpServerSource(server) !== 'project' || this.isProjectMcpServerApproved(server)) {
+            return { ok: true };
+        }
+        const isSubAgent = !!context?.runnerOptions?.useSlimPrompt;
+        if (isSubAgent || !context?.onPermissionRequest) {
+            return {
+                ok: false,
+                error: `MCP server '${server.name}' is declared in the workspace's .cwtools/mcp.json and needs one-time user approval before connecting. Call it from the main agent so the user can approve it.`,
+            };
+        }
+        const target = server.type === 'stdio'
+            ? `${server.command ?? ''} ${(server.args ?? []).join(' ')}`.trim()
+            : server.url ?? '';
+        const permissionId = `mcp_project_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+        const approved = await context.onPermissionRequest(
+            permissionId,
+            'mcp_call',
+            aiText(
+                `AI requests to connect to MCP server '${server.name}' declared in this workspace's .cwtools/mcp.json (${server.type}: ${target}). Approve only if you trust this repository.`,
+                `AI 请求连接本工作区 .cwtools/mcp.json 中声明的 MCP 服务器「${server.name}」（${server.type}: ${target}）。仅在信任该仓库时批准。`,
+            ),
+            undefined,
+            {
+                ...context,
+                preflight: {
+                    riskLevel: 3,
+                    classification: ['mcp'],
+                    reasons: ['Project-level MCP server from .cwtools/mcp.json requires first-connect approval.'],
+                    sandboxMode: 'mcp-server',
+                    mcpServer: server.name,
+                },
+            },
+        );
+        if (!approved) {
+            return { ok: false, error: `User denied connecting to project-level MCP server '${server.name}'.` };
+        }
+        this.approvedProjectMcpServers.set(server.name, AgentToolExecutor.mcpServerFingerprint(server));
+        // A newly approved project server was skipped by dynamic disclosure;
+        // drop the cache so the next refresh lists its tools.
+        this.dynamicMcpToolCache = undefined;
+        return { ok: true };
+    }
+
     /** Get or create a pooled MCP client for the given server. */
     private async getMcpClient(serverName: string, abortSignal?: AbortSignal): Promise<import('./mcpClient').MCPClient> {
+        const servers = this.getMergedMcpServers();
+        const serverConfig = servers.find(server => server.name === serverName);
+        if (!serverConfig) throw new Error(`MCP server "${serverName}" not found in configuration`);
+        if (!['paradox', 'general', 'both'].includes(serverConfig.capabilityDomain)) {
+            throw new Error(`MCP server "${serverName}" must declare capabilityDomain`);
+        }
+        const fingerprint = AgentToolExecutor.mcpServerFingerprint(serverConfig);
+
         const cached = this.mcpPool.get(serverName);
-        if (cached) {
+        if (cached && cached.fingerprint === fingerprint) {
             cached.lastUsed = Date.now();
             // Reset idle timer
             clearTimeout(cached.timer);
             cached.timer = setTimeout(() => this.evictMcpClient(serverName), AgentToolExecutor.MCP_IDLE_TIMEOUT_MS);
             return cached.client;
         }
+        if (cached) this.evictMcpClient(serverName);
 
         // Create new connection
         const { MCPClient } = await import('./mcpClient');
-        const config = vs.workspace.getConfiguration('stellarisLanguageServices.ai');
-        const servers = config.get<import('./types').MCPServerConfig[]>('mcp.servers') || [];
-        const serverConfig = servers.find(server => server.name === serverName);
-        if (!serverConfig) throw new Error(`MCP server "${serverName}" not found in configuration`);
-        if (!['paradox', 'general', 'both'].includes(serverConfig.capabilityDomain)) {
-            throw new Error(`MCP server "${serverName}" must declare capabilityDomain`);
-        }
-
         const client = new MCPClient(serverConfig);
         await client.connect(abortSignal);
 
         const timer = setTimeout(() => this.evictMcpClient(serverName), AgentToolExecutor.MCP_IDLE_TIMEOUT_MS);
-        this.mcpPool.set(serverName, { client, lastUsed: Date.now(), timer });
+        this.mcpPool.set(serverName, { client, lastUsed: Date.now(), timer, fingerprint });
         return client;
     }
 
@@ -3530,6 +3743,7 @@ export class AgentToolExecutor {
     private dynamicMcpToolCache?: {
         domain: import('./types').AgentRuntimeDomain;
         at: number;
+        configVersion: string;
         defs: import('./types').ToolDefinition[];
     };
     /** Reverse map for registered dynamic names — avoids ambiguous parsing when server names contain '_'. */
@@ -3546,18 +3760,25 @@ export class AgentToolExecutor {
         if (!evaluateEffectiveToolPolicy('mcp_call', { mode, domain }).allowed) return [];
 
         const runtimeDomain = domain;
+        const servers = this.getMergedMcpServers();
+        // Include the mcp.json file fingerprint so edits invalidate within one TTL.
+        const configVersion = `${loadMcpServerFileConfigs(this.workspaceRoot || undefined).version}#${servers.length}`;
         if (this.dynamicMcpToolCache
             && this.dynamicMcpToolCache.domain === runtimeDomain
+            && this.dynamicMcpToolCache.configVersion === configVersion
             && Date.now() - this.dynamicMcpToolCache.at < AgentToolExecutor.MCP_TOOL_CACHE_TTL_MS) {
             return this.dynamicMcpToolCache.defs;
         }
-        const servers = cfg.get<import('./types').MCPServerConfig[]>('mcp.servers') || [];
         const defs: import('./types').ToolDefinition[] = [];
         const nameMap = new Map<string, { server: string; tool: string }>();
         for (const server of servers) {
             const serverName = server?.name;
             if (!serverName || (server as { enabled?: boolean }).enabled === false
                 || !isMcpServerAllowedForDomain(server, runtimeDomain)) continue;
+            // Project-level servers connect only after explicit user approval
+            // (granted through an mcp_call in the main agent); listing tools
+            // would silently spawn the untrusted stdio command.
+            if (!this.isProjectMcpServerApproved(server) && mcpServerSource(server) === 'project') continue;
             try {
                 const client = await this.getMcpClient(serverName);
                 const listed = await Promise.race([
@@ -3586,7 +3807,7 @@ export class AgentToolExecutor {
             }
         }
         this.dynamicMcpToolNames = nameMap;
-        this.dynamicMcpToolCache = { domain: runtimeDomain, at: Date.now(), defs };
+        this.dynamicMcpToolCache = { domain: runtimeDomain, at: Date.now(), configVersion, defs };
         return defs;
     }
 
@@ -3674,8 +3895,7 @@ export class AgentToolExecutor {
         if (!runtimeDomain) {
             return { success: false, error: 'MCP calls require an active scheduler context.', terminalOutcome: 'policy_denied' };
         }
-        const configuredServers = vs.workspace.getConfiguration('stellarisLanguageServices.ai')
-            .get<import('./types').MCPServerConfig[]>('mcp.servers', []);
+        const configuredServers = this.getMergedMcpServers();
         const configuredServer = configuredServers.find(server => server.name === serverName);
         if (!configuredServer) {
             return { success: false, error: `MCP server '${serverName}' not found in configuration.` };
@@ -3685,6 +3905,13 @@ export class AgentToolExecutor {
                 success: false,
                 error: `MCP server '${serverName}' is not explicitly enabled for the '${runtimeDomain}' capability domain.`,
             };
+        }
+
+        // Untrusted repository input: a project-level .cwtools/mcp.json server
+        // must be explicitly approved once before its first connection.
+        const projectGate = await this.ensureProjectMcpServerApproved(configuredServer, context);
+        if (!projectGate.ok) {
+            return { success: false, error: projectGate.error, terminalOutcome: 'permission_denied' };
         }
 
         const CONNECTION_ERRORS = /ECONNREFUSED|EPIPE|disconnect|not connected|ECONNRESET/i;
@@ -3944,7 +4171,9 @@ export class AgentToolExecutor {
         const normalizedTasks = (tasks ?? []).map(task => normalizeDispatchTaskForLocalisationYml(task));
         // Per-task model selection is model-visible untrusted input: validate
         // and normalize before any value reaches TaskNode/AgentRunnerOptions.
-        const builtinProviderIds = new Set<string>(Object.keys(BUILTIN_PROVIDERS));
+        // Home providers (~/.cwtools/providers.json) are admitted alongside
+        // built-in ids.
+        const builtinProviderIds = new Set<string>([...Object.keys(BUILTIN_PROVIDERS), ...Object.keys(getHomeProviders())]);
         const taskModelSelections = new Map<string, {
             model?: string;
             provider?: string;
@@ -4212,7 +4441,9 @@ export class AgentToolExecutor {
             const { Orchestrator } = await import('./orchestrator/orchestrator');
             const { TaskGraphEngine, validateNodeModelSelection } = await import('./orchestrator/taskGraphEngine');
             const cfg = vs.workspace.getConfiguration('stellarisLanguageServices.ai');
-            const agentModels = cfg.get<Record<string, { provider: string; model: string }>>('orchestrator.agentModels');
+            // Settings are the base layer; ~/.cwtools/agent-models.json overrides
+            // same-named roles wholesale.
+            const agentModels = getAgentModelOverrides(cfg.get<Record<string, { provider: string; model: string }>>('orchestrator.agentModels'));
 
             // Build TaskGraph (resume path restores the persisted graph and
             // merges appended read-only tasks and clarification answers).
@@ -4982,8 +5213,8 @@ export class AgentToolExecutor {
                 providerId: runnerOpts.providerId,
                 model: runnerOpts.model,
                 reasoningEffort: runnerOpts.reasoningEffort,
-                agentModelOverrides: vs.workspace.getConfiguration('stellarisLanguageServices.ai')
-                    .get<Record<string, { provider: string; model: string }>>('orchestrator.agentModels'),
+                agentModelOverrides: getAgentModelOverrides(vs.workspace.getConfiguration('stellarisLanguageServices.ai')
+                    .get<Record<string, { provider: string; model: string }>>('orchestrator.agentModels')),
                 abortSignal: activation.signal,
                 topicId: runnerOpts.topicId,
                 parentRunId,

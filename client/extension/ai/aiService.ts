@@ -43,6 +43,9 @@ import {
 import { DEFAULT_REASONING_KEY, detectReasoningKey, KNOWN_REASONING_KEYS, reasoningValue } from './providers/reasoningKey';
 import { ErrorReporter } from './errorReporter';
 import { SOURCE, aiText } from './messages';
+import { getProjectWorkspaceRoot } from './workspacePaths';
+import { loadMcpServerFileConfigs, mergeMcpServerConfigs } from './mcpConfig';
+import { getHomeProviderApiKeyEnv, getHomeProviderEndpoint } from './providerConfig';
 import { ChatGptOAuthService, codexSubscriptionHeaders, codexWireReasoningEffort } from './codex/oauthService';
 import {
     CODEX_OPENAI_BETA,
@@ -1176,7 +1179,9 @@ export class AIService {
         const providerEndpoints = cfg.get<Record<string, string>>('providerEndpoints', {}) || {};
         const rawModel = this.modelOverride ?? cfg.get<string>('model', '');
         const model = provider === 'antigravity' ? antigravityDisplayModel(rawModel) : rawModel;
-        const endpoint = (providerEndpoints[provider] || '').trim();
+        // Home providers (~/.cwtools/providers.json) keep their endpoint in the
+        // file; the per-provider settings map never carries an entry for them.
+        const endpoint = (providerEndpoints[provider] || '').trim() || getHomeProviderEndpoint(provider);
         return {
             enabled: cfg.get<boolean>('enabled', false),
             provider,
@@ -1221,7 +1226,16 @@ export class AIService {
                 model: cfg.get<string>('translationPreview.model', ''),
             },
             mcp: {
-                servers: cfg.get<import('./types').MCPServerConfig[]>('mcp.servers', []),
+                // Settings are the lowest-priority layer; user (~/.cwtools/mcp.json)
+                // and project (.cwtools/mcp.json) files override same-named entries.
+                servers: ((): import('./types').MCPServerConfig[] => {
+                    const fileConfigs = loadMcpServerFileConfigs(getProjectWorkspaceRoot() || undefined);
+                    return mergeMcpServerConfigs(
+                        cfg.get<import('./types').MCPServerConfig[]>('mcp.servers', []),
+                        fileConfigs.home,
+                        fileConfigs.project,
+                    );
+                })(),
             },
         };
     }
@@ -1244,6 +1258,15 @@ export class AIService {
      * so an empty key slot falls back to a freshly renewed access token.
      */
     async getKeyForProvider(providerId: string): Promise<string> {
+        // A home provider (~/.cwtools/providers.json) may name an environment
+        // variable as its credential source; the file never stores the key
+        // itself. The env var wins over SecretStorage, keeping the overall
+        // order options override > env > SecretStorage (see chatCompletion).
+        const apiKeyEnv = getHomeProviderApiKeyEnv(providerId);
+        if (apiKeyEnv) {
+            const fromEnv = process.env[apiKeyEnv];
+            if (fromEnv && fromEnv.trim().length > 0) return fromEnv.trim();
+        }
         const stored = await this.keyManager.getKey(providerId);
         if (stored) return stored;
         if (providerId === 'kimi-code-plan') {

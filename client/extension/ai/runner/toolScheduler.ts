@@ -84,14 +84,6 @@ export function getAgentToolTargetFiles(
             }
         }
     };
-    const workflowId = (value: unknown, fallback: unknown): string | undefined => {
-        const source = String(value || fallback || '').trim().toLowerCase();
-        return source
-            .replace(/[^a-z0-9_.-]+/g, '-')
-            .replace(/^[.-]+|[.-]+$/g, '')
-            .slice(0, 80);
-    };
-
     switch (toolName) {
         case 'write_file':
         case 'git_ops':
@@ -154,12 +146,6 @@ export function getAgentToolTargetFiles(
             if (workspaceRoot) {
                 const blueprintDir = getPrivateTopicStorageDir(topicId || 'default', workspaceRoot);
                 paths.push(path.join(blueprintDir, 'Implementation_Plan.md'));
-            }
-            break;
-        case 'save_workflow':
-            if (workspaceRoot) {
-                const id = workflowId(args.id, args.title);
-                if (id) paths.push(path.join(workspaceRoot, '.cwtools', 'workflows', `${id}.md`));
             }
             break;
     }

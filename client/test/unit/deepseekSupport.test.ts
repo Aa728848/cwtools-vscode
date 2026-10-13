@@ -40,8 +40,9 @@ moduleLoader._load = function (this: unknown, request: string, ...args: any[]) {
 };
 describe('sub-agent command capability', () => {
     it('grants run_command only to profiles that declare it', () => {
-        expect(validateToolCapability('run_command', { mode: 'build', domain: 'paradox', isSubAgent: true, profileName: 'paradox-coder' }).allowed).to.be.false;
+        expect(validateToolCapability('run_command', { mode: 'build', domain: 'paradox', isSubAgent: true, profileName: 'paradox-coder' }).allowed).to.be.true;
         expect(validateToolCapability('run_command', { mode: 'utility', domain: 'general', isSubAgent: true, profileName: 'general-coder' }).allowed).to.be.true;
+        expect(validateToolCapability('run_command', { mode: 'build', domain: 'paradox', isSubAgent: true, profileName: 'localization-writer' }).allowed).to.be.false;
     });
 });
 

@@ -1122,7 +1122,7 @@ export async function activate(context: ExtensionContext) {
 	safeRegisterCommand(context, 'cwtools.ai.clearPrivateHistory', async () => {
 		const confirm = aiText('Clear private Agent history', '清除 Agent 私有历史');
 		const choice = await window.showWarningMessage(
-			aiText('This removes private runs, checkpoints, goals, and learned memory for this workspace. Project files and shared workflows are not affected.', '这会删除当前工作区的私有运行记录、检查点、目标和学习记忆，但不会影响项目文件和共享工作流。'),
+			aiText('This removes private runs, checkpoints, goals, and learned memory for this workspace. Project files are not affected.', '这会删除当前工作区的私有运行记录、检查点、目标和学习记忆，但不会影响项目文件。'),
 			{ modal: true },
 			confirm,
 		);

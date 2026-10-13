@@ -56,6 +56,7 @@ import {
 } from './chat/topicViews';
 import { getChatI18n } from './chat/i18n';
 import { parseHostMessage } from './chat/hostProtocol';
+import { findFileReferences } from './chat/fileReferences';
 import {
     buildSlashCommands,
     filterSlashCommands,
@@ -63,7 +64,6 @@ import {
     renderSlashCommandItems,
     type SlashCommandView,
 } from './chat/slashCommands';
-import { type WorkflowView } from './chat/workflows';
 import { createMarkdownRenderer } from './chat/markdown';
 import { startMermaidRendering } from './chat/mermaidRenderer';
 import { startMessageSelectionActions } from './chat/messageSelectionActions';
@@ -118,7 +118,7 @@ interface AgentSchedulingStateView {
     routeConfidence: number;
     routeEvidence: string[];
     awaitingUserDecision: boolean;
-    routingSource?: 'model' | 'deterministic' | 'workflow' | 'user';
+    routingSource?: 'model' | 'deterministic' | 'user';
     phaseReason: string;
     dispatchReason?: string;
     revision: number;
@@ -158,7 +158,7 @@ function parseSchedulingStateView(value: unknown): AgentSchedulingStateView | un
         routeConfidence: Math.max(0, Math.min(1, routeConfidence)),
         routeEvidence: routeEvidence.map(item => item.slice(0, 240)).slice(0, 4),
         awaitingUserDecision: candidate.awaitingUserDecision === true,
-        routingSource: routingSource === 'model' || routingSource === 'deterministic' || routingSource === 'workflow' || routingSource === 'user'
+        routingSource: routingSource === 'model' || routingSource === 'deterministic' || routingSource === 'user'
             ? routingSource
             : undefined,
         phaseReason: phaseReason.slice(0, 500),
@@ -374,6 +374,40 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
     const userMessagePayloadMap = new Map<number, UserMessageInputPayload>();
     let settingsProviders: any[] = [];
     let settingsOllamaModels: any[] = [];
+    /** MCP servers declared in ~/.cwtools/mcp.json or .cwtools/mcp.json (read-only view, badged by source). */
+    type McpFileServerView = { name: string; type?: string; command?: string; args?: string[]; url?: string; source?: string };
+    let settingsMcpFileServers: McpFileServerView[] = [];
+    /** Validation warnings collected while loading file-based MCP configs. */
+    let settingsMcpConfigWarnings: string[] = [];
+    /** Validation warnings collected while loading ~/.cwtools/providers.json. */
+    let settingsProviderFileWarnings: string[] = [];
+    /** Sub-agent roles whose model assignment comes from ~/.cwtools/agent-models.json (file-owned rows). */
+    const settingsAgentModelHomeRoles = new Set<string>();
+
+    function parseMcpFileServers(value: unknown): McpFileServerView[] {
+        if (!Array.isArray(value)) return [];
+        const out: McpFileServerView[] = [];
+        for (const item of value) {
+            if (!item || typeof item !== 'object') continue;
+            const candidate = item as Record<string, unknown>;
+            if (typeof candidate.name !== 'string' || !candidate.name.trim()) continue;
+            out.push({
+                name: candidate.name.slice(0, 100),
+                type: candidate.type === 'sse' ? 'sse' : 'stdio',
+                command: typeof candidate.command === 'string' ? candidate.command.slice(0, 300) : undefined,
+                args: Array.isArray(candidate.args) ? candidate.args.filter((a): a is string => typeof a === 'string').slice(0, 20) : undefined,
+                url: typeof candidate.url === 'string' ? candidate.url.slice(0, 300) : undefined,
+                source: candidate.source === 'project' ? 'project' : 'home',
+            });
+        }
+        return out;
+    }
+
+    /** Narrow the provenance badge on a settings provider row (untrusted host payload). */
+    function providerSourceOf(provider: unknown): 'home' | undefined {
+        if (!provider || typeof provider !== 'object') return undefined;
+        return (provider as { source?: unknown }).source === 'home' ? 'home' : undefined;
+    }
     let settingsCodexAccount: any = undefined;
     let settingsAntigravityAccount: AntigravityAccountStatus | undefined;
     let settingsCommandCodeAccount: any = undefined;
@@ -478,9 +512,7 @@ let settingsSubscriptionPools: Record<string, any> = {};
     let activeComposerEl: HTMLElement = input;
     let artifacts: ArtifactRecord[] = [];
     let artifactFilter: ArtifactFilter = 'all';
-    let workflows: WorkflowView[] = [];
     let slashCommandCatalog: SlashCommandView[] = [];
-    let activeWorkflowId: string | null = null;
     let quickModelOptions: string[] = [];
     let quickModelCurrent = '';
     let quickReasoningEffort: ReasoningEffortValue = 'high';
@@ -1894,10 +1926,10 @@ let settingsSubscriptionPools: Record<string, any> = {};
         const renderContexts = () => {
             contextRow.innerHTML = '';
             if (draftContexts.length === 0) {
-                contextRow.style.display = 'none';
+                contextRow.classList.add('row-hidden');
                 return;
             }
-            contextRow.style.display = '';
+            contextRow.classList.remove('row-hidden');
             draftContexts.forEach(ctx => {
                 contextRow.appendChild(buildInlineContextChip(ctx, () => {
                     draftContexts = draftContexts.filter(item => item.id !== ctx.id);
@@ -1909,10 +1941,10 @@ let settingsSubscriptionPools: Record<string, any> = {};
         const renderImages = () => {
             imageRow.innerHTML = '';
             if (draftImages.length === 0) {
-                imageRow.style.display = 'none';
+                imageRow.classList.add('row-hidden');
                 return;
             }
-            imageRow.style.display = '';
+            imageRow.classList.remove('row-hidden');
             draftImages.forEach(src => {
                 const wrap = document.createElement('div');
                 wrap.className = 'inline-edit-image';
@@ -2414,26 +2446,6 @@ let settingsSubscriptionPools: Record<string, any> = {};
         const quickDomainLabel = document.getElementById('quickDomainLabel');
         if (quickDomainLabel) quickDomainLabel.textContent = getSchedulingDomainSummary();
 
-        if (activeWorkflowId) {
-            const activeWorkflow = workflows.find(workflow => workflow.id === activeWorkflowId);
-            const workflowChip = document.createElement('button');
-            workflowChip.className = 'composer-chip workflow-chip';
-            workflowChip.type = 'button';
-            workflowChip.title = 'Turn off workflow';
-            const label = activeWorkflow?.title || activeWorkflowId;
-            const workflowIcon = document.createElement('span');
-            workflowIcon.className = 'composer-chip-icon';
-            workflowIcon.innerHTML = Icons.x;
-            const workflowText = document.createElement('span');
-            workflowText.textContent = label;
-            workflowChip.append(workflowIcon, workflowText);
-            workflowChip.addEventListener('click', e => {
-                e.stopPropagation();
-                vscode.postMessage({ type: 'switchWorkflow', workflowId: null });
-            });
-            chipRow.appendChild(workflowChip);
-        }
-
         document.querySelectorAll<HTMLElement>('.composer-menu-item[data-scheduling-domain]').forEach(item => {
             item.classList.toggle('active', item.dataset.schedulingDomain === schedulingState.domainProfile);
         });
@@ -2812,9 +2824,6 @@ let settingsSubscriptionPools: Record<string, any> = {};
             } else if (action === 'mentions') {
                 insertPlainTextAtRange('@');
                 input.dispatchEvent(new Event('input', { bubbles: true }));
-            } else if (action === 'workflows') {
-                setInputText('/workflow:');
-                input.dispatchEvent(new Event('input', { bubbles: true }));
             } else if (action === 'goal') {
                 setInputText('/goal ');
                 input.focus();
@@ -3039,6 +3048,15 @@ let settingsSubscriptionPools: Record<string, any> = {};
     bindBtn('accAgentProfiles', () => toggleAccordion('agentProfilesSection'));
     bindBtn('accWeb', () => toggleAccordion('webSection'));
     bindBtn('accSkills', () => toggleAccordion('skillsSection'));
+    // Wrap each accordion body in a single inner element so the open/close
+    // transition can animate one grid row (see .accordion-body in chatPanel.css).
+    document.querySelectorAll<HTMLElement>('.accordion-body').forEach(body => {
+        if (body.firstElementChild?.classList.contains('accordion-body-inner')) return;
+        const inner = document.createElement('div');
+        inner.className = 'accordion-body-inner';
+        while (body.firstChild) inner.appendChild(body.firstChild);
+        body.appendChild(inner);
+    });
     bindBtn('addMcpServerBtn', () => addMcpServerBlock());
     bindBtn('accUsage', () => { toggleAccordion('usageSection'); vscode.postMessage({ type: 'requestUsageStats' }); });
     bindBtn('refreshUsageBtn', () => vscode.postMessage({ type: 'requestUsageStats' }));
@@ -3142,7 +3160,10 @@ let settingsSubscriptionPools: Record<string, any> = {};
         const target = draftProviderId && (providers || []).some((p: any) => p.id === draftProviderId)
             ? draftProviderId
             : savedProviderId;
-        sel.innerHTML = (providers || []).map((p: any) => '<option value="' + p.id + '"' + (p.id === target ? ' selected' : '') + '>' + escapeHtml(p.name) + '</option>').join('');
+        // Home providers carry a provenance badge so a file-owned line is
+        // recognizable directly in the dropdown.
+        sel.innerHTML = (providers || []).map((p: any) => '<option value="' + p.id + '"' + (p.id === target ? ' selected' : '') + '>'
+            + escapeHtml(p.name) + (providerSourceOf(p) === 'home' ? escapeHtml(' (~/.cwtools)') : '') + '</option>').join('');
     }
 
     function refreshSettingsDraftStatus(): void {
@@ -3227,7 +3248,7 @@ let settingsSubscriptionPools: Record<string, any> = {};
     function showSlashPopup(filter: string) {
         if (!slashPopup) return;
         slashMatches = filterSlashCommands(
-            buildSlashCommands(slashCommandCatalog, workflows),
+            buildSlashCommands(slashCommandCatalog),
             filter,
         );
         slashSelectedIndex = 0;
@@ -3332,7 +3353,6 @@ let settingsSubscriptionPools: Record<string, any> = {};
         _mentionResults = results;
         _mentionSelectedIndex = 0;
         if (results.length === 0) {
-            atPopup.style.display = 'none';
             atPopup.classList.remove('show');
             _atPopupVisible = false;
             return;
@@ -3388,7 +3408,6 @@ let settingsSubscriptionPools: Record<string, any> = {};
                 replaceAtTriggerWithReference(mentionResultToActiveContext(result));
             });
         });
-        atPopup.style.display = '';
         positionComposerSuggestionPopup(atPopup);
         atPopup.classList.add('show');
         _atPopupVisible = true;
@@ -3523,7 +3542,6 @@ let settingsSubscriptionPools: Record<string, any> = {};
 
     function closeAtPopup() {
         if (atPopup) {
-            atPopup.style.display = 'none';
             atPopup.classList.remove('show');
             _atPopupVisible = false;
             _mentionResults = [];
@@ -3851,10 +3869,25 @@ let settingsSubscriptionPools: Record<string, any> = {};
     const formatTime = _fmtFormatTime;
     const escapeHtml = _fmtEscapeHtml;
 
+    // ── Streaming scroll pinning ─────────────────────────────────────────────
+    // isUserScrolledUp is a LATCH, not an instantaneous measurement: once the
+    // user scrolls up during streaming it stays set until they scroll back to
+    // within 65px of the bottom, click the jump-latest button, or a forced
+    // scroll (new user message / new turn) unlocks it. Content-height shrink
+    // (live-turn innerHTML rebuilds, clipLiveMarkdownContent truncation,
+    // virtual-scroll placeholders) makes the browser clamp scrollTop on its
+    // own; that passive movement must neither set nor clear the latch. The
+    // scroll handler therefore only trusts the direction of scrollTop changes
+    // and requires ~30px of cumulative upward drift while away from the bottom
+    // before latching, so shrink-clamps (which land at the bottom) and growth
+    // (which does not move scrollTop) can never toggle it.
     let isUserScrolledUp = false;
     let scrollBottomPending = false;
     let subagentScrollPending = false;
+    let lastChatScrollTop = 0;
+    let chatUpwardDrift = 0;
     const subagentUserScrolledUp = new WeakMap<HTMLElement, boolean>();
+    const subagentScrollTrack = new WeakMap<HTMLElement, { lastTop: number; upwardDrift: number }>();
     const jumpLatestBtn = document.createElement('button');
     jumpLatestBtn.className = 'jump-latest-btn';
     jumpLatestBtn.type = 'button';
@@ -3865,16 +3898,45 @@ let settingsSubscriptionPools: Record<string, any> = {};
     });
     document.body.appendChild(jumpLatestBtn);
     chatArea.addEventListener('scroll', () => {
-        isUserScrolledUp = chatArea.scrollHeight - chatArea.scrollTop - chatArea.clientHeight > 65;
+        const scrollTop = chatArea.scrollTop;
+        const distanceFromBottom = chatArea.scrollHeight - scrollTop - chatArea.clientHeight;
+        const delta = scrollTop - lastChatScrollTop;
+        lastChatScrollTop = scrollTop;
+        if (distanceFromBottom <= 65) {
+            chatUpwardDrift = 0;
+            // Reaching the bottom only unlocks on an actual downward (or still)
+            // movement; a shrink-clamp that lands here keeps the latch.
+            if (delta >= 0) isUserScrolledUp = false;
+        } else if (delta < 0) {
+            chatUpwardDrift += -delta;
+            if (chatUpwardDrift > 30) isUserScrolledUp = true;
+        } else {
+            chatUpwardDrift = 0;
+        }
         jumpLatestBtn.classList.toggle('show', isUserScrolledUp);
     });
 
     function bindSubagentScroll(fullscreen: HTMLElement): void {
         if (fullscreen.dataset.scrollBound === 'true') return;
         fullscreen.dataset.scrollBound = 'true';
+        subagentScrollTrack.set(fullscreen, { lastTop: fullscreen.scrollTop, upwardDrift: 0 });
         fullscreen.addEventListener('scroll', () => {
-            const scrolledUp = fullscreen.scrollHeight - fullscreen.scrollTop - fullscreen.clientHeight > 65;
-            subagentUserScrolledUp.set(fullscreen, scrolledUp);
+            // Same latch semantics as the main chat area (see above).
+            const track = subagentScrollTrack.get(fullscreen) || { lastTop: 0, upwardDrift: 0 };
+            const scrollTop = fullscreen.scrollTop;
+            const distanceFromBottom = fullscreen.scrollHeight - scrollTop - fullscreen.clientHeight;
+            const delta = scrollTop - track.lastTop;
+            track.lastTop = scrollTop;
+            if (distanceFromBottom <= 65) {
+                track.upwardDrift = 0;
+                if (delta >= 0) subagentUserScrolledUp.set(fullscreen, false);
+            } else if (delta < 0) {
+                track.upwardDrift += -delta;
+                if (track.upwardDrift > 30) subagentUserScrolledUp.set(fullscreen, true);
+            } else {
+                track.upwardDrift = 0;
+            }
+            subagentScrollTrack.set(fullscreen, track);
         });
     }
 
@@ -3883,6 +3945,8 @@ let settingsSubscriptionPools: Record<string, any> = {};
         subagentScrollPending = true;
         requestAnimationFrame(() => {
             subagentScrollPending = false;
+            // A frame queued before the user scrolled up must not yank the view.
+            if (subagentUserScrolledUp.get(fullscreen)) return;
             fullscreen.scrollTop = fullscreen.scrollHeight;
             subagentUserScrolledUp.set(fullscreen, false);
         });
@@ -3902,18 +3966,27 @@ let settingsSubscriptionPools: Record<string, any> = {};
         const activeSubagent = document.querySelector('.subagent-fullscreen-view.active') as HTMLElement | null;
         if (activeSubagent) {
             bindSubagentScroll(activeSubagent);
-            if (force || !subagentUserScrolledUp.get(activeSubagent)) {
+            if (force) subagentUserScrolledUp.set(activeSubagent, false);
+            if (!subagentUserScrolledUp.get(activeSubagent)) {
                 scrollSubagentBottom(activeSubagent);
             }
             return;
         }
-        if (force || !isUserScrolledUp) {
+        if (force) {
+            isUserScrolledUp = false;
+            chatUpwardDrift = 0;
+        }
+        if (!isUserScrolledUp) {
             if (scrollBottomPending) return;
             scrollBottomPending = true;
             requestAnimationFrame(() => {
                 scrollBottomPending = false;
+                // Re-check inside the frame: streaming queues many of these, and
+                // a user who scrolled up meanwhile must not be pulled back down.
+                if (isUserScrolledUp) return;
                 chatArea.scrollTop = chatArea.scrollHeight;
                 isUserScrolledUp = false;
+                chatUpwardDrift = 0;
                 jumpLatestBtn.classList.remove('show');
             });
         }
@@ -3967,6 +4040,58 @@ let settingsSubscriptionPools: Record<string, any> = {};
             });
             block.appendChild(btn);
         });
+    }
+
+    // ── File reference linkifier ─────────────────────────────────────────────
+    // Post-processes rendered markdown DOM: `path:line(-line)` text inside
+    // .markdown-body (and inline code within p/li/td) becomes a button that the
+    // chatArea delegation turns into an openFileAtLine host message. Links,
+    // code blocks (.md-codeblock/pre), buttons and already-processed nodes are
+    // skipped. Runs on the rendered DOM only; the markdown string renderer is
+    // untouched.
+    function linkifyFileReferences(container: HTMLElement) {
+        const roots: HTMLElement[] = [];
+        if (container.classList.contains('markdown-body')) roots.push(container);
+        container.querySelectorAll<HTMLElement>('.markdown-body').forEach(el => {
+            if (!roots.includes(el)) roots.push(el);
+        });
+        for (const root of roots) {
+            const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+            const textNodes: Text[] = [];
+            for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+                const parent = (node as Text).parentElement;
+                if (!parent) continue;
+                if (parent.closest('a, pre, button, script, style, .md-codeblock, .file-ref-link')) continue;
+                const inlineCode = parent.closest('code');
+                if (inlineCode && !inlineCode.closest('p, li, td')) continue;
+                textNodes.push(node as Text);
+            }
+            for (const textNode of textNodes) {
+                const matches = findFileReferences(textNode.data);
+                if (matches.length === 0) continue;
+                const fragment = document.createDocumentFragment();
+                let cursor = 0;
+                for (const match of matches) {
+                    if (match.index > cursor) {
+                        fragment.appendChild(document.createTextNode(textNode.data.slice(cursor, match.index)));
+                    }
+                    const link = document.createElement('button');
+                    link.type = 'button';
+                    link.className = 'file-ref-link';
+                    link.dataset.file = match.file;
+                    link.dataset.line = String(match.startLine);
+                    if (match.endLine !== undefined) link.dataset.endLine = String(match.endLine);
+                    link.title = chatI18n.links.openFileAtLine;
+                    link.textContent = match.text;
+                    fragment.appendChild(link);
+                    cursor = match.index + match.text.length;
+                }
+                if (cursor < textNode.data.length) {
+                    fragment.appendChild(document.createTextNode(textNode.data.slice(cursor)));
+                }
+                textNode.parentNode?.replaceChild(fragment, textNode);
+            }
+        }
     }
 
     // ── Batch 3.2: Task list checkbox rendering ──────────────────────────────
@@ -4533,6 +4658,7 @@ let settingsSubscriptionPools: Record<string, any> = {};
         setMessageAria(div, 'assistant');
         enhanceCodeBlocks(div);
         enhanceTaskLists(div);
+        linkifyFileReferences(div);
         observeMessage(div);
 
         return div;
@@ -4944,6 +5070,7 @@ let settingsSubscriptionPools: Record<string, any> = {};
         restoreCodexTurnUiState(host, uiSnapshot);
         enhanceCodeBlocks(host);
         enhanceTaskLists(host);
+        linkifyFileReferences(host);
     }
 
     function scheduleCodexLiveTurnRender(state: AgentStreamState, finalContent = ''): void {
@@ -5071,7 +5198,7 @@ let settingsSubscriptionPools: Record<string, any> = {};
             standaloneCompactionCard.classList.add('context-compaction-standalone');
         }
         updateContextMeterFromCompaction(step);
-        scrollBottom(true);
+        scrollBottom();
     }
 
     function applyLiveStep(s: any) {
@@ -5459,6 +5586,22 @@ let settingsSubscriptionPools: Record<string, any> = {};
         }
     });
 
+    // Clickable `path:line(-line)` references produced by linkifyFileReferences.
+    chatArea.addEventListener('click', (e) => {
+        const link = (e.target as HTMLElement).closest('.file-ref-link') as HTMLElement | null;
+        if (!link) return;
+        const filePath = link.dataset.file;
+        if (!filePath) return;
+        const startLine = link.dataset.line ? Number(link.dataset.line) : NaN;
+        const endLine = link.dataset.endLine ? Number(link.dataset.endLine) : NaN;
+        vscode.postMessage({
+            type: 'openFileAtLine',
+            filePath,
+            ...(Number.isInteger(startLine) ? { startLine } : {}),
+            ...(Number.isInteger(endLine) ? { endLine } : {}),
+        });
+    });
+
     // ── User message ───────────────────────────────────────────────────────────
     // Builds inline image thumbnails (clickable lightbox) from images array
     function buildImageRow(images: string[]) {
@@ -5713,11 +5856,9 @@ let settingsSubscriptionPools: Record<string, any> = {};
             // own mode escalation. The keyword router is gone, so neither the
             // 'model' (semantic classifier) nor the 'deterministic' (rule)
             // label describes a real path any more; both read as "Agent".
-            const sourceLabel = resolved.routingSource === 'workflow'
-                ? tr('Workflow scheduling', '工作流调度')
-                : resolved.routingSource === 'user'
-                    ? tr('User scheduling', '用户调度')
-                    : tr('Agent scheduling', '智能体调度');
+            const sourceLabel = resolved.routingSource === 'user'
+                ? tr('User scheduling', '用户调度')
+                : tr('Agent scheduling', '智能体调度');
             summary.textContent = resolved.awaitingUserDecision
                 ? `${sourceLabel} · ${tr('Awaiting your decision', '等待用户敲定')} · ${schedulingPhaseLabel(resolved.phase)}`
                 : `${sourceLabel} · ${schedulingPhaseLabel(resolved.phase)} · ${schedulingDispatchLabel(resolved.dispatch)} · ${schedulingAuthorizationLabel(resolved.authorization)}`;
@@ -6254,7 +6395,7 @@ let settingsSubscriptionPools: Record<string, any> = {};
             pageIndex = Math.max(0, Math.min(nextPageIndex, questions.length - 1));
             questionCards.forEach((card, index) => {
                 const visible = index === pageIndex;
-                card.style.display = visible ? 'block' : 'none';
+                card.classList.toggle('qc-hidden', !visible);
                 card.setAttribute('aria-hidden', visible ? 'false' : 'true');
             });
             const isFirst = pageIndex === 0;
@@ -6826,20 +6967,6 @@ let settingsSubscriptionPools: Record<string, any> = {};
                 break;
             }
 
-            case 'workflowList':
-                workflows = (msg.workflows || []) as WorkflowView[];
-                activeWorkflowId = msg.currentWorkflowId || null;
-                renderComposerChips();
-                break;
-
-            case 'workflowChanged':
-                activeWorkflowId = msg.workflowId || null;
-                if (msg.workflow && !workflows.some(workflow => workflow.id === msg.workflow.id)) {
-                    workflows = [...workflows, msg.workflow as WorkflowView];
-                }
-                renderComposerChips();
-                break;
-
             case 'slashCommandList':
                 slashCommandCatalog = Array.isArray(msg.commands) ? msg.commands as SlashCommandView[] : [];
                 if (slashPopup?.classList.contains('show')) {
@@ -6941,12 +7068,29 @@ let settingsSubscriptionPools: Record<string, any> = {};
                     if (!msg.skills || msg.skills.length === 0) {
                         list.innerHTML = `<div style="opacity:0.5; font-size:11px;">${tr('No local skills', '暂无本地技能')}</div>`;
                     } else {
+                        const rawSources: unknown = (msg as { skillSources?: unknown }).skillSources;
+                        const skillSources: Record<string, string> = rawSources && typeof rawSources === 'object'
+                            ? Object.fromEntries(
+                                Object.entries(rawSources as Record<string, unknown>)
+                                    .filter((entry): entry is [string, string] => typeof entry[1] === 'string'))
+                            : {};
+                        const skillSourceLabel = (source: string | undefined) => {
+                            switch (source) {
+                                case 'home': return '~/.cwtools';
+                                case 'legacy': return tr('legacy storage', '旧存储');
+                                case 'project': return tr('project', '项目');
+                                case 'both':
+                                case 'multiple': return tr('multiple dirs', '多处');
+                                default: return '';
+                            }
+                        };
                         msg.skills.forEach((skill: string) => {
+                            const sourceText = skillSourceLabel(skillSources[skill]);
                             const row = document.createElement('div');
                             row.style.display = 'flex';
                             row.style.justifyContent = 'space-between';
                             row.style.alignItems = 'center';
-                            row.innerHTML = `<span style="font-family:monospace;">${escapeHtml(skill)}</span>
+                            row.innerHTML = `<span style="font-family:monospace;">${escapeHtml(skill)}${sourceText ? ` <span class="skill-source-badge">${escapeHtml(sourceText)}</span>` : ''}</span>
                                 <button class="detect-btn" data-skill="${escapeHtml(skill)}" style="padding:0 6px; width:auto; border-radius:4px;" title="${tr('Delete this skill', '删除此技能')}">${svgIconNoMargin('trash')}</button>`;
                             row.querySelector('button')!.addEventListener('click', (e) => {
                                 const btn = e.currentTarget as HTMLButtonElement;
@@ -6992,6 +7136,16 @@ let settingsSubscriptionPools: Record<string, any> = {};
                 if (msg.modelContextTokens) settingsModelContextTokens = msg.modelContextTokens;
                 if (msg.thinkingModelPrefixes) settingsThinkingPrefixes = msg.thinkingModelPrefixes;
                 settingsReasoningCapabilities = msg.reasoningCapabilities || {};
+                {
+                    const mcpExtra = msg as { mcpFileServers?: unknown; mcpConfigWarnings?: unknown; providerFileWarnings?: unknown };
+                    settingsMcpFileServers = parseMcpFileServers(mcpExtra.mcpFileServers);
+                    settingsMcpConfigWarnings = Array.isArray(mcpExtra.mcpConfigWarnings)
+                        ? mcpExtra.mcpConfigWarnings.filter((w): w is string => typeof w === 'string').slice(0, 20)
+                        : [];
+                    settingsProviderFileWarnings = Array.isArray(mcpExtra.providerFileWarnings)
+                        ? mcpExtra.providerFileWarnings.filter((w): w is string => typeof w === 'string').slice(0, 20)
+                        : [];
+                }
                 updateQuickModelSelector(msg.providers, msg.current, msg.ollamaModels);
                 updateQuickReasoningSelector(msg.current);
                 updateQuickWriteModeSelector(deriveWriteTier(msg.current));
@@ -7521,6 +7675,11 @@ let settingsSubscriptionPools: Record<string, any> = {};
 
                 const filesList = document.createElement('div');
                 filesList.className = 'ds-files';
+                // Single inner wrapper so .ds-files can animate the summary
+                // collapse with the grid-rows technique (see chatPanel.css).
+                const filesInner = document.createElement('div');
+                filesInner.className = 'ds-files-inner';
+                filesList.appendChild(filesInner);
 
                 for (const f of summaryFiles) {
                     const fileEl = document.createElement('div');
@@ -7548,9 +7707,10 @@ let settingsSubscriptionPools: Record<string, any> = {};
 
                     // Line-level diff body (collapsed by default)
                     if (f.diffLines && f.diffLines.length > 0) {
+                        const diffCollapse = document.createElement('div');
+                        diffCollapse.className = 'ds-diff-collapse';
                         const diffBody = document.createElement('div');
                         diffBody.className = 'ds-diff-body';
-                        diffBody.style.display = 'none';
 
                         let diffHtml = '<table class="ds-diff-table"><tbody>';
                         for (const line of f.diffLines) {
@@ -7567,7 +7727,8 @@ let settingsSubscriptionPools: Record<string, any> = {};
                         }
                         diffHtml += '</tbody></table>';
                         diffBody.innerHTML = diffHtml;
-                        fileEl.appendChild(diffBody);
+                        diffCollapse.appendChild(diffBody);
+                        fileEl.appendChild(diffCollapse);
 
                         // Toggle expand/collapse
                         fileHeader.style.cursor = 'pointer';
@@ -7576,14 +7737,13 @@ let settingsSubscriptionPools: Record<string, any> = {};
                                 openDiffInSideWorkspace(summaryFiles, uiText.fileChanges, { sourceKey: summarySourceKey, focusFile: f.file });
                                 return;
                             }
-                            const isOpen = diffBody.style.display !== 'none';
-                            diffBody.style.display = isOpen ? 'none' : 'block';
+                            const isOpen = fileEl.classList.toggle('ds-open');
                             const btn = fileHeader.querySelector('.ds-expand-btn');
-                            if (btn) btn.textContent = isOpen ? '▶' : '▼';
+                            if (btn) btn.textContent = isOpen ? '▼' : '▶';
                         });
                     }
 
-                    filesList.appendChild(fileEl);
+                    filesInner.appendChild(fileEl);
                 }
 
                 card.appendChild(filesList);
@@ -7808,6 +7968,33 @@ let settingsSubscriptionPools: Record<string, any> = {};
         const currentView = matchingViews[matchingViews.length - 1];
         if (currentView) renderSubagentTodoPanel(currentView, todos);
     }
+
+    // Animate the todo <details> open/close: the grid-rows transition needs the
+    // content to stay rendered while collapsing, so intercept the native toggle
+    // and only clear `open` after the transition ends (with a timeout fallback).
+    const todoDetails = todoPanel as unknown as HTMLDetailsElement | null;
+    todoDetails?.querySelector('summary')?.addEventListener('click', (event) => {
+        event.preventDefault();
+        if (!todoDetails.open) {
+            todoDetails.open = true;
+            return;
+        }
+        if (todoDetails.classList.contains('todo-closing')) return;
+        todoDetails.classList.add('todo-closing');
+        let finished = false;
+        const finish = () => {
+            if (finished) return;
+            finished = true;
+            todoDetails.classList.remove('todo-closing');
+            todoDetails.open = false;
+        };
+        todoDetails.addEventListener('transitionend', function onEnd(ev) {
+            if (ev.propertyName !== 'grid-template-rows') return;
+            todoDetails.removeEventListener('transitionend', onEnd);
+            finish();
+        });
+        setTimeout(finish, 260);
+    });
 
     function renderTodos(rawTodos: unknown) {
         const todos = normalizeTodoViews(rawTodos);
@@ -8206,9 +8393,11 @@ let settingsSubscriptionPools: Record<string, any> = {};
         if (current.mcp?.servers) {
             current.mcp.servers.forEach((s: any) => addMcpServerBlock(s));
         }
+        renderMcpFileServers();
 
         // ── Child Agent model configuration: dynamically populate supplier/model drop-down ──────────────────────
         const savedAgentModels = current.orchestrator?.agentModels || {};
+        settingsAgentModelHomeRoles.clear();
         document.querySelectorAll('.agent-model-row').forEach(row => {
             const role = (row as HTMLElement).dataset.role;
             if (!role) return;
@@ -8242,6 +8431,23 @@ let settingsSubscriptionPools: Record<string, any> = {};
                 }
             }
 
+            // File-owned assignments (~/.cwtools/agent-models.json) get a
+            // provenance badge and read-only selects; the save collector skips
+            // them so a file value is never copied into VS Code settings.
+            row.querySelector('.agent-model-home-badge')?.remove();
+            provSel.disabled = false;
+            modSel.disabled = false;
+            if (saved && (saved as { source?: unknown }).source === 'home') {
+                settingsAgentModelHomeRoles.add(role);
+                provSel.disabled = true;
+                modSel.disabled = true;
+                const badge = document.createElement('span');
+                badge.className = 'agent-model-home-badge';
+                badge.textContent = '~/.cwtools';
+                badge.title = tr('From ~/.cwtools/agent-models.json — edit the file to change it.', '来自 ~/.cwtools/agent-models.json，请编辑文件修改。');
+                (row.querySelector('.settings-label') || row).appendChild(badge);
+            }
+
             // Linked update model drop-down when supplier changes
             provSel.onchange = () => {
                 if (provSel.value === '__inherit__') {
@@ -8265,6 +8471,7 @@ let settingsSubscriptionPools: Record<string, any> = {};
         updateCustomApiFormatUI(current.provider);
         updateModelUI(current.provider, current.model, ollamaModels);
         updateApiKeyStatus(current.provider, providers);
+        updateHomeProviderUI(current.provider);
         presentSettingsPage(true);
         refreshSettingsOverview();
         settingsSavePending = false;
@@ -8889,6 +9096,7 @@ let settingsSubscriptionPools: Record<string, any> = {};
                 : (chatSupportsUtility ? '' : (utilityProviders[0]?.id || ''));
             translationSel.dispatchEvent(new Event('change'));
         }
+        updateHomeProviderUI(id);
         refreshSettingsOverview();
     }
 
@@ -8977,6 +9185,43 @@ let settingsSubscriptionPools: Record<string, any> = {};
         if (provider && hint && ep) {
             hint.textContent = tr('Default: ', '默认: ') + (provider.defaultEndpoint || tr('decided by provider', '由 provider 决定'));
             if (!ep.value) ep.placeholder = provider.defaultEndpoint || tr('Leave empty to use default', '留空使用默认');
+        }
+    }
+
+    /**
+     * Home providers (~/.cwtools/providers.json) own their endpoint, model list
+     * and credential in the file: the inputs echo the file values but stay
+     * read-only, and the host skips writing them back on save. Must run AFTER
+     * updateApiKeyStatus/updateEndpointHint, which repaint the same elements.
+     */
+    function updateHomeProviderUI(providerId: string) {
+        const provider = settingsProviders.find(p => p.id === providerId);
+        const isHome = providerSourceOf(provider) === 'home';
+        const endpointInput = document.getElementById('settingsEndpoint') as HTMLInputElement | null;
+        const modelInput = document.getElementById('settingsModelInput') as HTMLInputElement | null;
+        const keyInput = document.getElementById('settingsApiKey') as HTMLInputElement | null;
+        for (const el of [endpointInput, modelInput, keyInput]) {
+            if (el) el.readOnly = isHome;
+        }
+        const deleteBtn = document.getElementById('deleteApiKeyBtn') as HTMLButtonElement | null;
+        if (isHome && deleteBtn) deleteBtn.disabled = true;
+        if (isHome) {
+            const hint = document.getElementById('endpointHint');
+            if (hint) hint.textContent = tr('From ~/.cwtools/providers.json — edit the file to change the endpoint or model list.', '来自 ~/.cwtools/providers.json，请编辑文件修改端点或模型列表。');
+            const providerHint = document.getElementById('providerHint');
+            if (providerHint) {
+                const envName = typeof provider?.apiKeyEnv === 'string' ? provider.apiKeyEnv : '';
+                providerHint.textContent = envName
+                    ? tr(`API key is read from the ${envName} environment variable.`, `API Key 从环境变量 ${envName} 读取。`)
+                    : '';
+            }
+        }
+        const warningsEl = document.getElementById('providerFileWarnings');
+        if (warningsEl) {
+            const shown = settingsProviderFileWarnings.slice(0, 3);
+            warningsEl.style.display = shown.length > 0 ? '' : 'none';
+            warningsEl.textContent = shown.join('\n');
+            warningsEl.title = settingsProviderFileWarnings.join('\n');
         }
     }
 
@@ -9082,6 +9327,35 @@ let settingsSubscriptionPools: Record<string, any> = {};
         });
         refreshSettingsOverview();
         refreshSettingsDraftStatus();
+    }
+
+    /** Read-only view of MCP servers declared in ~/.cwtools/mcp.json and .cwtools/mcp.json. */
+    function renderMcpFileServers() {
+        const list = document.getElementById('mcpServersList');
+        if (!list) return;
+        if (settingsMcpFileServers.length === 0 && settingsMcpConfigWarnings.length === 0) return;
+
+        const section = document.createElement('div');
+        section.className = 'mcp-file-servers';
+        const sourceLabel = (source: unknown) => source === 'project'
+            ? tr('Project .cwtools/mcp.json', '项目 .cwtools/mcp.json')
+            : tr('User ~/.cwtools/mcp.json', '用户 ~/.cwtools/mcp.json');
+        const rows = settingsMcpFileServers.map(server => {
+            const detail = (server.type || 'stdio') === 'stdio'
+                ? [server.command, ...(Array.isArray(server.args) ? server.args : [])].filter(Boolean).join(' ')
+                : server.url || '';
+            return `<div class="mcp-file-server" title="${tr('Declared in a config file; edit the file to change it. Project-level servers need one-time approval before first connection.', '来自配置文件；请编辑对应文件修改。项目级服务器首次连接前需一次性批准。')}">
+                <span class="mcp-file-server-name">${escapeHtml(server.name || '')}</span>
+                <span class="mcp-file-server-detail">${escapeHtml(detail)}</span>
+                <span class="mcp-file-server-source">${escapeHtml(sourceLabel(server.source))}</span>
+            </div>`;
+        }).join('');
+        const warnings = settingsMcpConfigWarnings.map(w =>
+            `<div class="mcp-file-warning">${svgIconNoMargin('warning')} ${escapeHtml(w)}</div>`).join('');
+        section.innerHTML = `
+            <div class="mcp-file-servers-title">${tr('From config files', '来自配置文件')}</div>
+            ${rows}${warnings}`;
+        list.appendChild(section);
     }
 
     function deleteApiKey() {
@@ -9215,6 +9489,9 @@ let settingsSubscriptionPools: Record<string, any> = {};
                         document.querySelectorAll('.agent-model-row').forEach(row => {
                             const role = (row as HTMLElement).dataset.role;
                             if (!role) return;
+                            // File-owned rows (~/.cwtools/agent-models.json) are
+                            // read-only; never copy them into VS Code settings.
+                            if (settingsAgentModelHomeRoles.has(role)) return;
                             const prov = (row.querySelector('.agent-model-provider') as HTMLSelectElement)?.value || '__inherit__';
                             const mod = (row.querySelector('.agent-model-model') as HTMLSelectElement)?.value || '__inherit__';
                             //Only collect non-inherited configurations

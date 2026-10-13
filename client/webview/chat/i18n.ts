@@ -17,6 +17,9 @@ export interface ChatI18nText {
     markdown: {
         waitingForChoice: string;
     };
+    links: {
+        openFileAtLine: string;
+    };
     settings: {
         saved: string;
         unsaved: string;
@@ -170,7 +173,7 @@ export interface ChatI18nText {
         tabs: { agents: string; runs: string; artifacts: string; tasks: string };
         overview: {
             topics: string; artifacts: string; steps: string; messages: string;
-            run: string; workflow: string; status: string;
+            run: string; status: string;
             none: string; running: string; idle: string;
         };
         runs: {
@@ -240,6 +243,9 @@ const EN: ChatI18nText = {
     },
     markdown: {
         waitingForChoice: 'Waiting for your choice...',
+    },
+    links: {
+        openFileAtLine: 'Open file and jump to line',
     },
     settings: {
         saved: 'Saved',
@@ -388,7 +394,7 @@ const EN: ChatI18nText = {
     manager: {
         tabs: { agents: 'Agents', runs: 'Runs', artifacts: 'Artifacts', tasks: 'Tasks' },
         // placeholder — EN manager block already present below
-        overview: { topics: 'Topics', artifacts: 'Artifacts', steps: 'Steps', messages: 'Messages', run: 'Run', workflow: 'Workflow', status: 'Status', none: 'none', running: 'running', idle: 'idle' },
+        overview: { topics: 'Topics', artifacts: 'Artifacts', steps: 'Steps', messages: 'Messages', run: 'Run', status: 'Status', none: 'none', running: 'running', idle: 'idle' },
         runs: {
             noRun: 'No active run recorded',
             runId: 'Run ID',
@@ -488,6 +494,9 @@ const ZH_CN: ChatI18nText = {
     },
     markdown: {
         waitingForChoice: '等待你的选择...',
+    },
+    links: {
+        openFileAtLine: '打开文件并跳转到行',
     },
     settings: {
         saved: '已保存',
@@ -635,7 +644,7 @@ const ZH_CN: ChatI18nText = {
     },
     manager: {
         tabs: { agents: 'Agents', runs: 'Runs', artifacts: 'Artifacts', tasks: '任务' },
-        overview: { topics: '话题', artifacts: 'Artifacts', steps: '步骤', messages: '消息', run: '运行', workflow: '工作流', status: '状态', none: '无', running: '运行中', idle: '空闲' },
+        overview: { topics: '话题', artifacts: 'Artifacts', steps: '步骤', messages: '消息', run: '运行', status: '状态', none: '无', running: '运行中', idle: '空闲' },
         runs: {
             noRun: '暂无运行记录',
             runId: '运行 ID',

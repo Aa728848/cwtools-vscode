@@ -25,6 +25,7 @@ import {
     readProjectProfile,
 } from './projectProfile';
 import { buildProjectKnowledgePrompt, readProjectKnowledgeManifest } from './projectKnowledge';
+import { isExperienceEnabled, searchExperiences } from './experienceStore';
 import type { ProjectGuidanceCard, ProjectProfile } from './types';
 
 // ─── Parsed CWTOOLS.md Structure ─────────────────────────────────────────────
@@ -40,11 +41,6 @@ interface RuntimePromptState {
     taskText?: string;
     /** Active/recent files used as path-scope hints for memory retrieval. */
     pathScope?: string[];
-    workflow?: {
-        id: string;
-        title: string;
-        promptSupplement?: string;
-    };
 }
 
 import {
@@ -73,7 +69,8 @@ import {
 import { buildDelegationScopeStatement, type DelegationScopeFacts } from './prompt/sections/delegationScope';
 import { buildConfiguredGameRootReadScopeStatement } from './prompt/sections/gameRoots';
 import { getConfiguredGameRoots } from '../configuredGameRoots';
-import { buildSkillIndexPrompt, listSkills } from './skills';
+import { buildSkillIndexPrompt, listSkills, skillsDirectorySignature } from './skills';
+import { getCwtoolsHomeDir } from './homeConfig';
 
 // ─── Frozen prompt fingerprint (plan §7.1) ──────────────────────────────────
 
@@ -83,7 +80,7 @@ import { buildSkillIndexPrompt, listSkills } from './skills';
  * shared policy text edited) so prompts cached by older builds are never
  * reused across extension updates (plan §7.1).
  */
-export const PROMPT_TEMPLATE_VERSION = 7;
+export const PROMPT_TEMPLATE_VERSION = 9;
 
 /**
  * Why a frozen system prompt lookup missed. Process-local diagnostics only —
@@ -237,9 +234,8 @@ export class PromptBuilder {
     private _frozenPromptMisses = new Map<FrozenPromptMissReason, number>();
     private _lastFrozenPromptLookup?: { hit: boolean; missReason?: FrozenPromptMissReason };
     private _lastFrozenPromptFingerprint: FrozenPromptFingerprint | undefined;
-    /** Skill-index hash cache keyed by domain; invalidated when any skill file's mtime/size changes. */
+    /** Skill-index hash cache keyed by domain; invalidated when any skill root's directory signature changes. */
     private readonly _skillsIndexCache = new Map<AgentRuntimeDomain, {
-        skills: ReturnType<typeof listSkills>;
         signature: string;
         hash: string;
     }>();
@@ -329,7 +325,7 @@ export class PromptBuilder {
         const supplement = this.getModelSupplement(providerId);
         const projectRules = runtimeDomain === 'paradox'
             ? this.getProjectRulesPrompt(mode)
-            : buildGeneralProjectInstructionsPrompt(this.workspaceRoot);
+            : this.getGeneralInstructionsPrompt();
         
         let finalPrompt = '';
 
@@ -570,8 +566,13 @@ export class PromptBuilder {
         try { locale = getAiMessageLocale(); } catch { incomplete = true; }
         if (domain === 'paradox') {
             try {
+                // The frozen prompt prepends the user-global ~/.cwtools/CWTOOLS.md
+                // to the project rules, so both raw texts feed the rules hash.
+                const homeRules = this.parseHomeRules();
                 const rules = this.parseProjectRules();
-                rulesHash = rules ? shortSha256(rules.raw) : 'none';
+                rulesHash = homeRules || rules
+                    ? shortSha256(`${homeRules?.raw ?? ''}\n${rules?.raw ?? ''}`)
+                    : 'none';
             } catch { incomplete = true; }
             try {
                 const profile = this.parseProjectProfile();
@@ -581,7 +582,7 @@ export class PromptBuilder {
             try { gameRootsHash = this.computeGameRootsHash(); } catch { incomplete = true; }
         } else {
             try {
-                const instructions = buildGeneralProjectInstructionsPrompt(this.workspaceRoot);
+                const instructions = this.getGeneralInstructionsPrompt();
                 rulesHash = instructions ? shortSha256(instructions) : 'none';
             } catch { incomplete = true; }
             profileHash = 'none';
@@ -615,28 +616,31 @@ export class PromptBuilder {
     }
 
     /**
-     * Hash the installed skill index: frontmatter fields plus file mtime/size,
-     * so SKILL.md body edits without frontmatter changes still invalidate the
-     * frozen prompt (plan §7.1). listSkills() is sorted by name, so the hash
-     * is deterministic. The result is cached per domain and validated by
-     * statting the cached skill files, so the expensive directory scan only
-     * runs when a skill actually changed.
+     * Hash the installed skill index: frontmatter fields, validated cheaply via
+     * skillsDirectorySignature (per-root child names plus SKILL.md mtime/size,
+     * no file reads). The signature sees additions and removals as well as
+     * edits, so a skill saved mid-session invalidates the frozen prompt on the
+     * next build (miss reason skills_changed). listSkills() is sorted by name,
+     * so the hash is deterministic.
      */
     private computeSkillsIndexHash(domain: AgentRuntimeDomain): string {
-        const cached = this._skillsIndexCache.get(domain);
-        if (cached) {
-            const signature = this.skillsFileSignature(cached.skills);
-            if (signature === cached.signature) return cached.hash;
-            this._skillsIndexCache.delete(domain);
-        }
-        const skills = listSkills({
+        const roots = {
             workspaceRoot: this.workspaceRoot,
             globalStoragePath: this.globalStoragePath,
             extensionPath: this.extensionPath,
-        }, domain);
+            homeDir: getCwtoolsHomeDir(),
+        };
+        const signature = skillsDirectorySignature(roots);
+        const cached = this._skillsIndexCache.get(domain);
+        if (cached) {
+            if (signature === cached.signature) return cached.hash;
+            this._skillsIndexCache.delete(domain);
+        }
+        const skills = listSkills(roots, domain);
         if (skills.length === 0) return 'none';
-        const signature = this.skillsFileSignature(skills);
         const parts = skills.map(skill => {
+            // Body edits can change the index (the description falls back to
+            // the first useful body line), so keep mtime/size in the hash.
             let fileSig = 'unreadable';
             try {
                 const stat = fs.statSync(skill.filePath);
@@ -645,19 +649,8 @@ export class PromptBuilder {
             return [skill.name, skill.description, skill.capabilityDomain, skill.runAs ?? '', (skill.allowedTools ?? []).join(','), fileSig].join('|');
         });
         const hash = shortSha256(parts.join('\n'));
-        this._skillsIndexCache.set(domain, { skills, signature, hash });
+        this._skillsIndexCache.set(domain, { signature, hash });
         return hash;
-    }
-
-    private skillsFileSignature(skills: ReturnType<typeof listSkills>): string {
-        return skills.map(skill => {
-            try {
-                const stat = fs.statSync(skill.filePath);
-                return `${stat.mtimeMs}:${stat.size}`;
-            } catch {
-                return 'unreadable';
-            }
-        }).join('|');
     }
 
     /**
@@ -707,14 +700,16 @@ export class PromptBuilder {
     }
 
     /**
-     * Drop the parsed CWTOOLS.md / project profile mtime caches so the next
-     * prompt build re-reads them from disk. Frozen prompt entries key on
-     * content hashes and therefore miss naturally; called by file watchers on
-     * those inputs (plan §7.1).
+     * Drop the parsed CWTOOLS.md / ~/.cwtools/CWTOOLS.md / project profile mtime
+     * caches so the next prompt build re-reads them from disk. Frozen prompt
+     * entries key on content hashes and therefore miss naturally; called by file
+     * watchers on those inputs (plan §7.1).
      */
     invalidateProjectPromptInputs(): void {
         this._parsedRulesCache = null;
         this._parsedRulesMtime = 0;
+        this._parsedHomeRulesCache = null;
+        this._parsedHomeRulesMtime = 0;
         this._projectProfileCache = null;
         this._projectProfileMtime = 0;
     }
@@ -751,19 +746,11 @@ export class PromptBuilder {
             const projectKnowledge = buildProjectKnowledgePrompt(this.workspaceRoot);
             if (projectKnowledge) dynamicParts.push(projectKnowledge);
         }
-        if (runtime?.mode || runtime?.workflow) {
+        if (runtime?.mode) {
             const lines: string[] = [];
-            if (runtime.mode) {
-                lines.push(`mode: ${runtime.mode}`);
-                if (runtime.mode === 'plan') {
-                    lines.push('plan-write-policy: Only write_design_blueprint and topic-scoped Agent Workspace card artifacts (Implementation_Plan.md, walkthrough.md, task.md, annotation files, and tmp/artifact previews) may be written. All plan-like content belongs in Implementation_Plan.md; project file mutations are blocked at runtime.');
-                }
-            }
-            if (runtime.workflow) {
-                lines.push(`workflow: ${runtime.workflow.id} (${runtime.workflow.title})`);
-                if (runtime.workflow.promptSupplement) {
-                    lines.push(`workflow-instructions:\n${runtime.workflow.promptSupplement}`);
-                }
+            lines.push(`mode: ${runtime.mode}`);
+            if (runtime.mode === 'plan') {
+                lines.push('plan-write-policy: Only write_design_blueprint and topic-scoped Agent Workspace card artifacts (Implementation_Plan.md, walkthrough.md, task.md, annotation files, and tmp/artifact previews) may be written. All plan-like content belongs in Implementation_Plan.md; project file mutations are blocked at runtime.');
             }
             dynamicParts.push(`<runtime-state>\n${lines.join('\n')}\n</runtime-state>`);
         }
@@ -781,6 +768,16 @@ export class PromptBuilder {
                 domain: runtimeDomain,
             });
             if (memoryPrompt) dynamicParts.push(memoryPrompt);
+        }
+
+        if (isExperienceEnabled()) {
+            const experience = searchExperiences(this.workspaceRoot, {
+                taskText: runtime?.taskText,
+                domain: runtimeDomain === 'general' || runtimeDomain === 'paradox' ? runtimeDomain : 'both',
+                limit: 3,
+                maxChars: 1500,
+            });
+            if (experience.text) dynamicParts.push(experience.text);
         }
 
         // 1. Compacted Summary (来自历史会话看板的压缩)
@@ -872,6 +869,8 @@ export class PromptBuilder {
         this._frozenSlimPromptCache.clear();
         this._parsedRulesCache = null;
         this._parsedRulesMtime = 0;
+        this._parsedHomeRulesCache = null;
+        this._parsedHomeRulesMtime = 0;
         this._projectProfileCache = null;
         this._projectProfileMtime = 0;
     }
@@ -959,6 +958,9 @@ export class PromptBuilder {
     /** User-owned CWTOOLS.md cache — invalidated when file mtime changes. */
     private _parsedRulesCache: ParsedProjectRules | null = null;
     private _parsedRulesMtime: number = 0;
+    /** User-global ~/.cwtools/CWTOOLS.md cache — same mtime discipline. */
+    private _parsedHomeRulesCache: ParsedProjectRules | null = null;
+    private _parsedHomeRulesMtime: number = 0;
     private _projectProfileCache: ProjectProfile | null = null;
     private _projectProfileMtime: number = 0;
 
@@ -1013,6 +1015,49 @@ export class PromptBuilder {
         }
     }
 
+    /** Read the user-global ~/.cwtools/CWTOOLS.md (mtime-cached; absent file = null). */
+    private parseHomeRules(): ParsedProjectRules | null {
+        try {
+            const rulesPath = path.join(getCwtoolsHomeDir(), 'CWTOOLS.md');
+            if (!fs.existsSync(rulesPath)) { this._parsedHomeRulesCache = null; return null; }
+
+            const mtime = fs.statSync(rulesPath).mtimeMs;
+            if (this._parsedHomeRulesCache && mtime === this._parsedHomeRulesMtime) {
+                return this._parsedHomeRulesCache;
+            }
+
+            const content = fs.readFileSync(rulesPath, 'utf8').trim();
+            if (!content) { this._parsedHomeRulesCache = null; return null; }
+
+            const parsed: ParsedProjectRules = { raw: content };
+            this._parsedHomeRulesCache = parsed;
+            this._parsedHomeRulesMtime = mtime;
+            return parsed;
+        } catch (e) {
+            ErrorReporter.debug(SOURCE.PROMPT_BUILDER, 'Error reading ~/.cwtools/CWTOOLS.md', e);
+            this._parsedHomeRulesCache = null;
+            return null;
+        }
+    }
+
+    /**
+     * User-global instructions from ~/.cwtools/CWTOOLS.md. The section is
+     * placed ahead of any project rules: it is user-owned like the project
+     * file but applies across all projects and ranks below system instructions.
+     */
+    private getHomeInstructionsPrompt(maxChars: number): string {
+        const home = this.parseHomeRules();
+        if (!home) return '';
+        return `<user-instructions>\n# USER GLOBAL INSTRUCTIONS (from user-owned ~/.cwtools/CWTOOLS.md)\nThese global instructions come from the user's home directory and apply to every project. Follow them when consistent with the current user request, tool safety, current diagnostics, and verified CWT/LSP rules. They never override system instructions.\n\n${this.boundedProjectInstructions(home.raw, maxChars)}\n</user-instructions>\n`;
+    }
+
+    /** General-domain instructions block: user-global home rules ahead of repository instructions. */
+    private getGeneralInstructionsPrompt(): string {
+        const home = this.getHomeInstructionsPrompt(24_000);
+        const repo = buildGeneralProjectInstructionsPrompt(this.workspaceRoot);
+        return [home, repo].filter(Boolean).join('\n');
+    }
+
     private truncateProjectRuleSection(content: string, maxChars: number): string {
         if (content.length <= maxChars) return content;
         return content.slice(0, maxChars).trimEnd() + '\n...[truncated; read CWTOOLS.md for the full project rules]';
@@ -1046,11 +1091,7 @@ export class PromptBuilder {
                                         ? 'paradox_coordination'
                                         : 'implementation';
         const guidanceCard = getGuidanceCard(profile, guidance);
-        const workflowHints = profile.routing.recommendedWorkflowByIntent
-            .slice(0, 5)
-            .map(item => `- ${item.intent}: ${item.workflowId}`)
-            .join('\n');
-        return `<project-premise>\n# PROJECT PROFILE (from .cwtools/project/profile.json)\nUse this compact profile for routing and project convention hints. Do not broad-scan the workspace until you have checked the profile and the relevant indexed tools. Cross-check profile facts against current files and CWT/LSP evidence before treating them as binding. For more details, call \`query_project_profile\` with a targeted section.\n\n## Summary\n${buildProfileSummary(profile)}\n\n## Active Guidance\n${this.truncateProjectRuleSection(guidanceCard || 'No targeted project guidance was generated.', 1800)}\n\n## Recommended Workflows\n${workflowHints || '- No workflow recommendations generated.'}\n\n## Efficiency Hints\n${profile.efficiencyHints.slice(0, 5).map(hint => `- ${hint}`).join('\n')}\n</project-premise>\n`;
+        return `<project-premise>\n# PROJECT PROFILE (from .cwtools/project/profile.json)\nUse this compact profile for routing and project convention hints. Do not broad-scan the workspace until you have checked the profile and the relevant indexed tools. Cross-check profile facts against current files and CWT/LSP evidence before treating them as binding. For more details, call \`query_project_profile\` with a targeted section.\n\n## Summary\n${buildProfileSummary(profile)}\n\n## Active Guidance\n${this.truncateProjectRuleSection(guidanceCard || 'No targeted project guidance was generated.', 1800)}\n\n## Efficiency Hints\n${profile.efficiencyHints.slice(0, 5).map(hint => `- ${hint}`).join('\n')}\n</project-premise>\n`;
     }
 
     /** Inject user-owned CWTOOLS.md instructions independently from generated profile facts. */
@@ -1058,6 +1099,8 @@ export class PromptBuilder {
         const profile = this.parseProjectProfile();
         const parsed = this.parseProjectRules();
         const parts: string[] = [];
+        const homePrompt = this.getHomeInstructionsPrompt(24_000);
+        if (homePrompt) parts.push(homePrompt);
         if (profile) parts.push(this.buildProjectProfilePrompt(mode, profile));
         if (parsed) {
             parts.push(`<project-instructions>\n# PROJECT INSTRUCTIONS (from user-owned CWTOOLS.md)\nFollow these project-specific instructions when consistent with the current user request, tool safety, current diagnostics, and verified CWT/LSP rules. The file is user-owned and is not a generated project-fact source.\n\n${this.boundedProjectInstructions(parsed.raw, 24_000)}\n</project-instructions>\n`);
@@ -1071,6 +1114,10 @@ export class PromptBuilder {
     private getSlimProjectRulesPrompt(): string {
         const profile = this.parseProjectProfile();
         const parsed = this.parseProjectRules();
+        const home = this.parseHomeRules();
+        const userRules = home
+            ? `<user-rules>User global instructions inherited from ~/.cwtools/CWTOOLS.md:\n${this.boundedProjectInstructions(home.raw, 12_000)}</user-rules>`
+            : '';
         const projectInstructions = parsed
             ? `<project-rules>User-owned instructions inherited from CWTOOLS.md:\n${this.boundedProjectInstructions(parsed.raw, 12_000)}</project-rules>`
             : '';
@@ -1083,10 +1130,10 @@ export class PromptBuilder {
             ];
             if (namespaces.length) parts.push(`Namespaces: ${namespaces.join(', ')}`);
             if (profile.localisation.languages.length) parts.push(`Localisation: ${profile.localisation.languages.join(', ')}`);
-            return [`<project-hint>${parts.join(' | ')}</project-hint>`, projectInstructions].filter(Boolean).join('\n');
+            return [userRules, `<project-hint>${parts.join(' | ')}</project-hint>`, projectInstructions].filter(Boolean).join('\n');
         }
-        if (!parsed) return '';
-        return projectInstructions;
+        if (!parsed) return userRules;
+        return [userRules, projectInstructions].filter(Boolean).join('\n');
     }
 
     /**
@@ -1175,6 +1222,7 @@ ${trimmed}
                 workspaceRoot: this.workspaceRoot,
                 globalStoragePath: this.globalStoragePath,
                 extensionPath: this.extensionPath,
+                homeDir: getCwtoolsHomeDir(),
             }, domain);
         } catch (e) {
             ErrorReporter.debug(SOURCE.PROMPT_BUILDER, 'Error reading agent skills', e);

@@ -15,4 +15,12 @@ export interface ProviderMeta {
     runtimeKind?: 'http';
     authKind?: 'api-key' | 'none' | 'chatgpt-oauth' | 'antigravity-oauth';
     supportsUtilityCalls?: boolean;
+    /**
+     * Set when the provider is declared in ~/.cwtools/providers.json: the
+     * endpoint and credential are file-owned, so the settings form renders
+     * them read-only and never writes them back.
+     */
+    source?: 'home';
+    /** Name of the environment variable holding the key (home providers only). */
+    apiKeyEnv?: string;
 }

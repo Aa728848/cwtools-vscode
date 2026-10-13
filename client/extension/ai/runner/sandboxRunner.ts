@@ -2,6 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import type { ChildProcess, SpawnOptions } from 'child_process';
 import { execFile } from 'child_process';
+import { aiText } from '../messages';
 
 export type SandboxBackend = 'direct' | 'bubblewrap' | 'seatbelt' | 'windows-helper' | 'wsl-bubblewrap';
 
@@ -23,7 +24,13 @@ export interface SandboxRunner {
 
 export class SandboxUnavailableError extends Error {
     constructor(public readonly platform: NodeJS.Platform) {
-        super(`No enforced command sandbox is available for ${platform}. Retry with requestEscalation=true and unsandboxed=true only for an explicitly approved one-shot bypass.`);
+        super(platform === 'win32'
+            ? aiText(
+                'No enforced command sandbox is available on this Windows host. To enable sandboxed execution, install the native CWTools Windows sandbox helper or set up WSL2 with bubblewrap. As a last resort, retry with requestEscalation=true and unsandboxed=true to ask the user for a one-time explicitly approved bypass.',
+                '当前 Windows 主机上没有可用的强制命令沙箱。要启用沙箱执行，请安装原生 CWTools Windows 沙箱助手，或配置带 bubblewrap 的 WSL2。作为最后手段，可以使用 requestEscalation=true 且 unsandboxed=true 重试，向用户申请一次性明确批准的绕过。')
+            : aiText(
+                `No enforced command sandbox is available for ${platform}. Install the platform sandbox backend (bubblewrap on Linux, sandbox-exec on macOS) to enable sandboxed execution. As a last resort, retry with requestEscalation=true and unsandboxed=true to ask the user for a one-time explicitly approved bypass.`,
+                `当前 ${platform} 主机上没有可用的强制命令沙箱。请安装平台沙箱后端（Linux 使用 bubblewrap，macOS 使用 sandbox-exec）以启用沙箱执行。作为最后手段，可以使用 requestEscalation=true 且 unsandboxed=true 重试，向用户申请一次性明确批准的绕过。`));
         this.name = 'SandboxUnavailableError';
     }
 }

@@ -261,7 +261,6 @@ describe('agent manager cross-surface contracts', () => {
         expect(hostPanel).to.include("this._restoreViewState(surface, true)");
         expect(hostBridge).to.include("case 'ready'");
         expect(hostBridge).to.include('provider.restoreViewState(sourceSurface, true)');
-        expect(hostPanel).to.include('this.sendWorkflowState(send)');
         expect(hostPanel).to.include('this.broadcaster.register(webview, surface)');
     });
 
@@ -316,5 +315,21 @@ describe('agent manager cross-surface contracts', () => {
         ];
         const allPassed: Checks = [true, true, true];
         expect(allPassed.every(Boolean)).to.equal(true);
+    });
+
+    it('automatic turn routing runs on every turn, not only while no workflow is active', () => {
+        // Regression guard for the removed AI Workflow subsystem: `handleUserMessage`
+        // used to skip `resolveTurnAgentProfile` for the whole topic whenever a
+        // workflow was active, which silently disabled automatic routing AND the
+        // user's /plan pin. The guard now depends only on the explicit
+        // skip-switch and on there being text to route.
+        const hostPanel = fs.readFileSync(path.join(root, 'client/extension/ai/chatPanel.ts'), 'utf8');
+
+        expect(hostPanel).to.include('if (!_skipAutoModeSwitch && text.trim()) {');
+        expect(hostPanel).to.not.include('!this.currentWorkflowId');
+        // The pinned-mode escape hatch is untouched and still short-circuits
+        // inside resolveTurnAgentProfile.
+        expect(hostPanel).to.include("const modeOverride = this.session.modeOverride;");
+        expect(hostPanel).to.include("if (modeOverride !== 'auto') {");
     });
 });

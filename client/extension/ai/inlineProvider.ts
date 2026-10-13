@@ -22,6 +22,7 @@ import { AIService } from './aiService';
 import { PromptBuilder } from './promptBuilder';
 import { getEffectiveModel, ALWAYS_THINKING_PREFIXES, BUILTIN_PROVIDERS } from './providers';
 import { MCPClient } from './mcpClient';
+import { mcpServerSource } from './mcpConfig';
 import { UsageTracker } from './usageTracker';
 import { ErrorReporter } from './errorReporter';
 import { SOURCE } from './messages';
@@ -354,8 +355,12 @@ export class AIInlineCompletionProvider implements vs.InlineCompletionItemProvid
             return;
         }
 
-        // Initialize MCP servers
-        const newServerNames = new Set(config.mcp.servers.map(s => s.name));
+        // Initialize MCP servers. Project-level .cwtools/mcp.json servers are
+        // untrusted repository input: inline completion has no approval surface,
+        // so they are never auto-connected here (the agent tool flow gates them
+        // behind an explicit first-connect approval instead).
+        const usableServers = config.mcp.servers.filter(serverConf => mcpServerSource(serverConf) !== 'project');
+        const newServerNames = new Set(usableServers.map(s => s.name));
         // Remove stale servers
         for (const name of this.mcpClients.keys()) {
             if (!newServerNames.has(name)) {
@@ -364,7 +369,7 @@ export class AIInlineCompletionProvider implements vs.InlineCompletionItemProvid
             }
         }
         // Add new servers
-        for (const serverConf of config.mcp.servers) {
+        for (const serverConf of usableServers) {
             if (!this.mcpClients.has(serverConf.name)) {
                 const client = new MCPClient(serverConf);
                 client.connect().catch((e) => {

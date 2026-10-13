@@ -70,11 +70,10 @@ Read supporting documents by task:
 ## Internationalization And Docs
 
 Update English and Chinese together for user-visible commands, settings,
-diagnostics, chat/workflow UI, Webviews, and release-facing docs. Prefer the
-existing catalogs:
+diagnostics, chat UI, Webviews, and release-facing docs. Prefer the existing
+catalogs:
 
 - `client/extension/ai/messages.ts`
-- `client/extension/ai/workflowI18n.ts`
 - `client/webview/chat/i18n.ts`
 
 Root docs are single-source bilingual documents:
@@ -89,7 +88,7 @@ changing these docs; it also regenerates `release/README.md` from `README.md`.
 ## Repository Boundaries
 
 - `client/extension/`: VS Code Extension Host code.
-- `client/extension/ai/`: AI runtime, tools, workflows, memory, and orchestration.
+- `client/extension/ai/`: AI runtime, tools, Agent skills, memory, and orchestration.
 - `client/webview/`: browser-sandboxed Webviews.
 - `src/LSP/`, `src/Main/`: .NET 10 / F# language server.
 - `submodules/cwtools/`: upstream F# library.

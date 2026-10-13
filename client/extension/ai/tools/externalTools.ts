@@ -71,12 +71,134 @@ const COMMAND_TEMP_SCRIPT_NAME_PATTERN = /^(?:agent_helper|helper|tmp|temp|scrat
 const COMMAND_STDOUT_MAX_CHARS = 4000;
 const COMMAND_STDERR_MAX_CHARS = 2000;
 const COMMAND_PROCESS_KILL_GRACE_MS = 1500;
-type RunCommandShell = 'auto' | 'sh' | 'bash' | 'pwsh' | 'powershell';
+export type RunCommandShell = 'auto' | 'sh' | 'bash' | 'pwsh' | 'powershell';
 
 function normalizeRunCommandShell(value: unknown): RunCommandShell {
     return value === 'sh' || value === 'bash' || value === 'pwsh' || value === 'powershell'
         ? value
         : 'auto';
+}
+
+export type ResolvedShellFamily = 'pwsh' | 'powershell' | 'bash' | 'sh';
+
+export interface ResolvedRunCommandShell {
+    exe: string;
+    family: ResolvedShellFamily;
+    /** Explicit shell=bash keeps the historical login-shell invocation (`bash -lc`); auto-resolved bash uses plain `-c` for determinism. */
+    loginShell: boolean;
+    /** Human-facing label recorded in approval payloads, e.g. `pwsh-7`, `powershell-5`, `bash`, `sh`. */
+    description: string;
+    /** Bilingual note when an explicitly requested shell was unavailable and a fallback is used. */
+    fallbackNote?: string;
+}
+
+const SHELL_PROBE_TIMEOUT_MS = 3000;
+type ExecFileFn = typeof import('child_process').execFile;
+
+/** Probe the major version of a PowerShell-family executable; any failure means unusable. */
+function probePowerShellMajorVersion(exe: string, execFile: ExecFileFn): Promise<number | undefined> {
+    return new Promise(resolve => {
+        try {
+            execFile(exe, ['-NoProfile', '-NonInteractive', '-Command', '$PSVersionTable.PSVersion.Major'],
+                { encoding: 'utf8', timeout: SHELL_PROBE_TIMEOUT_MS, windowsHide: true },
+                (error, stdout) => {
+                    if (error) { resolve(undefined); return; }
+                    const major = Number.parseInt(String(stdout ?? '').trim(), 10);
+                    resolve(Number.isInteger(major) && major >= 1 ? major : undefined);
+                });
+        } catch {
+            resolve(undefined);
+        }
+    });
+}
+
+/** Probe bash availability through the always-present POSIX shell. */
+function probeBashAvailable(execFile: ExecFileFn): Promise<boolean> {
+    return new Promise(resolve => {
+        try {
+            execFile('/bin/sh', ['-c', 'command -v bash'],
+                { encoding: 'utf8', timeout: SHELL_PROBE_TIMEOUT_MS, windowsHide: true },
+                (error, stdout) => {
+                    resolve(!error && /(?:^|\/)bash\s*$/.test(String(stdout ?? '').trim()));
+                });
+        } catch {
+            resolve(false);
+        }
+    });
+}
+
+// Process-level probe cache: each shell is probed at most once per session, and
+// failures are cached as unavailable so a missing pwsh never costs more than one probe.
+const shellMajorVersionCache = new Map<string, Promise<number | undefined>>();
+let cachedBashAvailability: Promise<boolean> | undefined;
+
+/** @internal Unit tests reset the process-level probe cache through this hook. */
+export function __resetShellDetectionCacheForTests(): void {
+    shellMajorVersionCache.clear();
+    cachedBashAvailability = undefined;
+}
+
+/**
+ * Resolve the concrete shell for a run_command invocation.
+ * - Windows auto/explicit: probe pwsh (PowerShell 7+) first, fall back to powershell.exe.
+ *   Explicit shell=pwsh with no usable pwsh falls back with a bilingual note.
+ * - macOS/Linux auto: probe bash (plain `-c`, no profile sourcing), fall back to /bin/sh.
+ * - Explicit sh keeps `/bin/sh -c`; explicit bash keeps the historical `bash -lc`.
+ * cmd is never part of any fallback chain.
+ */
+export async function resolveRunCommandShell(
+    requested: RunCommandShell,
+    platform: NodeJS.Platform = process.platform,
+    execFile?: ExecFileFn,
+): Promise<ResolvedRunCommandShell> {
+    const probeVersion = (exe: string): Promise<number | undefined> => {
+        if (execFile) return probePowerShellMajorVersion(exe, execFile);
+        let cached = shellMajorVersionCache.get(exe);
+        if (!cached) {
+            cached = import('child_process')
+                .then(m => probePowerShellMajorVersion(exe, m.execFile))
+                .catch(() => undefined);
+            shellMajorVersionCache.set(exe, cached);
+        }
+        return cached;
+    };
+    const probeBash = (): Promise<boolean> => {
+        if (execFile) return probeBashAvailable(execFile);
+        if (!cachedBashAvailability) {
+            cachedBashAvailability = import('child_process')
+                .then(m => probeBashAvailable(m.execFile))
+                .catch(() => false);
+        }
+        return cachedBashAvailability;
+    };
+
+    if (platform === 'win32') {
+        if (requested !== 'powershell') {
+            const pwshMajor = await probeVersion('pwsh.exe');
+            if (pwshMajor !== undefined && pwshMajor >= 7) {
+                return { exe: 'pwsh.exe', family: 'pwsh', loginShell: false, description: `pwsh-${pwshMajor}` };
+            }
+            if (requested === 'pwsh') {
+                const fallbackMajor = await probeVersion('powershell.exe');
+                return {
+                    exe: 'powershell.exe',
+                    family: 'powershell',
+                    loginShell: false,
+                    description: fallbackMajor ? `powershell-${fallbackMajor}` : 'powershell',
+                    fallbackNote: aiText(
+                        'Note: shell=pwsh was requested, but PowerShell 7+ (pwsh) is not available on this host; fell back to Windows PowerShell (powershell.exe).',
+                        '注意：请求了 shell=pwsh，但此主机上没有可用的 PowerShell 7+（pwsh），已回退到 Windows PowerShell（powershell.exe）。'),
+                };
+            }
+        }
+        const major = await probeVersion('powershell.exe');
+        return { exe: 'powershell.exe', family: 'powershell', loginShell: false, description: major ? `powershell-${major}` : 'powershell' };
+    }
+    if (requested === 'sh') return { exe: '/bin/sh', family: 'sh', loginShell: false, description: 'sh' };
+    if (requested === 'bash') return { exe: 'bash', family: 'bash', loginShell: true, description: 'bash' };
+    return (await probeBash())
+        ? { exe: 'bash', family: 'bash', loginShell: false, description: 'bash' }
+        : { exe: '/bin/sh', family: 'sh', loginShell: false, description: 'sh' };
 }
 
 function validateRunCommandShellPlatform(shell: RunCommandShell, platform: NodeJS.Platform): string | undefined {
@@ -1125,6 +1247,30 @@ export class ExternalToolHandler {
             };
         }
 
+        // Resolve the concrete shell (and the sandbox backend that may force /bin/sh)
+        // before the approval prompt so the permission payload shows what will
+        // actually execute. Both probes are cached per session.
+        const isWindows = process.platform === 'win32';
+        const detectedSandbox = directExecution ? undefined : await detectSandboxBackendAsync();
+        const useWslSandbox = isWindows && detectedSandbox?.backend === 'wsl-bubblewrap';
+        if (useWslSandbox && preflight.segments.some(segment => /^(?:get-|set-|new-|remove-|select-|where-|format-|out-|write-|resolve-|test-)/i.test(segment.command))) {
+            return {
+                stdout: '',
+                stderr: 'The enforced Windows fallback is WSL2 + bubblewrap, but this command uses PowerShell-only cmdlets. Use a portable command, install the native Windows helper, or request a visible terminal explicitly.',
+                exitCode: 1,
+            };
+        }
+        if (useWslSandbox && (requestedShell === 'pwsh' || requestedShell === 'powershell')) {
+            return {
+                stdout: '',
+                stderr: 'The enforced Windows fallback is WSL2 + bubblewrap, so explicit PowerShell shells cannot be honored. Use shell=auto with portable POSIX syntax, install the native Windows helper, or request a visible terminal explicitly.',
+                exitCode: 1,
+            };
+        }
+        const resolvedShell: ResolvedRunCommandShell = useWslSandbox
+            ? { exe: '/bin/sh', family: 'sh', loginShell: false, description: 'sh' }
+            : await resolveRunCommandShell(requestedShell);
+
         const approvedByPolicy = PermissionPolicyStore.getInstance().isApproved(
             'run_command',
             { CommandLine: args.command, Cwd: cwd },
@@ -1158,7 +1304,8 @@ export class ExternalToolHandler {
             // Build rich detailed telemetry payload for Webview visual enhancement
             const preflightPayload = {
                 command: args.command,
-                shell: requestedShell,
+                shell: resolvedShell.description,
+                requestedShell,
                 cwd,
                 opaqueExecution,
                 classification: preflight.segments.map(s => s.classification),
@@ -1209,37 +1356,15 @@ export class ExternalToolHandler {
         const timeoutMs = Math.min(Math.max(args.timeoutMs ?? 30000, 1000), 3_600_000);
         const { spawn } = await import('child_process');
 
-        // Parse command into binary + args on the platform shell
-        const isWindows = process.platform === 'win32';
-        const detectedSandbox = directExecution ? undefined : await detectSandboxBackendAsync();
-        const useWslSandbox = isWindows && detectedSandbox?.backend === 'wsl-bubblewrap';
-        if (useWslSandbox && preflight.segments.some(segment => /^(?:get-|set-|new-|remove-|select-|where-|format-|out-|write-|resolve-|test-)/i.test(segment.command))) {
-            return {
-                stdout: '',
-                stderr: 'The enforced Windows fallback is WSL2 + bubblewrap, but this command uses PowerShell-only cmdlets. Use a portable command, install the native Windows helper, or request a visible terminal explicitly.',
-                exitCode: 1,
-            };
-        }
-        if (useWslSandbox && (requestedShell === 'pwsh' || requestedShell === 'powershell')) {
-            return {
-                stdout: '',
-                stderr: 'The enforced Windows fallback is WSL2 + bubblewrap, so explicit PowerShell shells cannot be honored. Use shell=auto with portable POSIX syntax, install the native Windows helper, or request a visible terminal explicitly.',
-                exitCode: 1,
-            };
-        }
-        const shell = useWslSandbox
-            ? '/bin/sh'
-            : isWindows
-            ? (requestedShell === 'pwsh' ? 'pwsh.exe' : 'powershell.exe')
-            : requestedShell === 'bash'
-            ? 'bash'
-            : '/bin/sh';
-        const commandText = isWindows && !useWslSandbox
+        // Parse command into binary + args on the resolved shell.
+        const isPowerShellFamily = resolvedShell.family === 'pwsh' || resolvedShell.family === 'powershell';
+        const shell = resolvedShell.exe;
+        const commandText = isPowerShellFamily
             ? '$OutputEncoding = [System.Text.UTF8Encoding]::new($false); [Console]::OutputEncoding = $OutputEncoding; ' + args.command
             : args.command;
-        const shellArgs = isWindows && !useWslSandbox
+        const shellArgs = isPowerShellFamily
             ? ['-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', commandText]
-            : [requestedShell === 'bash' ? '-lc' : '-c', commandText];
+            : [resolvedShell.loginShell ? '-lc' : '-c', commandText];
         const agentWorkspaceDir = getPrivateTopicStorageDir(topicId, this.ctx.workspaceRoot);
         const scratchDir = getPrivateTopicScratchDir(topicId, this.ctx.workspaceRoot);
         const helperScript = scratchDir ? path.join(scratchDir, 'agent_helper.py') : '';
@@ -1394,6 +1519,9 @@ export class ExternalToolHandler {
                         proc.stdin.write(text);
                     },
                 });
+                if (resolvedShell.fallbackNote) {
+                    processRegistry.appendOutput(record.processId, 'stderr', `${resolvedShell.fallbackNote}\n`, eventSink);
+                }
                 let capturedChanges = false;
                 const captureChanges = () => {
                     if (capturedChanges) return;
@@ -1429,7 +1557,7 @@ export class ExternalToolHandler {
                 proc.once('close', () => clearTimeout(timer));
                 return {
                     stdout: `Captured background command started. Process id: ${record.processId}`,
-                    stderr: '',
+                    stderr: resolvedShell.fallbackNote ?? '',
                     exitCode: 0,
                     processId: record.processId,
                     status: 'started',
@@ -1494,7 +1622,10 @@ export class ExternalToolHandler {
                 if (timer) clearTimeout(timer);
                 if (heartbeatTimer) clearInterval(heartbeatTimer);
                 if (abortSignal) abortSignal.removeEventListener('abort', onParentAbort);
-                resolve(processId ? { ...result, processId } : result);
+                const finalResult = resolvedShell.fallbackNote
+                    ? { ...result, stderr: `${resolvedShell.fallbackNote}\n${result.stderr}` }
+                    : result;
+                resolve(processId ? { ...finalResult, processId } : finalResult);
             };
 
             const onParentAbort = () => {

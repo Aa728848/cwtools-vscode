@@ -68,7 +68,6 @@ export interface ManagerSnapshotMessage {
     messages: ChatHistoryMessageView[];
     messageCount?: number;
     schedulingState: ManagerChildRunView['schedulingState'];
-    workflowId?: string | null;
     isGenerating: boolean;
     liveStepCount: number;
     todos?: Array<{ id?: string; content: string; status: 'pending' | 'in_progress' | 'done' }>;

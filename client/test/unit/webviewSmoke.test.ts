@@ -82,7 +82,6 @@ describe('webview smoke checks', () => {
         expect(html).to.include('id="quickWriteModeTrigger"');
         expect(html).to.include('role="listbox"');
         expect(html).to.include('id="btnWorkspace"');
-        expect(html).to.include('data-composer-action="workflows"');
         expect(html).not.to.include('data-composer-action="plan"');
         expect(html).to.include('data-composer-action="goal"');
         expect(html).not.to.include('id="runtimeProfileMenuList"');
@@ -92,7 +91,7 @@ describe('webview smoke checks', () => {
         expect(host).not.to.include('profileForUserDomain');
         expect(html).to.include('id="artifactDrawer"');
         expect(html).to.include("'mermaid.min.js'");
-        expect(script).to.include("case 'workflowList'");
+        expect(script).not.to.include("case 'workflowList'");
         expect(script).to.include("case 'slashCommandList'");
         expect(script).to.include("case 'slashCommandResult'");
         expect(script).to.include('handleSlashPopupKeydown');
@@ -336,6 +335,27 @@ describe('webview smoke checks', () => {
         expect(script).to.include('function domPointForComposerTextOffset');
         expect(script).to.include('textFromComposerNode(before.cloneContents())');
         expect(script).to.include('triggerRange.setStart(start.node, start.offset);');
+    });
+
+    it('settings page honors home-file providers and agent-model overrides', () => {
+        const html = fs.readFileSync(path.join(root, 'client/extension/ai/chatHtml.ts'), 'utf8');
+        const hostSettings = fs.readFileSync(path.join(root, 'client/extension/ai/chatSettings.ts'), 'utf8');
+        const script = fs.readFileSync(path.join(root, 'client/webview/chatPanel.ts'), 'utf8');
+        const css = fs.readFileSync(path.join(root, 'client/webview/chatPanel.css'), 'utf8');
+
+        // Host: home providers join the settings payload, file warnings ride
+        // along, and saving a home line never writes endpoint or API key back.
+        expect(hostSettings).to.include("source: 'home'");
+        expect(hostSettings).to.include('providerFileWarnings');
+        expect(hostSettings).to.include('isHomeProviderId(settings.provider)');
+        // Webview: provenance badge, read-only file-owned fields, home-role
+        // rows excluded from the rebuilt agentModels save payload.
+        expect(html).to.include('id="providerFileWarnings"');
+        expect(script).to.include('function providerSourceOf');
+        expect(script).to.include('function updateHomeProviderUI');
+        expect(script).to.include("escapeHtml(' (~/.cwtools)')");
+        expect(script).to.include('settingsAgentModelHomeRoles.has(role)');
+        expect(css).to.include('.agent-model-home-badge');
     });
 
     it('release bundle exists and is non-empty after compile', () => {
@@ -695,6 +715,67 @@ describe('webview smoke checks', () => {
         expect(script).to.include('body.scrollTop = stickToBottom ? body.scrollHeight : Math.min(prevScrollTop, body.scrollHeight);');
         expect(script).to.include('rerenderScrollableBody(state.liveThinkBody, renderMarkdown(clipLiveMarkdownContent(state.liveThinkContent)));');
         expect(script).to.include('rerenderScrollableBody(state.liveTextProcessBody, renderMarkdown(clipLiveMarkdownContent(state.liveTextContent)));');
+    });
+
+    it('streaming scroll pinning latches upward scrolls and re-checks inside the queued frame', () => {
+        const script = fs.readFileSync(path.join(root, 'client/webview/chatPanel.ts'), 'utf8');
+        // Latch state: ~30px of deliberate upward drift sets it; only a downward
+        // return to the bottom (or a forced scroll) releases it.
+        expect(script).to.include('let chatUpwardDrift = 0;');
+        expect(script).to.include('let lastChatScrollTop = 0;');
+        expect(script).to.include('if (chatUpwardDrift > 30) isUserScrolledUp = true;');
+        expect(script).to.include('if (delta >= 0) isUserScrolledUp = false;');
+        // The rAF callback re-checks the latch so a queued frame never yanks the
+        // user back down after they scrolled up.
+        expect(script).to.include('scrollBottomPending = false;\n                // Re-check inside the frame');
+        expect(script).to.include('if (isUserScrolledUp) return;');
+        // Subagent fullscreen views share the same latch semantics.
+        expect(script).to.include('if (subagentUserScrolledUp.get(fullscreen)) return;');
+        expect(script).to.include('if (track.upwardDrift > 30) subagentUserScrolledUp.set(fullscreen, true);');
+        // Standalone compaction cards must not force-unlock a scrolled-up user.
+        const compaction = script.slice(script.indexOf('function applyStandaloneCompactionStep'));
+        expect(compaction.slice(0, compaction.indexOf('function ', 10))).to.not.include('scrollBottom(true)');
+    });
+
+    it('file references render as clickable buttons wired to openFileAtLine', () => {
+        const script = fs.readFileSync(path.join(root, 'client/webview/chatPanel.ts'), 'utf8');
+        const css = fs.readFileSync(path.join(root, 'client/webview/chatPanel.css'), 'utf8');
+        const i18n = fs.readFileSync(path.join(root, 'client/webview/chat/i18n.ts'), 'utf8');
+
+        expect(script).to.include("import { findFileReferences } from './chat/fileReferences';");
+        expect(script).to.include('function linkifyFileReferences(container: HTMLElement)');
+        expect(script).to.include("parent.closest('a, pre, button, script, style, .md-codeblock, .file-ref-link')");
+        expect(script).to.include("inlineCode.closest('p, li, td')");
+        expect(script).to.include("type: 'openFileAtLine',");
+        expect(script).to.include('.file-ref-link');
+        expect(css).to.include('.file-ref-link:hover');
+        expect(i18n).to.include('打开文件并跳转到行');
+        expect(i18n).to.include('Open file and jump to line');
+    });
+
+    it('panels and popups animate open and close via class-driven transitions', () => {
+        const css = fs.readFileSync(path.join(root, 'client/webview/chatPanel.css'), 'utf8');
+        const managerCss = fs.readFileSync(path.join(root, 'client/webview/agentManager.css'), 'utf8');
+        const script = fs.readFileSync(path.join(root, 'client/webview/chatPanel.ts'), 'utf8');
+
+        // Overlay panels stay mounted with visibility participating in the transition.
+        expect(css).to.include('.topics-panel.show { visibility: visible; opacity: 1; pointer-events: auto; transform: translateY(0); transition-delay: 0s; }');
+        expect(css).to.include('.settings-page.active { position: static; flex: 1; visibility: visible; opacity: 1; pointer-events: auto; transform: none; transition-delay: 0s; }');
+        expect(css).to.include('.slash-popup.show { visibility: visible; opacity: 1; pointer-events: auto; transform: none; transition-delay: 0s; }');
+        expect(css).to.include('.composer-menu.show, .model-menu.show { visibility: visible; opacity: 1; pointer-events: auto; transform: none; transition-delay: 0s; }');
+        // Height-animated collapsibles use the grid-rows technique.
+        expect(css).to.include('.accordion-body { display: grid; grid-template-rows: 0fr;');
+        expect(css).to.include('.diff-summary-card.collapsed .ds-files { grid-template-rows: 0fr; }');
+        expect(css).to.include('.ds-file.ds-open .ds-diff-collapse { grid-template-rows: 1fr; }');
+        expect(css).to.include('.todo-panel.has-items[open]:not(.todo-closing) { grid-template-rows: auto 1fr; }');
+        // Embedded side-workspace reuse stays instant and non-animated.
+        expect(css).to.include('.side-workspace-body .topics-panel { position: static; display: flex; flex-direction: column; background: transparent; overflow: hidden; visibility: visible; opacity: 1; pointer-events: auto; transform: none; transition: none; }');
+        // The @ mention popup is class-driven only (no direct display writes).
+        expect(script).to.not.include("atPopup.style.display = 'none';");
+        // The manager topics rail animates its width and fade.
+        expect(managerCss).to.include('transition: grid-template-columns .2s ease, --manager-active-left-width .2s ease;');
+        expect(managerCss).to.include('body.agent-manager-shell.manager-topics-collapsed .topics-panel');
+        expect(managerCss).to.include('.manager-file-change-row.is-collapsed .manager-diff-collapse');
     });
 
     it('plan approval cards render reliably without race-condition dismissal across chat and manager views', () => {

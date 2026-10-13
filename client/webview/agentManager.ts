@@ -35,7 +35,6 @@ type ManagerEnhancementState = {
     artifacts: ManagerSnapshotMessage['artifacts'];
     todos: Array<{ content: string; status: 'pending' | 'in_progress' | 'done' }>;
     schedulingState: ManagerSnapshotMessage['schedulingState'];
-    workflowId: string | null;
     isGenerating: boolean;
     liveStepCount: number;
     messageCount: number;
@@ -86,7 +85,6 @@ const DEFAULT_STATE: ManagerEnhancementState = {
         phaseReason: 'Waiting for the host scheduling snapshot.',
         revision: 0,
     },
-    workflowId: null,
     isGenerating: false,
     liveStepCount: 0,
     messageCount: 0,
@@ -168,7 +166,7 @@ const DEFAULT_STATE: ManagerEnhancementState = {
             topicsTitle: 'Agent 话题',
             tabs: { conversation: '对话', trajectory: '轨迹', changes: '变更', activity: '运行' },
             actions: { workbench: '工作台', closeWorkbench: '关闭工作台', settings: '设置', showTopics: '显示话题', toggleTopics: '折叠话题栏', newTopic: '新话题', archived: '已归档', exportTopic: '导出', searchTopics: '搜索话题...', renameTopic: '重命名话题', review: '审核' },
-            workflow: { build: '构建工作流', plan: '计划工作流', review: '审查工作流', explore: '探索工作流', orchestrator: '通用多 Agent 工作流', script: 'Paradox 多 Agent 工作流' },
+            schedulingMode: { build: '构建档', plan: '计划档', review: '审查档', explore: '探索档', orchestrator: '通用多 Agent', script: 'Paradox 多 Agent' },
             status: { paused: '已暂停', running: '运行中', completed: '已完成', failed: '失败', cancelled: '已取消', idle: '空闲' },
             metrics: { tokens: 'Token', cache: '缓存', filesChanged: '个文件变更', cost: '费用', in: '输入', out: '输出', cached: '缓存', calls: '调用', totalUsage: '总计消耗', estimatedCost: '预估成本', cacheHit: '缓存命中', providers: '按供应商', models: '模型分布' },
             run: {
@@ -233,7 +231,7 @@ const DEFAULT_STATE: ManagerEnhancementState = {
             topicsTitle: 'Agent Topics',
             tabs: { conversation: 'Conversation', trajectory: 'Trajectory', changes: 'Changes', activity: 'Run' },
             actions: { workbench: 'Workbench', closeWorkbench: 'Close Workbench', settings: 'Settings', showTopics: 'Show topics', toggleTopics: 'Toggle topics', newTopic: 'New topic', archived: 'Archived', exportTopic: 'Export', searchTopics: 'Search topics...', renameTopic: 'Rename topic', review: 'Review' },
-            workflow: { build: 'Build Workflow', plan: 'Plan Workflow', review: 'Review Workflow', explore: 'Explore Workflow', orchestrator: 'General Multi-Agent Workflow', script: 'Paradox Multi-Agent Workflow' },
+            schedulingMode: { build: 'Build mode', plan: 'Plan mode', review: 'Review mode', explore: 'Explore mode', orchestrator: 'General multi-agent', script: 'Paradox multi-agent' },
             status: { paused: 'Paused', running: 'Running', completed: 'Completed', failed: 'Failed', cancelled: 'Cancelled', idle: 'Idle' },
             metrics: { tokens: 'Tokens', cache: 'Cache', filesChanged: 'files changed', cost: 'Cost', in: 'in', out: 'out', cached: 'cached', calls: 'calls', totalUsage: 'Total Usage', estimatedCost: 'Estimated Cost', cacheHit: 'Cache Hit', providers: 'By Provider', models: 'Models' },
             run: {
@@ -618,17 +616,14 @@ const DEFAULT_STATE: ManagerEnhancementState = {
 
     function updateWorkspaceFileToggle(fileKey: string, row: HTMLElement): void {
         const files = collectWorkspaceFiles(state.run);
-        const file = files.find(item => item.file === fileKey);
         const nextCollapsed = !collapsedWorkspaceFiles.has(fileKey);
         if (nextCollapsed) collapsedWorkspaceFiles.add(fileKey);
         else collapsedWorkspaceFiles.delete(fileKey);
+        // The diff DOM stays mounted so collapse/expand is a pure class toggle
+        // that the grid-rows transition animates (see .manager-diff-collapse).
         row.classList.toggle('is-collapsed', nextCollapsed);
         const button = row.querySelector<HTMLButtonElement>('.manager-file-change-toggle');
         button?.setAttribute('aria-expanded', nextCollapsed ? 'false' : 'true');
-        row.querySelector<HTMLElement>('.manager-workspace-diff-preview')?.remove();
-        if (!nextCollapsed && file) {
-            row.insertAdjacentHTML('beforeend', renderWorkspaceDiffLines(file));
-        }
         lastWorkspaceRenderSignature = workspaceRenderSignature(files);
     }
 
@@ -1224,15 +1219,15 @@ const DEFAULT_STATE: ManagerEnhancementState = {
             .join(' · ');
     }
 
-    function workflowLabel(scheduling: ManagerSnapshotMessage['schedulingState'], workflowId: string | null): string {
-        if (workflowId) return workflowId;
+    /** Profile-level label for the active scheduler mode. */
+    function schedulingModeLabel(scheduling: ManagerSnapshotMessage['schedulingState']): string {
         if (scheduling.dispatch !== 'single') {
-            return scheduling.domainProfile === 'paradox' ? ui.workflow.script : ui.workflow.orchestrator;
+            return scheduling.domainProfile === 'paradox' ? ui.schedulingMode.script : ui.schedulingMode.orchestrator;
         }
-        if (scheduling.phase === 'plan') return ui.workflow.plan;
-        if (scheduling.phase === 'verify') return ui.workflow.review;
-        if (scheduling.phase === 'inspect') return ui.workflow.explore;
-        return ui.workflow.build;
+        if (scheduling.phase === 'plan') return ui.schedulingMode.plan;
+        if (scheduling.phase === 'verify') return ui.schedulingMode.review;
+        if (scheduling.phase === 'inspect') return ui.schedulingMode.explore;
+        return ui.schedulingMode.build;
     }
 
     function isRunActive(status: string): boolean {
@@ -1383,7 +1378,7 @@ const DEFAULT_STATE: ManagerEnhancementState = {
             drawerOpen,
             topicTitleEditing,
             topicTitle,
-            workflow: state.workflowId || state.schedulingState.profileName,
+            schedulingMode: state.schedulingState.profileName,
             statusText,
             statusClass,
             activeTab,
@@ -1410,10 +1405,10 @@ const DEFAULT_STATE: ManagerEnhancementState = {
                         <span>${escapeHtml(topicTitle)}</span>
                     </button>
                 `}
-                <button type="button" class="manager-command-workflow" data-manager-jump="activity" title="${escapeHtml(workflowLabel(state.schedulingState, state.workflowId))}">
+                <button type="button" class="manager-command-mode" data-manager-jump="activity" title="${escapeHtml(schedulingModeLabel(state.schedulingState))}">
                     ${svgIconNoMargin('gitBranch')}
                     <span>${escapeHtml(isActive ? ui.run.currentRound : ui.run.previousRound)}</span>
-                    <small>${escapeHtml(state.workflowId || schedulingLabel(state.schedulingState))}</small>
+                    <small>${escapeHtml(schedulingLabel(state.schedulingState))}</small>
                 </button>
                 <span class="manager-command-status ${statusClass}">
                     ${svgIconNoMargin(isActive ? 'link' : 'check')}
@@ -1513,14 +1508,14 @@ const DEFAULT_STATE: ManagerEnhancementState = {
                         </span>
                         <button type="button" class="manager-file-open open-result-link" data-path="${escapeHtml(file.file)}" title="${escapeHtml(ui.workspace.openFile)}" aria-label="${escapeHtml(ui.workspace.openFile)}">${svgIconNoMargin('file')}</button>
                     </header>
-                    ${collapsedWorkspaceFiles.has(file.file) ? '' : renderWorkspaceDiffLines(file)}
+                    <div class="manager-diff-collapse"><div class="manager-diff-clip">${renderWorkspaceDiffLines(file)}</div></div>
                 </article>
             `).join('') : `<div class="manager-review-empty"><strong>${ui.workspace.noChanges}</strong><span>${ui.workspace.noWorkspaceHint}</span></div>`;
             const hasExternalWorkspace = workspaceEntries.length > 0;
             artifactListEl.innerHTML = `
                 <div class="manager-workspace-page manager-changes-page">
                     <header class="manager-review-summary">
-                        <span><strong>${state.isGenerating || isRunActive(String(run?.status || '')) ? ui.run.currentRound : ui.run.previousRound}</strong><small>${escapeHtml(workflowLabel(state.schedulingState, state.workflowId))}</small></span>
+                        <span><strong>${state.isGenerating || isRunActive(String(run?.status || '')) ? ui.run.currentRound : ui.run.previousRound}</strong><small>${escapeHtml(schedulingModeLabel(state.schedulingState))}</small></span>
                         <span class="manager-review-delta"><strong>+${additions}</strong><em>-${deletions}</em><i>${workspaceFiles.length} ${ui.metrics.filesChanged}</i></span>
                     </header>
                     <section class="manager-workspace-host-card ${hasExternalWorkspace ? 'has-content' : ''}" ${hasExternalWorkspace ? '' : 'hidden'}>
@@ -1965,7 +1960,6 @@ const DEFAULT_STATE: ManagerEnhancementState = {
         state.transcript = snapshot.transcript;
         lastWorkspaceRenderSignature = '';
         state.schedulingState = snapshot.schedulingState || state.schedulingState;
-        state.workflowId = snapshot.workflowId || null;
         state.isGenerating = !!snapshot.isGenerating;
         state.liveStepCount = snapshot.liveStepCount || 0;
         state.todos = snapshot.todos || [];
@@ -2116,10 +2110,6 @@ const DEFAULT_STATE: ManagerEnhancementState = {
                 break;
             case 'startBackgroundGeneration':
                 state.isGenerating = true;
-                renderOverview();
-                break;
-            case 'workflowChanged':
-                state.workflowId = msg.workflowId || null;
                 renderOverview();
                 break;
             case 'artifactList':

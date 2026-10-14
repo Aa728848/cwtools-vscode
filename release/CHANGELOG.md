@@ -1,5 +1,30 @@
 # Changelog
 
+## [2.30.0] - 2026-10-14
+
+### 诊断刷新与校验修复 / Diagnostics Refresh and Validation Fixes
+
+- **[修复] 定义变更后引用方诊断免重启刷新（Reference Revalidation Without Restart）**：
+  - **解决什么**：在 `common/technology/` 等普通类型目录新增/修改/删除定义后，引用它的文件持续报「不存在」，只有重启插件才恢复。根因有二：引用方发现被路径白名单挡死（只认 events 与 scripted 目录）；且纯类型索引提交不会重建校验服务冻结的取值集合。
+  - **修复方式**：引用方发现改为类型引用索引驱动并覆盖所有类型定义目录（输入取「编辑前 ∪ 提交后」并集，新增定义也能找到引用方）；普通 `type[...]` 键的语义变更在编辑与删除两条路径上都升级为增量服务重建；events 的 id 集合变更同样纳入。**全程不触发全量刷新**，内存占用与之前持平。
+  - English: [Fix] Adding, editing or deleting a definition in ordinary type directories (e.g. `common/technology/`) no longer leaves referrers reporting "does not exist" until restart. Reference discovery now runs through the type-reference index for every type-defining path (fed by the pre-/post-commit definition union), and ordinary type-key semantic changes escalate to an incremental service rebuild on both the edit and the delete path — no full refresh is ever triggered.
+
+- **[修复] 引用方后台自动刷新（Background Referrer Refresh）**：
+  - events 引用方过去只标脏不驱动，要点开文件才刷新；且所有定义路径的后台重算走「只发布动态展开域」的旧管线，「technology 不存在」这类规则域诊断（CW240）永远等不到重发。现在所有定义路径的引用方统一走新的规则域后台重算管线：完整校验、完整发布，并保留 300ms 防抖、每批 500 上限、补全期间让位等全部节流护栏。
+  - English: [Fix] Referrers now revalidate in the background. Previously event referrers were only marked stale until focused, and the background pipeline republished only the dynamic-expansion domain, so rule-domain errors such as CW240 never cleared on their own. All definition paths now share a rule-domain background drain with the existing throttles intact.
+
+- **[修复] AI 建文件后诊断不刷新（AI-Created Files Now Validate）**：
+  - AI 工具写出的新文件此前几乎收不到 didOpen（服务器恒回 ok 短路了兜底），且「从未校验」被误当「陈旧无错」——新文件表现为假空诊断。现在写后对未打开文件总是补 didOpen，服务器通过 `validated` 字段显式区分「从未校验/陈旧」，客户端识别后立即触发校验而不是干等超时。
+  - English: [Fix] Files created by AI tools now actually validate: the client always emits didOpen for unopened files after a write, and the server's new `validated` flag lets the client tell "never validated" apart from "stale" instead of waiting out a timeout and reading the stale Problems panel.
+
+- **[特性] 新命令「重新校验全部文件 / Revalidate All Files」**：
+  - 命令面板新增手动兜底：优先调服务器端 `cwtools.ai.revalidateAll`（全局失效 + 有界分批排空，本地化域走整批刷新），旧服务器自动回退为客户端分批 `revalidateFiles`。带中英进度与完成提示。
+  - English: [Feature] New "Revalidate All Files" palette command: prefers the server-side `cwtools.ai.revalidateAll` (global invalidation with bounded batched draining, localisation handled by the batch refresh) and falls back to batched `revalidateFiles` on older servers, with bilingual progress reporting.
+
+- **[优化] 引用穷举扫描记忆化与索引缓存加固（Reference Scan Memoization）**：
+  - scripted 目录的引用发现兜底（全工作区 AST 遍历）现在按资源纪元记忆化（512 条有界），同一文件多个定义的编辑不再重复全库扫描；类型索引提交现在主动清理引用索引缓存，正确性不再依赖上层升级分支这条隐性约定（上游 cwtools 子模块 `6a3b43c0`）。
+  - English: [Optimization] The exhaustive reference-scan fallback is now memoized per resource epoch (bounded at 512 entries), and type-index commits clear the reference-index cache themselves instead of relying on an implicit upstream escalation contract (cwtools submodule `6a3b43c0`).
+
 ## [2.29.0] - 2026-10-13
 
 ### Agent Skill 体系与 Home 配置 / Agent Skills and Home Configuration

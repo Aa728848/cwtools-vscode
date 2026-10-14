@@ -71,6 +71,7 @@ import { configureSandboxStorage } from './configuredGameRoots';
 import { inferGameIdFromWorkspace, hasWorkspaceModDescriptor, workspaceHasParadoxStructure as workspaceHasParadoxStructureDetect } from './workspaceGameDetection';
 import { LspFeaturePriorityGate } from './lspFeaturePriority';
 import { LspPerformanceStats, type ValidationDiagnosticCounts } from './lspPerformanceStats';
+import { chunkRevalidateBatches, DIAGNOSTIC_REVALIDATE_EXTENSIONS, DIAGNOSTIC_REVALIDATE_SCAN_LIMIT, selectRevalidateTargets } from './diagnosticRevalidation';
 import { DirectoryCompletionCommand } from './directoryCompletionCommand';
 import { LanguageServerProcessController, ManagedLanguageClient } from './languageServerProcess';
 import {
@@ -243,6 +244,92 @@ async function removeConflictingExtensions(): Promise<boolean> {
 }
 
 const registeredCommands = new Map<string, Disposable>();
+/** Bound a single LSP round trip so the revalidation progress UI cannot hang forever. */
+async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, timeoutMessage: string): Promise<T> {
+	return new Promise<T>((resolve, reject) => {
+		const timer = setTimeout(() => reject(new Error(timeoutMessage)), timeoutMs);
+		promise.then(
+			value => { clearTimeout(timer); resolve(value); },
+			error => { clearTimeout(timer); reject(error instanceof Error ? error : new Error(String(error))); },
+		);
+	});
+}
+
+/**
+ * Ask the server to revalidate the whole workspace in one request.
+ *
+ * Returns null when the server does not support `cwtools.ai.revalidateAll` (or
+ * reported a failure), so the caller can fall back to batched revalidation.
+ */
+async function requestServerRevalidateAll(client: LanguageClient): Promise<number | null> {
+	try {
+		const response = await withTimeout(
+			client.sendRequest<unknown>('workspace/executeCommand', {
+				command: 'cwtools.ai.revalidateAll',
+				arguments: [],
+			}),
+			15000,
+			'Timed out requesting CWTools revalidation of all files');
+		if (response && typeof response === 'object') {
+			const payload = response as { ok?: unknown; queued?: unknown };
+			if (payload.ok === false) return null;
+			return typeof payload.queued === 'number' ? payload.queued : 0;
+		}
+	} catch (error) {
+		ErrorReporter.debug('Extension', 'cwtools.ai.revalidateAll unavailable; falling back to batched revalidation', error);
+	}
+	return null;
+}
+
+/**
+ * Revalidate every diagnostic-relevant file in the workspace and report how many
+ * were queued. Prefers the server-side `cwtools.ai.revalidateAll`; older servers
+ * answer with an error, and then the workspace is scanned and the files are
+ * revalidated in bounded batches through `cwtools.ai.revalidateFiles`.
+ */
+async function revalidateAllDiagnostics(
+	client: LanguageClient,
+	progress: vs.Progress<{ message?: string; increment?: number }>,
+	token: vs.CancellationToken,
+): Promise<number> {
+	const globExtensions = DIAGNOSTIC_REVALIDATE_EXTENSIONS.map(ext => ext.slice(1)).join(',');
+	if (!token.isCancellationRequested) {
+		const queued = await requestServerRevalidateAll(client);
+		if (queued !== null) return queued;
+	}
+
+	progress.report({ message: localize('Scanning workspace files…', '正在扫描工作区文件…') });
+	const found = await workspace.findFiles(
+		`**/*.{${globExtensions}}`,
+		'**/{node_modules,.git,.vscode,.vscode-test,.cwtools}/**',
+		DIAGNOSTIC_REVALIDATE_SCAN_LIMIT);
+	const batches = chunkRevalidateBatches(selectRevalidateTargets(found.map(uri => uri.fsPath), DIAGNOSTIC_REVALIDATE_SCAN_LIMIT));
+	let queued = 0;
+	for (let index = 0; index < batches.length; index++) {
+		if (token.isCancellationRequested) break;
+		const batch = batches[index]!;
+		progress.report({ message: localize(
+			`Revalidating batch ${index + 1}/${batches.length}…`,
+			`正在重新校验第 ${index + 1}/${batches.length} 批…`) });
+		let accepted = false;
+		try {
+			const response = await withTimeout(
+				client.sendRequest<unknown>('workspace/executeCommand', {
+					command: 'cwtools.ai.revalidateFiles',
+					arguments: [batch.map(file => vs.Uri.file(file).toString())],
+				}),
+				15000,
+				'Timed out requesting CWTools revalidation of a file batch');
+			accepted = !!response && typeof response === 'object'
+				&& (response as { ok?: unknown }).ok === true;
+		} catch (error) {
+			ErrorReporter.warn('Extension', `Revalidate batch ${index + 1}/${batches.length} failed`, error);
+		}
+		if (accepted) queued += batch.length;
+	}
+	return queued;
+}
+
 function safeRegisterCommand(context: ExtensionContext, commandId: string, handler: (...args: any[]) => any): void {
 	const existing = registeredCommands.get(commandId);
 	if (existing) {
@@ -1395,6 +1482,30 @@ export async function activate(context: ExtensionContext) {
 				`请获取并修复当前文件 \`${relPath}\` 中的所有 CWTools 诊断错误。`
 			)
 		);
+	});
+
+	safeRegisterCommand(context, 'cwtools.revalidateAllDiagnostics', async () => {
+		if (!defaultClient) {
+			void vs.window.showWarningMessage(localize(
+				'The CWTools language server is not running, so diagnostics cannot be revalidated.',
+				'CWTools 语言服务未运行，无法重新校验诊断。'));
+			return;
+		}
+		await vs.window.withProgress({
+			location: vs.ProgressLocation.Notification,
+			cancellable: true,
+			title: localize('CWTools: Revalidating all files…', 'CWTools：正在重新校验全部文件…'),
+		}, async (progress, token) => {
+			try {
+				const queued = await revalidateAllDiagnostics(defaultClient, progress, token);
+				void vs.window.showInformationMessage(localize(
+					`Revalidation queued for ${queued} file(s).`,
+					`已为 ${queued} 个文件排队重新校验。`));
+			} catch (error) {
+				ErrorReporter.warn('Extension', 'Failed to revalidate all files', error);
+				void vs.window.showErrorMessage(localize('Revalidating all files failed.', '全部文件重新校验失败。'));
+			}
+		});
 	});
 
 	safeRegisterCommand(context, "cwtools.ai.manageIgnoredDiagnostics", async () => {

@@ -39,6 +39,8 @@ import {
 import { GRAPHICS_EXTS, matchesExt } from '../../fileExtensions';
 import { getLocalisationTransactionTargets } from '../runner/toolScheduler';
 import { shouldBypassWriteConfirmation } from './writeConfirmation';
+import { isNeverValidatedState, shouldOpenDocumentForRevalidate } from '../../diagnosticRevalidation';
+import { ErrorReporter } from '../errorReporter';
 import { getSessionPermissionMode } from '../runner/sessionPermissions';
 import {
     createDiagnosticSnapshot,
@@ -91,6 +93,9 @@ export interface FileToolContext {
 }
 
 // - Handler class -
+
+/** ErrorReporter source tag for this handler's diagnostics plumbing. */
+const SOURCE = 'FileTools';
 
 export class FileToolHandler {
     /** Per-file edit failure counter - escalates errors for all file types */
@@ -1436,6 +1441,8 @@ export class FileToolHandler {
         epoch: number;
         pendingGlobalKinds: string[];
         diagnostics?: ValidationError[];
+        /** The server has no entry for this file at all (not merely an old revision). */
+        neverValidated: boolean;
     } | null> {
         if (context?.runnerOptions?.schedulingState.domainProfile === 'general') {
             return {
@@ -1443,6 +1450,7 @@ export class FileToolHandler {
                 epoch: Date.now(),
                 pendingGlobalKinds: [],
                 diagnostics: FileToolHandler.mapDiagnostics(vs.Uri.file(filePath), true),
+                neverValidated: false,
             };
         }
         try {
@@ -1459,18 +1467,26 @@ export class FileToolHandler {
                 context?.runnerOptions?.abortSignal,
             );
             if (result && typeof result === 'object' && 'freshness' in result) {
+                const hasDiagnostics = Array.isArray(result.diagnostics);
                 return {
                     freshness: String(result.freshness) as 'fresh' | 'pending' | 'stale',
                     epoch: typeof result.epoch === 'number' ? result.epoch : 0,
                     pendingGlobalKinds: Array.isArray(result.pendingGlobalKinds)
                         ? (result.pendingGlobalKinds as string[]) : [],
-                    diagnostics: Array.isArray(result.diagnostics)
+                    diagnostics: hasDiagnostics
                         ? (result.diagnostics as ValidationError[]) : undefined,
+                    neverValidated: isNeverValidatedState({
+                        freshness: String(result.freshness),
+                        epoch: typeof result.epoch === 'number' ? result.epoch : 0,
+                        // Absent on servers older than the field; never trust a non-boolean here.
+                        validated: typeof result.validated === 'boolean' ? result.validated : undefined,
+                        hasDiagnosticsField: hasDiagnostics,
+                    }),
                 };
             }
         } catch (error) {
             if (error instanceof Error && error.name === 'AbortError') throw error;
-            /* LSP is not available */
+            ErrorReporter.warn(SOURCE, `Diagnostics freshness query failed for ${filePath}`, error);
         }
         return null;
     }
@@ -1492,8 +1508,30 @@ export class FileToolHandler {
             return !!(res && typeof res === 'object' && res.ok === true);
         } catch (error) {
             if (error instanceof Error && error.name === 'AbortError') throw error;
+            ErrorReporter.warn(SOURCE, `Diagnostics revalidation request failed for ${filePath}`, error);
             return false;
         }
+    }
+
+    /**
+     * Open `uri` in the background so VS Code emits didOpen and the server starts
+     * validating the file. Never takes focus (no showTextDocument) and never
+     * throws: a file that cannot be opened must not fail the write that just
+     * succeeded, so failures are reported to the output channel instead.
+     */
+    private async openDocumentForDidOpen(uri: vs.Uri): Promise<void> {
+        try {
+            await vs.workspace.openTextDocument(uri);
+        } catch (error) {
+            ErrorReporter.debug(SOURCE, `Could not open ${uri.fsPath} to trigger a didOpen`, error);
+        }
+    }
+
+    /** True when VS Code already has `uri` open, so its didOpen was sent already. */
+    private isDocumentOpen(uri: vs.Uri): boolean {
+        // Partial VS Code stubs used by tests may not expose textDocuments.
+        const open: readonly vs.TextDocument[] = vs.workspace.textDocuments ?? [];
+        return open.some(doc => doc.uri.fsPath === uri.fsPath);
     }
 
     /**
@@ -1523,23 +1561,36 @@ export class FileToolHandler {
         const pollIntervalMs = 100;
         const uri = vs.Uri.file(filePath);
         const triggered = await this.requestRevalidateFromDisk(filePath, context);
-        if (!triggered) {
-            try { await vs.workspace.openTextDocument(uri); } catch { /* may already be open */ }
+        // `cwtools.ai.revalidateFiles` only re-lints files the server already tracks,
+        // so a file it has never opened (typically one the AI just created) stays
+        // unvalidated no matter what it answers. Drive the didOpen instead.
+        if (shouldOpenDocumentForRevalidate(triggered, this.isDocumentOpen(uri))) {
+            await this.openDocumentForDidOpen(uri);
         }
 
         //Client-side polling getDiagnosticsFresh (returns immediately, does not hold a lock)
         let elapsed = 0;
+        let openedForUnvalidated = false;
         let lastState: {
             freshness: 'fresh' | 'pending' | 'stale';
             epoch: number;
             pendingGlobalKinds: string[];
             diagnostics?: ValidationError[];
+            neverValidated: boolean;
         } | null = null;
         while (elapsed < timeoutMs) {
             lastState = await this.queryDiagnosticsFresh(filePath, context);
             if (lastState) {
-                // Waiting conditions: epoch > minEpoch (indicating that the new lint has been completed), and freshness != stale
-                if (lastState.epoch > minEpoch && lastState.freshness !== 'stale') {
+                // A never-validated file can never reach epoch > minEpoch, because the
+                // epoch only moves once the server has an entry for it. Open the document
+                // once to produce that didOpen and keep polling for the new result.
+                if (lastState.neverValidated && !openedForUnvalidated) {
+                    openedForUnvalidated = true;
+                    if (!this.isDocumentOpen(uri)) await this.openDocumentForDidOpen(uri);
+                }
+                // Waiting conditions: the file was validated at least once, epoch > minEpoch
+                // (indicating that the new lint has been completed), and freshness != stale
+                if (!lastState.neverValidated && lastState.epoch > minEpoch && lastState.freshness !== 'stale') {
                     return {
                         diagnostics: lastState.diagnostics ?? FileToolHandler.mapDiagnostics(uri),
                         freshness: lastState.freshness,
@@ -1557,6 +1608,8 @@ export class FileToolHandler {
 
         // Timed out but LSP available - return current state + timedOut
         if (lastState) {
+            ErrorReporter.warn(SOURCE,
+                `Diagnostics wait timed out for ${filePath}: freshness=${lastState.freshness} epoch=${lastState.epoch} neverValidated=${lastState.neverValidated} timedOut=true`);
             return {
                 diagnostics: lastState.diagnostics ?? FileToolHandler.mapDiagnostics(uri),
                 freshness: lastState.freshness,

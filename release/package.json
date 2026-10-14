@@ -436,6 +436,12 @@
                 "icon": "$(pulse)"
             },
             {
+                "command": "cwtools.revalidateAllDiagnostics",
+                "title": "%commands.stellarisLanguageServices.revalidateAllDiagnostics.title%",
+                "category": "Stellaris",
+                "icon": "$(refresh)"
+            },
+            {
                 "command": "cwtools.selectGameFolder",
                 "title": "%commands.stellarisLanguageServices.selectGameFolder.title%",
                 "category": "Stellaris",

@@ -75,6 +75,7 @@ import { isPdxScriptTarget } from './evidence/claimExtractor';
 import { runLedger } from './runner/runLedger';
 import { requestPermissionWithAbort } from './runner/permissionRequest';
 import { ErrorReporter } from './errorReporter';
+import { isDiagnosticRelevantFile, selectRevalidateTargets } from '../diagnosticRevalidation';
 import { mergeTokenUsageTotals } from './cacheCapability';
 import { MemoryParser } from './memoryParser';
 import { createDiagnosticSnapshot, diffDiagnosticSnapshots, hasAddedErrors, type DiagnosticDelta } from './runner/diagnosticSnapshot';
@@ -673,11 +674,6 @@ export class AgentToolExecutor {
         })));
     }
 
-    private isDiagnosticRelevantFile(filePath: string): boolean {
-        const ext = path.extname(filePath).toLowerCase();
-        return ['.txt', '.gui', '.yml', '.gfx', '.asset', '.cwt', '.entity', '.shader', '.fxh'].includes(ext);
-    }
-
     private requireCandidateTransaction(transactionId: unknown, context?: import('./types').AgentToolContext): string {
         const requested = typeof transactionId === 'string' ? transactionId : '';
         const active = this.candidateTransactions.id;
@@ -1048,7 +1044,7 @@ export class AgentToolExecutor {
     }
 
     private async requestRevalidateFiles(files: string[]): Promise<Record<string, unknown> | undefined> {
-        const targets = Array.from(new Set(files.filter(file => this.isDiagnosticRelevantFile(file)))).slice(0, 200);
+        const targets = selectRevalidateTargets(files);
         if (targets.length === 0) return undefined;
         try {
             const client = this.client;
@@ -1596,7 +1592,7 @@ export class AgentToolExecutor {
             if (depth > 8 || files.size >= 200 || value === null || value === undefined) return;
             if (typeof value === 'string') {
                 if (/^(?:file|sourceFile|callerFile|invocationFile|templateFile)$/i.test(key)
-                    && this.isDiagnosticRelevantFile(value)) {
+                    && isDiagnosticRelevantFile(value)) {
                     const resolved = path.isAbsolute(value) ? path.resolve(value) : path.resolve(this.workspaceRoot, value);
                     const relative = path.relative(this.workspaceRoot, resolved);
                     if (relative === '' || (!relative.startsWith(`..${path.sep}`) && relative !== '..' && !path.isAbsolute(relative))) files.add(resolved);

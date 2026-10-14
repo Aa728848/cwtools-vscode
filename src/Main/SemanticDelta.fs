@@ -67,6 +67,26 @@ let isEventDefinitionPath (path: string) =
 let isCompletionHeavyEditPath (path: string) =
     isDynamicDefinitionPath path || isTypeDefiningPath path
 
+/// How "which files reference the definitions this file owns" is answered.
+/// Type definitions are addressed by the value ids the shared type-reference
+/// index is keyed on, so both events and the ordinary `type[...]` directories
+/// resolve through that index. The scripted directories keep the exhaustive
+/// reference scan because their definitions are not all addressable that way.
+type ReferenceDiscovery =
+    | TypeReferenceIndexLookup
+    | ExhaustiveReferenceScan
+    | NoReferenceDiscovery
+
+let referenceDiscoveryForPath (path: string) =
+    if isEventDefinitionPath path then
+        TypeReferenceIndexLookup
+    elif isDynamicDefinitionPath path then
+        ExhaustiveReferenceScan
+    elif isTypeDefiningPath path then
+        TypeReferenceIndexLookup
+    else
+        NoReferenceDiscovery
+
 let inlineScriptPathMarker = "common/inline_scripts/"
 
 let tryInlineScriptNameFromPath (path: string) =
@@ -87,6 +107,16 @@ let isTypeIndexOnlyRefreshPath (path: string) =
 
 let scriptedTypeKeys =
     [ "scripted_trigger"; "scripted_effect"; "script_value" ]
+
+/// Type keys are matched against `type[...]` declarations, which are addressed by
+/// their base name; a key carrying a subtype qualifier names the same type.
+let baseTypeKey (typeKey: string) =
+    if isNull typeKey then
+        ""
+    else
+        typeKey
+        |> fun key -> key.Split('.').[0]
+        |> fun baseKey -> baseKey.Trim().ToLowerInvariant()
 
 let semanticDeltaForPath (path: string) =
     let lp = path.ToLowerInvariant().Replace('\\', '/')
@@ -139,6 +169,30 @@ let hasTypeDefiningDelta (delta: SemanticDelta) =
     || Set.contains "rules" delta.domains
     || (delta.validationVisible && not (Set.isEmpty delta.localisationKeys))
 
+/// True when a changed type key names an ordinary definition type, i.e. one
+/// declared by CWT as `type[...]` (technology, event, building, ...). The rule
+/// validation service freezes their value-id sets when it is constructed, so a
+/// change to one of them cannot be published by a type-index commit alone.
+let requiresScriptedServicesForTypeKeys (ordinaryTypeKeys: Set<string>) (changedTypeKeys: seq<string>) =
+    changedTypeKeys
+    |> Seq.exists (fun typeKey -> ordinaryTypeKeys.Contains(baseTypeKey typeKey))
+
+/// True when removing a file must publish through the scripted-service path
+/// instead of the type-index path. A deletion removes a value id from the set the
+/// rule validation service froze at construction exactly the way an edit adds
+/// one, so the two cases need the same signal: a scripted definition directory
+/// (always) or a deleted definition whose type names an ordinary `type[...]`
+/// declaration. An empty definition list names no key at all and therefore stays
+/// on the cheap type-index path.
+let deletionRequiresScriptedServices
+    (path: string)
+    (ordinaryTypeKeys: Set<string>)
+    (definitions: (string * string) list) =
+    isDynamicDefinitionPath path
+    || requiresScriptedServicesForTypeKeys
+        ordinaryTypeKeys
+        (definitions |> Seq.map fst)
+
 /// Decide whether a staged change can be committed incrementally, needs only a
 /// scripted-service update, or must fall back to a full RefreshCaches. The
 /// budget argument bounds consecutive scripted-service patches before a full
@@ -168,11 +222,22 @@ let decideSemanticDelta (delta: SemanticDelta) patchCount patchBudget =
 /// Once an atomic incremental stage has committed, that stage defines the safe
 /// publication boundary. Editor saves must not be promoted to a full cache
 /// rebuild merely because the generic delta is incomplete or a patch counter
-/// reached its historical safety budget.
-let decideCommittedSemanticDelta stage semanticChanged delta patchCount patchBudget =
+/// reached its historical safety budget. `ordinaryTypeKeys` carries the `type[...]`
+/// declaration names; a committed type-index stage that touched one of them is
+/// escalated to a scripted-service publication regardless of the stage that
+/// produced it.
+let decideCommittedSemanticDelta stage semanticChanged delta ordinaryTypeKeys patchCount patchBudget =
     if semanticChanged then
         match stage with
-        | CommittedTypeIndex -> TypeIndexOnly
+        | CommittedTypeIndex ->
+            // A committed type-index stage publishes no rebuilt services, so a change
+            // to an ordinary `type[...]` key must still escalate. Otherwise the rule
+            // validation service keeps the value set it froze at construction and
+            // every referrer reports the changed definition as unknown until restart.
+            if requiresScriptedServicesForTypeKeys ordinaryTypeKeys delta.changedTypeKeys then
+                ScriptedServices
+            else
+                TypeIndexOnly
         | CommittedScriptedServices -> ScriptedServices
     else
         decideSemanticDelta delta patchCount patchBudget

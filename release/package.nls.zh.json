@@ -23,6 +23,7 @@
   "commands.cacheVanilla.title": "重新生成游戏原版缓存文件",
   "commands.stellarisLanguageServices.openSetup.title": "打开安装配置",
   "commands.stellarisLanguageServices.runInstallationDoctor.title": "运行安装健康检查",
+  "commands.stellarisLanguageServices.revalidateAllDiagnostics.title": "重新校验全部文件",
   "commands.stellarisLanguageServices.selectGameFolder.title": "选择游戏目录",
   "commands.stellarisLanguageServices.createGameDirectory.title": "创建 Paradox 游戏文件夹...",
   "commands.stellarisLanguageServices.openSpecialPath.title": "打开本地游戏/CWTools 路径",

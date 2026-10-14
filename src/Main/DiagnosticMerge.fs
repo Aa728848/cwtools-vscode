@@ -56,6 +56,18 @@ let isDeferredValidationDiagnostic (diagnostic: Diagnostic) =
 let mergeDeferredValidationDiagnostics existing refreshed =
     replaceDomain isDeferredValidationDiagnostic existing refreshed
 
+/// A background full recomputation of a file (the event fan-out drain) owns every
+/// rule diagnostic of that file, but not the two domains other producers own:
+/// parser diagnostics come from the immediate per-file lint pass and localisation
+/// diagnostics from the localisation domain, which never runs in this pass. Only
+/// the remaining rule diagnostics may be replaced wholesale.
+let isDeferredRuleDiagnostic (diagnostic: Diagnostic) =
+    isDeferredValidationDiagnostic diagnostic
+    && not (isLocalisationDiagnostic diagnostic)
+
+let mergeDeferredRuleDiagnostics existing refreshed =
+    replaceDomain isDeferredRuleDiagnostic existing refreshed
+
 let mergeDeferredDefinitionDiagnostics existing refreshed =
     replaceDomain isDynamicExpansionDiagnostic existing refreshed
 

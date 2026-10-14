@@ -3375,6 +3375,41 @@ type Server(client: ILanguageClient) =
             |> Array.toList)
         |> List.distinct
 
+    /// Definitions a staged fold associates with one file, unioning the pre-fold and
+    /// post-fold type indexes. A newly added definition exists only post-fold and a
+    /// removed one only pre-fold; reading a single side silently drops the other, so
+    /// the semantic decision and the referrer lookup must both consume this union.
+    let definitionsInStagedMaps
+        (baseIndex: Map<string, CWTools.Common.NewScope.TypeDefInfo array>)
+        (stagedIndex: Map<string, CWTools.Common.NewScope.TypeDefInfo array>)
+        (path: string)
+        =
+        let targetFiles = [ normaliseCachePath path ] |> Set.ofList
+
+        let definitionsIn (index: Map<string, CWTools.Common.NewScope.TypeDefInfo array>) =
+            index
+            |> Map.toList
+            |> List.collect (fun (typeName, infos) ->
+                infos
+                |> Array.choose (fun info ->
+                    if targetFiles.Contains(normaliseCachePath info.range.FileName) then
+                        Some(typeName, info.id)
+                    else
+                        None)
+                |> Array.toList)
+
+        definitionsIn baseIndex @ definitionsIn stagedIndex
+        |> List.distinct
+
+    /// Names of the types CWT declares with `type[...]` (technology, event, ...). A
+    /// staged semantic change touching one of them cannot be published by a
+    /// type-index commit: the rule validation service froze that value-id set when
+    /// it was constructed and nothing rebuilds it on that path.
+    let ordinaryTypeKeysForGame (game: IGame) =
+        game.TypeDefs()
+        |> Seq.map (fun definition -> baseTypeKey definition.name)
+        |> Set.ofSeq
+
     /// Top-level assignment keys of a PDX file, lowercased and sorted. In the scripted
     /// dirs these are exactly the definition names, so comparing this signature against
     /// the type index detects whether an edit actually changed the definition set —
@@ -3455,25 +3490,37 @@ type Server(client: ILanguageClient) =
             []
 
     let referenceFilesForChangedDefinitions (game: IGame) (path: string) (definitions: (string * string) list) =
-        if isEventDefinitionPath path then
-            referenceFilesForDefinitionsFromIndex game definitions
-        elif isDynamicDefinitionPath path then
-            referenceFilesForDefinitions game definitions
-        else
-            []
+        match referenceDiscoveryForPath path with
+        | ReferenceDiscovery.TypeReferenceIndexLookup -> referenceFilesForDefinitionsFromIndex game definitions
+        | ReferenceDiscovery.ExhaustiveReferenceScan -> referenceFilesForDefinitions game definitions
+        | ReferenceDiscovery.NoReferenceDiscovery -> []
 
     let mutable scheduleDeferredDynamicRevalidationImpl: string list -> unit = fun _ -> ()
 
     let scheduleDeferredDynamicRevalidation files =
         scheduleDeferredDynamicRevalidationImpl files
 
-    let markDeferredRevalidationStale files =
+    let mutable scheduleDeferredRuleRevalidationImpl: string list -> unit = fun _ -> ()
+
+    /// Referrers discovered from any definition file are ordinary rule consumers.
+    /// They are marked with the `types`/`rules` kinds they actually lost — never
+    /// with `dynamicParameters`, which only the expansion drain may clear — and are
+    /// then handed to the background full-recomputation drain.
+    ///
+    /// Every referrer-producing path routes here. The deferred dynamic drain is not a
+    /// weaker version of this one: it republishes only the call-site expansion domain
+    /// (`mergeDeferredDefinitionDiagnostics`), so a rule-domain error such as CW240
+    /// "technology does not exist" is outside its publication domain and would survive
+    /// a background recomputation forever, cleared only by a focus-time lint. Routing
+    /// any referrer there re-creates the very staleness this drain removes.
+    let scheduleDeferredRuleRevalidation files =
         let queued =
             files
             |> List.distinctBy normaliseCachePath
         for path in queued do
             clearFileCaches path
             markFilePendingGlobalRevalidation path
+        scheduleDeferredRuleRevalidationImpl queued
 
     //-Lightweight bracket scanner -
     // Provide precise bracket error location when parser fails
@@ -4050,19 +4097,6 @@ type Server(client: ILanguageClient) =
                     elif skipIncrementalRefresh then
                         monitorLog Refresh $"RefreshIncrementalTypes skipped (exact version already indexed) file={name}"
 
-                    let priorCallFiles =
-                        if updateSuperseded
-                           || skipIncrementalRefresh
-                           || not (lintSnapshotStillCurrent ())
-                           || priorDefsForRevalidation.IsEmpty then
-                            []
-                        else
-                            gameStateLock.EnterReadLock()
-                            try
-                                referenceFilesForChangedDefinitions game name priorDefsForRevalidation
-                            finally
-                                gameStateLock.ExitReadLock()
-
                     let staged =
                         if not updateSuperseded
                            && lintSnapshotStillCurrent ()
@@ -4087,13 +4121,51 @@ type Server(client: ILanguageClient) =
                                             match game with
                                             | :? IIncrementalTypeIndex as index ->
                                                 match index.PrepareTypeIndex [ name ] with
-                                                | Some stagedIndex when
-                                                    isDynamicDefinitionPath name
-                                                    && stagedIndex.semanticChanged ->
-                                                    // A subtype/localisation-property change is not
-                                                    // visible in the cheap identity signature.
-                                                    game.PrepareScriptedTypes([ name ], true)
-                                                    |> Option.map ScriptedServices
+                                                | Some stagedIndex when stagedIndex.semanticChanged ->
+                                                    // Two semantic changes are invisible to a cheap
+                                                    // type-index publication. A subtype or
+                                                    // localisation-property change in the scripted
+                                                    // directories is not visible in the identity
+                                                    // signature, and a change to an ordinary
+                                                    // `type[...]` key (technology, event, ...)
+                                                    // leaves the rule validation service holding
+                                                    // the value set it froze at construction, so
+                                                    // every referrer keeps reporting the changed
+                                                    // definition as unknown until a restart.
+                                                    let stagedTypeKeys =
+                                                        definitionsInStagedMaps
+                                                            stagedIndex.baseTypeDefInfo
+                                                            stagedIndex.typeDefInfo
+                                                            name
+                                                        |> List.map fst
+                                                    let ordinaryTypeKeyEscalation =
+                                                        not (isDynamicDefinitionPath name)
+                                                        && requiresScriptedServicesForTypeKeys
+                                                            (ordinaryTypeKeysForGame game)
+                                                            stagedTypeKeys
+
+                                                    if ordinaryTypeKeyEscalation then
+                                                        monitorLog Refresh
+                                                            $"PrepareIncrementalTypes upgrade=scripted-services reason=ordinary_type_key file={name} changedKeys={stagedTypeKeys.Length}"
+
+                                                    if isDynamicDefinitionPath name || ordinaryTypeKeyEscalation then
+                                                        game.PrepareScriptedTypes([ name ], true)
+                                                        |> Option.map ScriptedServices
+                                                    else
+                                                        // Correctness of the ordinary type keys above
+                                                        // depends on this escalation branch always
+                                                        // existing: `CommitTypeIndex` advances
+                                                        // `nextTypeRules()` but never rebuilds
+                                                        // RuleValidationService, whose `typesMap`
+                                                        // froze the legal `type[...]` values at
+                                                        // construction. Derived caches are no longer
+                                                        // part of that argument —
+                                                        // `CommitTypeIndexForFiles` drops the
+                                                        // TypeReferenceIndex cache on every
+                                                        // successful commit, so a TypeIndexOnly
+                                                        // exception here would still owe the service
+                                                        // rebuild, and nothing else.
+                                                        Some(TypeIndexOnly(index, stagedIndex))
                                                 | Some stagedIndex ->
                                                     Some(TypeIndexOnly(index, stagedIndex))
                                                 | None -> None
@@ -4115,12 +4187,50 @@ type Server(client: ILanguageClient) =
                         |> Option.map (function
                             | TypeIndexOnly(_, typeStage) -> typeStage.semanticChanged || nonTypeSemanticChanged
                             | ScriptedServices scriptedStage -> scriptedStage.semanticChanged || nonTypeSemanticChanged)
+                    // Definitions this edit owns, taken from the staged fold itself so a
+                    // newly added file is represented: the pre-commit snapshot cannot
+                    // contain a definition that did not exist yet, and dropping it here
+                    // would blind both the escalation check and the referrer lookup.
+                    let stagedDefinitions =
+                        staged
+                        |> Option.map (function
+                            | TypeIndexOnly(_, typeStage) ->
+                                definitionsInStagedMaps typeStage.baseTypeDefInfo typeStage.typeDefInfo name
+                            | ScriptedServices scriptedStage ->
+                                definitionsInStagedMaps
+                                    scriptedStage.baseTypeDefInfo
+                                    scriptedStage.typeDefInfo
+                                    name)
+                        |> Option.defaultValue priorDefsForRevalidation
+                    let ordinaryTypeKeys =
+                        // Only a staged commit reaches the decision function, so the
+                        // declaration set is read once per decision rather than once per lint.
+                        match incrementalSemanticChangedCandidate with
+                        | Some _ ->
+                            gameStateLock.EnterReadLock()
+                            try
+                                ordinaryTypeKeysForGame game
+                            finally
+                                gameStateLock.ExitReadLock()
+                        | None -> Set.empty
+                    let priorCallFiles =
+                        if updateSuperseded
+                           || skipIncrementalRefresh
+                           || not (lintSnapshotStillCurrent ())
+                           || stagedDefinitions.IsEmpty then
+                            []
+                        else
+                            gameStateLock.EnterReadLock()
+                            try
+                                referenceFilesForChangedDefinitions game name stagedDefinitions
+                            finally
+                                gameStateLock.ExitReadLock()
                     let incrementalSemanticDeltaCandidate =
                         incrementalSemanticChangedCandidate
                         |> Option.map (fun semanticChanged ->
                             semanticDeltaForTypeIndex
                                 name
-                                (priorDefsForRevalidation |> Seq.map fst)
+                                (stagedDefinitions |> Seq.map fst)
                                 semanticChanged)
                     // A successfully committed stage is authoritative about the smallest
                     // safe publication unit. Compute its immutable follow-up plan before
@@ -4133,6 +4243,7 @@ type Server(client: ILanguageClient) =
                                     CommittedSemanticStage.CommittedScriptedServices
                                     semanticChanged
                                     semanticDelta
+                                    ordinaryTypeKeys
                                     incrementalScriptedPatchCount
                                     maxIncrementalScriptedPatchCount)
                         | Some (TypeIndexOnly _), Some semanticChanged, Some semanticDelta ->
@@ -4141,6 +4252,7 @@ type Server(client: ILanguageClient) =
                                     CommittedSemanticStage.CommittedTypeIndex
                                     semanticChanged
                                     semanticDelta
+                                    ordinaryTypeKeys
                                     incrementalScriptedPatchCount
                                     maxIncrementalScriptedPatchCount)
                         | _ -> None
@@ -4293,7 +4405,7 @@ type Server(client: ILanguageClient) =
                         try
                             let currentCallFiles =
                                 if incrementalSemanticChanged then
-                                    referenceFilesForChangedDefinitions game name (typeDefinitionsForFiles game [ name ])
+                                    referenceFilesForChangedDefinitions game name stagedDefinitions
                                 else
                                     []
                             let revalidateFiles =
@@ -4307,10 +4419,7 @@ type Server(client: ILanguageClient) =
                                 else
                                     revalidateFiles
                             if not revalidateFiles.IsEmpty then
-                                if isEventDefinitionPath name then
-                                    markDeferredRevalidationStale revalidateFiles
-                                else
-                                    scheduleDeferredDynamicRevalidation revalidateFiles
+                                scheduleDeferredRuleRevalidation revalidateFiles
                             monitorLog Refresh $"RefreshIncrementalTypes file={name} semantic={incrementalSemanticChanged} patches={incrementalScriptedPatchCount} refs={revalidateFiles.Length}"
                         finally
                             gameStateLock.ExitReadLock()
@@ -4705,6 +4814,32 @@ type Server(client: ILanguageClient) =
     let mutable pendingDeferredRevalidationFiles: Set<string> = Set.empty
     let mutable deferredRevalidationInFlight = false
 
+    /// Known non-localisation paths the invalidation tracker currently reports as
+    /// pending. Shared by the deferred drain and by `cwtools.ai.revalidateAll`, which
+    /// invalidates globally and then reports exactly what the drain will pick up.
+    let trackerPendingKnownPaths () =
+        let loadedResourcePaths =
+            match gameObj with
+            | Some currentGame ->
+                currentGame.AllFiles()
+                |> Seq.map (function
+                    | CWTools.Games.EntityResource(filePath, _)
+                    | CWTools.Games.FileResource(filePath, _)
+                    | CWTools.Games.FileWithContentResource(filePath, _) -> normaliseCachePath filePath)
+            | None -> Seq.empty
+        let known =
+            CWTools.Main.DiagnosticInvalidation.knownPaths
+                [ loadedResourcePaths
+                  fileDiagnosticStates.Keys |> Seq.map normaliseCachePath
+                  locCache.Keys |> Seq.map normaliseCachePath
+                  docs.OpenFiles() |> Seq.map (fun file -> normaliseCachePath file.FullName) ]
+            |> List.filter (fun path ->
+                diagnosticDomainForPath path = CWTools.Main.DiagnosticInvalidation.Domain.NonLocalisation)
+        diagnosticInvalidation.PendingPaths(
+            CWTools.Main.DiagnosticInvalidation.Domain.NonLocalisation,
+            known)
+        |> Set.ofList
+
     do
         scheduleDeferredDynamicRevalidationImpl <- fun (files: string list) ->
             let delay = max 0 dynamicDeferDelayMs
@@ -4718,28 +4853,6 @@ type Server(client: ILanguageClient) =
             for path in queued do
                 clearFileCaches path
                 markFilePendingDynamicRevalidation path
-            let trackerPendingKnownPaths () =
-                let loadedResourcePaths =
-                    match gameObj with
-                    | Some currentGame ->
-                        currentGame.AllFiles()
-                        |> Seq.map (function
-                            | CWTools.Games.EntityResource(filePath, _)
-                            | CWTools.Games.FileResource(filePath, _)
-                            | CWTools.Games.FileWithContentResource(filePath, _) -> normaliseCachePath filePath)
-                    | None -> Seq.empty
-                let known =
-                    CWTools.Main.DiagnosticInvalidation.knownPaths
-                        [ loadedResourcePaths
-                          fileDiagnosticStates.Keys |> Seq.map normaliseCachePath
-                          locCache.Keys |> Seq.map normaliseCachePath
-                          docs.OpenFiles() |> Seq.map (fun file -> normaliseCachePath file.FullName) ]
-                    |> List.filter (fun path ->
-                        diagnosticDomainForPath path = CWTools.Main.DiagnosticInvalidation.Domain.NonLocalisation)
-                diagnosticInvalidation.PendingPaths(
-                    CWTools.Main.DiagnosticInvalidation.Domain.NonLocalisation,
-                    known)
-                |> Set.ofList
             let shouldStart =
                 lock deferredRevalidationLock (fun () ->
                     pendingDeferredRevalidationFiles <-
@@ -4780,6 +4893,308 @@ type Server(client: ILanguageClient) =
                                     Set.union pendingDeferredRevalidationFiles (trackerPendingKnownPaths ())
                                 if Set.isEmpty pendingDeferredRevalidationFiles then
                                     deferredRevalidationInFlight <- false
+                                    false
+                                else
+                                    true))
+                |> ignore
+
+    /// True when any file in the batch currently carries a call-site expansion
+    /// diagnostic. Only such a batch needs dynamic parameter data forced first:
+    /// without the warm-up an unforced entity reports no expansion error, and this
+    /// drain — which owns the expansion domain — would publish an empty one and
+    /// clear a real CW274. The check itself only reads cached state.
+    let batchCarriesExpansionDiagnostics (batch: string list) =
+        batch
+        |> List.exists (fun filePath ->
+            match fileDiagnosticStates.TryGetValue(filePath) with
+            | true, state -> state.diagnostics |> List.exists DiagnosticMerge.isDynamicExpansionDiagnostic
+            | false, _ -> false)
+
+    /// Force dynamic parameter data for a batch about to be validated. Best effort:
+    /// a warm-up failure is logged and validation continues, exactly as in the
+    /// dynamic drain.
+    let warmRuleRevalidationBatch (game: IGame) (batch: string list) =
+        try
+            let warmSw = Stopwatch.StartNew()
+            let warmed = game.ForceDynamicParameterDataForFiles batch
+            warmSw.Stop()
+            logDiag $"Deferred rule revalidation warmed {warmed} queued entities in {warmSw.ElapsedMilliseconds}ms"
+        with e -> logDiag ("Deferred rule revalidation warm-up error: " + e.Message)
+
+    /// Background recomputation for the referrers any definition file fans out to.
+    /// Those files are ordinary rule consumers, so the deferred dynamic drain cannot
+    /// serve them: it republishes only the call-site expansion domain, and a rule
+    /// error such as CW240 "technology does not exist" falls outside that domain and
+    /// would survive the recomputation untouched. This variant therefore runs the
+    /// plain per-file validation and republishes the complete non-localisation
+    /// diagnostic set of every file in the batch.
+    /// Debounce, batch bound, single-flight, replenishment and the admission/version
+    /// cancellation discipline are identical to the dynamic drain by construction.
+    let revalidateDeferredRuleFiles (files: string list) =
+        match gameObj with
+        | None -> ()
+        | Some game when not files.IsEmpty ->
+            let queued =
+                files
+                |> List.distinctBy normaliseCachePath
+                |> List.filter (fun file ->
+                    // Only rule consumers take part: localisation files belong to the
+                    // localisation domain, and shader files carry no rule validation.
+                    not (isCurrentGameLocalisationFile file)
+                    && not (PdxShaderFeatures.isShaderFile file))
+            if not queued.IsEmpty then
+                try
+                    if isCompletionHeavyInteractiveWindow () then
+                        scheduleDeferredRuleRevalidation queued
+                        logDiag $"Deferred rule revalidation yielded to completion activity files={queued.Length}"
+                    else
+                        use _heavyAnalysisLease = acquireHeavyAnalysisGate ()
+                        do
+                            // This drain publishes the rule domain, and CW274 expansion
+                            // diagnostics satisfy isDeferredRuleDiagnostic, so it now
+                            // owns that domain too. Two dynamic-drain consistency rules
+                            // therefore apply here as well.
+                            let expansionDiagnosticFiles =
+                                fileDiagnosticStates
+                                |> Seq.choose (fun kvp ->
+                                    if kvp.Value.diagnostics |> List.exists DiagnosticMerge.isDynamicExpansionDiagnostic then
+                                        Some kvp.Key
+                                    else
+                                        None)
+                                |> Seq.toList
+                            // Two stable groups of real expansion errors requeued after
+                            // every pass would alternate forever, so the carriers join
+                            // the same bounded batch as the requested files.
+                            let requestedKeys = queued |> List.map normaliseCachePath |> Set.ofList
+                            let queued =
+                                DiagnosticMerge.planDeferredDynamicRevalidationBatch
+                                    normaliseCachePath
+                                    dynamicDeferMaxFiles
+                                    queued
+                                    expansionDiagnosticFiles
+                            // Folded-in carriers were not requested, so their own caches and
+                            // pending marker were never touched for this pass.
+                            let addedCarriers =
+                                queued |> List.filter (fun file -> not (requestedKeys.Contains(normaliseCachePath file)))
+                            for path in addedCarriers do
+                                clearFileCaches path
+                                markFilePendingGlobalRevalidation path
+                            if not addedCarriers.IsEmpty then
+                                logDiag
+                                    $"Deferred rule revalidation expanded batch with {addedCarriers.Length} expansion-diagnostic carrier(s)"
+                            let batchModelEpoch = modelEpochSnapshot ()
+                            let batchVersions =
+                                queued |> List.map (fun filePath -> filePath, docs.GetVersionByPath(filePath))
+                            let batchAdmissions =
+                                queued
+                                |> List.map (fun filePath ->
+                                    normaliseCachePath filePath,
+                                    diagnosticInvalidation.TryAdmit(
+                                        CWTools.Main.DiagnosticInvalidation.Domain.NonLocalisation,
+                                        normaliseCachePath filePath))
+                                |> Map.ofList
+                            let batchStillCurrent () =
+                                sameModelEpoch batchModelEpoch (modelEpochSnapshot ())
+                                && batchVersions
+                                   |> List.forall (fun (filePath, version) ->
+                                       docs.GetVersionByPath(filePath) = version)
+
+                            if not (batchStillCurrent ()) then
+                                scheduleDeferredRuleRevalidation queued
+                                logDiag $"Deferred rule revalidation rescheduled stale batch before validation files={queued.Length}"
+                            else
+                                let allocBefore = GC.GetTotalAllocatedBytes(false)
+                                let validationSw = Stopwatch.StartNew()
+                                let refreshedResult =
+                                    gameStateLock.EnterReadLock()
+                                    try
+                                        // Warm dynamic parameter data only when this batch can
+                                        // actually carry expansion diagnostics. The warm-up walks
+                                        // the whole entity map, so it is not free on a batch of
+                                        // plain rule files — but without it an unforced entity
+                                        // reports no expansion error and this drain would publish
+                                        // an empty expansion domain, clearing a real CW274.
+                                        if batchCarriesExpansionDiagnostics queued then
+                                            warmRuleRevalidationBatch game queued
+
+                                        game.ValidateFilesLocalCancellable(
+                                            queued,
+                                            (fun () -> not (batchStillCurrent ()))
+                                        )
+                                    finally
+                                        gameStateLock.ExitReadLock()
+                                validationSw.Stop()
+
+                                match refreshedResult with
+                                | None ->
+                                    scheduleDeferredRuleRevalidation queued
+                                    logDiag $"Deferred rule revalidation rescheduled superseded batch files={queued.Length}"
+                                | Some refreshedErrors ->
+                                    let validatedModelEpoch = batchModelEpoch
+
+                                    // No dynamic-parameter error filter here: these files
+                                    // own plain rule diagnostics and that filter would drop
+                                    // every one of them.
+                                    let refreshedByFile =
+                                        refreshedErrors
+                                        |> List.map (fun (e: CWError) ->
+                                            (e.code,
+                                             e.severity,
+                                             e.range.FileName,
+                                             e.message,
+                                             e.range,
+                                             e.keyLength,
+                                             e.relatedErrors))
+                                        |> List.map parserErrorToDiagnostics
+                                        |> List.filter diagnosticFilter
+                                        |> List.groupBy (fst >> normaliseCachePath)
+                                        |> Map.ofList
+                                    let filesToPublish =
+                                        queued
+                                        @ (refreshedByFile |> Map.toSeq |> Seq.map fst |> Seq.toList)
+                                        |> List.distinctBy normaliseCachePath
+                                    let publishEpoch = nextDiagnosticEpoch ()
+
+                                    for filePath in filesToPublish do
+                                        let refreshed =
+                                            refreshedByFile
+                                            |> Map.tryFind (normaliseCachePath filePath)
+                                            |> Option.map (List.map snd)
+                                            |> Option.defaultValue []
+                                        let pathKey = normaliseCachePath filePath
+                                        let admitted = batchAdmissions |> Map.tryFind pathKey |> Option.flatten
+                                        let currentAdmission =
+                                            diagnosticInvalidation.TryAdmit(
+                                                CWTools.Main.DiagnosticInvalidation.Domain.NonLocalisation,
+                                                pathKey)
+                                        if sameInvalidationAdmission admitted currentAdmission
+                                           && sameIndexModelEpoch validatedModelEpoch (modelEpochSnapshot ())
+                                           && docs.GetVersionByPath(filePath) = (batchVersions |> List.tryFind (fst >> normaliseCachePath >> (=) pathKey) |> Option.bind snd) then
+                                            let merged =
+                                                DiagnosticMerge.mergeDeferredRuleDiagnostics
+                                                    (existingDiagnosticsForFile filePath)
+                                                    refreshed
+                                            publishFileDiagnostics filePath merged
+
+                                            let priorState =
+                                                match fileDiagnosticStates.TryGetValue(filePath) with
+                                                | true, state -> Some state
+                                                | false, _ -> None
+                                            let validatedVersion =
+                                                priorState
+                                                |> Option.bind _.validatedVersion
+                                                |> Option.orElseWith (fun () -> docs.GetVersionByPath(filePath))
+                                            // This pass recomputed every rule diagnostic of the
+                                            // file, so the `types`/`rules` staleness it was
+                                            // scheduled for is satisfied and must be cleared —
+                                            // leaving it would pin the file at Pending forever.
+                                            // The dynamic-expansion and localisation domains
+                                            // belong to other consumers and keep their state.
+                                            let pendingKinds =
+                                                priorState
+                                                |> Option.map _.pendingGlobalKinds
+                                                |> Option.defaultValue []
+                                                |> List.filter (fun kind ->
+                                                    kind = "dynamicParameters" || kind = "localisation")
+                                                |> List.append (pendingRefreshDomainList ())
+                                                |> List.distinct
+                                            let freshness =
+                                                if DiagnosticMerge.isValidatedDocumentVersionStale validatedVersion (docs.GetVersionByPath(filePath)) then Stale
+                                                elif pendingKinds.IsEmpty then Fresh
+                                                else Pending
+                                            setFileDiagnosticStateWithSnapshot
+                                                filePath
+                                                publishEpoch
+                                                validatedVersion
+                                                validatedModelEpoch
+                                                freshness
+                                                pendingKinds
+                                                merged
+                                            currentAdmission
+                                            |> Option.iter (fun admission -> diagnosticInvalidation.Complete(true, admission))
+                                        else
+                                            scheduleDeferredRuleRevalidation [ filePath ]
+
+                                    let publishedCount = refreshedByFile |> Map.toSeq |> Seq.sumBy (snd >> List.length)
+                                    let allocatedMB = (GC.GetTotalAllocatedBytes(false) - allocBefore) / 1048576L
+                                    monitorLog Lint
+                                        $"ValidateFiles local rule fan-out batch files={queued.Length} diagnostics={publishedCount} elapsedMs={validationSw.ElapsedMilliseconds} allocDeltaMB={allocatedMB}{getPerfDiagnosticSnapshot()}"
+                with e -> logDiag $"Deferred rule revalidation failed: {e.Message}"
+        | _ -> ()
+
+    let deferredRuleRevalidationLock = obj ()
+    let mutable pendingDeferredRuleRevalidationFiles: Set<string> = Set.empty
+    /// Paths this drain has enqueued. Replenishment reads the shared invalidation
+    /// tracker lazily but only for paths it owns, so a later global invalidation
+    /// re-queues its referrers while every other pending file stays with the drain
+    /// that recomputes it. Ownership is pruned back to the still-pending set after
+    /// each pass so a long session retains no per-referrer history.
+    let mutable deferredRuleOwnedPaths: Set<string> = Set.empty
+    let mutable deferredRuleRevalidationInFlight = false
+
+    /// Must be called under `deferredRuleRevalidationLock`: restocks the queue
+    /// with the owned paths the shared tracker still reports as pending, so a
+    /// global invalidation landing mid-drain re-queues its referrers without the
+    /// unbounded sweep the dynamic drain performs.
+    let restockDeferredRulePaths () =
+        if Set.isEmpty deferredRuleOwnedPaths then
+            Set.empty
+        else
+            trackerPendingKnownPaths ()
+            |> Set.filter deferredRuleOwnedPaths.Contains
+
+    do
+        scheduleDeferredRuleRevalidationImpl <- fun (files: string list) ->
+            let delay = max 0 dynamicDeferDelayMs
+            let queued =
+                files
+                |> List.distinctBy normaliseCachePath
+                |> List.map normaliseCachePath
+                |> Set.ofList
+            // Same targeted invalidation the dynamic drain raises: it is what makes the
+            // admission captured before this batch reject a publication once a newer
+            // invalidation lands, and what makes replenishment see these paths as
+            // pending on later passes.
+            if not queued.IsEmpty then
+                diagnosticInvalidation.Invalidate(
+                    CWTools.Main.DiagnosticInvalidation.Domain.NonLocalisation,
+                    CWTools.Main.DiagnosticInvalidation.Targeted queued)
+            let shouldStart =
+                lock deferredRuleRevalidationLock (fun () ->
+                    deferredRuleOwnedPaths <- Set.union deferredRuleOwnedPaths queued
+                    pendingDeferredRuleRevalidationFiles <-
+                        Set.union pendingDeferredRuleRevalidationFiles queued
+                    if deferredRuleRevalidationInFlight || Set.isEmpty pendingDeferredRuleRevalidationFiles then
+                        false
+                    else
+                        deferredRuleRevalidationInFlight <- true
+                        true)
+            if shouldStart then
+                Task.Run(fun () ->
+                    let mutable go = true
+                    while go do
+                        (try
+                            if delay > 0 then System.Threading.Thread.Sleep(delay)
+                            let batch =
+                                lock deferredRuleRevalidationLock (fun () ->
+                                    pendingDeferredRuleRevalidationFiles <-
+                                        Set.union pendingDeferredRuleRevalidationFiles (restockDeferredRulePaths ())
+                                    let batch, remainder =
+                                        CWTools.Main.DiagnosticInvalidation.boundedSnapshot
+                                            dynamicDeferMaxFiles
+                                            pendingDeferredRuleRevalidationFiles
+                                    pendingDeferredRuleRevalidationFiles <- Set.ofList remainder
+                                    batch)
+                            if not batch.IsEmpty then revalidateDeferredRuleFiles batch
+                         with e -> logDiag $"Deferred rule revalidation scheduling failed: {e.Message}")
+                        go <-
+                            lock deferredRuleRevalidationLock (fun () ->
+                                pendingDeferredRuleRevalidationFiles <-
+                                    Set.union pendingDeferredRuleRevalidationFiles (restockDeferredRulePaths ())
+                                deferredRuleOwnedPaths <-
+                                    Set.intersect deferredRuleOwnedPaths pendingDeferredRuleRevalidationFiles
+                                if Set.isEmpty pendingDeferredRuleRevalidationFiles then
+                                    deferredRuleRevalidationInFlight <- false
                                     false
                                 else
                                     true))
@@ -7912,9 +8327,37 @@ type Server(client: ILanguageClient) =
                                 let callFiles =
                                     if definitionsForRevalidation.IsEmpty then []
                                     else referenceFilesForChangedDefinitions game path definitionsForRevalidation
+                                // Deleting a definition withdraws its value id from the very
+                                // set the rule validation service froze at construction, so the
+                                // deletion path escalates on exactly the signal the edit path
+                                // uses. The `type[...]` declaration snapshot is taken once
+                                // per deletion under the read lock; the write lock is only
+                                // taken afterwards, so acquiring the reader here cannot nest.
+                                // The read is skipped when the cheap path signal already
+                                // answers the question (a scripted directory) or when the
+                                // file owned no definition at all (no key to match).
+                                let deletionOrdinaryTypeKeys =
+                                    if isDynamicDefinitionPath path || definitionsForRevalidation.IsEmpty then
+                                        Set.empty
+                                    else
+                                        gameStateLock.EnterReadLock()
+                                        try
+                                            ordinaryTypeKeysForGame game
+                                        finally
+                                            gameStateLock.ExitReadLock()
+                                let deletionScripted =
+                                    deletionRequiresScriptedServices
+                                        path
+                                        deletionOrdinaryTypeKeys
+                                        definitionsForRevalidation
+
+                                if deletionScripted && not (isDynamicDefinitionPath path) then
+                                    monitorLog Refresh
+                                        $"PrepareFileDeletion upgrade=scripted-services reason=ordinary_type_key file={path} deletedDefs={definitionsForRevalidation.Length}"
+
                                 let stagedDeletion =
                                     try
-                                        game.PrepareFileDeletion([ path ], isDynamicDefinitionPath path)
+                                        game.PrepareFileDeletion([ path ], deletionScripted)
                                     with error ->
                                         logDiag $"Prepare file deletion failed for {path}: {error.Message}"
                                         None
@@ -7953,13 +8396,15 @@ type Server(client: ILanguageClient) =
                                         callFiles
                                         |> List.filter (fun file -> normaliseCachePath file <> normaliseCachePath path)
                                     if not revalidateFiles.IsEmpty then
-                                        if isEventDefinitionPath path then
-                                            markDeferredRevalidationStale revalidateFiles
-                                        else
-                                            scheduleDeferredDynamicRevalidation revalidateFiles
+                                        scheduleDeferredRuleRevalidation revalidateFiles
                                     monitorLog Refresh $"RemoveScriptedTypes file={path} patches={incrementalScriptedPatchCount} refs={revalidateFiles.Length}"
 
-                                    if isTypeIndexOnlyRefreshPath path then
+                                    // An escalated deletion committed through
+                                    // CommitScriptedTypes, so it is no longer a
+                                    // type-index-only publication even though the path
+                                    // still looks like one. Keep the branch aligned with
+                                    // the commit that actually ran.
+                                    if not deletionScripted && isTypeIndexOnlyRefreshPath path then
                                         completeRefreshDomains [ "types" ] "incremental_type_index_delete"
                                     elif incrementalScriptedPatchCount >= maxIncrementalScriptedPatchCount then
                                         needsTypeRefresh <- true
@@ -12711,6 +13156,7 @@ type Server(client: ILanguageClient) =
                                     JsonValue.Record
                                         [| "ok",                 JsonValue.Boolean true
                                            "file",              JsonValue.String (filePath.Replace('\\', '/'))
+                                           "validated",         JsonValue.Boolean true
                                            "epoch",             JsonValue.Number(decimal state.epoch)
                                            "version",           JsonValue.Number(decimal (state.validatedVersion |> Option.defaultValue -1))
                                            "currentVersion",    JsonValue.Number(decimal (currentVersion |> Option.defaultValue -1))
@@ -12728,9 +13174,14 @@ type Server(client: ILanguageClient) =
                                            "errorCount",        JsonValue.Number(decimal state.errorCount)
                                            "warningCount",      JsonValue.Number(decimal state.warningCount) |]
                                 | false, _ ->
+                                    // No state entry at all. "freshness" alone reads as
+                                    // "stale" exactly like a superseded snapshot, so the
+                                    // response also states that nothing ever validated this
+                                    // file and lets the client tell the two apart.
                                     JsonValue.Record
                                         [| "ok",        JsonValue.Boolean true
                                            "file",      JsonValue.String (filePath.Replace('\\', '/'))
+                                           "validated", JsonValue.Boolean false
                                            "freshness", JsonValue.String "stale"
                                            "epoch",     JsonValue.Number 0m
                                            "currentVersion", JsonValue.Number(decimal (docs.GetVersionByPath(filePath) |> Option.defaultValue -1))
@@ -12826,6 +13277,42 @@ type Server(client: ILanguageClient) =
                                        "requested",     JsonValue.Number(decimal capped.Length)
                                        "truncated",     JsonValue.Boolean(uris.Length > capped.Length)
                                        "files",         JsonValue.Array files |])
+
+                        // - cwtools.ai.revalidateAll -
+                        // Re-run diagnostics for every tracked file. Nothing is recomputed
+                        // here: both invalidation domains are marked globally, and the two
+                        // domains are consumed by two different existing mechanisms.
+                        //
+                        // NonLocalisation: `trackerPendingKnownPaths` feeds the bounded
+                        // deferred drain below, which replenishes from the tracker on every
+                        // pass and so drains the global epoch in batches.
+                        //
+                        // Localisation: that tracker is hard-filtered to non-localisation
+                        // paths, so the localisation epoch has no per-file consumer at all.
+                        // Its unit of invalidation is a whole recomputation, published by the
+                        // existing `delayedLocUpdate` -> `PrepareLocalisationRefresh` chain,
+                        // so setting that flag (plus a refresh wake) is what schedules the
+                        // work. It is deliberately the batch flag, not a synthetic per-file
+                        // drain: the localisation cache is rebuilt as one unit anyway.
+                        | { command = "cwtools.ai.revalidateAll" } ->
+                            diagnosticInvalidation.Invalidate(
+                                CWTools.Main.DiagnosticInvalidation.Domain.NonLocalisation,
+                                CWTools.Main.DiagnosticInvalidation.GlobalUnknown)
+                            diagnosticInvalidation.Invalidate(
+                                CWTools.Main.DiagnosticInvalidation.Domain.Localisation,
+                                CWTools.Main.DiagnosticInvalidation.GlobalUnknown)
+                            delayedLocUpdate <- true
+                            addPendingRefreshDomains [ "localisation" ]
+                            let queued = trackerPendingKnownPaths () |> Set.count
+                            // An empty request still seeds the drain from the tracker, so
+                            // the global epoch is worked off without a second scheduler.
+                            scheduleDeferredDynamicRevalidation []
+                            postRefreshWake None
+                            monitorLog Refresh $"RevalidateAll queued={queued}"
+                            Some(
+                                JsonValue.Record
+                                    [| "ok",     JsonValue.Boolean true
+                                       "queued", JsonValue.Number(decimal queued) |])
 
                         // - cwtools.ai.parseFragment -
                         // Fragment parsing: accepts code fragment text and returns syntax error (does not write to file)

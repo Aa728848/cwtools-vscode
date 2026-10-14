@@ -181,7 +181,7 @@ Agent Note（第二轮）：
 \`\`\`bash
 cd submodules/cwtools
 dotnet build cwtools.slnx          # 必须 0 错误
-dotnet test CWToolsTests/          # 必须 313 通过 / 0 失败
+dotnet test CWToolsTests/          # 必须 314 通过 / 0 失败（313 基线 + typeReferenceInvalidationTests）
 cd ../.. && dotnet build src/Main/ # 下游集成
 \`\`\`
 

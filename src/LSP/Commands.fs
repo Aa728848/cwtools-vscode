@@ -59,6 +59,11 @@ module Commands =
             readCmd "cwtools.ai.revalidateFiles"
             readCmd "cwtools.ai.parseFragment"
 
+            // AI revalidation commands. revalidateAll drives the invalidation
+            // tracker and the deferred drain, so it is a write command even though
+            // it rewrites no file.
+            writeCmd "cwtools.ai.revalidateAll"
+
             // AI Shader commands
             readCmd "cwtools.ai.shader.symbols"
             readCmd "cwtools.ai.shader.compileUnit"

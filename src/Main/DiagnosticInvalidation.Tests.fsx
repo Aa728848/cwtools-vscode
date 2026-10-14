@@ -1,6 +1,7 @@
 #load "../TestHelpers.fsx"
 #load "DiagnosticInvalidation.fs"
 
+open System
 open CWTools.Main.DiagnosticInvalidation
 open TestHelpers
 
@@ -194,5 +195,185 @@ let recreatedToken = tracker.TryAdmit(Domain.NonLocalisation, "thread-safe") |> 
 tracker.Complete(true, recreatedToken)
 check "recreated path completes normally" (not (tracker.IsPending(Domain.NonLocalisation, "thread-safe")))
 check "delete recreate leaves no retained history" (tracker.Counts(Domain.NonLocalisation).RetainedEntries = 0)
+
+// cwtools.ai.revalidateAll marks both domains globally and lets the bounded
+// deferred drain work the epochs off. Reproduce that exact invalidation pair:
+// every known path of each domain must become pending, so one call really does
+// queue the whole workspace instead of a single touched file.
+let revalidateAllTracker = Tracker()
+let revalidateAllKnown = [ "a/common/x.txt"; "a/localisation/y.yml"; "a/common/z.txt" ]
+revalidateAllTracker.Invalidate(Domain.NonLocalisation, GlobalUnknown)
+revalidateAllTracker.Invalidate(Domain.Localisation, GlobalUnknown)
+let revalidateAllSorted = List.sort revalidateAllKnown
+check
+    "revalidateAll queues every known non-localisation path"
+    (revalidateAllTracker.PendingPaths(Domain.NonLocalisation, revalidateAllKnown) = revalidateAllSorted)
+check
+    "revalidateAll queues every known localisation path"
+    (revalidateAllTracker.PendingPaths(Domain.Localisation, revalidateAllKnown) = revalidateAllSorted)
+for path in revalidateAllKnown do
+    match revalidateAllTracker.TryAdmit(Domain.NonLocalisation, path) with
+    | Some admission -> revalidateAllTracker.Complete(true, admission)
+    | None -> failwithf "Expected a revalidateAll admission for %s" path
+check
+    "the revalidateAll drain admits and completes every queued file"
+    (List.forall (fun path -> not (revalidateAllTracker.IsPending(Domain.NonLocalisation, path))) revalidateAllKnown)
+
+// Program.fs wiring: the freshness response must separate a file that was never
+// validated from a superseded snapshot, and revalidateAll must stay a write
+// command so callers cannot treat the global drain as a side-effect-free read.
+let programSource = System.IO.File.ReadAllText(System.IO.Path.Combine(__SOURCE_DIRECTORY__, "Program.fs"))
+let commandsSource = System.IO.File.ReadAllText(System.IO.Path.Combine(__SOURCE_DIRECTORY__, "..\LSP\Commands.fs"))
+
+let freshStart = programSource.IndexOf("// - cwtools.ai.getDiagnosticsFresh -", StringComparison.Ordinal)
+let freshEnd = programSource.IndexOf("// - cwtools.ai.getAllDiagnostics -", freshStart, StringComparison.Ordinal)
+check "the getDiagnosticsFresh response block stays discoverable" (freshStart >= 0 && freshEnd > freshStart)
+let freshBlock = programSource.Substring(freshStart, freshEnd - freshStart)
+
+let occurrences (needle: string) (haystack: string) =
+    let mutable index = haystack.IndexOf(needle, StringComparison.Ordinal)
+    let mutable count = 0
+
+    while index >= 0 do
+        count <- count + 1
+        index <- haystack.IndexOf(needle, index + needle.Length, StringComparison.Ordinal)
+
+    count
+
+/// The response literal is column-aligned, so the guards compare against a
+/// whitespace-collapsed copy instead of the raw layout.
+let normaliseWhitespace (text: string) =
+    System.Text.RegularExpressions.Regex.Replace(text, @"\s+", " ")
+
+check
+    "a file without a diagnostic-state entry reports validated=false"
+    (freshBlock.Contains("\"validated\", JsonValue.Boolean false", StringComparison.Ordinal))
+check
+    "both freshness branches publish the validated flag"
+    (occurrences "\"validated\"" freshBlock = 2)
+check
+    "the validated branch reports validated=true"
+    (occurrences "\"validated\", JsonValue.Boolean true" (normaliseWhitespace freshBlock) = 1)
+
+check
+    "revalidateAll has an executeCommand branch"
+    (programSource.Contains("command = \"cwtools.ai.revalidateAll\"", StringComparison.Ordinal))
+check
+    "revalidateAll is registered as a write command"
+    (commandsSource.Contains("writeCmd \"cwtools.ai.revalidateAll\"", StringComparison.Ordinal))
+check
+    "revalidateAll is never registered as a read command"
+    (not (commandsSource.Contains("readCmd \"cwtools.ai.revalidateAll\"", StringComparison.Ordinal)))
+
+// The pending tracker is filtered to non-localisation paths, so the localisation
+// epoch revalidateAll marks globally has no per-file consumer. Its unit of work
+// is the whole recomputation published by the delayedLocUpdate chain, and the
+// flag is the only thing that schedules it — assert the wiring directly.
+let revalidateAllStart =
+    programSource.IndexOf("// - cwtools.ai.revalidateAll -", StringComparison.Ordinal)
+let revalidateAllEnd =
+    programSource.IndexOf("// - cwtools.ai.parseFragment -", revalidateAllStart, StringComparison.Ordinal)
+check
+    "the revalidateAll response block stays discoverable"
+    (revalidateAllStart >= 0 && revalidateAllEnd > revalidateAllStart)
+let revalidateAllBlock = programSource.Substring(revalidateAllStart, revalidateAllEnd - revalidateAllStart)
+check
+    "revalidateAll sets the delayed localisation flag so the localisation epoch has a consumer"
+    (revalidateAllBlock.Contains("delayedLocUpdate <- true", StringComparison.Ordinal))
+
+// An event fan-out marks its referrers dirty and then schedules them onto the
+// background full-recomputation drain. Marking without scheduling is the defect this
+// guards: the referrer stayed stale until a focus-time recomputation happened to
+// cover it, so the problems panel lagged behind the file.
+let ruleSchedulerStart =
+    programSource.IndexOf("let scheduleDeferredRuleRevalidation files =", StringComparison.Ordinal)
+let ruleSchedulerEnd =
+    programSource.IndexOf("//-Lightweight bracket scanner -", ruleSchedulerStart, StringComparison.Ordinal)
+check
+    "the rule revalidation scheduler block stays discoverable"
+    (ruleSchedulerStart >= 0 && ruleSchedulerEnd > ruleSchedulerStart)
+let ruleSchedulerBlock = programSource.Substring(ruleSchedulerStart, ruleSchedulerEnd - ruleSchedulerStart)
+check
+    "marking an event referrer dirty schedules it instead of only marking it stale"
+    (ruleSchedulerBlock.Contains("scheduleDeferredRuleRevalidationImpl queued", StringComparison.Ordinal))
+check
+    "event referrers are dirtied with the types/rules kinds, never with dynamicParameters"
+    (ruleSchedulerBlock.Contains("markFilePendingGlobalRevalidation path", StringComparison.Ordinal)
+     && not (ruleSchedulerBlock.Contains("markFilePendingDynamicRevalidation", StringComparison.Ordinal)))
+
+let ruleDrainStart =
+    programSource.IndexOf("let revalidateDeferredRuleFiles (files: string list) =", StringComparison.Ordinal)
+let ruleDrainEnd =
+    programSource.IndexOf("let refreshDynamicCallSitesForDefinition", ruleDrainStart, StringComparison.Ordinal)
+check
+    "the rule revalidation batch block stays discoverable"
+    (ruleDrainStart >= 0 && ruleDrainEnd > ruleDrainStart)
+let ruleDrainBlock = programSource.Substring(ruleDrainStart, ruleDrainEnd - ruleDrainStart)
+
+// Regression: the dynamic drain republishes only the call-site expansion domain, so
+// a rule-domain error such as CW240 "technology does not exist" survives a background
+// recomputation untouched. The rule drain must therefore never filter results down to
+// expansion errors, and must publish the complete rule diagnostic set instead.
+check
+    "the rule fan-out drain never applies the dynamic-parameter diagnostic filter"
+    (not (ruleDrainBlock.Contains("isDynamicParameterError", StringComparison.Ordinal)))
+check
+    "the rule fan-out drain publishes the complete rule diagnostic set of the file"
+    (ruleDrainBlock.Contains("DiagnosticMerge.mergeDeferredRuleDiagnostics", StringComparison.Ordinal))
+check
+    "the rule fan-out drain shares the dynamic drain debounce"
+    (ruleDrainBlock.Contains("max 0 dynamicDeferDelayMs", StringComparison.Ordinal))
+check
+    "the rule fan-out drain shares the dynamic drain batch bound"
+    (ruleDrainBlock.Contains("dynamicDeferMaxFiles", StringComparison.Ordinal))
+check
+    "the rule fan-out drain keeps its own single-flight flag"
+    (occurrences "deferredRuleRevalidationInFlight <- true" programSource = 1)
+check
+    "the rule fan-out drain keeps its own bounded snapshot replenishment"
+    (ruleDrainBlock.Contains("restockDeferredRulePaths ()", StringComparison.Ordinal))
+
+// Every referrer-producing path must take the rule drain. Routing ordinary type
+// definitions (technology and friends) to the dynamic drain is the defect this
+// guards: their referrers report CW240, which the expansion-domain merge preserves
+// verbatim, so the headline "technology does not exist" error would never clear in
+// the background. Both fan-out fork points call the rule scheduler directly.
+check
+    "both fan-out fork points schedule the rule drain directly"
+    (occurrences "scheduleDeferredRuleRevalidation revalidateFiles" programSource = 2)
+check
+    "no fan-out fork point still routes referrers to the dynamic drain"
+    (not (programSource.Contains("scheduleDeferredDynamicRevalidation revalidateFiles", StringComparison.Ordinal)))
+check
+    "the removed route union leaves no symbol behind"
+    (not (programSource.Contains("deferredRevalidationRouteForPath", StringComparison.Ordinal))
+     && not (programSource.Contains("FullDiagnosticRevalidation", StringComparison.Ordinal))
+     && not (programSource.Contains("DynamicExpansionRevalidation", StringComparison.Ordinal)))
+check
+    "the stale-only event marker has no remaining callers"
+    (not (programSource.Contains("markDeferredRevalidationStale", StringComparison.Ordinal)))
+
+// The rule drain publishes the rule domain, and CW274 expansion diagnostics satisfy
+// isDeferredRuleDiagnostic, so it owns that domain too. The two consistency
+// mechanisms the dynamic drain pairs with expansion-domain publication must come
+// along: files carrying expansion diagnostics join the same bounded batch (otherwise
+// two stable error groups requeue each other forever), and such a batch forces
+// dynamic parameter data first (otherwise an unforced entity reports no expansion
+// error and the drain would clear a real CW274).
+check
+    "the rule drain folds expansion-diagnostic carriers into the same batch"
+    (ruleDrainBlock.Contains("planDeferredDynamicRevalidationBatch", StringComparison.Ordinal))
+check
+    "folded carriers are marked pending so their completion is accounted for"
+    (ruleDrainBlock.Contains("markFilePendingGlobalRevalidation path", StringComparison.Ordinal))
+check
+    "the rule drain warms dynamic parameter data before validating"
+    (ruleDrainBlock.Contains("warmRuleRevalidationBatch game queued", StringComparison.Ordinal))
+check
+    "the warm-up is gated on the batch actually carrying expansion diagnostics"
+    (ruleDrainBlock.Contains("batchCarriesExpansionDiagnostics queued", StringComparison.Ordinal))
+check
+    "the warm-up helper forces the queued files"
+    (programSource.Contains("game.ForceDynamicParameterDataForFiles batch", StringComparison.Ordinal))
 
 printfn "DiagnosticInvalidation: all tests passed (%d scale paths)" scalePending.Length

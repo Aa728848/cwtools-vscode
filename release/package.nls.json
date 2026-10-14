@@ -12,6 +12,7 @@
   "commands.cacheVanilla.title": "Regenerate game vanilla cache file",
   "commands.stellarisLanguageServices.openSetup.title": "Open Setup",
   "commands.stellarisLanguageServices.runInstallationDoctor.title": "Run Installation Health Check",
+  "commands.stellarisLanguageServices.revalidateAllDiagnostics.title": "Revalidate All Files",
   "commands.stellarisLanguageServices.selectGameFolder.title": "Select Vanilla Game Folder",
   "commands.stellarisLanguageServices.createGameDirectory.title": "Create Paradox Game Folder...",
   "commands.stellarisLanguageServices.openSpecialPath.title": "Open Local Game/CWTools Path",

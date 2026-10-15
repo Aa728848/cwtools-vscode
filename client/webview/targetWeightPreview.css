@@ -196,6 +196,12 @@ body {
     color: var(--warn);
 }
 
+/* 数值来自 weapon_components.csv（真实数据，不是估算）：用 accent 色区分。 */
+.field-tag.csv {
+    border-color: var(--accent);
+    color: var(--accent);
+}
+
 .checkbox {
     display: flex;
     align-items: center;

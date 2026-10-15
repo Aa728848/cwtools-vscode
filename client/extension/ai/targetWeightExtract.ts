@@ -52,6 +52,12 @@ export interface ExtractedWeaponTargeting {
     dynamicKeys: string[];
     /** 模板里完全没有出现的公式字段。 */
     missingKeys: string[];
+    /**
+     * 由 weapon_components.csv 补进来的字段（vanilla 的武器数值在 CSV 而非 txt，
+     * 见 components_consolidated.cwt 的「vanilla uses an .csv file」注释）。
+     * 面板据此显示「CSV」徽标而不是「估算」。
+     */
+    csvKeys: string[];
 }
 
 /** 参与分析的数值字段；missingKeys 也按这个顺序汇报。 */
@@ -245,6 +251,7 @@ function readComponentBlock(
         targetableShipSizes: [],
         dynamicKeys: [],
         missingKeys: [],
+        csvKeys: [],
     };
     let index = openIndex + 1;
     while (index < tokens.length) {
@@ -569,7 +576,7 @@ function stripLocalisationMarkup(value: string): string {
         // `[Starbase]` 之类的方括号前缀。
         .replace(/\[[^\]]*\]/g, '')
         // `$强调$` 保留文字。
-        .replace(/\$([^\$]*)\$/g, '$1')
+        .replace(/\$([^$]*)\$/g, '$1')
         // 残留的孤立标记。
         .replace(/[$£§]/g, '');
 }
@@ -665,4 +672,217 @@ export function formatComponentDisplayLabel(id: string, localizedName?: string):
     const name = toDisplayLocalisationValue(localizedName);
     if (!name || name === id) return id;
     return `${name} (${id})`;
+}
+
+// ── weapon_components.csv ────────────────────────────────────────────────────
+//
+// vanilla 的武器战斗数值不在 .txt 模板里，而在 common/component_templates/*.csv
+//（rules 注释："vanilla uses an .csv file to create these"）。CSV 以分号分隔，
+// `#` 开头为注释行，表头行是 `key;cost;power;min_damage;...;end`。
+
+/** CSV 一行提供的武器数值（TARGETING_NUMERIC_FIELDS 的子集）。 */
+export type CsvWeaponStats = Partial<Record<TargetingNumericField, number>>;
+
+/**
+ * 解析一个 weapon_components.csv：按表头行动态定位列序（列增减都不坏），
+ * 跳过注释与空行；键保持原样大小写（合并侧负责大小写回退匹配）。
+ */
+export function parseWeaponComponentsCsv(text: string): Map<string, CsvWeaponStats> {
+    const rows = new Map<string, CsvWeaponStats>();
+    let columns: string[] | undefined;
+    for (const rawLine of text.split(/\r?\n/)) {
+        const line = rawLine.trim();
+        if (!line || line.startsWith('#')) continue;
+        const cells = line.split(';').map(cell => cell.trim());
+        while (cells.length > 0 && cells[cells.length - 1] === '') cells.pop();
+        const first = cells[0] ?? '';
+        if (!first) continue;
+        if (first === 'key') {
+            columns = cells;
+            continue;
+        }
+        if (!columns) continue;
+        const stats: CsvWeaponStats = {};
+        for (const field of TARGETING_NUMERIC_FIELDS) {
+            const column = columns.indexOf(field);
+            if (column < 0) continue;
+            const raw = cells[column];
+            if (!raw) continue;
+            const value = Number.parseFloat(raw);
+            if (Number.isFinite(value)) stats[field] = value;
+        }
+        rows.set(unquote(first), stats);
+    }
+    return rows;
+}
+
+/** CSV 来源分组；同名键工作区覆盖原版。 */
+export interface CsvStatsSourceGroup {
+    source: 'workspace' | 'vanilla';
+    file: string;
+    stats: Map<string, CsvWeaponStats>;
+}
+
+/** 合并多根 CSV：vanilla 先写、workspace 后写覆盖。 */
+export function mergeCsvStatMaps(groups: CsvStatsSourceGroup[]): Map<string, CsvWeaponStats> {
+    const merged = new Map<string, CsvWeaponStats>();
+    for (const group of [...groups].sort((a, b) => SOURCE_PRIORITY[b.source] - SOURCE_PRIORITY[a.source])) {
+        for (const [key, stats] of group.stats) merged.set(key, stats);
+    }
+    return merged;
+}
+
+/**
+ * 把 CSV 数值并入模板：.txt 里显式写的字段优先，CSV 只补缺口；
+ * 补进来的字段记入 csvKeys（面板显示「CSV」徽标），并从 missingKeys 摘除。
+ */
+export function applyCsvWeaponStats(
+    entry: ExtractedWeaponTargeting,
+    csvRows: Map<string, CsvWeaponStats>,
+): void {
+    const stats = csvRows.get(entry.componentId) ?? csvRows.get(entry.componentId.toUpperCase());
+    if (!stats) return;
+    for (const field of TARGETING_NUMERIC_FIELDS) {
+        if (hasNumericField(entry, field)) continue;
+        const value = stats[field];
+        if (value === undefined) continue;
+        (entry as unknown as Record<string, number>)[FIELD_BY_TEMPLATE_KEY[field]] = value;
+        if (!entry.csvKeys.includes(field)) entry.csvKeys.push(field);
+    }
+    const filled = new Set<string>(entry.csvKeys);
+    entry.missingKeys = entry.missingKeys.filter(key => !filled.has(key));
+}
+
+// ── 脚本变量与 ship_size 详情 ─────────────────────────────────────────────────
+
+/** 解析 common/scripted_variables/*.txt 的 `@name = number` 行（注释与块跳过）。 */
+export function parseScriptedVariables(text: string): Map<string, number> {
+    const vars = new Map<string, number>();
+    for (const rawLine of text.split(/\r?\n/)) {
+        const line = rawLine.trim();
+        if (!line || line.startsWith('#')) continue;
+        const match = /^@([\w.-]+)\s*=\s*(-?[\d.]+)/.exec(line);
+        if (!match) continue;
+        const value = Number.parseFloat(match[2]!);
+        if (Number.isFinite(value)) vars.set(match[1]!, value);
+    }
+    return vars;
+}
+
+/** 合并多根的脚本变量：vanilla 先写、workspace 后写覆盖。 */
+export function mergeScriptedVariables(
+    groups: Array<{ source: 'workspace' | 'vanilla'; vars: Map<string, number> }>,
+): Map<string, number> {
+    const merged = new Map<string, number>();
+    for (const group of [...groups].sort((a, b) => SOURCE_PRIORITY[b.source] - SOURCE_PRIORITY[a.source])) {
+        for (const [key, value] of group.vars) merged.set(key, value);
+    }
+    return merged;
+}
+
+/** ship_size 的索敌相关属性（@脚本变量已解析；解析不出的项缺省）。 */
+export interface ShipSizeDetail {
+    id: string;
+    line: number;
+    /** size_multiplier → 公式里的 σ。 */
+    sizeMultiplier?: number;
+    /** max_hitpoints → 船体上限预填。 */
+    maxHitpoints?: number;
+    /** modifier 子块的 ship_evasion_add（百分制：60 = 60%）→ ε = /100。 */
+    evasionPercent?: number;
+}
+
+function resolveShipSizeNumber(raw: string, vars: Map<string, number>): number | undefined {
+    const trimmed = raw.trim();
+    if (trimmed.startsWith('@')) return vars.get(trimmed.slice(1));
+    const value = Number.parseFloat(trimmed);
+    return Number.isFinite(value) ? value : undefined;
+}
+
+/**
+ * 提取 ship_sizes 文件的顶层块详情：size_multiplier / max_hitpoints 是直接子项，
+ * ship_evasion_add 在 modifier 子块内（更深层的嵌套块不读）。
+ */
+export function extractShipSizeDetails(text: string, vars: Map<string, number>): ShipSizeDetail[] {
+    const tokens = tokenize(text);
+    const details: ShipSizeDetail[] = [];
+    let index = 0;
+    while (index < tokens.length) {
+        const token = tokens[index]!;
+        if (token.type === TokenType.EOF) break;
+        if (token.type === TokenType.LBrace) {
+            index = skipBlock(tokens, index);
+            continue;
+        }
+        const equals = tokens[index + 1];
+        const open = tokens[index + 2];
+        if (!(isAtom(token) && equals?.type === TokenType.Equals && open?.type === TokenType.LBrace)) {
+            index++;
+            continue;
+        }
+        const detail: ShipSizeDetail = { id: unquote(token.value), line: token.line };
+        // 块内游走：depth 1 = 直接子项；modifier 块内容在 depth 2。
+        let depth = 1;
+        let modifierContentDepth = 0;
+        let cursor = index + 3;
+        while (cursor < tokens.length && depth > 0) {
+            const current = tokens[cursor]!;
+            if (current.type === TokenType.LBrace) {
+                depth++;
+                cursor++;
+                continue;
+            }
+            if (current.type === TokenType.RBrace) {
+                if (modifierContentDepth > 0 && depth === modifierContentDepth) modifierContentDepth = 0;
+                depth--;
+                cursor++;
+                continue;
+            }
+            if (current.type === TokenType.EOF) break;
+            const eq = tokens[cursor + 1];
+            const rhs = tokens[cursor + 2];
+            if (isAtom(current) && eq?.type === TokenType.Equals && rhs) {
+                if (rhs.type === TokenType.LBrace) {
+                    if (depth === 1 && current.value === 'modifier') modifierContentDepth = depth + 1;
+                    cursor++;
+                    continue;
+                }
+                if (rhs.type === TokenType.Identifier || rhs.type === TokenType.String || rhs.type === TokenType.Number) {
+                    if (depth === 1 && current.value === 'size_multiplier') {
+                        detail.sizeMultiplier = resolveShipSizeNumber(rhs.value, vars);
+                    } else if (depth === 1 && current.value === 'max_hitpoints') {
+                        detail.maxHitpoints = resolveShipSizeNumber(rhs.value, vars);
+                    } else if (depth === 2 && modifierContentDepth === 2 && current.value === 'ship_evasion_add') {
+                        detail.evasionPercent = resolveShipSizeNumber(rhs.value, vars);
+                    }
+                    cursor += 3;
+                    continue;
+                }
+            }
+            cursor++;
+        }
+        details.push(detail);
+        index = cursor;
+    }
+    return details;
+}
+
+/** ship_size 详情的来源分组。 */
+export interface ShipSizeDetailGroup {
+    source: 'workspace' | 'vanilla';
+    file: string;
+    entries: ShipSizeDetail[];
+}
+
+/** 合并多根的 ship_size 详情：同 id 工作区覆盖原版，输出按 id 排序。 */
+export function mergeShipSizeDetails(groups: ShipSizeDetailGroup[]): ShipSizeDetail[] {
+    const byId = new Map<string, { detail: ShipSizeDetail; priority: number }>();
+    for (const group of groups) {
+        for (const detail of group.entries) {
+            const existing = byId.get(detail.id);
+            if (existing && existing.priority <= SOURCE_PRIORITY[group.source]) continue;
+            byId.set(detail.id, { detail, priority: SOURCE_PRIORITY[group.source] });
+        }
+    }
+    return [...byId.values()].map(entry => entry.detail).sort((a, b) => a.id.localeCompare(b.id));
 }

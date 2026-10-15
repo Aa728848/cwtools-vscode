@@ -18,19 +18,13 @@ const vscode = acquireVsCodeApi();
 
 type Locale = 'en' | 'zh-cn';
 
-interface PresetOption {
+/** init 载荷里的 ship_size 选项（Host 从 ship_sizes 定义解析而来，标签已本地化）。 */
+interface ShipSizeOption {
     id: string;
     label: string;
-    sizeMultiplier: number;
-    evasion: number;
-    distance: number;
-    hull: number;
-    maxHull: number;
-    shield: number;
-    armor: number;
-    armed: boolean;
-    isStarbase: boolean;
-    shipSizeId: string;
+    sizeMultiplier?: number;
+    evasion?: number;
+    maxHitpoints?: number;
 }
 
 interface WeaponOption {
@@ -43,6 +37,8 @@ interface WeaponOption {
     targetWeightKeys: string[];
     missingKeys: string[];
     dynamicKeys: string[];
+    /** 数值来自 weapon_components.csv 的模板键（显示「CSV」徽标，不是估算）。 */
+    csvKeys?: string[];
 }
 
 interface WeaponInput {
@@ -245,7 +241,7 @@ interface TargetFormState {
     isStarbase: boolean;
 }
 
-let targetState: TargetFormState = {
+const targetState: TargetFormState = {
     sizeMultiplier: 5,
     evasion: 0.6,
     distance: 72,
@@ -288,9 +284,11 @@ let weaponInput: WeaponInput = { ...weaponDefaults, targetWeights: {} };
 let weaponUseShipMainTarget = false;
 /** 需要标「估算」的模板键（模板缺字段或写了 @[…] 脚本表达式）。 */
 let estimatedTemplateKeys = new Set<string>();
+/** 数值来自 weapon_components.csv 的模板键。 */
+let csvTemplateKeys = new Set<string>();
 let targetableShipSizesText = '';
 
-let presets: PresetOption[] = [];
+let shipSizeOptions: ShipSizeOption[] = [];
 let weaponOptions: WeaponOption[] = [];
 let currentWeapon: WeaponDetail | undefined;
 let scannedShipSizes: string[] = [];
@@ -490,6 +488,8 @@ function buildWeaponForm(): void {
                 if (estimatedTemplateKeys.has(spec.templateKey)) {
                     row.classList.add('estimated');
                     row.appendChild(el('span', 'field-tag', t('estimated', '估算')));
+                } else if (csvTemplateKeys.has(spec.templateKey)) {
+                    row.appendChild(el('span', 'field-tag csv', t('from CSV', '来自 CSV')));
                 }
             },
         );
@@ -537,32 +537,32 @@ function refreshEstimatedMarkers(): void {
         const row = rows[index];
         if (!row) return;
         const estimated = estimatedTemplateKeys.has(spec.templateKey);
+        const fromCsv = !estimated && csvTemplateKeys.has(spec.templateKey);
         row.classList.toggle('estimated', estimated);
         let tag = row.querySelector('.field-tag');
-        if (estimated && !tag) {
-            tag = el('span', 'field-tag', t('estimated', '估算'));
-            row.appendChild(tag);
-        } else if (!estimated && tag) {
+        const label = estimated ? t('estimated', '估算') : fromCsv ? t('from CSV', '来自 CSV') : '';
+        if (label) {
+            if (!tag) {
+                tag = el('span', 'field-tag', label);
+                row.appendChild(tag);
+            }
+            tag.textContent = label;
+            tag.classList.toggle('csv', fromCsv);
+        } else if (tag) {
             tag.remove();
         }
     });
 }
 
-function applyPreset(presetId: string): void {
-    const preset = presets.find(entry => entry.id === presetId);
-    if (!preset) return;
-    targetState = {
-        sizeMultiplier: preset.sizeMultiplier,
-        evasion: preset.evasion,
-        distance: preset.distance,
-        hull: preset.hull,
-        maxHull: preset.maxHull,
-        shield: preset.shield,
-        armor: preset.armor,
-        shipSizeId: preset.shipSizeId,
-        armed: preset.armed,
-        isStarbase: preset.isStarbase,
-    };
+function applyShipSizeOption(id: string): void {
+    if (id === '') return; // 「自定义 / 手动」：保留当前表单值
+    const option = shipSizeOptions.find(entry => entry.id === id);
+    if (!option) return;
+    // 只预填定义里解析出的项；距离/盾/甲等战斗状态不动。
+    if (typeof option.sizeMultiplier === 'number') targetState.sizeMultiplier = option.sizeMultiplier;
+    if (typeof option.evasion === 'number') targetState.evasion = Math.round(option.evasion * 1000) / 1000;
+    if (typeof option.maxHitpoints === 'number') targetState.maxHull = option.maxHitpoints;
+    targetState.shipSizeId = option.id;
     buildTargetForms();
     refreshShipSizeOptions();
     scheduleCompute();
@@ -1058,8 +1058,8 @@ function readStats(raw: unknown): Record<'workspace' | 'vanilla', ScanStats> {
 
 function handleInit(message: Record<string, unknown>): void {
     if (message.locale === 'zh-cn' || message.locale === 'en') locale = message.locale;
-    const rawPresets = Array.isArray(message.presets) ? message.presets : [];
-    presets = rawPresets.filter((entry): entry is PresetOption => typeof entry === 'object' && entry !== null);
+    const rawShipSizeOptions = Array.isArray(message.shipSizeOptions) ? message.shipSizeOptions : [];
+    shipSizeOptions = rawShipSizeOptions.filter((entry): entry is ShipSizeOption => typeof entry === 'object' && entry !== null);
     const rawWeapons = Array.isArray(message.weapons) ? message.weapons : [];
     weaponOptions = rawWeapons.filter((entry): entry is WeaponOption => typeof entry === 'object' && entry !== null)
         .map(option => ({
@@ -1098,10 +1098,14 @@ function handleInit(message: Record<string, unknown>): void {
 
     if (presetSelect) {
         presetSelect.textContent = '';
-        for (const preset of presets) {
+        const custom = el('option');
+        custom.value = '';
+        custom.textContent = t('Custom / manual', '自定义 / 手动');
+        presetSelect.appendChild(custom);
+        for (const shipSize of shipSizeOptions) {
             const option = el('option');
-            option.value = preset.id;
-            option.textContent = preset.label;
+            option.value = shipSize.id;
+            option.textContent = shipSize.label;
             presetSelect.appendChild(option);
         }
     }
@@ -1191,11 +1195,13 @@ function handleWeapon(message: Record<string, unknown>): void {
         targetableShipSizes: asStringArray(payload.targetableShipSizes),
         missingKeys: asStringArray(payload.missingKeys),
         dynamicKeys: asStringArray(payload.dynamicKeys),
+        csvKeys: asStringArray(payload.csvKeys),
         input: toWeaponInput(payload.input),
     };
     weaponInput = { ...currentWeapon.input, targetWeights: { ...currentWeapon.input.targetWeights } };
     weaponUseShipMainTarget = currentWeapon.useShipMainTarget;
     estimatedTemplateKeys = new Set<string>([...currentWeapon.missingKeys, ...currentWeapon.dynamicKeys]);
+    csvTemplateKeys = new Set<string>(currentWeapon.csvKeys ?? []);
     targetableShipSizesText = currentWeapon.targetableShipSizes.join(' ');
 
     if (weaponSearch && weaponSearch.value.trim() !== currentWeapon.displayLabel) {
@@ -1238,7 +1244,7 @@ on(window, 'message', event => {
     handleMessage(data as Record<string, unknown>);
 });
 
-if (presetSelect) on(presetSelect, 'change', () => applyPreset(presetSelect.value));
+if (presetSelect) on(presetSelect, 'change', () => applyShipSizeOption(presetSelect.value));
 if (weaponSearch) {
     on(weaponSearch, 'input', handleWeaponSearchInput);
     on(weaponSearch, 'change', handleWeaponSearchInput);

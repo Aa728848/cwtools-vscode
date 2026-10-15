@@ -11,10 +11,17 @@ import {
     isGenericTemplateTypeKey,
     isTargetingRelevant,
     mergeComputeWeaponInput,
+    applyCsvWeaponStats,
+    extractShipSizeDetails,
+    mergeCsvStatMaps,
+    mergeScriptedVariables,
+    mergeShipSizeDetails,
     mergeShipSizeIds,
     mergeWeaponTargetingEntries,
     parsePdxBool,
     parsePdxNumber,
+    parseScriptedVariables,
+    parseWeaponComponentsCsv,
     readTopLevelBlocks,
     toDisplayLocalisationValue,
     type ExtractedWeaponTargeting,
@@ -187,6 +194,7 @@ describe('Targeting field extraction from component_templates', () => {
             targetableShipSizes: [],
             dynamicKeys: [],
             missingKeys: [],
+            csvKeys: [],
         })).to.equal(false);
     });
 
@@ -431,5 +439,120 @@ describe('Compute weapon input without a template', () => {
         const template = { ...defaultWeaponInput(), targetWeights: { corvette: 10 } };
         expect(mergeComputeWeaponInput(template, { accuracy: 0.4 }).targetWeights).to.deep.equal({ corvette: 10 });
         expect(mergeComputeWeaponInput(template, { targetWeights: 'corrupted' }).targetWeights).to.deep.equal({ corvette: 10 });
+    });
+});
+
+describe('weapon_components.csv parsing', () => {
+    // vanilla 表头：key;cost;power;min_damage;max_damage;hull_damage;shield_damage;shield_penetration;armor_damage;armor_penetration;min_windup;max_windup;cooldown;range;accuracy;tracking;size_damage_factor;military_power_multiplier;end
+    const CSV = [
+        '# comment row;;;;;;;;',
+        'key;cost;power;min_damage;max_damage;hull_damage;shield_damage;shield_penetration;armor_damage;armor_penetration;min_windup;max_windup;cooldown;range;accuracy;tracking;size_damage_factor;military_power_multiplier;end',
+        'ENERGY_LANCE_1;250.00;-200.00;600.00;1500.00;1.50;0.50;0.00;2.00;0.00;12.00;47.00;70.00;150.00;0.85;0.00;0.00;1.00;',
+        'SMALL_RED_LASER;10.00;-5.00;6.00;16.00;1.25;0.50;0.00;1.50;0.00;5.00;20.00;30.00;40.00;0.90;0.50;0.00;1.00;',
+    ].join('\n');
+
+    it('maps columns by the header row and skips comments', () => {
+        const rows = parseWeaponComponentsCsv(CSV);
+        const lance = rows.get('ENERGY_LANCE_1')!;
+        expect(lance.min_damage).to.equal(600);
+        expect(lance.max_damage).to.equal(1500);
+        expect(lance.hull_damage).to.equal(1.5);
+        expect(lance.shield_damage).to.equal(0.5);
+        expect(lance.armor_damage).to.equal(2);
+        expect(lance.accuracy).to.equal(0.85);
+        expect(lance.tracking).to.equal(0);
+        expect(rows.get('SMALL_RED_LASER')!.tracking).to.equal(0.5);
+        expect(rows.size).to.equal(2);
+    });
+
+    it('tolerates partial headers and header-less files', () => {
+        const rows = parseWeaponComponentsCsv('key;min_damage;max_damage;end\nW;1;2;');
+        expect(rows.get('W')).to.deep.equal({ min_damage: 1, max_damage: 2 });
+        expect(parseWeaponComponentsCsv('# only comments\n;;;').size).to.equal(0);
+    });
+
+    it('fills gaps from csv, keeps explicit txt fields, re-keys missing, matches uppercase', () => {
+        const entry = extractTargetingFields([
+            'weapon_component_template = {',
+            '    key = "test_gun"',
+            '    accuracy = 0.95',
+            '    tracking = 0.4',
+            '}',
+        ].join('\n'))[0]!;
+        expect(entry.missingKeys).to.include('min_damage');
+        const csv = parseWeaponComponentsCsv('key;min_damage;max_damage;accuracy;end\nTEST_GUN;100;200;0.10;');
+        applyCsvWeaponStats(entry, csv);
+        expect(entry.minDamage).to.equal(100);
+        expect(entry.maxDamage).to.equal(200);
+        expect(entry.accuracy).to.equal(0.95); // txt 显式值优先
+        expect(entry.csvKeys).to.have.members(['min_damage', 'max_damage']);
+        expect(entry.missingKeys).to.not.include('min_damage');
+        expect(entry.missingKeys).to.include('shield_damage');
+    });
+
+    it('workspace csv overrides vanilla regardless of argument order', () => {
+        const vanilla = { source: 'vanilla' as const, file: 'v.csv', stats: new Map([['GUN', { min_damage: 1 }]]) };
+        const workspace = { source: 'workspace' as const, file: 'w.csv', stats: new Map([['GUN', { min_damage: 9 }]]) };
+        expect(mergeCsvStatMaps([vanilla, workspace]).get('GUN')!.min_damage).to.equal(9);
+        expect(mergeCsvStatMaps([workspace, vanilla]).get('GUN')!.min_damage).to.equal(9);
+    });
+});
+
+describe('scripted variables and ship size details', () => {
+    const vars = mergeScriptedVariables([
+        { source: 'vanilla' as const, vars: parseScriptedVariables([
+            '# comment',
+            '@corvette_size_multiplier = 5',
+            '@corvette_hp = 200',
+            '@corvette_evasion = 60',
+            '@shared_var = 1',
+        ].join('\n')) },
+        { source: 'workspace' as const, vars: parseScriptedVariables('@shared_var = 99') },
+    ]);
+
+    it('parses @name = number lines and merges with workspace override', () => {
+        expect(vars.get('corvette_size_multiplier')).to.equal(5);
+        expect(vars.get('shared_var')).to.equal(99); // 工作区覆盖
+    });
+
+    it('extracts size_multiplier / max_hitpoints / nested ship_evasion_add with @var resolution', () => {
+        const details = extractShipSizeDetails([
+            'corvette = {',
+            '    max_speed = 250',
+            '    max_hitpoints = @corvette_hp',
+            '    size_multiplier = @corvette_size_multiplier',
+            '    modifier = {',
+            '        ship_evasion_add = @corvette_evasion',
+            '        trigger = {',
+            '            nested = { deep = yes }',
+            '        }',
+            '    }',
+            '}',
+            'custom_size = {',
+            '    size_multiplier = 12',
+            '    max_hitpoints = 5000',
+            '    modifier = { ship_evasion_add = 2.5 }',
+            '}',
+            'broken_size = {',
+            '    size_multiplier = @missing_var',
+            '}',
+        ].join('\n'), vars);
+        const corvette = details.find(d => d.id === 'corvette')!;
+        expect(corvette.sizeMultiplier).to.equal(5);
+        expect(corvette.maxHitpoints).to.equal(200);
+        expect(corvette.evasionPercent).to.equal(60);
+        const custom = details.find(d => d.id === 'custom_size')!;
+        expect(custom.sizeMultiplier).to.equal(12);
+        expect(custom.evasionPercent).to.equal(2.5);
+        expect(details.find(d => d.id === 'broken_size')!.sizeMultiplier).to.equal(undefined);
+    });
+
+    it('merges ship size details with workspace override and sorted output', () => {
+        const merged = mergeShipSizeDetails([
+            { source: 'vanilla' as const, file: 'v.txt', entries: [{ id: 'corvette', line: 1, sizeMultiplier: 5 }] },
+            { source: 'workspace' as const, file: 'w.txt', entries: [{ id: 'corvette', line: 9, sizeMultiplier: 7 }, { id: 'aaa_custom', line: 3 }] },
+        ]);
+        expect(merged.find(d => d.id === 'corvette')!.sizeMultiplier).to.equal(7);
+        expect(merged.map(d => d.id)).to.deep.equal(['aaa_custom', 'corvette']);
     });
 });

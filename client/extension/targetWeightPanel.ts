@@ -15,7 +15,8 @@ import { panelLocale, panelText } from './panelI18n';
 import { ErrorReporter } from './ai/errorReporter';
 import { getConfiguredGameRoots } from './configuredGameRoots';
 import type { IndexService } from './indexing/indexService';
-import { getPreferredLocalisationLanguageTags, pickPreferredLocalisationEntry } from './localisationLanguagePreference';
+import { getDefaultLocalisationLanguagesForUiLocale, getPreferredLocalisationLanguageTags, pickPreferredLocalisationEntry } from './localisationLanguagePreference';
+import { parseLocFile } from './indexing/locParser';
 import {
     computeTargetingChain,
     parseTargetingChainInput,
@@ -23,22 +24,35 @@ import {
 } from './ai/targetingWeights';
 import {
     TARGETING_FIELD_FALLBACKS,
-    extractShipSizeIds,
+    applyCsvWeaponStats,
+    extractShipSizeDetails,
     extractTargetingFields,
     findComponentTemplateIdAtLine,
     formatComponentDisplayLabel,
     mergeComputeWeaponInput,
-    mergeShipSizeIds,
+    mergeCsvStatMaps,
+    mergeScriptedVariables,
+    mergeShipSizeDetails,
     mergeWeaponTargetingEntries,
+    parseScriptedVariables,
+    parseWeaponComponentsCsv,
+    type CsvStatsSourceGroup,
+    type ShipSizeDetail,
+    type ShipSizeDetailGroup,
     type WeaponTargetingEntry,
     type WeaponTargetingSourceGroup,
-    type ShipSizeSourceGroup,
 } from './ai/targetWeightExtract';
 
 /** 与 techTreePanel 的 TECH_FILE_LIMIT_PER_ROOT 同量级的文件数上限，避免超大 mod 拖死扫描。 */
 const TARGET_WEIGHT_FILE_LIMIT_PER_ROOT = 2000;
 const TARGET_WEIGHT_FILE_GLOB = '**/common/component_templates/*.txt';
 const SHIP_SIZE_FILE_GLOB = '**/common/ship_sizes/*.txt';
+/** vanilla 的武器战斗数值在 CSV（weapon_components.csv），mod 也可自带。 */
+const COMPONENT_CSV_GLOB = '**/common/component_templates/*.csv';
+/** ship_size 的 size_multiplier 等常用 @脚本变量，需要跨根合并后解析。 */
+const SCRIPTED_VARIABLES_GLOB = '**/common/scripted_variables/*.txt';
+/** vanilla 本地化定向扫描的每语言文件数上限（IndexService 只索引工作区本地化）。 */
+const VANILLA_LOC_FILE_LIMIT_PER_LANGUAGE = 400;
 const TARGET_WEIGHT_EXCLUDE_GLOB = '**/{node_modules,.git,.cwtools}/**';
 
 function isUnknownRecord(value: unknown): value is Record<string, unknown> {
@@ -72,55 +86,21 @@ interface TargetWeightWeaponOption {
     targetWeightKeys: string[];
     missingKeys: string[];
     dynamicKeys: string[];
+    /** 由 weapon_components.csv 补入的字段（webview 显示「CSV」徽标）。 */
+    csvKeys: string[];
 }
 
-/** webview 下拉里的一行数据（不含宿主绝对路径以外的可写字段）。 */
-export interface TargetWeightPreset {
+/** init 载荷里的 ship_size 选项：本地化名 + 从 ship_sizes 定义解析出的预填值。 */
+interface ShipSizeOption {
     id: string;
-    sizeMultiplier: number;
-    evasion: number;
-    distance: number;
-    hull: number;
-    maxHull: number;
-    shield: number;
-    armor: number;
-    armed: boolean;
-    isStarbase: boolean;
-    shipSizeId: string;
+    label: string;
+    /** size_multiplier（σ）；定义里解析不出（如 @变量缺失）时缺省。 */
+    sizeMultiplier?: number;
+    /** 基础闪避（0..1；modifier.ship_evasion_add 百分制 ÷100，不含推进器等加成）。 */
+    evasion?: number;
+    /** max_hitpoints → 船体上限预填。 */
+    maxHitpoints?: number;
 }
-
-/**
- * 两组预置目标。corvette 取自 docs/stellaris-targeting-weight-4.5.2.md §6 的护卫舰算例
- * （σ=5 / ε=0.6 / d=72 / 240 船体 + 225 盾 + 225 甲）；battleship 用同级巨舰量级做对照。
- */
-const TARGET_PRESETS: TargetWeightPreset[] = [
-    {
-        id: 'corvette',
-        sizeMultiplier: 5,
-        evasion: 0.6,
-        distance: 72,
-        hull: 240,
-        maxHull: 300,
-        shield: 225,
-        armor: 225,
-        armed: true,
-        isStarbase: false,
-        shipSizeId: 'corvette',
-    },
-    {
-        id: 'battleship',
-        sizeMultiplier: 10,
-        evasion: 0.2,
-        distance: 150,
-        hull: 2400,
-        maxHull: 3000,
-        shield: 1500,
-        armor: 900,
-        armed: true,
-        isStarbase: false,
-        shipSizeId: 'battleship',
-    },
-];
 
 /** 打开面板时可带的一次性上下文。 */
 export interface TargetWeightOpenOptions {
@@ -142,7 +122,7 @@ interface ScanStats {
 
 interface TargetWeightScanResult {
     weapons: WeaponTargetingEntry[];
-    shipSizes: string[];
+    shipSizes: ShipSizeDetail[];
     stats: Record<'workspace' | 'vanilla', ScanStats>;
 }
 
@@ -296,25 +276,44 @@ export class TargetWeightPanel {
             vanilla: { files: 0, templates: 0 },
         };
         const weaponGroups: WeaponTargetingSourceGroup[] = [];
-        const sizeGroups: ShipSizeSourceGroup[] = [];
+        const sizeGroups: ShipSizeDetailGroup[] = [];
+        const csvGroups: CsvStatsSourceGroup[] = [];
+        const variableGroups: Array<{ source: 'workspace' | 'vanilla'; vars: Map<string, number> }> = [];
 
-        for (const root of this._getScanRoots()) {
-            const readFiles = async (glob: string): Promise<vscode.Uri[]> => {
-                const pattern = new vscode.RelativePattern(root.uri, glob);
-                const files = await vscode.workspace.findFiles(
-                    pattern,
-                    TARGET_WEIGHT_EXCLUDE_GLOB,
-                    TARGET_WEIGHT_FILE_LIMIT_PER_ROOT,
-                );
-                return files.sort((a, b) => a.fsPath.localeCompare(b.fsPath));
-            };
-            const readText = async (fileUri: vscode.Uri): Promise<string> => {
-                const bytes = await vscode.workspace.fs.readFile(fileUri);
-                return new TextDecoder('utf-8').decode(bytes);
-            };
+        const roots = this._getScanRoots();
+        const readFiles = async (root: ScanRoot, glob: string): Promise<vscode.Uri[]> => {
+            const pattern = new vscode.RelativePattern(root.uri, glob);
+            const files = await vscode.workspace.findFiles(
+                pattern,
+                TARGET_WEIGHT_EXCLUDE_GLOB,
+                TARGET_WEIGHT_FILE_LIMIT_PER_ROOT,
+            );
+            return files.sort((a, b) => a.fsPath.localeCompare(b.fsPath));
+        };
+        const readText = async (fileUri: vscode.Uri): Promise<string> => {
+            const bytes = await vscode.workspace.fs.readFile(fileUri);
+            return new TextDecoder('utf-8').decode(bytes);
+        };
 
+        // 先合并全部根的脚本变量：工作区的 ship_size 可能引用 vanilla 定义的 @变量。
+        for (const root of roots) {
             try {
-                for (const fileUri of await readFiles(TARGET_WEIGHT_FILE_GLOB)) {
+                for (const fileUri of await readFiles(root, SCRIPTED_VARIABLES_GLOB)) {
+                    try {
+                        variableGroups.push({ source: root.source, vars: parseScriptedVariables(await readText(fileUri)) });
+                    } catch (error) {
+                        ErrorReporter.debug('TargetWeightPanel', `Failed to read ${fileUri.fsPath}`, error);
+                    }
+                }
+            } catch (error) {
+                ErrorReporter.debug('TargetWeightPanel', `Failed to scan ${root.uri.fsPath}`, error);
+            }
+        }
+        const scriptedVars = mergeScriptedVariables(variableGroups);
+
+        for (const root of roots) {
+            try {
+                for (const fileUri of await readFiles(root, TARGET_WEIGHT_FILE_GLOB)) {
                     this._scannedFiles.add(scannedPathKey(fileUri.fsPath));
                     stats[root.source].files++;
                     try {
@@ -327,10 +326,18 @@ export class TargetWeightPanel {
                         ErrorReporter.debug('TargetWeightPanel', `Failed to read ${fileUri.fsPath}`, error);
                     }
                 }
-                for (const fileUri of await readFiles(SHIP_SIZE_FILE_GLOB)) {
+                for (const fileUri of await readFiles(root, COMPONENT_CSV_GLOB)) {
                     try {
-                        const ids = extractShipSizeIds(await readText(fileUri));
-                        if (ids.length > 0) sizeGroups.push({ source: root.source, file: fileUri.fsPath, ids });
+                        const csvStats = parseWeaponComponentsCsv(await readText(fileUri));
+                        if (csvStats.size > 0) csvGroups.push({ source: root.source, file: fileUri.fsPath, stats: csvStats });
+                    } catch (error) {
+                        ErrorReporter.debug('TargetWeightPanel', `Failed to read ${fileUri.fsPath}`, error);
+                    }
+                }
+                for (const fileUri of await readFiles(root, SHIP_SIZE_FILE_GLOB)) {
+                    try {
+                        const entries = extractShipSizeDetails(await readText(fileUri), scriptedVars);
+                        if (entries.length > 0) sizeGroups.push({ source: root.source, file: fileUri.fsPath, entries });
                     } catch (error) {
                         ErrorReporter.debug('TargetWeightPanel', `Failed to read ${fileUri.fsPath}`, error);
                     }
@@ -340,35 +347,118 @@ export class TargetWeightPanel {
             }
         }
 
+        const weapons = mergeWeaponTargetingEntries(weaponGroups);
+        // CSV 只补 txt 没有的字段（txt 显式值优先），补进来的字段记入 csvKeys。
+        const csvStats = mergeCsvStatMaps(csvGroups);
+        for (const entry of weapons) applyCsvWeaponStats(entry, csvStats);
+
         return {
-            weapons: mergeWeaponTargetingEntries(weaponGroups),
-            shipSizes: mergeShipSizeIds(sizeGroups),
+            weapons,
+            shipSizes: mergeShipSizeDetails(sizeGroups),
             stats,
         };
     }
 
-    /** 用户配置的语言优先级（与 locDecorations 的 hover 一致）。 */
+    /** 语言优先级：显式配置优先；未配置时跟随 VS Code 界面语言（与 locDecorations 的 hover 一致）。 */
     private _preferredLocTags(): string[] {
         const config = vscode.workspace.getConfiguration('stellarisLanguageServices');
-        return getPreferredLocalisationLanguageTags(config.get<string[]>('localisation.languages', ['English']));
+        const inspected = config.inspect<string[]>('localisation.languages');
+        const configured = inspected?.workspaceFolderValue ?? inspected?.workspaceValue ?? inspected?.globalValue;
+        const languages = configured && configured.length > 0
+            ? configured
+            : getDefaultLocalisationLanguagesForUiLocale(vscode.env.language);
+        return getPreferredLocalisationLanguageTags(languages);
     }
 
     /**
-     * 组件 id → 本地化显示名。组件名的 loc 键就是组件 key；
-     * 索引里查不到（或只剩标记）时返回 undefined，由 formatComponentDisplayLabel 回退 id。
+     * id → 本地化显示名。组件名的 loc 键就是组件 key；ship_size 的 loc 键是大写 id，
+     * 所以每个 id 都试「原样 + 全大写」两个键。IndexService 只索引工作区本地化，
+     * 查不到的再对游戏根的语言目录做定向扫描（_resolveVanillaDisplayNames）。
      */
     private async _resolveDisplayNames(ids: string[]): Promise<Map<string, string>> {
         const names = new Map<string, string>();
-        const indexService = this._indexService;
-        if (!indexService || ids.length === 0) return names;
+        if (ids.length === 0) return names;
         const tags = this._preferredLocTags();
+        const indexService = this._indexService;
+        const missing: string[] = [];
         for (const id of ids) {
-            try {
-                const entries = await indexService.queryLocalisationAsync({ key: id, limit: 64 });
-                const entry = pickPreferredLocalisationEntry(entries, tags);
-                if (entry) names.set(id, entry.value);
-            } catch (error) {
-                ErrorReporter.debug('TargetWeightPanel', `Failed to resolve localisation for ${id}`, error);
+            let value: string | undefined;
+            if (indexService) {
+                for (const key of [id, id.toUpperCase()]) {
+                    try {
+                        const entries = await indexService.queryLocalisationAsync({ key, limit: 64 });
+                        const entry = pickPreferredLocalisationEntry(entries, tags);
+                        if (entry) {
+                            value = entry.value;
+                            break;
+                        }
+                    } catch (error) {
+                        ErrorReporter.debug('TargetWeightPanel', `Failed to resolve localisation for ${id}`, error);
+                        break;
+                    }
+                }
+            }
+            if (value === undefined) missing.push(id);
+            else names.set(id, value);
+        }
+        if (missing.length > 0) {
+            const vanillaNames = await this._resolveVanillaDisplayNames(missing, tags);
+            for (const [id, value] of vanillaNames) names.set(id, value);
+        }
+        return names;
+    }
+
+    /**
+     * vanilla 本地化的定向扫描：按语言偏好顺序读 <游戏根>/localisation/<语言目录>/*.yml，
+     * 只收集仍缺失的键（原样 + 大写），找齐或扫完即止；每语言文件数有上限。
+     */
+    private async _resolveVanillaDisplayNames(ids: string[], tags: string[]): Promise<Map<string, string>> {
+        const names = new Map<string, string>();
+        const roots = getConfiguredGameRoots();
+        if (roots.length === 0 || ids.length === 0 || tags.length === 0) return names;
+        const keyToId = new Map<string, string>();
+        for (const id of ids) {
+            keyToId.set(id, id);
+            keyToId.set(id.toUpperCase(), id);
+        }
+        const remaining = new Set(ids);
+        for (const tag of tags) {
+            if (remaining.size === 0) break;
+            const directory = tag.replace(/^l_/, '');
+            if (!directory) continue;
+            for (const root of roots) {
+                if (remaining.size === 0) break;
+                const locRoot = vscode.Uri.file(path.join(root.root, 'localisation', directory));
+                let files: vscode.Uri[];
+                try {
+                    files = await vscode.workspace.findFiles(
+                        new vscode.RelativePattern(locRoot, '*.yml'),
+                        undefined,
+                        VANILLA_LOC_FILE_LIMIT_PER_LANGUAGE,
+                    );
+                } catch {
+                    continue;
+                }
+                files.sort((a, b) => a.fsPath.localeCompare(b.fsPath));
+                for (const file of files) {
+                    if (remaining.size === 0) break;
+                    let text: string;
+                    try {
+                        text = new TextDecoder('utf-8').decode(await vscode.workspace.fs.readFile(file));
+                    } catch {
+                        continue;
+                    }
+                    try {
+                        for (const entry of parseLocFile(text, file.fsPath)) {
+                            const id = keyToId.get(entry.key);
+                            if (id === undefined || !remaining.has(id)) continue;
+                            names.set(id, entry.value);
+                            remaining.delete(id);
+                        }
+                    } catch (error) {
+                        ErrorReporter.debug('TargetWeightPanel', `Failed to parse ${file.fsPath}`, error);
+                    }
+                }
             }
         }
         return names;
@@ -398,19 +488,23 @@ export class TargetWeightPanel {
             targetWeightKeys: Object.keys(entry.targetWeights).sort((a, b) => a.localeCompare(b)),
             missingKeys: [...entry.missingKeys],
             dynamicKeys: [...entry.dynamicKeys],
+            csvKeys: [...entry.csvKeys],
+        }));
+        const shipSizeNames = await this._resolveDisplayNames(this._scan.shipSizes.map(detail => detail.id));
+        const shipSizeOptions: ShipSizeOption[] = this._scan.shipSizes.map(detail => ({
+            id: detail.id,
+            label: formatComponentDisplayLabel(detail.id, shipSizeNames.get(detail.id)),
+            sizeMultiplier: detail.sizeMultiplier,
+            evasion: detail.evasionPercent === undefined ? undefined : detail.evasionPercent / 100,
+            maxHitpoints: detail.maxHitpoints,
         }));
         this._post({
             command: 'init',
             locale: panelLocale(),
             weapons: options,
-            shipSizes: this._scan.shipSizes,
+            shipSizes: this._scan.shipSizes.map(detail => detail.id),
+            shipSizeOptions,
             weaponDefaults: { ...TARGETING_FIELD_FALLBACKS },
-            presets: TARGET_PRESETS.map(preset => ({
-                ...preset,
-                label: preset.id === 'corvette'
-                    ? panelText('Corvette (σ=5 / ε=0.6)', '护卫舰（σ=5 / ε=0.6）')
-                    : panelText('Battleship class', '战列舰级'),
-            })),
             scannedFileCount: this._scannedFiles.size,
             stats: this._scan.stats,
         });
@@ -503,6 +597,7 @@ export class TargetWeightPanel {
                 targetWeightKeys: Object.keys(entry.targetWeights).sort((a, b) => a.localeCompare(b)),
                 missingKeys: [...entry.missingKeys],
                 dynamicKeys: [...entry.dynamicKeys],
+                csvKeys: [...entry.csvKeys],
             },
         });
     }
@@ -605,8 +700,8 @@ export class TargetWeightPanel {
     <div id="toolbar">
         <span class="title">${title}</span>
         <div class="controls">
-            <select id="preset-select" aria-label="${panelText('Target preset', '目标预设')}"
-                title="${panelText('Preset candidate target parameters', '预置候选目标参数')}"></select>
+            <select id="preset-select" aria-label="${panelText('Target ship size', '目标船型')}"
+                title="${panelText('Pick a ship size to prefill σ / ε / hull (from vanilla and workspace definitions)', '选择船型以预填 σ/ε/船体上限（取自原版与工作区定义）')}"></select>
             <span class="separator">|</span>
             <input id="weapon-search" type="text" list="weapon-options" autocomplete="off" spellcheck="false"
                 placeholder="${panelText('Weapon template id (filterable)', '武器模板 id（可输入筛选）')}"

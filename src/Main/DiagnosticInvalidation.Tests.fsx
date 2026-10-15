@@ -223,7 +223,7 @@ check
 // validated from a superseded snapshot, and revalidateAll must stay a write
 // command so callers cannot treat the global drain as a side-effect-free read.
 let programSource = System.IO.File.ReadAllText(System.IO.Path.Combine(__SOURCE_DIRECTORY__, "Program.fs"))
-let commandsSource = System.IO.File.ReadAllText(System.IO.Path.Combine(__SOURCE_DIRECTORY__, "..\LSP\Commands.fs"))
+let commandsSource = System.IO.File.ReadAllText(System.IO.Path.Combine(__SOURCE_DIRECTORY__, "..", "LSP", "Commands.fs"))
 
 let freshStart = programSource.IndexOf("// - cwtools.ai.getDiagnosticsFresh -", StringComparison.Ordinal)
 let freshEnd = programSource.IndexOf("// - cwtools.ai.getAllDiagnostics -", freshStart, StringComparison.Ordinal)

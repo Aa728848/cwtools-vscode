@@ -456,6 +456,60 @@ check('Server binaries exist for all platforms', () => {
     return missing.length === 0 && empty.length === 0;
 });
 
+// ── 11. Cross-platform paths in F# test scripts ─────────────────────────────
+// fsx suites run under dotnet fsi on Windows, Linux and macOS. Path.Combine does
+// not treat '\' as a separator on POSIX, so a literal such as "..\LSP\Commands.fs"
+// resolves to one bogus file name there and the suite dies inside File.ReadAllText.
+// Passing one segment per argument is the repository convention and is exact on
+// every platform.
+
+check('F# test scripts pass path segments separately to Path.Combine', () => {
+    const srcDir = path.join(ROOT, 'src');
+    if (!fs.existsSync(srcDir)) return 'warn';
+
+    const offenders = [];
+    // Escape sequences F# actually defines; anything else after a backslash is a
+    // literal path separator in disguise.
+    const knownEscapes = new Set(['n', 'r', 't', 'b', 'f', 'v', 'a', '\\', '"', "'", 'u']);
+
+    function scanFile(file) {
+        const lines = fs.readFileSync(file, 'utf-8').split(/\r?\n/);
+        lines.forEach((line, index) => {
+            if (!line.includes('Path.Combine')) return;
+            for (const match of line.matchAll(/"((?:[^"\\]|\\.)*)"/g)) {
+                const body = match[1];
+                for (let i = 0; i < body.length - 1; i++) {
+                    if (body[i] !== '\\') continue;
+                    if (!knownEscapes.has(body[i + 1])) {
+                        offenders.push(path.relative(ROOT, file).replace(/\\/g, '/') + ':' + (index + 1));
+                        return;
+                    }
+                    i++;
+                }
+            }
+        });
+    }
+
+    function walk(dir) {
+        for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+            const full = path.join(dir, entry.name);
+            if (entry.isDirectory()) {
+                if (entry.name !== 'node_modules') walk(full);
+            } else if (entry.isFile() && entry.name.endsWith('.fsx')) {
+                scanFile(full);
+            }
+        }
+    }
+
+    walk(srcDir);
+    if (offenders.length > 0) {
+        console.log('    Non-portable path literals: ' + offenders.join(', '));
+        console.log('    Use one segment per argument: Path.Combine(dir, "..", "LSP", "Commands.fs")');
+        return false;
+    }
+    return true;
+});
+
 // ── Summary ─────────────────────────────────────────────────────────────────
 
 console.log('');

@@ -611,3 +611,50 @@ LSP 编辑路径是 `CommitUpdateFileInteractive`（`commitPreparedFile` 调
   这 7 个套件及其加载的脚本均未被本次改动触及
   （`src/Main/DiagnosticMerge.Tests.fsx` 与 HEAD 逐字一致；
   本次只向 `DiagnosticMerge.fs` **追加**了纯函数，未改动既有函数）。
+  CI 侧不受影响：`ci.yml` 的 `.NET server build` 作业显式把
+  `FSharp.Data.DesignTime.dll` 复制进 `artifacts/bin/Main/debug` 之后才跑脚本。
+  本机复现该套件时应先执行同样的复制，否则看到的是环境缺失而非代码缺陷。
+
+## 交叉平台回归修复（源码守卫改用 `Path.Combine` 分段）
+
+上述新增的 `commandsSource` 源码守卫最初写作：
+
+```fsharp
+System.IO.Path.Combine(__SOURCE_DIRECTORY__, "..\LSP\Commands.fs")
+```
+
+这在 Windows 下可解析，但在 CI 的 Linux 运行器上
+`Path.Combine` **不会**把 `\` 当分隔符，于是整串被当成单个文件名，
+求值出 `.../src/Main/..\LSP\Commands.fs`，直接
+`System.IO.FileNotFoundException` 让 `DiagnosticInvalidation.Tests.fsx` 崩溃，
+`.NET server build` 作业失败（`ci.yml` 的 F# 脚本步骤用 `bash -e` 逐个执行，
+首个失败即中断整步）。由于该步骤排在 `CwtProjectIndex.Tests.fsx` 之后，
+同批后续脚本在 Linux 上从未被执行过。
+
+**决定：路径一律按段传给 `Path.Combine`，不在字符串字面量里内嵌任何分隔符。**
+
+```fsharp
+System.IO.Path.Combine(__SOURCE_DIRECTORY__, "..", "LSP", "Commands.fs")
+```
+
+这是本仓既有的书写惯例（`CwtLanguageSemantics.Tests.fsx`、
+`LocalisationLanguages.Tests.fsx` 等 10 余处同款调用均如此），
+本次只是把漏网的一处对齐到既有惯例，不引入新的约定或辅助函数。
+
+选它而非另两种写法的原因：
+
+- **改用 `Path.DirectorySeparatorChar` 拼接**：把一个可读的字面路径拆成
+  运行期字符串运算，只为掩盖一个字面量错误，反而更难审查。
+- **改成 `"/"` 单斜杠字面量**：Windows 上确实能跑，但把「依赖 Windows 也接受
+  `/`」这条隐式前提写进了测试；`Path.Combine` 的分段形式对两种平台都是精确语义。
+
+**验证**：`npm run test:fsx` 全量 35 个脚本通过（`DiagnosticInvalidation.Tests.fsx`
+内含该守卫的 3 条 `writeCmd`/`readCmd` 断言仍全绿）。
+另以静态扫描确认 `src/**/*.fsx` 中已不存在「`Path.Combine` 实参内嵌
+反斜杠路径」的写法，杜绝同类漏网点。
+
+**教训（写给后续新增源码守卫的人）**：用 `File.ReadAllText` +
+`string.Contains` 做源码守卫时，被读取的文件**路径**本身也是测试代码的一部分，
+必须与断言内容同等对待地保证跨平台可解析。
+这类缺陷在 Windows 开发机与 Linux CI 之间呈现为「本机全绿、CI 必红」的
+不对称失败，且因 `bash -e` 的短路语义还会掩盖同批后续脚本的真实状态。

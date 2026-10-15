@@ -2,12 +2,21 @@ import { expect } from 'chai';
 import {
     TARGETING_FIELD_FALLBACKS,
     countTargetingFields,
+    defaultWeaponInput,
+    extractShipSizeIds,
     extractTargetingFields,
+    findComponentTemplateIdAtLine,
+    formatComponentDisplayLabel,
     formatWeaponTargetingLabel,
+    isGenericTemplateTypeKey,
     isTargetingRelevant,
+    mergeComputeWeaponInput,
+    mergeShipSizeIds,
     mergeWeaponTargetingEntries,
     parsePdxBool,
     parsePdxNumber,
+    readTopLevelBlocks,
+    toDisplayLocalisationValue,
     type ExtractedWeaponTargeting,
     type WeaponTargetingSourceGroup,
 } from '../../extension/ai/targetWeightExtract';
@@ -219,7 +228,7 @@ describe('Targeting field extraction from component_templates', () => {
         expect(entries.map(entry => entry.componentId)).to.deep.equal(['energy_lance_1', 'railgun_1']);
     });
 
-    it('falls back to the top-level key when the template has no key field', () => {
+    it('falls back to the top-level key only for non-type-key templates', () => {
         const legacy = byId(extractTargetingFields('laser_gun_1 = { min_damage = 10 max_damage = 12 }\n'), 'laser_gun_1');
         expect(legacy.componentId).to.equal('laser_gun_1');
         expect(formatWeaponTargetingLabel({
@@ -227,5 +236,200 @@ describe('Targeting field extraction from component_templates', () => {
             file: 'C:/stellaris/common/component_templates/00_weapons.txt',
             source: 'vanilla',
         })).to.equal('laser_gun_1 [vanilla]');
+    });
+});
+/**
+ * 面板实测反馈第 4 点：类型键块缺内层 \`key\` 时曾回退成裸 \`weapon_component_template\`
+ * 条目，出现在武器下拉最上方；引擎按 name_field 取名，这类块（以及注释样例块）根本不是模板。
+ */
+describe('Component template id fallback', () => {
+    it('drops a type-key block that has no inner key field', () => {
+        const text = [
+            'weapon_component_template = {',
+            '    type = instant',
+            '    min_damage = 600',
+            '    max_damage = 1500',
+            '    accuracy = 0.85',
+            '}',
+        ].join('\n');
+        expect(extractTargetingFields(text)).to.deep.equal([]);
+    });
+
+    it('drops every key-less type-key shape, including starbase', () => {
+        expect(isGenericTemplateTypeKey('weapon_component_template')).to.equal(true);
+        expect(isGenericTemplateTypeKey('utility_component_template')).to.equal(true);
+        expect(isGenericTemplateTypeKey('starbase')).to.equal(true);
+        expect(isGenericTemplateTypeKey('energy_lance_1')).to.equal(false);
+        expect(extractTargetingFields('starbase = { min_damage = 10 tracking = 1 }\n')).to.deep.equal([]);
+        expect(extractTargetingFields('utility_component_template = { tracking = 1 }\n')).to.deep.equal([]);
+    });
+
+    it('ignores commented sample blocks that never become bare entries', () => {
+        const sample = [
+            '# weapon_component_template = {',
+            '#   key = "EXAMPLE"',
+            '#   min_damage = 1',
+            '#}',
+            '#corvette = { min_damage = 2 }',
+            '',
+        ].join('\n');
+        expect(extractTargetingFields(sample)).to.deep.equal([]);
+    });
+
+    it('keeps the canonical type-key template and the legacy id-named one side by side', () => {
+        const text = [
+            'weapon_component_template = { key = "energy_lance_1" min_damage = 600 max_damage = 1500 }',
+            'weapon_component_template = { type = instant tracking = 1 }',
+            'laser_gun_1 = { min_damage = 10 max_damage = 12 }',
+        ].join('\n');
+        expect(extractTargetingFields(text).map(entry => entry.componentId))
+            .to.deep.equal(['energy_lance_1', 'laser_gun_1']);
+    });
+});
+
+describe('Cursor line to component template id', () => {
+    const FILE = [
+        'weapon_component_template = {',        // 1
+        '    key = "SMALL_RED_LASER"',           // 2
+        '    min_damage = 10',                   // 3
+        '}',                                     // 4
+        'laser_gun_1 = {',                       // 5
+        '    max_damage = 12',                   // 6
+        '}',                                     // 7
+        'weapon_component_template = {',         // 8
+        '    tracking = 1',                      // 9
+        '}',                                     // 10
+    ].join('\n');
+
+    it('finds the inner key of the block containing the cursor', () => {
+        expect(findComponentTemplateIdAtLine(FILE, 1)).to.equal('SMALL_RED_LASER');
+        expect(findComponentTemplateIdAtLine(FILE, 3)).to.equal('SMALL_RED_LASER');
+        expect(findComponentTemplateIdAtLine(FILE, 4)).to.equal('SMALL_RED_LASER');
+    });
+
+    it('uses the top-level key for the legacy id-named shape', () => {
+        expect(findComponentTemplateIdAtLine(FILE, 6)).to.equal('laser_gun_1');
+    });
+
+    it('returns undefined for a key-less type-key block and for lines outside any block', () => {
+        expect(findComponentTemplateIdAtLine(FILE, 9)).to.equal(undefined);
+        expect(findComponentTemplateIdAtLine(FILE, 0)).to.equal(undefined);
+        expect(findComponentTemplateIdAtLine(FILE, Number.NaN)).to.equal(undefined);
+    });
+});
+
+describe('Top level block scanning', () => {
+    it('reads only top-level id = { blocks and skips comments and nesting', () => {
+        const text = [
+            '# corvette = { min_damage = 1 }',
+            'corvette = {',
+            '    nested = { key = "NOT_A_SIZE" }',
+            '}',
+            '"destroyer" = { max_hitpoints = 100 }',
+            'ignored_scalar = 3',
+        ].join('\n');
+        const blocks = readTopLevelBlocks(text);
+        expect(blocks.map(block => block.id)).to.deep.equal(['corvette', 'destroyer']);
+        expect(blocks[0]!.key).to.equal(undefined);
+        expect(blocks[0]!.line).to.equal(2);
+        expect(blocks[0]!.endLine).to.equal(4);
+    });
+});
+
+describe('Ship size collection', () => {
+    const SHIP_SIZE_FILE = [
+        '# 舰船尺寸定义：顶层键就是 ship_size id',
+        '# corvette = { commented_out = yes }',
+        'corvette = {',
+        '    max_hitpoints = 240',
+        '    size_multiplier = 1',
+        '}',
+        '',
+        'cruiser = { max_hitpoints = 600 }',
+        '   # 缩进的注释行同样不算块',
+        'battleship = { max_hitpoints = 2400 }',
+        'corvette = { max_hitpoints = 260 }',
+    ].join('\n');
+
+    it('collects top-level ids in document order and dedupes within the file', () => {
+        expect(extractShipSizeIds(SHIP_SIZE_FILE)).to.deep.equal(['corvette', 'cruiser', 'battleship']);
+    });
+
+    it('returns an empty list for a file without any top-level block', () => {
+        expect(extractShipSizeIds('# only comments here\n')).to.deep.equal([]);
+    });
+
+    it('merges roots deterministically and dedupes across files', () => {
+        const merged = mergeShipSizeIds([
+            { source: 'vanilla', file: 'C:/g/common/ship_sizes/00_ship_sizes.txt', ids: ['cruiser', 'corvette'] },
+            { source: 'vanilla', file: 'C:/g/common/ship_sizes/01_colossi.txt', ids: [' colossus ', 'cruiser'] },
+            { source: 'workspace', file: 'C:/mod/common/ship_sizes/my_size.txt', ids: ['my_size'] },
+        ]);
+        expect(merged).to.deep.equal(['colossus', 'corvette', 'cruiser', 'my_size']);
+        expect(mergeShipSizeIds([])).to.deep.equal([]);
+    });
+});
+
+describe('Localised display label fallback', () => {
+    it('shows name (id) when the component key has a localised value', () => {
+        expect(formatComponentDisplayLabel('SMALL_RED_LASER', 'Small Red Laser'))
+            .to.equal('Small Red Laser (SMALL_RED_LASER)');
+    });
+
+    it('falls back to the bare id without a localised value', () => {
+        expect(formatComponentDisplayLabel('MOD_ONLY_WEAPON')).to.equal('MOD_ONLY_WEAPON');
+        expect(formatComponentDisplayLabel('MOD_ONLY_WEAPON', undefined)).to.equal('MOD_ONLY_WEAPON');
+        expect(formatComponentDisplayLabel('MOD_ONLY_WEAPON', '')).to.equal('MOD_ONLY_WEAPON');
+        expect(formatComponentDisplayLabel('MOD_ONLY_WEAPON', '   ')).to.equal('MOD_ONLY_WEAPON');
+    });
+
+    it('does not repeat the id when the localised value equals it', () => {
+        expect(formatComponentDisplayLabel('AUTO_SAVE', 'AUTO_SAVE')).to.equal('AUTO_SAVE');
+    });
+
+    it('strips Paradox rich text so the label stays one readable line', () => {
+        expect(toDisplayLocalisationValue('$£ship_size_1$£Red Laser')).to.equal('Red Laser');
+        expect(toDisplayLocalisationValue('§Y$Cruiser§!')).to.equal('Cruiser');
+        expect(toDisplayLocalisationValue('[Starbase]  Outpost')).to.equal('Outpost');
+        expect(toDisplayLocalisationValue('  Spaced   Value ')).to.equal('Spaced Value');
+        expect(toDisplayLocalisationValue('$£icon$£')).to.equal(undefined);
+        expect(toDisplayLocalisationValue(undefined)).to.equal(undefined);
+    });
+});
+
+describe('Compute weapon input without a template', () => {
+    it('falls back to the estimated defaults when no template is selected', () => {
+        const merged = mergeComputeWeaponInput(undefined, undefined);
+        expect(merged.minDamage).to.equal(TARGETING_FIELD_FALLBACKS.min_damage);
+        expect(merged.hullDamage).to.equal(TARGETING_FIELD_FALLBACKS.hull_damage);
+        expect(merged.targetWeights).to.deep.equal({});
+        expect(merged).to.deep.equal(defaultWeaponInput());
+    });
+
+    it('lets manual edits override the template and drops unusable numbers', () => {
+        const template = {
+            ...defaultWeaponInput(),
+            minDamage: 600,
+            maxDamage: 1500,
+            accuracy: 0.85,
+            targetWeights: { corvette: 10 },
+        };
+        const merged = mergeComputeWeaponInput(template, {
+            accuracy: 0.5,
+            minDamage: Number.NaN,
+            tracking: 'not a number',
+            targetWeights: { battleship: 2.5, broken: Number.POSITIVE_INFINITY, '  frigate ': 1 },
+        });
+        expect(merged.minDamage).to.equal(600);
+        expect(merged.maxDamage).to.equal(1500);
+        expect(merged.accuracy).to.equal(0.5);
+        expect(merged.tracking).to.equal(TARGETING_FIELD_FALLBACKS.tracking);
+        expect(merged.targetWeights).to.deep.equal({ frigate: 1, battleship: 2.5 });
+    });
+
+    it('keeps the template target_weights when the webview sends none', () => {
+        const template = { ...defaultWeaponInput(), targetWeights: { corvette: 10 } };
+        expect(mergeComputeWeaponInput(template, { accuracy: 0.4 }).targetWeights).to.deep.equal({ corvette: 10 });
+        expect(mergeComputeWeaponInput(template, { targetWeights: 'corrupted' }).targetWeights).to.deep.equal({ corvette: 10 });
     });
 });

@@ -2497,7 +2497,16 @@ export async function activate(context: ExtensionContext) {
 
 		// Targeting Weight Analysis command
 		safeRegisterCommand(context, "cwtools.targetWeights.open", async () => {
-			TargetWeightPanel.create(context.extensionPath);
+			await TargetWeightPanel.create(context.extensionPath, { indexService });
+		});
+
+		// Editor context-menu entry: preselect the component template at the cursor.
+		safeRegisterCommand(context, "cwtools.targetWeights.openAtCursor", async () => {
+			const editor = vs.window.activeTextEditor;
+			await TargetWeightPanel.create(context.extensionPath, {
+				indexService,
+				cursor: editor ? { document: editor.document, line: editor.selection.active.line + 1 } : undefined,
+			});
 		});
 
 		// Entity Preview command

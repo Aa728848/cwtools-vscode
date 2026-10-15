@@ -181,6 +181,7 @@
   "commands.stellarisLanguageServices.visualizeEventChain.title": "Visualize Event Chain",
   "commands.stellarisLanguageServices.visualizeTechTree.title": "Visualize Tech Tree",
   "commands.stellarisLanguageServices.targetWeights.open.title": "Analyze Targeting Weights",
+  "commands.stellarisLanguageServices.targetWeights.openAtCursor.title": "Analyze Targeting Weights for This Block",
   "commands.stellarisLanguageServices.ai.selectModel.title": "Select AI Model from Provider...",
   "commands.stellarisLanguageServices.ai.previewSelectionTranslation.title": "AI: Toggle Comment Translation",
   "commands.stellarisLanguageServices.localisation.translateSelection.title": "AI: Translate Localisation Selection",

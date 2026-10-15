@@ -35,6 +35,7 @@ interface PresetOption {
 
 interface WeaponOption {
     id: string;
+    displayLabel: string;
     templateTypeKey: string;
     type?: string;
     source: 'workspace' | 'vanilla';
@@ -61,6 +62,15 @@ interface WeaponInput {
 interface WeaponDetail extends WeaponOption {
     input: WeaponInput;
     targetableShipSizes: string[];
+}
+
+type WeaponInputKey = keyof WeaponInput;
+/** 武器表单里的数值字段（target_weights 走独立的文本框）。 */
+type WeaponNumericInputKey = Exclude<WeaponInputKey, 'targetWeights'>;
+
+interface ScanStats {
+    files: number;
+    templates: number;
 }
 
 interface ShipChainView {
@@ -111,15 +121,17 @@ interface ChainResultView {
 // ─── DOM refs ──────────────────────────────────────────────────────────────────
 
 const presetSelect = document.getElementById('preset-select') as HTMLSelectElement | null;
-const weaponSelect = document.getElementById('weapon-select') as HTMLSelectElement | null;
+const weaponSearch = document.getElementById('weapon-search') as HTMLInputElement | null;
+const weaponDatalist = document.getElementById('weapon-options') as HTMLDataListElement | null;
 const btnReveal = document.getElementById('btn-reveal') as HTMLButtonElement | null;
 const btnCompute = document.getElementById('btn-compute') as HTMLButtonElement | null;
 const statusEl = document.getElementById('status');
 const loadingEl = document.getElementById('loading');
 const formBody = document.getElementById('form-body');
 const attackerBody = document.getElementById('attacker-body');
-const optionsBody = document.getElementById('options-body');
+const weaponBody = document.getElementById('weapon-body');
 const weaponFacts = document.getElementById('weapon-facts');
+const optionsBody = document.getElementById('options-body');
 const shipChainEl = document.getElementById('ship-chain');
 const weaponChainEl = document.getElementById('weapon-chain');
 const notesEl = document.getElementById('notes');
@@ -206,6 +218,20 @@ const OPTION_CHECKBOX_FIELDS: CheckboxFieldSpec[] = [
     { key: 'isRecentNonLatest', labelEn: 'In recent-target memory', labelZh: '在最近目标记忆中' },
 ];
 
+/** 武器数值字段：camelCase 键 + 模板里的 snake_case 键（估算标注按模板键汇报）。 */
+const WEAPON_NUMERIC_FIELDS: Array<{ key: WeaponNumericInputKey; templateKey: string; labelEn: string; labelZh: string; step: number }> = [
+    { key: 'minDamage', templateKey: 'min_damage', labelEn: 'min_damage', labelZh: 'min_damage', step: 1 },
+    { key: 'maxDamage', templateKey: 'max_damage', labelEn: 'max_damage', labelZh: 'max_damage', step: 1 },
+    { key: 'accuracy', templateKey: 'accuracy', labelEn: 'accuracy', labelZh: 'accuracy', step: 0.01 },
+    { key: 'tracking', templateKey: 'tracking', labelEn: 'tracking', labelZh: 'tracking', step: 0.01 },
+    { key: 'shieldDamage', templateKey: 'shield_damage', labelEn: 'shield_damage', labelZh: 'shield_damage', step: 0.05 },
+    { key: 'armorDamage', templateKey: 'armor_damage', labelEn: 'armor_damage', labelZh: 'armor_damage', step: 0.05 },
+    { key: 'hullDamage', templateKey: 'hull_damage', labelEn: 'hull_damage', labelZh: 'hull_damage', step: 0.05 },
+    { key: 'shieldPenetration', templateKey: 'shield_penetration', labelEn: 'shield_penetration', labelZh: 'shield_penetration', step: 0.05 },
+    { key: 'armorPenetration', templateKey: 'armor_penetration', labelEn: 'armor_penetration', labelZh: 'armor_penetration', step: 0.05 },
+    { key: 'sizeDamageFactor', templateKey: 'size_damage_factor', labelEn: 'size_damage_factor', labelZh: 'size_damage_factor', step: 0.05 },
+];
+
 interface TargetFormState {
     sizeMultiplier: number;
     evasion: number;
@@ -243,8 +269,31 @@ const optionState: Record<string, number | boolean> = {
     isRecentNonLatest: false,
 };
 
+/** Host 下发的缺省估算值；无模板时武器表单从这里起步。 */
+let weaponDefaults: WeaponInput = {
+    minDamage: 0,
+    maxDamage: 0,
+    accuracy: 0,
+    tracking: 0,
+    shieldDamage: 1,
+    armorDamage: 1,
+    hullDamage: 1,
+    shieldPenetration: 0,
+    armorPenetration: 0,
+    sizeDamageFactor: 0,
+    targetWeights: {},
+};
+
+let weaponInput: WeaponInput = { ...weaponDefaults, targetWeights: {} };
+let weaponUseShipMainTarget = false;
+/** 需要标「估算」的模板键（模板缺字段或写了 @[…] 脚本表达式）。 */
+let estimatedTemplateKeys = new Set<string>();
+let targetableShipSizesText = '';
+
 let presets: PresetOption[] = [];
+let weaponOptions: WeaponOption[] = [];
 let currentWeapon: WeaponDetail | undefined;
+let scannedShipSizes: string[] = [];
 let lastResult: ChainResultView | undefined;
 
 // ─── Small DOM helpers ─────────────────────────────────────────────────────────
@@ -271,6 +320,7 @@ function appendNumberField(
     spec: NumericFieldSpec,
     read: () => number,
     write: (value: number) => void,
+    decorate?: (row: HTMLElement) => void,
 ): void {
     const label = el('label', 'field');
     const input = el('input');
@@ -281,6 +331,7 @@ function appendNumberField(
     label.appendChild(el('span', 'field-label', t(spec.labelEn, spec.labelZh)));
     label.appendChild(input);
     container.appendChild(label);
+    if (decorate) decorate(label);
     on(input, 'input', event => {
         write(inputValueOf(event));
         scheduleCompute();
@@ -306,7 +357,56 @@ function appendCheckbox(
     });
 }
 
-function buildForms(): void {
+function appendTextField(
+    container: HTMLElement,
+    labelEn: string,
+    labelZh: string,
+    value: string,
+    placeholder: string,
+    write: (value: string) => void,
+): HTMLInputElement {
+    const label = el('label', 'field field-wide');
+    label.appendChild(el('span', 'field-label', t(labelEn, labelZh)));
+    const input = el('input');
+    input.type = 'text';
+    input.value = value;
+    input.placeholder = placeholder;
+    input.autocomplete = 'off';
+    input.spellcheck = false;
+    label.appendChild(input);
+    container.appendChild(label);
+    on(input, 'input', () => {
+        write(input.value);
+        scheduleCompute();
+    });
+    return input;
+}
+
+/** 解析 target_weights 文本：\`corvette=10 battleship=2.5\`，容错跳过坏条目。 */
+function parseTargetWeights(text: string): Record<string, number> {
+    const out: Record<string, number> = {};
+    for (const token of text.split(/[\s,]+/)) {
+        if (!token) continue;
+        const equals = token.indexOf('=');
+        if (equals <= 0) continue;
+        const key = token.slice(0, equals).trim();
+        const value = Number.parseFloat(token.slice(equals + 1));
+        if (!key || !Number.isFinite(value)) continue;
+        out[key] = value;
+    }
+    return out;
+}
+
+function formatTargetWeights(weights: Record<string, number>): string {
+    return Object.keys(weights)
+        .sort((a, b) => a.localeCompare(b))
+        .map(key => key + '=' + String(weights[key]))
+        .join('  ');
+}
+
+// ─── Forms ─────────────────────────────────────────────────────────────────────
+
+function buildTargetForms(): void {
     if (!formBody || !attackerBody || !optionsBody) return;
     formBody.textContent = '';
     attackerBody.textContent = '';
@@ -328,6 +428,8 @@ function buildForms(): void {
     sizeInput.value = targetState.shipSizeId;
     sizeInput.id = 'ship-size-id';
     sizeInput.setAttribute('list', 'ship-size-options');
+    sizeInput.autocomplete = 'off';
+    sizeInput.spellcheck = false;
     const datalist = el('datalist');
     datalist.id = 'ship-size-options';
     sizeLabel.appendChild(sizeInput);
@@ -365,6 +467,87 @@ function buildForms(): void {
     }
 }
 
+/**
+ * 武器参数表单：模板只负责自动填充，每个字段都能手动改。
+ * 模板没给的字段用 Host 的缺省值起步，并标「估算」；用户一改就变成手动值。
+ */
+function buildWeaponForm(): void {
+    if (!weaponBody) return;
+    weaponBody.textContent = '';
+
+    for (const spec of WEAPON_NUMERIC_FIELDS) {
+        appendNumberField(
+            weaponBody,
+            { key: spec.key, labelEn: spec.labelEn, labelZh: spec.labelZh, step: spec.step },
+            () => weaponInput[spec.key],
+            value => {
+                weaponInput[spec.key] = value;
+                // 用户改过的值不再是估算值。
+                estimatedTemplateKeys.delete(spec.templateKey);
+                refreshEstimatedMarkers();
+            },
+            row => {
+                if (estimatedTemplateKeys.has(spec.templateKey)) {
+                    row.classList.add('estimated');
+                    row.appendChild(el('span', 'field-tag', t('estimated', '估算')));
+                }
+            },
+        );
+    }
+
+    appendCheckbox(
+        weaponBody,
+        { key: 'useShipMainTarget', labelEn: 'use_ship_main_target', labelZh: 'use_ship_main_target' },
+        () => weaponUseShipMainTarget,
+        value => {
+            weaponUseShipMainTarget = value;
+            renderWeaponFacts();
+        },
+    );
+
+    const weightsInput = appendTextField(
+        weaponBody,
+        'target_weights (ship_size = wk)',
+        'target_weights（ship_size = wk）',
+        formatTargetWeights(weaponInput.targetWeights),
+        t('corvette=10  battleship=2.5', 'corvette=10  battleship=2.5'),
+        value => {
+            weaponInput.targetWeights = parseTargetWeights(value);
+        },
+    );
+    weightsInput.id = 'target-weights-input';
+
+    appendTextField(
+        weaponBody,
+        'targetable_ship_sizes',
+        'targetable_ship_sizes',
+        targetableShipSizesText,
+        t('corvette cruiser', 'corvette cruiser'),
+        value => {
+            targetableShipSizesText = value;
+        },
+    );
+}
+
+/** 估算角标随编辑实时更新，不需要重建整个表单。 */
+function refreshEstimatedMarkers(): void {
+    if (!weaponBody) return;
+    const rows = weaponBody.querySelectorAll<HTMLElement>('label.field');
+    WEAPON_NUMERIC_FIELDS.forEach((spec, index) => {
+        const row = rows[index];
+        if (!row) return;
+        const estimated = estimatedTemplateKeys.has(spec.templateKey);
+        row.classList.toggle('estimated', estimated);
+        let tag = row.querySelector('.field-tag');
+        if (estimated && !tag) {
+            tag = el('span', 'field-tag', t('estimated', '估算'));
+            row.appendChild(tag);
+        } else if (!estimated && tag) {
+            tag.remove();
+        }
+    });
+}
+
 function applyPreset(presetId: string): void {
     const preset = presets.find(entry => entry.id === presetId);
     if (!preset) return;
@@ -380,27 +563,42 @@ function applyPreset(presetId: string): void {
         armed: preset.armed,
         isStarbase: preset.isStarbase,
     };
-    buildForms();
+    buildTargetForms();
     refreshShipSizeOptions();
     scheduleCompute();
 }
 
-// ─── Weapon catalogue ──────────────────────────────────────────────────────────
+// ─── Ship size + weapon catalogue ──────────────────────────────────────────────
 
 function refreshShipSizeOptions(): void {
     const datalist = document.getElementById('ship-size-options');
     const input = document.getElementById('ship-size-id');
-    if (!datalist || !(input instanceof HTMLInputElement)) return;
+    if (!(datalist instanceof HTMLDataListElement) || !(input instanceof HTMLInputElement)) return;
     datalist.textContent = '';
-    const keys = currentWeapon?.targetWeightKeys ?? [];
-    for (const key of keys) {
+    // 当前武器的 target_weights 键排最前，其余是扫描到的全量 ship_size。
+    const ordered: string[] = [];
+    const seen = new Set<string>();
+    for (const key of currentWeapon?.targetWeightKeys ?? []) {
+        if (key && !seen.has(key)) {
+            seen.add(key);
+            ordered.push(key);
+        }
+    }
+    for (const key of scannedShipSizes) {
+        if (key && !seen.has(key)) {
+            seen.add(key);
+            ordered.push(key);
+        }
+    }
+    for (const key of ordered) {
         const option = el('option');
         option.value = key;
         datalist.appendChild(option);
     }
-    if (keys.length > 0 && !keys.includes(input.value)) {
-        input.value = keys[0]!;
-        targetState.shipSizeId = keys[0]!;
+    const weaponKeys = currentWeapon?.targetWeightKeys ?? [];
+    if (weaponKeys.length > 0 && !weaponKeys.includes(input.value)) {
+        input.value = weaponKeys[0]!;
+        targetState.shipSizeId = weaponKeys[0]!;
     }
 }
 
@@ -408,44 +606,42 @@ function renderWeaponFacts(): void {
     if (!weaponFacts) return;
     weaponFacts.textContent = '';
     const weapon = currentWeapon;
-    if (!weapon) return;
+    weaponFacts.appendChild(el(
+        'div',
+        'facts-title',
+        weapon ? t('Weapon template', '武器模板') : t('Manual weapon parameters', '手动武器参数'),
+    ));
 
-    weaponFacts.appendChild(el('div', 'facts-title', t('Weapon template fields', '武器模板字段')));
     const grid = el('div', 'facts-grid');
-    const input = weapon.input;
-    const rows: Array<[string, string]> = [
-        [t('Damage range', '伤害区间'), input.minDamage + ' – ' + input.maxDamage],
-        [t('Accuracy acc', '命中率 acc'), String(input.accuracy)],
-        [t('Tracking trk', '追踪率 trk'), String(input.tracking)],
-        [t('Shield / armor / hull', '盾 / 甲 / 船体倍率'), input.shieldDamage + ' / ' + input.armorDamage + ' / ' + input.hullDamage],
-        [t('Penetration', '穿透'), input.shieldPenetration + ' / ' + input.armorPenetration],
-        ['size_damage_factor', String(input.sizeDamageFactor)],
-        ['use_ship_main_target', weapon.useShipMainTarget ? t('yes', '是') : t('no', '否')],
-        [t('Declared as', '顶层声明'), weapon.templateTypeKey],
-        [t('Source', '来源'), weapon.source === 'workspace' ? t('workspace', '工作区') : t('vanilla', '原版')],
-    ];
-    for (const [label, value] of rows) {
+    const rows: Array<[string, string, string?]> = [];
+    if (weapon) {
+        rows.push([t('Template id', '模板 id'), weapon.id]);
+        rows.push([t('Declared as', '顶层声明'), weapon.templateTypeKey]);
+        if (weapon.type) rows.push([t('Component type', '组件 type'), weapon.type]);
+        rows.push([
+            t('Source', '来源'),
+            weapon.source === 'workspace' ? t('workspace', '工作区') : t('vanilla', '原版'),
+        ]);
+        if (weapon.targetableShipSizes.length > 0) {
+            rows.push(['targetable_ship_sizes', weapon.targetableShipSizes.join(', ')]);
+        }
+    } else {
+        rows.push([
+            t('Template', '模板'),
+            t('none selected — the values below are used as typed', '未选择模板 — 直接使用下面填入的数值'),
+        ]);
+    }
+
+    for (const [label, value, modifier] of rows) {
         const row = el('div', 'fact');
         row.appendChild(el('span', 'fact-label', label));
         row.appendChild(el('span', 'fact-value', value));
+        if (modifier) row.appendChild(el('span', 'fact-note', modifier));
         grid.appendChild(row);
     }
     weaponFacts.appendChild(grid);
 
-    const weightEntries = Object.entries(input.targetWeights).sort((a, b) => a[0].localeCompare(b[0]));
-    if (weightEntries.length > 0) {
-        const list = el('div', 'fact');
-        list.appendChild(el('span', 'fact-label', t('target_weights (additive wk)', 'target_weights（加法项 wk）')));
-        list.appendChild(el('span', 'fact-value', weightEntries.map(([key, value]) => key + '=' + value).join('  ')));
-        weaponFacts.appendChild(list);
-    }
-    if (weapon.targetableShipSizes.length > 0) {
-        const list = el('div', 'fact');
-        list.appendChild(el('span', 'fact-label', t('targetable_ship_sizes', 'targetable_ship_sizes')));
-        list.appendChild(el('span', 'fact-value', weapon.targetableShipSizes.join(', ')));
-        weaponFacts.appendChild(list);
-    }
-    if (weapon.missingKeys.length > 0) {
+    if (weapon && weapon.missingKeys.length > 0) {
         weaponFacts.appendChild(el(
             'div',
             'fact-warning',
@@ -455,7 +651,7 @@ function renderWeaponFacts(): void {
             ),
         ));
     }
-    if (weapon.dynamicKeys.length > 0) {
+    if (weapon && weapon.dynamicKeys.length > 0) {
         weaponFacts.appendChild(el(
             'div',
             'fact-warning',
@@ -465,6 +661,48 @@ function renderWeaponFacts(): void {
             ),
         ));
     }
+}
+
+function renderWeaponDatalist(): void {
+    if (!weaponDatalist) return;
+    weaponDatalist.textContent = '';
+    for (const option of weaponOptions) {
+        const node = el('option');
+        // 值为显示名（本地化名 (id)），label 补来源；输入框内容再反查回 id。
+        node.value = option.displayLabel || option.id;
+        node.label = option.source === 'workspace'
+            ? t('workspace', '工作区')
+            : t('vanilla', '原版');
+        weaponDatalist.appendChild(node);
+    }
+}
+
+function weaponIdForLabel(label: string): string | undefined {
+    const trimmed = label.trim();
+    if (!trimmed) return undefined;
+    return weaponOptions.find(option => (option.displayLabel || option.id) === trimmed)?.id;
+}
+
+/** 输入不再匹配任何模板 → 切到手动模式（字段仍可编辑，分析照常可用）。 */
+function useManualWeapon(): void {
+    if (!currentWeapon) return;
+    currentWeapon = undefined;
+    estimatedTemplateKeys = new Set<string>();
+    renderWeaponFacts();
+    refreshShipSizeOptions();
+    if (btnReveal) btnReveal.disabled = true;
+    scheduleCompute();
+}
+
+function handleWeaponSearchInput(): void {
+    if (!weaponSearch) return;
+    const id = weaponIdForLabel(weaponSearch.value);
+    if (!id) {
+        useManualWeapon();
+        return;
+    }
+    if (currentWeapon?.id === id) return;
+    vscode.postMessage({ command: 'selectWeapon', id });
 }
 
 // ─── Result rendering ──────────────────────────────────────────────────────────
@@ -494,14 +732,16 @@ function renderChain(
     container.appendChild(el('h2', 'section-title', title));
 
     const table = el('div', 'chain-table');
-    const maxAbs = rows.reduce((acc, row) => Math.max(acc, Math.abs(row.value)), 0) || 1;
+    // 条长只吃有限数值：缺失字段让 formatNumber 显示「—」，条宽归零而不是 NaN%。
+    const magnitude = (value: number): number => (Number.isFinite(value) ? Math.abs(value) : 0);
+    const maxAbs = rows.reduce((acc, row) => Math.max(acc, magnitude(row.value)), 0) || 1;
     for (const row of rows) {
         const entry = el('div', row.highlight ? 'chain-row highlight' : 'chain-row');
         entry.appendChild(el('span', 'chain-label', row.label));
         entry.appendChild(el('span', 'chain-value', formatNumber(row.value)));
         const track = el('span', 'bar-track');
         const bar = el('span', row.highlight ? 'bar-fill accent' : 'bar-fill');
-        bar.style.width = Math.min(100, (Math.abs(row.value) / maxAbs) * 100).toFixed(2) + '%';
+        bar.style.width = Math.min(100, (magnitude(row.value) / maxAbs) * 100).toFixed(2) + '%';
         track.appendChild(bar);
         entry.appendChild(track);
         table.appendChild(entry);
@@ -644,6 +884,12 @@ function renderNotes(result: ChainResultView): void {
             '两层互不相乘：舰船层与武器层各自 argmax。',
         ),
     ];
+    if (!currentWeapon) {
+        notes.push(t(
+            'No weapon template is selected, so the weapon layer uses the numbers typed in the form.',
+            '当前未选择武器模板，武器层使用的是表单里手动填入的数值。',
+        ));
+    }
     if (result.veto) {
         notes.push(t(
             'Veto: the engine returns 0 for this candidate; it never enters the argmax at all.',
@@ -692,18 +938,27 @@ function renderNotes(result: ChainResultView): void {
     notesEl.appendChild(list);
 }
 
+/**
+ * Host 的结果载荷是 `{ command:'result', usesShipMainTarget, result:{ veto, shipChain, weapon, defines } }`
+ * —— 乘法链本体在 `message.result` 里。早期版本在顶层找 `shipChain`，取到 undefined 就整段放弃渲染，
+ * 于是「分析」永远得不到结果面板。顶层回退保留给没有 result 信封的旧形状。
+ */
 function asChainResult(message: Record<string, unknown>): ChainResultView | undefined {
-    const shipChain = message.shipChain;
-    const weaponLayer = message.weapon;
+    const envelope = typeof message.result === 'object' && message.result !== null && !Array.isArray(message.result)
+        ? message.result as Record<string, unknown>
+        : message;
+    const shipChain = envelope.shipChain;
+    const weaponLayer = envelope.weapon;
     if (typeof shipChain !== 'object' || shipChain === null) return undefined;
     if (typeof weaponLayer !== 'object' || weaponLayer === null) return undefined;
-    const defines = message.defines;
+    const defines = envelope.defines;
     const distanceWeightMin = typeof defines === 'object' && defines !== null
         ? Number((defines as Record<string, unknown>).distanceWeightMin ?? 0.1)
         : 0.1;
     return {
-        veto: message.veto === true,
-        usesShipMainTarget: message.usesShipMainTarget === true,
+        veto: envelope.veto === true,
+        // usesShipMainTarget 由 Host 放在结果消息顶层（不在 result 内），两处都认。
+        usesShipMainTarget: message.usesShipMainTarget === true || envelope.usesShipMainTarget === true,
         shipChain: shipChain as unknown as ShipChainView,
         weapon: weaponLayer as unknown as WeaponLayerView,
         distanceWeightMin: Number.isFinite(distanceWeightMin) ? distanceWeightMin : 0.1,
@@ -738,13 +993,20 @@ function scheduleCompute(): void {
     }, DEBOUNCE_MS);
 }
 
+/**
+ * 计算永远可发起：武器字段来自表单（有模板就是模板自动填的，没有就是手动值），
+ * 缺字段按缺省估算并在表单上标注，所以不存在「请先选择一个武器模板」这种死路。
+ */
 function requestCompute(): void {
-    if (!currentWeapon) return;
     const maxHull = Number(targetState.maxHull);
     const shipSizeId = targetState.shipSizeId.trim();
     vscode.postMessage({
         command: 'compute',
-        weaponId: currentWeapon.id,
+        weaponId: currentWeapon?.id ?? '',
+        weapon: {
+            ...weaponInput,
+            useShipMainTarget: weaponUseShipMainTarget,
+        },
         attacker: {
             tracking: Number(attackerState.tracking ?? 0),
             sizeMultiplier: Number(attackerState.sizeMultiplier ?? 1),
@@ -778,12 +1040,60 @@ function setStatus(text: string, kind: 'info' | 'error' | 'ok'): void {
     statusEl.className = 'status ' + kind;
 }
 
+function readStats(raw: unknown): Record<'workspace' | 'vanilla', ScanStats> {
+    const fallback = { workspace: { files: 0, templates: 0 }, vanilla: { files: 0, templates: 0 } };
+    if (typeof raw !== 'object' || raw === null) return fallback;
+    const record = raw as Record<string, unknown>;
+    const read = (key: string): ScanStats => {
+        const entry = record[key];
+        if (typeof entry !== 'object' || entry === null) return { files: 0, templates: 0 };
+        const value = entry as Record<string, unknown>;
+        return {
+            files: typeof value.files === 'number' ? value.files : 0,
+            templates: typeof value.templates === 'number' ? value.templates : 0,
+        };
+    };
+    return { workspace: read('workspace'), vanilla: read('vanilla') };
+}
+
 function handleInit(message: Record<string, unknown>): void {
     if (message.locale === 'zh-cn' || message.locale === 'en') locale = message.locale;
     const rawPresets = Array.isArray(message.presets) ? message.presets : [];
     presets = rawPresets.filter((entry): entry is PresetOption => typeof entry === 'object' && entry !== null);
     const rawWeapons = Array.isArray(message.weapons) ? message.weapons : [];
-    const weaponOptions = rawWeapons.filter((entry): entry is WeaponOption => typeof entry === 'object' && entry !== null);
+    weaponOptions = rawWeapons.filter((entry): entry is WeaponOption => typeof entry === 'object' && entry !== null)
+        .map(option => ({
+            ...option,
+            displayLabel: typeof option.displayLabel === 'string' && option.displayLabel
+                ? option.displayLabel
+                : option.id,
+        }));
+    scannedShipSizes = Array.isArray(message.shipSizes)
+        ? message.shipSizes.filter((id): id is string => typeof id === 'string' && id.length > 0)
+        : [];
+    const rawDefaults = typeof message.weaponDefaults === 'object' && message.weaponDefaults !== null
+        ? message.weaponDefaults as Record<string, unknown>
+        : undefined;
+    if (rawDefaults) {
+        const readNumber = (key: string, fallback: number): number => {
+            const value = rawDefaults[key];
+            return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
+        };
+        weaponDefaults = {
+            minDamage: readNumber('min_damage', weaponDefaults.minDamage),
+            maxDamage: readNumber('max_damage', weaponDefaults.maxDamage),
+            accuracy: readNumber('accuracy', weaponDefaults.accuracy),
+            tracking: readNumber('tracking', weaponDefaults.tracking),
+            shieldDamage: readNumber('shield_damage', weaponDefaults.shieldDamage),
+            armorDamage: readNumber('armor_damage', weaponDefaults.armorDamage),
+            hullDamage: readNumber('hull_damage', weaponDefaults.hullDamage),
+            shieldPenetration: readNumber('shield_penetration', weaponDefaults.shieldPenetration),
+            armorPenetration: readNumber('armor_penetration', weaponDefaults.armorPenetration),
+            sizeDamageFactor: readNumber('size_damage_factor', weaponDefaults.sizeDamageFactor),
+            targetWeights: {},
+        };
+        weaponInput = { ...weaponDefaults, targetWeights: {} };
+    }
     if (loadingEl) loadingEl.classList.add('hidden');
 
     if (presetSelect) {
@@ -796,49 +1106,103 @@ function handleInit(message: Record<string, unknown>): void {
         }
     }
 
-    if (weaponSelect) {
-        weaponSelect.textContent = '';
-        for (const weapon of weaponOptions) {
-            const option = el('option');
-            option.value = weapon.id;
-            option.textContent = weapon.id
-                + (weapon.type ? ' (' + weapon.type + ')' : '')
-                + (/(_component_template|starbase)$/.test(weapon.templateTypeKey) ? ' {' + weapon.templateTypeKey + '}' : '')
-                + (weapon.useShipMainTarget ? t(' · ship main target', ' · 沿用舰船主目标') : '');
-            weaponSelect.appendChild(option);
-        }
-    }
-
-    buildForms();
+    renderWeaponDatalist();
+    buildTargetForms();
+    buildWeaponForm();
+    renderWeaponFacts();
+    refreshShipSizeOptions();
+    if (btnReveal) btnReveal.disabled = true;
 
     if (weaponOptions.length === 0) {
         setStatus(t(
-            'No weapon component template was found under common/component_templates in the workspace or the configured game roots.',
-            '在工作区与已配置游戏根的 common/component_templates 下没有找到武器组件模板。',
+            'No weapon component template was found under common/component_templates in the workspace or the configured game roots. Weapon fields can still be filled in manually.',
+            '在工作区与已配置游戏根的 common/component_templates 下没有找到武器组件模板；仍可手动填写武器参数后分析。',
         ), 'error');
+        scheduleCompute();
         return;
     }
-    const scanned = typeof message.scannedFileCount === 'number' ? message.scannedFileCount : 0;
+    const stats = readStats(message.stats);
     setStatus(
-        t(weaponOptions.length + ' weapon templates from ' + scanned + ' files.', '从 ' + scanned + ' 个文件里解析出 ' + weaponOptions.length + ' 个武器模板。'),
+        t(
+            weaponOptions.length + ' weapon templates · workspace ' + stats.workspace.templates + ' / vanilla '
+                + stats.vanilla.templates + ' · ' + scannedShipSizes.length + ' ship sizes',
+            '解析出 ' + weaponOptions.length + ' 个武器模板（工作区 ' + stats.workspace.templates
+                + ' / 原版 ' + stats.vanilla.templates + '）· ' + scannedShipSizes.length + ' 个 ship_size',
+        ),
         'ok',
     );
+    // 初始模板只由 Host 下发（右键菜单带入的 id 优先，否则第一条）：
+    // 这里再抢发一次 selectWeapon 会和光标预选赛跑，把用户光标处的模板覆盖掉。
 }
 
-function handleWeapon(message: Record<string, unknown>): void {
-    const rawInput = message.input;
-    currentWeapon = {
-        id: typeof message.id === 'string' ? message.id : '',
-        templateTypeKey: typeof message.templateTypeKey === 'string' ? message.templateTypeKey : '',
-        type: typeof message.type === 'string' ? message.type : undefined,
-        source: message.source === 'vanilla' ? 'vanilla' : 'workspace',
-        useShipMainTarget: message.useShipMainTarget === true,
-        targetWeightKeys: Array.isArray(message.targetWeightKeys) ? (message.targetWeightKeys as string[]) : [],
-        missingKeys: Array.isArray(message.missingKeys) ? (message.missingKeys as string[]) : [],
-        dynamicKeys: Array.isArray(message.dynamicKeys) ? (message.dynamicKeys as string[]) : [],
-        targetableShipSizes: Array.isArray(message.targetableShipSizes) ? (message.targetableShipSizes as string[]) : [],
-        input: (typeof rawInput === 'object' && rawInput !== null ? rawInput : {}) as WeaponInput,
+function asStringArray(value: unknown): string[] {
+    return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [];
+}
+
+function toWeaponInput(raw: unknown): WeaponInput {
+    const source = typeof raw === 'object' && raw !== null ? raw as Record<string, unknown> : {};
+    const read = (key: WeaponInputKey, fallback: number): number => {
+        const value = source[key];
+        return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
     };
+    const weights: Record<string, number> = {};
+    const rawWeights = source.targetWeights;
+    if (typeof rawWeights === 'object' && rawWeights !== null && !Array.isArray(rawWeights)) {
+        for (const [key, value] of Object.entries(rawWeights as Record<string, unknown>)) {
+            if (key && typeof value === 'number' && Number.isFinite(value)) weights[key] = value;
+        }
+    }
+    return {
+        minDamage: read('minDamage', weaponDefaults.minDamage),
+        maxDamage: read('maxDamage', weaponDefaults.maxDamage),
+        accuracy: read('accuracy', weaponDefaults.accuracy),
+        tracking: read('tracking', weaponDefaults.tracking),
+        shieldDamage: read('shieldDamage', weaponDefaults.shieldDamage),
+        armorDamage: read('armorDamage', weaponDefaults.armorDamage),
+        hullDamage: read('hullDamage', weaponDefaults.hullDamage),
+        shieldPenetration: read('shieldPenetration', weaponDefaults.shieldPenetration),
+        armorPenetration: read('armorPenetration', weaponDefaults.armorPenetration),
+        sizeDamageFactor: read('sizeDamageFactor', weaponDefaults.sizeDamageFactor),
+        targetWeights: weights,
+    };
+}
+
+/**
+ * Host 下发的模板载荷形如 { command:'weapon', weapon:{…} }；
+ * 字段全在 message.weapon 上（早期版本误读顶层，导致 id 变空串、
+ * 分析永远报「请先选择一个武器模板」、跳转静默失败、字段渲染成 undefined）。
+ */
+function handleWeapon(message: Record<string, unknown>): void {
+    const payload = typeof message.weapon === 'object' && message.weapon !== null && !Array.isArray(message.weapon)
+        ? message.weapon as Record<string, unknown>
+        : message;
+    const id = typeof payload.id === 'string' ? payload.id : '';
+    const known = weaponOptions.find(option => option.id === id);
+    currentWeapon = {
+        id,
+        displayLabel: typeof payload.displayLabel === 'string' && payload.displayLabel
+            ? payload.displayLabel
+            : (known?.displayLabel ?? id),
+        templateTypeKey: typeof payload.templateTypeKey === 'string' ? payload.templateTypeKey : '',
+        type: typeof payload.type === 'string' ? payload.type : undefined,
+        source: payload.source === 'vanilla' ? 'vanilla' : 'workspace',
+        useShipMainTarget: payload.useShipMainTarget === true,
+        targetWeightKeys: asStringArray(payload.targetWeightKeys),
+        targetableShipSizes: asStringArray(payload.targetableShipSizes),
+        missingKeys: asStringArray(payload.missingKeys),
+        dynamicKeys: asStringArray(payload.dynamicKeys),
+        input: toWeaponInput(payload.input),
+    };
+    weaponInput = { ...currentWeapon.input, targetWeights: { ...currentWeapon.input.targetWeights } };
+    weaponUseShipMainTarget = currentWeapon.useShipMainTarget;
+    estimatedTemplateKeys = new Set<string>([...currentWeapon.missingKeys, ...currentWeapon.dynamicKeys]);
+    targetableShipSizesText = currentWeapon.targetableShipSizes.join(' ');
+
+    if (weaponSearch && weaponSearch.value.trim() !== currentWeapon.displayLabel) {
+        weaponSearch.value = currentWeapon.displayLabel;
+    }
+    if (btnReveal) btnReveal.disabled = !currentWeapon.id;
+    buildWeaponForm();
     renderWeaponFacts();
     refreshShipSizeOptions();
     scheduleCompute();
@@ -875,15 +1239,14 @@ on(window, 'message', event => {
 });
 
 if (presetSelect) on(presetSelect, 'change', () => applyPreset(presetSelect.value));
-if (weaponSelect) {
-    on(weaponSelect, 'change', () => {
-        vscode.postMessage({ command: 'selectWeapon', id: weaponSelect.value });
-    });
+if (weaponSearch) {
+    on(weaponSearch, 'input', handleWeaponSearchInput);
+    on(weaponSearch, 'change', handleWeaponSearchInput);
 }
 if (btnCompute) on(btnCompute, 'click', () => requestCompute());
 if (btnReveal) {
     on(btnReveal, 'click', () => {
-        if (currentWeapon) vscode.postMessage({ command: 'revealWeapon', id: currentWeapon.id });
+        if (currentWeapon?.id) vscode.postMessage({ command: 'revealWeapon', id: currentWeapon.id });
     });
 }
 on(window, 'pagehide', () => disposeAll());

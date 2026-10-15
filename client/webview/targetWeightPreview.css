@@ -13,6 +13,11 @@
     --error: var(--vscode-editorError-foreground, #f14c4c);
     --ok: var(--vscode-charts-green, #89d185);
     --focus-ring: var(--vscode-focusBorder, #007fd4);
+    /* 表单与事实表的行高/字号统一走同一组 token，两边不再各写一套。 */
+    --field-gap: 6px 10px;
+    --row-gap: 4px;
+    --label-size: 11px;
+    --value-size: 11px;
 }
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -54,7 +59,8 @@ body {
     min-width: 0;
 }
 
-#toolbar select {
+#toolbar select,
+#toolbar input {
     background: var(--bg);
     color: var(--fg);
     border: 1px solid var(--border);
@@ -62,8 +68,14 @@ body {
     height: 26px;
     padding: 0 8px;
     font-size: 12px;
+    font-family: inherit;
     max-width: 320px;
 }
+
+#toolbar input { min-width: 200px; }
+#toolbar input::placeholder { color: var(--muted); }
+#toolbar select:focus-visible,
+#toolbar input:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 1px; }
 
 #toolbar button {
     background: rgba(255, 255, 255, 0.06);
@@ -75,11 +87,13 @@ body {
     padding: 0 10px;
     cursor: pointer;
     font-size: 12px;
+    font-family: inherit;
     transition: background 0.15s;
 }
 
-#toolbar button:hover { background: rgba(255, 255, 255, 0.12); }
+#toolbar button:hover:not(:disabled) { background: rgba(255, 255, 255, 0.12); }
 #toolbar button:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 1px; }
+#toolbar button:disabled { opacity: 0.45; cursor: default; }
 .separator { color: var(--border); }
 
 /* ── Status ── */
@@ -131,18 +145,26 @@ body {
 .form-grid {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-    gap: 6px 10px;
+    gap: var(--field-gap);
+    align-items: end;
 }
 
+/* 表单单元：标签一行、输入一行；min-width:0 防止网格子项被内容撑爆。 */
 .field {
     display: flex;
     flex-direction: column;
     gap: 2px;
+    min-width: 0;
 }
+
+.field-wide { grid-column: 1 / -1; }
 
 .field-label {
     font-size: 10px;
     color: var(--muted);
+    /* 长模板键（size_damage_factor）不得把标签挤成一列单字符 */
+    white-space: normal;
+    overflow-wrap: anywhere;
 }
 
 .field input {
@@ -154,15 +176,31 @@ body {
     padding: 0 6px;
     font-size: 12px;
     font-family: inherit;
+    min-width: 0;
+    width: 100%;
 }
 
 .field input:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 1px; }
+.field input::placeholder { color: var(--muted); }
+
+.field.estimated .field-label { color: var(--warn); }
+
+.field-tag {
+    align-self: flex-start;
+    margin-top: 1px;
+    padding: 0 4px;
+    border: 1px solid var(--warn);
+    border-radius: 3px;
+    font-size: 9px;
+    line-height: 14px;
+    color: var(--warn);
+}
 
 .checkbox {
     display: flex;
     align-items: center;
     gap: 5px;
-    font-size: 11px;
+    font-size: var(--label-size);
     color: var(--fg);
     cursor: pointer;
     grid-column: 1 / -1;
@@ -170,14 +208,18 @@ body {
 
 .checkbox input:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 1px; }
 
-/* ── Weapon facts ── */
+/* ── Weapon facts ──
+ * .facts-grid 只负责排纵向行；每一行自己才是「标签列 + 值列」的两列网格。
+ * 早期版本让 .facts-grid 也用 118px 两列，于是每个 .fact 只分到 118px，
+ * 内层 1fr 塌成 0，值被逐字符换行（undefined 竖成一列单字母）。
+ */
 .facts {
     margin-top: 16px;
     border-top: 1px solid var(--border);
     padding-top: 10px;
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    gap: var(--row-gap);
 }
 
 .facts-title {
@@ -186,21 +228,41 @@ body {
     color: var(--accent);
 }
 
-.facts-grid,
-.facts .fact {
-    display: grid;
-    grid-template-columns: 118px minmax(0, 1fr);
-    gap: 8px;
-    font-size: 11px;
+.facts-grid {
+    display: flex;
+    flex-direction: column;
+    gap: var(--row-gap);
 }
 
-.fact-label { color: var(--muted); }
-.fact-value { word-break: break-word; }
+.fact {
+    display: grid;
+    grid-template-columns: minmax(84px, 132px) minmax(0, 1fr);
+    gap: 8px;
+    align-items: baseline;
+    font-size: var(--value-size);
+    line-height: 1.5;
+}
+
+.fact-label {
+    color: var(--muted);
+    overflow-wrap: anywhere;
+}
+
+.fact-value {
+    min-width: 0;
+    /* 只在确实放不下时才断行，禁止逐字符换行 */
+    word-break: normal;
+    overflow-wrap: anywhere;
+    white-space: pre-wrap;
+}
+
+.fact-note { color: var(--muted); }
 
 .fact-warning {
     font-size: 10px;
     color: var(--warn);
     line-height: 1.45;
+    overflow-wrap: anywhere;
 }
 
 /* ── Chain tables + CSS bar chart ── */

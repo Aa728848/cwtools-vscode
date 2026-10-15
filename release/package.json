@@ -324,6 +324,11 @@
                     "group": "stellaris@8"
                 },
                 {
+                    "command": "cwtools.targetWeights.openAtCursor",
+                    "when": "editorLangId == stellaris || (resourceExtname == .txt && resourcePath =~ /component_templates/)",
+                    "group": "stellaris@9"
+                },
+                {
                     "command": "cwtools.csv.insertRowAbove",
                     "when": "resourceExtname == .csv",
                     "group": "paradoxCsv@1"
@@ -717,6 +722,12 @@
             {
                 "command": "cwtools.targetWeights.open",
                 "title": "%commands.stellarisLanguageServices.targetWeights.open.title%",
+                "category": "Stellaris",
+                "icon": "$(target)"
+            },
+            {
+                "command": "cwtools.targetWeights.openAtCursor",
+                "title": "%commands.stellarisLanguageServices.targetWeights.openAtCursor.title%",
                 "category": "Stellaris",
                 "icon": "$(target)"
             },

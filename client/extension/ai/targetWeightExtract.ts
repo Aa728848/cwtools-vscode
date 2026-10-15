@@ -6,6 +6,8 @@
  * armor_damage / shield_penetration / armor_penetration / size_damage_factor /
  * use_ship_main_target / target_weights。
  *
+ * 同模块也承担面板需要的另外三项纯计算：顶层块 id 收集（common/ship_sizes）、
+ * 光标行 → 所属组件模板 id、以及本地化名回退与富文本清洗。
  * 本模块刻意不 import vscode / fs / path，只做「文本 → 结构化字段」，
  * 文件枚举与读取一律留在 Extension Host（targetWeightPanel.ts）。
  */
@@ -13,7 +15,11 @@ import { tokenize, TokenType, type Token } from '../pdxTokenizer';
 
 /** 索敌公式里真正会读到的武器字段（对应 targetingWeights.ts 的 TargetingWeaponInput）。 */
 export interface ExtractedWeaponTargeting {
-    /** 模板 id：优先取块内的 `key = "…"`，缺失时退回顶层键。 */
+    /**
+     * 模板 id：优先取块内的 `key = "…"`；顶层键不是类型键时（`energy_lance_1 = { … }`
+     * 老写法）退回顶层键。顶层键是类型键却没有内层 `key` 的块不进入列表，见
+     * `extractTargetingFields`。
+     */
     componentId: string;
     /**
      * 顶层声明键。Stellaris 的规范形状是
@@ -110,6 +116,10 @@ function isAtom(token: Token | undefined): boolean {
     return token?.type === TokenType.Identifier
         || token?.type === TokenType.String
         || token?.type === TokenType.Number;
+}
+
+function unquote(raw: string): string {
+    return raw.trim().replace(/^["']|["']$/g, '');
 }
 
 /** `50%` 归一化为 0.5；`@[...]` 表达式返回 undefined（静态不可求值）。 */
@@ -259,7 +269,7 @@ function readComponentBlock(
             }
             if (rhs.type === TokenType.Identifier || rhs.type === TokenType.String || rhs.type === TokenType.Number) {
                 if (key === COMPONENT_ID_KEY) {
-                    fields.componentId = rhs.value.trim().replace(/^["']|["']$/g, '');
+                    fields.componentId = unquote(rhs.value);
                 } else if (key === COMPONENT_TYPE_KEY) {
                     fields.componentType = rhs.value;
                 } else if (key === USE_SHIP_MAIN_TARGET_KEY) {
@@ -298,8 +308,8 @@ export function isTargetingRelevant(fields: ExtractedWeaponTargeting): boolean {
 }
 
 function finalize(fields: ExtractedWeaponTargeting): ExtractedWeaponTargeting {
-    // 顶层键是类型键时（weapon_component_template = { key = "…" }），真正的模板 id 在 key 字段；
-    // 老写法直接用顶层键做 id（energy_lance_1 = { … }）时原样保留。
+    // 顶层键不是类型键时（`energy_lance_1 = { … }` 老写法），顶层键本身就是模板 id；
+    // 类型键缺 `key` 的块已在 extractTargetingFields 里先行丢弃。
     if (!fields.componentId) fields.componentId = fields.templateTypeKey;
     for (const key of TARGETING_NUMERIC_FIELDS) {
         if (!hasNumericField(fields, key)) {
@@ -310,12 +320,23 @@ function finalize(fields: ExtractedWeaponTargeting): ExtractedWeaponTargeting {
 }
 
 /**
+ * 顶层键是否只是类型键（weapon_component_template / utility_component_template / starbase …）。
+ */
+export function isGenericTemplateTypeKey(templateTypeKey: string): boolean {
+    return /_component_template$/.test(templateTypeKey) || templateTypeKey === 'starbase';
+}
+
+/**
  * 解析一个 component_templates 文件，返回其中所有与索敌相关的模板。
  *
  * 只把「顶层 `X = { ... }`」当成模板，两种写法都覆盖：
  * - 规范写法 `weapon_component_template = { key = "energy_lance_1" … }`（顶层键是类型键）；
  * - 直接以 id 命名的写法 `energy_lance_1 = { … }`。
  * 深一层嵌套块（prerequisites / ai_weight / inline_script 之类）会被整棵跳过。
+ *
+ * 顶层是类型键却没有内层 `key` 的块一律丢弃：引擎按 `name_field = "key"` 取名，
+ * 这种块取不到 id（文档里的注释样例块也长这样），把它们塞进下拉只会得到一条
+ * 名为 `weapon_component_template` 的裸条目。
  */
 export function extractTargetingFields(text: string): ExtractedWeaponTargeting[] {
     const tokens = tokenize(text);
@@ -332,9 +353,12 @@ export function extractTargetingFields(text: string): ExtractedWeaponTargeting[]
         const rhs = tokens[index + 2];
         if (isAtom(token) && equals?.type === TokenType.Equals && rhs?.type === TokenType.LBrace) {
             const parsed = readComponentBlock(tokens, index + 2, token.value, token.line);
-            const fields = finalize(parsed.fields);
-            if (isTargetingRelevant(fields)) {
-                results.push(fields);
+            const keylessTypeKey = !parsed.fields.componentId && isGenericTemplateTypeKey(token.value);
+            if (!keylessTypeKey) {
+                const fields = finalize(parsed.fields);
+                if (isTargetingRelevant(fields)) {
+                    results.push(fields);
+                }
             }
             index = parsed.next;
             continue;
@@ -389,7 +413,256 @@ export function formatWeaponTargetingLabel(entry: WeaponTargetingEntry): string 
     return parts.join(' ');
 }
 
-/** 顶层键是否只是类型键（weapon_component_template / utility_component_template / starbase …）。 */
-export function isGenericTemplateTypeKey(templateTypeKey: string): boolean {
-    return /_component_template$/.test(templateTypeKey) || templateTypeKey === 'starbase';
+// ── 顶层块扫描 ─────────────────────────────────────────────────────────────────
+//
+// common/ship_sizes/*.txt 没有 name_field：顶层键就是 id（`corvette = { … }`），
+// 所以 ship_size 候选与「光标落在哪个组件模板里」共用同一套顶层块扫描。
+
+/** 一个顶层 `id = { … }` 块。 */
+export interface TopLevelBlock {
+    /** 顶层键（引号已剥离）。 */
+    id: string;
+    /** `id = {` 所在的 1 基行号。 */
+    line: number;
+    /** 块闭合 `}` 所在的 1 基行号。 */
+    endLine: number;
+    /** 直接子项里的 `key = "…"`；没有则 undefined。 */
+    key?: string;
+}
+
+function readTopLevelBlock(
+    tokens: Token[],
+    openIndex: number,
+    id: string,
+    line: number,
+): { block: TopLevelBlock; next: number } {
+    let key: string | undefined;
+    let index = openIndex + 1;
+    const finish = (next: number): { block: TopLevelBlock; next: number } => ({
+        block: { id, line, endLine: tokens[next - 1]?.line ?? line, key },
+        next,
+    });
+    while (index < tokens.length) {
+        const token = tokens[index]!;
+        if (token.type === TokenType.RBrace) return finish(index + 1);
+        if (token.type === TokenType.EOF) return finish(index);
+        if (token.type === TokenType.LBrace) {
+            index = skipBlock(tokens, index);
+            continue;
+        }
+        const equals = tokens[index + 1];
+        const rhs = tokens[index + 2];
+        if (isAtom(token) && equals?.type === TokenType.Equals && rhs) {
+            if (token.value === COMPONENT_ID_KEY && rhs.type !== TokenType.LBrace) {
+                if (key === undefined) key = unquote(rhs.value);
+            } else if (rhs.type === TokenType.LBrace) {
+                index = skipBlock(tokens, index + 2);
+                continue;
+            }
+            index += 3;
+            continue;
+        }
+        index++;
+    }
+    return finish(index);
+}
+
+/**
+ * 扫描一个文件里的全部顶层块（注释与嵌套块由 tokenizer 处理掉）。
+ */
+export function readTopLevelBlocks(text: string): TopLevelBlock[] {
+    const tokens = tokenize(text);
+    const blocks: TopLevelBlock[] = [];
+    let index = 0;
+    while (index < tokens.length) {
+        const token = tokens[index]!;
+        if (token.type === TokenType.EOF) break;
+        if (token.type === TokenType.LBrace) {
+            index = skipBlock(tokens, index);
+            continue;
+        }
+        const equals = tokens[index + 1];
+        const rhs = tokens[index + 2];
+        if (isAtom(token) && equals?.type === TokenType.Equals && rhs?.type === TokenType.LBrace) {
+            const parsed = readTopLevelBlock(tokens, index + 2, token.value, token.line);
+            blocks.push(parsed.block);
+            index = parsed.next;
+            continue;
+        }
+        if (isAtom(token) && equals?.type === TokenType.Equals && rhs) {
+            index += 3;
+            continue;
+        }
+        index++;
+    }
+    return blocks;
+}
+
+/**
+ * 一个 `common/ship_sizes/*.txt` 文件里的 ship_size id（按出现顺序、文件内去重）。
+ *
+ * 注释行与嵌套块里的 `xxx = { … }` 不会被算进来：只取顶层键。
+ */
+export function extractShipSizeIds(text: string): string[] {
+    const ids: string[] = [];
+    const seen = new Set<string>();
+    for (const block of readTopLevelBlocks(text)) {
+        const id = block.id.trim();
+        if (!id || seen.has(id)) continue;
+        seen.add(id);
+        ids.push(id);
+    }
+    return ids;
+}
+
+export interface ShipSizeSourceGroup {
+    source: 'workspace' | 'vanilla';
+    file: string;
+    ids: string[];
+}
+
+/**
+ * 合并多根 ship_sizes 扫描结果：跨文件去重后按 id 排序，保证 datalist 顺序确定。
+ */
+export function mergeShipSizeIds(groups: ShipSizeSourceGroup[]): string[] {
+    const ids = new Set<string>();
+    for (const group of groups) {
+        for (const id of group.ids) {
+            const trimmed = id.trim();
+            if (trimmed) ids.add(trimmed);
+        }
+    }
+    return [...ids].sort((a, b) => a.localeCompare(b));
+}
+
+/**
+ * 光标行 → 所属顶层块的组件模板 id（编辑器右键菜单快速入口用）。
+ *
+ * 与 `extractTargetingFields` 用同一套 id 规则：内层 `key` 优先；顶层键不是类型键时
+ * 直接当 id；顶层键是类型键却没有内层 `key`（注释样例块）返回 undefined。
+ * 行号是 1 基的（与 vscode 的 0 基 selection.line 差 1，调用方负责换算）。
+ */
+export function findComponentTemplateIdAtLine(text: string, line: number): string | undefined {
+    if (!Number.isFinite(line) || line < 1) return undefined;
+    for (const block of readTopLevelBlocks(text)) {
+        if (line < block.line || line > block.endLine) continue;
+        if (block.key) return block.key;
+        return isGenericTemplateTypeKey(block.id) ? undefined : block.id;
+    }
+    return undefined;
+}
+
+// ── 本地化显示名 ───────────────────────────────────────────────────────────────
+
+/**
+ * 去掉 Paradox 富文本标记（图标、颜色、视觉标记），保留可读文字。
+ *
+ * `$£icon£$` 只包一半或整段缺失时会留下孤立标记，所以最后再统一清一次残字符，
+ * 保证下拉/标签永远是一行纯文本。
+ */
+function stripLocalisationMarkup(value: string): string {
+    return value
+        // `$£icon£$` 与 `£icon£` 两种图标写法，成对吃掉。
+        .replace(/\$?£[^£]*£\$?/g, '')
+        // `§Y` `§!` `§$` 等视觉标记：`§` 后跟任意一个字符。
+        .replace(/§./g, '')
+        // `[Starbase]` 之类的方括号前缀。
+        .replace(/\[[^\]]*\]/g, '')
+        // `$强调$` 保留文字。
+        .replace(/\$([^\$]*)\$/g, '$1')
+        // 残留的孤立标记。
+        .replace(/[$£§]/g, '');
+}
+
+
+// ── 计算载荷 ───────────────────────────────────────────────────────────────────
+
+/** parseTargetingChainInput 要求的武器数值键；顺序与 WeaponInput 的构造顺序一致。 */
+export const WEAPON_INPUT_NUMERIC_KEYS = [
+    'minDamage',
+    'maxDamage',
+    'accuracy',
+    'tracking',
+    'shieldDamage',
+    'armorDamage',
+    'hullDamage',
+    'shieldPenetration',
+    'armorPenetration',
+    'sizeDamageFactor',
+] as const;
+
+/** 无模板时的缺省武器输入（全部按缺省值估算，由面板标注）。 */
+export function defaultWeaponInput(): Record<string, number | Record<string, number>> {
+    return {
+        minDamage: TARGETING_FIELD_FALLBACKS.min_damage,
+        maxDamage: TARGETING_FIELD_FALLBACKS.max_damage,
+        accuracy: TARGETING_FIELD_FALLBACKS.accuracy,
+        tracking: TARGETING_FIELD_FALLBACKS.tracking,
+        shieldDamage: TARGETING_FIELD_FALLBACKS.shield_damage,
+        armorDamage: TARGETING_FIELD_FALLBACKS.armor_damage,
+        hullDamage: TARGETING_FIELD_FALLBACKS.hull_damage,
+        shieldPenetration: TARGETING_FIELD_FALLBACKS.shield_penetration,
+        armorPenetration: TARGETING_FIELD_FALLBACKS.armor_penetration,
+        sizeDamageFactor: TARGETING_FIELD_FALLBACKS.size_damage_factor,
+        targetWeights: {},
+    };
+}
+
+/** webview 的 target_weights 文本可能被改坏；只保留有限数值，其余丢弃。 */
+function sanitiseTargetWeights(raw: unknown, fallback: Record<string, number>): Record<string, number> {
+    if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return { ...fallback };
+    const out: Record<string, number> = {};
+    for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
+        const trimmed = key.trim();
+        if (!trimmed) continue;
+        if (typeof value !== 'number' || !Number.isFinite(value)) continue;
+        out[trimmed] = value;
+    }
+    return out;
+}
+
+/**
+ * 组装一次分析的武器输入：模板静态值打底，webview 的手动编辑覆盖。
+ *
+ * 模板缺字段时用 \`TARGETING_FIELD_FALLBACKS\` 估算；没选模板（template 为 undefined）
+ * 时整份输入都来自表单的手动值——因此「分析」永远可用，不存在
+ * 「必须先选一个武器模板」的死路。webview 的载荷不可信，非有限数值一律被丢弃，
+ * 保证 \`parseTargetingChainInput\` 收窄时不会抛错。
+ */
+export function mergeComputeWeaponInput(
+    template: Record<string, unknown> | undefined,
+    raw: unknown,
+): Record<string, unknown> {
+    const base = { ...defaultWeaponInput(), ...(template ?? {}) };
+    if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return base;
+    const overrides = raw as Record<string, unknown>;
+    for (const key of WEAPON_INPUT_NUMERIC_KEYS) {
+        const value = overrides[key];
+        if (typeof value === 'number' && Number.isFinite(value)) base[key] = value;
+    }
+    base.targetWeights = sanitiseTargetWeights(
+        overrides.targetWeights,
+        (base.targetWeights as Record<string, number> | undefined) ?? {},
+    );
+    return base;
+}
+
+/**
+ * 本地化值 → 适合放进下拉/标签的纯文本；空值或只剩标记时返回 undefined（调用方回退 id）。
+ */
+export function toDisplayLocalisationValue(value: string | undefined): string | undefined {
+    if (value === undefined) return undefined;
+    const collapsed = stripLocalisationMarkup(value).replace(/\s+/g, ' ').trim();
+    return collapsed.length > 0 ? collapsed : undefined;
+}
+
+/**
+ * 下拉里的一行：`<本地化名> (<id>)`。
+ *
+ * 组件名的 loc 键就是组件 key，没有本地化（或本地化与 id 相同）时回退到裸 id。
+ */
+export function formatComponentDisplayLabel(id: string, localizedName?: string): string {
+    const name = toDisplayLocalisationValue(localizedName);
+    if (!name || name === id) return id;
+    return `${name} (${id})`;
 }

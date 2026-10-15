@@ -12,7 +12,8 @@ Status: implemented
 
 - **Agent 工具 `query_targeting_weight`**：注册五触点（definitions/registry 的 AgentToolName+TOOL_DOMAINS+BASE_READ/agentTools 的 import+TOOL_TIMEOUTS+executeInternal/toolPhrases 双语）+ 单测；toolDefinitions 预算测试（96 工具/32000 token）通过。
 - **MCP 暴露**（cwtools-mcp `729c32f`，已推送，**npm 未发布**）：generate-mcp-schema.cjs、names.ts、mcpBridgeServer.ts 三处名单同步 + 生成器产出 generated/mcpTools.ts（37 工具，纯新增 210 行）；子模块 build + 契约测试 39+66 全绿，只读面未破。
-- **分析面板** `cwtools.targetWeights.open`：Host（targetWeightPanel.ts，文件 I/O 与扫描上限 2000/根、revealWeapon 白名单回跳）+ webview（targetWeightPreview.ts/css，纯 CSS 条形图、VETO/沿用主目标横幅、主题变量、prefers-reduced-motion、统一 dispose）+ 纯提取模块 targetWeightExtract.ts（13 项单测，顶层类型键 vs 内层 key 的模板 id 修正）；rollup.config.mjs 追加一个 webview bundle；命令与标题双语（release/package.json + 三个 nls）。
+- **分析面板** `cwtools.targetWeights.open`：Host（targetWeightPanel.ts，文件 I/O 与扫描上限 2000/根、revealWeapon 白名单回跳）+ webview（targetWeightPreview.ts/css，纯 CSS 条形图、VETO/沿用主目标横幅、主题变量、prefers-reduced-motion、统一 dispose）+ 纯提取模块 targetWeightExtract.ts（顶层类型键 vs 内层 key 的模板 id 修正；单测经实测迭代扩至 31 项）；rollup.config.mjs 追加一个 webview bundle；命令与标题双语（release/package.json + 三个 nls）。
+- **面板实测迭代（同日第二轮）**：修复 webview 误读 Host 载荷顶层字段（应为 `message.weapon`）引发的连锁缺陷（分析死路「请先选择模板」、↗ 跳转静默失败、字段渲染 undefined 竖排）；武器列表补工作区来源、本地化名显示（无本地化回退 id）与输入即筛；目标 ship_size 改为扫描工作区+vanilla 的 ship_sizes 顶层 id 完整 datalist；武器字段全部可手编（选模板仅自动填充，缺省标注估算）使无模板也可分析；CSS 网格修复；新增编辑器右键命令 `cwtools.targetWeights.openAtCursor`（光标所在块模板预选，when: stellaris 语言或 component_templates 路径）。release/rules 产物按已提交规则 bcccad4 重新打包。
 - **CW290 诊断**（src/Main）：WeaponComponentRangeValidation.fs（113 行，只报常量字面量，Warning，英文文案复刻引擎原文）+ Program.fs 三装配点（generic/cached/update）+.cwt 排除；25 项 fsx 回归；docs/diagnostic-codes.md 补 CW290 中英小节；diagnosticI18n.ts 中文映射 + 测试（31 项过）。
 - **修饰符文档接线**（cwtools `107dee77`，已推送）：RulesHelpers.fs modifierRuleFromNameAndTypeDef 把 m.documentation 接入 Options.description（combineDescription 合并非覆盖）；8 项 fsx 回归（ModifierDocumentationRuleParsing.Tests.fsx）。
 

@@ -502,6 +502,11 @@ const RULES: DiagnosticRule[] = [
         pattern: /^Inline script '(.+)' is invoked (\d+) times; each call point duplicates and re-parses the AST/,
         zh: m => `Inline script '${m[1]}' 已被调用 ${m[2]} 次:每个调用点都会全文复制并完整重解析 AST(无实例共享)。建议改用带参数的 scripted_trigger/effect 或减少展开组合。`,
     },
+    {
+        codes: ['CW290'],
+        pattern: /^Weapon component '(.+)' should be between 0\.0 and 1\.0, got (.+)$/,
+        zh: m => `武器组件字段 '${m[1]}' 的取值必须在 0.0 到 1.0 之间(当前为 ${m[2]}):引擎命中率公式把它当作概率夹取,越界值只会在游戏日志中报错。`,
+    },
 ];
 
 function codeOf(diag: EnrichableDiagnostic): string | undefined {

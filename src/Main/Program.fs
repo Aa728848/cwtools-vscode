@@ -3885,9 +3885,18 @@ type Server(client: ILanguageClient) =
                 if isCwtFilePath name then Main.Lang.CwtLanguageFeatures.projectErrorsForFile name
                 else []
 
+            // Script-level findings the bundled CWT rules cannot express because
+            // they declare the field as an unconstrained float (weapon component
+            // accuracy / tracking must stay in [0, 1] for the engine).
+            let scriptSemanticErrors =
+                match filetext with
+                | Some t when not (isCwtFilePath name) ->
+                    Main.WeaponComponentRangeValidation.diagnostics name t
+                | _ -> []
+
             let errors =
                 match gameObj with
-                | None -> parserErrors @ cwtSemanticErrors @ cwtProjectErrors @ applicableCachedLocErrors
+                | None -> parserErrors @ cwtSemanticErrors @ cwtProjectErrors @ scriptSemanticErrors @ applicableCachedLocErrors
                 // CWT documents never enter the game script validation path:
                 // the game model has no entities for them and rule semantics
                 // are served by the CWT pipeline (handoff doc §1).
@@ -3928,7 +3937,7 @@ type Server(client: ILanguageClient) =
                     let allocAfterValidate = GC.GetTotalAllocatedBytes(false)
                     monitorLog Lint $"ValidateFile file={name} shallow={shallowAnalyze} allocDeltaMB={(allocAfterValidate - allocBeforeValidate) / 1048576L}{getPerfDiagnosticSnapshot()}{getPerfCacheSnapshot()}"
                     if isCurrentGameLocalisationFile name then parserErrors @ applicableCachedLocErrors
-                    else parserErrors @ applicableCachedLocErrors @ astErrors
+                    else parserErrors @ applicableCachedLocErrors @ scriptSemanticErrors @ astErrors
                 | Some game ->
                     let allocBeforeUpdate = GC.GetTotalAllocatedBytes(false)
 
@@ -4537,7 +4546,7 @@ type Server(client: ILanguageClient) =
                         else
                             parserErrors @ applicableCachedLocErrors
                     else
-                        parserErrors @ applicableCachedLocErrors @ astErrors
+                        parserErrors @ applicableCachedLocErrors @ scriptSemanticErrors @ astErrors
 
             //-Publish diagnosis and update freshness status-
             let diagnosticsList =

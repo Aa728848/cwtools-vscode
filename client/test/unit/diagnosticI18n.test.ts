@@ -103,7 +103,7 @@ describe('diagnostic i18n enrichment', () => {
             expect(digit).to.include('撞名');
         });
 
-        it('translates engine anti-pattern diagnostics CW282 through CW289', () => {
+        it('translates engine anti-pattern diagnostics CW282 through CW290', () => {
             const cw282 = zh("Effect 'add_building' synchronously re-runs planet pop job assignments (EnsurePopJobsAreUpToDate); calling it inside a loop (every_owned_planet) causes severe lag", 'CW282');
             expect(cw282).to.include('add_building').and.to.include('every_owned_planet').and.to.include('EnsurePopJobsAreUpToDate');
 
@@ -127,6 +127,9 @@ describe('diagnostic i18n enrichment', () => {
 
             const cw289 = zh("Inline script 'events/my_script' is invoked 25 times; each call point duplicates and re-parses the AST. Consider parameterized scripted_trigger/effect or reducing unique argument expansions", 'CW289');
             expect(cw289).to.include('events/my_script').and.to.include('25 次');
+
+            const cw290 = zh("Weapon component 'accuracy' should be between 0.0 and 1.0, got 1.5", 'CW290');
+            expect(cw290).to.include('accuracy').and.to.include('1.5').and.to.include('概率');
         });
 
         it('translates brace/parse recovery errors', () => {            expect(zh("Missing '}' for '{' opened at line 12 col 4", 'CW001_MISSING_CLOSE_BRACE'))

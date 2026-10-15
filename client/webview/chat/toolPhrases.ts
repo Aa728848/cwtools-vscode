@@ -55,6 +55,7 @@ const TOOL_PHRASES: Record<string, ToolPhraseEntry> = {
     query_types:               { category: 'query',       icon: '🔍', en: 'Query types', zh: '查询类型' },
     query_rules:               { category: 'query',       icon: '🔍', en: 'Query rules', zh: '查询规则' },
     query_interface_knowledge: { category: 'query',       icon: '🔍', en: 'Query Interface knowledge', zh: '查询界面知识' },
+    query_targeting_weight:    { category: 'query',       icon: '🔍', en: 'Compute targeting weight', zh: '计算索敌权重' },
     query_blackboard:          { category: 'query',       icon: '🔍', en: 'Query blackboard', zh: '查询黑板' },
     web_search:                { category: 'query',       icon: '🔍', en: 'Search web', zh: '搜索网页' },
     web_open:                  { category: 'query',       icon: '🔍', en: 'Open web page', zh: '打开网页' },

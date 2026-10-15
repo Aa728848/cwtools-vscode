@@ -51,6 +51,7 @@
     <Compile Include="SemanticDelta.fs" />
     <Compile Include="SemanticDirectoryCatalog.fs" />
     <Compile Include="OverlayValidation.fs" />
+    <Compile Include="WeaponComponentRangeValidation.fs" />
     <Compile Include="RefreshCoordinator.fs" />
     <Compile Include="DiagnosticInvalidation.fs" />
     <Compile Include="SymbolIndex.fs" />

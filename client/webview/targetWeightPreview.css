@@ -1,0 +1,326 @@
+/* ── Target Weight Preview Stylesheet ──────────────────────────────────────────────
+ * 颜色一律取 VS Code 主题变量；条形图用纯 CSS（无 canvas / 无动画循环）。
+ */
+:root {
+    --bg: var(--vscode-editor-background, #1e1e1e);
+    --fg: var(--vscode-editor-foreground, #ccc);
+    --border: var(--vscode-panel-border, #333);
+    --surface: var(--vscode-sideBar-background, #252526);
+    --surface-strong: var(--vscode-editorWidget-background, #2d2d30);
+    --muted: var(--vscode-descriptionForeground, #8f8f8f);
+    --accent: var(--vscode-textLink-foreground, #4fc3f7);
+    --warn: var(--vscode-editorWarning-foreground, #cca700);
+    --error: var(--vscode-editorError-foreground, #f14c4c);
+    --ok: var(--vscode-charts-green, #89d185);
+    --focus-ring: var(--vscode-focusBorder, #007fd4);
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+    font-family: var(--vscode-font-family, system-ui, sans-serif);
+    font-size: var(--vscode-font-size, 13px);
+    color: var(--fg);
+    background: var(--bg);
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+}
+
+/* ── Toolbar ── */
+#toolbar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+    min-height: 38px;
+    padding: 6px 12px;
+    border-bottom: 1px solid var(--border);
+    background: var(--surface);
+    flex-shrink: 0;
+}
+
+#toolbar .title {
+    font-weight: 600;
+    color: var(--accent);
+}
+
+#toolbar .controls {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-left: auto;
+    flex-wrap: wrap;
+    min-width: 0;
+}
+
+#toolbar select {
+    background: var(--bg);
+    color: var(--fg);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    height: 26px;
+    padding: 0 8px;
+    font-size: 12px;
+    max-width: 320px;
+}
+
+#toolbar button {
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid var(--border);
+    color: var(--fg);
+    border-radius: 4px;
+    height: 26px;
+    min-width: 32px;
+    padding: 0 10px;
+    cursor: pointer;
+    font-size: 12px;
+    transition: background 0.15s;
+}
+
+#toolbar button:hover { background: rgba(255, 255, 255, 0.12); }
+#toolbar button:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 1px; }
+.separator { color: var(--border); }
+
+/* ── Status ── */
+.status {
+    padding: 5px 12px;
+    font-size: 11px;
+    border-bottom: 1px solid var(--border);
+    color: var(--muted);
+    background: var(--surface);
+    flex-shrink: 0;
+}
+
+.status.ok { color: var(--ok); }
+.status.error { color: var(--error); }
+
+/* ── Layout ── */
+#main {
+    flex: 1;
+    display: grid;
+    grid-template-columns: minmax(280px, 360px) minmax(0, 1fr);
+    gap: 0;
+    align-items: start;
+    min-height: 0;
+}
+
+#form-panel,
+#result-panel {
+    padding: 12px 14px 32px;
+    min-width: 0;
+}
+
+#form-panel {
+    border-right: 1px solid var(--border);
+    background: var(--surface);
+    min-height: 100%;
+}
+
+.section-title {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin: 14px 0 8px;
+}
+
+.section-title:first-child { margin-top: 0; }
+
+.form-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 6px 10px;
+}
+
+.field {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.field-label {
+    font-size: 10px;
+    color: var(--muted);
+}
+
+.field input {
+    background: var(--bg);
+    color: var(--fg);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    height: 24px;
+    padding: 0 6px;
+    font-size: 12px;
+    font-family: inherit;
+}
+
+.field input:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 1px; }
+
+.checkbox {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 11px;
+    color: var(--fg);
+    cursor: pointer;
+    grid-column: 1 / -1;
+}
+
+.checkbox input:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 1px; }
+
+/* ── Weapon facts ── */
+.facts {
+    margin-top: 16px;
+    border-top: 1px solid var(--border);
+    padding-top: 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.facts-title {
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--accent);
+}
+
+.facts-grid,
+.facts .fact {
+    display: grid;
+    grid-template-columns: 118px minmax(0, 1fr);
+    gap: 8px;
+    font-size: 11px;
+}
+
+.fact-label { color: var(--muted); }
+.fact-value { word-break: break-word; }
+
+.fact-warning {
+    font-size: 10px;
+    color: var(--warn);
+    line-height: 1.45;
+}
+
+/* ── Chain tables + CSS bar chart ── */
+.chain-table {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.chain-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 96px 34%;
+    align-items: center;
+    gap: 8px;
+    padding: 3px 6px;
+    border-radius: 4px;
+    border: 1px solid transparent;
+}
+
+.chain-row:nth-child(odd) { background: rgba(255, 255, 255, 0.03); }
+.chain-row.highlight { border-color: var(--accent); background: rgba(79, 195, 247, 0.12); }
+
+.chain-label {
+    font-size: 11px;
+    overflow-wrap: anywhere;
+}
+
+.chain-value {
+    font-size: 11px;
+    font-variant-numeric: tabular-nums;
+    text-align: right;
+    color: var(--accent);
+}
+
+.bar-track {
+    display: block;
+    height: 8px;
+    border-radius: 4px;
+    background: rgba(255, 255, 255, 0.06);
+    overflow: hidden;
+}
+
+.bar-fill {
+    display: block;
+    height: 100%;
+    border-radius: 4px;
+    background: var(--accent);
+    opacity: 0.55;
+    transition: width 0.2s ease-out;
+}
+
+.bar-fill.accent {
+    opacity: 0.95;
+}
+
+.chain-detail {
+    font-size: 10px;
+    color: var(--muted);
+    padding: 0 6px 4px;
+    overflow-wrap: anywhere;
+}
+
+/* ── Banners ── */
+.banner {
+    margin-top: 10px;
+    padding: 8px 10px;
+    border-radius: 6px;
+    font-size: 11px;
+    line-height: 1.5;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+}
+
+.banner.veto {
+    border: 1px solid var(--error);
+    background: color-mix(in srgb, var(--error) 18%, transparent);
+    color: var(--error);
+    font-weight: 600;
+}
+
+.banner.warn {
+    border: 1px solid var(--warn);
+    background: color-mix(in srgb, var(--warn) 16%, transparent);
+    color: var(--warn);
+}
+
+/* ── Notes ── */
+.notes-list {
+    margin-top: 18px;
+    padding-left: 18px;
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    font-size: 11px;
+    line-height: 1.55;
+    color: var(--muted);
+}
+
+/* ── Loading overlay ── */
+#loading {
+    position: fixed;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--bg);
+    z-index: 100;
+    color: var(--accent);
+}
+
+#loading.hidden { display: none; }
+
+@media (max-width: 880px) {
+    #main { grid-template-columns: minmax(0, 1fr); }
+    #form-panel { border-right: none; border-bottom: 1px solid var(--border); min-height: 0; }
+    .chain-row { grid-template-columns: minmax(0, 1fr) 80px; }
+    .bar-track { display: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    * { transition: none !important; animation: none !important; }
+}

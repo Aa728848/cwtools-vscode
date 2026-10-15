@@ -5,7 +5,7 @@ import { analyzeSchema, flattenSchema } from './schemaFlatten';
 export type AgentToolName =
     | 'ask_user_question' | 'select_tools' | 'manage_goal'
     | 'query_scope' | 'query_types' | 'query_rules' | 'query_cwt_schema' | 'query_override_modes' | 'search_rule_capabilities' | 'explain_scope' | 'parse_pdx_fragment' | 'remove_ignored_diagnostic'
-    | 'query_localisation_index' | 'query_workspace_index' | 'explore_pdx_project' | 'query_inline_instantiation' | 'analyze_pdx_flow' | 'compare_definition_with_vanilla' | 'query_project_profile' | 'query_project_knowledge' | 'query_interface_knowledge' | 'run_skill' | 'get_ignored_diagnostics' | 'get_pdx_block'
+    | 'query_localisation_index' | 'query_workspace_index' | 'explore_pdx_project' | 'query_inline_instantiation' | 'analyze_pdx_flow' | 'compare_definition_with_vanilla' | 'query_project_profile' | 'query_project_knowledge' | 'query_interface_knowledge' | 'query_targeting_weight' | 'run_skill' | 'get_ignored_diagnostics' | 'get_pdx_block'
     | 'find_sprite_candidates' | 'find_sound_candidates'
     | 'grep' | 'get_completion_at' | 'document_symbols' | 'workspace_symbols'
     | 'go_to_definition' | 'find_references' | 'hover_symbol' | 'rename_symbol'
@@ -104,6 +104,7 @@ const TOOL_DOMAINS = {
     query_project_profile: 'paradox',
     query_project_knowledge: 'paradox',
     query_interface_knowledge: 'paradox',
+    query_targeting_weight: 'paradox',
     run_skill: 'shared',
     get_ignored_diagnostics: 'paradox',
     get_pdx_block: 'paradox',
@@ -336,7 +337,7 @@ const GENERAL_SAVE_SKILL_SCHEMA: ToolDefinition = {
 const BASE_READ: AgentToolName[] = [
     'select_tools', 'manage_goal',
     'query_scope', 'query_types', 'query_rules', 'query_cwt_schema', 'query_override_modes', 'search_rule_capabilities', 'explain_scope', 'parse_pdx_fragment', 'query_localisation_index', 'query_workspace_index', 'explore_pdx_project', 'query_inline_instantiation', 'analyze_pdx_flow', 'compare_definition_with_vanilla',
-    'query_project_profile', 'query_project_knowledge', 'query_interface_knowledge', 'run_skill', 'history', 'find_sprite_candidates', 'find_sound_candidates', 'grep', 'get_completion_at',
+    'query_project_profile', 'query_project_knowledge', 'query_interface_knowledge', 'query_targeting_weight', 'run_skill', 'history', 'find_sprite_candidates', 'find_sound_candidates', 'grep', 'get_completion_at',
     'document_symbols', 'workspace_symbols', 'go_to_definition', 'find_references', 'hover_symbol',
     'verify_pdx_identifier', 'find_scope_bridge', 'extract_archetype_slots', 'instantiate_archetype', 'read_file', 'list_directory', 'glob_files',
     'get_lsp_status', 'get_diagnostics', 'web_find',

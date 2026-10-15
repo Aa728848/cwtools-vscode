@@ -775,6 +775,18 @@ inline_script 高复用次数提示：`inline_script` 每个调用点都会完�
 整棵语法树且不去重。当复用次数较多时会显著增加游戏加载耗时与内存，建议改用带参数
 的 scripted_trigger/effect。
 
+## CW290
+
+**Weapon component accuracy/tracking out of range (W)** — a weapon component
+template's `accuracy` and `tracking` are read by the engine as probabilities in
+the hit-chance formula `p = clamp(accuracy - clamp(target_evasion - tracking, 0,
+1), 0, 1)`; out-of-range values only get logged by the engine ("Accuracy /
+Tracking should be between 0.0 and 1.0"). Keep both fields within [0, 1].
+
+武器组件 accuracy/tracking 越界（W）：引擎在命中率公式 `p = clamp(accuracy -
+clamp(目标闪避 - tracking, 0, 1), 0, 1)` 中把这两个字段当概率使用，越界时引擎仅
+在游戏日志中记录报错。请将这两个字段保持在 [0, 1] 区间内。
+
 ---
 
 # Shader diagnostics (CWFX) / Shader 诊断

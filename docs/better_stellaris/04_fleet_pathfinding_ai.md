@@ -94,7 +94,7 @@
 - **A\***：用二叉堆，带 decrease-key 的位置索引；bypass 缓存也会缓存"不可达"结果。
 - **指令寻路并行**：`DailyUpdateHandleOrderPathfinding`（498293）。
 - **战斗检测按星系分桶**：`CheckForNewCombatsParallel`（3282868）只比较同一星系内的舰队。
-- **选目标节流**：`CShipTargeting::CalcBestTarget`（1477471）保留有效目标，只在 `(ticks + shipId) % 10|50 == 0` 时重新搜索。
+- **选目标节流**：`CShipTargeting::CalcBestTarget`（1477471，本行为 4.5 dump 行号）保留有效目标，只在 `(ticks + shipId) % 10|50 == 0` 时重新搜索。索敌权重公式与调用端细节见 [17_ship_targeting_weights.md](17_ship_targeting_weights.md)。
 - **边界由 dirty flag 驱动**，国家对去重后并行处理。
 - **AI 分摊到不同时间**：`CAICore` 的计数器用国家 ID 做种子（7878818–7878825：`id%7`、`id%30`、`id%360`）；`CreateColonizeData` 每年执行一次，按 `id % 12 == month` 分摊。
 - bypass 缓存只在排序后的列表**真的变化**时才清空。

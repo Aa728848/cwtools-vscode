@@ -169,6 +169,30 @@ export default [
             copyFile('client/webview/techTreePreview.css', 'release/bin/client/webview/techTreePreview.css'),
         ],
     },
+    // Target Weight Analysis webview bundle
+    {
+        input: './client/webview/targetWeightPreview.ts',
+        output: {
+            file: './release/bin/client/webview/targetWeightPreview.js',
+            format: "iife",
+            name: "cwtoolstargetweight",
+            indent: false,
+        },
+        plugins: [
+            typescript({
+                tsconfig: ".config/tsconfig.webview.json",
+                clean: true,
+                tsconfigOverride: {
+                    // Single-file webview: point the program at this entry plus the ambient
+                    // `acquireVsCodeApi` declaration. Both slots of the base config's
+                    // `include` are overridden, so the merge replaces it wholesale.
+                    include: ["../client/webview/targetWeightPreview.ts", "../client/webview/vscode.d.ts"],
+                    exclude: ["client/test/**/*", "**/*.test.ts", "client/extension/**"]
+                }
+            }),
+            copyFile('client/webview/targetWeightPreview.css', 'release/bin/client/webview/targetWeightPreview.css'),
+        ],
+    },
     // Entity Preview webview bundle
     {
         input: './client/webview/entityPreview.ts',

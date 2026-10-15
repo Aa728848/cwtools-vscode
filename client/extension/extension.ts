@@ -23,6 +23,7 @@ import { SolarSystemPanel } from './solarSystemPanel';
 import { openStaticGalaxyPreview, registerStaticGalaxyEditor } from './staticGalaxyEditorProvider';
 import { EventChainPanel } from './eventChainPanel';
 import { TechTreePanel } from './techTreePanel';
+import { TargetWeightPanel } from './targetWeightPanel';
 import * as exe from './executable';
 import { registerLocalizationFeatures } from './locDecorations';
 import { AIService } from './ai/aiService';
@@ -2492,6 +2493,11 @@ export async function activate(context: ExtensionContext) {
 		safeRegisterCommand(context, "cwtools.visualizeTechTree", async () => {
 			const editor = vs.window.activeTextEditor;
 			await TechTreePanel.create(context.extensionPath, editor?.document);
+		});
+
+		// Targeting Weight Analysis command
+		safeRegisterCommand(context, "cwtools.targetWeights.open", async () => {
+			TargetWeightPanel.create(context.extensionPath);
 		});
 
 		// Entity Preview command

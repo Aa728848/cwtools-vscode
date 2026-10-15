@@ -34,6 +34,7 @@ const MCP_BRIDGE_TOOL_NAMES = [
     'query_project_knowledge',
     'query_workspace_index',
     'explore_pdx_project',
+    'query_targeting_weight',
     'query_localisation_index',
     'get_pdx_block',
     'get_completion_at',

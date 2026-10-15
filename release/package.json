@@ -715,6 +715,12 @@
                 "icon": "$(circuit-board)"
             },
             {
+                "command": "cwtools.targetWeights.open",
+                "title": "%commands.stellarisLanguageServices.targetWeights.open.title%",
+                "category": "Stellaris",
+                "icon": "$(target)"
+            },
+            {
                 "command": "cwtools.vanillaCompare.diff",
                 "title": "%commands.stellarisLanguageServices.vanillaCompare.diff.title%",
                 "category": "Stellaris",

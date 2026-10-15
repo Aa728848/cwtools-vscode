@@ -180,6 +180,7 @@
   "commands.stellarisLanguageServices.previewStaticGalaxy.title": "预览/编辑静态银河",
   "commands.stellarisLanguageServices.visualizeEventChain.title": "可视化事件链",
   "commands.stellarisLanguageServices.visualizeTechTree.title": "可视化科技树",
+  "commands.stellarisLanguageServices.targetWeights.open.title": "分析索敌权重",
   "commands.stellarisLanguageServices.ai.selectModel.title": "从提供商选择 AI 模型...",
   "commands.stellarisLanguageServices.ai.previewSelectionTranslation.title": "AI: 切换注释翻译",
   "commands.stellarisLanguageServices.localisation.translateSelection.title": "AI: 翻译选中的本地化",

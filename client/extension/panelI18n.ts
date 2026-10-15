@@ -15,3 +15,14 @@ export function localize(en: string, zh: string): string {
 
 /** Alias used by preview panels (GUI/Entity/Particle/Solar/EventChain). */
 export const panelText = localize;
+
+/**
+ * Language tag down-sent to a webview initialization payload, so webview-side copy
+ * renders in the same locale as the Host-rendered chrome instead of guessing from
+ * `document.lang` alone.
+ */
+export type PanelLocale = 'en' | 'zh-cn';
+
+export function panelLocale(): PanelLocale {
+    return isChineseLocale() ? 'zh-cn' : 'en';
+}

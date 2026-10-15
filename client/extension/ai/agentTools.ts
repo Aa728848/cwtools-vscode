@@ -37,6 +37,7 @@ import { shouldBypassWriteConfirmation } from './tools/writeConfirmation';
 import { readProjectProfile, queryProjectProfile } from './projectProfile';
 import { queryProjectKnowledge } from './projectKnowledge';
 import { queryInterfaceKnowledge } from './interfaceKnowledge';
+import { executeTargetingWeightQuery } from './targetingWeights';
 import { validateOffCanvasGuiPreservation } from '../guiSafety';
 import { loadSkill } from './skills';
 import { saveSkill as saveSkillFile } from './skillsWriter';
@@ -285,6 +286,7 @@ const TOOL_TIMEOUTS: Record<string, number> = {
     query_project_profile: 5_000,
     query_project_knowledge: 10_000,
     query_interface_knowledge: 5_000,
+    query_targeting_weight: 5_000,
     history: 10_000,
     query_rules: 45_000,
     query_override_modes: 45_000,
@@ -2403,6 +2405,8 @@ export class AgentToolExecutor {
                 result = await queryProjectKnowledge(this.workspaceRoot, args as any); break;
             case 'query_interface_knowledge':
                 result = await this.queryInterfaceKnowledgeWithProject(args); break;
+            case 'query_targeting_weight':
+                result = executeTargetingWeightQuery(args); break;
             case 'run_skill':
                 result = this.runSkill(args, context); break;
             case 'query_rules':

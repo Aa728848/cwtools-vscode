@@ -28,6 +28,7 @@
 | [14_trigger_cost_catalog.md](14_trigger_cost_catalog.md) | **trigger 开销速查表**（约 100 个常用 trigger，按 O(1) / 线性 / 隐藏循环 / 求值脚本分级，附"贵 → 便宜"替换表） |
 | [10_effect_side_costs.md](10_effect_side_costs.md) | 约 40 个常用 effect 的直接开销与隐藏副作用（同步/延后），含物种爆炸、延迟事件队列、建筑与岗位重算 |
 | [16_combat_damage_resolution.md](16_combat_damage_resolution.md) | ⚠️ **伤害结算公式**（不是性能问题）：4.5.2 `CalcDamage` 三层分配模型、武器字段 ↔ 结构偏移对照、23 组算例；2026-10-08 已完成逐条源码核验 |
+| [17_ship_targeting_weights.md](17_ship_targeting_weights.md) | ⚠️ **舰船索敌权重公式**（不是性能问题）：4.5.2 两阶段乘法链（尺寸/追踪-闪避/距离/预置权重/残血/无武装/随机）、武器层 ΣD·p 分数、19 项 defines、算例与误区十条；公式转写自 PDF，脚本层与规则层已核，**dump 行号未经独立核验** |
 | [tools/](tools/) | 分析工具：建索引、按函数名提取函数体或调用序列 |
 
 ## Top 18 汇总（按估计的实际影响排序）

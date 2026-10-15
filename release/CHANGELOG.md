@@ -1,5 +1,36 @@
 # Changelog
 
+## [2.31.0] - 2026-10-15
+
+### 舰船索敌权重工具链 / Ship Targeting Weight Toolchain
+
+- **[特性] 索敌权重分析面板（Targeting Weight Analysis Panel）**：
+  - 新命令 `cwtools.targetWeights.open` 与编辑器右键「在光标处打开索敌权重面板」：完整还原 Stellaris 4.5.2 反编译的两阶段乘法链（舰船层尺寸/闪避/存活时间因子 × 武器层精度/追踪/伤害修正），纯 CSS 条形图逐因子可视化，VETO 与 `use_ship_main_target` 有专门横幅，中英双语。
+  - 武器模板从工作区与 vanilla 一并提取，全部字段可编辑、无模板也可手动分析，缺省项明确标注「估算」而非假装来自模板。
+  - English: [Feature] New targeting-weight analysis panel (`cwtools.targetWeights.open`, plus an editor context-menu entry that preselects the component template at the cursor): it reproduces the decompiled 4.5.2 two-stage multiplicative chain with pure-CSS per-factor bars, dedicated VETO / ship-main-target banners, and bilingual UI. Weapon templates are extracted from workspace and vanilla; every field is editable and defaults are explicitly marked as estimated.
+- **[特性] AI 工具 `query_targeting_weight` 与 Agent 技能（Agent Tool and Skill）**：
+  - 纯计算模块同时接入 Agent 工具注册表与 MCP 只读面（cwtools-mcp 0.2.8 已发布 npm，共 37 个工具）；新 Agent 技能 `stellaris-targeting-weights` 内置两阶段公式、10/50 tick 节流、19 个 defines 速查与十条常见误区。
+  - English: [Feature] New pure-computation tool `query_targeting_weight`, wired into both the in-extension agent and the read-only MCP surface (cwtools-mcp 0.2.8 on npm, 37 tools), plus a `stellaris-targeting-weights` agent skill carrying the formula, tick throttling, defines and common misconceptions.
+- **[特性] CWT 规则补全与 modifier 文档进 hover（Rules and Hover Docs）**：
+  - `target_weights` 键按 `<ship_size>` 强类型（vanilla 取证）、15 个武器字段的公式注释、20 个 NCombat/NShip defines、`shipsize_$_target_weight_mult` alias（cwtools-stellaris-config `bcccad4`）；typed modifier 的 `###` 文档注释接入 hover（cwtools `107dee77`）。
+  - English: [Feature] CWT rules: `target_weights` keys typed as `<ship_size>` (vanilla-verified), formula docs for 15 weapon fields, 20 NCombat/NShip defines and the `shipsize_$_target_weight_mult` alias; typed-modifier `###` documentation now surfaces in hovers.
+- **[特性] 新诊断 CW290（Weapon accuracy/tracking Range Warning）**：
+  - 武器组件 `accuracy`/`tracking` 超出 [0.0, 1.0] 时给 Warning（中英双语）：引擎命中率公式把它当概率夹取，越界值只会在游戏日志中报错，脚本层原本完全静默。
+  - English: [Feature] New diagnostic CW290 (Warning, bilingual): weapon component `accuracy`/`tracking` outside [0.0, 1.0] — the engine clamps them as probabilities and only logs to the game error log.
+
+### 面板实测迭代 / Hands-On Panel Iterations
+
+- **[修复] 分析死路与六点可用性（Analysis Dead-End and Usability Fixes）**：
+  - webview 在顶层误读 host payload 导致分析死路（「请先选择模板」）、reveal 失效、字段渲染 undefined；武器列表合并工作区 + vanilla 并带本地化显示名与输入筛选；目标 ship_size 由扫描结果提供全量候选；武器字段区 CSS grid 修复（不再逐字竖排）。
+  - English: [Fix] The webview read the host payload at the top level, dead-ending analysis and breaking reveal; the weapon list now merges workspace and vanilla entries with localised display names and filter-as-you-type; target ship_size candidates come from the scan; the weapon-fields grid no longer wraps one character per line.
+- **[修复] vanilla 数值与船型真实来源（CSV Stats and Real Ship Sizes）**：
+  - vanilla 武器战斗数值在 `common/component_templates/*.csv` 而非 txt：按表头映射合并进模板空缺字段（显式 txt 值优先，CSV 填充项带徽标）；目标船型下拉列出工作区 + vanilla 真实 ship_size 并预填 σ/闪避/最大 hull（跨 root 解析 `@` 脚本变量）；本地化跟随显式语言设置，否则跟随 VS Code UI 语言。
+  - English: [Fix] Vanilla weapon combat stats live in component_templates CSV files, not the txt templates — they are merged with header-driven column mapping (explicit txt values win, CSV-filled fields carry a badge); the target ship-size dropdown lists real sizes with sigma/evasion/max-hull prefilled; localisation follows the explicit language setting, then the VS Code UI language.
+- **[特性] 自绘 ComboBox 与 inline_script 字段级展开（ComboBoxes and inline_script Expansion）**：
+  - 三个选择器（预设/武器/船型）换成限高、可子串筛选、键盘导航的自绘 ComboBox；解析 `$other_key$` 本地化引用链（工作区索引 + vanilla 惰性键值表），解不出的成对 `$key$` 回退为裸 id。
+  - 字段级 inline_script 展开：`$param$` 插值（含拼接标识符）、`@[…]` 四则表达式与脚本变量求值、嵌套调用 BFS（damage_type/fixup 链，深度上限 2）。全参数化 mod（如 Kuat Ancient Empire）武器从 0 → 80 件入列，vanilla 114 件回归不变。
+  - English: [Feature] Self-drawn ComboBoxes (bounded height, substring filter, keyboard nav) replace native select/datalist; `$other_key$` localisation reference chains are resolved; field-level inline_script expansion interpolates `$param$` (including composed identifiers), evaluates `@[…]` arithmetic with scripted variables, and expands nested calls (damage_type/fixup chains) up to depth 2 — fully parameterized mods such as Kuat Ancient Empire went from 0 to 80 listed weapons, with the vanilla 114 unchanged.
+
 ## [2.30.0] - 2026-10-14
 
 ### 诊断刷新与校验修复 / Diagnostics Refresh and Validation Fixes

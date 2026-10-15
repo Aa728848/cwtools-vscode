@@ -25,18 +25,26 @@ import {
 import {
     TARGETING_FIELD_FALLBACKS,
     applyCsvWeaponStats,
+    buildInlineScriptRegistry,
+    collectLocalisationReferences,
+    expandInlineScriptFields,
     extractShipSizeDetails,
     extractTargetingFields,
     findComponentTemplateIdAtLine,
     formatComponentDisplayLabel,
+    isTargetingRelevant,
     mergeComputeWeaponInput,
     mergeCsvStatMaps,
     mergeScriptedVariables,
     mergeShipSizeDetails,
     mergeWeaponTargetingEntries,
+    normalizeInlineScriptKey,
+    parseInlineScriptTemplate,
     parseScriptedVariables,
     parseWeaponComponentsCsv,
+    resolveLocalisationReferences,
     type CsvStatsSourceGroup,
+    type InlineScriptSourceGroup,
     type ShipSizeDetail,
     type ShipSizeDetailGroup,
     type WeaponTargetingEntry,
@@ -51,6 +59,10 @@ const SHIP_SIZE_FILE_GLOB = '**/common/ship_sizes/*.txt';
 const COMPONENT_CSV_GLOB = '**/common/component_templates/*.csv';
 /** ship_size 的 size_multiplier 等常用 @脚本变量，需要跨根合并后解析。 */
 const SCRIPTED_VARIABLES_GLOB = '**/common/scripted_variables/*.txt';
+/** mod 常把武器数值写进 inline_script 参数（KEY/ACCURACY/MULT…），需要脚本注册表做字段级展开。 */
+const INLINE_SCRIPT_GLOB = '**/common/inline_scripts/**/*.txt';
+/** 本地化 $ref$ 解析用的每「根+语言」全量键值上限（仅在有 $ref$ 时惰性构建）。 */
+const VANILLA_LOC_REF_ENTRY_LIMIT = 200_000;
 /** vanilla 本地化定向扫描的每语言文件数上限（IndexService 只索引工作区本地化）。 */
 const VANILLA_LOC_FILE_LIMIT_PER_LANGUAGE = 400;
 const TARGET_WEIGHT_EXCLUDE_GLOB = '**/{node_modules,.git,.cwtools}/**';
@@ -145,6 +157,8 @@ export class TargetWeightPanel {
     };
     /** 编辑器右键菜单带入的初始选中项；加载完目录后用一次。 */
     private _pendingInitialId: string | undefined;
+    /** vanilla 本地化全量键值缓存（`根|语言` 键）：只在遇到 $ref$ 引用时惰性构建。 */
+    private readonly _locRefCache = new Map<string, Map<string, string>>();
 
     public static async create(extensionPath: string, options: TargetWeightOpenOptions = {}) {
         const initialId = await TargetWeightPanel._resolveCursorTemplateId(options.cursor);
@@ -235,6 +249,7 @@ export class TargetWeightPanel {
         TargetWeightPanel.currentPanel = undefined;
         this._weapons = [];
         this._scannedFiles = new Set();
+        this._locRefCache.clear();
         this._panel.dispose();
         while (this._disposables.length) {
             const d = this._disposables.pop();
@@ -278,6 +293,7 @@ export class TargetWeightPanel {
         const weaponGroups: WeaponTargetingSourceGroup[] = [];
         const sizeGroups: ShipSizeDetailGroup[] = [];
         const csvGroups: CsvStatsSourceGroup[] = [];
+        const inlineGroups: InlineScriptSourceGroup[] = [];
         const variableGroups: Array<{ source: 'workspace' | 'vanilla'; vars: Map<string, number> }> = [];
 
         const roots = this._getScanRoots();
@@ -311,6 +327,31 @@ export class TargetWeightPanel {
         }
         const scriptedVars = mergeScriptedVariables(variableGroups);
 
+        // inline script 注册表与脚本变量同为先置：组件块的 key/数值可能全部由
+        // inline 参数承载（KEY/ACCURACY/MULT…），展开需要完整的注册表与变量表。
+        for (const root of roots) {
+            try {
+                const inlineRoot = path.join(root.uri.fsPath, 'common', 'inline_scripts');
+                for (const fileUri of await readFiles(root, INLINE_SCRIPT_GLOB)) {
+                    try {
+                        const template = parseInlineScriptTemplate(await readText(fileUri));
+                        if (template.bindings.size > 0 || template.nested.length > 0) {
+                            inlineGroups.push({
+                                source: root.source,
+                                file: normalizeInlineScriptKey(path.relative(inlineRoot, fileUri.fsPath)),
+                                template,
+                            });
+                        }
+                    } catch (error) {
+                        ErrorReporter.debug('TargetWeightPanel', `Failed to read ${fileUri.fsPath}`, error);
+                    }
+                }
+            } catch (error) {
+                ErrorReporter.debug('TargetWeightPanel', `Failed to scan ${root.uri.fsPath}`, error);
+            }
+        }
+        const inlineRegistry = buildInlineScriptRegistry(inlineGroups);
+
         for (const root of roots) {
             try {
                 for (const fileUri of await readFiles(root, TARGET_WEIGHT_FILE_GLOB)) {
@@ -318,9 +359,13 @@ export class TargetWeightPanel {
                     stats[root.source].files++;
                     try {
                         const entries = extractTargetingFields(await readText(fileUri));
-                        if (entries.length > 0) {
-                            stats[root.source].templates += entries.length;
-                            weaponGroups.push({ source: root.source, file: fileUri.fsPath, entries });
+                        for (const entry of entries) expandInlineScriptFields(entry, inlineRegistry, scriptedVars);
+                        // inline 展开后仍取不到 id、或展开后仍不含任何索敌字段的块
+                        // （inline 写的护盾/装甲等 utility 组件）不进下表。
+                        const kept = entries.filter(entry => entry.componentId !== '' && isTargetingRelevant(entry));
+                        if (kept.length > 0) {
+                            stats[root.source].templates += kept.length;
+                            weaponGroups.push({ source: root.source, file: fileUri.fsPath, entries: kept });
                         }
                     } catch (error) {
                         ErrorReporter.debug('TargetWeightPanel', `Failed to read ${fileUri.fsPath}`, error);
@@ -405,7 +450,105 @@ export class TargetWeightPanel {
             const vanillaNames = await this._resolveVanillaDisplayNames(missing, tags);
             for (const [id, value] of vanillaNames) names.set(id, value);
         }
+        await this._expandLocReferences(names, tags);
         return names;
+    }
+
+    /**
+     * 解析值里的 `$other_key$` 引用（vanilla 的船型名多为引用链，如
+     * `military_arkship_tier_1: "$military_arkship_name$ I"`）。
+     * 分轮收集引用键 → 批量查 IndexService，查不到再惰性构建 vanilla 全量键值表；
+     * 轮数与每轮键数都有限额，替换本身由纯函数 resolveLocalisationReferences 完成。
+     * 解析不出的引用保留原样，webview 侧的 $ 护栏会回退到裸 id。
+     */
+    private async _expandLocReferences(names: Map<string, string>, tags: string[]): Promise<void> {
+        const hasRefs = [...names.values()].some(value => collectLocalisationReferences(value).length > 0);
+        if (!hasRefs) return;
+        const resolved = new Map<string, string>();
+        const MAX_ROUNDS = 4;
+        const MAX_KEYS_PER_ROUND = 48;
+        for (let round = 0; round < MAX_ROUNDS; round++) {
+            const pending = new Set<string>();
+            for (const value of names.values()) {
+                for (const ref of collectLocalisationReferences(value)) {
+                    if (!resolved.has(ref)) pending.add(ref);
+                }
+            }
+            if (pending.size === 0) return;
+            for (const key of [...pending].slice(0, MAX_KEYS_PER_ROUND)) {
+                try {
+                    const value = await this._lookupLocRefKey(key, tags);
+                    if (value !== undefined) resolved.set(key, value);
+                } catch (error) {
+                    ErrorReporter.debug('TargetWeightPanel', `Failed to resolve loc reference ${key}`, error);
+                }
+            }
+            for (const [id, value] of names) {
+                names.set(id, resolveLocalisationReferences(value, key => resolved.get(key), 1));
+            }
+        }
+    }
+
+    /** 单个引用键的取值：先工作区索引（IndexService），再 vanilla 全量键值表（惰性构建）。 */
+    private async _lookupLocRefKey(key: string, tags: string[]): Promise<string | undefined> {
+        const indexService = this._indexService;
+        if (indexService) {
+            try {
+                const entries = await indexService.queryLocalisationAsync({ key, limit: 16 });
+                const entry = pickPreferredLocalisationEntry(entries, tags);
+                if (entry) return entry.value;
+            } catch (error) {
+                ErrorReporter.debug('TargetWeightPanel', `Failed to query loc key ${key}`, error);
+            }
+        }
+        for (const tag of tags) {
+            for (const root of getConfiguredGameRoots()) {
+                const map = await this._vanillaLocReferenceMap(root.root, tag);
+                const value = map.get(key);
+                if (value !== undefined) return value;
+            }
+        }
+        return undefined;
+    }
+
+    /**
+     * vanilla 某「根+语言」的全量本地化键值表：只在遇到 `$ref$` 引用时构建一次并缓存，
+     * 条目数有上限（VANILLA_LOC_REF_ENTRY_LIMIT），面板 dispose 时清空。
+     */
+    private async _vanillaLocReferenceMap(root: string, tag: string): Promise<Map<string, string>> {
+        const cacheKey = `${root}|${tag}`;
+        const cached = this._locRefCache.get(cacheKey);
+        if (cached) return cached;
+        const map = new Map<string, string>();
+        const directory = tag.replace(/^l_/, '');
+        if (directory) {
+            const locRoot = vscode.Uri.file(path.join(root, 'localisation', directory));
+            let files: vscode.Uri[] = [];
+            try {
+                files = await vscode.workspace.findFiles(
+                    new vscode.RelativePattern(locRoot, '*.yml'),
+                    undefined,
+                    VANILLA_LOC_FILE_LIMIT_PER_LANGUAGE,
+                );
+                files.sort((a, b) => a.fsPath.localeCompare(b.fsPath));
+            } catch {
+                files = [];
+            }
+            for (const file of files) {
+                if (map.size >= VANILLA_LOC_REF_ENTRY_LIMIT) break;
+                try {
+                    const text = new TextDecoder('utf-8').decode(await vscode.workspace.fs.readFile(file));
+                    for (const entry of parseLocFile(text, file.fsPath)) {
+                        if (!map.has(entry.key)) map.set(entry.key, entry.value);
+                        if (map.size >= VANILLA_LOC_REF_ENTRY_LIMIT) break;
+                    }
+                } catch (error) {
+                    ErrorReporter.debug('TargetWeightPanel', `Failed to parse ${file.fsPath}`, error);
+                }
+            }
+        }
+        this._locRefCache.set(cacheKey, map);
+        return map;
     }
 
     /**
@@ -700,14 +843,15 @@ export class TargetWeightPanel {
     <div id="toolbar">
         <span class="title">${title}</span>
         <div class="controls">
-            <select id="preset-select" aria-label="${panelText('Target ship size', '目标船型')}"
-                title="${panelText('Pick a ship size to prefill σ / ε / hull (from vanilla and workspace definitions)', '选择船型以预填 σ/ε/船体上限（取自原版与工作区定义）')}"></select>
+            <input id="preset-combo" type="text" autocomplete="off" spellcheck="false"
+                placeholder="${panelText('Ship size (type to filter)', '目标船型（输入筛选）')}"
+                aria-label="${panelText('Target ship size', '目标船型')}"
+                title="${panelText('Pick a ship size to prefill σ / ε / hull (from vanilla and workspace definitions)', '选择船型以预填 σ/ε/船体上限（取自原版与工作区定义）')}" />
             <span class="separator">|</span>
-            <input id="weapon-search" type="text" list="weapon-options" autocomplete="off" spellcheck="false"
+            <input id="weapon-search" type="text" autocomplete="off" spellcheck="false"
                 placeholder="${panelText('Weapon template id (filterable)', '武器模板 id（可输入筛选）')}"
                 aria-label="${panelText('Weapon template', '武器模板')}"
                 title="${panelText('Type to filter; leave empty to use manual parameters only', '输入即筛选；留空表示只用手动参数')}" />
-            <datalist id="weapon-options"></datalist>
             <button id="btn-reveal" title="${panelText('Open the weapon template at its block', '跳转到武器模板定义行')}"
                 aria-label="${panelText('Open source file', '打开源文件')}">↗</button>
             <button id="btn-compute" title="${panelText('Recompute the chain', '重新计算乘法链')}">

@@ -368,6 +368,52 @@ body {
     color: var(--muted);
 }
 
+/* ── ComboBox（自绘下拉：限高滚动、子串筛选） ── */
+.combo-panel {
+    position: fixed;
+    z-index: 60;
+    background: var(--surface-strong);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4);
+    max-height: min(320px, 50vh);
+    overflow-y: auto;
+    padding: 2px 0;
+    font-size: 12px;
+}
+
+.combo-option {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 10px;
+    padding: 4px 10px;
+    cursor: pointer;
+}
+
+.combo-option:hover,
+.combo-option.active {
+    background: var(--vscode-list-activeSelectionBackground, rgba(79, 195, 247, 0.18));
+    color: var(--vscode-list-activeSelectionForeground, var(--fg));
+}
+
+.combo-option .combo-label {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.combo-option .combo-hint {
+    color: var(--muted);
+    font-size: 10px;
+    flex-shrink: 0;
+}
+
+.combo-empty {
+    padding: 4px 10px;
+    color: var(--muted);
+}
+
 /* ── Loading overlay ── */
 #loading {
     position: fixed;

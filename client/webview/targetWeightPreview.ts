@@ -116,9 +116,8 @@ interface ChainResultView {
 
 // ─── DOM refs ──────────────────────────────────────────────────────────────────
 
-const presetSelect = document.getElementById('preset-select') as HTMLSelectElement | null;
+const presetComboInput = document.getElementById('preset-combo') as HTMLInputElement | null;
 const weaponSearch = document.getElementById('weapon-search') as HTMLInputElement | null;
-const weaponDatalist = document.getElementById('weapon-options') as HTMLDataListElement | null;
 const btnReveal = document.getElementById('btn-reveal') as HTMLButtonElement | null;
 const btnCompute = document.getElementById('btn-compute') as HTMLButtonElement | null;
 const statusEl = document.getElementById('status');
@@ -164,6 +163,182 @@ function disposeAll(): void {
         debounceTimer = undefined;
     }
 }
+
+// ─── ComboBox：限高 + 可输入筛选的自绘下拉 ────────────────────────────────────
+//
+// 原生 <select>/<datalist> 的弹出层不受 CSS 控制：361 个船型会铺满整屏、船型
+// 下拉还不能子串筛选。这里统一换成自绘组合框：面板限高滚动、id 与显示名一起
+// 参与子串筛选、键盘上下选择、点击外部/滚动/缩放即关闭。
+
+interface ComboItem {
+    id: string;
+    label: string;
+    hint?: string;
+}
+
+/** 单次渲染上限（超出时末尾提示继续输入筛选），避免巨型 mod 一次性建几千个节点。 */
+const COMBO_RENDER_LIMIT = 400;
+
+interface ComboBehavior {
+    /** 失焦时收尾：回退显示文本、或空值时切手动模式等。 */
+    onBlur?: () => void;
+}
+
+class ComboBox {
+    private panel: HTMLElement | undefined;
+    private items: ComboItem[] = [];
+    private filtered: ComboItem[] = [];
+    private activeIndex = -1;
+    private disposed = false;
+    private readonly localDisposables: Array<() => void> = [];
+
+    constructor(
+        private readonly input: HTMLInputElement,
+        private readonly onPick: (id: string) => void,
+        private readonly behavior: ComboBehavior = {},
+    ) {
+        this.listen(input, 'focus', () => this.open());
+        this.listen(input, 'input', () => this.open());
+        this.listen(input, 'keydown', event => this.onKeyDown(event as KeyboardEvent));
+        this.listen(input, 'blur', () => {
+            this.close();
+            this.behavior.onBlur?.();
+        });
+        this.listen(document, 'mousedown', event => {
+            if (!this.panel) return;
+            const target = event.target as Node | null;
+            if (target && (this.panel.contains(target) || this.input.contains(target))) return;
+            this.close();
+        });
+        // 布局变化后固定定位会错位，直接关闭比重算位置更稳。
+        this.listen(window, 'resize', () => this.close());
+        disposables.push(() => this.dispose());
+    }
+
+    setItems(items: ComboItem[]): void {
+        this.items = items;
+        if (this.panel) this.render();
+    }
+
+    /** 回填当前选中项的显示文本（不触发选择）。 */
+    setDisplay(label: string): void {
+        if (this.input.value !== label) this.input.value = label;
+    }
+
+    dispose(): void {
+        if (this.disposed) return;
+        this.disposed = true;
+        this.close();
+        while (this.localDisposables.length) this.localDisposables.pop()?.();
+    }
+
+    private listen(target: EventTarget, type: string, handler: (event: Event) => void): void {
+        target.addEventListener(type, handler);
+        this.localDisposables.push(() => target.removeEventListener(type, handler));
+    }
+
+    private open(): void {
+        if (this.disposed) return;
+        if (!this.panel) {
+            this.panel = el('div', 'combo-panel');
+            this.panel.setAttribute('role', 'listbox');
+            document.body.appendChild(this.panel);
+            this.listen(this.panel, 'mousedown', event => {
+                // 在 mousedown 阶段完成选择并阻止默认行为，输入框不会因失焦抢先关面板。
+                event.preventDefault();
+                const option = (event.target as HTMLElement).closest('.combo-option');
+                const id = option instanceof HTMLElement ? option.dataset.id : undefined;
+                if (id !== undefined) this.pick(id);
+            });
+        }
+        const rect = this.input.getBoundingClientRect();
+        this.panel.style.left = rect.left + 'px';
+        this.panel.style.top = rect.bottom + 2 + 'px';
+        this.panel.style.width = Math.max(rect.width, 240) + 'px';
+        this.activeIndex = -1;
+        this.render();
+    }
+
+    private close(): void {
+        this.panel?.remove();
+        this.panel = undefined;
+        this.activeIndex = -1;
+    }
+
+    private pick(id: string): void {
+        const item = this.items.find(entry => entry.id === id);
+        if (item) this.input.value = item.label;
+        this.close();
+        this.onPick(id);
+    }
+
+    private onKeyDown(event: KeyboardEvent): void {
+        if (!this.panel) {
+            if (event.key === 'ArrowDown') this.open();
+            return;
+        }
+        if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+            event.preventDefault();
+            const step = event.key === 'ArrowDown' ? 1 : -1;
+            const last = Math.min(this.filtered.length, COMBO_RENDER_LIMIT) - 1;
+            if (last < 0) return;
+            this.activeIndex = this.activeIndex < 0
+                ? (step > 0 ? 0 : last)
+                : (this.activeIndex + step + last + 1) % (last + 1);
+            this.renderActive();
+        } else if (event.key === 'Enter') {
+            const item = this.filtered[this.activeIndex] ?? this.filtered[0];
+            if (item) {
+                event.preventDefault();
+                this.pick(item.id);
+            }
+        } else if (event.key === 'Escape' || event.key === 'Tab') {
+            this.close();
+        }
+    }
+
+    private render(): void {
+        if (!this.panel) return;
+        const query = this.input.value.trim().toLowerCase();
+        this.filtered = query
+            ? this.items.filter(item => item.id.toLowerCase().includes(query) || item.label.toLowerCase().includes(query))
+            : this.items;
+        this.panel.textContent = '';
+        const slice = this.filtered.slice(0, COMBO_RENDER_LIMIT);
+        if (this.activeIndex >= slice.length) this.activeIndex = slice.length - 1;
+        if (slice.length === 0) {
+            this.panel.appendChild(el('div', 'combo-empty', t('No match — keep typing to filter', '无匹配项 — 继续输入以筛选')));
+            return;
+        }
+        slice.forEach((item, index) => {
+            const row = el('div', 'combo-option' + (index === this.activeIndex ? ' active' : ''));
+            row.dataset.id = item.id;
+            row.setAttribute('role', 'option');
+            row.appendChild(el('span', 'combo-label', item.label));
+            if (item.hint) row.appendChild(el('span', 'combo-hint', item.hint));
+            this.panel!.appendChild(row);
+        });
+        if (this.filtered.length > COMBO_RENDER_LIMIT) {
+            this.panel.appendChild(el('div', 'combo-empty', t(
+                '…and ' + String(this.filtered.length - COMBO_RENDER_LIMIT) + ' more (type to filter)',
+                '……另有 ' + String(this.filtered.length - COMBO_RENDER_LIMIT) + ' 项（输入以筛选）',
+            )));
+        }
+    }
+
+    private renderActive(): void {
+        if (!this.panel) return;
+        this.panel.querySelectorAll('.combo-option').forEach((node, index) => {
+            node.classList.toggle('active', index === this.activeIndex);
+        });
+        this.panel.querySelector('.combo-option.active')?.scrollIntoView({ block: 'nearest' });
+    }
+}
+
+/** 三个组合框实例：工具栏船型、工具栏武器、表单 ship_size id（随表单重建）。 */
+let presetCombo: ComboBox | undefined;
+let weaponCombo: ComboBox | undefined;
+let shipSizeIdCombo: ComboBox | undefined;
 
 // ─── State ─────────────────────────────────────────────────────────────────────
 
@@ -425,18 +600,22 @@ function buildTargetForms(): void {
     sizeInput.type = 'text';
     sizeInput.value = targetState.shipSizeId;
     sizeInput.id = 'ship-size-id';
-    sizeInput.setAttribute('list', 'ship-size-options');
     sizeInput.autocomplete = 'off';
     sizeInput.spellcheck = false;
-    const datalist = el('datalist');
-    datalist.id = 'ship-size-options';
     sizeLabel.appendChild(sizeInput);
-    sizeLabel.appendChild(datalist);
     formBody.appendChild(sizeLabel);
     on(sizeInput, 'input', () => {
         targetState.shipSizeId = sizeInput.value.trim();
         scheduleCompute();
     });
+    // 表单每次重建都会换掉 input：旧组合框随节点一起作废，先 dispose 再挂新的。
+    shipSizeIdCombo?.dispose();
+    shipSizeIdCombo = new ComboBox(sizeInput, id => {
+        targetState.shipSizeId = id;
+        sizeInput.value = id;
+        scheduleCompute();
+    });
+    refreshShipSizeOptions();
 
     for (const spec of TARGET_CHECKBOX_FIELDS) {
         appendCheckbox(
@@ -555,7 +734,11 @@ function refreshEstimatedMarkers(): void {
 }
 
 function applyShipSizeOption(id: string): void {
-    if (id === '') return; // 「自定义 / 手动」：保留当前表单值
+    if (id === '') {
+        // 「自定义 / 手动」：保留当前表单值，工具栏显示清空。
+        presetCombo?.setDisplay('');
+        return;
+    }
     const option = shipSizeOptions.find(entry => entry.id === id);
     if (!option) return;
     // 只预填定义里解析出的项；距离/盾/甲等战斗状态不动。
@@ -563,6 +746,7 @@ function applyShipSizeOption(id: string): void {
     if (typeof option.evasion === 'number') targetState.evasion = Math.round(option.evasion * 1000) / 1000;
     if (typeof option.maxHitpoints === 'number') targetState.maxHull = option.maxHitpoints;
     targetState.shipSizeId = option.id;
+    presetCombo?.setDisplay(option.label);
     buildTargetForms();
     refreshShipSizeOptions();
     scheduleCompute();
@@ -571,10 +755,6 @@ function applyShipSizeOption(id: string): void {
 // ─── Ship size + weapon catalogue ──────────────────────────────────────────────
 
 function refreshShipSizeOptions(): void {
-    const datalist = document.getElementById('ship-size-options');
-    const input = document.getElementById('ship-size-id');
-    if (!(datalist instanceof HTMLDataListElement) || !(input instanceof HTMLInputElement)) return;
-    datalist.textContent = '';
     // 当前武器的 target_weights 键排最前，其余是扫描到的全量 ship_size。
     const ordered: string[] = [];
     const seen = new Set<string>();
@@ -590,13 +770,11 @@ function refreshShipSizeOptions(): void {
             ordered.push(key);
         }
     }
-    for (const key of ordered) {
-        const option = el('option');
-        option.value = key;
-        datalist.appendChild(option);
-    }
+    const labelById = new Map(shipSizeOptions.map(option => [option.id, option.label]));
+    shipSizeIdCombo?.setItems(ordered.map(id => ({ id, label: labelById.get(id) ?? id })));
+    const input = document.getElementById('ship-size-id');
     const weaponKeys = currentWeapon?.targetWeightKeys ?? [];
-    if (weaponKeys.length > 0 && !weaponKeys.includes(input.value)) {
+    if (input instanceof HTMLInputElement && weaponKeys.length > 0 && !weaponKeys.includes(input.value)) {
         input.value = weaponKeys[0]!;
         targetState.shipSizeId = weaponKeys[0]!;
     }
@@ -663,18 +841,12 @@ function renderWeaponFacts(): void {
     }
 }
 
-function renderWeaponDatalist(): void {
-    if (!weaponDatalist) return;
-    weaponDatalist.textContent = '';
-    for (const option of weaponOptions) {
-        const node = el('option');
-        // 值为显示名（本地化名 (id)），label 补来源；输入框内容再反查回 id。
-        node.value = option.displayLabel || option.id;
-        node.label = option.source === 'workspace'
-            ? t('workspace', '工作区')
-            : t('vanilla', '原版');
-        weaponDatalist.appendChild(node);
-    }
+function refreshWeaponCombo(): void {
+    weaponCombo?.setItems(weaponOptions.map(option => ({
+        id: option.id,
+        label: option.displayLabel || option.id,
+        hint: option.source === 'workspace' ? t('workspace', '工作区') : t('vanilla', '原版'),
+    })));
 }
 
 function weaponIdForLabel(label: string): string | undefined {
@@ -1096,21 +1268,12 @@ function handleInit(message: Record<string, unknown>): void {
     }
     if (loadingEl) loadingEl.classList.add('hidden');
 
-    if (presetSelect) {
-        presetSelect.textContent = '';
-        const custom = el('option');
-        custom.value = '';
-        custom.textContent = t('Custom / manual', '自定义 / 手动');
-        presetSelect.appendChild(custom);
-        for (const shipSize of shipSizeOptions) {
-            const option = el('option');
-            option.value = shipSize.id;
-            option.textContent = shipSize.label;
-            presetSelect.appendChild(option);
-        }
-    }
+    presetCombo?.setItems([
+        { id: '', label: t('Custom / manual', '自定义 / 手动') },
+        ...shipSizeOptions.map(option => ({ id: option.id, label: option.label })),
+    ]);
 
-    renderWeaponDatalist();
+    refreshWeaponCombo();
     buildTargetForms();
     buildWeaponForm();
     renderWeaponFacts();
@@ -1244,9 +1407,36 @@ on(window, 'message', event => {
     handleMessage(data as Record<string, unknown>);
 });
 
-if (presetSelect) on(presetSelect, 'change', () => applyShipSizeOption(presetSelect.value));
+if (presetComboInput) {
+    presetCombo = new ComboBox(presetComboInput, id => applyShipSizeOption(id), {
+        onBlur: () => {
+            // 失焦时输入框若不匹配任何船型，回退到当前船型的显示文本，避免「看起来选了其实没选」。
+            const value = presetComboInput.value.trim();
+            if (!value) return; // 空 = 自定义/手动，合法
+            const matched = shipSizeOptions.some(option => option.id === value || option.label === value);
+            if (!matched) {
+                const current = shipSizeOptions.find(option => option.id === targetState.shipSizeId);
+                presetComboInput.value = current?.label ?? '';
+            }
+        },
+    });
+}
 if (weaponSearch) {
-    on(weaponSearch, 'input', handleWeaponSearchInput);
+    weaponCombo = new ComboBox(weaponSearch, id => {
+        if (id) vscode.postMessage({ command: 'selectWeapon', id });
+    }, {
+        onBlur: () => {
+            const value = weaponSearch!.value.trim();
+            // 清空 = 显式切手动模式；失焦时残留的半截文本回退到当前模板显示名。
+            if (!value) {
+                useManualWeapon();
+                return;
+            }
+            if (!weaponIdForLabel(value) && !weaponOptions.some(option => option.id === value)) {
+                weaponSearch!.value = currentWeapon?.displayLabel ?? '';
+            }
+        },
+    });
     on(weaponSearch, 'change', handleWeaponSearchInput);
 }
 if (btnCompute) on(btnCompute, 'click', () => requestCompute());

@@ -12,17 +12,24 @@ import {
     isTargetingRelevant,
     mergeComputeWeaponInput,
     applyCsvWeaponStats,
+    buildInlineScriptRegistry,
+    collectLocalisationReferences,
+    evaluateInlineExpression,
+    expandInlineScriptFields,
     extractShipSizeDetails,
     mergeCsvStatMaps,
     mergeScriptedVariables,
     mergeShipSizeDetails,
     mergeShipSizeIds,
     mergeWeaponTargetingEntries,
+    normalizeInlineScriptKey,
+    parseInlineScriptTemplate,
     parsePdxBool,
     parsePdxNumber,
     parseScriptedVariables,
     parseWeaponComponentsCsv,
     readTopLevelBlocks,
+    resolveLocalisationReferences,
     toDisplayLocalisationValue,
     type ExtractedWeaponTargeting,
     type WeaponTargetingSourceGroup,
@@ -554,5 +561,264 @@ describe('scripted variables and ship size details', () => {
         ]);
         expect(merged.find(d => d.id === 'corvette')!.sizeMultiplier).to.equal(7);
         expect(merged.map(d => d.id)).to.deep.equal(['aaa_custom', 'corvette']);
+    });
+});
+
+// ── inline_script 展开 ──
+
+/** Kuat 模组式写法：战斗数值全部走 inline_script 参数，顶层只剩穿透与标签。 */
+const INLINE_SCRIPT_FILE = [
+    'key = $KEY$',
+    'icon = $ICON$',
+    'size = $SIZE$',
+    'type = $WEAPON_TYPE$',
+    'power = @[ 3 * $MULT$ * -1 ]',
+    'damage = {',
+    '    min = @[ standard_tuberlazer_damage_1 * $MULT$ ]',
+    '    max = @[ standard_tuberlazer_damage_1 * $MULT$ ]',
+    '}',
+    'accuracy = $ACCURACY$',
+    'tracking = $TRACKING$',
+    'inline_script = {',
+    '    script = kuat_weapon_event/$INLINE$',
+    '    MULT = $MULT$',
+    '    RANGE = $RANGE$',
+    '}',
+    'military_power_multiplier = 0.1',
+].join('\n');
+
+const INLINE_COMPONENT_FILE = [
+    'weapon_component_template = {',
+    '    inline_script = {',
+    '        script = kuat_utllities_component/kuat_component_weapon_artellarys',
+    '        KEY = "ED_LARGE_HEAVY_TURBO_3_G"',
+    '        SIZE = large',
+    '        WEAPON_TYPE = instant',
+    '        MULT = 6',
+    '        RANGE = 300',
+    '        ACCURACY = 0.75',
+    '        TRACKING = 0.50',
+    '    }',
+    '    target_type = target_enemies',
+    '    shield_penetration = 1',
+    '    armor_penetration = 1',
+    '}',
+    '',
+    'weapon_component_template = {',
+    '    inline_script = {',
+    '        script = missing/script',
+    '        KEY = "GHOST"',
+    '    }',
+    '}',
+    '',
+    'utility_component_template = {',
+    '    inline_script = {',
+    '        script = kuat_utllities_component/kuat_component_shield',
+    '        KEY = "KUAT_SHIELD_1"',
+    '        SHIELD = 500',
+    '    }',
+    '}',
+].join('\n');
+
+const INLINE_VARS = new Map<string, number>([['standard_tuberlazer_damage_1', 40]]);
+
+function inlineRegistry() {
+    return buildInlineScriptRegistry([
+        { source: 'vanilla' as const, file: 'kuat_utllities_component/kuat_component_weapon_artellarys', template: parseInlineScriptTemplate(INLINE_SCRIPT_FILE) },
+        { source: 'vanilla' as const, file: 'kuat_utllities_component/kuat_component_shield', template: parseInlineScriptTemplate('key = $KEY$\nshield_hit_points = $SHIELD$') },
+    ]);
+}
+
+describe('inline_script template parsing', () => {
+    it('binds top-level fields and damage min/max, skipping nested inline_script blocks', () => {
+        const template = parseInlineScriptTemplate(INLINE_SCRIPT_FILE);
+        expect(template.bindings.get('key')).to.equal('$KEY$');
+        expect(template.bindings.get('type')).to.equal('$WEAPON_TYPE$');
+        expect(template.bindings.get('accuracy')).to.equal('$ACCURACY$');
+        expect(template.bindings.get('min_damage')).to.equal('@[ standard_tuberlazer_damage_1 * $MULT$ ]');
+        expect(template.bindings.get('max_damage')).to.equal('@[ standard_tuberlazer_damage_1 * $MULT$ ]');
+        // 嵌套 inline_script 里的 MULT/RANGE 不是顶层字段绑定，而是作为嵌套调用记录。
+        expect(template.bindings.has('range')).to.equal(false);
+        expect(template.bindings.has('mult')).to.equal(false);
+        expect(template.nested.length).to.equal(1);
+        expect(template.nested[0]!.script).to.equal('kuat_weapon_event/$INLINE$');
+        expect(template.nested[0]!.params.get('mult')).to.equal('$MULT$');
+    });
+
+    it('captures single-line nested inline calls', () => {
+        const template = parseInlineScriptTemplate('accuracy = $ACC$\ninline_script = { script = a/b_$X$ k = $Y$ }');
+        expect(template.nested.length).to.equal(1);
+        expect(template.nested[0]!.script).to.equal('a/b_$X$');
+        expect(template.nested[0]!.params.get('k')).to.equal('$Y$');
+        expect(template.bindings.get('accuracy')).to.equal('$ACC$');
+    });
+
+    it('normalizes script keys across separators, extensions and case', () => {
+        expect(normalizeInlineScriptKey('Kuat\\\\weapon_art.TXT')).to.equal('kuat/weapon_art');
+        expect(normalizeInlineScriptKey('kuat/weapon_art')).to.equal('kuat/weapon_art');
+        expect(normalizeInlineScriptKey('/kuat/weapon_art/')).to.equal('kuat/weapon_art');
+    });
+});
+
+describe('inline expression evaluation', () => {
+    it('evaluates numbers, percents, params, variables and arithmetic', () => {
+        const params = new Map<string, string>([['mult', '6'], ['chained', '$mult$']]);
+        const vars = new Map<string, number>([['base_damage', 40]]);
+        expect(evaluateInlineExpression('6', params, vars)).to.equal(6);
+        expect(evaluateInlineExpression('50%', params, vars)).to.equal(0.5);
+        expect(evaluateInlineExpression('$MULT$', params, vars)).to.equal(6);
+        expect(evaluateInlineExpression('$CHAINED$', params, vars)).to.equal(6);
+        expect(evaluateInlineExpression('@[ base_damage * $MULT$ ]', params, vars)).to.equal(240);
+        expect(evaluateInlineExpression('@[ 2 + 3 * 4 ]', params, vars)).to.equal(14);
+        expect(evaluateInlineExpression('@[ (2 + 3) * 4 ]', params, vars)).to.equal(20);
+        expect(evaluateInlineExpression('@[ -$MULT$ / 2 ]', params, vars)).to.equal(-3);
+        expect(evaluateInlineExpression('@base_damage', params, vars)).to.equal(40);
+    });
+
+    it('returns undefined for unresolvable input instead of throwing', () => {
+        const params = new Map<string, string>([['a', '$b$'], ['b', '$a$']]);
+        const vars = new Map<string, number>();
+        expect(evaluateInlineExpression('@[ 10 / 0 ]', params, vars)).to.equal(undefined);
+        expect(evaluateInlineExpression('@[ unknown_var * 2 ]', params, vars)).to.equal(undefined);
+        expect(evaluateInlineExpression('$MISSING$', params, vars)).to.equal(undefined);
+        expect(evaluateInlineExpression('@[ 1 + ]', params, vars)).to.equal(undefined);
+        // 参数成环：深度上限兜底，不抛不挂。
+        expect(evaluateInlineExpression('$A$', params, vars)).to.equal(undefined);
+    });
+});
+
+describe('inline_script field expansion', () => {
+    it('fills id, type and targeting fields from inline params and script bindings', () => {
+        const entries = extractTargetingFields(INLINE_COMPONENT_FILE);
+        // 三个块都带 inline 调用：全部挺过提取门槛，id 待展开回填。
+        expect(entries.length).to.equal(3);
+        expect(entries.every(entry => entry.componentId === '')).to.equal(true);
+
+        for (const entry of entries) expandInlineScriptFields(entry, inlineRegistry(), INLINE_VARS);
+        const weapon = entries.find(entry => entry.componentId === 'ED_LARGE_HEAVY_TURBO_3_G');
+        expect(weapon, 'weapon resolved from inline KEY').to.not.equal(undefined);
+        expect(weapon!.componentType).to.equal('instant');
+        expect(weapon!.accuracy).to.equal(0.75);
+        expect(weapon!.tracking).to.equal(0.5);
+        expect(weapon!.minDamage).to.equal(240);
+        expect(weapon!.maxDamage).to.equal(240);
+        // 顶层显式值优先：inline 脚本若也绑 shield_penetration 不会覆盖 1。
+        expect(weapon!.shieldPenetration).to.equal(1);
+        expect(weapon!.armorPenetration).to.equal(1);
+        expect(weapon!.missingKeys).to.not.include('accuracy');
+        expect(weapon!.missingKeys).to.not.include('min_damage');
+        expect(weapon!.missingKeys).to.include('hull_damage');
+
+        // 面板过滤视角：id 缺失或展开后仍不含索敌字段的块不进下拉。
+        const kept = entries.filter(entry => entry.componentId !== '' && isTargetingRelevant(entry));
+        expect(kept.map(entry => entry.componentId)).to.deep.equal(['ED_LARGE_HEAVY_TURBO_3_G']);
+    });
+
+    it('expands one level of nested inline calls with param passthrough and composed names', () => {
+        const component = [
+            'weapon_component_template = {',
+            '    inline_script = {',
+            '        script = components/kuat_template_common_weapon',
+            '        kuat_index = ETM',
+            '        kuat_weapon_type = laser',
+            '        kuat_weapon_name = ION',
+            '        kuat_size = small',
+            '        kuat_component_type = standard',
+            '        kuat_mutation_weapon_fixup = no',
+            '    }',
+            '}',
+        ].join('\n');
+        const mainTemplate = [
+            'key = kuat_$kuat_index$_$kuat_weapon_name$_$kuat_size$',
+            'accuracy = @kuat_$kuat_index$_$kuat_weapon_type$_accuracy',
+            'inline_script = {',
+            '    script = components/kuat_mutation_weapon_damage_fixup_$kuat_mutation_weapon_fixup$',
+            '    kuat_index = $kuat_index$',
+            '    kuat_weapon_type = $kuat_weapon_type$',
+            '    kuat_weapon_name = $kuat_weapon_name$',
+            '    kuat_component_type = $kuat_component_type$',
+            '    kuat_size = $kuat_size$',
+            '}',
+        ].join('\n');
+        const fixupTemplate = [
+            'damage = {',
+            '    min = @[ kuat_$kuat_index$_$kuat_weapon_type$_damage_min * kuat_$kuat_size$_factor ]',
+            '    max = @[ kuat_$kuat_index$_$kuat_weapon_type$_damage_max * kuat_$kuat_size$_factor ]',
+            '}',
+        ].join('\n');
+        const registry = buildInlineScriptRegistry([
+            { source: 'workspace' as const, file: 'components/kuat_template_common_weapon', template: parseInlineScriptTemplate(mainTemplate) },
+            { source: 'workspace' as const, file: 'components/kuat_mutation_weapon_damage_fixup_no', template: parseInlineScriptTemplate(fixupTemplate) },
+        ]);
+        const vars = new Map<string, number>([
+            ['kuat_ETM_laser_accuracy', 0.9],
+            ['kuat_ETM_laser_damage_min', 10],
+            ['kuat_ETM_laser_damage_max', 20],
+            ['kuat_small_factor', 2],
+        ]);
+        const [entry] = extractTargetingFields(component);
+        expandInlineScriptFields(entry!, registry, vars);
+        expect(entry!.componentId).to.equal('kuat_ETM_ION_small');
+        expect(entry!.accuracy).to.equal(0.9);
+        expect(entry!.minDamage).to.equal(20);
+        expect(entry!.maxDamage).to.equal(40);
+        expect(entry!.missingKeys).to.not.include('min_damage');
+    });
+
+    it('marks unresolvable expressions as dynamic and keeps them missing', () => {
+        const file = [
+            'weapon_component_template = {',
+            '    inline_script = { script = a/b  KEY = "X"  MULT = 2 }',
+            '}',
+        ].join('\n');
+        const registry = buildInlineScriptRegistry([{
+            source: 'workspace' as const,
+            file: 'a/b',
+            template: parseInlineScriptTemplate('key = $KEY$\ndamage = {\n    min = @[ unknown_var * $MULT$ ]\n    max = 10\n}\naccuracy = $ACC$'),
+        }]);
+        const [entry] = extractTargetingFields(file);
+        expandInlineScriptFields(entry!, registry, new Map());
+        expect(entry!.componentId).to.equal('X');
+        expect(entry!.maxDamage).to.equal(10);
+        expect(entry!.minDamage).to.equal(undefined);
+        expect(entry!.dynamicKeys).to.include('min_damage');
+        expect(entry!.dynamicKeys).to.include('accuracy');
+        expect(entry!.missingKeys).to.include('min_damage');
+    });
+});
+
+describe('localisation reference resolution', () => {
+    it('collects unique $ref$ keys in order', () => {
+        expect(collectLocalisationReferences('$a$ and $b$ again $a$')).to.deep.equal(['a', 'b']);
+        expect(collectLocalisationReferences('plain text')).to.deep.equal([]);
+    });
+
+    it('resolves nested reference chains', () => {
+        const table: Record<string, string | undefined> = {
+            military_arkship_tier_1: '$military_arkship_name$ I',
+            military_arkship_name: '$military_arkship_class$ $arkship_cap$',
+            military_arkship_class: 'Military Arkship',
+            arkship_cap: 'I',
+        };
+        const lookup = (key: string) => table[key];
+        expect(resolveLocalisationReferences(table['military_arkship_tier_1']!, lookup))
+            .to.equal('Military Arkship I I');
+    });
+
+    it('keeps unknown keys and survives reference cycles', () => {
+        expect(resolveLocalisationReferences('$nope$ x', () => undefined)).to.equal('$nope$ x');
+        const cyclic: Record<string, string> = { a: '$b$', b: '$a$' };
+        const resolved = resolveLocalisationReferences('$a$', key => cyclic[key]);
+        expect(resolved.includes('$')).to.equal(true); // 残留引用由 $ 护栏回退 id
+    });
+
+    it('guard: unresolved $ref$ falls back to id, markup junk still cleaned', () => {
+        expect(toDisplayLocalisationValue('$military_arkship_name$ I')).to.equal(undefined);
+        expect(toDisplayLocalisationValue('$£icon$£Red Laser')).to.equal('Red Laser');
+        expect(toDisplayLocalisationValue('§Y$Cruiser§!')).to.equal('Cruiser');
+        expect(formatComponentDisplayLabel('military_arkship_tier_1', '$military_arkship_name$ I'))
+            .to.equal('military_arkship_tier_1');
+        expect(formatComponentDisplayLabel('military_arkship_tier_1', 'Military Arkship I'))
+            .to.equal('Military Arkship I (military_arkship_tier_1)');
     });
 });

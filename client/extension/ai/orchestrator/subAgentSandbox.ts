@@ -142,8 +142,11 @@ export function enforceSubAgentSafety(
     workspaceRoot: string
 ): { allowed: boolean; reason?: string } {
     const registryEntry = TOOL_REGISTRY.get(toolName as import('../tools/registry').AgentToolName);
-    const profileException = toolName === 'run_command' && sandbox.profileName === 'general-coder';
-    if (registryEntry && !registryEntry.allowSubAgent && !profileException) {
+    // A child may run commands only when its profile declares the capability; the
+    // registry still excludes run_command from children by default.
+    const profileDeclaresCommand = toolName === 'run_command'
+        && agentProfileCatalog.get(sandbox.profileName)?.subagentCapabilities?.command === true;
+    if (registryEntry && !registryEntry.allowSubAgent && !profileDeclaresCommand) {
         if (toolName === 'run_command') {
             return {
                 allowed: false,

@@ -5,6 +5,42 @@
 import { expect } from 'chai';
 import * as path from 'path';
 
+const vscodeStub = {
+    workspace: {
+        workspaceFolders: [] as Array<{ uri: { fsPath: string } }>,
+        getConfiguration: () => ({
+            get: <T>(_key: string, defaultValue?: T): T | undefined => defaultValue,
+        }),
+    },
+    window: {
+        createOutputChannel: () => ({
+            appendLine: () => undefined,
+            show: () => undefined,
+            dispose: () => undefined,
+        }),
+    },
+};
+
+function loadSandboxModules() {
+    const moduleLoader = require('module') as { _load: (...args: any[]) => any };
+    const originalLoad = moduleLoader._load;
+    moduleLoader._load = function (this: unknown, request: string, ...args: any[]) {
+        if (request === 'vscode') return vscodeStub;
+        return originalLoad.apply(this, [request, ...args]);
+    };
+    try {
+        const sandboxModule = require('../../extension/ai/orchestrator/subAgentSandbox') as typeof import('../../extension/ai/orchestrator/subAgentSandbox');
+        const workspaceSandboxModule = require('../../extension/ai/workspaceSandbox') as typeof import('../../extension/ai/workspaceSandbox');
+        return {
+            buildSubAgentSandbox: sandboxModule.buildSubAgentSandbox,
+            enforceSubAgentSafety: sandboxModule.enforceSubAgentSafety,
+            formatReadablePathForTool: workspaceSandboxModule.formatReadablePathForTool,
+        };
+    } finally {
+        moduleLoader._load = originalLoad;
+    }
+}
+
 describe('SubAgentSandbox', () => {
     let buildSubAgentSandbox: typeof import('../../extension/ai/orchestrator/subAgentSandbox').buildSubAgentSandbox;
     let enforceSubAgentSafety: typeof import('../../extension/ai/orchestrator/subAgentSandbox').enforceSubAgentSafety;
@@ -12,10 +48,13 @@ describe('SubAgentSandbox', () => {
     type TaskNode = import('../../extension/ai/orchestrator/types').TaskNode;
 
     before(() => {
-        const sandboxModule = require('../../extension/ai/orchestrator/subAgentSandbox');
-        buildSubAgentSandbox = sandboxModule.buildSubAgentSandbox;
-        enforceSubAgentSafety = sandboxModule.enforceSubAgentSafety;
-        formatReadablePathForTool = require('../../extension/ai/workspaceSandbox').formatReadablePathForTool;
+        // The sandbox module reaches vscode transitively (planModeGuard -> toolScheduler
+        // -> workspacePaths/configuredGameRoots), so a unit run needs the same stub the
+        // other Extension Host unit suites use.
+        const loaded = loadSandboxModules();
+        buildSubAgentSandbox = loaded.buildSubAgentSandbox;
+        enforceSubAgentSafety = loaded.enforceSubAgentSafety;
+        formatReadablePathForTool = loaded.formatReadablePathForTool;
     });
 
     // ── 1. 沙盒构建生成校验 ──
@@ -217,10 +256,10 @@ describe('SubAgentSandbox', () => {
             expect(goodResult.allowed).to.be.true;
         });
 
-        it('keeps command and parent-owned tools blocked for sub-agents', () => {
+        it('keeps command and parent-owned tools blocked for sub-agents without the command capability', () => {
             const sandbox = {
                 agentId: 'super_builder',
-                profileName: 'paradox-coder',
+                profileName: 'gui-expert',
                 writeScope: ['*'], // 全放通写入
                 permissionPolicy: 'deny' as const
             };
@@ -232,6 +271,105 @@ describe('SubAgentSandbox', () => {
 
             const gitResult = enforceSubAgentSafety(sandbox, 'git_ops', { operation: 'reset' }, process.cwd());
             expect(gitResult.allowed).to.be.false;
+        });
+
+        // ── 命令能力按 Profile 目录声明放行（回归：paradox-coder 声明了 command 能力，物理层不再拦死）──
+        it('lets profiles that declare the command capability run commands', () => {
+            const commandSandbox = (profileName: string) => ({
+                agentId: `command_${profileName}`,
+                profileName,
+                permissionPolicy: 'deny' as const,
+            });
+
+            // 1) paradox-coder 在目录中声明 subagentCapabilities.command → 物理层放行
+            const paradoxResult = enforceSubAgentSafety(
+                commandSandbox('paradox-coder'),
+                'run_command',
+                { CommandLine: 'echo hello' },
+                process.cwd(),
+            );
+            expect(paradoxResult.allowed).to.equal(true);
+            expect(paradoxResult.reason).to.equal(undefined);
+
+            // 2) general-coder 的历史豁免不得回退
+            const generalResult = enforceSubAgentSafety(
+                commandSandbox('general-coder'),
+                'run_command',
+                { CommandLine: 'echo hello' },
+                process.cwd(),
+            );
+            expect(generalResult.allowed).to.equal(true);
+        });
+
+        it('keeps run_command blocked for profiles without the command capability', () => {
+            const restrictedProfiles = [
+                'localization-writer',
+                'localization-translator',
+                'gui-expert',
+                'explore',
+                'planner',
+                'reviewer',
+            ];
+
+            for (const profileName of restrictedProfiles) {
+                const result = enforceSubAgentSafety(
+                    {
+                        agentId: `no_command_${profileName}`,
+                        profileName,
+                        permissionPolicy: 'delegate_to_parent' as const,
+                    },
+                    'run_command',
+                    { CommandLine: 'echo hello' },
+                    process.cwd(),
+                );
+                expect(result.allowed, profileName).to.equal(false);
+                expect(result.reason, profileName).to.include('run_command is disabled for orchestrator sub-agents');
+                expect(result.reason, profileName).to.include('BLOCKED_FOR_ORCHESTRATOR');
+            }
+        });
+
+        it('keeps unknown profiles and non-command privileged tools blocked', () => {
+            const unknownProfile = enforceSubAgentSafety(
+                {
+                    agentId: 'unknown_profile_child',
+                    profileName: 'custom-user-profile',
+                    permissionPolicy: 'delegate_to_parent' as const,
+                },
+                'run_command',
+                { CommandLine: 'echo hello' },
+                process.cwd(),
+            );
+            expect(unknownProfile.allowed).to.equal(false);
+            expect(unknownProfile.reason).to.include('run_command is disabled for orchestrator sub-agents');
+
+            // 命令能力只对 run_command 生效：声明了 command 的 profile 仍不能调度进程
+            for (const profileName of ['paradox-coder', 'general-coder']) {
+                const processResult = enforceSubAgentSafety(
+                    {
+                        agentId: `process_${profileName}`,
+                        profileName,
+                        permissionPolicy: 'delegate_to_parent' as const,
+                    },
+                    'manage_process',
+                    { action: 'list' },
+                    process.cwd(),
+                );
+                expect(processResult.allowed, profileName).to.equal(false);
+                expect(processResult.reason, profileName).to.include('manage_process');
+            }
+
+            // web / git / orchestration 特权工具未放松
+            const gitResult = enforceSubAgentSafety(
+                {
+                    agentId: 'git_paradox_coder',
+                    profileName: 'paradox-coder',
+                    permissionPolicy: 'delegate_to_parent' as const,
+                },
+                'git_ops',
+                { operation: 'reset' },
+                process.cwd(),
+            );
+            expect(gitResult.allowed).to.equal(false);
         });
 
         it('blocks non-file-scoped mutating tools in read-only sub-agent sandboxes', () => {

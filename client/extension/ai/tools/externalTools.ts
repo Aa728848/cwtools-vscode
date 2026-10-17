@@ -1252,6 +1252,10 @@ export class ExternalToolHandler {
         // actually execute. Both probes are cached per session.
         const isWindows = process.platform === 'win32';
         const detectedSandbox = directExecution ? undefined : await detectSandboxBackendAsync();
+        // No enforced backend on this host: keep the approval boundary but never fail dead.
+        // The command may only leave the OS sandbox through a fresh one-shot approval.
+        const unsandboxedDegrade = !directExecution && !detectedSandbox;
+        const effectiveDirect = directExecution || unsandboxedDegrade;
         const useWslSandbox = isWindows && detectedSandbox?.backend === 'wsl-bubblewrap';
         if (useWslSandbox && preflight.segments.some(segment => /^(?:get-|set-|new-|remove-|select-|where-|format-|out-|write-|resolve-|test-)/i.test(segment.command))) {
             return {
@@ -1295,12 +1299,15 @@ export class ExternalToolHandler {
         // the approval boundary as advertised. One-shot `unsandboxed` calls do
         // not set bypassSandbox and still require their own approval.
         if (bypassSandbox) requiresPermission = false;
+        // Leaving the OS sandbox is a different contract from a sandboxed run: it always
+        // needs a fresh explicit approval, even for auto-safe or policy-memorized commands.
+        if (unsandboxedDegrade || (args.unsandboxed === true && !bypassSandbox)) requiresPermission = true;
         const onPermissionRequest = context?.onPermissionRequest;
         let grantedPermissionId: string | undefined;
 
         if (requiresPermission && onPermissionRequest) {
             const permId = `perm_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
-            const leavesOsSandbox = args.unsandboxed === true || args.executionMode === 'terminal';
+            const leavesOsSandbox = args.unsandboxed === true || unsandboxedDegrade || args.executionMode === 'terminal';
             // Build rich detailed telemetry payload for Webview visual enhancement
             const preflightPayload = {
                 command: args.command,
@@ -1315,6 +1322,7 @@ export class ExternalToolHandler {
                     ...preflight.segments.map(s => s.reason),
                     ...(gitMetadataMutation ? [aiText('This approval temporarily permits Git metadata writes for this command only.', '此审批仅为本次命令临时允许写入 Git 元数据。')] : []),
                     ...(args.executionMode === 'terminal' ? [aiText('The agent may send input to or terminate this task-owned terminal through process controls.', 'Agent 可通过进程控制向此任务所属终端发送输入或终止它。')] : []),
+                    ...(unsandboxedDegrade ? [aiText('No enforced command sandbox backend is available on this host; this one-shot run will execute without the OS sandbox.', '本机没有可用的强制命令沙箱后端；本次执行将在无 OS 沙箱的情况下运行。')] : []),
                 ],
                 networkAccess: leavesOsSandbox || args.networkAccess === true,
                 networkHosts: requestedNetworkHosts,
@@ -1323,14 +1331,14 @@ export class ExternalToolHandler {
                     : args.networkAccess === true
                     ? (requestedNetworkHosts.length > 0 ? 'declared-only' : 'broad')
                     : 'blocked',
-                sandboxMode: args.executionMode === 'terminal' ? 'user-approved-terminal' : args.unsandboxed ? 'disabled' : 'workspace-write',
+                sandboxMode: args.executionMode === 'terminal' ? 'user-approved-terminal' : (args.unsandboxed === true || unsandboxedDegrade) ? 'disabled' : 'workspace-write',
                 unsandboxed: leavesOsSandbox,
                 writableRoots: leavesOsSandbox ? undefined : [...new Set(requestedWritableRoots.map(root => path.resolve(root)))],
                 protectedPathOverrides: gitMetadataMutation ? ['.git'] : undefined,
             };
             const description = args.executionMode === 'terminal'
                 ? `[UNSANDBOXED TERMINAL] AI requests a one-time visible VS Code terminal with unrestricted process, filesystem, and network access: ${args.command}`
-                : args.unsandboxed
+                : (args.unsandboxed === true || unsandboxedDegrade)
                 ? `[UNSANDBOXED] AI requests a one-time command run with the OS sandbox disabled: ${args.command}`
                 : currentEscalationReason
                 ? `[ESCALATION] AI requests additional sandbox scope (${currentEscalationReason}): ${args.command}`
@@ -1475,11 +1483,11 @@ export class ExternalToolHandler {
             }
         }
         const sandboxProfile = {
-            sandboxMode: directExecution ? 'disabled' : 'workspace-write',
-            networkAccess: directExecution ? true : args.networkAccess === true,
+            sandboxMode: effectiveDirect ? 'disabled' : 'workspace-write',
+            networkAccess: effectiveDirect ? true : args.networkAccess === true,
             writableRoots: [...new Set(writableRoots.map(root => path.resolve(root)))],
             protectedPaths: [...new Set(protectedPaths.map(protectedPath => path.resolve(protectedPath)))],
-            authorization: directExecution
+            authorization: effectiveDirect
                 ? (bypassSandbox ? { type: 'full-access' as const } : { type: 'one-shot' as const, permissionId: grantedPermissionId })
                 : undefined,
         };

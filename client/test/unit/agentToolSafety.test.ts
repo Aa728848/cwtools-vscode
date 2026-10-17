@@ -1194,13 +1194,23 @@ describe('agent sprite candidate tool contract', () => {
 
 describe('agent tool topic artifacts', () => {
     let workspaceRoot: string;
+    let sandboxBackendStubs: sinon.SinonStub[];
 
+    // Every run_command case here is about approval policy, not about which host
+    // it happens to run on, so the backend probe is pinned to a present backend.
+    // Cases that exercise the no-backend degrade replace these stubs themselves.
     beforeEach(() => {
         externalTools.useDirectSandboxRunnerForTests(true);
+        const sandboxRunner = require('../../extension/ai/runner/sandboxRunner') as typeof import('../../extension/ai/runner/sandboxRunner');
+        sandboxBackendStubs = [
+            sinon.stub(sandboxRunner, 'detectSandboxBackendAsync').resolves({ backend: 'bubblewrap', executable: '/usr/bin/bwrap' }),
+            sinon.stub(sandboxRunner, 'detectSandboxBackend').returns({ backend: 'bubblewrap', executable: '/usr/bin/bwrap' }),
+        ];
         workspaceRoot = makeWorkspace();
     });
 
     afterEach(() => {
+        for (const stub of sandboxBackendStubs) stub.restore();
         externalTools.useDirectSandboxRunnerForTests(false);
         resetStubState();
         PermissionPolicyStore.getInstance().clear();
@@ -1396,6 +1406,150 @@ describe('agent tool topic artifacts', () => {
         expect(preflight.protectedPathOverrides).to.deep.equal(['.git']);
         expect(preflight.unsandboxed).to.equal(false);
         expect(preflight.escalation).to.equal(true);
+    });
+
+    // ─── no enforced sandbox backend: fail-open-with-consent ──────────────────
+    // A host without a verified backend must never dead-end in
+    // SandboxUnavailableError; it must ask once for an unsandboxed run instead.
+    const stubNoSandboxBackend = () => {
+        const sandboxRunner = require('../../extension/ai/runner/sandboxRunner') as typeof import('../../extension/ai/runner/sandboxRunner');
+        (sandboxRunner.detectSandboxBackendAsync as sinon.SinonStub).restore();
+        (sandboxRunner.detectSandboxBackend as sinon.SinonStub).restore();
+        const asyncStub = sinon.stub(sandboxRunner, 'detectSandboxBackendAsync').resolves(undefined);
+        const syncStub = sinon.stub(sandboxRunner, 'detectSandboxBackend').returns(undefined);
+        sandboxBackendStubs = [asyncStub, syncStub];
+    };
+
+    it('runs a one-shot unsandboxed command when no sandbox backend exists and the user approves', async () => {
+        stubNoSandboxBackend();
+        // Exercise the real broker path: it is the layer that used to throw
+        // SandboxUnavailableError, and it must now fall through to direct spawn.
+        externalTools.useDirectSandboxRunnerForTests(false);
+        const handler = new ExternalToolHandler({ workspaceRoot });
+        let permissionRequests = 0;
+        let preflight: any;
+        let description = '';
+
+        const result = await handler.runCommand({
+            command: 'node -e "console.log(1)"',
+            timeoutMs: 20_000,
+        }, {
+            ...makeContext('no-backend-approved'),
+            onPermissionRequest: async (_id: string, _tool: string, requestDescription: string, _command: string, context: any) => {
+                permissionRequests++;
+                description = requestDescription;
+                preflight = context.preflight;
+                return true;
+            },
+        } as any);
+
+        if (result.exitCode !== 0) throw new Error(`runCommand failed: ${result.stderr || result.stdout}`);
+        expect(permissionRequests).to.equal(1);
+        expect(description).to.include('[UNSANDBOXED]');
+        expect(preflight.unsandboxed).to.equal(true);
+        expect(preflight.sandboxMode).to.equal('disabled');
+        expect(preflight.reasons.some((reason: string) => /No enforced command sandbox backend is available on this host/.test(reason)))
+            .to.equal(true);
+        expect(result.exitCode).to.equal(0);
+        expect(result.stdout).to.include('1');
+    });
+
+    it('always prompts before an unsandboxed degrade even when a learned rule covers the command', async () => {
+        stubNoSandboxBackend();
+        externalTools.useDirectSandboxRunnerForTests(false);
+        // Auto-safe AND covered by a learned session rule: this is exactly the
+        // pair that used to run silently, and the pair that now must still ask.
+        PermissionPolicyStore.getInstance().addRule({
+            tool: 'run_command', commandPrefix: ['node', '--version'], cwdScope: workspaceRoot, riskMax: 3, sessionOnly: true,
+        });
+        const handler = new ExternalToolHandler({ workspaceRoot });
+        let permissionRequests = 0;
+        let preflight: any;
+
+        const result = await handler.runCommand({
+            command: 'node --version',
+            timeoutMs: 20_000,
+        }, {
+            ...makeContext('no-backend-memorized'),
+            onPermissionRequest: async (_id: string, _tool: string, _description: string, _command: string, context: any) => {
+                permissionRequests++;
+                preflight = context.preflight;
+                return true;
+            },
+        } as any);
+
+        // Leaving the OS sandbox is never covered by a memorized approval.
+        expect(permissionRequests).to.equal(1);
+        expect(preflight.unsandboxed).to.equal(true);
+        expect(preflight.sandboxMode).to.equal('disabled');
+        expect(result.exitCode).to.equal(0);
+    });
+
+    it('denies an unsandboxed degrade run and produces no side effect when the user refuses', async () => {
+        stubNoSandboxBackend();
+        externalTools.useDirectSandboxRunnerForTests(false);
+        const handler = new ExternalToolHandler({ workspaceRoot });
+        const sideEffect = path.join(workspaceRoot, 'degrade-denied.txt');
+        let permissionRequests = 0;
+
+        const result = await handler.runCommand({
+            command: 'node -e "require(\'fs\').writeFileSync(\'degrade-denied.txt\', \'x\')"',
+            timeoutMs: 20_000,
+        }, {
+            ...makeContext('no-backend-denied'),
+            onPermissionRequest: async () => {
+                permissionRequests++;
+                return false;
+            },
+        } as any);
+
+        expect(permissionRequests).to.equal(1);
+        expect(result.exitCode).to.equal(1);
+        expect(result.stderr).to.include('denied');
+        expect(fs.existsSync(sideEffect)).to.equal(false);
+    });
+
+    it('stays fail-closed for an unsandboxed degrade when no approval channel is attached', async () => {
+        stubNoSandboxBackend();
+        externalTools.useDirectSandboxRunnerForTests(false);
+        const handler = new ExternalToolHandler({ workspaceRoot });
+        const sideEffect = path.join(workspaceRoot, 'degrade-unattended.txt');
+
+        // makeContext carries no onPermissionRequest: nobody can consent, so the
+        // degrade must refuse instead of running unsandboxed on its own.
+        const result = await handler.runCommand({
+            command: 'node -e "require(\'fs\').writeFileSync(\'degrade-unattended.txt\', \'x\')"',
+            timeoutMs: 20_000,
+        }, makeContext('no-backend-unattended'));
+
+        expect(result.exitCode).to.equal(1);
+        expect(result.stderr).to.include('no permission handler configured');
+        expect(fs.existsSync(sideEffect)).to.equal(false);
+    });
+
+    it('keeps the sandboxed contract unchanged when a backend is available', async () => {
+        // Backend probe already resolves to bubblewrap in beforeEach; the direct
+        // runner keeps that stub from launching a real bwrap/broker process.
+        externalTools.useDirectSandboxRunnerForTests(true);
+        const handler = new ExternalToolHandler({ workspaceRoot });
+        let preflight: any;
+
+        const result = await handler.runCommand({
+            command: 'node -e "console.log(1)"',
+            timeoutMs: 20_000,
+        }, {
+            ...makeContext('backend-present'),
+            onPermissionRequest: async (_id: string, _tool: string, _description: string, _command: string, context: any) => {
+                preflight = context.preflight;
+                return true;
+            },
+        } as any);
+
+        expect(preflight.unsandboxed).to.equal(false);
+        expect(preflight.sandboxMode).to.equal('workspace-write');
+        expect(preflight.reasons.some((reason: string) => /No enforced command sandbox backend is available on this host/.test(reason)))
+            .to.equal(false);
+        expect(result.exitCode).to.equal(0);
     });
 
     it('relativizes quoted workspace script paths before running commands', async () => {

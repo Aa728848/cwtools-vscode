@@ -48,11 +48,13 @@ Unix:     auto ──/bin/sh -c "command -v bash"──✓──→ bash -c（�
 
 ### 4. paradox-coder 放行命令能力
 
-`agentProfileCatalog.ts` 内置 `paradox-coder` 增加 `subagentCapabilities: { command: true }`，经 `effectiveToolPolicy.ts` 既有豁免分支放行 `run_command`（`manage_process` 仍被排除）。只读分析类（explore/planner/reviewer）与专门写作类（localization-writer/localization-translator/gui-expert）profile 保持不放行。放行不等于免审批：策略引擎、命令预检、审批边界、沙箱 fail-closed 全部原样生效。
+`agentProfileCatalog.ts` 内置 `paradox-coder` 增加 `subagentCapabilities: { command: true }`，经 `effectiveToolPolicy.ts` 既有豁免分支放行 `run_command`（`manage_process` 仍被排除）。只读分析类（explore/planner/reviewer）与专门写作类（localization-writer/localization-translator/gui-expert）profile 保持不放行。放行不等于免审批：策略引擎、命令预检、审批边界仍然生效。子代理物理沙箱 `orchestrator/subAgentSandbox.ts` 原先把 `run_command` 的豁免硬编码为 `general-coder`，现改为按 profile 目录的 `subagentCapabilities.command` 声明判定，与策略层语义一致，见 [无强制沙箱后端时的审批式降级与子代理命令能力对齐](../architecture/2026-10-17-command-sandbox-degrade-with-consent-and-subagent-command-capability.md)。
 
 ### 5. 沙箱不可用报错双语可操作化（`sandboxRunner.ts`）
 
-`SandboxUnavailableError` 按平台给出恢复路径（Windows：安装原生沙箱助手或配置 WSL2+bubblewrap；Linux/macOS：安装 bubblewrap/sandbox-exec），并说明最后手段是 `requestEscalation=true` + `unsandboxed=true` 向用户申请一次性明确批准的绕过；不泄露内部 helper 路径细节。fail-closed 语义不变。
+`SandboxUnavailableError` 按平台给出恢复路径（Windows：安装原生沙箱助手或配置 WSL2+bubblewrap；Linux/macOS：安装 bubblewrap/sandbox-exec），并说明最后手段是 `requestEscalation=true` + `unsandboxed=true` 向用户申请一次性明确批准的绕过；不泄露内部 helper 路径细节。
+
+> **后续变更（行为已反转）**：`run_command` 不再在该错误处死路。无强制后端时改为强制一次"仅本次无沙箱运行"审批后直连执行，无人值守仍拒绝；`SandboxUnavailableError` 与 broker 抛错仅作为纵深防御保留。详见 [无强制沙箱后端时的审批式降级与子代理命令能力对齐](../architecture/2026-10-17-command-sandbox-degrade-with-consent-and-subagent-command-capability.md)。
 
 ## Alternatives considered
 

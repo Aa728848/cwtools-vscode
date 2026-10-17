@@ -6940,9 +6940,18 @@ let settingsSubscriptionPools: Record<string, any> = {};
                     decline: tr('Denied', '已拒绝'),
                     cancel: tr('Cancelled', '已取消'),
                 };
+                // Show who approved and, when the OS sandbox was off, that fact too:
+                // an auto-approved unsandboxed run must stay auditable after the fact.
+                const reviewerRoute = [msg.reviewerProvider, msg.reviewerModel].filter(Boolean).join('/');
+                const reviewerText = msg.reviewer === 'auto_review'
+                    ? [
+                        reviewerRoute ? `${tr('auto review', '自动审核')} ${reviewerRoute}` : tr('auto review', '自动审核'),
+                        msg.unsandboxed === true ? tr('no OS sandbox', '无沙箱执行') : '',
+                    ].filter(Boolean).join(' · ')
+                    : msg.reviewer;
                 appendCodexLiveSyntheticStep({
                     type: 'thinking',
-                    content: `${tr('Permission', '权限')} · ${labels[msg.decision] || msg.decision} · ${msg.reviewer}`,
+                    content: `${tr('Permission', '权限')} · ${labels[msg.decision] || msg.decision} · ${reviewerText}`,
                     timestamp: Date.now(),
                 });
                 break;
@@ -8364,6 +8373,35 @@ let settingsSubscriptionPools: Record<string, any> = {};
         updateQuickWriteModeSelector(deriveWriteTier(current));
         const autoReviewEl = document.getElementById('approvalsAutoReview') as HTMLInputElement | null;
         if (autoReviewEl) autoReviewEl.checked = current.approvals?.reviewer === 'auto_review';
+        const reviewerProviderSel = document.getElementById('approvalsReviewerProvider') as HTMLSelectElement | null;
+        const reviewerModelInput = document.getElementById('approvalsReviewerModelInput') as HTMLInputElement | null;
+        if (reviewerProviderSel) {
+            const savedReviewerProvider = (current.approvals?.reviewerProvider as string | undefined) || '';
+            const reviewerProviders = (providers || []).filter((p: any) => p && p.id);
+            reviewerProviderSel.innerHTML = '<option value="">' + escapeHtml(tr('Inherit main model', '沿用主模型')) + '</option>'
+                + reviewerProviders.map((p: any) => '<option value="' + escapeHtml(p.id) + '"'
+                    + (p.id === savedReviewerProvider ? ' selected' : '') + '>' + escapeHtml(p.name || p.id) + '</option>').join('');
+            const paintReviewerModels = () => {
+                const pid = reviewerProviderSel.value;
+                const providerDef = reviewerProviders.find((p: any) => p.id === pid);
+                const models: string[] = !pid ? [] : pid === 'ollama'
+                    ? (ollamaModels || []).map((m: any) => m.name)
+                    : (providerDef && Array.isArray(providerDef.models) ? providerDef.models : []);
+                if (reviewerModelInput) {
+                    reviewerModelInput.disabled = !pid;
+                    reviewerModelInput.placeholder = pid
+                        ? tr('Leave empty to use the provider default model', '留空使用该提供商默认模型')
+                        : tr('Inherits the main chat model', '继承对话模型');
+                }
+                setupApDropdown('approvalsReviewerModelInput', 'approvalsReviewerModelDatalist', () => models);
+            };
+            reviewerProviderSel.onchange = () => {
+                if (reviewerModelInput) reviewerModelInput.value = '';
+                paintReviewerModels();
+            };
+            paintReviewerModels();
+        }
+        if (reviewerModelInput) reviewerModelInput.value = (current.approvals?.reviewerModel as string | undefined) || '';
         const web = current.webAccess || {};
         const setWebValue = (id: string, value: unknown) => {
             const element = document.getElementById(id) as HTMLInputElement | HTMLSelectElement | null;
@@ -9436,9 +9474,17 @@ let settingsSubscriptionPools: Record<string, any> = {};
                 customApiFormat: getCustomApiFormat(),
                 maxContextTokens: parseInt((document.getElementById('settingsCtx') as HTMLInputElement).value) || 0,
                 agentFileWriteMode: (document.getElementById('agentWriteMode') as HTMLSelectElement).value,
-                approvals: {
-                    reviewer: ((document.getElementById('approvalsAutoReview') as HTMLInputElement | null)?.checked ? 'auto_review' : 'user'),
-                },
+                approvals: (() => {
+                    const reviewerProvider = ((document.getElementById('approvalsReviewerProvider') as HTMLSelectElement | null)?.value || '').trim();
+                    return {
+                        reviewer: ((document.getElementById('approvalsAutoReview') as HTMLInputElement | null)?.checked ? 'auto_review' : 'user'),
+                        reviewerProvider,
+                        // A model id is only meaningful together with its provider.
+                        reviewerModel: reviewerProvider
+                            ? ((document.getElementById('approvalsReviewerModelInput') as HTMLInputElement | null)?.value || '').trim()
+                            : '',
+                    };
+                })(),
                 reasoningEffort: (document.getElementById('settingsReasoningEffort') as HTMLSelectElement).value || 'high',
                 responseVerbosity: (document.getElementById('settingsResponseVerbosity') as HTMLSelectElement | null)?.value || 'default',
                 codexServiceTier: (document.getElementById('settingsCodexServiceTier') as HTMLSelectElement | null)?.value || 'default',

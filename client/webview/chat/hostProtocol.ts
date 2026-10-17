@@ -96,6 +96,7 @@ const validators = {
     }),
     permissionResolved: fields({ permissionId: isString, itemId: isString, decision: isString, reviewer: isString }, {
         threadId: optional(isString), turnId: optional(isString),
+        reviewerProvider: optional(isString), reviewerModel: optional(isString), unsandboxed: optional(isBoolean),
     }),
     questionRequest: fields({ questionId: isString, topicId: isString, questions: isQuestionItems }, {
         threadId: optional(isString), turnId: optional(isString),

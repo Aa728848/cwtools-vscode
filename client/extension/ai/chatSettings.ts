@@ -585,6 +585,10 @@ export class ChatSettingsManager {
             approvals: {
                 reviewer: sessionApprovalsReviewer(getProjectWorkspaceRoot())
                     ?? vs.workspace.getConfiguration('stellarisLanguageServices.ai').get<'user' | 'auto_review'>('approvals.reviewer', 'user'),
+                // Empty provider means "review with the main model"; a model id alone
+                // is dropped by resolveReviewerRoute so it cannot pair with the wrong provider.
+                reviewerProvider: vs.workspace.getConfiguration('stellarisLanguageServices.ai').get<string>('approvals.reviewerProvider', ''),
+                reviewerModel: vs.workspace.getConfiguration('stellarisLanguageServices.ai').get<string>('approvals.reviewerModel', ''),
             },
             securitySandboxDisabled: getSessionPermissionMode(getProjectWorkspaceRoot())
                 ? isSessionFullAccess(getProjectWorkspaceRoot())
@@ -910,6 +914,12 @@ export class ChatSettingsManager {
         await update('agentFileWriteMode', settings.agentFileWriteMode);
         if (settings.approvals?.reviewer) {
             await update('approvals.reviewer', settings.approvals.reviewer);
+        }
+        if (settings.approvals?.reviewerProvider !== undefined) {
+            await update('approvals.reviewerProvider', (settings.approvals.reviewerProvider || '').trim());
+        }
+        if (settings.approvals?.reviewerModel !== undefined) {
+            await update('approvals.reviewerModel', (settings.approvals.reviewerModel || '').trim());
         }
         const reasoningCapability = getModelReasoningCapability(
             settings.provider,

@@ -29,6 +29,10 @@ export interface ApprovalReviewRequest {
     classification?: string[];
     escalation?: boolean;
     inlineEval?: boolean;
+    /** True when this execution runs outside the OS sandbox: filesystem and network are not enforced. */
+    unsandboxed?: boolean;
+    /** Host-reported sandbox mode label; evidence for the reviewer only. */
+    sandboxMode?: string;
     /** Host-authored user messages; authorization evidence only, never policy text. */
     userMessages?: string[];
     conversationSummary?: Array<{ role: string; content: string }>;
@@ -46,6 +50,21 @@ export interface ReviewerDecision {
 
 export type ReviewerLlmCall = (systemPrompt: string, userPrompt: string) => Promise<string>;
 
+/**
+ * Resolve the reviewer route configured by the user settings.
+ *
+ * An empty provider always means "reuse the main model", and a model name on its
+ * own is dropped instead of being paired with an unrelated provider. Both values
+ * arrive from settings, so they are narrowed and trimmed before use.
+ */
+export function resolveReviewerRoute(provider: unknown, model: unknown): { providerId?: string; model?: string } {
+    const providerId = typeof provider === 'string' ? provider.trim() : '';
+    if (providerId.length === 0) return {};
+    const modelId = typeof model === 'string' ? model.trim() : '';
+    if (modelId.length === 0) return { providerId };
+    return { providerId, model: modelId };
+}
+
 const REVIEWER_SYSTEM_PROMPT = [
     'You are a read-only approval reviewer for an AI coding agent inside a VS Code workspace.',
     'Decide from the STRUCTURED metadata only: tool, command tokens, cwd, target paths, risk level.',
@@ -58,6 +77,9 @@ const REVIEWER_SYSTEM_PROMPT = [
     '- deny: critical risk, writes outside the workspace, credential access, data exfiltration,',
     '  persistent security weakening, or clearly destructive commands.',
     '- ask_user: high-risk or irreversible work without explicit user authorization, or genuine uncertainty.',
+    '- unsandboxed=true means the OS sandbox is off for this execution: filesystem and network are not enforced.',
+    '  Approve it only when the user explicitly asked for this exact out-of-sandbox operation; otherwise ask_user.',
+    '  critical risk is always deny.',
     '- Do not ask_user for routine workspace edits/builds/tests merely because they have side effects.',
     'You cannot create global rules or change policy. When in doubt: ask_user.',
     'Approval is single-use; you cannot create persistent or session rules.',
@@ -173,6 +195,8 @@ function safeWorkspaceTargets(req: ApprovalReviewRequest): boolean {
 }
 
 function routinePolicyReview(req: ApprovalReviewRequest): ReviewerDecision | undefined {
+    // Nothing is "routine" once the sandbox is off; only the reviewer may approve it.
+    if (req.unsandboxed === true) return undefined;
     if (req.escalation || req.riskLevel >= 3 || req.inlineEval) return undefined;
     const unsafeClassification = req.classification?.some(value => /destructive/i.test(value)) === true;
     if (unsafeClassification) return undefined;
@@ -206,6 +230,9 @@ function normalizeExecutable(rawToken: string): string {
 }
 
 function isAgentScratchPythonHelper(req: ApprovalReviewRequest): boolean {
+    // Fast paths are rule-based, and a rule cannot see the contract the user is
+    // entering when the OS sandbox is off. Hand those executions to the reviewer.
+    if (req.unsandboxed === true) return false;
     if (req.toolName !== 'run_command' || !req.command || req.inlineEval || req.riskLevel > 2) {
         return false;
     }
@@ -290,8 +317,12 @@ export class AutoReviewer {
         }
         const routineDecision = routinePolicyReview(req);
         if (routineDecision) return routineDecision;
+        // An unsandboxed execution is a fresh contract every time: it never reads an
+        // approval granted while the sandbox still confined the same command, and it
+        // never seeds the cache with a decision made under looser terms.
+        const cacheable = !req.inlineEval && req.unsandboxed !== true;
         const key = this.cacheKey(req);
-        if (!req.inlineEval) {
+        if (cacheable) {
             const cached = this.cache.get(key);
             if (cached) return this.trackDecision(req, { ...cached, fromCache: true });
         }
@@ -307,6 +338,8 @@ export class AutoReviewer {
             networkHosts: req.networkHosts?.slice(0, 20),
             classification: req.classification,
             inlineEval: req.inlineEval,
+            unsandboxed: req.unsandboxed === true,
+            sandboxMode: req.sandboxMode,
             systemReason: req.systemReason,
             userMessages_authorization_evidence: req.userMessages?.slice(-4),
             agentReason_untrusted: req.agentReason,
@@ -321,7 +354,7 @@ export class AutoReviewer {
             }
             // Only exact-action, single-run results are cached. Never turn a
             // reviewer response into a broader command-prefix capability.
-            if (decision.verdict !== 'ask_user' && !req.inlineEval) this.cache.set(key, decision);
+            if (decision.verdict !== 'ask_user' && cacheable) this.cache.set(key, decision);
             return this.trackDecision(req, decision);
         } catch (e) {
             return policyDecision(

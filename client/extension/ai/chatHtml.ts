@@ -561,6 +561,17 @@ ${stylesheetLinks}
                     <span class="settings-toggle-label">${t('Auto-review approval requests', '自动审核审批请求 (Auto-review)')}</span>
                     <label class="toggle-switch"><input type="checkbox" id="approvalsAutoReview"><span class="toggle-track"></span></label>
                 </div>
+                <div class="settings-group">
+                    <label class="settings-label">${t('Approval reviewer model', '审批模型')}</label>
+                    <div class="settings-inline-row" style="display:flex; gap:8px; align-items:center;">
+                        <select class="settings-select" id="approvalsReviewerProvider" style="flex:1 1 40%;">
+                            <option value="">${t('Inherit main model', '沿用主模型')}</option>
+                        </select>
+                        <input class="settings-input" id="approvalsReviewerModelInput" style="flex:1 1 60%;" placeholder="${t('Leave empty to use the provider default model', '留空使用该提供商默认模型')}">
+                        <datalist id="approvalsReviewerModelDatalist"></datalist>
+                    </div>
+                    <div class="settings-hint" style="margin-top:6px;">${t('Leave empty to inherit the main chat model. The reviewer only decides whether to approve or deny a request; it can never widen the sandbox and falls back to asking you when it fails or times out. Each decision costs an extra model call.', '留空即沿用当前主模型。审批模型只判断是否批准，不会扩大沙箱；调用失败或超时会回落到由你确认。每次审批都会额外消耗一次模型调用。')}</div>
+                </div>
                 <div class="settings-hint">${t('When enabled, a read-only reviewer model approves most commands first. Unclear, escalated, or destructive actions still ask you.', '开启后由只读评审模型先行审批大部分命令；拿不准、升级请求或破坏性操作仍会询问用户。')}</div>
             </div>
         </div>

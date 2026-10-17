@@ -1,6 +1,6 @@
 import { expect } from 'chai';
 import { buildSandboxedEnv } from '../../extension/ai/runner/shellEnv';
-import { AutoReviewer } from '../../extension/ai/runner/autoReviewer';
+import { AutoReviewer, resolveReviewerRoute } from '../../extension/ai/runner/autoReviewer';
 
 function loadPermissionPolicyModule() {
     const moduleLoader = require('module') as { _load: (...args: any[]) => any };
@@ -308,6 +308,111 @@ describe('autoReviewer', () => {
         const third = await reviewer.review({ ...baseRequest, id: 'd3', command: 'tool three' });
         expect(third.circuitBreaker).to.equal(true);
         expect(third.rationale).to.include('stop retrying');
+    });
+
+    it('sends unsandboxed routine project commands to the reviewer instead of auto-approving', async () => {
+        let called = 0;
+        const reviewer = new AutoReviewer(async () => {
+            called++;
+            return '{"verdict":"approve_once","riskLevel":"medium","rationale":"user asked for it"}';
+        });
+        const decision = await reviewer.review({
+            ...baseRequest,
+            command: 'npm test',
+            classification: ['unknown'],
+            unsandboxed: true,
+        });
+
+        expect(called).to.equal(1);
+        expect(decision.verdict).to.equal('approve_once');
+        expect(decision.decisionSource).to.equal('model');
+    });
+
+    it('sends unsandboxed low-risk bounded actions to the reviewer instead of auto-approving', async () => {
+        let called = 0;
+        const reviewer = new AutoReviewer(async () => {
+            called++;
+            return '{"verdict":"ask_user","riskLevel":"low","rationale":"sandbox is off"}';
+        });
+        const decision = await reviewer.review({
+            ...baseRequest,
+            id: 'p_low_unsandboxed',
+            riskLevel: 0,
+            command: undefined,
+            toolName: 'edit_file',
+            targetPaths: ['src/example.ts'],
+            unsandboxed: true,
+        });
+
+        expect(called).to.equal(1);
+        expect(decision.decisionSource).to.equal('model');
+    });
+
+    it('never reads or writes the review cache for unsandboxed executions', async () => {
+        let called = 0;
+        const reviewer = new AutoReviewer(async () => {
+            called++;
+            return '{"verdict":"approve_once","riskLevel":"medium","rationale":"ok"}';
+        });
+
+        const first = await reviewer.review({ ...baseRequest, unsandboxed: true, sandboxMode: 'danger-full-access' });
+        const second = await reviewer.review({ ...baseRequest, id: 'p2', unsandboxed: true, sandboxMode: 'danger-full-access' });
+        expect(called).to.equal(2);
+        expect(first.fromCache).to.equal(undefined);
+        expect(second.fromCache).to.equal(undefined);
+
+        // The sandboxed form of the same action keeps the existing cache behaviour.
+        await reviewer.review({ ...baseRequest, id: 'p3', unsandboxed: false });
+        const sandboxedRepeat = await reviewer.review({ ...baseRequest, id: 'p4', unsandboxed: false });
+        expect(called).to.equal(3);
+        expect(sandboxedRepeat.fromCache).to.equal(true);
+    });
+
+    it('reports the sandbox state to the reviewer payload', async () => {
+        let seenUserPrompt = '';
+        const reviewer = new AutoReviewer(async (_system, user) => {
+            seenUserPrompt = user;
+            return '{"verdict":"ask_user","rationale":"sandbox off"}';
+        });
+        await reviewer.review({ ...baseRequest, unsandboxed: true, sandboxMode: 'danger-full-access' });
+
+        expect(seenUserPrompt).to.include('"unsandboxed": true');
+        expect(seenUserPrompt).to.include('"sandboxMode": "danger-full-access"');
+    });
+
+    it('keeps escalation as a hard gate even when the execution is unsandboxed', async () => {
+        let called = 0;
+        const reviewer = new AutoReviewer(async () => { called++; return '{"verdict":"approve_once","rationale":"x"}'; });
+        const decision = await reviewer.review({ ...baseRequest, unsandboxed: true, escalation: true });
+
+        expect(decision.verdict).to.equal('ask_user');
+        expect(called).to.equal(0);
+    });
+});
+
+describe('resolveReviewerRoute', () => {
+    it('reuses the main model when the provider is blank', () => {
+        expect(resolveReviewerRoute('', '')).to.deep.equal({});
+        expect(resolveReviewerRoute('   ', 'some-model')).to.deep.equal({});
+        expect(resolveReviewerRoute(undefined, undefined)).to.deep.equal({});
+    });
+
+    it('returns only the provider when the model is blank', () => {
+        expect(resolveReviewerRoute('workbuddy-subscription', '')).to.deep.equal({ providerId: 'workbuddy-subscription' });
+        expect(resolveReviewerRoute(' workbuddy-subscription ', '  ')).to.deep.equal({ providerId: 'workbuddy-subscription' });
+    });
+
+    it('returns both when the provider and model are set', () => {
+        expect(resolveReviewerRoute('workbuddy-subscription', 'deepseek-v4.1-flash')).to.deep.equal({
+            providerId: 'workbuddy-subscription',
+            model: 'deepseek-v4.1-flash',
+        });
+    });
+
+    it('drops a model that has no provider so it cannot be paired with the main provider', () => {
+        expect(resolveReviewerRoute('', 'deepseek-v4.1-flash')).to.deep.equal({});
+        expect(resolveReviewerRoute(null, 'deepseek-v4.1-flash')).to.deep.equal({});
+        expect(resolveReviewerRoute(42, 'deepseek-v4.1-flash')).to.deep.equal({});
     });
 });
 

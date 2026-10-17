@@ -2761,7 +2761,7 @@ export type HostMessage =
     | { type: 'topicTitleGenerated'; topicId: string; title: string }
     | { type: 'topicForked'; newTopicId: string; title: string }
     | { type: 'permissionRequest'; permissionId: string; itemId: string; threadId?: string; turnId?: string; tool: string; description: string; command?: string; allowAlways?: boolean; availableDecisions: PermissionDecision[]; proposedRule?: { commandPrefix: string[]; cwdScope: string; riskMax: number; scope: 'session' }; preflight?: PermissionRequestPreflight }
-    | { type: 'permissionResolved'; permissionId: string; itemId: string; threadId?: string; turnId?: string; decision: PermissionDecision; reviewer: 'user' | 'auto_review' | 'policy' }
+    | { type: 'permissionResolved'; permissionId: string; itemId: string; threadId?: string; turnId?: string; decision: PermissionDecision; reviewer: 'user' | 'auto_review' | 'policy'; reviewerProvider?: string; reviewerModel?: string; unsandboxed?: boolean }
     | { type: 'questionRequest'; questionId: string; topicId: string; threadId?: string; turnId?: string; questions: AskUserQuestionItem[] }
     | { type: 'questionResolved'; questionId: string; cancelled?: boolean }
     | { type: 'floatingCardResolved'; card: 'permission' | 'question' | 'write' | 'plan' | 'walkthrough' | 'blueprint'; id?: string }
@@ -2849,7 +2849,7 @@ export interface PanelSettings {
     maxContextTokens: number;
     agentFileWriteMode: 'confirm' | 'auto';
     /** Approval reviewer: 'user' shows cards; 'auto_review' routes to the read-only LLM reviewer first. */
-    approvals?: { reviewer?: 'user' | 'auto_review' };
+    approvals?: { reviewer?: 'user' | 'auto_review'; reviewerProvider?: string; reviewerModel?: string };
     /** Mirror of stellarisLanguageServices.ai.developer.disableSecuritySandbox — the 'full' write tier. */
     securitySandboxDisabled?: boolean;
     sandboxBackend?: { available: boolean; backend?: string; message: string };

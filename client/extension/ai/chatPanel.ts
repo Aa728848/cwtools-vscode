@@ -74,7 +74,7 @@ import {
 } from './runner/sessionPermissions';
 import type { RuntimeItem } from './runner/runtimeItems';
 import { isSecuritySandboxDisabled } from './workspaceSandbox';
-import { AutoReviewer } from './runner/autoReviewer';
+import { AutoReviewer, resolveReviewerRoute } from './runner/autoReviewer';
 import { AgentUiBroadcaster } from './agentUiBroadcaster';
 import { ArtifactStore } from './artifactStore';
 import { resolveAgentProfile } from './agentProfile';
@@ -3578,7 +3578,9 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         }
 
         // 联动 PermissionPolicyStore 进行高精细粒度低风险命令豁免，保障安全边界
-        if (tool === 'run_command' && !isEscalationRequest) {
+        // A memorized approval was granted while the sandbox still confined the
+        // command; it cannot authorize the same command to run without one.
+        if (tool === 'run_command' && !isEscalationRequest && context?.preflight?.unsandboxed !== true) {
             const riskLevel = context?.preflight?.riskLevel ?? 0;
             const approved = PermissionPolicyStore.getInstance().isApproved(
                 'run_command',
@@ -3786,14 +3788,30 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         });
     }
 
+    /** Configured reviewer route; both values are plain settings strings. */
+    private reviewerRoute(): { providerId?: string; model?: string } {
+        const config = vs.workspace.getConfiguration('stellarisLanguageServices.ai');
+        return resolveReviewerRoute(
+            config.get<string>('approvals.reviewerProvider', ''),
+            config.get<string>('approvals.reviewerModel', ''),
+        );
+    }
+
     private getAutoReviewer(): AutoReviewer {
         if (!this.autoReviewer) {
             this.autoReviewer = new AutoReviewer(async (system, user) => {
                 const messages: ChatMessage[] = [{ role: 'system', content: system }, { role: 'user', content: user }];
                 const startedAt = Date.now();
+                // Read the route per call so a settings change takes effect without
+                // rebuilding the reviewer (or restarting the extension host).
+                const route = this.reviewerRoute();
                 const res = await this.aiService.chatCompletion(
                     messages,
-                    { temperature: 0, maxTokens: 300, disableThinking: true, requestTimeoutMs: 30_000 }
+                    {
+                        temperature: 0, maxTokens: 300, disableThinking: true, requestTimeoutMs: 30_000,
+                        ...(route.providerId ? { providerId: route.providerId } : {}),
+                        ...(route.model ? { model: route.model } : {}),
+                    }
                 );
                 this.recordAuxiliaryProviderUsage(res, messages, 'approval_review', 'approval_review', startedAt);
                 const content = res.choices?.[0]?.message?.content;
@@ -3813,6 +3831,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
     ): Promise<boolean | undefined> {
         const preflight = context?.preflight;
         const reviewRunId = context?.runnerOptions?.runRecord?.runId ?? this.currentRunId;
+        const reviewerRoute = this.reviewerRoute();
         const decision = await this.getAutoReviewer().review({
             id,
             runId: reviewRunId,
@@ -3828,6 +3847,8 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             systemReason: description,
             escalation: !!preflight?.escalation || !!preflight?.requiresEscalation,
             inlineEval: preflight?.opaqueExecution === true || (!!command && hasInlineEvalPayload(command)),
+            unsandboxed: preflight?.unsandboxed === true,
+            sandboxMode: preflight?.sandboxMode,
             userMessages: this.conversationMessages
                 .filter(message => message.role === 'user')
                 .slice(-4)
@@ -3847,6 +3868,9 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                 userAuthorization: decision.userAuthorization,
                 decisionSource: decision.decisionSource,
                 fromCache: !!decision.fromCache,
+                reviewerProvider: reviewerRoute.providerId,
+                reviewerModel: reviewerRoute.model,
+                unsandboxed: preflight?.unsandboxed === true,
             }, { invocationId: id }).catch(() => {});
         }
         if (decision.verdict === 'ask_user') return undefined;
@@ -3875,6 +3899,9 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                 riskLevel: decision.riskLevel,
                 userAuthorization: decision.userAuthorization,
                 decisionSource: decision.decisionSource,
+                reviewerProvider: reviewerRoute.providerId,
+                reviewerModel: reviewerRoute.model,
+                unsandboxed: preflight?.unsandboxed === true,
             }, { invocationId: id }).catch(() => {});
             runLedger.appendEvent(reviewRunId, 'item_completed', {
                 itemId: id,
@@ -3897,6 +3924,9 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             turnId: context?.runnerOptions?.turnId,
             decision: allowed ? 'accept' : 'decline',
             reviewer: 'auto_review',
+            reviewerProvider: reviewerRoute.providerId,
+            reviewerModel: reviewerRoute.model,
+            unsandboxed: preflight?.unsandboxed === true,
         });
         return allowed;
     }

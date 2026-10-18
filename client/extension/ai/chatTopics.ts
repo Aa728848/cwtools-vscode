@@ -12,6 +12,15 @@ import type { AgentModeOverride, ChatTopic, ChatHistoryMessage, HostMessage, Cha
 import { UI, aiText, getAiMessageLocale } from './messages';
 import { getPrivateAiStorageRoot, getProjectWorkspaceRoot } from './workspacePaths';
 import { normalizeSchedulingState } from './runner/scheduling';
+import { atomicWriteTextSync, readJsonWithBackup } from './runner/durableStorage';
+import { ErrorReporter } from './errorReporter';
+
+/**
+ * Upper bound on how many topics are written back. Trimming on persist is a
+ * deliberate storage bound, but it is applied to what is *stored*, never to
+ * what is currently in memory.
+ */
+const MAX_PERSISTED_TOPICS = 50;
 
 function readSchedulingState(value: unknown) {
     try {
@@ -38,40 +47,65 @@ export function readModeOverride(value: unknown): AgentModeOverride {
         : 'auto';
 }
 
-function readStoredTopic(value: unknown): ChatTopic | undefined {
-    if (!isRecord(value)
-        || typeof value.id !== 'string'
-        || typeof value.title !== 'string'
-        || typeof value.createdAt !== 'number'
-        || typeof value.updatedAt !== 'number'
-        || !Array.isArray(value.messages)) return undefined;
+/**
+ * Topics the GUI lists and the Agent can resume are the user's only copy of
+ * their conversation history: no other subsystem stores them. Validation and
+ * storage therefore have to fail loudly and additively rather than quietly
+ * dropping entries, and a store that cannot be read must never be replaced.
+ */
+export interface TopicStoreLoadResult {
+    /** Topics recovered from the newest readable generation. */
+    topics: ChatTopic[];
+    /** Entries present in that generation but rejected by validation. */
+    skipped: number;
+    /** True when the primary file was unusable and `<file>.bak` was read instead. */
+    recoveredFromBackup: boolean;
+    /** Entries rejected by validation, kept verbatim so writes preserve them. */
+    rejected: unknown[];
+    /** True when a store file exists but no generation could be read. */
+    unreadable: boolean;
+}
+
+interface RejectedTopic { reason: string }
+
+function readStoredTopicWithReason(value: unknown): { topic: ChatTopic } | RejectedTopic {
+    if (!isRecord(value)) return { reason: 'entry is not an object' };
+    if (typeof value.id !== 'string' || !value.id) return { reason: 'missing id' };
+    if (typeof value.title !== 'string') return { reason: `${value.id}: missing title` };
+    if (typeof value.createdAt !== 'number') return { reason: `${value.id}: missing createdAt` };
+    if (typeof value.updatedAt !== 'number') return { reason: `${value.id}: missing updatedAt` };
+    if (!Array.isArray(value.messages)) return { reason: `${value.id}: messages is not an array` };
     const schedulingState = readSchedulingState(value.schedulingState);
-    if (!schedulingState) return undefined;
+    if (!schedulingState) return { reason: `${value.id}: unusable schedulingState` };
     if (!value.messages.every(message => isRecord(message)
         && (message.role === 'user' || message.role === 'assistant')
         && typeof message.content === 'string'
-        && typeof message.timestamp === 'number')) return undefined;
+        && typeof message.timestamp === 'number')) {
+        return { reason: `${value.id}: malformed message` };
+    }
     // Topics written before the AI Workflow subsystem was removed may still
     // carry `workflowId` / `workflowReturnSchedulingState`. They are dropped
     // here rather than rejected: a legacy field must not make a whole topic
     // unreadable, and the removed concept has nothing left to restore.
     return {
-        id: value.id,
-        title: value.title,
-        createdAt: value.createdAt,
-        updatedAt: value.updatedAt,
-        messages: value.messages as ChatHistoryMessage[],
-        parentTopicId: typeof value.parentTopicId === 'string' ? value.parentTopicId : undefined,
-        forkedFromMessageIndex: Number.isSafeInteger(value.forkedFromMessageIndex) ? value.forkedFromMessageIndex as number : undefined,
-        archived: typeof value.archived === 'boolean' ? value.archived : undefined,
-        pinned: typeof value.pinned === 'boolean' ? value.pinned : undefined,
-        workspaceId: typeof value.workspaceId === 'string' ? value.workspaceId : undefined,
-        workspaceLabel: typeof value.workspaceLabel === 'string' ? value.workspaceLabel : undefined,
-        schedulingState,
-        modeOverride: readModeOverride(value.modeOverride),
-        approvedPlanArtifact: typeof value.approvedPlanArtifact === 'string' && value.approvedPlanArtifact
-            ? value.approvedPlanArtifact
-            : undefined,
+        topic: {
+            id: value.id,
+            title: value.title,
+            createdAt: value.createdAt,
+            updatedAt: value.updatedAt,
+            messages: value.messages as ChatHistoryMessage[],
+            parentTopicId: typeof value.parentTopicId === 'string' ? value.parentTopicId : undefined,
+            forkedFromMessageIndex: Number.isSafeInteger(value.forkedFromMessageIndex) ? value.forkedFromMessageIndex as number : undefined,
+            archived: typeof value.archived === 'boolean' ? value.archived : undefined,
+            pinned: typeof value.pinned === 'boolean' ? value.pinned : undefined,
+            workspaceId: typeof value.workspaceId === 'string' ? value.workspaceId : undefined,
+            workspaceLabel: typeof value.workspaceLabel === 'string' ? value.workspaceLabel : undefined,
+            schedulingState,
+            modeOverride: readModeOverride(value.modeOverride),
+            approvedPlanArtifact: typeof value.approvedPlanArtifact === 'string' && value.approvedPlanArtifact
+                ? value.approvedPlanArtifact
+                : undefined,
+        },
     };
 }
 
@@ -92,6 +126,14 @@ export class ChatTopicManager {
     currentTopic: ChatTopic | null = null;
     topics: ChatTopic[] = [];
     public showArchived: boolean = false;
+    /**
+     * Set when the store could not be read at all. No write path may run while
+     * it is set: the in-memory list is empty only because loading failed, so
+     * persisting it would replace the user's history with that emptiness.
+     */
+    private persistBlockedReason: string | undefined;
+    /** Raw entries that failed validation, rewritten verbatim on every save. */
+    private preservedEntries: unknown[] = [];
 
     constructor(
         private storageUri: vs.Uri | undefined,
@@ -108,36 +150,103 @@ export class ChatTopicManager {
         return path.join(this.storageUri.fsPath, 'ai-chat-topics.json');
     }
 
+    /**
+     * Read the topic store, preferring the primary file and falling back to
+     * the previous complete generation written by {@link atomicWriteTextSync}.
+     * Returns an empty list for a genuinely absent store, and a blocked store
+     * when generations exist but none can be parsed.
+     */
+    readStore(): TopicStoreLoadResult {
+        const filePath = this.topicsFilePath;
+        const absent: TopicStoreLoadResult = {
+            topics: [], skipped: 0, rejected: [], recoveredFromBackup: false, unreadable: false,
+        };
+        if (this.persistence === 'off' || !filePath) return absent;
+        if (!fs.existsSync(filePath) && !fs.existsSync(`${filePath}.bak`)) return absent;
+        // The validator is part of the read, not a step after it: a primary
+        // file that exists but no longer parses must fall through to the
+        // previous complete generation instead of blocking recovery.
+        const stored = readJsonWithBackup<unknown[]>(filePath, Array.isArray);
+        if (!stored) return { ...absent, unreadable: true };
+        const parsed = stored.value;
+        const topics: ChatTopic[] = [];
+        const rejected: unknown[] = [];
+        const reasons: string[] = [];
+        for (const entry of parsed) {
+            const result = readStoredTopicWithReason(entry);
+            if ('topic' in result) topics.push(result.topic);
+            else {
+                rejected.push(entry);
+                reasons.push(result.reason);
+            }
+        }
+        return {
+            topics,
+            skipped: reasons.length,
+            rejected,
+            recoveredFromBackup: stored.recoveredFromBackup,
+            unreadable: false,
+        };
+    }
+
     loadTopics(): void {
         if (this.persistence === 'off') return;
         const filePath = this.topicsFilePath;
         if (!filePath) return;
-        try {
-            if (fs.existsSync(filePath)) {
-                const data = fs.readFileSync(filePath, 'utf-8');
-                const parsed: unknown = JSON.parse(data);
-                this.topics = Array.isArray(parsed)
-                    ? parsed.map(readStoredTopic).filter((topic): topic is ChatTopic => !!topic)
-                    : [];
-            }
-        } catch { /* ignore */ }
+        const result = this.readStore();
+        this.persistBlockedReason = undefined;
+        this.preservedEntries = result.rejected;
+        this.topics = result.topics;
+        if (result.unreadable) {
+            // Nothing was recovered, so the in-memory list is empty for a
+            // reason that has nothing to do with the user deleting topics.
+            this.persistBlockedReason = filePath;
+            ErrorReporter.warn(
+                'ChatTopics',
+                `Topic history at ${filePath} could not be read; it will not be overwritten`,
+            );
+            return;
+        }
+        if (result.recoveredFromBackup) {
+            ErrorReporter.warn('ChatTopics', `Recovered topic history from ${path.basename(filePath)}.bak`);
+        }
+        if (result.skipped > 0) {
+            // A single unreadable entry used to cost the user that topic and,
+            // through the next save, the entry itself. It is now hidden from
+            // the list but written back verbatim so the data stays recoverable.
+            ErrorReporter.warn(
+                'ChatTopics',
+                `Skipped ${result.skipped} unreadable topic(s) in ${path.basename(filePath)}; the raw entries are preserved`,
+            );
+        }
     }
 
     saveTopics(): void {
         if (this.persistence === 'off') return;
         const filePath = this.topicsFilePath;
         if (!filePath) return;
+        if (this.persistBlockedReason) {
+            // Writing now would replace the user's unreadable-but-present
+            // history with an empty list.
+            ErrorReporter.debug(
+                'ChatTopics',
+                `Skipped saving topic history because ${path.basename(this.persistBlockedReason)} could not be read`,
+            );
+            return;
+        }
         try {
-            const dir = path.dirname(filePath);
-            if (!fs.existsSync(dir)) {
-                fs.mkdirSync(dir, { recursive: true });
-            }
-            // Keep only the last 50 topics to limit file size
-            const toSave = this.topics.slice(0, 50).map(topic => this.persistence === 'metadata'
+            // Keep only the last `MAX_PERSISTED_TOPICS` topics to bound the file;
+            // the trimmed tail is still held in memory for this session.
+            const retained = this.topics.slice(0, MAX_PERSISTED_TOPICS).map(topic => this.persistence === 'metadata'
                 ? { ...topic, messages: [] }
                 : topic);
-            fs.writeFileSync(filePath, JSON.stringify(toSave, null, 2), 'utf-8');
-        } catch { /* ignore */ }
+            const payload = this.preservedEntries.length > 0
+                ? [...retained, ...this.preservedEntries]
+                : retained;
+            atomicWriteTextSync(filePath, JSON.stringify(payload, null, 2));
+        } catch (error) {
+            ErrorReporter.warn('ChatTopics', `Failed to save topic history to ${filePath}`, error);
+        }
     }
 
     // ─── Topic CRUD ──────────────────────────────────────────────────────────
@@ -261,10 +370,13 @@ export class ChatTopicManager {
         if (!topic) return false;
         topic.archived = !topic.archived;
         const shouldStartNew = this.currentTopic?.id === topicId && topic.archived;
+        // Persist before switching views: archiving the open topic clears the
+        // current topic, and the archive flag must already be on disk when the
+        // panel is reopened.
+        this.saveTopics();
         if (shouldStartNew) {
             this.startNewTopic();
         }
-        this.saveTopics();
         this.sendTopicList();
         return shouldStartNew;
     }

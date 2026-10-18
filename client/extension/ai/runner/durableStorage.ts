@@ -55,6 +55,60 @@ async function writeAtomicGeneration(filePath: string, contents: string): Promis
     }
 }
 
+/**
+ * Synchronous counterpart of {@link atomicWriteText}, for state that callers
+ * persist from synchronous code paths (chat topic history is saved from
+ * dispose, rename and archive handlers alike).
+ *
+ * The guarantee is the same one that matters here: the destination is replaced
+ * by a same-directory rename, so an interrupted extension host leaves either
+ * the previous complete generation or the new one on disk — never a truncated
+ * file — and the previous generation survives as `<file>.bak`.
+ */
+export function atomicWriteTextSync(filePath: string, contents: string): void {
+    const dir = path.dirname(filePath);
+    fs.mkdirSync(dir, { recursive: true });
+
+    const tempPath = path.join(
+        dir,
+        `.${path.basename(filePath)}.${process.pid}.${Date.now()}.${Math.random().toString(36).slice(2)}.tmp`,
+    );
+    const backupPath = `${filePath}.bak`;
+    let movedExisting = false;
+
+    const descriptor = fs.openSync(tempPath, 'w', 0o600);
+    try {
+        fs.writeFileSync(descriptor, contents, 'utf8');
+        fs.fsyncSync(descriptor);
+    } finally {
+        fs.closeSync(descriptor);
+    }
+
+    try {
+        if (fs.existsSync(filePath)) {
+            fs.rmSync(backupPath, { force: true });
+            fs.renameSync(filePath, backupPath);
+            movedExisting = true;
+        }
+        fs.renameSync(tempPath, filePath);
+    } catch (error) {
+        if (movedExisting && !fs.existsSync(filePath) && fs.existsSync(backupPath)) {
+            try {
+                fs.renameSync(backupPath, filePath);
+            } catch {
+                // Best effort: the backup still holds the previous generation.
+            }
+        }
+        throw error;
+    } finally {
+        try {
+            fs.rmSync(tempPath, { force: true });
+        } catch {
+            // Best effort: a leftover temp file never shadows the real one.
+        }
+    }
+}
+
 export function atomicWriteText(filePath: string, contents: string): Promise<void> {
     const key = path.resolve(filePath);
     const previous = atomicWriteQueues.get(key) ?? Promise.resolve();

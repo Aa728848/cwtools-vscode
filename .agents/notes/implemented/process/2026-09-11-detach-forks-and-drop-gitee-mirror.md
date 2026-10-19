@@ -149,3 +149,4 @@ Aa728848
 ## 关联
 
 - 子模块指针与提交纪律见 `AGENTS.md` 的 Repository Boundaries 一节；本次未改变子模块归属与提交策略。
+- 后续实际落地的脱离方式（同名删除重建）：`2026-10-19-detach-forks-by-recreating-standalone-repositories.md`

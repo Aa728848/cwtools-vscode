@@ -73,10 +73,9 @@ export function sanitizePathInput(inputPath: string): string {
     return value.replace(/[.,;，。；]+$/g, '').trim();
 }
 
-// Shared artifacts (the project profile) intentionally stay in the project
-// .cwtools directory; topic-scoped private data lives in the private agent
-// storage root.
-const SHARED_AI_STORAGE_SEGMENTS = new Set(['project']);
+// Shared project artifacts intentionally stay in the project .cwtools
+// directory; topic-scoped private data lives in the private agent storage root.
+export const SHARED_AI_STORAGE_SEGMENTS = new Set(['project', 'skills', 'experience.md', 'mcp.json', 'hooks.json']);
 
 function resolveAiStorageAlias(filePath: string, workspaceRoot: string): string | undefined {
     const normalized = filePath.trim().replace(/\\/g, '/');
@@ -84,7 +83,7 @@ function resolveAiStorageAlias(filePath: string, workspaceRoot: string): string 
     if (!match) return undefined;
 
     const rest = (match[1] ?? '').split('/').filter(Boolean);
-    if (!SHARED_AI_STORAGE_SEGMENTS.has(rest[0]?.toLowerCase() ?? '')) {
+    if (rest.length > 0 && !SHARED_AI_STORAGE_SEGMENTS.has(rest[0]?.toLowerCase() ?? '')) {
         const topicRoot = getPrivateTopicRoot(workspaceRoot);
         if (topicRoot) return path.join(topicRoot, ...rest);
     }

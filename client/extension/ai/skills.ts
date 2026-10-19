@@ -330,7 +330,7 @@ export function buildSkillIndexPrompt(roots: SkillLookupRoots, domain?: AgentRun
 
     return [
         '## Installed Agent Skills',
-        'Skill bodies are not embedded in the system prompt. When a skill is relevant, load `run_skill` through `select_tools` if needed, call it with the exact skill name, then follow the returned SKILL.md instructions.',
+        'Skill bodies are not embedded in the system prompt. When a skill is relevant, load `run_skill` through `select_tools` if needed, call it with the exact skill name, then follow the returned SKILL.md instructions. When the user asks to create or update a reusable skill, load `save_skill` through `select_tools` if needed and call `save_skill` (`scope="project"` or `scope="user"`) instead of writing `SKILL.md` or experience files with `write_file`/`edit_file`.',
         body,
     ].join('\n');
 }

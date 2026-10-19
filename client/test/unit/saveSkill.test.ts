@@ -5,13 +5,15 @@ import * as path from 'path';
 import { buildSkillIndexPrompt, listSkills, loadSkill, SKILL_BODY_CHAR_LIMIT } from '../../extension/ai/skills';
 import { saveSkill, skillSaveDirectory, SKILL_DESCRIPTION_CHAR_LIMIT } from '../../extension/ai/skillsWriter';
 import { setAiMessageLocale } from '../../extension/ai/messages';
-import { GENERAL_WRITE, PARADOX_PLAN } from './schedulingFixtures';
+import { GENERAL_WRITE, PARADOX_EXPLORE, PARADOX_PLAN } from './schedulingFixtures';
+import { TOOL_REGISTRY } from '../../extension/ai/tools/registry';
 import {
     AgentToolExecutor,
     makeWorkspace,
     cleanupWorkspace,
     resetStubState,
     resetSandboxStorageForTesting,
+    workspacePaths,
 } from './agentToolSafetyFixtures';
 
 const vscodeStub = {
@@ -335,13 +337,66 @@ describe('save_skill tool executor wiring', () => {
         expect(result.error).to.include('scope');
     });
 
-    it('stays permitted in plan mode, writing only the skill artifact', async () => {
+    it('stays permitted in plan and explore modes, and auto-discloses with file_write', async () => {
+        expect(TOOL_REGISTRY.get('save_skill')?.group).to.equal('file_write');
+
         const executor = new AgentToolExecutor({} as any, workspaceRoot);
-        const result = await executor.execute('save_skill', {
+        const planResult = await executor.execute('save_skill', {
             name: 'plan-skill', description: 'd', body: 'b', scope: 'project',
-        }, { runnerOptions: { schedulingState: PARADOX_PLAN } } as any) as any;
-        expect(result.success).to.equal(true);
+        }, { runnerOptions: { schedulingState: { ...PARADOX_PLAN, profileName: 'planner' } } } as any) as any;
+        expect(planResult.success).to.equal(true);
         expect(fs.existsSync(path.join(workspaceRoot, '.agents', 'skills', 'plan-skill', 'SKILL.md'))).to.equal(true);
+
+        const exploreResult = await executor.execute('save_skill', {
+            name: 'explore-skill', description: 'd', body: 'b', scope: 'project',
+        }, { runnerOptions: { schedulingState: PARADOX_EXPLORE } } as any) as any;
+        expect(exploreResult.success).to.equal(true);
+        expect(fs.existsSync(path.join(workspaceRoot, '.agents', 'skills', 'explore-skill', 'SKILL.md'))).to.equal(true);
+    });
+
+    it('returns a recoverable save_skill redirect instead of a run-terminating policy denial when generic write tools target experience.json or skill directories', async () => {
+        const privateRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'cwtools-private-exp-'));
+        workspacePaths.configurePrivateAgentStorage(privateRoot);
+        try {
+            const executor = new AgentToolExecutor({} as any, workspaceRoot);
+            executor.fileWriteMode = 'auto';
+            const context = { runnerOptions: { schedulingState: GENERAL_WRITE, topicId: 'topic-1' } } as any;
+
+            const expTarget = path.join(privateRoot, 'experience', 'dawning_firmament-433ff8c99b', 'experience.json');
+            const expWrite = await executor.execute('write_file', {
+                file: expTarget,
+                content: '{}',
+            }, context) as any;
+            expect(expWrite.success).to.equal(false);
+            expect(expWrite.policyDenied).to.equal(undefined);
+            expect(expWrite.terminalOutcome).to.equal(undefined);
+            expect(expWrite.error).to.include('save_skill');
+            expect(fs.existsSync(expTarget)).to.equal(false);
+
+            const skillTarget = path.join(workspaceRoot, '.agents', 'skills', 'manual-skill', 'SKILL.md');
+            const skillWrite = await executor.execute('write_file', {
+                file: skillTarget,
+                content: '# bad manual write',
+            }, context) as any;
+            expect(skillWrite.success).to.equal(false);
+            expect(skillWrite.policyDenied).to.equal(undefined);
+            expect(skillWrite.terminalOutcome).to.equal(undefined);
+            expect(skillWrite.error).to.include('save_skill');
+            expect(fs.existsSync(skillTarget)).to.equal(false);
+
+            // Project .cwtools/skills stays rooted in the workspace even when private topic storage is active.
+            const projectSkillDir = path.join(workspaceRoot, '.cwtools', 'skills', 'paradox-only');
+            fs.mkdirSync(projectSkillDir, { recursive: true });
+            fs.writeFileSync(path.join(projectSkillDir, 'SKILL.md'), '---\nname: paradox-only\ndescription: test\n---\nBody\n', 'utf8');
+            const readRes = await executor.execute('read_file', {
+                file: '.cwtools/skills/paradox-only/SKILL.md',
+            }, context) as any;
+            expect(readRes.error).to.equal(undefined);
+            expect(readRes.content).to.include('paradox-only');
+        } finally {
+            workspacePaths.configurePrivateAgentStorage(undefined);
+            fs.rmSync(privateRoot, { recursive: true, force: true });
+        }
     });
 });
 

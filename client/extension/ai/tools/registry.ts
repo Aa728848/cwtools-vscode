@@ -367,7 +367,7 @@ const TEAM: AgentToolName[] = [...TEAM_MEMBER_TOOLS, 'team_close'];
 const INTERACTION: AgentToolName[] = ['ask_user_question'];
 
 const GENERIC_FILE_WRITE_TOOLS = new Set<AgentToolName>([
-    'write_file', 'edit_file', 'replace_lines', 'rename_symbol',
+    'write_file', 'edit_file', 'replace_lines', 'rename_symbol', 'save_skill',
 ]);
 const PDX_WRITE_TOOLS = new Set<AgentToolName>([
     'typed_pdx_write', 'candidate_transaction', 'write_localisation',

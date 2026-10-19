@@ -34,6 +34,7 @@ import {
     isSecuritySandboxDisabled,
     resolveReadablePathInput,
     resolveWorkspacePathInput,
+    SHARED_AI_STORAGE_SEGMENTS,
     type WorkspacePathResolution,
 } from '../workspaceSandbox';
 import { GRAPHICS_EXTS, matchesExt } from '../../fileExtensions';
@@ -294,7 +295,10 @@ export class FileToolHandler {
 
         const safeTopicId = topicId.replace(/[^a-zA-Z0-9_.-]/g, '_');
         const rest = (match[1] ?? '').split('/').filter(Boolean);
-        if (rest[0]?.toLowerCase() === safeTopicId.toLowerCase()) {
+        const firstSegment = rest[0]?.toLowerCase() ?? '';
+        if (rest.length === 0
+            || firstSegment === safeTopicId.toLowerCase()
+            || SHARED_AI_STORAGE_SEGMENTS.has(firstSegment)) {
             return filePath;
         }
 

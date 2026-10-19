@@ -41,6 +41,7 @@ import { executeTargetingWeightQuery } from './targetingWeights';
 import { validateOffCanvasGuiPreservation } from '../guiSafety';
 import { loadSkill } from './skills';
 import { saveSkill as saveSkillFile } from './skillsWriter';
+import { getExperienceProjectionPath, getExperienceStoreFilePath } from './experienceStore';
 import { isPlanModeCardArtifactFile, validateGitOpsForMode, validatePlanModeToolUse } from './planModeGuard';
 import { budgetToolResult, TOOL_RESULT_BUDGET_HARD_STUB } from './contextBudget';
 import { aiText, EVIDENCE_GATE_MSG, TEAM_MSG } from './messages';
@@ -1142,13 +1143,41 @@ export class AgentToolExecutor {
         return [...hosts];
     }
 
+    private isManagedSkillOrExperienceTarget(targetPath: string): 'skill' | 'experience' | undefined {
+        const resolved = path.isAbsolute(targetPath)
+            ? path.resolve(targetPath)
+            : path.resolve(this.workspaceRoot, targetPath);
+        const normalized = resolved.replace(/\\/g, '/');
+
+        const expStorePath = getExperienceStoreFilePath(this.workspaceRoot);
+        const expProjPath = getExperienceProjectionPath(this.workspaceRoot);
+        if ((expStorePath && isPathInsideOrEqual(resolved, path.dirname(path.resolve(expStorePath))))
+            || (expProjPath && isPathInsideOrEqual(resolved, path.resolve(expProjPath)))
+            || /\/experience\/[^/]+\/experience\.json(?:\.tmp)?$/i.test(normalized)
+            || /\/\.cwtools\/experience\.md$/i.test(normalized)) {
+            return 'experience';
+        }
+
+        const skillRoots = [
+            this.workspaceRoot ? path.join(this.workspaceRoot, '.agents', 'skills') : '',
+            this.workspaceRoot ? path.join(this.workspaceRoot, '.cwtools', 'skills') : '',
+            path.join(getCwtoolsHomeDir(), 'skills'),
+            this.globalStoragePath ? path.join(this.globalStoragePath, '.agents', 'skills') : '',
+        ].filter(Boolean);
+        if (skillRoots.some(root => isPathInsideOrEqual(resolved, path.resolve(root)))
+            || /\/(?:\.agents|\.cwtools)\/skills(?:\/|$)/i.test(normalized)) {
+            return 'skill';
+        }
+        return undefined;
+    }
+
     /** The single enforced policy boundary for every model-visible tool call. */
     private async enforcePolicy(
         toolName: string,
         args: Record<string, unknown>,
         mode: import('./types').AgentMode,
         context?: import('./types').AgentToolContext,
-    ): Promise<{ allowed: boolean; error?: string }> {
+    ): Promise<{ allowed: boolean; error?: string; recoverable?: boolean }> {
         const entry = TOOL_REGISTRY.get(toolName as any)
             ?? (this.dynamicMcpToolNames.has(toolName) ? TOOL_REGISTRY.get('mcp_call') : undefined);
         if (!entry) return { allowed: false, error: `Unknown tool: ${toolName}` };
@@ -1173,6 +1202,22 @@ export class AgentToolExecutor {
             ? this.candidateTransactions.files.map(file => file.path)
             : getAgentToolTargetFiles(toolName, args, this.workspaceRoot, context?.runnerOptions?.topicId);
         const profile = buildProfile(preset, this.workspaceRoot, profileRules);
+        if (profile.sandboxMode !== 'read-only'
+            && (toolName === 'write_file' || toolName === 'edit_file' || toolName === 'replace_lines')
+            && targets.length > 0) {
+            for (const target of targets) {
+                const managedKind = this.isManagedSkillOrExperienceTarget(target);
+                if (managedKind) {
+                    return {
+                        allowed: false,
+                        recoverable: true,
+                        error: managedKind === 'experience'
+                            ? `Cannot write workspace experience store files directly with '${toolName}' ('${target}'). Workspace experience (experience.json / .cwtools/experience.md) is distilled and managed automatically by the host. If the user asked to preserve reusable experience as an Agent Skill, call 'save_skill' (load it via select_tools({ tools: ["save_skill"] }) if needed) with scope='project' or scope='user'.`
+                            : `Cannot write Agent Skill files directly with '${toolName}' ('${target}'). Use 'save_skill' (load it via select_tools({ tools: ["save_skill"] }) if needed) with scope='project' (.agents/skills/<name>/SKILL.md) or scope='user' (~/.cwtools/skills/<name>/SKILL.md).`,
+                    };
+                }
+            }
+        }
         const topicId = context?.runnerOptions?.topicId;
         if (subject === 'edit' && topicId && targets.length > 0) {
             const topicRoot = path.resolve(getPrivateTopicStorageDir(topicId, this.workspaceRoot));
@@ -1976,6 +2021,7 @@ export class AgentToolExecutor {
         const registryEntry = TOOL_REGISTRY.get(toolName as any);
         const authorization = context?.runnerOptions?.schedulingState?.authorization;
         if (registryEntry && authorization
+            && toolName !== 'save_skill'
             && !authorizationAllowsEffect(authorization, registryEntry.effect, registryEntry.mutating ?? false)) {
             return {
                 success: false,
@@ -2031,6 +2077,9 @@ export class AgentToolExecutor {
 
         const policy = await this.enforcePolicy(toolName, args, mode, context);
         if (!policy.allowed) {
+            if (policy.recoverable) {
+                return { success: false, error: policy.error };
+            }
             return { success: false, error: policy.error, policyDenied: true, terminalOutcome: 'policy_denied' };
         }
 

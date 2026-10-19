@@ -80,7 +80,7 @@ import { getCwtoolsHomeDir } from './homeConfig';
  * shared policy text edited) so prompts cached by older builds are never
  * reused across extension updates (plan §7.1).
  */
-export const PROMPT_TEMPLATE_VERSION = 9;
+export const PROMPT_TEMPLATE_VERSION = 10;
 
 /**
  * Why a frozen system prompt lookup missed. Process-local diagnostics only —

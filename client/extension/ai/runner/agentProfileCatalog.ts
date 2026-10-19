@@ -82,7 +82,7 @@ const BUILTIN_PROFILES: RuntimeAgentProfile[] = [
         name: 'explore',
         description: 'Read-only repository and semantic exploration.',
         authorizationCeiling: 'read_only',
-        tools: ['ask_user_question', 'select_tools', 'read_file', 'list_directory', 'glob_files', 'grep', 'document_symbols', 'workspace_symbols', 'go_to_definition', 'find_references', 'hover_symbol', 'query_*', 'search_*', 'get_*', 'web_*', 'set_memory', 'query_blackboard', 'team_send_message', 'team_members', 'team_task_*'],
+        tools: ['ask_user_question', 'select_tools', 'read_file', 'list_directory', 'glob_files', 'grep', 'document_symbols', 'workspace_symbols', 'go_to_definition', 'find_references', 'hover_symbol', 'query_*', 'search_*', 'get_*', 'run_skill', 'save_skill', 'web_*', 'set_memory', 'query_blackboard', 'team_send_message', 'team_members', 'team_task_*'],
         maxIterations: 40,
         disallowedTools: ['write_*', 'edit_file', 'replace_lines', 'run_command', 'git_ops', 'dispatch_agents'],
         summaryPolicy: {
@@ -95,7 +95,7 @@ const BUILTIN_PROFILES: RuntimeAgentProfile[] = [
         name: 'planner',
         description: 'Plan-only Agent that may write guarded design blueprints.',
         authorizationCeiling: 'plan_write_only',
-        tools: ['ask_user_question', 'select_tools', 'read_file', 'list_directory', 'glob_files', 'grep', 'document_symbols', 'workspace_symbols', 'go_to_definition', 'find_references', 'hover_symbol', 'query_*', 'search_*', 'get_*', 'write_design_blueprint', 'set_memory', 'query_blackboard', 'team_send_message', 'team_members', 'team_task_*'],
+        tools: ['ask_user_question', 'select_tools', 'read_file', 'list_directory', 'glob_files', 'grep', 'document_symbols', 'workspace_symbols', 'go_to_definition', 'find_references', 'hover_symbol', 'query_*', 'search_*', 'get_*', 'run_skill', 'save_skill', 'write_design_blueprint', 'set_memory', 'query_blackboard', 'team_send_message', 'team_members', 'team_task_*'],
         maxIterations: 30,
         disallowedTools: ['edit_file', 'replace_lines', 'run_command', 'git_ops', 'dispatch_agents'],
         summaryPolicy: {
@@ -108,7 +108,7 @@ const BUILTIN_PROFILES: RuntimeAgentProfile[] = [
         name: 'reviewer',
         description: 'Read-only verification and review Agent.',
         authorizationCeiling: 'read_only',
-        tools: ['ask_user_question', 'select_tools', 'read_file', 'glob_files', 'grep', 'document_symbols', 'workspace_symbols', 'go_to_definition', 'find_references', 'hover_symbol', 'query_*', 'get_*', 'validate_*', 'compare_*', 'git_ops', 'set_memory', 'query_blackboard', 'team_send_message', 'team_members', 'team_task_*'],
+        tools: ['ask_user_question', 'select_tools', 'read_file', 'glob_files', 'grep', 'document_symbols', 'workspace_symbols', 'go_to_definition', 'find_references', 'hover_symbol', 'query_*', 'get_*', 'run_skill', 'save_skill', 'validate_*', 'compare_*', 'git_ops', 'set_memory', 'query_blackboard', 'team_send_message', 'team_members', 'team_task_*'],
         maxIterations: 30,
         disallowedTools: ['write_*', 'edit_file', 'replace_lines', 'dispatch_agents'],
         summaryPolicy: {

@@ -82,8 +82,8 @@ Only when the user has NOT explicitly requested a plan, do **not** escalate when
  * workspace experience store, recalled as a dynamic <task-experience> block.
  * The default is to reuse what already worked instead of reinventing it.
  */
-const TASK_EXPERIENCE_USAGE_RULE = `## Recalled Task Experience
-When a \`<task-experience>\` block lists lessons from similar past tasks, prefer its validated approach and heed its pitfalls; deviate only with an explicit reason in your visible process updates.`;
+const TASK_EXPERIENCE_USAGE_RULE = `## Recalled Task Experience & Agent Skills
+When a \`<task-experience>\` block lists lessons from similar past tasks, prefer its validated approach and heed its pitfalls; deviate only with an explicit reason in your visible process updates. Workspace experience (\`experience.json\` / \`experience.md\`) is distilled automatically by the host—never read or write experience store files directly; when the user asks to summarize experience or a reusable procedure into a skill, load \`save_skill\` through \`select_tools\` if needed and call \`save_skill\` (\`scope="project"\` or \`scope="user"\`).`;
 
 function generalRules(isSlim: boolean): string {
     return isSlim

@@ -35,13 +35,18 @@ Agent Skill 只能由用户手工放置文件或经设置面板从外部安装�
 > 写作时以 `save_workflow` 为对照逐层对齐；该对照工具已随 [移除 AI Workflow 子系统](../simplification/2026-10-14-remove-ai-workflow-subsystem.md) 删除，下列清单中 `save_skill` 的每一项仍然成立且是当前唯一来源。
 
 - `tools/definitions.ts`：`save_skill` 定义紧随 `run_skill`；参数 `name/description/body/capability_domain/run_as/allowed_tools/scope/overwrite`，required 为 `name, description, body, scope`。
-- `tools/registry.ts`：`AgentToolName` 联合、`TOOL_DOMAINS.save_skill='shared'`、加入 `EDIT`（自动获得 effect `workspace_write`、riskLevel 2、`per-file-write`、`isWrite`、mutating）、`SUB_AGENT_EXCLUDES`（子代理不可保存技能）、`FILE_SCOPED_WRITE_TOOLS`、`PLAN/EXPLORE/REVIEW/LOC/ORCHESTRATOR/SCRIPT` 各模式集显式列出、`GENERAL_SAVE_SKILL_SCHEMA`（general 域把 `capability_domain` 收窄到 `general|both`）。
+- `tools/registry.ts`：`AgentToolName` 联合、`TOOL_DOMAINS.save_skill='shared'`、加入 `EDIT`（自动获得 effect `workspace_write`、riskLevel 2、`per-file-write`、`isWrite`、mutating）、加入 `GENERIC_FILE_WRITE_TOOLS`（归入 `file_write` 披露组，确保所有 `workspace_write` 执行轮次默认自动披露 `save_skill`，无需模型盲猜工具名）、`SUB_AGENT_EXCLUDES`（子代理不可保存技能）、`FILE_SCOPED_WRITE_TOOLS`、`PLAN/EXPLORE/REVIEW/LOC/ORCHESTRATOR/SCRIPT` 各模式集显式列出、`GENERAL_SAVE_SKILL_SCHEMA`（general 域把 `capability_domain` 收窄到 `general|both`）。
+- `runner/agentProfileCatalog.ts`：`explore`、`planner`、`reviewer` 内置 Profile 的 `tools` 白名单显式包含 `run_skill` 与 `save_skill`；`agentTools.ts` 的 `authorizationAllowsEffect` 门禁对 `save_skill` 放行（交由模式集与 `enforcePolicy` 的 `read-only` preset 守卫把关），使其在 `plan`/`explore`/`review` 模式下同样可用。
+- `skills.ts` 与 `prompt/sections/modePrompts.ts`（`PROMPT_TEMPLATE_VERSION = 10`）：`buildSkillIndexPrompt` 与 `TASK_EXPERIENCE_USAGE_RULE` 明确声明保存/更新技能必须调用 `save_skill`，且工作区经验库（`experience.json` / `experience.md`）由宿主自动蒸馏管理，禁止直接用 `write_file`/`edit_file` 读写。
+- `workspaceSandbox.ts` 与 `tools/fileTools.ts`：`SHARED_AI_STORAGE_SEGMENTS` 扩展为 `['project', 'skills', 'experience.md', 'mcp.json', 'hooks.json']`，且裸 `.cwtools` 与上述共享段在 `normalizeAgentWorkspacePath` 与 `resolveAiStorageAlias` 中均保持指向工作区 `<workspace>/.cwtools`，不再在启用私有 topic 存储时被误重写到 `workspaceStorage/.../topics`。
 - `agentTools.ts`：`TOOL_TIMEOUTS.save_skill = 30s`；dispatch `case 'save_skill'`；handler 收窄输入（`allowed_tools` 逐项校验必须存在于 `TOOL_REGISTRY`）后调 `saveSkillFile`，成功时经 `context?.onStep` 发双语 thinking（`aiText`：「技能已保存：<name>（项目级/用户级），可用 run_skill 调用。」）；general 域守卫：禁止保存 `capability_domain: 'paradox'` 或声明 paradox 域工具的技能。
 - 外围清单跟随：`planModeGuard` 显式放行、`runnerPolicy.NON_DELIVERY_WRITE_TOOLS`、`executePlanHandoff.NON_PROJECT_WRITE_TOOLS`、`autoReviewer.ROUTINE_WRITE_TOOLS`、`experienceStore.ACTION_TOOL_NAMES`。
 
-### 4. 策略面：刻意不向策略引擎上报目标路径
+### 4. 策略面：刻意不向策略引擎上报目标路径 + 通用写工具误写技能/经验路径的可恢复重定向
 
 `getAgentToolTargetFiles` **不加** `save_skill` case。若上报：project scope 目标命中 `DEFAULT_PROTECTED_PATHS` 的 `.agents/**`（protected_path 硬拒、无升级通道），user scope 目标在 writableRoots（仅 workspaceRoot）之外（outside_writable_roots 硬拒、无升级通道），两个 scope 在默认 preset 下都会全灭。不上报目标后，`enforcePolicy` 走 `baseAction('ask')` → workspace_write 属 selfManaged → 放行，与 `save_memory` 等「专用窄写入工具自校验」同型；工具自身以名称正则 + resolve 目录约束限定写入面（只能写 `<skills根>/<合法名>/SKILL.md`），`.agents/**` 对通用写工具的保护不削弱。read-only preset（WRITE_LIKE 拒 edit）与受限模式（workspace_write+mutating 拦截）仍然生效。per-file-write 在无目标时退化取全局锁。
+
+同时，当非 `read-only` preset 下模型误用 `write_file`/`edit_file`/`replace_lines` 直接写技能目录（`.agents/skills`、`.cwtools/skills`、`~/.cwtools/skills`）或宿主私有经验存储（`experience/<key>/experience.json`、`.cwtools/experience.md`）时，`enforcePolicy`（`isManagedSkillOrExperienceTarget`）拦截并返回 `recoverable: true` 的引导错误（提示改用 `save_skill`），`execute()` 不打 `policyDenied: true` / `terminalOutcome: 'policy_denied'`，从而避免整轮对话因 `Target '...' is outside the writable roots.` 直接中止。
 
 ### 5. MCP 面
 

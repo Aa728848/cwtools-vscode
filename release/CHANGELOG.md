@@ -1,5 +1,14 @@
 # Changelog
 
+## [2.32.1] - 2026-10-19
+
+### Agent 技能沉淀与路径边界修复 / Agent Skill Saving and Path Boundary Fixes
+
+- **[修复] `save_skill` 默认披露与经验库/技能路径保护重定向（`save_skill` Disclosure and Recoverable Write Redirect）**：
+  - 将 `save_skill` 纳入 `file_write` 披露组，工作区写入轮次启动时默认对模型可见；在 `explore`、`planner`、`reviewer` 内置 Profile 白名单及 `read_only` 调度授权检查中补齐 `run_skill` 与 `save_skill`，并在系统提示词中明确引导使用 `save_skill` 沉淀技能、禁止直接读写宿主自动管理的 `experience.json` / `experience.md`。
+  - 修复 `.cwtools` 路径别名在存在 `topicId` 时将裸 `.cwtools` 及 `.cwtools/skills`、`.cwtools/experience.md` 等工作区共享项误重写到 `workspaceStorage/.../topics` 的问题；当模型误用 `write_file`/`edit_file`/`replace_lines` 直接写技能目录或 `experience.json` 时，返回可恢复的 `save_skill` 引导错误，不再触发 `outside the writable roots`（`policy_denied`）直接中止整轮对话。
+  - English: [Fix] Put `save_skill` in the `file_write` disclosure group so workspace-write turns expose it by default, allow `run_skill` and `save_skill` across the `explore`/`planner`/`reviewer` profiles, keep shared `.cwtools` segments (`skills`, `experience.md`, `mcp.json`, `hooks.json`) rooted in the workspace instead of private topic storage, and return a recoverable `save_skill` redirect instead of a run-terminating `outside the writable roots` denial when generic file-write tools target skill directories or `experience.json`.
+
 ## [2.32.0] - 2026-10-19
 
 ### 审批边界与对话持久化 / Approval Boundary and Chat Durability

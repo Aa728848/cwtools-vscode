@@ -1,5 +1,26 @@
 # Changelog
 
+## [2.32.0] - 2026-10-19
+
+### 审批边界与对话持久化 / Approval Boundary and Chat Durability
+
+- **[特性] 审批审阅模型可独立配置（Configurable Approval Reviewer Model）**：
+  - 新增 `stellarisLanguageServices.ai.approvals.reviewerProvider` 与 `approvals.reviewerModel`：可以把「是否批准这次工具调用」交给更便宜、稳定、支持 JSON 输出的专用模型，留空沿用主模型；改动即时生效，无需重建 reviewer 或重启扩展宿主。设置页 Agent 区新增对应下拉与输入框，provider 为空时明确标注「继承对话模型」。
+  - 审批器现在能看见「本次执行离开了沙箱」：`unsandboxed` 进入审批 payload 与系统提示，两条不经模型直接放行的规则快路径在无沙箱执行时失效，且这类决策既不读也不写记忆批准缓存。
+  - English: [Feature] `approvals.reviewerProvider` / `approvals.reviewerModel` hand approve/deny to a cheaper JSON-capable model (empty = inherit the conversation model), applied without rebuilding the reviewer or restarting the extension host. The reviewer now sees `unsandboxed` in its payload and system prompt; the two rule fast-paths are disabled for unsandboxed runs, and those decisions neither read nor write the remembered-approval cache.
+- **[特性] 无强制沙箱后端时的「批准一次」降级（Consent-Based Degradation Without a Sandbox Backend）**：
+  - 在没有可验证沙箱后端的主机（例如部分 Windows 环境）上，命令执行不再直接抛出 `SandboxUnavailableError` 让模型停住，而是降级为需要用户逐次确认的执行；paradox-coder 子代理的命令能力在策略层与物理层之间也已对齐，不再被硬编码白名单拦死。
+  - English: [Feature] On hosts without a verifiable sandbox backend, command execution degrades to consent-based execution instead of dead-ending with `SandboxUnavailableError`; the paradox-coder sub-agent's command capability is now consistent between the policy and enforcement layers.
+- **[修复] 话题历史重启后不再丢失（Chat Topic History Durability）**：
+  - 修复「重启后已归档对话消失」：话题存储改为原子写入，读取失败时不再静默当成空列表回写（此前会形成「解析失败 → 内存空 → 覆盖写空」的不可逆链路），单条损坏也不再被永久删除。
+  - English: [Fix] Chat topics now use atomic writes and survive read failures: a parse error no longer silently resets the store to an empty list that is then written back, and a single corrupt record is no longer dropped permanently.
+
+### 仓库与许可 / Repository and License
+
+- **[维护] 仓库脱离 fork 网络与许可双署名（Standalone Repositories and Dual Attribution）**：
+  - `cwtools-vscode` 与子模块仓库 `cwtools`、`cwtools-stellaris-config` 已从上游 fork 网络脱离，改为同名独立仓库；`.gitmodules`、子模块指针与所有仓库链接保持不变。MIT 协议补全为「保留上游署名 + 追加本项目署名」，并列出 `src/LSP` 与三个子模块等衍生来源。
+  - English: [Maintenance] The root repository and the `cwtools` / `cwtools-stellaris-config` submodules left the upstream fork network and are now standalone repositories under unchanged URLs; `.gitmodules` and every repository link stay as they were. The MIT license now carries both the upstream notice and this project's attribution, listing `src/LSP` and the submodules as derivative sources.
+
 ## [2.31.0] - 2026-10-15
 
 ### 舰船索敌权重工具链 / Ship Targeting Weight Toolchain

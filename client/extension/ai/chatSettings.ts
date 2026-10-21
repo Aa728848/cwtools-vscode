@@ -19,11 +19,6 @@ import type { AIService } from './aiService';
 import type { AntigravityLogin } from './antigravity/oauthService';
 import type { CommandCodeLogin } from './commandcode/oauthService';
 import { getKimiCodeAccountStatus } from './kimi/accountStatus';
-import { summarizeWorkBuddyAccounts } from './workbuddy/accountStatus';
-import { loadWorkBuddyCatalog, workBuddyCatalogForSettings, workBuddyContextWindows } from './workbuddy/modelCatalog';
-import { DEFAULT_VISIBLE_MODEL_IDS } from './workbuddy/fallbackModels';
-import { workBuddyHeaders } from './workbuddy/client';
-import type { WorkBuddyLogin } from './workbuddy/client';
 import { isMinimaxCodeCredentialFresh } from './minimaxcode/credentials';
 import { MINIMAX_CODE_MODELS } from './minimaxcode/types';
 import { isClaudeSubscriptionCredentialFresh } from './claudesub/credentials';
@@ -166,7 +161,7 @@ export function buildModelsRequests(
 ): ModelsRequestCandidate[] {
     const cleanEndpoint = normalizeModelEndpointBase(endpoint);
     const apiFormat = getProviderApiFormat(providerId, '', customApiFormat);
-    if (providerId === 'opencode' || providerId === 'opencode-go') {
+    if (providerId === 'opencode') {
         return uniqueModelRequests([
             {
                 url: 'https://models.dev/api.json',
@@ -306,24 +301,6 @@ function readModelContextTokens(model: any): number {
     return Number.isFinite(value) && value > 0 ? Math.floor(value) : 0;
 }
 
-const OPENCODE_GO_DEPRECATED_MODELS = new Set([
-    'glm-5',
-    'hy3-preview',
-    'kimi-k2.5',
-    'mimo-v2-pro',
-    'mimo-v2-omni',
-    'mimo-v2-flash',
-    'minimax-m2.5',
-    'qwen3.5-plus',
-]);
-
-function isDeprecatedProviderModel(providerId: string, modelId: string): boolean {
-    if (providerId === 'opencode-go') {
-        return OPENCODE_GO_DEPRECATED_MODELS.has(modelId.toLowerCase());
-    }
-    return false;
-}
-
 export let lastAISettingsWriteTime = 0;
 
 export class ChatSettingsManager {
@@ -393,46 +370,6 @@ export class ChatSettingsManager {
                 canSignOut: minimaxCodeAccounts.some(entry => entry.source === 'managed'),
             }
             : undefined;
-        const workBuddyAccount = showPanel || config.provider === 'workbuddy-subscription'
-            ? summarizeWorkBuddyAccounts(
-                await this.aiService.listWorkBuddyAccounts(),
-                accountKey => this.aiService.isWorkBuddyAccountHidden(accountKey),
-            )
-            : undefined;
-        // The gateway's own /v3/config is the authority on both the model list and
-        // each model's window; a failed read keeps the last snapshot rather than
-        // emptying it. Before sign-in there is no account to ask about, so the
-        // dropdown falls back to the shipped table filtered by region — an empty
-        // list would leave the user unable to see, let alone pick, a model.
-        const workBuddySelection = showPanel || config.provider === 'workbuddy-subscription'
-            ? await this.aiService.getWorkBuddyCredential()
-            : undefined;
-        const workBuddyRegion = workBuddySelection?.credentials.region;
-        // The load warms the module cache that workBuddyCatalogForSettings reads next.
-        // Its own failure path already substitutes this region's previous snapshot, so the
-        // catch here only covers a total failure and still leaves the shipped table to
-        // answer.
-        if (workBuddySelection) {
-            await loadWorkBuddyCatalog({
-                backend: workBuddySelection.credentials.backend,
-                region: workBuddySelection.credentials.region,
-                headers: workBuddyHeaders(workBuddySelection.credentials),
-                fetchFn: this.aiService.getSubscriptionProxyService().fetch,
-            }).catch(() => []);
-        }
-        // Region unknown (no credential yet) is the two-region union: the region lists
-        // are not nested, so naming only one would hide the models the other region's
-        // account can actually call.
-        const workBuddySettings = workBuddyCatalogForSettings(workBuddyRegion);
-        const workBuddyModels = workBuddySettings.models;
-        // The card's first option would otherwise become the default, and the list leads
-        // with the gateway's own routing aliases (`default` / `default-model`) rather than
-        // a flagship. Naming the shipped default here keeps the card and the request path
-        // agreeing on which model a fresh profile is actually calling.
-        const workBuddyDefaultModel = DEFAULT_VISIBLE_MODEL_IDS
-            .map(id => workBuddyModels.find(model => model.id === id)?.id)
-            .find(id => id !== undefined) ?? workBuddyModels[0]?.id;
-        const workBuddyWindows = workBuddyContextWindows(workBuddyModels);
         const commandCodeWindows = showPanel || config.provider === 'commandcode' || config.provider === 'commandcode-messages'
             ? commandCodeContextWindows(await loadCommandCodeCatalog({
                 baseUrl: COMMANDCODE_API_BASE,
@@ -489,7 +426,6 @@ export class ChatSettingsManager {
             const customNonFim = p.id === 'custom' && config.customApiFormat !== 'openai-chat-completions';
             const codexModels = p.id === 'codex-chatgpt' ? (codexAccount?.models ?? [])
                 : p.id === 'antigravity' ? antigravityAccount?.models
-                : p.id === 'workbuddy-subscription' ? workBuddyModels.map(model => model.id)
                 : undefined;
             return {
                 id: p.id,
@@ -498,9 +434,7 @@ export class ChatSettingsManager {
                     : p.name,
                 models: codexModels ?? p.models,
                 inlineModels: p.inlineModels,
-                defaultModel: p.id === 'workbuddy-subscription'
-                    ? workBuddyDefaultModel ?? p.defaultModel
-                    : codexModels?.[0] ?? p.defaultModel,
+                defaultModel: codexModels?.[0] ?? p.defaultModel,
                 requiresApiKey: p.requiresApiKey,
                 defaultEndpoint: p.endpoint,
                 userEndpoint: this.aiService.getEndpointForProvider(p.id),
@@ -714,11 +648,6 @@ export class ChatSettingsManager {
                 ...Object.fromEntries(
                     kimiCatalog.map(model => [`kimi-code-plan:${model.id}`, model.contextWindow]),
                 ),
-                ...Object.fromEntries(
-                    Object.entries(workBuddyWindows).map(
-                        ([model, window]) => [`workbuddy-subscription:${model}`, window],
-                    ),
-                ),
                 // The subscription catalog is hardcoded on purpose (its /v1/models
                 // route is not configured for subscription traffic), so these
                 // windows are transcribed rather than discovered.
@@ -738,10 +667,6 @@ export class ChatSettingsManager {
             antigravityAccount,
             commandcodeAccount,
             kimiAccount,
-            workbuddyAccount: workBuddyAccount,
-            workbuddyCheckin: showPanel || config.provider === 'workbuddy-subscription'
-                ? this.aiService.getWorkBuddyCheckinService().summary()
-                : undefined,
             minimaxCodeAccount,
             claudeSubscriptionAccount,
             subscriptionPools,
@@ -1061,7 +986,7 @@ export class ChatSettingsManager {
         }
 
         // Command Code's /models catalog is public, so no API key is needed to list models.
-        if (provider.requiresApiKey && !apiKey && providerId !== 'custom' && providerId !== 'opencode' && providerId !== 'opencode-go' && providerId !== 'commandcode' && providerId !== 'commandcode-messages') {
+        if (provider.requiresApiKey && !apiKey && providerId !== 'custom' && providerId !== 'opencode' && providerId !== 'commandcode' && providerId !== 'commandcode-messages') {
             this.postMessage({ type: 'apiModelsFetched', providerId, models: [], error: 'API Key is required to fetch models' });
             return;
         }
@@ -1147,7 +1072,7 @@ export class ChatSettingsManager {
                     }
                     modelList = modelList.filter((m: any) => m.status !== 'deprecated');
                 }
-                modelList = modelList.filter((m: any) => !deprecatedModelIds.has(m.id) && !isDeprecatedProviderModel(providerId, m.id));
+                modelList = modelList.filter((m: any) => !deprecatedModelIds.has(m.id));
                 if (modelList.length === 0) {
                     errors.push(`${candidate.label}: empty or unknown response`);
                     continue;
@@ -1464,40 +1389,6 @@ export class ChatSettingsManager {
     }
 
     /**
-     * Start the WorkBuddy browser authorization for one region.
-     *
-     * The credential is only persisted once the account endpoint has named the
-     * account, so the same account cannot be stored twice under a name and a uid.
-     */
-    async loginWorkBuddy(region: 'cn' | 'intl', targetSurface: 'chat' | 'manager' = 'chat'): Promise<void> {
-        let login: WorkBuddyLogin | undefined;
-        try {
-            login = await this.aiService.getWorkBuddyOAuthService().startLogin(region);
-            this.postMessage({
-                type: 'testConnectionResult',
-                ok: true,
-                message: aiText(
-                    'Continue the WorkBuddy sign-in in your browser. The account is saved once the service confirms it.',
-                    '请在浏览器中继续完成 WorkBuddy 登录；服务确认账号后会自动保存。',
-                ),
-            });
-            void login.completion.then(async () => {
-                await this.buildAndSendSettingsData(true, targetSurface);
-                this.postMessage({
-                    type: 'testConnectionResult',
-                    ok: true,
-                    message: aiText('WorkBuddy sign-in completed.', 'WorkBuddy 登录完成。'),
-                });
-            }, (error: unknown) => {
-                this.postMessage({ type: 'testConnectionResult', ok: false, message: settingsErrorMessage(error) });
-            });
-        } catch (error) {
-            login?.cancel();
-            this.postMessage({ type: 'testConnectionResult', ok: false, message: settingsErrorMessage(error) });
-        }
-    }
-
-    /**
      * Start the MiniMax Code device-code sign-in.
      *
      * The desktop app's own sign-in is reused when one exists, so this is only
@@ -1591,29 +1482,6 @@ export class ChatSettingsManager {
             type: 'testConnectionResult',
             ok: true,
             message: aiText('Signed out of Claude in this extension.', '已在本插件中退出 Claude。'),
-        });
-    }
-
-    /** Re-scan desktop accounts and re-render the WorkBuddy card. */
-    async refreshWorkBuddyAccounts(targetSurface: 'chat' | 'manager' = 'chat'): Promise<void> {
-        await this.buildAndSendSettingsData(true, targetSurface);
-    }
-
-    /**
-     * Run the day's WorkBuddy check-in now.
-     *
-     * A manual pass deliberately ignores the daily attempt cap - the user asked for it - but
-     * it is queued behind an in-flight run rather than merged into it, because a check-in is
-     * a once-a-day credit action and a duplicate submit is just a wasted round trip.
-     */
-    async runWorkBuddyCheckin(targetSurface: 'chat' | 'manager' = 'chat'): Promise<void> {
-        const service = this.aiService.getWorkBuddyCheckinService();
-        await service.run();
-        await this.buildAndSendSettingsData(true, targetSurface);
-        this.postMessage({
-            type: 'testConnectionResult',
-            ok: true,
-            message: aiText('WorkBuddy check-in finished.', 'WorkBuddy 签到已执行。'),
         });
     }
 

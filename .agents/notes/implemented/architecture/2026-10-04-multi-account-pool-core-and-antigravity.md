@@ -113,6 +113,6 @@ SecretStorage 文本的解析、坏行跳过、策略回落、端到端存取、
   `isAntigravityAccountStatus` 校验（含 `pool` 形状）。
 - **全部线路已接入**（后续同一变更内完成）：新增 `pool/oauthAccountPool.ts` 通用工厂 +
   `pool/subscriptionPools.ts` 各线路规格 + `pool/poolRegistry.ts` 注册表；Antigravity 也改为
-  复用该工厂。codex-chatgpt、kimi-code-plan、workbuddy-subscription、minimax-code、
-  claude-subscription、commandcode（静态 Key）全部纳入同一套轮转、冷却与失效保留规则。
+  复用该工厂。codex-chatgpt、kimi-code-plan、minimax-code、claude-subscription、
+  commandcode（静态 Key）全部纳入同一套轮转、冷却与失效保留规则。
   细节见 `.agents/notes/implemented/architecture/2026-10-04-subscription-pool-all-lines.md`。

@@ -11,8 +11,6 @@ import {
     minimaxCodePoolCredentials,
     minimaxCodePoolIdentityKey,
     subscriptionRefreshFailureStatus,
-    workBuddyPoolCredentials,
-    workBuddyPoolIdentityKey,
 } from '../../extension/ai/pool/subscriptionPools';
 import { SubscriptionPoolRegistry } from '../../extension/ai/pool/poolRegistry';
 import { OAuthAccountPool, oauthRefreshFailureStatus, parseOAuthPoolData,
@@ -169,21 +167,6 @@ describe('Per-line pool specifications', () => {
         })!;
         expect(parsed.region).to.equal('global');
         expect(minimaxCodePoolIdentityKey(parsed)).to.equal('record:prod/global/mcode-public');
-    });
-
-    it('keys WorkBuddy accounts by uid then uin then name', () => {
-        const base = { accessToken: 'a', refreshToken: 'r', domain: 'd', backend: 'b', region: 'cn' as const, source: 'managed' as const, sourceFile: '' };
-        expect(workBuddyPoolIdentityKey(workBuddyPoolCredentials({ ...base, uid: 'u1' })!)).to.equal('uid:u1');
-        expect(workBuddyPoolIdentityKey(workBuddyPoolCredentials({ ...base, uin: 'n1' })!)).to.equal('uin:n1');
-        expect(workBuddyPoolIdentityKey(workBuddyPoolCredentials({ ...base, nickname: 'me' })!))
-            .to.equal('name:d:me');
-    });
-
-    // The region is a credential property: a model asked of the wrong region is a 400.
-    it('requires a WorkBuddy domain with the credential', () => {
-        expect(workBuddyPoolCredentials({ accessToken: 'a', refreshToken: 'r' })).to.equal(undefined);
-        expect(workBuddyPoolCredentials({ accessToken: 'a', refreshToken: 'r', domain: 'www.codebuddy.cn' })!.region)
-            .to.equal('cn');
     });
 
     it('keys Kimi accounts by the token claims', () => {

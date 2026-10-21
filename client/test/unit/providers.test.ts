@@ -13,7 +13,6 @@ import {
     getEffectiveModel,
     getEffectiveTemperature,
     getOpenCodeApiFormat,
-    getOpenCodeGoApiFormat,
     getProviderApiFormat,
     getEffectiveReasoningEffort,
     getDisableThinkingParams,
@@ -26,7 +25,6 @@ import {
     FIM_CAPABLE_MODELS,
     ALWAYS_THINKING_PREFIXES,
     OPENCODE_MODEL_LIMITS,
-    OPENCODE_GO_MODEL_LIMITS,
     COMMANDCODE_MODEL_CONTEXT_TOKENS,
     getModelReasoningCapability,
     getThinkingParams,
@@ -393,7 +391,6 @@ describe('getModelContextTokens', () => {
         expect(getModelContextTokens('hy3-free', 'opencode')).to.equal(256000);
         expect(getModelContextTokens('qwen3.6-plus', 'opencode')).to.equal(262144);
         expect(getModelContextTokens('nemotron-3-ultra-free', 'opencode')).to.equal(1000000);
-        expect(getModelContextTokens('mimo-v2.5-pro', 'opencode-go')).to.equal(1048576);
     });
 
     it('uses current direct-provider context metadata', () => {
@@ -447,8 +444,6 @@ describe('getModelOutputTokens', () => {
         expect(getModelOutputTokens('kimi-k2.7-code', 'opencode')).to.equal(262144);
         expect(getModelOutputTokens('grok-build-0.1', 'opencode')).to.equal(256000);
         expect(getModelOutputTokens('grok-4.5', 'opencode')).to.equal(500000);
-        expect(getModelOutputTokens('kimi-k2.7-code', 'opencode-go')).to.equal(262144);
-        expect(getModelOutputTokens('mimo-v2.5-pro', 'opencode-go')).to.equal(128000);
     });
 
     it('uses current direct-provider output limits', () => {
@@ -506,20 +501,6 @@ describe('getProvider', () => {
             'hy3-free',
         ]);
         expect(zen.models.some(model => model.includes('('))).to.equal(false);
-
-        const go = BUILTIN_PROVIDERS['opencode-go']!;
-        expect(go.models).to.include.members([
-            'mimo-v2.5-pro',
-        ]);
-        expect(go.models).to.not.include.members([
-            'mimo-v2-pro',
-            'mimo-v2-omni',
-            'mimo-v2-flash',
-            'kimi-k2.5',
-            'glm-5',
-            'qwen3.5-plus',
-            'hy3-preview',
-        ]);
     });
 
     it('exposes the MiMo V2.6 catalog on both MiMo providers', () => {
@@ -635,19 +616,6 @@ describe('getOpenCodeApiFormat', () => {
     });
 });
 
-describe('getOpenCodeGoApiFormat', () => {
-    it('routes MiniMax and Qwen to Anthropic Messages, the rest to OpenAI chat completions', () => {
-        expect(getOpenCodeGoApiFormat('glm-5.2')).to.equal('openai-chat-completions');
-        expect(getOpenCodeGoApiFormat('kimi-k2.7-code')).to.equal('openai-chat-completions');
-        expect(getOpenCodeGoApiFormat('deepseek-v4-flash')).to.equal('openai-chat-completions');
-        expect(getOpenCodeGoApiFormat('mimo-v2.5-pro')).to.equal('openai-chat-completions');
-        expect(getOpenCodeGoApiFormat('minimax-m3')).to.equal('anthropic-messages');
-        expect(getOpenCodeGoApiFormat('minimax-m2.7')).to.equal('anthropic-messages');
-        expect(getOpenCodeGoApiFormat('qwen3.7-max')).to.equal('anthropic-messages');
-        expect(getOpenCodeGoApiFormat('qwen3.6-plus')).to.equal('anthropic-messages');
-    });
-});
-
 describe('getProviderApiFormat', () => {
     it('covers every built-in provider with its effective default-model protocol', () => {
         const expected = {
@@ -678,14 +646,10 @@ describe('getProviderApiFormat', () => {
             together: 'openai-chat-completions',
             deepinfra: 'openai-chat-completions',
             opencode: 'openai-chat-completions',
-            'opencode-go': 'openai-chat-completions',
             commandcode: 'openai-chat-completions',
             'commandcode-messages': 'anthropic-messages',
             kimi: 'openai-chat-completions',
             'kimi-code-plan': 'openai-chat-completions',
-            // The WorkBuddy subscription is an OpenAI-compatible gateway whose
-            // default model comes from the live /v3/config listing.
-            'workbuddy-subscription': 'openai-chat-completions',
         } as const;
 
         const httpProviderIds = Object.values(BUILTIN_PROVIDERS).map(provider => provider.id).sort();
@@ -1104,10 +1068,8 @@ describe('BUILTIN_PROVIDERS', () => {
             }
             expect(p.maxContextTokens, `${key}.maxContextTokens`).to.be.a('number');
             expect(p.maxContextTokens, `${key}.maxContextTokens`).to.be.greaterThan(0);
-            // ollama is auto-detected, custom is user-entered, and the WorkBuddy
-            // subscription is catalogued live by the gateway (its shipped list is
-            // intentionally empty until an account's /v3/config answers).
-            if (key !== 'ollama' && key !== 'custom' && key !== 'workbuddy-subscription') {
+            // ollama is auto-detected and custom is entered by the user.
+            if (key !== 'ollama' && key !== 'custom') {
                 expect(p.defaultModel, `${key}.defaultModel`).to.be.a('string').with.length.greaterThan(0);
                 expect(p.models, `${key}.models`).to.be.an('array').with.length.greaterThan(0);
             }
@@ -1251,30 +1213,6 @@ describe('BUILTIN_PROVIDERS', () => {
             'nemotron-3-super-free',
         ]);
         expect(Object.keys(OPENCODE_MODEL_LIMITS)).to.have.length(56);
-    });
-
-    it('matches the OpenCode Go model list and limits', () => {
-        const go = BUILTIN_PROVIDERS['opencode-go']!;
-        expect(go).to.not.equal(undefined);
-        expect(go.endpoint).to.equal('https://opencode.ai/zen/go/v1');
-        expect(go.defaultModel).to.equal('glm-5.2');
-        expect(go.models).to.have.length(13);
-        expect(go.models).to.include.members([
-            'glm-5.2',
-            'kimi-k2.7-code',
-            'mimo-v2.5-pro',
-            'minimax-m3',
-            'qwen3.7-max',
-            'deepseek-v4-pro',
-        ]);
-        expect(go.requiresApiKey).to.equal(true);
-        expect(go.supportsVision).to.equal(true);
-        expect(Object.keys(OPENCODE_GO_MODEL_LIMITS)).to.have.length(13);
-        expect(getModelContextTokens('glm-5.2', 'opencode-go')).to.equal(1000000);
-        expect(getModelContextTokens('deepseek-v4-pro', 'opencode-go')).to.equal(1000000);
-        expect(getModelContextTokens('minimax-m2.7', 'opencode-go')).to.equal(204800);
-        expect(getModelOutputTokens('kimi-k2.7-code', 'opencode-go')).to.equal(262144);
-        expect(getModelOutputTokens('deepseek-v4-flash', 'opencode-go')).to.equal(384000);
     });
 });
 

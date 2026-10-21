@@ -398,14 +398,14 @@ describe('resolveReviewerRoute', () => {
     });
 
     it('returns only the provider when the model is blank', () => {
-        expect(resolveReviewerRoute('workbuddy-subscription', '')).to.deep.equal({ providerId: 'workbuddy-subscription' });
-        expect(resolveReviewerRoute(' workbuddy-subscription ', '  ')).to.deep.equal({ providerId: 'workbuddy-subscription' });
+        expect(resolveReviewerRoute('minimax-code', '')).to.deep.equal({ providerId: 'minimax-code' });
+        expect(resolveReviewerRoute(' minimax-code ', '  ')).to.deep.equal({ providerId: 'minimax-code' });
     });
 
     it('returns both when the provider and model are set', () => {
-        expect(resolveReviewerRoute('workbuddy-subscription', 'deepseek-v4.1-flash')).to.deep.equal({
-            providerId: 'workbuddy-subscription',
-            model: 'deepseek-v4.1-flash',
+        expect(resolveReviewerRoute('minimax-code', 'MiniMax-M3')).to.deep.equal({
+            providerId: 'minimax-code',
+            model: 'MiniMax-M3',
         });
     });
 

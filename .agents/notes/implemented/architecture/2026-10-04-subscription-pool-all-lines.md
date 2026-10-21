@@ -2,6 +2,10 @@
 
 Status: implemented
 
+> 2026-10-21：`workbuddy-subscription` 线路已整体移除（含号池原型、额度面与模型目录），
+> 见 `../simplification/2026-10-21-remove-workbuddy-and-opencode-go-lines.md`。本文中该线路相关
+> 的表行与断言已按移除后的现状修正，`Problem` 与历史缺陷小节保留当时的背景叙述。
+
 ## Problem
 
 多账号号池内核（`pool/accountPool.ts`）此前只接了 Antigravity。其余六条线路仍是单账号：
@@ -33,7 +37,6 @@ Status: implemented
 | --- | --- | --- |
 | `claude-subscription` | uuid → email | scopes（`user:inference` 是「这是不是订阅凭据」的判据） |
 | `minimax-code` | 桌面记录槽 → 来源文件 | **区域**（模型清单与端点都由它决定） |
-| `workbuddy-subscription` | uid → uin → 域+昵称 | **域、后端、区域**（跨区发模型是 400） |
 | `kimi-code-plan` | 令牌 userId → email | expiresIn |
 | `codex-chatgpt` | accountId（套餐/工作区边界） | — |
 | `commandcode` | userId → email → key 名 | —（静态 Key，无到期、无续期） |
@@ -45,7 +48,7 @@ Status: implemented
 ### 新增 `pool/poolRegistry.ts`：provider → 号池注册表
 
 - **惰性建池**：只有真正用过某条线路才为它建池，避免启动时为六条线路各读一次安全存储；
-- **幂等 seed**：自带桌面账号的线路（MiniMax Code、WorkBuddy）在**账号选择之前**把凭据并入
+- **幂等 seed**：自带桌面账号的线路（MiniMax Code）在**账号选择之前**把凭据并入
   池子。来源有**两个**——桌面端文件扫描 + 本插件托管存储——只扫桌面会让一个纯托管登录态
   留在池外（卡片显示着它，池却读成空，号池区就此隐藏，且该账号从不参与调度）；
   seed 失败只记日志，不让选择失败；
@@ -63,7 +66,7 @@ Antigravity 也改为复用同一工厂，删掉了它自己那份等价实现�
 
 ### 请求路径
 
-- **OpenAI 兼容流式路径**（覆盖 Kimi、WorkBuddy、MiniMax、Command Code）：429 时冷却当前
+- **OpenAI 兼容流式路径**（覆盖 Kimi、MiniMax、Command Code）：429 时冷却当前
   账号并**换一个账号重放同一请求体**；`Retry-After` 被解析（秒或 HTTP 日期两种写法）并夹到
   10 分钟上限；
 - **Responses 路径**（Codex）：429 走同一套换号；401 仍是「强制续期一次再重放」；
@@ -135,7 +138,6 @@ Antigravity 也改为复用同一工厂，删掉了它自己那份等价实现�
 
 | 线路 | 额度面 | 备注 |
 | --- | --- | --- |
-| `workbuddy-subscription` | `POST /billing/meter/get-user-resource` | `data.Response.Data.Accounts[]`；多套餐**求和**；容量与周期计数是两套独立数字，各成一个仪表 |
 | `kimi-code-plan` | `GET {coding}/v1/usages` | coding 主机（非 OAuth 主机）；兼容 `usages{}` 与 `usage`+`limits[]` 两种形状 |
 | `claude-subscription` | `GET /api/oauth/usage` | `utilization` 在这个面上是 **0-100 的百分数**（响应头里同名字段是 0-1） |
 | `codex-chatgpt` | 复用账号状态里的 `rateLimits` | 不额外发请求 |
@@ -149,7 +151,7 @@ Antigravity 也改为复用同一工厂，删掉了它自己那份等价实现�
 
 新增 `client/test/unit/subscriptionPools.test.ts`（24 例）：工厂的文档解析与坏行跳过、
 静态 Key 线路永不触发续期、过期即轮换并保留账号行、**并发续期单飞**、**`expiresAt: 0` 视为
-已过期**、旧单凭据投影、六条线路的身份键与线路属性（含 WorkBuddy 必须带域）、失败分类只认
+已过期**、旧单凭据投影、五条线路的身份键与线路属性（含 MiniMax Code 必须带区域）、失败分类只认
 认证类 4xx、注册表的惰性建池与复用、排除已尝试账号后**确实换到另一个账号**、429 冷却后绕行、
 失效停用但保留行、**seed 幂等**、策略与主账号切换、摘要绝不含凭据。
 
@@ -158,12 +160,12 @@ Antigravity 也改为复用同一工厂，删掉了它自己那份等价实现�
 从而掩盖被测缺陷。
 
 `client/test/unit/poolRegistry.test.ts`（4 例）：`poolId` 使**别名 id 共用一个池实例**（否则
-后写覆盖先写）、未声明 `poolId` 的线路**各自独立**（WorkBuddy 账号不得被 MiniMax 选中）、
+后写覆盖先写）、未声明 `poolId` 的线路**各自独立**（MiniMax Code 的账号不得被 Codex 选中）、
 `providerIds()` 枚举、别名线路只 seed 一次。
 
-`client/test/unit/subscriptionQuota.test.ts`（11 例）：WorkBuddy 账单的嵌套形状与多套餐求和、
-容量与周期各成一个仪表、无时区周期时间按本地时间解析、只有余额的额度画成数值而不编造比例、
-边界校验丢弃无名称的仪表并夹取比例。
+`client/test/unit/subscriptionQuota.test.ts`：额度视图跨 webview 边界后的形状校验、只有余额的
+额度画成数值而不编造比例、边界校验丢弃无名称的仪表并夹取比例；Command Code 按 Key 记账的配额
+解析单列一组。
 
 `client/test/unit/settingsPageDraft.test.ts`（6 例）：设置页草稿保护。测试**不复制被测逻辑**——
 它用 TypeScript AST 从 `client/webview/chatPanel.ts` 里把 `showSettingsPage` 与
@@ -205,7 +207,7 @@ provider 数据变化时选项集合更新而草稿选中项保留、草稿线�
 2. **`expiresAt: 0` 被误读为「永不过期」**。epoch 0 是**过去**，而 Antigravity 的测试凭据
    正是用 0 表示已过期；误读会让一个死令牌继续服役（实测表现为：并发用例拿到的仍是旧 token）。
    改为只把「未声明到期」视为不过期，声明的到期时刻按绝对时间比较。
-3. **seed 漏掉托管存储**（经用户实机截图定位）。WorkBuddy / MiniMax Code 的 seed 只扫描
+3. **seed 漏掉托管存储**（经用户实机截图定位）。MiniMax Code 的 seed 只扫描
    桌面端文件，于是「只用本插件登录过」的情形读出**空池**：卡片照常显示该账号，号池区却
    隐藏，且该账号从不参与调度。改为两个来源合并（桌面扫描 + 托管存储），按身份键去重。
 4. **设置面只推送已保存 provider 的池**（同一轮实机反馈）。用户在未保存的表单里切换 provider
@@ -240,20 +242,17 @@ provider 数据变化时选项集合更新而草稿选中项保留、草稿线�
 - 页面显隐收进 `presentSettingsPage(shouldShow)`（打开/重建与关闭共用一份实现），
   `showSettingsPage` 本身**不再直接增删 `settingsPage` 的 `active` 类**：草稿短路分支只重画账号区，
   不重新布局整张页面。
-- WorkBuddy 的模型下拉框由网关 `/v3/config` 的实时目录填充（内置表不列该线路模型）；读取
-  失败保留上一次快照而不是清空。
 - **登录控件在有账号之后仍然可用**（改称「再添加一个账号」）：此前它被隐藏，使得一个账号
-  登录之后**再也加不了第二个**，多账号在这几条线路上实际不可达。WorkBuddy 与 MiniMax Code
-  本来就没隐藏，因此只有它们能加第二个账号。
+  登录之后**再也加不了第二个**，多账号在这几条线路上实际不可达。MiniMax Code 本来就没隐藏，
+  因此只有它能加第二个账号。
 - 号池的每行下方显示该账号的额度（能读到才显示；读不到就只是没有数字）。
 - 额度读取失败**不是**凭据失败：它只让这一行没有数字，绝不写任何东西、也不让账号退出轮转。
 - MiniMax 的**每日签到**刻意未做：该网关拒绝不带官方第一方签名头的请求，而同一项目在额度
-  读取上选择不伪造第一方身份。属产品决策，需用户拍板。**WorkBuddy 的签到已实现**（用诚实请求头）。
+  读取上选择不伪造第一方身份。属产品决策，需用户拍板。
 - 额度与图片预算是**按线路**的，不是一条通用上限：各线路的额度互不通用，一刀切会拒绝掉
   其它线路上的合法请求（见 `requestImageBudget.ts` / `subscriptionFailure.ts`）。
-- 线路的**身份键必须覆盖它的每一条来源**：WorkBuddy 从令牌 claim 回填 uid（资料端点是
-  best-effort），Kimi 同样只有令牌里的身份。身份键缺失时 seed 行与登录行无法互认，一个账号
-  会被存成两行。
+- 线路的**身份键必须覆盖它的每一条来源**：Kimi 只有令牌里的身份（资料端点是 best-effort）。
+  身份键缺失时 seed 行与登录行无法互认，一个账号会被存成两行。
 - 单次使用的 refresh token 需要**按 token 单飞 + 拒绝墓碑**（MiniMax）：并发轮换会让除第一个
   之外全部拿到 `invalid_grant`，读起来像账号被吊销。
 - **仍未做的**：真机验证。所有线路的 OAuth 流程与多账号轮转都由单元测试（mock transport）

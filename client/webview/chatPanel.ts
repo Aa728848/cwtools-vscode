@@ -412,8 +412,6 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
     let settingsAntigravityAccount: AntigravityAccountStatus | undefined;
     let settingsCommandCodeAccount: any = undefined;
 let settingsKimiAccount: any = undefined;
-let settingsWorkBuddyAccount: any = undefined;
-let settingsWorkBuddyCheckin: any = undefined;
 let settingsMinimaxCodeAccount: any = undefined;
 let settingsClaudeSubscriptionAccount: any = undefined;
 // One pool view per subscription line, keyed by provider id: the settings form
@@ -2946,18 +2944,6 @@ let settingsSubscriptionPools: Record<string, any> = {};
     });
     bindBtn('kimiLogoutBtn', () => {
         vscode.postMessage({ type: 'kimiLogout' });
-    });
-    bindBtn('workbuddyLoginCnBtn', () => {
-        vscode.postMessage({ type: 'workbuddyLogin', region: 'cn' });
-    });
-    bindBtn('workbuddyLoginIntlBtn', () => {
-        vscode.postMessage({ type: 'workbuddyLogin', region: 'intl' });
-    });
-    bindBtn('workbuddyRefreshBtn', () => {
-        vscode.postMessage({ type: 'workbuddyRefreshAccounts' });
-    });
-    bindBtn('workbuddyCheckinBtn', () => {
-        vscode.postMessage({ type: 'workbuddyCheckin' });
     });
     bindBtn('minimaxCodeLoginBtn', () => {
         vscode.postMessage({ type: 'minimaxCodeLogin' });
@@ -7128,8 +7114,6 @@ let settingsSubscriptionPools: Record<string, any> = {};
                 settingsCodexAccount = msg.codexAccount;
                 settingsCommandCodeAccount = msg.commandcodeAccount;
         settingsKimiAccount = msg.kimiAccount;
-        settingsWorkBuddyAccount = msg.workbuddyAccount;
-        settingsWorkBuddyCheckin = msg.workbuddyCheckin;
         settingsMinimaxCodeAccount = msg.minimaxCodeAccount;
         settingsClaudeSubscriptionAccount = msg.claudeSubscriptionAccount;
         settingsSubscriptionPools = msg.subscriptionPools ?? {};
@@ -8261,7 +8245,6 @@ let settingsSubscriptionPools: Record<string, any> = {};
             antigravityAccount: settingsAntigravityAccount,
             commandcodeAccount: settingsCommandCodeAccount,
             kimiAccount: settingsKimiAccount,
-            workbuddyAccount: settingsWorkBuddyAccount,
             minimaxCodeAccount: settingsMinimaxCodeAccount,
             claudeSubscriptionAccount: settingsClaudeSubscriptionAccount,
             subscriptionPools: settingsSubscriptionPools,
@@ -8682,8 +8665,6 @@ let settingsSubscriptionPools: Record<string, any> = {};
         const commandcodeGroup = document.getElementById('commandcodeAccountGroup');
         const kimiGroup = document.getElementById('kimiAccountGroup');
         const isKimiCodePlan = p?.id === 'kimi-code-plan';
-        const workbuddyGroup = document.getElementById('workbuddyAccountGroup');
-        const isWorkBuddy = p?.id === 'workbuddy-subscription';
         const minimaxCodeGroup = document.getElementById('minimaxCodeAccountGroup');
         const isMinimaxCode = p?.id === 'minimax-code';
         const claudeSubscriptionGroup = document.getElementById('claudeSubscriptionAccountGroup');
@@ -8693,7 +8674,6 @@ let settingsSubscriptionPools: Record<string, any> = {};
         if (antigravityGroup) antigravityGroup.style.display = isAntigravity ? '' : 'none';
         if (commandcodeGroup) commandcodeGroup.style.display = isCommandCode ? '' : 'none';
         if (kimiGroup) kimiGroup.style.display = isKimiCodePlan ? '' : 'none';
-        if (workbuddyGroup) workbuddyGroup.style.display = isWorkBuddy ? '' : 'none';
         if (minimaxCodeGroup) minimaxCodeGroup.style.display = isMinimaxCode ? '' : 'none';
         if (claudeSubscriptionGroup) claudeSubscriptionGroup.style.display = isClaudeSubscription ? '' : 'none';
         if (codexGroup) codexGroup.style.display = isCodex ? '' : 'none';
@@ -8855,63 +8835,6 @@ let settingsSubscriptionPools: Record<string, any> = {};
             const logoutBtn = document.getElementById('minimaxCodeLogoutBtn');
             setAddAccountControl(loginBtn, 'Device code sign-in', '设备码登录', account?.signedIn === true);
             if (logoutBtn) logoutBtn.style.display = account?.canSignOut ? '' : 'none';
-            refreshSettingsOverview();
-            return;
-        }
-        if (isWorkBuddy) {
-            const accountStatus = document.getElementById('workbuddyAccountStatus');
-            const account = settingsWorkBuddyAccount;
-            if (accountStatus) {
-                const accounts: any[] = Array.isArray(account?.accounts) ? account.accounts : [];
-                const active = accounts.filter(entry => !entry.hidden);
-                if (account?.available) {
-                    const labels = active
-                        .map(entry => tr(`${entry.label} (${entry.source === 'managed' ? 'added here' : 'desktop'})`,
-                            `${entry.label}（${entry.source === 'managed' ? '本插件添加' : '桌面端'}）`))
-                        .join(' · ');
-                    accountStatus.innerHTML = svgIcon('check') + escapeHtml(tr(`Active · ${labels}`, `已就绪 · ${labels}`));
-                    accountStatus.style.color = '#4caf50';
-                } else if (account?.error) {
-                    accountStatus.innerHTML = svgIcon('warning') + escapeHtml(account.error);
-                    accountStatus.style.color = '#ff9800';
-                } else if (active.length > 0) {
-                    accountStatus.innerHTML = svgIcon('warning') + escapeHtml(tr(
-                        'The stored WorkBuddy credential has expired. Sign in again.',
-                        '已保存的 WorkBuddy 凭据已过期，请重新登录。',
-                    ));
-                    accountStatus.style.color = '#ff9800';
-                } else {
-                    accountStatus.innerHTML = svgIcon('warning') + escapeHtml(tr(
-                        'No WorkBuddy account found. Sign in with the CodeBuddy desktop app, or use a button above.',
-                        '未找到 WorkBuddy 账号。请先登录 CodeBuddy 桌面端，或使用上方按钮登录。',
-                    ));
-                    accountStatus.style.color = '#ff9800';
-                }
-            }
-            // The check-in status lives with the account it belongs to: the credit it
-            // claims is per account, and "signed in" for a line with no activity would be
-            // claiming something that never happened.
-            {
-                const checkin = document.getElementById('workbuddyCheckinStatus');
-                if (checkin) {
-                    const summary = settingsWorkBuddyCheckin;
-                    if (!summary || summary.accountCount === 0) {
-                        checkin.textContent = tr(
-                            'No China-region account to check in.',
-                            '没有可签到的国区账号。',
-                        );
-                    } else if (summary.signedInToday) {
-                        checkin.textContent = tr(
-                            `Checked in today · ${summary.signedInCount} of ${summary.accountCount} account(s).`,
-                            `今日已签到 · ${summary.accountCount} 个账号中 ${summary.signedInCount} 个已领取。`,
-                        );
-                    } else {
-                        checkin.textContent = summary.lastError
-                            ? tr(`Check-in pending: ${summary.lastError}`, `签到待重试：${summary.lastError}`)
-                            : tr('Not checked in today yet.', '今日尚未签到。');
-                    }
-                }
-            }
             refreshSettingsOverview();
             return;
         }

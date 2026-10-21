@@ -1,5 +1,15 @@
 # Changelog
 
+## [Unreleased]
+
+### 移除 WorkBuddy 与 OpenCode Go 线路 / Removal of the WorkBuddy and OpenCode Go Lines
+
+- **[简化] 两条订阅线路整体下线（WorkBuddy and OpenCode Go Line Removal）**：
+  - **解决什么**：`workbuddy-subscription`（WorkBuddy / CodeBuddy 订阅）与 `opencode-go`（OpenCode Go 套餐）不是本项目要服务的线路，却要长期维护账号、区域、网关契约与模型目录，并持续影响模型选择器、号池调度、计价与发布清单。
+  - **删了什么**：WorkBuddy 整个 `client/extension/ai/workbuddy/` 模块（凭据、网关客户端、实时目录、离线兜底表、额度、身份、每日签到）、`aiService` 的运行时分支与 8 个公开方法、设置页卡片与三条 webview 消息、号池凭据原型；`opencode-go` 的内置供应商条目、协议格式函数、13 条模型上限、13 条计价与缓存折扣分支、provider 枚举与 nls 描述。相关测试同步收敛，不留 `.skip`。
+  - **没动什么**：`opencode`（OpenCode Zen）线路、号池 / 额度内核与其余五条订阅线路完全不受影响；历史 CHANGELOG 条目与已实现笔记保持原样，旧 WorkBuddy 笔记归档并交叉链接到新决策笔记。
+  - English: [Simplification] The `workbuddy-subscription` (WorkBuddy / CodeBuddy) and `opencode-go` (OpenCode Go) lines are gone: the whole WorkBuddy module (credentials, gateway client, live catalog, offline table, quota, identity, daily check-in), its aiService runtime branches and eight public methods, its settings card and three webview messages, and its pool credential prototype are removed, along with the OpenCode Go provider entry, wire-format function, 13 model limits, 13 price entries, cache-discount branch, provider enums and nls descriptions. The `opencode` Zen line, the account-pool and quota kernels and the remaining five subscription lines are untouched; shipped changelog entries and implemented notes stay as history, and the old WorkBuddy note is archived with a cross-link to the new decision note.
+
 ## [2.32.1] - 2026-10-19
 
 ### Agent 技能沉淀与路径边界修复 / Agent Skill Saving and Path Boundary Fixes

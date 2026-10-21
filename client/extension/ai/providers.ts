@@ -27,7 +27,6 @@ import {
     isModelFIMCapable,
     ALWAYS_THINKING_PREFIXES,
     OPENCODE_MODEL_LIMITS,
-    OPENCODE_GO_MODEL_LIMITS,
     COMMANDCODE_MODEL_CONTEXT_TOKENS,
     MODEL_CONTEXT_TOKENS,
     getModelContextTokens,
@@ -38,7 +37,6 @@ import {
     getAnthropicModelFeatures
 } from './providers/models/capabilities';
 import { minimaxCodeModelDef, minimaxCodeOutputConfig } from './minimaxcode/types';
-import { resolveWorkBuddyCatalogEntry } from './workbuddy/modelCatalog';
 import { commandCodeReasoningEfforts, commandCodeWireEffort } from './commandcode/modelCapabilities';
 import {
     CLAUDE_CODE_IDENTITY_TEXT,
@@ -59,7 +57,6 @@ export {
     isModelFIMCapable,
     ALWAYS_THINKING_PREFIXES,
     OPENCODE_MODEL_LIMITS,
-    OPENCODE_GO_MODEL_LIMITS,
     COMMANDCODE_MODEL_CONTEXT_TOKENS,
     MODEL_CONTEXT_TOKENS,
     getModelContextTokens,
@@ -278,13 +275,6 @@ export function getOpenCodeApiFormat(model: string): CustomApiFormat {
     return 'openai-chat-completions';
 }
 
-/** OpenCode Go wire protocols: MiniMax and Qwen use Anthropic Messages, the rest use OpenAI chat completions. */
-export function getOpenCodeGoApiFormat(model: string): CustomApiFormat {
-    const normalized = model.toLowerCase().replace(/\s*\([^)]*\)$/i, '');
-    if (normalized.startsWith('minimax-') || normalized.startsWith('qwen')) return 'anthropic-messages';
-    return 'openai-chat-completions';
-}
-
 /**
  * Resolve the wire protocol for every built-in provider from one source of truth.
  * Custom channels keep the protocol selected by the user, while gateway providers
@@ -313,8 +303,6 @@ export function getProviderApiFormat(
             return 'anthropic-messages';
         case 'opencode':
             return getOpenCodeApiFormat(model);
-        case 'opencode-go':
-            return getOpenCodeGoApiFormat(model);
         case 'custom':
             return customApiFormat;
         default:
@@ -623,33 +611,6 @@ export function getModelReasoningCapability(
         if (/minimax-m3/.test(lower)) return reasoningCapability('toggle', ['none', 'high'], 'high');
         return reasoningCapability('fixed', ['high'], 'high');
     }
-    if (provider === 'workbuddy-subscription') {
-        // The gateway's catalog is the authority on a model's ladder, with the shipped
-        // table as the offline fallback. One shared resolver answers both, so the
-        // settings card and the request path can never disagree about a level, and an
-        // id neither source describes declares no ladder rather than inheriting a
-        // neighbour's capabilities.
-        //
-        // `none` means "skip thinking" and is offered only when the catalog says this
-        // model can be asked to skip it: the gateway answers an unsupported level with
-        // 400 code 11150. Every other level passes the ReasoningEffort filter, which is
-        // the vocabulary the control can express.
-        //
-        // The default comes resolved from the same read-time convergence the request
-        // path uses. The gateway names it from a wider vocabulary than the ladder it
-        // publishes (`medium` on a `low`/`high`/`max` model), and a capability whose
-        // defaultValue is absent from its own options renders a dead control —
-        // normalizeReasoningEffort would silently snap it to options[0].
-        const entry = resolveWorkBuddyCatalogEntry(model);
-        const efforts = (entry?.reasoningEfforts ?? []).filter(isReasoningEffort);
-        if (efforts.length === 0) return NO_REASONING;
-        const options: ReasoningEffort[] = entry?.canDisableThinking === true ? ['none', ...efforts] : efforts;
-        const declared = entry?.defaultReasoningEffort;
-        const defaultValue = declared !== null && declared !== undefined && options.includes(declared as ReasoningEffort)
-            ? declared as ReasoningEffort
-            : options[0]!;
-        return reasoningCapability('effort', options, defaultValue);
-    }
     if (provider === 'kimi' || provider === 'kimi-code-plan') {
         if (/(?:^|\/)(?:kimi-)?k3(?:-|$)/.test(lower)) {
             return reasoningCapability('effort', ['low', 'high', 'max'], 'high');
@@ -658,7 +619,7 @@ export function getModelReasoningCapability(
         if (/kimi-(?:for-coding|k2[.]7-code)/.test(lower)) return reasoningCapability('fixed', ['high'], 'high');
         return NO_REASONING;
     }
-    if (provider === 'opencode' || provider === 'opencode-go') {
+    if (provider === 'opencode') {
         return upstreamGatewayCapability(provider, lower) ?? NO_REASONING;
     }
     if (provider === 'commandcode') {
@@ -955,7 +916,7 @@ export function getEnableThinkingParams(model: string, providerId?: string): Ena
         return { extraBody: { thinking: { type: 'enabled' } } };
     }
     if ((lowerProvider === 'kimi' || lowerProvider === 'kimi-code-plan'
-        || lowerProvider === 'opencode' || lowerProvider === 'opencode-go')
+        || lowerProvider === 'opencode')
         && /(?:^|\/)kimi-k2[.](?:5|6)(?:-|$)/.test(lowerModel)) {
         return { extraBody: { thinking: { type: 'enabled' } } };
     }
@@ -1044,7 +1005,7 @@ const THINKING_RULES: ThinkingRule[] = [
 
 
     // MiniMax M3 exposes adaptive on/off control, but no named effort levels.
-    { providers: ['minimax', 'minimax-token-plan', 'opencode', 'opencode-go'], model: /(?:^|\/)minimax-m3(?:-|$)/, build: () => ({ extraBody: { thinking: { type: 'adaptive' } } }) },
+    { providers: ['minimax', 'minimax-token-plan', 'opencode'], model: /(?:^|\/)minimax-m3(?:-|$)/, build: () => ({ extraBody: { thinking: { type: 'adaptive' } } }) },
 
     // Anthropic Messages protocol.
     { apiFormats: ['anthropic-messages'], model: /claude-/, build: ctx => {
@@ -1067,10 +1028,10 @@ const THINKING_RULES: ThinkingRule[] = [
 
     { providers: ['siliconflow'], model: KNOWN_REASONING_MODEL_RE, build: ctx => ({ extraBody: { enable_thinking: true, thinking_budget: siliconflowThinkingBudget(ctx.requested) } }) },
 
-    { providers: ['glm', 'opencode', 'opencode-go'], model: /(?:^|\/)glm-5[.]2(?:-|$)/, build: ctx => ({ extraBody: { thinking: { type: 'enabled' } }, reasoningEffort: highOrMaxEffort(ctx.requested) }) },
-    { providers: ['glm', 'opencode', 'opencode-go'], model: /(?:^|\/)glm-(?:4[.]?[5-9]|5)(?:[-.]|$)/, build: () => ({ extraBody: { thinking: { type: 'enabled' } } }) },
+    { providers: ['glm', 'opencode'], model: /(?:^|\/)glm-5[.]2(?:-|$)/, build: ctx => ({ extraBody: { thinking: { type: 'enabled' } }, reasoningEffort: highOrMaxEffort(ctx.requested) }) },
+    { providers: ['glm', 'opencode'], model: /(?:^|\/)glm-(?:4[.]?[5-9]|5)(?:[-.]|$)/, build: () => ({ extraBody: { thinking: { type: 'enabled' } } }) },
 
-    { providers: ['deepseek', 'opencode', 'opencode-go'], model: DEEPSEEK_V4_FAMILY_MODEL_RE, build: ctx => ({ extraBody: { thinking: { type: 'enabled' } }, reasoningEffort: deepSeekV4Effort(ctx.requested) }) },
+    { providers: ['deepseek', 'opencode'], model: DEEPSEEK_V4_FAMILY_MODEL_RE, build: ctx => ({ extraBody: { thinking: { type: 'enabled' } }, reasoningEffort: deepSeekV4Effort(ctx.requested) }) },
 
     { providers: ['together'], model: DEEPSEEK_V4_FAMILY_MODEL_RE, build: ctx => ({ extraBody: { reasoning: { enabled: true } }, reasoningEffort: deepSeekV4Effort(ctx.requested) }) },
     { providers: ['together'], model: KNOWN_REASONING_MODEL_RE, build: () => ({ extraBody: { reasoning: { enabled: true } } }) },

@@ -286,24 +286,6 @@ export const OPENCODE_MODEL_LIMITS: Record<string, { context: number; output: nu
     'north-mini-code-free': { context: 256000, output: 64000 },
 };
 
-/** OpenCode Go limits from each vendor's official model documentation. */
-export const OPENCODE_GO_MODEL_LIMITS: Record<string, { context: number; output: number }> = {
-    'glm-5.2': { context: 1000000, output: 131072 },
-    'glm-5.1': { context: 202752, output: 32768 },
-    'kimi-k2.7-code': { context: 262144, output: 262144 },
-    'kimi-k2.6': { context: 262144, output: 65536 },
-    'mimo-v2.5': { context: 1000000, output: 128000 },
-    'mimo-v2.5-pro': { context: 1048576, output: 128000 },
-    'minimax-m3': { context: 1000000, output: 131072 },
-    'minimax-m2.7': { context: 204800, output: 131072 },
-    'qwen3.7-max': { context: 1000000, output: 65536 },
-    'qwen3.7-plus': { context: 1000000, output: 65536 },
-    'qwen3.6-plus': { context: 1000000, output: 65536 },
-    'deepseek-v4-pro': { context: 1000000, output: 384000 },
-    'deepseek-v4-flash': { context: 1000000, output: 384000 },
-};
-
-
 /** Command Code Provider API catalog limits (https://api.commandcode.ai/provider/v1/models). */
 export const COMMANDCODE_MODEL_CONTEXT_TOKENS: Record<string, number> = {
     'claude-sonnet-5': 1000000,
@@ -600,9 +582,6 @@ export const MODEL_CONTEXT_TOKENS: Record<string, number> = {
         Object.entries(OPENCODE_MODEL_LIMITS).map(([model, limits]) => [`opencode:${model}`, limits.context])
     ),
     ...Object.fromEntries(
-        Object.entries(OPENCODE_GO_MODEL_LIMITS).map(([model, limits]) => [`opencode-go:${model}`, limits.context])
-    ),
-    ...Object.fromEntries(
         Object.entries(COMMANDCODE_MODEL_CONTEXT_TOKENS).map(([model, context]) => [`commandcode:${model}`, context])
     ),
     'commandcode-messages:claude-sonnet-5': 1000000,
@@ -731,10 +710,6 @@ export function getModelOutputTokens(model: string, providerId?: string): number
 
     if (providerId === 'opencode') {
         return OPENCODE_MODEL_LIMITS[modelId]?.output ?? 32768;
-    }
-
-    if (providerId === 'opencode-go') {
-        return OPENCODE_GO_MODEL_LIMITS[modelId]?.output ?? 32768;
     }
 
     if (providerId === 'openai') {

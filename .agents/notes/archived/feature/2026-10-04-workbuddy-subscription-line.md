@@ -1,6 +1,10 @@
 # Agent Note: 接入 WorkBuddy / CodeBuddy 订阅线路
 
-Status: implemented
+Status: archived
+> 该线路已于 2026-10-21 整体移除：依据与删除范围见
+> `../../implemented/simplification/2026-10-21-remove-workbuddy-and-opencode-go-lines.md`。
+> 本笔记保留网关实测结论（区域即凭据属性、`/v1/models` 404、仅流式与首条 system、档位收敛）
+> 作为将来若重新支持该线路时的复用素材。
 
 ## Problem
 

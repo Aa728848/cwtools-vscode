@@ -157,61 +157,6 @@ export function kimiPoolIdentityKey(credentials: KimiPoolCredentials): string | 
     return undefined;
 }
 
-// ─── WorkBuddy 订阅 ──────────────────────────────────────────────────────────
-
-export interface WorkBuddyPoolCredentials extends PooledOAuthCredentials {
-    domain: string;
-    backend: string;
-    region: 'cn' | 'intl';
-    uid?: string;
-    nickname?: string;
-    uin?: string;
-    enterpriseId?: string;
-    source: 'desktop' | 'managed';
-    sourceFile: string;
-} 
-
-/**
- * WorkBuddy 的号池原型。
- *
- * 域、后端与区域都是**凭据属性**（区域由域决定，模型清单跟着区域走），因此必须随凭据进池。
- */
-export function workBuddyPoolCredentials(value: unknown): WorkBuddyPoolCredentials | undefined {
-    if (typeof value !== 'object' || value === null || Array.isArray(value)) return undefined;
-    const record = value as Record<string, unknown>;
-    const accessToken = firstNonempty(record.accessToken);
-    const refreshToken = firstNonempty(record.refreshToken);
-    const domain = firstNonempty(record.domain);
-    if (accessToken === undefined || refreshToken === undefined || domain === undefined) return undefined;
-    const expiresAt = typeof record.expiresAt === 'number' && Number.isFinite(record.expiresAt)
-        ? record.expiresAt : 0;
-    const backend = firstNonempty(record.backend) ?? '';
-    const region = record.region === 'intl' ? 'intl' : 'cn';
-    const uid = firstNonempty(record.uid);
-    const nickname = firstNonempty(record.nickname);
-    const uin = firstNonempty(record.uin);
-    const enterpriseId = firstNonempty(record.enterpriseId);
-    return {
-        accessToken, refreshToken, expiresAt, domain, backend, region,
-        ...(uid === undefined ? {} : { uid }),
-        ...(nickname === undefined ? {} : { nickname }),
-        ...(uin === undefined ? {} : { uin }),
-        ...(enterpriseId === undefined ? {} : { enterpriseId }),
-        source: record.source === 'desktop' ? 'desktop' : 'managed',
-        sourceFile: firstNonempty(record.sourceFile) ?? '',
-    };
-}
-
-/** WorkBuddy 的身份键：uid → uin → 域+昵称（与既有实现一致）。 */
-export function workBuddyPoolIdentityKey(credentials: WorkBuddyPoolCredentials): string | undefined {
-    if (nonempty(credentials.uid)) return 'uid:' + credentials.uid.trim();
-    if (nonempty(credentials.uin)) return 'uin:' + credentials.uin.trim();
-    if (nonempty(credentials.nickname)) {
-        return 'name:' + (credentials.domain || 'default') + ':' + credentials.nickname.trim();
-    }
-    return undefined;
-}
-
 // ─── ChatGPT / Codex 订阅 ────────────────────────────────────────────────────
 
 export interface CodexPoolCredentials extends PooledOAuthCredentials {

@@ -243,7 +243,7 @@ export interface AIProviderConfig {
     /** Transport used for primary chat turns. */
     runtimeKind?: 'http';
     /** Credential mechanism used by this provider. */
-    authKind?: 'api-key' | 'none' | 'chatgpt-oauth' | 'antigravity-oauth' | 'workbuddy-oauth' | 'minimax-code-oauth' | 'claude-subscription-oauth';
+    authKind?: 'api-key' | 'none' | 'chatgpt-oauth' | 'antigravity-oauth' | 'minimax-code-oauth' | 'claude-subscription-oauth';
     /** Whether stateless utility calls (translation, titles, routing) are supported. */
     supportsUtilityCalls?: boolean;
 }
@@ -310,10 +310,6 @@ export interface SubscriptionPoolView {
         expiresAt?: number;
     }>;
 }
-
-import type { WorkBuddyAccountStatus } from './workbuddy/accountStatus';
-import type { WorkBuddyCheckinSummary } from './workbuddy/checkinService';
-export type { WorkBuddyAccountStatus } from './workbuddy/accountStatus';
 
 /**
  * MiniMax Code session status shown on the settings card.
@@ -2667,9 +2663,6 @@ export type WebViewMessage =
     | { type: 'commandcodeLogin' }
     | { type: 'kimiLogin'; region?: 'mainland-cn' | 'global' }
     | { type: 'kimiLogout' }
-    | { type: 'workbuddyLogin'; region: 'cn' | 'intl' }
-    | { type: 'workbuddyRefreshAccounts' }
-    | { type: 'workbuddyCheckin' }
     | { type: 'minimaxCodeLogin' }
     | { type: 'minimaxCodeLogout' }
     | { type: 'claudeSubscriptionLogin' }
@@ -2749,7 +2742,7 @@ export type HostMessage =
     | { type: 'slashCommandList'; commands: SlashCommandDescriptor[] }
     | { type: 'slashCommandResult'; command: string; status: 'success' | 'error' | 'queued' | 'needsInput'; message: string; uiAction?: 'openModelMenu' | 'openReasoningMenu' | 'openPermissionsMenu' }
     | { type: 'todoUpdate'; todos: TodoItem[]; agentId?: string; threadId?: string; runId?: string }
-    | { type: 'settingsData'; providers: ProviderMeta[]; current: PanelSettings; ollamaModels?: OllamaModelInfo[]; showPanel?: boolean; targetSurface?: 'chat' | 'manager'; modelContextTokens?: Record<string, number>; thinkingModelPrefixes?: string[]; reasoningCapabilities?: Record<string, ModelReasoningCapability>; codexAccount?: CodexAccountStatus; antigravityAccount?: AntigravityAccountStatus; commandcodeAccount?: CommandCodeAccountStatus; kimiAccount?: KimiCodeAccountStatus; workbuddyAccount?: WorkBuddyAccountStatus; workbuddyCheckin?: WorkBuddyCheckinSummary; minimaxCodeAccount?: MinimaxCodeAccountStatus; claudeSubscriptionAccount?: ClaudeSubscriptionAccountStatus; subscriptionPools?: Record<string, SubscriptionPoolView>; subscriptionProxy?: SubscriptionProxyStatus }
+    | { type: 'settingsData'; providers: ProviderMeta[]; current: PanelSettings; ollamaModels?: OllamaModelInfo[]; showPanel?: boolean; targetSurface?: 'chat' | 'manager'; modelContextTokens?: Record<string, number>; thinkingModelPrefixes?: string[]; reasoningCapabilities?: Record<string, ModelReasoningCapability>; codexAccount?: CodexAccountStatus; antigravityAccount?: AntigravityAccountStatus; commandcodeAccount?: CommandCodeAccountStatus; kimiAccount?: KimiCodeAccountStatus; minimaxCodeAccount?: MinimaxCodeAccountStatus; claudeSubscriptionAccount?: ClaudeSubscriptionAccountStatus; subscriptionPools?: Record<string, SubscriptionPoolView>; subscriptionProxy?: SubscriptionProxyStatus }
     | { type: 'subscriptionProxyStatus'; status: SubscriptionProxyStatus; saved?: boolean; targetSurface?: 'chat' | 'manager' }
     | { type: 'subscriptionPoolQuota'; providerId: string; accountId: string; quota?: SubscriptionAccountQuota; targetSurface?: 'chat' | 'manager' }
     | { type: 'ollamaModels'; models: OllamaModelInfo[]; error?: string }

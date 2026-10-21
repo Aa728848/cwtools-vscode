@@ -204,8 +204,6 @@ function createHarness(): Harness {
         settingsAntigravityAccount: undefined,
         settingsCommandCodeAccount: undefined,
         settingsKimiAccount: undefined,
-        settingsWorkBuddyAccount: undefined,
-        settingsWorkBuddyCheckin: undefined,
         settingsMinimaxCodeAccount: undefined,
         settingsClaudeSubscriptionAccount: undefined,
         lastSettingsPageSignature: '',

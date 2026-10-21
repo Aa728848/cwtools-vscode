@@ -3,6 +3,12 @@
 > 参考项目：`C:\Users\A\Documents\ChatGPT\dsh-chatgpt-subscription`（DSH 插件，8 条线路）。
 > 本文是计划与进度文档；实施状态见 §6「分期实施」的勾选列，设计决策落在
 > `.agents/notes/implemented/`。
+>
+> **2026-10-21 更新**：`workbuddy-subscription`（WorkBuddy / CodeBuddy 订阅，含每日签到、额度面板
+> 与离线模型表）与 `opencode-go`（OpenCode Go 套餐，含发布清单中的 provider 枚举条目）两条线路
+> 已从代码中**移除**，`opencode`（OpenCode Zen）线路不受影响。本文凡涉及这两条线路的段落均只作
+> 历史记录保留；移除范围、取舍与验证见
+> `.agents/notes/implemented/simplification/2026-10-21-remove-workbuddy-and-opencode-go-lines.md`。
 
 ## 1. 背景与目标
 
@@ -21,7 +27,7 @@
 | `kimi-code` | Anthropic Messages / RFC 8628 设备码 | ✅ `kimi-code-plan`（+ 设备码登录 + 凭据续期 + K3 保留思考） | ✅ 已改进（§3.4） |
 | `minimax-code` | Anthropic Messages / 桌面端凭据复用或设备码（`agent.minimax.cn/mavis`） | ✅ `minimax-code`（与平台 API Key 线路 `minimax-token-plan` 并存） | ✅ 已新增（§4.2） |
 | `claude-subscription` | Anthropic Messages / Claude Pro·Max OAuth | ✅ `claude-subscription`（与 API Key 的 `claude` 并存） | ✅ 已新增（§4.3，合规风险已标注） |
-| `workbuddy-subscription` | OpenAI 兼容（仅流式）/ 桌面凭据扫描或浏览器授权 | ✅ `workbuddy-subscription` | ✅ 已新增（§4.1） |
+| `workbuddy-subscription` | OpenAI 兼容（仅流式）/ 桌面凭据扫描或浏览器授权 | ❌ 已移除（2026-10-21） | ❌ 已移除（原 §4.1，仅存历史记录） |
 | `ollama` | — | ✅ `ollama` | **按要求排除** |
 
 ## 3. 已有线路的改进点
@@ -76,9 +82,9 @@
 
 ## 4. 新增线路
 
-三条新线路共用的落点（§5 详述）：`BUILTIN_PROVIDERS` 增加条目、`types.ts` 的 `authKind` 扩枚举、`getProviderApiFormat` 映射、`aiService` 鉴权头与分发、`chatSettings` 登录/账号状态、webview 设置卡片与额度组件、`messages.ts` 与 `chat/i18n.ts` 中英双语。
+新增线路共用的落点（§5 详述）：`BUILTIN_PROVIDERS` 增加条目、`types.ts` 的 `authKind` 扩枚举、`getProviderApiFormat` 映射、`aiService` 鉴权头与分发、`chatSettings` 登录/账号状态、webview 设置卡片与额度组件、`messages.ts` 与 `chat/i18n.ts` 中英双语。
 
-### 4.1 `workbuddy-subscription`（腾讯 WorkBuddy / CodeBuddy，优先级 P2）✅ 已落地
+### 4.1 `workbuddy-subscription`（腾讯 WorkBuddy / CodeBuddy，优先级 P2）✅ 已落地（该线路已于 2026-10-21 移除）
 
 - 协议：OpenAI 兼容 `POST {backend}/v2/chat/completions`，两条硬约束：**仅流式**（`stream:false` → 400 `code 11101`）、**首条消息必须是 system**（否则 400 `code 11128`）——请求构造器始终 `stream:true` 并在缺系统提示时补中性 system。
 - 登录：扫描 CodeBuddy 桌面端 `*.info` 凭据（只读优先、续期后原子写回），或设置页选国区/国际区走官方浏览器授权；凭据存 VS Code SecretStorage。
@@ -112,11 +118,11 @@
 
 | 层 | 文件 | 改动 |
 | --- | --- | --- |
-| Provider 注册 | `client/extension/ai/providers/models/defaults.ts` | `BUILTIN_PROVIDERS` 增加 `workbuddy-subscription`、`minimax-code`、（可选）`claude-subscription` |
-| 类型 | `client/extension/ai/types.ts` | `authKind` 扩：`'kimi-device-oauth' | 'minimax-code-oauth' | 'workbuddy-oauth' | 'claude-subscription-oauth'`；账号状态类型 |
-| 协议路由 | `client/extension/ai/providers.ts` | `getProviderApiFormat`：`minimax-code`/`claude-subscription` → `anthropic-messages`；`workbuddy-subscription` → `openai-chat-completions`（强制流式 + 首条 system 在请求构造处保证） |
+| Provider 注册 | `client/extension/ai/providers/models/defaults.ts` | `BUILTIN_PROVIDERS` 增加 `minimax-code`、（可选）`claude-subscription` |
+| 类型 | `client/extension/ai/types.ts` | `authKind` 扩：`'kimi-device-oauth' | 'minimax-code-oauth' | 'claude-subscription-oauth'`；账号状态类型 |
+| 协议路由 | `client/extension/ai/providers.ts` | `getProviderApiFormat`：`minimax-code`/`claude-subscription` → `anthropic-messages` |
 | 请求层 | `client/extension/ai/aiService.ts` | 鉴权头分派（OAuth 线路走各自 service 而非 `buildAuthHeaders`）；k3 线路规则；codex 的 beta 头 / 目录驱动默认值 / turn-state |
-| OAuth 服务 | 新增 `client/extension/ai/kimi/oauthService.ts`、`minimaxcode/oauthService.ts`、`workbuddy/oauthService.ts`、（可选）`claudesub/oauthService.ts` | 仿照 `codex/oauthService.ts`、`antigravity/oauthService.ts`：SecretStorage 存 token、PKCE、单飞刷新、可取消登录 |
+| OAuth 服务 | 新增 `client/extension/ai/kimi/oauthService.ts`、`minimaxcode/oauthService.ts`、（可选）`claudesub/oauthService.ts` | 仿照 `codex/oauthService.ts`、`antigravity/oauthService.ts`：SecretStorage 存 token、PKCE、单飞刷新、可取消登录 |
 | 模型目录 | 各线路 `modelCatalog.ts` | 实时拉取 + SecretStorage/globalState 快照 + 静态兜底（minimax-code 例外：纯硬编码） |
 | 设置与额度 UI | `chatSettings.ts`、`chatHtml.ts`、`client/webview/chat/`（仿 `codexQuota.ts` / `antigravityAccount.ts` / `commandcodeQuota.ts`） | 登录按钮、账号卡片、额度胶囊 |
 | 国际化 | `client/extension/ai/messages.ts`、`client/webview/chat/i18n.ts` | 中英同步新增 |
@@ -129,7 +135,7 @@
 | 期 | 内容 | 状态 | 风险 |
 | --- | --- | --- | --- |
 | P1 | §3.1 codex 改进（beta 头、实时目录、summary/verbosity 默认对齐、turn state、家族窗口）；§3.3 commandcode OAuth + 目录 `context_length` | ✅ 已完成 | 低：协议细节均有参考项目实测背书 |
-| P2 | §3.2 antigravity 图片预算；§3.4 kimi 设备码 + 凭据续期 + K3 保留思考；§4.1 workbuddy；§4.2 minimax-code | ✅ 已完成 | 中：新 OAuth 流程与桌面凭据复用需真机验证 |
+| P2 | §3.2 antigravity 图片预算；§3.4 kimi 设备码 + 凭据续期 + K3 保留思考；§4.2 minimax-code | ✅ 已完成 | 中：新 OAuth 流程与桌面凭据复用需真机验证 |
 | P3 | §4.3 claude-subscription（Claude Pro/Max OAuth） | ✅ 已完成（用户确认合规取舍后实现） | 合规风险，卡片显著标注 |
 | P4 | 多账号号池抽象（内核 + antigravity 接入 + 设置面） | ✅ 已完成 | — |
 
@@ -159,7 +165,7 @@
 - **kimi**：新增 `kimi/oauthService.ts`（RFC 8628 设备码登录）、`kimi/tokenStore.ts`
   （`max(300s, expires_in×0.5)` 续期窗口、刷新单飞、终局拒绝冷却）、`kimi/accountStatus.ts`；
   `sanitizeRequest` 为 K3 家族在每条 assistant 消息上写 `reasoning_content`（无推理写空串）。
-- **workbuddy**：新增 `workbuddy/types.ts`（区域/后端/档位收敛）、`credentials.ts`（桌面
+- **workbuddy**（该线路已于 2026-10-21 移除，以下为历史实现记录）：新增 `workbuddy/types.ts`（区域/后端/档位收敛）、`credentials.ts`（桌面
   扫描、托管存储、原子写回、桌面账号不可删除）、`client.ts`（网关请求 + 浏览器授权）、
   `modelCatalog.ts`（`/v3/config` 实时目录）、`accountStatus.ts`；请求侧强制 `stream: true`
   与首条 system。
@@ -173,7 +179,8 @@
   `npm run test:unit`（2713 + 44 passing，0 failing）。
 - **决策记录**：`.agents/notes/implemented/feature/2026-10-04-antigravity-request-image-budget.md`、
   `2026-10-04-kimi-code-subscription-login-and-token-lifecycle.md`、
-  `2026-10-04-workbuddy-subscription-line.md`、
+  `2026-10-04-workbuddy-subscription-line.md`（线路已于 2026-10-21 移除，笔记归档至
+  `.agents/notes/archived/feature/`）、
   `2026-10-04-minimax-code-subscription-line.md`。
 
 ### 已知待办（非阻塞）
@@ -193,7 +200,7 @@
 ## 8. 风险与合规
 
 - `claude-subscription` 与 Anthropic 条款冲突（见 §4.3）；`antigravity` 已有账号被限制的公开报告——设置页保留风险提示。
-- 桌面端凭据（WorkBuddy `*.info`、MiniMax `auth.json`）**只读优先**；续期写回必须原子且只改 `auth` 块；绝不删除/撤销桌面端登录态。
+- 桌面端凭据（MiniMax `auth.json`）**只读优先**；续期写回必须原子且只改 `auth` 块；绝不删除/撤销桌面端登录态。
 - 所有 token 只进 VS Code SecretStorage，不写设置文件、不进 webview。### P3 交付明细
 
 - **新增** `claudesub/types.ts`（协议常量 + 转录的模型目录 + 三态/四形态思考控制 + 版本下限
@@ -214,7 +221,7 @@
 | 项 | 状态 |
 | --- | --- |
 | P1 codex-chatgpt + commandcode | ✅ 完成 |
-| P2 antigravity + kimi + workbuddy + minimax-code | ✅ 完成 |
+| P2 antigravity + kimi + minimax-code（workbuddy 已于 2026-10-21 移除） | ✅ 完成 |
 | P3 claude-subscription | ✅ 完成 |
 | P4 多账号号池抽象 | ✅ 完成 |
 
@@ -380,7 +387,7 @@ commandcode（静态 API Key）。
 
 | 线路 | 额度面 | 备注 |
 | --- | --- | --- |
-| workbuddy-subscription | `POST /billing/meter/get-user-resource` | 多套餐求和；容量与周期计数各成一个仪表 |
+| ~~workbuddy-subscription~~（2026-10-21 移除） | `POST /billing/meter/get-user-resource` | 多套餐求和；容量与周期计数各成一个仪表 |
 | kimi-code-plan | `GET {coding}/v1/usages` | coding 主机；兼容两种形状 |
 | claude-subscription | `GET /api/oauth/usage` | `utilization` 是 0-100 百分数 |
 | codex-chatgpt | 复用账号状态 `rateLimits` | 不额外发请求 |
@@ -394,11 +401,11 @@ commandcode（静态 API Key）。
 | commandcode 逐模型能力表 | ✅ 完成 |
 | P4 号池：内核 | ✅ 完成 |
 | P4 号池：antigravity | ✅ 完成 |
-| P4 号池：codex / kimi / claude / minimax / workbuddy / commandcode | ✅ 完成 |
+| P4 号池：codex / kimi / claude / minimax / commandcode（workbuddy 已于 2026-10-21 移除） | ✅ 完成 |
 | P4 号池：设置面（通用账号池区块，按选中线路渲染） | ✅ 完成 |
-| WorkBuddy 实时目录填充模型列表 | ✅ 完成 |
+| WorkBuddy 实时目录填充模型列表（该线路已于 2026-10-21 移除） | ✅ 完成 |
 | 登录控件在有账号后仍可用（可加第二个账号） | ✅ 完成 |
-| 各线路账号额度展示（六条线路） | ✅ 完成 |
+| 各线路账号额度展示（原六条线路，workbuddy 已于 2026-10-21 移除） | ✅ 完成 |
 
 > 唯一**非阻塞**待办仍是真机验证：各线路的 OAuth 流程、桌面凭据复用与多账号轮转均以单元
 > 测试（mock transport）锁定契约，尚未在真实订阅账号上端到端跑过。

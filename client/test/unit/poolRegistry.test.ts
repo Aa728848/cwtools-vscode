@@ -59,7 +59,7 @@ describe('Subscription pool registry multiplexes provider ids', () => {
         expect(registry.pool('line-a')).to.equal(registry.pool('line-b'));
     });
 
-    // Lines that do NOT declare a shared id keep separate pools: a WorkBuddy
+    // Lines that do NOT declare a shared id keep separate pools: a Kimi Code Plan
     // account must never be selectable for MiniMax Code.
     it('keeps unrelated lines in separate pools', async () => {
         const registry = new SubscriptionPoolRegistry(() => ({

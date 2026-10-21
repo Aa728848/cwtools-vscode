@@ -291,21 +291,6 @@ describe('provider thinking params', () => {
         expect(request).to.not.have.property('temperature');
     });
 
-    it('applies upstream controls on OpenCode gateway models', () => {
-        const { getThinkingParams, getReducedThinkingParams } = loadProviders();
-        expect(getThinkingParams('deepseek-v4-pro', 'opencode-go', 'openai-chat-completions', 'medium'))
-            .to.deep.equal({ extraBody: { thinking: { type: 'enabled' } }, reasoningEffort: 'high' });
-        expect(getThinkingParams('deepseek-v4-pro', 'opencode-go', 'openai-chat-completions', 'low'))
-            .to.deep.equal({ extraBody: { thinking: { type: 'enabled' } }, reasoningEffort: 'low' });
-        expect(getThinkingParams('glm-5.2', 'opencode-go', 'openai-chat-completions', 'max'))
-            .to.deep.equal({ extraBody: { thinking: { type: 'enabled' } }, reasoningEffort: 'max' });
-        expect(getReducedThinkingParams('glm-5.2', 'opencode-go', 'openai-chat-completions'))
-            .to.deep.equal({ extraBody: { thinking: { type: 'disabled' } } });
-        expect(getThinkingParams('kimi-k2.6', 'opencode-go', 'openai-chat-completions', 'high'))
-            .to.deep.equal({ extraBody: { thinking: { type: 'enabled' } } });
-        expect(getThinkingParams('minimax-m2.7', 'opencode-go', 'anthropic-messages', 'max')).to.equal(undefined);
-    });
-
     it('uses manual Anthropic thinking budgets for Qwen gateways', () => {
         const { getThinkingParams, toClaudeRequest } = loadProviders();
         const params = getThinkingParams('qwen3.7-plus', 'opencode', 'anthropic-messages', 'medium');
@@ -370,87 +355,6 @@ describe('provider thinking params', () => {
             options: [],
             defaultValue: 'high',
         });
-    });
-
-    it('answers WorkBuddy capability from the gateway catalog with the shipped table as fallback', () => {
-        const { getModelReasoningCapability } = loadProviders();
-        // The live catalog is empty in a unit test, so these come from the shipped table.
-        // glm-5.3 is the one flagship both regions serve, which is why it is the shipped
-        // default; canDisableThinking is true, so `none` is offered.
-        expect(getModelReasoningCapability('workbuddy-subscription', 'glm-5.3')).to.deep.equal({
-            kind: 'effort',
-            options: ['none', 'low', 'high', 'max'],
-            defaultValue: 'high',
-        });
-        // canDisableThinking false: offering `none` would be answered with 400 code 11150.
-        const deepseek = getModelReasoningCapability('workbuddy-subscription', 'deepseek-v4.1-flash');
-        expect(deepseek.kind).to.equal('effort');
-        expect(deepseek.options).to.deep.equal(['low', 'high', 'max']);
-        expect(deepseek.options).to.not.include('none');
-        // The gateway names `medium` as the default of a low/high/max model; the value is
-        // converged on read so the control does not render a level it cannot send.
-        expect(getModelReasoningCapability('workbuddy-subscription', 'kimi-k2.6').defaultValue)
-            .to.equal('high');
-        // No ladder means no control at all, rather than an empty dropdown.
-        for (const id of ['default', 'glm-5.0', 'glm-4.7', 'hunyuan-chat']) {
-            expect(getModelReasoningCapability('workbuddy-subscription', id).kind, id).to.equal('none');
-        }
-        // An id neither source describes declares nothing instead of borrowing a neighbour's.
-        expect(getModelReasoningCapability('workbuddy-subscription', 'no-such-model').kind).to.equal('none');
-    });
-
-    it('offers a usable control for every shipped WorkBuddy model', () => {
-        const { getModelReasoningCapability } = loadProviders();
-        const fallback = require('../../extension/ai/workbuddy/fallbackModels') as { FALLBACK_MODELS: ReadonlyArray<{ id: string; reasoningEfforts: readonly string[] }> };
-        for (const model of fallback.FALLBACK_MODELS) {
-            const capability = getModelReasoningCapability('workbuddy-subscription', model.id);
-            if (model.reasoningEfforts.length === 0) {
-                expect(capability.kind, model.id).to.equal('none');
-                continue;
-            }
-            expect(capability.kind, model.id).to.equal('effort');
-            expect(capability.options.length, model.id).to.be.greaterThan(0);
-            // A defaultValue outside its own options renders a dead control.
-            expect(capability.options, model.id).to.include(capability.defaultValue);
-        }
-    });
-
-    it('prefers the live WorkBuddy catalog over the shipped table', async () => {
-        const { getModelReasoningCapability } = loadProviders();
-        const catalog = require('../../extension/ai/workbuddy/modelCatalog') as typeof import('../../extension/ai/workbuddy/modelCatalog');
-        catalog.clearCachedWorkBuddyCatalog();
-        try {
-            // A ladder the shipped table does NOT have for glm-5.3 (was low/high/max with
-            // none); the live listing must win outright rather than being merged into it.
-            await catalog.loadWorkBuddyCatalog({
-                backend: 'https://www.codebuddy.cn',
-                region: 'cn',
-                headers: {},
-                fetchFn: async () => new Response(JSON.stringify({
-                    data: {
-                        models: [{
-                            id: 'glm-5.3', maxAllowedSize: 100, maxOutputTokens: 7,
-                            reasoning: { supportedEfforts: ['minimal', 'low'], defaultEffort: 'minimal' },
-                        }],
-                    },
-                }), { status: 200, headers: { 'Content-Type': 'application/json' } }),
-            });
-            expect(getModelReasoningCapability('workbuddy-subscription', 'glm-5.3')).to.deep.equal({
-                kind: 'effort',
-                options: ['minimal', 'low'],
-                defaultValue: 'minimal',
-            });
-            // The request path reads the same catalog, so the level it sends is the one
-            // the control offered.
-            expect(catalog.workBuddyEffortForRequest('glm-5.3', 'minimal')).to.equal('minimal');
-            expect(catalog.workBuddyEffortForRequest('glm-5.3', 'max')).to.equal('minimal');
-            expect(catalog.workBuddyMaxOutputTokens('glm-5.3')).to.equal(7);
-            // A model the live catalog is silent about still answers from the shipped table.
-            expect(getModelReasoningCapability('workbuddy-subscription', 'deepseek-v4.1-flash').options)
-                .to.deep.equal(['low', 'high', 'max']);
-        } finally {
-            catalog.clearCachedWorkBuddyCatalog();
-        }
     });
 
     it('returns a deterministic capability for every built-in model', () => {

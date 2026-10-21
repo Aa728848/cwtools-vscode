@@ -143,15 +143,6 @@ export async function routeWebviewMessage(
         case 'kimiLogout':
             await provider.settingsManager.logoutKimiCode(sourceSurface);
             break;
-        case 'workbuddyLogin':
-            await provider.settingsManager.loginWorkBuddy(msg.region, sourceSurface);
-            break;
-        case 'workbuddyRefreshAccounts':
-            await provider.settingsManager.refreshWorkBuddyAccounts(sourceSurface);
-            break;
-        case 'workbuddyCheckin':
-            await provider.settingsManager.runWorkBuddyCheckin(sourceSurface);
-            break;
         case 'minimaxCodeLogin':
             await provider.settingsManager.loginMinimaxCode(sourceSurface);
             break;

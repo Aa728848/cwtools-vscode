@@ -22,7 +22,6 @@ import type {
     ReasoningEffort,
     ResponseVerbosity,
 } from './types';
-import { isReasoningEffort } from './types';
 import {
     getProvider,
     getEffectiveEndpoint,
@@ -61,18 +60,6 @@ import { enforceRequestImageEdge } from './requestImageEdge';
 import { classifyFailedResponse, shouldRotateAccount } from './subscriptionFailure';
 import { KimiCodeOAuthService, kimiIdentityHeaders, readOrCreateKimiDeviceId, KIMI_REGION_OAUTH_HOSTS } from './kimi/oauthService';
 import { KimiCodeTokenStore, KimiUnauthorizedError, type KimiCredentials } from './kimi/tokenStore';
-import {
-    WorkBuddyCredentialStore,
-    mergeWorkBuddyAccounts,
-    isWorkBuddyCredentialFresh,
-    scanWorkBuddyDesktopCredentials,
-    workBuddyAccountKey,
-    type WorkBuddyCredentials,
-} from './workbuddy/credentials';
-import { WorkBuddyOAuthService, refreshWorkBuddyCredentials, workBuddyHeaders } from './workbuddy/client';
-import { fetchWorkBuddyQuota } from './workbuddy/quota';
-import { WorkBuddyCheckinService } from './workbuddy/checkinService';
-import { workBuddyEffortForRequest, workBuddyMaxOutputTokens } from './workbuddy/modelCatalog';
 import { fetchClaudeSubscriptionQuota } from './claudesub/quota';
 import { commandCodeQuotaFromStatus } from './commandcode/quota';
 import { fetchMinimaxCodeQuota } from './minimaxcode/quota';
@@ -109,8 +96,6 @@ import {
     minimaxCodePoolCredentials,
     minimaxCodePoolIdentityKey,
     subscriptionRefreshFailureStatus,
-    workBuddyPoolCredentials,
-    workBuddyPoolIdentityKey,
 } from './pool/subscriptionPools';
 import type { PooledOAuthCredentials } from './pool/oauthAccountPool';
 import {
@@ -142,15 +127,6 @@ import { resolveEffectiveCacheCapability } from './cacheCapability';
 /** Providers that reject the `detail` sub-field inside `image_url` objects. */
 const STRIP_IMAGE_DETAIL_PROVIDERS = new Set(['minimax', 'glm', 'qwen']);
 
-/**
- * System prompt a WorkBuddy request opens with when the caller supplied none.
- *
- * The subscription's international backend requires the first message to be a
- * system turn (400 code 11128 otherwise). Neutral wording, because it stands in
- * only to satisfy the shape — it is not a policy the model should follow.
- */
-const WORKBUDDY_IMPLICIT_SYSTEM_PROMPT =
-    'You are a helpful coding assistant. Follow the user instructions and use the provided tools when they help.';
 function shouldRequestStreamUsage(providerId: string, model: string, endpoint: string): boolean {
     return resolveEffectiveCacheCapability({
         providerId,
@@ -198,7 +174,6 @@ const CODEX_POOL_KEY = 'cwtools.ai.codexChatgpt.pool.v1';
 const KIMI_CODE_POOL_KEY = 'cwtools.ai.kimiCode.pool.v1';
 const CLAUDE_SUBSCRIPTION_POOL_KEY = 'cwtools.ai.claudeSubscription.pool.v1';
 const MINIMAX_CODE_POOL_KEY = 'cwtools.ai.minimaxCode.pool.v1';
-const WORKBUDDY_POOL_KEY = 'cwtools.ai.workbuddy.pool.v1';
 const COMMANDCODE_POOL_KEY = 'cwtools.ai.commandcode.pool.v1';
 
 /**
@@ -214,7 +189,6 @@ const SUBSCRIPTION_POOL_PROVIDER_IDS = [
     'kimi-code-plan',
     'claude-subscription',
     'minimax-code',
-    'workbuddy-subscription',
 ] as const;
 
 /**
@@ -265,14 +239,10 @@ function assertKimiCodeRequestSize(providerId: string, payload: string): void {
 /**
  * 一个请求的输出上限。
  *
- * 通用表之外，有两条线路的**逐模型**上限才是真的：WorkBuddy 的网关目录公布每个模型真实的
- * 输出上限，Command Code 的注册表逐条转录了观测到的值。按通用值发，答案要么在服务端被截断
- * （上限低于通用值），要么按一个模型并不接受的额度请求。
+ * 通用表之外，Command Code 的**逐模型**上限才是真的：它的注册表逐条转录了观测到的值。
+ * 按通用值发，答案要么在服务端被截断（上限低于通用值），要么按一个模型并不接受的额度请求。
  */
 function subscriptionOutputCap(providerId: string, model: string): number {
-    if (providerId === 'workbuddy-subscription') {
-        return workBuddyMaxOutputTokens(model) ?? getModelOutputTokens(model, providerId);
-    }
     if (providerId === 'commandcode' || providerId === 'commandcode-messages') {
         return commandCodeModelDef(model)?.maxTokens ?? getModelOutputTokens(model, providerId);
     }
@@ -528,8 +498,6 @@ export class AIService {
     private readonly commandCodeOAuth: CommandCodeOAuthService;
     private readonly kimiCodeOAuth: KimiCodeOAuthService;
     private readonly kimiCodeTokens: KimiCodeTokenStore;
-    private readonly workBuddyCredentials: WorkBuddyCredentialStore;
-    private readonly workBuddyOAuth: WorkBuddyOAuthService;
     private readonly minimaxCodeCredentials: MinimaxCodeCredentialStore;
     private readonly minimaxCodeOAuth: MinimaxCodeOAuthService;
     private readonly claudeSubscriptionCredentials: ClaudeSubscriptionCredentialStore;
@@ -540,18 +508,6 @@ export class AIService {
      * rules are the same everywhere.
      */
     private readonly subscriptionPools: SubscriptionPoolRegistry;
-    /** Daily WorkBuddy sign-in, which grants the subscription's free credit. */
-    private readonly workBuddyCheckin: WorkBuddyCheckinService;
-    /** Desktop accounts this extension has been asked to hide from its own scheduling. */
-    private readonly hiddenWorkBuddyAccounts = new Set<string>();
-    /**
-     * Identity headers of the credential the in-flight WorkBuddy request uses.
-     *
-     * Resolved once per `chatCompletion` (the bearer and these headers must come
-     * from the same account) and read by the request builders, which keeps their
-     * signatures unchanged.
-     */
-    private workBuddyIdentityHeaders: Record<string, string> = {};
 
 
     constructor(private context: vs.ExtensionContext) {
@@ -636,18 +592,6 @@ export class AIService {
             openBrowser: url => { void vs.env.openExternal(vs.Uri.parse(url)); },
         });
         context.subscriptions?.push({ dispose: () => this.kimiCodeOAuth.dispose() });
-        this.workBuddyCredentials = new WorkBuddyCredentialStore(context.secrets);
-        this.workBuddyOAuth = new WorkBuddyOAuthService({
-            fetchFn: this.subscriptionProxy.fetch,
-            saveCredentials: async credentials => {
-                await this.workBuddyCredentials.addManaged(credentials);
-                await this.subscriptionPools
-                    .addAccount('workbuddy-subscription', credentials as unknown as PooledOAuthCredentials)
-                    .catch(() => undefined);
-            },
-            openBrowser: url => { void vs.env.openExternal(vs.Uri.parse(url)); },
-        });
-        context.subscriptions?.push({ dispose: () => this.workBuddyOAuth.dispose() });
         this.minimaxCodeCredentials = new MinimaxCodeCredentialStore(context.secrets);
         this.minimaxCodeOAuth = new MinimaxCodeOAuthService({
             fetchFn: this.subscriptionProxy.fetch,
@@ -676,28 +620,6 @@ export class AIService {
             providerId => this.buildSubscriptionPool(providerId),
             SUBSCRIPTION_POOL_PROVIDER_IDS,
         );
-        // The daily credit is granted by signing in once a day, so it needs a scheduler
-        // rather than a settings read. It is CN-only: an international account has no
-        // activity to claim, and a card that said "signed in" for one would be claiming
-        // something that never happened.
-        this.workBuddyCheckin = new WorkBuddyCheckinService({
-            storageDir: context.globalStorageUri?.fsPath ?? context.globalStoragePath ?? process.cwd(),
-            accounts: () => this.listWorkBuddyAccounts().then(accounts => accounts
-                .filter(credentials => !this.hiddenWorkBuddyAccounts.has(workBuddyAccountKey(credentials)))
-                .map(credentials => ({ id: workBuddyAccountKey(credentials), credentials }))),
-            // Rotating a desktop credential writes the new token back to the IDE's own
-            // file, which is what keeps the running IDE signed in; the check-in itself
-            // never handles rotation.
-            ensureFresh: async credentials => refreshWorkBuddyCredentials(credentials, {
-                fetchFn: this.subscriptionProxy.fetch,
-            }),
-            fetchFn: this.subscriptionProxy.fetch,
-        });
-        context.subscriptions?.push({ dispose: () => this.workBuddyCheckin.dispose() });
-        // Start the scheduler. The first tick is the day's own run, so a host that starts
-        // after the activity opened still claims it; later ticks cost nothing because an
-        // already-confirmed day short-circuits before any request.
-        this.workBuddyCheckin.start();
     }
 
     /**
@@ -709,7 +631,6 @@ export class AIService {
      */
     private buildSubscriptionPool(providerId: string): SubscriptionPoolEntry<PooledOAuthCredentials> | undefined {
         const secrets = this.context.secrets;
-        const hiddenWorkBuddy = this.hiddenWorkBuddyAccounts;
         switch (providerId) {
             case 'claude-subscription':
                 return {
@@ -788,63 +709,12 @@ export class AIService {
                         // their own file by the refresh call rather than mirrored.
                         fetchFn: this.subscriptionProxy.fetch,
                     },
-                    // Both sources, for the same reason as WorkBuddy: a managed
-                    // device-code sign-in is a real account and must be scheduled.
+                    // Both sources: a managed device-code sign-in is a real account
+                    // and must be scheduled.
                     seed: async () => mergeMinimaxCodeCredentials(
                         scanMinimaxCodeDesktopCredentials(),
                         await this.minimaxCodeCredentials.readManaged(),
                     ) as unknown as PooledOAuthCredentials[],
-                };
-            case 'workbuddy-subscription':
-                return {
-                    spec: {
-                        displayName: 'WorkBuddy',
-                        parseCredentials: workBuddyPoolCredentials as (v: unknown) => PooledOAuthCredentials | undefined,
-                        identityKey: c => workBuddyPoolIdentityKey(c as never),
-                        defaultAlias: (c, position) => {
-                            const creds = c as never as { nickname?: string; uid?: string };
-                            return creds.nickname ?? creds.uid ?? ('Account ' + position);
-                        },
-                        refresh: async credentials => {
-                            const next = await refreshWorkBuddyCredentials(credentials as never, {
-                                fetchFn: this.subscriptionProxy.fetch,
-                            });
-                            return next as unknown as PooledOAuthCredentials;
-                        },
-                        refreshFailureStatus: subscriptionRefreshFailureStatus,
-                        // Billing allowance for one account, so the pool card can draw
-                        // each row's usage. It is a read: a failure yields no numbers
-                        // and never parks the account.
-                        quota: async (credentials, fetchFn) => {
-                            const creds = credentials as unknown as WorkBuddyCredentials;
-                            return await fetchWorkBuddyQuota(creds, workBuddyAccountKey(creds), { fetchFn });
-                        },
-                    },
-                    ports: {
-                        store: {
-                            read: () => secrets.get(WORKBUDDY_POOL_KEY),
-                            write: async value => { await secrets.store(WORKBUDDY_POOL_KEY, JSON.stringify(value)); },
-                        },
-                        fetchFn: this.subscriptionProxy.fetch,
-                    },
-                    // Seeding must cover BOTH credential sources. Scanning only the
-                    // desktop files leaves a plugin-managed sign-in out of the pool
-                    // entirely, so a managed-only setup reads as an empty pool and
-                    // the account the card shows is never scheduled.
-                    seed: async () => {
-                        const desktop = scanWorkBuddyDesktopCredentials()
-                            .filter(credentials => !hiddenWorkBuddy.has(workBuddyAccountKey(credentials)));
-                        const managed = await this.workBuddyCredentials.readManaged();
-                        return mergeWorkBuddyAccounts(desktop, managed)
-                            .map(credentials => ({
-                                ...credentials,
-                                // The pool stores a stable domain/region with the
-                                // credential: a model asked of the wrong region is a 400.
-                                domain: credentials.domain,
-                                backend: credentials.backend,
-                                region: credentials.region,
-                            })) as unknown as PooledOAuthCredentials[];
-                    },
                 };
             case 'kimi-code-plan':
                 return {
@@ -1005,10 +875,6 @@ export class AIService {
         });
     }
 
-    getWorkBuddyCheckinService(): WorkBuddyCheckinService {
-        return this.workBuddyCheckin;
-    }
-
     getClaudeSubscriptionCredentialStore(): ClaudeSubscriptionCredentialStore {
         return this.claudeSubscriptionCredentials;
     }
@@ -1053,20 +919,6 @@ export class AIService {
         return this.minimaxCodeOAuth;
     }
 
-    /**
-     * Every WorkBuddy account this extension can use.
-     *
-     * Desktop accounts are scanned read-only and merged with the managed ones;
-     * a managed sign-in for the same account wins, because it is the explicit
-     * one. Hidden desktop accounts stay out of scheduling.
-     */
-    async listWorkBuddyAccounts(): Promise<WorkBuddyCredentials[]> {
-        const managed = await this.workBuddyCredentials.readManaged();
-        const desktop = scanWorkBuddyDesktopCredentials()
-            .filter(credentials => !this.hiddenWorkBuddyAccounts.has(workBuddyAccountKey(credentials)));
-        return mergeWorkBuddyAccounts(desktop, managed);
-    }
-
     /** The pool's view of one line, for the settings card. */
     async listSubscriptionPoolAccounts(providerId: string) {
         return this.subscriptionPools.listAccounts(providerId);
@@ -1075,54 +927,6 @@ export class AIService {
     /** One pooled account's quota; undefined when the line has no quota surface. */
     async getSubscriptionPoolAccountQuota(providerId: string, accountId: string) {
         return await this.subscriptionPools.accountQuota(providerId, accountId);
-    }
-
-    /**
-     * A usable WorkBuddy credential, refreshing in place when it is near expiry.
-     *
-     * A desktop account's rotated refresh token is written back to its own file,
-     * so the IDE does not end up holding one the service has already retired.
-     */
-    async getWorkBuddyCredential(
-        excludeIds?: ReadonlySet<string>,
-        force = false,
-    ): Promise<{ credentials: WorkBuddyCredentials; accountId: string } | undefined> {
-        const selected = await this.subscriptionPools.select('workbuddy-subscription', excludeIds, force);
-        if (selected === undefined) return undefined;
-        return {
-            credentials: selected.credentials as unknown as WorkBuddyCredentials,
-            accountId: selected.accountId,
-        };
-    }
-
-    getWorkBuddyCredentialStore(): WorkBuddyCredentialStore {
-        return this.workBuddyCredentials;
-    }
-
-    getWorkBuddyOAuthService(): WorkBuddyOAuthService {
-        return this.workBuddyOAuth;
-    }
-
-    /** Hide or restore a desktop account for this extension only; the file is never touched. */
-    setWorkBuddyAccountHidden(accountKey: string, hidden: boolean): void {
-        if (hidden) this.hiddenWorkBuddyAccounts.add(accountKey);
-        else this.hiddenWorkBuddyAccounts.delete(accountKey);
-    }
-
-    isWorkBuddyAccountHidden(accountKey: string): boolean {
-        return this.hiddenWorkBuddyAccounts.has(accountKey);
-    }
-
-    /** Headers for one WorkBuddy request; exported for the settings card's tests. */
-    async workBuddyRequestHeaders(): Promise<Record<string, string>> {
-        const selected = await this.getWorkBuddyCredential();
-        if (!selected) {
-            throw new Error(aiText(
-                'Add a WorkBuddy account in Settings before using this provider.',
-                '请先在设置中添加 WorkBuddy 账号，再使用该 Provider。',
-            ));
-        }
-        return workBuddyHeaders(selected.credentials);
     }
 
     getKeyManager(): ApiKeyManager {
@@ -1354,8 +1158,6 @@ export class AIService {
         let claudeSubscriptionAccountId: string | undefined;
         /** MiniMax Code account, for the same reason. */
         let minimaxCodeAccountId: string | undefined;
-        /** WorkBuddy selection, so the endpoint and headers share one account. */
-        let workBuddySelection: { credentials: WorkBuddyCredentials; accountId: string } | undefined;
         /**
          * Pooled account this request used, for whichever line has a pool.
          *
@@ -1363,7 +1165,6 @@ export class AIService {
          * another; lines without a pool leave it undefined and are unaffected.
          */
         let subscriptionAccountId: string | undefined;
-        this.workBuddyIdentityHeaders = {};
         if (providerId === 'claude-subscription') {
             // The subscription authenticates with a bearer OAuth token, never with
             // a static API key; the key slot is deliberately not consulted.
@@ -1392,24 +1193,6 @@ export class AIService {
             minimaxCodeRegion = credentials.credentials.region;
             minimaxCodeAccountId = credentials.accountId;
             subscriptionAccountId = credentials.accountId;
-        } else if (providerId === 'workbuddy-subscription') {
-            // The subscription backend does not use a static key: its bearer and
-            // its account-identity headers both come from the stored credential.
-            // Resolving them here keeps every downstream call site synchronous,
-            // and the API-key slot is deliberately not consulted so a stale key
-            // can never be sent to this backend.
-            const credentials = await this.getWorkBuddyCredential();
-            if (!credentials) {
-                throw new Error(aiText(
-                    'Add a WorkBuddy account in Settings before using this provider.',
-                    '请先在设置中添加 WorkBuddy 账号，再使用该 Provider。',
-                ));
-            }
-            apiKey = credentials.credentials.accessToken;
-            workBuddySelection = credentials;
-            subscriptionAccountId = credentials.accountId;
-            // The bearer and these headers must come from the same account.
-            this.workBuddyIdentityHeaders = workBuddyHeaders(credentials.credentials);
         } else if (providerId === 'commandcode' || providerId === 'commandcode-messages') {
             // Command Code keys can be pooled: several keys of the same account or
             // of different accounts then rotate, cool down after a 429 and park
@@ -1455,18 +1238,14 @@ export class AIService {
         }
 
         // Subscription OAuth credentials stay on each provider's fixed backend.
-        // WorkBuddy's backend is a property of the account's region, so it comes
-        // from the credential rather than the provider default.
         const endpoint = providerId === 'codex-chatgpt' || providerId === 'antigravity'
             || providerId === 'claude-subscription'
             ? provider.endpoint
-            : workBuddySelection
-                ? workBuddySelection.credentials.backend
-                // The subscription's Messages endpoint is a property of the
-                // account's region, not of the provider default.
-                : minimaxCodeRegion
-                    ? minimaxCodeAgentHost({ region: minimaxCodeRegion }) + MINIMAX_CODE_AGENT_LLM_PREFIX
-                    : options?.endpoint || getEffectiveEndpoint(providerId, config.endpoint);
+            // The subscription's Messages endpoint is a property of the
+            // account's region, not of the provider default.
+            : minimaxCodeRegion
+                ? minimaxCodeAgentHost({ region: minimaxCodeRegion }) + MINIMAX_CODE_AGENT_LLM_PREFIX
+                : options?.endpoint || getEffectiveEndpoint(providerId, config.endpoint);
         if (!endpoint) {
             throw new Error(`${provider.name} endpoint is not configured. Please set an API endpoint in the AI Settings panel.`);
         }
@@ -1560,10 +1339,6 @@ export class AIService {
             if (enabledThinkingParams?.reasoningEffort) {
                 request.reasoning_effort = enabledThinkingParams.reasoningEffort;
             }
-        }
-        if (providerId === 'workbuddy-subscription') {
-            const effort = workBuddyEffortForRequest(model, request.reasoning_effort);
-            request.reasoning_effort = effort === undefined || !isReasoningEffort(effort) ? undefined : effort;
         }
 
         // C1 Fix: create a per-call controller; register it so cancel() can abort it.
@@ -1817,30 +1592,6 @@ export class AIService {
      *   If the key doesn't contain ".", it is used as-is (standard Token Plan JWT).
      * - All other providers: standard "Bearer {apiKey}".
      */
-    /**
-     * Add the account-identity headers a subscription gateway gates on.
-     *
-     * WorkBuddy reads the account from these headers rather than deriving it
-     * from the bearer token alone, so a request carrying only `Authorization`
-     * is not the same request the official IDE makes. Every other provider is
-     * returned unchanged.
-     */
-    private withSubscriptionIdentityHeaders(
-        providerId: string,
-        headers: Record<string, string>,
-    ): Record<string, string> {
-        if (providerId !== 'workbuddy-subscription') return headers;
-        if (Object.keys(this.workBuddyIdentityHeaders).length === 0) return headers;
-        // The identity set carries `accept: application/json` because the catalog read is
-        // a plain JSON GET. Merging it over a STREAM request would ask the gateway for
-        // JSON on a body it is streaming, so the stream Accept wins.
-        return {
-            ...headers,
-            ...this.workBuddyIdentityHeaders,
-            ...(headers.accept === undefined ? {} : { accept: headers.accept }),
-        };
-    }
-
     private buildAuthHeaders(providerId: string, apiKey: string): Record<string, string> {
         if (!apiKey.trim()) {
             return {};
@@ -1978,29 +1729,6 @@ export class AIService {
             return {
                 ...sanitized,
                 messages: this.stripImageDetail(mergedMsgs),
-            };
-        }
-
-        // ── WorkBuddy subscription: stream-only and a mandatory leading system ──
-        // Two measured constraints, both of which turn into a 400 otherwise:
-        //   * `stream: false` answers 400 code 11101, so there is no
-        //     non-streaming shape to keep in sync;
-        //   * the international backend answers 400 code 11128 unless the first
-        //     message is a system turn.
-        // A neutral system prompt is injected when the caller supplied none,
-        // rather than sending a request the endpoint is known to reject.
-        if (providerId === 'workbuddy-subscription') {
-            const existingSystem = chatRequest.messages.filter(message => message.role === 'system');
-            const rest = chatRequest.messages.filter(message => message.role !== 'system');
-            return {
-                ...chatRequest,
-                stream: true,
-                messages: [
-                    ...(existingSystem.length > 0
-                        ? existingSystem
-                        : [{ role: 'system' as const, content: WORKBUDDY_IMPLICIT_SYSTEM_PROMPT }]),
-                    ...rest,
-                ],
             };
         }
 
@@ -2210,7 +1938,7 @@ export class AIService {
         assertKimiCodeRequestSize(providerId, JSON.stringify(requestPayload));
         const send = () => this.fetchWithRetry(url, {
             method: 'POST',
-            headers: this.withSubscriptionIdentityHeaders(providerId, headers),
+            headers,
             body: JSON.stringify(requestPayload),
             signal: controller.signal,   // C1 Fix: use local per-call controller
         }, providerId);
@@ -2267,7 +1995,7 @@ export class AIService {
 
         const send = () => this.fetchWithRetry(url, {
             method: 'POST',
-            headers: this.withSubscriptionIdentityHeaders(providerId, headers),
+            headers,
             body: JSON.stringify(requestPayload),
             signal: controller.signal,
         }, providerId);
@@ -2300,7 +2028,7 @@ export class AIService {
                     };
                     response = await this.fetchWithRetry(url, {
                         method: 'POST',
-                        headers: this.withSubscriptionIdentityHeaders(providerId, nextHeaders),
+                        headers: nextHeaders,
                         body: JSON.stringify(requestPayload),
                         signal: controller.signal,
                     }, providerId);
@@ -3660,7 +3388,7 @@ export class AIService {
             // `x-api-key` and override the bearer.
             ...(providerId === 'claude-subscription'
                 ? {}
-                : providerId === 'opencode' || providerId === 'opencode-go'
+                : providerId === 'opencode'
                     || providerId === 'commandcode-messages' || providerId === 'minimax-code'
                     ? this.buildAuthHeaders(providerId, apiKey)
                     : authMode === 'bearer'

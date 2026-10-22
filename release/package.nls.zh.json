@@ -34,6 +34,7 @@
   "commands.stellarisLanguageServices.images.editExternally.title": "用外部程序编辑图片",
   "commands.stellarisLanguageServices.images.configureImageMagickPath.title": "配置 ImageMagick 路径",
   "commands.stellarisLanguageServices.images.checkImageMagick.title": "检查 ImageMagick",
+  "commands.stellarisLanguageServices.shipIcons.generateSheet.title": "从模型生成舰船顶部图标表",
   "commands.stellarisLanguageServices.rules.manageConfigGroups.title": "管理规则来源",
   "commands.stellarisLanguageServices.diagnostics.openInspectionOverview.title": "打开检查概览",
   "commands.listAllFiles.title": "调试：列出所有文件",
@@ -289,5 +290,6 @@
   "configuration.category.workshop": "CWTools：Steam 创意工坊",
   "configuration.stellarisLanguageServices.workshop.appIdOverride.description": "当 Mod 所属游戏的 App ID 缺失或为占位值（例如 Europa Universalis V）时，用于创意工坊上传的 Steam App ID。留空则使用自动识别到的游戏。",
   "configuration.stellarisLanguageServices.workshop.useIgnoreFiles.description": "使用 Mod 文件夹中的 .gitignore 与 .steamignore 过滤创意工坊上传内容，被忽略的文件不会被上传。版本控制与编辑器元数据（.git、.github、.vscode 等）始终会被排除。关闭后将上传 Mod 文件夹中的全部文件。",
-  "configuration.stellarisLanguageServices.workshop.extraIgnorePatterns.description": "除 Mod 自带的忽略文件外，额外用于排除创意工坊上传内容的 .gitignore 风格规则。适用于没有写进任何忽略文件的构建产物或仅本地使用的文件。"
+  "configuration.stellarisLanguageServices.workshop.extraIgnorePatterns.description": "除 Mod 自带的忽略文件外，额外用于排除创意工坊上传内容的 .gitignore 风格规则。适用于没有写进任何忽略文件的构建产物或仅本地使用的文件。",
+  "configuration.stellarisLanguageServices.shipIcons.meshOverrides.description": "按舰船尺寸手动指定模型，供「从模型生成舰船顶部图标表」命令使用。键是舰船尺寸，值是实体名或相对游戏根的 .mesh 路径，也可以是多条组成的数组；以 .mesh 结尾的条目按路径读取，其余按实体名解析。非空列表会替代该尺寸原本解析出的分段链。"
 }

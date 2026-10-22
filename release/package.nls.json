@@ -23,6 +23,7 @@
   "commands.stellarisLanguageServices.images.editExternally.title": "Edit Image Externally",
   "commands.stellarisLanguageServices.images.configureImageMagickPath.title": "Configure ImageMagick Path",
   "commands.stellarisLanguageServices.images.checkImageMagick.title": "Check ImageMagick",
+  "commands.stellarisLanguageServices.shipIcons.generateSheet.title": "Generate Ship Icon Sheet from Models",
   "commands.stellarisLanguageServices.rules.manageConfigGroups.title": "Manage Rules Sources",
   "commands.stellarisLanguageServices.diagnostics.openInspectionOverview.title": "Open Inspection Overview",
   "commands.listAllFiles.title": "Debug: list all files",
@@ -289,5 +290,6 @@
   "configuration.category.workshop": "CWTools: Steam Workshop",
   "configuration.stellarisLanguageServices.workshop.appIdOverride.description": "Steam App ID used for Workshop uploads when the mod's game profile has no App ID or the App ID is a placeholder (for example Europa Universalis V). Leave empty to use the detected game.",
   "configuration.stellarisLanguageServices.workshop.useIgnoreFiles.description": "Filter Workshop uploads through the mod folder's .gitignore and .steamignore files, so ignored files are not uploaded. Version-control and editor metadata (.git, .github, .vscode and similar) is always excluded. Turn this off to upload every file in the mod folder.",
-  "configuration.stellarisLanguageServices.workshop.extraIgnorePatterns.description": "Extra .gitignore-style patterns excluded from Workshop uploads, in addition to the mod's own ignore files. Useful for build output or local-only files that no ignore file covers."
+  "configuration.stellarisLanguageServices.workshop.extraIgnorePatterns.description": "Extra .gitignore-style patterns excluded from Workshop uploads, in addition to the mod's own ignore files. Useful for build output or local-only files that no ignore file covers.",
+  "configuration.stellarisLanguageServices.shipIcons.meshOverrides.description": "Manual model replacement per ship size, used by the \"Generate Ship Icon Sheet from Models\" command. Each key is a ship size; the value is an entity name or a .mesh path relative to the game root, or a list of them. Entries ending in .mesh are read as paths, the rest as entity names; a non-empty list replaces that size's resolved section chain."
 }

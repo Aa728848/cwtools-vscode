@@ -47,6 +47,7 @@ import { registerParadoxCsvFeatures } from './paradoxCsvFeatures';
 import { registerRelatedResourceFeatures } from './relatedResources';
 import { registerRulesConfigGroupCommands } from './rulesConfigGroups';
 import { registerImageTools } from './imageTools';
+import { registerShipIconCommand } from './shipIconCommand';
 import { registerWorkshopUpload } from './workshopUploadView';
 import { registerLocalisationAiCommands } from './localisationAiCommands';
 import { registerAuraLocalisationCommands } from './auraLocalisation';
@@ -1797,6 +1798,7 @@ export async function activate(context: ExtensionContext) {
 	registerStaticGalaxyEditor(context);
 	registerGraphicsFeatures(context);
 	registerImageTools(context);
+	registerShipIconCommand(context);
 
 	// ── Steam Workshop: upload the current mod to the Workshop ───────────────
 	registerWorkshopUpload(context);

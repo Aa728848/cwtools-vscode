@@ -18,7 +18,7 @@ Most language features work across supported Paradox game profiles. The visual t
 | Area | What you can do |
 | --- | --- |
 | Script editing | Get diagnostics, completion, hover information, navigation, references, symbols, CodeLens, and inlay hints for Paradox script and localisation. Stellaris hovers also carry reverse-engineered engine cost and hardcoded-behaviour notes for the script command under the cursor. |
-| Visual tools | Preview and edit Stellaris GUI files, solar systems, static galaxies, particles, entities, technology trees, and event chains. |
+| Visual tools | Preview and edit Stellaris GUI files, solar systems, static galaxies, particles, entities, technology trees, and event chains. Ship top-icon DDS sheets can be rendered from a ship set's models. |
 | Shader editing | Work with `.shader` and `.fxh` files using compile-unit-aware diagnostics, navigation, completion, formatting, rename, and semantic highlighting. |
 | CWT rule editing | Edit `.cwt` rule files with their own language id: parser/structure diagnostics (CWT0xx), directive and field-expression validation (CWT1xx/CWT2xx), project-wide undefined-reference and duplicate-type checks (CWT3xx), context completion for root blocks/directives/field expressions/symbols, cross-file navigation, and safe hot-swap of validated edits from the configured manual rules folder into the game model (CWT9xx). A rules-only repository starts the server in CWT-only mode without a game install and never activates a game model; a game workspace keeps full mode. |
 | Vanilla comparison | Compare a mod file with its vanilla counterpart and migrate the block under the cursor. |
@@ -53,6 +53,22 @@ Use the editor-title action or the file context menu:
 - technology and event files: dependency graphs
 
 Edits made by a visual editor use VS Code workspace edits, so they participate in normal undo and redo. Some previews are intentionally approximate; for example, runtime-generated hyperlanes are never presented as exact source data.
+
+#### Generate ship top-icon sheets from models
+
+Stellaris draws the ship-size icons in the ship designer and fleet view from `gfx/interface/icons/ship_parts/ship_sizes/ship_sizes_top.dds`, one 80×40 frame per size. `Generate Ship Icon Sheet from Models` renders that sheet from the models themselves, so a mod ship set no longer has to borrow vanilla art.
+
+Run the command from the Command Palette (or the editor-title button inside a mod workspace), pick a graphical culture, then a category group and the ship sizes inside it, and confirm the destination. Each size is resolved the way the game resolves it: the size's `icon` selects the sprite frame, `common/section_templates` names the section entity for every slot, and that entity's `pdxmesh` names the `.mesh` file. Sections are merged in their authored coordinates (no locator translation — vanilla section art is already positioned in hull space), projected top-down, and written as uncompressed ARGB8888 DDS at the sprite sheet's declared `noOfFrames` width, so the file drops in without editing any `.gfx`.
+
+Frames are drawn as the vanilla icon frame: a 1px transparent gutter, a 1px accent border, a vertical panel gradient, and a near-black silhouette lit by a soft glow in the accent colour. Both `ship_sizes_top.dds` and its `..._top_damaged.dds` companion are written; the damaged sheet uses the red variant of the same palette, so the outline is identical and only the colours differ. Sizes are grouped by their `class` (military, military stations, starbases, civilian hulls, and so on), and sizes that resolve to no model are left out of the lists instead of producing empty frames.
+
+Slots that offer several section templates use the first candidate by default; choose **Choose each slot manually** to override any of them. When a model cannot be resolved at all (missing `pdxmesh`, unmodelled slot, or a name that does not follow the `<culture>_<entity>` convention), use the **manual model entry** at the top of the size list: it stores an entity name or a `.mesh` path per ship size in `stellarisLanguageServices.shipIcons.meshOverrides` in the workspace settings, and that size resolves through the override from then on. Clearing the entry restores the automatic chain.
+
+When several sizes share one icon key, only one of them can keep that frame: the rest are packed into free frames, and once the sheet is full it is widened instead of dropping ships, with the counts reported. The command also writes a paste-ready `spriteTypes` block to the `CWTools Ship Icons` output channel — the two sheet sprites with the produced `noOfFrames`, a `GFX_<ship_size>_top` / `_top_damaged` pair per size, and a list of the `icon =` values to copy into the matching `ship_size` blocks so each ship reaches its own frame. Replace an existing definition instead of adding a duplicate.
+
+Hulls whose geometry lives on entities referenced through `attach` are collected too, down to four levels with cycle protection, so a model assembled from parts renders whole. A `attach`-referenced mesh that carries only locators is skipped and reported once, in locator wording.
+
+Collision proxies and alpha/additive effect planes are excluded from the silhouette, because including them would inflate the outline. Frames that reference a mesh that cannot be read stay blank instead of shifting the other sizes, and every skip and warning is listed in the `CWTools Ship Icons` output channel.
 
 #### Compare with vanilla
 
@@ -174,7 +190,7 @@ Stellaris Language Serves 是一款面向 Paradox Mod 开发的 VS Code 扩展�
 | 范围 | 可以做什么 |
 | --- | --- |
 | 脚本编辑 | 为 Paradox 脚本和本地化提供诊断、补全、悬停信息、跳转、引用、符号、CodeLens 和嵌入提示。Stellaris 的悬停还会附带光标所在脚本命令的引擎开销与硬编码行为说明（来自反编译分析）。 |
-| 可视化工具 | 预览或编辑 Stellaris GUI、恒星系、静态银河、粒子、实体、科技树和事件链。 |
+| 可视化工具 | 预览或编辑 Stellaris GUI、恒星系、静态银河、粒子、实体、科技树和事件链；也可以从舰船模型渲染舰船顶部图标 DDS 表。 |
 | Shader 编辑 | 按真实编译单元处理 `.shader` 和 `.fxh`，提供诊断、跳转、补全、格式化、重命名和语义高亮。 |
 | CWT 规则编辑 | 用独立的 `cwt` 语言编辑 `.cwt` 规则文件:解析/结构诊断(CWT0xx)、指令与字段表达式校验(CWT1xx/CWT2xx)、项目级未定义引用与重复类型检查(CWT3xx)、根块/指令/字段表达式/符号的上下文补全、跨文件跳转,以及把当前配置的手动规则目录中验证通过的编辑安全热替换进游戏模型(CWT9xx)。纯规则仓库以 CWT-only 模式启动服务,无需游戏安装且不会激活游戏模型;游戏工作区保持 full mode。 |
 | 原版对比 | 将 Mod 文件与原版对应文件对比，并迁移光标所在的代码块。 |
@@ -209,6 +225,22 @@ Stellaris Language Serves 是一款面向 Paradox Mod 开发的 VS Code 扩展�
 - 科技与事件文件：依赖关系图
 
 可视化编辑器通过 VS Code 工作区编辑写回文件，因此可以正常撤销和重做。部分预览只能近似表达游戏运行时结果；例如，运行时随机生成的超空间航道不会被当成精确数据展示。
+
+#### 从模型生成舰船顶部图标表
+
+舰船设计器和舰队视图里的舰船尺寸图标来自 `gfx/interface/icons/ship_parts/ship_sizes/ship_sizes_top.dds`，每个尺寸占 80×40 的一帧。`从模型生成舰船顶部图标表` 直接按模型重新渲染这张表，因此自制舰船组不必再借用原版图标。
+
+在命令面板运行该命令（Mod 工作区里也可以点编辑区右上角的按钮），选择图形文化，再选择类别分组与其中的舰船尺寸，最后确认输出位置。命令按游戏的同一套规则解析每个尺寸：尺寸的 `icon` 决定精灵帧号，`common/section_templates` 给出各槽位的分段实体，该实体的 `pdxmesh` 指向对应 `.mesh`。所有分段的几何会在其自带的船体坐标中合并（不施加 locator 平移——原版分段美术本身就是按船体坐标摆放的），做顶部正交投影，再按精灵表声明的 `noOfFrames` 宽度写成未压缩 ARGB8888 DDS，因此文件可以直接替换、无需改动任何 `.gfx`。
+
+每一帧按原版图标的画法绘制：1px 透明留白、1px 亮边框、面板竖向渐变，以及被同色系柔和光晕包围的近黑剪影。命令会同时写出 `ship_sizes_top.dds` 和 `..._top_damaged.dds`；破损态使用同一套配色的红色变体，因此轮廓完全一致，只有颜色不同。尺寸按其 `class` 分类（军舰、军用空间站、星港、民用船体等），解析不出模型的尺寸不会出现在列表里，也不会留下空白帧。
+
+同一槽位有多个分段模板时默认取第一个候选，需要精确控制时选择 **手动指定** 逐槽覆盖。若某个尺寸完全解析不出模型（缺 `pdxmesh`、槽位没有对应分段，或命名不符合 `<culture>_<entity>` 约定），使用尺寸列表顶部的 **手动指定模型**：它把「实体名或 `.mesh` 路径」按尺寸写进工作区设置里的 `stellarisLanguageServices.shipIcons.meshOverrides`，之后该尺寸就按这条覆盖解析；清空该条目即可恢复自动解析。
+
+当多个尺寸共用一个图标键时，只有一条能保住该帧：其余会被排进空闲帧，整张放满后改为加宽而不是丢弃，并在报告里给出各级数量。命令还会把一段可直接粘贴的 `spriteTypes` 写进 `CWTools Ship Icons` 输出通道——两条 sheet 精灵（带本次实际 `noOfFrames`）、每个尺寸一对 `GFX_<尺寸名>_top` / `_top_damaged`，以及一份需要复制进对应 `ship_size` 的 `icon =` 清单，让每艘船都能落到自己的帧。若同名定义已存在，请替换而不是重复添加。
+
+几何挂在 `attach` 子实体上的船体也会被收集（最多四层、带环检测），因此由零件拼装的模型能完整渲染；只含 locator 的 `attach` 网格会被跳过，并以 locator 措辞合并成一条报告。
+
+物理碰撞代理与 alpha/additive 特效面片不会进入剪影，否则会把轮廓撑大。引用到的 `.mesh` 读取失败的帧保持空白而不是让其他尺寸错位，所有跳过与告警都会列在 `CWTools Ship Icons` 输出通道里。
 
 #### 与原版对比
 

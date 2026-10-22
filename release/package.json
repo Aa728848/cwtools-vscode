@@ -265,6 +265,11 @@
                     "command": "cwtools.localisation.polishSelection",
                     "when": "resourceExtname == .yml && editorHasSelection",
                     "group": "navigation@8"
+                },
+                {
+                    "command": "cwtools.shipIcons.generateSheet",
+                    "when": "cwtools.workspaceIsMod && config.stellarisLanguageServices.cache.stellaris",
+                    "group": "navigation@10"
                 }
             ],
             "editor/context": [
@@ -499,6 +504,12 @@
                 "title": "%commands.stellarisLanguageServices.images.checkImageMagick.title%",
                 "category": "Paradox Images",
                 "icon": "$(check)"
+            },
+            {
+                "command": "cwtools.shipIcons.generateSheet",
+                "title": "%commands.stellarisLanguageServices.shipIcons.generateSheet.title%",
+                "category": "Stellaris",
+                "icon": "$(file-media)"
             },
             {
                 "command": "cwtools.rules.manageConfigGroups",
@@ -1081,6 +1092,25 @@
                         "type": "boolean",
                         "default": true,
                         "description": "%configuration.stellarisLanguageServices.checkForUpdates.description%"
+                    },
+                    "stellarisLanguageServices.shipIcons.meshOverrides": {
+                        "scope": "resource",
+                        "type": "object",
+                        "additionalProperties": {
+                            "anyOf": [
+                                {
+                                    "type": "string"
+                                },
+                                {
+                                    "type": "array",
+                                    "items": {
+                                        "type": "string"
+                                    }
+                                }
+                            ]
+                        },
+                        "default": {},
+                        "description": "%configuration.stellarisLanguageServices.shipIcons.meshOverrides.description%"
                     }
                 }
             },

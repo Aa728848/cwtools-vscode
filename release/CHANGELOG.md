@@ -1,6 +1,16 @@
 # Changelog
 
-## [Unreleased]
+## [2.33.0] - 2026-10-22
+
+### 舰船顶部图标表 / Ship Top-Icon Sheets from Models
+
+- **[特性] 从模型生成舰船顶部图标表（Ship Top-Icon Sheets from Models）**：
+  - 新命令 `从模型生成舰船顶部图标表`（`cwtools.shipIcons.generateSheet`，Mod 工作区的编辑区右上角另有按钮）：选图形文化 → 按 `class` 分类多选 → 选舰船尺寸 → 保存，直接产出可替换的 `ship_sizes_top.dds` 与其 `_top_damaged` 破损版。产出按原版面板画法（1px 透明留白 + 1px 亮边框 + 上亮下暗渐变 + 近黑剪影 + 同色系光晕），破损态只换红色系，不挖缺口。
+  - 解析与游戏一致：`icon` 经 `GFX_<icon>_top` 的 `default_frame` 决定帧位，`section_templates` → 实体 → `pdxmesh` 取网格，并沿 `attach` 链最多追四层（即使实体自带 pdxmesh）；分段几何按船体坐标合并、不施加 locator 平移，重复路径与重复告警都会去重。
+  - 帧位冲突不再丢弃：先按定义帧位放（aligned），冲突的塞进空闲帧（packed），整张放满则加宽（widened）。输出通道给出可直接粘贴的 `spriteTypes` 片段——两条 sheet 精灵（带实际 `noOfFrames`）+ 每尺寸一对 `GFX_<尺寸名>_top` / `_top_damaged`，并附 `icon =` 清单，供逐船寻址。
+  - 解析不出模型的尺寸不出现在列表里；需要强行指定时用尺寸列表顶部的手动入口，按尺寸写进工作区设置 `stellarisLanguageServices.shipIcons.meshOverrides`（实体名或 `.mesh` 路径，可多条，清空即恢复自动解析）。
+  - 修复 `graphical_culture = no` 被当成文化名导致 148 个尺寸被隐藏的问题；物理碰撞代理与 alpha/additive 特效面片不进入剪影；投影改为固定 Y 向上（群星模型约定），修复高瘦模型被画成侧视的问题。新增 132 个单元测试。
+  - English: [Feature] New command (`cwtools.shipIcons.generateSheet`, plus an editor-title button in mod workspaces): pick a graphical culture, a class category and the ship sizes, confirm the destination, and get a drop-in `ship_sizes_top.dds` plus its `_top_damaged` companion. Frames follow the vanilla panel (1px transparent gutter, 1px accent border, vertical gradient, near-black silhouette, same-hue glow) and the damaged sheet only swaps to the red palette. Sizes are resolved the way the game does — `icon` → `GFX_<icon>_top` frame, `section_templates` → entity → `pdxmesh`, following `attach` chains up to four levels even when the entity carries its own mesh — and section art is merged in authored hull space with duplicate paths and warnings collapsed. Icon-frame collisions are no longer dropped: aligned frames stay, the rest are packed into free frames, and the sheet is widened when it runs out. The output channel carries a paste-ready `spriteTypes` block (both sheets with the produced `noOfFrames`, a `GFX_<ship_size>_top` / `_top_damaged` pair per size) plus the `icon =` list, so every ship can reach its own frame. Sizes without geometry are hidden and can be supplied per size through the manual entry that persists to `stellarisLanguageServices.shipIcons.meshOverrides`. Also fixes `graphical_culture = no` hiding 148 sizes, keeps collision proxies and alpha/additive planes out of the silhouette, and projects with a fixed Y-up axis so tall models no longer render as side views. 132 new unit tests.
 
 ### 移除 WorkBuddy 与 OpenCode Go 线路 / Removal of the WorkBuddy and OpenCode Go Lines
 

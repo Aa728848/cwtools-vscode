@@ -66,9 +66,12 @@
 3. **逐模型能力表**：图片输入与思考档位按表查询而非按厂商/模型名前缀推断（参考项目实测同厂商内部自相矛盾）。✅ 已落地：转录官方 CLI 注册表（85 个模型）。
 4. **双 Provider 拆分维持现状**：参考项目是单 Provider 按模型 id 自动选 Anthropic/OpenAI 线路；我们拆成 `commandcode` / `commandcode-messages` 已发布且有用户数据，不合并，仅在设置文案中说明分工。
 
-### 3.4 `kimi-code-plan`（优先级 P2）✅ 已落地（1、2）
+### 3.4 `kimi-code-plan`（优先级 P2）✅ 已落地（1–4）
 
-现状：API Key + OpenAI Chat Completions（`api.kimi.com/coding/v1`），静态模型表 `k3` / `kimi-for-coding` / `kimi-for-coding-highspeed`。
+现状：API Key / OAuth 设备码 + OpenAI Chat Completions（国区 `api.kimi.com/coding/v1`，国际区
+`api.kimi.ai/coding/v1`）。实时目录驱动可选模型、上下文/输入预算与推理档位，随包表逐模型
+兜底；默认 `k3.1-pro`，另含 `k3.1-pro-highspeed` / `k3` / `k3-256k` /
+`kimi-for-coding` / `kimi-for-coding-highspeed`。
 
 可吸收项：
 
@@ -79,6 +82,11 @@
    - 不发 `temperature`；工具调用 id 截断 64 字符；`stop` 裁剪为 ≤5 条且每条 ≤32 字节；
    - **请求体超 2 MB 本地拒绝**（该端点最常见 400 就是 `total message size ... exceeds limit 2097152`），报错中给出可操作提示。
 3. **实时目录**：运行时以 `GET /v1/models` 为准，静态表兜底；`k3` 默认按 256K 计、可覆盖到 1M。
+4. **K3.1 与线协议刷新（2026-10-26）**：开放平台默认 `kimi-k3.1-pro`、订阅默认
+   `k3.1-pro`；K2.5 只从 `kimi` 内置项移除，并在有效配置读取时迁移而不写回文件。两条
+   Kimi 线路统一 `max_completion_tokens`，实时目录档位贯通设置与请求，补齐官方 `.ai`
+   区域和双位置 usage。模型、价格与取舍见
+   `.agents/notes/implemented/feature/2026-10-26-kimi-k3-1-dual-line-refresh.md`。
 
 ## 4. 新增线路
 

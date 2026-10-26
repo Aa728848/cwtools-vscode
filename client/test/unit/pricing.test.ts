@@ -67,6 +67,8 @@ describe('getModelPricing', () => {
         expect(getModelPricing('mimo-v2.5-pro')).to.deep.equal([3.00, 6.00]);
         expect(getModelPricing('kimi-k2.7-code')).to.deep.equal([6.50, 27.00]);
         expect(getModelPricing('kimi-k3')).to.deep.equal([20.00, 100.00]);
+        expect(getModelPricing('kimi-k3.1-pro')).to.deep.equal([13.00, 68.00]);
+        expect(getModelPricing('kimi-k3.1-pro-highspeed')).to.deep.equal([26.00, 136.00]);
     });
 
     it('prices the MiMo V2.6 series from the official list', () => {
@@ -182,6 +184,8 @@ describe('getCacheDiscountFactor', () => {
         expect(getCacheDiscountFactor('kimi-k2.7-code')).to.equal(0.2);
         expect(getCacheDiscountFactor('kimi-k3')).to.equal(0.1);
         expect(getCacheDiscountFactor('kimi-for-coding')).to.equal(0.1);
+        expect(getCacheDiscountFactor('kimi-k3.1-pro')).to.equal(0.1);
+        expect(getCacheDiscountFactor('kimi-k3.1-pro-highspeed')).to.equal(0.05);
         expect(getCacheDiscountFactor('kimi-k2.6')).to.equal(0.17);
         expect(getCacheDiscountFactor('minimax-m2.7')).to.equal(0.2);
         expect(getCacheDiscountFactor('mimo-v2.5-pro')).to.equal(0.0083);

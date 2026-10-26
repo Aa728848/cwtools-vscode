@@ -380,6 +380,10 @@ export const MODEL_CONTEXT_TOKENS: Record<string, number> = {
     'kimi-code-plan:k3': 262144,
     'kimi-code-plan:k3-256k': 262144,
     'kimi-code-plan:kimi-for-coding-highspeed': 262144,
+    // K3.1 Pro reaches 1M at the top tier, but the published default on this line is
+    // the 256K plan bound; the highspeed sibling is only offered at 1M.
+    'kimi-code-plan:k3.1-pro': 262144,
+    'kimi-code-plan:k3.1-pro-highspeed': 1048576,
     ...Object.fromEntries(ANTIGRAVITY_MODELS.map(model => [`antigravity:${model}`, antigravityContextTokens(model)])),
     ...Object.fromEntries(CODEX_CHATGPT_MODELS.map(model => [
         `codex-chatgpt:${model}`,
@@ -517,6 +521,8 @@ export const MODEL_CONTEXT_TOKENS: Record<string, number> = {
     'kimi-for-coding': 1048576,
     'k3': 1048576,
     'kimi-k3': 1048576,
+    'kimi-k3.1-pro-highspeed': 1048576,
+    'kimi-k3.1-pro': 1048576,
     'kimi-k2.7-code-highspeed': 262144,
     'kimi-k2.7-code': 262144,
     'kimi-k2.6': 262144,

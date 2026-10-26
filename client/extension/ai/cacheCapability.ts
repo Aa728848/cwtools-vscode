@@ -74,7 +74,11 @@ export function resolveEffectiveCacheCapability(options: {
             deepseek: /(^|\.)api\.deepseek\.com$/, qwen: /(^|\.)dashscope\.aliyuncs\.com$/,
             glm: /(^|\.)open\.bigmodel\.cn$/, mimo: /(^|\.)api\.xiaomimimo\.com$/,
             'mimo-token-plan': /(^|\.)token-plan-cn\.xiaomimimo\.com$/,
-            kimi: /(^|\.)api\.moonshot\.cn$/, 'kimi-code-plan': /(^|\.)api\.kimi\.com$/,
+            // Kimi serves the open platform from both .cn and the official .ai region, and
+            // the subscription from .com and .ai; every one of them runs the same
+            // implicit-prefix cache and the same usage trailer.
+            kimi: /(^|\.)api\.moonshot\.(?:cn|ai)$/,
+            'kimi-code-plan': /(^|\.)api\.kimi\.(?:com|ai)$/,
             minimax: /(^|\.)api\.minimaxi\.com$/,
         };
         const official = officialTransportOrUnspecified(host, hostPatterns[provider] ?? /$a/);

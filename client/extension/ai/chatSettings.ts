@@ -19,6 +19,14 @@ import type { AIService } from './aiService';
 import type { AntigravityLogin } from './antigravity/oauthService';
 import type { CommandCodeLogin } from './commandcode/oauthService';
 import { getKimiCodeAccountStatus } from './kimi/accountStatus';
+import {
+    kimiCatalogContextBudget,
+    kimiCatalogDefaultModel,
+    kimiCatalogModelIds,
+    kimiCatalogReasoningCapability,
+    preferDeclaredReasoningCapability,
+} from './kimi/catalog';
+import { migrateKimiModelId } from './kimi/modelMigration';
 import { isMinimaxCodeCredentialFresh } from './minimaxcode/credentials';
 import { MINIMAX_CODE_MODELS } from './minimaxcode/types';
 import { isClaudeSubscriptionCredentialFresh } from './claudesub/credentials';
@@ -427,14 +435,23 @@ export class ChatSettingsManager {
             const codexModels = p.id === 'codex-chatgpt' ? (codexAccount?.models ?? [])
                 : p.id === 'antigravity' ? antigravityAccount?.models
                 : undefined;
+            // The live Kimi listing decides which ids this account may call, so it
+            // replaces the shipped list. An empty listing (signed out, or a read that
+            // failed) keeps the shipped table rather than emptying the picker.
+            const kimiModels = p.id === 'kimi-code-plan' ? kimiCatalogModelIds(kimiCatalog) : undefined;
             return {
                 id: p.id,
                 name: p.id === 'codex-chatgpt'
                     ? aiText('Codex (ChatGPT Subscription)', 'Codex（ChatGPT 订阅）')
                     : p.name,
-                models: codexModels ?? p.models,
+                models: codexModels ?? kimiModels ?? p.models,
                 inlineModels: p.inlineModels,
-                defaultModel: codexModels?.[0] ?? p.defaultModel,
+                // A default the account's catalog does not offer is not a default:
+                // it would fail on the first request, so the first offered id takes
+                // its place. A saved non-default choice is never rewritten here.
+                defaultModel: codexModels?.[0] ?? (p.id === 'kimi-code-plan'
+                    ? kimiCatalogDefaultModel(kimiCatalog, p.defaultModel)
+                    : p.defaultModel),
                 requiresApiKey: p.requiresApiKey,
                 defaultEndpoint: p.endpoint,
                 userEndpoint: this.aiService.getEndpointForProvider(p.id),
@@ -495,9 +512,14 @@ export class ChatSettingsManager {
             webKeys[provider] = await this.aiService.getKeyManager().getKey(`web.${provider}`) ? '••••••••' : '';
         }
 
+        // A saved id this release retired (kimi-k2.5 on the kimi line) is shown as its
+        // successor, the same substitution aiService applies when the config is read.
+        // The settings file itself is left for the user to rewrite - the migration is
+        // a read-time decision (see kimi/modelMigration.ts), not a silent write here.
+        const migratedModel = migrateKimiModelId(config.provider, config.model);
         const selectedModel = config.provider === 'codex-chatgpt' && codexAccount?.models.length
             ? (codexAccount.models.includes(config.model) ? config.model : codexAccount.models[0] || config.model)
-            : config.model;
+            : migratedModel;
         // Split the merged MCP server list by origin: only settings-sourced
         // servers are editable in the panel (the webview rebuilds the saved
         // list from those blocks); file-based servers ride along read-only as
@@ -612,10 +634,29 @@ export class ChatSettingsManager {
             reasoningCapabilities[reasoningCapabilityKey('ollama', model.name)] =
                 getModelReasoningCapability('ollama', model.name);
         }
-        const currentCapability = getModelReasoningCapability(
-            current.provider,
-            current.model,
-            getProviderApiFormat(current.provider, current.model, current.customApiFormat)
+        // A catalog entry wins over the static table: it may declare a ladder, an
+        // explicit "no thinking", or an empty ladder. Only silence keeps the static
+        // answer, because silence is not the same as "no levels". The static answer is
+        // still handed over as the fallback for a missing default effort, so a live
+        // ladder without a default inherits this model's documented default (K3.1 keeps
+        // `max` instead of being downgraded to `high`).
+        for (const model of kimiCatalog) {
+            const key = reasoningCapabilityKey('kimi-code-plan', model.id);
+            const catalogCapability = kimiCatalogReasoningCapability(model, reasoningCapabilities[key]);
+            if (catalogCapability === undefined) continue;
+            reasoningCapabilities[key] = catalogCapability;
+        }
+        // Read the value just written, not a fresh static lookup: the picker and the
+        // request normalisation must agree, and a dynamically discovered model must not
+        // be misread as NO_REASONING while its catalog entry declares thinking.
+        const currentCapability = preferDeclaredReasoningCapability(
+            reasoningCapabilities,
+            reasoningCapabilityKey(current.provider, current.model),
+            getModelReasoningCapability(
+                current.provider,
+                current.model,
+                getProviderApiFormat(current.provider, current.model, current.customApiFormat)
+            )
         );
         current.reasoningEffort = normalizeReasoningEffort(currentCapability, current.reasoningEffort);
 
@@ -645,8 +686,13 @@ export class ChatSettingsManager {
                         ([model, window]) => [`commandcode:${model}`, window],
                     ),
                 ),
+                // The prompt/compaction budget is the smaller of the window and the
+                // model's declared input cap: a prompt past the cap is refused, so
+                // budgeting it against the window overshoots into a rejection instead
+                // of a compaction. The window itself and the output ceiling are left
+                // alone - the input cap is neither.
                 ...Object.fromEntries(
-                    kimiCatalog.map(model => [`kimi-code-plan:${model.id}`, model.contextWindow]),
+                    kimiCatalog.map(model => [`kimi-code-plan:${model.id}`, kimiCatalogContextBudget(model)]),
                 ),
                 // The subscription catalog is hardcoded on purpose (its /v1/models
                 // route is not configured for subscription traffic), so these
@@ -693,14 +739,38 @@ export class ChatSettingsManager {
     async quickChangeReasoningEffort(effort: ReasoningEffort): Promise<void> {
         if (!isReasoningEffort(effort)) return;
         const config = this.aiService.getConfig();
-        const capability = getModelReasoningCapability(
+        const staticCapability = getModelReasoningCapability(
             config.provider,
             config.model,
             getProviderApiFormat(config.provider, config.model, config.customApiFormat)
         );
+        // Ask the same question the settings page asks. The live Kimi directory knows this
+        // plan's levels right now; the static table only knows the levels at release time.
+        // Consulting only the static table refuses a level the directory just unlocked and
+        // accepts one it has already withdrawn.
+        const capability = config.provider === 'kimi-code-plan'
+            ? await this.liveKimiReasoningCapability(config.model, staticCapability)
+            : staticCapability;
         if (!capability.options.includes(effort)) return;
         this.aiService.setReasoningEffortOverride(effort);
         await this.buildAndSendSettingsData();
+    }
+
+    /**
+     * The live directory's levels for one Kimi model; the static answer stands where the
+     * directory is silent or does not list the model.
+     *
+     * Reuses the settings page's loader and its per-account cache, so a quick switch never
+     * opens a second request path of its own.
+     */
+    private async liveKimiReasoningCapability(
+        model: string,
+        staticCapability: ModelReasoningCapability,
+    ): Promise<ModelReasoningCapability> {
+        const catalog = await loadKimiCodeCatalog(this.aiService);
+        const entry = catalog.find(item => item.id === model);
+        if (entry === undefined) return staticCapability;
+        return kimiCatalogReasoningCapability(entry, staticCapability) ?? staticCapability;
     }
 
     /**

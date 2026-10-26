@@ -119,7 +119,13 @@ describe('PromptBuilder 快照与稳定性测试', () => {
 
         expect(prompt).to.include('Explore Mode');
         expect(prompt).to.include('Explore Mode Guidelines');
-        expect(prompt).to.not.include('write_file');
+        expect(prompt).to.include('You MUST NOT write or modify any files');
+        // The save-skill rule mentions write_file only to forbid using it for SKILL.md
+        // or experience files. A bare substring ban would confuse that safeguard with
+        // an actual write permission, so pin the read-only meaning instead.
+        const writeFileMentions = prompt.split(/\r?\n/).filter(line => line.includes('write_file'));
+        expect(writeFileMentions).to.have.length(1);
+        expect(writeFileMentions[0]).to.include('instead of writing `SKILL.md` or experience files with `write_file`/`edit_file`');
     });
 
     it('验证 review 模式的系统提示词关键特征', () => {

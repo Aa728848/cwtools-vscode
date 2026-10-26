@@ -131,7 +131,11 @@ export function getCacheDiscountFactor(model: string, providerId?: string): numb
     if (lower.includes('qwen')) return 0.2;
     // Zhipu GLM
     if (lower.includes('glm')) return 0.19;
-    // Moonshot Kimi
+    // Moonshot Kimi — K3.1 Pro bills cache hits at ¥1.30/MTok against a ¥13 input
+    // rate (10%), while the highspeed line keeps the same cache price against its
+    // doubled ¥26 input rate (5%).
+    if (lower.includes('k3.1-pro-highspeed')) return 0.05;
+    if (lower.includes('k3.1')) return 0.1;
     if (lower.includes('kimi-k3') || lower.includes('kimi-for-coding')) return 0.1;
     if (lower.includes('kimi-k2.7')) return 0.2;
     if (lower.includes('kimi-k2.5')) return 0.18;

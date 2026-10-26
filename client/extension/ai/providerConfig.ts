@@ -3,6 +3,7 @@ import * as path from 'path';
 import type { AIProviderConfig, CustomApiFormat } from './types';
 import { BUILTIN_PROVIDERS } from './providers/models/defaults';
 import { getCwtoolsHomeDir } from './homeConfig';
+import { migrateKimiModelId } from './kimi/modelMigration';
 
 /**
  * User-level provider routes and sub-agent model assignments, aligned with the
@@ -387,6 +388,13 @@ export function getAgentModelOverrides(
     settingsModels: Record<string, { provider: string; model: string }> | undefined,
 ): Record<string, SourcedAgentModelAssignment> | undefined {
     const merged = mergeAgentModelOverrides(settingsModels, loadHomeAgentModelOverrides().agentModels);
+    // A retired Kimi id can survive in either layer. The assignment is migrated on the way
+    // out — a pure substitution with no write-back — so the orchestrator never dispatches a
+    // model the service no longer serves, and neither file nor the settings are touched.
+    for (const [role, assignment] of Object.entries(merged)) {
+        const model = migrateKimiModelId(assignment.provider, assignment.model);
+        if (model !== assignment.model) merged[role] = { ...assignment, model };
+    }
     return Object.keys(merged).length > 0 ? merged : undefined;
 }
 

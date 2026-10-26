@@ -2175,3 +2175,332 @@ function geminiSseResponse(events: Record<string, unknown>[]): Response {
         }),
     } as Response;
 }
+
+describe('AIService Kimi K3.1 request assembly', () => {
+    /**
+     * Capture the body the real `chatCompletion` builds. `catalog` is what the account's Kimi
+     * Code listing would answer with; it defaults to an empty one, so no case reaches the
+     * network and every provider keeps the path it had before the catalog was consulted.
+     */
+    async function capturedWithCatalog(
+        providerId: string,
+        model: string,
+        options: Record<string, unknown> = {},
+        catalog: ReadonlyArray<Record<string, unknown>> = [],
+        catalogFailure?: Error,
+    ) {
+        const { AIService } = loadAIService();
+        const service = new AIService({ secrets: {} } as any) as any;
+        let catalogReads = 0;
+        service.listKimiCodeModels = async () => {
+            catalogReads++;
+            if (catalogFailure !== undefined) throw catalogFailure;
+            return catalog;
+        };
+        const bodies: any[] = [];
+        service.callOpenAICompatibleStreaming = async (_endpoint: string, _key: string, request: any) => {
+            bodies.push(request);
+            return completionResponse(request.model);
+        };
+        await service.chatCompletion(
+            [{ role: 'user', content: 'Hello' }],
+            { providerId, model, apiKey: 'test-key', ...options },
+        );
+        return { body: bodies[0]!, catalogReads };
+    }
+
+    async function capturedRequest(providerId: string, model: string, options: Record<string, unknown> = {}) {
+        return (await capturedWithCatalog(providerId, model, options)).body;
+    }
+
+    /** One entry of the live listing, spelled the way `/v1/models` declares a ladder. */
+    function catalogEntry(id: string, reasoningEfforts: readonly string[]) {
+        return { id, reasoningEfforts, contextWindow: 262144 };
+    }
+
+    it('renames the output cap across both Kimi lines and nowhere else', async () => {
+        // The catch-all 'k3' family in 'kimi-for-coding' means the list must be read as
+        // "every model each line serves", not "the models whose reasoning shape changed".
+        const cases = [
+            ['kimi', 'kimi-k3.1-pro', 131072],
+            ['kimi', 'kimi-k3.1-pro-highspeed', 131072],
+            ['kimi', 'kimi-k3', 131072],
+            ['kimi', 'kimi-k2.6', 32768],
+            ['kimi', 'kimi-for-coding', 131072],
+            ['kimi-code-plan', 'k3.1-pro', 32768],
+            ['kimi-code-plan', 'k3.1-pro-highspeed', 32768],
+            ['kimi-code-plan', 'k3', 131072],
+            ['kimi-code-plan', 'kimi-for-coding-highspeed', 131072],
+        ] as const;
+        for (const [providerId, model, cap] of cases) {
+            const body = await capturedRequest(providerId, model);
+            expect(body, `${providerId}/${model}`).to.not.have.property('max_tokens');
+            expect(body.max_completion_tokens, `${providerId}/${model}`).to.equal(cap);
+        }
+
+        // The K3.1 effort field still rides along untouched on both lines.
+        const kimi = await capturedRequest('kimi', 'kimi-k3.1-pro', { reasoningEffort: 'max' });
+        expect(kimi.reasoning_effort).to.equal('max');
+        expect(kimi.max_completion_tokens).to.equal(131072);
+        // The subscription line's K3.1 stays on its own 32768 rather than the open platform's.
+        const plan = await capturedRequest('kimi-code-plan', 'k3.1-pro-highspeed', { reasoningEffort: 'low' });
+        expect(plan.max_completion_tokens).to.equal(32768);
+        expect(plan.reasoning_effort).to.equal('low');
+
+        // An explicit cap still wins over the model default.
+        const explicit = await capturedRequest('kimi', 'kimi-k3.1-pro', { maxTokens: 4096 });
+        expect(explicit.max_completion_tokens).to.equal(4096);
+        expect(explicit).to.not.have.property('max_tokens');
+
+        // A route outside the two Kimi lines keeps the legacy field and its value.
+        const deepseek = await capturedRequest('deepseek', 'deepseek-v4-pro');
+        expect(deepseek.max_tokens).to.equal(384000);
+        expect(deepseek).to.not.have.property('max_completion_tokens');
+    });
+
+    it('keeps fixed sampling off the wire body for K3.1', async () => {
+        const body = await capturedRequest('kimi', 'kimi-k3.1-pro');
+        const wire = JSON.parse(JSON.stringify(body));
+        expect(wire).to.not.have.property('temperature');
+        expect(wire).to.not.have.property('top_p');
+        // The effort field is the only sampling-like control this family takes.
+        expect(wire.reasoning_effort).to.equal('high');
+        expect(wire).to.not.have.property('thinking');
+    });
+
+    it('sends the plan ladder rung the settings page accepted instead of the static re-mapping', async () => {
+        // The plan's K3.1 ladder can be as narrow as `medium` alone. The static table has no
+        // medium rung for this family, so its own rule would quietly widen the request to
+        // `high` — the exact divergence from the settings page this test pins down.
+        const { body, catalogReads } = await capturedWithCatalog(
+            'kimi-code-plan', 'k3.1-pro', { reasoningEffort: 'medium' },
+            [catalogEntry('k3.1-pro', ['medium'])],
+        );
+        expect(catalogReads).to.equal(1);
+        expect(body.reasoning_effort).to.equal('medium');
+        expect(body.max_completion_tokens).to.equal(32768);
+    });
+
+    it('emits a declared rung for a model the static table does not know at all', async () => {
+        // Unknown ids resolve to "no reasoning control", so the static rules return nothing to
+        // send. A catalog that names a ladder still has to reach the wire on its own.
+        const { body } = await capturedWithCatalog(
+            'kimi-code-plan', 'plan-ultra', { reasoningEffort: 'medium' },
+            [catalogEntry('plan-ultra', ['low', 'medium', 'high'])],
+        );
+        expect(body.reasoning_effort).to.equal('medium');
+    });
+
+    it('falls back to the static shape when the listing stays silent about rungs', async () => {
+        // An empty ladder is not evidence for a new one. The catalog is still consulted once,
+        // and the body has to stay byte-identical to the case where it names no such model.
+        const undeclared = await capturedWithCatalog('kimi-code-plan', 'k3.1-pro', {});
+        const silent = await capturedWithCatalog(
+            'kimi-code-plan', 'k3.1-pro', {},
+            [catalogEntry('k3.1-pro', [])],
+        );
+        expect(silent.catalogReads).to.equal(1);
+        expect(silent.body.reasoning_effort).to.equal(undeclared.body.reasoning_effort);
+        expect(silent.body.reasoning_effort).to.equal('high');
+
+        // Lines outside the plan never read the account catalog at all.
+        const deepseek = await capturedWithCatalog('deepseek', 'deepseek-v4-pro');
+        const kimi = await capturedWithCatalog('kimi', 'kimi-k3.1-pro');
+        expect(deepseek.catalogReads).to.equal(0);
+        expect(kimi.catalogReads).to.equal(0);
+    });
+
+    it('falls back to the shipped ladder and reports a catalog read failure', async () => {
+        const { ErrorReporter } = require('../../extension/ai/errorReporter') as typeof import('../../extension/ai/errorReporter');
+        const originalDebug = ErrorReporter.debug;
+        const messages: string[] = [];
+        (ErrorReporter as any).debug = (_source: unknown, message: string) => { messages.push(message); };
+        let result: Awaited<ReturnType<typeof capturedWithCatalog>>;
+        try {
+            result = await capturedWithCatalog(
+                'kimi-code-plan', 'k3.1-pro', {}, [], new Error('synthetic catalog outage'),
+            );
+        } finally {
+            (ErrorReporter as any).debug = originalDebug;
+        }
+        expect(result.catalogReads).to.equal(1);
+        expect(result.body.reasoning_effort).to.equal('high');
+        expect(messages.some(message => message.includes('k3.1-pro') && message.includes('shipped metadata'))).to.equal(true);
+    });
+
+    it('keeps the for-coding thinking body while the catalog rung takes over the effort', async () => {
+        // `thinking.keep: "all"` is what makes the service echo the chain back on the next
+        // turn, so the catalog's rung may replace only the effort field. The static table's
+        // own rule for this id still produces the body; `medium` must not cost it.
+        const dynamic = await capturedWithCatalog(
+            'kimi-code-plan', 'kimi-for-coding', { reasoningEffort: 'medium' },
+            [catalogEntry('kimi-for-coding', ['low', 'medium', 'high', 'max'])],
+        );
+        expect(dynamic.body.reasoning_effort).to.equal('medium');
+        expect(dynamic.body.thinking).to.deep.equal({ type: 'enabled', keep: 'all' });
+
+        // A model whose static ladder does admit a rung proves the extraBody survives too.
+        const k2 = await capturedWithCatalog(
+            'kimi-code-plan', 'kimi-k2.6', { reasoningEffort: 'medium' },
+            [catalogEntry('kimi-k2.6', ['none', 'medium', 'high'])],
+        );
+        expect(k2.body.reasoning_effort).to.equal('medium');
+        expect(k2.body.thinking).to.deep.equal({ type: 'enabled' });
+    });
+});
+
+describe('AIService Kimi K3.1 transcript replay', () => {
+    it('requires the reasoning field on every K3.1 assistant message on both lines', () => {
+        const { AIService } = loadAIService();
+        const service = new AIService({ secrets: {} } as any) as any;
+        const messages = [
+            { role: 'assistant', content: null, tool_calls: [{ id: 'c1', type: 'function', function: { name: 'read', arguments: '{}' } }] },
+            { role: 'tool', tool_call_id: 'c1', content: 'ok' },
+        ];
+        for (const [providerId, model] of [['kimi', 'kimi-k3.1-pro'], ['kimi-code-plan', 'k3.1-pro']]) {
+            const sanitized = service.sanitizeRequest(providerId, { model, messages });
+            expect(sanitized.messages[0], model).to.have.property('reasoning_content', '');
+        }
+        // The subscription K3 rule is unchanged, and the K2 toggle family has no requirement.
+        expect(service.sanitizeRequest('kimi-code-plan', { model: 'k3', messages }).messages[0])
+            .to.have.property('reasoning_content', '');
+        expect(service.sanitizeRequest('kimi', { model: 'kimi-k2.6', messages }).messages[0])
+            .to.not.have.property('reasoning_content');
+        expect(service.sanitizeRequest('openrouter', { model: 'moonshotai/kimi-k3.1-pro', messages }).messages[0])
+            .to.not.have.property('reasoning_content');
+    });
+
+    it('replays whichever reasoning key the service actually used', () => {
+        const { AIService } = loadAIService();
+        const service = new AIService({ secrets: {} } as any) as any;
+        for (const key of ['reasoning_content', 'reasoning', 'reasoning_details']) {
+            const sanitized = service.sanitizeRequest('kimi', {
+                model: 'kimi-k3.1-pro',
+                messages: [{ role: 'assistant', content: 'hi', reasoning_content: 'thought', reasoning_key: key }],
+            });
+            expect(sanitized.messages[0], key).to.have.property(key, 'thought');
+            if (key !== 'reasoning_content') {
+                expect(sanitized.messages[0], key).to.not.have.property('reasoning_content');
+            }
+        }
+    });
+
+    it('omits an empty tool-call content on Kimi only', () => {
+        const { AIService } = loadAIService();
+        const service = new AIService({ secrets: {} } as any) as any;
+        const toolCall = [{ id: 'c1', type: 'function', function: { name: 'read', arguments: '{}' } }];
+        for (const providerId of ['kimi', 'kimi-code-plan']) {
+            const sanitized = service.sanitizeRequest(providerId, {
+                model: 'kimi-k3.1-pro',
+                messages: [
+                    { role: 'assistant', content: null, tool_calls: toolCall },
+                    { role: 'assistant', content: '   ', tool_calls: toolCall },
+                ],
+            });
+            expect(sanitized.messages[0], providerId).to.not.have.property('content');
+            expect(sanitized.messages[1], providerId).to.not.have.property('content');
+        }
+        // A plain assistant turn keeps its content even when it is empty.
+        const text = service.sanitizeRequest('kimi', {
+            model: 'kimi-k3.1-pro',
+            messages: [{ role: 'assistant', content: '' }],
+        });
+        expect(text.messages[0]).to.have.property('content', '');
+        // Another provider's tool-call turn is untouched.
+        const other = service.sanitizeRequest('openrouter', {
+            model: 'moonshotai/kimi-k3.1-pro',
+            messages: [{ role: 'assistant', content: null, tool_calls: toolCall }],
+        });
+        expect(other.messages[0]).to.have.property('content', null);
+    });
+});
+
+describe('AIService Kimi usage positions', () => {
+    it('reads usage from the top-level trailer and from choices[0] without double counting cache', async () => {
+        const { AIService } = loadAIService();
+        const service = new AIService({ secrets: {} } as any) as any;
+        const usage = {
+            prompt_tokens: 1000,
+            completion_tokens: 20,
+            total_tokens: 1020,
+            prompt_tokens_details: { cached_tokens: 800 },
+        };
+        const chunks = [
+            // Documented position: the final chunk carries usage and no choices.
+            { choices: [], usage },
+            // Observed on the Kimi line: usage attached to the first choice.
+            { choices: [{ index: 0, delta: { content: 'ok' }, finish_reason: 'stop', usage }] },
+        ];
+        for (const chunk of chunks) {
+            service.fetchWithRetry = async () => chatCompletionsSseResponse([chunk]);
+            const response = await service.callOpenAICompatibleStreaming(
+                'https://api.kimi.ai/coding/v1', 'test-key',
+                { model: 'k3.1-pro', messages: [{ role: 'user', content: 'Hi' }] },
+                'kimi-code-plan', undefined, new AbortController(),
+            );
+            // prompt_tokens stays the TOTAL input; the cache counters are a subset and are
+            // reported beside it, never folded back in.
+            expect(response.usage!.prompt_tokens).to.equal(1000);
+            expect(response.usage!.cached_tokens).to.equal(800);
+            expect(response.usage!.cache_creation_tokens).to.equal(200);
+            expect(response.usage!.total_tokens).to.equal(1020);
+        }
+        // A non-Kimi route does not look inside choices[0].
+        service.fetchWithRetry = async () => chatCompletionsSseResponse([chunks[1]!]);
+        const other = await service.callOpenAICompatibleStreaming(
+            'https://api.deepseek.com/v1', 'test-key',
+            { model: 'deepseek-v4-pro', messages: [{ role: 'user', content: 'Hi' }] },
+            'deepseek', undefined, new AbortController(),
+        );
+        expect(other.usage).to.equal(undefined);
+    });
+});
+
+describe('AIService Kimi K2.5 effective-config migration', () => {
+    function configWith(settings: Record<string, unknown>) {
+        const { AIService } = loadAIService();
+        const originalConfiguration = vscodeStub.workspace.getConfiguration;
+        vscodeStub.workspace.getConfiguration = () => ({
+            get: <T>(key: string, defaultValue?: T): T | undefined =>
+                (key in settings ? settings[key] as T : defaultValue),
+        });
+        try {
+            return (new AIService({ secrets: {} } as any) as any).getConfig();
+        } finally {
+            vscodeStub.workspace.getConfiguration = originalConfiguration;
+        }
+    }
+
+    it('migrates a retired K2.5 selection without writing anything', () => {
+        const migrated = configWith({ provider: 'kimi', model: 'kimi-k2.5', reasoningEffort: 'none' });
+        expect(migrated.model).to.equal('kimi-k3.1-pro');
+        // K3.1 always thinks: none floors at low instead of becoming the family default max.
+        expect(migrated.reasoningEffort).to.equal('low');
+
+        const kept = configWith({ provider: 'kimi', model: 'kimi-k2.5', reasoningEffort: 'high' });
+        expect(kept.model).to.equal('kimi-k3.1-pro');
+        expect(kept.reasoningEffort).to.equal('high');
+    });
+
+    it('migrates the inline and translation preview models too', () => {
+        const inline = configWith({
+            provider: 'kimi',
+            model: 'kimi-k2.5',
+            'inlineCompletion.provider': '',
+            'inlineCompletion.model': 'kimi-k2.5',
+        });
+        expect(inline.inlineCompletion.model).to.equal('kimi-k3.1-pro');
+        const translation = configWith({
+            provider: 'kimi',
+            'translationPreview.provider': '',
+            'translationPreview.model': 'kimi-k2.5',
+        });
+        expect(translation.translationPreview.model).to.equal('kimi-k3.1-pro');
+    });
+
+    it('leaves other providers, surviving ids and custom ids alone', () => {
+        expect(configWith({ provider: 'openrouter', model: 'kimi-k2.5' }).model).to.equal('kimi-k2.5');
+        expect(configWith({ provider: 'kimi', model: 'kimi-k2.6' }).model).to.equal('kimi-k2.6');
+        expect(configWith({ provider: 'kimi', model: 'my-relay-k2.5' }).model).to.equal('my-relay-k2.5');
+    });
+});

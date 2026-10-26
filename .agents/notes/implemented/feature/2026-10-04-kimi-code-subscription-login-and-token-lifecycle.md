@@ -2,6 +2,10 @@
 
 Status: implemented
 
+> 2026-10-26：K3.1 双线模型目录、输出字段、输入预算与 K2.5 有效迁移见
+> [Kimi K3.1 双线模型与线路协议刷新](2026-10-26-kimi-k3-1-dual-line-refresh.md)。
+> 本文继续拥有设备码登录、凭据续期与 K3 保留思考契约。
+
 ## Problem
 
 `kimi-code-plan` 此前只支持手动粘贴 API Key，且缺少该线路自己的协议纪律：

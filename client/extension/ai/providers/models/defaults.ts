@@ -626,13 +626,18 @@ export const BUILTIN_PROVIDERS: Record<string, AIProviderConfig> = {
         registerUrl: 'https://platform.moonshot.cn/',
         name: 'Kimi (月之暗面)',
         endpoint: 'https://api.moonshot.cn/v1',
-        defaultModel: 'kimi-k3',
+        // K3.1 Pro (and its highspeed sibling) replace K3 at the top of this line.
+        // kimi-k2.5 is gone from the built-in list; a saved selection is rewritten when
+        // the config is read (kimi/modelMigration.ts) so it cannot linger as a
+        // dynamically registered model that every request would fail on.
+        defaultModel: 'kimi-k3.1-pro',
         models: [
+            'kimi-k3.1-pro',
+            'kimi-k3.1-pro-highspeed',
             'kimi-k3',
             'kimi-k2.7-code',
             'kimi-k2.7-code-highspeed',
-            'kimi-k2.6',
-            'kimi-k2.5'
+            'kimi-k2.6'
         ],
         supportsToolUse: true,
         requiresApiKey: true,
@@ -686,10 +691,12 @@ export const BUILTIN_PROVIDERS: Record<string, AIProviderConfig> = {
         registerUrl: 'https://www.kimi.com/code/console',
         name: 'Kimi Code Plan (月之暗面)',
         endpoint: 'https://api.kimi.com/coding/v1',
-        defaultModel: 'kimi-for-coding',
+        defaultModel: 'k3.1-pro',
         // k3-256k is a served model the earlier table omitted, so it was simply
         // unreachable; its window is the plan-safe 256K the entitlement bound uses.
-        models: ['k3', 'k3-256k', 'kimi-for-coding', 'kimi-for-coding-highspeed'],
+        // The K3.1 Pro pair joins at the top; kimi-for-coding stays as the durable
+        // alias the service upgrades in place.
+        models: ['k3.1-pro', 'k3.1-pro-highspeed', 'k3', 'k3-256k', 'kimi-for-coding', 'kimi-for-coding-highspeed'],
         supportsToolUse: true,
         requiresApiKey: true,
         supportsStreaming: true,

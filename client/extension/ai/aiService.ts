@@ -45,6 +45,12 @@ import { SOURCE, aiText } from './messages';
 import { getProjectWorkspaceRoot } from './workspacePaths';
 import { loadMcpServerFileConfigs, mergeMcpServerConfigs } from './mcpConfig';
 import { getHomeProviderApiKeyEnv, getHomeProviderEndpoint } from './providerConfig';
+import {
+    isKimiK31ProviderModel,
+    isKimiProviderId,
+    migrateKimiModelId,
+    migrateKimiReasoningEffort,
+} from './kimi/modelMigration';
 import { ChatGptOAuthService, codexSubscriptionHeaders, codexWireReasoningEffort } from './codex/oauthService';
 import {
     CODEX_OPENAI_BETA,
@@ -65,7 +71,7 @@ import { commandCodeQuotaFromStatus } from './commandcode/quota';
 import { fetchMinimaxCodeQuota } from './minimaxcode/quota';
 import { fetchKimiQuota } from './kimi/quota';
 import { identityFromKimiToken } from './kimi/identity';
-import { getCachedKimiCatalog, loadKimiCatalog, type KimiCodeCatalogModel } from './kimi/catalog';
+import { getCachedKimiCatalog, kimiCatalogReasoningCapability, loadKimiCatalog, type KimiCodeCatalogModel } from './kimi/catalog';
 import { codexQuotaFromRateLimits } from './codex/quota';
 import {
     MinimaxCodeCredentialStore,
@@ -202,6 +208,13 @@ const SUBSCRIPTION_POOL_PROVIDER_IDS = [
  * K2-family models on the same route have no such requirement.
  */
 function requiresReasoningOnEveryAssistantMessage(providerId: string, model: string): boolean {
+    if (!isKimiProviderId(providerId)) return false;
+    // K3.1 always thinks and its guide makes the echo mandatory: the full assistant
+    // message (reasoning included) is returned as-is on every follow-up turn. Both
+    // Kimi lines carry that contract.
+    if (isKimiK31ProviderModel(providerId, model)) return true;
+    // The subscription line's K3 keeps its own behaviour and is unchanged; the open
+    // platform line has no such requirement.
     if (providerId !== 'kimi-code-plan') return false;
     return /(?:^|\/)(?:kimi-)?k3(?:-|$)/i.test(model.trim());
 }
@@ -246,7 +259,26 @@ function subscriptionOutputCap(providerId: string, model: string): number {
     if (providerId === 'commandcode' || providerId === 'commandcode-messages') {
         return commandCodeModelDef(model)?.maxTokens ?? getModelOutputTokens(model, providerId);
     }
+    // Every other line reads its documented budget straight from the capability table, which
+    // already knows that the open platform's K3.1 answers with 131072 while the subscription
+    // line's K3.1 stays on its own 32768. Lifting one line's value to the other's would request
+    // a budget the subscription service does not offer, so no line-specific override lives here.
     return getModelOutputTokens(model, providerId);
+}
+
+/**
+ * Which name the output cap travels under.
+ *
+ * Both Kimi lines **prefer** `max_completion_tokens` for every model they serve — K3.1, K3,
+ * K2.6 and for-coding alike — because the preference belongs to the line, not to the family
+ * whose reasoning shape changed. The legacy `max_tokens` is still accepted there, so this is a
+ * preference, not a per-family capability. Command Code's GPT family carries the same preference
+ * under its own table, and every other route keeps `max_tokens` byte-for-byte.
+ */
+function wantsCompletionTokenCap(providerId: string, model: string): boolean {
+    if ((providerId === 'commandcode' || providerId === 'commandcode-messages')
+        && commandCodeWantsCompletionTokens(model)) return true;
+    return isKimiProviderId(providerId);
 }
 /**
  * Read an upstream `Retry-After` as milliseconds.
@@ -302,6 +334,28 @@ export function normalizeOpenAIActionUrl(endpoint: string, action: 'chat/complet
         // Preserve the generic endpoint behavior for user-controlled non-URL adapters.
     }
     return `${base}/${action}${query}`;
+}
+
+/**
+ * Read the usage carried by one OpenAI-compatible stream chunk.
+ *
+ * The documented position is the top-level `usage` trailer. The Kimi lines are also
+ * observed attaching it to `choices[0].usage`, so that shape is accepted for those two
+ * providers only — no other route's meaning of `choices[0]` changes.
+ */
+function openAiChunkUsage(
+    providerId: string,
+    chunk: Record<string, unknown>,
+    choices: Array<Record<string, unknown>> | undefined,
+): Record<string, any> | undefined {
+    const asRecord = (value: unknown): Record<string, any> | undefined =>
+        typeof value === 'object' && value !== null && !Array.isArray(value)
+            ? value as Record<string, any>
+            : undefined;
+    const top = asRecord(chunk.usage);
+    if (top) return top;
+    if (!isKimiProviderId(providerId)) return undefined;
+    return asRecord(choices?.[0]?.usage);
 }
 
 function removeUnsupportedOptionalChatFields(
@@ -875,6 +929,35 @@ export class AIService {
         });
     }
 
+    /**
+     * The thinking ladder the plan's catalog declares for `model`.
+     *
+     * The rungs belong to the account, not to the shipped table: a rung the shipped table
+     * does not expose may exist only in the catalog, so the effort the settings page just
+     * accepted has to be read back from there. Returning undefined — no signed-in account, an
+     * unreadable listing, a model the catalog never names, or a declaration that stays silent
+     * about rungs — keeps the static answer, because a chat request must not fail over a
+     * catalog that could not be read.
+     */
+    private async readKimiCatalogReasoningCapability(
+        model: string,
+        staticCapability: ReturnType<typeof getModelReasoningCapability>,
+    ): Promise<ReturnType<typeof getModelReasoningCapability> | undefined> {
+        try {
+            const catalog = await this.listKimiCodeModels();
+            const wanted = model.trim().toLowerCase();
+            const entry = catalog.find(candidate => candidate.id.trim().toLowerCase() === wanted);
+            return entry === undefined ? undefined : kimiCatalogReasoningCapability(entry, staticCapability);
+        } catch (error) {
+            ErrorReporter.debug(
+                SOURCE.AI_SERVICE,
+                `Failed to read Kimi Code catalog reasoning capability for ${model}; using shipped metadata.`,
+                error,
+            );
+            return undefined;
+        }
+    }
+
     getClaudeSubscriptionCredentialStore(): ClaudeSubscriptionCredentialStore {
         return this.claudeSubscriptionCredentials;
     }
@@ -981,8 +1064,13 @@ export class AIService {
         const cfg = vs.workspace.getConfiguration('stellarisLanguageServices.ai');
         const provider = cfg.get<string>('provider', 'openai');
         const providerEndpoints = cfg.get<Record<string, string>>('providerEndpoints', {}) || {};
-        const rawModel = this.modelOverride ?? cfg.get<string>('model', '');
+        // A retired Kimi id (settings or the in-memory quick-switch override) is migrated at
+        // read time. This must stay a pure substitution: the settings file is the user's,
+        // and nothing here may write to it or schedule a write.
+        const rawModel = migrateKimiModelId(provider, this.modelOverride ?? cfg.get<string>('model', ''));
         const model = provider === 'antigravity' ? antigravityDisplayModel(rawModel) : rawModel;
+        const inlineProvider = cfg.get<string>('inlineCompletion.provider', '') || provider;
+        const translationProvider = cfg.get<string>('translationPreview.provider', '') || provider;
         // Home providers (~/.cwtools/providers.json) keep their endpoint in the
         // file; the per-provider settings map never carries an entry for them.
         const endpoint = (providerEndpoints[provider] || '').trim() || getHomeProviderEndpoint(provider);
@@ -1002,8 +1090,14 @@ export class AIService {
                 cfg.get<number>('maxContextTokens', 0),
             ),
             agentFileWriteMode: cfg.get<'confirm' | 'auto'>('agentFileWriteMode', 'auto'),
-            reasoningEffort: this.reasoningEffortOverride
-                ?? normalizeConfiguredReasoningEffort(cfg.get<unknown>('reasoningEffort', 'high')),
+            // Compatible efforts are kept as chosen; on K3.1 `none` has no wire form and
+            // becomes `low` (see migrateKimiReasoningEffort).
+            reasoningEffort: migrateKimiReasoningEffort(
+                provider,
+                model,
+                this.reasoningEffortOverride
+                    ?? normalizeConfiguredReasoningEffort(cfg.get<unknown>('reasoningEffort', 'high')),
+            ),
             responseVerbosity: normalizeConfiguredResponseVerbosity(
                 cfg.get<unknown>('responseVerbosity', 'default'),
             ),
@@ -1021,13 +1115,13 @@ export class AIService {
                 requestTimeoutMs: cfg.get<number>('inlineCompletion.requestTimeoutMs', 6_000),
                 lspFastPath: cfg.get<boolean>('inlineCompletion.lspFastPath', true),
                 provider: cfg.get<string>('inlineCompletion.provider', ''),
-                model: cfg.get<string>('inlineCompletion.model', ''),
+                model: migrateKimiModelId(inlineProvider, cfg.get<string>('inlineCompletion.model', '')),
                 endpoint: cfg.get<string>('inlineCompletion.endpoint', ''),
                 overlapStripping: cfg.get<boolean>('inlineCompletion.overlapStripping', true),
             },
             translationPreview: {
                 provider: cfg.get<string>('translationPreview.provider', ''),
-                model: cfg.get<string>('translationPreview.model', ''),
+                model: migrateKimiModelId(translationProvider, cfg.get<string>('translationPreview.model', '')),
             },
             mcp: {
                 // Settings are the lowest-priority layer; user (~/.cwtools/mcp.json)
@@ -1263,7 +1357,15 @@ export class AIService {
         let finalMessages = messages;
 
         let extraBody: Record<string, any> | undefined;
-        const reasoningCapability = getModelReasoningCapability(providerId, model, effectiveApiFormat);
+        const staticReasoningCapability = getModelReasoningCapability(providerId, model, effectiveApiFormat);
+        // The Kimi Code plan's ladder is per account, so a rung the shipped table does not
+        // expose can only come from the catalog. Reading it here keeps the
+        // effort the settings page accepted and the effort this request carries the same
+        // value. Every other line, and any catalog that stays silent, keeps the static table.
+        const catalogReasoningCapability = providerId === 'kimi-code-plan'
+            ? await this.readKimiCatalogReasoningCapability(model, staticReasoningCapability)
+            : undefined;
+        const reasoningCapability = catalogReasoningCapability ?? staticReasoningCapability;
         const requestedEffort = normalizeReasoningEffort(
             reasoningCapability,
             options?.reasoningEffort ?? config.reasoningEffort
@@ -1275,6 +1377,14 @@ export class AIService {
         const enabledThinkingParams = disableThinking || reasoningCapability.kind === 'none'
             ? undefined
             : getThinkingParams(model, providerId, effectiveApiFormat, requestedEffort);
+        // `getThinkingParams` normalizes the effort a second time against the STATIC ladder, so
+        // its `reasoningEffort` is a re-mapping of a value the catalog already normalized. When
+        // the catalog named a non-empty ladder, `requestedEffort` is the rung the user picked
+        // and the one the wire must carry; the rule's extraBody still applies (for-coding's
+        // `thinking.keep = "all"` is not part of the effort field).
+        const catalogEffortOnWire = disableThinking || catalogReasoningCapability === undefined
+            ? undefined
+            : requestedEffort;
 
         if (disableThinking) {
             // Data-driven lookup keeps provider-specific thinking controls out of this flow.
@@ -1319,7 +1429,7 @@ export class AIService {
             // The output-cap FIELD is not universal: the Command Code GPT family takes
             // `max_completion_tokens` and rejects the legacy `max_tokens` outright, so the
             // choice follows the model id rather than the provider.
-            ...(commandCodeWantsCompletionTokens(model) && (providerId === 'commandcode' || providerId === 'commandcode-messages')
+            ...(wantsCompletionTokenCap(providerId, model)
                 ? { max_completion_tokens: options?.maxTokens ?? subscriptionOutputCap(providerId, model) }
                 : { max_tokens: options?.maxTokens ?? subscriptionOutputCap(providerId, model) }),
             stream: false,
@@ -1335,10 +1445,12 @@ export class AIService {
             if (reducedThinkingParams?.reasoningEffort) {
                 request.reasoning_effort = reducedThinkingParams.reasoningEffort;
             }
-        } else {
-            if (enabledThinkingParams?.reasoningEffort) {
-                request.reasoning_effort = enabledThinkingParams.reasoningEffort;
-            }
+        } else if (catalogEffortOnWire !== undefined) {
+            // The catalog's normalized rung wins over the static table's second mapping, and it
+            // is emitted even when the static rules return nothing for an unknown model.
+            request.reasoning_effort = catalogEffortOnWire;
+        } else if (enabledThinkingParams?.reasoningEffort) {
+            request.reasoning_effort = enabledThinkingParams.reasoningEffort;
         }
 
         // C1 Fix: create a per-call controller; register it so cancel() can abort it.
@@ -1678,7 +1790,16 @@ export class AIService {
                 // is missing in assistant tool call message at index N".
                 const kimiPreservedThinking = message.role === 'assistant'
                     && requiresReasoningOnEveryAssistantMessage(providerId, request.model);
-                return {
+                // The Kimi family omits `content` entirely on an assistant turn that only
+                // called tools — the official client sends no empty string there, and the
+                // service treats the two differently. Scoped to a tool-call turn with no
+                // text: an ordinary assistant message keeps its (possibly empty) content.
+                const omitToolCallContent = isKimiProviderId(providerId)
+                    && message.role === 'assistant'
+                    && (message.tool_calls?.length ?? 0) > 0
+                    && (message.content === undefined || message.content === null
+                        || (typeof message.content === 'string' && message.content.trim().length === 0));
+                const sanitizedMessage: ChatMessage & Record<string, unknown> = {
                     role: message.role,
                     content: message.content,
                     ...(message.tool_calls ? {
@@ -1694,6 +1815,10 @@ export class AIService {
                         ? { [reasoningKey]: message.reasoning_content }
                         : kimiPreservedThinking ? { [reasoningKey]: '' } : {}),
                 };
+                // Deleting the key (rather than sending null or "") is what the official
+                // Kimi client does on a tool-call turn with no text.
+                if (omitToolCallContent) delete (sanitizedMessage as Record<string, unknown>).content;
+                return sanitizedMessage;
             }),
         };
 
@@ -2132,7 +2257,22 @@ export class AIService {
                 if (typeof chunk.model === 'string' && chunk.model) modelBuf = chunk.model;
                 if (typeof chunk.id === 'string' && chunk.id) responseIdBuf = chunk.id;
                 if (typeof chunk.created === 'number') createdBuf = chunk.created;
-                if (chunk.usage) { const u = chunk.usage as Record<string, any>; const promptTk = u.prompt_tokens ?? u.input_tokens ?? 0; const cached = getCachedInputTokens(u); const cacheCreation = getCacheCreationInputTokens(u, promptTk, cached); usageBuf = { prompt_tokens: promptTk, completion_tokens: u.completion_tokens ?? u.output_tokens ?? 0, total_tokens: u.total_tokens ?? (promptTk + (u.completion_tokens ?? 0)), cached_tokens: cached, cache_creation_tokens: cacheCreation }; }
+                const chunkUsage = openAiChunkUsage(providerId, chunk, choices);
+                if (chunkUsage) {
+                    // `prompt_tokens` is the TOTAL input on every provider this line
+                    // speaks to, and the cache counters are a SUBSET of it: they are
+                    // reported alongside, never added to the prompt count.
+                    const promptTk = chunkUsage.prompt_tokens ?? chunkUsage.input_tokens ?? 0;
+                    const cached = getCachedInputTokens(chunkUsage);
+                    const cacheCreation = getCacheCreationInputTokens(chunkUsage, promptTk, cached);
+                    usageBuf = {
+                        prompt_tokens: promptTk,
+                        completion_tokens: chunkUsage.completion_tokens ?? chunkUsage.output_tokens ?? 0,
+                        total_tokens: chunkUsage.total_tokens ?? (promptTk + (chunkUsage.completion_tokens ?? 0)),
+                        cached_tokens: cached,
+                        cache_creation_tokens: cacheCreation,
+                    };
+                }
                 // With stream_options.include_usage, the protocol's final data
                 // chunk has an empty choices array and carries only usage. Some
                 // providers omit both finish_reason and [DONE], then keep the HTTP

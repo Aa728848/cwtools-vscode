@@ -30,10 +30,18 @@ function loadProviders() {
 describe('provider thinking params', () => {
     it('exposes every current Kimi Code Plan model', () => {
         const { BUILTIN_PROVIDERS, getModelOutputTokens } = loadProviders();
-        // k3-256k is a served model; leaving it out made it unreachable.
+        // k3-256k is a served model; leaving it out made it unreachable. The K3.1 pair joined
+        // the line later and must stay reachable there too.
         expect(BUILTIN_PROVIDERS['kimi-code-plan']!.models)
-            .to.deep.equal(['k3', 'k3-256k', 'kimi-for-coding', 'kimi-for-coding-highspeed']);
+            .to.deep.equal(['k3.1-pro', 'k3.1-pro-highspeed', 'k3', 'k3-256k', 'kimi-for-coding', 'kimi-for-coding-highspeed']);
         expect(getModelOutputTokens('k3', 'kimi-code-plan')).to.equal(131072);
+        // The subscription line's own documented budget is the generic Kimi value, so its K3.1
+        // is NOT lifted to the open platform's 131072 — the two lines differ on purpose.
+        expect(getModelOutputTokens('k3.1-pro', 'kimi-code-plan')).to.equal(32768);
+        expect(getModelOutputTokens('k3.1-pro-highspeed', 'kimi-code-plan')).to.equal(32768);
+        // The open platform spells the same family with a `kimi-` prefix and keeps 131072.
+        expect(getModelOutputTokens('kimi-k3.1-pro', 'kimi')).to.equal(131072);
+        expect(getModelOutputTokens('kimi-k3.1-pro-highspeed', 'kimi')).to.equal(131072);
     });
 
     it('keeps model-specific hard-disable params before provider fallbacks', () => {
@@ -423,5 +431,60 @@ describe('provider thinking params', () => {
             options: ['none', 'low', 'medium', 'high', 'max'],
             defaultValue: 'high',
         });
+    });
+});
+
+describe('Kimi K3.1 request shaping', () => {
+    it('gives K3.1 its own ladder without touching K3 or K2', () => {
+        const { getModelReasoningCapability } = loadProviders();
+        for (const [providerId, model] of [
+            ['kimi', 'kimi-k3.1-pro'],
+            ['kimi', 'kimi-k3.1-pro-highspeed'],
+            ['kimi-code-plan', 'k3.1-pro'],
+            ['kimi-code-plan', 'k3.1-pro-highspeed'],
+        ] as const) {
+            expect(getModelReasoningCapability(providerId, model, 'openai-chat-completions'), model)
+                .to.deep.equal({ kind: 'effort', options: ['low', 'high', 'max'], defaultValue: 'max' });
+        }
+        // K3 keeps its own three-rung ladder and its high default.
+        expect(getModelReasoningCapability('kimi-code-plan', 'k3', 'openai-chat-completions'))
+            .to.deep.equal({ kind: 'effort', options: ['low', 'high', 'max'], defaultValue: 'high' });
+        // K2.5 / K2.6 stay a plain on/off toggle.
+        expect(getModelReasoningCapability('kimi', 'kimi-k2.6', 'openai-chat-completions'))
+            .to.deep.equal({ kind: 'toggle', options: ['none', 'high'], defaultValue: 'high' });
+    });
+
+    it('omits fixed sampling for K3.1 on both lines', () => {
+        const { getEffectiveTemperature } = loadProviders();
+        for (const model of ['kimi-k3.1-pro', 'kimi-k3.1-pro-highspeed', 'k3.1-pro', 'k3.1-pro-highspeed']) {
+            expect(getEffectiveTemperature(model), model).to.equal(undefined);
+        }
+        // K2.7-code keeps its own fixed value and the K2 toggle family keeps the default.
+        expect(getEffectiveTemperature('kimi-k2.7-code')).to.equal(1.0);
+        expect(getEffectiveTemperature('kimi-k2.6')).to.equal(0.3);
+    });
+
+    it('sends the effort field only, and never none', () => {
+        const { getThinkingParams, getEnableThinkingParams, getDisableThinkingParams } = loadProviders();
+        expect(getThinkingParams('kimi-k3.1-pro', 'kimi', 'openai-chat-completions', 'max'))
+            .to.deep.equal({ reasoningEffort: 'max' });
+        expect(getThinkingParams('k3.1-pro', 'kimi-code-plan', 'openai-chat-completions', 'high'))
+            .to.deep.equal({ reasoningEffort: 'high' });
+        expect(getThinkingParams('k3.1-pro-highspeed', 'kimi-code-plan', 'openai-chat-completions', 'low'))
+            .to.deep.equal({ reasoningEffort: 'low' });
+        // none cannot be honoured: it floors at low instead of jumping to the default max.
+        expect(getThinkingParams('kimi-k3.1-pro', 'kimi', 'openai-chat-completions', 'none'))
+            .to.deep.equal({ reasoningEffort: 'low' });
+        // A rung the family does not expose clamps to its neighbour.
+        expect(getThinkingParams('kimi-k3.1-pro', 'kimi', 'openai-chat-completions', 'medium'))
+            .to.deep.equal({ reasoningEffort: 'high' });
+        // No thinking block, so no keep:all on this family.
+        expect(getThinkingParams('kimi-k3.1-pro', 'kimi', 'openai-chat-completions', 'high'))
+            .to.not.have.property('extraBody');
+        // K3.1 must never reach the K2 disable-thinking table, and K2.5 still does.
+        expect(getDisableThinkingParams('kimi-k3.1-pro')).to.equal(undefined);
+        expect(getDisableThinkingParams('k3.1-pro')).to.equal(undefined);
+        expect(getDisableThinkingParams('kimi-k2.5')).to.deep.equal({ extraBody: { thinking: { type: 'disabled' } } });
+        expect(getEnableThinkingParams('kimi-k2.6', 'kimi')).to.deep.equal({ extraBody: { thinking: { type: 'enabled' } } });
     });
 });

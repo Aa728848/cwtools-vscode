@@ -41,4 +41,24 @@ describe('MiMo prefix cache capability', () => {
         expect(isCacheCapableUsage('custom', 10, 'openai-chat-completions')).to.equal(true);
         expect(isCacheCapableUsage('custom', 0, 'openai-chat-completions')).to.equal(false);
     });
+
+    it('treats the official .ai regions as official Kimi transports', () => {
+        for (const endpoint of ['https://api.moonshot.ai/v1', 'https://api.moonshot.cn/v1']) {
+            expect(resolveEffectiveCacheCapability({
+                providerId: 'kimi', model: 'kimi-k3.1-pro', endpoint,
+                apiFormat: 'openai-chat-completions',
+            })).to.include({ status: 'supported', requestMode: 'implicit-prefix', supportsUsageTrailer: true });
+        }
+        for (const endpoint of ['https://api.kimi.ai/coding/v1', 'https://api.kimi.com/coding/v1']) {
+            expect(resolveEffectiveCacheCapability({
+                providerId: 'kimi-code-plan', model: 'k3.1-pro', endpoint,
+                apiFormat: 'openai-chat-completions',
+            })).to.include({ status: 'supported', requestMode: 'implicit-prefix', supportsUsageTrailer: true });
+        }
+        // A look-alike host is still not official.
+        expect(resolveEffectiveCacheCapability({
+            providerId: 'kimi', model: 'kimi-k3.1-pro', endpoint: 'https://api.moonshot.ai.example/v1',
+            apiFormat: 'openai-chat-completions',
+        })).to.include({ status: 'unknown', supportsUsageTrailer: false });
+    });
 });

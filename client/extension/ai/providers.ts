@@ -15,6 +15,7 @@ import { SOURCE, aiText } from './messages';
 import { contentToString, isReasoningEffort } from './types';
 import { sanitizeOutboundText } from './outboundText';
 import { stripToolMetaSchema } from './toolSchemaOutbound';
+import { isKimiK31Model, isKimiK31ProviderModel, KIMI_K31_FAMILY_MODEL_RE } from './kimi/modelMigration';
 
 // Import core settings and capabilities from partitioned sub-modules
 import { BUILTIN_PROVIDERS } from './providers/models/defaults';
@@ -255,6 +256,11 @@ export function getEffectiveTemperature(model: string, requested?: number): numb
     // `temperature`/`top_p`/`top_logprobs`. Astra and GPT-6.1 Sol have no `none`
     // effort, so sampling is unsupported for them in every request.
     if (isGpt6NoNoneEffortModel(model)) return undefined;
+    // K3.1 fixes sampling itself on both Kimi lines: the guide documents one value and
+    // the endpoint rejects an explicit one, so the field has to be absent rather than
+    // clamped. The subscription ids (`k3.1-pro`) are not covered by the `kimi-k3`
+    // substring test below, so the family is recognised by shape.
+    if (isKimiK31Model(model)) return undefined;
     const lower = model.toLowerCase();
     // The Kimi Code *subscription* endpoint fixes sampling itself and **rejects** an
     // explicit value instead of clamping it, so any temperature on this route costs a
@@ -612,6 +618,9 @@ export function getModelReasoningCapability(
         return reasoningCapability('fixed', ['high'], 'high');
     }
     if (provider === 'kimi' || provider === 'kimi-code-plan') {
+        // K3.1: three named levels, `max` as the documented default, thinking always on
+        // (so `none` is not on the ladder at all, unlike the K2 toggle family).
+        if (isKimiK31Model(lower)) return reasoningCapability('effort', ['low', 'high', 'max'], 'max');
         if (/(?:^|\/)(?:kimi-)?k3(?:-|$)/.test(lower)) {
             return reasoningCapability('effort', ['low', 'high', 'max'], 'high');
         }
@@ -879,7 +888,9 @@ export function getReducedThinkingParams(
     const lowerProvider = providerId?.toLowerCase() ?? '';
     const lowerModel = modelName(model);
     if ((lowerProvider === 'kimi' || lowerProvider === 'kimi-code-plan')
-        && /(?:^|\/)(?:kimi-)?k3(?:-|$)/.test(lowerModel)) {
+        && (/(?:^|\/)(?:kimi-)?k3(?:-|$)/.test(lowerModel) || isKimiK31Model(lowerModel))) {
+        // K3.1 cannot stop thinking, so the lowest legal request is the `low` rung — never
+        // a disable-thinking body, which this family does not accept.
         return { reasoningEffort: 'low' };
     }
     if (lowerProvider === 'openrouter') {
@@ -985,15 +996,19 @@ const THINKING_RULES: ThinkingRule[] = [
 
     // Kimi K3 exposes named effort levels through the reasoning_effort field.
     { providers: ['kimi', 'kimi-code-plan'], model: /(?:^|\/)(?:kimi-)?k3(?:-|$)/, build: ctx => ({ reasoningEffort: kimiK3Effort(ctx.requested) }) },
+    // K3.1 keeps that ladder with its own default (`max`) and always thinks. Only the
+    // effort field travels: sampling is fixed by the service, and the guide's
+    // multi-turn requirement is met by replaying the assistant message verbatim.
+    { providers: ['kimi', 'kimi-code-plan'], model: KIMI_K31_FAMILY_MODEL_RE, build: ctx => ({ reasoningEffort: kimiK3Effort(ctx.requested) }) },
 {
     // Scoped to the models that reason BY DEFAULT. k3 already has its own rule that
     // narrows the effort for this line's three-rung wire, and a provider-wide rule would
     // shadow it.
     providers: ['kimi', 'kimi-code-plan'],
-    // Matched against the NORMALIZED name (modelName strips a `kimi-` prefix), so the
-    // ids appear here as the service spells them. A loose pattern also caught unrelated
-    // Kimi families (k2.6, k2.7-code) that have their own rules further down.
-    model: /^for-coding(-highspeed)?$/,
+    // The service spells these ids with a `kimi-` prefix, while some callers already
+    // normalized it away. Accept both without touching unrelated Kimi families (k2.6,
+    // k2.7-code) that have their own rules further down.
+    model: /^(?:kimi-)?for-coding(-highspeed)?$/,
     build: ctx => ({
         // `keep: "all"` is the official CLI's default and the reason the service echoes
         // reasoning back on the next turn. Without it the chain is dropped and the
@@ -1073,6 +1088,11 @@ export function getThinkingParams(
 ): EnableThinkingResult | undefined {
     const lowerModel = modelName(model);
     const lowerProvider = providerId?.toLowerCase() ?? '';
+    // K3.1 always thinks, so `none` has no wire form. Generic normalization would read it
+    // as "unsupported, use the default", and this family's default is the `max` rung —
+    // the opposite of what was asked; the service's own floor for "as little as possible"
+    // is `low`.
+    if (requested === 'none' && isKimiK31ProviderModel(lowerProvider, lowerModel)) requested = 'low';
     requested = normalizeReasoningEffort(
         getModelReasoningCapability(lowerProvider, model, apiFormat),
         requested

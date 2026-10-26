@@ -396,6 +396,25 @@ describe('home agent-model overrides (~/.cwtools/agent-models.json)', () => {
         );
         expect(Object.keys(merged)).to.deep.equal(['ok']);
     });
+
+    it('migrates a retired Kimi K2.5 assignment in the effective result only', () => {
+        writeAgentModels({
+            agentModels: { reviewer: { provider: 'kimi', model: 'kimi-k2.5' } },
+        });
+        const merged = getAgentModelOverrides({
+            build: { provider: 'kimi', model: 'kimi-k2.5' },
+            script: { provider: 'openrouter', model: 'kimi-k2.5' },
+            custom: { provider: 'kimi', model: 'my-relay-k2.5' },
+        });
+        // Both layers are migrated on the way out.
+        expect(merged?.['reviewer']).to.deep.equal({ provider: 'kimi', model: 'kimi-k3.1-pro', source: 'home' });
+        expect(merged?.['build']).to.deep.equal({ provider: 'kimi', model: 'kimi-k3.1-pro', source: 'settings' });
+        // Another provider, and a custom id that merely mentions k2.5, are left alone.
+        expect(merged?.['script']).to.deep.equal({ provider: 'openrouter', model: 'kimi-k2.5', source: 'settings' });
+        expect(merged?.['custom']).to.deep.equal({ provider: 'kimi', model: 'my-relay-k2.5', source: 'settings' });
+        // Nothing was written back: the file still holds what the user typed.
+        expect(loadHomeAgentModelOverrides().agentModels['reviewer']).to.deep.equal({ provider: 'kimi', model: 'kimi-k2.5' });
+    });
 });
 
 describe('provider registry integration (providers.ts)', () => {

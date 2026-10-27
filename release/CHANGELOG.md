@@ -1,5 +1,19 @@
 # Changelog
 
+## [2.34.0] - 2026-10-27
+
+### Kimi K3.1 双线模型刷新 / Kimi K3.1 Dual-Line Model Refresh
+
+- **[特性] Kimi 两条线路默认升级到 K3.1，并由实时目录驱动模型、窗口与思考档位（Kimi K3.1 Defaults and Live-Catalog Capabilities）**：
+  - `kimi` 线路默认改为 `kimi-k3.1-pro` 并新增 `kimi-k3.1-pro-highspeed`；`kimi-code-plan` 默认改为 `k3.1-pro` 并新增 `k3.1-pro-highspeed`，K3、K3-256K 与 `kimi-for-coding(-highspeed)` 仍可选。上游已下线的 `kimi-k2.5` 从该线路内置选项中移除，K2.6/K2.7 与其他供应商的兼容条目不受影响。
+  - 随包目录改为逐模型声明窗口与能力，实时目录真正驱动订阅模型清单：解析 `limit.context`/`limit.input`、`think_efforts`、`reasoning_options` 与 `supports_thinking_type`，输入预算取窗口与输入上限的较小值；目录只给出档位而未给默认值时继承静态默认，K3.1 不会从 `max` 被悄悄降为 `high`；目录不可读时记录带模型名与错误详情的 debug 后安全回退静态能力。
+  - 设置页、快捷档位切换与请求装配共用同一份目录解析结果，目录独有的有效档位原样进入 `reasoning_effort`，不再被静态规则二次映射。
+  - 两条 Kimi 线路统一发送 `max_completion_tokens`（显式 `maxTokens` 仍优先），开放平台与订阅各取本线路的默认输出预算，不再把订阅的 32768 强抬为开放平台的 131072。官方价格按 MTok 记为 Pro 输入/输出 ¥13/¥68、高速版 ¥26/¥136，缓存命中比例分别为 0.1 与 0.05，不再因命中价同为 ¥1.30 而共用比例。
+  - 复用既有 reasoning 三键检测与 `message.reasoning_key` 回写，不另建全局方言：K3.1 在两条线都保留每条 assistant 的 reasoning 字段；Kimi 的空正文工具调用省略 `content`；usage 接受顶层与 `choices[0].usage` 且缓存数量不重复累加，官方 `api.moonshot.ai` 与 `api.kimi.ai` 一并启用相应能力。修复 `kimi-for-coding` 因规则只匹配缩短名而未命中 `thinking.keep: "all"` 的问题。
+  - `kimi-k2.5` 配置在读取有效配置时迁移到 `kimi-k3.1-pro`，覆盖主模型、快速切换、inline、翻译与 orchestrator 指派，只改内存不写回用户文件；K3.1 不可关闭思考，兼容档位 `none` 映射为 `low`。
+  - 新增与更新目录解析、模型元数据、价格、快捷档位、请求装配、usage、缓存区域与迁移共 7 个单测文件。
+  - English: [Feature] Both Kimi lines now default to K3.1: `kimi` moves to `kimi-k3.1-pro` with a new `kimi-k3.1-pro-highspeed`, `kimi-code-plan` moves to `k3.1-pro` with a new `k3.1-pro-highspeed`, while K3, K3-256K and `kimi-for-coding(-highspeed)` stay selectable. The withdrawn `kimi-k2.5` leaves the `kimi` line's built-in list (K2.6/K2.7 and other providers are untouched). The bundled catalog now declares per-model windows and capabilities and the live catalog really drives the subscription model list — `limit.context`/`limit.input`, `think_efforts`, `reasoning_options` and `supports_thinking_type` are parsed, the input budget takes the smaller of window and input limit, a directory that lists efforts without a default inherits the static default (so K3.1 is not silently dropped from `max` to `high`), and an unreadable catalog logs a model-named debug and falls back to static capabilities. Settings, the quick effort switcher and request assembly share one parse result, and directory-only efforts reach `reasoning_effort` verbatim instead of being remapped. Both lines send `max_completion_tokens` (an explicit `maxTokens` still wins) with per-line default output budgets, official pricing is ¥13/¥68 per MTok for Pro and ¥26/¥136 for the highspeed model with cache-hit ratios of 0.1 and 0.05, existing reasoning-key detection is reused (empty-content tool calls omit `content`, usage accepts top-level and `choices[0].usage` without double-counting cache), `api.moonshot.ai`/`api.kimi.ai` gain the same capabilities, and `kimi-k2.5` configs migrate in memory to `kimi-k3.1-pro` with `none` mapped to `low`. Covered by seven new or updated unit-test files.
+
 ## [2.33.0] - 2026-10-22
 
 ### 舰船顶部图标表 / Ship Top-Icon Sheets from Models

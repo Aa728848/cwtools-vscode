@@ -18,6 +18,7 @@ Status: implemented
    - 全量后台规则校验结束（`startFullWorkspaceBackgroundValidation` finally 尾部）：清理数千个文件切片批处理与 2.2 万条诊断生成过程中的海量中间对象；
    - 原版快照重新生成后（`checkOrSetGameCache`）：清理重新解析原版的大量文本与词法缓冲；
 4. **常规交互 GC 调整**：将 `maybeCollectGarbage` 中的模式从 `Optimized` 调整为 `Forced`，仍保持非阻塞以保证打字与补全零卡顿。
+5. **计算数据重算只换已建实例、不预热（上游 submodule 同步收敛）**：`ResourceManager` 的 `forceRecompute` 在服务重建后仅为 `IsValueCreated = true` 的 computed-data `Lazy` 换新实例，使下次访问按需重算；从未创建的 `Lazy` 保留原实例、绝不强制求值，避免全表预热放大峰值分配。它与里程碑收缩同向削减校验中间对象与大对象堆压力，但只收紧重算时机，不改动上述任何 GC 决策。
 
 ## Alternatives considered
 1. **强制要求用户依赖静态打包的旧 `stl.cwb` 并不载入原版游戏**：已拒绝。群星版本更新频繁，旧快照缺乏新版本 triggers/effects 会造成大量假阳性报错；且通过本地实际原版生成 520MB 完整快照是保证 100% 规则准确性的基石，不应牺牲功能保真度换取内存；
@@ -26,3 +27,4 @@ Status: implemented
 ## Consequences
 - **预期收益**：消除了 16+ 核心堆段导致的 5.5 GB 闲置 Committed 内存扣押与 1.63 GB 的 LOH 碎片，预计物理工作集从 12.6 GB 压缩至 4.5~5.2 GB 真实存活基线（内存降幅超 60%）；
 - **已知权衡**：全量初始化与批处理校验吞吐量受单 GC 线程影响可能微增 3%~8% 的用时（约 1~2 秒），但日常打字、代码补全、悬停因后台并发 GC 保持零停顿，且系统分页压力大幅减轻。
+- **复测现状**：按当前工作区（含 submodule 未提交的性能加固，见 [2026-10-14 增量类型定义失效扇出与 ScriptedServices 升级](../bug-fix/2026-10-14-incremental-type-definition-fanout-and-scripted-services-escalation.md) Decision 11）在同口径 Windows 小 fixture 上复测，服务进程累计分配下降约 11.5%~12.1%（`alloc` 为 `GC.GetTotalAllocatedBytes` 口径），工作集基本不变，诊断计数与基线完全一致。该 fixture 远小于 Linux 14GB 级真实工作区，不能据此外推大项目收益；Linux 同口径复测（`dotnet-counters` 与空闲 Full GC 后 `dotnet-gcdump` 流程）见 `tools/perf/README-lsp.md`，尚待执行。

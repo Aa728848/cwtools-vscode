@@ -446,6 +446,63 @@ LSP 编辑路径是 `CommitUpdateFileInteractive`（`commitPreparedFile` 调
 派生缓存不再是该分支存在理由的一部分，剩下的理由只有
 「`CommitTypeIndex` 不重建构造时冻结了取值集合的 `RuleValidationService`」。
 
+### 11. 校验结果记忆化与服务输入缓存复用（submodule 性能加固，工作区待提交）
+
+**动机。** Decision 4 接受了「普通 type 键语义变更升级为 `PrepareScriptedTypes`」的服务重建成本；
+本轮把这条热路上的重复计算折叠掉。全部改动位于 `submodules/cwtools`
+（`RulesManager.fs` / `ValidationManager.fs` / `LocalisationManager.fs` /
+`ResourceManager.fs` / `Game.fs` / `GameTypes.fs`），主仓 `src/Main` 与 `src/LSP`
+零改动；按仓库边界，交付时需先在 submodule 内提交、再 bump 根指针。
+
+**(a) 已完成规则校验结果记忆化（`ValidationManager.fs`）。**
+新增 `RuleResultMemoKey(path, entity, service, resourceEpoch, localisationEpoch, lazyCreated)`：
+path 走规范化路径比较，`entity` 与 `service` 按引用相等，
+`resourceEpoch` / `localisationEpoch` 固定结果所见的资源与本地化纪元，
+`lazyCreated` 记录落账时该实体 computed-data `Lazy` 是否已被强制求值
+（同一实体 forced 前后结果可能不同，必须入键区分）。
+容量上限 `maxRuleResultMemoEntries = 1024` 条，LinkedList 维护 LRU 顺序、
+超限逐出最旧；既有按文件清理路径同步调用 `cleanupRuleResultMemo` 剔除已删文件。编辑失效时还会删除同路径下不属于当前 Entity 的旧条目，避免旧 AST/诊断等到 LRU 淘汰才释放；当前 Entity 的正常复用不受影响。
+每实体的查询顺序为「一次性 detached 缓存 → memo → `runRuleValidation`」；
+**memo 命中仍执行 `addToCache`、nonSelf/impacted 汇总与全部下游过滤器**，
+被跳过的只有 `RuleValidateEntity` 本体；结果只在 `addToCache` 消费完之后才入 memo，
+被取消或中途被取代的运行永不入 memo。观测计数 `RuleResultMemoStats`
+（hits/misses/stores/evictions）仅供验证使用，诊断等价性以公开校验结果为准。
+
+**(b) 动态校验器工作区快照按 resource 纪元复用。**
+dynamic validators 的整工作区 `EntitySet` 原为每批全量重建；现为**单槽快照**，
+键为 `ResourceManagerEager.currentResource()`——工作区未变则同一纪元复用同一个
+`EntitySet`；`changedEntities` 仍按批构建，**dynamic validators 每一批照常执行**，
+快照复用不影响其结果。观测计数 `DynamicWorkspaceSnapshotStats`（builds/reuses）。
+
+**(c) 服务输入缓存按引用共享（`RulesManager.fs`）。**
+`RulesWrapper`、冻结 type map、var map、alias key map 四个派生输入全部改为
+按不可变源的引用相等做缓存键，由同一把 `serviceInputCacheLock` 守卫；
+live lookup、staged clone 与 overlay 物化共用同一份缓存，每个 helper 只从
+调用方递给它的源引用计算——**staged clone 只能命中自己的源**，
+永远不会读到 live lookup 的当前字段。观测计数 `ServiceInputCacheStats`（hits/misses）。
+
+**(d) staged processed-localisation 候选的三层守卫。**
+`StagedCacheRefresh` 新增 `processedLocCandidate`、`baseProcessedLoc`、
+`baseLocalisationSources`、`localisationEpoch` 四个字段：prepare 阶段对
+staged clone 的索引解析候选（`PrepareProcessedLocalisationCommands`，
+不动 live lookup 与 delta journal），并把 live `lookup.proccessedLoc` 引用、
+`LocalisationSourceIdentity`（parsed-source 引用身份）与
+`ResourceManagerEager.currentLocalisation()` 纪元一并冻结进 staged。
+提交时在既有 `typeDefInfo`/`varDefInfo`/`configRules` 引用守卫之外新增
+**本地化三层守卫**：live `proccessedLoc` 引用仍等于 prepare 所见、
+parsed-source 身份未变、本地化纪元未变——三层全过才
+`CommitProcessedLocalisationCommands` 发布候选并 `rebuildProcessedReferenceIndex()`
+（delta journal 刻意不动），任一不过则整次 staged 提交放弃（返回 `None`），
+不会把陈旧命令诊断复活。`CommitConfigRules` 与
+`CommitRefreshCaches` 里既有的 `refreshProcessedLocalisation()`
+全量重算随之移除——staged 提交已在 prepare 解析过候选，提交只发布。
+观测计数 `ProcessedLocalisationCommandStats()`（prepare/commit 次数）。
+
+**(e) `forceRecompute` 只替换已创建的 Lazy（`ResourceManager.fs`）。**
+服务重建后，仅 `IsValueCreated = true` 的 computed-data `Lazy` 换新实例，
+使下次访问按需重算；从未创建的 `Lazy` 保留原实例、**绝不强制求值**——
+全表预热只会放大峰值分配。观测计数 `ForceRecomputeStats()`（replaced/skipped）。
+
 ## Alternatives considered
 
 1. **在 `submodules/cwtools` 让 `CommitTypeIndex` 也重建服务。**
@@ -614,6 +671,20 @@ LSP 编辑路径是 `CommitUpdateFileInteractive`（`commitPreparedFile` 调
   CI 侧不受影响：`ci.yml` 的 `.NET server build` 作业显式把
   `FSharp.Data.DesignTime.dll` 复制进 `artifacts/bin/Main/debug` 之后才跑脚本。
   本机复现该套件时应先执行同样的复制，否则看到的是环境缺失而非代码缺陷。
+- **本轮 submodule 性能加固的验证证据**（Decision 11，均为当前工作区状态下测得）：
+  `ruleResultMemoTests` 定向 11/11 通过（memo 命中诊断逐字等价、`lazyCreated`
+  翻转必 miss、纪元推进必失效），staged processed-loc 定向 5/5 通过；
+  主仓相关 F# 定向 7/7 通过，TS compile/typecheck 通过；
+  完整 CWTools 回归 **329 通过 / 2 跳过 / 0 失败**（16 秒），
+  进程退出码 1 与基线一致，源于既有 `trigger_docs.log`/`setup.log` 缺失，非新增失败。
+- **同口径前后测量（Windows 小 fixture，不代表 Linux 14GB 大项目）**：
+  20 次编辑、100ms 迭代延迟、5 秒沉降，`client/test/sample`，未载入原版数据。
+  基线末尾 `alloc=1052MB`/`working=174MB`，优化后 `alloc=931MB`/`working=172MB`，
+  累计分配（`GC.GetTotalAllocatedBytes` 口径）下降约 11.5%；
+  post-full-background-validation 基线 `alloc=1002MB`，优化后 `881MB`，下降约 12.1%；
+  两侧诊断计数完全一致（errors=572、warnings=749）。
+  工作集口径基本不变，收益集中在累计分配；该 fixture 远小于真实模组工作区，
+  **不得外推 Linux 14GB 场景**；Linux 同口径复测流程见 `tools/perf/README-lsp.md`，尚待执行。
 
 ## 交叉平台回归修复（源码守卫改用 `Path.Combine` 分段）
 

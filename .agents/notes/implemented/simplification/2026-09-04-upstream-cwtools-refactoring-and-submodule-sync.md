@@ -29,4 +29,4 @@ Status: implemented
 
 ## Consequences
 - 上游核心库的代码纯净度与健壮性显著改善，跨平台路径判定行为归一。
-- 主仓子模块指针无缝更新至最新稳定基线 `cec56ee1`，彻底消除了历史遗留废弃依赖。
+- 主仓子模块指针已推进至 `0a2269c4`（自 `cec56ee1` 起累计 14 个提交，含类型引用兜底记忆化与类型索引提交清缓存、CW279-CW289 引擎性能反模式校验器、本地化管理器拆分、CLI 修复与许可证说明等）。截至本轮，submodule 工作区另含未提交的内存/校验性能加固（规则校验结果记忆化、服务输入引用缓存、staged processed-localisation 候选三层守卫、`forceRecompute` 只替换已建 Lazy，详见 [2026-10-14 增量类型定义失效扇出与 ScriptedServices 升级](../bug-fix/2026-10-14-incremental-type-definition-fanout-and-scripted-services-escalation.md) Decision 11）；按仓库边界，这些改动须先在 submodule 仓库内提交、再 bump 根指针。

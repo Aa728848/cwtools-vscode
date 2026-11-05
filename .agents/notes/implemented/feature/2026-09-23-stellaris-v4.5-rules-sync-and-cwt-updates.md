@@ -63,11 +63,20 @@ flowchart LR
 
 - **命令**：新增 `pop_ethics_divergence`、`is_preferred_platform_weapons` 与 6 个 `set_/clear_ai_platform_*` effect，类型与同族 starbase 命令一致（`enum[weapon_type]`、`value_field[0.0..1.0]`、`bool`）。`ethos` 原版仍可解析，仅在描述中标注废弃，不删除。
 - **作用域收窄只改 log**：`is_archetype`、`is_ship_category/class/size`、`prevent_anomaly` 的 `Supported Scopes` 变化只写入 `trigger_docs.log`，CWT alias 不加 `## scopes`，保持由 log 驱动。
-- **本地化**：`GetPopsGuidingEthic` 迁至 `pop_faction`；`Faction` 提升不再接受 `pop_group`（原版文档与本地化均无此用法）；`GetIcon`、`GetNamePlural` 在 log 中按原版移除/收窄，但 `localisation.cwt` 中手工维护的 `GetIcon = any` 与宽范围 `GetNamePlural` 保留，因为原版大量使用 `[job.GetIcon]` 等职业目标写法。
+- **本地化**：`GetPopsGuidingEthic` 迁至 `pop_faction`；`Faction` 提升不再接受 `pop_group`（原版文档与本地化均无此用法）。`localisation.cwt` 中手工维护的 `GetIcon = any` 与宽范围 `GetNamePlural` 保留，因为原版大量使用 `[job.GetIcon]` 等职业目标写法；`config/logs/localizations.log` 只作为 report 的 diff 基线，按原版文档同步，不参与运行时校验（详见 v4.5.3 增量）。
 - **Common**：`on_actions.cwt` 补 `on_arkship_knights_detox{,_start,_cancelled}`（`this/root = planet, from = fleet`）；`defines.cwt` 补 `NShip.DESIGNER_STARBASE_WEAPON_PREF_MUL = float`；`num_buildings` 补可选 `category = any | enum[building_categories]`。
 - **扫描器误报改修工具而不是改规则**：
   - `report.ts` 字段扫描跨行追踪双引号状态：`inline_script` 的 `TRIGGER = "...{` 多行字符串曾让括号深度少算一层，把 `AMOUNT` 及若干修饰符误报为建筑/职业字段。只跨行携带 `"`，避免裸撇号吞掉后续内容。
   - `scope-contracts.ts` 中“中心名词 + 关系从句”（`starbase that changed controller`）优先解析为中心名词，不再因从句中的 `controller` 被判为 `country`；现有 `on_starbase_occupied` 的 `from = starbase` 本就正确。
+
+### v4.5.3 增量同步
+
+v4.5.2 → 4.5.3 是小版本更新，Trigger / Effect / Modifier / Scope 四类命令与 Common 字段级覆盖均无漂移（`folders with findings: 0`），实际变动只有基线与作用域契约两处：
+
+- **本地化文档基线**：4.5.3 原版 `localizations.log` 把 `GetIcon` 与 `GetNamePlural` 从 Country 段移除（`GetNamePlural` 仅保留在 Species 段），`config/logs/localizations.log` 随之删除两行，其余内容与头部时间戳保持原样。
+- **`config/localisation.cwt` 不变**：`GetIcon = any` 与宽范围 `GetNamePlural` 继续兜底。原版当前本地化仍有 341 处 `[xxx.GetIcon]` 调用（如 `[enforcer.GetIcon]`、`[coordinator.GetIcon]`），命令本身未被废弃，只是文档不再列出；按废弃删除会产生大量假阳性。
+- **作用域契约**：`common/game_rules.cwt` 的 `species_has_uncapped_habitability_on_planet` 与 `species_has_uncapped_habitability_on_ship` 补 `from = country`，与 4.5.3 原版 `#Root/#From/#This` 注释及其体内 `from? = { is_mutation_authority = yes }` 调用一致。
+- **Shader ABI 随扫描自动重锚**：`config/shader/` 三份目录由 `shader-abi-sync` 自动改写，471 条 catalog 全部 carried（added=0、dropped=0），13 条 renderer contract 全部保留，差异只有版本戳与 exe 指纹。
 
 ## Alternatives considered
 
@@ -90,4 +99,5 @@ flowchart LR
   - `scope: +0 -0 ~0`。
 - 运行 `npm run compile`：前端 Webview 与 Extension Host 编译全部通过。
 - 运行 `npm run typecheck:test`：全量 TypeScript 类型检查通过。
+- v4.5.3：`report --no-open` 的 trigger / effect / modifier / scope / localisation_command 全为 `+0 -0 ~0`，`folders with findings: 0`，`scope contracts missing=0 mismatch=0 unresolved=0`，`documented-but-required=0`、`documented-but-unmodeled=0`，shader-abi `carried=471 added=0 dropped=0`、contracts `kept=13 dropped=0`。
 - v4.5.2：`report --no-open` 所有 diff 均为 `+0 -0 ~0`，`folders with findings: 0`，`scope contracts missing=0 mismatch=0`，`documented-but-unmodeled=0`；`npm run test:rules-sync` 通过（新增多行字符串字段扫描与关系从句作用域两条回归测试）；规则 diff 中无新增 `scalar`。

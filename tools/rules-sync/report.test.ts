@@ -100,6 +100,15 @@ describe('Stellaris rules sync parameter drift', () => {
         ]);
     });
 
+    it('unions sibling groups chained on one documented signature', () => {
+        const lines = [
+            'is_point_of_interest - Checks if the planet has a point of interest for a country.',
+            'is_point_of_interest = { owner = <target> } or { id = <id> event_chain = <event_chain> owner = <target> }',
+            'Supported Scopes: planet country ship',
+        ];
+        expect(extractBlockParameters(lines, 1, 2)).to.deep.equal(['event_chain', 'id', 'owner']);
+    });
+
     it('ignores nested blocks and trailing scalar signatures', () => {
         const lines = ['ethos = { ethic = <key> } / random (optional)', 'set_scoped_species_flag = flag'];
         expect(extractBlockParameters(lines, 0, lines.length)).to.deep.equal(['ethic']);

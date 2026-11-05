@@ -90,7 +90,7 @@ v4.5.2 → 4.5.3 是小版本更新，Trigger / Effect / Modifier / Scope 四类
 - `report.ts` 新增 `extractBlockParameters`（导出，供回归测试）：以字符级状态机扫描命令块第一层花括号内的 `key =`，跳注释与引号内容，忽略 `or/and/not/nor/nand` 这类语法词；同一行并列多个块（`{ owner } or { id event_chain owner }`）合并取并集。
 - `DocRule.parameters` 与 `addDocRule` 的并集合并负责多段重复条目的累积；`diffKind` 输出独立的 `parameterDrift` 列表，控制台打印 `trigger parameters: ~N` / `effect parameters: ~N`，HTML 报告新增"参数变更"筛选。
 - 参数漂移**不进** `changed`，也不作为必须清零的硬门禁：基线日志是人工维护的镜像，允许比原版文档更全，逐条复核比强制归零更符合事实。
-- 新增 4 条回归测试（`tools/rules-sync/report.test.ts`）：并列块并集、嵌套块与语法词过滤、纯参数变化只进 `parameterDrift`、参数一致时静默。
+- 新增 5 条回归测试（`tools/rules-sync/report.test.ts`）：块内第一层键收集、同一行并列块并集（`is_point_of_interest` 的 `{ owner } or { id event_chain owner }` 形态）、嵌套块与语法词过滤、纯参数变化只进 `parameterDrift`、参数一致时静默。
 
 启用后立刻暴露 5 条历史漏检，逐条处置：
 

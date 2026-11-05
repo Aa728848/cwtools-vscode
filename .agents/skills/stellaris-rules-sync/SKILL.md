@@ -53,8 +53,19 @@ node tools/rules-sync/stellaris-rules-sync.js report --no-open
 
 读取 `.rules-sync/stellaris/report/rules-sync-report.json`，关注以下指标：
 - `trigger` / `effect` / `modifier` 的变动数量（`+新增 -移除 ~修改`）；
+- `trigger parameters` / `effect parameters`（**命令块内参数键**的漂移，见下方"参数级漂移"）；
 - `folders with findings`（未覆盖的 Common 目录或字段）；
 - `scope contracts`（缺失的作用域契约）。
+
+#### 参数级漂移（`parameters`）
+
+`diffKind` 除了比对 name / Supported Scopes / Output Scope / 分类 / 描述之外，还比对**命令块内第一层花括号的参数键集合**（`extractBlockParameters`）：同名命令在文档里新增或删除一个参数（如 `limit`、`surveyor`），文档块内容变化但描述不变，此时**只会**出现在 `parameterDrift` 里，不会进 `changed`。
+
+- 报告字段：`diffs[].parameterDrift[]`，每条含 `changes[{field:'parameters'}]` 的 before/after 参数键列表；
+- 基线是**人工维护**的镜像，允许比原版文档更全（例如原版脚本仍在用、但文档没列出的字段），因此参数漂移是**逐条人工复核清单**，而非必须清零的硬门禁；核对后按"原版是否还能解析"决定补规则还是同步基线；
+- 同一行出现多个并列块（`{ owner = <target> } or { id = <id> }`）时解析器会合并所有并列块的键，不要把它们当成漂移。
+
+**文档滞后是常态**：Paradox 有时只改引擎与 changelog、不重新生成 `script_documentation`。此时扫描器**看不到任何信号**（`effect: +0 -0 ~0`、`parameters: ~0` 同时成立），必须靠官方 changelog / patch notes 人工补规则。判断依据是原版脚本里是否已经开始使用该参数（如 `keep_automodding`）；若既无文档、脚本也尚未使用，仍应按公告在 CWT 中补上可选字段，避免玩家照公告书写时报未知字段。
 
 ---
 
@@ -135,6 +146,7 @@ diff.split('\n').forEach(l => {
    **合格标准**：
    - `folders with findings: 0`（所有字段级缺失清零）；
    - `scope contracts missing: 0`；
+   - `trigger parameters: ~0` 与 `effect parameters: ~0`（参数级漂移已逐条核对，或确认原版文档滞后）；
    - `effect: +0 -0 ~0`；
    - `modifier: +0 -0 ~0`。
 

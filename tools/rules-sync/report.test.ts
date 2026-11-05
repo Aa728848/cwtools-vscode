@@ -3,6 +3,7 @@ import {
     collectDefinitionFields,
     descriptionChangeWindow,
     diffKind,
+    extractBlockParameters,
     type DocRule,
     type FolderFieldStats,
     type RuleKind,
@@ -73,5 +74,55 @@ describe('Stellaris rules sync report', () => {
 
         expect(stats.definitionCount).to.equal(2);
         expect([...stats.fields.keys()].sort()).to.deep.equal(['category', 'inline_script', 'upkeep']);
+    });
+});
+
+describe('Stellaris rules sync parameter drift', () => {
+    const block = [
+        'transfer_pop_amount = {',
+        '\tsource = <source pop group>',
+        '\ttarget = <target pop group>',
+        '\tamount = <amount> OR percentage = <percentage>',
+        '\trandom = <number> (optional) If set, the amount will be randomized.',
+        '\tkeep_automodding = yes (optional)',
+        '}',
+        'Supported Scopes: all',
+    ];
+
+    it('collects block keys at the outer level and ignores grammar words', () => {
+        expect(extractBlockParameters(block, 0, block.length)).to.deep.equal([
+            'amount',
+            'keep_automodding',
+            'percentage',
+            'random',
+            'source',
+            'target',
+        ]);
+    });
+
+    it('ignores nested blocks and trailing scalar signatures', () => {
+        const lines = ['ethos = { ethic = <key> } / random (optional)', 'set_scoped_species_flag = flag'];
+        expect(extractBlockParameters(lines, 0, lines.length)).to.deep.equal(['ethic']);
+    });
+
+    it('reports a parameter-only change as parameter drift instead of a name change', () => {
+        const key = 'effect:transfer_pop_amount';
+        const before: DocRule = { ...docRule('transfer_pop_amount', 'effect', 'Move pops'), parameters: ['growth_category', 'source'] };
+        const after: DocRule = { ...docRule('transfer_pop_amount', 'effect', 'Move pops'), parameters: ['growth_category', 'keep_automodding', 'source'] };
+        const diff = diffKind('effect', new Map([[key, after]]), new Map([[key, before]]), new Map());
+
+        expect(diff.changed).to.have.length(0);
+        expect(diff.parameterDrift).to.have.length(1);
+        const change = diff.parameterDrift![0]!.changes!.find(entry => entry.field === 'parameters');
+        expect(change).to.exist;
+        expect(change!.after).to.contain('keep_automodding');
+    });
+
+    it('stays silent when a curated baseline documents the same parameter set', () => {
+        const key = 'effect:transfer_pop_amount';
+        const same: DocRule = { ...docRule('transfer_pop_amount', 'effect', 'Move pops'), parameters: ['source', 'target'] };
+        const diff = diffKind('effect', new Map([[key, same]]), new Map([[key, { ...same }]]), new Map());
+
+        expect(diff.parameterDrift).to.have.length(0);
     });
 });

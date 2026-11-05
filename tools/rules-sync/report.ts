@@ -16,6 +16,8 @@ export interface DocRule {
     targetScopes: string[];
     category?: string;
     description: string;
+    /** Block parameter keys documented for this trigger/effect, lowercased and sorted. */
+    parameters?: string[];
     source: string;
     sourceLine: number;
 }
@@ -43,6 +45,9 @@ export interface KindDiff {
     added: DiffEntry[];
     removed: DiffEntry[];
     changed: DiffEntry[];
+    /** Documented block parameters that differ from the baseline. The baseline log
+     *  is curated, so this is a review list rather than drift that must be zero. */
+    parameterDrift?: DiffEntry[];
     /** Generated-modifier families excluded from added/removed. */
     excluded?: ExcludedFamily[];
 }
@@ -236,8 +241,66 @@ function addDocRule(map: Map<string, DocRule>, rule: DocRule) {
     }
     existing.scopes = Array.from(new Set([...existing.scopes, ...rule.scopes]));
     existing.targetScopes = Array.from(new Set([...existing.targetScopes, ...rule.targetScopes]));
+    if (rule.parameters?.length) {
+        existing.parameters = Array.from(new Set([...(existing.parameters ?? []), ...rule.parameters])).sort();
+    }
     if (!existing.description && rule.description) existing.description = rule.description;
     if (!existing.category && rule.category) existing.category = rule.category;
+}
+
+/** Logical operators are grammar, not parameter keys, and a nested block
+ *  (limit = { ... }, trigger scopes) belongs to its own construct. */
+const PARAMETER_NON_KEYS = new Set(['or', 'and', 'not', 'nor', 'nand']);
+
+/** Keys documented directly inside the outermost braces of a command block:
+ *  an identifier immediately followed by '=' at brace depth 1. */
+export function extractBlockParameters(lines: string[], start: number, end: number): string[] {
+    const keys = new Set<string>();
+    let depth = 0;
+    let started = false;
+    let quoted = false;
+    for (let i = start; i < end; i++) {
+        const line = lines[i] ?? '';
+        for (let c = 0; c < line.length; c++) {
+            const ch = line[c]!;
+            if (quoted) {
+                if (ch === '\\') c++;
+                else if (ch === '"') quoted = false;
+                continue;
+            }
+            if (ch === '#') break;
+            if (!started) {
+                if (ch === '{') {
+                    started = true;
+                    depth = 1;
+                }
+                continue;
+            }
+            if (ch === '"') {
+                quoted = true;
+                continue;
+            }
+            if (ch === '{') {
+                depth++;
+                continue;
+            }
+            if (ch === '}') {
+                depth--;
+                // A documented signature may chain sibling groups on one line
+                // ("{ owner = <target> } or { id = <id> }"), so keep scanning
+                // instead of stopping at the first closing brace.
+                if (depth === 0) started = false;
+                continue;
+            }
+            if (ch === '=') {
+                // The key precedes the '=' separated by optional whitespace, so it
+                // is read back from the line instead of tracked char by char.
+                const key = (/([A-Za-z0-9_.-]+)\s*$/.exec(line.slice(0, c))?.[1] ?? '').toLowerCase();
+                if (depth === 1 && key && !PARAMETER_NON_KEYS.has(key)) keys.add(key);
+            }
+        }
+    }
+    return Array.from(keys).sort();
 }
 
 function parseScriptDocSections(filePath: string, lines: string[], map: Map<string, DocRule>, kind: Extract<RuleKind, 'effect' | 'trigger'>, titlePattern: RegExp) {
@@ -262,6 +325,7 @@ function parseScriptDocSections(filePath: string, lines: string[], map: Map<stri
                 scopes: supportedScopes,
                 targetScopes: [],
                 description: nameMatch[2]!.trim(),
+                parameters: extractBlockParameters(lines, i + 1, j),
                 source,
                 sourceLine: i + 1,
             });
@@ -738,6 +802,7 @@ export function diffKind(kind: RuleKind, game: Map<string, DocRule>, baseline: M
     const added: DiffEntry[] = [];
     const removed: DiffEntry[] = [];
     const changed: DiffEntry[] = [];
+    const parameterDrift: DiffEntry[] = [];
     const cwtSet = cwtNames.get(kind);
 
     for (const [key, rule] of game) {
@@ -757,6 +822,14 @@ export function diffKind(kind: RuleKind, game: Map<string, DocRule>, baseline: M
         if ((old.category ?? '') !== (rule.category ?? '')) {
             changes.push({ field: 'category', before: old.category ?? '(无)', after: rule.category ?? '(无)' });
         }
+        const beforeParameters = (old.parameters ?? []).join(' ');
+        const afterParameters = (rule.parameters ?? []).join(' ');
+        if (beforeParameters !== afterParameters) {
+            parameterDrift.push({
+                ...toDiffEntry(rule),
+                changes: [{ field: 'parameters', before: beforeParameters || '(无)', after: afterParameters || '(无)' }],
+            });
+        }
         const beforeDescription = old.description.trim();
         const afterDescription = rule.description.trim();
         if (beforeDescription !== afterDescription) {
@@ -774,7 +847,8 @@ export function diffKind(kind: RuleKind, game: Map<string, DocRule>, baseline: M
     added.sort(byName);
     removed.sort(byName);
     changed.sort(byName);
-    return { kind, added, removed, changed };
+    parameterDrift.sort(byName);
+    return { kind, added, removed, changed, parameterDrift };
 }
 
 // ---------- field-level report assembly ----------
@@ -1115,7 +1189,7 @@ function meta() {
 
 const tabs = [];
 for (const diff of DATA.diffs) {
-  tabs.push({ id: diff.kind, label: KIND_LABELS[diff.kind] || diff.kind, count: diff.added.length + diff.removed.length + diff.changed.length, render: () => renderDiff(diff) });
+  tabs.push({ id: diff.kind, label: KIND_LABELS[diff.kind] || diff.kind, count: diff.added.length + diff.removed.length + diff.changed.length + (diff.parameterDrift || []).length, render: () => renderDiff(diff) });
 }
 tabs.push({ id: 'fields', label: 'Common 字段级参数', count: DATA.folders.reduce((n, f) => n + f.newFields.length + (f.missingSubtypes || []).length + (f.staleSubtypes || []).length + (f.covered ? 0 : 1), 0), render: renderFolders });
 tabs.push({ id: 'scope-contracts', label: 'Scope 契约', count: DATA.scopeContracts.findings.length, render: renderScopeContracts });
@@ -1131,6 +1205,7 @@ function cards() {
     if (diff.added.length) items.push({ tab: diff.kind, cls: 'add', num: diff.added.length, lbl: (KIND_LABELS[diff.kind] || diff.kind).split(' ')[0] + ' 新增' });
     if (diff.removed.length) items.push({ tab: diff.kind, cls: 'del', num: diff.removed.length, lbl: (KIND_LABELS[diff.kind] || diff.kind).split(' ')[0] + ' 移除' });
     if (diff.changed.length) items.push({ tab: diff.kind, cls: 'chg', num: diff.changed.length, lbl: (KIND_LABELS[diff.kind] || diff.kind).split(' ')[0] + ' 变更' });
+    if ((diff.parameterDrift || []).length) items.push({ tab: diff.kind, cls: 'chg', num: diff.parameterDrift.length, lbl: (KIND_LABELS[diff.kind] || diff.kind).split(' ')[0] + ' 参数变更' });
   }
   const uncovered = DATA.folders.filter(f => !f.covered).length;
   const fieldCount = DATA.folders.reduce((n, f) => n + f.newFields.length, 0);
@@ -1194,7 +1269,8 @@ function renderDiff(diff) {
   wrap.innerHTML = '<div class="toolbar"><input type="search" placeholder="搜索名称 / 描述 / 分类…">'
     + '<label><input type="checkbox" data-b="added" checked> 新增 (' + diff.added.length + ')</label>'
     + '<label><input type="checkbox" data-b="removed" checked> 移除 (' + diff.removed.length + ')</label>'
-    + '<label><input type="checkbox" data-b="changed" checked> 变更 (' + diff.changed.length + ')</label></div>'
+    + '<label><input type="checkbox" data-b="changed" checked> 变更 (' + diff.changed.length + ')</label>'
+    + '<label><input type="checkbox" data-b="parameterDrift" checked> 参数变更 (' + (diff.parameterDrift || []).length + ')</label></div>'
     + (excludedTotal ? '<details class="inner" style="margin-bottom:10px"><summary>已排除 ' + excludedTotal + ' 个由规则动态生成的修正（' + excluded.length + ' 个模板，无需校对）</summary>'
       + '<table><thead><tr><th style="width:42%">生成模板</th><th style="width:12%">数量</th><th>示例</th></tr></thead><tbody>'
       + excluded.map(f => '<tr><td class="name">' + esc(f.template) + '</td><td>' + f.count + '</td><td class="name">' + esc(f.example) + '</td></tr>').join('')
@@ -1208,7 +1284,7 @@ function renderDiff(diff) {
   function rows() {
     const q = input.value.trim().toLowerCase();
     const buckets = [];
-    for (const [name, badge] of [['added', ['add', '新增']], ['removed', ['del', '移除']], ['changed', ['chg', '变更']]]) {
+    for (const [name, badge] of [['added', ['add', '新增']], ['removed', ['del', '移除']], ['changed', ['chg', '变更']], ['parameterDrift', ['chg', '参数变更']]]) {
       if (!wrap.querySelector('[data-b=' + name + ']').checked) continue;
       for (const e of diff[name]) {
         if (q && !(e.name.toLowerCase().includes(q) || (e.description || '').toLowerCase().includes(q) || (e.category || '').toLowerCase().includes(q))) continue;
@@ -1504,6 +1580,10 @@ function main() {
 
     for (const diff of diffs) {
         console.log(`[report] ${diff.kind}: +${diff.added.length} -${diff.removed.length} ~${diff.changed.length}`);
+        if (diff.kind === 'effect' || diff.kind === 'trigger') {
+            const parameterDrift = diff.parameterDrift ?? [];
+            console.log(`[report] ${diff.kind} parameters: ~${parameterDrift.length}` + (parameterDrift.length ? ` (${parameterDrift.map(entry => entry.name).join(', ')})` : ''));
+        }
     }
     console.log(`[report] folders with findings: ${folders.length}`);
     console.log(`[report] scope contracts: extracted=${data.scopeContracts.summary.extracted} high=${data.scopeContracts.summary.highConfidence} missing=${data.scopeContracts.summary.missing} mismatch=${data.scopeContracts.summary.mismatch} unresolved=${data.scopeContracts.summary.unresolved}`);

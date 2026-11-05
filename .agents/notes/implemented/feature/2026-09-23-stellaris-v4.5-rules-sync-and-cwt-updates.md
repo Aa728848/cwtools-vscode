@@ -78,6 +78,31 @@ v4.5.2 → 4.5.3 是小版本更新，Trigger / Effect / Modifier / Scope 四类
 - **作用域契约**：`common/game_rules.cwt` 的 `species_has_uncapped_habitability_on_planet` 与 `species_has_uncapped_habitability_on_ship` 补 `from = country`，与 4.5.3 原版 `#Root/#From/#This` 注释及其体内 `from? = { is_mutation_authority = yes }` 调用一致。
 - **Shader ABI 随扫描自动重锚**：`config/shader/` 三份目录由 `shader-abi-sync` 自动改写，471 条 catalog 全部 carried（added=0、dropped=0），13 条 renderer contract 全部保留，差异只有版本戳与 exe 指纹。
 
+### 参数级漂移：扫描器补上命令块参数比对
+
+4.5.3 公告写明 `transfer_pop_amount` 新增 `keep_automodding` 参数，但扫描器当时报 `effect: +0 -0 ~0`。原因是两层：
+
+1. **原版文档根本没更新**：4.5.3 的 `script_documentation/effects.log` 中 `transfer_pop_amount` 仍只有 source / target / amount / percentage / random / growth_category，`keep_automodding` 在文档与脚本中均不存在——Paradox 只改了引擎与 changelog。
+2. **扫描器结构上也不可能发现**：`diffKind` 只比对 name / scopes / targetScopes / category / description，`DocRule` 没有 parameters 字段，纯参数变化在任何版本都不可见。
+
+修法与落地：
+
+- `report.ts` 新增 `extractBlockParameters`（导出，供回归测试）：以字符级状态机扫描命令块第一层花括号内的 `key =`，跳注释与引号内容，忽略 `or/and/not/nor/nand` 这类语法词；同一行并列多个块（`{ owner } or { id event_chain owner }`）合并取并集。
+- `DocRule.parameters` 与 `addDocRule` 的并集合并负责多段重复条目的累积；`diffKind` 输出独立的 `parameterDrift` 列表，控制台打印 `trigger parameters: ~N` / `effect parameters: ~N`，HTML 报告新增"参数变更"筛选。
+- 参数漂移**不进** `changed`，也不作为必须清零的硬门禁：基线日志是人工维护的镜像，允许比原版文档更全，逐条复核比强制归零更符合事实。
+- 新增 4 条回归测试（`tools/rules-sync/report.test.ts`）：并列块并集、嵌套块与语法词过滤、纯参数变化只进 `parameterDrift`、参数一致时静默。
+
+启用后立刻暴露 5 条历史漏检，逐条处置：
+
+| 条目 | 漂移 | 处置 |
+| --- | --- | --- |
+| `total_system_workforce_with_job_tag` | 原版文档与脚本（`07_script_values_shroud.txt`）均有 `limit`，规则缺失 | **补规则**：`limit = { alias_name[trigger] = alias_match_left[trigger] }`，与同族 `num_neighbor_systems` 一致；这是玩家照原版书写会被误报的真实缺陷 |
+| `create_country` | 4.5.3 文档块被重写：新增 `ruler`、`day_zero_contact`、`exclude_day_zero_contact`、`default_ships`、`randomize_ethos`、`ignore_initial_colony_error`、`released_by/from_country`、`use_hostilities_from`、`origin` 与 flag 内 `use_ship_color`；移除 `nomadic`/`ship_kinds`/`room`/等（原版脚本仍在用，规则保留） | **补规则**：`ruler = scalar \| random`（自由字符串，与同块 `name`/`ship_prefix` 同写法）、flag 内 `use_ship_color = bool`；基线块同步为 4.5.3 原文 |
+| `modify_species` | `add_random_trait` → `add_random_species_trait`（含描述） | 基线同步；规则本已正确 |
+| `spawn_random_anomaly` | 新增 `surveyor` | 基线同步；规则本已正确 |
+| `is_point_of_interest` | 解析器只取第一组花括号，漏掉 `{ } or { }` 第二组 | 修解析器（并列块并集），规则本已正确 |
+| `transfer_pop_amount` | 公告新增 `keep_automodding`，文档与脚本均无 | **补规则**：`keep_automodding = bool`（可选），保留在 `alias[effect:transfer_pop_amount]` 内 |
+
 ## Alternatives considered
 
 1. **将 `overclock` / `role` / `action` 保持为 `scalar`**：
@@ -88,6 +113,10 @@ v4.5.2 → 4.5.3 是小版本更新，Trigger / Effect / Modifier / Scope 四类
    - 被否决。前者会在规则中写入并不存在的定义字段；后者只掩盖单点，同类关系从句注释仍会误判。修正扫描器并加回归测试才能根治。
 4. **从 `localisation.cwt` 同步删除 `GetIcon` / 收窄 `GetNamePlural`**：
    - 被否决。原版本地化在职业等动态目标上广泛使用这两个命令，删除会产生大量假阳性。
+5. **把参数漂移塞进 `changed`，与描述/作用域变更同等归零**：
+   - 被否决。基线是人工维护的镜像，允许比原版文档更全（`create_country` 的 `nomadic`、`ship_kinds` 原版脚本仍在用，文档却不再列出）；强行归零会删掉真实字段或把噪声训练成"看到也不看"。
+6. **等原版文档更新后靠扫描器自动发现 `keep_automodding`**：
+   - 被否决（也不可能）。4.5.3 文档未更新，扫描器对"只存在于公告与引擎"的变更天然失明，必须按公告人工补规则并记录在案。
 
 ## Verification
 
@@ -99,5 +128,6 @@ v4.5.2 → 4.5.3 是小版本更新，Trigger / Effect / Modifier / Scope 四类
   - `scope: +0 -0 ~0`。
 - 运行 `npm run compile`：前端 Webview 与 Extension Host 编译全部通过。
 - 运行 `npm run typecheck:test`：全量 TypeScript 类型检查通过。
+- 参数级漂移：修好后 `report --no-open` 报 `trigger parameters: ~0`、`effect parameters: ~0`（修前为 `~2` / `~3`，其中 5 条是历史漏检）；`npm run test:rules-sync` 50 项通过（含 4 条新增参数回归）；`dotnet fsi src/Main/StellarisConfigLogs.Tests.fsx` 8 项通过（基线日志仍可被 F# 解析）；`npm run typecheck:test` 通过；规则 diff 中新增的 `scalar` 只有 `create_country.ruler`（自由字符串，与同块 `name`/`ship_prefix` 一致）。
 - v4.5.3：`report --no-open` 的 trigger / effect / modifier / scope / localisation_command 全为 `+0 -0 ~0`，`folders with findings: 0`，`scope contracts missing=0 mismatch=0 unresolved=0`，`documented-but-required=0`、`documented-but-unmodeled=0`，shader-abi `carried=471 added=0 dropped=0`、contracts `kept=13 dropped=0`。
 - v4.5.2：`report --no-open` 所有 diff 均为 `+0 -0 ~0`，`folders with findings: 0`，`scope contracts missing=0 mismatch=0`，`documented-but-unmodeled=0`；`npm run test:rules-sync` 通过（新增多行字符串字段扫描与关系从句作用域两条回归测试）；规则 diff 中无新增 `scalar`。

@@ -1,5 +1,21 @@
 # Changelog
 
+## [2.34.1] - 2026-11-06
+
+### 校验热路径性能与分配优化 / Validation Hot-Path Performance and Allocation Reduction
+
+- **[优化] 规则校验结果记忆化与服务重建分配收敛（Rule-Validation Memoization and Refresh Allocation Reduction）**：
+  - `ValidationManager` 对已完成消费的规则校验结果做有界 LRU 记忆化（上限 1024 条，按规范化路径、Entity/Service 引用、资源与本地化纪元及 computed-data `Lazy` 求值态定键），命中时直接跳过 `RuleValidateEntity` 本体而保留全部下游汇总与过滤器；文件删除与编辑时主动剔除旧 Entity 条目，取消或中途取代的运行不入缓存。
+  - 动态校验器的全工作区 `EntitySet` 改为按资源纪元单槽复用；`RulesWrapper`、冻结类型表、变量表与 alias 键表按不可变源引用共享缓存；staged processed-localisation 候选在 prepare 阶段解析并通过三层守卫（`proccessedLoc` 引用、parsed-source 身份、本地化纪元）原子发布，移除提交期重复全量重算；`forceRecompute` 仅替换已创建的 `Lazy` 实例，不再预热未求值项（`cwtools` 子模块 `559f4f24`）。
+  - English: [Optimization] Memoize completed `RuleValidateEntity` results in a bounded 1024-entry LRU keyed by normalized path, entity/service reference, resource/localisation epochs, and computed-data `Lazy` state while keeping all downstream aggregation and filters intact; reuse the dynamic-validator workspace `EntitySet` snapshot per resource epoch; cache `RulesWrapper` and frozen type/var/alias maps by immutable source identity; stage processed-localisation command candidates during prepare with a three-layer commit guard instead of recomputing on commit; and limit `forceRecompute` to already-created `Lazy` instances (`cwtools` submodule `559f4f24`).
+
+### Stellaris 4.5.3 规则同步与参数漂移检测 / Stellaris 4.5.3 Rules Sync and Parameter Drift Detection
+
+- **[维护] 同步 Stellaris 4.5.3 规则与命令块参数校对（Stellaris 4.5.3 Rules and Command Parameter Reconciliation）**：
+  - 同步 4.5.3 规则基线与 Shader ABI 目录（471 条 catalog 与 13 条 renderer contract 完整保留）：`common/game_rules.cwt` 的 `species_has_uncapped_habitability_on_planet` 与 `_on_ship` 补齐 `from = country`；`localizations.log` 基线对齐 4.5.3，同时保留 `localisation.cwt` 的 `GetIcon = any` 与宽范围 `GetNamePlural` 兜底以避免原版职业调用误报。
+  - `tools/rules-sync/report.ts` 新增命令块第一层花括号参数键提取与并列块并集比对（`parameterDrift`），并据此补齐 4.5.3 公告与历史漏检参数：`transfer_pop_amount` 新增可选 `keep_automodding = bool`，`total_system_workforce_with_job_tag` 补齐 `limit` 触发器块，`create_country` 补齐 `ruler` 与 `flag.use_ship_color`（`cwtools-stellaris-config` `1aba83ae`、`cwtools-mcp` `57116f4`）。
+  - English: [Maintenance] Sync Stellaris CWT rules and shader ABI catalogs to 4.5.3 (`from = country` on `species_has_uncapped_habitability_on_planet` / `_on_ship`, updated `localizations.log` baseline while keeping the `GetIcon = any` / `GetNamePlural` overrides in `localisation.cwt`), add brace-depth-1 command block parameter drift reporting (`parameterDrift` with sibling-block union) to `tools/rules-sync/report.ts`, and reconcile command parameters in CWT rules (`transfer_pop_amount.keep_automodding`, `total_system_workforce_with_job_tag.limit`, `create_country.ruler`, and `flag.use_ship_color`; `cwtools-stellaris-config` `1aba83ae`, `cwtools-mcp` `57116f4`).
+
 ## [2.34.0] - 2026-10-27
 
 ### Kimi K3.1 双线模型刷新 / Kimi K3.1 Dual-Line Model Refresh

@@ -29,7 +29,7 @@ export { TOOL_DEFINITIONS } from './tools/definitions';
 import { FileToolHandler, findFiles } from './tools/fileTools';
 import { LspToolHandler } from './tools/lspTools';
 import { ExternalToolHandler } from './tools/externalTools';
-import { MemoryToolHandler, blackboardDomainPrefix } from './tools/memoryTools';
+import { MemoryToolHandler } from './tools/memoryTools';
 import { searchAgentHistory } from './tools/historyTool';
 import type { IndexService } from '../indexing/indexService';
 import { validateToolCapability, evaluateMcpPermission } from './tools/permissions';
@@ -44,48 +44,29 @@ import { saveSkill as saveSkillFile } from './skillsWriter';
 import { getExperienceProjectionPath, getExperienceStoreFilePath } from './experienceStore';
 import { isPlanModeCardArtifactFile, validateGitOpsForMode, validatePlanModeToolUse } from './planModeGuard';
 import { budgetToolResult, TOOL_RESULT_BUDGET_HARD_STUB } from './contextBudget';
-import { aiText, EVIDENCE_GATE_MSG, TEAM_MSG } from './messages';
+import { aiText, EVIDENCE_GATE_MSG } from './messages';
 import { getPrivateAiStorageRoot, getPrivateTopicStorageDir } from './workspacePaths';
 import { isPathInsideOrEqual } from '../pathScope';
 import { TOOL_REGISTRY, WRITE_TOOLS } from './tools/registry';
-import { BUILTIN_PROVIDERS } from './providers/models/defaults';
 import { runAgentHooks } from './runner/hookRunner';
 import { getAgentToolTargetFiles } from './runner/toolScheduler';
-import { buildProfile, resolvePolicy, subjectForEffect, type PolicyPresetId, type PolicyRule } from './runner/policyEngine';
+import { buildProfile, resolvePolicy, subjectForEffect, type PolicyRule } from './runner/policyEngine';
 import { evaluateEffectiveToolPolicy } from './runner/effectiveToolPolicy';
-import { preflightCommand, type ConfiguredCommandPolicyRule } from './runner/commandPreflight';
-import { sessionFileWriteMode, sessionPolicyPreset } from './runner/sessionPermissions';
-import { PermissionPolicyStore } from './runner/permissionPolicy';
+import { sessionFileWriteMode } from './runner/sessionPermissions';
 import type { ApiKeyManager } from './aiService';
 import type { WebSearchProvider } from './tools/webAccess';
 import { EvidenceGate, type EvidenceCallRecord } from './evidence/evidenceGate';
-import {
-    saveOrchestration,
-    loadOrchestration,
-    listOrchestrations,
-    deserializeGraph,
-    deserializeAgentResults,
-} from './orchestrator/orchestrationStore';
-import { backgroundOrchestrators } from './orchestrator/backgroundOrchestrators';
-import { evaluateDelegationBudget } from './orchestrator/delegationDepth';
-import { buildOrchestrationCatalog as projectOrchestrationCatalog } from './orchestrator/orchestrationCatalog';
-import { normalizeResumedGraph } from './orchestrator/resumeNormalization';
-import { TaskGraphEngine } from './orchestrator/taskGraphEngine';
-import { BLACKBOARD_KEY_PREFIXES } from './orchestrator/blackboardSchema';
 import { normalizeEvidenceGateMode, type EvidenceClaimKind, type EvidenceGateDecision, type EvidenceGateMode, type EvidenceGatePhase } from './evidence/evidenceTypes';
 import { isPdxScriptTarget } from './evidence/claimExtractor';
 import { runLedger } from './runner/runLedger';
-import { requestPermissionWithAbort } from './runner/permissionRequest';
 import { ErrorReporter } from './errorReporter';
 import { isDiagnosticRelevantFile, selectRevalidateTargets } from '../diagnosticRevalidation';
-import { mergeTokenUsageTotals } from './cacheCapability';
 import { MemoryParser } from './memoryParser';
 import { createDiagnosticSnapshot, diffDiagnosticSnapshots, hasAddedErrors, type DiagnosticDelta } from './runner/diagnosticSnapshot';
 import { CandidateTransactionManager, sha256 } from './runner/candidateTransaction';
 import { buildTypedPdxCandidate } from './tools/typedPdxWrite';
 import { globalPartitionedWriteQueue } from './runner/writeCoordinator';
 import { validateOverlayCatalog } from './runner/overlayCatalog';
-import { parseImplementationPlanBlueprint } from './executePlanHandoff';
 import { solveScopeBridge, type ScopeBridgeCandidate } from './tools/scopeBridge';
 import { HostArchetypeArtifactStore } from './tools/archetypeArtifacts';
 import { canonicalPathKey } from './workspacePaths';
@@ -95,36 +76,17 @@ import { getCwtoolsHomeDir } from './homeConfig';
 import {
     loadMcpServerFileConfigs,
     mergeMcpServerConfigs,
-    mcpServerSource,
     type SourcedMCPServerConfig,
 } from './mcpConfig';
-import { getAgentModelOverrides, getHomeProviders } from './providerConfig';
 import {
     AUTHORITY_RANK,
     authorizationAllowsEffect,
-    evaluateDispatchAdmission,
     executionModeForSchedulingState,
     transitionSchedulingState,
 } from './runner/scheduling';
 import { goalStore, type DurableGoalStatus } from './runner/goalStore';
 import { goalSupervisor } from './runner/goalSupervisor';
 import { agentTaskManager } from './runner/taskManager';
-import { activeTurnRegistry } from './runner/activeTurnRegistry';
-import { atomicWriteJson } from './runner/durableStorage';
-import { teamRegistry } from './orchestrator/team/teamRegistry';
-import { TeamRuntime, type TeamMemberLauncher, type TeamRuntimeEvent } from './orchestrator/team/teamRuntime';
-import {
-    TEAM_LEAD,
-    TEAM_MAX_BRIEF_CHARS,
-    TEAM_MAX_MEMBERS,
-    TEAM_MAX_MESSAGE_CHARS,
-    TEAM_MEMBER_NAME_PATTERN,
-    TEAM_MIN_MEMBERS,
-    type TeamMemberSpec,
-    type TeamSummary,
-} from './orchestrator/team/types';
-import { normalizeTeamWriteScope } from './orchestrator/team/teamTaskBoard';
-import { deriveUserExecutionPolicy } from './orchestrator/userExecutionPolicy';
 import { configureSandboxStorage } from './workspaceSandbox';
 
 const MAX_TOOL_RESULT_CHARS = TOOL_RESULT_BUDGET_HARD_STUB;
@@ -327,7 +289,6 @@ const TOOL_TIMEOUTS: Record<string, number> = {
     web_search: 30_000,
     web_open: 20_000,
     web_find: 5_000,
-    run_command: 0,
     convert_image_to_dds: 60_000,
     convert_audio: 60_000,
     deploy_mod_asset: 0,
@@ -338,10 +299,6 @@ const TOOL_TIMEOUTS: Record<string, number> = {
     run_skill: 30_000,
     // Interactive questions wait indefinitely for user input from the WebView.
     ask_user_question: 0,
-    // Child activity/idle guards and run budgets own orchestration lifetime.
-    // A fixed tool timeout would kill healthy long-running child graphs.
-    dispatch_agents: 0,
-    merge_results: 30_000,
 };
 
 
@@ -353,95 +310,10 @@ const WRITE_CONFIRMATION_TOOLS = new Set<string>([
 ]);
 
 const DEFAULT_TOOL_TIMEOUT = 30_000;
-const LOCALISATION_YML_TOOL_GUARD = [
-    'Localisation YML routing guard:',
-    '- These targets are Paradox localisation .yml files. Use `write_localisation` only.',
-    '- Do not use `write_file`, `edit_file`, or `replace_lines` on localisation YAML.',
-    '- If the request describes a line/text replacement, convert it into exact localisation key upserts through `write_localisation`.',
-].join('\n');
-
-function isLocalisationYmlPath(value: unknown): boolean {
-    if (typeof value !== 'string') return false;
-    const normalized = value.trim().replace(/\\/g, '/').toLowerCase();
-    if (!normalized.endsWith('.yml')) return false;
-    return /(?:^|\/)(localisation|localization)(?:\/|$)/.test(normalized);
-}
-
-function promptMentionsLocalisationYml(prompt: unknown): boolean {
-    if (typeof prompt !== 'string') return false;
-    const normalized = prompt.replace(/\\/g, '/').toLowerCase();
-    return normalized.includes('.yml') && /(localisation|localization)/.test(normalized);
-}
-
-function normalizeDispatchTaskForLocalisationYml<T extends {
-    profileName: string;
-    prompt: string;
-    contextFiles?: string[];
-    plannedFiles?: string[];
-}>(task: T): T {
-    const plannedFiles = Array.isArray(task.plannedFiles) ? task.plannedFiles : [];
-    const contextFiles = Array.isArray(task.contextFiles) ? task.contextFiles : [];
-    const localisationTargets = [...plannedFiles, ...contextFiles].filter(isLocalisationYmlPath);
-    const hasLocalisationYml = localisationTargets.length > 0 || promptMentionsLocalisationYml(task.prompt);
-    if (!hasLocalisationYml) return task;
-
-    const nextTask = { ...task };
-
-    if (!nextTask.prompt.includes('write_localisation')) {
-        const targetLine = localisationTargets.length > 0
-            ? `\nTargets: ${Array.from(new Set(localisationTargets)).map(file => `\`${file}\``).join(', ')}`
-            : '';
-        nextTask.prompt = `${nextTask.prompt.trim()}\n\n${LOCALISATION_YML_TOOL_GUARD}${targetLine}`;
-    }
-    return nextTask;
-}
-
-function stripInternalTruncationMarker(text: string): string {
-    return text
-        .replace(/\n?\s*\.{3}\s*\[truncated, full length:\s*\d+\]\s*$/i, '')
-        .replace(/\s*\.{3}\(truncated, full length:\s*\d+\)\s*$/i, '')
-        .trimEnd();
-}
-
-function trimIncompleteMarkdownTail(text: string): string {
-    let next = text.trimEnd();
-    while (/(^|\n)\s*(?:[-*+]\s*|\d+[.)]\s*)$/.test(next)) {
-        next = next.replace(/(^|\n)\s*(?:[-*+]\s*|\d+[.)]\s*)$/, '').trimEnd();
-    }
-    return next;
-}
-
-function compactAgentOutputForReport(output: unknown, maxLength = 1600): string | undefined {
-    const text = stripInternalTruncationMarker(String(output ?? '')
-        .replace(/\r\n/g, '\n')
-        .replace(/\n{3,}/g, '\n\n')
-        .trim());
-    if (!text) return undefined;
-    if (text.length <= maxLength) return text;
-    if (maxLength < 80) {
-        return `_Output omitted because the combined summary budget was exhausted. Original length: ${text.length} characters._`;
-    }
-    let preview = text.slice(0, maxLength).trimEnd();
-    const paragraphBreak = preview.lastIndexOf('\n\n');
-    const lineBreak = preview.lastIndexOf('\n');
-    if (paragraphBreak > maxLength * 0.55) {
-        preview = preview.slice(0, paragraphBreak).trimEnd();
-    } else if (lineBreak > maxLength * 0.75) {
-        preview = preview.slice(0, lineBreak).trimEnd();
-    }
-    preview = trimIncompleteMarkdownTail(preview);
-    return `${preview}\n\n${aiText(
-        `_Content was long and has been compacted automatically: showing the first ${preview.length} / ${text.length} characters._`,
-        `_内容较长，已自动压缩：显示前 ${preview.length} / ${text.length} 字符。_`,
-    )}`;
-}
 
 /**
  * Executes Agent tools by communicating with the CWTools Language Server
  * and directly reading workspace files.
- *
- * This is the orchestrator: it owns shared state and dispatches each tool
- * call to the appropriate domain handler (file, LSP, or external).
  */
 export class AgentToolExecutor {
     /** Callback when todos are updated (for UI) */
@@ -454,9 +326,6 @@ export class AgentToolExecutor {
     public onSkillSaved?: () => void;
     /** Agent file write mode from config */
     public fileWriteMode: 'confirm' | 'auto' = 'confirm';
-
-    /** Parent AgentRunner instance (used for Orchestrator to spawn sub-agents) */
-    public parentAgentRunner?: import('./agentRunner').AgentRunner;
 
     // - Domain handlers -
     private fileHandler: FileToolHandler;
@@ -509,11 +378,6 @@ export class AgentToolExecutor {
         this.lspHandler = new LspToolHandler(this, this.clientGetter, findFiles);
         this.externalHandler = new ExternalToolHandler(this);
         this.memoryHandler = new MemoryToolHandler(this);
-
-        // Initialize the enhanced blackboard (replacing the old sharedMemory)
-         
-        const { Blackboard } = require('./orchestrator/blackboard') as typeof import('./orchestrator/blackboard');
-        this.blackboard = new Blackboard();
 
         // Listen for LSP server-ready notification
         vs.commands.executeCommand('setContext', 'cwtools.lspReady', false);
@@ -639,9 +503,6 @@ export class AgentToolExecutor {
     resumeLsp = (): void => {
         try { void this.client.sendNotification('cwtools/resumeIndexing'); } catch { /* ignore */ }
     }
-
-    /** Shared typed knowledge storage with CAS optimistic locking and prefix subscriptions. */
-    public blackboard!: import('./orchestrator/blackboard').Blackboard;
 
     invalidateCacheForFile(filePath: string): void {
         this.lspHandler.invalidateCacheForFile(filePath);
@@ -1184,26 +1045,16 @@ export class AgentToolExecutor {
         const subject = subjectForEffect(entry.effect);
         if (!subject) return { allowed: true };
 
-        const cfg = vs.workspace.getConfiguration('stellarisLanguageServices.ai');
-        const sessionPreset = sessionPolicyPreset(this.workspaceRoot);
-        const persistentFullAccess = vs.workspace.getConfiguration('stellarisLanguageServices.ai.developer')
-            .get<boolean>('disableSecuritySandbox') === true;
-        const preset = sessionPreset
-            ?? (persistentFullAccess ? 'full-access' : cfg.get<PolicyPresetId>('policy.preset', 'workspace-auto'));
         const effectiveWriteMode = sessionFileWriteMode(this.workspaceRoot) ?? this.fileWriteMode;
         this.fileWriteMode = effectiveWriteMode;
-        const profileRules: PolicyRule[] = [];
-        if (subject === 'edit' && effectiveWriteMode === 'auto' && preset !== 'read-only') {
-            profileRules.push({ id: 'effective-auto-write', subject: 'edit', pathGlob: '**', action: 'allow', riskMax: 2, scope: 'session' });
-        }
-        const learnedRules = PermissionPolicyStore.getInstance().toPolicyRules();
-        profileRules.push(...learnedRules);
+        const profileRules: PolicyRule[] = [
+            { id: 'effective-workspace-write', subject: 'edit', pathGlob: '**', action: 'allow', riskMax: 2, scope: 'session' },
+        ];
         const targets = toolName === 'candidate_transaction' && args.action === 'commit'
             ? this.candidateTransactions.files.map(file => file.path)
             : getAgentToolTargetFiles(toolName, args, this.workspaceRoot, context?.runnerOptions?.topicId);
-        const profile = buildProfile(preset, this.workspaceRoot, profileRules);
-        if (profile.sandboxMode !== 'read-only'
-            && (toolName === 'write_file' || toolName === 'edit_file' || toolName === 'replace_lines')
+        const profile = buildProfile('workspace-auto', this.workspaceRoot, profileRules);
+        if ((toolName === 'write_file' || toolName === 'edit_file' || toolName === 'replace_lines')
             && targets.length > 0) {
             for (const target of targets) {
                 const managedKind = this.isManagedSkillOrExperienceTarget(target);
@@ -1228,13 +1079,8 @@ export class AgentToolExecutor {
                 profile.writableRoots.push(topicRoot);
             }
         }
-        const command = typeof args.command === 'string' ? args.command : undefined;
-        const commandRules = cfg.get<ConfiguredCommandPolicyRule[]>('shell.commandRules', []);
-        const commandPreflight = command ? preflightCommand(command, commandRules) : undefined;
         const gitAction = toolName === 'git_ops' && typeof args.action === 'string' ? args.action : undefined;
-        const riskLevel = commandPreflight
-            ? (commandPreflight.decision === 'allow' ? 0 : commandPreflight.riskLevel)
-            : (gitAction === 'status' || gitAction === 'diff' ? 0 : gitAction === 'checkout' ? 3 : entry.riskLevel);
+        const riskLevel = gitAction === 'status' || gitAction === 'diff' ? 0 : gitAction === 'checkout' ? 2 : entry.riskLevel;
         const mcpServer = typeof args.server === 'string' ? args.server : undefined;
         const mcpTool = typeof args.tool === 'string' ? args.tool : undefined;
         const networkHosts = await this.extractNetworkHosts(toolName, args);
@@ -1243,8 +1089,7 @@ export class AgentToolExecutor {
             subject,
             riskLevel,
             workspaceRoot: this.workspaceRoot,
-            command,
-            cwd: typeof args.cwd === 'string' ? args.cwd : this.workspaceRoot,
+            cwd: this.workspaceRoot,
             targetPaths: targets,
             networkHosts,
             mcpServer,
@@ -1260,47 +1105,10 @@ export class AgentToolExecutor {
             profileId: profile.id,
             shadow: false,
         });
-        // Rich command/file/media/MCP handlers request approval with their full
-        // domain-specific context. Other subjects use the shared card here.
-        const selfManaged = entry.effect === 'shell' || entry.effect === 'workspace_write'
-            || entry.effect === 'media' || entry.effect === 'mcp';
         if (decision.action === 'deny' && !decision.denial?.approvalPath) {
             return { allowed: false, error: decision.denial?.whyDenied ?? `Policy '${profile.id}' denied ${toolName}.` };
         }
-        if (decision.action === 'allow') return { allowed: true };
-        if (selfManaged) return { allowed: true };
-        const requestPermission = context?.onPermissionRequest;
-        if (!requestPermission) return { allowed: false, error: `Policy requires approval for ${toolName}, but no permission handler is available.` };
-        const id = `policy_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
-        // A permission card is an unbounded wait on a human. Race it against the
-        // run signal, or a dispatched child blocks its whole reasoning loop on a
-        // card nobody is necessarily watching.
-        const allowed = await requestPermissionWithAbort(
-            requestPermission,
-            {
-                id,
-                tool: toolName,
-                description: aiText(`AI requests permission to use ${toolName}`, `AI 请求使用 ${toolName}`),
-                command,
-                context: {
-                    ...context,
-                    preflight: {
-                        riskLevel,
-                        classification: [subject],
-                        cwd: this.workspaceRoot,
-                        reasons: [`Policy profile: ${profile.id}`],
-                        networkAccess: subject === 'network',
-                        networkHosts,
-                        sandboxMode: profile.sandboxMode,
-                        targetPaths: targets,
-                        mcpServer,
-                        mcpTool,
-                    },
-                },
-            },
-            context?.runnerOptions?.abortSignal,
-        );
-        return allowed ? { allowed: true } : { allowed: false, error: `Permission denied for ${toolName}.` };
+        return { allowed: true };
     }
 
     // - Semantic evidence gate (plan §4 P0) -
@@ -1560,37 +1368,6 @@ export class AgentToolExecutor {
             return { summary };
         }
 
-        // Manual override (plan §3.6/§4.3): only the user can approve, via the
-        // shared approval channel. Tool args are never consulted for an
-        // override flag, so the model cannot self-authorize.
-        const requestPermission = context?.onPermissionRequest;
-        if (requestPermission) {
-            const targetRel = path.relative(this.workspaceRoot, resolvedTargetFile) || resolvedTargetFile;
-            const claimLines = decision.missingEvidence
-                .filter(item => item.status === 'conflict' || item.status === 'unknown' || item.status === 'stale')
-                .slice(0, 5)
-                .map(m => EVIDENCE_GATE_MSG.CLAIM_LINE(m.kind, m.status, m.claim));
-            try {
-                const approved = await requestPermissionWithAbort(
-                    requestPermission,
-                    {
-                        id: `evidence_gate_${decision.decisionId}`,
-                        tool: toolName,
-                        description: EVIDENCE_GATE_MSG.OVERRIDE_REQUEST(targetRel, claimLines.join('\n')),
-                        context,
-                    },
-                    context?.runnerOptions?.abortSignal,
-                );
-                if (approved) {
-                    decision.verdict = 'override';
-                    const overrideSummary = await this.recordEvidenceGateDecision(decision, context);
-                    return { summary: overrideSummary };
-                }
-                return { summary, errorResult: this.buildEvidenceGateBlockResult(decision, EVIDENCE_GATE_MSG.OVERRIDE_DENIED) };
-            } catch (error) {
-                ErrorReporter.warn('AgentTools', `Evidence gate override approval failed for ${decision.decisionId}`, error);
-            }
-        }
         return { summary, errorResult: this.buildEvidenceGateBlockResult(decision, undefined) };
     }
 
@@ -1993,30 +1770,6 @@ export class AgentToolExecutor {
                 allowedTools: [...skillPolicy.allowedTools].sort(),
             };
         }
-        if (runtimeDomain === 'general' && toolName === 'save_skill') {
-            if (args.capability_domain === 'paradox') {
-                return {
-                    success: false,
-                    error: aiText(
-                        `General Coding cannot save a paradox-domain skill.`,
-                        `通用编码模式不能保存 paradox 域技能。`,
-                    ),
-                };
-            }
-            const requestedTools = (Array.isArray(args.allowed_tools) ? args.allowed_tools : [])
-                .filter((value): value is string => typeof value === 'string');
-            const domainSpecificTool = requestedTools.find(name =>
-                TOOL_REGISTRY.get(name as import('./types').AgentToolName)?.domain === 'paradox');
-            if (domainSpecificTool) {
-                return {
-                    success: false,
-                    error: aiText(
-                        `General Coding cannot save a skill declaring paradox-domain tool '${domainSpecificTool}'.`,
-                        `通用编码模式不能保存声明了 paradox 域工具“${domainSpecificTool}”的技能。`,
-                    ),
-                };
-            }
-        }
 
         const registryEntry = TOOL_REGISTRY.get(toolName as any);
         const authorization = context?.runnerOptions?.schedulingState?.authorization;
@@ -2046,16 +1799,14 @@ export class AgentToolExecutor {
         }
 
         const runtimePlanPhase = context?.runnerOptions?.schedulingState?.phase === 'plan';
-        if (runtimePlanPhase
-            || mode === 'plan'
-            || ((mode === 'orchestrator' || mode === 'script') && toolName === 'write_file')) {
+        if (runtimePlanPhase || mode === 'plan') {
             const guard = validatePlanModeToolUse(
                 toolName,
                 args,
                 this.workspaceRoot,
                 context?.runnerOptions?.topicId,
                 undefined,
-                runtimePlanPhase ? 'plan' : mode as 'plan' | 'orchestrator' | 'script',
+                'plan',
             );
             if (!guard.allowed) {
                 return {
@@ -2186,7 +1937,7 @@ export class AgentToolExecutor {
                     abortSignal,
                 },
             };
-            if (toolContext.runnerOptions?.schedulingState.domainProfile !== 'general') toolContext.onBeforePdxWrite = async request => {
+            toolContext.onBeforePdxWrite = async request => {
                 if (inheritedPdxPreflight) {
                     const inherited = await inheritedPdxPreflight(request);
                     if (!inherited.allowed) return inherited;
@@ -2378,19 +2129,10 @@ export class AgentToolExecutor {
                 }
                 const writtenFiles = this.extractResultWrittenFiles(result);
 
-                // ReadTracker read/write synchronization and Blackboard invalidation cascade (T2.2 & B3)
+                // ReadTracker read/write synchronization (T2.2)
                 if (readTracker) {
                     for (const file of writtenFiles) {
                         readTracker.invalidate(file);
-                    }
-                    // Multi-agent cascade invalidation (B3)
-                    if (toolName === 'merge_results' && result && typeof result === 'object') {
-                        const writtenFiles = (result as any).writtenFiles;
-                        if (Array.isArray(writtenFiles)) {
-                            for (const file of writtenFiles) {
-                                readTracker.invalidate(path.resolve(this.workspaceRoot, file));
-                            }
-                        }
                     }
                 }
                 if (writtenFiles.length > 0) {
@@ -2608,15 +2350,6 @@ export class AgentToolExecutor {
             // - External / agent tools -
             case 'web_open':
                 result = await this.externalHandler.webOpen(args as any, context); break;
-            case 'run_command':
-                result = await this.externalHandler.runCommand(args as any, context); break;
-            case 'manage_process':
-                if (args.action === 'list') result = this.externalHandler.listProcesses(args as any, context);
-                else if (args.action === 'read') result = this.externalHandler.readProcess(args as any, context);
-                else if (args.action === 'write') result = this.externalHandler.writeProcessStdin(args as any, context);
-                else if (args.action === 'terminate') result = this.externalHandler.terminateProcess(args as any, context);
-                else result = { success: false, error: 'Unsupported manage_process action.' };
-                break;
             case 'web_search':
                 result = await this.externalHandler.webSearch(args as any, context); break;
             case 'web_find':
@@ -2789,7 +2522,7 @@ export class AgentToolExecutor {
             }
             // ignore_validation_error - REMOVED: AI must fix errors, not suppress them
             case 'remove_ignored_diagnostic':
-                result = await this.externalHandler.removeIgnoredDiagnostic(args as any, context); break;
+                result = await this.externalHandler.removeIgnoredDiagnostic(args as any); break;
             case 'get_ignored_diagnostics':
                 result = await this.externalHandler.getIgnoredDiagnostics(); break;
             // - Media Asset Conversion tools -
@@ -2831,25 +2564,6 @@ export class AgentToolExecutor {
             case 'mcp_call':
                 result = await this.executeMcpTool(args as any, context); break;
 
-            // - Orchestrator tools -
-            case 'dispatch_agents': {
-                // One entry, two shapes: a member roster means peer-team mode
-                // (mailbox + CAS board), otherwise it is a bounded DAG wave.
-                result = Array.isArray(args.members)
-                    ? await this.executeDispatchTeam(args, context)
-                    : await this.executeDispatchAgents(args, context);
-                break;
-            }
-            case 'query_blackboard':
-                result = await this.memoryHandler.queryBlackboard(args as any, context); break;
-            case 'merge_results': {
-                result = this.executeMergeResults(args, context);
-                break;
-            }
-            case 'cancel_dispatch': {
-                result = this.executeCancelDispatch(args, context);
-                break;
-            }
             case 'enter_plan_mode': {
                 result = this.executeEnterPlanMode(args, context);
                 break;
@@ -2858,30 +2572,12 @@ export class AgentToolExecutor {
                 result = this.executeExitPlanMode(args, context);
                 break;
             }
-
-            // - Agent Teams (peer collaboration inside a member run) -
-            case 'team_send_message': {
-                result = this.executeTeamSendMessage(args, context);
+            case 'get_ide_context': {
+                result = await this.executeGetIdeContext(args);
                 break;
             }
-            case 'team_task_create': {
-                result = this.executeTeamTaskCreate(args, context);
-                break;
-            }
-            case 'team_task_list': {
-                result = this.executeTeamTaskList(args, context);
-                break;
-            }
-            case 'team_task_update': {
-                result = this.executeTeamTaskUpdate(args, context);
-                break;
-            }
-            case 'team_members': {
-                result = this.executeTeamMembers(args, context);
-                break;
-            }
-            case 'team_close': {
-                result = this.executeTeamClose(args, context);
+            case 'open_in_visual_editor': {
+                result = await this.executeOpenInVisualEditor(args);
                 break;
             }
 
@@ -3070,7 +2766,7 @@ export class AgentToolExecutor {
             allowedTools: loaded.skill.allowedTools,
             truncated: loaded.truncated,
             content: `<skill name="${loaded.skill.name}">\n${loaded.content}\n</skill>${argumentSummary}`,
-            guidance: 'Follow this SKILL.md for the current task. If runAs says subagent, use dispatch_agents only when orchestration is already appropriate and available.',
+            guidance: 'Follow this SKILL.md for the current task.',
             policyEnforced: !!effectivePolicy,
             activeSkills: effectivePolicy?.skillNames,
             effectiveAllowedTools: effectivePolicy ? [...effectivePolicy.allowedTools].sort() : undefined,
@@ -3677,69 +3373,8 @@ export class AgentToolExecutor {
         return mergeMcpServerConfigs(settingsServers, fileConfigs.home, fileConfigs.project);
     }
 
-    /** Project-sourced MCP servers approved for connection this session (name → config fingerprint). */
-    private approvedProjectMcpServers = new Map<string, string>();
-
     private static mcpServerFingerprint(server: SourcedMCPServerConfig): string {
         return JSON.stringify(server);
-    }
-
-    /** An approved project server stays approved until its file entry changes. */
-    private isProjectMcpServerApproved(server: SourcedMCPServerConfig): boolean {
-        return this.approvedProjectMcpServers.get(server.name) === AgentToolExecutor.mcpServerFingerprint(server);
-    }
-
-    /**
-     * `.cwtools/mcp.json` inside a workspace is untrusted repository input, so a
-     * project-sourced server requires explicit one-time approval before the
-     * first connection (re-prompted when its config changes). Settings/home
-     * servers are user-level configuration and keep the enable-and-go behavior.
-     */
-    private async ensureProjectMcpServerApproved(
-        server: SourcedMCPServerConfig,
-        context?: import('./types').AgentToolContext,
-    ): Promise<{ ok: true } | { ok: false; error: string }> {
-        if (mcpServerSource(server) !== 'project' || this.isProjectMcpServerApproved(server)) {
-            return { ok: true };
-        }
-        const isSubAgent = !!context?.runnerOptions?.useSlimPrompt;
-        if (isSubAgent || !context?.onPermissionRequest) {
-            return {
-                ok: false,
-                error: `MCP server '${server.name}' is declared in the workspace's .cwtools/mcp.json and needs one-time user approval before connecting. Call it from the main agent so the user can approve it.`,
-            };
-        }
-        const target = server.type === 'stdio'
-            ? `${server.command ?? ''} ${(server.args ?? []).join(' ')}`.trim()
-            : server.url ?? '';
-        const permissionId = `mcp_project_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
-        const approved = await context.onPermissionRequest(
-            permissionId,
-            'mcp_call',
-            aiText(
-                `AI requests to connect to MCP server '${server.name}' declared in this workspace's .cwtools/mcp.json (${server.type}: ${target}). Approve only if you trust this repository.`,
-                `AI 请求连接本工作区 .cwtools/mcp.json 中声明的 MCP 服务器「${server.name}」（${server.type}: ${target}）。仅在信任该仓库时批准。`,
-            ),
-            undefined,
-            {
-                ...context,
-                preflight: {
-                    riskLevel: 3,
-                    classification: ['mcp'],
-                    reasons: ['Project-level MCP server from .cwtools/mcp.json requires first-connect approval.'],
-                    sandboxMode: 'mcp-server',
-                    mcpServer: server.name,
-                },
-            },
-        );
-        if (!approved) {
-            return { ok: false, error: `User denied connecting to project-level MCP server '${server.name}'.` };
-        }
-        this.approvedProjectMcpServers.set(server.name, AgentToolExecutor.mcpServerFingerprint(server));
-        // A newly approved project server was skipped by dynamic disclosure;
-        // drop the cache so the next refresh lists its tools.
-        this.dynamicMcpToolCache = undefined;
-        return { ok: true };
     }
 
     /** Get or create a pooled MCP client for the given server. */
@@ -3824,10 +3459,6 @@ export class AgentToolExecutor {
             const serverName = server?.name;
             if (!serverName || (server as { enabled?: boolean }).enabled === false
                 || !isMcpServerAllowedForDomain(server, runtimeDomain)) continue;
-            // Project-level servers connect only after explicit user approval
-            // (granted through an mcp_call in the main agent); listing tools
-            // would silently spawn the untrusted stdio command.
-            if (!this.isProjectMcpServerApproved(server) && mcpServerSource(server) === 'project') continue;
             try {
                 const client = await this.getMcpClient(serverName);
                 const listed = await Promise.race([
@@ -3902,42 +3533,14 @@ export class AgentToolExecutor {
             callArgs = rest as Record<string, unknown>;
         }
 
-        // Single policy chokepoint for both generic mcp_call and dynamic mcp_* names.
-        // Sub-agents are denied by default unless an explicit allow pattern matches.
         const isSubAgent = !!context?.runnerOptions?.useSlimPrompt;
         let mcpRules: Record<string, string> | undefined;
         try {
             mcpRules = vs.workspace.getConfiguration('stellarisLanguageServices.ai').get<{ mcp?: Record<string, string> }>('permissions')?.mcp;
         } catch { /* configuration unavailable (tests) — fall back to defaults */ }
         const permission = evaluateMcpPermission(serverName, toolName, { isSubAgent, rules: mcpRules });
-        if (!permission.allowed) {
-            if (!isSubAgent && permission.action === 'ask' && context?.onPermissionRequest) {
-                const permissionId = `mcp_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
-                const approved = await context.onPermissionRequest(
-                    permissionId,
-                    'mcp_call',
-                    aiText(`AI requests to call MCP tool ${serverName}/${toolName}`, `AI 请求调用 MCP 工具 ${serverName}/${toolName}`),
-                    undefined,
-                    {
-                        ...context,
-                        preflight: {
-                            riskLevel: 2,
-                            classification: ['mcp'],
-                            reasons: [permission.reason ?? `Matched MCP permission rule ${permission.matchedPattern ?? ''}`],
-                            sandboxMode: 'mcp-server',
-                            mcpServer: serverName,
-                            mcpTool: toolName,
-                        },
-                    },
-                );
-                if (!approved) return {
-                    success: false,
-                    error: `User denied MCP tool ${serverName}/${toolName}.`,
-                    terminalOutcome: 'permission_denied',
-                };
-            } else {
-                return { success: false, error: permission.reason };
-            }
+        if (!permission.allowed && permission.action === 'deny') {
+            return { success: false, error: permission.reason };
         }
 
         const runtimeDomain = context?.runnerOptions?.schedulingState.domainProfile;
@@ -3954,13 +3557,6 @@ export class AgentToolExecutor {
                 success: false,
                 error: `MCP server '${serverName}' is not explicitly enabled for the '${runtimeDomain}' capability domain.`,
             };
-        }
-
-        // Untrusted repository input: a project-level .cwtools/mcp.json server
-        // must be explicitly approved once before its first connection.
-        const projectGate = await this.ensureProjectMcpServerApproved(configuredServer, context);
-        if (!projectGate.ok) {
-            return { success: false, error: projectGate.error, terminalOutcome: 'permission_denied' };
         }
 
         const CONNECTION_ERRORS = /ECONNREFUSED|EPIPE|disconnect|not connected|ECONNRESET/i;
@@ -4007,1792 +3603,6 @@ export class AgentToolExecutor {
         return result;
     }
 
-    //- Orchestrator scheduling implementation -
-
-    /**
-     * Controllers for in-flight orchestrator dispatches.
-     *
-     * AgentToolExecutor is shared by top-level runs, so a single global
-     * controller would let an unrelated retry/resume cancel another run's
-     * sub-agents. Each dispatch instead follows only its own parent signal.
-     */
-    private readonly _activeDispatchAbortControllers = new Set<AbortController>();
-
-    private readonly _orchestratorValidationByRun = new Map<string, {
-        success: boolean;
-        summary: string;
-        pendingOnly?: boolean;
-    }>();
-
-    /** 
-* Execute the dispatch_agents tool: convert the task array built by AI into TaskGraph, 
-* Then trigger true multi-Agent parallel execution through Orchestrator.execute(). 
-*/
-    private async executeDispatchAgents(args: Record<string, unknown>, context?: import('./types').AgentToolContext): Promise<unknown> {
-        let tasks = args.tasks as Array<{
-            id: string;
-            profileName: string;
-            prompt: string;
-            contextFiles?: string[];
-            plannedFiles?: string[];
-            plannedEntities?: string[];
-            produces?: import('./orchestrator/types').TaskEntityContract[];
-            consumes?: import('./orchestrator/types').TaskEntityContract[];
-            acceptanceChecks?: import('./orchestrator/types').AcceptanceCheck[];
-            dependencies?: string[];
-            maxIterations?: number;
-            model?: unknown;
-            provider?: unknown;
-            reasoningEffort?: unknown;
-            modelOverride?: unknown;
-            providerOverride?: unknown;
-        }> | undefined;
-
-        // Resume/append/clarification contract (Phase 2): a later dispatch may
-        // continue a persisted graph instead of starting a fresh one.
-        const resumeGraphId = typeof args.resumeGraphId === 'string' ? args.resumeGraphId.trim() : '';
-        const appendTasks = Array.isArray(args.appendTasks) ? args.appendTasks : [];
-        const answerClarifications = Array.isArray(args.answerClarifications) ? args.answerClarifications : [];
-        // Background execution: the wave returns immediately and keeps running
-        // off the tool call; completion arrives as a BACKGROUND TASK RESULT.
-        const backgroundRequested = args.background === true;
-
-        const runnerOptsForLimits = context?.runnerOptions;
-        if (!runnerOptsForLimits?.schedulingState) {
-            return { success: false, error: 'dispatch_agents requires an active scheduler context.' };
-        }
-        const schedulingState = runnerOptsForLimits.schedulingState;
-        const originalUserMessage = runnerOptsForLimits.originalUserMessage
-            ?? (typeof args.userPrompt === 'string' ? args.userPrompt : undefined);
-        let userExecutionPolicy = deriveUserExecutionPolicy(
-            originalUserMessage,
-            args.userConstraints,
-        );
-        const runtimeDomain = schedulingState.domainProfile;
-        const isScriptMode = runtimeDomain === 'paradox'
-            && schedulingState.authorization === 'workspace_write'
-            && schedulingState.dispatch !== 'single';
-        const requiresStructuredWriteContract = isScriptMode;
-        let featureManifest = args.featureManifest as import('./types').FeatureManifest | undefined;
-        const blueprintFile = typeof args.blueprintFile === 'string' ? args.blueprintFile.trim() : '';
-
-        // Load the persisted graph up front when resuming so appended task
-        // ids and the stored feature manifest are known to later validations.
-        const resumeRecord = resumeGraphId
-            ? loadOrchestration(resumeGraphId, { topicId: runnerOptsForLimits?.topicId, domain: runtimeDomain, workspaceRoot: this.workspaceRoot })
-            : undefined;
-        if (resumeGraphId && !resumeRecord) {
-            return {
-                success: false,
-                error: `resumeGraphId '${resumeGraphId}' is not a known orchestration for the current topic/domain. Use merge_results to inspect known graphs, or start a new dispatch.`,
-            };
-        }
-        if (resumeGraphId && backgroundOrchestrators.hasActive(resumeGraphId)) {
-            return {
-                success: false,
-                error: `Graph '${resumeGraphId}' is still running in the background. Wait for its BACKGROUND TASK RESULT, then resume or merge it.`,
-            };
-        }
-
-        // ─── Delegation-depth budget ───
-        // Explicit and monotone: a resumed graph contributes a floor, so a nested
-        // coordinator can never be re-counted as top level and buy itself another
-        // delegation level. `SUB_AGENT_EXCLUDES` still hides the orchestration
-        // tools from children as defence in depth behind this budget.
-        const delegationBudget = evaluateDelegationBudget({
-            parentDepth: runnerOptsForLimits?.delegationDepth,
-            persistedFloor: resumeRecord?.delegationDepth,
-            maxDepth: vs.workspace
-                .getConfiguration('stellarisLanguageServices.ai.orchestrator')
-                .get<number>('maxDelegationDepth'),
-        });
-        runnerOptsForLimits?.runEventSink?.appendSoon('dispatch_evaluated', {
-            kind: 'delegation_depth',
-            allowed: delegationBudget.allowed,
-            parentDepth: delegationBudget.parentDepth,
-            childDepth: delegationBudget.childDepth,
-            maxDepth: delegationBudget.maxDepth,
-        }, { status: delegationBudget.allowed ? 'done' : 'failed' });
-        if (!delegationBudget.allowed) {
-            return {
-                success: false,
-                error: delegationBudget.reason,
-                delegationDepth: delegationBudget.parentDepth,
-                maxDelegationDepth: delegationBudget.maxDepth,
-            };
-        }
-        if (backgroundRequested && blueprintFile) {
-            return {
-                success: false,
-                error: 'Background dispatch does not accept blueprintFile: blueprints are approved write contracts and stay synchronous. Run read-only fan-out in the background without a blueprint.',
-            };
-        }
-        if (resumeGraphId && blueprintFile) {
-            return {
-                success: false,
-                error: 'Resumed graphs are already approved contracts; blueprintFile applies only to the initial dispatch. Use appendTasks to extend a resumed graph.',
-            };
-        }
-        if (resumeRecord && !featureManifest && resumeRecord.graph.featureManifest) {
-            featureManifest = resumeRecord.graph.featureManifest;
-        }
-
-        if (schedulingState.authorization !== 'workspace_write' && blueprintFile) {
-            return {
-                success: false,
-                error: 'The current scheduler authorization cannot execute a blueprintFile task graph. Dispatch at most four bounded evidence tasks directly.',
-            };
-        }
-        if (runtimeDomain === 'general' && blueprintFile) {
-            return { success: false, error: 'General Multi-Agent does not accept domain-specific design blueprints.' };
-        }
-        const maxTasksPerDispatch = blueprintFile ? 64 : isScriptMode ? 8 : 4;
-        if (blueprintFile) {
-            const resolvedBlueprint = path.isAbsolute(blueprintFile)
-                ? path.resolve(blueprintFile)
-                : path.resolve(this.workspaceRoot, blueprintFile);
-            const relativeBlueprint = path.relative(this.workspaceRoot, resolvedBlueprint);
-            const insideWorkspace = isPathInsideOrEqual(resolvedBlueprint, this.workspaceRoot);
-            const normalizedRelative = relativeBlueprint.replace(/\\/g, '/').toLowerCase();
-            const insideProjectAgentStorage = !!insideWorkspace
-                && (normalizedRelative.includes('/.cwtools/') || normalizedRelative.startsWith('.cwtools/'));
-            const privateStorageRoot = getPrivateAiStorageRoot(this.workspaceRoot);
-            const insidePrivateStorage = !!privateStorageRoot && isPathInsideOrEqual(resolvedBlueprint, path.resolve(privateStorageRoot));
-            if (!insideProjectAgentStorage && !insidePrivateStorage) {
-                return { success: false, error: 'blueprintFile must be a topic-scoped Implementation_Plan.md inside the agent storage directory.' };
-            }
-            const blueprintBaseName = path.basename(resolvedBlueprint).toLowerCase();
-            if (blueprintBaseName !== 'implementation_plan.md') {
-                return { success: false, error: 'blueprintFile must point to the unified Implementation_Plan.md.' };
-            }
-            const approvedTopicId = runnerOptsForLimits?.topicId;
-            if (approvedTopicId) {
-                const topicDir = path.resolve(getPrivateTopicStorageDir(approvedTopicId, this.workspaceRoot));
-                if (!isPathInsideOrEqual(resolvedBlueprint, topicDir)) {
-                    return { success: false, error: 'blueprintFile must belong to the current approved topic.' };
-                }
-            }
-            try {
-                const stat = fs.statSync(resolvedBlueprint);
-                if (!stat.isFile() || stat.size > 2 * 1024 * 1024) {
-                    return { success: false, error: 'Approved blueprint data is missing or exceeds the 2 MiB safety limit.' };
-                }
-                const fileContent = fs.readFileSync(resolvedBlueprint, 'utf8').replace(/^\uFEFF/, '');
-                const approvedBlueprint = parseImplementationPlanBlueprint(fileContent).value as {
-                    schemaVersion?: number;
-                    featureManifest?: import('./types').FeatureManifest;
-                    taskPlan?: typeof tasks;
-                    unresolvedCritical?: unknown;
-                } | undefined;
-                if (approvedBlueprint?.schemaVersion !== 2 || !approvedBlueprint.featureManifest || !Array.isArray(approvedBlueprint.taskPlan)) {
-                    return { success: false, error: 'Approved Implementation Plan does not contain a valid schemaVersion 2 executable blueprint contract.' };
-                }
-                if (!Array.isArray(approvedBlueprint.unresolvedCritical) || approvedBlueprint.unresolvedCritical.length > 0) {
-                    return { success: false, error: 'Blueprint is not approval-ready: unresolvedCritical must be an empty array before dispatch.' };
-                }
-                featureManifest = approvedBlueprint.featureManifest;
-                tasks = approvedBlueprint.taskPlan;
-            } catch (error) {
-                return { success: false, error: `Failed to load approved blueprint contract: ${error instanceof Error ? error.message : String(error)}` };
-            }
-        }
-
-        if (resumeGraphId) {
-            // Appended tasks form this wave; the stored graph contributes the rest.
-            tasks = appendTasks as typeof tasks;
-            const hasAnswers = answerClarifications.length > 0;
-            if ((!tasks || tasks.length === 0) && !hasAnswers) {
-                return {
-                    success: false,
-                    error: 'Resuming requires appendTasks (new read-only tasks) and/or answerClarifications; otherwise there is nothing left to execute.',
-                };
-            }
-        } else if (!tasks || !Array.isArray(tasks) || tasks.length === 0) {
-            return { success: false, error: 'Provide tasks or blueprintFile. Each task must include id, profileName, and prompt.' };
-        }
-
-        if (tasks && tasks.length > maxTasksPerDispatch) {
-            return {
-                success: false,
-                error: `Concurrency guard: attempted to dispatch ${tasks.length} tasks at once, above the current mode limit of ${maxTasksPerDispatch}. Long task lists can cause model timeout or truncation; split the work into smaller waves.`
-            };
-        }
-        const normalizedTasks = (tasks ?? []).map(task => normalizeDispatchTaskForLocalisationYml(task));
-        // Per-task model selection is model-visible untrusted input: validate
-        // and normalize before any value reaches TaskNode/AgentRunnerOptions.
-        // Home providers (~/.cwtools/providers.json) are admitted alongside
-        // built-in ids.
-        const builtinProviderIds = new Set<string>([...Object.keys(BUILTIN_PROVIDERS), ...Object.keys(getHomeProviders())]);
-        const taskModelSelections = new Map<string, {
-            model?: string;
-            provider?: string;
-            reasoningEffort?: import('./types').ReasoningEffort;
-        }>();
-        {
-            const { validateNodeModelSelection, mapTaskModelSelection } = await import('./orchestrator/taskGraphEngine');
-            for (const task of normalizedTasks) {
-                const selection = validateNodeModelSelection(mapTaskModelSelection(task), builtinProviderIds);
-                if (!selection.ok) {
-                    return { success: false, error: `Task '${task.id}': ${selection.error}` };
-                }
-                taskModelSelections.set(task.id, selection);
-            }
-        }
-        if (resumeRecord) {
-            const existingIds = new Set(resumeRecord.graph.nodes.map(node => node.id));
-            const duplicate = normalizedTasks.find(task => existingIds.has(task.id));
-            if (duplicate) {
-                return {
-                    success: false,
-                    error: `Task id '${duplicate.id}' already exists in graph '${resumeGraphId}'. Choose new ids for appended tasks or use answerClarifications instead.`,
-                };
-            }
-        }
-        if (userExecutionPolicy.localisationOwnership === 'user') {
-            const localisationWriter = normalizedTasks.find(task =>
-                task.profileName === 'localization-writer'
-                || (Array.isArray(task.plannedFiles) && task.plannedFiles.some(isLocalisationYmlPath))
-                || (Array.isArray(task.produces) && task.produces.some(contract =>
-                    !!contract
-                    && typeof contract === 'object'
-                    && (contract.operation === 'localise'
-                        || (typeof contract.kind === 'string' && contract.kind.toLowerCase() === 'localisation')))));
-            if (localisationWriter) {
-                return {
-                    success: false,
-                    error: aiText(
-                        `Task '${localisationWriter.id}' conflicts with the user's retained ownership of localisation. Remove localisation writes from the graph and dispatch only the work the user delegated.`,
-                        `任务“${localisationWriter.id}”与用户保留的本地化所有权冲突。请从任务图中移除本地化写入，只调度用户已经委派的工作。`,
-                    ),
-                    userExecutionPolicy,
-                };
-            }
-        }
-        const runtimeProfile = schedulingState.profileName
-            ? agentProfileCatalog.get(schedulingState.profileName)
-            : undefined;
-        if (!runtimeProfile) {
-            return { success: false, error: `dispatch_agents requires a known scheduler profile; received '${schedulingState.profileName}'.` };
-        }
-        const allowedProfileNames = new Set(runtimeProfile.subagents ?? []);
-        if (schedulingState.authorization !== 'workspace_write') {
-            for (const profileName of [...allowedProfileNames]) {
-                if (agentProfileCatalog.get(profileName)?.authorizationCeiling === 'workspace_write') {
-                    allowedProfileNames.delete(profileName);
-                }
-            }
-        }
-        const invalidProfile = normalizedTasks.find(task =>
-            !allowedProfileNames.has(task.profileName) || !agentProfileCatalog.get(task.profileName));
-        if (invalidProfile) {
-            return {
-                success: false,
-                error: `Sub-agent profile '${invalidProfile.profileName}' is not allowed by scheduler profile '${runtimeProfile.name}'. Allowed profiles: ${[...allowedProfileNames].join(', ')}.`,
-            };
-        }
-        const localisationProfileMismatch = normalizedTasks.find(task => {
-            const plannedFiles = Array.isArray(task.plannedFiles) ? task.plannedFiles : [];
-            return plannedFiles.some(isLocalisationYmlPath) && task.profileName !== 'localization-writer';
-        });
-        if (localisationProfileMismatch) {
-            return {
-                success: false,
-                error: `Task '${localisationProfileMismatch.id}' targets localisation YML but uses profile '${localisationProfileMismatch.profileName}'. Use profileName='localization-writer'.`,
-            };
-        }
-        const isWritableProfile = (profileName: string): boolean =>
-            agentProfileCatalog.getRequired(profileName).authorizationCeiling === 'workspace_write';
-        // Resumed graphs keep the static write contract of the approved plan:
-        // appended nodes in the Paradox domain are read-only evidence work.
-        if (resumeGraphId && runtimeDomain === 'paradox') {
-            const appendedWriter = normalizedTasks.find(task =>
-                isWritableProfile(task.profileName)
-                || (task.plannedFiles?.length ?? 0) > 0
-            );
-            if (appendedWriter) {
-                return {
-                    success: false,
-                    error: `Appended task '${appendedWriter.id}' declares a write intent in the Paradox domain. Write waves are static contracts — dispatch them as a new graph instead of appending to '${resumeGraphId}'. Appended tasks must use read-only profiles.`,
-                };
-            }
-        }
-        // Background waves in the Paradox domain are read-only evidence work;
-        // write waves keep the synchronous quality-gate transaction.
-        if (backgroundRequested && runtimeDomain === 'paradox') {
-            const backgroundWriter = normalizedTasks.find(task =>
-                isWritableProfile(task.profileName)
-                || (task.plannedFiles?.length ?? 0) > 0
-            );
-            if (backgroundWriter) {
-                return {
-                    success: false,
-                    error: `Background task '${backgroundWriter.id}' declares a write intent in the Paradox domain. Background waves require read-only profiles; dispatch write waves synchronously.`,
-                };
-            }
-            if (resumeRecord) {
-                const resumableWriter = resumeRecord.graph.nodes.find(node =>
-                    node.status !== 'done' && isWritableProfile(node.profileName));
-                if (resumableWriter) {
-                    return {
-                        success: false,
-                        error: `Resumed graph '${resumeGraphId}' still contains write node '${resumableWriter.id}' that would run in the background. Finish write waves synchronously before backgrounding read-only follow-ups.`,
-                    };
-                }
-            }
-        }
-        if (schedulingState.authorization !== 'workspace_write') {
-            const taskWithWriteIntent = normalizedTasks.find(task => (task.plannedFiles?.length ?? 0) > 0);
-            if (taskWithWriteIntent) {
-                return {
-                    success: false,
-                    error: `Read-only fan-out task '${taskWithWriteIntent.id}' must not declare plannedFiles or any write intent.`,
-                };
-            }
-        }
-        const hasWriteTasks = normalizedTasks.some(task =>
-            isWritableProfile(task.profileName)
-            || (task.plannedFiles?.length ?? 0) > 0
-        );
-        // Answers-only resumes add no new work: the re-run nodes were already
-        // admitted by their first wave. Appended tasks are scored against the
-        // combined graph, so dependencies may reference stored node ids.
-        const admissionNeeded = normalizedTasks.length > 0;
-        const evaluatedDispatchAdmission = !admissionNeeded
-            ? { accepted: true, score: 0, reason: 'Answers-only resume of an already-admitted graph.', conflicts: [] }
-            : evaluateDispatchAdmission(
-            normalizedTasks.map(task => ({
-                id: task.id,
-                objective: task.prompt,
-                dependencies: task.dependencies,
-                expectedWrites: task.plannedFiles,
-                acceptanceCriteria: task.acceptanceChecks?.map(check => check.description),
-                profileName: task.profileName,
-            })),
-            {
-                explicitDelegation: schedulingState.dispatch === 'parallel'
-                    || schedulingState.dispatch === 'specialist'
-                    || !!blueprintFile,
-                availableTokenBudget: runnerOptsForLimits?.tokenBudget,
-                knownTaskIds: resumeRecord
-                    ? resumeRecord.graph.nodes.map(node => node.id)
-                    : undefined,
-            },
-        );
-        const dispatchAdmission = evaluatedDispatchAdmission;
-        if (!dispatchAdmission.accepted) {
-            runnerOptsForLimits?.runEventSink?.appendSoon('dispatch_evaluated', {
-                accepted: false,
-                score: dispatchAdmission.score,
-                reason: dispatchAdmission.reason,
-                taskCount: normalizedTasks.length,
-                conflicts: dispatchAdmission.conflicts,
-            }, { status: 'failed' });
-            return {
-                success: false,
-                error: `Runtime dispatch admission rejected this graph: ${dispatchAdmission.reason}`,
-                dispatchAdmission,
-            };
-        }
-        if (runnerOptsForLimits?.schedulingState?.dispatch === 'single') {
-            runnerOptsForLimits.schedulingState = transitionSchedulingState(
-                runnerOptsForLimits.schedulingState,
-                {
-                    dispatch: 'parallel',
-                    reason: dispatchAdmission.reason,
-                    dispatchReason: dispatchAdmission.reason,
-                },
-            );
-        }
-        runnerOptsForLimits?.runEventSink?.appendSoon('dispatch_evaluated', {
-            accepted: true,
-            state: runnerOptsForLimits?.schedulingState,
-            score: dispatchAdmission.score,
-            reason: dispatchAdmission.reason,
-            taskCount: normalizedTasks.length,
-            conflicts: dispatchAdmission.conflicts,
-        }, { status: 'done' });
-        if (requiresStructuredWriteContract && hasWriteTasks) {
-            const invalidWriter = normalizedTasks.find(task =>
-                ['paradox-coder', 'localization-writer', 'gui-expert'].includes(task.profileName)
-                && (task.produces?.length ?? 0) === 0
-                && (task.consumes?.length ?? 0) === 0
-            );
-            const orphanLocWriter = normalizedTasks.find(task =>
-                task.profileName === 'localization-writer'
-                && task.produces?.some(contract => contract.kind === 'localisation')
-                && !task.consumes?.some(contract => contract.kind !== 'localisation')
-            );
-            if (!featureManifest?.objective || (featureManifest.acceptanceCriteria?.length ?? 0) === 0) {
-                return {
-                    success: false,
-                    error: aiText(
-                        'Paradox Multi-Agent write waves require featureManifest with an objective and at least one acceptance criterion. Declare the required entities/edges before dispatching writers.',
-                        'Paradox 多 Agent 写入批次必须提供 featureManifest，其中包含目标和至少一条验收条件。请先声明所需实体与关联边。',
-                    ),
-                };
-            }
-            if (invalidWriter) {
-                return {
-                    success: false,
-                    error: aiText(
-                        `Paradox Multi-Agent writer '${invalidWriter.id}' must declare produces and/or consumes entity contracts.`,
-                        `Paradox 多 Agent 写入节点“${invalidWriter.id}”必须声明 produces 和/或 consumes 实体契约。`,
-                    ),
-                };
-            }
-            if (orphanLocWriter) {
-                return {
-                    success: false,
-                    error: aiText(
-                        `Localisation writer '${orphanLocWriter.id}' must consume its owning event/object entity so dependency ordering and orphan checks can be enforced.`,
-                        `本地化写入节点“${orphanLocWriter.id}”必须通过 consumes 声明其所属事件或对象，系统才能强制依赖顺序并检查孤立本地化。`,
-                    ),
-                };
-            }
-            featureManifest = { ...featureManifest, expectsFileChanges: featureManifest.expectsFileChanges ?? true };
-        }
-
-        // Phase 3: reject over-privileged child tasks at dispatch time.
-        {
-            const { clampWriteScopeToRoots } = require('./runner/policyEngine') as typeof import('./runner/policyEngine');
-            for (const task of normalizedTasks) {
-                if (!Array.isArray(task.plannedFiles) || task.plannedFiles.length === 0) continue;
-                const { rejected } = clampWriteScopeToRoots(task.plannedFiles, [this.workspaceRoot], this.workspaceRoot);
-                if (rejected.length > 0) {
-                    return {
-                        success: false,
-                        error: `Task '${task.id}' plans writes outside the workspace sandbox: ${rejected.join(', ')}. Sub-agents cannot exceed the parent's writable roots — re-plan those files inside the workspace, or drop them from plannedFiles.`,
-                    };
-                }
-            }
-        }
-
-        // Make sure there is a parentAgentRunner (the Orchestrator needs it to schedule child Agents)
-        if (!this.parentAgentRunner) {
-            return { success: false, error: 'Orchestrator is not ready: missing AgentRunner instance. Run in a coordinator-capable mode.' };
-        }
-
-        const localAbort = new AbortController();
-        this._activeDispatchAbortControllers.add(localAbort);
-        const globalSignal = runnerOptsForLimits?.abortSignal;
-        const onGlobalAbort = () => localAbort.abort(globalSignal?.reason);
-        if (globalSignal?.aborted) {
-            onGlobalAbort();
-        } else {
-            globalSignal?.addEventListener('abort', onGlobalAbort, { once: true });
-        }
-
-        // Kept for best-effort persistence when execution throws before returning.
-        let persistedGraph: import('./orchestrator/types').TaskGraph | undefined;
-
-        try {
-            //Dynamic import avoids circular dependencies
-            const { Orchestrator } = await import('./orchestrator/orchestrator');
-            const { TaskGraphEngine, validateNodeModelSelection } = await import('./orchestrator/taskGraphEngine');
-            const cfg = vs.workspace.getConfiguration('stellarisLanguageServices.ai');
-            // Settings are the base layer; ~/.cwtools/agent-models.json overrides
-            // same-named roles wholesale.
-            const agentModels = getAgentModelOverrides(cfg.get<Record<string, { provider: string; model: string }>>('orchestrator.agentModels'));
-
-            // Build TaskGraph (resume path restores the persisted graph and
-            // merges appended read-only tasks and clarification answers).
-            const userPrompt = originalUserMessage || featureManifest?.objective || 'Multi-agent collaboration task';
-            let graph: import('./orchestrator/types').TaskGraph;
-            let restoredBlackboard: import('./orchestrator/types').SerializedBlackboard | undefined;
-            if (resumeRecord) {
-                graph = deserializeGraph(resumeRecord.graph);
-                restoredBlackboard = resumeRecord.blackboard;
-                // Nodes left incomplete by the previous wave are re-eligible.
-                // `running` is included: a wave that threw mid-flight is persisted
-                // with a live graph reference, so its interrupted nodes would
-                // otherwise stay `running` on disk and never be scheduled again.
-                // See orchestrator/resumeNormalization.ts.
-                const resumeNormalization = normalizeResumedGraph(graph);
-                if (resumeNormalization.changed) {
-                    runnerOptsForLimits?.runEventSink?.appendSoon('step_appended', {
-                        step: {
-                            type: 'orchestrator_progress',
-                            content: `Resume re-queued ${resumeNormalization.resetFailed.length + resumeNormalization.resetCancelled.length} unfinished node(s)`
-                                + (resumeNormalization.resetRunning.length > 0
-                                    ? `, including ${resumeNormalization.resetRunning.length} interrupted mid-flight node(s) from a wave that never settled`
-                                    : '')
-                                + '.',
-                            timestamp: Date.now(),
-                        },
-                    });
-                }
-                if (resumeRecord.graph.userExecutionPolicy) {
-                    userExecutionPolicy = resumeRecord.graph.userExecutionPolicy;
-                }
-            } else {
-                graph = TaskGraphEngine.createGraph(userPrompt, featureManifest);
-                graph.metadata.userExecutionPolicy = userExecutionPolicy;
-            }
-
-            for (const task of normalizedTasks) {
-                const modelSelection = taskModelSelections.get(task.id);
-                TaskGraphEngine.addNode(
-                    graph,
-                    task.id,
-                    task.profileName,
-                    task.prompt,
-                    {
-                        contextFiles: task.contextFiles,
-                        plannedFiles: task.plannedFiles,
-                        plannedEntities: task.plannedEntities,
-                        produces: task.produces,
-                        consumes: task.consumes,
-                        acceptanceChecks: task.acceptanceChecks,
-                        dependencies: task.dependencies || [],
-                        maxIterations: task.maxIterations,
-                        modelOverride: modelSelection?.model,
-                        providerOverride: modelSelection?.provider,
-                        reasoningEffort: modelSelection?.reasoningEffort,
-                    },
-                );
-            }
-            let contextPreservingResumes = 0;
-            for (const entry of answerClarifications) {
-                const id = typeof entry?.id === 'string' ? entry.id : '';
-                const answer = typeof entry?.answer === 'string' ? entry.answer.trim() : '';
-                if (!id || !answer) continue;
-                const node = graph.nodes.get(id);
-                if (!node) {
-                    return { success: false, error: `answerClarifications references unknown node id '${id}'.` };
-                }
-                // Two delivery paths, deliberately both:
-                // 1. The prompt append is durable — it survives a failed resume and
-                //    a later fresh retry, exactly as before this change.
-                // 2. `resumeAnswer` asks the executor to replay this child's own
-                //    preserved transcript and send only the answer, so an explore profile
-                //    that already spent 40 iterations on evidence does not repeat it.
-                node.prompt = [node.prompt, '', '## Parent clarification answer', answer].join('\n');
-                node.resumeAnswer = answer;
-                if (node.resumeContextRef) contextPreservingResumes++;
-                if (node.status !== 'pending') {
-                    node.status = 'pending';
-                    node.error = undefined;
-                    node.retryCount = 0;
-                }
-            }
-            TaskGraphEngine.linkEntityDependencies(graph);
-            persistedGraph = graph;
-
-            // Instantiate Orchestrator
-            const pendingNodeCount = [...graph.nodes.values()].filter(node => node.status === 'pending').length;
-            const orchestrator = new Orchestrator(this.parentAgentRunner, {
-                maxConcurrency: isScriptMode ? Math.min(8, Math.max(1, pendingNodeCount)) : undefined,
-            });
-            const parentRunPromise = context?.agentRunner?.getActiveRunRecordPromise?.()
-                ?? this.parentAgentRunner.getActiveRunRecordPromise?.();
-            const parentRun = runnerOptsForLimits?.runRecord
-                ?? await parentRunPromise?.catch(() => undefined);
-
-            // Build child execution options from the active tool-call context.
-            const runnerOpts = runnerOptsForLimits;
-            const parentRunSink = context?.runEventSink ?? runnerOpts?.runEventSink;
-            this.blackboard.setEventSink(parentRunSink);
-
-            const onBeforeFileWrite =
-                context?.onBeforeFileWrite
-                ?? runnerOpts.onBeforeFileWrite;
-            const validationRunId = parentRun?.runId ?? parentRunSink?.runId;
-
-            const options: import('./orchestrator/types').OrchestratorOptions = {
-                schedulingState,
-                providerId: runnerOpts.providerId,
-                model: runnerOpts.model,
-                reasoningEffort: runnerOpts.reasoningEffort,
-                agentModelOverrides: agentModels,
-                abortSignal: localAbort.signal,
-                topicId: runnerOpts.topicId,
-                parentRunId: parentRun?.runId ?? parentRunSink?.runId,
-                delegationDepth: delegationBudget.parentDepth,
-                durableGoal: runnerOpts.durableGoal,
-                restoredBlackboard,
-                originalUserMessage,
-                userExecutionPolicy,
-                runEventSink: parentRunSink,
-                onStep: context?.onStep,
-                onBeforeFileWrite,
-                onTodoUpdate: context?.onTodoUpdate || runnerOpts.onTodoUpdate,
-                onPermissionRequest: context?.onPermissionRequest
-                    ?? runnerOpts.onPermissionRequest,
-            };
-
-            // Push initial progress
-            options.onStep?.({
-                type: 'thinking',
-                content: `Coordinator started: dispatching ${normalizedTasks.length} sub-agent task(s).`,
-                timestamp: Date.now(),
-            });
-            if (parentRunSink) {
-                for (const task of normalizedTasks) {
-                    await parentRunSink.append(
-                        'subagent_start',
-                        {
-                            taskNodeId: task.id,
-                            profileName: task.profileName,
-                            parentAgentId: parentRun?.agentId ?? parentRunSink?.agentId,
-                            task: task.prompt.slice(0, 240),
-                            plannedFiles: task.plannedFiles ?? [],
-                            plannedEntities: task.plannedEntities ?? [],
-                            dependencies: task.dependencies ?? [],
-                        },
-                        { agentId: task.id, status: 'running' }
-                    ).catch(() => {});
-                }
-            }
-
-            // A later dispatch may belong to another top-level run and must
-            // not replace or cancel this graph.
-
-            // ─── Background mode: return immediately, keep the graph running ───
-            if (backgroundRequested) {
-                const bgGraphId = graph.id;
-                const bgTopicId = runnerOpts?.topicId;
-                const bgRunId = validationRunId;
-
-                // Graph-level aggregation notification: one BACKGROUND TASK
-                // RESULT entry when the whole graph settles.
-                let graphTask: import('./runner/taskManager').AgentTaskRecord | undefined;
-                if (bgTopicId && bgRunId) {
-                    try {
-                        agentTaskManager.configure(bgTopicId);
-                        graphTask = await agentTaskManager.create({
-                            kind: 'background_read',
-                            agentId: `graph:${bgGraphId}`,
-                            topicId: bgTopicId,
-                            runId: bgRunId,
-                            threadId: bgTopicId,
-                        });
-                    } catch {
-                        graphTask = undefined;
-                    }
-                }
-
-                // In-progress snapshot so merge_results/resume see the graph.
-                await saveOrchestration({
-                    workspaceRoot: this.workspaceRoot,
-                    topicId: bgTopicId,
-                    runId: bgRunId,
-                    domain: runtimeDomain,
-                    delegationDepth: delegationBudget.parentDepth,
-                    graph,
-                    agentResults: new Map(),
-                    blackboard: { entries: [], timestamp: Date.now() },
-                    summary: 'Background dispatch started; execution in progress.',
-                    totalTokenUsage: { total: 0, input: 0, output: 0, estimatedCostCny: 0 },
-                }).catch(() => false);
-
-                // Progress events go through the run ledger: the tool-call
-                // onStep closure is not reliable across turns.
-                const bgOptions = parentRunSink
-                    ? {
-                        ...options,
-                        onStep: (step: import('./types').AgentStep) => {
-                            parentRunSink.appendSoon('step_appended', {
-                                step: {
-                                    type: step.type,
-                                    content: step.content,
-                                    timestamp: step.timestamp,
-                                    agentId: step.agentId,
-                                    source: 'background',
-                                },
-                            });
-                        },
-                    }
-                    : options;
-
-                backgroundOrchestrators.start({
-                    graphId: bgGraphId,
-                    topicId: bgTopicId,
-                    runId: bgRunId,
-                    parentAbortSignal: globalSignal,
-                    run: async (bgAbortSignal) => {
-                        const bgLocalAbort = new AbortController();
-                        const onBgAbort = () => bgLocalAbort.abort(bgAbortSignal.reason);
-                        if (bgAbortSignal.aborted) {
-                            onBgAbort();
-                        } else {
-                            bgAbortSignal.addEventListener('abort', onBgAbort, { once: true });
-                        }
-                        try {
-                            const bgResult = await orchestrator.execute(graph, { ...bgOptions, abortSignal: bgLocalAbort.signal });
-                            if (graphTask) {
-                                await agentTaskManager.transition(
-                                    graphTask.taskId,
-                                    bgResult.success ? 'completed' : 'failed',
-                                    bgResult.summary,
-                                    {
-                                        stopReason: bgResult.success
-                                            ? 'completed'
-                                            : bgResult.cancelledNodes.length > 0
-                                                ? 'graph_partially_cancelled'
-                                                : 'graph_nodes_failed',
-                                        lastMessage: bgResult.summary,
-                                    },
-                                ).catch(() => {});
-                            }
-                            await this.finalizeOrchestration(bgResult, graph, {
-                                domain: runtimeDomain,
-                                topicId: bgTopicId,
-                                runId: bgRunId,
-                                hasWriteTasks,
-                                blackboard: orchestrator.getBlackboard().snapshot(),
-                                delegationDepth: delegationBudget.parentDepth,
-                            }, context);
-                        } catch (error) {
-                            const cancelled = bgLocalAbort.signal.aborted
-                                || (error instanceof Error && error.name === 'AbortError');
-                            const errMsg = error instanceof Error ? error.message : String(error);
-                            if (graphTask) {
-                                await agentTaskManager.transition(
-                                    graphTask.taskId,
-                                    cancelled ? 'killed' : 'failed',
-                                    cancelled ? 'Cancelled by parent' : errMsg,
-                                    {
-                                        stopReason: cancelled ? 'cancelled_by_parent' : 'orchestration_threw',
-                                        lastMessage: cancelled ? 'Cancelled by parent' : errMsg,
-                                    },
-                                ).catch(() => {});
-                            }
-                            await saveOrchestration({
-                                workspaceRoot: this.workspaceRoot,
-                                topicId: bgTopicId,
-                                runId: bgRunId,
-                                domain: runtimeDomain,
-                                delegationDepth: delegationBudget.parentDepth,
-                                graph,
-                                agentResults: new Map(),
-                                blackboard: { entries: [], timestamp: Date.now() },
-                                summary: cancelled
-                                    ? 'Background orchestration cancelled by parent.'
-                                    : `Background orchestration failed: ${errMsg}`,
-                                totalTokenUsage: { total: 0, input: 0, output: 0, estimatedCostCny: 0 },
-                            }).catch(() => false);
-                        } finally {
-                            bgAbortSignal.removeEventListener('abort', onBgAbort);
-                        }
-                    },
-                });
-
-                return {
-                    success: true,
-                    background: true,
-                    graphId: bgGraphId,
-                    nodeCount: graph.nodes.size,
-                    hint: 'Background dispatch started. A BACKGROUND TASK RESULT arrives in the next turn; then call merge_results with this graphId to merge every available node result, or dispatch_agents with resumeGraphId to extend the graph.',
-                };
-            }
-
-            const result = await orchestrator.execute(graph, options);
-            await this.finalizeOrchestration(result, graph, {
-                domain: runtimeDomain,
-                topicId: runnerOpts?.topicId,
-                runId: validationRunId,
-                hasWriteTasks,
-                blackboard: orchestrator.getBlackboard().snapshot(),
-                delegationDepth: delegationBudget.parentDepth,
-            }, context);
-
-            // Keep the parent Agent context compact while preserving enough detail for the final global walkthrough.
-            const agentSummaries: Array<{
-                id: string;
-                profileName?: string;
-                prompt?: string;
-                dependencies?: string[];
-                plannedFiles?: string[];
-                plannedEntities?: string[];
-                produces?: import('./orchestrator/types').TaskEntityContract[];
-                consumes?: import('./orchestrator/types').TaskEntityContract[];
-                success: boolean;
-                filesWritten: string[];
-                tokenUsed: number;
-                stepCount?: number;
-                outputSummary?: string;
-                verification?: string[];
-                unresolved?: string[];
-                error?: string;
-                needsClarification?: boolean;
-                clarification?: string;
-            }> = [];
-            const clarifications: Array<{ id: string; clarification: string; options?: string[] }> = [];
-            for (const [id, agentResult] of result.agentResults) {
-                if (agentResult.needsClarification && agentResult.clarification) {
-                    clarifications.push({
-                        id,
-                        clarification: agentResult.clarification.slice(0, 4000),
-                        options: agentResult.clarificationOptions,
-                    });
-                }
-                if (parentRunSink) {
-                    await parentRunSink.append(
-                        'subagent_end',
-                        {
-                            taskNodeId: id,
-                            success: agentResult.success,
-                            filesWritten: agentResult.writtenFiles,
-                            tokenUsage: agentResult.tokenUsage,
-                            stepCount: agentResult.stepCount,
-                            error: agentResult.error,
-                            needsClarification: agentResult.needsClarification,
-                            clarification: agentResult.clarification,
-                            handoff: agentResult.handoff,
-                        },
-                        { agentId: id, status: agentResult.success ? 'done' : 'failed' }
-                    ).catch(() => {});
-                    for (const filePath of agentResult.writtenFiles ?? []) {
-                        if (typeof filePath !== 'string' || !filePath) continue;
-                        await parentRunSink.append(
-                            'file_change',
-                            { filePath, source: 'subagent', taskNodeId: id },
-                            { agentId: id, status: agentResult.success ? 'done' : 'failed' }
-                        ).catch(() => {});
-                    }
-                }
-                const taskMeta = normalizedTasks.find(task => task.id === id);
-                agentSummaries.push({
-                    id,
-                    profileName: taskMeta?.profileName,
-                    prompt: taskMeta?.prompt,
-                    dependencies: taskMeta?.dependencies ?? [],
-                    plannedFiles: taskMeta?.plannedFiles ?? [],
-                    plannedEntities: taskMeta?.plannedEntities ?? [],
-                    produces: taskMeta?.produces ?? [],
-                    consumes: taskMeta?.consumes ?? [],
-                    success: agentResult.success,
-                    filesWritten: [...new Set([
-                        ...agentResult.writtenFiles,
-                        ...(agentResult.handoff?.changedFiles ?? []),
-                    ])].sort(),
-                    tokenUsed: agentResult.tokenUsage.total,
-                    stepCount: agentResult.stepCount,
-                    outputSummary: compactAgentOutputForReport(agentResult.handoff?.summary ?? agentResult.output),
-                    verification: agentResult.handoff?.verification,
-                    unresolved: agentResult.handoff?.unresolved,
-                    error: agentResult.error ? agentResult.error.slice(0, 1000) : undefined,
-                    needsClarification: agentResult.needsClarification,
-                    clarification: agentResult.clarification ? agentResult.clarification.slice(0, 2000) : undefined,
-                });
-            }
-
-            const doneCount = [...graph.nodes.values()].filter(node => node.status === 'done').length;
-            return {
-                success: result.success,
-                summary: result.summary,
-                totalTokens: result.totalTokenUsage.total,
-                estimatedCostCny: result.totalTokenUsage.estimatedCostCny,
-                agents: agentSummaries,
-                failedNodes: result.failedNodes,
-                cancelledNodes: result.cancelledNodes,
-                clarifications,
-                graphId: graph.id,
-                resumeGraphId: resumeGraphId || undefined,
-                completedNodes: doneCount,
-                delegationDepth: delegationBudget.parentDepth,
-                contextPreservingResumes: contextPreservingResumes || undefined,
-                indexRevision: schedulingState.authorization !== 'workspace_write' && this.indexService
-                    ? `${this.indexService.workspaceSymbolUpdatedAt ?? 'unbuilt'}:${this.indexService.workspaceSymbolCount}:${this.indexService.workspaceSymbolStatus}`
-                    : undefined,
-                hint: clarifications.length > 0
-                    ? 'One or more sub-agents escalated a decision to the parent agent. First answer from the user request, approved plan, repository evidence, and shared context. If the answer is still genuinely ambiguous, call ask_user_question as the only tool call; after the user answers, resume with dispatch_agents(answerClarifications=[...], resumeGraphId=...). An answered node resumes from its preserved context instead of re-running its investigation.'
-                    : resumeGraphId
-                        ? `Wave complete. The graph '${graph.id}' is persisted and resumable: call dispatch_agents(resumeGraphId='${graph.id}', appendTasks=[...]) to extend it, or merge_results to consolidate node outputs.`
-                        : 'To view the detailed output of each sub-agent, use the merge_results tool.',
-            };
-        } catch (e) {
-            const errMsg = e instanceof Error ? e.message : String(e);
-            if (persistedGraph) {
-                void saveOrchestration({
-                    workspaceRoot: this.workspaceRoot,
-                    topicId: runnerOptsForLimits?.topicId,
-                    runId: undefined,
-                    domain: runtimeDomain,
-                    delegationDepth: delegationBudget.parentDepth,
-                    graph: persistedGraph,
-                    agentResults: new Map(),
-                    blackboard: { entries: [], timestamp: Date.now() },
-                    summary: `Coordinator execution failed: ${errMsg}`,
-                    totalTokenUsage: { total: 0, input: 0, output: 0, estimatedCostCny: 0 },
-                }).catch(() => false);
-            }
-            return { success: false, error: `Coordinator execution failed: ${errMsg}` };
-        } finally {
-            globalSignal?.removeEventListener('abort', onGlobalAbort);
-            this._activeDispatchAbortControllers.delete(localAbort);
-        }
-    }
-
-    /**
-     * Shared post-execution settlement for foreground and background waves:
-     * token accounting, run validation state, and the durable orchestration record.
-     */
-    private async finalizeOrchestration(
-        result: import('./orchestrator/types').OrchestratorResult,
-        graph: import('./orchestrator/types').TaskGraph,
-        meta: {
-            domain: import('./types').AgentRuntimeDomain;
-            topicId?: string;
-            runId?: string;
-            hasWriteTasks: boolean;
-            blackboard: import('./orchestrator/types').SerializedBlackboard;
-            /** Monotone delegation depth of this coordinator, persisted as a resume floor. */
-            delegationDepth?: number;
-        },
-        context?: import('./types').AgentToolContext,
-    ): Promise<void> {
-        mergeTokenUsageTotals(context?.tokenAccumulator, result.totalTokenUsage);
-
-        if (meta.runId && (meta.hasWriteTasks || result.qualityGate !== undefined)) {
-            this._orchestratorValidationByRun.set(meta.runId, {
-                // A later quality-gated repair wave supersedes an earlier failed write wave.
-                // Read-only fanout waves do not overwrite this validation state.
-                success: result.success,
-                summary: result.summary,
-                pendingOnly: !!result.qualityGate
-                    && (result.qualityGate.validationPending ?? 0) > 0
-                    && result.qualityGate.operationalFailure !== true
-                    && result.qualityGate.diagnosticErrors === 0
-                    && (result.qualityGate.evidenceConflicts ?? 0) === 0
-                    && result.qualityGate.semanticIssues === 0
-                    && result.qualityGate.logicIssues === 0
-                    && result.qualityGate.acceptanceFailures.length === 0,
-            });
-            while (this._orchestratorValidationByRun.size > 100) {
-                const oldest = this._orchestratorValidationByRun.keys().next().value as string | undefined;
-                if (!oldest) break;
-                this._orchestratorValidationByRun.delete(oldest);
-            }
-        }
-
-        const saved = await saveOrchestration({
-            workspaceRoot: this.workspaceRoot,
-            topicId: meta.topicId,
-            runId: meta.runId,
-            domain: meta.domain,
-            delegationDepth: meta.delegationDepth,
-            graph,
-            agentResults: result.agentResults,
-            blackboard: meta.blackboard,
-            summary: result.summary,
-            totalTokenUsage: result.totalTokenUsage,
-            qualityGate: result.qualityGate,
-        }).catch(() => false);
-        if (!saved) {
-            throw new Error(`Failed to persist orchestration '${graph.id}'.`);
-        }
-    }
-
-    // ─── Agent Teams ────────────────────────────────────────────────────────
-
-    /**
-     * Peer-team mode of dispatch_agents: validate the roster against the same
-     * profile/depth/containment gates as a DAG wave, then run the team in the
-     * background. Members collaborate through the team mailbox and the CAS task
-     * board until the team settles; the lead receives the settle summary plus a
-     * shared quality-gate verdict through the standard background-task channel.
-     */
-    private async executeDispatchTeam(args: Record<string, unknown>, context?: import('./types').AgentToolContext): Promise<unknown> {
-        const runnerOpts = context?.runnerOptions;
-        if (!runnerOpts?.schedulingState) {
-            return { success: false, error: 'Peer-team dispatch requires an active scheduler context.' };
-        }
-        const schedulingState = runnerOpts.schedulingState;
-        const runtimeDomain = schedulingState.domainProfile;
-        const originalUserMessage = runnerOpts.originalUserMessage;
-        const userExecutionPolicy = deriveUserExecutionPolicy(originalUserMessage, undefined);
-
-        const delegationBudget = evaluateDelegationBudget({
-            parentDepth: runnerOpts.delegationDepth,
-            persistedFloor: undefined,
-            maxDepth: vs.workspace
-                .getConfiguration('stellarisLanguageServices.ai.orchestrator')
-                .get<number>('maxDelegationDepth'),
-        });
-        if (!delegationBudget.allowed) {
-            return {
-                success: false,
-                error: delegationBudget.reason,
-                delegationDepth: delegationBudget.parentDepth,
-                maxDelegationDepth: delegationBudget.maxDepth,
-            };
-        }
-
-        const objective = typeof args.objective === 'string' ? args.objective.trim() : '';
-        if (!objective) {
-            return { success: false, error: 'Peer-team dispatch requires a non-empty objective.' };
-        }
-        const teamName = typeof args.teamName === 'string' && args.teamName.trim() ? args.teamName.trim().slice(0, 80) : undefined;
-
-        const rawMembers = Array.isArray(args.members) ? args.members : [];
-        if (rawMembers.length < TEAM_MIN_MEMBERS || rawMembers.length > TEAM_MAX_MEMBERS) {
-            return { success: false, error: 'Peer-team dispatch requires between ' + TEAM_MIN_MEMBERS + ' and ' + TEAM_MAX_MEMBERS + ' members; received ' + rawMembers.length + '.' };
-        }
-
-        const runtimeProfile = schedulingState.profileName
-            ? agentProfileCatalog.get(schedulingState.profileName)
-            : undefined;
-        if (!runtimeProfile) {
-            return { success: false, error: "Peer-team dispatch requires a known scheduler profile; received '" + schedulingState.profileName + "'." };
-        }
-        const allowedProfileNames = new Set(runtimeProfile.subagents ?? []);
-        if (schedulingState.authorization !== 'workspace_write') {
-            for (const profileName of [...allowedProfileNames]) {
-                if (agentProfileCatalog.get(profileName)?.authorizationCeiling === 'workspace_write') {
-                    allowedProfileNames.delete(profileName);
-                }
-            }
-        }
-
-        const seenNames = new Set<string>();
-        const members: TeamMemberSpec[] = [];
-        for (const raw of rawMembers) {
-            const member = raw as Record<string, unknown>;
-            const name = typeof member?.name === 'string' ? member.name.trim() : '';
-            if (!TEAM_MEMBER_NAME_PATTERN.test(name)) {
-                return { success: false, error: "Member name '" + name + "' must match " + TEAM_MEMBER_NAME_PATTERN.source + '.' };
-            }
-            if (name === TEAM_LEAD || seenNames.has(name)) {
-                return { success: false, error: "Member name '" + name + "' is reserved or duplicated." };
-            }
-            seenNames.add(name);
-            const profileName = typeof member.profileName === 'string' ? member.profileName.trim() : '';
-            if (!allowedProfileNames.has(profileName) || !agentProfileCatalog.get(profileName)) {
-                return {
-                    success: false,
-                    error: "Member '" + name + "' uses profile '" + profileName + "', which is not allowed by scheduler profile '" + runtimeProfile.name + "'. Allowed profiles: " + [...allowedProfileNames].join(', ') + '.',
-                };
-            }
-            const brief = typeof member.brief === 'string' ? member.brief.trim() : '';
-            if (!brief) {
-                return { success: false, error: "Member '" + name + "' requires a non-empty brief." };
-            }
-            if (brief.length > TEAM_MAX_BRIEF_CHARS) {
-                return { success: false, error: "Member '" + name + "' brief exceeds " + TEAM_MAX_BRIEF_CHARS + " characters." };
-            }
-            const plannedFiles = Array.isArray(member.plannedFiles)
-                ? member.plannedFiles.filter((file): file is string => typeof file === 'string' && file.trim().length > 0)
-                : [];
-            if (plannedFiles.length > 0) {
-                const { clampWriteScopeToRoots } = require('./runner/policyEngine') as typeof import('./runner/policyEngine');
-                const { rejected } = clampWriteScopeToRoots(plannedFiles, [this.workspaceRoot], this.workspaceRoot);
-                if (rejected.length > 0) {
-                    return { success: false, error: "Member '" + name + "' plans writes outside the workspace sandbox: " + rejected.join(', ') + '.' };
-                }
-            }
-            const writeScopes: string[] = [];
-            if (Array.isArray(member.writeScopes)) {
-                for (const rawScope of member.writeScopes) {
-                    const scope = normalizeTeamWriteScope(rawScope);
-                    if (!scope) {
-                        return { success: false, error: "Member '" + name + "' has an invalid write scope '" + String(rawScope) + "': use workspace-relative prefixes without drive letters, leading slashes, or '..'." };
-                    }
-                    writeScopes.push(scope);
-                }
-            }
-            members.push({ name, profileName, brief, plannedFiles, writeScopes });
-        }
-
-        // Mirror dispatch_agents localisation ownership rules.
-        if (userExecutionPolicy.localisationOwnership === 'user') {
-            const localisationMember = members.find(member =>
-                member.profileName === 'localization-writer'
-                || member.plannedFiles?.some(isLocalisationYmlPath));
-            if (localisationMember) {
-                return {
-                    success: false,
-                    error: aiText(
-                        'Team member "' + localisationMember.name + '" conflicts with the user retained ownership of localisation. Remove localisation writes from the team and dispatch only the work the user delegated.',
-                        '团队成员“' + localisationMember.name + '”与用户保留的本地化所有权冲突。请从团队中移除本地化写入，只调度用户已经委派的工作。',
-                    ),
-                };
-            }
-        }
-        const localisationProfileMismatch = members.find(member =>
-            (member.plannedFiles ?? []).some(isLocalisationYmlPath) && member.profileName !== 'localization-writer');
-        if (localisationProfileMismatch) {
-            return {
-                success: false,
-                error: "Member '" + localisationProfileMismatch.name + "' targets localisation YML but uses profile '" + localisationProfileMismatch.profileName + "'. Use profileName='localization-writer'.",
-            };
-        }
-
-        // ─── Runtime dispatch admission ───
-        // Same gate as dispatch_agents, scored over the member roster: a team is
-        // still a delegation, and a single-member or duplicate-objective roster
-        // must be rejected here instead of becoming an expensive no-op.
-        const featureManifest = args.featureManifest as import('./types').FeatureManifest | undefined;
-        const isScriptMode = runtimeDomain === 'paradox'
-            && schedulingState.authorization === 'workspace_write'
-            && schedulingState.dispatch !== 'single';
-        const hasWriteMembers = members.some(member =>
-            agentProfileCatalog.getRequired(member.profileName).authorizationCeiling === 'workspace_write'
-            || (member.plannedFiles?.length ?? 0) > 0);
-        const dispatchAdmission = evaluateDispatchAdmission(
-            members.map(member => ({
-                id: member.name,
-                objective: member.brief,
-                expectedWrites: member.plannedFiles,
-                profileName: member.profileName,
-            })),
-            {
-                explicitDelegation: schedulingState.dispatch === 'parallel'
-                    || schedulingState.dispatch === 'specialist',
-                availableTokenBudget: runnerOpts.tokenBudget,
-            },
-        );
-        if (!dispatchAdmission.accepted) {
-            runnerOpts.runEventSink?.appendSoon('dispatch_evaluated', {
-                accepted: false,
-                score: dispatchAdmission.score,
-                reason: dispatchAdmission.reason,
-                taskCount: members.length,
-                conflicts: dispatchAdmission.conflicts,
-                mode: 'team',
-            }, { status: 'failed' });
-            return {
-                success: false,
-                error: 'Runtime dispatch admission rejected this team: ' + dispatchAdmission.reason,
-                dispatchAdmission,
-            };
-        }
-        runnerOpts.runEventSink?.appendSoon('dispatch_evaluated', {
-            accepted: true,
-            state: schedulingState,
-            score: dispatchAdmission.score,
-            reason: dispatchAdmission.reason,
-            taskCount: members.length,
-            conflicts: dispatchAdmission.conflicts,
-            mode: 'team',
-        }, { status: 'done' });
-
-        // ─── Paradox write contract ───
-        // A peer team whose members write must declare the same machine-checkable
-        // feature contract as a DAG write wave: an objective with acceptance
-        // criteria plus per-member produces/consumes entity contracts. Peer briefs
-        // are free text, so the contract is the only machine-readable anchor the
-        // settlement quality gate can validate against.
-        const memberContracts = Array.isArray(args.memberContracts) ? args.memberContracts : [];
-        const contractByMember = new Map<string, { produces: unknown[]; consumes: unknown[] }>();
-        for (const raw of memberContracts) {
-            const entry = raw as Record<string, unknown>;
-            const memberName = typeof entry?.member === 'string' ? entry.member.trim() : '';
-            if (!memberName || !seenNames.has(memberName)) {
-                return { success: false, error: "memberContracts entry references unknown member '" + memberName + "'." };
-            }
-            if (contractByMember.has(memberName)) {
-                return { success: false, error: "memberContracts lists member '" + memberName + "' more than once." };
-            }
-            contractByMember.set(memberName, {
-                produces: Array.isArray(entry.produces) ? entry.produces : [],
-                consumes: Array.isArray(entry.consumes) ? entry.consumes : [],
-            });
-        }
-        if (isScriptMode && hasWriteMembers) {
-            if (!featureManifest?.objective || (featureManifest.acceptanceCriteria?.length ?? 0) === 0) {
-                return {
-                    success: false,
-                    error: aiText(
-                        'Paradox Multi-Agent write teams require featureManifest with an objective and at least one acceptance criterion. Declare the required entities and edges before dispatching writers.',
-                        'Paradox 多 Agent 写入团队必须提供 featureManifest，其中包含目标和至少一条验收条件。请先声明所需实体与关联边。',
-                    ),
-                };
-            }
-            for (const member of members) {
-                const isWriter = agentProfileCatalog.getRequired(member.profileName).authorizationCeiling === 'workspace_write'
-                    || (member.plannedFiles?.length ?? 0) > 0;
-                if (!isWriter) continue;
-                const contract = contractByMember.get(member.name);
-                const produces = (contract?.produces ?? []).filter(entry => !!entry && typeof entry === 'object');
-                const consumes = (contract?.consumes ?? []).filter(entry => !!entry && typeof entry === 'object');
-                if (produces.length === 0 && consumes.length === 0) {
-                    return {
-                        success: false,
-                        error: aiText(
-                            "Paradox Multi-Agent writer '" + member.name + "' must declare produces and/or consumes entity contracts through memberContracts.",
-                            "Paradox 多 Agent 写入成员“" + member.name + "”必须通过 memberContracts 声明 produces 和/或 consumes 实体契约。",
-                        ),
-                    };
-                }
-                if (member.profileName === 'localization-writer'
-                    && produces.some(entry => (entry as { kind?: unknown }).kind === 'localisation')
-                    && !consumes.some(entry => (entry as { kind?: unknown }).kind !== 'localisation')) {
-                    return {
-                        success: false,
-                        error: aiText(
-                            "Localisation member '" + member.name + "' must consume its owning event/object entity so ordering and orphan checks can be enforced.",
-                            "本地化成员“" + member.name + "”必须通过 consumes 声明其所属事件或对象，系统才能强制依赖顺序并检查孤立本地化。",
-                        ),
-                    };
-                }
-            }
-        }
-
-        if (!this.parentAgentRunner) {
-            return { success: false, error: 'Orchestrator is not ready: missing AgentRunner instance. Run in a coordinator-capable mode.' };
-        }
-
-        const teamId = 'team-' + Date.now().toString(36) + '-' + nodeCrypto.randomBytes(3).toString('hex');
-        const parentRunSink = context?.runEventSink ?? runnerOpts.runEventSink;
-        const parentRunPromise = context?.agentRunner?.getActiveRunRecordPromise?.()
-            ?? this.parentAgentRunner.getActiveRunRecordPromise?.();
-        const parentRun = runnerOpts.runRecord
-            ?? await parentRunPromise?.catch(() => undefined);
-        const parentRunId = parentRun?.runId ?? parentRunSink?.runId;
-
-        const { Orchestrator } = await import('./orchestrator/orchestrator');
-        const orchestrator = new Orchestrator(this.parentAgentRunner, {});
-
-        const runtimeRef: { current?: TeamRuntime } = {};
-        const launcher: TeamMemberLauncher = async (activation) => {
-            const taskNode: import('./orchestrator/types').TaskNode = {
-                id: activation.member.name,
-                profileName: activation.member.profileName,
-                prompt: activation.prompt,
-                plannedFiles: activation.member.plannedFiles,
-                dependencies: [],
-                priority: 'normal',
-                status: 'pending',
-                retryCount: 0,
-                maxRetries: 0,
-            };
-            const memberOptions: import('./orchestrator/types').OrchestratorOptions = {
-                schedulingState,
-                providerId: runnerOpts.providerId,
-                model: runnerOpts.model,
-                reasoningEffort: runnerOpts.reasoningEffort,
-                agentModelOverrides: getAgentModelOverrides(vs.workspace.getConfiguration('stellarisLanguageServices.ai')
-                    .get<Record<string, { provider: string; model: string }>>('orchestrator.agentModels')),
-                abortSignal: activation.signal,
-                topicId: runnerOpts.topicId,
-                parentRunId,
-                delegationDepth: delegationBudget.parentDepth,
-                durableGoal: runnerOpts.durableGoal,
-                originalUserMessage,
-                userExecutionPolicy,
-                runEventSink: parentRunSink,
-                onStep: parentRunSink
-                    ? (step) => {
-                        parentRunSink.appendSoon('step_appended', {
-                            step: {
-                                type: step.type,
-                                content: step.content,
-                                timestamp: step.timestamp,
-                                agentId: step.agentId,
-                                source: 'team',
-                            },
-                        });
-                    }
-                    : undefined,
-                onBeforeFileWrite: context?.onBeforeFileWrite ?? runnerOpts.onBeforeFileWrite,
-                onTodoUpdate: context?.onTodoUpdate ?? runnerOpts.onTodoUpdate,
-                onPermissionRequest: context?.onPermissionRequest ?? runnerOpts.onPermissionRequest,
-                team: {
-                    teamId,
-                    onMemberRunStarted: (memberName, runId) => runtimeRef.current?.markMemberRunStarted(memberName, runId),
-                },
-            };
-            const result = await orchestrator.runTeamMember(taskNode, memberOptions, activation.resumeMessages);
-            return {
-                success: result.success,
-                output: result.output,
-                error: result.error,
-                runId: result.runId,
-                tokenUsage: result.tokenUsage,
-                needsClarification: result.needsClarification,
-                clarification: result.clarification,
-                writtenFiles: result.writtenFiles,
-                handoff: result.handoff,
-            };
-        };
-
-        const emitTeamEvent = (event: TeamRuntimeEvent) => {
-            const content = event.kind === 'team_message'
-                ? TEAM_MSG.MESSAGE(event.from, event.to, event.delivery)
-                : event.kind === 'team_member_started'
-                    ? TEAM_MSG.MEMBER_STARTED(event.member, event.profileName, event.reason)
-                    : event.kind === 'team_member_idle'
-                        ? TEAM_MSG.MEMBER_IDLE(event.member, event.success)
-                        : TEAM_MSG.SETTLING(event.reason);
-            parentRunSink?.appendSoon('step_appended', {
-                step: { type: 'orchestrator_progress', content, timestamp: Date.now() },
-            });
-        };
-
-        const maxConcurrency = Math.max(1, Math.min(4, typeof args.maxConcurrency === 'number' ? Math.floor(args.maxConcurrency) : 3));
-        const runtime = new TeamRuntime({
-            teamId,
-            teamName,
-            objective,
-            topicId: runnerOpts.topicId,
-            domain: runtimeDomain,
-            members,
-            maxConcurrency,
-            leadRunId: parentRunId,
-            launcher,
-            steer: (runId, message) => activeTurnRegistry.steer(runId, message, undefined, undefined, 'team_message'),
-            readResumeTranscript: (runId) => runLedger.readResumeTranscript(runId, runnerOpts.topicId),
-            onEvent: emitTeamEvent,
-        });
-        runtimeRef.current = runtime;
-        teamRegistry.register(runtime);
-
-        let teamTask: import('./runner/taskManager').AgentTaskRecord | undefined;
-        if (runnerOpts.topicId && parentRunId) {
-            try {
-                agentTaskManager.configure(runnerOpts.topicId);
-                teamTask = await agentTaskManager.create({
-                    kind: 'subagent',
-                    agentId: 'team:' + teamId,
-                    topicId: runnerOpts.topicId,
-                    runId: parentRunId,
-                    threadId: runnerOpts.topicId,
-                });
-            } catch {
-                teamTask = undefined;
-            }
-        }
-
-        const globalSignal = runnerOpts.abortSignal;
-        backgroundOrchestrators.start({
-            graphId: teamId,
-            topicId: runnerOpts.topicId,
-            runId: parentRunId,
-            parentAbortSignal: globalSignal,
-            run: async (bgAbortSignal) => {
-                try {
-                    const summary = await runtime.run(bgAbortSignal);
-                    let summaryText = this.formatTeamSettleSummary(summary);
-
-                    // ─── Shared quality gate ───
-                    // A team whose members wrote files settles through the same
-                    // reviewer/admission/auto-fix path as a DAG write wave. Without
-                    // this the peer mode would be the one multi-agent entry that can
-                    // land unreviewed writes.
-                    const project = this.projectTeamOutcome(summary);
-                    let settlementGraph: import('./orchestrator/types').TaskGraph | undefined;
-                    let settlementQualityGate: import('./orchestrator/types').QualityGateResult | undefined;
-                    if (project.hasWriteMembers && project.writtenFiles.length > 0) {
-                        const taskGraph = TaskGraphEngine.createGraph(objective, featureManifest);
-                        for (const member of members) {
-                            const contract = contractByMember.get(member.name);
-                            TaskGraphEngine.addNode(
-                                taskGraph,
-                                member.name,
-                                member.profileName,
-                                member.brief,
-                                {
-                                    plannedFiles: member.plannedFiles,
-                                    produces: isScriptMode ? (contract?.produces as never) : undefined,
-                                    consumes: isScriptMode ? (contract?.consumes as never) : undefined,
-                                },
-                            );
-                        }
-                        TaskGraphEngine.linkEntityDependencies(taskGraph);
-                        settlementGraph = taskGraph;
-                        const outcome: import('./orchestrator/types').OrchestratorResult = {
-                            success: true,
-                            summary: summaryText,
-                            agentResults: project.agentResults,
-                            totalTokenUsage: summary.totalTokenUsage,
-                            failedNodes: project.failedMembers,
-                            cancelledNodes: [],
-                        };
-                        const gateOptions: import('./orchestrator/types').OrchestratorOptions = {
-                            schedulingState,
-                            topicId: runnerOpts.topicId,
-                            parentRunId,
-                            runEventSink: parentRunSink,
-                            originalUserMessage,
-                            userExecutionPolicy,
-                        };
-                        try {
-                            await orchestrator.runQualityGatePhase(
-                                taskGraph,
-                                outcome,
-                                gateOptions,
-                                (step) => parentRunSink?.appendSoon('step_appended', {
-                                    step: {
-                                        type: step.type,
-                                        content: step.content,
-                                        timestamp: step.timestamp,
-                                        agentId: step.agentId,
-                                        source: 'team',
-                                    },
-                                }),
-                            );
-                        } catch (error) {
-                            ErrorReporter.debug(
-                                'AgentTeams',
-                                'Team settlement quality gate failed: '
-                                    + (error instanceof Error ? error.message : String(error)),
-                            );
-                        }
-                        settlementQualityGate = outcome.qualityGate;
-                        if (settlementQualityGate && !settlementQualityGate.passed) {
-                            outcome.success = false;
-                            summaryText += aiText(
-                                '\n- Settlement quality gate: failed (' + settlementQualityGate.diagnosticErrors
-                                    + ' diagnostics, ' + settlementQualityGate.semanticIssues + ' semantic issues, '
-                                    + settlementQualityGate.logicIssues + ' review issues)',
-                                '\n- 结算质量门：未通过（' + settlementQualityGate.diagnosticErrors + ' 个诊断、'
-                                    + settlementQualityGate.semanticIssues + ' 个语义问题、'
-                                    + settlementQualityGate.logicIssues + ' 个审查问题）',
-                            );
-                        } else if (settlementQualityGate) {
-                            outcome.success = true;
-                        }
-                    }
-
-                    const persisted = await this.persistTeamOutcome(runtime, summary, {
-                        domain: runtimeDomain,
-                        topicId: runnerOpts.topicId,
-                        runId: parentRunId,
-                        delegationDepth: delegationBudget.parentDepth,
-                        objective,
-                        featureManifest,
-                        graph: settlementGraph,
-                        agentResults: project.agentResults,
-                        writtenFiles: project.writtenFiles,
-                        summaryText,
-                        qualityGate: settlementQualityGate,
-                        hasWriteMembers: project.hasWriteMembers,
-                    });
-                    if (teamTask) {
-                        await agentTaskManager.transition(
-                            teamTask.taskId,
-                            summary.settleReason === 'aborted' ? 'killed' : 'completed',
-                            summaryText,
-                            {
-                                stopReason: summary.settleReason === 'aborted' ? 'cancelled_by_parent' : 'team_settled_' + summary.settleReason,
-                                lastMessage: summaryText,
-                            },
-                        ).catch(() => {});
-                    }
-                    if (persisted) {
-                        parentRunSink?.appendSoon('step_appended', {
-                            step: {
-                                type: 'validation',
-                                content: aiText(
-                                    'Team outcome persisted as orchestration ' + teamId + ': merge_results(graphId="' + teamId + '") returns every member result.',
-                                    '团队结果已持久化为编排 ' + teamId + '：merge_results(graphId="' + teamId + '") 可取出全部成员结果。',
-                                ),
-                                timestamp: Date.now(),
-                            },
-                        });
-                    }
-                } finally {
-                    teamRegistry.remove(teamId);
-                }
-            },
-        });
-
-        parentRunSink?.appendSoon('step_appended', {
-            step: { type: 'thinking', content: TEAM_MSG.START(teamId, members.length), timestamp: Date.now() },
-        });
-
-        return {
-            success: true,
-            background: true,
-            teamId,
-            members: members.map(member => ({ name: member.name, profileName: member.profileName })),
-            hint: 'Team started in the background. Members collaborate through team_send_message and the shared board (team_task_*). You can steer any member with team_send_message, inspect with team_members / team_task_list, and close the team with team_close. The settle summary arrives as a BACKGROUND TASK RESULT.',
-        };
-    }
-
-    /** Resolve the team a team tool call belongs to, plus the caller identity. */
-    private resolveTeamCall(args: Record<string, unknown>, context?: import('./types').AgentToolContext):
-        { team: TeamRuntime; caller: string; isLead: boolean } | { error: string } {
-        const boundTeamId = context?.runnerOptions?.teamId;
-        const memberName = context?.runnerOptions?.teamMemberName;
-        const requested = typeof args.teamId === 'string' && args.teamId.trim() ? args.teamId.trim() : undefined;
-        if (boundTeamId && requested && requested !== boundTeamId) {
-            return { error: "Team members can only address their own team ('" + boundTeamId + "'), not '" + requested + "'." };
-        }
-        const team = teamRegistry.resolve({
-            teamId: requested ?? boundTeamId,
-            topicId: context?.runnerOptions?.topicId,
-        });
-        if (!team) {
-            return { error: requested
-                ? "Team '" + requested + "' is not active (it may have settled). Dispatch a new team for follow-up work."
-                : 'No active team found for this topic. Start one with dispatch_agents(members=[...]).' };
-        }
-        if (boundTeamId && memberName && team.teamId === boundTeamId) {
-            return { team, caller: memberName, isLead: false };
-        }
-        if (!boundTeamId) {
-            // Only top-level runs may act as the lead. Sub-agents without a
-            // team binding (e.g. the quality-gate reviewer) must not steer or
-            // close a team that happens to be active in the same topic.
-            if (context?.runnerOptions?.useSlimPrompt) {
-                return { error: 'Team tools are only available to team members and the dispatching lead.' };
-            }
-            const callerTopic = context?.runnerOptions?.topicId;
-            if (team.topicId && callerTopic && team.topicId !== callerTopic) {
-                return { error: "Team '" + team.teamId + "' belongs to a different topic." };
-            }
-            return { team, caller: TEAM_LEAD, isLead: true };
-        }
-        return { error: 'Team call context is incomplete: missing member identity.' };
-    }
-
-    private executeTeamSendMessage(args: Record<string, unknown>, context?: import('./types').AgentToolContext): unknown {
-        const resolved = this.resolveTeamCall(args, context);
-        if ('error' in resolved) return { success: false, error: resolved.error };
-        const target = typeof args.target === 'string' ? args.target.trim() : '';
-        if (!target) return { success: false, error: 'team_send_message requires a target member name or "lead".' };
-        const message = typeof args.message === 'string' ? args.message : '';
-        if (message.trim().length === 0) return { success: false, error: 'team_send_message requires a non-empty message.' };
-        if (message.length > TEAM_MAX_MESSAGE_CHARS) {
-            return { success: false, error: 'message exceeds ' + TEAM_MAX_MESSAGE_CHARS + ' characters.' };
-        }
-        const result = resolved.team.sendMessage(resolved.caller, target, message);
-        return result.success
-            ? { ...result, hint: result.delivery === 'steered' ? 'Delivered into the running teammate immediately.' : 'Queued; the teammate receives it on its next activation.' }
-            : result;
-    }
-
-    private executeTeamTaskCreate(args: Record<string, unknown>, context?: import('./types').AgentToolContext): unknown {
-        const resolved = this.resolveTeamCall(args, context);
-        if ('error' in resolved) return { success: false, error: resolved.error };
-        return resolved.team.board.create(resolved.caller, {
-            subject: typeof args.subject === 'string' ? args.subject : '',
-            description: typeof args.description === 'string' ? args.description : undefined,
-            blockedBy: Array.isArray(args.blockedBy) ? args.blockedBy : undefined,
-            writeScopes: Array.isArray(args.writeScopes) ? args.writeScopes : undefined,
-        });
-    }
-
-    private executeTeamTaskList(args: Record<string, unknown>, context?: import('./types').AgentToolContext): unknown {
-        const resolved = this.resolveTeamCall(args, context);
-        if ('error' in resolved) return { success: false, error: resolved.error };
-        const status = typeof args.status === 'string' ? args.status : undefined;
-        if (status && !['pending', 'in_progress', 'completed'].includes(status)) {
-            return { success: false, error: "status must be one of pending | in_progress | completed." };
-        }
-        const tasks = resolved.team.board.list({
-            status: status as 'pending' | 'in_progress' | 'completed' | undefined,
-            owner: typeof args.owner === 'string' ? args.owner : undefined,
-        });
-        return { success: true, teamId: resolved.team.teamId, tasks };
-    }
-
-    private executeTeamTaskUpdate(args: Record<string, unknown>, context?: import('./types').AgentToolContext): unknown {
-        const resolved = this.resolveTeamCall(args, context);
-        if ('error' in resolved) return { success: false, error: resolved.error };
-        const taskId = typeof args.taskId === 'string' ? args.taskId.trim() : '';
-        const action = typeof args.action === 'string' ? args.action : '';
-        if (!['claim', 'release', 'complete', 'edit'].includes(action)) {
-            return { success: false, error: "action must be one of claim | release | complete | edit." };
-        }
-        const expectedRevision = typeof args.expectedRevision === 'number' ? args.expectedRevision : NaN;
-        return resolved.team.board.update(
-            resolved.caller,
-            resolved.isLead,
-            taskId,
-            expectedRevision,
-            action as 'claim' | 'release' | 'complete' | 'edit',
-            {
-                subject: typeof args.subject === 'string' ? args.subject : undefined,
-                description: typeof args.description === 'string' ? args.description : undefined,
-                blockedBy: Array.isArray(args.blockedBy) ? args.blockedBy : undefined,
-                writeScopes: Array.isArray(args.writeScopes) ? args.writeScopes : undefined,
-            },
-        );
-    }
-
-    private executeTeamMembers(args: Record<string, unknown>, context?: import('./types').AgentToolContext): unknown {
-        const resolved = this.resolveTeamCall(args, context);
-        if ('error' in resolved) return { success: false, error: resolved.error };
-        return {
-            success: true,
-            teamId: resolved.team.teamId,
-            teamName: resolved.team.teamName,
-            objective: resolved.team.objective,
-            closing: resolved.team.isClosing(),
-            members: resolved.team.roster(),
-        };
-    }
-
-    private executeTeamClose(args: Record<string, unknown>, context?: import('./types').AgentToolContext): unknown {
-        const resolved = this.resolveTeamCall(args, context);
-        if ('error' in resolved) return { success: false, error: resolved.error };
-        if (!resolved.isLead) {
-            return { success: false, error: 'Only the lead can close a team. Members can report completion with team_send_message to "lead".' };
-        }
-        resolved.team.requestClose('closed', typeof args.reason === 'string' ? args.reason : undefined);
-        return {
-            success: true,
-            teamId: resolved.team.teamId,
-            hint: 'Team is closing: running members finish their current activation, then the settle summary arrives as a BACKGROUND TASK RESULT.',
-        };
-    }
-
-    /** Compact model-facing summary of a settled team (background task record). */
-    private formatTeamSettleSummary(summary: TeamSummary): string {
-        const lines = [
-            'Team ' + summary.teamId + (summary.teamName ? ' "' + summary.teamName + '"' : '') + ' settled (' + summary.settleReason + ').',
-            'Objective: ' + summary.objective,
-            'Members: ' + summary.members.map(member => member.name + ' (' + member.activations + ' activation(s))').join(', '),
-            'Board: ' + summary.tasks.completed + '/' + summary.tasks.total + ' task(s) completed.',
-        ];
-        if (summary.tasks.open.length > 0) {
-            lines.push('Open tasks: ' + summary.tasks.open.map(task => task.id + ' "' + task.subject + '" (' + task.status + (task.owner ? ', owner ' + task.owner : '') + ')').join('; '));
-        }
-        for (const member of summary.members) {
-            if (member.lastError) {
-                lines.push('[' + member.name + '] ended with error: ' + member.lastError.slice(0, 300));
-            } else if (member.lastOutput) {
-                lines.push('[' + member.name + '] ' + member.lastOutput.slice(0, 400));
-            }
-        }
-        if (summary.undeliveredMessages.length > 0) {
-            lines.push('Undelivered messages:');
-            for (const message of summary.undeliveredMessages) {
-                lines.push('- ' + message.from + ' → ' + message.to + ': ' + message.preview);
-            }
-        }
-        return lines.join('\n');
-    }
-
-    /**
-     * Project one settled team into the shared orchestration vocabulary: one
-     * agent result per member, so merge_results, the catalog, and the quality
-     * gate treat a team and a DAG wave identically.
-     */
-    private projectTeamOutcome(summary: TeamSummary): {
-        agentResults: Map<string, import('./orchestrator/types').SubAgentResult>;
-        writtenFiles: string[];
-        failedMembers: string[];
-        hasWriteMembers: boolean;
-    } {
-        const agentResults = new Map<string, import('./orchestrator/types').SubAgentResult>();
-        const writtenFiles = new Set<string>();
-        const failedMembers: string[] = [];
-        let hasWriteMembers = false;
-        for (const member of summary.members) {
-            if (agentProfileCatalog.get(member.profileName)?.authorizationCeiling === 'workspace_write'
-                || member.writtenFiles.length > 0) {
-                hasWriteMembers = true;
-            }
-            for (const file of member.writtenFiles) writtenFiles.add(file);
-            if (member.lastError) failedMembers.push(member.name);
-            agentResults.set(member.name, {
-                nodeId: member.name,
-                success: !member.lastError,
-                output: member.lastOutput ?? member.lastError ?? '',
-                error: member.lastError,
-                tokenUsage: { ...member.tokenUsage },
-                writtenFiles: [...member.writtenFiles],
-                stepCount: member.activations,
-                handoff: member.lastHandoff,
-                preservedAfterFailure: !!member.lastError && member.writtenFiles.length > 0,
-            });
-        }
-        return {
-            agentResults,
-            writtenFiles: [...writtenFiles].sort(),
-            failedMembers,
-            hasWriteMembers,
-        };
-    }
-
-    /**
-     * Persist a settled team as a regular orchestration record plus its team
-     * audit payload, so both multi-agent modes share one durable store, one
-     * listing surface, and one merge path.
-     */
-    private async persistTeamOutcome(
-        runtime: TeamRuntime,
-        summary: TeamSummary,
-        input: {
-            domain: import('./types').AgentRuntimeDomain;
-            topicId?: string;
-            runId?: string;
-            delegationDepth: number;
-            objective: string;
-            featureManifest?: import('./types').FeatureManifest;
-            graph?: import('./orchestrator/types').TaskGraph;
-            agentResults: Map<string, import('./orchestrator/types').SubAgentResult>;
-            writtenFiles: string[];
-            summaryText: string;
-            qualityGate?: import('./orchestrator/types').QualityGateResult;
-            hasWriteMembers: boolean;
-        },
-    ): Promise<boolean> {
-        if (!input.topicId) return false;
-        try {
-            const graph = input.graph ?? TaskGraphEngine.createGraph(input.objective, input.featureManifest);
-            if (!input.graph) {
-                // Read-only team: still record every member as a node so the
-                // catalog and merge_results can list the run.
-                for (const member of summary.members) {
-                    TaskGraphEngine.addNode(
-                        graph,
-                        member.name,
-                        member.profileName,
-                        'Team member ' + member.name + (runtime.teamName ? ' of team "' + runtime.teamName + '"' : '')
-                            + ' — objective: ' + input.objective,
-                        { plannedFiles: member.writtenFiles },
-                    );
-                    const node = graph.nodes.get(member.name);
-                    if (node) {
-                        node.status = member.lastError ? 'failed' : 'done';
-                        node.error = member.lastError;
-                        node.result = member.lastOutput;
-                        node.tokenUsage = member.tokenUsage;
-                        node.completedAt = summary.settledAt;
-                    }
-                }
-            }
-            if (input.qualityGate) {
-                for (const member of summary.members) {
-                    if (!member.lastHandoff) continue;
-                    const node = graph.nodes.get(member.name);
-                    if (node) node.status = node.status === 'failed' ? 'failed' : 'done';
-                }
-            }
-            const snapshot = runtime.snapshot();
-            snapshot.summary = summary;
-            const saved = await saveOrchestration({
-                workspaceRoot: this.workspaceRoot,
-                topicId: input.topicId,
-                runId: input.runId,
-                domain: input.domain,
-                delegationDepth: input.delegationDepth,
-                graph,
-                agentResults: input.agentResults,
-                blackboard: { entries: [], timestamp: Date.now() },
-                summary: input.summaryText,
-                totalTokenUsage: summary.totalTokenUsage,
-                qualityGate: input.qualityGate,
-                teamSnapshot: snapshot,
-            });
-            if (!saved) {
-                // Fall back to the legacy team-scoped file so an unavailable
-                // orchestration store never loses the audit trail entirely.
-                const topicDir = getPrivateTopicStorageDir(input.topicId, this.workspaceRoot);
-                const teamDir = path.join(topicDir, 'teams');
-                await fs.promises.mkdir(teamDir, { recursive: true });
-                await atomicWriteJson(path.join(teamDir, runtime.teamId + '.json'), snapshot);
-                return false;
-            }
-            return true;
-        } catch (error) {
-            ErrorReporter.debug('AgentTeams', 'Team outcome persistence failed: ' + (error instanceof Error ? error.message : String(error)));
-            return false;
-        }
-    }
-
-    /**
-     * Execute enter_plan_mode: narrow this turn to Plan before any project
-     * change. Planning is the safe direction — authorization only ever narrows
-     * here (workspace_write -> plan_write_only) — and the transition is applied
-     * to the shared runner scheduling state, so the per-call plan guard and the
-     * post-run durable state both observe it immediately.
-     */
     private executeEnterPlanMode(args: Record<string, unknown>, context?: import('./types').AgentToolContext): unknown {
         const runnerState = context?.runnerOptions?.schedulingState;
         if (!runnerState) {
@@ -5812,8 +3622,6 @@ export class AgentToolExecutor {
                 ),
             };
         }
-        // Narrowing only. transitionSchedulingState itself refuses to widen, so
-        // the explicit rank check documents the invariant at this boundary too.
         const next = transitionSchedulingState(runnerState, {
             phase: 'plan',
             authorization: 'plan_write_only',
@@ -5822,11 +3630,6 @@ export class AgentToolExecutor {
         if (AUTHORITY_RANK[next.authorization] > AUTHORITY_RANK[runnerState.authorization]) {
             return { success: false, error: 'enter_plan_mode cannot widen authorization.' };
         }
-        // execute() hands each call a COPY of runnerOptions whose schedulingState
-        // field points at the runner's live state object. Assigning to
-        // context.runnerOptions would only swap the reference inside that copy,
-        // so patch the live object in place: the per-call plan guard reads it and
-        // the runner keeps the same reference for its durable phase.
         Object.assign(runnerState, next);
         context?.runnerOptions?.runEventSink?.appendSoon('phase_changed', {
             previousPhase: runnerState.phase,
@@ -5846,13 +3649,6 @@ export class AgentToolExecutor {
         };
     }
 
-    /**
-     * Execute exit_plan_mode: leave Plan without an approved plan, for the case
-     * where investigation proved planning unnecessary. Widening back to
-     * workspace_write is deliberately NOT done here: the approval path
-     * (beginApprovedPlanExecution) owns that, so a model can never talk itself
-     * out of the approval gate it just entered.
-     */
     private executeExitPlanMode(args: Record<string, unknown>, context?: import('./types').AgentToolContext): unknown {
         const runnerState = context?.runnerOptions?.schedulingState;
         if (!runnerState) {
@@ -5868,15 +3664,10 @@ export class AgentToolExecutor {
                 ),
             };
         }
-        // Authorization stays exactly as-is (plan_write_only). The turn may keep
-        // investigating and report findings, but it cannot start writing project
-        // files: only an explicit user approval widens the authorization again.
         const next = transitionSchedulingState(runnerState, {
             phase: 'inspect',
             reason: 'agent left plan mode without an approved plan: ' + (reason || 'not needed'),
         });
-        // In place for the same reason as enter_plan_mode: the call context holds
-        // a per-call copy, but the state object inside it is the runner's own.
         Object.assign(runnerState, next);
         context?.runnerOptions?.runEventSink?.appendSoon('phase_changed', {
             previousPhase: runnerState.phase,
@@ -5895,224 +3686,380 @@ export class AgentToolExecutor {
         };
     }
 
-    /**
-     * Execute the cancel_dispatch tool: abort a running background graph.
-     * Partial state stays persisted, so the graph can be resumed later.
-     */
-    private executeCancelDispatch(args: Record<string, unknown>, context?: import('./types').AgentToolContext): unknown {
-        const graphId = typeof args.graphId === 'string' ? args.graphId.trim() : '';
-        if (!graphId) {
-            return { success: false, message: 'cancel_dispatch requires a graphId (returned by dispatch_agents).' };
+    private toWorkspaceRel(filePath: string | undefined): string | undefined {
+        if (!filePath) return undefined;
+        const resolved = path.resolve(filePath);
+        if (this.workspaceRoot && isPathInsideOrEqual(resolved, this.workspaceRoot)) {
+            return path.relative(this.workspaceRoot, resolved).replace(/\\/g, '/');
         }
-        if (!backgroundOrchestrators.hasActive(graphId)) {
+        return resolved.replace(/\\/g, '/');
+    }
+
+    private async executeGetIdeContext(args: Record<string, unknown>): Promise<unknown> {
+        const includeSelectionText = args.includeSelectionText !== false;
+        const includeActiveFileDiagnostics = args.includeActiveFileDiagnostics !== false;
+        const editor = vs.window.activeTextEditor;
+
+        let activeEditorInfo: Record<string, unknown> | null = null;
+        if (editor) {
+            const doc = editor.document;
+            const sel = editor.selection;
+            const selectedRaw = includeSelectionText && !sel.isEmpty ? doc.getText(sel) : '';
+            const selectedText = selectedRaw.length > 4000
+                ? `${selectedRaw.slice(0, 4000)}\n...[truncated, full ${selectedRaw.length} chars]`
+                : selectedRaw;
+            const diagnostics = includeActiveFileDiagnostics
+                ? (vs.languages.getDiagnostics(doc.uri) ?? []).slice(0, 100).map(d => ({
+                    line: d.range.start.line + 1,
+                    column: d.range.start.character + 1,
+                    severity: d.severity === vs.DiagnosticSeverity.Error ? 'error'
+                        : d.severity === vs.DiagnosticSeverity.Warning ? 'warning' : 'info',
+                    code: typeof d.code === 'object' && d.code !== null
+                        ? String((d.code as { value?: unknown }).value ?? '')
+                        : String(d.code ?? ''),
+                    message: d.message,
+                    source: d.source ?? 'cwtools',
+                }))
+                : undefined;
+
+            activeEditorInfo = {
+                file: this.toWorkspaceRel(doc.uri.fsPath),
+                absolutePath: doc.uri.fsPath,
+                languageId: doc.languageId,
+                lineCount: doc.lineCount,
+                isDirty: doc.isDirty,
+                cursor: {
+                    line: sel.active.line + 1,
+                    column: sel.active.character + 1,
+                },
+                selection: {
+                    isEmpty: sel.isEmpty,
+                    startLine: sel.start.line + 1,
+                    startColumn: sel.start.character + 1,
+                    endLine: sel.end.line + 1,
+                    endColumn: sel.end.character + 1,
+                    ...(includeSelectionText && !sel.isEmpty ? { text: selectedText } : {}),
+                },
+                ...(diagnostics ? { diagnostics, diagnosticCount: diagnostics.length } : {}),
+            };
+        }
+
+        const dirtyDocuments = (vs.workspace.textDocuments ?? [])
+            .filter(doc => doc.isDirty && !doc.isUntitled && doc.uri.scheme === 'file')
+            .slice(0, 50)
+            .map(doc => ({
+                file: this.toWorkspaceRel(doc.uri.fsPath),
+                languageId: doc.languageId,
+                lineCount: doc.lineCount,
+            }));
+
+        const visualPanels: Array<Record<string, unknown>> = [];
+        try {
+            const { GuiPanel } = await import('../guiPanel');
+            if (GuiPanel.currentPanel) {
+                const guiDoc = (GuiPanel.currentPanel as unknown as { _document?: vs.TextDocument })._document;
+                let guiSummary: Record<string, unknown> | undefined;
+                if (guiDoc) {
+                    const { parseGuiFile } = await import('../guiParser');
+                    const parsedElements = parseGuiFile(guiDoc.getText(), new Map());
+                    guiSummary = {
+                        elementCount: parsedElements.length,
+                        topLevelWindows: parsedElements.slice(0, 25).map(el => ({
+                            type: el.type,
+                            name: el.name,
+                            line: el.line,
+                            childCount: el.children.length,
+                        })),
+                    };
+                }
+                visualPanels.push({
+                    editor: 'gui',
+                    open: true,
+                    file: this.toWorkspaceRel(guiDoc?.uri.fsPath),
+                    ...(guiSummary ? { summary: guiSummary } : {}),
+                });
+            }
+        } catch { /* ignore when panel module is unavailable in headless unit tests */ }
+
+        try {
+            const { EntityPanel } = await import('../entityPanel');
+            if (EntityPanel.currentPanel) {
+                const entityDoc = (EntityPanel.currentPanel as unknown as { _document?: vs.TextDocument })._document;
+                visualPanels.push({
+                    editor: 'entity',
+                    open: true,
+                    file: this.toWorkspaceRel(entityDoc?.uri.fsPath),
+                });
+            }
+        } catch { /* ignore */ }
+
+        try {
+            const { ParticlePanel } = await import('../particlePanel');
+            if (ParticlePanel.currentPanel) {
+                const particleDoc = (ParticlePanel.currentPanel as unknown as { _document?: vs.TextDocument })._document;
+                visualPanels.push({
+                    editor: 'particle',
+                    open: true,
+                    file: this.toWorkspaceRel(particleDoc?.uri.fsPath),
+                });
+            }
+        } catch { /* ignore */ }
+
+        try {
+            const { SolarSystemPanel } = await import('../solarSystemPanel');
+            if (SolarSystemPanel.currentPanel) {
+                const solarDoc = (SolarSystemPanel.currentPanel as unknown as { _document?: vs.TextDocument })._document;
+                visualPanels.push({
+                    editor: 'solar_system',
+                    open: true,
+                    file: this.toWorkspaceRel(solarDoc?.uri.fsPath),
+                });
+            }
+        } catch { /* ignore */ }
+
+        try {
+            const { TechTreePanel } = await import('../techTreePanel');
+            if (TechTreePanel.currentPanel) {
+                const techDoc = (TechTreePanel.currentPanel as unknown as { _seedDocument?: vs.TextDocument })._seedDocument;
+                visualPanels.push({
+                    editor: 'tech_tree',
+                    open: true,
+                    seedFile: this.toWorkspaceRel(techDoc?.uri.fsPath),
+                });
+            }
+        } catch { /* ignore */ }
+
+        try {
+            const { EventChainPanel } = await import('../eventChainPanel');
+            if (EventChainPanel.currentPanel) {
+                visualPanels.push({
+                    editor: 'event_chain',
+                    open: true,
+                });
+            }
+        } catch { /* ignore */ }
+
+        try {
+            const { TargetWeightPanel } = await import('../targetWeightPanel');
+            if (TargetWeightPanel.currentPanel) {
+                visualPanels.push({
+                    editor: 'target_weight',
+                    open: true,
+                });
+            }
+        } catch { /* ignore */ }
+
+        return {
+            success: true,
+            workspaceRoot: this.workspaceRoot,
+            activeEditor: activeEditorInfo,
+            dirtyDocuments,
+            visualPanels,
+        };
+    }
+
+    private async executeOpenInVisualEditor(args: Record<string, unknown>): Promise<unknown> {
+        const rawFile = typeof args.file === 'string' ? args.file.trim() : '';
+        const requestedEditor = typeof args.editor === 'string' ? args.editor.trim() : 'auto';
+        const line = typeof args.line === 'number' && Number.isInteger(args.line) && args.line >= 1
+            ? args.line
+            : undefined;
+
+        const extensionPath = this.extensionPath;
+        if (!extensionPath) {
             return {
                 success: false,
-                message: `Graph '${graphId}' is not running in the background (it may have already completed). Call merge_results with that graphId to inspect all available node results.`,
+                error: 'Visual editor panels require an active VS Code Extension Host with extensionPath configured.',
             };
         }
-        backgroundOrchestrators.cancel(graphId);
-        return {
-            success: true,
-            cancelled: true,
-            graphId,
-            hint: 'Background graph cancelled. Its partial state stays persisted: resume it later with dispatch_agents(resumeGraphId=...) or call merge_results with that graphId to inspect all available node results.',
-        };
-    }
 
-    /** 
-* Execute the merge_results tool: extract a summary from the results of the most recent coordinator execution. 
-* Falls back to the durable orchestration store so past waves remain mergeable. 
-*/
-    private executeMergeResults(args: Record<string, unknown>, context?: import('./types').AgentToolContext): unknown {
-        const requestedDomain = context?.runnerOptions?.schedulingState.domainProfile;
-        if (!requestedDomain) {
-            return { success: false, message: 'merge_results requires an active scheduler context.' };
-        }
-        const requestedTopicId = context?.runnerOptions?.topicId;
-        const requestedGraphId = typeof args.graphId === 'string' && args.graphId.trim().length > 0
-            ? args.graphId.trim()
-            : undefined;
-        const requestedRunId = typeof args.runId === 'string' && args.runId.trim().length > 0
-            ? args.runId.trim()
-            : undefined;
-
-        let requestedNodeIds = Array.isArray(args.nodeIds)
-            ? [...new Set(args.nodeIds
-                .filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
-                .map(value => value.trim()))]
-            : [];
-        if (!requestedGraphId && requestedNodeIds.length === 0) {
-            // Empty/catalog mode recovers graph ids and node state. An explicit
-            // graph id is instead an actionable merge request and selects every
-            // available result when no node subset was supplied.
-            return this.buildOrchestrationCatalog(requestedTopicId, requestedDomain, requestedRunId);
-        }
-        const strategy = args.strategy === 'concatenate' || args.strategy === 'summary' ? args.strategy : 'structured';
-
-        // Durable store: explicit graphId, else the latest matching wave.
-        let storedRecord: import('./orchestrator/orchestrationStore').StoredOrchestration | undefined;
-        if (requestedGraphId) {
-            storedRecord = loadOrchestration(requestedGraphId, { topicId: requestedTopicId, domain: requestedDomain, workspaceRoot: this.workspaceRoot });
-        } else {
-            const candidates = listOrchestrations({ topicId: requestedTopicId, domain: requestedDomain, limit: 16, workspaceRoot: this.workspaceRoot });
-            storedRecord = candidates.find(record => !record.complete && (!requestedRunId || record.runId === requestedRunId))
-                ?? (requestedRunId ? candidates.find(record => record.runId === requestedRunId) : candidates[0]);
-        }
-        if (storedRecord) {
-            if (backgroundOrchestrators.hasActive(storedRecord.graphId)) {
+        let targetDoc: vs.TextDocument | undefined;
+        let resolvedFile: string | undefined;
+        if (rawFile) {
+            resolvedFile = path.isAbsolute(rawFile)
+                ? path.resolve(rawFile)
+                : path.resolve(this.workspaceRoot, rawFile);
+            if (!isPathInsideOrEqual(resolvedFile, this.workspaceRoot)) {
                 return {
                     success: false,
-                    background: true,
-                    graphId: storedRecord.graphId,
-                    message: `Graph '${storedRecord.graphId}' is still running in the background; its results are not final yet. Wait for the BACKGROUND TASK RESULT, then merge again.`,
+                    error: `Target file '${rawFile}' must be inside the workspace root.`,
                 };
             }
-            const agentResults = deserializeAgentResults(storedRecord.agentResults);
-            if (requestedNodeIds.length === 0) requestedNodeIds = [...agentResults.keys()].sort();
-            const graph = deserializeGraph(storedRecord.graph);
-            const failedNodes = [...graph.nodes.values()].filter(node => node.status === 'failed').map(node => node.id);
-            const cancelledNodes = [...graph.nodes.values()].filter(node => node.status === 'cancelled').map(node => node.id);
-            return this.assembleMergeReport(
-                agentResults,
-                graph,
-                {
-                    success: failedNodes.length === 0 && cancelledNodes.length === 0,
-                    summary: storedRecord.summary,
-                    totalTokenUsage: storedRecord.totalTokenUsage,
-                    qualityGate: storedRecord.qualityGate,
-                    failedNodes,
-                    cancelledNodes,
-                },
-                requestedNodeIds,
-                strategy,
-            );
-        }
-
-        return { success: false, message: 'Failed to find the most recent orchestrator execution result. Please use dispatch_agents first.' };
-    }
-
-    /**
-     * Catalog mode of `merge_results`: which orchestration graphs exist for this
-     * topic, how far each got, and what can still be done with each one.
-     * The projection and its state wording live in `orchestrationCatalog.ts`.
-     */
-    private buildOrchestrationCatalog(
-        topicId: string | undefined,
-        domain: import('./types').AgentRuntimeDomain,
-        runId?: string,
-    ): unknown {
-        const records = listOrchestrations({ topicId, domain, limit: 16, workspaceRoot: this.workspaceRoot })
-            .filter(record => !runId || record.runId === runId);
-        return projectOrchestrationCatalog(
-            records,
-            graphId => backgroundOrchestrators.hasActive(graphId),
-            { topicId, domain },
-        );
-    }
-
-    private assembleMergeReport(
-        agentResults: Map<string, import('./orchestrator/types').SubAgentResult>,
-        graph: import('./orchestrator/types').TaskGraph | undefined,
-        meta: {
-            success: boolean;
-            summary: string;
-            totalTokenUsage: import('./types').TokenUsage;
-            qualityGate?: import('./orchestrator/types').QualityGateResult;
-            failedNodes: string[];
-            cancelledNodes: string[];
-        },
-        selectedIds: string[],
-        strategy: 'concatenate' | 'structured' | 'summary',
-    ): unknown {
-        const unknownNodeIds = selectedIds.filter(id => !agentResults.has(id));
-        if (unknownNodeIds.length > 0) {
-            return { success: false, message: `Unknown or unavailable task node IDs: ${unknownNodeIds.join(', ')}` };
-        }
-        const allWrittenFiles = new Set<string>();
-        const agentOutputs: Array<{
-            id: string;
-            output: string;
-            files: string[];
-            verification?: string[];
-            unresolved?: string[];
-        }> = [];
-
-        //Smart truncation: the upper limit for a single Agent is 2000 characters, and the total budget is 8000 characters
-        const MAX_PER_AGENT = 2000;
-        const MAX_TOTAL = 8000;
-        let totalOutputLen = 0;
-
-        for (const id of selectedIds) {
-            const agentResult = agentResults.get(id)!;
-            const files = [...new Set([
-                ...agentResult.writtenFiles,
-                ...(agentResult.handoff?.changedFiles ?? []),
-            ])].sort();
-            for (const file of files) allWrittenFiles.add(file);
-            const remaining = Math.max(0, MAX_TOTAL - totalOutputLen);
-            const perAgentLimit = strategy === 'concatenate' ? MAX_PER_AGENT : strategy === 'summary' ? 800 : 1200;
-            const limit = Math.min(perAgentLimit, remaining);
-            let output = agentResult.handoff?.summary ?? agentResult.output;
-            if (output.length > limit) {
-                output = compactAgentOutputForReport(output, limit) || '';
+            if (!fs.existsSync(resolvedFile)) {
+                return {
+                    success: false,
+                    error: `Target file not found: '${rawFile}'.`,
+                };
             }
-            totalOutputLen += output.length;
-            agentOutputs.push({
-                id,
-                output,
-                files,
-                verification: agentResult.handoff?.verification,
-                unresolved: agentResult.handoff?.unresolved,
-            });
+            targetDoc = await vs.workspace.openTextDocument(vs.Uri.file(resolvedFile));
+        } else {
+            targetDoc = vs.window.activeTextEditor?.document;
+            resolvedFile = targetDoc?.uri.fsPath;
         }
 
-        const fileGroups = [...allWrittenFiles].map(file => ({
-            file,
-            nodeIds: selectedIds.filter(id => {
-                const result = agentResults.get(id);
-                return result?.writtenFiles.includes(file) || result?.handoff?.changedFiles.includes(file);
-            }),
-        }));
-        const entityContracts = selectedIds.map(id => {
-            const node = graph?.nodes.get(id);
-            return {
-                nodeId: id,
-                produces: node?.produces ?? [],
-                consumes: node?.consumes ?? [],
-                acceptanceChecks: node?.acceptanceChecks ?? [],
-                dependencies: node?.dependencies ?? [],
-            };
-        });
-        const selectedSucceeded = selectedIds.every(id => agentResults.get(id)?.success === true);
-        const mergedOutput = strategy === 'concatenate'
-            ? agentOutputs.map(item => `## ${item.id}\n${item.output}`).join('\n\n')
-            : undefined;
-        const complete = graph ? [...graph.nodes.values()].every(node =>
-            node.status !== 'pending' && node.status !== 'running') : true;
+        const relPath = this.toWorkspaceRel(resolvedFile) ?? '';
+        const lowerRel = relPath.toLowerCase();
 
-        return {
-            success: true,
-            overallSuccess: meta.success && selectedSucceeded,
-            strategy,
-            selectedNodeIds: selectedIds,
-            summary: meta.summary,
-            totalTokens: meta.totalTokenUsage.total,
-            estimatedCostCny: meta.totalTokenUsage.estimatedCostCny,
-            totalFilesWritten: allWrittenFiles.size,
-            writtenFiles: [...allWrittenFiles],
-            fileGroups,
-            agentOutputs,
-            mergedOutput,
-            graphId: graph?.id,
-            resumeable: !complete,
-            integration: {
-                featureManifest: graph?.metadata.featureManifest,
-                entityContracts,
-                qualityGate: meta.qualityGate,
-            },
-            failedNodes: meta.failedNodes,
-            cancelledNodes: meta.cancelledNodes,
-        };
+        let editorKind = requestedEditor;
+        if (!editorKind || editorKind === 'auto') {
+            if (lowerRel.endsWith('.gui')) {
+                editorKind = 'gui';
+            } else if (lowerRel.endsWith('.asset')) {
+                const text = targetDoc?.getText() ?? (resolvedFile ? fs.readFileSync(resolvedFile, 'utf8') : '');
+                editorKind = /(?:^|\n)\s*particle\s*=\s*\{/.test(text) ? 'particle' : 'entity';
+            } else if (lowerRel.includes('solar_system_initializers')) {
+                editorKind = 'solar_system';
+            } else if (lowerRel.includes('common/technology')) {
+                editorKind = 'tech_tree';
+            } else if (lowerRel.includes('common/component_templates')) {
+                editorKind = 'target_weight';
+            } else if (lowerRel.startsWith('events/') || lowerRel.includes('/events/')) {
+                editorKind = 'event_chain';
+            } else {
+                return {
+                    success: false,
+                    error: `Could not auto-infer visual editor for '${relPath || '(no file)'}'. Specify editor explicitly: gui | entity | particle | solar_system | tech_tree | event_chain | target_weight.`,
+                };
+            }
+        }
+
+        switch (editorKind) {
+            case 'gui': {
+                if (!targetDoc || !targetDoc.fileName.toLowerCase().endsWith('.gui')) {
+                    return { success: false, error: 'GUI Preview requires a .gui file.' };
+                }
+                const { GuiPanel } = await import('../guiPanel');
+                const { parseGuiFile } = await import('../guiParser');
+                await GuiPanel.create(extensionPath, targetDoc);
+                const parsedElements = parseGuiFile(targetDoc.getText(), new Map());
+                return {
+                    success: true,
+                    editor: 'gui',
+                    file: relPath,
+                    summary: {
+                        elementCount: parsedElements.length,
+                        topLevelWindows: parsedElements.slice(0, 30).map(el => ({
+                            type: el.type,
+                            name: el.name,
+                            line: el.line,
+                            childCount: el.children.length,
+                        })),
+                    },
+                };
+            }
+            case 'entity': {
+                if (!targetDoc || !targetDoc.fileName.toLowerCase().endsWith('.asset')) {
+                    return { success: false, error: 'Entity Preview requires a .asset file.' };
+                }
+                const { EntityPanel } = await import('../entityPanel');
+                const { parseAssetFile } = await import('../entityAssetParser');
+                await EntityPanel.create(extensionPath, targetDoc);
+                const parsed = parseAssetFile(targetDoc.getText(), targetDoc.uri.fsPath);
+                return {
+                    success: true,
+                    editor: 'entity',
+                    file: relPath,
+                    summary: {
+                        entityCount: parsed.entities.length,
+                        entities: parsed.entities.slice(0, 30).map(ent => ({
+                            name: ent.name,
+                            pdxmesh: ent.pdxmesh,
+                            line: ent.line,
+                            stateCount: ent.states.length,
+                            locatorCount: ent.locators.length,
+                        })),
+                    },
+                };
+            }
+            case 'particle': {
+                if (!targetDoc || !targetDoc.fileName.toLowerCase().endsWith('.asset')) {
+                    return { success: false, error: 'Particle Preview requires a .asset file.' };
+                }
+                const { ParticlePanel } = await import('../particlePanel');
+                const { parseParticleFile } = await import('../particleAssetParser');
+                await ParticlePanel.create(extensionPath, targetDoc);
+                const parsedParticle = parseParticleFile(targetDoc.getText());
+                return {
+                    success: true,
+                    editor: 'particle',
+                    file: relPath,
+                    summary: {
+                        effectCount: parsedParticle.effects.length,
+                        effects: parsedParticle.effects.slice(0, 30).map(eff => ({
+                            name: eff.name,
+                            subsystemCount: eff.subsystems.length,
+                        })),
+                    },
+                };
+            }
+            case 'solar_system': {
+                if (!targetDoc || !targetDoc.fileName.toLowerCase().endsWith('.txt')) {
+                    return { success: false, error: 'Solar System Preview requires a .txt initializer file.' };
+                }
+                const { SolarSystemPanel } = await import('../solarSystemPanel');
+                const { parseSolarSystemFile } = await import('../solarSystemParser');
+                await SolarSystemPanel.create(extensionPath, targetDoc);
+                const systems = parseSolarSystemFile(targetDoc.getText());
+                return {
+                    success: true,
+                    editor: 'solar_system',
+                    file: relPath,
+                    summary: {
+                        systemCount: systems.length,
+                        systems: systems.slice(0, 30).map(sys => ({
+                            key: sys.key,
+                            displayName: sys.displayName,
+                            starClass: sys.starClass,
+                            line: sys.line,
+                            bodyCount: sys.bodies.length,
+                        })),
+                    },
+                };
+            }
+            case 'tech_tree': {
+                const { TechTreePanel } = await import('../techTreePanel');
+                await TechTreePanel.create(extensionPath, targetDoc);
+                return {
+                    success: true,
+                    editor: 'tech_tree',
+                    file: relPath || undefined,
+                };
+            }
+            case 'event_chain': {
+                const { EventChainPanel } = await import('../eventChainPanel');
+                await EventChainPanel.create(
+                    extensionPath,
+                    targetDoc,
+                    line ?? (vs.window.activeTextEditor ? vs.window.activeTextEditor.selection.active.line + 1 : undefined),
+                );
+                return {
+                    success: true,
+                    editor: 'event_chain',
+                    file: relPath || undefined,
+                    line,
+                };
+            }
+            case 'target_weight': {
+                const { TargetWeightPanel } = await import('../targetWeightPanel');
+                await TargetWeightPanel.create(extensionPath, {
+                    indexService: this.indexService,
+                    cursor: targetDoc
+                        ? { document: targetDoc, line: line ?? (vs.window.activeTextEditor?.selection.active.line ?? 0) + 1 }
+                        : undefined,
+                });
+                return {
+                    success: true,
+                    editor: 'target_weight',
+                    file: relPath || undefined,
+                    line,
+                };
+            }
+            default:
+                return {
+                    success: false,
+                    error: `Unsupported visual editor '${editorKind}'.`,
+                };
+        }
     }
 
     // - Public accessors for external consumers -
@@ -6123,8 +4070,4 @@ export class AgentToolExecutor {
         this.onTodoUpdate?.(this.externalHandler.getTodos(agentId), agentId ? { agentId } : undefined);
     }
     clearTodos(agentId?: string): void { this.externalHandler.clearTodos(agentId); }
-    clearOrchestratorValidation(runId: string): void { this._orchestratorValidationByRun.delete(runId); }
-    getOrchestratorValidation(runId: string): { success: boolean; summary: string; pendingOnly?: boolean } | undefined {
-        return this._orchestratorValidationByRun.get(runId);
-    }
 }

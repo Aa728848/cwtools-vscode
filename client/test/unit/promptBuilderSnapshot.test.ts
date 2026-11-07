@@ -71,22 +71,17 @@ describe('PromptBuilder 快照与稳定性测试', () => {
         expect(prompt).to.include('fields as suggestions');
         expect(prompt).to.include('Include only sections');
         expect(prompt).to.include('Call `write_design_blueprint` once');
-        expect(prompt).to.include('ordinary software engineering or Paradox/CWTools work');
-        expect(prompt).to.include('ordinary code');
         expect(prompt).to.include('final design authority');
         expect(prompt).to.include('Approval transitions directly to Write/Execute');
-        expect(prompt).to.include('Adaptive planning fan-out');
-        expect(prompt).to.include('Dispatch only `explore`, `planner`, and `reviewer` profiles');
-        expect(prompt).to.include('main Agent alone author the final Implementation Plan');
     });
 
-    it('keeps changing Stellaris facts out of domain-neutral plan prompts', () => {
+    it('keeps changing Stellaris facts out of plan prompts', () => {
         const { PromptBuilder } = loadPromptBuilder();
         const builder = new PromptBuilder(process.cwd());
         const prompt = builder.buildSystemPromptForMode('plan', undefined, 'stellaris', undefined, undefined, undefined, true, true, 'paradox');
 
-        expect(prompt).to.include('current workspace');
-        expect(prompt).to.include('query active CWT/LSP');
+        expect(prompt).to.include('PDXScript mod development');
+        expect(prompt).to.include('Query active CWT/LSP');
         expect(prompt).to.include('fields as suggestions');
         expect(prompt).to.not.include('intentionally contains no game-version rule tables');
         expect(prompt).to.not.include('Stellaris common/ Design Space Review');
@@ -94,14 +89,13 @@ describe('PromptBuilder 快照与稳定性测试', () => {
         expect(prompt).to.not.include('common/storm_types');
     });
 
-    it('requires visible process updates for main, orchestrator, and slim prompts', () => {
+    it('requires visible process updates for main and slim prompts', () => {
         const { PromptBuilder } = loadPromptBuilder();
         const builder = new PromptBuilder(process.cwd());
         const buildPrompt = builder.buildSystemPromptForMode('build', undefined, undefined, undefined, undefined, undefined, true, true, 'paradox');
-        const orchestratorPrompt = builder.buildSystemPromptForMode('orchestrator', undefined, undefined, undefined, undefined, undefined, true, true, 'general');
         const slimPrompt = builder.buildSlimSystemPromptForMode('build', undefined, undefined, undefined, 'paradox');
 
-        for (const prompt of [buildPrompt, orchestratorPrompt, slimPrompt]) {
+        for (const prompt of [buildPrompt, slimPrompt]) {
             expect(prompt).to.include('Visible Process Updates');
             expect(prompt).to.include('Codex-style visible process narrative');
             expect(prompt).to.include('what you will do next, how you will do it, and why');
@@ -148,59 +142,6 @@ describe('PromptBuilder 快照与稳定性测试', () => {
         expect(prompt).to.include('Template Reference Methodology');
     });
 
-    it('keeps general orchestrators on general-coder profiles and explicit write targets', () => {
-        const { PromptBuilder } = loadPromptBuilder();
-        const builder = new PromptBuilder(process.cwd());
-        const prompt = builder.buildSystemPromptForMode('orchestrator', undefined, undefined, undefined, undefined, undefined, true, true, 'general');
-
-        expect(prompt).to.include('plannedFiles');
-        expect(prompt).to.include('general-coder');
-        expect(prompt).to.include('bounded read-only discovery wave');
-        expect(prompt).to.include('repository investigation alone is not a Plan boundary');
-        expect(prompt).to.not.include('mandatory user-facing approval');
-        expect(prompt).to.not.include('LocWriter');
-    });
-
-    it('keeps every General Coding intent free of Paradox prompts and repair protocols', () => {
-        const { PromptBuilder } = loadPromptBuilder();
-        const builder = new PromptBuilder(process.cwd());
-        const generalDomainPrompt = (mode: 'plan' | 'explore' | 'review') =>
-            builder.buildSystemPromptForMode(
-                mode,
-                undefined,
-                undefined,
-                undefined,
-                undefined,
-                undefined,
-                true,
-                true,
-                'general',
-            );
-        const prompts = [
-            builder.buildSystemPromptForMode('utility', undefined, undefined, undefined, undefined, undefined, true, true, 'general'),
-            generalDomainPrompt('plan'),
-            generalDomainPrompt('explore'),
-            generalDomainPrompt('review'),
-            builder.buildSystemPromptForMode('orchestrator', undefined, undefined, undefined, undefined, undefined, true, true, 'general'),
-            builder.buildSlimSystemPromptForMode('utility', undefined, undefined, undefined, 'general'),
-        ];
-        const forbidden = [
-            'Paradox', 'PDXScript', 'CWTools', 'CWT/LSP', 'query_scope',
-            'write_design_blueprint', 'EvidenceGate', 'sprite repair',
-            'localisation sweep', 'vanilla cache',
-        ];
-
-        for (const prompt of prompts) {
-            const platformPrompt = withoutRepositoryInstructions(prompt);
-            for (const term of forbidden) expect(platformPrompt, term).to.not.include(term);
-            expect(prompt).to.include('repository');
-        }
-
-        const paradoxPlan = builder.buildSystemPromptForMode('plan', undefined, undefined, undefined, undefined, undefined, true, true, 'paradox');
-        expect(paradoxPlan).to.include('query active CWT/LSP');
-        expect(paradoxPlan).to.include('write_design_blueprint');
-    });
-
     it('treats blueprint structure as model guidance instead of a host completeness gate', () => {
         const { PromptBuilder } = loadPromptBuilder();
         const builder = new PromptBuilder(process.cwd());
@@ -210,42 +151,17 @@ describe('PromptBuilder 快照与稳定性测试', () => {
         expect(prompt).to.include('fields as suggestions');
         expect(prompt).to.include('host saves and presents it without judging cross-section semantic completeness');
         expect(prompt).to.include('Omit `unresolvedCritical` or use `[]` to request approval');
-        expect(prompt).to.include('Runtime path, permission, and schedulability checks still apply');
+        expect(prompt).to.include('Runtime path and schedulability checks still apply');
         expect(prompt).to.include('STOP and wait for user approval');
         expect(prompt).to.include('Do not defer any design work until after approval');
     });
 
-    it('describes script mode as a dynamic PDXScript workflow coordinator', () => {
-        const { PromptBuilder } = loadPromptBuilder();
-        const builder = new PromptBuilder(process.cwd());
-        const prompt = builder.buildSystemPromptForMode('script', undefined, undefined, undefined, undefined, undefined, true, true, 'paradox');
-
-        expect(prompt).to.include('Paradox Multi-Agent Mode');
-        expect(prompt).to.include('dynamic workflow coordinator');
-        expect(prompt).to.include('dispatch_agents');
-        expect(prompt).to.include('up to 8');
-        expect(prompt).to.include('plannedFiles');
-        expect(prompt).to.include('approved `blueprintFile`');
-        expect(prompt).to.include('write_design_blueprint');
-        expect(prompt).to.include('Approved Implementation Plan');
-        expect(prompt).to.include('bounded read-only preflight wave');
-        expect(prompt).to.include('must not change the approved design');
-        expect(prompt).to.include('Never call `write_design_blueprint`');
-        expect(prompt).to.not.include('Blueprint Self-check');
-        expect(prompt).to.include('Structured dispatch preflight for Paradox write waves');
-        expect(prompt).to.include('exact current-topic `Implementation_Plan.md`');
-        expect(prompt).to.include('schemaVersion 2 manifest and task DAG remain canonical');
-        expect(prompt).to.include('cross-check task IDs, files, entity contracts, dependencies, and acceptance checks');
-    });
-
-    it('keeps slim localisation writers on write_localisation and concise completion', () => {
+    it('keeps slim localisation writers on write_localisation', () => {
         const { PromptBuilder } = loadPromptBuilder();
         const builder = new PromptBuilder(process.cwd());
         const prompt = builder.buildSlimSystemPromptForMode('loc_writer', undefined, undefined, undefined, 'paradox');
 
-        expect(prompt).to.include('write_localisation` is the only mutation path');
-        expect(prompt).to.include('Do not use `edit_file`');
-        expect(prompt).to.include('non-localisation deliverable');
-        expect(prompt).to.include('return a concise summary immediately');
+        expect(prompt).to.include('write_localisation');
+        expect(prompt).to.include('MANDATORY for .yml files');
     });
 });

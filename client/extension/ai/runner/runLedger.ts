@@ -842,7 +842,7 @@ export class RunLedger {
             topicId,
             status: 'running',
             schedulingState: schedulingStateFromAdmission({
-                domainProfile: 'general',
+                domainProfile: 'paradox',
                 authorization: 'read_only',
                 initialPhase: 'inspect',
                 explicitDelegation: false,

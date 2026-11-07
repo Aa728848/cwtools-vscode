@@ -10,6 +10,8 @@ import { getGameKnowledge } from './gameKnowledge';
 import { getProjectProfilePath, queryProjectProfile, readProjectProfile } from './projectProfile';
 import { ErrorReporter } from './errorReporter';
 import { getProjectKnowledgeManifestPath, readProjectKnowledgeManifest } from './projectKnowledge';
+import { getCwtoolsHomeDir } from './homeConfig';
+import { listSkills, loadSkill } from './skills';
 import {
     isAuthorizedBridgeRequest,
     isMcpBridgeMethod,
@@ -22,11 +24,14 @@ import { schedulingStateFromAdmission } from './runner/scheduling';
 const BRIDGE_PROTOCOL_VERSION = 1;
 const MANIFEST_FILE_NAME = 'bridge-manifest.json';
 
-const MCP_BRIDGE_TOOL_NAMES = [
+export const MCP_BRIDGE_READONLY_TOOL_NAMES = [
     'query_types',
-    'query_cwt_schema',
     'query_rules',
+    'query_cwt_schema',
     'query_override_modes',
+    'search_rule_capabilities',
+    'explain_scope',
+    'parse_pdx_fragment',
     'query_scope',
     'get_diagnostics',
     'analyze_diagnostic_error',
@@ -34,6 +39,9 @@ const MCP_BRIDGE_TOOL_NAMES = [
     'query_project_knowledge',
     'query_workspace_index',
     'explore_pdx_project',
+    'query_inline_instantiation',
+    'analyze_pdx_flow',
+    'compare_definition_with_vanilla',
     'query_targeting_weight',
     'query_localisation_index',
     'get_pdx_block',
@@ -48,9 +56,28 @@ const MCP_BRIDGE_TOOL_NAMES = [
     'query_static_modifiers',
     'query_variables',
     'get_entity_info',
+    'query_shader_symbol',
+    'query_shader_compile_unit',
+    'query_shader_platform_variants',
+    'query_shader_callers',
+    'explain_shader_reachability',
+    'validate_shader',
+    'compare_shader_with_vanilla',
+    'get_ide_context',
+    'open_in_visual_editor',
 ] as const;
 
-const MCP_BRIDGE_TOOL_SET = new Set<string>(MCP_BRIDGE_TOOL_NAMES);
+export const MCP_BRIDGE_DOMAIN_WRITE_TOOL_NAMES = [
+    'write_localisation',
+    'typed_pdx_write',
+    'candidate_transaction',
+    'convert_image_to_dds',
+    'convert_audio',
+    'deploy_mod_asset',
+] as const;
+
+const MCP_BRIDGE_READONLY_SET = new Set<string>(MCP_BRIDGE_READONLY_TOOL_NAMES);
+const MCP_BRIDGE_DOMAIN_WRITE_SET = new Set<string>(MCP_BRIDGE_DOMAIN_WRITE_TOOL_NAMES);
 
 const RESOURCE_URIS = [
     'cwtools://knowledge/game',
@@ -58,6 +85,7 @@ const RESOURCE_URIS = [
     'cwtools://knowledge/workflow-hints',
     'cwtools://project/profile',
     'cwtools://project/knowledge-manifest',
+    'cwtools://skills/catalog',
 ] as const;
 
 interface BridgeManifest {
@@ -244,15 +272,16 @@ export class McpBridgeServer implements Disposable {
     }
 
     private async dispatch(method: string, params: unknown): Promise<unknown> {
+        const record = asRecord(params);
         switch (method) {
             case 'tools/list':
-                return { tools: listBridgeTools() };
+                return { tools: listBridgeTools(record.allowDomainWrites === true) };
             case 'tools/call':
-                return this.callTool(asRecord(params));
+                return this.callTool(record);
             case 'resources/list':
-                return { resources: listResources() };
+                return { resources: this.listBridgeResources() };
             case 'resources/read':
-                return this.readResource(String(asRecord(params).uri ?? ''));
+                return this.readResource(String(record.uri ?? ''));
             case 'bridge/metadata':
                 return this.currentManifest();
             default:
@@ -263,14 +292,30 @@ export class McpBridgeServer implements Disposable {
     private async callTool(params: Record<string, unknown>): Promise<McpContentResult> {
         const name = String(params.name ?? '');
         const args = asRecord(params.arguments ?? params.args);
-        if (!MCP_BRIDGE_TOOL_SET.has(name)) {
+        const allowDomainWrites = params.allowDomainWrites === true;
+        const isReadOnlyTool = MCP_BRIDGE_READONLY_SET.has(name);
+        const isDomainWriteTool = MCP_BRIDGE_DOMAIN_WRITE_SET.has(name);
+
+        if (!isReadOnlyTool && !isDomainWriteTool) {
             return toMcpTextResult({
                 ok: false,
                 status: 'denied',
                 source: 'cwtools-vscode-extension',
                 error: {
                     code: 'tool_not_available',
-                    message: `Tool '${name}' is not available: this MCP bridge is read-only.`,
+                    message: `Tool '${name}' is not available on the CWTools MCP bridge.`,
+                },
+            }, true);
+        }
+
+        if (isDomainWriteTool && !allowDomainWrites) {
+            return toMcpTextResult({
+                ok: false,
+                status: 'denied',
+                source: 'cwtools-vscode-extension',
+                error: {
+                    code: 'writes_disabled',
+                    message: `Tool '${name}' is a Paradox domain write tool and requires starting cwtools-mcp with --allow-domain-writes (or --enable-writes).`,
                 },
             }, true);
         }
@@ -280,19 +325,19 @@ export class McpBridgeServer implements Disposable {
                 runnerOptions: {
                     schedulingState: schedulingStateFromAdmission({
                         domainProfile: 'paradox',
-                        authorization: 'read_only',
-                        initialPhase: 'inspect',
+                        authorization: isDomainWriteTool ? 'workspace_write' : 'read_only',
+                        initialPhase: isDomainWriteTool ? 'execute' : 'inspect',
                         explicitDelegation: false,
                         confidence: 1,
-                        evidence: ['read-only MCP bridge'],
-                    }, 'read-only MCP bridge'),
-                    forceAutoApplyWrites: false,
+                        evidence: [isDomainWriteTool ? 'domain-write MCP bridge' : 'read-only MCP bridge'],
+                    }, isDomainWriteTool ? 'domain-write MCP bridge' : 'read-only MCP bridge'),
+                    forceAutoApplyWrites: isDomainWriteTool,
                 },
             } as never);
             const failed = isFailureResult(result);
             return toMcpTextResult({
                 ok: !failed,
-                status: failed ? 'error' : 'ready',
+                status: failed ? 'error' : (isDomainWriteTool ? 'success' : 'ready'),
                 source: 'cwtools-vscode-extension',
                 data: result,
             }, failed);
@@ -312,7 +357,62 @@ export class McpBridgeServer implements Disposable {
         }
     }
 
+    private listBridgeResources() {
+        const base = listResources();
+        const skills = this.discoverSkills();
+        for (const skill of skills) {
+            base.push({
+                uri: `cwtools://skills/${encodeURIComponent(skill.name)}`,
+                name: `Paradox Skill: ${skill.name}`,
+                description: skill.description,
+                mimeType: 'text/markdown',
+            });
+        }
+        return base;
+    }
+
+    private discoverSkills() {
+        try {
+            return listSkills({
+                workspaceRoot: this.options.workspaceRoot,
+                extensionPath: this.options.context.extensionPath,
+                homeDir: getCwtoolsHomeDir(),
+            }, 'paradox');
+        } catch {
+            return [];
+        }
+    }
+
     private async readResource(uri: string): Promise<McpResourceResult> {
+        if (uri.startsWith('cwtools://skills/') && uri !== 'cwtools://skills/catalog') {
+            const skillName = decodeURIComponent(uri.slice('cwtools://skills/'.length));
+            const loaded = loadSkill(skillName, {
+                workspaceRoot: this.options.workspaceRoot,
+                extensionPath: this.options.context.extensionPath,
+                homeDir: getCwtoolsHomeDir(),
+            }, 'paradox');
+            if (loaded.success && loaded.content) {
+                return {
+                    contents: [{
+                        uri,
+                        mimeType: 'text/markdown',
+                        text: `${loaded.content}\n`,
+                    }],
+                };
+            }
+            const errMsg = !loaded.success ? loaded.error : `Skill '${skillName}' not found.`;
+            return {
+                contents: [{
+                    uri,
+                    mimeType: 'application/json',
+                    text: `${JSON.stringify({
+                        status: 'error',
+                        error: { code: 'skill_not_found', message: errMsg },
+                    }, null, 2)}\n`,
+                }],
+            };
+        }
+
         const data = await this.readResourceData(uri);
         return {
             contents: [
@@ -346,9 +446,11 @@ export class McpBridgeServer implements Disposable {
                     status: 'ready',
                     routes: [
                         { category: 'syntax', recommendedTools: ['get_diagnostics', 'get_pdx_block', 'query_cwt_schema', 'query_rules'] },
-                        { category: 'localisation', recommendedTools: ['get_diagnostics', 'query_localisation_index'] },
-                        { category: 'scope', recommendedTools: ['query_scope', 'query_cwt_schema', 'query_rules', 'get_completion_at'] },
+                        { category: 'localisation', recommendedTools: ['get_diagnostics', 'query_localisation_index', 'write_localisation'] },
+                        { category: 'scope', recommendedTools: ['query_scope', 'explain_scope', 'query_cwt_schema', 'query_rules', 'get_completion_at'] },
                         { category: 'reference', recommendedTools: ['go_to_definition', 'find_references', 'workspace_symbols'] },
+                        { category: 'shader', recommendedTools: ['query_shader_symbol', 'query_shader_compile_unit', 'explain_shader_reachability', 'validate_shader'] },
+                        { category: 'ide', recommendedTools: ['get_ide_context', 'open_in_visual_editor'] },
                     ],
                 };
             case 'cwtools://knowledge/workflow-hints':
@@ -357,8 +459,10 @@ export class McpBridgeServer implements Disposable {
                     hints: [
                         'Use query_types before relying on a game ID.',
                         'Use query_cwt_schema for schema/entity shape and query_rules/query_scope before changing trigger/effect syntax.',
-                        'Use get_diagnostics after edits; bridge diagnostics are sourced from the active host Problems panel.',
-                        'This bridge is read-only. Perform file edits through the host agent environment, then re-check diagnostics.',
+                        'Use get_ide_context to inspect the user active file, cursor selection, dirty buffers, and open visual editors.',
+                        'Use open_in_visual_editor to open or refresh GUI, Entity, Particle, Solar System, Tech Tree, Event Chain, or Targeting Weight panels.',
+                        'When started with --allow-domain-writes, use write_localisation for .yml files (preserves UTF-8 BOM), typed_pdx_write/candidate_transaction for guarded script edits, and convert_image_to_dds/convert_audio for assets.',
+                        'Read cwtools://skills/catalog and cwtools://skills/<name> for Paradox domain SOP skills.',
                     ],
                 };
             case 'cwtools://project/profile': {
@@ -376,6 +480,19 @@ export class McpBridgeServer implements Disposable {
                     status: 'missing',
                     manifestPath,
                     _hint: 'Run /init in the extension AI chat and wait for the deep semantic phase.',
+                };
+            }
+            case 'cwtools://skills/catalog': {
+                const skills = this.discoverSkills();
+                return {
+                    status: 'ready',
+                    count: skills.length,
+                    skills: skills.map(skill => ({
+                        name: skill.name,
+                        description: skill.description,
+                        source: skill.source,
+                        uri: `cwtools://skills/${encodeURIComponent(skill.name)}`,
+                    })),
                 };
             }
             default:
@@ -468,14 +585,17 @@ export function mcpBridgeManifestDir(context: ExtensionContext): string {
     return path.join(context.globalStorageUri.fsPath, 'mcp');
 }
 
-function listBridgeTools(): McpToolSchema[] {
+function listBridgeTools(allowDomainWrites = false): McpToolSchema[] {
     const byName = new Map(TOOL_DEFINITIONS.map(definition => [definition.function.name, definition]));
-    return MCP_BRIDGE_TOOL_NAMES.map(name => {
+    const names = allowDomainWrites
+        ? [...MCP_BRIDGE_READONLY_TOOL_NAMES, ...MCP_BRIDGE_DOMAIN_WRITE_TOOL_NAMES]
+        : [...MCP_BRIDGE_READONLY_TOOL_NAMES];
+    return names.map(name => {
         const definition = byName.get(name);
         if (!definition) {
             return {
                 name,
-                description: `CWTools read-only tool '${name}'.`,
+                description: `CWTools tool '${name}'.`,
                 inputSchema: { type: 'object', properties: {}, required: [] },
             };
         }
@@ -492,19 +612,19 @@ function listResources() {
         {
             uri: 'cwtools://knowledge/game',
             name: 'CWTools game knowledge',
-            description: 'PDX/Stellaris knowledge cards for MCP clients.',
+            description: 'Current-game semantic catalog summary and stable evidence-routing guidance.',
             mimeType: 'application/json',
         },
         {
             uri: 'cwtools://knowledge/diagnostic-routing',
             name: 'CWTools diagnostic routing',
-            description: 'Diagnostic routing guidance and suggested tools.',
+            description: 'Structured diagnostic routing guidance and suggested tools.',
             mimeType: 'application/json',
         },
         {
             uri: 'cwtools://knowledge/workflow-hints',
             name: 'CWTools workflow hints',
-            description: 'Reusable workflow hints for diagnostics, localisation, and entity lookup.',
+            description: 'Reusable workflow hints for diagnostics, localisation, entity lookup, IDE sensing, and domain writes.',
             mimeType: 'application/json',
         },
         {
@@ -516,22 +636,16 @@ function listResources() {
         {
             uri: 'cwtools://project/knowledge-manifest',
             name: 'CWTools project knowledge manifest',
-            description: 'Freshness, domains, counts, and fingerprints for the /init semantic knowledge pack.',
+            description: 'Freshness, domains, counts, and fingerprints for the /init-generated semantic knowledge pack.',
+            mimeType: 'application/json',
+        },
+        {
+            uri: 'cwtools://skills/catalog',
+            name: 'CWTools Paradox skills catalog',
+            description: 'Catalog of built-in, project, and user Paradox modding skills exposed as cwtools://skills/<name> resources.',
             mimeType: 'application/json',
         },
     ];
-}
-
-function toMcpTextResult(value: unknown, isError = false): McpContentResult {
-    return {
-        content: [
-            {
-                type: 'text',
-                text: `${JSON.stringify(value, null, 2)}\n`,
-            },
-        ],
-        isError: isError || undefined,
-    };
 }
 
 function asRecord(value: unknown): Record<string, unknown> {
@@ -543,5 +657,17 @@ function asRecord(value: unknown): Record<string, unknown> {
 function isFailureResult(value: unknown): boolean {
     if (!value || typeof value !== 'object') return false;
     const record = value as Record<string, unknown>;
-    return record.success === false || typeof record.error === 'string';
+    return record.success === false || record.ok === false || typeof record.error === 'string';
+}
+
+function toMcpTextResult(payload: unknown, isError = false): McpContentResult {
+    return {
+        content: [
+            {
+                type: 'text',
+                text: `${JSON.stringify(payload, null, 2)}\n`,
+            },
+        ],
+        ...(isError ? { isError: true } : {}),
+    };
 }

@@ -20,10 +20,10 @@ describe('ToolInvocation & Registry Single Source of Truth Tests', () => {
         expect(metaWrite.riskLevel).to.equal(2);
         expect(metaWrite.concurrencyClass).to.equal('per-file-write');
 
-        const metaShell = getToolMetadata('run_command');
-        expect(metaShell.effect).to.equal('shell');
-        expect(metaShell.riskLevel).to.equal(2);
-        expect(metaShell.concurrencyClass).to.equal('interactive');
+        const metaGit = getToolMetadata('git_ops');
+        expect(metaGit.effect).to.equal('git');
+        expect(metaGit.riskLevel).to.equal(2);
+        expect(metaGit.concurrencyClass).to.equal('global-exclusive');
 
         const metaSearch = getToolMetadata('web_search');
         expect(metaSearch.effect).to.equal('network');

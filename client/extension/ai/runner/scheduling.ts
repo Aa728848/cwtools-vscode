@@ -20,7 +20,8 @@ export const AUTHORITY_RANK: Record<AgentAuthorization, number> = {
 
 const PHASES = new Set<AgentRunPhase>(['inspect', 'plan', 'execute', 'verify', 'finalize']);
 const AUTHORIZATIONS = new Set<AgentAuthorization>(['read_only', 'plan_write_only', 'workspace_write']);
-const DISPATCH_MODES = new Set<AgentDispatchMode>(['single', 'parallel', 'specialist']);
+const LEGACY_DOMAINS = new Set<string>(['paradox', 'general', 'hybrid']);
+const LEGACY_DISPATCH_MODES = new Set<string>(['single', 'parallel', 'specialist']);
 const ROUTING_SOURCES = new Set<string>(['model', 'deterministic', 'user']);
 /**
  * Topics persisted while the removed AI Workflow subsystem was still active can
@@ -49,10 +50,10 @@ export function admissionFromResolvedProfile(profile: {
                 ? 'verify'
                 : 'inspect';
     return {
-        domainProfile: profile.domain,
+        domainProfile: 'paradox',
         authorization,
         initialPhase,
-        explicitDelegation: profile.strategy === 'multi',
+        explicitDelegation: false,
         confidence: clampConfidence(confidence),
         evidence: uniqueEvidence(evidence.length > 0 ? evidence : [profile.reason]),
     };
@@ -65,15 +66,15 @@ export function schedulingStateFromAdmission(
     const profileName = profileNameForAdmission(admission);
     return {
         profileName,
-        domainProfile: admission.domainProfile,
+        domainProfile: 'paradox',
         authorization: admission.authorization,
         phase: admission.initialPhase,
-        dispatch: admission.explicitDelegation ? 'parallel' : 'single',
-        overlays: schedulingOverlays(admission.initialPhase, admission.explicitDelegation ? 'parallel' : 'single'),
+        dispatch: 'single',
+        overlays: schedulingOverlays(admission.initialPhase),
         routeConfidence: clampConfidence(admission.confidence),
         routeEvidence: uniqueEvidence(admission.evidence),
         phaseReason: reason,
-        dispatchReason: admission.explicitDelegation ? 'explicit user delegation' : 'runtime dispatch pending',
+        dispatchReason: 'single agent',
         revision: 0,
     };
 }
@@ -83,14 +84,11 @@ export function executionModeForSchedulingState(state: AgentSchedulingState): Ag
     if (state.profileName === 'localization-writer') return 'loc_writer';
     if (state.profileName === 'localization-translator') return 'loc_translator';
     if (state.profileName === 'gui-expert') return 'gui_expert';
-    if (state.profileName === 'reviewer' && state.domainProfile === 'paradox') return 'script_reviewer';
-    if (state.dispatch !== 'single') {
-        return state.domainProfile === 'paradox' ? 'script' : 'orchestrator';
-    }
+    if (state.profileName === 'reviewer') return 'script_reviewer';
     if (state.phase === 'plan') return 'plan';
     if (state.phase === 'verify') return 'review';
     if (state.phase === 'inspect' && state.authorization === 'read_only') return 'explore';
-    return state.domainProfile === 'paradox' ? 'build' : 'utility';
+    return 'build';
 }
 
 export function normalizeSchedulingState(
@@ -101,10 +99,10 @@ export function normalizeSchedulingState(
     }
     const candidate = value as Partial<AgentSchedulingState>;
     const revision = candidate.revision;
-    if ((candidate.domainProfile !== 'general' && candidate.domainProfile !== 'paradox' && candidate.domainProfile !== 'hybrid')
+    if (!LEGACY_DOMAINS.has(candidate.domainProfile as string)
         || !AUTHORIZATIONS.has(candidate.authorization as AgentAuthorization)
         || !PHASES.has(candidate.phase as AgentRunPhase)
-        || !DISPATCH_MODES.has(candidate.dispatch as AgentDispatchMode)
+        || !LEGACY_DISPATCH_MODES.has(candidate.dispatch as string)
         || typeof candidate.profileName !== 'string'
         || !candidate.profileName.trim()
         || !Array.isArray(candidate.overlays)
@@ -124,16 +122,18 @@ export function normalizeSchedulingState(
         || (candidate.dispatchReason !== undefined && typeof candidate.dispatchReason !== 'string')) {
         throw new Error('Agent scheduling state is invalid.');
     }
-    const domainProfile = candidate.domainProfile as AgentRuntimeDomain;
     const authorization = candidate.authorization as AgentAuthorization;
     const phase = candidate.phase as AgentRunPhase;
-    const dispatch = candidate.dispatch as AgentDispatchMode;
+    const rawProfileName = candidate.profileName.trim().slice(0, 100);
+    const profileName = rawProfileName === 'general-agent' || rawProfileName === 'hybrid-agent' || rawProfileName === 'general-coder'
+        ? 'paradox-agent'
+        : rawProfileName;
     return {
-        profileName: candidate.profileName.trim().slice(0, 100),
-        domainProfile,
+        profileName,
+        domainProfile: 'paradox',
         authorization,
         phase,
-        dispatch,
+        dispatch: 'single',
         overlays: [...new Set(candidate.overlays.filter(value => !!value.trim())
             .map(value => value.trim().slice(0, 80)))].slice(0, 12),
         routeConfidence: clampConfidence(candidate.routeConfidence),
@@ -169,162 +169,13 @@ export function transitionSchedulingState(
         ...current,
         authorization: nextAuthorization,
         phase: update.phase ?? current.phase,
-        dispatch: update.dispatch ?? current.dispatch,
-        overlays: schedulingOverlays(update.phase ?? current.phase, update.dispatch ?? current.dispatch),
+        dispatch: 'single',
+        overlays: schedulingOverlays(update.phase ?? current.phase),
         phaseReason: update.phase !== undefined || update.authorization !== undefined
             ? update.reason.slice(0, 500)
             : current.phaseReason,
         dispatchReason: update.dispatchReason ?? current.dispatchReason,
         revision: current.revision + 1,
-    };
-}
-
-export interface DispatchCandidate {
-    id: string;
-    objective: string;
-    dependencies?: readonly string[];
-    expectedWrites?: readonly string[];
-    acceptanceCriteria?: readonly string[];
-    profileName?: string;
-}
-
-export interface DispatchAdmissionResult {
-    accepted: boolean;
-    score: number;
-    reason: string;
-    conflicts: Array<{ resource: string; taskIds: string[] }>;
-}
-
-export function evaluateDispatchAdmission(
-    tasks: readonly DispatchCandidate[],
-    options: {
-        explicitDelegation?: boolean;
-        availableTokenBudget?: number;
-        minimumScore?: number;
-        /** Valid dependency targets outside the candidate list (resumed graph node ids). */
-        knownTaskIds?: string[];
-    } = {},
-): DispatchAdmissionResult {
-    if (tasks.length === 0) {
-        return { accepted: false, score: -10, reason: 'Dispatch requires at least one task.', conflicts: [] };
-    }
-    if (tasks.length === 1 && options.explicitDelegation !== true) {
-        return { accepted: false, score: -10, reason: 'Single-agent dispatch requires explicit delegation.', conflicts: [] };
-    }
-    const knownIds = new Set(options.knownTaskIds ?? []);
-    const ids = new Set<string>();
-    const objectives = new Set<string>();
-    for (const task of tasks) {
-        const id = task.id.trim();
-        const objective = task.objective.trim().toLowerCase();
-        if (!id || !objective) {
-            return { accepted: false, score: -10, reason: 'Every task requires a non-empty id and objective.', conflicts: [] };
-        }
-        if (ids.has(id) || objectives.has(objective)) {
-            return { accepted: false, score: -10, reason: `Duplicate task id or objective detected: ${id}.`, conflicts: [] };
-        }
-        ids.add(id);
-        objectives.add(objective);
-    }
-    const tasksById = new Map(tasks.map(task => [task.id, task]));
-    for (const task of tasks) {
-        const missing = (task.dependencies ?? []).find(dependency => !tasksById.has(dependency) && !knownIds.has(dependency));
-        if (missing) {
-            return {
-                accepted: false,
-                score: -10,
-                reason: `Task ${task.id} depends on missing task ${missing}.`,
-                conflicts: [],
-            };
-        }
-    }
-    const visiting = new Set<string>();
-    const visited = new Set<string>();
-    const hasCycle = (taskId: string): boolean => {
-        if (visiting.has(taskId)) return true;
-        if (visited.has(taskId)) return false;
-        visiting.add(taskId);
-        const cyclic = (tasksById.get(taskId)?.dependencies ?? []).some(hasCycle);
-        visiting.delete(taskId);
-        visited.add(taskId);
-        return cyclic;
-    };
-    if (tasks.some(task => hasCycle(task.id))) {
-        return {
-            accepted: false,
-            score: -10,
-            reason: 'Task graph contains a dependency cycle.',
-            conflicts: [],
-        };
-    }
-    const dependsOn = (taskId: string, targetId: string, visited = new Set<string>()): boolean => {
-        if (taskId === targetId) return true;
-        if (visited.has(taskId)) return false;
-        visited.add(taskId);
-        const task = tasksById.get(taskId);
-        return (task?.dependencies ?? []).some(dependency =>
-            dependency === targetId || dependsOn(dependency, targetId, visited));
-    };
-
-    const writers = new Map<string, string[]>();
-    for (const task of tasks) {
-        for (const resource of task.expectedWrites ?? []) {
-            const normalized = resource.replace(/\\/g, '/').toLowerCase();
-            if (!normalized) continue;
-            const owners = writers.get(normalized) ?? [];
-            owners.push(task.id);
-            writers.set(normalized, owners);
-        }
-    }
-    const conflicts = [...writers.entries()]
-        .filter(([, taskIds]) => {
-            if (taskIds.length < 2) return false;
-            for (let left = 0; left < taskIds.length; left++) {
-                for (let right = left + 1; right < taskIds.length; right++) {
-                    const leftId = taskIds[left]!;
-                    const rightId = taskIds[right]!;
-                    if (!dependsOn(leftId, rightId) && !dependsOn(rightId, leftId)) return true;
-                }
-            }
-            return false;
-        })
-        .map(([resource, taskIds]) => ({ resource, taskIds }));
-    if (conflicts.length > 0) {
-        return {
-            accepted: false,
-            score: -10,
-            reason: `Unordered writers target the same resource: ${conflicts.map(item => item.resource).join(', ')}.`,
-            conflicts,
-        };
-    }
-
-    const independent = tasks.filter(task => (task.dependencies?.length ?? 0) === 0).length;
-    const specialistProfiles = new Set(tasks.map(task => task.profileName).filter(Boolean)).size;
-    const testable = tasks.filter(task => (task.acceptanceCriteria?.length ?? 0) > 0).length;
-    const budgetPenalty = options.availableTokenBudget !== undefined
-        && options.availableTokenBudget > 0
-        && options.availableTokenBudget < tasks.length * 2_000
-        ? 4
-        : 0;
-    const hasDependencyIsolation = tasks.some(task => (task.dependencies?.length ?? 0) > 0);
-    const score = independent * 2
-        + Math.min(3, specialistProfiles)
-        + testable
-        + (hasDependencyIsolation ? 2 : 0)
-        + (options.explicitDelegation ? 6 : 0)
-        - Math.max(0, tasks.length - 4)
-        - budgetPenalty;
-    const threshold = options.minimumScore ?? 2;
-    // User-requested delegation bypasses only optimization scoring; every safety
-    // rejection above and the minimum token budget remain authoritative.
-    const accepted = options.explicitDelegation === true || score >= threshold;
-    return {
-        accepted,
-        score,
-        reason: accepted
-            ? `Dispatch admitted with ${independent} independent tasks and score ${score}.`
-            : `Dispatch benefit score ${score} is below threshold ${threshold}; continue with one Agent.`,
-        conflicts: [],
     };
 }
 
@@ -375,12 +226,12 @@ export function authorizationAllowsEffect(
     if (authorization === 'workspace_write') return true;
     if (authorization === 'read_only') {
         const internalStateOnly = effect === 'none' || effect === 'memory';
-        return !['workspace_write', 'shell', 'git', 'media', 'process'].includes(effect)
+        return !['workspace_write', 'git', 'media'].includes(effect)
             && (!mutating || internalStateOnly);
     }
     // plan_write_only may write only the guarded topic-local plan artifact.
     // The plan-mode path guard performs the target-level decision.
-    return !['shell', 'git', 'media', 'process'].includes(effect);
+    return !['git', 'media'].includes(effect);
 }
 
 function clampConfidence(value: unknown): number {
@@ -397,14 +248,13 @@ function profileNameForAdmission(admission: AdmissionDecision): string {
     if (admission.authorization === 'read_only') {
         return admission.initialPhase === 'verify' ? 'reviewer' : 'explore';
     }
-    return admission.domainProfile === 'paradox' ? 'paradox-agent' : admission.domainProfile === 'hybrid' ? 'hybrid-agent' : 'general-agent';
+    return 'paradox-agent';
 }
 
-function schedulingOverlays(phase: AgentRunPhase, dispatch: AgentDispatchMode): string[] {
+function schedulingOverlays(phase: AgentRunPhase): string[] {
     const overlays: string[] = [];
     if (phase === 'plan') overlays.push('planning');
     if (phase === 'verify') overlays.push('verification');
     if (phase === 'finalize') overlays.push('finalization');
-    if (dispatch !== 'single') overlays.push(dispatch === 'parallel' ? 'swarm' : 'specialist');
     return overlays;
 }

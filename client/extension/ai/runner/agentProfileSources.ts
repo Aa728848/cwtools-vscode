@@ -4,7 +4,7 @@ import type { AgentAuthorization, AgentRuntimeDomain } from '../types';
 import type { AgentProfileSource, RuntimeAgentProfile } from './agentProfileCatalog';
 
 const AUTHORIZATIONS = new Set<AgentAuthorization>(['read_only', 'plan_write_only', 'workspace_write']);
-const DOMAINS = new Set<AgentRuntimeDomain>(['general', 'paradox', 'hybrid']);
+const DOMAINS = new Set<string>(['general', 'paradox', 'hybrid']);
 
 function scalar(value: string): string | boolean | number {
     const trimmed = value.trim();
@@ -49,8 +49,9 @@ function parseAgentMarkdown(content: string, fallbackName: string): RuntimeAgent
         frontmatterLists.get(key) ?? (frontmatter.has(key) ? list(frontmatter.get(key)!) : undefined);
     const authorization = String(scalar(frontmatter.get('authorization') ?? 'read_only')) as AgentAuthorization;
     const domainValue = frontmatter.get('domain');
-    const domain = domainValue ? String(scalar(domainValue)) as AgentRuntimeDomain : undefined;
-    if (!AUTHORIZATIONS.has(authorization) || (domain !== undefined && !DOMAINS.has(domain))) return undefined;
+    const rawDomain = domainValue ? String(scalar(domainValue)) : undefined;
+    if (!AUTHORIZATIONS.has(authorization) || (rawDomain !== undefined && !DOMAINS.has(rawDomain))) return undefined;
+    const domain: AgentRuntimeDomain | undefined = rawDomain ? 'paradox' : undefined;
     return {
         name: String(scalar(frontmatter.get('name') ?? fallbackName)),
         description: String(scalar(frontmatter.get('description') ?? match[2]!.trim().slice(0, 500) ?? fallbackName)),
@@ -59,10 +60,6 @@ function parseAgentMarkdown(content: string, fallbackName: string): RuntimeAgent
         authorizationCeiling: authorization,
         tools: readList('tools'),
         disallowedTools: readList('disallowedTools'),
-        subagents: readList('subagents'),
-        subagentCapabilities: frontmatter.has('subagentCommand') ? {
-            command: scalar(frontmatter.get('subagentCommand') ?? 'false') === true,
-        } : undefined,
         maxIterations: frontmatter.has('maxIterations')
             ? Math.max(1, Math.min(10_000, Number(scalar(frontmatter.get('maxIterations')!)) || 1))
             : undefined,

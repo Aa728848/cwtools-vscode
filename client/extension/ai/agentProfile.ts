@@ -17,24 +17,22 @@ export const DEFAULT_AGENT_PROFILE: Readonly<AgentProfileSelection> = Object.fre
     strategy: 'auto',
 });
 
-const DOMAINS = new Set<AgentDomain>(['paradox', 'general', 'hybrid']);
+const DOMAINS = new Set<string>(['paradox', 'general', 'hybrid']);
 const INTENTS = new Set<AgentIntent>(['auto', 'execute', 'plan', 'explore', 'review']);
-const STRATEGIES = new Set<AgentExecutionStrategy>(['auto', 'single', 'multi']);
-
-const MULTI_AGENT_RE = /\b(multi(?:ple)?[-\s]?agents?|sub[-\s]?agents?|dispatch_agents|parallel agents?|in parallel)\b|多\s*agent|子\s*agent|并行.*agent|并行处理/i;
+const STRATEGIES = new Set<string>(['auto', 'single', 'multi']);
 
 export function cloneAgentProfile(profile: AgentProfileSelection = DEFAULT_AGENT_PROFILE): AgentProfileSelection {
     return {
-        domain: profile.domain,
+        domain: 'paradox',
         intent: profile.intent,
-        strategy: profile.strategy,
+        strategy: profile.strategy === 'auto' ? 'auto' : 'single',
         ...(profile.profileName ? { profileName: profile.profileName } : {}),
     };
 }
 
-/** Build the only profile exposed by the normal composer: domain is selectable; routing stays automatic. */
-export function profileForUserDomain(domain: AgentDomain): AgentProfileSelection {
-    return { domain, intent: 'auto', strategy: 'auto' };
+/** Build the default Paradox profile exposed by the composer; routing stays automatic. */
+export function profileForUserDomain(_domain: AgentDomain = 'paradox'): AgentProfileSelection {
+    return { domain: 'paradox', intent: 'auto', strategy: 'auto' };
 }
 
 export function sameAgentProfile(left: AgentProfileSelection, right: AgentProfileSelection): boolean {
@@ -47,9 +45,9 @@ export function sameAgentProfile(left: AgentProfileSelection, right: AgentProfil
 export function isAgentProfileSelection(value: unknown): value is AgentProfileSelection {
     if (!value || typeof value !== 'object') return false;
     const candidate = value as Partial<AgentProfileSelection>;
-    return DOMAINS.has(candidate.domain as AgentDomain)
+    return DOMAINS.has(candidate.domain as string)
         && INTENTS.has(candidate.intent as AgentIntent)
-        && STRATEGIES.has(candidate.strategy as AgentExecutionStrategy)
+        && STRATEGIES.has(candidate.strategy as string)
         && (candidate.profileName === undefined
             || (typeof candidate.profileName === 'string' && /^[a-zA-Z0-9_.-]{1,80}$/.test(candidate.profileName)));
 }
@@ -79,37 +77,21 @@ export function normalizeAgentProfile(value: unknown): AgentProfileSelection {
  * - the Agent escalates by calling `enter_plan_mode` (or `exit_plan_mode`)
  *   during the run, which the runner applies as a scheduling transition.
  *
- * Keyword routing used to run here as a third, implicit source. It has been
- * removed: a request that merely mentioned a plan produced plan mode, and an
- * ordinary question that happened to contain 设计/方案 produced
- * `plan_write_only`, which silently blocked the write the user had asked for.
- * With an explicit user intent the resolution is fully determined, so there is
- * no ambiguity left for a keyword heuristic to arbitrate. The Agent still
- * inspects the repository within the resolved authorization and escalates to
- * Plan itself when it finds a user-owned decision inspection cannot settle.
- *
- * Only the capability domain and the exploration/execution axis remain
- * derived: a non-`auto` intent keeps its own authorization and phase, while
- * `auto` resolves to an ordinary writable turn.
+ * The built-in Agent focuses exclusively on Paradox / CWTools semantics as a
+ * single-Agent assistant.
  */
 export function resolveAgentProfile(
     _text: string,
     profile: AgentProfileSelection = cloneAgentProfile(),
 ): ResolvedSchedulingDecision {
     const selection = normalizeAgentProfile(profile);
-    const domain: AgentRuntimeDomain = selection.domain;
+    const domain: AgentRuntimeDomain = 'paradox';
 
     // 'auto' is only reachable on the normal composer path, where no explicit
     // user pin exists. It means "let the run start writable and let the Agent
     // decide", so it resolves to an ordinary execution turn.
     const intent: Exclude<AgentIntent, 'auto'> = selection.intent === 'auto' ? 'execute' : selection.intent;
-
-    let strategy: Exclude<AgentExecutionStrategy, 'auto'>;
-    if (selection.strategy !== 'auto') {
-        strategy = selection.strategy;
-    } else {
-        strategy = MULTI_AGENT_RE.test(_text) ? 'multi' : 'single';
-    }
+    const strategy: Exclude<AgentExecutionStrategy, 'auto'> = 'single';
 
     const intentReason = selection.intent === 'auto' ? 'user selection (auto)' : 'user selection';
     const strategyReason = selection.strategy === 'auto' ? 'task scope' : 'user selection';
@@ -117,12 +99,12 @@ export function resolveAgentProfile(
         selection,
         intent,
         strategy,
-        reason: `domain: user selection; intent: ${intentReason}; strategy: ${strategyReason}`,
+        reason: `domain: paradox; intent: ${intentReason}; strategy: ${strategyReason}`,
         requiresUserDecision: false,
         routingSource: selection.intent === 'auto' ? 'deterministic' as const : 'manual' as const,
     };
     const evidence = [
-        'domain: user selection',
+        'domain: paradox',
         `intent: ${intentReason}`,
         `strategy: ${strategyReason}`,
     ];

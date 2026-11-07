@@ -17,13 +17,10 @@ import {
 import {
     FileToolHandler,
     ExternalToolHandler,
-    HeadTailTextBuffer,
     AgentToolExecutor,
     TOOL_DEFINITIONS,
     getAgentToolTargetFiles,
     SUPERSEDED_BY_LATER_SAME_FILE_WRITE_TOOLS,
-    PermissionPolicyStore,
-    processRegistry,
     resetSandboxStorageForTesting,
     getParadoxUserDataRoots,
     makeWorkspace,
@@ -167,13 +164,12 @@ describe('enforced central tool policy', () => {
         expect(callbackCalled).to.equal(false);
     });
 
-    it('blocks workspace writes when the effective policy preset is read-only', async () => {
-        stubConfigOverrides['policy.preset'] = 'read-only';
+    it('blocks workspace writes when scheduling authorization is read_only', async () => {
         const executor = new AgentToolExecutor({} as any, workspaceRoot);
         executor.fileWriteMode = 'auto';
         const target = path.join(workspaceRoot, 'blocked.txt');
-        const result = await executor.execute('write_file', { file: target, content: 'nope' }, { runnerOptions: { schedulingState: PARADOX_WRITE, topicId: 'policy-test' } } as any) as any;
-        expect(result.policyDenied).to.equal(true);
+        const result = await executor.execute('write_file', { file: target, content: 'nope' }, { runnerOptions: { schedulingState: PARADOX_EXPLORE, topicId: 'policy-test' } } as any) as any;
+        expect(result.success).to.equal(false);
         expect(fs.existsSync(target)).to.equal(false);
     });
 
@@ -485,18 +481,14 @@ describe('enforced central tool policy', () => {
         expect(afterCleanup.skillPolicyDenied).to.equal(undefined);
     });
 
-    it('enforces the General Coding domain even for unadvertised direct tool calls', async () => {
+    it('rejects unadvertised dynamic MCP tool calls and allows set_memory', async () => {
         const executor = new AgentToolExecutor({} as any, workspaceRoot);
         const context = {
             runnerOptions: {
-                schedulingState: GENERAL_WRITE,
+                schedulingState: PARADOX_WRITE,
                 abortSignal: new AbortController().signal,
             },
         } as any;
-
-        const semanticCall = await executor.execute('query_cwt_schema', { query: 'anything' }, context) as any;
-        expect(semanticCall.success).to.equal(false);
-        expect(semanticCall.error).to.include('Paradox-only capability');
 
         const mcpCall = await executor.execute('mcp_filesystem_read_file', { path: 'README.md' }, context) as any;
         expect(mcpCall.success).to.equal(false);
@@ -504,35 +496,12 @@ describe('enforced central tool policy', () => {
 
         const memoryCall = await executor.execute('set_memory', { key: 'secret', value: 'value' }, context) as any;
         expect(memoryCall.success).to.equal(true);
-        const generalMemory = await executor.execute('query_blackboard', { key: 'secret' }, context) as any;
-        expect(generalMemory.found).to.equal(true);
-        expect(generalMemory.entry.value).to.equal('value');
-        const paradoxMemory = await executor.execute('query_blackboard', { key: 'secret' }, {
-            runnerOptions: { schedulingState: PARADOX_WRITE },
-        } as any) as any;
-        expect(paradoxMemory).to.deep.equal({ found: false });
-
-        executor.blackboard.write('domain:paradox:topic:session:secret', 'paradox value', 'free_text', 'test');
-        const generalBlackboard = await executor.execute('query_blackboard', { key: 'secret' }, {
-            runnerOptions: { schedulingState: GENERAL_PARALLEL },
-        } as any) as any;
-        expect(generalBlackboard.found).to.equal(true);
-        expect(generalBlackboard.entry.value).to.equal('value');
-        const paradoxBlackboard = await executor.execute('query_blackboard', { key: 'secret' }, {
-            runnerOptions: { schedulingState: PARADOX_PARALLEL },
-        } as any) as any;
-        expect(paradoxBlackboard.found).to.equal(true);
-        expect(paradoxBlackboard.entry.value).to.equal('paradox value');
-        const otherTopicBlackboard = await executor.execute('query_blackboard', { key: 'secret' }, {
-            runnerOptions: { schedulingState: PARADOX_PARALLEL, topicId: 'other-topic' },
-        } as any) as any;
-        expect(otherTopicBlackboard).to.deep.equal({ found: false });
     });
 
-    it('limits coordinator write_file calls to the current plan artifact', async () => {
+    it('limits plan-mode write_file calls to the current plan artifact', async () => {
         const executor = new AgentToolExecutor({} as any, workspaceRoot);
         executor.fileWriteMode = 'auto';
-        const context = { runnerOptions: { schedulingState: GENERAL_PARALLEL, topicId: 'policy-test' } } as any;
+        const context = { runnerOptions: { schedulingState: PARADOX_PLAN, topicId: 'policy-test' } } as any;
         const projectTarget = path.join(workspaceRoot, 'client', 'blocked.ts');
 
         const blocked = await executor.execute('write_file', {
@@ -614,25 +583,6 @@ describe('enforced central tool policy', () => {
             workspacePaths.configurePrivateAgentStorage(undefined);
             fs.rmSync(privateRoot, { recursive: true, force: true });
         }
-    });
-});
-
-describe('HeadTailTextBuffer', () => {
-    it('keeps bounded head and tail output while recording omitted chars', () => {
-        const buffer = new HeadTailTextBuffer(12, 4);
-        buffer.append('abcdef');
-        buffer.append('ghijklmnop');
-
-        const output = buffer.toString();
-        expect(output).to.equal('abcdefgh\n... [4 chars omitted] ...\nmnop');
-    });
-
-    it('does not add an omission marker when output fits', () => {
-        const buffer = new HeadTailTextBuffer(12, 4);
-        buffer.append('hello ');
-        buffer.append('world');
-
-        expect(buffer.toString()).to.equal('hello world');
     });
 });
 
@@ -733,19 +683,6 @@ describe('agent sprite candidate tool contract', () => {
         expect(definition.function.description).to.include('CWT-FIRST schema lookup');
         expect(definition.function.parameters.properties).to.have.property('target');
         expect(definition.function.parameters.properties).to.have.property('name');
-    });
-
-    it('tells dispatch_agents to declare known Builder plannedFiles', () => {
-        const definition = TOOL_DEFINITIONS.find((tool: any) => tool.function.name === 'dispatch_agents');
-        if (!definition) {
-            throw new Error('dispatch_agents tool definition is missing');
-        }
-
-        const taskProperties = (definition.function.parameters.properties as any).tasks.items.properties;
-        expect((definition.function.parameters.properties as any).tasks.maxItems).to.equal(8);
-        expect(taskProperties.plannedFiles.description).to.include('Expected project files this writer will modify');
-        expect((definition.function.parameters.properties as any).userConstraints.properties)
-            .to.have.keys(['localisationOwnership', 'warningHandling']);
     });
 
     it('queries the shared localisation index when IndexService is provided', async () => {
@@ -1194,26 +1131,13 @@ describe('agent sprite candidate tool contract', () => {
 
 describe('agent tool topic artifacts', () => {
     let workspaceRoot: string;
-    let sandboxBackendStubs: sinon.SinonStub[];
 
-    // Every run_command case here is about approval policy, not about which host
-    // it happens to run on, so the backend probe is pinned to a present backend.
-    // Cases that exercise the no-backend degrade replace these stubs themselves.
     beforeEach(() => {
-        externalTools.useDirectSandboxRunnerForTests(true);
-        const sandboxRunner = require('../../extension/ai/runner/sandboxRunner') as typeof import('../../extension/ai/runner/sandboxRunner');
-        sandboxBackendStubs = [
-            sinon.stub(sandboxRunner, 'detectSandboxBackendAsync').resolves({ backend: 'bubblewrap', executable: '/usr/bin/bwrap' }),
-            sinon.stub(sandboxRunner, 'detectSandboxBackend').returns({ backend: 'bubblewrap', executable: '/usr/bin/bwrap' }),
-        ];
         workspaceRoot = makeWorkspace();
     });
 
     afterEach(() => {
-        for (const stub of sandboxBackendStubs) stub.restore();
-        externalTools.useDirectSandboxRunnerForTests(false);
         resetStubState();
-        PermissionPolicyStore.getInstance().clear();
         cleanupWorkspace(workspaceRoot);
     });
 
@@ -1223,805 +1147,6 @@ describe('agent tool topic artifacts', () => {
 
         expect(dir).to.equal(path.join(workspaceRoot, '.cwtools', 'media-topic', 'media'));
         expect(fs.existsSync(dir)).to.equal(true);
-    });
-
-    it('scopes process inspection and control to the owning task thread', () => {
-        const handler = new ExternalToolHandler({ workspaceRoot });
-        const terminate = sinon.spy();
-        const record = processRegistry.register('long task', workspaceRoot, 123, undefined, undefined, {
-            threadId: 'thread-owner',
-            terminate,
-        });
-        const foreignContext = { runnerOptions: { schedulingState: GENERAL_WRITE, threadId: 'thread-other' } } as any;
-        const ownerContext = { runnerOptions: { schedulingState: GENERAL_WRITE, threadId: 'thread-owner' } } as any;
-
-        expect(handler.listProcesses({}, foreignContext).processes.some(item => item.processId === record.processId)).to.equal(false);
-        expect(handler.readProcess({ processId: record.processId }, foreignContext).success).to.equal(false);
-        expect(handler.terminateProcess({ processId: record.processId }, foreignContext).success).to.equal(false);
-        expect(handler.terminateProcess({ processId: record.processId }, ownerContext).success).to.equal(true);
-        expect(terminate.calledOnce).to.equal(true);
-    });
-
-    it('starts and controls a captured command in the background', async function () {
-        this.timeout(10_000);
-        const handler = new ExternalToolHandler({ workspaceRoot });
-        const context = makeContext('background-process');
-        const result = await handler.runCommand({
-            command: `node -e "process.stdin.setEncoding('utf8'); process.stdin.once('data', function(d) { console.log(d.trim()); process.exit(0); }); setTimeout(function() { process.exit(2); }, 5000)"`,
-            background: true,
-            timeoutMs: 10_000,
-            requestEscalation: true,
-        }, {
-            ...context,
-            onPermissionRequest: async () => true,
-        } as any);
-
-        expect(result.status).to.equal('started');
-        expect(result.processId).to.be.a('string');
-        expect(handler.writeProcessStdin({ processId: result.processId!, text: 'hello background' }, context).success).to.equal(true);
-        // Windows sandbox/process brokers can take more than one second to attach
-        // stdio even after the background start record has been published.
-        for (let attempt = 0; attempt < 200; attempt++) {
-            if (handler.readProcess({ processId: result.processId! }, context).process?.status !== 'running') break;
-            await new Promise(resolve => setTimeout(resolve, 25));
-        }
-        const record = handler.readProcess({ processId: result.processId! }, context).process;
-        expect(record?.status).to.equal('completed');
-        expect(record?.outputPreview).to.include('hello background');
-    });
-
-    it('marks network host scopes as declared-only in approval metadata', async () => {
-        const handler = new ExternalToolHandler({ workspaceRoot });
-        let preflight: any;
-        const result = await handler.runCommand({
-            command: 'node --version',
-            networkAccess: true,
-            networkHosts: ['example.com'],
-        }, {
-            ...makeContext('network-scope'),
-            onPermissionRequest: async (_id: string, _tool: string, _description: string, _command: string, context: any) => {
-                preflight = context.preflight;
-                return true;
-            },
-        } as any);
-
-        expect(result.exitCode).to.equal(0);
-        expect(preflight.networkHosts).to.deep.equal(['example.com']);
-        expect(preflight.networkEnforcement).to.equal('declared-only');
-    });
-
-    it('requires approval for opaque inline code even when it runs inside the sandbox', async () => {
-        const handler = new ExternalToolHandler({ workspaceRoot });
-        let permissionRequests = 0;
-        const result = await handler.runCommand({
-            command: 'node -e "require(\'fs\').writeFileSync(\'sandboxed.txt\', \'ok\')"',
-            timeoutMs: 10_000,
-        }, {
-            ...makeContext('sandboxed-command'),
-            onPermissionRequest: async () => {
-                permissionRequests++;
-                return true;
-            },
-        } as any);
-
-        expect(result.exitCode).to.equal(0);
-        expect(permissionRequests).to.equal(1);
-        expect(fs.readFileSync(path.join(workspaceRoot, 'sandboxed.txt'), 'utf8')).to.equal('ok');
-    });
-
-    it('does not let learned approval rules bypass data-driven command review', async () => {
-        PermissionPolicyStore.getInstance().addRule({
-            tool: 'run_command', commandPrefix: ['xargs'], cwdScope: workspaceRoot, riskMax: 3, sessionOnly: true,
-        });
-        const handler = new ExternalToolHandler({ workspaceRoot });
-        let permissionRequests = 0;
-        const result = await handler.runCommand({ command: 'xargs echo', timeoutMs: 10_000 }, {
-            ...makeContext('opaque-data-command'),
-            onPermissionRequest: async (_id: string, _tool: string, _description: string, _command?: string, context?: any) => {
-                permissionRequests++;
-                expect(context?.preflight?.opaqueExecution).to.equal(true);
-                return false;
-            },
-        } as any);
-
-        expect(permissionRequests).to.equal(1);
-        expect(result.exitCode).to.equal(1);
-    });
-
-    it('honors a specific configured allow rule for Git metadata without broad Git approval', async () => {
-        stubConfigOverrides['shell.commandRules'] = [{ prefix: ['git', 'init'], decision: 'allow' }];
-        const handler = new ExternalToolHandler({ workspaceRoot });
-        let permissionRequests = 0;
-        const result = await handler.runCommand({ command: 'git init', timeoutMs: 10_000 }, {
-            ...makeContext('configured-git-rule'),
-            onPermissionRequest: async () => {
-                permissionRequests++;
-                return false;
-            },
-        } as any);
-
-        expect(result.exitCode).to.equal(0);
-        expect(permissionRequests).to.equal(0);
-        expect(fs.existsSync(path.join(workspaceRoot, '.git'))).to.equal(true);
-    });
-
-    it('does not let learned approvals bypass a configured prompt rule', async () => {
-        stubConfigOverrides['shell.commandRules'] = [{ prefix: ['node', '--version'], decision: 'prompt' }];
-        PermissionPolicyStore.getInstance().addRule({
-            tool: 'run_command', commandPrefix: ['node', '--version'], cwdScope: workspaceRoot, riskMax: 3, sessionOnly: true,
-        });
-        const handler = new ExternalToolHandler({ workspaceRoot });
-        let permissionRequested = false;
-        const result = await handler.runCommand({ command: 'node --version' }, {
-            ...makeContext('configured-prompt-rule'),
-            onPermissionRequest: async () => {
-                permissionRequested = true;
-                return false;
-            },
-        } as any);
-
-        expect(permissionRequested).to.equal(true);
-        expect(result.exitCode).to.equal(1);
-    });
-
-    it('rejects destructive commands until an explicit escalation is requested', async () => {
-        const handler = new ExternalToolHandler({ workspaceRoot });
-        const result = await handler.runCommand({ command: 'rm -rf build' }, makeContext('destructive-command'));
-        expect(result.exitCode).to.equal(1);
-        expect(result.stderr).to.include('Prohibited destructive shell operation');
-    });
-
-    it('rejects run_command working directories outside the workspace boundary', async () => {
-        const handler = new ExternalToolHandler({ workspaceRoot });
-        const result = await handler.runCommand({
-            command: 'echo hi',
-            cwd: `${workspaceRoot}-sibling`,
-        }, makeContext('media-topic'));
-
-        expect(result.exitCode).to.equal(1);
-        expect(result.stderr).to.include('Working directory must be within the workspace root');
-    });
-
-    it('requires explicit unsandboxed approval before generic shell commands mutate protected control paths', async () => {
-        const handler = new ExternalToolHandler({ workspaceRoot });
-        const directPath = await handler.runCommand({ command: 'mkdir .git', requestEscalation: true }, {
-            ...makeContext('media-topic'),
-            onPermissionRequest: async () => true,
-        } as any);
-        expect(directPath.exitCode).to.equal(1);
-        expect(directPath.stderr).to.include('protected Git/agent control paths');
-    });
-
-    it('grants approved Git commands only a visible one-shot .git metadata override', async () => {
-        const handler = new ExternalToolHandler({ workspaceRoot });
-        let preflight: any;
-        const result = await handler.runCommand({ command: 'git init', timeoutMs: 10_000 }, {
-            ...makeContext('media-topic'),
-            onPermissionRequest: async (_id: string, _tool: string, _description: string, _command: string, context: any) => {
-                preflight = context.preflight;
-                return true;
-            },
-        } as any);
-        expect(result.exitCode).to.equal(0);
-        expect(preflight.protectedPathOverrides).to.deep.equal(['.git']);
-        expect(preflight.unsandboxed).to.equal(false);
-        expect(preflight.escalation).to.equal(true);
-    });
-
-    // ─── no enforced sandbox backend: fail-open-with-consent ──────────────────
-    // A host without a verified backend must never dead-end in
-    // SandboxUnavailableError; it must ask once for an unsandboxed run instead.
-    const stubNoSandboxBackend = () => {
-        const sandboxRunner = require('../../extension/ai/runner/sandboxRunner') as typeof import('../../extension/ai/runner/sandboxRunner');
-        (sandboxRunner.detectSandboxBackendAsync as sinon.SinonStub).restore();
-        (sandboxRunner.detectSandboxBackend as sinon.SinonStub).restore();
-        const asyncStub = sinon.stub(sandboxRunner, 'detectSandboxBackendAsync').resolves(undefined);
-        const syncStub = sinon.stub(sandboxRunner, 'detectSandboxBackend').returns(undefined);
-        sandboxBackendStubs = [asyncStub, syncStub];
-    };
-
-    it('runs a one-shot unsandboxed command when no sandbox backend exists and the user approves', async () => {
-        stubNoSandboxBackend();
-        // Exercise the real broker path: it is the layer that used to throw
-        // SandboxUnavailableError, and it must now fall through to direct spawn.
-        externalTools.useDirectSandboxRunnerForTests(false);
-        const handler = new ExternalToolHandler({ workspaceRoot });
-        let permissionRequests = 0;
-        let preflight: any;
-        let description = '';
-
-        const result = await handler.runCommand({
-            command: 'node -e "console.log(1)"',
-            timeoutMs: 20_000,
-        }, {
-            ...makeContext('no-backend-approved'),
-            onPermissionRequest: async (_id: string, _tool: string, requestDescription: string, _command: string, context: any) => {
-                permissionRequests++;
-                description = requestDescription;
-                preflight = context.preflight;
-                return true;
-            },
-        } as any);
-
-        if (result.exitCode !== 0) throw new Error(`runCommand failed: ${result.stderr || result.stdout}`);
-        expect(permissionRequests).to.equal(1);
-        expect(description).to.include('[UNSANDBOXED]');
-        expect(preflight.unsandboxed).to.equal(true);
-        expect(preflight.sandboxMode).to.equal('disabled');
-        expect(preflight.reasons.some((reason: string) => /No enforced command sandbox backend is available on this host/.test(reason)))
-            .to.equal(true);
-        expect(result.exitCode).to.equal(0);
-        expect(result.stdout).to.include('1');
-    });
-
-    it('always prompts before an unsandboxed degrade even when a learned rule covers the command', async () => {
-        stubNoSandboxBackend();
-        externalTools.useDirectSandboxRunnerForTests(false);
-        // Auto-safe AND covered by a learned session rule: this is exactly the
-        // pair that used to run silently, and the pair that now must still ask.
-        PermissionPolicyStore.getInstance().addRule({
-            tool: 'run_command', commandPrefix: ['node', '--version'], cwdScope: workspaceRoot, riskMax: 3, sessionOnly: true,
-        });
-        const handler = new ExternalToolHandler({ workspaceRoot });
-        let permissionRequests = 0;
-        let preflight: any;
-
-        const result = await handler.runCommand({
-            command: 'node --version',
-            timeoutMs: 20_000,
-        }, {
-            ...makeContext('no-backend-memorized'),
-            onPermissionRequest: async (_id: string, _tool: string, _description: string, _command: string, context: any) => {
-                permissionRequests++;
-                preflight = context.preflight;
-                return true;
-            },
-        } as any);
-
-        // Leaving the OS sandbox is never covered by a memorized approval.
-        expect(permissionRequests).to.equal(1);
-        expect(preflight.unsandboxed).to.equal(true);
-        expect(preflight.sandboxMode).to.equal('disabled');
-        expect(result.exitCode).to.equal(0);
-    });
-
-    it('denies an unsandboxed degrade run and produces no side effect when the user refuses', async () => {
-        stubNoSandboxBackend();
-        externalTools.useDirectSandboxRunnerForTests(false);
-        const handler = new ExternalToolHandler({ workspaceRoot });
-        const sideEffect = path.join(workspaceRoot, 'degrade-denied.txt');
-        let permissionRequests = 0;
-
-        const result = await handler.runCommand({
-            command: 'node -e "require(\'fs\').writeFileSync(\'degrade-denied.txt\', \'x\')"',
-            timeoutMs: 20_000,
-        }, {
-            ...makeContext('no-backend-denied'),
-            onPermissionRequest: async () => {
-                permissionRequests++;
-                return false;
-            },
-        } as any);
-
-        expect(permissionRequests).to.equal(1);
-        expect(result.exitCode).to.equal(1);
-        expect(result.stderr).to.include('denied');
-        expect(fs.existsSync(sideEffect)).to.equal(false);
-    });
-
-    it('stays fail-closed for an unsandboxed degrade when no approval channel is attached', async () => {
-        stubNoSandboxBackend();
-        externalTools.useDirectSandboxRunnerForTests(false);
-        const handler = new ExternalToolHandler({ workspaceRoot });
-        const sideEffect = path.join(workspaceRoot, 'degrade-unattended.txt');
-
-        // makeContext carries no onPermissionRequest: nobody can consent, so the
-        // degrade must refuse instead of running unsandboxed on its own.
-        const result = await handler.runCommand({
-            command: 'node -e "require(\'fs\').writeFileSync(\'degrade-unattended.txt\', \'x\')"',
-            timeoutMs: 20_000,
-        }, makeContext('no-backend-unattended'));
-
-        expect(result.exitCode).to.equal(1);
-        expect(result.stderr).to.include('no permission handler configured');
-        expect(fs.existsSync(sideEffect)).to.equal(false);
-    });
-
-    it('keeps the sandboxed contract unchanged when a backend is available', async () => {
-        // Backend probe already resolves to bubblewrap in beforeEach; the direct
-        // runner keeps that stub from launching a real bwrap/broker process.
-        externalTools.useDirectSandboxRunnerForTests(true);
-        const handler = new ExternalToolHandler({ workspaceRoot });
-        let preflight: any;
-
-        const result = await handler.runCommand({
-            command: 'node -e "console.log(1)"',
-            timeoutMs: 20_000,
-        }, {
-            ...makeContext('backend-present'),
-            onPermissionRequest: async (_id: string, _tool: string, _description: string, _command: string, context: any) => {
-                preflight = context.preflight;
-                return true;
-            },
-        } as any);
-
-        expect(preflight.unsandboxed).to.equal(false);
-        expect(preflight.sandboxMode).to.equal('workspace-write');
-        expect(preflight.reasons.some((reason: string) => /No enforced command sandbox backend is available on this host/.test(reason)))
-            .to.equal(false);
-        expect(result.exitCode).to.equal(0);
-    });
-
-    it('relativizes quoted workspace script paths before running commands', async () => {
-        const handler = new ExternalToolHandler({ workspaceRoot });
-        const scriptDir = path.join(workspaceRoot, '!!! WIP', 'tools');
-        const scriptPath = path.join(scriptDir, 'TRTE_btn_gen.js');
-        fs.mkdirSync(scriptDir, { recursive: true });
-        fs.writeFileSync(scriptPath, 'console.log("ran script");\n', 'utf8');
-
-        const result = await handler.runCommand({
-            command: `node "${scriptPath}"`,
-            timeoutMs: 10000,
-        }, {
-            runnerOptions: {
-                schedulingState: GENERAL_WRITE,
-                topicId: 'media-topic',
-                abortSignal: new AbortController().signal,
-            },
-            onPermissionRequest: async () => true,
-        } as any);
-
-        if (result.exitCode !== 0) {
-            throw new Error(`runCommand failed: ${result.stderr || result.stdout}`);
-        }
-        expect(result.exitCode).to.equal(0);
-        expect(result.stdout).to.include('ran script');
-    });
-
-    it('maps the canonical scratch alias into the current topic scratch directory for commands', async () => {
-        const handler = new ExternalToolHandler({ workspaceRoot });
-        const topicScratch = path.join(workspaceRoot, '.cwtools', 'media-topic', 'scratch');
-        fs.mkdirSync(topicScratch, { recursive: true });
-        const targetPath = path.join(topicScratch, 'helper.js');
-        fs.writeFileSync(targetPath, 'console.log("ok");\n', 'utf8');
-
-        const result = await handler.runCommand({
-            command: 'node ".cwtools/scratch/helper.js"',
-            timeoutMs: 10000,
-        }, {
-            runnerOptions: {
-                schedulingState: GENERAL_WRITE,
-                topicId: 'media-topic',
-                abortSignal: new AbortController().signal,
-            },
-            onPermissionRequest: async () => true,
-        } as any);
-
-        if (result.exitCode !== 0) {
-            throw new Error(`runCommand failed: ${result.stderr || result.stdout}`);
-        }
-        expect(result.stdout).to.include('ok');
-    });
-
-    it('keeps run_command stdout and stderr out of streamed UI steps', async () => {
-        const handler = new ExternalToolHandler({ workspaceRoot });
-        const scriptDir = path.join(workspaceRoot, 'tools');
-        const scriptPath = path.join(scriptDir, 'emit-output.js');
-        fs.mkdirSync(scriptDir, { recursive: true });
-        fs.writeFileSync(scriptPath, [
-            "console.log('VISIBLE_STDOUT_MARKER');",
-            "console.error('VISIBLE_STDERR_MARKER');",
-            "console.log(process.env.PYTHONIOENCODING || '');",
-        ].join('\n'), 'utf8');
-        const steps: any[] = [];
-
-        const result = await handler.runCommand({
-            command: 'node "tools/emit-output.js"',
-            timeoutMs: 10000,
-        }, {
-            runnerOptions: {
-                schedulingState: GENERAL_WRITE,
-                topicId: 'media-topic',
-                abortSignal: new AbortController().signal,
-            },
-            onPermissionRequest: async () => true,
-            onStep: (step: any) => steps.push(step),
-        } as any);
-
-        if (result.exitCode !== 0) {
-            throw new Error(`runCommand failed: ${result.stderr || result.stdout}`);
-        }
-        expect(result.stdout).to.include('VISIBLE_STDOUT_MARKER');
-        expect(result.stdout).to.include('utf-8');
-        expect(result.stderr).to.include('VISIBLE_STDERR_MARKER');
-        const streamed = steps.map(step => String(step.content ?? '')).join('\n');
-        expect(streamed).to.not.include('VISIBLE_STDOUT_MARKER');
-        expect(streamed).to.not.include('VISIBLE_STDERR_MARKER');
-    });
-
-    it('normalizes backslash-escaped quoted scratch script paths before running commands', async () => {
-        const handler = new ExternalToolHandler({ workspaceRoot });
-        const topicScratch = path.join(workspaceRoot, '.cwtools', 'media-topic', 'scratch');
-        fs.mkdirSync(topicScratch, { recursive: true });
-        const targetPath = path.join(topicScratch, 'agent_helper.js');
-        fs.writeFileSync(targetPath, 'console.log("escaped ok");\n', 'utf8');
-
-        const result = await handler.runCommand({
-            command: 'node \\".cwtools/scratch/agent_helper.js\\"',
-            timeoutMs: 10000,
-        }, {
-            runnerOptions: {
-                schedulingState: GENERAL_WRITE,
-                topicId: 'media-topic',
-                abortSignal: new AbortController().signal,
-            },
-            onPermissionRequest: async () => true,
-        } as any);
-
-        if (result.exitCode !== 0) {
-            throw new Error(`runCommand failed: ${result.stderr || result.stdout}`);
-        }
-        expect(result.stdout).to.include('escaped ok');
-    });
-
-    it('normalizes one-sided escaped quoted topic scratch script paths before running commands', async () => {
-        const handler = new ExternalToolHandler({ workspaceRoot });
-        const topicScratch = path.join(workspaceRoot, '.cwtools', 'topic_1779112553395', 'scratch');
-        fs.mkdirSync(topicScratch, { recursive: true });
-        const targetPath = path.join(topicScratch, 'search_fallen.js');
-        fs.writeFileSync(targetPath, 'console.log("topic escaped ok");\n', 'utf8');
-
-        const result = await handler.runCommand({
-            command: 'node \\".cwtools\\topic_1779112553395\\scratch\\search_fallen.js"',
-            timeoutMs: 10000,
-        }, {
-            runnerOptions: {
-                schedulingState: GENERAL_WRITE,
-                topicId: 'topic_1779112553395',
-                abortSignal: new AbortController().signal,
-            },
-            onPermissionRequest: async () => true,
-        } as any);
-
-        if (result.exitCode !== 0) {
-            throw new Error(`runCommand failed: ${result.stderr || result.stdout}`);
-        }
-        expect(result.stdout).to.include('topic escaped ok');
-    });
-
-    if (process.platform === 'win32') it('normalizes one-sided escaped quoted topic scratch paths for PowerShell commands', async () => {
-        const handler = new ExternalToolHandler({ workspaceRoot });
-        const topicScratch = path.join(workspaceRoot, '.cwtools', 'topic_1779112553395', 'scratch');
-        fs.mkdirSync(topicScratch, { recursive: true });
-        const targetPath = path.join(topicScratch, 'search_fallen.txt');
-        fs.writeFileSync(targetPath, 'powershell path ok\n', 'utf8');
-
-        const result = await handler.runCommand({
-            command: 'Get-Content \\".cwtools\\topic_1779112553395\\scratch\\search_fallen.txt"',
-            timeoutMs: 10000,
-        }, {
-            runnerOptions: {
-                schedulingState: GENERAL_WRITE,
-                topicId: 'topic_1779112553395',
-                abortSignal: new AbortController().signal,
-            },
-            onPermissionRequest: async () => true,
-        } as any);
-
-        if (result.exitCode !== 0) {
-            throw new Error(`runCommand failed: ${result.stderr || result.stdout}`);
-        }
-        expect(result.stdout).to.include('powershell path ok');
-    });
-
-    if (process.platform === 'win32') it('uses PowerShell for normal Windows commands instead of cmd quoting', async () => {
-        const handler = new ExternalToolHandler({ workspaceRoot });
-        const topicScratch = path.join(workspaceRoot, '.cwtools', 'topic_1779112553395', 'scratch');
-        fs.mkdirSync(topicScratch, { recursive: true });
-        const targetPath = path.join(topicScratch, 'search_fallen.txt');
-        fs.writeFileSync(targetPath, 'normal powershell path ok\n', 'utf8');
-
-        const result = await handler.runCommand({
-            command: 'Get-Content \\".cwtools\\topic_1779112553395\\scratch\\search_fallen.txt"',
-            timeoutMs: 10000,
-        }, {
-            runnerOptions: {
-                schedulingState: GENERAL_WRITE,
-                topicId: 'topic_1779112553395',
-                abortSignal: new AbortController().signal,
-            },
-            onPermissionRequest: async () => true,
-        } as any);
-
-        if (result.exitCode !== 0) {
-            throw new Error(`runCommand failed: ${result.stderr || result.stdout}`);
-        }
-        expect(result.stdout).to.include('normal powershell path ok');
-    });
-
-    it('classifies PowerShell read-only commands as safe auto-run commands', () => {
-        const handler = new ExternalToolHandler({ workspaceRoot }) as any;
-
-        expect(handler.isReadOnlyRunCommand('Select-String -Path "common/buildings/*.txt" -Pattern "planet"')).to.equal(true);
-        expect(handler.isReadOnlyRunCommand('Get-ChildItem -Path "common" -Recurse -Filter *.txt | Select-String -Pattern "trigger"')).to.equal(true);
-        expect(handler.isReadOnlyRunCommand('Get-Content "common/test.txt" | Select-Object -First 20')).to.equal(true);
-        expect(handler.isReadOnlyRunCommand('Select-String -Path "common/*.txt" -Pattern "planet" | Set-Content out.txt')).to.equal(false);
-    });
-
-    it('declares platform-specific run_command shells in the model-visible schema', () => {
-        const tool = TOOL_DEFINITIONS.find(def => def.function.name === 'run_command')!;
-        const shell = (tool.function.parameters as any).properties.shell;
-
-        expect(shell.enum).to.deep.equal(['auto', 'sh', 'bash', 'pwsh', 'powershell']);
-        expect(shell.description).to.include('sh/bash are valid on macOS/Linux only');
-        expect(shell.description).to.include('pwsh/powershell are valid on Windows only');
-        // shell=auto resolution priority is part of the model-visible contract.
-        expect(shell.description).to.include('pwsh (PowerShell 7+) then powershell on Windows');
-        expect(shell.description).to.include('bash then sh on macOS/Linux');
-        expect(tool.function.description).to.include('falls back to Windows PowerShell');
-    });
-
-    it('rejects explicit run_command shells that do not match the host platform', async () => {
-        const handler = new ExternalToolHandler({ workspaceRoot });
-        const shell = process.platform === 'win32' ? 'bash' : 'pwsh';
-        let permissionRequested = false;
-
-        const result = await handler.runCommand({
-            command: 'echo ok',
-            shell: shell as any,
-            timeoutMs: 1000,
-        }, {
-            onPermissionRequest: async () => {
-                permissionRequested = true;
-                return true;
-            },
-        } as any);
-
-        expect(permissionRequested).to.equal(false);
-        expect(result.exitCode).to.equal(1);
-        expect(result.stderr).to.include('Blocked:');
-        expect(result.stderr).to.include(process.platform === 'win32' ? 'macOS/Linux' : 'Windows');
-    });
-
-    it('does not request permission for read-only run_command invocations', async () => {
-        const handler = new ExternalToolHandler({ workspaceRoot });
-        let permissionRequested = false;
-
-        const result = await handler.runCommand({
-            command: 'ls .',
-            timeoutMs: 10000,
-        }, {
-            runnerOptions: {
-                schedulingState: GENERAL_WRITE,
-                topicId: 'media-topic',
-                abortSignal: new AbortController().signal,
-            },
-            onPermissionRequest: async () => {
-                permissionRequested = true;
-                return false;
-            },
-        } as any);
-
-        expect(permissionRequested).to.equal(false);
-        expect(result.stderr).to.not.include('no permission handler configured');
-    });
-
-    it('does not let a low-risk permission rule bypass higher-risk complex-shell preflight', async () => {
-        const handler = new ExternalToolHandler({ workspaceRoot });
-        const policy = PermissionPolicyStore.getInstance();
-        policy.clear();
-        policy.addRule({
-            tool: 'run_command',
-            commandPrefix: ['node'],
-            cwdScope: workspaceRoot,
-            riskMax: 1,
-            sessionOnly: true,
-        });
-
-        let permissionRequested = false;
-        const result = await handler.runCommand({
-            command: 'node -e "console.log($(pwd))"',
-            timeoutMs: 10000,
-        }, {
-            runnerOptions: {
-                schedulingState: GENERAL_WRITE,
-                topicId: 'media-topic',
-                abortSignal: new AbortController().signal,
-            },
-            onPermissionRequest: async () => {
-                permissionRequested = true;
-                return false;
-            },
-        } as any);
-
-        expect(permissionRequested).to.equal(true);
-        expect(result.exitCode).to.equal(1);
-        policy.clear();
-    });
-
-    it('records project file changes made by a command for the diff panel', async () => {
-        const handler = new ExternalToolHandler({ workspaceRoot });
-        const scriptDir = path.join(workspaceRoot, 'tools');
-        const scriptPath = path.join(scriptDir, 'change-file.js');
-        const targetPath = path.join(workspaceRoot, 'config.txt');
-        fs.mkdirSync(scriptDir, { recursive: true });
-        fs.writeFileSync(targetPath, 'before\n', 'utf8');
-        fs.writeFileSync(scriptPath, [
-            "const fs = require('fs');",
-            "fs.writeFileSync('config.txt', 'after\\n', 'utf8');",
-            "console.log('changed');",
-        ].join('\n'), 'utf8');
-
-        const snapshots: Array<{ filePath: string; previousContent: string | null }> = [];
-        const result = await handler.runCommand({
-            command: 'node "tools/change-file.js"',
-            timeoutMs: 10000,
-        }, {
-            runnerOptions: {
-                schedulingState: GENERAL_WRITE,
-                topicId: 'media-topic',
-                abortSignal: new AbortController().signal,
-            },
-            onPermissionRequest: async () => true,
-            onBeforeFileWrite: (filePath: string, previousContent: string | null) => {
-                snapshots.push({ filePath, previousContent });
-            },
-        } as any);
-
-        if (result.exitCode !== 0) {
-            throw new Error(`runCommand failed: ${result.stderr || result.stdout}`);
-        }
-        expect(fs.readFileSync(targetPath, 'utf8')).to.equal('after\n');
-        expect(snapshots).to.deep.include({ filePath: targetPath, previousContent: 'before\n' });
-        expect(result.changedFiles).to.deep.include(targetPath);
-        expect(result.writtenFiles).to.deep.include(targetPath);
-    });
-
-    it('returns command-written files even when no diff snapshot callback is configured', async () => {
-        const handler = new ExternalToolHandler({ workspaceRoot });
-        const scriptDir = path.join(workspaceRoot, 'tools');
-        const scriptPath = path.join(scriptDir, 'change-file-no-callback.js');
-        const targetPath = path.join(workspaceRoot, 'events', 'scripted_change.txt');
-        fs.mkdirSync(path.dirname(targetPath), { recursive: true });
-        fs.mkdirSync(scriptDir, { recursive: true });
-        fs.writeFileSync(targetPath, 'before\n', 'utf8');
-        fs.writeFileSync(scriptPath, [
-            "const fs = require('fs');",
-            "fs.writeFileSync('events/scripted_change.txt', 'after\\n', 'utf8');",
-        ].join('\n'), 'utf8');
-
-        const result = await handler.runCommand({
-            command: 'node "tools/change-file-no-callback.js"',
-            timeoutMs: 10000,
-        }, {
-            runnerOptions: {
-                schedulingState: GENERAL_WRITE,
-                topicId: 'media-topic',
-                abortSignal: new AbortController().signal,
-            },
-            onPermissionRequest: async () => true,
-        } as any);
-
-        if (result.exitCode !== 0) {
-            throw new Error(`runCommand failed: ${result.stderr || result.stdout}`);
-        }
-        expect(result.changedFiles).to.deep.include(targetPath);
-        expect(result.writtenFiles).to.deep.include(targetPath);
-        expect(result.recordedSnapshots).to.equal(0);
-    });
-
-    it('omits temporary helper scripts from command-recorded workspace changes', async () => {
-        const handler = new ExternalToolHandler({ workspaceRoot });
-        const scriptDir = path.join(workspaceRoot, 'tools');
-        const scriptPath = path.join(scriptDir, 'create-temp-and-change.js');
-        const targetPath = path.join(workspaceRoot, 'config.txt');
-        const helperPath = path.join(workspaceRoot, 'agent_helper.py');
-        fs.mkdirSync(scriptDir, { recursive: true });
-        fs.writeFileSync(targetPath, 'before\n', 'utf8');
-        fs.writeFileSync(scriptPath, [
-            "const fs = require('fs');",
-            "fs.writeFileSync('config.txt', 'after\\n', 'utf8');",
-            "fs.writeFileSync('agent_helper.py', 'print(\"temporary\")\\n', 'utf8');",
-        ].join('\n'), 'utf8');
-
-        const snapshots: Array<{ filePath: string; previousContent: string | null }> = [];
-        const result = await handler.runCommand({
-            command: 'node "tools/create-temp-and-change.js"',
-            timeoutMs: 10000,
-        }, {
-            runnerOptions: {
-                schedulingState: GENERAL_WRITE,
-                topicId: 'media-topic',
-                abortSignal: new AbortController().signal,
-            },
-            onPermissionRequest: async () => true,
-            onBeforeFileWrite: (filePath: string, previousContent: string | null) => {
-                snapshots.push({ filePath, previousContent });
-            },
-        } as any);
-
-        if (result.exitCode !== 0) {
-            throw new Error(`runCommand failed: ${result.stderr || result.stdout}`);
-        }
-        expect(fs.existsSync(helperPath)).to.equal(true);
-        expect(snapshots).to.deep.include({ filePath: targetPath, previousContent: 'before\n' });
-        expect(snapshots.some(snapshot => snapshot.filePath === helperPath)).to.equal(false);
-        expect(result.changedFiles).to.deep.include(targetPath);
-        expect(result.changedFiles ?? []).to.not.include(helperPath);
-    });
-
-    it('still records edits to existing project scripts with helper-like names', async () => {
-        const handler = new ExternalToolHandler({ workspaceRoot });
-        const scriptDir = path.join(workspaceRoot, 'tools');
-        const scriptPath = path.join(scriptDir, 'modify-existing-helper.js');
-        const helperPath = path.join(workspaceRoot, 'helper.py');
-        fs.mkdirSync(scriptDir, { recursive: true });
-        fs.writeFileSync(helperPath, 'print("before")\n', 'utf8');
-        fs.writeFileSync(scriptPath, [
-            "const fs = require('fs');",
-            "fs.writeFileSync('helper.py', 'print(\"after\")\\n', 'utf8');",
-        ].join('\n'), 'utf8');
-
-        const snapshots: Array<{ filePath: string; previousContent: string | null }> = [];
-        const result = await handler.runCommand({
-            command: 'node "tools/modify-existing-helper.js"',
-            timeoutMs: 10000,
-        }, {
-            runnerOptions: {
-                schedulingState: GENERAL_WRITE,
-                topicId: 'media-topic',
-                abortSignal: new AbortController().signal,
-            },
-            onPermissionRequest: async () => true,
-            onBeforeFileWrite: (filePath: string, previousContent: string | null) => {
-                snapshots.push({ filePath, previousContent });
-            },
-        } as any);
-
-        if (result.exitCode !== 0) {
-            throw new Error(`runCommand failed: ${result.stderr || result.stdout}`);
-        }
-        expect(snapshots).to.deep.include({ filePath: helperPath, previousContent: 'print("before")\n' });
-    });
-
-    it('records previous-content snapshots for .shader and .fxh files changed by commands', async () => {
-        const handler = new ExternalToolHandler({ workspaceRoot });
-        const scriptDir = path.join(workspaceRoot, 'tools');
-        const scriptPath = path.join(scriptDir, 'modify-shaders.js');
-        const shaderPath = path.join(workspaceRoot, 'gfx', 'FX', 'test.shader');
-        const fxhPath = path.join(workspaceRoot, 'gfx', 'FX', 'test.fxh');
-        fs.mkdirSync(path.dirname(shaderPath), { recursive: true });
-        fs.mkdirSync(scriptDir, { recursive: true });
-        fs.writeFileSync(shaderPath, 'shader before\n', 'utf8');
-        fs.writeFileSync(fxhPath, '#include "before"\n', 'utf8');
-        fs.writeFileSync(scriptPath, [
-            "const fs = require('fs');",
-            "fs.writeFileSync('gfx/FX/test.shader', 'shader after\\n', 'utf8');",
-            "fs.writeFileSync('gfx/FX/test.fxh', '#include \"after\"\\n', 'utf8');",
-        ].join('\n'), 'utf8');
-
-        const snapshots: Array<{ filePath: string; previousContent: string | null }> = [];
-        const result = await handler.runCommand({
-            command: 'node "tools/modify-shaders.js"',
-            timeoutMs: 10000,
-        }, {
-            runnerOptions: {
-                schedulingState: GENERAL_WRITE,
-                topicId: 'shader-topic',
-                abortSignal: new AbortController().signal,
-            },
-            onPermissionRequest: async () => true,
-            onBeforeFileWrite: (filePath: string, previousContent: string | null) => {
-                snapshots.push({ filePath, previousContent });
-            },
-        } as any);
-
-        if (result.exitCode !== 0) {
-            throw new Error(`runCommand failed: ${result.stderr || result.stdout}`);
-        }
-        expect(snapshots).to.deep.include({ filePath: shaderPath, previousContent: 'shader before\n' });
-        expect(snapshots).to.deep.include({ filePath: fxhPath, previousContent: '#include "before"\n' });
-        expect(result.recordedSnapshots).to.be.at.least(2);
     });
 
     it('returns deployed asset paths as written files for downstream refresh', async () => {
@@ -2100,14 +1225,11 @@ describe('agent tool progress and aborts', () => {
         });
         const invalidate = sinon.spy();
 
-        const permission = sinon.stub().resolves(true);
         const result = await executor.execute('git_ops', { action: 'checkout', file: 'events/scripted_change.txt' }, {
             runnerOptions: { schedulingState: PARADOX_WRITE },
             agentRunner: { readTracker: { invalidate } },
-            onPermissionRequest: permission,
         } as any) as any;
 
-        expect(permission.calledOnce).to.equal(true);
         expect(invalidate.calledWith(changedFile)).to.equal(true);
         expect(sendRequest.calledOnce).to.equal(true);
         expect(sendRequest.firstCall.args[0]).to.equal('workspace/executeCommand');
@@ -2193,19 +1315,6 @@ describe('agent tool progress and aborts', () => {
         expect(permission.called).to.equal(false);
     });
 
-    it('rejects writer sub-agents when Plan mode fans out repository exploration', async () => {
-        const executor = createExecutor();
-        const result = await executor.execute('dispatch_agents', {
-            tasks: [{ id: 'writer', profileName: 'paradox-coder', prompt: 'Modify a project file.' }],
-        }, {
-            runnerOptions: { schedulingState: PARADOX_PLAN },
-        } as any) as any;
-
-        expect(result.success).to.equal(false);
-        expect(result.error).to.include("Sub-agent profile 'paradox-coder' is not allowed by scheduler profile");
-        expect(result.error).to.include('explore, planner, reviewer');
-    });
-
     it('enter_plan_mode narrows the shared scheduling state and blocks later writes', async () => {
         const executor = createExecutor();
         // Copy the shared fixture: the mode tools mutate the scheduling state that
@@ -2265,50 +1374,6 @@ describe('agent tool progress and aborts', () => {
         expect(runnerOptions.schedulingState.authorization).to.equal('plan_write_only');
     });
 
-    it('routes a dispatch_agents call with a member roster into peer-team mode', async () => {
-        const executor = createExecutor();
-        // A roster instead of tasks selects the team path; the roster is then
-        // validated against the same scheduler-profile gate as a DAG wave, so a
-        // profile outside the scheduler's allowance is rejected before any run.
-        const result = await executor.execute('dispatch_agents', {
-            objective: 'coordinate a peer team',
-            members: [{ name: 'writer', profileName: 'paradox-coder', brief: 'Modify a project file.' }],
-        }, {
-            runnerOptions: { schedulingState: PARADOX_PLAN },
-        } as any) as any;
-
-        expect(result.success).to.equal(false);
-        expect(result.error).to.include('Peer-team dispatch requires between');
-    });
-
-    it('rejects a peer roster whose profiles the scheduler does not allow', async () => {
-        const executor = createExecutor();
-        const result = await executor.execute('dispatch_agents', {
-            objective: 'coordinate a peer team',
-            members: [
-                { name: 'reader', profileName: 'explore', brief: 'Scan the project.' },
-                { name: 'writer', profileName: 'paradox-coder', brief: 'Modify a project file.' },
-            ],
-        }, {
-            runnerOptions: { schedulingState: PARADOX_PLAN },
-        } as any) as any;
-
-        expect(result.success).to.equal(false);
-        expect(result.error).to.include("Member 'writer' uses profile 'paradox-coder'");
-    });
-
-    it('does not expose dispatch_agents to an Explore scheduler', async () => {
-        const executor = createExecutor();
-        const result = await executor.execute('dispatch_agents', {
-            tasks: [{ id: 'writer', profileName: 'general-coder', prompt: 'Modify a project file.' }],
-        }, {
-            runnerOptions: { schedulingState: GENERAL_EXPLORE },
-        } as any) as any;
-
-        expect(result.success).to.equal(false);
-        expect(result.error).to.include("Tool 'dispatch_agents' is unavailable under the effective runtime policy");
-    });
-
     it('emits heartbeat progress while a tool is still running and stops after abort', async () => {
         const clock = sinon.useFakeTimers();
         try {
@@ -2316,15 +1381,18 @@ describe('agent tool progress and aborts', () => {
             sinon.stub(executor as any, 'executeInternal').returns(new Promise(() => undefined));
             const abortController = new AbortController();
             const steps: any[] = [];
-            const promise = executor.execute('dispatch_agents', {}, {
-                runnerOptions: { schedulingState: PARADOX_PARALLEL, abortSignal: abortController.signal },
+            const promise = executor.execute('deploy_mod_asset', {
+                sourcePath: 'gfx/source.dds',
+                targetRelativePath: 'gfx/target.dds',
+            }, {
+                runnerOptions: { schedulingState: PARADOX_WRITE, abortSignal: abortController.signal },
                 onStep: (step: any) => steps.push(step),
             } as any);
 
             await clock.tickAsync(15_001);
             const progress = steps.filter(step => step.type === 'orchestrator_progress');
             expect(progress.length).to.be.greaterThan(0);
-            expect(String(progress[0].content)).to.include('dispatch_agents');
+            expect(String(progress[0].content)).to.include('deploy_mod_asset');
 
             let settled = false;
             void promise.then(
@@ -2504,28 +1572,28 @@ describe('agent tool progress and aborts', () => {
         expect(result.error).to.include('not found in configuration');
     });
 
-    it('applies the same permission patterns to generic mcp_call and fails closed on ask', async () => {
-        setPermissionsConfig({ mcp: { 'filesystem_*': 'ask' } });
+    it('applies explicit deny permission patterns to generic mcp_call', async () => {
+        setPermissionsConfig({ mcp: { 'filesystem_*': 'deny' } });
         const executor = createExecutor();
         const result = await executor.execute('mcp_call', { server: 'filesystem', tool: 'read_file' }, {
             runnerOptions: { schedulingState: GENERAL_WRITE },
         } as any) as any;
 
         expect(result.success).to.equal(false);
-        expect(result.error).to.include('requires approval');
+        expect(result.error).to.include('denied by permission pattern');
         expect(result.error).to.include("'filesystem_*'");
     });
 
     it('forwards top-level dynamic MCP args to the MCP call', async () => {
         stubConfigOverrides['mcp.registerDynamicTools'] = true;
-        stubConfigOverrides['mcp.servers'] = [{ name: 'filesystem', capabilityDomain: 'general' }];
+        stubConfigOverrides['mcp.servers'] = [{ name: 'filesystem', capabilityDomain: 'both' }];
         const executor = createExecutor();
         const callTool = sinon.stub().resolves({ ok: true });
         sinon.stub(executor as any, 'getMcpClient').resolves({
             callTool,
             listTools: async () => ({ tools: [{ name: 'read_file', description: 'd', inputSchema: { type: 'object', properties: {} } }] }),
         });
-        await executor.getDynamicMcpToolDefinitions('utility', 'general');
+        await executor.getDynamicMcpToolDefinitions('build', 'paradox');
 
         const result = await executor.execute('mcp_filesystem_read_file', { path: 'README.md' }, {
             runnerOptions: { schedulingState: GENERAL_WRITE },
@@ -2538,7 +1606,7 @@ describe('agent tool progress and aborts', () => {
     });
 
     it('keeps mcp_call nested arguments intact', async () => {
-        stubConfigOverrides['mcp.servers'] = [{ name: 'filesystem', capabilityDomain: 'general' }];
+        stubConfigOverrides['mcp.servers'] = [{ name: 'filesystem', capabilityDomain: 'both' }];
         const executor = createExecutor();
         const callTool = sinon.stub().resolves({ ok: true });
 
@@ -2555,7 +1623,7 @@ describe('agent tool progress and aborts', () => {
     it('resolves underscore server names through the dynamic registration map', async () => {
         setStubConfigOverrides({
             'mcp.registerDynamicTools': true,
-            'mcp.servers': [{ name: 'my_server', type: 'stdio', capabilityDomain: 'general' }],
+            'mcp.servers': [{ name: 'my_server', type: 'stdio', capabilityDomain: 'both' }],
         });
         const executor = createExecutor();
         const callTool = sinon.stub().resolves({ ok: true });
@@ -2564,7 +1632,7 @@ describe('agent tool progress and aborts', () => {
             listTools: async () => ({ tools: [{ name: 'read_file', description: 'd', inputSchema: { type: 'object', properties: {} } }] }),
         });
 
-        const defs = await executor.getDynamicMcpToolDefinitions('utility' as any, 'general');
+        const defs = await executor.getDynamicMcpToolDefinitions('build', 'paradox');
         expect(defs.map((d: any) => d.function.name)).to.include('mcp_my_server_read_file');
 
         const result = await executor.execute('mcp_my_server_read_file', { path: 'x' }, {
@@ -2696,7 +1764,7 @@ describe('agent tool progress and aborts', () => {
         expect(committed.commit.rollback.attempted).to.equal(false);
     });
 
-    it('keeps sub-agent git and command tools out of the runtime', async () => {
+    it('keeps sub-agent git tools out of the runtime and rejects removed command tools', async () => {
         const executor = createExecutor();
         const executeInternal = sinon.stub(executor as any, 'executeInternal').resolves({ success: true });
         const context = {
@@ -2712,8 +1780,7 @@ describe('agent tool progress and aborts', () => {
         expect(gitResult.success).to.equal(false);
         expect(gitResult.error).to.include("Tool 'git_ops' is disabled in sub-agent sandbox context");
         expect(commandResult.success).to.equal(false);
-        expect(commandResult.error).to.include("Tool 'run_command' is disabled in sub-agent sandbox context");
-        expect(commandResult.terminalOutcome).to.equal('policy_denied');
+        expect(commandResult.error).to.include('Unknown tool: run_command');
         expect(executeInternal.called).to.equal(false);
     });
 });

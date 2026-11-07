@@ -86,16 +86,6 @@ const validators = {
     autoWriteFile: fields({ file: isString, isNewFile: isBoolean }),
     topicTitleGenerated: fields({ topicId: isString, title: isString }),
     topicForked: fields({ newTopicId: isString, title: isString }),
-    permissionRequest: fields({
-        permissionId: isString, itemId: isString, tool: isString, description: isString, availableDecisions: isStringArray,
-    }, {
-        threadId: optional(isString), turnId: optional(isString), command: optional(isString), allowAlways: optional(isBoolean),
-        proposedRule: optional(isObject), preflight: optional(isObject),
-    }),
-    permissionResolved: fields({ permissionId: isString, itemId: isString, decision: isString, reviewer: isString }, {
-        threadId: optional(isString), turnId: optional(isString),
-        reviewerProvider: optional(isString), reviewerModel: optional(isString), unsandboxed: optional(isBoolean),
-    }),
     questionRequest: fields({ questionId: isString, topicId: isString, questions: isQuestionItems }, {
         threadId: optional(isString), turnId: optional(isString),
     }),

@@ -4,9 +4,9 @@ export type MCPServerCapabilityDomain = 'paradox' | 'general' | 'both';
 
 export function isMcpServerAllowedForDomain(
     server: Pick<MCPServerConfig, 'capabilityDomain'> | undefined,
-    domain: AgentRuntimeDomain,
+    _domain: AgentRuntimeDomain = 'paradox',
 ): boolean {
     const declared = server?.capabilityDomain;
     if (!declared) return false;
-    return declared === 'both' || declared === domain;
+    return declared === 'both' || declared === 'paradox';
 }

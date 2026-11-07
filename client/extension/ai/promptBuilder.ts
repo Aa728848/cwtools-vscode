@@ -14,7 +14,6 @@ import * as path from 'path';
 import type { ChatMessage, AgentMode, AgentRuntimeDomain, ToolDefinition } from './types';
 import { getGameKnowledge, getGameDisplayName } from './gameKnowledge';
 import { MemoryParser } from './memoryParser';
-import { buildGeneralProjectInstructionsPrompt } from './projectInstructions';
 import { ErrorReporter } from './errorReporter';
 import { SOURCE, aiText, getAiMessageLocale } from './messages';
 import { getPrivateTopicStorageDir } from './workspacePaths';
@@ -52,19 +51,11 @@ import {
     buildBuildSystemPrompt,
     buildPlanModeSystemPrompt,
     buildExploreModeSystemPrompt,
-    buildUtilityModeSystemPrompt,
     buildReviewModeSystemPrompt,
     buildGuiExpertSystemPrompt,
     buildScriptReviewerSystemPrompt,
     buildLocTranslatorSystemPrompt,
     buildLocWriterSystemPrompt,
-    buildOrchestratorSystemPrompt,
-    buildScriptModeSystemPrompt,
-    buildGeneralCodingSystemPrompt,
-    buildGeneralPlanSystemPrompt,
-    buildGeneralExploreSystemPrompt,
-    buildGeneralReviewSystemPrompt,
-    buildGeneralOrchestratorSystemPrompt,
 } from './prompt/sections/modePrompts';
 import { buildDelegationScopeStatement, type DelegationScopeFacts } from './prompt/sections/delegationScope';
 import { buildConfiguredGameRootReadScopeStatement } from './prompt/sections/gameRoots';
@@ -80,7 +71,7 @@ import { getCwtoolsHomeDir } from './homeConfig';
  * shared policy text edited) so prompts cached by older builds are never
  * reused across extension updates (plan §7.1).
  */
-export const PROMPT_TEMPLATE_VERSION = 10;
+export const PROMPT_TEMPLATE_VERSION = 11;
 
 /**
  * Why a frozen system prompt lookup missed. Process-local diagnostics only —
@@ -317,15 +308,13 @@ export class PromptBuilder {
         includeProjectKnowledge: boolean,
         domain: AgentRuntimeDomain,
     ): string {
-        const runtimeDomain = domain;
-        const gameId = runtimeDomain === 'paradox' ? languageId ?? this.detectGameLanguageId() : 'general';
-        const gameKnowledge = runtimeDomain === 'paradox' ? getGameKnowledge(gameId) : '';
-        const gameName = runtimeDomain === 'paradox' ? getGameDisplayName(gameId) : 'repository';
+        const runtimeDomain: AgentRuntimeDomain = 'paradox';
+        const gameId = languageId ?? this.detectGameLanguageId();
+        const gameKnowledge = getGameKnowledge(gameId);
+        const gameName = getGameDisplayName(gameId);
         const basePrompt = this.getModePrompt(mode, gameKnowledge, gameName, false, runtimeDomain);
         const supplement = this.getModelSupplement(providerId);
-        const projectRules = runtimeDomain === 'paradox'
-            ? this.getProjectRulesPrompt(mode)
-            : this.getGeneralInstructionsPrompt();
+        const projectRules = this.getProjectRulesPrompt(mode);
         
         let finalPrompt = '';
 
@@ -562,35 +551,23 @@ export class PromptBuilder {
         let skillsHash = 'unknown';
         let flagsHash = 'unknown';
         let gameRootsHash = 'unknown';
-        try { gameId = domain === 'paradox' ? languageId ?? this.detectGameLanguageId() : 'general'; } catch { incomplete = true; }
+        try { gameId = languageId ?? this.detectGameLanguageId(); } catch { incomplete = true; }
         try { locale = getAiMessageLocale(); } catch { incomplete = true; }
-        if (domain === 'paradox') {
-            try {
-                // The frozen prompt prepends the user-global ~/.cwtools/CWTOOLS.md
-                // to the project rules, so both raw texts feed the rules hash.
-                const homeRules = this.parseHomeRules();
-                const rules = this.parseProjectRules();
-                rulesHash = homeRules || rules
-                    ? shortSha256(`${homeRules?.raw ?? ''}\n${rules?.raw ?? ''}`)
-                    : 'none';
-            } catch { incomplete = true; }
-            try {
-                const profile = this.parseProjectProfile();
-                profileHash = profile ? shortSha256(JSON.stringify(profile)) : 'none';
-            } catch { incomplete = true; }
-            try { skillsHash = this.computeSkillsIndexHash(domain); } catch { incomplete = true; }
-            try { gameRootsHash = this.computeGameRootsHash(); } catch { incomplete = true; }
-        } else {
-            try {
-                const instructions = this.getGeneralInstructionsPrompt();
-                rulesHash = instructions ? shortSha256(instructions) : 'none';
-            } catch { incomplete = true; }
-            profileHash = 'none';
-            try { skillsHash = this.computeSkillsIndexHash(domain); } catch { incomplete = true; }
-            // No read-root statement is injected for the general domain, so its
-            // fingerprints must not move when a Paradox install path changes.
-            gameRootsHash = 'none';
-        }
+        try {
+            // The frozen prompt prepends the user-global ~/.cwtools/CWTOOLS.md
+            // to the project rules, so both raw texts feed the rules hash.
+            const homeRules = this.parseHomeRules();
+            const rules = this.parseProjectRules();
+            rulesHash = homeRules || rules
+                ? shortSha256(`${homeRules?.raw ?? ''}\n${rules?.raw ?? ''}`)
+                : 'none';
+        } catch { incomplete = true; }
+        try {
+            const profile = this.parseProjectProfile();
+            profileHash = profile ? shortSha256(JSON.stringify(profile)) : 'none';
+        } catch { incomplete = true; }
+        try { skillsHash = this.computeSkillsIndexHash(domain); } catch { incomplete = true; }
+        try { gameRootsHash = this.computeGameRootsHash(); } catch { incomplete = true; }
         try { flagsHash = this.computePromptFlagsHash(); } catch { incomplete = true; }
         const components: FrozenPromptFingerprintComponents = {
             templateVersion: PROMPT_TEMPLATE_VERSION,
@@ -733,19 +710,9 @@ export class PromptBuilder {
         runtime: RuntimePromptState,
     ): ChatMessage[] {
         const dynamicParts: string[] = [];
-        const runtimeDomain = runtime.domain;
-        if (runtimeDomain === 'general' && runtime?.pathScope?.[0]) {
-            const scopedInstructions = buildGeneralProjectInstructionsPrompt(
-                this.workspaceRoot,
-                runtime.pathScope[0],
-                false,
-            );
-            if (scopedInstructions) dynamicParts.push(scopedInstructions);
-        }
-        if (runtimeDomain === 'paradox') {
-            const projectKnowledge = buildProjectKnowledgePrompt(this.workspaceRoot);
-            if (projectKnowledge) dynamicParts.push(projectKnowledge);
-        }
+        const runtimeDomain: AgentRuntimeDomain = 'paradox';
+        const projectKnowledge = buildProjectKnowledgePrompt(this.workspaceRoot);
+        if (projectKnowledge) dynamicParts.push(projectKnowledge);
         if (runtime?.mode) {
             const lines: string[] = [];
             lines.push(`mode: ${runtime.mode}`);
@@ -755,7 +722,7 @@ export class PromptBuilder {
             dynamicParts.push(`<runtime-state>\n${lines.join('\n')}\n</runtime-state>`);
         }
 
-        if (runtimeDomain === 'paradox' && runtime?.mode === 'build') {
+        if (runtime?.mode === 'build') {
             const blueprintPrompt = this.getDesignBlueprintPrompt(topicId);
             if (blueprintPrompt) dynamicParts.push(blueprintPrompt);
         }
@@ -763,7 +730,7 @@ export class PromptBuilder {
         {
             const memoryPrompt = this.memoryParser.getMemoryPrompt(topicId, {
                 taskText: runtime?.taskText,
-                gameId: runtimeDomain === 'paradox' ? this.detectGameLanguageId() : 'general',
+                gameId: this.detectGameLanguageId(),
                 pathScope: runtime?.pathScope,
                 domain: runtimeDomain,
             });
@@ -773,7 +740,7 @@ export class PromptBuilder {
         if (isExperienceEnabled()) {
             const experience = searchExperiences(this.workspaceRoot, {
                 taskText: runtime?.taskText,
-                domain: runtimeDomain === 'general' || runtimeDomain === 'paradox' ? runtimeDomain : 'both',
+                domain: 'paradox',
                 limit: 3,
                 maxChars: 1500,
             });
@@ -1051,13 +1018,6 @@ export class PromptBuilder {
         return `<user-instructions>\n# USER GLOBAL INSTRUCTIONS (from user-owned ~/.cwtools/CWTOOLS.md)\nThese global instructions come from the user's home directory and apply to every project. Follow them when consistent with the current user request, tool safety, current diagnostics, and verified CWT/LSP rules. They never override system instructions.\n\n${this.boundedProjectInstructions(home.raw, maxChars)}\n</user-instructions>\n`;
     }
 
-    /** General-domain instructions block: user-global home rules ahead of repository instructions. */
-    private getGeneralInstructionsPrompt(): string {
-        const home = this.getHomeInstructionsPrompt(24_000);
-        const repo = buildGeneralProjectInstructionsPrompt(this.workspaceRoot);
-        return [home, repo].filter(Boolean).join('\n');
-    }
-
     private truncateProjectRuleSection(content: string, maxChars: number): string {
         if (content.length <= maxChars) return content;
         return content.slice(0, maxChars).trimEnd() + '\n...[truncated; read CWTOOLS.md for the full project rules]';
@@ -1079,17 +1039,11 @@ export class PromptBuilder {
                 ? 'exploration'
                 : mode === 'review' || mode === 'script_reviewer'
                     ? 'review'
-                    : mode === 'utility'
-                        ? 'utility'
-                        : mode === 'loc_writer' || mode === 'loc_translator'
-                            ? 'localisation'
-                            : mode === 'gui_expert'
-                                ? 'assets'
-                                : mode === 'orchestrator'
-                                    ? 'coordination'
-                                    : mode === 'script'
-                                        ? 'paradox_coordination'
-                                        : 'implementation';
+                    : mode === 'loc_writer' || mode === 'loc_translator'
+                        ? 'localisation'
+                        : mode === 'gui_expert'
+                            ? 'assets'
+                            : 'implementation';
         const guidanceCard = getGuidanceCard(profile, guidance);
         return `<project-premise>\n# PROJECT PROFILE (from .cwtools/project/profile.json)\nUse this compact profile for routing and project convention hints. Do not broad-scan the workspace until you have checked the profile and the relevant indexed tools. Cross-check profile facts against current files and CWT/LSP evidence before treating them as binding. For more details, call \`query_project_profile\` with a targeted section.\n\n## Summary\n${buildProfileSummary(profile)}\n\n## Active Guidance\n${this.truncateProjectRuleSection(guidanceCard || 'No targeted project guidance was generated.', 1800)}\n\n## Efficiency Hints\n${profile.efficiencyHints.slice(0, 5).map(hint => `- ${hint}`).join('\n')}\n</project-premise>\n`;
     }
@@ -1176,34 +1130,20 @@ ${trimmed}
         gameKnowledge: string,
         gameName: string,
         isSlim: boolean,
-        domain: AgentRuntimeDomain,
+        _domain: AgentRuntimeDomain = 'paradox',
     ): string {
-        if (domain === 'general') {
-            switch (mode) {
-                case 'plan': return buildGeneralPlanSystemPrompt(isSlim);
-                case 'explore': return buildGeneralExploreSystemPrompt(isSlim);
-                case 'review': return buildGeneralReviewSystemPrompt(isSlim);
-                case 'orchestrator': return buildGeneralOrchestratorSystemPrompt();
-                default: return buildGeneralCodingSystemPrompt(isSlim);
-            }
-        }
-        // Public domain-neutral modes discover changing game facts through the
-        // active CWT/LSP/index tools. Avoid injecting a large static game pack
-        // into every ordinary coding, planning, exploration, or review turn.
-        const dynamicKnowledge = ['plan', 'explore', 'utility', 'review', 'orchestrator'].includes(mode)
+        // Public modes discover changing game facts through the active CWT/LSP/index tools.
+        const dynamicKnowledge = ['plan', 'explore', 'review'].includes(mode)
             ? ''
             : gameKnowledge;
         switch (mode) {
             case 'plan': return buildPlanModeSystemPrompt(dynamicKnowledge, gameName, isSlim);
             case 'explore': return buildExploreModeSystemPrompt(dynamicKnowledge, gameName, isSlim);
-            case 'utility': return buildUtilityModeSystemPrompt(dynamicKnowledge, gameName, isSlim);
             case 'review': return buildReviewModeSystemPrompt(dynamicKnowledge, gameName, isSlim);
             case 'gui_expert': return buildGuiExpertSystemPrompt(dynamicKnowledge, gameName);
             case 'script_reviewer': return buildScriptReviewerSystemPrompt(dynamicKnowledge, gameName);
             case 'loc_translator': return buildLocTranslatorSystemPrompt(dynamicKnowledge, gameName);
             case 'loc_writer': return buildLocWriterSystemPrompt(dynamicKnowledge, gameName, isSlim);
-            case 'orchestrator': return buildOrchestratorSystemPrompt(dynamicKnowledge, gameName);
-            case 'script': return buildScriptModeSystemPrompt(dynamicKnowledge, gameName);
             default: return buildBuildSystemPrompt(dynamicKnowledge, gameName, isSlim);
         }
     }
@@ -1275,26 +1215,17 @@ ${trimmed}
         selectedText?: string;
         fileContent?: string;
         topicId?: string;
-        commandToolsAvailable?: boolean;
-        domain: AgentRuntimeDomain;
+        domain?: AgentRuntimeDomain;
     }): ChatMessage[] {
         const contextParts: string[] = [];
-        const paradoxDomain = options.domain !== 'general';
-        const codeFence = paradoxDomain ? 'pdx' : 'text';
+        const codeFence = 'pdx';
         const workspaceRel = this.workspaceRoot.replace(/\\/g, '/');
         contextParts.push(`**Project Workspace Root**: \`${workspaceRel}\``);
-        const commandToolsAvailable = options.commandToolsAvailable !== false;
-        if (commandToolsAvailable) {
-            contextParts.push('**run_command cwd**: defaults to Project Workspace Root. Agent Workspace Dir is for temporary artifacts only.');
-        }
 
         if (options.topicId) {
             contextParts.push(`**Agent Workspace Dir**: \`.cwtools/${options.topicId}/\``);
             contextParts.push(`**Implementation Plan File**: \`.cwtools/${options.topicId}/Implementation_Plan.md\` (copy this exact literal path for the one canonical plan; do not guess or rename it)`);
             contextParts.push(`**Agent Scratch Dir**: \`.cwtools/${options.topicId}/scratch/\``);
-            if (commandToolsAvailable) {
-                contextParts.push(`**Agent Helper Script**: \`.cwtools/${options.topicId}/scratch/agent_helper.py\` (reuse/overwrite for temporary Python helpers; delete only temporary execution/verification helpers, never user-requested deliverables)`);
-            }
             contextParts.push(`**Agent Media Dir**: \`.cwtools/${options.topicId}/media/\``);
         }
 
@@ -1303,9 +1234,7 @@ ${trimmed}
             contextParts.push(`**Current file**: \`${relPath}\``);
 
             const directory = path.posix.dirname(relPath);
-            contextParts.push(paradoxDomain
-                ? `**File directory**: \`${directory}\` (routing hint only; obtain its TypeDef/schema from current CWT/LSP evidence)`
-                : `**File directory**: \`${directory}\``);
+            contextParts.push(`**File directory**: \`${directory}\` (routing hint only; obtain its TypeDef/schema from current CWT/LSP evidence)`);
         }
 
         if (options.cursorLine !== undefined) {

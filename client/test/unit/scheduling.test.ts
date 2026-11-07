@@ -3,7 +3,6 @@ import {
     AdaptiveConcurrencyController,
     authorizationAllowsEffect,
     executionModeForSchedulingState,
-    evaluateDispatchAdmission,
     normalizeSchedulingState,
     schedulingStateFromAdmission,
     transitionSchedulingState,
@@ -13,20 +12,19 @@ import { AgentInputQueue } from '../../extension/ai/runner/inputQueue';
 describe('Agent runtime scheduling', () => {
     it('projects execution labels without creating a second persisted state', () => {
         const state = schedulingStateFromAdmission({
-            domainProfile: 'general', authorization: 'workspace_write', initialPhase: 'execute',
+            domainProfile: 'paradox', authorization: 'workspace_write', initialPhase: 'execute',
             explicitDelegation: false, confidence: 1, evidence: ['test'],
         });
         expect(state).to.include({
-            domainProfile: 'general',
+            domainProfile: 'paradox',
             authorization: 'workspace_write',
             phase: 'execute',
             dispatch: 'single',
         });
-        expect(executionModeForSchedulingState(state)).to.equal('utility');
-        expect(executionModeForSchedulingState({ ...state, dispatch: 'parallel' })).to.equal('orchestrator');
+        expect(executionModeForSchedulingState(state)).to.equal('build');
     });
 
-    it('rejects missing or invalid scheduling state instead of reconstructing it', () => {
+    it('rejects missing or invalid scheduling state and migrates legacy domain/dispatch', () => {
         expect(() => normalizeSchedulingState(undefined)).to.throw('required');
         expect(() => normalizeSchedulingState({
             domainProfile: 'general',
@@ -47,14 +45,11 @@ describe('Agent runtime scheduling', () => {
             revision: 0,
         });
         expect(restored).to.include({
-            domainProfile: 'general', authorization: 'read_only', phase: 'execute', dispatch: 'single',
+            domainProfile: 'paradox', authorization: 'read_only', phase: 'execute', dispatch: 'single',
         });
     });
 
     it('degrades a persisted routingSource:workflow to unknown instead of throwing', () => {
-        // Topics written while the AI Workflow subsystem was active still carry
-        // this origin. The concept is gone, but the conversation is not: a legacy
-        // value must not make the whole topic unreadable.
         const legacy = normalizeSchedulingState({
             profileName: 'paradox-agent',
             domainProfile: 'paradox',
@@ -71,18 +66,16 @@ describe('Agent runtime scheduling', () => {
         expect(legacy.routingSource).to.equal(undefined);
         expect(legacy).to.include({ domainProfile: 'paradox', phase: 'execute', revision: 3 });
 
-        // Everything the surviving origins declare still round-trips untouched.
         for (const source of ['model', 'deterministic', 'user'] as const) {
             expect(normalizeSchedulingState({ ...legacy, routingSource: source }).routingSource).to.equal(source);
         }
 
-        // A value that was never a routing origin is still rejected outright.
         expect(() => normalizeSchedulingState({ ...legacy, routingSource: 'telepathy' })).to.throw('invalid');
     });
 
     it('never expands authorization during a runtime transition', () => {
         const readOnly = schedulingStateFromAdmission({
-            domainProfile: 'general', authorization: 'read_only', initialPhase: 'verify',
+            domainProfile: 'paradox', authorization: 'read_only', initialPhase: 'verify',
             explicitDelegation: false, confidence: 1, evidence: ['test'],
         });
         expect(() => transitionSchedulingState(readOnly, {
@@ -92,75 +85,11 @@ describe('Agent runtime scheduling', () => {
         })).to.throw('cannot expand authorization');
     });
 
-    it('allows read-only orchestration state while blocking external mutation effects', () => {
+    it('allows read-only internal state while blocking external mutation effects', () => {
         expect(authorizationAllowsEffect('read_only', 'none', true)).to.equal(true);
         expect(authorizationAllowsEffect('read_only', 'memory', true)).to.equal(true);
         expect(authorizationAllowsEffect('read_only', 'workspace_write', true)).to.equal(false);
-        expect(authorizationAllowsEffect('read_only', 'shell', false)).to.equal(false);
-    });
-
-    it('admits independent tasks and rejects duplicate or conflicting work', () => {
-        const accepted = evaluateDispatchAdmission([
-            { id: 'a', objective: 'inspect parser', profileName: 'explore', acceptanceCriteria: ['report'] },
-            { id: 'b', objective: 'inspect runner', profileName: 'reviewer', acceptanceCriteria: ['report'] },
-        ]);
-        expect(accepted.accepted).to.equal(true);
-
-        const conflict = evaluateDispatchAdmission([
-            { id: 'a', objective: 'edit a', expectedWrites: ['src/a.ts'] },
-            { id: 'b', objective: 'edit b', expectedWrites: ['src/a.ts'] },
-        ], { explicitDelegation: true });
-        expect(conflict.accepted).to.equal(false);
-        expect(conflict.conflicts).to.have.length(1);
-    });
-
-    it('admits a single task only through explicit delegation and still validates it', () => {
-        const task = [{ id: 'focused', objective: 'inspect one isolated subsystem', profileName: 'explore' }];
-        const implicit = evaluateDispatchAdmission(task);
-        expect(implicit.accepted).to.equal(false);
-        expect(implicit.reason).to.contain('explicit delegation');
-
-        const explicit = evaluateDispatchAdmission(task, { explicitDelegation: true });
-        expect(explicit.accepted).to.equal(true);
-
-        const invalid = evaluateDispatchAdmission([
-            { id: 'focused', objective: 'inspect one isolated subsystem', dependencies: ['missing'] },
-        ], { explicitDelegation: true });
-        expect(invalid.accepted).to.equal(false);
-        expect(invalid.reason).to.contain('missing task');
-    });
-
-    it('allows explicitly ordered writers to share a resource', () => {
-        const result = evaluateDispatchAdmission([
-            { id: 'a', objective: 'prepare a', expectedWrites: ['src/a.ts'] },
-            { id: 'b', objective: 'finish a', expectedWrites: ['src/a.ts'], dependencies: ['a'] },
-        ], { explicitDelegation: true });
-        expect(result.conflicts).to.deep.equal([]);
-        expect(result.accepted).to.equal(true);
-
-        const transitive = evaluateDispatchAdmission([
-            { id: 'a', objective: 'prepare a', expectedWrites: ['src/a.ts'] },
-            { id: 'b', objective: 'check a', dependencies: ['a'] },
-            { id: 'c', objective: 'finish a', expectedWrites: ['src/a.ts'], dependencies: ['b'] },
-        ], { explicitDelegation: true });
-        expect(transitive.conflicts).to.deep.equal([]);
-        expect(transitive.accepted).to.equal(true);
-    });
-
-    it('rejects task graphs with missing dependencies during admission', () => {
-        const result = evaluateDispatchAdmission([
-            { id: 'a', objective: 'prepare a', dependencies: ['missing'] },
-            { id: 'b', objective: 'inspect b' },
-        ], { explicitDelegation: true });
-        expect(result.accepted).to.equal(false);
-        expect(result.reason).to.contain('missing task');
-
-        const cyclic = evaluateDispatchAdmission([
-            { id: 'a', objective: 'prepare a', dependencies: ['b'] },
-            { id: 'b', objective: 'inspect b', dependencies: ['a'] },
-        ], { explicitDelegation: true });
-        expect(cyclic.accepted).to.equal(false);
-        expect(cyclic.reason).to.contain('cycle');
+        expect(authorizationAllowsEffect('read_only', 'git', false)).to.equal(false);
     });
 
     it('contracts provider capacity on rate limits and recovers after stability', () => {

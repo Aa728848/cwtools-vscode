@@ -14,12 +14,9 @@ export type { AgentToolFocus } from './types';
 
 const WRITE_EXECUTION_MODES = new Set<AgentMode>([
     'build',
-    'utility',
     'gui_expert',
     'loc_translator',
     'loc_writer',
-    'orchestrator',
-    'script',
 ]);
 
 const NON_DELIVERY_WRITE_TOOLS = new Set([
@@ -28,15 +25,15 @@ const NON_DELIVERY_WRITE_TOOLS = new Set([
 ]);
 
 const BUILD_LIFECYCLE_MODES = new Set<AgentMode>([
-    'build', 'gui_expert', 'loc_translator', 'loc_writer', 'script',
+    'build', 'gui_expert', 'loc_translator', 'loc_writer',
 ]);
 
 const READ_FOCUSED_MODES = new Set<AgentMode>([
-    'plan', 'orchestrator', 'explore', 'review', 'script_reviewer',
+    'plan', 'explore', 'review', 'script_reviewer',
 ]);
 
 export function initialToolFocusForMode(mode: AgentMode): AgentToolFocus | undefined {
-    if (BUILD_LIFECYCLE_MODES.has(mode) || mode === 'utility') return 'write';
+    if (BUILD_LIFECYCLE_MODES.has(mode)) return 'write';
     return READ_FOCUSED_MODES.has(mode) ? 'discovery' : undefined;
 }
 
@@ -85,14 +82,11 @@ export function finalResponseRequiresUserInput(content: string): boolean {
 }
 
 export function isExecutionActionTool(toolName: string): boolean {
-    if (toolName === 'dispatch_agents') return true;
     if (NON_DELIVERY_WRITE_TOOLS.has(toolName)) return false;
     const effect = TOOL_REGISTRY.get(toolName as import('./types').AgentToolName)?.effect;
     return effect === 'workspace_write'
-        || effect === 'shell'
         || effect === 'git'
-        || effect === 'media'
-        || effect === 'process';
+        || effect === 'media';
 }
 
 /**
@@ -121,19 +115,11 @@ const FOCUS_GUIDANCE: Record<AgentToolFocus, string> = {
 export function buildToolFocusReminder(
     mode: AgentMode,
     focus: AgentToolFocus | undefined,
-    domain: AgentRuntimeDomain,
+    _domain: AgentRuntimeDomain = 'paradox',
 ): string {
     const normalizedFocus = focus;
     if (!normalizedFocus) return '';
-    const guidance = domain === 'general'
-        ? normalizedFocus === 'discovery'
-            ? 'Inspect the repository and identify the exact implementation and verification surface; do not write yet.'
-            : normalizedFocus === 'write'
-                ? 'Implement the scoped change and run relevant commands through the policy engine.'
-                : normalizedFocus === 'validation'
-                        ? 'Cross-check the proposed or reviewed behavior against callers, diagnostics, tests, and current implementation.'
-                        : 'Synthesize the evidence, review the diff when applicable, and report verification and remaining risks.'
-        : FOCUS_GUIDANCE[normalizedFocus];
+    const guidance = FOCUS_GUIDANCE[normalizedFocus];
     return `<system-reminder>Current ${mode} focus: ${normalizedFocus}. ${guidance} `
         + 'This focus is advisory; use select_tools for any capability allowed by the current mode and policy.</system-reminder>';
 }
@@ -141,9 +127,8 @@ export function buildToolFocusReminder(
 export interface IterationLimitOptions {
     mode: AgentMode;
     baseContextLimit: number;
-    bypassSandbox?: boolean;
     override?: number;
-    /** When true, apply the bounded role-specific sub-Agent limits. */
+    /** When true, apply the bounded role-specific limits. */
     isSubAgent?: boolean;
 }
 
@@ -203,7 +188,6 @@ export function filterToolDefinitionsForMode(
     let filtered = tools.filter(t => {
         const entry = TOOL_REGISTRY.get(t.function.name as import('./types').AgentToolName);
         if (!entry) return false;
-        if (domain === 'general' && entry.domain === 'paradox') return false;
         
         return evaluateEffectiveToolPolicy(entry.name, {
             mode,
@@ -218,11 +202,6 @@ export function filterToolDefinitionsForMode(
         filtered = filtered.filter(t => !excluded.has(t.function.name));
     }
 
-    if (domain === 'general') {
-        filtered = filtered.map(tool =>
-            TOOL_REGISTRY.get(tool.function.name as import('./types').AgentToolName)?.generalSchema ?? tool);
-    }
-
     return filtered;
 }
 
@@ -230,14 +209,11 @@ const MODE_ITERATION_LIMITS: Record<AgentMode, { min: number; base: number; cap:
     build: { min: 20, base: 40, cap: 60 },
     plan: { min: 10, base: 18, cap: 28 },
     explore: { min: 8, base: 16, cap: 24 },
-    utility: { min: 15, base: 30, cap: 45 },
     review: { min: 15, base: 30, cap: 45 },
     gui_expert: { min: 15, base: 30, cap: 45 },
     script_reviewer: { min: 8, base: 15, cap: 23 },
     loc_translator: { min: 10, base: 20, cap: 30 },
     loc_writer: { min: 10, base: 20, cap: 30 },
-    orchestrator: { min: 32, base: 48, cap: 80 },
-    script: { min: 40, base: 64, cap: 96 },
 };
 
 export function resolveMaxToolIterations(options: IterationLimitOptions): number {

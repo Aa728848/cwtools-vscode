@@ -206,15 +206,15 @@ describe('tool disclosure and dedupe', () => {
         const service = new ToolDisclosureService();
         const pool = [...TOOL_REGISTRY.values()].map(entry => entry.schema);
         const context = {
-            mode: 'utility' as const,
-            domain: 'general' as const,
+            mode: 'build' as const,
+            domain: 'paradox' as const,
             dynamicSupported: true,
             loaded: new Set<string>(),
         };
         const initial = service.initialTools(pool, context);
-        expect(initial.some(tool => tool.function.name === 'run_command')).to.equal(false);
-        const selected = service.select({ tools: ['run_command', 'mcp_call'], reason: 'validate' }, pool, context);
-        expect(selected.loaded).to.deep.equal(['mcp_call', 'run_command']);
+        expect(initial.some(tool => tool.function.name === 'mcp_call')).to.equal(false);
+        const selected = service.select({ tools: ['mcp_call', 'git_ops'], reason: 'validate' }, pool, context);
+        expect(selected.loaded).to.deep.equal(['git_ops', 'mcp_call']);
         expect(selected.denied).to.deep.equal([]);
         const mcpTool = {
             type: 'function' as const,
@@ -239,12 +239,9 @@ describe('tool disclosure and dedupe', () => {
         const service = new ToolDisclosureService();
         const cases = [
             { mode: 'build', domain: 'paradox', expected: ['write_file', 'edit_file', 'replace_lines'] },
-            { mode: 'utility', domain: 'general', expected: ['write_file', 'edit_file', 'replace_lines', 'run_command', 'dispatch_agents'] },
-            { mode: 'gui_expert', domain: 'paradox', expected: ['write_file', 'edit_file', 'replace_lines', 'run_command', 'dispatch_agents'] },
+            { mode: 'gui_expert', domain: 'paradox', expected: ['write_file', 'edit_file', 'replace_lines'] },
             { mode: 'loc_translator', domain: 'paradox', expected: ['write_file', 'git_ops'] },
             { mode: 'loc_writer', domain: 'paradox', expected: ['write_file', 'git_ops'] },
-            { mode: 'orchestrator', domain: 'paradox', expected: ['write_file', 'git_ops', 'dispatch_agents'] },
-            { mode: 'script', domain: 'paradox', expected: ['write_file', 'git_ops', 'dispatch_agents'] },
         ] as const;
 
         for (const testCase of cases) {
@@ -262,7 +259,7 @@ describe('tool disclosure and dedupe', () => {
                 `${testCase.mode} disclosure boundary`,
             ).to.equal(true);
             service.select({
-                groups: ['file_write', 'command', 'git', 'media', 'orchestrator'],
+                groups: ['file_write', 'git', 'media'],
                 reason: 'runtime-authorized execution surface',
             }, modePool, context);
             const visible = service.initialTools(modePool, context).map(tool => tool.function.name);

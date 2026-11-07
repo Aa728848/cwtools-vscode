@@ -47,16 +47,6 @@ describe('tool definitions', () => {
         expect(TOOL_REGISTRY.get('web_find')?.riskLevel).to.equal(0);
     });
 
-    it('registers one task-scoped process management tool', () => {
-        const tool = TOOL_DEFINITIONS.find(definition => definition.function.name === 'manage_process');
-        expect(tool).to.not.equal(undefined);
-        const parameters = tool!.function.parameters as { properties: { action: { enum: string[] } } };
-        expect(parameters.properties.action.enum).to.deep.equal(['list', 'read', 'write', 'terminate']);
-        expect(TOOL_REGISTRY.get('manage_process')?.effect).to.equal('process');
-        expect(TOOL_REGISTRY.get('manage_process')?.isReadOnly).to.equal(false);
-        expect(TOOL_REGISTRY.get('manage_process')?.concurrencyClass).to.equal('interactive');
-    });
-
     it('keeps recursive PDX write schema bounded', () => {
         const tool = TOOL_DEFINITIONS.find(definition => definition.function.name === 'typed_pdx_write');
         expect(JSON.stringify(tool).length).to.be.lessThan(32_000);
@@ -157,7 +147,6 @@ describe('tool definitions', () => {
         expect(registry!.concurrencyClass).to.equal('lsp-limited');
         expect(registry!.riskLevel).to.equal(0);
         expect(registry!.stormExempt).to.equal(true);
-        expect(TOOL_REGISTRY.get('query_blackboard')!.stormExempt).to.equal(true);
         expect(TOOL_REGISTRY.get('get_diagnostics')!.stormExempt).to.equal(false);
         expect(TOOL_REGISTRY.get('workspace_symbols')!.stormExempt).to.equal(false);
     });

@@ -634,26 +634,14 @@ export interface AgentRunnerOptions {
     abortSignal?: AbortSignal;
     /** Enable streaming text tokens (emits text_delta steps) */
     streaming?: boolean;
-    /**
-     * Permission callback for bash/run_command tool (OpenCode strategy).
-     * Resolve with true=allow, false=deny.
-     */
-    onPermissionRequest?: (id: string, tool: string, description: string, command?: string, context?: any) => Promise<boolean>;
     /** Structured blocking clarification supplied by the active host UI. */
     onUserQuestion?: import('./types').AgentToolContext['onUserQuestion'];
     /** If provided, file mutations are written to this memory overlay instead of disk. */
     vfsOverlay?: Map<string, string>;
     /** Parent durable run when this run is a child agent/replay/fix turn. */
     parentRunId?: string;
-    /** Stable agent id inside a multi-agent graph. */
+    /** Stable agent id. */
     agentId?: string;
-    /**
-     * Agent Teams binding: the team this run belongs to. Set only for team
-     * member activations; team tools resolve their runtime from it.
-     */
-    teamId?: string;
-    /** Agent Teams member name for this run (the TaskNode id of the member). */
-    teamMemberName?: string;
     /** Durable provider thread id for protocol-backed runtimes. */
     threadId?: string;
     /** Durable provider turn id for protocol-backed runtimes. */
@@ -674,37 +662,19 @@ export interface AgentRunnerOptions {
     rebuildSystemPrompt?: boolean;
     /** Hook called before a file is written, allowing the caller to take a snapshot for rollback */
     onBeforeFileWrite?: (filePath: string, prevContent: string | null) => void;
-    /** Callback when a sub-agent creates or modifies a todo list plan */
+    /** Callback when a todo list plan is created or modified */
     onTodoUpdate?: import('./types').TodoUpdateCallback;
-    /** Leave terminal validation ownership to the parent orchestrator quality gate. */
+    /** Leave terminal validation ownership to the caller. */
     deferTerminalValidationToParent?: boolean;
-    /** 
-* A list of tool names to exclude from the set of available tools. 
-* Used in sub-Agent scenarios: disable tools that are not suitable for independent use by sub-Agents (such as network search), 
-* Prevent child Agents from falling into meaningless search loops. 
-*/
+    /** A list of tool names to exclude from the set of available tools. */
     excludeTools?: string[];
-    /** Sub-Agent sandboxing scope configuration (Phase 5) */
-    sandbox?: import('./orchestrator/subAgentSandbox').SubAgentSandbox;
-    /** Force file-mutating tools to bypass interactive diff confirmation. Used by orchestrator sub-agents. */
+    /** Force file-mutating tools to bypass interactive diff confirmation. */
     forceAutoApplyWrites?: boolean;
     /** Max time a write tool may wait for another file lock before returning a structured error. */
     writeQueueWaitTimeoutMs?: number;
-    /** 
-* Use condensed system prompt words for Orchestrator sub-agents. 
-* The sub-Agent should not directly ask questions to the user or wait for user approval, but should report the blocking points to the main Agent. 
-*/
+    /** Use condensed system prompt words. */
     useSlimPrompt?: boolean;
-    /**
-     * Delegation depth of this run: 0 for a top-level agent, parent depth + 1
-     * for a dispatched sub-agent. Read by the dispatch gate to decide whether
-     * this agent may open another delegation level; see
-     * `orchestrator/delegationDepth.ts` for the monotone accounting.
-     */
-    delegationDepth?: number;
-    /** 
-* Whether to restore the state from the last breakpoint snapshot that exited abnormally (breakpoint resume) 
-*/
+    /** Whether to restore the state from the last breakpoint snapshot that exited abnormally (breakpoint resume) */
     resumeFromState?: boolean;
     /**
      * Skill the Host already injected into this turn's user message via
@@ -745,9 +715,7 @@ export class AgentRunner {
         public readonly toolExecutor: AgentToolExecutor,
         private promptBuilder: PromptBuilder,
         private tokenCalibration?: TokenCalibrationTable,
-    ) {
-        this.toolExecutor.parentAgentRunner = this;
-    }
+    ) {}
 
     /**
      * Bind the next turn to the project root that owns the active editor.
@@ -1299,9 +1267,6 @@ export class AgentRunner {
         const turnRuntime = await turnRuntimePromise;
         const runRecord = turnRuntime.run;
         runId = runRecord.runId;
-        if (mode === 'script' || mode === 'orchestrator') {
-            this.toolExecutor.clearOrchestratorValidation(runId);
-        }
         // The `/skill` slash path embeds the SKILL.md body in the user message
         // before the run starts; arm its `allowed-tools` policy here, the first
         // point where the run id is known and still before any tool can execute.
@@ -1411,20 +1376,6 @@ export class AgentRunner {
         // DeepSeek prefix-cache optimization: use frozen (session-cached) system prompt
         // to ensure byte-level stability across API calls for cache hits.
         // rebuildSystemPrompt drops this fingerprint's cache entry before building (plan sec.7.1).
-        // A delegated child is told the shape of its own fixed scope so a host
-        // denial reads as policy instead of a transient error worth retrying. The
-        // host still enforces all of it independently. Only a real dispatched
-        // child has a sandbox; other slim runs (quality gate, side questions) get
-        // no statement.
-        const delegationScopeFacts = options?.sandbox
-            ? {
-                readOnly: options.sandbox.writeScope?.length === 0,
-                readScope: options.sandbox.readScope,
-                writeScope: options.sandbox.writeScope,
-                deniedWriteScopes: options.sandbox.deniedWriteScopes,
-                rejectedScopes: options.sandbox.rejectedScopes,
-            }
-            : undefined;
         const systemPrompt = options?.useSlimPrompt
             ? this.promptBuilder.buildFrozenSlimSystemPromptForMode(
                 mode,
@@ -1487,7 +1438,6 @@ export class AgentRunner {
         const initialFocusReminder = buildToolFocusReminder(mode, initialToolFocus, domain);
         const dynamicBlock: ChatMessage[] = [
             ...promptDynamicBlock,
-            ...(options?.useSlimPrompt ? this.promptBuilder.buildSlimDynamicPromptBlock(delegationScopeFacts) : []),
         ];
         if (options?.agentProfileInstructions?.trim()) {
             dynamicBlock.unshift({
@@ -1508,7 +1458,6 @@ export class AgentRunner {
         const contextMessages = this.promptBuilder.buildContextMessages({
             ...context,
             domain,
-            commandToolsAvailable: options?.useSlimPrompt !== true,
         });
         const fixedPromptMessages: ChatMessage[] = [
             { role: 'system', content: systemPrompt },
@@ -1663,10 +1612,7 @@ export class AgentRunner {
             build: AGENT.MODE_BUILD,
             plan: AGENT.MODE_PLAN,
             explore: AGENT.MODE_EXPLORE,
-            utility: AGENT.MODE_UTILITY,
             review: AGENT.MODE_REVIEW,
-            orchestrator: AGENT.MODE_ORCHESTRATOR,
-            script: AGENT.MODE_SCRIPT,
         };
         emitStep({
             type: 'thinking',
@@ -1723,17 +1669,10 @@ export class AgentRunner {
                 };
             }
 
-            const orchestratorValidation = mode === 'script' || mode === 'orchestrator'
-                ? this.toolExecutor.getOrchestratorValidation(runId)
-                : undefined;
             const toolValidationOutcome = terminalValidationOutcome(terminalValidation);
             const terminalValidationDeferred = options?.deferTerminalValidationToParent === true;
-            const validationPending = !terminalValidationDeferred
-                && (orchestratorValidation?.pendingOnly === true
-                    || (!orchestratorValidation && toolValidationOutcome === 'pending'));
-            const validationFailed = !terminalValidationDeferred
-                && ((orchestratorValidation?.success === false && orchestratorValidation.pendingOnly !== true)
-                    || (!orchestratorValidation && toolValidationOutcome === 'repair'));
+            const validationPending = !terminalValidationDeferred && toolValidationOutcome === 'pending';
+            const validationFailed = !terminalValidationDeferred && toolValidationOutcome === 'repair';
             if (validationPending) {
                 this.retainedResumeRuns.add(runId);
                 if (context.topicId) {
@@ -1757,16 +1696,14 @@ export class AgentRunner {
             }
             await clearResumeStateIfComplete();
             const validationErrors = validationPending || validationFailed ? [{
-                code: validationPending
-                    ? 'VALIDATION_PENDING'
-                    : orchestratorValidation ? 'orchestrator_quality_gate' : 'post_write_validation',
+                code: validationPending ? 'VALIDATION_PENDING' : 'post_write_validation',
                 severity: 'error' as const,
-                message: orchestratorValidation?.summary ?? (validationPending
+                message: validationPending
                     ? aiText(
                         'Written files are saved, but final deterministic validation is still pending. The run can be resumed.',
                         '文件已写入，但最终确定性验证仍在等待中；该运行可以恢复。',
                     )
-                    : formatTerminalValidationFeedback(terminalValidation)),
+                    : formatTerminalValidationFeedback(terminalValidation),
                 line: 0,
                 column: 0,
             }] : [];
@@ -2295,10 +2232,7 @@ export class AgentRunner {
             runEventSink: options?.runEventSink,
             tokenAccumulator: tokenAccumulator,
             onStep: emitStep,
-            onPermissionRequest: options?.onPermissionRequest,
             onUserQuestion: options?.onUserQuestion,
-            // Per-run scope for the anchor-failure guard: sub-agents share the
-            // executor, so each run contributes only its own scoped signatures.
             scopeId: runRecord.runId,
             onBeforeFileWrite: onFileWrite,
             onTodoUpdate: options?.onTodoUpdate,
@@ -2474,7 +2408,6 @@ export class AgentRunner {
         const iterationWindow = resolveMaxToolIterations({
             mode,
             baseContextLimit,
-            bypassSandbox,
             override: options?.maxIterations,
             isSubAgent: options?.useSlimPrompt === true,
         });
@@ -2608,27 +2541,8 @@ export class AgentRunner {
                         timestamp: Date.now(),
                     });
                 } else {
-                    emitStep({
-                        type: 'validation',
-                        content: `Agent runtime soft budget reached (${detail}). Waiting for explicit continuation approval.`,
-                        timestamp: Date.now(),
-                    });
-                    const approved = options?.onPermissionRequest
-                        ? await options.onPermissionRequest(
-                            `run_budget_${runRecord.runId}_${iteration}`,
-                            'continue_agent_run',
-                            `The Agent reached its soft runtime budget (${detail}). Continue for one additional budget window?\nAgent 已达到软运行预算（${detail}）。是否继续一个预算窗口？`,
-                            undefined,
-                            agentToolContext,
-                        )
-                        : false;
-                    if (!approved) {
-                        await saveRetainedResumeSnapshot();
-                        return `The Agent paused at its soft runtime budget (${detail}). Progress is checkpointed; continue the task to resume.`;
-                    }
-                    budgetTracker.extend();
-                    lastExtendedProgressRevision = progressRevision;
-                    lastExtendedActivityIteration = iteration;
+                    await saveRetainedResumeSnapshot();
+                    return `The Agent paused at its soft runtime budget (${detail}). Progress is checkpointed; continue the task to resume.`;
                 }
             }
             if (options?.tokenBudget && tokenAccumulator && tokenAccumulator.total >= options.tokenBudget) {
@@ -3343,7 +3257,7 @@ export class AgentRunner {
                         type: 'cache_stats',
                         content: `Prefix Cache: Hit ${cachedTokens} tokens (${(hitRate * 100).toFixed(1)}% hit), Created ${cacheCreationTokens} tokens. Saved approx. ¥${savedCostCny.toFixed(4)}.`,
                         timestamp: Date.now(),
-                        agentId: options?.sandbox?.agentId,
+                        agentId: options?.agentId,
                         cacheStats: {
                             cachedTokens,
                             totalTokens: promptTokens,
@@ -3362,7 +3276,7 @@ export class AgentRunner {
                         outputTokens: completionTokens,
                         hitRate,
                         savedCostCny
-                    }, { agentId: options?.sandbox?.agentId }).catch(error => {
+                    }, { agentId: options?.agentId }).catch(error => {
                         reportBestEffortFailure('ledger.append_cache_stats', { runId: runRecord.runId }, error);
                     });
                 }
@@ -3768,34 +3682,6 @@ export class AgentRunner {
             for (let i = 0; i < parsedCalls.length; i++) {
                 options?.abortSignal?.throwIfAborted();
                 const ci = parsedCalls[i]!;
-                
-                // Phase 5: 子 Agent 物理沙盒安全强硬拦截
-                if (options?.sandbox) {
-                    const { enforceSubAgentSafety } = require('./orchestrator/subAgentSandbox');
-                    const safetyCheck = enforceSubAgentSafety(options.sandbox, ci.toolName, ci.toolArgs, this.toolExecutor.workspaceRoot);
-                    if (!safetyCheck.allowed) {
-                        emitStep({
-                            type: 'validation',
-                            content: aiText(
-                                `[Sub-agent sandbox hard block] ${safetyCheck.reason}`,
-                                `[子 Agent 沙盒物理强拦截] ${safetyCheck.reason}`,
-                            ),
-                            timestamp: Date.now()
-                        });
-                        // B4: 结构化拒绝事件,供 reducer 投影聚合,而非只发字符串 step。
-                        runLedger.appendEvent(runRecord.runId, 'subagent_refused', {
-                            agentId: options.sandbox?.agentId,
-                            tool: ci.toolName,
-                            reason: 'SANDBOX_VIOLATION',
-                            detail: safetyCheck.reason,
-                            toolArgs: ci.toolArgs,
-                        }).catch(error => {
-                            reportBestEffortFailure('ledger.append_subagent_refusal', { runId: runRecord.runId, tool: ci.toolName }, error);
-                        });
-                        toolResults[i] = { success: false, error: safetyCheck.reason };
-                        continue;
-                    }
-                }
                 const { toolName, toolArgs } = ci;
 
                 if (questionCallViolatesSoleCallRule(questionCallIndex, parsedCalls.length)) {
@@ -3814,7 +3700,7 @@ export class AgentRunner {
                     && parsedCalls[submittedPlanIndex]?.invocationId !== ci.invocationId
                     && isExecutionActionTool(toolName)) {
                     const reason = 'An interactive Implementation Plan was submitted in this model step. '
-                        + 'Project writes, commands, and dispatch must wait for explicit user approval.';
+                        + 'Project writes must wait for explicit user approval.';
                     emitStep({
                         type: 'validation',
                         content: reason,
@@ -3836,8 +3722,6 @@ export class AgentRunner {
                     // Add tool-specific truncation recovery guidance
                     if (toolName === 'write_localisation') {
                         errMsg += '\n\n⚠️ Your entries array was truncated by the output length limit. Split into SMALLER batches: call write_localisation multiple times with at most 15 entries each.';
-                    } else if (toolName === 'dispatch_agents') {
-                        errMsg += '\n\n⚠️ Your tasks array was truncated or malformed because the prompt strings were too long. KEEP PROMPTS CONCISE. Do NOT embed massive file contents or long paths directly in the prompt. If you need to pass large data, use `set_memory` first and pass the memory key. Also, try dispatching fewer tasks at once.';
                     }
                     toolResults[i] = { ok: false, error: errMsg };
                     continue;

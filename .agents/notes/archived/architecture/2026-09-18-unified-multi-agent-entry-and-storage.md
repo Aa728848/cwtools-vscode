@@ -1,6 +1,6 @@
 # Agent Note: 多 Agent 工具面与持久化收敛为单一入口
 
-Status: implemented
+Status: archived
 
 ## Problem
 

@@ -127,12 +127,11 @@ permissions when applicable, and dispatch in `agentTools.ts`. The registry is
 the source of truth for gating, effects, risk, and concurrency.
 
 Keep every tool call behind the policy engine. Preserve hardened `path.relative`
-cwd checks, sorted multi-file locking, per-file write exclusion, command
-preflight, and plan-mode write gates. Active multi-agent tools are
-`dispatch_agents` (single entry: `tasks` for a DAG wave, `members` for a peer
-team), `query_blackboard`, `merge_results`, and the team collaboration tools
-(`team_send_message`, `team_members`, `team_close`, `team_task_*`); do not
-revive old tool names or retired model-visible patch tools.
+cwd checks, sorted multi-file locking, per-file write exclusion, and plan-mode
+write gates. The built-in Agent focuses exclusively on the Paradox / CWTools
+semantic domain as a single-Agent assistant; do not revive retired shell-command,
+multi-agent orchestration (`dispatch_agents`, `team_*`, `query_blackboard`,
+`merge_results`), or model-visible patch tools.
 
 New run-event types must update reducers and Webview renderers. Resume changes
 must retain V2 compatibility. Read `ARCHITECTURE.md` before large runner changes.

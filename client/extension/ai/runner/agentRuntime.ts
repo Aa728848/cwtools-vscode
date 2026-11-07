@@ -48,7 +48,6 @@ import {
 import { agentProfileCatalog, ToolActivationService, type ToolActivationSnapshot } from './agentProfileCatalog';
 import { createDirectoryAgentProfileSource } from './agentProfileSources';
 import { getProjectWorkspaceRoots } from '../workspacePaths';
-import { getAgentModelOverrides } from '../providerConfig';
 import { normalizeSchedulingState, schedulingStateFromAdmission } from './scheduling';
 import { ErrorReporter } from '../errorReporter';
 
@@ -247,15 +246,6 @@ export class AgentRuntime {
                 && (schedulingState.phase === 'execute' || schedulingState.phase === 'finalize')
                 ? 'plan'
                 : schedulingState.phase;
-        const profileDispatch = toolSnapshot.activated.includes('dispatch_agents')
-            && (profile.subagents === undefined || profile.subagents.length > 0)
-            ? schedulingState.dispatch
-            : 'single';
-        const configuredModels = typeof vs.workspace?.getConfiguration === 'function'
-            ? getAgentModelOverrides(vs.workspace.getConfiguration('stellarisLanguageServices.ai')
-                .get<Record<string, { provider: string; model: string }>>('orchestrator.agentModels'))
-            : undefined;
-        const modelBinding = configuredModels?.[profile.name];
         const priorOnStep = request.options?.onStep;
         const effectiveOptions = {
             ...request.options,
@@ -263,18 +253,18 @@ export class AgentRuntime {
             // narrow tools and authorization; they cannot cross this boundary.
             schedulingState: {
                 ...schedulingState,
-                domainProfile: schedulingState.domainProfile,
+                domainProfile: 'paradox' as const,
                 authorization: toolSnapshot.authorization,
                 phase: profilePhase,
                 phaseReason: profilePhase === schedulingState.phase
                     ? schedulingState.phaseReason
                     : `Runtime profile "${profile.name}" constrained the initial phase.`,
-                dispatch: profileDispatch,
+                dispatch: 'single' as const,
                 profileName: profile.name,
             },
             agentProfileInstructions: profile.instructions,
-            providerId: request.options?.providerId ?? modelBinding?.provider,
-            model: request.options?.model ?? modelBinding?.model,
+            providerId: request.options?.providerId,
+            model: request.options?.model,
             excludeTools: [...new Set([...existingExclusions, ...inactiveTools])],
             onStep: (step: AgentStep) => {
                 priorOnStep?.(step);
@@ -286,7 +276,7 @@ export class AgentRuntime {
         const bindingState: ModelBindingState = {
             source: request.options?.providerId || request.options?.model
                 ? 'request'
-                : modelBinding ? `profile:${profile.name}` : 'workspace-default',
+                : 'workspace-default',
             providerId: effectiveOptions.providerId,
             model: effectiveOptions.model,
         };
@@ -1052,7 +1042,7 @@ export class AgentRuntime {
                     topicId: input.topicId,
                     threadId: `${input.threadId}:side-question`,
                     schedulingState: schedulingStateFromAdmission({
-                        domainProfile: 'general',
+                        domainProfile: 'paradox',
                         authorization: 'read_only',
                         initialPhase: 'inspect',
                         explicitDelegation: false,

@@ -136,15 +136,6 @@ describe('agent tool file path safety', () => {
         expect(yamlResult.success).to.equal(true);
         const yamlBytes = fs.readFileSync(path.join(workspaceRoot, '.github', 'workflows', 'verify.yml'));
         expect(yamlBytes.subarray(0, 3).equals(Buffer.from([0xEF, 0xBB, 0xBF]))).to.equal(false);
-
-        const textRel = 'fixtures/unbalanced-template.txt';
-        const textResult = await handler.writeFile({
-            file: textRel,
-            content: 'literal template brace: {\n',
-        }, ctx);
-        expect(textResult.success).to.equal(true);
-        expect(fs.readFileSync(path.join(workspaceRoot, 'fixtures', 'unbalanced-template.txt'), 'utf8'))
-            .to.equal('literal template brace: {\n');
     });
 
     it('enforces UTF-8 without BOM for new PDXScript files even if utf8bom is requested', async () => {

@@ -1,6 +1,6 @@
 # Agent Note: DAG 执行引擎收敛到团队看板底座（GraphTeamExecutor）
 
-Status: implemented
+Status: archived
 
 ## Problem
 

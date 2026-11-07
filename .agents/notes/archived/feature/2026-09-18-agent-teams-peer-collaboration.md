@@ -1,6 +1,6 @@
 # Agent Note: Agent Teams 对等协作（邮箱 + CAS 任务看板 + 冷启动唤醒）
 
-Status: implemented
+Status: archived
 
 ## Problem
 

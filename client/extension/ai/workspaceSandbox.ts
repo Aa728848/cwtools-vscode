@@ -1,8 +1,7 @@
 import * as path from 'path';
 import * as vs from 'vscode';
-import { getAiStorageRoot, getPrivateAiStorageRoot, getPrivateTopicRoot, getProjectWorkspaceRoot } from './workspacePaths';
+import { getAiStorageRoot, getPrivateAiStorageRoot, getPrivateTopicRoot } from './workspacePaths';
 import { isPathInsideOrEqual } from '../pathScope';
-import { getSessionPermissionMode } from './runner/sessionPermissions';
 import {
     getConfiguredGameRoots,
     getAuxiliaryReadableRoots,
@@ -46,12 +45,6 @@ export function formatReadablePathForTool(filePath: string, workspaceRoot: strin
 
 export function escapeRegExp(value: string): string {
     return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
-
-export function isSecuritySandboxDisabled(): boolean {
-    const sessionMode = getSessionPermissionMode(getProjectWorkspaceRoot());
-    if (sessionMode) return sessionMode === 'full';
-    return vs.workspace.getConfiguration('stellarisLanguageServices.ai.developer').get<boolean>('disableSecuritySandbox') === true;
 }
 
 export function sanitizePathInput(inputPath: string): string {

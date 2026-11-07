@@ -46,7 +46,7 @@ describe('sidebar settings layout', () => {
                     'inlineMcpCacheTtl', 'inlineLspFastPath', 'inlineIncludeMcp', 'inlineOverlapStripping',
                     'translationPreviewProvider', 'translationPreviewModelInput',
                 ],
-                agent: ['agentWriteMode', 'approvalsAutoReview', 'agentModelRows'],
+                agent: ['agentWriteMode'],
                 tools: [
                     'webAccessMode', 'webSearchProvider', 'webContextSize', 'webAllowSyntheticProxy',
                     'webFallbackProviders', 'webAllowedDomains', 'webBlockedDomains', 'webCountry',
@@ -73,9 +73,8 @@ describe('sidebar settings layout', () => {
             expect(html).to.include('id="saveSettingsBtn"');
             expect(html).to.include('value="disabled"');
             expect(html).to.include('value="live"');
-            for (const role of ['explore', 'planner', 'general-coder', 'paradox-coder', 'localization-writer', 'reviewer', 'gui-expert']) {
-                expect(html).to.include(`class="agent-model-row" data-role="${role}"`);
-            }
+            expect(html).not.to.include('id="approvalsAutoReview"');
+            expect(html).not.to.include('id="agentProfilesSection"');
         });
     }
 

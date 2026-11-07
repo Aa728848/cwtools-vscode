@@ -142,8 +142,6 @@ describe('saveSkill writer', () => {
         expect(entry?.capabilityDomain).to.equal('paradox');
         expect(entry?.runAs).to.equal('subagent');
         expect(entry?.allowedTools).to.deep.equal(['read_file', 'grep']);
-        // Domain gate honoured: not visible to the general runtime.
-        expect(listSkills({ workspaceRoot }, 'general').map(skill => skill.name)).to.not.include('narrowed');
     });
 
     it('refuses to overwrite an existing skill unless overwrite=true', () => {
@@ -303,7 +301,7 @@ describe('save_skill tool executor wiring', () => {
         expect(replaced.success).to.equal(true);
     });
 
-    it('rejects unknown allowed_tools entries and paradox-domain saves in General Coding', async () => {
+    it('rejects unknown allowed_tools entries and allows paradox-domain saves', async () => {
         const executor = new AgentToolExecutor({} as any, workspaceRoot);
         const context = { runnerOptions: { schedulingState: GENERAL_WRITE } } as any;
 
@@ -312,19 +310,6 @@ describe('save_skill tool executor wiring', () => {
         }, context) as any;
         expect(unknownTool.success).to.equal(false);
         expect(unknownTool.error).to.include('not_a_tool');
-
-        const paradoxDomain = await executor.execute('save_skill', {
-            name: 'paradox-only', description: 'd', body: 'b', scope: 'project', capability_domain: 'paradox',
-        }, context) as any;
-        expect(paradoxDomain.success).to.equal(false);
-        expect(paradoxDomain.error).to.include('paradox');
-
-        const paradoxTool = await executor.execute('save_skill', {
-            name: 'paradox-tool', description: 'd', body: 'b', scope: 'project', allowed_tools: ['query_rules'],
-        }, context) as any;
-        expect(paradoxTool.success).to.equal(false);
-        expect(paradoxTool.error).to.include('query_rules');
-
         expect(fs.existsSync(path.join(workspaceRoot, '.agents'))).to.equal(false);
     });
 

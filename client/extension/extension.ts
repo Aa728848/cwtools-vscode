@@ -59,7 +59,6 @@ import { configurePrivateAgentStorage, configureWorkspaceCacheStorage, getProjec
 import { configureHistoryPolicy, enforceHistoryRetention } from './ai/runner/historyPolicy';
 import { TokenCalibrationTable, readCalibrationSnapshot } from './ai/runner/tokenCalibration';
 import { sha256Text } from './ai/runner/durableStorage';
-import { processRegistry } from './ai/runner/processRegistry';
 import { getAllLanguageIds, getAllProfiles, getCacheSettingKey, getKnownProfileByLanguageId, getProfileByLanguageId, getRulesRemoteUrl, getGameExeList, getGameFolderMapping, getAlternativeSteamFolderNames } from './gameProfiles';
 import { IndexService, type WorkspaceSymbolEntry } from './indexing/indexService';
 import { McpBridgeServer } from './ai/mcpBridgeServer';
@@ -1154,7 +1153,6 @@ export async function activate(context: ExtensionContext) {
 		maxBytes: historyConfig.get<number>('maxBytes', 268435456),
 		redactLocalPaths: historyConfig.get<boolean>('redactLocalPaths', true),
 	});
-	if (historyPersistence !== 'off') processRegistry.configureStorage(privateAgentRoot);
 	void enforceHistoryRetention(getPrivateAiStorageRoot()).catch(error =>
 		ErrorReporter.warn('AgentHistory', 'Failed to enforce Agent history retention', error)
 	);
@@ -3016,11 +3014,10 @@ export async function reloadExtension(prompt: string, buttonText?: string, force
 }
 
 export async function deactivate(): Promise<void> {
-	// Flush the Agent run ledger and process registry so the final state of any
-	// active run survives a window/extension close (VS Code awaits deactivate).
+	// Flush the Agent run ledger so the final state of any active run survives a window/extension close.
 	try {
 		const { runLedger } = require('./ai/runner/runLedger') as typeof import('./ai/runner/runLedger');
-		await Promise.allSettled([processRegistry.flush(), runLedger.flushAll()]);
+		await runLedger.flushAll();
 	} catch (error) {
 		ErrorReporter.warn('Extension', 'Failed to flush Agent state during deactivation', error);
 	}

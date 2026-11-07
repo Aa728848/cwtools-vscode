@@ -514,10 +514,7 @@ let settingsSubscriptionPools: Record<string, any> = {};
     let quickModelOptions: string[] = [];
     let quickModelCurrent = '';
     let quickReasoningEffort: ReasoningEffortValue = 'high';
-    let quickWriteMode: 'confirm' | 'auto' | 'auto_review' | 'full' = 'auto';
-    let fullAccessArmedUntil = 0;
-    /** Last known host-side cwtools.ai.developer.disableSecuritySandbox value (the 'full' tier). */
-    let settingsSandboxDisabled = false;
+    let quickWriteMode: 'confirm' | 'auto' = 'auto';
     let sideWorkspaceContent: HTMLElement | null = null;
     let settingsInSideWorkspace = false;
     let lastSettingsPageSignature = '';
@@ -2626,17 +2623,13 @@ let settingsSubscriptionPools: Record<string, any> = {};
         }
     }
 
-    /** Map host settings to the quick ladder tier: confirm < auto < auto_review < full. */
-    function deriveWriteTier(current: any): 'confirm' | 'auto' | 'auto_review' | 'full' {
-        settingsSandboxDisabled = current?.securitySandboxDisabled === true;
-        if (settingsSandboxDisabled) return 'full';
-        const writeMode = current?.agentFileWriteMode === 'auto' ? 'auto' : 'confirm';
-        if (writeMode === 'auto' && current?.approvals?.reviewer === 'auto_review') return 'auto_review';
-        return writeMode;
+    /** Map host settings to the file write mode: confirm | auto. */
+    function deriveWriteTier(current: any): 'confirm' | 'auto' {
+        return current?.agentFileWriteMode === 'auto' ? 'auto' : 'confirm';
     }
 
-    function updateQuickWriteModeSelector(mode: 'confirm' | 'auto' | 'auto_review' | 'full' | string | undefined): void {
-        quickWriteMode = mode === 'auto' || mode === 'auto_review' || mode === 'full' ? mode : 'confirm';
+    function updateQuickWriteModeSelector(mode: 'confirm' | 'auto' | string | undefined): void {
+        quickWriteMode = mode === 'auto' ? 'auto' : 'confirm';
         const select = document.getElementById('quickWriteModeSelect') as HTMLSelectElement | null;
         if (select) select.value = quickWriteMode;
         const label = document.getElementById('quickWriteModeLabel');
@@ -2644,48 +2637,36 @@ let settingsSubscriptionPools: Record<string, any> = {};
         const display = getQuickWriteModeLabel(quickWriteMode);
         if (label) label.textContent = display;
         if (trigger) {
-            trigger.classList.toggle('write-mode-elevated', quickWriteMode === 'auto_review');
-            trigger.classList.toggle('write-mode-danger', quickWriteMode === 'full');
-            trigger.title = (chatI18n.locale === 'zh-cn' ? `权限配置：${display}` : `Permission profile: ${display}`)
+            trigger.title = (chatI18n.locale === 'zh-cn' ? `文件写入模式：${display}` : `File write mode: ${display}`)
                 + (getQuickWriteModeDesc(quickWriteMode) ? ` — ${getQuickWriteModeDesc(quickWriteMode)}` : '');
             trigger.dataset.baseTitle = trigger.title;
         }
         renderQuickWriteModeMenu();
     }
 
-    function getQuickWriteModeLabel(mode: 'confirm' | 'auto' | 'auto_review' | 'full'): string {
+    function getQuickWriteModeLabel(mode: 'confirm' | 'auto'): string {
         if (chatI18n.locale === 'zh-cn') {
-            if (mode === 'full') return '完全放行';
-            return mode === 'auto_review' ? '自动审核' : mode === 'auto' ? '自动写入' : '确认写入';
+            return mode === 'auto' ? '自动写入' : '确认写入';
         }
-        if (mode === 'full') return 'Full access';
-        return mode === 'auto_review' ? 'Auto review' : mode === 'auto' ? 'Auto write' : 'Confirm write';
+        return mode === 'auto' ? 'Auto write' : 'Confirm write';
     }
 
-    function getQuickWriteModeDesc(mode: 'confirm' | 'auto' | 'auto_review' | 'full'): string {
+    function getQuickWriteModeDesc(mode: 'confirm' | 'auto'): string {
         if (chatI18n.locale === 'zh-cn') {
-            if (mode === 'full') return '仅当前工作区会话解除沙箱与审批边界（高危，关闭 VS Code 后失效）';
-            if (mode === 'auto_review') return '自动审核原本需要审批的操作；可能批准或拒绝，并会增加模型调用';
-            if (mode === 'auto') return '文件直接写入；风险操作仍询问';
-            return '写入前出 diff 确认';
+            return mode === 'auto' ? '文件直接保存' : '写入前出 diff 确认';
         }
-        if (mode === 'full') return 'Removes sandbox and approval boundaries for this workspace session only (dangerous)';
-        if (mode === 'auto_review') return 'Automatically reviews actions that require approval; it may allow or deny them and uses extra model calls';
-        if (mode === 'auto') return 'Files write directly; risky calls still ask';
-        return 'Diff confirmation before writes';
+        return mode === 'auto' ? 'Save files directly' : 'Diff confirmation before writes';
     }
 
     function renderQuickWriteModeMenu(): void {
         const list = document.getElementById('writeModeMenuList');
         const title = document.getElementById('writeModeMenuTitle');
-        if (title) title.textContent = chatI18n.locale === 'zh-cn' ? '权限配置' : 'Permission profile';
+        if (title) title.textContent = chatI18n.locale === 'zh-cn' ? '文件写入模式' : 'File write mode';
         if (!list) return;
         list.innerHTML = '';
-        (['confirm', 'auto', 'auto_review', 'full'] as const).forEach(mode => {
+        (['confirm', 'auto'] as const).forEach(mode => {
             const btn = document.createElement('button');
             btn.className = 'model-menu-item model-menu-item-stacked';
-            if (mode === 'auto_review') btn.classList.add('write-mode-item-elevated');
-            if (mode === 'full') btn.classList.add('write-mode-item-danger');
             btn.type = 'button';
             const nameEl = document.createElement('span');
             nameEl.textContent = getQuickWriteModeLabel(mode);
@@ -2696,14 +2677,6 @@ let settingsSubscriptionPools: Record<string, any> = {};
             btn.appendChild(descEl);
             btn.classList.toggle('active', mode === quickWriteMode);
             btn.addEventListener('click', () => {
-                if (mode === 'full' && quickWriteMode !== 'full' && Date.now() > fullAccessArmedUntil) {
-                    fullAccessArmedUntil = Date.now() + 10_000;
-                    nameEl.textContent = tr('Confirm Full access', '确认完全放行');
-                    descEl.textContent = tr('Click again within 10 seconds to remove sandbox and approval boundaries for this workspace session.', '请在 10 秒内再次点击，以解除当前工作区会话的沙箱与审批边界。');
-                    btn.focus();
-                    return;
-                }
-                fullAccessArmedUntil = 0;
                 updateQuickWriteModeSelector(mode);
                 syncSettingsControlsToWriteTier();
                 refreshSettingsOverview();
@@ -2715,13 +2688,10 @@ let settingsSubscriptionPools: Record<string, any> = {};
         });
     }
 
-    /** Mirror the quick ladder into the settings-page controls so both stay coherent. */
+    /** Mirror the quick selector into the settings-page control so both stay coherent. */
     function syncSettingsControlsToWriteTier(): void {
         const agentWriteMode = document.getElementById('agentWriteMode') as HTMLSelectElement | null;
         if (agentWriteMode) agentWriteMode.value = quickWriteMode === 'confirm' ? 'confirm' : 'auto';
-        const autoReviewEl = document.getElementById('approvalsAutoReview') as HTMLInputElement | null;
-        if (autoReviewEl) autoReviewEl.checked = quickWriteMode === 'auto_review';
-        settingsSandboxDisabled = quickWriteMode === 'full';
     }
 
     const quickModelSel = document.getElementById('quickModelSelect');
@@ -2764,21 +2734,15 @@ let settingsSubscriptionPools: Record<string, any> = {};
     if (chatI18n.locale !== 'zh-cn' && quickWriteModeSel) {
         const confirmOption = quickWriteModeSel.querySelector<HTMLOptionElement>('option[value="confirm"]');
         const autoOption = quickWriteModeSel.querySelector<HTMLOptionElement>('option[value="auto"]');
-        const autoReviewOption = quickWriteModeSel.querySelector<HTMLOptionElement>('option[value="auto_review"]');
-        const fullOption = quickWriteModeSel.querySelector<HTMLOptionElement>('option[value="full"]');
         if (confirmOption) confirmOption.textContent = 'Confirm';
         if (autoOption) autoOption.textContent = 'Auto';
-        if (autoReviewOption) autoReviewOption.textContent = 'Auto review';
-        if (fullOption) fullOption.textContent = 'Full access';
-        quickWriteModeSel.title = 'Permission profile';
-        quickWriteModeSel.setAttribute('aria-label', 'Permission profile');
+        quickWriteModeSel.title = 'File write mode';
+        quickWriteModeSel.setAttribute('aria-label', 'File write mode');
     }
 
-    applyComposerDomainLabels();
     renderQuickReasoningMenu();
 
     const composerAddBtn = document.getElementById('composerAddBtn');
-    const quickDomainTrigger = document.getElementById('quickDomainTrigger');
     const quickModelTrigger = document.getElementById('quickModelTrigger');
     const quickReasoningTrigger = document.getElementById('quickReasoningTrigger');
     composerAddBtn?.addEventListener('click', e => {
@@ -2795,23 +2759,6 @@ let settingsSubscriptionPools: Record<string, any> = {};
         e.stopPropagation();
         const reasoningMenu = document.getElementById('reasoningMenu');
         setReasoningMenuOpen(!reasoningMenu?.classList.contains('show'));
-    });
-    quickDomainTrigger?.addEventListener('click', e => {
-        e.stopPropagation();
-        const domainMenu = document.getElementById('domainMenu');
-        setDomainMenuOpen(!domainMenu?.classList.contains('show'));
-    });
-    const updateSchedulingDomain = (domain: SchedulingDomain) => {
-        vscode.postMessage({ type: 'switchSchedulingDomain', domain });
-    };
-    document.querySelectorAll<HTMLElement>('.composer-menu-item[data-scheduling-domain]').forEach(item => {
-        item.addEventListener('click', () => {
-            const domain = item.dataset.schedulingDomain;
-            if (domain === 'paradox' || domain === 'general' || domain === 'hybrid') {
-                updateSchedulingDomain(domain);
-                setDomainMenuOpen(false);
-            }
-        });
     });
     document.querySelectorAll<HTMLElement>('.composer-menu-item[data-composer-action]').forEach(item => {
         item.addEventListener('click', () => {
@@ -3084,13 +3031,9 @@ let settingsSubscriptionPools: Record<string, any> = {};
                 const reasoningSelect = event.target as HTMLSelectElement;
                 reasoningSelect.dataset.requested = reasoningSelect.value;
             }
-            if ((targetId === 'agentWriteMode' || targetId === 'approvalsAutoReview') && !settingsSandboxDisabled) {
-                // While the 'full' tier is active the ladder is the only exit — the page
-                // controls don't persist the sandbox flag, so they must not repaint the tier.
+            if (targetId === 'agentWriteMode') {
                 const writeSel = document.getElementById('agentWriteMode') as HTMLSelectElement | null;
-                const autoReviewEl = document.getElementById('approvalsAutoReview') as HTMLInputElement | null;
-                const base = writeSel?.value || 'confirm';
-                updateQuickWriteModeSelector(base === 'auto' && autoReviewEl?.checked ? 'auto_review' : base);
+                updateQuickWriteModeSelector(writeSel?.value || 'confirm');
             }
             if (settingsPage.classList.contains('active')) refreshSettingsOverview();
             settingsSavePending = false;
@@ -6896,53 +6839,6 @@ let settingsSubscriptionPools: Record<string, any> = {};
                 resolveFloatingCard('question', msg.questionId);
                 break;
 
-            case 'permissionRequest': {
-                appendCodexLiveSyntheticStep({
-                    type: 'permission_request',
-                    toolName: msg.tool || 'tool',
-                    permissionId: msg.permissionId,
-                    invocationId: msg.permissionId ? `permission:${msg.permissionId}` : undefined,
-                    content: msg.description || msg.command || msg.tool || '',
-                    toolArgs: {
-                        command: msg.command || undefined,
-                        description: msg.description || undefined,
-                    },
-                    toolResult: msg.preflight ? { preflight: msg.preflight } : undefined,
-                    timestamp: Date.now(),
-                });
-                showPermissionCard(msg.permissionId, msg.tool || '', msg.description || '', msg.command || '', !!msg.allowAlways, msg.preflight, msg.availableDecisions, msg.proposedRule);
-                break;
-            }
-
-            case 'permissionResolved': {
-                floatingPermissionIds.delete(msg.permissionId);
-                removeQueuedFloatingCards(card => card.dataset.permId === msg.permissionId);
-                document.querySelectorAll<HTMLElement>('.permission-card[data-perm-id]').forEach(card => {
-                    if (card.dataset.permId === msg.permissionId && !card.querySelector('[aria-pressed="true"]')) dismissResolvedCard(card);
-                });
-                const labels: Record<string, string> = {
-                    accept: tr('Allowed once', '已允许一次'),
-                    acceptForSession: tr('Allowed for this session', '已在本会话允许'),
-                    decline: tr('Denied', '已拒绝'),
-                    cancel: tr('Cancelled', '已取消'),
-                };
-                // Show who approved and, when the OS sandbox was off, that fact too:
-                // an auto-approved unsandboxed run must stay auditable after the fact.
-                const reviewerRoute = [msg.reviewerProvider, msg.reviewerModel].filter(Boolean).join('/');
-                const reviewerText = msg.reviewer === 'auto_review'
-                    ? [
-                        reviewerRoute ? `${tr('auto review', '自动审核')} ${reviewerRoute}` : tr('auto review', '自动审核'),
-                        msg.unsandboxed === true ? tr('no OS sandbox', '无沙箱执行') : '',
-                    ].filter(Boolean).join(' · ')
-                    : msg.reviewer;
-                appendCodexLiveSyntheticStep({
-                    type: 'thinking',
-                    content: `${tr('Permission', '权限')} · ${labels[msg.decision] || msg.decision} · ${reviewerText}`,
-                    timestamp: Date.now(),
-                });
-                break;
-            }
-
             case 'agentRoutingStatus':
                 updateAgentRoutingStatus(msg.phase, msg.schedulingState);
                 break;
@@ -6952,13 +6848,6 @@ let settingsSubscriptionPools: Record<string, any> = {};
                 break;
 
             case 'runtimeInspectorSnapshot': {
-                // Detailed runtime diagnostics remain available in Agent Manager.
-                // The composer deliberately exposes only the capability domain.
-                const trigger = document.getElementById('quickDomainTrigger');
-                if (trigger) trigger.title = tr(
-                    `Capability domain: ${getSchedulingDomainSummary()}`,
-                    `能力领域：${getSchedulingDomainSummary()}`,
-                );
                 break;
             }
 
@@ -8069,12 +7958,7 @@ let settingsSubscriptionPools: Record<string, any> = {};
                 inlineEnabled: !!inlineEnabled?.checked,
                 inlineProviderName,
                 mcpCount: document.querySelectorAll('#mcpServersList .mcp-server-block').length,
-                writeMode: (() => {
-                    if (settingsSandboxDisabled) return 'full';
-                    const base = writePermissionSel?.value || 'confirm';
-                    const autoReviewEl = document.getElementById('approvalsAutoReview') as HTMLInputElement | null;
-                    return base === 'auto' && autoReviewEl?.checked ? 'auto_review' : base;
-                })(),
+                writeMode: writePermissionSel?.value || 'confirm',
                 reasoningEffort: reasoningSel?.value || 'high',
             }, chatI18n),
         );
@@ -8354,37 +8238,6 @@ let settingsSubscriptionPools: Record<string, any> = {};
         (document.getElementById('inlineMcpCacheTtl') as HTMLInputElement).value = String(current.inlineCompletion?.mcpCacheTtlMs ?? 30000);
         (document.getElementById('agentWriteMode') as HTMLSelectElement).value = current.agentFileWriteMode || 'auto';
         updateQuickWriteModeSelector(deriveWriteTier(current));
-        const autoReviewEl = document.getElementById('approvalsAutoReview') as HTMLInputElement | null;
-        if (autoReviewEl) autoReviewEl.checked = current.approvals?.reviewer === 'auto_review';
-        const reviewerProviderSel = document.getElementById('approvalsReviewerProvider') as HTMLSelectElement | null;
-        const reviewerModelInput = document.getElementById('approvalsReviewerModelInput') as HTMLInputElement | null;
-        if (reviewerProviderSel) {
-            const savedReviewerProvider = (current.approvals?.reviewerProvider as string | undefined) || '';
-            const reviewerProviders = (providers || []).filter((p: any) => p && p.id);
-            reviewerProviderSel.innerHTML = '<option value="">' + escapeHtml(tr('Inherit main model', '沿用主模型')) + '</option>'
-                + reviewerProviders.map((p: any) => '<option value="' + escapeHtml(p.id) + '"'
-                    + (p.id === savedReviewerProvider ? ' selected' : '') + '>' + escapeHtml(p.name || p.id) + '</option>').join('');
-            const paintReviewerModels = () => {
-                const pid = reviewerProviderSel.value;
-                const providerDef = reviewerProviders.find((p: any) => p.id === pid);
-                const models: string[] = !pid ? [] : pid === 'ollama'
-                    ? (ollamaModels || []).map((m: any) => m.name)
-                    : (providerDef && Array.isArray(providerDef.models) ? providerDef.models : []);
-                if (reviewerModelInput) {
-                    reviewerModelInput.disabled = !pid;
-                    reviewerModelInput.placeholder = pid
-                        ? tr('Leave empty to use the provider default model', '留空使用该提供商默认模型')
-                        : tr('Inherits the main chat model', '继承对话模型');
-                }
-                setupApDropdown('approvalsReviewerModelInput', 'approvalsReviewerModelDatalist', () => models);
-            };
-            reviewerProviderSel.onchange = () => {
-                if (reviewerModelInput) reviewerModelInput.value = '';
-                paintReviewerModels();
-            };
-            paintReviewerModels();
-        }
-        if (reviewerModelInput) reviewerModelInput.value = (current.approvals?.reviewerModel as string | undefined) || '';
         const web = current.webAccess || {};
         const setWebValue = (id: string, value: unknown) => {
             const element = document.getElementById(id) as HTMLInputElement | HTMLSelectElement | null;
@@ -8415,69 +8268,6 @@ let settingsSubscriptionPools: Record<string, any> = {};
             current.mcp.servers.forEach((s: any) => addMcpServerBlock(s));
         }
         renderMcpFileServers();
-
-        // ── Child Agent model configuration: dynamically populate supplier/model drop-down ──────────────────────
-        const savedAgentModels = current.orchestrator?.agentModels || {};
-        settingsAgentModelHomeRoles.clear();
-        document.querySelectorAll('.agent-model-row').forEach(row => {
-            const role = (row as HTMLElement).dataset.role;
-            if (!role) return;
-            const provSel = row.querySelector('.agent-model-provider') as HTMLSelectElement;
-            const modSel = row.querySelector('.agent-model-model') as HTMLSelectElement;
-            if (!provSel || !modSel) return;
-
-            // Populate the supplier dropdown
-            provSel.innerHTML = `<option value="__inherit__">${tr('Inherit main settings', '继承主设置')}</option>`
-                + providers.filter((p: any) => p.supportsUtilityCalls !== false).map((p: any) => `<option value="${p.id}">${escapeHtml(p.name)}</option>`).join('');
-
-            const saved = savedAgentModels[role];
-            if (saved?.provider && saved.provider !== '__inherit__') {
-                provSel.value = saved.provider;
-            }
-
-            // Populate model dropdown (according to selected supplier)
-            const fillModels = (pid: string) => {
-                const provDef = providers.find((p: any) => p.id === pid);
-                const models: string[] = pid === 'ollama'
-                    ? (ollamaModels || []).map((m: any) => m.name)
-                    : (provDef ? provDef.models : []);
-                modSel.innerHTML = `<option value="__inherit__">${tr('Inherit main settings', '继承主设置')}</option>`
-                    + models.map(m => `<option value="${m}">${escapeHtml(m)}</option>`).join('');
-            };
-
-            if (saved?.provider && saved.provider !== '__inherit__') {
-                fillModels(saved.provider);
-                if (saved.model && saved.model !== '__inherit__') {
-                    modSel.value = saved.model;
-                }
-            }
-
-            // File-owned assignments (~/.cwtools/agent-models.json) get a
-            // provenance badge and read-only selects; the save collector skips
-            // them so a file value is never copied into VS Code settings.
-            row.querySelector('.agent-model-home-badge')?.remove();
-            provSel.disabled = false;
-            modSel.disabled = false;
-            if (saved && (saved as { source?: unknown }).source === 'home') {
-                settingsAgentModelHomeRoles.add(role);
-                provSel.disabled = true;
-                modSel.disabled = true;
-                const badge = document.createElement('span');
-                badge.className = 'agent-model-home-badge';
-                badge.textContent = '~/.cwtools';
-                badge.title = tr('From ~/.cwtools/agent-models.json — edit the file to change it.', '来自 ~/.cwtools/agent-models.json，请编辑文件修改。');
-                (row.querySelector('.settings-label') || row).appendChild(badge);
-            }
-
-            // Linked update model drop-down when supplier changes
-            provSel.onchange = () => {
-                if (provSel.value === '__inherit__') {
-                    modSel.innerHTML = `<option value="__inherit__">${tr('Inherit main settings', '继承主设置')}</option>`;
-                } else {
-                    fillModels(provSel.value);
-                }
-            };
-        });
 
         const inlineProviderSel = document.getElementById('inlineProvider') as HTMLSelectElement;
         const translationPreviewProviderSel = document.getElementById('translationPreviewProvider') as HTMLSelectElement | null;
@@ -9397,17 +9187,6 @@ let settingsSubscriptionPools: Record<string, any> = {};
                 customApiFormat: getCustomApiFormat(),
                 maxContextTokens: parseInt((document.getElementById('settingsCtx') as HTMLInputElement).value) || 0,
                 agentFileWriteMode: (document.getElementById('agentWriteMode') as HTMLSelectElement).value,
-                approvals: (() => {
-                    const reviewerProvider = ((document.getElementById('approvalsReviewerProvider') as HTMLSelectElement | null)?.value || '').trim();
-                    return {
-                        reviewer: ((document.getElementById('approvalsAutoReview') as HTMLInputElement | null)?.checked ? 'auto_review' : 'user'),
-                        reviewerProvider,
-                        // A model id is only meaningful together with its provider.
-                        reviewerModel: reviewerProvider
-                            ? ((document.getElementById('approvalsReviewerModelInput') as HTMLInputElement | null)?.value || '').trim()
-                            : '',
-                    };
-                })(),
                 reasoningEffort: (document.getElementById('settingsReasoningEffort') as HTMLSelectElement).value || 'high',
                 responseVerbosity: (document.getElementById('settingsResponseVerbosity') as HTMLSelectElement | null)?.value || 'default',
                 codexServiceTier: (document.getElementById('settingsCodexServiceTier') as HTMLSelectElement | null)?.value || 'default',
@@ -9452,25 +9231,6 @@ let settingsSubscriptionPools: Record<string, any> = {};
                         : ''),
                 },
                 mcp: { servers: mcpServers },
-                orchestrator: {
-                    agentModels: (() => {
-                        const models: Record<string, { provider: string; model: string }> = {};
-                        document.querySelectorAll('.agent-model-row').forEach(row => {
-                            const role = (row as HTMLElement).dataset.role;
-                            if (!role) return;
-                            // File-owned rows (~/.cwtools/agent-models.json) are
-                            // read-only; never copy them into VS Code settings.
-                            if (settingsAgentModelHomeRoles.has(role)) return;
-                            const prov = (row.querySelector('.agent-model-provider') as HTMLSelectElement)?.value || '__inherit__';
-                            const mod = (row.querySelector('.agent-model-model') as HTMLSelectElement)?.value || '__inherit__';
-                            //Only collect non-inherited configurations
-                            if (prov !== '__inherit__' || mod !== '__inherit__') {
-                                models[role] = { provider: prov, model: mod };
-                            }
-                        });
-                        return Object.keys(models).length > 0 ? models : undefined;
-                    })(),
-                },
             }
         });
     }

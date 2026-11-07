@@ -19,7 +19,7 @@ export interface SettingsOverviewInput {
     inlineEnabled?: boolean;
     inlineProviderName?: string;
     mcpCount?: number;
-    writeMode?: 'auto' | 'confirm' | 'auto_review' | 'full' | string;
+    writeMode?: 'auto' | 'confirm' | string;
     reasoningEffort?: string;
     accountStatus?: string;
 }
@@ -85,11 +85,7 @@ export function buildSettingsOverviewModel(input: SettingsOverviewInput, i18n: C
         ? `${labels.inlinePrefix}: ${input.inlineProviderName || labels.inlineSameProvider}`
         : labels.inlineOff;
     const mcpCount = input.mcpCount ?? 0;
-    const writeMode = input.writeMode === 'full'
-        ? labels.writeFull
-        : input.writeMode === 'auto_review'
-            ? labels.writeAutoReview
-            : input.writeMode === 'auto' ? labels.writeAuto : labels.writeConfirm;
+    const writeMode = input.writeMode === 'auto' ? labels.writeAuto : labels.writeConfirm;
     const reasoning = input.reasoningEffort || 'high';
 
     return {

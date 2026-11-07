@@ -2,7 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import type { AgentRuntimeDomain } from './types';
 
-export type SkillCapabilityDomain = AgentRuntimeDomain | 'both';
+export type SkillCapabilityDomain = 'paradox' | 'general' | 'both';
 
 export interface SkillIndexEntry {
     name: string;

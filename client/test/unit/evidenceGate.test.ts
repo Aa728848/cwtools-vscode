@@ -1248,7 +1248,7 @@ describe('AgentToolExecutor evidence gate wiring', () => {
         expect(fs.existsSync(target)).to.equal(false);
     });
 
-    it('manual override via the approval channel writes with verdict override and is recorded', async () => {
+    it('confirmed syntax conflict blocks the write and records the block verdict without approval prompts', async () => {
         gateModeConfig = 'enforce';
         const lsp = makeFakeLspClient({ parseValid: false });
         const executor = makeExecutor(lsp);
@@ -1261,18 +1261,13 @@ describe('AgentToolExecutor evidence gate wiring', () => {
             content: 'effect = { totally_fake_effect = yes }',
         }, makeContext(events, true)) as any;
 
-        expect(result.success).to.equal(true);
-        expect(fs.existsSync(target)).to.equal(true);
+        expect(result.success).to.equal(false);
+        expect(result.evidenceGateBlocked).to.equal(true);
+        expect(fs.existsSync(target)).to.equal(false);
         const gateEvents = events.filter(e => e.type === 'evidence_gate_decision');
         expect(gateEvents.length).to.be.greaterThan(0);
         const preWriteEvents = gateEvents.filter(e => e.payload.phase === 'pre_write');
-        expect(preWriteEvents[preWriteEvents.length - 1]!.payload.verdict).to.equal('override');
-        expect(result.postWriteValidationPassed).to.equal(true);
-        expect(result.postWriteValidation).to.deep.include({
-            verdict: 'allow',
-            diagnosticsSupersededSyntaxConflict: true,
-        });
-        expect(result.requiresRepair).to.not.equal(true);
+        expect(preWriteEvents[preWriteEvents.length - 1]!.payload.verdict).to.equal('block');
     });
 
     it('denying the override keeps the write blocked', async () => {

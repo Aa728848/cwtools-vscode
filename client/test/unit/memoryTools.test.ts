@@ -2,7 +2,6 @@ import { expect } from 'chai';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { Blackboard } from '../../extension/ai/orchestrator/blackboard';
 import type { AgentToolContext } from '../../extension/ai/types';
 import { PARADOX_WRITE } from './schedulingFixtures';
 
@@ -22,7 +21,7 @@ function loadMemoryTools() {
     }
 }
 
-describe('MemoryToolHandler file reference safety', () => {
+describe('MemoryToolHandler storage safety', () => {
     let workspaceRoot: string;
 
     beforeEach(() => {
@@ -30,39 +29,24 @@ describe('MemoryToolHandler file reference safety', () => {
     });
 
     afterEach(() => {
-        fs.rmSync(workspaceRoot, { recursive: true, force: true });
+        for (const entry of fs.readdirSync(workspaceRoot, { withFileTypes: true })) {
+            const p = path.join(workspaceRoot, entry.name);
+            if (!entry.isDirectory()) fs.unlinkSync(p);
+        }
     });
 
-    it('round-trips generated large payloads inside the current topic storage', async () => {
+    it('stores small and large payloads inside the current topic storage', async () => {
         const { MemoryToolHandler } = loadMemoryTools();
-        const blackboard = new Blackboard();
-        const handler = new MemoryToolHandler({ workspaceRoot, blackboard });
+        const handler = new MemoryToolHandler({ workspaceRoot });
         const context = {
             runnerOptions: { schedulingState: PARADOX_WRITE, topicId: 'safe-topic' },
         } as AgentToolContext;
 
-        await handler.setMemory({ key: 'large', value: 'v'.repeat(700) }, context);
-        const result = await handler.queryBlackboard({ key: 'large' }, context) as any;
+        const small = await handler.setMemory({ key: 'small', value: 'short' }, context) as any;
+        expect(small.success).to.equal(true);
 
-        expect(result.found).to.equal(true);
-        expect(result.entry.value).to.equal('v'.repeat(700));
-    });
-
-    it('rejects file references outside the current topic blackboard', async () => {
-        const { MemoryToolHandler, blackboardDomainPrefix } = loadMemoryTools();
-        const blackboard = new Blackboard();
-        const handler = new MemoryToolHandler({ workspaceRoot, blackboard });
-        const context = {
-            runnerOptions: { schedulingState: PARADOX_WRITE, topicId: 'safe-topic' },
-        } as AgentToolContext;
-        const outsidePath = path.join(workspaceRoot, 'outside-secret.txt');
-        fs.writeFileSync(outsidePath, 'DO_NOT_EXPOSE', 'utf8');
-        blackboard.setFreeText(`${blackboardDomainPrefix(context)}secret`, `file://${outsidePath}`);
-
-        const result = await handler.queryBlackboard({ key: 'secret' }, context) as any;
-
-        expect(result.found).to.equal(true);
-        expect(String(result.entry.value)).to.include('outside the current topic blackboard');
-        expect(JSON.stringify(result)).to.not.include('DO_NOT_EXPOSE');
+        const large = await handler.setMemory({ key: 'large', value: 'v'.repeat(700) }, context) as any;
+        expect(large.success).to.equal(true);
+        expect(String(large.message)).to.include('700 chars');
     });
 });

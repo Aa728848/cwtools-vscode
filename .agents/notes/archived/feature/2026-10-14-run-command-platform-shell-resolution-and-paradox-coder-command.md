@@ -1,6 +1,6 @@
 # Agent Note: run_command 按平台智能选择 Shell 并放行 paradox-coder 命令能力
 
-Status: implemented
+Status: archived
 
 ## Problem
 

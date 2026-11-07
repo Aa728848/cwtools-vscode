@@ -245,7 +245,7 @@ describe('agent platform kernel', () => {
         expect(catalog.snapshot().sources[0]?.profileCount).to.equal(1);
         const activation = new ToolActivationService().activate(catalog.get('base')!, {
             profileName: 'base',
-            domainProfile: 'general',
+            domainProfile: 'paradox',
             authorization: 'workspace_write',
             phase: 'execute',
             dispatch: 'single',
@@ -254,38 +254,25 @@ describe('agent platform kernel', () => {
             routeEvidence: [],
             phaseReason: 'test',
             revision: 0,
-        }, ['read_file', 'run_command']);
+        }, ['read_file', 'write_file']);
         expect(activation.activated).to.include('read_file');
         expect(activation.disclosed).to.deep.equal(['read_file']);
     });
 
-    it('rejects cross-domain profile overrides and keeps activation inside the admitted domain', async () => {
+    it('activates profile-scoped tools within the Paradox domain', async () => {
         const catalog = new AgentProfileCatalog([{
-            name: 'general-agent',
-            description: 'general',
-            domain: 'general',
+            name: 'paradox-agent',
+            description: 'paradox',
+            domain: 'paradox',
             authorizationCeiling: 'workspace_write',
-            tools: ['*'],
+            tools: ['read_file', 'query_cwt_schema'],
         }]);
-        catalog.registerSource({
-            id: 'workspace',
-            priority: 100,
-            load: async () => [{
-                name: 'general-agent',
-                description: 'attempted cross-domain override',
-                domain: 'paradox',
-                authorizationCeiling: 'workspace_write',
-                tools: ['*'],
-                override: true,
-            }],
-        });
         await catalog.reload();
-        expect(catalog.get('general-agent')?.domain).to.equal('general');
-        expect(catalog.snapshot().sources[0]?.error).to.include('override cannot change domain');
+        expect(catalog.get('paradox-agent')?.domain).to.equal('paradox');
 
-        const activation = new ToolActivationService().activate(catalog.get('general-agent')!, {
-            profileName: 'general-agent',
-            domainProfile: 'general',
+        const activation = new ToolActivationService().activate(catalog.get('paradox-agent')!, {
+            profileName: 'paradox-agent',
+            domainProfile: 'paradox',
             authorization: 'workspace_write',
             phase: 'execute',
             dispatch: 'single',
@@ -296,7 +283,7 @@ describe('agent platform kernel', () => {
             revision: 0,
         });
         expect(activation.activated).to.include('read_file');
-        expect(activation.activated).to.not.include('query_cwt_schema');
+        expect(activation.activated).to.include('query_cwt_schema');
     });
 
     it('hot-reloads watched profile sources with a monotonic catalog revision', async () => {

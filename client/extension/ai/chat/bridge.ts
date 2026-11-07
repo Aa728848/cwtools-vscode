@@ -194,9 +194,6 @@ export async function routeWebviewMessage(
         case 'cancelGeneration':
             provider.cancelGeneration();
             break;
-        case 'switchSchedulingDomain':
-            provider.switchSchedulingDomain(msg.domain);
-            break;
         case 'openAgentManager':
             await provider.openAgentManager();
             break;
@@ -222,13 +219,6 @@ export async function routeWebviewMessage(
             break;
         case 'slashCommand':
             await provider.handleComposerSubmission(msg.command);
-            break;
-        case 'permissionResponse':
-            provider.postMessage({ type: 'floatingCardResolved', card: 'permission', id: msg.permissionId });
-            provider.resolvePermissionRequest(
-                msg.permissionId,
-                msg.decision ?? (msg.alwaysAllow && msg.allowed === true ? 'acceptForSession' : msg.allowed === true ? 'accept' : 'decline'),
-            );
             break;
         case 'questionResponse':
             provider.resolveUserQuestion(msg.questionId, msg.answers, msg.cancelled === true);

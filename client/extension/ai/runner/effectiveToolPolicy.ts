@@ -36,9 +36,6 @@ export function evaluateEffectiveToolPolicy(
     const entry = TOOL_REGISTRY.get(toolName as AgentToolName);
     if (!entry) return { allowed: false, reason: 'unknown' };
 
-    if (context.domain === 'general' && entry.domain === 'paradox') {
-        return { allowed: false, reason: 'domain' };
-    }
     if (!entry.allowedModes.has(context.mode)) {
         return { allowed: false, reason: 'mode' };
     }
@@ -56,9 +53,7 @@ export function evaluateEffectiveToolPolicy(
         }
     }
 
-    const declaredChildCapability = entry.name === 'run_command'
-        && context.profile?.subagentCapabilities?.command === true;
-    if (context.isSubAgent && !entry.allowSubAgent && !declaredChildCapability) {
+    if (context.isSubAgent && !entry.allowSubAgent) {
         return { allowed: false, reason: 'subagent' };
     }
 

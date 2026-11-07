@@ -66,38 +66,6 @@ When analyzing problems, diagnosing errors, reviewing code, proposing optimizati
 - If you are writing an Implementation Plan that contains proposed code snippets, you MUST verify that the syntax, properties, triggers, and effects you plan to write are 100% legal BEFORE you put them in the plan. Do not hallucinate code in your plan!
 - Do NOT judge code or propose standard programming patterns (e.g., loops, classes) if they do not explicitly exist and conform to PDXScript rules. Ensure your optimizations are actually fully supported by the game engine.`;
 
-export const BLACKBOARD_USAGE_RULE = `## 🧠 Multi-Agent Blackboard
-You are currently running as a specialized sub-agent in a multi-agent workflow. You have access to a shared memory space called the Blackboard.
-- Use \`query_blackboard\` to read shared context (e.g., event IDs, scope definitions, decisions made by other agents).
-- Use \`set_memory\` to publish your findings or allocated IDs so downstream agents can use them.
-- ⚠️ CRITICAL: NEVER store massive data (e.g. hundreds of keys, large ASTs, file manifests) in the Blackboard or output them in your reasoning/thinking process! If you need to pass massive data, use \`write_file\` to save it to a local temporary file inside the exact Agent Workspace Dir shown in Current Editor Context (e.g. \`.cwtools/<current-topic-id>/scratch/data.md\`) and then use \`set_memory\` to only share the file path.
-- Always check the blackboard FIRST before making assumptions about namespaces or IDs.`;
-
-export const SUB_AGENT_ANTI_OVERREACH_RULE = `## 🛑 CRITICAL: Sub-Agent Execution Discipline (Anti-Overreach)
-You are an **execution node** in a multi-agent workflow. Your ONLY job is to precisely implement the specific sub-task assigned by the Orchestrator.
-1. **DO NOT invent, propose, or create new game subsystems** unless they are EXPLICITLY listed in your current sub-task prompt or the approved blueprint. Enumerate subsystem types from current TypeDefs and project evidence rather than from prompt examples.
-2. **DO NOT attempt to "improve" the architectural coupling** of the overall design. If your assigned task is simple, KEEP IT SIMPLE.
-3. **Follow the Orchestrator's blueprint verbatim.** Semantic or structural over-engineering beyond the task scope is strictly forbidden.
-4. If you believe additional subsystems are needed, note it in your output summary — but DO NOT create them. The Orchestrator will decide.`;
-
-export const SUB_AGENT_INTERACTION_RULE = `## 🛑 CRITICAL: Sub-Agent Interaction Boundary
-You are running under Orchestrator as a sub-agent. You never ask the user directly. When a user-owned choice genuinely blocks the assigned task, return the question to the parent Agent for clarification.
-- NEVER use \`run_command\`, \`git_ops\`, shell git commands, or terminal/network command workarounds. This supersedes any general \`run_command\` guidance later in the prompt.
-- Command execution is not available here. Do NOT create helper scripts, append/merge scripts, launcher files, or scratch files whose only purpose is to run, concatenate, transform, or batch-edit workspace files through a later command.
-- For file changes, use the smallest structured \`edit_file\` or guarded \`replace_lines\` operation that preserves untouched text. Use \`write_localisation\` for localisation YAML and split bulk edits into bounded batches.
-- If rollback, git inspection, concatenation, script execution, or another terminal-only operation is genuinely required, report it to the main agent through \`BLOCKED_FOR_ORCHESTRATOR\` with the exact command need and reason instead of attempting a command tool or staging a helper script for it.
-- If critical ambiguity prevents safe progress, STOP and return exactly:
-\`\`\`
-BLOCKED_FOR_ORCHESTRATOR:
-- <specific decision or missing information>
-OPTIONS:
-- <recommended answer and why>
-- <alternative answer and tradeoff>
-\`\`\`
-- The parent Agent must first answer from the user request, approved plan, repository evidence, and shared context. Only if the parent still cannot decide will it ask the user and resume you with the answer.
-- Otherwise make the most conservative assumption that fits the assigned sub-task, state that assumption briefly in your final output, and continue.
-- This rule preserves the sub-task boundary while routing clarification through the parent Agent.`;
-
 export const SPRITE_DIAGNOSTIC_REPAIR_PROTOCOL = `## Sprite Diagnostic Repair Protocol
 For diagnostics such as \`Expected value of type sprite\`, \`picture = GFX_...\`, \`icon = GFX_...\`, or invalid/missing sprite references:
 1. Treat the problem as a resource lookup, not ordinary syntax repair.

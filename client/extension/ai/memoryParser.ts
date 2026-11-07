@@ -111,7 +111,7 @@ function sanitizeMemoryEntry(raw: unknown): MemoryEntry | null {
     return {
         key: record.key,
         content: record.content,
-        domain,
+        domain: 'paradox',
         priority: record.priority === 'high' || record.priority === 'low' ? record.priority : 'normal',
         source: typeof record.source === 'string' ? record.source : undefined,
         confidence: num(record.confidence),

@@ -59,7 +59,7 @@ describe('RunReducers — pure event projections (T3.2)', () => {
     describe('reduceScheduling', () => {
         it('projects admission, phase, prompt, dispatch, and capacity events', () => {
             const admitted = schedulingStateFromAdmission({
-                domainProfile: 'general',
+                domainProfile: 'paradox',
                 authorization: 'workspace_write',
                 initialPhase: 'execute',
                 explicitDelegation: false,
@@ -75,15 +75,15 @@ describe('RunReducers — pure event projections (T3.2)', () => {
                 ev('prompt_steered'),
                 ev('dispatch_evaluated', {}, {
                     accepted: true,
-                    state: transitionSchedulingState(admitted, { dispatch: 'parallel', reason: 'test dispatch' }),
+                    state: transitionSchedulingState(admitted, { dispatch: 'single', reason: 'test dispatch' }),
                 }),
                 ev('provider_capacity_changed', {}, { current: 2 }),
             ]);
             expect(snapshot).to.include({
-                domainProfile: 'general',
+                domainProfile: 'paradox',
                 authorization: 'workspace_write',
                 phase: 'execute',
-                dispatch: 'parallel',
+                dispatch: 'single',
                 routeConfidence: 0.9,
                 queuedPrompts: 1,
                 steeredPrompts: 1,
@@ -279,7 +279,7 @@ describe('RunReducers & Structured Events', () => {
         const { RunLedger } = loadRunLedgerModule();
         const ledger = RunLedger.getInstance();
         const run = await ledger.createRun('topic_1', schedulingStateFromAdmission({
-            domainProfile: 'general', authorization: 'workspace_write', initialPhase: 'execute',
+            domainProfile: 'paradox', authorization: 'workspace_write', initialPhase: 'execute',
             explicitDelegation: false, confidence: 1, evidence: ['test'],
         }), 'test prompt');
         expect(RunLedger.getLatestActiveRunId()).to.equal(run.runId);
@@ -290,7 +290,7 @@ describe('RunReducers & Structured Events', () => {
         const ledger = RunLedger.getInstance();
         const record = {
             schedulingState: schedulingStateFromAdmission({
-                domainProfile: 'general', authorization: 'workspace_write', initialPhase: 'execute',
+                domainProfile: 'paradox', authorization: 'workspace_write', initialPhase: 'execute',
                 explicitDelegation: false, confidence: 1, evidence: ['test'],
             }),
             steps: [],
@@ -298,13 +298,13 @@ describe('RunReducers & Structured Events', () => {
             metrics: {},
         } as any;
         const dispatched = transitionSchedulingState(record.schedulingState, {
-            dispatch: 'parallel',
+            dispatch: 'single',
             reason: 'independent tasks',
         });
         (ledger as any).applyPersistedEvents(record, [
             ev('admission_decided', {}, {
                 state: schedulingStateFromAdmission({
-                    domainProfile: 'general',
+                    domainProfile: 'paradox',
                     authorization: 'workspace_write',
                     initialPhase: 'execute',
                     explicitDelegation: false,
@@ -319,10 +319,10 @@ describe('RunReducers & Structured Events', () => {
         ]);
 
         expect(record.schedulingState).to.include({
-            domainProfile: 'general',
+            domainProfile: 'paradox',
             authorization: 'workspace_write',
             phase: 'execute',
-            dispatch: 'parallel',
+            dispatch: 'single',
         });
     });
 });

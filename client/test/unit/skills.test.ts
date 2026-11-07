@@ -23,14 +23,12 @@ describe('Agent skill capability domains', () => {
         fs.rmSync(workspaceRoot, { recursive: true, force: true });
     });
 
-    it('keeps legacy CWTools skills Paradox-only while allowing explicit General skills', () => {
-        const general = listSkills({ workspaceRoot }, 'general');
+    it('includes Paradox and shared skills while excluding general-only skills', () => {
         const paradox = listSkills({ workspaceRoot }, 'paradox');
 
-        expect(general.map(skill => skill.name)).to.deep.equal(['general-skill', 'shared-skill']);
         expect(paradox.map(skill => skill.name)).to.deep.equal(['paradox-skill', 'shared-skill']);
-        expect(buildSkillIndexPrompt({ workspaceRoot }, 'general')).to.not.include('paradox-skill');
-        expect(loadSkill('paradox-skill', { workspaceRoot }, 'general').success).to.equal(false);
+        expect(buildSkillIndexPrompt({ workspaceRoot }, 'paradox')).to.include('paradox-skill');
+        expect(loadSkill('general-skill', { workspaceRoot }, 'paradox').success).to.equal(false);
         expect(loadSkill('paradox-skill', { workspaceRoot }, 'paradox').success).to.equal(true);
     });
 });
@@ -72,11 +70,9 @@ describe('Agent skill lookup roots (home dir)', () => {
 
     it('scans the home dir as a user-level root with default domain both', () => {
         writeSkill(path.join(homeDir, 'skills'), 'home-skill');
-        const general = listSkills({ workspaceRoot, homeDir }, 'general');
         const paradox = listSkills({ workspaceRoot, homeDir }, 'paradox');
-        expect(general.map(skill => skill.name)).to.deep.equal(['home-skill']);
         expect(paradox.map(skill => skill.name)).to.deep.equal(['home-skill']);
-        expect(general[0]?.source).to.equal('user');
+        expect(paradox[0]?.source).to.equal('user');
     });
 
     it('lets the home dir override a same-named built-in skill', () => {
@@ -108,7 +104,6 @@ describe('Agent skill lookup roots (home dir)', () => {
     it('honours capability-domain frontmatter in home skills', () => {
         writeSkill(path.join(homeDir, 'skills'), 'home-general', 'capability-domain: general\n');
         expect(listSkills({ homeDir }, 'paradox').map(skill => skill.name)).to.deep.equal([]);
-        expect(listSkills({ homeDir }, 'general').map(skill => skill.name)).to.deep.equal(['home-general']);
     });
 
     it('loads a home skill body through loadSkill', () => {

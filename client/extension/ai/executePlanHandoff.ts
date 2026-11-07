@@ -4,7 +4,7 @@ import { WRITE_TOOLS } from './tools/registry';
 
 const PLAN_ARTIFACT_PATTERN = /(?:^|[\\/])implementation_plan\.md$/i;
 const PLAN_HANDOFF_BLOCK_PATTERN = /```cwtools-plan\s*([\s\S]*?)```/gi;
-const EXECUTE_HANDOFF_MODES = new Set<AgentMode>(['build', 'utility', 'orchestrator', 'script']);
+const EXECUTE_HANDOFF_MODES = new Set<AgentMode>(['build']);
 const NON_PROJECT_WRITE_TOOLS = new Set(['git_ops', 'write_design_blueprint', 'save_skill']);
 
 export interface ImplementationPlanOperation {

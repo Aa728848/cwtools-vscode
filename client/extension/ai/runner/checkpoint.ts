@@ -5,7 +5,6 @@ import type { AgentResumeState, ChatMessage, AgentSchedulingState, ToolCall } fr
 import type { AgentToolExecutor } from '../agentTools';
 import { isPathInsideOrEqual } from '../../pathScope';
 import { ErrorReporter } from '../errorReporter';
-import { PermissionPolicyStore } from './permissionPolicy';
 import {
     cloneChatMessage,
     normalizeTranscriptForPersistence,
@@ -180,7 +179,6 @@ export async function saveResumeState(
                     ? event.payload.loaded.filter((item: unknown): item is string => typeof item === 'string')
                     : [])
             : [];
-        const durablePermissionRules = PermissionPolicyStore.getInstance().serialize({ includeSessionOnly: false });
 
         const resumeState: AgentResumeState = {
             version: 4,
@@ -212,7 +210,6 @@ export async function saveResumeState(
                 dynamicSupported: true,
                 loaded: [...new Set(disclosedTools)].sort(),
             },
-            ...(durablePermissionRules.length > 0 ? { permissionRules: durablePermissionRules } : {}),
         };
 
         await atomicWriteJson(pathModule.join(resumeDir, 'resume_state.json'), resumeState);
@@ -284,9 +281,6 @@ export async function loadResumeState(topicId: string): Promise<AgentResumeState
             : [];
         raw.pendingStepRequests = typedPending.length > 0 ? typedPending : undefined;
         raw.recoveredFromBackup = loaded.recoveredFromBackup;
-        // A process restart ends the approval session. Restore only rules that
-        // the V4 checkpoint explicitly marked durable.
-        PermissionPolicyStore.getInstance().restore(raw.permissionRules, { allowSessionOnly: false });
         return raw as AgentResumeState;
     } catch {
         return null;

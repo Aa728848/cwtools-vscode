@@ -11,17 +11,15 @@ export type AgentToolName =
     | 'go_to_definition' | 'find_references' | 'hover_symbol' | 'rename_symbol'
     | 'verify_pdx_identifier' | 'find_scope_bridge' | 'extract_archetype_slots' | 'instantiate_archetype' | 'todo_write' | 'read_file' | 'write_file' | 'edit_file'
     | 'replace_lines' | 'typed_pdx_write' | 'candidate_transaction' | 'list_directory' | 'get_lsp_status' | 'get_diagnostics' | 'analyze_diagnostic_error'
-    | 'glob_files' | 'web_search' | 'web_open' | 'web_find' | 'run_command' | 'manage_process'
+    | 'glob_files' | 'web_search' | 'web_open' | 'web_find'
     | 'query_scripted_effects'
     | 'query_scripted_triggers' | 'query_enums' | 'get_entity_info'
     | 'query_static_modifiers' | 'query_variables' | 'set_memory'
     | 'history' | 'save_memory' | 'forget_memory' | 'memory_recall_trace'
     | 'convert_image_to_dds' | 'convert_audio' | 'deploy_mod_asset' | 'mcp_call'
-    | 'write_localisation' | 'write_design_blueprint' | 'save_skill' | 'git_ops' | 'dispatch_agents'
-    | 'query_blackboard' | 'merge_results' | 'cancel_dispatch'
+    | 'write_localisation' | 'write_design_blueprint' | 'save_skill' | 'git_ops'
     | 'enter_plan_mode' | 'exit_plan_mode'
-    | 'team_send_message' | 'team_members' | 'team_close'
-    | 'team_task_create' | 'team_task_list' | 'team_task_update'
+    | 'get_ide_context' | 'open_in_visual_editor'
     | 'query_shader_symbol' | 'query_shader_compile_unit' | 'query_shader_platform_variants' | 'query_shader_callers'
     | 'explain_shader_reachability' | 'validate_shader' | 'compare_shader_with_vanilla';
 
@@ -31,11 +29,9 @@ export type ToolEffect =
     | 'workspace_read'
     | 'workspace_write'
     | 'network'
-    | 'shell'
     | 'git'
     | 'media'
-    | 'mcp'
-    | 'process';
+    | 'mcp';
 
 export type ToolConcurrencyClass =
     | 'parallel'
@@ -67,8 +63,6 @@ export interface ToolRegistryEntry {
     flatSchema?: ToolDefinition;
     /** Full schema substituted only after this deferred capability is selected. */
     disclosedSchema?: ToolDefinition;
-    /** Domain-safe schema used when a shared tool has mixed-domain parameters. */
-    generalSchema?: ToolDefinition;
     disclosure: ToolDisclosure;
     group?: string;
     providerCapability?: string;
@@ -79,8 +73,7 @@ export interface ToolRegistryEntry {
 export const TOOL_REGISTRY = new Map<AgentToolName, ToolRegistryEntry>();
 
 /**
- * Explicit classification is intentionally exhaustive: adding a tool without
- * deciding whether General Coding may receive it is a compile error.
+ * Explicit classification is intentionally exhaustive.
  */
 const TOOL_DOMAINS = {
     ask_user_question: 'shared',
@@ -137,8 +130,6 @@ const TOOL_DOMAINS = {
     web_search: 'shared',
     web_open: 'shared',
     web_find: 'shared',
-    run_command: 'shared',
-    manage_process: 'shared',
     query_scripted_effects: 'paradox',
     query_scripted_triggers: 'paradox',
     query_enums: 'paradox',
@@ -153,25 +144,15 @@ const TOOL_DOMAINS = {
     convert_image_to_dds: 'paradox',
     convert_audio: 'paradox',
     deploy_mod_asset: 'paradox',
-    // Per-server capability metadata is enforced again immediately before
-    // listing or executing a configured MCP tool.
     mcp_call: 'shared',
     write_localisation: 'paradox',
     write_design_blueprint: 'paradox',
     save_skill: 'shared',
     git_ops: 'shared',
-    dispatch_agents: 'shared',
-    query_blackboard: 'shared',
-    merge_results: 'shared',
-    cancel_dispatch: 'shared',
     enter_plan_mode: 'shared',
     exit_plan_mode: 'shared',
-    team_send_message: 'shared',
-    team_members: 'shared',
-    team_close: 'shared',
-    team_task_create: 'shared',
-    team_task_list: 'shared',
-    team_task_update: 'shared',
+    get_ide_context: 'paradox',
+    open_in_visual_editor: 'paradox',
     query_shader_symbol: 'paradox',
     query_shader_compile_unit: 'paradox',
     query_shader_platform_variants: 'paradox',
@@ -180,158 +161,6 @@ const TOOL_DOMAINS = {
     validate_shader: 'paradox',
     compare_shader_with_vanilla: 'paradox',
 } satisfies Record<AgentToolName, ToolDomain>;
-
-const GENERAL_DISPATCH_SCHEMA: ToolDefinition = {
-    type: 'function',
-    function: {
-        name: 'dispatch_agents',
-        description: 'Dispatch work to sub-agents. Pass "tasks" for up to four ordinary repository tasks as a bounded dependency graph (declare dependencies and planned files so overlapping writes are serialized), or "members" for a peer team that coordinates through a shared mailbox and task board.',
-        parameters: {
-            type: 'object',
-            properties: {
-                members: {
-                    type: 'array',
-                    minItems: 2,
-                    maxItems: 6,
-                    description: 'Peer-team roster (2-6). Members share a mailbox and a CAS task board and report to you as "lead". Mutually exclusive with tasks.',
-                    items: {
-                        type: 'object',
-                        properties: {
-                            name: { type: 'string', pattern: '^[a-z][a-z0-9-]{0,39}$', description: 'Unique kebab-case member name.' },
-                            profileName: {
-                                type: 'string',
-                                enum: ['explore', 'planner', 'general-coder', 'reviewer'],
-                                description: 'Registered runtime profile for this member.',
-                            },
-                            brief: { type: 'string', description: 'Concise initial brief.' },
-                            plannedFiles: {
-                                type: 'array',
-                                items: { type: 'string' },
-                                description: 'Expected files this member may modify.',
-                            },
-                        },
-                        required: ['name', 'profileName', 'brief'],
-                    },
-                },
-                teamName: { type: 'string', description: 'Peer-team mode: optional human-readable label.' },
-                objective: { type: 'string', description: 'Peer-team mode: shared objective visible to every member.' },
-                tasks: {
-                    type: 'array',
-                    maxItems: 4,
-                    description: 'Repository sub-tasks ordered by dependencies. Split larger work into bounded waves.',
-                    items: {
-                        type: 'object',
-                        properties: {
-                            id: { type: 'string', description: 'Unique sub-task ID.' },
-                            profileName: {
-                                type: 'string',
-                                enum: ['explore', 'planner', 'general-coder', 'reviewer'],
-                                description: 'Registered runtime profile. Use general-coder for scoped implementation and verification commands.',
-                            },
-                            prompt: { type: 'string', description: 'Concise sub-task description.' },
-                            dependencies: {
-                                type: 'array',
-                                items: { type: 'string' },
-                                description: 'Prerequisite task IDs that must complete first.',
-                            },
-                            contextFiles: {
-                                type: 'array',
-                                items: { type: 'string' },
-                                description: 'Optional repository paths or Blackboard keys containing required context.',
-                            },
-                            plannedFiles: {
-                                type: 'array',
-                                items: { type: 'string' },
-                                description: 'Expected files this task may modify. Provide exact paths whenever known.',
-                            },
-                            priority: { type: 'string', enum: ['critical', 'normal', 'low'] },
-                            maxIterations: { type: 'integer', minimum: 1, maximum: 100 },
-                            model: { type: 'string', description: 'Optional model id for this sub-task only; unset inherits the coordinator model.' },
-                            provider: { type: 'string', description: 'Optional configured built-in provider id paired with model.' },
-                            reasoningEffort: { type: 'string', enum: ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'], description: 'Optional per-task reasoning level.' },
-                        },
-                        required: ['id', 'profileName', 'prompt'],
-                    },
-                },
-            },
-            required: [],
-        },
-    },
-};
-
-const GENERAL_BLACKBOARD_SCHEMA: ToolDefinition = {
-    type: 'function',
-    function: {
-        name: 'query_blackboard',
-        description: 'Query the shared cross-agent store by exact key, prefix, text search, or ordinary repository record type.',
-        parameters: {
-            type: 'object',
-            properties: {
-                key: { type: 'string', description: 'Exact key to look up.' },
-                prefix: { type: 'string', description: 'Key prefix for bounded range queries.' },
-                query: { type: 'string', description: 'Case-insensitive substring search across keys and values.' },
-                type: {
-                    type: 'string',
-                    enum: ['file_snapshot', 'diag_result', 'write_intent', 'free_text'],
-                    description: 'Optional repository record type filter.',
-                },
-                structured: { type: 'boolean', description: 'Parse JSON values and return them under `parsed` (or `parseError: true` when not JSON).' },
-            },
-            required: [],
-        },
-    },
-};
-
-const GENERAL_GREP_SCHEMA: ToolDefinition = {
-    type: 'function',
-    function: {
-        name: 'grep',
-        description: 'Search for literal text or a regular expression inside the workspace or a configured game installation.',
-        parameters: {
-            type: 'object',
-            properties: {
-                query: { type: 'string', description: 'The search pattern or regular expression.' },
-                path: { type: 'string', description: 'Workspace-relative path or an absolute path inside the workspace/configured game installation.' },
-                isRegex: { type: 'boolean', description: 'Treat query as a regular expression. Default false.' },
-                caseSensitive: { type: 'boolean', description: 'Perform a case-sensitive search. Default false.' },
-                include: { type: 'string', description: 'Optional file glob, for example "*.ts" or "**/*.json".' },
-                limit: { type: 'number', description: 'Maximum matching lines to return (default 50, max 200).' },
-            },
-            required: ['query'],
-            additionalProperties: false,
-        },
-    },
-};
-
-const GENERAL_SAVE_SKILL_SCHEMA: ToolDefinition = {
-    type: 'function',
-    function: {
-        name: 'save_skill',
-        description: 'Save a reusable ordinary repository Agent Skill; once saved it is loadable through run_skill.',
-        parameters: {
-            type: 'object',
-            properties: {
-                name: { type: 'string', description: 'Skill directory name; lowercased, ^[a-z0-9][a-z0-9._-]{0,63}$.' },
-                description: { type: 'string', description: 'One-line summary shown in the skill index.' },
-                body: { type: 'string', description: 'Markdown body of SKILL.md with the reusable instructions.' },
-                capability_domain: {
-                    type: 'string',
-                    enum: ['general', 'both'],
-                    description: 'Optional domain gate. General Coding cannot save paradox-only skills.',
-                },
-                run_as: { type: 'string' },
-                allowed_tools: { type: 'array', items: { type: 'string' } },
-                scope: {
-                    type: 'string',
-                    enum: ['project', 'user'],
-                    description: 'project = <workspace>/.agents/skills; user = ~/.cwtools/skills.',
-                },
-                overwrite: { type: 'boolean' },
-            },
-            required: ['name', 'description', 'body', 'scope'],
-        },
-    },
-};
 
 // Categories to help assign modes
 const BASE_READ: AgentToolName[] = [
@@ -344,7 +173,8 @@ const BASE_READ: AgentToolName[] = [
     'query_scripted_effects', 'query_scripted_triggers', 'query_enums',
     'get_entity_info', 'query_static_modifiers', 'query_variables', 'get_pdx_block', 'get_ignored_diagnostics',
     'query_shader_symbol', 'query_shader_compile_unit', 'query_shader_platform_variants', 'query_shader_callers',
-    'explain_shader_reachability', 'validate_shader', 'compare_shader_with_vanilla'
+    'explain_shader_reachability', 'validate_shader', 'compare_shader_with_vanilla',
+    'get_ide_context', 'open_in_visual_editor'
 ];
 const EDIT: AgentToolName[] = [
     'write_file', 'edit_file', 'replace_lines', 'typed_pdx_write', 'candidate_transaction', 'rename_symbol',
@@ -352,18 +182,12 @@ const EDIT: AgentToolName[] = [
 ];
 const MEMORY: AgentToolName[] = ['todo_write', 'manage_goal', 'set_memory', 'save_memory', 'forget_memory', 'memory_recall_trace'];
 const NETWORK: AgentToolName[] = ['web_search', 'web_open'];
-const UTILITY: AgentToolName[] = ['run_command', 'manage_process', 'git_ops', 'analyze_diagnostic_error'];
+const UTILITY: AgentToolName[] = ['git_ops', 'analyze_diagnostic_error'];
 const MEDIA: AgentToolName[] = ['convert_image_to_dds', 'convert_audio', 'deploy_mod_asset'];
 const _MCP: AgentToolName[] = ['mcp_call'];
-// Orchestration surface. dispatch_agents is the single entry for both shapes
-// (tasks = DAG wave, members = peer team); the team_* tools are the peer
-// collaboration vocabulary that stays available *inside* member runs.
-const TEAM_MEMBER_TOOLS: AgentToolName[] = ['team_send_message', 'team_members', 'team_task_create', 'team_task_list', 'team_task_update'];
-const ORCHESTRATION: AgentToolName[] = ['dispatch_agents', 'query_blackboard', 'merge_results', 'cancel_dispatch', 'team_close'];
 // Mode control: the Agent's own escape hatch into/out of Plan mode. Available
 // wherever ordinary execution is, since that is exactly when it is needed.
 const MODE_CONTROL: AgentToolName[] = ['enter_plan_mode', 'exit_plan_mode'];
-const TEAM: AgentToolName[] = [...TEAM_MEMBER_TOOLS, 'team_close'];
 const INTERACTION: AgentToolName[] = ['ask_user_question'];
 
 const GENERIC_FILE_WRITE_TOOLS = new Set<AgentToolName>([
@@ -382,6 +206,7 @@ const PDX_PROJECT_TOOLS = new Set<AgentToolName>([
     'query_project_profile', 'query_project_knowledge', 'query_interface_knowledge',
     'query_workspace_index', 'query_localisation_index', 'explore_pdx_project',
     'query_inline_instantiation', 'analyze_pdx_flow', 'compare_definition_with_vanilla',
+    'get_ide_context', 'open_in_visual_editor',
 ]);
 const PDX_RULE_TOOLS = new Set<AgentToolName>([
     'query_scope', 'query_rules', 'query_cwt_schema', 'query_override_modes',
@@ -410,17 +235,11 @@ const ALWAYS_DISCLOSED_TOOLS = new Set<AgentToolName>([
 const WRITE_TOOLS_SET = new Set<string>([...EDIT, 'deploy_mod_asset', 'git_ops']);
 const SUB_AGENT_EXCLUDES_SET = new Set<string>([
     'ask_user_question',
-    // web/process/media and orchestration are lead capabilities; members
-    // collaborate through the board and mailbox of their own team only.
     'web_search', 'web_open', 'web_find',
-    'run_command', 'manage_process',
     'git_ops', 'save_skill',
     'rename_symbol',
-    // Candidate transaction state is parent-run owned; slim sub-agents must
-    // report typed intents to the parent instead of sharing its overlay.
     'typed_pdx_write', 'candidate_transaction',
     ...MEDIA,
-    ...ORCHESTRATION,
 ]);
 const FILE_SCOPED_WRITE_TOOLS_SET = new Set<string>([
     'write_file',
@@ -434,7 +253,7 @@ const FILE_SCOPED_WRITE_TOOLS_SET = new Set<string>([
     'save_skill',
 ]);
 
-// Mutating tools: 改变工作区 / 记忆 / 黑板状态的工具。doom-loop 检测见到 mutating 成功
+// Mutating tools: 改变工作区 / 记忆状态的工具。doom-loop 检测见到 mutating 成功
 // 后会清空对应文件的 pairFrequency 窗口,避免把 verify-after-write 误判为重复。
 const MUTATING_TOOLS_SET = new Set<string>([
     ...EDIT,
@@ -444,27 +263,18 @@ const MUTATING_TOOLS_SET = new Set<string>([
     'save_memory',
     'forget_memory',
     'manage_goal',
-    'merge_results',
-    'manage_process',
-    'team_send_message',
-    'team_close',
-    'team_task_create',
-    'team_task_update',
 ]);
 
-// Only live status/collaboration polling is exempt. Ordinary reads stay behind
+// Only live status polling is exempt. Ordinary reads stay behind
 // the result-hash loop detector, which already permits calls whose output changes.
 const STORM_EXEMPT_TOOLS_SET = new Set<string>([
     'get_lsp_status',
-    'query_blackboard',
-    'team_task_list',
-    'team_members',
 ]);
 
-const PLAN_MODES = new Set([...BASE_READ, ...INTERACTION, ...NETWORK, ..._MCP, ...ORCHESTRATION, ...TEAM, ...MODE_CONTROL, 'todo_write', 'write_file', 'edit_file', 'replace_lines', 'typed_pdx_write', 'candidate_transaction', 'write_design_blueprint', 'save_skill', 'set_memory', 'git_ops']);
-const EXPLORE_MODES = new Set([...BASE_READ, ...INTERACTION, ...NETWORK, ..._MCP, ...ORCHESTRATION, ...TEAM, ...MODE_CONTROL, 'git_ops', 'save_skill']);
+const PLAN_MODES = new Set([...BASE_READ, ...INTERACTION, ...NETWORK, ..._MCP, ...MODE_CONTROL, 'todo_write', 'write_file', 'edit_file', 'replace_lines', 'typed_pdx_write', 'candidate_transaction', 'write_design_blueprint', 'save_skill', 'set_memory', 'git_ops']);
+const EXPLORE_MODES = new Set([...BASE_READ, ...INTERACTION, ...NETWORK, ..._MCP, ...MODE_CONTROL, 'git_ops', 'save_skill']);
 const REVIEW_MODES = new Set([...BASE_READ, ...INTERACTION, ...NETWORK, ..._MCP, 'git_ops', 'save_skill']);
-const BUILD_MODES = new Set([...BASE_READ, ...INTERACTION, ...EDIT, ...MEMORY, ...NETWORK, ...UTILITY, ...MEDIA, ..._MCP, ...ORCHESTRATION, ...TEAM, ...MODE_CONTROL]);
+const BUILD_MODES = new Set([...BASE_READ, ...INTERACTION, ...EDIT, ...MEMORY, ...NETWORK, ...UTILITY, ...MEDIA, ..._MCP, ...MODE_CONTROL]);
 const LOC_MODES = new Set([
     'select_tools', 'read_file', 'write_file',
     'list_directory', 'glob_files', 'find_sprite_candidates', 'find_sound_candidates', 'grep',
@@ -476,9 +286,6 @@ const LOC_MODES = new Set([
     'candidate_transaction',
     'analyze_diagnostic_error', 'save_skill', ...INTERACTION
 ]);
-const ORCHESTRATOR_MODES = new Set([...BASE_READ, ...INTERACTION, ...NETWORK, ..._MCP, 'set_memory', 'todo_write', 'write_file', 'write_design_blueprint', ...ORCHESTRATION, ...TEAM, ...MODE_CONTROL, 'git_ops', 'analyze_diagnostic_error', 'save_skill']);
-const SCRIPT_MODES = new Set([...BASE_READ, ...INTERACTION, ...NETWORK, ..._MCP, 'set_memory', 'todo_write', 'write_file', 'write_design_blueprint', ...ORCHESTRATION, ...TEAM, 'git_ops', 'analyze_diagnostic_error', 'save_skill']);
-const UTILITY_MODES = new Set([...BASE_READ, ...INTERACTION, ...EDIT, ...MEMORY, ...NETWORK, ...UTILITY, ...MEDIA, ...ORCHESTRATION, ...TEAM, ...MODE_CONTROL, 'mcp_call']);
 
 for (const schema of SCHEMA_DEFINITIONS) {
     const name = schema.function.name as AgentToolName;
@@ -487,13 +294,7 @@ for (const schema of SCHEMA_DEFINITIONS) {
     if (EXPLORE_MODES.has(name)) allowed.add('explore');
     if (REVIEW_MODES.has(name)) { allowed.add('review'); allowed.add('script_reviewer'); }
     if (LOC_MODES.has(name)) { allowed.add('loc_translator'); allowed.add('loc_writer'); }
-    if (ORCHESTRATOR_MODES.has(name)) allowed.add('orchestrator');
-    if (SCRIPT_MODES.has(name)) allowed.add('script');
     if (BUILD_MODES.has(name)) { allowed.add('build'); allowed.add('gui_expert'); }
-    
-    // Security-sensitive modes use positive allowlists. New tools must be
-    // deliberately assigned instead of becoming available by omission.
-    if (UTILITY_MODES.has(name)) allowed.add('utility');
 
     // 动态推演 effect、riskLevel 与 concurrencyClass 以维护单一事实源
     let effect: ToolEffect = 'none';
@@ -529,14 +330,6 @@ for (const schema of SCHEMA_DEFINITIONS) {
         effect = 'network';
         riskLevel = 1;
         concurrencyClass = 'network-limited';
-    } else if (name === 'run_command') {
-        effect = 'shell';
-        riskLevel = 2;
-        concurrencyClass = 'interactive';
-    } else if (name === 'manage_process') {
-        effect = 'process';
-        riskLevel = 0;
-        concurrencyClass = 'interactive';
     } else if (name === 'git_ops') {
         effect = 'git';
         riskLevel = 2;
@@ -549,7 +342,7 @@ for (const schema of SCHEMA_DEFINITIONS) {
         effect = 'mcp';
         riskLevel = 1;
         concurrencyClass = 'interactive';
-    } else if (ORCHESTRATION.includes(name) || TEAM.includes(name) || MODE_CONTROL.includes(name)) {
+    } else if (MODE_CONTROL.includes(name)) {
         effect = 'none';
         riskLevel = 0;
         concurrencyClass = 'parallel';
@@ -566,7 +359,7 @@ for (const schema of SCHEMA_DEFINITIONS) {
     const mutating = MUTATING_TOOLS_SET.has(name);
     const stormExempt = STORM_EXEMPT_TOOLS_SET.has(name);
 
-    const noFlatten = ['dispatch_agents', 'merge_results', 'query_blackboard', 'todo_write', 'typed_pdx_write', 'enter_plan_mode', 'exit_plan_mode', 'extract_archetype_slots', 'instantiate_archetype', ...TEAM].includes(name);
+    const noFlatten = ['todo_write', 'typed_pdx_write', 'enter_plan_mode', 'exit_plan_mode', 'extract_archetype_slots', 'instantiate_archetype'].includes(name);
     let flatSchema: ToolDefinition | undefined = undefined;
     if (!noFlatten) {
         const analysis = analyzeSchema(schema);
@@ -579,9 +372,7 @@ for (const schema of SCHEMA_DEFINITIONS) {
     // a read-only tool even though it touches no workspace file.
     const isReadOnly = !MODE_CONTROL.includes(name) && name !== 'ask_user_question' && (effect === 'workspace_read'
         || effect === 'network'
-        || (effect === 'none' && !mutating && !ORCHESTRATION.includes(name) && !TEAM.includes(name))
-        || name === 'team_task_list'
-        || name === 'team_members');
+        || (effect === 'none' && !mutating));
     const disclosure: ToolDisclosure = ALWAYS_DISCLOSED_TOOLS.has(name) ? 'always' : 'deferred';
     const group = GENERIC_FILE_WRITE_TOOLS.has(name) ? 'file_write'
         : PDX_WRITE_TOOLS.has(name) ? 'pdx_write'
@@ -593,14 +384,12 @@ for (const schema of SCHEMA_DEFINITIONS) {
                                 : DIAGNOSTIC_TOOLS.has(name) ? 'diagnostics'
                                     : ASSET_TOOLS.has(name) ? 'assets'
                                         : effect === 'network' || name === 'web_find' ? 'web'
-                : effect === 'shell' || effect === 'process' ? 'command'
-                    : effect === 'git' ? 'git'
-                        : effect === 'media' ? 'media'
-                            : effect === 'mcp' ? 'mcp'
-                                : ORCHESTRATION.includes(name) || TEAM.includes(name) || MODE_CONTROL.includes(name) ? 'orchestrator'
-                                    : MEMORY.includes(name) || name === 'query_blackboard' || name === 'history' ? 'memory'
-                                        : effect === 'workspace_read' ? 'workspace_read'
-                                            : 'support';
+                                            : effect === 'git' ? 'git'
+                                                : effect === 'media' ? 'media'
+                                                    : effect === 'mcp' ? 'mcp'
+                                                        : MEMORY.includes(name) || name === 'history' ? 'memory'
+                                                            : effect === 'workspace_read' ? 'workspace_read'
+                                                                : 'support';
     TOOL_REGISTRY.set(name, {
         name,
         schema,
@@ -617,15 +406,6 @@ for (const schema of SCHEMA_DEFINITIONS) {
         noFlatten,
         flatSchema,
         disclosedSchema: name === 'write_design_blueprint' ? DESIGN_BLUEPRINT_DISCLOSED_TOOL : undefined,
-        generalSchema: name === 'dispatch_agents'
-            ? GENERAL_DISPATCH_SCHEMA
-            : name === 'query_blackboard'
-                ? GENERAL_BLACKBOARD_SCHEMA
-                : name === 'grep'
-                    ? GENERAL_GREP_SCHEMA
-                    : name === 'save_skill'
-                        ? GENERAL_SAVE_SKILL_SCHEMA
-                        : undefined,
         disclosure,
         group,
         providerCapability: disclosure === 'deferred' ? 'dynamic_tools' : undefined,
@@ -645,6 +425,4 @@ export const WRITE_TOOLS = WRITE_TOOLS_SET;
 export const MUTATING_TOOLS = MUTATING_TOOLS_SET;
 export const FILE_SCOPED_WRITE_TOOLS = FILE_SCOPED_WRITE_TOOLS_SET;
 export const SUB_AGENT_EXCLUDES = SUB_AGENT_EXCLUDES_SET;
-export const TEAM_TOOLS = TEAM;
-export const TEAM_MEMBER_TOOL_NAMES = TEAM_MEMBER_TOOLS;
 export const READ_ONLY_TOOLS = new Set([...TOOL_REGISTRY.values()].filter(entry => entry.isReadOnly).map(entry => entry.name));

@@ -1,6 +1,6 @@
 # Agent Note: 无强制沙箱后端时的审批式降级与子代理命令能力对齐
 
-Status: implemented
+Status: archived
 
 ## Problem
 

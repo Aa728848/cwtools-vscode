@@ -13,20 +13,6 @@ rawFs.readFileSync = function(p: any, opts: any) {
 describe('webview smoke checks', () => {
     const root = path.resolve(__dirname, '../../..');
 
-    it('permission cards expose scoped decisions, critical risk, and accessible state', () => {
-        const script = fs.readFileSync(path.join(root, 'client/webview/chatPanel.ts'), 'utf8');
-        const css = fs.readFileSync(path.join(root, 'client/webview/chatPanel.css'), 'utf8');
-        expect(script).to.include("3: { text: tr('Critical / destructive'");
-        expect(script).to.include("setAttribute('role', 'alertdialog')");
-        expect(script).to.include("finish('acceptForSession'");
-        expect(script).to.include("case 'permissionResolved'");
-        expect(script).to.include('fullAccessArmedUntil = Date.now() + 10_000');
-        const host = fs.readFileSync(path.join(root, 'client/extension/ai/chatPanel.ts'), 'utf8');
-        expect(host).to.include('availableDecisions.includes(decision)');
-        expect(css).to.include('var(--vscode-errorForeground)');
-        expect(css).to.include('.permission-scope-row');
-    });
-
     it('chat webview source exposes expected bootstrap controls', () => {
         const html = fs.readFileSync(path.join(root, 'client/extension/ai/chatHtml.ts'), 'utf8');
         const host = fs.readFileSync(path.join(root, 'client/extension/ai/chatPanel.ts'), 'utf8');
@@ -41,31 +27,15 @@ describe('webview smoke checks', () => {
         expect(host).to.include('this.generatedImageDirectoryUri()');
         expect(html).not.to.include('id="modeSel"');
         expect(html).to.include('id="composerAddBtn"');
-        expect(html).to.include('id="quickDomainTrigger"');
-        expect(html).not.to.include('data-scheduling-domain="auto"');
-        expect(html).to.include('data-scheduling-domain="paradox"');
-        expect(html).to.include('data-scheduling-domain="general"');
-        expect(html).to.include('data-scheduling-domain="hybrid"');
-        expect(html).to.include('<span id="quickDomainLabel">Paradox</span>');
+        expect(html).not.to.include('id="quickDomainTrigger"');
+        expect(html).not.to.include('id="domainMenu"');
         expect(html).not.to.include('data-profile-intent=');
         expect(html).not.to.include('data-profile-strategy=');
         expect(script).to.include("let schedulingState: AgentSchedulingStateView = {");
-        expect(script).to.not.include("schedulingState = { ...schedulingState, domainProfile: domain");
-        expect(script).to.include("tr('Parallel', '并行')");
-        expect(script).to.include('updateSchedulingDomain(domain);\n                setDomainMenuOpen(false);');
-        expect(css).not.to.include('.composer-write-mode-trigger.write-mode-elevated {');
-        expect(css).not.to.include('.write-mode-item-danger.active { border-color: var(--error); }');
         expect(css).to.include('.composer-write-mode-trigger:focus-visible');
         expect(css).to.include('border: 0 !important;');
         expect(css).not.to.include('outline: none !important;');
         expect(css).to.include('box-shadow: none !important;');
-        expect(css).not.to.include('#quickWriteModeTrigger:focus-visible');
-        expect(css).not.to.include('#quickWriteModeTrigger.write-mode-danger {\n    background: transparent !important;\n    color: var(--error);');
-        expect(css).to.include('#quickWriteModeTrigger.write-mode-danger { color: var(--warning); }');
-        expect(css).to.include('.write-domain-menu .write-mode-item-danger span:first-child { color: var(--warning); }');
-        expect(css).not.to.include('.sandbox-backend-unavailable');
-        expect(script).not.to.include("classList.toggle('sandbox-backend-unavailable'");
-        expect(css).to.include('.write-domain-menu .write-mode-item-danger:focus-visible { outline: none; box-shadow: none; }');
         expect(script).to.include('setWriteModeMenuOpen(false);\n                input.focus();');
         expect(html).to.include('id="quickModelTrigger"');
         expect(html).to.include('id="quickReasoningEffort"');
@@ -85,7 +55,6 @@ describe('webview smoke checks', () => {
         expect(html).not.to.include('data-composer-action="plan"');
         expect(html).to.include('data-composer-action="goal"');
         expect(html).not.to.include('id="runtimeProfileMenuList"');
-        expect(script).to.include("vscode.postMessage({ type: 'switchSchedulingDomain', domain });");
         expect(script).to.include("setInputText('/goal ');");
         expect(script).not.to.include('function renderRuntimeProfiles()');
         expect(host).not.to.include('profileForUserDomain');
@@ -107,7 +76,6 @@ describe('webview smoke checks', () => {
         expect(script).to.include('buildSettingsOverviewModel');
         expect(script).to.include('cachedSettingsData');
         expect(script).to.include("input.dataset.apDropdownBound === 'true'");
-        expect(script).to.include('provSel.onchange =');
     });
 
     it('shows and restores the automatic routing decision on its user turn', () => {
@@ -128,7 +96,7 @@ describe('webview smoke checks', () => {
         expect(css).to.include('.agent-routing-status');
         expect(css).to.include('.agent-routing-live');
         expect(host).to.include('public beginApprovedPlanExecution(): void');
-        expect(host).to.include("intent: 'execute', strategy: 'multi'");
+        expect(host).to.include("intent: 'execute', strategy: 'single'");
         expect(bridge).to.include('provider.beginApprovedPlanExecution();');
         expect(bridge).not.to.include('provider.switchMode');
     });
@@ -337,25 +305,20 @@ describe('webview smoke checks', () => {
         expect(script).to.include('triggerRange.setStart(start.node, start.offset);');
     });
 
-    it('settings page honors home-file providers and agent-model overrides', () => {
+    it('settings page honors home-file providers', () => {
         const html = fs.readFileSync(path.join(root, 'client/extension/ai/chatHtml.ts'), 'utf8');
         const hostSettings = fs.readFileSync(path.join(root, 'client/extension/ai/chatSettings.ts'), 'utf8');
         const script = fs.readFileSync(path.join(root, 'client/webview/chatPanel.ts'), 'utf8');
-        const css = fs.readFileSync(path.join(root, 'client/webview/chatPanel.css'), 'utf8');
 
         // Host: home providers join the settings payload, file warnings ride
         // along, and saving a home line never writes endpoint or API key back.
         expect(hostSettings).to.include("source: 'home'");
         expect(hostSettings).to.include('providerFileWarnings');
         expect(hostSettings).to.include('isHomeProviderId(settings.provider)');
-        // Webview: provenance badge, read-only file-owned fields, home-role
-        // rows excluded from the rebuilt agentModels save payload.
         expect(html).to.include('id="providerFileWarnings"');
         expect(script).to.include('function providerSourceOf');
         expect(script).to.include('function updateHomeProviderUI');
         expect(script).to.include("escapeHtml(' (~/.cwtools)')");
-        expect(script).to.include('settingsAgentModelHomeRoles.has(role)');
-        expect(css).to.include('.agent-model-home-badge');
     });
 
     it('release bundle exists and is non-empty after compile', () => {

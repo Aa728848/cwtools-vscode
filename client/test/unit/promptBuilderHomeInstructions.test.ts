@@ -109,15 +109,6 @@ describe('PromptBuilder user-global instructions (~/.cwtools/CWTOOLS.md)', () =>
         expect(prompt.indexOf('<user-instructions>')).to.be.lessThan(prompt.indexOf('<project-instructions>'));
     });
 
-    it('injects <user-instructions> into the general-domain prompt', () => {
-        writeHomeRules('# Global\nPrefer pnpm over npm.');
-        const builder = makeBuilder();
-        const prompt = builder.buildFrozenSystemPrompt('utility', undefined, undefined, { toolsetHash: 'tools-a', domain: 'general' });
-
-        expect(prompt).to.include('<user-instructions>');
-        expect(prompt).to.include('Prefer pnpm over npm.');
-    });
-
     it('omits the section when the home file is absent or empty', () => {
         const builder = makeBuilder();
         const paradox = builder.buildFrozenSystemPrompt('build', 'deepseek', 'stellaris', { toolsetHash: 'tools-a', domain: 'paradox' });
@@ -125,8 +116,8 @@ describe('PromptBuilder user-global instructions (~/.cwtools/CWTOOLS.md)', () =>
 
         writeHomeRules('   \n  ');
         const builder2 = makeBuilder();
-        const general = builder2.buildFrozenSystemPrompt('utility', undefined, undefined, { toolsetHash: 'tools-a', domain: 'general' });
-        expect(general).to.not.include('<user-instructions>');
+        const emptyParadox = builder2.buildFrozenSystemPrompt('build', undefined, undefined, { toolsetHash: 'tools-a', domain: 'paradox' });
+        expect(emptyParadox).to.not.include('<user-instructions>');
     });
 
     it('injects <user-rules> into slim paradox sub-agent prompts', () => {
@@ -149,20 +140,6 @@ describe('PromptBuilder user-global instructions (~/.cwtools/CWTOOLS.md)', () =>
 
         const rebuilt = builder.buildFrozenSystemPrompt('build', 'deepseek', 'stellaris', { toolsetHash: 'tools-a', domain: 'paradox' });
         expect(rebuilt).to.include('Version two.');
-        expect(builder.getFrozenPromptCacheStats().missReasons.rules_changed).to.equal(1);
-    });
-
-    it('invalidates the general-domain fingerprint too', () => {
-        const rulesPath = writeHomeRules('# Global\nGeneral one.');
-        const builder = makeBuilder();
-        builder.buildFrozenSystemPrompt('utility', undefined, undefined, { toolsetHash: 'tools-a', domain: 'general' });
-
-        fs.writeFileSync(rulesPath, '# Global\nGeneral two.', 'utf8');
-        const bumped = fs.statSync(rulesPath).mtimeMs + 5000;
-        fs.utimesSync(rulesPath, new Date(bumped), new Date(bumped));
-
-        const rebuilt = builder.buildFrozenSystemPrompt('utility', undefined, undefined, { toolsetHash: 'tools-a', domain: 'general' });
-        expect(rebuilt).to.include('General two.');
         expect(builder.getFrozenPromptCacheStats().missReasons.rules_changed).to.equal(1);
     });
 

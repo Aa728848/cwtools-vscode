@@ -52,8 +52,8 @@ export function buildGameRootReadScopeStatement(facts?: readonly ConfiguredGameR
             '- 原版 grep 与语义查询返回的是这些根下的绝对路径，请原样传给 `read_file`、`document_symbols` 或 `get_pdx_block`。',
         ),
         aiText(
-            '- Never guess a drive letter and never hunt for the install folder with `run_command`; the roots above are the ones cwtools itself resolved from settings.',
-            '- 不要猜测盘符，也不要用 `run_command` 去寻找安装目录；上面的根就是 cwtools 从设置里自己解析出来的。',
+            '- Never guess a drive letter or hunt for another install folder; the roots above are the ones cwtools itself resolved from settings.',
+            '- 不要猜测盘符或寻找其他安装目录；上面的根就是 cwtools 从设置里自己解析出来的。',
         ),
     ].join('\n');
 }

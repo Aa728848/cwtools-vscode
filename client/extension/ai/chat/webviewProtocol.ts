@@ -24,8 +24,7 @@ import {
 } from '../../../shared/protocolValidation';
 
 const isReasoningEffort = isOneOf(['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'] as const);
-const isWriteMode = isOneOf(['confirm', 'auto', 'auto_review', 'full'] as const);
-const isPermissionDecision = isOneOf(['accept', 'acceptForSession', 'decline', 'cancel'] as const);
+const isWriteMode = isOneOf(['confirm', 'auto'] as const);
 const isCustomApiFormat = isOneOf([
     'openai-chat-completions',
     'openai-responses',
@@ -119,7 +118,6 @@ const validators: Record<WebViewMessage['type'], MessageValidator> = {
     setShowArchived: fields({ show: isBoolean }),
     configureProvider: noFields,
     cancelGeneration: noFields,
-    switchSchedulingDomain: fields({ domain: isOneOf(['paradox', 'general', 'hybrid'] as const) }),
     openAgentManager: noFields,
     openSettings: noFields,
     saveSettings: fields({ settings: isPanelSettings }),
@@ -161,11 +159,6 @@ const validators: Record<WebViewMessage['type'], MessageValidator> = {
     quickChangeReasoningEffort: fields({ effort: isReasoningEffort }),
     quickChangeWriteMode: fields({ mode: isWriteMode }),
     slashCommand: fields({ command: isString }),
-    permissionResponse: fields({ permissionId: isString }, {
-        decision: optional(isPermissionDecision),
-        allowed: optional(isBoolean),
-        alwaysAllow: optional(isBoolean),
-    }),
     questionResponse: fields({ questionId: isString }, {
         answers: optional(isQuestionAnswers),
         cancelled: optional(isBoolean),

@@ -11,7 +11,7 @@ const eligibleTool = (name: string) => ({
 
 function context(
     mode: AgentMode,
-    domain: AgentRuntimeDomain = 'general',
+    domain: AgentRuntimeDomain = 'paradox',
     loaded: string[] = [],
 ): ToolDisclosureContext {
     return { mode, domain, dynamicSupported: true, loaded: new Set(loaded) };
@@ -89,17 +89,6 @@ describe('toolDisclosure', () => {
         expect(modeDenied.denied).to.include('edit_file');
         expect(modeDenied.loaded).to.deep.equal([]);
         expect(exploreCtx.loaded.has('edit_file')).to.equal(false);
-
-        // Domain-specific schemas remain denied in a General Coding run.
-        const generalCtx = context('build');
-        const paradoxSelection = service.select(
-            { tools: ['query_types'], reason: 'test' },
-            [],
-            generalCtx,
-            { eligibleTools: [eligibleTool('query_types')] },
-        );
-        expect(paradoxSelection.loaded).to.deep.equal([]);
-        expect(generalCtx.loaded.has('query_types')).to.equal(false);
     });
 
     it('keeps unknown tool names unknown', () => {

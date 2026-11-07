@@ -46,18 +46,13 @@ import {
     type SourcedMCPServerConfig,
 } from './mcpConfig';
 import {
-    getAgentModelOverrides,
     isHomeProviderId,
     loadHomeProviderConfigs,
 } from './providerConfig';
 import {
-    getSessionPermissionMode,
-    isSessionFullAccess,
-    sessionApprovalsReviewer,
     sessionFileWriteMode,
     setSessionPermissionMode,
 } from './runner/sessionPermissions';
-import { detectSandboxBackendAsync } from './runner/sandboxRunner';
 import {
     getModelReasoningCapability,
     getProviderApiFormat,
@@ -325,7 +320,6 @@ export class ChatSettingsManager {
     async buildAndSendSettingsData(showPanel = false, targetSurface?: 'chat' | 'manager'): Promise<void> {
         const { BUILTIN_PROVIDERS, fetchOllamaModels, MODEL_CONTEXT_TOKENS } = await import('./providers');
         const config = this.aiService.getConfig();
-        const detectedSandbox = await detectSandboxBackendAsync();
         const codexAccount = showPanel || config.provider === 'codex-chatgpt'
             ? await this.aiService.getChatGptOAuthService().getAccountStatus()
             : undefined;
@@ -538,22 +532,6 @@ export class ChatSettingsManager {
             customApiFormat: config.customApiFormat,
             maxContextTokens: config.maxContextTokens,
             agentFileWriteMode: sessionFileWriteMode(getProjectWorkspaceRoot()) ?? config.agentFileWriteMode,
-            approvals: {
-                reviewer: sessionApprovalsReviewer(getProjectWorkspaceRoot())
-                    ?? vs.workspace.getConfiguration('stellarisLanguageServices.ai').get<'user' | 'auto_review'>('approvals.reviewer', 'user'),
-                // Empty provider means "review with the main model"; a model id alone
-                // is dropped by resolveReviewerRoute so it cannot pair with the wrong provider.
-                reviewerProvider: vs.workspace.getConfiguration('stellarisLanguageServices.ai').get<string>('approvals.reviewerProvider', ''),
-                reviewerModel: vs.workspace.getConfiguration('stellarisLanguageServices.ai').get<string>('approvals.reviewerModel', ''),
-            },
-            securitySandboxDisabled: getSessionPermissionMode(getProjectWorkspaceRoot())
-                ? isSessionFullAccess(getProjectWorkspaceRoot())
-                : vs.workspace.getConfiguration('stellarisLanguageServices.ai').get<boolean>('developer.disableSecuritySandbox') === true,
-            sandboxBackend: detectedSandbox
-                ? { available: true, backend: detectedSandbox.backend, message: aiText(`Enforced command sandbox: ${detectedSandbox.backend}`, `强制命令沙箱：${detectedSandbox.backend}`) }
-                : { available: false, message: process.platform === 'win32'
-                    ? aiText('No enforced Windows command backend is ready. Install bubblewrap in WSL2, use a Dev Container, configure a verified native helper, or explicitly approve a terminal run.', 'Windows 强制命令后端尚未就绪。请在 WSL2 中安装 bubblewrap、使用开发容器、配置已验证的原生 helper，或明确批准终端运行。')
-                    : aiText('No supported OS command sandbox backend is available. Captured commands fail closed.', '没有可用的操作系统命令沙箱后端。捕获命令将安全拒绝。') },
             reasoningEffort: config.reasoningEffort,
             responseVerbosity: config.responseVerbosity,
             codexServiceTier: config.codexServiceTier,
@@ -593,14 +571,6 @@ export class ChatSettingsManager {
             },
             mcp: {
                 servers: settingsMcpServers
-            },
-            orchestrator: {
-                // Merged view: the VS Code setting is the base layer,
-                // ~/.cwtools/agent-models.json overrides same-named roles and
-                // each entry carries its source so the webview can badge it.
-                agentModels: getAgentModelOverrides(
-                    vs.workspace.getConfiguration('stellarisLanguageServices.ai').get<Record<string, { provider: string; model: string }>>('orchestrator.agentModels'),
-                ),
             },
         };
 
@@ -774,13 +744,9 @@ export class ChatSettingsManager {
     }
 
     /**
-     * Quick ladder from the chat composer: confirm < auto < auto_review < full.
-     * auto_review = auto write + read-only LLM reviewer at the approval boundary.
-     * full = sandbox and approval boundaries removed for this workspace
-     * (stellarisLanguageServices.ai.developer.disableSecuritySandbox); calls are still logged.
-     * The tier fully determines all underlying settings.
+     * Quick file-write mode switch from the chat composer: confirm | auto.
      */
-    async quickChangeWriteMode(mode: 'confirm' | 'auto' | 'auto_review' | 'full'): Promise<void> {
+    async quickChangeWriteMode(mode: 'confirm' | 'auto'): Promise<void> {
         setSessionPermissionMode(getProjectWorkspaceRoot(), mode);
         await this.buildAndSendSettingsData();
     }
@@ -907,15 +873,6 @@ export class ChatSettingsManager {
         }
         await update('maxContextTokens', effectiveMaxContextTokens);
         await update('agentFileWriteMode', settings.agentFileWriteMode);
-        if (settings.approvals?.reviewer) {
-            await update('approvals.reviewer', settings.approvals.reviewer);
-        }
-        if (settings.approvals?.reviewerProvider !== undefined) {
-            await update('approvals.reviewerProvider', (settings.approvals.reviewerProvider || '').trim());
-        }
-        if (settings.approvals?.reviewerModel !== undefined) {
-            await update('approvals.reviewerModel', (settings.approvals.reviewerModel || '').trim());
-        }
         const reasoningCapability = getModelReasoningCapability(
             settings.provider,
             settings.model,
@@ -964,14 +921,6 @@ export class ChatSettingsManager {
 
         if (settings.mcp?.servers) {
             await update('mcp.servers', settings.mcp.servers);
-        }
-
-        //Coordination mode sub-Agent model configuration persistence
-        if (settings.orchestrator?.agentModels) {
-            await update('orchestrator.agentModels', settings.orchestrator.agentModels);
-        } else {
-            //Clear existing configurations (users revert to all inheritance)
-            await update('orchestrator.agentModels', undefined);
         }
 
         lastAISettingsWriteTime = Date.now();

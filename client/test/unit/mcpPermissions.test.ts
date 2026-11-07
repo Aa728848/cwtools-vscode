@@ -7,19 +7,19 @@ import { isMcpServerAllowedForDomain } from '../../extension/ai/mcpCapability';
 
 describe('dynamic MCP access validation', () => {
     it('governs only the registered mcp_call surface', () => {
-        const generalAccess = validateToolCapability('mcp_call', {
-            mode: 'utility',
-            domain: 'general',
+        const paradoxAccess = validateToolCapability('mcp_call', {
+            mode: 'build',
+            domain: 'paradox',
         });
-        expect(generalAccess.allowed).to.equal(true);
+        expect(paradoxAccess.allowed).to.equal(true);
 
-        const unregisteredDynamic = validateToolCapability('mcp_filesystem_read_file', { mode: 'utility', domain: 'general' });
+        const unregisteredDynamic = validateToolCapability('mcp_filesystem_read_file', { mode: 'build', domain: 'paradox' });
         expect(unregisteredDynamic.allowed).to.equal(false);
         expect(unregisteredDynamic.reason).to.include('Unknown tool');
     });
 
     it('allows Paradox top-level modes and rejects modes outside the MCP surface', () => {
-        for (const mode of ['build', 'plan', 'explore', 'review', 'orchestrator', 'script'] as const) {
+        for (const mode of ['build', 'plan', 'explore', 'review'] as const) {
             const access = validateToolCapability('mcp_call', { mode, domain: 'paradox' });
             expect(access.allowed, `mode ${mode}`).to.equal(true);
         }
@@ -43,10 +43,8 @@ describe('dynamic MCP access validation', () => {
 describe('MCP capability domains', () => {
     it('requires every server to declare its capability domain', () => {
         expect(isMcpServerAllowedForDomain(undefined, 'paradox')).to.equal(false);
-        expect(isMcpServerAllowedForDomain(undefined, 'general')).to.equal(false);
-        expect(isMcpServerAllowedForDomain({ capabilityDomain: 'general' }, 'general')).to.equal(true);
         expect(isMcpServerAllowedForDomain({ capabilityDomain: 'general' }, 'paradox')).to.equal(false);
-        expect(isMcpServerAllowedForDomain({ capabilityDomain: 'both' }, 'general')).to.equal(true);
+        expect(isMcpServerAllowedForDomain({ capabilityDomain: 'paradox' }, 'paradox')).to.equal(true);
         expect(isMcpServerAllowedForDomain({ capabilityDomain: 'both' }, 'paradox')).to.equal(true);
     });
 });

@@ -63,22 +63,15 @@ import { UI, SOURCE, aiText } from './messages';
 import { ContextReferenceManager } from './contextReferences';
 import { AgentSessionCoordinator } from './agentSessionCoordinator';
 import { runLedger, type AgentRunEvent } from './runner/runLedger';
-import { backgroundOrchestrators } from './orchestrator/backgroundOrchestrators';
 import { AgentRuntime } from './runner/agentRuntime';
 import { agentProfileCatalog } from './runner/agentProfileCatalog';
-import { PermissionPolicyStore, deriveCommandPrefix, hasInlineEvalPayload } from './runner/permissionPolicy';
 import {
     getSessionPermissionMode,
-    sessionApprovalsReviewer,
-    shouldReviewOpaqueCommandBeforePolicy,
 } from './runner/sessionPermissions';
-import type { RuntimeItem } from './runner/runtimeItems';
-import { isSecuritySandboxDisabled } from './workspaceSandbox';
-import { AutoReviewer, resolveReviewerRoute } from './runner/autoReviewer';
 import { AgentUiBroadcaster } from './agentUiBroadcaster';
 import { ArtifactStore } from './artifactStore';
 import { resolveAgentProfile } from './agentProfile';
-import { AUTHORITY_RANK, executionModeForSchedulingState, normalizeSchedulingState, schedulingStateFromAdmission } from './runner/scheduling';
+import { AUTHORITY_RANK, executionModeForSchedulingState, normalizeSchedulingState } from './runner/scheduling';
 import { computeLineDiff } from './diffEngine';
 import {
     clipUiText,
@@ -116,7 +109,6 @@ export function getPendingInteractions(topicId?: string): string[] {
 }
 
 type PendingWriteCardMessage = Extract<HostMessage, { type: 'pendingWriteFile' }>;
-type PendingPermissionCardMessage = Extract<HostMessage, { type: 'permissionRequest' }>;
 type PendingQuestionCardMessage = Extract<HostMessage, { type: 'questionRequest' }>;
 type FileSnapshot = {
     filePath: string;
@@ -219,7 +211,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
      */
     public beginApprovedPlanExecution(): void {
         const domain = this.session.schedulingState.domainProfile;
-        this.session.schedulingState = resolveAgentProfile('', { domain, intent: 'execute', strategy: 'multi' }).schedulingState;
+        this.session.schedulingState = resolveAgentProfile('', { domain, intent: 'execute', strategy: 'single' }).schedulingState;
         // An approval outranks a /plan pin for the continuation turn, otherwise
         // the pinned Plan mode would re-narrow the very execution just approved.
         if (this.session.modeOverride === 'plan') this.session.modeOverride = 'auto';
@@ -278,7 +270,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         this.agentRuntime = new AgentRuntime(agentRunner);
         this.topicManager = new ChatTopicManager(storageUri, (msg) => this.postMessage(msg), historyPersistence);
         this.settingsManager = new ChatSettingsManager(aiService, (msg) => this.postMessage(msg), storageUri?.fsPath, () => this.sendSlashCommandCatalog());
-        this.contextReferences = new ContextReferenceManager(() => this.agentRunner.toolExecutor.blackboard);
+        this.contextReferences = new ContextReferenceManager();
         // Skills appearing or disappearing change the `/skill:<name>` catalog, so
         // every write path resends it instead of waiting for a panel reopen.
         this.agentRunner.toolExecutor.onSkillSaved = () => this.sendSlashCommandCatalog();
@@ -295,12 +287,6 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         if (this.abortController) {
             this.abortController.abort();
             this.abortController = null;
-        }
-        // Background graphs are owned by the panel, not by one turn's controller:
-        // dispose must stop them or they keep running against a dead host.
-        const disposedTopicId = this.topicManager.currentTopic?.id;
-        if (disposedTopicId) {
-            try { backgroundOrchestrators.cancelAllForTopic(disposedTopicId); } catch { /* ignore */ }
         }
         // Dispose the shared content provider if registered
         if (this._previewProviderRegistration) {
@@ -415,9 +401,6 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
 
     private restorePendingInteractionCards(send: (msg: HostMessage) => void): void {
         for (const card of this.pendingWriteCards.values()) {
-            send(card);
-        }
-        for (const card of this.pendingPermissionCards.values()) {
             send(card);
         }
         for (const card of this.pendingQuestionCards.values()) {
@@ -589,8 +572,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         await this.handleUserMessage(text);
     }
 
-    private ensureDispatchAgentFeedbackVisible(result: GenerationResult, mode: AgentMode = this.currentMode): GenerationResult {
-        if (mode !== 'orchestrator' && mode !== 'script') return result;
+    private ensureDispatchAgentFeedbackVisible(result: GenerationResult, _mode: AgentMode = this.currentMode): GenerationResult {
         if (!result.steps.some(s => s.toolName === 'dispatch_agents')) return result;
 
         const existing = (result.explanation || '').trim();
@@ -1173,7 +1155,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                 options: {
                     schedulingState,
                     approvedPlanExecution,
-                    initialToolFocus: approvedPlanExecution && (turnMode === 'build' || turnMode === 'utility')
+                    initialToolFocus: approvedPlanExecution && turnMode === 'build'
                         ? 'write'
                         : undefined,
                     providerId: config.provider,
@@ -1187,9 +1169,6 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                     },
                     onRunStarted: runId => { this.currentRunId = runId; },
                     abortSignal: this.abortController!.signal,
-                    // Permission callback for run_command tool (OpenCode strategy)
-                    onPermissionRequest: (id: string, tool: string, description: string, command?: string, ctx?: any) =>
-                        this.requestPermission(id, tool, description, command, ctx),
                     onBeforeFileWrite,
                     onUserQuestion: (request, questionContext) => this.requestUserQuestion(request, questionContext),
                     onTodoUpdate: (todos, scope) => {
@@ -1213,11 +1192,6 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
 
             const rawResult = await runPromise;
             const result = this.ensureDispatchAgentFeedbackVisible(rawResult, turnMode);
-
-            // ── Orchestrator 自动生成 Walkthrough 自愈机制 ──
-            if ((turnMode === 'orchestrator' || turnMode === 'script') && result.steps.some(s => s.toolName === 'dispatch_agents')) {
-                await this.ensureOrchestratorWalkthrough(result);
-            }
 
             // ── Update conversation history ───────────────────────────────────────
             // For the user turn: use ContentPart[] if images were sent, otherwise plain text.
@@ -2737,62 +2711,6 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         this.aiService.cancel();
 
         // A background dispatch outlives the tool call that started it, and its
-        // abort chain is bound to THAT turn's controller — which is already null by
-        // the time a later turn is stopped. Stopping the main agent must stop every
-        // sub-agent it owns, so cancel the topic's background graphs explicitly.
-        // Their partial state stays persisted and resumable via resumeGraphId.
-        const backgroundTopicId = this.topicManager.currentTopic?.id;
-        if (backgroundTopicId) {
-            const cancelledGraphs = backgroundOrchestrators.cancelAllForTopic(backgroundTopicId);
-            if (cancelledGraphs > 0) {
-                this.postMessage({
-                    type: 'agentStep',
-                    step: {
-                        type: 'orchestrator_progress',
-                        content: aiText(
-                            `Cancelled ${cancelledGraphs} background sub-agent graph(s). Their partial state stays resumable with dispatch_agents(resumeGraphId=...).`,
-                            `已取消 ${cancelledGraphs} 个后台子 Agent 任务图。其部分状态仍可通过 dispatch_agents(resumeGraphId=...) 恢复。`,
-                        ),
-                        timestamp: Date.now(),
-                    },
-                });
-            }
-        }
-
-        // Clean up all pending permission approval resolvers to prevent orphaned Promise and UI residual cards
-        for (const [permissionId, resolver] of this.pendingPermissionResolvers.entries()) {
-            const details = this.pendingPermissionDetails.get(permissionId);
-            const card = this.pendingPermissionCards.get(permissionId);
-            const eventRunId = details?.runId ?? this.currentRunId;
-            if (eventRunId) {
-                runLedger.appendEvent(eventRunId, 'permission_resolved', { allowed: false, decision: 'cancel', reviewer: 'user' }, { invocationId: permissionId }).catch(() => {});
-                runLedger.appendEvent(eventRunId, 'item_completed', {
-                    itemId: details?.itemId ?? permissionId,
-                    type: 'permission',
-                    status: 'cancelled',
-                    completedAt: Date.now(),
-                    decision: 'cancel',
-                }, { invocationId: permissionId, status: 'cancelled' }).catch(() => {});
-            }
-            if (card) {
-                this.postMessage({ type: 'permissionResolved', permissionId, itemId: card.itemId, threadId: card.threadId, turnId: card.turnId, decision: 'cancel', reviewer: 'user' });
-            }
-            const topicId = details?.topicId ?? this.topicManager.currentTopic?.id ?? 'default';
-            this.agentRuntime.resolveInteraction(
-                permissionId,
-                topicId,
-                details?.threadId ?? topicId,
-                { decision: 'cancel', allowed: false },
-                true,
-            );
-            activePendingInteractions.delete(permissionId);
-            resolver(false);
-        }
-        this.pendingPermissionResolvers.clear();
-        this.pendingPermissionModes.clear();
-        this.pendingPermissionDetails.clear();
-        this.pendingPermissionCards.clear();
-
         for (const [questionId, resolver] of this.pendingQuestionResolvers.entries()) {
             const card = this.pendingQuestionCards.get(questionId);
             const topicId = card?.topicId ?? 'default';
@@ -3185,20 +3103,14 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             case 'status': {
                 const config = this.aiService.getConfig();
                 const scheduling = this.session.schedulingState;
-                const configuredReviewer = vs.workspace.getConfiguration('stellarisLanguageServices.ai')
-                    .get<'user' | 'auto_review'>('approvals.reviewer', 'user');
-                const permission = getSessionPermissionMode(getProjectWorkspaceRoot())
-                    ?? (isSecuritySandboxDisabled()
-                        ? 'full'
-                        : config.agentFileWriteMode === 'confirm'
-                            ? 'confirm'
-                            : configuredReviewer === 'auto_review' ? 'auto_review' : 'auto');
+                const writeMode = getSessionPermissionMode(getProjectWorkspaceRoot())
+                    ?? (config.agentFileWriteMode === 'confirm' ? 'confirm' : 'auto');
                 this.emitSlashCommandResult(
                     raw,
                     'success',
                     aiText(
-                        `Model ${config.model || '(not set)'} · reasoning ${config.reasoningEffort} · scheduling ${scheduling.domainProfile}/${scheduling.phase}/${scheduling.dispatch}/${scheduling.authorization} · permissions ${permission}`,
-                        `模型 ${config.model || '（未设置）'} · 推理 ${config.reasoningEffort} · 调度 ${scheduling.domainProfile}/${scheduling.phase}/${scheduling.dispatch}/${scheduling.authorization} · 权限 ${permission}`,
+                        `Model ${config.model || '(not set)'} · reasoning ${config.reasoningEffort} · scheduling ${scheduling.domainProfile}/${scheduling.phase}/${scheduling.dispatch}/${scheduling.authorization} · write mode ${writeMode}`,
+                        `模型 ${config.model || '（未设置）'} · 推理 ${config.reasoningEffort} · 调度 ${scheduling.domainProfile}/${scheduling.phase}/${scheduling.dispatch}/${scheduling.authorization} · 写入模式 ${writeMode}`,
                     ),
                 );
                 return;
@@ -3386,12 +3298,8 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
     }
 
 
-    // ─── Permission System (OpenCode-aligned) ────────────────────────────────────
+    // ─── User Clarification Questions ────────────────────────────────────────────
 
-    private pendingPermissionResolvers = new Map<string, (allowed: boolean) => void>();
-    private pendingPermissionModes = new Map<string, AgentMode>();
-    private pendingPermissionDetails = new Map<string, { command?: string, cwd?: string, preflight?: any, runId?: string, topicId?: string, threadId?: string, turnId?: string, itemId: string }>();
-    private pendingPermissionCards = new Map<string, PendingPermissionCardMessage>();
     private pendingQuestionResolvers = new Map<string, (result: AskUserQuestionResult) => void>();
     private pendingQuestionCards = new Map<string, PendingQuestionCardMessage>();
 
@@ -3463,601 +3371,11 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         resolver(result);
     }
 
-    /**
-     * Request permission from the user (for run_command tool).
-     * Shows a WebView permission card and suspends indefinitely until user responds.
-     */
-    private requestPermission(
-        id: string,
-        tool: string,
-        description: string,
-        command?: string,
-        context?: any
-    ): Promise<boolean> {
-        // Resolve the owning run from the request itself. `this.currentRunId` is the
-        // panel's live run, which for a background sub-agent raising a card in a
-        // later turn is an unrelated run — its approval events must not land there.
-        const permissionRunId = context?.runnerOptions?.runRecord?.runId
-            ?? context?.runnerOptions?.parentRunId
-            ?? this.currentRunId;
-        const permissionTopicId = context?.runnerOptions?.topicId ?? this.topicManager.currentTopic?.id ?? 'default';
-        const permissionThreadId = context?.runnerOptions?.threadId ?? permissionTopicId;
-        this.agentRuntime.recordPermissionTrace({
-            id,
-            topicId: permissionTopicId,
-            threadId: permissionThreadId,
-            runId: permissionRunId,
-            tool,
-            decision: 'requested',
-            source: 'policy',
-            reason: description,
-        });
-        if (permissionRunId) {
-            runLedger.appendEvent(permissionRunId, 'permission_requested', { tool, command, description }, { invocationId: id }).catch(() => {});
-            const item: RuntimeItem = {
-                itemId: id,
-                threadId: context?.runnerOptions?.threadId,
-                turnId: context?.runnerOptions?.turnId,
-                type: 'permission',
-                status: 'awaitingApproval',
-                title: description,
-                command,
-                cwd: context?.preflight?.cwd,
-                startedAt: Date.now(),
-                metadata: { tool },
-            };
-            runLedger.appendEvent(permissionRunId, 'item_started', item as any, { invocationId: id, status: 'pending' }).catch(() => {});
-        }
-        activePendingInteractions.set(id, {
-            topicId: permissionTopicId,
-            description: command ? `[run_command] ${command}` : `[${tool}] ${description}`,
-        });
-        const requestMode = this.currentMode;
-        // Structured flags from preflight/tool context decide escalation; the
-        // description-tag regex stays only as a fail-safe fallback.
-        const isEscalationRequest = context?.preflight?.escalation === true
-            || context?.preflight?.requiresEscalation === true
-            || context?.escalation === true
-            || /\[ESCALATION\]|\[UNSANDBOXED\]|escalation|unsandboxed/i.test(description);
-        const resolveAutomatically = (reason: string): Promise<boolean> => {
-            activePendingInteractions.delete(id);
-            this.agentRuntime.recordPermissionTrace({
-                id,
-                topicId: permissionTopicId,
-                threadId: permissionThreadId,
-                runId: permissionRunId,
-                tool,
-                decision: 'auto_approved',
-                source: reason === 'full-access' ? 'full_access' : 'policy',
-                reason,
-            });
-            if (permissionRunId) {
-                runLedger.appendEvent(
-                    permissionRunId,
-                    'permission_resolved',
-                    { allowed: true, alwaysAllow: false, autoApproved: true, reason },
-                    { invocationId: id }
-                ).catch(() => {});
-                runLedger.appendEvent(permissionRunId, 'item_completed', {
-                    itemId: id,
-                    type: 'permission',
-                    status: 'completed',
-                    completedAt: Date.now(),
-                    decision: 'accept',
-                    reviewer: 'policy',
-                    reason,
-                }, { invocationId: id, status: 'done' }).catch(() => {});
-            }
-            return Promise.resolve(true);
-        };
-
-        // Full-access tier: the user explicitly removed sandbox and approval
-        // boundaries for this workspace. Every request auto-resolves; the call is
-        // still fully logged and visible in the run timeline.
-        if (isSecuritySandboxDisabled()) {
-            return resolveAutomatically('full-access');
-        }
-
-        const reviewerMode = sessionApprovalsReviewer(getProjectWorkspaceRoot())
-            ?? vs.workspace.getConfiguration('stellarisLanguageServices.ai').get<string>('approvals.reviewer', 'user');
-        const opaqueExecution = context?.preflight?.opaqueExecution === true
-            || (!!command && hasInlineEvalPayload(command));
-
-        // Auto Review must inspect each opaque payload before any learned rule
-        // can resolve it. Reviewer uncertainty/failure falls back to the user.
-        if (shouldReviewOpaqueCommandBeforePolicy(
-            reviewerMode,
-            tool,
-            opaqueExecution,
-            isEscalationRequest,
-        )) {
-            return this.runAutoReview(id, tool, description, command, context).then(decision => {
-                if (decision !== undefined) return decision;
-                return this.promptUserPermission(id, tool, description, command, context, requestMode, permissionRunId);
-            });
-        }
-
-        // 联动 PermissionPolicyStore 进行高精细粒度低风险命令豁免，保障安全边界
-        // A memorized approval was granted while the sandbox still confined the
-        // command; it cannot authorize the same command to run without one.
-        if (tool === 'run_command' && !isEscalationRequest && context?.preflight?.unsandboxed !== true) {
-            const riskLevel = context?.preflight?.riskLevel ?? 0;
-            const approved = PermissionPolicyStore.getInstance().isApproved(
-                'run_command',
-                {
-                    CommandLine: command || '',
-                    Cwd: context?.preflight?.cwd || context?.cwd || ''
-                },
-                riskLevel
-            );
-            if (approved) {
-                return resolveAutomatically('policy');
-            }
-        }
-
-        // Auto-review: reviewer swap at the approval boundary; ask_user falls through to the card.
-        // Mode-agnostic: utility/build/script all share this exact funnel.
-        if (reviewerMode === 'auto_review' && !isEscalationRequest) {
-            return this.runAutoReview(id, tool, description, command, context).then(decision => {
-                if (decision !== undefined) return decision;
-                return this.promptUserPermission(id, tool, description, command, context, requestMode, permissionRunId);
-            });
-        }
-
-        return this.promptUserPermission(id, tool, description, command, context, requestMode, permissionRunId);
-    }
-
-    private promptUserPermission(
-        id: string,
-        tool: string,
-        description: string,
-        command: string | undefined,
-        context: any,
-        requestMode: AgentMode,
-        permissionRunId?: string,
-    ): Promise<boolean> {
-        return new Promise<boolean>((resolve) => {
-            const topicId = context?.runnerOptions?.topicId ?? this.topicManager.currentTopic?.id ?? 'default';
-            const threadId = context?.runnerOptions?.threadId ?? topicId;
-            // An approval card is an unbounded wait on a human, and a dispatched
-            // sub-agent's card may outlive the turn that started its graph. If the
-            // run is aborted, deny and clear the card: an abort is not consent, and
-            // leaving the entry behind resurrects a stale card on every view
-            // restore while the child's inner await never settles.
-            const abortSignal: AbortSignal | undefined = context?.runnerOptions?.abortSignal;
-            if (abortSignal?.aborted) {
-                activePendingInteractions.delete(id);
-                resolve(false);
-                return;
-            }
-            let onAbort: (() => void) | undefined;
-            const settle = (allowed: boolean) => {
-                if (onAbort && abortSignal) abortSignal.removeEventListener('abort', onAbort);
-                onAbort = undefined;
-                resolve(allowed);
-            };
-            this.agentRuntime.beginInteraction({
-                id,
-                topicId,
-                threadId,
-                turnId: context?.runnerOptions?.turnId,
-                runId: permissionRunId,
-                kind: 'approval',
-                title: description,
-                detail: command,
-            });
-            this.pendingPermissionResolvers.set(id, (allowed: boolean) => {
-                settle(allowed);
-            });
-            this.pendingPermissionModes.set(id, requestMode);
-            this.pendingPermissionDetails.set(id, {
-                command,
-                cwd: context?.preflight?.cwd,
-                preflight: context?.preflight,
-                runId: permissionRunId,
-                // Snapshotted: a request that outlives a topic switch must still
-                // resolve against the topic/thread it was raised in.
-                topicId,
-                threadId: context?.runnerOptions?.threadId,
-                turnId: context?.runnerOptions?.turnId,
-                itemId: id,
-            });
-
-            const isEscalation = context?.preflight?.escalation === true || /\[ESCALATION\]|\[UNSANDBOXED\]|escalation/i.test(description);
-            const riskLevel = context?.preflight?.riskLevel ?? 2;
-            const allowAlways = tool === 'run_command' && !isEscalation && riskLevel <= 1;
-            const prefixWords = command ? deriveCommandPrefix(command) : [];
-            const card: PendingPermissionCardMessage = {
-                type: 'permissionRequest',
-                permissionId: id,
-                itemId: id,
-                threadId: context?.runnerOptions?.threadId,
-                turnId: context?.runnerOptions?.turnId,
-                tool,
-                description,
-                command,
-                preflight: context?.preflight,
-                allowAlways,
-                availableDecisions: allowAlways ? ['accept', 'acceptForSession', 'decline', 'cancel'] : ['accept', 'decline', 'cancel'],
-                proposedRule: allowAlways && prefixWords.length > 0 ? {
-                    commandPrefix: prefixWords,
-                    cwdScope: context?.preflight?.cwd || getProjectWorkspaceRoot(),
-                    riskMax: 1,
-                    scope: 'session',
-                } : undefined,
-            };
-            this.pendingPermissionCards.set(id, card);
-            this.postMessage(card);
-            onAbort = () => this.abandonPermissionRequest(id, 'run_aborted');
-            abortSignal?.addEventListener('abort', onAbort, { once: true });
-        });
-    }
-
-    /**
-     * Deny and fully retire a pending approval whose run went away.
-     *
-     * Called when the requesting run aborts. Without it the resolver, the card
-     * and the runtime interaction all survive the run: the card is re-posted by
-     * `restorePendingInteractionCards` on every view restore, and the awaiting
-     * tool call never settles.
-     */
-    private abandonPermissionRequest(permissionId: string, reason: string): void {
-        const resolver = this.pendingPermissionResolvers.get(permissionId);
-        const card = this.pendingPermissionCards.get(permissionId);
-        const details = this.pendingPermissionDetails.get(permissionId);
-        if (!resolver && !card && !details) return;
-
-        this.pendingPermissionResolvers.delete(permissionId);
-        this.pendingPermissionCards.delete(permissionId);
-        this.pendingPermissionModes.delete(permissionId);
-        this.pendingPermissionDetails.delete(permissionId);
-        activePendingInteractions.delete(permissionId);
-
-        const topicId = details?.topicId ?? this.topicManager.currentTopic?.id ?? 'default';
-        const threadId = details?.threadId ?? topicId;
-        this.agentRuntime.resolveInteraction(
-            permissionId,
-            topicId,
-            threadId,
-            { decision: 'cancel', allowed: false },
-            true,
-        );
-        this.agentRuntime.recordPermissionTrace({
-            id: permissionId,
-            topicId,
-            threadId,
-            runId: details?.runId,
-            tool: card?.tool ?? 'unknown',
-            decision: 'cancelled',
-            source: 'policy',
-            reason,
-        });
-        const eventRunId = details?.runId;
-        if (eventRunId) {
-            runLedger.appendEvent(eventRunId, 'permission_resolved', {
-                allowed: false, decision: 'cancel', reviewer: 'policy', reason,
-            }, { invocationId: permissionId }).catch(() => {});
-            runLedger.appendEvent(eventRunId, 'item_completed', {
-                itemId: details?.itemId ?? permissionId,
-                threadId: details?.threadId,
-                turnId: details?.turnId,
-                type: 'permission',
-                status: 'cancelled',
-                completedAt: Date.now(),
-                decision: 'cancel',
-                reviewer: 'policy',
-                reason,
-            }, { invocationId: permissionId, status: 'cancelled' }).catch(() => {});
-        }
-        if (card) {
-            this.postMessage({
-                type: 'permissionResolved',
-                permissionId,
-                itemId: card.itemId,
-                threadId: card.threadId,
-                turnId: card.turnId,
-                decision: 'cancel',
-                reviewer: 'user',
-            });
-        }
-        resolver?.(false);
-    }
-
-    private autoReviewer?: AutoReviewer;
-
-    private recordAuxiliaryProviderUsage(
-        response: import('./types').ChatCompletionResponse,
-        messages: ChatMessage[],
-        agentMode: string,
-        purpose: 'routing' | 'approval_review',
-        startedAt: number,
-    ): void {
-        const config = this.aiService.getConfig();
-        const sample = buildProviderCallTokenUsage(response, messages, {
-            providerId: config.provider,
-            requestedModel: config.model,
-            customApiFormat: config.customApiFormat,
-            endpoint: this.aiService.getEndpointForProvider(config.provider),
-            agentMode,
-            purpose,
-        });
-        this.usageTracker.addUsage(sample.providerId, sample.model, sample.usage, {
-            durationMs: Date.now() - startedAt,
-            topicId: this.topicManager.currentTopic?.id,
-            cacheCapable: sample.cacheCapable,
-        });
-    }
-
-    /** Configured reviewer route; both values are plain settings strings. */
-    private reviewerRoute(): { providerId?: string; model?: string } {
-        const config = vs.workspace.getConfiguration('stellarisLanguageServices.ai');
-        return resolveReviewerRoute(
-            config.get<string>('approvals.reviewerProvider', ''),
-            config.get<string>('approvals.reviewerModel', ''),
-        );
-    }
-
-    private getAutoReviewer(): AutoReviewer {
-        if (!this.autoReviewer) {
-            this.autoReviewer = new AutoReviewer(async (system, user) => {
-                const messages: ChatMessage[] = [{ role: 'system', content: system }, { role: 'user', content: user }];
-                const startedAt = Date.now();
-                // Read the route per call so a settings change takes effect without
-                // rebuilding the reviewer (or restarting the extension host).
-                const route = this.reviewerRoute();
-                const res = await this.aiService.chatCompletion(
-                    messages,
-                    {
-                        temperature: 0, maxTokens: 300, disableThinking: true, requestTimeoutMs: 30_000,
-                        ...(route.providerId ? { providerId: route.providerId } : {}),
-                        ...(route.model ? { model: route.model } : {}),
-                    }
-                );
-                this.recordAuxiliaryProviderUsage(res, messages, 'approval_review', 'approval_review', startedAt);
-                const content = res.choices?.[0]?.message?.content;
-                return typeof content === 'string' ? content : JSON.stringify(content ?? '');
-            });
-        }
-        return this.autoReviewer;
-    }
-
-    /** Returns true/false when the reviewer decided, undefined to fall back to the user. */
-    private async runAutoReview(
-        id: string,
-        tool: string,
-        description: string,
-        command: string | undefined,
-        context: any
-    ): Promise<boolean | undefined> {
-        const preflight = context?.preflight;
-        const reviewRunId = context?.runnerOptions?.runRecord?.runId ?? this.currentRunId;
-        const reviewerRoute = this.reviewerRoute();
-        const decision = await this.getAutoReviewer().review({
-            id,
-            runId: reviewRunId,
-            toolName: tool,
-            riskLevel: preflight?.riskLevel ?? 2,
-            command,
-            cwd: preflight?.cwd ?? context?.cwd,
-            classification: preflight?.classification,
-            targetPaths: preflight?.targetPaths,
-            mcpServer: preflight?.mcpServer,
-            mcpTool: preflight?.mcpTool,
-            networkHosts: preflight?.networkHosts,
-            systemReason: description,
-            escalation: !!preflight?.escalation || !!preflight?.requiresEscalation,
-            inlineEval: preflight?.opaqueExecution === true || (!!command && hasInlineEvalPayload(command)),
-            unsandboxed: preflight?.unsandboxed === true,
-            sandboxMode: preflight?.sandboxMode,
-            userMessages: this.conversationMessages
-                .filter(message => message.role === 'user')
-                .slice(-4)
-                .map(message => contentToString(message.content).slice(0, 1200)),
-            conversationSummary: this.conversationMessages.slice(-8).map(message => ({
-                role: message.role,
-                content: contentToString(message.content).slice(0, 1200),
-            })),
-        });
-        if (reviewRunId) {
-            runLedger.appendEvent(reviewRunId, 'reviewer_decision', {
-                tool,
-                command,
-                verdict: decision.verdict,
-                rationale: decision.rationale,
-                riskLevel: decision.riskLevel,
-                userAuthorization: decision.userAuthorization,
-                decisionSource: decision.decisionSource,
-                fromCache: !!decision.fromCache,
-                reviewerProvider: reviewerRoute.providerId,
-                reviewerModel: reviewerRoute.model,
-                unsandboxed: preflight?.unsandboxed === true,
-            }, { invocationId: id }).catch(() => {});
-        }
-        if (decision.verdict === 'ask_user') return undefined;
-        if (decision.circuitBreaker && reviewRunId) {
-            this.agentRuntime.interruptTurn(reviewRunId, decision.rationale);
-        }
-        activePendingInteractions.delete(id);
-        const allowed = decision.verdict !== 'deny';
-        const traceTopicId = context?.runnerOptions?.topicId ?? this.topicManager.currentTopic?.id ?? 'default';
-        const traceThreadId = context?.runnerOptions?.threadId ?? traceTopicId;
-        this.agentRuntime.recordPermissionTrace({
-            id,
-            topicId: traceTopicId,
-            threadId: traceThreadId,
-            runId: reviewRunId,
-            tool,
-            decision: allowed ? 'auto_approved' : 'auto_denied',
-            source: 'auto_review',
-            reason: decision.rationale,
-        });
-        if (reviewRunId) {
-            runLedger.appendEvent(reviewRunId, 'permission_resolved', {
-                allowed,
-                reviewer: 'auto_review',
-                rationale: decision.rationale,
-                riskLevel: decision.riskLevel,
-                userAuthorization: decision.userAuthorization,
-                decisionSource: decision.decisionSource,
-                reviewerProvider: reviewerRoute.providerId,
-                reviewerModel: reviewerRoute.model,
-                unsandboxed: preflight?.unsandboxed === true,
-            }, { invocationId: id }).catch(() => {});
-            runLedger.appendEvent(reviewRunId, 'item_completed', {
-                itemId: id,
-                type: 'permission',
-                status: allowed ? 'completed' : 'declined',
-                completedAt: Date.now(),
-                decision: allowed ? 'accept' : 'decline',
-                reviewer: 'auto_review',
-                rationale: decision.rationale,
-                riskLevel: decision.riskLevel,
-                userAuthorization: decision.userAuthorization,
-                decisionSource: decision.decisionSource,
-            }, { invocationId: id, status: allowed ? 'done' : 'failed' }).catch(() => {});
-        }
-        this.postMessage({
-            type: 'permissionResolved',
-            permissionId: id,
-            itemId: id,
-            threadId: context?.runnerOptions?.threadId,
-            turnId: context?.runnerOptions?.turnId,
-            decision: allowed ? 'accept' : 'decline',
-            reviewer: 'auto_review',
-            reviewerProvider: reviewerRoute.providerId,
-            reviewerModel: reviewerRoute.model,
-            unsandboxed: preflight?.unsandboxed === true,
-        });
-        return allowed;
-    }
-
-    public resolvePermissionRequest(permissionId: string, decision: PermissionDecision): void {
-        if (!this.pendingPermissionResolvers.has(permissionId)
-            && !this.pendingPermissionCards.has(permissionId)
-            && !this.pendingPermissionDetails.has(permissionId)) return;
-        const card = this.pendingPermissionCards.get(permissionId);
-        const resolvedDecision: PermissionDecision = card?.availableDecisions.includes(decision) ? decision : 'decline';
-        const allowed = resolvedDecision === 'accept' || resolvedDecision === 'acceptForSession';
-        const alwaysAllow = resolvedDecision === 'acceptForSession';
-        activePendingInteractions.delete(permissionId);
-        const details = this.pendingPermissionDetails.get(permissionId);
-        // Snapshotted at request time: a card that outlived a topic switch must
-        // still resolve against the topic it was raised in.
-        const interactionTopicId = details?.topicId ?? this.topicManager.currentTopic?.id ?? 'default';
-        const interactionThreadId = details?.threadId ?? interactionTopicId;
-        this.agentRuntime.resolveInteraction(
-            permissionId,
-            interactionTopicId,
-            interactionThreadId,
-            { decision: resolvedDecision, allowed },
-            resolvedDecision === 'cancel',
-        );
-        this.agentRuntime.recordPermissionTrace({
-            id: permissionId,
-            topicId: interactionTopicId,
-            threadId: interactionThreadId,
-            runId: details?.runId ?? this.currentRunId,
-            tool: card?.tool ?? 'unknown',
-            decision: allowed ? 'accepted' : resolvedDecision === 'cancel' ? 'cancelled' : 'declined',
-            source: 'user',
-            reason: resolvedDecision,
-        });
-        const eventRunId = details?.runId ?? this.currentRunId;
-        if (eventRunId) {
-            runLedger.appendEvent(eventRunId, 'permission_resolved', { allowed, alwaysAllow, decision: resolvedDecision, reviewer: 'user' }, { invocationId: permissionId }).catch(() => {});
-            runLedger.appendEvent(eventRunId, 'item_completed', {
-                itemId: details?.itemId ?? permissionId,
-                threadId: details?.threadId,
-                turnId: details?.turnId,
-                type: 'permission',
-                status: resolvedDecision === 'decline' ? 'declined' : resolvedDecision === 'cancel' ? 'cancelled' : 'completed',
-                completedAt: Date.now(),
-                decision: resolvedDecision,
-                reviewer: 'user',
-            }, { invocationId: permissionId, status: allowed ? 'done' : resolvedDecision === 'cancel' ? 'cancelled' : 'failed' }).catch(() => {});
-        }
-        if (card) {
-            this.postMessage({
-                type: 'permissionResolved',
-                permissionId,
-                itemId: card.itemId,
-                threadId: card.threadId,
-                turnId: card.turnId,
-                decision: resolvedDecision,
-                reviewer: 'user',
-            });
-        }
-        this.pendingPermissionCards.delete(permissionId);
-        const resolver = this.pendingPermissionResolvers.get(permissionId);
-        if (resolver) {
-            this.pendingPermissionResolvers.delete(permissionId);
-            this.pendingPermissionModes.delete(permissionId);
-            
-            this.pendingPermissionDetails.delete(permissionId);
-
-            if (alwaysAllow && allowed) {
-                const riskLevel = details?.preflight?.riskLevel ?? 1;
-                // Defense in depth: never persist exemptions for risk >= 2 even if the UI sent alwaysAllow.
-                if (details?.command && riskLevel <= 1) {
-                    const prefixWords = deriveCommandPrefix(details.command);
-                    if (prefixWords[0]) {
-                        const created = PermissionPolicyStore.getInstance().addRule({
-                            tool: 'run_command',
-                            commandPrefix: prefixWords,
-                            cwdScope: details.cwd || getProjectWorkspaceRoot(),
-                            riskMax: 1,
-                            sessionOnly: true
-                        });
-                        if (eventRunId) {
-                            runLedger.appendEvent(eventRunId, 'approval_rule_created', {
-                                ruleId: created.id, tool: 'run_command', commandPrefix: prefixWords, scope: 'session', createdBy: 'user',
-                            }, { invocationId: permissionId }).catch(() => {});
-                        }
-                        // Rule-set change invalidates cached reviewer decisions.
-                        if (this.autoReviewer) {
-                            this.autoReviewer.invalidateCache();
-                            if (eventRunId) {
-                                runLedger.appendEvent(eventRunId, 'reviewer_cache_invalidated', { reason: 'approval_rule_created' }).catch(() => {});
-                            }
-                        }
-                    }
-                }
-            }
-            resolver(allowed);
-        }
-    }
-
     private persistSchedulingStateForCurrentTopic(): void {
         const topic = this.topicManager.currentTopic;
         if (!topic) return;
         topic.schedulingState = this.session.schedulingState;
         this.topicManager.saveTopics();
-    }
-
-    public switchSchedulingDomain(domain: AgentSchedulingState['domainProfile']): void {
-        if (domain !== 'paradox' && domain !== 'general' && domain !== 'hybrid') return;
-        if (domain === this.session.schedulingState.domainProfile) return;
-        this.session.previousSchedulingState = this.session.schedulingState;
-        const current = this.session.schedulingState;
-        const profileName = schedulingStateFromAdmission({
-            domainProfile: domain,
-            authorization: current.authorization,
-            initialPhase: current.phase === 'finalize' ? 'verify' : current.phase,
-            explicitDelegation: current.dispatch !== 'single',
-            confidence: current.routeConfidence,
-            evidence: ['user selected capability domain'],
-        }, 'User selected capability domain.').profileName;
-        this.session.schedulingState = normalizeSchedulingState({
-            ...current,
-            profileName,
-            domainProfile: domain,
-            routeEvidence: ['user selected capability domain'],
-            routingSource: 'user',
-            phaseReason: 'User selected capability domain.',
-            revision: this.session.schedulingState.revision + 1,
-        });
-        this.persistSchedulingStateForCurrentTopic();
-        this.postMessage({ type: 'setSchedulingState', schedulingState: this.session.schedulingState });
     }
 
     public restorePreviousSchedulingState(): void {
@@ -4347,19 +3665,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             });
         }
 
-        const blackboardSteps = result.steps.filter(s =>
-            ['set_memory', 'query_blackboard', 'merge_results', 'dispatch_agents'].includes(String(s.toolName))
-        );
-        if (blackboardSteps.length > 0) {
-            this.upsertArtifact({
-                id: this.artifactId('blackboard', generationKey),
-                kind: 'blackboard',
-                title: 'Blackboard Summary',
-                summary: `${blackboardSteps.length} blackboard/orchestrator coordination step(s).`,
-                status: 'done',
-                data: blackboardSteps.map(s => ({ toolName: s.toolName, args: s.toolArgs, result: s.toolResult })),
-            });
-        }
+
     }
 
     // ─── HTML Content ────────────────────────────────────────────────────────

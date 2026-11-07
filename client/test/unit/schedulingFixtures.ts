@@ -12,18 +12,18 @@ function schedulingState(
         domainProfile,
         authorization,
         initialPhase: phase === 'finalize' ? 'verify' : phase,
-        explicitDelegation: dispatch !== 'single',
+        explicitDelegation: false,
         confidence: 1,
         evidence: ['test fixture'],
     }, 'test fixture');
     return { ...state, phase, dispatch, profileName: profileName ?? state.profileName };
 }
 
-export const GENERAL_WRITE = schedulingState('general', 'workspace_write', 'execute');
-export const GENERAL_PARALLEL = schedulingState('general', 'workspace_write', 'execute', 'parallel');
-export const GENERAL_EXPLORE = schedulingState('general', 'read_only', 'inspect');
+export const GENERAL_WRITE = schedulingState('paradox', 'workspace_write', 'execute');
+export const GENERAL_PARALLEL = schedulingState('paradox', 'workspace_write', 'execute', 'single');
+export const GENERAL_EXPLORE = schedulingState('paradox', 'read_only', 'inspect');
 export const PARADOX_WRITE = schedulingState('paradox', 'workspace_write', 'execute');
-export const PARADOX_PARALLEL = schedulingState('paradox', 'workspace_write', 'execute', 'parallel');
+export const PARADOX_PARALLEL = schedulingState('paradox', 'workspace_write', 'execute', 'single');
 export const PARADOX_PLAN = schedulingState('paradox', 'plan_write_only', 'plan');
 export const PARADOX_EXPLORE = schedulingState('paradox', 'read_only', 'inspect');
 export const LOCALIZATION_WRITE = schedulingState('paradox', 'workspace_write', 'execute', 'single', 'localization-writer');

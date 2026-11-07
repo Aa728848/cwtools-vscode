@@ -163,14 +163,6 @@ ${stylesheetLinks}
         <div class="composer-menu-divider"></div>
         <button class="composer-menu-item" data-composer-action="goal">${svgIconNoMargin('flag')}<span>${t('Set goal', '设置目标')}</span></button>
     </div>
-    <div id="domainMenu" class="composer-menu domain-menu" aria-hidden="true">
-        <div class="composer-menu-section">
-            <div class="model-menu-title">${t('Capability domain', '能力领域')}</div>
-            <button class="composer-menu-item" data-scheduling-domain="paradox">${svgIconNoMargin('code')}<span>${t('Paradox / CWTools', 'Paradox / CWTools')}</span></button>
-            <button class="composer-menu-item" data-scheduling-domain="general">${svgIconNoMargin('zap')}<span>${t('General coding', '通用编码')}</span></button>
-            <button class="composer-menu-item" data-scheduling-domain="hybrid">${svgIconNoMargin('layers')}<span>${t('Hybrid coding + CWTools', '混合编码 + CWTools')}</span></button>
-        </div>
-    </div>
     <div id="modelMenu" class="model-menu" aria-hidden="true">
         <div class="model-menu-title">Model</div>
         <div id="modelMenuList" class="model-menu-list"></div>
@@ -180,7 +172,7 @@ ${stylesheetLinks}
         <div id="reasoningMenuList" class="model-menu-list" role="listbox" aria-label="${t('Reasoning effort', '推理强度')}"></div>
     </div>
     <div id="writeModeMenu" class="model-menu write-domain-menu" aria-hidden="true">
-        <div class="model-menu-title" id="writeModeMenuTitle">${t('Permission profile', '权限配置')}</div>
+        <div class="model-menu-title" id="writeModeMenuTitle">${t('File write mode', '文件写入模式')}</div>
         <div id="writeModeMenuList" class="model-menu-list"></div>
     </div>
     <div class="input-container">
@@ -196,19 +188,13 @@ ${stylesheetLinks}
         <div class="input-controls">
             <div class="composer-toolbar">
                 <button class="composer-add-btn" id="composerAddBtn" title="${t('Add context', '添加上下文')}" aria-label="${t('Add context', '添加上下文')}">${svgIconNoMargin('plus')}</button>
-                <select class="hidden-composer-select" id="quickWriteModeSelect" title="${t('Permission profile', '权限配置')}" aria-hidden="true" tabindex="-1">
+                <select class="hidden-composer-select" id="quickWriteModeSelect" title="${t('File write mode', '文件写入模式')}" aria-hidden="true" tabindex="-1">
                     <option value="confirm">${t('Confirm writes', '确认写入')}</option>
                     <option value="auto" selected>${t('Auto writes', '自动写入')}</option>
-                    <option value="auto_review">${t('Auto review', '自动审核')}</option>
-                    <option value="full">${t('Full access', '完全放行')}</option>
                 </select>
-                <button class="composer-model-trigger composer-write-mode-trigger" id="quickWriteModeTrigger" title="${t('Permission profile', '权限配置')}" aria-haspopup="listbox" aria-expanded="false">
+                <button class="composer-model-trigger composer-write-mode-trigger" id="quickWriteModeTrigger" title="${t('File write mode', '文件写入模式')}" aria-haspopup="listbox" aria-expanded="false">
                     <span class="composer-trigger-icon" aria-hidden="true">${svgIconNoMargin('shield')}</span>
                     <span id="quickWriteModeLabel">${t('Auto write', '自动写入')}</span>
-                    <span class="composer-chevron" aria-hidden="true">v</span>
-                </button>
-                <button class="composer-model-trigger composer-domain-trigger" id="quickDomainTrigger" title="${t('Select capability domain', '选择能力领域')}" aria-haspopup="listbox" aria-expanded="false">
-                    <span id="quickDomainLabel">Paradox</span>
                     <span class="composer-chevron" aria-hidden="true">v</span>
                 </button>
                 <div class="composer-chip-row" id="composerChipRow"></div>
@@ -540,54 +526,6 @@ ${stylesheetLinks}
                         <option value="confirm">${t('Confirm mode - review diff before writes (recommended)', '确认模式 — 写操作前 diff 确认（推荐）')}</option>
                         <option value="auto">${t('Auto mode - write directly (advanced)', '自动模式 — 直接写入（高级）')}</option>
                     </select>
-                </div>
-                <div class="settings-row" style="display:flex; align-items:center; justify-content:space-between; gap:8px;">
-                    <span class="settings-toggle-label">${t('Auto-review approval requests', '自动审核审批请求 (Auto-review)')}</span>
-                    <label class="toggle-switch"><input type="checkbox" id="approvalsAutoReview"><span class="toggle-track"></span></label>
-                </div>
-                <div class="settings-group">
-                    <label class="settings-label">${t('Approval reviewer model', '审批模型')}</label>
-                    <div class="settings-inline-row" style="display:flex; gap:8px; align-items:center;">
-                        <select class="settings-select" id="approvalsReviewerProvider" style="flex:1 1 40%;">
-                            <option value="">${t('Inherit main model', '沿用主模型')}</option>
-                        </select>
-                        <input class="settings-input" id="approvalsReviewerModelInput" style="flex:1 1 60%;" placeholder="${t('Leave empty to use the provider default model', '留空使用该提供商默认模型')}">
-                        <datalist id="approvalsReviewerModelDatalist"></datalist>
-                    </div>
-                    <div class="settings-hint" style="margin-top:6px;">${t('Leave empty to inherit the main chat model. The reviewer only decides whether to approve or deny a request; it can never widen the sandbox and falls back to asking you when it fails or times out. Each decision costs an extra model call.', '留空即沿用当前主模型。审批模型只判断是否批准，不会扩大沙箱；调用失败或超时会回落到由你确认。每次审批都会额外消耗一次模型调用。')}</div>
-                </div>
-                <div class="settings-hint">${t('When enabled, a read-only reviewer model approves most commands first. Unclear, escalated, or destructive actions still ask you.', '开启后由只读评审模型先行审批大部分命令；拿不准、升级请求或破坏性操作仍会询问用户。')}</div>
-            </div>
-        </div>
-        <div class="accordion-section" id="agentProfilesSection">
-            <button type="button" class="accordion-header" id="accAgentProfiles" aria-expanded="false"><span>${svgIcon('bot')} ${t('Profile models', 'Profile 模型')}</span><span class="settings-section-summary" id="profilesSectionSummary"></span><span class="accordion-arrow" aria-hidden="true">▶</span></button>
-            <div class="accordion-body">
-                <div class="settings-group">
-                    <label class="settings-label">${svgIcon('bot')} ${t('Multi-Agent profile model settings', '多 Agent Profile 模型配置')}</label>
-                    <div class="settings-hint" style="margin-bottom:8px;">${t('Set a provider/model per runtime profile. Leave as "Inherit main settings" to use the main model configured above.', '为每个运行时 Profile 单独指定供应商/模型。留为“继承主设置”则使用上方配置的主模型。')}</div>
-                    <div id="agentModelRows" style="display:flex;flex-direction:column;gap:8px;">
-                        ${[
-                                `explore|${t('Explorer', '探索 Profile')}`,
-                                `planner|${t('Planner', '规划 Profile')}`,
-                                `general-coder|${t('General coder', '通用编码 Profile')}`,
-                                `paradox-coder|${t('Paradox coder', 'Paradox 编码 Profile')}`,
-                                `localization-writer|${t('Localisation writer', '本地化写入 Profile')}`,
-                                `reviewer|${t('Reviewer', '审查者 (Reviewer)')}`,
-                                `gui-expert|${t('GUI expert', 'GUI 专家 Profile')}`,
-                            ]
-                            .map(item => {
-                                const [role, label] = item.split('|');
-                                return `<div class="agent-model-row" data-role="${role}">
-                                    <span class="settings-label">${label}</span>
-                                    <select class="settings-select agent-model-provider" data-role="${role}">
-                                        <option value="__inherit__">${t('Inherit main settings', '继承主设置')}</option>
-                                    </select>
-                                    <select class="settings-select agent-model-model" data-role="${role}">
-                                        <option value="__inherit__">${t('Inherit main settings', '继承主设置')}</option>
-                                    </select>
-                                </div>`;
-                            }).join('\n')}
-                    </div>
                 </div>
             </div>
         </div>

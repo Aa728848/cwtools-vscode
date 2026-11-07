@@ -12,8 +12,6 @@ import type { BaseContextItem, ContextItem, ContextItemType } from './types';
 import { ErrorReporter } from './errorReporter';
 import { diagnosticCodeString } from '../diagnosticI18n';
 import { SOURCE } from './messages';
-import type { Blackboard } from './orchestrator/blackboard';
-import type { BlackboardEntry } from './orchestrator/types';
 import { getProjectWorkspaceRoot, resolveProjectWorkspacePath } from './workspacePaths';
 
 function isAgentTempPath(filePath: string): boolean {
@@ -41,9 +39,7 @@ export interface MentionSearchResult {
 }
 
 export class ContextReferenceManager {
-    constructor(
-        private readonly getBlackboard: () => Blackboard | undefined,
-    ) {}
+    constructor() {}
 
     resolveWorkspacePath(refPath: string | undefined): string | undefined {
         if (!refPath) return undefined;
@@ -79,10 +75,6 @@ export class ContextReferenceManager {
         if (!q) return [...builtins, ...this.recentWorkspaceFiles(8)];
 
         const results: MentionSearchResult[] = [...builtins];
-        if (qLower.startsWith('blackboard:')) {
-            results.push(...this.searchBlackboard(q.slice('blackboard:'.length)));
-            return results.slice(0, 30);
-        }
         if (qLower.startsWith('vanilla::')) {
             results.push(...await this.searchVanilla(q));
             return results.slice(0, 30);
@@ -96,9 +88,6 @@ export class ContextReferenceManager {
         results.push(...await this.searchWorkspaceFiles(q, Math.max(0, 30 - results.length)));
         if (q.length >= 2 && results.length < 30) {
             results.push(...await this.searchSymbols(q, Math.min(8, 30 - results.length)));
-        }
-        if (results.length < 30) {
-            results.push(...this.searchBlackboard(q).slice(0, 30 - results.length));
         }
 
         return results.slice(0, 30);
@@ -128,8 +117,6 @@ export class ContextReferenceManager {
                 blocks.push(await this.formatReferencedSymbol(ref));
             } else if (ctx.type === 'vanilla') {
                 blocks.push(await this.formatReferencedVanilla(ref));
-            } else if (ctx.type === 'blackboard') {
-                blocks.push(await this.formatReferencedBlackboard(ref.key));
             } else if (ctx.type === 'quote' && typeof ref.text === 'string' && ref.text.trim()) {
                 const text = ref.text.length > QUOTED_TEXT_PROMPT_LIMIT
                     ? `${ref.text.slice(0, QUOTED_TEXT_PROMPT_LIMIT)}\n... (truncated)`
@@ -155,13 +142,9 @@ export class ContextReferenceManager {
 
     async openReference(ctx: ContextItem): Promise<void> {
         const ref = ctx as any;
-        if (ctx.type === 'quote') return;
+        if (ctx.type === 'quote' || ctx.type === 'blackboard') return;
         if (ctx.type === 'diagnostics') {
             await vs.commands.executeCommand('workbench.actions.view.problems');
-            return;
-        }
-        if (ctx.type === 'blackboard') {
-            await this.openBlackboardReference(ref.key);
             return;
         }
 
@@ -219,12 +202,6 @@ export class ContextReferenceManager {
                 type: 'vanilla',
                 label: 'vanilla::',
                 desc: 'Reference vanilla cache with @vanilla::<type>:<id>',
-                cacheStatus: 'cached',
-            },
-            {
-                type: 'blackboard',
-                label: 'blackboard:',
-                desc: 'Reference shared blackboard entries with @blackboard:<key>',
                 cacheStatus: 'cached',
             },
         ];
@@ -425,21 +402,6 @@ export class ContextReferenceManager {
                 cacheStatus: 'cached',
             }];
         }
-    }
-
-    private searchBlackboard(query: string): MentionSearchResult[] {
-        const bb = this.getBlackboard();
-        if (!bb) return [];
-        const q = query.trim();
-        const entries = q ? bb.search(q, 12) : bb.queryByPrefix('').slice(0, 12);
-        return entries.map(entry => ({
-            type: 'blackboard' as const,
-            label: `blackboard:${entry.key}`,
-            desc: `${entry.type} v${entry.version} by ${entry.authorAgentId}`,
-            key: entry.key,
-            tokenEstimate: this.estimateTokens(entry.value),
-            cacheStatus: 'cached' as const,
-        }));
     }
 
     private async resolveLiveCodeContext(uriStr: string, startLine: number, endLine: number): Promise<string> {
@@ -652,57 +614,6 @@ export class ContextReferenceManager {
         } catch (e) {
             return `Vanilla reference ${vanillaType}:${vanillaId} could not be resolved directly. Use query_types({ typeName: "${vanillaType}", filter: "${vanillaId}", vanillaOnly: true }). Error: ${String(e)}`;
         }
-    }
-
-    private async formatReferencedBlackboard(key?: string): Promise<string> {
-        const bb = this.getBlackboard();
-        if (!bb || !key) return `Blackboard reference unavailable: ${key || '(missing key)'}.`;
-        const entry = bb.read(key);
-        if (!entry) return `Blackboard key '${key}' was not found.`;
-        const value = await this.resolveBlackboardValue(entry);
-        return [
-            `Blackboard: ${entry.key}`,
-            `type: ${entry.type}, version: ${entry.version}, author: ${entry.authorAgentId}`,
-            '```',
-            value,
-            '```',
-        ].join('\n');
-    }
-
-    private async openBlackboardReference(key?: string): Promise<void> {
-        const bb = this.getBlackboard();
-        const entry = key ? bb?.read(key) : undefined;
-        if (!entry) {
-            vs.window.showWarningMessage(`Blackboard key '${key || ''}' was not found.`);
-            return;
-        }
-        if (entry.value.startsWith('file://')) {
-            const filePath = entry.value.slice(7);
-            if (fs.existsSync(filePath)) {
-                await vs.window.showTextDocument(await vs.workspace.openTextDocument(vs.Uri.file(filePath)), { preview: true });
-                return;
-            }
-        }
-        const doc = await vs.workspace.openTextDocument({
-            content: await this.resolveBlackboardValue(entry),
-            language: 'markdown',
-        });
-        await vs.window.showTextDocument(doc, { preview: true });
-    }
-
-    private async resolveBlackboardValue(entry: BlackboardEntry): Promise<string> {
-        if (entry.value.startsWith('file://')) {
-            const filePath = entry.value.slice(7);
-            try {
-                const content = await fs.promises.readFile(filePath, 'utf-8');
-                return content.length > 24_000
-                    ? content.slice(0, 24_000) + `\n...[truncated, full ${content.length} chars at ${filePath}]`
-                    : content;
-            } catch {
-                return entry.value;
-            }
-        }
-        return entry.value.length > 24_000 ? entry.value.slice(0, 24_000) + '\n...[truncated]' : entry.value;
     }
 
     private async readLineWindow(refPath: string, zeroLine: number, radius: number): Promise<string> {

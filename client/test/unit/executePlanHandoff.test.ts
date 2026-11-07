@@ -9,7 +9,6 @@ import {
 } from '../../extension/ai/executePlanHandoff';
 import {
     buildBuildSystemPrompt,
-    buildGeneralPlanSystemPrompt,
     buildPlanModeSystemPrompt,
 } from '../../extension/ai/prompt/sections/modePrompts';
 import type { AgentStep } from '../../extension/ai/types';
@@ -305,7 +304,7 @@ describe('Execute-to-Plan handoff', () => {
     it('turns a complete Execute-mode proposal into an approval stop even before host persistence', () => {
         const plan = completePlan();
         expect(shouldRenderInteractivePlan({ explanation: plan, steps: [] }, {
-            mode: 'utility',
+            mode: 'build',
             planText: plan,
         })).to.equal(true);
         expect(shouldRenderInteractivePlan({
@@ -315,7 +314,7 @@ describe('Execute-to-Plan handoff', () => {
                 successfulToolResult('write_file'),
             ],
         }, {
-            mode: 'utility',
+            mode: 'build',
             planText: plan,
         })).to.equal(true);
     });
@@ -323,11 +322,11 @@ describe('Execute-to-Plan handoff', () => {
     it('does not reopen the approval boundary during an approved execution continuation', () => {
         const plan = completePlan();
         expect(shouldPauseForInteractivePlan(plan, {
-            mode: 'utility',
+            mode: 'build',
             approvedPlanExecution: true,
         })).to.equal(false);
         expect(shouldRenderInteractivePlan({ explanation: plan, steps: [] }, {
-            mode: 'utility',
+            mode: 'build',
             planText: plan,
             approvedPlanExecution: true,
         })).to.equal(false);
@@ -368,7 +367,7 @@ describe('Execute-to-Plan handoff', () => {
                 toolCall('edit_file', 'client/extension/ai/chatPanel.ts'),
             ],
         }, {
-            mode: 'utility',
+            mode: 'build',
             planText: plan,
         })).to.equal(false);
     });
@@ -381,11 +380,11 @@ describe('Execute-to-Plan handoff', () => {
                 toolCall('write_file', '.cwtools/topic/Implementation_Plan.md'),
                 { ...successfulToolResult('write_file'), toolResult: { success: false, error: 'write failed' } },
             ],
-        }, { mode: 'utility', planText: plan })).to.equal(true);
+        }, { mode: 'build', planText: plan })).to.equal(true);
         expect(shouldRenderInteractivePlan({
             explanation: plan,
             steps: [toolCall('write_file', '.cwtools/topic/plan.md'), successfulToolResult('write_file')],
-        }, { mode: 'utility', planText: plan })).to.equal(false);
+        }, { mode: 'build', planText: plan })).to.equal(false);
     });
 
     it('keeps planning and approval lifecycle out of Execute prompts', () => {
@@ -399,8 +398,8 @@ describe('Execute-to-Plan handoff', () => {
         expect(childPrompt).to.include('Slim Build Contract');
     });
 
-    it('teaches both Plan domains to self-check the contract without imposing one prose template', () => {
-        for (const prompt of [buildGeneralPlanSystemPrompt(), buildPlanModeSystemPrompt('', 'Synthetic')]) {
+    it('teaches Plan mode to self-check the contract without imposing one prose template', () => {
+        for (const prompt of [buildPlanModeSystemPrompt('', 'Synthetic')]) {
             expect(prompt).to.include('Plan authoring guidance');
             expect(prompt).to.include('Scale the plan to the real work');
             expect(prompt).to.include('Section names and depth should follow the task');
@@ -426,14 +425,9 @@ describe('Execute-to-Plan handoff', () => {
 
     it('does not turn ordinary explanatory Markdown answers into an approval plan in execute modes', () => {
         const explanatoryAnswer = `# 结论\n\n本项目所谓的动态修正不是一个单独的引擎目录，而是 exe_dynamic 命名空间下的一套运行时读值机制。\n\n## 1. 入口：每次进入战斗触发\n\n内容详尽解析。\n\n## 2. 控制事件\n\n周期性重新计算。`;
-        expect(shouldPauseForInteractivePlan(explanatoryAnswer, { mode: 'utility' })).to.equal(false);
-        expect(shouldPauseForInteractivePlan(explanatoryAnswer, { mode: 'script' })).to.equal(false);
+        expect(shouldPauseForInteractivePlan(explanatoryAnswer, { mode: 'build' })).to.equal(false);
         expect(shouldRenderInteractivePlan({ explanation: explanatoryAnswer, steps: [] }, {
-            mode: 'utility',
-            planText: explanatoryAnswer,
-        })).to.equal(false);
-        expect(shouldRenderInteractivePlan({ explanation: explanatoryAnswer, steps: [] }, {
-            mode: 'script',
+            mode: 'build',
             planText: explanatoryAnswer,
         })).to.equal(false);
     });

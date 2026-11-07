@@ -4,10 +4,10 @@
  * Canonical scheduling state shared across Extension Host and Webviews.
  */
 
-export type AgentRuntimeDomain = 'paradox' | 'general' | 'hybrid';
+export type AgentRuntimeDomain = 'paradox';
 export type AgentAuthorization = 'read_only' | 'plan_write_only' | 'workspace_write';
 export type AgentRunPhase = 'inspect' | 'plan' | 'execute' | 'verify' | 'finalize';
-export type AgentDispatchMode = 'single' | 'parallel' | 'specialist';
+export type AgentDispatchMode = 'single';
 
 export interface AgentSchedulingState {
     profileName: string;

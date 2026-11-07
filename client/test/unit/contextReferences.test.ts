@@ -3,7 +3,7 @@ import { expect } from 'chai';
 describe('context references: quote contexts', () => {
     it('injects quoted chat text into the reference prompt without touching the filesystem', async () => {
         const { ContextReferenceManager } = loadContextReferencesModule();
-        const manager = new ContextReferenceManager(() => undefined);
+        const manager = new ContextReferenceManager();
         const prompt = await manager.buildReferencePrompt([
             { id: 'ctx_1', type: 'quote', label: 'quote', text: 'selected assistant answer' } as any,
         ]);
@@ -13,7 +13,7 @@ describe('context references: quote contexts', () => {
 
     it('skips quote contexts with empty text', async () => {
         const { ContextReferenceManager } = loadContextReferencesModule();
-        const manager = new ContextReferenceManager(() => undefined);
+        const manager = new ContextReferenceManager();
         const prompt = await manager.buildReferencePrompt([
             { id: 'ctx_2', type: 'quote', label: 'quote', text: '   ' } as any,
         ]);
@@ -22,7 +22,7 @@ describe('context references: quote contexts', () => {
 
     it('clips over-long quoted text', async () => {
         const { ContextReferenceManager } = loadContextReferencesModule();
-        const manager = new ContextReferenceManager(() => undefined);
+        const manager = new ContextReferenceManager();
         const prompt = await manager.buildReferencePrompt([
             { id: 'ctx_3', type: 'quote', label: 'quote', text: 'x'.repeat(9000) } as any,
         ]);

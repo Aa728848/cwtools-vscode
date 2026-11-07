@@ -16,8 +16,8 @@ const PARADOX_PLAN = schedulingStateFromAdmission({
     explicitDelegation: false, confidence: 1, evidence: ['test'],
 });
 const GENERAL_PARALLEL = schedulingStateFromAdmission({
-    domainProfile: 'general', authorization: 'workspace_write', initialPhase: 'execute',
-    explicitDelegation: true, confidence: 1, evidence: ['test'],
+    domainProfile: 'paradox', authorization: 'workspace_write', initialPhase: 'execute',
+    explicitDelegation: false, confidence: 1, evidence: ['test'],
 });
 
 const TEMP_BASE = path.join(os.tmpdir(), 'cwtools-run-ledger');
@@ -263,48 +263,6 @@ describe('RunLedger Unit Tests', () => {
         expect([keepFile, extraFile].filter(file => fs.existsSync(file))).to.have.lengthOf(1);
     });
 
-    it('routes blackboard events through an explicit run event sink instead of the latest run', async () => {
-        const { runLedger } = loadRunLedgerModule();
-        const { createRunEventSink } = loadRunContextModule();
-        const { Blackboard } = loadBlackboardModule();
-
-        const intendedRun = await runLedger.createRun('topic_sink_a', GENERAL_PARALLEL, 'intended prompt');
-        const latestRun = await runLedger.createRun('topic_sink_b', GENERAL_PARALLEL, 'latest prompt');
-        const sink = createRunEventSink({ runId: intendedRun.runId, agentId: 'parent' });
-        const blackboard = new Blackboard(undefined, sink);
-
-        blackboard.write('k', 'value', 'free_text', 'agent_a');
-        expect(blackboard.read('k')?.value).to.equal('value');
-
-        await waitForEvent(runLedger, intendedRun.runId, 'blackboard_read');
-        expect(runLedger.getSnapshot(intendedRun.runId)?.events.map(event => event.type)).to.include.members([
-            'blackboard_write',
-            'blackboard_read',
-        ]);
-        expect(runLedger.getSnapshot(latestRun.runId)?.events.map(event => event.type)).to.not.include('blackboard_write');
-    });
-
-    it('routes conflict detector events through the provided run event sink', async () => {
-        const { runLedger } = loadRunLedgerModule();
-        const { createRunEventSink } = loadRunContextModule();
-        const { Blackboard } = loadBlackboardModule();
-        const { ConflictDetector } = loadConflictDetectorModule();
-
-        const intendedRun = await runLedger.createRun('topic_conflict_a', GENERAL_PARALLEL, 'intended prompt');
-        const latestRun = await runLedger.createRun('topic_conflict_b', GENERAL_PARALLEL, 'latest prompt');
-        const sink = createRunEventSink({ runId: intendedRun.runId, agentId: 'parent' });
-        const blackboard = new Blackboard(undefined, sink);
-        const detector = new ConflictDetector(sink);
-
-        detector.declareIntent('agent_b', ['common/events/test.txt'], blackboard);
-        const result = detector.checkWriteConflict('agent_a', 'common/events/test.txt', blackboard);
-
-        expect(result.hasConflict).to.equal(true);
-        await waitForEvent(runLedger, intendedRun.runId, 'conflict_detected');
-        expect(runLedger.getSnapshot(intendedRun.runId)?.events.map(event => event.type)).to.include('conflict_detected');
-        expect(runLedger.getSnapshot(latestRun.runId)?.events.map(event => event.type)).to.not.include('conflict_detected');
-    });
-
     it('exposes rollout projection and explicit run metadata', async () => {
         const { runLedger } = loadRunLedgerModule();
         const { createRunEventSink } = loadRunContextModule();
@@ -338,39 +296,6 @@ describe('RunLedger Unit Tests', () => {
         expect(drained.map(item => item.message)).to.deep.equal(['first', 'second']);
         expect(drained[1]?.images).to.deep.equal(['data:image/png;base64,abc']);
         expect(queue.size).to.equal(0);
-    });
-
-    it('records background process lifecycle events through the run event sink', async () => {
-        const { runLedger } = loadRunLedgerModule();
-        const { createRunEventSink } = loadRunContextModule();
-        const { ProcessRegistry } = loadProcessRegistryModule();
-        const run = await runLedger.createRun('topic_process', PARADOX_WRITE, 'process prompt');
-        const sink = createRunEventSink({ runId: run.runId });
-        const registry = new ProcessRegistry();
-
-        let stdin = '';
-        const process = registry.register('echo hello', workspaceRoot, 1234, sink, {
-            sandboxMode: 'direct-preflight',
-            networkAccess: true,
-        }, { writeStdin: text => { stdin += text; } });
-        expect(registry.writeStdin(process.processId, 'continue\n')).to.equal(true);
-        expect(stdin).to.equal('continue\n');
-        registry.appendOutput(process.processId, 'stdout', 'hello\n', sink);
-        registry.complete(process.processId, 0, sink);
-
-        await waitForEvent(runLedger, run.runId, 'process_completed');
-        const snapshot = runLedger.getSnapshot(run.runId);
-        expect(snapshot?.events.map(event => event.type)).to.include.members([
-            'process_started',
-            'process_output_delta',
-            'process_completed',
-            'item_started',
-            'item_updated',
-            'item_completed',
-        ]);
-        const started = snapshot?.events.find(event => event.type === 'process_started');
-        expect(started?.payload.sandboxMode).to.equal('direct-preflight');
-        expect(started?.payload.networkAccess).to.equal(true);
     });
 
     it('persists durable thread records and supports fork/compact metadata', async () => {
@@ -526,20 +451,6 @@ describe('RunLedger Unit Tests', () => {
         const store = new ThreadStore();
         const thread = await store.markStatus('topic_protocol', 'thread_missing', 'active');
         expect(thread).to.equal(undefined);
-    });
-
-    it('fails closed when no verified command sandbox backend exists', () => {
-        const { BrokeredSandboxRunner, detectSandboxBackend, SandboxUnavailableError } = require('../../extension/ai/runner/sandboxRunner') as typeof import('../../extension/ai/runner/sandboxRunner');
-        expect(detectSandboxBackend('aix')).to.equal(undefined);
-        if (process.platform === 'win32' && !detectSandboxBackend()) {
-            const runner = new BrokeredSandboxRunner((() => { throw new Error('must not spawn'); }) as any);
-            expect(() => runner.spawn({
-                command: 'cmd.exe',
-                args: ['/c', 'echo test'],
-                options: { cwd: process.cwd() },
-                profile: { sandboxMode: 'workspace-write', networkAccess: false },
-            })).to.throw(SandboxUnavailableError);
-        }
     });
 
     it('enforces private history age retention', async () => {
@@ -717,10 +628,6 @@ function loadInputQueueModule() {
     return require('../../extension/ai/runner/inputQueue') as typeof import('../../extension/ai/runner/inputQueue');
 }
 
-function loadProcessRegistryModule() {
-    return loadModuleWithVscodeStub('../../extension/ai/runner/processRegistry') as typeof import('../../extension/ai/runner/processRegistry');
-}
-
 function loadThreadStoreModule() {
     return loadModuleWithVscodeStub('../../extension/ai/runner/threadStore') as typeof import('../../extension/ai/runner/threadStore');
 }
@@ -744,16 +651,6 @@ function loadAgentRuntimeModule() {
 
 function loadChatTopicsModule() {
     return loadModuleWithVscodeStub('../../extension/ai/chatTopics') as typeof import('../../extension/ai/chatTopics');
-}
-
-function loadBlackboardModule() {
-    delete require.cache[require.resolve('../../extension/ai/orchestrator/blackboard')];
-    return require('../../extension/ai/orchestrator/blackboard') as typeof import('../../extension/ai/orchestrator/blackboard');
-}
-
-function loadConflictDetectorModule() {
-    delete require.cache[require.resolve('../../extension/ai/orchestrator/conflictDetector')];
-    return require('../../extension/ai/orchestrator/conflictDetector') as typeof import('../../extension/ai/orchestrator/conflictDetector');
 }
 
 function loadModuleWithVscodeStub(request: string): unknown {

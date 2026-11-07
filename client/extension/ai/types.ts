@@ -19,14 +19,11 @@ export type { ProviderMeta };
  * - build:   Full tool access including file writes and in-loop validation (default)
  * - plan:    Read-only analysis, no writes, structured plan output
  * - explore: Parallel read-only exploration; focuses on understanding codebase, no validation
- * - utility: General-purpose workspace task mode for non-PDXScript scripts/tools.
  * - review:  Read-only mode focused on code review, finding issues, and providing feedback.
  * - loc_translator: Specialized for translating YML localisation files between languages.
  * - loc_writer: Specialized for writing new YML localisation entries from scratch.
- * - orchestrator: Multi-Agent coordinator mode — decomposes tasks and dispatches sub-agents.
- * - script: Paradox Multi-Agent — dynamic PDXScript workflow coordination with higher read parallelism.
  */
-export type AgentMode = 'build' | 'plan' | 'explore' | 'utility' | 'review' | 'gui_expert' | 'script_reviewer' | 'loc_translator' | 'loc_writer' | 'orchestrator' | 'script';
+export type AgentMode = 'build' | 'plan' | 'explore' | 'review' | 'gui_expert' | 'script_reviewer' | 'loc_translator' | 'loc_writer';
 
 /** Transient routing input; never persisted as session or topic state. */
 import type {
@@ -53,7 +50,7 @@ export type AgentIntent = 'auto' | 'execute' | 'plan' | 'explore' | 'review';
  * one turn.
  */
 export type AgentModeOverride = AgentIntent;
-export type AgentExecutionStrategy = 'auto' | 'single' | 'multi';
+export type AgentExecutionStrategy = 'auto' | 'single';
 
 export interface AdmissionDecision {
     domainProfile: AgentRuntimeDomain;
@@ -2287,8 +2284,6 @@ export interface AgentResumeState {
     recoveredFromBackup?: boolean;
     /** A newer checksummed model-request artifact was replayed after the last periodic snapshot. */
     recoveredFromEventLog?: boolean;
-    /** Explicitly durable approval rules captured with this V4 state. */
-    permissionRules?: import('./runner/permissionPolicy').PermissionRule[];
     domainSequence?: number;
     domainSnapshot?: import('./runner/state/domainModel').DomainSnapshot;
     pendingStepRequests?: import('./runner/stepRequest').StepRequest[];
@@ -2647,7 +2642,6 @@ export type WebViewMessage =
     | { type: 'setShowArchived'; show: boolean }
     | { type: 'configureProvider' }
     | { type: 'cancelGeneration' }
-    | { type: 'switchSchedulingDomain'; domain: AgentRuntimeDomain }
     | { type: 'openAgentManager' }
     | { type: 'openSettings' }
     | { type: 'saveSettings'; settings: PanelSettings }
@@ -2687,9 +2681,8 @@ export type WebViewMessage =
     | { type: 'cancelWriteFile'; messageId: string }
     | { type: 'quickChangeModel'; model: string }
     | { type: 'quickChangeReasoningEffort'; effort: ReasoningEffort }
-    | { type: 'quickChangeWriteMode'; mode: 'confirm' | 'auto' | 'auto_review' | 'full' }
+    | { type: 'quickChangeWriteMode'; mode: 'confirm' | 'auto' }
     | { type: 'slashCommand'; command: string }
-    | { type: 'permissionResponse'; permissionId: string; decision?: PermissionDecision; allowed?: boolean; alwaysAllow?: boolean }
     | { type: 'questionResponse'; questionId: string; answers?: Record<string, string | string[]>; cancelled?: boolean }
     /** Submit inline annotations collected in the webview back to AI for revision */
     | { type: 'submitPlanAnnotations'; annotations: Array<{ section: string; note: string }> }
@@ -2753,11 +2746,9 @@ export type HostMessage =
     | { type: 'autoWriteFile'; file: string; isNewFile: boolean }
     | { type: 'topicTitleGenerated'; topicId: string; title: string }
     | { type: 'topicForked'; newTopicId: string; title: string }
-    | { type: 'permissionRequest'; permissionId: string; itemId: string; threadId?: string; turnId?: string; tool: string; description: string; command?: string; allowAlways?: boolean; availableDecisions: PermissionDecision[]; proposedRule?: { commandPrefix: string[]; cwdScope: string; riskMax: number; scope: 'session' }; preflight?: PermissionRequestPreflight }
-    | { type: 'permissionResolved'; permissionId: string; itemId: string; threadId?: string; turnId?: string; decision: PermissionDecision; reviewer: 'user' | 'auto_review' | 'policy'; reviewerProvider?: string; reviewerModel?: string; unsandboxed?: boolean }
     | { type: 'questionRequest'; questionId: string; topicId: string; threadId?: string; turnId?: string; questions: AskUserQuestionItem[] }
     | { type: 'questionResolved'; questionId: string; cancelled?: boolean }
-    | { type: 'floatingCardResolved'; card: 'permission' | 'question' | 'write' | 'plan' | 'walkthrough' | 'blueprint'; id?: string }
+    | { type: 'floatingCardResolved'; card: 'question' | 'write' | 'plan' | 'walkthrough' | 'blueprint'; id?: string }
     | { type: 'setSchedulingState'; schedulingState: AgentSchedulingState }
     /** Replay all AI steps accumulated while the panel was hidden; isGenerating=true means still running */
     | { type: 'replaySteps'; steps: AgentStep[]; isGenerating: boolean }
@@ -2841,11 +2832,6 @@ export interface PanelSettings {
     customApiFormat?: CustomApiFormat;
     maxContextTokens: number;
     agentFileWriteMode: 'confirm' | 'auto';
-    /** Approval reviewer: 'user' shows cards; 'auto_review' routes to the read-only LLM reviewer first. */
-    approvals?: { reviewer?: 'user' | 'auto_review'; reviewerProvider?: string; reviewerModel?: string };
-    /** Mirror of stellarisLanguageServices.ai.developer.disableSecuritySandbox — the 'full' write tier. */
-    securitySandboxDisabled?: boolean;
-    sandboxBackend?: { available: boolean; backend?: string; message: string };
     /** Reasoning effort / thinking mode for the selected provider/model. */
     reasoningEffort: ReasoningEffort;
     /** Visible-answer detail for the Codex ChatGPT subscription provider. */
@@ -2889,14 +2875,6 @@ export interface PanelSettings {
     };
     mcp?: {
         servers: MCPServerConfig[];
-    };
-    /** Coordination mode sub-Agent model coverage configuration */
-    orchestrator?: {
-        /**
-         * Role → { provider, model } mapping ('__inherit__' means inheriting the main settings).
-         * `source` marks entries that came from ~/.cwtools/agent-models.json (read-only provenance badge).
-         */
-        agentModels?: Record<string, { provider: string; model: string; source?: 'settings' | 'home' }>;
     };
 }
 

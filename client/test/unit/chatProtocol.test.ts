@@ -19,12 +19,6 @@ describe('AI chat protocol boundaries', () => {
             text: 'hello',
             images: ['data:image/png;base64,AA=='],
         })).to.not.equal(null);
-        expect(parseWebviewMessage({ type: 'switchSchedulingDomain', domain: 'general' })).to.not.equal(null);
-        expect(parseWebviewMessage({
-            type: 'permissionResponse',
-            permissionId: 'permission-1',
-            decision: 'acceptForSession',
-        })).to.not.equal(null);
         expect(parseWebviewMessage({
             type: 'questionResponse',
             questionId: 'question-1',
@@ -113,14 +107,6 @@ describe('AI chat protocol boundaries', () => {
         expect(parseHostMessage({ type: 'agentStep', step: { type: 'thinking', content: 'x' } })).to.not.equal(null);
         expect(parseHostMessage({ type: 'agentRoutingStatus', phase: 'classifying' })).to.not.equal(null);
         expect(parseHostMessage({ type: 'agentRoutingStatus', phase: 'unknown' })).to.equal(null);
-        expect(parseHostMessage({
-            type: 'permissionRequest',
-            permissionId: 'p1',
-            itemId: 'i1',
-            tool: 'write_file',
-            description: 'write',
-            availableDecisions: ['accept', 'decline'],
-        })).to.not.equal(null);
         expect(parseHostMessage({
             type: 'questionRequest',
             questionId: 'q1',

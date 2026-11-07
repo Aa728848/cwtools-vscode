@@ -1,6 +1,6 @@
 # Agent Note: 审批模型可配置与无沙箱执行的审批归属
 
-Status: implemented
+Status: archived
 
 ## Problem
 

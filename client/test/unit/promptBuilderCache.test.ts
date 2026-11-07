@@ -242,19 +242,6 @@ describe('PromptBuilder frozen prompt fingerprint cache (plan §7.1)', () => {
         expect(stats.missReasons.cold).to.equal(1);
     });
 
-    it('leaves general-domain prompts cached when a Paradox vanilla root changes', () => {
-        stubFlags[STELLARIS_CACHE_KEY] = OLD_VANILLA_ROOT;
-        const builder = makeBuilder();
-        const first = builder.buildFrozenSystemPrompt('plan', 'deepseek', undefined, { toolsetHash: 'general-tools', domain: 'general' });
-
-        stubFlags[STELLARIS_CACHE_KEY] = NEW_VANILLA_ROOT;
-        const second = builder.buildFrozenSystemPrompt('plan', 'deepseek', undefined, { toolsetHash: 'general-tools', domain: 'general' });
-
-        expect(second).to.equal(first);
-        expect(second).to.not.include(GAME_ROOT_SECTION);
-        expect(builder.getFrozenPromptCacheStats().hits).to.equal(1);
-    });
-
     it('rebuild:true forces a rebuild and counts a rebuild miss', () => {
         const builder = makeBuilder();
         builder.buildFrozenSystemPrompt('build', 'deepseek', undefined, { toolsetHash: 'tools-a', domain: 'paradox' });
@@ -302,23 +289,6 @@ describe('PromptBuilder frozen prompt fingerprint cache (plan §7.1)', () => {
         }
         expect(builder.getFrozenPromptCacheStats().size).to.be.at.most(32);
     });
-
-    it('uses separate frozen prompt identities for General and Paradox domains in a shared mode', () => {
-        const builder = makeBuilder();
-        const general = builder.buildFrozenSystemPrompt('plan', 'deepseek', undefined, {
-            toolsetHash: 'general-tools',
-            domain: 'general',
-        });
-        const paradox = builder.buildFrozenSystemPrompt('plan', 'deepseek', undefined, {
-            toolsetHash: 'paradox-tools',
-            domain: 'paradox',
-        });
-
-        expect(general).to.not.include('CWT/LSP');
-        expect(paradox).to.include('CWT/LSP');
-        expect(general).to.not.equal(paradox);
-        expect(builder.getFrozenPromptCacheStats().size).to.equal(2);
-    });
 });
 
 describe('orderMessagesForStablePrefix (plan §7.2)', () => {
@@ -360,10 +330,10 @@ describe('PromptBuilder frozen slim prompt cache', () => {
         const { PromptBuilder } = loadPromptBuilderModule();
         const builder = new PromptBuilder('', undefined, undefined);
         const first = builder.buildFrozenSlimSystemPromptForMode('explore', 'mimo', undefined, {
-            toolsetHash: 'tools-a', domain: 'general',
+            toolsetHash: 'tools-a', domain: 'paradox',
         });
         const second = builder.buildFrozenSlimSystemPromptForMode('explore', 'mimo', undefined, {
-            toolsetHash: 'tools-a', domain: 'general',
+            toolsetHash: 'tools-a', domain: 'paradox',
         });
         expect(second).to.equal(first);
         expect(builder.getFrozenPromptCacheStats().hits).to.equal(1);

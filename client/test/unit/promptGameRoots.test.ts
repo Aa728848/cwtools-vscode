@@ -92,16 +92,16 @@ describe('PromptBuilder configured vanilla read roots', () => {
         try { fs.rmdirSync(TEMP_BASE); } catch { /* not empty or already removed */ }
     });
 
-    function buildPrompt(domain: 'paradox' | 'general'): string {
+    function buildPrompt(): string {
         const { PromptBuilder } = withVscodeStub(
             () => require('../../extension/ai/promptBuilder') as typeof import('../../extension/ai/promptBuilder'));
         return new PromptBuilder(workspaceRoot)
-            .buildSystemPromptForMode('build', undefined, 'stellaris', undefined, undefined, undefined, true, true, domain);
+            .buildSystemPromptForMode('build', undefined, 'stellaris', undefined, undefined, undefined, true, true, 'paradox');
     }
 
     it('states the configured root and the read_file contract in the main agent prompt', () => {
         stubConfig[STELLARIS_CACHE_KEY] = vanillaRoot;
-        const prompt = buildPrompt('paradox');
+        const prompt = buildPrompt();
 
         expect(prompt).to.include(SECTION_HEADING);
         expect(prompt).to.include(vanillaRoot);
@@ -110,19 +110,11 @@ describe('PromptBuilder configured vanilla read roots', () => {
     });
 
     it('omits the whole statement when no game root is configured', () => {
-        const prompt = buildPrompt('paradox');
+        const prompt = buildPrompt();
 
         expect(prompt).to.not.include(SECTION_HEADING);
         expect(prompt).to.not.include('Never guess a drive letter');
         expect(prompt).to.include('Eddy CWTool Code');
-    });
-
-    it('keeps the statement out of the general repository domain', () => {
-        stubConfig[STELLARIS_CACHE_KEY] = vanillaRoot;
-        const prompt = buildPrompt('general');
-
-        expect(prompt).to.not.include(SECTION_HEADING);
-        expect(prompt).to.not.include(vanillaRoot);
     });
 
     it('mirrors the statement in Chinese for a zh-cn session', () => {
@@ -132,7 +124,7 @@ describe('PromptBuilder configured vanilla read roots', () => {
         const previousLocale = messages.getAiMessageLocale();
         try {
             messages.setAiMessageLocale('zh-cn');
-            expect(buildPrompt('paradox')).to.include('## \u5df2\u914d\u7f6e\u7684\u539f\u7248\u53ea\u8bfb\u6839');
+            expect(buildPrompt()).to.include('## \u5df2\u914d\u7f6e\u7684\u539f\u7248\u53ea\u8bfb\u6839');
         } finally {
             messages.setAiMessageLocale(previousLocale);
         }

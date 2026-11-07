@@ -86,8 +86,6 @@ export class ToolDisclosureService {
                 result.alreadyLoaded.push(name);
             } else if (entry.disclosure !== 'deferred' && poolByName.has(name)) {
                 result.alreadyLoaded.push(name);
-            } else if (context.domain === 'general' && entry.domain === 'paradox') {
-                result.denied.push(name);
             } else if (!entry.allowedModes.has(context.mode)) {
                 result.denied.push(name);
             } else if (!eligibleByName.has(name)) {

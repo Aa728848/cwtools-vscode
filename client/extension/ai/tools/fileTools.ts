@@ -31,7 +31,6 @@ import { getPrivateTopicStorageDir, canonicalPathKey } from '../workspacePaths';
 import { isPlanModeCardArtifactFile } from '../planModeGuard';
 import { isPathInsideOrEqual } from '../../pathScope';
 import {
-    isSecuritySandboxDisabled,
     resolveReadablePathInput,
     resolveWorkspacePathInput,
     SHARED_AI_STORAGE_SEGMENTS,
@@ -327,7 +326,7 @@ export class FileToolHandler {
 
     private resolveAndAssertInWorkspace(filePath: string, context?: import('../types').AgentToolContext): string {
         const resolution = this.resolveWorkspacePath(filePath, context);
-        if (isSecuritySandboxDisabled() || resolution.isWithinAnyWorkspace) {
+        if (resolution.isWithinAnyWorkspace) {
             return resolution.resolved;
         }
         const topicArtifact = this.resolveCurrentTopicArtifact(filePath, context);
@@ -338,7 +337,7 @@ export class FileToolHandler {
     private resolveAndAssertReadable(filePath: string, context?: import('../types').AgentToolContext): string {
         const normalizedInput = this.normalizeAgentWorkspacePath(filePath, context);
         const resolution = resolveReadablePathInput(normalizedInput, this.ctx.workspaceRoot);
-        if (isSecuritySandboxDisabled() || resolution.isWithinReadableRoot) {
+        if (resolution.isWithinReadableRoot) {
             return resolution.resolved;
         }
         const topicArtifact = this.resolveCurrentTopicArtifact(filePath, context);
@@ -394,14 +393,12 @@ export class FileToolHandler {
         return false;
     }
 
-    private async resolveAndAuthorizeWrite(filePath: string, toolName: string, context?: import('../types').AgentToolContext): Promise<string> {
+    private async resolveAndAuthorizeWrite(filePath: string, _toolName: string, context?: import('../types').AgentToolContext): Promise<string> {
         const resolution = this.resolveWorkspacePath(this.normalizeAgentWorkspaceWritePath(filePath, context), context);
-        if (!isSecuritySandboxDisabled()) {
-            if (!resolution.isWithinAnyWorkspace) {
-                const topicArtifact = this.resolveCurrentTopicArtifact(filePath, context);
-                if (topicArtifact) return topicArtifact;
-                throw new Error(`Access denied: Cannot write outside the workspace root: '${resolution.resolved}'.`);
-            }
+        if (!resolution.isWithinAnyWorkspace) {
+            const topicArtifact = this.resolveCurrentTopicArtifact(filePath, context);
+            if (topicArtifact) return topicArtifact;
+            throw new Error(`Access denied: Cannot write outside the workspace root: '${resolution.resolved}'.`);
         }
         // ReadTracker write-gate safety interception (D1)
         const readTracker = (context?.agentRunner as any)?.readTracker;
@@ -445,8 +442,7 @@ export class FileToolHandler {
         return null;
     }
 
-    private isPdxStructureGuardedPath(filePath: string, context?: import('../types').AgentToolContext): boolean {
-        if (context?.runnerOptions?.schedulingState.domainProfile === 'general') return false;
+    private isPdxStructureGuardedPath(filePath: string, _context?: import('../types').AgentToolContext): boolean {
         return ['.txt', '.gui', '.gfx', '.asset', '.entity'].includes(path.extname(filePath).toLowerCase());
     }
 
@@ -455,8 +451,7 @@ export class FileToolHandler {
      * not use the PDX brace counter above: their mixed DSL/HLSL syntax is validated
      * by the authoritative shader frontend in the language server instead.
      */
-    private isPdxSemanticGuardedPath(filePath: string, context?: import('../types').AgentToolContext): boolean {
-        if (context?.runnerOptions?.schedulingState.domainProfile === 'general') return false;
+    private isPdxSemanticGuardedPath(filePath: string, _context?: import('../types').AgentToolContext): boolean {
         return ['.txt', '.gui', '.gfx', '.asset', '.entity', '.shader', '.fxh']
             .includes(path.extname(filePath).toLowerCase());
     }
@@ -605,7 +600,7 @@ export class FileToolHandler {
             }
             args = normalizedArgs;
             args.file = this.resolveAndAssertReadable(args.file, context);
-            const paradoxDomain = context?.runnerOptions?.schedulingState.domainProfile !== 'general';
+            const paradoxDomain = true;
             const localisationFile = this.isLocalisationPath(args.file) && matchesExt(args.file, '.yml');
             const readTracker = (context?.agentRunner as any)?.readTracker;
             if (readTracker) { readTracker.markRead(args.file); }
@@ -1448,15 +1443,6 @@ export class FileToolHandler {
         /** The server has no entry for this file at all (not merely an old revision). */
         neverValidated: boolean;
     } | null> {
-        if (context?.runnerOptions?.schedulingState.domainProfile === 'general') {
-            return {
-                freshness: 'fresh',
-                epoch: Date.now(),
-                pendingGlobalKinds: [],
-                diagnostics: FileToolHandler.mapDiagnostics(vs.Uri.file(filePath), true),
-                neverValidated: false,
-            };
-        }
         try {
             const client = (this.ctx as any).client;
             if (!client) return null;
@@ -1551,16 +1537,6 @@ export class FileToolHandler {
         epoch: number;
         timedOut?: boolean;
     }> {
-        if (context?.runnerOptions?.schedulingState.domainProfile === 'general') {
-            const diagnostics = await this.getLspDiagnosticsForFile(filePath, context);
-            return {
-                diagnostics,
-                freshness: 'fresh',
-                pendingGlobalKinds: [],
-                epoch: Date.now(),
-                timedOut: false,
-            };
-        }
         const timeoutMs = 3000;
         const pollIntervalMs = 100;
         const uri = vs.Uri.file(filePath);
@@ -1662,7 +1638,6 @@ export class FileToolHandler {
                 });
             }), 2500, 'Diagnostics panel wait timed out.', context?.runnerOptions?.abortSignal);
             return vs.languages.getDiagnostics(uri)
-                .filter(d => context?.runnerOptions?.schedulingState.domainProfile !== 'general' || !/cwtools/i.test(d.source ?? ''))
                 .map(d => {
                 const metadata = diagnosticMetadata(d);
                 return {

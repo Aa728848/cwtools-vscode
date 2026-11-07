@@ -24,10 +24,7 @@ export interface RuntimeAgentProfile {
     authorizationCeiling: AgentAuthorization;
     tools?: string[];
     disallowedTools?: string[];
-    subagents?: string[];
-    /** Declarative child capability exceptions. Web remains denied by the registry. */
-    subagentCapabilities?: { command?: boolean };
-    /** Healthy-progress iteration window for child runs using this profile. */
+    /** Healthy-progress iteration window for runs using this profile. */
     maxIterations?: number;
     summaryPolicy?: AgentSummaryPolicy;
     override?: boolean;
@@ -55,36 +52,19 @@ const AUTHORITY_RANK: Record<AgentAuthorization, number> = {
 
 const BUILTIN_PROFILES: RuntimeAgentProfile[] = [
     {
-        name: 'general-agent',
-        description: 'General workspace Agent with progressively disclosed tools.',
-        domain: 'general',
-        authorizationCeiling: 'workspace_write',
-        tools: ['*'],
-        subagents: ['general-coder', 'explore', 'planner', 'reviewer'],
-    },
-    {
-        name: 'hybrid-agent',
-        description: 'General workspace writer with Paradox/CWTools semantic read capabilities.',
-        domain: 'hybrid',
-        authorizationCeiling: 'workspace_write',
-        tools: ['*'],
-        subagents: ['general-coder', 'paradox-coder', 'explore', 'planner', 'reviewer'],
-    },
-    {
         name: 'paradox-agent',
         description: 'Paradox/CWTools Agent with semantic and workspace capabilities.',
         domain: 'paradox',
         authorizationCeiling: 'workspace_write',
         tools: ['*'],
-        subagents: ['paradox-coder', 'explore', 'planner', 'reviewer', 'localization-writer', 'gui-expert'],
     },
     {
         name: 'explore',
         description: 'Read-only repository and semantic exploration.',
         authorizationCeiling: 'read_only',
-        tools: ['ask_user_question', 'select_tools', 'read_file', 'list_directory', 'glob_files', 'grep', 'document_symbols', 'workspace_symbols', 'go_to_definition', 'find_references', 'hover_symbol', 'query_*', 'search_*', 'get_*', 'run_skill', 'save_skill', 'web_*', 'set_memory', 'query_blackboard', 'team_send_message', 'team_members', 'team_task_*'],
+        tools: ['ask_user_question', 'select_tools', 'read_file', 'list_directory', 'glob_files', 'grep', 'document_symbols', 'workspace_symbols', 'go_to_definition', 'find_references', 'hover_symbol', 'query_*', 'search_*', 'get_*', 'run_skill', 'save_skill', 'web_*', 'set_memory'],
         maxIterations: 40,
-        disallowedTools: ['write_*', 'edit_file', 'replace_lines', 'run_command', 'git_ops', 'dispatch_agents'],
+        disallowedTools: ['write_*', 'edit_file', 'replace_lines', 'git_ops'],
         summaryPolicy: {
             minCharacters: 160,
             requiredSections: ['summary', 'unresolved'],
@@ -95,9 +75,9 @@ const BUILTIN_PROFILES: RuntimeAgentProfile[] = [
         name: 'planner',
         description: 'Plan-only Agent that may write guarded design blueprints.',
         authorizationCeiling: 'plan_write_only',
-        tools: ['ask_user_question', 'select_tools', 'read_file', 'list_directory', 'glob_files', 'grep', 'document_symbols', 'workspace_symbols', 'go_to_definition', 'find_references', 'hover_symbol', 'query_*', 'search_*', 'get_*', 'run_skill', 'save_skill', 'write_design_blueprint', 'set_memory', 'query_blackboard', 'team_send_message', 'team_members', 'team_task_*'],
+        tools: ['ask_user_question', 'select_tools', 'read_file', 'list_directory', 'glob_files', 'grep', 'document_symbols', 'workspace_symbols', 'go_to_definition', 'find_references', 'hover_symbol', 'query_*', 'search_*', 'get_*', 'run_skill', 'save_skill', 'write_design_blueprint', 'set_memory'],
         maxIterations: 30,
-        disallowedTools: ['edit_file', 'replace_lines', 'run_command', 'git_ops', 'dispatch_agents'],
+        disallowedTools: ['edit_file', 'replace_lines', 'git_ops'],
         summaryPolicy: {
             minCharacters: 160,
             requiredSections: ['summary', 'unresolved'],
@@ -108,9 +88,9 @@ const BUILTIN_PROFILES: RuntimeAgentProfile[] = [
         name: 'reviewer',
         description: 'Read-only verification and review Agent.',
         authorizationCeiling: 'read_only',
-        tools: ['ask_user_question', 'select_tools', 'read_file', 'glob_files', 'grep', 'document_symbols', 'workspace_symbols', 'go_to_definition', 'find_references', 'hover_symbol', 'query_*', 'get_*', 'run_skill', 'save_skill', 'validate_*', 'compare_*', 'git_ops', 'set_memory', 'query_blackboard', 'team_send_message', 'team_members', 'team_task_*'],
+        tools: ['ask_user_question', 'select_tools', 'read_file', 'glob_files', 'grep', 'document_symbols', 'workspace_symbols', 'go_to_definition', 'find_references', 'hover_symbol', 'query_*', 'get_*', 'run_skill', 'save_skill', 'validate_*', 'compare_*', 'git_ops', 'set_memory'],
         maxIterations: 30,
-        disallowedTools: ['write_*', 'edit_file', 'replace_lines', 'dispatch_agents'],
+        disallowedTools: ['write_*', 'edit_file', 'replace_lines'],
         summaryPolicy: {
             minCharacters: 200,
             requiredSections: ['summary', 'verification', 'unresolved'],
@@ -118,26 +98,11 @@ const BUILTIN_PROFILES: RuntimeAgentProfile[] = [
         },
     },
     {
-        name: 'general-coder',
-        description: 'General implementation sub-Agent.',
-        domain: 'general',
-        authorizationCeiling: 'workspace_write',
-        tools: ['*'],
-        subagentCapabilities: { command: true },
-        maxIterations: 80,
-        summaryPolicy: {
-            minCharacters: 240,
-            requiredSections: ['summary', 'changedFiles', 'verification', 'unresolved'],
-            retries: 1,
-        },
-    },
-    {
         name: 'paradox-coder',
-        description: 'Paradox implementation sub-Agent.',
+        description: 'Paradox implementation profile.',
         domain: 'paradox',
         authorizationCeiling: 'workspace_write',
         tools: ['*'],
-        subagentCapabilities: { command: true },
         maxIterations: 80,
         summaryPolicy: {
             minCharacters: 240,
@@ -147,7 +112,7 @@ const BUILTIN_PROFILES: RuntimeAgentProfile[] = [
     },
     {
         name: 'localization-writer',
-        description: 'Paradox localization writing sub-Agent.',
+        description: 'Paradox localization writing profile.',
         domain: 'paradox',
         authorizationCeiling: 'workspace_write',
         tools: ['*'],
@@ -155,7 +120,7 @@ const BUILTIN_PROFILES: RuntimeAgentProfile[] = [
     },
     {
         name: 'localization-translator',
-        description: 'Paradox localization translation sub-Agent.',
+        description: 'Paradox localization translation profile.',
         domain: 'paradox',
         authorizationCeiling: 'workspace_write',
         tools: ['*'],
@@ -163,7 +128,7 @@ const BUILTIN_PROFILES: RuntimeAgentProfile[] = [
     },
     {
         name: 'gui-expert',
-        description: 'Paradox GUI implementation sub-Agent.',
+        description: 'Paradox GUI implementation profile.',
         domain: 'paradox',
         authorizationCeiling: 'workspace_write',
         tools: ['*'],
@@ -181,7 +146,7 @@ function profileValidationError(profile: RuntimeAgentProfile): string | undefine
     if (profile.instructions !== undefined && (typeof profile.instructions !== 'string' || profile.instructions.length > 32_000)) {
         return `${profile.name}: instructions exceed 32000 characters`;
     }
-    if (profile.domain !== undefined && profile.domain !== 'general' && profile.domain !== 'paradox' && profile.domain !== 'hybrid') {
+    if (profile.domain !== undefined && profile.domain !== 'paradox') {
         return `${profile.name}: invalid capability domain`;
     }
     if (AUTHORITY_RANK[profile.authorizationCeiling] === undefined) {
@@ -196,12 +161,6 @@ function profileValidationError(profile: RuntimeAgentProfile): string | undefine
                 return `${profile.name}: tool pattern "${String(pattern)}" matches no registered tool`;
             }
         }
-    }
-    if (profile.subagents !== undefined
-        && (!Array.isArray(profile.subagents)
-            || profile.subagents.length > 32
-            || profile.subagents.some(role => typeof role !== 'string' || !/^[a-zA-Z0-9_.-]{1,80}$/.test(role)))) {
-        return `${profile.name}: invalid subagent list`;
     }
     if (profile.maxIterations !== undefined
         && (!Number.isSafeInteger(profile.maxIterations) || profile.maxIterations < 1 || profile.maxIterations > 10_000)) {
@@ -311,7 +270,7 @@ export class AgentProfileCatalog {
         const readOnly = admission.authorization === 'read_only';
         const name = readOnly
             ? (admission.initialPhase === 'verify' ? 'reviewer' : 'explore')
-            : admission.domainProfile === 'paradox' ? 'paradox-agent' : admission.domainProfile === 'hybrid' ? 'hybrid-agent' : 'general-agent';
+            : 'paradox-agent';
         return this.getRequired(name);
     }
 
@@ -411,13 +370,11 @@ export class ToolActivationService {
             ? scheduling.authorization
             : profile.authorizationCeiling;
         const registered: string[] = [...TOOL_REGISTRY.keys()].sort();
-        const effectiveMode = scheduling.dispatch !== 'single'
-            ? scheduling.domainProfile === 'general' ? 'orchestrator' : 'script'
-            : authorization === 'read_only'
-                ? scheduling.phase === 'verify' || profile.name === 'reviewer' ? 'review' : 'explore'
-                : authorization === 'plan_write_only' || scheduling.phase === 'plan'
-                    ? 'plan'
-                    : scheduling.domainProfile === 'paradox' ? 'build' : 'utility';
+        const effectiveMode = authorization === 'read_only'
+            ? scheduling.phase === 'verify' || profile.name === 'reviewer' ? 'review' : 'explore'
+            : authorization === 'plan_write_only' || scheduling.phase === 'plan'
+                ? 'plan'
+                : 'build';
         const activated: string[] = registered.filter(name => {
             const entry = TOOL_REGISTRY.get(name as AgentToolName);
             return !!entry && evaluateEffectiveToolPolicy(name, {

@@ -11,7 +11,7 @@ const PARADOX_WRITE = schedulingStateFromAdmission({
     explicitDelegation: false, confidence: 1, evidence: ['test'],
 });
 const GENERAL_PLAN = schedulingStateFromAdmission({
-    domainProfile: 'general', authorization: 'plan_write_only', initialPhase: 'plan',
+    domainProfile: 'paradox', authorization: 'plan_write_only', initialPhase: 'plan',
     explicitDelegation: false, confidence: 1, evidence: ['test'],
 });
 
@@ -217,7 +217,7 @@ describe('ResumeState V4', () => {
             const topicId = 'topic_general_plan';
             await saveResumeState(topicId, GENERAL_PLAN, [{ role: 'user', content: 'plan a TypeScript refactor' }], { getTodos: () => [] } as any);
             const loaded = await loadResumeState(topicId);
-            expect(loaded?.schedulingState).to.include({ domainProfile: 'general', phase: 'plan' });
+            expect(loaded?.schedulingState).to.include({ domainProfile: 'paradox', phase: 'plan' });
             expect(loaded).not.to.have.property('mode');
             expect(loaded).not.to.have.property('domain');
         } finally {

@@ -92,17 +92,6 @@ describe('PromptBuilder context budgeting', () => {
         expect(content).to.not.include('Full file content');
     });
 
-    it('tells utility mode to run existing scripts directly instead of creating wrappers', () => {
-        const { PromptBuilder } = loadPromptBuilder();
-        const builder = new PromptBuilder(process.cwd());
-        const prompt = builder.buildSystemPromptForMode('utility', undefined, undefined, undefined, undefined, undefined, true, true, 'general');
-
-        expect(prompt).to.include('edit that script directly');
-        expect(prompt).to.include('execute it from the project root');
-        expect(prompt).to.include('Prefer `python "relative/path/to/script.py"` over wrapper files');
-        expect(withoutRepositoryInstructions(prompt)).to.not.match(/\b(?:Paradox|PDXScript|CWTools|CWT)\b/i);
-    });
-
     it('injects generated profile facts and user-owned CWTOOLS.md instructions independently', () => {
         const { PromptBuilder } = loadPromptBuilder();
         const workspaceRoot = makeWorkspace();
@@ -278,59 +267,6 @@ describe('PromptBuilder context budgeting', () => {
         expect(content).to.include('copy this exact literal path');
     });
 
-    it('tells agents to reuse one temporary helper script per task', () => {
-        const { PromptBuilder } = loadPromptBuilder();
-        const builder = new PromptBuilder(process.cwd());
-        const prompt = builder.buildSystemPromptForMode('utility', undefined, undefined, undefined, undefined, undefined, true, true, 'general');
-        const context = builder.buildContextMessages({ topicId: 'topic-123', domain: 'general' });
-
-        expect(prompt).to.include('reuse one helper for the whole task');
-        expect(prompt).to.include('provided topic scratch directory');
-        expect(prompt).to.include('Delete it only when it was created solely for execution or verification');
-        expect(prompt).to.include('preserve existing scripts and user-requested deliverables');
-        expect(prompt).to.not.include('CWT_AGENT_HELPER_SCRIPT');
-        expect(String(context[0]!.content)).to.include('Agent Helper Script');
-        expect(String(context[0]!.content)).to.include('.cwtools/topic-123/scratch/agent_helper.py');
-        expect(String(context[0]!.content)).to.include('never user-requested deliverables');
-    });
-
-    it('tells agents to use platform-appropriate run_command env-var syntax', () => {
-        const { PromptBuilder } = loadPromptBuilder();
-        const builder = new PromptBuilder(process.cwd());
-        const prompt = builder.buildSystemPromptForMode('utility', undefined, undefined, undefined, undefined, undefined, true, true, 'general');
-
-        if (process.platform === 'win32') {
-            expect(prompt).to.include('falls back to Windows PowerShell 5.1');
-        } else {
-            expect(prompt).to.include('/bin/sh');
-        }
-        expect(withoutRepositoryInstructions(prompt)).to.not.match(/\b(?:Paradox|PDXScript|CWTools|CWT)\b/i);
-        expect(prompt).to.not.include('cmd.exe');
-        expect(prompt).to.not.include('%VAR%');
-    });
-
-    it('tells slim sub-agents to use structured edits instead of commands', () => {
-        const { PromptBuilder } = loadPromptBuilder();
-        const builder = new PromptBuilder(process.cwd());
-        const prompt = builder.buildSlimSystemPromptForMode('build', undefined, undefined, undefined, 'paradox');
-        const context = builder.buildContextMessages({
-            topicId: 'topic-123',
-            domain: 'paradox',
-            commandToolsAvailable: false,
-        });
-
-        expect(prompt).to.include('NEVER use `run_command`');
-        expect(prompt).to.include('For bulk file changes');
-        expect(prompt).to.include('structured tools');
-        expect(prompt).to.include('Do NOT create helper scripts');
-        expect(prompt).to.include('SUB-AGENT COMMAND BOUNDARY');
-        expect(prompt).to.not.include('COMMAND PERMISSION');
-        expect(prompt).to.not.include('Agent Helper Script');
-        expect(prompt).to.include('BLOCKED_FOR_ORCHESTRATOR');
-        expect(String(context[0]!.content)).to.not.include('run_command cwd');
-        expect(String(context[0]!.content)).to.not.include('Agent Helper Script');
-    });
-
     it('inherits user-owned CWTOOLS.md instructions in slim Paradox prompts', () => {
         const { PromptBuilder } = loadPromptBuilder();
         const workspaceRoot = makeWorkspace();
@@ -345,23 +281,10 @@ describe('PromptBuilder context budgeting', () => {
             const builder = new PromptBuilder(workspaceRoot);
 
             const paradoxPrompt = builder.buildSlimSystemPromptForMode('build', undefined, undefined, undefined, 'paradox');
-            const generalPrompt = builder.buildSlimSystemPromptForMode('utility', undefined, undefined, undefined, 'general');
 
             expect(paradoxPrompt).to.include('SLIM_MUST_KEEP_THIS_RULE');
-            expect(generalPrompt).to.not.include('SLIM_MUST_KEEP_THIS_RULE');
         } finally {
             cleanupWorkspace(workspaceRoot);
         }
-    });
-
-    it('lets slim utility sub-agents run scoped repository verification commands', () => {
-        const { PromptBuilder } = loadPromptBuilder();
-        const builder = new PromptBuilder(process.cwd());
-        const prompt = builder.buildSlimSystemPromptForMode('utility', undefined, undefined, undefined, 'general');
-
-        expect(prompt).to.include('general-coding sub-task');
-        expect(prompt).to.include('scoped repository inspection, formatting, builds, or tests');
-        expect(prompt).to.include('parent policy engine');
-        expect(prompt).to.not.include('NEVER use `run_command`');
     });
 });

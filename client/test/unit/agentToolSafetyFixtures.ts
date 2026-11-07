@@ -96,8 +96,6 @@ export function loadToolModules() {
             externalTools: require('../../extension/ai/tools/externalTools') as typeof import('../../extension/ai/tools/externalTools'),
             agentTools: require('../../extension/ai/agentTools') as typeof import('../../extension/ai/agentTools'),
             agentRunner: require('../../extension/ai/agentRunner') as typeof import('../../extension/ai/agentRunner'),
-            permissionPolicy: require('../../extension/ai/runner/permissionPolicy') as typeof import('../../extension/ai/runner/permissionPolicy'),
-            processRegistry: require('../../extension/ai/runner/processRegistry') as typeof import('../../extension/ai/runner/processRegistry'),
             workspacePaths: require('../../extension/ai/workspacePaths') as typeof import('../../extension/ai/workspacePaths'),
             configuredGameRoots: require('../../extension/configuredGameRoots') as typeof import('../../extension/configuredGameRoots'),
         };
@@ -111,18 +109,14 @@ export const {
     externalTools,
     agentTools,
     agentRunner,
-    permissionPolicy,
-    processRegistry: processRegistryModule,
     workspacePaths,
     configuredGameRoots,
 } = loadToolModules();
 
 export const { FileToolHandler } = fileTools;
-export const { ExternalToolHandler, HeadTailTextBuffer } = externalTools;
+export const { ExternalToolHandler } = externalTools;
 export const { AgentToolExecutor, TOOL_DEFINITIONS } = agentTools;
 export const { getAgentToolTargetFiles, SUPERSEDED_BY_LATER_SAME_FILE_WRITE_TOOLS } = agentRunner;
-export const { PermissionPolicyStore } = permissionPolicy;
-export const { processRegistry } = processRegistryModule;
 export const { resetSandboxStorageForTesting, getParadoxUserDataRoots } = configuredGameRoots;
 
 export const TEMP_BASE = path.join(os.tmpdir(), 'cwtools-test-agent-tools');

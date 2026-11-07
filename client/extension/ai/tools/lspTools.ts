@@ -25,7 +25,7 @@ import type {
     CwtRuleValueReference,
     PdxSemanticCatalog,
 } from '../types';
-import { formatReadablePathForTool, isPathInsideOrEqual, resolveReadablePathInput, isSecuritySandboxDisabled } from '../workspaceSandbox';
+import { formatReadablePathForTool, isPathInsideOrEqual, resolveReadablePathInput } from '../workspaceSandbox';
 import { getConfiguredGameRoots } from '../../configuredGameRoots';
 import { diagnosticMetadata } from './diagnosticMetadata';
 import { diagnosticCodeString, diagnosticMatchesIgnoredKey } from '../../diagnosticI18n';
@@ -250,7 +250,7 @@ export class LspToolHandler {
             }
         }
         const resolution = resolveReadablePathInput(pathForResolution, this.ctx.workspaceRoot);
-        if (!isSecuritySandboxDisabled() && !resolution.isWithinReadableRoot) {
+        if (!resolution.isWithinReadableRoot) {
             return {
                 error: `Access denied: Path '${filePath}' is outside the workspace and configured game directories.`,
             };
@@ -2941,7 +2941,7 @@ export class LspToolHandler {
             }
             args.file = guard.resolved ?? args.file;
         }
-        const generalDomain = context?.runnerOptions?.schedulingState.domainProfile === 'general';
+        const generalDomain = false;
         const requestedLimit = typeof args.limit === 'number' && Number.isFinite(args.limit)
             ? args.limit
             : 500;
@@ -3924,10 +3924,6 @@ export class LspToolHandler {
     }
 
     async searchText(args: import('../types').GrepArgs, context?: import('../types').AgentToolContext): Promise<import('../types').GrepResult> {
-        if (context?.runnerOptions?.schedulingState.domainProfile === 'general') {
-            const { query, path: searchPath, isRegex, caseSensitive, include, limit } = args;
-            return this.grep({ query, path: searchPath, isRegex, caseSensitive, include, limit }, context);
-        }
         if (!args.searchContext && !args.exactMatch && !args.fileExtensions?.length) {
             return this.grep(args, context);
         }
@@ -3993,7 +3989,7 @@ export class LspToolHandler {
             }
             args.path = guard.resolved ?? args.path;
         }
-        const generalDomain = context?.runnerOptions?.schedulingState.domainProfile === 'general';
+        const generalDomain = false;
         const limit = Math.min(args.limit ?? 50, 200);
         const matches: Array<{ file: string; line: number; content: string }> = [];
         let totalMatches = 0;
@@ -4160,10 +4156,10 @@ export class LspToolHandler {
 
     async getCompletionAt(
         args: { file: string; line: number; column: number; limit?: number },
-        toolContext?: import('../types').AgentToolContext,
+        _toolContext?: import('../types').AgentToolContext,
     ): Promise<GetCompletionAtResult> {
         let context: GetCompletionAtResult['context'] | undefined;
-        const generalDomain = toolContext?.runnerOptions?.schedulingState.domainProfile === 'general';
+        const generalDomain = false;
         const guard = this.guardReadablePath(args.file);
         if (guard.error) {
             return { completions: [], error: guard.error, success: false } as any;
@@ -4366,7 +4362,7 @@ export class LspToolHandler {
             if (!symbols || symbols.length === 0) {
                 const indexed = await this.workspaceSymbolsFromIndex(args.query, limit);
                 if (indexed) return indexed;
-                const generalDomain = context?.runnerOptions?.schedulingState.domainProfile === 'general';
+                const generalDomain = false;
                 return {
                     symbols: [],
                     _warning: generalDomain

@@ -12,7 +12,7 @@ export interface PlanModeGuardResult {
 }
 
 const READ_ONLY_GIT_ACTIONS = new Set(['status', 'diff']);
-const READ_ONLY_GIT_MODES = new Set<AgentMode>(['plan', 'explore', 'review', 'script_reviewer', 'orchestrator', 'script']);
+const READ_ONLY_GIT_MODES = new Set<AgentMode>(['plan', 'explore', 'review', 'script_reviewer']);
 
 export function isReadOnlyGitAction(action: unknown): boolean {
     return typeof action === 'string' && READ_ONLY_GIT_ACTIONS.has(action);
@@ -37,7 +37,6 @@ export function validateGitOpsForMode(
 }
 
 const PLAN_FILE_RE = /^(implementation|implement)[ _-]?plan\.md$/i;
-const EXACT_HANDOFF_PLAN_FILE_RE = /^implementation_plan\.md$/i;
 const CARD_ARTIFACT_FILE_RE = /^(?:(?:implementation|implement)[ _-]?plan|design_blueprint|walkthrough|task|(?:plan|blueprint|walkthrough)?[ _-]?annotations?)\.(?:md|json)$/i;
 
 function normalize(filePath: string): string {
@@ -111,23 +110,13 @@ export function isPlanModeCardArtifactFile(filePath: string, workspaceRoot: stri
     return false;
 }
 
-function isCurrentTopicPermittedArtifact(filePath: string, workspaceRoot: string, topicId: string | undefined): boolean {
-    if (!topicId) return false;
-    const base = path.basename(filePath);
-    if (!EXACT_HANDOFF_PLAN_FILE_RE.test(base) && !/^walkthrough\.md$/i.test(base)) return false;
-    const segments = getAiRelativeSegments(filePath, workspaceRoot, topicId);
-    if (!segments || segments.length < 2) return false;
-    const safeTopicId = topicId.replace(/[^a-zA-Z0-9_.-]/g, '_').toLowerCase();
-    return segments[0]!.toLowerCase() === safeTopicId;
-}
-
 export function validatePlanModeToolUse(
     toolName: string,
     args: Record<string, unknown>,
     workspaceRoot: string,
     topicId?: string,
     precomputedTargets?: string[],
-    mode: 'plan' | 'orchestrator' | 'script' = 'plan',
+    mode: 'plan' = 'plan',
 ): PlanModeGuardResult {
     if (!WRITE_TOOLS.has(toolName)) {
         return { allowed: true };
@@ -152,10 +141,7 @@ export function validatePlanModeToolUse(
         : getAgentToolTargetFiles(toolName, args, workspaceRoot, topicId);
 
     const planFileWriteTools = new Set(['write_file', 'edit_file', 'replace_lines']);
-    const allowedArtifactTargets = mode === 'plan'
-        ? targets.every(target => isPlanModeCardArtifactFile(target, workspaceRoot, topicId))
-        : toolName === 'write_file'
-            && targets.every(target => isCurrentTopicPermittedArtifact(target, workspaceRoot, topicId));
+    const allowedArtifactTargets = targets.every(target => isPlanModeCardArtifactFile(target, workspaceRoot, topicId));
     if (planFileWriteTools.has(toolName) && targets.length > 0 && allowedArtifactTargets) {
         return { allowed: true, targetPaths: targets };
     }

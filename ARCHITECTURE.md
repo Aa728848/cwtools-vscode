@@ -204,19 +204,19 @@ Shader edits are conservative because some Effects are called by the executable 
 
 ### AI subsystem
 
-`client/extension/ai/` runs inside the Extension Host. It owns provider clients, chat state, prompt construction, tool dispatch, permission policy, Agent skills, memory, and multi-agent coordination.
+`client/extension/ai/` runs inside the Extension Host. It owns provider clients, chat state, prompt construction, tool dispatch, workspace path policy, Agent skills, and memory.
 
 #### Turn routing
 
-The composer selects a capability domain: automatic, Paradox/CWTools, or general coding. The task mode for a turn resolves deterministically from the request (plus an explicit user pin), and no separate routing model is consulted: the Agent itself decides when a request needs user-owned design decisions resolved, and escalates through the `enter_plan_mode` tool. Once admitted, a run cannot broaden its domain; profiles and child agents may only narrow it.
+The built-in Agent focuses exclusively on the Paradox / CWTools semantic domain as a single-Agent assistant. The task mode for a turn resolves deterministically from an explicit user pin (`/plan`, `/execute`, `/explore`, `/review`, or `/mode <value>`), and no separate routing model is consulted: the Agent itself decides when a request needs user-owned design decisions resolved, and escalates through the `enter_plan_mode` tool.
 
 Users can pin a mode for the session with `/plan`, `/execute`, `/explore`, `/review`, or `/mode <value>`; a pinned mode bypasses automatic resolution entirely for later turns.
 
 Plan is the Agent's own escalation, not a classifier's guess. It calls `enter_plan_mode` before its first project write when the user asked for a plan or a materially user-owned choice is still open; that narrows authorization to `plan_write_only` and the per-call plan guard then blocks project writes for the rest of the turn. `exit_plan_mode` leaves Plan without restoring write access, so a model can never bypass the approval it just requested — only the user's approval does that. Bounded repository inspection settles ordinary changes, so Execute remains the default.
 
-`AgentSchedulingState` is the only persisted and host-to-Webview scheduling state. Prompt/tool execution labels such as Build, Plan, or Orchestrator are projections derived at the call boundary and are never restored independently. A run's post-run state is read back from the scheduling domain store, a Plan turn is not rewritten to `finalize` (Plan means waiting on the user, not finished), and a topic carries the user's pinned `modeOverride` plus any approved plan artifact so both survive a topic switch, a reload, and a fork.
+`AgentSchedulingState` is the only persisted and host-to-Webview scheduling state. Prompt/tool execution labels such as Build or Plan are projections derived at the call boundary and are never restored independently. Legacy persisted `'general' | 'hybrid'` domains and multi-agent dispatch modes are normalized to `'paradox'` and `'single'` on load. A run's post-run state is read back from the scheduling domain store, a Plan turn is not rewritten to `finalize` (Plan means waiting on the user, not finished), and a topic carries the user's pinned `modeOverride` plus any approved plan artifact so both survive a topic switch, a reload, and a fork.
 
-General coding loads normal repository instructions and cannot use Paradox-only semantic capabilities. The Paradox domain can query the active profile, CWT rules, indexes, and LSP evidence. `CWTOOLS.md` remains user-owned and is only scaffolded when absent.
+The Paradox domain can query the active profile, CWT rules, indexes, and LSP evidence. `CWTOOLS.md` remains user-owned and is only scaffolded when absent.
 
 The generated `.cwtools/project/profile.json` uses the current V4 guidance-card schema. Older profile shapes are rejected and rebuilt by `/init`; MCP exposes targeted `guidance` rather than an execution-mode compatibility selector.
 
@@ -231,28 +231,26 @@ sequenceDiagram
     participant G as Policy engine
     participant S as Workspace, indexes, LSP, MCP
 
-    C->>R: request, context, immutable domain
+    C->>R: request, context, paradox domain
     R->>P: model request
     P-->>R: text or tool call
     R->>T: parsed tool call
-    T->>G: effect, risk, targets, command, network hosts
-    G-->>T: allow, ask, or deny
+    T->>G: effect, risk, targets, network hosts
+    G-->>T: allow or deny
     T->>S: validated execution
     S-->>T: structured result
     T-->>R: result plus run events
     R-->>C: streamed output and final state
 ```
 
-The tool registry is authoritative for tool availability, effects, risk, and concurrency. Enforcement has three conceptual layers: capability eligibility (domain, derived execution label, runtime profile), invocation authorization (run authorization, trust, approvals), and resource sandboxing (paths, commands, locks). Deferred tools may substitute a detailed schema only after selection, so a complex contract does not consume every model request. `agentTools.ts` dispatches calls only after the policy engine evaluates them. File writes also use path containment, per-file exclusion, sorted multi-file locking, and plan-mode gates. Shell commands pass through command preflight.
+The tool registry is authoritative for tool availability, effects, risk, and concurrency. Enforcement checks capability eligibility (derived execution label, runtime profile), invocation authorization (run authorization), and workspace path containment. Deferred tools may substitute a detailed schema only after selection, so a complex contract does not consume every model request. `agentTools.ts` dispatches calls only after the policy engine evaluates them. File writes also use path containment, per-file exclusion, sorted multi-file locking, plan-mode gates, and user-selectable `confirm` (diff confirmation) / `auto` (direct write) modes.
 
 `Implementation_Plan.md` contains one machine-readable `cwtools-plan` contract. A Paradox blueprint is an optional payload inside that contract; drafts and approval-ready plans no longer use a second `cwtools-blueprint` fence or a separate contract-loading tool.
 
 
 The runner records typed events for streaming, replay, checkpoints, and resume. Adding an event requires matching reducer and Webview support. Resume accepts only the current V4 snapshot contract; older snapshots are rejected instead of migrated.
 
-Long runs use bounded context compaction, checkpoints, budgets, loop detection, and child-agent activity monitoring. Multi-agent coordination uses `dispatch_agents`, `query_blackboard`, and `merge_results` with a shared typed Blackboard. Child tasks name a registered runtime `profileName` directly; there is no separate role registry, alias mapping, or default writer fallback. Persisted orchestration graphs accept only the current V3 contract. DAG waves are scheduled by `GraphTeamExecutor`, which seeds the graph onto the shared Agent Teams task board (task id = node id, `blockedBy` = dependencies), so readiness, cascade cancellation, and write-conflict avoidance have exactly one implementation across both multi-agent modes.
-
-`dispatch_agents` is the single multi-agent entry and takes two shapes. A `tasks` array is a bounded DAG wave. A `members` array is an Agent Team: named peers that share a durable mailbox and a CAS task board (`team_send_message`, `team_task_create`/`team_task_list`/`team_task_update`, `team_members`, `team_close`). A message to a running member is steered into its next model step through the active-turn registry; a message to an idle member cold-resumes it with its preserved transcript and the queued mail. Board updates are compare-and-set on the task revision, and `writeScopes` are advisory prefixes, never locks. A team settles when no member is running, no message is undelivered, and the quiet window elapses (or the lead closes it); settlement then runs the same quality gate as a DAG write wave and persists one orchestration record (plus a team audit payload) so `merge_results` and the catalog behave identically for both shapes.
+Long runs use bounded context compaction, checkpoints, budgets, and loop detection.
 
 #### Provider and secret boundary
 
@@ -498,19 +496,19 @@ CWT-only 工作区只索引当前工作区,不激活游戏模型。候选可用�
 
 ### AI 子系统
 
-`client/extension/ai/` 运行在 Extension Host 中，负责 Provider、聊天状态、Prompt、工具 dispatch、权限策略、Agent 技能、记忆和多 Agent 编排。
+`client/extension/ai/` 运行在 Extension Host 中，负责 Provider、聊天状态、Prompt、工具 dispatch、工作区路径策略、Agent 技能与记忆。
 
 #### 单轮路由
 
-输入区选择能力领域：自动、Paradox/CWTools 或通用编码。当前轮任务模式由请求确定性解析（并可被用户显式钉住），不再调用任何独立路由模型：由 Agent 自己判断何时需要在写入前先解决属于用户的设计决策，并通过 `enter_plan_mode` 工具升级。Run 一旦准入，不能扩大领域；Profile 和子 Agent 只能进一步收窄。
+内置 Agent 专注 Paradox / CWTools 语义领域，作为单 Agent 辅助运行。当前轮任务模式由用户显式钉住的模式确定性解析，不再调用任何独立路由模型：由 Agent 自己判断何时需要在写入前先解决属于用户的设计决策，并通过 `enter_plan_mode` 工具升级。
 
 用户可用 `/plan`、`/execute`、`/explore`、`/review` 或 `/mode <值>` 为整个会话钉住模式；被钉住的模式会让后续轮次完全跳过自动解析。
 
 Plan 是 Agent 自己的升级决策，不是分类器的猜测。当用户明确要求方案，或仍存在属于用户的重大未决选择时，它会在首次项目写入前调用 `enter_plan_mode`：该调用把授权收窄为 `plan_write_only`，随后每次工具调用实时读取该状态的 plan guard 会拦截本回合剩余的项目写入。`exit_plan_mode` 只离开 Plan、不恢复写权限，因此模型无法绕过它刚刚请求的审批——只有用户的批准才能恢复。有界仓库检查足以确定的普通改动保持默认走 Execute。
 
-`AgentSchedulingState` 是唯一会持久化、并在宿主与 Webview 间传递的调度状态。Build、Plan、Orchestrator 等 Prompt/工具执行标签只在调用边界由它派生，不会被独立恢复。回合结束后的状态会从调度 domain store 回流；处于 Plan 的回合不会被改写成 `finalize`（Plan 表示等待用户，而非已完成）；话题会保存用户钉住的 `modeOverride` 与已批准的 plan 产物，因此两者都能跨话题切换、重载与分叉存续。
+`AgentSchedulingState` 是唯一会持久化、并在宿主与 Webview 间传递的调度状态。Build、Plan 等 Prompt/工具执行标签只在调用边界由它派生，不会被独立恢复。历史持久化的 `'general' | 'hybrid'` 领域与多 Agent 调度模式在读取时平滑归一化为 `'paradox'` 与 `'single'`。回合结束后的状态会从调度 domain store 回流；处于 Plan 的回合不会被改写成 `finalize`（Plan 表示等待用户，而非已完成）；话题会保存用户钉住的 `modeOverride` 与已批准的 plan 产物，因此两者都能跨话题切换、重载与分叉存续。
 
-通用编码会读取常规仓库指令，但不能调用 Paradox 专用语义能力。Paradox 领域可以查询当前 Profile、CWT 规则、索引和 LSP 证据。`CWTOOLS.md` 属于用户，只有缺失时才创建最小模板。
+Paradox 领域可以查询当前 Profile、CWT 规则、索引和 LSP 证据。`CWTOOLS.md` 属于用户，只有缺失时才创建最小模板。
 
 生成的 `.cwtools/project/profile.json` 使用当前 V4 guidance-card schema。旧 Profile 结构会被拒绝并由 `/init` 重建；MCP 暴露定向 `guidance`，不再提供执行模式兼容选择器。
 
@@ -525,28 +523,26 @@ sequenceDiagram
     participant G as 策略引擎
     participant S as 工作区、索引、LSP、MCP
 
-    C->>R: 请求、上下文、不可变领域
+    C->>R: 请求、上下文、Paradox 领域
     R->>P: 模型请求
     P-->>R: 文本或工具调用
     R->>T: 已解析工具调用
-    T->>G: 副作用、风险、目标、命令、网络主机
-    G-->>T: 允许、询问或拒绝
+    T->>G: 副作用、风险、目标、网络主机
+    G-->>T: 允许或拒绝
     T->>S: 校验后执行
     S-->>T: 结构化结果
     T-->>R: 结果与 run event
     R-->>C: 流式输出和最终状态
 ```
 
-工具可用性、副作用、风险和并发策略以 registry 为准。执行概念上只有三层：能力资格（领域、派生执行标签、运行时 Profile）、调用授权（Run 授权、信任、审批）和资源沙箱（路径、命令、锁）。延迟工具只在被选中后替换为详细 Schema，复杂合同不会占用每次模型请求。`agentTools.ts` 只在策略引擎完成判断后 dispatch。文件写入还要经过路径包含、单文件写排他、排序后的多文件锁和 Plan 模式门；Shell 命令先做 command preflight。
+工具可用性、副作用、风险和并发策略以 registry 为准。执行校验包含能力资格（派生执行标签、运行时 Profile）、调用授权（Run 授权）和工作区路径包含边界。延迟工具只在被选中后替换为详细 Schema，复杂合同不会占用每次模型请求。`agentTools.ts` 只在策略引擎完成判断后 dispatch。文件写入还要经过路径包含、单文件写排他、排序后的多文件锁、Plan 模式门以及用户可选的 `confirm`（Diff 确认）/ `auto`（自动写入）两档模式。
 
 `Implementation_Plan.md` 只包含一个机器可读 `cwtools-plan` 合同。Paradox 蓝图是该合同中的可选 payload；草案和审批就绪计划不再使用第二个 `cwtools-blueprint` 围栏，也不再需要独立的合同加载工具。
 
 
 Runner 用类型化事件支持流式展示、replay、checkpoint 和恢复。新增事件必须同步 reducer 与 Webview。恢复只接受当前 V4 快照合同；旧快照会被拒绝，不再迁移。
 
-长任务使用有界上下文压缩、checkpoint、预算、循环检测和子 Agent 活动监控。多 Agent 通过 `dispatch_agents`、`query_blackboard`、`merge_results` 与共享类型化 Blackboard 协作。子任务直接引用已注册的运行时 `profileName`；不再存在第二套角色注册表、别名映射或默认写入 Profile 回退。持久化任务图只接受当前 V3 契约。DAG 波次由 `GraphTeamExecutor` 调度：它把图播种到共享的 Agent Teams 任务看板（任务 id = 节点 id，`blockedBy` = 依赖），两种多 Agent 模式共用同一套就绪判定、级联取消与写冲突避让实现。
-
-`dispatch_agents` 是唯一的多 Agent 入口，有两种形态。传 `tasks` 数组是有界 DAG 波次；传 `members` 数组则是 Agent 团队：具名成员共享持久化邮箱与 CAS 任务看板（`team_send_message`、`team_task_create`/`team_task_list`/`team_task_update`、`team_members`、`team_close`）。发送给运行中成员的消息经由活动回合注册表注入其下一个模型步骤；发送给空闲成员的消息会带着其保留的转录上下文冷启动唤醒该成员。看板更新以任务 revision 做比较并交换（CAS），`writeScopes` 只是咨询性前缀而非锁。当没有成员在运行、没有未投递消息且静默窗口结束（或 Lead 关闭团队）时团队结算；结算随后走与 DAG 写入波次相同的质量门，并写入同一条编排记录（外加团队审计载荷），因此 `merge_results` 与目录对两种形态表现一致。
+长任务使用有界上下文压缩、checkpoint、预算和循环检测。
 
 #### Provider 与 Secret 边界
 

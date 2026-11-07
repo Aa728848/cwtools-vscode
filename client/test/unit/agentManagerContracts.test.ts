@@ -291,7 +291,6 @@ describe('agent manager cross-surface contracts', () => {
         const webview = fs.readFileSync(path.join(root, 'client/webview/chatPanel.ts'), 'utf8');
 
         expect(hostTypes).to.include("type: 'floatingCardResolved'");
-        expect(hostBridge).to.include("card: 'permission'");
         expect(hostBridge).to.include("card: 'write'");
         expect(hostBridge).to.not.include("card: 'transaction'");
         expect(hostBridge).to.not.include("case 'approveTransaction'");

@@ -17,30 +17,24 @@ describe('agent routing', () => {
         expect(isAgentProfileSelection({ domain: 'general', intent: 'execute', strategy: 'multi' })).to.equal(true);
         expect(isAgentProfileSelection({ domain: 'hybrid', intent: 'review', strategy: 'single' })).to.equal(true);
         expect(isAgentProfileSelection({
-            domain: 'general', intent: 'execute', strategy: 'multi', profileName: 'workspace-reviewer',
+            domain: 'paradox', intent: 'execute', strategy: 'single', profileName: 'workspace-reviewer',
         })).to.equal(true);
         expect(isAgentProfileSelection({
-            domain: 'general', intent: 'execute', strategy: 'multi', profileName: '../unsafe',
+            domain: 'paradox', intent: 'execute', strategy: 'single', profileName: '../unsafe',
         })).to.equal(false);
         expect(isAgentProfileSelection({ domain: 'auto', intent: 'execute', strategy: 'single' })).to.equal(false);
-        expect(isAgentProfileSelection({ domain: 'general', intent: 'build', strategy: 'single' })).to.equal(false);
+        expect(isAgentProfileSelection({ domain: 'paradox', intent: 'build', strategy: 'single' })).to.equal(false);
     });
 
-    it('keeps capability domain user-owned while the Agent decides the mode', () => {
+    it('keeps capability domain fixed to paradox while the Agent decides the mode', () => {
         expect(profileForUserDomain('paradox')).to.deep.equal({ domain: 'paradox', intent: 'auto', strategy: 'auto' });
-        expect(profileForUserDomain('general')).to.deep.equal({ domain: 'general', intent: 'auto', strategy: 'auto' });
-        expect(profileForUserDomain('hybrid')).to.deep.equal({ domain: 'hybrid', intent: 'auto', strategy: 'auto' });
 
-        // The domain stays user-owned: a general request resolves to the general
-        // domain and its utility execution label without any routing model.
-        const general = resolveAgentProfile('change the webview', profileForUserDomain('general'));
-        expect(general.schedulingState.domainProfile).to.equal('general');
-        expect(executionModeForSchedulingState(general.schedulingState)).to.equal('utility');
+        const resolved = resolveAgentProfile('change the scripted effect', profileForUserDomain('paradox'));
+        expect(resolved.schedulingState.domainProfile).to.equal('paradox');
+        expect(executionModeForSchedulingState(resolved.schedulingState)).to.equal('build');
     });
 
     it('pins an explicit user mode instead of consulting a router', () => {
-        // A user-pinned intent short-circuits automatic resolution: it is the
-        // session-level override that routing must respect.
         const pinnedPlan = resolveAgentProfile('implement the importer', {
             domain: 'paradox', intent: 'plan', strategy: 'auto',
         });
@@ -50,16 +44,13 @@ describe('agent routing', () => {
         expect(executionModeForSchedulingState(pinnedPlan.schedulingState)).to.equal('plan');
 
         const pinnedExplore = resolveAgentProfile('implement the importer', {
-            domain: 'general', intent: 'explore', strategy: 'auto',
+            domain: 'paradox', intent: 'explore', strategy: 'auto',
         });
         expect(pinnedExplore.schedulingState.authorization).to.equal('read_only');
         expect(executionModeForSchedulingState(pinnedExplore.schedulingState)).to.equal('explore');
     });
 
     it('never routes an unpinned request into plan mode from its wording', () => {
-        // Keyword routing used to run here. A request that merely mentioned a
-        // plan — or any of 设计/方案/规划/蓝图/路线图 — silently became
-        // plan_write_only and blocked the write the user had actually asked for.
         const planWorded = resolveAgentProfile('refactor the runner', profileForUserDomain('paradox'));
         expect(planWorded.schedulingState.authorization).to.equal('workspace_write');
         expect(planWorded.schedulingState.phase).to.equal('execute');
@@ -80,12 +71,12 @@ describe('agent routing', () => {
     });
 
     it('resolves an ordinary unpinned request as a writable execution turn', () => {
-        const explore = resolveAgentProfile('Explain this API', profileForUserDomain('general'));
+        const explore = resolveAgentProfile('Explain this API', profileForUserDomain('paradox'));
         const build = resolveAgentProfile('Implement a new scripted effect');
-        const review = resolveAgentProfile('Review the cancellation logic', profileForUserDomain('general'));
-        expect(executionMode(explore)).to.equal('utility');
+        const review = resolveAgentProfile('Review the cancellation logic', profileForUserDomain('paradox'));
+        expect(executionMode(explore)).to.equal('build');
         expect(executionMode(build)).to.equal('build');
-        expect(executionMode(review)).to.equal('utility');
+        expect(executionMode(review)).to.equal('build');
         expect(build).not.to.have.property('mode');
         expect(build).not.to.have.property('domain');
         expect(build).not.to.have.property('admission');
@@ -116,7 +107,7 @@ describe('agent routing', () => {
         expect(executionModeForSchedulingState(noWrite.schedulingState)).to.equal('explore');
     });
 
-    it('keeps deterministic domain ownership without reading prior turns for intent', () => {
+    it('keeps deterministic single-agent Paradox ownership', () => {
         const replacement = resolveAgentProfile('帮我把 executor_build.23 改成 executor_build.X');
         expect(replacement.schedulingState.domainProfile).to.equal('paradox');
         expect(executionMode(replacement)).to.equal('build');
@@ -125,10 +116,12 @@ describe('agent routing', () => {
         expect(executionMode(singleEdit)).to.equal('build');
 
         const explicitMulti = resolveAgentProfile('用多个 agent 并行处理');
-        expect(explicitMulti.schedulingState.dispatch).to.equal('parallel');
+        expect(explicitMulti.schedulingState.dispatch).to.equal('single');
     });
 
-    it('registers the hybrid profile without storing a second state', () => {
-        expect(agentProfileCatalog.get('hybrid-agent')?.domain).to.equal('hybrid');
+    it('registers the paradox-agent profile without general/hybrid profiles', () => {
+        expect(agentProfileCatalog.get('paradox-agent')?.domain).to.equal('paradox');
+        expect(agentProfileCatalog.get('general-agent')).to.equal(undefined);
+        expect(agentProfileCatalog.get('hybrid-agent')).to.equal(undefined);
     });
 });

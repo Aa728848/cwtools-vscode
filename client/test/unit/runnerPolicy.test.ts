@@ -23,7 +23,7 @@ import { toolDisclosureService } from '../../extension/ai/runner/toolDisclosure'
 
 const toolDefinitions = [
     'ask_user_question', 'select_tools', 'read_file', 'replace_lines', 'query_workspace_index',
-    'dispatch_agents', 'query_blackboard', 'mcp_call', 'run_command',
+    'mcp_call',
     'write_file', 'write_localisation',
 ].map(name => ({
     type: 'function',
@@ -33,14 +33,11 @@ const toolDefinitions = [
 describe('runnerPolicy', () => {
     it('keeps initial disclosure compact without narrowing the eligible pool', () => {
         const modes = [
-            'build', 'plan', 'explore', 'utility', 'review',
+            'build', 'plan', 'explore', 'review',
             'gui_expert', 'script_reviewer', 'loc_translator', 'loc_writer',
-            'orchestrator', 'script',
         ] as const;
         for (const mode of modes) {
-            const domain = mode === 'utility' || mode === 'orchestrator'
-                ? 'general'
-                : 'paradox';
+            const domain = 'paradox' as const;
             const eligible = filterToolDefinitionsForMode(registeredTools, mode, { domain });
             const visible = toolDisclosureService.initialTools(eligible, {
                 mode,
@@ -57,7 +54,7 @@ describe('runnerPolicy', () => {
 
     it('keeps the mode policy authoritative for execution capabilities', () => {
         const build = filterToolDefinitionsForMode(toolDefinitions, 'build', { domain: 'paradox' }).map(tool => tool.function.name);
-        expect(build).to.include.members(['read_file', 'replace_lines', 'dispatch_agents', 'mcp_call']);
+        expect(build).to.include.members(['read_file', 'replace_lines', 'mcp_call']);
 
         for (const mode of ['plan', 'explore', 'review'] as const) {
             const names = filterToolDefinitionsForMode(registeredTools, mode, { domain: 'paradox' }).map(tool => tool.function.name);
@@ -66,7 +63,6 @@ describe('runnerPolicy', () => {
             expect(names).to.not.include.members(['write_file', 'replace_lines', 'write_localisation']);
         }
         expect(initialToolFocusForMode('build')).to.equal('write');
-        expect(initialToolFocusForMode('utility')).to.equal('write');
     });
 
     it('gives read-only sub-agents direct semantic tools for vanilla evidence', () => {
@@ -102,7 +98,7 @@ describe('runnerPolicy', () => {
     });
 
     it('auto-discloses and continues execution from authorization, not stage', () => {
-        for (const mode of ['build', 'utility', 'gui_expert', 'loc_translator', 'loc_writer', 'orchestrator', 'script'] as const) {
+        for (const mode of ['build', 'gui_expert', 'loc_translator', 'loc_writer'] as const) {
             expect(shouldAutoDiscloseExecutionTools(mode, 'workspace_write'), mode).to.equal(true);
         }
         for (const mode of ['plan', 'explore', 'review', 'script_reviewer'] as const) {
@@ -123,34 +119,16 @@ describe('runnerPolicy', () => {
         // Only explicitly approved plan continuations are forced to execute until an action is observed.
         expect(shouldContinueAuthorizedExecution('build', 'workspace_write', false, true)).to.equal(true);
         expect(shouldContinueAuthorizedExecution('build', 'workspace_write', true, true)).to.equal(false);
-        expect(shouldContinueAuthorizedExecution('utility', 'workspace_write', false, true)).to.equal(true);
         expect(shouldContinueAuthorizedExecution('plan', 'workspace_write', false, true)).to.equal(false);
     });
 
     it('keeps guard decisions at the effective mode/domain boundary', () => {
-        for (const mode of ['utility', 'plan', 'explore', 'review', 'orchestrator'] as const) {
-            const leaked = filterToolDefinitionsForMode(registeredTools, mode, { domain: 'general' })
-                .map(tool => TOOL_REGISTRY.get(tool.function.name as any))
-                .filter(entry => entry?.domain === 'paradox')
-                .map(entry => entry!.name);
-            expect(leaked, `${mode} leaked Paradox tools`).to.deep.equal([]);
-        }
-        expect(validateToolCapability('query_cwt_schema', { mode: 'utility', domain: 'general' }).allowed).to.equal(false);
-        expect(validateToolCapability('write_localisation', { mode: 'utility', domain: 'general' }).allowed).to.equal(false);
-        expect(validateToolCapability('mcp_call', { mode: 'utility', domain: 'general' }).allowed).to.equal(true);
-        expect(validateToolCapability('run_command', {
-            mode: 'utility', domain: 'general', isSubAgent: true, profileName: 'general-coder',
-        }).allowed).to.equal(true);
+        expect(validateToolCapability('query_cwt_schema', { mode: 'build', domain: 'paradox' }).allowed).to.equal(true);
+        expect(validateToolCapability('write_localisation', { mode: 'build', domain: 'paradox' }).allowed).to.equal(true);
+        expect(validateToolCapability('mcp_call', { mode: 'build', domain: 'paradox' }).allowed).to.equal(true);
         expect(validateToolCapability('run_command', {
             mode: 'build', domain: 'paradox', isSubAgent: true,
         }).allowed).to.equal(false);
-        const utilityChildTools = filterToolDefinitionsForMode(toolDefinitions, 'utility', {
-            domain: 'general',
-            useSlimPrompt: true,
-            profileName: 'general-coder',
-        }).map(tool => tool.function.name);
-        expect(utilityChildTools).to.include('run_command');
-        expect(utilityChildTools).to.not.include('ask_user_question');
     });
 
     it('registers only current source editors and keeps specialised writes scoped', () => {
@@ -169,8 +147,8 @@ describe('runnerPolicy', () => {
 
     it('distinguishes execution, clarification, and truncation stops', () => {
         expect(isExecutionActionTool('write_file')).to.equal(true);
-        expect(isExecutionActionTool('run_command')).to.equal(true);
-        expect(isExecutionActionTool('dispatch_agents')).to.equal(true);
+        expect(isExecutionActionTool('git_ops')).to.equal(true);
+        expect(isExecutionActionTool('deploy_mod_asset')).to.equal(true);
         expect(isExecutionActionTool('write_design_blueprint')).to.equal(false);
         expect(isExecutionActionTool('read_file')).to.equal(false);
         expect(finalResponseRequiresUserInput(

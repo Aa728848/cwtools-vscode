@@ -43,6 +43,14 @@ const mcpToolNames = [
   'explain_shader_reachability',
   'validate_shader',
   'compare_shader_with_vanilla',
+  'get_ide_context',
+  'open_in_visual_editor',
+  'write_localisation',
+  'typed_pdx_write',
+  'candidate_transaction',
+  'convert_image_to_dds',
+  'convert_audio',
+  'deploy_mod_asset',
 ];
 
 require.extensions['.ts'] = function loadTypeScript(module, filename) {

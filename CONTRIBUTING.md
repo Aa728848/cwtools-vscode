@@ -137,7 +137,7 @@ Code under `client/webview/` runs in a browser sandbox:
 
 When a model-visible tool changes, update its definition, shared types, registry metadata, permission handling when applicable, and dispatch. The registry is the source of truth for gating, effects, risk, and concurrency.
 
-Every tool call must pass through the policy engine. Preserve path containment checks, sorted multi-file locking, per-file write exclusion, command preflight, and plan-mode write gates. The active multi-agent tools are `dispatch_agents`, `query_blackboard`, and `merge_results`.
+Every tool call must pass through the policy engine. Preserve path containment checks, sorted multi-file locking, per-file write exclusion, and plan-mode write gates. The built-in Agent is a single-Agent Paradox assistant; shell execution and multi-agent orchestration belong to external Agents (DSH, Claude Code, Codex) that reach the semantic tools through `cwtools-mcp`.
 
 New run events must be handled by reducers and Webview renderers. Resume-format changes must remain compatible with V2 data. Read the AI sections of [ARCHITECTURE.md](ARCHITECTURE.md) before a broad runner change.
 
@@ -336,7 +336,7 @@ schema 命令会写入 MCP 子模块。请先在该仓库中审阅并提交，�
 
 修改模型可见工具时，要同步更新定义、共享类型、registry 元数据、适用的权限处理和 dispatch。工具 gating、副作用、风险和并发策略以 registry 为准。
 
-所有工具调用都必须经过策略引擎。保留路径包含检查、排序后的多文件锁、单文件写排他、命令预检和 Plan 模式写入门。当前多 Agent 工具为 `dispatch_agents`、`query_blackboard` 和 `merge_results`。
+所有工具调用都必须经过策略引擎。保留路径包含检查、排序后的多文件锁、单文件写排他和 Plan 模式写入门。内置 Agent 是 Paradox 单 Agent 助手；Shell 执行与多 Agent 编排由外部 Agent（DSH、Claude Code、Codex）经 `cwtools-mcp` 调用语义工具完成。
 
 新增 run event 时要同步 reducer 和 Webview renderer。恢复格式必须继续兼容 V2。大范围修改 runner 前，请先阅读 [ARCHITECTURE.md](ARCHITECTURE.md) 的 AI 部分。
 

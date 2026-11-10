@@ -7,3 +7,8 @@ bin/client/test
 # check sees a complete tree for steamworks.js. Nothing loads them at runtime.
 node_modules/@types
 node_modules/undici-types
+# cwtools-shared is a real runtime dependency (the targeting-weight formula and the
+# shared tool contracts). Its declared dependencies are bundled or unused at
+# runtime, so only the built package ships.
+node_modules/cwtools-shared/src
+node_modules/cwtools-shared/tsconfig*.json

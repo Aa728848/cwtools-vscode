@@ -37,7 +37,9 @@ import { shouldBypassWriteConfirmation } from './tools/writeConfirmation';
 import { readProjectProfile, queryProjectProfile } from './projectProfile';
 import { queryProjectKnowledge } from './projectKnowledge';
 import { queryInterfaceKnowledge } from './interfaceKnowledge';
-import { executeTargetingWeightQuery } from './targetingWeights';
+// The targeting-weight formula lives in cwtools-shared so the MCP surface, the
+// agent and the analysis panel all compute identical numbers from one source.
+import { executeTargetingWeightQuery } from 'cwtools-shared';
 import { validateOffCanvasGuiPreservation } from '../guiSafety';
 import { loadSkill } from './skills';
 import { saveSkill as saveSkillFile } from './skillsWriter';

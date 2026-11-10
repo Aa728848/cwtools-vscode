@@ -2482,6 +2482,7 @@
         }
     },
     "dependencies": {
+        "cwtools-shared": "0.3.0",
         "executable": "4.1.1",
         "ignore": "^5.3.2",
         "socks": "^2.8.10",

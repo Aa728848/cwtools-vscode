@@ -21,6 +21,7 @@ import {
     parseBridgeJsonRpcPayload,
     readMcpBridgeRequestBody,
 } from './mcpBridgeProtocol';
+import { dispatchNativeCwtoolsRequest, NATIVE_HEALTH_PATH, NATIVE_PROTOCOL_VERSION, NATIVE_RPC_PATH, NativeBridgeProtocolError } from './cwtoolsNativeBridge';
 import { schedulingStateFromAdmission } from './runner/scheduling';
 
 const BRIDGE_PROTOCOL_VERSION = 1;
@@ -98,6 +99,8 @@ interface BridgeManifest {
     port: number;
     rpcUrl: string;
     healthUrl: string;
+    cwtoolsNativeRpcUrl?: string;
+    cwtoolsNativeHealthUrl?: string;
     token: string;
     pid: number;
     workspaceRoot: string;
@@ -139,6 +142,11 @@ export interface McpBridgeServerOptions {
     /** Live extension-owned classification, shared with startup and project profiling. */
     detectProject?: () => WorkspaceProjectDetection;
     additionalManifestDirs?: string[];
+    /** Native, non-MCP CWTools access to the active LanguageClient. */
+    executeCommand?: (command: string, args: unknown[]) => Promise<unknown>;
+    lspRequest?: (method: string, params: unknown) => Promise<unknown>;
+    isActive?: () => boolean;
+    readyAtMs?: () => number | undefined;
 }
 
 export class McpBridgeServer implements Disposable {
@@ -232,6 +240,70 @@ export class McpBridgeServer implements Disposable {
                 protocolVersion: BRIDGE_PROTOCOL_VERSION,
                 workspaceRoot: this.options.workspaceRoot,
             });
+            return;
+        }
+
+        if (request.method === 'GET' && request.url === NATIVE_HEALTH_PATH) {
+            this.sendJson(response, 200, {
+                ok: true,
+                protocolVersion: NATIVE_PROTOCOL_VERSION,
+                active: this.options.isActive?.() ?? this.options.executeCommand !== undefined,
+                workspaceRoot: path.resolve(this.options.workspaceRoot),
+                ...(this.options.readyAtMs?.() !== undefined ? { readyAtMs: this.options.readyAtMs() } : {}),
+            });
+            return;
+        }
+
+        if (request.method === 'POST' && request.url === NATIVE_RPC_PATH) {
+            if (!isAuthorizedBridgeRequest(request.headers, this.token)) {
+                this.sendJson(response, 401, {
+                    jsonrpc: '2.0',
+                    id: null,
+                    error: { code: -32001, message: 'Unauthorized CWTools native bridge request.' },
+                });
+                return;
+            }
+            let nativeBody: string;
+            try {
+                nativeBody = await readMcpBridgeRequestBody(request);
+            } catch (error) {
+                if (!(error instanceof McpBridgeRequestTooLargeError)) throw error;
+                this.sendJson(response, 413, {
+                    jsonrpc: '2.0',
+                    id: null,
+                    error: { code: -32600, message: error.message },
+                });
+                return;
+            }
+            const parsed = parseBridgeJsonRpcPayload(nativeBody);
+            if (!parsed.ok) {
+                this.sendJson(response, 400, {
+                    jsonrpc: '2.0',
+                    id: parsed.id,
+                    error: { code: parsed.code, message: parsed.message },
+                });
+                return;
+            }
+            const rpc = parsed.request;
+            try {
+                if (!this.options.executeCommand || !this.options.lspRequest) {
+                    throw new NativeBridgeProtocolError(-32601, 'The native CWTools host is not active.');
+                }
+                const result = await dispatchNativeCwtoolsRequest(rpc, {
+                    executeCommand: this.options.executeCommand,
+                    lspRequest: this.options.lspRequest,
+                });
+                this.sendJson(response, 200, { jsonrpc: '2.0', id: rpc.id ?? null, result });
+            } catch (error) {
+                this.sendJson(response, 200, {
+                    jsonrpc: '2.0',
+                    id: rpc.id ?? null,
+                    error: {
+                        code: error instanceof NativeBridgeProtocolError ? error.code : -32603,
+                        message: error instanceof Error ? error.message : String(error),
+                    },
+                });
+            }
             return;
         }
 
@@ -565,6 +637,8 @@ export class McpBridgeServer implements Disposable {
             throw new Error('CWTools MCP bridge has not finished starting.');
         }
         const rpcUrl = `http://127.0.0.1:${port}/rpc`;
+        const cwtoolsNativeRpcUrl = `http://127.0.0.1:${port}${NATIVE_RPC_PATH}`;
+        const cwtoolsNativeHealthUrl = `http://127.0.0.1:${port}${NATIVE_HEALTH_PATH}`;
         return {
             schemaVersion: 1,
             protocolVersion: BRIDGE_PROTOCOL_VERSION,
@@ -573,6 +647,7 @@ export class McpBridgeServer implements Disposable {
             port,
             rpcUrl,
             healthUrl: `http://127.0.0.1:${port}/healthz`,
+            ...(this.options.executeCommand ? { cwtoolsNativeRpcUrl, cwtoolsNativeHealthUrl } : {}),
             token: this.token,
             pid: process.pid,
             workspaceRoot: path.resolve(this.options.workspaceRoot),

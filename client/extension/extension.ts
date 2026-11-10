@@ -1161,12 +1161,24 @@ export async function activate(context: ExtensionContext) {
 	const legacyMcpDirs = legacyPublisherStoragePaths(context)
 		.filter(legacyStorage => fs.existsSync(legacyStorage))
 		.map(legacyStorage => path.join(legacyStorage, 'mcp'));
+	let nativeClientReadyAtMs: number | undefined;
+	const requireRunningClient = (): LanguageClient => {
+		if (!defaultClient?.isRunning()) throw new Error('CWTools language client is not active.');
+		return defaultClient;
+	};
 	const mcpBridge = new McpBridgeServer({
 		context,
 		toolExecutor,
 		workspaceRoot,
 		detectProject: () => classifyWorkspaceRoot(workspaceRoot, getConfiguredGamePath),
 		additionalManifestDirs: legacyMcpDirs,
+		executeCommand: async (command, args) => requireRunningClient().sendRequest('workspace/executeCommand', {
+			command,
+			arguments: args,
+		}),
+		lspRequest: async (method, params) => requireRunningClient().sendRequest(method, params),
+		isActive: () => defaultClient?.isRunning() === true,
+		readyAtMs: () => nativeClientReadyAtMs,
 	});
 	context.subscriptions.push(mcpBridge);
 	void mcpBridge.start().catch(e =>
@@ -2586,6 +2598,7 @@ export async function activate(context: ExtensionContext) {
 
 		await client.start();
 		clientStarted = true;
+		nativeClientReadyAtMs = Date.now();
 		context.subscriptions.push(workspace.onDidChangeConfiguration(event => {
 			if (!event.affectsConfiguration('stellarisLanguageServices.errors.localisationFilter')) return;
 			const mode = workspace.getConfiguration('stellarisLanguageServices.errors')

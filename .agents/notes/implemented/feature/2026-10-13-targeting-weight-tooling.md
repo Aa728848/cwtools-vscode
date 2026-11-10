@@ -8,7 +8,7 @@ Status: implemented
 
 ## Decision
 
-2026-10-13 落地，全部入口共享同一计算模块 `client/extension/ai/targetingWeights.ts`（纯函数 `computeTargetingChain`，无 vscode/fs 依赖，按设计文档 §2/§3 归一化公式实现；§6 算例 9 项单测复算通过）：
+2026-10-13 落地，全部入口共享同一计算模块（纯函数 `computeTargetingChain`，无 vscode/fs 依赖，按设计文档 §2/§3 归一化公式实现；§6 算例 9 项单测复算通过）。**2026-11-10 更新**：该模块已从 `client/extension/ai/targetingWeights.ts` 迁到 `submodules/cwtools-mcp/packages/cwtools-shared/src/tools/targetingWeights.ts`（测试随迁为 `targetingWeights.contract.test.ts`），MCP dispatcher 也补上了原先只登记工具名、没有实现的 `query_targeting_weight` case，因此 Agent 工具、MCP 面与面板现在共用同一实现；详见 `architecture/2026-11-10-cwtools-node-host-capabilities.md`。以下各条为当时的实现记录：
 
 - **Agent 工具 `query_targeting_weight`**：注册五触点（definitions/registry 的 AgentToolName+TOOL_DOMAINS+BASE_READ/agentTools 的 import+TOOL_TIMEOUTS+executeInternal/toolPhrases 双语）+ 单测；toolDefinitions 预算测试（96 工具/32000 token）通过。
 - **MCP 暴露**（cwtools-mcp `729c32f`，已推送，**npm 未发布**）：generate-mcp-schema.cjs、names.ts、mcpBridgeServer.ts 三处名单同步 + 生成器产出 generated/mcpTools.ts（37 工具，纯新增 210 行）；子模块 build + 契约测试 39+66 全绿，只读面未破。

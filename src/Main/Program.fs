@@ -10313,7 +10313,19 @@ type Server(client: ILanguageClient) =
                                 [| "ok", JsonValue.Boolean false
                                    "status", JsonValue.String "error"
                                    "error", JsonValue.String error.Message |]
-            if p.command = "cwtools.ai.getValidationStatus" then
+            if p.command = "cwtools.ai.getHostCapabilities" then
+                // Internal handshake. Answered before the game model exists so a client
+                // can reject an incompatible build without paying the load cost, and
+                // kept out of every model-facing tool schema.
+                let capabilities =
+                    JsonValue.Record
+                        [| "ok", JsonValue.Boolean true
+                           "protocolVersion", JsonValue.Number(decimal LSP.Commands.HostCapabilitiesProtocolVersion)
+                           "serverVersion", JsonValue.String LSP.Commands.serverVersion
+                           "commands",
+                           JsonValue.Array(LSP.Commands.allCommandNames |> List.map JsonValue.String |> Array.ofList) |]
+                async.Return(Some capabilities)
+            elif p.command = "cwtools.ai.getValidationStatus" then
                 // Readiness must remain observable while the initial project load owns
                 // the game-state write lock or has failed before gameObj is assigned.
                 async.Return(Some(validationStatusResult ()))

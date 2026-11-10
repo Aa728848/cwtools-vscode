@@ -39,6 +39,9 @@ param (
 
 $StartTime = Get-Date
 
+# Build outputs are merged in place. This script never recursively deletes a
+# directory: junctions and symlinks can point outside the intended staging tree.
+
 Write-Host ""
 Write-Host "=======================================================" -ForegroundColor Cyan
 Write-Host "         CWTools VSCode Extension Build Tool           " -ForegroundColor Cyan
@@ -62,10 +65,19 @@ if ($Version) {
 # 2. Compile F# Server (win-x64, linux-x64, osx-x64)
 if (-not $SkipServer) {
     Write-Host "[1/6] Compiling F# server (3 platforms, sequentially)..." -ForegroundColor Yellow
+    # Stamp the product version into the server assembly. Root/release package.json
+    # are the only version sources; the capability handshake reports whatever the
+    # assembly carries, so without this the server would announce 1.0.0.0.
+    $ProductVersion = (& node -e "process.stdout.write(require('./release/package.json').version)").Trim()
+    if ($LASTEXITCODE -ne 0 -or -not $ProductVersion) {
+        Write-Error "Failed to read the product version from release/package.json"
+        exit 1
+    }
+    Write-Host ">>> Server assembly version: $ProductVersion" -ForegroundColor Cyan
     
     # win-x64 (ReadyToRun optimization)
     Write-Host ">>> Publishing win-x64 (ReadyToRun=true)..." -ForegroundColor Cyan
-    dotnet publish src/Main/Main.fsproj -c Release -r win-x64 --self-contained true /p:PublishReadyToRun=true /p:UseLocalCwtools=False -o release/bin/server/win-x64
+    dotnet publish src/Main/Main.fsproj -c Release -r win-x64 --self-contained true /p:PublishReadyToRun=true /p:UseLocalCwtools=False /p:Version=$ProductVersion -o release/bin/server/win-x64
     if ($LASTEXITCODE -ne 0) {
         Write-Error "Failed to publish win-x64 server!"
         exit $LASTEXITCODE
@@ -74,7 +86,7 @@ if (-not $SkipServer) {
 
     # linux-x64
     Write-Host ">>> Publishing linux-x64..." -ForegroundColor Cyan
-    dotnet publish src/Main/Main.fsproj -c Release -r linux-x64 --self-contained true /p:PublishReadyToRun=false /p:UseLocalCwtools=False -o release/bin/server/linux-x64
+    dotnet publish src/Main/Main.fsproj -c Release -r linux-x64 --self-contained true /p:PublishReadyToRun=false /p:UseLocalCwtools=False /p:Version=$ProductVersion -o release/bin/server/linux-x64
     if ($LASTEXITCODE -ne 0) {
         Write-Error "Failed to publish linux-x64 server!"
         exit $LASTEXITCODE
@@ -83,7 +95,7 @@ if (-not $SkipServer) {
 
     # osx-x64
     Write-Host ">>> Publishing osx-x64..." -ForegroundColor Cyan
-    dotnet publish src/Main/Main.fsproj -c Release -r osx-x64 --self-contained true /p:PublishReadyToRun=false /p:UseLocalCwtools=False -o release/bin/server/osx-x64
+    dotnet publish src/Main/Main.fsproj -c Release -r osx-x64 --self-contained true /p:PublishReadyToRun=false /p:UseLocalCwtools=False /p:Version=$ProductVersion -o release/bin/server/osx-x64
     if ($LASTEXITCODE -ne 0) {
         Write-Error "Failed to publish osx-x64 server!"
         exit $LASTEXITCODE
@@ -97,9 +109,7 @@ if (-not $SkipServer) {
 if (-not $SkipClient) {
     Write-Host "[2/6] Compiling client TypeScript extension host..." -ForegroundColor Yellow
     $WebviewOutDir = Join-Path $PSScriptRoot "release/bin/client/webview"
-    if (Test-Path $WebviewOutDir) {
-        Remove-Item -LiteralPath $WebviewOutDir -Recurse -Force
-    }
+    # Webview outputs are merged by Rollup; no recursive cleanup is performed.
     New-Item -ItemType Directory -Path $WebviewOutDir -Force | Out-Null
     npx tsc -p .config/tsconfig.extension.json
     if ($LASTEXITCODE -ne 0) {
@@ -152,7 +162,7 @@ if (-not $SkipClient) {
     }
     # Remove legacy folder and old ZIP
     $LegacyDir = Join-Path $PSScriptRoot "release/rules/stellaris"
-    if (Test-Path $LegacyDir) { Remove-Item -LiteralPath $LegacyDir -Recurse -Force }
+    # Legacy rules are merged in place; no recursive cleanup is performed.
     if (Test-Path $RulesDestZip) { Remove-Item -LiteralPath $RulesDestZip -Force }
     if (Test-Path $RulesVersionPath) { Remove-Item -LiteralPath $RulesVersionPath -Force }
     Compress-Archive -Path (Join-Path $RulesSourceDir "*") -DestinationPath $RulesDestZip -CompressionLevel Optimal
@@ -227,6 +237,56 @@ Get-ChildItem -LiteralPath $IgnoreSource -Force | ForEach-Object {
     Copy-Item -LiteralPath $_.FullName -Destination $IgnoreDest -Recurse -Force
 }
 Write-Host "[OK] Staged ignore (Workshop upload file filtering) into release/node_modules." -ForegroundColor Green
+
+# cwtools-shared is a real runtime dependency: the Extension Host imports the
+# targeting-weight formula and the shared tool contracts from it. It is resolved
+# from the cwtools-mcp submodule, so its built output must be staged into
+# release/node_modules exactly like the other runtime dependencies — a
+# `file:` symlink would not survive VSIX packaging.
+Write-Host "[*] Staging cwtools-shared runtime dependency (release/node_modules/cwtools-shared)..." -ForegroundColor Yellow
+$SharedSource = Join-Path $PSScriptRoot "submodules/cwtools-mcp/packages/cwtools-shared"
+if (-not (Test-Path (Join-Path $SharedSource "dist/index.js"))) {
+    Write-Host ">>> Building cwtools-shared (no dist found)..." -ForegroundColor Cyan
+    $SharedWorkspace = Join-Path $PSScriptRoot "submodules/cwtools-mcp"
+    Push-Location $SharedWorkspace
+    npm run build -w cwtools-shared
+    $SharedBuildExit = $LASTEXITCODE
+    Pop-Location
+    if ($SharedBuildExit -ne 0 -or -not (Test-Path (Join-Path $SharedSource "dist/index.js"))) {
+        Write-Error "Failed to build cwtools-shared at $SharedSource. Run 'npm run build -w cwtools-shared' inside submodules/cwtools-mcp before packaging."
+        exit 1
+    }
+}
+$SharedDest = Join-Path $PSScriptRoot "release/node_modules/cwtools-shared"
+New-Item -ItemType Directory -Path $SharedDest -Force | Out-Null
+# Merge the named staging entries into the destination in place, exactly like the
+# steamworks.js / ignore staging above. A previously staged tree is merged over,
+# never deleted recursively: the repository forbids recursive deletes because a
+# junction or symlink inside the target would be followed and destroy the real
+# directory on the other side.
+foreach ($SharedEntry in @("dist", "package.json", "README.md")) {
+    $SharedEntryPath = Join-Path $SharedSource $SharedEntry
+    if (Test-Path $SharedEntryPath) {
+        Copy-Item -LiteralPath $SharedEntryPath -Destination $SharedDest -Recurse -Force
+    }
+}
+# Drop stale build output from an earlier staging run by naming each leftover
+# file individually (a stale module could otherwise shadow a removed one).
+if (Test-Path (Join-Path $SharedDest "dist")) {
+    $SharedStagedFiles = Get-ChildItem -LiteralPath (Join-Path $SharedDest "dist") -Recurse -File
+    foreach ($SharedStagedFile in $SharedStagedFiles) {
+        $SharedRelative = $SharedStagedFile.FullName.Substring((Join-Path $SharedDest "dist").Length).TrimStart('\', '/')
+        $SharedSourceFile = Join-Path (Join-Path $SharedSource "dist") $SharedRelative
+        if (-not (Test-Path $SharedSourceFile)) {
+            Remove-Item -LiteralPath $SharedStagedFile.FullName -Force
+        }
+    }
+}
+if (-not (Test-Path (Join-Path $SharedDest "dist/index.js"))) {
+    Write-Error "cwtools-shared staged without its built entry point: $SharedDest"
+    exit 1
+}
+Write-Host "[OK] Staged cwtools-shared (shared tool contracts and targeting weights) into release/node_modules." -ForegroundColor Green
 
 # 5. (Opt-in) Build and bundle the MCP server (shipped inside the extension at bin/mcp)
 # The MCP server moved to the submodules/cwtools-mcp repository and is installed

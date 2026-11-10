@@ -7,3 +7,6 @@
 [submodule "submodules/cwtools-mcp"]
 	path = submodules/cwtools-mcp
 	url = https://github.com/Aa728848/cwtools-mcp.git
+[submodule "submodules/dsh-cwtool"]
+	path = submodules/dsh-cwtool
+	url = https://github.com/Aa728848/dsh-cwtool.git

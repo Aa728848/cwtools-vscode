@@ -39,6 +39,7 @@
     "test:perf": "node --test \"tools/perf/*.test.mjs\""
   },
   "dependencies": {
+    "cwtools-shared": "file:submodules/cwtools-mcp/packages/cwtools-shared",
     "google-translate-api-x": "^10.7.2",
     "ignore": "^5.3.2",
     "socks": "^2.8.10",

@@ -267,6 +267,14 @@ The default mode discovers the active compatible VS Code host and connects throu
 
 Standalone mode can start its own LSP process. Both modes share generated tool schemas, generated workspace detection, and host-service contracts. New semantic capability should be implemented as a read-only `cwtools.ai.*` LSP command first, added to the server read-command allowlist, and then exposed through generated MCP schemas.
 
+The submodule publishes three packages with a strictly one-way dependency graph: `cwtools-shared` (transport-free contracts, tool schemas, the transport-neutral tool call handler in `tools/callHandler`, and pure computations such as `tools/targetingWeights.ts`), `cwtools-node` (Node host services: filesystem, LSP process, revalidation, project detection — depends on `cwtools-shared`, `chokidar` and `vscode-jsonrpc` only, never on the MCP SDK), and `cwtools-mcp` (MCP transport plus generated schemas; re-exports the Node hosts so older deep imports keep working). A host that needs CWTools semantics without an MCP dependency imports `cwtools-node` and calls `createToolCallHandler` from `cwtools-shared`.
+
+The Extension Host also consumes `cwtools-shared` directly for the targeting-weight formula, so exactly one implementation produces the numbers shown by the agent tool, the MCP surface and the analysis panel. Its built output is staged into `release/node_modules` by `package.ps1` and ships inside the VSIX.
+
+`cwtools.ai.getHostCapabilities` is an internal handshake, not a model-facing tool: it answers with `{ protocolVersion, serverVersion, commands }` before the game model loads, and a Node host that receives an old, malformed or incomplete answer reports `backend_incompatible` and releases the backend instead of driving it.
+
+For non-MCP consumers, the extension exposes bearer-authenticated `/cwtools/healthz` and `/cwtools/rpc` alongside the existing manifest. These native routes forward only the required read-only CWTools commands and five navigation/document LSP methods to the active LanguageClient; they never dispatch MCP methods. `cwtools-node` validates the manifest, pid, exact workspace and live health before injecting this host. Missing/stale/mismatched/inactive/unreachable hosts may fall back to standalone, while an incompatible active host returns `backend_incompatible` without spawning a competitor.
+
 Do not hand-edit files under `cwtools-shared/src/generated/`. Run `npm run generate:mcp-schema` and `npm run generate:mcp-detection` (or their `check:*` counterparts), test inside the submodule, commit and release there, then update the root pointer.
 
 ### Submodule ownership
@@ -559,6 +567,14 @@ Provider 凭据和网页搜索 Key 通过 VS Code SecretStorage 保存。不同 
 默认模式会发现当前兼容的 VS Code 宿主，并通过扩展 bridge manifest 连接。客户端工作区必须与 bridge 工作区一致；不一致时返回不可用，而不是查询另一个项目。Bridge 与 Standalone 使用同一项目能力门禁：非支持/歧义工作区不披露工具/资源且不启动 LSP；CWT-only 只暴露可用于 CWT 的文档、导航与诊断工具。
 
 Standalone 模式可以启动自己的 LSP。两种模式共用生成的工具 schema、工作区检测器和 Host Service 契约。新增语义能力时，应先实现只读 `cwtools.ai.*` LSP 命令，加入服务端只读命令 allowlist，再通过生成的 MCP schema 暴露。
+
+子模块发布三个包，依赖关系严格单向：`cwtools-shared`（与传输无关的契约、工具 schema、`tools/callHandler` 里的传输无关调用处理器，以及 `tools/targetingWeights.ts` 这类纯计算）、`cwtools-node`（Node 宿主服务：文件系统、LSP 进程、复验、项目探测——只依赖 `cwtools-shared`、`chokidar` 与 `vscode-jsonrpc`，绝不依赖 MCP SDK）、`cwtools-mcp`（MCP 传输与生成的 schema；重新导出 Node 宿主，保证旧的深层导入仍可用）。需要 CWTools 语义但不想引入 MCP 依赖的宿主，导入 `cwtools-node`，并从 `cwtools-shared` 取 `createToolCallHandler`。
+
+扩展宿主也直接消费 `cwtools-shared` 里的索敌权重公式，因此 Agent 工具、MCP 面和分析面板展示的数字来自唯一实现。它的构建产物由 `package.ps1` 复制进 `release/node_modules` 并随 VSIX 一起发布。
+
+`cwtools.ai.getHostCapabilities` 是内部握手而非模型可见工具：它在游戏模型加载前返回 `{ protocolVersion, serverVersion, commands }`；Node 宿主收到旧的、畸形的或不完整的响应时报 `backend_incompatible` 并释放后端，而不是继续驱动它。
+
+面向非 MCP 消费者，扩展在现有清单旁提供 bearer 认证的 `/cwtools/healthz` 与 `/cwtools/rpc`。这些原生路由只把必需的只读 CWTools 命令和五个导航/文档 LSP 方法转发给活跃 LanguageClient，绝不分派 MCP 方法。`cwtools-node` 校验清单、pid、精确工作区和实时健康状态后才注入该宿主。缺失、失效、不匹配、未活跃或不可连接的宿主允许回退独立后端；活跃宿主不兼容则返回 `backend_incompatible`，不启动竞争实例。
 
 不要手改 `cwtools-shared/src/generated/` 下的文件。运行 `npm run generate:mcp-schema` 与 `npm run generate:mcp-detection`（或对应 `check:*`），在子模块内测试、提交和发布，最后更新根仓库指针。
 

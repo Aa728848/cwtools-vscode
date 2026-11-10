@@ -21,7 +21,7 @@ import {
     computeTargetingChain,
     parseTargetingChainInput,
     type TargetingChainInput,
-} from './ai/targetingWeights';
+} from 'cwtools-shared';
 import {
     TARGETING_FIELD_FALLBACKS,
     applyCsvWeaponStats,

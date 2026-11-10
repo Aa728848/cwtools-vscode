@@ -67,6 +67,8 @@ export interface ToolRegistryEntry {
     group?: string;
     providerCapability?: string;
     estimatedSchemaTokens: number;
+    /** Whether the generated MCP surface is valid without a full game model. */
+    mcpSupportsCwtOnly: boolean;
     idempotency: ToolIdempotency;
 }
 
@@ -201,6 +203,10 @@ const SHADER_TOOLS = new Set<AgentToolName>([
     'query_shader_symbol', 'query_shader_compile_unit', 'query_shader_platform_variants',
     'query_shader_callers', 'explain_shader_reachability', 'validate_shader',
     'compare_shader_with_vanilla',
+]);
+const MCP_CWT_ONLY_TOOLS = new Set<AgentToolName>([
+    'get_diagnostics', 'analyze_diagnostic_error', 'get_completion_at',
+    'document_symbols', 'workspace_symbols', 'go_to_definition', 'find_references',
 ]);
 const PDX_PROJECT_TOOLS = new Set<AgentToolName>([
     'query_project_profile', 'query_project_knowledge', 'query_interface_knowledge',
@@ -410,6 +416,7 @@ for (const schema of SCHEMA_DEFINITIONS) {
         group,
         providerCapability: disclosure === 'deferred' ? 'dynamic_tools' : undefined,
         estimatedSchemaTokens: Math.ceil(JSON.stringify(flatSchema ?? schema).length / 4),
+        mcpSupportsCwtOnly: MCP_CWT_ONLY_TOOLS.has(name),
         idempotency: name === 'ask_user_question'
             ? 'none'
             : isReadOnly && effect !== 'network'

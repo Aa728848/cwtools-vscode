@@ -8,6 +8,7 @@ import type {
 } from './types';
 import { getAllProfiles } from '../gameProfiles';
 import { readDescriptor } from '../modDescriptor';
+import { classifyWorkspaceRoot, type WorkspaceProjectDetection } from '../workspaceGameDetection';
 
 export const PROJECT_PROFILE_RELATIVE_PATH = path.join('.cwtools', 'project', 'profile.json');
 const MAX_PROJECT_PROFILE_BYTES = 2 * 1024 * 1024;
@@ -151,11 +152,8 @@ export function buildProjectProfile(workspaceRoot: string): ProjectProfile {
     const projectName = descriptor.name || path.basename(root);
     const hasExtensionSource = fs.existsSync(path.join(root, 'package.json'))
         && fs.existsSync(path.join(root, 'client', 'extension'));
-    const hasModSignals = !!descriptor.exists
-        || fs.existsSync(path.join(root, 'events'))
-        || fs.existsSync(path.join(root, 'common'))
-        || fs.existsSync(path.join(root, 'localisation'))
-        || fs.existsSync(path.join(root, 'localization'));
+    const workspaceDetection = classifyWorkspaceRoot(root, () => undefined);
+    const hasModSignals = workspaceDetection.kind === 'mod' || workspaceDetection.kind === 'vanilla';
     const workspaceKind: ProjectProfile['workspaceKind'] = hasExtensionSource && hasModSignals
         ? 'mixed'
         : hasExtensionSource
@@ -184,7 +182,7 @@ export function buildProjectProfile(workspaceRoot: string): ProjectProfile {
     const softDependencies = collectSoftDependencies(root, scriptFiles);
     const variablePrefixes = collectVariablePrefixes(scriptFiles);
     const localisation = detectLocalisation(root);
-    const game = detectGame(root, descriptor, keyDirectories.map(d => d.path));
+    const game = detectGame(workspaceDetection);
     const vanillaCache = detectVanillaCache(root);
     const warnings = [...localisation.warnings, ...(descriptor.warnings ?? [])];
     const preferredReadTools = [
@@ -482,40 +480,22 @@ function buildGuidanceCards(profile: Omit<ProjectProfile, 'guidanceCards' | 'eff
     };
 }
 
-function detectGame(
-    root: string,
-    descriptor: { tags?: string[] },
-    directoryEvidence: string[],
-): ProjectProfile['game'] {
-    const tagText = (descriptor.tags ?? []).join(' ').toLowerCase();
-    const rootLower = root.toLowerCase();
-    for (const profile of getAllProfiles()) {
-        const markers = [profile.id, profile.displayName, profile.install.steamFolderName]
-            .map(value => value.trim().toLowerCase())
-            .filter(value => value.length > 2);
-        const tagMarker = markers.find(marker => tagText.includes(marker));
-        if (tagMarker) {
+function detectGame(detection: WorkspaceProjectDetection): ProjectProfile['game'] {
+    if (detection.gameId) {
+        const profile = getAllProfiles().find(candidate => candidate.id === detection.gameId);
+        if (profile) {
             return {
                 id: profile.id,
                 displayName: profile.displayName,
-                confidence: 'high',
-                evidence: [`registered profile marker '${tagMarker}' found in descriptor tags`],
-            };
-        }
-        const pathMarker = markers.find(marker => rootLower.includes(marker));
-        if (pathMarker) {
-            return {
-                id: profile.id,
-                displayName: profile.displayName,
-                confidence: 'medium',
-                evidence: [`registered profile marker '${pathMarker}' found in workspace path`],
+                confidence: detection.evidence.some(item => item.includes('profile.json') || item.includes('App ID')) ? 'high' : 'medium',
+                evidence: [...detection.evidence],
             };
         }
     }
-    if (directoryEvidence.length > 0) {
-        return { id: 'paradox', displayName: 'Paradox Script', confidence: 'low', evidence: ['PDX content directories detected; exact game remains an LSP/profile fact'] };
+    if (detection.kind === 'mod' || detection.kind === 'vanilla') {
+        return { id: 'paradox', displayName: 'Paradox Script', confidence: 'low', evidence: [...detection.evidence, 'Exact game is inconclusive; use generic Paradox capabilities'] };
     }
-    return { id: 'unknown', displayName: 'Unknown', confidence: 'low', evidence: ['No Paradox game marker detected'] };
+    return { id: 'unknown', displayName: 'Unknown', confidence: 'low', evidence: detection.evidence.length > 0 ? [...detection.evidence] : ['No Paradox game marker detected'] };
 }
 
 interface LocalisationDetectionResult {

@@ -52,7 +52,7 @@ Codex subscription and Antigravity (Gemini OAuth) share **AI Settings → Subscr
 
 ### External agents through MCP
 
-The separately released [`cwtools-mcp`](https://github.com/Aa728848/cwtools-mcp) package gives MCP clients read-only access to CWTools semantic queries. It normally connects to the active extension instead of starting another language server.
+The separately released [`cwtools-mcp`](https://github.com/Aa728848/cwtools-mcp) package gives MCP clients CWTools semantic queries and six default-on whitelisted domain-write tools. It normally connects to the active extension instead of starting another language server.
 
 ```sh
 codex mcp add cwtools -- npx -y cwtools-mcp --stdio
@@ -123,7 +123,7 @@ Codex 订阅与 Antigravity（Gemini OAuth）共用 **AI 设置 → 订阅渠道
 
 ### 通过 MCP 连接外部 Agent
 
-独立发布的 [`cwtools-mcp`](https://github.com/Aa728848/cwtools-mcp) 为 MCP 客户端提供只读 CWTools 语义查询。它通常会连接当前已激活的扩展，而不是再次启动语言服务。
+独立发布的 [`cwtools-mcp`](https://github.com/Aa728848/cwtools-mcp) 为 MCP 客户端提供 CWTools 语义查询和六个默认开启的白名单领域写入工具。它通常会连接当前已激活的扩展，而不是再次启动语言服务。
 
 ```sh
 codex mcp add cwtools -- npx -y cwtools-mcp --stdio

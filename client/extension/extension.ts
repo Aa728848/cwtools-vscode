@@ -69,7 +69,7 @@ import { getDefaultLocalisationLanguagesForUiLocale } from './localisationLangua
 import { handleVanillaCacheGenerated } from './vanillaCacheLifecycle';
 import { parseWorkshopContentAppId, getGameIdForWorkshopAppId } from './workshopDetection';
 import { configureSandboxStorage } from './configuredGameRoots';
-import { inferGameIdFromWorkspace, hasWorkspaceModDescriptor, workspaceHasParadoxStructure as workspaceHasParadoxStructureDetect } from './workspaceGameDetection';
+import { classifyWorkspaceRoot, inferGameIdFromWorkspace, hasWorkspaceModDescriptor, workspaceHasParadoxStructure as workspaceHasParadoxStructureDetect } from './workspaceGameDetection';
 import { LspFeaturePriorityGate } from './lspFeaturePriority';
 import { LspPerformanceStats, type ValidationDiagnosticCounts } from './lspPerformanceStats';
 import { chunkRevalidateBatches, DIAGNOSTIC_REVALIDATE_EXTENSIONS, DIAGNOSTIC_REVALIDATE_SCAN_LIMIT, selectRevalidateTargets } from './diagnosticRevalidation';
@@ -1165,6 +1165,7 @@ export async function activate(context: ExtensionContext) {
 		context,
 		toolExecutor,
 		workspaceRoot,
+		detectProject: () => classifyWorkspaceRoot(workspaceRoot, getConfiguredGamePath),
 		additionalManifestDirs: legacyMcpDirs,
 	});
 	context.subscriptions.push(mcpBridge);
@@ -2680,18 +2681,6 @@ export async function activate(context: ExtensionContext) {
 		}
 	}
 
-	if (
-		workspace.workspaceFolders &&
-		workspace.workspaceFolders.length > 0 &&
-		 
-		path.basename(workspace.workspaceFolders[0]!.uri.fsPath) === "game"
-	) {
-		isVanillaFolder = true;
-		if (!isKnownGameLanguageId(languageId)) {
-			languageId = inferLanguageIdFromWorkspace() ?? languageId;
-		}
-	}
-
 	// ── Steam Workshop workspace gate ──
 	// Workshop mods live under steamapps/workshop/content/<appId>/<itemId>.
 	// The App ID is the most reliable identification signal, and users should
@@ -2779,6 +2768,7 @@ export async function activate(context: ExtensionContext) {
 		workspaceRootPath,
 		isVanillaFolder,
 		hasModDescriptor,
+		workspaceKind: workspaceRootPath ? classifyWorkspaceRoot(workspaceRootPath, getConfiguredGamePath).kind : undefined,
 		languageId,
 		activeDocument: activeDocumentForMode
 			? { languageId: activeDocumentForMode.languageId, fileName: activeDocumentForMode.fileName }

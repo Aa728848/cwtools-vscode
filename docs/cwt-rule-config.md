@@ -46,7 +46,7 @@ CWT rules do not describe game runtime behavior directly. They describe how the 
 - How `this`, `root`, `from`, and related scopes change inside nested blocks.
 - Which localisation keys and image resources should exist for a definition.
 
-The same rules drive diagnostics, completion, hover, go-to-definition, find-references, document symbols, dependency graphs, previews, AI tools, and the bundled read-only MCP server.
+The same rules drive diagnostics, completion, hover, go-to-definition, find-references, document symbols, dependency graphs, previews, AI tools, and the external MCP service.
 
 ### Game Families
 
@@ -917,7 +917,7 @@ CWT 规则不直接描述游戏运行时逻辑。它描述编辑器和语言服�
 - 嵌套块中 `this`、`root`、`from` 及相关作用域如何变化。
 - 某个定义应该有哪些本地化键和图片资源。
 
-这些规则同时驱动诊断、补全、悬浮、跳转定义、查找引用、文档符号、依赖图、预览、AI 工具和随扩展分发的只读 MCP 服务。
+这些规则同时驱动诊断、补全、悬浮、跳转定义、查找引用、文档符号、依赖图、预览、AI 工具和外部 MCP 服务。
 
 ### 游戏家族
 

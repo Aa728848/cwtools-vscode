@@ -93,8 +93,9 @@ changing these docs; it also regenerates `release/README.md` from `README.md`.
 - `src/LSP/`, `src/Main/`: .NET 10 / F# language server.
 - `submodules/cwtools/`: upstream F# library.
 - `submodules/cwtools-stellaris-config/`: Stellaris CWT rules data.
-- `submodules/cwtools-mcp/`: standalone read-only MCP server (`cwtools-shared` +
-  `cwtools-mcp` packages), a separate repository vendored as a submodule. The
+- `submodules/cwtools-mcp/`: standalone MCP server (`cwtools-shared` +
+  `cwtools-mcp` packages) with whitelisted domain writes enabled by default,
+  vendored as a separate repository submodule. The
   extension VSIX does not bundle it; users install it via `npx -y cwtools-mcp`.
 
 Reuse shared platform helpers such as `gameProfiles.ts`, `indexing/`,
@@ -138,7 +139,7 @@ must retain V2 compatibility. Read `ARCHITECTURE.md` before large runner changes
 
 ### MCP (`submodules/cwtools-mcp/`)
 
-- The MCP server is read-only and must reject non-whitelisted writes.
+- Whitelisted domain-write tools are enabled by default; reject every non-whitelisted write.
 - Add new semantic capability as a `cwtools.ai.*` LSP command first.
 - Keep tool names and schema generation inputs synchronized; do not hand-edit
   `submodules/cwtools-mcp/packages/cwtools-shared/src/generated/mcpTools.ts`.

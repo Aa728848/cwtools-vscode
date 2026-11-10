@@ -1,4 +1,5 @@
 import { getAllLanguageIds, getKnownProfileByLanguageId } from './gameProfiles';
+import type { WorkspaceProjectKind } from './workspaceGameDetection';
 
 export const LOCALISATION_LANGUAGE_ID = 'stellaris-localisation';
 export const CWT_LANGUAGE_ID = 'cwt';
@@ -77,6 +78,8 @@ export interface ServerStartModeInput {
 	workspaceRootPath: string | undefined;
 	isVanillaFolder: boolean;
 	hasModDescriptor: boolean;
+	/** Structural classification; absent preserves legacy callers. */
+	workspaceKind?: WorkspaceProjectKind;
 	/** The raw resolved language id; only registered game ids count as a
 	 *  game context (generic `paradox` is not one). */
 	languageId: string | null | undefined;
@@ -91,6 +94,8 @@ export function determineServerStartMode(input: ServerStartModeInput): ServerSta
 	// `!workspaceRootPath` keeps legacy behavior for single-file windows.
 	if (!input.workspaceRootPath) return 'full';
 	if (input.isVanillaFolder || input.hasModDescriptor) return 'full';
+	if (input.workspaceKind === 'mod' || input.workspaceKind === 'vanilla') return 'full';
 	if (input.languageId && getKnownProfileByLanguageId(input.languageId)) return 'full';
+	if (input.workspaceKind === 'cwt-only') return 'cwt-only';
 	return input.activeDocument && isCwtDocument(input.activeDocument) ? 'cwt-only' : 'none';
 }

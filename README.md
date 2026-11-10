@@ -24,7 +24,7 @@ Most language features work across supported Paradox game profiles. The visual t
 | Vanilla comparison | Compare a mod file with its vanilla counterpart and migrate the block under the cursor. |
 | Steam Workshop | Upload the current mod to the Steam Workshop: create a new item or update an existing one, with tags, preview image, visibility, and change note. Requires the Steam client running and signed in to an account that owns the game. |
 | AI workspace | Use a general coding agent or a Paradox/CWTools-aware agent with explicit permissions, project indexing, Agent skills, and optional MCP servers. |
-| External MCP | Connect Codex, Claude Code, or another MCP client to the separate read-only `cwtools-mcp` package. |
+| External MCP | Connect Codex, Claude Code, or another MCP client to the separate `cwtools-mcp` package with semantic queries and default-on whitelisted domain writes. |
 
 The extension also supports Hearts of Iron IV, Europa Universalis IV and V, Crusader Kings II and III, Imperator: Rome, Victoria II and 3, and custom CWT projects. Game-specific coverage depends on the active profile and available rules.
 
@@ -115,7 +115,7 @@ Agent behavior can be customized from the user home directory: skills live in `~
 
 #### Connect an external MCP client
 
-`cwtools-mcp` is maintained and released separately. It exposes read-only semantic queries and normally reuses the language server already running in VS Code.
+`cwtools-mcp` is maintained and released separately. It exposes semantic queries plus six whitelisted domain-write tools by default and normally reuses the language server already running in VS Code. Reliable Paradox/CWT evidence is required: unsupported or ambiguous workspaces disclose no tools/resources and do not start a language server; an unknown game uses generic Paradox mode rather than assuming Stellaris.
 
 ```sh
 codex mcp add cwtools -- npx -y cwtools-mcp --stdio
@@ -138,7 +138,7 @@ The main runtime boundaries are:
 - `src/LSP/` and `src/Main/`: the F#/.NET language server
 - `submodules/cwtools/`: the upstream CWTools library
 - `submodules/cwtools-stellaris-config/`: Stellaris CWT rules
-- `submodules/cwtools-mcp/`: the separately released read-only MCP server
+- `submodules/cwtools-mcp/`: the separately released MCP server with default-on whitelisted domain writes
 
 Webviews communicate with the Extension Host through messages and do not access Node.js or the filesystem directly. The [architecture guide](ARCHITECTURE.md) covers the data flows and maintenance boundaries in detail.
 
@@ -196,7 +196,7 @@ Stellaris Language Serves 是一款面向 Paradox Mod 开发的 VS Code 扩展�
 | 原版对比 | 将 Mod 文件与原版对应文件对比，并迁移光标所在的代码块。 |
 | Steam 创意工坊 | 把当前 Mod 上传到 Steam 创意工坊：可新建物品或更新已有物品，支持标签、预览图、可见性与更新说明。需要 Steam 客户端已运行并登录拥有该游戏的账号。 |
 | AI 工作区 | 使用通用编码 Agent 或了解 Paradox/CWTools 的 Agent，并通过权限、项目索引、工作流和可选 MCP 服务控制执行范围。 |
-| 外部 MCP | 通过独立发布的只读 `cwtools-mcp`，让 Codex、Claude Code 等客户端查询 CWTools 语义信息。 |
+| 外部 MCP | 通过独立发布的 `cwtools-mcp`，让 Codex、Claude Code 等客户端查询 CWTools 语义并使用默认开启的白名单领域写入工具。 |
 
 语言服务还支持 Hearts of Iron IV、Europa Universalis IV 和 V、Crusader Kings II 和 III、Imperator: Rome、Victoria II 和 3，以及自定义 CWT 项目。具体能力取决于当前 Profile 和可用规则。
 
@@ -287,7 +287,7 @@ Agent 行为可从用户主目录定制：技能放在 `~/.cwtools/skills`（项
 
 #### 连接外部 MCP 客户端
 
-`cwtools-mcp` 独立维护和发布，只提供语义查询，默认复用 VS Code 中已经运行的语言服务。
+`cwtools-mcp` 独立维护和发布，默认提供语义查询和六个白名单领域写入工具，并复用 VS Code 中已经运行的语言服务。它需要可靠的 Paradox/CWT 证据：非支持或歧义工作区不披露工具/资源，也不启动语言服务；游戏不明时使用通用 Paradox 模式，不会假定 Stellaris。
 
 ```sh
 codex mcp add cwtools -- npx -y cwtools-mcp --stdio
@@ -310,7 +310,7 @@ claude mcp add cwtools --scope user -- npx -y cwtools-mcp --stdio
 - `src/LSP/`、`src/Main/`：F#/.NET 语言服务
 - `submodules/cwtools/`：上游 CWTools 库
 - `submodules/cwtools-stellaris-config/`：Stellaris CWT 规则
-- `submodules/cwtools-mcp/`：独立发布的只读 MCP 服务
+- `submodules/cwtools-mcp/`：独立发布、默认开放白名单领域写入的 MCP 服务
 
 Webview 只通过消息与 Extension Host 通信，不能直接访问 Node.js 或文件系统。详细数据流和维护边界见[架构文档](ARCHITECTURE.md)。
 

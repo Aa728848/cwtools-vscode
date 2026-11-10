@@ -6,6 +6,8 @@
     "build:docs": "node tools/build-github-docs.js && node tools/build-release-readme.js",
     "generate:mcp-schema": "node tools/generate-mcp-schema.cjs",
     "check:mcp-schema": "node tools/generate-mcp-schema.cjs --check",
+    "generate:mcp-detection": "node tools/generate-mcp-detection.cjs",
+    "check:mcp-detection": "node tools/generate-mcp-detection.cjs --check",
     "pack": "powershell -ExecutionPolicy Bypass -File ./package.ps1",
     "pack:install": "powershell -ExecutionPolicy Bypass -File ./package.ps1 -Install",
     "pack:quick": "powershell -ExecutionPolicy Bypass -File ./package.ps1 -SkipServer -Install",

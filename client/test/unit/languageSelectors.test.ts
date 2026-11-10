@@ -105,6 +105,14 @@ describe('server start mode determination', () => {
 		})).to.equal('full');
 	});
 
+	it('uses generic full mode for a supported project with no unique game', () => {
+		expect(determineServerStartMode({ ...base, workspaceKind: 'mod', languageId: 'paradox' })).to.equal('full');
+	});
+
+	it('starts CWT-only mode from the workspace classification without an active document', () => {
+		expect(determineServerStartMode({ ...base, workspaceKind: 'cwt-only' })).to.equal('cwt-only');
+	});
+
 	it('defers startup when there is no evidence at all', () => {
 		expect(determineServerStartMode({
 			...base,

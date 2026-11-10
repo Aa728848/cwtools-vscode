@@ -70,7 +70,7 @@ flowchart LR
   - 递增 `PROMPT_TEMPLATE_VERSION` 至 `11`，使旧版本缓存的冻结提示词自动失效。
 - **【一升】`cwtools-mcp` 与 `mcpBridgeServer.ts` 升级**：
   1. **只读语义工具全量对齐（39 个）**：`mcpBridgeServer.ts` 补齐缺失的 7 个 Shader 工具（`query_shader_*`、`explain_shader_reachability`、`validate_shader`、`compare_shader_with_vanilla`）及 `search_rule_capabilities`、`explain_scope`、`parse_pdx_fragment`、`query_inline_instantiation`、`analyze_pdx_flow`。
-  2. **Paradox 领域受控写工具（`--allow-domain-writes` / `--enable-writes`，6 个）**：`cwtools-mcp` 与 `mcpBridgeServer.ts` 支持通过 `--allow-domain-writes` 显式开启 6 个 Paradox 专属受控写工具：`write_localisation`（保 UTF-8 BOM 与键值结构）、`typed_pdx_write`、`candidate_transaction`（带 CWTools 语法/规则预检门禁）、`convert_image_to_dds`、`convert_audio`、`deploy_mod_asset`。默认未开启时保持严格只读拒绝。
+  2. **Paradox 领域受控写工具（`--allow-domain-writes` / `--enable-writes`，6 个）**：`cwtools-mcp` 与 `mcpBridgeServer.ts` 支持通过 `--allow-domain-writes` 显式开启 6 个 Paradox 专属受控写工具：`write_localisation`（保 UTF-8 BOM 与键值结构）、`typed_pdx_write`、`candidate_transaction`（带 CWTools 语法/规则预检门禁）、`convert_image_to_dds`、`convert_audio`、`deploy_mod_asset`。该版本默认未开启时保持严格只读拒绝；后续默认策略见 [领域写入默认激活 Note](../architecture/2026-11-10-default-domain-write-activation.md)。
   3. **Paradox 领域 Skills 导出**：`mcpBridgeServer.ts` 与 `cwtools-mcp` 新增 `cwtools://skills/catalog` 与 `cwtools://skills/<name>` MCP Resources，自动发现并暴露内置、项目级（`.agents/skills` / `.cwtools/skills`）与用户级（`~/.cwtools/skills`）Paradox 技能。
 - **【一打通】IDE 现场感知与可视化编辑器联动（2 个新工具）**：
   - `get_ide_context`：只读返回当前 VS Code 激活编辑器文件、语言、光标行列、选区文本、未保存脏缓冲区列表、当前文件实时诊断，以及已打开的 CWTools 可视化面板（GUI / Entity / Particle / Solar System / Tech Tree / Event Chain / Targeting Weight）及结构摘要。

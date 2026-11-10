@@ -151,10 +151,11 @@ Two server modes exist:
 CWT-only mode must not trigger game guessing, vanilla cache creation, or rules
 source setup; `checkOrSetGameCache` and `setupRulesCaches` skip it. Startup
 mode is decided by the pure `determineServerStartMode` in
-`client/extension/languageSelectors.ts`. See
-[docs/cwt-language-support-handoff.md](docs/cwt-language-support-handoff.md)
-for the phased plan (project index, cross-file semantics, and candidate rule
-activation land in later phases).
+`client/extension/languageSelectors.ts`. `workspaceGameDetection.ts` separates
+project support from exact game identity: strong markers or composite PDX content
+evidence are required, multiple child projects are ambiguous, and an unknown game
+uses generic `paradox` rather than Stellaris. See
+[the workspace-detection Agent Note](.agents/notes/implemented/architecture/2026-11-10-evidence-based-workspace-detection.md).
 
 Single-file semantics live in `submodules/cwtools/CWTools/Rules/`
 (`CwtLanguageTypes.fs` / `CwtLanguageSchema.fs` / `CwtLanguageService.fs`,
@@ -260,13 +261,13 @@ Network and MCP access are model-visible effects and go through policy checks. L
 
 ### Standalone MCP server
 
-`submodules/cwtools-mcp/` is a separate repository and npm release. It is read-only: it exposes semantic queries but does not provide workspace write tools.
+`submodules/cwtools-mcp/` is a separate repository and npm release. Its six whitelisted domain-write tools are enabled by default; non-whitelisted writes remain unavailable.
 
-The default mode discovers the active compatible VS Code host and connects through the extension's bridge manifest. The client workspace must match the bridge workspace. A mismatch returns an unavailable result instead of querying another project.
+The default mode discovers the active compatible VS Code host and connects through the extension's bridge manifest. The client workspace must match the bridge workspace. A mismatch returns an unavailable result instead of querying another project. Bridge and Standalone apply the same project capability gate: unsupported/ambiguous workspaces disclose no tools/resources and never spawn LSP; CWT-only exposes only CWT-capable document, navigation, and diagnostic tools.
 
-Standalone mode can start its own LSP process. Both modes share generated tool schemas and host-service contracts. New semantic capability should be implemented as a read-only `cwtools.ai.*` LSP command first, added to the server read-command allowlist, and then exposed through generated MCP schemas.
+Standalone mode can start its own LSP process. Both modes share generated tool schemas, generated workspace detection, and host-service contracts. New semantic capability should be implemented as a read-only `cwtools.ai.*` LSP command first, added to the server read-command allowlist, and then exposed through generated MCP schemas.
 
-Do not hand-edit `submodules/cwtools-mcp/packages/cwtools-shared/src/generated/mcpTools.ts`. Run `npm run generate:mcp-schema`, test inside the submodule, commit and release there, then update the root pointer.
+Do not hand-edit files under `cwtools-shared/src/generated/`. Run `npm run generate:mcp-schema` and `npm run generate:mcp-detection` (or their `check:*` counterparts), test inside the submodule, commit and release there, then update the root pointer.
 
 ### Submodule ownership
 
@@ -454,9 +455,10 @@ flowchart LR
 CWT-only 不得触发游戏猜测、vanilla 缓存生成或规则源配置;
 `checkOrSetGameCache` 与 `setupRulesCaches` 均跳过。启动模式由
 `client/extension/languageSelectors.ts` 中的纯函数 `determineServerStartMode`
-决定。分阶段计划见
-[docs/cwt-language-support-handoff.md](docs/cwt-language-support-handoff.md)
-(项目索引、跨文件语义与候选规则激活已落地;完整 Phase 3 仍有增强项)。
+决定。`workspaceGameDetection.ts` 分开判断项目支持与具体游戏：必须有强标记或
+组合 PDX 内容证据，多个子项目属于歧义，游戏不明时使用通用 `paradox` 而非
+Stellaris。详见
+[工作区识别 Agent Note](.agents/notes/implemented/architecture/2026-11-10-evidence-based-workspace-detection.md)。
 
 单文件语义位于 `submodules/cwtools/CWTools/Rules/`
 (`CwtLanguageTypes.fs` / `CwtLanguageSchema.fs` / `CwtLanguageService.fs`,
@@ -552,13 +554,13 @@ Provider 凭据和网页搜索 Key 通过 VS Code SecretStorage 保存。不同 
 
 ### 独立 MCP 服务
 
-`submodules/cwtools-mcp/` 是独立仓库和 npm 发布包，只提供只读语义查询，不提供工作区写入工具。
+`submodules/cwtools-mcp/` 是独立仓库和 npm 发布包，默认开放六个白名单领域写入工具；非白名单写入仍不可用。
 
-默认模式会发现当前兼容的 VS Code 宿主，并通过扩展 bridge manifest 连接。客户端工作区必须与 bridge 工作区一致；不一致时返回不可用，而不是查询另一个项目。
+默认模式会发现当前兼容的 VS Code 宿主，并通过扩展 bridge manifest 连接。客户端工作区必须与 bridge 工作区一致；不一致时返回不可用，而不是查询另一个项目。Bridge 与 Standalone 使用同一项目能力门禁：非支持/歧义工作区不披露工具/资源且不启动 LSP；CWT-only 只暴露可用于 CWT 的文档、导航与诊断工具。
 
-Standalone 模式可以启动自己的 LSP。两种模式共用生成的工具 schema 和 Host Service 契约。新增语义能力时，应先实现只读 `cwtools.ai.*` LSP 命令，加入服务端只读命令 allowlist，再通过生成的 MCP schema 暴露。
+Standalone 模式可以启动自己的 LSP。两种模式共用生成的工具 schema、工作区检测器和 Host Service 契约。新增语义能力时，应先实现只读 `cwtools.ai.*` LSP 命令，加入服务端只读命令 allowlist，再通过生成的 MCP schema 暴露。
 
-不要手改 `submodules/cwtools-mcp/packages/cwtools-shared/src/generated/mcpTools.ts`。运行 `npm run generate:mcp-schema`，在子模块内测试、提交和发布，最后更新根仓库指针。
+不要手改 `cwtools-shared/src/generated/` 下的文件。运行 `npm run generate:mcp-schema` 与 `npm run generate:mcp-detection`（或对应 `check:*`），在子模块内测试、提交和发布，最后更新根仓库指针。
 
 ### 子模块职责
 

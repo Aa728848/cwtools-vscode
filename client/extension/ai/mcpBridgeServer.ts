@@ -6,6 +6,8 @@ import * as vs from 'vscode';
 import type { Disposable, ExtensionContext } from 'vscode';
 import type { AgentToolExecutor } from './agentTools';
 import { TOOL_DEFINITIONS } from './tools/definitions';
+import { classifyWorkspaceRoot, type WorkspaceProjectDetection } from '../workspaceGameDetection';
+import { bridgeResourceDenied, bridgeToolDenied, filterBridgeResources, filterBridgeTools } from './mcpBridgeCapabilities';
 import { getGameKnowledge } from './gameKnowledge';
 import { getProjectProfilePath, queryProjectProfile, readProjectProfile } from './projectProfile';
 import { ErrorReporter } from './errorReporter';
@@ -104,6 +106,13 @@ interface BridgeManifest {
     extensionId: string;
     hostAppName: string;
     hostUriScheme: string;
+    project?: {
+        kind: WorkspaceProjectDetection['kind'];
+        gameId?: string;
+        reason: string;
+        evidence: string[];
+        candidates?: string[];
+    };
     createdAt: string;
     updatedAt: string;
 }
@@ -127,6 +136,8 @@ export interface McpBridgeServerOptions {
     context: ExtensionContext;
     toolExecutor: AgentToolExecutor;
     workspaceRoot: string;
+    /** Live extension-owned classification, shared with startup and project profiling. */
+    detectProject?: () => WorkspaceProjectDetection;
     additionalManifestDirs?: string[];
 }
 
@@ -164,6 +175,20 @@ export class McpBridgeServer implements Disposable {
             await new Promise<void>(resolve => server.close(() => resolve()));
         }
         await Promise.all(this.manifestPaths().map(file => this.removeManifestIfOwned(file)));
+    }
+
+    private projectDetection(): WorkspaceProjectDetection {
+        try {
+            return this.options.detectProject?.()
+                ?? classifyWorkspaceRoot(this.options.workspaceRoot, () => undefined);
+        } catch (error) {
+            return {
+                kind: 'unsupported',
+                strength: 'none',
+                evidence: [],
+                reason: `Workspace detection failed: ${error instanceof Error ? error.message : String(error)}`,
+            };
+        }
     }
 
     private async startInternal(): Promise<void> {
@@ -275,7 +300,7 @@ export class McpBridgeServer implements Disposable {
         const record = asRecord(params);
         switch (method) {
             case 'tools/list':
-                return { tools: listBridgeTools(record.allowDomainWrites === true) };
+                return { tools: listBridgeTools(this.projectDetection()) };
             case 'tools/call':
                 return this.callTool(record);
             case 'resources/list':
@@ -292,7 +317,7 @@ export class McpBridgeServer implements Disposable {
     private async callTool(params: Record<string, unknown>): Promise<McpContentResult> {
         const name = String(params.name ?? '');
         const args = asRecord(params.arguments ?? params.args);
-        const allowDomainWrites = params.allowDomainWrites === true;
+        const project = this.projectDetection();
         const isReadOnlyTool = MCP_BRIDGE_READONLY_SET.has(name);
         const isDomainWriteTool = MCP_BRIDGE_DOMAIN_WRITE_SET.has(name);
 
@@ -308,15 +333,14 @@ export class McpBridgeServer implements Disposable {
             }, true);
         }
 
-        if (isDomainWriteTool && !allowDomainWrites) {
+        const capabilityDenied = bridgeToolDenied(project, name);
+        if (capabilityDenied) {
             return toMcpTextResult({
                 ok: false,
                 status: 'denied',
                 source: 'cwtools-vscode-extension',
-                error: {
-                    code: 'writes_disabled',
-                    message: `Tool '${name}' is a Paradox domain write tool and requires starting cwtools-mcp with --allow-domain-writes (or --enable-writes).`,
-                },
+                error: { code: capabilityDenied.code, message: capabilityDenied.message },
+                nextSteps: capabilityDenied.nextSteps,
             }, true);
         }
 
@@ -358,7 +382,10 @@ export class McpBridgeServer implements Disposable {
     }
 
     private listBridgeResources() {
+        const project = this.projectDetection();
+        if (project.kind === 'unsupported' || project.kind === 'ambiguous') return [];
         const base = listResources();
+        if (project.kind === 'cwt-only') return filterBridgeResources(base, project);
         const skills = this.discoverSkills();
         for (const skill of skills) {
             base.push({
@@ -384,6 +411,17 @@ export class McpBridgeServer implements Disposable {
     }
 
     private async readResource(uri: string): Promise<McpResourceResult> {
+        const project = this.projectDetection();
+        const capabilityDenied = bridgeResourceDenied(project, uri);
+        if (capabilityDenied) {
+            return {
+                contents: [{
+                    uri,
+                    mimeType: 'application/json',
+                    text: `${JSON.stringify({ status: 'error', error: { code: capabilityDenied.code, message: capabilityDenied.message } }, null, 2)}\n`,
+                }],
+            };
+        }
         if (uri.startsWith('cwtools://skills/') && uri !== 'cwtools://skills/catalog') {
             const skillName = decodeURIComponent(uri.slice('cwtools://skills/'.length));
             const loaded = loadSkill(skillName, {
@@ -521,6 +559,7 @@ export class McpBridgeServer implements Disposable {
     }
 
     private currentManifest(): BridgeManifest {
+        const project = this.projectDetection();
         const port = this.port;
         if (!port) {
             throw new Error('CWTools MCP bridge has not finished starting.');
@@ -542,6 +581,13 @@ export class McpBridgeServer implements Disposable {
             extensionId: this.options.context.extension.id,
             hostAppName: vs.env.appName,
             hostUriScheme: vs.env.uriScheme,
+            project: {
+                kind: project.kind,
+                ...(project.gameId ? { gameId: project.gameId } : {}),
+                reason: project.reason,
+                evidence: [...project.evidence],
+                ...(project.candidates ? { candidates: [...project.candidates] } : {}),
+            },
             createdAt: this.createdAt,
             updatedAt: new Date().toISOString(),
         };
@@ -585,11 +631,12 @@ export function mcpBridgeManifestDir(context: ExtensionContext): string {
     return path.join(context.globalStorageUri.fsPath, 'mcp');
 }
 
-function listBridgeTools(allowDomainWrites = false): McpToolSchema[] {
+function listBridgeTools(project?: WorkspaceProjectDetection): McpToolSchema[] {
     const byName = new Map(TOOL_DEFINITIONS.map(definition => [definition.function.name, definition]));
-    const names = allowDomainWrites
-        ? [...MCP_BRIDGE_READONLY_TOOL_NAMES, ...MCP_BRIDGE_DOMAIN_WRITE_TOOL_NAMES]
-        : [...MCP_BRIDGE_READONLY_TOOL_NAMES];
+    // allowDomainWrites is a legacy wire field, not a read-only switch. Whitelisted
+    // domain writes are enabled by default for both current and older MCP proxies.
+    const requestedNames = [...MCP_BRIDGE_READONLY_TOOL_NAMES, ...MCP_BRIDGE_DOMAIN_WRITE_TOOL_NAMES];
+    const names = project ? filterBridgeTools(requestedNames, project) : requestedNames;
     return names.map(name => {
         const definition = byName.get(name);
         if (!definition) {

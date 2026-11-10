@@ -96,6 +96,7 @@ const generated = mcpToolNames.map((name) => {
       effect: registry.effect,
       riskLevel: registry.riskLevel,
       concurrencyClass: registry.concurrencyClass,
+      mcpSupportsCwtOnly: registry.mcpSupportsCwtOnly === true,
     },
   };
 });

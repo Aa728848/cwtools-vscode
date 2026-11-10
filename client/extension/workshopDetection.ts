@@ -10,7 +10,7 @@
  * it directly without stubs.
  */
 
-import { getAllProfiles } from './gameProfiles';
+import { getWorkspaceDetectionProfiles } from './workspaceDetectionProfiles';
 
 /**
  * Extracts the Steam App ID from a workshop content path.
@@ -38,8 +38,8 @@ export function getGameIdForWorkshopAppId(appId: string): string | undefined {
 	if (!/^\d+$/.test(appId) || appId === '0') {
 		return undefined;
 	}
-	for (const profile of getAllProfiles()) {
-		if (profile.install.steamAppId === appId) {
+	for (const profile of getWorkspaceDetectionProfiles()) {
+		if (profile.steamAppId === appId) {
 			return profile.id;
 		}
 	}

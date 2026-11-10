@@ -87,16 +87,17 @@ dotnet build src/LSP/
 dotnet build src/Main/
 ```
 
-For MCP schema changes:
+For MCP schema or workspace-detection changes:
 
 ```bash
 npm run generate:mcp-schema
+npm run generate:mcp-detection
 cd submodules/cwtools-mcp
 npm run build
 npm run test:contracts
 ```
 
-The schema command writes into the MCP submodule. Review and commit that repository separately before updating the root submodule pointer.
+The generation commands write into the MCP submodule. Use `check:mcp-schema` and `check:mcp-detection` for read-only drift checks. Review and commit that repository separately before updating the root submodule pointer.
 
 ### Repository boundaries
 
@@ -108,7 +109,7 @@ The schema command writes into the MCP submodule. Review and commit that reposit
 | `src/LSP/`, `src/Main/` | F#/.NET protocol layer and language-server executable |
 | `submodules/cwtools/` | Upstream CWTools parser, validation, game model, and Shader semantics |
 | `submodules/cwtools-stellaris-config/` | Stellaris CWT rule data |
-| `submodules/cwtools-mcp/` | Separately released read-only MCP server |
+| `submodules/cwtools-mcp/` | Separately released MCP server with default-on whitelisted domain writes |
 
 The three submodules have separate histories and release concerns. Commit a change inside the relevant submodule first, then update its pointer in the root repository. Do not combine CWTools library work, rules-data work, and MCP release work into one unexplained change.
 
@@ -286,16 +287,17 @@ dotnet build src/LSP/
 dotnet build src/Main/
 ```
 
-修改 MCP schema 时：
+修改 MCP schema 或工作区识别时：
 
 ```bash
 npm run generate:mcp-schema
+npm run generate:mcp-detection
 cd submodules/cwtools-mcp
 npm run build
 npm run test:contracts
 ```
 
-schema 命令会写入 MCP 子模块。请先在该仓库中审阅并提交，再更新根仓库的 submodule 指针。
+生成命令会写入 MCP 子模块；`check:mcp-schema` 与 `check:mcp-detection` 用于只读漂移检查。请先在该仓库中审阅并提交，再更新根仓库的 submodule 指针。
 
 ### 仓库边界
 
@@ -307,7 +309,7 @@ schema 命令会写入 MCP 子模块。请先在该仓库中审阅并提交，�
 | `src/LSP/`、`src/Main/` | F#/.NET 协议层和语言服务端程序 |
 | `submodules/cwtools/` | 上游 CWTools 解析、校验、游戏模型和 Shader 语义 |
 | `submodules/cwtools-stellaris-config/` | Stellaris CWT 规则数据 |
-| `submodules/cwtools-mcp/` | 独立发布的只读 MCP 服务 |
+| `submodules/cwtools-mcp/` | 独立发布、默认开放白名单领域写入的 MCP 服务 |
 
 三个子模块各有独立历史和发布边界。先在对应子模块内提交，再更新根仓库指针。CWTools 库、规则数据和 MCP 发布不应混成一项没有说明的改动。
 

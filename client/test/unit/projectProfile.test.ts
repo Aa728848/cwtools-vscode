@@ -165,6 +165,7 @@ describe('ProjectProfile localisation detection', () => {
     it('discovers current content directories without a fixed entity-family list', () => {
         const workspaceRoot = makeWorkspace();
         try {
+            fs.writeFileSync(path.join(workspaceRoot, 'descriptor.mod'), 'name="Profile fixture"\n', 'utf8');
             const typedDir = path.join(workspaceRoot, 'common', 'ritual_definitions');
             fs.mkdirSync(typedDir, { recursive: true });
             fs.writeFileSync(path.join(typedDir, 'sample.txt'), 'sample_ritual = { }\n', 'utf8');
@@ -181,6 +182,7 @@ describe('ProjectProfile localisation detection', () => {
     it('does not double count common vs its child directories', () => {
         const workspaceRoot = makeWorkspace();
         try {
+            fs.writeFileSync(path.join(workspaceRoot, 'descriptor.mod'), 'name="Profile fixture"\n', 'utf8');
             fs.mkdirSync(path.join(workspaceRoot, 'common', 'events'), { recursive: true });
             fs.mkdirSync(path.join(workspaceRoot, 'common', 'on_actions'), { recursive: true });
             fs.writeFileSync(path.join(workspaceRoot, 'common', 'direct.txt'), 'x = { }\n', 'utf8');

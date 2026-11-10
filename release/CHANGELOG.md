@@ -1,5 +1,29 @@
 # Changelog
 
+## [2.36.0] - 2026-11-10
+
+### 原生后端共享与证据级工作区识别 / Shared Native Backend Host and Evidence-Based Workspace Detection
+
+- **[架构] `cwtools-node` 宿主包、后端能力握手与可取消请求（New `cwtools-node` host package, backend capability handshake and cancellable requests）**：
+  - 新建 `cwtools-node`（0.1.0），把 `nodeHostServices`、`lspProcessHost`、`projectDetect`、`projectSettings`、`revalidation`、`vscodeCache` 六个宿主模块从 MCP 包迁出，依赖图收敛为 `cwtools-shared` ← `cwtools-node` ← `cwtools-mcp`；任何宿主不再需要为了跑语义而引入 MCP SDK，`cwtools-mcp` 的旧深路径导入经 re-export 保持兼容。
+  - 新增只读命令 `cwtools.ai.getHostCapabilities`（协议版本 1，与 `getValidationStatus` 同级、在 `gameObj` 匹配前返回，因此游戏模型加载前即可应答）。Node 宿主在 `initialize` 之后、触发加载的 `workspace/didChangeConfiguration` 之前握手，不兼容后端在付出加载代价前被拒绝；`serverVersion` 由最近的 `release/package.json` 提供，开发构建与 VSIX 共用同一来源。
+  - 扩展在既有 manifest 中新增 `cwtoolsNativeRpcUrl`/`cwtoolsNativeHealthUrl`，通过独立 `/cwtools/*` 路由只转发必需的只读命令与五个文档/导航 LSP 方法。`NativeBridgeLspHost` 复用已活跃的扩展后端而不另起进程；manifest 缺失、畸形、pid/工作区/健康/协议不匹配时回退独立进程，绝不双开。
+  - `LspCommandOptions` 增加 `AbortSignal`：每个请求把中止信号与超时接到 `vscode-jsonrpc` 的取消令牌，向语言服务发出真正的 `$/cancelRequest`；`AbortError` 直接抛出而不再被统一转成 `unavailable`，诊断复验（`RevalidationCoordinator`）同样传播取消。
+  - 索敌权重公式迁入共享包，`query_targeting_weight` 不再只有工具名与 schema 而无实现，宿主无需复制公式。
+  - English: [Architecture] A new `cwtools-node` package (0.1.0) moves the six Node host modules out of the MCP package, so the dependency graph becomes strictly `cwtools-shared` ← `cwtools-node` ← `cwtools-mcp` and any host can run CWTools semantics without the MCP SDK; a new read-only `cwtools.ai.getHostCapabilities` command (protocol version 1) is answered before the game model loads, and the Node host performs the handshake after `initialize` but before the `workspace/didChangeConfiguration` that starts loading, so an incompatible backend is rejected before the load cost is paid. The extension exposes `cwtoolsNativeRpcUrl`/`cwtoolsNativeHealthUrl` in its existing manifest so `NativeBridgeLspHost` can reuse an already-active extension backend instead of spawning a second one, falling back to a standalone process only when the manifest is missing, malformed, stale or mismatched. Every LSP request now honours an `AbortSignal` by sending a real `$/cancelRequest`, and aborts propagate instead of being flattened into `unavailable`.
+
+- **[特性] 基于证据分级的 Paradox/CWT 工作区识别与能力门禁（Evidence-graded workspace detection and capability gating）**：
+  - `client/extension/workspaceGameDetection.ts` 成为扩展、Bridge 与 Standalone 共用的检测真源，输出 `mod | vanilla | cwt-only | unsupported | ambiguous`、游戏、实际匹配根与证据；路径文本和游戏分数只在结构证据成立后才参与选择。
+  - 强证据为 `descriptor.mod`、根路径一致的 V4 项目 Profile、游戏专属嵌套目录、已知 Workshop App ID、以及位于已验证游戏数据路径内部；单个 `common/`、`events/` 或任意 `.mod` 不再构成证据，CWT 聚簇要求至少六个规则/日志文件且含真实 `.cwt`。
+  - 非支持/歧义项目不再披露任何工具与资源（消除外部 Harness 的固定上下文成本），Standalone 不创建 LSP；CWT-only 只披露 `get_diagnostics`、`analyze_diagnostic_error`、`get_completion_at`、`document_symbols`、`workspace_symbols`、`go_to_definition`、`find_references` 七项能力，且通用/CWT 模式不再借用 Stellaris 规则与缓存。
+  - 检测器、Workshop 适配与静态 Profile 证据表由 `tools/generate-mcp-detection.cjs` 生成到 `cwtools-shared/src/generated/`，`npm run generate:mcp-detection` 与 `npm run check:mcp-detection` 分别更新与只读校验，避免扩展与 standalone 各自漂移。
+  - English: [Feature] `workspaceGameDetection.ts` becomes the single source of truth shared by the extension, the bridge and standalone hosts, reporting `mod | vanilla | cwt-only | unsupported | ambiguous` plus game, matched root and evidence. A lone `common/` or `events/` directory or an arbitrary `.mod` file no longer counts as evidence, and CWT clusters require at least six rule/log files including a real `.cwt`. Unsupported or ambiguous roots publish no tools and no resources and never spawn an LSP, CWT-only roots publish exactly seven game-model-independent tools, and generic/CWT modes never borrow Stellaris rules or caches.
+
+- **[特性] 受控领域写入默认激活（Whitelisted domain writes on by default）**：
+  - `write_localisation`、`typed_pdx_write`、`candidate_transaction`、`convert_image_to_dds`、`convert_audio`、`deploy_mod_asset` 六个白名单写入工具在受支持的游戏工作区默认披露并允许，CLI `enableWrites` 默认 `true`，`--enable-writes` 与 `--allow-domain-writes` 作为幂等兼容别名保留，不提供 `--read-only`。
+  - 默认开启不改变边界：`workspace_write` 路径包含校验、单文件写锁、预检与本地化 BOM 规则照旧；非白名单工具、非支持/歧义项目与 CWT-only 项目的拒绝策略不变。
+  - English: [Feature] The six whitelisted domain write tools are enabled by default in supported game workspaces, with `enableWrites` defaulting to true and `--enable-writes` / `--allow-domain-writes` kept as idempotent aliases; path containment, write locks, preflight checks and BOM-safe localisation writes still apply, and non-whitelisted tools and unsupported/CWT-only projects remain rejected.
+
 ## [2.35.0] - 2026-11-07
 
 ### 内置 Agent 收敛为 Paradox 单 Agent / Built-in Agent Convergence to a Single Paradox Assistant

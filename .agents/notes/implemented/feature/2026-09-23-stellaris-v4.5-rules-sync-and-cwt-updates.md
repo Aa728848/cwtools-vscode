@@ -103,6 +103,38 @@ v4.5.2 → 4.5.3 是小版本更新，Trigger / Effect / Modifier / Scope 四类
 | `is_point_of_interest` | 解析器只取第一组花括号，漏掉 `{ } or { }` 第二组 | 修解析器（并列块并集），规则本已正确 |
 | `transfer_pop_amount` | 公告新增 `keep_automodding`，文档与脚本均无 | **补规则**：`keep_automodding = bool`（可选），保留在 `alias[effect:transfer_pop_amount]` 内 |
 
+### v4.6.0 增量同步（测试版 Corona Borealis）
+
+4.6.0 是近年变动最大的一次：新增整套 **ideology（意识形态）子系统**，命令层、作用域层与 `common/` 目录同时扩张。同步按同一两阶段路径执行。
+
+```mermaid
+flowchart LR
+    A["script_documentation 4.6.0"] --> B["rules-sync report"]
+    B --> C["阶段一：config/logs 只改差异块"]
+    C --> D["阶段二：triggers/effects/scope_changes/scopes"]
+    D --> E["common：新目录 + 字段 + 子类型"]
+    E --> F["contracts --apply 补 replace_scope"]
+    F --> G["report 全零"]
+```
+
+- **阶段一（日志基线）**：`trigger_docs.log` 按块替换 49 条、追加 72 条 trigger 与 63 条 effect；`modifiers.log` 追加 61 行并改 3 条分类；`localizations.log` 插入 18 行含新增 `--Ideology--` 段；`scopes.log` 追加 3 条作用域并改 6 条。追加/替换的块直接取自原版文档，不整文件覆盖，因此人工维护的排版与更全的历史字段（如 `transfer_pop_amount.keep_automodding`）保持不变。顺带修好镜像自身丢失空行的 3 条块（`is_majority_species`、`set_timed_carrier_flag`、`set_timed_pop_faction_flag`）。
+
+- **命令层强类型化（无 `scalar`）**：
+  - 新作用域 `ideology` 进 `scopes.cwt`（`Ideology` 类型），命令统一绑定 `<ideology>` / `<ideology_tenet>` / `<ideology_action>` / `<ideology_reach_type>` / `<megastructure_module>`，其余沿用既有类型（`<ethos>`、`<bombardment_stance>`、`<council_agenda>`、`<message_type>`、`<precursors>`、`<district>`）。
+  - `triggers.cwt` 新增 53 条 trigger；`any_/count_/every_/ordered_/random_` 共 46 条遍历器进 `scope_changes.cwt`（带 `## push_scope`），因为遍历器由 `scope_changes.cwt` 负责，不属于 `triggers.cwt` / `effects.cwt`。
+  - `effects.cwt` 新增 36 条 effect。
+  - 参数级收敛（34 条）：`set_timed_*_flag` 家族 27 条补可选 `random = int_value_field`；`add_opinion_modifier` 补 `mult`、`add_random_research_option` 补 `research_instantly`、`add_trait`/`remove_trait` 补 `message_type`+`custom_description`、`delete_ship`/`destroy_ship` 补 `{ target kill_leader }` 块写法、`count_starbase_buildings`/`count_starbase_modules` 补 `limit`。
+
+- **Common 目录**：
+  - 新建 `common/ideologies.cwt`：`type[ideology]`（`path_strict`，避免子目录重复解析）、`type[ideology_tenet]`、`type[ideology_action]`、`type[ideology_reach_type]`，并按原版头注释建模 `strength_level`/`monthly_increase`/`on_*`/`swappable_data`/`inline_script` 等字段。
+  - 新建 `common/megastructure_modules.cwt`：`type[megastructure_module]` 与建造、资源、触发修饰符字段。
+  - 既有目录补齐 149 个字段：`defines` 最多（`NAI` 28 条 AI 优先级常量、`NGameplay`/`NGraphics`/`NPop`/`NEconomy` 的 `ideology_*`/`tenet_*`/`reach_*`/`ideological_*`），其余散落在 `megastructures`、`traits`、`zones`、`resolutions`、`jobs_and_social_strata`、`pop_faction`、`governments` 等。
+  - `triggered_station_modifier`（巨构）与 `triggered_advocate_modifier`（特质）没有可复用的别名组，写成显式块；其余 `triggered_*_modifier` 复用既有别名组（组名即字段名）。
+  - 子类型：`game_rules.cwt` 补 28 条（`ideology` 相关规则 + `ruler_can_*` 领袖任职规则），`on_actions.cwt` 补 20 条（`on_ideology_*`、`on_golden_generation_*`、`on_system_affected_by_ideology` 等），27 条 `replace_scope` 由 `contracts --apply` 依据原版注释自动写入。
+  - 另有 10 条契约 `contracts` 工具**按设计不落笔**（`unresolved`，原版注释用的是描述性名字而非作用域 token，如 `# This = ruler`、`# from = fanatic faction`、`# This = New Custodian`），按原版语义手工补齐：`ruler_can_*` 8 条按 `scopes.log` 的链接定义 `this = leader root = leader`（`ruler` 的输出作用域是 `leader`），`from` 分别为 fleet / country / federation / ideology / colony；`on_fanatic_faction_consequence_event` 仅补 `from = pop_faction`（原版未给出 this）；`on_ideology_custodian_changed` 补 `this/root = country`、`from = country`、`fromfrom = ideology`。`unresolved` 计数因此仍是 10——它度量的是原版注释可归一化程度，不是规则覆盖度。
+
+- **原版重命名**：`on_entering_war` 在 4.6.0 改名 `on_war_entered`（原版仅剩脚本注释提到旧名）。旧 `subtype` 删除，并在 `on_actions.cwt` 的 `obsolete_keys` 登记 `on_entering_war = "renamed to on_war_entered"`，保留迁移提示而不是静默失效。
+
 ## Alternatives considered
 
 1. **将 `overclock` / `role` / `action` 保持为 `scalar`**：
@@ -129,5 +161,6 @@ v4.5.2 → 4.5.3 是小版本更新，Trigger / Effect / Modifier / Scope 四类
 - 运行 `npm run compile`：前端 Webview 与 Extension Host 编译全部通过。
 - 运行 `npm run typecheck:test`：全量 TypeScript 类型检查通过。
 - 参数级漂移：修好后 `report --no-open` 报 `trigger parameters: ~0`、`effect parameters: ~0`（修前为 `~2` / `~3`，其中 5 条是历史漏检）；`npm run test:rules-sync` 50 项通过（含 4 条新增参数回归）；`dotnet fsi src/Main/StellarisConfigLogs.Tests.fsx` 8 项通过（基线日志仍可被 F# 解析）；`npm run typecheck:test` 通过；规则 diff 中新增的 `scalar` 只有 `create_country.ruler`（自由字符串，与同块 `name`/`ship_prefix` 一致）。
+- v4.6.0：`report --no-open` 全部 diff 为 `+0 -0 ~0`，`trigger parameters: ~0`、`effect parameters: ~0`，`folders with findings: 0`，`scope contracts missing=0 mismatch=0 unresolved=10`，`documented-but-required=0`、`documented-but-unmodeled=0`；shader-abi `carried=479 added=8 dropped=0`、contracts `kept=13 dropped=0`；`npm run compile`、`npm run typecheck:test`、`npm test`（19 passing，语言服务器成功加载新规则）均通过；规则 diff 中 `scalar` 新增计数为 0。
 - v4.5.3：`report --no-open` 的 trigger / effect / modifier / scope / localisation_command 全为 `+0 -0 ~0`，`folders with findings: 0`，`scope contracts missing=0 mismatch=0 unresolved=0`，`documented-but-required=0`、`documented-but-unmodeled=0`，shader-abi `carried=471 added=0 dropped=0`、contracts `kept=13 dropped=0`。
 - v4.5.2：`report --no-open` 所有 diff 均为 `+0 -0 ~0`，`folders with findings: 0`，`scope contracts missing=0 mismatch=0`，`documented-but-unmodeled=0`；`npm run test:rules-sync` 通过（新增多行字符串字段扫描与关系从句作用域两条回归测试）；规则 diff 中无新增 `scalar`。

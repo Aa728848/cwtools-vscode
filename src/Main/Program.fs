@@ -11866,10 +11866,13 @@ type Server(client: ILanguageClient) =
                                 let typeMap = game.Types()
                                 match typeMap |> Map.tryFind typeName with
                                 | None ->
+                                    // `typeKnown: false` separates "no such type" from "type exists
+                                    // but has no instances" — both otherwise look like totalCount 0.
                                     JsonValue.Record
                                         [| "typeName",   JsonValue.String typeName
                                            "instances",  JsonValue.Array [||]
                                            "totalCount", JsonValue.Number 0m
+                                           "typeKnown",  JsonValue.Boolean false
                                            "ok",         JsonValue.Boolean true |]
                                 | Some typeArr ->
                                     // Single filter pass reuse for both count and truncated result
@@ -11898,6 +11901,7 @@ type Server(client: ILanguageClient) =
                                         [| "typeName",   JsonValue.String typeName
                                            "instances",  JsonValue.Array instances
                                            "totalCount", JsonValue.Number(decimal allCount)
+                                           "typeKnown",  JsonValue.Boolean true
                                            "ok",         JsonValue.Boolean true |]
                             Some resultJson
 
@@ -13223,45 +13227,68 @@ type Server(client: ILanguageClient) =
                                 allDiagArgs |> List.tryItem 1
                                 |> Option.bind (function JsonValue.Number n -> Some(int n) | _ -> None)
                                 |> Option.defaultValue 1000
-                            // Severity is a minimum threshold: "warning" => errors + warnings, etc.
+                            // Exact match, as documented ("filter by severity") and as the
+                            // in-extension implementation behaves. A cumulative threshold made
+                            // `severity: "warning"` return errors too.
                             let severityOk sev =
                                 match severityArg with
-                                | None | Some "all" | Some "hint" -> true
-                                | Some "error" -> sev = "error"
-                                | Some "warning" -> sev = "error" || sev = "warning"
-                                | Some "info" -> sev = "error" || sev = "warning" || sev = "info"
-                                | Some other -> sev = other
+                                | None | Some "all" -> true
+                                | Some desired -> sev = desired
                             let mutable totalErrors = 0
                             let mutable totalWarnings = 0
                             let mutable matched = 0
+                            let seen = System.Collections.Generic.HashSet<string>(System.StringComparer.Ordinal)
                             let collected = System.Collections.Generic.List<JsonValue>()
                             for kvp in fileDiagnosticStates do
                                 let filePath = kvp.Key.Replace('\\', '/')
                                 for d in kvp.Value.diagnostics do
                                     let sev = diagnosticSeverityToString d.severity
-                                    if sev = "error" then totalErrors <- totalErrors + 1
-                                    elif sev = "warning" then totalWarnings <- totalWarnings + 1
-                                    if severityOk sev then
-                                        matched <- matched + 1
-                                        if collected.Count < limitVal then
-                                            collected.Add(
-                                                JsonValue.Record
-                                                    [| "file",     JsonValue.String filePath
-                                                       "code",     JsonValue.String (d.code |> Option.defaultValue "")
-                                                       "message",  JsonValue.String d.message
-                                                       "severity", JsonValue.String sev
-                                                       "line",     JsonValue.Number(decimal d.range.start.line)
-                                                       "column",   JsonValue.Number(decimal d.range.start.character) |])
+                                    // The same location can be published twice (a file stored under
+                                    // two path spellings, or a validation pass reporting one key via
+                                    // two rules). Count and return each distinct issue once.
+                                    let key =
+                                        String.concat
+                                            "|"
+                                            [ filePath.ToLowerInvariant()
+                                              string d.range.start.line
+                                              string d.range.start.character
+                                              d.code |> Option.defaultValue ""
+                                              d.message ]
+                                    if seen.Add key then
+                                        if sev = "error" then totalErrors <- totalErrors + 1
+                                        elif sev = "warning" then totalWarnings <- totalWarnings + 1
+                                        if severityOk sev then
+                                            matched <- matched + 1
+                                            if collected.Count < limitVal then
+                                                collected.Add(
+                                                    JsonValue.Record
+                                                        [| "file",     JsonValue.String filePath
+                                                           "code",     JsonValue.String (d.code |> Option.defaultValue "")
+                                                           "message",  JsonValue.String d.message
+                                                           "severity", JsonValue.String sev
+                                                           "line",     JsonValue.Number(decimal d.range.start.line)
+                                                           "column",   JsonValue.Number(decimal d.range.start.character) |])
+                            // Report the aggregate's own freshness: the paginated path used to
+                            // hard-code "fresh", so a mid-reload snapshot looked authoritative.
+                            let loadingStatus = loadingRuntimeSnapshot ()
+                            let validationStatus = validationRuntimeSnapshot ()
+                            let pendingKinds = pendingRefreshDomainList ()
+                            let freshness =
+                                if loadingStatus.inProgress then "loading"
+                                elif validationStatus.inProgress || not pendingKinds.IsEmpty then "stale"
+                                else "fresh"
                             let result =
                                 JsonValue.Record
-                                    [| "ok",            JsonValue.Boolean true
-                                       "totalFiles",    JsonValue.Number(decimal fileDiagnosticStates.Count)
-                                       "totalCount",    JsonValue.Number(decimal matched)
-                                       "returnedCount", JsonValue.Number(decimal collected.Count)
-                                       "truncated",     JsonValue.Boolean(matched > collected.Count)
-                                       "errorCount",    JsonValue.Number(decimal totalErrors)
-                                       "warningCount",  JsonValue.Number(decimal totalWarnings)
-                                       "diagnostics",   JsonValue.Array(collected.ToArray()) |]
+                                    [| "ok",                 JsonValue.Boolean true
+                                       "totalFiles",         JsonValue.Number(decimal fileDiagnosticStates.Count)
+                                       "totalCount",         JsonValue.Number(decimal matched)
+                                       "returnedCount",      JsonValue.Number(decimal collected.Count)
+                                       "truncated",          JsonValue.Boolean(matched > collected.Count)
+                                       "errorCount",         JsonValue.Number(decimal totalErrors)
+                                       "warningCount",       JsonValue.Number(decimal totalWarnings)
+                                       "freshness",          JsonValue.String freshness
+                                       "pendingGlobalKinds", JsonValue.Array(pendingKinds |> List.map JsonValue.String |> Array.ofList)
+                                       "diagnostics",        JsonValue.Array(collected.ToArray()) |]
                             Some result
 
                         // waitDiagnosticsFresh is kept as a non-blocking compatibility alias.

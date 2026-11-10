@@ -405,7 +405,7 @@ const RAW_TOOL_DEFINITIONS: ToolDefinition[] = [
                     query: { type: 'string', description: 'Identifier or concise semantic search text. Exact PDX IDs give the strongest results. Optional when file or typeName is supplied.' },
                     file: { type: 'string', description: 'Optional workspace-relative path or absolute path inside the workspace/configured game installation used to restrict entry points.' },
                     typeName: { type: 'string', description: 'Optional exact CWTools type name obtained from active schema/type evidence.' },
-                    exact: { type: 'boolean', description: 'Require query to exactly match an entity ID. Default false.' },
+                    exact: { type: 'boolean', description: 'Require query to exactly match an entity ID; needs a non-empty query. Default false.' },
                     depth: { type: 'number', minimum: 0, maximum: 3, description: 'Incoming/outgoing graph traversal depth. Default 1; use 2-3 only for focused IDs.' },
                     maxNodes: { type: 'number', minimum: 1, maximum: 100, description: 'Maximum graph nodes. Default 30.' },
                     maxEdges: { type: 'number', minimum: 1, maximum: 300, description: 'Maximum graph edges and per-file semantic facts. Default 80.' },
@@ -1013,12 +1013,12 @@ const RAW_TOOL_DEFINITIONS: ToolDefinition[] = [
         type: 'function',
         function: {
             name: 'get_diagnostics',
-            description: 'Get errors, warnings, information, and hints from the VS Code Problems diagnostics snapshot, optionally filtered by file and severity. Returns totals and truncation metadata; check truncated before treating the returned list as complete.',
+            description: 'Get errors, warnings, information, and hints from the VS Code Problems diagnostics snapshot, optionally filtered by file and severity. Counts are workspace-wide; diagnostics hidden by the workspace ignore list are reported through suppressedCount and still count in totalCount. Check truncated before treating the returned list as complete.',
             parameters: {
                 type: 'object',
                 properties: {
-                    file: { type: 'string', description: 'Optional: restrict to a specific file path (absolute) or a path substring to match. Leave empty to get all workspace diagnostics.' },
-                    severity: { type: 'string', enum: ['error', 'warning', 'info', 'hint', 'all'], description: 'Filter by severity. Default: "all"' },
+                    file: { type: 'string', description: 'Optional: restrict to one file, as an absolute path or a workspace-relative path. Leave empty to get all workspace diagnostics.' },
+                    severity: { type: 'string', enum: ['error', 'warning', 'info', 'hint', 'all'], description: 'Exact severity filter: "error" returns only errors. Default: "all"' },
                     limit: { type: 'number', description: 'Max diagnostics to return (default 500, max 2000). For full project reviews, omit this parameter to get all diagnostics. Only set a low limit when you want a quick summary.' },
                 },
                 required: [],

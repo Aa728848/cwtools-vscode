@@ -31,21 +31,11 @@ import {
 } from '../../extension/ai/providers';
 import type { ChatCompletionRequest, ChatMessage } from '../../extension/ai/types';
 
-describe('Antigravity provider support', () => {
-    it('keeps OAuth chat and editor model catalogs separate', () => {
-        const provider = getProvider('antigravity');
-        expect(provider).to.include({ authKind: 'antigravity-oauth', requiresApiKey: false, supportsFIM: true, supportsUtilityCalls: false });
-        expect(provider.inlineModels).to.deep.equal(['tab_flash_lite_preview']);
-        expect(provider.models).not.to.include('tab_flash_lite_preview');
-        expect(isModelFIMCapable('', 'antigravity')).to.equal(true);
-        expect(isModelFIMCapable('tab_flash_lite_preview', 'antigravity')).to.equal(true);
-        expect(isModelFIMCapable('tab_jump_flash_lite_preview', 'antigravity')).to.equal(false);
-        expect(isModelFIMCapable('gemini-3.1-pro', 'antigravity')).to.equal(false);
-        expect(provider.models).to.include(provider.defaultModel);
-        expect(getProviderApiFormat('antigravity', 'claude-opus-4-6')).to.equal('gemini-generate-content');
-        expect(getModelContextTokens('claude-opus-4-6', 'antigravity')).to.equal(1048576);
-        expect(getModelContextTokens('gpt-oss-120b', 'antigravity')).to.equal(262144);
-        expect(getModelOutputTokens('claude-opus-4-6', 'antigravity')).to.equal(64000);
+describe('provider registry removal', () => {
+    it('does not register a retired Antigravity id and falls back for legacy settings', () => {
+        expect(BUILTIN_PROVIDERS).not.to.have.property('antigravity');
+        expect(getProvider('antigravity').id).to.equal(getProvider('openai').id);
+        expect(getProviderApiFormat('antigravity', 'gemini-3-flash')).to.equal('openai-chat-completions');
     });
 });
 
@@ -620,7 +610,6 @@ describe('getProviderApiFormat', () => {
     it('covers every built-in provider with its effective default-model protocol', () => {
         const expected = {
             'codex-chatgpt': 'openai-responses',
-            antigravity: 'gemini-generate-content',
             openai: 'openai-responses',
             claude: 'anthropic-messages',
             // The subscription speaks Anthropic Messages with an OAuth bearer,

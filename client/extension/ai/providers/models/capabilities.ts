@@ -3,7 +3,6 @@
  */
 
 import { BUILTIN_PROVIDERS } from './defaults';
-import { ANTIGRAVITY_MODELS, antigravityContextTokens, antigravityOutputTokens } from '../../antigravity/models';
 import { commandCodeModelSupportsImage } from '../../commandcode/modelCapabilities';
 import {
     CODEX_CHATGPT_CONTEXT_TOKENS,
@@ -384,7 +383,6 @@ export const MODEL_CONTEXT_TOKENS: Record<string, number> = {
     // the 256K plan bound; the highspeed sibling is only offered at 1M.
     'kimi-code-plan:k3.1-pro': 262144,
     'kimi-code-plan:k3.1-pro-highspeed': 1048576,
-    ...Object.fromEntries(ANTIGRAVITY_MODELS.map(model => [`antigravity:${model}`, antigravityContextTokens(model)])),
     ...Object.fromEntries(CODEX_CHATGPT_MODELS.map(model => [
         `codex-chatgpt:${model}`,
         isCodexGpt6FamilyModel(model)
@@ -604,7 +602,6 @@ export const MODEL_CONTEXT_TOKENS: Record<string, number> = {
  * Get the context window size for a specific model.
  */
 export function getModelContextTokens(model: string, providerId?: string): number {
-    if (providerId === 'antigravity') return antigravityContextTokens(model);
     if (!model) return 0;
     const providerKey = providerId ? `${providerId}:${model}` : '';
     if (providerKey && providerKey in MODEL_CONTEXT_TOKENS) return MODEL_CONTEXT_TOKENS[providerKey]!;
@@ -709,7 +706,6 @@ export function clampConfiguredContextTokens(
  * Dynamic output token limits for API calls to prevent self-truncation.
  */
 export function getModelOutputTokens(model: string, providerId?: string): number {
-    if (providerId === 'antigravity') return antigravityOutputTokens(model);
     if (!model) return 16384;
     const lower = model.toLowerCase();
     const modelId = lower.replace(/\s*\([^)]*\)$/i, '');

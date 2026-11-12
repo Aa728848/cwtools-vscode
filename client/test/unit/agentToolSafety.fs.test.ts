@@ -280,7 +280,7 @@ describe('agent tool file path safety', () => {
         expect(result.content).to.not.include('12 | line 12');
     });
 
-    it('allows reading arbitrary local external files in Antigravity model and blocks sensitive credentials', async () => {
+    it('rejects ordinary local files outside trusted roots and blocks sensitive credentials', async () => {
         const configuredRoot = makeWorkspace();
         const otherRoot = makeWorkspace();
         const vanillaFile = path.join(configuredRoot, 'common', 'game_rules', '00_rules.txt');
@@ -300,7 +300,7 @@ describe('agent tool file path safety', () => {
             const blocked = await handler.readFile({ file: sshKeyFile });
 
             expect(vanilla.content).to.include('vanilla_rule = yes');
-            expect(outside.content).to.include('outside content');
+            expect(outside.content).to.include('outside the workspace and configured game directories');
             expect(blocked.content).to.include('outside the workspace and configured game directories');
         } finally {
             cleanupWorkspace(configuredRoot);
@@ -308,7 +308,7 @@ describe('agent tool file path safety', () => {
         }
     });
 
-    it('applies Antigravity read model to file-scoped read tools and protects credentials', async () => {
+    it('applies trusted-root read policy to file-scoped read tools and protects credentials', async () => {
         const configuredRoot = makeWorkspace();
         const otherRoot = makeWorkspace();
         const vanillaFile = path.join(configuredRoot, 'common', 'game_rules', '00_rules.txt');
@@ -324,11 +324,12 @@ describe('agent tool file path safety', () => {
         try {
             const executor = new AgentToolExecutor({} as any, workspaceRoot);
             const allowedVanilla = await executor.execute('document_symbols', { file: vanillaFile }, makeContext());
-            const allowedOutside = await executor.execute('document_symbols', { file: otherFile }, makeContext());
+            const blockedOutside = await executor.execute('document_symbols', { file: otherFile }, makeContext()) as any;
             const blockedCredential = await executor.execute('document_symbols', { file: sshKeyFile }, makeContext()) as any;
 
             expect(allowedVanilla).to.have.property('symbols');
-            expect(allowedOutside).to.have.property('symbols');
+            expect(blockedOutside.success).to.equal(false);
+            expect(blockedOutside.error).to.include('outside the workspace and configured game directories');
             expect(blockedCredential.success).to.equal(false);
             expect(blockedCredential.error).to.include('outside the workspace and configured game directories');
         } finally {

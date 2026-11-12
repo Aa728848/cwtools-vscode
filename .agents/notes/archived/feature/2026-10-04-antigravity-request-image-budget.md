@@ -1,6 +1,8 @@
 # Agent Note: Antigravity 请求图片体积预算
 
-Status: implemented
+Status: archived
+
+> 该线路已于 2026-11-12 整体移除；本笔记永久冻结为历史记录。当前决策见 `../../implemented/simplification/2026-11-12-remove-antigravity-provider-and-completion-services.md`。
 
 ## Problem
 

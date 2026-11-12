@@ -1,6 +1,4 @@
 import { Icons, svgIcon, svgIconNoMargin } from './svgIcons';
-import type { ProviderMeta } from '../shared/providerMeta';
-import { buildAntigravityAccountHtml, isAntigravityAccountStatus, type AntigravityAccountStatus } from './chat/antigravityAccount';
 import { isSubscriptionProxyMode, isSubscriptionProxyStatus, type SubscriptionProxyStatus } from '../shared/subscriptionProxy';
 import { routeLiveStep, buildToolPairHtml, buildToolGroupHtml, buildLocalisationPromptCardHtml, escapeHtml as mrEscapeHtml, type RendererStep } from './messageRenderer';
 import { groupToolCalls } from './chat/toolPhrases';
@@ -409,7 +407,6 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
         return (provider as { source?: unknown }).source === 'home' ? 'home' : undefined;
     }
     let settingsCodexAccount: any = undefined;
-    let settingsAntigravityAccount: AntigravityAccountStatus | undefined;
     let settingsCommandCodeAccount: any = undefined;
 let settingsKimiAccount: any = undefined;
 let settingsMinimaxCodeAccount: any = undefined;
@@ -2907,21 +2904,6 @@ let settingsSubscriptionPools: Record<string, any> = {};
     bindBtn('codexLogoutBtn', () => {
         vscode.postMessage({ type: 'codexLogout' });
     });
-    const poolStrategySelect = document.getElementById('antigravityPoolStrategy') as HTMLSelectElement | null;
-    poolStrategySelect?.addEventListener('change', () => {
-        const value = poolStrategySelect.value;
-        if (value === 'sequential' || value === 'round-robin' || value === 'sticky') {
-            vscode.postMessage({ type: 'setAntigravityPoolStrategy', strategy: value });
-        }
-    });
-    document.getElementById('antigravityPoolAccounts')?.addEventListener('click', event => {
-        const target = event.target as HTMLElement | null;
-        const button = target?.closest('.pool-act') as HTMLElement | null;
-        const accountId = button?.dataset.id;
-        if (!button || !accountId) return;
-        if (button.dataset.act === 'primary') vscode.postMessage({ type: 'setAntigravityPrimary', accountId });
-        else if (button.dataset.act === 'cooldown') vscode.postMessage({ type: 'clearAntigravityCooldown', accountId });
-    });
     /** The line whose pool the account-pool section is currently showing. */
     function selectedPoolProviderId(): string {
         return (document.getElementById('settingsProvider') as HTMLSelectElement | null)?.value || '';
@@ -2946,9 +2928,6 @@ let settingsSubscriptionPools: Record<string, any> = {};
         else if (act === 'cooldown') vscode.postMessage({ type: 'clearSubscriptionPoolCooldown', providerId, accountId });
         else if (act === 'remove') vscode.postMessage({ type: 'removeSubscriptionPoolAccount', providerId, accountId });
     });
-    bindBtn('antigravityLoginBtn', () => vscode.postMessage({ type: 'antigravityLogin' }));
-    bindBtn('antigravityRefreshBtn', () => vscode.postMessage({ type: 'antigravityRefreshAccount' }));
-    bindBtn('antigravityLogoutBtn', () => vscode.postMessage({ type: 'antigravityLogout' }));
     document.getElementById('subscriptionProxyMode')?.addEventListener('change', updateSubscriptionProxyUrlVisibility);
     bindBtn('subscriptionProxySaveBtn', () => {
         const mode = document.getElementById('subscriptionProxyMode');
@@ -7006,7 +6985,6 @@ let settingsSubscriptionPools: Record<string, any> = {};
         settingsMinimaxCodeAccount = msg.minimaxCodeAccount;
         settingsClaudeSubscriptionAccount = msg.claudeSubscriptionAccount;
         settingsSubscriptionPools = msg.subscriptionPools ?? {};
-                settingsAntigravityAccount = isAntigravityAccountStatus(msg.antigravityAccount) ? msg.antigravityAccount : undefined;
                 if (isSubscriptionProxyStatus(msg.subscriptionProxy)) settingsSubscriptionProxy = msg.subscriptionProxy;
                 cachedSettingsData = {
                     providers: msg.providers,
@@ -7951,8 +7929,6 @@ let settingsSubscriptionPools: Record<string, any> = {};
                 providers: settingsProviders,
                 providerId,
                 model: modelInput?.value.trim() || provider?.defaultModel,
-                accountStatus: providerId === 'antigravity'
-                    ? (settingsAntigravityAccount?.signedIn ? tr('Signed in', '已登录') : tr('Not signed in', '未登录')) : undefined,
                 endpoint: endpointInput?.value.trim() || provider?.defaultEndpoint,
                 contextTokens: parseInt(ctxInput?.value || '0', 10) || 0,
                 inlineEnabled: !!inlineEnabled?.checked,
@@ -8042,7 +8018,7 @@ let settingsSubscriptionPools: Record<string, any> = {};
 
         // If the current selection is invalid (e.g., "Same as chat" but chat doesn't support FIM, or the provider was removed), auto-select a valid one.
         if ((currentPid === '' && !chatSupportsFIM) || (currentPid !== '' && !filteredProviders.find((p: any) => p.id === currentPid))) {
-            sel.value = filteredProviders.find((p: ProviderMeta) => p.authKind !== 'antigravity-oauth')?.id || '';
+            sel.value = filteredProviders[0]?.id || '';
         }
     }
 
@@ -8126,7 +8102,6 @@ let settingsSubscriptionPools: Record<string, any> = {};
                 maxContextTokens: p.maxContextTokens,
             })),
             codexAccount: settingsCodexAccount,
-            antigravityAccount: settingsAntigravityAccount,
             commandcodeAccount: settingsCommandCodeAccount,
             kimiAccount: settingsKimiAccount,
             minimaxCodeAccount: settingsMinimaxCodeAccount,
@@ -8449,9 +8424,7 @@ let settingsSubscriptionPools: Record<string, any> = {};
         const providerHint = document.getElementById('providerHint')!;
         const deleteBtn = document.getElementById('deleteApiKeyBtn') as HTMLButtonElement | null;
         const isCodex = p?.authKind === 'chatgpt-oauth';
-        const isAntigravity = p?.authKind === 'antigravity-oauth';
         const isCommandCode = p?.id === 'commandcode' || p?.id === 'commandcode-messages';
-        const antigravityGroup = document.getElementById('antigravityAccountGroup');
         const commandcodeGroup = document.getElementById('commandcodeAccountGroup');
         const kimiGroup = document.getElementById('kimiAccountGroup');
         const isKimiCodePlan = p?.id === 'kimi-code-plan';
@@ -8460,8 +8433,7 @@ let settingsSubscriptionPools: Record<string, any> = {};
         const claudeSubscriptionGroup = document.getElementById('claudeSubscriptionAccountGroup');
         const isClaudeSubscription = p?.id === 'claude-subscription';
         const proxyGroup = document.getElementById('subscriptionProxyGroup');
-        if (proxyGroup) proxyGroup.style.display = isCodex || isAntigravity ? '' : 'none';
-        if (antigravityGroup) antigravityGroup.style.display = isAntigravity ? '' : 'none';
+        if (proxyGroup) proxyGroup.style.display = isCodex ? '' : 'none';
         if (commandcodeGroup) commandcodeGroup.style.display = isCommandCode ? '' : 'none';
         if (kimiGroup) kimiGroup.style.display = isKimiCodePlan ? '' : 'none';
         if (minimaxCodeGroup) minimaxCodeGroup.style.display = isMinimaxCode ? '' : 'none';
@@ -8469,52 +8441,10 @@ let settingsSubscriptionPools: Record<string, any> = {};
         if (codexGroup) codexGroup.style.display = isCodex ? '' : 'none';
         if (codexSpeedGroup) codexSpeedGroup.style.display = isCodex ? '' : 'none';
         if (responseVerbosityGroup) responseVerbosityGroup.style.display = isCodex ? '' : 'none';
-        if (endpointGroup) endpointGroup.style.display = isCodex || isAntigravity ? 'none' : '';
+        if (endpointGroup) endpointGroup.style.display = isCodex ? 'none' : '';
         // Rendered once, before any per-line early return: every subscription line
         // can own an account pool, and each of those branches returns early.
         renderSubscriptionPool(p?.id ?? '');
-        if (isAntigravity) {
-            group.style.display = 'none';
-            providerHint.textContent = '';
-            if (deleteBtn) deleteBtn.disabled = true;
-            const accountStatus = document.getElementById('antigravityAccountStatus');
-            if (accountStatus) accountStatus.innerHTML = buildAntigravityAccountHtml(settingsAntigravityAccount, chatI18n.locale === 'zh-cn');
-            const pool = settingsAntigravityAccount?.pool;
-            const poolGroup = document.getElementById('antigravityPoolGroup');
-            const poolAccounts = document.getElementById('antigravityPoolAccounts');
-            const strategySelect = document.getElementById('antigravityPoolStrategy') as HTMLSelectElement | null;
-            if (poolGroup) poolGroup.style.display = pool && pool.accounts.length > 1 ? '' : 'none';
-            if (strategySelect && pool) strategySelect.value = pool.strategy;
-            if (poolAccounts && pool) {
-                const rows = pool.accounts.map(entry => {
-                    const badges: string[] = [];
-                    if (entry.isPrimary) badges.push(tr('primary', '主账号'));
-                    if (entry.authStatus) badges.push(tr('needs sign-in', '需重新登录'));
-                    if (entry.cooldownUntil && entry.cooldownUntil > Date.now()) {
-                        const minutes = Math.max(1, Math.ceil((entry.cooldownUntil - Date.now()) / 60000));
-                        badges.push(tr('cooling ~' + minutes + 'm', '冷却约 ' + minutes + ' 分钟'));
-                    }
-                    const actions: string[] = [];
-                    if (!entry.isPrimary) {
-                        actions.push('<button type="button" class="detect-btn pool-act" data-act="primary" data-id="' + escapeHtml(entry.id) + '" style="padding:0 6px;width:auto;font-size:11px;">' + tr('Make primary', '设为主账号') + '</button>');
-                    }
-                    if (entry.cooldownUntil) {
-                        actions.push('<button type="button" class="detect-btn pool-act" data-act="cooldown" data-id="' + escapeHtml(entry.id) + '" style="padding:0 6px;width:auto;font-size:11px;">' + tr('Clear cooldown', '清除冷却') + '</button>');
-                    }
-                    return '<div class="pool-row" style="display:flex;align-items:center;gap:6px;margin-top:4px;">'
-                        + '<span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escapeHtml(entry.alias)
-                        + (badges.length ? ' <span style="opacity:0.7">(' + escapeHtml(badges.join(', ')) + ')</span>' : '') + '</span>'
-                        + actions.join('') + '</div>';
-                });
-                poolAccounts.innerHTML = rows.join('');
-            }
-            const loginBtn = document.getElementById('antigravityLoginBtn');
-            const logoutBtn = document.getElementById('antigravityLogoutBtn');
-            setAddAccountControl(loginBtn, 'Sign in with Google', '使用 Google 登录', settingsAntigravityAccount?.signedIn === true);
-            if (logoutBtn) logoutBtn.style.display = settingsAntigravityAccount?.hasCredentials ? '' : 'none';
-            refreshSettingsOverview();
-            return;
-        }
         if (isCodex) {
             group.style.display = 'none';
             providerHint.innerHTML = '';
@@ -8832,7 +8762,7 @@ let settingsSubscriptionPools: Record<string, any> = {};
                 + fimProviders.map((candidate: any) => `<option value="${candidate.id}">${escapeHtml(candidate.name)}</option>`).join('');
             inlineSel.value = (selected && fimProviders.some((candidate: any) => candidate.id === selected))
                 ? selected
-                : (chatSupportsFim ? '' : (fimProviders.find((candidate: ProviderMeta) => candidate.authKind !== 'antigravity-oauth')?.id || ''));
+                : (chatSupportsFim ? '' : (fimProviders[0]?.id || ''));
             inlineSel.dispatchEvent(new Event('change'));
         }
         const translationSel = document.getElementById('translationPreviewProvider') as HTMLSelectElement | null;

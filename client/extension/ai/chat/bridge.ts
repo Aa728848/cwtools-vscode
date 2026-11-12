@@ -113,15 +113,6 @@ export async function routeWebviewMessage(
         case 'codexLogin':
             await provider.settingsManager.loginCodex();
             break;
-        case 'antigravityLogin':
-            await provider.settingsManager.loginAntigravity(sourceSurface);
-            break;
-        case 'antigravityRefreshAccount':
-            await provider.settingsManager.refreshAntigravityAccount(sourceSurface);
-            break;
-        case 'antigravityLogout':
-            await provider.settingsManager.logoutAntigravity(sourceSurface);
-            break;
         case 'saveSubscriptionProxy':
             await provider.settingsManager.saveSubscriptionProxy(msg.mode, msg.url, sourceSurface);
             break;
@@ -154,15 +145,6 @@ export async function routeWebviewMessage(
             break;
         case 'claudeSubscriptionLogout':
             await provider.settingsManager.logoutClaudeSubscription(sourceSurface);
-            break;
-        case 'setAntigravityPoolStrategy':
-            await provider.settingsManager.setAntigravityPoolStrategy(msg.strategy, sourceSurface);
-            break;
-        case 'setAntigravityPrimary':
-            await provider.settingsManager.setAntigravityPrimary(msg.accountId, sourceSurface);
-            break;
-        case 'clearAntigravityCooldown':
-            await provider.settingsManager.clearAntigravityCooldown(msg.accountId, sourceSurface);
             break;
         case 'setSubscriptionPoolStrategy':
             await provider.settingsManager.setSubscriptionPoolStrategy(msg.providerId, msg.strategy, sourceSurface);

@@ -1,6 +1,8 @@
 # Agent Note: Antigravity 原生 Tab 代码补全与手动下一处编辑跳转
 
-Status: implemented
+Status: archived
+
+> 该线路已于 2026-11-12 整体移除；本笔记永久冻结为历史记录。当前决策见 `../../implemented/simplification/2026-11-12-remove-antigravity-provider-and-completion-services.md`。
 
 ## Problem
 OAuth 模型目录中暴露了两个编辑器模型，但如果作为常规的前缀/后缀（prefix/suffix）聊天模型调用，会返回转义文本、后缀回显或错误预测。CWTools 已有一套标准的 FIM（Fill-in-the-Middle）插入机制，若直接将原生的编辑差异输出视作普通插入文本，会导致代码补全建议发生错乱。

@@ -157,6 +157,25 @@ describe('webview smoke checks', () => {
         expect(manager).to.include("import './chatPanel'");
     });
 
+    it('release manifest no longer exposes retired provider or completion commands', () => {
+        const manifest = JSON.parse(fs.readFileSync(path.join(root, 'release/package.json'), 'utf8'));
+        const commands: Array<{ command?: string }> = manifest.contributes?.commands ?? [];
+        const sections = (Array.isArray(manifest.contributes?.configuration)
+            ? manifest.contributes.configuration
+            : [manifest.contributes?.configuration]) as Array<{ properties?: Record<string, { enum?: string[] }> }>;
+        const properties = Object.assign({}, ...sections.map(section => section?.properties ?? {}));
+        const providerEnum = properties['stellarisLanguageServices.ai.provider']?.enum ?? [];
+        const inlineEnum = properties['stellarisLanguageServices.ai.inlineCompletion.provider']?.enum ?? [];
+        expect(commands.map(item => item.command)).not.to.include('cwtools.ai.antigravityTabJump');
+        expect(providerEnum).not.to.include('antigravity');
+        expect(inlineEnum).not.to.include('antigravity');
+        for (const locale of ['package.nls.json', 'package.nls.zh.json', 'package.nls.zh-cn.json']) {
+            const nls = JSON.parse(fs.readFileSync(path.join(root, 'release', locale), 'utf8'));
+            expect(nls).not.to.have.property('commands.stellarisLanguageServices.ai.antigravityTabJump.title');
+            expect(nls).not.to.have.property('configuration.stellarisLanguageServices.ai.provider.enum.antigravity');
+        }
+    });
+
     it('chat webview keeps visual shell contracts for browser regression coverage', () => {
         const css = fs.readFileSync(path.join(root, 'client/webview/chatPanel.css'), 'utf8');
         const html = fs.readFileSync(path.join(root, 'client/extension/ai/chatHtml.ts'), 'utf8');

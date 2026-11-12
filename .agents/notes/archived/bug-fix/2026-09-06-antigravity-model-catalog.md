@@ -1,6 +1,8 @@
 # Agent Note: 规范化 Antigravity 模型别名、过滤编辑器专用模型并接入 Claude 5.5 目录
 
-Status: implemented
+Status: archived
+
+> 该线路已于 2026-11-12 整体移除；本笔记永久冻结为历史记录。当前决策见 `../../implemented/simplification/2026-11-12-remove-antigravity-provider-and-completion-services.md`。
 
 ## Problem
 

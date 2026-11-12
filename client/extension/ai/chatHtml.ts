@@ -327,25 +327,6 @@ ${stylesheetLinks}
                     </div>
                     <div class="codex-quota-status" id="codexQuotaStatus"></div>
                 </details>
-                <details class="settings-group settings-account" id="antigravityAccountGroup" style="display:none">
-                    <summary class="settings-account-summary"><span>${svgIcon('key')} ${t('Antigravity account', 'Antigravity 账户')}</span></summary>
-                    <div id="antigravityAccountStatus"></div>
-                    <div class="settings-key-row" style="margin-top:6px">
-                        <button class="detect-btn" id="antigravityLoginBtn" style="padding:0 8px; width:auto; border-radius:4px">${svgIcon('link')}${t('Sign in with Google', '使用 Google 登录')}</button>
-                        <button class="detect-btn" id="antigravityRefreshBtn" style="margin-left:4px; padding:0 8px; width:auto; border-radius:4px">${svgIcon('refresh')}${t('Refresh account and models', '刷新账户与模型')}</button>
-                        <button class="detect-btn" id="antigravityLogoutBtn" style="margin-left:4px; padding:0 8px; width:auto; border-radius:4px; display:none">${svgIcon('trash')}${t('Sign out', '退出账号')}</button>
-                    </div>
-                    <div class="settings-group" id="antigravityPoolGroup" style="display:none; margin-top:8px">
-                        <label class="settings-label" for="antigravityPoolStrategy">${svgIcon('layers')}${t('Account rotation', '账号调度')}</label>
-                        <select class="settings-select" id="antigravityPoolStrategy">
-                            <option value="sequential">${t('Sequential - exhaust the primary first', '顺序耗尽 — 先用满主账号')}</option>
-                            <option value="round-robin">${t('Round-robin - spread over every account', '轮询 — 摊到全部账号')}</option>
-                            <option value="sticky">${t('Sticky - keep one account per conversation', '粘性 — 同一会话固定账号')}</option>
-                        </select>
-                        <div class="settings-hint">${t('Sticky protects the upstream prompt cache across turns; round-robin spreads load. A rate-limited account cools down and another one serves instead.', '粘性可跨轮保护上游提示缓存；轮询则摊平负载。被限流的账号会进入冷却，由另一个账号接手。')}</div>
-                        <div id="antigravityPoolAccounts" style="margin-top:6px"></div>
-                    </div>
-                </details>
                 <details class="settings-group settings-account" id="subscriptionPoolGroup" style="display:none" open>
                     <summary class="settings-account-summary"><span>${svgIcon('layers')} ${t('Account pool', '账号池')}</span></summary>
                     <div class="settings-hint" id="subscriptionPoolHint"></div>

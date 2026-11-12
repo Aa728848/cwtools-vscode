@@ -1,5 +1,4 @@
 {
-  "commands.stellarisLanguageServices.ai.antigravityTabJump.title": "Jump to Next Edit (Antigravity)",
   "extension.displayName": "Stellaris Language Serves",
   "extension.description": "Language services, previews, validation, and AI-assisted tooling for Stellaris mod development.",
   "views.loadedFiles.name": "Loaded files",
@@ -96,7 +95,6 @@
   "configuration.stellarisLanguageServices.checkForUpdates.description": "Enable automatic checking for extension updates via GitHub Releases.",
   "configuration.stellarisLanguageServices.ai.enabled.description": "Enable AI-assisted code generation and completion",
   "configuration.stellarisLanguageServices.ai.provider.enum.codex-chatgpt": "Codex (ChatGPT Subscription, browser OAuth and quota)",
-  "configuration.stellarisLanguageServices.ai.provider.enum.antigravity": "Antigravity (Google OAuth, models and quota)",
   "configuration.stellarisLanguageServices.ai.provider.enum.openai": "OpenAI",
   "configuration.stellarisLanguageServices.ai.provider.enum.claude": "Claude (Anthropic)",
   "configuration.stellarisLanguageServices.ai.provider.enum.tokenrhythm": "Token Rhythm",
@@ -198,7 +196,7 @@
   "configuration.stellarisLanguageServices.ai.subscriptionProxy.mode.auto": "Detect VS Code http.proxy, proxy environment variables, then the manual system proxy; connect directly when none is configured.",
   "configuration.stellarisLanguageServices.ai.subscriptionProxy.mode.custom": "Use the proxy address saved securely in AI Settings.",
   "configuration.stellarisLanguageServices.ai.subscriptionProxy.mode.direct": "Connect directly without a proxy.",
-  "configuration.stellarisLanguageServices.ai.subscriptionProxy.mode.description": "Shared proxy for Codex subscription and Antigravity (Gemini OAuth) token exchange, refresh, account queries and chat. Save an HTTP, HTTPS or SOCKS5 address in AI Settings > Subscription channel proxy. Applies to subsequent requests; browser sign-in uses browser proxy settings.",
+  "configuration.stellarisLanguageServices.ai.subscriptionProxy.mode.description": "Shared proxy for subscription-provider token exchange, refresh, account queries and chat. Save an HTTP, HTTPS or SOCKS5 address in AI Settings > Subscription channel proxy. Applies to subsequent requests; browser sign-in uses browser proxy settings.",
   "configuration.stellarisLanguageServices.ai.codexServiceTier.enum.default": "Standard — default speed",
   "configuration.stellarisLanguageServices.ai.codexServiceTier.enum.fast": "Fast — lower latency and higher ChatGPT quota usage",
   "configuration.stellarisLanguageServices.ai.codexServiceTier.description": "Controls processing speed for Codex (ChatGPT Subscription). Fast mode requests the Responses API fast service tier and uses more ChatGPT quota.",

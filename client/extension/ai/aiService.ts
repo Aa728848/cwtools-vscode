@@ -60,7 +60,6 @@ import {
 import { CodexTurnStateTracker } from './codex/turnState';
 import { CommandCodeOAuthService } from './commandcode/oauthService';
 import { commandCodeModelDef, commandCodeWantsCompletionTokens } from './commandcode/modelCapabilities';
-import { offloadAntigravityRequestImages } from './antigravity/imageBudget';
 import { imageBudgetForProvider, offloadRequestImages } from './requestImageBudget';
 import { enforceRequestImageEdge } from './requestImageEdge';
 import { classifyFailedResponse, shouldRotateAccount } from './subscriptionFailure';
@@ -119,10 +118,6 @@ import {
     CLAUDE_SUBSCRIPTION_CACHE_TTL,
 } from './claudesub/types';
 import { getCommandCodeAccountStatus } from './commandcode/accountService';
-import { AntigravityOAuthService } from './antigravity/oauthService';
-import { antigravityDisplayModel } from './antigravity/models';
-import { callAntigravity } from './antigravity/completion';
-import { antigravityInlineModel, callAntigravityTab } from './antigravity/tabCompletion';
 import { SubscriptionProxyService } from './subscriptionProxy';
 import { isRecord } from '../../shared/protocolValidation';
 import { getCachedInputTokens, getCacheCreationInputTokens } from './providerUsage';
@@ -530,7 +525,6 @@ export class ApiKeyManager {
 export class AIService {
     private keyManager: ApiKeyManager;
     private readonly chatGptOAuth: ChatGptOAuthService;
-    private readonly antigravityOAuth: AntigravityOAuthService;
     private readonly subscriptionProxy: SubscriptionProxyService;
     /**
      * C1 Fix: Use a Set instead of a single instance so that concurrent
@@ -592,8 +586,6 @@ export class AIService {
             },
         );
         context.subscriptions?.push(this.chatGptOAuth);
-        this.antigravityOAuth = new AntigravityOAuthService(context.secrets, this.subscriptionProxy.fetch);
-        context.subscriptions?.push(this.antigravityOAuth);
         this.commandCodeOAuth = new CommandCodeOAuthService({
             // The browser callback hands us a freshly minted key; it is only
             // stored after the account API accepts it, so an unusable key never
@@ -1024,10 +1016,6 @@ export class AIService {
         return this.chatGptOAuth;
     }
 
-    getAntigravityOAuthService(): AntigravityOAuthService {
-        return this.antigravityOAuth;
-    }
-
     getCommandCodeOAuthService(): CommandCodeOAuthService {
         return this.commandCodeOAuth;
     }
@@ -1068,7 +1056,7 @@ export class AIService {
         // read time. This must stay a pure substitution: the settings file is the user's,
         // and nothing here may write to it or schedule a write.
         const rawModel = migrateKimiModelId(provider, this.modelOverride ?? cfg.get<string>('model', ''));
-        const model = provider === 'antigravity' ? antigravityDisplayModel(rawModel) : rawModel;
+        const model = rawModel;
         const inlineProvider = cfg.get<string>('inlineCompletion.provider', '') || provider;
         const translationProvider = cfg.get<string>('translationPreview.provider', '') || provider;
         // Home providers (~/.cwtools/providers.json) keep their endpoint in the
@@ -1332,7 +1320,7 @@ export class AIService {
         }
 
         // Subscription OAuth credentials stay on each provider's fixed backend.
-        const endpoint = providerId === 'codex-chatgpt' || providerId === 'antigravity'
+        const endpoint = providerId === 'codex-chatgpt'
             || providerId === 'claude-subscription'
             ? provider.endpoint
             // The subscription's Messages endpoint is a property of the
@@ -1494,22 +1482,6 @@ export class AIService {
                     ...incomingBody,
                     messages: enforceRequestImageEdge(withBudget, providerId),
                 };
-                if (providerId === 'antigravity') {
-                    // Google caps a request carrying inline data, and an
-                    // image-heavy session would otherwise grow the body until it
-                    // is rejected. The oldest images are replaced with a visible
-                    // placeholder; durable history is untouched.
-                    const boundedBody = {
-                        ...requestBody,
-                        messages: offloadAntigravityRequestImages(requestBody.messages),
-                    };
-                    return callAntigravity(this.antigravityOAuth, boundedBody,
-                        this.buildGeminiPayload(boundedBody, true), disableThinking ? 'none' : requestedEffort,
-                        controller.signal, {
-                            onThinking: options?.onThinking, onTextDelta: options?.onTextDelta,
-                            onToolCallDelta: options?.onToolCallDelta,
-                        }, this.subscriptionProxy.fetch);
-                }
                 if (effectiveApiFormat === 'openai-responses') {
                     return await this.callOpenAIResponses(requestEndpoint, apiKey, requestBody, providerId, controller, {
                         onThinking: options?.onThinking,
@@ -1589,9 +1561,7 @@ export class AIService {
         // Inline completion owns its provider/model selection. In particular, do not
         // fall back to the chat model while settings are switching providers: a Codex
         // chat model is not a valid DeepSeek (or other FIM provider) model.
-        const rawModel = providerId === 'antigravity'
-            ? antigravityInlineModel(options?.model ?? config.inlineCompletion.model)
-            : options?.model ?? getEffectiveModel(providerId, config.inlineCompletion.model);
+        const rawModel = options?.model ?? getEffectiveModel(providerId, config.inlineCompletion.model);
         const model = rawModel.replace(/\s*\(免费\)$/i, '');
 
         const controller = new AbortController();
@@ -1605,16 +1575,6 @@ export class AIService {
         this.activeControllers.add(controller);
 
         try {
-            if (providerId === 'antigravity') {
-                const edit = await callAntigravityTab(this.antigravityOAuth, this.subscriptionProxy.fetch,
-                    { prefix, suffix, languageId: options?.languageId, previousText: options?.previousText }, controller.signal, false, options?.maxTokens);
-                if (!edit) return '';
-                const source = prefix + suffix;
-                const replacement = source.slice(0, edit.start) + edit.text + source.slice(edit.end);
-                // The FIM contract permits insertion at the cursor only.
-                if (replacement.length <= source.length || !replacement.startsWith(prefix) || !replacement.endsWith(suffix)) return '';
-                return replacement.slice(prefix.length, replacement.length - suffix.length);
-            }
             if (providerId === 'ollama') {
                 // Ollama uses /api/generate instead of /v1/completions for its FIM support
                 const url = `${endpoint.replace(/\/v1\/?$/, '')}/api/generate`;
@@ -3091,11 +3051,10 @@ export class AIService {
         return url;
     }
 
-    private buildGeminiPayload(request: ChatCompletionRequest, antigravity = false): Record<string, unknown> {
+    private buildGeminiPayload(request: ChatCompletionRequest): Record<string, unknown> {
         const systemParts: Array<Record<string, unknown>> = [];
         const contents: Array<Record<string, unknown>> = [];
         const toolCallNames = new Map<string, string>();
-        const nativeToolCallIds = new Set<string>();
         const appendContent = (role: 'user' | 'model', parts: Array<Record<string, unknown>>) => {
             if (parts.length === 0) return;
             const previous = contents[contents.length - 1] as { role?: string; parts?: Array<Record<string, unknown>> } | undefined;
@@ -3115,39 +3074,23 @@ export class AIService {
                 appendContent('user', [{
                         functionResponse: {
                             name,
-                            ...(antigravity && (!request.model.startsWith('gemini-') || nativeToolCallIds.has(msg.tool_call_id ?? ''))
-                                ? { id: msg.tool_call_id } : {}),
                             response: { result: this.messageContentToText(msg.content) },
                         },
                     }]);
                 continue;
             }
 
-            if (antigravity && msg.role === 'assistant' && msg.antigravity_content?.model === request.model
-                && Array.isArray(msg.antigravity_content.parts) && msg.antigravity_content.parts.every(isRecord)) {
-                for (const call of msg.tool_calls ?? []) toolCallNames.set(call.id, call.function.name);
-                // Echo upstream IDs, but keep locally generated IDs out of ID-less Gemini turns.
-                for (const part of msg.antigravity_content.parts) {
-                    const call = part.functionCall;
-                    if (isRecord(call) && typeof call.id === 'string' && call.id) nativeToolCallIds.add(call.id);
-                }
-                appendContent('model', structuredClone(msg.antigravity_content.parts));
-                continue;
-            }
             const parts = this.toGeminiParts(msg.content);
             if (msg.role === 'assistant' && msg.tool_calls && msg.tool_calls.length > 0) {
                 for (const tc of msg.tool_calls) {
                     toolCallNames.set(tc.id, tc.function.name);
-                    const thoughtSignature = antigravity && msg.antigravity_content
-                        && msg.antigravity_content.model !== request.model ? undefined : tc.thoughtSignature;
+                    const thoughtSignature = tc.thoughtSignature;
                     parts.push({
                         functionCall: {
                             name: tc.function.name,
                             args: this.parseJsonObject(tc.function.arguments, tc.function.name),
-                            ...(antigravity && !request.model.startsWith('gemini-') ? { id: tc.id } : {}),
                         },
-                        ...(thoughtSignature ? { thoughtSignature }
-                            : antigravity ? { thoughtSignature: 'skip_thought_signature_validator' } : {}),
+                        ...(thoughtSignature ? { thoughtSignature } : {}),
                     });
                 }
             }
@@ -3184,8 +3127,7 @@ export class AIService {
                 functionDeclarations: request.tools.map(t => ({
                     name: t.function.name,
                     description: t.function.description,
-                    // Code Assist's JSON Schema field preserves constraints such as propertyNames without typed-Schema parsing.
-                    [antigravity ? 'parametersJsonSchema' : 'parameters']: t.function.parameters,
+                    parameters: t.function.parameters,
                 })),
             }];
             payload.toolConfig = {

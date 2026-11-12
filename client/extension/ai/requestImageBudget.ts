@@ -1,13 +1,12 @@
 /**
  * 各线路的单次请求图片预算。
  *
- * 三条线路的预算**互不相同**，且都不是「传输层能接受多少」：
+ * 两条线路的预算**互不相同**，且都不是「传输层能接受多少」：
  * - **Anthropic 系**（claude-subscription / commandcode-messages）：单请求 8 MB base64，长边
  *   8000 px；一张请求里图片**超过 20 张**时长边进一步收紧到 2000 px。历史会保留每一张图，
  *   所以一个长会话只能加不能减——一旦越过这个界线，后续每一轮都 400 且不可恢复。
  * - **Kimi Code**：整包 2 MB，图片与正文、工具声明共享同一份预算，因此图片额度取更小的
  *   1.5 MB，留出信封空间。
- * - **Antigravity**：12 MB。
  *
  * 超限时**最旧的图片先变成占位文本**，并且占位对模型可见：被静默丢弃的图片比一条说明更难
  * 诊断——模型会在一个「图根本不存在」的对话上作答，现场没有任何线索指向原因。
@@ -18,7 +17,6 @@
 import type { ChatMessage, ContentPart } from './types';
 
 /** 一个请求允许携带的 base64 图片总量（按线路）。 */
-export const ANTIGRAVITY_MAX_REQUEST_IMAGE_BYTES = 12 * 1024 * 1024;
 /** Kimi Code 的图片额度：整包 2 MB，图片只拿其中 1.5 MB。 */
 export const KIMI_MAX_REQUEST_IMAGE_BYTES = 1_500_000;
 /** Anthropic 系单请求的图片额度。 */
@@ -55,7 +53,6 @@ function imagePartBytes(part: ContentPart): number | undefined {
 
 /** 该 provider 的图片预算；未列出的线路没有图片预算。 */
 export function imageBudgetForProvider(providerId: string): number | undefined {
-    if (providerId === 'antigravity') return ANTIGRAVITY_MAX_REQUEST_IMAGE_BYTES;
     if (providerId === 'kimi-code-plan' || providerId === 'kimi') return KIMI_MAX_REQUEST_IMAGE_BYTES;
     if (providerId === 'claude-subscription' || providerId === 'commandcode-messages' || providerId === 'claude') {
         return ANTHROPIC_MAX_REQUEST_IMAGE_BYTES;

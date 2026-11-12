@@ -1,6 +1,8 @@
 # Agent Note: 集成 Antigravity Google OAuth 订阅渠道 Provider
 
-Status: implemented
+Status: archived
+
+> 该线路已于 2026-11-12 整体移除；本笔记永久冻结为历史记录。当前决策见 `../../implemented/simplification/2026-11-12-remove-antigravity-provider-and-completion-services.md`。
 
 ## Problem
 CWTools 缺少对 Antigravity 渠道的支持（该渠道已在本地 dsh-chatgpt-subscription 方案中得到验证）。仅仅在列表中添加一个 Provider 条目无法处理复杂的 Google OAuth 认证、项目动态发现、封装的 Gemini SSE 流式传输以及带签名的工具调用连续性机制。

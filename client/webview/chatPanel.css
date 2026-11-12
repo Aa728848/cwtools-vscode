@@ -1873,7 +1873,7 @@ body.codex-sidebar-shell:has(.settings-page.active):not(.side-workspace-open) .s
 .tool-timeline > .tool-pair { padding: 4px 10px; }
 .tool-timeline > .tool-pair:not(:last-child) { border-bottom: 1px solid rgba(255,255,255,0.04); }
 
-/* Antigravity-style concentrated process panel (custom collapsible) */
+/* Concentrated process panel (custom collapsible) */
 .agent-process-panel { margin: 6px 0; border: 1px solid var(--thinking-border); border-radius: 8px; overflow: hidden; background: var(--thinking-bg); }
 .process-panel-header { width: 100%; border: 0; background: transparent; cursor: pointer; user-select: none; display: flex; align-items: center; gap: 7px; min-width: 0; padding: 7px 12px; color: cornflowerblue; font-size: 11.5px; font-family: inherit; }
 .process-panel-header:hover { background: rgba(100,149,237,0.04); }

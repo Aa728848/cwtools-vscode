@@ -204,10 +204,9 @@ export function resolveReadablePathInput(
         };
     }
 
-    // Antigravity model: Allow read access to any valid local file path
     return {
         ...resolution,
-        isWithinReadableRoot: true,
+        isWithinReadableRoot: false,
     };
 }
 

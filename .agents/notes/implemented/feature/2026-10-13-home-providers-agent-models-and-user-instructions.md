@@ -41,7 +41,7 @@ Status: implemented
 
 ## Alternatives considered
 
-1. **home provider 覆盖内置同名条目**：否决。内置条目携带账号体系/订阅池等运行时接线（antigravity、claude-subscription），允许文件覆盖会出现「UI 显示内置、实际走路由文件」的混乱；撞名跳过 + warning 语义单调。
+1. **home provider 覆盖内置同名条目**：否决。内置条目携带账号体系/订阅池等运行时接线（如 claude-subscription），允许文件覆盖会出现「UI 显示内置、实际走路由文件」的混乱；撞名跳过 + warning 语义单调。
 2. **agent-models 字段级深合并（provider 来自 settings、model 来自 home）**：否决。provider+model 是耦合对，拆开合并会产生不存在的组合；整项覆盖与 mcp server 合并语义一致。
 3. **apiKeyEnv 解析后把 key 写进 SecretStorage 缓存**：否决。环境变量的价值就在于不落盘、可随 shell 轮换；每次 `getKeyForProvider` 现读 `process.env`，优先级高于 SecretStorage 但低于显式 options override。
 4. **webview 允许编辑 home agent-model 行并按「设置覆盖文件」保存**：否决。合并方向是 settings < home，设置里的同名 role 永远不会生效，保存即死配置；禁用 + 跳过收集是唯一不自欺的 UI。

@@ -719,12 +719,11 @@ export class AIInlineCompletionProvider implements vs.InlineCompletionItemProvid
 
             if (token.isCancellationRequested || abortController.signal.aborted || document.version !== docVersion) return undefined;
 
-            if (!contentStr.trim() && inlineProvider !== 'antigravity') {
+            if (!contentStr.trim()) {
                 ErrorReporter.warn('InlineProvider', `Model ${inlineModel} returned empty FIM completion`);
             }
 
-            const nativeTab = inlineProvider === 'antigravity';
-            completionText = nativeTab ? contentStr : contentStr.trim();
+            completionText = contentStr.trim();
 
             if (!completionText || completionText.length === 0) return undefined;
 
@@ -732,7 +731,7 @@ export class AIInlineCompletionProvider implements vs.InlineCompletionItemProvid
             // AI sometimes echoes the current line prefix (e.g. "limit = {" when cursor is after "limit = {")
             const linePrefix = document.lineAt(position.line).text.substring(0, position.character);
             const trimmedPrefix = linePrefix.trimStart();
-            if (!nativeTab && trimmedPrefix.length > 0) {
+            if (trimmedPrefix.length > 0) {
                 // Check if completion starts with the full prefix (or its trimmed version)
                 if (completionText.startsWith(trimmedPrefix)) {
                     completionText = completionText.substring(trimmedPrefix.length);
@@ -749,7 +748,7 @@ export class AIInlineCompletionProvider implements vs.InlineCompletionItemProvid
             }
 
             // ── Overlap stripping: prevent collision with existing suffix after cursor ──
-            if (!nativeTab && config.inlineCompletion.overlapStripping) {
+            if (config.inlineCompletion.overlapStripping) {
                 const lineSuffix = document.lineAt(position.line).text.substring(position.character);
                 if (lineSuffix) {
                     const firstLine = completionText.split('\n')[0]!;  

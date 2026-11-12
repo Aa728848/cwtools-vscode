@@ -206,7 +206,7 @@ function sanitizeProviderEntry(
         : (models[0] ?? '');
     const name = typeof raw.name === 'string' && raw.name.trim() ? raw.name.trim() : id;
     // anthropic-messages / gemini-generate-content are not OpenAI-shaped wires;
-    // mirror the built-in claude/antigravity entries for those formats.
+    // mirror the built-in non-OpenAI entries for those formats.
     const openAiWire = apiFormat === 'openai-chat-completions' || apiFormat === 'openai-responses';
 
     const config: HomeProviderConfig = {

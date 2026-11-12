@@ -1,6 +1,8 @@
 # Agent Note: 号池接入全部订阅线路与设置页草稿保护
 
 Status: implemented
+> 后续更新：Antigravity 供应商与独占补全服务已移除；现存订阅线路与 provider 无关号池内核继续保留，
+> 见 `../simplification/2026-11-12-remove-antigravity-provider-and-completion-services.md`。
 
 > 2026-10-21：`workbuddy-subscription` 线路已整体移除（含号池原型、额度面与模型目录），
 > 见 `../simplification/2026-10-21-remove-workbuddy-and-opencode-go-lines.md`。本文中该线路相关
@@ -8,11 +10,11 @@ Status: implemented
 
 ## Problem
 
-多账号号池内核（`pool/accountPool.ts`）此前只接了 Antigravity。其余六条线路仍是单账号：
+多账号号池内核（`pool/accountPool.ts`）此前只接了一条历史订阅线路。其余线路仍是单账号：
 `codex-chatgpt`、`kimi-code-plan`、`workbuddy-subscription`、`minimax-code`、
 `claude-subscription`、`commandcode`（静态 API Key）。
 
-后果与接入 Antigravity 之前相同：一个账号撞到 429 就是整轮失败；想同时用两个账号只能
+后果与号池接入之前相同：一个账号撞到 429 就是整轮失败；想同时用两个账号只能
 手工来回登录；一个被撤销的令牌会让用户以为整条线路不可用。
 
 直接为六条线路各写一份适配器是不可取的——它们的差异其实很小（身份键、别名、续期调用、
@@ -62,7 +64,7 @@ Status: implemented
 - 统一暴露 select / recordUsage / noteRateLimited / noteAuthFailure / listAccounts /
   strategy / setPrimary / clearCooldown / addAccount / removeAccount / providerIds。
 
-Antigravity 也改为复用同一工厂，删掉了它自己那份等价实现。
+历史接入线路也曾改为复用同一工厂；该线路已移除，通用工厂继续服务其余线路。
 
 ### 请求路径
 
@@ -204,7 +206,7 @@ provider 数据变化时选项集合更新而草稿选中项保留、草稿线�
    一旦池里有第二个账号，账号 B 会拿到账号 A 的续期 promise 并**收到 A 的凭据**。
    两处都改为按 refresh token 归类；Codex 的池内续期还改为**不写单凭据槽位**（否则池里当前
    账号的轮换会覆盖另一个账号）。
-2. **`expiresAt: 0` 被误读为「永不过期」**。epoch 0 是**过去**，而 Antigravity 的测试凭据
+2. **`expiresAt: 0` 被误读为「永不过期」**。epoch 0 是**过去**，而当时的测试凭据
    正是用 0 表示已过期；误读会让一个死令牌继续服役（实测表现为：并发用例拿到的仍是旧 token）。
    改为只把「未声明到期」视为不过期，声明的到期时刻按绝对时间比较。
 3. **seed 漏掉托管存储**（经用户实机截图定位）。MiniMax Code 的 seed 只扫描

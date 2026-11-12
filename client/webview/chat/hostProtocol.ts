@@ -15,7 +15,6 @@ import {
     type MessageValidator,
 } from '../../shared/protocolValidation';
 
-import { isAntigravityAccountStatus } from './antigravityAccount';
 import { isSubscriptionProxyStatus } from '../../shared/subscriptionProxy';
 
 const isSurface = isOneOf(['chat', 'manager'] as const);
@@ -62,7 +61,6 @@ const validators = {
         ollamaModels: optional(isRecordArray), showPanel: optional(isBoolean), targetSurface: optional(isSurface),
         modelContextTokens: optional(isObject), thinkingModelPrefixes: optional(isStringArray),
         reasoningCapabilities: optional(isObject), codexAccount: optional(isObject),
-        antigravityAccount: optional(isAntigravityAccountStatus),
         commandcodeAccount: optional(isObject),
         kimiAccount: optional(isObject),
         minimaxCodeAccount: optional(isObject),

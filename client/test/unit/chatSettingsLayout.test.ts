@@ -38,7 +38,6 @@ describe('sidebar settings layout', () => {
                     'settingsCtx', 'settingsReasoningEffort', 'settingsCodexServiceTier', 'settingsResponseVerbosity',
                     'settingsApiKey', 'keyToggleBtn', 'fetchApiModelsBtn', 'deleteApiKeyBtn',
                     'codexLoginBtn', 'codexRefreshBtn', 'codexLogoutBtn', 'codexQuotaStatus',
-                    'antigravityLoginBtn', 'antigravityRefreshBtn', 'antigravityLogoutBtn', 'antigravityAccountStatus',
                     'settingsReasoningKey', 'settingsEndpoint', 'subscriptionProxyMode', 'subscriptionProxyUrl',
                     'subscriptionProxySaveBtn', 'subscriptionProxyRefreshBtn',
                     'inlineEnabled', 'inlineProvider', 'inlineModelInput', 'inlineEndpoint', 'inlineDebounce',
@@ -75,6 +74,8 @@ describe('sidebar settings layout', () => {
             expect(html).to.include('value="live"');
             expect(html).not.to.include('id="approvalsAutoReview"');
             expect(html).not.to.include('id="agentProfilesSection"');
+            expect(html).not.to.include('id="antigravityAccountGroup"');
+            expect(html).not.to.include('id="antigravityPoolGroup"');
         });
     }
 

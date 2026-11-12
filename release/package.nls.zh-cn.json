@@ -1,5 +1,4 @@
 {
-  "commands.stellarisLanguageServices.ai.antigravityTabJump.title": "跳转到下一处编辑（Antigravity）",
   "configuration.category.editor": "CWTools：编辑器体验",
   "configuration.category.language": "CWTools：语言与诊断",
   "configuration.category.rules": "CWTools：规则与游戏数据",
@@ -96,7 +95,6 @@
   "configuration.stellarisLanguageServices.checkForUpdates.description": "启用通过 GitHub Releases 对插件进行自动更新检查。",
   "configuration.stellarisLanguageServices.ai.enabled.description": "启用AI辅助代码生成与补全",
   "configuration.stellarisLanguageServices.ai.provider.enum.codex-chatgpt": "Codex（ChatGPT 订阅，浏览器 OAuth 与额度）",
-  "configuration.stellarisLanguageServices.ai.provider.enum.antigravity": "Antigravity（Google OAuth、模型与额度）",
   "configuration.stellarisLanguageServices.ai.provider.enum.openai": "OpenAI",
   "configuration.stellarisLanguageServices.ai.provider.enum.claude": "Claude(Anthropic)",
   "configuration.stellarisLanguageServices.ai.provider.enum.tokenrhythm": "基元律动 (Token Rhythm)",
@@ -198,7 +196,7 @@
   "configuration.stellarisLanguageServices.ai.subscriptionProxy.mode.auto": "依次检测 VS Code http.proxy、代理环境变量、系统手动代理；未配置代理时直连。",
   "configuration.stellarisLanguageServices.ai.subscriptionProxy.mode.custom": "使用在 AI 设置中安全保存的代理地址。",
   "configuration.stellarisLanguageServices.ai.subscriptionProxy.mode.direct": "直接连接，不使用代理。",
-  "configuration.stellarisLanguageServices.ai.subscriptionProxy.mode.description": "Codex 订阅与 Antigravity（Gemini OAuth）共用的代理，覆盖令牌交换、刷新、账户查询和聊天。请在 AI 设置 > 订阅渠道代理中保存 HTTP、HTTPS 或 SOCKS5 地址。修改对后续请求生效；浏览器登录使用浏览器代理设置。",
+  "configuration.stellarisLanguageServices.ai.subscriptionProxy.mode.description": "订阅供应商共用的代理，覆盖令牌交换、刷新、账户查询和聊天。请在 AI 设置 > 订阅渠道代理中保存 HTTP、HTTPS 或 SOCKS5 地址。修改对后续请求生效；浏览器登录使用浏览器代理设置。",
   "configuration.stellarisLanguageServices.ai.codexServiceTier.enum.default": "标准 — 默认速度",
   "configuration.stellarisLanguageServices.ai.codexServiceTier.enum.fast": "快速 — 更低延迟，消耗更多 ChatGPT 额度",
   "configuration.stellarisLanguageServices.ai.codexServiceTier.description": "控制 Codex（ChatGPT 订阅）的处理速度。快速模式请求 Responses API 的 Fast 服务层，并消耗更多 ChatGPT 额度。",

@@ -13,7 +13,7 @@ export interface ProviderMeta {
     maxContextTokens?: number;
     registerUrl?: string;
     runtimeKind?: 'http';
-    authKind?: 'api-key' | 'none' | 'chatgpt-oauth' | 'antigravity-oauth';
+    authKind?: 'api-key' | 'none' | 'chatgpt-oauth';
     supportsUtilityCalls?: boolean;
     /**
      * Set when the provider is declared in ~/.cwtools/providers.json: the

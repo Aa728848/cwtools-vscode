@@ -122,7 +122,7 @@ lower cost"）。本仓库完全没有该 id，且既有 GPT-6 家族判定只�
    造成界面允许、服务端拒绝。
 2. **沿用家族 1M 策略给 6.1**：否决。Codex 目录明确 `max_context_window=872000`。
 3. **缓存折扣并入 `gpt-6-` 前缀规则**：否决。费率不同（5% vs 10%），会高估一倍。
-4. **同步更新 OpenRouter 目录**：本次不做，范围限定 GPT/Antigravity；共享能力表与定价
+4. **同步更新 OpenRouter 目录**：本次不做，范围限定 GPT 与当时接入的历史订阅线路；共享能力表与定价
    按 id 生效，手输 `openai/gpt-6.1-sol` 也能正确计价。
 5. **删除 `gpt-5.5`**：否决。官方下线日 2026-10-14 未到。
 6. **采纳 `ultra` 档位**：否决。Codex `models.json` 为多款列出 `ultra`，但 Responses

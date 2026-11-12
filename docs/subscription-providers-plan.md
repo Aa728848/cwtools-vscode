@@ -9,6 +9,9 @@
 > 已从代码中**移除**，`opencode`（OpenCode Zen）线路不受影响。本文凡涉及这两条线路的段落均只作
 > 历史记录保留；移除范围、取舍与验证见
 > `.agents/notes/implemented/simplification/2026-10-21-remove-workbuddy-and-opencode-go-lines.md`。
+>
+> **当前更新**：`antigravity` 供应商及其独占的聊天、行内补全、Tab Jump 与账号链路已从代码中**移除**；
+> 本文凡涉及该线路的段落均只作历史记录保留。通用号池、订阅代理、通用行内补全与其余供应商不受影响。
 
 ## 1. 背景与目标
 
@@ -22,7 +25,7 @@
 | 参考项目线路 | 协议 / 登录 | 我们项目现状 | 结论 |
 | --- | --- | --- | --- |
 | `codex-chatgpt` | Responses / ChatGPT OAuth（localhost:1455） | ✅ `codex-chatgpt`（OAuth + Responses + 实时目录） | ✅ 已改进（§3.1） |
-| `antigravity` | Gemini / Google OAuth | ✅ `antigravity`（+ 图片预算） | ✅ 已改进（§3.2） |
+| `antigravity` | Gemini / Google OAuth | ❌ 已移除 | ❌ 已移除（原 §3.2，仅存历史记录） |
 | `command-code` | Anthropic/OpenAI 双轨按模型 id 路由 / 浏览器 OAuth 或 API Key | ✅ `commandcode` + `commandcode-messages`（+ 浏览器登录 + 实时目录） | ✅ 已改进（§3.3） |
 | `kimi-code` | Anthropic Messages / RFC 8628 设备码 | ✅ `kimi-code-plan`（+ 设备码登录 + 凭据续期 + K3 保留思考） | ✅ 已改进（§3.4） |
 | `minimax-code` | Anthropic Messages / 桌面端凭据复用或设备码（`agent.minimax.cn/mavis`） | ✅ `minimax-code`（与平台 API Key 线路 `minimax-token-plan` 并存） | ✅ 已新增（§4.2） |
@@ -45,9 +48,9 @@
 5. **`x-codex-turn-state` 多轮续传**：回传响应头里的 turn state 以续接该轮；后端不再下发时立即停止回送。
 6. **上下文/输出预留按系列区分**：GPT-6 系列有效上下文 384K（可配至 872K）、输出预留 128K 仅用于本地压缩判断（请求仍不带 `max_output_tokens`，此项我们已合规）。当前固定 272K 偏小。
 
-### 3.2 `antigravity`（优先级 P2）✅ 已落地（1、2）
+### 3.2 `antigravity`（优先级 P2）❌ 已移除（历史记录）
 
-现状：`antigravity/oauthService.ts` + `api.ts` + `models.ts`，已有多端点 failover、模型发现（`fetchAvailableModels`）、配额解析、图片输入。
+历史实现曾包含 `antigravity/oauthService.ts` + `api.ts` + `models.ts`，具备多端点 failover、模型发现（`fetchAvailableModels`）、配额解析与图片输入；当前代码已整体移除。
 
 可吸收项：
 
@@ -130,9 +133,9 @@
 | 类型 | `client/extension/ai/types.ts` | `authKind` 扩：`'kimi-device-oauth' | 'minimax-code-oauth' | 'claude-subscription-oauth'`；账号状态类型 |
 | 协议路由 | `client/extension/ai/providers.ts` | `getProviderApiFormat`：`minimax-code`/`claude-subscription` → `anthropic-messages` |
 | 请求层 | `client/extension/ai/aiService.ts` | 鉴权头分派（OAuth 线路走各自 service 而非 `buildAuthHeaders`）；k3 线路规则；codex 的 beta 头 / 目录驱动默认值 / turn-state |
-| OAuth 服务 | 新增 `client/extension/ai/kimi/oauthService.ts`、`minimaxcode/oauthService.ts`、（可选）`claudesub/oauthService.ts` | 仿照 `codex/oauthService.ts`、`antigravity/oauthService.ts`：SecretStorage 存 token、PKCE、单飞刷新、可取消登录 |
+| OAuth 服务 | 新增 `client/extension/ai/kimi/oauthService.ts`、`minimaxcode/oauthService.ts`、（可选）`claudesub/oauthService.ts` | 仿照 `codex/oauthService.ts`：SecretStorage 存 token、PKCE、单飞刷新、可取消登录 |
 | 模型目录 | 各线路 `modelCatalog.ts` | 实时拉取 + SecretStorage/globalState 快照 + 静态兜底（minimax-code 例外：纯硬编码） |
-| 设置与额度 UI | `chatSettings.ts`、`chatHtml.ts`、`client/webview/chat/`（仿 `codexQuota.ts` / `antigravityAccount.ts` / `commandcodeQuota.ts`） | 登录按钮、账号卡片、额度胶囊 |
+| 设置与额度 UI | `chatSettings.ts`、`chatHtml.ts`、`client/webview/chat/`（仿 `codexQuota.ts` / `commandcodeQuota.ts`） | 登录按钮、账号卡片、额度胶囊 |
 | 国际化 | `client/extension/ai/messages.ts`、`client/webview/chat/i18n.ts` | 中英同步新增 |
 | 代理 | `subscriptionProxy.ts` | 新线路请求统一走 `SubscriptionProxyService.fetch`（现有订阅代理设置直接生效） |
 
@@ -143,9 +146,9 @@
 | 期 | 内容 | 状态 | 风险 |
 | --- | --- | --- | --- |
 | P1 | §3.1 codex 改进（beta 头、实时目录、summary/verbosity 默认对齐、turn state、家族窗口）；§3.3 commandcode OAuth + 目录 `context_length` | ✅ 已完成 | 低：协议细节均有参考项目实测背书 |
-| P2 | §3.2 antigravity 图片预算；§3.4 kimi 设备码 + 凭据续期 + K3 保留思考；§4.2 minimax-code | ✅ 已完成 | 中：新 OAuth 流程与桌面凭据复用需真机验证 |
+| P2 | §3.2 antigravity 图片预算（该线路已移除）；§3.4 kimi 设备码 + 凭据续期 + K3 保留思考；§4.2 minimax-code | ✅ 已完成（antigravity 除外） | 中：新 OAuth 流程与桌面凭据复用需真机验证 |
 | P3 | §4.3 claude-subscription（Claude Pro/Max OAuth） | ✅ 已完成（用户确认合规取舍后实现） | 合规风险，卡片显著标注 |
-| P4 | 多账号号池抽象（内核 + antigravity 接入 + 设置面） | ✅ 已完成 | — |
+| P4 | 多账号号池抽象（内核 + 已移除的 antigravity 历史接入 + 设置面） | ✅ 已完成（内核与其余线路保留） | — |
 
 ### P1 交付明细
 
@@ -168,7 +171,7 @@
 
 ### P2 交付明细
 
-- **antigravity**：新增 `antigravity/imageBudget.ts`（12 MiB 请求图片预算，最旧优先替换为
+- **antigravity**（该线路已移除，以下为历史实现记录）：曾新增 `antigravity/imageBudget.ts`（12 MiB 请求图片预算，最旧优先替换为
   模型可见占位，只作用于本次请求）；流终结校验核对确认已存在，无需改动。
 - **kimi**：新增 `kimi/oauthService.ts`（RFC 8628 设备码登录）、`kimi/tokenStore.ts`
   （`max(300s, expires_in×0.5)` 续期窗口、刷新单飞、终局拒绝冷却）、`kimi/accountStatus.ts`；
@@ -181,11 +184,11 @@
   body/image 预算）、`credentials.ts`（桌面复用 + 原子写回 + 双区域探测）、
   `oauthService.ts`（设备码 PKCE S256 + 5 分钟续期窗口）；端点只用 bearer，无 x-api-key 回退。
 - **测试**：新增 `workbuddySubscription.test.ts`（30 例）、`minimaxCodeSubscription.test.ts`
-  （22 例）、`kimiCodeOAuth.test.ts`（23 例）、antigravity 图片预算块（5 例）；更新
+  （22 例）、`kimiCodeOAuth.test.ts`（23 例）、已移除的 antigravity 图片预算块（5 例）；更新
   `providers.test.ts` 的协议覆盖与必需字段契约。
 - **验证**：`npm run lint`（0 error）、`npm run compile`、`npm run typecheck:test`、
   `npm run test:unit`（2713 + 44 passing，0 failing）。
-- **决策记录**：`.agents/notes/implemented/feature/2026-10-04-antigravity-request-image-budget.md`、
+- **历史决策记录**：`.agents/notes/archived/feature/2026-10-04-antigravity-request-image-budget.md`、
   `2026-10-04-kimi-code-subscription-login-and-token-lifecycle.md`、
   `2026-10-04-workbuddy-subscription-line.md`（线路已于 2026-10-21 移除，笔记归档至
   `.agents/notes/archived/feature/`）、
@@ -207,7 +210,7 @@
 
 ## 8. 风险与合规
 
-- `claude-subscription` 与 Anthropic 条款冲突（见 §4.3）；`antigravity` 已有账号被限制的公开报告——设置页保留风险提示。
+- `claude-subscription` 与 Anthropic 条款冲突（见 §4.3）；`antigravity` 历史上曾有账号被限制的公开报告，当前线路已移除。
 - 桌面端凭据（MiniMax `auth.json`）**只读优先**；续期写回必须原子且只改 `auth` 块；绝不删除/撤销桌面端登录态。
 - 所有 token 只进 VS Code SecretStorage，不写设置文件、不进 webview。### P3 交付明细
 
@@ -229,7 +232,7 @@
 | 项 | 状态 |
 | --- | --- |
 | P1 codex-chatgpt + commandcode | ✅ 完成 |
-| P2 antigravity + kimi + minimax-code（workbuddy 已于 2026-10-21 移除） | ✅ 完成 |
+| P2 antigravity（已移除）+ kimi + minimax-code（workbuddy 已于 2026-10-21 移除） | ✅ 完成（现存线路） |
 | P3 claude-subscription | ✅ 完成 |
 | P4 多账号号池抽象 | ✅ 完成 |
 
@@ -241,18 +244,18 @@
   序列化、可调度性、三种轮转策略、429 冷却与账号级失效保留。各线路只提供少数钩子。
   两处实现细节是缺陷修复：**单飞续期**（并发共用一次轮换，否则除第一个外全部拿到作废令牌）、
   **`AccountPoolStore` 返回 `Thenable`**（匹配 VS Code 的 SecretStorage）。
-- **Antigravity 接入**：新增 `antigravity/accountPool.ts`；`oauthService.ts` 的
+- **Antigravity 历史接入**（该线路已移除）：曾新增 `antigravity/accountPool.ts`；`oauthService.ts` 的
   `getRequestContext` 改为从号池取账号并返回 `accountId`；**项目缓存按账号隔离**（原先的
   无键缓存会在轮转后把前一个账号的 project 交给下一个）；登录入池、登出清池、续期绑定会话
-  信号；`callAntigravity` 支持 401 强制续期与 429 换号（上限 3 次尝试）。
-- **设置面**：Antigravity 卡片新增调度策略选择器与账号列表（主账号标记、冷却倒计时、
+  信号；历史 `callAntigravity` 曾支持 401 强制续期与 429 换号（上限 3 次尝试）。
+- **历史设置面**：Antigravity 卡片曾新增调度策略选择器与账号列表（主账号标记、冷却倒计时、
   失效提示、「设为主账号」/「清除冷却」按钮）；协议链为 `setAntigravityPoolStrategy` /
   `setAntigravityPrimary` / `clearAntigravityCooldown` + `settingsData.antigravityAccount.pool`。
 - **测试**：新增 `accountPool.test.ts`（28 例）+ `commandCodeCapabilities.test.ts`；
-  更新 `antigravity.test.ts`（并发用例断言新契约）与 `providers.test.ts`（能力按表）。
+  当时更新 `antigravity.test.ts`（并发用例断言新契约）与 `providers.test.ts`（能力按表）。
 - **验证**：`npm run lint`（0 error）、`npm run compile`、`npm run typecheck:test`、
   `npm run test:unit`（**2780 + 44 passing，0 failing**）。
-- **决策记录**：`.agents/notes/implemented/architecture/2026-10-04-multi-account-pool-core-and-antigravity.md`、
+- **决策记录**：`.agents/notes/archived/architecture/2026-10-04-multi-account-pool-core-and-antigravity.md`、
   `feature/2026-10-04-commandcode-per-model-capabilities.md`。
 
 ### 全部剩余项状态
@@ -260,7 +263,7 @@
 | 项 | 状态 |
 | --- | --- |
 | commandcode 逐模型能力表 | ✅ 完成（85 个模型，逐精确 id 查表） |
-| P4 多账号号池（内核 + antigravity + 设置面） | ✅ 完成 |
+| P4 多账号号池（内核 + 已移除的 antigravity 历史接入 + 设置面） | ✅ 完成（内核与其余线路保留） |
 
 > 唯一**非阻塞**待办仍是真机验证：三条新 OAuth 流程（workbuddy / minimax-code /
 > claude-subscription）、kimi 设备码、桌面凭据复用与多账号轮转均以单元测试锁定契约，
@@ -280,7 +283,7 @@ commandcode（静态 API Key）。
   Command Code userId/email/key 名）。
 - **新增 `pool/poolRegistry.ts`**：provider → 号池的注册表，含**幂等 seed**（桌面端账号每次
   选择前并入池子，同一身份原地更新）。
-- **antigravity** 改为复用同一工厂（删掉自己那份实现），行为与其余线路一致。
+- **antigravity** 历史上曾改为复用同一工厂；该线路已移除，通用工厂继续服务其余线路。
 - **请求路径**：OpenAI 兼容流式路径与 Responses 路径都接入 429 冷却换号 + 401 强制续期；
   账号集合排除本次已尝试的账号；`Retry-After` 被解析并夹取上限。
 - **设置面**：新增通用「账号池」区块（策略选择器 + 账号行：主账号标记、冷却倒计时、失效
@@ -296,7 +299,7 @@ commandcode（静态 API Key）。
    单账号时无害；一旦池里有第二个账号，账号 B 会拿到账号 A 的续期 promise 并**收到 A 的
    凭据**。两处都改为按 refresh token 归类；Codex 的池内续期还改为**不写单凭据槽位**
    （否则会覆盖另一个账号）。
-2. **`expiresAt: 0` 被误读为「永不过期」**：epoch 0 是**过去**，而 Antigravity 的测试凭据
+2. **`expiresAt: 0` 被误读为「永不过期」**：epoch 0 是**过去**，而当时 Antigravity 的测试凭据
    正是用它表示已过期。误读会让一个死令牌继续服役。改为只把「未声明到期」视为不过期。
 3. **seed 漏掉托管存储**：WorkBuddy / MiniMax Code 的 seed 只扫描桌面端文件，因此「只用本
    插件登录过」的情形读出**空池**——卡片照常显示该账号，号池区却隐藏，且该账号从不参与
@@ -354,7 +357,7 @@ commandcode（静态 API Key）。
 第一轮只修了会**硬失败**的十二项。第二轮把审计确认的其余项做完：
 
 - **图片预算按线路统一实现**：Anthropic 8 MB + 8000 px 长边（图片超过 20 张时收紧到 2000 px）、
-  kimi 1.5 MB（对 2 MB 整包）、antigravity 12 MB。长边那条最要命：历史保留每一张图，长会话
+  kimi 1.5 MB（对 2 MB 整包）、历史 antigravity 12 MB（该线路已移除）。长边那条最要命：历史保留每一张图，长会话
   只能加不能减，越过收紧线之后每轮 400 且本地无法补救。
 - **WorkBuddy 身份来自令牌**：在凭据被解析时（即任何账号键被计算之前）读取 `sub` 回填 uid。
   账号资料端点是一次 best-effort 请求，失败时凭据只剩显示名，同一账号就存成两行。
@@ -408,8 +411,8 @@ commandcode（静态 API Key）。
 | --- | --- |
 | commandcode 逐模型能力表 | ✅ 完成 |
 | P4 号池：内核 | ✅ 完成 |
-| P4 号池：antigravity | ✅ 完成 |
-| P4 号池：codex / kimi / claude / minimax / commandcode（workbuddy 已于 2026-10-21 移除） | ✅ 完成 |
+| P4 号池：antigravity（历史接入，已移除） | ✅ 完成（内核保留） |
+| P4 号池：codex / kimi / claude / minimax / commandcode（workbuddy 与 antigravity 已移除） | ✅ 完成 |
 | P4 号池：设置面（通用账号池区块，按选中线路渲染） | ✅ 完成 |
 | WorkBuddy 实时目录填充模型列表（该线路已于 2026-10-21 移除） | ✅ 完成 |
 | 登录控件在有账号后仍可用（可加第二个账号） | ✅ 完成 |

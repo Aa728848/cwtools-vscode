@@ -1,6 +1,8 @@
 # Agent Note: 统一 Antigravity 渠道配额进度条渲染与排版精简
 
-Status: implemented
+Status: archived
+
+> 该线路已于 2026-11-12 整体移除；本笔记永久冻结为历史记录。当前决策见 `../../implemented/simplification/2026-11-12-remove-antigravity-provider-and-completion-services.md`。
 
 ## Problem
 Antigravity此前以纯小号文本行的形式罗列配额桶（quota buckets），与 Codex 订阅渠道直观的视觉进度条形式不一致。此外，订阅代理区域原先包含了冗长的静态说明细则文字，造成视觉噪点。

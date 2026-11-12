@@ -2,6 +2,11 @@
 
 ## [2.36.0] - 2026-11-10
 
+- **[简化] 移除 Antigravity 供应商与独占补全服务（Remove Antigravity provider and dedicated completion services）**：
+  - 内置供应商注册表、Gemini 封装请求流、原生 Tab/FIM 补全、Tab Jump 命令、账号 OAuth/号池、设置卡片、Webview 协议、12 MiB 图片预算与签名消息字段全部移除；发布清单的 provider 枚举、命令与三语 NLS 同步收窄。旧 `antigravity` 配置值沿用现有未知供应商回退，不改写用户设置，也不主动删除既存 SecretStorage 凭据。
+  - 通用订阅代理、provider 无关号池、其余订阅线路、通用行内补全与其他 provider 的 Gemini/Anthropic/Responses 请求路径保持不变。模型可见读取路径恢复为仅限工作区、配置游戏根和辅助可信根，不再默认放行任意本地文件。
+  - English: [Simplification] The Antigravity provider and its dedicated completion services are gone: the built-in registry entry, wrapped Gemini request flow, native Tab/FIM completion, Tab Jump command, OAuth/account pool, settings card, Webview messages, 12 MiB image budget and signed content field are removed. Release provider enums, command contributions and all three NLS catalogs are narrowed in step. Legacy `antigravity` setting values use the existing unknown-provider fallback; user settings and existing SecretStorage credentials are left untouched. The shared subscription proxy, provider-agnostic account-pool kernel, remaining subscription lines, generic inline completion and other Gemini/Anthropic/Responses paths remain intact. Model-visible reads again require a workspace, configured game root or auxiliary trusted root.
+
 ### 原生后端共享与证据级工作区识别 / Shared Native Backend Host and Evidence-Based Workspace Detection
 
 - **[架构] `cwtools-node` 宿主包、后端能力握手与可取消请求（New `cwtools-node` host package, backend capability handshake and cancellable requests）**：

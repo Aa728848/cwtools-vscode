@@ -3,7 +3,7 @@
 Status: implemented
 
 ## Problem
-Codex 订阅渠道与 Antigravity（Gemini OAuth）在企业内网或特定网络环境下，需要为 OAuth 认证和 Provider 流量提供可配置的代理路由，参考 `dsh-chatgpt-subscription` 的交互模型。
+订阅供应商在企业内网或特定网络环境下，需要为 OAuth 认证和 Provider 流量提供可配置的代理路由，参考 `dsh-chatgpt-subscription` 的交互模型。
 
 ## Decision
 1. **多模式代理配置**：在双方 AI 设置中增加共享的“自动（auto）/自定义（custom）/直连（direct）”代理设置。机器级模式遵循用户配置；自定义 HTTP、HTTPS 和 SOCKS5 地址（含账号密码鉴权）存储于 `SecretStorage` 中；状态展示与上报时对敏感凭据进行严格脱敏。

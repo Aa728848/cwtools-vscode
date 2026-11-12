@@ -1,6 +1,8 @@
 # Agent Note: Antigravity Account Shared Protocol Boundary Extraction
 
-Status: implemented
+Status: archived
+
+> 该线路已于 2026-11-12 整体移除；本笔记永久冻结为历史记录。当前决策见 `../../implemented/simplification/2026-11-12-remove-antigravity-provider-and-completion-services.md`。
 
 ## Problem
 在执行 `npm run compile` / `rollup -c` 打包 Webview 脚本（`chatPanel.js` 与 `agentManager.js`）时，Rollup 输出了长达数十行的未解析依赖警告（`(!) Unresolved dependencies`），提示 `crypto`, `fs`, `path`, `vscode`, `http`, `child_process`, `undici`, `socks` 等模块作为外部依赖处理。

@@ -3,7 +3,7 @@
 Status: implemented
 
 ## Problem
-在开启 AI 与 Antigravity 行内代码补全（inline completion）后，编辑器未展示任何虚位预览文本（ghost text）。日志持续输出大量 `FIM timed out after 1500ms`。排查确认传输协议已正常触发，但旧有的 1500ms 超时默认值过小，在实际网络或首字生成场景下（例如本地探测中原生补全耗时 1756ms）会导致正常返回被过早取消。
+在开启 AI 与通用行内代码补全（inline completion）后，编辑器未展示任何虚位预览文本（ghost text）。日志持续输出大量 `FIM timed out after 1500ms`。排查确认传输协议已正常触发，但旧有的 1500ms 超时默认值过小，在实际网络或首字生成场景下（例如本地探测中原生补全耗时 1756ms）会导致正常返回被过早取消。
 
 ## Decision
 1. **统一调整行内补全默认超时为 6000ms**：在 `package.json` 插件清单配置声明、AI 服务实现及设置 Webview 中，将 `inlineCompletionTimeoutMs` 默认值统一定义为 6000ms。

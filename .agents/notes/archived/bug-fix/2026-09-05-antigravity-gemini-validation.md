@@ -1,6 +1,8 @@
 # Agent Note: Antigravity 渠道 Gemini 请求校验与错误诊断改进
 
-Status: implemented
+Status: archived
+
+> 该线路已于 2026-11-12 整体移除；本笔记永久冻结为历史记录。当前决策见 `../../implemented/simplification/2026-11-12-remove-antigravity-provider-and-completion-services.md`。
 
 ## Problem
 在请求路由与工具调用续接过程中，Gemini 3.8 Flash 出现 HTTP 400 校验错误。原因是 Antigravity 适配层在分级 Gemini 3.7/3.8 运行时中，对于“禁用/极简思考”（disabled/minimal thinking）发送了上游不接受的 `MINIMAL` 思考档位；此外，在回放 Gemini 函数调用时保留了上游生成的 ID，但在函数执行结果（function response）中却遗漏了这些 ID；而在发生 HTTP 错误时，原有逻辑直接丢弃了上游返回的具体校验错误信息。

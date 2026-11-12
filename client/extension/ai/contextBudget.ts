@@ -317,7 +317,6 @@ export function compactMessagesInPlace(messages: ChatMessage[], toolResultBudget
         const content = contentToString(m.content);
         const providerStateSize = JSON.stringify(m.responses_output_items ?? []).length
             + JSON.stringify(m.anthropic_thinking_blocks ?? []).length
-            + JSON.stringify(m.antigravity_content ?? {}).length;
         const preserveReasoningContent = options?.preserveReasoningContentForToolCalls === true
             && m.role === 'assistant'
             && !!m.tool_calls?.length;
@@ -372,7 +371,6 @@ export function compactMessagesInPlace(messages: ChatMessage[], toolResultBudget
             // un-compacted prompt instead. Signed provider content remains mandatory
             // on tool-use turns and therefore may only be removed from non-tool messages.
             delete newM.responses_output_items;
-            if (!newM.tool_calls?.length) delete newM.antigravity_content;
             if (!newM.tool_calls?.length) delete newM.anthropic_thinking_blocks;
             messages[i] = newM;
         }
@@ -386,7 +384,6 @@ export function compactMessagesInPlace(messages: ChatMessage[], toolResultBudget
             const stripped: ChatMessage = { ...messages[i]! };
             delete stripped.reasoning_content;
             delete stripped.responses_output_items;
-            if (!stripped.tool_calls?.length) delete stripped.antigravity_content;
             if (!stripped.tool_calls?.length) delete stripped.anthropic_thinking_blocks;
             messages[i] = stripped;
         }

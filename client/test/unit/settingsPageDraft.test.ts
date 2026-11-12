@@ -201,7 +201,6 @@ function createHarness(): Harness {
         settingsSubscriptionPools: {},
         settingsSubscriptionProxy: undefined,
         settingsCodexAccount: undefined,
-        settingsAntigravityAccount: undefined,
         settingsCommandCodeAccount: undefined,
         settingsKimiAccount: undefined,
         settingsMinimaxCodeAccount: undefined,

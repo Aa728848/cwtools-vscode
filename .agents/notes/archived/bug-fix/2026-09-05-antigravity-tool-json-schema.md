@@ -1,6 +1,8 @@
 # Agent Note: Antigravity 工具传输采用标准 JSON Schema
 
-Status: implemented
+Status: archived
+
+> 该线路已于 2026-11-12 整体移除；本笔记永久冻结为历史记录。当前决策见 `../../implemented/simplification/2026-11-12-remove-antigravity-provider-and-completion-services.md`。
 
 ## Problem
 Antigravity 渠道在接收完整的 CWTools 工具列表时拒绝了请求并报错 HTTP 400：函数声明参数内出现 `Unknown name "propertyNames"`。原因是适配层此前通过 Google 的强类型 `parameters` 字段发送了完整的 JSON Schema，而旧有的元数据递归过滤不仅无法让该 Schema 与强类型解析器兼容，还会意外破坏或删除诸如 `$id` 等合法的属性名或字面量数据。

@@ -1,6 +1,8 @@
 # Agent Note: 内置 Agent 架构瘦身与 Paradox 语义专注化（退役通用编码/混合领域、命令工具、沙箱审批与多 Agent 编排）
 
 Status: implemented
+> 后续更新：Antigravity 供应商与独占补全服务已移除；现存订阅线路与 provider 无关号池内核继续保留，
+> 见 `../simplification/2026-11-12-remove-antigravity-provider-and-completion-services.md`。
 
 ## Problem
 
@@ -35,13 +37,13 @@ flowchart LR
     BRIDGE --> LSP
 ```
 
-### 1. 能力领域收敛为单一 Paradox 领域（保留全部订阅渠道池）
+### 1. 能力领域收敛为单一 Paradox 领域（保留现存订阅渠道池）
 
 - **领域与调度协议**（`client/shared/agentSchedulingProtocol.ts`、`client/extension/ai/types.ts`、`client/extension/ai/agentProfile.ts`、`client/extension/ai/runner/scheduling.ts`）：
   - `AgentRuntimeDomain` 收敛为 `'paradox'`，`AgentDispatchMode` 收敛为 `'single'`，`AgentExecutionStrategy` 收敛为 `'auto' | 'single'`。
   - `AgentMode` 移除 `'utility'`、`'orchestrator'`、`'script'`，保留 `'build' | 'plan' | 'explore' | 'review' | 'gui_expert' | 'script_reviewer' | 'loc_translator' | 'loc_writer'`。
   - 向后兼容恢复：`normalizeSchedulingState()` 与 `normalizeAgentProfile()` 在读取历史持久化话题或 V4 检查点时，将旧 `'general' | 'hybrid'` 领域、`'parallel' | 'specialist'` 调度模式与 `'general-agent' | 'hybrid-agent' | 'general-coder'` Profile 自动平滑迁移为 `'paradox'`、`'single'` 与 `'paradox-agent'`，避免历史会话失效。
-- **订阅渠道池保持不变**：`antigravity/`、`codex/`、`commandcode/`、`kimi/`、`minimaxcode/`、`claudesub/` 与 `pool/` 完整保留。
+- **现存订阅渠道池保持不变**：`codex/`、`commandcode/`、`kimi/`、`minimaxcode/`、`claudesub/` 与 `pool/` 完整保留。
 - **Composer UI**：从 `client/extension/ai/chatHtml.ts`、`client/webview/chatPanel.ts`、`client/extension/ai/chat/webviewProtocol.ts` 与 `client/extension/ai/chat/bridge.ts` 中移除 `#domainMenu`、`#quickDomainTrigger` 及 `switchSchedulingDomain` 协议消息。
 
 ### 2. 退役命令/进程工具与内置多 Agent 编排器
@@ -86,7 +88,7 @@ flowchart LR
 
 ## Alternatives considered
 
-1. **一并移除订阅渠道池（`antigravity`、`codex`、`commandcode`、`kimi`、`minimaxcode`、`claudesub`）**：否决。用户明确要求保留全部现有订阅渠道与多账号轮询能力，以便内置轻量 Agent 与行内补全直接复用现有账号体系。
+1. **一并移除订阅渠道池（`codex`、`commandcode`、`kimi`、`minimaxcode`、`claudesub`）**：否决。用户明确要求保留当时全部现有订阅渠道与多账号轮询能力，以便内置轻量 Agent 与行内补全直接复用现有账号体系。
 2. **一并移除 `git_ops` 与 `web_search` / `web_open` / `web_find`**：否决。保留 `git_ops` 与网页搜索工具可支持 Paradox Mod 版本对比与查阅外部 Wiki/更新日志，且无需依赖 Shell 命令沙箱。
 3. **连同文件写入 Diff 确认（`confirm` / `auto`）一并移除**：否决。用户希望移除复杂的命令/策略权限审批卡片与审批模型，但保留直观的文件写入前 Diff 确认开关。
 

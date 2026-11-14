@@ -3,6 +3,7 @@ import {
     OPENDESIGN_PROVIDER_ID,
     isOpenDesignDeepSeekModel,
     isOpenDesignUnsupportedMaxTokensError,
+    openDesignCatalogEntry,
     openDesignWantsCompletionTokens,
     withoutMaxTokensUseCompletionTokens,
 } from '../../extension/ai/opendesign/types';
@@ -265,6 +266,14 @@ describe('OpenDesign quota and catalog merging', () => {
         expect(custom.contextWindow).to.equal(512_000);
         expect(custom.input).to.deep.equal(['text', 'image']);
         expect(custom.efforts).to.deep.equal(['low', 'high']);
+
+        expect(openDesignCatalogEntry('claude-fable-5.2')?.maxTokens).to.equal(128_000);
+        const fable52 = resolveOpenDesignModelInfo('claude-fable-5.2');
+        expect(fable52.contextWindow).to.equal(1_000_000);
+        expect(fable52.maxTokens).to.equal(64_000);
+        expect(fable52.pricing).to.deep.equal({ input: 8, output: 40 });
+        expect(fable52.input).to.deep.equal(['text', 'image']);
+        expect(fable52.efforts).to.deep.equal(['low', 'medium', 'high', 'xhigh', 'max']);
     });
 });
 

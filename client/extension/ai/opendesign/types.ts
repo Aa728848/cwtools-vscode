@@ -45,10 +45,11 @@ export interface OpenDesignModelMeta {
     input: readonly string[];
 }
 
-/** 2026-11 公开价目表与上下文/推理档位元数据（41 个对话模型）。 */
+/** 2026-11 公开价目表与上下文/推理档位元数据（42 个对话模型）。 */
 export const OPENDESIGN_MODEL_CATALOG: Readonly<Record<string, OpenDesignModelMeta>> = Object.freeze({
     'claude-fable-5': { name: 'Claude Fable 5', pricing: { input: 10, output: 50 }, contextWindow: 1_000_000, input: ['text', 'image'], efforts: ['low', 'medium', 'high', 'xhigh', 'max'] },
     'claude-fable-5.1': { name: 'Claude Fable 5.1', pricing: { input: 10, output: 50 }, contextWindow: 1_000_000, input: ['text', 'image'], efforts: ['low', 'medium', 'high', 'xhigh', 'max'] },
+    'claude-fable-5.2': { name: 'Claude Fable 5.2', pricing: { input: 8, output: 40 }, contextWindow: 1_000_000, maxTokens: 128_000, input: ['text', 'image'], efforts: ['low', 'medium', 'high', 'xhigh', 'max'] },
     'claude-haiku-5.5': { name: 'Claude Haiku 5.5', pricing: { input: 0.1, output: 0.5 }, contextWindow: 1_000_000, maxTokens: 128_000, input: ['text', 'image'], efforts: ['low', 'medium', 'high', 'xhigh', 'max'] },
     'claude-opus-4.8': { name: 'Claude Opus 4.8', pricing: { input: 5, output: 25 }, contextWindow: 1_000_000, input: ['text', 'image'], efforts: ['low', 'medium', 'high', 'xhigh', 'max'] },
     'claude-opus-5': { name: 'Claude Opus 5', pricing: { input: 5, output: 25 }, contextWindow: 1_000_000, input: ['text', 'image'], efforts: ['low', 'medium', 'high', 'xhigh', 'max'] },

@@ -51,7 +51,7 @@ Status: implemented
    - 设备码授权（`POST /cli/device-authorizations` → 强制校验 `activationUrl` 为 `https://` 后打开浏览器 → 轮询 `/token`）签发成对密钥 `controlKey`（`vela_ctrl_…`，查额度/余额/控制面目录）与 `runtimeKey`（`sk-amr-…`，调用网关 `/v1/chat/completions` 与 `/v1/models`）；
    - 通过 UI 输入框或 `ApiKeyManager` 保存的控制台静态 Key 与 OAuth 账号共同入池（`opendesign` 号池）；`openDesignPoolCredentials` 与 `toOpenDesignPoolCredentials` **省略 `expiresAt`**（避免 `AccountPoolCore` 把 `expiresAt: 0` 误判为 1970 年已过期）。
 2. **字段级三层模型目录融合与特殊能力边界**：
-   - `catalog.ts` 对 AMR 控制面 `/api/v1/models`、网关 `/v1/models`（用 `canonicalOpenDesignModelKey` 对齐 `vela/` / `public_model_` 与连字符差异）及内置 41 模型目录 `OPENDESIGN_MODEL_CATALOG` 做**字段级合并**（而非整表覆盖）；
+   - `catalog.ts` 对 AMR 控制面 `/api/v1/models`、网关 `/v1/models`（用 `canonicalOpenDesignModelKey` 对齐 `vela/` / `public_model_` 与连字符差异）及内置 42 模型目录 `OPENDESIGN_MODEL_CATALOG` 做**字段级合并**（而非整表覆盖）；
    - DeepSeek 系列（如 `deepseek-v4.1-flash`、`deepseek-v4-pro`）支持 `'none'` 作为独立思考关闭档；GPT 家族按 `openDesignWantsCompletionTokens` 发送 `max_completion_tokens`，遇到旧网关拒收 `max_tokens` 时本地自动降级切换重试一次。
 3. **精细错误分类（不误伤账号）**：
    - `403 tier_*not_entitled` / `membership tier` 等套餐等级无权使用特定模型的拒绝只将该账号加入当次 `attemptedIds` 尝试池内更高套餐账号，**绝不触发 `noteAuthFailure`**；

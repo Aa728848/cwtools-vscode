@@ -363,6 +363,7 @@ export const BUILTIN_PROVIDERS: Record<string, AIProviderConfig> = {
         defaultModel: 'deepseek/deepseek-v4-pro',
         models: [
             'deepseek/deepseek-v4-pro',
+            'anthropic/claude-fable-5.2',
             'anthropic/claude-opus-5.5',
             'anthropic/claude-sonnet-5.5',
             'anthropic/claude-haiku-5.5',

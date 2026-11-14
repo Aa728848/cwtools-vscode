@@ -118,7 +118,8 @@ export function getCacheDiscountFactor(model: string, providerId?: string): numb
     if (lower.includes('deepseek-v4-pro')) return 1 / 30;
     if (lower.includes('deepseek-flash') || lower.includes('deepseek-v4-flash')) return 0.02;
     if (lower.includes('deepseek')) return 7 / 220;
-    // Anthropic Claude
+    // Anthropic Claude — Fable 5.2 bills cache reads at $0.20 against $8.00 input (2.5%).
+    if (/claude-fable-5[.-]2(?:[.-]|\[|$)/.test(lower)) return 0.025;
     if (lower.includes('claude')) return 0.1;
     // OpenAI GPT series
     // GPT-6.1 Sol and GPT-6.1 Terra price cached input at 5% of base input.

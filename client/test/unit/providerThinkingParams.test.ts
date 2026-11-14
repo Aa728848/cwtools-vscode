@@ -333,6 +333,7 @@ describe('provider thinking params', () => {
             thinkingDisplay: false,
             effort: true,
             samplingRemoved: true,
+            bindsThinkingToPrefix: false,
         });
     });
 
@@ -549,14 +550,17 @@ describe('2026-11 refreshed model catalogs thinking & gateway isolation', () => 
 
     it('shapes Claude 5.5 Opus, Sonnet, and Haiku capabilities and prevents invalid disabled blocks', () => {
         const { getAnthropicModelFeatures, getModelReasoningCapability, getReducedThinkingParams, toClaudeRequest } = loadProviders();
-        for (const model of ['claude-opus-5-5', 'claude-sonnet-5-5', 'claude-haiku-5-5']) {
+        for (const model of ['claude-opus-5-5', 'claude-sonnet-5-5', 'claude-haiku-5-5', 'claude-fable-5-2']) {
             expect(getAnthropicModelFeatures(model), model).to.deep.equal({
                 adaptiveThinking: true,
                 thinkingDisplay: true,
                 effort: true,
                 samplingRemoved: true,
+                bindsThinkingToPrefix: true,
             });
         }
+        expect(getAnthropicModelFeatures('claude-fable-5').bindsThinkingToPrefix).to.equal(false);
+        expect(getAnthropicModelFeatures('claude-opus-4-8').bindsThinkingToPrefix).to.equal(false);
         expect(getModelReasoningCapability('claude', 'claude-opus-5-5', 'anthropic-messages')).to.deep.equal({
             kind: 'effort',
             options: ['low', 'medium', 'high', 'xhigh', 'max'],
@@ -677,6 +681,10 @@ describe('2026-11 refreshed model catalogs thinking & gateway isolation', () => 
         expect(getReducedThinkingParams('google/gemini-3.8-flash', 'openrouter', 'openai-chat-completions')).to.equal(undefined);
         expect(getReducedThinkingParams('anthropic/claude-haiku-5.5', 'openrouter', 'openai-chat-completions'))
             .to.deep.equal({ extraBody: { reasoning: { enabled: false } } });
+        expect(getReducedThinkingParams('anthropic/claude-fable-5.2', 'openrouter', 'openai-chat-completions'))
+            .to.equal(undefined);
+        expect(getReducedThinkingParams('claude-fable-5-2', 'claude', 'anthropic-messages'))
+            .to.deep.equal({ reasoningEffort: 'low' });
         expect(getThinkingParams('z-ai/glm-5.3', 'openrouter', 'openai-chat-completions', 'medium'))
             .to.deep.equal({ extraBody: { reasoning: { effort: 'high' } } });
 

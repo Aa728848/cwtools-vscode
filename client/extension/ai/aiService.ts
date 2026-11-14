@@ -190,6 +190,7 @@ import {
     CLAUDE_API_BASE,
     CLAUDE_MESSAGES_PATH,
     CLAUDE_SUBSCRIPTION_CACHE_TTL,
+    CLAUDE_THINKING_BINDING_CONTROLS_BETA,
 } from './claudesub/types';
 import { getCommandCodeAccountStatus } from './commandcode/accountService';
 import { SubscriptionProxyService } from './subscriptionProxy';
@@ -4422,6 +4423,7 @@ export class AIService {
                 ...(minimaxCodeModel !== undefined ? { minimaxCodeModel } : {}),
                 ...(claudeSubscriptionModel !== undefined ? { claudeSubscriptionModel } : {}),
                 ...(claudeCacheTtl !== undefined ? { claudeCacheTtl } : {}),
+                ...(providerId === 'claude' ? { allowThinkingBlockBinding: true } : {}),
             }
         );
         // Claude Code-style relays often expose models that reject temperature entirely.
@@ -4459,6 +4461,11 @@ export class AIService {
                 // a stream request as JSON otherwise, and the client would see no events at all.
                 accept: 'text/event-stream',
                 'anthropic-version': '2023-06-01',
+                ...(providerId === 'claude'
+                    && isRecord(claudeRequest.thinking)
+                    && 'block_binding' in claudeRequest.thinking
+                    ? { 'anthropic-beta': CLAUDE_THINKING_BINDING_CONTROLS_BETA }
+                    : {}),
                 // A subscription request must carry the Claude Code identity: the
                 // bearer, the claude-cli user agent, `x-app: cli`, and the beta set
                 // that licenses the fields its body uses. `x-api-key` is dropped by

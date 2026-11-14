@@ -141,6 +141,7 @@ describe('getModelPricing', () => {
         expect(getModelPricing('deepseek-ai/DeepSeek-V4-Pro', 'deepinfra')).to.deep.equal([8.87, 17.73]);
         expect(getModelPricing('z-ai/glm-5.3', 'openrouter')).to.deep.equal([8.00, 28.00]);
         expect(getModelPricing('z-ai/glm-5.3-flash', 'openrouter')).to.deep.equal([0.80, 2.80]);
+        expect(getModelPricing('anthropic/claude-fable-5.2', 'openrouter')).to.deep.equal([54.56, 272.80]);
         expect(getModelPricing('anthropic/claude-opus-5.5', 'openrouter')).to.deep.equal([27.28, 136.40]);
         expect(getModelPricing('anthropic/claude-haiku-5.5', 'openrouter')).to.deep.equal([0.68, 3.41]);
         expect(getModelPricing('openai/gpt-6.1-terra', 'openrouter')).to.deep.equal([6.82, 34.10]);
@@ -183,7 +184,11 @@ describe('getCacheDiscountFactor', () => {
         expect(getCacheDiscountFactor('deepseek-chat')).to.equal(7 / 220);
     });
 
-    it('returns 0.1 for Claude models', () => {
+    it('returns 0.1 for Claude models and 0.025 for Claude Fable 5.2', () => {
+        expect(getCacheDiscountFactor('claude-fable-5-2')).to.equal(0.025);
+        expect(getCacheDiscountFactor('claude-fable-5.2')).to.equal(0.025);
+        expect(getCacheDiscountFactor('anthropic/claude-fable-5.2', 'openrouter')).to.equal(0.025);
+        expect(getCacheDiscountFactor('claude-fable-5-1')).to.equal(0.1);
         expect(getCacheDiscountFactor('claude-sonnet-4-6')).to.equal(0.1);
         expect(getCacheDiscountFactor('claude-opus-4-7-20251101')).to.equal(0.1);
         expect(getCacheDiscountFactor('claude-opus-4-8')).to.equal(0.1);

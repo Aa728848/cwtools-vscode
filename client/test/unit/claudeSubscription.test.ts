@@ -61,7 +61,7 @@ class Secrets {
 
 describe('Claude subscription model catalog', () => {
     it('ships the subscription models with their thinking forms', () => {
-        expect(CLAUDE_CLI_VERSION).to.equal('2.1.293');
+        expect(CLAUDE_CLI_VERSION).to.equal('2.1.323');
         expect(CLAUDE_MODELS.map(model => model.id)).to.include.members([
             'claude-opus-5-5',
             'claude-sonnet-5-5',
@@ -69,6 +69,7 @@ describe('Claude subscription model catalog', () => {
             'claude-opus-5',
             'claude-opus-4-5-20251101',
             'claude-sonnet-4-5-20250929',
+            'claude-fable-5-2',
             'claude-fable-5-1',
             'claude-haiku-4-5',
             'claude-haiku-4-5-20251001',
@@ -82,6 +83,14 @@ describe('Claude subscription model catalog', () => {
             maxTokens: 128_000,
             bindsThinkingToPrefix: true,
         });
+        expect(resolveClaudeModel('claude-fable-5-2')).to.include({
+            thinkingMode: 'mid-convo',
+            canDisableThinking: false,
+            supportsTemperature: false,
+            contextWindow: 1_000_000,
+            maxTokens: 128_000,
+            bindsThinkingToPrefix: true,
+        });
         expect(resolveClaudeModel('claude-sonnet-5-5').thinkingMode).to.equal('mid-convo');
         expect(resolveClaudeModel('claude-fable-5-1').thinkingMode).to.equal('mid-convo');
         expect(resolveClaudeModel('claude-opus-5')).to.include({
@@ -89,6 +98,18 @@ describe('Claude subscription model catalog', () => {
             canDisableThinking: true,
         });
         expect(resolveClaudeModel('claude-haiku-4-5').thinkingMode).to.equal('budget');
+
+        const fable52Entry = resolveClaudeModel('claude-fable-5-2');
+        const fable52Default = claudeThinkingFor(fable52Entry, undefined, undefined);
+        expect(fable52Default.thinking).to.deep.equal({
+            type: 'adaptive',
+            display: 'summarized',
+            block_binding: { prefix_mismatch_behavior: 'drop_block' },
+        });
+        expect(fable52Default.outputConfig).to.deep.equal({ effort: 'high' });
+        const fable52None = claudeThinkingFor(fable52Entry, 'none', undefined);
+        expect(fable52None.thinking).to.not.deep.equal({ type: 'disabled' });
+        expect(JSON.stringify(fable52None)).to.not.include('disabled');
     });
 
     it('shapes Claude Haiku 5.5 adaptive effort and disabled thinking cleanly', () => {

@@ -1283,6 +1283,8 @@ export function toClaudeRequest(
         claudeSubscriptionModel?: string;
         /** Prompt-cache tier to write for the subscription route. */
         claudeCacheTtl?: ClaudeCacheTtl;
+        /** Enable Anthropic `thinking.block_binding` for official Anthropic endpoints (`claude`). */
+        allowThinkingBlockBinding?: boolean;
     } = {}
 ): Record<string, unknown> {
     const enableCacheControl = options.cacheControl !== false;
@@ -1556,9 +1558,13 @@ export function toClaudeRequest(
         }
         if (anthropicFeatures.adaptiveThinking) {
             // display: 'summarized' restores thinking text on models that omit it by default
-            claudeRequest.thinking = anthropicFeatures.thinkingDisplay
-                ? { type: 'adaptive', display: 'summarized' }
-                : { type: 'adaptive' };
+            claudeRequest.thinking = {
+                type: 'adaptive',
+                ...(anthropicFeatures.thinkingDisplay ? { display: 'summarized' } : {}),
+                ...(options.allowThinkingBlockBinding && anthropicFeatures.bindsThinkingToPrefix
+                    ? { block_binding: { prefix_mismatch_behavior: 'drop_block' } }
+                    : {}),
+            };
             // Anthropic rejects sampling params alongside thinking
             delete claudeRequest.temperature;
         }

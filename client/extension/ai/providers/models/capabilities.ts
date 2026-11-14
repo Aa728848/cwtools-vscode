@@ -47,7 +47,9 @@ export const VISION_CAPABLE_MODELS: Record<string, boolean> = {
     'gpt-4-vision': true,
     'gpt-5': true,
     'claude-fable-5-2': true,
+    'claude-fable-5.2': true,
     'claude-fable-5-1': true,
+    'claude-fable-5.1': true,
     'claude-fable-5': true,
     'claude-opus-5-5': true,
     'claude-opus-5.5': true,
@@ -393,7 +395,9 @@ export const MODEL_CONTEXT_TOKENS: Record<string, number> = {
     'gpt-5-nano': 400000,
     'gpt-4-vision': 128000,
     'claude-fable-5-2': 1000000,
+    'claude-fable-5.2': 1000000,
     'claude-fable-5-1': 1000000,
+    'claude-fable-5.1': 1000000,
     'claude-fable-5': 1000000,
     'claude-opus-5-5': 1000000,
     'claude-opus-5.5': 1000000,
@@ -562,6 +566,7 @@ export const MODEL_CONTEXT_TOKENS: Record<string, number> = {
     'nemotron-3-super-free': 131072,
     'phi-4-reasoning': 16384,
     'Qwen3.7-Max': 1000000,
+    'openrouter:anthropic/claude-fable-5.2': 1000000,
     'openrouter:anthropic/claude-opus-5.5': 1000000,
     'openrouter:anthropic/claude-sonnet-5.5': 1000000,
     'openrouter:anthropic/claude-haiku-5.5': 1000000,
@@ -831,6 +836,8 @@ export interface AnthropicModelFeatures {
     effort: boolean;
     /** `temperature`/`top_p`/`top_k` return HTTP 400 (Fable 5, Opus 4.7+). */
     samplingRemoved: boolean;
+    /** Thinking blocks bind to conversation prefix and require `block_binding` on official Anthropic API (Fable 5.1+, Opus/Sonnet/Haiku 5.5+). */
+    bindsThinkingToPrefix: boolean;
 }
 
 /**
@@ -839,7 +846,13 @@ export interface AnthropicModelFeatures {
  * suffixes (`claude-fable-5[1m]`).
  */
 export function getAnthropicModelFeatures(model: string): AnthropicModelFeatures {
-    const none: AnthropicModelFeatures = { adaptiveThinking: false, thinkingDisplay: false, effort: false, samplingRemoved: false };
+    const none: AnthropicModelFeatures = {
+        adaptiveThinking: false,
+        thinkingDisplay: false,
+        effort: false,
+        samplingRemoved: false,
+        bindsThinkingToPrefix: false,
+    };
     if (!model) return none;
     const lower = model.toLowerCase();
     if (!lower.includes('claude')) return none;
@@ -850,25 +863,28 @@ export function getAnthropicModelFeatures(model: string): AnthropicModelFeatures
     const sonnetVer = sonnetMinor ? Number(sonnetMinor[1]) + Number(sonnetMinor[2] ?? 0) / 10 : 0;
     const haikuMinor = lower.match(/claude-haiku-(\d+)(?:[.-](\d+))?/);
     const haikuVer = haikuMinor ? Number(haikuMinor[1]) + Number(haikuMinor[2] ?? 0) / 10 : 0;
+    const fableMinor = lower.match(/claude-fable-(\d+)(?:[.-](\d+))?/);
+    const fableVer = fableMinor ? Number(fableMinor[1]) + Number(fableMinor[2] ?? 0) / 10 : 0;
     const isFable = lower.includes('claude-fable');
+    const bindsThinkingToPrefix = fableVer >= 5.1 || opusVer >= 5.5 || sonnetVer >= 5.5 || haikuVer >= 5.5;
 
     // Sonnet 5 has adaptive thinking on by default, rejects sampling parameters,
     // and only needs output_config.effort to control depth.
     if (sonnetVer === 5) {
-        return { adaptiveThinking: false, thinkingDisplay: false, effort: true, samplingRemoved: true };
+        return { adaptiveThinking: false, thinkingDisplay: false, effort: true, samplingRemoved: true, bindsThinkingToPrefix: false };
     }
 
     // Fable 5 / Opus 4.7+ / Sonnet 5.5+ / Haiku 5.5+: adaptive thinking, display param, sampling params removed
     if (isFable || opusVer >= 4.7 || sonnetVer >= 5.5 || haikuVer >= 5.5) {
-        return { adaptiveThinking: true, thinkingDisplay: true, effort: true, samplingRemoved: true };
+        return { adaptiveThinking: true, thinkingDisplay: true, effort: true, samplingRemoved: true, bindsThinkingToPrefix };
     }
     // Opus 4.6 / Sonnet 4.6: adaptive thinking + effort; sampling still accepted
     if (opusVer >= 4.6 || sonnetVer >= 4.6) {
-        return { adaptiveThinking: true, thinkingDisplay: false, effort: true, samplingRemoved: false };
+        return { adaptiveThinking: true, thinkingDisplay: false, effort: true, samplingRemoved: false, bindsThinkingToPrefix: false };
     }
     // Opus 4.5: effort only (manual extended thinking is not auto-enabled here)
     if (opusVer >= 4.5) {
-        return { adaptiveThinking: false, thinkingDisplay: false, effort: true, samplingRemoved: false };
+        return { adaptiveThinking: false, thinkingDisplay: false, effort: true, samplingRemoved: false, bindsThinkingToPrefix: false };
     }
     return none;
 }

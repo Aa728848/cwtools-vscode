@@ -84,7 +84,7 @@ export const CLAUDE_ANTHROPIC_VERSION = '2023-06-01';
  * 该值是**真实发布过的** `@anthropic-ai/claude-code` 版本，而不是仅为了越过下限而挑的数字：
  * 声称一个不存在的版本，只是把一个清晰的拒绝换成不可预测的拒绝。
  */
-export const CLAUDE_CLI_VERSION = '2.1.293';
+export const CLAUDE_CLI_VERSION = '2.1.323';
 
 /**
  * 回环回调端口默认值。
@@ -231,6 +231,14 @@ export const CLAUDE_MODELS: readonly ClaudeModelEntry[] = [
         supportsImage: true, supportsTemperature: true,
         thinkingMode: 'mid-convo', reasoningEfforts: ['low', 'medium', 'high', 'xhigh', 'max'],
         canDisableThinking: false,
+    },
+    {
+        id: 'claude-fable-5-2', name: 'Claude Fable 5.2',
+        contextWindow: 1_000_000, maxTokens: 128_000,
+        supportsImage: true, supportsTemperature: false,
+        thinkingMode: 'mid-convo', reasoningEfforts: ['low', 'medium', 'high', 'xhigh', 'max'],
+        canDisableThinking: false,
+        bindsThinkingToPrefix: true,
     },
     {
         id: 'claude-haiku-4-5', name: 'Claude Haiku 4.5 (latest)',

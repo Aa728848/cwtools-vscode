@@ -28,6 +28,7 @@ import {
     COMMANDCODE_MODEL_CONTEXT_TOKENS,
     getModelReasoningCapability,
     getThinkingParams,
+    getAnthropicModelFeatures,
 } from '../../extension/ai/providers';
 import type { ChatCompletionRequest, ChatMessage } from '../../extension/ai/types';
 
@@ -1030,6 +1031,39 @@ describe('toClaudeRequest', () => {
             }],
         })).to.throw("Cannot replay Anthropic tool call 'read_file'");
     });
+
+    it('emits thinking.block_binding only when opted in for official Anthropic endpoints', () => {
+        const official = toClaudeRequest({
+            model: 'claude-fable-5-2',
+            reasoning_effort: 'high',
+            messages: [{ role: 'user', content: 'Hi' }],
+        }, { allowThinkingBlockBinding: true });
+        expect(official.thinking).to.deep.equal({
+            type: 'adaptive',
+            display: 'summarized',
+            block_binding: { prefix_mismatch_behavior: 'drop_block' },
+        });
+
+        const gatewayDefault = toClaudeRequest({
+            model: 'claude-fable-5-2',
+            reasoning_effort: 'high',
+            messages: [{ role: 'user', content: 'Hi' }],
+        });
+        expect(gatewayDefault.thinking).to.deep.equal({
+            type: 'adaptive',
+            display: 'summarized',
+        });
+
+        const earlierFable = toClaudeRequest({
+            model: 'claude-fable-5',
+            reasoning_effort: 'high',
+            messages: [{ role: 'user', content: 'Hi' }],
+        }, { allowThinkingBlockBinding: true });
+        expect(earlierFable.thinking).to.deep.equal({
+            type: 'adaptive',
+            display: 'summarized',
+        });
+    });
 });
 
 // ─── suggestOllamaConfig ─────────────────────────────────────────────────────
@@ -1161,6 +1195,12 @@ describe('BUILTIN_PROVIDERS', () => {
             'claude-sonnet-5',
             'claude-haiku-5-5',
         ]);
+        expect(BUILTIN_PROVIDERS['openrouter']!.models).to.include('anthropic/claude-fable-5.2');
+        expect(getModelContextTokens('anthropic/claude-fable-5.2', 'openrouter')).to.equal(1000000);
+        expect(isModelVisionCapable('claude-fable-5.2')).to.equal(true);
+        expect(getAnthropicModelFeatures('claude-fable-5-2').bindsThinkingToPrefix).to.equal(true);
+        expect(getAnthropicModelFeatures('claude-fable-5').bindsThinkingToPrefix).to.equal(false);
+        expect(getAnthropicModelFeatures('claude-opus-4-8').bindsThinkingToPrefix).to.equal(false);
         expect(BUILTIN_PROVIDERS['glm']!.defaultModel).to.equal('glm-5.3');
         expect(BUILTIN_PROVIDERS['glm']!.models).to.include.members([
             'glm-5.3',

@@ -1,9 +1,9 @@
 /**
  * Command Code 的**逐模型能力表**。
  *
- * 转录自官方 CLI 自己的模型注册表——那是「哪些模型接受图片输入、各自暴露哪些思考档位」的唯一
- * 权威来源。公开的 `/provider/v1/models` 目录只带 id、显示名与上下文长度，对模态与思考档位**什么
- * 都不说**。
+ * 转录自官方 CLI (`command-code@1.88.4`) 自己的模型注册表——那是「哪些模型接受图片输入、
+ * 各自暴露哪些思考档位」的唯一权威来源。公开的 `/provider/v1/models` 目录只带 id、显示名与
+ * 上下文长度，对模态与思考档位**什么都不说**。
  *
  * **按厂商/模型名前缀推断是不行的**：同一厂商内部就会自相矛盾——实测
  * `deepseek/deepseek-v4-flash` 纯文本，而 `deepseek/deepseek-v4.1-flash` 与
@@ -19,23 +19,27 @@
  * 这个档位，所以它在请求构造时被丢弃（`commandCodeWireEffort`）。
  */
 
+export type CommandCodeModality = 'text' | 'image' | 'file';
+
 export interface CommandCodeModelDef {
     id: string;
     name: string;
     /** 接受的输入模态，与注册表声明的一致。 */
-    inputModalities: Array<'text' | 'image'>;
+    inputModalities: CommandCodeModality[];
     /** 可选思考档位；该模型不暴露档位时为空。 */
     reasoningEfforts: string[];
     /** 注册表声明的上下文窗口；未声明为 null。 */
     contextWindow: number | null;
     /** 注册表声明的输出上限；未声明为 null。 */
     maxTokens: number | null;
+    /** 官方注册表是否将该条目标记为不在默认列表中展示（如已下线或计费别名）。 */
+    hidden: boolean;
 }
 
 /** DSH 用来表示「尽量少思考」的档位名，与 Kimi / Claude 线路一致。 */
 export const COMMAND_CODE_DISABLED_EFFORT = 'none';
 
-/** Command Code 注册表描述的每个模型，按注册表顺序。 */
+/** Command Code 注册表描述的每个模型，按官方注册表顺序（共 109 条）。 */
 export const COMMAND_CODE_MODELS: readonly CommandCodeModelDef[] = [
     {
         id: 'claude-sonnet-5-5',
@@ -44,6 +48,7 @@ export const COMMAND_CODE_MODELS: readonly CommandCodeModelDef[] = [
         reasoningEfforts: ['low', 'medium', 'high', 'xhigh', 'max'],
         contextWindow: 1000000,
         maxTokens: null,
+        hidden: false,
     },
     {
         id: 'claude-sonnet-5',
@@ -52,6 +57,7 @@ export const COMMAND_CODE_MODELS: readonly CommandCodeModelDef[] = [
         reasoningEfforts: ['low', 'medium', 'high', 'xhigh', 'max'],
         contextWindow: 1000000,
         maxTokens: null,
+        hidden: false,
     },
     {
         id: 'claude-sonnet-4-6',
@@ -60,6 +66,7 @@ export const COMMAND_CODE_MODELS: readonly CommandCodeModelDef[] = [
         reasoningEfforts: ['low', 'medium', 'high', 'xhigh', 'max'],
         contextWindow: 1000000,
         maxTokens: null,
+        hidden: false,
     },
     {
         id: 'claude-fable-5-1',
@@ -68,6 +75,7 @@ export const COMMAND_CODE_MODELS: readonly CommandCodeModelDef[] = [
         reasoningEfforts: ['low', 'medium', 'high', 'xhigh', 'max'],
         contextWindow: 1000000,
         maxTokens: null,
+        hidden: false,
     },
     {
         id: 'claude-fable-5',
@@ -76,6 +84,7 @@ export const COMMAND_CODE_MODELS: readonly CommandCodeModelDef[] = [
         reasoningEfforts: ['low', 'medium', 'high', 'xhigh', 'max'],
         contextWindow: 1000000,
         maxTokens: null,
+        hidden: false,
     },
     {
         id: 'claude-opus-5-5',
@@ -84,6 +93,7 @@ export const COMMAND_CODE_MODELS: readonly CommandCodeModelDef[] = [
         reasoningEfforts: ['low', 'medium', 'high', 'xhigh', 'max'],
         contextWindow: 1000000,
         maxTokens: null,
+        hidden: false,
     },
     {
         id: 'claude-opus-5',
@@ -92,6 +102,7 @@ export const COMMAND_CODE_MODELS: readonly CommandCodeModelDef[] = [
         reasoningEfforts: ['low', 'medium', 'high', 'xhigh', 'max'],
         contextWindow: 1000000,
         maxTokens: null,
+        hidden: false,
     },
     {
         id: 'claude-opus-4-8',
@@ -100,6 +111,7 @@ export const COMMAND_CODE_MODELS: readonly CommandCodeModelDef[] = [
         reasoningEfforts: ['low', 'medium', 'high', 'xhigh', 'max'],
         contextWindow: 1000000,
         maxTokens: null,
+        hidden: false,
     },
     {
         id: 'claude-opus-4-7',
@@ -108,6 +120,16 @@ export const COMMAND_CODE_MODELS: readonly CommandCodeModelDef[] = [
         reasoningEfforts: ['low', 'medium', 'high', 'xhigh', 'max'],
         contextWindow: 1000000,
         maxTokens: null,
+        hidden: false,
+    },
+    {
+        id: 'claude-haiku-5-5',
+        name: 'Claude Haiku 5.5',
+        inputModalities: ['text', 'image'],
+        reasoningEfforts: ['low', 'medium', 'high', 'xhigh', 'max'],
+        contextWindow: 1000000,
+        maxTokens: null,
+        hidden: false,
     },
     {
         id: 'claude-haiku-4-5-20251001',
@@ -116,6 +138,7 @@ export const COMMAND_CODE_MODELS: readonly CommandCodeModelDef[] = [
         reasoningEfforts: [],
         contextWindow: 200000,
         maxTokens: null,
+        hidden: false,
     },
     {
         id: 'gpt-6-astra',
@@ -124,6 +147,7 @@ export const COMMAND_CODE_MODELS: readonly CommandCodeModelDef[] = [
         reasoningEfforts: ['low', 'medium', 'high', 'xhigh', 'max'],
         contextWindow: 1050000,
         maxTokens: null,
+        hidden: false,
     },
     {
         id: 'gpt-6.1-sol',
@@ -132,6 +156,16 @@ export const COMMAND_CODE_MODELS: readonly CommandCodeModelDef[] = [
         reasoningEfforts: ['low', 'medium', 'high', 'xhigh', 'max'],
         contextWindow: 1050000,
         maxTokens: null,
+        hidden: false,
+    },
+    {
+        id: 'gpt-6.1-terra',
+        name: 'GPT-6.1 Terra',
+        inputModalities: ['text', 'image'],
+        reasoningEfforts: ['low', 'medium', 'high', 'xhigh', 'max'],
+        contextWindow: 1050000,
+        maxTokens: null,
+        hidden: false,
     },
     {
         id: 'gpt-6-sol',
@@ -140,6 +174,7 @@ export const COMMAND_CODE_MODELS: readonly CommandCodeModelDef[] = [
         reasoningEfforts: ['low', 'medium', 'high', 'xhigh', 'max'],
         contextWindow: 1050000,
         maxTokens: null,
+        hidden: false,
     },
     {
         id: 'gpt-6-luna',
@@ -148,6 +183,7 @@ export const COMMAND_CODE_MODELS: readonly CommandCodeModelDef[] = [
         reasoningEfforts: ['low', 'medium', 'high', 'xhigh', 'max'],
         contextWindow: 1050000,
         maxTokens: null,
+        hidden: false,
     },
     {
         id: 'gpt-5.6-sol',
@@ -156,6 +192,7 @@ export const COMMAND_CODE_MODELS: readonly CommandCodeModelDef[] = [
         reasoningEfforts: ['low', 'medium', 'high', 'xhigh', 'max'],
         contextWindow: 1050000,
         maxTokens: null,
+        hidden: false,
     },
     {
         id: 'gpt-5.6-terra',
@@ -164,6 +201,7 @@ export const COMMAND_CODE_MODELS: readonly CommandCodeModelDef[] = [
         reasoningEfforts: ['low', 'medium', 'high', 'xhigh', 'max'],
         contextWindow: 1050000,
         maxTokens: null,
+        hidden: false,
     },
     {
         id: 'gpt-5.6-luna',
@@ -172,6 +210,7 @@ export const COMMAND_CODE_MODELS: readonly CommandCodeModelDef[] = [
         reasoningEfforts: ['low', 'medium', 'high', 'xhigh', 'max'],
         contextWindow: 1050000,
         maxTokens: null,
+        hidden: false,
     },
     {
         id: 'gpt-5.5',
@@ -180,6 +219,7 @@ export const COMMAND_CODE_MODELS: readonly CommandCodeModelDef[] = [
         reasoningEfforts: ['low', 'medium', 'high', 'xhigh'],
         contextWindow: 400000,
         maxTokens: null,
+        hidden: false,
     },
     {
         id: 'gpt-5.4',
@@ -188,6 +228,7 @@ export const COMMAND_CODE_MODELS: readonly CommandCodeModelDef[] = [
         reasoningEfforts: ['low', 'medium', 'high', 'xhigh'],
         contextWindow: 400000,
         maxTokens: null,
+        hidden: false,
     },
     {
         id: 'gpt-5.3-codex',
@@ -196,6 +237,7 @@ export const COMMAND_CODE_MODELS: readonly CommandCodeModelDef[] = [
         reasoningEfforts: ['low', 'medium', 'high', 'xhigh'],
         contextWindow: 400000,
         maxTokens: null,
+        hidden: false,
     },
     {
         id: 'gpt-5.4-mini',
@@ -204,6 +246,16 @@ export const COMMAND_CODE_MODELS: readonly CommandCodeModelDef[] = [
         reasoningEfforts: ['low', 'medium', 'high'],
         contextWindow: 400000,
         maxTokens: null,
+        hidden: false,
+    },
+    {
+        id: 'MiniMaxAI/MiniMax-M3-Free',
+        name: 'MiniMax M3',
+        inputModalities: ['text', 'image'],
+        reasoningEfforts: ['low', 'medium', 'high'],
+        contextWindow: 1000000,
+        maxTokens: null,
+        hidden: true,
     },
     {
         id: 'deepseek/deepseek-v4-pro',
@@ -212,6 +264,7 @@ export const COMMAND_CODE_MODELS: readonly CommandCodeModelDef[] = [
         reasoningEfforts: ['off', 'high', 'max'],
         contextWindow: 1000000,
         maxTokens: null,
+        hidden: false,
     },
     {
         id: 'deepseek/deepseek-v4-flash',
@@ -220,6 +273,7 @@ export const COMMAND_CODE_MODELS: readonly CommandCodeModelDef[] = [
         reasoningEfforts: ['off', 'high', 'max'],
         contextWindow: 1000000,
         maxTokens: null,
+        hidden: false,
     },
     {
         id: 'deepseek/deepseek-v4-flash-vision-exp',
@@ -228,6 +282,7 @@ export const COMMAND_CODE_MODELS: readonly CommandCodeModelDef[] = [
         reasoningEfforts: ['off', 'high', 'max'],
         contextWindow: 1000000,
         maxTokens: null,
+        hidden: false,
     },
     {
         id: 'deepseek/deepseek-v4-flash-fast',
@@ -236,22 +291,34 @@ export const COMMAND_CODE_MODELS: readonly CommandCodeModelDef[] = [
         reasoningEfforts: ['low', 'high', 'max'],
         contextWindow: 1000000,
         maxTokens: null,
+        hidden: false,
     },
     {
         id: 'deepseek/deepseek-v4.1-flash',
-        name: 'DeepSeek V4.1 Flash',
+        name: 'DeepSeek V4.1 Flash (latest)',
         inputModalities: ['text', 'image'],
         reasoningEfforts: ['off', 'low', 'high', 'max'],
         contextWindow: 1000000,
         maxTokens: null,
+        hidden: false,
     },
     {
         id: 'deepseek/deepseek-v4.1-flash-fast',
-        name: 'DeepSeek V4.1 Flash Fast',
+        name: 'DeepSeek V4.1 Flash Fast (latest)',
         inputModalities: ['text', 'image'],
         reasoningEfforts: ['off', 'low', 'high', 'max'],
         contextWindow: 1000000,
         maxTokens: null,
+        hidden: false,
+    },
+    {
+        id: 'moonshotai/Kimi-K3.1-Pro',
+        name: 'Kimi K3.1 Pro',
+        inputModalities: ['text', 'image'],
+        reasoningEfforts: ['low', 'high', 'max'],
+        contextWindow: 1048576,
+        maxTokens: null,
+        hidden: false,
     },
     {
         id: 'moonshotai/Kimi-K3',
@@ -260,6 +327,7 @@ export const COMMAND_CODE_MODELS: readonly CommandCodeModelDef[] = [
         reasoningEfforts: ['low', 'high', 'max'],
         contextWindow: 1000000,
         maxTokens: null,
+        hidden: false,
     },
     {
         id: 'moonshotai/Kimi-K2.7-Code',
@@ -268,6 +336,7 @@ export const COMMAND_CODE_MODELS: readonly CommandCodeModelDef[] = [
         reasoningEfforts: [],
         contextWindow: 256000,
         maxTokens: null,
+        hidden: false,
     },
     {
         id: 'moonshotai/Kimi-K2.7-Code-Highspeed',
@@ -276,6 +345,7 @@ export const COMMAND_CODE_MODELS: readonly CommandCodeModelDef[] = [
         reasoningEfforts: [],
         contextWindow: 262000,
         maxTokens: null,
+        hidden: false,
     },
     {
         id: 'moonshotai/Kimi-K2.6',
@@ -284,6 +354,7 @@ export const COMMAND_CODE_MODELS: readonly CommandCodeModelDef[] = [
         reasoningEfforts: [],
         contextWindow: 256000,
         maxTokens: null,
+        hidden: false,
     },
     {
         id: 'moonshotai/Kimi-K2.5',
@@ -292,6 +363,7 @@ export const COMMAND_CODE_MODELS: readonly CommandCodeModelDef[] = [
         reasoningEfforts: [],
         contextWindow: 256000,
         maxTokens: null,
+        hidden: false,
     },
     {
         id: 'z-ai/glm-5.3-flash',
@@ -300,6 +372,7 @@ export const COMMAND_CODE_MODELS: readonly CommandCodeModelDef[] = [
         reasoningEfforts: ['low', 'high', 'max'],
         contextWindow: 1048576,
         maxTokens: 131072,
+        hidden: false,
     },
     {
         id: 'z-ai/glm-5.3-flashx',
@@ -308,6 +381,7 @@ export const COMMAND_CODE_MODELS: readonly CommandCodeModelDef[] = [
         reasoningEfforts: ['low', 'high', 'max'],
         contextWindow: 1000000,
         maxTokens: 131072,
+        hidden: false,
     },
     {
         id: 'zai-org/GLM-5.3',
@@ -316,6 +390,7 @@ export const COMMAND_CODE_MODELS: readonly CommandCodeModelDef[] = [
         reasoningEfforts: ['low', 'high', 'max'],
         contextWindow: 1000000,
         maxTokens: null,
+        hidden: false,
     },
     {
         id: 'zai-org/GLM-5.2',
@@ -324,6 +399,7 @@ export const COMMAND_CODE_MODELS: readonly CommandCodeModelDef[] = [
         reasoningEfforts: ['high', 'max'],
         contextWindow: 1000000,
         maxTokens: null,
+        hidden: false,
     },
     {
         id: 'zai-org/GLM-5.2-Fast',
@@ -332,6 +408,7 @@ export const COMMAND_CODE_MODELS: readonly CommandCodeModelDef[] = [
         reasoningEfforts: [],
         contextWindow: 1000000,
         maxTokens: null,
+        hidden: false,
     },
     {
         id: 'zai-org/GLM-5.1',
@@ -340,6 +417,7 @@ export const COMMAND_CODE_MODELS: readonly CommandCodeModelDef[] = [
         reasoningEfforts: [],
         contextWindow: 200000,
         maxTokens: null,
+        hidden: false,
     },
     {
         id: 'zai-org/GLM-5',
@@ -348,6 +426,25 @@ export const COMMAND_CODE_MODELS: readonly CommandCodeModelDef[] = [
         reasoningEfforts: [],
         contextWindow: 200000,
         maxTokens: null,
+        hidden: false,
+    },
+    {
+        id: 'minimax/minimax-m3.1-flash',
+        name: 'MiniMax M3.1 Flash',
+        inputModalities: ['text', 'image'],
+        reasoningEfforts: ['low', 'medium', 'high', 'xhigh', 'max'],
+        contextWindow: 1000000,
+        maxTokens: null,
+        hidden: false,
+    },
+    {
+        id: 'minimax/minimax-m3.1-flash:free',
+        name: 'MiniMax M3.1 Flash',
+        inputModalities: ['text', 'image'],
+        reasoningEfforts: ['low', 'medium', 'high', 'xhigh', 'max'],
+        contextWindow: 1000000,
+        maxTokens: null,
+        hidden: true,
     },
     {
         id: 'MiniMaxAI/MiniMax-M3',
@@ -356,6 +453,7 @@ export const COMMAND_CODE_MODELS: readonly CommandCodeModelDef[] = [
         reasoningEfforts: ['low', 'medium', 'high'],
         contextWindow: 1000000,
         maxTokens: null,
+        hidden: false,
     },
     {
         id: 'MiniMaxAI/MiniMax-M2.7',
@@ -364,6 +462,25 @@ export const COMMAND_CODE_MODELS: readonly CommandCodeModelDef[] = [
         reasoningEfforts: [],
         contextWindow: 200000,
         maxTokens: null,
+        hidden: false,
+    },
+    {
+        id: 'minimax/minimax-m3-free',
+        name: 'MiniMax M3 (Free)',
+        inputModalities: ['text', 'image'],
+        reasoningEfforts: ['low', 'medium', 'high'],
+        contextWindow: 1000000,
+        maxTokens: null,
+        hidden: true,
+    },
+    {
+        id: 'minimax/minimax-m2.7-free',
+        name: 'MiniMax M2.7 (Free)',
+        inputModalities: ['text'],
+        reasoningEfforts: [],
+        contextWindow: 197000,
+        maxTokens: null,
+        hidden: true,
     },
     {
         id: 'MiniMaxAI/MiniMax-M2.5',
@@ -372,6 +489,25 @@ export const COMMAND_CODE_MODELS: readonly CommandCodeModelDef[] = [
         reasoningEfforts: [],
         contextWindow: 200000,
         maxTokens: null,
+        hidden: false,
+    },
+    {
+        id: 'ornith/ornith-1.5-122b',
+        name: 'Ornith 1.5 122B',
+        inputModalities: ['text', 'image'],
+        reasoningEfforts: [],
+        contextWindow: 262144,
+        maxTokens: null,
+        hidden: false,
+    },
+    {
+        id: 'ornith/ornith-1.5-122b:free',
+        name: 'Ornith 1.5 122B',
+        inputModalities: ['text', 'image'],
+        reasoningEfforts: [],
+        contextWindow: 262144,
+        maxTokens: null,
+        hidden: true,
     },
     {
         id: 'xiaomi/mimo-v2.6-pro',
@@ -380,6 +516,7 @@ export const COMMAND_CODE_MODELS: readonly CommandCodeModelDef[] = [
         reasoningEfforts: [],
         contextWindow: 1048576,
         maxTokens: null,
+        hidden: false,
     },
     {
         id: 'xiaomi/mimo-v2.6-pro-ultraspeed',
@@ -388,6 +525,7 @@ export const COMMAND_CODE_MODELS: readonly CommandCodeModelDef[] = [
         reasoningEfforts: [],
         contextWindow: 1048576,
         maxTokens: null,
+        hidden: false,
     },
     {
         id: 'xiaomi/mimo-v2.6-flash',
@@ -396,6 +534,7 @@ export const COMMAND_CODE_MODELS: readonly CommandCodeModelDef[] = [
         reasoningEfforts: [],
         contextWindow: 1048576,
         maxTokens: null,
+        hidden: false,
     },
     {
         id: 'xiaomi/mimo-v2.5-pro',
@@ -404,6 +543,7 @@ export const COMMAND_CODE_MODELS: readonly CommandCodeModelDef[] = [
         reasoningEfforts: [],
         contextWindow: 1000000,
         maxTokens: null,
+        hidden: true,
     },
     {
         id: 'xiaomi/mimo-v2.5',
@@ -412,6 +552,7 @@ export const COMMAND_CODE_MODELS: readonly CommandCodeModelDef[] = [
         reasoningEfforts: [],
         contextWindow: 1000000,
         maxTokens: null,
+        hidden: true,
     },
     {
         id: 'Qwen/Qwen3.8-Omni-Flash',
@@ -420,6 +561,16 @@ export const COMMAND_CODE_MODELS: readonly CommandCodeModelDef[] = [
         reasoningEfforts: ['low', 'medium', 'xhigh'],
         contextWindow: 1000000,
         maxTokens: 131072,
+        hidden: false,
+    },
+    {
+        id: 'Qwen/Qwen3.8-Max-Prime',
+        name: 'Qwen 3.8 Max Prime',
+        inputModalities: ['text', 'image'],
+        reasoningEfforts: ['low', 'medium', 'xhigh'],
+        contextWindow: 1000000,
+        maxTokens: 131072,
+        hidden: false,
     },
     {
         id: 'Qwen/Qwen3.8-Max-0902',
@@ -428,6 +579,7 @@ export const COMMAND_CODE_MODELS: readonly CommandCodeModelDef[] = [
         reasoningEfforts: ['low', 'medium', 'xhigh'],
         contextWindow: 1000000,
         maxTokens: null,
+        hidden: false,
     },
     {
         id: 'Qwen/Qwen3.8-Max',
@@ -436,6 +588,7 @@ export const COMMAND_CODE_MODELS: readonly CommandCodeModelDef[] = [
         reasoningEfforts: ['low', 'medium', 'xhigh'],
         contextWindow: 1000000,
         maxTokens: null,
+        hidden: false,
     },
     {
         id: 'Qwen/Qwen3.8-27B',
@@ -444,6 +597,7 @@ export const COMMAND_CODE_MODELS: readonly CommandCodeModelDef[] = [
         reasoningEfforts: ['low', 'medium', 'xhigh'],
         contextWindow: 262144,
         maxTokens: 32768,
+        hidden: false,
     },
     {
         id: 'Qwen/Qwen3.8-Flash',
@@ -452,6 +606,7 @@ export const COMMAND_CODE_MODELS: readonly CommandCodeModelDef[] = [
         reasoningEfforts: ['low', 'medium', 'xhigh'],
         contextWindow: 1000000,
         maxTokens: null,
+        hidden: false,
     },
     {
         id: 'Qwen/Qwen3.7-Max',
@@ -460,6 +615,7 @@ export const COMMAND_CODE_MODELS: readonly CommandCodeModelDef[] = [
         reasoningEfforts: [],
         contextWindow: 1000000,
         maxTokens: null,
+        hidden: false,
     },
     {
         id: 'Qwen/Qwen3.7-Plus',
@@ -468,6 +624,7 @@ export const COMMAND_CODE_MODELS: readonly CommandCodeModelDef[] = [
         reasoningEfforts: [],
         contextWindow: 1000000,
         maxTokens: null,
+        hidden: false,
     },
     {
         id: 'Qwen/Qwen3.7-Flash',
@@ -476,6 +633,7 @@ export const COMMAND_CODE_MODELS: readonly CommandCodeModelDef[] = [
         reasoningEfforts: [],
         contextWindow: 1000000,
         maxTokens: null,
+        hidden: false,
     },
     {
         id: 'Qwen/Qwen3.6-Max-Preview',
@@ -484,6 +642,7 @@ export const COMMAND_CODE_MODELS: readonly CommandCodeModelDef[] = [
         reasoningEfforts: [],
         contextWindow: 200000,
         maxTokens: null,
+        hidden: false,
     },
     {
         id: 'Qwen/Qwen3.6-Plus',
@@ -492,6 +651,7 @@ export const COMMAND_CODE_MODELS: readonly CommandCodeModelDef[] = [
         reasoningEfforts: [],
         contextWindow: 200000,
         maxTokens: null,
+        hidden: false,
     },
     {
         id: 'meituan/LongCat-2.0',
@@ -500,6 +660,16 @@ export const COMMAND_CODE_MODELS: readonly CommandCodeModelDef[] = [
         reasoningEfforts: [],
         contextWindow: 1048576,
         maxTokens: null,
+        hidden: false,
+    },
+    {
+        id: 'meituan/LongCat-2.0:free',
+        name: 'LongCat 2.0 (Free)',
+        inputModalities: ['text'],
+        reasoningEfforts: [],
+        contextWindow: 1048576,
+        maxTokens: null,
+        hidden: true,
     },
     {
         id: 'stepfun/Step-5-Preview',
@@ -508,6 +678,7 @@ export const COMMAND_CODE_MODELS: readonly CommandCodeModelDef[] = [
         reasoningEfforts: ['low', 'medium', 'high'],
         contextWindow: 1000000,
         maxTokens: null,
+        hidden: false,
     },
     {
         id: 'stepfun/Step-3.7-Flash',
@@ -516,6 +687,7 @@ export const COMMAND_CODE_MODELS: readonly CommandCodeModelDef[] = [
         reasoningEfforts: [],
         contextWindow: 256000,
         maxTokens: null,
+        hidden: false,
     },
     {
         id: 'stepfun/Step-3.5-Flash',
@@ -524,6 +696,16 @@ export const COMMAND_CODE_MODELS: readonly CommandCodeModelDef[] = [
         reasoningEfforts: [],
         contextWindow: 262144,
         maxTokens: null,
+        hidden: false,
+    },
+    {
+        id: 'tencent/Hy3',
+        name: 'Tencent Hy3 (Free)',
+        inputModalities: ['text'],
+        reasoningEfforts: [],
+        contextWindow: 262144,
+        maxTokens: null,
+        hidden: true,
     },
     {
         id: 'tencent/hy3-paid',
@@ -532,6 +714,7 @@ export const COMMAND_CODE_MODELS: readonly CommandCodeModelDef[] = [
         reasoningEfforts: [],
         contextWindow: 262144,
         maxTokens: null,
+        hidden: false,
     },
     {
         id: 'tencent/hy4-preview',
@@ -540,6 +723,16 @@ export const COMMAND_CODE_MODELS: readonly CommandCodeModelDef[] = [
         reasoningEfforts: ['low', 'medium', 'high'],
         contextWindow: 1048576,
         maxTokens: null,
+        hidden: false,
+    },
+    {
+        id: 'google/gemini-4-argon',
+        name: 'Gemini 4 Argon',
+        inputModalities: ['text', 'image'],
+        reasoningEfforts: ['low', 'medium', 'high'],
+        contextWindow: 1000000,
+        maxTokens: null,
+        hidden: false,
     },
     {
         id: 'google/gemini-3.8-flash',
@@ -548,6 +741,7 @@ export const COMMAND_CODE_MODELS: readonly CommandCodeModelDef[] = [
         reasoningEfforts: ['low', 'medium', 'high'],
         contextWindow: 1000000,
         maxTokens: null,
+        hidden: false,
     },
     {
         id: 'google/gemini-3.7-flash',
@@ -556,6 +750,7 @@ export const COMMAND_CODE_MODELS: readonly CommandCodeModelDef[] = [
         reasoningEfforts: ['low', 'medium', 'high'],
         contextWindow: 1048576,
         maxTokens: null,
+        hidden: false,
     },
     {
         id: 'google/gemini-3.6-flash',
@@ -564,6 +759,7 @@ export const COMMAND_CODE_MODELS: readonly CommandCodeModelDef[] = [
         reasoningEfforts: ['low', 'medium', 'high'],
         contextWindow: 1000000,
         maxTokens: null,
+        hidden: false,
     },
     {
         id: 'google/gemini-3.5-flash',
@@ -572,6 +768,7 @@ export const COMMAND_CODE_MODELS: readonly CommandCodeModelDef[] = [
         reasoningEfforts: ['low', 'medium', 'high'],
         contextWindow: 1000000,
         maxTokens: null,
+        hidden: false,
     },
     {
         id: 'google/gemini-3.5-flash-lite',
@@ -580,6 +777,7 @@ export const COMMAND_CODE_MODELS: readonly CommandCodeModelDef[] = [
         reasoningEfforts: ['low', 'medium', 'high'],
         contextWindow: 1000000,
         maxTokens: null,
+        hidden: false,
     },
     {
         id: 'google/gemini-3.1-flash-lite',
@@ -588,6 +786,7 @@ export const COMMAND_CODE_MODELS: readonly CommandCodeModelDef[] = [
         reasoningEfforts: ['low', 'medium', 'high'],
         contextWindow: 1000000,
         maxTokens: null,
+        hidden: false,
     },
     {
         id: 'sakana/fugu-ultra',
@@ -596,6 +795,7 @@ export const COMMAND_CODE_MODELS: readonly CommandCodeModelDef[] = [
         reasoningEfforts: ['high', 'xhigh'],
         contextWindow: 1000000,
         maxTokens: null,
+        hidden: false,
     },
     {
         id: 'nvidia/nemotron-3-ultra-550b-a55b',
@@ -604,6 +804,16 @@ export const COMMAND_CODE_MODELS: readonly CommandCodeModelDef[] = [
         reasoningEfforts: [],
         contextWindow: 1000000,
         maxTokens: null,
+        hidden: false,
+    },
+    {
+        id: 'nvidia/nemotron-3.5-super-vl',
+        name: 'Nemotron 3.5 Super VL',
+        inputModalities: ['text', 'image'],
+        reasoningEfforts: ['low', 'medium', 'high'],
+        contextWindow: 262144,
+        maxTokens: null,
+        hidden: false,
     },
     {
         id: 'thinkingmachines/inkling',
@@ -612,6 +822,7 @@ export const COMMAND_CODE_MODELS: readonly CommandCodeModelDef[] = [
         reasoningEfforts: [],
         contextWindow: 256000,
         maxTokens: null,
+        hidden: false,
     },
     {
         id: 'thinkingmachines/inkling-small',
@@ -620,38 +831,97 @@ export const COMMAND_CODE_MODELS: readonly CommandCodeModelDef[] = [
         reasoningEfforts: [],
         contextWindow: 1000000,
         maxTokens: null,
+        hidden: false,
     },
     {
         id: 'stealth/space-bunny-alpha',
         name: 'Space Bunny Alpha',
         inputModalities: ['text', 'image'],
-        reasoningEfforts: ['low', 'medium', 'high', 'max'],
+        reasoningEfforts: [],
         contextWindow: 1000000,
-        maxTokens: 524288,
+        maxTokens: null,
+        hidden: true,
+    },
+    {
+        id: 'stealth/pixel-canary',
+        name: 'Pixel Canary',
+        inputModalities: ['text', 'image'],
+        reasoningEfforts: [],
+        contextWindow: 262144,
+        maxTokens: null,
+        hidden: true,
+    },
+    {
+        id: 'stealth/glyph-cluster:free',
+        name: 'Glyph Cluster',
+        inputModalities: ['text'],
+        reasoningEfforts: ['low', 'medium', 'high', 'xhigh'],
+        contextWindow: 256000,
+        maxTokens: 256000,
+        hidden: false,
+    },
+    {
+        id: 'stealth/crouton-alpha',
+        name: 'Crouton Alpha',
+        inputModalities: ['text', 'image'],
+        reasoningEfforts: ['low', 'medium', 'high', 'xhigh', 'max'],
+        contextWindow: 1048576,
+        maxTokens: 943718,
+        hidden: false,
+    },
+    {
+        id: 'reflection/beam:free',
+        name: 'Beam 1.0',
+        inputModalities: ['text'],
+        reasoningEfforts: ['low', 'medium', 'high', 'xhigh', 'max'],
+        contextWindow: 1048576,
+        maxTokens: 131072,
+        hidden: false,
     },
     {
         id: 'poolside/laguna-s-2.1-free',
-        name: 'Laguna S 2.1',
+        name: 'Laguna S 2.1 (Free)',
         inputModalities: ['text'],
         reasoningEfforts: [],
         contextWindow: 256000,
         maxTokens: 32768,
-    },
-    {
-        id: 'inclusionai/ling-3.0-flash-sante:free',
-        name: 'Ling 3.0 Flash Sante',
-        inputModalities: ['text'],
-        reasoningEfforts: [],
-        contextWindow: 262144,
-        maxTokens: 32768,
+        hidden: false,
     },
     {
         id: 'inclusionai/ling-3.1-flash:free',
+        name: 'Ling 3.1 Flash (Free)',
+        inputModalities: ['text'],
+        reasoningEfforts: [],
+        contextWindow: 262144,
+        maxTokens: null,
+        hidden: true,
+    },
+    {
+        id: 'inclusionai/ling-3.1-flash',
         name: 'Ling 3.1 Flash',
         inputModalities: ['text'],
         reasoningEfforts: ['low', 'medium', 'high'],
         contextWindow: 262144,
         maxTokens: 32768,
+        hidden: false,
+    },
+    {
+        id: 'inclusionai/ling-3.1-flash-1019',
+        name: 'Ling 3.1 Flash 1019',
+        inputModalities: ['text'],
+        reasoningEfforts: ['low', 'medium', 'high'],
+        contextWindow: 1000000,
+        maxTokens: 262144,
+        hidden: false,
+    },
+    {
+        id: 'inclusionai/ling-3.1-flash-1019:free',
+        name: 'Ling 3.1 Flash 1019',
+        inputModalities: ['text'],
+        reasoningEfforts: ['low', 'medium', 'high'],
+        contextWindow: 1000000,
+        maxTokens: 262144,
+        hidden: true,
     },
     {
         id: 'meta/muse-spark-1.1',
@@ -660,6 +930,7 @@ export const COMMAND_CODE_MODELS: readonly CommandCodeModelDef[] = [
         reasoningEfforts: ['low', 'medium', 'high', 'xhigh'],
         contextWindow: 1048576,
         maxTokens: null,
+        hidden: false,
     },
     {
         id: 'meta/muse-spark-1.2',
@@ -668,6 +939,7 @@ export const COMMAND_CODE_MODELS: readonly CommandCodeModelDef[] = [
         reasoningEfforts: ['low', 'medium', 'high', 'xhigh'],
         contextWindow: 1048576,
         maxTokens: null,
+        hidden: false,
     },
     {
         id: 'meta/muse-spark-1.2-contributor',
@@ -676,6 +948,7 @@ export const COMMAND_CODE_MODELS: readonly CommandCodeModelDef[] = [
         reasoningEfforts: ['low', 'medium', 'high', 'xhigh'],
         contextWindow: 1048576,
         maxTokens: null,
+        hidden: false,
     },
     {
         id: 'meta/muse-spark-1.3',
@@ -684,6 +957,7 @@ export const COMMAND_CODE_MODELS: readonly CommandCodeModelDef[] = [
         reasoningEfforts: ['low', 'medium', 'high', 'xhigh', 'max'],
         contextWindow: 1048576,
         maxTokens: null,
+        hidden: false,
     },
     {
         id: 'meta/muse-spark-1.3-contributor',
@@ -692,6 +966,25 @@ export const COMMAND_CODE_MODELS: readonly CommandCodeModelDef[] = [
         reasoningEfforts: ['low', 'medium', 'high', 'xhigh'],
         contextWindow: 1048576,
         maxTokens: null,
+        hidden: false,
+    },
+    {
+        id: 'meta/muse-spark-open',
+        name: 'Muse Spark Open',
+        inputModalities: ['text', 'image'],
+        reasoningEfforts: ['low', 'medium', 'high'],
+        contextWindow: 1048576,
+        maxTokens: null,
+        hidden: false,
+    },
+    {
+        id: 'meta/muse-wonder-1.0',
+        name: 'Muse Wonder',
+        inputModalities: ['text', 'image', 'file'],
+        reasoningEfforts: ['low', 'medium', 'high', 'xhigh'],
+        contextWindow: 1048576,
+        maxTokens: null,
+        hidden: false,
     },
     {
         id: 'xai/grok-4.5',
@@ -700,6 +993,7 @@ export const COMMAND_CODE_MODELS: readonly CommandCodeModelDef[] = [
         reasoningEfforts: ['low', 'medium', 'high'],
         contextWindow: 500000,
         maxTokens: null,
+        hidden: false,
     },
     {
         id: 'xai/grok-4.6',
@@ -708,6 +1002,7 @@ export const COMMAND_CODE_MODELS: readonly CommandCodeModelDef[] = [
         reasoningEfforts: ['low', 'medium', 'high', 'xhigh'],
         contextWindow: 500000,
         maxTokens: null,
+        hidden: false,
     },
     {
         id: 'xai/grok-4.7',
@@ -716,6 +1011,16 @@ export const COMMAND_CODE_MODELS: readonly CommandCodeModelDef[] = [
         reasoningEfforts: ['low', 'medium', 'high', 'xhigh'],
         contextWindow: 500000,
         maxTokens: null,
+        hidden: false,
+    },
+    {
+        id: 'mistral/mistral-large-4',
+        name: 'Mistral Large 4',
+        inputModalities: ['text', 'image'],
+        reasoningEfforts: ['low', 'medium', 'high'],
+        contextWindow: 524288,
+        maxTokens: 262144,
+        hidden: false,
     },
 ];
 
@@ -788,7 +1093,9 @@ export function commandCodeWireEffort(effort: string | undefined | null): string
  * 「支持图片」的错误会把字节发给一个拒绝整个请求的端点。
  */
 export function commandCodeInputModalities(modelId: string): Array<'text' | 'image'> {
-    return [...(commandCodeModelDef(modelId)?.inputModalities ?? ['text'])];
+    const declared = commandCodeModelDef(modelId)?.inputModalities;
+    if (!declared) return ['text'];
+    return declared.filter((modality): modality is 'text' | 'image' => modality === 'text' || modality === 'image');
 }
 
 /** 某个模型是否接受图片输入（精确 id 查表）。 */

@@ -10,9 +10,13 @@ describe('getModelPricing', () => {
         expect(getModelPricing('claude-sonnet-4-6')).to.deep.equal([20.46, 102.30]);
     });
 
-    it('prices GPT-6.1 Sol at the official $2/$10 rate with a 5% cached-input discount', () => {
+    it('prices GPT-6.1 Sol and Terra with a 5% cached-input discount', () => {
         for (const model of ['gpt-6.1-sol', 'openai/gpt-6.1-sol']) {
             expect(getModelPricing(model, 'openai'), model).to.deep.equal([13.64, 68.20]);
+            expect(getCacheDiscountFactor(model, 'openai'), model).to.equal(0.05);
+        }
+        for (const model of ['gpt-6.1-terra', 'openai/gpt-6.1-terra']) {
+            expect(getModelPricing(model, 'openai'), model).to.deep.equal([6.82, 34.10]);
             expect(getCacheDiscountFactor(model, 'openai'), model).to.equal(0.05);
         }
         // The rest of the GPT-6 family keeps the 10% cached-input rate.
@@ -51,17 +55,35 @@ describe('getModelPricing', () => {
     });
 
     it('uses current direct-provider pricing', () => {
+        expect(getModelPricing('claude-opus-5-5')).to.deep.equal([27.28, 136.40]);
+        expect(getModelPricing('claude-opus-5')).to.deep.equal([34.10, 170.50]);
+        expect(getModelPricing('claude-sonnet-5-5')).to.deep.equal([13.64, 68.20]);
+        expect(getModelPricing('claude-haiku-5-5')).to.deep.equal([0.68, 3.41]);
+        expect(getModelPricing('claude-fable-5-2')).to.deep.equal([54.56, 272.80]);
         expect(getModelPricing('claude-sonnet-5')).to.deep.equal([13.64, 68.20]);
+        expect(getModelPricing('glm-5.3')).to.deep.equal([8.00, 28.00]);
+        expect(getModelPricing('glm-5.3-flash')).to.deep.equal([0.80, 2.80]);
+        expect(getModelPricing('glm-5.3-flashx')).to.deep.equal([2.00, 7.00]);
         expect(getModelPricing('glm-5.2')).to.deep.equal([9.56, 30.05]);
         expect(getModelPricing('glm-4.7-flashx')).to.deep.equal([0.48, 2.73]);
         expect(getModelPricing('glm-4.6')).to.deep.equal([4.10, 15.02]);
+        expect(getModelPricing('MiniMax-M3.1-Flash')).to.deep.equal([1.02, 4.09]);
         expect(getModelPricing('MiniMax-M3')).to.deep.equal([2.10, 8.40]);
+        expect(getModelPricing('qwen4-max-preview')).to.deep.equal([12.00, 36.00]);
         expect(getModelPricing('qwen3.7-max-2026-06-08')).to.deep.equal([12.00, 36.00]);
         expect(getModelPricing('qwen3.8-max')).to.deep.equal([12.00, 36.00]);
+        expect(getModelPricing('qwen3.8-plus')).to.deep.equal([2.00, 8.00]);
+        expect(getModelPricing('qwen3.8-flash')).to.deep.equal([0.80, 2.70]);
+        expect(getModelPricing('qwen3.8-27b')).to.deep.equal([0.60, 2.40]);
         expect(getModelPricing('gpt-5.6')).to.deep.equal([34.10, 204.59]);
         expect(getModelPricing('gpt-5.6-sol')).to.deep.equal([34.10, 204.59]);
         expect(getModelPricing('gpt-5.6-terra')).to.deep.equal([13.64, 81.84]);
         expect(getModelPricing('gpt-5.6-luna')).to.deep.equal([1.36, 8.18]);
+        expect(getModelPricing('gemini-4-argon')).to.deep.equal([13.64, 68.20]);
+        expect(getModelPricing('gemini-4-carbon')).to.deep.equal([13.64, 68.20]);
+        expect(getModelPricing('gemini-4-hydrogen')).to.deep.equal([10.23, 51.15]);
+        expect(getModelPricing('gemini-3.8-flash')).to.deep.equal([5.12, 25.58]);
+        expect(getModelPricing('gemini-3.7-flash')).to.deep.equal([5.12, 25.58]);
         expect(getModelPricing('gemini-3.5-flash')).to.deep.equal([10.23, 61.38]);
         expect(getModelPricing('gemini-3.6-flash')).to.deep.equal([10.23, 51.15]);
         expect(getModelPricing('mimo-v2.5-pro')).to.deep.equal([3.00, 6.00]);
@@ -117,6 +139,12 @@ describe('getModelPricing', () => {
     it('provider-specific override beats base model pricing', () => {
         expect(getModelPricing('deepseek-ai/DeepSeek-V4-Pro', 'siliconflow')).to.deep.equal([3.00, 6.00]);
         expect(getModelPricing('deepseek-ai/DeepSeek-V4-Pro', 'deepinfra')).to.deep.equal([8.87, 17.73]);
+        expect(getModelPricing('z-ai/glm-5.3', 'openrouter')).to.deep.equal([8.00, 28.00]);
+        expect(getModelPricing('z-ai/glm-5.3-flash', 'openrouter')).to.deep.equal([0.80, 2.80]);
+        expect(getModelPricing('anthropic/claude-opus-5.5', 'openrouter')).to.deep.equal([27.28, 136.40]);
+        expect(getModelPricing('anthropic/claude-haiku-5.5', 'openrouter')).to.deep.equal([0.68, 3.41]);
+        expect(getModelPricing('openai/gpt-6.1-terra', 'openrouter')).to.deep.equal([6.82, 34.10]);
+        expect(getModelPricing('minimax/minimax-m3.1-flash', 'openrouter')).to.deep.equal([1.02, 4.09]);
         expect(getModelPricing('z-ai/glm-5.2', 'openrouter')).to.deep.equal([8.18, 27.96]);
         expect(getModelPricing('gpt-5.5', 'opencode')).to.deep.equal([34.10, 204.60]);
         expect(getModelPricing('deepseek-v4-pro', 'opencode')).to.deep.equal([11.87, 23.73]);
@@ -180,6 +208,9 @@ describe('getCacheDiscountFactor', () => {
     });
 
     it('returns correct factors for other providers', () => {
+        expect(getCacheDiscountFactor('glm-5.3-flashx')).to.equal(0.285);
+        expect(getCacheDiscountFactor('glm-5.3-flash')).to.equal(0.2875);
+        expect(getCacheDiscountFactor('glm-5.3')).to.equal(0.25);
         expect(getCacheDiscountFactor('glm-5.2')).to.equal(0.19);
         expect(getCacheDiscountFactor('kimi-k2.7-code')).to.equal(0.2);
         expect(getCacheDiscountFactor('kimi-k3')).to.equal(0.1);
@@ -187,6 +218,8 @@ describe('getCacheDiscountFactor', () => {
         expect(getCacheDiscountFactor('kimi-k3.1-pro')).to.equal(0.1);
         expect(getCacheDiscountFactor('kimi-k3.1-pro-highspeed')).to.equal(0.05);
         expect(getCacheDiscountFactor('kimi-k2.6')).to.equal(0.17);
+        expect(getCacheDiscountFactor('MiniMax-M3.1-Flash')).to.equal(0.1);
+        expect(getCacheDiscountFactor('MiniMax-M3')).to.equal(0.2);
         expect(getCacheDiscountFactor('minimax-m2.7')).to.equal(0.2);
         expect(getCacheDiscountFactor('mimo-v2.5-pro')).to.equal(0.0083);
         expect(getCacheDiscountFactor('mimo-v2.5')).to.equal(0.02);

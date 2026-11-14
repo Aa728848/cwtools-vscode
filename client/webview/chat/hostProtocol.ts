@@ -65,6 +65,8 @@ const validators = {
         kimiAccount: optional(isObject),
         minimaxCodeAccount: optional(isObject),
         claudeSubscriptionAccount: optional(isObject),
+        workbuddyAccount: optional(isObject),
+        opendesignAccount: optional(isObject),
         subscriptionPools: optional(isObject),
         subscriptionProxy: optional(isSubscriptionProxyStatus),
     }),

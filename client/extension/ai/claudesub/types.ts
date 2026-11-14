@@ -84,7 +84,7 @@ export const CLAUDE_ANTHROPIC_VERSION = '2023-06-01';
  * 该值是**真实发布过的** `@anthropic-ai/claude-code` 版本，而不是仅为了越过下限而挑的数字：
  * 声称一个不存在的版本，只是把一个清晰的拒绝换成不可预测的拒绝。
  */
-export const CLAUDE_CLI_VERSION = '2.1.285';
+export const CLAUDE_CLI_VERSION = '2.1.293';
 
 /**
  * 回环回调端口默认值。
@@ -240,7 +240,29 @@ export const CLAUDE_MODELS: readonly ClaudeModelEntry[] = [
         canDisableThinking: true,
     },
     {
+        id: 'claude-haiku-4-5-20251001', name: 'Claude Haiku 4.5',
+        contextWindow: 200_000, maxTokens: 64_000,
+        supportsImage: true, supportsTemperature: true,
+        thinkingMode: 'budget', reasoningEfforts: ['low', 'medium', 'high'],
+        canDisableThinking: true,
+    },
+    {
+        id: 'claude-haiku-5-5', name: 'Claude Haiku 5.5',
+        contextWindow: 1_000_000, maxTokens: 128_000,
+        supportsImage: true, supportsTemperature: false,
+        thinkingMode: 'adaptive', reasoningEfforts: ['low', 'medium', 'high', 'xhigh', 'max'],
+        canDisableThinking: true,
+        bindsThinkingToPrefix: true,
+    },
+    {
         id: 'claude-opus-4-5', name: 'Claude Opus 4.5 (latest)',
+        contextWindow: 200_000, maxTokens: 64_000,
+        supportsImage: true, supportsTemperature: true,
+        thinkingMode: 'budget', reasoningEfforts: ['low', 'medium', 'high'],
+        canDisableThinking: true,
+    },
+    {
+        id: 'claude-opus-4-5-20251101', name: 'Claude Opus 4.5',
         contextWindow: 200_000, maxTokens: 64_000,
         supportsImage: true, supportsTemperature: true,
         thinkingMode: 'budget', reasoningEfforts: ['low', 'medium', 'high'],
@@ -272,7 +294,7 @@ export const CLAUDE_MODELS: readonly ClaudeModelEntry[] = [
         contextWindow: 1_000_000, maxTokens: 128_000,
         supportsImage: true, supportsTemperature: false,
         thinkingMode: 'mid-convo', reasoningEfforts: ['low', 'medium', 'high', 'xhigh', 'max'],
-        canDisableThinking: false,
+        canDisableThinking: true,
     },
     {
         id: 'claude-opus-5-5', name: 'Claude Opus 5.5',
@@ -290,7 +312,14 @@ export const CLAUDE_MODELS: readonly ClaudeModelEntry[] = [
     },
     {
         id: 'claude-sonnet-4-5', name: 'Claude Sonnet 4.5 (latest)',
-        contextWindow: 1_000_000, maxTokens: 64_000,
+        contextWindow: 200_000, maxTokens: 64_000,
+        supportsImage: true, supportsTemperature: true,
+        thinkingMode: 'budget', reasoningEfforts: ['low', 'medium', 'high'],
+        canDisableThinking: true,
+    },
+    {
+        id: 'claude-sonnet-4-5-20250929', name: 'Claude Sonnet 4.5',
+        contextWindow: 200_000, maxTokens: 64_000,
         supportsImage: true, supportsTemperature: true,
         thinkingMode: 'budget', reasoningEfforts: ['low', 'medium', 'high'],
         canDisableThinking: true,
@@ -416,6 +445,9 @@ export function claudeThinkingFor(
     thinkingBudget: number | undefined,
 ): { thinking?: Record<string, unknown>; outputConfig?: Record<string, unknown> } {
     if (model.thinkingMode === 'none') return {};
+    if (requestedEffort === 'none' && model.canDisableThinking) {
+        return { thinking: { type: 'disabled' } };
+    }
     if (model.thinkingMode === 'mid-convo') {
         // block_binding 不是可选的：前缀被编辑后重放思考块需要它，而缺它时整个请求是 400。
         return {
@@ -441,12 +473,12 @@ export function claudeThinkingFor(
                     ? { block_binding: { prefix_mismatch_behavior: 'drop_block' } }
                     : {}),
             },
+            ...(requestedEffort && requestedEffort !== 'none'
+                ? { outputConfig: { effort: requestedEffort } }
+                : {}),
         };
     }
     // budget：思考预算计入 max_tokens，所以必须为回答留出至少 1024 token。
-    if (requestedEffort === 'none' && model.canDisableThinking) {
-        return { thinking: { type: 'disabled' } };
-    }
     const budget = typeof thinkingBudget === 'number' && thinkingBudget >= 1024 ? thinkingBudget : 8192;
     return { thinking: { type: 'enabled', display: 'summarized', budget_tokens: budget } };
 }

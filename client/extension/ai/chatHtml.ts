@@ -383,6 +383,50 @@ ${stylesheetLinks}
                     <div class="settings-hint">${t('Browser sign-in opens Command Code Studio and saves the key after it is verified. You can also paste an API key above.', '浏览器登录会打开 Command Code Studio，并在验证通过后保存 Key；也可以在上方直接粘贴 API Key。')}</div>
                     <div class="codex-quota-status" id="commandcodeQuotaStatus"></div>
                 </details>
+                <details class="settings-group settings-account" id="workbuddyAccountGroup" style="display:none" open>
+                    <summary class="settings-account-summary"><span>${svgIcon('key')} ${t('WorkBuddy subscription', 'WorkBuddy 订阅')}</span></summary>
+                    <div class="settings-hint" id="workbuddyAccountStatus"></div>
+                    <label class="settings-label" for="workbuddyRegionSelect" style="margin-top:6px">${t('Login region', '登录区域')}</label>
+                    <select class="settings-select" id="workbuddyRegionSelect">
+                        <option value="cn">${t('Mainland China (workbuddy.weixin.qq.com)', '中国大陆（workbuddy.weixin.qq.com）')}</option>
+                        <option value="intl">${t('International (workbuddy.ai)', '国际区（workbuddy.ai）')}</option>
+                    </select>
+                    <div class="settings-key-row" style="margin-top:6px">
+                        <button type="button" class="detect-btn" id="workbuddyLoginBtn" style="padding:0 8px; width:auto; border-radius:4px">${svgIcon('link')}${t('Add browser sign-in', '浏览器登录账号')}</button>
+                        <button type="button" class="detect-btn" id="workbuddyRescanBtn" style="margin-left:4px; padding:0 8px; width:auto; border-radius:4px">${svgIcon('refresh')}${t('Rescan desktop accounts', '重扫桌面端账号')}</button>
+                        <button type="button" class="detect-btn" id="workbuddyLogoutBtn" style="margin-left:4px; padding:0 8px; width:auto; border-radius:4px; display:none">${svgIcon('trash')}${t('Sign out managed', '退出托管账号')}</button>
+                    </div>
+                    <div class="settings-hint">${t('Reuses local WorkBuddy / CodeBuddy desktop sessions automatically, or add extra accounts via browser sign-in to join the pool above.', '自动复用本地 WorkBuddy / CodeBuddy 桌面端会话；也可以通过浏览器登录追加多个账号进入上方账号池。')}</div>
+                    <div id="workbuddyAtRestGroup" style="display:none; margin-top:8px; padding-top:8px; border-top:1px solid var(--vscode-panel-border);">
+                        <label class="settings-label" for="workbuddyAtRestKeyInput">${svgIcon('key')} ${t('Desktop encrypted session key ($wbEncrypted)', '桌面端加密会话保护密钥 ($wbEncrypted)')}</label>
+                        <div class="settings-hint" id="workbuddyAtRestStatus"></div>
+                        <div class="settings-key-row" style="margin-top:4px">
+                            <input class="settings-input" id="workbuddyAtRestKeyInput" type="password" placeholder="${t('Paste 32-byte key (64 hex or base64)', '粘贴 32 字节密钥（64 位 Hex 或 Base64）')}" autocomplete="off" maxlength="512" />
+                            <button type="button" class="detect-btn" id="workbuddySaveAtRestKeyBtn" style="margin-left:4px; padding:0 8px; width:auto; border-radius:4px">${t('Save key', '保存密钥')}</button>
+                            <button type="button" class="detect-btn" id="workbuddyClearAtRestKeyBtn" style="margin-left:4px; padding:0 8px; width:auto; border-radius:4px; display:none">${t('Clear key', '清除密钥')}</button>
+                        </div>
+                    </div>
+                    <div id="workbuddyCheckinGroup" style="display:none; margin-top:8px; padding-top:8px; border-top:1px solid var(--vscode-panel-border);">
+                        <div class="settings-toggle-row">
+                            <span class="settings-toggle-label">${t('Auto daily check-in (CN)', '国区每日自动签到')}</span>
+                            <label class="toggle-switch"><input type="checkbox" id="workbuddyAutoCheckinToggle"><span class="toggle-track"></span></label>
+                        </div>
+                        <div class="settings-key-row" style="margin-top:4px">
+                            <button type="button" class="detect-btn" id="workbuddyRunCheckinBtn" style="padding:0 8px; width:auto; border-radius:4px">${svgIcon('check')}${t('Check in now', '立即签到')}</button>
+                        </div>
+                        <div class="settings-hint" id="workbuddyCheckinStatus"></div>
+                    </div>
+                </details>
+                <details class="settings-group settings-account" id="opendesignAccountGroup" style="display:none" open>
+                    <summary class="settings-account-summary"><span>${svgIcon('key')} ${t('OpenDesign subscription & quota', 'OpenDesign 订阅账户与额度')}</span></summary>
+                    <div class="settings-hint" id="opendesignAccountStatus"></div>
+                    <div class="settings-key-row" style="margin-top:6px">
+                        <button type="button" class="detect-btn" id="opendesignLoginBtn" style="padding:0 8px; width:auto; border-radius:4px">${svgIcon('link')}${t('Device code sign-in', '设备码登录')}</button>
+                        <button type="button" class="detect-btn" id="opendesignRefreshQuotaBtn" style="margin-left:4px; padding:0 8px; width:auto; border-radius:4px">${svgIcon('refresh')}${t('Refresh quota', '刷新额度')}</button>
+                        <button type="button" class="detect-btn" id="opendesignLogoutBtn" style="margin-left:4px; padding:0 8px; width:auto; border-radius:4px; display:none">${svgIcon('trash')}${t('Sign out all', '全部退出')}</button>
+                    </div>
+                    <div class="settings-hint">${t('Sign in via OpenDesign browser device authorization, or paste an OpenDesign API key above; both join the pool above.', '通过 OpenDesign 浏览器设备授权登录，或在上方粘贴 OpenDesign API Key；两种凭据都会自动进入上方账号池参与轮换。')}</div>
+                </details>
                 <details class="settings-advanced">
                     <summary>${t('Advanced connection settings', '高级连接设置')}</summary>
                     <div class="settings-advanced-body">

@@ -37,6 +37,24 @@ describe('provider registry removal', () => {
         expect(getProvider('antigravity').id).to.equal(getProvider('openai').id);
         expect(getProviderApiFormat('antigravity', 'gemini-3-flash')).to.equal('openai-chat-completions');
     });
+
+    it('registers WorkBuddy and OpenDesign subscription lines with expected flags and routing', () => {
+        const workbuddy = BUILTIN_PROVIDERS['workbuddy-subscription']!;
+        expect(workbuddy).to.exist;
+        expect(workbuddy.requiresApiKey).to.equal(false);
+        expect(workbuddy.supportsFIM).to.equal(false);
+        expect(workbuddy.supportsUtilityCalls).to.equal(false);
+        expect(workbuddy.authKind).to.equal('workbuddy-oauth');
+        expect(getProviderApiFormat('workbuddy-subscription', 'glm-5.3')).to.equal('openai-chat-completions');
+        expect(getProviderApiFormat('workbuddy-subscription', 'claude-sonnet-4.6')).to.equal('anthropic-messages');
+
+        const opendesign = BUILTIN_PROVIDERS['opendesign']!;
+        expect(opendesign).to.exist;
+        expect(opendesign.requiresApiKey).to.equal(true);
+        expect(opendesign.supportsFIM).to.equal(true);
+        expect(opendesign.authKind).to.equal('opendesign-oauth');
+        expect(getProviderApiFormat('opendesign', 'claude-sonnet-5.5')).to.equal('openai-chat-completions');
+    });
 });
 
 describe('GPT-6 Astra provider support', () => {
@@ -161,7 +179,7 @@ describe('Command Code provider support', () => {
 });
 
 describe('Command Code Messages provider support', () => {
-    it('registers the Anthropic Messages endpoint with the 8 Claude models', () => {
+    it('registers the Anthropic Messages endpoint with the 11 Claude models', () => {
         const provider = getProvider('commandcode-messages');
         expect(provider).to.include({
             endpoint: 'https://api.commandcode.ai/provider/v1',
@@ -171,33 +189,38 @@ describe('Command Code Messages provider support', () => {
             supportsStreaming: true,
             supportsFIM: false,
             supportsVision: true,
-            defaultModel: 'claude-sonnet-5',
+            defaultModel: 'claude-sonnet-5-5',
         });
         expect(provider.models).to.deep.equal([
+            'claude-sonnet-5-5',
             'claude-sonnet-5',
             'claude-sonnet-4-6',
             'claude-fable-5-1',
             'claude-fable-5',
+            'claude-opus-5-5',
             'claude-opus-5',
             'claude-opus-4-8',
             'claude-opus-4-7',
+            'claude-haiku-5-5',
             'claude-haiku-4-5-20251001',
         ]);
         expect(provider.models).to.include(provider.defaultModel);
     });
 
     it('uses the Anthropic messages wire format', () => {
-        expect(getProviderApiFormat('commandcode-messages', 'claude-sonnet-5')).to.equal('anthropic-messages');
+        expect(getProviderApiFormat('commandcode-messages', 'claude-sonnet-5-5')).to.equal('anthropic-messages');
         expect(getProviderApiFormat('commandcode-messages', 'claude-haiku-4-5-20251001')).to.equal('anthropic-messages');
     });
 
     it('resolves catalog context windows with provider-scoped keys', () => {
-        expect(getModelContextTokens('claude-sonnet-5', 'commandcode-messages')).to.equal(1000000);
+        expect(getModelContextTokens('claude-sonnet-5-5', 'commandcode-messages')).to.equal(1000000);
+        expect(getModelContextTokens('claude-haiku-5-5', 'commandcode-messages')).to.equal(1000000);
         expect(getModelContextTokens('claude-haiku-4-5-20251001', 'commandcode-messages')).to.equal(200000);
     });
 
     it('derives output limits from the underlying Claude model family', () => {
-        expect(getModelOutputTokens('claude-sonnet-5', 'commandcode-messages')).to.equal(128000);
+        expect(getModelOutputTokens('claude-sonnet-5-5', 'commandcode-messages')).to.equal(128000);
+        expect(getModelOutputTokens('claude-haiku-5-5', 'commandcode-messages')).to.equal(128000);
         expect(getModelOutputTokens('claude-haiku-4-5-20251001', 'commandcode-messages')).to.equal(64000);
     });
 
@@ -273,14 +296,19 @@ describe('isModelVisionCapable', () => {
 
     it('returns false for glm text-only models', () => {
         expect(isModelVisionCapable('glm-5-turbo')).to.equal(false);
+        expect(isModelVisionCapable('glm-5.3')).to.equal(false);
     });
 
     it('returns true for glm vision models', () => {
         expect(isModelVisionCapable('glm-5v-turbo')).to.equal(true);
+        expect(isModelVisionCapable('glm-5.3-flash')).to.equal(true);
+        expect(isModelVisionCapable('glm-5.3-flashx')).to.equal(true);
     });
 
-    it('tracks newly multimodal MiniMax, Qwen, and Kimi models', () => {
+    it('tracks newly multimodal MiniMax, Qwen, Kimi, and Claude models', () => {
         expect(isModelVisionCapable('MiniMax-M3')).to.equal(true);
+        expect(isModelVisionCapable('MiniMax-M3.1-Flash')).to.equal(true);
+        expect(isModelVisionCapable('claude-haiku-5-5')).to.equal(true);
         expect(isModelVisionCapable('qwen3.7-max-2026-06-08')).to.equal(true);
         expect(isModelVisionCapable('qwen3.7-plus')).to.equal(true);
         expect(isModelVisionCapable('kimi-k2.7-code-highspeed')).to.equal(true);
@@ -437,7 +465,10 @@ describe('getModelOutputTokens', () => {
     });
 
     it('uses current direct-provider output limits', () => {
+        expect(getModelOutputTokens('claude-opus-5-5', 'claude')).to.equal(128000);
+        expect(getModelOutputTokens('claude-haiku-5-5', 'claude')).to.equal(128000);
         expect(getModelOutputTokens('claude-sonnet-5', 'claude')).to.equal(128000);
+        expect(getModelOutputTokens('MiniMax-M3.1-Flash', 'minimax')).to.equal(128000);
         expect(getModelOutputTokens('MiniMax-M2.7', 'minimax')).to.equal(131072);
         expect(getModelOutputTokens('mimo-v2.5-pro', 'mimo')).to.equal(131072);
         expect(getModelOutputTokens('mimo-v2.6-pro', 'mimo')).to.equal(131072);
@@ -639,6 +670,8 @@ describe('getProviderApiFormat', () => {
             'commandcode-messages': 'anthropic-messages',
             kimi: 'openai-chat-completions',
             'kimi-code-plan': 'openai-chat-completions',
+            'workbuddy-subscription': 'openai-chat-completions',
+            opendesign: 'openai-chat-completions',
         } as const;
 
         const httpProviderIds = Object.values(BUILTIN_PROVIDERS).map(provider => provider.id).sort();
@@ -672,8 +705,10 @@ describe('getEffectiveReasoningEffort', () => {
         expect(getEffectiveReasoningEffort('gpt-6-luna', 'none', 'openai-responses')).to.equal('none');
         expect(getEffectiveReasoningEffort('gpt-6-astra', 'max', 'openai-responses')).to.equal('max');
         expect(getEffectiveReasoningEffort('gpt-6-astra', 'none', 'openai-responses')).to.equal('low');
+        expect(getEffectiveReasoningEffort('gpt-6.1-terra', 'none', 'openai-responses')).to.equal('none');
+        expect(getEffectiveReasoningEffort('gpt-6.1-terra', 'max', 'openai-responses')).to.equal('max');
         // GPT-6 has no `minimal` effort, so it must never reach the wire.
-        for (const model of ['gpt-6-astra', 'gpt-6.1-sol', 'gpt-6-sol', 'gpt-6-luna']) {
+        for (const model of ['gpt-6-astra', 'gpt-6.1-sol', 'gpt-6.1-terra', 'gpt-6-sol', 'gpt-6-luna']) {
             expect(getEffectiveReasoningEffort(model, 'minimal', 'openai-responses'), model).to.equal('low');
         }
         expect(getEffectiveReasoningEffort('gpt-6.1-sol', 'max', 'openai-responses')).to.equal('max');
@@ -686,15 +721,19 @@ describe('getEffectiveReasoningEffort', () => {
         expect(getEffectiveReasoningEffort('gpt-6.2-sol', 'max', 'openai-responses')).to.equal('xhigh');
     });
 
-    it('caps GPT-6.1 Sol at the Codex service ceiling while the API keeps 1,050,000', () => {
+    it('caps GPT-6.1 Sol and Terra at the Codex service ceiling while the API keeps 1,050,000', () => {
         expect(getModelContextTokens('gpt-6.1-sol', 'openai')).to.equal(1050000);
         expect(getModelContextTokens('gpt-6.1-sol', 'codex-chatgpt')).to.equal(384000);
+        expect(getModelContextTokens('gpt-6.1-terra', 'openai')).to.equal(1050000);
+        expect(getModelContextTokens('gpt-6.1-terra', 'codex-chatgpt')).to.equal(500000);
         // Codex catalog max_context_window is 872,000, so 1M must not be offered.
         expect(clampConfiguredContextTokens('codex-chatgpt', 'gpt-6.1-sol', 1050000)).to.equal(872000);
+        expect(clampConfiguredContextTokens('codex-chatgpt', 'gpt-6.1-terra', 1050000)).to.equal(872000);
         expect(clampConfiguredContextTokens('codex-chatgpt', 'gpt-6.1-sol', 872000)).to.equal(872000);
         expect(clampConfiguredContextTokens('codex-chatgpt', 'gpt-6.1-sol', 272000)).to.equal(272000);
         // The direct API channel is unaffected by the Codex ceiling.
         expect(clampConfiguredContextTokens('openai', 'gpt-6.1-sol', 1050000)).to.equal(1050000);
+        expect(clampConfiguredContextTokens('openai', 'gpt-6.1-terra', 1050000)).to.equal(1050000);
         // The whole GPT-6 family shares the 872K Codex ceiling.
         expect(clampConfiguredContextTokens('codex-chatgpt', 'gpt-6-astra', 1050000)).to.equal(872000);
     });
@@ -1077,8 +1116,10 @@ describe('BUILTIN_PROVIDERS', () => {
         // live listing raises it per model once an account is signed in.
         expect(codex.maxContextTokens).to.equal(272000);
         for (const model of codex.models) {
-            // Only the GPT-6 family starts above the listing's 272K floor.
-            const expected = isCodexGpt6FamilyModel(model) ? 384000 : 272000;
+            // Only the GPT-6 family starts above the listing's 272K floor, with GPT-6.1 Terra at 500K.
+            const expected = model === 'gpt-6.1-terra'
+                ? 500000
+                : isCodexGpt6FamilyModel(model) ? 384000 : 272000;
             expect(getModelContextTokens(model, codex.id), model).to.equal(expected);
         }
         expect(getProviderApiFormat(codex.id, codex.defaultModel)).to.equal('openai-responses');
@@ -1094,6 +1135,7 @@ describe('BUILTIN_PROVIDERS', () => {
         expect(BUILTIN_PROVIDERS['openai']!.models).to.include.members([
             'gpt-6-astra',
             'gpt-6.1-sol',
+            'gpt-6.1-terra',
             'gpt-6-sol',
             'gpt-6-luna',
             'gpt-5.6',
@@ -1103,6 +1145,7 @@ describe('BUILTIN_PROVIDERS', () => {
             'gpt-5.4-pro',
         ]);
         expect(BUILTIN_PROVIDERS['openai']!.defaultModel).to.equal('gpt-6-astra');
+        expect(getModelContextTokens('gpt-6.1-terra')).to.equal(1050000);
         expect(getModelContextTokens('gpt-6-sol')).to.equal(1050000);
         expect(getModelContextTokens('gpt-6-luna')).to.equal(1050000);
         expect(getModelContextTokens('gpt-5.6')).to.equal(1050000);
@@ -1110,9 +1153,19 @@ describe('BUILTIN_PROVIDERS', () => {
         expect(getModelContextTokens('gpt-5.6-terra')).to.equal(1050000);
         expect(getModelContextTokens('gpt-5.6-luna')).to.equal(400000);
         expect(getModelContextTokens('gpt-5.4-pro')).to.equal(1050000);
-        expect(BUILTIN_PROVIDERS['claude']!.models).to.include('claude-sonnet-5');
-        expect(BUILTIN_PROVIDERS['glm']!.defaultModel).to.equal('glm-5.2');
+        expect(BUILTIN_PROVIDERS['claude']!.defaultModel).to.equal('claude-opus-5-5');
+        expect(BUILTIN_PROVIDERS['claude']!.models).to.include.members([
+            'claude-opus-5-5',
+            'claude-sonnet-5-5',
+            'claude-fable-5-2',
+            'claude-sonnet-5',
+            'claude-haiku-5-5',
+        ]);
+        expect(BUILTIN_PROVIDERS['glm']!.defaultModel).to.equal('glm-5.3');
         expect(BUILTIN_PROVIDERS['glm']!.models).to.include.members([
+            'glm-5.3',
+            'glm-5.3-flash',
+            'glm-5.3-flashx',
             'glm-4.7-flashx',
             'glm-4.6',
             'glm-4.6v',
@@ -1123,11 +1176,26 @@ describe('BUILTIN_PROVIDERS', () => {
             'glm-5v',
             'glm-5v-flash',
         ]);
-        expect(BUILTIN_PROVIDERS['qwen']!.defaultModel).to.equal('qwen3.7-max-2026-06-08');
+        expect(BUILTIN_PROVIDERS['qwen']!.defaultModel).to.equal('qwen3.8-max');
+        expect(BUILTIN_PROVIDERS['qwen']!.models).to.include.members([
+            'qwen4-max-preview',
+            'qwen3.8-max',
+            'qwen3.8-max-0902',
+            'qwen3.8-plus',
+            'qwen3.8-flash',
+            'qwen3.8-27b',
+        ]);
         expect(BUILTIN_PROVIDERS['qwen']!.models).to.not.include('qwen3.7-flash');
+        expect(BUILTIN_PROVIDERS['google']!.defaultModel).to.equal('gemini-3.8-flash');
         expect(BUILTIN_PROVIDERS['google']!.models).to.deep.equal([
-            'gemini-3.5-flash',
+            'gemini-4-argon',
+            'gemini-4-carbon',
+            'gemini-4-hydrogen',
+            'gemini-3.8-flash',
+            'gemini-3.7-flash',
             'gemini-3.6-flash',
+            'gemini-3.5-flash',
+            'gemini-3.5-flash-lite',
             'gemini-3.1-pro-preview',
             'gemini-3.1-flash-lite',
             'gemini-3-flash-preview',

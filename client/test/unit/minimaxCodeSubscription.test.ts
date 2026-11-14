@@ -10,10 +10,12 @@ import {
     MINIMAX_CODE_MODELS,
     MINIMAX_CODE_OAUTH_TOKEN_PATH,
     MINIMAX_CODE_REGION_HOSTS,
+    MINIMAX_CODE_RENAMED_MODEL_IDS,
     isMinimaxCodeModelId,
     minimaxCodeContextWindows,
     minimaxCodeModelDef,
     minimaxCodeOutputConfig,
+    resolveMinimaxCodeModelId,
 } from '../../extension/ai/minimaxcode/types';
 import {
     MINIMAX_CODE_SECRET_KEY,
@@ -58,14 +60,60 @@ class Secrets {
 describe('MiniMax Code catalog and thinking shape', () => {
     it('ships the four subscription models with their transcribed windows', () => {
         expect(MINIMAX_CODE_MODELS.map(model => model.id)).to.deep.equal([
-            'MiniMax-M2.7', 'MiniMax-M2.7-highspeed', 'MiniMax-M3', 'MiniMax-M3.1-Flash-Preview',
+            'MiniMax-M2.7', 'MiniMax-M2.7-highspeed', 'MiniMax-M3', 'MiniMax-M3.1-Flash',
         ]);
         expect(minimaxCodeModelDef('MiniMax-M3')!.contextWindow).to.equal(512_000);
         expect(minimaxCodeModelDef('MiniMax-M3')!.optionalContextWindow).to.equal(1_000_000);
-        expect(minimaxCodeModelDef('MiniMax-M3.1-Flash-Preview')!.contextWindow).to.equal(1_000_000);
+        expect(minimaxCodeModelDef('MiniMax-M3.1-Flash')!.contextWindow).to.equal(1_000_000);
         expect(isMinimaxCodeModelId('MiniMax-M3')).to.equal(true);
+        expect(isMinimaxCodeModelId('MiniMax-M3.1-Flash')).to.equal(true);
         expect(isMinimaxCodeModelId('MiniMax-M9')).to.equal(false);
         expect(minimaxCodeContextWindows()['MiniMax-M3']).to.equal(512_000);
+    });
+
+    it('normalizes the retired Preview id onto GA MiniMax-M3.1-Flash across lookups and requests', () => {
+        expect(MINIMAX_CODE_RENAMED_MODEL_IDS).to.deep.equal({
+            'MiniMax-M3.1-Flash-Preview': 'MiniMax-M3.1-Flash',
+        });
+        expect(resolveMinimaxCodeModelId('MiniMax-M3.1-Flash-Preview')).to.equal('MiniMax-M3.1-Flash');
+        expect(isMinimaxCodeModelId('MiniMax-M3.1-Flash-Preview')).to.equal(true);
+        expect(minimaxCodeModelDef('MiniMax-M3.1-Flash-Preview')!.id).to.equal('MiniMax-M3.1-Flash');
+        expect(minimaxCodeModelDef('MiniMax-M3.1-Flash-Preview')!.contextWindow).to.equal(1_000_000);
+        expect(minimaxCodeOutputConfig('MiniMax-M3.1-Flash-Preview', 'low')).to.deep.equal({ effort: 'low' });
+
+        const moduleLoader = require('module') as { _load: (...args: any[]) => any };
+        const originalLoad = moduleLoader._load;
+        const vscodeStub = {
+            env: { language: 'en' },
+            window: {
+                showErrorMessage: () => undefined,
+                showWarningMessage: () => undefined,
+                showInformationMessage: () => undefined,
+            },
+            workspace: {
+                getConfiguration: () => ({ get: () => undefined }),
+            },
+            commands: {},
+        };
+        moduleLoader._load = function (this: unknown, request: string, ...args: any[]) {
+            if (request === 'vscode') return vscodeStub;
+            return originalLoad.apply(this, [request, ...args]);
+        };
+        try {
+            const { toClaudeRequest } = require('../../extension/ai/providers') as typeof import('../../extension/ai/providers');
+            const claudeRequest = toClaudeRequest(
+                {
+                    model: 'MiniMax-M3.1-Flash-Preview',
+                    messages: [{ role: 'user', content: 'Hello' }],
+                    reasoning_effort: 'high',
+                },
+                { minimaxCodeModel: 'MiniMax-M3.1-Flash-Preview' },
+            );
+            expect(claudeRequest.model).to.equal('MiniMax-M3.1-Flash');
+            expect(claudeRequest.output_config).to.deep.equal({ effort: 'high' });
+        } finally {
+            moduleLoader._load = originalLoad;
+        }
     });
 
     it('declares only the modalities this route can actually encode', () => {
@@ -81,10 +129,10 @@ describe('MiniMax Code catalog and thinking shape', () => {
         expect(minimaxCodeOutputConfig('MiniMax-M3', null)).to.equal(undefined);
         expect(minimaxCodeOutputConfig('MiniMax-M3', 'none')).to.deep.equal({ effort: 'none' });
         expect(minimaxCodeOutputConfig('MiniMax-M3', 'high')).to.equal(undefined);
-        expect(minimaxCodeOutputConfig('MiniMax-M3.1-Flash-Preview', 'default')).to.equal(undefined);
-        expect(minimaxCodeOutputConfig('MiniMax-M3.1-Flash-Preview', null)).to.equal(undefined);
-        expect(minimaxCodeOutputConfig('MiniMax-M3.1-Flash-Preview', 'low')).to.deep.equal({ effort: 'low' });
-        expect(minimaxCodeOutputConfig('MiniMax-M3.1-Flash-Preview', 'nonsense')).to.equal(undefined);
+        expect(minimaxCodeOutputConfig('MiniMax-M3.1-Flash', 'default')).to.equal(undefined);
+        expect(minimaxCodeOutputConfig('MiniMax-M3.1-Flash', null)).to.equal(undefined);
+        expect(minimaxCodeOutputConfig('MiniMax-M3.1-Flash', 'low')).to.deep.equal({ effort: 'low' });
+        expect(minimaxCodeOutputConfig('MiniMax-M3.1-Flash', 'nonsense')).to.equal(undefined);
         expect(minimaxCodeOutputConfig('MiniMax-M9', 'high')).to.equal(undefined);
     });
 

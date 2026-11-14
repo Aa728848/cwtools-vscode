@@ -161,8 +161,8 @@ export const MINIMAX_CODE_MODELS: readonly MinimaxCodeModelEntry[] = [
         description: '旗舰订阅模型。思考默认开启且可关闭。接受文本与图片，单图上限 10MB。',
     },
     {
-        id: 'MiniMax-M3.1-Flash-Preview',
-        name: 'MiniMax M3.1 Flash Preview',
+        id: 'MiniMax-M3.1-Flash',
+        name: 'MiniMax M3.1 Flash',
         contextWindow: 1_000_000,
         optionalContextWindow: null,
         maxTokens: 128_000,
@@ -173,20 +173,30 @@ export const MINIMAX_CODE_MODELS: readonly MinimaxCodeModelEntry[] = [
         reasoningEfforts: ['default', 'low', 'medium', 'high', 'xhigh', 'max'],
         defaultReasoningEffort: 'default',
         maxImageBytes: 10 * 1024 * 1024,
-        description: '1M 上下文的预览版 Flash。思考强制开启并可指定档位。',
+        description: '1M 上下文的正式版 Flash。思考强制开启并可指定档位。',
     },
 ];
+
+/** 单向别名映射：保留历史 Preview 模型名对 GA 正式条目的解析兼容。 */
+export const MINIMAX_CODE_RENAMED_MODEL_IDS: Readonly<Record<string, string>> = {
+    'MiniMax-M3.1-Flash-Preview': 'MiniMax-M3.1-Flash',
+};
+
+export function resolveMinimaxCodeModelId(modelId: string): string {
+    const trimmed = modelId.trim();
+    return MINIMAX_CODE_RENAMED_MODEL_IDS[trimmed] ?? trimmed;
+}
 
 const MINIMAX_CODE_BY_ID = new Map(MINIMAX_CODE_MODELS.map(model => [model.id, model]));
 
 /** 某个模型 id 的目录条目；未知 id 返回 undefined。 */
 export function minimaxCodeModelDef(modelId: string): MinimaxCodeModelEntry | undefined {
-    return MINIMAX_CODE_BY_ID.get(modelId.trim());
+    return MINIMAX_CODE_BY_ID.get(resolveMinimaxCodeModelId(modelId));
 }
 
 /** 某个模型 id 是否已知。 */
 export function isMinimaxCodeModelId(value: unknown): boolean {
-    return typeof value === 'string' && MINIMAX_CODE_BY_ID.has(value.trim());
+    return typeof value === 'string' && MINIMAX_CODE_BY_ID.has(resolveMinimaxCodeModelId(value));
 }
 
 /**

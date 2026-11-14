@@ -35,6 +35,8 @@ export function isDeepSeekPeakPricingWindow(at: Date = new Date()): boolean {
 /** Look up per-million-token CNY cost for a model. Falls back to [0, 0] if unknown. */
 export function getModelPricing(model: string, providerId?: string, at?: Date): [number, number] {
     if (!model) return [0, 0];
+    // WorkBuddy 按订阅账号积分倍率消耗（无按量人民币费率），直接返回 [0, 0] 防止落入裸模型名价格表兜底。
+    if (providerId === 'workbuddy-subscription') return [0, 0];
     const deepSeekKey = at ? directDeepSeekModelKey(model, providerId) : undefined;
     if (deepSeekKey && !isDeepSeekPeakPricingWindow(at)) {
         return DEEPSEEK_OFF_PEAK_PRICING[deepSeekKey]!;
@@ -119,8 +121,8 @@ export function getCacheDiscountFactor(model: string, providerId?: string): numb
     // Anthropic Claude
     if (lower.includes('claude')) return 0.1;
     // OpenAI GPT series
-    // GPT-6.1 Sol is priced at 5% ($0.10 of $2), unlike the rest of the family.
-    if (lower.includes('gpt-6.1-sol')) return 0.05;
+    // GPT-6.1 Sol and GPT-6.1 Terra price cached input at 5% of base input.
+    if (lower.includes('gpt-6.1-sol') || lower.includes('gpt-6.1-terra')) return 0.05;
     if (lower.includes('gpt-6-')) return 0.1; // GPT-6 Astra/Sol/Luna cached input = 10% of input
     if (lower.startsWith('gpt-5.6')) return 0.1; // Sol/Terra/Luna all cache at 10% (BenchLM 2026-08)
     if (lower.includes('gpt-') || lower.includes('gpt5')) return 0.5;
@@ -130,6 +132,9 @@ export function getCacheDiscountFactor(model: string, providerId?: string): numb
     if (lower.startsWith('qwen3.8')) return 0.125; // 3.8-Max: 1.5/12 implicit-cache rate
     if (lower.includes('qwen')) return 0.2;
     // Zhipu GLM
+    if (lower.includes('glm-5.3-flashx')) return 0.285;
+    if (lower.includes('glm-5.3-flash')) return 0.2875;
+    if (lower.includes('glm-5.3')) return 0.25;
     if (lower.includes('glm')) return 0.19;
     // Moonshot Kimi — K3.1 Pro bills cache hits at ¥1.30/MTok against a ¥13 input
     // rate (10%), while the highspeed line keeps the same cache price against its
@@ -141,6 +146,7 @@ export function getCacheDiscountFactor(model: string, providerId?: string): numb
     if (lower.includes('kimi-k2.5')) return 0.18;
     if (lower.includes('kimi')) return 0.17;
     // MiniMax
+    if (lower.includes('minimax-m3.1')) return 0.1;
     if (lower.includes('minimax-m3') || lower.includes('minimax-m2.7')) return 0.2;
     if (lower.includes('minimax')) return 0.1;
     // Xiaomi MiMo — extremely aggressive cache pricing

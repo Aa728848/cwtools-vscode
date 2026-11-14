@@ -146,6 +146,36 @@ export async function routeWebviewMessage(
         case 'claudeSubscriptionLogout':
             await provider.settingsManager.logoutClaudeSubscription(sourceSurface);
             break;
+        case 'workbuddyLogin':
+            await provider.settingsManager.loginWorkBuddy(msg.region, sourceSurface);
+            break;
+        case 'workbuddyLogout':
+            await provider.settingsManager.logoutWorkBuddy(sourceSurface);
+            break;
+        case 'workbuddyRescan':
+            await provider.settingsManager.rescanWorkBuddyAccounts(sourceSurface);
+            break;
+        case 'workbuddySaveAtRestKey':
+            await provider.settingsManager.saveWorkBuddyAtRestKey(msg.keyText, sourceSurface);
+            break;
+        case 'workbuddyClearAtRestKey':
+            await provider.settingsManager.clearWorkBuddyAtRestKey(sourceSurface);
+            break;
+        case 'workbuddyRunCheckin':
+            await provider.settingsManager.runWorkBuddyCheckin(sourceSurface);
+            break;
+        case 'workbuddyToggleAutoCheckin':
+            await provider.settingsManager.toggleWorkBuddyAutoCheckin(msg.enabled, sourceSurface);
+            break;
+        case 'opendesignLogin':
+            await provider.settingsManager.loginOpenDesign(sourceSurface);
+            break;
+        case 'opendesignLogout':
+            await provider.settingsManager.logoutOpenDesign(sourceSurface);
+            break;
+        case 'opendesignRefreshQuota':
+            await provider.settingsManager.refreshOpenDesignQuota(sourceSurface);
+            break;
         case 'setSubscriptionPoolStrategy':
             await provider.settingsManager.setSubscriptionPoolStrategy(msg.providerId, msg.strategy, sourceSurface);
             break;

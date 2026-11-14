@@ -52,6 +52,10 @@ import {
     sessionFileWriteMode,
     setSessionPermissionMode,
 } from './runner/sessionPermissions';
+import { OPENDESIGN_PROVIDER_ID } from './opendesign/types';
+import { getCachedOpenDesignModels } from './opendesign/catalog';
+import { WORKBUDDY_PROVIDER_ID } from './workbuddy/types';
+import { workBuddyCatalogForSettings, workBuddyContextWindows } from './workbuddy/modelCatalog';
 import {
     getModelReasoningCapability,
     getProviderApiFormat,
@@ -420,6 +424,16 @@ export class ChatSettingsManager {
             }
         }
 
+        const needWorkBuddyStatus = showPanel || config.provider === WORKBUDDY_PROVIDER_ID;
+        const needOpenDesignStatus = showPanel || config.provider === OPENDESIGN_PROVIDER_ID;
+        const [workbuddyAccount, opendesignAccount] = await Promise.all([
+            needWorkBuddyStatus ? this.aiService.getWorkBuddyAccountStatus().catch(() => undefined) : Promise.resolve(undefined),
+            needOpenDesignStatus ? this.aiService.getOpenDesignAccountStatus().catch(() => undefined) : Promise.resolve(undefined),
+        ]);
+        const workbuddyCatalog = workBuddyCatalogForSettings(workbuddyAccount?.accounts[0]?.region);
+        const workbuddyWindows = workBuddyContextWindows(workbuddyCatalog.models);
+        const openDesignCachedModels = getCachedOpenDesignModels();
+
         const providers: SettingsProviderView[] = Object.values(BUILTIN_PROVIDERS).map(p => {
             const customNonFim = p.id === 'custom' && config.customApiFormat !== 'openai-chat-completions';
             const codexModels = p.id === 'codex-chatgpt' ? (codexAccount?.models ?? []) : undefined;
@@ -427,19 +441,31 @@ export class ChatSettingsManager {
             // replaces the shipped list. An empty listing (signed out, or a read that
             // failed) keeps the shipped table rather than emptying the picker.
             const kimiModels = p.id === 'kimi-code-plan' ? kimiCatalogModelIds(kimiCatalog) : undefined;
+            const workbuddyModels = p.id === WORKBUDDY_PROVIDER_ID && workbuddyCatalog.models.length > 0
+                ? workbuddyCatalog.models.map(m => m.id)
+                : undefined;
+            const openDesignModels = p.id === OPENDESIGN_PROVIDER_ID && openDesignCachedModels.length > 0
+                ? openDesignCachedModels.map(m => m.id)
+                : undefined;
+            const resolvedModels = codexModels ?? kimiModels ?? workbuddyModels ?? openDesignModels ?? p.models;
+            const catalogDefault = p.id === 'kimi-code-plan'
+                ? kimiCatalogDefaultModel(kimiCatalog, p.defaultModel)
+                : (workbuddyModels
+                    ? (workbuddyModels.includes(p.defaultModel) ? p.defaultModel : (workbuddyModels[0] ?? p.defaultModel))
+                    : (openDesignModels
+                        ? (openDesignModels.includes(p.defaultModel) ? p.defaultModel : (openDesignModels[0] ?? p.defaultModel))
+                        : p.defaultModel));
             return {
                 id: p.id,
                 name: p.id === 'codex-chatgpt'
                     ? aiText('Codex (ChatGPT Subscription)', 'Codex（ChatGPT 订阅）')
                     : p.name,
-                models: codexModels ?? kimiModels ?? p.models,
+                models: resolvedModels,
                 inlineModels: p.inlineModels,
                 // A default the account's catalog does not offer is not a default:
                 // it would fail on the first request, so the first offered id takes
                 // its place. A saved non-default choice is never rewritten here.
-                defaultModel: codexModels?.[0] ?? (p.id === 'kimi-code-plan'
-                    ? kimiCatalogDefaultModel(kimiCatalog, p.defaultModel)
-                    : p.defaultModel),
+                defaultModel: codexModels?.[0] ?? catalogDefault,
                 requiresApiKey: p.requiresApiKey,
                 defaultEndpoint: p.endpoint,
                 userEndpoint: this.aiService.getEndpointForProvider(p.id),
@@ -670,6 +696,17 @@ export class ChatSettingsManager {
                 ...Object.fromEntries(
                     CLAUDE_MODELS.map(model => [`claude-subscription:${model.id}`, model.contextWindow]),
                 ),
+                ...Object.fromEntries(
+                    Object.entries(workbuddyWindows).map(
+                        ([model, window]) => [`${WORKBUDDY_PROVIDER_ID}:${model}`, window],
+                    ),
+                ),
+                ...Object.fromEntries(
+                    openDesignCachedModels
+                        .filter((model): model is typeof model & { contextWindow: number } =>
+                            typeof model.contextWindow === 'number' && model.contextWindow > 0)
+                        .map(model => [`${OPENDESIGN_PROVIDER_ID}:${model.id}`, model.contextWindow]),
+                ),
             },
             thinkingModelPrefixes: ALWAYS_THINKING_PREFIXES,
             reasoningCapabilities,
@@ -678,6 +715,8 @@ export class ChatSettingsManager {
             kimiAccount,
             minimaxCodeAccount,
             claudeSubscriptionAccount,
+            workbuddyAccount,
+            opendesignAccount,
             subscriptionPools,
             subscriptionProxy,
             mcpFileServers: fileMcpServers.length > 0 ? fileMcpServers : undefined,
@@ -830,6 +869,9 @@ export class ChatSettingsManager {
             // would leave the user believing the provider is configured.
             if (trimmedKey.length > 0 && !trimmedKey.startsWith('•')) {
                 await this.aiService.getKeyManager().setKey(settings.provider, trimmedKey);
+                if (settings.provider === OPENDESIGN_PROVIDER_ID) {
+                    await this.aiService.addOpenDesignStaticKey(trimmedKey);
+                }
             }
         }
         if (settings.webAccess) {
@@ -985,6 +1027,74 @@ export class ChatSettingsManager {
 
         if (!endpoint) {
             this.postMessage({ type: 'apiModelsFetched', providerId, models: [], error: aiText('Please enter an endpoint first', '请先填写 Endpoint') });
+            return;
+        }
+
+        if (providerId === OPENDESIGN_PROVIDER_ID) {
+            try {
+                const trimmedKey = apiKeyOverride.trim();
+                const catalog = await this.aiService.listOpenDesignModels({
+                    ...(trimmedKey && !trimmedKey.startsWith('•') ? { runtimeKey: trimmedKey } : {}),
+                    ...(endpointOverride.trim() ? { baseUrl: endpointOverride.trim() } : {}),
+                    forceRefresh: true,
+                });
+                const normalized = catalog.map(m => ({ id: m.id }));
+                const dynContexts: Record<string, number> = {};
+                const reasoningCapabilities: Record<string, ModelReasoningCapability> = {};
+                for (const model of catalog) {
+                    if (typeof model.contextWindow === 'number' && model.contextWindow > 0) {
+                        dynContexts[model.id] = model.contextWindow;
+                    }
+                    reasoningCapabilities[reasoningCapabilityKey(providerId, model.id)] = getModelReasoningCapability(
+                        providerId,
+                        model.id,
+                        getProviderApiFormat(providerId, model.id, customApiFormat),
+                    );
+                }
+                this.postMessage({
+                    type: 'apiModelsFetched',
+                    providerId,
+                    models: normalized,
+                    dynContexts,
+                    reasoningCapabilities,
+                    ctxNote: aiText(
+                        `(catalog refreshed: ${catalog.length} models)`,
+                        `（已刷新 OpenDesign 目录：共 ${catalog.length} 个模型）`,
+                    ),
+                });
+            } catch (error) {
+                this.postMessage({ type: 'apiModelsFetched', providerId, models: [], error: settingsErrorMessage(error) });
+            }
+            return;
+        }
+
+        if (providerId === WORKBUDDY_PROVIDER_ID) {
+            try {
+                const entries = await this.aiService.listWorkBuddyModels(true);
+                const normalized = entries.map(m => ({ id: m.id }));
+                const dynContexts = workBuddyContextWindows(entries);
+                const reasoningCapabilities: Record<string, ModelReasoningCapability> = {};
+                for (const entry of entries) {
+                    reasoningCapabilities[reasoningCapabilityKey(providerId, entry.id)] = getModelReasoningCapability(
+                        providerId,
+                        entry.id,
+                        getProviderApiFormat(providerId, entry.id, customApiFormat),
+                    );
+                }
+                this.postMessage({
+                    type: 'apiModelsFetched',
+                    providerId,
+                    models: normalized,
+                    dynContexts,
+                    reasoningCapabilities,
+                    ctxNote: aiText(
+                        `(catalog refreshed: ${entries.length} models)`,
+                        `（已刷新 WorkBuddy 目录：共 ${entries.length} 个模型）`,
+                    ),
+                });
+            } catch (error) {
+                this.postMessage({ type: 'apiModelsFetched', providerId, models: [], error: settingsErrorMessage(error) });
+            }
             return;
         }
 
@@ -1165,7 +1275,13 @@ export class ChatSettingsManager {
             return;
         }
         if (provider.requiresApiKey && !apiKey) {
-            this.postMessage({ type: 'testConnectionResult', ok: false, message: aiText('Enter an API key', '请填写 API Key') });
+            this.postMessage({
+                type: 'testConnectionResult',
+                ok: false,
+                message: providerId === OPENDESIGN_PROVIDER_ID
+                    ? aiText('Enter an OpenDesign API key or sign in with device code', '请填写 OpenDesign API Key 或先使用设备码登录')
+                    : aiText('Enter an API key', '请填写 API Key'),
+            });
             return;
         }
 
@@ -1455,6 +1571,207 @@ export class ChatSettingsManager {
         });
     }
 
+    async loginWorkBuddy(
+        region: 'cn' | 'intl' = 'cn',
+        targetSurface: 'chat' | 'manager' = 'chat',
+    ): Promise<void> {
+        const wbRegion = region === 'intl' ? 'intl' : 'cn';
+        try {
+            const login = await this.aiService.getWorkBuddyOAuthService().startLogin(wbRegion);
+            const opened = await vs.env.openExternal(vs.Uri.parse(login.authUrl));
+            if (!opened) {
+                login.cancel();
+                throw new Error(aiText(
+                    'Could not open the browser for WorkBuddy sign-in.',
+                    '无法打开浏览器完成 WorkBuddy 登录。',
+                ));
+            }
+            this.postMessage({
+                type: 'testConnectionResult',
+                ok: true,
+                message: aiText(
+                    'Continue signing in in your browser. WorkBuddy credentials will be added to the pool after authorization.',
+                    '请在浏览器中继续登录；授权完成后账号会自动加入 WorkBuddy 号池。',
+                ),
+            });
+            void login.completion.then(async credentials => {
+                await this.aiService.saveWorkBuddyManagedAccount(credentials);
+                await this.buildAndSendSettingsData(true, targetSurface);
+                this.postMessage({
+                    type: 'testConnectionResult',
+                    ok: true,
+                    message: aiText('WorkBuddy sign-in completed.', 'WorkBuddy 登录完成。'),
+                });
+            }, (error: unknown) => {
+                this.postMessage({ type: 'testConnectionResult', ok: false, message: settingsErrorMessage(error) });
+            });
+        } catch (error) {
+            this.postMessage({ type: 'testConnectionResult', ok: false, message: settingsErrorMessage(error) });
+        }
+    }
+
+    async logoutWorkBuddy(targetSurface: 'chat' | 'manager' = 'chat'): Promise<void> {
+        await this.aiService.logoutWorkBuddyManaged();
+        await this.buildAndSendSettingsData(true, targetSurface);
+        this.postMessage({
+            type: 'testConnectionResult',
+            ok: true,
+            message: aiText(
+                'Signed out of managed WorkBuddy accounts in this extension. Desktop app sessions, if any, are unaffected.',
+                '已在本插件中退出托管 WorkBuddy 账号；桌面端会话（如有）不受影响。',
+            ),
+        });
+    }
+
+    async rescanWorkBuddyAccounts(targetSurface: 'chat' | 'manager' = 'chat'): Promise<void> {
+        try {
+            const status = await this.aiService.rescanWorkBuddyAccounts();
+            await this.buildAndSendSettingsData(true, targetSurface);
+            const activeCount = status.accounts.filter(a => !a.hidden && a.fresh).length;
+            this.postMessage({
+                type: 'testConnectionResult',
+                ok: true,
+                message: status.missingAtRestKey
+                    ? aiText(
+                        `Detected ${status.encryptedDesktopCount} encrypted desktop session(s); paste the $wbEncrypted key to unlock.`,
+                        `检测到 ${status.encryptedDesktopCount} 个桌面端加密会话；请粘贴 $wbEncrypted 保护密钥以解封。`,
+                    )
+                    : aiText(
+                        `WorkBuddy scan finished: ${activeCount} usable account(s) loaded.`,
+                        `WorkBuddy 扫描完成：已加载 ${activeCount} 个可用账号。`,
+                    ),
+            });
+        } catch (error) {
+            this.postMessage({ type: 'testConnectionResult', ok: false, message: settingsErrorMessage(error) });
+        }
+    }
+
+    async saveWorkBuddyAtRestKey(keyText: string, targetSurface: 'chat' | 'manager' = 'chat'): Promise<void> {
+        try {
+            const { keyId, status } = await this.aiService.setWorkBuddyAtRestKey(keyText);
+            await this.buildAndSendSettingsData(true, targetSurface);
+            this.postMessage({
+                type: 'testConnectionResult',
+                ok: true,
+                message: aiText(
+                    `Saved protection key (${keyId}); unlocked ${status.openedEncryptedCount}/${status.encryptedDesktopCount} encrypted desktop file(s).`,
+                    `已保存保护密钥（${keyId}）；已解封 ${status.openedEncryptedCount}/${status.encryptedDesktopCount} 个桌面端加密会话。`,
+                ),
+            });
+        } catch (error) {
+            this.postMessage({ type: 'testConnectionResult', ok: false, message: settingsErrorMessage(error) });
+        }
+    }
+
+    async clearWorkBuddyAtRestKey(targetSurface: 'chat' | 'manager' = 'chat'): Promise<void> {
+        try {
+            await this.aiService.clearWorkBuddyAtRestKey();
+            await this.buildAndSendSettingsData(true, targetSurface);
+            this.postMessage({
+                type: 'testConnectionResult',
+                ok: true,
+                message: aiText('Cleared saved WorkBuddy protection key.', '已清除保存的 WorkBuddy 保护密钥。'),
+            });
+        } catch (error) {
+            this.postMessage({ type: 'testConnectionResult', ok: false, message: settingsErrorMessage(error) });
+        }
+    }
+
+    async runWorkBuddyCheckin(targetSurface: 'chat' | 'manager' = 'chat'): Promise<void> {
+        try {
+            const { summary } = await this.aiService.runWorkBuddyCheckin();
+            await this.buildAndSendSettingsData(true, targetSurface);
+            if (summary.accountCount === 0) {
+                this.postMessage({
+                    type: 'testConnectionResult',
+                    ok: false,
+                    message: aiText('No CN WorkBuddy account is available for check-in.', '当前没有可用于每日签到的国区 WorkBuddy 账号。'),
+                });
+                return;
+            }
+            const ok = summary.failedCount === 0 && !summary.lastError;
+            this.postMessage({
+                type: 'testConnectionResult',
+                ok,
+                message: ok
+                    ? aiText(
+                        `WorkBuddy check-in finished: ${summary.signedInCount} signed in, ${summary.skippedCount} already signed today.`,
+                        `WorkBuddy 签到完成：新签到 ${summary.signedInCount} 个，今日已签 ${summary.skippedCount} 个。`,
+                    )
+                    : aiText(
+                        `WorkBuddy check-in completed with ${summary.failedCount} failure(s)${summary.lastError ? `: ${summary.lastError}` : '.'}`,
+                        `WorkBuddy 签到存在 ${summary.failedCount} 个失败${summary.lastError ? `：${summary.lastError}` : '。'}`,
+                    ),
+            });
+        } catch (error) {
+            this.postMessage({ type: 'testConnectionResult', ok: false, message: settingsErrorMessage(error) });
+        }
+    }
+
+    async toggleWorkBuddyAutoCheckin(enabled: boolean, targetSurface: 'chat' | 'manager' = 'chat'): Promise<void> {
+        try {
+            await this.aiService.setWorkBuddyAutoCheckin(enabled);
+            await this.buildAndSendSettingsData(true, targetSurface);
+        } catch (error) {
+            this.postMessage({ type: 'testConnectionResult', ok: false, message: settingsErrorMessage(error) });
+        }
+    }
+
+    async loginOpenDesign(targetSurface: 'chat' | 'manager' = 'chat'): Promise<void> {
+        try {
+            const login = await this.aiService.getOpenDesignOAuthService().startLogin();
+            const { userCode, activationUrl } = login.authorization;
+            this.postMessage({
+                type: 'testConnectionResult',
+                ok: true,
+                message: aiText(
+                    `Enter code ${userCode} at ${activationUrl} to finish signing in.`,
+                    `请在 ${activationUrl} 输入代码 ${userCode} 完成登录。`,
+                ),
+            });
+            void login.completion.then(async () => {
+                await this.buildAndSendSettingsData(true, targetSurface);
+                this.postMessage({
+                    type: 'testConnectionResult',
+                    ok: true,
+                    message: aiText('OpenDesign sign-in completed.', 'OpenDesign 登录完成。'),
+                });
+            }, (error: unknown) => {
+                this.postMessage({ type: 'testConnectionResult', ok: false, message: settingsErrorMessage(error) });
+            });
+        } catch (error) {
+            this.postMessage({ type: 'testConnectionResult', ok: false, message: settingsErrorMessage(error) });
+        }
+    }
+
+    async logoutOpenDesign(targetSurface: 'chat' | 'manager' = 'chat'): Promise<void> {
+        try {
+            await this.aiService.logoutOpenDesignAll();
+            await this.buildAndSendSettingsData(true, targetSurface);
+            this.postMessage({
+                type: 'testConnectionResult',
+                ok: true,
+                message: aiText('Signed out of all OpenDesign accounts in this extension.', '已在本插件中退出全部 OpenDesign 账号。'),
+            });
+        } catch (error) {
+            this.postMessage({ type: 'testConnectionResult', ok: false, message: settingsErrorMessage(error) });
+        }
+    }
+
+    async refreshOpenDesignQuota(targetSurface: 'chat' | 'manager' = 'chat'): Promise<void> {
+        try {
+            await this.sendSubscriptionPoolQuota(OPENDESIGN_PROVIDER_ID, targetSurface);
+            await this.buildAndSendSettingsData(true, targetSurface);
+            this.postMessage({
+                type: 'testConnectionResult',
+                ok: true,
+                message: aiText('OpenDesign quota refreshed.', 'OpenDesign 额度已刷新。'),
+            });
+        } catch (error) {
+            this.postMessage({ type: 'testConnectionResult', ok: false, message: settingsErrorMessage(error) });
+        }
+    }
+
     /**
      * Read every account's quota for one line and push the result to the card.
      *
@@ -1510,7 +1827,7 @@ export class ChatSettingsManager {
      * because this extension does not own it.
      */
     async removeSubscriptionPoolAccount(providerId: string, accountId: string, targetSurface: 'chat' | 'manager' = 'chat'): Promise<void> {
-        await this.aiService.getSubscriptionPoolRegistry().removeAccount(providerId, accountId);
+        await this.aiService.removeSubscriptionPoolAccount(providerId, accountId);
         await this.buildAndSendSettingsData(true, targetSurface);
     }
 

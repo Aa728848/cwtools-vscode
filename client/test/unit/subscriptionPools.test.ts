@@ -10,7 +10,12 @@ import {
     kimiPoolIdentityKey,
     minimaxCodePoolCredentials,
     minimaxCodePoolIdentityKey,
+    openDesignPoolCredentials,
+    openDesignPoolIdentityKey,
     subscriptionRefreshFailureStatus,
+    toOpenDesignPoolCredentials,
+    workBuddyPoolCredentials,
+    workBuddyPoolIdentityKey,
 } from '../../extension/ai/pool/subscriptionPools';
 import { SubscriptionPoolRegistry } from '../../extension/ai/pool/poolRegistry';
 import { OAuthAccountPool, oauthRefreshFailureStatus, parseOAuthPoolData,
@@ -187,7 +192,7 @@ describe('Per-line pool specifications', () => {
             .to.equal(undefined);
     });
 
-    // Command Code uses a static API key: it must parse, have no expiry, and
+        // Command Code uses a static API key: it must parse, have no expiry, and
     // still carry identity so several keys can coexist.
     it('parses a static Command Code key without inventing an expiry', () => {
         const parsed = commandCodePoolCredentials({ apiKey: 'sk-1', userId: 'u1', userName: 'me' })!;
@@ -195,6 +200,72 @@ describe('Per-line pool specifications', () => {
         expect(parsed.expiresAt).to.equal(undefined);
         expect(commandCodePoolIdentityKey(parsed)).to.equal('user:u1');
         expect(commandCodePoolCredentials({})).to.equal(undefined);
+    });
+
+    it('normalizes WorkBuddy credentials, rejects sealed values, and prioritizes uid/uin/file keys', () => {
+        // Never allow sealed $wbEncrypted tokens into the plaintext pool
+        expect(workBuddyPoolCredentials({
+            accessToken: { $wbEncrypted: { scheme: 'sym-v1', suite: 1, keyId: 'k', nonce: 'n', ciphertext: 'c', tag: 't' } },
+        })).to.equal(undefined);
+
+        // Missing refreshToken must omit expiresAt so the pool never tries to refresh an unrefreshable token
+        const noRefresh = workBuddyPoolCredentials({
+            accessToken: 'tok-1',
+            refreshToken: '',
+            expiresAt: 123456,
+            uid: 'u-1',
+            uin: 'uin-1',
+            sourceFile: '/tmp/desk.info',
+        })!;
+        expect(noRefresh.expiresAt).to.equal(undefined);
+        expect(workBuddyPoolIdentityKey(noRefresh)).to.equal('uid:u-1');
+
+        const withRefresh = workBuddyPoolCredentials({
+            accessToken: 'tok-2',
+            refreshToken: 'ref-2',
+            expiresAt: 9999999999,
+            uin: 'uin-2',
+            sourceFile: '/tmp/desk2.info',
+        })!;
+        expect(withRefresh.expiresAt).to.equal(9999999999);
+        expect(workBuddyPoolIdentityKey(withRefresh)).to.equal('uin:uin-2');
+
+        const fileOnly = workBuddyPoolCredentials({
+            accessToken: 'tok-3',
+            source: 'desktop',
+            sourceFile: '/tmp/desk3.info',
+            domain: 'www.workbuddy.ai',
+        })!;
+        expect(fileOnly.region).to.equal('intl');
+        expect(workBuddyPoolIdentityKey(fileOnly)).to.equal('file:/tmp/desk3.info');
+    });
+
+    it('normalizes OpenDesign OAuth and static API key entries without inventing expiry or leaking secrets', () => {
+        const oauthCreds = toOpenDesignPoolCredentials({
+            kind: 'oauth',
+            controlKey: 'vela_ctrl_secret',
+            runtimeKey: 'sk-amr-secret',
+            addedAt: 100,
+            user: { id: 'usr-1', email: 'dev@example.com', plan: 'pro' },
+        });
+        expect(oauthCreds.accessToken).to.equal('sk-amr-secret');
+        expect(oauthCreds.expiresAt).to.equal(undefined);
+        const oauthParsed = openDesignPoolCredentials(oauthCreds)!;
+        expect(oauthParsed.kind).to.equal('oauth');
+        expect(oauthParsed.expiresAt).to.equal(undefined);
+        const oauthKey = openDesignPoolIdentityKey(oauthParsed)!;
+        expect(oauthKey).to.equal('amr-user:usr-1');
+
+        const staticParsed = openDesignPoolCredentials(toOpenDesignPoolCredentials({
+            kind: 'api-key',
+            apiKey: 'sk-static-secret-xyz',
+            addedAt: 200,
+        }))!;
+        expect(staticParsed.kind).to.equal('api-key');
+        expect(staticParsed.expiresAt).to.equal(undefined);
+        const staticKey = openDesignPoolIdentityKey(staticParsed)!;
+        expect(staticKey).to.match(/^key:[0-9a-f]{64}$/);
+        expect(staticKey).to.not.contain('sk-static-secret-xyz');
     });
 
     // 5xx and transport failures say nothing about the credential, so they must
@@ -293,6 +364,7 @@ describe('Subscription pool registry', () => {
         }));
         await registry.select('line-a');
         await registry.select('line-a');
+        expect(seeds).to.equal(1);
         const accounts = await registry.listAccounts('line-a');
         expect(accounts).to.have.length(1);
         expect(accounts[0]!.alias).to.equal('desk@x');

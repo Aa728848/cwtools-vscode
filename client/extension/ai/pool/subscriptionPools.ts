@@ -14,12 +14,23 @@
  */
 
 import {
-    OAuthAccountPool,
     oauthRefreshFailureStatus,
     type OAuthPoolPorts,
     type OAuthPoolSpec,
     type PooledOAuthCredentials,
 } from './oauthAccountPool';
+import {
+    WORKBUDDY_DEFAULT_DOMAIN,
+    workBuddyBackendForDomain,
+    workBuddyRegionForDomain,
+    type WorkBuddyRegion,
+} from '../workbuddy/types';
+import { isWorkBuddySealedValue } from '../workbuddy/atrest';
+import {
+    openDesignCredentialsIdentity,
+    type OpenDesignCredentials,
+    type OpenDesignOAuthUser,
+} from '../opendesign/credentials';
 
 /** 所有线路共享的失败分类：只有认证类 4xx 才是对凭据的判定。 */
 export const subscriptionRefreshFailureStatus = oauthRefreshFailureStatus;
@@ -230,6 +241,175 @@ export function commandCodePoolIdentityKey(credentials: CommandCodePoolCredentia
     if (nonempty(credentials.email)) return 'email:' + credentials.email.trim().toLowerCase();
     if (nonempty(credentials.keyName)) return 'key:' + credentials.keyName.trim();
     return undefined;
+}
+
+// ─── WorkBuddy / CodeBuddy 订阅 ──────────────────────────────────────────────
+
+export interface WorkBuddyPoolCredentials extends PooledOAuthCredentials {
+    domain: string;
+    backend: string;
+    region: WorkBuddyRegion;
+    uid?: string;
+    nickname?: string;
+    uin?: string;
+    enterpriseId?: string;
+    accountType?: string;
+    source: 'desktop' | 'managed';
+    sourceFile: string;
+    sourceMtimeMs: number;
+}
+
+/**
+ * WorkBuddy 订阅的号池原型。
+ *
+ * 绝不把未解封的 `$wbEncrypted` 密文写进号池：只接收明文 `accessToken`；
+ * `refreshToken` 在少数桌面凭据上允许为空串（不阻断有效期内访问）。
+ */
+export function workBuddyPoolCredentials(value: unknown): WorkBuddyPoolCredentials | undefined {
+    if (typeof value !== 'object' || value === null || Array.isArray(value)) return undefined;
+    const record = value as Record<string, unknown>;
+    if (isWorkBuddySealedValue(record.accessToken)) return undefined;
+    const accessToken = firstNonempty(record.accessToken);
+    if (accessToken === undefined) return undefined;
+    const refreshToken = !isWorkBuddySealedValue(record.refreshToken) && typeof record.refreshToken === 'string'
+        ? record.refreshToken.trim()
+        : '';
+    const expiresAt = refreshToken !== ''
+        && typeof record.expiresAt === 'number'
+        && Number.isFinite(record.expiresAt)
+        && record.expiresAt > 0
+        ? record.expiresAt
+        : undefined;
+    const domain = firstNonempty(record.domain) ?? WORKBUDDY_DEFAULT_DOMAIN;
+    const backend = firstNonempty(record.backend) ?? workBuddyBackendForDomain(domain);
+    const region = record.region === 'intl' || record.region === 'cn'
+        ? record.region
+        : workBuddyRegionForDomain(domain);
+    const source: 'desktop' | 'managed' = record.source === 'desktop' ? 'desktop' : 'managed';
+    const sourceFile = typeof record.sourceFile === 'string' ? record.sourceFile.trim() : '';
+    const sourceMtimeMs = typeof record.sourceMtimeMs === 'number' && Number.isFinite(record.sourceMtimeMs)
+        ? record.sourceMtimeMs : 0;
+    const uid = firstNonempty(record.uid);
+    const nickname = firstNonempty(record.nickname);
+    const uin = firstNonempty(record.uin);
+    const enterpriseId = firstNonempty(record.enterpriseId);
+    const accountType = firstNonempty(record.accountType);
+    return {
+        accessToken,
+        refreshToken,
+        ...(expiresAt === undefined ? {} : { expiresAt }),
+        domain,
+        backend,
+        region,
+        source,
+        sourceFile,
+        sourceMtimeMs,
+        ...(uid === undefined ? {} : { uid }),
+        ...(nickname === undefined ? {} : { nickname }),
+        ...(uin === undefined ? {} : { uin }),
+        ...(enterpriseId === undefined ? {} : { enterpriseId }),
+        ...(accountType === undefined ? {} : { accountType }),
+    };
+}
+
+/**
+ * WorkBuddy 身份键：优先 uid，其次 uin，其次桌面文件路径，最后域 + 昵称。
+ * uid/uin 先于文件路径，这样同一个账号即使同时存在桌面文件与 OAuth 登录也能去重合并。
+ */
+export function workBuddyPoolIdentityKey(credentials: WorkBuddyPoolCredentials): string | undefined {
+    if (nonempty(credentials.uid)) return 'uid:' + credentials.uid.trim();
+    if (nonempty(credentials.uin)) return 'uin:' + credentials.uin.trim();
+    if (nonempty(credentials.sourceFile)) return 'file:' + credentials.sourceFile.trim();
+    if (nonempty(credentials.nickname)) {
+        const domain = nonempty(credentials.domain) ? credentials.domain.trim().toLowerCase() : WORKBUDDY_DEFAULT_DOMAIN;
+        return `name:${domain}:${credentials.nickname.trim()}`;
+    }
+    return undefined;
+}
+
+// ─── OpenDesign 订阅（OAuth + 静态 API Key） ─────────────────────────────────
+
+export type OpenDesignPoolCredentials = PooledOAuthCredentials & OpenDesignCredentials;
+
+/** 将 OpenDesign 双形态凭据归一化为同时兼容号池与域调用的形状（不过期，不设 `expiresAt`）。 */
+export function toOpenDesignPoolCredentials(credentials: OpenDesignCredentials): OpenDesignPoolCredentials {
+    if (credentials.kind === 'oauth') {
+        return {
+            ...credentials,
+            accessToken: credentials.runtimeKey,
+            refreshToken: '',
+        };
+    }
+    return {
+        ...credentials,
+        accessToken: credentials.apiKey,
+        refreshToken: '',
+    };
+}
+
+/**
+ * OpenDesign 的号池原型：兼容 OAuth（controlKey + runtimeKey）与静态 API Key。
+ * 两者均不过期（省略 `expiresAt`），通过轮换冷却与认证失效降权管理。
+ */
+export function openDesignPoolCredentials(value: unknown): OpenDesignPoolCredentials | undefined {
+    if (typeof value !== 'object' || value === null || Array.isArray(value)) return undefined;
+    const record = value as Record<string, unknown>;
+    const baseUrl = firstNonempty(record.baseUrl);
+    const workspaceId = firstNonempty(record.workspaceId);
+    const addedAt = typeof record.addedAt === 'number' && Number.isFinite(record.addedAt)
+        ? record.addedAt
+        : Date.now();
+
+    if (record.kind === 'oauth') {
+        const controlKey = firstNonempty(record.controlKey);
+        const runtimeKey = firstNonempty(record.runtimeKey) ?? firstNonempty(record.accessToken);
+        if (controlKey === undefined || runtimeKey === undefined) return undefined;
+        let user: OpenDesignOAuthUser | undefined;
+        if (typeof record.user === 'object' && record.user !== null && !Array.isArray(record.user)) {
+            const rawUser = record.user as Record<string, unknown>;
+            const id = firstNonempty(rawUser.id);
+            const email = firstNonempty(rawUser.email);
+            const name = firstNonempty(rawUser.name);
+            const plan = firstNonempty(rawUser.plan);
+            const cleaned: OpenDesignOAuthUser = {
+                ...(id ? { id } : {}),
+                ...(email ? { email } : {}),
+                ...(name ? { name } : {}),
+                ...(plan ? { plan } : {}),
+            };
+            if (Object.keys(cleaned).length > 0) user = cleaned;
+        }
+        return {
+            kind: 'oauth',
+            controlKey,
+            runtimeKey,
+            addedAt,
+            accessToken: runtimeKey,
+            refreshToken: '',
+            ...(baseUrl ? { baseUrl } : {}),
+            ...(workspaceId ? { workspaceId } : {}),
+            ...(user ? { user } : {}),
+        };
+    }
+
+    const apiKey = firstNonempty(record.apiKey) ?? firstNonempty(record.accessToken);
+    if (apiKey === undefined) return undefined;
+    const alias = firstNonempty(record.alias);
+    return {
+        kind: 'api-key',
+        apiKey,
+        addedAt,
+        accessToken: apiKey,
+        refreshToken: '',
+        ...(baseUrl ? { baseUrl } : {}),
+        ...(alias ? { alias } : {}),
+        ...(workspaceId ? { workspaceId } : {}),
+    };
+}
+
+/** OpenDesign 身份键：委托给 `openDesignCredentialsIdentity`，按 user/email/key sha256 区分且绝不暴露明文。 */
+export function openDesignPoolIdentityKey(credentials: OpenDesignPoolCredentials): string | undefined {
+    return openDesignCredentialsIdentity(credentials);
 }
 
 /** 一条线路的号池规格集合，供 aiService 按 provider 取用。 */

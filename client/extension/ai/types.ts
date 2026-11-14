@@ -240,7 +240,7 @@ export interface AIProviderConfig {
     /** Transport used for primary chat turns. */
     runtimeKind?: 'http';
     /** Credential mechanism used by this provider. */
-    authKind?: 'api-key' | 'none' | 'chatgpt-oauth' | 'minimax-code-oauth' | 'claude-subscription-oauth';
+    authKind?: 'api-key' | 'none' | 'chatgpt-oauth' | 'minimax-code-oauth' | 'claude-subscription-oauth' | 'workbuddy-oauth' | 'opendesign-oauth';
     /** Whether stateless utility calls (translation, titles, routing) are supported. */
     supportsUtilityCalls?: boolean;
 }
@@ -283,7 +283,9 @@ export interface CodexAccountStatus {
 
 import type { CommandCodeAccountStatus, CommandCodeWindowLimit, CommandCodeCredits, CommandCodeUsageSummary, CommandCodeSubscription, CommandCodeUser } from './commandcode/accountService';
 import type { KimiCodeAccountStatus } from './kimi/accountStatus';
+import type { WorkBuddyAccountStatus } from './workbuddy/accountStatus';
 export type { KimiCodeAccountStatus } from './kimi/accountStatus';
+export type { WorkBuddyAccountStatus, WorkBuddyAccountSummary } from './workbuddy/accountStatus';
 /**
  * Multi-account view for whichever subscription line is selected.
  *
@@ -333,6 +335,19 @@ export interface MinimaxCodeAccountStatus {
     /** Only this extension's own credential can be signed out of. */
     canSignOut: boolean;
 }
+
+/** OpenDesign 订阅账号与静态 Key 号池在设置页上的只读状态摘要（绝不含明文凭据）。 */
+export interface OpenDesignAccountStatus {
+    signedIn: boolean;
+    accountCount: number;
+    oauthCount: number;
+    apiKeyCount: number;
+    email?: string | null;
+    userName?: string | null;
+    workspaceId?: string | null;
+    plan?: string | null;
+}
+
 export type { CommandCodeAccountStatus, CommandCodeWindowLimit, CommandCodeCredits, CommandCodeUsageSummary, CommandCodeSubscription, CommandCodeUser };
 
 export type CustomApiFormat =
@@ -2656,6 +2671,16 @@ export type WebViewMessage =
     | { type: 'minimaxCodeLogout' }
     | { type: 'claudeSubscriptionLogin' }
     | { type: 'claudeSubscriptionLogout' }
+    | { type: 'workbuddyLogin'; region?: 'cn' | 'intl' }
+    | { type: 'workbuddyLogout' }
+    | { type: 'workbuddyRescan' }
+    | { type: 'workbuddySaveAtRestKey'; keyText: string }
+    | { type: 'workbuddyClearAtRestKey' }
+    | { type: 'workbuddyRunCheckin' }
+    | { type: 'workbuddyToggleAutoCheckin'; enabled: boolean }
+    | { type: 'opendesignLogin' }
+    | { type: 'opendesignLogout' }
+    | { type: 'opendesignRefreshQuota' }
     | { type: 'setSubscriptionPoolStrategy'; providerId: string; strategy: 'sequential' | 'round-robin' | 'sticky' }
     | { type: 'setSubscriptionPoolPrimary'; providerId: string; accountId: string }
     | { type: 'clearSubscriptionPoolCooldown'; providerId: string; accountId: string }
@@ -2724,7 +2749,7 @@ export type HostMessage =
     | { type: 'slashCommandList'; commands: SlashCommandDescriptor[] }
     | { type: 'slashCommandResult'; command: string; status: 'success' | 'error' | 'queued' | 'needsInput'; message: string; uiAction?: 'openModelMenu' | 'openReasoningMenu' | 'openPermissionsMenu' }
     | { type: 'todoUpdate'; todos: TodoItem[]; agentId?: string; threadId?: string; runId?: string }
-    | { type: 'settingsData'; providers: ProviderMeta[]; current: PanelSettings; ollamaModels?: OllamaModelInfo[]; showPanel?: boolean; targetSurface?: 'chat' | 'manager'; modelContextTokens?: Record<string, number>; thinkingModelPrefixes?: string[]; reasoningCapabilities?: Record<string, ModelReasoningCapability>; codexAccount?: CodexAccountStatus; commandcodeAccount?: CommandCodeAccountStatus; kimiAccount?: KimiCodeAccountStatus; minimaxCodeAccount?: MinimaxCodeAccountStatus; claudeSubscriptionAccount?: ClaudeSubscriptionAccountStatus; subscriptionPools?: Record<string, SubscriptionPoolView>; subscriptionProxy?: SubscriptionProxyStatus }
+    | { type: 'settingsData'; providers: ProviderMeta[]; current: PanelSettings; ollamaModels?: OllamaModelInfo[]; showPanel?: boolean; targetSurface?: 'chat' | 'manager'; modelContextTokens?: Record<string, number>; thinkingModelPrefixes?: string[]; reasoningCapabilities?: Record<string, ModelReasoningCapability>; codexAccount?: CodexAccountStatus; commandcodeAccount?: CommandCodeAccountStatus; kimiAccount?: KimiCodeAccountStatus; minimaxCodeAccount?: MinimaxCodeAccountStatus; claudeSubscriptionAccount?: ClaudeSubscriptionAccountStatus; workbuddyAccount?: WorkBuddyAccountStatus; opendesignAccount?: OpenDesignAccountStatus; subscriptionPools?: Record<string, SubscriptionPoolView>; subscriptionProxy?: SubscriptionProxyStatus }
     | { type: 'subscriptionProxyStatus'; status: SubscriptionProxyStatus; saved?: boolean; targetSurface?: 'chat' | 'manager' }
     | { type: 'subscriptionPoolQuota'; providerId: string; accountId: string; quota?: SubscriptionAccountQuota; targetSurface?: 'chat' | 'manager' }
     | { type: 'ollamaModels'; models: OllamaModelInfo[]; error?: string }

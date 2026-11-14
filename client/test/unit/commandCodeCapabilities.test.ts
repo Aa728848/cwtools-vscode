@@ -19,12 +19,14 @@ describe('Command Code capability table', () => {
         expect(new Set(ids).size).to.equal(ids.length);
     });
 
-    // The public catalog and the CLI registry spell one model differently; a
-    // user picking the catalog's id must not silently lose its capabilities.
-    it('resolves a free-tier id onto its registry entry', () => {
-        expect(commandCodeModelDef('meituan/LongCat-2.0:free')).to.equal(commandCodeModelDef('meituan/LongCat-2.0'));
-        expect(commandCodeModelSupportsImage('meituan/LongCat-2.0:free'))
-            .to.equal(commandCodeModelSupportsImage('meituan/LongCat-2.0'));
+    // Exact id wins when both tiers exist (e.g. meituan/LongCat-2.0:free in 1.88.4);
+    // otherwise stripping the `:free` tier suffix falls back to the paid entry.
+    it('resolves exact :free entries and strips unstated :free suffixes', () => {
+        expect(commandCodeModelDef('meituan/LongCat-2.0:free')?.id).to.equal('meituan/LongCat-2.0:free');
+        expect(commandCodeModelDef('meituan/LongCat-2.0:free')?.hidden).to.equal(true);
+        expect(commandCodeModelDef('mistral/mistral-large-4:free')).to.equal(commandCodeModelDef('mistral/mistral-large-4'));
+        expect(commandCodeModelSupportsImage('mistral/mistral-large-4:free'))
+            .to.equal(commandCodeModelSupportsImage('mistral/mistral-large-4'));
         // An unknown id still resolves to nothing, suffix or not.
         expect(commandCodeModelDef('unlisted/vendor:free')).to.equal(undefined);
     });
@@ -32,8 +34,15 @@ describe('Command Code capability table', () => {
     it('covers every model the provider advertises', () => {
         // A shipped model missing from the table loses its capabilities, so the
         // two lists must not drift apart.
-        const missing = getProvider('commandcode').models.filter(id => commandCodeModelDef(id) === undefined);
+        const advertised = getProvider('commandcode').models;
+        const missing = advertised.filter(id => commandCodeModelDef(id) === undefined);
         expect(missing).to.deep.equal([]);
+        expect(advertised).to.include.members(['claude-haiku-5-5', 'gpt-6.1-terra', 'gpt-6-luna', 'z-ai/glm-5.3-flashx']);
+        const hiddenIds = COMMAND_CODE_MODELS.filter(model => model.hidden).map(model => model.id);
+        expect(hiddenIds).to.include('minimax/minimax-m3.1-flash:free');
+        for (const hiddenId of hiddenIds) {
+            expect(advertised, hiddenId).to.not.include(hiddenId);
+        }
     });
 
     // The registry's own example of why a family test cannot decide modalities:
@@ -43,7 +52,12 @@ describe('Command Code capability table', () => {
         expect(commandCodeModelSupportsImage('deepseek/deepseek-v4.1-flash')).to.equal(true);
         expect(commandCodeModelSupportsImage('deepseek/deepseek-v4-flash-vision-exp')).to.equal(true);
         expect(commandCodeModelSupportsImage('z-ai/glm-5.3-flash')).to.equal(true);
+        expect(commandCodeModelSupportsImage('z-ai/glm-5.3-flashx')).to.equal(true);
         expect(commandCodeModelSupportsImage('zai-org/GLM-5.3')).to.equal(false);
+        expect(commandCodeModelSupportsImage('claude-haiku-5-5')).to.equal(true);
+        expect(commandCodeModelSupportsImage('gpt-6.1-terra')).to.equal(true);
+        // Registry entries carrying 'file' (e.g. Muse Wonder) must normalize out 'file' here.
+        expect(commandCodeInputModalities('meta/muse-wonder-1.0')).to.deep.equal(['text', 'image']);
     });
 
     // An unknown id must claim as little as possible: a false "images accepted"

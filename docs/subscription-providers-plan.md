@@ -4,18 +4,20 @@
 > 本文是计划与进度文档；实施状态见 §6「分期实施」的勾选列，设计决策落在
 > `.agents/notes/implemented/`。
 >
-> **2026-10-21 更新**：`workbuddy-subscription`（WorkBuddy / CodeBuddy 订阅，含每日签到、额度面板
-> 与离线模型表）与 `opencode-go`（OpenCode Go 套餐，含发布清单中的 provider 枚举条目）两条线路
-> 已从代码中**移除**，`opencode`（OpenCode Zen）线路不受影响。本文凡涉及这两条线路的段落均只作
-> 历史记录保留；移除范围、取舍与验证见
+> **2026-10-21 历史记录**：`workbuddy-subscription` 与 `opencode-go` 曾在当时从代码中移除；
+> `opencode-go` 继续保持移除状态，`opencode`（OpenCode Zen）不受影响。当时移除过程见
 > `.agents/notes/implemented/simplification/2026-10-21-remove-workbuddy-and-opencode-go-lines.md`。
 >
-> **当前更新**：`antigravity` 供应商及其独占的聊天、行内补全、Tab Jump 与账号链路已从代码中**移除**；
-> 本文凡涉及该线路的段落均只作历史记录保留。通用号池、订阅代理、通用行内补全与其余供应商不受影响。
+> **当前更新（2026-11-14）**：`antigravity` 供应商、独占补全服务及其遗留打包产物已彻底清理（见
+> `.agents/notes/implemented/simplification/2026-11-12-remove-antigravity-provider-and-completion-services.md`）。
+> 同时参照 `dsh-chatgpt-subscription` 重新接入 **`workbuddy-subscription`**（含 `/v2/chat/completions` gzip 强制流式、
+> 国区 `claude-*` 走 `/v1/messages`、`$wbEncrypted` 按需密钥解封与保密封写回、防风控会话头、国区每日签到与多账号号池），
+> 并新增 **`opendesign`**（设备码 OAuth 双密钥与静态 API Key 双模合流号池、AMR 控制面额度窗口与模型目录、403 套餐无权不伤号换号），
+> 详见 `.agents/notes/implemented/feature/2026-11-14-workbuddy-opendesign-subscriptions.md`。
 
 ## 1. 背景与目标
 
-参考项目以 DSH 插件形态接入了 8 条订阅线路。本计划目标：
+参考项目以 DSH 插件形态接入了多条订阅线路。本计划目标：
 
 1. 将其中**除 Ollama 外**（用户明确要求排除）我们项目尚未支持的线路补齐；
 2. 对**双方共有**的线路逐条比对，把参考项目已验证的协议细节与默认值修正吸收进来。
@@ -30,7 +32,8 @@
 | `kimi-code` | Anthropic Messages / RFC 8628 设备码 | ✅ `kimi-code-plan`（+ 设备码登录 + 凭据续期 + K3 保留思考） | ✅ 已改进（§3.4） |
 | `minimax-code` | Anthropic Messages / 桌面端凭据复用或设备码（`agent.minimax.cn/mavis`） | ✅ `minimax-code`（与平台 API Key 线路 `minimax-token-plan` 并存） | ✅ 已新增（§4.2） |
 | `claude-subscription` | Anthropic Messages / Claude Pro·Max OAuth | ✅ `claude-subscription`（与 API Key 的 `claude` 并存） | ✅ 已新增（§4.3，合规风险已标注） |
-| `workbuddy-subscription` | OpenAI 兼容（仅流式）/ 桌面凭据扫描或浏览器授权 | ❌ 已移除（2026-10-21） | ❌ 已移除（原 §4.1，仅存历史记录） |
+| `workbuddy-subscription` | `/v2/chat/completions`（gzip 强制流式）+ 国区 Claude `/v1/messages` / 桌面扫盘（含 `$wbEncrypted` 解封）或浏览器 OAuth | ✅ `workbuddy-subscription`（桌面扫盘 + 保护密钥 + 浏览器登录 + 实时 `/v3/config` 目录 + 国区签到 + 号池） | ✅ 已重新接入并增强 |
+| `opendesign` | OpenAI Chat Completions / 设备码 OAuth（`controlKey` + `runtimeKey`）或静态 API Key | ✅ `opendesign`（双模号池 + AMR 5h/7d/余额仪表 + 在线目录 + 403 套餐无权切号） | ✅ 已新增 |
 | `ollama` | — | ✅ `ollama` | **按要求排除** |
 
 ## 3. 已有线路的改进点

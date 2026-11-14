@@ -3,12 +3,21 @@
  */
 
 import { BUILTIN_PROVIDERS } from './defaults';
-import { commandCodeModelSupportsImage } from '../../commandcode/modelCapabilities';
+import { COMMAND_CODE_MODELS, commandCodeModelSupportsImage } from '../../commandcode/modelCapabilities';
 import {
     CODEX_CHATGPT_CONTEXT_TOKENS,
     CODEX_CHATGPT_EFFECTIVE_CONTEXT_TOKENS,
     CODEX_CHATGPT_MODELS,
+    CODEX_CHATGPT_TERRA_CONTEXT_TOKENS,
 } from '../../codex/oauthService';
+import { OPENDESIGN_PROVIDER_ID } from '../../opendesign/types';
+import { openDesignSupportsVision, resolveOpenDesignModelInfo } from '../../opendesign/catalog';
+import { WORKBUDDY_PROVIDER_ID } from '../../workbuddy/types';
+import {
+    resolveWorkBuddyCatalogEntry,
+    workBuddyMaxOutputTokens,
+    workBuddySupportsVision,
+} from '../../workbuddy/modelCatalog';
 
 /**
  * Model-level vision capability map.
@@ -16,6 +25,7 @@ import {
 export const VISION_CAPABLE_MODELS: Record<string, boolean> = {
     'gpt-6-astra': true,
     'gpt-6.1-sol': true,
+    'gpt-6.1-terra': true,
     'gpt-6-sol': true,
     'gpt-6-luna': true,
     'gpt-5.6': true,
@@ -36,15 +46,30 @@ export const VISION_CAPABLE_MODELS: Record<string, boolean> = {
     'gpt-4o': true,
     'gpt-4-vision': true,
     'gpt-5': true,
+    'claude-fable-5-2': true,
+    'claude-fable-5-1': true,
     'claude-fable-5': true,
+    'claude-opus-5-5': true,
+    'claude-opus-5.5': true,
+    'claude-opus-5': true,
     'claude-opus-4-8': true,
     'claude-opus-4-7': true,
     'claude-opus-4-6': true,
+    'claude-sonnet-5-5': true,
+    'claude-sonnet-5.5': true,
     'claude-sonnet-5': true,
     'claude-sonnet-4-6': true,
+    'claude-haiku-5-5': true,
+    'claude-haiku-5.5': true,
     'claude-haiku-4-5': true,
     'claude-3': true,
     'claude-4': true,
+    'claude-5': true,
+    'gemini-4-argon': true,
+    'gemini-4-carbon': true,
+    'gemini-4-hydrogen': true,
+    'gemini-3.8-flash': true,
+    'gemini-3.7-flash': true,
     'gemini-3.1-pro-preview': true,
     'gemini-3.1-pro': true,
     'gemini-3-flash-preview': true,
@@ -58,6 +83,7 @@ export const VISION_CAPABLE_MODELS: Record<string, boolean> = {
     'gemini-2.5-flash-lite': true,
     'gemini': true,
     'minimax-m3-free': false,
+    'MiniMax-M3.1-Flash': true,
     'MiniMax-M3': true,
     'MiniMax-M2': false,
     'glm-5v-turbo': true,
@@ -67,6 +93,10 @@ export const VISION_CAPABLE_MODELS: Record<string, boolean> = {
     'glm-5v-flash': true,
     'glm-4v': true,
     'glm-4.5v': true,
+    // glm-5.3-flash/flashx are multimodal while bare glm-5.3 is text-only; longer keys must come first.
+    'glm-5.3-flashx': true,
+    'glm-5.3-flash': true,
+    'glm-5.3': false,
     'glm-5.2': false,
     'glm-5.1': false,
     'glm-5-air': false,
@@ -80,12 +110,17 @@ export const VISION_CAPABLE_MODELS: Record<string, boolean> = {
     'glm-4.6v': true,
     'glm-z1-flash': false,
     'glm-4-flash': false,
+    'qwen4-max-preview': true,
     'qwen3.7-max-2026-06-08': true,
     'qwen3.6-plus': true,
     'qwen3.5-plus': true,
     'qwen3.6-flash': true,
     'qwen3.7-max': false,
+    'qwen3.8-max-0902': true,
     'qwen3.8-max': true,
+    'qwen3.8-plus': true,
+    'qwen3.8-flash': true,
+    'qwen3.8-27b': true,
     'qwen3.7-plus': true,
     'qwen3.7-flash': false,
     'qwen3.6-27b': true,
@@ -115,6 +150,8 @@ export const VISION_CAPABLE_MODELS: Record<string, boolean> = {
     'kimi-k2.6': true,
     'kimi-k2.5': true,
     'grok-build-0.1': true,
+    'grok-4': true,
+    'mistral-large-4': true,
     'qwen3.7': false,
     'Qwen3.7': false
 };
@@ -144,6 +181,12 @@ export function isModelVisionCapable(model: string): boolean {
 export function isModelVisionCapableFor(providerId: string | undefined, model: string): boolean {
     if (providerId === 'commandcode' || providerId === 'commandcode-messages') {
         return commandCodeModelSupportsImage(model);
+    }
+    if (providerId === WORKBUDDY_PROVIDER_ID) {
+        return workBuddySupportsVision(model);
+    }
+    if (providerId === OPENDESIGN_PROVIDER_ID) {
+        return openDesignSupportsVision(model);
     }
     return isModelVisionCapable(model);
 }
@@ -211,10 +254,18 @@ export function isModelFIMCapable(model: string, providerId: string): boolean {
 export const ALWAYS_THINKING_PREFIXES: string[] = [
     'gpt-6-astra',
     'gpt-6.1-sol',
+    'claude-fable-5',
+    'claude-opus-5-5',
+    'claude-opus-5.5',
+    'claude-sonnet-5-5',
+    'claude-sonnet-5.5',
     'deepseek-r1', 'DeepSeek-R1',
     'o1', 'o3', 'o4-mini',
     'glm-z1', 'GLM-Z1',
+    'glm-5.3', 'GLM-5.3',
+    'gemini-4-', 'gemini-3.8-flash', 'gemini-3.7-flash',
     'gemini-2.5-pro', 'gemini-3.1-pro',
+    'minimax-m3.1', 'MiniMax-M3.1',
     'QwQ', 'qwq',
     'Thinking', 'thinking',
     'kimi-k3',
@@ -286,77 +337,11 @@ export const OPENCODE_MODEL_LIMITS: Record<string, { context: number; output: nu
 };
 
 /** Command Code Provider API catalog limits (https://api.commandcode.ai/provider/v1/models). */
-export const COMMANDCODE_MODEL_CONTEXT_TOKENS: Record<string, number> = {
-    'claude-sonnet-5': 1000000,
-    'claude-sonnet-4-6': 1000000,
-    'claude-fable-5-1': 1000000,
-    'claude-fable-5': 1000000,
-    'claude-opus-5': 1000000,
-    'claude-opus-4-8': 1000000,
-    'claude-opus-4-7': 1000000,
-    'claude-haiku-4-5-20251001': 200000,
-    'gpt-5.6-sol': 1050000,
-    'gpt-5.6-terra': 1050000,
-    'gpt-5.6-luna': 1050000,
-    'gpt-5.5': 400000,
-    'gpt-5.4': 400000,
-    'gpt-5.3-codex': 400000,
-    'gpt-5.4-mini': 400000,
-    'deepseek/deepseek-v4-pro': 1000000,
-    'deepseek/deepseek-v4-flash': 1000000,
-    'deepseek/deepseek-v4-flash-vision-exp': 1000000,
-    'deepseek/deepseek-v4-flash-fast': 1000000,
-    'deepseek/deepseek-v4.1-flash': 1000000,
-    'moonshotai/Kimi-K3': 1000000,
-    'moonshotai/Kimi-K2.7-Code': 256000,
-    'moonshotai/Kimi-K2.7-Code-Highspeed': 262000,
-    'moonshotai/Kimi-K2.6': 256000,
-    'moonshotai/Kimi-K2.5': 256000,
-    'z-ai/glm-5.3-flash': 1048576,
-    'zai-org/GLM-5.3': 1000000,
-    'zai-org/GLM-5.2': 1000000,
-    'zai-org/GLM-5.2-Fast': 1000000,
-    'zai-org/GLM-5.1': 200000,
-    'zai-org/GLM-5': 200000,
-    'MiniMaxAI/MiniMax-M3': 1000000,
-    'MiniMaxAI/MiniMax-M2.7': 200000,
-    'MiniMaxAI/MiniMax-M2.5': 200000,
-    'xiaomi/mimo-v2.5-pro': 1000000,
-    'xiaomi/mimo-v2.5': 1000000,
-    'Qwen/Qwen3.8-Max-0902': 1000000,
-    'Qwen/Qwen3.8-Max': 1000000,
-    'Qwen/Qwen3.8-27B': 262144,
-    'Qwen/Qwen3.8-Flash': 1000000,
-    'Qwen/Qwen3.7-Max': 1000000,
-    'Qwen/Qwen3.7-Plus': 1000000,
-    'Qwen/Qwen3.7-Flash': 1000000,
-    'Qwen/Qwen3.6-Max-Preview': 200000,
-    'Qwen/Qwen3.6-Plus': 200000,
-    'meituan/LongCat-2.0:free': 1048576,
-    'stepfun/Step-3.7-Flash': 256000,
-    'stepfun/Step-3.5-Flash': 1000000,
-    'tencent/hy3-paid': 262144,
-    'tencent/hy4-preview': 1048576,
-    'google/gemini-3.8-flash': 1000000,
-    'google/gemini-3.7-flash': 1048576,
-    'google/gemini-3.6-flash': 1000000,
-    'google/gemini-3.5-flash': 1000000,
-    'google/gemini-3.5-flash-lite': 1000000,
-    'google/gemini-3.1-flash-lite': 1000000,
-    'sakana/fugu-ultra': 1000000,
-    'nvidia/nemotron-3-ultra-550b-a55b': 1000000,
-    'thinkingmachines/inkling': 256000,
-    'thinkingmachines/inkling-small': 1000000,
-    'poolside/laguna-s-2.1-free': 256000,
-    'inclusionai/ling-3.0-flash-sante:free': 262144,
-    'meta/muse-spark-1.1': 1048576,
-    'meta/muse-spark-1.2': 1048576,
-    'meta/muse-spark-1.2-contributor': 1048576,
-    'meta/muse-spark-1.3': 1048576,
-    'meta/muse-spark-1.3-contributor': 1048576,
-    'xai/grok-4.5': 500000,
-    'xai/grok-4.6': 500000,
-};
+export const COMMANDCODE_MODEL_CONTEXT_TOKENS: Record<string, number> = Object.fromEntries(
+    COMMAND_CODE_MODELS
+        .filter(model => !model.hidden)
+        .map(model => [model.id, model.contextWindow ?? 1_000_000]),
+);
 
 /**
  * Per-model context window sizes (tokens).
@@ -366,10 +351,6 @@ export const MODEL_CONTEXT_TOKENS: Record<string, number> = {
     // differ from the same model IDs exposed through the public API. The live
     // listing (see codex/modelCatalog.ts) overrides these when it is available;
     // this table answers before the first sign-in and when a listing call fails.
-    'codex-chatgpt:gpt-6-astra': CODEX_CHATGPT_EFFECTIVE_CONTEXT_TOKENS,
-    'codex-chatgpt:gpt-6.1-sol': CODEX_CHATGPT_EFFECTIVE_CONTEXT_TOKENS,
-    'codex-chatgpt:gpt-6-sol': CODEX_CHATGPT_EFFECTIVE_CONTEXT_TOKENS,
-    'codex-chatgpt:gpt-6-luna': CODEX_CHATGPT_EFFECTIVE_CONTEXT_TOKENS,
     'codex-chatgpt:gpt-5.6': CODEX_CHATGPT_CONTEXT_TOKENS,
     // Kimi Code's k3 serves a 1M window, but the plan's entitlement on the Moderato
     // tier is 256K and the service answers **401** past it - not a truncation and not a
@@ -385,12 +366,15 @@ export const MODEL_CONTEXT_TOKENS: Record<string, number> = {
     'kimi-code-plan:k3.1-pro-highspeed': 1048576,
     ...Object.fromEntries(CODEX_CHATGPT_MODELS.map(model => [
         `codex-chatgpt:${model}`,
-        isCodexGpt6FamilyModel(model)
-            ? CODEX_CHATGPT_EFFECTIVE_CONTEXT_TOKENS
-            : CODEX_CHATGPT_CONTEXT_TOKENS,
+        model === 'gpt-6.1-terra'
+            ? CODEX_CHATGPT_TERRA_CONTEXT_TOKENS
+            : isCodexGpt6FamilyModel(model)
+                ? CODEX_CHATGPT_EFFECTIVE_CONTEXT_TOKENS
+                : CODEX_CHATGPT_CONTEXT_TOKENS,
     ])),
     'gpt-6-astra': 1050000,
     'gpt-6.1-sol': 1050000,
+    'gpt-6.1-terra': 1050000,
     'gpt-6-sol': 1050000,
     'gpt-6-luna': 1050000,
     'gpt-5.6': 1050000,
@@ -408,12 +392,23 @@ export const MODEL_CONTEXT_TOKENS: Record<string, number> = {
     'gpt-5-mini': 200000,
     'gpt-5-nano': 400000,
     'gpt-4-vision': 128000,
+    'claude-fable-5-2': 1000000,
+    'claude-fable-5-1': 1000000,
     'claude-fable-5': 1000000,
+    'claude-opus-5-5': 1000000,
+    'claude-opus-5.5': 1000000,
+    'claude-opus-5': 1000000,
+    'claude-sonnet-5-5': 1000000,
+    'claude-sonnet-5.5': 1000000,
     'claude-sonnet-5': 1000000,
     'claude-opus-4-7': 1000000,
     'claude-opus-4-6': 1000000,
     'claude-sonnet-4-6': 1000000,
+    'claude-haiku-5-5': 1000000,
+    'claude-haiku-5.5': 1000000,
     'claude-haiku-4-5': 200000,
+    'MiniMax-M3.1-Flash': 1000000,
+    'MiniMax-M3.1-Flash-Preview': 1000000,
     'MiniMax-M3': 1000000,
     'MiniMax-M2.7': 204800,
     'MiniMax-M2.7-highspeed': 204800,
@@ -421,6 +416,10 @@ export const MODEL_CONTEXT_TOKENS: Record<string, number> = {
     'MiniMax-M2.5-highspeed': 204800,
     'MiniMax-M2.1': 204800,
     'MiniMax-M2': 196608,
+    'glm-5.3': 1000000,
+    'glm-5.3-flash': 1000000,
+    'glm-5.3-flashx': 1000000,
+    'GLM-5.3': 1000000,
     'glm-5.2': 1000000,
     'glm-5.1': 200000,
     'glm-5.1-highspeed': 200000,
@@ -440,6 +439,12 @@ export const MODEL_CONTEXT_TOKENS: Record<string, number> = {
     'glm-4.6v': 128000,
     'glm-z1-flash': 128000,
     'glm-4-flash': 128000,
+    'qwen4-max-preview': 1000000,
+    'qwen3.8-max': 1000000,
+    'qwen3.8-max-0902': 1000000,
+    'qwen3.8-plus': 1000000,
+    'qwen3.8-flash': 1000000,
+    'qwen3.8-27b': 262144,
     'qwen3.7-max-2026-06-08': 1000000,
     'qwen3.7-max': 1000000,
     'qwen3.7-plus': 1000000,
@@ -453,6 +458,12 @@ export const MODEL_CONTEXT_TOKENS: Record<string, number> = {
     'qwen3.6-27b': 262144,
     'qwen3-235b-a22b': 128000,
     'qwen3-32b': 128000,
+    'gemini-4-argon': 1048576,
+    'gemini-4-carbon': 1048576,
+    'gemini-4-hydrogen': 1048576,
+    'gemini-3.8-flash': 1048576,
+    'gemini-3.7-flash': 1048576,
+    'gemini-3.6-flash': 1048576,
     'gemini-3.1-pro-preview': 1048576,
     'gemini-3-flash-preview': 1048576,
     'gemini-3.1-flash-lite-preview': 1048576,
@@ -551,6 +562,20 @@ export const MODEL_CONTEXT_TOKENS: Record<string, number> = {
     'nemotron-3-super-free': 131072,
     'phi-4-reasoning': 16384,
     'Qwen3.7-Max': 1000000,
+    'openrouter:anthropic/claude-opus-5.5': 1000000,
+    'openrouter:anthropic/claude-sonnet-5.5': 1000000,
+    'openrouter:anthropic/claude-haiku-5.5': 1000000,
+    'openrouter:openai/gpt-6.1-sol': 1050000,
+    'openrouter:openai/gpt-6.1-terra': 1050000,
+    'openrouter:google/gemini-4-carbon': 1048576,
+    'openrouter:google/gemini-4-argon': 1048576,
+    'openrouter:google/gemini-3.8-flash': 1048576,
+    'openrouter:z-ai/glm-5.3': 1000000,
+    'openrouter:z-ai/glm-5.3-flash': 1048576,
+    'openrouter:minimax/minimax-m3.1-flash': 1000000,
+    'openrouter:moonshotai/kimi-k3.1-pro': 1048576,
+    'openrouter:qwen/qwen3.8-max': 1000000,
+    'openrouter:x-ai/grok-4.7': 500000,
     'openrouter:deepseek/deepseek-v4-pro': 1048576,
     'openrouter:z-ai/glm-5.2': 1048576,
     'openrouter:moonshotai/kimi-k2.7-code': 262144,
@@ -588,13 +613,16 @@ export const MODEL_CONTEXT_TOKENS: Record<string, number> = {
     ...Object.fromEntries(
         Object.entries(COMMANDCODE_MODEL_CONTEXT_TOKENS).map(([model, context]) => [`commandcode:${model}`, context])
     ),
+    'commandcode-messages:claude-sonnet-5-5': 1000000,
     'commandcode-messages:claude-sonnet-5': 1000000,
     'commandcode-messages:claude-sonnet-4-6': 1000000,
     'commandcode-messages:claude-fable-5-1': 1000000,
     'commandcode-messages:claude-fable-5': 1000000,
+    'commandcode-messages:claude-opus-5-5': 1000000,
     'commandcode-messages:claude-opus-5': 1000000,
     'commandcode-messages:claude-opus-4-8': 1000000,
     'commandcode-messages:claude-opus-4-7': 1000000,
+    'commandcode-messages:claude-haiku-5-5': 1000000,
     'commandcode-messages:claude-haiku-4-5-20251001': 200000,
 };
 
@@ -603,6 +631,12 @@ export const MODEL_CONTEXT_TOKENS: Record<string, number> = {
  */
 export function getModelContextTokens(model: string, providerId?: string): number {
     if (!model) return 0;
+    if (providerId === WORKBUDDY_PROVIDER_ID) {
+        return resolveWorkBuddyCatalogEntry(model)?.contextWindow ?? 200_000;
+    }
+    if (providerId === OPENDESIGN_PROVIDER_ID) {
+        return resolveOpenDesignModelInfo(model).contextWindow;
+    }
     const providerKey = providerId ? `${providerId}:${model}` : '';
     if (providerKey && providerKey in MODEL_CONTEXT_TOKENS) return MODEL_CONTEXT_TOKENS[providerKey]!;
     if (model in MODEL_CONTEXT_TOKENS) return MODEL_CONTEXT_TOKENS[model]!;
@@ -671,6 +705,7 @@ export function isCodexExtendedContextModel(model: string): boolean {
  */
 export const CODEX_CHATGPT_MAX_CONTEXT_TOKENS: Record<string, number> = {
     'gpt-6.1-sol': 872_000,
+    'gpt-6.1-terra': 872_000,
     'gpt-6-astra': 872_000,
     'gpt-6-sol': 872_000,
     'gpt-6-luna': 872_000,
@@ -686,6 +721,11 @@ export function clampConfiguredContextTokens(
         : 0;
     if (normalized === 0) return 0;
     const bounded = Math.min(normalized, MAX_SAFE_CONTEXT_TOKENS);
+    if (providerId === WORKBUDDY_PROVIDER_ID) {
+        const entry = resolveWorkBuddyCatalogEntry(model);
+        const ceiling = entry?.maxContextWindow ?? getModelContextTokens(model, providerId);
+        return ceiling > 0 ? Math.min(bounded, ceiling) : bounded;
+    }
     if (providerId !== 'codex-chatgpt') return bounded;
 
     // GPT-5.6 and GPT-6 models in Codex default to 272K, but support user configuration up to 1M (or model ceiling).
@@ -707,6 +747,12 @@ export function clampConfiguredContextTokens(
  */
 export function getModelOutputTokens(model: string, providerId?: string): number {
     if (!model) return 16384;
+    if (providerId === WORKBUDDY_PROVIDER_ID) {
+        return workBuddyMaxOutputTokens(model) ?? 32_000;
+    }
+    if (providerId === OPENDESIGN_PROVIDER_ID) {
+        return resolveOpenDesignModelInfo(model).maxTokens;
+    }
     const lower = model.toLowerCase();
     const modelId = lower.replace(/\s*\([^)]*\)$/i, '');
 
@@ -721,9 +767,10 @@ export function getModelOutputTokens(model: string, providerId?: string): number
         return 384000;
     }
     if (providerId === 'claude' || lower.includes('claude')) {
+        if (lower.includes('haiku-5-5') || lower.includes('haiku-5.5')) return 128000;
         if (lower.includes('haiku-4-5')) return 64000;
         if (lower.includes('opus-4-5') || lower.includes('sonnet-4-5')) return 64000;
-        if (lower.includes('fable-5') || lower.includes('opus-4-') || lower.includes('sonnet-5') || lower.includes('sonnet-4-6')) return 128000;
+        if (lower.includes('fable-5') || lower.includes('opus-5') || lower.includes('opus-4-') || lower.includes('sonnet-5') || lower.includes('sonnet-4-6')) return 128000;
         return 16384;
     }
     if (providerId === 'minimax' || providerId === 'minimax-token-plan' || providerId?.includes('minimax') || lower.includes('minimax')) {
@@ -735,7 +782,7 @@ export function getModelOutputTokens(model: string, providerId?: string): number
     if (providerId === 'glm' || lower.includes('glm')) {
         return 128000;
     }
-    if (providerId === 'qwen' || (lower.includes('qwen') && (lower.includes('3') || lower.includes('max') || lower.includes('plus')))) {
+    if (providerId === 'qwen' || (lower.includes('qwen') && (lower.includes('3') || lower.includes('4') || lower.includes('max') || lower.includes('plus')))) {
         return 65536;
     }
     if (providerId === 'mimo' || providerId === 'mimo-token-plan' || providerId?.includes('mimo') || lower.includes('mimo')) {
@@ -797,20 +844,22 @@ export function getAnthropicModelFeatures(model: string): AnthropicModelFeatures
     const lower = model.toLowerCase();
     if (!lower.includes('claude')) return none;
 
-    const opusMinor = lower.match(/claude-opus-(\d+)[.-](\d+)/);
-    const opusVer = opusMinor ? Number(opusMinor[1]) + Number(opusMinor[2]) / 10 : 0;
+    const opusMinor = lower.match(/claude-opus-(\d+)(?:[.-](\d+))?/);
+    const opusVer = opusMinor ? Number(opusMinor[1]) + Number(opusMinor[2] ?? 0) / 10 : 0;
     const sonnetMinor = lower.match(/claude-sonnet-(\d+)(?:[.-](\d+))?/);
     const sonnetVer = sonnetMinor ? Number(sonnetMinor[1]) + Number(sonnetMinor[2] ?? 0) / 10 : 0;
+    const haikuMinor = lower.match(/claude-haiku-(\d+)(?:[.-](\d+))?/);
+    const haikuVer = haikuMinor ? Number(haikuMinor[1]) + Number(haikuMinor[2] ?? 0) / 10 : 0;
     const isFable = lower.includes('claude-fable');
 
     // Sonnet 5 has adaptive thinking on by default, rejects sampling parameters,
     // and only needs output_config.effort to control depth.
-    if (sonnetVer >= 5) {
+    if (sonnetVer === 5) {
         return { adaptiveThinking: false, thinkingDisplay: false, effort: true, samplingRemoved: true };
     }
 
-    // Fable 5 / Opus 4.7+: adaptive-only thinking, display param, sampling params removed
-    if (isFable || opusVer >= 4.7) {
+    // Fable 5 / Opus 4.7+ / Sonnet 5.5+ / Haiku 5.5+: adaptive thinking, display param, sampling params removed
+    if (isFable || opusVer >= 4.7 || sonnetVer >= 5.5 || haikuVer >= 5.5) {
         return { adaptiveThinking: true, thinkingDisplay: true, effort: true, samplingRemoved: true };
     }
     // Opus 4.6 / Sonnet 4.6: adaptive thinking + effort; sampling still accepted

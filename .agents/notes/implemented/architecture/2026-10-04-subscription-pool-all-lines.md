@@ -1,12 +1,16 @@
 # Agent Note: 号池接入全部订阅线路与设置页草稿保护
 
 Status: implemented
-> 后续更新：Antigravity 供应商与独占补全服务已移除；现存订阅线路与 provider 无关号池内核继续保留，
+> 后续更新（2026-11-12）：Antigravity 供应商与独占补全服务已移除；现存订阅线路与 provider 无关号池内核继续保留，
 > 见 `../simplification/2026-11-12-remove-antigravity-provider-and-completion-services.md`。
-
-> 2026-10-21：`workbuddy-subscription` 线路已整体移除（含号池原型、额度面与模型目录），
-> 见 `../simplification/2026-10-21-remove-workbuddy-and-opencode-go-lines.md`。本文中该线路相关
-> 的表行与断言已按移除后的现状修正，`Problem` 与历史缺陷小节保留当时的背景叙述。
+>
+> 历史注记（2026-10-21）：`workbuddy-subscription` 与 `opencode-go` 曾于当时移除（见
+> `../simplification/2026-10-21-remove-workbuddy-and-opencode-go-lines.md`）。
+>
+> 最新更新（2026-11-14）：`workbuddy-subscription` 已按增强后的协议重新接入，并新增 `opendesign` 订阅线路，
+> 两者已接入本笔记确立的同一套 `OAuthAccountPool` 工厂、`SubscriptionPoolRegistry`（`poolRegistry.ts`）与共享额度仪表
+> （`SubscriptionAccountQuota`），且均补全身份键、去重归并、冷却换号与移除联动清理。专属决策见
+> `../feature/2026-11-14-workbuddy-opendesign-subscriptions.md`。
 
 ## Problem
 
@@ -42,6 +46,8 @@ Status: implemented
 | `kimi-code-plan` | 令牌 userId → email | expiresIn |
 | `codex-chatgpt` | accountId（套餐/工作区边界） | — |
 | `commandcode` | userId → email → key 名 | —（静态 Key，无到期、无续期） |
+| `workbuddy-subscription` | `uid` → `uin` → 桌面 `sourceFile` → `domain + nickname` | **域 / 后端 / 区域**（`cn` / `intl`）、`source`（`desktop` / `managed`）、`enterpriseId`、`accountType`（拒绝未解封 `$wbEncrypted` 入池；无 `refreshToken` 时省略 `expiresAt`） |
+| `opendesign` | `amr-user:<id>` → `amr-email:<email>` → `ctrl:<sha256>` → `key:<sha256>` | `kind`（`oauth` / `api-key`）、`controlKey` / `runtimeKey` 或 `apiKey`、`baseUrl`、`workspaceId`（均省略 `expiresAt` 防止被误判为 1970 年已过期） |
 
 共同的取舍：**身份键不是令牌**。令牌每次轮换都会变，用令牌做键会在每次续期后把同一账号看成
 新账号并产生幽灵行。凡是凭据里有稳定账号标识就用它；没有时回落到线路自己的记录槽身份，
@@ -145,6 +151,8 @@ Status: implemented
 | `codex-chatgpt` | 复用账号状态里的 `rateLimits` | 不额外发请求 |
 | `commandcode` | 复用账号状态（`/alpha/billing/credits` 等） | 额度**按 Key** 记账；只报余额时就画成数值 |
 | `minimax-code` | `GET /v1/api/openplatform/coding_plan/remains` | **只带 bearer**：不伪造官方客户端的 `yy`/`x-signature` 第一方标记（冒用官方应用是封号理由） |
+| `workbuddy-subscription` | `POST /billing/meter/get-user-resource` | 汇总 `Accounts[]` 多套餐容量生成 `cycle`（当期）与 `package`（资源包）双仪表并按账号 ID 缓存（上限 20 条） |
+| `opendesign` | AMR `/workspaces/{id}/billing/coding-plan-usage` + `/billing/summary` + `/wallet/balance` | 仅对携带 `controlKey` 的 OAuth 账号查询 5 小时 / 7 天窗口与美元余额（只 401/403 切换鉴权格式）；静态 API Key 静默跳过 |
 
 `pool/quotaWindows.ts` 把各线路的形状收敛成统一仪表，其中**比例缺失但报金额**的窗口仍然产出仪表
 （画成数值）：一个只报余额的额度是真实事实，丢掉它会显示成「什么都没有」。

@@ -411,6 +411,8 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
 let settingsKimiAccount: any = undefined;
 let settingsMinimaxCodeAccount: any = undefined;
 let settingsClaudeSubscriptionAccount: any = undefined;
+let settingsWorkbuddyAccount: any = undefined;
+let settingsOpendesignAccount: any = undefined;
 // One pool view per subscription line, keyed by provider id: the settings form
 // is a draft, so the section follows the selected provider, not the saved one.
 let settingsSubscriptionPools: Record<string, any> = {};
@@ -2901,6 +2903,58 @@ let settingsSubscriptionPools: Record<string, any> = {};
     bindBtn('claudeSubscriptionLogoutBtn', () => {
         vscode.postMessage({ type: 'claudeSubscriptionLogout' });
     });
+    bindBtn('workbuddyLoginBtn', () => {
+        const region = (document.getElementById('workbuddyRegionSelect') as HTMLSelectElement | null)?.value;
+        vscode.postMessage({
+            type: 'workbuddyLogin',
+            region: region === 'intl' ? 'intl' : 'cn',
+        });
+    });
+    bindBtn('workbuddyRescanBtn', () => {
+        vscode.postMessage({ type: 'workbuddyRescan' });
+    });
+    bindBtn('workbuddyLogoutBtn', () => {
+        vscode.postMessage({ type: 'workbuddyLogout' });
+    });
+    bindBtn('workbuddySaveAtRestKeyBtn', () => {
+        const input = document.getElementById('workbuddyAtRestKeyInput') as HTMLInputElement | null;
+        const statusEl = document.getElementById('workbuddyAtRestStatus');
+        const keyText = (input?.value || '').trim();
+        if (!keyText) {
+            if (statusEl) {
+                statusEl.textContent = tr('Paste a 32-byte key first (64 hex chars or base64).', '请先粘贴 32 字节保护密钥（64 位 Hex 或 Base64）。');
+                statusEl.style.color = '#ff9800';
+            }
+            input?.focus();
+            return;
+        }
+        if (input) input.value = '';
+        vscode.postMessage({ type: 'workbuddySaveAtRestKey', keyText });
+    });
+    bindBtn('workbuddyClearAtRestKeyBtn', () => {
+        const input = document.getElementById('workbuddyAtRestKeyInput') as HTMLInputElement | null;
+        if (input) input.value = '';
+        vscode.postMessage({ type: 'workbuddyClearAtRestKey' });
+    });
+    bindBtn('workbuddyRunCheckinBtn', () => {
+        vscode.postMessage({ type: 'workbuddyRunCheckin' });
+    });
+    document.getElementById('workbuddyAutoCheckinToggle')?.addEventListener('change', event => {
+        const target = event.target;
+        if (target instanceof HTMLInputElement) {
+            vscode.postMessage({ type: 'workbuddyToggleAutoCheckin', enabled: target.checked });
+        }
+    });
+    bindBtn('opendesignLoginBtn', () => {
+        vscode.postMessage({ type: 'opendesignLogin' });
+    });
+    bindBtn('opendesignRefreshQuotaBtn', () => {
+        settingsSubscriptionQuotaRequested.delete('opendesign');
+        vscode.postMessage({ type: 'opendesignRefreshQuota' });
+    });
+    bindBtn('opendesignLogoutBtn', () => {
+        vscode.postMessage({ type: 'opendesignLogout' });
+    });
     bindBtn('codexLogoutBtn', () => {
         vscode.postMessage({ type: 'codexLogout' });
     });
@@ -3041,7 +3095,7 @@ let settingsSubscriptionPools: Record<string, any> = {};
 
     function settingsFormSignature(): string {
         return JSON.stringify(Array.from(settingsPage.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>('input, select, textarea'))
-            .filter(field => field.id !== 'skillSourceInput' && !field.closest('#subscriptionProxyGroup'))
+            .filter(field => field.id !== 'skillSourceInput' && !field.closest('#subscriptionProxyGroup') && !field.closest('#workbuddyAccountGroup'))
             .map(field => [field.id || field.className, field instanceof HTMLInputElement && field.type === 'checkbox' ? field.checked : field.value]));
     }
 
@@ -6984,6 +7038,8 @@ let settingsSubscriptionPools: Record<string, any> = {};
         settingsKimiAccount = msg.kimiAccount;
         settingsMinimaxCodeAccount = msg.minimaxCodeAccount;
         settingsClaudeSubscriptionAccount = msg.claudeSubscriptionAccount;
+        settingsWorkbuddyAccount = msg.workbuddyAccount;
+        settingsOpendesignAccount = msg.opendesignAccount;
         settingsSubscriptionPools = msg.subscriptionPools ?? {};
                 if (isSubscriptionProxyStatus(msg.subscriptionProxy)) settingsSubscriptionProxy = msg.subscriptionProxy;
                 cachedSettingsData = {
@@ -8106,6 +8162,8 @@ let settingsSubscriptionPools: Record<string, any> = {};
             kimiAccount: settingsKimiAccount,
             minimaxCodeAccount: settingsMinimaxCodeAccount,
             claudeSubscriptionAccount: settingsClaudeSubscriptionAccount,
+            workbuddyAccount: settingsWorkbuddyAccount,
+            opendesignAccount: settingsOpendesignAccount,
             subscriptionPools: settingsSubscriptionPools,
             subscriptionProxy: settingsSubscriptionProxy,
             current,
@@ -8432,12 +8490,18 @@ let settingsSubscriptionPools: Record<string, any> = {};
         const isMinimaxCode = p?.id === 'minimax-code';
         const claudeSubscriptionGroup = document.getElementById('claudeSubscriptionAccountGroup');
         const isClaudeSubscription = p?.id === 'claude-subscription';
+        const workbuddyGroup = document.getElementById('workbuddyAccountGroup');
+        const isWorkBuddy = p?.id === 'workbuddy-subscription';
+        const opendesignGroup = document.getElementById('opendesignAccountGroup');
+        const isOpenDesign = p?.id === 'opendesign';
         const proxyGroup = document.getElementById('subscriptionProxyGroup');
         if (proxyGroup) proxyGroup.style.display = isCodex ? '' : 'none';
         if (commandcodeGroup) commandcodeGroup.style.display = isCommandCode ? '' : 'none';
         if (kimiGroup) kimiGroup.style.display = isKimiCodePlan ? '' : 'none';
         if (minimaxCodeGroup) minimaxCodeGroup.style.display = isMinimaxCode ? '' : 'none';
         if (claudeSubscriptionGroup) claudeSubscriptionGroup.style.display = isClaudeSubscription ? '' : 'none';
+        if (workbuddyGroup) workbuddyGroup.style.display = isWorkBuddy ? '' : 'none';
+        if (opendesignGroup) opendesignGroup.style.display = isOpenDesign ? '' : 'none';
         if (codexGroup) codexGroup.style.display = isCodex ? '' : 'none';
         if (codexSpeedGroup) codexSpeedGroup.style.display = isCodex ? '' : 'none';
         if (responseVerbosityGroup) responseVerbosityGroup.style.display = isCodex ? '' : 'none';
@@ -8615,6 +8679,146 @@ let settingsSubscriptionPools: Record<string, any> = {};
                     freeCredits: tr('Free credits', '免费额度'),
                 }, chatI18n.locale === 'zh-cn' ? 'zh-CN' : 'en');
             }
+        }
+        if (isWorkBuddy) {
+            const accountStatus = document.getElementById('workbuddyAccountStatus');
+            const account = settingsWorkbuddyAccount;
+            const accounts: any[] = Array.isArray(account?.accounts) ? account.accounts : [];
+            const activeAccounts = accounts.filter((entry: any) => !entry.hidden && entry.fresh);
+            const expiredAccounts = accounts.filter((entry: any) => !entry.hidden && !entry.fresh);
+            const desktopCount = accounts.filter((entry: any) => entry.source === 'desktop' && !entry.hidden).length;
+            const managedCount = accounts.filter((entry: any) => entry.source === 'managed').length;
+            if (accountStatus) {
+                if (activeAccounts.length > 0) {
+                    const parts = [
+                        desktopCount > 0 ? tr(`${desktopCount} desktop`, `${desktopCount} 个桌面端`) : '',
+                        managedCount > 0 ? tr(`${managedCount} browser`, `${managedCount} 个浏览器账号`) : '',
+                    ].filter(Boolean).join(' · ');
+                    accountStatus.innerHTML = svgIcon('check') + escapeHtml(tr(
+                        `Active · ${parts}`,
+                        `已就绪 · ${parts}`,
+                    ));
+                    accountStatus.style.color = '#4caf50';
+                } else if (expiredAccounts.length > 0) {
+                    accountStatus.innerHTML = svgIcon('warning') + escapeHtml(tr(
+                        'Stored WorkBuddy session expired. Rescan desktop or sign in again.',
+                        '已保存的 WorkBuddy 会话已过期，请重扫桌面端或重新登录。',
+                    ));
+                    accountStatus.style.color = '#ff9800';
+                } else if (account?.missingAtRestKey) {
+                    accountStatus.innerHTML = svgIcon('warning') + escapeHtml(tr(
+                        'Encrypted desktop session detected. Provide the $wbEncrypted protection key below or add a browser sign-in.',
+                        '检测到加密的桌面端会话。请在下方填入 $wbEncrypted 保护密钥，或通过浏览器登录新账号。',
+                    ));
+                    accountStatus.style.color = '#ff9800';
+                } else {
+                    accountStatus.innerHTML = svgIcon('warning') + escapeHtml(tr(
+                        'No WorkBuddy session found. Sign in via browser or launch WorkBuddy desktop and rescan.',
+                        '未找到 WorkBuddy 会话。请使用浏览器登录，或在启动桌面端后点击重扫。',
+                    ));
+                    accountStatus.style.color = '#ff9800';
+                }
+            }
+            const loginBtn = document.getElementById('workbuddyLoginBtn');
+            const logoutBtn = document.getElementById('workbuddyLogoutBtn');
+            setAddAccountControl(loginBtn, 'Add browser sign-in', '浏览器登录账号', activeAccounts.length > 0);
+            if (logoutBtn) logoutBtn.style.display = managedCount > 0 ? '' : 'none';
+
+            const atRestGroup = document.getElementById('workbuddyAtRestGroup');
+            const atRestStatus = document.getElementById('workbuddyAtRestStatus');
+            const clearAtRestBtn = document.getElementById('workbuddyClearAtRestKeyBtn');
+            const showAtRest = Boolean(
+                account && (
+                    account.encryptedDesktopCount > 0
+                    || account.missingAtRestKey
+                    || account.hasAtRestKey
+                    || Boolean(account.lastAtRestError)
+                ),
+            );
+            if (atRestGroup) atRestGroup.style.display = showAtRest ? '' : 'none';
+            if (clearAtRestBtn) clearAtRestBtn.style.display = account?.hasAtRestKey ? '' : 'none';
+            if (atRestStatus && account) {
+                if (account.lastAtRestError) {
+                    atRestStatus.textContent = String(account.lastAtRestError);
+                    atRestStatus.style.color = '#ff9800';
+                } else if (account.missingAtRestKey) {
+                    atRestStatus.textContent = tr(
+                        `Detected ${account.encryptedDesktopCount} encrypted file(s); key not configured yet.`,
+                        `检测到 ${account.encryptedDesktopCount} 个加密会话文件，尚未配置解封密钥。`,
+                    );
+                    atRestStatus.style.color = '#ff9800';
+                } else if (account.hasAtRestKey) {
+                    atRestStatus.textContent = tr(
+                        `Key loaded (${account.atRestKeyId || 'stored'}); unlocked ${account.openedEncryptedCount}/${account.encryptedDesktopCount} encrypted file(s).`,
+                        `已配置密钥（指纹 ${account.atRestKeyId || '已保存'}）；已解封 ${account.openedEncryptedCount}/${account.encryptedDesktopCount} 个加密会话文件。`,
+                    );
+                    atRestStatus.style.color = '#4caf50';
+                } else {
+                    atRestStatus.textContent = '';
+                }
+            }
+
+            const checkinGroup = document.getElementById('workbuddyCheckinGroup');
+            const checkinToggle = document.getElementById('workbuddyAutoCheckinToggle') as HTMLInputElement | null;
+            const checkinStatus = document.getElementById('workbuddyCheckinStatus');
+            const checkin = account?.checkin;
+            const hasCnAccount = accounts.some((entry: any) => entry.region === 'cn');
+            const showCheckin = Boolean(
+                checkin && (hasCnAccount || checkin.enabled || checkin.signedInToday || checkin.lastRunAt),
+            );
+            if (checkinGroup) checkinGroup.style.display = showCheckin ? '' : 'none';
+            if (checkinToggle) checkinToggle.checked = Boolean(checkin?.enabled);
+            if (checkinStatus && checkin) {
+                if (checkin.lastError) {
+                    checkinStatus.textContent = tr(`Last check-in error: ${checkin.lastError}`, `上次签到错误：${checkin.lastError}`);
+                    checkinStatus.style.color = '#ff9800';
+                } else if (checkin.signedInToday) {
+                    checkinStatus.textContent = tr(
+                        `Checked in today (${checkin.signedInCount + checkin.skippedCount}/${checkin.accountCount} CN account(s)).`,
+                        `今日已签到（${checkin.signedInCount + checkin.skippedCount}/${checkin.accountCount} 个国区账号）。`,
+                    );
+                    checkinStatus.style.color = '#4caf50';
+                } else if (checkin.accountCount > 0) {
+                    checkinStatus.textContent = tr(
+                        `${checkin.accountCount} CN account(s) eligible for daily check-in.`,
+                        `共 ${checkin.accountCount} 个国区账号可执行每日签到。`,
+                    );
+                    checkinStatus.style.color = '';
+                } else {
+                    checkinStatus.textContent = '';
+                }
+            }
+        }
+        if (isOpenDesign) {
+            const accountStatus = document.getElementById('opendesignAccountStatus');
+            const account = settingsOpendesignAccount;
+            if (accountStatus) {
+                if (account?.signedIn) {
+                    const detailParts = [
+                        account.oauthCount > 0 ? tr(`${account.oauthCount} OAuth`, `${account.oauthCount} 个 OAuth`) : '',
+                        account.apiKeyCount > 0 ? tr(`${account.apiKeyCount} API key`, `${account.apiKeyCount} 个 API Key`) : '',
+                        account.email || account.userName || '',
+                        account.plan || '',
+                    ].filter(Boolean).join(' · ');
+                    accountStatus.innerHTML = svgIcon('check') + escapeHtml(tr(
+                        `Active · ${account.accountCount} account(s)${detailParts ? ` (${detailParts})` : ''}`,
+                        `已就绪 · 共 ${account.accountCount} 个账号${detailParts ? `（${detailParts}）` : ''}`,
+                    ));
+                    accountStatus.style.color = '#4caf50';
+                } else {
+                    accountStatus.innerHTML = svgIcon('warning') + escapeHtml(tr(
+                        'Not signed in. Sign in with device code below, or paste an OpenDesign API key above.',
+                        '尚未配置账号。请使用下方设备码登录，或在上方粘贴 OpenDesign API Key。',
+                    ));
+                    accountStatus.style.color = '#ff9800';
+                }
+            }
+            const loginBtn = document.getElementById('opendesignLoginBtn');
+            const logoutBtn = document.getElementById('opendesignLogoutBtn');
+            const refreshBtn = document.getElementById('opendesignRefreshQuotaBtn') as HTMLButtonElement | null;
+            setAddAccountControl(loginBtn, 'Device code sign-in', '设备码登录', account?.signedIn === true);
+            if (logoutBtn) logoutBtn.style.display = account?.signedIn ? '' : 'none';
+            if (refreshBtn) refreshBtn.disabled = !account?.signedIn;
         }
         if (p && p.requiresApiKey === false) {
             group.style.display = 'none';

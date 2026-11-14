@@ -23,6 +23,7 @@ import {
 export const CODEX_CHATGPT_MODELS = [
     'gpt-6-astra',
     'gpt-6.1-sol',
+    'gpt-6.1-terra',
     'gpt-6-sol',
     'gpt-6-luna',
     'gpt-5.6-sol',
@@ -33,6 +34,11 @@ export const CODEX_CHATGPT_MODELS = [
     'gpt-5.4-mini',
     'gpt-5.3-codex-spark',
 ] as const;
+
+/**
+ * Context window the ChatGPT Codex service serves for GPT-6.1 Terra.
+ */
+export const CODEX_CHATGPT_TERRA_CONTEXT_TOKENS = 500_000;
 
 /**
  * Context window the ChatGPT Codex service serves for the GPT-5.6 family.

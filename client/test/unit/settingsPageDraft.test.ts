@@ -71,6 +71,7 @@ class StubElement {
     onchange: unknown = null;
     oninput: unknown = null;
     inSubscriptionProxyGroup = false;
+    inWorkbuddyAccountGroup = false;
     private readonly children: StubElement[] = [];
     private fieldValue = '';
     private markup = '';
@@ -84,7 +85,9 @@ class StubElement {
     get value(): string { return this.fieldValue; }
     set value(next: string) { this.fieldValue = next; }
     closest(selector: string): StubElement | null {
-        return selector === '#subscriptionProxyGroup' && this.inSubscriptionProxyGroup ? this : null;
+        if (selector === '#subscriptionProxyGroup' && this.inSubscriptionProxyGroup) return this;
+        if (selector === '#workbuddyAccountGroup' && this.inWorkbuddyAccountGroup) return this;
+        return null;
     }
     querySelector(): null { return null; }
     querySelectorAll(): StubElement[] { return []; }
@@ -129,8 +132,11 @@ class StubSelectElement extends StubElement {
     override set value(next: string) { this.selectedIndex = this.optionList.findIndex(option => option.value === next); }
 }
 
-const SELECT_IDS = new Set(['settingsProvider', 'inlineProvider', 'translationPreviewProvider', 'subscriptionProxyMode']);
+const SELECT_IDS = new Set([
+    'settingsProvider', 'inlineProvider', 'translationPreviewProvider', 'subscriptionProxyMode', 'workbuddyRegionSelect',
+]);
 const PROXY_GROUP_IDS = new Set(['subscriptionProxyMode', 'subscriptionProxyUrl', 'subscriptionProxySaveBtn', 'subscriptionProxyRefreshBtn', 'subscriptionProxyStatus']);
+const WORKBUDDY_GROUP_IDS = new Set(['workbuddyRegionSelect', 'workbuddyAtRestKeyInput', 'workbuddyAutoCheckinToggle']);
 
 interface Harness {
     readonly deps: Record<string, unknown>;
@@ -155,6 +161,7 @@ function createHarness(): Harness {
             ? new StubSelectElement(id)
             : new StubInputElement(id, 'input');
         element.inSubscriptionProxyGroup = PROXY_GROUP_IDS.has(id);
+        element.inWorkbuddyAccountGroup = WORKBUDDY_GROUP_IDS.has(id);
         elementById.set(id, element);
         if (id !== 'settingsPage') formFields.push(element);
         return element;
@@ -205,6 +212,8 @@ function createHarness(): Harness {
         settingsKimiAccount: undefined,
         settingsMinimaxCodeAccount: undefined,
         settingsClaudeSubscriptionAccount: undefined,
+        settingsWorkbuddyAccount: undefined,
+        settingsOpendesignAccount: undefined,
         lastSettingsPageSignature: '',
         settingsFormBaseline: null,
         settingsSavePending: false,
@@ -414,5 +423,40 @@ describe('settings page draft preservation', () => {
         harness.render([SAVED_PROVIDERS[0]!], savedConfig('custom', 'https://saved.example/v1'));
 
         expect(providerSelect.value, 'a vanished draft line falls back to the saved one').to.equal('custom');
+    });
+
+    it('keeps unsaved drafts on WorkBuddy/OpenDesign refresh and ignores internal WorkBuddy controls in form dirty signature', () => {
+        const providers = [
+            ...SAVED_PROVIDERS,
+            { id: 'workbuddy-subscription', name: 'WorkBuddy', models: [], hasKey: false, supportsUtilityCalls: false, userEndpoint: '' },
+            { id: 'opendesign', name: 'OpenDesign', models: [], hasKey: true, supportsUtilityCalls: true, userEndpoint: '' },
+        ];
+        const harness = createHarness();
+        harness.render(providers, savedConfig('custom', 'https://saved.example/v1'));
+        const providerSelect = harness.select('settingsProvider');
+
+        // 1. Controls inside #workbuddyAccountGroup are immediate account actions and must not mark main settings dirty.
+        const atRestInput = harness.element('workbuddyAtRestKeyInput');
+        atRestInput.value = '0'.repeat(64);
+        const regionSelect = harness.select('workbuddyRegionSelect');
+        regionSelect.innerHTML = '<option value="cn" selected>CN</option><option value="intl">INTL</option>';
+        regionSelect.value = 'intl';
+        expect(harness.isDirty(), 'editing WorkBuddy account controls does not dirty main form baseline').to.equal(false);
+
+        // 2. Picking workbuddy-subscription or opendesign as an unsaved draft survives a settings push while still repainting that card.
+        providerSelect.value = 'workbuddy-subscription';
+        expect(harness.isDirty()).to.equal(true);
+        harness.deps.settingsWorkbuddyAccount = { signedIn: true, accountCount: 1, sealedFiles: 0, sealedOpened: 0, missingAtRestKey: false, hasAtRestKey: false };
+        harness.resetCalls();
+        harness.render(providers, savedConfig('custom', 'https://saved.example/v1'));
+        expect(providerSelect.value).to.equal('workbuddy-subscription');
+        expect(harness.accountRepaintProviders()).to.deep.equal(['workbuddy-subscription']);
+
+        providerSelect.value = 'opendesign';
+        harness.deps.settingsOpendesignAccount = { signedIn: true, accountCount: 1, oauthCount: 1, apiKeyCount: 0 };
+        harness.resetCalls();
+        harness.render(providers, savedConfig('custom', 'https://saved.example/v1'));
+        expect(providerSelect.value).to.equal('opendesign');
+        expect(harness.accountRepaintProviders()).to.deep.equal(['opendesign']);
     });
 });

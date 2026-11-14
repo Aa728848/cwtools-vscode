@@ -37,8 +37,26 @@ import {
     getModelOutputTokens,
     getAnthropicModelFeatures
 } from './providers/models/capabilities';
-import { minimaxCodeModelDef, minimaxCodeOutputConfig } from './minimaxcode/types';
+import {
+    minimaxCodeModelDef,
+    minimaxCodeOutputConfig,
+    resolveMinimaxCodeModelId,
+} from './minimaxcode/types';
 import { commandCodeReasoningEfforts, commandCodeWireEffort } from './commandcode/modelCapabilities';
+import {
+    OPENDESIGN_PROVIDER_ID,
+    isOpenDesignDeepSeekModel,
+} from './opendesign/types';
+import { openDesignReasoningCapability } from './opendesign/catalog';
+import {
+    WORKBUDDY_PROVIDER_ID,
+    workBuddyModelRoute,
+} from './workbuddy/types';
+import {
+    resolveWorkBuddyCatalogEntry,
+    workBuddyEffortForRequest,
+    workBuddyEffortsFor,
+} from './workbuddy/modelCatalog';
 import {
     CLAUDE_CODE_IDENTITY_TEXT,
     CLAUDE_DEFAULT_CACHE_TTL,
@@ -307,6 +325,8 @@ export function getProviderApiFormat(
             return 'anthropic-messages';
         case 'opencode':
             return getOpenCodeApiFormat(model);
+        case WORKBUDDY_PROVIDER_ID:
+            return workBuddyModelRoute(model, 'cn');
         case 'custom':
             return customApiFormat;
         default:
@@ -346,6 +366,16 @@ function reasoningCapability(
 
 function openAiReasoningCapability(model: string, providerId?: string): ModelReasoningCapability {
     if (isGpt6ReasoningFamilyModel(model)) {
+        if (isGpt6DotOneTerraModel(model)) {
+            const isCodex = providerId?.toLowerCase() === 'codex-chatgpt';
+            return reasoningCapability(
+                'effort',
+                isCodex
+                    ? ['low', 'medium', 'high', 'xhigh', 'max']
+                    : ['none', 'low', 'medium', 'high', 'xhigh', 'max'],
+                isCodex ? 'low' : 'medium',
+            );
+        }
         // Astra and GPT-6.1 Sol reject `none`; Sol and Luna accept it with `max`.
         if (!isGpt6NoNoneEffortModel(model)) {
             return reasoningCapability('effort', ['none', 'low', 'medium', 'high', 'xhigh', 'max'], 'high');
@@ -432,9 +462,9 @@ function claudeReasoningCapability(model: string): ModelReasoningCapability {
     const lower = modelName(model);
     const features = getAnthropicModelFeatures(lower);
     if (features.effort) {
-        const supportsMax = /claude-(?:fable-5|sonnet-5|opus-(?:4[.-][6-9]|[5-9]))/.test(lower);
-        const supportsXHigh = /claude-(?:fable-5|sonnet-5|opus-(?:4[.-][78]|[5-9]))/.test(lower);
-        const canDisable = !/claude-fable-5/.test(lower);
+        const supportsMax = /claude-(?:fable-5|sonnet-5|haiku-5|opus-(?:4[.-][6-9]|[5-9]))/.test(lower);
+        const supportsXHigh = /claude-(?:fable-5|sonnet-5|haiku-5|opus-(?:4[.-][78]|[5-9]))/.test(lower);
+        const canDisable = !/claude-(?:fable-5|opus-5[.-]5|sonnet-5[.-]5)/.test(lower);
         return reasoningCapability('effort', [
             ...(canDisable ? ['none' as const] : []),
             'low',
@@ -452,8 +482,17 @@ function claudeReasoningCapability(model: string): ModelReasoningCapability {
 
 function geminiReasoningCapability(model: string): ModelReasoningCapability {
     const lower = modelName(model);
+    if (/gemini-4-hydrogen/.test(lower)) {
+        return reasoningCapability('effort', ['low', 'medium', 'high', 'xhigh'], 'high');
+    }
+    if (/gemini-4-(?:argon|carbon)/.test(lower)) {
+        return reasoningCapability('effort', ['low', 'medium', 'high'], 'medium');
+    }
     if (/gemini-3[.]1-pro/.test(lower)) {
         return reasoningCapability('effort', ['low', 'medium', 'high'], 'high');
+    }
+    if (/gemini-3[.][678]-flash/.test(lower)) {
+        return reasoningCapability('effort', ['low', 'medium', 'high'], 'medium');
     }
     if (/gemini-(?:3[.]5-flash|3(?:[.-]|$)|3[.]1-flash-lite)/.test(lower)) {
         return reasoningCapability('effort', ['minimal', 'low', 'medium', 'high'], 'medium');
@@ -490,6 +529,9 @@ function upstreamGatewayCapability(providerId: string, model: string): ModelReas
     if (DEEPSEEK_V4_FAMILY_MODEL_RE.test(lower)) {
         return reasoningCapability('effort', ['none', 'low', 'high', 'max'], 'high');
     }
+    if (/glm-5[.]3/.test(lower)) {
+        return reasoningCapability('effort', ['low', 'high', 'max'], 'high');
+    }
     if (/glm-5[.]2/.test(lower)) {
         return reasoningCapability('effort', ['none', 'high', 'max'], 'max');
     }
@@ -504,6 +546,9 @@ function upstreamGatewayCapability(providerId: string, model: string): ModelReas
     }
     if (/kimi-k2[.]7-code/.test(lower)) {
         return reasoningCapability('fixed', ['high'], 'high');
+    }
+    if (/minimax-m3[.]1/.test(lower)) {
+        return reasoningCapability('effort', ['low', 'medium', 'high', 'xhigh', 'max'], 'max');
     }
     if (/minimax-m3/.test(lower)) {
         return reasoningCapability('toggle', ['none', 'high'], 'high');
@@ -569,6 +614,7 @@ export function getModelReasoningCapability(
         ? reasoningCapability('effort', ['none', 'low', 'high', 'max'], 'high')
         : reasoningCapability('fixed', ['high'], 'high');
     if (provider === 'glm') {
+        if (/glm-5[.]3/.test(lower)) return reasoningCapability('effort', ['low', 'high', 'max'], 'high');
         if (/glm-5[.]2/.test(lower)) return reasoningCapability('effort', ['none', 'high', 'max'], 'max');
         if (/glm-(?:4[.]?[5-9]|5)/.test(lower)) return reasoningCapability('toggle', ['none', 'high'], 'high');
         return NO_REASONING;
@@ -583,6 +629,7 @@ export function getModelReasoningCapability(
         ? reasoningCapability('toggle', ['none', 'high'], 'high')
         : NO_REASONING;
     if (provider === 'minimax' || provider === 'minimax-token-plan') {
+        if (/minimax-m3[.]1/.test(lower)) return reasoningCapability('effort', ['low', 'medium', 'high', 'xhigh', 'max'], 'max');
         if (/minimax-m3/.test(lower)) return reasoningCapability('toggle', ['none', 'high'], 'high');
         if (/minimax-m2/.test(lower)) return reasoningCapability('fixed', ['high'], 'high');
         return NO_REASONING;
@@ -591,9 +638,12 @@ export function getModelReasoningCapability(
         // The subscription catalog is the authority: an unknown id declares no
         // ladder rather than inheriting a neighbour's.
         const entry = resolveClaudeModel(model);
-        const efforts = entry.reasoningEfforts.filter(isReasoningEffort);
-        if (efforts.length === 0) return NO_REASONING;
-        return reasoningCapability('effort', efforts, efforts[0]!);
+        const baseEfforts = entry.reasoningEfforts.filter(isReasoningEffort);
+        if (baseEfforts.length === 0) return NO_REASONING;
+        const efforts: ReasoningEffort[] = entry.canDisableThinking && !baseEfforts.includes('none')
+            ? ['none', ...baseEfforts]
+            : baseEfforts;
+        return reasoningCapability('effort', efforts, baseEfforts.includes('high') ? 'high' : efforts[0]!);
     }
     if (provider === 'minimax-code') {
         // The subscription's thinking shape is a three-state table, not a
@@ -629,6 +679,26 @@ export function getModelReasoningCapability(
         const efforts = commandCodeReasoningEfforts(model).filter(isReasoningEffort);
         if (efforts.length === 0) return NO_REASONING;
         return reasoningCapability('effort', efforts, efforts[0]!);
+    }
+    if (provider === OPENDESIGN_PROVIDER_ID) {
+        return openDesignReasoningCapability(model);
+    }
+    if (provider === WORKBUDDY_PROVIDER_ID) {
+        const entry = resolveWorkBuddyCatalogEntry(model);
+        const efforts = Array.from(new Set(workBuddyEffortsFor(model).filter(isReasoningEffort)));
+        if (efforts.length === 0) return NO_REASONING;
+        const canDisable = entry?.canDisableThinking === true;
+        if (efforts.length === 1 && !canDisable) {
+            return reasoningCapability('fixed', efforts, efforts[0]!);
+        }
+        const preferredDefault = entry?.defaultReasoningEffort
+            && isReasoningEffort(entry.defaultReasoningEffort)
+            && efforts.includes(entry.defaultReasoningEffort)
+            ? entry.defaultReasoningEffort
+            : efforts.includes('high')
+                ? 'high'
+                : efforts[efforts.length - 1]!;
+        return reasoningCapability('effort', efforts, preferredDefault);
     }
     return NO_REASONING;
 }
@@ -738,17 +808,22 @@ function isGpt6DotOneModel(model: string): boolean {
     return /(?:^|\/)gpt-6[.]1-sol(?:-|$)/.test(modelName(model));
 }
 
+/** GPT-6.1 Terra, supporting `none` with OpenAI API default `medium` (Codex default `low`). */
+function isGpt6DotOneTerraModel(model: string): boolean {
+    return /(?:^|\/)gpt-6[.]1-terra(?:-|$)/.test(modelName(model));
+}
+
 /**
  * GPT-6 reasoning tiers that control depth through the Responses
  * `reasoning.effort` field.
  */
 function isGpt6ReasoningFamilyModel(model: string): boolean {
-    return /(?:^|\/)(?:gpt-6-(?:astra|sol|luna)|gpt-6[.]1-sol)(?:-|$)/.test(modelName(model));
+    return /(?:^|\/)(?:gpt-6-(?:astra|sol|luna)|gpt-6[.]1-(?:sol|terra))(?:-|$)/.test(modelName(model));
 }
 
-const QWEN_THINKING_MODEL_RE = /(?:^|\/)qwen3(?:[.-]|$)|(?:^|\/)qwen(?:-max|-plus|-flash|-turbo|-long)(?:[-.]|$)/;
+const QWEN_THINKING_MODEL_RE = /(?:^|\/)qwen[34](?:[.-]|$)|(?:^|\/)qwen(?:-max|-plus|-flash|-turbo|-long)(?:[-.]|$)/;
 
-const KNOWN_REASONING_MODEL_RE = /(?:^|\/)(?:gpt-5|gpt-6-(?:astra|sol|luna)|gpt-6[.]1-sol|o[134](?:-|$)|claude-|deepseek-(?:r1|v3|v4|reasoner|flash)|glm-(?:4[.]?[5-9]|5)|qwen3|qwq|gemini-(?:2[.]5|3)|kimi-k2|kimi-k3|minimax-m2|minimax-m3|mimo-v2|gpt-oss)/;
+const KNOWN_REASONING_MODEL_RE = /(?:^|\/)(?:gpt-5|gpt-6-(?:astra|sol|luna)|gpt-6[.]1-(?:sol|terra)|o[134](?:-|$)|claude-|deepseek-(?:r1|v3|v4|reasoner|flash)|glm-(?:4[.]?[5-9]|5)|qwen[34]|qwq|gemini-(?:2[.]5|[34])|kimi-k2|kimi-k3|minimax-m2|minimax-m3|mimo-v2|gpt-oss)/;
 
 function isQwenThinkingModel(model: string): boolean {
     return QWEN_THINKING_MODEL_RE.test(model);
@@ -813,25 +888,34 @@ const DISABLE_THINKING_PARAMS: Array<{
         result: { extraBody: { thinking: { type: 'disabled' } } },
     },
     {
+        match: (m) => /(?:^|\/)minimax-m3[.]1(?:-|$)/.test(m),
+        result: { reasoningEffort: 'low' },
+    },
+    {
         match: (m) => /(?:^|\/)(?:mimo-v2[.](?:5|6)|minimax-m3)(?:-|$)/.test(m),
         result: { extraBody: { thinking: { type: 'disabled' } } },
     },
-    // Claude Sonnet 5 thinks by default and requires an explicit disable switch.
+    // Claude Sonnet 5 and Haiku 5.5 think by default and accept thinking.type='disabled'.
     {
-        match: (m) => /(?:^|\/)claude-sonnet-5(?:-|$)/.test(m),
+        match: (m) => /(?:^|\/)claude-(?:sonnet-5(?![.-]5)|haiku-5[.-]5)(?:-|$)/.test(m),
         result: { extraBody: { thinking: { type: 'disabled' } } },
     },
-    // Fable 5 always uses adaptive thinking; low effort is the closest fast path.
+    // Fable 5 and Opus/Sonnet 5.5 always use adaptive thinking; low effort is the closest fast path.
     {
-        match: (m) => /(?:^|\/)claude-fable-5(?:-|$)/.test(m),
+        match: (m) => /(?:^|\/)claude-(?:fable-5|opus-5[.-]5|sonnet-5[.-]5)(?:[.-]|$)/.test(m),
         result: { reasoningEffort: 'low' },
     },
     // ── Qwen: enable_thinking=false + /no_think prompt fallback ──
     {
         match: (m) => m.startsWith('qwen') && (
-            m.includes('qwen3') || m.includes('qwen-max') || m.includes('qwen-turbo') || m.includes('qwen-long')
+            m.includes('qwen4') || m.includes('qwen3') || m.includes('qwen-max') || m.includes('qwen-turbo') || m.includes('qwen-long')
         ),
         result: { extraBody: { enable_thinking: false }, injectPrompt: true },
+    },
+    // GLM-5.3 keeps thinking enabled and rejects type='disabled' with HTTP 400.
+    {
+        match: (m) => /(?:^|\/)glm-5[.]3(?:-|$)/.test(m),
+        result: { reasoningEffort: 'low' },
     },
     // GLM 4.0+ hybrid models use the same explicit thinking switch.
     {
@@ -842,6 +926,11 @@ const DISABLE_THINKING_PARAMS: Array<{
     {
         match: (m) => m.startsWith('gemini-2.5-flash'),
         result: { extraBody: { thinking_config: { thinking_budget: 0 } } },
+    },
+    // ── Gemini 4.x & 3.6/3.7/3.8 Flash: thinkingLevel="low" (do not accept "minimal") ──
+    {
+        match: (m) => m.startsWith('gemini-4') || /^gemini-3[.][678]-flash/.test(m),
+        result: { extraBody: { thinking_config: { thinking_level: 'low' } } },
     },
     // ── Gemini 3.x: thinkingLevel="minimal" (cannot fully disable, but minimizes) ──
     {
@@ -872,16 +961,23 @@ export function getReducedThinkingParams(
     providerId?: string,
     apiFormat?: CustomApiFormat
 ): DisableThinkingResult | undefined {
-    const modelParams = getDisableThinkingParams(model);
-    if (modelParams) return modelParams;
-
     const lowerProvider = providerId?.toLowerCase() ?? '';
+    if (lowerProvider === OPENDESIGN_PROVIDER_ID) {
+        return isOpenDesignDeepSeekModel(model)
+            ? { extraBody: { thinking: { type: 'disabled' } } }
+            : undefined;
+    }
+    if (lowerProvider === WORKBUDDY_PROVIDER_ID) {
+        return apiFormat === 'anthropic-messages'
+            ? { extraBody: { thinking: { type: 'disabled' } } }
+            : { reasoningEffort: 'none' };
+    }
+
     const lowerModel = modelName(model);
-    if ((lowerProvider === 'kimi' || lowerProvider === 'kimi-code-plan')
-        && (/(?:^|\/)(?:kimi-)?k3(?:-|$)/.test(lowerModel) || isKimiK31Model(lowerModel))) {
-        // K3.1 cannot stop thinking, so the lowest legal request is the `low` rung — never
-        // a disable-thinking body, which this family does not accept.
-        return { reasoningEffort: 'low' };
+    // Gateway routes must stay within their normalized wire shape instead of leaking
+    // vendor-specific `thinking` / `thinking_config` fields.
+    if (lowerProvider === 'commandcode') {
+        return undefined;
     }
     if (lowerProvider === 'openrouter') {
         const capability = getModelReasoningCapability('openrouter', model, apiFormat);
@@ -889,8 +985,24 @@ export function getReducedThinkingParams(
             ? { extraBody: { reasoning: { enabled: false } } }
             : undefined;
     }
-    // Astra and GPT-6.1 Sol cannot disable reasoning, so reduction bottoms out at `low`.
-    if (isGpt6NoNoneEffortModel(model)) return { reasoningEffort: 'low' };
+    if (lowerProvider === 'minimax-token-plan' && /(?:^|\/)minimax-m3[.]1(?:-|$)/.test(lowerModel)) {
+        return { extraBody: { thinking: { type: 'adaptive' } }, reasoningEffort: 'low' };
+    }
+
+    const modelParams = getDisableThinkingParams(model);
+    if (modelParams) return modelParams;
+
+    if ((lowerProvider === 'kimi' || lowerProvider === 'kimi-code-plan')
+        && (/(?:^|\/)(?:kimi-)?k3(?:-|$)/.test(lowerModel) || isKimiK31Model(lowerModel))) {
+        // K3.1 cannot stop thinking, so the lowest legal request is the `low` rung — never
+        // a disable-thinking body, which this family does not accept.
+        return { reasoningEffort: 'low' };
+    }
+    // Astra and GPT-6.1 Sol cannot disable reasoning (and Codex restricts Terra too),
+    // so reduction bottoms out at `low`.
+    if (isGpt6NoNoneEffortModel(model) || (lowerProvider === 'codex-chatgpt' && isGpt6DotOneTerraModel(model))) {
+        return { reasoningEffort: 'low' };
+    }
     if (lowerProvider === 'together' && isKnownReasoningModel(lowerModel)) {
         return { extraBody: { reasoning: { enabled: false } } };
     }
@@ -951,7 +1063,9 @@ function siliconflowThinkingBudget(requested: ReasoningEffort): number {
 }
 
 function geminiThinkingLevelParams(ctx: ThinkingBuildContext): EnableThinkingResult {
-    const thinkingLevel = withoutMax(ctx.requested);
+    const thinkingLevel = /gemini-4-hydrogen/.test(ctx.lowerModel)
+        ? (ctx.requested === 'max' ? 'xhigh' : ctx.requested)
+        : withoutMax(ctx.requested);
     return ctx.apiFormat === 'gemini-generate-content'
         ? { extraBody: { thinking_config: { thinking_level: thinkingLevel } } }
         : { extraBody: { google: { thinking_config: { thinking_level: thinkingLevel } } } };
@@ -978,8 +1092,9 @@ const THINKING_RULES: ThinkingRule[] = [
 
     // OpenRouter normalizes request shapes; the upstream model decides whether an
     // effort selector exists and which values are meaningful.
-    { providers: ['openrouter'], model: /(?:^|\/)(?:moonshotai\/kimi-k2|minimax\/minimax-m[23])/, build: () => ({ extraBody: { reasoning: { enabled: true } } }) },
+    { providers: ['openrouter'], model: /(?:^|\/)(?:moonshotai\/kimi-k2|minimax\/minimax-m(?:2|3(?![.]1)))/, build: () => ({ extraBody: { reasoning: { enabled: true } } }) },
     { providers: ['openrouter'], model: DEEPSEEK_V4_FAMILY_MODEL_RE, build: ctx => ({ extraBody: { reasoning: { effort: deepSeekV4Effort(ctx.requested) } } }) },
+    { providers: ['openrouter'], model: /glm-5[.]3/, build: ctx => ({ extraBody: { reasoning: { effort: kimiK3Effort(ctx.requested) } } }) },
     { providers: ['openrouter'], model: /glm-5[.]2/, build: ctx => ({ extraBody: { reasoning: { effort: highOrMaxEffort(ctx.requested) } } }) },
     { providers: ['openrouter'], model: /(?:^|\/)moonshotai\/kimi-k3(?:-|$)/, build: ctx => ({ extraBody: { reasoning: { effort: kimiK3Effort(ctx.requested) } } }) },
     { providers: ['openrouter'], model: KNOWN_REASONING_MODEL_RE, build: ctx => ({ extraBody: { reasoning: { effort: ctx.requested } } }) },
@@ -1009,8 +1124,24 @@ const THINKING_RULES: ThinkingRule[] = [
 },
 
 
+    // MiniMax M3.1 adds named effort levels (Token Plan preserves adaptive thinking shape).
+    { providers: ['minimax'], model: /(?:^|\/)minimax-m3[.]1(?:-|$)/, build: ctx => ({ reasoningEffort: ctx.requested }) },
+    { providers: ['minimax-token-plan'], model: /(?:^|\/)minimax-m3[.]1(?:-|$)/, build: ctx => ({ extraBody: { thinking: { type: 'adaptive' } }, reasoningEffort: ctx.requested }) },
     // MiniMax M3 exposes adaptive on/off control, but no named effort levels.
     { providers: ['minimax', 'minimax-token-plan', 'opencode'], model: /(?:^|\/)minimax-m3(?:-|$)/, build: () => ({ extraBody: { thinking: { type: 'adaptive' } } }) },
+
+    // OpenDesign: forward requested reasoning effort; OpenAI-compatible payload drops/adjusts downstream.
+    { providers: [OPENDESIGN_PROVIDER_ID], build: ctx => ({ reasoningEffort: ctx.requested }) },
+
+    // WorkBuddy: Chat Completions routes map model-specific effort ladder (Anthropic /v1/messages handled below).
+    {
+        providers: [WORKBUDDY_PROVIDER_ID],
+        apiFormats: ['openai-chat-completions'],
+        build: ctx => {
+            const wire = workBuddyEffortForRequest(ctx.model, ctx.requested);
+            return wire && wire !== 'none' ? { reasoningEffort: wire as ReasoningEffort } : {};
+        },
+    },
 
     // Anthropic Messages protocol.
     { apiFormats: ['anthropic-messages'], model: /claude-/, build: ctx => {
@@ -1022,9 +1153,9 @@ const THINKING_RULES: ThinkingRule[] = [
     { apiFormats: ['anthropic-messages'], model: QWEN_THINKING_MODEL_RE, build: ctx => ({ extraBody: { thinking_budget: qwenBudgetFor(ctx.lowerModel, ctx.requested) } }) },
     { apiFormats: ['anthropic-messages'], build: ctx => getEnableThinkingParams(ctx.model, ctx.providerId) },
 
-    // Gemini 3.x: thinking levels (cannot fully disable).
-    { providers: ['google'], model: /gemini-3/, build: geminiThinkingLevelParams },
-    { apiFormats: ['gemini-generate-content'], model: /gemini-3/, build: geminiThinkingLevelParams },
+    // Gemini 3.x & 4.x: thinking levels (cannot fully disable).
+    { providers: ['google'], model: /gemini-[34]/, build: geminiThinkingLevelParams },
+    { apiFormats: ['gemini-generate-content'], model: /gemini-[34]/, build: geminiThinkingLevelParams },
     // Gemini 2.5 Flash: thinking budget.
     { providers: ['google'], model: /gemini-2[.]5/, build: gemini25ThinkingBudgetParams },
     { apiFormats: ['gemini-generate-content'], model: /gemini-2[.]5/, build: gemini25ThinkingBudgetParams },
@@ -1033,6 +1164,7 @@ const THINKING_RULES: ThinkingRule[] = [
 
     { providers: ['siliconflow'], model: KNOWN_REASONING_MODEL_RE, build: ctx => ({ extraBody: { enable_thinking: true, thinking_budget: siliconflowThinkingBudget(ctx.requested) } }) },
 
+    { providers: ['glm', 'opencode'], model: /(?:^|\/)glm-5[.]3(?:-|$)/, build: ctx => ({ extraBody: { thinking: { type: 'enabled' } }, reasoningEffort: kimiK3Effort(ctx.requested) }) },
     { providers: ['glm', 'opencode'], model: /(?:^|\/)glm-5[.]2(?:-|$)/, build: ctx => ({ extraBody: { thinking: { type: 'enabled' } }, reasoningEffort: highOrMaxEffort(ctx.requested) }) },
     { providers: ['glm', 'opencode'], model: /(?:^|\/)glm-(?:4[.]?[5-9]|5)(?:[-.]|$)/, build: () => ({ extraBody: { thinking: { type: 'enabled' } } }) },
 
@@ -1046,7 +1178,7 @@ const THINKING_RULES: ThinkingRule[] = [
 
     // Custom OpenAI-compatible endpoints can still benefit from well-known model conventions.
     { providers: ['custom'], model: QWEN_THINKING_MODEL_RE, build: ctx => ({ extraBody: { enable_thinking: true, thinking_budget: qwenBudgetFor(ctx.lowerModel, ctx.requested) } }) },
-    { providers: ['custom'], model: /(?:^|\/)gpt-6-(?:astra|sol|luna)(?:-|$)/, build: ctx => ({ reasoningEffort: ctx.requested }) },
+    { providers: ['custom'], model: /(?:^|\/)(?:gpt-6-(?:astra|sol|luna)|gpt-6[.]1-(?:sol|terra))(?:-|$)/, build: ctx => ({ reasoningEffort: ctx.requested }) },
     { providers: ['custom'], model: /(?:^|\/)(?:gpt-5|o[134](?:-|$)|deepseek-|glm-5[.]2|gpt-oss)/, build: ctx => ({ reasoningEffort: withoutMax(ctx.requested) }) },
 
     // Command Code's Provider API normalizes per-model reasoning controls
@@ -1362,8 +1494,11 @@ export function toClaudeRequest(
         claudeRequest.thinking = { type: 'disabled' };
     }
     if (!anthropicFeatures.effort && request.thinking?.type === 'adaptive') {
-        // Anthropic-compatible non-Claude gateways (currently MiniMax M3).
+        // Anthropic-compatible non-Claude gateways (currently MiniMax M3 / M3.1).
         claudeRequest.thinking = { type: 'adaptive' };
+        if (request.reasoning_effort) {
+            claudeRequest.output_config = { effort: request.reasoning_effort };
+        }
         delete claudeRequest.temperature;
     }
     // The MiniMax Code subscription's thinking control is its own documented
@@ -1377,7 +1512,9 @@ export function toClaudeRequest(
     if (options.claudeSubscriptionModel !== undefined) {
         const entry = resolveClaudeModel(options.claudeSubscriptionModel);
         if (!entry.supportsTemperature) delete claudeRequest.temperature;
-        const thinking = claudeThinkingFor(entry, request.reasoning_effort, request.thinking_budget);
+        const requestedClaudeEffort = request.thinking?.type === 'disabled' ? 'none' : request.reasoning_effort;
+        delete claudeRequest.thinking;
+        const thinking = claudeThinkingFor(entry, requestedClaudeEffort, request.thinking_budget);
         if (thinking.thinking !== undefined) claudeRequest.thinking = thinking.thinking;
         if (thinking.outputConfig !== undefined) claudeRequest.output_config = thinking.outputConfig;
         // Sampling and thinking are mutually exclusive on this wire. A budget-form model
@@ -1397,6 +1534,7 @@ export function toClaudeRequest(
         return claudeRequest;
     }
     if (options.minimaxCodeModel !== undefined) {
+        claudeRequest.model = resolveMinimaxCodeModelId(options.minimaxCodeModel || request.model);
         const outputConfig = minimaxCodeOutputConfig(
             options.minimaxCodeModel,
             request.reasoning_effort ?? null,

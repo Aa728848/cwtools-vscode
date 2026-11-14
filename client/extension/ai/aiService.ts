@@ -9,6 +9,7 @@
 import * as vs from 'vscode';
 import * as crypto from 'crypto';
 import * as fs from 'fs';
+import * as os from 'os';
 import * as path from 'path';
 import type {
     ChatCompletionRequest,
@@ -19,6 +20,7 @@ import type {
     CustomApiFormat,
     ContentPart,
     CodexServiceTier,
+    OpenDesignAccountStatus,
     ReasoningEffort,
     ResponseVerbosity,
 } from './types';
@@ -100,8 +102,80 @@ import {
     kimiPoolIdentityKey,
     minimaxCodePoolCredentials,
     minimaxCodePoolIdentityKey,
+    openDesignPoolCredentials,
+    openDesignPoolIdentityKey,
     subscriptionRefreshFailureStatus,
+    toOpenDesignPoolCredentials,
+    workBuddyPoolCredentials,
+    workBuddyPoolIdentityKey,
+    type OpenDesignPoolCredentials,
+    type WorkBuddyPoolCredentials,
 } from './pool/subscriptionPools';
+import {
+    OPENDESIGN_DEFAULT_BASE_URL,
+    OPENDESIGN_POOL_COOLDOWN_MS,
+    OPENDESIGN_PROVIDER_ID,
+    OPENDESIGN_PROVIDER_NAME,
+    isOpenDesignUnsupportedMaxTokensError,
+    openDesignWantsCompletionTokens,
+    withoutMaxTokensUseCompletionTokens,
+} from './opendesign/types';
+import {
+    OpenDesignCredentialStore,
+    describeOpenDesignCredential,
+    openDesignCredentialsIdentity,
+    openDesignRuntimeKey,
+    type OpenDesignCredentials,
+} from './opendesign/credentials';
+import { classifyOpenDesignFailure } from './opendesign/errors';
+import { OpenDesignOAuthService } from './opendesign/oauth';
+import {
+    fetchOpenDesignCatalog,
+    getCachedOpenDesignModels,
+    resolveOpenDesignModelInfo,
+    type OpenDesignCatalogModel,
+} from './opendesign/catalog';
+import { fetchOpenDesignAccountQuota } from './opendesign/quota';
+import {
+    WORKBUDDY_CHAT_PATH,
+    WORKBUDDY_ERROR_CODE,
+    WORKBUDDY_MESSAGES_PATH,
+    WORKBUDDY_PROVIDER_ID,
+    WORKBUDDY_PROVIDER_NAME,
+    workBuddyModelRoute,
+} from './workbuddy/types';
+import {
+    WorkBuddyCredentialStore,
+    describeWorkBuddyCredential,
+    isWorkBuddyCredentialFresh,
+    readWorkBuddyDesktopFile,
+    scanWorkBuddyDesktopCredentials,
+    workBuddyAccountKey,
+    workBuddySealedDiagnostics,
+    writeBackWorkBuddyDesktopCredential,
+    type WorkBuddyCredentials,
+} from './workbuddy/credentials';
+import {
+    WorkBuddyOAuthService,
+    classifyWorkBuddyFailure,
+    extractWorkBuddyUserTurnKey,
+    gzipWorkBuddyBody,
+    prepareWorkBuddyChatPayload,
+    prepareWorkBuddyMessagesPayload,
+    refreshWorkBuddyCredentials,
+    relocateWorkBuddySystemToInstructions,
+    workBuddyHeaders,
+} from './workbuddy/client';
+import {
+    loadWorkBuddyCatalog,
+    workBuddyEffortForRequest,
+    workBuddyMaxOutputTokens,
+    type WorkBuddyModelEntry,
+} from './workbuddy/modelCatalog';
+import { fetchWorkBuddyQuota } from './workbuddy/quota';
+import type { WorkBuddyCheckinResult } from './workbuddy/checkin';
+import { WorkBuddyCheckinService, type WorkBuddyCheckinSummary } from './workbuddy/checkinService';
+import { summarizeWorkBuddyAccounts, type WorkBuddyAccountStatus } from './workbuddy/accountStatus';
 import type { PooledOAuthCredentials } from './pool/oauthAccountPool';
 import {
     ClaudeSubscriptionCredentialStore,
@@ -176,6 +250,16 @@ const KIMI_CODE_POOL_KEY = 'cwtools.ai.kimiCode.pool.v1';
 const CLAUDE_SUBSCRIPTION_POOL_KEY = 'cwtools.ai.claudeSubscription.pool.v1';
 const MINIMAX_CODE_POOL_KEY = 'cwtools.ai.minimaxCode.pool.v1';
 const COMMANDCODE_POOL_KEY = 'cwtools.ai.commandcode.pool.v1';
+const WORKBUDDY_POOL_KEY = 'cwtools.ai.workbuddySubscription.pool.v1';
+const OPENDESIGN_POOL_KEY = 'cwtools.ai.opendesign.pool.v1';
+
+/** 将号池中的 WorkBuddy 凭据补全为完整 `WorkBuddyCredentials`（未设过期时间则以 `0` 表示无到期限制）。 */
+function toWorkBuddyCredentials(credentials: WorkBuddyPoolCredentials): WorkBuddyCredentials {
+    return {
+        ...credentials,
+        expiresAt: credentials.expiresAt ?? 0,
+    };
+}
 
 /**
  * 有号池的 provider id。
@@ -190,6 +274,8 @@ const SUBSCRIPTION_POOL_PROVIDER_IDS = [
     'kimi-code-plan',
     'claude-subscription',
     'minimax-code',
+    WORKBUDDY_PROVIDER_ID,
+    OPENDESIGN_PROVIDER_ID,
 ] as const;
 
 /**
@@ -254,6 +340,12 @@ function subscriptionOutputCap(providerId: string, model: string): number {
     if (providerId === 'commandcode' || providerId === 'commandcode-messages') {
         return commandCodeModelDef(model)?.maxTokens ?? getModelOutputTokens(model, providerId);
     }
+    if (providerId === WORKBUDDY_PROVIDER_ID) {
+        return workBuddyMaxOutputTokens(model) ?? getModelOutputTokens(model, providerId);
+    }
+    if (providerId === OPENDESIGN_PROVIDER_ID) {
+        return resolveOpenDesignModelInfo(model).maxTokens ?? getModelOutputTokens(model, providerId);
+    }
     // Every other line reads its documented budget straight from the capability table, which
     // already knows that the open platform's K3.1 answers with 131072 while the subscription
     // line's K3.1 stays on its own 32768. Lifting one line's value to the other's would request
@@ -273,6 +365,7 @@ function subscriptionOutputCap(providerId: string, model: string): number {
 function wantsCompletionTokenCap(providerId: string, model: string): boolean {
     if ((providerId === 'commandcode' || providerId === 'commandcode-messages')
         && commandCodeWantsCompletionTokens(model)) return true;
+    if (providerId === OPENDESIGN_PROVIDER_ID && openDesignWantsCompletionTokens(model)) return true;
     return isKimiProviderId(providerId);
 }
 /**
@@ -550,6 +643,12 @@ export class AIService {
     private readonly minimaxCodeOAuth: MinimaxCodeOAuthService;
     private readonly claudeSubscriptionCredentials: ClaudeSubscriptionCredentialStore;
     private readonly claudeSubscriptionOAuth: ClaudeSubscriptionOAuthService;
+    private readonly workBuddyCredentials: WorkBuddyCredentialStore;
+    private readonly workBuddyOAuth: WorkBuddyOAuthService;
+    private readonly workBuddyCheckin: WorkBuddyCheckinService;
+    private readonly openDesignCredentials: OpenDesignCredentialStore;
+    private readonly openDesignOAuth: OpenDesignOAuthService;
+    private workBuddyCheckinAutoEnabled = false;
     /**
      * Account pools for every subscription line that can hold more than one
      * credential. One registry so the selection, cooldown and account-retention
@@ -662,6 +761,49 @@ export class AIService {
             openBrowser: url => { void vs.env.openExternal(vs.Uri.parse(url)); },
         });
         context.subscriptions?.push({ dispose: () => this.claudeSubscriptionOAuth.dispose() });
+        this.workBuddyCredentials = new WorkBuddyCredentialStore(context.secrets);
+        this.workBuddyOAuth = new WorkBuddyOAuthService({ fetchFn: this.subscriptionProxy.fetch });
+        context.subscriptions?.push({ dispose: () => this.workBuddyOAuth.cancelActive() });
+        const workBuddyStorageDir = context.globalStorageUri?.fsPath || path.join(os.homedir(), '.cwtools');
+        const readAutoCheckin = (): boolean =>
+            vs.workspace?.getConfiguration?.('stellarisLanguageServices.ai')
+                ?.get<boolean>('workbuddyAutoCheckin', false) ?? false;
+        this.workBuddyCheckinAutoEnabled = readAutoCheckin();
+        this.workBuddyCheckin = new WorkBuddyCheckinService({
+            storageDir: workBuddyStorageDir,
+            fetchFn: this.subscriptionProxy.fetch,
+            isEnabled: () => this.workBuddyCheckinAutoEnabled,
+            accounts: async () => (await this.listWorkBuddyCredentials()).map(credentials => ({
+                id: workBuddyAccountKey(credentials),
+                credentials,
+            })),
+            ensureFresh: (credentials, force) => this.ensureWorkBuddyFreshCredential(credentials, force),
+        });
+        context.subscriptions?.push({ dispose: () => this.workBuddyCheckin.stop() });
+        const configWatcher = vs.workspace?.onDidChangeConfiguration?.(event => {
+            if (event.affectsConfiguration('stellarisLanguageServices.ai.workbuddyAutoCheckin')) {
+                this.workBuddyCheckinAutoEnabled = readAutoCheckin();
+                this.workBuddyCheckin.setEnabled(this.workBuddyCheckinAutoEnabled);
+            }
+        });
+        if (configWatcher) context.subscriptions?.push(configWatcher);
+        void this.workBuddyCredentials.loadAtRestKey().catch(() => false).then(() => {
+            if (this.workBuddyCheckinAutoEnabled) {
+                this.workBuddyCheckin.setEnabled(true);
+            }
+        });
+        this.openDesignCredentials = new OpenDesignCredentialStore(context.secrets);
+        this.openDesignOAuth = new OpenDesignOAuthService({
+            fetchFn: this.subscriptionProxy.fetch,
+            saveCredentials: async credentials => {
+                await this.openDesignCredentials.add(credentials);
+                await this.subscriptionPools
+                    .addAccount(OPENDESIGN_PROVIDER_ID, toOpenDesignPoolCredentials(credentials) as unknown as PooledOAuthCredentials)
+                    .catch(() => undefined);
+            },
+            openBrowser: url => { void vs.env.openExternal(vs.Uri.parse(url)); },
+        });
+        context.subscriptions?.push({ dispose: () => this.openDesignOAuth.dispose() });
         this.subscriptionPools = new SubscriptionPoolRegistry(
             providerId => this.buildSubscriptionPool(providerId),
             SUBSCRIPTION_POOL_PROVIDER_IDS,
@@ -873,6 +1015,111 @@ export class AIService {
                         },
                     },
                 };
+            case WORKBUDDY_PROVIDER_ID:
+                return {
+                    spec: {
+                        displayName: 'WorkBuddy',
+                        parseCredentials: workBuddyPoolCredentials as (v: unknown) => PooledOAuthCredentials | undefined,
+                        identityKey: c => workBuddyPoolIdentityKey(c as never),
+                        refreshMarginMs: 2 * 60_000,
+                        defaultAlias: c => describeWorkBuddyCredential(toWorkBuddyCredentials(c as WorkBuddyPoolCredentials)),
+                        refresh: async credentials => {
+                            const current = toWorkBuddyCredentials(credentials as WorkBuddyPoolCredentials);
+                            const next = await this.ensureWorkBuddyFreshCredential(current, true);
+                            const pooled = workBuddyPoolCredentials(next);
+                            if (pooled) return pooled as unknown as PooledOAuthCredentials;
+                            return {
+                                ...next,
+                                expiresAt: next.refreshToken !== '' && next.expiresAt > 0 ? next.expiresAt : undefined,
+                            } as unknown as PooledOAuthCredentials;
+                        },
+                        refreshFailureStatus: error => {
+                            const msg = error instanceof Error ? error.message : String(error ?? '');
+                            if (/\b11140\b|invalid_grant|invalid_token|没有 refresh token/i.test(msg)) {
+                                return 'invalid_credential';
+                            }
+                            return subscriptionRefreshFailureStatus(error);
+                        },
+                        quota: async (credentials, fetchFn) => {
+                            const creds = toWorkBuddyCredentials(credentials as WorkBuddyPoolCredentials);
+                            return await fetchWorkBuddyQuota(creds, workBuddyAccountKey(creds), { fetchFn });
+                        },
+                    },
+                    ports: {
+                        store: {
+                            read: () => secrets.get(WORKBUDDY_POOL_KEY),
+                            write: async value => { await secrets.store(WORKBUDDY_POOL_KEY, JSON.stringify(value)); },
+                        },
+                        fetchFn: this.subscriptionProxy.fetch,
+                    },
+                    seed: async () => {
+                        await this.workBuddyCredentials.loadAtRestKey().catch(() => false);
+                        const combined = [
+                            ...scanWorkBuddyDesktopCredentials(),
+                            ...(await this.workBuddyCredentials.readManaged()),
+                        ];
+                        const out: PooledOAuthCredentials[] = [];
+                        for (const item of combined) {
+                            const pooled = workBuddyPoolCredentials(item);
+                            if (pooled) out.push(pooled as unknown as PooledOAuthCredentials);
+                        }
+                        return out;
+                    },
+                };
+            case OPENDESIGN_PROVIDER_ID:
+                return {
+                    spec: {
+                        displayName: OPENDESIGN_PROVIDER_NAME,
+                        parseCredentials: openDesignPoolCredentials as (v: unknown) => PooledOAuthCredentials | undefined,
+                        identityKey: c => openDesignPoolIdentityKey(c as never),
+                        defaultAlias: c => describeOpenDesignCredential(c as unknown as OpenDesignPoolCredentials),
+                        quota: async (credentials, fetchFn) => {
+                            return await fetchOpenDesignAccountQuota(
+                                credentials as unknown as OpenDesignPoolCredentials,
+                                { fetchFn },
+                            );
+                        },
+                    },
+                    ports: {
+                        store: {
+                            read: () => secrets.get(OPENDESIGN_POOL_KEY),
+                            write: async value => { await secrets.store(OPENDESIGN_POOL_KEY, JSON.stringify(value)); },
+                        },
+                        fetchFn: this.subscriptionProxy.fetch,
+                        legacy: {
+                            read: async () => {
+                                const stored = await this.openDesignCredentials.read();
+                                if (stored.length > 0) {
+                                    return toOpenDesignPoolCredentials(stored[0]!) as unknown as PooledOAuthCredentials;
+                                }
+                                const staticKey = await this.keyManager.getKey(OPENDESIGN_PROVIDER_ID);
+                                if (staticKey && staticKey.trim() !== '') {
+                                    return toOpenDesignPoolCredentials({
+                                        kind: 'api-key',
+                                        apiKey: staticKey.trim(),
+                                        addedAt: Date.now(),
+                                    }) as unknown as PooledOAuthCredentials;
+                                }
+                                return null;
+                            },
+                            write: async credentials => {
+                                if (credentials === null) {
+                                    await this.openDesignCredentials.clear();
+                                    await this.keyManager.deleteKey(OPENDESIGN_PROVIDER_ID);
+                                    return;
+                                }
+                                const parsed = openDesignPoolCredentials(credentials);
+                                if (!parsed) return;
+                                await this.openDesignCredentials.add(parsed);
+                                if (parsed.kind === 'api-key') {
+                                    await this.keyManager.setKey(OPENDESIGN_PROVIDER_ID, parsed.apiKey);
+                                } else {
+                                    await this.keyManager.deleteKey(OPENDESIGN_PROVIDER_ID);
+                                }
+                            },
+                        },
+                    },
+                };
             default:
                 return undefined;
         }
@@ -994,9 +1241,372 @@ export class AIService {
         return this.minimaxCodeOAuth;
     }
 
+    /** 刷新一条 WorkBuddy 凭据（桌面账号先检查磁盘是否已被桌面端刷新，完成后写回原格式）。 */
+    private async ensureWorkBuddyFreshCredential(
+        credentials: WorkBuddyCredentials,
+        force = false,
+    ): Promise<WorkBuddyCredentials> {
+        if (credentials.source === 'desktop' && credentials.sourceFile) {
+            const disk = readWorkBuddyDesktopFile(credentials.sourceFile);
+            if (disk && disk.accessToken !== credentials.accessToken && isWorkBuddyCredentialFresh(disk)) {
+                return disk;
+            }
+        }
+        if (!force && isWorkBuddyCredentialFresh(credentials)) {
+            return credentials;
+        }
+        const next = await refreshWorkBuddyCredentials(credentials, {
+            fetchFn: this.subscriptionProxy.fetch,
+        });
+        if (next.source === 'desktop') {
+            try {
+                writeBackWorkBuddyDesktopCredential(next);
+            } catch (err) {
+                ErrorReporter.debug(SOURCE.AI_SERVICE, 'WorkBuddy desktop credential write-back failed.', err);
+            }
+        } else {
+            await this.workBuddyCredentials.addManaged(next).catch(() => undefined);
+        }
+        return next;
+    }
+
+    getWorkBuddyOAuthService(): WorkBuddyOAuthService {
+        return this.workBuddyOAuth;
+    }
+
+    getWorkBuddyCredentialStore(): WorkBuddyCredentialStore {
+        return this.workBuddyCredentials;
+    }
+
+    getWorkBuddyCheckinService(): WorkBuddyCheckinService {
+        return this.workBuddyCheckin;
+    }
+
+    /** 从 WorkBuddy 号池选出一个有效账号；必要时强制刷新。 */
+    async getWorkBuddyCredential(
+        excludeIds?: ReadonlySet<string>,
+        force = false,
+    ): Promise<{ credentials: WorkBuddyCredentials; accountId: string } | undefined> {
+        const selected = await this.subscriptionPools.select(WORKBUDDY_PROVIDER_ID, excludeIds, force);
+        if (selected === undefined) return undefined;
+        return {
+            credentials: toWorkBuddyCredentials(selected.credentials as WorkBuddyPoolCredentials),
+            accountId: selected.accountId,
+        };
+    }
+
+    /** 合并桌面端已解封账号与托管存储账号（按身份去重，并同步号池中的最新已刷新令牌）。 */
+    async listWorkBuddyCredentials(): Promise<WorkBuddyCredentials[]> {
+        await this.workBuddyCredentials.loadAtRestKey().catch(() => false);
+        const byKey = new Map<string, WorkBuddyCredentials>();
+        for (const item of scanWorkBuddyDesktopCredentials()) {
+            byKey.set(workBuddyAccountKey(item), item);
+        }
+        for (const item of await this.workBuddyCredentials.readManaged()) {
+            byKey.set(workBuddyAccountKey(item), item);
+        }
+        const pool = this.subscriptionPools.pool(WORKBUDDY_PROVIDER_ID);
+        if (pool) {
+            const data = await pool.read().catch(() => undefined);
+            for (const account of data?.accounts ?? []) {
+                const pooledCreds = toWorkBuddyCredentials(account.credentials as WorkBuddyPoolCredentials);
+                const key = workBuddyAccountKey(pooledCreds);
+                const prev = byKey.get(key);
+                if (prev && pooledCreds.expiresAt > prev.expiresAt) {
+                    byKey.set(key, pooledCreds);
+                }
+            }
+        }
+        return Array.from(byKey.values());
+    }
+
+    /** 返回 WorkBuddy 账号、`$wbEncrypted` 解封诊断与国区每日签到的只读状态摘要。 */
+    async getWorkBuddyAccountStatus(): Promise<WorkBuddyAccountStatus> {
+        const accounts = await this.listWorkBuddyCredentials();
+        const hasAtRestKey = await this.workBuddyCredentials.hasAtRestKey().catch(() => false);
+        const atRestKeyId = this.workBuddyCredentials.currentAtRestKeyId();
+        const checkin = await this.workBuddyCheckin.summary().catch(() => this.workBuddyCheckin.cachedSummary());
+        return summarizeWorkBuddyAccounts(accounts, () => false, {
+            hasAtRestKey,
+            atRestKeyId,
+            checkin,
+        });
+    }
+
+    /** 将一条刚完成浏览器登录的 WorkBuddy 凭据保存为托管账号并立即并入号池。 */
+    async saveWorkBuddyManagedAccount(credentials: WorkBuddyCredentials): Promise<void> {
+        await this.workBuddyCredentials.addManaged(credentials);
+        const pooled = workBuddyPoolCredentials(credentials);
+        if (pooled) {
+            await this.subscriptionPools
+                .addAccount(WORKBUDDY_PROVIDER_ID, pooled as unknown as PooledOAuthCredentials)
+                .catch(() => undefined);
+        }
+    }
+
+    /** 重新扫描桌面与托管 WorkBuddy 凭据，同步写入号池并返回最新摘要。 */
+    async rescanWorkBuddyAccounts(): Promise<WorkBuddyAccountStatus> {
+        const accounts = await this.listWorkBuddyCredentials();
+        const pool = this.subscriptionPools.pool(WORKBUDDY_PROVIDER_ID);
+        if (pool) {
+            for (const creds of accounts) {
+                const pooled = workBuddyPoolCredentials(creds);
+                if (pooled) {
+                    await pool.addAccount(pooled as unknown as PooledOAuthCredentials).catch(() => undefined);
+                }
+            }
+        }
+        return this.getWorkBuddyAccountStatus();
+    }
+
+    /** 保存并验证用户输入的 `$wbEncrypted` 保护密钥，立即解封桌面账号并同步入池。 */
+    async setWorkBuddyAtRestKey(keyText: string): Promise<{ keyId: string; status: WorkBuddyAccountStatus }> {
+        const keyId = await this.workBuddyCredentials.adoptAtRestKey(keyText);
+        const status = await this.rescanWorkBuddyAccounts();
+        return { keyId, status };
+    }
+
+    /** 清除已保存的 `$wbEncrypted` 保护密钥，并从号池移除原本依赖密文解封的桌面账号。 */
+    async clearWorkBuddyAtRestKey(): Promise<WorkBuddyAccountStatus> {
+        await this.workBuddyCredentials.clearAtRestKey();
+        const plainAccounts = scanWorkBuddyDesktopCredentials();
+        const plainKeys = new Set(plainAccounts.map(acc => workBuddyAccountKey(acc)));
+        const pool = this.subscriptionPools.pool(WORKBUDDY_PROVIDER_ID);
+        if (pool) {
+            const data = await pool.read().catch(() => undefined);
+            for (const account of data?.accounts ?? []) {
+                const creds = toWorkBuddyCredentials(account.credentials as WorkBuddyPoolCredentials);
+                if (creds.source === 'desktop' && !plainKeys.has(workBuddyAccountKey(creds))) {
+                    await pool.removeAccount(account.id).catch(() => undefined);
+                }
+            }
+        }
+        return this.getWorkBuddyAccountStatus();
+    }
+
+    /** 手动执行一轮 WorkBuddy 国区每日签到并同步最新令牌。 */
+    async runWorkBuddyCheckin(): Promise<{ results: WorkBuddyCheckinResult[]; summary: WorkBuddyCheckinSummary }> {
+        const results = await this.workBuddyCheckin.run(Date.now(), { manual: true });
+        const summary = await this.workBuddyCheckin.summary();
+        return { results, summary };
+    }
+
+    /** 切换并持久化 WorkBuddy 国区每日自动签到偏好。 */
+    async setWorkBuddyAutoCheckin(enabled: boolean): Promise<WorkBuddyCheckinSummary> {
+        this.workBuddyCheckinAutoEnabled = enabled;
+        this.workBuddyCheckin.setEnabled(enabled);
+        await vs.workspace
+            .getConfiguration('stellarisLanguageServices.ai')
+            .update('workbuddyAutoCheckin', enabled, vs.ConfigurationTarget.Global);
+        return this.workBuddyCheckin.summary();
+    }
+
+    /** 退出插件托管的 WorkBuddy 账号（同时从号池移除托管条目，绝不删改桌面端原文件）。 */
+    async logoutWorkBuddyManaged(): Promise<void> {
+        const managed = await this.workBuddyCredentials.readManaged();
+        const managedKeys = new Set(managed.map(m => workBuddyAccountKey(m)));
+        await this.context.secrets.delete('cwtools.ai.workbuddy.credentials.v1');
+        const pool = this.subscriptionPools.pool(WORKBUDDY_PROVIDER_ID);
+        if (pool) {
+            const data = await pool.read().catch(() => undefined);
+            for (const account of data?.accounts ?? []) {
+                const creds = toWorkBuddyCredentials(account.credentials as WorkBuddyPoolCredentials);
+                if (creds.source === 'managed' || managedKeys.has(workBuddyAccountKey(creds))) {
+                    await pool.removeAccount(account.id).catch(() => undefined);
+                }
+            }
+        }
+    }
+
+    /** 拉取所属区域 WorkBuddy `/v3/config` 实时模型目录（失败或未登录时优雅回退内置目录）。 */
+    async listWorkBuddyModels(forceRefresh = false): Promise<readonly WorkBuddyModelEntry[]> {
+        const selected = await this.getWorkBuddyCredential().catch(() => undefined);
+        const creds = selected?.credentials ?? (await this.listWorkBuddyCredentials())[0];
+        if (!creds) {
+            return [];
+        }
+        return await loadWorkBuddyCatalog({
+            backend: creds.backend,
+            region: creds.region,
+            headers: workBuddyHeaders(creds),
+            fetchFn: this.subscriptionProxy.fetch,
+            force: forceRefresh,
+        });
+    }
+
+    getOpenDesignOAuthService(): OpenDesignOAuthService {
+        return this.openDesignOAuth;
+    }
+
+    getOpenDesignCredentialStore(): OpenDesignCredentialStore {
+        return this.openDesignCredentials;
+    }
+
+    /** 将用户在设置页或弹窗输入的 OpenDesign 静态 API Key 保存并加入号池。 */
+    async addOpenDesignStaticKey(apiKey: string, alias?: string): Promise<void> {
+        const trimmed = apiKey.trim();
+        if (!trimmed) return;
+        const credentials: OpenDesignCredentials = {
+            kind: 'api-key',
+            apiKey: trimmed,
+            addedAt: Date.now(),
+            ...(alias ? { alias } : {}),
+        };
+        await this.openDesignCredentials.add(credentials);
+        await this.subscriptionPools
+            .addAccount(OPENDESIGN_PROVIDER_ID, toOpenDesignPoolCredentials(credentials) as unknown as PooledOAuthCredentials)
+            .catch(() => undefined);
+    }
+
+    /** 读取 OpenDesign 动态目录（同时结合网关 `/models` 与有控制面 Key 时的 AMR `/models`）。 */
+    async listOpenDesignModels(options?: {
+        runtimeKey?: string;
+        controlKey?: string;
+        baseUrl?: string;
+        forceRefresh?: boolean;
+    }): Promise<OpenDesignCatalogModel[]> {
+        let runtimeKey = options?.runtimeKey?.trim();
+        let controlKey = options?.controlKey?.trim();
+        let baseUrl = options?.baseUrl?.trim();
+        let identity: string | undefined;
+
+        if (!runtimeKey) {
+            const selected = await this.subscriptionPools.select(OPENDESIGN_PROVIDER_ID).catch(() => undefined);
+            if (selected) {
+                const parsed = openDesignPoolCredentials(selected.credentials);
+                if (parsed) {
+                    runtimeKey = openDesignRuntimeKey(parsed);
+                    identity = openDesignCredentialsIdentity(parsed);
+                    if (parsed.kind === 'oauth') controlKey ??= parsed.controlKey;
+                    if (parsed.baseUrl) baseUrl ??= parsed.baseUrl;
+                }
+            }
+        }
+        if (!runtimeKey) {
+            const fallback = await this.getKeyForProvider(OPENDESIGN_PROVIDER_ID);
+            if (fallback) runtimeKey = fallback;
+        }
+        if (!runtimeKey) {
+            return getCachedOpenDesignModels();
+        }
+        return await fetchOpenDesignCatalog({
+            runtimeKey,
+            ...(controlKey ? { controlKey } : {}),
+            baseUrl: baseUrl || OPENDESIGN_DEFAULT_BASE_URL,
+            fetchFn: this.subscriptionProxy.fetch,
+            ...(identity ? { identity } : {}),
+            forceRefresh: options?.forceRefresh,
+        });
+    }
+
+    /** 当前已配置的 OpenDesign 账号与号池的只读汇总状态（绝不传出明文密钥）。 */
+    async getOpenDesignAccountStatus(): Promise<OpenDesignAccountStatus> {
+        const pool = this.subscriptionPools.pool(OPENDESIGN_PROVIDER_ID);
+        const accounts = pool ? await pool.listAccounts().catch(() => []) : [];
+        const data = pool ? await pool.read().catch(() => undefined) : undefined;
+        const storedList = await this.openDesignCredentials.read().catch(() => []);
+        const fallbackKey = await this.keyManager.getKey(OPENDESIGN_PROVIDER_ID).catch(() => undefined);
+
+        let oauthCount = 0;
+        let apiKeyCount = 0;
+        let email: string | null = null;
+        let userName: string | null = null;
+        let workspaceId: string | null = null;
+        let plan: string | null = null;
+        const seenIdentities = new Set<string>();
+
+        const collectCreds = (creds: OpenDesignCredentials | undefined): void => {
+            if (!creds) return;
+            const idKey = openDesignCredentialsIdentity(creds);
+            if (seenIdentities.has(idKey)) return;
+            seenIdentities.add(idKey);
+            if (creds.kind === 'oauth') {
+                oauthCount += 1;
+                email ??= creds.user?.email ?? null;
+                userName ??= creds.user?.name ?? null;
+                workspaceId ??= creds.workspaceId ?? null;
+                plan ??= creds.user?.plan ?? null;
+            } else {
+                apiKeyCount += 1;
+            }
+        };
+
+        for (const entry of data?.accounts ?? []) {
+            collectCreds(openDesignPoolCredentials(entry.credentials));
+        }
+        for (const entry of storedList) {
+            collectCreds(entry);
+        }
+        if (fallbackKey && fallbackKey.trim() !== '') {
+            collectCreds({
+                kind: 'api-key',
+                apiKey: fallbackKey.trim(),
+                addedAt: 0,
+            });
+        }
+
+        const totalCount = Math.max(accounts.length, seenIdentities.size);
+        return {
+            signedIn: totalCount > 0,
+            accountCount: totalCount,
+            oauthCount,
+            apiKeyCount,
+            email,
+            userName,
+            workspaceId,
+            plan,
+        };
+    }
+
+    /** 清空本插件存储的全部 OpenDesign 凭据（号池 + SecretStorage 静态 Key）。 */
+    async logoutOpenDesignAll(): Promise<void> {
+        this.openDesignOAuth.dispose();
+        const pool = this.subscriptionPools.pool(OPENDESIGN_PROVIDER_ID);
+        if (pool) {
+            const data = await pool.read().catch(() => undefined);
+            for (const account of data?.accounts ?? []) {
+                await pool.removeAccount(account.id).catch(() => undefined);
+            }
+        }
+        await this.openDesignCredentials.clear();
+        await this.keyManager.deleteKey(OPENDESIGN_PROVIDER_ID);
+        await this.context.secrets.delete(OPENDESIGN_POOL_KEY);
+    }
+
     /** The pool's view of one line, for the settings card. */
     async listSubscriptionPoolAccounts(providerId: string) {
         return this.subscriptionPools.listAccounts(providerId);
+    }
+
+    /**
+     * 移除号池中的单个账号，并同步清理本插件自管的底层凭据槽，防止下次 seed/重扫时复活。
+     * 外部桌面端凭据（如 WorkBuddy `source === 'desktop'`）绝不触碰原文件。
+     */
+    async removeSubscriptionPoolAccount(providerId: string, accountId: string): Promise<void> {
+        if (providerId === WORKBUDDY_PROVIDER_ID) {
+            const pool = this.subscriptionPools.pool(WORKBUDDY_PROVIDER_ID);
+            const data = await pool?.read().catch(() => undefined);
+            const target = data?.accounts.find(entry => entry.id === accountId);
+            const creds = target ? workBuddyPoolCredentials(target.credentials) : undefined;
+            if (creds && creds.source === 'managed') {
+                await this.workBuddyCredentials.removeManaged(workBuddyAccountKey(creds));
+            }
+        } else if (providerId === OPENDESIGN_PROVIDER_ID) {
+            const pool = this.subscriptionPools.pool(OPENDESIGN_PROVIDER_ID);
+            const data = await pool?.read().catch(() => undefined);
+            const target = data?.accounts.find(entry => entry.id === accountId);
+            const creds = target ? openDesignPoolCredentials(target.credentials) : undefined;
+            if (creds) {
+                await this.openDesignCredentials.remove(openDesignCredentialsIdentity(creds));
+                if (creds.kind === 'api-key') {
+                    const storedKey = (await this.keyManager.getKey(OPENDESIGN_PROVIDER_ID))?.trim();
+                    if (storedKey && storedKey === creds.apiKey) {
+                        await this.keyManager.deleteKey(OPENDESIGN_PROVIDER_ID);
+                    }
+                }
+            }
+        }
+        await this.subscriptionPools.removeAccount(providerId, accountId);
     }
 
     /** One pooled account's quota; undefined when the line has no quota surface. */
@@ -1166,6 +1776,13 @@ export class AIService {
                 return '';
             }
         }
+        if (providerId === OPENDESIGN_PROVIDER_ID) {
+            const selected = await this.subscriptionPools.select(OPENDESIGN_PROVIDER_ID).catch(() => undefined);
+            if (selected) {
+                const parsed = openDesignPoolCredentials(selected.credentials);
+                return parsed ? openDesignRuntimeKey(parsed) : selected.credentials.accessToken;
+            }
+        }
         return '';
     }
 
@@ -1240,6 +1857,10 @@ export class AIService {
         let claudeSubscriptionAccountId: string | undefined;
         /** MiniMax Code account, for the same reason. */
         let minimaxCodeAccountId: string | undefined;
+        /** WorkBuddy 订阅账号凭据。 */
+        let workBuddyCredentials: WorkBuddyCredentials | undefined;
+        /** OpenDesign 账号池中选出的凭据。 */
+        let openDesignPoolCreds: OpenDesignPoolCredentials | undefined;
         /**
          * Pooled account this request used, for whichever line has a pool.
          *
@@ -1275,6 +1896,47 @@ export class AIService {
             minimaxCodeRegion = credentials.credentials.region;
             minimaxCodeAccountId = credentials.accountId;
             subscriptionAccountId = credentials.accountId;
+        } else if (providerId === WORKBUDDY_PROVIDER_ID) {
+            const credentials = await this.getWorkBuddyCredential();
+            if (!credentials) {
+                const sealed = workBuddySealedDiagnostics();
+                if (sealed.missingKey) {
+                    throw new Error(aiText(
+                        'Encrypted WorkBuddy desktop credentials ($wbEncrypted) were detected, but no protection key is loaded. Enter the protection key in AI Settings or sign in with your browser.',
+                        '检测到已加密的 WorkBuddy 桌面端凭据（$wbEncrypted），但尚未配置保护密钥。请在 AI 设置页填入桌面端保护密钥，或直接使用浏览器登录。',
+                    ));
+                }
+                throw new Error(aiText(
+                    'Sign in to WorkBuddy in Settings, or sign in with the WorkBuddy desktop app, before using this provider.',
+                    '请先在设置中登录 WorkBuddy，或先登录 WorkBuddy 桌面端，再使用该 Provider。',
+                ));
+            }
+            workBuddyCredentials = credentials.credentials;
+            apiKey = credentials.credentials.accessToken;
+            subscriptionAccountId = credentials.accountId;
+        } else if (providerId === OPENDESIGN_PROVIDER_ID) {
+            if (options?.apiKey) {
+                apiKey = options.apiKey;
+            } else {
+                const selected = await this.subscriptionPools.select(OPENDESIGN_PROVIDER_ID).catch(() => undefined);
+                if (selected !== undefined) {
+                    openDesignPoolCreds = openDesignPoolCredentials(selected.credentials);
+                    apiKey = openDesignPoolCreds ? openDesignRuntimeKey(openDesignPoolCreds) : selected.credentials.accessToken;
+                    subscriptionAccountId = selected.accountId;
+                } else {
+                    const key = await this.getKeyForProvider(OPENDESIGN_PROVIDER_ID);
+                    if (!key) {
+                        const entered = await this.keyManager.promptForKey(OPENDESIGN_PROVIDER_ID);
+                        if (!entered) {
+                            throw new Error(`No API key configured for ${provider.name}. Please configure it in the AI Settings panel.`);
+                        }
+                        apiKey = entered;
+                    } else {
+                        apiKey = key;
+                    }
+                    await this.addOpenDesignStaticKey(apiKey).catch(() => undefined);
+                }
+            }
         } else if (providerId === 'commandcode' || providerId === 'commandcode-messages') {
             // Command Code keys can be pooled: several keys of the same account or
             // of different accounts then rotate, cool down after a 429 and park
@@ -1323,18 +1985,26 @@ export class AIService {
         const endpoint = providerId === 'codex-chatgpt'
             || providerId === 'claude-subscription'
             ? provider.endpoint
-            // The subscription's Messages endpoint is a property of the
-            // account's region, not of the provider default.
-            : minimaxCodeRegion
-                ? minimaxCodeAgentHost({ region: minimaxCodeRegion }) + MINIMAX_CODE_AGENT_LLM_PREFIX
-                : options?.endpoint || getEffectiveEndpoint(providerId, config.endpoint);
+            : workBuddyCredentials
+                ? workBuddyCredentials.backend
+                // The subscription's Messages endpoint is a property of the
+                // account's region, not of the provider default.
+                : minimaxCodeRegion
+                    ? minimaxCodeAgentHost({ region: minimaxCodeRegion }) + MINIMAX_CODE_AGENT_LLM_PREFIX
+                    : providerId === OPENDESIGN_PROVIDER_ID && openDesignPoolCreds?.baseUrl
+                        ? (options?.endpoint || (config.providerEndpoints[providerId]?.trim()
+                            ? getEffectiveEndpoint(providerId, config.endpoint)
+                            : openDesignPoolCreds.baseUrl))
+                        : options?.endpoint || getEffectiveEndpoint(providerId, config.endpoint);
         if (!endpoint) {
             throw new Error(`${provider.name} endpoint is not configured. Please set an API endpoint in the AI Settings panel.`);
         }
         const rawModel = options?.model ?? getEffectiveModel(providerId, config.model);
         // Strip the UI '(免费)' suffix from the model ID before sending to the API
         const model = rawModel.replace(/\s*\(免费\)$/i, '');
-        const effectiveApiFormat = getProviderApiFormat(providerId, model, selectedCustomApiFormat);
+        const effectiveApiFormat = workBuddyCredentials
+            ? workBuddyModelRoute(model, workBuddyCredentials.region)
+            : getProviderApiFormat(providerId, model, selectedCustomApiFormat);
         const responseVerbosity = normalizeConfiguredResponseVerbosity(
             options?.responseVerbosity ?? config.responseVerbosity,
         );
@@ -1358,7 +2028,12 @@ export class AIService {
             reasoningCapability,
             options?.reasoningEffort ?? config.reasoningEffort
         );
-        const disableThinking = options?.disableThinking === true || requestedEffort === 'none';
+        const workBuddyWireEffort = providerId === WORKBUDDY_PROVIDER_ID
+            ? workBuddyEffortForRequest(model, options?.disableThinking === true ? 'none' : requestedEffort)
+            : undefined;
+        const disableThinking = providerId === WORKBUDDY_PROVIDER_ID
+            ? options?.disableThinking === true || workBuddyWireEffort === 'none'
+            : options?.disableThinking === true || requestedEffort === 'none';
         const reducedThinkingParams = disableThinking
             ? getReducedThinkingParams(model, providerId, effectiveApiFormat)
             : undefined;
@@ -1374,30 +2049,32 @@ export class AIService {
             ? undefined
             : requestedEffort;
 
-        if (disableThinking) {
-            // Data-driven lookup keeps provider-specific thinking controls out of this flow.
-            if (reducedThinkingParams) {
-                if (reducedThinkingParams.extraBody) {
-                    const reducedBody = reducedThinkingParams.extraBody as Record<string, any>;
-                    extraBody = providerId === 'google'
-                        && effectiveApiFormat === 'openai-chat-completions'
-                        && reducedBody.thinking_config
-                        ? { google: { thinking_config: reducedBody.thinking_config } }
-                        : reducedBody;
+        if (providerId !== WORKBUDDY_PROVIDER_ID) {
+            if (disableThinking) {
+                // Data-driven lookup keeps provider-specific thinking controls out of this flow.
+                if (reducedThinkingParams) {
+                    if (reducedThinkingParams.extraBody) {
+                        const reducedBody = reducedThinkingParams.extraBody as Record<string, any>;
+                        extraBody = providerId === 'google'
+                            && effectiveApiFormat === 'openai-chat-completions'
+                            && reducedBody.thinking_config
+                            ? { google: { thinking_config: reducedBody.thinking_config } }
+                            : reducedBody;
+                    }
+                    if (reducedThinkingParams.injectPrompt) {
+                        // Qwen-style: append /no_think to system prompt as fallback
+                        finalMessages = messages.map(m => {
+                            if (m.role === 'system' && typeof m.content === 'string') {
+                                return { ...m, content: m.content + '\n/no_think' };
+                            }
+                            return m;
+                        });
+                    }
                 }
-                if (reducedThinkingParams.injectPrompt) {
-                    // Qwen-style: append /no_think to system prompt as fallback
-                    finalMessages = messages.map(m => {
-                        if (m.role === 'system' && typeof m.content === 'string') {
-                            return { ...m, content: m.content + '\n/no_think' };
-                        }
-                        return m;
-                    });
+            } else {
+                if (enabledThinkingParams?.extraBody) {
+                    extraBody = { ...(extraBody ?? {}), ...enabledThinkingParams.extraBody } as Record<string, any>;
                 }
-            }
-        } else {
-            if (enabledThinkingParams?.extraBody) {
-                extraBody = { ...(extraBody ?? {}), ...enabledThinkingParams.extraBody } as Record<string, any>;
             }
         }
 
@@ -1429,7 +2106,17 @@ export class AIService {
         };
 
         // Inject reasoning effort / thinking preferences based on provider
-        if (disableThinking) {
+        if (providerId === WORKBUDDY_PROVIDER_ID) {
+            if (effectiveApiFormat === 'anthropic-messages') {
+                if (disableThinking) {
+                    request.thinking = { type: 'disabled' };
+                } else if (workBuddyWireEffort !== undefined) {
+                    request.reasoning_effort = workBuddyWireEffort as ReasoningEffort;
+                }
+            } else if (workBuddyWireEffort !== undefined) {
+                request.reasoning_effort = workBuddyWireEffort as ReasoningEffort;
+            }
+        } else if (disableThinking) {
             if (reducedThinkingParams?.reasoningEffort) {
                 request.reasoning_effort = reducedThinkingParams.reasoningEffort;
             }
@@ -1498,10 +2185,10 @@ export class AIService {
                     // The account id is carried for every pooled Anthropic-route line, not
                     // only the Claude subscription: it is what lets a 429 cool the exact
                     // account and a 401 force one rotation against it.
-                    return await this.callClaude(requestEndpoint, apiKey, requestBody, controller, options?.onThinking, options?.onTextDelta, options?.onToolCallDelta, providerId, claudeSubscriptionCredentials, claudeSubscriptionAccountId ?? subscriptionAccountId);
+                    return await this.callClaude(requestEndpoint, apiKey, requestBody, controller, options?.onThinking, options?.onTextDelta, options?.onToolCallDelta, providerId, claudeSubscriptionCredentials, claudeSubscriptionAccountId ?? subscriptionAccountId, workBuddyCredentials, options?.promptCacheKey);
                 }
-                if (provider.supportsStreaming) {
-                    return await this.callOpenAICompatibleStreaming(requestEndpoint, apiKey, { ...requestBody, stream: true }, providerId, options?.onThinking, controller, options?.onTextDelta, options?.onToolCallDelta, config.reasoningKey, subscriptionAccountId);
+                if (provider.supportsStreaming || providerId === WORKBUDDY_PROVIDER_ID) {
+                    return await this.callOpenAICompatibleStreaming(requestEndpoint, apiKey, { ...requestBody, stream: true }, providerId, options?.onThinking, controller, options?.onTextDelta, options?.onToolCallDelta, config.reasoningKey, subscriptionAccountId, workBuddyCredentials, options?.promptCacheKey);
                 }
                 return await this.callOpenAICompatible(requestEndpoint, apiKey, requestBody, providerId, controller);
             };
@@ -1539,7 +2226,7 @@ export class AIService {
         const config = this.getConfig();
         const providerId = options?.providerId || config.inlineCompletion.provider || config.provider;
         const provider = getProvider(providerId);
-        if (providerId === 'codex-chatgpt') {
+        if (providerId === 'codex-chatgpt' || providerId === WORKBUDDY_PROVIDER_ID) {
             throw new Error(`${provider.name} does not support inline completion. Select a FIM-capable provider for inline completion.`);
         }
 
@@ -1739,7 +2426,7 @@ export class AIService {
                     ? message.reasoning_key
                     : DEFAULT_REASONING_KEY;
                 const tokenRhythmReasoningReplay = providerId !== 'tokenrhythm'
-                    || /^(?:deepseek-v4-(?:flash|pro)(?:-[a-z0-9.-]+)?|glm-5(?:\.[12])?)$/i.test(request.model.trim());
+                    || /^(?:deepseek-v4-(?:flash|pro)(?:-[a-z0-9.-]+)?|glm-5(?:\.[123])?(?:-flashx?)?)$/i.test(request.model.trim());
                 const hasReasoning = tokenRhythmReasoningReplay
                     && typeof message.reasoning_content === 'string'
                     && message.reasoning_content.trim().length > 0;
@@ -1886,7 +2573,11 @@ export class AIService {
             }, 300000);
 
             try {
-                const fetchFn = providerId === 'codex-chatgpt' ? this.subscriptionProxy.fetch : fetch;
+                const fetchFn = (providerId === 'codex-chatgpt'
+                    || providerId === WORKBUDDY_PROVIDER_ID
+                    || providerId === OPENDESIGN_PROVIDER_ID)
+                    ? this.subscriptionProxy.fetch
+                    : fetch;
                 const response = await fetchFn(url, { ...init, signal: fetchController.signal });
                 
                 if (fetchTimeoutId) {
@@ -1894,8 +2585,12 @@ export class AIService {
                     fetchTimeoutId = undefined;
                 }
 
-                // Check for 429 (Rate Limit / Too Many Requests)
-                if (response.status === 429 && retries < maxRetries) {
+                // Check for 429 (Rate Limit / Too Many Requests).
+                // 带号池且支持快速切换的线路（WorkBuddy / OpenDesign）立即把 429 交回号池冷却换号，不在单号上盲等退避。
+                if (response.status === 429
+                    && retries < maxRetries
+                    && providerId !== WORKBUDDY_PROVIDER_ID
+                    && providerId !== OPENDESIGN_PROVIDER_ID) {
                     const jitter = Math.floor(Math.random() * delays[retries]! * 0.25);
                     const delay = delays[retries]! + jitter;
                     ErrorReporter.debug(SOURCE.AI_SERVICE, `429 Rate Limit hit for ${providerId}. Retrying in ${delay}ms...`);
@@ -2003,6 +2698,183 @@ export class AIService {
 
     // ─── Private API callers ─────────────────────────────────────────────────
 
+    /** 处理 WorkBuddy 对话响应失败（11128 自愈移位、401 刷新/重读桌面文件、11140 停用、429/6004 冷却切号、11159 禁止移位）。 */
+    private async recoverWorkBuddyFailure(options: {
+        response: Response;
+        detail: string;
+        activeAccountId: string | undefined;
+        activeCreds: WorkBuddyCredentials;
+        attemptedIds: Set<string>;
+        refreshedIds: Set<string>;
+        allowRelocateSystem: boolean;
+        relocatedOnce: boolean;
+    }): Promise<
+        | { action: 'relocate' }
+        | { action: 'retry_account'; accountId: string | undefined; credentials: WorkBuddyCredentials }
+        | { action: 'give_up'; errorMessage?: string }
+    > {
+        const {
+            response,
+            detail,
+            activeAccountId,
+            activeCreds,
+            attemptedIds,
+            refreshedIds,
+            allowRelocateSystem,
+            relocatedOnce,
+        } = options;
+        const failure = classifyWorkBuddyFailure(response.status, detail, response.headers);
+
+        if (failure.kind === 'thinking_signature_refused') {
+            return {
+                action: 'give_up',
+                errorMessage: `${WORKBUDDY_PROVIDER_NAME} API error (${response.status}, code ${WORKBUDDY_ERROR_CODE.THINKING_SIGNATURE_INVALID}): ${detail}`,
+            };
+        }
+
+        if (failure.kind === 'channel_refusal_11128') {
+            if (allowRelocateSystem && !relocatedOnce && failure.canRelocateSystem) {
+                return { action: 'relocate' };
+            }
+            return { action: 'give_up' };
+        }
+
+        if (failure.kind === 'account_restricted') {
+            if (activeAccountId !== undefined) {
+                await this.subscriptionPools.noteAuthFailure(
+                    WORKBUDDY_PROVIDER_ID,
+                    activeAccountId,
+                    failure.detail.slice(0, 200) || `account restricted (${failure.code})`,
+                );
+                attemptedIds.add(activeAccountId);
+            }
+            const next = await this.getWorkBuddyCredential(attemptedIds, false).catch(() => undefined);
+            return next
+                ? { action: 'retry_account', accountId: next.accountId, credentials: next.credentials }
+                : { action: 'give_up' };
+        }
+
+        if (failure.kind === 'rate_limited') {
+            if (activeAccountId !== undefined) {
+                await this.subscriptionPools.noteRateLimited(WORKBUDDY_PROVIDER_ID, activeAccountId, failure.retryAfterMs);
+                attemptedIds.add(activeAccountId);
+            }
+            const next = await this.getWorkBuddyCredential(attemptedIds, false).catch(() => undefined);
+            return next
+                ? { action: 'retry_account', accountId: next.accountId, credentials: next.credentials }
+                : { action: 'give_up' };
+        }
+
+        if (response.status === 401 && activeAccountId !== undefined && !refreshedIds.has(activeAccountId)) {
+            refreshedIds.add(activeAccountId);
+            if (activeCreds.source === 'desktop' && activeCreds.sourceFile) {
+                const disk = readWorkBuddyDesktopFile(activeCreds.sourceFile);
+                if (disk && disk.accessToken !== activeCreds.accessToken && isWorkBuddyCredentialFresh(disk)) {
+                    const pooled = workBuddyPoolCredentials(disk);
+                    if (pooled) {
+                        await this.subscriptionPools
+                            .addAccount(WORKBUDDY_PROVIDER_ID, pooled as unknown as PooledOAuthCredentials)
+                            .catch(() => undefined);
+                    }
+                    return { action: 'retry_account', accountId: activeAccountId, credentials: disk };
+                }
+            }
+            const excludePreviousOnly = new Set(attemptedIds);
+            excludePreviousOnly.delete(activeAccountId);
+            const refreshed = await this.getWorkBuddyCredential(excludePreviousOnly, true).catch(() => undefined);
+            if (refreshed !== undefined
+                && (refreshed.accountId !== activeAccountId || refreshed.credentials.accessToken !== activeCreds.accessToken)) {
+                return { action: 'retry_account', accountId: refreshed.accountId, credentials: refreshed.credentials };
+            }
+        }
+
+        if (failure.kind === 'auth_failed' || response.status === 401) {
+            if (activeAccountId !== undefined) {
+                if (failure.kind === 'auth_failed') {
+                    await this.subscriptionPools.noteAuthFailure(
+                        WORKBUDDY_PROVIDER_ID,
+                        activeAccountId,
+                        detail.slice(0, 200) || `HTTP ${response.status}`,
+                    );
+                }
+                attemptedIds.add(activeAccountId);
+            }
+            const next = await this.getWorkBuddyCredential(attemptedIds, false).catch(() => undefined);
+            return next
+                ? { action: 'retry_account', accountId: next.accountId, credentials: next.credentials }
+                : { action: 'give_up' };
+        }
+
+        if (failure.kind === 'model_unavailable') {
+            if (activeAccountId !== undefined) attemptedIds.add(activeAccountId);
+            const next = await this.getWorkBuddyCredential(attemptedIds, false).catch(() => undefined);
+            return next
+                ? { action: 'retry_account', accountId: next.accountId, credentials: next.credentials }
+                : { action: 'give_up' };
+        }
+
+        return { action: 'give_up' };
+    }
+
+    /** 处理 OpenDesign 失败（`max_completion_tokens` 降级、403 无权不伤号换号、401 停用、402/429 冷却换号）。 */
+    private async recoverOpenDesignFailure(options: {
+        response: Response;
+        errorText: string;
+        requestPayload: Record<string, unknown>;
+        maxTokensDowngraded: boolean;
+        activeAccountId: string | undefined;
+        attemptedIds: Set<string>;
+        currentUrl: string;
+    }): Promise<
+        | { action: 'retry_payload'; nextPayload: Record<string, unknown> }
+        | { action: 'retry_account'; accountId: string; apiKey: string; url: string }
+        | { action: 'give_up' }
+    > {
+        const { response, errorText, requestPayload, maxTokensDowngraded, activeAccountId, attemptedIds, currentUrl } = options;
+        if (!maxTokensDowngraded
+            && isOpenDesignUnsupportedMaxTokensError(errorText)
+            && requestPayload.max_tokens !== undefined) {
+            return {
+                action: 'retry_payload',
+                nextPayload: withoutMaxTokensUseCompletionTokens(requestPayload),
+            };
+        }
+        if (activeAccountId === undefined) return { action: 'give_up' };
+
+        const kind = classifyOpenDesignFailure(response.status, errorText);
+        if (kind === 'entitlement_denied') {
+            attemptedIds.add(activeAccountId);
+        } else if (kind === 'invalid_credential') {
+            await this.subscriptionPools.noteAuthFailure(
+                OPENDESIGN_PROVIDER_ID,
+                activeAccountId,
+                errorText.slice(0, 200) || `HTTP ${response.status}`,
+            );
+            attemptedIds.add(activeAccountId);
+        } else if (kind === 'account_quota_exhausted' || kind === 'rate_limit') {
+            const cooldownMs = retryAfterMsFromHeaders(response.headers) ?? OPENDESIGN_POOL_COOLDOWN_MS;
+            await this.subscriptionPools.noteRateLimited(OPENDESIGN_PROVIDER_ID, activeAccountId, cooldownMs);
+            attemptedIds.add(activeAccountId);
+        } else {
+            return { action: 'give_up' };
+        }
+
+        const next = await this.subscriptionPools.select(OPENDESIGN_PROVIDER_ID, attemptedIds, false).catch(() => undefined);
+        if (next === undefined) return { action: 'give_up' };
+        const parsed = openDesignPoolCredentials(next.credentials);
+        const nextKey = parsed ? openDesignRuntimeKey(parsed) : next.credentials.accessToken;
+        const configuredEndpoint = this.getEndpointForProvider(OPENDESIGN_PROVIDER_ID);
+        const nextUrl = parsed?.baseUrl && !configuredEndpoint
+            ? normalizeOpenAIActionUrl(parsed.baseUrl, 'chat/completions')
+            : currentUrl;
+        return {
+            action: 'retry_account',
+            accountId: next.accountId,
+            apiKey: nextKey,
+            url: nextUrl,
+        };
+    }
+
     private async callOpenAICompatible(
         endpoint: string,
         apiKey: string,
@@ -2011,19 +2883,20 @@ export class AIService {
         controller: AbortController,
     ): Promise<ChatCompletionResponse> {
         const url = normalizeOpenAIActionUrl(endpoint, 'chat/completions');
+        const currentApiKey = apiKey;
 
-        const headers: Record<string, string> = {
+        const buildHeaders = () => ({
             'Content-Type': 'application/json',
-            ...this.buildAuthHeaders(providerId, apiKey),
-        };
+            ...this.buildAuthHeaders(providerId, currentApiKey),
+        });
 
-        const requestPayload = this.sanitizeRequest(providerId, request) as ChatCompletionRequest & Record<string, unknown>;
+        let requestPayload = this.sanitizeRequest(providerId, request) as ChatCompletionRequest & Record<string, unknown>;
         // The Kimi Code endpoint refuses an oversized body with a 400 the user cannot
         // act on; catching it here turns that into an actionable local message.
         assertKimiCodeRequestSize(providerId, JSON.stringify(requestPayload));
         const send = () => this.fetchWithRetry(url, {
             method: 'POST',
-            headers,
+            headers: buildHeaders(),
             body: JSON.stringify(requestPayload),
             signal: controller.signal,   // C1 Fix: use local per-call controller
         }, providerId);
@@ -2031,6 +2904,11 @@ export class AIService {
         let response = await send();
         if (!response.ok) {
             let errorText = await response.text();
+            if (providerId === OPENDESIGN_PROVIDER_ID && isOpenDesignUnsupportedMaxTokensError(errorText) && requestPayload.max_tokens !== undefined) {
+                requestPayload = withoutMaxTokensUseCompletionTokens(requestPayload) as ChatCompletionRequest & Record<string, unknown>;
+                response = await send();
+                if (!response.ok) errorText = await response.text();
+            }
             const removed = response.status === 400 || response.status === 422
                 ? removeUnsupportedOptionalChatFields(requestPayload, errorText)
                 : [];
@@ -2063,60 +2941,153 @@ export class AIService {
         reasoningKey?: string,
         /** Pooled account this request used, when the line has a pool. */
         accountIdForPool?: string,
+        workBuddyCredentials?: WorkBuddyCredentials,
+        turnCacheKey?: string,
     ): Promise<ChatCompletionResponse> {
-        const url = normalizeOpenAIActionUrl(endpoint, 'chat/completions');
-        const headers: Record<string, string> = {
-            'Content-Type': 'application/json',
-            ...this.buildAuthHeaders(providerId, apiKey),
-        };
+        let activeWbCreds = workBuddyCredentials;
+        let activeAccountId = accountIdForPool;
+        let currentApiKey = apiKey;
+        let url = activeWbCreds
+            ? `${activeWbCreds.backend}${WORKBUDDY_CHAT_PATH}`
+            : normalizeOpenAIActionUrl(endpoint, 'chat/completions');
 
-        const requestPayload = this.sanitizeRequest(providerId, { ...request, stream: true }) as ChatCompletionRequest & Record<string, unknown>;
+        let requestPayload: Record<string, unknown> = activeWbCreds
+            ? prepareWorkBuddyChatPayload(this.sanitizeRequest(providerId, { ...request, stream: true }) as unknown as Record<string, unknown>)
+            : this.sanitizeRequest(providerId, { ...request, stream: true }) as ChatCompletionRequest & Record<string, unknown>;
 
-        if (shouldRequestStreamUsage(providerId, request.model, endpoint)) {
+        if (!activeWbCreds && shouldRequestStreamUsage(providerId, request.model, endpoint)) {
             requestPayload.stream_options = { include_usage: true };
         }
         // Same local size guard as the non-streaming path (see above).
         assertKimiCodeRequestSize(providerId, JSON.stringify(requestPayload));
 
-        const send = () => this.fetchWithRetry(url, {
-            method: 'POST',
-            headers,
-            body: JSON.stringify(requestPayload),
-            signal: controller.signal,
-        }, providerId);
+        const send = () => {
+            if (activeWbCreds) {
+                const jsonText = JSON.stringify(requestPayload);
+                const compressed = gzipWorkBuddyBody(jsonText);
+                const wbHeaders = workBuddyHeaders(activeWbCreds, {
+                    chat: true,
+                    gzipBody: true,
+                    accountKey: workBuddyAccountKey(activeWbCreds),
+                    sessionId: turnCacheKey,
+                    turnKey: extractWorkBuddyUserTurnKey(requestPayload.messages),
+                });
+                return this.fetchWithRetry(url, {
+                    method: 'POST',
+                    headers: wbHeaders,
+                    body: compressed as unknown as BodyInit,
+                    signal: controller.signal,
+                }, providerId);
+            }
+            const headers: Record<string, string> = {
+                'Content-Type': 'application/json',
+                ...this.buildAuthHeaders(providerId, currentApiKey),
+            };
+            return this.fetchWithRetry(url, {
+                method: 'POST',
+                headers,
+                body: JSON.stringify(requestPayload),
+                signal: controller.signal,
+            }, providerId);
+        };
 
         let response = await send();
+        if (!response.ok && (providerId === WORKBUDDY_PROVIDER_ID || providerId === OPENDESIGN_PROVIDER_ID)) {
+            const attemptedIds = new Set<string>(activeAccountId ? [activeAccountId] : []);
+            const refreshedIds = new Set<string>();
+            let relocatedOnce = false;
+            let maxTokensDowngraded = false;
+            for (let attempt = 0; attempt < 8 && !response.ok; attempt += 1) {
+                const detail = await response.clone().text().catch(() => '');
+                if (providerId === WORKBUDDY_PROVIDER_ID && activeWbCreds !== undefined) {
+                    const recovery = await this.recoverWorkBuddyFailure({
+                        response,
+                        detail,
+                        activeAccountId,
+                        activeCreds: activeWbCreds,
+                        attemptedIds,
+                        refreshedIds,
+                        allowRelocateSystem: true,
+                        relocatedOnce,
+                    });
+                    if (recovery.action === 'relocate') {
+                        const relocated = relocateWorkBuddySystemToInstructions(requestPayload);
+                        if (relocated === null) break;
+                        relocatedOnce = true;
+                        requestPayload = relocated;
+                        await response.body?.cancel().catch(() => undefined);
+                        response = await send();
+                        continue;
+                    }
+                    if (recovery.action === 'retry_account') {
+                        activeAccountId = recovery.accountId;
+                        activeWbCreds = recovery.credentials;
+                        url = `${activeWbCreds.backend}${WORKBUDDY_CHAT_PATH}`;
+                        await response.body?.cancel().catch(() => undefined);
+                        response = await send();
+                        continue;
+                    }
+                    if (recovery.errorMessage) {
+                        await response.body?.cancel().catch(() => undefined);
+                        throw new Error(recovery.errorMessage);
+                    }
+                    break;
+                }
+                if (providerId === OPENDESIGN_PROVIDER_ID) {
+                    const recovery = await this.recoverOpenDesignFailure({
+                        response,
+                        errorText: detail,
+                        requestPayload,
+                        maxTokensDowngraded,
+                        activeAccountId,
+                        attemptedIds,
+                        currentUrl: url,
+                    });
+                    if (recovery.action === 'retry_payload') {
+                        maxTokensDowngraded = true;
+                        requestPayload = recovery.nextPayload;
+                        await response.body?.cancel().catch(() => undefined);
+                        response = await send();
+                        continue;
+                    }
+                    if (recovery.action === 'retry_account') {
+                        activeAccountId = recovery.accountId;
+                        currentApiKey = recovery.apiKey;
+                        url = recovery.url;
+                        await response.body?.cancel().catch(() => undefined);
+                        response = await send();
+                        continue;
+                    }
+                    break;
+                }
+            }
+        }
         // A pooled subscription line rotates on any ACCOUNT-scoped refusal, not just a
         // 429: a dead credential and an account-level limit are just as un-retryable on the
         // same account, and without this the dead one keeps being selected. The account id
         // is carried by the request options, so a line without a pool is unaffected.
-        if (!response.ok && accountIdForPool !== undefined) {
+        if (!response.ok
+            && activeAccountId !== undefined
+            && providerId !== WORKBUDDY_PROVIDER_ID
+            && providerId !== OPENDESIGN_PROVIDER_ID) {
             const { failure } = await classifyFailedResponse(response.clone());
             if (shouldRotateAccount(failure.kind)) {
                 const retryAfterMs = failure.cooldownMs ?? retryAfterMsFromHeaders(response.headers);
                 if (failure.kind === 'invalid_credential') {
                     await this.subscriptionPools.noteAuthFailure(
-                        providerId, accountIdForPool,
+                        providerId, activeAccountId,
                         failure.code === undefined ? 'credential rejected' : `credential rejected (code ${failure.code})`);
                 } else {
-                    await this.subscriptionPools.noteRateLimited(providerId, accountIdForPool, retryAfterMs);
+                    await this.subscriptionPools.noteRateLimited(providerId, activeAccountId, retryAfterMs);
                 }
                 const next = await this.subscriptionPools
-                    .select(providerId, new Set([accountIdForPool]), false)
+                    .select(providerId, new Set([activeAccountId]), false)
                     .catch(() => undefined);
                 if (next !== undefined) {
                     await response.body?.cancel().catch(() => undefined);
-                    const nextKey = next.credentials.accessToken;
-                    const nextHeaders: Record<string, string> = {
-                        'Content-Type': 'application/json',
-                        ...this.buildAuthHeaders(providerId, nextKey),
-                    };
-                    response = await this.fetchWithRetry(url, {
-                        method: 'POST',
-                        headers: nextHeaders,
-                        body: JSON.stringify(requestPayload),
-                        signal: controller.signal,
-                    }, providerId);
+                    currentApiKey = next.credentials.accessToken;
+                    activeAccountId = next.accountId;
+                    response = await send();
                 }
             }
         }
@@ -2139,6 +3110,9 @@ export class AIService {
             const data = await response.json() as ChatCompletionResponse & { error?: { message?: string } | string };
             if (data.error) {
                 throw new Error(`${getProvider(providerId).name} API error: ${typeof data.error === 'string' ? data.error : data.error.message ?? 'Unknown error'}`);
+            }
+            if (activeAccountId !== undefined && (providerId === WORKBUDDY_PROVIDER_ID || providerId === OPENDESIGN_PROVIDER_ID)) {
+                void this.subscriptionPools.recordUsage(providerId, activeAccountId).catch(() => undefined);
             }
             const message = data.choices?.[0]?.message;
             if (typeof message?.content === 'string' && message.content) onTextDelta?.(message.content);
@@ -2325,6 +3299,10 @@ export class AIService {
                     id: tc.id || `${responseIdBuf || `chatcmpl_${createdBuf}`}_call_${index}`,
                 }))
             : undefined;
+
+        if (activeAccountId !== undefined && (providerId === WORKBUDDY_PROVIDER_ID || providerId === OPENDESIGN_PROVIDER_ID)) {
+            void this.subscriptionPools.recordUsage(providerId, activeAccountId).catch(() => undefined);
+        }
 
         return {
             id: responseIdBuf || `chatcmpl_${createdBuf}`,
@@ -3403,16 +4381,25 @@ export class AIService {
         subscriptionCredentials?: ClaudeSubscriptionCredentials,
         /** Pool account the credential came from, so a 429 can cool it down. */
         subscriptionAccountId?: string,
+        /** Resolved WorkBuddy credentials when routing CN `claude-*` over `/v1/messages`. */
+        workBuddyCredentials?: WorkBuddyCredentials,
+        /** Turn/session key used by WorkBuddy outbound identity headers. */
+        turnCacheKey?: string,
     ): Promise<ChatCompletionResponse> {
         // Reassigned by the forced-refresh step below, so it is a local binding
         // rather than a read of the parameter on every use.
         let claudeSubscriptionCredentials = subscriptionCredentials;
         let claudeSubscriptionAccountId = subscriptionAccountId;
+        let activeWbCreds = workBuddyCredentials;
+        let activeWbAccountId = subscriptionAccountId;
+        const isWorkBuddyMessages = providerId === WORKBUDDY_PROVIDER_ID && activeWbCreds !== undefined;
         // The subscription's beta route is part of its contract, not an alias of
         // the plain one, so the path is used verbatim for that provider.
-        const url = providerId === 'claude-subscription'
-            ? CLAUDE_API_BASE + CLAUDE_MESSAGES_PATH
-            : `${normalizeAnthropicMessagesEndpoint(endpoint)}/messages`;
+        const resolveClaudeUrl = (): string => isWorkBuddyMessages && activeWbCreds
+            ? `${activeWbCreds.backend}${WORKBUDDY_MESSAGES_PATH}`
+            : providerId === 'claude-subscription'
+                ? CLAUDE_API_BASE + CLAUDE_MESSAGES_PATH
+                : `${normalizeAnthropicMessagesEndpoint(endpoint)}/messages`;
         // Force stream=true so we get SSE — enables thinking tokens and unblocks UI.
         const cacheCapability = resolveEffectiveCacheCapability({
             providerId, model: request.model, endpoint, apiFormat: 'anthropic-messages',
@@ -3434,51 +4421,76 @@ export class AIService {
                 cacheControl: cacheCapability.requestMode === 'anthropic-breakpoints',
                 ...(minimaxCodeModel !== undefined ? { minimaxCodeModel } : {}),
                 ...(claudeSubscriptionModel !== undefined ? { claudeSubscriptionModel } : {}),
-                ...(claudeSubscriptionModel !== undefined ? { claudeCacheTtl } : {}),
+                ...(claudeCacheTtl !== undefined ? { claudeCacheTtl } : {}),
             }
         );
         // Claude Code-style relays often expose models that reject temperature entirely.
-        if (providerId === 'custom') {
+        if (providerId === 'custom' || isWorkBuddyMessages) {
             delete claudeRequest.temperature;
         }
+        if (isWorkBuddyMessages) {
+            const rawReq = request as unknown as Record<string, unknown>;
+            if (isRecord(rawReq.thinking) && rawReq.thinking.type === 'disabled') {
+                claudeRequest.thinking = { type: 'disabled' };
+                delete claudeRequest.output_config;
+            } else if (request.enable_thinking || (request.reasoning_effort !== undefined && request.reasoning_effort !== 'none')) {
+                if (claudeRequest.thinking === undefined) {
+                    claudeRequest.thinking = { type: 'adaptive' };
+                }
+                if (request.reasoning_effort && request.reasoning_effort !== 'none' && claudeRequest.output_config === undefined) {
+                    claudeRequest.output_config = { effort: request.reasoning_effort };
+                }
+            }
+            Object.assign(claudeRequest, prepareWorkBuddyMessagesPayload(claudeRequest));
+        }
 
-        const buildClaudeHeaders = (authMode: 'x-api-key' | 'bearer'): Record<string, string> => ({
-            'Content-Type': 'application/json',
-            // This route is always a stream; a relay that switches on Accept would answer
-            // a stream request as JSON otherwise, and the client would see no events at all.
-            accept: 'text/event-stream',
-            'anthropic-version': '2023-06-01',
-            // A subscription request must carry the Claude Code identity: the
-            // bearer, the claude-cli user agent, `x-app: cli`, and the beta set
-            // that licenses the fields its body uses. `x-api-key` is dropped by
-            // that builder, since carrying both is a documented 401 cause.
-            ...(providerId === 'claude-subscription' && claudeSubscriptionCredentials
-                ? claudeSubscriptionHeaders(claudeSubscriptionCredentials.accessToken, {
-                    model: request.model,
-                    thinking: claudeRequest.thinking !== undefined,
-                    thinkingBinding: isRecord(claudeRequest.thinking)
-                        && 'block_binding' in claudeRequest.thinking,
-                    cacheTtl: claudeCacheTtl,
-                })
-                : {}),
-            // Measured: this route authenticates with the bearer only, and
-            // x-api-key answers 401 {"code":401,"message":"token is required"}.
-            // There is deliberately no x-api-key fallback here, because it would
-            // only spend a round trip per request to learn that.
-            // The subscription route owns its whole header set above, so it must
-            // not also receive the generic auth spread — that would reintroduce
-            // `x-api-key` and override the bearer.
-            ...(providerId === 'claude-subscription'
-                ? {}
-                : providerId === 'opencode'
-                    || providerId === 'commandcode-messages' || providerId === 'minimax-code'
-                    ? this.buildAuthHeaders(providerId, apiKey)
-                    : authMode === 'bearer'
+        const buildClaudeHeaders = (authMode: 'x-api-key' | 'bearer'): Record<string, string> => {
+            if (isWorkBuddyMessages && activeWbCreds) {
+                return workBuddyHeaders(activeWbCreds, {
+                    messages: true,
+                    accountKey: workBuddyAccountKey(activeWbCreds),
+                    sessionId: turnCacheKey,
+                    turnKey: extractWorkBuddyUserTurnKey(claudeRequest.messages),
+                });
+            }
+            return {
+                'Content-Type': 'application/json',
+                // This route is always a stream; a relay that switches on Accept would answer
+                // a stream request as JSON otherwise, and the client would see no events at all.
+                accept: 'text/event-stream',
+                'anthropic-version': '2023-06-01',
+                // A subscription request must carry the Claude Code identity: the
+                // bearer, the claude-cli user agent, `x-app: cli`, and the beta set
+                // that licenses the fields its body uses. `x-api-key` is dropped by
+                // that builder, since carrying both is a documented 401 cause.
+                ...(providerId === 'claude-subscription' && claudeSubscriptionCredentials
+                    ? claudeSubscriptionHeaders(claudeSubscriptionCredentials.accessToken, {
+                        model: request.model,
+                        thinking: claudeRequest.thinking !== undefined,
+                        thinkingBinding: isRecord(claudeRequest.thinking)
+                            && 'block_binding' in claudeRequest.thinking,
+                        cacheTtl: claudeCacheTtl,
+                    })
+                    : {}),
+                // Measured: this route authenticates with the bearer only, and
+                // x-api-key answers 401 {"code":401,"message":"token is required"}.
+                // There is deliberately no x-api-key fallback here, because it would
+                // only spend a round trip per request to learn that.
+                // The subscription route owns its whole header set above, so it must
+                // not also receive the generic auth spread — that would reintroduce
+                // `x-api-key` and override the bearer.
+                ...(providerId === 'claude-subscription'
+                    ? {}
+                    : providerId === 'opencode'
+                        || providerId === 'commandcode-messages' || providerId === 'minimax-code'
                         ? this.buildAuthHeaders(providerId, apiKey)
-                        : (apiKey ? { 'x-api-key': apiKey } : {})),
-        });
+                        : authMode === 'bearer'
+                            ? this.buildAuthHeaders(providerId, apiKey)
+                            : (apiKey ? { 'x-api-key': apiKey } : {})),
+            };
+        };
 
-        const sendClaudeRequest = (authMode: 'x-api-key' | 'bearer' = 'x-api-key'): Promise<Response> => this.fetchWithRetry(url, {
+        const sendClaudeRequest = (authMode: 'x-api-key' | 'bearer' = 'x-api-key'): Promise<Response> => this.fetchWithRetry(resolveClaudeUrl(), {
             method: 'POST',
             headers: buildClaudeHeaders(authMode),
             body: JSON.stringify(claudeRequest),
@@ -3488,8 +4500,37 @@ export class AIService {
         // This route has no x-api-key shape at all, so it starts on the bearer
         // it actually uses instead of spending a request to discover that.
         let authMode: 'x-api-key' | 'bearer' =
-            providerId === 'minimax-code' || providerId === 'claude-subscription' ? 'bearer' : 'x-api-key';
+            providerId === 'minimax-code' || providerId === 'claude-subscription' || isWorkBuddyMessages ? 'bearer' : 'x-api-key';
         let response = await sendClaudeRequest(authMode);
+        if (isWorkBuddyMessages && !response.ok && activeWbCreds !== undefined) {
+            const attemptedIds = new Set<string>(activeWbAccountId ? [activeWbAccountId] : []);
+            const refreshedIds = new Set<string>();
+            for (let attempt = 0; attempt < 8 && !response.ok; attempt += 1) {
+                const detail = await response.clone().text().catch(() => '');
+                const recovery = await this.recoverWorkBuddyFailure({
+                    response,
+                    detail,
+                    activeAccountId: activeWbAccountId,
+                    activeCreds: activeWbCreds,
+                    attemptedIds,
+                    refreshedIds,
+                    allowRelocateSystem: false,
+                    relocatedOnce: true,
+                });
+                if (recovery.action === 'retry_account') {
+                    activeWbAccountId = recovery.accountId;
+                    activeWbCreds = recovery.credentials;
+                    await response.body?.cancel().catch(() => undefined);
+                    response = await sendClaudeRequest(authMode);
+                    continue;
+                }
+                if (recovery.action === 'give_up' && recovery.errorMessage) {
+                    await response.body?.cancel().catch(() => undefined);
+                    throw new Error(recovery.errorMessage);
+                }
+                break;
+            }
+        }
         // A subscription token can be refused while it still looks valid locally
         // (revoked elsewhere, clock skew, the server already rotated it), and that
         // is indistinguishable from "sign in again" on the status alone. So the
@@ -3532,7 +4573,7 @@ export class AIService {
                 response = await sendClaudeRequest(authMode);
             }
         }
-        if (!response.ok && subscriptionAccountId !== undefined) {
+        if (!response.ok && subscriptionAccountId !== undefined && !isWorkBuddyMessages) {
             // This route had no account-scoped handling at all, so a rate-limited or
             // exhausted account kept being selected and every later turn hit the same
             // wall. Rotation is only correct for ACCOUNT-scoped refusals: a global rate
@@ -3666,6 +4707,9 @@ export class AIService {
                     });
                     onToolCallDelta?.(String(block.name ?? ''), args);
                 }
+            }
+            if (isWorkBuddyMessages && activeWbAccountId !== undefined) {
+                void this.subscriptionPools.recordUsage(WORKBUDDY_PROVIDER_ID, activeWbAccountId).catch(() => undefined);
             }
             const usage = data.usage ?? {};
             const inputTokens = usage.input_tokens ?? 0;
@@ -3900,6 +4944,9 @@ export class AIService {
         const totalPromptTokens = inputTokens + cachedTokens + cacheCreationTokens;
         // Note: the per-call cache_stats ledger event is appended by agentRunner from
         // the returned usage — appending it here too double-counted cache dashboards.
+        if (isWorkBuddyMessages && activeWbAccountId !== undefined) {
+            void this.subscriptionPools.recordUsage(WORKBUDDY_PROVIDER_ID, activeWbAccountId).catch(() => undefined);
+        }
 
         return {
             id: messageIdBuf || undefined,

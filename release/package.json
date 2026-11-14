@@ -1141,7 +1141,9 @@
                             "mimo-token-plan",
                             "opencode",
                             "kimi",
-                            "kimi-code-plan"
+                            "kimi-code-plan",
+                            "workbuddy-subscription",
+                            "opendesign"
                         ],
                         "enumDescriptions": [
                             "%configuration.stellarisLanguageServices.ai.provider.enum.codex-chatgpt%",
@@ -1165,10 +1167,18 @@
                             "%configuration.stellarisLanguageServices.ai.provider.enum.mimo-token-plan%",
                             "%configuration.stellarisLanguageServices.ai.provider.enum.opencode%",
                             "%configuration.stellarisLanguageServices.ai.provider.enum.kimi%",
-                            "%configuration.stellarisLanguageServices.ai.provider.enum.kimi-code-plan%"
+                            "%configuration.stellarisLanguageServices.ai.provider.enum.kimi-code-plan%",
+                            "%configuration.stellarisLanguageServices.ai.provider.enum.workbuddy-subscription%",
+                            "%configuration.stellarisLanguageServices.ai.provider.enum.opendesign%"
                         ],
                         "default": "openai",
                         "markdownDescription": "%configuration.stellarisLanguageServices.ai.provider.description%"
+                    },
+                    "stellarisLanguageServices.ai.workbuddyAutoCheckin": {
+                        "scope": "window",
+                        "type": "boolean",
+                        "default": false,
+                        "description": "%configuration.stellarisLanguageServices.ai.workbuddyAutoCheckin.description%"
                     },
                     "stellarisLanguageServices.ai.model": {
                         "scope": "window",
@@ -1479,7 +1489,8 @@
                             "mimo",
                             "minimax-token-plan",
                             "mimo-token-plan",
-                            "opencode"
+                            "opencode",
+                            "opendesign"
                         ],
                         "enumDescriptions": [
                             "%configuration.stellarisLanguageServices.ai.provider.enum.openai%",
@@ -1500,7 +1511,8 @@
                             "%configuration.stellarisLanguageServices.ai.provider.enum.mimo%",
                             "%configuration.stellarisLanguageServices.ai.provider.enum.minimax-token-plan%",
                             "%configuration.stellarisLanguageServices.ai.provider.enum.mimo-token-plan%",
-                            "%configuration.stellarisLanguageServices.ai.provider.enum.opencode%"
+                            "%configuration.stellarisLanguageServices.ai.provider.enum.opencode%",
+                            "%configuration.stellarisLanguageServices.ai.provider.enum.opendesign%"
                         ],
                         "default": "",
                         "description": "%configuration.stellarisLanguageServices.ai.inlineCompletion.provider.description%"
@@ -1549,7 +1561,9 @@
                             "mimo-token-plan",
                             "opencode",
                             "kimi",
-                            "kimi-code-plan"
+                            "kimi-code-plan",
+                            "workbuddy-subscription",
+                            "opendesign"
                         ],
                         "enumDescriptions": [
                             "%configuration.stellarisLanguageServices.ai.translationPreview.provider.enum.inherit%",
@@ -1573,7 +1587,9 @@
                             "%configuration.stellarisLanguageServices.ai.provider.enum.mimo-token-plan%",
                             "%configuration.stellarisLanguageServices.ai.provider.enum.opencode%",
                             "%configuration.stellarisLanguageServices.ai.provider.enum.kimi%",
-                            "%configuration.stellarisLanguageServices.ai.provider.enum.kimi-code-plan%"
+                            "%configuration.stellarisLanguageServices.ai.provider.enum.kimi-code-plan%",
+                            "%configuration.stellarisLanguageServices.ai.provider.enum.workbuddy-subscription%",
+                            "%configuration.stellarisLanguageServices.ai.provider.enum.opendesign%"
                         ],
                         "default": "",
                         "description": "%configuration.stellarisLanguageServices.ai.translationPreview.provider.description%"

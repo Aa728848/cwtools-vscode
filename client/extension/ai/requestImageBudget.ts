@@ -54,7 +54,10 @@ function imagePartBytes(part: ContentPart): number | undefined {
 /** 该 provider 的图片预算；未列出的线路没有图片预算。 */
 export function imageBudgetForProvider(providerId: string): number | undefined {
     if (providerId === 'kimi-code-plan' || providerId === 'kimi') return KIMI_MAX_REQUEST_IMAGE_BYTES;
-    if (providerId === 'claude-subscription' || providerId === 'commandcode-messages' || providerId === 'claude') {
+    if (providerId === 'claude-subscription'
+        || providerId === 'commandcode-messages'
+        || providerId === 'claude'
+        || providerId === 'workbuddy-subscription') {
         return ANTHROPIC_MAX_REQUEST_IMAGE_BYTES;
     }
     return undefined;
@@ -62,7 +65,10 @@ export function imageBudgetForProvider(providerId: string): number | undefined {
 
 /** 该 provider 的图片长边上限；未列出的线路没有长边限制。 */
 export function imageEdgeLimitForProvider(providerId: string, imageCount: number): number | undefined {
-    if (providerId !== 'claude-subscription' && providerId !== 'commandcode-messages' && providerId !== 'claude') {
+    if (providerId !== 'claude-subscription'
+        && providerId !== 'commandcode-messages'
+        && providerId !== 'claude'
+        && providerId !== 'workbuddy-subscription') {
         return undefined;
     }
     return imageCount > ANTHROPIC_MANY_IMAGE_THRESHOLD

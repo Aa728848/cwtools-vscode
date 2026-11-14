@@ -61,14 +61,49 @@ class Secrets {
 
 describe('Claude subscription model catalog', () => {
     it('ships the subscription models with their thinking forms', () => {
+        expect(CLAUDE_CLI_VERSION).to.equal('2.1.293');
         expect(CLAUDE_MODELS.map(model => model.id)).to.include.members([
-            'claude-opus-5-5', 'claude-sonnet-5-5', 'claude-opus-5', 'claude-fable-5-1', 'claude-haiku-4-5',
+            'claude-opus-5-5',
+            'claude-sonnet-5-5',
+            'claude-haiku-5-5',
+            'claude-opus-5',
+            'claude-opus-4-5-20251101',
+            'claude-sonnet-4-5-20250929',
+            'claude-fable-5-1',
+            'claude-haiku-4-5',
+            'claude-haiku-4-5-20251001',
         ]);
         expect(resolveClaudeModel('claude-opus-5-5').thinkingMode).to.equal('adaptive');
+        expect(resolveClaudeModel('claude-haiku-5-5')).to.include({
+            thinkingMode: 'adaptive',
+            canDisableThinking: true,
+            supportsTemperature: false,
+            contextWindow: 1_000_000,
+            maxTokens: 128_000,
+            bindsThinkingToPrefix: true,
+        });
         expect(resolveClaudeModel('claude-sonnet-5-5').thinkingMode).to.equal('mid-convo');
         expect(resolveClaudeModel('claude-fable-5-1').thinkingMode).to.equal('mid-convo');
-        expect(resolveClaudeModel('claude-opus-5').thinkingMode).to.equal('mid-convo');
+        expect(resolveClaudeModel('claude-opus-5')).to.include({
+            thinkingMode: 'mid-convo',
+            canDisableThinking: true,
+        });
         expect(resolveClaudeModel('claude-haiku-4-5').thinkingMode).to.equal('budget');
+    });
+
+    it('shapes Claude Haiku 5.5 adaptive effort and disabled thinking cleanly', () => {
+        const entry = resolveClaudeModel('claude-haiku-5-5');
+        const defaultThinking = claudeThinkingFor(entry, undefined, undefined);
+        expect(defaultThinking.outputConfig).to.equal(undefined);
+        expect(defaultThinking.thinking).to.deep.equal({
+            type: 'adaptive',
+            display: 'summarized',
+            block_binding: { prefix_mismatch_behavior: 'drop_block' },
+        });
+        expect(claudeThinkingFor(entry, 'low', undefined).outputConfig).to.deep.equal({ effort: 'low' });
+        expect(claudeThinkingFor(entry, 'none', undefined)).to.deep.equal({
+            thinking: { type: 'disabled' },
+        });
     });
 
     // 'mid-convo' forces effort=high when the caller names none, so it is only

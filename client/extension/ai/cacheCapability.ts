@@ -16,7 +16,7 @@ const OFFICIAL_OPENAI_PREFIX_PROVIDERS = new Set([
 ]);
 const GATEWAY_PROVIDERS = new Set([
     'openrouter', 'siliconflow', 'github', 'together', 'deepinfra', 'opencode',
-    'commandcode', 'commandcode-messages',
+    'commandcode', 'commandcode-messages', 'opendesign',
 ]);
 
 function normalizedEndpointHost(endpoint?: string): string {
@@ -46,6 +46,12 @@ export function resolveEffectiveCacheCapability(options: {
 
     if (provider === 'ollama') return { status: 'unknown', requestMode: 'none', supportsUsageTrailer: false };
     if (provider === 'codex-chatgpt') return { status: 'supported', requestMode: 'openai-prompt-cache-key', supportsUsageTrailer: true };
+    if (provider === 'workbuddy-subscription') {
+        if (format === 'anthropic-messages') {
+            return { status: 'supported', requestMode: 'anthropic-breakpoints', supportsUsageTrailer: false };
+        }
+        return { status: 'supported', requestMode: 'implicit-prefix', supportsUsageTrailer: true };
+    }
     if (provider === 'openai') {
         const official = officialTransportOrUnspecified(host, /(^|\.)api\.openai\.com$/);
         return { status: official ? 'supported' : 'unknown', requestMode: 'openai-prompt-cache-key', supportsUsageTrailer: official };

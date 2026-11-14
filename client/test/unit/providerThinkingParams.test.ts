@@ -488,3 +488,199 @@ describe('Kimi K3.1 request shaping', () => {
         expect(getEnableThinkingParams('kimi-k2.6', 'kimi')).to.deep.equal({ extraBody: { thinking: { type: 'enabled' } } });
     });
 });
+
+describe('WorkBuddy and OpenDesign thinking params', () => {
+    it('only emits thinking disabled on OpenDesign DeepSeek models when effort is none', () => {
+        const { getThinkingParams, getReducedThinkingParams } = loadProviders();
+        expect(getReducedThinkingParams('deepseek-v4.1-flash', 'opendesign', 'openai-chat-completions'))
+            .to.deep.equal({ extraBody: { thinking: { type: 'disabled' } } });
+        expect(getThinkingParams('deepseek-v4.1-flash', 'opendesign', 'openai-chat-completions', 'none'))
+            .to.deep.equal({ extraBody: { thinking: { type: 'disabled' } } });
+        expect(getThinkingParams('deepseek-v4.1-flash', 'opendesign', 'openai-chat-completions', 'high'))
+            .to.deep.equal({ reasoningEffort: 'high' });
+
+        // Non-DeepSeek models omit thinking: { type: 'disabled' } (e.g. Claude / GPT families).
+        expect(getReducedThinkingParams('claude-sonnet-5.5', 'opendesign', 'openai-chat-completions'))
+            .to.equal(undefined);
+        expect(getThinkingParams('claude-sonnet-5.5', 'opendesign', 'openai-chat-completions', 'xhigh'))
+            .to.deep.equal({ reasoningEffort: 'xhigh' });
+    });
+
+    it('shapes WorkBuddy thinking controls across /v2/chat/completions and /v1/messages routes', () => {
+        const { getThinkingParams, getReducedThinkingParams, getModelReasoningCapability } = loadProviders();
+        // /v2/chat/completions model with canDisableThinking: true accepts none
+        expect(getModelReasoningCapability('workbuddy-subscription', 'gpt-6-astra', 'openai-chat-completions'))
+            .to.deep.equal({ kind: 'effort', options: ['none', 'low', 'medium', 'high', 'xhigh', 'max'], defaultValue: 'high' });
+        expect(getThinkingParams('gpt-6-astra', 'workbuddy-subscription', 'openai-chat-completions', 'none'))
+            .to.deep.equal({ reasoningEffort: 'none' });
+        expect(getThinkingParams('glm-5.3', 'workbuddy-subscription', 'openai-chat-completions', 'max'))
+            .to.deep.equal({ reasoningEffort: 'max' });
+
+        // /v1/messages reduced thinking falls back to Anthropic thinking disabled
+        expect(getReducedThinkingParams('claude-sonnet-4.6', 'workbuddy-subscription', 'anthropic-messages'))
+            .to.deep.equal({ extraBody: { thinking: { type: 'disabled' } } });
+    });
+});
+
+describe('2026-11 refreshed model catalogs thinking & gateway isolation', () => {
+    it('gives GPT-6.1 Terra channel-specific defaults while honoring none on direct API and restricting Codex', () => {
+        const { getModelReasoningCapability, getThinkingParams, getReducedThinkingParams } = loadProviders();
+        expect(getModelReasoningCapability('openai', 'gpt-6.1-terra', 'openai-responses')).to.deep.equal({
+            kind: 'effort',
+            options: ['none', 'low', 'medium', 'high', 'xhigh', 'max'],
+            defaultValue: 'medium',
+        });
+        expect(getModelReasoningCapability('codex-chatgpt', 'gpt-6.1-terra', 'openai-responses')).to.deep.equal({
+            kind: 'effort',
+            options: ['low', 'medium', 'high', 'xhigh', 'max'],
+            defaultValue: 'low',
+        });
+        expect(getThinkingParams('gpt-6.1-terra', 'openai', 'openai-responses', 'none'))
+            .to.deep.equal({ reasoningEffort: 'none' });
+        expect(getThinkingParams('gpt-6.1-terra', 'codex-chatgpt', 'openai-responses', 'none'))
+            .to.deep.equal({ reasoningEffort: 'low' });
+        expect(getReducedThinkingParams('gpt-6.1-terra', 'openai', 'openai-responses'))
+            .to.deep.equal({ reasoningEffort: 'none' });
+        expect(getReducedThinkingParams('gpt-6.1-terra', 'codex-chatgpt', 'openai-responses'))
+            .to.deep.equal({ reasoningEffort: 'low' });
+        expect(getThinkingParams('gpt-6.1-terra', 'custom', 'openai-chat-completions', 'max'))
+            .to.deep.equal({ reasoningEffort: 'max' });
+    });
+
+    it('shapes Claude 5.5 Opus, Sonnet, and Haiku capabilities and prevents invalid disabled blocks', () => {
+        const { getAnthropicModelFeatures, getModelReasoningCapability, getReducedThinkingParams, toClaudeRequest } = loadProviders();
+        for (const model of ['claude-opus-5-5', 'claude-sonnet-5-5', 'claude-haiku-5-5']) {
+            expect(getAnthropicModelFeatures(model), model).to.deep.equal({
+                adaptiveThinking: true,
+                thinkingDisplay: true,
+                effort: true,
+                samplingRemoved: true,
+            });
+        }
+        expect(getModelReasoningCapability('claude', 'claude-opus-5-5', 'anthropic-messages')).to.deep.equal({
+            kind: 'effort',
+            options: ['low', 'medium', 'high', 'xhigh', 'max'],
+            defaultValue: 'high',
+        });
+        expect(getModelReasoningCapability('claude', 'claude-sonnet-5-5', 'anthropic-messages')).to.deep.equal({
+            kind: 'effort',
+            options: ['low', 'medium', 'high', 'xhigh', 'max'],
+            defaultValue: 'high',
+        });
+        expect(getModelReasoningCapability('claude', 'claude-haiku-5-5', 'anthropic-messages')).to.deep.equal({
+            kind: 'effort',
+            options: ['none', 'low', 'medium', 'high', 'xhigh', 'max'],
+            defaultValue: 'high',
+        });
+
+        expect(getReducedThinkingParams('claude-opus-5-5', 'claude', 'anthropic-messages'))
+            .to.deep.equal({ reasoningEffort: 'low' });
+        expect(getReducedThinkingParams('claude-sonnet-5-5', 'claude', 'anthropic-messages'))
+            .to.deep.equal({ reasoningEffort: 'low' });
+        expect(getReducedThinkingParams('claude-haiku-5-5', 'claude', 'anthropic-messages'))
+            .to.deep.equal({ extraBody: { thinking: { type: 'disabled' } } });
+
+        // Subscription normalization: Haiku 5.5 accepts disabled; Opus 5.5 must fall back to adaptive.
+        const haikuDisabled = toClaudeRequest(
+            {
+                model: 'claude-haiku-5-5',
+                messages: [{ role: 'user', content: 'Hello' }],
+                thinking: { type: 'disabled' },
+            },
+            { claudeSubscriptionModel: 'claude-haiku-5-5' },
+        );
+        expect(haikuDisabled.thinking).to.deep.equal({ type: 'disabled' });
+
+        const opusDisabledRejected = toClaudeRequest(
+            {
+                model: 'claude-opus-5-5',
+                messages: [{ role: 'user', content: 'Hello' }],
+                thinking: { type: 'disabled' },
+            },
+            { claudeSubscriptionModel: 'claude-opus-5-5' },
+        );
+        expect(opusDisabledRejected.thinking).to.deep.equal({
+            type: 'adaptive',
+            display: 'summarized',
+            block_binding: { prefix_mismatch_behavior: 'drop_block' },
+        });
+    });
+
+    it('shapes Gemini 4 and 3.8 Flash thinking levels and clamps minimal down to low', () => {
+        const { getModelReasoningCapability, getThinkingParams, getReducedThinkingParams } = loadProviders();
+        expect(getModelReasoningCapability('google', 'gemini-4-hydrogen', 'openai-chat-completions')).to.deep.equal({
+            kind: 'effort',
+            options: ['low', 'medium', 'high', 'xhigh'],
+            defaultValue: 'high',
+        });
+        expect(getModelReasoningCapability('google', 'gemini-4-carbon', 'openai-chat-completions')).to.deep.equal({
+            kind: 'effort',
+            options: ['low', 'medium', 'high'],
+            defaultValue: 'medium',
+        });
+        expect(getThinkingParams('gemini-4-hydrogen', 'google', 'openai-chat-completions', 'max'))
+            .to.deep.equal({ extraBody: { google: { thinking_config: { thinking_level: 'xhigh' } } } });
+        expect(getThinkingParams('gemini-4-argon', 'google', 'gemini-generate-content', 'max'))
+            .to.deep.equal({ extraBody: { thinking_config: { thinking_level: 'high' } } });
+        expect(getReducedThinkingParams('gemini-3.8-flash', 'google', 'openai-chat-completions'))
+            .to.deep.equal({ extraBody: { thinking_config: { thinking_level: 'low' } } });
+        expect(getReducedThinkingParams('gemini-4-hydrogen', 'google', 'openai-chat-completions'))
+            .to.deep.equal({ extraBody: { thinking_config: { thinking_level: 'low' } } });
+    });
+
+    it('shapes GLM-5.3, MiniMax M3.1 Flash, and Qwen 4 Max Preview thinking controls', () => {
+        const { getModelReasoningCapability, getThinkingParams, getReducedThinkingParams, toClaudeRequest } = loadProviders();
+        expect(getModelReasoningCapability('glm', 'glm-5.3', 'openai-chat-completions')).to.deep.equal({
+            kind: 'effort',
+            options: ['low', 'high', 'max'],
+            defaultValue: 'high',
+        });
+        expect(getThinkingParams('glm-5.3', 'glm', 'openai-chat-completions', 'medium'))
+            .to.deep.equal({ extraBody: { thinking: { type: 'enabled' } }, reasoningEffort: 'high' });
+        expect(getReducedThinkingParams('glm-5.3', 'glm', 'openai-chat-completions'))
+            .to.deep.equal({ reasoningEffort: 'low' });
+
+        // MiniMax M3.1 Flash exposes named levels on direct API, Token Plan (adaptive + effort), and OpenRouter.
+        expect(getThinkingParams('MiniMax-M3.1-Flash', 'minimax', 'openai-chat-completions', 'xhigh'))
+            .to.deep.equal({ reasoningEffort: 'xhigh' });
+        expect(getReducedThinkingParams('MiniMax-M3.1-Flash', 'minimax', 'openai-chat-completions'))
+            .to.deep.equal({ reasoningEffort: 'low' });
+        const tokenPlanParams = getThinkingParams('MiniMax-M3.1-Flash', 'minimax-token-plan', 'anthropic-messages', 'high');
+        expect(tokenPlanParams).to.deep.equal({
+            extraBody: { thinking: { type: 'adaptive' } },
+            reasoningEffort: 'high',
+        });
+        const tokenPlanRequest = toClaudeRequest({
+            model: 'MiniMax-M3.1-Flash',
+            messages: [{ role: 'user', content: 'Hello' }],
+            reasoning_effort: tokenPlanParams?.reasoningEffort,
+            ...(tokenPlanParams?.extraBody ?? {}),
+        });
+        expect(tokenPlanRequest.thinking).to.deep.equal({ type: 'adaptive' });
+        expect(tokenPlanRequest.output_config).to.deep.equal({ effort: 'high' });
+        expect(getReducedThinkingParams('MiniMax-M3.1-Flash', 'minimax-token-plan', 'anthropic-messages'))
+            .to.deep.equal({ extraBody: { thinking: { type: 'adaptive' } }, reasoningEffort: 'low' });
+
+        expect(getThinkingParams('minimax/minimax-m3.1-flash', 'openrouter', 'openai-chat-completions', 'xhigh'))
+            .to.deep.equal({ extraBody: { reasoning: { effort: 'xhigh' } } });
+        expect(getThinkingParams('minimax/minimax-m3', 'openrouter', 'openai-chat-completions', 'xhigh'))
+            .to.deep.equal({ extraBody: { reasoning: { enabled: true } } });
+
+        expect(getThinkingParams('qwen4-max-preview', 'qwen', 'openai-chat-completions', 'high'))
+            .to.deep.equal({ extraBody: { enable_thinking: true, thinking_budget: 32768 } });
+    });
+
+    it('keeps OpenRouter and Command Code reduced params within gateway wire contracts', () => {
+        const { getReducedThinkingParams, getThinkingParams } = loadProviders();
+        // Mandatory reasoning on OpenRouter / Command Code omits disabled vendor thinking fields.
+        expect(getReducedThinkingParams('z-ai/glm-5.3', 'openrouter', 'openai-chat-completions')).to.equal(undefined);
+        expect(getReducedThinkingParams('google/gemini-3.8-flash', 'openrouter', 'openai-chat-completions')).to.equal(undefined);
+        expect(getReducedThinkingParams('anthropic/claude-haiku-5.5', 'openrouter', 'openai-chat-completions'))
+            .to.deep.equal({ extraBody: { reasoning: { enabled: false } } });
+        expect(getThinkingParams('z-ai/glm-5.3', 'openrouter', 'openai-chat-completions', 'medium'))
+            .to.deep.equal({ extraBody: { reasoning: { effort: 'high' } } });
+
+        expect(getReducedThinkingParams('z-ai/glm-5.3', 'commandcode', 'openai-chat-completions')).to.equal(undefined);
+        expect(getReducedThinkingParams('claude-haiku-5-5', 'commandcode', 'openai-chat-completions')).to.equal(undefined);
+    });
+});

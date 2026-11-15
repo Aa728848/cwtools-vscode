@@ -187,7 +187,15 @@ npm run pack:quick
 - `pack:install` also installs the result through the VS Code `code` command.
 - `pack:quick` reuses existing server binaries, so it is not suitable for a fresh checkout.
 
-The package is written to `release/eddy-stellaris-cwt-<version>.vsix`. Do not duplicate the current version in documentation; root `package.json` and `release/package.json` are authoritative.
+The package is written to `release/foreverskywalker-stellaris-cwtools-<version>.vsix`. Do not duplicate the current version in documentation; root `package.json` and `release/package.json` are authoritative.
+
+### Publish a release
+
+Pushing a `v<version>` tag runs `.github/workflows/release.yml`. The job builds the universal VSIX on Windows through `package.ps1`, runs `npm run check:release`, publishes to the VS Code Marketplace, uploads the VSIX as a workflow artifact, and creates or updates the GitHub Release with that changelog section as its notes. It fails before any upload when the tag does not match the version in `package.json` and `release/package.json`.
+
+Marketplace publishing uses [Trusted Publishing](https://code.visualstudio.com/api/working-with-extensions/publishing-extension#publish-with-github-actions-and-trusted-publishing), so no personal access token is stored in this repository. A publisher owner creates the policy once: open the [publisher management page](https://marketplace.visualstudio.com/manage), open the `ForeverSkywalker` publisher, choose **Trusted Publishing**, and add a policy with repository owner `Aa728848`, repository `cwtools-vscode`, workflow `release.yml`, and no environment.
+
+To retry without moving the tag, run the workflow manually from the Actions page with the existing tag. Clear **Publish to the VS Code Marketplace** to rebuild the VSIX and refresh the GitHub Release only.
 
 ### Pull request checklist
 
@@ -387,7 +395,15 @@ npm run pack:quick
 - `pack:install` 还会通过 VS Code 的 `code` 命令安装产物。
 - `pack:quick` 复用已有服务端二进制，不适合全新检出。
 
-产物位于 `release/eddy-stellaris-cwt-<version>.vsix`。不要在文档中重复维护当前版本；根 `package.json` 和 `release/package.json` 才是来源。
+产物位于 `release/foreverskywalker-stellaris-cwtools-<version>.vsix`。不要在文档中重复维护当前版本；根 `package.json` 和 `release/package.json` 才是来源。
+
+### 发布版本
+
+推送 `v<version>` 标签会触发 `.github/workflows/release.yml`：在 Windows 上通过 `package.ps1` 构建全平台 VSIX，运行 `npm run check:release`，发布到 VS Code 市场，把 VSIX 作为工作流产物上传，并以该版本的更新日志作为说明创建或更新 GitHub Release。标签与 `package.json`、`release/package.json` 中的版本不一致时，任务会在任何上传之前失败。
+
+市场发布使用 [Trusted Publishing](https://code.visualstudio.com/api/working-with-extensions/publishing-extension#publish-with-github-actions-and-trusted-publishing)，仓库中不保存个人访问令牌。发布者属主需要一次性创建策略：打开[发布者管理页面](https://marketplace.visualstudio.com/manage)，进入 `ForeverSkywalker` 发布者，选择 **Trusted Publishing**，新建一条仓库属主 `Aa728848`、仓库 `cwtools-vscode`、workflow `release.yml`、environment 留空的策略。
+
+要在不移动标签的情况下重试，请在 Actions 页面手动运行工作流并填写已有标签；取消勾选 **Publish to the VS Code Marketplace** 则只重建 VSIX 并刷新 GitHub Release。
 
 ### Pull request 检查清单
 

@@ -1,0 +1,137 @@
+name: Release
+
+# Tag pushes are the release signal; the manual run exists so a failed job can be
+# retried without moving the tag, and so the GitHub Release can be recreated alone.
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing release tag to publish, for example v2.37.0'
+        required: true
+      publish_marketplace:
+        description: 'Publish to the VS Code Marketplace (disable to rebuild the VSIX and GitHub Release only)'
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Build VSIX and publish
+    runs-on: windows-latest
+    timeout-minutes: 90
+    permissions:
+      # Create or update the GitHub Release and attach the VSIX.
+      contents: write
+      # Exchange a GitHub OIDC token for a short-lived Marketplace credential.
+      id-token: write
+    steps:
+      - name: Check out the release commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+          submodules: recursive
+
+      - name: Verify the tag matches the manifest version
+        id: version
+        shell: pwsh
+        env:
+          INPUT_TAG: ${{ inputs.tag }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          $tag = if ($env:INPUT_TAG) { $env:INPUT_TAG } else { $env:REF_NAME }
+          if ($tag -notmatch '^v\d+\.\d+\.\d+$') {
+            throw "Unsupported release tag: $tag"
+          }
+          $version = $tag.Substring(1)
+          $releaseVersion = (Get-Content -Raw release/package.json | ConvertFrom-Json).version
+          $rootVersion = (Get-Content -Raw package.json | ConvertFrom-Json).version
+          if ($releaseVersion -ne $version) {
+            throw "release/package.json is $releaseVersion but the tag says $tag"
+          }
+          if ($rootVersion -ne $version) {
+            throw "package.json is $rootVersion but the tag says $tag"
+          }
+          "tag=$tag" >> $env:GITHUB_OUTPUT
+          "version=$version" >> $env:GITHUB_OUTPUT
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+      - run: npm ci
+
+      - name: Build the universal VSIX
+        shell: pwsh
+        run: powershell -ExecutionPolicy Bypass -File ./package.ps1
+
+      - name: Run the release gates
+        run: npm run check:release -- --skip-compile --skip-test
+
+      - name: Locate the VSIX
+        id: vsix
+        shell: pwsh
+        run: |
+          $vsix = Get-ChildItem -LiteralPath release -Filter *.vsix |
+            Sort-Object LastWriteTime -Descending |
+            Select-Object -First 1
+          if (-not $vsix) {
+            throw 'package.ps1 produced no VSIX under release/'
+          }
+          "path=$($vsix.FullName)" >> $env:GITHUB_OUTPUT
+
+      - name: Publish to the VS Code Marketplace
+        if: ${{ github.event_name == 'push' || inputs.publish_marketplace }}
+        shell: pwsh
+        env:
+          VSIX_PATH: ${{ steps.vsix.outputs.path }}
+        # Trusted Publishing: vsce exchanges the GitHub OIDC token for a 15-minute
+        # Marketplace credential, so no PAT is stored in this repository. vsce stays
+        # pinned here because the version package.ps1 packages with (3.x) predates
+        # --oidc; the pinned CLI only uploads the VSIX, it does not repackage it.
+        run: npx --yes @vscode/vsce@4.1.1 publish --oidc --packagePath "$env:VSIX_PATH"
+
+      - name: Upload the VSIX as a workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: vsix-${{ steps.version.outputs.version }}
+          path: ${{ steps.vsix.outputs.path }}
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Create or update the GitHub Release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ steps.version.outputs.tag }}
+          RELEASE_VERSION: ${{ steps.version.outputs.version }}
+          VSIX_PATH: ${{ steps.vsix.outputs.path }}
+        run: |
+          $changelog = Get-Content -Raw release/CHANGELOG.md
+          $pattern = '(?ms)^## \[' + [regex]::Escape($env:RELEASE_VERSION) + '\][^\n]*\n(.*?)(?=^## \[|\z)'
+          $match = [regex]::Match($changelog, $pattern)
+          if (-not $match.Success) {
+            throw "release/CHANGELOG.md has no section for $($env:RELEASE_VERSION)"
+          }
+          $notesPath = Join-Path $env:RUNNER_TEMP 'release-notes.md'
+          [System.IO.File]::WriteAllText($notesPath, $match.Groups[1].Value.Trim(), [System.Text.UTF8Encoding]::new($false))
+
+          $existing = gh release list --limit 100 --json tagName | ConvertFrom-Json |
+            Where-Object { $_.tagName -eq $env:RELEASE_TAG }
+          if ($existing) {
+            Write-Host "Release $($env:RELEASE_TAG) already exists; uploading the VSIX."
+            gh release upload $env:RELEASE_TAG $env:VSIX_PATH --clobber
+          } else {
+            gh release create $env:RELEASE_TAG $env:VSIX_PATH --title $env:RELEASE_TAG --notes-file $notesPath --verify-tag
+          }

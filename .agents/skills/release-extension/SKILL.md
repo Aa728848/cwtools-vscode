@@ -3,12 +3,13 @@ name: release-extension
 description: >-
   Use this skill when the user asks to release a new version of the extension,
   bump the version number, write changelogs, build cross-platform .NET servers,
-  package universal VSIX, and publish to GitHub Releases.
+  package universal VSIX, and publish to the VS Code Marketplace and GitHub Releases
+  through CI.
 ---
 
 # CWTools VSCode 插件版本发布与打包技能 (Release Extension Skill)
 
-本技能定义了 CWTools VSCode 插件从改动梳理、版本号升级、双语更新日志编写、单源文档同步、全平台自包含语言服务器编译与 VSIX 打包，到最终 Git 提交打 Tag、推送并创建 GitHub Release 挂载安装包的全流程标准作业规范（SOP）。
+本技能定义了 CWTools VSCode 插件从改动梳理、版本号升级、双语更新日志编写、单源文档同步、全平台自包含语言服务器编译与 VSIX 打包，到最终 Git 提交打 Tag、推送并由 CI 自动发布到 VS Code 市场与 GitHub Release 的全流程标准作业规范（SOP）。
 
 ---
 
@@ -29,9 +30,9 @@ description: >-
 5. **Git 提交与打 Tag**：
    - 暂存相关文件并提交：`git commit -m "Bump version to <version> and add changelog"`。
    - 创建 Git 标签：`git tag v<version>`。
-6. **推送与 GitHub Release 发布**：
+6. **推送标签触发发布 CI（自动）**：
    - 推送分支与标签至 GitHub（如遇网络连接问题，可临时设置本地代理环境变量 `$env:all_proxy="http://127.0.0.1:7890"`）。
-   - 提取新版本更新日志并通过 `gh release create v<version> <vsix_file> --repo Aa728848/cwtools-vscode --title "v<version>" --notes-file <notes_file>` 发布。
+   - `.github/workflows/release.yml` 随即构建全平台 VSIX、通过 Trusted Publishing 发布到 VS Code 市场，并以该版本更新日志创建或刷新 GitHub Release；本地 `gh release create` 仅作为回退路径。
 
 ---
 
@@ -109,37 +110,26 @@ git commit -m "Bump version to <version> and add changelog"
 git tag "v<version>"
 ```
 
-### 步骤 6：推送到 GitHub 并创建 Release
+### 步骤 6：推送标签触发发布 CI
 
 ```powershell
-# 1. 如遇到 GitHub 网络连接限制，配置代理环境变量（如使用 7890 端口）：
+# 如遇到 GitHub 网络连接限制，配置代理环境变量（如使用 7890 端口）：
 $env:all_proxy = "http://127.0.0.1:7890"
 
-# 2. 推送主分支与标签
 git push origin main
 git push origin "v<version>"
-
-# 3. 提取当前版本的 Changelog 内容至临时文件
-node -e "
-const fs = require('fs');
-const content = fs.readFileSync('release/CHANGELOG.md', 'utf8');
-const match = content.match(/## \[<version>\] - [^\n]+([\s\S]*?)(?=\n## \[)/);
-if (match) { fs.writeFileSync('.release-notes-temp.md', match[1].trim(), 'utf8'); }
-"
-
-# 4. 获取生成的 VSIX 路径
-$vsix = (Get-ChildItem release/*.vsix | Sort-Object LastWriteTime -Descending | Select-Object -First 1).FullName
-
-# 5. 调用 gh CLI 创建 GitHub Release 并上传 VSIX
-gh release create "v<version>" $vsix --repo Aa728848/cwtools-vscode --title "v<version>" --notes-file .release-notes-temp.md
-
-# 6. 清理临时笔记文件
-Remove-Item .release-notes-temp.md -Force
 ```
+
+推送标签后 `.github/workflows/release.yml` 在 Windows runner 上依次执行：构建全平台自包含 VSIX → `npm run check:release` → 用 Trusted Publishing（OIDC）发布到 VS Code 市场 → 上传 VSIX 工作流产物 → 以该版本更新日志创建或刷新 GitHub Release。标签与两处 `package.json` 的版本不一致时，任务会在任何上传之前失败。
+
+- **重跑**：在 Actions 页面手动运行该工作流并填写已有标签；取消勾选 `publish_marketplace` 可只重建 VSIX 与 GitHub Release（同版本重复发市场会被拒绝）。
+- **回退**：CI 不可用时仍可本地执行 `powershell -ExecutionPolicy Bypass -File ./package.ps1 -Publish`，它会提交版本改动、打标签并 `gh release create`。
+- **首次配置**：发布者属主需在市场发布者管理页面创建 Trusted Publishing 策略（仓库属主 `Aa728848`、仓库 `cwtools-vscode`、workflow `release.yml`、environment 留空）。
 
 ### 步骤 7：验证发布结果
 
 ```powershell
+gh run list --workflow release.yml --limit 1
 gh release view "v<version>" --repo Aa728848/cwtools-vscode
 ```
-验证包含对应的 Tag、Release 描述以及挂载的 `.vsix` 资产包。
+验证 CI 运行成功、Release 包含对应 Tag、说明与挂载的 `.vsix` 资产，并确认市场上该扩展已显示新版本。

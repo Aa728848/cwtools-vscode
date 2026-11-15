@@ -297,9 +297,13 @@ flowchart TD
     RULES["Package Stellaris CWT rules"] --> PACKAGE
     DOCS["Generate Marketplace README"] --> PACKAGE
     PACKAGE --> VSIX["VSIX"]
+    VSIX -->|"tag push"| MARKET["VS Code Marketplace"]
+    VSIX -->|"tag push"| RELEASE["GitHub Release"]
 ```
 
 `npm run compile` builds Extension Host code and Webviews. Packaging publishes self-contained servers for Windows, Linux, and macOS, stages resources under `release/`, and creates the VSIX.
+
+Pushing a `v<version>` tag runs `.github/workflows/release.yml`. The job rebuilds the VSIX on a Windows runner, publishes it to the VS Code Marketplace with Trusted Publishing over GitHub OIDC, and creates or updates the GitHub Release; the tag must match the version in both manifests.
 
 The bilingual root documents remain their own sources. `npm run build:docs` validates them and generates `release/README.md` from `docs/marketplace-readme.md`; it no longer copies the GitHub README into the Marketplace description.
 
@@ -598,9 +602,13 @@ flowchart TD
     RULES["打包 Stellaris CWT 规则"] --> PACKAGE
     DOCS["生成 Marketplace README"] --> PACKAGE
     PACKAGE --> VSIX["VSIX"]
+    VSIX -->|"推送标签"| MARKET["VS Code 市场"]
+    VSIX -->|"推送标签"| RELEASE["GitHub Release"]
 ```
 
 `npm run compile` 构建 Extension Host 和 Webview。打包流程会发布 Windows、Linux 和 macOS 的自包含服务端，把资源放入 `release/`，再生成 VSIX。
+
+推送 `v<version>` 标签会运行 `.github/workflows/release.yml`：在 Windows runner 上重建 VSIX，通过 GitHub OIDC 的 Trusted Publishing 发布到 VS Code 市场，并创建或更新 GitHub Release；标签必须与两份清单中的版本一致。
 
 根目录双语文档各自保持单一来源。`npm run build:docs` 会校验它们，并从 `docs/marketplace-readme.md` 生成 `release/README.md`；GitHub README 不再直接复制为插件市场介绍。
 

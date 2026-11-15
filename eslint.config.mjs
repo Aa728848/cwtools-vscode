@@ -44,6 +44,15 @@ export default tseslint.config(
 			'@typescript-eslint/no-floating-promises': 'off',
 		},
 	},
+	// Ambient declarations that mirror upstream three.js event maps. Their empty
+	// `{}` payload types describe "no event data" and cannot be narrowed without
+	// diverging from the declarations the browser code is written against.
+	{
+		files: ['client/webview/vscode.d.ts'],
+		rules: {
+			'@typescript-eslint/no-empty-object-type': 'off',
+		},
+	},
 	// Protocol, storage-recovery, and wire-format boundary files: forbid new `any`.
 	// Keep these files strict so untrusted payloads stay `unknown` at the edge.
 	// (runLedger is exempt: its event envelope intentionally keeps `any` — see the

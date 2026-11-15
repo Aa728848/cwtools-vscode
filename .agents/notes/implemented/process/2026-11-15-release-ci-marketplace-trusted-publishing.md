@@ -44,4 +44,5 @@ Status: implemented
 - 本地 `package.ps1 -Publish` 与 `build/Program.fs` 的 `publishToGallery` 保留为回退路径，不再是主流程。
 - 后续若改工作流文件名或引入 environment，必须同步更新发布者页面上的 Trusted Publishing 策略，否则 OIDC 交换会被拒绝。
 - 单次发布预计占用 Windows runner 20–40 分钟（三个自包含 .NET 发布是主要耗时）。
-- 首次冒烟运行（`v2.36.0`，市场侧因版本已存在而被拒）证实链路可用：版本守卫、工作区构建、打包、门禁、OIDC 换取凭据、产物留档全部通过；`ci.yml` 仍因缺少 `cwtools-shared` 构建步骤而红，属于同一既有缺口，未在本次改动范围内。
+- 冒烟运行证实链路可用：`v2.36.0` + 市场发布时，版本守卫、工作区构建、打包、门禁、OIDC 换取凭据、产物留档全部通过，市场按预期以「版本已存在」结束；`v2.36.0` + 关闭市场发布时整条链路 succeess，GitHub Release 附件被等价重建产物覆盖（154,068,631 字节）。
+- `.github/workflows/ci.yml` 的同一缺口已在本批次补齐（`typescript`、`vscode-integration`、`platform-overlay-e2e` 三个作业先构建 `cwtools-shared`），并顺带清掉两个掩盖了它的既有红点：`client/webview/vscode.d.ts` 的 `no-empty-object-type` 作用域例外，以及 Kimi 请求装配用例的 mocha 超时（每个 case 都要重载 aiService 模块图，2 秒默认值在共享 runner 上不够）。

@@ -1889,7 +1889,11 @@ function geminiSseResponse(events: Record<string, unknown>[]): Response {
     } as Response;
 }
 
-describe('AIService Kimi K3.1 request assembly', () => {
+describe('AIService Kimi K3.1 request assembly', function () {
+    // Every case re-loads the aiService module graph through loadAIService(). That
+    // costs about a second on a dev machine, so the 2s default is too tight on
+    // shared runners (it timed out at ~2s and was the only red check in CI).
+    this.timeout(20_000);
     /**
      * Capture the body the real `chatCompletion` builds. `catalog` is what the account's Kimi
      * Code listing would answer with; it defaults to an empty one, so no case reaches the

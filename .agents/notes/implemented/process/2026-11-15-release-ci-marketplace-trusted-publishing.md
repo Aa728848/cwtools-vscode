@@ -17,7 +17,8 @@ Status: implemented
 1. **触发**：推送 `v*` 标签自动发布；同时提供 `workflow_dispatch`，输入已有标签即可重跑，`publish_marketplace` 布尔入参可关掉市场发布、只重建 VSIX 与 GitHub Release。并发组不取消正在进行的发布。
 2. **运行环境**：`windows-latest`（与本地验证过的打包环境一致，win-x64 ReadyToRun 原生构建），超时 90 分钟。
 3. **版本守卫**：标签必须匹配 `^v\d+\.\d+\.\d+$`，且与 `package.json`、`release/package.json` 的 `version` 完全一致，否则在任何上传之前失败。
-4. **构建**：`npm ci` → `package.ps1`（三个自包含 F# 服务端、tsc、Rollup、规则 zip、steamworks 原生依赖暂存、`vsce package`）。
+4. **构建**：`npm ci` → `cd submodules/cwtools-mcp && npm ci && npm run build -w cwtools-shared` → `cd release && npm ci` → `package.ps1`（三个自包含 F# 服务端、tsc、Rollup、规则 zip、steamworks 原生依赖暂存、`vsce package`）。
+   中间两步补的是此前只存在于本地预置状态的隐式前提：`cwtools-mcp` 的 `dist/` 被 gitignore，而 `package.ps1` 只在打包暂存阶段兜底构建，`tsc` 会先失败；`release/package-lock.json` 虽受版本控制，但 `package.ps1` 从不执行 `npm ci`，而 vsce 会用 `npm list --production` 校验该清单声明的运行时依赖闭包。
 5. **门禁**：打包之后运行 `npm run check:release -- --skip-compile --skip-test`，因为它检查 webview bundle 与服务端二进制是否就位，必须在构建后执行。
 6. **市场发布**：`npx --yes @vscode/vsce@4.1.1 publish --oidc --packagePath <vsix>`。仓库锁定的 vsce 3.6.0 不支持 `--oidc`，因此 CI 固定 4.1.1 仅承担上传；打包仍由 3.6.0 完成，避免本地与 CI 的打包行为分叉。
 7. **留档**：VSIX 作为工作流产物上传，保留 14 天。
@@ -43,3 +44,4 @@ Status: implemented
 - 本地 `package.ps1 -Publish` 与 `build/Program.fs` 的 `publishToGallery` 保留为回退路径，不再是主流程。
 - 后续若改工作流文件名或引入 environment，必须同步更新发布者页面上的 Trusted Publishing 策略，否则 OIDC 交换会被拒绝。
 - 单次发布预计占用 Windows runner 20–40 分钟（三个自包含 .NET 发布是主要耗时）。
+- 首次冒烟运行（`v2.36.0`，市场侧因版本已存在而被拒）证实链路可用：版本守卫、工作区构建、打包、门禁、OIDC 换取凭据、产物留档全部通过；`ci.yml` 仍因缺少 `cwtools-shared` 构建步骤而红，属于同一既有缺口，未在本次改动范围内。

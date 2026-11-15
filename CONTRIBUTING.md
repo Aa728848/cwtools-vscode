@@ -187,6 +187,8 @@ npm run pack:quick
 - `pack:install` also installs the result through the VS Code `code` command.
 - `pack:quick` reuses existing server binaries, so it is not suitable for a fresh checkout.
 
+On a fresh checkout, run `npm ci` inside `release/` first; `vsce` validates the runtime dependency closure declared by `release/package.json`, and `package.ps1` does not install it.
+
 The package is written to `release/foreverskywalker-stellaris-cwtools-<version>.vsix`. Do not duplicate the current version in documentation; root `package.json` and `release/package.json` are authoritative.
 
 ### Publish a release
@@ -394,6 +396,8 @@ npm run pack:quick
 - `pack` 构建三个自包含语言服务端并生成 VSIX。
 - `pack:install` 还会通过 VS Code 的 `code` 命令安装产物。
 - `pack:quick` 复用已有服务端二进制，不适合全新检出。
+
+全新检出时请先在 `release/` 中执行 `npm ci`：`vsce` 会校验 `release/package.json` 声明的运行时依赖闭包，而 `package.ps1` 不负责安装它。
 
 产物位于 `release/foreverskywalker-stellaris-cwtools-<version>.vsix`。不要在文档中重复维护当前版本；根 `package.json` 和 `release/package.json` 才是来源。
 

@@ -72,6 +72,17 @@ jobs:
           dotnet-version: 10.0.x
       - run: npm ci
 
+      # The extension resolves types and the packaged runtime dependency from the
+      # cwtools-mcp submodule, whose dist/ output is gitignored. A fresh checkout has
+      # no build output, so compile it before TypeScript runs.
+      - name: Install the cwtools-mcp workspace
+        working-directory: submodules/cwtools-mcp
+        run: npm ci
+
+      - name: Build cwtools-shared
+        working-directory: submodules/cwtools-mcp
+        run: npm run build -w cwtools-shared
+
       - name: Build the universal VSIX
         shell: pwsh
         run: powershell -ExecutionPolicy Bypass -File ./package.ps1

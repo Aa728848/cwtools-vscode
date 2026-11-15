@@ -2,6 +2,18 @@
 
 ## [2.36.0] - 2026-11-10
 
+### 订阅渠道扩展、模型目录刷新与供应商收敛 / Subscription Pool Expansion, Model Catalog Refresh, and Provider Convergence
+
+- **[特性] 重新接入 WorkBuddy 国内桌面订阅并新增 OpenDesign 统一订阅号池（Re-integrate WorkBuddy Desktop Subscription and Add OpenDesign Subscription Pool）**：
+  - `workbuddy-subscription` 重新接入共享多账号号池：发现本机 `~/.workbuddy/.info` 桌面上游凭据，支持 `$wbEncrypted` AES-256-GCM 静态落盘加密解封与回写、国内 `claude-*` `/v1/messages` 与其余模型 `/v2/chat/completions` 请求级 gzip 流式传输、出站反风控会话标头、国内每日签到与多加油包配额仪表。
+  - 新增 `opendesign` 供应商并接入统一多账号号池：同时支持 OAuth 设备码登录（自动保存 `controlKey` 与 `runtimeKey`）和静态 API Key 粘贴入池，集成 AMR 5 小时 / 7 天滚动窗口与钱包余额三联配额仪表、三层模型目录合并（内置 24 模型基线 + 远端 `/models` + `/v1/models` 探测，自动过滤 `locked`/`disabled` 条目），以及 403 套餐档位不足（`tier_required`/`insufficient_tier`）按临时不可用切号而不污染 `authFailures`。
+  - English: [Feature] Re-integrate `workbuddy-subscription` into the shared multi-account pool with `~/.workbuddy/.info` desktop credential discovery, `$wbEncrypted` AES-256-GCM at-rest key unsealing and sealed write-back, CN `claude-*` `/v1/messages` and `/v2/chat/completions` request-level gzip streaming, outbound anti-risk session headers, CN daily check-in, and multi-package quota meters; and add the `opendesign` provider with a unified account pool supporting both device-code OAuth (`controlKey` + `runtimeKey`) and static API keys, AMR 5h/7d/wallet quota meters, 3-layer model catalog merging, and 403 tier-entitlement failover without recording `authFailures`.
+
+- **[特性] 2026-11 供应商模型目录、Claude Fable 5.2、思考契约与人民币缓存定价刷新（2026-11 Provider Catalog, Claude Fable 5.2, Thinking Contracts, and CNY Cache Pricing Refresh）**：
+  - 全面刷新内置与订阅目录：Claude 补齐 Opus / Sonnet / Haiku 5.5 与 Claude Fable 5.2（`claude-fable-5-2` / `anthropic/claude-fable-5.2`，200K 上下文 / 128K 输出，直连 `claude` 与 `claude-subscription` 自动注入 `thinking.block_binding` 与 `anthropic-beta: thinking-binding-controls-2026-08-01`，缓存读取按 2.5% 计费），Claude Code 订阅指纹对齐 CLI `2.1.323`；Codex 新增 `gpt-6.1-terra`（400K 窗口与自适应思考）；MiniMax 全面切换至 GA 版 `MiniMax-M3.1-Flash`（`M3-Pro` 保留为显式可选，旧 `M3.1-Flash-Preview` 在配置迁移中透明升级）；Command Code 同步上游 109 模型目录与推荐置顶；智谱新增 GLM-5.3 系列（Coding 订阅直连升级至 `/api/coding/paas/v4`）；Gemini 升级至 Gemini 4 Pro / Flash / Flash-Lite 与 3.8 Flash；通义千问升级至 Qwen 4 / 3.8 系列。
+  - 思考降级（`getReducedThinkingParams`）改为先按有效网关路由（TokenRhythm / OpenRouter / SiliconFlow / OpenAI Responses）分发再按模型族回退，防止聚合网关下 Claude / Gemini / DeepSeek 降级参数漏发；同步更新全量人民币百万 Token 定价与缓存命中折扣系数。
+  - English: [Feature] Refresh built-in and subscription model catalogs for 2026-11: add Claude Opus/Sonnet/Haiku 5.5 and Claude Fable 5.2 (`claude-fable-5-2` / `anthropic/claude-fable-5.2` with 200K context, 128K output, `thinking.block_binding` + `anthropic-beta: thinking-binding-controls-2026-08-01` on direct `claude` and `claude-subscription`, and a 2.5% cache-read discount) and bump the Claude Code fingerprint to CLI `2.1.323`; add Codex `gpt-6.1-terra`; promote `MiniMax-M3.1-Flash` to GA with transparent migration from `MiniMax-M3.1-Flash-Preview`; sync Command Code's 109-model catalog; and update Zhipu GLM-5.3 (`/api/coding/paas/v4`), Gemini 4 / 3.8 Flash, and Qwen 4 / 3.8 catalogs. `getReducedThinkingParams` now routes by effective gateway before model-family fallback, and CNY pricing plus cache-read discount tables are updated in step.
+
 - **[简化] 移除 Antigravity 供应商与独占补全服务（Remove Antigravity provider and dedicated completion services）**：
   - 内置供应商注册表、Gemini 封装请求流、原生 Tab/FIM 补全、Tab Jump 命令、账号 OAuth/号池、设置卡片、Webview 协议、12 MiB 图片预算与签名消息字段全部移除；发布清单的 provider 枚举、命令与三语 NLS 同步收窄。旧 `antigravity` 配置值沿用现有未知供应商回退，不改写用户设置，也不主动删除既存 SecretStorage 凭据。
   - 通用订阅代理、provider 无关号池、其余订阅线路、通用行内补全与其他 provider 的 Gemini/Anthropic/Responses 请求路径保持不变。模型可见读取路径恢复为仅限工作区、配置游戏根和辅助可信根，不再默认放行任意本地文件。
@@ -28,6 +40,11 @@
   - `write_localisation`、`typed_pdx_write`、`candidate_transaction`、`convert_image_to_dds`、`convert_audio`、`deploy_mod_asset` 六个白名单写入工具在受支持的游戏工作区默认披露并允许，CLI `enableWrites` 默认 `true`，`--enable-writes` 与 `--allow-domain-writes` 作为幂等兼容别名保留，不提供 `--read-only`。
   - 默认开启不改变边界：`workspace_write` 路径包含校验、单文件写锁、预检与本地化 BOM 规则照旧；非白名单工具、非支持/歧义项目与 CWT-only 项目的拒绝策略不变。
   - English: [Feature] The six whitelisted domain write tools are enabled by default in supported game workspaces, with `enableWrites` defaulting to true and `--enable-writes` / `--allow-domain-writes` kept as idempotent aliases; path containment, write locks, preflight checks and BOM-safe localisation writes still apply, and non-whitelisted tools and unsupported/CWT-only projects remain rejected.
+
+- **[修复] 聚合诊断去重、新鲜度披露与语义工具失败信号对齐（Aggregate Diagnostics Deduplication, Freshness Reporting, and Semantic Tool Failure Signal Alignment）**：
+  - `cwtools.ai.getAllDiagnostics` 在 LSP 聚合出口按 `file.toLowerCase() + line + column + code + message` 去重，消除同一文件被多个缓存桶收录时的重复计数，并在响应中新增 `freshness`（`"complete"` | `"partial"`）与 `pendingGlobalKinds`；`severity` 过滤统一对齐 `error | warning | information | hint`，`cwtools.ai.queryTypes` 显式返回 `typeKnown: boolean`。
+  - 工具失败信号对齐：LSP 命令返回 `ok: false` 时在扩展与共享契约层统一标记为工具失败；`find_references` 在索引未就绪退化为词法扫描时返回 `status: "partial"`、`degraded: true` 与 `warnings`；`get_diagnostics` 指定不存在的 `file` 时精确报错 `file_not_found`（并归一化反斜杠与 `./` 前缀）；`explore_pdx_project` 校验 `exact` 布尔类型；LSP 探测遇到 `unavailable` 时立即失效缓存（`cwtools-mcp` `9caa698`、`dsh-cwtool` `d2f8a0e`）。
+  - English: [Fix] Deduplicate `cwtools.ai.getAllDiagnostics` by lowercase file path, line, column, code and message at the LSP aggregation boundary, add `freshness` (`"complete"` | `"partial"`) and `pendingGlobalKinds`, align `severity` filtering across `error | warning | information | hint`, and return `typeKnown: boolean` from `cwtools.ai.queryTypes`. Tool failure signals now surface `ok: false` LSP responses as tool errors, report lexical fallback in `find_references` as `status: "partial"` (`degraded: true`), return `file_not_found` when `get_diagnostics.file` targets a missing file, validate `explore_pdx_project.exact` as a boolean, and invalidate the readiness cache on `unavailable` (`cwtools-mcp` `9caa698`, `dsh-cwtool` `d2f8a0e`).
 
 ## [2.35.0] - 2026-11-07
 

@@ -18,12 +18,12 @@ Most language features work across supported Paradox game profiles. The visual t
 | Area | What you can do |
 | --- | --- |
 | Script editing | Get diagnostics, completion, hover information, navigation, references, symbols, CodeLens, and inlay hints for Paradox script and localisation. Stellaris hovers also carry reverse-engineered engine cost and hardcoded-behaviour notes for the script command under the cursor. |
-| Visual tools | Preview and edit Stellaris GUI files, solar systems, static galaxies, particles, entities, technology trees, and event chains. Ship top-icon DDS sheets can be rendered from a ship set's models. |
+| Visual tools | Preview and edit Stellaris GUI files, solar systems, static galaxies, particles, entities, technology trees, event chains, and weapon targeting weights. Ship top-icon DDS sheets can be rendered from a ship set's models. |
 | Shader editing | Work with `.shader` and `.fxh` files using compile-unit-aware diagnostics, navigation, completion, formatting, rename, and semantic highlighting. |
 | CWT rule editing | Edit `.cwt` rule files with their own language id: parser/structure diagnostics (CWT0xx), directive and field-expression validation (CWT1xx/CWT2xx), project-wide undefined-reference and duplicate-type checks (CWT3xx), context completion for root blocks/directives/field expressions/symbols, cross-file navigation, and safe hot-swap of validated edits from the configured manual rules folder into the game model (CWT9xx). A rules-only repository starts the server in CWT-only mode without a game install and never activates a game model; a game workspace keeps full mode. |
 | Vanilla comparison | Compare a mod file with its vanilla counterpart and migrate the block under the cursor. |
 | Steam Workshop | Upload the current mod to the Steam Workshop: create a new item or update an existing one, with tags, preview image, visibility, and change note. Requires the Steam client running and signed in to an account that owns the game. |
-| AI workspace | Use a general coding agent or a Paradox/CWTools-aware agent with explicit permissions, project indexing, Agent skills, and optional MCP servers. |
+| AI workspace | Use the built-in Paradox/CWTools-focused agent with `EvidenceGate` semantic prechecks, `confirm` / `auto` file-write controls, project indexing, Agent skills, and optional MCP servers. |
 | External MCP | Connect Codex, Claude Code, or another MCP client to the separate `cwtools-mcp` package with semantic queries and default-on whitelisted domain writes. |
 
 The extension also supports Hearts of Iron IV, Europa Universalis IV and V, Crusader Kings II and III, Imperator: Rome, Victoria II and 3, and custom CWT projects. Game-specific coverage depends on the active profile and available rules.
@@ -51,6 +51,7 @@ Use the editor-title action or the file context menu:
 - `map/setup_scenarios/*.txt`: static-galaxy preview and position editor
 - `.asset` and `.gfx`: entity, animation, and particle previews
 - technology and event files: dependency graphs
+- `common/component_templates/*.txt`: weapon targeting-weight analysis
 
 Edits made by a visual editor use VS Code workspace edits, so they participate in normal undo and redo. Some previews are intentionally approximate; for example, runtime-generated hyperlanes are never presented as exact source data.
 
@@ -98,7 +99,7 @@ Nothing is written to disk, and the aura script is not modified: paste the lines
 
 #### Use the AI panel
 
-Open `AI: Open Chat Panel` from the Command Palette. The composer lets you keep routing automatic or restrict a turn to the Paradox/CWTools or general-coding domain. Provider credentials are stored through VS Code SecretStorage; tool access still follows the selected sandbox and approval policy.
+Open `AI: Open Chat Panel` from the Command Palette. The built-in agent focuses on the Paradox/CWTools semantic domain as a single-agent assistant; use `/plan`, `/execute`, `/explore`, or `/review` to pin the session mode. Provider credentials are stored through VS Code SecretStorage, while file writes follow the selected `confirm` (diff preview card before writing) or `auto` mode, `EvidenceGate` semantic prechecks, and BOM-safe localisation enforcement.
 
 
 The ChatGPT-subscription-compatible Codex provider uses a browser sign-in flow and the extension's own agent runtime. It is an integration with an upstream compatibility endpoint, not a public stable API, so upstream changes can require extension updates. The Codex picker uses a built-in model catalog, not an account entitlement list; OpenAI API and Codex subscription availability can differ.
@@ -186,12 +187,12 @@ Stellaris Language Serves 是一款面向 Paradox Mod 开发的 VS Code 扩展�
 | 范围 | 可以做什么 |
 | --- | --- |
 | 脚本编辑 | 为 Paradox 脚本和本地化提供诊断、补全、悬停信息、跳转、引用、符号、CodeLens 和嵌入提示。Stellaris 的悬停还会附带光标所在脚本命令的引擎开销与硬编码行为说明（来自反编译分析）。 |
-| 可视化工具 | 预览或编辑 Stellaris GUI、恒星系、静态银河、粒子、实体、科技树和事件链；也可以从舰船模型渲染舰船顶部图标 DDS 表。 |
+| 可视化工具 | 预览或编辑 Stellaris GUI、恒星系、静态银河、粒子、实体、科技树、事件链和武器索敌权重；也可以从舰船模型渲染舰船顶部图标 DDS 表。 |
 | Shader 编辑 | 按真实编译单元处理 `.shader` 和 `.fxh`，提供诊断、跳转、补全、格式化、重命名和语义高亮。 |
 | CWT 规则编辑 | 用独立的 `cwt` 语言编辑 `.cwt` 规则文件:解析/结构诊断(CWT0xx)、指令与字段表达式校验(CWT1xx/CWT2xx)、项目级未定义引用与重复类型检查(CWT3xx)、根块/指令/字段表达式/符号的上下文补全、跨文件跳转,以及把当前配置的手动规则目录中验证通过的编辑安全热替换进游戏模型(CWT9xx)。纯规则仓库以 CWT-only 模式启动服务,无需游戏安装且不会激活游戏模型;游戏工作区保持 full mode。 |
 | 原版对比 | 将 Mod 文件与原版对应文件对比，并迁移光标所在的代码块。 |
 | Steam 创意工坊 | 把当前 Mod 上传到 Steam 创意工坊：可新建物品或更新已有物品，支持标签、预览图、可见性与更新说明。需要 Steam 客户端已运行并登录拥有该游戏的账号。 |
-| AI 工作区 | 使用通用编码 Agent 或了解 Paradox/CWTools 的 Agent，并通过权限、项目索引、工作流和可选 MCP 服务控制执行范围。 |
+| AI 工作区 | 使用专注于 Paradox/CWTools 语义领域的内置单 Agent 助手，配合 `EvidenceGate` 语义预检、`confirm` / `auto` 文件写入控制、项目索引、Agent 技能与可选 MCP 服务。 |
 | 外部 MCP | 通过独立发布的 `cwtools-mcp`，让 Codex、Claude Code 等客户端查询 CWTools 语义并使用默认开启的白名单领域写入工具。 |
 
 语言服务还支持 Hearts of Iron IV、Europa Universalis IV 和 V、Crusader Kings II 和 III、Imperator: Rome、Victoria II 和 3，以及自定义 CWT 项目。具体能力取决于当前 Profile 和可用规则。
@@ -219,6 +220,7 @@ Stellaris Language Serves 是一款面向 Paradox Mod 开发的 VS Code 扩展�
 - `map/setup_scenarios/*.txt`：静态银河预览和位置编辑
 - `.asset`、`.gfx`：实体、动画和粒子预览
 - 科技与事件文件：依赖关系图
+- `common/component_templates/*.txt`：武器索敌权重分析
 
 可视化编辑器通过 VS Code 工作区编辑写回文件，因此可以正常撤销和重做。部分预览只能近似表达游戏运行时结果；例如，运行时随机生成的超空间航道不会被当成精确数据展示。
 
@@ -266,7 +268,7 @@ SRA_Aura_5_1:0 "§Y防御性光环§!\n对盟友舰船效果：\n $MOD_SHIP_SHIE
 
 #### 使用 AI 面板
 
-从命令面板运行 `AI: Open Chat Panel`。输入区可以保持自动路由，也可以把当前请求限制在 Paradox/CWTools 或通用编码领域。Provider 凭据通过 VS Code SecretStorage 保存；工具调用仍受当前沙盒和审批策略约束。
+从命令面板运行 `AI: Open Chat Panel`。内置 Agent 专注于 Paradox/CWTools 语义领域的单 Agent 辅助，可通过 `/plan`、`/execute`、`/explore` 或 `/review` 固定当前会话模式。Provider 凭据通过 VS Code SecretStorage 保存；文件修改遵循所选的 `confirm`（写入前弹出 Diff 预览确认卡片）或 `auto` 模式，并受 `EvidenceGate` 语义预检与本地化 UTF-8 BOM 护栏保护。
 
 
 兼容 ChatGPT 订阅的 Codex Provider 通过浏览器登录，并使用插件自己的 Agent 运行时。它依赖上游兼容端点，不属于公开稳定 API；如果上游流程变化，插件可能需要同步更新。Codex 选择器使用内置模型目录，不代表账户已获授权；OpenAI API 与 Codex 订阅的可用模型可能不同。

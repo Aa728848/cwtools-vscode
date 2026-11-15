@@ -33,6 +33,7 @@ Open a supported file and use its editor-title action or context menu:
 - Static-galaxy preview with system, nebula, coordinate, and explicit-hyperlane editing
 - Technology-tree and event-chain graphs
 - Entity, material, animation, and particle previews
+- Weapon targeting-weight analysis and ship top-icon DDS sheet generation from `.mesh` models
 
 Source changes use VS Code workspace edits and can be undone normally. Previews distinguish source-backed data from estimates; runtime-generated content is not presented as exact file data.
 
@@ -42,9 +43,9 @@ Use `Compare with Vanilla` on a matching mod file to open a diff. `Migrate Block
 
 ### Optional AI workspace
 
-Run `AI: Open Chat Panel` to use the built-in agent workspace. It supports general coding and Paradox/CWTools-aware tasks, project indexing, plans and Agent skills, explicit tool permissions, and optional MCP servers.
+Run `AI: Open Chat Panel` to use the built-in Paradox/CWTools-focused agent workspace. It supports semantic script/rule queries, project indexing, plans and Agent skills, `EvidenceGate` semantic prechecks, `confirm` / `auto` file-write controls, and optional MCP servers.
 
-AI providers are configured separately. Credentials are stored with VS Code SecretStorage, and tool calls remain subject to the selected sandbox and approval policy. The ChatGPT-subscription-compatible Codex provider relies on an upstream compatibility endpoint and may need updates when that endpoint changes.
+AI providers are configured separately. Credentials are stored with VS Code SecretStorage, and subscription lines (Codex, Claude, Kimi Code, MiniMax Code, Command Code, WorkBuddy, and OpenDesign) share a multi-account rotation pool with rate-limit failover and quota meters. The ChatGPT-subscription-compatible Codex provider relies on an upstream compatibility endpoint and may need updates when that endpoint changes.
 
 Subscription providers share **AI Settings → Subscription channel proxy**: auto detection, custom HTTP/HTTPS/SOCKS5 proxy, or direct connection. Click **Save proxy** before signing in or testing. Proxy credentials are stored in VS Code SecretStorage. This covers token exchange and refresh, account queries, and chat; browser sign-in follows browser proxy settings.
 
@@ -102,6 +103,7 @@ If something behaves unexpectedly, please include the game profile, extension ve
 - 静态银河预览，以及星系、星云、坐标和显式超空间航道编辑
 - 科技树与事件链关系图
 - 实体、材质、动画和粒子预览
+- 武器索敌权重分析，以及从 `.mesh` 模型生成舰船顶部图标 DDS 表
 
 源码修改使用 VS Code 工作区编辑，可以正常撤销。预览会区分源码数据和估算结果，不会把运行时生成的内容当作文件中的精确数据。
 
@@ -111,9 +113,9 @@ If something behaves unexpectedly, please include the game profile, extension ve
 
 ### 可选 AI 工作区
 
-运行 `AI: Open Chat Panel` 打开内置 Agent 工作区。它可以处理通用编码或 Paradox/CWTools 任务，并提供项目索引、计划和工作流、明确的工具权限，以及可选 MCP 服务。
+运行 `AI: Open Chat Panel` 打开专注于 Paradox/CWTools 语义领域的内置单 Agent 工作区。它提供语义脚本与规则查询、项目索引、计划和 Agent 技能、`EvidenceGate` 语义预检、`confirm` / `auto` 文件写入控制，以及可选 MCP 服务。
 
-AI Provider 需要单独配置。凭据通过 VS Code SecretStorage 保存，工具调用仍受当前沙盒和审批策略限制。兼容 ChatGPT 订阅的 Codex Provider 依赖上游兼容端点；上游变化时，扩展可能需要同步更新。
+AI Provider 需要单独配置。凭据通过 VS Code SecretStorage 保存，订阅线路（Codex、Claude、Kimi Code、MiniMax Code、Command Code、WorkBuddy 与 OpenDesign）共享支持限流自动切号与额度仪表的多账号号池。兼容 ChatGPT 订阅的 Codex Provider 依赖上游兼容端点；上游变化时，扩展可能需要同步更新。
 
 订阅供应商共用 **AI 设置 → 订阅渠道代理**，支持自动检测、自定义 HTTP/HTTPS/SOCKS5 代理和直连。登录或测试前点击 **保存代理**。代理凭据保存在 VS Code SecretStorage，覆盖令牌交换与刷新、账户查询及聊天；浏览器登录页面遵循浏览器代理设置。
 

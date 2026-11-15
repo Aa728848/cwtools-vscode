@@ -88,7 +88,7 @@ changing these docs; it also regenerates `release/README.md` from `README.md`.
 ## Repository Boundaries
 
 - `client/extension/`: VS Code Extension Host code.
-- `client/extension/ai/`: AI runtime, tools, Agent skills, memory, and orchestration.
+- `client/extension/ai/`: AI runtime, tools, Agent skills, and memory.
 - `client/webview/`: browser-sandboxed Webviews.
 - `src/LSP/`, `src/Main/`: .NET 10 / F# language server.
 - `submodules/cwtools/`: upstream F# library.
@@ -135,7 +135,7 @@ multi-agent orchestration (`dispatch_agents`, `team_*`, `query_blackboard`,
 `merge_results`), or model-visible patch tools.
 
 New run-event types must update reducers and Webview renderers. Resume changes
-must retain V2 compatibility. Read `ARCHITECTURE.md` before large runner changes.
+must preserve the V4 checkpoint snapshot contract. Read `ARCHITECTURE.md` before large runner changes.
 
 ### MCP (`submodules/cwtools-mcp/`)
 

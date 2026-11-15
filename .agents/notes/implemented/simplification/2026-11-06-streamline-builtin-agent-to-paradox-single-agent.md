@@ -97,3 +97,4 @@ flowchart LR
 - **代码体量与复杂度显著下降**：移除了 30 个运行时模块文件与 19 个专项旧测试文件，`client/extension/ai/` 净削减超过 1.6 万行高复杂度编排、命令沙箱与审批代码。
 - **职责边界清晰**：内置 Agent 专注 Paradox / CWTools 语义辅助、本地化编写/翻译、GUI 与脚本检查及受控文件编辑；重型多 Agent 编排与跨工具工程交由外部 DSH / Claude Code / Codex 通过 37 工具全量对齐的 `cwtools-mcp` 桥接完成。
 - **向后兼容**：旧会话中持久化的 `'general' | 'hybrid'` 领域与 `'parallel' | 'specialist'` 状态在加载时自动归一化为 `'paradox'` 与 `'single'`，不会破坏已有聊天历史。
+- **文档、NLS 与发版日志全量同步（2026-11-15 补充）**：`README.md`、`docs/marketplace-readme.md`（及生成的 `release/README.md`）、`CONTRIBUTING.md`、`ARCHITECTURE.md`、`AGENTS.md`、三语 NLS（`ai.web.mode.description` 与 `ai.mcp.servers.description`）及 `chatHtml.ts` / `chatPanel.ts` 提示文案同步清理残留的「通用编码领域切换」「Shell 命令联网权限」「项目级 MCP 首次连接一次性批准」与旧 `V2` 检查点兼容表述，统一对齐单 Agent Paradox 助手、`confirm` / `auto` 文件写入控制、`V4` 检查点快照契约及 `release/CHANGELOG.md` 2.36.0 完整变更记录。

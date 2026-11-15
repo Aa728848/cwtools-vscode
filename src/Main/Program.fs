@@ -8175,7 +8175,7 @@ type Server(client: ILanguageClient) =
             // No-op: DidSaveTextDocument posts the appropriate save validation request.
             async { () }
 
-        // P0 Fix: was TODO() return empty edit list instead of crashing
+        // No pre-save text edits are produced; validation runs on DidSaveTextDocument.
         member this.WillSaveWaitUntilTextDocument(_: WillSaveTextDocumentParams) = async { return [] }
 
         member this.DidSaveTextDocument(p: DidSaveTextDocumentParams) =
@@ -9925,7 +9925,7 @@ type Server(client: ILanguageClient) =
             }
             |> catchError []
 
-        // P0 Fix: was TODO() return empty results / no-op instead of crashing
+        // Range/on-type formatting and dynamic workspace-folder changes are intentionally no-ops; full-document formatting is handled above.
         member this.DocumentRangeFormatting(_: DocumentRangeFormattingParams) = async { return [] }
         member this.DocumentOnTypeFormatting(_: DocumentOnTypeFormattingParams) = async { return [] }
         member this.DidChangeWorkspaceFolders(_: DidChangeWorkspaceFoldersParams) = async { () }

@@ -9229,7 +9229,7 @@ let settingsSubscriptionPools: Record<string, any> = {};
             const detail = (server.type || 'stdio') === 'stdio'
                 ? [server.command, ...(Array.isArray(server.args) ? server.args : [])].filter(Boolean).join(' ')
                 : server.url || '';
-            return `<div class="mcp-file-server" title="${tr('Declared in a config file; edit the file to change it. Project-level servers need one-time approval before first connection.', '来自配置文件；请编辑对应文件修改。项目级服务器首次连接前需一次性批准。')}">
+            return `<div class="mcp-file-server" title="${tr('Declared in a config file; edit the file to change it.', '来自配置文件；请编辑对应文件修改。')}">
                 <span class="mcp-file-server-name">${escapeHtml(server.name || '')}</span>
                 <span class="mcp-file-server-detail">${escapeHtml(detail)}</span>
                 <span class="mcp-file-server-source">${escapeHtml(sourceLabel(server.source))}</span>

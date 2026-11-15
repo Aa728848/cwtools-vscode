@@ -127,6 +127,8 @@ flowchart LR
 
 Read requests may run concurrently while model-changing operations require exclusive coordination. Changes to locking, cancellation, incremental refresh, or document snapshots should be tested under concurrent edit and read traffic.
 
+The root reader-writer lock (`gameStateLock`) is writer-preferring: once any writer is waiting, all new readers are blocked. A writer must therefore never park indefinitely while waiting — batch validation holds read locks continuously for several seconds, during which a parked waiting writer would cause hover, completion, semantic highlighting, and other editor read requests to time out on their read lock and silently return empty results. Deferrable background cycles must use `tryEnterGameStateWriteLock` (polling acquisition that never blocks readers), preserving pending state for the next wake-up if the lock is not acquired within budget; when a model mutation does proceed, write-lock hold time must remain bounded.
+
 Incremental refresh must have a guarded full-refresh fallback. For changes that affect scripted types or localisation dependencies, compare incremental results with a full rebuild.
 
 ### CWT document pipeline

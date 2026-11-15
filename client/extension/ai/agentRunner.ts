@@ -32,7 +32,6 @@ import { estimateTokenCount, estimateChatMessageTokens, hasImageContent, BASE64_
 import * as vs from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
-// P1-7: contentToString is now imported from './types' — see import above.
 
 import { AIService } from './aiService';
 import { AgentToolExecutor, TOOL_DEFINITIONS } from './agentTools';

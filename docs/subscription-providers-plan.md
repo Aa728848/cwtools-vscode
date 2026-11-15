@@ -214,8 +214,10 @@
 ## 8. 风险与合规
 
 - `claude-subscription` 与 Anthropic 条款冲突（见 §4.3）；`antigravity` 历史上曾有账号被限制的公开报告，当前线路已移除。
-- 桌面端凭据（MiniMax `auth.json`）**只读优先**；续期写回必须原子且只改 `auth` 块；绝不删除/撤销桌面端登录态。
-- 所有 token 只进 VS Code SecretStorage，不写设置文件、不进 webview。### P3 交付明细
+- 桌面端凭据（MiniMax `auth.json`、WorkBuddy `.info`）**只读优先**；续期写回必须原子且不破坏加密/原结构；绝不删除/撤销桌面端登录态。
+- 所有 token 只进 VS Code SecretStorage，不写设置文件、不进 webview。
+
+### P3 交付明细
 
 - **新增** `claudesub/types.ts`（协议常量 + 转录的模型目录 + 三态/四形态思考控制 + 版本下限
   与全域比较）、`claudesub/credentials.ts`（凭据存储、单飞续期、`user:inference` 校验）、
@@ -235,13 +237,15 @@
 | 项 | 状态 |
 | --- | --- |
 | P1 codex-chatgpt + commandcode | ✅ 完成 |
-| P2 antigravity（已移除）+ kimi + minimax-code（workbuddy 已于 2026-10-21 移除） | ✅ 完成（现存线路） |
+| P2 antigravity（已移除）+ workbuddy-subscription（2026-11-14 重新接入）+ opendesign（2026-11-14 新增）+ kimi + minimax-code | ✅ 完成（现存线路） |
 | P3 claude-subscription | ✅ 完成 |
 | P4 多账号号池抽象 | ✅ 完成 |
 
-> 唯一**非阻塞**待办：三条新 OAuth 流程（workbuddy / minimax-code / claude-subscription）与
-> kimi 设备码、桌面凭据复用均以单元测试锁定契约，但**真机账号验证**尚未进行；建议在有对应
-> 订阅的机器上各跑一次登录 + 一轮对话。### P4 交付明细（多账号号池）
+> 唯一**非阻塞**待办：各 OAuth 流程（workbuddy / opendesign / minimax-code / claude-subscription）与
+> kimi 设备码、桌面凭据复用均以单元测试锁定契约，但**真机账号验证**尚未全量覆盖；建议在有对应
+> 订阅的机器上各跑一次登录 + 一轮对话。
+
+### P4 交付明细（多账号号池）
 
 - **内核**：新增 `client/extension/ai/pool/accountPool.ts`——provider 无关的号池，含存储、
   序列化、可调度性、三种轮转策略、429 冷却与账号级失效保留。各线路只提供少数钩子。
@@ -401,7 +405,8 @@ commandcode（静态 API Key）。
 
 | 线路 | 额度面 | 备注 |
 | --- | --- | --- |
-| ~~workbuddy-subscription~~（2026-10-21 移除） | `POST /billing/meter/get-user-resource` | 多套餐求和；容量与周期计数各成一个仪表 |
+| workbuddy-subscription（2026-11-14 重新接入） | `POST /billing/meter/get-user-resource` | 多套餐加总，基础包 + 加油包双仪表，附国区每日签到状态 |
+| opendesign（2026-11-14 新增） | `GET /key` + `GET /Subscription` | AMR 5h / 7d 窗口与钱包余额三联仪表 |
 | kimi-code-plan | `GET {coding}/v1/usages` | coding 主机；兼容两种形状 |
 | claude-subscription | `GET /api/oauth/usage` | `utilization` 是 0-100 百分数 |
 | codex-chatgpt | 复用账号状态 `rateLimits` | 不额外发请求 |
@@ -415,11 +420,11 @@ commandcode（静态 API Key）。
 | commandcode 逐模型能力表 | ✅ 完成 |
 | P4 号池：内核 | ✅ 完成 |
 | P4 号池：antigravity（历史接入，已移除） | ✅ 完成（内核保留） |
-| P4 号池：codex / kimi / claude / minimax / commandcode（workbuddy 与 antigravity 已移除） | ✅ 完成 |
+| P4 号池：codex / kimi / claude / minimax / commandcode / workbuddy / opendesign（antigravity 已移除） | ✅ 完成 |
 | P4 号池：设置面（通用账号池区块，按选中线路渲染） | ✅ 完成 |
-| WorkBuddy 实时目录填充模型列表（该线路已于 2026-10-21 移除） | ✅ 完成 |
+| WorkBuddy 实时目录填充模型列表（2026-11-14 重新接入）与 OpenDesign 三层目录合并 | ✅ 完成 |
 | 登录控件在有账号后仍可用（可加第二个账号） | ✅ 完成 |
-| 各线路账号额度展示（原六条线路，workbuddy 已于 2026-10-21 移除） | ✅ 完成 |
+| 各线路账号额度展示（现存七条订阅池线路） | ✅ 完成 |
 
 > 唯一**非阻塞**待办仍是真机验证：各线路的 OAuth 流程、桌面凭据复用与多账号轮转均以单元
 > 测试（mock transport）锁定契约，尚未在真实订阅账号上端到端跑过。

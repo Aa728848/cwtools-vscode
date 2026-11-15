@@ -1091,10 +1091,9 @@ reason. Retry happens automatically on the next candidate rebuild.
 ## Reserved CWT ranges / CWT 预留码段
 
 The CWT document pipeline reserves the following ranges. Codes are published
-here before release and stay stable (handoff doc
-[`cwt-language-support-handoff.md`](cwt-language-support-handoff.md) §6.1).
+here before release and stay stable (see [ARCHITECTURE.md](../ARCHITECTURE.md#cwt-document-pipeline)).
 
-CWT 文档管线预留以下码段,发布前写入本文并保持稳定:
+CWT 文档管线预留以下码段,发布前写入本文并保持稳定(见 [ARCHITECTURE.md](../ARCHITECTURE.md#cwt-文档管线)):
 
 | Range / 码段 | Purpose / 用途 | Examples / 示例 |
 | --- | --- | --- |

@@ -566,7 +566,7 @@ ${stylesheetLinks}
                         <option value="indexed">${t('Indexed search only (recommended)', '仅搜索索引（推荐）')}</option>
                         <option value="live">${t('Live search and page access', '实时搜索和网页访问')}</option>
                     </select>
-                    <div class="settings-hint">${t('Web tools are separate from shell-command networking. Live mode opens only public HTTP(S) pages through SSRF and redirect checks.', '网页工具与 Shell 命令联网权限相互独立。实时模式仅通过 SSRF 与重定向检查访问公开 HTTP(S) 网页。')}</div>
+                    <div class="settings-hint">${t('Live mode opens only public HTTP(S) pages through SSRF and redirect checks.', '实时模式仅通过 SSRF 与重定向检查访问公开 HTTP(S) 网页。')}</div>
                     <label class="settings-label">${t('Search provider', '搜索供应商')}</label>
                     <select class="settings-select" id="webSearchProvider">
                         <option value="auto">${t('Auto (configured providers, then DuckDuckGo)', '自动（已配置供应商，最后 DuckDuckGo）')}</option>

@@ -30,9 +30,13 @@ The extension also supports Hearts of Iron IV, Europa Universalis IV and V, Crus
 
 ### Install
 
+Install from the [Visual Studio Marketplace](https://marketplace.visualstudio.com/items?itemName=ForeverSkywalker.foreverskywalker-stellaris-cwtools), or install a `.vsix` manually:
+
 1. Download the latest `.vsix` from [Releases](https://github.com/Aa728848/cwtools-vscode/releases).
 2. In VS Code, run `Extensions: Install from VSIX...` and select the file.
 3. When prompted, choose the vanilla game folder. CWTools uses it to build its initial cache.
+
+Installing from the VS Code Marketplace updates the extension automatically. A `.vsix` installed this way is not updated by the extension itself; download the newer release and install it again.
 
 The packaged extension includes its language-server binaries. The .NET SDK is only needed when building the project locally.
 
@@ -199,9 +203,13 @@ Stellaris Language Serves 是一款面向 Paradox Mod 开发的 VS Code 扩展�
 
 ### 安装
 
+从 [Visual Studio 市场](https://marketplace.visualstudio.com/items?itemName=ForeverSkywalker.foreverskywalker-stellaris-cwtools) 安装，或手动安装 `.vsix`：
+
 1. 从 [Releases](https://github.com/Aa728848/cwtools-vscode/releases) 下载最新 `.vsix`。
 2. 在 VS Code 中运行 `Extensions: Install from VSIX...`，选择下载的文件。
 3. 首次提示时选择原版游戏目录，CWTools 会据此建立缓存。
+
+通过 VS Code 市场安装的版本会随市场自动更新；以 `.vsix` 方式安装的版本不会由扩展自行更新，需要重新下载新版本并再次安装。
 
 发布的扩展已经包含语言服务端；只有本地构建项目时才需要 .NET SDK。
 

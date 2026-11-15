@@ -1078,12 +1078,6 @@
                         "default": 2000,
                         "description": "%configuration.stellarisLanguageServices.diagnostics.dynamicPreflightMaxEntities.description%"
                     },
-                    "stellarisLanguageServices.checkForUpdates": {
-                        "scope": "window",
-                        "type": "boolean",
-                        "default": true,
-                        "description": "%configuration.stellarisLanguageServices.checkForUpdates.description%"
-                    },
                     "stellarisLanguageServices.shipIcons.meshOverrides": {
                         "scope": "resource",
                         "type": "object",

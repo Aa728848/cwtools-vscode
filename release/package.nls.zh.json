@@ -92,7 +92,6 @@
   "configuration.stellarisLanguageServices.diagnostics.deferDynamicParameterDiagnostics.description": "首次载入发布前，通过一次批量调用方验证校正动态参数诊断（inline_script 展开、scripted effect/trigger/value 参数替换）。可减少假阳性红错，并避免对每个受影响文件重复执行完整验证。",
   "configuration.stellarisLanguageServices.diagnostics.dynamicPreflightTimeoutMs.description": "首次验证前预热动态参数 computed data（scripted effects/triggers、script values、inline scripts）的时间预算（毫秒）。0 表示不限时间。",
   "configuration.stellarisLanguageServices.diagnostics.dynamicPreflightMaxEntities.description": "首次验证前预热动态参数实体的数量上限。0 表示不限数量。",
-  "configuration.stellarisLanguageServices.checkForUpdates.description": "启用通过 GitHub Releases 对插件进行自动更新检查。",
   "configuration.stellarisLanguageServices.ai.enabled.description": "启用AI辅助代码生成与补全",
   "configuration.stellarisLanguageServices.ai.provider.enum.codex-chatgpt": "Codex（ChatGPT 订阅，浏览器 OAuth 与额度）",
   "configuration.stellarisLanguageServices.ai.provider.enum.openai": "OpenAI",

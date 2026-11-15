@@ -47,7 +47,7 @@ Status: implemented
 ## Consequences
 
 - 三个仓库现在都是独立仓库：`fork: false`、`parent: null`，不再出现在 `cwtools` 的 fork 网络里，也不会再显示 "forked from" 标记。
-- **Release 清零是可见影响**：`client/extension/updateChecker.ts` 请求的 `/releases/latest` 在发布新版本前会 404，README 与 `docs/marketplace-readme.md` 的 Releases 下载链接同样 404。发布下一个版本后自动恢复，无需改代码。
+- **Release 清零是可见影响**：`client/extension/updateChecker.ts` 请求的 `/releases/latest` 在发布新版本前会 404，README 与 `docs/marketplace-readme.md` 的 Releases 下载链接同样 404。发布下一个版本后自动恢复，无需改代码。（该自动更新链路已于 2026-11-15 整体移除，见 [移除扩展自建自动更新](2026-11-15-remove-extension-self-updater-and-rely-on-marketplace-updates.md)；Releases 下载链接失效的判断仍然适用。）
 - 已丢失且不可恢复：主仓库 17 个 star、issue #6（`Compare with vanilla command not working`）、外部子 fork；`cwtools-stellaris-config` 的 1 个 star；两个 Gitee 遗留 Actions 密钥 `GITEE_PRIVATE_KEY` / `GITEE_TOKEN`（`ci.yml` 未引用，属于废弃项）。
 - 两个子仓库的 tag 已丢弃。本地克隆仍保留 24 / 28 个 tag，需要时执行 `git push origin --tags` 即可恢复。
 - 完整备份保留在 `C:/Users/A/Documents/_repo-detach-backup`，确认无误后可整目录删除。

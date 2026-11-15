@@ -34,7 +34,6 @@ import { AIChatPanelProvider } from './ai/chatPanel';
 import { AIInlineCompletionProvider } from './ai/inlineProvider';
 import { UsageTracker } from './ai/usageTracker';
 import { lastAISettingsWriteTime } from './ai/chatSettings';
-import { checkForUpdates } from './updateChecker';
 import { registerCodeActions } from './codeActions';
 import { enrichDiagnosticsInPlace, diagnosticCodeString, diagnosticMatchesIgnoredKey, filterLocalisationDiagnostics, foldLocalisationWarnings, foldRelatedCallSiteInformation } from './diagnosticI18n';
 import type { LocalisationDiagnosticFilterMode } from './diagnosticI18n';
@@ -912,20 +911,6 @@ export async function activate(context: ExtensionContext) {
 	if (!await removeConflictingExtensions()) {
 		return;
 	}
-
-	// Run update checks in the background so slow GitHub/network responses never block LSP startup.
-	void checkForUpdates(context, {
-		beforeInstall: async ({ reinstallCurrentVersion }) => {
-			if (!reinstallCurrentVersion || !defaultClient) {
-				return;
-			}
-			try {
-				await defaultClient.stop();
-			} catch (e) {
-				ErrorReporter.warn(SOURCE.UPDATE_CHECKER, 'Failed to stop CWTools language server before same-version reinstall', e);
-			}
-		}
-	}).catch((e) => ErrorReporter.warn(SOURCE.UPDATE_CHECKER, 'Failed to check for updates', e));
 
 	const workspaceRoot = getProjectWorkspaceRoot();
 	const indexService = new IndexService({

@@ -76,6 +76,8 @@ flowchart LR
 | 子模块 README（`cwtools-stellaris-config`、`cwtools-mcp`） | 跨仓库说明与规则指南链接 |
 | `client/test/unit/gameProfiles.test.ts:59 / 200` | 规则地址格式与内容的回归断言 |
 
+> 注：上表第 3 行、正文第 2 点与 Consequences 中提到的 `client/extension/updateChecker.ts` 及其 `/releases/latest` 自动更新链路已于 2026-11-15 整体移除（见 [移除扩展自建自动更新](2026-11-15-remove-extension-self-updater-and-rely-on-marketplace-updates.md)），相关路径与分支名约束仅作为历史记录保留。
+
 ## 附录 A：GitHub 侧脱离 fork 网络的执行材料（2026-09-11 实测更新）
 
 > **更正**：GitHub 现已提供自助解除入口（仓库 Settings → General → Danger Zone → **Leave fork network**），不再必须提工单。以下规则摘自官方文档源码 `github/docs:content/pull-requests/how-tos/work-with-forks/detaching-a-fork.md`（经 `gh api` 读取）。

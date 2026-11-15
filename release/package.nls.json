@@ -92,7 +92,6 @@
   "configuration.stellarisLanguageServices.diagnostics.deferDynamicParameterDiagnostics.description": "Correct dynamic-parameter diagnostics (inline_script expansions and scripted effect/trigger/value parameters) with one batched call-site validation before initial results are published. Reduces phantom errors without repeating a full validation for every affected file.",
   "configuration.stellarisLanguageServices.diagnostics.dynamicPreflightTimeoutMs.description": "Time budget (ms) for warming dynamic-parameter computed data (scripted effects/triggers, script values, inline scripts) before the first validation pass. 0 means no time limit.",
   "configuration.stellarisLanguageServices.diagnostics.dynamicPreflightMaxEntities.description": "Maximum number of dynamic-parameter entities to warm before the first validation pass. 0 means no limit.",
-  "configuration.stellarisLanguageServices.checkForUpdates.description": "Enable automatic checking for extension updates via GitHub Releases.",
   "configuration.stellarisLanguageServices.ai.enabled.description": "Enable AI-assisted code generation and completion",
   "configuration.stellarisLanguageServices.ai.provider.enum.codex-chatgpt": "Codex (ChatGPT Subscription, browser OAuth and quota)",
   "configuration.stellarisLanguageServices.ai.provider.enum.openai": "OpenAI",

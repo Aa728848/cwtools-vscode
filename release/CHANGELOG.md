@@ -1,5 +1,26 @@
 # Changelog
 
+## [2.37.0] - 2026-11-15
+
+### 更新路径收口到市场与发布自动化 / Update Path Consolidated onto the Marketplace and Automated Releases
+
+- **[简化] 移除扩展自建自动更新（Remove the in-extension self-updater）**：
+  - 删除 `client/extension/updateChecker.ts` 与对应单元测试：激活时不再请求 GitHub `releases/latest`、不再下载并安装 VSIX，也不再为同版本重装去停止语言服务。
+  - 用户设置 `stellarisLanguageServices.checkForUpdates` 与三份 NLS 描述同步下线；遗留的设置值由 VS Code 忽略，不做迁移。升级路径统一交给 VS Code 市场，从 Releases 安装 VSIX 的用户需要手动重新下载（README 双语安装章节已说明，并补充了市场安装入口）。
+  - 新增 `client/test/unit/updatePolicy.test.ts` 守住下线面：发布清单、三份 NLS、激活流程与模块文件都不得再出现自更新链路。
+  - English: [Simplification] `client/extension/updateChecker.ts` and its unit test are gone: activation no longer queries GitHub `releases/latest`, downloads or installs VSIX packages, or stops the language server for a same-version reinstall. The `stellarisLanguageServices.checkForUpdates` setting and its three NLS strings are removed, leftover user values are ignored without migration, and upgrades are left to the VS Code Marketplace; the README documents the Marketplace entry point and that VSIX installs must be reinstalled by hand. A new `updatePolicy` test keeps the retired surface from returning.
+
+- **[流程] 标签驱动的市场发布 CI（Tag-driven Marketplace release pipeline）**：
+  - 新增 `.github/workflows/release.yml`：推送 `v*` 标签（或手动运行并填写已有标签）后，在 Windows runner 上构建三平台自包含 VSIX、运行发布门禁、通过 Marketplace Trusted Publishing（GitHub OIDC）发布到市场、把 VSIX 留档为工作流产物，并以该版本更新日志创建或更新 GitHub Release。
+  - 认证不再依赖长期个人访问令牌（Azure DevOps 全局 PAT 于 2026-12-01 退役）；标签与两处 `package.json` 版本不一致时任务会在任何上传之前失败，市场发布失败时不会留下半成品 Release。
+  - 工作流显式补齐了此前只存在于本地预置状态的两个前提：`cwtools-mcp` 子模块的 `cwtools-shared` 构建产物，以及 `release/` 的运行时依赖闭包。
+  - English: [Process] A new `.github/workflows/release.yml` builds the universal VSIX on a Windows runner when a `v*` tag is pushed (or when the workflow is dispatched with an existing tag), runs the release gates, publishes through Marketplace Trusted Publishing over GitHub OIDC, keeps the VSIX as a workflow artifact, and creates or updates the GitHub Release from that changelog section. No long-lived personal access token is stored, a mismatched tag fails before any upload, and a failed Marketplace publish never leaves a partial Release. The job also materializes the two prerequisites that previously only existed in a prepared local checkout: the `cwtools-shared` build output and the `release/` runtime dependency closure.
+
+- **[修复] CI 恢复绿灯（Restore a green CI baseline）**：
+  - `typescript`、`vscode-integration`、`platform-overlay-e2e` 三个作业在检出后先安装 `cwtools-mcp` 工作区并构建 `cwtools-shared`，修复 `Cannot find module 'cwtools-shared'` 导致的编译失败。
+  - `client/webview/vscode.d.ts` 中模拟 three.js 事件表的空载荷类型获得作用域化 lint 例外；Kimi 请求装配用例按模块重载成本调整 mocha 超时，不再在共享 runner 上超时。
+  - English: [Fix] The three jobs that compile TypeScript now install the `cwtools-mcp` workspace and build `cwtools-shared` before type checking, which fixes the `Cannot find module 'cwtools-shared'` failures. Empty event-payload types in `client/webview/vscode.d.ts` get a scoped lint exception, and the Kimi request-assembly suite gets a timeout that matches its module-reload cost so it no longer fails on shared runners.
+
 ## [2.36.0] - 2026-11-10
 
 ### 订阅渠道扩展、模型目录刷新与供应商收敛 / Subscription Pool Expansion, Model Catalog Refresh, and Provider Convergence

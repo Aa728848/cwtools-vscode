@@ -3,6 +3,9 @@
  * Runs inside the VS Code webview context.
  */
 import { svgIconNoMargin } from './svgIcons';
+import type { GuiElement } from '../shared/guiPreview';
+import { computeTopLeft, effectiveSize, isOffCanvasElement, normalizeOrientation, ORIENTATION_FRACS } from './guiLayout';
+import { applyGuiImageStyles as applyImageStyles } from './guiVisuals';
 
 const vscode = acquireVsCodeApi();
 const locale = (document.documentElement.lang || navigator.language || '').toLowerCase().startsWith('zh') ? 'zh-cn' : 'en';
@@ -82,46 +85,7 @@ function requestDocumentSave(): void {
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
-interface GuiElement {
-    type: string;
-    name: string;
-    position: { x: number; y: number };
-    size: { width: number; height: number };
-    sizeExplicit?: boolean;
-    sizeUsesXY?: boolean;
-    percentWidth?: boolean;
-    percentHeight?: boolean;
-    orientation?: string;
-    origo?: string;
-    clipping?: boolean;
-    alwaysTransparent?: boolean;
-    spriteKey?: string;
-    spriteAttr?: 'spriteType' | 'quadTextureSprite';
-    spriteTexture?: string;
-    spriteDefType?: string;
-    noOfFrames?: number;
-    frame?: number;
-    textureWidth?: number;
-    textureHeight?: number;
-    text?: string;
-    font?: string;
-    format?: string;
-    maxWidth?: number;
-    maxHeight?: number;
-    scale?: number;
-    rotation?: number;
-    alpha?: number;
-    centerPosition?: boolean;
-    borderSize?: { x: number; y: number };
-    margin?: { top: number; bottom: number; left: number; right: number };
-    spacing?: number;
-    slotSize?: { width: number; height: number };
-    children: GuiElement[];
-    properties: Record<string, unknown>;
-    line: number;
-    endLine: number;
-    propertyLines: Record<string, number>;
-}
+
 
 const OFF_CANVAS_THRESHOLD = 5_000;
 const SAFE_HIDDEN_POSITION = -9_999;
@@ -180,101 +144,7 @@ function updateTransform() {
 
 // ─── Image Helpers ────────────────────────────────────────────────────────────
 
-function applyImageStyles(img: HTMLImageElement, div: HTMLElement, el: GuiElement) {
-    // VS Code Webviews globally apply `img { max-width: 100%; }` which breaks multi-frame scaling
-    img.style.maxWidth = 'none';
-    img.style.maxHeight = 'none';
 
-    if (el.spriteDefType === 'corneredTileSpriteType') {
-        const bx = el.borderSize?.x ?? 0;
-        const by = el.borderSize?.y ?? 0;
-
-        if (bx > 0 || by > 0) {
-            // Canvas-based 9-slice (CSS border-image unreliable with data: URIs in webview)
-            img.style.display = 'none';
-
-            const drawNineSlice = () => {
-                const canvas = document.createElement('canvas');
-                canvas.style.position = 'absolute';
-                canvas.style.top = '0';
-                canvas.style.left = '0';
-                canvas.style.width = '100%';
-                canvas.style.height = '100%';
-                canvas.style.pointerEvents = 'none';
-                canvas.style.opacity = '0.90';
-
-                const dw = div.offsetWidth || parseInt(div.style.width) || 200;
-                const dh = div.offsetHeight || parseInt(div.style.height) || 200;
-                canvas.width = dw;
-                canvas.height = dh;
-
-                const ctx = canvas.getContext('2d');
-                if (!ctx) return;
-
-                const sw = img.naturalWidth;
-                const sh = img.naturalHeight;
-                if (sw === 0 || sh === 0) return;
-
-                const sl = Math.min(bx, sw / 2);
-                const sr = Math.min(bx, sw / 2);
-                const st = Math.min(by, sh / 2);
-                const sb = Math.min(by, sh / 2);
-                const scw = sw - sl - sr;
-                const sch = sh - st - sb;
-
-                const dl = Math.min(bx, dw / 2);
-                const dr = Math.min(bx, dw / 2);
-                const dt = Math.min(by, dh / 2);
-                const db = Math.min(by, dh / 2);
-                const dcw = dw - dl - dr;
-                const dch = dh - dt - db;
-
-                // Top-left, top-center, top-right
-                if (sl > 0 && st > 0) ctx.drawImage(img, 0, 0, sl, st, 0, 0, dl, dt);
-                if (scw > 0 && st > 0) ctx.drawImage(img, sl, 0, scw, st, dl, 0, dcw, dt);
-                if (sr > 0 && st > 0) ctx.drawImage(img, sw - sr, 0, sr, st, dw - dr, 0, dr, dt);
-                // Mid-left, center, mid-right
-                if (sl > 0 && sch > 0) ctx.drawImage(img, 0, st, sl, sch, 0, dt, dl, dch);
-                if (scw > 0 && sch > 0) ctx.drawImage(img, sl, st, scw, sch, dl, dt, dcw, dch);
-                if (sr > 0 && sch > 0) ctx.drawImage(img, sw - sr, st, sr, sch, dw - dr, dt, dr, dch);
-                // Bot-left, bot-center, bot-right
-                if (sl > 0 && sb > 0) ctx.drawImage(img, 0, sh - sb, sl, sb, 0, dh - db, dl, db);
-                if (scw > 0 && sb > 0) ctx.drawImage(img, sl, sh - sb, scw, sb, dl, dh - db, dcw, db);
-                if (sr > 0 && sb > 0) ctx.drawImage(img, sw - sr, sh - sb, sr, sb, dw - dr, dh - db, dr, db);
-
-                // P0-3 Fix: remove any stale 9-slice canvas from previous renders
-                // (e.g. resolution switch or re-render) to prevent DOM leak
-                div.querySelectorAll('canvas').forEach(c => c.remove());
-
-                div.appendChild(canvas);
-            };
-
-            if (img.complete && img.naturalWidth > 0) {
-                requestAnimationFrame(() => drawNineSlice());
-            } else {
-                img.onload = () => requestAnimationFrame(() => drawNineSlice());
-            }
-        } else {
-            img.style.width = '100%';
-            img.style.height = '100%';
-            img.style.objectFit = 'fill';
-        }
-    } else if (el.noOfFrames && el.noOfFrames > 1) {
-        img.style.width = `${el.noOfFrames * 100}%`;
-        img.style.height = '100%';
-        img.style.objectFit = 'fill';
-        let f = 0;
-        if (el.frame !== undefined && el.frame > 0) {
-            f = el.frame - 1;
-        }
-        f = Math.max(0, Math.min(f, el.noOfFrames - 1));
-        img.style.left = `-${f * 100}%`; 
-        div.style.overflow = 'hidden';
-        // Mark for animation
-        img.dataset.animFrames = String(el.noOfFrames);
-        img.dataset.animCurrent = String(f);
-    }
-}
 
 // ─── Sprite Animation ─────────────────────────────────────────────────────
 
@@ -306,214 +176,6 @@ function toggleSpriteAnimations(play: boolean) {
 }
 
 // ─── PDX Layout Engine ──────────────────────────────────────────────────────
-
-// Orientation/origo → fraction of parent/widget size
-// Maps orientation string to (fx, fy) where anchor = (parent_w * fx, parent_h * fy)
-const ORIENTATION_FRACS: Record<string, [number, number]> = {
-    'UPPER_LEFT': [0, 0], 'TOP_LEFT': [0, 0], 'LEFT_UP': [0, 0],
-    'UPPER_CENTER': [0.5, 0], 'TOP': [0.5, 0], 'CENTER_UP': [0.5, 0],
-    'CENTERUP': [0.5, 0], 'CENTERED_UP': [0.5, 0],
-    'UPPER_RIGHT': [1, 0], 'TOP_RIGHT': [1, 0], 'RIGHT_UP': [1, 0],
-    'CENTER_LEFT': [0, 0.5], 'CENTERED_LEFT': [0, 0.5], 'LEFT': [0, 0.5],
-    'CENTER': [0.5, 0.5], 'CENTRE': [0.5, 0.5], 'CENTER_CENTER': [0.5, 0.5],
-    'CENTER_RIGHT': [1, 0.5], 'CENTERED_RIGHT': [1, 0.5], 'RIGHT': [1, 0.5],
-    'LOWER_LEFT': [0, 1], 'BOTTOM_LEFT': [0, 1], 'LEFT_DOWN': [0, 1],
-    'LOWER_CENTER': [0.5, 1], 'BOTTOM': [0.5, 1], 'CENTER_DOWN': [0.5, 1],
-    'CENTERED_DOWN': [0.5, 1],
-    'LOWER_RIGHT': [1, 1], 'BOTTOM_RIGHT': [1, 1], 'RIGHT_DOWN': [1, 1],
-};
-
-function normalizeOrientation(raw: string): string {
-    return (raw || '').trim().replace(/['"]/g, '').toUpperCase().replace(/[-\s]+/g, '_');
-}
-
-/** Anchor point in parent coordinates from orientation */
-function orientationToAnchor(parentW: number, parentH: number, orientation: string): { x: number; y: number } {
-    const [fx, fy] = ORIENTATION_FRACS[normalizeOrientation(orientation)] ?? [0, 0];
-    return { x: parentW * fx, y: parentH * fy };
-}
-
-/** Origo offset: distance from widget top-left to the origo point */
-function origoToOffset(widgetW: number, widgetH: number, origo: string): { x: number; y: number } {
-    const [fx, fy] = ORIENTATION_FRACS[normalizeOrientation(origo)] ?? [0, 0];
-    return { x: widgetW * fx, y: widgetH * fy };
-}
-
-/**
- * PDX core layout formula:
- *   top_left = anchor + position - origo_offset
- * centerPosition = yes acts as origo = CENTER
- *
- * parentAnchorOverride: For child elements, the Clausewitz engine resolves CENTER-type
- * orientations using the parent's own anchor point in parent-local coordinates (derived
- * from the parent's orientation + position relative to its grandparent), rather than
- * simply using parentW/2. This ensures children with CENTER_UP stay stable when the
- * parent container's width changes.
- */
-function computeTopLeft(
-    parentW: number, parentH: number,
-    widgetW: number, widgetH: number,
-    orientation: string, origo: string,
-    posX: number, posY: number,
-    centerPosition: boolean,
-    parentAnchorOverride?: { x: number; y: number },
-): { x: number; y: number } {
-    let anchor: { x: number; y: number };
-    if (parentAnchorOverride) {
-        // Use the parent's own anchor for CENTER-type orientations.
-        // For edge-type orientations (UPPER_RIGHT, LOWER_LEFT etc.), still use parentW/H
-        // so that they correctly track the parent's edges.
-        const [fx, fy] = ORIENTATION_FRACS[normalizeOrientation(orientation)] ?? [0, 0];
-        anchor = {
-            x: fx === 0.5 ? parentAnchorOverride.x : parentW * fx,
-            y: fy === 0.5 ? parentAnchorOverride.y : parentH * fy,
-        };
-    } else {
-        anchor = orientationToAnchor(parentW, parentH, orientation);
-    }
-    const effectiveOrigo = centerPosition ? 'CENTER' : origo;
-    const offset = origoToOffset(widgetW, widgetH, effectiveOrigo);
-    return {
-        x: anchor.x + posX - offset.x,
-        y: anchor.y + posY - offset.y,
-    };
-}
-
-// ─── Default Sizes (from Stellaris reference) ───────────────────────────────
-
-const DEFAULT_SIZE: Record<string, [number, number]> = {
-    'containerWindowType': [200, 150],
-    'windowType': [200, 150],
-    'iconType': [32, 32],
-    'buttonType': [142, 34],
-    'effectButtonType': [142, 34],
-    'guiButtonType': [30, 30],
-    'instantTextBoxType': [200, 20],
-    'textboxType': [200, 80],
-    'editBoxType': [200, 30],
-    'checkboxType': [24, 24],
-    'checkBoxType': [24, 24],
-    'listBoxType': [200, 150],
-    'listboxType': [200, 150],
-    'smoothListboxType': [200, 150],
-    'scrollbarType': [20, 200],
-    'extendedScrollbarType': [20, 200],
-    'OverlappingElementsBoxType': [200, 30],
-    'gridBoxType': [200, 200],
-    'dropDownBoxType': [200, 30],
-    'spinnerType': [120, 30],
-    'positionType': [0, 0],
-    'scrollAreaType': [200, 150],
-    'expandButton': [142, 30],
-    'expandedWindow': [200, 150],
-    'browserType': [200, 150],
-};
-
-/**
- * Determine the effective display size of a widget.
- * 
- * PDX Rules (from gui_model.py / widget_items.py):
- *   - spriteType attr: size = natural_image_size × scale. Widget 'size' is IGNORED.
- *   - quadTextureSprite w/ corneredTileSpriteType: size = widget's declared size (9-patch)
- *   - quadTextureSprite w/ plain spriteType in GFX: size = natural_image_size × scale
- *   - background: fills parent container
- *   - Negative size values: parent_size + value (e.g. -20 → parent - 20)
- *   - instantTextBoxType: maxWidth/maxHeight take priority as dimensions
- */
-function effectiveSize(el: GuiElement, parentW = 0, parentH = 0): { w: number; h: number } {
-    let w = el.size.width;
-    let h = el.size.height;
-
-    // Handle percentage sizes (e.g. width = 100% → parent width)
-    if (el.percentWidth && parentW > 0) {
-        w = Math.round(parentW * w / 100);
-    }
-    if (el.percentHeight && parentH > 0) {
-        h = Math.round(parentH * h / 100);
-    }
-
-    // Handle negative size (parent - N)
-    if (w < 0 && parentW > 0) w = parentW + w;
-    if (h < 0 && parentH > 0) h = parentH + h;
-
-    // Apply margin reduction
-    if (el.margin) {
-        if (w > 0) w = w - el.margin.left - el.margin.right;
-        if (h > 0) h = h - el.margin.top - el.margin.bottom;
-    }
-
-    // Determine render mode:
-    // 1. spriteType attribute → fixed (natural image size), ignore widget size
-    // 2. quadTextureSprite → check GFX registry:
-    //    - corneredTileSpriteType / textSpriteType → widget size
-    //    - spriteType in GFX → fixed (natural image size)
-    // NOTE: scale is NOT applied here — it's purely visual (CSS transform)
-    // Special: corneredTileSpriteType ALWAYS uses widget size, even when called via spriteType attr
-    const isCorneredTile = el.spriteDefType === 'corneredTileSpriteType';
-    const isFixedSprite = !isCorneredTile && (
-        el.spriteAttr === 'spriteType' ||
-        (el.spriteAttr === 'quadTextureSprite' &&
-         el.spriteDefType === 'spriteType')
-    );
-    if (isFixedSprite && el.textureWidth && el.textureHeight) {
-        let tw = el.textureWidth;
-        if (el.noOfFrames && el.noOfFrames > 1) {
-            tw = Math.round(tw / el.noOfFrames);
-        }
-        return { w: tw, h: el.textureHeight };
-    }
-
-    // instantTextBoxType uses maxWidth/maxHeight as its actual dimensions
-    if (el.type === 'instantTextBoxType' || el.type === 'textboxType' || el.type === 'editBoxType') {
-        if (el.maxWidth) w = el.maxWidth;
-        if (el.maxHeight) h = el.maxHeight;
-    } else {
-        if (w <= 0 && el.maxWidth) w = el.maxWidth;
-        if (h <= 0 && el.maxHeight) h = el.maxHeight;
-    }
-
-    // Use texture dimensions when explicit size is missing
-    if (w <= 0 && el.textureWidth) {
-        w = el.textureWidth;
-        if (el.noOfFrames && el.noOfFrames > 1) {
-            w = Math.round(w / el.noOfFrames);
-        }
-    }
-    if (h <= 0 && el.textureHeight) h = el.textureHeight;
-
-    // Container sizing: PDX containers without explicit size inherit parent dimensions
-    const isContainerType = el.type === 'containerWindowType' || el.type === 'windowType'
-        || el.type === 'scrollAreaType' || el.type === 'dropDownBoxType' || el.type === 'expandedWindow';
-    if (isContainerType && (w <= 0 || h <= 0)) {
-        // First try: inherit parent size
-        if (w <= 0 && parentW > 0) w = parentW;
-        if (h <= 0 && parentH > 0) h = parentH;
-        // Fallback: auto-size from children bounding box (when parent size unknown)
-        if ((w <= 0 || h <= 0) && el.children.length > 0) {
-            let maxR = 0, maxB = 0;
-            for (const ch of el.children) {
-                if (ch.type === 'background') continue;
-                if (isOffCanvasElement(ch)) continue;
-                const cs = effectiveSize(ch);
-                const r = Math.max(0, ch.position.x) + cs.w;
-                const b = Math.max(0, ch.position.y) + cs.h;
-                if (r > maxR) maxR = r;
-                if (b > maxB) maxB = b;
-            }
-            if (w <= 0) w = maxR + 10;
-            if (h <= 0) h = maxB + 10;
-        }
-    }
-
-    // Type-specific defaults
-    if (w <= 0 || h <= 0) {
-        const def = DEFAULT_SIZE[el.type] ?? [60, 24];
-        if (w <= 0) w = def[0];
-        if (h <= 0) h = def[1];
-    }
-
-    return { w, h };
-}
 
 // ─── Rendering ──────────────────────────────────────────────────────────────
 
@@ -1088,10 +750,7 @@ function setupControls() {
 
 const REPEAT_LAYER_GROUP_MIN = 6;
 
-function isOffCanvasElement(el: GuiElement): boolean {
-    return Math.abs(el.position.x) > OFF_CANVAS_THRESHOLD
-        || Math.abs(el.position.y) > OFF_CANVAS_THRESHOLD;
-}
+
 
 function isRenderableLayerElement(el: GuiElement): boolean {
     if (isOffCanvasElement(el)) return false;

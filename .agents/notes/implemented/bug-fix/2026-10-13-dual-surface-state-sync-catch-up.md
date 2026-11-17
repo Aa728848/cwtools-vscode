@@ -14,7 +14,8 @@ Status: implemented
    - 当前话题存在消息时补发 `agentRoutingStatus { phase: 'resolved', schedulingState }`；空话题不补，避免遮盖空白态（Webview 处理器会隐藏 emptyState）。
    - 补发最近一次实际展示过的 `tokenUsage`：chatPanel 新增 `lastTokenUsageMessage` 字段，仅在两处真实发送点（turn 完成、/compact 完成）记录，恢复时原样重放。
    - 根作用域 todo 列表非空时补发 `todoUpdate`（数据源 `agentRunner.toolExecutor.getTodos()`，与 `sendManagerSnapshot` 一致）。
-3. **定向发送审计结论**（保留不变）：`runSnapshot` 仅由 manager 专属脚本 `agentManager.ts` 处理；`managerSnapshot` 处理器有 `isManagerShell()` 门控；`_restoreViewState`/`sendManagerSnapshot`/`_syncViewChromeState` 中的 surface 定向属于按 surface 恢复的既有设计。除 `agentRoutingStatus` 外未发现「两侧都有 UI 却定向发送」的消息。
+3. **GUI 预览与视觉证据恢复纳入 Host 事实源**：`ManagerGuiPreviewController` 保存当前目标、文档版本与逻辑选择；manager 重建时重新加载并定向发送 `guiPreviewSnapshot`，纹理解析 URI 按新 Webview 重新生成，Webview 只持久化当前 Tab 与本地视口；最新 Before/After/Diff 的元数据与固定文件按话题恢复，图片 URI 同样按目标 Webview 重建，过期 capture-in-flight 不恢复。
+4. **定向发送审计结论**（保留不变）：`runSnapshot` 仅由 manager 专属脚本 `agentManager.ts` 处理；`managerSnapshot` 处理器有 `isManagerShell()` 门控；`_restoreViewState`/`sendManagerSnapshot`/`_syncViewChromeState` 中的 surface 定向属于按 surface 恢复的既有设计。除 `agentRoutingStatus` 外未发现「两侧都有 UI 却定向发送」的消息。
 
 ## Alternatives considered
 - **在 Webview 端自行缓存最新状态**：否决。Host 是唯一事实来源，Webview 缓存会在销毁重建时丢失，且违反「状态经 Host 恢复序列统一下发」的既有架构。

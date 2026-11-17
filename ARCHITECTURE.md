@@ -248,6 +248,12 @@ sequenceDiagram
 
 The tool registry is authoritative for tool availability, effects, risk, and concurrency. Enforcement checks capability eligibility (derived execution label, runtime profile), invocation authorization (run authorization), and workspace path containment. Deferred tools may substitute a detailed schema only after selection, so a complex contract does not consume every model request. `agentTools.ts` dispatches calls only after the policy engine evaluates them. File writes also use path containment, per-file exclusion, sorted multi-file locking, plan-mode gates, and user-selectable `confirm` (diff confirmation) / `auto` (direct write) modes.
 
+#### Manager GUI development preview
+
+The detached Agent Manager mounts a persistent Preview pane beside Changes, Run, and Settings. `ManagerGuiPreviewController` owns the target document, revision, selection, typed snapshots, and restore; `GuiPreviewLoader` shares parsing, sprite indexing, texture-path containment, decoded-texture caching, and per-Webview URI generation with the full GUI workbench. The Webview canvas owns only local viewport state and interaction. Switching inspector tabs hides rather than destroys that canvas.
+
+GUI references carry the document version, zero-based element hierarchy, name, type, and source range. Adding one to the composer does not start a run. Submission reparses the live document and creates bounded read-only source context through the existing `ContextReferenceManager`; writes still use the normal tool policy and Diff confirmation. Disk-based Agent writes reject dirty GUI drafts, and run-ledger write notifications debounce refresh of both preview surfaces. See [the Manager GUI preview Agent Note](.agents/notes/implemented/feature/2026-11-17-agent-manager-gui-development-preview.md). After a write, `guiVisualCaptureRequest` captures a fixed-frame offscreen image. Before/After use the same logical frame, and RGBA comparison produces a Diff image, changed-pixel ratio, and bounds. The controller injects at most two `visual_verification` inputs per run through the existing input queue, so image-capable providers review evidence in the same turn; other providers receive metrics only. After-only is explicit when no baseline exists. Latest evidence uses bounded topic-private files and per-Webview URIs, never V4 checkpoints or game processes.
+
 `Implementation_Plan.md` contains one machine-readable `cwtools-plan` contract. A Paradox blueprint is an optional payload inside that contract; drafts and approval-ready plans no longer use a second `cwtools-blueprint` fence or a separate contract-loading tool.
 
 
@@ -552,6 +558,12 @@ sequenceDiagram
 ```
 
 工具可用性、副作用、风险和并发策略以 registry 为准。执行校验包含能力资格（派生执行标签、运行时 Profile）、调用授权（Run 授权）和工作区路径包含边界。延迟工具只在被选中后替换为详细 Schema，复杂合同不会占用每次模型请求。`agentTools.ts` 只在策略引擎完成判断后 dispatch。文件写入还要经过路径包含、单文件写排他、排序后的多文件锁、Plan 模式门以及用户可选的 `confirm`（Diff 确认）/ `auto`（自动写入）两档模式。
+
+#### 管理器 GUI 开发预览
+
+独立 Agent Manager 在“变更 / 运行 / 设置”旁挂载持久的“预览”面板。`ManagerGuiPreviewController` 负责目标文档、版本、选择、类型化快照与恢复；`GuiPreviewLoader` 与完整 GUI 工作台共享解析、精灵索引、纹理路径包含校验、解码缓存和按 Webview 生成 URI。Webview 画布只保存本地视口状态并收集交互，切换右侧 Tab 时隐藏而不销毁画布。
+
+GUI 引用携带文档版本、从零下标的元素层级路径、名称、类型和源码范围。添加到输入框不会自动启动任务；发送时通过现有 `ContextReferenceManager` 重新解析实时文档并生成有界只读源码上下文，写入仍走原工具策略与 Diff 确认。直接写磁盘的 Agent 工具会拒绝未保存的 GUI 草稿，run-ledger 写入通知则以防抖方式刷新两处预览。详见 [管理器 GUI 开发预览 Agent Note](.agents/notes/implemented/feature/2026-11-17-agent-manager-gui-development-preview.md)。 写入后，`guiVisualCaptureRequest` 通过离屏画布生成固定坐标帧截图。Before/After 共用逻辑坐标，RGBA 比较生成 Diff 图、变化像素比例和边界。控制器每个 run 最多通过现有输入队列注入两次 `visual_verification`：支持视觉的 Provider 在同一回合审查图片，其他 Provider 只接收文本指标。没有基线时明确返回 After-only。最新证据保存在话题私有固定文件中并按 Webview 生成 URI，不进入 V4 checkpoint，也不启动游戏进程。
 
 `Implementation_Plan.md` 只包含一个机器可读 `cwtools-plan` 合同。Paradox 蓝图是该合同中的可选 payload；草案和审批就绪计划不再使用第二个 `cwtools-blueprint` 围栏，也不再需要独立的合同加载工具。
 

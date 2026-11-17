@@ -105,6 +105,8 @@ Nothing is written to disk, and the aura script is not modified: paste the lines
 
 Open `AI: Open Chat Panel` from the Command Palette. The built-in agent focuses on the Paradox/CWTools semantic domain as a single-agent assistant; use `/plan`, `/execute`, `/explore`, or `/review` to pin the session mode. Provider credentials are stored through VS Code SecretStorage, while file writes follow the selected `confirm` (diff preview card before writing) or `auto` mode, `EvidenceGate` semantic prechecks, and BOM-safe localisation enforcement.
 
+The detached Agent Manager includes a **Preview** tab beside Changes, Run, and Settings. Choose or pin a `.gui` file, zoom and pan the canvas, click or Ctrl-click elements, or drag a marquee, then use **Add to conversation** to attach their structured source references to the composer. Agent writes refresh the preview and highlight changed elements; **Open workbench** keeps the full GUI editor available. Save dirty GUI drafts before allowing an Agent write. After a GUI write, the previewer also produces Before/After/Diff evidence and injects it into the same run for agent review, with at most two automatic correction rounds. The preview tab exposes these images and pixel metrics; providers without vision support receive text metrics only. No game process is launched, and preview verification remains an approximation of runtime rendering.
+
 
 The ChatGPT-subscription-compatible Codex provider uses a browser sign-in flow and the extension's own agent runtime. It is an integration with an upstream compatibility endpoint, not a public stable API, so upstream changes can require extension updates. The Codex picker uses a built-in model catalog, not an account entitlement list; OpenAI API and Codex subscription availability can differ.
 
@@ -277,6 +279,8 @@ SRA_Aura_5_1:0 "§Y防御性光环§!\n对盟友舰船效果：\n $MOD_SHIP_SHIE
 #### 使用 AI 面板
 
 从命令面板运行 `AI: Open Chat Panel`。内置 Agent 专注于 Paradox/CWTools 语义领域的单 Agent 辅助，可通过 `/plan`、`/execute`、`/explore` 或 `/review` 固定当前会话模式。Provider 凭据通过 VS Code SecretStorage 保存；文件修改遵循所选的 `confirm`（写入前弹出 Diff 预览确认卡片）或 `auto` 模式，并受 `EvidenceGate` 语义预检与本地化 UTF-8 BOM 护栏保护。
+
+独立 Agent Manager 的右侧工作区提供与“变更 / 运行 / 设置”并列的 **“预览”** Tab。可选择一个 `.gui` 文件并固定，缩放和平移画布，单击、Ctrl 多选或框选元素，再通过 **“添加到对话”** 把结构化源码引用放入中央输入框。Agent 写入后预览会刷新并高亮变更元素；点击 **“完整工作台”** 可继续使用原有 GUI 编辑器。若 GUI 文档有未保存草稿，请先保存，再允许 Agent 写入。 GUI 写入后，预览器还会生成 Before/After/Diff 证据并注入同一 Agent 回合，由 Agent 自主检查和最多两轮修正。预览 Tab 可查看图片和像素指标；不支持视觉的 Provider 只接收文本指标。此过程不会启动游戏，预览验证仍是对运行时渲染的近似，而非游戏内验证。
 
 
 兼容 ChatGPT 订阅的 Codex Provider 通过浏览器登录，并使用插件自己的 Agent 运行时。它依赖上游兼容端点，不属于公开稳定 API；如果上游流程变化，插件可能需要同步更新。Codex 选择器使用内置模型目录，不代表账户已获授权；OpenAI API 与 Codex 订阅的可用模型可能不同。

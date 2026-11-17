@@ -1,4 +1,184 @@
 /* Agent Manager shell: keep chat logic, but present as a three-pane workspace. */
+
+/* Persistent manager GUI development preview. */
+body.agent-manager-shell .manager-gui-preview-pane {
+    display: flex;
+    flex: 1;
+    min-height: 0;
+    flex-direction: column;
+    overflow: hidden;
+    background: var(--manager-bg);
+}
+body.agent-manager-shell .manager-gui-preview-pane[hidden],
+body.agent-manager-shell .artifact-drawer .artifact-list[hidden] { display: none !important; }
+
+body.agent-manager-shell .manager-gui-visual-evidence {
+    flex: 0 0 auto;
+    max-height: 46%;
+    overflow: auto;
+    border-top: 1px solid var(--manager-border-soft);
+    background: var(--manager-panel-soft);
+}
+body.agent-manager-shell .manager-gui-visual-evidence[hidden] { display: none; }
+body.agent-manager-shell .manager-gui-visual-evidence > summary {
+    padding: 7px 10px;
+    color: var(--manager-muted);
+    font-size: 11px;
+    cursor: pointer;
+    user-select: none;
+}
+body.agent-manager-shell .manager-gui-visual-evidence-body { padding: 0 8px 8px; }
+body.agent-manager-shell .manager-gui-visual-evidence-tabs { display: flex; gap: 5px; margin-bottom: 6px; }
+body.agent-manager-shell .manager-gui-visual-evidence-tabs .active { border-color: var(--manager-blue); }
+body.agent-manager-shell .manager-gui-visual-evidence-image {
+    display: block;
+    width: 100%;
+    max-height: 340px;
+    object-fit: contain;
+    border: 1px solid var(--manager-border-soft);
+    background: #17191d;
+}
+
+body.agent-manager-shell .manager-gui-preview-toolbar,
+body.agent-manager-shell .manager-gui-preview-footer {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    flex-wrap: wrap;
+    padding: 7px 9px;
+    border-bottom: 1px solid var(--manager-border-soft);
+}
+body.agent-manager-shell .manager-gui-preview-footer {
+    border-top: 1px solid var(--manager-border-soft);
+    border-bottom: 0;
+    flex-wrap: nowrap;
+}
+body.agent-manager-shell .manager-gui-preview-button {
+    min-width: 0;
+    padding: 4px 7px;
+    border: 1px solid var(--manager-border-soft);
+    border-radius: 4px;
+    background: var(--manager-button);
+    color: var(--manager-fg);
+    font-size: 11px;
+    cursor: pointer;
+}
+body.agent-manager-shell .manager-gui-preview-button:hover { background: var(--manager-button-hover); }
+body.agent-manager-shell .manager-gui-preview-button.active { border-color: var(--manager-blue); color: var(--manager-fg); }
+body.agent-manager-shell .manager-gui-preview-button:disabled { opacity: .4; cursor: default; }
+body.agent-manager-shell .manager-gui-file-button {
+    max-width: 180px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+body.agent-manager-shell .manager-gui-preview-status {
+    padding: 5px 10px;
+    color: var(--manager-muted);
+    font-size: 11px;
+    border-bottom: 1px solid var(--manager-border-soft);
+}
+body.agent-manager-shell .manager-gui-preview-status[data-state="error"] { color: var(--vscode-errorForeground, #f48771); }
+body.agent-manager-shell .manager-gui-preview-canvas-host { flex: 1; min-height: 0; display: flex; }
+body.agent-manager-shell .manager-gui-canvas { position: relative; flex: 1; min-height: 0; }
+body.agent-manager-shell .manager-gui-viewport {
+    position: absolute;
+    inset: 0;
+    overflow: hidden;
+    outline: none;
+    background-color: #17191d;
+    background-image: linear-gradient(45deg, rgba(255,255,255,.018) 25%, transparent 25%), linear-gradient(-45deg, rgba(255,255,255,.018) 25%, transparent 25%);
+    background-size: 24px 24px;
+}
+body.agent-manager-shell .manager-gui-viewport:focus-visible { box-shadow: inset 0 0 0 1px var(--manager-blue); }
+body.agent-manager-shell .manager-gui-surface {
+    position: absolute;
+    left: 0;
+    top: 0;
+    transform-origin: 0 0;
+    background: rgba(0,0,0,.16);
+    box-shadow: 0 0 0 1px rgba(255,255,255,.06);
+}
+body.agent-manager-shell .manager-gui-element {
+    position: absolute;
+    box-sizing: border-box;
+    border: 1px solid #727b88;
+    background: rgba(75, 88, 105, .18);
+    color: var(--manager-fg);
+    cursor: default;
+    user-select: none;
+}
+body.agent-manager-shell .manager-gui-element-name {
+    position: relative;
+    z-index: 2;
+    display: block;
+    padding: 2px 4px;
+    overflow: hidden;
+    color: inherit;
+    font-size: 11px;
+    line-height: 1.2;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    pointer-events: none;
+}
+body.agent-manager-shell .manager-gui-element-text {
+    position: relative;
+    z-index: 1;
+    display: block;
+    padding: 3px 5px;
+    font-size: 12px;
+    pointer-events: none;
+}
+body.agent-manager-shell .manager-gui-element-image {
+    position: absolute;
+    z-index: 0;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: fill;
+    pointer-events: none;
+}
+body.agent-manager-shell .manager-gui-sprite-reference {
+    position: absolute;
+    inset: 20% 4px auto;
+    overflow: hidden;
+    color: var(--manager-muted);
+    font: 10px monospace;
+    text-overflow: ellipsis;
+    pointer-events: none;
+}
+body.agent-manager-shell .manager-gui-element.is-selected {
+    outline: 2px solid var(--manager-blue);
+    outline-offset: 1px;
+    box-shadow: 0 0 0 3px rgba(0,122,204,.18);
+    z-index: 10;
+}
+body.agent-manager-shell .manager-gui-element.is-agent-changed { animation: manager-gui-changed 1.4s ease-out 2; }
+body.agent-manager-shell .manager-gui-marquee {
+    position: absolute;
+    z-index: 100;
+    border: 1px solid var(--manager-blue);
+    background: rgba(0,122,204,.14);
+    pointer-events: none;
+}
+body.agent-manager-shell .manager-gui-canvas.is-marquee-mode .manager-gui-viewport { cursor: crosshair; }
+body.agent-manager-shell .manager-gui-selection-summary {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    color: var(--manager-muted);
+    font-size: 11px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+@keyframes manager-gui-changed {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(137,209,133,0); }
+    45% { box-shadow: 0 0 0 4px rgba(137,209,133,.55); }
+}
+@media (prefers-reduced-motion: reduce) {
+    body.agent-manager-shell .manager-gui-element.is-agent-changed { animation: none; outline-color: var(--manager-green); }
+}
+
 /* Registered so the left rail width animates smoothly everywhere it is
    consumed (grid columns and calc() offsets) when the rail toggles. */
 @property --manager-active-left-width {
@@ -2290,7 +2470,7 @@ body.agent-manager-shell .manager-file-delta em {
 }
 
 body.agent-manager-shell .manager-inspector-tabs {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(4, minmax(0, 1fr));
     min-height: 43px;
     gap: 24px;
     padding: 0 18px;

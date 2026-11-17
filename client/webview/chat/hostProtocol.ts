@@ -16,6 +16,8 @@ import {
 } from '../../shared/protocolValidation';
 
 import { isSubscriptionProxyStatus } from '../../shared/subscriptionProxy';
+import { isGuiPreviewSnapshot, isGuiSelectionContextData } from '../../shared/guiPreview';
+import { isGuiVisualCaptureRequest, isGuiVisualEvidence } from '../../shared/guiVisualVerification';
 
 const isSurface = isOneOf(['chat', 'manager'] as const);
 const isRecordArray = isArrayOf(isObject);
@@ -50,6 +52,11 @@ const validators = {
     generationComplete: fields({ result: isObject }),
     generationError: fields({ error: isString }, { canResume: optional(isBoolean) }),
     insertSelectionReference: fields({ relPath: isString, startLine: isInteger, endLine: isInteger }),
+    insertGuiSelectionReference: fields({ context: (value: unknown) => isGuiSelectionContextData(value)
+        && isRecord(value) && typeof value.id === 'string' && typeof value.label === 'string' && value.type === 'gui_selection' }),
+    guiPreviewSnapshot: fields({ snapshot: isGuiPreviewSnapshot }),
+    guiVisualCaptureRequest: (value: unknown) => isGuiVisualCaptureRequest(value),
+    guiVisualVerification: fields({ evidence: (value: unknown) => isGuiVisualEvidence(value, false) }),
     topicList: fields({ topics: isRecordArray }, { stats: optional(isObject) }),
     loadTopicMessages: fields({ messages: isRecordArray }, { targetSurface: optional(isSurface) }),
     streamToken: fields({ token: isString }),

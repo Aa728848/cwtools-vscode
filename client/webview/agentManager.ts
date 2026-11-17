@@ -17,12 +17,13 @@ import type { ManagerSnapshotMessage } from './chat/messages.manager';
 import type { ManagerRunSnapshotMessage } from './chat/messages.manager';
 import type { TopicListItem, TopicStats } from './chat/messages.shared';
 import { parseHostMessage } from './chat/hostProtocol';
+import { ManagerGuiPreviewPane } from './managerGuiPreview';
 
-type ManagerTab = 'changes' | 'activity' | 'settings';
+type ManagerTab = 'preview' | 'changes' | 'activity' | 'settings';
 type ManagerMainView = 'conversation' | 'trajectory';
 
 type PersistedManagerUiState = {
-    activeTab?: 'changes' | 'activity' | 'trajectory';
+    activeTab?: 'preview' | 'changes' | 'activity' | 'trajectory';
     mainView?: ManagerMainView;
     drawerOpen?: boolean;
     leftWidth?: number;
@@ -114,11 +115,11 @@ const DEFAULT_STATE: ManagerEnhancementState = {
     const vscode = (window as any).__cwtoolsVscode;
     const persistedRootState = vscode?.getState?.() || {};
     const persistedUi = (persistedRootState.agentManager || {}) as PersistedManagerUiState;
-    let activeTab: ManagerTab = persistedUi.activeTab === 'activity' ? 'activity' : 'changes';
+    let activeTab: ManagerTab = persistedUi.activeTab === 'activity' || persistedUi.activeTab === 'preview' ? persistedUi.activeTab : 'changes';
     let mainView: ManagerMainView = persistedUi.mainView === 'trajectory' || persistedUi.activeTab === 'trajectory'
         ? 'trajectory'
         : 'conversation';
-    let hasUserSelectedPrimaryTab = persistedUi.activeTab === 'changes' || persistedUi.activeTab === 'activity';
+    let hasUserSelectedPrimaryTab = persistedUi.activeTab === 'preview' || persistedUi.activeTab === 'changes' || persistedUi.activeTab === 'activity';
     let settingsRequestPending = false;
     let topicTitleEditing = false;
     let runDockOpen: 'tasks' | 'changes' | null = null;
@@ -164,7 +165,7 @@ const DEFAULT_STATE: ManagerEnhancementState = {
     const ui = locale === 'zh-cn'
         ? {
             topicsTitle: 'Agent 话题',
-            tabs: { conversation: '对话', trajectory: '轨迹', changes: '变更', activity: '运行' },
+            tabs: { conversation: '对话', trajectory: '轨迹', preview: '预览', changes: '变更', activity: '运行' },
             actions: { workbench: '工作台', closeWorkbench: '关闭工作台', settings: '设置', showTopics: '显示话题', toggleTopics: '折叠话题栏', newTopic: '新话题', archived: '已归档', exportTopic: '导出', searchTopics: '搜索话题...', renameTopic: '重命名话题', review: '审核' },
             schedulingMode: { build: '构建档', plan: '计划档', review: '审查档', explore: '探索档', orchestrator: '通用多 Agent', script: 'Paradox 多 Agent' },
             status: { paused: '已暂停', running: '运行中', completed: '已完成', failed: '失败', cancelled: '已取消', idle: '空闲' },
@@ -229,7 +230,7 @@ const DEFAULT_STATE: ManagerEnhancementState = {
         }
         : {
             topicsTitle: 'Agent Topics',
-            tabs: { conversation: 'Conversation', trajectory: 'Trajectory', changes: 'Changes', activity: 'Run' },
+            tabs: { conversation: 'Conversation', trajectory: 'Trajectory', preview: 'Preview', changes: 'Changes', activity: 'Run' },
             actions: { workbench: 'Workbench', closeWorkbench: 'Close Workbench', settings: 'Settings', showTopics: 'Show topics', toggleTopics: 'Toggle topics', newTopic: 'New topic', archived: 'Archived', exportTopic: 'Export', searchTopics: 'Search topics...', renameTopic: 'Rename topic', review: 'Review' },
             schedulingMode: { build: 'Build mode', plan: 'Plan mode', review: 'Review mode', explore: 'Explore mode', orchestrator: 'General multi-agent', script: 'Paradox multi-agent' },
             status: { paused: 'Paused', running: 'Running', completed: 'Completed', failed: 'Failed', cancelled: 'Cancelled', idle: 'Idle' },
@@ -698,11 +699,14 @@ const DEFAULT_STATE: ManagerEnhancementState = {
     tabs.setAttribute('role', 'tablist');
     tabs.setAttribute('aria-label', ui.actions.workbench);
     tabs.innerHTML = `
+        <button type="button" role="tab" aria-selected="${activeTab === 'preview'}" class="artifact-filter ${tabActiveClass('preview')}" data-manager-tab="preview">${ui.tabs.preview}</button>
         <button type="button" role="tab" aria-selected="${activeTab === 'changes'}" class="artifact-filter ${tabActiveClass('changes')}" data-manager-tab="changes">${ui.tabs.changes}</button>
         <button type="button" role="tab" aria-selected="${activeTab === 'activity'}" class="artifact-filter ${tabActiveClass('activity')}" data-manager-tab="activity">${ui.tabs.activity}</button>
         <button type="button" role="tab" aria-selected="false" class="artifact-filter ${tabActiveClass('settings')}" data-manager-tab="settings">${ui.actions.settings}</button>
     `;
     artifactDrawerEl.querySelector('.artifact-drawer-header')?.after(tabs);
+    const previewPane = new ManagerGuiPreviewPane(vscode);
+    artifactDrawerEl.insertBefore(previewPane.element, artifactListEl);
     artifactDrawerEl.setAttribute('data-active-tab', activeTab);
 
     const topicsPanel = document.getElementById('topicsPanel');
@@ -849,7 +853,7 @@ const DEFAULT_STATE: ManagerEnhancementState = {
     installPaneResizer(leftResizer, 'left');
     installPaneResizer(rightResizer, 'right');
 
-    function suggestedPrimaryTab(): Exclude<ManagerTab, 'settings'> {
+    function suggestedPrimaryTab(): Exclude<ManagerTab, 'settings' | 'preview'> {
         if (currentWorkspaceEntries().length > 0) return 'changes';
         return collectWorkspaceFiles(state.run).length > 0 ? 'changes' : 'activity';
     }
@@ -949,8 +953,8 @@ const DEFAULT_STATE: ManagerEnhancementState = {
 
     tabs.addEventListener('keydown', event => {
         if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
-        const tabOrder: ManagerTab[] = ['changes', 'activity', 'settings'];
-        const nextTab = tabOrder[(tabOrder.indexOf(activeTab) + (event.key === 'ArrowRight' ? 1 : 2)) % 3];
+        const tabOrder: ManagerTab[] = ['preview', 'changes', 'activity', 'settings'];
+        const nextTab = tabOrder[(tabOrder.indexOf(activeTab) + (event.key === 'ArrowRight' ? 1 : tabOrder.length - 1)) % tabOrder.length];
         if (!nextTab) return;
         event.preventDefault();
         hasUserSelectedPrimaryTab = true;
@@ -1461,6 +1465,9 @@ const DEFAULT_STATE: ManagerEnhancementState = {
         if (activeTab === 'settings' && !options.suppressSettingsRequest) {
             ensureSettingsContent(!!options.forceSettingsRefresh);
         }
+        if (activeTab === 'preview') {
+            vscode?.postMessage?.({ type: 'guiPreviewRequest', action: 'open' });
+        }
 
         if (activeTab !== 'settings') persistManagerUiState();
         renderInspector();
@@ -1468,7 +1475,7 @@ const DEFAULT_STATE: ManagerEnhancementState = {
     }
 
     function syncSuggestedPrimaryTab(): void {
-        if (hasUserSelectedPrimaryTab || activeTab === 'settings') return;
+        if (hasUserSelectedPrimaryTab || activeTab === 'settings' || activeTab === 'preview') return;
         const nextTab = suggestedPrimaryTab();
         if (nextTab === activeTab) return;
         activeTab = nextTab;
@@ -1482,6 +1489,9 @@ const DEFAULT_STATE: ManagerEnhancementState = {
     }
 
     function renderInspector(): void {
+        previewPane.setVisible(activeTab === 'preview');
+        artifactListEl.hidden = activeTab === 'preview';
+        if (activeTab === 'preview') return;
         if (activeTab === 'changes') {
             const run = state.run;
             const workspaceFiles = collectWorkspaceFiles(run);
@@ -2019,10 +2029,12 @@ const DEFAULT_STATE: ManagerEnhancementState = {
         if (activeTab === 'settings') {
             renderOverview();
             renderInspector();
-        } else {
+        } else if (activeTab !== 'preview') {
             setActiveTab('changes');
             renderOverview();
             renderInspector();
+        } else {
+            renderOverview();
         }
     }
 
@@ -2031,6 +2043,15 @@ const DEFAULT_STATE: ManagerEnhancementState = {
         if (!validatedMessage) return;
         const msg: any = validatedMessage;
         switch (msg?.type) {
+            case 'guiVisualCaptureRequest':
+                void previewPane.captureVisual(msg).then(response => vscode?.postMessage?.(response));
+                break;
+            case 'guiVisualVerification':
+                previewPane.applyVisualEvidence(msg.evidence);
+                break;
+            case 'guiPreviewSnapshot':
+                previewPane.applySnapshot(msg.snapshot);
+                break;
             case 'managerSnapshot':
                 updateFromSnapshot(msg as ManagerSnapshotMessage);
                 break;

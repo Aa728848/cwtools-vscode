@@ -7529,6 +7529,11 @@ let settingsSubscriptionPools: Record<string, any> = {};
                 break;
             }
 
+            case 'insertGuiSelectionReference': {
+                insertReferenceAtCaret(msg.context as ActiveContext);
+                break;
+            }
+
             case 'tokenUsage': {
                 // Override/supplement with actual counted tokens from the API
                 // This fires AFTER generationComplete (for plan mode) or may duplicate normal mode;

@@ -30,6 +30,7 @@ import { diagnosticCodeString } from '../../diagnosticI18n';
 import { getPrivateTopicStorageDir, canonicalPathKey } from '../workspacePaths';
 import { isPlanModeCardArtifactFile } from '../planModeGuard';
 import { isPathInsideOrEqual } from '../../pathScope';
+import { findDirtyGuiDocument } from '../../guiSafety';
 import {
     resolveReadablePathInput,
     resolveWorkspacePathInput,
@@ -399,6 +400,13 @@ export class FileToolHandler {
             const topicArtifact = this.resolveCurrentTopicArtifact(filePath, context);
             if (topicArtifact) return topicArtifact;
             throw new Error(`Access denied: Cannot write outside the workspace root: '${resolution.resolved}'.`);
+        }
+        if (path.extname(resolution.resolved).toLowerCase() === '.gui') {
+            const target = this.pathKey(resolution.resolved);
+            const dirtyDocument = findDirtyGuiDocument(target, vs.workspace.textDocuments);
+            if (dirtyDocument) {
+                throw new Error(`Unsaved GUI document: '${dirtyDocument.uri.fsPath}' has unsaved changes. Ask the user to save it before any Agent write; do not overwrite the in-memory draft with disk content.`);
+            }
         }
         // ReadTracker write-gate safety interception (D1)
         const readTracker = (context?.agentRunner as any)?.readTracker;

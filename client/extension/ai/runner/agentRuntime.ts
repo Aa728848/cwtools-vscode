@@ -676,7 +676,7 @@ export class AgentRuntime {
         };
     }
 
-    steerTurn(runId: string, message: string, clientUserMessageId?: string, images?: string[]): TurnSteerResult {
+    steerTurn(runId: string, message: string, clientUserMessageId?: string, images?: string[], kind: import('./inputQueue').AgentQueuedInputKind = 'steer'): TurnSteerResult {
         const run = runLedger.getRun(runId);
         const activePrompt = run?.threadId
             ? [...this.promptQueue.list(run.threadId)].reverse()
@@ -688,7 +688,7 @@ export class AgentRuntime {
         }
         return {
             runId,
-            accepted: activeTurnRegistry.steer(runId, message, clientUserMessageId, images),
+            accepted: activeTurnRegistry.steer(runId, message, clientUserMessageId, images, kind),
         };
     }
 

@@ -64,6 +64,8 @@ import { ContextReferenceManager } from './contextReferences';
 import { AgentSessionCoordinator } from './agentSessionCoordinator';
 import { runLedger, type AgentRunEvent } from './runner/runLedger';
 import { AgentRuntime } from './runner/agentRuntime';
+import { ManagerGuiPreviewController } from './managerGuiPreview';
+import { isGuiSelectionContextData } from '../../shared/guiPreview';
 import { agentProfileCatalog } from './runner/agentProfileCatalog';
 import {
     getSessionPermissionMode,
@@ -149,6 +151,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
 
     private view?: vs.WebviewView;
     private managerPanel?: vs.WebviewPanel;
+    private readonly managerGuiPreview: ManagerGuiPreviewController;
     private currentRunId?: string;
     private readonly agentRuntime: AgentRuntime;
     public readonly session = new AgentSessionCoordinator();
@@ -271,10 +274,44 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         this.topicManager = new ChatTopicManager(storageUri, (msg) => this.postMessage(msg), historyPersistence);
         this.settingsManager = new ChatSettingsManager(aiService, (msg) => this.postMessage(msg), storageUri?.fsPath, () => this.sendSlashCommandCatalog());
         this.contextReferences = new ContextReferenceManager();
+        this.managerGuiPreview = new ManagerGuiPreviewController(
+            this.extensionUri.fsPath,
+            snapshot => this.postMessageToSurface('manager', { type: 'guiPreviewSnapshot', snapshot }),
+            data => {
+                const count = data.elements.length;
+                const context: import('./types').GuiSelectionContext = {
+                    ...data,
+                    id: `gui_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
+                    type: 'gui_selection',
+                    label: `${path.basename(data.uri)} · ${count} GUI`,
+                    description: count === 1
+                        ? `${data.elements[0]!.name || data.elements[0]!.type} · L${data.elements[0]!.line}-${data.elements[0]!.endLine}`
+                        : `${count} selected GUI elements`,
+                    cacheStatus: 'live',
+                };
+                this.postMessageToSurface('manager', { type: 'insertGuiSelectionReference', context });
+            },
+            evidence => this.postMessageToSurface('manager', { type: 'guiVisualVerification', evidence }),
+            (runId, evidence) => this.injectGuiVisualEvidence(runId, evidence),
+            (runId, error) => {
+                const detail = error instanceof Error ? error.message : String(error);
+                this.agentRuntime.steerTurn(
+                    runId,
+                    `[Automatic GUI visual verification unavailable] ${detail}. Use the current structured GUI preview/source only; do not guess visual content or start a new task.`,
+                    `visual_error_${runId}_${Date.now()}`,
+                    undefined,
+                    'visual_verification',
+                );
+            },
+        );
         // Skills appearing or disappearing change the `/skill:<name>` catalog, so
         // every write path resends it instead of waiting for a panel reopen.
         this.agentRunner.toolExecutor.onSkillSaved = () => this.sendSlashCommandCatalog();
-        runLedger.onChange((runId) => this.queueRunSnapshot(runId));
+        runLedger.onChange((runId) => {
+            this.queueRunSnapshot(runId);
+            const writtenFiles = runLedger.getRun(runId)?.writtenFiles ?? [];
+            for (const file of writtenFiles) this.managerGuiPreview.notifyAgentWrite(runId, file);
+        });
         agentProfileCatalog.startWatching();
     }
 
@@ -316,6 +353,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         this.pendingRunSnapshotTimers.clear();
         this.lastRunSnapshotSentAt.clear();
         this.queuedSlashCommands.length = 0;
+        this.managerGuiPreview.dispose();
         void this.agentRuntime.dispose();
     }
 
@@ -392,6 +430,9 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         }
         if (this.lastTokenUsageMessage) {
             send(this.lastTokenUsageMessage);
+        }
+        if (targetSurface === 'manager' && this.managerPanel) {
+            void this.managerGuiPreview.attach(this.managerPanel.webview, this.topicManager.currentTopic?.id ?? 'default');
         }
         const restoredTodos = this.agentRunner.toolExecutor.getTodos();
         if (restoredTodos.length > 0) {
@@ -1167,7 +1208,12 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                         const uiStep = prepareLiveStepForUi(this._liveSteps, step, UI_REPLAY_STEP_LIMIT * 2);
                         if (uiStep && this.topicManager.currentTopic?.id === runTopicId) this.postMessage({ type: 'agentStep', step: uiStep });
                     },
-                    onRunStarted: runId => { this.currentRunId = runId; },
+                    onRunStarted: runId => {
+                        this.currentRunId = runId;
+                        const guiContext = contexts?.find(context => isGuiSelectionContextData(context));
+                        const guiFile = guiContext && isGuiSelectionContextData(guiContext) ? guiContext.uri : undefined;
+                        void this.managerGuiPreview.prepareVisualReview(runId, guiFile, runTopicId);
+                    },
                     abortSignal: this.abortController!.signal,
                     onBeforeFileWrite,
                     onUserQuestion: (request, questionContext) => this.requestUserQuestion(request, questionContext),
@@ -1403,6 +1449,9 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                 this.postMessage({ type: 'generationError', error: errorMsg, canResume });
             }
         } finally {
+            for (const runId of new Set([...completedRunIds, ...(this.currentRunId ? [this.currentRunId] : [])])) {
+                this.managerGuiPreview.finishRun(runId);
+            }
             // Store file snapshots for this message (keyed by the message index)
             // Also record the conversationMessages length so retractMessage can use the
             // correct slice point (avoids index divergence after fork/load).
@@ -3670,6 +3719,43 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
 
     // ─── HTML Content ────────────────────────────────────────────────────────
 
+    private injectGuiVisualEvidence(runId: string, evidence: import('../../shared/guiVisualVerification').GuiVisualEvidence): void {
+        const ratio = evidence.metrics ? (evidence.metrics.changeRatio * 100).toFixed(3) : undefined;
+        const bounds = evidence.metrics?.bounds
+            ? `x=${evidence.metrics.bounds.x}, y=${evidence.metrics.bounds.y}, width=${evidence.metrics.bounds.width}, height=${evidence.metrics.bounds.height}`
+            : 'none';
+        const prompt = [
+            '[Automatic GUI visual verification from the plugin previewer]',
+            `File: ${evidence.file}; review round: ${evidence.round}/2; status: ${evidence.status}.`,
+            ratio === undefined
+                ? 'No reliable before image exists. This is an after-only capture; do not claim a before/after comparison.'
+                : `Changed pixels: ${evidence.metrics!.changedPixels}/${evidence.metrics!.totalPixels} (${ratio}%); bounds: ${bounds}.`,
+            'Images are ordered as before, after, and diff when available. Inspect clipping, overlap, alignment, text readability and unintended visual changes.',
+            'If there is a real problem, correct it with the existing tools. Otherwise explicitly report that the plugin preview was checked and note that it remains an approximation, not game-runtime validation.',
+            'Do not request another screenshot and do not start a new task. Further writes may produce one additional review within the two-round limit.',
+        ].join('\n');
+        const images = [evidence.before, evidence.after, evidence.diff].filter((value): value is string => typeof value === 'string');
+        const accepted = this.agentRuntime.steerTurn(
+            runId,
+            prompt,
+            `visual_${evidence.requestId}`,
+            images,
+            'visual_verification',
+        ).accepted;
+        if (!accepted) {
+            ErrorReporter.debug(SOURCE.CHAT_PANEL, `GUI visual evidence retained without starting a new run: ${runId}`);
+        }
+    }
+
+    public handleGuiVisualCaptureResponse(msg: import('./types').GuiVisualCaptureResponseMessage): void {
+        this.managerGuiPreview.handleVisualCaptureResponse(msg);
+    }
+
+    public async handleGuiPreviewRequest(msg: import('./types').GuiPreviewRequestMessage, sourceSurface: 'chat' | 'manager'): Promise<void> {
+        if (sourceSurface !== 'manager' || !this.managerPanel) return;
+        await this.managerGuiPreview.handleRequest(msg, this.managerPanel.webview);
+    }
+
     private getHtmlContent(webview: vs.Webview): string {
         return getChatPanelHtml(webview, this.extensionUri, {
             imageSources: this.generatedImageSource(webview),
@@ -3683,6 +3769,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
     public async openAgentManager(): Promise<void> {
         if (this.managerPanel) {
             this.managerPanel.reveal(this.managerPanel.viewColumn ?? vs.ViewColumn.One, false);
+            await this.managerGuiPreview.attach(this.managerPanel.webview, this.topicManager.currentTopic?.id ?? 'default');
             this._syncViewChromeState('manager');
             this.openManagerPanelInNewWindow();
             return;
@@ -3698,6 +3785,11 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                 localResourceRoots: [
                     this.extensionUri,
                     this.generatedImageDirectoryUri(),
+                    ...(vs.workspace.workspaceFolders ?? []).map(folder => folder.uri),
+                    ...(() => {
+                        const gamePath = vs.workspace.getConfiguration('stellarisLanguageServices').get<string>('cache.stellaris');
+                        return gamePath && fs.existsSync(gamePath) ? [vs.Uri.file(gamePath)] : [];
+                    })(),
                 ],
             }
         );
@@ -3708,6 +3800,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         this.bindWebview(panel.webview, this._managerDisposables, 'manager');
 
         panel.onDidDispose(() => {
+            this.managerGuiPreview.detach();
             this.managerPanel = undefined;
             this._managerDisposables.forEach(d => d.dispose());
             this._managerDisposables = [];

@@ -1,7 +1,9 @@
 import { Icons } from '../svgIcons';
+import type { GuiElementReference, GuiRegion } from '../../shared/guiPreview';
 
 export type ActiveContextType =
     | 'code_selection'
+    | 'gui_selection'
     | 'diagnostics'
     | 'file'
     | 'folder'
@@ -30,6 +32,9 @@ export interface ActiveContext {
     text?: string;
     tokenEstimate?: number;
     cacheStatus?: 'live' | 'disk' | 'cached' | 'large' | 'missing' | 'external' | 'unknown';
+    documentVersion?: number;
+    elements?: GuiElementReference[];
+    region?: GuiRegion;
 }
 
 export interface MentionResult {
@@ -52,6 +57,7 @@ export interface MentionResult {
 
 export const CONTEXT_TYPE_META: Record<ActiveContextType, { icon: keyof typeof Icons; label: string }> = {
     code_selection: { icon: 'file', label: 'selection' },
+    gui_selection: { icon: 'layers', label: 'GUI' },
     diagnostics: { icon: 'stethoscope', label: 'diagnostics' },
     file: { icon: 'file', label: 'file' },
     folder: { icon: 'folder', label: 'folder' },

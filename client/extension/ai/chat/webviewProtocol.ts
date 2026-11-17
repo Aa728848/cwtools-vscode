@@ -7,12 +7,15 @@ import {
     type WebViewMessage,
 } from '../types';
 import { isSubscriptionProxyMode } from '../../../shared/subscriptionProxy';
+import { isGuiSelection, isGuiSelectionContextData } from '../../../shared/guiPreview';
+import { isGuiVisualCapture, isGuiVisualEvidence } from '../../../shared/guiVisualVerification';
 import {
     fields,
     isArrayOf,
     isBoolean,
     isFiniteNumber,
     isInteger,
+    isIntegerInRange,
     isOneOf,
     isRecord,
     isString,
@@ -42,6 +45,8 @@ function isContextItem(value: unknown): value is ContextItem {
     switch (value.type) {
         case 'code_selection':
             return typeof value.uri === 'string' && isInteger(value.startLine) && isInteger(value.endLine);
+        case 'gui_selection':
+            return isGuiSelectionContextData(value);
         case 'file':
         case 'folder':
             return typeof value.uri === 'string';
@@ -97,6 +102,17 @@ const isOptionalStringArray = optional(isStringArray);
 const noFields = fields();
 
 const validators: Record<WebViewMessage['type'], MessageValidator> = {
+    guiVisualCaptureResponse: fields({
+        requestId: (value: unknown) => typeof value === 'string' && value.length > 0 && value.length <= 160,
+        runId: (value: unknown) => typeof value === 'string' && value.length > 0 && value.length <= 160,
+    }, {
+        capture: optional(isGuiVisualCapture),
+        evidence: optional((value: unknown) => isGuiVisualEvidence(value, true)),
+        error: optional((value: unknown) => typeof value === 'string' && value.length <= 4000),
+    }),
+    guiPreviewRequest: fields({
+        action: isOneOf(['open', 'chooseFile', 'refresh', 'togglePin', 'openFull', 'openSource', 'select', 'addToChat'] as const),
+    }, { file: optional(isString), line: optional(isIntegerInRange(1, 100_000_000)), selection: optional(isGuiSelection) }),
     sendMessage: fields({ text: isString }, { attachedFiles: isOptionalStringArray, images: isOptionalStringArray }),
     steerGeneration: fields({ text: isString }, { images: isOptionalStringArray }),
     sendMessageWithReference: fields({ text: isString, contexts: isContexts }, { images: isOptionalStringArray }),

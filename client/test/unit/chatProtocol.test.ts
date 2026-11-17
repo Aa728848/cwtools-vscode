@@ -61,6 +61,27 @@ describe('AI chat protocol boundaries', () => {
         })).to.equal(null);
     });
 
+    it('validates GUI preview requests and structured selection references', () => {
+        const reference = { path: '0.0', ancestors: ['root'], name: 'confirm', type: 'buttonType', line: 4, endLine: 7 };
+        const context = {
+            id: 'gui-1', type: 'gui_selection', label: 'test.gui · 1 GUI', uri: 'interface/test.gui',
+            documentVersion: 3, elements: [reference], region: { x: 0, y: 0, width: 40, height: 30 },
+        };
+        expect(parseWebviewMessage({ type: 'guiPreviewRequest', action: 'addToChat', selection: { elements: [reference] } })).to.not.equal(null);
+        expect(parseWebviewMessage({ type: 'guiPreviewRequest', action: 'openSource', line: 0 })).to.equal(null);
+        expect(parseWebviewMessage({ type: 'sendMessageWithReference', text: 'align it', contexts: [context] })).to.not.equal(null);
+        expect(parseWebviewMessage({
+            type: 'sendMessageWithReference', text: 'align it',
+            contexts: [{ ...context, region: { x: 0, y: 0, width: -1, height: 30 } }],
+        })).to.equal(null);
+        expect(parseHostMessage({ type: 'guiPreviewSnapshot', snapshot: { status: 'empty', elements: [] } })).to.not.equal(null);
+        expect(parseHostMessage({ type: 'insertGuiSelectionReference', context })).to.not.equal(null);
+        expect(parseHostMessage({ type: 'guiPreviewSnapshot', snapshot: { status: 'ready', elements: [{}] } })).to.equal(null);
+        expect(parseHostMessage({ type: 'guiVisualCaptureRequest', requestId: 'r', runId: 'run', file: 'a.gui', round: 0 })).to.not.equal(null);
+        expect(parseHostMessage({ type: 'guiVisualCaptureRequest', requestId: 'x'.repeat(161), runId: 'run', file: 'a.gui', round: 0 })).to.equal(null);
+        expect(parseWebviewMessage({ type: 'guiVisualCaptureResponse', requestId: 'r', runId: 'run', error: 'x'.repeat(4001) })).to.equal(null);
+    });
+
     it('validates settings before they reach SecretStorage-backed handlers', () => {
         const settings = {
             provider: 'openai',

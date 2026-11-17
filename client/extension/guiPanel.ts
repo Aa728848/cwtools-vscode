@@ -5,9 +5,8 @@ import * as vscode from 'vscode';
 import { panelText } from './panelI18n';
 import * as path from 'path';
 import * as fs from 'fs';
-import { parseGuiFile, buildSpriteIndex, serializePosition, serializeSize, serializeProperty, serializeNewElement, type GuiElement } from './guiParser';
-import { decodeDds, decodeTga, type DdsResult } from './ddsDecoder';
-import { walkFiles } from './fileWalker';
+import { serializePosition, serializeSize, serializeProperty, serializeNewElement } from './guiParser';
+import { GuiPreviewLoader } from './guiPreviewLoader';
 import {
     fields,
     isFiniteNumber,
@@ -77,14 +76,9 @@ export class GuiPanel {
     private readonly _panel: vscode.WebviewPanel;
     private _disposables: vscode.Disposable[] = [];
     private readonly _webviewRootPath: string;
-    private _textureCache: Map<string, DdsResult | null> = new Map();
-    private _textureCacheBytes = 0;
-    private static readonly MAX_CACHE_BYTES = 50 * 1024 * 1024; // 50 MB limit
+    private readonly _loader = new GuiPreviewLoader();
     private _document: vscode.TextDocument | undefined;
-    private _searchRoots: string[] = [];
     private _skipNextReload = false;   // skip reload after programmatic edit
-    /** Aborts any in-flight workspace scan when the panel is disposed. */
-    private _scanAbortController = new AbortController();
     private _contentSnapshots: string[] = [];  // content snapshots for structural undo
     private _lastSnapshotTime = 0;  // debounce: only save one snapshot per 500ms batch
     private static readonly MAX_SNAPSHOTS = 20;
@@ -106,8 +100,18 @@ export class GuiPanel {
                 void vscode.window.showErrorMessage(`${panelText('GUI edit failed', 'GUI 编辑失败')}: ${detail}`);
             });
     }
-    private _spriteIndexCache: Map<string, import('./guiParser').SpriteInfo> | null = null;
-    private _effectNamesCache: string[] | null = null;
+
+    /** Refresh the matching clean GUI document after an Agent disk write. */
+    public static async refreshIfFile(filePath: string): Promise<boolean> {
+        const panel = GuiPanel.currentPanel;
+        const document = panel?._document;
+        if (!panel || !document || document.isDirty) return false;
+        const normalize = (value: string) => process.platform === 'win32' ? path.resolve(value).toLowerCase() : path.resolve(value);
+        if (normalize(document.uri.fsPath) !== normalize(filePath)) return false;
+        const content = await fs.promises.readFile(filePath, 'utf8');
+        await panel._loadAndRender(document, content);
+        return true;
+    }
 
     public static async create(extensionPath: string, document: vscode.TextDocument) {
         const column = vscode.window.activeTextEditor?.viewColumn;
@@ -207,8 +211,8 @@ export class GuiPanel {
                         this._postDocumentState(false, true);
                         return;
                     }
-                    this._textureCache.clear();
-                    this._textureCacheBytes = 0;
+                    this._loader.textureCache.clear();
+                    this._loader.textureCacheBytes = 0;
                     await this._loadAndRender(savedDoc);
                     this._postDocumentState(false, true);
                 }
@@ -218,10 +222,10 @@ export class GuiPanel {
         // Watch .gfx files for sprite index invalidation — incremental by directory
         const gfxWatcher = vscode.workspace.createFileSystemWatcher('**/*.gfx');
         const invalidateSpriteCache = (uri: vscode.Uri) => {
-            if (!this._spriteIndexCache) return;
+            if (!this._loader.spriteIndexCache) return;
             const dir = path.dirname(uri.fsPath);
-            for (const key of this._spriteIndexCache.keys()) {
-                if (key.startsWith(dir)) this._spriteIndexCache.delete(key);
+            for (const key of this._loader.spriteIndexCache.keys()) {
+                if (key.startsWith(dir)) this._loader.spriteIndexCache.delete(key);
             }
         };
         gfxWatcher.onDidChange(invalidateSpriteCache);
@@ -230,79 +234,22 @@ export class GuiPanel {
         this._disposables.push(gfxWatcher);
     }
 
-    /**
-     * Get Stellaris game installation path from the plugin's existing configuration.
-     * Uses `stellarisLanguageServices.cache.stellaris` which is set by the user via the "Select vanilla folder" prompt.
-     */
     private _getGamePath(): string | null {
-        const config = vscode.workspace.getConfiguration('stellarisLanguageServices');
-        const configPath = config.get<string>('cache.stellaris');
-        if (configPath && fs.existsSync(configPath)) return configPath;
-        return null;
+        return this._loader.getGamePath();
     }
 
-    /**
-     * Find the mod root directory by looking for common markers (descriptor.mod, common/, interface/)
-     */
-    private _findModRoot(dir: string): string | null {
-        let current = dir;
-        for (let i = 0; i < 5; i++) {
-            if (fs.existsSync(path.join(current, 'descriptor.mod')) ||
-                fs.existsSync(path.join(current, 'common')) ||
-                (fs.existsSync(path.join(current, 'interface')) && fs.existsSync(path.join(current, 'gfx')))) {
-                return current;
-            }
-            const parent = path.dirname(current);
-            if (parent === current) break;
-            current = parent;
-        }
-        return dir; // fallback to document directory
+    private _findModRoot(dir: string): string {
+        return this._loader.findModRoot(dir);
     }
 
-    private async _loadAndRender(document: vscode.TextDocument) {
-        const content = document.getText();
-        const docDir = path.dirname(document.uri.fsPath);
-        const modRoot = this._findModRoot(docDir);
-
-        // Collect all search roots (mod root + workspace folders + game path)
-        const searchRoots: string[] = [];
-        if (modRoot) searchRoots.push(modRoot);
-        for (const wf of vscode.workspace.workspaceFolders ?? []) {
-            if (!searchRoots.includes(wf.uri.fsPath)) searchRoots.push(wf.uri.fsPath);
-        }
-        // Add Stellaris vanilla game path as fallback for GFX and textures
-        const gamePath = this._getGamePath();
-        if (gamePath && !searchRoots.includes(gamePath)) searchRoots.push(gamePath);
-
-        this._searchRoots = searchRoots;
-
-        // Build sprite index from .gfx files (cached)
-        if (!this._spriteIndexCache) {
-            this._spriteIndexCache = await this._buildSpriteIndex(searchRoots);
-        }
-        const spriteIndex = this._spriteIndexCache;
-
-        // Parse the GUI file
-        const elements = parseGuiFile(content, spriteIndex);
-
-        // Resolve texture URIs for webview display
-        const resolved = this._resolveTextures(elements, searchRoots);
-
-        // Collect sprite names for the webview dropdown
-        const spriteNames = Array.from(spriteIndex.keys()).sort();
-
-        // Collect button effect names (cached)
-        if (!this._effectNamesCache) {
-            this._effectNamesCache = await this._collectButtonEffects(searchRoots);
-        }
-        const effectNames = this._effectNamesCache;
-
+    private async _loadAndRender(document: vscode.TextDocument, contentOverride?: string) {
+        const loaded = await this._loader.load(document, this._panel.webview, contentOverride);
         this._panel.webview.postMessage({
             command: 'render',
-            data: resolved,
+            data: loaded.elements,
             fileName: path.basename(document.fileName),
-            spriteNames,
-            effectNames,
+            spriteNames: loaded.spriteNames,
+            effectNames: loaded.effectNames,
             dirty: document.isDirty,
         });
     }
@@ -316,161 +263,14 @@ export class GuiPanel {
         });
     }
 
-    private async _buildSpriteIndex(searchRoots: string[]): Promise<Map<string, import('./guiParser').SpriteInfo>> {
-        const maxGfxFiles = 500;
-
-        const gfxContents: Array<{ path: string; content: string }> = [];
-        for (const root of searchRoots) {
-            if (gfxContents.length >= maxGfxFiles) break;
-            const searchDirs = [
-                path.join(root, 'interface'),
-                path.join(root, 'gfx'),
-            ];
-
-            for (const dir of searchDirs) {
-                if (gfxContents.length >= maxGfxFiles) break;
-                try { await fs.promises.access(dir); } catch { continue; }
-                const found = await walkFiles(dir, {
-                    ext: '.gfx',
-                    maxFiles: maxGfxFiles - gfxContents.length,
-                    signal: this._scanAbortController.signal,
-                });
-                for (const file of found) {
-                    gfxContents.push({ path: file.path, content: file.content });
-                }
-            }
-        }
-
-        return buildSpriteIndex(gfxContents);
-    }
-
-    /**
-     * Collect button effect names from common/button_effects/*.txt in all search roots.
-     * Extracts top-level keys (e.g. `my_effect = { ... }`) from these files.
-     */
-    private async _collectButtonEffects(searchRoots: string[]): Promise<string[]> {
-        const names = new Set<string>();
-        for (const root of searchRoots) {
-            const dir = path.join(root, 'common', 'button_effects');
-            const files = await walkFiles(dir, {
-                ext: '.txt',
-                recursive: false,
-                signal: this._scanAbortController.signal,
-            });
-            for (const file of files) {
-                // Match only top-level keys: no leading whitespace
-                const regex = /^([a-zA-Z_][a-zA-Z0-9_]*)\s*=\s*\{/gm;
-                let m;
-                while ((m = regex.exec(file.content)) !== null) {
-                    names.add(m[1]!);
-                }
-            }
-        }
-        return Array.from(names).sort();
-    }
-
-    /**
-     * Resolve sprite texture paths to webview-accessible URIs.
-     * Searches for .dds → .png fallback, and converts to webview URIs.
-     */
-    private _resolveTextures(elements: GuiElement[], searchRoots: string[]): GuiElement[] {
-        const resolve = (el: GuiElement): GuiElement => {
-            let textureUri: string | undefined;
-            let texW: number | undefined;
-            let texH: number | undefined;
-
-            if (el.spriteTexture) {
-                const relPath = el.spriteTexture.replace(/\//g, path.sep);
-
-                for (const root of searchRoots) {
-                    const fullDds = path.join(root, relPath);
-                    const fullPng = fullDds.replace(/\.dds$/i, '.png');
-                    const fullTga = fullDds.replace(/\.dds$/i, '.tga');
-
-                    if (fs.existsSync(fullPng)) {
-                        textureUri = this._panel.webview.asWebviewUri(vscode.Uri.file(fullPng)).toString();
-                        break;
-                    }
-
-                    if (fs.existsSync(fullDds)) {
-                        let result: DdsResult | null;
-                        if (this._textureCache.has(fullDds)) {
-                            result = this._textureCache.get(fullDds) ?? null;
-                        } else {
-                            result = decodeDds(fullDds);
-                            const entrySize = result?.dataUri?.length ?? 0;
-                            // Evict oldest entries if cache is too large
-                            while (this._textureCacheBytes + entrySize > GuiPanel.MAX_CACHE_BYTES && this._textureCache.size > 0) {
-                                const oldestKey = this._textureCache.keys().next().value;
-                                if (oldestKey) {
-                                    const old = this._textureCache.get(oldestKey);
-                                    this._textureCacheBytes -= old?.dataUri?.length ?? 0;
-                                    this._textureCache.delete(oldestKey);
-                                }
-                            }
-                            this._textureCache.set(fullDds, result);
-                            this._textureCacheBytes += entrySize;
-                        }
-                        if (result) {
-                            textureUri = result.dataUri;
-                            texW = result.width;
-                            texH = result.height;
-                        } else {
-                            textureUri = `dds:${el.spriteTexture}`;
-                        }
-                        break;
-                    }
-
-                    // Try .tga
-                    if (fs.existsSync(fullTga)) {
-                        let result: DdsResult | null;
-                        if (this._textureCache.has(fullTga)) {
-                            result = this._textureCache.get(fullTga) ?? null;
-                        } else {
-                            result = decodeTga(fullTga);
-                            const entrySize = result?.dataUri?.length ?? 0;
-                            while (this._textureCacheBytes + entrySize > GuiPanel.MAX_CACHE_BYTES && this._textureCache.size > 0) {
-                                const oldestKey = this._textureCache.keys().next().value;
-                                if (oldestKey) {
-                                    const old = this._textureCache.get(oldestKey);
-                                    this._textureCacheBytes -= old?.dataUri?.length ?? 0;
-                                    this._textureCache.delete(oldestKey);
-                                }
-                            }
-                            this._textureCache.set(fullTga, result);
-                            this._textureCacheBytes += entrySize;
-                        }
-                        if (result) {
-                            textureUri = result.dataUri;
-                            texW = result.width;
-                            texH = result.height;
-                        } else {
-                            textureUri = `tga:${el.spriteTexture}`;
-                        }
-                        break;
-                    }
-                }
-            }
-
-            return {
-                ...el,
-                spriteTexture: textureUri ?? el.spriteTexture,
-                textureWidth: texW ?? el.textureWidth,
-                textureHeight: texH ?? el.textureHeight,
-                children: el.children.map(resolve),
-            };
-        };
-        return elements.map(resolve);
-    }
-
     public dispose() {
         GuiPanel.currentPanel = undefined;
-        this._scanAbortController.abort();
+        this._loader.scanAbortController.abort();
         // Release texture cache memory
-        this._textureCache.clear();
-        this._textureCacheBytes = 0;
+        this._loader.textureCache.clear();
+        this._loader.textureCacheBytes = 0;
         this._document = undefined;
-        this._searchRoots = [];
+        this._loader.searchRoots = [];
         this._panel.dispose();
         while (this._disposables.length) {
             const d = this._disposables.pop();
@@ -659,8 +459,8 @@ export class GuiPanel {
                 await vscode.workspace.applyEdit(edit);
                 // Sprite changes need full re-render to resolve new texture
                 if (isSpriteChange) {
-                    this._textureCache.clear();
-                    this._textureCacheBytes = 0;
+                    this._loader.textureCache.clear();
+                    this._loader.textureCacheBytes = 0;
                     await this._loadAndRender(doc);
                 }
             } else {
@@ -678,8 +478,8 @@ export class GuiPanel {
                     edit.replace(doc.uri, line.range, newText);
                     await vscode.workspace.applyEdit(edit);
                     if (isSpriteChange) {
-                        this._textureCache.clear();
-                        this._textureCacheBytes = 0;
+                        this._loader.textureCache.clear();
+                        this._loader.textureCacheBytes = 0;
                         await this._loadAndRender(doc);
                     }
                 } else {
@@ -706,8 +506,8 @@ export class GuiPanel {
                         edit.replace(doc.uri, existingLine.range, newText);
                         await vscode.workspace.applyEdit(edit);
                         if (isSpriteChange) {
-                            this._textureCache.clear();
-                            this._textureCacheBytes = 0;
+                            this._loader.textureCache.clear();
+                            this._loader.textureCacheBytes = 0;
                             await this._loadAndRender(doc);
                         }
                     } else {

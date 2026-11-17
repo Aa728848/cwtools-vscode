@@ -6,48 +6,10 @@
 // ─── Data Types ─────────────────────────────────────────────────────────────
 import { safeEval } from './exprEval';
 import { ErrorReporter } from './ai/errorReporter';
+import type { GuiElement } from '../shared/guiPreview';
+export type { GuiElement } from '../shared/guiPreview';
 
-export interface GuiElement {
-    type: string;
-    name: string;
-    position: { x: number; y: number };
-    size: { width: number; height: number };
-    sizeExplicit?: boolean;
-    sizeUsesXY?: boolean;
-    percentWidth?: boolean;   // true when width was specified as e.g. "100%"
-    percentHeight?: boolean;  // true when height was specified as e.g. "100%"
-    orientation?: string;
-    origo?: string;
-    moveable?: boolean;
-    clipping?: boolean;
-    alwaysTransparent?: boolean;
-    spriteKey?: string;
-    spriteAttr?: 'spriteType' | 'quadTextureSprite';  // which GUI attr referenced the sprite
-    spriteTexture?: string;
-    spriteDefType?: string;  // GFX registry type (corneredTileSpriteType, spriteType, etc.)
-    noOfFrames?: number;
-    frame?: number;
-    textureWidth?: number;
-    textureHeight?: number;
-    text?: string;
-    font?: string;
-    format?: string;
-    maxWidth?: number;
-    maxHeight?: number;
-    scale?: number;
-    rotation?: number;
-    alpha?: number;
-    centerPosition?: boolean;
-    borderSize?: { x: number; y: number };
-    margin?: { top: number; bottom: number; left: number; right: number };
-    spacing?: number;
-    slotSize?: { width: number; height: number };
-    children: GuiElement[];
-    properties: Record<string, unknown>;
-    line: number;
-    endLine: number;                          // closing brace line
-    propertyLines: Record<string, number>;    // property name → source line number
-}
+
 
 export interface SpriteInfo {
     name: string;

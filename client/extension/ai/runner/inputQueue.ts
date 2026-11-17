@@ -6,6 +6,7 @@ export type AgentQueuedInputKind =
     | 'continuation'
     | 'pending'
     | 'background_result'
+    | 'visual_verification'
     /** Peer message delivered into a running team member (Agent Teams). */
     | 'team_message';
 
@@ -79,6 +80,7 @@ function inputPriority(kind: AgentQueuedInputKind): number {
         case 'retry': return 3;
         case 'continuation': return 4;
         case 'pending': return 5;
+        case 'visual_verification': return 2;
         case 'background_result': return 6;
     }
 }

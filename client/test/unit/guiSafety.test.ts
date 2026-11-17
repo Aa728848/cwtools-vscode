@@ -1,8 +1,23 @@
 import { expect } from 'chai';
-import {
+const {
     GUI_SAFE_HIDDEN_POSITION,
     validateOffCanvasGuiPreservation,
-} from '../../extension/guiSafety';
+    findDirtyGuiDocument,
+} = loadGuiSafetyModule();
+
+function loadGuiSafetyModule() {
+    const moduleLoader = require('module') as { _load: (...args: any[]) => any };
+    const originalLoad = moduleLoader._load;
+    moduleLoader._load = function (this: unknown, request: string, ...args: any[]) {
+        if (request === 'vscode') return {};
+        return originalLoad.apply(this, [request, ...args]);
+    };
+    try {
+        return require('../../extension/guiSafety') as typeof import('../../extension/guiSafety');
+    } finally {
+        moduleLoader._load = originalLoad;
+    }
+}
 
 function guiWithChild(child: string): string {
     return [
@@ -15,6 +30,19 @@ function guiWithChild(child: string): string {
         '}',
     ].join('\n');
 }
+
+describe('GUI document write safety', () => {
+    it('finds only the matching unsaved file-backed GUI draft', () => {
+        const target = { uri: { scheme: 'file', fsPath: 'C:/Mod/Interface/Test.gui' }, isDirty: true };
+        const documents = [
+            target,
+            { uri: { scheme: 'file', fsPath: 'C:/Mod/Interface/Test.gui' }, isDirty: false },
+            { uri: { scheme: 'untitled', fsPath: 'C:/Mod/Interface/Test.gui' }, isDirty: true },
+        ];
+        expect(findDirtyGuiDocument('c:/mod/interface/test.gui', documents, 'win32')).to.equal(target);
+        expect(findDirtyGuiDocument('C:/Mod/Interface/Other.gui', documents, 'win32')).to.equal(undefined);
+    });
+});
 
 describe('GUI off-canvas safety', () => {
     it('protects named controls hidden with large coordinates', () => {

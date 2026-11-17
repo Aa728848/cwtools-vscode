@@ -52,6 +52,7 @@ describe('agent manager cross-surface contracts', () => {
 
         expect(manager).to.include("import './chatPanel'");
         expect(manager).to.include("import type { ManagerSnapshotMessage");
+        expect(manager).to.include('data-manager-tab="preview"');
         expect(manager).to.include('data-manager-tab="changes"');
         expect(manager).to.include('data-manager-tab="activity"');
         expect(manager).to.include('data-manager-main-tab="conversation"');
@@ -88,6 +89,11 @@ describe('agent manager cross-surface contracts', () => {
         expect(contracts).to.include('childRuns?: ManagerChildRunView[]');
 
         expect(css).to.include('.manager-inspector-tabs');
+        expect(css).to.include('grid-template-columns: repeat(4, minmax(0, 1fr))');
+        expect(css).to.include('.manager-gui-preview-pane[hidden]');
+        expect(manager).to.include('new ManagerGuiPreviewPane(vscode)');
+        expect(manager).to.include("artifactListEl.hidden = activeTab === 'preview'");
+        expect(manager).to.include("activeTab !== 'preview'");
         expect(css).to.include('.manager-review-files');
         expect(css).to.include('.manager-pane-resizer');
         expect(css).to.include('.manager-diff-line-omitted');
@@ -106,6 +112,21 @@ describe('agent manager cross-surface contracts', () => {
         expect(css).to.not.include('.run-inspector-slider');
         expect(css).to.include('body.agent-manager-shell.artifact-drawer-open');
         expect(css).to.not.include('workspace-toggle {\n    display: none !important;');
+    });
+
+    it('keeps GUI preview state host-owned and protects live GUI drafts', () => {
+        const controller = fs.readFileSync(path.join(root, 'client/extension/ai/managerGuiPreview.ts'), 'utf8');
+        const loader = fs.readFileSync(path.join(root, 'client/extension/guiPreviewLoader.ts'), 'utf8');
+        const fileTools = fs.readFileSync(path.join(root, 'client/extension/ai/tools/fileTools.ts'), 'utf8');
+        const host = fs.readFileSync(path.join(root, 'client/extension/ai/chatPanel.ts'), 'utf8');
+        expect(controller).to.include('resolveGuiElementReference');
+        expect(controller).to.include('documentVersion: this.currentDocument.version');
+        expect(controller).to.include('GuiPanel.refreshIfFile');
+        expect(controller).to.include('this.loader.load(document, webview, content)');
+        expect(loader).to.include('isPathInsideOrEqual(fullDds, root)');
+        expect(fileTools).to.include('findDirtyGuiDocument');
+        expect(host).to.include("type: 'insertGuiSelectionReference'");
+        expect(host).to.include('this.managerGuiPreview.attach');
     });
 
     it('keeps task progress and changed files visible above the manager composer', () => {

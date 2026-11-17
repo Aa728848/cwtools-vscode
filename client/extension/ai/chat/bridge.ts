@@ -209,6 +209,12 @@ export async function routeWebviewMessage(
         case 'openAgentManager':
             await provider.openAgentManager();
             break;
+        case 'guiPreviewRequest':
+            await provider.handleGuiPreviewRequest(msg, sourceSurface);
+            break;
+        case 'guiVisualCaptureResponse':
+            provider.handleGuiVisualCaptureResponse(msg);
+            break;
         case 'retractMessage':
             await provider.retractMessage(msg.messageIndex);
             break;

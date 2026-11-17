@@ -92,6 +92,7 @@ import { planOutputRepetitionRetry } from './runner/outputRepetitionRecovery';
 import { ReadTracker } from './runner/readTracker';
 import { TurnRunner } from './runner/turnRunner';
 import type { AgentInputQueue, AgentQueuedInputKind } from './runner/inputQueue';
+import { queuedInputContent } from './runner/queuedInputContent';
 import type { RunEventSink } from './runner/runContext';
 import { activeTurnRegistry } from './runner/activeTurnRegistry';
 import { isRetryStepRequest, type RetryStepRequest, type StepRequest } from './runner/stepRequest';
@@ -1206,6 +1207,7 @@ export class AgentRunner {
                 await this.clearResumeState(context.topicId);
             }
         };
+
 
         // Vision capability check: if the active provider doesn't support image input,
         // silently drop image attachments and emit a warning so the user knows.
@@ -2377,6 +2379,8 @@ export class AgentRunner {
         const _providerId0 = options?.providerId ?? _config0.provider;
         const _provider0 = getProvider(_providerId0);
         const useDsmlToolRole0 = _provider0.toolCallStyle === 'dsml';
+        const visionSupported = _provider0.supportsVision
+            && isModelVisionCapableFor(_providerId0, options?.model ?? _config0.model ?? _provider0.defaultModel);
 
         // Compute context limit and tool result budget once for the entire loop
         const bypassSandbox = vs.workspace.getConfiguration('stellarisLanguageServices.ai.developer').get<boolean>('disableSecuritySandbox') === true;
@@ -2584,18 +2588,12 @@ export class AgentRunner {
                 const pendingInputs = options?.inputQueue?.drain() ?? [];
                 if (pendingInputs.length > 0) {
                     for (const input of pendingInputs) {
-                        const inputPrefix = input.kind === 'team_message'
-                            ? '[Team message received while running]'
-                            : '[User steering input queued during run]';
-                        const content: ChatMessage['content'] = input.images && input.images.length > 0
-                            ? [
-                                { type: 'text' as const, text: `${inputPrefix}\n${input.message}` },
-                                ...input.images.map(url => ({
-                                    type: 'image_url' as const,
-                                    image_url: { url, detail: 'auto' as const },
-                                })),
-                            ]
-                            : `${inputPrefix}\n${input.message}`;
+                        const inputPrefix = input.kind === 'visual_verification'
+                            ? '[Automatic GUI visual verification]'
+                            : input.kind === 'team_message'
+                                ? '[Team message received while running]'
+                                : '[User steering input queued during run]';
+                        const content = queuedInputContent(input, inputPrefix, visionSupported);
                         messages.push({
                             role: 'user',
                             content,
@@ -3483,18 +3481,12 @@ export class AgentRunner {
                     const lateInputs = options?.inputQueue?.drain() ?? [];
                     if (lateInputs.length > 0) {
                         for (const input of lateInputs) {
-                            const inputPrefix = input.kind === 'team_message'
-                                ? '[Team message received while running]'
-                                : '[User steering input queued during run]';
-                            const steerContent: ChatMessage['content'] = input.images && input.images.length > 0
-                                ? [
-                                    { type: 'text' as const, text: `${inputPrefix}\n${input.message}` },
-                                    ...input.images.map(url => ({
-                                        type: 'image_url' as const,
-                                        image_url: { url, detail: 'auto' as const },
-                                    })),
-                                ]
-                                : `${inputPrefix}\n${input.message}`;
+                            const inputPrefix = input.kind === 'visual_verification'
+                                ? '[Automatic GUI visual verification]'
+                                : input.kind === 'team_message'
+                                    ? '[Team message received while running]'
+                                    : '[User steering input queued during run]';
+                            const steerContent = queuedInputContent(input, inputPrefix, visionSupported);
                             messages.push({ role: 'user', content: steerContent });
                             options?.runEventSink?.appendSoon('input_injected', {
                                 inputId: input.id,

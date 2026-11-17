@@ -13,6 +13,8 @@ import { ErrorReporter } from './errorReporter';
 import { diagnosticCodeString } from '../diagnosticI18n';
 import { SOURCE } from './messages';
 import { getProjectWorkspaceRoot, resolveProjectWorkspacePath } from './workspacePaths';
+import { isGuiSelectionContextData, type GuiSelectionContextData } from '../../shared/guiPreview';
+import { buildGuiSelectionPrompt } from './guiContext';
 
 function isAgentTempPath(filePath: string): boolean {
     return /(?:^|[\\/])\.cwtools[\\/](?:tmp|[^\\/]+[\\/]tmp)(?:[\\/]|$)/i.test(filePath);
@@ -105,6 +107,8 @@ export class ContextReferenceManager {
                     liveContent,
                     '```',
                 ].join('\n'));
+            } else if (ctx.type === 'gui_selection' && isGuiSelectionContextData(ctx)) {
+                blocks.push(await this.formatReferencedGuiSelection(ctx));
             } else if (ctx.type === 'file') {
                 blocks.push(await this.readReferencedFilePreview(ref.uri));
             } else if (ctx.type === 'folder') {
@@ -161,12 +165,16 @@ export class ContextReferenceManager {
 
         const doc = await vs.workspace.openTextDocument(vs.Uri.file(targetPath));
         const editor = await vs.window.showTextDocument(doc, { preview: true });
-        const startLine = typeof ref.startLine === 'number'
-            ? Math.max(0, ref.startLine - 1)
-            : typeof ref.line === 'number'
-                ? Math.max(0, ref.line)
-                : 0;
-        const endLine = typeof ref.endLine === 'number' ? Math.max(startLine, ref.endLine - 1) : startLine;
+        const startLine = isGuiSelectionContextData(ctx) && ctx.elements[0]
+            ? Math.max(0, ctx.elements[0].line - 1)
+            : typeof ref.startLine === 'number'
+                ? Math.max(0, ref.startLine - 1)
+                : typeof ref.line === 'number'
+                    ? Math.max(0, ref.line)
+                    : 0;
+        const endLine = isGuiSelectionContextData(ctx) && ctx.elements[0]
+            ? Math.max(startLine, ctx.elements[0].endLine - 1)
+            : typeof ref.endLine === 'number' ? Math.max(startLine, ref.endLine - 1) : startLine;
         const column = typeof ref.column === 'number' ? Math.max(0, ref.column) : 0;
         const start = new vs.Position(Math.min(startLine, doc.lineCount - 1), column);
         const end = new vs.Position(Math.min(endLine, doc.lineCount - 1), doc.lineAt(Math.min(endLine, doc.lineCount - 1)).text.length);
@@ -401,6 +409,19 @@ export class ContextReferenceManager {
                 vanillaId,
                 cacheStatus: 'cached',
             }];
+        }
+    }
+
+    private async formatReferencedGuiSelection(context: GuiSelectionContextData): Promise<string> {
+        const targetPath = this.resolveWorkspacePath(context.uri);
+        if (!targetPath) return `GUI selection '${context.uri}' is outside the workspace and cannot be resolved.`;
+        try {
+            const uri = vs.Uri.file(targetPath);
+            const document = await vs.workspace.openTextDocument(uri);
+            return buildGuiSelectionPrompt(document.getText(), context, document.version, document.isDirty);
+        } catch (error) {
+            ErrorReporter.warn(SOURCE.CHAT_PANEL, 'Failed to resolve GUI selection context.', error);
+            return `GUI selection '${context.uri}' could not be read. Verify the file before editing.`;
         }
     }
 

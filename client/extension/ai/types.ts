@@ -8,6 +8,9 @@ import type { SubscriptionAccountQuota } from '../../shared/subscriptionQuota';
 import type { CwtRuleValueReference } from '../../shared/pdxSemanticCatalog';
 import type { AgentToolName } from './tools/registry';
 import type { ProviderMeta } from '../../shared/providerMeta';
+import type { GuiPreviewSnapshot, GuiSelection, GuiSelectionContextData } from '../../shared/guiPreview';
+import type { GuiVisualCaptureRequestMessage, GuiVisualCaptureResponseMessage, GuiVisualEvidence } from '../../shared/guiVisualVerification';
+export type { GuiVisualCaptureRequestMessage, GuiVisualCaptureResponseMessage, GuiVisualEvidence } from '../../shared/guiVisualVerification';
 export type { CwtRuleValueReference, CwtShaderReference, PdxRuleCategory, PdxSemanticCatalog } from '../../shared/pdxSemanticCatalog';
 export type { AgentToolName } from './tools/registry';
 export type { ProviderMeta };
@@ -2534,7 +2537,7 @@ export interface ChatHistoryMessage {
 
 // ─── Context Tray Types ──────────────────────────────────────────────────────
 
-export type ContextItemType = 'code_selection' | 'image' | 'diagnostics' | 'file' | 'folder' | 'scope' | 'symbol' | 'vanilla' | 'blackboard' | 'quote';
+export type ContextItemType = 'code_selection' | 'gui_selection' | 'image' | 'diagnostics' | 'file' | 'folder' | 'scope' | 'symbol' | 'vanilla' | 'blackboard' | 'quote';
 
 export interface BaseContextItem {
     id: string;
@@ -2550,6 +2553,10 @@ export interface CodeSelectionContext extends BaseContextItem {
     uri: string;
     startLine: number;
     endLine: number;
+}
+
+export interface GuiSelectionContext extends BaseContextItem, GuiSelectionContextData {
+    type: 'gui_selection';
 }
 
 export interface FileContext extends BaseContextItem {
@@ -2598,7 +2605,7 @@ export interface BlackboardContext extends BaseContextItem {
     key: string;
 }
 
-export type ContextItem = CodeSelectionContext | FileContext | FolderContext | DiagnosticsContext | ScopeContext | SymbolContext | VanillaContext | BlackboardContext | QuoteContext | BaseContextItem;
+export type ContextItem = CodeSelectionContext | GuiSelectionContext | FileContext | FolderContext | DiagnosticsContext | ScopeContext | SymbolContext | VanillaContext | BlackboardContext | QuoteContext | BaseContextItem;
 
 export interface QuoteContext extends BaseContextItem {
     type: 'quote';
@@ -2630,7 +2637,17 @@ export interface PermissionRequestPreflight {
     protectedPathOverrides?: string[];
 }
 
+export interface GuiPreviewRequestMessage {
+    type: 'guiPreviewRequest';
+    action: 'open' | 'chooseFile' | 'refresh' | 'togglePin' | 'openFull' | 'openSource' | 'select' | 'addToChat';
+    file?: string;
+    line?: number;
+    selection?: GuiSelection;
+}
+
 export type WebViewMessage =
+    | GuiPreviewRequestMessage
+    | GuiVisualCaptureResponseMessage
     | { type: 'sendMessage'; text: string; attachedFiles?: string[]; images?: string[] }
     | { type: 'steerGeneration'; text: string; images?: string[] }
     | { type: 'sendMessageWithReference'; text: string; contexts: ContextItem[]; images?: string[] }
@@ -2742,6 +2759,10 @@ export type HostMessage =
     | { type: 'generationComplete'; result: GenerationResult }
     | { type: 'generationError'; error: string; canResume?: boolean }
     | { type: 'insertSelectionReference'; relPath: string; startLine: number; endLine: number }
+    | { type: 'insertGuiSelectionReference'; context: GuiSelectionContext }
+    | { type: 'guiPreviewSnapshot'; snapshot: GuiPreviewSnapshot }
+    | GuiVisualCaptureRequestMessage
+    | { type: 'guiVisualVerification'; evidence: GuiVisualEvidence }
     | { type: 'topicList'; topics: TopicSummary[]; stats?: TopicStats }
     | { type: 'loadTopicMessages'; messages: ChatHistoryMessage[]; targetSurface?: 'chat' | 'manager' }
     | { type: 'streamToken'; token: string }

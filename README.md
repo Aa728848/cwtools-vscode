@@ -18,7 +18,7 @@ Most language features work across supported Paradox game profiles. The visual t
 | Area | What you can do |
 | --- | --- |
 | Script editing | Get diagnostics, completion, hover information, navigation, references, symbols, CodeLens, and inlay hints for Paradox script and localisation. Stellaris hovers also carry reverse-engineered engine cost and hardcoded-behaviour notes for the script command under the cursor. |
-| Visual tools | Preview and edit Stellaris GUI files, solar systems, static galaxies, particles, entities, technology trees, event chains, and weapon targeting weights. Ship top-icon DDS sheets can be rendered from a ship set's models. |
+| Visual tools | Preview and edit Stellaris GUI files, global ship designs, solar systems, static galaxies, particles, entities, technology trees, event chains, and weapon targeting weights. Ship top-icon DDS sheets can be rendered from a ship set's models. |
 | Shader editing | Work with `.shader` and `.fxh` files using compile-unit-aware diagnostics, navigation, completion, formatting, rename, and semantic highlighting. |
 | CWT rule editing | Edit `.cwt` rule files with their own language id: parser/structure diagnostics (CWT0xx), directive and field-expression validation (CWT1xx/CWT2xx), project-wide undefined-reference and duplicate-type checks (CWT3xx), context completion for root blocks/directives/field expressions/symbols, cross-file navigation, and safe hot-swap of validated edits from the configured manual rules folder into the game model (CWT9xx). A rules-only repository starts the server in CWT-only mode without a game install and never activates a game model; a game workspace keeps full mode. |
 | Vanilla comparison | Compare a mod file with its vanilla counterpart and migrate the block under the cursor. |
@@ -56,8 +56,19 @@ Use the editor-title action or the file context menu:
 - `.asset` and `.gfx`: entity, animation, and particle previews
 - technology and event files: dependency graphs
 - `common/component_templates/*.txt`: weapon targeting-weight analysis
+- `common/global_ship_designs/*.txt`: global ship design workbench
 
 Edits made by a visual editor use VS Code workspace edits, so they participate in normal undo and redo. Some previews are intentionally approximate; for example, runtime-generated hyperlanes are never presented as exact source data.
+
+#### Edit global ship designs visually
+
+Open `common/global_ship_designs/*.txt` in a mod workspace and run **Open Ship Design Workbench** from the editor title or Command Palette. The workbench opens in the current editor column instead of splitting the editor in half. The current file and other workspace designs can be switched from the design tree; create, duplicate, and delete operations write only the active workspace document. Display names follow the configured localisation languages, including vanilla fallback and `$reference$` expansion, while edit fields and write-back keep the original script keys.
+
+The centre view assembles the ship-size root entity, selected section entities, and visible weapon entities through their real mesh/script locators, with graphical-culture prefix fallback, textures, `attach` children, orbit/pan/zoom, and the `ship_designer` worldgfx environment when available. Section-only hulls do not require an artificial root mesh, and large hull meshes (tens of MB) are streamed from the workspace instead of being size-limited. Missing models or locators remain editable; actual loading or operation failures use a short error message rather than a persistent diagnostics panel. The Stellaris-style HUD overlays component icons and size badges above and below the model, resolves those icons from `.gfx` sprite definitions with DDS/TGA decoding, and keeps production and ship-data readouts on the right. Sections are arranged left-to-right, with up to five components per row in each section column. Parameterized `inline_script` components are expanded for key, size, icon, component set, and statically evaluable power before candidates and icons are resolved. The component library and the design-card strip do not cover the ship with diagnostic lists.
+
+The slot editor changes sections, components, and required core components. Required components appear as a vertical icon rail on the right edge of the viewport, one position per ship-size `required_component_set` (empty sets show a placeholder); clicking one lists only compatible components from the same set in the library, and dropping or clicking a candidate replaces it. The layout follows the in-game ship designer: clicking a slot opens the **Add components** library on the left (compatible candidates only, with icons, tier numerals, and size badges), and designs are listed as cards grouped by ship size below the viewport. The library filters by name or key, by tier derived from `upgrades_to` chains, can hide obsolete components whose upgrade is also listed, and can hide vanilla components (definitions that resolve to the game rather than a workspace root); the filters are remembered. Clicking a library component picks it up: its icon follows the cursor, every slot it can go into is highlighted, and each click on a highlighted slot places it; right-click or Esc puts it down. Dragging a component onto a slot also works, or drop it on **Fill all** to equip every compatible slot (tick **Only empty slots** to keep equipped slots); switching designs from the card strip keeps the library open on the closest matching slot. Every edit updates only a Host-owned draft, and the component library stays open across draft refreshes. Replacing a component rebuilds only that component's model; the rest of the ship, the camera, and the library list stay in place. Undo, redo, and discard also affect only that draft. The host revalidates the current slot, component, fixed-target state, and compatibility before every drop. There is no incompatible-candidate toggle or diagnostics list. **Generate draft** is an offline, deterministic loadout generator with role and technology-scope choices (all, starting, or custom prerequisites); it returns an explainable unsaved draft and does not reproduce the engine's runtime auto-best algorithm.
+
+Only `global_ship_designs` is edited: ship sizes, section/component templates, assets, and locators are read-only inputs. Growth-stage loadouts are read-only and their source is preserved; shared metadata remains editable. The source TextDocument is not edited while you work. **Save** applies the current draft through one VS Code workspace edit and then saves the document. Semantic incompatibilities do not block saving, but malformed source, stale document versions, and writes outside the workspace do. Common static costs, upkeep, power, hull, defences, speed, and sensor values show their provenance; unresolved expressions, dynamic country modifiers, unsupported damage formulas, and non-representable shaders remain explicitly partial or unknown rather than being presented as exact game values.
 
 #### Generate ship top-icon sheets from models
 
@@ -193,7 +204,7 @@ Stellaris Language Serves 是一款面向 Paradox Mod 开发的 VS Code 扩展�
 | 范围 | 可以做什么 |
 | --- | --- |
 | 脚本编辑 | 为 Paradox 脚本和本地化提供诊断、补全、悬停信息、跳转、引用、符号、CodeLens 和嵌入提示。Stellaris 的悬停还会附带光标所在脚本命令的引擎开销与硬编码行为说明（来自反编译分析）。 |
-| 可视化工具 | 预览或编辑 Stellaris GUI、恒星系、静态银河、粒子、实体、科技树、事件链和武器索敌权重；也可以从舰船模型渲染舰船顶部图标 DDS 表。 |
+| 可视化工具 | 预览或编辑 Stellaris GUI、全局舰船设计、恒星系、静态银河、粒子、实体、科技树、事件链和武器索敌权重；也可以从舰船模型渲染舰船顶部图标 DDS 表。 |
 | Shader 编辑 | 按真实编译单元处理 `.shader` 和 `.fxh`，提供诊断、跳转、补全、格式化、重命名和语义高亮。 |
 | CWT 规则编辑 | 用独立的 `cwt` 语言编辑 `.cwt` 规则文件:解析/结构诊断(CWT0xx)、指令与字段表达式校验(CWT1xx/CWT2xx)、项目级未定义引用与重复类型检查(CWT3xx)、根块/指令/字段表达式/符号的上下文补全、跨文件跳转,以及把当前配置的手动规则目录中验证通过的编辑安全热替换进游戏模型(CWT9xx)。纯规则仓库以 CWT-only 模式启动服务,无需游戏安装且不会激活游戏模型;游戏工作区保持 full mode。 |
 | 原版对比 | 将 Mod 文件与原版对应文件对比，并迁移光标所在的代码块。 |
@@ -231,8 +242,19 @@ Stellaris Language Serves 是一款面向 Paradox Mod 开发的 VS Code 扩展�
 - `.asset`、`.gfx`：实体、动画和粒子预览
 - 科技与事件文件：依赖关系图
 - `common/component_templates/*.txt`：武器索敌权重分析
+- `common/global_ship_designs/*.txt`：全局舰船设计工作台
 
 可视化编辑器通过 VS Code 工作区编辑写回文件，因此可以正常撤销和重做。部分预览只能近似表达游戏运行时结果；例如，运行时随机生成的超空间航道不会被当成精确数据展示。
+
+#### 可视化编辑全局舰船设计
+
+在 Mod 工作区打开 `common/global_ship_designs/*.txt`，通过编辑器标题栏或命令面板运行 **打开舰船设计工作台**。工作台在当前编辑器列中打开，不再把编辑器拆成左右半屏。设计树可以切换当前文件和其他工作区设计；新建、复制和删除只写入当前工作区文档。显示名按本地化语言设置解析，支持原版回退和 `$引用$` 展开，编辑字段与写回仍保留原始脚本 key。
+
+中央视口按真实 mesh/脚本 locator 组装船型根实体、所选区段和可见武器实体，支持文化前缀回退、纹理、`attach` 子实体、旋转/平移/缩放，并在可用时使用 `ship_designer` worldgfx 环境。单区段船体不需要伪造根 mesh；数十 MB 的大型船体网格会从工作区流式加载，不再受大小限制而缺失。模型或 locator 缺失时仍可编辑；实际加载或操作失败只显示简短错误，不再提供常驻诊断面板。游戏式 HUD 在模型上下方叠加组件图标和尺寸徽章，图标由 `.gfx` 精灵定义经 DDS/TGA 解码获得；右侧依次显示生产与舰船数据。区段按列从左到右排列，每列每行最多 5 个组件。参数化 `inline_script` 会先展开 key、尺寸、图标、component_set 和可静态求值的功率，再参与候选与图标解析。组件库与设计卡片条不再用诊断列表遮挡舰船。
+
+槽位编辑器可以修改区段、部件和必填核心组件。必需部件以竖排图标栏显示在视口右侧，按船型的 `required_component_set` 逐个占位（未填充的集合显示空位）；点击后组件库只列出同一集合的兼容部件，拖放或点击即可替换。布局参照游戏舰船设计器：点击槽位后左侧打开**增加部件**组件库（仅兼容候选，显示图标、等级罗马数字与尺寸徽章），设计以按船型分组的卡片列在视口下方。组件库可按名称或键搜索、按 `upgrades_to` 升级链推算的等级筛选，可隐藏列表中已有升级版的淘汰部件，也可隐藏原版部件（定义文件解析到游戏目录而非工作区），筛选条件会被记住。点击组件库中的部件即“拿起”它：图标跟随鼠标，所有可安装的槽位高亮，点击高亮槽位即可放置并继续点下一个，右键或 Esc 取消；也可直接把部件拖到槽位；拖到**填充全部**按钮会填入所有兼容槽位（勾选**仅填充空槽**则保留已装备槽位）。从底部卡片切换设计时，组件库保持打开并定位到最接近的槽位。点击候选是键盘与无拖动环境的回退。所有编辑只更新 Host 持有的草稿，草稿刷新时组件库保持打开；替换部件时只重建该部件的模型，舰船其余部分、视角和组件库列表保持不动；撤销、重做和放弃也只作用于草稿。每次拖放都由 Host 根据当前草稿重新校验槽位、部件、固定状态和兼容性。工作台没有不兼容候选开关或诊断列表。**生成草稿**是确定性的离线装载生成器，可选择角色与科技范围（全部、初始或自定义前置闭包），生成带说明的未保存草稿，不复刻引擎运行时 auto-best 算法。
+
+工作台只编辑 `global_ship_designs`：船型、区段/部件模板、资产和 locator 都是只读输入。成长阶段配装只读并保留原文，通用元数据仍可编辑。编辑过程中不修改源 TextDocument；点击**保存**时才通过一次 VS Code 工作区编辑应用当前草稿并保存文档。语义不兼容不阻止保存；语法损坏、文档版本冲突和工作区外写入会被拒绝。常用静态费用、维护、能量、船体、防御、速度和探测值显示来源；未解析表达式、动态国家修正、未支持的伤害公式和无法表达的 Shader 会明确标为部分或未知，不冒充游戏内精确值。
 
 #### 从模型生成舰船顶部图标表
 

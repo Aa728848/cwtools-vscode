@@ -215,6 +215,28 @@ export default [
             copyFile('client/webview/entityPreview.css', 'release/bin/client/webview/entityPreview.css'),
         ],
     },
+    // Global Ship Design Workbench webview bundle
+    {
+        input: './client/webview/shipDesignPreview.ts',
+        output: {
+            file: './release/bin/client/webview/shipDesignPreview.js',
+            format: "iife",
+            name: "cwtoolsshipdesignpreview",
+            indent: false,
+        },
+        plugins: [
+            resolve({ browser: true }),
+            commonjs(),
+            typescript({
+                tsconfig: ".config/tsconfig.webview-ship-design.json",
+                clean: true,
+                tsconfigOverride: {
+                    exclude: ["client/test/**/*", "**/*.test.ts", "client/extension/**"]
+                }
+            }),
+            copyFile('client/webview/shipDesignPreview.css', 'release/bin/client/webview/shipDesignPreview.css'),
+        ],
+    },
     // Particle Preview / Editor webview bundle
     {
         input: './client/webview/particlePreview.ts',

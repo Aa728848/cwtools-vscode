@@ -30,7 +30,7 @@ import { diagnosticCodeString } from '../../diagnosticI18n';
 import { getPrivateTopicStorageDir, canonicalPathKey } from '../workspacePaths';
 import { isPlanModeCardArtifactFile } from '../planModeGuard';
 import { isPathInsideOrEqual } from '../../pathScope';
-import { findDirtyGuiDocument } from '../../guiSafety';
+import { findDirtyGuiDocument, findDirtyShipDesignDocument, isGlobalShipDesignPath, type VisualEditorDocumentState } from '../../visualEditorSafety';
 import {
     resolveReadablePathInput,
     resolveWorkspacePathInput,
@@ -401,11 +401,21 @@ export class FileToolHandler {
             if (topicArtifact) return topicArtifact;
             throw new Error(`Access denied: Cannot write outside the workspace root: '${resolution.resolved}'.`);
         }
-        if (path.extname(resolution.resolved).toLowerCase() === '.gui') {
+        const isGui = path.extname(resolution.resolved).toLowerCase() === '.gui';
+        const isShipDesign = isGlobalShipDesignPath(resolution.resolved);
+        if (isGui || isShipDesign) {
             const target = this.pathKey(resolution.resolved);
-            const dirtyDocument = findDirtyGuiDocument(target, vs.workspace.textDocuments);
+            const documents: VisualEditorDocumentState[] = [...vs.workspace.textDocuments];
+            if (isShipDesign) {
+                const { ShipDesignPanel } = await import('../../shipDesignPanel');
+                const draft = ShipDesignPanel.currentPanel?.dirtyDocumentState;
+                if (draft) documents.push(draft);
+            }
+            const dirtyDocument = isGui
+                ? findDirtyGuiDocument(target, documents)
+                : findDirtyShipDesignDocument(target, documents);
             if (dirtyDocument) {
-                throw new Error(`Unsaved GUI document: '${dirtyDocument.uri.fsPath}' has unsaved changes. Ask the user to save it before any Agent write; do not overwrite the in-memory draft with disk content.`);
+                throw new Error(`Unsaved visual editor document: '${dirtyDocument.uri.fsPath}' has unsaved changes. Ask the user to save it before any Agent write; do not overwrite the in-memory draft with disk content.`);
             }
         }
         // ReadTracker write-gate safety interception (D1)

@@ -1,13 +1,13 @@
 import { parsePdx, type PdxNode } from './guiParser';
-import * as path from 'path';
+import {
+    findDirtyGuiDocument as findDirtyVisualGuiDocument,
+    type VisualEditorDocumentState,
+} from './visualEditorSafety';
 
 export const GUI_OFF_CANVAS_THRESHOLD = 5_000;
 export const GUI_SAFE_HIDDEN_POSITION = -9_999;
 
-export interface GuiDocumentState {
-    uri: { scheme: string; fsPath: string };
-    isDirty: boolean;
-}
+export type GuiDocumentState = VisualEditorDocumentState;
 
 /** Return the unsaved in-memory GUI draft that must block a disk-based Agent write. */
 export function findDirtyGuiDocument<T extends GuiDocumentState>(
@@ -15,14 +15,7 @@ export function findDirtyGuiDocument<T extends GuiDocumentState>(
     documents: readonly T[],
     platform: NodeJS.Platform = process.platform,
 ): T | undefined {
-    const normalize = (value: string) => {
-        const resolved = path.resolve(value);
-        return platform === 'win32' ? resolved.toLowerCase() : resolved;
-    };
-    const target = normalize(filePath);
-    return documents.find(document => document.uri.scheme === 'file'
-        && document.isDirty
-        && normalize(document.uri.fsPath) === target);
+    return findDirtyVisualGuiDocument(filePath, documents, platform);
 }
 
 export interface OffCanvasGuiContract {

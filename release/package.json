@@ -179,6 +179,11 @@
                     "group": "navigation"
                 },
                 {
+                    "command": "cwtools.shipDesign.open",
+                    "when": "resourceExtname == .txt && resourcePath =~ /global_ship_designs/ && editorLangId == stellaris",
+                    "group": "navigation"
+                },
+                {
                     "command": "cwtools.previewSolarSystem",
                     "when": "resourceExtname == .txt && resourcePath =~ /solar_system_initializers/",
                     "group": "navigation"
@@ -501,6 +506,12 @@
                 "title": "%commands.stellarisLanguageServices.images.checkImageMagick.title%",
                 "category": "Paradox Images",
                 "icon": "$(check)"
+            },
+            {
+                "command": "cwtools.shipDesign.open",
+                "title": "%commands.stellarisLanguageServices.shipDesign.open.title%",
+                "category": "Stellaris",
+                "icon": "$(rocket)"
             },
             {
                 "command": "cwtools.shipIcons.generateSheet",

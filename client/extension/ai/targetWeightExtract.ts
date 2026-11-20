@@ -737,12 +737,21 @@ function evaluateArithmetic(
 }
 
 /** 文本字段（key / type）的参数插值（`kuat_$idx$_$type$` 这种拼 id 写法也算）；非引用则取原值（去引号）。 */
-function resolveInlineText(raw: string | undefined, params: ReadonlyMap<string, string>): string | undefined {
+export function resolveInlineText(raw: string | undefined, params: ReadonlyMap<string, string>): string | undefined {
     if (!raw) return undefined;
     const resolved = interpolateParams(raw.trim(), params);
     if (!resolved) return undefined;
     const text = unquote(resolved).trim();
     return text ? text : undefined;
+}
+
+export function resolveInlineScriptText(
+    call: InlineScriptCall,
+    registry: ReadonlyMap<string, InlineScriptTemplate>,
+    field: string,
+): string | undefined {
+    const template = registry.get(call.script);
+    return template ? resolveInlineText(template.bindings.get(field), call.params) : undefined;
 }
 
 /**

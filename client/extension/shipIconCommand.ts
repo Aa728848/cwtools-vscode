@@ -130,7 +130,7 @@ async function listDirectory(directoryPath: string): Promise<string[]> {
  * has a path wins. Directory listings are the union of every layer, ordered by the
  * same priority so a scan sees shadowed files first.
  */
-class LayeredShipIconDataSource implements ShipIconDataSource {
+export class LayeredShipIconDataSource implements ShipIconDataSource {
     private readonly layers: readonly string[];
 
     constructor(workspaceRoots: readonly string[], vanillaRoot: string) {
@@ -152,6 +152,19 @@ class LayeredShipIconDataSource implements ShipIconDataSource {
         for (const layer of this.layers) {
             const content = await readTextFileIfSmall(toFileSystemPath(layer, normalized));
             if (content !== undefined) return content;
+        }
+        return undefined;
+    }
+
+    /** Absolute file path for Host-owned webview URI creation; no Webview path is accepted. */
+    resolvePath(relativePath: string): string | undefined {
+        const normalized = normalizeRelativePath(relativePath);
+        if (normalized === undefined) return undefined;
+        for (const layer of this.layers) {
+            const candidate = toFileSystemPath(layer, normalized);
+            try {
+                if (fs.statSync(candidate).isFile()) return candidate;
+            } catch { /* Try the next layer. */ }
         }
         return undefined;
     }
@@ -189,7 +202,7 @@ class LayeredShipIconDataSource implements ShipIconDataSource {
 // ── Game path ────────────────────────────────────────────────────────────────
 
 /** Vanilla root: the Stellaris profile's configured cache path, as every other command reads it. */
-function resolveVanillaGamePath(): string | undefined {
+export function resolveVanillaGamePath(): string | undefined {
     const profile = getProfileByLanguageId('stellaris');
     const settingName = profile.cacheSettingKey.replace(/^stellarisLanguageServices\./, '');
     const configured = vs.workspace.getConfiguration('stellarisLanguageServices').get<string>(settingName);
@@ -203,7 +216,7 @@ function resolveVanillaGamePath(): string | undefined {
     }
 }
 
-function collectWorkspaceRoots(): string[] {
+export function collectWorkspaceRoots(): string[] {
     const roots: string[] = [];
     const seen = new Set<string>();
     for (const folder of vs.workspace.workspaceFolders ?? []) {

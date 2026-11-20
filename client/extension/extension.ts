@@ -15,6 +15,7 @@ import { LanguageClient, LanguageClientOptions, NotificationType, RevealOutputCh
 import { FileExplorer, FileListItem } from './fileExplorer';
 import { GuiPanel } from './guiPanel';
 import { EntityPanel } from './entityPanel';
+import { ShipDesignPanel } from './shipDesignPanel';
 import { ParticlePanel } from './particlePanel';
 import { classifyAssetFile } from './particleSniff';
 import { UI, SOURCE, aiText, setAiMessageLocale } from './ai/messages';
@@ -2431,39 +2432,55 @@ export async function activate(context: ExtensionContext) {
 		safeRegisterCommand(context, "cwtools.previewGUI", async () => {
 			const editor = vs.window.activeTextEditor;
 			if (!editor) {
-				vs.window.showWarningMessage('No active editor to preview');
+				vs.window.showWarningMessage(localize('No active editor to preview.', '没有可预览的活动编辑器。'));
 				return;
 			}
 			const doc = editor.document;
 			const fileName = doc.fileName.toLowerCase();
 			if (!fileName.endsWith('.gui')) {
-				vs.window.showWarningMessage('GUI Preview is only available for .gui files');
+				vs.window.showWarningMessage(localize('GUI Preview is only available for .gui files.', 'GUI 预览仅适用于 .gui 文件。'));
 				return;
 			}
 			await GuiPanel.create(context.extensionPath, doc);
+		});
+
+		// Global Ship Design visual editor command
+		safeRegisterCommand(context, "cwtools.shipDesign.open", async () => {
+			const editor = vs.window.activeTextEditor;
+			if (!editor) {
+				vs.window.showWarningMessage(localize('Open a global_ship_designs .txt file to use the ship design workbench.', '请先打开 global_ship_designs 下的 .txt 文件再使用舰船设计工作台。'));
+				return;
+			}
+			const normalized = editor.document.fileName.split(String.fromCharCode(92)).join('/').toLowerCase();
+			if (!normalized.endsWith('.txt') || !normalized.includes('/common/global_ship_designs/')) {
+				vs.window.showWarningMessage(localize('Ship Design Workbench is only available for common/global_ship_designs/*.txt files.', '舰船设计工作台仅适用于 common/global_ship_designs/*.txt 文件。'));
+				return;
+			}
+			await ShipDesignPanel.create(context.extensionPath, editor.document, indexService);
 		});
 
 		// Solar System Preview command
 		safeRegisterCommand(context, "cwtools.previewSolarSystem", async () => {
 			const editor = vs.window.activeTextEditor;
 			if (!editor) {
-				vs.window.showWarningMessage('No active editor to preview');
+				vs.window.showWarningMessage(localize('No active editor to preview.', '没有可预览的活动编辑器。'));
 				return;
 			}
 			const doc = editor.document;
 			const fileName = doc.fileName.toLowerCase();
 			if (!fileName.endsWith('.txt')) {
-				vs.window.showWarningMessage('Solar System Preview is only available for .txt files');
+				vs.window.showWarningMessage(localize('Solar System Preview is only available for .txt files.', '恒星系预览仅适用于 .txt 文件。'));
 				return;
 			}
 			// Check if file is in solar_system_initializers directory
 			const normalizedPath = fileName.replace(/\\/g, '/');
 			if (!normalizedPath.includes('solar_system_initializers')) {
+				const previewLabel = localize('Preview', '预览');
 				const result = await vs.window.showWarningMessage(
-					'This file is not in a solar_system_initializers directory. Preview anyway?',
-					'Preview', 'Cancel'
+					localize('This file is not in a solar_system_initializers directory. Preview anyway?', '此文件不在 solar_system_initializers 目录中，仍要预览吗？'),
+					previewLabel, localize('Cancel', '取消'),
 				);
-				if (result !== 'Preview') return;
+				if (result !== previewLabel) return;
 			}
 			await SolarSystemPanel.create(context.extensionPath, doc);
 		});
@@ -2507,13 +2524,13 @@ export async function activate(context: ExtensionContext) {
 		safeRegisterCommand(context, "cwtools.previewEntity", async () => {
 			const editor = vs.window.activeTextEditor;
 			if (!editor) {
-				vs.window.showWarningMessage('No active editor to preview');
+				vs.window.showWarningMessage(localize('No active editor to preview.', '没有可预览的活动编辑器。'));
 				return;
 			}
 			const doc = editor.document;
 			const fileName = doc.fileName.toLowerCase();
 			if (!fileName.endsWith('.asset')) {
-				vs.window.showWarningMessage('Entity Preview is only available for .asset files');
+				vs.window.showWarningMessage(localize('Entity Preview is only available for .asset files.', '实体预览仅适用于 .asset 文件。'));
 				return;
 			}
 			await EntityPanel.create(context.extensionPath, doc);
@@ -2529,18 +2546,18 @@ export async function activate(context: ExtensionContext) {
 		safeRegisterCommand(context, "cwtools.previewParticle", async () => {
 			const editor = vs.window.activeTextEditor;
 			if (!editor) {
-				vs.window.showWarningMessage('No active editor to preview');
+				vs.window.showWarningMessage(localize('No active editor to preview.', '没有可预览的活动编辑器。'));
 				return;
 			}
 			const doc = editor.document;
 			const fileName = doc.fileName.toLowerCase();
 			if (!fileName.endsWith('.asset')) {
-				vs.window.showWarningMessage('Particle Preview is only available for .asset files');
+				vs.window.showWarningMessage(localize('Particle Preview is only available for .asset files.', '粒子预览仅适用于 .asset 文件。'));
 				return;
 			}
 			const kind = classifyAssetFile(doc.getText());
 			if (kind !== 'particle') {
-				vs.window.showWarningMessage('This .asset file does not contain a top-level particle definition. It may be an entity asset.');
+				vs.window.showWarningMessage(localize('This .asset file does not contain a top-level particle definition. It may be an entity asset.', '此 .asset 文件不包含顶层粒子定义，可能是实体资源。'));
 				return;
 			}
 			await ParticlePanel.create(context.extensionPath, doc);
@@ -2557,6 +2574,9 @@ export async function activate(context: ExtensionContext) {
 			}
 			if (EntityPanel.currentPanel) {
 				try { EntityPanel.currentPanel.dispose(); } catch { /* ignore */ }
+			}
+			if (ShipDesignPanel.currentPanel) {
+				try { ShipDesignPanel.currentPanel.dispose(); } catch { /* ignore */ }
 			}
 			if (ParticlePanel.currentPanel) {
 				try { ParticlePanel.currentPanel.dispose(); } catch { /* ignore */ }

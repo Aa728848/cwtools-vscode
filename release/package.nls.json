@@ -22,6 +22,7 @@
   "commands.stellarisLanguageServices.images.editExternally.title": "Edit Image Externally",
   "commands.stellarisLanguageServices.images.configureImageMagickPath.title": "Configure ImageMagick Path",
   "commands.stellarisLanguageServices.images.checkImageMagick.title": "Check ImageMagick",
+  "commands.stellarisLanguageServices.shipDesign.open.title": "Open Ship Design Workbench",
   "commands.stellarisLanguageServices.shipIcons.generateSheet.title": "Generate Ship Icon Sheet from Models",
   "commands.stellarisLanguageServices.rules.manageConfigGroups.title": "Manage Rules Sources",
   "commands.stellarisLanguageServices.diagnostics.openInspectionOverview.title": "Open Inspection Overview",

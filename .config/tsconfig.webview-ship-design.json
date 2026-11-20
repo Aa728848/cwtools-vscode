@@ -1,0 +1,14 @@
+{
+    "compilerOptions": {
+        "module": "ES2020"
+    },
+    "extends": "../tsconfig.json",
+    "include": [
+        "../client/webview/shipDesignPreview.ts",
+        "../client/webview/vscode.d.ts"
+    ],
+    "exclude": [
+        "../client/extension/**",
+        "../client/test/**"
+    ]
+}

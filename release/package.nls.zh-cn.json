@@ -33,6 +33,7 @@
   "commands.stellarisLanguageServices.images.editExternally.title": "用外部程序编辑图片",
   "commands.stellarisLanguageServices.images.configureImageMagickPath.title": "配置 ImageMagick 路径",
   "commands.stellarisLanguageServices.images.checkImageMagick.title": "检查 ImageMagick",
+  "commands.stellarisLanguageServices.shipDesign.open.title": "打开舰船设计工作台",
   "commands.stellarisLanguageServices.shipIcons.generateSheet.title": "从模型生成舰船顶部图标表",
   "commands.stellarisLanguageServices.rules.manageConfigGroups.title": "管理规则来源",
   "commands.stellarisLanguageServices.diagnostics.openInspectionOverview.title": "打开检查概览",

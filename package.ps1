@@ -6,18 +6,24 @@
     Compiles .NET LSP server (win/linux/osx), compiles typescript client and webviews,
     copies static resources, packs vsix, and optionally installs the extension locally.
 .PARAMETER Version
-    Specifies a new version (e.g. 2.2.3) to update in release/package.json.
+    Specifies a new version (e.g. 2.2.3) to update in both root package.json and release/package.json.
 .PARAMETER Install
     Force installs the newly generated VSIX package to the local VSCode instance,
-    then removes the conflicting upstream CWTools extension if it is installed.
+    then removes conflicting legacy or upstream CWTools extensions if installed.
 .PARAMETER SkipServer
     Skips the F# .NET server compilation step to save time.
 .PARAMETER SkipClient
-    Skips typescript and webview Rollup compilation.
+    Skips TypeScript and Webview Rollup compilation, CSS copy, and bundled rules packaging.
 .PARAMETER IncludeMcp
     Opt-in: builds the MCP server from submodules/cwtools-mcp and bundles it into
     the VSIX at bin/mcp. By default the VSIX ships without the MCP server, which is
     installed standalone (npx -y cwtools-mcp) from its own repository.
+.PARAMETER Publish
+    Fallback local release path: commits pending version changes, tags v<version>,
+    pushes to origin, and creates a GitHub Release via gh CLI. Standard releases
+    are published automatically by .github/workflows/release.yml on tag push.
+.PARAMETER SkipDocs
+    Skips bilingual documentation validation and release/README.md generation.
 .EXAMPLE
     .\package.ps1 -Install
 .EXAMPLE
@@ -121,7 +127,7 @@ if (-not $SkipClient) {
     Write-Host "[2/6] (SKIPPED) Skip client TypeScript compilation." -ForegroundColor Gray
 }
 
-# 4. Compile Webview and Copy CSS Assets
+# 4. Bundle Webviews, Copy CSS Assets, and Package Bundled Stellaris Rules
 if (-not $SkipClient) {
     Write-Host "[3/6] Bundling Webview scripts (Rollup)..." -ForegroundColor Yellow
     npx rollup -c
@@ -160,9 +166,8 @@ if (-not $SkipClient) {
     if (-not (Test-Path $RulesDestDir)) {
         New-Item -ItemType Directory -Path $RulesDestDir -Force | Out-Null
     }
-    # Remove legacy folder and old ZIP
+    # Replace previous rules ZIP and metadata files individually (no recursive directory deletion).
     $LegacyDir = Join-Path $PSScriptRoot "release/rules/stellaris"
-    # Legacy rules are merged in place; no recursive cleanup is performed.
     if (Test-Path $RulesDestZip) { Remove-Item -LiteralPath $RulesDestZip -Force }
     if (Test-Path $RulesVersionPath) { Remove-Item -LiteralPath $RulesVersionPath -Force }
     Compress-Archive -Path (Join-Path $RulesSourceDir "*") -DestinationPath $RulesDestZip -CompressionLevel Optimal
@@ -367,7 +372,7 @@ if ($VsixFile) {
     Write-Warning "Could not find any generated VSIX file!"
 }
 
-# 6. Local Installation
+# 7. Local Installation
 if ($Install) {
     if ($VsixFile) {
         Write-Host "[*] Executing local installation (code --install-extension)..." -ForegroundColor Yellow
@@ -410,7 +415,7 @@ if ($Install) {
     }
 }
 
-# 7. GitHub Release Publishing
+# 8. GitHub Release Publishing (local fallback when CI is unavailable)
 if ($Publish) {
     if ($VsixFile) {
         Write-Host "[*] Executing GitHub Release publishing via gh CLI..." -ForegroundColor Yellow

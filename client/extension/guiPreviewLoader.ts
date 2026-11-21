@@ -1,3 +1,12 @@
+/**
+ * Shared `.gui` Preview Loader for `GuiPanel` and `ManagerGuiPreviewController`.
+ *
+ * Centralizes mod/workspace/vanilla root discovery, `.gfx` sprite indexing,
+ * button-effect collection, and DDS/TGA texture decoding under strict memory
+ * caps (`MAX_CACHE_BYTES` = 50 MB, `MAX_CAPTURE_CACHE_BYTES` = 20 MB) with
+ * cancellable workspace scanning (`scanAbortController`).
+ */
+
 import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';

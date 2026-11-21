@@ -1,3 +1,11 @@
+/**
+ * Agent Manager Embedded `.gui` Preview & Visual Verification Host Controller.
+ *
+ * Coordinates live `.gui` snapshots between `GuiPreviewLoader` and the detached
+ * Agent Manager Webview, tracks element selections for chat context injection,
+ * and orchestrates bounded before/after visual verification capture rounds.
+ */
+
 import * as vs from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';

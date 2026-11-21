@@ -70,7 +70,8 @@ The scanner intentionally reuses the F# Shader parser. Do not add a second TypeS
 - `check` 生成差异报告；加 `--ci` 后，发现漂移会以退出码 2 结束。
 - `update` 只把候选内容追加到 `update\generated`，需要人工审阅。
 - `report` 生成可独立打开的 HTML 报告；加 `--no-open` 可禁止自动打开。
-- `contracts` 对比原版作用域注释与 CWT 标注；默认只读，`--apply` 只补充缺失且高置信的内容。
+- `contracts` 对比原版作用域注释与 CWT 标注；默认只读，`--apply` 只补充缺失且高置信的内容，已有冲突需单独审阅后传 `--apply-conflicts`。
+- `optional-fields` 独立审计 `config/logs/*_docs.log` 与 CWT alias 的可选字段契约（`check` 与 `report` 也会自动执行）。
 
 `check` 会把「文档标注可选、CWT 规则仍必填」的字段报告为 `optional_field`，只要还有残留就以退出码 2 结束（配合 `--ci`）。CWT alias 字段默认基数为 `1..1`，所以脚本文档标注为可选的字段（"if not specified…"、"(optional)"、"(default)…"）会在所有合法省略写法上误报 `Missing <field>, expecting at least 1`（CW242）。在该字段上方补 `## cardinality = 0..1` 即可；该审计从文档自动推导，不依赖人工维护清单。
 

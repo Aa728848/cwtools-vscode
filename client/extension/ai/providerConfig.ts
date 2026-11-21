@@ -6,11 +6,11 @@ import { getCwtoolsHomeDir } from './homeConfig';
 import { migrateKimiModelId } from './kimi/modelMigration';
 
 /**
- * User-level provider routes and sub-agent model assignments, aligned with the
- * user-level config conventions of Kimi Code / Claude Code:
+ * User-level provider routes and legacy per-role model overrides, aligned with
+ * the user-level config conventions of Kimi Code / Claude Code:
  *
  *   ~/.cwtools/providers.json    — extra provider routes (endpoint + models)
- *   ~/.cwtools/agent-models.json — per-profile sub-agent model assignments
+ *   ~/.cwtools/agent-models.json — legacy per-profile model overrides (retained for compatibility)
  *
  * File formats:
  *   { "providers": { "<id>": { "name"?: string, "endpoint": string,
@@ -380,8 +380,9 @@ export function mergeAgentModelOverrides(
 }
 
 /**
- * Effective sub-agent model assignments: the VS Code
- * `orchestrator.agentModels` setting overridden by `~/.cwtools/agent-models.json`.
+ * Legacy per-role model overrides: the retained VS Code
+ * `orchestrator.agentModels` setting overridden by `~/.cwtools/agent-models.json`
+ * (kept for configuration compatibility; the built-in runtime is single-agent).
  * Returns undefined when neither layer assigns any role.
  */
 export function getAgentModelOverrides(
@@ -389,8 +390,8 @@ export function getAgentModelOverrides(
 ): Record<string, SourcedAgentModelAssignment> | undefined {
     const merged = mergeAgentModelOverrides(settingsModels, loadHomeAgentModelOverrides().agentModels);
     // A retired Kimi id can survive in either layer. The assignment is migrated on the way
-    // out — a pure substitution with no write-back — so the orchestrator never dispatches a
-    // model the service no longer serves, and neither file nor the settings are touched.
+    // out — a pure substitution with no write-back — so callers never receive a model id
+    // the service no longer serves, and neither file nor the settings are touched.
     for (const [role, assignment] of Object.entries(merged)) {
         const model = migrateKimiModelId(assignment.provider, assignment.model);
         if (model !== assignment.model) merged[role] = { ...assignment, model };

@@ -1,3 +1,10 @@
+/**
+ * Shared Wire Protocol & Runtime Validators for the Global Ship Design Workbench.
+ *
+ * Single source of truth for typed snapshots, edit operations, asset payloads,
+ * and inbound Webview-to-Host message validation (`parseShipDesignRequest`).
+ */
+
 import type { EnvironmentPreset } from '../webview/environmentTypes';
 import {
     fields,

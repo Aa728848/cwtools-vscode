@@ -1,9 +1,8 @@
-// Phase 0 performance baseline probe for the CWT parsing stack.
+// Performance baseline probe for the CWT parsing stack.
 //
 // Measures single-file CKParser + parseConfigWithMetadata latency across the
 // golden corpus, representative real files, and the full Stellaris rule
-// repository. Results are recorded (not asserted) in
-// docs/cwt-language-support-baseline.md; no thresholds are invented here.
+// repository without enforcing arbitrary thresholds.
 //
 // Run from this directory (after `dotnet build src/Main/`):
 //

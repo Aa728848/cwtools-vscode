@@ -1,10 +1,17 @@
+/**
+ * Rollup bundle configuration for all browser-sandboxed Webview entries and
+ * the skybox environment Web Worker under `client/webview/`.
+ *
+ * Outputs IIFE bundles and copies static CSS / vendor assets into
+ * `release/bin/client/webview/`.
+ */
 import typescript from 'rollup-plugin-typescript2';
 import resolve from '@rollup/plugin-node-resolve';
 import commonjs from '@rollup/plugin-commonjs';
 import { copyFileSync, mkdirSync } from 'fs';
 import { dirname } from 'path';
 
-/** Inline copy plugin — copies a plain JS file to the output directory */
+/** Inline copy plugin — copies a static asset (CSS or prebuilt JS) to the Webview output directory. */
 function copyFile(src, dest) {
     return {
         name: 'copy-file',
@@ -16,10 +23,9 @@ function copyFile(src, dest) {
 }
 
 /**
- * Native N-API modules that must never be inlined into a bundle.
- * `steamworks.js` ships prebuilt `.node` binaries and Steam redistributables in
- * `dist/{win64,linux64,osx}`; a bundler cannot inline those, and the Extension
- * Host loads the package from `release/node_modules/steamworks.js` at runtime.
+ * Native N-API modules kept external so Rollup never attempts to bundle them
+ * into browser-sandboxed Webviews (the Extension Host loads `steamworks.js`
+ * from `release/node_modules` at runtime).
  */
 const EXTERNAL_NATIVE_MODULES = ['steamworks.js'];
 

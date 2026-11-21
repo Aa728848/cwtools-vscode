@@ -16,8 +16,8 @@ The extension package includes the language-server binaries for Windows, macOS, 
 
 ### Language support
 
-- Diagnostics, completion, hover information, definitions, references, symbols, CodeLens, and inlay hints
-- Paradox script, localisation, assets, GUI files, and compile-unit-aware `.shader` / `.fxh` editing
+- Diagnostics, completion, hover information (including reverse-engineered Stellaris engine cost and hardcoded-behaviour notes), definitions, references, symbols, CodeLens, and inlay hints
+- Paradox script, localisation, assets, GUI files, compile-unit-aware `.shader` / `.fxh` editing, and dedicated `.cwt` rule-file support (diagnostics, completion, navigation, safe hot-swap, and CWT-only mode without a game install)
 - Profiles for Stellaris, Hearts of Iron IV, Europa Universalis IV and V, Crusader Kings II and III, Imperator: Rome, Victoria II and 3, and custom CWT projects
 - Aura tooltip localisation for `friendly_aura` / `hostile_aura` blocks in `common/component_templates`, generated from their modifiers and `damage_per_day`
 - Incremental project and vanilla indexes for larger workspaces
@@ -29,6 +29,7 @@ Coverage depends on the active game profile and its CWT rules. Stellaris is the 
 Open a supported file and use its editor-title action or context menu:
 
 - GUI canvas with selection, positioning, resizing, texture lookup, and source write-back
+- Global ship design workbench for `common/global_ship_designs/*.txt` with locator-based 3D assembly, slot and required-component editing (click-to-place, drag-and-drop, Fill all), a filtered component library, Host-owned drafts, and offline loadout generation
 - 3D solar-system preview with orbit editing
 - Static-galaxy preview with system, nebula, coordinate, and explicit-hyperlane editing
 - Technology-tree and event-chain graphs
@@ -37,13 +38,15 @@ Open a supported file and use its editor-title action or context menu:
 
 Source changes use VS Code workspace edits and can be undone normally. Previews distinguish source-backed data from estimates; runtime-generated content is not presented as exact file data.
 
-### Vanilla comparison and migration
+### Vanilla comparison and Steam Workshop
 
-Use `Compare with Vanilla` on a matching mod file to open a diff. `Migrate Block from Vanilla` replaces the block under the cursor without turning the whole file into a generated rewrite.
+Use **Compare File with Vanilla** from the editor title bar or **Compare Block with Vanilla** from the editor context menu on a matching mod file to open a diff. **Migrate Block from Vanilla** replaces the block under the cursor, and **Migrate Changed Blocks from Vanilla** lets you batch-migrate selected blocks from the diff view.
+
+Run **Upload Mod to Steam Workshop** inside a mod workspace (containing `descriptor.mod`) to create or update a Workshop item with tags, preview image, visibility, change note, and `.gitignore`/`.steamignore` staging filters. Requires the Steam client running and signed in to an account that owns the game.
 
 ### Optional AI workspace
 
-Run `AI: Open Chat Panel` to use the built-in Paradox/CWTools-focused agent workspace. It supports semantic script/rule queries, project indexing, plans and Agent skills, `EvidenceGate` semantic prechecks, `confirm` / `auto` file-write controls, and optional MCP servers.
+Run **Stellaris AI: Open AI Chat** from the Command Palette (or **Stellaris AI: Open Agent Manager** for the detached manager) to use the built-in Paradox/CWTools-focused single-agent workspace. It supports semantic script/rule queries, project indexing, plans and Agent skills, `EvidenceGate` semantic prechecks, `confirm` / `auto` file-write controls, and optional MCP servers. The detached Agent Manager also includes a `.gui` **Preview** tab with structured element selection into chat and up to two rounds of automatic Before/After/Diff visual verification after GUI edits.
 
 AI providers are configured separately. Credentials are stored with VS Code SecretStorage, and subscription lines (Codex, Claude, Kimi Code, MiniMax Code, Command Code, WorkBuddy, and OpenDesign) share a multi-account rotation pool with rate-limit failover and quota meters. The ChatGPT-subscription-compatible Codex provider relies on an upstream compatibility endpoint and may need updates when that endpoint changes.
 
@@ -86,8 +89,8 @@ If something behaves unexpectedly, please include the game profile, extension ve
 
 ### 语言服务
 
-- 诊断、补全、悬停信息、定义、引用、符号、CodeLens 和嵌入提示
-- Paradox 脚本、本地化、资产、GUI，以及按真实编译单元工作的 `.shader` / `.fxh` 编辑
+- 诊断、补全、悬停信息（含 Stellaris 反编译引擎开销与硬编码行为说明）、定义、引用、符号、CodeLens 和嵌入提示
+- Paradox 脚本、本地化、资产、GUI、按真实编译单元工作的 `.shader` / `.fxh` 编辑，以及独立的 `.cwt` 规则语言支持（诊断、补全、跳转、安全热替换与无需游戏安装的 CWT-only 模式）
 - 支持 Stellaris、Hearts of Iron IV、Europa Universalis IV 和 V、Crusader Kings II 和 III、Imperator: Rome、Victoria II 和 3，以及自定义 CWT 项目
 - 按 `common/component_templates` 中 `friendly_aura` / `hostile_aura` 的 modifier 与 `damage_per_day` 自动生成光环 Tooltip 本地化
 - 面向大型工作区的项目与原版增量索引
@@ -99,6 +102,7 @@ If something behaves unexpectedly, please include the game profile, extension ve
 打开受支持的文件，再使用编辑器标题栏按钮或右键菜单：
 
 - GUI 画布：选择、定位、缩放控件，查找贴图并写回源码
+- 全局舰船设计工作台（`common/global_ship_designs/*.txt`）：基于真实 locator 的 3D 组装、槽位与必需部件编辑（点击放置、拖放与填充全部）、可筛选组件库、Host 草稿与离线配装生成
 - 3D 恒星系预览和轨道编辑
 - 静态银河预览，以及星系、星云、坐标和显式超空间航道编辑
 - 科技树与事件链关系图
@@ -107,13 +111,15 @@ If something behaves unexpectedly, please include the game profile, extension ve
 
 源码修改使用 VS Code 工作区编辑，可以正常撤销。预览会区分源码数据和估算结果，不会把运行时生成的内容当作文件中的精确数据。
 
-### 原版对比与迁移
+### 原版对比与 Steam 创意工坊
 
-在有原版对应文件的 Mod 文件中使用 `Compare with Vanilla` 打开差异视图。`Migrate Block from Vanilla` 只替换光标所在代码块，不会把整个文件变成一次生成式重写。
+在有原版对应文件的 Mod 文件中，使用编辑器标题栏的 **与原版对比文件** 或右键菜单中的 **与原版对比代码块** 打开差异视图。**从原版迁移当前代码块** 只替换光标所在代码块，在差异视图中还可用 **从原版迁移所有变更块** 批量勾选迁移。
+
+在 Mod 工作区（包含 `descriptor.mod`）运行 **上传 Mod 到 Steam 创意工坊**，可新建或更新工坊物品，支持标签、预览图、可见性、更新说明以及基于 `.gitignore`/`.steamignore` 的暂存过滤（需 Steam 客户端已运行并登录拥有该游戏的账号）。
 
 ### 可选 AI 工作区
 
-运行 `AI: Open Chat Panel` 打开专注于 Paradox/CWTools 语义领域的内置单 Agent 工作区。它提供语义脚本与规则查询、项目索引、计划和 Agent 技能、`EvidenceGate` 语义预检、`confirm` / `auto` 文件写入控制，以及可选 MCP 服务。
+从命令面板运行 **Stellaris AI: 打开 AI 对话面板**（或 **Stellaris AI: 打开 Agent 运行管理器** 打开独立管理器）以使用专注于 Paradox/CWTools 语义领域的内置单 Agent 工作区。它提供语义脚本与规则查询、项目索引、计划和 Agent 技能、`EvidenceGate` 语义预检、`confirm` / `auto` 文件写入控制，以及可选 MCP 服务。独立 Agent 管理器还提供 `.gui` **预览**页，支持框选/多选元素加入对话，并在 GUI 写入后自动执行最多两轮 Before/After/Diff 视觉核对。
 
 AI Provider 需要单独配置。凭据通过 VS Code SecretStorage 保存，订阅线路（Codex、Claude、Kimi Code、MiniMax Code、Command Code、WorkBuddy 与 OpenDesign）共享支持限流自动切号与额度仪表的多账号号池。兼容 ChatGPT 订阅的 Codex Provider 依赖上游兼容端点；上游变化时，扩展可能需要同步更新。
 

@@ -1,5 +1,5 @@
 /**
- * Eddy CWTool Code — Message Renderer (Pure Functions)
+ * CWTools Webview — Message Renderer (Pure Functions)
  *
  * Extracted from chatPanel.ts to enable unit testing without DOM dependencies.
  * All functions are pure: they accept data and return HTML strings or structured objects.

@@ -1,5 +1,5 @@
 /**
- * Eddy CWTool Code — Settings Manager
+ * CWTools AI Module — Settings Manager
  *
  * Manages Provider configuration, API Key storage, model detection,
  * dynamic model management, and connection testing.

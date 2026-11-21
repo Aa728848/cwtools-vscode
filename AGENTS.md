@@ -83,7 +83,8 @@ Root docs are single-source bilingual documents:
 - `ARCHITECTURE.md`
 
 Do not recreate separate `_EN` or `_ZH` copies. Run `npm run build:docs` after
-changing these docs; it also regenerates `release/README.md` from `README.md`.
+changing these docs; it validates single-source bilingual docs and regenerates
+`release/README.md` from `docs/marketplace-readme.md`.
 
 ## Repository Boundaries
 
@@ -93,10 +94,12 @@ changing these docs; it also regenerates `release/README.md` from `README.md`.
 - `src/LSP/`, `src/Main/`: .NET 10 / F# language server.
 - `submodules/cwtools/`: upstream F# library.
 - `submodules/cwtools-stellaris-config/`: Stellaris CWT rules data.
-- `submodules/cwtools-mcp/`: standalone MCP server (`cwtools-shared` +
-  `cwtools-mcp` packages) with whitelisted domain writes enabled by default,
-  vendored as a separate repository submodule. The
-  extension VSIX does not bundle it; users install it via `npx -y cwtools-mcp`.
+- `submodules/cwtools-mcp/`: standalone MCP repository (`cwtools-shared`,
+  `cwtools-node`, and `cwtools-mcp` packages) with whitelisted domain writes
+  enabled by default, vendored as a separate repository submodule. The
+  Extension Host consumes `cwtools-shared` directly (build it before compiling
+  on a fresh checkout); the extension VSIX does not bundle the MCP server,
+  which users install via `npx -y cwtools-mcp`.
 
 Reuse shared platform helpers such as `gameProfiles.ts`, `indexing/`,
 `pathScope.ts`, and `fileExtensions.ts` rather than duplicating them.
@@ -141,14 +144,15 @@ must preserve the V4 checkpoint snapshot contract. Read `ARCHITECTURE.md` before
 
 - Whitelisted domain-write tools are enabled by default; reject every non-whitelisted write.
 - Add new semantic capability as a `cwtools.ai.*` LSP command first.
-- Keep tool names and schema generation inputs synchronized; do not hand-edit
-  `submodules/cwtools-mcp/packages/cwtools-shared/src/generated/mcpTools.ts`.
-- Add read-only LSP commands to `LanguageServer.fs` `isReadCmd`.
-- Tool-schema workflow after changing `client/extension/ai/tools/definitions.ts`:
-  run `npm run generate:mcp-schema` (writes into the submodule), commit and push
-  inside `submodules/cwtools-mcp`, then bump the root submodule pointer. Publish
-  a new `cwtools-mcp` version from that repository so external agents pick up
-  the change.
+- Keep tool names, schemas, and workspace-detection generators synchronized; do
+  not hand-edit files under `submodules/cwtools-mcp/packages/cwtools-shared/src/generated/`.
+- Add read-only LSP commands via `readCmd` in `src/LSP/Commands.fs` (`allCommands`, the single source of truth used by `LanguageServer.fs` and `Program.fs`).
+- Generation workflow after changing `client/extension/ai/tools/definitions.ts`
+  or `client/extension/workspaceGameDetection.ts`: run `npm run generate:mcp-schema`
+  and/or `npm run generate:mcp-detection` (use `check:mcp-schema` /
+  `check:mcp-detection` for read-only drift checks), commit and push inside
+  `submodules/cwtools-mcp`, then bump the root submodule pointer. Publish a new
+  `cwtools-mcp` version from that repository so external agents pick up the change.
 - MCP builds and contract tests run inside the submodule:
   `cd submodules/cwtools-mcp && npm run build && npm run test:contracts`.
 
@@ -175,19 +179,20 @@ Run the narrowest useful checks, then broaden according to risk:
 - AI runtime/tools: targeted unit tests, then `npm run test:unit`.
 - Extension Host integration suites: `npm test` (compiles the suite JS via
   `tsconfig.test-build.json`, copies `client/test/sample` fixtures, and runs the
-  completion/hover/folding/extension suites; the shader contract suite is run
-  separately via `npm run test:shader-lsp`). Fixture workspace settings are
-  created by `tools/copy-test-fixtures.js` with Stellaris language associations
-  (`*.txt/gui/gfx/asset/cwt -> stellaris`) and the vendored
+  completion/hover/folding/extension suites; shader and CWT contract suites run
+  separately via `npm run test:shader-lsp`, `npm run test:cwt-lsp`, and
+  `npm run test:cwt-game-lsp`). Fixture workspace settings are created by
+  `tools/copy-test-fixtures.js` with Stellaris language associations
+  (`*.txt/gui/gfx/asset -> stellaris`, `*.cwt -> cwt`) and the vendored
   `submodules/cwtools-stellaris-config/config` rules. The Stellaris game model
   needs vanilla data (game install or `stl.cwb` cache) and takes ~20s to build;
   when neither exists the server degrades to the generic game (see
   `hasStellarisVanillaData` in `src/Main/GameLoader.fs`).
-- MCP: `npm run generate:mcp-schema`, then inside `submodules/cwtools-mcp`:
-  `npm run build` and `npm run test:contracts`.
+- MCP: `npm run generate:mcp-schema` and/or `npm run generate:mcp-detection`,
+  then inside `submodules/cwtools-mcp`: `npm run build` and `npm run test:contracts`.
 - F# backend: `dotnet build src/LSP/` and/or `dotnet build src/Main/`, plus the
-  `src/**/*.Tests.fsx` regression scripts via `dotnet fsi` (run from each
-  script's directory).
+  `src/**/*.Tests.fsx` regression scripts via `npm run test:fsx` (or `dotnet fsi`
+  from each script's directory).
 - Broad pre-release gate: `npm run verify`.
 
 If a relevant check cannot run, report that explicitly instead of silently

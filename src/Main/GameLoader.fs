@@ -1,3 +1,5 @@
+/// Game model factory, CWT rule file loading, and vanilla cache resolution for
+/// all supported Paradox games and custom CWT profiles.
 module Main.Lang.GameLoader
 
 open LSP.Types
@@ -307,7 +309,6 @@ let loadEU4 (serverSettings: ServerSettings) =
 
     let folders = configs |> List.tryPick getFolderList
 
-    // let eu4Mods = EU4Parser.loadModifiers "eu4mods" ((new StreamReader(Assembly.GetEntryAssembly().GetManifestResourceStream(eu4modpath))).ReadToEnd())
     let eu4settings =
         { rootDirectories = getRootDirectories serverSettings
           scriptFolders = folders
@@ -375,8 +376,6 @@ let loadCK2 serverSettings =
 
     let folders = configs |> List.tryPick getFolderList
 
-
-    // let ck2Mods = CK2Parser.loadModifiers "ck2mods" ((new StreamReader(Assembly.GetEntryAssembly().GetManifestResourceStream(ck2modpath))).ReadToEnd())
     let ck2settings =
         { rootDirectories = getRootDirectories serverSettings
           scriptFolders = folders
@@ -409,9 +408,6 @@ let loadIR serverSettings =
 
     let folders = configs |> List.tryPick getFolderList
 
-
-
-    // let ck2Mods = CK2Parser.loadModifiers "ck2mods" ((new StreamReader(Assembly.GetEntryAssembly().GetManifestResourceStream(ck2modpath))).ReadToEnd())
     let irsettings =
         { rootDirectories = getRootDirectories serverSettings
           scriptFolders = folders
@@ -647,7 +643,6 @@ let loadEU5 serverSettings =
     game
 
 let loadCustom serverSettings =
-    // let cached, cachedFiles = getCachedFiles STL serverSettings.cachePath serverSettings.isVanillaFolder
     let configs =
         getConfigFiles serverSettings.cachePath serverSettings.useManualRules serverSettings.manualRulesFolder serverSettings.bundledRulesPath serverSettings.preferBundledRules
 

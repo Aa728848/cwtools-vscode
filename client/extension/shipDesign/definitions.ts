@@ -1,3 +1,11 @@
+/**
+ * Ship Design Catalog Loader.
+ *
+ * Parses layered workspace + vanilla ship sizes, section templates, component
+ * templates, slot templates, and tech prerequisites (expanding `inline_script`
+ * fields and weapon targeting metadata) into a deterministic `ShipDesignCatalog`.
+ */
+
 import {
     loadShipIconCatalog,
     type ShipIconCatalog,

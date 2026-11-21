@@ -98,7 +98,7 @@ export interface MinimaxCodeModelEntry {
     /**
      * 模型接受的输入模态。
      *
-     * **只声明本线路真的能编码的东西**：DSH 的能力闸门、模型选择器与子代理委派都会
+     * **只声明本线路真的能编码的东西**：本扩展的能力闸门与模型选择器都会
      * 当它成立，所以列出一个映射器做不到的能力等于给出一个必然被打破的承诺。本扩展
      * 没有视频字节读取器，因此这里只声明 text 与 image。
      */
@@ -154,7 +154,7 @@ export const MINIMAX_CODE_MODELS: readonly MinimaxCodeModelEntry[] = [
         inputModalities: ['text', 'image'],
         thinking: 'toggle',
         // 该模型的思考是二态开关而非梯度：模型表写的是「无思考 / 思考，默认思考」。
-        // 把它投影成 DSH 的档位列表时，一个「默认」项才是诚实的（列表里没有 off 成员）。
+        // 把它投影成本扩展的档位列表时，一个「默认」项才是诚实的（列表里没有 off 成员）。
         reasoningEfforts: ['default'],
         defaultReasoningEffort: 'default',
         maxImageBytes: 10 * 1024 * 1024,
@@ -234,7 +234,7 @@ export function minimaxCodeOutputConfig(
     return model.reasoningEfforts.includes(effort) ? { effort } : undefined;
 }
 
-/** 从目录提取「模型 id → 上下文窗口」，供 DSH 的压缩与溢出判断使用。 */
+/** 从目录提取「模型 id → 上下文窗口」，供 Agent 运行时的压缩与溢出判断使用。 */
 export function minimaxCodeContextWindows(): Record<string, number> {
     const result: Record<string, number> = {};
     for (const model of MINIMAX_CODE_MODELS) result[model.id] = model.contextWindow;

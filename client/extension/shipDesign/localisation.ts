@@ -1,3 +1,11 @@
+/**
+ * Ship Design Display-Name Localisation Resolver.
+ *
+ * Resolves component, section, and ship-size display names using the workspace
+ * `IndexService` first and falling back to bounded, per-language cached `.yml`
+ * scans, expanding nested `$KEY$` references up to a fixed round limit.
+ */
+
 import type { ShipIconDataSource } from '../shipIcon/shipIconDefinitions';
 import type { IndexService, LocEntry } from '../indexing/indexService';
 import { parseLocFile } from '../indexing/locParser';

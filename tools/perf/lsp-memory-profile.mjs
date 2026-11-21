@@ -1,3 +1,19 @@
+/**
+ * Non-destructive LSP memory and edit-latency profiling harness.
+ *
+ * Drives the CWTools Server executable over stdio with repeated in-memory edits,
+ * saves, and completions without modifying files on disk; see `tools/perf/README-lsp.md`.
+ *
+ * CLI arguments:
+ *   --root <dir>                Mod workspace root (required)
+ *   --server <path>             Path to the CWTools Server executable (required)
+ *   --rules <dir>               CWT rules directory (required)
+ *   --cache <dir>               Optional cache directory
+ *   --edit-file <relPath>       Workspace file for synthetic edits (required when --iterations > 0)
+ *   --iterations <n>            Number of edit/save/completion iterations (default 0)
+ *   --iteration-delay-ms <ms>   Delay between iterations (default 250)
+ *   --hold-ms <ms>              Idle settle window after edits (default 300000)
+ */
 import { spawn } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { basename, resolve } from 'node:path';

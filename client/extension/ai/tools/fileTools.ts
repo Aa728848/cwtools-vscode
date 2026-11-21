@@ -870,7 +870,7 @@ export class FileToolHandler {
                 // `N | ` prefixes on every line — writing them would corrupt the file.
                 args.content = stripLineNumberPrefixes(args.content) ?? args.content;
 
-                // Security blocking has been removed: allowing AI to overwrite files directly
+                // Snapshot existing content and BOM before running structure/evidence gates and write confirmation.
                 const { content: originalContent, hasBom } = this.readTextFile(args.file, context);
                 (context?.onBeforeFileWrite ?? this.ctx.onBeforeFileWrite)?.(args.file, originalContent);
 

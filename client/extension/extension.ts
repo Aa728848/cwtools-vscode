@@ -2,6 +2,14 @@
  * Copyright (c) Microsoft Corporation. All rights reserved.
  * Licensed under the MIT License. See License.txt in the project root for license information.
  * ------------------------------------------------------------------------------------------ */
+/**
+ * VS Code Extension Host entry point (`activate` / `deactivate`).
+ *
+ * Coordinates workspace game detection, F# CWTools language-client lifecycle
+ * (full game mode and CWT-only mode), shared incremental indexing, visual
+ * editor panels, Steam Workshop upload, the single-agent Paradox AI workspace,
+ * and the local MCP / native RPC bridge server.
+ */
 'use strict';
 
 import * as path from 'path';
@@ -1122,8 +1130,6 @@ export async function activate(context: ExtensionContext) {
 	// versions still work: the bridge manifest protocol below is unchanged.
 	// ─── AI Module Integration (registered at top-level so panel works immediately) ──
 	const aiService = new AIService(context);
-	// Retire the legacy global endpoint into the per-provider map early so quick-switching
-	// providers before opening settings cannot leak one provider's endpoint into another.
 	const privateAgentRoot = context.storageUri?.fsPath
 		?? path.join(context.globalStorageUri.fsPath, 'agent-workspaces', sha256Text(workspaceRoot || 'empty-window').slice(0, 16));
 	configurePrivateAgentStorage(privateAgentRoot);
@@ -1170,9 +1176,9 @@ export async function activate(context: ExtensionContext) {
 		ErrorReporter.warn('MCP', 'Failed to start extension-host MCP bridge', e)
 	);
 	const promptBuilder = new PromptBuilder(workspaceRoot, context.globalStorageUri.fsPath, context.extensionPath);
-	// Real-usage token calibration (P0 design 3): created before the Runner and
-	// injected; persisted snapshots are validated field-by-field on load and
-	// written single-flight by the table itself.
+	// Real-usage token calibration: created before the Runner and injected;
+	// persisted snapshots are validated field-by-field on load and written
+	// single-flight by the table itself.
 	const tokenCalibration = new TokenCalibrationTable(
 		readCalibrationSnapshot(context.globalState.get('cwtools.ai.tokenCalibration.v1')),
 		snapshot => Promise.resolve(context.globalState.update('cwtools.ai.tokenCalibration.v1', snapshot)),
@@ -1242,8 +1248,8 @@ export async function activate(context: ExtensionContext) {
 		void window.showInformationMessage(aiText('Redacted Agent diagnostics exported.', '已导出脱敏后的 Agent 诊断。'));
 	});
 
-	// T4.2 — Replay a recorded agent run with optional overrides.
-	// Side-by-side diff of original vs new event streams is opened in the editor.
+	// Replay a recorded agent run with optional overrides; opens a side-by-side
+	// diff of original vs replayed event streams in the editor.
 	safeRegisterCommand(context, 'cwtools.ai.replayRun', async () => {
 		try {
 			const { runLedger } = require('./ai/runner/runLedger') as typeof import('./ai/runner/runLedger');
@@ -1364,8 +1370,7 @@ export async function activate(context: ExtensionContext) {
 	);
 	// Frozen system prompts key on CWTOOLS.md / project profile content hashes,
 	// so they miss naturally on edit; this watcher proactively drops the parsed
-	// mtime caches so the next fingerprint reflects current content immediately
-	// (plan §7.1).
+	// mtime caches so the next fingerprint reflects current content immediately.
 	const aiPromptInputsWatcher = workspace.createFileSystemWatcher('{CWTOOLS.md,.cwtools/project/profile.json}');
 	const invalidatePromptInputs = () => {
 		promptBuilder.invalidateProjectPromptInputs();
@@ -1865,7 +1870,7 @@ export async function activate(context: ExtensionContext) {
 
 		const cwtOnly = mode === 'cwt-only';
 		// Game-specific watchers (script/gfx/localisation) only make sense in
-		// full mode; CWT-only watches rule files for the Phase 3 project index.
+		// full mode; CWT-only watches `.cwt` rule files for the CWT project index.
 		const fileEvents = cwtOnly
 			? [workspace.createFileSystemWatcher('**/*.cwt')]
 			: (() => {

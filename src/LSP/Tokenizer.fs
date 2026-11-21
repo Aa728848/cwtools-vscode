@@ -21,9 +21,9 @@ let parseHeader (header: string) : Header =
     else
         OtherHeader
 
-/// C2 Fix: only consume the byte after \r if it really is \n.
-/// Previously the code blindly called ReadChar(), which could silently drop
-/// a legitimate content byte when the line ending was a bare \r.
+/// Read one header line, consuming the trailing `\n` of CRLF. On a seekable stream,
+/// a non-`\n` byte after bare `\r` is put back via `Seek(-1L)`; on non-seekable
+/// stdio pipes, LSP framing always uses `\r\n`.
 let readLine (client: BinaryReader) : string option =
     let buffer = StringBuilder()
 
@@ -75,7 +75,7 @@ let tokenize (client: BinaryReader) : seq<string> =
             | None -> endOfInput <- true
             | Some(ContentLength l) -> contentLength <- l
             | Some(EmptyHeader) when contentLength > 0 ->
-                // L1 Fix: only call readLength when a valid Content-Length header was seen.
+                // Only call readLength when a valid Content-Length header was seen.
                 // If contentLength is still -1 the header block was malformed; skip silently.
                 yield readLength (contentLength, client)
                 contentLength <- -1   // reset so a stray empty line doesn't re-trigger

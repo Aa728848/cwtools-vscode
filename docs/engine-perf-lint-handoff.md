@@ -1,7 +1,7 @@
 # 引擎事实驱动的 Lint 与性能工具：剩余工作交接文档
 
 > [!IMPORTANT]
-> **状态更新（已全部落地）**：本文档列出的任务 A（`o(n)` 细分与 `## engine_bad_pattern` 元数据）、任务 B（`CW282`–`CW288` 引擎反模式校验器）、任务 C（`on_actions` 高频脉冲传递性开销跨文件检查）与任务 D（`CW289` `prev` 链跨越 `random_list`）均已在 v2.24.0 全部实现并合入主干。完整实现说明与架构决策见 [`.agents/notes/implemented/feature/2026-09-29-engine-cost-fact-driven-validators.md`](../.agents/notes/implemented/feature/2026-09-29-engine-cost-fact-driven-validators.md) 与 [`docs/diagnostic-codes.md`](diagnostic-codes.md)（`CW279`–`CW289`）；下文保留作为设计背景与规则扩充规范参考。
+> **状态更新（已全部落地）**：本文档列出的任务 A（`o(n)` 细分与 `script_eval` / `scope_copy` 等级扩展）、任务 B（`## sync_effect` 元数据通道与 `CW282`–`CW288` 引擎反模式校验器）、任务 C（`CW279` 高频宿主扩展，覆盖派系/法令/特殊项目/局势/考古/科技/星球自动化/`game_rules`）与任务 D（`CW289` 全局 `inline_script` 复用计数提示）均已全部实现并合入主干。完整实现说明与架构决策见 [`.agents/notes/implemented/feature/2026-09-29-engine-cost-fact-driven-validators.md`](../.agents/notes/implemented/feature/2026-09-29-engine-cost-fact-driven-validators.md) 与 [`docs/diagnostic-codes.md`](diagnostic-codes.md)（`CW279`–`CW289`）；下文保留作为设计背景与规则扩充规范参考。
 
 本文档记录 better_stellaris 分析（`docs/better_stellaris/`，Stellaris 4.5 反编译性能/正确性审查）
 转化为本项目规则配置与插件功能的**已完成部分**与**剩余工作**，供后续开发者或 AI 代理接续。

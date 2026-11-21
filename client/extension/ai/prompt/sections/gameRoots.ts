@@ -1,15 +1,13 @@
 /**
- * Eddy CWTool Code — Configured vanilla read roots for the main agent.
+ * CWTools AI Module — Configured vanilla read roots for the agent prompt.
  *
- * `subAgentSandbox.ts` already hands a dispatched child the resolved game roots
- * through `DelegationScopeFacts.readScope`, but the coordinating agent got no
- * such statement. It could therefore only reach vanilla files by guessing a
- * drive letter, or by shelling out to hunt for the install folder, and a
- * guessed path simply ENOENTs in `read_file`.
+ * Injects the resolved read-only game installation roots into the system prompt
+ * so the agent can reference vanilla files directly without guessing drive
+ * letters or ENOENTing in `read_file`.
  *
  * The roots come from `getConfiguredGameRoots()` — the same single authority
- * the sandbox and vanilla search already use — so there is no hardcoded drive
- * letter, no `run_command` probing, and no extra LSP command.
+ * the workspace sandbox and vanilla search already use — so there is no
+ * hardcoded drive letter and no extra LSP command.
  *
  * Kept deterministic (sorted, deduplicated, bounded, no timestamps) because it
  * is part of a system prompt: an unstable statement would defeat prefix caching.

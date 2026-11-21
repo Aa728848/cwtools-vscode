@@ -16,7 +16,7 @@
 
 import type { ChatMessage, ContentPart } from './types';
 
-/** 一个请求允许携带的 base64 图片总量（按线路）。 */
+// 按线路划分的单请求 base64 图片额度：
 /** Kimi Code 的图片额度：整包 2 MB，图片只拿其中 1.5 MB。 */
 export const KIMI_MAX_REQUEST_IMAGE_BYTES = 1_500_000;
 /** Anthropic 系单请求的图片额度。 */
@@ -31,7 +31,7 @@ export const ANTHROPIC_MANY_IMAGE_EDGE = 2000;
 /**
  * 被省略图片的模型可见替换文本。
  *
- * 与 DSH 自身占位文案同一措辞，且明确要求模型「需要时重新读取或请用户重新附上」，而不是
+ * 与扩展对话层占位文案同一措辞，且明确要求模型「需要时重新读取或请用户重新附上」，而不是
  * 让它以为图片是空白的。
  */
 export const OMITTED_IMAGE_TEXT =

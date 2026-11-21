@@ -1,9 +1,8 @@
-// Phase 0 contract tests for the CWT document pipeline.
+// Contract tests for the CWT parsing stack (CKParser + RulesParser).
 //
-// Locks in the current observable behavior of the CWT parsing stack
-// (CKParser + RulesParser) against the golden corpus in client/test/fixtures/cwt
-// BEFORE Phase 2 introduces the dedicated CwtLanguageService. Run from this
-// directory:
+// Verifies observable parsing and recovery behavior against the golden corpus
+// in client/test/fixtures/cwt (see client/test/fixtures/cwt/README.md). Run
+// from this directory:
 //
 //     dotnet build src/Main/   (fresh CWTools.dll + "CWTools Server.dll")
 //     dotnet fsi CwtLanguageService.Tests.fsx
@@ -170,8 +169,7 @@ for file in [ "missing_close_brace.cwt"; "unexpected_token.cwt" ] do
 
 // A trailing incomplete line (cursor mid-expression at EOF) must NOT fail the
 // whole file: the parser recovers, the rest of the model stays usable, and
-// only the incomplete construct is lost. This is the editor contract behind
-// handoff doc §6.3 (no cascading errors from an unfinished current line).
+// only the incomplete construct is lost (no cascading errors from an unfinished line).
 let incompleteText = readFixture "invalid/incomplete_line.cwt"
 
 match parseCwt incompleteText "invalid/incomplete_line.cwt" with
@@ -182,9 +180,8 @@ match parseCwt incompleteText "invalid/incomplete_line.cwt" with
         parseWithMetadata incompleteText "invalid/incomplete_line.cwt"
     check "invalid/incomplete_line.cwt: completed rules kept" (rules.Length >= 1)
 
-// Baseline record (Phase 0, handoff doc §3.3): these files are syntactically
-// legal CWT but carry semantically invalid option/field values. Print the
-// observed behavior so it can be pinned in docs/cwt-language-support-baseline.md.
+// Syntactically valid CWT files carrying semantically invalid option/field values
+// (semantic diagnostics CWT102/CWT201 are covered by CwtLanguageSemantics.Tests.fsx).
 
 for file in [ "bad_cardinality.cwt"; "bad_field_expression.cwt" ] do
     let name = $"invalid/%s{file}"
@@ -197,8 +194,8 @@ for file in [ "bad_cardinality.cwt"; "bad_field_expression.cwt" ] do
         printfn "BASELINE %s: CKParser Success, rules=%d" name rules.Length
 
 // --- semantic/: syntactically valid, semantically broken ------------------
-// These must parse (their diagnostics arrive in Phase 3), and duplicate
-// definitions must both be preserved by the parser.
+// These must parse (cross-file diagnostics CWT301/CWT302 are covered by
+// CwtProjectIndex.Tests.fsx), and duplicate definitions must both be preserved.
 
 let undefinedText = readFixture "semantic/undefined_type_reference.cwt"
 

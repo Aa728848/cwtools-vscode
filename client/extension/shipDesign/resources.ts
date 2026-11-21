@@ -1,3 +1,11 @@
+/**
+ * Ship Design 3D Asset & Entity Graph Resource Loader.
+ *
+ * Resolves entity graphs, meshes, attachments, and texture paths across
+ * layered mod/vanilla roots with strict directory-visit, attachment-depth,
+ * and bounded mesh/texture cache limits.
+ */
+
 import * as path from 'path';
 import { isPathInsideOrEqual } from '../pathScope';
 import type { ShipIconDataSource } from '../shipIcon/shipIconDefinitions';

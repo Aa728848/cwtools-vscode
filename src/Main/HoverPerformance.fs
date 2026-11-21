@@ -118,9 +118,6 @@ module HoverPerformance =
           Mechanism = mechanism
           Evidence = evidence }
 
-    /// Every *_flag command shares one engine implementation whose scope family
-    /// (country, ship, planet, starbase, ...) only selects which flag array the
-    /// virtual call returns, so the family-level annotation covers all of them.
     let private hasPrefix (name: string) (prefix: string) =
         name.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)
 
@@ -129,7 +126,9 @@ module HoverPerformance =
 
     /// Family fallbacks, used only when the rule file declares nothing for the
     /// exact command. Kept deliberately small: the rule file is the source of
-    /// truth and covers the concrete command names.
+    /// truth and covers the concrete command names. Every `*_flag` command shares
+    /// one engine implementation whose scope family only selects which flag array
+    /// the virtual call returns, so the family-level annotation covers all of them.
     let private familyFallback (name: string) : Fact option =
         if hasSuffix name "_flag" && (hasPrefix name "has_" || hasPrefix name "set_" || hasPrefix name "remove_") then
             Some(fromRule name LinearContainer None (Some "shared flag implementation - see ## engine on the annotated command in triggers.cwt / effects.cwt"))
@@ -154,7 +153,7 @@ module HoverPerformance =
                 | Some entry -> Some entry
                 | None -> familyFallback name
 
-    /// Markdown block for a hover, or None when the command has no recorded fact.
+    /// Render a resolved engine-cost fact as a Markdown hover block.
     let describe (uiText: string -> string -> string) (entry: Fact) : string =
         let symbol, en, zh = classInfo entry.Class
         let parts = ResizeArray<string>()

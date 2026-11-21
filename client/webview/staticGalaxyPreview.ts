@@ -5,7 +5,7 @@
  * semantic edit requests back. The webview never sees source spans, file paths
  * or replacement text — only opaque nodeKeys plus revision/document versions.
  *
- * Rendering rules (docs/static-galaxy-preview-editor-plan.md §8):
+ * Rendering rules:
  * - Canvas2D only, devicePixelRatio capped at 2.
  * - All world<->screen math goes through worldToScreen/screenToWorld; axis
  *   orientation is defined in exactly those two functions.

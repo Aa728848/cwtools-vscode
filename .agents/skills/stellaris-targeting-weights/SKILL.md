@@ -2,7 +2,7 @@
 name: stellaris-targeting-weights
 description: >-
   Stellaris 4.5.2 舰船索敌与开火目标权重机制知识库。用于回答索敌 / 目标权重 / target weight / targeting / 开火目标（fire target）选择、舰船主目标（ship main target）、盾甲仇恨（shield & armor aggro）传言、`target_weights` 与 `ship_target_weight_mult` 怎么写、以及 `ai_weight` 与战斗索敌权重的区别等一切问题。内置两阶段乘法链公式与 10/50 tick 节流、19 个 defines 速查、原版与 CWT 规则取证路径、十条常见误区。凡出现"为什么我的船不打那个目标""怎么让 AI 优先打小型舰""索敌权重怎么调"之类提问，先加载本技能再回答。
-allowed-tools: query_cwt_schema, query_rules, search_rule_capabilities, explain_scope, query_project_knowledge, explore_pdx_project, compare_definition_with_vanilla, grep, read_file
+allowed-tools: query_targeting_weight, query_cwt_schema, query_rules, search_rule_capabilities, explain_scope, query_project_knowledge, explore_pdx_project, compare_definition_with_vanilla, grep, read_file
 capability-domain: both
 ---
 
@@ -140,50 +140,50 @@ S(weapon) = S2 + wk              wk = target_weights 表中该目标船尺寸名
 
 ### 2.1 defines（`common/defines/00_defines.txt`，NCombat / NShip 块）
 
-下表 19 条即"索敌可调 defines"全集，规则侧位于 `submodules/cwtools-stellaris-config/config/common/defines.cwt:3754-3836`，目前全部仅有 `float` 声明、**无 `###` 公式文档**。
+下表 19 条即"索敌可调 defines"全集，规则侧位于 `submodules/cwtools-stellaris-config/config/common/defines.cwt`，均已补齐 `###` 公式文档（悬停与补全可见）。
 
 | # | 符号 | define 名 | vanilla | 作用环节 |
 |---|---|---|---|---|
-| 1 | κsize | `COMBAT_SHIP_TARGETING_SIZE_MULT` | 0.03 | 尺寸项斜率（defines.cwt:3780） |
-| 2 | σmax | `COMBAT_SHIP_TARGETING_SIZE_MAX` | 10 | 尺寸封顶（:3782） |
-| 3 | κtrk | `COMBAT_SHIP_TARGETING_TRACKING_MULT` | 2.0 | 追踪放大（:3784） |
-| 4 | κev | `COMBAT_SHIP_EVASION_TARGETING_WEIGHT` | 2.0 | 闪避惩罚斜率（:3786） |
-| 5 | θh | `COMBAT_SHIP_LOW_HEALTH_THRESHOLD` | 0.5 | 残血阈值（:3788） |
-| 6 | κh | `COMBAT_SHIP_LOW_HEALTH_TARGETING_WEIGHT` | 1.5 | 残血倍率（:3790） |
-| 7 | κd | `COMBAT_SHIP_DISTANCE_TARGETING_WEIGHT` | 0.002 | 距离衰减（:3792） |
-| 8 | dmin | `COMBAT_SHIP_DISTANCE_TARGETING_WEIGHT_MIN` | 0.10 | 距离下限（:3794） |
-| 9 | κun | `COMBAT_SHIP_UNARMED_TARGETING_WEIGHT` | 0.005 | 无武装降权（:3796） |
-| 10 | κsb | `COMBAT_SHIP_STARBASE_TARGETING_WEIGHT` | 0.75 | 星基/巨构降权（:3798） |
-| 11 | σavoidmin | `COMBAT_SHIP_EVASION_AVOID_MIN_SHIP_SIZE` | 8 | 否决判据的攻击方尺寸门槛（:3800） |
-| 12 | Tavoid | `COMBAT_SHIP_EVASION_AVOID_THRESHOLD` | 0.7 | 否决判据的 Δ 门槛（:3802） |
-| 13 | κr | `RANDOM_TARGETING_WEIGHT` | 3.0 | 随机扰动幅度，末项乘数 ∈ [1, 1+κr)（:3776） |
-| 14 | Mcur | `SHIP_CURRENT_TARGET_MULTIPLIER` | 1.1 | 当前目标粘性（:3770） |
-| 15 | Mrec | `SHIP_RECENT_TARGET_PENALIZER` | 0.3 | 近期目标惩罚（:3772） |
-| 16 | — | `NUMBER_OF_TARGETS_TO_REMEMBER` | 10 | 近期目标记忆长度（:3774） |
+| 1 | κsize | `COMBAT_SHIP_TARGETING_SIZE_MULT` | 0.03 | 尺寸项斜率 |
+| 2 | σmax | `COMBAT_SHIP_TARGETING_SIZE_MAX` | 10 | 尺寸封顶 |
+| 3 | κtrk | `COMBAT_SHIP_TARGETING_TRACKING_MULT` | 2.0 | 追踪放大 |
+| 4 | κev | `COMBAT_SHIP_EVASION_TARGETING_WEIGHT` | 2.0 | 闪避惩罚斜率 |
+| 5 | θh | `COMBAT_SHIP_LOW_HEALTH_THRESHOLD` | 0.5 | 残血阈值 |
+| 6 | κh | `COMBAT_SHIP_LOW_HEALTH_TARGETING_WEIGHT` | 1.5 | 残血倍率 |
+| 7 | κd | `COMBAT_SHIP_DISTANCE_TARGETING_WEIGHT` | 0.002 | 距离衰减 |
+| 8 | dmin | `COMBAT_SHIP_DISTANCE_TARGETING_WEIGHT_MIN` | 0.10 | 距离下限 |
+| 9 | κun | `COMBAT_SHIP_UNARMED_TARGETING_WEIGHT` | 0.005 | 无武装降权 |
+| 10 | κsb | `COMBAT_SHIP_STARBASE_TARGETING_WEIGHT` | 0.75 | 星基/巨构降权 |
+| 11 | σavoidmin | `COMBAT_SHIP_EVASION_AVOID_MIN_SHIP_SIZE` | 8 | 否决判据的攻击方尺寸门槛 |
+| 12 | Tavoid | `COMBAT_SHIP_EVASION_AVOID_THRESHOLD` | 0.7 | 否决判据的 Δ 门槛 |
+| 13 | κr | `RANDOM_TARGETING_WEIGHT` | 3.0 | 随机扰动幅度，末项乘数 ∈ [1, 1+κr) |
+| 14 | Mcur | `SHIP_CURRENT_TARGET_MULTIPLIER` | 1.1 | 当前目标粘性 |
+| 15 | Mrec | `SHIP_RECENT_TARGET_PENALIZER` | 0.3 | 近期目标惩罚 |
+| 16 | — | `NUMBER_OF_TARGETS_TO_REMEMBER` | 10 | 近期目标记忆长度 |
 | 17 | — | `SHIP_MAX_EVASION`（NShip 块） | 0.9 | 闪避上限 |
 | 18 | — | `MAX_DAMAGE_SCALING`（NShip 块） | 100 | size_damage_factor 放大上限 |
-| 19 | — | `MISSILE_RETARGET_CHANCE_START` / `_REDUCTION` | — | 导弹重索敌（defines.cwt:3825/3827，本文未展开） |
+| 19 | — | `MISSILE_RETARGET_CHANCE_START` / `_REDUCTION` | — | 导弹重索敌（本文未展开） |
 
 ### 2.2 船级与修饰符
 
-- `ship_target_weight_mult`（modifier，类别含 Military Ships 等，`config/logs/modifiers.log:119`）→ 直接进入 ŵtgt，与开战随机 ρ **相加**。
-- 按船级的别名 `shipsize_$_target_weight_mult`（`ship_sizes.cwt:85`）。
+- `ship_target_weight_mult`（modifier，类别含 Military Ships 等，`config/logs/modifiers.log`）→ 直接进入 ŵtgt，与开战随机 ρ **相加**。
+- 按船级的别名 `shipsize_$_target_weight_mult`（`ship_sizes.cwt`，已配 `###` 文档并接入 hover）。
 - `ship_sizes` 的 `combat_size_multiplier`（σ）、`default_behavior = <ship_behavior>`；`ship_behaviors` 的 `preferred_attack_range` / `attack_move_pattern` 控制走位，**间接影响距离项 d 的分布**，从而影响索敌。
 
 ### 2.3 武器组件模板（`common/component_templates/`，规则 subtype `weapon_component_template`）
 
-| 字段 | 进入公式的位置 | 规则现状（components_consolidated.cwt 行号） |
+| 字段 | 进入公式的位置 | 规则与诊断现状（`components_consolidated.cwt`） |
 |---|---|---|
-| `min_damage` / `max_damage` | ΣD 基础（区间中点） | float（:586 注释，CSV 反填批） |
-| `hull_damage` / `shield_damage` / `armor_damage` | mh / ms / ma 三层倍率 | float（:590-598 等），无公式文档 |
-| `shield_penetration` / `armor_penetration` | 穿透（减硬化后夹 [0,1]） | float，无文档 |
-| `accuracy` / `tracking` | p 与 τw；引擎要求 0..1（有 "should be between 0.0 and 1.0" 报错文案） | float（:604-608），**无范围诊断** |
-| `size_damage_factor` | 按目标尺寸放大（上限 100） | float（:624） |
-| `use_ship_main_target` | 选目标分派（§1.6 第 2 支） | bool（:118），无文档 |
-| `target_weights = { … }` | S 的**加法项** wk（§2.4） | **键为 `scalar = float`，无类型无文档**（:566-569） |
-| `targetable_ship_sizes = { … }` | 候选过滤（前置条件） | **`<ship_size>` 强类型**（:629-632）——与上行不对称 |
-| `target_focus` | 节流周期 / Mcur 是否生效（映射未证实） | `enum[component_target_focus]`（:394, :778-781） |
-| `firing_arc` / `min_range` / `range` | 沿用主目标时的射程/射界约束 | float（:558-560） |
+| `damage`（`min` / `max`） | ΣD 基础（区间中点，原版由 `.csv` 提供） | `damage = { min = float max = float }`，已补 `###` 文档 |
+| `hull_damage` / `shield_damage` / `armor_damage` | mh / ms / ma 三层倍率 | `float`，已补 `###` 文档 |
+| `shield_penetration` / `armor_penetration` | 穿透（减硬化后夹 [0,1]） | `float`，已补 `###` 文档 |
+| `accuracy` / `tracking` | p 与 τw；引擎要求 0..1 | `float`，已补 `###` 文档，且由 `CW290` 提供 [0, 1] 范围警告诊断 |
+| `size_damage_factor` | 按目标尺寸放大（上限 100） | `float`，已补 `###` 文档 |
+| `use_ship_main_target` | 选目标分派（§1.6 第 2 支） | `bool`，已补 `###` 文档 |
+| `target_weights = { … }` | S 的**加法项** wk（§2.4） | **`<ship_size> = float` 强类型**，已补 `###` 文档 |
+| `targetable_ship_sizes = { … }` | 候选过滤（前置条件） | **`<ship_size>` 强类型** |
+| `target_focus` | 节流周期 / Mcur 是否生效（映射未证实） | `enum[component_target_focus]` |
+| `firing_arc` / `min_range` / `range` | 沿用主目标时的射程/射界约束 | `float`，已补 `###` 文档 |
 
 ### 2.4 `target_weights` 是加法项，不是倍率
 
@@ -221,23 +221,24 @@ S(weapon) = S2 + wk          wk = target_weights 表中该目标船尺寸名对�
 - `common/component_templates/*.txt` → 武器字段原版写法、`use_ship_main_target`、`target_weights` 的合法键集合（已证实：ship_size id）、`target_focus` 枚举取值（V2）；
 - `common/ship_sizes/*.txt` → `combat_size_multiplier`、光环类 `ship_target_weight_mult`。
 
-### 3.3 本技能可用的只读工具（allowed-tools 核对表）
+### 3.3 本技能可用的只读工具（`allowed-tools` 核对表）
 
-| 工具 | 用途 | registry.ts 行号（联合类型 / 分组 / 只读依据） |
+| 工具 | 用途 | 分类（`client/extension/ai/tools/registry.ts`） |
 |---|---|---|
-| `query_cwt_schema` | 查 CWT 规则 schema（字段类型、alias） | 联合类型 :7；BASE_READ :338；PDX_RULE_TOOLS :386 → effect `workspace_read`（:506-514）→ isReadOnly |
-| `query_rules` | 查规则定义内容 | 联合类型 :7；BASE_READ :338；PDX_RULE_TOOLS :386 → 同上 |
-| `search_rule_capabilities` | 搜索规则能力/触发器效果 | 联合类型 :7；BASE_READ :338；PDX_RULE_TOOLS :387 → 同上 |
-| `explain_scope` | 解释 scope 与支持域 | 联合类型 :7；BASE_READ :338；PDX_RULE_TOOLS :387 → 同上 |
-| `query_project_knowledge` | 查项目内策展知识包（机制说明入口） | 联合类型 :8；BASE_READ :339；PDX_PROJECT_TOOLS :381 → 同上 |
-| `explore_pdx_project` | 跨文件结构化探索 mod 工程 | 联合类型 :8；BASE_READ :338；PDX_PROJECT_TOOLS :382 → 同上（lsp-limited） |
-| `compare_definition_with_vanilla` | mod 定义 vs 原版定义对比（字段改动核对） | 联合类型 :8；BASE_READ :338；PDX_PROJECT_TOOLS :383 → 同上（lsp-limited） |
-| `grep` | 全文检索 mod 与规则文件 | 联合类型 :10；BASE_READ :339；NAVIGATION_TOOLS :395；ALWAYS_DISCLOSED :407 → 同上 |
-| `read_file` | 读取具体文件/行区间 | 联合类型 :12；BASE_READ :341；NAVIGATION_TOOLS :395；ALWAYS_DISCLOSED :407 → 同上 |
+| `query_targeting_weight` | 按共享公式（`cwtools-shared`）分解舰船层/武器层索敌权重链 | `paradox` / `workspace_read`（`isReadOnly = true`） |
+| `query_cwt_schema` | 查 CWT 规则 schema（字段类型、alias） | `paradox` / `workspace_read` |
+| `query_rules` | 查规则定义内容 | `paradox` / `workspace_read` |
+| `search_rule_capabilities` | 搜索规则能力/触发器效果 | `paradox` / `workspace_read` |
+| `explain_scope` | 解释 scope 与支持域 | `paradox` / `workspace_read` |
+| `query_project_knowledge` | 查项目内策展知识包（机制说明入口） | `paradox` / `workspace_read` |
+| `explore_pdx_project` | 跨文件结构化探索 mod 工程 | `paradox` / `workspace_read`（`lsp-limited`） |
+| `compare_definition_with_vanilla` | mod 定义 vs 原版定义对比（字段改动核对） | `paradox` / `workspace_read`（`lsp-limited`） |
+| `grep` | 全文检索 mod 与规则文件 | `shared` / `workspace_read`（`always`） |
+| `read_file` | 读取具体文件/行区间 | `shared` / `workspace_read`（`always`） |
 
-判定依据：`registry.ts:579-583` —— `isReadOnly = !MODE_CONTROL && name !== 'ask_user_question' && (effect === 'workspace_read' || effect === 'network' || (effect === 'none' && !mutating && !ORCHESTRATION && !TEAM) || team_task_list || team_members)`。上表 9 个工具全部命中 `BASE_READ` 分支 → `effect = 'workspace_read'` → `isReadOnly = true`。
+判定依据：`registry.ts` 中 `isReadOnly = !MODE_CONTROL.includes(name) && name !== 'ask_user_question' && (effect === 'workspace_read' || effect === 'network' || (effect === 'none' && !mutating))`。上表 10 个工具全部为 `effect = 'workspace_read'`、`isReadOnly = true`。
 
-**曾被剔除的候选**：`query_blackboard` 虽在联合类型（:21）与 ORCHESTRATION（:361）中存在，但 effect 为 `'none'` 且被 ORCHESTRATION 排除，按 :581 的判定式 `isReadOnly = false`，**不是只读工具**，故不在本技能白名单内。写本技能时不要把它加回来。
+扩展还提供可视化分析面板 **Analyze Targeting Weights**（`cwtools.targetWeights.open` / `cwtools.targetWeights.openAtCursor`，`client/extension/targetWeightPanel.ts`），与 `query_targeting_weight` 及 MCP 面共用 `submodules/cwtools-mcp/packages/cwtools-shared/src/tools/targetingWeights.ts` 的唯一实现。
 
 ### 3.4 机制文档
 
@@ -271,7 +272,7 @@ S(weapon) = S2 + wk          wk = target_weights 表中该目标船尺寸名对�
 4. **给出可复现的实验条件**：涉及节流（10/50 tick）、开战随机 ρ、随机扰动 κr 时，必须说明"结果依赖 tick 对齐与战斗内随机量"，不要把单次观测当结论。
 5. **未证实项要显式标注**：`target_focus` 枚举到 targetFocus 0/1 的映射（V2）当前**仍未证实**，引用时必须带上"未证实"标签或先去原版反查。（V1/V6 已于 2026-10-13 解决，见附录 B）
 6. **规则改动走 stellaris-rules-sync SOP**：要新增/补全规则定义（给 define 加 `###` 公式文档、给 `target_weights` 键做 `<ship_size>` 强类型）时，按 `.agents/skills/stellaris-rules-sync/SKILL.md` 的原版反查 → 强类型 → 验证门禁流程执行；**严禁滥用 `scalar`**。
-7. **本技能只读。** 需要新增分析能力（`query_targeting_weight` 之类工具）时，那是扩展层任务，走路线图 P2-2 的五处同步（definitions / registry / agentTools / toolPhrases / test），不要在回答里假装已有该工具。
+7. **本技能只读。** 进行定量权重分解时优先调用 `query_targeting_weight`（或引导用户打开 **Analyze Targeting Weights** 面板），涉及规则修改或代码变更时切换常规工具流并遵循 `stellaris-rules-sync` SOP。
 
 ---
 

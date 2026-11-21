@@ -1,11 +1,11 @@
 /**
- * Run Timeline — 渲染 Agent Manager 中的运行事件时间线视图 (Phase 1 - P1-2)
+ * Run Timeline — 渲染 Agent Manager 中的运行事件时间线视图
  *
  * 职责：
- * - 按时间顺序渲染 model/tool/permission/file/validation/compaction/subagent 事件
- * - 按事件分组：Model | Tools | Files | Permissions | Validation | Context | Sub-agents
+ * - 按时间顺序渲染 model/tool/permission/file/validation/compaction 等运行事件（含历史 subagent 兼容事件）
+ * - 按事件分组：Model | Tools | Files | Permissions | Validation | Context | Activity | Scheduling | Sub-agents（历史兼容）
  * - 支持 tool_call 与 tool_result 成对显示
- * - 子 agent lane 按 agentId 分组显示 running/done/failed/cancelled
+ * - 历史子任务 lane 按 agentId 分组显示 running/done/failed/cancelled
  */
 
 import type { AgentRunEvent } from '../../shared/agentRunEvent';

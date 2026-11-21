@@ -4,7 +4,7 @@
  * Parses Stellaris `map/setup_scenarios/*.txt` `static_galaxy_scenario` blocks
  * into a span-carrying semantic model used by the Static Galaxy preview/editor.
  *
- * Design rules (see docs/static-galaxy-preview-editor-plan.md):
+ * Design rules:
  * - Never locate coordinates with line-based regex; every editable number keeps
  *   its exact token span so write-back can replace only that token.
  * - Single tokenization + single ordered AST walk.

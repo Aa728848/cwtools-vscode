@@ -1,3 +1,11 @@
+/**
+ * Ship Design Slot Layout, Compatibility, and Candidate Queries.
+ *
+ * Pure projection layer that builds section/required slot views, validates
+ * size/type/class/restriction drop compatibility, lists ordered candidate
+ * tiers, and computes batch fill or replacement operations.
+ */
+
 import type {
     ShipDesignData,
     ShipDesignDiagnosticData,

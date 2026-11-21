@@ -11,7 +11,7 @@ export interface AgentStreamStateLike {
     subtaskStatus?: string | null;
 }
 
-/** Reopen a cached completed subagent state when its explicit next run begins. */
+/** Reopen a cached completed historical subagent state when a replay/next run begins. */
 export function reactivateSubagentStreamState(
     state: AgentStreamStateLike,
     stepType: unknown,

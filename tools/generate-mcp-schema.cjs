@@ -1,4 +1,11 @@
 #!/usr/bin/env node
+/**
+ * Generate MCP tool schemas into `submodules/cwtools-mcp/packages/cwtools-shared/src/generated/mcpTools.ts`
+ * from `client/extension/ai/tools/definitions.ts` and `registry.ts`.
+ *
+ * Pass `--check` for a read-only drift check (exits non-zero when out of sync).
+ * Keep `mcpToolNames` synchronized with the whitelisted MCP tool surface.
+ */
 
 const fs = require('fs');
 const path = require('path');

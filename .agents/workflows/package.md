@@ -4,107 +4,92 @@ description: 打包 CWTools VSCode 插件为 .vsix 格式（含 Win/Linux/macOS 
 
 # 打包 CWTools VSCode 插件
 
-所有命令在项目根目录 `c:\Users\A\Documents\cwtools-vscode` 下执行。
-最终产物为一个通用 `.vsix` 文件，内含 win-x64、linux-x64、osx-x64 三组自包含服务端。
+所有命令在仓库根目录执行。
+最终产物为一个通用 `.vsix` 文件（`release/foreverskywalker-stellaris-cwtools-<version>.vsix`），内含 `win-x64`、`linux-x64`、`osx-x64` 三组自包含服务端。
+
+> **全新检出前置条件**：首次打包前需初始化子模块、构建 `cwtools-shared`，并在 `release/` 安装运行时依赖闭包（供 `vsce` 校验）：
+> ```powershell
+> git submodule update --init --recursive
+> npm install
+> Push-Location submodules/cwtools-mcp; npm ci; npm run build -w cwtools-shared; Pop-Location
+> Push-Location release; npm ci --no-audit --no-fund; Pop-Location
+> ```
 
 ---
 
-## 💡 自动化打包捷径 (推荐)
+## 💡 自动化打包捷径（推荐）
 
-项目根目录提供了全自动一键打包与安装脚本 [package.ps1](file:///c:/Users/A/Documents/cwtools-vscode/package.ps1)，可以通过集成在 `package.json` 中的快捷命令随时在终端调用：
+项目根目录提供了全自动打包与安装脚本 [package.ps1](../../package.ps1)，可通过 `package.json` 中的快捷命令调用：
 
-* **完整一键打包安装**（自动依次执行下述第 0 至 6 步，并将最新版本强制升级部署至当前系统的 VSCode）：
-  ```bash
-  npm run pack:install
-  ```
-* **极速更新调试模式**（跳过第 1 步 .NET 服务端的编译，仅快速重编译 TypeScript 和 Webview 前端，打包并强制升级仅需 30 秒，极力推荐在仅调试修改前端 UI/逻辑时使用）：
-  ```bash
-  npm run pack:quick
-  ```
-* **仅一键打包通用包**（自动执行编译与打包，不执行最后的本地安装）：
+* **仅一键打包通用包**（依次编译服务端、前端、打包规则、校验文档并生成 VSIX）：
   ```bash
   npm run pack
   ```
-* **打包并自动发布至 GitHub Release**（打包通用包，并通过 GitHub CLI 自动 Tag、推送并创建 Release 上传 VSIX）：
+* **完整一键打包并本地安装**（打包后强制安装至本地 VS Code，并清理冲突的上游扩展）：
+  ```bash
+  npm run pack:install
+  ```
+* **极速前端调试模式**（跳过 .NET 服务端编译，仅重编译 TypeScript 与 Webview 并本地安装；不适用于全新检出）：
+  ```bash
+  npm run pack:quick
+  ```
+* **本地回退发布至 GitHub Release**（常规发布请直接推送 `v<version>` 标签由 CI 完成；仅在 CI 不可用时使用）：
   ```bash
   npm run pack:release
   ```
 
-如果您需要对流程进行更细粒度的控制，或者查验手动编译细节，请依次参阅下述各步：
+如果需要对流程进行更细粒度的控制，或排查手动编译细节，请依次参阅下述各步：
 
 ---
 
-## 0. 更新版本号与变更日志（可选项）
+## 0. 更新版本号与变更日志（发布时）
 
-在开始打包前，如果需要发布新版本，请确保已手动或通过脚本更新 `release/package.json` 中的 `version` 字段，并在 `release/CHANGELOG.md` 记录本次更新内容。也可通过 `package.ps1 -Version <version>` 传参一键更新。
+在发版打包前，请确保同时更新根目录 `package.json` 与 `release/package.json` 的 `version` 字段（两者必须一致），并在 `release/CHANGELOG.md` 顶部记录中英双语更新日志。也可通过 `.\package.ps1 -Version <version>` 同步更新两处 `package.json`。
 
-// turbo
+## 1. 编译服务端（三平台，自包含，含 .NET 10 运行时）
+
+依次为三个平台发布 .NET 服务端。**不可并行执行**，否则 dotnet 会因文件锁冲突导致构建取消。版本号应与 `release/package.json` 一致（供能力握手上报）：
+
 ```powershell
-Write-Host "请确保已修改版本号并记录更新日志！"
-```
-
-
-## 1. 编译服务端（三平台，自包含，含 .NET 运行时）
-
-依次为三个平台发布 .NET 服务端。**不可并行执行**，否则 dotnet 会因锁冲突导致构建取消。
-
-// turbo
-```powershell
-dotnet publish src/Main/Main.fsproj -c Release -r win-x64 --self-contained true /p:PublishReadyToRun=true /p:UseLocalCwtools=False -o release/bin/server/win-x64
-```
-
-// turbo
-```powershell
-dotnet publish src/Main/Main.fsproj -c Release -r linux-x64 --self-contained true /p:PublishReadyToRun=false /p:UseLocalCwtools=False -o release/bin/server/linux-x64
-```
-
-// turbo
-```powershell
-dotnet publish src/Main/Main.fsproj -c Release -r osx-x64 --self-contained true /p:PublishReadyToRun=false /p:UseLocalCwtools=False -o release/bin/server/osx-x64
+$ver = (Get-Content release/package.json -Raw | ConvertFrom-Json).version
+dotnet publish src/Main/Main.fsproj -c Release -r win-x64 --self-contained true /p:PublishReadyToRun=true /p:UseLocalCwtools=False /p:Version=$ver -o release/bin/server/win-x64
+dotnet publish src/Main/Main.fsproj -c Release -r linux-x64 --self-contained true /p:PublishReadyToRun=false /p:UseLocalCwtools=False /p:Version=$ver -o release/bin/server/linux-x64
+dotnet publish src/Main/Main.fsproj -c Release -r osx-x64 --self-contained true /p:PublishReadyToRun=false /p:UseLocalCwtools=False /p:Version=$ver -o release/bin/server/osx-x64
 ```
 
 > **说明**：
-> - `PublishReadyToRun=true` 仅用于 win-x64（交叉编译 R2R 在 linux/osx 目标上不支持）
-> - `UseLocalCwtools=False` 使用 submodule 中的 cwtools 源码
+> - `PublishReadyToRun=true` 仅用于 `win-x64`（交叉编译 R2R 在 Linux/macOS 目标上不支持）。
+> - `UseLocalCwtools=False` 确保使用 `submodules/cwtools` 中的源码。
 
-## 2. 编译客户端（TypeScript）
+## 2. 编译客户端与 Webview
 
-// turbo
 ```powershell
-npx tsc -p tsconfig.extension.json
+npm run compile
 ```
 
-## 3. 编译 Webview 脚本（Rollup 打包）
+该命令依次执行 `tsc -p ./.config/tsconfig.extension.json` 与 `rollup -c`，自动输出扩展宿主 JS、所有 Webview bundle 及对应静态 CSS / `mermaid.min.js`。
 
-// turbo
+## 3. 校验单源文档与生成 Marketplace README
+
 ```powershell
-npx rollup -c
+npm run build:docs
+npm run check:release -- --skip-compile --skip-test
 ```
 
-## 4. 复制 Webview 静态资源与内置技能
+`npm run build:docs` 校验根目录双语文档，并从 `docs/marketplace-readme.md` 生成 `release/README.md`。
 
-// turbo
-```powershell
-Copy-Item "client\webview\solarSystemPreview.css" "release\bin\client\webview\" -Force
-Copy-Item "client\webview\chatPanel.css" "release\bin\client\webview\" -Force
-```
+## 4. 打包 VSIX（通用包，含三平台）
 
-## 5. 打包 VSIX（通用包，含三平台）
+不指定 `--target`，生成一个通用 `.vsix`（`package.ps1` 会先将 `submodules/cwtools-stellaris-config/config` 压缩为 `release/rules/stellaris-rules.zip` 并暂存 `steamworks.js`、`ignore`、`cwtools-shared` 等运行时依赖到 `release/node_modules`）：
 
-不指定 `--target`，生成一个通用 `.vsix`，内含全部三组平台服务端。
-
-// turbo
 ```powershell
 Push-Location release; npx @vscode/vsce package; Pop-Location
 ```
 
-产物路径：`release/eddy-stellaris-cwt-<version>.vsix`
+产物路径：`release/foreverskywalker-stellaris-cwtools-<version>.vsix`。
 
-## 6. 本地安装
+## 5. 本地安装
 
-获取 release 目录下最新生成的 `.vsix` 扩展包并强制安装到当前的 VSCode 中。
-
-// turbo
 ```powershell
 $vsix = Get-ChildItem -Path release -Filter *.vsix | Sort-Object LastWriteTime -Descending | Select-Object -First 1
 if ($vsix) {
@@ -116,35 +101,28 @@ if ($vsix) {
 
 ---
 
-## 7. 发布至 GitHub Release
+## 6. 发布至 VS Code 市场与 GitHub Release
 
-使用 GitHub CLI (`gh`) 自动提交 Commit、打 Tag 并发布至 GitHub Release 页面。
+常规发布由标签触发 `.github/workflows/release.yml` 自动完成（在 Windows runner 上构建通用 VSIX、运行 `npm run check:release`、通过 GitHub OIDC Trusted Publishing 发布到 VS Code 市场，并以该版本更新日志创建或刷新 GitHub Release）：
 
-// turbo
 ```powershell
-$vsix = Get-ChildItem -Path release -Filter *.vsix | Sort-Object LastWriteTime -Descending | Select-Object -First 1
 $ver = (Get-Content release/package.json -Raw | ConvertFrom-Json).version
 $tag = "v$ver"
-git commit -am "Bump version to $ver and add changelog"
 git tag $tag
 git push origin main
 git push origin $tag
-gh release create $tag $vsix.FullName --repo Aa728848/cwtools-vscode --title $tag --generate-notes
 ```
+
+详见 [CONTRIBUTING.md](../../CONTRIBUTING.md#发布版本) 与 [release-extension SKILL](../skills/release-extension/SKILL.md)。
 
 ---
 
 ## 注意事项
 
-- `release/package.json` 中包含发布者、版本号等信息，修改后需重新打包
-- `.vscodeignore` 已配置排除 `.cwtools/` 缓存目录、`*.js.map` 和 `bin/client/test`
-- 打包前确认 `release/__metadata` 字段已移除（会干扰 VSCode 加载）
+- 版本号以根 `package.json` 与 `release/package.json` 为唯一来源，不要在文档或注释中重复硬编码当前版本。
+- `release/.vscodeignore` 已排除 `.cwtools/` 缓存目录、`*.js.map`、`bin/client/test` 与类型专用依赖。
 - 服务端二进制路径在 `client/extension/extension.ts` 中根据 `process.platform` 自动选择：
   - `win32` → `bin/server/win-x64/CWTools Server.exe`
   - `darwin` → `bin/server/osx-x64/CWTools Server`
   - `linux` → `bin/server/linux-x64/CWTools Server`
-- 事件流程图功能已于 2026-04-19 移除，相关文件：`graph.ts`、`graphPanel.ts`、`graphTypes.ts`
-- 性能分析器功能已于 2026-04-18 移除，相关文件：`performanceHints.ts`
-- 星系可视化预览功能于 1.3.0 版本加入，相关文件：`solarSystemParser.ts`、`solarSystemPanel.ts`、`solarSystemPreview.ts`、`solarSystemPreview.css`
-- F# 后端 `IGameDispatcher` 多态化分发及 `agentRunner.ts` 代理核心模块化剥离已于 2026-04-25 完成重建，大幅消减了 10 向 `match` 匹配与代码冗余耦合。
-// turbo-all
+- `package.ps1` 采用原地合并暂存，绝不执行递归删除，避免误伤符号链接或目录联接。

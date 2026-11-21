@@ -2,12 +2,12 @@
 
 [Project Overview / 项目介绍](../README.md) | [Contribution Guide / 贡献指南](../CONTRIBUTING.md) | [Architecture / 架构文档](../ARCHITECTURE.md) | [CWT Rule Guide / CWT 规则指南](cwt-rule-config.md)
 
-This is the reference for `CWxxx` validation codes and `CWFXxxx` Shader codes.
-The code link in VS Code's Problems panel opens the matching section. If you
-arrived here directly, use the page search to jump to a code.
+This is the reference for `CWxxx` script/localisation validation codes, `CWFXxxx`
+Shader codes, and `CWTxxx` rule-language codes. The code link in VS Code's
+Problems panel opens the matching section. If you arrived here directly, use the
+page search to jump to a code.
 
-本页收录 `CWxxx` 校验诊断和 `CWFXxxx` Shader 诊断。VS Code 问题面板中的
-错误码链接会直接打开对应小节；如果从文档首页进入，可以用页面搜索查找编号。
+本页收录 `CWxxx` 脚本与本地化校验诊断、`CWFXxxx` Shader 诊断和 `CWTxxx` CWT 规则语言诊断。VS Code 问题面板中的错误码链接会直接打开对应小节；如果从文档首页进入，可以用页面搜索查找编号。
 
 Severity / 严重度：**E** Error，**W** Warning，**I** Information，**H** Hint。
 
@@ -47,9 +47,9 @@ for the listed language. Add the key to the corresponding `.yml` file under
 
 ## CW101
 
-**Undefined variable (E)** — the referenced variable is never defined.
+**Undefined variable (W)** — the referenced variable is never defined.
 
-引用的变量从未被定义。检查拼写,或先用 `set_variable` 等方式定义它。
+引用的变量从未被定义。检查拼写，或先用 `set_variable` 等方式定义它。
 
 ## CW102
 
@@ -332,10 +332,11 @@ verify this still works as intended.
 
 ## CW239
 
-**Unused definition (W)** — the definition is expected to be referenced
-somewhere but is not used.
+**Unused definition (rule severity)** — the definition is expected to be
+referenced somewhere but is not used. Severity is configured by the CWT type
+rule.
 
-该定义应当被引用但没有任何地方使用它。
+该定义应当被引用但没有任何地方使用它（严重度由对应 CWT 类型规则配置）。
 
 ## CW240
 
@@ -651,18 +652,22 @@ remain valid.
 
 ## CW279
 
-**Expensive command in a hot block (I)** — a command with galaxy-scale engine
-cost (rule `## cost` metadata: `o(n)_galaxy` / `o(n^2)` / `combat`) appears in
-a block the engine evaluates frequently: job `weight` / `possible`, decision
-`potential` / `allow`, casus belli `potential`, triggered modifier blocks on
-buildings/districts, or `mean_time_to_happen` modifier blocks. Check the
-command's `## engine` note for a cheaper alternative, or move the check to a
-lower-frequency context.
+**Expensive command in a hot block (I)** — a command with high engine cost
+(rule `## cost` metadata: `o(n)_galaxy` / `o(n^2)` / `combat` / `script_eval`)
+appears in a block the engine evaluates frequently: job `weight` / `possible`,
+decision `potential` / `allow`, casus belli `potential`, triggered modifier
+blocks on buildings/districts, `mean_time_to_happen` modifier blocks, faction
+membership triggers (`common/pop_faction_types`), edicts (`common/edicts`),
+special projects/situations, archaeological sites, technology weights, colony
+automation, or uncached `common/game_rules`. Check the command's `## engine`
+note for a cheaper alternative, or move the check to a lower-frequency context.
 
-命令的引擎开销达到全银河级（规则 `## cost` 元数据：`o(n)_galaxy` /
-`o(n^2)` / `combat`），而所在块会被引擎高频求值：岗位 `weight` /
+命令的引擎开销较高（规则 `## cost` 元数据：`o(n)_galaxy` / `o(n^2)` /
+`combat` / `script_eval`），而所在块会被引擎高频求值：岗位 `weight` /
 `possible`、决议 `potential` / `allow`、宣战理由 `potential`、建筑/区段的
-triggered modifier 块，或 `mean_time_to_happen` 的 modifier 块。请查看该
+triggered modifier 块、`mean_time_to_happen` 的 modifier 块、派系条件
+（`common/pop_faction_types`）、法令（`common/edicts`）、特殊项目/局势、
+考古遗址、科技权重、星球自动化，或不缓存的 `common/game_rules`。请查看该
 命令的 `## engine` 说明换用更便宜的替代写法，或把检查移到更低频的位置。
 
 ## CW280
@@ -802,14 +807,12 @@ features. Lossless-front-end failures (`CWFX101`–`CWFX104`) default to
 
 ## CWFX001
 
-**Undefined MainCode reference (W)** — an `Effect` references a `VertexShader`
-or `PixelShader` MainCode that is not defined in the effect's compile unit
-(the root `.shader` file plus its transitive `Includes`). Check the MainCode
-name, or add the file that defines it to `Includes`.
+**Undefined MainCode reference (W)** — an `Effect` references a `VertexShader`,
+`PixelShader`, or `GeometryShader` MainCode that is not defined in the effect's
+compile unit (the root `.shader` file plus its transitive `Includes`). Check the
+MainCode name, or add the file that defines it to `Includes`.
 
-Effect 引用了未定义的 `VertexShader` / `PixelShader` MainCode(解析范围是当前
-编译单元:根 `.shader` 文件及其 `Includes` 传递闭包)。检查名称拼写,
-或把定义该 MainCode 的文件加入 `Includes`。
+Effect 引用了未定义的 `VertexShader` / `PixelShader` / `GeometryShader` MainCode（解析范围是当前编译单元：根 `.shader` 文件及其 `Includes` 传递闭包）。检查名称拼写，或把定义该 MainCode 的文件加入 `Includes`。
 
 Note: vanilla Stellaris 4.4.6 ships a few such references
 (`PixelLineLegacy`, `VertexPdxMeshShieldHitEffectSkinned`) that resolve to
@@ -1000,21 +1003,38 @@ flagged; only the structured `name = value` form is validated.
 
 **Illegal directive value (E)** — a known directive carries an invalid value,
 e.g. `## cardinality = banana` (bounds must be numbers or `inf`) or an illegal
-`## severity`. Variant `CWT104` fires when a no-value option (like `## required`)
-receives a value, or a value-requiring option is bare.
+`## severity`.
 
-已知指令携带非法值,如 `## cardinality = banana`(边界必须是数字或 `inf`)或
-非法的 `## severity`。变体 `CWT104` 在无值选项(如 `## required`)被赋值或
-需要值的选项缺少值时触发。
+已知指令携带非法值，如 `## cardinality = banana`（边界必须是数字或 `inf`）或非法的 `## severity`。
 
-## CWT110 / CWT111 / CWT112
+## CWT104
 
-**Invalid declaration inside a root block (W)** — `types` may only contain
-`type[...]` declarations (`CWT110`), `enums` only `enum[...]` /
-`complex_enum[...]` (`CWT111`), `values` only `value[...]` (`CWT112`).
+**Directive value shape mismatch (W)** — a no-value directive (such as
+`## required`) receives a value, or a directive that requires a value is written
+without one.
 
-根块内的非法声明:`types` 只允许 `type[...]`(`CWT110`)、`enums` 只允许
-`enum[...]`/`complex_enum[...]`(`CWT111`)、`values` 只允许 `value[...]`(`CWT112`)。
+指令值形态不匹配：无值选项（如 `## required`）被赋值，或需要值的选项缺少值。
+
+## CWT110
+
+**Invalid declaration inside `types` (W)** — a `types` root block may only
+contain `type[...]` declarations.
+
+`types` 根块内的非法声明：`types` 只允许包含 `type[...]` 声明。
+
+## CWT111
+
+**Invalid declaration inside `enums` (W)** — an `enums` root block may only
+contain `enum[...]` or `complex_enum[...]` declarations.
+
+`enums` 根块内的非法声明：`enums` 只允许包含 `enum[...]` 或 `complex_enum[...]` 声明。
+
+## CWT112
+
+**Invalid declaration inside `values` (W)** — a `values` root block may only
+contain `value[...]` declarations.
+
+`values` 根块内的非法声明：`values` 只允许包含 `value[...]` 声明。
 
 ## CWT113
 
@@ -1070,13 +1090,12 @@ pattern and are not reported either.
 ## CWT900
 
 **Candidate rules rejected (I)** — the edited rule files cannot produce a
-usable rules model (parse failure or blocking diagnostic), so the active game
-rules are kept (last-known-good). Fix the reported `CWT0xx`/`CWT1xx`/`CWT2xx`
-diagnostics to retry; activation is automatic on the next valid candidate.
+usable rules model (parse failure, Error-level diagnostic, or explicit blocking
+code such as `CWT001`, `CWT113`, `CWT201`, `CWT302`, or `CWT401`), so the active
+game rules are kept (last-known-good). Fix the reported diagnostics to retry;
+activation is automatic on the next valid candidate.
 
-编辑中的规则文件无法生成可用的规则模型(解析失败或存在阻止诊断),因此
-保留当前生效的游戏规则(last-known-good)。修复报告的 `CWT0xx`/`CWT1xx`/
-`CWT2xx` 诊断后自动重试激活。
+编辑中的规则文件无法生成可用的规则模型（解析失败、Error 级诊断或阻断码如 `CWT001`、`CWT113`、`CWT201`、`CWT302`、`CWT401`），因此保留当前生效的游戏规则（last-known-good）。修复报告的诊断后自动重试激活。
 
 ## CWT901
 
@@ -1085,21 +1104,20 @@ into the game model (an exception during the hot swap). The previous rules
 remain active; the message carries the rules generation and the failure
 reason. Retry happens automatically on the next candidate rebuild.
 
-已验证的候选规则无法热替换进游戏模型(热替换过程抛出异常)。之前的规则
-保持生效;消息包含规则 generation 与失败原因。下一次候选重建会自动重试。
+已验证的候选规则无法热替换进游戏模型（热替换过程抛出异常）。之前的规则保持生效；消息包含规则 generation 与失败原因。下一次候选重建会自动重试。
 
 ## Reserved CWT ranges / CWT 预留码段
 
 The CWT document pipeline reserves the following ranges. Codes are published
 here before release and stay stable (see [ARCHITECTURE.md](../ARCHITECTURE.md#cwt-document-pipeline)).
 
-CWT 文档管线预留以下码段,发布前写入本文并保持稳定(见 [ARCHITECTURE.md](../ARCHITECTURE.md#cwt-文档管线)):
+CWT 文档管线预留以下码段，发布前写入本文并保持稳定（见 [ARCHITECTURE.md](../ARCHITECTURE.md#cwt-文档管线)）：
 
-| Range / 码段 | Purpose / 用途 | Examples / 示例 |
+| Range / 码段 | Purpose / 用途 | Published codes / 已发布码 |
 | --- | --- | --- |
-| `CWT001`–`CWT099` | Parser / structure recovery / 解析与结构恢复 | `CWT001`(已发布) |
-| `CWT100`–`CWT199` | Root blocks and directives / 根块与指令 | unknown root block, illegal `## cardinality` |
-| `CWT200`–`CWT299` | Field expressions / 字段表达式 | unknown expression, illegal argument range |
-| `CWT300`–`CWT399` | Project symbols and references / 项目符号与引用 | undefined enum/type/alias, duplicate definition |
-| `CWT400`–`CWT499` | Cross-file consistency / 跨文件一致性 | inject cycle, scope inheritance cycle |
-| `CWT900`–`CWT999` | Activation and degradation / 激活与降级 | candidate rules rejected, last-known-good retained |
+| `CWT001`–`CWT099` | Parser / structure recovery / 解析与结构恢复 | `CWT001`（含恢复变体） |
+| `CWT100`–`CWT199` | Root blocks and directives / 根块与指令 | `CWT101`、`CWT102`、`CWT104`、`CWT110`–`CWT113` |
+| `CWT200`–`CWT299` | Field expressions / 字段表达式 | `CWT200`、`CWT201` |
+| `CWT300`–`CWT399` | Project symbols and references / 项目符号与引用 | `CWT301`、`CWT302` |
+| `CWT400`–`CWT499` | Cross-file consistency / 跨文件一致性 | `CWT401` |
+| `CWT900`–`CWT999` | Activation and degradation / 激活与降级 | `CWT900`、`CWT901` |

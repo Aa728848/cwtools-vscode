@@ -1,4 +1,10 @@
 #!/usr/bin/env node
+/**
+ * Sync the workspace game-detection engine and static profile table from
+ * `client/extension/` into `submodules/cwtools-mcp/packages/cwtools-shared/src/generated/`.
+ *
+ * Pass `--check` for a read-only drift check (exits non-zero when out of sync).
+ */
 
 const fs = require('fs');
 const path = require('path');

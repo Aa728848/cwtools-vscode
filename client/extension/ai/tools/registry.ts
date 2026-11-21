@@ -1,3 +1,11 @@
+/**
+ * Authoritative tool registry for the built-in Paradox single-agent runtime.
+ *
+ * Single source of truth for tool availability, capability domain, effect class,
+ * risk level, concurrency class, disclosure mode, read-only classification, and
+ * CWT-only MCP eligibility. Consumed by the policy engine, prompt/tool gating,
+ * and `tools/generate-mcp-schema.cjs`.
+ */
 import type { ToolDefinition, AgentMode } from '../types';
 import { DESIGN_BLUEPRINT_DISCLOSED_TOOL, TOOL_DEFINITIONS as SCHEMA_DEFINITIONS } from './definitions';
 import { analyzeSchema, flattenSchema } from './schemaFlatten';

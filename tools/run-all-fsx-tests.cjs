@@ -1,3 +1,9 @@
+/**
+ * Discover and run `*.Tests.fsx` F# regression scripts under `src/` via
+ * `dotnet fsi` from each script's own directory.
+ *
+ * Usage: `npm run test:fsx` or `node tools/run-all-fsx-tests.cjs [nameFilter]`
+ */
 const fs = require('node:fs');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');

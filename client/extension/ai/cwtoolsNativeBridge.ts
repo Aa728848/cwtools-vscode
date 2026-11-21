@@ -1,3 +1,11 @@
+/**
+ * Native CWTools JSON-RPC Allowlist Dispatcher (`/cwtools/rpc`).
+ *
+ * Exposes only explicitly whitelisted `cwtools.ai.*` commands and read-only
+ * LSP methods to local bridge clients (such as `cwtools-mcp`), rejecting all
+ * arbitrary LSP or filesystem write calls.
+ */
+
 import type { BridgeJsonRpcRequest } from './mcpBridgeProtocol';
 import { REQUIRED_BACKEND_COMMANDS } from 'cwtools-shared';
 

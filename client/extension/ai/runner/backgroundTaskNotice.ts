@@ -1,16 +1,13 @@
 /**
- * Eddy CWTool Code — Background task settlement notice.
+ * CWTools AI Module — Background task settlement notice formatter.
  *
- * Formats the `[BACKGROUND TASK RESULT]` system message a parent agent receives
- * when one of its background tasks settles.
+ * Formats `[BACKGROUND TASK RESULT]` system messages when a background task
+ * settles (retained for legacy/compatibility notification paths).
  *
- * The design rule this file exists to hold: the endings that most need an
- * account to the parent are exactly the ones where the child never got to write
- * its own summary — a token ceiling, a provider fault, a cancellation, a host
- * restart. A bare `Status: failed` reads to a model as "that attempt was
- * unlucky, dispatch it again", which is the most expensive possible response.
- * So the notice always states a stop reason, always carries whatever content was
- * preserved, and says so explicitly when nothing was.
+ * Design rule: failures where a task stopped without writing its own summary
+ * (token ceiling, provider fault, cancellation, host restart) must still state
+ * a stop reason and carry whatever content was preserved, rather than emitting
+ * a bare `Status: failed` that invites blind retries.
  */
 
 export interface BackgroundTaskNoticePayload {

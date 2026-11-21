@@ -14,7 +14,7 @@ export {};
 
 const vscode = acquireVsCodeApi();
 
-// ─── Types (mirror of targetingWeights.ts / targetWeightExtract.ts) ─────────────
+// ─── Types (mirror of cwtools-shared targetingWeights / targetWeightExtract) ───
 
 type Locale = 'en' | 'zh-cn';
 
@@ -1048,8 +1048,8 @@ function renderNotes(result: ChainResultView): void {
     const ship = result.shipChain;
     const weapon = result.weapon;
 
-    // 提示文案由面板按结果状态自行生成：targetingWeights.ts 的 notes 是中文模块文本，
-    // 且该模块不允许修改，直接透传会在英文界面下破坏双语约束。
+    // 提示文案由面板按结果状态自行生成：`cwtools-shared` 计算模块返回的 notes
+    // 为单语诊断文本，直接透传会在英文界面下破坏双语约束。
     const notes: string[] = [
         t(
             'The two layers are independent: the ship layer and the weapon layer each run their own argmax.',

@@ -1,3 +1,10 @@
+/**
+ * Ship Design Component & Section Sprite Icon Resolver.
+ *
+ * Indexes `.gfx` sprite definitions and decodes DDS/TGA textures into data URIs
+ * for the Webview within bounded file-scan, texture-byte, and icon-count caps.
+ */
+
 import { decodeDds, decodeTga } from '../ddsDecoder';
 import type { ShipIconDataSource } from '../shipIcon/shipIconDefinitions';
 import type { ShipDesignIconData, ShipDesignViewData } from '../../shared/shipDesignProtocol';

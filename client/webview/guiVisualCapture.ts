@@ -1,3 +1,11 @@
+/**
+ * Offscreen 2D Canvas Renderer & Pixel-Diff Evidence Builder for `.gui` Verification.
+ *
+ * Renders `GuiVisualRenderable` snapshots (including nine-slice sprites) to
+ * fixed-size PNG captures inside the Webview and computes before/after diff
+ * summaries using `shared/guiVisualVerification.ts`.
+ */
+
 import type { GuiElement, GuiRegion } from '../shared/guiPreview';
 import {
     compareRgbaImages,

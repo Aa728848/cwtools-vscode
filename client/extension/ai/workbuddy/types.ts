@@ -1,7 +1,7 @@
 /**
  * WorkBuddy / CodeBuddy 订阅线路的静态事实、错误码、区域路由与倍率工具。
  *
- * 与参照仓库（`dsh-chatgpt-subscription`）保持协议对齐：
+ * 关键线路约束：
  * - 对话端点仅接受流式（`stream: true`），`stream: false` 会答 `400 code 11101`；
  * - 国区 `claude-*` 模型需经 `/v1/messages`（Anthropic Messages 协议，明文 JSON 无 gzip，
  *   Bearer 鉴权），其余模型及所有国际区账号经 `/v2/chat/completions`（OpenAI 兼容，gzip 请求体）；

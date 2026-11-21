@@ -1,5 +1,5 @@
 /**
- * Eddy CWTool Code Module — Chat Panel (WebView Host)
+ * CWTools AI Module — Chat Panel (WebView Host)
  *
  * Manages the side panel WebView for AI chat interaction.
  * Handles:
@@ -509,8 +509,8 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         const events = compactEvents.length > UI_RUN_EVENT_LIMIT
             ? compactEvents.slice(compactEvents.length - UI_RUN_EVENT_LIMIT)
             : compactEvents;
-        // Derive aggregates from the complete run family so the manager can show
-        // root and child calls on one DSH-style trace without losing child identity.
+        // Derive aggregates from the complete run family (including any historical child
+        // runs) so the Agent Manager renders one unified trace without losing provenance.
         const { reduceCacheStats, reduceRunFamilyWrittenFiles, reduceScheduling } = require('./runner/runReducers') as typeof import('./runner/runReducers');
         const run = {
             ...rootRun.run,
@@ -1264,7 +1264,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                 this.conversationMessages.push({ role: 'assistant', content: assistantContent });
             }
 
-            // ── Plan/multi-Agent mode: suppress explanation in chat, auto-open annotation panel ──
+            // Compact step payloads for UI rendering and bind durable runId to history.
             const uiSteps = compactStepsForUi(result.steps);
             const uiResult = { ...result, steps: uiSteps };
             const durableRunId = result.runId ?? this.currentRunId;
@@ -2379,8 +2379,8 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
 
     /** Push todo update to the WebView (called by toolExecutor.onTodoUpdate) with debouncing */
     sendTodoUpdate(todos: import('./types').TodoItem[], scope?: TodoUpdateScope): void {
-        // Defensive try-catch: In a multi-Agent concurrent scenario, this callback is called synchronously by the sub-Agent's todoWrite.
-        // Any uncaught exception will cause the child Agent's Promise to reject, thus blocking the coordinator.
+        // Defensive try-catch: called synchronously from `todo_write`, so an uncaught
+        // exception here must never reject the tool invocation.
         try {
             const scopeKey = scope?.agentId ? `agent:${scope.agentId}` : 'root';
             this.pendingTodosByScope.set(scopeKey, { todos: todos.map(todo => ({ ...todo })), scope });
@@ -2389,7 +2389,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                 return;
             }
 
-            // Throttle updates to prevent UI lockups and I/O congestion during multi-agent concurrent execution
+            // Throttle updates to avoid UI churn and disk I/O bursts on rapid todo writes
             const timeout = setTimeout(() => {
                 this.todoUpdateTimeouts.delete(scopeKey);
                 const pending = this.pendingTodosByScope.get(scopeKey);
@@ -2425,7 +2425,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             }, 500);
             this.todoUpdateTimeouts.set(scopeKey, timeout);
         } catch (e) {
-            // Swallow the exception silently to ensure that the caller (sub-Agent todoWrite) is not affected
+            // Swallow the exception so the calling `todo_write` invocation is never broken
             ErrorReporter.debug(SOURCE.CHAT_PANEL, 'sendTodoUpdate: 回调异常已捕获', e);
         }
     }
@@ -2759,7 +2759,6 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
         }
         this.aiService.cancel();
 
-        // A background dispatch outlives the tool call that started it, and its
         for (const [questionId, resolver] of this.pendingQuestionResolvers.entries()) {
             const card = this.pendingQuestionCards.get(questionId);
             const topicId = card?.topicId ?? 'default';

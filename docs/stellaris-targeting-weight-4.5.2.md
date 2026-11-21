@@ -1,6 +1,9 @@
 # Stellaris 4.5.2 舰船索敌权重机制解读与功能路线图
 
-**整理日期**：2026-10-13 · **状态**：设计文档（机制解读 + 差距分析 + 功能路线图，未实施）
+> [!IMPORTANT]
+> **状态更新（主体已落地）**：本路线图中的核心交付均已实现并合入主干——包括 CWT 规则强类型化与 `###` 公式文档（`target_weights` 收紧为 `<ship_size> = float`、19 项 defines 与武器字段文档、typed modifier 文档接线）、[`CW290`](diagnostic-codes.md#cw290) 武器 `accuracy`/`tracking` 范围诊断、机制文档 [`docs/better_stellaris/17_ship_targeting_weights.md`](better_stellaris/17_ship_targeting_weights.md)、Agent 技能 [`.agents/skills/stellaris-targeting-weights/SKILL.md`](../.agents/skills/stellaris-targeting-weights/SKILL.md)、共享计算模块（位于 `submodules/cwtools-mcp/packages/cwtools-shared/src/tools/targetingWeights.ts`，供 `query_targeting_weight` Agent/MCP 工具与 **Analyze Targeting Weights** 面板共用）。完整实施记录见 [知识层 Note](../.agents/notes/implemented/feature/2026-10-13-stellaris-targeting-weight-knowledge-rules.md) 与 [工具链 Note](../.agents/notes/implemented/feature/2026-10-13-targeting-weight-tooling.md)；下文 §8–§10 保留作为当时的差距分析与设计路线背景。
+
+**整理日期**：2026-10-13 · **状态**：设计文档（机制解读 + 差距分析 + 路线图；主体已落地）
 
 **一手来源**：[《群星索敌权重计算公式 4.5.2》](群星索敌权重计算公式_4.5.2.pdf)（古明地瓜/KKoishi_ 反编译分析整理，地砖 & 清流蛋糕 rt 辅助数据验证）。该文基于 Stellaris 4.5.2（Cygnus，二进制 hash `32709cf254181b032b1b309a6ea09776`）的反编译产物 `stellaris_4.5.2_source.cpp`，文中行号与结构偏移均以该版本为准。
 
@@ -36,7 +39,7 @@
    每门武器各自的开火目标
 ```
 
-**一句话**：Stage 1 回答"这个目标好不好打、值不值得打"；Stage 2 回答"这门武器打它能造成多少有效伤害"；两者相乘后取最大。**如果武器模板写了 `use_ship_main_target = yes`，武器直接沿用舰船主目标**（需在射程与射界内），Stage 2 不生效；`ENERGY_LANCE`（泰坦光矛）写的恰恰是 `no`，所以它完全按武器层分数自选目标。
+**一句话**：Stage 1 回答"这个目标好不好打、值不值得打"；Stage 2 回答"这门武器打它能造成多少有效伤害"；两者**不是**相乘，而是各自 argmax 并叠加粘性项后再比较。**如果武器模板写了 `use_ship_main_target = yes`，武器直接沿用舰船主目标**（需在射程与射界内），Stage 2 不生效；`ENERGY_LANCE`（泰坦光矛）写的恰恰是 `no`，所以它完全按武器层分数自选目标。
 
 **节流**：舰船已有有效主目标时，只在 `(TotalTicks + shipID) mod fp == 0` 的 tick 重算权重（`fp = 50` 当 targetFocus=1，否则 10）；**没有有效主目标时才立刻重算**。索敌权重不是每 tick 重算的。
 
@@ -244,7 +247,7 @@ targetFocus 取自设计 growth stage +0x128，IsConfused 时为 1（此时节�
 | P0-3 | **武器字段补 `###`**：accuracy/tracking（0..1 约束）、伤害/穿透字段（进入 ΣD 的位置）、`use_ship_main_target`、`target_focus`、`target_weights` | components_consolidated.cwt:370-634 | hover 文档可见；键入补全带描述 |
 | P0-4 | **修饰符文档**：`ship_target_weight_mult` / `shipsize_$_target_weight_mult` 注明进入 ŵtgt 与 ρ 叠加方式 | modifiers.log:119、ship_sizes.cwt:85 | 补全/悬停可见 |
 
-> P0 全部走 [stellaris-rules-sync](.agents/skills/stellaris-rules-sync/SKILL.md) SOP（原版反查→强类型→验证门禁）；严禁滥用 `scalar`。
+> P0 全部走 [stellaris-rules-sync](../.agents/skills/stellaris-rules-sync/SKILL.md) SOP（原版反查→强类型→验证门禁）；严禁滥用 `scalar`。
 
 ### P1 — 校验与证据管道（M）
 | # | 内容 | 挂载点 | 验收思路 |

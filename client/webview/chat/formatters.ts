@@ -2,11 +2,8 @@
  * Chat Panel — Pure Formatting Helpers
  *
  * Extracted from chatPanel.ts for testability and reuse.
- * These functions are pure (no DOM access, no vscode API).
- *
- * Phase 2 of the Webview Modularization plan:
- *   - Move escaping, formatting, and grouping helpers out
- *   - Add unit tests for extracted helpers
+ * These functions are pure (no DOM access, no vscode API) and cover HTML
+ * escaping, numeric/duration formatting, and run-summary aggregation.
  */
 
 /**

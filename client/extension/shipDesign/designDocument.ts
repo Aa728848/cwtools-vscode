@@ -1,3 +1,11 @@
+/**
+ * Ship Design Document Parser, Format-Preserving Editor, and Draft Session.
+ *
+ * Parses `common/global_ship_designs/*.txt` via `pdxTokenizer`, applies
+ * span-targeted `ShipDesignOperation` edits without clobbering unrelated
+ * comments or formatting, and manages undo/redo draft state.
+ */
+
 import { TokenType, tokenize, type Token } from '../pdxTokenizer';
 import type {
     ShipDesignData,

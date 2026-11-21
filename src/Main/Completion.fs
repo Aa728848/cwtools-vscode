@@ -1090,11 +1090,11 @@ let completion
     =
     match gameObj with
     // CWT rule files are completed by the CWT pipeline, never by the game
-    // script completion service (handoff doc §4.2).
+    // script completion service.
     | Some _ when p.textDocument.uri.LocalPath.EndsWith(".cwt", System.StringComparison.OrdinalIgnoreCase) ->
         Main.Lang.CwtLanguageFeatures.complete p docs
     | Some game ->
-        let position = PosHelper.fromZ p.position.line p.position.character // |> (fun p -> Pos.fromZ)
+        let position = PosHelper.fromZ p.position.line p.position.character
 
         let filetext =
             (docs.GetText(FileInfo(p.textDocument.uri.LocalPath)) |> Option.defaultValue "")
@@ -1234,13 +1234,6 @@ let completion
                 try getRawItems () |> Seq.toList
                 with _ -> []
             Some { isIncomplete = false; items = fallbackItems }
-    // |false ->
-    //     let extraKeywords = ["yes"; "no";]
-    //     let eventIDs = game.References.EventIDs
-    //     let names = eventIDs @ game.References.TriggerNames @ game.References.EffectNames @ game.References.ModifierNames @ game.References.ScopeNames @ extraKeywords
-    //     let variables = game.References.ScriptVariableNames |> List.map (fun v -> {defaultCompletionItem with label = v; kind = Some CompletionItemKind.Variable })
-    //     let items = names |> List.map (fun n -> {defaultCompletionItem with label = n})
-    //     Some {isIncomplete = false; items = items @ variables}
     | None when p.textDocument.uri.LocalPath.EndsWith(".cwt", System.StringComparison.OrdinalIgnoreCase) ->
         // CWT-only mode has no game model; the CWT pipeline still completes.
         Main.Lang.CwtLanguageFeatures.complete p docs

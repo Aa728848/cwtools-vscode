@@ -1,3 +1,11 @@
+/**
+ * Ship Design Auto-Loadout Draft Generator.
+ *
+ * Deterministically synthesizes section choices, required components, and
+ * utility/weapon loadouts subject to technology scope, role preference,
+ * upgrade-chain depth, and bounded power-balance repair passes.
+ */
+
 import type {
     ShipDesignData,
     ShipDesignGenerateOptions,

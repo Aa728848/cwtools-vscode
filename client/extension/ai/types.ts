@@ -19,16 +19,17 @@ export type { ProviderMeta };
 
 /**
  * Internal prompt/tool execution labels derived from AgentSchedulingState.
- * - build:   Full tool access including file writes and in-loop validation (default)
- * - plan:    Read-only analysis, no writes, structured plan output
- * - explore: Parallel read-only exploration; focuses on understanding codebase, no validation
- * - review:  Read-only mode focused on code review, finding issues, and providing feedback.
- * - loc_translator: Specialized for translating YML localisation files between languages.
- * - loc_writer: Specialized for writing new YML localisation entries from scratch.
+ * - build:           Full tool access including file writes and in-loop validation (default)
+ * - plan:            Read-only analysis, no project writes, structured plan output
+ * - explore:         Read-only exploration focused on understanding the workspace
+ * - review:          Read-only code/script review and findings
+ * - gui_expert:      Specialized for Paradox `.gui` layout analysis and editing
+ * - script_reviewer: Specialized for Paradox script auditing and diagnostics review
+ * - loc_translator:  Specialized for translating YML localisation files between languages
+ * - loc_writer:      Specialized for writing new YML localisation entries from scratch
  */
 export type AgentMode = 'build' | 'plan' | 'explore' | 'review' | 'gui_expert' | 'script_reviewer' | 'loc_translator' | 'loc_writer';
 
-/** Transient routing input; never persisted as session or topic state. */
 import type {
     AgentRuntimeDomain,
     AgentAuthorization,
@@ -1520,7 +1521,7 @@ export interface GetCompletionAtResult {
     _nextSteps?: string[];
 }
 
-// ─── Blackboard Memory Tool Types ──────────────────────────────────────────────
+// ─── Scratchpad Memory Tool Types ──────────────────────────────────────────────
 
 export interface SetMemoryArgs {
     key: string;
@@ -2016,7 +2017,7 @@ export interface WriteDesignBlueprintArgs {
     dependencyOrder?: string[];
     /** Executable entity/edge/acceptance contract approved by the user with this blueprint. */
     featureManifest?: FeatureManifest;
-    /** Executable DAG slices. Paradox/General Multi-Agent modes hydrate dispatch_agents from this plan. */
+    /** Optional structured task slices embedded inside an approved plan blueprint. */
     taskPlan?: BlueprintTaskPlan[];
     riskRegister?: string[];
     /** Explicit blockers the model wants resolved before approval. Omission or an empty list submits the blueprint for approval. */
@@ -2347,9 +2348,9 @@ export interface AgentStep {
      * - error             : recoverable or terminal error
      * - compaction        : context history was compressed
      * - todo_update       : todo list was updated
-     * - permission_request: agent is asking user for permission (bash/write)
-     * - subtask_start     : a sub-agent task was dispatched
-     * - subtask_complete  : a sub-agent task completed
+     * - permission_request: agent is asking user for confirmation (e.g. file write)
+     * - subtask_start     : legacy compatibility for historical recorded subtask steps
+     * - subtask_complete  : legacy compatibility for historical recorded subtask completion
      */
     type: 'thinking' | 'thinking_content' | 'tool_call' | 'tool_result'
     | 'text_delta' | 'step_finish'
@@ -2379,7 +2380,7 @@ export interface AgentStep {
     timestamp: number;
     /** For permission_request: identifier so UI can respond */
     permissionId?: string;
-    /** For subtask steps: the runtime sub-agent profile. */
+    /** Legacy compatibility: profile name recorded on historical subtask steps. */
     subagentProfileName?: string;
     /** For subtask_complete: terminal state for UI/history. */
     subtaskStatus?: 'completed' | 'failed' | 'cancelled' | 'needs_clarification' | 'pending_validation';

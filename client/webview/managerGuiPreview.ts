@@ -1,3 +1,11 @@
+/**
+ * Agent Manager Embedded `.gui` Preview Pane (Browser-Sandboxed Webview).
+ *
+ * Renders the toolbar, read-only `GuiCanvasView`, selection summary, and
+ * before/after/diff visual verification evidence drawer; communicates with
+ * `ai/managerGuiPreview.ts` exclusively via `postMessage`.
+ */
+
 import type { GuiPreviewSnapshot, GuiSelection } from '../shared/guiPreview';
 import type { GuiVisualCaptureRequestMessage, GuiVisualCaptureResponseMessage, GuiVisualEvidence } from '../shared/guiVisualVerification';
 import { GuiCanvasView } from './guiCanvas';

@@ -1,9 +1,10 @@
 /**
  * 把各线路的「按比例计费的窗口」收敛成统一的额度仪表。
  *
- * Codex、Claude 订阅、Kimi 的用量面形状不同，但表达的是同一件事：一个有名有重置时刻的
- * 已用比例。收敛在一处可以保证四条线路的卡片读数不会各自漂移（尤其是**百分比与分数两种
- * 单位**——Claude 的 `utilization` 在用量负载里是 0-100，在响应头里是 0-1）。
+ * Codex、Claude 订阅、Kimi、Command Code、MiniMax Code、OpenDesign（共 6 条线路）的
+ * 用量面形状不同，但表达的是同一件事：一个有名有重置时刻的已用比例。收敛在一处可以保证
+ * 各线路的卡片读数不会各自漂移（尤其是**百分比与分数两种单位**——Claude 的 `utilization`
+ * 在用量负载里是 0-100，在响应头里是 0-1）。
  */
 
 import type { SubscriptionQuotaMeter } from '../../../shared/subscriptionQuota';

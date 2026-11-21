@@ -1,3 +1,12 @@
+/**
+ * Global Ship Design Visual Workbench — Extension Host Webview Controller.
+ *
+ * Hosts the interactive Webview for `common/global_ship_designs/*.txt`,
+ * coordinating catalog loading, draft editing/undo via `ShipDesignDraftSession`,
+ * compatibility/stats calculation, 3D entity asset resolution, sprite icon
+ * decoding, and localisation lookup. All filesystem I/O stays in the Host.
+ */
+
 import * as path from 'path';
 import * as vscode from 'vscode';
 import { ErrorReporter } from './ai/errorReporter';

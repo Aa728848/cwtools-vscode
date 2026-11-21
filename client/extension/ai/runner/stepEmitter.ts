@@ -32,7 +32,7 @@ export class StepEmitter {
     }
 
     /**
-     * Helper to emit high-level orchestrator progress.
+     * Helper to emit high-level run progress.
      */
     public emitProgress(content: string, toolName?: string): void {
         this.emit({

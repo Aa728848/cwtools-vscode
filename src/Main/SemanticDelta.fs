@@ -134,9 +134,10 @@ let semanticDeltaForPath (path: string) =
       completionVisible = isTypeDefiningPath path
       validationVisible = true }
 
-/// Refine the path-based delta with the actual staged type-index result. Until
-/// every game exposes a complete semantic contribution delta, a reported
-/// semantic change remains a conservative full-refresh request.
+/// Refine the path-based delta with the actual staged type-index result.
+/// Specific `changedTypeKeys` or `dynamicDefinitions` route to incremental
+/// `TypeIndexOnly` / `ScriptedServices` refreshes; `FullRefresh` is reserved
+/// for unknown semantic changes or deltas exceeding the patch budget.
 let semanticDeltaForTypeIndex path changedTypeKeys semanticChanged =
     let routed = semanticDeltaForPath path
     let domains =

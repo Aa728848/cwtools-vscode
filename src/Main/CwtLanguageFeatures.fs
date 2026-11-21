@@ -1,3 +1,7 @@
+/// LSP adapter and project-index lifecycle for standalone `.cwt` rule files.
+/// Owns single-file and project-wide CWT diagnostics (`CWT0xx`–`CWT9xx`),
+/// context completion, cross-file navigation, and debounced candidate-rule
+/// hot-swap activation into the game model.
 module Main.Lang.CwtLanguageFeatures
 
 open System
@@ -15,9 +19,8 @@ open Main
 /// (code, severity, fileName, message, range, keyLength, relatedErrors).
 type CwtErrorTuple = string * Severity * string * string * range * int * (CWRelatedError list) option
 
-/// Resolves a stable CwtDiagnostic.messageKey into concrete text at the
-/// server-side localization boundary (handoff doc §5). Full English/Chinese
-/// catalogs land in Phase 5; the texts below are the English defaults.
+/// Resolves a stable `CwtDiagnostic.messageKey` into the server-side English
+/// default message; client-side Chinese translations live in `diagnosticI18n.ts`.
 let private messageText (d: CwtDiagnostic) : string =
     match d.messageKey, d.messageArgs with
     | "cwt.syntaxError", msg :: _ -> $"CWT syntax error: %s{msg}"
@@ -191,8 +194,8 @@ type CwtActivationRequest =
       snapshot: CwtProjectSnapshot
       ruleFiles: (string * string) list }
 
-/// Set by Program.fs to the write-locked game-model swap; None in CWT-only
-/// mode (no game model to swap).
+/// Write-locked game-model hot-swap callback supplied by Program.fs;
+/// actual activation is gated by `canActivateRulesFromRoot` (always false in CWT-only mode).
 let mutable onActivationReady: (CwtActivationRequest -> unit) option = None
 
 /// Program.fs supplies the runtime policy. CWT-only workspaces index rules but
@@ -244,8 +247,8 @@ let private maybeRequestActivation (ruleRoot: string) (snapshot: CwtProjectSnaps
     | _ ->
         lock snapshotLock (fun () -> latestActivationRejection <- None)
 
-/// Project diagnostics for a file (CWT3xx/CWT4xx), as error tuples; [] when
-/// the index is not ready (no false "undefined" reports while pending).
+/// Project diagnostics (`CWT3xx`/`CWT4xx`) plus candidate-rejection notice (`CWT900`)
+/// for a file, as error tuples; [] when the index is not ready (no false "undefined" reports while pending).
 let projectErrorsForFile (filePath: string) : CwtErrorTuple list =
     match latestSnapshot () with
     | None -> []
@@ -278,8 +281,8 @@ let projectErrorsForFile (filePath: string) : CwtErrorTuple list =
 let private toLspRange = LspConvert.rangeToLsp
 let private filePathToUri = LspConvert.filePathToUri
 
-/// Finds the structured token at the cursor (`type[pl|anet_class]`,
-/// `<sprite>`, `$x`) and resolves it to (kind, name, range).
+/// Finds the structured token at the cursor (`type[pl|anet_class]` or
+/// `<sprite>`) and resolves it to (kind, name, range).
 let private symbolAtPosition (filePath: string) (text: string) (position: pos) : (CwtSymbolKind * string * range) option =
     let lineIdx = max 0 (position.Line - 1)
     let lineStart =

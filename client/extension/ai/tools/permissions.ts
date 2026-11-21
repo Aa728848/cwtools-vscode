@@ -1,7 +1,7 @@
 /**
  * CWTools AI Module — Tool Execution Permissions
  *
- * Centralizes permission checks, mode validation, and sandbox/sub-agent boundary logic.
+ * Centralizes permission checks, mode validation, and mode, domain, and scoped-profile boundary logic.
  */
 
 import { TOOL_REGISTRY, WRITE_TOOLS } from './registry';
@@ -53,7 +53,7 @@ export function validateToolCapability(
         };
     }
 
-    // 2. Sub-agent sandbox check
+    // 2. Scoped profile restriction check
     if (decision.reason === 'subagent') {
         return {
             allowed: false,

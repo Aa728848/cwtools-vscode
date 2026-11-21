@@ -5,14 +5,15 @@
  * Verifies the project is in a releasable state:
  *   1.  Root & release manifest version sync
  *   2.  CHANGELOG entry for current version
- *   3.  Required files present (README, LICENSE, etc.)
- *   4.  No hardcoded secrets or localhost URLs in source
+ *   3.  Required files, single-source bilingual docs, and Marketplace README sync
+ *   4.  No hardcoded secrets or localhost URLs in extension source
  *   5.  TypeScript compiles cleanly
  *   6.  Unit tests pass
- *   7.  Release manifest is valid JSON
- *   8.  NLS key completeness (package.nls.json ↔ package.nls.zh.json)
+ *   7.  Release manifest integrity and protected VS Code keybinding safety
+ *   8.  NLS completeness across all package.nls*.json locales and manifest %key% refs
  *   9.  Webview bundles exist and are non-empty
  *   10. Server binaries exist for all platforms
+ *   11. Cross-platform Path.Combine usage in F# .fsx test scripts
  *
  * Usage: node tools/check-release.js [--skip-compile] [--skip-test]
  * Exit code 0 = all checks passed, 1 = at least one failure.

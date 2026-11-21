@@ -93,7 +93,7 @@ export class ReadTracker {
     }
 
     /**
-     * 清理某个特定文件的读记录（例如在多 Agent 场景下子 Agent 改写了文件，需要强制父 Agent 重新读取）
+     * 清理某个特定文件的读记录（例如外部或工具修改文件后，需要强制重新读取再编辑）
      */
     invalidate(filePath: string): void {
         this.readMap.delete(this.normalizeKey(filePath));

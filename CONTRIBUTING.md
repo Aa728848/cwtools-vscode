@@ -20,12 +20,13 @@ Install the following tools:
 | Git | A current version with submodule support |
 | PowerShell | Windows PowerShell 5.1+ for the root packaging scripts |
 
-Clone the repository with its submodules, then install the npm workspaces:
+Clone the repository with its submodules, install dependencies, and build `cwtools-shared` before compiling on a fresh checkout:
 
 ```bash
 git clone --recurse-submodules https://github.com/Aa728848/cwtools-vscode.git
 cd cwtools-vscode
 npm install
+(cd submodules/cwtools-mcp && npm ci && npm run build -w cwtools-shared)
 ```
 
 If you cloned without submodules, repair the checkout before building:
@@ -34,7 +35,7 @@ If you cloned without submodules, repair the checkout before building:
 git submodule update --init --recursive
 ```
 
-Missing `submodules/cwtools` breaks the F# build. Missing `submodules/cwtools-stellaris-config/config` breaks packaging.
+Missing `submodules/cwtools` breaks the F# build. Missing `submodules/cwtools-stellaris-config/config` breaks packaging. Missing `submodules/cwtools-mcp/packages/cwtools-shared/dist` breaks TypeScript compilation (`Cannot find module 'cwtools-shared'`).
 
 To use a separate local CWTools checkout, create `src/Main/cwtools.local.props`:
 
@@ -69,9 +70,10 @@ Run the smallest check that covers your change, then broaden when the change cro
 | Documentation | `npm run build:docs` and `npm run check:release -- --skip-compile --skip-test` |
 | F# LSP layer | `dotnet build src/LSP/` |
 | F# server or CWTools integration | `dotnet build src/Main/` |
-| F# regression scripts | `dotnet fsi` each `src/**/*.Tests.fsx` from its directory |
+| F# regression scripts | `npm run test:fsx` (or `dotnet fsi` each `src/**/*.Tests.fsx` from its directory) |
+| Shader or CWT LSP contracts | `npm run test:shader-lsp`, `npm run test:cwt-lsp`, `npm run test:cwt-game-lsp` |
 | CWT rules sync | `npm run test:rules-sync` plus the relevant scan/check/report command |
-| MCP contracts | Generate the schema, then build and test inside `submodules/cwtools-mcp` |
+| MCP contracts | Generate the schema/detection files, then build and test inside `submodules/cwtools-mcp` |
 | Broad release-sensitive change | `npm run verify` |
 
 Common commands:
@@ -82,6 +84,7 @@ npm run compile
 npm run typecheck:test
 npm run test:unit
 npm run test
+npm run test:fsx
 npm run verify
 dotnet build src/LSP/
 dotnet build src/Main/
@@ -230,12 +233,13 @@ To retry without moving the tag, run the workflow manually from the Actions page
 | Git | 支持 submodule 的当前版本 |
 | PowerShell | 根目录打包脚本需要 Windows PowerShell 5.1+ |
 
-连同子模块一起克隆仓库，再安装 npm workspace 依赖：
+连同子模块一起克隆仓库、安装依赖，并在全新检出首次编译前先构建 `cwtools-shared`：
 
 ```bash
 git clone --recurse-submodules https://github.com/Aa728848/cwtools-vscode.git
 cd cwtools-vscode
 npm install
+(cd submodules/cwtools-mcp && npm ci && npm run build -w cwtools-shared)
 ```
 
 如果克隆时没有拉取子模块，请先补全：
@@ -244,7 +248,7 @@ npm install
 git submodule update --init --recursive
 ```
 
-缺少 `submodules/cwtools` 会导致 F# 构建失败；缺少 `submodules/cwtools-stellaris-config/config` 会导致打包失败。
+缺少 `submodules/cwtools` 会导致 F# 构建失败；缺少 `submodules/cwtools-stellaris-config/config` 会导致打包失败；缺少 `submodules/cwtools-mcp/packages/cwtools-shared/dist` 会导致 TypeScript 编译失败（`Cannot find module 'cwtools-shared'`）。
 
 如需使用另一份本地 CWTools 检出，请创建 `src/Main/cwtools.local.props`：
 
@@ -279,9 +283,10 @@ git submodule update --init --recursive
 | 文档 | `npm run build:docs` 和 `npm run check:release -- --skip-compile --skip-test` |
 | F# LSP 层 | `dotnet build src/LSP/` |
 | F# 服务端或 CWTools 集成 | `dotnet build src/Main/` |
-| F# 回归脚本 | 在各自目录用 `dotnet fsi` 运行每个 `src/**/*.Tests.fsx` |
+| F# 回归脚本 | `npm run test:fsx`（或在各自目录用 `dotnet fsi` 运行 `src/**/*.Tests.fsx`） |
+| Shader 或 CWT LSP 契约 | `npm run test:shader-lsp`、`npm run test:cwt-lsp`、`npm run test:cwt-game-lsp` |
 | CWT 规则同步 | `npm run test:rules-sync`，再运行相关 scan/check/report 命令 |
-| MCP 契约 | 生成 schema，再进入 `submodules/cwtools-mcp` 构建和测试 |
+| MCP 契约 | 生成 schema/探测文件，再进入 `submodules/cwtools-mcp` 构建和测试 |
 | 影响发布的较大修改 | `npm run verify` |
 
 常用命令：
@@ -292,6 +297,7 @@ npm run compile
 npm run typecheck:test
 npm run test:unit
 npm run test
+npm run test:fsx
 npm run verify
 dotnet build src/LSP/
 dotnet build src/Main/

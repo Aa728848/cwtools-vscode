@@ -88,7 +88,7 @@ export function parseCommandCodeCatalog(payload: unknown): CommandCodeCatalogMod
     return models;
 }
 
-/** 从已解析的目录提取「模型 id → 上下文窗口」，供 DSH 的压缩与溢出判断使用。 */
+/** 从已解析的目录提取「模型 id → 上下文窗口」，供 Agent 运行时的压缩与溢出判断使用。 */
 export function commandCodeContextWindows(models: readonly CommandCodeCatalogModel[]): Record<string, number> {
     const result: Record<string, number> = {};
     for (const model of models) {

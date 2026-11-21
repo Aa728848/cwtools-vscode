@@ -1,3 +1,12 @@
+/**
+ * Dirty-Buffer Safety Guards for Visual Editors (`.gui` and Global Ship Designs).
+ *
+ * Checks open `file://` documents with unsaved edits (`scheme === 'file' && isDirty`)
+ * so AI file-write tools (`ai/tools/fileTools.ts`) and visual workbench hosts
+ * (`guiSafety.ts`, `shipDesignPanel.ts`) refuse to silently overwrite dirty buffers.
+ * Pure module (no vscode dependency).
+ */
+
 import * as path from 'path';
 
 export interface VisualEditorDocumentState {

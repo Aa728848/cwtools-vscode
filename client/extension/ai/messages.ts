@@ -2,7 +2,7 @@
  * CWTools AI Module - centralized user-visible messages.
  *
  * The extension host cannot import Webview i18n modules, so this file keeps a
- * small host-side catalog for AI runner, orchestration, and VS Code messages.
+ * small host-side catalog for AI runner, tool feedback, and VS Code messages.
  * Call `setAiMessageLocale(vscode.env.language)` during activation.
  */
 

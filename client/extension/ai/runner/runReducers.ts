@@ -1,15 +1,15 @@
 /**
- * Pure event-projection reducers for run state (T3.2).
+ * Pure event-projection reducers for run state.
  *
  * Each function takes a slice of AgentRunEvent[] and produces an immutable
  * snapshot the Webview consumes. Reducers are pure and side-effect-free so
  * that they can be unit-tested in isolation and re-played from `runLedger`
  * JSONL streams without touching the live RunLedger singleton.
  *
- * Per the plan:
+ * Projections:
  *  - `reduceRunState` — overall run progress, token counts, status.
  *  - `reduceToolTimeline` — turn-by-turn tool call list, agentId-filterable.
- *  - `reduceAgentGraph` — parent / sub-agent topology with sandbox-rejection markers.
+ *  - `reduceAgentGraph` — run-family topology with sandbox-rejection markers (retained for historical run compatibility).
  *  - `reduceCacheStats` — per-agent prefix-cache hit aggregation.
  *
  * Reducers iterate events once; callers are expected to slice by runId upstream.

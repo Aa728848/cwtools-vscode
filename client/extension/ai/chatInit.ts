@@ -1,5 +1,5 @@
 /**
- * Eddy CWTool Code - /init command.
+ * CWTools AI Module — `/init` Command Handler
  *
  * Creates a user-owned project instruction scaffold when missing, then builds
  * the machine-readable profile and semantic knowledge database.

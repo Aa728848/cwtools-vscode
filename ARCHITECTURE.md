@@ -85,7 +85,7 @@ Keep these caches bounded. Sort filesystem-derived results where callers or test
 
 ### Webview sandbox
 
-`client/webview/` is bundled by Rollup and runs in VS Code's browser sandbox. It contains the chat interface and the GUI, solar-system, static-galaxy, event, technology, entity, and particle views.
+`client/webview/` is bundled by Rollup and runs in VS Code's browser sandbox. It contains the chat interface, the detached Agent Manager, the Steam Workshop uploader, and the GUI, global ship design, solar-system, static-galaxy, event-chain, technology-tree, targeting-weight, entity, and particle views.
 
 The communication pattern is always:
 
@@ -264,7 +264,6 @@ GUI references carry the document version, zero-based element hierarchy, name, t
 
 `Implementation_Plan.md` contains one machine-readable `cwtools-plan` contract. A Paradox blueprint is an optional payload inside that contract; drafts and approval-ready plans no longer use a second `cwtools-blueprint` fence or a separate contract-loading tool.
 
-
 The runner records typed events for streaming, replay, checkpoints, and resume. Adding an event requires matching reducer and Webview support. Resume accepts only the current V4 snapshot contract; older snapshots are rejected instead of migrated.
 
 Long runs use bounded context compaction, checkpoints, budgets, and loop detection.
@@ -418,7 +417,7 @@ flowchart TD
 
 ### Webview 沙盒
 
-`client/webview/` 由 Rollup 打包，在 VS Code 浏览器沙盒中运行，包含聊天界面以及 GUI、恒星系、静态银河、事件、科技、实体和粒子视图。
+`client/webview/` 由 Rollup 打包，在 VS Code 浏览器沙盒中运行，包含聊天界面、独立 Agent Manager、Steam 创意工坊上传视图，以及 GUI、全局舰船设计、恒星系、静态银河、事件链、科技树、索敌权重、实体和粒子视图。
 
 通信方式固定为：
 
@@ -445,7 +444,7 @@ Webview 不得导入 `vscode`、`fs`、`path`，不得使用 `require()` 或 Nod
 
 `client/shared/shipDesignProtocol.ts` 是带运行时校验的请求/响应边界。Webview 不为写入提供文件系统路径；跨文件设计导航携带的 URI 会由宿主重新校验工作区包含关系和全局设计目录。`set-required-component` 同样仅由 Host 完成：Host 重建 `requiredSlots`（先按船型 `required_component_set` 顺序，再列其余条目），校验部件集合与船级/船型限制后重写 `required_component` 列表。`drop-component` 是仅由 Host 完成的操作意图：Host 重建当前视图，校验部件、固定槽位和兼容性，再转换成 `set-component`；`fill-empty-slots` 同样根据 Host 目录计算写回操作，可选覆盖已装备槽位，并在工作副本上逐槽校验，使数量上限与互斥规则计入同一次填充中先放入的部件。组件库候选携带 `upgrades_to` 等级与 `origin`（定义文件解析到工作区根内为 `mod`，否则为 `vanilla`），供 Webview 筛选。手持放置时，`request-compatible-slots` 返回所持部件通过放置校验的槽位 ID；每次放置仍发送 `drop-component`，由 Host 再次校验。Webview 只列兼容候选，不渲染诊断或场景警告面板。源码补丁保留注释、未知字段和成长阶段块。未保存的全局设计文档与 GUI 共用 fail-closed 保护，阻止 Agent 直接写磁盘覆盖草稿；面板还把 Host 草稿暴露为虚拟脏文档，防止利用仍然干净的 TextDocument 绕过保护。
 
-Three.js 场景消费声明式的“根 → 区段 → 部件” locator 树。`shipDesignModelNodeKeys` 为每个节点生成包含祖先链的组合键；在同一设计与 `assetRevision` 内，场景保留键未变且已加载的节点，Host 只发送 Webview 尚未收到的键对应资源，因此替换部件只重建一个实体。网格以 Host 解析的 Webview 资源 URI 下发（内联 base64 仅作回退），场景按 URI 拉取并对并发请求去重、按字节上限缓存，大型船体网格既不受大小上限限制，也不经 postMessage 复制。场景与 Entity Preview 共用 `entityModelRuntime.ts`，不再维护另一套 pdxmesh/材质实现。宿主资产加载和 Webview 组装队列都有代际/epoch 检查、数量上限和释放路径。`shipDesign/sprites.ts` 解析直接引用与精灵表引用的 `.gfx` 图标，用有界 data-URI 缓存解码 DDS/TGA，驱动模型上下方的游戏式图标与尺寸槽位。中文本地化解析先查工作区索引，再回退到按语言优先级排列的分层文件并使用有界缓存；译文只用于显示，绝不替换写回脚本 key。
+Three.js 场景消费声明式的“根 → 区段 → 部件” locator 树。`shipDesignModelNodeKeys` 为每个节点生成包含祖先链的组合键；在同一设计与 `assetRevision` 内，场景保留键未变且已加载的节点，Host 只发送 Webview 尚未收到的键对应资源，因此替换部件只重建一个实体。网格以 Host 解析的 Webview 资源 URI 下发（内联 base64 仅作回退），场景按 URI 拉取并对并发请求去重、按字节上限缓存，大型船体网格既不受大小上限限制，也不经 postMessage 复制。场景与 Entity Preview 共用 `entityModelRuntime.ts`，不再维护另一套 pdxmesh/材质实现。宿主资产加载和 Webview 组装队列都有代际/epoch 检查、数量上限和释放路径。`shipDesign/sprites.ts` 解析直接引用与精灵表引用的 `.gfx` 图标，用有界 data-URI 缓存解码 DDS/TGA，驱动模型上下方的游戏式图标与尺寸槽位。本地化解析先查工作区索引，再回退到按语言优先级排列的分层文件并使用有界缓存；译文只用于显示，绝不替换写回脚本 key。
 
 ### 语言服务
 
@@ -474,21 +473,21 @@ flowchart LR
 
 ### CWT 文档管线
 
-`.cwt` 规则文件是一门独立的编辑器语言(`cwt` language id),不是游戏脚本。
-它们永不进入 `game.Complete`/`game.ValidateFile`;诊断使用 `CWT0xx` 族
-(见 [docs/diagnostic-codes.md](docs/diagnostic-codes.md)),由内置 CWT 元模型
-提供,而不是用正在编辑的规则自我验证。
+`.cwt` 规则文件是一门独立的编辑器语言（`cwt` language id），不是游戏脚本。
+它们永不进入 `game.Complete`/`game.ValidateFile`；诊断使用 `CWT0xx` 族
+（见 [docs/diagnostic-codes.md](docs/diagnostic-codes.md)），由内置 CWT 元模型
+提供，而不是用正在编辑的规则自我验证。
 
-两种服务端模式:
+两种服务端模式：
 
-- **Full game mode**——工作区存在游戏证据(vanilla 目录、mod descriptor、
-  已知游戏 language id)。按原方式构建游戏模型;`.cwt` 文档仍走 CWT 管线。
-- **CWT-only mode**——规则仓库或单独打开的 `.cwt` 文件,无游戏证据。
-  服务端以 `language: "cwt"`(`GameLanguage.CWT`)启动,不构建游戏模型;
+- **Full game mode**——工作区存在游戏证据（vanilla 目录、mod descriptor、
+  已知游戏 language id）。按原方式构建游戏模型；`.cwt` 文档仍走 CWT 管线。
+- **CWT-only mode**——规则仓库或单独打开的 `.cwt` 文件，无游戏证据。
+  服务端以 `language: "cwt"`（`GameLanguage.CWT`）启动，不构建游戏模型；
   lint 只发布解析/结构诊断。升级到 full mode 时在同一进程内重启
-  (`cwtools.reloadExtension`),绝不启动第二个竞争进程。
+  （`cwtools.reloadExtension`），绝不启动第二个竞争进程。
 
-CWT-only 不得触发游戏猜测、vanilla 缓存生成或规则源配置;
+CWT-only 不得触发游戏猜测、vanilla 缓存生成或规则源配置；
 `checkOrSetGameCache` 与 `setupRulesCaches` 均跳过。启动模式由
 `client/extension/languageSelectors.ts` 中的纯函数 `determineServerStartMode`
 决定。`workspaceGameDetection.ts` 分开判断项目支持与具体游戏：必须有强标记或
@@ -497,31 +496,31 @@ Stellaris。详见
 [工作区识别 Agent Note](.agents/notes/implemented/architecture/2026-11-10-evidence-based-workspace-detection.md)。
 
 单文件语义位于 `submodules/cwtools/CWTools/Rules/`
-(`CwtLanguageTypes.fs` / `CwtLanguageSchema.fs` / `CwtLanguageService.fs`,
-命名空间 `CWTools.CwtLanguage`):版本化的根块、`##` 指令与字段表达式族
-元模型驱动结构/表达式诊断(`CWT1xx`/`CWT2xx`)、局部符号与上下文补全。
-LSP 适配器(`src/Main/CwtLanguageFeatures.fs`)将领域类型转换为诊断与补全项;
-`.cwt` 补全永不进入 `game.Complete`,`.cwt` 的 lint 输出为解析器诊断加
+（`CwtLanguageTypes.fs` / `CwtLanguageSchema.fs` / `CwtLanguageService.fs`，
+命名空间 `CWTools.CwtLanguage`）：版本化的根块、`##` 指令与字段表达式族
+元模型驱动结构/表达式诊断（`CWT1xx`/`CWT2xx`）、局部符号与上下文补全。
+LSP 适配器（`src/Main/CwtLanguageFeatures.fs`）将领域类型转换为诊断与补全项；
+`.cwt` 补全永不进入 `game.Complete`，`.cwt` 的 lint 输出为解析器诊断加
 服务的语义诊断。`RulesParser.parseConfigWithMetadataDetailed` 返回结构化
-解析错误,`RulesParser` 中由用户输入触发的 `failwith` 路径降级为受控回退。
+解析错误，`RulesParser` 中由用户输入触发的 `failwith` 路径降级为受控回退。
 
-跨文件语义基于不可变、版本化的项目快照(`CWTools/Rules/CwtProjectIndex.fs`):
+跨文件语义基于不可变、版本化的项目快照（`CWTools/Rules/CwtProjectIndex.fs`）：
 `CwtProjectIndex.buildSnapshot` 将各文件文档聚合成符号索引并产出项目诊断
-(`CWT301` 未定义引用、`CWT302` 重复 type、`CWT401` inject 循环),输出确定
-有序并设有文件数/大小上限。`src/Main/CwtLanguageFeatures.fs` 负责生命周期:
-overlay 合并的文件枚举(未保存文档优先于磁盘,跳过 `.git`/`node_modules`/
-构建目录)、可取消防抖重建(只有最新请求版本可发布或激活)、以及 LSP 接线——`.cwt`
+（`CWT301` 未定义引用、`CWT302` 重复 type、`CWT401` inject 循环），输出确定
+有序并设有文件数/大小上限。`src/Main/CwtLanguageFeatures.fs` 负责生命周期：
+overlay 合并的文件枚举（未保存文档优先于磁盘，跳过 `.git`/`node_modules`/
+构建目录）、可取消防抖重建（只有最新请求版本可发布或激活）、以及 LSP 接线——`.cwt`
 补全合并项目符号、definition/references 走索引跳转、lint 仅在快照就绪时
-附加项目诊断。`## inject` 源路径对规则根做包含性校验(拒绝绝对路径与 `..`
-穿越,解析文件/目录链接,并用真实目录集合阻止链接循环)。
+附加项目诊断。`## inject` 源路径对规则根做包含性校验（拒绝绝对路径与 `..`
+穿越，解析文件/目录链接，并用真实目录集合阻止链接循环）。
 
-候选规则激活(`CWTools/Rules/CwtActivation.fs` + `src/Main/Program.fs` 中持写锁
-的处理器)只把当前配置的手动规则根中验证通过的规则文件热替换进游戏模型;
-CWT-only 工作区只索引当前工作区,不激活游戏模型。候选可用要求每个规则文件
-可解析且不存在 Error 级诊断(或被显式提升为阻断项的诊断);
-内容 hash + generation 追踪活动规则,替换在游戏状态写锁内原子完成,规则/
-模型 epoch 递增,失败发布 `CWT901` 并保留 last-known-good。被拒绝的候选
-绝不替换活动模型(`CWT900`),下一个有效候选自动重试;`reloadrulesconfig`
+候选规则激活（`CWTools/Rules/CwtActivation.fs` + `src/Main/Program.fs` 中持写锁
+的处理器）只把当前配置的手动规则根中验证通过的规则文件热替换进游戏模型；
+CWT-only 工作区只索引当前工作区，不激活游戏模型。候选可用要求每个规则文件
+可解析且不存在 Error 级诊断（或被显式提升为阻断项的诊断）；
+内容 hash + generation 追踪活动规则，替换在游戏状态写锁内原子完成，规则/
+模型 epoch 递增，失败发布 `CWT901` 并保留 last-known-good。被拒绝的候选
+绝不替换活动模型（`CWT900`），下一个有效候选自动重试；`reloadrulesconfig`
 仍是手动兜底。
 
 ### Shader 子系统
@@ -579,10 +578,9 @@ sequenceDiagram
 
 独立 Agent Manager 在“变更 / 运行 / 设置”旁挂载持久的“预览”面板。`ManagerGuiPreviewController` 负责目标文档、版本、选择、类型化快照与恢复；`GuiPreviewLoader` 与完整 GUI 工作台共享解析、精灵索引、纹理路径包含校验、解码缓存和按 Webview 生成 URI。Webview 画布只保存本地视口状态并收集交互，切换右侧 Tab 时隐藏而不销毁画布。
 
-GUI 引用携带文档版本、从零下标的元素层级路径、名称、类型和源码范围。添加到输入框不会自动启动任务；发送时通过现有 `ContextReferenceManager` 重新解析实时文档并生成有界只读源码上下文，写入仍走原工具策略与 Diff 确认。直接写磁盘的 Agent 工具会拒绝未保存的 GUI 草稿，run-ledger 写入通知则以防抖方式刷新两处预览。详见 [管理器 GUI 开发预览 Agent Note](.agents/notes/implemented/feature/2026-11-17-agent-manager-gui-development-preview.md)。 写入后，`guiVisualCaptureRequest` 通过离屏画布生成固定坐标帧截图。Before/After 共用逻辑坐标，RGBA 比较生成 Diff 图、变化像素比例和边界。控制器每个 run 最多通过现有输入队列注入两次 `visual_verification`：支持视觉的 Provider 在同一回合审查图片，其他 Provider 只接收文本指标。没有基线时明确返回 After-only。最新证据保存在话题私有固定文件中并按 Webview 生成 URI，不进入 V4 checkpoint，也不启动游戏进程。
+GUI 引用携带文档版本、从零下标的元素层级路径、名称、类型和源码范围。添加到输入框不会自动启动任务；发送时通过现有 `ContextReferenceManager` 重新解析实时文档并生成有界只读源码上下文，写入仍走原工具策略与 Diff 确认。直接写磁盘的 Agent 工具会拒绝未保存的 GUI 草稿，run-ledger 写入通知则以防抖方式刷新两处预览。详见 [管理器 GUI 开发预览 Agent Note](.agents/notes/implemented/feature/2026-11-17-agent-manager-gui-development-preview.md)。写入后，`guiVisualCaptureRequest` 通过离屏画布生成固定坐标帧截图。Before/After 共用逻辑坐标，RGBA 比较生成 Diff 图、变化像素比例和边界。控制器每个 run 最多通过现有输入队列注入两次 `visual_verification`：支持视觉的 Provider 在同一回合审查图片，其他 Provider 只接收文本指标。没有基线时明确返回 After-only。最新证据保存在话题私有固定文件中并按 Webview 生成 URI，不进入 V4 checkpoint，也不启动游戏进程。
 
 `Implementation_Plan.md` 只包含一个机器可读 `cwtools-plan` 合同。Paradox 蓝图是该合同中的可选 payload；草案和审批就绪计划不再使用第二个 `cwtools-blueprint` 围栏，也不再需要独立的合同加载工具。
-
 
 Runner 用类型化事件支持流式展示、replay、checkpoint 和恢复。新增事件必须同步 reducer 与 Webview。恢复只接受当前 V4 快照合同；旧快照会被拒绝，不再迁移。
 

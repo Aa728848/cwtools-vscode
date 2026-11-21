@@ -1,6 +1,6 @@
 /**
  * Policy engine: layered permission profiles, typed rule matching, and
- * actionable denials. Pure module (no vscode) — see docs/agent-boundary-permissions-plan.md.
+ * actionable denials. Pure module (no vscode dependency).
  */
 import * as path from 'path';
 import { foldPathCase, isPathInsideOrEqual } from '../../pathScope';
@@ -411,9 +411,9 @@ export function resolvePolicy(
     return decision;
 }
 
-// ── Sub-agent derivation (Phase 3) ───────────────────────────────────
+// ── Write-scope clamping ─────────────────────────────────────────────
 
-/** Clamp a child write scope to parent writable roots; escapes are rejected, never widened. */
+/** Clamp a candidate write scope to allowed writable roots; escapes are rejected, never widened. */
 export function clampWriteScopeToRoots(
     writeScope: string[] | undefined,
     parentRoots: string[],

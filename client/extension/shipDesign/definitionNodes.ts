@@ -1,3 +1,10 @@
+/**
+ * Lightweight Paradox Definition AST Helpers for Ship Design.
+ *
+ * Tokenizes `.txt`/`.gfx` definitions into scalar/block trees with `@var`
+ * numeric resolution and safe typed field accessors (no vscode dependency).
+ */
+
 import { TokenType, tokenize, type Token } from '../pdxTokenizer';
 
 export interface DefinitionScalar {

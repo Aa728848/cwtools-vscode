@@ -1,11 +1,9 @@
 /**
- * Eddy CWTool Code Module - Agent Tools (Orchestrator)
+ * CWTools AI Module — Agent Tool Dispatcher
  *
- * This file is the public API surface. It re-exports TOOL_DEFINITIONS and
- * the AgentToolExecutor class. Internally, tool implementations are split
- * across domain-specific modules under ./tools/.
- *
- * Consumers (agentRunner.ts, index.ts) import from this file - no change needed.
+ * Public surface for model-visible tool execution. Re-exports TOOL_DEFINITIONS
+ * and `AgentToolExecutor`; domain-specific implementations live under `./tools/`
+ * and every invocation is evaluated by the policy engine before dispatch.
  */
 
 import * as vs from 'vscode';

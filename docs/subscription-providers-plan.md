@@ -98,13 +98,15 @@
 
 新增线路共用的落点（§5 详述）：`BUILTIN_PROVIDERS` 增加条目、`types.ts` 的 `authKind` 扩枚举、`getProviderApiFormat` 映射、`aiService` 鉴权头与分发、`chatSettings` 登录/账号状态、webview 设置卡片与额度组件、`messages.ts` 与 `chat/i18n.ts` 中英双语。
 
-### 4.1 `workbuddy-subscription`（腾讯 WorkBuddy / CodeBuddy，优先级 P2）✅ 已落地（该线路已于 2026-10-21 移除）
+### 4.1 `workbuddy-subscription`（腾讯 WorkBuddy / CodeBuddy，优先级 P2）✅ 已重新接入并增强（2026-11-14）
 
-- 协议：OpenAI 兼容 `POST {backend}/v2/chat/completions`，两条硬约束：**仅流式**（`stream:false` → 400 `code 11101`）、**首条消息必须是 system**（否则 400 `code 11128`）——请求构造器始终 `stream:true` 并在缺系统提示时补中性 system。
-- 登录：扫描 CodeBuddy 桌面端 `*.info` 凭据（只读优先、续期后原子写回），或设置页选国区/国际区走官方浏览器授权；凭据存 VS Code SecretStorage。
-- **区域是凭据属性**：`*.workbuddy.ai` / `*.codebuddy.ai` 走国际区，其余走国区 `copilot.tencent.com`；模型目录、额度、对话跟随当前账号区域，模型选择器按区域过滤（跨区发模型 → 400 `code 11102`）。
-- 模型目录：取自网关 `/v3/config`（含真实上下文/输出上限、图片能力、思考档位表），内置表仅作离线兜底；`/v1/models` 在该线路是 404，**不要**走通用发现。
-- 额度：`/billing/meter/get-user-resource`。
+> 注：该线路于 2026-10-04 首次落地，2026-10-21 曾一度下线，并于 **2026-11-14** 重新接入且纳入统一多账号号池。
+
+- 协议：国区 `claude-*` 模型分流至 Anthropic Messages 风格 `/v1/messages`，其余模型走 OpenAI 兼容 `POST {backend}/v2/chat/completions`（请求级 gzip 强制流式、首条消息必须为 system，防风控会话头）；
+- 登录：扫描桌面端 `~/.workbuddy/.info` / CodeBuddy 凭据（只读优先，支持按需 `$wbEncrypted` AES-256-GCM 保护密钥解封并在刷新写回时保留原密文封装），或走浏览器 OAuth 登录；托管凭据存 VS Code SecretStorage。
+- **区域是凭据属性**：`*.workbuddy.ai` / `*.codebuddy.ai` 走国际区，其余走国区 `copilot.tencent.com`；模型目录、额度、对话与国区每日签到均跟随当前账号区域。
+- 模型目录：取自网关 `/v3/config`（含真实上下文/输出上限、图片能力、思考档位表），内置表仅作离线兜底；`/v1/models` 在该线路不可用，不走通用发现。
+- 额度与签到：`/billing/meter/get-user-resource`（基础包 + 加油包双仪表），国区支持幂等每日签到。
 - 桌面账号不可删除（只能在本扩展中隐藏/恢复），与参考项目做法一致。
 
 ### 4.2 `minimax-code`（MiniMax Code 编程订阅，优先级 P2）✅ 已落地
@@ -128,19 +130,26 @@
 - 刷新单飞、轮换后读回校验；额度主来源 `GET /api/oauth/usage`，辅以响应头 `anthropic-ratelimit-unified-5h-utilization`。
 - 提示缓存 TTL 可选（跟随官方 / 1 小时 / 5 分钟；1 小时需 `extended-cache-ttl-2025-04-11` beta）。
 
+### 4.4 `opendesign`（OpenDesign，2026-11-14 新增）✅ 已落地
+
+- 协议：OpenAI Chat Completions 兼容端点，纳入统一多账号号池；403 套餐档位不足（`tier_required`/`insufficient_tier`）按临时不可用切号，不污染 `authFailures`。
+- 登录：在同一号池内同时支持 RFC 8628 设备码 OAuth（保存 `controlKey` + `runtimeKey`）与静态控制台 API Key。
+- 模型目录：三层合并（内置基线 + 远端 `/models` + `/v1/models` 探测，自动过滤 `locked`/`disabled` 条目）。
+- 额度：通过 `GET /key` + `GET /Subscription` 展示 AMR 5 小时 / 7 天滚动窗口与钱包余额三联仪表。
+
 ## 5. 我们项目的架构落点
 
 | 层 | 文件 | 改动 |
 | --- | --- | --- |
-| Provider 注册 | `client/extension/ai/providers/models/defaults.ts` | `BUILTIN_PROVIDERS` 增加 `minimax-code`、（可选）`claude-subscription` |
-| 类型 | `client/extension/ai/types.ts` | `authKind` 扩：`'kimi-device-oauth' | 'minimax-code-oauth' | 'claude-subscription-oauth'`；账号状态类型 |
-| 协议路由 | `client/extension/ai/providers.ts` | `getProviderApiFormat`：`minimax-code`/`claude-subscription` → `anthropic-messages` |
-| 请求层 | `client/extension/ai/aiService.ts` | 鉴权头分派（OAuth 线路走各自 service 而非 `buildAuthHeaders`）；k3 线路规则；codex 的 beta 头 / 目录驱动默认值 / turn-state |
-| OAuth 服务 | 新增 `client/extension/ai/kimi/oauthService.ts`、`minimaxcode/oauthService.ts`、（可选）`claudesub/oauthService.ts` | 仿照 `codex/oauthService.ts`：SecretStorage 存 token、PKCE、单飞刷新、可取消登录 |
-| 模型目录 | 各线路 `modelCatalog.ts` | 实时拉取 + SecretStorage/globalState 快照 + 静态兜底（minimax-code 例外：纯硬编码） |
-| 设置与额度 UI | `chatSettings.ts`、`chatHtml.ts`、`client/webview/chat/`（仿 `codexQuota.ts` / `commandcodeQuota.ts`） | 登录按钮、账号卡片、额度胶囊 |
-| 国际化 | `client/extension/ai/messages.ts`、`client/webview/chat/i18n.ts` | 中英同步新增 |
-| 代理 | `subscriptionProxy.ts` | 新线路请求统一走 `SubscriptionProxyService.fetch`（现有订阅代理设置直接生效） |
+| Provider 注册 | `client/extension/ai/providers/models/defaults.ts` | `BUILTIN_PROVIDERS` 注册 `codex-chatgpt`、`commandcode`、`kimi-code-plan`、`minimax-code`、`claude-subscription`、`workbuddy-subscription`、`opendesign` |
+| 类型 | `client/extension/ai/types.ts` | `authKind` 与各订阅线路账号/号池状态类型 |
+| 协议路由 | `client/extension/ai/providers.ts` | `getProviderApiFormat` 按线路映射至 `openai-responses`、`anthropic-messages` 或 `openai-chat` |
+| 请求层 | `client/extension/ai/aiService.ts` | 鉴权头分派、401 单飞刷新重放、429/403 号池切号、K3/Codex/WorkBuddy/Claude 线路规则 |
+| 各线路服务 | `client/extension/ai/{codex,commandcode,kimi,minimaxcode,claudesub,workbuddy,opendesign}/` | OAuth/设备码/桌面凭据发现、单飞刷新、实时目录、额度与错误分类 |
+| 统一号池 | `client/extension/ai/pool/{accountPool,oauthAccountPool,subscriptionPools,poolRegistry,quotaWindows}.ts` | provider 无关号池内核、OAuth 号池工厂、身份键去重与按需额度窗口 |
+| 设置与额度 UI | `chatSettings.ts`、`chatHtml.ts`、`client/webview/chat/{codexQuota,commandcodeQuota,subscriptionQuota}.ts` | 登录/凭据按钮、通用账号池区块与逐账号额度仪表 |
+| 国际化 | `client/extension/ai/messages.ts`、`client/webview/chat/i18n.ts` | 中英同步文案 |
+| 代理 | `subscriptionProxy.ts` | 所有订阅线路请求统一走 `SubscriptionProxyService.fetch` |
 
 通用约束（来自 AGENTS.md）：错误上报用 `ErrorReporter`；外部响应一律 `isRecord` 收窄；保留 AbortSignal/超时语义；缓存有界；确定性行为。
 
@@ -179,10 +188,7 @@
 - **kimi**：新增 `kimi/oauthService.ts`（RFC 8628 设备码登录）、`kimi/tokenStore.ts`
   （`max(300s, expires_in×0.5)` 续期窗口、刷新单飞、终局拒绝冷却）、`kimi/accountStatus.ts`；
   `sanitizeRequest` 为 K3 家族在每条 assistant 消息上写 `reasoning_content`（无推理写空串）。
-- **workbuddy**（该线路已于 2026-10-21 移除，以下为历史实现记录）：新增 `workbuddy/types.ts`（区域/后端/档位收敛）、`credentials.ts`（桌面
-  扫描、托管存储、原子写回、桌面账号不可删除）、`client.ts`（网关请求 + 浏览器授权）、
-  `modelCatalog.ts`（`/v3/config` 实时目录）、`accountStatus.ts`；请求侧强制 `stream: true`
-  与首条 system。
+- **workbuddy**（首版交付，后于 2026-10-21 移除并在 2026-11-14 增强重写接入）：首版包含 `workbuddy/types.ts`、`credentials.ts`、`client.ts`、`modelCatalog.ts`、`accountStatus.ts`；2026-11-14 版本进一步补齐 `/v1/messages` 国区 Claude 分流、请求级 gzip 流式、`$wbEncrypted` 解封保密封写回与国区每日签到。
 - **minimax-code**：新增 `minimaxcode/types.ts`（硬编码目录 + 三态思考控制 + 本线路自己的
   body/image 预算）、`credentials.ts`（桌面复用 + 原子写回 + 双区域探测）、
   `oauthService.ts`（设备码 PKCE S256 + 5 分钟续期窗口）；端点只用 bearer，无 x-api-key 回退。
@@ -232,19 +238,6 @@
 - **测试**：新增 `claudeSubscription.test.ts`（29 例）；更新 `providers.test.ts` 的协议覆盖。
 - **决策记录**：`.agents/notes/implemented/feature/2026-10-04-claude-subscription-line.md`。
 
-### 全部完成状态（P1 / P2 / P3）
-
-| 项 | 状态 |
-| --- | --- |
-| P1 codex-chatgpt + commandcode | ✅ 完成 |
-| P2 antigravity（已移除）+ workbuddy-subscription（2026-11-14 重新接入）+ opendesign（2026-11-14 新增）+ kimi + minimax-code | ✅ 完成（现存线路） |
-| P3 claude-subscription | ✅ 完成 |
-| P4 多账号号池抽象 | ✅ 完成 |
-
-> 唯一**非阻塞**待办：各 OAuth 流程（workbuddy / opendesign / minimax-code / claude-subscription）与
-> kimi 设备码、桌面凭据复用均以单元测试锁定契约，但**真机账号验证**尚未全量覆盖；建议在有对应
-> 订阅的机器上各跑一次登录 + 一轮对话。
-
 ### P4 交付明细（多账号号池）
 
 - **内核**：新增 `client/extension/ai/pool/accountPool.ts`——provider 无关的号池，含存储、
@@ -264,17 +257,6 @@
   `npm run test:unit`（**2780 + 44 passing，0 failing**）。
 - **决策记录**：`.agents/notes/archived/architecture/2026-10-04-multi-account-pool-core-and-antigravity.md`、
   `feature/2026-10-04-commandcode-per-model-capabilities.md`。
-
-### 全部剩余项状态
-
-| 项 | 状态 |
-| --- | --- |
-| commandcode 逐模型能力表 | ✅ 完成（85 个模型，逐精确 id 查表） |
-| P4 多账号号池（内核 + 已移除的 antigravity 历史接入 + 设置面） | ✅ 完成（内核与其余线路保留） |
-
-> 唯一**非阻塞**待办仍是真机验证：三条新 OAuth 流程（workbuddy / minimax-code /
-> claude-subscription）、kimi 设备码、桌面凭据复用与多账号轮转均以单元测试锁定契约，
-> 但尚未在真实订阅账号上端到端跑过。
 
 ### 号池全线路接入（本轮）
 

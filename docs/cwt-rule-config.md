@@ -852,7 +852,7 @@ language id). What the CWTools extension provides while editing rules:
 - **Safe rule activation**: when the active rules come from a manual rules
   folder, validated edits hot-swap into the game model automatically; a
   broken candidate keeps the last-known-good rules (`CWT900`/`CWT901`) and
-  retries on the next valid candidate. `Reload Rules` (`reloadrulesconfig`)
+  retries on the next valid candidate. `Reload config rules` (`reloadrulesconfig`)
   remains the manual fallback.
 - **Modes**: a rules-only repository opens in CWT-only mode (no game install
   needed); a game workspace keeps full mode and upgrades in place.
@@ -1582,23 +1582,23 @@ database_object_types = {
 
 ### 文档标注的可选字段
 
-脚本文档用行内标注说明可选性:`pop_group = <target> (if not specified,
+脚本文档用行内标注说明可选性：`pop_group = <target> (if not specified,
 check total number)`、`who = <target (optional)>`、`disabled =
-<any(default)/yes(only)>`。没有 `## cardinality` 的规则字段默认是 `1..1`,
+<any(default)/yes(only)>`。没有 `## cardinality` 的规则字段默认是 `1..1`，
 因此「文档说可选、规则却必填」的字段会在所有合法省略写法上报
-`Missing <field>, expecting at least 1`(CW242)。
+`Missing <field>, expecting at least 1`（CW242）。
 
-不要靠人肉读注释维护这件事,而是让它自动探测:
+不要靠人肉读注释维护这件事，而是让它自动探测：
 
 ```powershell
-node tools/rules-sync/stellaris-rules-sync.js check   # 报告 action "optional_field",漂移时退出码 2
+node tools/rules-sync/stellaris-rules-sync.js check   # 报告 action "optional_field"，漂移时退出码 2
 npm run rules:stellaris:report                        # 渲染「可选字段契约」页签
 npm run rules:stellaris:optional-fields               # 独立审计
 ```
 
-探测器读取 `config/logs/trigger_docs.log`(以及 `effect_docs.log`),把「文档标注为可选、
+探测器读取 `config/logs/trigger_docs.log`（以及 `effect_docs.log`），把「文档标注为可选、
 规则仍然必填」的 alias 字段全部列出。在该字段上方补 `## cardinality = 0..1` 即可。
-推导出来的只有基数,字段类型仍由人工规则维护。
+推导出来的只有基数，字段类型仍由人工规则维护。
 
 ### 常见模式
 
@@ -1657,7 +1657,7 @@ dotnet build src/Main/
 ```
 
 `npm run rules:stellaris:check` 同时会报告「文档标注可选、规则仍必填」的字段
-(action `optional_field`),只要还有残留就以退出码 2 结束,因此规则刷新不会再悄悄
+（action `optional_field`），只要还有残留就以退出码 2 结束，因此规则刷新不会再悄悄
 引入 CW242 误报。
 
 解析器或字段语义改动：
@@ -1701,25 +1701,25 @@ npm run verify
 
 ### 编辑器支持
 
-`.cwt` 规则文件是一等编辑器语言(独立 `cwt` language id)。CWTools 扩展在
-编辑规则时提供:
+`.cwt` 规则文件是一等编辑器语言（独立 `cwt` language id）。CWTools 扩展在
+编辑规则时提供：
 
-- **诊断**(按族划分,见 [diagnostic-codes.md](diagnostic-codes.md)):解析/结构
+- **诊断**（按族划分，见 [diagnostic-codes.md](diagnostic-codes.md)）：解析/结构
   `CWT0xx`、根块与指令校验 `CWT1xx`、字段表达式 `CWT2xx`、项目级未定义
   引用与重复类型 `CWT3xx`、inject 循环 `CWT4xx`、激活状态 `CWT9xx`。
-  先修结构错误;解析恢复期间后续诊断可能不完整。
-- **补全**:文件顶层的根块、`##` 指令名、`=` 后的字段表达式族,以及 type、
-  enum、动态值、alias 和 scope 引用的项目真实候选。括号补全(`type[`、
-  `enum[`、`scope[` 等)会合并所有已索引规则文件;开放式动态命名空间从
-  项目用法中提取,不会再把字面量 `x` 当成真实候选。
-- **跳转**:定义与引用通过项目索引跨文件解析。
-- **安全规则激活**:当活动规则来自手动规则目录时,验证通过的编辑自动热替换
-  进游戏模型;损坏的候选保留 last-known-good(`CWT900`/`CWT901`),下一个
-  有效候选自动重试。`重新加载规则`(`reloadrulesconfig`)仍是手动兜底。
-- **模式**:纯规则仓库以 CWT-only 模式打开(无需游戏安装);游戏工作区保持
+  先修结构错误；解析恢复期间后续诊断可能不完整。
+- **补全**：文件顶层的根块、`##` 指令名、`=` 后的字段表达式族，以及 type、
+  enum、动态值、alias 和 scope 引用的项目真实候选。括号补全（`type[`、
+  `enum[`、`scope[` 等）会合并所有已索引规则文件；开放式动态命名空间从
+  项目用法中提取，不会再把字面量 `x` 当成真实候选。
+- **跳转**：定义与引用通过项目索引跨文件解析。
+- **安全规则激活**：当活动规则来自手动规则目录时，验证通过的编辑自动热替换
+  进游戏模型；损坏的候选保留 last-known-good（`CWT900`/`CWT901`），下一个
+  有效候选自动重试。`重新加载配置规则`（`reloadrulesconfig`）仍是手动兜底。
+- **模式**：纯规则仓库以 CWT-only 模式打开（无需游戏安装）；游戏工作区保持
   full mode 并在原地升级。
 
-编辑器使用内置 CWT 元模型校验规则,绝不用正在编辑的规则自我验证。
+编辑器使用内置 CWT 元模型校验规则，绝不用正在编辑的规则自我验证。
 
 ### 实现检查清单
 

@@ -3,7 +3,7 @@
  *
  * 元数据优先级（字段级合并）：
  * - 在线列表（AMR 控制面 `/api/v1/models` > 网关 `/v1/models`）补齐窗口、模态与新上架模型；
- * - 内置 41 条公开价目与能力表 `OPENDESIGN_MODEL_CATALOG` 提供稳定展示名、思考档位与上下文下界；
+ * - 内置 42 条公开价目与能力表 `OPENDESIGN_MODEL_CATALOG` 提供稳定展示名、思考档位与上下文下界；
  * - 兜底使用 `OPENDESIGN_DEFAULT_CONTEXT_WINDOW`（128k）与 `OPENDESIGN_DEFAULT_EFFORTS`（low/medium/high）。
  */
 

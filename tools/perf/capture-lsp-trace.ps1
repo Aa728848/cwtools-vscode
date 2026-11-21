@@ -1,3 +1,13 @@
+<#
+.SYNOPSIS
+    Capture a .NET runtime and CPU sample trace (.nettrace) from a running CWTools Server process.
+.PARAMETER ProcessId
+    PID of the running CWTools Server process to profile.
+.PARAMETER DurationSeconds
+    Trace capture duration in seconds (default 60).
+.PARAMETER OutputPath
+    Destination `.nettrace` file path (default `artifacts/lsp-perf/cwtools-lsp.nettrace`).
+#>
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)]

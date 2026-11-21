@@ -10,10 +10,9 @@
  * Consumers (AI tools, editor features, previews) should query this service
  * instead of performing their own file scans.
  *
- * Phase 1 of the Incremental Index plan:
- *   - Build the service skeleton with lifecycle management
- *   - Add file watcher infrastructure with debounced updates
- *   - Add localisation key indexing (first consumer)
+ * Architecture:
+ *   - Lifecycle-managed singleton service with debounced file-watcher updates
+ *   - Localisation, file inventory, and lazy workspace symbol indexing
  *
  * Performance design:
  *   - Localisation index is built on startup (lightweight, powers hovers/definitions).

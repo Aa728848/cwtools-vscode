@@ -1,3 +1,6 @@
+/// Single source of truth for LSP `workspace/executeCommand` registration,
+/// read/write lock classification (`allCommands` / `isReadOnly`), and the
+/// `cwtools.ai.getHostCapabilities` protocol version handshake.
 namespace LSP
 
 open System

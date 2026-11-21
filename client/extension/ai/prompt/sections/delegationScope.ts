@@ -1,32 +1,29 @@
 /**
- * Eddy CWTool Code — Delegated sub-agent scope statement.
+ * CWTools AI Module — Scoped prompt boundary statement.
  *
- * A dispatched sub-agent runs inside a permission scope the coordinator fixed
- * when it was started: runtime profile authority, clamped `writeScope`, denied
- * user-owned scopes, and `plannedFiles` that were dropped because they escaped
- * the parent's writable roots.
+ * Formats read/write scope constraints (read-only profile authority, clamped
+ * `writeScope`, denied user-owned scopes, and `rejectedScopes` dropped because
+ * they escaped writable roots) into a concise prompt section for slim or
+ * scoped prompt profiles.
  *
- * The host already enforces all of that. What the child was never told is WHY a
- * write failed, so its natural next move is to retry — which is exactly the
- * behaviour `RecoveryStormBudget` has to extinguish afterwards. One sentence in
- * the child's own system prompt is far cheaper than that recovery, and it has a
- * structured place to put the outcome: the `Unresolved` section of its handoff.
+ * The host already enforces these boundaries. Stating the scope upfront avoids
+ * blind write retries when a path is outside the allowed roots.
  *
  * Kept deterministic (sorted, bounded, no timestamps) because it is part of a
  * system prompt: an unstable statement would defeat prefix caching.
  */
 
-/** Scope facts a coordinator already computed for one child. */
+/** Scope facts supplied to render a scoped prompt boundary statement. */
 export interface DelegationScopeFacts {
     /** True when the runtime profile has no project write tools. */
     readOnly?: boolean;
-    /** Absolute workspace and configured game roots this child may read. */
+    /** Absolute workspace and configured game roots this scope may read. */
     readScope?: readonly string[];
-    /** Workspace-relative or absolute scopes this child may write. */
+    /** Workspace-relative or absolute scopes this scope may write. */
     writeScope?: readonly string[];
     /** Scopes withheld because the user retained ownership of them. */
     deniedWriteScopes?: readonly string[];
-    /** plannedFiles dropped because they escaped the parent writable roots. */
+    /** Planned scopes dropped because they escaped the writable roots. */
     rejectedScopes?: readonly string[];
 }
 

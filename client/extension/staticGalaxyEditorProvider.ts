@@ -1,7 +1,7 @@
 /**
  * Static Galaxy Preview/Editor — CustomTextEditorProvider.
  *
- * Host responsibilities (docs/static-galaxy-preview-editor-plan.md §5.2):
+ * Host responsibilities:
  * - Owns parsing, revisions, source spans, permissions and WorkspaceEdits.
  * - The TextDocument stays the single source of truth; undo/redo/save are the
  *   native VS Code document operations.

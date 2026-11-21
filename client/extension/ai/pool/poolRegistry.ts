@@ -5,9 +5,9 @@
  * 每条线路的凭据解析都走**同一套**账号选择、冷却与失效保留规则，而不是各写一份。
  *
  * 两类线路的差别通过 `seed` 表达：
- * - **自带桌面账号的线路**（MiniMax Code）每次选择前把扫描到的桌面凭据并入
+ * - **自带桌面账号的线路**（MiniMax Code、WorkBuddy）每次选择前把扫描到的桌面凭据并入
  *   号池，因此桌面账号与插件账号在同一池里参与调度；
- * - **纯登录线路**（Codex、Kimi、Claude 订阅、Command Code）不需要 seed。
+ * - **纯登录 / 密钥线路**（Codex、Kimi、Claude 订阅、Command Code、OpenDesign）不需要 seed。
  *
  * seed 的合并是幂等的：身份键相同即原地更新，不会每次选择都长出新行。
  */
@@ -57,7 +57,7 @@ export interface SelectedSubscriptionAccount<TCredentials extends PooledOAuthCre
 /**
  * 一个 provider id 一个号池。
  *
- * 池子是**懒创建**的：只有真正用过某条线路才会为它建池，避免启动时为六条线路各读一次
+ * 池子是**懒创建**的：只有真正用过某条线路才会为它建池，避免启动时为全部七条线路各读一次
  * 安全存储。
  */
 export class SubscriptionPoolRegistry {

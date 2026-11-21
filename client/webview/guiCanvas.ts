@@ -1,3 +1,11 @@
+/**
+ * Read-Only Interactive `.gui` Canvas Component (Browser-Sandboxed Webview).
+ *
+ * Renders parsed `.gui` hierarchies with pan/zoom, marquee selection, change
+ * highlights, and offscreen capture hooks (`guiVisualCapture.ts`) while
+ * disposing DOM listeners via `AbortController`.
+ */
+
 import {
     createGuiElementReference,
     flattenGuiElements,

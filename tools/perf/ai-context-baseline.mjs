@@ -1,19 +1,18 @@
 /**
- * AI static-context baseline measurement (docs/ai-agent-reliability-efficiency-plan.md
- * §9 phase 0 "测量基线", table structure mirrors §2.1).
+ * AI static-context baseline measurement harness.
  *
  * Loads the real PromptBuilder / TOOL_DEFINITIONS / runnerPolicy from
  * client/extension/ai under a minimal `vscode` stub (same hook pattern as
  * client/test/unit/memoryParser.test.ts) and measures the static per-request
  * context — system prompt + tool schemas — with the repo's own
- * estimateTokenCount heuristic (client/extension/ai/agentRunner.ts).
+ * estimateTokenCount heuristic (client/extension/ai/runner/tokenEstimation.ts).
  *
  * Fixture: an empty temp workspace (no CWTOOLS.md, project profile, project
  * knowledge, memory, or installed skills), languageId forced to 'stellaris'.
  * Dynamic context (editor state, user input, conversation history, injected
  * memory/blueprint) is not part of these numbers.
  *
- * Usage: npm run baseline:ai-context  — writes docs/ai-context-baseline.md
+ * Usage: npm run baseline:ai-context
  */
 import { createRequire } from 'node:module';
 import { execSync } from 'node:child_process';

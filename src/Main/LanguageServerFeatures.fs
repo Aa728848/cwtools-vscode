@@ -32,7 +32,7 @@ module LanguageServerFeatures =
     
     let convRangeToLSPRange = LspConvert.rangeToLsp
 
-    /// Windows URI path correction tool function (eliminate duplicate code)
+    /// Convert a file URI to a local filesystem path, stripping the leading `/` on Windows.
     let getPathFromDoc (doc: Uri) =
         let p = doc.LocalPath
         if RuntimeInformation.IsOSPlatform(OSPlatform.Windows) && p.Length > 0 && p.[0] = '/' then

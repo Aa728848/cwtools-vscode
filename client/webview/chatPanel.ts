@@ -1,3 +1,12 @@
+/**
+ * CWTools Webview — AI Chat & Detached Agent Manager Entrypoint.
+ *
+ * Browser-sandboxed UI script for both the sidebar chat and detached Agent
+ * Manager surfaces (topics, streaming steps, settings, account pools, run
+ * inspector, artifact drawers, and embedded `.gui` preview); communicates with
+ * `client/extension/ai/chatPanel.ts` exclusively via `postMessage`.
+ */
+
 import { Icons, svgIcon, svgIconNoMargin } from './svgIcons';
 import { isSubscriptionProxyMode, isSubscriptionProxyStatus, type SubscriptionProxyStatus } from '../shared/subscriptionProxy';
 import { routeLiveStep, buildToolPairHtml, buildToolGroupHtml, buildLocalisationPromptCardHtml, escapeHtml as mrEscapeHtml, type RendererStep } from './messageRenderer';
@@ -379,7 +388,7 @@ function cloneSideDiffEntry(entry: SideDiffEntry): SideDiffEntry {
     let settingsMcpConfigWarnings: string[] = [];
     /** Validation warnings collected while loading ~/.cwtools/providers.json. */
     let settingsProviderFileWarnings: string[] = [];
-    /** Sub-agent roles whose model assignment comes from ~/.cwtools/agent-models.json (file-owned rows). */
+    /** Legacy per-role model overrides sourced from ~/.cwtools/agent-models.json (file-owned compatibility rows). */
     const settingsAgentModelHomeRoles = new Set<string>();
 
     function parseMcpFileServers(value: unknown): McpFileServerView[] {
@@ -4555,7 +4564,7 @@ let settingsSubscriptionPools: Record<string, any> = {};
             div.prepend(createContextCompactionCard(latestCompactionStep));
         }
 
-        // Recursively render all sub-Agent independent boxes to prevent merging with the main dialogue flow
+        // Recursively render any legacy/historical sub-agent step groups separately from the main dialogue flow
         for (const [agentId, groupSteps] of subAgentGroups.entries()) {
             // Use a fixed uniqueId to prevent the active state from being lost during re-rendering
             const uniqueId = `subview-${agentId.replace(/[^a-zA-Z0-9_-]/g, '_')}-${msgTime || 'sub'}`;
@@ -4604,7 +4613,7 @@ let settingsSubscriptionPools: Record<string, any> = {};
             `;
             bindSubagentScroll(fullscreen);
             
-            // Recursively render the content of the sub-Agent without msgTime to avoid multiple timestamps
+            // Recursively render historical sub-agent steps without msgTime to avoid duplicate timestamps
             const innerMsg = buildAssistantMessage('', groupSteps, null, true);
             fullscreen.querySelector('.subagent-body')!.appendChild(innerMsg);
             
@@ -5208,7 +5217,7 @@ let settingsSubscriptionPools: Record<string, any> = {};
             if (state.liveSummary) {
                 state.liveSummary.innerHTML = renderRunSummaryHtml(makeRunSummary(state.liveSteps, s.content), false);
             }
-            // Find card using explicitly stored fullscreenId (fix: state.container points to .subagent-body, no id)
+            // Find the legacy subtask card using explicitly stored fullscreenId (state.container points to .subagent-body)
             if (state.fullscreenId) {
                 const card = document.querySelector(`.subagent-card[data-target-id="${state.fullscreenId}"]`);
                 if (card) {
@@ -5526,7 +5535,7 @@ let settingsSubscriptionPools: Record<string, any> = {};
         }
     });
 
-    // Subagent drill-down view navigation via event delegation
+    // Historical subagent drill-down view navigation via event delegation
     chatArea.addEventListener('click', (e) => {
         const target = e.target as HTMLElement;
         const subagentCard = target.closest('.subagent-card') as HTMLElement | null;
@@ -6925,27 +6934,6 @@ let settingsSubscriptionPools: Record<string, any> = {};
                 }
                 scrollBottom();
                 break;
-                /*
-                // Panel was hidden while AI was running — replay accumulated steps
-                banner.innerHTML = msg.isGenerating
-                    ? `${svgIconNoMargin('zap')} AI 正在后台运行（面板重新打开时恢复显示）`
-                    : `${svgIconNoMargin('clipboard')} 以下为 AI 上次运行记录`;
-                chatArea.appendChild(banner);
-                // Replay each step
-                for (const step of msg.steps) {
-                    applyLiveStep(step);
-                }
-                if (msg.isGenerating) {
-                    // Show generating indicator
-                    sendBtn.classList.add('cancel-mode');
-                    const sendIcon = sendBtn.querySelector('.send-icon') as HTMLElement | null;
-                    const stopIcon = sendBtn.querySelector('.stop-icon') as HTMLElement | null;
-                    if (sendIcon) (sendIcon as HTMLElement).style.display = 'none';
-                    if (stopIcon) (stopIcon as HTMLElement).style.display = 'inline-block';
-                }
-                scrollBottom();
-                break;
-                */
             }
 
             case 'activitySnapshot': {

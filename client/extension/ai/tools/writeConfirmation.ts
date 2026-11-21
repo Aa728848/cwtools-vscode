@@ -1,11 +1,11 @@
 /**
  * Unified decision logic for whether a file write requires user confirmation.
- * Single source of truth for the 4-switch resolution:
+ * Single source of truth for the confirmation-bypass conditions:
  *   1. fileWriteMode: 'auto' bypasses confirmation entirely.
  *   2. vfsOverlay: in-memory speculative writes bypass confirmation.
- *   3. args._autoApply: caller-requested bypass (e.g. reviewed transaction / subagent).
- *   4. runnerOptions.forceAutoApplyWrites: orchestrator or autonomous mode bypass.
- *   5. runnerOptions.useSlimPrompt: low-latency slim prompt bypass.
+ *   3. args._autoApply: caller-requested bypass (e.g. a pre-reviewed transaction).
+ *   4. runnerOptions.forceAutoApplyWrites: autonomous-run bypass.
+ *   5. runnerOptions.useSlimPrompt: low-latency slim-prompt bypass.
  */
 
 export interface WriteConfirmationDecisionParams {

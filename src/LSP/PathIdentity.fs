@@ -1,3 +1,11 @@
+/// Path identity and containment helpers for the F# language server.
+///
+/// Two distinct casing conventions exist by design:
+/// - OS filesystem paths (`normalize`, `equals`, `isUnderRoot`): fold to uppercase
+///   with `/` separators on Windows (matching upstream CWTools), while preserving
+///   exact casing on Unix.
+/// - Logical Paradox relative paths (`normalizeLogicalPath`): fold to lowercase
+///   with `/` separators on all platforms for cross-platform graph/lookup keys.
 module PathIdentity
 
 open System

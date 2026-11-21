@@ -1,5 +1,5 @@
 /**
- * Eddy CWTool Code — Chat Panel HTML Template
+ * CWTools AI Module — Chat Panel HTML Template
  *
  * Generates the HTML content for the AI chat WebView panel.
  * CSS is loaded from an external chatPanel.css file for maintainability.

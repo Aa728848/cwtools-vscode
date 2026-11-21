@@ -5,7 +5,7 @@
  * 1. 在工作区与「已配置游戏根」下枚举 common/component_templates/*.txt 与 common/ship_sizes/*.txt
  * 2. 用纯函数 targetWeightExtract.ts 提取索敌字段（一切文件 I/O 只在 Host 侧）
  * 3. 用户在 webview 里填候选目标参数 → postMessage 回 Host
- * 4. Host 调 ai/targetingWeights.ts 的 computeTargetingChain，把完整乘法链回传渲染
+ * 4. Host 调 `cwtools-shared` 的 `computeTargetingChain`，把完整乘法链回传渲染
  *
  * 机制与公式见 docs/stellaris-targeting-weight-4.5.2.md §2/§3/§5。
  */

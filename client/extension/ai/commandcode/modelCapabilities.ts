@@ -13,7 +13,7 @@
  * 转录的是**整张表**，不是「有人用过的那几项」：表里没有的 id 不是「未知」，而是「没有图片、
  * 没有思考档位」——一个真实模型漏在这里就会静默失去图片输入与档位选择器。
  *
- * 注册表的 `off` 档**不逐字带出**：Command Code 把「不思考」写成一个叫 `off` 的档位，而 DSH
+ * 注册表的 `off` 档**不逐字带出**：Command Code 把「不思考」写成一个叫 `off` 的档位，而本扩展
  * 把同一件事写成 `none`。翻译发生在 `commandCodeReasoningEfforts`，因此下面的表保持对来源的
  * 忠实转录、把 `off` 留在注册表放它的地方。两个方向都不该发原生的 `off`：OpenAI 族线协议没有
  * 这个档位，所以它在请求构造时被丢弃（`commandCodeWireEffort`）。
@@ -36,7 +36,7 @@ export interface CommandCodeModelDef {
     hidden: boolean;
 }
 
-/** DSH 用来表示「尽量少思考」的档位名，与 Kimi / Claude 线路一致。 */
+/** 本扩展用来表示「尽量少思考」的档位名，与 Kimi / Claude 线路一致。 */
 export const COMMAND_CODE_DISABLED_EFFORT = 'none';
 
 /** Command Code 注册表描述的每个模型，按官方注册表顺序（共 109 条）。 */
@@ -1063,10 +1063,10 @@ export function commandCodeModelDef(modelId: string): CommandCodeModelDef | unde
 }
 
 /**
- * 某个模型可选的思考档位，已把注册表的 `off` 翻译成 DSH 的 `none`。
+ * 某个模型可选的思考档位，已把注册表的 `off` 翻译成本扩展的 `none`。
  *
  * 两种拼写都接受（存储的选择或别处开始的会话可能带任一种），但本线路**只对外声明 `none`**，
- * 所以选择器显示的是 DSH 能理解的档位。
+ * 所以选择器显示的是本扩展能理解的档位。
  */
 export function commandCodeReasoningEfforts(modelId: string): string[] {
     const declared = commandCodeModelDef(modelId)?.reasoningEfforts ?? [];
@@ -1076,7 +1076,7 @@ export function commandCodeReasoningEfforts(modelId: string): string[] {
 /**
  * 某个档位是否会上到供给方线协议。
  *
- * `none` 是真实的 DSH 档位但**不是** Command Code 的档位：它由**省略该字段**表达，这正是官方
+ * `none` 是本扩展的合法档位但**不是** Command Code 的档位：它由**省略该字段**表达，这正是官方
  * CLI 在其档位为 `off` 时所做的事。本线路声明的其余档位原样通过。
  */
 export function commandCodeWireEffort(effort: string | undefined | null): string | undefined {
@@ -1089,7 +1089,7 @@ export function commandCodeWireEffort(effort: string | undefined | null): string
 /**
  * 某个模型接受的输入模态。
  *
- * 未知模型回落到**纯文本**：DSH 会把「不支持图片」变成一个用户可以换模型纠正的可见占位，而
+ * 未知模型回落到**纯文本**：本扩展会把「不支持图片」变成一个用户可以换模型纠正的可见占位，而
  * 「支持图片」的错误会把字节发给一个拒绝整个请求的端点。
  */
 export function commandCodeInputModalities(modelId: string): Array<'text' | 'image'> {

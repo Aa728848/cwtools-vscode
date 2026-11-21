@@ -88,7 +88,7 @@ Collision proxies and alpha/additive effect planes are excluded from the silhoue
 
 #### Compare with vanilla
 
-Use the `Compare with Vanilla` CodeLens on a matching mod file. `Migrate Block from Vanilla` replaces the current block while preserving the coordinates of other pending edits.
+Use **Compare File with Vanilla** from the editor title bar or **Compare Block with Vanilla** from the editor context menu on a matching mod file. **Migrate Block from Vanilla** replaces the block under the cursor while preserving the coordinates of other pending edits, and **Migrate Changed Blocks from Vanilla** lets you batch-migrate selected blocks from the diff view.
 
 #### Upload to the Steam Workshop
 
@@ -114,10 +114,9 @@ Nothing is written to disk, and the aura script is not modified: paste the lines
 
 #### Use the AI panel
 
-Open `AI: Open Chat Panel` from the Command Palette. The built-in agent focuses on the Paradox/CWTools semantic domain as a single-agent assistant; use `/plan`, `/execute`, `/explore`, or `/review` to pin the session mode. Provider credentials are stored through VS Code SecretStorage, while file writes follow the selected `confirm` (diff preview card before writing) or `auto` mode, `EvidenceGate` semantic prechecks, and BOM-safe localisation enforcement.
+Run **Stellaris AI: Open AI Chat** from the Command Palette (or **Stellaris AI: Open Agent Manager** for the detached manager window). The built-in agent focuses on the Paradox/CWTools semantic domain as a single-agent assistant; use `/plan`, `/execute`, `/explore`, or `/review` to pin the session mode. Provider credentials are stored through VS Code SecretStorage, while file writes follow the selected `confirm` (diff preview card before writing) or `auto` mode, `EvidenceGate` semantic prechecks, and BOM-safe localisation enforcement.
 
 The detached Agent Manager includes a **Preview** tab beside Changes, Run, and Settings. Choose or pin a `.gui` file, zoom and pan the canvas, click or Ctrl-click elements, or drag a marquee, then use **Add to conversation** to attach their structured source references to the composer. Agent writes refresh the preview and highlight changed elements; **Open workbench** keeps the full GUI editor available. Save dirty GUI drafts before allowing an Agent write. After a GUI write, the previewer also produces Before/After/Diff evidence and injects it into the same run for agent review, with at most two automatic correction rounds. The preview tab exposes these images and pixel metrics; providers without vision support receive text metrics only. No game process is launched, and preview verification remains an approximation of runtime rendering.
-
 
 The ChatGPT-subscription-compatible Codex provider uses a browser sign-in flow and the extension's own agent runtime. It is an integration with an upstream compatibility endpoint, not a public stable API, so upstream changes can require extension updates. The Codex picker uses a built-in model catalog, not an account entitlement list; OpenAI API and Codex subscription availability can differ.
 
@@ -206,7 +205,7 @@ Stellaris Language Serves 是一款面向 Paradox Mod 开发的 VS Code 扩展�
 | 脚本编辑 | 为 Paradox 脚本和本地化提供诊断、补全、悬停信息、跳转、引用、符号、CodeLens 和嵌入提示。Stellaris 的悬停还会附带光标所在脚本命令的引擎开销与硬编码行为说明（来自反编译分析）。 |
 | 可视化工具 | 预览或编辑 Stellaris GUI、全局舰船设计、恒星系、静态银河、粒子、实体、科技树、事件链和武器索敌权重；也可以从舰船模型渲染舰船顶部图标 DDS 表。 |
 | Shader 编辑 | 按真实编译单元处理 `.shader` 和 `.fxh`，提供诊断、跳转、补全、格式化、重命名和语义高亮。 |
-| CWT 规则编辑 | 用独立的 `cwt` 语言编辑 `.cwt` 规则文件:解析/结构诊断(CWT0xx)、指令与字段表达式校验(CWT1xx/CWT2xx)、项目级未定义引用与重复类型检查(CWT3xx)、根块/指令/字段表达式/符号的上下文补全、跨文件跳转,以及把当前配置的手动规则目录中验证通过的编辑安全热替换进游戏模型(CWT9xx)。纯规则仓库以 CWT-only 模式启动服务,无需游戏安装且不会激活游戏模型;游戏工作区保持 full mode。 |
+| CWT 规则编辑 | 用独立的 `cwt` 语言编辑 `.cwt` 规则文件：解析/结构诊断（CWT0xx）、指令与字段表达式校验（CWT1xx/CWT2xx）、项目级未定义引用与重复类型检查（CWT3xx）、根块/指令/字段表达式/符号的上下文补全、跨文件跳转，以及把当前配置的手动规则目录中验证通过的编辑安全热替换进游戏模型（CWT9xx）。纯规则仓库以 CWT-only 模式启动服务，无需游戏安装且不会激活游戏模型；游戏工作区保持 full mode。 |
 | 原版对比 | 将 Mod 文件与原版对应文件对比，并迁移光标所在的代码块。 |
 | Steam 创意工坊 | 把当前 Mod 上传到 Steam 创意工坊：可新建物品或更新已有物品，支持标签、预览图、可见性与更新说明。需要 Steam 客户端已运行并登录拥有该游戏的账号。 |
 | AI 工作区 | 使用专注于 Paradox/CWTools 语义领域的内置单 Agent 助手，配合 `EvidenceGate` 语义预检、`confirm` / `auto` 文件写入控制、项目索引、Agent 技能与可选 MCP 服务。 |
@@ -252,7 +251,7 @@ Stellaris Language Serves 是一款面向 Paradox Mod 开发的 VS Code 扩展�
 
 中央视口按真实 mesh/脚本 locator 组装船型根实体、所选区段和可见武器实体，支持文化前缀回退、纹理、`attach` 子实体、旋转/平移/缩放，并在可用时使用 `ship_designer` worldgfx 环境。单区段船体不需要伪造根 mesh；数十 MB 的大型船体网格会从工作区流式加载，不再受大小限制而缺失。模型或 locator 缺失时仍可编辑；实际加载或操作失败只显示简短错误，不再提供常驻诊断面板。游戏式 HUD 在模型上下方叠加组件图标和尺寸徽章，图标由 `.gfx` 精灵定义经 DDS/TGA 解码获得；右侧依次显示生产与舰船数据。区段按列从左到右排列，每列每行最多 5 个组件。参数化 `inline_script` 会先展开 key、尺寸、图标、component_set 和可静态求值的功率，再参与候选与图标解析。组件库与设计卡片条不再用诊断列表遮挡舰船。
 
-槽位编辑器可以修改区段、部件和必填核心组件。必需部件以竖排图标栏显示在视口右侧，按船型的 `required_component_set` 逐个占位（未填充的集合显示空位）；点击后组件库只列出同一集合的兼容部件，拖放或点击即可替换。布局参照游戏舰船设计器：点击槽位后左侧打开**增加部件**组件库（仅兼容候选，显示图标、等级罗马数字与尺寸徽章），设计以按船型分组的卡片列在视口下方。组件库可按名称或键搜索、按 `upgrades_to` 升级链推算的等级筛选，可隐藏列表中已有升级版的淘汰部件，也可隐藏原版部件（定义文件解析到游戏目录而非工作区），筛选条件会被记住。点击组件库中的部件即“拿起”它：图标跟随鼠标，所有可安装的槽位高亮，点击高亮槽位即可放置并继续点下一个，右键或 Esc 取消；也可直接把部件拖到槽位；拖到**填充全部**按钮会填入所有兼容槽位（勾选**仅填充空槽**则保留已装备槽位）。从底部卡片切换设计时，组件库保持打开并定位到最接近的槽位。点击候选是键盘与无拖动环境的回退。所有编辑只更新 Host 持有的草稿，草稿刷新时组件库保持打开；替换部件时只重建该部件的模型，舰船其余部分、视角和组件库列表保持不动；撤销、重做和放弃也只作用于草稿。每次拖放都由 Host 根据当前草稿重新校验槽位、部件、固定状态和兼容性。工作台没有不兼容候选开关或诊断列表。**生成草稿**是确定性的离线装载生成器，可选择角色与科技范围（全部、初始或自定义前置闭包），生成带说明的未保存草稿，不复刻引擎运行时 auto-best 算法。
+槽位编辑器可以修改区段、部件和必填核心组件。必需部件以竖排图标栏显示在视口右侧，按船型的 `required_component_set` 逐个占位（未填充的集合显示空位）；点击后组件库只列出同一集合的兼容部件，拖放或点击即可替换。布局参照游戏舰船设计器：点击槽位后左侧打开**增加部件**组件库（仅兼容候选，显示图标、等级罗马数字与尺寸徽章），设计以按船型分组的卡片列在视口下方。组件库可按名称或键搜索、按 `upgrades_to` 升级链推算的等级筛选，可隐藏列表中已有升级版的淘汰部件，也可隐藏原版部件（定义文件解析到游戏目录而非工作区），筛选条件会被记住。点击组件库中的部件即“拿起”它：图标跟随鼠标，所有可安装的槽位高亮，点击高亮槽位即可放置并继续点下一个，右键或 Esc 取消；也可直接把部件拖到槽位；拖到**填充全部**按钮会填入所有兼容槽位（勾选**仅填充空槽**则保留已装备槽位）。从底部卡片切换设计时，组件库保持打开并定位到最接近的槽位。所有编辑只更新 Host 持有的草稿，草稿刷新时组件库保持打开；替换部件时只重建该部件的模型，舰船其余部分、视角和组件库列表保持不动；撤销、重做和放弃也只作用于草稿。每次拖放都由 Host 根据当前草稿重新校验槽位、部件、固定状态和兼容性。工作台没有不兼容候选开关或诊断列表。**生成草稿**是确定性的离线装载生成器，可选择角色与科技范围（全部、初始或自定义前置闭包），生成带说明的未保存草稿，不复刻引擎运行时 auto-best 算法。
 
 工作台只编辑 `global_ship_designs`：船型、区段/部件模板、资产和 locator 都是只读输入。成长阶段配装只读并保留原文，通用元数据仍可编辑。编辑过程中不修改源 TextDocument；点击**保存**时才通过一次 VS Code 工作区编辑应用当前草稿并保存文档。语义不兼容不阻止保存；语法损坏、文档版本冲突和工作区外写入会被拒绝。常用静态费用、维护、能量、船体、防御、速度和探测值显示来源；未解析表达式、动态国家修正、未支持的伤害公式和无法表达的 Shader 会明确标为部分或未知，不冒充游戏内精确值。
 
@@ -274,7 +273,7 @@ Stellaris Language Serves 是一款面向 Paradox Mod 开发的 VS Code 扩展�
 
 #### 与原版对比
 
-在有原版对应文件的 Mod 文件中使用 `Compare with Vanilla` CodeLens。`Migrate Block from Vanilla` 会替换当前代码块，并避免其他待处理修改的行号失效。
+在有原版对应文件的 Mod 文件中，使用编辑器标题栏的 **与原版对比文件** 按钮或右键菜单中的 **与原版对比代码块** 打开差异视图。**从原版迁移当前代码块** 会替换光标所在代码块并避免其他待处理修改的行号失效；在差异视图中还可通过 **从原版迁移所有变更块** 批量勾选迁移。
 
 #### 上传到 Steam 创意工坊
 
@@ -300,10 +299,9 @@ SRA_Aura_5_1:0 "§Y防御性光环§!\n对盟友舰船效果：\n $MOD_SHIP_SHIE
 
 #### 使用 AI 面板
 
-从命令面板运行 `AI: Open Chat Panel`。内置 Agent 专注于 Paradox/CWTools 语义领域的单 Agent 辅助，可通过 `/plan`、`/execute`、`/explore` 或 `/review` 固定当前会话模式。Provider 凭据通过 VS Code SecretStorage 保存；文件修改遵循所选的 `confirm`（写入前弹出 Diff 预览确认卡片）或 `auto` 模式，并受 `EvidenceGate` 语义预检与本地化 UTF-8 BOM 护栏保护。
+从命令面板运行 **Stellaris AI: 打开 AI 对话面板**（或 **Stellaris AI: 打开 Agent 运行管理器** 打开独立管理器窗口）。内置 Agent 专注于 Paradox/CWTools 语义领域的单 Agent 辅助，可通过 `/plan`、`/execute`、`/explore` 或 `/review` 固定当前会话模式。Provider 凭据通过 VS Code SecretStorage 保存；文件修改遵循所选的 `confirm`（写入前弹出 Diff 预览确认卡片）或 `auto` 模式，并受 `EvidenceGate` 语义预检与本地化 UTF-8 BOM 护栏保护。
 
-独立 Agent Manager 的右侧工作区提供与“变更 / 运行 / 设置”并列的 **“预览”** Tab。可选择一个 `.gui` 文件并固定，缩放和平移画布，单击、Ctrl 多选或框选元素，再通过 **“添加到对话”** 把结构化源码引用放入中央输入框。Agent 写入后预览会刷新并高亮变更元素；点击 **“完整工作台”** 可继续使用原有 GUI 编辑器。若 GUI 文档有未保存草稿，请先保存，再允许 Agent 写入。 GUI 写入后，预览器还会生成 Before/After/Diff 证据并注入同一 Agent 回合，由 Agent 自主检查和最多两轮修正。预览 Tab 可查看图片和像素指标；不支持视觉的 Provider 只接收文本指标。此过程不会启动游戏，预览验证仍是对运行时渲染的近似，而非游戏内验证。
-
+独立 Agent Manager 的右侧工作区提供与“变更 / 运行 / 设置”并列的 **“预览”** Tab。可选择一个 `.gui` 文件并固定，缩放和平移画布，单击、Ctrl 多选或框选元素，再通过 **“添加到对话”** 把结构化源码引用放入中央输入框。Agent 写入后预览会刷新并高亮变更元素；点击 **“完整工作台”** 可继续使用原有 GUI 编辑器。若 GUI 文档有未保存草稿，请先保存，再允许 Agent 写入。GUI 写入后，预览器还会生成 Before/After/Diff 证据并注入同一 Agent 回合，由 Agent 自主检查和最多两轮修正。预览 Tab 可查看图片和像素指标；不支持视觉的 Provider 只接收文本指标。此过程不会启动游戏，预览验证仍是对运行时渲染的近似，而非游戏内验证。
 
 兼容 ChatGPT 订阅的 Codex Provider 通过浏览器登录，并使用插件自己的 Agent 运行时。它依赖上游兼容端点，不属于公开稳定 API；如果上游流程变化，插件可能需要同步更新。Codex 选择器使用内置模型目录，不代表账户已获授权；OpenAI API 与 Codex 订阅的可用模型可能不同。
 

@@ -1,3 +1,11 @@
+/**
+ * Local Authenticated Loopback Bridge Server for External MCP Clients (`cwtools-mcp`).
+ *
+ * Publishes per-workspace `bridge-manifest.json` metadata and serves both
+ * read-only MCP tool/resource queries and `/cwtools/rpc` native LSP dispatch
+ * behind bearer-token auth, request-size caps, and project capability filters.
+ */
+
 import * as crypto from 'crypto';
 import * as fs from 'fs';
 import * as http from 'http';

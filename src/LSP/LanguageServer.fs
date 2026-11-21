@@ -1,3 +1,7 @@
+/// Core LSP stdio transport, JSON-RPC dispatch, and root reader-writer lock (`gameStateLock`) coordination.
+/// Read-only editor requests execute concurrently under read locks (with bounded timeout fallbacks),
+/// while model-mutating operations acquire exclusive write access via `enterGameStateWriteLock` or
+/// reader-friendly polling (`tryEnterGameStateWriteLock`).
 module LSP.LanguageServer
 
 open LSP.Log
@@ -57,8 +61,8 @@ let exitGameStateWriteLock () =
 
 let isGameStateWriteBusy () = Volatile.Read(&gameStateWriterActivityCount) > 0
 
-// Phase 0 observability: per-request segment tracing so a single slow request
-// can be attributed to queueing, lock wait, or method execution.
+// Per-request segment tracing thresholds so a single slow request can be
+// attributed to queueing, lock wait, or method execution.
 let private traceLogThresholdMs = 500.0
 let private traceQueueDepthThreshold = 10
 let private traceLockWaitThresholdMs = 100.0
@@ -455,7 +459,9 @@ let connect (serverFactory: ILanguageClient -> ILanguageServer, receive: BinaryR
 
     /// Returns (serialisedResponseTask, isReadOnly).
     /// isReadOnly = true  -> safe to run concurrently with other reads, holding gameStateLock in read mode.
-    /// isReadOnly = false -> must run exclusively, holding gameStateLock in write mode.
+    /// isReadOnly = false -> runs exclusively under gameStateLock in write mode, except requests explicitly
+    ///                       routed to ProcessLockFreeRequest below (Shutdown, FoldingRanges,
+    ///                       and cwtools.ai.getValidationStatus).
     let processRequest (request: Request) : Async<RequestResult> * bool =
         match request with
         | Initialize(p)         -> server.Initialize(p) |> thenMap serializeInitializeResult |> thenPayload, false
@@ -516,7 +522,7 @@ let connect (serverFactory: ILanguageClient -> ILanguageServer, receive: BinaryR
             server.ExecuteCommand p |> thenMap (serializeExecuteCommandResponseOption >> Option.defaultValue "null" >> ResponsePayload), isReadCmd
 
 
-        // - Write / formatting -
+        // - Write / formatting (PrepareRename stays read-only with a read-lock fallback) -
         | DocumentFormatting(p)     -> server.DocumentFormatting(p)     |> thenMap serializeTextEditList |> thenPayload, false
         | DocumentRangeFormatting(p)-> server.DocumentRangeFormatting(p)|> thenMap serializeTextEditList |> thenPayload, false
         | DocumentOnTypeFormatting(p)->server.DocumentOnTypeFormatting(p)|> thenMap serializeTextEditList |> thenPayload, false
@@ -531,7 +537,9 @@ let connect (serverFactory: ILanguageClient -> ILanguageServer, receive: BinaryR
         // writer: a queued writer blocks every concurrent editor read.
         | Initialized            -> server.Initialized(), false
         | DidChangeConfiguration(p) -> server.DidChangeConfiguration(p), true
-        // All others only touch DocumentStore + MailboxProcessor (both thread-safe) -> no lock needed
+        // Remaining notifications do not take the dispatcher's exclusive write lock up front;
+        // each handler coordinates thread-safe state (DocumentStore/MailboxProcessor) or uses
+        // reader-friendly polling locks internally where needed.
         | DidOpenTextDocument(p)  -> server.DidOpenTextDocument(p), false
         | DidChangeTextDocument(p)-> server.DidChangeTextDocument(p), false
         | WillSaveTextDocument(p) -> server.WillSaveTextDocument(p), false

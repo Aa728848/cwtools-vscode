@@ -89,6 +89,8 @@ npm run check:release -- --skip-compile --skip-test
 
 ### 步骤 4：全平台自包含 Universal VSIX 打包
 
+全新检出在打包前需确保已完成两项依赖准备：`submodules/cwtools-mcp` 内已安装并构建 `cwtools-shared`（`npm ci && npm run build -w cwtools-shared`），以及 `release/` 内已执行 `npm ci --no-audit --no-fund`（供 `vsce` 校验运行时依赖闭包）。
+
 调用自动化打包工具 `package.ps1`，该脚本会严格按顺序依次发布三平台 .NET 运行时，避免多目标锁冲突：
 
 ```powershell
@@ -100,7 +102,7 @@ powershell -ExecutionPolicy Bypass -File ./package.ps1
 ### 步骤 5：Git 提交与打 Tag
 
 ```powershell
-# 暂存版本与日志文件
+# 暂存版本、日志与发布笔记（若 build:docs 更新了 release/README.md 一并暂存）
 git add package.json release/package.json release/CHANGELOG.md .agents/notes/implemented/process/YYYY-MM-DD-release-v<version>.md
 
 # 提交变更

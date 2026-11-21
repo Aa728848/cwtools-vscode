@@ -2546,8 +2546,8 @@ export class AIService {
     }
 
     /**
-     * Executes fetch with exponential backoff for 429 Too Many Requests.
-     * Prevents multi-agent swarms from crashing API limits.
+     * Executes fetch with exponential backoff for 429 Too Many Requests
+     * to absorb transient upstream rate-limit bursts.
      */
     private async fetchWithRetry(url: string, init: RequestInit, providerId: string): Promise<Response> {
         let retries = 0;

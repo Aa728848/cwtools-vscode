@@ -58,8 +58,8 @@ type private Version =
       //Cache StringBuilder.ToString() results to avoid repeated allocation of strings on the hot path
       mutable cachedText: string
       mutable cachedVersion: int
-      // Line offset cache: lineOffsets.[i] = index of first char on line i
-      // Rebuilt lazily after Open/Replace; invalidated after Patch.
+      // Line offset cache: lineOffsets.[i] = index of first char on line i.
+      // Rebuilt eagerly on Open/Replace; marked dirty and rebuilt lazily after Patch.
       mutable lineOffsets: int[] | null
       mutable lineOffsetsDirty: bool }
 
@@ -85,9 +85,8 @@ module DocumentStoreUtils =
             i <- i + 1
         offsets
 
-    /// O(log n) range-to-offset conversion via a pre-built lineOffsets cache.
-    /// Uses a pre-built lineOffsets cache to jump directly to the right line,
-    /// then walks within that line for the column offset.
+    /// O(1) range-to-offset conversion via direct index lookup into the pre-built
+    /// `lineOffsets` array, clamping out-of-range lines and columns to `text.Length`.
     let findRangeFast (text: StringBuilder, lineOffsets: int[], range: Range) : struct (int * int) =
         let lineStart (line: int) =
             if line < lineOffsets.Length then lineOffsets.[line]

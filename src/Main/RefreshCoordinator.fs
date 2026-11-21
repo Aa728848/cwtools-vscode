@@ -62,7 +62,7 @@ type Coordinator<'Identity when 'Identity: equality>() =
                 Run ticket)
 
     /// Complete exactly the issued capability currently running. There is deliberately no
-    /// Stale, foreign, or reconstructed values cannot consume a wake.
+    /// parameterless overload: stale, foreign, or reconstructed values cannot consume a wake.
     member _.Complete(ticket: Ticket<'Identity>) =
         if obj.ReferenceEquals(ticket, null) then nullArg (nameof ticket)
         lock gate (fun () ->

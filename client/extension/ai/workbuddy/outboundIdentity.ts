@@ -1,7 +1,7 @@
 /**
  * WorkBuddy / CodeBuddy 订阅出站桌面客户端身份、对话防风控头、链路追踪头及客户端指纹脱敏。
  *
- * 与参照仓库（`dsh-chatgpt-subscription` `outbound-identity.ts` / `client.ts`）对齐：
+ * 关键出站协议要求：
  * - 对话端点要求桌面客户端身份组合：`WorkBuddy/5.9.3 WorkBuddy/5.9.3 CLI/2.165.0`（国区）或
  *   `WorkBuddy/5.9.3 workbuddy-ai/5.9.3 CLI/2.165.0`（国际区），并附带 `X-Agent-*`、`X-IDE-*`、
  *   `X-Stainless-*`、`X-Machine-ID`、`X-Root-Request-ID` 与 traceparent / B3 追踪头；

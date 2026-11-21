@@ -1,3 +1,11 @@
+/**
+ * Ship Design Derived Stats Aggregator.
+ *
+ * Pure calculator that aggregates hull, armor, shield, power balance, damage,
+ * range, and resource cost/upkeep across sections and equipped components while
+ * tracking unresolved variable/formula expressions explicitly.
+ */
+
 import type { ShipDesignData, ShipDesignStatsData, ShipDesignStatValue } from '../../shared/shipDesignProtocol';
 import type { DefinitionNumber } from './definitionNodes';
 import {

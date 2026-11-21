@@ -1387,7 +1387,7 @@ const RAW_TOOL_DEFINITIONS: ToolDefinition[] = [
             },
         },
     },
-    // - Blackboard Memory Tools -
+    // - Scratchpad Memory Tools -
     {
         type: 'function',
         function: {

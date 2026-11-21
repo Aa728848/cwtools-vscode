@@ -1,5 +1,5 @@
 /**
- * Eddy CWTool Code — Chat Topic Manager
+ * CWTools AI Module — Chat Topic Manager
  *
  * Manages chat topic CRUD, persistence, search, export/import, and history.
  * Extracted from chatPanel.ts for maintainability.

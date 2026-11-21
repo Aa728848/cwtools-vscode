@@ -16,7 +16,7 @@ fs.cpSync(src, dest, { recursive: true, force: true });
 // The fixture workspace needs the vendored rules to be configured before the
 // extension activates; the sample repo no longer carries a `.vscode/settings.json`
 // (editor config does not belong in mod data), so create it here with the
-// machine-independent rules path, mirroring what .vscode-test.shader.js does.
+// machine-independent rules path, mirroring what .config/vscode-test.shader.js does.
 // Language associations point at the Stellaris language ID (not the generic
 // `paradox` fallback) because this is a Stellaris fixture workspace.
 const settingsPath = path.join(dest, '.vscode', 'settings.json');

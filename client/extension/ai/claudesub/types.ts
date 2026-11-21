@@ -364,7 +364,7 @@ const CLAUDE_BY_ID = new Map(CLAUDE_MODELS.map(model => [model.id, model]));
  * 查一个模型；未知 id 得到一个**不声明任何能力**的桩。
  *
  * 未知 id 按保守而非乐观处理，理由是**不对称的**：错误的「支持图片」会把图片字节发给一个
- * 拒绝整个请求的端点，而错误的「不支持图片」只是让 DSH 显示一个用户可纠正的占位。同样的
+ * 拒绝整个请求的端点，而错误的「不支持图片」只是让本扩展显示一个用户可纠正的占位。同样的
  * 不对称选择最弱的思考形态与更小的默认窗口——高估服务端授予的窗口是那个会硬失败的错误。
  */
 export function resolveClaudeModel(modelId: string): ClaudeModelEntry {

@@ -1,11 +1,11 @@
 /**
- * CWTools AI Module — Agent Runner
+ * CWTools AI Module — Single-Agent Paradox Runner
  *
- * Orchestrates the AI reasoning loop:
- * 1. Send user message + context + tools to AI
- * 2. If AI wants to call tools → execute tools → feed results back
- * 3. Repeat until AI produces final answer or max iterations reached
- * 4. Fold deterministic tool validation back into the same loop before finalizing
+ * Drives the single-agent reasoning loop within the Extension Host:
+ * 1. Build bounded prompt/context and disclosed tool catalog for the active mode
+ * 2. Stream model output and tool calls through the provider layer
+ * 3. Evaluate every tool call through the policy engine, locks, and EvidenceGate
+ * 4. Maintain checkpoints (V4 contract), compaction, loop guards, and deterministic verification
  */
 
 import type {
@@ -612,15 +612,15 @@ export interface AgentRunnerOptions {
     durableGoal?: boolean;
     /** Host-authored evidence that the user explicitly requested durable long-running work. */
     goalCreationAuthorized?: boolean;
-    /** Override the reasoning-loop iteration limit. Used by orchestrator role budgets. */
+    /** Override the reasoning-loop iteration limit for this run. */
     maxIterations?: number;
     /** Treat maxIterations as a renewable healthy-progress window instead of an absolute ceiling. */
     renewableIterationLimit?: boolean;
-    /** Main-Agent approved-plan continuation may start with write-focused guidance. */
+    /** Approved-plan continuation may start with write-focused guidance. */
     initialToolFocus?: AgentToolFocus;
-    /** The user approved a design-complete plan; coordinators must execute it without a second design pass. */
+    /** The user approved a design-complete plan; execute it without a second design pass. */
     approvedPlanExecution?: boolean;
-    /** Original top-level user turn used to preserve user-owned work across orchestration. */
+    /** Original top-level user turn preserved across approved-plan execution or resume. */
     originalUserMessage?: string;
     /** Authoritative admission, authorization, phase, and dispatch state. */
     schedulingState: AgentSchedulingState;
@@ -1176,10 +1176,9 @@ export class AgentRunner {
             });
         };
 
-        // Accumulate token usage across all API calls in this generation
-        // (declared here so compaction call and sub-agent dispatch can also contribute to the total)
-        // Widened with cache-observability fields (plan sec.7.3); they ride
-        // GenerationResult.tokenUsage into UsageTracker.addUsage without chatPanel changes.
+        // Accumulate token usage (including prompt-cache counters) across all API calls
+        // in this generation, including compaction passes; rides GenerationResult.tokenUsage
+        // into UsageTracker.addUsage.
         const tokenAccumulator: TokenUsage = {
             total: 0,
             input: 0,
@@ -2340,7 +2339,7 @@ export class AgentRunner {
             return (entry && entry.flatSchema) ? entry.flatSchema : t;
         });
 
-        // Dynamic MCP tools (Phase 2): opt-in, share mcp_call mode gating, never offered to slim sub-agents.
+        // Dynamic MCP tools: opt-in, share mcp_call mode gating, omitted in slim-prompt runs.
         if (!options?.useSlimPrompt) {
             try {
                 const mcpDefs = await this.toolExecutor.getDynamicMcpToolDefinitions(mode, schedulingState.domainProfile);
@@ -2373,8 +2372,6 @@ export class AgentRunner {
         // a snapshot of the disclosed catalog.
         let modelFacingTools = [...availableTools];
 
-        // M3 Fix: remove per-call dynamic import — getProvider is already statically
-        // imported at the top of this file; dynamic import added latency for nothing.
         const _config0 = this.aiService.getConfig();
         const _providerId0 = options?.providerId ?? _config0.provider;
         const _provider0 = getProvider(_providerId0);
@@ -3867,9 +3864,8 @@ export class AgentRunner {
                                     options?.abortSignal?.throwIfAborted();
                                     await runLedger.appendEvent(runRecord.runId, 'tool_call_start', { toolName: ci.toolName }, { invocationId: ci.invocationId });
                             
-                            // Sub-agent snapshot isolate hook. Keep the same bounded
-                            // before image locally so the durable file_change event can
-                            // reconstruct line-level details after a manager reload.
+                            // Keep a bounded before-image snapshot per run so durable file_change
+                            // events can reconstruct line-level diffs after a manager reload.
                             if (primaryFilePath) {
                                 const canonicalKey = canonicalPathKey(primaryFilePath, this.toolExecutor.workspaceRoot);
                                 let runInitialContents = this.runInitialFileContentsByRunId.get(runRecord.runId);
@@ -4049,7 +4045,7 @@ export class AgentRunner {
                 if (pc.targetPaths && pc.targetPaths.length > 0) {
                     for (const fp of pc.targetPaths) mutatedFilePaths.add(fp);
                 } else {
-                    // mutating without a file target (set_memory / save_memory / merge_results / git_ops 等)
+                    // Mutating without a file target (e.g. set_memory / save_memory / git_ops)
                     hasFilelessMutating = true;
                 }
             }

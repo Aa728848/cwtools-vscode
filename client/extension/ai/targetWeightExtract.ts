@@ -13,7 +13,7 @@
  */
 import { tokenize, TokenType, type Token } from '../pdxTokenizer';
 
-/** 索敌公式里真正会读到的武器字段（对应 targetingWeights.ts 的 TargetingWeaponInput）。 */
+/** 索敌公式里真正会读到的武器字段（对应 `cwtools-shared` 中的 `TargetingWeaponInput`）。 */
 export interface ExtractedWeaponTargeting {
     /**
      * 模板 id：优先取块内的 `key = "…"`；顶层键不是类型键时（`energy_lance_1 = { … }`

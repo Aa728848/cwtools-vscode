@@ -1,5 +1,5 @@
 /**
- * Run Inspector — 渲染选中事件的详情面板 (Phase 1 - P1-2)
+ * Run Inspector — 渲染选中事件的详情面板
  *
  * 职责：
  * - 选中 event 的 JSON payload 详情展示

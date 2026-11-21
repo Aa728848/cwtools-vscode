@@ -1,3 +1,6 @@
+/// Entry point and LSP server implementation (`CWTools Server`) integrating the
+/// CWTools game model, CWT document pipeline, Shader analysis, debounced lint/refresh
+/// agents, and `cwtools.ai.*` semantic query commands.
 module Main.Program
 
 open LSP
@@ -1445,7 +1448,7 @@ type FileDiagnosticState =
       freshness: DiagnosticFreshness   // current status
       pendingGlobalKinds: string list  // For example ["localisation"; "types"]
       modelEpoch: ValidationModelEpoch // Shared model snapshot used by this validation
-      errorCount: int                  //Lightweight counting, does not store the complete Diagnostic list
+      errorCount: int                  // Cached error count alongside full diagnostics for aggregate queries
       diagnostics: Diagnostic list
       warningCount: int }
 
@@ -3879,8 +3882,8 @@ type Server(client: ILanguageClient) =
                 else
                     []
 
-            // Project diagnostics (CWT3xx/CWT4xx) publish only when the index
-            // snapshot is current; while pending they stay silent.
+            // Project diagnostics (CWT3xx/CWT4xx) and candidate-rejection notices (CWT900)
+            // publish only when the index snapshot is current; while pending they stay silent.
             let cwtProjectErrors =
                 if isCwtFilePath name then Main.Lang.CwtLanguageFeatures.projectErrorsForFile name
                 else []
@@ -3899,7 +3902,7 @@ type Server(client: ILanguageClient) =
                 | None -> parserErrors @ cwtSemanticErrors @ cwtProjectErrors @ scriptSemanticErrors @ applicableCachedLocErrors
                 // CWT documents never enter the game script validation path:
                 // the game model has no entities for them and rule semantics
-                // are served by the CWT pipeline (handoff doc §1).
+                // are served by the CWT pipeline.
                 | Some _ when isCwtFilePath name -> parserErrors @ cwtSemanticErrors @ cwtProjectErrors
                 | Some game when validateCachedOnly ->
                     let allocBeforeValidate = GC.GetTotalAllocatedBytes(false)
@@ -6049,9 +6052,8 @@ type Server(client: ILanguageClient) =
                 with e ->
                     logDiag $"CleanupCache failed: {e.Message}"
             
-            // L6/L3 Fix: Use non-blocking Gen2 GC only after a full refresh to
-            // reclaim large rule data; avoid frequent mid-stream GC in hot path.
-            // A loc-only recompute does not warrant a gen2 collection.
+            // Run GC only after a full refresh to reclaim large rule data;
+            // avoid frequent mid-stream collections on the hot path or after loc-only recomputes.
             if didRefreshCaches then maybeCollectGarbage ()
 
             // Memory diagnostics: track growth sources after each analyze pass.
@@ -6337,8 +6339,9 @@ type Server(client: ILanguageClient) =
 
     do postRefreshWake <- fun ticket -> lintAgent.Post(RefreshRequest ticket)
 
-    /// Debounce agent for DidChangeTextDocument lintAgent.
-    /// Waits 1.5 seconds of inactivity before forwarding the lint request.
+    /// Debounce agent for DidChangeTextDocument lint requests.
+    /// Waits 180ms for fast definition-index saves or 1.5s for ordinary edits before
+    /// forwarding to `lintAgent` (non-fast `forceDeepLint` requests bypass debounce).
     /// This prevents write-lock contention during rapid typing.
     let lintDebounceAgent =
         MailboxProcessor.Start(fun agent ->
@@ -6376,7 +6379,7 @@ type Server(client: ILanguageClient) =
                         // Ignore WorkComplete messages in debounce agent
                         return! loop pending deferCount
                     | None ->
-                        // Timeout: 1.5s of inactivity forward to lintAgent
+                        // Debounce window elapsed: forward pending edits to lintAgent unless completion defers it
                         if not pending.IsEmpty then
                             let pendingFastIndex =
                                 pending
@@ -6481,14 +6484,14 @@ type Server(client: ILanguageClient) =
         | _, _, CWT -> cacheStatus <- "skipped_cwt_only"
         | _, _, Custom -> cacheStatus <- "skipped_custom_game"
         | Some cp, false, _ ->
-            // L7 Fix: use Directory.GetParent() instead of string `+ "/../"` which
+            // Use Directory.GetParent() instead of string `+ "/../"` which
             // fails on UNC paths (\\server\share\...) and some symlinked directories.
             let gameCachePath =
                 let parent = System.IO.Directory.GetParent(cp)
                 if parent <> null then parent.FullName + "/"
                 else cp + "/../"
 
-            // P2 Fix: data-driven lookup eliminates ~120 lines of structural duplication.
+            // Data-driven lookup mapping each supported game to its cache serializer and vanilla path.
             // Each entry: (game, cacheFileName, serializeFunction, vanillaPathOption, promptGameName)
             let gameConfig =
                 match activeGame with
@@ -7141,10 +7144,10 @@ type Server(client: ILanguageClient) =
                    "vanillaLoaded", JsonValue.Boolean(not isVanillaFolder)
                    "timestamp", JsonValue.Number(decimal (DateTimeOffset.UtcNow.ToUnixTimeMilliseconds())) |])
 
-    /// Normal startup keeps the historical UI/diagnostic behavior by preparing
-    /// first, invoking the optional publication callback, then running follow-up
-    /// outside the root lock. Passing None returns a fully detached candidate and
-    /// performs no loading UI, diagnostics, global assignment, or background work.
+    /// Normal startup prepares first, invokes the optional publication callback,
+    /// then runs follow-up work outside the root lock. Passing None returns a
+    /// detached `PreparedWorkspace` without global assignment, diagnostics, or
+    /// background validation (note: `prepareWorkspace` still notifies the loading bar when `uri.IsSome`).
     let processWorkspace
         (uri: option<Uri>)
         (publishGame: (PreparedWorkspace -> PublishedWorkspace option) option)
@@ -7765,14 +7768,6 @@ type Server(client: ILanguageClient) =
 
                         isVanillaFolder <- b
                     | _ -> ()
-                    // match opt.Item("rulesVersion") with
-                    // | JsonValue.Array x ->
-                    //     match x with
-                    //     |[|JsonValue.String s; JsonValue.String e|] ->
-                    //         stellarisCacheVersion <- Some s
-                    //         eu4CacheVersion <- Some e
-                    //     | _ -> ()
-                    // | _ -> ()
                     match opt.Item("diagnosticLogging") with
                     | JsonValue.Boolean b -> diagnosticLogging <- b
                     | _ -> ()
@@ -8055,8 +8050,9 @@ type Server(client: ILanguageClient) =
                             let rulesUpdate, prepared =
                                 use _heavyAnalysisLease = acquireHeavyAnalysisGate ()
                                 if activeGame = CWT then
-                                    // CWT-only mode has no rules source or vanilla
-                                    // cache, but workspace processing is still heavy.
+                                    // CWT-only mode has no rules source, vanilla cache, or game model;
+                                    // `processWorkspace` returns an empty candidate while `.cwt` indexing
+                                    // is driven by `CwtLanguageFeatures`.
                                     (configurationGeneration, cachePath, remoteRepoPath, useManualRules, rulesChannel, activeGame),
                                     processWorkspace rootUri None
                                 else
@@ -8158,10 +8154,9 @@ type Server(client: ILanguageClient) =
                 monitorLog Lint
                     $"Validation phase=diagnostics-cleared file={path} documentVersion={p.textDocument.version} modelEpoch={modelEpochSnapshot ()} freshness=stale"
 
-                // Use debounce agent instead of immediate lint.
-                // Lint will fire after 1.5s of typing inactivity.
-                // This prevents the write lock (game.UpdateFile) from blocking
-                // read requests (Completion, Hover, SemanticTokens) during rapid typing.
+                // Use debounce agent instead of immediate lint so rapid typing batches
+                // interactive updates and avoids churning validation/write-lock commits
+                // while Completion, Hover, and SemanticTokens requests are active.
                 lintDebounceAgent.Post(
                     UpdateRequest(
                         { uri = p.textDocument.uri
@@ -9517,7 +9512,7 @@ type Server(client: ILanguageClient) =
         member this.ResolveDocumentLink(link: DocumentLink) = async { return link }
 
         member this.SemanticTokensFull(p: SemanticTokensParams) =
-            // Token type indices (must match legend in capabilities):
+            // Token type indices must match the semanticTokensProvider legend advertised in Initialize.
             async {
                 let! cancellationToken = Async.CancellationToken
 
@@ -11968,8 +11963,8 @@ type Server(client: ILanguageClient) =
                         // CWTools TypeDef index before scanning untyped top-level keys.
                         // Much more practical than position-based GoToType for AI use.
                         //
-                        // Optimization: Phase 1 uses g.Types() an already-indexed Map<typeName, TypeDefInfo[]>
-                        // for O(1) lookup. Phase 2 falls back to AllEntities scan only if Types() misses.
+                        // Stage 1 scans the indexed `g.Types()` map (filtered by expectedTypes
+                        // when provided) before Stage 2 falls back to scanning `AllEntities`.
                         | { command = "cwtools.ai.queryDefinitionByName"
                             arguments = args } ->
                             let symbolName = JsonArgs.tryStringItem 0 args
@@ -11981,7 +11976,7 @@ type Server(client: ILanguageClient) =
                                         [| "ok",    JsonValue.Boolean false
                                            "error", JsonValue.String "symbolName is required. Provide the exact identifier obtained from current project or TypeDef evidence." |]
                                 | Some name ->
-                                    // Phase 1: Fast lookup via Types() index (O(1) per type category)
+                                    // Stage 1: lookup in pre-built Types() index before falling back to AllEntities
                                     let tryFindInTypes (g: IGame) =
                                         g.Types()
                                         |> Map.toSeq
@@ -12820,8 +12815,7 @@ type Server(client: ILanguageClient) =
                                 let raw = uriArg.AsString()
                                 getPathFromDoc (Uri(raw))
                             let result =
-                                // Helper to find an entity via IGame<T>.AllEntities() and extract pre-computed data
-                                // Uses Dictionary for O(1) lookup instead of O(N) Seq.tryFind
+                                // Find the matching entity via IGame<T>.AllEntities() and extract its pre-computed data
                                 let tryEntityFromGame (g: IGame<'T>) =
                                     g.AllEntities()
                                     |> Seq.tryFind (fun struct (e, _) ->
@@ -13123,7 +13117,9 @@ type Server(client: ILanguageClient) =
                                        "files", JsonValue.Array fileResults |])
 
                         // - cwtools.ai.getDiagnosticsFresh -
-                        // Immediately return the diagnostic freshness status of a file (without blocking)
+                        // Immediately return the diagnostic freshness status of a file (without blocking).
+                        // `cwtools.ai.waitDiagnosticsFresh` is kept as a non-blocking compatibility alias;
+                        // actual waiting stays client-side to avoid holding an LSP read lock.
                         | { command = cmd
                             arguments = uriArg :: _ } when
                                 cmd = "cwtools.ai.getDiagnosticsFresh"
@@ -13291,9 +13287,6 @@ type Server(client: ILanguageClient) =
                                        "diagnostics",        JsonValue.Array(collected.ToArray()) |]
                             Some result
 
-                        // waitDiagnosticsFresh is kept as a non-blocking compatibility alias.
-                        // Actual waiting stays client-side to avoid holding an LSP read lock.
-
                         | { command = "cwtools.ai.revalidateFiles"
                             arguments = revalArgs } ->
                             let uris =
@@ -13438,16 +13431,12 @@ let main (_: array<string>) : int =
     System.Globalization.CultureInfo.DefaultThreadCurrentUICulture <- cultureInfo
     System.Threading.Thread.CurrentThread.CurrentCulture <- cultureInfo
     System.Threading.Thread.CurrentThread.CurrentUICulture <- cultureInfo
-    // CultureInfo.DefaultThreadCurrentCulture = CultureInfo.InvariantCulture;
     let read = new BinaryReader(Console.OpenStandardInput())
     let write = new BinaryWriter(Console.OpenStandardOutput())
     let serverFactory client = Server(client) :> ILanguageServer
-    // "Listening on stdin"
     try
         LanguageServer.connect (serverFactory, read, write)
         0 // return an integer exit code
     with e ->
         Log.dprintfn $"Exception in language server {e}"
         1
-//eprintfn "%A" (JsonValue.Parse "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"processId\":12660,\"rootUri\": \"file:///c%3A/Users/Thomas/Documents/Paradox%20Interactive/Stellaris\"},\"capabilities\":{\"workspace\":{}}}")
-//0

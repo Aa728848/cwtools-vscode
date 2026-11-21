@@ -1,7 +1,7 @@
 /**
  * WorkBuddy / CodeBuddy 订阅 HTTP 客户端、请求清洗、防风控协议适配、凭据续期与浏览器登录。
  *
- * 合并自参照仓库 `workbuddy/client.ts`、`workbuddy/mapper.ts`、`workbuddy/oauth.ts` 及 `workbuddy/adapter.ts`：
+ * 协议与防风控关键约束：
  * - 对话通道启用 WorkBuddy 5.9.3 桌面出站身份、5 个会话头（种子含 `accountKey`）、遥测/追踪头；
  * - OpenAI Chat Completions（`/v2/chat/completions`）强制 `stream: true`、`stream_options: { include_usage: true }`、
  *   `cache_retention: 'long'`、首条 system 兜底、`gpt-*` `max_tokens >= 16`、并发拆散 `tool_calls` 合并、缺失 tool

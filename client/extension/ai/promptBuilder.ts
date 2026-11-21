@@ -1,10 +1,9 @@
 /**
- * Eddy CWTool Code Module — Prompt Builder
+ * CWTools AI Module — Prompt Builder
  *
- * Constructs system prompts and contextual information for the AI agent,
- * injecting game-specific PDXScript knowledge based on the active languageId.
- *
- * Aligned with OpenCode's multi-mode prompt design (build / plan / explore / general).
+ * Constructs system prompts and contextual information for the single-agent
+ * Paradox assistant, injecting game-specific PDXScript knowledge based on the
+ * active languageId and derived `AgentMode`.
  */
 
 import * as vs from 'vscode';
@@ -889,7 +888,7 @@ export class PromptBuilder {
             : [];
     }
 
-    /** Build a slim sub-agent prompt with only a compact project hint. */
+    /** Build a slim system prompt with only a compact project hint (for low-latency slim runs). */
     buildSlimSystemPromptForMode(
         mode: AgentMode,
         providerId: string | undefined,

@@ -7,7 +7,6 @@ describe('Manager GUI visual review state machine', () => {
     it('caps automatic reviews at two and cleans up the run', async () => {
         const { ManagerGuiPreviewController } = loadControllerModule();
         const injected: GuiVisualEvidence[] = [];
-        let controller: InstanceType<typeof ManagerGuiPreviewController>;
         const webview = {
             postMessage: (message: GuiVisualCaptureRequestMessage) => {
                 queueMicrotask(() => {
@@ -32,7 +31,7 @@ describe('Manager GUI visual review state machine', () => {
             },
             asWebviewUri: (uri: { fsPath: string }) => ({ toString: () => 'file://' + uri.fsPath }),
         };
-        controller = new ManagerGuiPreviewController(
+        const controller = new ManagerGuiPreviewController(
             '/tmp/extension',
             () => undefined,
             () => undefined,

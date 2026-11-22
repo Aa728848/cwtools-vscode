@@ -392,7 +392,7 @@ function quote(value: string): string {
 
 function scalar(value: string | boolean, quoted = false): string {
     if (typeof value === 'boolean') return value ? 'yes' : 'no';
-    if (!quoted && /^[@A-Za-z0-9_.:\/+%-]+$/.test(value)) return value;
+    if (!quoted && /^[@A-Za-z0-9_.:/+%-]+$/.test(value)) return value;
     return quote(value);
 }
 

@@ -14,6 +14,7 @@ Status: implemented
 4. **两个被实证的写者等待点**：
    - `Program.fs` 刷新/分析周期：09:23:36 `analyze-begin` → 09:24:08 `analyze-complete`（`elapsedMs=31711`），期间 `doRefresh=false`、待校验域为空、只有"刷新缓存·已跳过"，说明该周期**什么也不需要做**，却仍在 `enterGameStateWriteLock()` 上等待约 32 秒，并因此封锁全部读者；
    - `Program.fs` 交互更新提交：日志 `CommitUpdateFileInteractive wait=6746ms hold=0ms`，等待 6.7 秒期间同样封锁全部读者（该窗口内 09:24:15 补全走立即回退，`writerBusy=True`、`结果数: 0`）。
+5. **全量知识导出阻断折叠请求**：`.gui` 属于图级输入，保存 UI 会触发全量知识导出。该导出此前按写命令在 LSP 主队列中同步执行并持有根写锁；`FoldingRanges` 虽已标记为 `ProcessLockFreeRequest`，但在导出完成前无法出队，因此 VS Code 的折叠/展开会随重建长时间失效。
 
 ## Decision
 
@@ -28,6 +29,7 @@ Status: implemented
 9. **`reloadrulesconfig` 递归缺陷（`Program.fs` `ExecuteCommand`）**：先用 `gameStateLock.IsWriteLockHeld` 判断当前线程是否已持有根写锁（LSP 写请求路径已持有），仅在未持有时用轮询变体获取，并按是否由本处获取决定是否释放；未获得时保留"上一次规则仍生效"的既有日志路径，避免误报"被更新快照取代"。
 10. **删除死代码 `publishPreparedWorkspaceUnderRootLock`**：全仓库无调用者（已核实），其挂起式获取随之移除。
 11. **回归保护**：`src/LSP/Locking.Tests.fsx` 直接对锁原语做行为断言（挂起写者必须阻塞读者、轮询写者不得阻塞读者、预算内交接成功、不插队、零预算不轮询且不残留等待者）；`src/Main/RefreshLockIntegration.Tests.fsx` 增加源码护栏，逐个禁止刷新周期、交互更新提交、增量类型提交、inline 调用点提交、两个删除提交段重新出现挂起式 `enterGameStateWriteLock ()`，断言各自保留 `TypeCommitDeferred` / `RefreshInlineScriptCallers deferred` / `LocalisationDeleteCapabilityUnavailable` / `Incremental staged delete deferred` 等延后路径，并限制 `Program.fs` 中挂起式获取数量不超过 4 处（仅剩已核实的启动/命令路径）；`client/extension/memDiagFormatter.ts` 与 `client/test/unit/memDiagFormatter.test.ts` 为新的 `write_lock_busy` 状态补中英双语标签。
+12. **知识库全量与增量导出统一使用模型读锁**：`src/LSP/Commands.fs` 将 `cwtools.ai.exportProjectKnowledge` 归为 `readCmd`，`src/LSP/LanguageServer.fs` 删除按 `generationMode` 把全量导出改判为写请求的分支。两种导出都只读取一致的 `IGame` 模型，SQLite 发布继续由 `databaseWriteGates` 按数据库串行化；导出改在线程池读请求中执行后，主队列可继续分发 `FoldingRanges`。`src/Main/ProjectKnowledge.Tests.fsx` 固定该命令的读锁分类。
 
 ## Alternatives considered
 
@@ -36,6 +38,8 @@ Status: implemented
 3. **把延迟动态重校验整体推迟到用户空闲**：已拒绝（本次）。这会改变动态参数诊断的新鲜度语义；本次只修复锁等待拓扑，不改变诊断刷新策略。
 4. **挂起式写者固定使用 `TryEnterWriteLock(timeout)` 超时**：已拒绝。该 API 在等待期间同样处于"写者等待"状态，仍会阻塞读者整个超时窗口，而 500ms 的读者预算经不起任何 250ms 级别的写者等待叠加。
 5. **对增量类型提交采用"短预算 + 复用 `TypeCommitSuperseded`"**：已拒绝。核实后 `TypeCommitSuperseded` 分支只写一条 `monitorLog`，既不 `markFileStale`、不请求全量刷新，也没有任何重驱动机制；它的安全性当前完全依赖"被更新的快照覆盖"（`lintSnapshotStillCurrent()`），而锁竞争导致的延后并不满足该前提，会让已提交类型索引与诊断新鲜度脱节。因此该站点改为"长预算轮询 + 预算耗尽后走既有的保守全量刷新分支（`needsTypeRefresh`/`addPendingRefreshDomains`/`clearTypeCaches`/`markFileStale`）"，并新增可观测的 `TypeCommitDeferred` 结果。
+6. **把 `.gui` 直接改走普通文件增量导出**：已拒绝。GUI、GFX、Asset 与 Shader 输入会改变跨文件界面/着色器图，现有增量路径明确拒绝这类图级变更；绕过该守卫会产出看似新鲜但关系不完整的数据。此次只消除编辑器阻塞，不改变知识图新鲜度语义。
+7. **把所有 LSP 写请求改为并发异步执行**：已拒绝。这虽然也能让主队列继续出队，却会破坏写请求之间的串行顺序，并把修复面扩大到真正修改模型的命令；将只读导出归入既有读请求路径即可解决根因。
 
 ## Consequences
 
@@ -46,3 +50,4 @@ Status: implemented
 - **锁等待预算耗尽后的行为变化**：批量校验持续超过预算时，交互更新提交改为本轮不提交并走既有重试路径（最多 `maxPreparedCommitRetries` 次重新 lint），分析周期改为推迟到下一次唤醒，增量/inline 提交改为保守全量刷新，LSP 写请求返回 `-32000 Request timed out`，需写锁的通知改为延迟重新入队（不丢设置变更、邮箱保持空闲）。除 LSP 写请求外都保留待处理状态并在后续周期收敛；最坏情况是相关文件诊断短暂保持待校验态（既有 `markFileStale`/`pending` 语义，并输出 `write_lock_busy`、`deferred`、`WriteLock wait budget exceeded` 日志）。
 - **仍保留挂起式写者的站点（已核实为低风险且各有理由）**：`Program.fs` 中规则候选激活（仅当工作区把 `.cwt` 目录设为手动规则根时可达，且其失败路径语义为"候选被拒绝"，需要独立消息设计）、`finishBackgroundRulesUpdate` 的启动规则提交与"无模型时的分离式工作区发布"（后者在 `gameObj.IsNone` 时运行，此时不存在批量校验读锁，无法产生该竞争）、`DidChangeConfiguration` 的工作区重载（跳过会导致工作区未加载，需要"重触发重载"而非丢弃的独立设计）。原死代码 `publishPreparedWorkspaceUnderRootLock` 已确认无调用者并删除。
 - **观测口径变化**：`writerActivityCount=1` 现在只反映真实写锁持有；新增 `RefreshCaches write_lock_busy`、`WriteLock wait budget exceeded`、`TypeCommitDeferred`、`RefreshInlineScriptCallers deferred`、`Deferred notification`(dprintfn) 等可定位信号；`WriteLock hold budget exceeded` 仅在同一次进入真正持锁后超预算时输出。
+- **UI 全量刷新不再冻结折叠**：图级输入仍会触发完整知识导出，导出的实际耗时与知识正确性规则不变，但耗时任务不再同步堵住 LSP 主队列，也不再独占根写锁；折叠请求可在导出期间继续出队执行。

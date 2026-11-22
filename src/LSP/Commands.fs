@@ -124,8 +124,8 @@ module Commands =
             readCmd "cwtools.ai.shader.preflightEdit"
             readCmd "cwtools.ai.shader.compareVanilla"
 
-            // Export project knowledge (default write, incremental may be read)
-            writeCmd "cwtools.ai.exportProjectKnowledge"
+            // Both export modes read the coherent model; SQLite publication has its own per-database gate.
+            readCmd "cwtools.ai.exportProjectKnowledge"
         ]
 
     let private readOnlySet =

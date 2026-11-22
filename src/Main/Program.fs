@@ -12347,9 +12347,8 @@ type Server(client: ILanguageClient) =
                                 | VIC3 -> "vic3"
                                 | CWT -> "cwt"
                                 | Custom -> "paradox"
-                            // Incremental export only reads the coherent game model and uses a
-                            // per-database gate, so the protocol may run it alongside editor reads.
-                            // Full publication remains under the protocol write lock during load.
+                            // Both export modes only read the coherent game model and use a
+                            // per-database gate, so the protocol runs them alongside editor reads.
                             let validation = validationRuntimeSnapshot ()
                             let loading = loadingRuntimeSnapshot ()
                             let pendingKinds = pendingRefreshDomainList ()

@@ -502,24 +502,7 @@ let connect (serverFactory: ILanguageClient -> ILanguageServer, receive: BinaryR
         | CodeActions(p)        -> server.CodeActions(p)         |> thenMap serializeCommandList |> thenPayload,            true
         // ExecuteCommand: split into read-only (query/info) and write (etc.)
         | ExecuteCommand(p) ->
-            let isReadCmd =
-                if p.command = "cwtools.ai.exportProjectKnowledge" then
-                    p.arguments
-                    |> List.tryHead
-                    |> Option.bind (function
-                        | JsonValue.Record fields ->
-                            fields
-                            |> Array.tryPick (fun (key, value) ->
-                                if key = "generationMode" then
-                                    match value with
-                                    | JsonValue.String mode -> Some mode
-                                    | _ -> None
-                                else None)
-                        | _ -> None)
-                    |> Option.exists (fun mode -> mode = "incremental")
-                else
-                    Commands.isReadOnly p.command
-            server.ExecuteCommand p |> thenMap (serializeExecuteCommandResponseOption >> Option.defaultValue "null" >> ResponsePayload), isReadCmd
+            server.ExecuteCommand p |> thenMap (serializeExecuteCommandResponseOption >> Option.defaultValue "null" >> ResponsePayload), Commands.isReadOnly p.command
 
 
         // - Write / formatting (PrepareRename stays read-only with a read-lock fallback) -

@@ -1,5 +1,6 @@
 #r "../../artifacts/bin/Main/debug/CWTools.dll"
 #r "../../artifacts/bin/Main/debug/CWTools Server.dll"
+#r "../../artifacts/bin/Main/debug/LSP.dll"
 #r "../../artifacts/bin/Main/debug/Microsoft.Data.Sqlite.dll"
 #r "../../artifacts/bin/Main/debug/SQLitePCLRaw.core.dll"
 #r "../../artifacts/bin/Main/debug/SQLitePCLRaw.batteries_v2.dll"
@@ -19,6 +20,9 @@ SQLitePCL.Batteries_V2.Init()
 
 let assertTrue = assertTrueNamed
 let assertFalse = assertFalseNamed
+
+assertTrue "project knowledge export shares the model read lock in both generation modes"
+    (LSP.Commands.isReadOnly "cwtools.ai.exportProjectKnowledge")
 
 let executeCommand (connection: Microsoft.Data.Sqlite.SqliteConnection) (sql: string) (parameters: (string * obj) list) =
     use cmd = connection.CreateCommand()

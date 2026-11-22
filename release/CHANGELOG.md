@@ -1,5 +1,18 @@
 # Changelog
 
+## [2.38.1] - 2026-11-22
+
+### 编辑器修复与维护 / Editor Fixes and Maintenance
+
+- **[修复] 知识库全量刷新不再阻塞 VS Code 折叠（Project knowledge refresh no longer blocks VS Code folding）**：
+  - 保存 `.gui` 等图级输入后，知识库全量导出不再同步占住语言服务器主队列或独占模型写锁；全量与增量导出均在模型读锁下执行，SQLite 发布继续按数据库串行化，因此长时间刷新期间折叠/展开请求仍可被处理。
+  - 保持图级知识必须完整重建的正确性规则，不把 GUI、GFX、Asset 或 Shader 改动强行降级为可能丢失跨文件关系的普通增量更新。
+  - English: [Fix] Full project knowledge exports triggered by saving `.gui` and other graph-wide inputs no longer synchronously block the language server queue or exclusively hold the model write lock. Full and incremental exports now run under the model read lock while SQLite publication remains serialized per database, so folding and unfolding requests can still be served during a long refresh. Graph-wide changes still require a complete rebuild to preserve cross-file interface and shader relationships.
+
+- **[优化] 静态检查与仓库文档同步（Static-check cleanup and repository documentation synchronization）**：
+  - 清理舰船设计标量正则中的冗余转义及 GUI 视觉回顾测试中的未使用变量，并同步当前实现的双语仓库文档、Marketplace README、架构资料、诊断代码指南和代码注释；不改变运行时行为。
+  - English: [Optimization] Remove a redundant escape in the ship-design scalar regular expression and an unused variable in the GUI visual-review test, and synchronize bilingual repository documentation, the Marketplace README, architecture material, the diagnostic-code guide and code comments with the current implementation. Runtime behavior is unchanged.
+
 ## [2.38.0] - 2026-11-21
 
 ### 全局舰船设计可视化工作台 / Global Ship Design Workbench

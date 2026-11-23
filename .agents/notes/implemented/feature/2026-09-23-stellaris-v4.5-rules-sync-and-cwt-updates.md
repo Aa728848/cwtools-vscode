@@ -135,6 +135,35 @@ flowchart LR
 
 - **原版重命名**：`on_entering_war` 在 4.6.0 改名 `on_war_entered`（原版仅剩脚本注释提到旧名）。旧 `subtype` 删除，并在 `on_actions.cwt` 的 `obsolete_keys` 登记 `on_entering_war = "renamed to on_war_entered"`，保留迁移提示而不是静默失效。
 
+### v4.6.0 正式版补全（Corona Borealis 3d1a）
+
+在 4.6.0 测试版同步的基础上，对照正式版 `Corona Borealis v4.6.0 (3d1a)` 的最新 `script_documentation`、原版 `common/`、`unchecked_defines/`、`dlc_metadata/`、`inline_scripts/` 与官方 README 做了全量核对并补齐三类缺口，同时修复了测试版提交遗留的一处关键日志格式故障：
+
+- **修复 `trigger_docs.log` 的 FParsec `=================` 分隔符错位（关键回归）**：
+  - `CWTools.Parser.DocsParser` 按 `twoDocs = docFile .>>. docFile` 解析，每个 `docFile` 以 `DOCUMENTATION ==` 开头、以 `=================` 结尾，且 `header` 向前查找 `DOCUMENTATION ==` 的字符上限为 `maxChars = 4000`。
+  - 前序测试版提交把 72 条新 trigger 错插在第一个 `=================` 与 `== EFFECT DOCUMENTATION ==` 之间、把 63 条新 effect 错插在第二个 `=================` 之后，导致 `DocsParser.parseDocsFile` 在第 4956 行直接解析失败（`Could not find the string 'DOCUMENTATION =='`）。
+  - 将两处 `=================` 分别归位至 Trigger 段落末尾（`== EFFECT DOCUMENTATION ==` 之前）与文件末尾，同时按正式版补入 `country_defeats_nomads_in_war`（`Supported Scopes: war`）并同步 `add_building` 扩充后的详细文档说明。
+- **正式版 `rules-sync` 增量**：
+  - `triggers.cwt`：新增 `alias[trigger:country_defeats_nomads_in_war] = scope[country]`（作用域仍由 `trigger_docs.log` 驱动，不冗余声明 `## scopes`）。
+  - `common/defines.cwt`：`NAI` 新增 7 个市场交易参数（`AI_MARKET_SELL_STOCKPILE_FULFILLMENT`、`AI_MARKET_SELL_MONTHS_TO_FULL`、`AI_MARKET_SELL_MAX_STOCKPILE_SHARE`、`AI_MARKET_SURPLUS_MONTHS_OF_COVER`、`AI_MARKET_SURPLUS_BUY_FULFILLMENT`、`AI_MARKET_RESERVE_BUY_FULFILLMENT`、`AI_MARKET_RESERVE_TARGET_FULFILLMENT`）。
+  - `common/casus_belli_and_war_goals.cwt`：新增 `defeat_nomad_on_all_arkships_lost = bool`（原版 34 处调用）及文档记录的 `available_in_proxy_wars_only = bool`、`galactic_community_joins_defender`。
+  - `config/shader/abi-audit.json`：随 `rules-sync report` 自动刷新为正式版 `stellaris.exe` 指纹（479 条 catalog 与 13 条 renderer contracts 均未变动）。
+- **扫描器盲区（枚举、`unchecked_defines`、`inline_scripts` 与嵌套块）实装项补齐**：
+  - `dlc_list.cwt`：`enum[DLCs]` 补入 `"Willpower"`（原版 `00_scripted_triggers.txt` 已使用 `host_has_dlc = "Willpower"`）。
+  - `common/defines.cwt`：`Unchecked_NInterface` 补入 `unchecked_defines/00_interface.txt` 新增的 5 个字段——`ADVOCATE_MOUSE_OVER_OPACITY`、`POP_TOOLTIP_MAX_COLONIES`、`TENET_SELECT_MIN_WIDTH`，以及强类型绑定至 `<Paragon_UI_NAME_type>`（而非 `scalar`）的 `PORTRAIT_GUI_NAME_DELEGATE` 与 `PORTRAIT_GUI_NAME_GESTALT_FACTION_IDEOLOGY`。
+  - `common/governments.cwt`：在 `alias[government_trigger:*]` 的 `OR`/`NOT`/`NOR` 块补入原版 `00_authorities.txt` 使用的 `show_at_empire_creation = bool`，并在 `civic_or_origin` 补入 `homeworld = <planet_class>`。
+  - `common/megastructures.cwt`：补齐原版 `inline_scripts/megastructures/galactic_halls.txt` 使用的 5 个顶层字段：`scoped_name`、`modules`（`<megastructure_module>`）、`initial_module_capacity`、`max_module_capacity`、`locked_module_custom_tooltip`。
+  - `common/ideologies.cwt`、`common/common_economic_templates.cwt`、`modifier_rule.cwt`：
+    - `ideology` 补齐 `resources`、`intel`、`ideology_affinity`，`strength_level` 与 `ideology_tenet.tier` 放宽为 `cardinality = 0..inf`；修正 `monthly_increase` 与 `category` 内直接复用 `alias_name[modifier_rule]`（支持 `base` 与 `modifier` 内 `max_decimals`/`polarity`/`display_level`，强类型枚举 `enum[modifier_polarity]` 与 `enum[modifier_display_level]`）；
+    - 将 `ideology`/`ideology_tenet.tier` 中误引用的 `triggered_modifier_system`（键名为 `triggered_modifier`）修正为新增的 `triggered_system_modifier_system`（键名为 `triggered_system_modifier`），新增 `triggered_colony_modifier`（原版 `00_tenets.txt` 使用 30 次），并为相关 `triggered_*_modifier` 补齐原版使用的 `possible`、`fix_key`、`should_mult_desc`、`show_if_trigger_false`、`show_trigger_if_false`、`show_trigger_if_true`、`trigger_true_key_override`、`trigger_false_key_override`；
+    - `ideology_reach_type` 的 `value`/`weight` 块补齐 `possible`。
+- **原版官方 README 文档新增可选字段补齐**：
+  - `common/ethics.cwt`：`pop_group_modifier`；
+  - `common/traits.cwt`：`subtype[leader_trait]` 补齐 `allowed_civics`、`forbidden_civics`、`advocate_modifier`；
+  - `common/pop_faction.cwt`：`skip_creation_cooldown`、`hidden`、`allow_natural_spawn`；
+  - `common/situations.cwt`：`custom_tooltip`、`custom_tooltip_with_modifiers`、`override_active_title`、`override_active_desc`；
+  - `common/zones.cwt`：`excluded_buildings`（及 `triggered_buildings` 完整 4 列表）、`destroy_trigger`、`is_capped_by_modifier`、`desc`、`empire_limit`、`planet_limit` modifier 规则、`on_built`/`on_queued`/`on_unqueued`、`additional_ai_weight`、`ai_estimate_without_unemployment`。
+
 ## Alternatives considered
 
 1. **将 `overclock` / `role` / `action` 保持为 `scalar`**：
@@ -161,6 +190,7 @@ flowchart LR
 - 运行 `npm run compile`：前端 Webview 与 Extension Host 编译全部通过。
 - 运行 `npm run typecheck:test`：全量 TypeScript 类型检查通过。
 - 参数级漂移：修好后 `report --no-open` 报 `trigger parameters: ~0`、`effect parameters: ~0`（修前为 `~2` / `~3`，其中 5 条是历史漏检）；`npm run test:rules-sync` 50 项通过（含 4 条新增参数回归）；`dotnet fsi src/Main/StellarisConfigLogs.Tests.fsx` 8 项通过（基线日志仍可被 F# 解析）；`npm run typecheck:test` 通过；规则 diff 中新增的 `scalar` 只有 `create_country.ruler`（自由字符串，与同块 `name`/`ship_prefix` 一致）。
+- v4.6.0 正式版补全：`report --no-open` 全部 diff 为 `+0 -0 ~0`，`trigger parameters: ~0`、`effect parameters: ~0`，`folders with findings: 0`，`scope contracts missing=0 mismatch=0 unresolved=10`，`documented-but-required=0`、`documented-but-unmodeled=0`，shader-abi `carried=479 added=0 dropped=0`、`contracts kept=13 dropped=0`；`dotnet fsi src/Main/StellarisConfigLogs.Tests.fsx` 8/8 通过（`DocsParser` 完整解析 1171 triggers + 1143 effects，含 `country_defeats_nomads_in_war`、`abandon_adopted_ideology`、`validate_species_rights`）；`EngineCostRuleParsing.Tests.fsx` 30/30 通过；`ModifierDocumentationRuleParsing.Tests.fsx` 8/8 通过；全部 108 个 CWT 文件经 `CKParser` 与 `RulesParser.parseConfigs` 零错误加载（3760 rules / 260 types / 194 enums / 29 complexEnums）；`npm run compile`、`npm run typecheck:test`、`npm run test:rules-sync`（51 passing）全部通过；规则 diff 新增 `scalar` 计数为 0；原版 DLC 使用项与 `common/defines`、`unchecked_defines` 缺失项均为 0。
 - v4.6.0：`report --no-open` 全部 diff 为 `+0 -0 ~0`，`trigger parameters: ~0`、`effect parameters: ~0`，`folders with findings: 0`，`scope contracts missing=0 mismatch=0 unresolved=10`，`documented-but-required=0`、`documented-but-unmodeled=0`；shader-abi `carried=479 added=8 dropped=0`、contracts `kept=13 dropped=0`；`npm run compile`、`npm run typecheck:test`、`npm test`（19 passing，语言服务器成功加载新规则）均通过；规则 diff 中 `scalar` 新增计数为 0。
 - v4.5.3：`report --no-open` 的 trigger / effect / modifier / scope / localisation_command 全为 `+0 -0 ~0`，`folders with findings: 0`，`scope contracts missing=0 mismatch=0 unresolved=0`，`documented-but-required=0`、`documented-but-unmodeled=0`，shader-abi `carried=471 added=0 dropped=0`、contracts `kept=13 dropped=0`。
 - v4.5.2：`report --no-open` 所有 diff 均为 `+0 -0 ~0`，`folders with findings: 0`，`scope contracts missing=0 mismatch=0`，`documented-but-unmodeled=0`；`npm run test:rules-sync` 通过（新增多行字符串字段扫描与关系从句作用域两条回归测试）；规则 diff 中无新增 `scalar`。

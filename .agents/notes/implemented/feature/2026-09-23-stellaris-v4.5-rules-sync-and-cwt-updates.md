@@ -178,6 +178,21 @@ flowchart LR
   - `stellaris-rules-sync.js` 新增 `gui` 模式（含 `--update-baseline`、`--vanilla-interface`、`--gui-baseline`、`--no-gui-audit`、`--ci`）及 `npm run rules:stellaris:gui` 脚本；`report` 模式探测到原版 `interface/` 目录时自动执行并在控制台摘要、JSON 与 HTML 报告中新增「GUI 控件审计」标签页与告警卡片。
   - 更新 `tools/rules-sync/tsconfig.test.json`、`tools/rules-sync/gui-audit.test.ts`、`tools/rules-sync/README.md` 与 `.agents/skills/stellaris-rules-sync/SKILL.md`。
 
+### 反向陈旧 / 引擎已移除字段审计与废弃迁移警告
+
+原版升级不仅会新增字段，还会废弃或改名旧字段（如 4.0 起 `common/districts/` 将 `is_capped_by_modifier` 替换为逻辑相反的 `is_uncapped = { ... }`、将 `inherits_capped_modifiers_from` 替换为 `shared_capacity_modifier`，以及 `pop_jobs`/`pop_categories`/`ship_sizes`/`zones`/`megastructures` 等多处移除或改名）。此前 `rules-sync` 仅检查正向缺失，规则库里残留的死字段会静默放行甚至被自动补全推荐。本次从引擎、规则与扫描器三层闭环解决：
+
+- **F# 规则引擎增强（`submodules/cwtools`）**：
+  - `RuleValidationService.fs` 的 `applyNodeRule` 补齐 `options.errorIfOnlyMatch` 诊断（与 `applyLeafRule` 对称），使块级废弃字段（如 `zones` 的 `include`/`exclude`、`ship_sizes` 的 `possible_starbase`/`potential_starbase`/`potential_planet`/`possible_planet`、`pop_categories` 的 `assign_to_pop`/`unemployment_resources`）与叶子字段一样按 `## severity = warning` 发出自定义迁移提示；
+  - `CompletionService.fs` 过滤掉带 `o.errorIfOnlyMatch.IsSome` 的废弃规则，避免补全继续推荐旧键。
+- **CWT 规则库补齐废弃与迁移提示（`submodules/cwtools-stellaris-config`）**：
+  - 经原版脚本、官方文档（`00_DOCUMENTATION.txt`、`00_README.txt`、`99_HOW_TO_ZONE.txt`）与 `stellaris.exe` 字符串表双重核实，为 13 个 CWT 文件中 31 个废弃/引擎移除字段添加 `## severity = warning` + `## error_if_only_match = "..."`（含 `districts.cwt` 的 `is_capped_by_modifier`、`inherits_capped_modifiers_from`、`base_cap_amount` 并移除依赖旧键的零引用 `subtype[capped]`/`subtype[uncapped]`，`zones.cwt` 的 `include`/`exclude`，`jobs_and_social_strata.cwt` 的 12 个 4.0 移除字段，`ship_sizes.cwt` 的 4 个 `*_starbase`/`*_planet` 构造块，`megastructures.cwt`、`megastructure_modules.cwt`、`00_small_types_consolidated.cwt`、`bypass.cwt`、`starbases_consolidated.cwt`、`country_types.cwt`、`pop_faction.cwt`、`governments.cwt`、`planet_classes.cwt`）；
+  - 顺手修复 `country_types.cwt:265` 漏写 `## ` 的 `replace_scope = { this = country root = country }` 伪字段笔误，以及 `ideologies.cwt` 四处带多余引号的 `filepath["common/inline_scripts/",".txt"]`（触发 `CWT200`）。
+- **反向审计工具纳入检查流程（`tools/rules-sync/stale-fields.ts`）**：
+  - 扫描 `config/common/*.cwt` 非 `type_per_file` 的顶层具名字段，对比原版 `common/<folder>/`、官方文档注释、`inline_scripts/` 与可执行文件非标识符边界提取的引擎键集合（避免漏掉相邻 NUL 串或 `.set.custom_portraits` 等点分键）；
+  - 区分高置信度 `removed_from_engine`（CI 退出码 2 阻断）与待人工复核 `unused_in_vanilla`（覆盖跨系统同名键如 `is_capped_by_modifier`），自动豁免已标 `## error_if_only_match` 的字段；
+  - 接入 `npm run rules:stellaris:stale-fields`、`report.ts`（控制台摘要 + HTML「陈旧/废弃字段」标签页与告警卡片）、`stale-fields.test.ts`、`README.md` 与 `SKILL.md`。
+
 ## Alternatives considered
 
 1. **将 `overclock` / `role` / `action` 保持为 `scalar`**：
@@ -206,6 +221,11 @@ flowchart LR
 - 运行 `npm run compile`：前端 Webview 与 Extension Host 编译全部通过。
 - 运行 `npm run typecheck:test`：全量 TypeScript 类型检查通过。
 - 参数级漂移：修好后 `report --no-open` 报 `trigger parameters: ~0`、`effect parameters: ~0`（修前为 `~2` / `~3`，其中 5 条是历史漏检）；`npm run test:rules-sync` 50 项通过（含 4 条新增参数回归）；`dotnet fsi src/Main/StellarisConfigLogs.Tests.fsx` 8 项通过（基线日志仍可被 F# 解析）；`npm run typecheck:test` 通过；规则 diff 中新增的 `scalar` 只有 `create_country.ruler`（自由字符串，与同块 `name`/`ship_prefix` 一致）。
+- **反向陈旧字段审计与块级废弃警告接入**：
+  - `node tools/rules-sync/stellaris-rules-sync.js stale-fields --ci`（退出码 0）：`files=76 checked=2216 annotated_deprecated=31 removed_from_engine=0 unused_in_vanilla=80 exe=yes`；
+  - `node tools/rules-sync/stellaris-rules-sync.js report --no-open --no-shader-abi`：全部正向/反向/GUI 指标清零；
+  - `dotnet build src/LSP/` 与 `dotnet build src/Main/` 0 错 0 警告；`npm run test:fsx` 全部 36 个 F# 回归脚本通过（含 `CwtLanguageSemantics.Tests.fsx` 92/92 零 `CWT200` 诊断与 `StellarisConfigLogs.Tests.fsx` 8/8）；108 个 `.cwt` 全量零错加载；`CWToolsTests` 新增 `error_if_only_match` 叶子+块级警告及补全过滤测试通过；
+  - `npm run test:rules-sync` 60 passing（含 `stale-fields.test.ts` 新增 4 条回归）、`npm run test:perf` 7/7 passing、`npm run typecheck:test` 与 `npm run compile` 全部通过；子模块新增 `scalar` 为 0。
 - **GUI 控件审计与外交窗口基线接入**：
   - `node tools/rules-sync/stellaris-rules-sync.js gui --ci`（退出码 0）：`files=181 widget_types=19 uncovered_types=0 uncovered_props=0 tracked_windows=7 (+0 -0)`；
   - `node tools/rules-sync/stellaris-rules-sync.js report --no-open`：全指标清零且输出 `[report] gui: files=181 widget_types=19 uncovered_types=0 uncovered_props=0 tracked_windows=7 (+0 -0)`；

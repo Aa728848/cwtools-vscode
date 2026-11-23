@@ -21,6 +21,7 @@ npm run rules:stellaris:report
 npm run rules:stellaris:contracts
 npm run rules:stellaris:optional-fields
 npm run rules:stellaris:gui
+npm run rules:stellaris:stale-fields
 ```
 
 ### Inputs and outputs
@@ -45,6 +46,7 @@ npm run rules:stellaris:gui
 | `contracts` | Compares vanilla scope comments against CWT scope annotations under `scope-contracts`. Read-only by default; `--apply` adds missing high-confidence annotations, while `--apply-conflicts` updates conflicting ones. |
 | `optional-fields` | Audits `config/logs/*_docs.log` against CWT aliases to flag documented-optional fields still required (`1..1` default, causing `CW242` false positives). Also runs inside `check` and `report`. Add `## cardinality = 0..1` above confirmed optional fields. |
 | `gui` | Audits vanilla `interface/**/*.gui` widget types and properties against `config/interface/gui_types.cwt`, and diffs named controls inside 7 key diplomacy and mod `custom_gui` event windows against `gui-window-baseline.json`. Pass `--update-baseline` after reviewing window changes, or `--ci` to exit `2` on drift. |
+| `stale-fields` | Reverse-audits `config/common/*.cwt` top-level fields against vanilla `common/`, README comments, `inline_scripts`, and the Stellaris executable to flag removed or renamed fields lacking `## error_if_only_match`. Also runs inside `report` (skip with `--no-stale-fields`); pass `--ci` to exit `2` when engine-removed fields are found. |
 
 ### GUI widget & diplomacy window audit
 
@@ -85,6 +87,7 @@ npm run rules:stellaris:report
 npm run rules:stellaris:contracts
 npm run rules:stellaris:optional-fields
 npm run rules:stellaris:gui
+npm run rules:stellaris:stale-fields
 ```
 
 ### 输入与输出
@@ -109,6 +112,7 @@ npm run rules:stellaris:gui
 | `contracts` | 比对原版作用域注释与 CWT 标注并输出到 `scope-contracts`。默认只读；`--apply` 仅补缺失的高置信标注，`--apply-conflicts` 处理冲突项。 |
 | `optional-fields` | 审计 `config/logs/*_docs.log` 与 CWT alias，检出文档标为可选但规则仍默认必填（`1..1`）导致 `CW242` 误报的字段（`check` 与 `report` 会自动包含）。确认后在该字段上方补 `## cardinality = 0..1`。 |
 | `gui` | 审计原版 `interface/**/*.gui` 中的控件类型与属性键是否已覆盖于 `config/interface/gui_types.cwt`，并对照 `gui-window-baseline.json` 追踪 7 个关键外交与 Mod `custom_gui` 事件窗口的命名控件增删。核对变动后传 `--update-baseline` 刷新基线；`--ci` 在存在漂移时以退出码 `2` 结束。 |
+| `stale-fields` | 反向审计 `config/common/*.cwt` 的顶层字段，对比原版 `common/`、官方文档注释、`inline_scripts` 与游戏可执行文件字符串表，检出引擎已移除或已改名却尚未标注 `## error_if_only_match` 的陈旧字段（`report` 默认包含，可传 `--no-stale-fields` 跳过）；`--ci` 在存在引擎已移除字段时以退出码 `2` 结束。 |
 
 ### GUI 控件与外交窗口审计
 

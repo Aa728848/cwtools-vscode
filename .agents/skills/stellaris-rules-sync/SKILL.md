@@ -56,6 +56,7 @@ node tools/rules-sync/stellaris-rules-sync.js report --no-open
 - `trigger parameters` / `effect parameters`（**命令块内参数键**的漂移，见下方"参数级漂移"）；
 - `folders with findings`（未覆盖的 Common 目录或字段）；
 - `scope contracts`（缺失的作用域契约）；
+- `stale fields`（反向审计：`config/common/*.cwt` 中已被引擎移除或原版不再使用的陈旧字段，需标注 `## severity = warning` + `## error_if_only_match` 或移除）；
 - `gui`（原版 `interface/**/*.gui` 未覆盖的控件类型/属性键，以及 7 个关键外交与 Mod `custom_gui` 事件窗口的新增/移除控件）。
 
 #### 参数级漂移（`parameters`）
@@ -124,6 +125,9 @@ node tools/rules-sync/stellaris-rules-sync.js report --no-open
      npm run rules:stellaris:gui -- --update-baseline
      ```
      将 `tools/rules-sync/gui-window-baseline.json` 刷新至当前版本。
+5. **陈旧 / 引擎已移除字段（`stale-fields` 反向审计）**：
+   - 凡 `removed_from_engine > 0` 的字段（或 `unused_in_vanilla` 中确认已在当前版本改名/废弃的跨系统同名键，如区划中的 `is_capped_by_modifier`），不得静默保留为正常有效字段。
+   - 优先保留规则并添加 `## severity = warning` 与 `## error_if_only_match = "Deprecated ...: use <new_key> instead"`，使编辑器对旧 Mod 给出明确迁移警告且不在自动补全中推荐该旧键；如确认仅为笔误（如漏写 `##` 的伪字段），直接修正。
 
 ---
 
@@ -147,10 +151,11 @@ diff.split('\n').forEach(l => {
 
 ### 步骤 6：全套验证门禁（Verification Gate）
 
-1. **规则报告与 GUI 审计指标验证**：
+1. **规则报告、陈旧字段与 GUI 审计指标验证**：
    ```powershell
    node tools/rules-sync/stellaris-rules-sync.js report --no-open
    node tools/rules-sync/stellaris-rules-sync.js gui --ci
+   node tools/rules-sync/stellaris-rules-sync.js stale-fields --ci
    ```
    **合格标准**：
    - `folders with findings: 0`（所有字段级缺失清零）；
@@ -158,6 +163,7 @@ diff.split('\n').forEach(l => {
    - `trigger parameters: ~0` 与 `effect parameters: ~0`（参数级漂移已逐条核对，或确认原版文档滞后）；
    - `effect: +0 -0 ~0`；
    - `modifier: +0 -0 ~0`；
+   - `stale fields: removed_from_engine=0`（并人工复核 `unused_in_vanilla` 中的跨子系统改名项）；
    - `gui: uncovered_types=0 uncovered_props=0` 且 7 个追踪窗口 `(+0 -0)`（变动已核对并更新基线）。
 
 2. **F# 日志与规则加载校验**：

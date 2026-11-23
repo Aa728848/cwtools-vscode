@@ -3,6 +3,7 @@ import * as path from 'path';
 import { scanScopeContracts, type ScopeContractReport } from './scope-contracts';
 import { auditOptionalFields, type OptionalFieldAudit } from './optional-fields';
 import { auditGui, type GuiAuditReport } from './gui-audit';
+import { auditStaleFields, type StaleFieldAuditReport } from './stale-fields';
 
 // Visual comparison report: fresh game script_documentation + vanilla common
 // versus the rules config baseline (config/logs/* + CWT files).
@@ -108,6 +109,7 @@ interface ReportData {
     folders: FolderFieldReport[];
     scopeContracts: ScopeContractReport;
     optionalFields: OptionalFieldAudit;
+    staleFields: StaleFieldAuditReport | null;
     guiAudit: GuiAuditReport | null;
     shaderAbi: ShaderAbiMergeInfo | null;
 }
@@ -1196,6 +1198,9 @@ for (const diff of DATA.diffs) {
 tabs.push({ id: 'fields', label: 'Common 字段级参数', count: DATA.folders.reduce((n, f) => n + f.newFields.length + (f.missingSubtypes || []).length + (f.staleSubtypes || []).length + (f.covered ? 0 : 1), 0), render: renderFolders });
 tabs.push({ id: 'scope-contracts', label: 'Scope 契约', count: DATA.scopeContracts.findings.length, render: renderScopeContracts });
 tabs.push({ id: 'optional-fields', label: '可选字段契约', count: DATA.optionalFields.findings.length, render: renderOptionalFields });
+if (DATA.staleFields) {
+  tabs.push({ id: 'stale-fields', label: '陈旧/废弃字段', count: DATA.staleFields.summary.removedFromEngine, render: renderStaleFields });
+}
 if (DATA.guiAudit) {
   const gs = DATA.guiAudit.summary;
   const missingWindows = DATA.guiAudit.trackedWindows.filter(w => !w.found).length;
@@ -1232,6 +1237,10 @@ function cards() {
   if (scopeSummary.mismatch) items.push({ tab: 'scope-contracts', cls: 'chg', num: scopeSummary.mismatch, lbl: 'Scope 契约冲突' });
   if (scopeSummary.unresolved) items.push({ tab: 'scope-contracts', cls: 'del', num: scopeSummary.unresolved, lbl: 'Scope 注释待复核' });
   if (DATA.optionalFields.findings.length) items.push({ tab: 'optional-fields', cls: 'del', num: DATA.optionalFields.findings.length, lbl: '可选字段误报 CW242' });
+  const stale = DATA.staleFields;
+  if (stale && stale.summary.removedFromEngine) {
+    items.push({ tab: 'stale-fields', cls: 'del', num: stale.summary.removedFromEngine, lbl: '引擎已移除字段' });
+  }
   const gui = DATA.guiAudit;
   if (gui) {
     const gs = gui.summary;
@@ -1472,6 +1481,52 @@ function renderOptionalFields() {
   main.appendChild(wrap);
 }
 
+function renderStaleFields() {
+  const main = document.getElementById('main');
+  const audit = DATA.staleFields;
+  if (!audit) return;
+  const wrap = document.createElement('div');
+  const s = audit.summary;
+  wrap.innerHTML = '<div class="toolbar"><input type="search" placeholder="搜索目录 / 字段 / 规则文件…">'
+    + '<label><input type="checkbox" data-st="removed_from_engine" checked> 引擎已移除 (' + s.removedFromEngine + ')</label>'
+    + '<label><input type="checkbox" data-st="unused_in_vanilla"' + (s.removedFromEngine === 0 ? ' checked' : '') + '> 原版目录未用待复核 (' + s.unusedInVanilla + ')</label></div>'
+    + '<div class="desc" style="margin-bottom:10px">已检查 <b>' + s.cwtFilesScanned + '</b> 个 <code>config/common/*.cwt</code> 中的 <b>' + s.fieldsChecked + '</b> 个顶层字段，'
+    + '其中 <b>' + s.annotatedDeprecated + '</b> 个已标注 <code>## error_if_only_match</code> 废弃提示'
+    + (s.executableScanned ? ' · 已对照引擎可执行文件字符串表' : ' · 未提供可执行文件（仅原版目录检查）')
+    + '。「引擎已移除」表示原版目录、README、inline_scripts 与引擎中均不存在，应补废弃提示或移除；「原版目录未用」可能为跨子系统同名键（如 <code>is_capped_by_modifier</code>）或 Mod 专用钩子，建议人工扫视复核。</div>'
+    + '<div class="list"></div>';
+  main.appendChild(wrap);
+  const listHost = wrap.querySelector('.list');
+  const input = wrap.querySelector('input[type=search]');
+
+  function paint() {
+    const q = input.value.trim().toLowerCase();
+    const enabled = new Set(Array.from(wrap.querySelectorAll('[data-st]:checked')).map(el => el.dataset.st));
+    const rows = audit.findings.filter(item => {
+      if (!enabled.has(item.status)) return false;
+      return !q || item.field.includes(q) || item.folder.includes(q) || item.file.toLowerCase().includes(q) || item.typeName.includes(q);
+    });
+    if (!rows.length) {
+      listHost.innerHTML = '<div class="empty">没有匹配的陈旧字段项</div>';
+      return;
+    }
+    listHost.innerHTML = '<table><thead><tr><th style="width:28%">字段</th><th style="width:18%">目录 / 类型</th><th style="width:12%">形态</th><th>规则位置</th></tr></thead><tbody>'
+      + rows.map(item => {
+        const badge = item.status === 'removed_from_engine'
+          ? '<span class="badge del">引擎已移除</span>'
+          : '<span class="badge chg">原版未用</span>';
+        return '<tr><td class="name">' + esc(item.field) + badge + '</td>'
+          + '<td><span class="tag">common/' + esc(item.folder) + '</span> <span class="desc">' + esc(item.typeName) + '</span></td>'
+          + '<td><span class="tag">' + esc(item.kind) + '</span></td>'
+          + '<td class="src">' + esc(item.file) + ':' + item.line + '</td></tr>';
+      }).join('') + '</tbody></table>';
+  }
+
+  input.addEventListener('input', paint);
+  wrap.querySelectorAll('[data-st]').forEach(el => el.addEventListener('change', paint));
+  paint();
+}
+
 function renderGuiAudit() {
   const main = document.getElementById('main');
   const gui = DATA.guiAudit;
@@ -1585,6 +1640,8 @@ function parseArgs(argv: string[]) {
         vanillaCommon: getArg('--vanilla-common'),
         vanillaInterface: getArg('--vanilla-interface'),
         guiBaseline: getArg('--gui-baseline', path.join(__dirname, 'gui-window-baseline.json')),
+        gamePath: getArg('--game-path'),
+        noStaleFields: argv.includes('--no-stale-fields'),
         shaderAbi: getArg('--shader-abi'),
         outDir: getArg('--output', path.resolve('rules-report')),
     };
@@ -1593,7 +1650,7 @@ function parseArgs(argv: string[]) {
 function main() {
     const args = parseArgs(process.argv.slice(2));
     if (!args.docs || !args.config) {
-        console.error('Usage: npx ts-node tools/rules-sync/report.ts --docs <scriptDocsDir> --config <configDir> [--vanilla-common <dir>] [--vanilla-interface <dir>] [--gui-baseline <baseline.json>] [--shader-abi <mergeReport.json>] [--output <outDir>]');
+        console.error('Usage: npx ts-node tools/rules-sync/report.ts --docs <scriptDocsDir> --config <configDir> [--vanilla-common <dir>] [--vanilla-interface <dir>] [--gui-baseline <baseline.json>] [--game-path <dir>] [--no-stale-fields] [--shader-abi <mergeReport.json>] [--output <outDir>]');
         process.exit(1);
     }
     const baselineDir = path.join(args.config, 'logs');
@@ -1651,6 +1708,9 @@ function main() {
         // Documentation-optional fields that the rules still require would
         // report a false CW242 for every legal usage that omits them.
         optionalFields: auditOptionalFields(args.config),
+        staleFields: !args.noStaleFields && args.vanillaCommon && fs.existsSync(args.vanillaCommon)
+            ? auditStaleFields(args.vanillaCommon, args.config, args.gamePath)
+            : null,
         guiAudit: args.vanillaInterface && fs.existsSync(args.vanillaInterface)
             ? auditGui(args.vanillaInterface, args.config, args.guiBaseline)
             : null,
@@ -1673,6 +1733,10 @@ function main() {
     console.log(`[report] folders with findings: ${folders.length}`);
     console.log(`[report] scope contracts: extracted=${data.scopeContracts.summary.extracted} high=${data.scopeContracts.summary.highConfidence} missing=${data.scopeContracts.summary.missing} mismatch=${data.scopeContracts.summary.mismatch} unresolved=${data.scopeContracts.summary.unresolved}`);
     console.log(`[report] optional fields: documented-but-required=${data.optionalFields.findings.length} documented-but-unmodeled=${data.optionalFields.unmodeled.length}`);
+    if (data.staleFields) {
+        const st = data.staleFields.summary;
+        console.log(`[report] stale fields: removed_from_engine=${st.removedFromEngine} unused_in_vanilla=${st.unusedInVanilla} annotated_deprecated=${st.annotatedDeprecated}`);
+    }
     if (data.guiAudit) {
         const gs = data.guiAudit.summary;
         console.log(`[report] gui: files=${gs.guiFilesScanned} widget_types=${gs.widgetTypesSeen} uncovered_types=${gs.uncoveredWidgetTypes} uncovered_props=${gs.uncoveredProperties} tracked_windows=${gs.trackedWindows} (+${gs.trackedControlsAdded} -${gs.trackedControlsRemoved})`);

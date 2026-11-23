@@ -11,6 +11,8 @@
   "include": [
     "gui-audit.ts",
     "gui-audit.test.ts",
+    "stale-fields.ts",
+    "stale-fields.test.ts",
     "optional-fields.ts",
     "optional-fields.test.ts",
     "scope-contracts.ts",

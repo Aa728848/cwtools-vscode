@@ -1,3 +1,11 @@
+/**
+ * Typed PDXScript mutation builders (pure text -> candidate content transforms).
+ *
+ * Supports structured definition/event/trigger/inline-script/variable edits
+ * with strict bounds (`MAX_DEPTH`, `MAX_NODES`, `MAX_TEXT`, `MAX_FILE_CHARS`,
+ * `MAX_OVERRIDES`) and identifier allowlists. Never performs disk I/O; callers
+ * supply a reader and commit the validated candidate through the write pipeline.
+ */
 import { createHash } from 'crypto';
 
 export type PdxValue =

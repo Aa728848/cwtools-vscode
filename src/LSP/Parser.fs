@@ -1,3 +1,4 @@
+/// JSON-RPC / LSP message and enum deserializers for incoming client payloads.
 module LSP.Parser
 
 open LSP.Log

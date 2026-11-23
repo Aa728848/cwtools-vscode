@@ -1578,10 +1578,8 @@ export interface AgentToolContext {
     authoritativeProjectRevision?: string;
     escalation?: boolean;
     /**
-     * Owning run scope for per-run tool state (anchor-failure guard signatures).
-     * Top-level runs pass their runId; sub-agents pass their own runId so
-     * sibling sub-agents sharing one executor never consume each other's
-     * failure budgets. Set by AgentRunner when building this context.
+     * Owning run scope for per-run tool state (anchor-failure guard signatures),
+     * isolating independent runs that share one executor. Set by AgentRunner.
      */
     scopeId?: string;
 }
@@ -2266,17 +2264,9 @@ export interface AgentRunMetrics {
     finalPromptTokens: number;
 }
 
-// ─── Tool Result Types (Batch 2.1) ──────────────────────────────────────────
-
-
 /**
- * Agent checkpoint — serializable snapshot for long-task resilience (Batch 2.3).
- * Saved periodically so the agent can resume after crashes or context resets.
- */
-/**
- * Agent resume state — fully serializable state of an interrupted agent task.
- * Allows the agent to resume execution from the exact point of interruption
- * with the complete tool call context and reasoning history.
+ * Serializable V4 checkpoint snapshot for resuming an interrupted agent run
+ * with its full tool-call context and reasoning history.
  */
 export interface AgentResumeState {
     version: 4;
@@ -2390,7 +2380,7 @@ export interface AgentStep {
     durationMs?: number;
     /** Iteration context string, e.g. "Iteration 3/10" */
     iterationInfo?: string;
-    /** Child Agent node ID, used for UI group display */
+    /** Legacy compatibility: recorded agent node ID for historical UI grouping. */
     agentId?: string;
     /** Unique ID identifying a specific tool execution within this run */
     invocationId?: string;

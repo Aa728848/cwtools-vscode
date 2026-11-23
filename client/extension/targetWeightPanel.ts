@@ -7,7 +7,7 @@
  * 3. 用户在 webview 里填候选目标参数 → postMessage 回 Host
  * 4. Host 调 `cwtools-shared` 的 `computeTargetingChain`，把完整乘法链回传渲染
  *
- * 机制与公式见 docs/stellaris-targeting-weight-4.5.2.md §2/§3/§5。
+ * 机制与公式见 docs/better_stellaris/17_ship_targeting_weights.md。
  */
 import * as vscode from 'vscode';
 import * as path from 'path';

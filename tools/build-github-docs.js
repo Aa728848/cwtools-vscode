@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 /**
- * Validate the single-source bilingual Markdown documents.
+ * Validate single-source bilingual Markdown documents.
  *
- * README.md, CONTRIBUTING.md, ARCHITECTURE.md, and selected docs under docs/
- * are canonical bilingual sources. There are no maintained language-specific
- * copies.
+ * Canonical bilingual docs maintain English and Chinese sections in one file
+ * (no separate _EN / _ZH copies). This script enforces required markers,
+ * matching section structure, and guards against stale `blob/master/` links.
  */
 
 const fs = require('fs');
@@ -33,6 +33,21 @@ function readRequired(relativePath) {
     return normalize(fs.readFileSync(filePath, 'utf8'));
 }
 
+function countSubheadings(section) {
+    let inFence = false;
+    let count = 0;
+    for (const line of section.split('\n')) {
+        if (/^\s*```/.test(line)) {
+            inFence = !inFence;
+            continue;
+        }
+        if (!inFence && /^#{3,4}\s+/.test(line)) {
+            count++;
+        }
+    }
+    return count;
+}
+
 function validateBilingualDoc(relativePath) {
     const content = readRequired(relativePath);
     const required = [
@@ -45,6 +60,24 @@ function validateBilingualDoc(relativePath) {
         if (!content.includes(marker)) {
             throw new Error(`${relativePath} is missing bilingual marker: ${marker}`);
         }
+    }
+
+    if (content.includes('github.com/Aa728848/cwtools-vscode/blob/master/')) {
+        throw new Error(`${relativePath} contains stale blob/master/ links (use blob/main/)`);
+    }
+
+    const enStart = content.indexOf('## English');
+    const zhStart = content.indexOf('## 中文');
+    if (zhStart <= enStart) {
+        throw new Error(`${relativePath} must place ## English before ## 中文`);
+    }
+
+    const enCount = countSubheadings(content.slice(enStart, zhStart));
+    const zhCount = countSubheadings(content.slice(zhStart));
+    if (enCount !== zhCount) {
+        throw new Error(
+            `${relativePath} has mismatched bilingual heading counts (EN: ${enCount}, ZH: ${zhCount})`
+        );
     }
 }
 

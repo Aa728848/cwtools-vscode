@@ -13,16 +13,10 @@ describe('tool definitions', () => {
             'get_file_context', 'search_mod_files',
             'query_definition', 'query_definition_by_name', 'query_references',
         ]);
-        // Budget headroom: 87 base tools + 6 Agent Teams peer-collaboration
-        // tools (team_*). All six are deferred-disclosure, so the always-visible
-        // prompt budget is unchanged; peer-team mode is a parameter set on the
-        // single dispatch_agents entry rather than a separate tool.
+        // Keep the registered tool count and total static schema token budget bounded.
         expect(names.length).to.be.lessThan(96);
         const schemaTokens = [...TOOL_REGISTRY.values()]
             .reduce((total, entry) => total + entry.estimatedSchemaTokens, 0);
-        // Budget headroom: the merged dispatch_agents schema (DAG wave + peer
-        // team + member contracts) plus six deferred orchestration schemas sit
-        // on top of the 28.8k baseline.
         expect(schemaTokens).to.be.lessThan(32_000);
     });
 

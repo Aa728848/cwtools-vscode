@@ -29,7 +29,6 @@ import { SOURCE } from './messages';
 
 // ─── Thinking-model detection ────────────────────────────────────────────────
 
-// Fix #4: Use shared ALWAYS_THINKING_PREFIXES from providers.ts (single source of truth)
 const THINKING_MODEL_PREFIXES = ALWAYS_THINKING_PREFIXES;
 
 /** Returns true if the model always thinks and CANNOT disable thinking */
@@ -137,7 +136,6 @@ export class AIInlineCompletionProvider implements vs.InlineCompletionItemProvid
     /** A re-offered suggestion younger than this is not marked stale — it may still be displayed/accepted. */
     private static readonly STALE_GRACE_MS = 1500;
 
-    /** Fix #1: collect event Disposables for proper cleanup */
     private _disposables: vs.Disposable[] = [];
 
     constructor(
@@ -145,7 +143,6 @@ export class AIInlineCompletionProvider implements vs.InlineCompletionItemProvid
         private promptBuilder: PromptBuilder,
         private usageTracker: UsageTracker
     ) {
-        // Watch for configuration changes — Fix #1: capture Disposable
         this._disposables.push(
             vs.commands.registerCommand(this.acceptCommand, (id: string) => {
                 this.recordTelemetryAccepted(id);
@@ -159,7 +156,6 @@ export class AIInlineCompletionProvider implements vs.InlineCompletionItemProvid
         this.updateEnabled();
     }
 
-    /** Fix #1: release event listeners */
     dispose(): void {
         this.clearPendingDebounce();
         this.abortCurrentRequest();

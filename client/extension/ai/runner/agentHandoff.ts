@@ -54,7 +54,7 @@ export function buildHandoffRepairPrompt(output: string, missing: readonly strin
     ].join('\n');
 }
 
-/** Tool-free deterministic repair used when a child omitted the handoff envelope. */
+/** Tool-free deterministic repair used when a structured handoff envelope is incomplete. */
 export function repairAgentHandoff(
     output: string,
     writtenFiles: readonly string[],

@@ -293,7 +293,6 @@ function renderElement(el: GuiElement, parent: HTMLElement, parentW = 0, parentH
         div.style.transformOrigin = '0 0';
     }
 
-    // Alpha / opacity
     if (el.alpha !== undefined && el.alpha !== 1) {
         div.style.opacity = String(Math.max(0, Math.min(1, el.alpha)));
     }
@@ -301,14 +300,12 @@ function renderElement(el: GuiElement, parent: HTMLElement, parentW = 0, parentH
     div.style.backgroundColor = c.bg;
     div.style.borderColor = c.border;
 
-    // Name label
     const nameLabel = document.createElement('div');
     nameLabel.className = 'el-name';
     nameLabel.textContent = el.name || '(no name)';
     nameLabel.style.color = c.border;
     div.appendChild(nameLabel);
 
-    // Type tag
     const tag = document.createElement('span');
     tag.className = 'el-tag';
     tag.textContent = c.tag;
@@ -316,7 +313,6 @@ function renderElement(el: GuiElement, parent: HTMLElement, parentW = 0, parentH
     tag.style.color = c.border;
     div.appendChild(tag);
 
-    // Text content
     if (el.text && ['instantTextBoxType', 'textboxType', 'editBoxType'].includes(el.type)) {
         const td = document.createElement('div');
         td.className = 'el-text';
@@ -326,7 +322,6 @@ function renderElement(el: GuiElement, parent: HTMLElement, parentW = 0, parentH
         div.appendChild(td);
     }
 
-    // Sprite / texture display
     if (el.spriteTexture) {
         if (el.spriteTexture.startsWith('dds:') || el.spriteTexture.startsWith('tga:')) {
             // DDS decode failed / TGA - show placeholder
@@ -697,7 +692,6 @@ function setupControls() {
         overlaySelect.onchange = () => setOverlayMode(overlaySelect.value as OverlayMode);
     }
 
-    // Resolution selector
     const resSel = document.getElementById('resolution-select') as HTMLSelectElement | null;
     if (resSel) {
         resSel.value = currentResolution;
@@ -713,7 +707,6 @@ function setupControls() {
         };
     }
 
-    // Animation toggle
     const animBtn = document.getElementById('btn-anim');
     if (animBtn) {
         animBtn.onclick = () => {

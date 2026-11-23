@@ -1,20 +1,13 @@
 /**
- * Real-usage-calibrated token estimation (P0 design 3).
+ * Real-usage-calibrated token estimation.
  *
- * The heuristic estimators in tokenEstimation.ts drive every context-window
- * threshold decision, but their error varies by provider/model/content mix.
- * This table closes the loop: each completed request with a REAL
- * usage.prompt_tokens yields one sample (actual/estimated ratio) folded into
- * a per-key EWMA. Decision paths multiply their raw estimate by the
- * calibrated ratio once enough samples exist.
+ * Folds observed `usage.prompt_tokens / estimated` ratios into a per-key EWMA
+ * so context-window threshold checks adapt to provider/model drift.
  *
- * Safety rails:
- * - keys are {providerId, model, customApiFormat, endpoint fingerprint} from
- *   the RESPONSE side — a fallback never pollutes the primary provider's key;
- * - samples outside [0.25, 4] are rejected (truncated/abnormal usage);
- * - the EWMA ratio is clamped to [0.5, 2.0]; cold start (< MIN_SAMPLES)
- *   returns the raw estimate unchanged;
- * - bounded to 50 keys with LRU eviction; samples never cross keys.
+ * Invariants: keys come from response-side `{providerId, model, customApiFormat,
+ * endpoint fingerprint}` (fallbacks never pollute primary keys); samples outside
+ * `[0.25, 4]` are dropped; EWMA ratio clamps to `[0.5, 2.0]`; cold start
+ * (`< MIN_SAMPLES`) returns raw estimates; bounded to 50 LRU keys.
  */
 import * as crypto from 'crypto';
 

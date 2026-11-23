@@ -12,7 +12,7 @@
 >
 > **本文实际做过独立核验的，只有脚本层（vanilla 文本）与规则层（CWT）**，逐项列在下方"本次独立核验清单"；未列入的一律是转写。
 >
-> **游戏版本**：`D:\Steam\steamapps\common\Stellaris`，`common/defines/00_defines.txt` 经本文实读核对（见 §5 表的"vanilla 行号"列）。姊妹篇 04 号引用的 `CShipTargeting::CalcBestTarget`（1477471）出自 **4.5** 的 870 万行 dump，与本文 PDF 的 **4.5.2**（行 1577208）不是同一份，行号不可混用。
+> **游戏版本**：以 Stellaris 4.5.2 原版 `common/defines/00_defines.txt` 实读核对（见 §5 表的"vanilla 行号"列）。姊妹篇 04 号引用的 `CShipTargeting::CalcBestTarget`（1477471）出自 **4.5** 的 870 万行 dump，与本文 PDF 的 **4.5.2**（行 1577208）不是同一份，行号不可混用。
 
 **本次独立核验清单（2026-10-13，本文作者实读原版脚本与规则文件）**
 
@@ -24,7 +24,7 @@
 | N4 | `use_ship_main_target` 默认值 | 实读 `000_documentation.txt:182` | 注释"default no" |
 | N5 | 算例中两条船的尺寸倍率 | 实读 `common/scripted_variables/03_scripted_variables_ships.txt` | `@corvette_size_multiplier = 5`、`@frigate_size_multiplier = 8`，与 PDF 表的 σ=5.00 / 8.00 吻合 |
 | N6 | `ship_target_weight_mult` 的原版取值样本 | 全 `common/` 检索 | 6 处命中（见 §5.3），比 PDF 列举的多 4 处 |
-| N7 | CWT 规则侧行号 | 实读 `defines.cwt` / `components_consolidated.cwt` / `ship_sizes.cwt` / `logs/modifiers.log` | 与设计文档 `docs/stellaris-targeting-weight-4.5.2.md` §5.1/§5.2 所引行号一致（§8） |
+| N7 | CWT 规则侧行号 | 实读 `defines.cwt` / `components_consolidated.cwt` / `ship_sizes.cwt` / `logs/modifiers.log` | 已核对与实际规则文件行号一致（§8） |
 
 **阅读约定**
 
@@ -34,7 +34,7 @@
 
 - [16_combat_damage_resolution.md](16_combat_damage_resolution.md)：伤害结算，本文 §3.1 的 ΣD 三层分摊细节、字段 ↔ 偏移对照、23 组算例全部在那里；本文只引用不重复。
 - [04_fleet_pathfinding_ai.md](04_fleet_pathfinding_ai.md)：索敌节流原本只有一行提及，已改为指向本文。
-- 设计输入：[docs/stellaris-targeting-weight-4.5.2.md](../stellaris-targeting-weight-4.5.2.md)（机制解读 + 差距分析 + 功能路线图，其 P1-3 即本文）。
+- 实施记录：见 [知识层 Note](../../.agents/notes/implemented/feature/2026-10-13-stellaris-targeting-weight-knowledge-rules.md) 与 [工具链 Note](../../.agents/notes/implemented/feature/2026-10-13-targeting-weight-tooling.md)。
 
 阅读导航：
 
@@ -52,7 +52,7 @@
 
 ## 1. 两阶段总览
 
-索敌是**两阶段、argmax（取最大值，而不是加权抽签）、带错峰节流**的过程。**阶段一回答"这个目标好不好打、值不值得打"，阶段二回答"这门武器打它能造成多少有效伤害"；两者相乘后取最大。**
+索敌是**两阶段、argmax（取最大值，而不是加权抽签）、带错峰节流**的过程。**阶段一回答"这个目标好不好打、值不值得打"，阶段二回答"这门武器打它能造成多少有效伤害"；两层互不相乘，而是各自独立 argmax（含粘性修正），仅在 `use_ship_main_target = yes` 时直接沿用阶段一结果。**
 
 ```
  敌方候选船（同星系 · 可被攻击 · 非 FTL/隐身）
@@ -517,18 +517,17 @@ S ∝ ΣD · p · ŵtgt
 
 **转写来源（本文的公式与行号出处，未经本仓库独立核验）**
 
-- `docs/stellaris-targeting-weight-4.5.2.md`（本文的直接上游：机制解读 + 差距分析 + 功能路线图）
 - 《群星索敌权重计算公式_4.5.2.pdf》文本提取件（古明地瓜/KKoishi_，地砖 & 清流蛋糕 rt 验证）：§0 约定、§1 Stage 1、§2 Stage 2、§3 调用端、§4 最终计算、§5 归一化形式、§6 defines、§7 算例、附 A 关键函数地址、附 B 常量行号、附 C `CalcDamage`
 
-**脚本层（本文独立核验，2026-10-13）**
+**脚本层（本文独立核验，2026-10-13，相对原版 Stellaris 目录）**
 
-- `D:\Steam\steamapps\common\Stellaris\common\defines\00_defines.txt`（19 项 defines）
-- `D:\Steam\steamapps\common\Stellaris\common\component_templates\000_documentation.txt`（:81 / :182 / :184）
-- `D:\Steam\steamapps\common\Stellaris\common\component_templates\00_weapons_extra_large.txt`（:15 / :55-61 / :63-69）
-- `D:\Steam\steamapps\common\Stellaris\common\scripted_variables/03_scripted_variables_ships.txt`（:59 / :74 / :126 / :143）
-- `D:\Steam\steamapps\common\Stellaris\common\ship_sizes\00_ship_sizes.txt`（:120 / :207 / :233）
-- `D:\Steam\steamapps\common\Stellaris\common\static_modifiers\23_static_modifiers_biogenesis.txt`（:832/838/844）、`25_static_modifiers_nomads.txt`（:139）
-- `D:\Steam\steamapps\common\Stellaris\common\component_templates\00_dsc_auras.txt`（:23）、`common\ship_sizes\29_nomads_dlc_ships.txt`（:14）
+- `common/defines/00_defines.txt`（19 项 defines）
+- `common/component_templates/000_documentation.txt`（:81 / :182 / :184）
+- `common/component_templates/00_weapons_extra_large.txt`（:15 / :55-61 / :63-69）
+- `common/scripted_variables/03_scripted_variables_ships.txt`（:59 / :74 / :126 / :143）
+- `common/ship_sizes/00_ship_sizes.txt`（:120 / :207 / :233）
+- `common/static_modifiers/23_static_modifiers_biogenesis.txt`（:832/838/844）、`25_static_modifiers_nomads.txt`（:139）
+- `common/component_templates/00_dsc_auras.txt`（:23）、`common/ship_sizes/29_nomads_dlc_ships.txt`（:14）
 
 **规则层（本仓库，已实读核对行号）**
 

@@ -45,10 +45,8 @@ function formatScopes(scopes: readonly string[] | undefined): string | undefined
 }
 
 /**
- * Build the delegation-scope statement for a child system prompt.
- * @param facts Scope facts derived from the child's sandbox; omit for a
- *              non-delegated run.
- * @returns The statement, or an empty string when this run is not delegated.
+ * Build the scoped read/write boundary statement when explicit scope facts are
+ * supplied; returns an empty string for unrestricted runs.
  */
 export function buildDelegationScopeStatement(facts?: DelegationScopeFacts): string {
     if (!facts) return '';

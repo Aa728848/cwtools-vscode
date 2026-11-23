@@ -638,7 +638,7 @@ export interface AgentRunnerOptions {
     onUserQuestion?: import('./types').AgentToolContext['onUserQuestion'];
     /** If provided, file mutations are written to this memory overlay instead of disk. */
     vfsOverlay?: Map<string, string>;
-    /** Parent durable run when this run is a child agent/replay/fix turn. */
+    /** Parent durable run when this run is a replay or scoped follow-up turn. */
     parentRunId?: string;
     /** Stable agent id. */
     agentId?: string;
@@ -654,11 +654,11 @@ export interface AgentRunnerOptions {
     runRecord?: import('./types').AgentRunRecord;
     /** Topic ID for checkpoint persistence — threaded from run() context */
     topicId?: string;
-    /** T4.1 — replay session. When present, tool calls are served from the ledger instead of live execution. */
+    /** Replay session. When present, tool calls are served from the ledger instead of live execution. */
     replaySession?: import('./runner/runReplay').ReplaySession;
-    /** T4.1 — id of the original run being replayed (recorded in ledger meta for traceability). */
+    /** ID of the original run being replayed (recorded in ledger meta for traceability). */
     replayOf?: string;
-    /** T4.1 — rebuild the system prompt this turn (clears frozen cache key so promptBuilder edits take effect). */
+    /** Rebuild the system prompt this turn (clears the frozen cache key so prompt edits take effect). */
     rebuildSystemPrompt?: boolean;
     /** Hook called before a file is written, allowing the caller to take a snapshot for rollback */
     onBeforeFileWrite?: (filePath: string, prevContent: string | null) => void;
@@ -1320,7 +1320,7 @@ export class AgentRunner {
         });
         // topicId is already declared in function scope
 
-        // 收集 Pinned Context 实时数据 (Todos & Diagnostics)
+        // Collect live pinned context (todos and workspace diagnostics).
         let pinnedData: any = undefined;
         if (topicId) {
             const todos = this.toolExecutor.getExternalToolHandler().getTodos(options.agentId);
@@ -1362,9 +1362,8 @@ export class AgentRunner {
         const promptConfig = this.aiService.getConfig();
         const providerForPrompt = options?.providerId ?? promptConfig.provider;
         const supportsPrefixCache = supportsOpenAiStylePrefixCache(providerForPrompt, promptConfig.customApiFormat, options?.model ?? promptConfig.model, this.aiService.getEndpointForProvider(providerForPrompt));
-        // The model-visible tool set feeds both the frozen prompt fingerprint
-        // (plan sec.7.1) and the reserved-token estimate below; mirror the
-        // reasoning loop's filter inputs so both describe the real toolset.
+        // Mirror the reasoning loop's tool filters so both the frozen prompt
+        // fingerprint and reserved-token estimate describe the real toolset.
         const promptModeTools = filterWebToolsForConfiguredAccess(filterToolDefinitionsForMode(TOOL_DEFINITIONS, mode, {
             domain,
             useSlimPrompt: options?.useSlimPrompt,
@@ -1373,9 +1372,8 @@ export class AgentRunner {
         }));
         const initialToolFocus = options?.initialToolFocus ?? initialToolFocusForMode(mode);
         const promptToolDefinitions = promptModeTools;
-        // DeepSeek prefix-cache optimization: use frozen (session-cached) system prompt
-        // to ensure byte-level stability across API calls for cache hits.
-        // rebuildSystemPrompt drops this fingerprint's cache entry before building (plan sec.7.1).
+        // Use the session-cached system prompt for byte-level prefix-cache stability.
+        // rebuildSystemPrompt drops this fingerprint's cache entry before building.
         const systemPrompt = options?.useSlimPrompt
             ? this.promptBuilder.buildFrozenSlimSystemPromptForMode(
                 mode,
@@ -1561,13 +1559,10 @@ export class AgentRunner {
             conversationHistory.splice(0, conversationHistory.length, ...compactedHistory);
         }
 
-        // Build the message array. Stable-prefix ordering (plan sec.7.2): the
-        // frozen system prompt stays at the head, cacheable (possibly compacted)
-        // history follows, and dynamic editor/project state sits immediately
-        // before the user turn so the long static prefix remains byte-stable for
-        // provider prefix caches. The OpenAI Responses path merges system
-        // messages into top-level instructions preserving their relative order,
-        // so this reorder does not conflict with that merge.
+        // Stable-prefix message ordering: frozen system prompt at the head,
+        // cacheable history next, and dynamic editor/project state immediately
+        // before the user turn so the static prefix stays byte-stable for
+        // provider prefix caches (OpenAI Responses preserves relative order).
         let messages: ChatMessage[];
         let restoredStepRequests: StepRequest[] = [];
         
@@ -2161,7 +2156,7 @@ export class AgentRunner {
     }
 
     /**
-     * Best-effort long-term memory usage tracking (plan §8): when the assistant's
+     * Best-effort long-term memory usage tracking: when the assistant's
      * response mentions a stored memory key verbatim, count it as an actual use.
      * Persistence is debounced inside MemoryParser; failures never break the loop.
      */
@@ -2197,8 +2192,7 @@ export class AgentRunner {
         if (options) options.schedulingState = schedulingState;
         const runRecord = options?.runRecord ?? await this.activeRunRecordPromise!;
         this.readTracker.reset();
-        // Per-run reset of edit failure counters (top-level runs only: sub-agents
-        // share the executor and must not clear the parent run's counters).
+        // Reset per-run edit failure counters for top-level runs (slim/scoped runs share the executor).
         if (!options?.useSlimPrompt) {
             this.toolExecutor.resetEditFailureTracking();
         }
@@ -2213,8 +2207,7 @@ export class AgentRunner {
             preserveReasoningContentForToolCalls: preserveMimoReasoningContent,
         };
 
-        // Calibrated estimate closure for in-loop threshold decisions (P0 design 3):
-        // cold table returns the raw estimate unchanged.
+        // Calibrated estimate closure for in-loop threshold decisions (cold table returns raw estimate unchanged).
         const calibrateLoopEstimate = (tokens: number): number => this.calibrateContextEstimate(
             options?.providerId ?? this.aiService.getConfig().provider,
             options?.model ?? this.aiService.getConfig().model,
@@ -2333,7 +2326,7 @@ export class AgentRunner {
             profileName: schedulingState.profileName,
         }));
 
-        // 🌟 核心优化：若开启了扁平化并且工具注册了展平 schema，则展现给模型的 availableTools 使用扁平化版本
+        // Prefer flattened schemas when registered for a tool to keep provider schemas compact.
         availableTools = availableTools.map(t => {
             const entry = TOOL_REGISTRY.get(t.function.name as any);
             return (entry && entry.flatSchema) ? entry.flatSchema : t;
@@ -2367,9 +2360,6 @@ export class AgentRunner {
             return toolDisclosureService.initialTools(eligibleToolPool, disclosureContext);
         };
         availableTools = refreshAvailableTools();
-        // PTC (programmatic tool calling) is gone: the model always receives the
-        // standard function-calling schema array, so the model-facing surface is
-        // a snapshot of the disclosed catalog.
         let modelFacingTools = [...availableTools];
 
         const _config0 = this.aiService.getConfig();
@@ -2852,9 +2842,7 @@ export class AgentRunner {
                     maxTokens: requestMaxTokens,
                     disableThinking: requestDisableThinking,
                     promptCacheKey: options?.threadId ? `agent-thread:${options.threadId}` : undefined,
-                    // Key fix: propagate abort signal to HTTP request layer
-                    // The absence of this parameter will cause the child agent to wait for the LLM streaming response
-                    // Cannot be interrupted at all by the parent's cancelGeneration/abort
+                    // Propagate the abort signal to HTTP streaming so cancellations interrupt in-flight model calls immediately.
                     abortSignal: modelAbortController.signal,
                     // Stream thinking tokens to UI in real-time (OpenCode-style)
                     onThinking: options?.streaming ? (text) => {
@@ -3607,10 +3595,8 @@ export class AgentRunner {
                     activeToolCount: availableTools.length,
                 }, { invocationId: toolCall.id, status: selection.denied.length > 0 ? 'failed' : 'done' });
             }
-            // ── Execute tool calls (parallel for read-only, serial for writes) ──
-            // Fix #9: WRITE_TOOLS and READ_ONLY_TOOLS are now module-level constants
+            // Execute tool calls (parallel for read-only, serial for writes).
 
-            // Use pre-fetched provider info from outside the loop
             const useDsmlToolRole = useDsmlToolRole0;
 
             const normalizedBatch = normalizeToolCallBatch({
@@ -4098,7 +4084,6 @@ export class AgentRunner {
 
             // Emit results in original order and feed back to AI
             for (let j = 0; j < parsedCalls.length; j++) {
-                // Fix #10: use _prefix for intentionally unused destructured vars
                 const { invocationId, toolName, toolArgs: _toolArgs, toolCall } = parsedCalls[j]!;  
                 const toolResult = toolResults[j];
                 const stateResult = effectiveToolResults[j];

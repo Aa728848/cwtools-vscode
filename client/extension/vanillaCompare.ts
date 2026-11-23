@@ -423,7 +423,7 @@ export function registerVanillaCompare(context: vs.ExtensionContext): void {
                 }
                 const ext = path.extname(doc.uri.fsPath).toLowerCase();
 
-                // 优先使用 Git 风格的物理同名文件进行全量直接比对
+                // Prefer direct full-file diff when the matching vanilla file exists.
                 const relFilePath = normalizeParadoxRelativeDir(doc.uri.fsPath);
                 const vanillaFilePath = relFilePath ? path.join(vanillaRoot, relFilePath) : null;
                 if (vanillaFilePath && fs.existsSync(vanillaFilePath)) {
@@ -436,7 +436,7 @@ export function registerVanillaCompare(context: vs.ExtensionContext): void {
                     return;
                 }
 
-                // 只有原版无同名物理文件时，才 Fallback 使用 block 对齐拼装对比
+                // Fallback to block-aligned comparison when no same-named vanilla file exists.
                 const modBlocks = findTopLevelBlocks(doc.getText(), doc.uri.fsPath, definitionTypes);
 
                 // Build vanilla block index for the directory
@@ -697,7 +697,7 @@ export function registerVanillaCompare(context: vs.ExtensionContext): void {
                     }
                 }
 
-                // 从后往前排序，避免行偏移影响
+                // Sort bottom-up so earlier edits do not shift later line numbers.
                 selectedItems.sort((a, b) => b.item.modBlock.startLine - a.item.modBlock.startLine);
 
                 const edit = new vs.WorkspaceEdit();

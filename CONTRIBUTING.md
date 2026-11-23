@@ -6,21 +6,21 @@
 
 ## English
 
-This guide covers local setup, repository boundaries, verification, and packaging. For data flow and component ownership, read [ARCHITECTURE.md](ARCHITECTURE.md).
+This guide covers local setup, verification, coding expectations, CWT rules tooling, and VSIX packaging/release. For module ownership and data flows, see [ARCHITECTURE.md](ARCHITECTURE.md).
 
-### Before you start
+### Setup
 
-Install the following tools:
+Install the prerequisites:
 
 | Tool | Requirement |
 | --- | --- |
 | Node.js / npm | Node.js 20+ and npm 10+ |
-| .NET SDK | .NET 10; `global.json` selects the expected SDK and roll-forward policy |
+| .NET SDK | .NET 10 (`global.json` pins SDK and roll-forward policy) |
 | VS Code | 1.90+ |
-| Git | A current version with submodule support |
-| PowerShell | Windows PowerShell 5.1+ for the root packaging scripts |
+| Git | Current version with submodule support |
+| PowerShell | Windows PowerShell 5.1+ (for `package.ps1`) |
 
-Clone the repository with its submodules, install dependencies, and build `cwtools-shared` before compiling on a fresh checkout:
+Clone with submodules, install dependencies, and build `cwtools-shared` before compiling on a fresh checkout:
 
 ```bash
 git clone --recurse-submodules https://github.com/Aa728848/cwtools-vscode.git
@@ -29,15 +29,9 @@ npm install
 (cd submodules/cwtools-mcp && npm ci && npm run build -w cwtools-shared)
 ```
 
-If you cloned without submodules, repair the checkout before building:
+If cloned without submodules, run `git submodule update --init --recursive`. Missing `submodules/cwtools` breaks the F# build; missing `submodules/cwtools-stellaris-config/config` breaks packaging; missing `submodules/cwtools-mcp/packages/cwtools-shared/dist` breaks TypeScript compilation.
 
-```bash
-git submodule update --init --recursive
-```
-
-Missing `submodules/cwtools` breaks the F# build. Missing `submodules/cwtools-stellaris-config/config` breaks packaging. Missing `submodules/cwtools-mcp/packages/cwtools-shared/dist` breaks TypeScript compilation (`Cannot find module 'cwtools-shared'`).
-
-To use a separate local CWTools checkout, create `src/Main/cwtools.local.props`:
+To build against an external local CWTools checkout, create an untracked `src/Main/cwtools.local.props`:
 
 ```xml
 <Project>
@@ -48,123 +42,60 @@ To use a separate local CWTools checkout, create `src/Main/cwtools.local.props`:
 </Project>
 ```
 
-Adjust `CwtoolsPath` for your machine and do not commit the file.
+### Run and debug
 
-### Run the extension
+1. Open the repository root in VS Code and press `F5` (`Run and Debug: Start Debugging`).
+2. Open a test mod workspace in the Extension Development Host window.
+3. For Webview debugging, open the panel and run `Developer: Open Webview Developer Tools`.
 
-1. Open the repository root in VS Code.
-2. Press `F5`, or run `Run and Debug: Start Debugging`.
-3. Use the new Extension Development Host window to open a test workspace.
-4. Restart the debug session or reload that window after code changes.
+### Verification matrix
 
-For a Webview, open the panel in the Extension Development Host and run `Developer: Open Webview Developer Tools`.
+Run the narrowest useful check first, then broaden when crossing subsystem boundaries:
 
-### Choose the right verification
-
-Run the smallest check that covers your change, then broaden when the change crosses a boundary.
-
-| Change | Minimum useful check |
+| Scope | Minimum check |
 | --- | --- |
-| Extension Host or Webview TypeScript | `npm run compile`, `npm run typecheck:test` (strict over the whole `client/` tree including tests), then targeted unit tests |
+| Extension Host or Webview TS | `npm run compile`, `npm run typecheck:test`, targeted unit tests |
 | AI runner or tools | Targeted tests, then `npm run test:unit` |
-| Documentation | `npm run build:docs` and `npm run check:release -- --skip-compile --skip-test` |
-| F# LSP layer | `dotnet build src/LSP/` |
-| F# server or CWTools integration | `dotnet build src/Main/` |
-| F# regression scripts | `npm run test:fsx` (or `dotnet fsi` each `src/**/*.Tests.fsx` from its directory) |
-| Shader or CWT LSP contracts | `npm run test:shader-lsp`, `npm run test:cwt-lsp`, `npm run test:cwt-game-lsp` |
-| CWT rules sync | `npm run test:rules-sync` plus the relevant scan/check/report command |
-| MCP contracts | Generate the schema/detection files, then build and test inside `submodules/cwtools-mcp` |
-| Broad release-sensitive change | `npm run verify` |
+| Docs | `npm run build:docs` and `npm run check:release -- --skip-compile --skip-test` |
+| F# LSP / server | `dotnet build src/LSP/` and/or `dotnet build src/Main/`, plus `npm run test:fsx` |
+| Integration / Shader / CWT LSP | `npm test`, `npm run test:shader-lsp`, `npm run test:cwt-lsp`, `npm run test:cwt-game-lsp` |
+| CWT rules sync | `npm run test:rules-sync` plus the relevant `rules:stellaris:*` command |
+| MCP schemas / workspace detection | `npm run generate:mcp-schema` / `generate:mcp-detection`, then inside `submodules/cwtools-mcp`: `npm run build && npm run test:contracts` |
+| Broad pre-release gate | `npm run verify` |
 
-Common commands:
+Use `npm run check:mcp-schema` and `npm run check:mcp-detection` for read-only drift checks against `submodules/cwtools-mcp`.
 
-```bash
-npm run lint
-npm run compile
-npm run typecheck:test
-npm run test:unit
-npm run test
-npm run test:fsx
-npm run verify
-dotnet build src/LSP/
-dotnet build src/Main/
-```
-
-For MCP schema or workspace-detection changes:
-
-```bash
-npm run generate:mcp-schema
-npm run generate:mcp-detection
-cd submodules/cwtools-mcp
-npm run build
-npm run test:contracts
-```
-
-The generation commands write into the MCP submodule. Use `check:mcp-schema` and `check:mcp-detection` for read-only drift checks. Review and commit that repository separately before updating the root submodule pointer.
-
-### Repository boundaries
+### Repository boundaries and submodules
 
 | Path | Ownership |
 | --- | --- |
-| `client/extension/` | VS Code Extension Host, filesystem access, commands, LSP client, AI host |
-| `client/extension/ai/` | AI providers, runner, tools, permissions, Agent skills, and memory |
+| `client/extension/` | Extension Host, filesystem I/O, commands, LSP client, AI host (`client/extension/ai/`) |
 | `client/webview/` | Browser-sandboxed panels and visual editors |
-| `src/LSP/`, `src/Main/` | F#/.NET protocol layer and language-server executable |
+| `src/LSP/`, `src/Main/` | F#/.NET LSP layer and server executable |
 | `submodules/cwtools/` | Upstream CWTools parser, validation, game model, and Shader semantics |
 | `submodules/cwtools-stellaris-config/` | Stellaris CWT rule data |
-| `submodules/cwtools-mcp/` | Separately released MCP server with default-on whitelisted domain writes |
+| `submodules/cwtools-mcp/` | Separately released MCP server packages (`cwtools-shared`, `cwtools-node`, `cwtools-mcp`) |
 
-The three submodules have separate histories and release concerns. Commit a change inside the relevant submodule first, then update its pointer in the root repository. Do not combine CWTools library work, rules-data work, and MCP release work into one unexplained change.
+Each submodule has independent history and release cadence: commit and test inside the submodule first, then update the root pointer. Keep library code, rules data, and MCP releases in separate commits.
 
 ### Coding expectations
 
-- Keep the patch focused and preserve unrelated working-tree changes.
-- Follow nearby patterns and reuse shared helpers before adding a new abstraction.
-- Treat file contents, JSON, Webview messages, tool arguments, LSP/MCP payloads, and process output as untrusted input. Narrow them at the boundary.
-- Prefer `unknown`, type guards, and discriminated unions over new `any`, unchecked assertions, or non-null assertions for external data.
-- Preserve cancellation, timeouts, and disposal in asynchronous code. Report failures with enough operation and target context to diagnose them.
-- Keep filesystem-derived output deterministic and bound caches and concurrency.
-- Add or update a regression test when observable behavior changes.
-- Use `ErrorReporter` instead of bare `console.error` in Extension Host and AI code.
+- Keep patches scoped and preserve unrelated working-tree changes.
+- Reuse shared helpers (`gameProfiles.ts`, `indexing/`, `pathScope.ts`, `fileExtensions.ts`) before introducing new abstractions.
+- Treat file contents, JSON, Webview messages, tool arguments, LSP/MCP payloads, and process output as untrusted input; validate and narrow at the boundary using `unknown`, type guards, and discriminated unions rather than new `any` or unchecked assertions.
+- Preserve cancellation, timeouts, and disposal in async code; report errors with actionable context via `ErrorReporter` (not bare `console.error`) in Extension Host and AI code.
+- Keep filesystem-derived outputs deterministic, bound caches and concurrency, and add focused regression tests for observable behavior changes.
 
-#### Webviews
-
-Code under `client/webview/` runs in a browser sandbox:
-
-- Do not import `vscode`, `fs`, `path`, use `require()`, or call other Node-only APIs.
-- Communicate with the Extension Host through `postMessage`.
-- Use VS Code theme variables and support `prefers-reduced-motion`.
-- Dispose renderers, GPU resources, workers, listeners, and animation loops.
-- Keep file access and read tracking in the Extension Host.
-
-#### AI tools and runner
-
-When a model-visible tool changes, update its definition, shared types, registry metadata, permission handling when applicable, and dispatch. The registry is the source of truth for gating, effects, risk, and concurrency.
-
-Every tool call must pass through the policy engine. Preserve path containment checks, sorted multi-file locking, per-file write exclusion, and plan-mode write gates. The built-in Agent is a single-Agent Paradox assistant; shell execution and multi-agent orchestration belong to external Agents (DSH, Claude Code, Codex) that reach the semantic tools through `cwtools-mcp`.
-
-New run events must be handled by reducers and Webview renderers. Resume-format changes must preserve the V4 checkpoint snapshot contract. Read the AI sections of [ARCHITECTURE.md](ARCHITECTURE.md) before a broad runner change.
-
-#### F# and Shader code
-
-Reuse `PdxShaderFeatures` and existing parsing helpers. Preserve nested-block depth handling, escaped quotes, supported caches, and Windows-only case-insensitive path comparison.
-
-Incremental scripted-type refresh spans the server and the CWTools submodule. Compare incremental output with a full refresh, and keep the submodule commit separate from the root pointer update.
-
-#### Localisation and documentation
-
-Update English and Chinese together for user-visible commands, settings, diagnostics, chat UI, Webviews, and release-facing docs. Existing catalogs include:
-
-- `client/extension/ai/messages.ts`
-- `client/webview/chat/i18n.ts`
-
-`README.md`, this guide, `ARCHITECTURE.md`, and `docs/cwt-rule-config.md` are bilingual single-source documents. Do not create separate `_EN` or `_ZH` copies. `npm run build:docs` validates them and generates `release/README.md` from `docs/marketplace-readme.md`.
-
-Localisation `.yml` files may require a BOM or game-specific encoding. Do not rewrite them with a generic text writer; use the project's `write_localisation` path.
+Domain constraints:
+- **Webviews (`client/webview/`)**: no `vscode`/`fs`/`path`/`require()`, communicate only via `postMessage`, use VS Code theme variables, support `prefers-reduced-motion`, dispose renderers/GPU/listeners/loops, and keep file I/O and `ReadTracker` in the Host.
+- **AI tools & runner (`client/extension/ai/`)**: keep definitions, shared types, registry metadata, permissions, and `agentTools.ts` dispatch in sync; route all calls through the policy engine; preserve path containment, sorted multi-file locking, per-file exclusion, and plan gates; keep run-event reducers/Webviews and V4 checkpoint resume contracts intact. External agents (such as Claude Code or Codex) handle shell execution and multi-agent orchestration through `cwtools-mcp`.
+- **F# & Shader (`src/`, `submodules/cwtools/`)**: reuse `PdxShaderFeatures`, handle nested block depth and escaped quotes, use case-insensitive path comparison only on Windows, and compare Stellaris incremental refresh results against full refreshes.
+- **Localisation & docs**: update English and Chinese together (`client/extension/ai/messages.ts`, `client/webview/chat/i18n.ts`, `release/package.nls*.json`, and single-source bilingual docs). Never rewrite `.yml` localisation files with a generic text writer—use `write_localisation` to preserve encoding/BOM. Never duplicate version numbers outside root `package.json` and `release/package.json`.
+- **Agent Notes**: record or update a Simplified Chinese decision note in `.agents/notes/` for every non-trivial change (see [.agents/notes/README.md](.agents/notes/README.md)).
 
 ### CWT rule work
 
-Read [docs/cwt-rule-config.md](docs/cwt-rule-config.md) before editing rules. The main commands are:
+Read [docs/cwt-rule-config.md](docs/cwt-rule-config.md) and [tools/rules-sync/README.md](tools/rules-sync/README.md) before modifying Stellaris rules. Main commands:
 
 ```bash
 npm run rules:stellaris:scan
@@ -172,46 +103,39 @@ npm run rules:stellaris:check
 npm run rules:stellaris:update
 npm run rules:stellaris:report
 npm run rules:stellaris:contracts
+npm run rules:stellaris:optional-fields
 ```
 
-`report` compares current game documentation and vanilla content with the CWT baseline. With a Stellaris install available, it also refreshes the Shader ABI inventory unless `--no-shader-abi` is supplied. See [tools/rules-sync/README.md](tools/rules-sync/README.md) for inputs, outputs, and write behavior.
+Pass `--no-shader-abi` to `report` when you need a read-only report that leaves `config/shader/` untouched.
 
 ### Package a VSIX
 
-The packaging scripts run from Windows PowerShell at the repository root:
+From the repository root in Windows PowerShell (on a fresh checkout, run `npm ci` inside `release/` first so `vsce` finds the runtime dependency closure):
 
 ```bash
-npm run pack
-npm run pack:install
-npm run pack:quick
+npm run pack          # Build all 3 self-contained servers and create the universal VSIX
+npm run pack:install  # Package and install into local VS Code
+npm run pack:quick    # Reuse existing server binaries and reinstall (not for fresh checkouts)
 ```
 
-- `pack` builds the three self-contained language servers and creates the VSIX.
-- `pack:install` also installs the result through the VS Code `code` command.
-- `pack:quick` reuses existing server binaries, so it is not suitable for a fresh checkout.
-
-On a fresh checkout, run `npm ci` inside `release/` first; `vsce` validates the runtime dependency closure declared by `release/package.json`, and `package.ps1` does not install it.
-
-The package is written to `release/foreverskywalker-stellaris-cwtools-<version>.vsix`. Do not duplicate the current version in documentation; root `package.json` and `release/package.json` are authoritative.
+Output: `release/foreverskywalker-stellaris-cwtools-<version>.vsix`. See [.agents/workflows/package.md](.agents/workflows/package.md) for manual step-by-step commands.
 
 ### Publish a release
 
-Pushing a `v<version>` tag runs `.github/workflows/release.yml`. The job builds the universal VSIX on Windows through `package.ps1`, runs `npm run check:release`, publishes to the VS Code Marketplace, uploads the VSIX as a workflow artifact, and creates or updates the GitHub Release with that changelog section as its notes. It fails before any upload when the tag does not match the version in `package.json` and `release/package.json`.
+Pushing a `v<version>` tag triggers `.github/workflows/release.yml`, which builds the universal VSIX on Windows via `package.ps1`, runs `npm run check:release`, publishes to the VS Code Marketplace, uploads the VSIX artifact, and creates/updates the GitHub Release from `release/CHANGELOG.md`. Tag and both `package.json` versions must match.
 
-Marketplace publishing uses [Trusted Publishing](https://code.visualstudio.com/api/working-with-extensions/publishing-extension#publish-with-github-actions-and-trusted-publishing), so no personal access token is stored in this repository. A publisher owner creates the policy once: open the [publisher management page](https://marketplace.visualstudio.com/manage), open the `ForeverSkywalker` publisher, choose **Trusted Publishing**, and add a policy with repository owner `Aa728848`, repository `cwtools-vscode`, workflow `release.yml`, and no environment.
+Marketplace publishing uses [Trusted Publishing](https://code.visualstudio.com/api/working-with-extensions/publishing-extension#publish-with-github-actions-and-trusted-publishing) over GitHub OIDC (no PAT stored in this repository). One-time publisher policy: in [Visual Studio Marketplace Management](https://marketplace.visualstudio.com/manage) → publisher `ForeverSkywalker` → **Trusted Publishing**, add owner `Aa728848`, repository `cwtools-vscode`, workflow `release.yml`, and empty environment.
 
-To retry without moving the tag, run the workflow manually from the Actions page with the existing tag. Clear **Publish to the VS Code Marketplace** to rebuild the VSIX and refresh the GitHub Release only.
+To re-run without moving a tag, dispatch the workflow manually from GitHub Actions with the existing tag; uncheck **Publish to the VS Code Marketplace** to refresh only the VSIX and GitHub Release.
 
 ### Pull request checklist
 
-- The change is scoped and unrelated work is untouched.
-- User-visible English and Chinese text are both updated.
-- Behavior changes have a focused regression test.
-- Relevant compile, test, and documentation checks pass.
-- New input and message boundaries validate untrusted data.
-- Async work still cancels, times out, and disposes correctly.
-- Submodule commits and root pointer changes are separated and explained.
-- The PR description states what changed, why, and which checks ran.
+- Scoped change; unrelated work preserved.
+- User-visible English and Chinese text updated together.
+- Focused regression tests added/updated; relevant verification checks pass.
+- Untrusted inputs validated; async cancellation/timeout/disposal preserved.
+- Submodule commits separated from root pointer updates; Agent Note added or updated.
+- PR description states what changed, why, and which checks ran.
 
 ---
 
@@ -219,21 +143,19 @@ To retry without moving the tag, run the workflow manually from the Actions page
 
 ## 中文
 
-本文说明本地环境、仓库边界、验证方式和打包流程。需要了解数据流和模块职责时，请阅读 [ARCHITECTURE.md](ARCHITECTURE.md)。
+本文说明本地环境搭建、验证方式、编码规范、CWT 规则工具及 VSIX 打包发布流程。模块职责与数据流详见 [ARCHITECTURE.md](ARCHITECTURE.md)。
 
-### 开始之前
-
-请先安装：
+### 环境准备
 
 | 工具 | 要求 |
 | --- | --- |
 | Node.js / npm | Node.js 20+、npm 10+ |
-| .NET SDK | .NET 10；具体 SDK 与滚动策略以 `global.json` 为准 |
+| .NET SDK | .NET 10（`global.json` 指定具体版本与滚动策略） |
 | VS Code | 1.90+ |
 | Git | 支持 submodule 的当前版本 |
-| PowerShell | 根目录打包脚本需要 Windows PowerShell 5.1+ |
+| PowerShell | Windows PowerShell 5.1+（用于 `package.ps1`） |
 
-连同子模块一起克隆仓库、安装依赖，并在全新检出首次编译前先构建 `cwtools-shared`：
+连同子模块一起克隆，并在全新检出首次编译前构建 `cwtools-shared`：
 
 ```bash
 git clone --recurse-submodules https://github.com/Aa728848/cwtools-vscode.git
@@ -242,15 +164,9 @@ npm install
 (cd submodules/cwtools-mcp && npm ci && npm run build -w cwtools-shared)
 ```
 
-如果克隆时没有拉取子模块，请先补全：
+若克隆时未拉取子模块，运行 `git submodule update --init --recursive`。缺少 `submodules/cwtools` 会导致 F# 构建失败；缺少 `submodules/cwtools-stellaris-config/config` 会导致打包失败；缺少 `submodules/cwtools-mcp/packages/cwtools-shared/dist` 会导致 TypeScript 编译失败。
 
-```bash
-git submodule update --init --recursive
-```
-
-缺少 `submodules/cwtools` 会导致 F# 构建失败；缺少 `submodules/cwtools-stellaris-config/config` 会导致打包失败；缺少 `submodules/cwtools-mcp/packages/cwtools-shared/dist` 会导致 TypeScript 编译失败（`Cannot find module 'cwtools-shared'`）。
-
-如需使用另一份本地 CWTools 检出，请创建 `src/Main/cwtools.local.props`：
+如需链接另一份本地 CWTools 源码，创建不提交的 `src/Main/cwtools.local.props`：
 
 ```xml
 <Project>
@@ -261,123 +177,60 @@ git submodule update --init --recursive
 </Project>
 ```
 
-按本机路径修改 `CwtoolsPath`，不要提交这个文件。
+### 运行与调试
 
-### 运行扩展
+1. 在 VS Code 中打开仓库根目录，按 `F5`（`Run and Debug: Start Debugging`）。
+2. 在弹出的 Extension Development Host 窗口中打开测试 Mod 工作区。
+3. 调试 Webview 时，先打开对应面板，再运行 `Developer: Open Webview Developer Tools`。
 
-1. 在 VS Code 中打开仓库根目录。
-2. 按 `F5`，或运行 `Run and Debug: Start Debugging`。
-3. 在新打开的 Extension Development Host 窗口中载入测试工作区。
-4. 修改代码后，重新启动调试或重载该窗口。
+### 验证矩阵
 
-调试 Webview 时，先在 Extension Development Host 中打开对应面板，再运行 `Developer: Open Webview Developer Tools`。
-
-### 选择合适的验证
-
-先运行能覆盖本次修改的最小检查；跨越模块边界时，再扩大验证范围。
+优先运行覆盖本次改动的最小检查，跨边界修改时再扩大验证范围：
 
 | 修改范围 | 最小有效检查 |
 | --- | --- |
-| Extension Host 或 Webview TypeScript | `npm run compile`、`npm run typecheck:test`（对包含测试的整个 `client/` 严格检查），再运行相关单元测试 |
-| AI runner 或工具 | 相关测试，然后 `npm run test:unit` |
-| 文档 | `npm run build:docs` 和 `npm run check:release -- --skip-compile --skip-test` |
-| F# LSP 层 | `dotnet build src/LSP/` |
-| F# 服务端或 CWTools 集成 | `dotnet build src/Main/` |
-| F# 回归脚本 | `npm run test:fsx`（或在各自目录用 `dotnet fsi` 运行 `src/**/*.Tests.fsx`） |
-| Shader 或 CWT LSP 契约 | `npm run test:shader-lsp`、`npm run test:cwt-lsp`、`npm run test:cwt-game-lsp` |
-| CWT 规则同步 | `npm run test:rules-sync`，再运行相关 scan/check/report 命令 |
-| MCP 契约 | 生成 schema/探测文件，再进入 `submodules/cwtools-mcp` 构建和测试 |
-| 影响发布的较大修改 | `npm run verify` |
+| Extension Host 或 Webview TS | `npm run compile`、`npm run typecheck:test`、相关单元测试 |
+| AI runner 或工具 | 相关测试，随后 `npm run test:unit` |
+| 文档 | `npm run build:docs` 与 `npm run check:release -- --skip-compile --skip-test` |
+| F# LSP / 服务端 | `dotnet build src/LSP/` 与/或 `dotnet build src/Main/`，以及 `npm run test:fsx` |
+| 集成 / Shader / CWT LSP | `npm test`、`npm run test:shader-lsp`、`npm run test:cwt-lsp`、`npm run test:cwt-game-lsp` |
+| CWT 规则同步 | `npm run test:rules-sync` 及对应的 `rules:stellaris:*` 命令 |
+| MCP schema / 工作区探测 | `npm run generate:mcp-schema` / `generate:mcp-detection`，随后在 `submodules/cwtools-mcp` 内执行 `npm run build && npm run test:contracts` |
+| 发布前全量门禁 | `npm run verify` |
 
-常用命令：
+只读漂移检查可使用 `npm run check:mcp-schema` 与 `npm run check:mcp-detection`。
 
-```bash
-npm run lint
-npm run compile
-npm run typecheck:test
-npm run test:unit
-npm run test
-npm run test:fsx
-npm run verify
-dotnet build src/LSP/
-dotnet build src/Main/
-```
-
-修改 MCP schema 或工作区识别时：
-
-```bash
-npm run generate:mcp-schema
-npm run generate:mcp-detection
-cd submodules/cwtools-mcp
-npm run build
-npm run test:contracts
-```
-
-生成命令会写入 MCP 子模块；`check:mcp-schema` 与 `check:mcp-detection` 用于只读漂移检查。请先在该仓库中审阅并提交，再更新根仓库的 submodule 指针。
-
-### 仓库边界
+### 仓库边界与子模块
 
 | 路径 | 职责 |
 | --- | --- |
-| `client/extension/` | VS Code Extension Host、文件访问、命令、LSP 客户端和 AI 宿主 |
-| `client/extension/ai/` | AI Provider、runner、工具、权限、Agent 技能和记忆 |
-| `client/webview/` | 运行在浏览器沙盒中的面板和可视化编辑器 |
-| `src/LSP/`、`src/Main/` | F#/.NET 协议层和语言服务端程序 |
-| `submodules/cwtools/` | 上游 CWTools 解析、校验、游戏模型和 Shader 语义 |
+| `client/extension/` | Extension Host、文件 I/O、命令、LSP 客户端、AI 宿主（`client/extension/ai/`） |
+| `client/webview/` | 浏览器沙盒面板与可视化编辑器 |
+| `src/LSP/`、`src/Main/` | F#/.NET 协议层与语言服务端程序 |
+| `submodules/cwtools/` | 上游 CWTools 解析、校验、游戏模型与 Shader 语义 |
 | `submodules/cwtools-stellaris-config/` | Stellaris CWT 规则数据 |
-| `submodules/cwtools-mcp/` | 独立发布、默认开放白名单领域写入的 MCP 服务 |
+| `submodules/cwtools-mcp/` | 独立发布的 MCP 服务包（`cwtools-shared`、`cwtools-node`、`cwtools-mcp`） |
 
-三个子模块各有独立历史和发布边界。先在对应子模块内提交，再更新根仓库指针。CWTools 库、规则数据和 MCP 发布不应混成一项没有说明的改动。
+三个子模块拥有独立历史与发布周期：先在子模块内测试并提交，再更新根仓库指针；库代码、规则数据与 MCP 发布不要混在同一个提交中。
 
 ### 编码要求
 
-- 保持改动聚焦，不要覆盖工作区中的无关修改。
-- 优先沿用附近实现和共享 helper，不为小改动增加新抽象。
-- 把文件内容、JSON、Webview 消息、工具参数、LSP/MCP payload 和进程输出视为不可信输入，在边界处校验并收窄类型。
-- 外部数据优先使用 `unknown`、类型守卫和可辨识联合，避免新增 `any`、未经检查的断言和非空断言。
-- 异步代码要保留取消、超时和释放行为；错误信息应包含可定位问题的操作与目标上下文。
-- 文件系统派生结果应保持确定顺序，并限制缓存和并发规模。
-- 可观察行为变化需要补充或更新回归测试。
-- Extension Host 和 AI 代码使用 `ErrorReporter`，不要直接写裸 `console.error`。
+- 保持改动聚焦，不覆盖无关工作区更改。
+- 优先复用共享 helper（`gameProfiles.ts`、`indexing/`、`pathScope.ts`、`fileExtensions.ts`），避免重复造轮子。
+- 将文件内容、JSON、Webview 消息、工具参数、LSP/MCP payload 与进程输出视为不可信输入；在边界用 `unknown`、类型守卫和可辨识联合收窄，避免新增 `any` 或无校验断言。
+- 保留异步代码的取消、超时与释放逻辑；Extension Host 与 AI 代码通过 `ErrorReporter` 上报带上下文的错误，不使用裸 `console.error`。
+- 文件系统派生输出保持确定排序，缓存与并发保持有界，可观察行为变更补充针对性回归测试。
 
-#### Webview
+领域约束：
+- **Webview（`client/webview/`）**：禁止 `vscode`/`fs`/`path`/`require()`，仅通过 `postMessage` 通信；使用 VS Code 主题变量并支持 `prefers-reduced-motion`；关闭时释放渲染器/GPU/监听器/动画循环；文件访问与 `ReadTracker` 留在宿主。
+- **AI 工具与 runner（`client/extension/ai/`）**：同步维护定义、共享类型、registry 元数据、权限与 `agentTools.ts` 分发；所有调用经过策略引擎；保持路径包含、排序多文件锁、单文件写排他与 Plan 模式门；保持 run event reducer/Webview 与 V4 检查点恢复契约兼容。Shell 执行与多 Agent 编排由外部 Agent（如 Claude Code、Codex）通过 `cwtools-mcp` 完成。
+- **F# 与 Shader（`src/`、`submodules/cwtools/`）**：复用 `PdxShaderFeatures`，保留嵌套块深度与转义引号处理、仅 Windows 不区分大小写路径比较，以及 Stellaris 增量刷新与全量刷新的对比验证。
+- **本地化与文档**：用户可见英文与中文同步更新（`client/extension/ai/messages.ts`、`client/webview/chat/i18n.ts`、`release/package.nls*.json` 及单源双语文档）。本地化 `.yml` 必须通过 `write_localisation` 写入以保留编码/BOM。不要在根 `package.json` 与 `release/package.json` 之外重复写版本号。
+- **Agent Notes**：每次非平凡变更均需在 `.agents/notes/` 中记录或原地更新简体中文决策笔记（见 [.agents/notes/README.md](.agents/notes/README.md)）。
 
-`client/webview/` 运行在浏览器沙盒中：
+### CWT 规则维护
 
-- 不要导入 `vscode`、`fs`、`path`，不要使用 `require()` 或其他 Node 专用 API。
-- 通过 `postMessage` 与 Extension Host 通信。
-- 使用 VS Code 主题变量，并支持 `prefers-reduced-motion`。
-- 正确释放渲染器、GPU 资源、worker、监听器和动画循环。
-- 文件访问和读取追踪留在 Extension Host。
-
-#### AI 工具与 runner
-
-修改模型可见工具时，要同步更新定义、共享类型、registry 元数据、适用的权限处理和 dispatch。工具 gating、副作用、风险和并发策略以 registry 为准。
-
-所有工具调用都必须经过策略引擎。保留路径包含检查、排序后的多文件锁、单文件写排他和 Plan 模式写入门。内置 Agent 是 Paradox 单 Agent 助手；Shell 执行与多 Agent 编排由外部 Agent（DSH、Claude Code、Codex）经 `cwtools-mcp` 调用语义工具完成。
-
-新增 run event 时要同步 reducer 和 Webview renderer。恢复格式改动必须保持 V4 检查点快照契约兼容。大范围修改 runner 前，请先阅读 [ARCHITECTURE.md](ARCHITECTURE.md) 的 AI 部分。
-
-#### F# 与 Shader
-
-复用 `PdxShaderFeatures` 和现有解析 helper。保留嵌套块深度、转义引号、已有缓存，以及仅在 Windows 使用不区分大小写路径比较的行为。
-
-scripted type 增量刷新横跨服务端和 CWTools 子模块。请把增量结果与全量刷新对比，并把子模块提交与根指针更新分开。
-
-#### 本地化与文档
-
-用户可见的命令、设置、诊断、聊天 UI、Webview 和发布文档需要同时更新英文和中文。常用文案目录包括：
-
-- `client/extension/ai/messages.ts`
-- `client/webview/chat/i18n.ts`
-
-`README.md`、本文、`ARCHITECTURE.md` 和 `docs/cwt-rule-config.md` 都是双语单一来源，不要新增 `_EN` 或 `_ZH` 副本。`npm run build:docs` 会校验这些文件，并从 `docs/marketplace-readme.md` 生成 `release/README.md`。
-
-本地化 `.yml` 可能要求 BOM 或游戏特定编码。不要用通用文本写入方式重写它们，应使用项目的 `write_localisation` 路径。
-
-### CWT 规则
-
-修改规则前请阅读 [docs/cwt-rule-config.md](docs/cwt-rule-config.md)。主要命令：
+修改规则前请阅读 [docs/cwt-rule-config.md](docs/cwt-rule-config.md) 与 [tools/rules-sync/README.md](tools/rules-sync/README.md)。常用命令：
 
 ```bash
 npm run rules:stellaris:scan
@@ -385,43 +238,36 @@ npm run rules:stellaris:check
 npm run rules:stellaris:update
 npm run rules:stellaris:report
 npm run rules:stellaris:contracts
+npm run rules:stellaris:optional-fields
 ```
 
-`report` 会把当前游戏文档和原版内容与 CWT 基线对比。如果能找到 Stellaris 安装，还会刷新 Shader ABI 清单；传入 `--no-shader-abi` 可跳过。输入、输出和写入行为见 [tools/rules-sync/README.md](tools/rules-sync/README.md)。
+需要完全只读的报告（不修改 `config/shader/`）时，给 `report` 传入 `--no-shader-abi`。
 
 ### 打包 VSIX
 
-在仓库根目录使用 Windows PowerShell 运行：
+在仓库根目录通过 Windows PowerShell 运行（全新检出请先在 `release/` 执行 `npm ci`，以满足 `vsce` 的运行时依赖闭包校验）：
 
 ```bash
-npm run pack
-npm run pack:install
-npm run pack:quick
+npm run pack          # 构建三平台自包含服务端并打包通用 VSIX
+npm run pack:install  # 打包并安装到本地 VS Code
+npm run pack:quick    # 复用已有服务端二进制快速重装（不适用于全新检出）
 ```
 
-- `pack` 构建三个自包含语言服务端并生成 VSIX。
-- `pack:install` 还会通过 VS Code 的 `code` 命令安装产物。
-- `pack:quick` 复用已有服务端二进制，不适合全新检出。
-
-全新检出时请先在 `release/` 中执行 `npm ci`：`vsce` 会校验 `release/package.json` 声明的运行时依赖闭包，而 `package.ps1` 不负责安装它。
-
-产物位于 `release/foreverskywalker-stellaris-cwtools-<version>.vsix`。不要在文档中重复维护当前版本；根 `package.json` 和 `release/package.json` 才是来源。
+产物路径：`release/foreverskywalker-stellaris-cwtools-<version>.vsix`。手动分步命令见 [.agents/workflows/package.md](.agents/workflows/package.md)。
 
 ### 发布版本
 
-推送 `v<version>` 标签会触发 `.github/workflows/release.yml`：在 Windows 上通过 `package.ps1` 构建全平台 VSIX，运行 `npm run check:release`，发布到 VS Code 市场，把 VSIX 作为工作流产物上传，并以该版本的更新日志作为说明创建或更新 GitHub Release。标签与 `package.json`、`release/package.json` 中的版本不一致时，任务会在任何上传之前失败。
+推送 `v<version>` 标签会触发 `.github/workflows/release.yml`：在 Windows 上通过 `package.ps1` 构建通用 VSIX、执行 `npm run check:release`、发布到 VS Code 市场、上传 VSIX 产物，并以 `release/CHANGELOG.md` 对应章节创建或更新 GitHub Release。标签必须与两份 `package.json` 中的版本一致。
 
-市场发布使用 [Trusted Publishing](https://code.visualstudio.com/api/working-with-extensions/publishing-extension#publish-with-github-actions-and-trusted-publishing)，仓库中不保存个人访问令牌。发布者属主需要一次性创建策略：打开[发布者管理页面](https://marketplace.visualstudio.com/manage)，进入 `ForeverSkywalker` 发布者，选择 **Trusted Publishing**，新建一条仓库属主 `Aa728848`、仓库 `cwtools-vscode`、workflow `release.yml`、environment 留空的策略。
+市场发布采用基于 GitHub OIDC 的 [Trusted Publishing](https://code.visualstudio.com/api/working-with-extensions/publishing-extension#publish-with-github-actions-and-trusted-publishing)（不在仓库保存 PAT）。发布者属主一次性配置：在 [发布者管理页面](https://marketplace.visualstudio.com/manage) → `ForeverSkywalker` → **Trusted Publishing**，添加仓库属主 `Aa728848`、仓库 `cwtools-vscode`、workflow `release.yml`、environment 留空。
 
-要在不移动标签的情况下重试，请在 Actions 页面手动运行工作流并填写已有标签；取消勾选 **Publish to the VS Code Marketplace** 则只重建 VSIX 并刷新 GitHub Release。
+如需在不移动标签的情况下重试，在 GitHub Actions 页面手动触发该工作流并填写已有标签；取消勾选 **Publish to the VS Code Marketplace** 可仅重建 VSIX 并刷新 GitHub Release。
 
 ### Pull request 检查清单
 
-- 改动范围明确，没有覆盖无关工作。
-- 用户可见英文和中文均已更新。
-- 行为变化有针对性的回归测试。
-- 相关编译、测试和文档检查通过。
-- 新增输入和消息边界会校验不可信数据。
-- 异步任务仍能正确取消、超时和释放。
-- 子模块提交与根指针更新分开，并在 PR 中说明。
+- 改动范围明确，无关工作未受影响。
+- 用户可见英文与中文同步更新。
+- 已补充/更新回归测试并通过相关验证。
+- 边界输入已校验，异步取消/超时/释放行为完整。
+- 子模块提交与根指针更新分开，已记录或更新 Agent Note。
 - PR 描述写明改了什么、为什么改，以及运行过哪些检查。

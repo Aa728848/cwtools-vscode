@@ -181,12 +181,11 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
      * (e.g. plan file) to register themselves into the same snapshot.
      */
     private _currentMessageSnapshots: FileSnapshot[] | null = null;
-    // ── Shared ContentProvider for insertCodeWithDiff (M5 fix) ───────────────
-    // Lazily registered once and reused for all code-insert previews.
-    // The mutable `_previewContent` field is updated before each diff view.
+    // Shared ContentProvider for insertCodeWithDiff: lazily registered once
+    // and reused across previews by updating `_previewContent` before each diff.
     private _previewContent = '';
     private _previewProviderRegistration?: vs.Disposable;
-    /** Fix #2: disposables for sidebar WebView event listeners, cleaned up on dispose() */
+    /** Disposables for sidebar WebView event listeners, cleaned up on dispose(). */
     private _viewDisposables: vs.Disposable[] = [];
     /** Disposables for detached Agent Manager panel listeners */
     private _managerDisposables: vs.Disposable[] = [];
@@ -342,7 +341,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             this.managerPanel = undefined;
         }
         this._messageFileSnapshots.clear();
-        // Fix #2: dispose WebView event listeners
+        // Dispose sidebar WebView event listeners.
         this._viewDisposables.forEach(d => d.dispose());
         this._viewDisposables = [];
         this._managerDisposables.forEach(d => d.dispose());
@@ -1552,7 +1551,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             contexts: messageToRestore.contexts?.length ? [...messageToRestore.contexts] : undefined,
         } : undefined;
 
-        // ── P0 Fix: validate file paths are within workspace boundaries ──────
+        // Validate file paths stay within workspace boundaries before rollback.
         const workspaceFolders = vs.workspace.workspaceFolders?.map(f => f.uri.fsPath) ?? [];
         const isWithinWorkspace = (filePath: string): boolean => {
             if (workspaceFolders.length === 0) return false;
@@ -1611,7 +1610,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
             };
             // Process in reverse order within the same message too
             for (const snap of [...snapshots].reverse()) {
-                // P0 Fix: reject paths outside workspace to prevent path traversal
+                // Reject paths outside the workspace to prevent path traversal.
                 if (!isWithinWorkspace(snap.filePath)) {
                     ErrorReporter.debug(SOURCE.CHAT_PANEL, `Retract: Skipping file outside workspace: ${snap.filePath}`);
                     skippedFiles++;
@@ -2369,7 +2368,7 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
                 });
             });
 
-            // Fix #5: async delete to avoid blocking extension host
+            // Delete asynchronously to avoid blocking the extension host.
             try { await fs.promises.unlink(tempPath); } catch { /* ignore */ }
         }
     }
@@ -3268,9 +3267,8 @@ export class AIChatPanelProvider implements vs.WebviewViewProvider {
     }
 
     /**
-     * /init — scans the workspace and generates a CWTOOLS.md project rules file.
-     * Mirrors OpenCode's /init command which generates CLAUDE.md.
-     * The file is written to the workspace root and loaded into every future session.
+     * /init — scans the workspace and generates CWTOOLS.md + the project profile.
+     * Written to the workspace root and loaded into future sessions.
      */
     private async generateInitFile(options?: InitGenerationOptions): Promise<Awaited<ReturnType<typeof generateInitFile>>> {
         const result = await generateInitFile(

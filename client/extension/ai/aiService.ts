@@ -254,7 +254,7 @@ const COMMANDCODE_POOL_KEY = 'cwtools.ai.commandcode.pool.v1';
 const WORKBUDDY_POOL_KEY = 'cwtools.ai.workbuddySubscription.pool.v1';
 const OPENDESIGN_POOL_KEY = 'cwtools.ai.opendesign.pool.v1';
 
-/** 将号池中的 WorkBuddy 凭据补全为完整 `WorkBuddyCredentials`（未设过期时间则以 `0` 表示无到期限制）。 */
+/** Normalize pooled WorkBuddy credentials (`0` means no expiry limit). */
 function toWorkBuddyCredentials(credentials: WorkBuddyPoolCredentials): WorkBuddyCredentials {
     return {
         ...credentials,
@@ -263,10 +263,10 @@ function toWorkBuddyCredentials(credentials: WorkBuddyPoolCredentials): WorkBudd
 }
 
 /**
- * 有号池的 provider id。
+ * Provider IDs backed by a multi-account subscription pool.
  *
- * 设置页要一次拿到**全部**线路的池：用户在未保存的表单里切到另一条线路时，只推送已保存
- * provider 的池会让号池区停在上一条线路上。列表在注册表构造时注入，不在这里现场推导。
+ * Settings fetches every pool up front so switching lines in an unsaved form
+ * immediately renders that line's pool instead of staying on the saved provider.
  */
 const SUBSCRIPTION_POOL_PROVIDER_IDS = [
     'codex-chatgpt',
@@ -332,10 +332,10 @@ function assertKimiCodeRequestSize(providerId: string, payload: string): void {
 }
 
 /**
- * 一个请求的输出上限。
+ * Output token cap for a subscription request.
  *
- * 通用表之外，Command Code 的**逐模型**上限才是真的：它的注册表逐条转录了观测到的值。
- * 按通用值发，答案要么在服务端被截断（上限低于通用值），要么按一个模型并不接受的额度请求。
+ * Command Code's per-model registry records observed server limits; sending a
+ * generic cap either truncates responses or triggers server rejection.
  */
 function subscriptionOutputCap(providerId: string, model: string): number {
     if (providerId === 'commandcode' || providerId === 'commandcode-messages') {
@@ -1242,7 +1242,7 @@ export class AIService {
         return this.minimaxCodeOAuth;
     }
 
-    /** 刷新一条 WorkBuddy 凭据（桌面账号先检查磁盘是否已被桌面端刷新，完成后写回原格式）。 */
+    /** Refresh WorkBuddy credentials (desktop accounts check disk first and preserve original sealed format on write-back). */
     private async ensureWorkBuddyFreshCredential(
         credentials: WorkBuddyCredentials,
         force = false,
@@ -1283,7 +1283,7 @@ export class AIService {
         return this.workBuddyCheckin;
     }
 
-    /** 从 WorkBuddy 号池选出一个有效账号；必要时强制刷新。 */
+    /** Select an active account from the WorkBuddy pool, refreshing when forced. */
     async getWorkBuddyCredential(
         excludeIds?: ReadonlySet<string>,
         force = false,
@@ -1296,7 +1296,7 @@ export class AIService {
         };
     }
 
-    /** 合并桌面端已解封账号与托管存储账号（按身份去重，并同步号池中的最新已刷新令牌）。 */
+    /** Merge unsealed desktop accounts with managed accounts (deduplicated, preferring fresher pooled tokens). */
     async listWorkBuddyCredentials(): Promise<WorkBuddyCredentials[]> {
         await this.workBuddyCredentials.loadAtRestKey().catch(() => false);
         const byKey = new Map<string, WorkBuddyCredentials>();
@@ -1321,7 +1321,7 @@ export class AIService {
         return Array.from(byKey.values());
     }
 
-    /** 返回 WorkBuddy 账号、`$wbEncrypted` 解封诊断与国区每日签到的只读状态摘要。 */
+    /** Return a read-only summary of WorkBuddy accounts, `$wbEncrypted` unseal diagnostics, and CN check-in state. */
     async getWorkBuddyAccountStatus(): Promise<WorkBuddyAccountStatus> {
         const accounts = await this.listWorkBuddyCredentials();
         const hasAtRestKey = await this.workBuddyCredentials.hasAtRestKey().catch(() => false);
@@ -1334,7 +1334,7 @@ export class AIService {
         });
     }
 
-    /** 将一条刚完成浏览器登录的 WorkBuddy 凭据保存为托管账号并立即并入号池。 */
+    /** Persist browser-authenticated WorkBuddy credentials as a managed account and add them to the pool. */
     async saveWorkBuddyManagedAccount(credentials: WorkBuddyCredentials): Promise<void> {
         await this.workBuddyCredentials.addManaged(credentials);
         const pooled = workBuddyPoolCredentials(credentials);
@@ -1345,7 +1345,7 @@ export class AIService {
         }
     }
 
-    /** 重新扫描桌面与托管 WorkBuddy 凭据，同步写入号池并返回最新摘要。 */
+    /** Rescan desktop and managed WorkBuddy credentials, sync into the pool, and return updated status. */
     async rescanWorkBuddyAccounts(): Promise<WorkBuddyAccountStatus> {
         const accounts = await this.listWorkBuddyCredentials();
         const pool = this.subscriptionPools.pool(WORKBUDDY_PROVIDER_ID);
@@ -1360,14 +1360,14 @@ export class AIService {
         return this.getWorkBuddyAccountStatus();
     }
 
-    /** 保存并验证用户输入的 `$wbEncrypted` 保护密钥，立即解封桌面账号并同步入池。 */
+    /** Validate and store the `$wbEncrypted` protection key, immediately unsealing desktop accounts into the pool. */
     async setWorkBuddyAtRestKey(keyText: string): Promise<{ keyId: string; status: WorkBuddyAccountStatus }> {
         const keyId = await this.workBuddyCredentials.adoptAtRestKey(keyText);
         const status = await this.rescanWorkBuddyAccounts();
         return { keyId, status };
     }
 
-    /** 清除已保存的 `$wbEncrypted` 保护密钥，并从号池移除原本依赖密文解封的桌面账号。 */
+    /** Clear the stored `$wbEncrypted` protection key and evict desktop accounts that required unsealing. */
     async clearWorkBuddyAtRestKey(): Promise<WorkBuddyAccountStatus> {
         await this.workBuddyCredentials.clearAtRestKey();
         const plainAccounts = scanWorkBuddyDesktopCredentials();
@@ -1385,14 +1385,14 @@ export class AIService {
         return this.getWorkBuddyAccountStatus();
     }
 
-    /** 手动执行一轮 WorkBuddy 国区每日签到并同步最新令牌。 */
+    /** Manually run a WorkBuddy CN daily check-in pass and sync updated tokens. */
     async runWorkBuddyCheckin(): Promise<{ results: WorkBuddyCheckinResult[]; summary: WorkBuddyCheckinSummary }> {
         const results = await this.workBuddyCheckin.run(Date.now(), { manual: true });
         const summary = await this.workBuddyCheckin.summary();
         return { results, summary };
     }
 
-    /** 切换并持久化 WorkBuddy 国区每日自动签到偏好。 */
+    /** Toggle and persist WorkBuddy CN automatic daily check-in. */
     async setWorkBuddyAutoCheckin(enabled: boolean): Promise<WorkBuddyCheckinSummary> {
         this.workBuddyCheckinAutoEnabled = enabled;
         this.workBuddyCheckin.setEnabled(enabled);
@@ -1402,7 +1402,7 @@ export class AIService {
         return this.workBuddyCheckin.summary();
     }
 
-    /** 退出插件托管的 WorkBuddy 账号（同时从号池移除托管条目，绝不删改桌面端原文件）。 */
+    /** Sign out extension-managed WorkBuddy accounts without touching desktop files. */
     async logoutWorkBuddyManaged(): Promise<void> {
         const managed = await this.workBuddyCredentials.readManaged();
         const managedKeys = new Set(managed.map(m => workBuddyAccountKey(m)));
@@ -1419,7 +1419,7 @@ export class AIService {
         }
     }
 
-    /** 拉取所属区域 WorkBuddy `/v3/config` 实时模型目录（失败或未登录时优雅回退内置目录）。 */
+    /** Fetch the region-appropriate WorkBuddy `/v3/config` model catalog, falling back to the built-in list. */
     async listWorkBuddyModels(forceRefresh = false): Promise<readonly WorkBuddyModelEntry[]> {
         const selected = await this.getWorkBuddyCredential().catch(() => undefined);
         const creds = selected?.credentials ?? (await this.listWorkBuddyCredentials())[0];
@@ -1443,7 +1443,7 @@ export class AIService {
         return this.openDesignCredentials;
     }
 
-    /** 将用户在设置页或弹窗输入的 OpenDesign 静态 API Key 保存并加入号池。 */
+    /** Save a user-provided OpenDesign static API key and add it to the account pool. */
     async addOpenDesignStaticKey(apiKey: string, alias?: string): Promise<void> {
         const trimmed = apiKey.trim();
         if (!trimmed) return;
@@ -1459,7 +1459,7 @@ export class AIService {
             .catch(() => undefined);
     }
 
-    /** 读取 OpenDesign 动态目录（同时结合网关 `/models` 与有控制面 Key 时的 AMR `/models`）。 */
+    /** Fetch the live OpenDesign catalog, merging gateway `/models` with AMR `/models` when a control key exists. */
     async listOpenDesignModels(options?: {
         runtimeKey?: string;
         controlKey?: string;
@@ -1500,7 +1500,7 @@ export class AIService {
         });
     }
 
-    /** 当前已配置的 OpenDesign 账号与号池的只读汇总状态（绝不传出明文密钥）。 */
+    /** Return a read-only OpenDesign account/pool summary without exposing raw secrets. */
     async getOpenDesignAccountStatus(): Promise<OpenDesignAccountStatus> {
         const pool = this.subscriptionPools.pool(OPENDESIGN_PROVIDER_ID);
         const accounts = pool ? await pool.listAccounts().catch(() => []) : [];
@@ -1559,7 +1559,7 @@ export class AIService {
         };
     }
 
-    /** 清空本插件存储的全部 OpenDesign 凭据（号池 + SecretStorage 静态 Key）。 */
+    /** Clear all extension-managed OpenDesign credentials (account pool + SecretStorage static key). */
     async logoutOpenDesignAll(): Promise<void> {
         this.openDesignOAuth.dispose();
         const pool = this.subscriptionPools.pool(OPENDESIGN_PROVIDER_ID);
@@ -1580,8 +1580,8 @@ export class AIService {
     }
 
     /**
-     * 移除号池中的单个账号，并同步清理本插件自管的底层凭据槽，防止下次 seed/重扫时复活。
-     * 外部桌面端凭据（如 WorkBuddy `source === 'desktop'`）绝不触碰原文件。
+     * Remove an account from the pool and clear extension-managed backing slots
+     * so rescanning does not resurrect it. External desktop files are never touched.
      */
     async removeSubscriptionPoolAccount(providerId: string, accountId: string): Promise<void> {
         if (providerId === WORKBUDDY_PROVIDER_ID) {
@@ -1858,9 +1858,9 @@ export class AIService {
         let claudeSubscriptionAccountId: string | undefined;
         /** MiniMax Code account, for the same reason. */
         let minimaxCodeAccountId: string | undefined;
-        /** WorkBuddy 订阅账号凭据。 */
+        /** Selected WorkBuddy subscription credentials. */
         let workBuddyCredentials: WorkBuddyCredentials | undefined;
-        /** OpenDesign 账号池中选出的凭据。 */
+        /** Selected OpenDesign pooled credentials. */
         let openDesignPoolCreds: OpenDesignPoolCredentials | undefined;
         /**
          * Pooled account this request used, for whichever line has a pool.
@@ -2085,16 +2085,9 @@ export class AIService {
             tools: options?.tools,
             tool_choice: options?.tools && options.tools.length > 0 ? 'auto' : undefined,
             temperature: getEffectiveTemperature(model, options?.temperature),
-            // M5 Fix: dynamically set maxTokens based on model/provider.
-            // Reasoning models (like DeepSeek-R1) generate >20K thinking tokens
-            // and will self-truncate if capped at 8192.
-            //
-            // The output-cap FIELD is not universal: the Command Code GPT family takes
-            // `max_completion_tokens` and rejects the legacy `max_tokens` outright, so
-            // the choice follows the model id rather than the provider.
-            // The output-cap FIELD is not universal: the Command Code GPT family takes
-            // `max_completion_tokens` and rejects the legacy `max_tokens` outright, so the
-            // choice follows the model id rather than the provider.
+            // Set output token cap dynamically per model/provider (reasoning models
+            // such as DeepSeek-R1 can generate >20K thinking tokens). Some model
+            // families require `max_completion_tokens` and reject `max_tokens`.
             ...(wantsCompletionTokenCap(providerId, model)
                 ? { max_completion_tokens: options?.maxTokens ?? subscriptionOutputCap(providerId, model) }
                 : { max_tokens: options?.maxTokens ?? subscriptionOutputCap(providerId, model) }),
@@ -2586,8 +2579,8 @@ export class AIService {
                     fetchTimeoutId = undefined;
                 }
 
-                // Check for 429 (Rate Limit / Too Many Requests).
-                // 带号池且支持快速切换的线路（WorkBuddy / OpenDesign）立即把 429 交回号池冷却换号，不在单号上盲等退避。
+                // Check for 429 (Rate Limit). Fast-failover pooled lines (WorkBuddy / OpenDesign)
+                // return 429 immediately so the pool can cool the account and rotate instead of backing off.
                 if (response.status === 429
                     && retries < maxRetries
                     && providerId !== WORKBUDDY_PROVIDER_ID
@@ -2699,7 +2692,7 @@ export class AIService {
 
     // ─── Private API callers ─────────────────────────────────────────────────
 
-    /** 处理 WorkBuddy 对话响应失败（11128 自愈移位、401 刷新/重读桌面文件、11140 停用、429/6004 冷却切号、11159 禁止移位）。 */
+    /** Recover WorkBuddy chat failures (11128 system relocation, 401 refresh/disk reload, 11140 disable, 429/6004 cooldown rotation, 11159 hard stop). */
     private async recoverWorkBuddyFailure(options: {
         response: Response;
         detail: string;
@@ -2817,7 +2810,7 @@ export class AIService {
         return { action: 'give_up' };
     }
 
-    /** 处理 OpenDesign 失败（`max_completion_tokens` 降级、403 无权不伤号换号、401 停用、402/429 冷却换号）。 */
+    /** Recover OpenDesign failures (`max_completion_tokens` downgrade, 403 non-punitive rotation, 401 disable, 402/429 cooldown rotation). */
     private async recoverOpenDesignFailure(options: {
         response: Response;
         errorText: string;
@@ -5244,8 +5237,8 @@ export class AIService {
     }
 
     /**
-     * P1 Fix: shared helper for applying model selection —
-     * sets the model config, infers maxContextTokens, and shows confirmation.
+     * Shared helper for applying model selection — sets model config, infers
+     * maxContextTokens, and shows confirmation.
      */
     private async applyModelSelection(modelName: string, provider: { id: string; maxContextTokens: number }): Promise<void> {
         await vs.workspace.getConfiguration('stellarisLanguageServices.ai').update('model', modelName, vs.ConfigurationTarget.Global);

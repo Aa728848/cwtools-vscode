@@ -10,7 +10,7 @@ capability-domain: both
 
 本技能内置 Stellaris 4.5.2（Cygnus，二进制 hash `32709cf254181b032b1b309a6ea09776`）的舰船索敌机制解读，覆盖 Stage 1 舰船层权重 `W(ship)`、Stage 2 武器层分数 `S(weapon)`、节流周期、`use_ship_main_target` 分派、全部脚本可调点与取证路径。
 
-一手来源为反编译分析整理稿《群星索敌权重计算公式 4.5.2》，本仓库内的机制文档见 [docs/stellaris-targeting-weight-4.5.2.md](../../../docs/stellaris-targeting-weight-4.5.2.md)，伤害侧姊妹篇见 [docs/better_stellaris/16_combat_damage_resolution.md](../../../docs/better_stellaris/16_combat_damage_resolution.md)。
+一手来源为反编译分析整理稿《群星索敌权重计算公式 4.5.2》，本仓库内的机制文档见 [docs/better_stellaris/17_ship_targeting_weights.md](../../../docs/better_stellaris/17_ship_targeting_weights.md)，伤害侧姊妹篇见 [docs/better_stellaris/16_combat_damage_resolution.md](../../../docs/better_stellaris/16_combat_damage_resolution.md)。
 
 > **阅读约定**：引擎内部使用定点数，`F = 100000`（脚本中的 1.0），除法为 C 风格向零截断。本文公式一律给出**归一化形式**（把定点除法当实数除法）。"修正后的量"指经 modifier 系统计算后的值。行号与偏移以 4.5.2 dump 为准，**游戏更新后行号整体失效**，因此本文只记函数名与行为，不把行号当契约。
 
@@ -215,7 +215,7 @@ S(weapon) = S2 + wk          wk = target_weights 表中该目标船尺寸名对�
 
 ### 3.2 原版（vanilla）目录
 
-`D:\Steam\steamapps\common\Stellaris\common` —— 反查强类型、补 `###` 文档、验证未证实项时的**一手事实来源**：
+`<Stellaris 安装目录>/common`（通过 `STELLARIS_COMMON` 或扩展配置的游戏路径定位）—— 反查强类型、补 `###` 文档、验证未证实项时的**一手事实来源**：
 
 - `common/defines/00_defines.txt` → 19 个 define 的原版真实取值；
 - `common/component_templates/*.txt` → 武器字段原版写法、`use_ship_main_target`、`target_weights` 的合法键集合（已证实：ship_size id）、`target_focus` 枚举取值（V2）；
@@ -242,14 +242,14 @@ S(weapon) = S2 + wk          wk = target_weights 表中该目标船尺寸名对�
 
 ### 3.4 机制文档
 
-- 本技能主文档：`docs/stellaris-targeting-weight-4.5.2.md`（机制解读 + 差距分析 + 路线图）
+- 本技能主文档：`docs/better_stellaris/17_ship_targeting_weights.md`（公式、defines、算例、误区与脚本/规则核验）
 - 伤害结算：`docs/better_stellaris/16_combat_damage_resolution.md`（ΣD 三层分摊、武器字段 ↔ 结构偏移对照）
 - 舰队寻路 AI：`docs/better_stellaris/04_fleet_pathfinding_ai.md`（:97 仅一行提及索敌节流，本文补齐）
 - 规则维护 SOP：`.agents/skills/stellaris-rules-sync/SKILL.md`（原版反查 → 强类型 → 验证门禁）
 
 ---
 
-## 4. 常见误区十条（按设计文档 §7）
+## 4. 常见误区十条
 
 1. **"盾甲吸引仇恨"是结果不是机制**：根因是 ΣD 的三层分摊不夹各层存量（§1.5），不是引擎写了"优先打盾甲船"。
 2. **`ai_weight` ≠ 索敌权重**：`ai_weight` 是 AI 建造/决策权重（出现在 traits/zones/starbases 等规则里）；战斗索敌的脚本抓手是 `ship_target_weight_mult`、`target_weights` 和 §2.1 的 defines。**回答时必须显式区分这两者。**
@@ -266,11 +266,11 @@ S(weapon) = S2 + wk          wk = target_weights 表中该目标船尺寸名对�
 
 ## 5. 工作纪律
 
-1. **先查规则与 vanilla，再回答。** 任何"某 define 是什么值""某字段叫什么""目标是不是这样选"的断言，都必须先在 `submodules/cwtools-stellaris-config/config/**` 或 `D:\Steam\steamapps\common\Stellaris\common` 里找到出处；找不到就说"未证实"，**不要凭印象给数字**。
+1. **先查规则与 vanilla，再回答。** 任何"某 define 是什么值""某字段叫什么""目标是不是这样选"的断言，都必须先在 `submodules/cwtools-stellaris-config/config/**` 或原版 Stellaris `common/` 目录里找到出处；找不到就说"未证实"，**不要凭印象给数字**。
 2. **区分层次，不要跨层归因。** 战争优先级（`calc_planet_specific_war_attack_priority`）、AI 配船偏好（`set_ai_*_weapon_preference`）、AI 决策权重（`ai_weight`）与战斗索敌是四套东西。
 3. **数值问题走 §2 速查表 + 取证复核双确认**：先按公式算出量级，再用 `read_file` / `grep` 核对 vanilla 的真实取值，最后才下结论。
 4. **给出可复现的实验条件**：涉及节流（10/50 tick）、开战随机 ρ、随机扰动 κr 时，必须说明"结果依赖 tick 对齐与战斗内随机量"，不要把单次观测当结论。
-5. **未证实项要显式标注**：`target_focus` 枚举到 targetFocus 0/1 的映射（V2）当前**仍未证实**，引用时必须带上"未证实"标签或先去原版反查。（V1/V6 已于 2026-10-13 解决，见附录 B）
+5. **未证实项要显式标注**：`target_focus` 枚举到 targetFocus 0/1 的映射（V2）当前**仍未证实**，引用时必须带上"未证实"标签或先去原版反查（见附录 B）。
 6. **规则改动走 stellaris-rules-sync SOP**：要新增/补全规则定义（给 define 加 `###` 公式文档、给 `target_weights` 键做 `<ship_size>` 强类型）时，按 `.agents/skills/stellaris-rules-sync/SKILL.md` 的原版反查 → 强类型 → 验证门禁流程执行；**严禁滥用 `scalar`**。
 7. **本技能只读。** 进行定量权重分解时优先调用 `query_targeting_weight`（或引导用户打开 **Analyze Targeting Weights** 面板），涉及规则修改或代码变更时切换常规工具流并遵循 `stellaris-rules-sync` SOP。
 
@@ -298,9 +298,7 @@ S(weapon) = S2 + wk          wk = target_weights 表中该目标船尺寸名对�
 
 | # | 未证实项 | 验证方式 |
 |---|---|---|
-| V1 | ~~`target_weights` 合法键集合~~ | ✅ 已解决（2026-10-13）：原版 25 处用法去重 18 键全部是 ship_size id（`000_documentation.txt:81` 注释证实）；CWT 规则已把键收紧为 `<ship_size> = float` |
 | V2 | `target_focus`（single/spread）到引擎 targetFocus 0/1 的映射 | 原版样本 + dump 反查 |
-| V6 | ~~`fire_rate` / `burst_*` / `damage_degrade_per_tier` 等相邻字段是否缺失~~ | ✅ 已解决（2026-10-13）：6 个字段在 4.5.2 vanilla 全部不存在（`fire_rate` 的 170 处命中均为 modifier 名），属其它版本的字段，无需补规则 |
 | — | 逐 tick 权重的实测复现 | 关闭随机扰动（κr 视为 1）并按 shipID 错峰对齐后再取样 |
 
 ## 附录 C：数值算例（可用于自检公式理解）

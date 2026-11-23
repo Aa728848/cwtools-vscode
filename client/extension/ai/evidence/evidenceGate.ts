@@ -1,21 +1,12 @@
 /**
- * Semantic evidence collection and verdict aggregation (plan §4.2.2–4.2.6, §4.3).
+ * Semantic evidence collection and verdict aggregation.
  *
- * For each extracted claim the gate consults the appropriate source:
- *  - CWT rules (name existence, supported scopes) — file-backed, fingerprinted
- *  - LSP parseFragment (syntax shape)
- *  - LSP queryDefinitionByName + workspace IndexService (ID existence)
- *
- * Status rules (plan §3 boundary 4):
- *  - no evidence / source unavailable or timed out -> `unknown`
- *  - sources disagree, or an authoritative source contradicts the claim -> `conflict`
- *  - evidence revision older than the currently observable revision -> `stale`
- *
- * Aggregation is two-phase: pre-write only a confirmed conflict blocks, while
- * unknown/stale evidence remains visible for post-write and final validation.
- * The gate never lets model text promote a claim; a retry re-runs collection.
- * call_chain is only checked when the fragment determines it deterministically
- * — otherwise it stays a non-blocking `unknown` with an explicit limitation.
+ * Consults CWT rules (fingerprinted), LSP parseFragment, and LSP/IndexService
+ * symbol lookups for each extracted claim:
+ * - missing/timed-out source -> `unknown`; conflicting evidence -> `conflict`;
+ *   older revision -> `stale`.
+ * - Pre-write blocks only on confirmed conflicts; unknown/stale evidence stays
+ *   visible for post-write validation and cannot be promoted by model text.
  */
 
 import * as crypto from 'crypto';
@@ -112,7 +103,7 @@ export interface EvidenceCallRecord {
     observedAt: string;
 }
 
-/** Total per-write evidence collection budget (plan §4.2 performance bound). */
+/** Total per-write evidence collection timeout budget. */
 export const GATE_TOTAL_TIMEOUT_MS = 6_000;
 const PER_SOURCE_TIMEOUT_MS = 3_000;
 const DECISION_CACHE_TTL_MS = 30_000;
@@ -467,12 +458,10 @@ export class EvidenceGate {
 
         const missingEvidence = this.buildMissingEvidence(claims, input);
 
-        // Impact-scope evidence (plan §9.1): files whose edits change shared
-        // contracts must surface the read-only queries that establish the
-        // blast radius before writing. Advisory in shadow mode; in enforce
-        // mode the missing evidence is surfaced for a manual override.
-        // Inputs without a host risk classification use the strongest evidence
-        // profile. AgentToolExecutor supplies an explicit tier for each pending write.
+        // Impact-scope evidence: files whose edits change shared contracts must
+        // surface the read-only queries that establish blast radius before writing.
+        // Advisory in shadow mode; in enforce mode missing evidence triggers override.
+        // Inputs without a host risk tier use the strictest evidence profile.
         const impactEvidence = (input.riskLevel ?? 3) >= 3 ? this.buildImpactScopeEvidence(input) : [];
         if (impactEvidence.length > 0) {
             for (const item of impactEvidence) {
@@ -509,12 +498,10 @@ export class EvidenceGate {
     }
 
     /**
-     * Impact-scope evidence for high-blast-radius writes (plan §9.1):
+     * Impact-scope evidence for high-blast-radius writes:
      * inline template edits must be preceded by their caller closure, vanilla
      * override edits by the resolved winner and diff, and event/state edits
-     * by their inbound/outbound state relations. These are advisory
-     * requirements the model must satisfy; they never auto-block ordinary
-     * small PDXScript edits.
+     * by their inbound/outbound state relations. Advisory for ordinary small edits.
      */
     private buildImpactScopeEvidence(
         input: EvidenceGateEvaluateInput,
@@ -850,7 +837,7 @@ export class EvidenceGate {
             sources: [ruleSource],
         }];
 
-        // Scope compatibility (plan §3 boundary 2: judged separately).
+        // Scope compatibility is evaluated independently from command existence.
         const scopes = matched.rule.scopes.filter(s => typeof s === 'string' && s.trim().length > 0);
         const scopeClaimBase: EvidenceClaim = {
             kind: 'scope_compatibility',

@@ -41,11 +41,11 @@
 html { min-width: var(--chat-min-width); }
 body { font-family: var(--vscode-font-family, system-ui, sans-serif); font-size: var(--vscode-font-size, 13px); color: var(--fg); background: var(--bg); min-width: var(--chat-min-width); height: 100vh; display: flex; flex-direction: column; overflow: hidden; line-height: 1.5; }
 
-/* ── Batch 3.3: Accessibility — keyboard focus ring ── */
+/* Accessibility: keyboard focus ring */
 :focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 1px; border-radius: 3px; }
 button:focus-visible, select:focus-visible, input:focus-visible, textarea:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 1px; }
 
-/* ── Batch 3.3: Reduced motion preference ── */
+/* Reduced motion preference */
 @media (prefers-reduced-motion: reduce) {
     *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; }
 }
@@ -504,7 +504,7 @@ body.side-workspace-wide { --active-side-workspace-width: var(--side-workspace-w
 .live-thinking-block { opacity: 0.82; }
 .message.assistant .thinking-block + .thinking-block { margin-top: -2px; }
 
-/* ── Sub-Agent Block ── */
+/* Legacy Sub-Agent Block (historical transcript replay) */
 .subagent-block { margin: 8px 0; border: 1px solid rgba(232,168,56,0.3); border-radius: 8px; overflow: hidden; background: rgba(232,168,56,0.03); }
 .subagent-block > summary { cursor: pointer; padding: 8px 12px; user-select: none; display: flex; align-items: center; gap: 7px; list-style: none; font-size: 12px; font-weight: 600; color: #e8a838; background: rgba(232,168,56,0.06); border-bottom: 1px solid rgba(232,168,56,0.15); transition: background 0.15s; }
 .subagent-block > summary:hover { background: rgba(232,168,56,0.1); }
@@ -670,7 +670,7 @@ body.side-workspace-wide { --active-side-workspace-width: var(--side-workspace-w
 .file-ref-link { background:rgba(255,255,255,0.1); border:0; border-radius:3px; padding:1px 4px; font-family:var(--vscode-editor-font-family,monospace); font-size:12.5px; color:var(--vscode-textLink-foreground, #4da3ff); cursor:pointer; text-decoration:none; }
 .file-ref-link:hover { color:var(--vscode-textLink-activeForeground, var(--vscode-textLink-foreground, #4da3ff)); text-decoration:underline; }
 
-/* ── Batch 3.2: Code block copy button ── */
+/* Code block copy button */
 .md-codeblock-copy { position:absolute; top:4px; right:6px; background:rgba(255,255,255,0.08); border:1px solid rgba(255,255,255,0.12); color:var(--fg); border-radius:4px; padding:2px 7px; cursor:pointer; font-size:10px; opacity:0; transition:opacity 0.15s; z-index:1; }
 .md-codeblock:hover .md-codeblock-copy { opacity:0.7; }
 .md-codeblock-copy:hover { opacity:1 !important; background:rgba(255,255,255,0.15); }
@@ -909,14 +909,14 @@ body.side-workspace-wide { --active-side-workspace-width: var(--side-workspace-w
     .md-mermaid-action { transition: none; }
 }
 
-/* ── Batch 3.2: Task list (GFM checkboxes) ── */
+/* Task list (GFM checkboxes) */
 .msg-bubble .task-list { list-style:none; margin-left:0; padding-left:2px; }
 .msg-bubble .task-list li { display:flex; align-items:flex-start; gap:6px; }
 .msg-bubble .task-checkbox { width:14px; height:14px; border-radius:3px; border:1px solid var(--border); background:transparent; flex-shrink:0; margin-top:3px; appearance:none; cursor:default; }
 .msg-bubble .task-checkbox:checked { background:var(--success); border-color:var(--success); }
 .msg-bubble .task-checkbox:checked::after { content:'\2713'; display:block; text-align:center; font-size:10px; line-height:14px; color:#fff; }
 
-/* ── Batch 3.1: Virtual scroll offscreen optimization ── */
+/* Virtual scroll offscreen optimization */
 .message.offscreen { content-visibility:auto; contain-intrinsic-size:auto 80px; }
 
 /* ── Diff card ── */
@@ -940,7 +940,7 @@ body.side-workspace-wide { --active-side-workspace-width: var(--side-workspace-w
 .input-container { width: min(100%, var(--chat-column-width)); max-width: var(--chat-column-width); margin: 0 auto; background: color-mix(in srgb, var(--vscode-input-background, #252525) 94%, var(--fg) 6%); border: 1px solid color-mix(in srgb, var(--vscode-panel-border, #3b3b3b) 82%, var(--fg) 18%); border-radius: 20px; overflow: visible; transition: border-color 0.15s, background 0.15s, box-shadow 0.15s; display: flex; flex-direction: column; max-height: 50vh; box-shadow: 0 8px 24px rgba(0,0,0,0.16); }
 body.chat-empty .input-wrapper { bottom: 50%; transform: translateY(50%); }
 body.chat-empty .input-container { box-shadow: 0 16px 38px rgba(0,0,0,0.22); }
-/* ── 附件/引用区域高度约束：防止大量附件导致输入框无限增长 ── */
+/* Cap attachment/reference area height so many attachments do not overflow the composer. */
 #fileBadgeArea { display: none; }
 #imagePreviewArea { display: flex; flex-wrap: wrap; gap: 8px; max-height: 74px; overflow-y: auto; flex-shrink: 0; padding: 12px 16px 8px; }
 #imagePreviewArea:empty { display: none; }
@@ -1993,7 +1993,7 @@ body.codex-sidebar-shell:has(.settings-page.active):not(.side-workspace-open) .s
 .aw-file { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--codex-mono); font-weight: 650; }
 .aw-count { justify-self: end; color: var(--codex-muted); font-family: var(--codex-mono); font-size: 10.5px; }
 
-/* 单个 Agent 泳道 */
+/* Legacy subtask lane styles (historical transcript replay) */
 .orch-lane {
     border: 1px solid var(--border);
     border-radius: 8px;
@@ -2003,7 +2003,6 @@ body.codex-sidebar-shell:has(.settings-page.active):not(.side-workspace-open) .s
 }
 .orch-lane:hover { transform: translateY(-1px); }
 
-/* 泳道状态颜色 */
 .orch-lane.lane-pending { border-color: rgba(255,255,255,0.1); opacity: 0.55; }
 .orch-lane.lane-running {
     border-color: rgba(232,168,56,0.5);
@@ -2025,7 +2024,6 @@ body.codex-sidebar-shell:has(.settings-page.active):not(.side-workspace-open) .s
     50% { box-shadow: 0 0 0 3px rgba(232,168,56,0.12); }
 }
 
-/* 泳道头 */
 .lane-header {
     display: flex;
     align-items: center;
@@ -2043,7 +2041,6 @@ body.codex-sidebar-shell:has(.settings-page.active):not(.side-workspace-open) .s
 }
 .lane-status { font-size: 14px; flex-shrink: 0; }
 
-/* 泳道 ID */
 .lane-id {
     font-size: 10px;
     font-family: var(--vscode-editor-font-family, monospace);
@@ -2054,7 +2051,6 @@ body.codex-sidebar-shell:has(.settings-page.active):not(.side-workspace-open) .s
     white-space: nowrap;
 }
 
-/* 泳道元数据 */
 .lane-meta {
     display: flex;
     gap: 8px;
@@ -2070,7 +2066,6 @@ body.codex-sidebar-shell:has(.settings-page.active):not(.side-workspace-open) .s
     white-space: nowrap;
 }
 
-/* 泳道状态文本 */
 .lane-status-text {
     font-size: 10px;
     opacity: 0.6;
@@ -2080,7 +2075,7 @@ body.codex-sidebar-shell:has(.settings-page.active):not(.side-workspace-open) .s
     white-space: nowrap;
 }
 
-/* ── 下钻视图 (Drill-Down View) ── */
+/* Legacy subtask drill-down view (historical transcript replay) */
 .subagent-fullscreen-view {
     display: none;
     position: fixed;
@@ -2207,14 +2202,12 @@ body.codex-sidebar-shell:has(.settings-page.active):not(.side-workspace-open) .s
     line-height: 1.25;
 }
 
-/* ── 双 Agent 视图并排分栏模式 (Side-by-Side Dual-Agent Mode) ── */
+/* Legacy side-by-side split layout for historical subtask drill-down */
 @media (min-width: 500px) {
-    /* 核心优化：确保主容器具有相对定位以供下钻视图绝对定位 */
     .chat-area {
         position: relative !important;
     }
 
-    /* 当子 Agent 激活时，主 Agent 聊天流的所有直接子节点优雅缩窄至左侧 50% 空间 */
     body.has-active-subagent .chat-area > *:not(.subagent-fullscreen-view) {
         width: calc(50% - 12px) !important;
         max-width: calc(50% - 12px) !important;
@@ -2223,7 +2216,6 @@ body.codex-sidebar-shell:has(.settings-page.active):not(.side-workspace-open) .s
         align-self: flex-start !important;
     }
     
-    /* 输入框组件同样缩窄并对齐在左侧 50% */
     body.has-active-subagent .input-wrapper {
         width: calc(50% - 12px) !important;
         max-width: calc(50% - 12px) !important;
@@ -2231,7 +2223,6 @@ body.codex-sidebar-shell:has(.settings-page.active):not(.side-workspace-open) .s
         transition: width 0.25s cubic-bezier(0.2, 0.8, 0.2, 1);
     }
     
-    /* 浮动卡片与快捷指令弹窗也收窄至左侧 50% */
     body.has-active-subagent .floating-card-area,
     body.has-active-subagent .slash-popup {
         width: calc(50% - 12px) !important;
@@ -2240,7 +2231,6 @@ body.codex-sidebar-shell:has(.settings-page.active):not(.side-workspace-open) .s
         transition: width 0.25s cubic-bezier(0.2, 0.8, 0.2, 1);
     }
     
-    /* 💡 高保真设计：子 Agent 独立视图以局部绝对定位靠于右侧 50% */
     body.has-active-subagent .subagent-fullscreen-view.active {
         display: block !important;
         position: fixed !important;

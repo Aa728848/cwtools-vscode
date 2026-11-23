@@ -1,5 +1,5 @@
 /**
- * Semantic evidence protocol (plan §4.1).
+ * Semantic evidence protocol.
  *
  * A write to a PDX script file must be backed by structured evidence claims.
  * Each claim is verified against a concrete source (CWT rules, LSP, project

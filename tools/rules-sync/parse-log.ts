@@ -1,3 +1,10 @@
+/**
+ * Stellaris script documentation, vanilla `common/`, and `.cwt` rule parser.
+ *
+ * Extracts effects, triggers, modifiers, scopes, localisation commands,
+ * optional-field metadata, and top-level common definitions into a unified
+ * `RulesGenerated` model consumed by `scan`, `check`, `update`, and `report`.
+ */
 import * as crypto from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';

@@ -7,7 +7,7 @@ export type AgentQueuedInputKind =
     | 'pending'
     | 'background_result'
     | 'visual_verification'
-    /** Peer message delivered into a running team member (Agent Teams). */
+    /** Legacy input kind retained for historical queue/event compatibility. */
     | 'team_message';
 
 export interface AgentQueuedInput {
@@ -74,7 +74,7 @@ function inputPriority(kind: AgentQueuedInputKind): number {
     switch (kind) {
         case 'interrupt': return 0;
         case 'approval': return 1;
-        // Team peer mail shares the steer tier; FIFO order disambiguates ties.
+        // Legacy `team_message` entries share the steer tier; FIFO order breaks ties.
         case 'team_message':
         case 'steer': return 2;
         case 'retry': return 3;

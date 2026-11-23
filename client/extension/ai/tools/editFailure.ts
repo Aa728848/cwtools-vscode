@@ -1,5 +1,5 @@
 /**
- * Typed edit-failure classification and anchor-guard signatures (P0 design 1).
+ * Typed edit-failure classification and anchor-guard signatures.
  *
  * The anchor-aware repeated write-failure guard only covers the three
  * `anchor_*` classes: they are the only failures a side-effect-free preview
@@ -47,7 +47,7 @@ export function replacerKindToErrorClass(kind: ReplacerError['kind']): EditError
 }
 
 export interface FailureSignature {
-    /** Owning run scope (top-level runId or sub-agent runId) — see AgentToolContext.scopeId. */
+    /** Owning run scope (isolated per run/slim execution) — see AgentToolContext.scopeId. */
     scopeId: string;
     tool: 'edit_file' | 'replace_lines';
     /** Canonical file key (resolved, `/` separators, lowercased on win32). */

@@ -1,5 +1,5 @@
 /**
- * Claim extraction from pending PDX write payloads (plan §4.2.1).
+ * Claim extraction from pending PDX write payloads.
  *
  * Pure, deterministic, bounded. Extracts the semantic claims a write makes
  * (effect/trigger/modifier usage, ID references, entry-point definitions)

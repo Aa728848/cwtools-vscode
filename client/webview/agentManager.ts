@@ -1,3 +1,12 @@
+/**
+ * Detached Agent Manager Webview shell.
+ *
+ * Extends the shared `chatPanel` runtime with a three-column layout (topics
+ * rail, conversation/trajectory view, and right inspector hosting Preview,
+ * Changes, Run/Activity, and Settings). All host messages are validated through
+ * `parseHostMessage`, and the GUI Preview canvas is mounted once and hidden
+ * rather than destroyed across tab switches.
+ */
 import './chatPanel';
 import { escapeHtml } from './chat/formatters';
 import { renderInspectorHTML } from './chat/runInspector';
@@ -57,7 +66,7 @@ type ManagerEnhancementState = {
     settingsTitle?: string;
     settingsSubtitle?: string;
     usageStats?: any;
-    /** T3.3 — Cache hit / saving badge on the run overview row. */
+    /** Cache hit / saving badge on the run overview row. */
     cacheStats?: {
         totalCachedTokens: number;
         totalInputTokens: number;

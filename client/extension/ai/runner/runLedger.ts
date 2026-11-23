@@ -156,7 +156,7 @@ export class RunLedger {
         this.emitter.on('change', listener);
     }
 
-    /** List runs newest-first (in-memory cache only — does not scan disk). T4.2 uses this for the replay picker. */
+    /** List runs newest-first from the in-memory cache (does not scan disk). */
     public listRecentRuns(): AgentRunRecord[] {
         return Array.from(this.activeRuns.values())
             .sort((a, b) => (b.startedAt ?? 0) - (a.startedAt ?? 0));

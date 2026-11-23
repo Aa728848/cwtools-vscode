@@ -6,13 +6,13 @@
 
 ## English
 
-This document explains the runtime boundaries, shared services, and maintenance rules of Stellaris Language Serves. It is a map for deciding where a change belongs and which neighbouring components must be checked.
+This document maps the runtime boundaries, shared services, and architectural invariants of Stellaris Language Serves. Design rationale, trade-offs, and rejected alternatives live in `.agents/notes/implemented/` rather than here.
 
-Version numbers are intentionally absent. Root `package.json` and `release/package.json` are the sources of truth.
+Version numbers are intentionally absent; root `package.json` and `release/package.json` are the sole sources of truth.
 
 ### Runtime overview
 
-The extension has three live processes or sandboxes, plus shared source and data repositories:
+The extension spans three runtime boundaries plus three independent submodules:
 
 ```mermaid
 flowchart LR
@@ -34,43 +34,35 @@ flowchart LR
     MCP -->|"extension bridge or standalone LSP"| LSP
 ```
 
-The important boundary is the Extension Host. It owns VS Code APIs, filesystem access, process startup, secrets, commands, and Webview lifecycle. Webviews only render and collect interaction. The F# server owns Paradox syntax and semantic analysis.
+The Extension Host is the trust boundary: it owns VS Code APIs, filesystem I/O, process startup, SecretStorage, commands, and Webview lifecycles. Webviews only render and emit intents. The F# server owns Paradox syntax, CWT rules, Shader compile-unit analysis, and game semantics.
 
 ### Extension Host
 
-`client/extension/` starts in the VS Code Extension Host process. Its main responsibilities are:
+`client/extension/` runs inside the VS Code Extension Host process.
 
-- activating commands and configuration;
-- starting and supervising the language client;
-- reading and writing workspace resources through VS Code APIs;
-- creating visual-editor and AI Webviews;
-- maintaining shared indexes and game-profile information;
-- translating Webview messages into validated host operations.
-
-Useful entry points:
-
-| Area | Files or directories |
+| Area | Primary files / directories |
 | --- | --- |
-| Activation and commands | `client/extension/extension.ts` |
-| Game capabilities | `client/extension/gameProfiles.ts` |
+| Activation & commands | `client/extension/extension.ts` |
+| Game profiles | `client/extension/gameProfiles.ts` |
+| Workspace & mode detection | `workspaceGameDetection.ts`, `languageSelectors.ts` |
 | Shared indexes | `client/extension/indexing/` |
-| Path and extension helpers | `pathScope.ts`, `fileExtensions.ts`, `fsCaseInsensitive.ts` |
-| Visual-editor hosts | `*Panel.ts`, `staticGalaxyEditorProvider.ts` |
-| Vanilla comparison | `vanillaCompare.ts` |
+| Path & filesystem helpers | `pathScope.ts`, `fileExtensions.ts`, `fsCaseInsensitive.ts` |
+| Visual-editor hosts | `*Panel.ts`, `shipDesign/`, `staticGalaxyEditorProvider.ts` |
+| Vanilla comparison & Workshop | `vanillaCompare.ts`, `workshopPanel.ts`, `workshopIgnore.ts` |
 | AI runtime | `client/extension/ai/` |
 
-Host code must validate Webview messages and other external input before acting on it. Path operations should use the shared containment and case-handling helpers rather than open-coded prefix checks.
+Host code validates all Webview messages and external payloads at the boundary before executing operations. Path containment checks must use `pathScope.ts` (and `ai/workspaceSandbox.ts` for AI read policy) rather than ad-hoc prefix matching.
 
 **Cross-layer path casing convention**:
-- **F# server (`src/LSP/`, `src/Main/`)**: Normalizes internal comparison and cache keys to uppercase (`ToUpperInvariant()`, see `PathIdentity.normalizePath`), following the CWTools upstream engine convention.
-- **TypeScript client (`client/extension/`)**: Normalizes internal indexing and lookup keys to lowercase (`toLowerCase()`, see `pathScope.ts`).
-- Display paths and paths passed to OS filesystem APIs preserve their original casing.
+- **F# server (`src/LSP/`, `src/Main/`)**: internal comparison/cache keys fold to uppercase (`ToUpperInvariant()`, see `PathIdentity.normalizePath`), matching upstream CWTools.
+- **TypeScript client (`client/extension/`)**: internal index/lookup keys fold to lowercase (`toLowerCase()`, see `pathScope.ts`).
+- User-facing display paths and OS filesystem API arguments always preserve original casing.
 
 ### Shared game profiles and indexes
 
-`gameProfiles.ts` describes differences between supported games: language IDs, folders, localisation formats, installation hints, feature flags, and generated metadata. A feature that varies by game should ask the active profile instead of assuming Stellaris conventions.
+`gameProfiles.ts` defines per-game capabilities (language IDs, folders, localisation formats, install hints, and feature flags). Game-varying features query the active profile instead of hardcoding Stellaris assumptions.
 
-`client/extension/indexing/` supplies project knowledge that is useful outside the F# semantic model, including localisation and workspace-symbol queries. The indexes are incremental and shared by UI and AI features.
+`client/extension/indexing/` provides incremental localisation and workspace-symbol indexes outside the F# semantic model, shared by UI previews and AI tools.
 
 ```mermaid
 flowchart TD
@@ -81,13 +73,11 @@ flowchart TD
     LSP["CWTools semantic model"] --> AI
 ```
 
-Keep these caches bounded. Sort filesystem-derived results where callers or tests depend on stable order. A project index may report partial or stale coverage; callers must preserve that status instead of presenting incomplete data as complete.
+Caches must stay bounded, filesystem-derived results must be sorted deterministically where order matters, and partial or stale index status must be surfaced honestly to callers.
 
 ### Webview sandbox
 
-`client/webview/` is bundled by Rollup and runs in VS Code's browser sandbox. It contains the chat interface, the detached Agent Manager, the Steam Workshop uploader, and the GUI, global ship design, solar-system, static-galaxy, event-chain, technology-tree, targeting-weight, entity, and particle views.
-
-The communication pattern is always:
+`client/webview/` is bundled by Rollup and executes in VS Code's browser sandbox (chat, detached Agent Manager, Steam Workshop uploader, GUI, global ship design, solar system, static galaxy, event chain, tech tree, targeting weight, entity, and particle views).
 
 ```mermaid
 sequenceDiagram
@@ -95,33 +85,31 @@ sequenceDiagram
     participant H as Extension Host
     participant F as Workspace or LSP
 
-    W->>H: typed postMessage request
+    W->>H: typed postMessage intent
     H->>H: validate and narrow payload
     H->>F: read, query, or WorkspaceEdit
     F-->>H: result or diagnostic
     H-->>W: serializable response
 ```
 
-Webview code must not import `vscode`, `fs`, `path`, use `require()`, or call Node-only APIs. It uses VS Code theme variables, supports reduced motion, and disposes renderers, workers, event listeners, GPU objects, textures, and animation loops when a panel closes.
-
-Source write-back belongs in the host. Visual editors should produce minimal `WorkspaceEdit`s so native undo, dirty state, and file-watch behaviour remain correct.
+Webview invariants:
+- No `vscode`, `fs`, `path`, `require()`, or Node-only APIs.
+- Use VS Code theme variables and respect `prefers-reduced-motion`.
+- Dispose renderers, GPU resources, textures, workers, listeners, and animation loops on close.
+- Source write-back stays in the Host via minimal `WorkspaceEdit`s to preserve native undo, dirty state, and watchers.
 
 #### Global ship design workbench
 
-`ShipDesignPanel` opens in the active editor column and owns the active workspace document, a separate `ShipDesignDraftSession`, bounded workspace-design discovery, localisation display names, and per-generation model assets. Operations, undo/redo, and generated loadouts mutate only draft text; the save path is the sole caller that applies draft text to the TextDocument and saves it. The host-side `shipDesign/` modules project token-ranged `ship_design` blocks into stable design/section/slot IDs, resolve layered vanilla/mod definitions, compute compatible candidates and static stats, and generate deterministic offline loadout drafts. Global scripted variables and file-local variables have separate scopes; CSV data is used only for explicitly supported fields. `common/inline_scripts` expands parameterized keys and statically supported size/icon/component-set/power fields through a raw-text field map that preserves `$param$` references.
+`ShipDesignPanel` (`client/extension/shipDesignPanel.ts`, `client/extension/shipDesign/`, and `client/shared/shipDesignProtocol.ts`) keeps edits inside a Host-owned `ShipDesignDraftSession` and applies a single `WorkspaceEdit` only on **Save**. All mutation intents (`set-component`, `drop-component`, `set-required-component`, `fill-empty-slots`) are revalidated by the Host against live draft state, workspace containment, and compatibility rules; the Webview never supplies write paths.
 
-`client/shared/shipDesignProtocol.ts` is the runtime-validated request/response boundary. The Webview never supplies filesystem paths for writes: cross-file design navigation carries a URI that the host revalidates against workspace containment and the global-design directory. `set-required-component` is likewise host-only: the host rebuilds `requiredSlots` (ship-size `required_component_set` order, then remaining entries), checks the component set and class/size restrictions, and rewrites the `required_component` list. `drop-component` is a host-only intent: the host rebuilds the current view, validates the component and fixed/compatibility state, then translates it to `set-component`; `fill-empty-slots` also computes operations from host catalog data, optionally replacing equipped slots, and evaluates each slot against a working copy so ship limits and blocks count components placed earlier in the same fill. Library candidates carry their `upgrades_to` tier and `origin` (`mod` when the defining file resolves inside a workspace root, otherwise `vanilla`) for Webview-side filtering. For click-to-place, `request-compatible-slots` returns the slot IDs where a held component passes drop validation; placement still sends `drop-component`, so the Host re-validates every click. The Webview lists compatible candidates only and renders no diagnostics or scene-warning panels. Source patches preserve comments, unknown fields, and growth-stage blocks. Dirty global-design documents share the GUI fail-closed guard against disk-based Agent writes; the panel also exposes its Host-only draft as a virtual dirty document so a clean TextDocument cannot be used to bypass that guard.
-
-The Three.js scene consumes a declarative root → section → component locator tree. `shipDesignModelNodeKeys` gives each node a composite key including its ancestry; within the same design and `assetRevision`, the scene keeps settled nodes with unchanged keys and the Host sends assets only for keys the Webview has not received, so a component swap rebuilds one entity. Meshes are delivered as Webview resource URIs resolved by the Host (inline base64 is only a fallback), and the scene fetches them with in-flight de-duplication and a byte-bounded cache, so large hull meshes are neither size-capped nor copied through postMessage. It shares `entityModelRuntime.ts` with Entity Preview rather than maintaining another pdxmesh/material implementation. Host asset loads and Webview assembly queues are generation/epoch checked, bounded, and disposable. `shipDesign/sprites.ts` resolves direct and sheet-referenced `.gfx` sprites, decodes DDS/TGA into a bounded data-URI cache, and drives the game-style icon-and-size slot overlays above and below the model. Localisation resolution uses the workspace index first, then preferred-language layered files with bounded caching; localised text is display-only and never replaces script keys in write-back.
+The 3D scene reuses `entityModelRuntime.ts`, addresses meshes via Host-resolved Webview resource URIs with byte-bounded caching, and incrementally rebuilds changed locator subtrees using ancestry keys. Unsaved drafts register as virtual dirty documents under the same fail-closed guard that prevents disk-based Agent writes from clobbering dirty GUI editors. See [the Ship Design Workbench Agent Note](.agents/notes/implemented/feature/2026-11-20-global-ship-design-workbench.md).
 
 ### Language server
 
-The server is split into two root projects:
-
-- `src/LSP/` provides the reusable Language Server Protocol and parsing-facing layer.
-- `src/Main/` assembles the CWTools server executable and game integration.
-
-Most Paradox semantics come from `submodules/cwtools/`: parsing, validation, scopes, definitions, references, scripted services, and Shader analysis. The active CWT rules describe what the server should recognise for a game.
+The F# / .NET 10 server splits into:
+- `src/LSP/` — reusable LSP protocol, JSON-RPC framing, document store, and tokenizer layer.
+- `src/Main/` — CWTools server executable, game loader, refresh coordinator, and feature handlers.
+- `submodules/cwtools/` — core parser, validator, scope/reference/completion engine, CWT meta-model, and Shader analysis.
 
 ```mermaid
 flowchart LR
@@ -133,105 +121,41 @@ flowchart LR
     FEATURES --> CLIENT["VS Code language client"]
 ```
 
-Read requests may run concurrently while model-changing operations require exclusive coordination. Changes to locking, cancellation, incremental refresh, or document snapshots should be tested under concurrent edit and read traffic.
-
-The root reader-writer lock (`gameStateLock`) is writer-preferring: once any writer is waiting, all new readers are blocked. A writer must therefore never park indefinitely while waiting — batch validation holds read locks continuously for several seconds, during which a parked waiting writer would cause hover, completion, semantic highlighting, and other editor read requests to time out on their read lock and silently return empty results. Deferrable background cycles must use `tryEnterGameStateWriteLock` (polling acquisition that never blocks readers), preserving pending state for the next wake-up if the lock is not acquired within budget; when a model mutation does proceed, write-lock hold time must remain bounded.
-
-Incremental refresh must have a guarded full-refresh fallback. For changes that affect scripted types or localisation dependencies, compare incremental results with a full rebuild.
+**Concurrency and locking**:
+- Read requests run concurrently while model mutations require exclusive access via `gameStateLock`.
+- `gameStateLock` is writer-preferring: a parked waiting writer blocks all incoming readers. Because batch validation holds read locks for seconds, deferrable background writers must acquire via `tryEnterGameStateWriteLock` (bounded polling) and yield pending work to the next cycle on contention; write-lock hold times must stay bounded.
+- Incremental scripted-type refresh (currently implemented for Stellaris) must retain a guarded full-refresh fallback and match full-rebuild semantics.
 
 ### CWT document pipeline
 
-`.cwt` rule files are an independent editor language (`cwt` language id), not
-game script. They never enter `game.Complete`/`game.ValidateFile`; their
-diagnostics use the `CWT0xx` family (see
-[docs/diagnostic-codes.md](docs/diagnostic-codes.md)) and are served by the
-built-in CWT meta-model, not by the rules being edited.
+`.cwt` files use the dedicated `cwt` language ID (`CWT0xx`–`CWT9xx` diagnostics; see [docs/diagnostic-codes.md](docs/diagnostic-codes.md)) and never enter `game.Complete` or `game.ValidateFile`.
 
-Two server modes exist:
+Startup runs in one of two modes chosen by `determineServerStartMode` (`client/extension/languageSelectors.ts`) using evidence from `workspaceGameDetection.ts` (see [the workspace-detection Agent Note](.agents/notes/implemented/architecture/2026-11-10-evidence-based-workspace-detection.md)):
+- **Full game mode**: workspace has game evidence; builds the game model while still routing `.cwt` files through the CWT pipeline.
+- **CWT-only mode**: rules-only repository or standalone `.cwt` file; starts with `GameLanguage.CWT`, skips game guessing/vanilla cache/rules setup, and upgrades in place via `cwtools.reloadExtension` if game evidence appears.
 
-- **Full game mode** — the workspace has game evidence (vanilla folder, mod
-  descriptor, known game language id). A game model is built as before; `.cwt`
-  documents still route to the CWT pipeline.
-- **CWT-only mode** — a rules repository or an opened `.cwt` file without game
-  evidence. The server starts (`language: "cwt"` → `GameLanguage.CWT`) without
-  building a game model; lint publishes parser/structure diagnostics only.
-  Upgrading to full mode restarts the single server process in place
-  (`cwtools.reloadExtension`), never a second competing process.
-
-CWT-only mode must not trigger game guessing, vanilla cache creation, or rules
-source setup; `checkOrSetGameCache` and `setupRulesCaches` skip it. Startup
-mode is decided by the pure `determineServerStartMode` in
-`client/extension/languageSelectors.ts`. `workspaceGameDetection.ts` separates
-project support from exact game identity: strong markers or composite PDX content
-evidence are required, multiple child projects are ambiguous, and an unknown game
-uses generic `paradox` rather than Stellaris. See
-[the workspace-detection Agent Note](.agents/notes/implemented/architecture/2026-11-10-evidence-based-workspace-detection.md).
-
-Single-file semantics live in `submodules/cwtools/CWTools/Rules/`
-(`CwtLanguageTypes.fs` / `CwtLanguageSchema.fs` / `CwtLanguageService.fs`,
-namespace `CWTools.CwtLanguage`): a versioned meta-model of root blocks,
-`##` directives and field-expression families drives structure/expression
-diagnostics (`CWT1xx`/`CWT2xx`), local symbols, and context completion.
-The LSP adapter (`src/Main/CwtLanguageFeatures.fs`) converts domain types to
-diagnostics and completion items; `.cwt` completion never enters
-`game.Complete`, and `.cwt` lint output is the parser diagnostics plus the
-service's semantic diagnostics. `RulesParser.parseConfigWithMetadataDetailed`
-reports structured parse errors, and the user-input `failwith` paths in
-`RulesParser` degrade to controlled fallbacks.
-
-Cross-file semantics run on an immutable, versioned project snapshot
-(`CWTools/Rules/CwtProjectIndex.fs`): `CwtProjectIndex.buildSnapshot`
-aggregates per-file documents into a symbol index and produces project
-diagnostics (`CWT301` undefined reference, `CWT302` duplicate type, `CWT401`
-inject cycle) with deterministic ordering and bounded file/size limits.
-`src/Main/CwtLanguageFeatures.fs` owns the lifecycle: overlay-merged file
-enumeration (open documents win over disk, `.git`/`node_modules`/build dirs
-skipped), cancellable debounced rebuilds where only the latest requested
-version can publish or activate, and LSP wiring so `.cwt` completion merges project symbols,
-definition/references navigate through the index, and lint attaches project
-diagnostics only when the snapshot is current. `## inject` source paths are
-containment-checked against the rule root (absolute paths and `..` traversal
-rejected, file/directory links resolved, and real-directory cycles suppressed).
-
-Candidate-rule activation (`CWTools/Rules/CwtActivation.fs` + the write-locked
-handler in `src/Main/Program.fs`) hot-swaps validated rule files into the game
-model only for the currently configured manual rules root. CWT-only workspaces
-index their workspace without activating a game model. A candidate is usable
-only when every rule file parses and no Error-level (or explicitly promoted)
-diagnostic exists; a content
-hash + generation tracks the active rules, the swap happens atomically under
-the game-state write lock, the rules/model epochs bump, and failures publish
-`CWT901` while keeping last-known-good. Rejected candidates never replace the
-active model (`CWT900`), and the next valid candidate retries automatically;
-`reloadrulesconfig` remains the manual fallback.
+Pipeline layers:
+1. **Single-file meta-model** (`CWTools/Rules/CwtLanguage*.fs` + `src/Main/CwtLanguageFeatures.fs`): parses with `RulesParser.parseConfigWithMetadataDetailed`, validates root blocks/`##` directives/field expressions (`CWT0xx`–`CWT2xx`), and serves context completion.
+2. **Project snapshot** (`CWTools/Rules/CwtProjectIndex.fs`): immutable, versioned overlay snapshot (open editors win over disk) producing deterministic cross-file symbols, navigation, and project diagnostics (`CWT301`, `CWT302`, `CWT401`). `## inject` paths are strictly containment-checked with symlink-cycle protection.
+3. **Validated hot-swap** (`CWTools/Rules/CwtActivation.fs` + `src/Main/Program.fs`): atomically swaps validated manual-rules candidates into the game model under the write lock, bumping rules/model epochs. Invalid candidates (`CWT900`) or swap failures (`CWT901`) preserve the last-known-good model; `reloadrulesconfig` remains the manual fallback.
 
 ### Shader subsystem
 
-`.shader` and `.fxh` share the CWTools Shader parser and feature layer. Analysis is compile-unit aware: includes, file precedence, platform conditions, and renderer contracts affect what a symbol means.
+`.shader` and `.fxh` share the compile-unit-aware `PdxShaderFeatures` surface in `submodules/cwtools/`. Includes, file precedence, platform conditions, and renderer contracts determine symbol meaning.
 
-`PdxShaderFeatures` is the shared feature surface. Do not add a second parser in TypeScript or a tool-specific approximation of Shader semantics. Agent and MCP queries should call the LSP commands that expose the same model.
-
-Shader edits are conservative because some Effects are called by the executable rather than visible script. Renderer contracts and curated ABI evidence distinguish known calls from candidates and unknowns. Missing text references alone are not proof that an Effect is unused.
+Do not add a parallel TypeScript Shader parser; Agent tools and MCP must query the LSP commands backed by `PdxShaderFeatures`. Because engine executables invoke some Effects directly, renderer contracts and audited ABI evidence govern safe edits—absent text references never prove an Effect is unused.
 
 ### AI subsystem
 
-`client/extension/ai/` runs inside the Extension Host. It owns provider clients, chat state, prompt construction, tool dispatch, workspace path policy, Agent skills, and memory.
+`client/extension/ai/` runs in the Extension Host and owns provider clients, multi-account subscription pools, chat/topic state, prompt assembly, tool policy/dispatch, Agent skills, and workspace memory.
 
-#### Turn routing
+#### Turn routing and state
 
-The built-in Agent focuses exclusively on the Paradox / CWTools semantic domain as a single-Agent assistant. The task mode for a turn resolves deterministically from an explicit user pin (`/plan`, `/execute`, `/explore`, `/review`, or `/mode <value>`), and no separate routing model is consulted: the Agent itself decides when a request needs user-owned design decisions resolved, and escalates through the `enter_plan_mode` tool.
+The built-in Agent is a single-agent Paradox/CWTools assistant. Turns default to Execute (bounded inspection settles routine changes) unless the user pins a mode (`/plan`, `/execute`, `/explore`, `/review`, or `/mode <value>`). When user-owned design choices remain open, the Agent escalates via `enter_plan_mode`, narrowing authorization to `plan_write_only` so the plan guard blocks project writes for the rest of the turn; `exit_plan_mode` exits Plan without restoring write access (only user approval authorizes execution).
 
-Users can pin a mode for the session with `/plan`, `/execute`, `/explore`, `/review`, or `/mode <value>`; a pinned mode bypasses automatic resolution entirely for later turns.
+`AgentSchedulingState` is the sole persisted and host-to-Webview scheduling state; prompt/tool execution labels derive from it at call boundaries. `Implementation_Plan.md` carries one machine-readable `cwtools-plan` contract (with an optional Paradox blueprint payload). `.cwtools/project/profile.json` uses the V4 guidance-card schema rebuilt by `/init`.
 
-Plan is the Agent's own escalation, not a classifier's guess. It calls `enter_plan_mode` before its first project write when the user asked for a plan or a materially user-owned choice is still open; that narrows authorization to `plan_write_only` and the per-call plan guard then blocks project writes for the rest of the turn. `exit_plan_mode` leaves Plan without restoring write access, so a model can never bypass the approval it just requested — only the user's approval does that. Bounded repository inspection settles ordinary changes, so Execute remains the default.
-
-`AgentSchedulingState` is the only persisted and host-to-Webview scheduling state. Prompt/tool execution labels such as Build or Plan are projections derived at the call boundary and are never restored independently. Legacy persisted `'general' | 'hybrid'` domains and multi-agent dispatch modes are normalized to `'paradox'` and `'single'` on load. A run's post-run state is read back from the scheduling domain store, a Plan turn is not rewritten to `finalize` (Plan means waiting on the user, not finished), and a topic carries the user's pinned `modeOverride` plus any approved plan artifact so both survive a topic switch, a reload, and a fork.
-
-The Paradox domain can query the active profile, CWT rules, indexes, and LSP evidence. `CWTOOLS.md` remains user-owned and is only scaffolded when absent.
-
-The generated `.cwtools/project/profile.json` uses the current V4 guidance-card schema. Older profile shapes are rejected and rebuilt by `/init`; MCP exposes targeted `guidance` rather than an execution-mode compatibility selector.
-
-#### Runner and tools
+#### Runner and tool enforcement
 
 ```mermaid
 sequenceDiagram
@@ -254,51 +178,30 @@ sequenceDiagram
     R-->>C: streamed output and final state
 ```
 
-The tool registry is authoritative for tool availability, effects, risk, and concurrency. Enforcement checks capability eligibility (derived execution label, runtime profile), invocation authorization (run authorization), and workspace path containment. Deferred tools may substitute a detailed schema only after selection, so a complex contract does not consume every model request. `agentTools.ts` dispatches calls only after the policy engine evaluates them. File writes also use path containment, per-file exclusion, sorted multi-file locking, plan-mode gates, and user-selectable `confirm` (diff confirmation) / `auto` (direct write) modes.
+The tool registry (`client/extension/ai/tools/registry.ts`) is the source of truth for availability, effects, risk, and concurrency. Every call passes through `policyEngine.ts` before dispatch in `agentTools.ts`. File writes enforce path containment, per-file exclusion, sorted multi-file locking, plan-mode gates, `EvidenceGate` semantic prechecks, BOM-safe localisation handling, and user-selected `confirm` / `auto` mode.
+
+Typed run events drive streaming, replay, checkpoints, and resume; new events require matching reducers and Webview renderers, and resume strictly enforces the V4 checkpoint contract. Long runs use bounded context compaction, budgets, and loop detection.
 
 #### Manager GUI development preview
 
-The detached Agent Manager mounts a persistent Preview pane beside Changes, Run, and Settings. `ManagerGuiPreviewController` owns the target document, revision, selection, typed snapshots, and restore; `GuiPreviewLoader` shares parsing, sprite indexing, texture-path containment, decoded-texture caching, and per-Webview URI generation with the full GUI workbench. The Webview canvas owns only local viewport state and interaction. Switching inspector tabs hides rather than destroys that canvas.
-
-GUI references carry the document version, zero-based element hierarchy, name, type, and source range. Adding one to the composer does not start a run. Submission reparses the live document and creates bounded read-only source context through the existing `ContextReferenceManager`; writes still use the normal tool policy and Diff confirmation. Disk-based Agent writes reject dirty GUI drafts, and run-ledger write notifications debounce refresh of both preview surfaces. See [the Manager GUI preview Agent Note](.agents/notes/implemented/feature/2026-11-17-agent-manager-gui-development-preview.md). After a write, `guiVisualCaptureRequest` captures a fixed-frame offscreen image. Before/After use the same logical frame, and RGBA comparison produces a Diff image, changed-pixel ratio, and bounds. The controller injects at most two `visual_verification` inputs per run through the existing input queue, so image-capable providers review evidence in the same turn; other providers receive metrics only. After-only is explicit when no baseline exists. Latest evidence uses bounded topic-private files and per-Webview URIs, never V4 checkpoints or game processes.
-
-`Implementation_Plan.md` contains one machine-readable `cwtools-plan` contract. A Paradox blueprint is an optional payload inside that contract; drafts and approval-ready plans no longer use a second `cwtools-blueprint` fence or a separate contract-loading tool.
-
-The runner records typed events for streaming, replay, checkpoints, and resume. Adding an event requires matching reducer and Webview support. Resume accepts only the current V4 snapshot contract; older snapshots are rejected instead of migrated.
-
-Long runs use bounded context compaction, checkpoints, budgets, and loop detection.
+The detached Agent Manager mounts a persistent `.gui` Preview tab (`ManagerGuiPreviewController` + shared `GuiPreviewLoader`) alongside Changes, Run, and Settings. Element selections attach versioned, read-only source references via `ContextReferenceManager`. Disk-based Agent writes fail closed against dirty GUI drafts. After GUI writes, fixed-frame offscreen Before/After/Diff captures inject up to two `visual_verification` rounds into the active run (image + metrics for vision providers; metrics only otherwise), stored in bounded topic-private files outside V4 checkpoints. See [the Manager GUI preview Agent Note](.agents/notes/implemented/feature/2026-11-17-agent-manager-gui-development-preview.md).
 
 #### Provider and secret boundary
 
-Provider credentials and web-search keys are stored through VS Code SecretStorage. Provider clients normalize different request and streaming formats into the runner's common message and tool-call model.
+Provider credentials, OAuth tokens, proxy credentials, and web-search keys live in VS Code SecretStorage. Provider clients normalize wire formats into the runner's unified message/tool model. Live web content, MCP payloads, and provider responses are treated as untrusted input.
 
-Network and MCP access are model-visible effects and go through policy checks. Live web content, MCP payloads, and provider responses are untrusted input.
+### Standalone MCP server and native bridge
 
-### Standalone MCP server
+`submodules/cwtools-mcp/` is maintained and published independently as three strictly one-way packages:
+- `cwtools-shared` — transport-free contracts, generated schemas/detection, `createToolCallHandler`, and shared pure formulas (including `targetingWeights.ts`, also consumed directly by the Extension Host).
+- `cwtools-node` — Node host services (filesystem, LSP process, revalidation, project detection; no MCP SDK dependency).
+- `cwtools-mcp` — MCP transport wiring and re-exports.
 
-`submodules/cwtools-mcp/` is a separate repository and npm release. Its six whitelisted domain-write tools are enabled by default; non-whitelisted writes remain unavailable.
+Both Bridge mode (connecting to an active VS Code Extension Host manifest) and Standalone mode (spawning its own LSP) enforce the same capability gate: unsupported or ambiguous workspaces expose no tools/resources and spawn no LSP; CWT-only workspaces expose only CWT-capable tools. Whitelisted domain-write tools (6 tools) are enabled by default; non-whitelisted writes are rejected.
 
-The default mode discovers the active compatible VS Code host and connects through the extension's bridge manifest. The client workspace must match the bridge workspace. A mismatch returns an unavailable result instead of querying another project. Bridge and Standalone apply the same project capability gate: unsupported/ambiguous workspaces disclose no tools/resources and never spawn LSP; CWT-only exposes only CWT-capable document, navigation, and diagnostic tools.
+The internal `cwtools.ai.getHostCapabilities` handshake verifies `{ protocolVersion, serverVersion, commands }` before model load; incompatible hosts fail explicitly with `backend_incompatible`. For non-MCP consumers, the extension also exposes bearer-authenticated `/cwtools/healthz` and `/cwtools/rpc` forwarding only allowlisted read-only commands and navigation/document LSP methods.
 
-Standalone mode can start its own LSP process. Both modes share generated tool schemas, generated workspace detection, and host-service contracts. New semantic capability should be implemented as a read-only `cwtools.ai.*` LSP command first, added to the server read-command allowlist, and then exposed through generated MCP schemas.
-
-The submodule publishes three packages with a strictly one-way dependency graph: `cwtools-shared` (transport-free contracts, tool schemas, the transport-neutral tool call handler in `tools/callHandler`, and pure computations such as `tools/targetingWeights.ts`), `cwtools-node` (Node host services: filesystem, LSP process, revalidation, project detection — depends on `cwtools-shared`, `chokidar` and `vscode-jsonrpc` only, never on the MCP SDK), and `cwtools-mcp` (MCP transport plus generated schemas; re-exports the Node hosts so older deep imports keep working). A host that needs CWTools semantics without an MCP dependency imports `cwtools-node` and calls `createToolCallHandler` from `cwtools-shared`.
-
-The Extension Host also consumes `cwtools-shared` directly for the targeting-weight formula, so exactly one implementation produces the numbers shown by the agent tool, the MCP surface and the analysis panel. Its built output is staged into `release/node_modules` by `package.ps1` and ships inside the VSIX.
-
-`cwtools.ai.getHostCapabilities` is an internal handshake, not a model-facing tool: it answers with `{ protocolVersion, serverVersion, commands }` before the game model loads, and a Node host that receives an old, malformed or incomplete answer reports `backend_incompatible` and releases the backend instead of driving it.
-
-For non-MCP consumers, the extension exposes bearer-authenticated `/cwtools/healthz` and `/cwtools/rpc` alongside the existing manifest. These native routes forward only the required read-only CWTools commands and five navigation/document LSP methods to the active LanguageClient; they never dispatch MCP methods. `cwtools-node` validates the manifest, pid, exact workspace and live health before injecting this host. Missing/stale/mismatched/inactive/unreachable hosts may fall back to standalone, while an incompatible active host returns `backend_incompatible` without spawning a competitor.
-
-Do not hand-edit files under `cwtools-shared/src/generated/`. Run `npm run generate:mcp-schema` and `npm run generate:mcp-detection` (or their `check:*` counterparts), test inside the submodule, commit and release there, then update the root pointer.
-
-### Submodule ownership
-
-| Submodule | Contains | Change process |
-| --- | --- | --- |
-| `submodules/cwtools/` | F# library and semantic implementation | Commit and test in the submodule, then update the root pointer. |
-| `submodules/cwtools-stellaris-config/` | Stellaris rules data | Treat as rules content; verify with rules tooling and keep separate from library code. |
-| `submodules/cwtools-mcp/` | MCP packages and release metadata | Build and run contract tests in the submodule; publish on its own release cycle. |
+Never hand-edit `submodules/cwtools-mcp/packages/cwtools-shared/src/generated/`; regenerate via `npm run generate:mcp-schema` and `npm run generate:mcp-detection`.
 
 ### Build and release flow
 
@@ -314,23 +217,19 @@ flowchart TD
     VSIX -->|"tag push"| RELEASE["GitHub Release"]
 ```
 
-`npm run compile` builds Extension Host code and Webviews. Packaging publishes self-contained servers for Windows, Linux, and macOS, stages resources under `release/`, and creates the VSIX.
-
-Pushing a `v<version>` tag runs `.github/workflows/release.yml`. The job rebuilds the VSIX on a Windows runner, publishes it to the VS Code Marketplace with Trusted Publishing over GitHub OIDC, and creates or updates the GitHub Release; the tag must match the version in both manifests.
-
-The bilingual root documents remain their own sources. `npm run build:docs` validates them and generates `release/README.md` from `docs/marketplace-readme.md`; it no longer copies the GitHub README into the Marketplace description.
+`npm run compile` builds Extension Host code and Webview bundles. `package.ps1` publishes self-contained `win-x64`, `linux-x64`, and `osx-x64` servers, packages Stellaris rules, stages `release/`, and builds the universal VSIX. Pushing a matching `v<version>` tag triggers `.github/workflows/release.yml` to build, verify, publish to the VS Code Marketplace via GitHub OIDC Trusted Publishing, and create/update the GitHub Release.
 
 ### Design constraints at a glance
 
 | Constraint | Reason |
 | --- | --- |
-| Webviews do not access Node.js or the filesystem | Maintains the browser sandbox and a single trusted I/O boundary. |
-| Model-visible tools always pass through policy | Keeps permissions, effects, and audit events consistent. |
-| Semantic capability originates in the LSP | Prevents Extension Host, MCP, and AI features from drifting into separate parsers. |
-| Shared output is deterministic and bounded | Keeps large mods responsive and tests reproducible. |
-| User input and wire data are validated at boundaries | Prevents malformed messages or files from becoming trusted state. |
-| Submodule commits stay separate | Preserves ownership, history, and independent release cycles. |
-| English and Chinese user-facing text change together | Keeps both supported documentation and UI surfaces current. |
+| Webviews never access Node.js or the filesystem | Preserves browser sandbox and a single trusted I/O boundary. |
+| Every model-visible tool passes through policy | Keeps permissions, effects, locks, and audit events uniform. |
+| Semantic capabilities originate in the LSP | Prevents Extension Host, AI, and MCP from drifting into separate parsers. |
+| Shared outputs and caches stay deterministic and bounded | Keeps large mods responsive and tests reproducible. |
+| Untrusted inputs are validated at every boundary | Prevents malformed messages or files from becoming trusted state. |
+| Submodule commits stay independent | Preserves ownership, history, and separate release cycles. |
+| User-facing English and Chinese stay in sync | Keeps both supported documentation and UI surfaces accurate. |
 
 ---
 
@@ -338,13 +237,13 @@ The bilingual root documents remain their own sources. `npm run build:docs` vali
 
 ## 中文
 
-本文说明 Stellaris Language Serves 的运行边界、共享服务和维护约束，帮助开发者判断改动应放在哪里，以及需要同时检查哪些相邻模块。
+本文说明 Stellaris Language Serves 的运行边界、共享服务与架构不变量。具体设计动机、权衡与被否决的备选方案归档在 `.agents/notes/implemented/`，不在此重复。
 
-文档不重复维护版本号；根 `package.json` 和 `release/package.json` 是唯一来源。
+文档不重复维护版本号；根 `package.json` 与 `release/package.json` 是唯一来源。
 
 ### 运行时概览
 
-扩展包含三个实际运行的进程或沙盒，以及几份共享源码和规则仓库：
+扩展横跨三个运行边界与三个独立子模块：
 
 ```mermaid
 flowchart LR
@@ -366,43 +265,35 @@ flowchart LR
     MCP -->|"扩展桥接或独立 LSP"| LSP
 ```
 
-Extension Host 是最重要的边界：VS Code API、文件访问、进程启动、Secret、命令和 Webview 生命周期都由它负责。Webview 只处理展示和交互，F# 服务端负责 Paradox 语法与语义。
+Extension Host 是信任边界：统一负责 VS Code API、文件 I/O、进程启动、SecretStorage、命令与 Webview 生命周期。Webview 仅负责渲染与交互意图提交。F# 服务端负责 Paradox 语法、CWT 规则、Shader 编译单元分析与游戏语义。
 
 ### Extension Host
 
-`client/extension/` 运行在 VS Code Extension Host 进程中，主要负责：
+`client/extension/` 运行在 VS Code Extension Host 进程中。
 
-- 激活命令和配置；
-- 启动并管理语言客户端；
-- 通过 VS Code API 读写工作区资源；
-- 创建可视化编辑器和 AI Webview；
-- 维护共享索引和游戏 Profile；
-- 校验 Webview 消息，再执行宿主操作。
-
-常用入口：
-
-| 范围 | 文件或目录 |
+| 模块 | 主要文件 / 目录 |
 | --- | --- |
-| 激活和命令 | `client/extension/extension.ts` |
-| 游戏能力 | `client/extension/gameProfiles.ts` |
+| 激活与命令 | `client/extension/extension.ts` |
+| 游戏 Profile | `client/extension/gameProfiles.ts` |
+| 工作区与模式探测 | `workspaceGameDetection.ts`、`languageSelectors.ts` |
 | 共享索引 | `client/extension/indexing/` |
-| 路径与扩展名 helper | `pathScope.ts`、`fileExtensions.ts`、`fsCaseInsensitive.ts` |
-| 可视化编辑器宿主 | `*Panel.ts`、`staticGalaxyEditorProvider.ts` |
-| 原版对比 | `vanillaCompare.ts` |
+| 路径与文件系统 helper | `pathScope.ts`、`fileExtensions.ts`、`fsCaseInsensitive.ts` |
+| 可视化编辑器宿主 | `*Panel.ts`、`shipDesign/`、`staticGalaxyEditorProvider.ts` |
+| 原版对比与创意工坊 | `vanillaCompare.ts`、`workshopPanel.ts`、`workshopIgnore.ts` |
 | AI 运行时 | `client/extension/ai/` |
 
-宿主代码执行操作前必须校验 Webview 消息和其他外部输入。路径判断应使用共享的包含关系与大小写 helper，不要自行写字符串前缀判断。
+宿主代码在边界处校验所有 Webview 消息与外部 payload 后再执行操作。路径包含判断统一使用 `pathScope.ts`（AI 读取策略在 `ai/workspaceSandbox.ts`），不要手写前缀比对。
 
 **跨层路径大小写约定**：
-- **F# 服务端（`src/LSP/`、`src/Main/`）**：内部字典索引键与比较键统一折叠为大写（`ToUpperInvariant()`，见 `PathIdentity.normalizePath`），遵循上游 CWTools 引擎约定。
-- **TypeScript 客户端（`client/extension/`）**：内部路径规范化与集合查找统一折叠为小写（`toLowerCase()`，见 `pathScope.ts`）。
-- 面向用户展示或传递给操作系统文件系统 API 时，必须保留原始路径大小写。
+- **F# 服务端（`src/LSP/`、`src/Main/`）**：内部比较与缓存键统一折叠为大写（`ToUpperInvariant()`，见 `PathIdentity.normalizePath`），遵循上游 CWTools 约定。
+- **TypeScript 客户端（`client/extension/`）**：内部索引与查找键统一折叠为小写（`toLowerCase()`，见 `pathScope.ts`）。
+- 展示路径与传给操作系统 API 的路径始终保留原始大小写。
 
 ### 共享游戏 Profile 与索引
 
-`gameProfiles.ts` 描述各游戏的差异：language ID、目录、本地化格式、安装提示、功能开关和生成元数据。随游戏变化的功能应查询当前 Profile，不要默认套用 Stellaris 约定。
+`gameProfiles.ts` 描述各游戏的差异（language ID、目录、本地化格式、安装提示与功能开关）。随游戏变化的功能必须查询当前 Profile，不硬编码 Stellaris 假设。
 
-`client/extension/indexing/` 提供 F# 语义模型之外仍需要共享的项目知识，包括本地化和工作区符号查询。这些索引按增量更新，并由 UI 与 AI 共用。
+`client/extension/indexing/` 提供 F# 语义模型之外的增量本地化与工作区符号索引，由 UI 预览与 AI 工具共享。
 
 ```mermaid
 flowchart TD
@@ -413,13 +304,11 @@ flowchart TD
     LSP["CWTools 语义模型"] --> AI
 ```
 
-缓存必须有容量上限。调用方或测试依赖顺序时，应对文件系统派生结果排序。项目索引可能处于 partial 或 stale 状态，调用方要保留该状态，不能把不完整数据表述为完整结果。
+缓存必须有容量上限；依赖顺序的文件系统派生结果必须确定性排序；索引处于 partial 或 stale 状态时必须如实透传给调用方。
 
 ### Webview 沙盒
 
-`client/webview/` 由 Rollup 打包，在 VS Code 浏览器沙盒中运行，包含聊天界面、独立 Agent Manager、Steam 创意工坊上传视图，以及 GUI、全局舰船设计、恒星系、静态银河、事件链、科技树、索敌权重、实体和粒子视图。
-
-通信方式固定为：
+`client/webview/` 由 Rollup 打包，运行在 VS Code 浏览器沙盒中（聊天、独立 Agent Manager、Steam 创意工坊、GUI、全局舰船设计、恒星系、静态银河、事件链、科技树、索敌权重、实体与粒子视图）。
 
 ```mermaid
 sequenceDiagram
@@ -427,33 +316,31 @@ sequenceDiagram
     participant H as Extension Host
     participant F as 工作区或 LSP
 
-    W->>H: 类型化 postMessage 请求
+    W->>H: 类型化 postMessage 意图
     H->>H: 校验并收窄 payload
     H->>F: 读取、查询或 WorkspaceEdit
     F-->>H: 结果或诊断
     H-->>W: 可序列化响应
 ```
 
-Webview 不得导入 `vscode`、`fs`、`path`，不得使用 `require()` 或 Node 专用 API。它应使用 VS Code 主题变量，支持 reduced motion，并在面板关闭时释放渲染器、worker、事件监听器、GPU 对象、贴图和动画循环。
-
-源码写回属于宿主职责。可视化编辑器应生成最小 `WorkspaceEdit`，让原生撤销、dirty 状态和文件 watcher 保持正常。
+Webview 约束：
+- 禁止导入 `vscode`、`fs`、`path`，禁止 `require()` 或调用 Node 专用 API。
+- 使用 VS Code 主题变量并支持 `prefers-reduced-motion`。
+- 关闭面板时正确释放渲染器、GPU 对象、贴图、worker、监听器与动画循环。
+- 源码写回由宿主通过最小 `WorkspaceEdit` 完成，以保持原生撤销、dirty 状态与文件监听正常。
 
 #### 全局舰船设计工作台
 
-`ShipDesignPanel` 在当前编辑器列打开，持有当前工作区文档、独立的 `ShipDesignDraftSession`、有界工作区设计发现、本地化显示名和按代际发送的模型资产。普通操作、撤销/重做和装载生成只修改草稿文本；只有保存路径会把草稿应用到 TextDocument 并保存。宿主侧 `shipDesign/` 模块把带 token 范围的 `ship_design` 块投影为稳定的设计/区段/槽位 ID，解析原版与 Mod 分层定义，计算兼容候选和静态属性，并生成确定性的离线装载草稿。全局 scripted variables 与文件局部变量分属不同作用域；CSV 只补明确支持的字段。`common/inline_scripts` 通过保留 `$param$` 引用的原始字段映射展开参数化 key，以及可静态支持的尺寸、图标、component_set 和功率。
+`ShipDesignPanel`（`client/extension/shipDesignPanel.ts`、`client/extension/shipDesign/` 与 `client/shared/shipDesignProtocol.ts`）将所有编辑限制在宿主侧 `ShipDesignDraftSession` 草稿中，仅在点击 **保存** 时以单次 `WorkspaceEdit` 写回文档。所有修改意图（`set-component`、`drop-component`、`set-required-component`、`fill-empty-slots`）均由宿主按实时草稿状态、工作区边界与兼容性规则复验；Webview 不提供写入路径。
 
-`client/shared/shipDesignProtocol.ts` 是带运行时校验的请求/响应边界。Webview 不为写入提供文件系统路径；跨文件设计导航携带的 URI 会由宿主重新校验工作区包含关系和全局设计目录。`set-required-component` 同样仅由 Host 完成：Host 重建 `requiredSlots`（先按船型 `required_component_set` 顺序，再列其余条目），校验部件集合与船级/船型限制后重写 `required_component` 列表。`drop-component` 是仅由 Host 完成的操作意图：Host 重建当前视图，校验部件、固定槽位和兼容性，再转换成 `set-component`；`fill-empty-slots` 同样根据 Host 目录计算写回操作，可选覆盖已装备槽位，并在工作副本上逐槽校验，使数量上限与互斥规则计入同一次填充中先放入的部件。组件库候选携带 `upgrades_to` 等级与 `origin`（定义文件解析到工作区根内为 `mod`，否则为 `vanilla`），供 Webview 筛选。手持放置时，`request-compatible-slots` 返回所持部件通过放置校验的槽位 ID；每次放置仍发送 `drop-component`，由 Host 再次校验。Webview 只列兼容候选，不渲染诊断或场景警告面板。源码补丁保留注释、未知字段和成长阶段块。未保存的全局设计文档与 GUI 共用 fail-closed 保护，阻止 Agent 直接写磁盘覆盖草稿；面板还把 Host 草稿暴露为虚拟脏文档，防止利用仍然干净的 TextDocument 绕过保护。
-
-Three.js 场景消费声明式的“根 → 区段 → 部件” locator 树。`shipDesignModelNodeKeys` 为每个节点生成包含祖先链的组合键；在同一设计与 `assetRevision` 内，场景保留键未变且已加载的节点，Host 只发送 Webview 尚未收到的键对应资源，因此替换部件只重建一个实体。网格以 Host 解析的 Webview 资源 URI 下发（内联 base64 仅作回退），场景按 URI 拉取并对并发请求去重、按字节上限缓存，大型船体网格既不受大小上限限制，也不经 postMessage 复制。场景与 Entity Preview 共用 `entityModelRuntime.ts`，不再维护另一套 pdxmesh/材质实现。宿主资产加载和 Webview 组装队列都有代际/epoch 检查、数量上限和释放路径。`shipDesign/sprites.ts` 解析直接引用与精灵表引用的 `.gfx` 图标，用有界 data-URI 缓存解码 DDS/TGA，驱动模型上下方的游戏式图标与尺寸槽位。本地化解析先查工作区索引，再回退到按语言优先级排列的分层文件并使用有界缓存；译文只用于显示，绝不替换写回脚本 key。
+3D 场景复用 `entityModelRuntime.ts`，通过宿主解析的 Webview 资源 URI 搭配字节上限缓存加载网格，并按祖先组合键仅增量重建变更节点子树。未保存草稿注册为虚拟脏文档，与 GUI 编辑器共用 fail-closed 保护，阻止 Agent 写磁盘覆盖草稿。详见 [全局舰船设计工作台 Agent Note](.agents/notes/implemented/feature/2026-11-20-global-ship-design-workbench.md)。
 
 ### 语言服务
 
-服务端由两个根项目组成：
-
-- `src/LSP/` 提供可复用的 Language Server Protocol 与解析接口层。
-- `src/Main/` 组装 CWTools 服务端程序和游戏集成。
-
-大部分 Paradox 语义来自 `submodules/cwtools/`：解析、校验、作用域、定义、引用、scripted service 和 Shader 分析。当前 CWT 规则决定服务端应如何理解某个游戏。
+F# / .NET 10 服务端分为三层：
+- `src/LSP/` — 可复用的 LSP 协议、JSON-RPC 编解码、文档存储与词法层。
+- `src/Main/` — CWTools 服务端入口、游戏加载器、刷新协调器与功能处理器。
+- `submodules/cwtools/` — 核心解析、校验、作用域/引用/补全引擎、CWT 元模型与 Shader 分析。
 
 ```mermaid
 flowchart LR
@@ -465,91 +352,41 @@ flowchart LR
     FEATURES --> CLIENT["VS Code 语言客户端"]
 ```
 
-只读请求可以并发，修改模型的操作需要独占协调。改动锁、取消、增量刷新或文档快照时，应在编辑和读取同时发生的场景中测试。
-
-根读写锁 (`gameStateLock`) 是写者优先的：只要有一个写者在等待，所有新的读者都会被阻塞。因此写者不得在等待状态上无限期挂起——批量校验会在数秒内连续持有读锁，此时一个挂起等待的写者会让悬停、补全、高亮等所有编辑操作读锁超时而静默返回空结果。可延迟的后台周期必须使用 `tryEnterGameStateWriteLock`（轮询获取，读者不被阻塞），在预算内未拿到锁就保留待处理状态并留待下一次唤醒；确实需要修改模型时也要保持写锁持有时间有界。
-
-增量刷新必须保留受保护的全量刷新兜底。涉及 scripted type 或本地化依赖时，要把增量结果与全量重建对比。
+**并发与锁约束**：
+- 只读请求可并发执行，模型变更需通过 `gameStateLock` 独占协调。
+- `gameStateLock` 为写者优先锁：一旦有写者挂起等待，后续所有读者都会阻塞。因批量校验会连续持读锁数秒，可延迟后台写任务必须使用 `tryEnterGameStateWriteLock`（有界轮询），争用时保留待处理状态留待下周期；进入写锁后的持有时间必须有界。
+- scripted type 增量刷新（当前仅 Stellaris 实现）必须保留受保护的全量刷新兜底，并与全量重建结果一致。
 
 ### CWT 文档管线
 
-`.cwt` 规则文件是一门独立的编辑器语言（`cwt` language id），不是游戏脚本。
-它们永不进入 `game.Complete`/`game.ValidateFile`；诊断使用 `CWT0xx` 族
-（见 [docs/diagnostic-codes.md](docs/diagnostic-codes.md)），由内置 CWT 元模型
-提供，而不是用正在编辑的规则自我验证。
+`.cwt` 文件属于独立的 `cwt` 语言（诊断码 `CWT0xx`–`CWT9xx`，见 [docs/diagnostic-codes.md](docs/diagnostic-codes.md)），不进入 `game.Complete` 或 `game.ValidateFile`。
 
-两种服务端模式：
+启动模式由 `determineServerStartMode`（`client/extension/languageSelectors.ts`）结合 `workspaceGameDetection.ts` 的工作区证据决定（见 [工作区识别 Agent Note](.agents/notes/implemented/architecture/2026-11-10-evidence-based-workspace-detection.md)）：
+- **Full game mode**：工作区有游戏证据时构建游戏模型，`.cwt` 文件仍走独立 CWT 管线。
+- **CWT-only mode**：纯规则仓库或单独打开 `.cwt` 时以 `GameLanguage.CWT` 启动，跳过游戏猜测、原版缓存与规则源装配；若后续出现游戏证据则通过 `cwtools.reloadExtension` 原地重启升级。
 
-- **Full game mode**——工作区存在游戏证据（vanilla 目录、mod descriptor、
-  已知游戏 language id）。按原方式构建游戏模型；`.cwt` 文档仍走 CWT 管线。
-- **CWT-only mode**——规则仓库或单独打开的 `.cwt` 文件，无游戏证据。
-  服务端以 `language: "cwt"`（`GameLanguage.CWT`）启动，不构建游戏模型；
-  lint 只发布解析/结构诊断。升级到 full mode 时在同一进程内重启
-  （`cwtools.reloadExtension`），绝不启动第二个竞争进程。
-
-CWT-only 不得触发游戏猜测、vanilla 缓存生成或规则源配置；
-`checkOrSetGameCache` 与 `setupRulesCaches` 均跳过。启动模式由
-`client/extension/languageSelectors.ts` 中的纯函数 `determineServerStartMode`
-决定。`workspaceGameDetection.ts` 分开判断项目支持与具体游戏：必须有强标记或
-组合 PDX 内容证据，多个子项目属于歧义，游戏不明时使用通用 `paradox` 而非
-Stellaris。详见
-[工作区识别 Agent Note](.agents/notes/implemented/architecture/2026-11-10-evidence-based-workspace-detection.md)。
-
-单文件语义位于 `submodules/cwtools/CWTools/Rules/`
-（`CwtLanguageTypes.fs` / `CwtLanguageSchema.fs` / `CwtLanguageService.fs`，
-命名空间 `CWTools.CwtLanguage`）：版本化的根块、`##` 指令与字段表达式族
-元模型驱动结构/表达式诊断（`CWT1xx`/`CWT2xx`）、局部符号与上下文补全。
-LSP 适配器（`src/Main/CwtLanguageFeatures.fs`）将领域类型转换为诊断与补全项；
-`.cwt` 补全永不进入 `game.Complete`，`.cwt` 的 lint 输出为解析器诊断加
-服务的语义诊断。`RulesParser.parseConfigWithMetadataDetailed` 返回结构化
-解析错误，`RulesParser` 中由用户输入触发的 `failwith` 路径降级为受控回退。
-
-跨文件语义基于不可变、版本化的项目快照（`CWTools/Rules/CwtProjectIndex.fs`）：
-`CwtProjectIndex.buildSnapshot` 将各文件文档聚合成符号索引并产出项目诊断
-（`CWT301` 未定义引用、`CWT302` 重复 type、`CWT401` inject 循环），输出确定
-有序并设有文件数/大小上限。`src/Main/CwtLanguageFeatures.fs` 负责生命周期：
-overlay 合并的文件枚举（未保存文档优先于磁盘，跳过 `.git`/`node_modules`/
-构建目录）、可取消防抖重建（只有最新请求版本可发布或激活）、以及 LSP 接线——`.cwt`
-补全合并项目符号、definition/references 走索引跳转、lint 仅在快照就绪时
-附加项目诊断。`## inject` 源路径对规则根做包含性校验（拒绝绝对路径与 `..`
-穿越，解析文件/目录链接，并用真实目录集合阻止链接循环）。
-
-候选规则激活（`CWTools/Rules/CwtActivation.fs` + `src/Main/Program.fs` 中持写锁
-的处理器）只把当前配置的手动规则根中验证通过的规则文件热替换进游戏模型；
-CWT-only 工作区只索引当前工作区，不激活游戏模型。候选可用要求每个规则文件
-可解析且不存在 Error 级诊断（或被显式提升为阻断项的诊断）；
-内容 hash + generation 追踪活动规则，替换在游戏状态写锁内原子完成，规则/
-模型 epoch 递增，失败发布 `CWT901` 并保留 last-known-good。被拒绝的候选
-绝不替换活动模型（`CWT900`），下一个有效候选自动重试；`reloadrulesconfig`
-仍是手动兜底。
+管线三层：
+1. **单文件元模型**（`CWTools/Rules/CwtLanguage*.fs` + `src/Main/CwtLanguageFeatures.fs`）：使用 `RulesParser.parseConfigWithMetadataDetailed` 解析，输出结构/表达式诊断（`CWT0xx`–`CWT2xx`）与上下文补全。
+2. **跨文件项目快照**（`CWTools/Rules/CwtProjectIndex.fs`）：基于不可变、版本化 overlay 快照（未保存文档优先于磁盘）生成确定性符号索引、跳转与项目诊断（`CWT301`、`CWT302`、`CWT401`）；`## inject` 路径执行严格包含性校验与符号链接环保护。
+3. **候选规则热替换**（`CWTools/Rules/CwtActivation.fs` + `src/Main/Program.fs`）：仅对当前配置的手动规则目录中校验通过的候选在写锁下原子替换并递增规则/模型 epoch；无效候选（`CWT900`）或替换失败（`CWT901`）保留 last-known-good 模型，`reloadrulesconfig` 保留为手动兜底。
 
 ### Shader 子系统
 
-`.shader` 和 `.fxh` 共用 CWTools Shader 解析器与 feature 层。分析按真实编译单元工作，Include、文件优先级、平台条件和 renderer contract 都会影响符号含义。
+`.shader` 与 `.fxh` 共用 `submodules/cwtools/` 中编译单元感知的 `PdxShaderFeatures` 能力层；Include、文件优先级、平台条件与 renderer contract 共同决定符号语义。
 
-`PdxShaderFeatures` 是共享功能入口。不要在 TypeScript 或某个工具中维护第二套解析器或近似 Shader 语义。Agent 与 MCP 应调用暴露同一模型的 LSP 命令。
-
-部分 Effect 由可执行程序调用，源码中没有直接引用，因此 Shader 修改需要保守处理。renderer contract 和已审核 ABI 证据用于区分已知调用、候选和未知；“找不到文本引用”本身不能证明 Effect 未使用。
+不要在 TypeScript 中实现平行 Shader 解析器；Agent 与 MCP 应调用 `PdxShaderFeatures` 支撑的 LSP 命令。部分 Effect 由游戏可执行程序直接调用，安全修改依赖 renderer contract 与已审核 ABI 证据——缺少脚本文本引用不代表 Effect 未使用。
 
 ### AI 子系统
 
-`client/extension/ai/` 运行在 Extension Host 中，负责 Provider、聊天状态、Prompt、工具 dispatch、工作区路径策略、Agent 技能与记忆。
+`client/extension/ai/` 运行在 Extension Host 中，负责 Provider 客户端、多账号订阅号池、聊天与话题状态、Prompt 构建、工具策略与分发、Agent 技能及工作区记忆。
 
-#### 单轮路由
+#### 单轮路由与状态
 
-内置 Agent 专注 Paradox / CWTools 语义领域，作为单 Agent 辅助运行。当前轮任务模式由用户显式钉住的模式确定性解析，不再调用任何独立路由模型：由 Agent 自己判断何时需要在写入前先解决属于用户的设计决策，并通过 `enter_plan_mode` 工具升级。
+内置 Agent 是专注 Paradox/CWTools 语义的单 Agent 助手。除用户显式固定模式（`/plan`、`/execute`、`/explore`、`/review` 或 `/mode <值>`）外，默认走 Execute，由有界只读检查确定普通修改；当存在属于用户的未决设计选择时，Agent 调用 `enter_plan_mode` 将授权收窄为 `plan_write_only`，使 plan guard 拦截本回合剩余项目写入；`exit_plan_mode` 只退出 Plan 而不恢复写权限，必须由用户批准后才能进入执行。
 
-用户可用 `/plan`、`/execute`、`/explore`、`/review` 或 `/mode <值>` 为整个会话钉住模式；被钉住的模式会让后续轮次完全跳过自动解析。
+`AgentSchedulingState` 是唯一持久化并在宿主与 Webview 间传递的调度状态，Prompt/工具执行标签仅在调用边界派生。`Implementation_Plan.md` 只包含单个机器可读 `cwtools-plan` 合同（可附带 Paradox 蓝图载荷）。`.cwtools/project/profile.json` 采用由 `/init` 重建的 V4 guidance-card schema。
 
-Plan 是 Agent 自己的升级决策，不是分类器的猜测。当用户明确要求方案，或仍存在属于用户的重大未决选择时，它会在首次项目写入前调用 `enter_plan_mode`：该调用把授权收窄为 `plan_write_only`，随后每次工具调用实时读取该状态的 plan guard 会拦截本回合剩余的项目写入。`exit_plan_mode` 只离开 Plan、不恢复写权限，因此模型无法绕过它刚刚请求的审批——只有用户的批准才能恢复。有界仓库检查足以确定的普通改动保持默认走 Execute。
-
-`AgentSchedulingState` 是唯一会持久化、并在宿主与 Webview 间传递的调度状态。Build、Plan 等 Prompt/工具执行标签只在调用边界由它派生，不会被独立恢复。历史持久化的 `'general' | 'hybrid'` 领域与多 Agent 调度模式在读取时平滑归一化为 `'paradox'` 与 `'single'`。回合结束后的状态会从调度 domain store 回流；处于 Plan 的回合不会被改写成 `finalize`（Plan 表示等待用户，而非已完成）；话题会保存用户钉住的 `modeOverride` 与已批准的 plan 产物，因此两者都能跨话题切换、重载与分叉存续。
-
-Paradox 领域可以查询当前 Profile、CWT 规则、索引和 LSP 证据。`CWTOOLS.md` 属于用户，只有缺失时才创建最小模板。
-
-生成的 `.cwtools/project/profile.json` 使用当前 V4 guidance-card schema。旧 Profile 结构会被拒绝并由 `/init` 重建；MCP 暴露定向 `guidance`，不再提供执行模式兼容选择器。
-
-#### Runner 与工具
+#### Runner 与工具策略执行
 
 ```mermaid
 sequenceDiagram
@@ -572,53 +409,32 @@ sequenceDiagram
     R-->>C: 流式输出和最终状态
 ```
 
-工具可用性、副作用、风险和并发策略以 registry 为准。执行校验包含能力资格（派生执行标签、运行时 Profile）、调用授权（Run 授权）和工作区路径包含边界。延迟工具只在被选中后替换为详细 Schema，复杂合同不会占用每次模型请求。`agentTools.ts` 只在策略引擎完成判断后 dispatch。文件写入还要经过路径包含、单文件写排他、排序后的多文件锁、Plan 模式门以及用户可选的 `confirm`（Diff 确认）/ `auto`（自动写入）两档模式。
+工具可用性、副作用、风险与并发策略以 `client/extension/ai/tools/registry.ts` 为准。所有工具调用在 `agentTools.ts` 分发前均须经过 `policyEngine.ts`；文件写入额外受路径包含、单文件写排他、排序多文件锁、Plan 模式门、`EvidenceGate` 语义预检、本地化 UTF-8 BOM 护栏与 `confirm` / `auto` 模式约束。
+
+类型化 run event 驱动流式输出、重放、检查点与恢复；新增事件必须同步 reducer 与 Webview 渲染器，恢复严格校验 V4 检查点合同。长任务受有界上下文压缩、预算与循环检测保护。
 
 #### 管理器 GUI 开发预览
 
-独立 Agent Manager 在“变更 / 运行 / 设置”旁挂载持久的“预览”面板。`ManagerGuiPreviewController` 负责目标文档、版本、选择、类型化快照与恢复；`GuiPreviewLoader` 与完整 GUI 工作台共享解析、精灵索引、纹理路径包含校验、解码缓存和按 Webview 生成 URI。Webview 画布只保存本地视口状态并收集交互，切换右侧 Tab 时隐藏而不销毁画布。
-
-GUI 引用携带文档版本、从零下标的元素层级路径、名称、类型和源码范围。添加到输入框不会自动启动任务；发送时通过现有 `ContextReferenceManager` 重新解析实时文档并生成有界只读源码上下文，写入仍走原工具策略与 Diff 确认。直接写磁盘的 Agent 工具会拒绝未保存的 GUI 草稿，run-ledger 写入通知则以防抖方式刷新两处预览。详见 [管理器 GUI 开发预览 Agent Note](.agents/notes/implemented/feature/2026-11-17-agent-manager-gui-development-preview.md)。写入后，`guiVisualCaptureRequest` 通过离屏画布生成固定坐标帧截图。Before/After 共用逻辑坐标，RGBA 比较生成 Diff 图、变化像素比例和边界。控制器每个 run 最多通过现有输入队列注入两次 `visual_verification`：支持视觉的 Provider 在同一回合审查图片，其他 Provider 只接收文本指标。没有基线时明确返回 After-only。最新证据保存在话题私有固定文件中并按 Webview 生成 URI，不进入 V4 checkpoint，也不启动游戏进程。
-
-`Implementation_Plan.md` 只包含一个机器可读 `cwtools-plan` 合同。Paradox 蓝图是该合同中的可选 payload；草案和审批就绪计划不再使用第二个 `cwtools-blueprint` 围栏，也不再需要独立的合同加载工具。
-
-Runner 用类型化事件支持流式展示、replay、checkpoint 和恢复。新增事件必须同步 reducer 与 Webview。恢复只接受当前 V4 快照合同；旧快照会被拒绝，不再迁移。
-
-长任务使用有界上下文压缩、checkpoint、预算和循环检测。
+独立 Agent Manager 在“变更 / 运行 / 设置”旁提供持久的 `.gui` 预览页（`ManagerGuiPreviewController` + 共享 `GuiPreviewLoader`）。元素选择通过 `ContextReferenceManager` 附带带版本号的只读源码引用；磁盘写入类 Agent 工具对未保存 GUI 草稿采取 fail-closed 拦截。GUI 写入后，固定坐标离屏 Before/After/Diff 捕获最多向当前回合注入两轮 `visual_verification` 证据（视觉 Provider 接收图片与像素指标，其余接收文本指标），证据存于话题私有有界文件中且不进入 V4 检查点。详见 [管理器 GUI 开发预览 Agent Note](.agents/notes/implemented/feature/2026-11-17-agent-manager-gui-development-preview.md)。
 
 #### Provider 与 Secret 边界
 
-Provider 凭据和网页搜索 Key 通过 VS Code SecretStorage 保存。不同 Provider 的请求与流式格式会被转换为 runner 使用的统一消息和工具调用模型。
+Provider 凭据、OAuth 令牌、代理凭据与网页搜索 Key 均存储在 VS Code SecretStorage。各 Provider 客户端将差异化的线协议统一转换为 runner 的通用消息与工具调用模型。实时网页、MCP payload 与 Provider 响应均按不可信输入处理。
 
-网络和 MCP 访问都是模型可见副作用，必须经过策略检查。实时网页、MCP payload 和 Provider 响应均视为不可信输入。
+### 独立 MCP 服务与原生桥接
 
-### 独立 MCP 服务
+`submodules/cwtools-mcp/` 独立维护与发布，包含严格单向依赖的三个包：
+- `cwtools-shared` — 传输无关契约、生成的 schema/探测代码、`createToolCallHandler` 以及共享纯计算公式（如 `targetingWeights.ts`，Extension Host 亦直接消费）。
+- `cwtools-node` — Node 宿主服务（文件系统、LSP 进程、复验、项目探测，不依赖 MCP SDK）。
+- `cwtools-mcp` — MCP 传输层接线与重导出。
 
-`submodules/cwtools-mcp/` 是独立仓库和 npm 发布包，默认开放六个白名单领域写入工具；非白名单写入仍不可用。
+Bridge 模式（复用已运行的 VS Code 扩展清单）与 Standalone 模式（自启 LSP）执行统一能力门禁：非支持或歧义工作区不暴露任何工具/资源且不启动 LSP；CWT-only 仅暴露 CWT 能力工具。6 个白名单领域写入工具默认启用，非白名单写入一律拒绝。
 
-默认模式会发现当前兼容的 VS Code 宿主，并通过扩展 bridge manifest 连接。客户端工作区必须与 bridge 工作区一致；不一致时返回不可用，而不是查询另一个项目。Bridge 与 Standalone 使用同一项目能力门禁：非支持/歧义工作区不披露工具/资源且不启动 LSP；CWT-only 只暴露可用于 CWT 的文档、导航与诊断工具。
+内部握手 `cwtools.ai.getHostCapabilities` 在游戏模型加载前校验 `{ protocolVersion, serverVersion, commands }`；不兼容宿主明确返回 `backend_incompatible`。面向非 MCP 消费者，扩展另在清单旁提供 bearer 认证的 `/cwtools/healthz` 与 `/cwtools/rpc`，仅转发白名单只读命令及 5 个导航/文档 LSP 方法。
 
-Standalone 模式可以启动自己的 LSP。两种模式共用生成的工具 schema、工作区检测器和 Host Service 契约。新增语义能力时，应先实现只读 `cwtools.ai.*` LSP 命令，加入服务端只读命令 allowlist，再通过生成的 MCP schema 暴露。
+不要手改 `submodules/cwtools-mcp/packages/cwtools-shared/src/generated/`；应运行 `npm run generate:mcp-schema` 与 `npm run generate:mcp-detection` 重新生成。
 
-子模块发布三个包，依赖关系严格单向：`cwtools-shared`（与传输无关的契约、工具 schema、`tools/callHandler` 里的传输无关调用处理器，以及 `tools/targetingWeights.ts` 这类纯计算）、`cwtools-node`（Node 宿主服务：文件系统、LSP 进程、复验、项目探测——只依赖 `cwtools-shared`、`chokidar` 与 `vscode-jsonrpc`，绝不依赖 MCP SDK）、`cwtools-mcp`（MCP 传输与生成的 schema；重新导出 Node 宿主，保证旧的深层导入仍可用）。需要 CWTools 语义但不想引入 MCP 依赖的宿主，导入 `cwtools-node`，并从 `cwtools-shared` 取 `createToolCallHandler`。
-
-扩展宿主也直接消费 `cwtools-shared` 里的索敌权重公式，因此 Agent 工具、MCP 面和分析面板展示的数字来自唯一实现。它的构建产物由 `package.ps1` 复制进 `release/node_modules` 并随 VSIX 一起发布。
-
-`cwtools.ai.getHostCapabilities` 是内部握手而非模型可见工具：它在游戏模型加载前返回 `{ protocolVersion, serverVersion, commands }`；Node 宿主收到旧的、畸形的或不完整的响应时报 `backend_incompatible` 并释放后端，而不是继续驱动它。
-
-面向非 MCP 消费者，扩展在现有清单旁提供 bearer 认证的 `/cwtools/healthz` 与 `/cwtools/rpc`。这些原生路由只把必需的只读 CWTools 命令和五个导航/文档 LSP 方法转发给活跃 LanguageClient，绝不分派 MCP 方法。`cwtools-node` 校验清单、pid、精确工作区和实时健康状态后才注入该宿主。缺失、失效、不匹配、未活跃或不可连接的宿主允许回退独立后端；活跃宿主不兼容则返回 `backend_incompatible`，不启动竞争实例。
-
-不要手改 `cwtools-shared/src/generated/` 下的文件。运行 `npm run generate:mcp-schema` 与 `npm run generate:mcp-detection`（或对应 `check:*`），在子模块内测试、提交和发布，最后更新根仓库指针。
-
-### 子模块职责
-
-| 子模块 | 内容 | 修改流程 |
-| --- | --- | --- |
-| `submodules/cwtools/` | F# 库和语义实现 | 在子模块内提交和测试，再更新根指针。 |
-| `submodules/cwtools-stellaris-config/` | Stellaris 规则数据 | 作为规则内容处理，用规则工具验证，并与库代码分开。 |
-| `submodules/cwtools-mcp/` | MCP 包和发布元数据 | 在子模块内构建和运行契约测试，按独立周期发布。 |
-
-### 构建与发布
+### 构建与发布流程
 
 ```mermaid
 flowchart TD
@@ -632,20 +448,16 @@ flowchart TD
     VSIX -->|"推送标签"| RELEASE["GitHub Release"]
 ```
 
-`npm run compile` 构建 Extension Host 和 Webview。打包流程会发布 Windows、Linux 和 macOS 的自包含服务端，把资源放入 `release/`，再生成 VSIX。
-
-推送 `v<version>` 标签会运行 `.github/workflows/release.yml`：在 Windows runner 上重建 VSIX，通过 GitHub OIDC 的 Trusted Publishing 发布到 VS Code 市场，并创建或更新 GitHub Release；标签必须与两份清单中的版本一致。
-
-根目录双语文档各自保持单一来源。`npm run build:docs` 会校验它们，并从 `docs/marketplace-readme.md` 生成 `release/README.md`；GitHub README 不再直接复制为插件市场介绍。
+`npm run compile` 构建 Extension Host 与 Webview bundle；`package.ps1` 发布 `win-x64`、`linux-x64`、`osx-x64` 自包含服务端、打包 Stellaris 规则、暂存 `release/` 并输出通用 VSIX。推送与两份清单版本一致的 `v<version>` 标签会触发 `.github/workflows/release.yml`，自动完成构建、校验、通过 GitHub OIDC Trusted Publishing 发布到 VS Code 市场以及创建/更新 GitHub Release。
 
 ### 关键约束速查
 
 | 约束 | 原因 |
 | --- | --- |
-| Webview 不访问 Node.js 和文件系统 | 保持浏览器沙盒和单一可信 I/O 边界。 |
-| 模型可见工具全部经过策略引擎 | 统一权限、副作用和审计事件。 |
-| 语义能力先进入 LSP | 避免 Extension Host、MCP 和 AI 各自演化出不同解析器。 |
-| 共享输出确定且有界 | 保证大型 Mod 的响应速度和测试可复现。 |
-| 在边界校验用户输入和线协议数据 | 防止异常消息或文件直接变成可信状态。 |
-| 子模块提交分开 | 保留所有权、历史和独立发布周期。 |
-| 用户可见英文和中文同步修改 | 保证两种受支持文档与 UI 都保持最新。 |
+| Webview 不访问 Node.js 或文件系统 | 保持浏览器沙盒与单一可信 I/O 边界。 |
+| 模型可见工具全部经过策略引擎 | 统一权限、副作用、锁与审计事件。 |
+| 语义能力先进入 LSP | 防止 Extension Host、AI 与 MCP 演化出多套解析器。 |
+| 共享输出与缓存确定且有界 | 保证大型 Mod 响应速度与测试可复现。 |
+| 在边界校验所有不可信输入 | 防止畸形消息或文件变成可信状态。 |
+| 子模块提交保持独立 | 保留所有权、历史与独立发布周期。 |
+| 用户可见英文与中文同步维护 | 保证双语文档与 UI 始终一致。 |

@@ -1,3 +1,10 @@
+/**
+ * Agent runtime coordinator.
+ *
+ * Bridges `AgentRunner` with durable thread/goal/ledger stores, per-topic
+ * `DomainStateStore` snapshots, prompt/interaction queues, profile catalogs,
+ * goal continuations, and conversation undo boundaries.
+ */
 import type { AgentRunner, AgentRunnerOptions } from '../agentRunner';
 import * as vs from 'vscode';
 import * as os from 'os';

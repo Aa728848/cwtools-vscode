@@ -613,7 +613,6 @@ const RAW_TOOL_DEFINITIONS: ToolDefinition[] = [
             },
         },
     },
-    // ignore_validation_error - REMOVED: AI must fix errors, not suppress them
     {
         type: 'function',
         function: {

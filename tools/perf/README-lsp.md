@@ -1,10 +1,21 @@
-# Reproducing LSP performance problems
+# Performance Tooling & LSP Profiling
 
-The scripts in this directory reproduce edit-time freezes and memory growth without changing files on disk. Keep the workspace, build commit, operation sequence, and trace together; a log by itself is not enough for a performance claim.
+Scripts in `tools/perf/` measure LSP edit/memory behavior, AI context baselines, and performance-log summaries without mutating workspace files on disk.
 
-## Run the 100-edit harness
+## Scripts in this directory
 
-Build the server, choose a large Stellaris workspace and a representative event file, then run it against the `CWTools Server` binary (`CWTools Server.exe` on Windows, no file extension on Linux, e.g. `artifacts/bin/Main/release_linux-x64/CWTools Server`; the assembly name contains a space, so quote the path):
+| Script | Purpose |
+| --- | --- |
+| `lsp-memory-profile.mjs` | Reproduces edit-time freezes and memory growth against a `CWTools Server` binary (comment-only edits + save + completion, restored on `didClose`). |
+| `capture-lsp-trace.ps1` | Attaches `dotnet-trace` to a running server PID to capture CPU, GC, allocation, contention, ThreadPool, and exception events. |
+| `ai-context-baseline.mjs` | Measures AI prompt/context assembly budgets (`npm run baseline:ai-context`). |
+| `analyze-performance-log.mjs` | Parses and summarizes LSP performance logs (covered by `npm run test:perf`). |
+
+Always keep the workspace metadata, build commit, exact operation sequence, and trace together—a log excerpt alone is insufficient for a performance claim.
+
+## Run the 100-edit LSP harness
+
+Build the server, pick a representative Stellaris workspace and event file, and point `--server` at the `CWTools Server` binary (quote the path because the assembly name contains a space):
 
 ```powershell
 node tools/perf/lsp-memory-profile.mjs `
@@ -17,56 +28,33 @@ node tools/perf/lsp-memory-profile.mjs `
   --hold-ms 300000
 ```
 
-Each iteration sends a comment-only change, a save, and a completion request. The process then remains open for five minutes so memory can settle. `didClose` restores the in-memory document; the harness never writes the edited content to disk.
+Record the printed server PID and keep the `Memory`, `Performance`, `Refresh`, `CarrierSnapshot`, and validation-phase logs.
 
-Record the printed server PID and retain the `Memory`, `Performance`, `Refresh`, `CarrierSnapshot`, and validation-phase logs.
+## Before/after baseline comparison
 
-## Before/after comparison on the same baseline
+1. Build baseline and candidate binaries with identical configuration (`debug` vs `release`, same RID) and run both against the same workspace and arguments.
+2. Record the `mem[...]` line from the `Memory` monitorLog at end-of-run and after full background validation completes (`alloc` = cumulative `GC.GetTotalAllocatedBytes`, `working` = process working set).
+3. Require identical final diagnostic counts (errors and warnings); a memory drop with changed diagnostics is a correctness regression.
 
-To attribute a memory delta to the server build, run two binaries against the same workspace with the same arguments and operation sequence:
+## Capture traces, live counters, and idle heap dumps
 
-1. Build a baseline server (e.g. the previous submodule pointer) and an optimized server from the same commit, with the same configuration (`debug` vs `release`, same RID). The current optimization round lives entirely in `submodules/cwtools`; the root `src/` tree is unchanged.
-2. Run the harness once per binary and keep the complete monitor log for each run.
-3. Record the `mem[...]` line from the `Memory` monitorLog at the end of the run and again after full background validation finishes, plus the final diagnostic counts. `alloc` is cumulative allocated bytes (`GC.GetTotalAllocatedBytes`) and `working` is the process working set; treat `alloc` as the allocation-pressure signal and `working` as the retained-memory signal.
-4. Require identical diagnostics between the two runs (same error and warning counts). A memory improvement with changed diagnostics is a correctness regression, not a win.
+- **Runtime trace** (attach while editing or settling; open `.nettrace` in PerfView or Visual Studio):
+  ```powershell
+  powershell -ExecutionPolicy Bypass -File tools/perf/capture-lsp-trace.ps1 -ProcessId 12345 -DurationSeconds 90
+  ```
+- **Live counters** (Windows and Linux):
+  ```bash
+  dotnet-counters monitor --process-id 12345 --counters System.Runtime
+  ```
+- **Idle retained-heap snapshot**: wait until the `Memory` monitorLog logs the post-validation or post-refresh idle trim (`Memory trimmed (...)` / `GC after global refresh (idle)`), then capture and compare dumps taken at the same lifecycle point:
+  ```bash
+  dotnet-gcdump collect --process-id 12345 --output heap-after-idle.gcdump
+  ```
 
-Current same-baseline result, Windows small fixture only (20 edits, 100 ms iteration delay, 5 s settle, `client/test/sample`, no vanilla data): end-of-run `alloc` 1052 MB -> 931 MB (about -11.5%) with `working` unchanged (174 MB -> 172 MB); after full background validation `alloc` 1002 MB -> 881 MB (about -12.1%). Diagnostics were identical (errors=572, warnings=749). These figures describe cumulative allocation on a small fixture; they do not represent the Linux 14 GB-scale workspace. Run the same comparison on Linux with a large workspace before claiming anything about that scenario.
-
-## Capture a runtime trace
-
-While the harness is editing or waiting, attach the trace collector to the printed PID:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File tools/perf/capture-lsp-trace.ps1 `
-  -ProcessId 12345 -DurationSeconds 90
-```
-
-The `.nettrace` includes CPU samples, GC and allocation events, contention, ThreadPool events, and exceptions. Open it in PerfView or Visual Studio. Match request IDs and heartbeat gaps from the LSP log to the dominant request phase in the trace.
-
-## Live counters and idle heap snapshots
-
-For a live view of GC and ThreadPool behavior while the harness runs, attach `dotnet-counters` to the printed PID (works on Windows and Linux):
-
-```bash
-dotnet-counters monitor --process-id 12345 --counters System.Runtime
-```
-
-For a retained-heap snapshot, let the run go idle first. The server trims at business milestones with a full compacting GC (`GC.Collect(2, Aggressive)` plus LOH compaction); wait until the `Memory` monitorLog reports the post-validation or post-refresh idle trim (`Memory trimmed (...)` / `GC after global refresh (idle)`), then collect:
-
-```bash
-dotnet-gcdump collect --process-id 12345 --output heap-after-idle.gcdump
-```
-
-Compare baseline and optimized dumps in PerfView at the same lifecycle point — always after idle and trim, never mid-edit. Differences taken mid-run mostly capture validation batch garbage.
-
-## Scenarios to compare
-
-Use the same build and workspace for each case:
+## Recommended comparison scenarios
 
 1. Save a large event file while requesting completion in another file.
-2. Edit a section template, then request completion and definition navigation.
-3. Perform 25 saves each across solar initializers, section templates, component sets, and events.
+2. Edit a section template, then request completion and go-to-definition.
+3. Run 25 saves each across solar initializers, section templates, component sets, and events.
 4. Create, rename, and delete duplicate or overridden definitions.
-5. Edit scripted triggers, scripted effects, inline scripts, and their callers in the same run.
-
-For every reported measurement, keep the trace, complete monitor log, build commit, workspace file count, and exact operation sequence.
+5. Edit scripted triggers, scripted effects, inline scripts, and their callers in one run.

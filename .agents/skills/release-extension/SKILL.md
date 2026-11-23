@@ -31,7 +31,7 @@ description: >-
    - 暂存相关文件并提交：`git commit -m "Bump version to <version> and add changelog"`。
    - 创建 Git 标签：`git tag v<version>`。
 6. **推送标签触发发布 CI（自动）**：
-   - 推送分支与标签至 GitHub（如遇网络连接问题，可临时设置本地代理环境变量 `$env:all_proxy="http://127.0.0.1:7890"`）。
+   - 推送分支与标签至 GitHub（如遇网络受限，可按本机环境配置 `all_proxy` / `https_proxy`）。
    - `.github/workflows/release.yml` 随即构建全平台 VSIX、通过 Trusted Publishing 发布到 VS Code 市场，并以该版本更新日志创建或刷新 GitHub Release；本地 `gh release create` 仅作为回退路径。
 
 ---
@@ -115,18 +115,14 @@ git tag "v<version>"
 ### 步骤 6：推送标签触发发布 CI
 
 ```powershell
-# 如遇到 GitHub 网络连接限制，配置代理环境变量（如使用 7890 端口）：
-$env:all_proxy = "http://127.0.0.1:7890"
-
+# 如遇 GitHub 网络受限，可按本机代理配置 $env:all_proxy
 git push origin main
 git push origin "v<version>"
 ```
 
 推送标签后 `.github/workflows/release.yml` 在 Windows runner 上依次执行：构建全平台自包含 VSIX → `npm run check:release` → 用 Trusted Publishing（OIDC）发布到 VS Code 市场 → 上传 VSIX 工作流产物 → 以该版本更新日志创建或刷新 GitHub Release。标签与两处 `package.json` 的版本不一致时，任务会在任何上传之前失败。
 
-- **重跑**：在 Actions 页面手动运行该工作流并填写已有标签；取消勾选 `publish_marketplace` 可只重建 VSIX 与 GitHub Release（同版本重复发市场会被拒绝）。
-- **回退**：CI 不可用时仍可本地执行 `powershell -ExecutionPolicy Bypass -File ./package.ps1 -Publish`，它会提交版本改动、打标签并 `gh release create`。
-- **首次配置**：发布者属主需在市场发布者管理页面创建 Trusted Publishing 策略（仓库属主 `Aa728848`、仓库 `cwtools-vscode`、workflow `release.yml`、environment 留空）。
+- **重跑 / 回退 / OIDC 首次配置**：见 [CONTRIBUTING.md](../../../CONTRIBUTING.md#发布版本)；CI 不可用时本地回退可执行 `powershell -ExecutionPolicy Bypass -File ./package.ps1 -Publish`。
 
 ### 步骤 7：验证发布结果
 

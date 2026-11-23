@@ -1,26 +1,11 @@
 /**
- * Context Maintenance Coordinator (P0 design 2).
+ * Context Maintenance Coordinator — single decision point for "free in-place
+ * prune before paid summarization" (`estimate -> prune -> re-estimate -> decide`).
  *
- * Single decision point for "free in-place prune before paid summarization".
- * Every paid-compaction entry (admission / manual / mid-loop / overflow /
- * emergency) runs the same ladder:
- *
- *   estimate (unified) -> free prune -> re-estimate -> decide
- *
- * …but the *decision* is reason-aware:
- * - admission: histories under threshold are returned untouched (no mutation);
- * - manual / overflow: always summarize — a manual request is explicit and a
- *   provider-reported overflow is authoritative; the prune only shrinks the
- *   summarizer input;
- * - mid_loop: escalate to paid only when still over threshold AND the prune
- *   freed < 10% (preserves the pre-existing anti-thrash gate);
- * - emergency: summarize when still over the emergency threshold.
- *
- * The per-message estimate is the unified `estimateChatMessageTokens` (counts
- * tool_calls / reasoning / provider continuation state), replacing the older
- * content-only estimate at the decision layer. `extraTokens` keeps each
- * caller's existing accounting convention (tool schemas, reserved output),
- * so thresholds stay comparable to their pre-refactor values.
+ * Decisions are reason-aware: `admission` leaves under-threshold histories untouched;
+ * `manual` / `overflow` always summarize after pruning; `mid_loop` escalates only when
+ * still over threshold and pruning freed < 10%; `emergency` summarizes if still above
+ * the emergency cap. `extraTokens` preserves caller-side schema/output accounting.
  */
 import type { ChatMessage } from '../types';
 import { compactMessagesInPlace, type CompactMessagesOptions } from '../contextBudget';

@@ -1,4 +1,4 @@
-/** Deterministic soft/hard runtime budget evaluation (plan sections 5.2 and 10). */
+/** Deterministic soft/hard runtime budget evaluation. */
 
 export interface RunBudgetLimits {
     modelCalls: number;

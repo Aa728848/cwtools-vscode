@@ -1093,7 +1093,6 @@ export async function activate(context: ExtensionContext) {
 		private disposables: Disposable[] = [];
 
 		constructor() {
-			// Fix #7: capture registration Disposable instead of dropping it
 			this.disposables.push(
 				workspace.registerTextDocumentContentProvider("cwtools", this)
 			);
@@ -1410,7 +1409,6 @@ export async function activate(context: ExtensionContext) {
 			}
 		}, 0);
 	}));
-	// Fix #8: reuse shared gameLanguages instead of duplicate gameLanguages2
 	const docSelector2 = gameLanguages.map(lang => ({ scheme: 'file', language: lang }));
 	const inlineProvider = new AIInlineCompletionProvider(aiService, promptBuilder, usageTracker);
 	context.subscriptions.push(
@@ -2429,11 +2427,9 @@ export async function activate(context: ExtensionContext) {
 			}
 		};
 
-		// Toggle Inline Text commands for dynamic icon
 		safeRegisterCommand(context, "cwtools.toggleInlineTextOn", toggleInlineTextFunc);
 		safeRegisterCommand(context, "cwtools.toggleInlineTextOff", toggleInlineTextFunc);
 
-		// GUI Preview command
 		safeRegisterCommand(context, "cwtools.previewGUI", async () => {
 			const editor = vs.window.activeTextEditor;
 			if (!editor) {
@@ -2449,7 +2445,6 @@ export async function activate(context: ExtensionContext) {
 			await GuiPanel.create(context.extensionPath, doc);
 		});
 
-		// Global Ship Design visual editor command
 		safeRegisterCommand(context, "cwtools.shipDesign.open", async () => {
 			const editor = vs.window.activeTextEditor;
 			if (!editor) {
@@ -2464,7 +2459,6 @@ export async function activate(context: ExtensionContext) {
 			await ShipDesignPanel.create(context.extensionPath, editor.document, indexService);
 		});
 
-		// Solar System Preview command
 		safeRegisterCommand(context, "cwtools.previewSolarSystem", async () => {
 			const editor = vs.window.activeTextEditor;
 			if (!editor) {
@@ -2477,7 +2471,6 @@ export async function activate(context: ExtensionContext) {
 				vs.window.showWarningMessage(localize('Solar System Preview is only available for .txt files.', '恒星系预览仅适用于 .txt 文件。'));
 				return;
 			}
-			// Check if file is in solar_system_initializers directory
 			const normalizedPath = fileName.replace(/\\/g, '/');
 			if (!normalizedPath.includes('solar_system_initializers')) {
 				const previewLabel = localize('Preview', '预览');
@@ -2490,12 +2483,10 @@ export async function activate(context: ExtensionContext) {
 			await SolarSystemPanel.create(context.extensionPath, doc);
 		});
 
-		// Static Galaxy Preview/Edit command (also reachable via explorer/editor context menus)
 		safeRegisterCommand(context, "cwtools.previewStaticGalaxy", async (target?: vs.Uri) => {
 			await openStaticGalaxyPreview(target);
 		});
 
-		// Event Chain Visualizer command
 		safeRegisterCommand(context, "cwtools.visualizeEventChain", async () => {
 			const editor = vs.window.activeTextEditor;
 			await EventChainPanel.create(
@@ -2505,13 +2496,11 @@ export async function activate(context: ExtensionContext) {
 			);
 		});
 
-		// Tech Tree Visualizer command
 		safeRegisterCommand(context, "cwtools.visualizeTechTree", async () => {
 			const editor = vs.window.activeTextEditor;
 			await TechTreePanel.create(context.extensionPath, editor?.document);
 		});
 
-		// Targeting Weight Analysis command
 		safeRegisterCommand(context, "cwtools.targetWeights.open", async () => {
 			await TargetWeightPanel.create(context.extensionPath, { indexService });
 		});
@@ -3037,7 +3026,6 @@ export async function deactivate(): Promise<void> {
 		ErrorReporter.warn('Extension', 'Failed to stop CWTools language client during deactivation', error);
 	}
 }
-// export default defaultClient;
 
 /**
  * Auto-detect a Paradox game's vanilla installation path by scanning

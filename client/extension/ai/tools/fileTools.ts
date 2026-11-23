@@ -103,14 +103,14 @@ export class FileToolHandler {
     private editFailCount = new Map<string, number>();
 
     /**
-     * Anchor-aware repeated write-failure guard (P0 design 1). Keyed by
+     * Anchor-aware repeated write-failure guard. Keyed by
      * signatureKey({scopeId, tool, pathKey, anchorHash, errorClass}); values
      * count consecutive failures of the SAME anchor. Clearing is preview-first
      * and evidence-based: a signature only dies when the side-effect-free
      * preview proves the anchor now succeeds (replace_lines self-correction
      * often changes line numbers with the file content untouched, so a
-     * content-hash precondition would false-block it). Sub-agents share this
-     * executor, so the scopeId in every key keeps sibling budgets isolated.
+     * content-hash precondition would false-block it). Scoping by scopeId
+     * keeps independent runs sharing this executor isolated.
      */
     private failureSignatures = new Map<string, { count: number }>();
     private static readonly ANCHOR_GUARD_MAX_SIGNATURES = 256;
@@ -215,8 +215,8 @@ export class FileToolHandler {
     }
 
     /**
-     * Top-level runs reset everything; a sub-agent scope resets only its own
-     * guard signatures (sub-agents share this executor with the parent run).
+     * Reset all tracked failures for top-level runs, or only the matching
+     * scopeId's guard signatures when scoped runs share this executor.
      */
     resetEditFailureTracking(scopeId?: string): void {
         if (!scopeId) {
@@ -1632,8 +1632,8 @@ export class FileToolHandler {
         try {
             const uri = vs.Uri.file(filePath);
             try { await vs.workspace.openTextDocument(uri); } catch { /* may already be open */ }
-            // P3 Fix: debounce diagnostic events - wait 300ms after last change
-            // to avoid returning incomplete diagnostics from intermediate LSP states
+            // Debounce diagnostic events (300ms after last change) so we don't
+            // return incomplete diagnostics from intermediate LSP states.
             await this.withAbortAndTimeout(new Promise<void>((resolve) => {
                 let settled = false;
                 let debounce: ReturnType<typeof setTimeout> | null = null;

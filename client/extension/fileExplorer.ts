@@ -1,7 +1,5 @@
 import * as vscode from 'vscode';
 
-//#region Utilities
-
     export interface TreeNode {
         isDirectory: boolean
         children: TreeNode[]
@@ -40,7 +38,6 @@ import * as vscode from 'vscode';
                 const segment = splitpath[i]!;
                 const isLastSegment = i === splitpath.length - 1;
 
-                // Initialize node if it doesn't exist
                 if (!ptr[segment]) {
                     ptr[segment] = {
                         fileName: segment,
@@ -58,7 +55,6 @@ import * as vscode from 'vscode';
         }
 
         function convertToTreeNode(node: TreeNodeInternal): TreeNode {
-            // Convert children from Record to Array
             const childrenArray = Object.values(node.children).map(convertToTreeNode);
 
             return {
@@ -69,17 +65,10 @@ import * as vscode from 'vscode';
             };
         }
 
-        // Process all input files
         arr.forEach(addnode);
 
-        // Convert the tree to the expected format
         return Object.values(tree).map(convertToTreeNode);
       }
-
-    // interface Entry {
-    //     uri: vscode.Uri;
-    //     type: vscode.FileType;
-    // }
 
     export class FilesProvider implements vscode.TreeDataProvider<TreeNode> {
         private readonly _tree : TreeNode = {
@@ -111,25 +100,10 @@ import * as vscode from 'vscode';
         async getChildren(element?: TreeNode): Promise<TreeNode[]> {
             if (element) {
                 return element.children;
-                // const children = await this.readDirectory(element.uri);
-                // return children.map(([name, type]) => ({ uri: vscode.Uri.file(path.join(element.uri.fsPath, name)), type }));
             }
             else {
                 return this._tree.children;
             }
-
-            // const workspaceFolder = vscode.workspace.workspaceFolders.filter(folder => folder.uri.scheme === 'file')[0];
-            // if (workspaceFolder) {
-            //     const children = await this.readDirectory(workspaceFolder.uri);
-            //     children.sort((a, b) => {
-            //         if (a[1] === b[1]) {
-            //             return a[0].localeCompare(b[0]);
-            //         }
-            //         return a[1] === vscode.FileType.Directory ? -1 : 1;
-            //     });
-            //     return children.map(([name, type]) => ({ uri: vscode.Uri.file(path.join(workspaceFolder.uri.fsPath, name)), type }));
-            // }
-
         }
         refresh(files : FileListItem[]) {
             this.parseTree(files);

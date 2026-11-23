@@ -64,9 +64,8 @@ import {
 } from './providers';
 
 /**
- * 读取当前 Kimi 账号的实时模型目录。
- *
- * 读不到就返回空数组：设置页随后用随包发出的表作答，一份读不到的目录不该让选择器变空。
+ * Fetch the live Kimi model catalog; returns `[]` on error so settings falls
+ * back to the bundled catalog instead of rendering an empty picker.
  */
 async function loadKimiCodeCatalog(aiService: AIService) {
     return await aiService.listKimiCodeModels().catch(() => []);
@@ -784,10 +783,9 @@ export class ChatSettingsManager {
     }
 
     /**
-     * 把一条配置写失败收窄到「键本身」。
-     *
-     * VS Code 只在键已注册时接受写入，否则抛 ERROR_UNKNOWN_KEY；未注册的键是不该被
-     * 整段保存拖垮的编程错误，因此这里报告并跳过，让其余设置照常落盘。
+     * Isolate config write errors to a single key: VS Code throws
+     * ERROR_UNKNOWN_KEY for unregistered keys, so report and skip without
+     * aborting the rest of the save batch.
      */
     private async updateConfig(
         cfg: vs.WorkspaceConfiguration,

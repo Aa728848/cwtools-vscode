@@ -23,7 +23,7 @@ description: >-
 
 3. **严禁滥用 `scalar`，必须深入原版反查强类型**：
    - 严禁为了快速消除扫描警告或字段缺失报错而随意使用 `scalar`！
-   - 必须深入原版游戏目录（`D:\Steam\steamapps\common\Stellaris\common`、`00_defines.txt` 或 `README` 文档）反查实际调用：
+   - 必须深入原版游戏目录（`<Stellaris 安装目录>/common`、`00_defines.txt` 或 `README` 文档）反查实际调用：
      - 若为特定游戏对象（如 `preset_vassal`、`SMELTING`、超频模式等），必须绑定为具体的强类型 `<type>`（如 `<agreement_preset>`、`<mega_overclock>`、`<tradable_actions>`）；
      - 若为同类对象分组标识符（如 `overclock_group`），必须定义为 `value_set[...]`（如 `value_set[megastructure_overclock_group]`）；
      - 若为动态本地化拼接前缀或键名，定义为 `localisation`；
@@ -33,7 +33,7 @@ description: >-
 4. **引擎事实注释必须原样保留（禁止手改行号）**：
    - `triggers.cwt` / `effects.cwt` 中的 `## cost` / `## engine` / `## engine_evidence` **不是文档注释，而是反编译派生的引擎事实**，由 `tools/engine-cost/` 单独维护，与规则同步是两条链路。
    - 同步规则时：新增 alias **不强制**补标注（覆盖率由成本工具单独负责）；**严禁删除或改写已有的 `## engine_evidence`**。
-   - 其中的 `dump L<行号>` 指向 `anti_stellaris` 仓库某个**特定 dump 版本**。游戏更新后这些行号会整体失效，但**不能手改单条**——必须用 `merge-engine-cost.cjs` 整批重锚（见 [docs/engine-perf-lint-handoff.md](../../../docs/engine-perf-lint-handoff.md)）。
+   - 其中的 `dump L<行号>` 指向某个**特定反编译 dump 版本**。游戏更新后这些行号会整体失效，但**不能手改单条**——必须用 `merge-engine-cost.cjs` 整批重锚（见 [tools/engine-cost/README.md](../../../tools/engine-cost/README.md)）。
    - 成本类标注只允许经 `tools/engine-cost/merge-engine-cost.cjs` 写入：它会在反编译结论与人工细分冲突时**保留人工值**，直接覆盖会把 `o(n)_galaxy`/`script_eval` 等细分降级为普通 `o(n)`。
 
 5. **严格核实属性层级结构**：
@@ -109,7 +109,7 @@ node tools/rules-sync/stellaris-rules-sync.js report --no-open
 2. **缺失的 Subtype**：
    - 在 `game_rules.cwt` 或 `on_actions.cwt` 中补齐 subtype（如 `can_pop_group_auto_migrate_abroad`、`on_cosmogenesis_exodus_fleet_reached`），并配置好 `## replace_scope` 契约。
 3. **未覆盖的字段属性（Uncovered Fields）**：
-   - 前往原版游戏目录 `D:\Steam\steamapps\common\Stellaris\common\<folder>\` 搜索该字段的全部用法；
+   - 前往原版游戏目录 `<Stellaris 安装目录>/common/<folder>/` 搜索该字段的全部用法；
    - 确认层级位置与类型定义（查验是否已有对应 type，严禁写 `scalar`）；
    - 在对应的 `.cwt` 文件中添加：
      ```cwt

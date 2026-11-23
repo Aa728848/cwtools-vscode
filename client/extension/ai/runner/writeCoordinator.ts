@@ -1,5 +1,5 @@
 // WriteQueue: serializes write operations to prevent race conditions on AST/file state.
-// Each AgentRunner owns one; sub-agents get their own instance for isolated tracking.
+// Each AgentRunner owns an isolated instance.
 export class WriteQueue {
     private queue: Promise<void> = Promise.resolve();
     /** Incremented on every enqueue; used by PartitionedWriteQueue to detect idle queues. */

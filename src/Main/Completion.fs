@@ -930,9 +930,6 @@ let completionCallLSP (game: IGame) (p: CompletionParams) debugMode supportsInse
 
     let comp = game.Complete position path filetext
 
-    // let extraKeywords = ["yes"; "no";]
-    // let eventIDs = game.References.EventIDs
-    // let names = eventIDs @ game.References.TriggerNames @ game.References.EffectNames @ game.References.ModifierNames @ game.References.ScopeNames @ extraKeywords
     let convertKind (x: CompletionCategory) =
         match x with
         | CompletionCategory.Link -> (true, CompletionItemKind.Method)

@@ -6220,7 +6220,6 @@ type Server(client: ILanguageClient) =
                 } |> Async.StartAsTask
 
             let analyze (file: VersionedTextDocumentIdentifier) options isEditAction =
-                //eprintfn "Analyze %s" (file.uri.ToString())
                 activeLintPaths.[normaliseCachePath file.uri.LocalPath] <- 0uy
                 analyzeTask file options isEditAction |> ignore
 
@@ -11997,7 +11996,7 @@ type Server(client: ILanguageClient) =
                                                            "col",    JsonValue.Number(decimal (int td.range.StartColumn))
                                                            "ok",     JsonValue.Boolean true |]))
 
-                                    // Phase 2: Fallback to full AllEntities scan (for non-typed symbols)
+                                    // Stage 2: fallback to full AllEntities scan (for non-typed symbols)
                                     let tryFindInGame (g: IGame<'T>) =
                                         g.AllEntities()
                                         |> Seq.tryPick (fun struct (e, _) ->

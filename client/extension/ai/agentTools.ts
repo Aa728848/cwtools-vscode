@@ -341,7 +341,7 @@ export class AgentToolExecutor {
     private readonly impactEvidenceCalls = new Map<string, EvidenceCallRecord[]>();
     private readonly postWriteAffectedFiles = new Map<string, string[]>();
     private static readonly ACTIVE_SKILL_POLICY_LIMIT = 64;
-    /** Lazily constructed semantic evidence gate (plan §4 P0). */
+    /** Lazily constructed semantic evidence gate. */
     private evidenceGate?: EvidenceGate;
 
     private readonly clientGetter: () => LanguageClient;
@@ -1111,7 +1111,7 @@ export class AgentToolExecutor {
         return { allowed: true };
     }
 
-    // - Semantic evidence gate (plan §4 P0) -
+    // Semantic evidence gate
 
     private evidenceGateMode(): EvidenceGateMode {
         const raw = vs.workspace.getConfiguration('stellarisLanguageServices.ai.evidenceGate').get<string>('mode', 'enforce');
@@ -2044,10 +2044,9 @@ export class AgentToolExecutor {
                 };
             }
 
-            // Semantic evidence gate (plan §4): semantic PDX writes must carry
-            // FileToolHandler invokes the async preflight after it has resolved
-            // the path and built the exact final content. This keeps policy and
-            // path gates outside it while preventing fragment-only validation.
+            // Semantic evidence gate: FileToolHandler runs async preflight after
+            // resolving the path and building final content, keeping policy/path
+            // gates outside it while avoiding fragment-only validation.
             const racePromises: Promise<unknown>[] = [
                 this.executeInternal(toolName, args, toolContext),
                 abortPromise,
@@ -2085,9 +2084,8 @@ export class AgentToolExecutor {
                     runId: context?.runnerOptions?.runRecord?.runId,
                     threadId: context?.runnerOptions?.threadId,
                 });
-                // Attach the evidence gate decision id so the model and the UI
-                // can correlate the write with its evidence (plan §4.2 step 7
-                // stays with the existing post-write diagnostics revalidation).
+                // Attach the evidence gate decision id so the model and UI can
+                // correlate the write with its preflight and post-write evidence.
                 if (resultRecord) {
                     if (gateOutcome?.errorResult) {
                         Object.assign(resultRecord, gateOutcome.errorResult);
@@ -2129,7 +2127,7 @@ export class AgentToolExecutor {
                 }
                 const writtenFiles = this.extractResultWrittenFiles(result);
 
-                // ReadTracker read/write synchronization (T2.2)
+                // Keep ReadTracker synchronized after file writes.
                 if (readTracker) {
                     for (const file of writtenFiles) {
                         readTracker.invalidate(file);
@@ -2212,7 +2210,6 @@ export class AgentToolExecutor {
                 result = await this.lspHandler.explainScope(args as any); break;
             case 'parse_pdx_fragment':
                 result = await this.lspHandler.parsePdxFragment(args as any); break;
-            // validate_code - REMOVED: replaced by get_diagnostics + edit_file inline diagnostics
             case 'get_lsp_status':
                 result = await this.lspHandler.getLspStatus(args as any); break;
             case 'get_diagnostics':
@@ -2520,7 +2517,6 @@ export class AgentToolExecutor {
                 result = { success: false, error: 'Unsupported manage_goal action.' };
                 break;
             }
-            // ignore_validation_error - REMOVED: AI must fix errors, not suppress them
             case 'remove_ignored_diagnostic':
                 result = await this.externalHandler.removeIgnoredDiagnostic(args as any); break;
             case 'get_ignored_diagnostics':

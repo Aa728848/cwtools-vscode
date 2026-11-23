@@ -1,7 +1,7 @@
 /**
  * 从 Stellaris `common/component_templates/*.txt` 中静态提取索敌相关字段（纯函数）。
  *
- * 对应 docs/stellaris-targeting-weight-4.5.2.md §5.2 的武器组件模板字段表：
+ * 对应 docs/better_stellaris/17_ship_targeting_weights.md 中的武器组件模板字段表：
  * min_damage / max_damage / accuracy / tracking / hull_damage / shield_damage /
  * armor_damage / shield_penetration / armor_penetration / size_damage_factor /
  * use_ship_main_target / target_weights。

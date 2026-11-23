@@ -1,4 +1,4 @@
-// Phase 4 candidate-activation tests (CwtActivation + CwtProjectIndex).
+// Candidate-activation tests (CwtActivation + CwtProjectIndex).
 //
 // Covers the decideActivation state machine: activation on valid candidates,
 // last-known-good on rejection, upgrade after repair, and content-hash

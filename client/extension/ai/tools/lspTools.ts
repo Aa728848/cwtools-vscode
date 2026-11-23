@@ -204,11 +204,9 @@ export interface LspToolContext {
 export class LspToolHandler {
     private cwtRulesCache: CwtRuleCache | null = null;
     /**
-     * Cache lifecycle for cwtRulesCache (plan §7.4): the parsed rule cache used
-     * to live forever. It now reloads when the mtime/size signature over the
-     * bounded candidate file set changes; `cwtRulesGeneration` is a monotonic
-     * reload counter and `cwtRulesContentHash` a sha256 (16 hex chars) over the
-     * rule file contents. Both are process-local and exposed in tool results so
+     * Cache lifecycle for cwtRulesCache: reloads when the mtime/size signature
+     * over candidate rule files changes. `cwtRulesGeneration` (monotonic counter)
+     * and `cwtRulesContentHash` (16-char sha256) are exposed in tool results so
      * evidence consumers can detect stale rule data.
      */
     private cwtRulesGeneration = 0;
@@ -1165,7 +1163,7 @@ export class LspToolHandler {
             rules: rules.slice(0, 80),
             totalCount: rules.length,
             truncated: rules.length > 80,
-            // Cache lifecycle metadata so evidence consumers can detect stale rule data (plan §7.4).
+            // Cache lifecycle metadata so evidence consumers can detect stale rule data.
             rulesGeneration: this.cwtRulesGeneration,
             rulesContentHash: this.cwtRulesContentHash,
         };
@@ -1413,7 +1411,7 @@ export class LspToolHandler {
             candidates: candidates.slice(0, limit),
             totalConsidered: rules.length,
             source: 'cwtools-node-rules',
-            // Cache lifecycle metadata so evidence consumers can detect stale rule data (plan §7.4).
+            // Cache lifecycle metadata so evidence consumers can detect stale rule data.
             rulesGeneration: this.cwtRulesGeneration,
             rulesContentHash: this.cwtRulesContentHash,
             warnings: [
@@ -2075,8 +2073,8 @@ export class LspToolHandler {
 
     /**
      * Return the parsed CWT rule cache, reloading when any candidate rule
-     * file's mtime/size changed (plan §7.4). Rule facts are drawn from every
-     * `.cwt` file under the active config root, plus the docs/modifier logs.
+     * file's mtime/size changed. Rule facts are drawn from every `.cwt` file
+     * under the active config root, plus the docs/modifier logs.
      */
     private async getCwtRulesCache(): Promise<CwtRuleCache> {
         const signature = this.computeCwtRulesSignature();
@@ -2117,7 +2115,7 @@ export class LspToolHandler {
      * roots (not just the first yielding one) so edits to shadowed rule files
      * still bump the generation. The MCP side (cwtools-shared knowledge/rules)
      * uses the same algorithm, so both ends describe rule revisions with the
-     * same hash semantics (plan §7.4).
+     * same hash semantics.
      */
     private computeCwtRulesContentHash(): string {
         const hash = crypto.createHash('sha256');

@@ -6,184 +6,105 @@
 
 ## English
 
-Stellaris Language Serves is a VS Code extension for Paradox modding. It combines the CWTools language server with visual editors, vanilla comparison, Shader support, and an optional AI workspace.
+Stellaris Language Serves is a VS Code extension for Paradox modding. It combines the CWTools language server with visual editors, vanilla comparison, Shader support, Steam Workshop publishing, and an optional AI workspace.
 
 [![Built with F#](https://img.shields.io/badge/backend-F%23%20%2F%20.NET%2010-blue.svg?style=flat-square)](https://dotnet.microsoft.com/)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-brightgreen.svg?style=flat-square)]()
 
-Most language features work across supported Paradox game profiles. The visual tools and bundled rules are developed primarily for Stellaris.
+Core language features cover Stellaris, Hearts of Iron IV, Europa Universalis IV and V, Crusader Kings II and III, Imperator: Rome, Victoria II and 3, and custom CWT projects. Bundled rules and visual tools primarily target Stellaris.
 
-### What it includes
+### Feature overview
 
-| Area | What you can do |
+| Area | Capabilities |
 | --- | --- |
-| Script editing | Get diagnostics, completion, hover information, navigation, references, symbols, CodeLens, and inlay hints for Paradox script and localisation. Stellaris hovers also carry reverse-engineered engine cost and hardcoded-behaviour notes for the script command under the cursor. |
-| Visual tools | Preview and edit Stellaris GUI files, global ship designs, solar systems, static galaxies, particles, entities, technology trees, event chains, and weapon targeting weights. Ship top-icon DDS sheets can be rendered from a ship set's models. |
-| Shader editing | Work with `.shader` and `.fxh` files using compile-unit-aware diagnostics, navigation, completion, formatting, rename, and semantic highlighting. |
-| CWT rule editing | Edit `.cwt` rule files with their own language id: parser/structure diagnostics (CWT0xx), directive and field-expression validation (CWT1xx/CWT2xx), project-wide undefined-reference and duplicate-type checks (CWT3xx), context completion for root blocks/directives/field expressions/symbols, cross-file navigation, and safe hot-swap of validated edits from the configured manual rules folder into the game model (CWT9xx). A rules-only repository starts the server in CWT-only mode without a game install and never activates a game model; a game workspace keeps full mode. |
-| Vanilla comparison | Compare a mod file with its vanilla counterpart and migrate the block under the cursor. |
-| Steam Workshop | Upload the current mod to the Steam Workshop: create a new item or update an existing one, with tags, preview image, visibility, and change note. Requires the Steam client running and signed in to an account that owns the game. |
-| AI workspace | Use the built-in Paradox/CWTools-focused agent with `EvidenceGate` semantic prechecks, `confirm` / `auto` file-write controls, project indexing, Agent skills, and optional MCP servers. |
-| External MCP | Connect Codex, Claude Code, or another MCP client to the separate `cwtools-mcp` package with semantic queries and default-on whitelisted domain writes. |
-
-The extension also supports Hearts of Iron IV, Europa Universalis IV and V, Crusader Kings II and III, Imperator: Rome, Victoria II and 3, and custom CWT projects. Game-specific coverage depends on the active profile and available rules.
+| Script & localisation | Diagnostics, completion, hover (with Stellaris engine-cost and hardcoded-behaviour notes), go-to-definition, references, symbols, CodeLens, inlay hints, and aura tooltip localisation generation. |
+| Visual editors | Interactive views for Stellaris GUI, global ship designs, 3D solar systems, static galaxies, entities, animations, particles, technology trees, event chains, weapon targeting weights, and ship top-icon DDS sheets. |
+| Shader editing | Compile-unit-aware diagnostics, navigation, completion, formatting, rename, and semantic highlighting for `.shader` and `.fxh` files. |
+| CWT rule authoring | Dedicated `cwt` language support (`CWT0xx`–`CWT9xx` diagnostics, context completion, cross-file navigation, validated hot-swap into the game model, and CWT-only mode without a game install). |
+| Vanilla & Workshop | File/block vanilla diffing, selective block migration, and `.gitignore`/`.steamignore`-aware Steam Workshop uploading. |
+| Built-in AI & MCP | Single-agent Paradox/CWTools assistant (`EvidenceGate`, `confirm`/`auto` writes, skills, memory, GUI preview verification) plus the standalone `cwtools-mcp` server for external agents. |
 
 ### Install
 
-Install from the [Visual Studio Marketplace](https://marketplace.visualstudio.com/items?itemName=ForeverSkywalker.foreverskywalker-stellaris-cwtools), or install a `.vsix` manually:
+Install from the [Visual Studio Marketplace](https://marketplace.visualstudio.com/items?itemName=ForeverSkywalker.foreverskywalker-stellaris-cwtools) (updates automatically), or install a `.vsix` from [Releases](https://github.com/Aa728848/cwtools-vscode/releases) via `Extensions: Install from VSIX...`.
 
-1. Download the latest `.vsix` from [Releases](https://github.com/Aa728848/cwtools-vscode/releases).
-2. In VS Code, run `Extensions: Install from VSIX...` and select the file.
-3. When prompted, choose the vanilla game folder. CWTools uses it to build its initial cache.
+When prompted on first launch, select your vanilla game directory so CWTools can build its initial cache. Packaged releases include the language-server binaries for Windows, macOS, and Linux; the .NET SDK is only needed for local development.
 
-Installing from the VS Code Marketplace updates the extension automatically. A `.vsix` installed this way is not updated by the extension itself; download the newer release and install it again.
+### Key workflows
 
-The packaged extension includes its language-server binaries. The .NET SDK is only needed when building the project locally.
+#### Script editing & aura localisation
 
-### Common workflows
+Open a supported mod folder as a VS Code workspace. Diagnostics and navigation activate once project and vanilla indexes finish loading.
 
-#### Edit Paradox script
+- **Vanilla diff & migration**: run **Compare File with Vanilla**, **Compare Block with Vanilla**, **Migrate Block from Vanilla**, or **Migrate Changed Blocks from Vanilla** from the editor title bar or context menu.
+- **Aura localisation**: place the cursor inside a `friendly_aura` or `hostile_aura` block in `common/component_templates/*.txt` and run **Generate Aura Localisation for This Block** (or **for All Auras in This File**) to produce paste-ready `.yml` tooltip lines in a read-only `cwtools://auraloc` preview buffer.
 
-Open a supported mod workspace as a folder. Diagnostics and navigation become available after the language server has loaded the project and vanilla data.
+#### Visual editors & Stellaris asset tools
 
-#### Open a visual editor
+Open a supported file and invoke the editor-title button or context menu:
 
-Use the editor-title action or the file context menu:
+- `.gui` — GUI canvas and property editor
+- `common/global_ship_designs/*.txt` — **Ship Design Workbench**: 3D locator-based hull/section/weapon assembly, slot and required-core editing (click-to-place, drag-and-drop, Fill all), tier/origin-filtered component library, Host-owned drafts (applied only on **Save**), static stat readouts with provenance, and deterministic offline loadout generation
+- `solar_system_initializers/*.txt` — 3D solar-system layout and orbit preview
+- `map/setup_scenarios/*.txt` — static-galaxy preview with coordinate and explicit-hyperlane editing
+- `.asset` / `.gfx` — entity, animation, material, and particle previews
+- Technology & event files — dependency graphs
+- `common/component_templates/*.txt` — weapon targeting-weight analysis
+- **Generate Ship Icon Sheet from Models** — renders normal and `_damaged` `ship_sizes_top.dds` sheets directly from resolved ship-set `.mesh` models (including nested `attach` parts and workspace `meshOverrides`) and prints ready-to-paste `spriteTypes` / `icon =` blocks to the `CWTools Ship Icons` output channel
 
-- `.gui`: GUI canvas and property editor
-- `solar_system_initializers/*.txt`: 3D solar-system preview
-- `map/setup_scenarios/*.txt`: static-galaxy preview and position editor
-- `.asset` and `.gfx`: entity, animation, and particle previews
-- technology and event files: dependency graphs
-- `common/component_templates/*.txt`: weapon targeting-weight analysis
-- `common/global_ship_designs/*.txt`: global ship design workbench
+Visual edits apply through VS Code workspace edits so undo and redo behave normally. Previews explicitly distinguish source-backed data from runtime estimates.
 
-Edits made by a visual editor use VS Code workspace edits, so they participate in normal undo and redo. Some previews are intentionally approximate; for example, runtime-generated hyperlanes are never presented as exact source data.
+#### Upload to Steam Workshop
 
-#### Edit global ship designs visually
+Open a workspace containing `descriptor.mod` and run **Upload Mod to Steam Workshop** (requires the Steam client running and signed in). The Steam Workshop view pre-fills metadata from `descriptor.mod` and existing Workshop items, stages a filtered copy honoring `.gitignore`, `.steamignore`, and `stellarisLanguageServices.workshop.extraIgnorePatterns`, and writes the new `remote_file_id` back on first upload. Set `stellarisLanguageServices.workshop.appIdOverride` for games without a built-in Steam App ID.
 
-Open `common/global_ship_designs/*.txt` in a mod workspace and run **Open Ship Design Workbench** from the editor title or Command Palette. The workbench opens in the current editor column instead of splitting the editor in half. The current file and other workspace designs can be switched from the design tree; create, duplicate, and delete operations write only the active workspace document. Display names follow the configured localisation languages, including vanilla fallback and `$reference$` expansion, while edit fields and write-back keep the original script keys.
+#### Built-in AI workspace
 
-The centre view assembles the ship-size root entity, selected section entities, and visible weapon entities through their real mesh/script locators, with graphical-culture prefix fallback, textures, `attach` children, orbit/pan/zoom, and the `ship_designer` worldgfx environment when available. Section-only hulls do not require an artificial root mesh, and large hull meshes (tens of MB) are streamed from the workspace instead of being size-limited. Missing models or locators remain editable; actual loading or operation failures use a short error message rather than a persistent diagnostics panel. The Stellaris-style HUD overlays component icons and size badges above and below the model, resolves those icons from `.gfx` sprite definitions with DDS/TGA decoding, and keeps production and ship-data readouts on the right. Sections are arranged left-to-right, with up to five components per row in each section column. Parameterized `inline_script` components are expanded for key, size, icon, component set, and statically evaluable power before candidates and icons are resolved. The component library and the design-card strip do not cover the ship with diagnostic lists.
+Run **Stellaris AI: Open AI Chat** or **Stellaris AI: Open Agent Manager** from the Command Palette.
 
-The slot editor changes sections, components, and required core components. Required components appear as a vertical icon rail on the right edge of the viewport, one position per ship-size `required_component_set` (empty sets show a placeholder); clicking one lists only compatible components from the same set in the library, and dropping or clicking a candidate replaces it. The layout follows the in-game ship designer: clicking a slot opens the **Add components** library on the left (compatible candidates only, with icons, tier numerals, and size badges), and designs are listed as cards grouped by ship size below the viewport. The library filters by name or key, by tier derived from `upgrades_to` chains, can hide obsolete components whose upgrade is also listed, and can hide vanilla components (definitions that resolve to the game rather than a workspace root); the filters are remembered. Clicking a library component picks it up: its icon follows the cursor, every slot it can go into is highlighted, and each click on a highlighted slot places it; right-click or Esc puts it down. Dragging a component onto a slot also works, or drop it on **Fill all** to equip every compatible slot (tick **Only empty slots** to keep equipped slots); switching designs from the card strip keeps the library open on the closest matching slot. Every edit updates only a Host-owned draft, and the component library stays open across draft refreshes. Replacing a component rebuilds only that component's model; the rest of the ship, the camera, and the library list stay in place. Undo, redo, and discard also affect only that draft. The host revalidates the current slot, component, fixed-target state, and compatibility before every drop. There is no incompatible-candidate toggle or diagnostics list. **Generate draft** is an offline, deterministic loadout generator with role and technology-scope choices (all, starting, or custom prerequisites); it returns an explainable unsaved draft and does not reproduce the engine's runtime auto-best algorithm.
+- **Modes & safety**: single-agent Paradox/CWTools assistant with `/plan`, `/execute`, `/explore`, and `/review` mode pins, `EvidenceGate` semantic prechecks, BOM-safe localisation writes, and `confirm` (diff preview) or `auto` write control.
+- **Manager GUI Preview**: the detached Agent Manager adds a `.gui` **Preview** tab where you can select elements to attach structured source references to chat, and automatically runs up to two rounds of Before/After/Diff visual verification after Agent GUI edits.
+- **Providers, account pools & proxy**: credentials live in VS Code SecretStorage. Subscription lines (Codex, Claude, Kimi Code, MiniMax Code, Command Code, WorkBuddy, and OpenDesign) share a multi-account rotation pool (`sequential` / `round-robin` / `sticky`, rate-limit failover, quota meters) and unified **AI Settings → Subscription channel proxy** controls (auto detect, custom HTTP/HTTPS/SOCKS5 proxy, or direct).
+- **Customization & memory**: customize skills (`~/.cwtools/skills`, `.agents/skills`, `.cwtools/skills`), agent profiles (`~/.cwtools/agents`), extra MCP servers (`~/.cwtools/mcp.json` or `.cwtools/mcp.json`), custom providers (`~/.cwtools/providers.json`), and global instructions (`~/.cwtools/CWTOOLS.md`). Completed runs distill reusable workspace lessons into `.cwtools/experience.md` when enabled.
 
-Only `global_ship_designs` is edited: ship sizes, section/component templates, assets, and locators are read-only inputs. Growth-stage loadouts are read-only and their source is preserved; shared metadata remains editable. The source TextDocument is not edited while you work. **Save** applies the current draft through one VS Code workspace edit and then saves the document. Semantic incompatibilities do not block saving, but malformed source, stale document versions, and writes outside the workspace do. Common static costs, upkeep, power, hull, defences, speed, and sensor values show their provenance; unresolved expressions, dynamic country modifiers, unsupported damage formulas, and non-representable shaders remain explicitly partial or unknown rather than being presented as exact game values.
+#### External MCP clients
 
-#### Generate ship top-icon sheets from models
-
-Stellaris draws the ship-size icons in the ship designer and fleet view from `gfx/interface/icons/ship_parts/ship_sizes/ship_sizes_top.dds`, one 80×40 frame per size. `Generate Ship Icon Sheet from Models` renders that sheet from the models themselves, so a mod ship set no longer has to borrow vanilla art.
-
-Run the command from the Command Palette (or the editor-title button inside a mod workspace), pick a graphical culture, then a category group and the ship sizes inside it, and confirm the destination. Each size is resolved the way the game resolves it: the size's `icon` selects the sprite frame, `common/section_templates` names the section entity for every slot, and that entity's `pdxmesh` names the `.mesh` file. Sections are merged in their authored coordinates (no locator translation — vanilla section art is already positioned in hull space), projected top-down, and written as uncompressed ARGB8888 DDS at the sprite sheet's declared `noOfFrames` width, so the file drops in without editing any `.gfx`.
-
-Frames are drawn as the vanilla icon frame: a 1px transparent gutter, a 1px accent border, a vertical panel gradient, and a near-black silhouette lit by a soft glow in the accent colour. Both `ship_sizes_top.dds` and its `..._top_damaged.dds` companion are written; the damaged sheet uses the red variant of the same palette, so the outline is identical and only the colours differ. Sizes are grouped by their `class` (military, military stations, starbases, civilian hulls, and so on), and sizes that resolve to no model are left out of the lists instead of producing empty frames.
-
-Slots that offer several section templates use the first candidate by default; choose **Choose each slot manually** to override any of them. When a model cannot be resolved at all (missing `pdxmesh`, unmodelled slot, or a name that does not follow the `<culture>_<entity>` convention), use the **manual model entry** at the top of the size list: it stores an entity name or a `.mesh` path per ship size in `stellarisLanguageServices.shipIcons.meshOverrides` in the workspace settings, and that size resolves through the override from then on. Clearing the entry restores the automatic chain.
-
-When several sizes share one icon key, only one of them can keep that frame: the rest are packed into free frames, and once the sheet is full it is widened instead of dropping ships, with the counts reported. The command also writes a paste-ready `spriteTypes` block to the `CWTools Ship Icons` output channel — the two sheet sprites with the produced `noOfFrames`, a `GFX_<ship_size>_top` / `_top_damaged` pair per size, and a list of the `icon =` values to copy into the matching `ship_size` blocks so each ship reaches its own frame. Replace an existing definition instead of adding a duplicate.
-
-Hulls whose geometry lives on entities referenced through `attach` are collected too, down to four levels with cycle protection, so a model assembled from parts renders whole. A `attach`-referenced mesh that carries only locators is skipped and reported once, in locator wording.
-
-Collision proxies and alpha/additive effect planes are excluded from the silhouette, because including them would inflate the outline. Frames that reference a mesh that cannot be read stay blank instead of shifting the other sizes, and every skip and warning is listed in the `CWTools Ship Icons` output channel.
-
-#### Compare with vanilla
-
-Use **Compare File with Vanilla** from the editor title bar or **Compare Block with Vanilla** from the editor context menu on a matching mod file. **Migrate Block from Vanilla** replaces the block under the cursor while preserving the coordinates of other pending edits, and **Migrate Changed Blocks from Vanilla** lets you batch-migrate selected blocks from the diff view.
-
-#### Upload to the Steam Workshop
-
-Open a mod workspace (a folder with a `descriptor.mod`), then run `Upload Mod to Steam Workshop` from the Command Palette or the editor title button. The form opens in the dedicated `Steam Workshop` view in the activity bar, pre-filled from `descriptor.mod`; for an update, the current description is also read back from the Workshop page. Confirm the title, description, tags, preview image, visibility, and change note, then upload.
-
-A mod whose `descriptor.mod` has no `remote_file_id` is uploaded as a new Workshop item (private by default), and the new item id is written back to `remote_file_id`; later uploads update that item. The Steam client must be running and signed in to an account that owns the game. For games whose Steam App ID is not known to the extension, set `stellarisLanguageServices.workshop.appIdOverride`.
-
-Steam uploads everything in the folder it is given, so the extension first builds a filtered copy of the mod in a temporary staging directory and uploads that. The mod's own `.gitignore` and `.steamignore` files are applied with git's own rules, including negation and per-directory scoping; version-control and editor metadata (`.git`, `.github`, `.vscode`, `.idea`, and similar) is always excluded. Add patterns to `stellarisLanguageServices.workshop.extraIgnorePatterns` for build output or local-only files that no ignore file covers, or set `stellarisLanguageServices.workshop.useIgnoreFiles` to false to upload the mod folder verbatim. The result reports how many files were uploaded and how many the rules kept out; a mod with nothing to exclude is uploaded directly, with no copy at all.
-
-#### Generate aura localisation
-
-Auras in `common/component_templates/*.txt` need a tooltip string of their own. Put the cursor inside a `friendly_aura` or `hostile_aura` block and run `Generate Aura Localisation for This Block`, or run `Generate Aura Localisation for All Auras in This File` to convert every aura in the file at once. Both commands are available from the Command Palette, the editor context menu, and the lightbulb.
-
-The generated lines open in a read-only `cwtools://auraloc` buffer, ready to paste into the matching localisation `.yml`:
-
-```yaml
-SRA_Aura_5_1:0 "§Y防御性光环§!\n对盟友舰船效果：\n $MOD_SHIP_SHIELD_DAMAGE_MULT$：§G+50%§!\n $MOD_SHIP_ARMOR_DAMAGE_MULT$：§G+50%§!\n $MOD_SHIP_HULL_DAMAGE_MULT$：§G+50%§!"
-```
-
-Every `modifier` entry becomes `$MOD_<KEY>$` followed by its value: `_mult` keys and fractional values are rendered as percentages (`0.5` → `§G+50%§!`), other values keep their written form, and negative values are shown in red. `damage_per_day` follows as labelled lines (daily damage, shield/armor/hull damage, accuracy, penetration, size factor). The localisation key is taken from `stack_info.id`, falling back to `name`.
-
-Nothing is written to disk, and the aura script is not modified: paste the lines yourself, and reference the generated key from the aura's `modifier` (`custom_tooltip = <KEY>`) if you want to replace the auto-generated tooltip. When nothing can be generated (the cursor is outside every aura block, the block has no key, or the file does not parse), the same buffer shows the reason as `#` comment lines.
-
-#### Use the AI panel
-
-Run **Stellaris AI: Open AI Chat** from the Command Palette (or **Stellaris AI: Open Agent Manager** for the detached manager window). The built-in agent focuses on the Paradox/CWTools semantic domain as a single-agent assistant; use `/plan`, `/execute`, `/explore`, or `/review` to pin the session mode. Provider credentials are stored through VS Code SecretStorage, while file writes follow the selected `confirm` (diff preview card before writing) or `auto` mode, `EvidenceGate` semantic prechecks, and BOM-safe localisation enforcement.
-
-The detached Agent Manager includes a **Preview** tab beside Changes, Run, and Settings. Choose or pin a `.gui` file, zoom and pan the canvas, click or Ctrl-click elements, or drag a marquee, then use **Add to conversation** to attach their structured source references to the composer. Agent writes refresh the preview and highlight changed elements; **Open workbench** keeps the full GUI editor available. Save dirty GUI drafts before allowing an Agent write. After a GUI write, the previewer also produces Before/After/Diff evidence and injects it into the same run for agent review, with at most two automatic correction rounds. The preview tab exposes these images and pixel metrics; providers without vision support receive text metrics only. No game process is launched, and preview verification remains an approximation of runtime rendering.
-
-The ChatGPT-subscription-compatible Codex provider uses a browser sign-in flow and the extension's own agent runtime. It is an integration with an upstream compatibility endpoint, not a public stable API, so upstream changes can require extension updates. The Codex picker uses a built-in model catalog, not an account entitlement list; OpenAI API and Codex subscription availability can differ.
-
-The built-in **WorkBuddy** (`workbuddy-subscription`) and **OpenDesign** (`opendesign`) subscription lines participate in the same multi-account **Account Pool** (`sequential` / `round-robin` / `sticky` rotation, rate-limit cooldown failover, and per-account quota meters). WorkBuddy discovers local desktop `.info` sessions (including optional `$wbEncrypted` at-rest protection key unsealing without downgrading sealed desktop files), supports browser OAuth sign-in, CN daily check-in, and routes CN `claude-*` models to `/v1/messages` while sending gzip-compressed streaming payloads to `/v2/chat/completions`. OpenDesign accepts both device-code OAuth (`controlKey` + `runtimeKey` with AMR coding-plan/wallet quota meters) and static console API keys in the same pool.
-
-Subscription providers share **AI Settings → Subscription channel proxy**. Choose **Auto detect**, **Custom proxy**, or **Direct connection**, then click **Save proxy** before signing in or testing. Custom mode accepts HTTP, HTTPS, and SOCKS5 addresses (for example `http://127.0.0.1:7890` or `socks5://127.0.0.1:1080`), with optional `username:password@` authentication stored in VS Code SecretStorage. Leave the address empty to keep the saved proxy. Auto mode checks VS Code `http.proxy`, `HTTPS_PROXY` / `HTTP_PROXY` / `ALL_PROXY` (including lowercase variants), then Windows/macOS manual system proxy settings; PAC is not evaluated. Without a detected proxy it connects directly. A configured proxy failure is reported without a direct fallback. Changes apply to subsequent token, account, quota and chat requests; active streams continue with their existing connection. Browser sign-in uses the browser's own proxy settings.
-
-Agent behavior can be customized from the user home directory: skills live in `~/.cwtools/skills` (project-level `.agents/skills` and `.cwtools/skills` still apply), agent profiles in `~/.cwtools/agents`, and additional MCP servers can be declared in `~/.cwtools/mcp.json` (user level) or `.cwtools/mcp.json` (project level, Claude-style `mcpServers` JSON). Extra AI providers (endpoint, model list, API key via environment-variable reference) can be declared in `~/.cwtools/providers.json`. Global instructions that apply to every workspace live in `~/.cwtools/CWTOOLS.md`. The agent can also save a reusable skill into the project itself (`save_skill` writes `.agents/skills/<name>/SKILL.md`, the same layout Kimi Code discovers, so saved skills are portable across agents) and load it on demand with `run_skill`. When the first task starts without a project knowledge database, the agent auto-initializes it in the background (`stellarisLanguageServices.ai.autoInitProjectKnowledge`). Completed runs distill reusable lessons into a workspace experience store and recall them on similar future tasks (`stellarisLanguageServices.ai.experience.enabled`, human-readable projection at `.cwtools/experience.md`).
-
-#### Connect an external MCP client
-
-`cwtools-mcp` is maintained and released separately. It exposes semantic queries plus six whitelisted domain-write tools by default and normally reuses the language server already running in VS Code. Reliable Paradox/CWT evidence is required: unsupported or ambiguous workspaces disclose no tools/resources and do not start a language server; an unknown game uses generic Paradox mode rather than assuming Stellaris.
+The separately published [`cwtools-mcp`](https://github.com/Aa728848/cwtools-mcp) server exposes CWTools semantic queries and six default-on whitelisted domain-write tools. It reuses the active VS Code language server when available and requires verified Paradox/CWT workspace evidence before exposing tools.
 
 ```sh
 codex mcp add cwtools -- npx -y cwtools-mcp --stdio
-```
-
-```sh
 claude mcp add cwtools --scope user -- npx -y cwtools-mcp --stdio
 ```
 
-See the [cwtools-mcp repository](https://github.com/Aa728848/cwtools-mcp) for standalone mode and manual configuration.
-
-### Architecture
+### Architecture at a glance
 
 ![System architecture overview](docs/system-architecture.png)
 
-The main runtime boundaries are:
+- `client/extension/` — VS Code Extension Host, filesystem/LSP/AI host boundaries
+- `client/webview/` — browser-sandboxed panels and visual editors (`postMessage` only)
+- `src/LSP/`, `src/Main/` — F# / .NET 10 language server
+- `submodules/cwtools/`, `submodules/cwtools-stellaris-config/`, `submodules/cwtools-mcp/` — upstream library, Stellaris rules, and standalone MCP packages
 
-- `client/extension/`: VS Code Extension Host code and filesystem access
-- `client/webview/`: browser-sandboxed panels and visual editors
-- `src/LSP/` and `src/Main/`: the F#/.NET language server
-- `submodules/cwtools/`: the upstream CWTools library
-- `submodules/cwtools-stellaris-config/`: Stellaris CWT rules
-- `submodules/cwtools-mcp/`: the separately released MCP server with default-on whitelisted domain writes
-
-Webviews communicate with the Extension Host through messages and do not access Node.js or the filesystem directly. The [architecture guide](ARCHITECTURE.md) covers the data flows and maintenance boundaries in detail.
+See [ARCHITECTURE.md](ARCHITECTURE.md) for data flows, locking rules, and subsystem boundaries.
 
 ### Develop
 
-You need Node.js 20+, npm 10+, the .NET 10 SDK, Git with submodule support, and VS Code 1.90+.
+Prerequisites: Node.js 20+, npm 10+, .NET 10 SDK, Git (with submodules), and VS Code 1.90+.
 
 ```bash
 git clone --recurse-submodules https://github.com/Aa728848/cwtools-vscode.git
 cd cwtools-vscode
 npm install
+(cd submodules/cwtools-mcp && npm ci && npm run build -w cwtools-shared)
 npm run compile
 npm run test:unit
 ```
 
-Useful checks:
-
-| Command | Purpose |
-| --- | --- |
-| `npm run lint` | Lint Extension Host and Webview code. |
-| `npm run compile` | Compile TypeScript and bundle Webviews. |
-| `npm run test:unit` | Run unit tests. |
-| `dotnet build src/LSP/` | Build the reusable LSP layer. |
-| `dotnet build src/Main/` | Build the server executable. |
-| `npm run verify` | Run the broad local quality gate. |
-| `npm run build:docs` | Validate bilingual docs and generate the Marketplace README. |
-
-Read [CONTRIBUTING.md](CONTRIBUTING.md) before changing code, packaging the extension, or editing a submodule. CWT rule authors should start with the [rule configuration guide](docs/cwt-rule-config.md).
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the full verification matrix, submodule workflows, CWT rule tooling, and VSIX packaging/release steps.
 
 ### License
 
-Released under the [MIT License](LICENSE.md). This project builds on [CWTools](https://github.com/cwtools) and the work of the Paradox modding community.
+Released under the [MIT License](LICENSE.md). Built on [CWTools](https://github.com/cwtools) and the Paradox modding community.
 
 ---
 
@@ -191,181 +112,102 @@ Released under the [MIT License](LICENSE.md). This project builds on [CWTools](h
 
 ## 中文
 
-Stellaris Language Serves 是一款面向 Paradox Mod 开发的 VS Code 扩展。它把 CWTools 语言服务、可视化编辑器、原版对比、Shader 支持和可选的 AI 工作区放在同一个插件中。
+Stellaris Language Serves 是一款面向 Paradox Mod 开发的 VS Code 扩展，整合了 CWTools 语言服务、可视化编辑器、原版对比、Shader 支持、Steam 创意工坊上传与可选 AI 工作区。
 
 [![Built with F#](https://img.shields.io/badge/backend-F%23%20%2F%20.NET%2010-blue.svg?style=flat-square)](https://dotnet.microsoft.com/)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-brightgreen.svg?style=flat-square)]()
 
-语言服务覆盖多个受支持的 Paradox 游戏 Profile；可视化工具和随插件提供的规则主要围绕 Stellaris 开发。
+核心语言能力覆盖 Stellaris、Hearts of Iron IV、Europa Universalis IV / V、Crusader Kings II / III、Imperator: Rome、Victoria II / 3 及自定义 CWT 项目；内置规则与可视化工具主要围绕 Stellaris 开发。
 
-### 主要功能
+### 功能概览
 
-| 范围 | 可以做什么 |
+| 模块 | 核心能力 |
 | --- | --- |
-| 脚本编辑 | 为 Paradox 脚本和本地化提供诊断、补全、悬停信息、跳转、引用、符号、CodeLens 和嵌入提示。Stellaris 的悬停还会附带光标所在脚本命令的引擎开销与硬编码行为说明（来自反编译分析）。 |
-| 可视化工具 | 预览或编辑 Stellaris GUI、全局舰船设计、恒星系、静态银河、粒子、实体、科技树、事件链和武器索敌权重；也可以从舰船模型渲染舰船顶部图标 DDS 表。 |
-| Shader 编辑 | 按真实编译单元处理 `.shader` 和 `.fxh`，提供诊断、跳转、补全、格式化、重命名和语义高亮。 |
-| CWT 规则编辑 | 用独立的 `cwt` 语言编辑 `.cwt` 规则文件：解析/结构诊断（CWT0xx）、指令与字段表达式校验（CWT1xx/CWT2xx）、项目级未定义引用与重复类型检查（CWT3xx）、根块/指令/字段表达式/符号的上下文补全、跨文件跳转，以及把当前配置的手动规则目录中验证通过的编辑安全热替换进游戏模型（CWT9xx）。纯规则仓库以 CWT-only 模式启动服务，无需游戏安装且不会激活游戏模型；游戏工作区保持 full mode。 |
-| 原版对比 | 将 Mod 文件与原版对应文件对比，并迁移光标所在的代码块。 |
-| Steam 创意工坊 | 把当前 Mod 上传到 Steam 创意工坊：可新建物品或更新已有物品，支持标签、预览图、可见性与更新说明。需要 Steam 客户端已运行并登录拥有该游戏的账号。 |
-| AI 工作区 | 使用专注于 Paradox/CWTools 语义领域的内置单 Agent 助手，配合 `EvidenceGate` 语义预检、`confirm` / `auto` 文件写入控制、项目索引、Agent 技能与可选 MCP 服务。 |
-| 外部 MCP | 通过独立发布的 `cwtools-mcp`，让 Codex、Claude Code 等客户端查询 CWTools 语义并使用默认开启的白名单领域写入工具。 |
-
-语言服务还支持 Hearts of Iron IV、Europa Universalis IV 和 V、Crusader Kings II 和 III、Imperator: Rome、Victoria II 和 3，以及自定义 CWT 项目。具体能力取决于当前 Profile 和可用规则。
+| 脚本与本地化 | 诊断、补全、悬停（含 Stellaris 反编译引擎开销与硬编码行为说明）、跳转、引用、符号、CodeLens、嵌入提示与光环 Tooltip 本地化生成。 |
+| 可视化编辑器 | Stellaris GUI、全局舰船设计、3D 恒星系、静态银河、实体/动画/粒子、科技树、事件链、武器索敌权重分析与舰船顶部图标 DDS 表渲染。 |
+| Shader 编辑 | 按真实编译单元提供 `.shader` / `.fxh` 诊断、跳转、补全、格式化、重命名与语义高亮。 |
+| CWT 规则编写 | 独立的 `cwt` 语言支持（`CWT0xx`–`CWT9xx` 诊断、上下文补全、跨文件跳转、校验通过后安全热替换，以及无需游戏安装的 CWT-only 模式）。 |
+| 原版对比与工坊 | 文件/代码块原版差异对比、按块或批量迁移，以及遵循 `.gitignore`/`.steamignore` 的 Steam 创意工坊上传。 |
+| 内置 AI 与 MCP | 专注 Paradox/CWTools 语义的单 Agent 助手（`EvidenceGate`、`confirm`/`auto` 写入、技能、记忆、GUI 视觉核对），以及面向外部 Agent 的独立 `cwtools-mcp`。 |
 
 ### 安装
 
-从 [Visual Studio 市场](https://marketplace.visualstudio.com/items?itemName=ForeverSkywalker.foreverskywalker-stellaris-cwtools) 安装，或手动安装 `.vsix`：
+推荐从 [Visual Studio 市场](https://marketplace.visualstudio.com/items?itemName=ForeverSkywalker.foreverskywalker-stellaris-cwtools) 安装（自动更新），或从 [Releases](https://github.com/Aa728848/cwtools-vscode/releases) 下载 `.vsix` 后运行 `Extensions: Install from VSIX...` 手动安装。
 
-1. 从 [Releases](https://github.com/Aa728848/cwtools-vscode/releases) 下载最新 `.vsix`。
-2. 在 VS Code 中运行 `Extensions: Install from VSIX...`，选择下载的文件。
-3. 首次提示时选择原版游戏目录，CWTools 会据此建立缓存。
+首次启动时按提示选择原版游戏目录，CWTools 会据此建立初始缓存。发布包已内置 Windows、macOS、Linux 三平台语言服务端；只有本地开发构建时才需要安装 .NET SDK。
 
-通过 VS Code 市场安装的版本会随市场自动更新；以 `.vsix` 方式安装的版本不会由扩展自行更新，需要重新下载新版本并再次安装。
+### 常用工作流
 
-发布的扩展已经包含语言服务端；只有本地构建项目时才需要 .NET SDK。
+#### 脚本编辑与光环本地化
 
-### 常用方式
+将受支持的 Mod 目录作为工作区打开，待项目与原版索引加载完成后即可使用诊断与导航功能。
 
-#### 编辑 Paradox 脚本
+- **原版对比与迁移**：在编辑器标题栏或右键菜单运行 **与原版对比文件**、**与原版对比代码块**、**从原版迁移当前代码块** 或 **从原版迁移所有变更块**。
+- **光环本地化**：在 `common/component_templates/*.txt` 的 `friendly_aura` 或 `hostile_aura` 块内运行 **生成光环本地化（光标所在块）**（或 **当前文件全部光环**），即可在只读 `cwtools://auraloc` 预览页获得可直接粘贴进 `.yml` 的本地化条目。
 
-把受支持的 Mod 目录作为工作区打开。语言服务完成项目和原版数据加载后，诊断、补全和跳转等功能会自动启用。
+#### 可视化编辑器与 Stellaris 资产工具
 
-#### 打开可视化编辑器
+打开对应文件后，通过编辑器标题栏按钮或右键菜单启动：
 
-使用编辑器标题栏按钮或文件右键菜单：
+- `.gui` — GUI 画布与属性编辑器
+- `common/global_ship_designs/*.txt` — **舰船设计工作台**：基于真实 locator 的 3D 船体/区段/武器组装、槽位与核心组件编辑（点击放置、拖放、填充全部）、按等级与来源筛选的组件库、Host 草稿机制（点击 **保存** 才写回文档）、带来源标注的静态数值面板，以及确定性离线配装生成
+- `solar_system_initializers/*.txt` — 3D 恒星系布局与轨道预览
+- `map/setup_scenarios/*.txt` — 静态银河预览与坐标/显式超空间航道编辑
+- `.asset` / `.gfx` — 实体、动画、材质与粒子预览
+- 科技与事件文件 — 依赖关系图
+- `common/component_templates/*.txt` — 武器索敌权重分析
+- **从模型生成舰船顶部图标表** — 从舰船组 `.mesh` 模型直接渲染正常态与 `_damaged` 态 `ship_sizes_top.dds` 精灵表（支持多层 `attach` 子实体与 `meshOverrides` 覆盖），并在 `CWTools Ship Icons` 输出通道打印可直接粘贴的 `spriteTypes` / `icon =` 定义
 
-- `.gui`：GUI 画布和属性编辑
-- `solar_system_initializers/*.txt`：3D 恒星系预览
-- `map/setup_scenarios/*.txt`：静态银河预览和位置编辑
-- `.asset`、`.gfx`：实体、动画和粒子预览
-- 科技与事件文件：依赖关系图
-- `common/component_templates/*.txt`：武器索敌权重分析
-- `common/global_ship_designs/*.txt`：全局舰船设计工作台
-
-可视化编辑器通过 VS Code 工作区编辑写回文件，因此可以正常撤销和重做。部分预览只能近似表达游戏运行时结果；例如，运行时随机生成的超空间航道不会被当成精确数据展示。
-
-#### 可视化编辑全局舰船设计
-
-在 Mod 工作区打开 `common/global_ship_designs/*.txt`，通过编辑器标题栏或命令面板运行 **打开舰船设计工作台**。工作台在当前编辑器列中打开，不再把编辑器拆成左右半屏。设计树可以切换当前文件和其他工作区设计；新建、复制和删除只写入当前工作区文档。显示名按本地化语言设置解析，支持原版回退和 `$引用$` 展开，编辑字段与写回仍保留原始脚本 key。
-
-中央视口按真实 mesh/脚本 locator 组装船型根实体、所选区段和可见武器实体，支持文化前缀回退、纹理、`attach` 子实体、旋转/平移/缩放，并在可用时使用 `ship_designer` worldgfx 环境。单区段船体不需要伪造根 mesh；数十 MB 的大型船体网格会从工作区流式加载，不再受大小限制而缺失。模型或 locator 缺失时仍可编辑；实际加载或操作失败只显示简短错误，不再提供常驻诊断面板。游戏式 HUD 在模型上下方叠加组件图标和尺寸徽章，图标由 `.gfx` 精灵定义经 DDS/TGA 解码获得；右侧依次显示生产与舰船数据。区段按列从左到右排列，每列每行最多 5 个组件。参数化 `inline_script` 会先展开 key、尺寸、图标、component_set 和可静态求值的功率，再参与候选与图标解析。组件库与设计卡片条不再用诊断列表遮挡舰船。
-
-槽位编辑器可以修改区段、部件和必填核心组件。必需部件以竖排图标栏显示在视口右侧，按船型的 `required_component_set` 逐个占位（未填充的集合显示空位）；点击后组件库只列出同一集合的兼容部件，拖放或点击即可替换。布局参照游戏舰船设计器：点击槽位后左侧打开**增加部件**组件库（仅兼容候选，显示图标、等级罗马数字与尺寸徽章），设计以按船型分组的卡片列在视口下方。组件库可按名称或键搜索、按 `upgrades_to` 升级链推算的等级筛选，可隐藏列表中已有升级版的淘汰部件，也可隐藏原版部件（定义文件解析到游戏目录而非工作区），筛选条件会被记住。点击组件库中的部件即“拿起”它：图标跟随鼠标，所有可安装的槽位高亮，点击高亮槽位即可放置并继续点下一个，右键或 Esc 取消；也可直接把部件拖到槽位；拖到**填充全部**按钮会填入所有兼容槽位（勾选**仅填充空槽**则保留已装备槽位）。从底部卡片切换设计时，组件库保持打开并定位到最接近的槽位。所有编辑只更新 Host 持有的草稿，草稿刷新时组件库保持打开；替换部件时只重建该部件的模型，舰船其余部分、视角和组件库列表保持不动；撤销、重做和放弃也只作用于草稿。每次拖放都由 Host 根据当前草稿重新校验槽位、部件、固定状态和兼容性。工作台没有不兼容候选开关或诊断列表。**生成草稿**是确定性的离线装载生成器，可选择角色与科技范围（全部、初始或自定义前置闭包），生成带说明的未保存草稿，不复刻引擎运行时 auto-best 算法。
-
-工作台只编辑 `global_ship_designs`：船型、区段/部件模板、资产和 locator 都是只读输入。成长阶段配装只读并保留原文，通用元数据仍可编辑。编辑过程中不修改源 TextDocument；点击**保存**时才通过一次 VS Code 工作区编辑应用当前草稿并保存文档。语义不兼容不阻止保存；语法损坏、文档版本冲突和工作区外写入会被拒绝。常用静态费用、维护、能量、船体、防御、速度和探测值显示来源；未解析表达式、动态国家修正、未支持的伤害公式和无法表达的 Shader 会明确标为部分或未知，不冒充游戏内精确值。
-
-#### 从模型生成舰船顶部图标表
-
-舰船设计器和舰队视图里的舰船尺寸图标来自 `gfx/interface/icons/ship_parts/ship_sizes/ship_sizes_top.dds`，每个尺寸占 80×40 的一帧。`从模型生成舰船顶部图标表` 直接按模型重新渲染这张表，因此自制舰船组不必再借用原版图标。
-
-在命令面板运行该命令（Mod 工作区里也可以点编辑区右上角的按钮），选择图形文化，再选择类别分组与其中的舰船尺寸，最后确认输出位置。命令按游戏的同一套规则解析每个尺寸：尺寸的 `icon` 决定精灵帧号，`common/section_templates` 给出各槽位的分段实体，该实体的 `pdxmesh` 指向对应 `.mesh`。所有分段的几何会在其自带的船体坐标中合并（不施加 locator 平移——原版分段美术本身就是按船体坐标摆放的），做顶部正交投影，再按精灵表声明的 `noOfFrames` 宽度写成未压缩 ARGB8888 DDS，因此文件可以直接替换、无需改动任何 `.gfx`。
-
-每一帧按原版图标的画法绘制：1px 透明留白、1px 亮边框、面板竖向渐变，以及被同色系柔和光晕包围的近黑剪影。命令会同时写出 `ship_sizes_top.dds` 和 `..._top_damaged.dds`；破损态使用同一套配色的红色变体，因此轮廓完全一致，只有颜色不同。尺寸按其 `class` 分类（军舰、军用空间站、星港、民用船体等），解析不出模型的尺寸不会出现在列表里，也不会留下空白帧。
-
-同一槽位有多个分段模板时默认取第一个候选，需要精确控制时选择 **手动指定** 逐槽覆盖。若某个尺寸完全解析不出模型（缺 `pdxmesh`、槽位没有对应分段，或命名不符合 `<culture>_<entity>` 约定），使用尺寸列表顶部的 **手动指定模型**：它把「实体名或 `.mesh` 路径」按尺寸写进工作区设置里的 `stellarisLanguageServices.shipIcons.meshOverrides`，之后该尺寸就按这条覆盖解析；清空该条目即可恢复自动解析。
-
-当多个尺寸共用一个图标键时，只有一条能保住该帧：其余会被排进空闲帧，整张放满后改为加宽而不是丢弃，并在报告里给出各级数量。命令还会把一段可直接粘贴的 `spriteTypes` 写进 `CWTools Ship Icons` 输出通道——两条 sheet 精灵（带本次实际 `noOfFrames`）、每个尺寸一对 `GFX_<尺寸名>_top` / `_top_damaged`，以及一份需要复制进对应 `ship_size` 的 `icon =` 清单，让每艘船都能落到自己的帧。若同名定义已存在，请替换而不是重复添加。
-
-几何挂在 `attach` 子实体上的船体也会被收集（最多四层、带环检测），因此由零件拼装的模型能完整渲染；只含 locator 的 `attach` 网格会被跳过，并以 locator 措辞合并成一条报告。
-
-物理碰撞代理与 alpha/additive 特效面片不会进入剪影，否则会把轮廓撑大。引用到的 `.mesh` 读取失败的帧保持空白而不是让其他尺寸错位，所有跳过与告警都会列在 `CWTools Ship Icons` 输出通道里。
-
-#### 与原版对比
-
-在有原版对应文件的 Mod 文件中，使用编辑器标题栏的 **与原版对比文件** 按钮或右键菜单中的 **与原版对比代码块** 打开差异视图。**从原版迁移当前代码块** 会替换光标所在代码块并避免其他待处理修改的行号失效；在差异视图中还可通过 **从原版迁移所有变更块** 批量勾选迁移。
+所有可视化改动均通过 VS Code 工作区编辑应用，支持常规撤销与重做；预览会明确区分源码数据与运行时近似估算。
 
 #### 上传到 Steam 创意工坊
 
-打开 Mod 工作区（包含 `descriptor.mod` 的文件夹），然后从命令面板或编辑器标题按钮运行 `上传 Mod 到 Steam 创意工坊`。表单位于活动栏独立的 `Steam 创意工坊` 视图中，会按 `descriptor.mod` 预填；更新已有物品时还会从工坊页面读出当前描述一并预填。确认标题、描述、标签、预览图、可见性与更新说明后即可上传。
+打开含 `descriptor.mod` 的 Mod 工作区并运行 **上传 Mod 到 Steam 创意工坊**（需 Steam 客户端已运行并登录）。工坊视图会自动预填 `descriptor.mod` 与已有工坊条目信息，按 `.gitignore`、`.steamignore` 和 `stellarisLanguageServices.workshop.extraIgnorePatterns` 过滤暂存后上传，并在首次上传后回写 `remote_file_id`。未内置 Steam App ID 的游戏可通过 `stellarisLanguageServices.workshop.appIdOverride` 指定。
 
-`descriptor.mod` 没有 `remote_file_id` 的 Mod 会作为新工坊物品上传（默认私有），新物品 id 会回写到 `remote_file_id`，之后的上传即为更新该物品。上传要求 Steam 客户端已运行并登录拥有该游戏的账号。对于扩展尚未内置 Steam App ID 的游戏，可设置 `stellarisLanguageServices.workshop.appIdOverride`。
+#### 内置 AI 工作区
 
-Steam 会把它拿到的整个文件夹一并上传，因此扩展会先在临时暂存目录中生成一份过滤后的副本，再上传该副本。Mod 自带的 `.gitignore` 与 `.steamignore` 会按 git 自身的规则生效，包括否定规则与按目录作用域的规则；版本控制与编辑器元数据（`.git`、`.github`、`.vscode`、`.idea` 等）始终被排除。对于任何忽略文件都未覆盖的构建产物或仅本地使用的文件，可在 `stellarisLanguageServices.workshop.extraIgnorePatterns` 中追加规则；也可将 `stellarisLanguageServices.workshop.useIgnoreFiles` 设为 false 以原样上传整个 Mod 文件夹。上传结果会报告实际上传了多少文件、规则排除了多少项；没有任何可排除内容的 Mod 会直接上传原目录，完全不做拷贝。
+从命令面板运行 **Stellaris AI: 打开 AI 对话面板** 或 **Stellaris AI: 打开 Agent 运行管理器**。
 
-#### 生成光环本地化
-
-`common/component_templates/*.txt` 中的光环需要自己的 Tooltip 文本。把光标放在 `friendly_aura` 或 `hostile_aura` 块内，运行 `生成光环本地化（光标所在块）`；或运行 `生成光环本地化（当前文件全部光环）`，一次转换文件中的全部光环。两个命令都可以从命令面板、编辑器右键菜单和灯泡菜单调用。
-
-生成结果会显示在只读的 `cwtools://auraloc` 缓冲区中，可直接粘贴进对应的本地化 `.yml`：
-
-```yaml
-SRA_Aura_5_1:0 "§Y防御性光环§!\n对盟友舰船效果：\n $MOD_SHIP_SHIELD_DAMAGE_MULT$：§G+50%§!\n $MOD_SHIP_ARMOR_DAMAGE_MULT$：§G+50%§!\n $MOD_SHIP_HULL_DAMAGE_MULT$：§G+50%§!"
-```
-
-`modifier` 中的每条修正都会生成 `$MOD_<键名>$` 加数值：`_mult` 结尾的键和小数值按百分比渲染（`0.5` → `§G+50%§!`），其余按原值输出，负值使用红色。随后是 `damage_per_day` 的逐项标签（每日伤害、护盾/装甲/船体伤害、命中率、穿透、体积伤害系数）。本地化键取自 `stack_info.id`，缺失时回退到 `name`。
-
-该功能不会写入任何文件，也不会修改光环脚本：请自行粘贴生成的行；如果想覆盖自动生成的 Tooltip，可在光环的 `modifier` 中用 `custom_tooltip = <键名>` 引用它。当无法生成时（光标不在任何光环块内、光环块没有键名、文件语法有误），同一个缓冲区会以 `#` 注释行显示原因。
-
-#### 使用 AI 面板
-
-从命令面板运行 **Stellaris AI: 打开 AI 对话面板**（或 **Stellaris AI: 打开 Agent 运行管理器** 打开独立管理器窗口）。内置 Agent 专注于 Paradox/CWTools 语义领域的单 Agent 辅助，可通过 `/plan`、`/execute`、`/explore` 或 `/review` 固定当前会话模式。Provider 凭据通过 VS Code SecretStorage 保存；文件修改遵循所选的 `confirm`（写入前弹出 Diff 预览确认卡片）或 `auto` 模式，并受 `EvidenceGate` 语义预检与本地化 UTF-8 BOM 护栏保护。
-
-独立 Agent Manager 的右侧工作区提供与“变更 / 运行 / 设置”并列的 **“预览”** Tab。可选择一个 `.gui` 文件并固定，缩放和平移画布，单击、Ctrl 多选或框选元素，再通过 **“添加到对话”** 把结构化源码引用放入中央输入框。Agent 写入后预览会刷新并高亮变更元素；点击 **“完整工作台”** 可继续使用原有 GUI 编辑器。若 GUI 文档有未保存草稿，请先保存，再允许 Agent 写入。GUI 写入后，预览器还会生成 Before/After/Diff 证据并注入同一 Agent 回合，由 Agent 自主检查和最多两轮修正。预览 Tab 可查看图片和像素指标；不支持视觉的 Provider 只接收文本指标。此过程不会启动游戏，预览验证仍是对运行时渲染的近似，而非游戏内验证。
-
-兼容 ChatGPT 订阅的 Codex Provider 通过浏览器登录，并使用插件自己的 Agent 运行时。它依赖上游兼容端点，不属于公开稳定 API；如果上游流程变化，插件可能需要同步更新。Codex 选择器使用内置模型目录，不代表账户已获授权；OpenAI API 与 Codex 订阅的可用模型可能不同。
-
-内置的 **WorkBuddy**（`workbuddy-subscription`）与 **OpenDesign**（`opendesign`）订阅线路均纳入统一多账号**账号池**管理（支持顺序耗尽 / 轮询 / 粘性三种策略、限流冷却换号与逐账号额度仪表）。WorkBuddy 支持扫描桌面端 `.info` 会话（支持按需提供 `$wbEncrypted` 保护密钥解封，且刷新写回时不破坏原密文格式）、浏览器 OAuth 登录、国区每日签到，并将国区 `claude-*` 模型分流至 `/v1/messages`，其余请求走 `/v2/chat/completions` 的 gzip 强制流式通道；OpenDesign 支持在同一号池内混用设备码 OAuth（双密钥携带 AMR 5 小时/7 天及钱包额度查询）与静态控制台 API Key。
-
-订阅供应商共用 **AI 设置 → 订阅渠道代理**。选择 **自动检测**、**自定义代理** 或 **直连**，登录或测试前点击 **保存代理**。自定义模式支持 HTTP、HTTPS、SOCKS5 地址（例如 `http://127.0.0.1:7890` 或 `socks5://127.0.0.1:1080`），可用 `用户名:密码@` 提供认证，凭据保存在 VS Code SecretStorage。地址留空会保留已保存的代理。自动模式依次检测 VS Code `http.proxy`、`HTTPS_PROXY` / `HTTP_PROXY` / `ALL_PROXY`（含小写形式）、Windows/macOS 系统手动代理；不解析 PAC。未检测到代理时直连，已配置的代理连接失败时会报错，不会回退直连。修改对后续令牌、账户、额度和聊天请求生效，进行中的流式回复继续使用原连接。浏览器登录页面遵循浏览器自身的代理设置。
-
-Agent 行为可从用户主目录定制：技能放在 `~/.cwtools/skills`（项目级 `.agents/skills` 与 `.cwtools/skills` 仍然生效），Agent 档案放在 `~/.cwtools/agents`，额外的 MCP 服务器可声明在 `~/.cwtools/mcp.json`（用户级）或 `.cwtools/mcp.json`（项目级，Claude 风格 `mcpServers` JSON）。额外的 AI 供应商（端点、模型列表、API Key 用环境变量名引用）可声明在 `~/.cwtools/providers.json`。对所有工作区生效的全局指令放在 `~/.cwtools/CWTOOLS.md`。Agent 还可以把可复用技能直接保存进项目（`save_skill` 写入 `.agents/skills/<name>/SKILL.md`，与 Kimi Code 相同的目录约定，保存的技能可跨 agent 通用），并通过 `run_skill` 按需加载。当首个任务启动且项目知识数据库不存在时，Agent 会在后台自动初始化（`stellarisLanguageServices.ai.autoInitProjectKnowledge`）。已完成的任务会把可复用的做法与坑沉淀到工作区经验库，并在后续相似任务开始时自动召回（`stellarisLanguageServices.ai.experience.enabled`，人读投影在 `.cwtools/experience.md`）。
+- **模式与护栏**：专注 Paradox/CWTools 语义的单 Agent 助手，支持 `/plan`、`/execute`、`/explore`、`/review` 模式固定、`EvidenceGate` 语义预检、本地化 UTF-8 BOM 护栏与 `confirm`（Diff 确认）/ `auto` 写入控制。
+- **管理器 GUI 预览**：独立 Agent 管理器提供 `.gui` **预览**页，可将选中的界面元素作为结构化源码引用加入对话，并在 Agent 修改 GUI 后自动执行最多两轮 Before/After/Diff 视觉核对。
+- **Provider、账号池与代理**：凭据存放在 VS Code SecretStorage。各订阅线路（Codex、Claude、Kimi Code、MiniMax Code、Command Code、WorkBuddy 与 OpenDesign）共享多账号轮换号池（顺序/轮询/粘性策略、限流切号与额度仪表）以及统一的 **AI 设置 → 订阅渠道代理** 配置（自动检测、自定义 HTTP/HTTPS/SOCKS5 代理或直连）。
+- **定制与记忆**：支持在主目录或项目内自定义技能（`~/.cwtools/skills`、`.agents/skills`、`.cwtools/skills`）、Agent 档案（`~/.cwtools/agents`）、额外 MCP（`~/.cwtools/mcp.json` 或 `.cwtools/mcp.json`）、自定义 Provider（`~/.cwtools/providers.json`）与全局指令（`~/.cwtools/CWTOOLS.md`）。开启经验库后，完成任务的可复用经验会沉淀至 `.cwtools/experience.md`。
 
 #### 连接外部 MCP 客户端
 
-`cwtools-mcp` 独立维护和发布，默认提供语义查询和六个白名单领域写入工具，并复用 VS Code 中已经运行的语言服务。它需要可靠的 Paradox/CWT 证据：非支持或歧义工作区不披露工具/资源，也不启动语言服务；游戏不明时使用通用 Paradox 模式，不会假定 Stellaris。
+独立发布的 [`cwtools-mcp`](https://github.com/Aa728848/cwtools-mcp) 提供 CWTools 语义查询与六个默认开启的白名单领域写入工具；它会优先复用当前已激活的 VS Code 语言服务，并仅在存在可靠 Paradox/CWT 工作区证据时暴露工具。
 
 ```sh
 codex mcp add cwtools -- npx -y cwtools-mcp --stdio
-```
-
-```sh
 claude mcp add cwtools --scope user -- npx -y cwtools-mcp --stdio
 ```
 
-独立模式和手动配置见 [cwtools-mcp 仓库](https://github.com/Aa728848/cwtools-mcp)。
-
-### 架构
+### 架构速览
 
 ![System architecture overview](docs/system-architecture.png)
 
-主要运行边界如下：
+- `client/extension/` — VS Code Extension Host、文件系统/LSP/AI 宿主边界
+- `client/webview/` — 浏览器沙盒面板与可视化编辑器（仅经 `postMessage` 通信）
+- `src/LSP/`、`src/Main/` — F# / .NET 10 语言服务端
+- `submodules/cwtools/`、`submodules/cwtools-stellaris-config/`、`submodules/cwtools-mcp/` — 上游核心库、Stellaris 规则与独立 MCP 包
 
-- `client/extension/`：VS Code Extension Host 代码和文件系统访问
-- `client/webview/`：运行在浏览器沙盒中的面板与可视化编辑器
-- `src/LSP/`、`src/Main/`：F#/.NET 语言服务
-- `submodules/cwtools/`：上游 CWTools 库
-- `submodules/cwtools-stellaris-config/`：Stellaris CWT 规则
-- `submodules/cwtools-mcp/`：独立发布、默认开放白名单领域写入的 MCP 服务
-
-Webview 只通过消息与 Extension Host 通信，不能直接访问 Node.js 或文件系统。详细数据流和维护边界见[架构文档](ARCHITECTURE.md)。
+详细数据流、锁约束与子系统边界见 [ARCHITECTURE.md](ARCHITECTURE.md)。
 
 ### 参与开发
 
-本地开发需要 Node.js 20+、npm 10+、.NET 10 SDK、支持 submodule 的 Git，以及 VS Code 1.90+。
+环境要求：Node.js 20+、npm 10+、.NET 10 SDK、支持 submodule 的 Git、VS Code 1.90+。
 
 ```bash
 git clone --recurse-submodules https://github.com/Aa728848/cwtools-vscode.git
 cd cwtools-vscode
 npm install
+(cd submodules/cwtools-mcp && npm ci && npm run build -w cwtools-shared)
 npm run compile
 npm run test:unit
 ```
 
-常用检查：
-
-| 命令 | 用途 |
-| --- | --- |
-| `npm run lint` | 检查 Extension Host 和 Webview 代码。 |
-| `npm run compile` | 编译 TypeScript 并打包 Webview。 |
-| `npm run test:unit` | 运行单元测试。 |
-| `dotnet build src/LSP/` | 构建可复用 LSP 层。 |
-| `dotnet build src/Main/` | 构建语言服务端。 |
-| `npm run verify` | 运行较完整的本地质量检查。 |
-| `npm run build:docs` | 校验双语文档并生成 Marketplace README。 |
-
-修改代码、打包扩展或调整子模块前，请阅读 [CONTRIBUTING.md](CONTRIBUTING.md)。编写 CWT 规则请从[规则配置指南](docs/cwt-rule-config.md)开始。
+完整的验证矩阵、子模块流程、CWT 规则工具与 VSIX 打包发布说明见 [CONTRIBUTING.md](CONTRIBUTING.md)。
 
 ### 许可证
 
-本项目采用 [MIT License](LICENSE.md)。感谢 [CWTools](https://github.com/cwtools) 以及 Paradox Mod 社区的贡献。
+本项目采用 [MIT License](LICENSE.md)。基于 [CWTools](https://github.com/cwtools) 及 Paradox Mod 社区成果构建。

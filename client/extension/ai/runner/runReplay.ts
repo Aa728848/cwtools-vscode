@@ -1,16 +1,10 @@
 /**
- * Run Replay (T4.1).
+ * Run Replay.
  *
- * Re-runs a previously-recorded agent run with new prompt / model / provider
- * overrides. The default mode is "recorded-tool" (mode A): the LLM is invoked
- * fresh but tool calls are answered from the original ledger, so the replay is
- * cheap and the behaviour difference is isolated to the LLM's reasoning under
- * the new prompt.
- *
- * Mode B (full-replay, where tools are re-executed) is intentionally out of
- * scope for this MVP — it requires workspace snapshotting and dry-run guards
- * the plan deferred. Callers asking for it currently fall back to mode A and
- * see a warning step.
+ * Re-runs a previously recorded agent run with new prompt/model/provider
+ * overrides. Recorded-tool mode replays tool outputs from the original ledger
+ * so behavior changes isolate to the LLM's reasoning. Full re-execution is not
+ * enabled; callers requesting it fall back to recorded-tool mode with a warning.
  */
 
 import type { AgentRunEvent } from './runLedger';

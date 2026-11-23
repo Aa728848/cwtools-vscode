@@ -1,21 +1,19 @@
-# Stellaris rules sync
+# Stellaris Rules Sync / Stellaris 规则同步工具
 
-These tools compare current Stellaris script documentation and vanilla files with the CWT rule baseline. Start with `scan` or `check`. Commands that can change rule data are called out below.
+[English](#english) | [中文](#zh-cn)
 
-## Run a command
+<a id="english"></a>
+
+## English
+
+These tools compare current Stellaris script documentation and vanilla files against the CWT rule baseline. Start with `scan` or `check`; commands that modify rule data are noted below.
+
+### Run a command
 
 From the repository root:
 
 ```powershell
-.\sync-stellaris-rules.cmd
-.\sync-stellaris-rules.cmd scan
-.\sync-stellaris-rules.cmd check
-.\sync-stellaris-rules.cmd update
-```
-
-With no argument, the script opens an interactive `scan` / `check` / `update` menu. The same operations are available through npm:
-
-```powershell
+.\sync-stellaris-rules.cmd          # Interactive scan / check / update menu
 npm run rules:stellaris:scan
 npm run rules:stellaris:check
 npm run rules:stellaris:update
@@ -24,57 +22,84 @@ npm run rules:stellaris:contracts
 npm run rules:stellaris:optional-fields
 ```
 
-## Inputs and output
+### Inputs and outputs
 
-| Input | Default |
+| Input / Output | Default |
 | --- | --- |
 | Script documentation | `%USERPROFILE%\Documents\Paradox Interactive\Stellaris\logs\script_documentation` |
-| Vanilla `common/` | Auto-detected from `D:\Steam\steamapps\common\Stellaris\common`, or set with `STELLARIS_COMMON` |
+| Vanilla `common/` | Auto-detected from local Steam install, or set via `STELLARIS_COMMON` |
 | CWT config | `submodules\cwtools-stellaris-config\config` |
 | Generated output | `.rules-sync\stellaris` |
 
-## Modes
+### Modes
 
-| Mode | Behaviour |
+| Mode | Behavior |
 | --- | --- |
-| `scan` | Writes `rules.generated.json` and generated CWT candidates. |
-| `check` | Runs a scan, compares it with current rules, and writes `check\rules-sync-check-report.json`. Use `--ci` to exit with code 2 when drift is found. |
-| `update` | Writes append-only candidates under `update\generated` for manual review. It does not silently replace maintained rules. |
-| `report` | Writes a self-contained HTML report to `report\rules-sync-report.html` and opens it unless `--no-open` is supplied. |
-| `contracts` | Compares vanilla scope comments with CWT scope annotations and writes review material under `scope-contracts`. |
-| `optional-fields` | Audits `config/logs/*_docs.log` against the CWT aliases and reports fields the documentation marks optional while the rule still requires them (CW242 false positives). Standalone; `check` and `report` run it as well. |
+| `scan` | Writes `rules.generated.json` and generated CWT candidates (effects and triggers only; modifiers/scopes come from game logs). |
+| `check` | Compares scan output against current rules and writes `check\rules-sync-check-report.json`. Pass `--ci` to exit with code `2` on drift. |
+| `update` | Writes append-only candidates under `update\generated` for manual review without overwriting maintained rules. |
+| `report` | Generates a self-contained HTML report at `report\rules-sync-report.html` (pass `--no-open` to skip opening the browser). |
+| `contracts` | Compares vanilla scope comments against CWT scope annotations under `scope-contracts`. Read-only by default; `--apply` adds missing high-confidence annotations, while `--apply-conflicts` updates conflicting ones. |
+| `optional-fields` | Audits `config/logs/*_docs.log` against CWT aliases to flag documented-optional fields still required (`1..1` default, causing `CW242` false positives). Also runs inside `check` and `report`. Add `## cardinality = 0..1` above confirmed optional fields. |
 
-`contracts` is read-only by default. `--apply` adds only missing, high-confidence annotations. Existing conflicts require the separately reviewed `--apply-conflicts` option.
+### Shader ABI refresh
 
-`check` reports documented-optional field drift as action `optional_field` and exits with code 2 while any remains (see `--ci`). A CWT alias field defaults to cardinality `1..1`, so a field the script documentation marks optional ("if not specified…", "(optional)", "(default)…") would report `Missing <field>, expecting at least 1` (CW242) for every legal usage that omits it. Add `## cardinality = 0..1` above such a field; the audit is derived from the documentation rather than a hand-maintained list.
+When `report` locates a Stellaris installation, it also refreshes Shader ABI metadata under `config/shader/` (pass `--no-shader-abi` for a strictly read-only report):
 
-Only effects and triggers become generated CWT candidates. Modifiers and scopes remain in `rules.generated.json` because the server loads them from game logs. The vanilla scan also reports `common_missing_rule` when a populated `common/` folder has no matching CWT type path.
+1. `CWToolsCLI` parses `gfx/FX` via the shared `PdxShaderRuntime` implementation and records the executable fingerprint in `.rules-sync/stellaris/shader-abi/shader-abi-inventory.json`.
+2. `shader-abi-sync.ts` merges the inventory into `config/shader/abi-catalog.json`, `abi-audit.json`, and `renderer-contracts.json` (preserving audited evidence, marking new entries `automatic_inventory` with `rename_policy = forbidden`, and removing vanished entries).
+3. Pre-merge backups are written under `.rules-sync/stellaris/shader-abi/previous/` and a JSON merge summary accompanies the HTML report.
 
-## Shader ABI refresh
+Never add a parallel TypeScript Shader parser for this workflow. On a fresh checkout, restore `submodules/cwtools/CWToolsCLI/CWToolsCLI.fsproj` if the CLI is not yet built.
 
-When `report` can find a Stellaris installation, it also refreshes the Shader ABI data before producing the report. Pass `--no-shader-abi` when you need the report to leave rule data untouched.
+---
 
-The refresh has three steps:
+<a id="zh-cn"></a>
 
-1. `CWToolsCLI` parses `gfx/FX` through the shared `PdxShaderRuntime` implementation and records a `stellaris.exe` fingerprint in `.rules-sync/stellaris/shader-abi/shader-abi-inventory.json`.
-2. `shader-abi-sync.ts` merges the inventory into `config/shader/abi-catalog.json`, `abi-audit.json`, and `renderer-contracts.json`. Reviewed entries keep their evidence while their declarations exist; new declarations receive `automatic_inventory` evidence and `rename_policy = forbidden`; vanished declarations and contracts are removed.
-3. The HTML report shows the version transition, executable identity change, and carried, added, or removed entries. A JSON copy is written to `.rules-sync/stellaris/shader-abi/shader-abi-merge-report.json`; pre-merge files are backed up under `.rules-sync/stellaris/shader-abi/previous/`.
+## 中文
 
-The scanner intentionally reuses the F# Shader parser. Do not add a second TypeScript parser for this workflow. On a fresh checkout, restore `submodules/cwtools/CWToolsCLI/CWToolsCLI.fsproj` if the CLI is not available yet.
+本工具集用于对比当前 Stellaris 脚本文档、原版文件与 CWT 规则基线。日常建议先运行 `scan` 或 `check`；会修改规则数据的命令在下表单独标出。
 
-## 中文说明
+### 运行命令
 
-这些工具用于对比当前 Stellaris 脚本文档、原版文件和 CWT 规则基线。一般先运行 `scan` 或 `check`：
+在仓库根目录执行：
 
-- `scan` 生成扫描结果和候选规则。
-- `check` 生成差异报告；加 `--ci` 后，发现漂移会以退出码 2 结束。
-- `update` 只把候选内容追加到 `update\generated`，需要人工审阅。
-- `report` 生成可独立打开的 HTML 报告；加 `--no-open` 可禁止自动打开。
-- `contracts` 对比原版作用域注释与 CWT 标注；默认只读，`--apply` 只补充缺失且高置信的内容，已有冲突需单独审阅后传 `--apply-conflicts`。
-- `optional-fields` 独立审计 `config/logs/*_docs.log` 与 CWT alias 的可选字段契约（`check` 与 `report` 也会自动执行）。
+```powershell
+.\sync-stellaris-rules.cmd          # 交互式 scan / check / update 菜单
+npm run rules:stellaris:scan
+npm run rules:stellaris:check
+npm run rules:stellaris:update
+npm run rules:stellaris:report
+npm run rules:stellaris:contracts
+npm run rules:stellaris:optional-fields
+```
 
-`check` 会把「文档标注可选、CWT 规则仍必填」的字段报告为 `optional_field`，只要还有残留就以退出码 2 结束（配合 `--ci`）。CWT alias 字段默认基数为 `1..1`，所以脚本文档标注为可选的字段（"if not specified…"、"(optional)"、"(default)…"）会在所有合法省略写法上误报 `Missing <field>, expecting at least 1`（CW242）。在该字段上方补 `## cardinality = 0..1` 即可；该审计从文档自动推导，不依赖人工维护清单。
+### 输入与输出
 
-`report` 在找到 Stellaris 安装时还会刷新 Shader ABI 数据，这一步会修改 `config/shader/` 下的维护文件。需要完全只读的报告时，请传入 `--no-shader-abi`。合并前文件会备份到 `.rules-sync/stellaris/shader-abi/previous/`，结果同时写入 HTML 和 JSON 报告。
+| 项目 | 默认位置 |
+| --- | --- |
+| 脚本文档日志 | `%USERPROFILE%\Documents\Paradox Interactive\Stellaris\logs\script_documentation` |
+| 原版 `common/` | 自动探测本机 Steam 安装目录，或通过 `STELLARIS_COMMON` 显式指定 |
+| CWT 规则目录 | `submodules\cwtools-stellaris-config\config` |
+| 生成产物目录 | `.rules-sync\stellaris` |
 
-Shader 扫描复用 `CWToolsCLI` 与 `PdxShaderRuntime`，不在 TypeScript 中维护第二套解析器。全新检出如果尚未还原 CLI，请先 restore `submodules/cwtools/CWToolsCLI/CWToolsCLI.fsproj`。
+### 运行模式
+
+| 模式 | 行为说明 |
+| --- | --- |
+| `scan` | 输出 `rules.generated.json` 与候选 CWT（仅生成 effect/trigger；modifier 与 scope 由服务端直接读游戏日志）。 |
+| `check` | 与现有规则比对并写出 `check\rules-sync-check-report.json`；传入 `--ci` 时存在漂移将以退出码 `2` 结束。 |
+| `update` | 仅向 `update\generated` 追加候选规则供人工审阅，不静默覆盖既有规则。 |
+| `report` | 生成可独立打开的 `report\rules-sync-report.html`（传入 `--no-open` 不自动打开浏览器）。 |
+| `contracts` | 比对原版作用域注释与 CWT 标注并输出到 `scope-contracts`。默认只读；`--apply` 仅补缺失的高置信标注，`--apply-conflicts` 处理冲突项。 |
+| `optional-fields` | 审计 `config/logs/*_docs.log` 与 CWT alias，检出文档标为可选但规则仍默认必填（`1..1`）导致 `CW242` 误报的字段（`check` 与 `report` 会自动包含）。确认后在该字段上方补 `## cardinality = 0..1`。 |
+
+### Shader ABI 刷新
+
+当 `report` 探测到 Stellaris 安装目录时，还会自动刷新 `config/shader/` 下的 Shader ABI 数据（需要完全只读报告请传 `--no-shader-abi`）：
+
+1. `CWToolsCLI` 复用共享 `PdxShaderRuntime` 解析 `gfx/FX`，并将可执行文件指纹写入 `.rules-sync/stellaris/shader-abi/shader-abi-inventory.json`。
+2. `shader-abi-sync.ts` 将清单合并到 `config/shader/abi-catalog.json`、`abi-audit.json` 与 `renderer-contracts.json`（保留已审核证据，新条目记为 `automatic_inventory` 且 `rename_policy = forbidden`，移除已消失条目）。
+3. 合并前文件备份至 `.rules-sync/stellaris/shader-abi/previous/`，同时输出 JSON 合并摘要与 HTML 报告。
+
+严禁在 TypeScript 中另写第二套 Shader 解析器。全新检出如尚未构建 CLI，请先还原 `submodules/cwtools/CWToolsCLI/CWToolsCLI.fsproj`。

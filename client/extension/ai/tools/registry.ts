@@ -267,8 +267,8 @@ const FILE_SCOPED_WRITE_TOOLS_SET = new Set<string>([
     'save_skill',
 ]);
 
-// Mutating tools: 改变工作区 / 记忆状态的工具。doom-loop 检测见到 mutating 成功
-// 后会清空对应文件的 pairFrequency 窗口,避免把 verify-after-write 误判为重复。
+// Mutating tools alter workspace or memory state; a successful mutation resets
+// per-file doom-loop pair counts so verify-after-write is not flagged as a loop.
 const MUTATING_TOOLS_SET = new Set<string>([
     ...EDIT,
     'deploy_mod_asset',
@@ -310,7 +310,7 @@ for (const schema of SCHEMA_DEFINITIONS) {
     if (LOC_MODES.has(name)) { allowed.add('loc_translator'); allowed.add('loc_writer'); }
     if (BUILD_MODES.has(name)) { allowed.add('build'); allowed.add('gui_expert'); }
 
-    // 动态推演 effect、riskLevel 与 concurrencyClass 以维护单一事实源
+    // Derive effect, riskLevel, and concurrencyClass from the single source of truth.
     let effect: ToolEffect = 'none';
     let riskLevel: 0 | 1 | 2 | 3 = 0;
     let concurrencyClass: ToolConcurrencyClass = 'parallel';

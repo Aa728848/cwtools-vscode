@@ -1,3 +1,11 @@
+/**
+ * Global Ship Design Workbench Webview entry point.
+ *
+ * Validates all Host responses at the protocol boundary (bounding recursive
+ * `attach` asset trees to `depth < 32`), drives the Three.js `ShipDesignScene`,
+ * and dispatches typed user edit intents back to `ShipDesignPanel` without
+ * holding filesystem write paths in the sandbox.
+ */
 import {
     fields, isArrayOf, isBoolean, isFiniteNumber, isIntegerInRange, isOneOf, isRecord,
     isString, isStringArray, optional, parseProtocolMessage, type MessageValidator, type ValueValidator,

@@ -58,7 +58,7 @@ export interface MemoryRecallTrace {
     excluded: { expired: number; stale: number; archived: number; domain: number };
 }
 
-/** Optional retrieval context for top-k memory selection (plan §8). */
+/** Optional retrieval context for top-k memory selection. */
 export interface MemoryRetrievalContext {
     /** Current task text; keywords overlapping entry key/content raise relevance. */
     taskText?: string;
@@ -139,14 +139,14 @@ function sanitizeMemoryEntry(raw: unknown): MemoryEntry | null {
  * it is only a generated human-readable projection.
  *
  * Prompt building is read-only and retrieves the top-k most relevant entries under
- * a strict character budget (plan §8). Usage statistics change only via
+ * a strict character budget. Usage statistics change only via
  * `markMemoryUsed`/`markMemoryUsedInText` and are persisted asynchronously
  * (debounced); call `flushUsageWrites` to force persistence.
  */
 export class MemoryParser {
     /** Strict cap on the total size of memory entries injected into a prompt. */
     static readonly MAX_MEMORY_CHARS = 12000;
-    /** Max number of entries injected per prompt (top-k retrieval, plan §8). */
+    /** Max number of entries injected per prompt (top-k retrieval). */
     static readonly TOP_K_MEMORY_ENTRIES = 10;
     /** Small metadata-only queue exposed to a later relevant run for re-validation. */
     static readonly TOP_K_STALE_PROJECT_FACTS = 5;
@@ -397,7 +397,7 @@ export class MemoryParser {
     }
 
     /**
-     * Retrieval score (plan §8): task relevance (keyword/path overlap), priority,
+     * Retrieval score: task relevance (keyword/path overlap), priority,
      * confidence, freshness (updatedAt decay) and actual recent use (lastUsedAt
      * decay). Deterministic; ties break on updatedAt then key.
      */
@@ -564,7 +564,7 @@ export class MemoryParser {
     }
 
     /**
-     * Record actual uses of memory entries (plan §8): bumps `usageCount` and
+     * Record actual uses of memory entries: bumps `usageCount` and
      * `lastUsedAt` for the given keys, persisted asynchronously after a debounce.
      * Call only when the model actually references a memory (e.g. response text
      * mentions the key, or `save_memory` rewrites an existing key) — never from

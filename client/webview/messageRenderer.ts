@@ -44,15 +44,12 @@ export interface RendererStep {
 }
 
 export interface ClassifiedSteps {
-    /** thinking + thinking_content steps (NOT text_delta!) */
+    /** thinking + thinking_content steps (distinct from text_delta). */
     thinkingSteps: RendererStep[];
-    /** text_delta steps — final streaming reply tokens */
     textDeltaSteps: RendererStep[];
-    /** tool_call steps */
     toolCalls: RendererStep[];
-    /** tool_result steps */
     toolResults: RendererStep[];
-    /** error, validation, compaction, and other special steps */
+    /** error, validation, compaction, and other special steps. */
     specialSteps: RendererStep[];
 }
 
@@ -95,7 +92,7 @@ const TOOL_ICON_LABELS: Record<string, string> = {
     todo_write: '📋', manage_goal: '🎯', run_command: '⚡', manage_process: '⚡', web_search: '🌐', web_open: '🌐', web_find: '🔎',
     glob_files: '📁', delete_file: '🗑️', apply_patch: '🩹',
     permission_request: '🔑',
-    // Coordinator tool
+    // Legacy multi-agent / orchestration tools (retained for historical transcript replay)
     dispatch_agents: '🎯', query_blackboard: '📋', merge_results: '🔗',
     team_send_message: '✉️', team_members: '👥', team_close: '🏁',
     team_task_create: '🗂️', team_task_list: '🗂️', team_task_update: '🗂️',
@@ -268,7 +265,7 @@ export function summarizeToolArgs(toolName: string, args: Record<string, unknown
         }
     }
 
-    // Command tools
+    // Legacy command tool (historical transcript replay)
     if (toolName === 'run_command' && args.command) {
         const cmd = String(args.command);
         return cmd.length > limit ? cmd.substring(0, limit) + '...' : cmd;
@@ -808,7 +805,7 @@ export function buildAssistantMessageHtml(
         html += `<div class="msg-bubble" data-raw-content="${escapeHtml(content)}">${escapeHtml(content)}</div>`;
     }
 
-    // Recursively render all child Agent independent boxes
+    // Legacy historical transcript replay: render persisted grouped sub-agent boxes
     for (const [agentId, groupClassified] of subAgentGroups.entries()) {
         const innerHtml = buildAssistantMessageHtml('', groupClassified, msgTime, locale);
         const uniqueId = `subview-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;

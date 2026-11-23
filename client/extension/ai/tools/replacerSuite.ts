@@ -344,7 +344,7 @@ function findSearchString(content: string, oldString: string): string | null {
 }
 
 /**
- * Side-effect-free anchor check for the write-failure guard (P0 design 1):
+ * Side-effect-free anchor check for the write-failure guard:
  * reports whether oldString would match uniquely right now, without building
  * any replacement. Mirrors fuzzyReplace's search (including line-number-prefix
  * stripping) so a preview pass implies the real replace would find its anchor.

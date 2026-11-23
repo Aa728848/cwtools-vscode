@@ -27,11 +27,11 @@ export interface UsageRecord {
      * provider/format). Records without this flag are inferred at read time.
      */
     cacheCapable?: boolean;
-    /** Tool calls made in this request (Batch 4.2) */
+    /** Tool calls made in this request. */
     toolCalls?: Record<string, number>;
-    /** Response latency in ms (Batch 4.2) */
+    /** Response latency in ms. */
     durationMs?: number;
-    /** Topic/session ID for grouping (Batch 4.2) */
+    /** Topic/session ID for grouping. */
     topicId?: string;
     /** Completed provider-call samples for request-accurate cache metrics. */
     cacheRequests?: CacheRequestUsage[];
@@ -77,9 +77,9 @@ export interface UsageStats {
     byProvider: Record<string, ProviderStats>;
     dailyStats: DailyStats[];
     modelDistribution: ModelDistribution[];
-    /** Batch 4.2: Aggregated tool call frequencies */
+    /** Aggregated tool call frequencies. */
     toolFrequency: { tool: string; count: number; percentage: number }[];
-    /** Batch 4.2: Average response time in ms */
+    /** Average response time in ms. */
     avgResponseMs: number;
     /** Aggregate cache hit statistics */
     cacheStats: {
@@ -235,7 +235,7 @@ export class UsageTracker {
             }))
             .sort((a, b) => b.tokens - a.tokens);
 
-        // Batch 4.2: Tool frequency aggregation
+        // Tool frequency aggregation
         const toolMap = new Map<string, number>();
         let totalDurationMs = 0;
         let durationCount = 0;
@@ -475,10 +475,7 @@ export class UsageTracker {
 
     // ── Lifecycle ────────────────────────────────────────────────────────────
 
-    /**
-     * Batch 4.2: Export all usage records as CSV or JSON.
-     * Supports optional date range filtering.
-     */
+    /** Export all usage records as CSV or JSON with optional date-range filtering. */
     exportStats(format: 'csv' | 'json', options?: { fromDate?: number; toDate?: number }): string {
         const data = this.loadData();
         let records = data.records;

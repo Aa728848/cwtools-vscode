@@ -1,3 +1,13 @@
+/**
+ * Policy-gated web search and page-fetch implementation (`web_search`,
+ * `web_open`, `web_find`).
+ *
+ * Enforces SSRF protection by resolving DNS and rejecting non-public IPv4/IPv6
+ * ranges (with optional `198.18.0.0/15` allowlisting when
+ * `allowSyntheticProxyAddresses` is enabled), strips sensitive headers/query
+ * keys across redirects, caps response sizes, and tags all outputs as
+ * `untrusted_external_content`.
+ */
 import { createHash } from 'crypto';
 import { promises as dns } from 'dns';
 import * as http from 'http';

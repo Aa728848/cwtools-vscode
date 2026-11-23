@@ -487,7 +487,7 @@ body.agent-manager-shell .manager-topic-empty {
     text-align: center;
 }
 
-/* 统一左侧微件样式以匹配右侧高级质感 */
+/* Left-rail topic controls aligned with right-pane surface styling */
 body.agent-manager-shell .new-topic-btn {
     display: none;
 }
@@ -587,7 +587,6 @@ body.agent-manager-shell .topics-export-btn {
     white-space: nowrap;
 }
 
-/* 统一左侧对话项卡片样式以对齐右侧 artifacts/runs 的优雅圆角与边框 */
 body.agent-manager-shell .topic-item {
     min-height: 28px;
     background: transparent;
@@ -2324,7 +2323,7 @@ body.agent-manager-shell .manager-workspace-external-host .annotatable-plan.ap-c
     color: var(--vscode-editor-foreground);
 }
 
-/* ── 时间线分组折叠支持 ──────────────────────────────────────────── */
+/* Collapsible timeline groups */
 .timeline-group-header {
     cursor: pointer;
     user-select: none;
@@ -2358,7 +2357,7 @@ body.agent-manager-shell .manager-workspace-external-host .annotatable-plan.ap-c
     display: none;
 }
 
-/* Steps 折叠区域 */
+/* Collapsible run steps section */
 .run-steps-section {
     border: 1px solid var(--vscode-border);
     border-radius: 6px;

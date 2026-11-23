@@ -124,7 +124,7 @@ export interface CompactionBudgetOptions {
     precomputedRequestTokens?: number;
     /** Cost gate requested compaction below the normal context watermark. */
     costGateFired?: boolean;
-    /** Real-usage calibration hook (P0 design 3); invoked once per completed summarizer call. */
+    /** Real-usage calibration hook; invoked once per completed summarizer call. */
     onUsageSample?: (sample: { estimated: number; actual: number; providerId: string; model: string }) => void;
 }
 

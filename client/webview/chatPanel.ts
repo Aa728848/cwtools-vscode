@@ -3963,10 +3963,7 @@ let settingsSubscriptionPools: Record<string, any> = {};
         }
     }
 
-    // ── Batch 3.1: Virtual scroll — IntersectionObserver offscreen optimization ──
-    // Adds CSS class 'offscreen' to messages far from the viewport, enabling
-    // content-visibility:auto to skip layout/paint for off-screen DOM subtrees.
-    // This dramatically reduces memory and rendering cost for 100+ message sessions.
+    // Virtual scroll: mark offscreen messages so content-visibility:auto skips layout/paint.
     const virtualScrollObserver = new IntersectionObserver(
         (entries) => {
             for (const entry of entries) {
@@ -3989,8 +3986,7 @@ let settingsSubscriptionPools: Record<string, any> = {};
         virtualScrollObserver.observe(el);
     }
 
-    // ── Batch 3.2: Code block copy button enhancer ──────────────────────────
-    // After rendering markdown, attach copy buttons to all code blocks.
+    // Attach copy buttons to rendered markdown code blocks.
     function enhanceCodeBlocks(container: HTMLElement) {
         const blocks = container.querySelectorAll('.md-codeblock');
         blocks.forEach(block => {
@@ -4065,8 +4061,7 @@ let settingsSubscriptionPools: Record<string, any> = {};
         }
     }
 
-    // ── Batch 3.2: Task list checkbox rendering ──────────────────────────────
-    // Converts GFM-style task list items (- [x] / - [ ]) to styled checkboxes.
+    // Convert GFM task list items (- [x] / - [ ]) into styled checkboxes.
     function enhanceTaskLists(container: HTMLElement) {
         const lists = container.querySelectorAll('ul, ol');
         lists.forEach(list => {
@@ -4088,7 +4083,6 @@ let settingsSubscriptionPools: Record<string, any> = {};
         });
     }
 
-    // ── Batch 3.3: ARIA role helpers for dynamic messages ─────────────────────
     function setMessageAria(el: HTMLElement, role: 'user' | 'assistant') {
         el.setAttribute('role', 'article');
         el.setAttribute('aria-label', role === 'user' ? 'User message' : 'AI response');
@@ -4870,8 +4864,7 @@ let settingsSubscriptionPools: Record<string, any> = {};
                     }
                 }
             }
-            // 💡 Performance Optimization: If no active subagents are currently running,
-            // tear down the interval ticker to release main thread CPU cycles.
+            // Tear down the legacy subtask ticker once no grouped stream states remain active.
             if (activeCount === 0 && subagentTicker) {
                 clearInterval(subagentTicker);
                 subagentTicker = null;
@@ -5234,14 +5227,11 @@ let settingsSubscriptionPools: Record<string, any> = {};
                 }
             }
             updateSubagentCard(state, s.content || tr('Complete', '完成'));
-            // Terminate all active streaming states - the child agent has completed and there will be no new steps
-            // 1. Terminate the Thinking block: stop the spinning indicator
+            // Finalize all active streaming containers for this completed legacy subtask stream.
             if (state.liveThinkBlock) {
                 finishLiveThinking(state);
             }
-            // 2. End text bubble
             if (state.liveTextBubble) flushLiveText(state);
-            // 3. Clean tool timeline references
             state.liveToolTimeline = null;
             state.livePhase = null;
             return;
@@ -5502,7 +5492,7 @@ let settingsSubscriptionPools: Record<string, any> = {};
         toggleCodexActivityControl(control);
     });
 
-    // ── Phase 5: Event delegation for inline permission buttons in tool timeline ──
+    // Event delegation for inline permission buttons in the tool timeline.
     chatArea.addEventListener('click', (e) => {
         const btn = (e.target as HTMLElement).closest('.tp-perm-btn') as HTMLElement | null;
         if (!btn) return;
@@ -5810,7 +5800,6 @@ let settingsSubscriptionPools: Record<string, any> = {};
         }
         }
 
-        // M6 fix: display image thumbnails from the actual images array
         const imgRow = buildImageRow(images || []);
         if (imgRow) bubble.appendChild(imgRow);
 
@@ -6813,7 +6802,6 @@ let settingsSubscriptionPools: Record<string, any> = {};
                 msg.messages.forEach((m: any, idx: number) => {
                     if (m.isHidden === true) return;
                     
-                    // M4 fix: pass images array when restoring user messages from history
                     if (m.role === 'user') addUserMessage(m.displayContent || m.content, idx, m.images, m.contexts, m.schedulingState);
                     else {
                         chatArea.appendChild(buildAssistantMessage(m.content, m.steps, null));
@@ -7288,7 +7276,6 @@ let settingsSubscriptionPools: Record<string, any> = {};
                     html += `</div><div class="usage-trend-dates"><span>${escapeHtml(recent[0].date)}</span><span>${escapeHtml(recent[recent.length - 1].date)}</span></div></div>`;
                 }
 
-                // ── Batch 4.2: Tool frequency ──
                 if (stats.toolFrequency && stats.toolFrequency.length > 0) {
                     html += '<div style="border-top: 1px dashed var(--border); padding-top: 6px; margin-bottom: 10px;">';
                     html += `<div style="font-size:11px; opacity:0.5; margin-bottom:4px;">${tr('Tool usage frequency', '工具使用频率')}</div>`;
@@ -7309,7 +7296,6 @@ let settingsSubscriptionPools: Record<string, any> = {};
                     html += '</div>';
                 }
 
-                // ── Batch 4.2: Average response time ──
                 if (stats.avgResponseMs && stats.avgResponseMs > 0) {
                     const avgSec = (stats.avgResponseMs / 1000).toFixed(1);
                     html += `<div style="border-top: 1px dashed var(--border); padding-top: 6px; font-size:11px; opacity:0.7;">

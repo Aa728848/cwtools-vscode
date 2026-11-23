@@ -62,13 +62,13 @@ import { getConfiguredGameRoots } from '../configuredGameRoots';
 import { buildSkillIndexPrompt, listSkills, skillsDirectorySignature } from './skills';
 import { getCwtoolsHomeDir } from './homeConfig';
 
-// ─── Frozen prompt fingerprint (plan §7.1) ──────────────────────────────────
+// Frozen prompt fingerprint
 
 /**
  * Manual version counter for the frozen system prompt template. Bump this
  * whenever the prompt structure changes (sections added/removed/reordered, or
  * shared policy text edited) so prompts cached by older builds are never
- * reused across extension updates (plan §7.1).
+ * reused across extension updates.
  */
 export const PROMPT_TEMPLATE_VERSION = 11;
 
@@ -126,7 +126,7 @@ function shortSha256(content: string, length = 16): string {
  * Fingerprint the model-visible tool definitions for the frozen prompt cache
  * key. Only tool names and `required` parameter lists are hashed: description
  * text churn is covered by PROMPT_TEMPLATE_VERSION, so editing a description
- * does not needlessly invalidate cached prompts (plan §7.1).
+ * does not needlessly invalidate cached prompts.
  */
 export function hashToolDefinitionsForFingerprint(tools: readonly ToolDefinition[]): string {
     const stable = [...tools]
@@ -139,7 +139,7 @@ export function hashToolDefinitionsForFingerprint(tools: readonly ToolDefinition
 }
 
 /**
- * Order the initial request messages for provider prefix caching (plan §7.2):
+ * Order the initial request messages for provider prefix caching:
  * the stable system prompt stays at the head, cacheable (possibly compacted)
  * history follows, and dynamic editor/project state sits immediately before
  * the user turn so the long static prefix remains byte-stable. The OpenAI
@@ -203,14 +203,12 @@ export function modelSupplementForProvider(providerId?: string): string {
 export class PromptBuilder {
     private memoryParser: MemoryParser;
 
-    /** Frozen system prompt cache for prefix-cache optimization (DeepSeek etc.).
-     *  Key: sha256 over the structured prompt fingerprint (template version,
-     *  mode, provider, resolved game id, locale, CWTOOLS.md / project profile
-     *  content hashes, skill index hash, toolset hash, prompt-affecting flags,
-     *  configured vanilla roots) — value is the cached prompt string (plan §7.1).
-     *  Bounded by FROZEN_PROMPT_CACHE_MAX to guard against runaway growth from
-     *  unexpected key explosion (e.g. providerId variations). LRU eviction relies
-     *  on Map's insertion-order semantics. */
+    /**
+     * Frozen system prompt cache keyed by sha256 over the structured prompt
+     * fingerprint (template version, mode, provider, resolved game id, locale,
+     * rules/profile/skills/toolset/flags hashes, and configured vanilla roots).
+     * Bounded with insertion-order LRU eviction.
+     */
     private static readonly FROZEN_PROMPT_CACHE_MAX = 32;
     private _frozenPromptCache = new Map<string, string>();
     private _frozenSlimPromptCache = new Map<string, string>();
@@ -317,7 +315,7 @@ export class PromptBuilder {
         
         let finalPrompt = '';
 
-        // 2. Compacted Summary (来自 Phase 4 结构化记忆压缩)
+        // Compacted summary from structured memory compaction
         if (topicId && runId) {
             const wsRoot = this.workspaceRoot;
             const summaryMdPath = path.join(getPrivateTopicStorageDir(topicId, wsRoot), 'runs', runId, 'summary.md');
@@ -333,7 +331,7 @@ export class PromptBuilder {
             }
         }
 
-        // 3. Pinned Context (活跃钉选状态与实时断点)
+        // Pinned context (active todos, diagnostics, and pending approvals)
         if (pinned) {
             let pinnedText = aiText('## Pinned Context\n', '## 📌 活跃钉选状态与实时断点 (Pinned Context)\n');
             let hasPinned = false;
@@ -419,8 +417,7 @@ export class PromptBuilder {
         const skillsPrompt = this.getAgentSkillsPrompt(runtimeDomain);
         if (skillsPrompt) finalPrompt += '\n' + skillsPrompt;
 
-        // Configured vanilla roots reach delegated children through their sandbox;
-        // the coordinating agent needs the same statement in its own prompt.
+        // State configured vanilla roots explicitly so the agent knows read-only paths upfront.
         if (runtimeDomain === 'paradox') {
             const gameRootScope = buildConfiguredGameRootReadScopeStatement();
             if (gameRootScope) finalPrompt += '\n\n' + gameRootScope;
@@ -430,24 +427,16 @@ export class PromptBuilder {
     }
 
     /**
-     * Build a frozen (session-cached) system prompt for DeepSeek prefix-cache optimization.
-     * The first call builds and caches the prompt; subsequent calls return the cached string
-     * verbatim, ensuring byte-level stability across API calls for prefix cache hits.
+     * Build a session-cached system prompt for prefix-cache stability.
      *
-     * Kept byte-stable by excluding transient/dynamic parameters (pinned context, topic, run summaries).
-     *
-     * The cache key is a sha256 over a structured fingerprint (plan §7.1):
-     * PROMPT_TEMPLATE_VERSION, mode, providerId, the RESOLVED game language id
-     * (never undefined — auto-detection used to leave the key segment empty),
-     * locale, CWTOOLS.md and project-profile content hashes, skill index hash,
-     * the filtered toolset hash, prompt-affecting feature flags, and the
-     * configured vanilla roots. Any component change therefore produces a
-     * distinct entry instead of reusing a stale prompt — including a moved game
-     * install, whose read-scope statement is part of the cached string.
+     * Excludes transient parameters (pinned context, topic, run summaries) and keys
+     * the cache by a sha256 fingerprint over PROMPT_TEMPLATE_VERSION, mode,
+     * providerId, resolved game language id, locale, CWTOOLS.md/profile hashes,
+     * skill index hash, toolset hash, prompt-affecting feature flags, and configured
+     * vanilla roots so any relevant change invalidates cleanly.
      *
      * @param options.toolsetHash - hashToolDefinitionsForFingerprint() of the run's tool set
-     * @param options.rebuild - AgentRunnerOptions.rebuildSystemPrompt: drop this
-     *   fingerprint's entry and rebuild (counts as a 'rebuild' miss).
+     * @param options.rebuild - drop this fingerprint's entry and rebuild
      */
     buildFrozenSystemPrompt(
         mode: AgentMode,
@@ -641,7 +630,7 @@ export class PromptBuilder {
         return roots.length > 0 ? shortSha256(roots.join('\n')) : 'none';
     }
 
-    /** Feature flags that change prompt or tool message content (plan §7.1). */
+    /** Feature flags that change prompt or tool message content. */
     private computePromptFlagsHash(): string {
         const perfConfig = vs.workspace.getConfiguration('stellarisLanguageServices.ai.performance');
         return shortSha256(JSON.stringify({
@@ -649,7 +638,7 @@ export class PromptBuilder {
         }));
     }
 
-    /** Short fingerprint hash of the most recently served frozen prompt, for usage records (plan §7.3). */
+    /** Short fingerprint hash of the most recently served frozen prompt, for usage records. */
     getLastFrozenPromptFingerprintHash(): string | undefined {
         return this._lastFrozenPromptFingerprint?.hash;
     }
@@ -660,10 +649,8 @@ export class PromptBuilder {
     }
 
     /**
-     * Process-local frozen prompt cache diagnostics (plan §7.3). Deliberately
-     * not persisted to globalState: these are session-scoped cache-correctness
-     * counters, not billing data, so they live next to the cache itself
-     * instead of inside UsageTracker's persisted store.
+     * Process-local frozen prompt cache diagnostics (session-scoped cache
+     * counters, not billing data, so kept out of UsageTracker's store).
      */
     getFrozenPromptCacheStats(): { size: number; hits: number; misses: number; missReasons: Record<string, number> } {
         const missReasons: Record<string, number> = {};
@@ -676,10 +663,8 @@ export class PromptBuilder {
     }
 
     /**
-     * Drop the parsed CWTOOLS.md / ~/.cwtools/CWTOOLS.md / project profile mtime
-     * caches so the next prompt build re-reads them from disk. Frozen prompt
-     * entries key on content hashes and therefore miss naturally; called by file
-     * watchers on those inputs (plan §7.1).
+     * Drop mtime caches for CWTOOLS.md and project profile so the next prompt
+     * build re-reads them from disk (called by file watchers on those inputs).
      */
     invalidateProjectPromptInputs(): void {
         this._parsedRulesCache = null;
@@ -746,7 +731,7 @@ export class PromptBuilder {
             if (experience.text) dynamicParts.push(experience.text);
         }
 
-        // 1. Compacted Summary (来自历史会话看板的压缩)
+        // Compacted run summary
         if (topicId && runId) {
             const wsRoot = this.workspaceRoot;
             const summaryMdPath = path.join(getPrivateTopicStorageDir(topicId, wsRoot), 'runs', runId, 'summary.md');
@@ -762,7 +747,7 @@ export class PromptBuilder {
             }
         }
 
-        // 2. Pinned Context (活跃钉选状态与实时断点)
+        // Pinned context (active todos, diagnostics, and pending approvals)
         if (pinned) {
             let pinnedText = aiText('## Pinned Context\n', '## 📌 活跃钉选状态与实时断点 (Pinned Context)\n');
             let hasPinned = false;
@@ -1348,8 +1333,8 @@ ${trimmed}
 
 
 
-    // W6 fix: no longer inject complete code blocks repeatedly (AI has already seen its own generated code in the previous round).
-    //Only list the error lines and guide the AI   to use replace_lines for directed repair to avoid wasting thousands of tokens on large files.
+    // List only error lines and direct the model to targeted edits instead of
+    // re-injecting the entire file body on large files.
     buildValidationRetryMessage(code: string, errors: Array<{ message: string; line: number }>, diagnosticAdvice?: string): ChatMessage {
         const errorList = errors.map(e => `  - Line ${e.line}: ${e.message}`).join('\n');
         const hasSpriteError = errors.some(e => /Expected value of type sprite|type sprite|spriteType|picture|GFX_/i.test(e.message));

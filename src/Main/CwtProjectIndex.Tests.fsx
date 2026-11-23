@@ -1,4 +1,4 @@
-// Phase 3 project-index tests (CwtProjectIndex + CwtLanguageService).
+// Cross-file project-index tests (CwtProjectIndex + CwtLanguageService).
 //
 // Covers snapshot determinism, cross-file diagnostics (CWT301 undefined
 // reference, CWT302 duplicate type, CWT401 inject cycle), inject path

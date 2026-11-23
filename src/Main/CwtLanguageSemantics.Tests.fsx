@@ -1,4 +1,4 @@
-// Phase 2 semantic tests for the CWT language service (CwtLanguageService).
+// Single-file semantic tests for the CWT language service (CwtLanguageService).
 //
 // Table-driven checks for field-expression classification, directive
 // validation, declaration shapes, local symbols, and context completion.

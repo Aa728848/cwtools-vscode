@@ -4,7 +4,7 @@ Status: implemented
 
 ## Problem
 
-在初步实现 CW279–CW281 之后，[docs/engine-perf-lint-handoff.md](../../../../docs/engine-perf-lint-handoff.md) 梳理了 Stellaris 4.5 反编译性能分析转化为规则配置与插件功能的剩余工作：
+在初步实现 CW279–CW281 之后，原交接文档 `docs/engine-perf-lint-handoff.md`（现已随任务收口移除，成本标注重锚说明已迁至 [tools/engine-cost/README.md](../../../../tools/engine-cost/README.md)）梳理了 Stellaris 4.5 反编译性能分析转化为规则配置与插件功能的剩余工作：
 1. **任务 A（复杂度细分）**：714 条初版标注为笼统 `o(n)` 的命令缺少粒度，无法区分遍历本对象还是全银河；且缺少“复杂脚本求值（`script_eval`）”与“作用域深拷贝（`scope_copy`）”词汇，使 `opinion`、`habitability` 等沉重命令逃逸了 CW279 检查。
 2. **任务 B（结构反模式）**：
    - B1/B2：`add_building`/`remove_building`/`add_district`/`remove_district`/`set_controller`/`create_pop_group` 同步触发全星岗位重排（`EnsurePopJobsAreUpToDate`），`create_country` 同步全图联络并重建数据库；若出现在循环体内导致严重掉帧/冻结，此前无 `## sync_effect` 规则通道与校验器。

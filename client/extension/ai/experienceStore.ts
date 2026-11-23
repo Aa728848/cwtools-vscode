@@ -518,7 +518,7 @@ export interface ExperienceEligibilityInput {
     toolCallsByName?: Record<string, number>;
     writtenFiles: readonly string[];
     persistence: HistoryPersistenceMode;
-    /** Delegated child/slim runs are skipped; the top-level run distills the task. */
+    /** Internal/slim helper runs are skipped; only top-level user runs distill experience. */
     isSubAgentRun: boolean;
     alreadyDistilled: boolean;
     enabled: boolean;

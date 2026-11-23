@@ -1,9 +1,8 @@
 # Stellaris Trigger / Effect 引擎性能扫描清单
 
 > **来源**：Stellaris 4.5 Linux 版反编译结果（Ghidra dump）。
-> **生成工具**：`tools/engine-cost/extract-engine-cost.cjs`。
-> **数据即随扩展分发**的 `triggers.cwt` / `effects.cwt` 中的 `## cost` / `## engine_evidence` 标注。
-> 在 VS Code 中把光标放在任意已标注命令上，即可看到同样的信息。
+> **生成工具**：`tools/engine-cost/extract-engine-cost.cjs`（维护与重锚流程见 [tools/engine-cost/README.md](../tools/engine-cost/README.md)）。
+> **快照说明**：本文保留的是 4.5 初始全量静态扫描基线（1,248 条）。后续人工细分补充的 `o(n)_galaxy`、`o(n)_owned`、`script_eval`、`scope_copy` 等精确等级与 `## sync_effect` 标注均直接维护在 `submodules/cwtools-stellaris-config/config/*.cwt` 中；日常开发请以编辑器悬停提示和当前 `.cwt` 规则为准。
 
 ## 覆盖率
 

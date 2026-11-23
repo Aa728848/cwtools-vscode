@@ -1,28 +1,14 @@
 /**
- * IndexService — Workspace Indexing Layer
+ * IndexService — shared incremental workspace & vanilla-cache index.
  *
- * Provides a single, incremental index for workspace and vanilla cache files.
- * The first version indexes:
- *   - workspace file inventory
- *   - localisation keys
- *   - top-level PDXScript symbols and named .gfx/.asset/.gui assets
+ * Maintains file inventory, localisation keys, and lazy PDXScript/asset symbols
+ * with debounced file-watcher updates so UI previews and AI tools avoid ad-hoc
+ * workspace scans.
  *
- * Consumers (AI tools, editor features, previews) should query this service
- * instead of performing their own file scans.
- *
- * Architecture:
- *   - Lifecycle-managed singleton service with debounced file-watcher updates
- *   - Localisation, file inventory, and lazy workspace symbol indexing
- *
- * Performance design:
- *   - Localisation index is built on startup (lightweight, powers hovers/definitions).
- *   - Workspace symbol index is built LAZILY — only when an AI tool or consumer calls
- *     ensureWorkspaceSymbolsReady(). This keeps the extension host free for CodeLens,
- *     semantic highlighting, and completions during startup.
- *   - File contents are NOT held in memory after parsing. Runtime indexing captures
- *     lightweight in-block asset references and deliberately skips cross-file scans.
- *   - Index building yields to the event loop between batches to avoid starving
- *     other extension host consumers.
+ * Performance invariants:
+ * - Localisation indexes build at startup; workspace symbols build lazily on
+ *   `ensureWorkspaceSymbolsReady()` to keep startup responsive.
+ * - File bodies are discarded after parsing; batch work yields to the event loop.
  */
 
 import * as crypto from 'crypto';

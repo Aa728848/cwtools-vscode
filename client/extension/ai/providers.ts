@@ -157,7 +157,7 @@ function formatBytes(bytes: number): string {
 }
 
 /**
- * Batch 4.4: Suggest optimal Ollama configuration based on detected models.
+ * Suggest optimal Ollama configuration based on detected models.
  * Analyzes model parameter sizes and names to recommend:
  * - Best model for agent/chat use (largest capable model)
  * - Best model for inline completion (fastest small model)
@@ -406,14 +406,11 @@ function openAiReasoningCapability(model: string, providerId?: string): ModelRea
 }
 
 /**
- * 给「会思考」的请求调整输出上限。
+ * Adjust output token cap for thinking-enabled Claude requests.
  *
- * 思考预算计入 `max_tokens`，因此两件事必须同时成立：
- * - 上限要**装得下**这个预算，否则一个超预算的请求是 400；
- * - 预算要为回答**留出至少 1024 token**，否则模型想完就没有额度说结论。
- *
- * 调用方没给上限时用该线路公布的声明值，而不是一个硬编码的小数字：后者会让一次长回合
- * 在思考结束时被截断。
+ * Because thinking budget counts against `max_tokens`, the cap must exceed
+ * `budget_tokens` and leave at least `MIN_THINKING_ANSWER_TOKENS` for the final
+ * reply. Falls back to the line's declared ceiling rather than a small constant.
  */
 function claudeThinkingAwareMaxTokens(
     requested: number | undefined,
@@ -439,10 +436,10 @@ const MIN_THINKING_ANSWER_TOKENS = 1024;
 const MINIMAX_FORCED_THINKING_FLOOR_TOKENS = 512;
 
 /**
- * MiniMax 的输出上限。
+ * Output token floor for MiniMax forced-thinking models.
  *
- * 强制思考的模型有一个实测下限：`max_tokens: 64` 回来的是 `max_tokens` 结束原因、一个思考块、
- * **没有正文**；512 才正常结束。给一个小上限的调用方（会话标题、探针）一个空的答案。
+ * Measured minimum: `max_tokens: 64` ends with `max_tokens` after a thinking block
+ * and zero visible text; 512 completes normally (prevents empty title/probe replies).
  */
 function minimaxCodeThinkingAwareMaxTokens(
     requested: number | undefined,
@@ -1358,8 +1355,8 @@ export function toClaudeRequest(
         }
     }
 
-    // 🌟 自动注入 Anthropic cache_control 断点 (T3.1)
-    // breakpoint 1: System prompt 末尾
+    // Inject Anthropic prompt-cache breakpoints:
+    // Breakpoint 1: end of system prompt.
     let claudeSystem: any = undefined;
     if (options.claudeSubscriptionModel !== undefined) {
         // A subscription request's system array MUST open with the Claude Code
@@ -1400,7 +1397,7 @@ export function toClaudeRequest(
         cache_control: undefined as any
     }));
 
-    // breakpoint 2: 最后一个 tool 定义上打 breakpoint
+    // Breakpoint 2: last tool definition.
     if (enableCacheControl && claudeTools && claudeTools.length > 0) {
         const lastTool = claudeTools[claudeTools.length - 1];
         if (lastTool) {
@@ -1408,7 +1405,7 @@ export function toClaudeRequest(
         }
     }
 
-    // breakpoint 3: 寻找第一个包含 Context Recovery 或 system-reminder 的 user 消息
+    // Breakpoint 3: first user message carrying Context Recovery or <system-reminder>.
     let recoveryIdx = -1;
     if (enableCacheControl) {
         for (let i = 0; i < claudeMessages.length; i++) {
@@ -1431,16 +1428,14 @@ export function toClaudeRequest(
                             lastContentPart.cache_control = { type: 'ephemeral' };
                         }
                     }
-                    break; // 只打第一个
+                    break;
                 }
             }
         }
     }
 
-    // breakpoint 4: 滚动历史前缀。打在**最后一条 user 消息**的最后一个块上。
-    //
-    // 断点必须落在把历史带到下一轮的那个位置上：打在倒数第二条上，下一轮它就变成了最后一条，
-    // 于是那一整段历史被当成新输入重新计费——缓存命中率为零而看不出任何异常。
+    // Breakpoint 4: rolling history prefix on the last user message's final block
+    // (placing it on the penultimate message causes the entire prefix to miss next turn).
     if (enableCacheControl) {
         for (let i = claudeMessages.length - 1; i >= 0; i--) {
             const m = claudeMessages[i];

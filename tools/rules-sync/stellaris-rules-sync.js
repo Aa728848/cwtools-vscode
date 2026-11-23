@@ -9,7 +9,7 @@ let tsNodeBin = '';
 
 function usage() {
     console.log(`Usage:
-  node tools/rules-sync/stellaris-rules-sync.js [scan|check|update|report|contracts] [options]
+  node tools/rules-sync/stellaris-rules-sync.js [scan|check|update|report|contracts|optional-fields|gui] [options]
 
 Modes:
   scan    Generate rules.generated.json and generated CWT candidates.
@@ -18,12 +18,16 @@ Modes:
   report  Compare fresh game docs + vanilla common against the config baseline and
           write a self-contained visual HTML report (opens in browser). When a
           Stellaris install is found, the Shader ABI inventory is scanned and
-          auto-merged into config/shader before the report is generated.
+          auto-merged into config/shader and interface/**/*.gui is audited
+          against config/interface/gui_types.cwt before the report is generated.
   contracts  Extract Scope/ROOT/FROM contracts from vanilla comments and emit
              reviewable CWT candidates. Read-only unless --apply is passed.
   optional-fields
              Report alias fields the script documentation marks optional while
              the rule still requires them (false CW242). Also a check/report step.
+  gui        Audit vanilla interface/**/*.gui widget types and properties against
+             config/interface/gui_types.cwt and track named controls in key
+             diplomacy / mod custom_gui event windows against the saved baseline.
 
 Options:
   --docs <path>              Stellaris script_documentation directory.
@@ -33,8 +37,12 @@ Options:
   --previous <path>          Previous rules.generated.json for definition diffs.
   --include-vanilla-common   Inventory vanilla Stellaris common/ definitions. Enabled by default.
   --vanilla-common <path>    Vanilla Stellaris common directory.
-  --game-path <path>         Stellaris install root for the report mode Shader ABI scan.
+  --vanilla-interface <path> Vanilla Stellaris interface directory (for gui/report mode).
+  --gui-baseline <path>      Tracked GUI window baseline JSON (defaults to tools/rules-sync/gui-window-baseline.json).
+  --update-baseline          Refresh the tracked GUI window baseline from vanilla interface/ (gui mode).
+  --game-path <path>         Stellaris install root for report mode Shader ABI and GUI audits.
   --no-shader-abi            Skip the Shader ABI scan and auto-merge in report mode.
+  --no-gui-audit             Skip the vanilla interface/*.gui audit in report mode.
   --no-vanilla-common        Do not inventory vanilla Stellaris common/ definitions.
   --no-config-common         Do not inventory config/common CWT definitions.
   --no-cwt                   Do not emit generated CWT candidate files during scan.
@@ -50,8 +58,8 @@ function parseArgs(argv) {
     let mode = 'check';
     if (args[0] && !args[0].startsWith('-')) mode = args.shift();
     if (mode === 'help' || mode === '--help' || mode === '-h') return { help: true };
-    if (!['scan', 'check', 'update', 'report', 'contracts', 'optional-fields'].includes(mode)) {
-        throw new Error(`Unknown mode "${mode}". Expected scan, check, update, report, contracts, or optional-fields.`);
+    if (!['scan', 'check', 'update', 'report', 'contracts', 'optional-fields', 'gui'].includes(mode)) {
+        throw new Error(`Unknown mode "${mode}". Expected scan, check, update, report, contracts, optional-fields, or gui.`);
     }
 
     const opts = {
@@ -63,6 +71,10 @@ function parseArgs(argv) {
         previous: '',
         includeVanillaCommon: true,
         vanillaCommon: '',
+        vanillaInterface: '',
+        guiBaseline: '',
+        guiAudit: true,
+        updateBaseline: false,
         gamePath: '',
         shaderAbi: true,
         includeConfigCommon: true,
@@ -98,11 +110,23 @@ function parseArgs(argv) {
                 opts.includeVanillaCommon = true;
                 opts.vanillaCommon = path.resolve(args[++i] || '');
                 break;
+            case '--vanilla-interface':
+                opts.vanillaInterface = path.resolve(args[++i] || '');
+                break;
+            case '--gui-baseline':
+                opts.guiBaseline = path.resolve(args[++i] || '');
+                break;
+            case '--update-baseline':
+                opts.updateBaseline = true;
+                break;
             case '--game-path':
                 opts.gamePath = path.resolve(args[++i] || '');
                 break;
             case '--no-shader-abi':
                 opts.shaderAbi = false;
+                break;
+            case '--no-gui-audit':
+                opts.guiAudit = false;
                 break;
             case '--no-vanilla-common':
                 opts.includeVanillaCommon = false;
@@ -254,6 +278,15 @@ function buildCommonArgs(opts) {
     return commonArgs;
 }
 
+function resolveVanillaInterfaceDir(opts) {
+    if (opts.vanillaInterface) return opts.vanillaInterface;
+    const gameRoot = opts.gamePath
+        || (opts.vanillaCommon ? path.dirname(opts.vanillaCommon) : '')
+        || defaultGamePath();
+    if (!gameRoot) return '';
+    return path.join(gameRoot, 'interface');
+}
+
 function runShaderAbiAutoMerge(opts) {
     const gamePath = opts.gamePath || defaultGamePath();
     if (!gamePath || !fs.existsSync(gamePath)) {
@@ -299,6 +332,21 @@ function main() {
         return;
     }
 
+    if (opts.mode === 'gui') {
+        const vanillaInterface = resolveVanillaInterfaceDir(opts);
+        assertDir('Vanilla interface', vanillaInterface);
+        const guiScript = path.join(repoRoot, 'tools', 'rules-sync', 'gui-audit.ts');
+        const guiArgs = ['--vanilla-interface', vanillaInterface, '--config', opts.config];
+        if (opts.guiBaseline) guiArgs.push('--baseline', opts.guiBaseline);
+        if (opts.updateBaseline) guiArgs.push('--update-baseline');
+        if (opts.ci) guiArgs.push('--ci');
+        console.log(`[rules-sync] mode=gui${opts.updateBaseline ? ' update-baseline' : ''}`);
+        console.log(`[rules-sync] vanillaInterface=${vanillaInterface}`);
+        console.log(`[rules-sync] config=${opts.config}`);
+        runTsNode(guiScript, guiArgs, false, opts.ci);
+        return;
+    }
+
     if (opts.mode === 'contracts') {
         const vanillaCommon = opts.vanillaCommon || defaultVanillaCommonDir();
         assertDir('Vanilla common', vanillaCommon);
@@ -325,6 +373,15 @@ function main() {
             const vanillaCommon = opts.vanillaCommon || defaultVanillaCommonDir();
             assertDir('Vanilla common', vanillaCommon);
             reportArgs.push('--vanilla-common', vanillaCommon);
+        }
+        if (opts.guiAudit) {
+            const vanillaInterface = resolveVanillaInterfaceDir(opts);
+            if (vanillaInterface && fs.existsSync(vanillaInterface) && fs.statSync(vanillaInterface).isDirectory()) {
+                reportArgs.push('--vanilla-interface', vanillaInterface);
+                if (opts.guiBaseline) reportArgs.push('--gui-baseline', opts.guiBaseline);
+            } else {
+                console.log('[rules-sync] gui-audit skipped: Stellaris interface directory not found (set --vanilla-interface or --game-path, or pass --no-gui-audit to silence).');
+            }
         }
         console.log(`[rules-sync] mode=report`);
         console.log(`[rules-sync] docs=${opts.docs}`);

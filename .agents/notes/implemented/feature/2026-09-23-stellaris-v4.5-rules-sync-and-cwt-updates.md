@@ -163,6 +163,20 @@ flowchart LR
   - `common/pop_faction.cwt`：`skip_creation_cooldown`、`hidden`、`allow_natural_spawn`；
   - `common/situations.cwt`：`custom_tooltip`、`custom_tooltip_with_modifiers`、`override_active_title`、`override_active_desc`；
   - `common/zones.cwt`：`excluded_buildings`（及 `triggered_buildings` 完整 4 列表）、`destroy_trigger`、`is_capped_by_modifier`、`desc`、`empire_limit`、`planet_limit` modifier 规则、`on_built`/`on_queued`/`on_unqueued`、`additional_ai_weight`、`ai_estimate_without_unemployment`。
+- **Interface GUI 属性补全**：`interface/gui_types.cwt` 为 `containerWindowType` 补齐 `scroll_wheel_factor = float`，为 `gridBoxType` 补齐 `max_slots = { x = int y = int }`（原版 `galaxy_view.gui` 与 `main_bottom.gui` 已使用）。
+- **修复提交 `55fb233` 误删 `trigger_docs.log` 28 行**：子模块提交 `55fb233` 中意外丢失 `random_attacker`、`ordered_attacker`、`every_attacker` 与 `random_defender` 首部 3 行导致 FParsec 解析 `weights = {` 失败；已从原基线 `574648e` 完整恢复并通过 `StellarisConfigLogs.Tests.fsx`。
+
+### GUI 控件覆盖与外交窗口基线审计纳入检查流程
+
+原先 `rules-sync` 只扫描 `script_documentation`、`common/` 与 `gfx/FX`，原版 `interface/**/*.gui` 新增属性（如 4.6 顺手查出的 `scroll_wheel_factor`、`max_slots`）以及外交界面新增引擎绑定控件（如 `diplomacy_view.gui` 的 `ideology_window`）无法被自动化检查发现。本次将 GUI 审计正式纳入 `tools/rules-sync/`：
+
+- **独立审计模块（`tools/rules-sync/gui-audit.ts`）**：
+  - 扫描原版 `interface/**/*.gui` 内所有 `guiTypes = { ... }` 块的控件类型与属性键，大小写不敏感地对照 `config/interface/gui_types.cwt`，精确输出未覆盖类型/属性的出现次数与示例行号；显式跳过 `guiTypes` 块外的文件顶层全局键（如 `core.gui` 的 `default_clicksound`、`default_ime_text_color`），与 `gui_types.cwt` 的 `## type_key_filter = guiTypes` 边界一致。
+  - 追踪 7 个关键窗口的命名控件层级（`parentPath|type|name`）：4 个 Mod `custom_gui` 事件契约窗口（`diplomacy_event_view.gui` 的 `DiplomaticEventWindow`、`event_option_entry`，`eventwindow.gui` 的 `EventWindow`、`event_window_option_entry`）与 3 个核心外交界面（`diplomacy_view`、`federation_view`、`galactic_community_view`），透传 `if_resolution` 等无名布局包装块并支持单行块声明。
+- **基线与 CLI/报告集成**：
+  - 生成并落盘 4.6.0 基线 `tools/rules-sync/gui-window-baseline.json`（不放入规则子模块，避免污染语言服务器运行时配置）。
+  - `stellaris-rules-sync.js` 新增 `gui` 模式（含 `--update-baseline`、`--vanilla-interface`、`--gui-baseline`、`--no-gui-audit`、`--ci`）及 `npm run rules:stellaris:gui` 脚本；`report` 模式探测到原版 `interface/` 目录时自动执行并在控制台摘要、JSON 与 HTML 报告中新增「GUI 控件审计」标签页与告警卡片。
+  - 更新 `tools/rules-sync/tsconfig.test.json`、`tools/rules-sync/gui-audit.test.ts`、`tools/rules-sync/README.md` 与 `.agents/skills/stellaris-rules-sync/SKILL.md`。
 
 ## Alternatives considered
 
@@ -178,6 +192,8 @@ flowchart LR
    - 被否决。基线是人工维护的镜像，允许比原版文档更全（`create_country` 的 `nomadic`、`ship_kinds` 原版脚本仍在用，文档却不再列出）；强行归零会删掉真实字段或把噪声训练成"看到也不看"。
 6. **等原版文档更新后靠扫描器自动发现 `keep_automodding`**：
    - 被否决（也不可能）。4.5.3 文档未更新，扫描器对"只存在于公告与引擎"的变更天然失明，必须按公告人工补规则并记录在案。
+7. **把 `gui-window-baseline.json` 放进 `submodules/cwtools-stellaris-config/config/` 或全量扫描 `.gui` 顶层键**：
+   - 被否决。窗口基线是 `rules-sync` 工具侧漂移快照，不属于语言服务器运行时规则数据；全量扫描文件深度 0 会把 `core.gui` 的 `default_clicksound` 等非 `guiTypes` 引擎配置误报为 `gui_types.cwt` 缺失属性。
 
 ## Verification
 
@@ -190,6 +206,12 @@ flowchart LR
 - 运行 `npm run compile`：前端 Webview 与 Extension Host 编译全部通过。
 - 运行 `npm run typecheck:test`：全量 TypeScript 类型检查通过。
 - 参数级漂移：修好后 `report --no-open` 报 `trigger parameters: ~0`、`effect parameters: ~0`（修前为 `~2` / `~3`，其中 5 条是历史漏检）；`npm run test:rules-sync` 50 项通过（含 4 条新增参数回归）；`dotnet fsi src/Main/StellarisConfigLogs.Tests.fsx` 8 项通过（基线日志仍可被 F# 解析）；`npm run typecheck:test` 通过；规则 diff 中新增的 `scalar` 只有 `create_country.ruler`（自由字符串，与同块 `name`/`ship_prefix` 一致）。
+- **GUI 控件审计与外交窗口基线接入**：
+  - `node tools/rules-sync/stellaris-rules-sync.js gui --ci`（退出码 0）：`files=181 widget_types=19 uncovered_types=0 uncovered_props=0 tracked_windows=7 (+0 -0)`；
+  - `node tools/rules-sync/stellaris-rules-sync.js report --no-open`：全指标清零且输出 `[report] gui: files=181 widget_types=19 uncovered_types=0 uncovered_props=0 tracked_windows=7 (+0 -0)`；
+  - `dotnet fsi src/Main/StellarisConfigLogs.Tests.fsx` 8/8 通过（确认 `trigger_docs.log` 恢复 28 行后 `DocsParser` 完整解析 1171 triggers + 1143 effects，全部 108 个 CWT 文件零错加载）；
+  - `npm run test:rules-sync` 56 passing（含 `gui-audit.test.ts` 新增 5 条回归测试），`npm run test:perf` 7/7 passing，`npm run compile` 与 `npm run typecheck:test` 通过；
+  - `npm run test:unit` 中 `client/test/unit` 2802 passing / 2 failing（均为本次改动无关项：`shaderCwtContract.test.ts` 仍断言 4.5.x 旧 Shader 统计 `49/473/438`，以及 `claudeSubscription.test.ts` 本机回调端口 `53692` 竞争）；子模块新增 `scalar` 为 0。
 - v4.6.0 正式版补全：`report --no-open` 全部 diff 为 `+0 -0 ~0`，`trigger parameters: ~0`、`effect parameters: ~0`，`folders with findings: 0`，`scope contracts missing=0 mismatch=0 unresolved=10`，`documented-but-required=0`、`documented-but-unmodeled=0`，shader-abi `carried=479 added=0 dropped=0`、`contracts kept=13 dropped=0`；`dotnet fsi src/Main/StellarisConfigLogs.Tests.fsx` 8/8 通过（`DocsParser` 完整解析 1171 triggers + 1143 effects，含 `country_defeats_nomads_in_war`、`abandon_adopted_ideology`、`validate_species_rights`）；`EngineCostRuleParsing.Tests.fsx` 30/30 通过；`ModifierDocumentationRuleParsing.Tests.fsx` 8/8 通过；全部 108 个 CWT 文件经 `CKParser` 与 `RulesParser.parseConfigs` 零错误加载（3760 rules / 260 types / 194 enums / 29 complexEnums）；`npm run compile`、`npm run typecheck:test`、`npm run test:rules-sync`（51 passing）全部通过；规则 diff 新增 `scalar` 计数为 0；原版 DLC 使用项与 `common/defines`、`unchecked_defines` 缺失项均为 0。
 - v4.6.0：`report --no-open` 全部 diff 为 `+0 -0 ~0`，`trigger parameters: ~0`、`effect parameters: ~0`，`folders with findings: 0`，`scope contracts missing=0 mismatch=0 unresolved=10`，`documented-but-required=0`、`documented-but-unmodeled=0`；shader-abi `carried=479 added=8 dropped=0`、contracts `kept=13 dropped=0`；`npm run compile`、`npm run typecheck:test`、`npm test`（19 passing，语言服务器成功加载新规则）均通过；规则 diff 中 `scalar` 新增计数为 0。
 - v4.5.3：`report --no-open` 的 trigger / effect / modifier / scope / localisation_command 全为 `+0 -0 ~0`，`folders with findings: 0`，`scope contracts missing=0 mismatch=0 unresolved=0`，`documented-but-required=0`、`documented-but-unmodeled=0`，shader-abi `carried=471 added=0 dropped=0`、contracts `kept=13 dropped=0`。

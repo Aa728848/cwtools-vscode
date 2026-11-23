@@ -9,6 +9,10 @@
     "types": ["node", "mocha"]
   },
   "include": [
+    "gui-audit.ts",
+    "gui-audit.test.ts",
+    "optional-fields.ts",
+    "optional-fields.test.ts",
     "scope-contracts.ts",
     "scope-contracts-cli.ts",
     "scope-contracts.test.ts",

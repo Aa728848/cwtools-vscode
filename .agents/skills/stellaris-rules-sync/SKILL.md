@@ -55,7 +55,8 @@ node tools/rules-sync/stellaris-rules-sync.js report --no-open
 - `trigger` / `effect` / `modifier` 的变动数量（`+新增 -移除 ~修改`）；
 - `trigger parameters` / `effect parameters`（**命令块内参数键**的漂移，见下方"参数级漂移"）；
 - `folders with findings`（未覆盖的 Common 目录或字段）；
-- `scope contracts`（缺失的作用域契约）。
+- `scope contracts`（缺失的作用域契约）；
+- `gui`（原版 `interface/**/*.gui` 未覆盖的控件类型/属性键，以及 7 个关键外交与 Mod `custom_gui` 事件窗口的新增/移除控件）。
 
 #### 参数级漂移（`parameters`）
 
@@ -99,9 +100,9 @@ node tools/rules-sync/stellaris-rules-sync.js report --no-open
 
 ---
 
-### 步骤 4：第二阶段 —— 覆盖 Common 字段级参数与目录
+### 步骤 4：第二阶段 —— 覆盖 Common 字段级参数、目录与 Interface GUI 控件
 
-针对 `folders with findings` 中报告的每一项进行针对性覆盖：
+针对 `folders with findings` 与 `gui` 中报告的每一项进行针对性覆盖：
 
 1. **未覆盖的全新目录（Missing Rule Path）**：
    - 在 `submodules/cwtools-stellaris-config/config/common/` 新建对应的 `.cwt` 文件（如 `policy_categories.cwt`、`resource_regions.cwt`）。
@@ -116,6 +117,13 @@ node tools/rules-sync/stellaris-rules-sync.js report --no-open
      ## cardinality = 0..1
      field_name = <exact_type>
      ```
+4. **Interface GUI 控件类型、属性与外交窗口基线（`gui` 审计）**：
+   - 若 `uncovered_types > 0` 或 `uncovered_props > 0`，前往原版 `<Stellaris 安装目录>/interface/` 核实实际用法与所属控件，补入 `submodules/cwtools-stellaris-config/config/interface/gui_types.cwt`（强类型声明，如 `float` / `{ x = int y = int }`，严禁滥用 `scalar`）。
+   - 若 7 个关键窗口（`diplomacy_event_view.gui` / `eventwindow.gui` 的 `custom_gui` 契约窗口，以及 `diplomacy_view` / `federation_view` / `galactic_community_view`）检出控件增删（`+N -M`），先核实是否影响 Mod `custom_gui` 契约或外交界面覆写，确认处理完毕后运行：
+     ```powershell
+     npm run rules:stellaris:gui -- --update-baseline
+     ```
+     将 `tools/rules-sync/gui-window-baseline.json` 刷新至当前版本。
 
 ---
 
@@ -139,23 +147,32 @@ diff.split('\n').forEach(l => {
 
 ### 步骤 6：全套验证门禁（Verification Gate）
 
-1. **规则报告指标验证**：
+1. **规则报告与 GUI 审计指标验证**：
    ```powershell
    node tools/rules-sync/stellaris-rules-sync.js report --no-open
+   node tools/rules-sync/stellaris-rules-sync.js gui --ci
    ```
    **合格标准**：
    - `folders with findings: 0`（所有字段级缺失清零）；
    - `scope contracts missing: 0`；
    - `trigger parameters: ~0` 与 `effect parameters: ~0`（参数级漂移已逐条核对，或确认原版文档滞后）；
    - `effect: +0 -0 ~0`；
-   - `modifier: +0 -0 ~0`。
+   - `modifier: +0 -0 ~0`；
+   - `gui: uncovered_types=0 uncovered_props=0` 且 7 个追踪窗口 `(+0 -0)`（变动已核对并更新基线）。
 
-2. **代码编译与类型安全**：
+2. **F# 日志与规则加载校验**：
+   ```powershell
+   dotnet fsi src/Main/StellarisConfigLogs.Tests.fsx
+   ```
+   确保 `config/logs/trigger_docs.log` 的两处 `=================` 分隔符位置与语法块结构完整，8/8 全部通过。
+
+3. **代码编译、类型安全与规则工具单测**：
    ```powershell
    npm run compile
    npm run typecheck:test
+   npm run test:rules-sync
    ```
-   确保退出码均为 0，无任何 TypeScript 类型错误。
+   确保退出码均为 0，无任何 TypeScript 类型错误或回归失败。
 
-3. **撰写 Agent Note 归档**：
+4. **撰写 Agent Note 归档**：
    根据 `AGENTS.md` 要求，在 `.agents/notes/implemented/feature/` 创建或更新实施记录（使用简体中文），详述背景、设计决策、拒绝方案与验证指标。

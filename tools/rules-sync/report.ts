@@ -2,6 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { scanScopeContracts, type ScopeContractReport } from './scope-contracts';
 import { auditOptionalFields, type OptionalFieldAudit } from './optional-fields';
+import { auditGui, type GuiAuditReport } from './gui-audit';
 
 // Visual comparison report: fresh game script_documentation + vanilla common
 // versus the rules config baseline (config/logs/* + CWT files).
@@ -107,6 +108,7 @@ interface ReportData {
     folders: FolderFieldReport[];
     scopeContracts: ScopeContractReport;
     optionalFields: OptionalFieldAudit;
+    guiAudit: GuiAuditReport | null;
     shaderAbi: ShaderAbiMergeInfo | null;
 }
 
@@ -1194,6 +1196,16 @@ for (const diff of DATA.diffs) {
 tabs.push({ id: 'fields', label: 'Common 字段级参数', count: DATA.folders.reduce((n, f) => n + f.newFields.length + (f.missingSubtypes || []).length + (f.staleSubtypes || []).length + (f.covered ? 0 : 1), 0), render: renderFolders });
 tabs.push({ id: 'scope-contracts', label: 'Scope 契约', count: DATA.scopeContracts.findings.length, render: renderScopeContracts });
 tabs.push({ id: 'optional-fields', label: '可选字段契约', count: DATA.optionalFields.findings.length, render: renderOptionalFields });
+if (DATA.guiAudit) {
+  const gs = DATA.guiAudit.summary;
+  const missingWindows = DATA.guiAudit.trackedWindows.filter(w => !w.found).length;
+  tabs.push({
+    id: 'gui-audit',
+    label: 'GUI 控件审计',
+    count: gs.uncoveredWidgetTypes + gs.uncoveredProperties + gs.trackedControlsAdded + gs.trackedControlsRemoved + gs.baselineMissingWindows + missingWindows,
+    render: renderGuiAudit,
+  });
+}
 if (DATA.shaderAbi) {
   tabs.push({ id: 'shader-abi', label: 'Shader ABI', count: DATA.shaderAbi.added.length + DATA.shaderAbi.dropped.length + DATA.shaderAbi.contractsDropped.length, render: renderShaderAbi });
 }
@@ -1220,6 +1232,16 @@ function cards() {
   if (scopeSummary.mismatch) items.push({ tab: 'scope-contracts', cls: 'chg', num: scopeSummary.mismatch, lbl: 'Scope 契约冲突' });
   if (scopeSummary.unresolved) items.push({ tab: 'scope-contracts', cls: 'del', num: scopeSummary.unresolved, lbl: 'Scope 注释待复核' });
   if (DATA.optionalFields.findings.length) items.push({ tab: 'optional-fields', cls: 'del', num: DATA.optionalFields.findings.length, lbl: '可选字段误报 CW242' });
+  const gui = DATA.guiAudit;
+  if (gui) {
+    const gs = gui.summary;
+    const missingWindows = gui.trackedWindows.filter(w => !w.found).length;
+    if (gs.uncoveredWidgetTypes) items.push({ tab: 'gui-audit', cls: 'del', num: gs.uncoveredWidgetTypes, lbl: '未覆盖 GUI 控件类型' });
+    if (gs.uncoveredProperties) items.push({ tab: 'gui-audit', cls: 'del', num: gs.uncoveredProperties, lbl: '未覆盖 GUI 属性' });
+    if (gs.trackedControlsAdded) items.push({ tab: 'gui-audit', cls: 'add', num: gs.trackedControlsAdded, lbl: '外交/事件 GUI 新增控件' });
+    if (gs.trackedControlsRemoved) items.push({ tab: 'gui-audit', cls: 'chg', num: gs.trackedControlsRemoved, lbl: '外交/事件 GUI 移除控件' });
+    if (gs.baselineMissingWindows || missingWindows) items.push({ tab: 'gui-audit', cls: 'del', num: gs.baselineMissingWindows + missingWindows, lbl: 'GUI 窗口基线/定义缺失' });
+  }
   const abi = DATA.shaderAbi;
   if (abi) {
     if (abi.executableChanged) items.push({ tab: 'shader-abi', cls: 'chg', num: 'EXE', lbl: '引擎可执行文件已变化' });
@@ -1450,6 +1472,64 @@ function renderOptionalFields() {
   main.appendChild(wrap);
 }
 
+function renderGuiAudit() {
+  const main = document.getElementById('main');
+  const gui = DATA.guiAudit;
+  if (!gui) return;
+  const wrap = document.createElement('div');
+  const s = gui.summary;
+  const surfaceTable = (rows, colName) => '<table><thead><tr><th style="width:34%">' + colName + '</th><th style="width:12%">出现次数</th><th>示例位置</th></tr></thead><tbody>'
+    + rows.map(r => '<tr><td class="name">' + esc(r.key) + '</td><td>' + r.count + '</td><td class="src">' + esc(r.example) + ':' + r.exampleLine + '</td></tr>').join('')
+    + '</tbody></table>';
+  const roleLabel = role => role === 'custom_gui_contract'
+    ? '<span class="badge cwt">Mod custom_gui 契约</span>'
+    : '<span class="badge cwt">外交主界面</span>';
+  const windowBlocks = gui.trackedWindows.map(win => {
+    const hasDiff = !win.found || win.baselineMissing || win.added.length || win.removed.length;
+    const statusBadges = (!win.found ? '<span class="badge del">窗口缺失</span>' : '')
+      + (win.baselineMissing ? '<span class="badge chg">缺少基线</span>' : '')
+      + (win.added.length ? '<span class="badge add">+' + win.added.length + ' 新增</span>' : '')
+      + (win.removed.length ? '<span class="badge del">-' + win.removed.length + ' 移除</span>' : '')
+      + (!hasDiff ? '<span class="badge add">无变动</span>' : '');
+    let body = '';
+    if (!win.found) {
+      body = '<div class="body"><span class="desc">原版 <span class="tag">' + esc(win.file) + '</span> 中未找到顶层窗口 <span class="tag">' + esc(win.windowName) + '</span>，可能已重命名或拆分。</span></div>';
+    } else if (win.baselineMissing) {
+      body = '<div class="body"><span class="desc">基线文件中尚无此窗口（当前识别 ' + win.controlCount + ' 个命名控件）。复核后可运行 <code>npm run rules:stellaris:gui -- --update-baseline</code> 刷新基线。</span></div>';
+    } else if (win.added.length || win.removed.length) {
+      const addedRows = win.added.map(c =>
+        '<tr><td class="name">' + esc((c.parentPath ? c.parentPath + '/' : '') + c.name) + '<span class="badge add">新增</span></td>'
+        + '<td><span class="tag">' + esc(c.type) + '</span></td>'
+        + '<td class="src">' + esc(win.file) + ':' + c.line + '</td></tr>').join('');
+      const removedRows = win.removed.map(c =>
+        '<tr><td class="name">' + esc((c.parentPath ? c.parentPath + '/' : '') + c.name) + '<span class="badge del">移除</span></td>'
+        + '<td><span class="tag">' + esc(c.type) + '</span></td>'
+        + '<td class="src">基线 ' + esc(gui.baselineVersion || 'previous') + '</td></tr>').join('');
+      body = '<div class="body"><table><thead><tr><th style="width:52%">控件路径与名称</th><th style="width:24%">控件类型</th><th>位置 / 来源</th></tr></thead><tbody>'
+        + addedRows + removedRows + '</tbody></table></div>';
+    } else {
+      body = '<div class="body"><span class="desc">全部 ' + win.controlCount + ' 个命名控件与基线（' + esc(gui.baselineVersion || '当前基线') + '）一致。</span></div>';
+    }
+    return '<details class="folder' + (hasDiff ? ' uncovered' : '') + '"' + (hasDiff ? ' open' : '') + '>'
+      + '<summary>' + esc(win.file) + ' :: ' + esc(win.windowName) + roleLabel(win.role)
+      + '<span class="sub">控件 ' + win.controlCount + ' 个 ' + statusBadges + '</span></summary>' + body + '</details>';
+  }).join('');
+  wrap.innerHTML = '<div class="desc" style="margin-bottom:12px">'
+    + '已扫描原版 <span class="tag">interface/**/*.gui</span> 共 <b>' + s.guiFilesScanned + '</b> 个文件、<b>' + s.widgetTypesSeen + '</b> 种控件类型，对照 <span class="tag">config/interface/gui_types.cwt</span>'
+    + ' · 外交/事件窗口基线版本 <b>' + esc(gui.baselineVersion || '未建立') + '</b>'
+    + '（确认窗口控件变动后可运行 <code>npm run rules:stellaris:gui -- --update-baseline</code> 更新基线）。'
+    + '</div>'
+    + (gui.uncoveredWidgetTypes.length
+      ? '<details class="folder uncovered" open><summary>未覆盖的 GUI 控件类型 ' + gui.uncoveredWidgetTypes.length + '<span class="sub">需在 config/interface/gui_types.cwt 新增 alias[gui:*]</span></summary><div class="body">' + surfaceTable(gui.uncoveredWidgetTypes, '控件类型') + '</div></details>'
+      : '')
+    + (gui.uncoveredProperties.length
+      ? '<details class="folder uncovered" open><summary>未覆盖的 GUI 属性键 ' + gui.uncoveredProperties.length + '<span class="sub">需核实原版用法后补入 config/interface/gui_types.cwt</span></summary><div class="body">' + surfaceTable(gui.uncoveredProperties, '属性键') + '</div></details>'
+      : '')
+    + '<h3 class="bucket">关键外交与 Mod 自定义事件窗口控件追踪（' + s.trackedWindows + ' 个窗口）</h3>'
+    + windowBlocks;
+  main.appendChild(wrap);
+}
+
 function renderShaderAbi() {
   const main = document.getElementById('main');
   const abi = DATA.shaderAbi;
@@ -1503,6 +1583,8 @@ function parseArgs(argv: string[]) {
         docs: getArg('--docs'),
         config: getArg('--config'),
         vanillaCommon: getArg('--vanilla-common'),
+        vanillaInterface: getArg('--vanilla-interface'),
+        guiBaseline: getArg('--gui-baseline', path.join(__dirname, 'gui-window-baseline.json')),
         shaderAbi: getArg('--shader-abi'),
         outDir: getArg('--output', path.resolve('rules-report')),
     };
@@ -1511,7 +1593,7 @@ function parseArgs(argv: string[]) {
 function main() {
     const args = parseArgs(process.argv.slice(2));
     if (!args.docs || !args.config) {
-        console.error('Usage: npx ts-node tools/rules-sync/report.ts --docs <scriptDocsDir> --config <configDir> [--vanilla-common <dir>] [--shader-abi <mergeReport.json>] [--output <outDir>]');
+        console.error('Usage: npx ts-node tools/rules-sync/report.ts --docs <scriptDocsDir> --config <configDir> [--vanilla-common <dir>] [--vanilla-interface <dir>] [--gui-baseline <baseline.json>] [--shader-abi <mergeReport.json>] [--output <outDir>]');
         process.exit(1);
     }
     const baselineDir = path.join(args.config, 'logs');
@@ -1569,6 +1651,9 @@ function main() {
         // Documentation-optional fields that the rules still require would
         // report a false CW242 for every legal usage that omits them.
         optionalFields: auditOptionalFields(args.config),
+        guiAudit: args.vanillaInterface && fs.existsSync(args.vanillaInterface)
+            ? auditGui(args.vanillaInterface, args.config, args.guiBaseline)
+            : null,
         shaderAbi: args.shaderAbi ? readShaderAbiMergeReport(args.shaderAbi) : null,
     };
 
@@ -1588,6 +1673,10 @@ function main() {
     console.log(`[report] folders with findings: ${folders.length}`);
     console.log(`[report] scope contracts: extracted=${data.scopeContracts.summary.extracted} high=${data.scopeContracts.summary.highConfidence} missing=${data.scopeContracts.summary.missing} mismatch=${data.scopeContracts.summary.mismatch} unresolved=${data.scopeContracts.summary.unresolved}`);
     console.log(`[report] optional fields: documented-but-required=${data.optionalFields.findings.length} documented-but-unmodeled=${data.optionalFields.unmodeled.length}`);
+    if (data.guiAudit) {
+        const gs = data.guiAudit.summary;
+        console.log(`[report] gui: files=${gs.guiFilesScanned} widget_types=${gs.widgetTypesSeen} uncovered_types=${gs.uncoveredWidgetTypes} uncovered_props=${gs.uncoveredProperties} tracked_windows=${gs.trackedWindows} (+${gs.trackedControlsAdded} -${gs.trackedControlsRemoved})`);
+    }
     if (data.shaderAbi) {
         const abi = data.shaderAbi;
         console.log(`[report] shader-abi: ${abi.fromVersion} -> ${abi.toVersion}, catalog carried=${abi.carried.length} added=${abi.added.length} dropped=${abi.dropped.length}, contracts kept=${abi.contractsKept} dropped=${abi.contractsDropped.length}`);

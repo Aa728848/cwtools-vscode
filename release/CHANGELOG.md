@@ -1,5 +1,29 @@
 # Changelog
 
+## [2.39.0] - 2026-11-23
+
+### Stellaris 4.6.0 正式版规则支持 / Stellaris 4.6.0 (Corona Borealis) Rule Support
+
+- **[特性] 完整同步 Stellaris 4.6.0（Corona Borealis）正式版规则库（Full Stellaris 4.6.0 rule sync）**：
+  - 新增完整意识形态子系统规则（`ideology`、`ideology_tenet`、`ideology_action`、`ideology_reach_type`）与巨构模块规则（`megastructure_modules`），补齐 `ideology` 作用域及 100+ 新增 Trigger、Effect、Modifier、Scope 与 Localisation 命令；全部强类型绑定，零新增 `scalar`。
+  - 补齐 `common/` 149+ 新增字段（含正式版市场 AI 参数、`unchecked_defines` 界面参数、`Willpower` DLC、巨构模块容量、`casus_belli`/`war_goals`、`ethics`/`traits`/`pop_faction`/`situations`/`zones` 等）以及 `game_rules`、`on_actions` 新子类型与作用域契约（登记 `on_entering_war` → `on_war_entered` 迁移提示）。
+  - 同步刷新 4.6.0 Shader ABI 清单，补齐 `interface/gui_types.cwt` 的 `scroll_wheel_factor` 与 `max_slots` 属性；修复 `trigger_docs.log` 分隔符与缺失条目、`ideologies.cwt` 的 `filepath[...]` 语法以及 `country_types.cwt` 漏写 `##` 的 `replace_scope` 注释。
+  - English: [Feature] Fully sync the bundled Stellaris rule set to Corona Borealis v4.6.0: add the complete ideology subsystem (`ideology`, `ideology_tenet`, `ideology_action`, `ideology_reach_type`) and `megastructure_modules` rules, the `ideology` scope, 100+ new triggers/effects/modifiers/scopes/localisations, 149+ common fields (including release market AI defines, `unchecked_defines`, `Willpower` DLC, megastructure module slots, war goals and README optional fields), new `game_rules`/`on_actions` subtypes and scope contracts (`on_entering_war` -> `on_war_entered`), refreshed 4.6.0 Shader ABI data, and `scroll_wheel_factor` / `max_slots` in `gui_types.cwt`. Also fixes `trigger_docs.log` section delimiters, `ideologies.cwt` `filepath[...]` syntax, and a malformed `replace_scope` line in `country_types.cwt`.
+
+### 废弃字段迁移警告与智能补全过滤 / Deprecated Field Warnings and Completion Filtering
+
+- **[特性] 块级废弃警告支持、补全过滤与 31 项 Stellaris 4.x 迁移提示（Block-level deprecation warnings, completion filtering, and 31 Stellaris 4.x migration hints）**：
+  - 语言服务器规则校验将 `## error_if_only_match` 扩展至块级规则（此前仅对叶子键值对生效），同时自动补全自动隐藏已标注废弃提示的旧键，不再推荐用户写入过期字段。
+  - 经原版脚本、官方文档与引擎可执行文件双重核实，为 13 个 CWT 文件中 31 个已移除或改名的旧字段补充黄色迁移警告：区划 `is_capped_by_modifier`（改用 `is_uncapped = { ... }`）、`inherits_capped_modifiers_from`（改用 `shared_capacity_modifier`）、`base_cap_amount`；区带 `include`/`exclude`（改用 `included_buildings`/`excluded_buildings`）；舰船 `possible_starbase`/`potential_starbase`/`potential_planet`/`possible_planet`（改用 `*_construction`）；人口与职业 4.0 移除的 12 个旧字段；以及巨构、领袖、超空间通道、恒星基地、国家类型、派系、议程与行星类型中的过期字段。
+  - English: [Feature] Extend `## error_if_only_match` validation in the CWTools F# rule engine from leaf rules to block (`NodeRule`) rules and omit deprecated keys from auto-completion suggestions. Annotate 31 engine-removed or renamed Stellaris 4.x fields across 13 CWT files with warning-level migration messages, including district `is_capped_by_modifier` -> `is_uncapped` and `inherits_capped_modifiers_from` -> `shared_capacity_modifier`, zone `include`/`exclude` -> `included_buildings`/`excluded_buildings`, ship size `*_starbase`/`*_planet` -> `*_construction`, 12 removed pop/job fields, and legacy megastructure/leader/bypass/starbase/country/faction/agenda/planet fields.
+
+### 规则同步维护与文档 / Rules Sync Tooling and Documentation
+
+- **[优化] 新增 GUI 控件审计、反向陈旧字段审计与双语文档精简（GUI widget audit, reverse stale-field audit, and documentation streamlining）**：
+  - `tools/rules-sync/` 新增原版 `interface/**/*.gui` 控件覆盖与 7 个关键外交/自定义事件窗口基线审计（`npm run rules:stellaris:gui`），以及对照原版脚本与引擎可执行文件的反向陈旧字段审计（`npm run rules:stellaris:stale-fields`），统一集成进 HTML 对比报告。
+  - 精简并去重根目录双语文档、架构文档与代码注释，同步更新 4.6.0 Shader 契约单测。
+  - English: [Optimization] Add vanilla `interface/**/*.gui` widget coverage plus 7 tracked diplomacy/custom_gui window baselines (`npm run rules:stellaris:gui`) and a reverse stale/engine-removed CWT field audit (`npm run rules:stellaris:stale-fields`) into `tools/rules-sync/` and its HTML report. Streamline bilingual repository docs and code comments, and update the 4.6.0 Shader contract unit test.
+
 ## [2.38.1] - 2026-11-22
 
 ### 编辑器修复与维护 / Editor Fixes and Maintenance

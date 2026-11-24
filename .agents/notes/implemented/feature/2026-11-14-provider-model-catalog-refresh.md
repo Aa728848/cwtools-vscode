@@ -39,6 +39,7 @@ Status: implemented
   - `getAnthropicModelFeatures` 在保持 `sonnetVer === 5` 既有契约不变的前提下，使 `sonnetVer >= 5.5`、`haikuVer >= 5.5` 与 `opusVer >= 4.7` 均返回全 `true`，并新增 `bindsThinkingToPrefix` 字段（`fableVer >= 5.1 || opusVer >= 5.5 || sonnetVer >= 5.5 || haikuVer >= 5.5`）；
   - `toClaudeRequest` 新增 `allowThinkingBlockBinding` 开关，`aiService.ts` 仅向官方直连 `claude` 开启，当且仅当模型 `bindsThinkingToPrefix` 为真时写入 `thinking.block_binding: { prefix_mismatch_behavior: 'drop_block' }` 并附带 `anthropic-beta: thinking-binding-controls-2026-08-01`，避免 Fable 5.2（已取消账号宽限期）重放编辑前缀后的思考块报 400，同时不向第三方兼容网关泄漏该私有头与字段；
   - `aiService.ts` 的 `tokenRhythmReasoningReplay` 正则扩展为 `glm-5(?:\.[123])?(?:-flashx?)?`。
+  - `getModelOutputTokens` 对未识别的 Claude 兼容 ID 使用保守 32000 输出兜底；`toClaudeRequest` 在调用方未显式提供 `max_tokens` 时改用该逐模型输出上限，显式值始终优先，不再统一截到 4096。参考项目中的 fast-mode、context-editing 与 server compaction 仅作为未启用候选，不在缺少账号能力证据时默认发送。
 - **经核查无需变动的供应商**：`deepseek`、`mimo`、`mimo-token-plan`、`kimi`、`kimi-code-plan`、`workbuddy-subscription`、`opencode`、`siliconflow`、`github`、`together`、`deepinfra`、`ollama`、`custom` 均已符合最新模型基线，保持原样。
 
 ### 2. 网关优先协议隔离与请求塑形流程

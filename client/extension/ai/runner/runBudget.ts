@@ -30,8 +30,7 @@ export interface RunBudgetProgressState {
     blockingValidationIssues: number;
 }
 
-export interface SubAgentActivityBudgetState {
-    isSubAgent: boolean;
+export interface RunActivityBudgetState {
     iteration: number;
     lastExtendedIteration: number;
     consecutiveErrors: number;
@@ -94,10 +93,9 @@ export function shouldAutoExtendRunBudget(state: RunBudgetProgressState): boolea
         && state.blockingValidationIssues === 0;
 }
 
-/** Read-only and analysis children may be healthy without producing durable writes. */
-export function shouldAutoExtendSubAgentBudget(state: SubAgentActivityBudgetState): boolean {
-    return state.isSubAgent
-        && state.iteration > state.lastExtendedIteration
+/** Read-only and analysis runs may be healthy without producing durable writes. */
+export function shouldAutoExtendRunActivity(state: RunActivityBudgetState): boolean {
+    return state.iteration > state.lastExtendedIteration
         && state.consecutiveErrors === 0
         && state.blockingValidationIssues === 0;
 }

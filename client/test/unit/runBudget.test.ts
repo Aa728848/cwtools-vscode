@@ -5,7 +5,7 @@ import {
     normalizeRunBudgetLimits,
     selectHardBudgetMultiplier,
     shouldAutoExtendRunBudget,
-    shouldAutoExtendSubAgentBudget,
+    shouldAutoExtendRunActivity,
     shouldPersistResumeSnapshot,
     shouldRetainResumeState,
 } from '../../extension/ai/runner/runBudget';
@@ -102,23 +102,20 @@ describe('RunBudgetTracker', () => {
         })).to.equal(false);
     });
 
-    it('auto-extends an active healthy sub-agent even when its work is read-only', () => {
-        expect(shouldAutoExtendSubAgentBudget({
-            isSubAgent: true,
+    it('auto-extends an active healthy main agent even when its work is read-only', () => {
+        expect(shouldAutoExtendRunActivity({
             iteration: 24,
             lastExtendedIteration: 0,
             consecutiveErrors: 0,
             blockingValidationIssues: 0,
         })).to.equal(true);
-        expect(shouldAutoExtendSubAgentBudget({
-            isSubAgent: true,
+        expect(shouldAutoExtendRunActivity({
             iteration: 24,
             lastExtendedIteration: 24,
             consecutiveErrors: 0,
             blockingValidationIssues: 0,
         })).to.equal(false);
-        expect(shouldAutoExtendSubAgentBudget({
-            isSubAgent: true,
+        expect(shouldAutoExtendRunActivity({
             iteration: 24,
             lastExtendedIteration: 0,
             consecutiveErrors: 1,

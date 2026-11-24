@@ -469,6 +469,7 @@ describe('getModelOutputTokens', () => {
         expect(getModelOutputTokens('claude-opus-5-5', 'claude')).to.equal(128000);
         expect(getModelOutputTokens('claude-haiku-5-5', 'claude')).to.equal(128000);
         expect(getModelOutputTokens('claude-sonnet-5', 'claude')).to.equal(128000);
+        expect(getModelOutputTokens('claude-unlisted-compatible', 'claude')).to.equal(32000);
         expect(getModelOutputTokens('MiniMax-M3.1-Flash', 'minimax')).to.equal(128000);
         expect(getModelOutputTokens('MiniMax-M2.7', 'minimax')).to.equal(131072);
         expect(getModelOutputTokens('mimo-v2.5-pro', 'mimo')).to.equal(131072);
@@ -895,13 +896,13 @@ describe('toClaudeRequest', () => {
         expect(content[0]!.tool_use_id).to.equal('call_1');
     });
 
-    it('sets max_tokens with default 4096', () => {
+    it('uses the model output limit when max_tokens is omitted', () => {
         const req: ChatCompletionRequest = {
             model: 'claude-opus-4-7',
             messages: [{ role: 'user', content: 'Hi' }],
         };
         const result = toClaudeRequest(req);
-        expect(result.max_tokens).to.equal(4096);
+        expect(result.max_tokens).to.equal(128000);
     });
 
     it('uses provided max_tokens', () => {

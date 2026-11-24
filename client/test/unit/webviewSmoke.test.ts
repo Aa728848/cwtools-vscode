@@ -694,18 +694,21 @@ describe('webview smoke checks', () => {
     it('streaming thinking body re-render preserves user scroll position', () => {
         const script = fs.readFileSync(path.join(root, 'client/webview/chatPanel.ts'), 'utf8');
         expect(script).to.include('function rerenderScrollableBody(body: HTMLElement, html: string): void {');
+        expect(script).to.include('const scrollableBodyTrack = new WeakMap<HTMLElement, { lastTop: number; userScrolledUp: boolean }>();');
+        expect(script).to.include('const stickToBottom = !track.userScrolledUp');
         expect(script).to.include('body.scrollTop = stickToBottom ? body.scrollHeight : Math.min(prevScrollTop, body.scrollHeight);');
+        expect(script).to.include('track.lastTop = body.scrollTop;');
         expect(script).to.include('rerenderScrollableBody(state.liveThinkBody, renderMarkdown(clipLiveMarkdownContent(state.liveThinkContent)));');
         expect(script).to.include('rerenderScrollableBody(state.liveTextProcessBody, renderMarkdown(clipLiveMarkdownContent(state.liveTextContent)));');
     });
 
     it('streaming scroll pinning latches upward scrolls and re-checks inside the queued frame', () => {
         const script = fs.readFileSync(path.join(root, 'client/webview/chatPanel.ts'), 'utf8');
-        // Latch state: ~30px of deliberate upward drift sets it; only a downward
-        // return to the bottom (or a forced scroll) releases it.
+        // Any deliberate upward drift sets the latch immediately; only a
+        // downward return to the bottom (or a forced scroll) releases it.
         expect(script).to.include('let chatUpwardDrift = 0;');
         expect(script).to.include('let lastChatScrollTop = 0;');
-        expect(script).to.include('if (chatUpwardDrift > 30) isUserScrolledUp = true;');
+        expect(script).to.include('if (chatUpwardDrift > 0) isUserScrolledUp = true;');
         expect(script).to.include('if (delta >= 0) isUserScrolledUp = false;');
         // The rAF callback re-checks the latch so a queued frame never yanks the
         // user back down after they scrolled up.
@@ -713,7 +716,7 @@ describe('webview smoke checks', () => {
         expect(script).to.include('if (isUserScrolledUp) return;');
         // Subagent fullscreen views share the same latch semantics.
         expect(script).to.include('if (subagentUserScrolledUp.get(fullscreen)) return;');
-        expect(script).to.include('if (track.upwardDrift > 30) subagentUserScrolledUp.set(fullscreen, true);');
+        expect(script).to.include('if (track.upwardDrift > 0) subagentUserScrolledUp.set(fullscreen, true);');
         // Standalone compaction cards must not force-unlock a scrolled-up user.
         const compaction = script.slice(script.indexOf('function applyStandaloneCompactionStep'));
         expect(compaction.slice(0, compaction.indexOf('function ', 10))).to.not.include('scrollBottom(true)');

@@ -1467,7 +1467,7 @@ export function toClaudeRequest(
         model: request.model,
         system: claudeSystem,
         messages: claudeMessages,
-        max_tokens: request.max_tokens ?? 4096,
+        max_tokens: request.max_tokens ?? getModelOutputTokens(request.model, 'claude'),
     };
     if (claudeTools && claudeTools.length > 0) {
         claudeRequest.tools = claudeTools;

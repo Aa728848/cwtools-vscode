@@ -776,7 +776,9 @@ export function getModelOutputTokens(model: string, providerId?: string): number
         if (lower.includes('haiku-4-5')) return 64000;
         if (lower.includes('opus-4-5') || lower.includes('sonnet-4-5')) return 64000;
         if (lower.includes('fable-5') || lower.includes('opus-5') || lower.includes('opus-4-') || lower.includes('sonnet-5') || lower.includes('sonnet-4-6')) return 128000;
-        return 16384;
+        // Match the reference catalog's conservative template for an unknown
+        // Claude-compatible id instead of truncating every response at 16K.
+        return 32000;
     }
     if (providerId === 'minimax' || providerId === 'minimax-token-plan' || providerId?.includes('minimax') || lower.includes('minimax')) {
         if (lower.includes('minimax-m3')) return 128000;

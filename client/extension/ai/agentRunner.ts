@@ -120,7 +120,7 @@ import {
     DEFAULT_HARD_BUDGET_MULTIPLIER,
     RunBudgetTracker,
     selectHardBudgetMultiplier,
-    shouldAutoExtendSubAgentBudget,
+    shouldAutoExtendRunActivity,
     shouldAutoExtendRunBudget,
     shouldPersistResumeSnapshot,
     shouldRetainResumeState,
@@ -2508,8 +2508,7 @@ export class AgentRunner {
                     await saveRetainedResumeSnapshot();
                     return `The emergency runtime budget was reached (${detail}). Progress is checkpointed; review the current evidence before continuing.`;
                 }
-                const hasHealthySubAgentActivity = shouldAutoExtendSubAgentBudget({
-                    isSubAgent: isSlimRun,
+                const hasHealthyRunActivity = shouldAutoExtendRunActivity({
                     iteration,
                     lastExtendedIteration: lastExtendedActivityIteration,
                     consecutiveErrors: consecutiveErrorCount,
@@ -2520,14 +2519,14 @@ export class AgentRunner {
                     lastExtendedProgressRevision,
                     consecutiveErrors: consecutiveErrorCount,
                     blockingValidationIssues: blockingValidationIssues.size,
-                }) || hasHealthySubAgentActivity) {
+                }) || hasHealthyRunActivity) {
                     await maybeSaveResumeSnapshot(true);
                     budgetTracker.extend();
                     lastExtendedProgressRevision = progressRevision;
                     lastExtendedActivityIteration = iteration;
                     emitStep({
                         type: 'validation',
-                        content: `Agent runtime soft budget reached with healthy ${hasHealthySubAgentActivity ? 'sub-agent activity' : 'durable progress'} (${detail}). Checkpoint saved; continuing automatically for one additional budget window.`,
+                        content: `Agent runtime soft budget reached with healthy ${hasHealthyRunActivity ? 'run activity' : 'durable progress'} (${detail}). Checkpoint saved; continuing automatically for one additional budget window.`,
                         timestamp: Date.now(),
                     });
                 } else {

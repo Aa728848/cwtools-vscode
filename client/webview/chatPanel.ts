@@ -3848,10 +3848,10 @@ let settingsSubscriptionPools: Record<string, any> = {};
     // (live-turn innerHTML rebuilds, clipLiveMarkdownContent truncation,
     // virtual-scroll placeholders) makes the browser clamp scrollTop on its
     // own; that passive movement must neither set nor clear the latch. The
-    // scroll handler therefore only trusts the direction of scrollTop changes
-    // and requires ~30px of cumulative upward drift while away from the bottom
-    // before latching, so shrink-clamps (which land at the bottom) and growth
-    // (which does not move scrollTop) can never toggle it.
+    // scroll handler therefore only trusts the direction of scrollTop changes:
+    // any upward movement while away from the bottom latches immediately, so a
+    // queued streaming frame cannot win a race with a small wheel/scrollbar
+    // gesture. Shrink-clamps at the bottom and growth never toggle the latch.
     let isUserScrolledUp = false;
     let scrollBottomPending = false;
     let subagentScrollPending = false;
@@ -3880,7 +3880,7 @@ let settingsSubscriptionPools: Record<string, any> = {};
             if (delta >= 0) isUserScrolledUp = false;
         } else if (delta < 0) {
             chatUpwardDrift += -delta;
-            if (chatUpwardDrift > 30) isUserScrolledUp = true;
+            if (chatUpwardDrift > 0) isUserScrolledUp = true;
         } else {
             chatUpwardDrift = 0;
         }
@@ -3903,7 +3903,7 @@ let settingsSubscriptionPools: Record<string, any> = {};
                 if (delta >= 0) subagentUserScrolledUp.set(fullscreen, false);
             } else if (delta < 0) {
                 track.upwardDrift += -delta;
-                if (track.upwardDrift > 30) subagentUserScrolledUp.set(fullscreen, true);
+                if (track.upwardDrift > 0) subagentUserScrolledUp.set(fullscreen, true);
             } else {
                 track.upwardDrift = 0;
             }
@@ -3926,11 +3926,31 @@ let settingsSubscriptionPools: Record<string, any> = {};
     // Re-render a streaming scrollable body (e.g. .thinking-body) without losing
     // the user's scroll position: follow the stream while pinned to the bottom,
     // otherwise restore the previous offset (innerHTML replacement resets it).
+    const scrollableBodyTrack = new WeakMap<HTMLElement, { lastTop: number; userScrolledUp: boolean }>();
     function rerenderScrollableBody(body: HTMLElement, html: string): void {
-        const stickToBottom = body.scrollHeight - body.scrollTop - body.clientHeight < 24;
+        let track = scrollableBodyTrack.get(body);
+        if (!track) {
+            track = { lastTop: body.scrollTop, userScrolledUp: false };
+            scrollableBodyTrack.set(body, track);
+            body.addEventListener('scroll', () => {
+                const current = scrollableBodyTrack.get(body)!;
+                const scrollTop = body.scrollTop;
+                const distanceFromBottom = body.scrollHeight - scrollTop - body.clientHeight;
+                const delta = scrollTop - current.lastTop;
+                current.lastTop = scrollTop;
+                if (distanceFromBottom <= 24) {
+                    if (delta >= 0) current.userScrolledUp = false;
+                } else if (delta < 0) {
+                    current.userScrolledUp = true;
+                }
+            });
+        }
+        const stickToBottom = !track.userScrolledUp
+            && body.scrollHeight - body.scrollTop - body.clientHeight < 24;
         const prevScrollTop = body.scrollTop;
         body.innerHTML = html;
         body.scrollTop = stickToBottom ? body.scrollHeight : Math.min(prevScrollTop, body.scrollHeight);
+        track.lastTop = body.scrollTop;
     }
 
     function scrollBottom(force = false) {

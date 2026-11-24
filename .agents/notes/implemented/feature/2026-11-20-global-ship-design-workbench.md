@@ -70,7 +70,7 @@ Host 资源加载支持默认 state、材质覆盖、纹理、scale 与递归 at
 
 必需部件以视口右侧竖排图标栏呈现：`buildShipDesignRequiredSlots` 先按船型 `required_component_set` 顺序生成 `required:set:<集合>` 位（未填为空位），再把其余 `required_component` 列为 `required:extra:<n>`；无集合的条目只读。点击图标打开同集合候选，拖放或点击发送 Host 专用的 `set-required-component`，Host 重建槽位并校验集合、隐藏和船级/船型限制后改写列表。检查器中的必需部件文本框已移除，左右区段槽位为图标栏让出右侧空间。否决方案：保留文本框——无法提示集合与图标，也不能拖放。
 
-槽位使用 46px 图标按钮、S/M/L/A 等尺寸徽章和键盘选择；tooltip 只含槽位与当前部件，不含诊断原因。组件可拖到空槽或已装备槽位进行添加/替换，也可拖到中央“填满空槽”投放区批量填入兼容空槽；点击候选保留为键盘和无拖动环境回退。多个区段按列从左到右排列，每列内部每行最多 5 个组件，14 个组件显示为 5/5/4，空间不足时横向滚动。视口与右侧均不显示诊断列表。默认相机距离系数为 1.28，并将观察中心下移 `radius * 0.12`，使模型略缩小、上移，避免左下设计面板遮住船头。样式保留 VS Code 焦点和 reduced-motion 行为，窄视口改用上下分区。
+槽位使用 46px 图标按钮、S/M/L/A 等尺寸徽章和键盘选择；tooltip 只含槽位与当前部件，不含诊断原因。组件可拖到空槽或已装备槽位进行添加/替换，也可拖到中央“填满空槽”投放区批量填入兼容空槽；点击候选保留为键盘和无拖动环境回退。多个区段按列从左到右排列，每列内部每行最多 5 个组件，14 个组件显示为 5/5/4，空间不足时横向滚动。上下槽位层各以 `calc(50% - 6px)` 为最大高度并保持 `pointer-events: none` 与横向滚动；每个 `.sd-strip` 零件簇以 `max-block-size: 100%`、纵向 `overflow-y: auto` 和 `overscroll-behavior: contain` 提供可拖拽滚动条，让 30 个以上组件形成的多行网格可滚动选择，簇间空白仍穿透到三维 CANVAS。视口与右侧均不显示诊断列表。默认相机距离系数为 1.28，并将观察中心下移 `radius * 0.12`，使模型略缩小、上移，避免左下设计面板遮住船头。样式保留 VS Code 焦点和 reduced-motion 行为，窄视口改用上下分区。
 
 ### 8. inline 参数化组件与区段分组
 
@@ -106,5 +106,6 @@ Host 资源加载支持默认 state、材质覆盖、纹理、scale 与递归 at
 - 必需部件栏 Before 为 `ship-design-draft-library-after-1280.png`（检查器文本框），After 为 `ship-design-required-after-1280.png`、`ship-design-required-after-2000.png` 与 `ship-design-required-library-1280.png`：6 个图标竖排、与上下槽位重叠 0、检查器无文本框；拖放与点击均发出 `set-required-component`，组件库保持打开，源写入为 0，控制台零错误，见 `ship-design-required-verification.json`。
 - 增量组装 Before/After 由 `ship-design-incremental-verify.js` 通过 WebGL 缓冲计数采集：修改前替换一个武器删除并重建全部 25 个模型缓冲，出现加载遮罩且组件库清空；修改后替换与撤销均只删除/重建 5 个（单个武器），场景隐藏、加载遮罩、组件库清空次数均为 0，源文档写入仍为 0。结果见 `ship-design-incremental-before.json`、`ship-design-incremental-after.json`。
 - 草稿事务与紧凑布局的 Before 使用 `ship-design-library-height-after-2000.png`，After 为 `ship-design-draft-library-after-1280.png` 和 `ship-design-draft-library-after-2000.png`。12 个候选均为 40px 单行，1280 下面板为 340×730，2000 下为 340×1055；拖放、批量填槽、点击编辑、撤销和重做后的 `sourceEditCount` 均为 0，保存后为 1，组件库始终打开且控制台零错误。结果保存在 `ship-design-draft-verification.json`。
+- 大槽位滚动回归使用 45 个武器槽与 12 个公用槽、1280×800 同场景 Before/After：修复前原始 43%/hidden 几何无滚动条、滚轮与拖拽后 scrollTop 均为 0 且 GUN_45 被裁切；修复后零件簇 clientHeight/scrollHeight 为 301/450、滚动条宽 10px，滚轮和原生拖拽后 scrollTop 均为 149，GUN_45 可见且可打开候选。三段布局的簇间空白命中 CANVAS，控制台无错误。证据为 `ship-design-slot-scroll-before.png`、`ship-design-slot-scroll-after.png` 与 `ship-design-slot-scroll-verification.json`。
 - 发布布局修复：实际扩展根与仓库开发根不同，Webview 必须沿用 GUI/Entity 的 `extensionPath/bin/client/webview`，不能写成 `extensionPath/release/bin/client/webview`。错误路径会让实际 HTML 的 JS/CSS 全部 404，表现为无工具栏的整页黑屏；`shipDesignPanelContract.test.ts` 同时守住路径一致性和发布资产存在性。
 - 已知边界：不编辑船型/区段/部件模板和资产 locator，不编辑成长阶段配装，不实现玩家存档设计、游戏内 auto-best、动态国家属性完全复刻或逐像素游戏 Shader。无 WebGL 时仍保留二维编辑；实际资源或操作失败才显示简短错误。

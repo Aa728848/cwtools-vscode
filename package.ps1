@@ -143,7 +143,6 @@ if (-not $SkipClient) {
         New-Item -ItemType Directory -Path $DestCssDir -Force | Out-Null
     }
     Copy-Item "client/webview/solarSystemPreview.css" "$DestCssDir/" -Force
-    Copy-Item "client/webview/chatPanel.css" "$DestCssDir/" -Force
     $RulesSourceDir = Join-Path $PSScriptRoot "submodules/cwtools-stellaris-config/config"
     $RulesRepoDir = Split-Path $RulesSourceDir -Parent
     $RulesDestZip = Join-Path $PSScriptRoot "release/rules/stellaris-rules.zip"

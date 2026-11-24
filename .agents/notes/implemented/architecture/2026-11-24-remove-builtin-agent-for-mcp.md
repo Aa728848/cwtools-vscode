@@ -23,6 +23,12 @@ Status: implemented
 - 把 GUI 截图重新注入 Agent：违反外部 Agent 自主计划/核对的边界，改为按需 artifact。
 - 递归删除旧目录/缓存：违反仓库安全约束；所有删除均使用明确文件名。
 
+## CI 构建顺序
+
+- `cwtools-mcp` 子模块的 `packages/*/dist/` 被 gitignore，扩展的 `import { createNodeHostServices } from 'cwtools-node'` 依赖其类型产物，因此 CI 的每个 TypeScript job 都必须先在工作区构建。
+- 统一使用 `npm run build -w cwtools-node`：`cwtools-node` 的 `prebuild` 会先构建 `cwtools-shared`，一次命令覆盖两个包，与 `release.yml` 保持一致。
+- 拆分后根仓库不再提供 `check:mcp-schema` 脚本，schema 事实源位于 `cwtools-shared/src/tools/catalog.ts`，由 `submodules/cwtools-mcp` 的 `npm run test:contracts` 覆盖，CI 不再引用该脚本。
+
 ## Consequences
 
 - 扩展职责收敛为语言服务、可视化、项目知识与 MCP/Native 宿主；外部 Agent 负责通用 Harness。

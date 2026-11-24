@@ -27,13 +27,12 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - name: Build cwtools-shared for TypeScript resolution
+      - name: Build cwtools-node and cwtools-shared
         working-directory: submodules/cwtools-mcp
         run: |
           npm ci --no-audit --no-fund
-          npm run build -w cwtools-shared
+          npm run build -w cwtools-node
       - run: npm run verify
-      - run: npm run check:mcp-schema
 
   vscode-integration:
     name: Extension Host integration
@@ -51,11 +50,11 @@ jobs:
         with:
           dotnet-version: 10.0.x
       - run: npm ci
-      - name: Build cwtools-shared for TypeScript resolution
+      - name: Build cwtools-node and cwtools-shared
         working-directory: submodules/cwtools-mcp
         run: |
           npm ci --no-audit --no-fund
-          npm run build -w cwtools-shared
+          npm run build -w cwtools-node
       - name: Publish Linux language server
         run: >-
           dotnet publish src/Main/Main.fsproj
@@ -131,11 +130,11 @@ jobs:
         with:
           dotnet-version: 10.0.x
       - run: npm ci
-      - name: Build cwtools-shared for TypeScript resolution
+      - name: Build cwtools-node and cwtools-shared
         working-directory: submodules/cwtools-mcp
         run: |
           npm ci --no-audit --no-fund
-          npm run build -w cwtools-shared
+          npm run build -w cwtools-node
       - run: npm run compile
       - run: npm run typecheck:test
       - name: Run detached overlay Extension Host E2E (Linux)

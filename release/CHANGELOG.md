@@ -1,5 +1,30 @@
 # Changelog
 
+## [3.1.0] - 2026-11-24
+
+### 兼容性报错忽略修复 / Diagnostic Ignore Fix
+
+- **[修复] 忽略名单不再写进一个没人读取的键（The ignore allowlist now lands where filtering reads it）**：
+  - 「忽略兼容性报错」面板此前把白名单写入 `stellarisLanguageServices.ai.ignoredDiagnostics`，而诊断过滤读取的是 `stellarisLanguageServices.diagnostics.ignoredKeys`。后者默认值是空数组而非未定义，导致「回退到旧键」的逻辑永远不会触发，勾选后不会有任何报错被忽略。
+  - 现在读写统一到 `diagnostics.ignoredKeys`；旧键仍作为只读回退保留，已有工作区不必重新配置。
+  - 该命令的快捷键此前绑定在已随内置 Agent 移除的 `ai.enabled` 设置上，条件恒为假，Ctrl+Shift+I 实际不可达，现已恢复可用。
+  - English: [Fix] The ignore panel wrote to `ai.ignoredDiagnostics` while filtering read `diagnostics.ignoredKeys`; because that key defaults to an empty array rather than undefined, the legacy fallback never fired and nothing was ever suppressed. Reads and writes now share `diagnostics.ignoredKeys`, the legacy key stays readable, and Ctrl+Shift+I works again instead of being gated on a setting removed with the built-in agent.
+
+### 创意工坊上传版本号 / Workshop Upload Versions
+
+- **[特性] 上传面板可编辑 Mod 版本与支持的游戏版本（Edit mod and supported game versions in the upload form）**：
+  - 面板新增两个输入框，打开时用 `descriptor.mod` 中 `version=` 与 `supported_version=` 的现值预填。
+  - 两值都不是 Steam 的工坊字段，因此上传成功后写回 `descriptor.mod`，与既有 `remote_file_id` 回写并列；写回保留原有缩进与换行风格，缺失时才追加声明。
+  - 写回失败只降级为警告，不会把已经成功的上传报告成失败；留空的输入被忽略而非删除已有声明。
+  - English: [Feature] Add editable "Mod version" and "Supported game version" fields, prefilled from `descriptor.mod`. Neither value is a Steam Workshop field, so they are written back to the descriptor after a successful upload alongside `remote_file_id`, preserving indentation and line endings. A failed write degrades to a warning, and blank input never deletes an existing declaration.
+
+### 持续集成修复 / CI Fixes
+
+- **[修复] CI 的 TypeScript 任务补齐 cwtools-node 构建（Build cwtools-node in CI）**：
+  - 扩展依赖 `cwtools-node` 的类型产物，而 `packages/*/dist` 被 gitignore；CI 只构建了 `cwtools-shared`，导致四个任务因 `TS2307: Cannot find module 'cwtools-node'` 全部失败。
+  - 改为与发布流程一致的 `npm run build -w cwtools-node`（其 prebuild 会连带构建 shared），并移除拆分后已不存在的 `check:mcp-schema` 步骤。
+  - English: [Fix] The extension imports types from `cwtools-node`, whose `dist` output is gitignored, but CI only built `cwtools-shared`, so four jobs failed with TS2307. CI now runs `npm run build -w cwtools-node` like the release workflow, and the obsolete `check:mcp-schema` step is gone.
+
 ## [3.0.0] - 2026-11-24
 
 ### 破坏性变更：移除内置 Agent，迁移到外部 Agent 宿主 / Breaking: External Agent Hosts Replace the Built-in Agent

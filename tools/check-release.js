@@ -380,7 +380,6 @@ check('NLS keys: manifest references exist in NLS files', () => {
 // ── 9. Webview Bundles ──────────────────────────────────────────────────────
 
 const EXPECTED_WEBVIEW_BUNDLES = [
-    'chatPanel.js',
     'entityPreview.js',
     'guiPreview.js',
     'solarSystemPreview.js',

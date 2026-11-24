@@ -27,6 +27,7 @@ Status: implemented
   - **清理**：`mkdtemp` 在 `<stagingParent>/workshop-upload/` 下建唯一目录，`performUpload` 的 finally 必定调用 `removeStagingRoot`；该函数在递归删除前校验父目录名必须是 `workshop-upload`（递归删除会跟随链接，未校验路径可能删掉链接外的真实目标）。暂存父目录优先取 globalStorage 下的 workshop-staging，避免上传中途被系统临时清理器扫走。
   - **体积上限**：暂存超过 8 GB 抛错并清理，防止误配置把整个磁盘写满。
   - **UI**：新增 `staging` 阶段（Webview 双语文案），沿用既有 progress 协议；成功结果通过既有 warning 通道附带统计。设置项 `workshop.useIgnoreFiles`（默认 true）可关闭过滤。
+  - **版本字段编辑（追加决策）**：面板新增「Mod 版本」与「支持的游戏版本」两个输入框，打开时用 `descriptor.mod` 的 `version=` / `supported_version=` 现值预填，上传成功后由 `writeDescriptorVersions` 就地写回。两值都不进 Steam 的 UGC 字段——创意工坊条目本身没有「mod 版本」这一概念——也不自动追加进描述（用户决策：描述保持用户完全掌控）。写回在成功路径上与 `remote_file_id` 回写并列，失败只降级为 warning，不会把已完成的上传报成失败。空白输入被忽略而非删除字段，避免误清用户已写好的值；写入时剥离引号，防止值里的引号提前闭合声明。
 
 ## Alternatives considered
 
@@ -41,4 +42,5 @@ Status: implemented
 - **已知风险与换库触发条件**：steamworks.js 维护停滞（npm 停在 2024-08，issue #199 求接手）；上传 bug #197（error 5）未修复——适配层已做错误码可读化，若实测命中则先尝试不设 preview 缩小失败面；缺 KV tag / fileType / deleteItem，若后续需要这些能力即为换库硬触发条件。
 - **后续约束**：`release-extension` 流程依赖 package.ps1 4b 步暂存 node_modules/steamworks.js，打包前必须先 npm install；不要为省体积裁剪 dist/ 平台目录（通用包全平台是刻意选择）。steamworks.js 把 @types/node 声明为生产依赖，若其范围从 "*" 收紧会导致 vsce 的 npm list 校验失败。
 - **测试状态**：modDescriptor 18 例单测全绿；Webview 前端经仓库外一次性 DOM 垫片 14 项行为检查；宿主侧为代码审查级正确性（本机无 Steam 登录态，未做真实上传），首次真实上传需人工验证。
+- **测试状态（版本字段追加）**：modDescriptor 23 例单测全绿（含新增 5 例覆盖就地改写、缺失追加、CRLF 保持、空白不删字段、引号剥离）。
 - **测试状态（文件忽略追加）**：workshopIgnore 17 例单测全绿，覆盖 gitignore 过滤、目录作用域、否定规则、零拷贝快路径、体积上限与取消清理、符号链接报告、以及删除守卫拒绝越界路径。`npm run test:unit` 2889 例全绿（HEAD 基线 2872 + 17）。注意：本测试必须用带还原的 loader 钩子 stub `vscode`——早期版本把 `moduleLoader._load` 永久改写，导致同进程内 planModeGuard / promptBuilderContext 两例因解析不到真实模块而失败；`loadWithStubbedVscode` 在 finally 中还原。

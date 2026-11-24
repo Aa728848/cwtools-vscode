@@ -52,6 +52,8 @@ interface FormModel {
     previewPath?: string;
     visibility: Visibility;
     changeNote: string;
+    version: string;
+    supportedVersion: string;
 }
 
 interface ContextModel {
@@ -81,6 +83,11 @@ interface WorkshopTexts {
     previewPlaceholder: string;
     browse: string;
     fieldVisibility: string;
+    fieldVersion: string;
+    versionPlaceholder: string;
+    fieldSupportedVersion: string;
+    supportedVersionPlaceholder: string;
+    versionHint: string;
     fieldChangeNote: string;
     changeNotePlaceholder: string;
     upload: string;
@@ -118,6 +125,11 @@ const TEXT: Record<Locale, WorkshopTexts> = {
         previewPlaceholder: 'No preview image selected',
         browse: 'Browse…',
         fieldVisibility: 'Visibility',
+        fieldVersion: 'Mod version',
+        versionPlaceholder: 'For example: 1.4.2 (optional)',
+        fieldSupportedVersion: 'Supported game version',
+        supportedVersionPlaceholder: 'For example: 4.5.* (optional)',
+        versionHint: 'Both values are written back to descriptor.mod after a successful upload.',
         fieldChangeNote: 'Change note',
         changeNotePlaceholder: 'What changed in this update? (optional)',
         upload: 'Upload',
@@ -153,6 +165,11 @@ const TEXT: Record<Locale, WorkshopTexts> = {
         previewPlaceholder: '未选择预览图',
         browse: '浏览…',
         fieldVisibility: '可见性',
+        fieldVersion: 'Mod 版本',
+        versionPlaceholder: '例如：1.4.2（可选）',
+        fieldSupportedVersion: '支持的游戏版本',
+        supportedVersionPlaceholder: '例如：4.5.*（可选）',
+        versionHint: '上传成功后这两个值会写回 descriptor.mod。',
         fieldChangeNote: '更新说明',
         changeNotePlaceholder: '本次更新了什么？（可选）',
         upload: '上传',
@@ -258,7 +275,7 @@ const state = {
     /** True between the upload click and the host acknowledging it. */
     pending: false,
     context: { modRoot: '', appId: '', gameId: '' } as ContextModel,
-    form: { title: '', description: '', tags: [], visibility: 'unchanged', changeNote: '' } as FormModel,
+    form: { title: '', description: '', tags: [], visibility: 'unchanged', changeNote: '', version: '', supportedVersion: '' } as FormModel,
     previewUri: undefined as string | undefined,
 };
 
@@ -384,6 +401,15 @@ const SHELL = [
     '    <p class="wu-hint" data-wu="tagsHint"></p>',
     '  </div>',
     '  <div class="wu-field">',
+    '    <label class="wu-label" for="wu-version" data-wu="labelVersion"></label>',
+    '    <input class="wu-input" id="wu-version" type="text" autocomplete="off" />',
+    '  </div>',
+    '  <div class="wu-field">',
+    '    <label class="wu-label" for="wu-supported-version" data-wu="labelSupportedVersion"></label>',
+    '    <input class="wu-input" id="wu-supported-version" type="text" autocomplete="off" />',
+    '    <p class="wu-hint" data-wu="versionHint"></p>',
+    '  </div>',
+    '  <div class="wu-field">',
     '    <label class="wu-label" for="wu-preview" data-wu="labelPreview"></label>',
     '    <div class="wu-preview-row">',
     '      <input class="wu-input" id="wu-preview" type="text" readonly />',
@@ -423,6 +449,8 @@ interface Ui {
     preview: HTMLInputElement;
     previewThumb: HTMLImageElement;
     visibility: HTMLSelectElement;
+    version: HTMLInputElement;
+    supportedVersion: HTMLInputElement;
     changeNote: HTMLInputElement;
     browse: HTMLButtonElement;
     upload: HTMLButtonElement;
@@ -450,6 +478,8 @@ function buildUi(): Ui {
         preview: query<HTMLInputElement>('#wu-preview'),
         previewThumb: query<HTMLImageElement>('[data-wu="previewThumb"]'),
         visibility: query<HTMLSelectElement>('[data-wu="visibility"]'),
+        version: query<HTMLInputElement>('#wu-version'),
+        supportedVersion: query<HTMLInputElement>('#wu-supported-version'),
         changeNote: query<HTMLInputElement>('#wu-change-note'),
         browse: query<HTMLButtonElement>('[data-wu="browse"]'),
         upload: query<HTMLButtonElement>('[data-wu="upload"]'),
@@ -489,11 +519,16 @@ function applyLabels(): void {
     setText('labelPreview', text.fieldPreview);
     setText('browse', text.browse);
     setText('labelVisibility', text.fieldVisibility);
+    setText('labelVersion', text.fieldVersion);
+    setText('labelSupportedVersion', text.fieldSupportedVersion);
+    setText('versionHint', text.versionHint);
     setText('labelChangeNote', text.fieldChangeNote);
 
     query<HTMLInputElement>('#wu-description').placeholder = text.descriptionPlaceholder;
     query<HTMLInputElement>('#wu-tags').placeholder = text.tagsPlaceholder;
     query<HTMLInputElement>('#wu-title').placeholder = text.titlePlaceholder;
+    query<HTMLInputElement>('#wu-version').placeholder = text.versionPlaceholder;
+    query<HTMLInputElement>('#wu-supported-version').placeholder = text.supportedVersionPlaceholder;
     query<HTMLInputElement>('#wu-change-note').placeholder = text.changeNotePlaceholder;
 
     const select = query<HTMLSelectElement>('[data-wu="visibility"]');
@@ -511,6 +546,8 @@ function applyModel(ui: Ui): void {
     ui.title.value = state.form.title;
     ui.description.value = state.form.description;
     ui.tags.value = state.form.tags.join(', ');
+    ui.version.value = state.form.version;
+    ui.supportedVersion.value = state.form.supportedVersion;
     ui.changeNote.value = state.form.changeNote;
     ui.visibility.value = state.form.visibility;
     ui.preview.value = state.form.previewPath ?? text.previewPlaceholder;
@@ -573,6 +610,12 @@ function render(): Ui {
     });
     ui.tags.addEventListener('input', () => {
         state.form.tags = parseTags(ui.tags.value);
+    });
+    ui.version.addEventListener('input', () => {
+        state.form.version = ui.version.value;
+    });
+    ui.supportedVersion.addEventListener('input', () => {
+        state.form.supportedVersion = ui.supportedVersion.value;
     });
     ui.changeNote.addEventListener('input', () => {
         state.form.changeNote = ui.changeNote.value;
@@ -685,6 +728,8 @@ function submitUpload(ui: Ui): void {
     state.form.description = ui.description.value;
     state.form.tags = parseTags(ui.tags.value);
     state.form.changeNote = ui.changeNote.value;
+    state.form.version = ui.version.value;
+    state.form.supportedVersion = ui.supportedVersion.value;
     state.form.visibility = asVisibility(ui.visibility.value);
 
     if (state.form.title.trim().length === 0) {
@@ -710,6 +755,8 @@ function submitUpload(ui: Ui): void {
             ...(previewPath ? { previewPath } : {}),
             visibility: state.form.visibility,
             changeNote: state.form.changeNote,
+            ...(state.form.version.trim() ? { version: state.form.version.trim() } : {}),
+            ...(state.form.supportedVersion.trim() ? { supportedVersion: state.form.supportedVersion.trim() } : {}),
         },
     });
 }
@@ -723,6 +770,8 @@ function applyPrefill(data: Record<string, unknown>): void {
     state.form.tags = asTags(data.tags);
     state.form.visibility = asVisibility(data.visibility);
     state.form.changeNote = asText(data.changeNote);
+    state.form.version = asText(data.version);
+    state.form.supportedVersion = asText(data.supportedVersion);
     state.form.previewPath = asOptionalText(data.previewPath);
 
     state.context.modRoot = asText(data.modRoot);

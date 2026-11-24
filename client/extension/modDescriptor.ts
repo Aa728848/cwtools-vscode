@@ -96,3 +96,60 @@ export function writeRemoteFileId(descriptorPath: string, id: string): void {
     }
     fs.writeFileSync(descriptorPath, next, 'utf8');
 }
+
+/** Fields the workshop form may edit in `descriptor.mod`. */
+export interface DescriptorVersionFields {
+    /** Mod's own version, written as `version="..."`. */
+    version?: string;
+    /** Game version the mod targets, written as `supported_version="..."`. */
+    supportedVersion?: string;
+}
+
+function escapeDescriptorValue(value: string): string {
+    // Paradox descriptors quote string values; an embedded quote would end the
+    // value early and turn the line into a parse warning.
+    return value.replace(/["\r\n]/g, '').trim();
+}
+
+/**
+ * Rewrites one `name="value"` declaration, keeping the line's indentation and
+ * spacing when it already exists, or appending it when the descriptor has none.
+ * `content` keeps whatever line endings it already uses.
+ */
+function setDescriptorDeclaration(content: string, name: string, value: string, eol: string): string {
+    // The captured prefix already carries "name =", so only the quoted value is
+    // spliced back in; appending a whole declaration would repeat the key.
+    const linePattern = new RegExp('^([ \\t]*' + name + '[ \\t]*=[ \\t]*).*$', 'm');
+    const quoted = '"' + escapeDescriptorValue(value) + '"';
+    if (linePattern.test(content)) {
+        return content.replace(linePattern, (_match: string, prefix: string) => prefix + quoted);
+    }
+    const body = content.length === 0 ? '' : content.endsWith('\n') ? content : content + eol;
+    return body + name + '=' + quoted + eol;
+}
+
+/**
+ * Writes the mod's own version and/or its supported game version back into an
+ * existing `descriptor.mod`.
+ *
+ * Blank or whitespace-only values are ignored: the two declarations are only
+ * touched when the user actually typed something, so clearing a field never
+ * deletes a fact the descriptor already recorded.
+ *
+ * @returns true when the file changed.
+ */
+export function writeDescriptorVersions(descriptorPath: string, fields: DescriptorVersionFields): boolean {
+    const version = fields.version?.trim();
+    const supportedVersion = fields.supportedVersion?.trim();
+    if (!version && !supportedVersion) return false;
+    // Byte read, decoded here: a string-mode read would hand the line-ending
+    // style to whatever text shim wraps `fs.readFileSync`.
+    const content = fs.readFileSync(descriptorPath).toString('utf8');
+    const eol = content.includes('\r\n') ? '\r\n' : '\n';
+    let next = content;
+    if (version) next = setDescriptorDeclaration(next, 'version', version, eol);
+    if (supportedVersion) next = setDescriptorDeclaration(next, 'supported_version', supportedVersion, eol);
+    if (next === content) return false;
+    fs.writeFileSync(descriptorPath, next, 'utf8');
+    return true;
+}

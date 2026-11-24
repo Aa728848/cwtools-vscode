@@ -46,6 +46,10 @@ export interface WorkshopUploadFormData {
     previewPath?: string;
     visibility: WorkshopVisibility;
     changeNote: string;
+    /** Editable mod version, written back to descriptor.mod after a successful upload. */
+    version?: string;
+    /** Editable supported game version, written back to descriptor.mod. */
+    supportedVersion?: string;
 }
 
 /** Everything the form needs to describe the mod it is about to upload. */
@@ -56,6 +60,8 @@ export interface WorkshopUploadPrefill {
     previewPath?: string;
     visibility: WorkshopVisibility;
     changeNote: string;
+    version: string;
+    supportedVersion: string;
     modRoot: string;
     remoteFileId?: string;
     appId: string;
@@ -99,7 +105,9 @@ const WORKSHOP_MESSAGE_VALIDATORS: Record<WorkshopWebviewMessage['type'], (messa
             isStringArray((message as WorkshopUploadFormData).tags) &&
             isString((message as WorkshopUploadFormData).changeNote) &&
             isWorkshopVisibility((message as WorkshopUploadFormData).visibility) &&
-            optional(isString)((message as WorkshopUploadFormData).previewPath),
+            optional(isString)((message as WorkshopUploadFormData).previewPath) &&
+            optional(isString)((message as WorkshopUploadFormData).version) &&
+            optional(isString)((message as WorkshopUploadFormData).supportedVersion),
     }),
 };
 
@@ -301,6 +309,8 @@ export class WorkshopUploadViewProvider implements vscode.WebviewViewProvider {
                 previewPath: target.previewPath,
                 visibility: target.defaultVisibility,
                 changeNote: '',
+                version: target.descriptor.version ?? '',
+                supportedVersion: target.descriptor.supportedVersion ?? '',
                 modRoot: target.modRoot,
                 remoteFileId: target.descriptor.remoteFileId,
                 appId: target.appId,
@@ -408,6 +418,8 @@ export class WorkshopUploadViewProvider implements vscode.WebviewViewProvider {
                 changeNote: data.changeNote,
                 visibility: data.visibility,
                 previewPath: data.previewPath,
+                version: data.version,
+                supportedVersion: data.supportedVersion,
                 remoteFileId: target.descriptor.remoteFileId,
                 stagingParent: this.stagingParent,
                 applyIgnoreRules: useIgnoreFiles(),

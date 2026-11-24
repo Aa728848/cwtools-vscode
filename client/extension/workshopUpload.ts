@@ -18,7 +18,7 @@ import * as path from 'path';
 import * as vscode from 'vscode';
 import { ErrorReporter } from './errorReporter';
 import { getAllProfiles, getCacheSettingKey } from './gameProfiles';
-import { getDescriptorPath, readDescriptor, writeRemoteFileId, type ModDescriptor } from './modDescriptor';
+import { getDescriptorPath, readDescriptor, writeDescriptorVersions, writeRemoteFileId, type ModDescriptor } from './modDescriptor';
 import { localize } from './panelI18n';
 import { removeStagingRoot, stageUploadContent, type StagedContent } from './workshopIgnore';
 import { hasWorkspaceModDescriptor, inferGameIdFromWorkspace } from './workspaceGameDetection';
@@ -601,6 +601,10 @@ export interface WorkshopUploadRequest {
     changeNote: string;
     visibility: WorkshopVisibility;
     previewPath?: string;
+    /** Mod version written back to descriptor.mod; blank leaves the file alone. */
+    version?: string;
+    /** Supported game version written back to descriptor.mod; blank leaves it alone. */
+    supportedVersion?: string;
     /** Present for an update; absent creates a new workshop item. */
     remoteFileId?: string;
     /** Where the filtered staging copy is created; defaults to the OS temp dir. */
@@ -702,6 +706,30 @@ function commitUpload(
             finish({ ok: false, itemId, needsAgreement: false, error: describeError(error) });
         }
     });
+}
+
+/**
+ * Writes the version fields the user edited in the form back into
+ * `descriptor.mod`. Like the remote-file-id write-back it is reported but never
+ * turns a completed upload into a failed one: the Workshop item is already live
+ * at this point, and losing that fact would be worse than a stale version line.
+ */
+function writeBackVersions(modRoot: string, request: WorkshopUploadRequest): string | undefined {
+    if (!request.version?.trim() && !request.supportedVersion?.trim()) return undefined;
+    const descriptorPath = getDescriptorPath(modRoot);
+    try {
+        writeDescriptorVersions(descriptorPath, {
+            version: request.version,
+            supportedVersion: request.supportedVersion,
+        });
+        return undefined;
+    } catch (error) {
+        ErrorReporter.warn('WorkshopUpload', `Failed to write version fields into ${descriptorPath}`, error);
+        return localize(
+            'Uploaded, but descriptor.mod version fields could not be updated.',
+            '上传成功，但未能更新 descriptor.mod 的版本号字段。'
+        );
+    }
 }
 
 /**
@@ -837,6 +865,7 @@ async function performUpload(request: WorkshopUploadRequest): Promise<WorkshopUp
             // The staging copy is disposable, but the numbers it produced are
             // the only record of what actually shipped.
             const warning = [
+                writeBackVersions(request.modRoot, request),
                 created ? writeBackRemoteFileId(request.modRoot, outcome.itemId) : undefined,
                 describeStagedContent(staged),
             ]

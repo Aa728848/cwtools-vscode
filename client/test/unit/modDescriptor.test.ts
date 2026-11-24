@@ -6,6 +6,7 @@ import {
     DESCRIPTOR_FILE_NAME,
     getDescriptorPath,
     readDescriptor,
+    writeDescriptorVersions,
     writeRemoteFileId,
 } from '../../extension/modDescriptor';
 
@@ -319,4 +320,80 @@ describe('mod descriptor', () => {
             }
         });
     });
+
+    describe('writeDescriptorVersions', () => {
+        it('replaces existing version declarations in place and keeps everything else', () => {
+            const root = makeModRoot([
+                'name="Sample Mod"',
+                'version="1.0.0"',
+                'supported_version="4.0.*"',
+                'tags={ "Fleet" }',
+                '',
+            ].join('\n'));
+            try {
+                const changed = writeDescriptorVersions(getDescriptorPath(root), {
+                    version: '1.4.2',
+                    supportedVersion: '4.5.*',
+                });
+                expect(changed).to.equal(true);
+                const written = readRaw(root);
+                expect(written).to.equal([
+                    'name="Sample Mod"',
+                    'version="1.4.2"',
+                    'supported_version="4.5.*"',
+                    'tags={ "Fleet" }',
+                    '',
+                ].join('\n'));
+                const descriptor = readDescriptor(root);
+                expect(descriptor.version).to.equal('1.4.2');
+                expect(descriptor.supportedVersion).to.equal('4.5.*');
+            } finally {
+                cleanup(root);
+            }
+        });
+
+        it('appends a missing declaration instead of dropping it', () => {
+            const root = makeModRoot('name="No Versions"\n');
+            try {
+                expect(writeDescriptorVersions(getDescriptorPath(root), { version: '2.0.0' })).to.equal(true);
+                expect(readRaw(root)).to.equal('name="No Versions"\nversion="2.0.0"\n');
+                expect(readDescriptor(root).version).to.equal('2.0.0');
+            } finally {
+                cleanup(root);
+            }
+        });
+
+        it('preserves CRLF line endings', () => {
+            const root = makeModRoot('name="Windows Mod"\r\nversion="0.1.0"\r\n');
+            try {
+                writeDescriptorVersions(getDescriptorPath(root), { version: '0.2.0' });
+                expect(readRaw(root)).to.equal('name="Windows Mod"\r\nversion="0.2.0"\r\n');
+            } finally {
+                cleanup(root);
+            }
+        });
+
+        it('leaves the file untouched when both fields are blank', () => {
+            const original = 'name="Untouched"\nversion="1.0.0"\n';
+            const root = makeModRoot(original);
+            try {
+                expect(writeDescriptorVersions(getDescriptorPath(root), { version: '   ', supportedVersion: '' })).to.equal(false);
+                expect(readRaw(root)).to.equal(original);
+            } finally {
+                cleanup(root);
+            }
+        });
+
+        it('strips quotes so a value cannot break the declaration', () => {
+            const root = makeModRoot('name="Quoted"\n');
+            try {
+                writeDescriptorVersions(getDescriptorPath(root), { version: '1.0"beta' });
+                expect(readRaw(root)).to.contain('version="1.0beta"');
+                expect(readDescriptor(root).warnings).to.deep.equal([]);
+            } finally {
+                cleanup(root);
+            }
+        });
+    });
+
 });

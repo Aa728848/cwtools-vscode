@@ -13,7 +13,7 @@
 import * as vscode from 'vscode';
 import { panelText } from './panelI18n';
 import * as path from 'path';
-import { ErrorReporter } from './ai/errorReporter';
+import { ErrorReporter } from './errorReporter';
 import { isPathInsideOrEqual } from './pathScope';
 import {
     parseEventFile,

@@ -23,7 +23,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import ignore, { type Ignore } from 'ignore';
-import { ErrorReporter } from './ai/errorReporter';
+import { ErrorReporter } from './errorReporter';
 
 /**
  * Never uploaded, whatever the ignore files say.

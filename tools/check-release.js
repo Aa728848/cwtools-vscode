@@ -190,18 +190,6 @@ check('No hardcoded localhost URLs or API keys in extension source', () => {
                 // Whitelist: provider configuration with localhost defaults
                 const rel = path.relative(ROOT, file);
                 if (rel.includes('aiService') || rel.includes('providers')) continue;
-                // Browser OAuth requires a registered loopback redirect. Keep the
-                // exception exact so unrelated extension code cannot hide localhost URLs.
-                if (rel.replace(/\\/g, '/') === 'client/extension/ai/codex/oauthService.ts'
-                    && content.includes('OAUTH_CALLBACK_PATH')
-                    && content.includes('OAUTH_REDIRECT_URI')) continue;
-                // Command Code CORS-answers the browser POST, so its allowed-origin
-                // list names Studio's own localhost dev origin next to the loopback
-                // redirect it serves.
-                if (rel.replace(/\\/g, '/') === 'client/extension/ai/commandcode/oauthService.ts'
-                    && pattern.test('http://localhost')
-                    && content.includes("server.listen(port, '127.0.0.1'")
-                    && content.includes("url.searchParams.get('state') !== expectedState")) continue;
                 console.log(`    Found: ${pattern.source} in ${rel}`);
                 return false;
             }

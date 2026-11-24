@@ -9,7 +9,7 @@
 
 import * as path from 'path';
 import * as vscode from 'vscode';
-import { ErrorReporter } from './ai/errorReporter';
+import { ErrorReporter } from './errorReporter';
 import { localize } from './panelI18n';
 import { shipDesignErrorText } from './shipDesign/messages';
 import { isPathInsideOrEqual } from './pathScope';

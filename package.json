@@ -4,8 +4,6 @@
     "scripts": {
         "compile": "tsc -p ./.config/tsconfig.extension.json && rollup -c",
         "build:docs": "node tools/build-github-docs.js && node tools/build-release-readme.js",
-        "generate:mcp-schema": "node tools/generate-mcp-schema.cjs",
-        "check:mcp-schema": "node tools/generate-mcp-schema.cjs --check",
         "generate:mcp-detection": "node tools/generate-mcp-detection.cjs",
         "check:mcp-detection": "node tools/generate-mcp-detection.cjs --check",
         "pack": "powershell -ExecutionPolicy Bypass -File ./package.ps1",
@@ -30,7 +28,6 @@
         "test:coverage": "c8 npm run test:unit",
         "test:fsx": "node tools/run-all-fsx-tests.cjs",
         "typecheck:test": "tsc -p tsconfig.json --noEmit",
-        "baseline:ai-context": "node tools/perf/ai-context-baseline.mjs",
         "lint": "eslint client/",
         "check:release": "node tools/check-release.js",
         "verify": "npm run lint && npm run compile && npm run typecheck:test && npm run test:unit && npm run check:release -- --skip-compile --skip-test",
@@ -41,6 +38,7 @@
         "test:perf": "node --test \"tools/perf/*.test.mjs\""
     },
     "dependencies": {
+        "cwtools-node": "file:submodules/cwtools-mcp/packages/cwtools-node",
         "cwtools-shared": "file:submodules/cwtools-mcp/packages/cwtools-shared",
         "google-translate-api-x": "^10.7.2",
         "ignore": "^5.3.2",

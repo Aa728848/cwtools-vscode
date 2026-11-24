@@ -12,7 +12,7 @@ import * as fs from 'fs';
 import { panelText } from './panelI18n';
 import * as path from 'path';
 import * as vscode from 'vscode';
-import { ErrorReporter } from './ai/errorReporter';
+import { ErrorReporter } from './errorReporter';
 import { isPreviewAvailable } from './gameProfiles';
 import { parseStaticGalaxy, toScenarioView, ParsedScenario, OffsetSpan } from './staticGalaxyParser';
 import { StaticGalaxyInitializerIndex } from './staticGalaxyInitializers';

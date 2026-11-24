@@ -1,5 +1,5 @@
 import { expect } from 'chai';
-import { getGameKnowledge } from '../../extension/ai/gameKnowledge';
+import { getGameKnowledge } from '../../extension/mcp/gameKnowledge';
 
 describe('game knowledge', () => {
     it('keeps mutable game facts out of the prompt and routes them to active evidence', () => {

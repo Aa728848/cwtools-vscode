@@ -1,6 +1,6 @@
 import * as fs from 'fs';
 import * as path from 'path';
-import { ErrorReporter } from './ai/errorReporter';
+import { ErrorReporter } from './errorReporter';
 import { decodeDds, decodeTga } from './ddsDecoder';
 import { resolveCaseInsensitivePath } from './fsCaseInsensitive';
 import { parseParticleFile } from './particleAssetParser';

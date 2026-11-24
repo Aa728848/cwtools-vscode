@@ -6,6 +6,8 @@ import { svgIconNoMargin } from './svgIcons';
 import type { GuiElement } from '../shared/guiPreview';
 import { computeTopLeft, effectiveSize, isOffCanvasElement, normalizeOrientation, ORIENTATION_FRACS } from './guiLayout';
 import { applyGuiImageStyles as applyImageStyles } from './guiVisuals';
+import { createGuiVisualEvidence } from './guiVisualCapture';
+import { isGuiVisualCapture } from '../shared/guiVisualVerification';
 
 const vscode = acquireVsCodeApi();
 const locale = (document.documentElement.lang || navigator.language || '').toLowerCase().startsWith('zh') ? 'zh-cn' : 'en';
@@ -2848,7 +2850,34 @@ function setupAlignButtons() {
 
 // ─── Init ───────────────────────────────────────────────────────────────────
 
-window.addEventListener('message', e => {
+window.addEventListener('message', async e => {
+    if (e.data.command === 'guiVisualCaptureRequest') {
+        const requestId = typeof e.data.requestId === 'string' ? e.data.requestId : '';
+        try {
+            const before = isGuiVisualCapture(e.data.before) ? e.data.before : undefined;
+            const items = [...elMap.values()].map(({ el, div }) => {
+                const position = getElementCanvasPos(el);
+                const width = parseFloat(div.style.width) || effectiveSize(el).w;
+                const height = parseFloat(div.style.height) || effectiveSize(el).h;
+                return {
+                    element: el,
+                    div,
+                    bounds: { left: position.x, top: position.y, right: position.x + width, bottom: position.y + height },
+                };
+            });
+            const evidence = await createGuiVisualEvidence(items, {
+                requestId,
+                runId: 'mcp',
+                file: typeof e.data.file === 'string' ? e.data.file : '',
+                round: 0,
+            }, before);
+            const selection = selectedElements.map(({ el }) => ({ name: el.name, type: el.type, line: el.line, endLine: el.endLine }));
+            vscode.postMessage({ command: 'guiVisualCaptureResponse', requestId, evidence: { ...evidence, selection } });
+        } catch (error) {
+            vscode.postMessage({ command: 'guiVisualCaptureResponse', requestId, error: error instanceof Error ? error.message : String(error) });
+        }
+        return;
+    }
     if (e.data.command === 'render') {
         elMap.clear();
         allElements = e.data.data;

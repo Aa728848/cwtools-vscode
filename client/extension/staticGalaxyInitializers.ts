@@ -10,7 +10,7 @@
 import * as vscode from 'vscode';
 import { parseSolarSystemFile } from './solarSystemParser';
 import { StaticGalaxyInitializerSummary, summarizeInitializer } from './staticGalaxyInitializerSummary';
-import { ErrorReporter } from './ai/errorReporter';
+import { ErrorReporter } from './errorReporter';
 
 const SOURCE = 'StaticGalaxyInitializers';
 const MAX_INITIALIZER_FILES = 20;

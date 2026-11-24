@@ -14,7 +14,7 @@ import {
     collectLocalisationReferences,
     resolveLocalisationReferences,
     toDisplayLocalisationValue,
-} from '../ai/targetWeightExtract';
+} from '../targetWeightExtract';
 
 const MAX_LOC_FILES_PER_LANGUAGE = 512;
 const MAX_LOC_ENTRIES_PER_LANGUAGE = 200000;

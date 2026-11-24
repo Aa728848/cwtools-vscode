@@ -16,7 +16,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import { parsePdxSemanticCatalog, type PdxDefinitionType } from '../../shared/pdxSemanticCatalog';
-import { ErrorReporter } from '../ai/errorReporter';
+import { ErrorReporter } from '../errorReporter';
 import { matchesExt } from '../fileExtensions';
 import { getAllProfiles, getLocalisationDirectoryGlob, getVanillaCacheFileName } from '../gameProfiles';
 import { parseLocFile, addEntriesToIndex, removeFileFromIndex, queryLocIndex, countLocIndex } from './locParser';

@@ -3,7 +3,7 @@ import {
     MAX_SCOPE_BRIDGE_CANDIDATES,
     solveScopeBridge,
     type ScopeBridgeCandidate,
-} from '../../extension/ai/tools/scopeBridge';
+} from 'cwtools-shared';
 
 describe('solveScopeBridge', () => {
     it('uses bounded BFS and returns all shortest paths in deterministic order', () => {

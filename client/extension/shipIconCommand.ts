@@ -11,7 +11,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as vs from 'vscode';
 import { localize } from './panelI18n';
-import { ErrorReporter } from './ai/errorReporter';
+import { ErrorReporter } from './errorReporter';
 import { getProfileByLanguageId } from './gameProfiles';
 import {
     loadShipIconCatalog,

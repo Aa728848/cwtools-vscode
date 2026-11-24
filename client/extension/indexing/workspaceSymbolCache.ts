@@ -1,7 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import initSqlJs, { type Database, type SqlJsStatic } from 'sql.js';
-import { getWorkspaceCacheRoot } from '../ai/workspacePaths';
+import { getWorkspaceCacheRoot } from '../workspacePaths';
 import type { WorkspaceSymbolEntry, WorkspaceSymbolOrigin } from './workspaceSymbolParser';
 
 const SCHEMA_VERSION = 5;

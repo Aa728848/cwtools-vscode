@@ -90,47 +90,6 @@ export default [
             copyFile('client/webview/staticGalaxyPreview.css', 'release/bin/client/webview/staticGalaxyPreview.css'),
         ],
     },
-    // Chat Panel webview bundle
-    {
-        input: './client/webview/chatPanel.ts',
-        output: {
-            file: './release/bin/client/webview/chatPanel.js',
-            format: "iife",
-            name: "cwtoolschatpanel",
-            indent: false,
-        },
-        plugins: [
-            typescript({
-                tsconfig: ".config/tsconfig.webview-chat.json",
-                clean: true,
-                tsconfigOverride: {
-                    exclude: ["client/test/**/*", "**/*.test.ts", "client/extension/**"]
-                }
-            }),
-            copyFile('client/webview/chatPanel.css', 'release/bin/client/webview/chatPanel.css'),
-            copyFile('node_modules/mermaid/dist/mermaid.min.js', 'release/bin/client/webview/mermaid.min.js'),
-        ],
-    },
-    // Agent Manager webview bundle
-    {
-        input: './client/webview/agentManager.ts',
-        output: {
-            file: './release/bin/client/webview/agentManager.js',
-            format: "iife",
-            name: "cwtoolsagentmanager",
-            indent: false,
-        },
-        plugins: [
-            typescript({
-                tsconfig: ".config/tsconfig.webview-chat.json",
-                clean: true,
-                tsconfigOverride: {
-                    exclude: ["client/test/**/*", "**/*.test.ts", "client/extension/**"]
-                }
-            }),
-            copyFile('client/webview/agentManager.css', 'release/bin/client/webview/agentManager.css'),
-        ],
-    },
     // Event Chain Preview webview bundle
     {
         input: './client/webview/eventChainPreview.ts',

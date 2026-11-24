@@ -16,7 +16,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import * as vscode from 'vscode';
-import { ErrorReporter } from './ai/errorReporter';
+import { ErrorReporter } from './errorReporter';
 import { getAllProfiles, getCacheSettingKey } from './gameProfiles';
 import { getDescriptorPath, readDescriptor, writeRemoteFileId, type ModDescriptor } from './modDescriptor';
 import { localize } from './panelI18n';

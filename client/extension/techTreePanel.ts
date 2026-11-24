@@ -13,7 +13,7 @@ import * as vscode from 'vscode';
 import { panelText } from './panelI18n';
 import * as path from 'path';
 import * as fs from 'fs';
-import { ErrorReporter } from './ai/errorReporter';
+import { ErrorReporter } from './errorReporter';
 import { decodeDds, decodeTga } from './ddsDecoder';
 import { resolveCaseInsensitivePath } from './fsCaseInsensitive';
 import { getLocalisationDirectoryGlob } from './gameProfiles';

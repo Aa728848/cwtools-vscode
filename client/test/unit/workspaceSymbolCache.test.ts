@@ -12,13 +12,13 @@ const vscodeStub = {
 };
 
 type CacheModule = typeof import('../../extension/indexing/workspaceSymbolCache');
-type WorkspacePathsModule = typeof import('../../extension/ai/workspacePaths');
+type WorkspacePathsModule = typeof import('../../extension/workspacePaths');
 
 function loadModules(): { cache: CacheModule; workspacePaths: WorkspacePathsModule } {
     const moduleLoader = require('module') as { _load: (...args: any[]) => any };
     const originalLoad = moduleLoader._load;
     const cacheModulePath = require.resolve('../../extension/indexing/workspaceSymbolCache');
-    const workspacePathsModulePath = require.resolve('../../extension/ai/workspacePaths');
+    const workspacePathsModulePath = require.resolve('../../extension/workspacePaths');
     delete require.cache[cacheModulePath];
     delete require.cache[workspacePathsModulePath];
     moduleLoader._load = function (this: unknown, request: string, ...args: any[]) {
@@ -26,7 +26,7 @@ function loadModules(): { cache: CacheModule; workspacePaths: WorkspacePathsModu
         return originalLoad.apply(this, [request, ...args]);
     };
     try {
-        const workspacePaths = require('../../extension/ai/workspacePaths') as WorkspacePathsModule;
+        const workspacePaths = require('../../extension/workspacePaths') as WorkspacePathsModule;
         const cache = require('../../extension/indexing/workspaceSymbolCache') as CacheModule;
         return { cache, workspacePaths };
     } finally {

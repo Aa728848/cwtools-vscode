@@ -7,6 +7,7 @@ import * as path from 'path';
 import * as fs from 'fs';
 import { serializePosition, serializeSize, serializeProperty, serializeNewElement } from './guiParser';
 import { GuiPreviewLoader } from './guiPreviewLoader';
+import { isGuiVisualEvidence, type GuiVisualCapture, type GuiVisualEvidence } from '../shared/guiVisualVerification';
 import {
     fields,
     isFiniteNumber,
@@ -78,6 +79,11 @@ export class GuiPanel {
     private readonly _webviewRootPath: string;
     private readonly _loader = new GuiPreviewLoader();
     private _document: vscode.TextDocument | undefined;
+    private readonly _pendingVisualCaptures = new Map<string, {
+        resolve: (evidence: GuiVisualEvidence) => void;
+        reject: (error: Error) => void;
+        timer: ReturnType<typeof setTimeout>;
+    }>();
     private _skipNextReload = false;   // skip reload after programmatic edit
     private _contentSnapshots: string[] = [];  // content snapshots for structural undo
     private _lastSnapshotTime = 0;  // debounce: only save one snapshot per 500ms batch
@@ -99,6 +105,26 @@ export class GuiPanel {
                 const detail = error instanceof Error ? error.message : String(error);
                 void vscode.window.showErrorMessage(`${panelText('GUI edit failed', 'GUI 编辑失败')}: ${detail}`);
             });
+    }
+
+    /** Capture the current independent GUI preview without involving an Agent run. */
+    public captureVisual(before?: GuiVisualCapture): Promise<GuiVisualEvidence> {
+        const document = this._document;
+        if (!document) return Promise.reject(new Error('No GUI document is open.'));
+        const requestId = `gui_${Date.now()}_${Math.floor(Math.random() * 1000000)}`;
+        return new Promise((resolve, reject) => {
+            const timer = setTimeout(() => {
+                this._pendingVisualCaptures.delete(requestId);
+                reject(new Error('GUI visual capture timed out.'));
+            }, 15_000);
+            this._pendingVisualCaptures.set(requestId, { resolve, reject, timer });
+            void this._panel.webview.postMessage({
+                command: 'guiVisualCaptureRequest',
+                requestId,
+                file: document.uri.fsPath,
+                before,
+            });
+        });
     }
 
     /** Refresh the matching clean GUI document after an Agent disk write. */
@@ -151,6 +177,16 @@ export class GuiPanel {
         this._panel.onDidDispose(() => this.dispose(), null, this._disposables);
         this._disposables.push(
             this._panel.webview.onDidReceiveMessage(async (raw: unknown) => {
+                if (isRecord(raw) && raw.command === 'guiVisualCaptureResponse') {
+                    const requestId = typeof raw.requestId === 'string' ? raw.requestId : '';
+                    const pending = this._pendingVisualCaptures.get(requestId);
+                    if (!pending) return;
+                    this._pendingVisualCaptures.delete(requestId);
+                    clearTimeout(pending.timer);
+                    if (isGuiVisualEvidence(raw.evidence, true)) pending.resolve(raw.evidence);
+                    else pending.reject(new Error(typeof raw.error === 'string' ? raw.error : 'Invalid GUI visual capture response.'));
+                    return;
+                }
                 if (!isGuiPanelMessage(raw)) return;
                 const msg = raw;
                 switch (msg.command) {
@@ -264,6 +300,11 @@ export class GuiPanel {
     }
 
     public dispose() {
+        for (const pending of this._pendingVisualCaptures.values()) {
+            clearTimeout(pending.timer);
+            pending.reject(new Error('GUI panel was disposed.'));
+        }
+        this._pendingVisualCaptures.clear();
         GuiPanel.currentPanel = undefined;
         this._loader.scanAbortController.abort();
         // Release texture cache memory

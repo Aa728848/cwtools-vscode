@@ -24,7 +24,7 @@ interface TestServerOptions {
     executeCommand: (command: string, args: unknown[]) => Promise<unknown>;
     lspRequest: (method: string, params: unknown) => Promise<unknown>;
 }
-const { McpBridgeServer } = localRequire('../../../release/bin/client/extension/ai/mcpBridgeServer.js') as {
+const { McpBridgeServer } = localRequire('../../../release/bin/client/extension/mcp/mcpBridgeServer.js') as {
     McpBridgeServer: new (options: TestServerOptions) => { start(): Promise<void>; stop(): Promise<void> };
 };
 moduleLoader._load = originalLoad;

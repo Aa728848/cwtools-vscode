@@ -26,8 +26,8 @@ import { EntityPanel } from './entityPanel';
 import { ShipDesignPanel } from './shipDesignPanel';
 import { ParticlePanel } from './particlePanel';
 import { classifyAssetFile } from './particleSniff';
-import { UI, SOURCE, aiText, setAiMessageLocale } from './ai/messages';
-import { ErrorReporter } from './ai/errorReporter';
+import { UI, SOURCE, aiText, setAiMessageLocale } from './messages';
+import { ErrorReporter } from './errorReporter';
 import { SolarSystemPanel } from './solarSystemPanel';
 import { openStaticGalaxyPreview, registerStaticGalaxyEditor } from './staticGalaxyEditorProvider';
 import { EventChainPanel } from './eventChainPanel';
@@ -35,15 +35,6 @@ import { TechTreePanel } from './techTreePanel';
 import { TargetWeightPanel } from './targetWeightPanel';
 import * as exe from './executable';
 import { registerLocalizationFeatures } from './locDecorations';
-import { AIService } from './ai/aiService';
-import { AgentToolExecutor } from './ai/agentTools';
-import { AgentRunner } from './ai/agentRunner';
-import { PromptBuilder } from './ai/promptBuilder';
-import { AIChatPanelProvider } from './ai/chatPanel';
-import { AIInlineCompletionProvider } from './ai/inlineProvider';
-import { UsageTracker } from './ai/usageTracker';
-import { lastAISettingsWriteTime } from './ai/chatSettings';
-import { registerCodeActions } from './codeActions';
 import { enrichDiagnosticsInPlace, diagnosticCodeString, diagnosticMatchesIgnoredKey, filterLocalisationDiagnostics, foldLocalisationWarnings, foldRelatedCallSiteInformation } from './diagnosticI18n';
 import type { LocalisationDiagnosticFilterMode } from './diagnosticI18n';
 import { isImagePathLinkText, registerGraphicsFeatures } from './graphicsFeatures';
@@ -56,21 +47,19 @@ import { registerRulesConfigGroupCommands } from './rulesConfigGroups';
 import { registerImageTools } from './imageTools';
 import { registerShipIconCommand } from './shipIconCommand';
 import { registerWorkshopUpload } from './workshopUploadView';
-import { registerLocalisationAiCommands } from './localisationAiCommands';
 import { registerAuraLocalisationCommands } from './auraLocalisation';
-import { registerTranslationPreviewCommands } from './translationPreview';
 import { registerSpecialPathCommands } from './specialPaths';
 import { registerInspectionOverviewCommand } from './inspectionOverview';
 import { formatMemDiagEntry, memDiagLanguageForLocale } from './memDiagFormatter';
-import { configurePrivateAgentStorage, configureWorkspaceCacheStorage, getProjectWorkspaceRoot, getPrivateAiStorageRoot } from './ai/workspacePaths';
-import { configureHistoryPolicy, enforceHistoryRetention } from './ai/runner/historyPolicy';
-import { TokenCalibrationTable, readCalibrationSnapshot } from './ai/runner/tokenCalibration';
-import { sha256Text } from './ai/runner/durableStorage';
+import { configureWorkspaceCacheStorage, getProjectWorkspaceRoot } from './workspacePaths';
 import { getAllLanguageIds, getAllProfiles, getCacheSettingKey, getKnownProfileByLanguageId, getProfileByLanguageId, getRulesRemoteUrl, getGameExeList, getGameFolderMapping, getAlternativeSteamFolderNames } from './gameProfiles';
 import { IndexService, type WorkspaceSymbolEntry } from './indexing/indexService';
-import { McpBridgeServer } from './ai/mcpBridgeServer';
+import { McpBridgeServer } from './mcp/mcpBridgeServer';
+import { createNodeHostServices } from 'cwtools-node';
+import { createIdeHost } from './ideTools';
+import { createAbortError, MCP_WRITE_TOOL_NAMES, type HostServices } from 'cwtools-shared';
 import { maybePromptForDefaultDarkModernTheme } from './themePrompt';
-import { registerProjectKnowledgeWatcher, resumeStaleProjectKnowledgeRefreshes } from './ai/projectKnowledge';
+import { registerProjectKnowledgeWatcher, resumeStaleProjectKnowledgeRefreshes } from './projectKnowledgeWatcher';
 import { QuickPickSelectionGuard } from './quickPickSelectionGuard';
 import { getDefaultLocalisationLanguagesForUiLocale } from './localisationLanguagePreference';
 import { handleVanillaCacheGenerated } from './vanillaCacheLifecycle';
@@ -939,7 +928,6 @@ export async function activate(context: ExtensionContext) {
 	});
 	context.subscriptions.push(indexService);
 	void indexService.start();
-	registerProjectKnowledgeWatcher(context, indexService);
 
 	// Register localization enhancements (§ color highlighting, $REF$ hover/goto).
 	// Keep the custom word pattern scoped to the dedicated localisation language;
@@ -1110,44 +1098,13 @@ export async function activate(context: ExtensionContext) {
 	// common when extensions are installed in Program Files or Chinese User directories.
 	const cacheDir = path.join(context.globalStorageUri.fsPath, '.cwtools');
 
-	// Asynchronously clean up the old .cwtools directory in the extension path if it exists
-	// to reclaim disk space for the user.
-	setTimeout(async () => {
-		try {
-			const oldCacheDir = path.join(context.extensionPath, '.cwtools');
-			if (fs.existsSync(oldCacheDir)) {
-				await fs.promises.rm(oldCacheDir, { recursive: true, force: true });
-				ErrorReporter.debug('Extension', 'Successfully cleaned up legacy .cwtools cache directory.');
-			}
-		} catch (e) {
-			ErrorReporter.debug('Extension', 'Failed to clean up legacy .cwtools directory', e);
-		}
-	}, 5000);
 
 	// The MCP server moved to the standalone cwtools-mcp package (npx -y cwtools-mcp)
 	// and is no longer bundled or synced to globalStorage. Copies synced by older
 	// versions still work: the bridge manifest protocol below is unchanged.
-	// ─── AI Module Integration (registered at top-level so panel works immediately) ──
-	const aiService = new AIService(context);
-	const privateAgentRoot = context.storageUri?.fsPath
-		?? path.join(context.globalStorageUri.fsPath, 'agent-workspaces', sha256Text(workspaceRoot || 'empty-window').slice(0, 16));
-	configurePrivateAgentStorage(privateAgentRoot);
-	// Regenerable per-workspace caches (symbol index) live in extension storage,
-	// never in the project tree.
-	configureWorkspaceCacheStorage(privateAgentRoot);
-	const historyConfig = workspace.getConfiguration('stellarisLanguageServices.ai.history');
-	const historyPersistence = historyConfig.get<'off' | 'metadata' | 'full'>('persistence', 'full');
-	configureHistoryPolicy({
-		persistence: historyPersistence,
-		maxAgeDays: historyConfig.get<number>('maxAgeDays', 30),
-		maxBytes: historyConfig.get<number>('maxBytes', 268435456),
-		redactLocalPaths: historyConfig.get<boolean>('redactLocalPaths', true),
-	});
-	void enforceHistoryRetention(getPrivateAiStorageRoot()).catch(error =>
-		ErrorReporter.warn('AgentHistory', 'Failed to enforce Agent history retention', error)
-	);
-	// AgentToolExecutor gets a lazy getter so it can be registered before client starts
-	const toolExecutor = new AgentToolExecutor(() => defaultClient, workspaceRoot, indexService, context.globalStorageUri.fsPath, context.extensionPath, aiService.getKeyManager());
+	// Regenerable per-workspace caches live in extension storage, never in the project tree.
+	const workspaceCacheRoot = context.storageUri?.fsPath ?? path.join(context.globalStorageUri.fsPath, 'workspace-cache');
+	configureWorkspaceCacheStorage(workspaceCacheRoot);
 	const legacyMcpDirs = legacyPublisherStoragePaths(context)
 		.filter(legacyStorage => fs.existsSync(legacyStorage))
 		.map(legacyStorage => path.join(legacyStorage, 'mcp'));
@@ -1156,9 +1113,48 @@ export async function activate(context: ExtensionContext) {
 		if (!defaultClient?.isRunning()) throw new Error('CWTools language client is not active.');
 		return defaultClient;
 	};
+	const callWithCancellation = <T>(
+		options: { signal?: AbortSignal } | undefined,
+		action: (token: vs.CancellationToken) => Promise<T>,
+	): Promise<T> => {
+		const source = new vs.CancellationTokenSource();
+		const signal = options?.signal;
+		if (signal?.aborted) {
+			source.dispose();
+			return Promise.reject(createAbortError());
+		}
+		const onAbort = () => source.cancel();
+		signal?.addEventListener('abort', onAbort, { once: true });
+		return action(source.token).finally(() => {
+			signal?.removeEventListener('abort', onAbort);
+			source.dispose();
+		});
+	};
+	const bridgeLspHost: HostServices['lsp'] = {
+		executeCommand: (command, args = [], options) => callWithCancellation(options, token =>
+			requireRunningClient().sendRequest('workspace/executeCommand', { command, arguments: args }, token)),
+		request: (method, params, options) => callWithCancellation(options, token =>
+			requireRunningClient().sendRequest(method, params, token)),
+	};
+	const bridgeHost = createNodeHostServices({
+		workspaceRoot: workspaceRoot || process.cwd(),
+		lspHost: bridgeLspHost,
+		enableWrites: true,
+		allowedTools: [...MCP_WRITE_TOOL_NAMES],
+		imageMagickPath: workspace.getConfiguration('stellarisLanguageServices.media').get<string>('imageMagickPath', ''),
+		ffmpegPath: workspace.getConfiguration('stellarisLanguageServices.media').get<string>('ffmpegPath', ''),
+		forceStart: false,
+	});
+	bridgeHost.ide = createIdeHost(workspaceRoot || process.cwd(), context.extensionPath, indexService, path.join(context.globalStorageUri.fsPath, 'gui-evidence'));
+	bridgeHost.capabilities = new Set([
+		...(bridgeHost.capabilities ?? []),
+		'domain_writes', 'ide_context', 'visual_editor', 'gui_capture',
+	]);
+	context.subscriptions.push({ dispose: () => bridgeHost.dispose?.() });
+	registerProjectKnowledgeWatcher(context, bridgeHost);
 	const mcpBridge = new McpBridgeServer({
 		context,
-		toolExecutor,
+		host: bridgeHost,
 		workspaceRoot,
 		detectProject: () => classifyWorkspaceRoot(workspaceRoot, getConfiguredGamePath),
 		additionalManifestDirs: legacyMcpDirs,
@@ -1173,213 +1169,6 @@ export async function activate(context: ExtensionContext) {
 	context.subscriptions.push(mcpBridge);
 	void mcpBridge.start().catch(e =>
 		ErrorReporter.warn('MCP', 'Failed to start extension-host MCP bridge', e)
-	);
-	const promptBuilder = new PromptBuilder(workspaceRoot, context.globalStorageUri.fsPath, context.extensionPath);
-	// Real-usage token calibration: created before the Runner and injected;
-	// persisted snapshots are validated field-by-field on load and written
-	// single-flight by the table itself.
-	const tokenCalibration = new TokenCalibrationTable(
-		readCalibrationSnapshot(context.globalState.get('cwtools.ai.tokenCalibration.v1')),
-		snapshot => Promise.resolve(context.globalState.update('cwtools.ai.tokenCalibration.v1', snapshot)),
-		error => ErrorReporter.warn('TokenCalibration', 'Failed to persist token calibration data', error),
-	);
-	context.subscriptions.push({ dispose: () => { void tokenCalibration.flush(); } });
-	const agentRunner = new AgentRunner(aiService, toolExecutor, promptBuilder, tokenCalibration);
-	const usageTracker = new UsageTracker(context);
-	const chatStorageUri = historyPersistence === 'off'
-		? undefined
-		: context.storageUri ?? Uri.file(privateAgentRoot);
-	if (chatStorageUri) {
-		const legacyTopics = path.join(context.globalStorageUri.fsPath, 'ai-chat-topics.json');
-		const privateTopics = path.join(chatStorageUri.fsPath, 'ai-chat-topics.json');
-		if (fs.existsSync(legacyTopics) && !fs.existsSync(privateTopics)) {
-			fs.mkdirSync(path.dirname(privateTopics), { recursive: true });
-			fs.copyFileSync(legacyTopics, privateTopics);
-		}
-	}
-	const chatPanelProvider = new AIChatPanelProvider(
-		context.extensionUri,
-		agentRunner,
-		aiService,
-		usageTracker,
-		chatStorageUri,
-		historyPersistence,
-	);
-	context.subscriptions.push(
-		vs.window.registerWebviewViewProvider(AIChatPanelProvider.viewType, chatPanelProvider)
-	);
-
-	safeRegisterCommand(context, 'cwtools.ai.clearPrivateHistory', async () => {
-		const confirm = aiText('Clear private Agent history', '清除 Agent 私有历史');
-		const choice = await window.showWarningMessage(
-			aiText('This removes private runs, checkpoints, goals, and learned memory for this workspace. Project files are not affected.', '这会删除当前工作区的私有运行记录、检查点、目标和学习记忆，但不会影响项目文件。'),
-			{ modal: true },
-			confirm,
-		);
-		if (choice !== confirm) return;
-		await fs.promises.rm(path.join(getPrivateAiStorageRoot(), 'topics'), { recursive: true, force: true });
-		void window.showInformationMessage(aiText('Private Agent history cleared.', 'Agent 私有历史已清除。'));
-	});
-
-	safeRegisterCommand(context, 'cwtools.ai.exportDiagnostics', async () => {
-		const target = await window.showSaveDialog({
-			filters: { JSON: ['json'] },
-			saveLabel: aiText('Export diagnostics', '导出诊断'),
-			defaultUri: Uri.file(path.join(os.homedir(), 'cwtools-agent-diagnostics.json')),
-		});
-		if (!target) return;
-		const { runLedger } = require('./ai/runner/runLedger') as typeof import('./ai/runner/runLedger');
-		const runs = await runLedger.listRecentRunsFromDisk(50);
-		const redactPaths = workspace.getConfiguration('stellarisLanguageServices.ai.history').get<boolean>('redactLocalPaths', true);
-		const serialized = JSON.stringify({
-			version: 1,
-			exportedAt: new Date().toISOString(),
-			workspaceTrusted: workspace.isTrusted,
-			runs,
-		}, null, 2);
-		const output = redactPaths && workspaceRoot
-			? serialized
-				.split(workspaceRoot).join('${WORKSPACE_ROOT}')
-				.split(getPrivateAiStorageRoot()).join('${AGENT_PRIVATE_STORAGE}')
-				.split(os.homedir()).join('${USER_HOME}')
-			: serialized;
-		await workspace.fs.writeFile(target, Buffer.from(output, 'utf8'));
-		void window.showInformationMessage(aiText('Redacted Agent diagnostics exported.', '已导出脱敏后的 Agent 诊断。'));
-	});
-
-	// Replay a recorded agent run with optional overrides; opens a side-by-side
-	// diff of original vs replayed event streams in the editor.
-	safeRegisterCommand(context, 'cwtools.ai.replayRun', async () => {
-		try {
-			const { runLedger } = require('./ai/runner/runLedger') as typeof import('./ai/runner/runLedger');
-			const { replayRun } = require('./ai/runner/runReplay') as typeof import('./ai/runner/runReplay');
-			const recentRuns = await runLedger.listRecentRunsFromDisk(30);
-			if (recentRuns.length === 0) {
-				vs.window.showInformationMessage('CWTools: no recorded runs available to replay.');
-				return;
-			}
-			const pick = await vs.window.showQuickPick(
-				recentRuns.slice(0, 30).map((r: any) => ({
-					label: `${(r.runId ?? '').substring(0, 12)}  ·  ${r.mode ?? 'build'}  ·  ${r.status ?? 'unknown'}`,
-					description: r.userPromptPreview ? String(r.userPromptPreview).substring(0, 80) : '',
-					runId: r.runId,
-				})),
-				{ placeHolder: 'Select a run to replay (recorded tool results will be reused)' }
-			);
-			if (!pick) return;
-
-			const overrideChoice = await vs.window.showQuickPick(
-				[
-					{ label: 'Replay with current prompt (no override)', op: 'none' as const },
-					{ label: 'Replay with rebuilt system prompt', op: 'rebuild' as const },
-					{ label: 'Replay with different model…', op: 'model' as const },
-				],
-				{ placeHolder: 'Replay overrides' }
-			);
-			if (!overrideChoice) return;
-
-			const overrides: any = {};
-			if (overrideChoice.op === 'rebuild') overrides.rebuildSystemPrompt = true;
-			if (overrideChoice.op === 'model') {
-				const modelInput = await vs.window.showInputBox({ placeHolder: 'Model id (e.g. claude-3-5-sonnet)' });
-				if (!modelInput) return;
-				overrides.model = modelInput;
-			}
-
-			const result = await replayRun(pick.runId, agentRunner, overrides);
-
-			const origSnap = await runLedger.getOrLoadSnapshot(pick.runId);
-			const newSnap = await runLedger.getOrLoadSnapshot(result.newRun.runId);
-			const origDoc = await vs.workspace.openTextDocument({
-				language: 'jsonc',
-				content: JSON.stringify(origSnap?.events ?? [], null, 2),
-			});
-			const newDoc = await vs.workspace.openTextDocument({
-				language: 'jsonc',
-				content: JSON.stringify(newSnap?.events ?? [], null, 2),
-			});
-			await vs.commands.executeCommand(
-				'vscode.diff',
-				origDoc.uri,
-				newDoc.uri,
-				`Replay: ${pick.runId.substring(0, 8)} ↔ ${result.newRun.runId.substring(0, 8)}`,
-			);
-
-			if (result.missedToolCalls > 0) {
-				vs.window.showWarningMessage(
-					`Replay finished with ${result.missedToolCalls} tool-call miss(es) — model diverged from recorded run.`,
-				);
-			}
-		} catch (e) {
-			vs.window.showErrorMessage(`CWTools replayRun failed: ${(e as Error)?.message ?? e}`);
-		}
-	});
-
-	// ─── Wire up AgentToolExecutor callbacks ─────────────────────────────────
-	// onPendingWrite: route file-write confirmations through the WebView panel
-	toolExecutor.onPendingWrite = (file, newContent, messageId) =>
-		chatPanelProvider.handlePendingWrite(file, newContent, messageId);
-	// onAutoWritten: show a read-only notification UI for auto-applied changes
-	toolExecutor.onAutoWritten = (file, isNewFile) =>
-		chatPanelProvider.handleAutoWritten(file, isNewFile);
-	// onTodoUpdate: push todo list updates to the WebView panel
-	toolExecutor.onTodoUpdate = (todos, scope) =>
-		chatPanelProvider.sendTodoUpdate(todos, scope);
-	// Sync fileWriteMode from config on startup
-	toolExecutor.fileWriteMode = workspace.getConfiguration('stellarisLanguageServices.ai').get<'confirm' | 'auto'>('agentFileWriteMode', 'auto');
-	// Re-sync fileWriteMode whenever config changes
-	context.subscriptions.push(workspace.onDidChangeConfiguration(e => {
-		if (e.affectsConfiguration('stellarisLanguageServices.ai.agentFileWriteMode')) {
-			toolExecutor.fileWriteMode = workspace.getConfiguration('stellarisLanguageServices.ai').get<'confirm' | 'auto'>('agentFileWriteMode', 'auto');
-		}
-		if (e.affectsConfiguration('stellarisLanguageServices.rules_version')
-			|| e.affectsConfiguration('stellarisLanguageServices.rules_folder')
-			|| e.affectsConfiguration('stellarisLanguageServices.rules_remote_url')) {
-			scheduleProjectMemoryInvalidation();
-		}
-	}));
-	// Invalidate LSP read cache on document changes so AI doesn't base decisions on stale data
-	context.subscriptions.push(workspace.onDidChangeTextDocument(e => {
-		toolExecutor.invalidateCacheForFile(e.document.uri.fsPath);
-	}));
-	// Closed files can be changed by Git, external editors, generators, or agent
-	// commands without producing onDidChangeTextDocument. Keep query-only semantic
-	// graph caches coherent with those file-system mutations as well.
-	const aiSemanticWatcher = workspace.createFileSystemWatcher('**/*.{txt,gui,yml,csv,gfx,asset,cwt,entity,shader,fxh}');
-	let aiMemoryInvalidationTimer: ReturnType<typeof setTimeout> | undefined;
-	const scheduleProjectMemoryInvalidation = () => {
-		if (aiMemoryInvalidationTimer) clearTimeout(aiMemoryInvalidationTimer);
-		aiMemoryInvalidationTimer = setTimeout(() => {
-			aiMemoryInvalidationTimer = undefined;
-			promptBuilder.markProjectMemoryStale();
-		}, 250);
-	};
-	const invalidateAiSemanticInputs = (uri: vs.Uri) => {
-		toolExecutor.invalidateCacheForFile(uri.fsPath);
-		scheduleProjectMemoryInvalidation();
-	};
-	context.subscriptions.push(
-		{ dispose: () => {
-			if (aiMemoryInvalidationTimer) clearTimeout(aiMemoryInvalidationTimer);
-		} },
-		aiSemanticWatcher,
-		aiSemanticWatcher.onDidChange(invalidateAiSemanticInputs),
-		aiSemanticWatcher.onDidCreate(invalidateAiSemanticInputs),
-		aiSemanticWatcher.onDidDelete(invalidateAiSemanticInputs),
-	);
-	// Frozen system prompts key on CWTOOLS.md / project profile content hashes,
-	// so they miss naturally on edit; this watcher proactively drops the parsed
-	// mtime caches so the next fingerprint reflects current content immediately.
-	const aiPromptInputsWatcher = workspace.createFileSystemWatcher('{CWTOOLS.md,.cwtools/project/profile.json}');
-	const invalidatePromptInputs = () => {
-		promptBuilder.invalidateProjectPromptInputs();
-		scheduleProjectMemoryInvalidation();
-	};
-	context.subscriptions.push(
-		aiPromptInputsWatcher,
-		aiPromptInputsWatcher.onDidChange(invalidatePromptInputs),
-		aiPromptInputsWatcher.onDidCreate(invalidatePromptInputs),
-		aiPromptInputsWatcher.onDidDelete(invalidatePromptInputs),
 	);
 	// Backspacing never auto-triggers completion in VS Code (only typed word characters do),
 	// so a mistyped character inside an @variable token would dead-end the suggestion list.
@@ -1409,78 +1198,7 @@ export async function activate(context: ExtensionContext) {
 			}
 		}, 0);
 	}));
-	const docSelector2 = gameLanguages.map(lang => ({ scheme: 'file', language: lang }));
-	const inlineProvider = new AIInlineCompletionProvider(aiService, promptBuilder, usageTracker);
-	context.subscriptions.push(
-		inlineProvider,
-		chatPanelProvider,
-		vs.languages.registerInlineCompletionItemProvider(docSelector2, inlineProvider)
-	);
-	safeRegisterCommand(context, "cwtools.ai.configure", async () => {
-		await aiService.quickConfigureProvider();
-	});
-	safeRegisterCommand(context, "cwtools.ai.openChat", async () => {
-		await vs.commands.executeCommand('cwtools.aiChat.focus');
-	});
-	safeRegisterCommand(context, "cwtools.ai.openAgentManager", async () => {
-		await chatPanelProvider.openAgentManager();
-	});
-	safeRegisterCommand(context, "cwtools.ai.selectModel", async () => {
-		await aiService.selectModelCommand();
-	});
-	registerLocalisationAiCommands(context, (message: string) => chatPanelProvider.sendProgrammaticMessage(message));
 	registerAuraLocalisationCommands(context, () => defaultClient);
-	registerTranslationPreviewCommands(context, aiService);
-
-	// ── Quick AI commands (keyboard shortcuts / command palette) ──────────
-	safeRegisterCommand(context, "cwtools.ai.reviewFile", async () => {
-		const editor = vs.window.activeTextEditor;
-		if (!editor) {
-			vs.window.showWarningMessage(UI.NO_ACTIVE_EDITOR);
-			return;
-		}
-		const relPath = vs.workspace.asRelativePath(editor.document.uri);
-		await chatPanelProvider.sendProgrammaticMessage(
-			localize(
-				`Please review the current file \`${relPath}\` for scope errors, logic issues, and CWTools diagnostic warnings.`,
-				`请审查当前文件 \`${relPath}\`，检查 scope 错误、逻辑问题和 CWTools 诊断警告。`
-			)
-		);
-	});
-
-	safeRegisterCommand(context, "cwtools.ai.explainSelection", async () => {
-		const editor = vs.window.activeTextEditor;
-		if (!editor) {
-			vs.window.showWarningMessage(UI.NO_ACTIVE_EDITOR);
-			return;
-		}
-		const selection = editor.document.getText(editor.selection);
-		if (!selection.trim()) {
-			vs.window.showWarningMessage(UI.SELECT_CODE_FIRST);
-			return;
-		}
-		await chatPanelProvider.sendProgrammaticMessage(
-			localize(
-				`Please explain what the following code does, including its scope chain and logic:\n\`\`\`pdx\n${selection}\n\`\`\``,
-				`请解释以下代码的作用、scope 链和逻辑：\n\`\`\`pdx\n${selection}\n\`\`\``
-			)
-		);
-	});
-
-	safeRegisterCommand(context, "cwtools.ai.fixDiagnostics", async () => {
-		const editor = vs.window.activeTextEditor;
-		if (!editor) {
-			vs.window.showWarningMessage(UI.NO_ACTIVE_EDITOR);
-			return;
-		}
-		const relPath = vs.workspace.asRelativePath(editor.document.uri);
-		await chatPanelProvider.sendProgrammaticMessage(
-			localize(
-				`Please get and fix all CWTools diagnostic errors in the current file \`${relPath}\`.`,
-				`请获取并修复当前文件 \`${relPath}\` 中的所有 CWTools 诊断错误。`
-			)
-		);
-	});
 
 	safeRegisterCommand(context, 'cwtools.revalidateAllDiagnostics', async () => {
 		if (!defaultClient) {
@@ -1769,26 +1487,6 @@ export async function activate(context: ExtensionContext) {
 		qp.show();
 	});
 
-	// ── CodeActionProvider: AI Quick Fix for CWTools diagnostics ──────────
-	registerCodeActions(
-		context,
-		(msg: string) => chatPanelProvider.sendProgrammaticMessage(msg),
-		[...getAllLanguageIds(), 'paradox']
-	);
-
-	// ── AI Chat: Send selection to chat ──────────────────────────────────────
-	safeRegisterCommand(context, "cwtools.ai.sendSelectionToChat", async () => {
-		const editor = vs.window.activeTextEditor;
-		if (!editor || editor.selection.isEmpty) {
-			vs.window.showWarningMessage(UI.SELECT_CODE_FIRST);
-			return;
-		}
-		const relPath = vs.workspace.asRelativePath(editor.document.uri);
-		const startLine = editor.selection.start.line + 1;
-		const endLine = editor.selection.end.line + 1;
-		await chatPanelProvider.sendSelectionReference(relPath, startLine, endLine);
-	});
-
 	// ── Graphics Features: DDS hover preview, GFX sprite goto, room completion ──
 	registerTexturePreviewEditor(context);
 	registerStaticGalaxyEditor(context);
@@ -1973,18 +1671,14 @@ export async function activate(context: ExtensionContext) {
 				},
 				workspace: {
 					didChangeConfiguration: async (sections: any, next: (sections: any) => Promise<void>) => {
-						// Drop config changes if they were just triggered by our own AI Settings Manager
-						// This prevents the F# server from resetting the workspace because of pure UI changes.
-						if (Date.now() - lastAISettingsWriteTime < 1500) {
-							return;
-						}
 						await next(sections);
 					}
 				},
 				handleDiagnostics: (uri, diagnostics, next) => {
-					const config = workspace.getConfiguration('stellarisLanguageServices.ai');
+					const config = workspace.getConfiguration('stellarisLanguageServices.diagnostics');
+					const legacyAiConfig = workspace.getConfiguration('stellarisLanguageServices.ai');
 					const errorsConfig = workspace.getConfiguration('stellarisLanguageServices.errors');
-					const ignored = config.get<string[]>('ignoredDiagnostics', []);
+					const ignored = config.get<string[]>('ignoredKeys', legacyAiConfig.get<string[]>('ignoredDiagnostics', []));
 					let result = diagnostics;
 					const localisationFilter = errorsConfig.get<LocalisationDiagnosticFilterMode>('localisationFilter', 'off');
 					if (localisationFilter !== 'off') {
@@ -2000,7 +1694,7 @@ export async function activate(context: ExtensionContext) {
 						result = diagnostics.filter(diag =>
 							!ignored.some(key => diagnosticMatchesIgnoredKey(diag, key)));
 					}
-					if (config.get<boolean>('enhancedDiagnostics', true)) {
+					if (config.get<boolean>('enhanced', legacyAiConfig.get<boolean>('enhancedDiagnostics', true))) {
 						enrichDiagnosticsInPlace(result, vs.env.language.startsWith('zh'));
 					}
 					if (errorsConfig.get<boolean>('foldLocalisationWarnings', true)) {
@@ -2360,7 +2054,7 @@ export async function activate(context: ExtensionContext) {
 			});
 		})
 		client.onNotification(serverReady, () => {
-			resumeStaleProjectKnowledgeRefreshes(indexService);
+			resumeStaleProjectKnowledgeRefreshes(bridgeHost);
 		})
 		client.onNotification(promptVanillaPath, async (param: string) => {
 			await selectGameFolderFlow(param, context);
@@ -2575,9 +2269,6 @@ export async function activate(context: ExtensionContext) {
 			if (ParticlePanel.currentPanel) {
 				try { ParticlePanel.currentPanel.dispose(); } catch { /* ignore */ }
 			}
-			// L7 Fix: dispose the chat panel provider before re-activating so its
-			// WebView is closed and callbacks don't reference a stale agentRunner.
-			try { chatPanelProvider.dispose(); } catch { /* ignore */ }
 			// Dispose all subscriptions
 			for (const sub of context.subscriptions) {
 				try {
@@ -3012,13 +2703,6 @@ export async function reloadExtension(prompt: string, buttonText?: string, force
 }
 
 export async function deactivate(): Promise<void> {
-	// Flush the Agent run ledger so the final state of any active run survives a window/extension close.
-	try {
-		const { runLedger } = require('./ai/runner/runLedger') as typeof import('./ai/runner/runLedger');
-		await runLedger.flushAll();
-	} catch (error) {
-		ErrorReporter.warn('Extension', 'Failed to flush Agent state during deactivation', error);
-	}
 	if (!defaultClient) return;
 	try {
 		await defaultClient.stop();

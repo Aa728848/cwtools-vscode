@@ -8,7 +8,7 @@ import {
     mergeDeepCompatibilityEvidence,
     queryProjectProfile,
     readProjectProfile,
-} from '../../extension/ai/projectProfile';
+} from 'cwtools-shared';
 
 describe('ProjectProfile localisation detection', () => {
     const tempBase = path.join(os.tmpdir(), 'cwtools-project-profile');

@@ -55,21 +55,21 @@ Run the narrowest useful check first, then broaden when crossing subsystem bound
 | Scope | Minimum check |
 | --- | --- |
 | Extension Host or Webview TS | `npm run compile`, `npm run typecheck:test`, targeted unit tests |
-| AI runner or tools | Targeted tests, then `npm run test:unit` |
+| MCP, DSH, or host tools | Shared/Node/MCP contract tests, DSH Host/Client tests, then `npm run test:unit` |
 | Docs | `npm run build:docs` and `npm run check:release -- --skip-compile --skip-test` |
 | F# LSP / server | `dotnet build src/LSP/` and/or `dotnet build src/Main/`, plus `npm run test:fsx` |
 | Integration / Shader / CWT LSP | `npm test`, `npm run test:shader-lsp`, `npm run test:cwt-lsp`, `npm run test:cwt-game-lsp` |
 | CWT rules sync | `npm run test:rules-sync` plus the relevant `rules:stellaris:*` command |
-| MCP schemas / workspace detection | `npm run generate:mcp-schema` / `generate:mcp-detection`, then inside `submodules/cwtools-mcp`: `npm run build && npm run test:contracts` |
+| Domain tools / workspace detection | Update `cwtools-shared/src/tools/catalog.ts` with dispatch, run `npm run generate:mcp-detection` when detection changes, then `npm run build && npm run test:contracts` inside `submodules/cwtools-mcp` |
 | Broad pre-release gate | `npm run verify` |
 
-Use `npm run check:mcp-schema` and `npm run check:mcp-detection` for read-only drift checks against `submodules/cwtools-mcp`.
+Use `npm run check:mcp-detection` for a read-only workspace-detection drift check. Tool catalog consistency is covered by shared contract tests.
 
 ### Repository boundaries and submodules
 
 | Path | Ownership |
 | --- | --- |
-| `client/extension/` | Extension Host, filesystem I/O, commands, LSP client, AI host (`client/extension/ai/`) |
+| `client/extension/` | Extension Host, filesystem I/O, commands, LSP client, MCP/IDE host services (`client/extension/mcp/`) |
 | `client/webview/` | Browser-sandboxed panels and visual editors |
 | `src/LSP/`, `src/Main/` | F#/.NET LSP layer and server executable |
 | `submodules/cwtools/` | Upstream CWTools parser, validation, game model, and Shader semantics |
@@ -88,9 +88,9 @@ Each submodule has independent history and release cadence: commit and test insi
 
 Domain constraints:
 - **Webviews (`client/webview/`)**: no `vscode`/`fs`/`path`/`require()`, communicate only via `postMessage`, use VS Code theme variables, support `prefers-reduced-motion`, dispose renderers/GPU/listeners/loops, and keep file I/O and `ReadTracker` in the Host.
-- **AI tools & runner (`client/extension/ai/`)**: keep definitions, shared types, registry metadata, permissions, and `agentTools.ts` dispatch in sync; route all calls through the policy engine; preserve path containment, sorted multi-file locking, per-file exclusion, and plan gates; keep run-event reducers/Webviews and V4 checkpoint resume contracts intact. External agents (such as Claude Code or Codex) handle shell execution and multi-agent orchestration through `cwtools-mcp`.
+- **MCP and host tools**: keep `cwtools-shared/src/tools/catalog.ts`, host capability filtering, and shared dispatch synchronized. Preserve path containment, sorted locking, per-file exclusion, cancellation, and evidence prechecks. External Agents own planning, shell, memory, and general editing.
 - **F# & Shader (`src/`, `submodules/cwtools/`)**: reuse `PdxShaderFeatures`, handle nested block depth and escaped quotes, use case-insensitive path comparison only on Windows, and compare Stellaris incremental refresh results against full refreshes.
-- **Localisation & docs**: update English and Chinese together (`client/extension/ai/messages.ts`, `client/webview/chat/i18n.ts`, `release/package.nls*.json`, and single-source bilingual docs). Never rewrite `.yml` localisation files with a generic text writer—use `write_localisation` to preserve encoding/BOM. Never duplicate version numbers outside root `package.json` and `release/package.json`.
+- **Localisation & docs**: update English and Chinese together (`client/extension/messages.ts`, `release/package.nls*.json`, and single-source bilingual docs). Never rewrite `.yml` localisation files with a generic text writer—use `write_localisation` to preserve encoding/BOM. Never duplicate version numbers outside root `package.json` and `release/package.json`.
 - **Agent Notes**: record or update a Simplified Chinese decision note in `.agents/notes/` for every non-trivial change (see [.agents/notes/README.md](.agents/notes/README.md)).
 
 ### CWT rule work
@@ -190,21 +190,21 @@ npm install
 | 修改范围 | 最小有效检查 |
 | --- | --- |
 | Extension Host 或 Webview TS | `npm run compile`、`npm run typecheck:test`、相关单元测试 |
-| AI runner 或工具 | 相关测试，随后 `npm run test:unit` |
+| MCP、DSH 或宿主工具 | 共享/Node/MCP 契约测试、DSH Host/Client 测试，随后 `npm run test:unit` |
 | 文档 | `npm run build:docs` 与 `npm run check:release -- --skip-compile --skip-test` |
 | F# LSP / 服务端 | `dotnet build src/LSP/` 与/或 `dotnet build src/Main/`，以及 `npm run test:fsx` |
 | 集成 / Shader / CWT LSP | `npm test`、`npm run test:shader-lsp`、`npm run test:cwt-lsp`、`npm run test:cwt-game-lsp` |
 | CWT 规则同步 | `npm run test:rules-sync` 及对应的 `rules:stellaris:*` 命令 |
-| MCP schema / 工作区探测 | `npm run generate:mcp-schema` / `generate:mcp-detection`，随后在 `submodules/cwtools-mcp` 内执行 `npm run build && npm run test:contracts` |
+| 领域工具 / 工作区探测 | 同步修改 `cwtools-shared/src/tools/catalog.ts` 与 dispatcher；探测变化时运行 `npm run generate:mcp-detection`，随后在 `submodules/cwtools-mcp` 内执行 `npm run build && npm run test:contracts` |
 | 发布前全量门禁 | `npm run verify` |
 
-只读漂移检查可使用 `npm run check:mcp-schema` 与 `npm run check:mcp-detection`。
+工作区探测的只读漂移检查可使用 `npm run check:mcp-detection`；工具目录一致性由共享契约测试覆盖。
 
 ### 仓库边界与子模块
 
 | 路径 | 职责 |
 | --- | --- |
-| `client/extension/` | Extension Host、文件 I/O、命令、LSP 客户端、AI 宿主（`client/extension/ai/`） |
+| `client/extension/` | Extension Host、文件 I/O、命令、LSP 客户端、MCP/IDE 宿主服务（`client/extension/mcp/`） |
 | `client/webview/` | 浏览器沙盒面板与可视化编辑器 |
 | `src/LSP/`、`src/Main/` | F#/.NET 协议层与语言服务端程序 |
 | `submodules/cwtools/` | 上游 CWTools 解析、校验、游戏模型与 Shader 语义 |
@@ -218,14 +218,14 @@ npm install
 - 保持改动聚焦，不覆盖无关工作区更改。
 - 优先复用共享 helper（`gameProfiles.ts`、`indexing/`、`pathScope.ts`、`fileExtensions.ts`），避免重复造轮子。
 - 将文件内容、JSON、Webview 消息、工具参数、LSP/MCP payload 与进程输出视为不可信输入；在边界用 `unknown`、类型守卫和可辨识联合收窄，避免新增 `any` 或无校验断言。
-- 保留异步代码的取消、超时与释放逻辑；Extension Host 与 AI 代码通过 `ErrorReporter` 上报带上下文的错误，不使用裸 `console.error`。
+- 保留异步代码的取消、超时与释放逻辑；Extension Host 与 MCP 宿主代码通过 `ErrorReporter` 上报带上下文的错误，不使用裸 `console.error`。
 - 文件系统派生输出保持确定排序，缓存与并发保持有界，可观察行为变更补充针对性回归测试。
 
 领域约束：
 - **Webview（`client/webview/`）**：禁止 `vscode`/`fs`/`path`/`require()`，仅通过 `postMessage` 通信；使用 VS Code 主题变量并支持 `prefers-reduced-motion`；关闭时释放渲染器/GPU/监听器/动画循环；文件访问与 `ReadTracker` 留在宿主。
-- **AI 工具与 runner（`client/extension/ai/`）**：同步维护定义、共享类型、registry 元数据、权限与 `agentTools.ts` 分发；所有调用经过策略引擎；保持路径包含、排序多文件锁、单文件写排他与 Plan 模式门；保持 run event reducer/Webview 与 V4 检查点恢复契约兼容。Shell 执行与多 Agent 编排由外部 Agent（如 Claude Code、Codex）通过 `cwtools-mcp` 完成。
+- **MCP 与宿主工具**：同步维护 `cwtools-shared/src/tools/catalog.ts`、宿主能力过滤和共享 dispatcher；保留路径包含、排序锁、单文件排他、取消与证据预检。计划、Shell、记忆和通用编辑由外部 Agent 负责。
 - **F# 与 Shader（`src/`、`submodules/cwtools/`）**：复用 `PdxShaderFeatures`，保留嵌套块深度与转义引号处理、仅 Windows 不区分大小写路径比较，以及 Stellaris 增量刷新与全量刷新的对比验证。
-- **本地化与文档**：用户可见英文与中文同步更新（`client/extension/ai/messages.ts`、`client/webview/chat/i18n.ts`、`release/package.nls*.json` 及单源双语文档）。本地化 `.yml` 必须通过 `write_localisation` 写入以保留编码/BOM。不要在根 `package.json` 与 `release/package.json` 之外重复写版本号。
+- **本地化与文档**：用户可见英文与中文同步更新（`client/extension/messages`、`release/package.nls*.json` 及单源双语文档）。本地化 `.yml` 必须通过 `write_localisation` 写入以保留编码/BOM。不要在根 `package.json` 与 `release/package.json` 之外重复写版本号。
 - **Agent Notes**：每次非平凡变更均需在 `.agents/notes/` 中记录或原地更新简体中文决策笔记（见 [.agents/notes/README.md](.agents/notes/README.md)）。
 
 ### CWT 规则维护

@@ -2,7 +2,7 @@ import { expect } from 'chai';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { buildSkillIndexPrompt, listSkills, loadSkill, parseFrontmatter, type ParsedFrontmatter } from '../../extension/ai/skills';
+import { buildSkillIndexPrompt, listSkills, loadSkill, parseFrontmatter, type ParsedFrontmatter } from '../../extension/mcp/skills';
 
 describe('Agent skill capability domains', () => {
     let workspaceRoot: string;

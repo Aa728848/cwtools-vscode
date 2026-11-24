@@ -293,6 +293,31 @@ if (-not (Test-Path (Join-Path $SharedDest "dist/index.js"))) {
 }
 Write-Host "[OK] Staged cwtools-shared (shared tool contracts and targeting weights) into release/node_modules." -ForegroundColor Green
 
+# The MCP bridge uses the same Node host services as Standalone and DSH.
+$NodeSource = Join-Path $PSScriptRoot "submodules/cwtools-mcp/packages/cwtools-node"
+if (-not (Test-Path (Join-Path $NodeSource "dist/index.js"))) {
+    Push-Location (Join-Path $PSScriptRoot "submodules/cwtools-mcp")
+    npm run build -w cwtools-node
+    $NodeBuildExit = $LASTEXITCODE
+    Pop-Location
+    if ($NodeBuildExit -ne 0 -or -not (Test-Path (Join-Path $NodeSource "dist/index.js"))) {
+        Write-Error "Failed to build cwtools-node at $NodeSource"
+        exit 1
+    }
+}
+$NodeDest = Join-Path $PSScriptRoot "release/node_modules/cwtools-node"
+New-Item -ItemType Directory -Path $NodeDest -Force | Out-Null
+foreach ($NodeEntry in @("dist", "package.json", "README.md")) {
+    $NodeEntryPath = Join-Path $NodeSource $NodeEntry
+    if (Test-Path $NodeEntryPath) {
+        Copy-Item -LiteralPath $NodeEntryPath -Destination $NodeDest -Recurse -Force
+    }
+}
+if (-not (Test-Path (Join-Path $NodeDest "dist/index.js"))) {
+    Write-Error "cwtools-node staged without its built entry point: $NodeDest"
+    exit 1
+}
+
 # 5. (Opt-in) Build and bundle the MCP server (shipped inside the extension at bin/mcp)
 # The MCP server moved to the submodules/cwtools-mcp repository and is installed
 # standalone (npx -y cwtools-mcp); the VSIX no longer carries it by default.

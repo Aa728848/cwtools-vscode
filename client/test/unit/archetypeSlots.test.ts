@@ -1,5 +1,5 @@
 import { expect } from 'chai';
-import { extractArchetypeSlots, instantiateArchetypeSlots } from '../../extension/ai/tools/archetypeSlots';
+import { extractArchetypeSlots, instantiateArchetypeSlots } from 'cwtools-shared';
 
 function expectFailure(operation: () => unknown, pattern: RegExp): void {
     try {

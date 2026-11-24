@@ -7,7 +7,7 @@ import {
     McpBridgeRequestTooLargeError,
     parseBridgeJsonRpcPayload,
     readMcpBridgeRequestBody,
-} from '../../extension/ai/mcpBridgeProtocol';
+} from '../../extension/mcp/mcpBridgeProtocol';
 
 class MockIncomingRequest extends EventEmitter {
     destroyed = false;

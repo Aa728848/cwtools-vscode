@@ -33,7 +33,7 @@ import {
     toDisplayLocalisationValue,
     type ExtractedWeaponTargeting,
     type WeaponTargetingSourceGroup,
-} from '../../extension/ai/targetWeightExtract';
+} from '../../extension/targetWeightExtract';
 
 /** 一段贴近原版形状的武器模板：注释、引号、嵌套 prerequisites、target_weights 都在。 */
 const WEAPON_FILE = `

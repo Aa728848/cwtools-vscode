@@ -12,7 +12,7 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import { panelLocale, panelText } from './panelI18n';
-import { ErrorReporter } from './ai/errorReporter';
+import { ErrorReporter } from './errorReporter';
 import { getConfiguredGameRoots } from './configuredGameRoots';
 import type { IndexService } from './indexing/indexService';
 import { getDefaultLocalisationLanguagesForUiLocale, getPreferredLocalisationLanguageTags, pickPreferredLocalisationEntry } from './localisationLanguagePreference';
@@ -49,7 +49,7 @@ import {
     type ShipSizeDetailGroup,
     type WeaponTargetingEntry,
     type WeaponTargetingSourceGroup,
-} from './ai/targetWeightExtract';
+} from './targetWeightExtract';
 
 /** 与 techTreePanel 的 TECH_FILE_LIMIT_PER_ROOT 同量级的文件数上限，避免超大 mod 拖死扫描。 */
 const TARGET_WEIGHT_FILE_LIMIT_PER_ROOT = 2000;

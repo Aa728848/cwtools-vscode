@@ -5,7 +5,7 @@
 
 // ─── Data Types ─────────────────────────────────────────────────────────────
 import { safeEval } from './exprEval';
-import { ErrorReporter } from './ai/errorReporter';
+import { ErrorReporter } from './errorReporter';
 import type { GuiElement } from '../shared/guiPreview';
 export type { GuiElement } from '../shared/guiPreview';
 

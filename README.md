@@ -58,18 +58,14 @@ Visual edits apply through VS Code workspace edits so undo and redo behave norma
 
 Open a workspace containing `descriptor.mod` and run **Upload Mod to Steam Workshop** (requires the Steam client running and signed in). The Steam Workshop view pre-fills metadata from `descriptor.mod` and existing Workshop items, stages a filtered copy honoring `.gitignore`, `.steamignore`, and `stellarisLanguageServices.workshop.extraIgnorePatterns`, and writes the new `remote_file_id` back on first upload. Set `stellarisLanguageServices.workshop.appIdOverride` for games without a built-in Steam App ID.
 
-#### Built-in AI workspace
+#### External agents via MCP
 
-Run **Stellaris AI: Open AI Chat** or **Stellaris AI: Open Agent Manager** from the Command Palette.
+The extension no longer includes a built-in Agent, Provider pool, or inline AI completion. Use the separately published [`cwtools-mcp`](https://github.com/Aa728848/cwtools-mcp) server or the DSH native plugin:
 
-- **Modes & safety**: single-agent Paradox/CWTools assistant with `/plan`, `/execute`, `/explore`, and `/review` mode pins, `EvidenceGate` semantic prechecks, BOM-safe localisation writes, and `confirm` (diff preview) or `auto` write control.
-- **Manager GUI Preview**: the detached Agent Manager adds a `.gui` **Preview** tab where you can select elements to attach structured source references to chat, and automatically runs up to two rounds of Before/After/Diff visual verification after Agent GUI edits.
-- **Providers, account pools & proxy**: credentials live in VS Code SecretStorage. Subscription lines (Codex, Claude, Kimi Code, MiniMax Code, Command Code, WorkBuddy, and OpenDesign) share a multi-account rotation pool (`sequential` / `round-robin` / `sticky`, rate-limit failover, quota meters) and unified **AI Settings → Subscription channel proxy** controls (auto detect, custom HTTP/HTTPS/SOCKS5 proxy, or direct).
-- **Customization & memory**: customize skills (`~/.cwtools/skills`, `.agents/skills`, `.cwtools/skills`), agent profiles (`~/.cwtools/agents`), extra MCP servers (`~/.cwtools/mcp.json` or `.cwtools/mcp.json`), custom providers (`~/.cwtools/providers.json`), and global instructions (`~/.cwtools/CWTOOLS.md`). Completed runs distill reusable workspace lessons into `.cwtools/experience.md` when enabled.
-
-#### External MCP clients
-
-The separately published [`cwtools-mcp`](https://github.com/Aa728848/cwtools-mcp) server exposes CWTools semantic queries and six default-on whitelisted domain-write tools. It reuses the active VS Code language server when available and requires verified Paradox/CWT workspace evidence before exposing tools.
+- **Bridge or Standalone**: reuse the active VS Code CWTools host, or start an independent LSP with the same project detection and capability gates.
+- **Project initialization**: `initialize_project` generates the V4 project profile and V7 SQLite knowledge pack without a chat command; incremental refresh is supported.
+- **Domain workflows**: semantic/rule/asset/Shader queries, whitelisted writes, Archetype extraction, and Paradox skills are shared across MCP and DSH.
+- **IDE evidence**: an active editor host can return IDE context, open visual editors, and capture bounded GUI Before/After/Diff artifacts. The external Agent controls its own plan and verification loop.
 
 ```sh
 codex mcp add cwtools -- npx -y cwtools-mcp --stdio
@@ -80,7 +76,7 @@ claude mcp add cwtools --scope user -- npx -y cwtools-mcp --stdio
 
 ![System architecture overview](docs/system-architecture.png)
 
-- `client/extension/` — VS Code Extension Host, filesystem/LSP/AI host boundaries
+- `client/extension/` — VS Code Extension Host, filesystem/LSP/MCP host boundaries
 - `client/webview/` — browser-sandboxed panels and visual editors (`postMessage` only)
 - `src/LSP/`, `src/Main/` — F# / .NET 10 language server
 - `submodules/cwtools/`, `submodules/cwtools-stellaris-config/`, `submodules/cwtools-mcp/` — upstream library, Stellaris rules, and standalone MCP packages
@@ -112,7 +108,7 @@ Released under the [MIT License](LICENSE.md). Built on [CWTools](https://github.
 
 ## 中文
 
-Stellaris Language Serves 是一款面向 Paradox Mod 开发的 VS Code 扩展，整合了 CWTools 语言服务、可视化编辑器、原版对比、Shader 支持、Steam 创意工坊上传与可选 AI 工作区。
+Stellaris Language Serves 是一款面向 Paradox Mod 开发的 VS Code 扩展，整合了 CWTools 语言服务、可视化编辑器、原版对比、Shader 支持与 Steam 创意工坊上传。
 
 [![Built with F#](https://img.shields.io/badge/backend-F%23%20%2F%20.NET%2010-blue.svg?style=flat-square)](https://dotnet.microsoft.com/)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-brightgreen.svg?style=flat-square)]()
@@ -128,7 +124,7 @@ Stellaris Language Serves 是一款面向 Paradox Mod 开发的 VS Code 扩展�
 | Shader 编辑 | 按真实编译单元提供 `.shader` / `.fxh` 诊断、跳转、补全、格式化、重命名与语义高亮。 |
 | CWT 规则编写 | 独立的 `cwt` 语言支持（`CWT0xx`–`CWT9xx` 诊断、上下文补全、跨文件跳转、校验通过后安全热替换，以及无需游戏安装的 CWT-only 模式）。 |
 | 原版对比与工坊 | 文件/代码块原版差异对比、按块或批量迁移，以及遵循 `.gitignore`/`.steamignore` 的 Steam 创意工坊上传。 |
-| 内置 AI 与 MCP | 专注 Paradox/CWTools 语义的单 Agent 助手（`EvidenceGate`、`confirm`/`auto` 写入、技能、记忆、GUI 视觉核对），以及面向外部 Agent 的独立 `cwtools-mcp`。 |
+| 外部 Agent 与 MCP | 通过独立 `cwtools-mcp` 或 DSH 原生插件提供 Paradox/CWTools 语义查询、项目初始化、受控写入、技能与按需 GUI 视觉证据。 |
 
 ### 安装
 
@@ -164,18 +160,14 @@ Stellaris Language Serves 是一款面向 Paradox Mod 开发的 VS Code 扩展�
 
 打开含 `descriptor.mod` 的 Mod 工作区并运行 **上传 Mod 到 Steam 创意工坊**（需 Steam 客户端已运行并登录）。工坊视图会自动预填 `descriptor.mod` 与已有工坊条目信息，按 `.gitignore`、`.steamignore` 和 `stellarisLanguageServices.workshop.extraIgnorePatterns` 过滤暂存后上传，并在首次上传后回写 `remote_file_id`。未内置 Steam App ID 的游戏可通过 `stellarisLanguageServices.workshop.appIdOverride` 指定。
 
-#### 内置 AI 工作区
+#### 连接外部 Agent
 
-从命令面板运行 **Stellaris AI: 打开 AI 对话面板** 或 **Stellaris AI: 打开 Agent 运行管理器**。
+扩展已不再内置 Agent、Provider 号池或行内 AI 补全。请使用独立发布的 [`cwtools-mcp`](https://github.com/Aa728848/cwtools-mcp) 或 DSH 原生插件：
 
-- **模式与护栏**：专注 Paradox/CWTools 语义的单 Agent 助手，支持 `/plan`、`/execute`、`/explore`、`/review` 模式固定、`EvidenceGate` 语义预检、本地化 UTF-8 BOM 护栏与 `confirm`（Diff 确认）/ `auto` 写入控制。
-- **管理器 GUI 预览**：独立 Agent 管理器提供 `.gui` **预览**页，可将选中的界面元素作为结构化源码引用加入对话，并在 Agent 修改 GUI 后自动执行最多两轮 Before/After/Diff 视觉核对。
-- **Provider、账号池与代理**：凭据存放在 VS Code SecretStorage。各订阅线路（Codex、Claude、Kimi Code、MiniMax Code、Command Code、WorkBuddy 与 OpenDesign）共享多账号轮换号池（顺序/轮询/粘性策略、限流切号与额度仪表）以及统一的 **AI 设置 → 订阅渠道代理** 配置（自动检测、自定义 HTTP/HTTPS/SOCKS5 代理或直连）。
-- **定制与记忆**：支持在主目录或项目内自定义技能（`~/.cwtools/skills`、`.agents/skills`、`.cwtools/skills`）、Agent 档案（`~/.cwtools/agents`）、额外 MCP（`~/.cwtools/mcp.json` 或 `.cwtools/mcp.json`）、自定义 Provider（`~/.cwtools/providers.json`）与全局指令（`~/.cwtools/CWTOOLS.md`）。开启经验库后，完成任务的可复用经验会沉淀至 `.cwtools/experience.md`。
-
-#### 连接外部 MCP 客户端
-
-独立发布的 [`cwtools-mcp`](https://github.com/Aa728848/cwtools-mcp) 提供 CWTools 语义查询与六个默认开启的白名单领域写入工具；它会优先复用当前已激活的 VS Code 语言服务，并仅在存在可靠 Paradox/CWT 工作区证据时暴露工具。
+- **Bridge 或 Standalone**：复用当前 VS Code CWTools 宿主，或在同一套项目识别与能力门禁下启动独立 LSP。
+- **项目初始化**：`initialize_project` 无需聊天命令即可生成 V4 项目画像和 V7 SQLite 知识库，并支持增量刷新。
+- **领域工作流**：语义、规则、资产、Shader 查询、白名单写入、Archetype 提取和 Paradox 技能在 MCP 与 DSH 间共享。
+- **IDE 证据**：活跃编辑器宿主可提供 IDE 上下文、打开可视化编辑器并生成有界 GUI Before/After/Diff artifact；计划与核对回合并由外部 Agent 自主管理。
 
 ```sh
 codex mcp add cwtools -- npx -y cwtools-mcp --stdio
@@ -186,7 +178,7 @@ claude mcp add cwtools --scope user -- npx -y cwtools-mcp --stdio
 
 ![System architecture overview](docs/system-architecture.png)
 
-- `client/extension/` — VS Code Extension Host、文件系统/LSP/AI 宿主边界
+- `client/extension/` — VS Code Extension Host、文件系统/LSP/MCP 宿主边界
 - `client/webview/` — 浏览器沙盒面板与可视化编辑器（仅经 `postMessage` 通信）
 - `src/LSP/`、`src/Main/` — F# / .NET 10 语言服务端
 - `submodules/cwtools/`、`submodules/cwtools-stellaris-config/`、`submodules/cwtools-mcp/` — 上游核心库、Stellaris 规则与独立 MCP 包

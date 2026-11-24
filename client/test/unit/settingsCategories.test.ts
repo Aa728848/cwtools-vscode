@@ -25,7 +25,8 @@ describe('extension settings categories', () => {
 		expect(orders).to.deep.equal([...orders].sort((left, right) => (left ?? 0) - (right ?? 0)));
 		expect(new Set(settingKeys).size).to.equal(settingKeys.length);
 		expect(settingKeys).to.include('stellarisLanguageServices.editor.codeLens.enabled');
-		expect(settingKeys).to.include('stellarisLanguageServices.ai.performance.modelCallBudget');
+		expect(settingKeys).to.include('stellarisLanguageServices.diagnostics.ignoredKeys');
+		expect(settingKeys).to.include('stellarisLanguageServices.media.ffmpegPath');
 
 		for (const filename of ['package.nls.json', 'package.nls.zh-cn.json', 'package.nls.zh.json']) {
 			const messages = JSON.parse(fs.readFileSync(path.resolve(path.dirname(manifestPath), filename), 'utf8')) as Record<string, unknown>;

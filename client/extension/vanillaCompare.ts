@@ -9,7 +9,7 @@ import * as path from 'path';
 import * as fs from 'fs';
 import * as os from 'os';
 import { tokenize, TokenType, type Token } from './pdxTokenizer';
-import { ErrorReporter } from './ai/errorReporter';
+import { ErrorReporter } from './errorReporter';
 import { getAllProfiles } from './gameProfiles';
 import {
     matchPdxDefinitionType,

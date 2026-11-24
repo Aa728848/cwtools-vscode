@@ -60,10 +60,6 @@ export default tseslint.config(
 	{
 		files: [
 			'client/shared/protocolValidation.ts',
-			'client/extension/ai/chat/webviewProtocol.ts',
-			'client/extension/ai/durableStorage.ts',
-			'client/extension/ai/orchestrationStore.ts',
-			'client/extension/ai/runner/agentHandoff.ts',
 		],
 		rules: {
 			'@typescript-eslint/no-explicit-any': 'error',

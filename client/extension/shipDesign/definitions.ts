@@ -24,7 +24,7 @@ import {
     type ExtractedWeaponTargeting,
     type InlineScriptSourceGroup,
     type InlineScriptTemplate,
-} from '../ai/targetWeightExtract';
+} from '../targetWeightExtract';
 import {
     collectDefinitionItemsDeep,
     definitionBlocks,

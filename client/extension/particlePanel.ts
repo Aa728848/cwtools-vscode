@@ -3,7 +3,7 @@ import { panelText } from './panelI18n';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import { decodeDds, decodeTga } from './ddsDecoder';
-import { ErrorReporter } from './ai/errorReporter';
+import { ErrorReporter } from './errorReporter';
 import { resolveCaseInsensitivePath } from './fsCaseInsensitive';
 import { isPathInsideOrEqual } from './pathScope';
 import { parseParticleFile } from './particleAssetParser';

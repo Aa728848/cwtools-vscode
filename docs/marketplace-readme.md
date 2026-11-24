@@ -6,7 +6,7 @@
 
 ## English
 
-Build and maintain Paradox mods in VS Code with CWTools language support, Stellaris visual editors, vanilla comparison, Shader tooling, Steam Workshop upload, and an optional AI workspace.
+Build and maintain Paradox mods in VS Code with CWTools language support, Stellaris visual editors, vanilla comparison, Shader tooling, Steam Workshop upload,.
 
 ### Start here
 
@@ -43,15 +43,9 @@ All source edits use VS Code workspace edits and support standard undo/redo. Pre
 - **Compare & Migrate**: run **Compare File with Vanilla** or **Compare Block with Vanilla** to diff against vanilla counterparts, then migrate individual or selected blocks cleanly.
 - **Steam Workshop**: run **Upload Mod to Steam Workshop** inside a workspace with `descriptor.mod` to create or update a Workshop item with tags, preview image, visibility, change notes, and `.gitignore`/`.steamignore` staging filters (requires the Steam client running and signed in).
 
-### Optional AI workspace
-
-Run **Stellaris AI: Open AI Chat** or **Stellaris AI: Open Agent Manager** to open the built-in Paradox/CWTools single-agent workspace. It provides semantic script/rule queries, project indexing, plans, reusable skills, `EvidenceGate` semantic prechecks, `confirm` / `auto` file-write controls, and optional MCP servers. The detached Agent Manager also includes a `.gui` **Preview** tab with structured element selection into chat and automatic Before/After/Diff visual verification after GUI edits.
-
-Credentials are stored in VS Code SecretStorage. Subscription lines (Codex, Claude, Kimi Code, MiniMax Code, Command Code, WorkBuddy, and OpenDesign) share a multi-account rotation pool with rate-limit failover, quota meters, and unified **Subscription channel proxy** settings (auto detect, custom HTTP/HTTPS/SOCKS5 proxy, or direct). The ChatGPT-subscription Codex provider uses an upstream compatibility endpoint and may require updates if upstream changes.
-
 ### External agents via MCP
 
-The separately released [`cwtools-mcp`](https://github.com/Aa728848/cwtools-mcp) package exposes CWTools semantic queries and six default-on whitelisted domain-write tools to external agents, reusing the active VS Code language server when available.
+The extension has no built-in Agent. The separately released [`cwtools-mcp`](https://github.com/Aa728848/cwtools-mcp) package and DSH native plugin provide shared Paradox semantics, project initialization, whitelisted domain writes, skills, and host-side GUI evidence to external agents. Use Bridge mode to reuse the active VS Code host, or Standalone mode for an independent CWTools LSP.
 
 ```sh
 codex mcp add cwtools -- npx -y cwtools-mcp --stdio
@@ -110,15 +104,9 @@ When reporting an issue on [GitHub](https://github.com/Aa728848/cwtools-vscode/i
 - **对比与迁移**：通过 **与原版对比文件** 或 **与原版对比代码块** 打开差异视图，并按块或批量迁移原版内容。
 - **Steam 创意工坊**：在包含 `descriptor.mod` 的工作区运行 **上传 Mod 到 Steam 创意工坊**，可新建或更新物品，支持标签、预览图、可见性、更新说明以及 `.gitignore`/`.steamignore` 过滤（需 Steam 客户端已运行并登录）。
 
-### 可选 AI 工作区
-
-运行 **Stellaris AI: 打开 AI 对话面板** 或 **Stellaris AI: 打开 Agent 运行管理器**，开启专注 Paradox/CWTools 语义领域的内置单 Agent 工作区。它提供语义脚本与规则查询、项目索引、计划、可复用技能、`EvidenceGate` 语义预检、`confirm` / `auto` 写入控制与可选 MCP 服务。独立 Agent 管理器还提供 `.gui` **预览**页，支持元素框选/多选加入对话，并在 GUI 写入后自动执行 Before/After/Diff 视觉核对。
-
-凭据保存在 VS Code SecretStorage。各订阅线路（Codex、Claude、Kimi Code、MiniMax Code、Command Code、WorkBuddy 与 OpenDesign）共享多账号轮换号池、限流自动切号、额度仪表以及统一的 **订阅渠道代理** 设置（自动检测、自定义 HTTP/HTTPS/SOCKS5 代理或直连）。兼容 ChatGPT 订阅的 Codex 线路依赖上游兼容端点，上游调整时可能需要同步更新扩展。
-
 ### 通过 MCP 连接外部 Agent
 
-独立发布的 [`cwtools-mcp`](https://github.com/Aa728848/cwtools-mcp) 为外部 Agent 提供 CWTools 语义查询与六个默认开启的白名单领域写入工具，并优先复用已运行的 VS Code 语言服务。
+扩展不再内置 Agent。独立发布的 [`cwtools-mcp`](https://github.com/Aa728848/cwtools-mcp) 与 DSH 原生插件为外部 Agent 提供共享 Paradox 语义、项目初始化、白名单领域写入、技能和宿主 GUI 证据。Bridge 模式复用当前 VS Code 宿主，Standalone 模式启动独立 CWTools LSP。
 
 ```sh
 codex mcp add cwtools -- npx -y cwtools-mcp --stdio

@@ -324,7 +324,7 @@ describe('IndexService workspaceSymbolTypeSummary', () => {
         const moduleLoader = require('module') as { _load: (...args: any[]) => any };
         const originalLoad = moduleLoader._load;
         const modulePath = require.resolve('../../extension/indexing/indexService');
-        const reporterPath = require.resolve('../../extension/ai/errorReporter');
+        const reporterPath = require.resolve('../../extension/errorReporter');
         delete require.cache[modulePath];
         delete require.cache[reporterPath];
         moduleLoader._load = function (this: unknown, request: string, ...args: any[]) {

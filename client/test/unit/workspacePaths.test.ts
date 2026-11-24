@@ -16,14 +16,14 @@ const vscodeStub = {
 function loadWorkspacePaths() {
     const moduleLoader = require('module') as { _load: (...args: any[]) => any };
     const originalLoad = moduleLoader._load;
-    const modulePath = require.resolve('../../extension/ai/workspacePaths');
+    const modulePath = require.resolve('../../extension/workspacePaths');
     delete require.cache[modulePath];
     moduleLoader._load = function (this: unknown, request: string, ...args: any[]) {
         if (request === 'vscode') return vscodeStub;
         return originalLoad.apply(this, [request, ...args]);
     };
     try {
-        return require('../../extension/ai/workspacePaths') as typeof import('../../extension/ai/workspacePaths');
+        return require('../../extension/workspacePaths') as typeof import('../../extension/workspacePaths');
     } finally {
         moduleLoader._load = originalLoad;
         delete require.cache[modulePath];
@@ -46,14 +46,14 @@ describe('workspace AI storage paths', () => {
     it('uses one canonical .cwtools project root', () => {
         const workspacePaths = loadWorkspacePaths();
         const expected = path.join(projectRoot, '.cwtools');
-        expect(workspacePaths.getAiStorageRoot(projectRoot)).to.equal(expected);
+        expect(workspacePaths.getCwtoolsStorageRoot(projectRoot)).to.equal(expected);
     });
 
     it('recognizes a directly opened .cwtools folder as the canonical storage root', () => {
         const workspacePaths = loadWorkspacePaths();
         const aiRoot = path.join(projectRoot, '.cwtools');
         workspaceFolders = [{ uri: { fsPath: aiRoot } }];
-        expect(workspacePaths.getAiStorageRoot(aiRoot)).to.equal(aiRoot);
+        expect(workspacePaths.getCwtoolsStorageRoot(aiRoot)).to.equal(aiRoot);
     });
 
     it('resolves explicitly qualified paths in a multi-root workspace', () => {
@@ -86,7 +86,7 @@ describe('workspace AI storage paths', () => {
                 document: { uri: { fsPath: path.join(secondRoot, 'common', 'traits.txt') } },
             };
             expect(workspacePaths.getProjectWorkspaceRoot(projectRoot)).to.equal(secondRoot);
-            expect(workspacePaths.getAiStorageRoot(projectRoot)).to.equal(path.join(secondRoot, '.cwtools'));
+            expect(workspacePaths.getCwtoolsStorageRoot(projectRoot)).to.equal(path.join(secondRoot, '.cwtools'));
         } finally {
             vscodeStub.window.activeTextEditor = undefined;
             fs.rmSync(secondRoot, { recursive: true, force: true });
@@ -101,7 +101,7 @@ describe('workspace AI storage paths', () => {
         ];
         try {
             const workspacePaths = loadWorkspacePaths();
-            expect(workspacePaths.getAiStorageRoot()).to.equal(path.join(projectRoot, '.cwtools'));
+            expect(workspacePaths.getCwtoolsStorageRoot()).to.equal(path.join(projectRoot, '.cwtools'));
         } finally {
             fs.rmSync(secondRoot, { recursive: true, force: true });
         }
@@ -116,17 +116,4 @@ describe('workspace AI storage paths', () => {
         workspacePaths.configureWorkspaceCacheStorage(undefined);
     });
 
-    it('uses only the configured private topic root when private storage is active', () => {
-        const workspacePaths = loadWorkspacePaths();
-        const privateRoot = path.join(projectRoot, 'private-storage');
-        workspacePaths.configurePrivateAgentStorage(privateRoot);
-        try {
-            expect(workspacePaths.getPrivateTopicStorageDir('topic_1', projectRoot))
-                .to.equal(path.join(privateRoot, 'topics', 'topic_1'));
-            expect(workspacePaths.getPrivateTopicScratchDir('topic_1', projectRoot))
-                .to.equal(path.join(privateRoot, 'topics', 'topic_1', 'scratch'));
-        } finally {
-            workspacePaths.configurePrivateAgentStorage(undefined);
-        }
-    });
 });

@@ -1,6 +1,6 @@
 import * as vs from 'vscode';
 import type { LanguageClient } from 'vscode-languageclient/node';
-import { ErrorReporter } from './ai/errorReporter';
+import { ErrorReporter } from './errorReporter';
 import {
     getAllProfiles,
     getProfileByLanguageId,

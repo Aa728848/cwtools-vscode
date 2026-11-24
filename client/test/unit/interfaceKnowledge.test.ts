@@ -1,5 +1,5 @@
 import { expect } from 'chai';
-import { queryInterfaceKnowledge } from '../../extension/ai/interfaceKnowledge';
+import { queryInterfaceKnowledge } from 'cwtools-shared';
 
 describe('Stellaris Interface knowledge', () => {
     it('always returns crash-risk preservation rules with source revision metadata', () => {

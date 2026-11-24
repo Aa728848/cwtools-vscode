@@ -4,7 +4,7 @@ import {
     bridgeToolDenied,
     filterBridgeResources,
     filterBridgeTools,
-} from '../../extension/ai/mcpBridgeCapabilities';
+} from '../../extension/mcp/mcpBridgeCapabilities';
 import type { WorkspaceProjectDetection, WorkspaceProjectKind } from '../../extension/workspaceGameDetection';
 
 function project(kind: WorkspaceProjectKind): WorkspaceProjectDetection {

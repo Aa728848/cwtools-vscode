@@ -1,5 +1,5 @@
 import { expect } from 'chai';
-import { dispatchNativeCwtoolsRequest } from '../../extension/ai/cwtoolsNativeBridge';
+import { dispatchNativeCwtoolsRequest } from '../../extension/mcp/cwtoolsNativeBridge';
 
 describe('cwtoolsNativeBridge protocol', () => {
     it('forwards only whitelisted commands and LSP methods', async () => {
@@ -27,7 +27,7 @@ describe('cwtoolsNativeBridge protocol', () => {
             lspRequest: async () => { throw new Error('must not be called'); },
         };
         for (const request of [
-            { jsonrpc: '2.0', method: 'cwtools/executeCommand', params: { command: 'cwtools.ai.exportProjectKnowledge', args: [] } },
+            { jsonrpc: '2.0', method: 'cwtools/executeCommand', params: { command: 'cwtools.ai.notARealCommand', args: [] } },
             { jsonrpc: '2.0', method: 'cwtools/lspRequest', params: { method: 'workspace/applyEdit', params: {} } },
             { jsonrpc: '2.0', method: 'cwtools/executeCommand', params: { command: 'cwtools.ai.queryTypes', args: {} } },
             { jsonrpc: '2.0', method: 'tools/call', params: {} },

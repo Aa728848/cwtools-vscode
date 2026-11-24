@@ -49,7 +49,7 @@ The Extension Host is the trust boundary: it owns VS Code APIs, filesystem I/O, 
 | Path & filesystem helpers | `pathScope.ts`, `fileExtensions.ts`, `fsCaseInsensitive.ts` |
 | Visual-editor hosts | `*Panel.ts`, `shipDesign/`, `staticGalaxyEditorProvider.ts` |
 | Vanilla comparison & Workshop | `vanillaCompare.ts`, `workshopPanel.ts`, `workshopIgnore.ts` |
-| AI runtime | `client/extension/ai/` |
+| MCP and IDE host services | `client/extension/mcp/`, `ideTools.ts`, `guiEvidence.ts` |
 
 Host code validates all Webview messages and external payloads at the boundary before executing operations. Path containment checks must use `pathScope.ts` (and `ai/workspaceSandbox.ts` for AI read policy) rather than ad-hoc prefix matching.
 
@@ -145,63 +145,26 @@ Pipeline layers:
 
 Do not add a parallel TypeScript Shader parser; Agent tools and MCP must query the LSP commands backed by `PdxShaderFeatures`. Because engine executables invoke some Effects directly, renderer contracts and audited ABI evidence govern safe edits—absent text references never prove an Effect is unused.
 
-### AI subsystem
+### Host-side semantic services
 
-`client/extension/ai/` runs in the Extension Host and owns provider clients, multi-account subscription pools, chat/topic state, prompt assembly, tool policy/dispatch, Agent skills, and workspace memory.
+The extension has no built-in Agent or Provider runtime. Shared CWTools semantics live in `cwtools-shared`; Node filesystem, project initialization, diagnostics, writes, and LSP lifecycle live in `cwtools-node`. The Extension Host supplies the same HostServices contract to the MCP Bridge, adding only real IDE capabilities.
 
-#### Turn routing and state
+`client/extension/mcp/` owns bearer-authenticated MCP and native RPC transports. `ideTools.ts` owns editor/visual-panel access, while `guiEvidence.ts` stores bounded fixed-frame PNG and pixel-diff artifacts. External Agents decide when to capture Before/After evidence and whether another correction is needed; no run loop is injected by the extension. Dirty GUI drafts remain fail-closed against disk writes.
 
-The built-in Agent is a single-agent Paradox/CWTools assistant. Turns default to Execute (bounded inspection settles routine changes) unless the user pins a mode (`/plan`, `/execute`, `/explore`, `/review`, or `/mode <value>`). When user-owned design choices remain open, the Agent escalates via `enter_plan_mode`, narrowing authorization to `plan_write_only` so the plan guard blocks project writes for the rest of the turn; `exit_plan_mode` exits Plan without restoring write access (only user approval authorizes execution).
-
-`AgentSchedulingState` is the sole persisted and host-to-Webview scheduling state; prompt/tool execution labels derive from it at call boundaries. `Implementation_Plan.md` carries one machine-readable `cwtools-plan` contract (with an optional Paradox blueprint payload). `.cwtools/project/profile.json` uses the V4 guidance-card schema rebuilt by `/init`.
-
-#### Runner and tool enforcement
-
-```mermaid
-sequenceDiagram
-    participant C as Chat host
-    participant R as Agent runner
-    participant P as Provider
-    participant T as Tool dispatcher
-    participant G as Policy engine
-    participant S as Workspace, indexes, LSP, MCP
-
-    C->>R: request, context, paradox domain
-    R->>P: model request
-    P-->>R: text or tool call
-    R->>T: parsed tool call
-    T->>G: effect, risk, targets, network hosts
-    G-->>T: allow or deny
-    T->>S: validated execution
-    S-->>T: structured result
-    T-->>R: result plus run events
-    R-->>C: streamed output and final state
-```
-
-The tool registry (`client/extension/ai/tools/registry.ts`) is the source of truth for availability, effects, risk, and concurrency. Every call passes through `policyEngine.ts` before dispatch in `agentTools.ts`. File writes enforce path containment, per-file exclusion, sorted multi-file locking, plan-mode gates, `EvidenceGate` semantic prechecks, BOM-safe localisation handling, and user-selected `confirm` / `auto` mode.
-
-Typed run events drive streaming, replay, checkpoints, and resume; new events require matching reducers and Webview renderers, and resume strictly enforces the V4 checkpoint contract. Long runs use bounded context compaction, budgets, and loop detection.
-
-#### Manager GUI development preview
-
-The detached Agent Manager mounts a persistent `.gui` Preview tab (`ManagerGuiPreviewController` + shared `GuiPreviewLoader`) alongside Changes, Run, and Settings. Element selections attach versioned, read-only source references via `ContextReferenceManager`. Disk-based Agent writes fail closed against dirty GUI drafts. After GUI writes, fixed-frame offscreen Before/After/Diff captures inject up to two `visual_verification` rounds into the active run (image + metrics for vision providers; metrics only otherwise), stored in bounded topic-private files outside V4 checkpoints. See [the Manager GUI preview Agent Note](.agents/notes/implemented/feature/2026-11-17-agent-manager-gui-development-preview.md).
-
-#### Provider and secret boundary
-
-Provider credentials, OAuth tokens, proxy credentials, and web-search keys live in VS Code SecretStorage. Provider clients normalize wire formats into the runner's unified message/tool model. Live web content, MCP payloads, and provider responses are treated as untrusted input.
+Project knowledge watchers call the shared `initialize_project` implementation directly. V4 profiles and V7 SQLite manifests remain machine-readable artifacts, not chat-session state.
 
 ### Standalone MCP server and native bridge
 
 `submodules/cwtools-mcp/` is maintained and published independently as three strictly one-way packages:
-- `cwtools-shared` — transport-free contracts, generated schemas/detection, `createToolCallHandler`, and shared pure formulas (including `targetingWeights.ts`, also consumed directly by the Extension Host).
+- `cwtools-shared` — transport-free contracts, the authoritative domain-tool catalog, generated detection, `createToolCallHandler`, and shared pure formulas (including `targetingWeights.ts`, also consumed directly by the Extension Host).
 - `cwtools-node` — Node host services (filesystem, LSP process, revalidation, project detection; no MCP SDK dependency).
 - `cwtools-mcp` — MCP transport wiring and re-exports.
 
-Both Bridge mode (connecting to an active VS Code Extension Host manifest) and Standalone mode (spawning its own LSP) enforce the same capability gate: unsupported or ambiguous workspaces expose no tools/resources and spawn no LSP; CWT-only workspaces expose only CWT-capable tools. Whitelisted domain-write tools (6 tools) are enabled by default; non-whitelisted writes are rejected.
+Both Bridge mode (connecting to an active VS Code Extension Host manifest) and Standalone mode (spawning its own LSP) enforce the same capability gate: unsupported or ambiguous workspaces expose no tools/resources and spawn no LSP; CWT-only workspaces expose only CWT-capable tools. Whitelisted domain-write and initialization tools are enabled by default in MCP; DSH keeps every write explicitly opt-in. Tools requiring unavailable IDE capabilities are not disclosed.
 
-The internal `cwtools.ai.getHostCapabilities` handshake verifies `{ protocolVersion, serverVersion, commands }` before model load; incompatible hosts fail explicitly with `backend_incompatible`. For non-MCP consumers, the extension also exposes bearer-authenticated `/cwtools/healthz` and `/cwtools/rpc` forwarding only allowlisted read-only commands and navigation/document LSP methods.
+The internal `cwtools.ai.getHostCapabilities` handshake verifies `{ protocolVersion, serverVersion, commands }` before model load; incompatible hosts fail explicitly with `backend_incompatible`. For non-MCP consumers, the extension also exposes bearer-authenticated `/cwtools/healthz` and `/cwtools/rpc` forwarding only allowlisted semantic commands, navigation/document LSP methods, and explicitly named IDE operations.
 
-Never hand-edit `submodules/cwtools-mcp/packages/cwtools-shared/src/generated/`; regenerate via `npm run generate:mcp-schema` and `npm run generate:mcp-detection`.
+Never hand-edit generated workspace-detection files; update `cwtools-shared/src/tools/catalog.ts` with its dispatch implementation and run `npm run generate:mcp-detection` when detection changes.
 
 ### Build and release flow
 
@@ -280,7 +243,7 @@ Extension Host 是信任边界：统一负责 VS Code API、文件 I/O、进程�
 | 路径与文件系统 helper | `pathScope.ts`、`fileExtensions.ts`、`fsCaseInsensitive.ts` |
 | 可视化编辑器宿主 | `*Panel.ts`、`shipDesign/`、`staticGalaxyEditorProvider.ts` |
 | 原版对比与创意工坊 | `vanillaCompare.ts`、`workshopPanel.ts`、`workshopIgnore.ts` |
-| AI 运行时 | `client/extension/ai/` |
+| MCP 与 IDE 宿主服务 | `client/extension/mcp/`、`ideTools.ts`、`guiEvidence.ts` |
 
 宿主代码在边界处校验所有 Webview 消息与外部 payload 后再执行操作。路径包含判断统一使用 `pathScope.ts`（AI 读取策略在 `ai/workspaceSandbox.ts`），不要手写前缀比对。
 
@@ -376,63 +339,26 @@ flowchart LR
 
 不要在 TypeScript 中实现平行 Shader 解析器；Agent 与 MCP 应调用 `PdxShaderFeatures` 支撑的 LSP 命令。部分 Effect 由游戏可执行程序直接调用，安全修改依赖 renderer contract 与已审核 ABI 证据——缺少脚本文本引用不代表 Effect 未使用。
 
-### AI 子系统
+### 宿主侧语义服务
 
-`client/extension/ai/` 运行在 Extension Host 中，负责 Provider 客户端、多账号订阅号池、聊天与话题状态、Prompt 构建、工具策略与分发、Agent 技能及工作区记忆。
+扩展不再包含内置 Agent 或 Provider 运行时。共享 CWTools 语义位于 `cwtools-shared`；Node 文件系统、项目初始化、诊断、写入和 LSP 生命周期位于 `cwtools-node`。Extension Host 通过同一 HostServices 合同驱动 MCP Bridge，并只追加真实存在的 IDE 能力。
 
-#### 单轮路由与状态
+`client/extension/mcp/` 负责带 bearer 认证的 MCP 与原生 RPC 传输；`ideTools.ts` 负责编辑器和可视化面板访问，`guiEvidence.ts` 保存有界固定帧 PNG 与像素 Diff artifact。是否采集 Before/After、是否需要再次修正均由外部 Agent 决定，扩展不再注入运行回合。对未保存 GUI 草稿的磁盘写入仍保持 fail-closed。
 
-内置 Agent 是专注 Paradox/CWTools 语义的单 Agent 助手。除用户显式固定模式（`/plan`、`/execute`、`/explore`、`/review` 或 `/mode <值>`）外，默认走 Execute，由有界只读检查确定普通修改；当存在属于用户的未决设计选择时，Agent 调用 `enter_plan_mode` 将授权收窄为 `plan_write_only`，使 plan guard 拦截本回合剩余项目写入；`exit_plan_mode` 只退出 Plan 而不恢复写权限，必须由用户批准后才能进入执行。
-
-`AgentSchedulingState` 是唯一持久化并在宿主与 Webview 间传递的调度状态，Prompt/工具执行标签仅在调用边界派生。`Implementation_Plan.md` 只包含单个机器可读 `cwtools-plan` 合同（可附带 Paradox 蓝图载荷）。`.cwtools/project/profile.json` 采用由 `/init` 重建的 V4 guidance-card schema。
-
-#### Runner 与工具策略执行
-
-```mermaid
-sequenceDiagram
-    participant C as Chat 宿主
-    participant R as Agent runner
-    participant P as Provider
-    participant T as 工具 dispatcher
-    participant G as 策略引擎
-    participant S as 工作区、索引、LSP、MCP
-
-    C->>R: 请求、上下文、Paradox 领域
-    R->>P: 模型请求
-    P-->>R: 文本或工具调用
-    R->>T: 已解析工具调用
-    T->>G: 副作用、风险、目标、网络主机
-    G-->>T: 允许或拒绝
-    T->>S: 校验后执行
-    S-->>T: 结构化结果
-    T-->>R: 结果与 run event
-    R-->>C: 流式输出和最终状态
-```
-
-工具可用性、副作用、风险与并发策略以 `client/extension/ai/tools/registry.ts` 为准。所有工具调用在 `agentTools.ts` 分发前均须经过 `policyEngine.ts`；文件写入额外受路径包含、单文件写排他、排序多文件锁、Plan 模式门、`EvidenceGate` 语义预检、本地化 UTF-8 BOM 护栏与 `confirm` / `auto` 模式约束。
-
-类型化 run event 驱动流式输出、重放、检查点与恢复；新增事件必须同步 reducer 与 Webview 渲染器，恢复严格校验 V4 检查点合同。长任务受有界上下文压缩、预算与循环检测保护。
-
-#### 管理器 GUI 开发预览
-
-独立 Agent Manager 在“变更 / 运行 / 设置”旁提供持久的 `.gui` 预览页（`ManagerGuiPreviewController` + 共享 `GuiPreviewLoader`）。元素选择通过 `ContextReferenceManager` 附带带版本号的只读源码引用；磁盘写入类 Agent 工具对未保存 GUI 草稿采取 fail-closed 拦截。GUI 写入后，固定坐标离屏 Before/After/Diff 捕获最多向当前回合注入两轮 `visual_verification` 证据（视觉 Provider 接收图片与像素指标，其余接收文本指标），证据存于话题私有有界文件中且不进入 V4 检查点。详见 [管理器 GUI 开发预览 Agent Note](.agents/notes/implemented/feature/2026-11-17-agent-manager-gui-development-preview.md)。
-
-#### Provider 与 Secret 边界
-
-Provider 凭据、OAuth 令牌、代理凭据与网页搜索 Key 均存储在 VS Code SecretStorage。各 Provider 客户端将差异化的线协议统一转换为 runner 的通用消息与工具调用模型。实时网页、MCP payload 与 Provider 响应均按不可信输入处理。
+项目知识 watcher 直接调用共享 `initialize_project`。V4 画像与 V7 SQLite 清单仍是机器可读产物，不再是聊天会话状态。
 
 ### 独立 MCP 服务与原生桥接
 
 `submodules/cwtools-mcp/` 独立维护与发布，包含严格单向依赖的三个包：
-- `cwtools-shared` — 传输无关契约、生成的 schema/探测代码、`createToolCallHandler` 以及共享纯计算公式（如 `targetingWeights.ts`，Extension Host 亦直接消费）。
+- `cwtools-shared` — 传输无关契约、权威领域工具目录、生成的探测代码、`createToolCallHandler` 以及共享纯计算公式（如 `targetingWeights.ts`，Extension Host 亦直接消费）。
 - `cwtools-node` — Node 宿主服务（文件系统、LSP 进程、复验、项目探测，不依赖 MCP SDK）。
 - `cwtools-mcp` — MCP 传输层接线与重导出。
 
-Bridge 模式（复用已运行的 VS Code 扩展清单）与 Standalone 模式（自启 LSP）执行统一能力门禁：非支持或歧义工作区不暴露任何工具/资源且不启动 LSP；CWT-only 仅暴露 CWT 能力工具。6 个白名单领域写入工具默认启用，非白名单写入一律拒绝。
+Bridge 模式（复用已运行的 VS Code 扩展清单）与 Standalone 模式（自启 LSP）执行统一能力门禁：非支持或歧义工作区不暴露任何工具/资源且不启动 LSP；CWT-only 仅暴露 CWT 能力工具。白名单领域写入与初始化工具在 MCP 默认启用；DSH 的每项写入仍需显式授权。需要不存在 IDE 能力的工具不予披露。
 
-内部握手 `cwtools.ai.getHostCapabilities` 在游戏模型加载前校验 `{ protocolVersion, serverVersion, commands }`；不兼容宿主明确返回 `backend_incompatible`。面向非 MCP 消费者，扩展另在清单旁提供 bearer 认证的 `/cwtools/healthz` 与 `/cwtools/rpc`，仅转发白名单只读命令及 5 个导航/文档 LSP 方法。
+内部握手 `cwtools.ai.getHostCapabilities` 在游戏模型加载前校验 `{ protocolVersion, serverVersion, commands }`；不兼容宿主明确返回 `backend_incompatible`。面向非 MCP 消费者，扩展另在清单旁提供 bearer 认证的 `/cwtools/healthz` 与 `/cwtools/rpc`，仅转发白名单语义命令、导航/文档 LSP 方法及明确点名的 IDE 操作。
 
-不要手改 `submodules/cwtools-mcp/packages/cwtools-shared/src/generated/`；应运行 `npm run generate:mcp-schema` 与 `npm run generate:mcp-detection` 重新生成。
+不要手改生成的工作区探测文件；工具目录 `cwtools-shared/src/tools/catalog.ts` 必须与 dispatcher 同步修改，探测变化时运行 `npm run generate:mcp-detection`。
 
 ### 构建与发布流程
 

@@ -717,7 +717,7 @@
                 "command": "cwtools.ai.manageIgnoredDiagnostics",
                 "key": "ctrl+shift+i",
                 "mac": "cmd+shift+i",
-                "when": "editorTextFocus && config.stellarisLanguageServices.ai.enabled"
+                "when": "editorTextFocus"
             }
         ],
         "configuration": [

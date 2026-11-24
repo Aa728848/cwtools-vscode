@@ -1225,8 +1225,14 @@ export async function activate(context: ExtensionContext) {
 	});
 
 	safeRegisterCommand(context, "cwtools.ai.manageIgnoredDiagnostics", async () => {
-		const config = vs.workspace.getConfiguration('stellarisLanguageServices.ai');
-		const currentIgnored = config.get<string[]>('ignoredDiagnostics', []);
+		// The ignore list has one home: diagnostics.ignoredKeys. The legacy
+		// ai.ignoredDiagnostics value is still read as a fallback so existing
+		// workspaces keep their entries, but every write targets the current key.
+		const config = vs.workspace.getConfiguration('stellarisLanguageServices.diagnostics');
+		const currentIgnored = config.get<string[]>(
+			'ignoredKeys',
+			vs.workspace.getConfiguration('stellarisLanguageServices.ai').get<string[]>('ignoredDiagnostics', [])
+		);
 
 		const allDiagnostics = vs.languages.getDiagnostics();
 		const candidatesByCode = new Map<string, Set<string>>();
@@ -1468,7 +1474,7 @@ export async function activate(context: ExtensionContext) {
 			qp.hide();
 			
 			const newIgnored = Array.from(internalSelected);
-			await config.update('ignoredDiagnostics', newIgnored, vs.ConfigurationTarget.Workspace);
+			await config.update('ignoredKeys', newIgnored, vs.ConfigurationTarget.Workspace);
 			vs.window.showInformationMessage(localize(
 				`Added ${newIgnored.length} compatibility diagnostic(s) to the allowlist.`,
 				`已成功将 ${newIgnored.length} 个兼容性报错加入白名单。`

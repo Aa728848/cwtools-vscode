@@ -283,9 +283,12 @@ check('Release manifest avoids protected VS Code keybindings', () => {
         }
         if (keys.some(key => key === 'ctrl+shift+i' || key === 'cmd+shift+i')) {
             const when = String(binding?.when ?? '');
+            // editorTextFocus is the live scope: the ai.enabled setting this
+            // rule used to require was deleted with the built-in agent, and a
+            // `when` clause naming a missing setting is false forever, which
+            // silently disabled the binding entirely.
             const safelyScoped = command === 'cwtools.ai.manageIgnoredDiagnostics'
-                && when.includes('editorTextFocus')
-                && when.includes('config.stellarisLanguageServices.ai.enabled');
+                && when.includes('editorTextFocus');
             if (!safelyScoped) violations.push(`${command}: ${keys.join(' / ')}`);
         }
         if (keys.some(key => key === 'ctrl+l' || key === 'cmd+l')) {

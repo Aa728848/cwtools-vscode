@@ -36,4 +36,32 @@ describe('extension settings categories', () => {
 			}
 		}
 	});
+
+	it('routes the ignore manager at the declared diagnostics.ignoredKeys setting', () => {
+		// Regression: the picker wrote to the legacy ai.ignoredDiagnostics key
+		// while diagnostics filtering read diagnostics.ignoredKeys, so a saved
+		// allowlist never suppressed anything.
+		const source = fs.readFileSync(path.resolve(__dirname, '../../extension/extension.ts'), 'utf8');
+		const ignoreManager = source.slice(
+			source.indexOf('cwtools.ai.manageIgnoredDiagnostics'),
+			source.indexOf('cwtools.ai.manageIgnoredDiagnostics') + 12000,
+		);
+
+		expect(ignoreManager).to.contain("getConfiguration('stellarisLanguageServices.diagnostics')");
+		expect(ignoreManager).to.contain("update('ignoredKeys'");
+		expect(ignoreManager).to.not.contain("update('ignoredDiagnostics'");
+	});
+
+	it('does not gate the ignore-manager keybinding on a removed setting', () => {
+		const manifestPath = path.resolve(__dirname, '../../../release/package.json');
+		const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8')) as {
+			contributes?: { keybindings?: { command: string; when?: string }[] };
+		};
+		const binding = manifest.contributes?.keybindings?.find(
+			entry => entry.command === 'cwtools.ai.manageIgnoredDiagnostics',
+		);
+
+		expect(binding, 'the ignore manager should stay reachable from the keyboard').to.not.equal(undefined);
+		expect(binding?.when ?? '').to.not.contain('stellarisLanguageServices.ai.enabled');
+	});
 });

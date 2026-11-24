@@ -23,6 +23,13 @@ Status: implemented
 - 把 GUI 截图重新注入 Agent：违反外部 Agent 自主计划/核对的边界，改为按需 artifact。
 - 递归删除旧目录/缓存：违反仓库安全约束；所有删除均使用明确文件名。
 
+## 诊断忽略名单的唯一键
+
+- 忽略名单只认 `stellarisLanguageServices.diagnostics.ignoredKeys`：`cwtools.ai.manageIgnoredDiagnostics` 面板读写该键，诊断过滤也从该键读取。
+- `stellarisLanguageServices.ai.ignoredDiagnostics` 仅作旧配置的**只读回退**保留。删除内置 Agent 时 `ai.*` 整段配置声明被移除，该键因此没有 schema；任何继续写入它的代码都会写进一个无人读取的位置。
+- 早期缺陷：面板写 `ai.ignoredDiagnostics`、过滤读 `diagnostics.ignoredKeys`，且后者默认值是 `[]` 而非 `undefined`，`get(key, fallback)` 的旧键回退永不触发——白名单填了也不生效。另有一处 `when: config.stellarisLanguageServices.ai.enabled` 引用已删除的设置，使 Ctrl+Shift+I 永远不可达。两者均由 `settingsCategories.test.ts` 锁定。
+- 快捷键作用域因此退化为 `editorTextFocus`；`tools/check-release.js` 的保护键位检查同步放宽，不再要求引用已不存在的设置。
+
 ## CI 构建顺序
 
 - `cwtools-mcp` 子模块的 `packages/*/dist/` 被 gitignore，扩展的 `import { createNodeHostServices } from 'cwtools-node'` 依赖其类型产物，因此 CI 的每个 TypeScript job 都必须先在工作区构建。

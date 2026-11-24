@@ -1,5 +1,25 @@
 # Changelog
 
+## [3.0.0] - 2026-11-24
+
+### 破坏性变更：移除内置 Agent，迁移到外部 Agent 宿主 / Breaking: External Agent Hosts Replace the Built-in Agent
+
+- **[破坏性] 删除内置 Chat、Agent Manager、Runner、Provider/号池、行内 AI 补全与内置 MCP Client（Remove the built-in agent stack）**：
+  - 扩展不再提供内置聊天、Agent 运行管理、模型供应商/订阅号池或行内 AI 补全；相关联的命令、设置与界面一并移除。既有用户数据不会被主动删除。
+  - 通用规划、文件编辑、Shell、Git、网页与记忆能力交由外部 Agent；CWTools 专注 Paradox 语言服务、项目知识、可视化与领域工具。请通过支持 MCP 的 Agent 或 DSH 插件访问这些能力。
+  - English: [Breaking] Remove the built-in Chat, Agent Manager, Runner, provider/subscription pools, inline AI completion and MCP client, together with their commands, settings and UI. Existing user data is not deleted. External Agents now own general planning, file editing, shell, Git, web and memory workflows, while CWTools focuses on Paradox language services, project knowledge, visual tools and domain capabilities through MCP or the DSH plugin.
+
+### 统一领域工具与独立宿主 / Unified Domain Tools and Standalone Hosts
+
+- **[特性] 58 个 Paradox 领域工具统一由 shared 目录提供（58-tool shared domain catalog）**：
+  - VS Code Bridge、Standalone MCP 与 DSH 复用同一工具目录和语义调度；完整 Bridge 提供 58 项，Standalone 提供 55 项并排除三个仅 IDE 可执行的工具，CWT-only 项目仅披露七项适用工具。
+  - 新增真实 `initialize_project`，支持 full/incremental、single-flight、取消与 readiness 等待，生成 V4 profile 和 V7 SQLite 项目知识；Standalone 补齐 typed PDX 写入、候选事务、媒体转换和二进制资产部署。
+  - English: [Feature] Share one 58-tool Paradox catalog and semantic dispatcher across the VS Code Bridge, Standalone MCP and DSH. Standalone exposes 55 tools, excludes three IDE-only operations, implements real typed PDX writes, candidate transactions, media conversion and binary asset deployment, and adds cancellable full/incremental project initialization with V4 profile and V7 SQLite knowledge outputs.
+- **[特性] DSH 原生插件与有界 GUI 证据（Native DSH plugin and bounded GUI evidence）**：
+  - DSH 默认只读，所有写入和项目初始化均需显式授权；Code Mode 继续使用宿主现有的按需工具发现，不在会话中动态改写工具声明面。
+  - GUI 预览留在独立面板，通过 `capture_gui_preview` 按需返回有界 PNG、Before/After/Diff artifact 与选择/版本元数据，不恢复内置 Agent 自动验证回合。
+  - English: [Feature] Keep DSH read-only by default with explicit write and initialization authorization, preserve Code Mode's on-demand tool discovery without mutating the tool declaration surface, and expose bounded GUI PNG and Before/After/Diff artifacts on demand instead of restoring built-in Agent review loops.
+
 ## [2.39.0] - 2026-11-23
 
 ### Stellaris 4.6.0 正式版规则支持 / Stellaris 4.6.0 (Corona Borealis) Rule Support

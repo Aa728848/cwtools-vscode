@@ -72,16 +72,16 @@ jobs:
           dotnet-version: 10.0.x
       - run: npm ci
 
-      # The extension resolves types and the packaged runtime dependency from the
-      # cwtools-mcp submodule, whose dist/ output is gitignored. A fresh checkout has
-      # no build output, so compile it before TypeScript runs.
+      # The extension resolves types and packaged runtime dependencies from the
+      # cwtools-mcp submodule, whose dist/ output is gitignored. Building
+      # cwtools-node also builds cwtools-shared through its prebuild script.
       - name: Install the cwtools-mcp workspace
         working-directory: submodules/cwtools-mcp
         run: npm ci
 
-      - name: Build cwtools-shared
+      - name: Build cwtools-node and cwtools-shared
         working-directory: submodules/cwtools-mcp
-        run: npm run build -w cwtools-shared
+        run: npm run build -w cwtools-node
 
       # release/package.json declares the runtime dependency closure that vsce
       # validates with its own npm list --production run; the lockfile is tracked,

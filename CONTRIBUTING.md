@@ -20,16 +20,16 @@ Install the prerequisites:
 | Git | Current version with submodule support |
 | PowerShell | Windows PowerShell 5.1+ (for `package.ps1`) |
 
-Clone with submodules, install dependencies, and build `cwtools-shared` before compiling on a fresh checkout:
+Clone with submodules, install dependencies, and build `cwtools-node` (which also builds `cwtools-shared`) before compiling on a fresh checkout:
 
 ```bash
 git clone --recurse-submodules https://github.com/Aa728848/cwtools-vscode.git
 cd cwtools-vscode
 npm install
-(cd submodules/cwtools-mcp && npm ci && npm run build -w cwtools-shared)
+(cd submodules/cwtools-mcp && npm ci && npm run build -w cwtools-node)
 ```
 
-If cloned without submodules, run `git submodule update --init --recursive`. Missing `submodules/cwtools` breaks the F# build; missing `submodules/cwtools-stellaris-config/config` breaks packaging; missing `submodules/cwtools-mcp/packages/cwtools-shared/dist` breaks TypeScript compilation.
+If cloned without submodules, run `git submodule update --init --recursive`. Missing `submodules/cwtools` breaks the F# build; missing `submodules/cwtools-stellaris-config/config` breaks packaging; missing `submodules/cwtools-mcp/packages/cwtools-node/dist` or `submodules/cwtools-mcp/packages/cwtools-shared/dist` breaks TypeScript compilation.
 
 To build against an external local CWTools checkout, create an untracked `src/Main/cwtools.local.props`:
 
@@ -155,16 +155,16 @@ To re-run without moving a tag, dispatch the workflow manually from GitHub Actio
 | Git | 支持 submodule 的当前版本 |
 | PowerShell | Windows PowerShell 5.1+（用于 `package.ps1`） |
 
-连同子模块一起克隆，并在全新检出首次编译前构建 `cwtools-shared`：
+连同子模块一起克隆，并在全新检出首次编译前构建 `cwtools-node`（其预构建步骤会同时构建 `cwtools-shared`）：
 
 ```bash
 git clone --recurse-submodules https://github.com/Aa728848/cwtools-vscode.git
 cd cwtools-vscode
 npm install
-(cd submodules/cwtools-mcp && npm ci && npm run build -w cwtools-shared)
+(cd submodules/cwtools-mcp && npm ci && npm run build -w cwtools-node)
 ```
 
-若克隆时未拉取子模块，运行 `git submodule update --init --recursive`。缺少 `submodules/cwtools` 会导致 F# 构建失败；缺少 `submodules/cwtools-stellaris-config/config` 会导致打包失败；缺少 `submodules/cwtools-mcp/packages/cwtools-shared/dist` 会导致 TypeScript 编译失败。
+若克隆时未拉取子模块，运行 `git submodule update --init --recursive`。缺少 `submodules/cwtools` 会导致 F# 构建失败；缺少 `submodules/cwtools-stellaris-config/config` 会导致打包失败；缺少 `submodules/cwtools-mcp/packages/cwtools-node/dist` 或 `submodules/cwtools-mcp/packages/cwtools-shared/dist` 会导致 TypeScript 编译失败。
 
 如需链接另一份本地 CWTools 源码，创建不提交的 `src/Main/cwtools.local.props`：
 

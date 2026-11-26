@@ -1,5 +1,14 @@
 # Changelog
 
+## [3.3.0] - 2026-11-26
+
+### 重新打包：更新内置运行时依赖 / Repackaged with Updated Runtime Dependencies
+
+- **[说明] 与 3.2.0 功能一致，内置运行时依赖对齐 npm 最新版（Same features as 3.2.0 with runtime dependencies aligned to the npm latest）**：
+  - 本版本仅重新打包：内置 `cwtools-shared` 0.6.0 与 `cwtools-node` 0.4.1，与 npm 上对应包的 `latest` 一致。
+  - 对应的独立发布版本为 `cwtools-shared@0.6.0`、`cwtools-node@0.4.1`、`cwtools-mcp@0.6.1` 与 `dsh-cwtools@0.3.3`；`0.4.0` / `0.6.0` / `0.3.2` 与它们内容完全一致，仅版本号不同。
+  - English: [Note] This is a repackaging of 3.2.0 with the bundled runtime dependencies aligned to the npm latest: `cwtools-shared` 0.6.0 and `cwtools-node` 0.4.1. The matching standalone releases are `cwtools-shared@0.6.0`, `cwtools-node@0.4.1`, `cwtools-mcp@0.6.1` and `dsh-cwtools@0.3.3`; `0.4.0` / `0.6.0` / `0.3.2` carry identical content under a different version number.
+
 ## [3.2.0] - 2026-11-26
 
 ### 编辑器解析器单源化 / Single-Source Editor Parsers
@@ -51,12 +60,6 @@
   - 工作台以 DSH 原生 Session Tab 形式出现在右侧栏，包含 GUI 画布、星系画布、Three.js 实体与粒子预览，以及证据中心、本地化矩阵、语义检查器三个面板。
   - 实际 Mod 只读展示；写操作只在显式授权的隔离环境中生效。
   - English: [Feature] The workbench ships as a native DSH right-sidebar Session Tab with the GUI canvas, galaxy canvas, Three.js entity and particle previews, plus the evidence center, localisation matrix and semantic inspector panels. Real mods stay read-only; writes only happen in explicitly authorized isolated fixtures.
-
-### 运行时依赖版本 / Bundled Runtime Dependencies
-
-- **[说明] 本版本内置 `cwtools-shared` 0.6.0 与 `cwtools-node` 0.4.1（Publish dependency versions）**：
-  - 对应的独立发布版本为 `cwtools-shared@0.6.0`、`cwtools-node@0.4.1`、`cwtools-mcp@0.6.1` 与 `dsh-cwtools@0.3.3`；`0.4.0` / `0.6.0` / `0.3.2` 与其内容一致，仅版本号不同。
-  - English: [Note] This build bundles `cwtools-shared` 0.6.0 and `cwtools-node` 0.4.1. The matching standalone releases are `cwtools-shared@0.6.0`, `cwtools-node@0.4.1`, `cwtools-mcp@0.6.1` and `dsh-cwtools@0.3.3`; `0.4.0` / `0.6.0` / `0.3.2` carry identical content under a different version number.
 
 ## [3.1.0] - 2026-11-24
 

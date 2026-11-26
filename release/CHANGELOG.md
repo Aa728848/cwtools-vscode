@@ -1,5 +1,57 @@
 # Changelog
 
+## [3.2.0] - 2026-11-26
+
+### 编辑器解析器单源化 / Single-Source Editor Parsers
+
+- **[重构] 编辑器解析器迁入 cwtools-shared，扩展侧改为兼容转发（Shared editor parsers replace the duplicated copies）**：
+  - tokenizer、实体/粒子/GUI/事件链/舰船设计/静态星系的纯解析与协议代码统一迁到 `cwtools-shared/src/editors`，并新增浏览器安全的 `./editors` 子路径导出；VS Code 扩展、DSH 插件与 Standalone MCP 现在共用同一份实现。
+  - 原 `client/extension` 下的同名模块改为 re-export 兼容层，既有导入无需改动；净减少约一万行重复代码，序列化与协议校验只有一处定义。
+  - 仅宿主可用的 DDS 解码与舰船图标/精灵资源迁入 `cwtools-node`。
+  - English: [Refactor] The pure editor parsers and protocols for tokenizer, entity/particle/GUI/event-chain/ship-design/static-galaxy now live in `cwtools-shared/src/editors` behind a browser-safe `./editors` subpath, shared by the VS Code extension, the DSH plugin and the standalone MCP server. The extension modules become re-export shims so existing imports keep working, removing roughly ten thousand duplicated lines; Host-only DDS decoding and ship icon/sprite resources move to `cwtools-node`.
+
+### 领域写入工具 / Domain Write Tools
+
+- **[特性] 新增 GUI、舰船设计与静态星系候选写入工具（GUI, ship-design and static-galaxy draft tools）**：
+  - 新增 `gui_draft`、`ship_design_draft`、`static_galaxy_draft`，全部基于既有的 `pdxWrites` 事务：先产出候选，校验通过后才落盘，失败则不写入。
+  - 写入仍受既有白名单约束，默认关闭，需要显式配置授权。
+  - English: [Feature] Add `gui_draft`, `ship_design_draft` and `static_galaxy_draft` on top of the existing `pdxWrites` transaction: a candidate is produced, validated, and only then committed. Writes stay behind the existing allowlist and remain off by default.
+
+- **[特性] `get_semantic_catalog` 作为只读工具开放（Expose `get_semantic_catalog` as a read-only tool）**：
+  - 语义目录可以按工作区直接查询，并标记为依赖加载完成，模型未就绪时不会返回空结果冒充成功。
+  - English: [Feature] The semantic catalog is queryable per workspace and marked load-dependent, so an unready model no longer returns an empty result that looks like success.
+
+### 缺陷修复 / Bug Fixes
+
+- **[修复] 图像与房间悬停忽略越界行号（Image and room hovers ignore stale line positions）**：
+  - Extension Host 传来的位置可能指向当前文档之外，导致 `Illegal value for line` 报错并让悬停失效。
+  - 现在图像悬停、房间补全/定义/悬停四处都先校验位置落在文档内，再读取行内容。
+  - English: [Fix] Positions coming from the Extension Host could point past the end of the document, throwing `Illegal value for line` and breaking the hover. Image hover and the room completion/definition/hover providers now validate the position against the document before reading the line.
+
+- **[修复] 原版 locator 允许省略等号的 rotation 块（Accept vanilla locator rotation blocks without an equals sign）**：
+  - 部分原版 `.asset` 使用 `rotation { 0 0 45 }` 而不是 `rotation = { ... }`，此前解析中断。
+  - 现在仅当紧随其后的是 `{` 时接受省略等号的形式，其余写法不受影响。
+  - English: [Fix] Some vanilla `.asset` files write `rotation { 0 0 45 }` instead of `rotation = { ... }`, which aborted parsing. The equals sign is now optional only when the next token is `{`, leaving other forms untouched.
+
+- **[修复] LSP 空响应不再被当成成功（A null LSP response is no longer reported as success）**：
+  - 工具调用拿到 `null`/`undefined` 响应时曾以空结果返回成功，掩盖了后端未就绪的真实状态。
+  - 现在视为 unavailable，并按加载依赖工具处理。
+  - English: [Fix] A `null` or `undefined` LSP response used to be returned as an empty success, hiding that the backend was not ready. It is now treated as unavailable and handled like the other load-dependent tools.
+
+### 性能优化 / Performance
+
+- **[优化] CarrierSnapshot 按根节点缓存数组，首次构建少分配约 35%（Cache per-root node arrays when building CarrierSnapshot）**：
+  - 构建快照时对同一个 root 反复枚举全部节点，导致首次构建峰值分配约 777MB。
+  - 现在按 root 身份缓存 node 数组并在单次构建内复用，峰值降到约 505MB。
+  - English: [Optimization] Building the snapshot re-enumerated every node for each root, peaking around 777 MB of allocation. Node arrays are now cached per root identity and reused within a build, bringing the peak down to about 505 MB.
+
+### 原生工作台 / Native Workbench
+
+- **[特性] DSH 原生右侧栏 CWTools 工作台（Native right-sidebar CWTools workbench in DSH）**：
+  - 工作台以 DSH 原生 Session Tab 形式出现在右侧栏，包含 GUI 画布、星系画布、Three.js 实体与粒子预览，以及证据中心、本地化矩阵、语义检查器三个面板。
+  - 实际 Mod 只读展示；写操作只在显式授权的隔离环境中生效。
+  - English: [Feature] The workbench ships as a native DSH right-sidebar Session Tab with the GUI canvas, galaxy canvas, Three.js entity and particle previews, plus the evidence center, localisation matrix and semantic inspector panels. Real mods stay read-only; writes only happen in explicitly authorized isolated fixtures.
+
 ## [3.1.0] - 2026-11-24
 
 ### 兼容性报错忽略修复 / Diagnostic Ignore Fix

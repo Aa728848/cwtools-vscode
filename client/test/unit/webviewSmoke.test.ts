@@ -231,11 +231,11 @@ describe('webview smoke checks', () => {
         const provider = fs.readFileSync(path.join(root, 'client/extension/staticGalaxyEditorProvider.ts'), 'utf8');
         expect(provider).to.include("kind: 'nebulaRadius'");
 
-        const builder = fs.readFileSync(path.join(root, 'client/extension/staticGalaxyEditBuilder.ts'), 'utf8');
+        const builder = fs.readFileSync(path.join(root, 'submodules/cwtools-mcp/packages/cwtools-shared/src/editors/staticGalaxyEditBuilder.ts'), 'utf8');
         expect(builder).to.include('buildNebulaRadiusEdit');
         expect(builder).to.include('radiusWritable');
 
-        const parser = fs.readFileSync(path.join(root, 'client/extension/staticGalaxyParser.ts'), 'utf8');
+        const parser = fs.readFileSync(path.join(root, 'submodules/cwtools-mcp/packages/cwtools-shared/src/editors/staticGalaxyParser.ts'), 'utf8');
         expect(parser).to.include('radiusSpan');
     });
 

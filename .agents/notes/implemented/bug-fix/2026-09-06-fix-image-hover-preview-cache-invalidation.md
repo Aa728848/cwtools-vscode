@@ -20,8 +20,10 @@ Status: implemented
    在 `registerGraphicsFeatures` 中注册针对于 `**/*.{dds,tga,png,DDS,TGA,PNG}` 的 `FileSystemWatcher`，在文件发生变更、创建或删除时主动从 `imageCache` 中剔除并删除临时文件。
 4. **提升后台临时文件清理的健壮性**：
    在 `cleanupOldTempFiles` 的逐个文件清理中包裹异常防护，避免单个被占用的文件导致整个 24h 兜底清理循环中断。
-5. **回归测试全覆盖**：
-   在 `client/test/unit/graphicsFeatures.test.ts` 中新增针对高熵图片修改、时间戳更新、旧临时文件自动删除、原图删除后返回 `null` 并清理缓存的自动化回归测试。
+5. **失效文档位置边界**：
+   `ImageHoverProvider`、`RoomCompletionProvider`、`RoomDefinitionProvider` 与 `RoomHoverProvider` 在读取行文本前统一通过 `isPositionInDocument` 检查行号；扩展宿主传入已失效位置时返回 `null`，不调用 `lineAt`。
+6. **回归测试全覆盖**：
+   在 `client/test/unit/graphicsFeatures.test.ts` 中覆盖高熵图片修改、时间戳更新、旧临时文件自动删除、原图删除清理，以及图像/房间悬停收到越界位置时不调用 `lineAt`。
 
 ## Alternatives considered
 
@@ -34,4 +36,4 @@ Status: implemented
 
 - 彻底解决了用户反馈的“更改原图甚至删掉原图后预览依然显示旧图”的问题，修改或重放图片能立即在编辑器 Hover 中实时呈现最新图像；
 - 旧的临时文件在图片每次变更时会被精准删除，不再长期占用系统 `%TEMP%` 目录磁盘空间；
-- 增加了针对性回归测试并保持全量测试与发布门禁 100% 通过。
+- 增加了针对性回归测试并保持全量测试与发布门禁通过；VS Code Extension Host 集成日志不再出现失效行号导致的 `Illegal value for line`。

@@ -9,7 +9,18 @@ import typescript from 'rollup-plugin-typescript2';
 import resolve from '@rollup/plugin-node-resolve';
 import commonjs from '@rollup/plugin-commonjs';
 import { copyFileSync, mkdirSync } from 'fs';
-import { dirname } from 'path';
+import { dirname, resolve as resolvePath } from 'path';
+
+/** Resolve only the browser-safe editor barrel; never expose the Host shared barrel to Webviews. */
+function sharedEditorsResolver() {
+    return {
+        name: 'cwtools-shared-editors',
+        resolveId(source) {
+            if (source === 'cwtools-shared/editors') return resolvePath('node_modules/cwtools-shared/dist/editors/index.js');
+            return null;
+        },
+    };
+}
 
 /** Inline copy plugin — copies a static asset (CSS or prebuilt JS) to the Webview output directory. */
 function copyFile(src, dest) {
@@ -40,6 +51,9 @@ export default [
             indent: false,
         },
         plugins: [
+            sharedEditorsResolver(),
+            resolve({ browser: true }),
+            commonjs(),
             typescript({
                 tsconfig: ".config/tsconfig.webview.json",
                 clean: true,
@@ -80,6 +94,7 @@ export default [
             indent: false,
         },
         plugins: [
+            sharedEditorsResolver(),
             typescript({
                 tsconfig: ".config/tsconfig.webview-galaxy.json",
                 clean: true,
@@ -212,6 +227,7 @@ export default [
             indent: false,
         },
         plugins: [
+            sharedEditorsResolver(),
             resolve({ browser: true }),
             commonjs(),
             typescript({

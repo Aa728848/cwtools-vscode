@@ -72,6 +72,20 @@ describe('graphicsFeatures image path links', () => {
     });
 });
 
+describe('graphicsFeatures image hover bounds', () => {
+    it('ignores a stale hover position outside the current document', async () => {
+        const graphicsFeatures = loadGraphicsFeatures();
+        const provider = new graphicsFeatures.__test.ImageHoverProvider();
+        const document = {
+            lineCount: 1,
+            lineAt: () => { throw new Error('lineAt must not be called for a stale position'); },
+        } as unknown as import('vscode').TextDocument;
+        const position = { line: 1, character: 0 } as import('vscode').Position;
+        expect(provider.provideHover(document, position)).to.be.null;
+        expect(await new graphicsFeatures.__test.RoomHoverProvider().provideHover(document, position)).to.be.null;
+    });
+});
+
 describe('graphicsFeatures GFX sprite scan', () => {
     it('continues scanning vanilla files when the workspace sprite index is already large', async () => {
         const graphicsFeatures = loadGraphicsFeatures();

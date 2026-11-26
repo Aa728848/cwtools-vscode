@@ -12411,17 +12411,38 @@ type Server(client: ILanguageClient) =
                                     |> Array.truncate 4000
                                     |> Array.toList)
                                 |> Option.defaultValue []
+                            let requestedDefinitionNames =
+                                rest
+                                |> List.tryItem 2
+                                |> Option.bind (function JsonValue.Array values -> Some values | _ -> None)
+                                |> Option.map (fun values ->
+                                    values
+                                    |> Array.choose (function JsonValue.String name when not (String.IsNullOrWhiteSpace name) -> Some(name.ToLowerInvariant()) | _ -> None)
+                                    |> Array.distinct
+                                    |> Array.truncate 4000
+                                    |> Array.toList)
+                                |> Option.defaultValue []
+                            let includeDirectoryPaths =
+                                rest
+                                |> List.tryItem 3
+                                |> Option.bind (function JsonValue.Boolean value -> Some value | _ -> None)
+                                |> Option.defaultValue true
+                            let mutable semanticCatalogInitializationError: exn option = None
                             let allRules, allDefinitionReferences, allShaderReferences, rulesHash, hasConfigs =
                                 match semanticCatalogCache with
                                 | Some cached -> cached
                                 | None ->
-                                    let configs = getConfigFiles cachePath useManualRules manualRulesFolder bundledRulesPath preferBundledRules
-                                    let parsedRules, parsedHash = semanticRulesFromConfigs [] configs
-                                    let parsedDefinitionReferences, parsedShaderReferences = semanticDefinitionReferencesFromConfigs configs
-                                    semanticCatalogGeneration <- semanticCatalogGeneration + 1L
-                                    let cached = parsedRules, parsedDefinitionReferences, parsedShaderReferences, parsedHash, not configs.IsEmpty
-                                    semanticCatalogCache <- Some cached
-                                    cached
+                                    try
+                                        let configs = getConfigFiles cachePath useManualRules manualRulesFolder bundledRulesPath preferBundledRules
+                                        let parsedRules, parsedHash = semanticRulesFromConfigs [] configs
+                                        let parsedDefinitionReferences, parsedShaderReferences = semanticDefinitionReferencesFromConfigs configs
+                                        semanticCatalogGeneration <- semanticCatalogGeneration + 1L
+                                        let cached = parsedRules, parsedDefinitionReferences, parsedShaderReferences, parsedHash, not configs.IsEmpty
+                                        semanticCatalogCache <- Some cached
+                                        cached
+                                    with error ->
+                                        semanticCatalogInitializationError <- Some error
+                                        [], [], [], "", false
                             let requested = System.Collections.Generic.HashSet<string>(requestedNames, StringComparer.OrdinalIgnoreCase)
                             let rules =
                                 if requested.Count = 0 then allRules
@@ -12450,8 +12471,12 @@ type Server(client: ILanguageClient) =
                                         let allTypeDefs =
                                             game.TypeDefs()
                                             |> List.sortBy (fun td -> td.name)
+                                        let requestedDefinitions = System.Collections.Generic.HashSet<string>(requestedDefinitionNames, StringComparer.OrdinalIgnoreCase)
+                                        let selectedTypeDefs =
+                                            if requestedDefinitions.Count = 0 then allTypeDefs
+                                            else allTypeDefs |> List.filter (fun td -> requestedDefinitions.Contains td.name)
                                         let definitionTypes =
-                                            allTypeDefs
+                                            selectedTypeDefs
                                             |> List.truncate 4000
                                             |> List.map (fun td ->
                                                 let paths =
@@ -12511,7 +12536,7 @@ type Server(client: ILanguageClient) =
                                                 JsonValue.Record(fields.ToArray()))
                                             |> List.toArray
                                         let directoryPaths =
-                                            allTypeDefs
+                                            (if includeDirectoryPaths then selectedTypeDefs else [])
                                             |> Seq.map (fun td -> td.name, td.pathOptions.paths :> seq<string>)
                                             |> Catalog.build
                                             |> List.map (fun item ->
@@ -12540,7 +12565,8 @@ type Server(client: ILanguageClient) =
                                             |> List.toArray
                                         let hasRules = ruleValues.Length > 0
                                         let hasTypes = definitionTypes.Length > 0
-                                        let status = if hasRules && hasTypes then "ready" elif hasRules || hasTypes then "partial" else "unavailable"
+                                        let catalogFiltered = requestedDefinitions.Count > 0 || not includeDirectoryPaths
+                                        let status = if hasRules && hasTypes && not catalogFiltered then "ready" elif hasRules || hasTypes then "partial" else "unavailable"
                                         JsonValue.Record
                                             [| "ok", JsonValue.Boolean true
                                                "status", JsonValue.String status
@@ -12551,14 +12577,17 @@ type Server(client: ILanguageClient) =
                                                "definitionTypes", JsonValue.Array definitionTypes
                                                "directoryCatalogVersion", JsonValue.Number 1M
                                                "directoryPaths", JsonValue.Array directoryPaths
-                                               "directoryPathsTruncated", JsonValue.Boolean false
-                                               "warnings", JsonValue.Array(if not hasConfigs then [| JsonValue.String "No active CWT configuration files are loaded." |] else [||]) |] }
-                            try
-                                match gameDispatcher.Dispatch visitor with
-                                | Some result -> Some result
-                                | None -> Some(JsonValue.Record [| "ok", JsonValue.Boolean false; "status", JsonValue.String "unavailable"; "error", JsonValue.String "LSP server not ready" |])
-                            with error ->
-                                Some(JsonValue.Record [| "ok", JsonValue.Boolean false; "status", JsonValue.String "unavailable"; "error", JsonValue.String error.Message |])
+                                               "directoryPathsTruncated", JsonValue.Boolean catalogFiltered
+                                               "warnings", JsonValue.Array(Array.concat [ if not hasConfigs then [| JsonValue.String "No active CWT configuration files are loaded." |] else [||]; if catalogFiltered then [| JsonValue.String "The semantic catalog was explicitly filtered." |] else [||] ]) |] }
+                            match semanticCatalogInitializationError with
+                            | Some error -> Some(JsonValue.Record [| "ok", JsonValue.Boolean false; "status", JsonValue.String "unavailable"; "error", JsonValue.String error.Message |])
+                            | None ->
+                                try
+                                    match gameDispatcher.Dispatch visitor with
+                                    | Some result -> Some result
+                                    | None -> Some(JsonValue.Record [| "ok", JsonValue.Boolean false; "status", JsonValue.String "unavailable"; "error", JsonValue.String "LSP server not ready" |])
+                                with error ->
+                                    Some(JsonValue.Record [| "ok", JsonValue.Boolean false; "status", JsonValue.String "unavailable"; "error", JsonValue.String error.Message |])
 
                         // - cwtools.ai.queryScriptedEffects -
                         // Returns all scripted effects with name, scope constraints and type
@@ -13407,7 +13436,8 @@ type Server(client: ILanguageClient) =
                                                         |> Array.ofList) |]
                             Some result
 
-                        | _ -> None
+                        | _ ->
+                            Some(JsonValue.Record [| "ok", JsonValue.Boolean false; "status", JsonValue.String "error"; "error", JsonValue.Record [| "code", JsonValue.String "unsupported_command"; "message", JsonValue.String(sprintf "Command '%s' is not supported." p.command) |] |])
 
                     | None ->
                         match p with
@@ -13415,9 +13445,10 @@ type Server(client: ILanguageClient) =
                             auraLocalisationCommand p readDocumentText (showVirtualFile "cwtools://auraloc")
                         | { command = "cwtools.ai.queryProjectKnowledgeDb"
                             arguments = args } -> Some(queryProjectKnowledgeDbCommand args)
-                        | _ -> None
+                        | _ ->
+                            Some(JsonValue.Record [| "ok", JsonValue.Boolean false; "status", JsonValue.String "unavailable"; "error", JsonValue.Record [| "code", JsonValue.String "lsp_not_ready"; "message", JsonValue.String "The CWTools game model is still loading. Retry after readiness completes." |] |])
             }
-            |> catchError None
+            |> catchError (Some(JsonValue.Record [| "ok", JsonValue.Boolean false; "status", JsonValue.String "unavailable"; "error", JsonValue.Record [| "code", JsonValue.String "command_failed"; "message", JsonValue.String "The CWTools command failed. See the language server log for details." |] |]))
 
 
 [<EntryPoint>]

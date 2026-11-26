@@ -83,6 +83,14 @@ suite(`Debug Integration Test: `, function() {
 		}
 	});
 
+	test('Semantic catalog command returns an explicit payload', async function () {
+		this.timeout(3 * 60 * 1000);
+		await activate();
+		const raw = await vscode.commands.executeCommand<unknown>('cwtools.ai.getSemanticCatalog', [], []);
+		assert.notEqual(raw, null, 'The LSP command must not silently return null');
+		assert.equal(typeof raw, 'object');
+	});
+
 	describe('Diagnostics and Language Features', function () {
 		this.timeout(2 * 60 * 1000);
 

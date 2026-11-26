@@ -4,6 +4,8 @@
 		"target": "es2020",
 		"module": "commonjs",
 		"moduleResolution": "node",
+		"baseUrl": ".",
+		"paths": { "cwtools-shared/editors": ["node_modules/cwtools-shared/dist/editors/index.d.ts"] },
 		"rootDir": "client",
 		"outDir": "release/bin/client",
 		"lib": [ "es2020", "dom" ],

@@ -70,6 +70,10 @@ const GFX_PREFIX_RE = /GFX_[A-Za-z0-9_]+/;
 /** Regex to identify `room = ` context (with optional quotes) */
 const ROOM_ASSIGN_RE = /\broom\s*=\s*["']?([A-Za-z0-9_]*)["']?\s*$/;
 
+function isPositionInDocument(document: vs.TextDocument, position: vs.Position): boolean {
+    return position.line >= 0 && position.line < document.lineCount;
+}
+
 function findCommentStartOutsideQuotes(lineText: string): number {
     let quote: '"' | "'" | null = null;
     for (let i = 0; i < lineText.length; i++) {
@@ -157,6 +161,7 @@ const imageCache = new LRUCache<string, CachedImage>(64);
  */
 class ImageHoverProvider implements vs.HoverProvider {
     provideHover(document: vs.TextDocument, position: vs.Position): vs.Hover | null {
+        if (!isPositionInDocument(document, position)) return null;
         const lineText = document.lineAt(position).text;
 
         // Try quoted paths first
@@ -373,6 +378,8 @@ async function scanDirForGfx(
 }
 
 export const __test = {
+    ImageHoverProvider,
+    get RoomHoverProvider() { return RoomHoverProvider; },
     parseGfxFile,
     scanDirForGfx,
     createImageHover,
@@ -617,6 +624,7 @@ class RoomCompletionProvider implements vs.CompletionItemProvider {
         document: vs.TextDocument,
         position: vs.Position,
     ): Promise<vs.CompletionItem[] | null> {
+        if (!isPositionInDocument(document, position)) return null;
         // Check if cursor is in a `room = ` context
         const lineText = document.lineAt(position).text;
         const textBefore = lineText.substring(0, position.character);
@@ -639,6 +647,7 @@ class RoomCompletionProvider implements vs.CompletionItemProvider {
  */
 class RoomDefinitionProvider implements vs.DefinitionProvider {
     async provideDefinition(document: vs.TextDocument, position: vs.Position): Promise<vs.Location | null> {
+        if (!isPositionInDocument(document, position)) return null;
         const lineText = document.lineAt(position).text;
 
         // Match `room = value` and verify cursor is on the value part
@@ -665,6 +674,7 @@ class RoomDefinitionProvider implements vs.DefinitionProvider {
 
 class RoomHoverProvider implements vs.HoverProvider {
     async provideHover(document: vs.TextDocument, position: vs.Position): Promise<vs.Hover | null> {
+        if (!isPositionInDocument(document, position)) return null;
         const lineText = document.lineAt(position).text;
         const roomMatch = /\broom\s*=\s*["']?([A-Za-z0-9_]+)["']?/.exec(lineText);
         if (!roomMatch) return null;

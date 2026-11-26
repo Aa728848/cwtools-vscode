@@ -1,20 +1,21 @@
 ---
 name: stellaris-rules-sync
 description: >-
-  Stellaris 规则与 CWT 语法更新的标准作业规范（SOP）。用于同步游戏脚本文档日志、生成与更新 CWT 规则、严禁滥用 scalar、深入原版反查强类型、补全 Common 字段级未覆盖参数，并完成全套验证门禁。
+  Stellaris 规则与 CWT 语法更新的标准作业规范（SOP）。用于同步游戏脚本文档日志、生成与更新 CWT 规则、严禁滥用 scalar、深入原版反查强类型、补全 Common 字段级与 GUI 未覆盖参数、通过 CWToolsCLI 原版全量实跑区分解析器/引擎漏洞与规则缺陷及原版自身 Bug，并完成全套验证门禁。
 ---
 
 # Stellaris 规则同步与 CWT 规则库维护技能 (Stellaris Rules Sync Skill)
 
-本技能定义了当 Stellaris（群星）游戏版本更新或脚本文档漂移时，CWTools VSCode 扩展中 CWT 规则库从日志提取、差异对比、强类型定义补全，到最终校验的完整标准作业规范（SOP）。
+本技能定义了当 Stellaris（群星）游戏版本更新或脚本文档漂移时，CWTools VSCode 扩展中 CWT 规则库从日志提取、差异对比、强类型定义补全、原版全量实跑三分类归因，到最终校验的完整标准作业规范（SOP）。
 
 ---
 
 ## 核心原则与底层机制
 
-1. **两阶段更新路径（Two-Phase Path）**：
-   - **第一阶段（Log 结合文档同步）**：先同步原版脚本文档中的 Trigger、Effect、Modifier、Localisation 变动至 `config/logs/` 中的日志文件。严格**仅更新报告中检测到的变动条目**，禁止全量盲目替换，以避免冲掉人工维护的注释排版与自定义修正。
-   - **第二阶段（CWT 语法规则更新）**：在 Log 同步完成后，再同步更新 CWT 规则文件（`triggers.cwt`、`effects.cwt`、`scope_changes.cwt` 及 `common/*.cwt`）。
+1. **三阶段更新路径（Three-Phase Path）**：
+   - **第一阶段（Log 结合文档同步）**：先同步原版脚本文档中的 Trigger、Effect、Modifier、Scope、Localisation 变动至 `config/logs/` 中的日志文件。严格**仅更新报告中检测到的变动条目**，禁止全量盲目替换，以避免冲掉人工维护的注释排版、裁剪基线与自定义修正。
+   - **第二阶段（CWT 语法规则更新）**：在 Log 同步完成后，再同步更新 CWT 规则文件（`triggers.cwt`、`effects.cwt`、`scope_changes.cwt`、`links.cwt`、`common/*.cwt`、`interface/*.cwt`、`gfx/*.cwt`）。
+   - **第三阶段（原版全量实跑与三分类归因闭环）**：`rules-sync report` 只检查文档 Diff、Common 顶层键与 GUI 属性，**无法发现**嵌套作用域契约、参数类型标错（`<type>` vs `scope[type]`）、`ordered_*` 可选基数遗漏、`inline_script` 展开异常、`.cwt` 语法破坏，或 CWTools 解析器/验证引擎自身缺陷。必须在第二阶段之后，使用 `CWToolsCLI` 对真实 Stellaris 原版目录执行全量校验，逐簇归因并收口。
 
 2. **Trigger / Effect 支持定义域（Supported Scopes）机制**：
    - 在 `triggers.cwt` 和 `effects.cwt` 中，普通的 trigger 和 effect 的 alias 上**不需要**额外手动标注 `## supported_scopes`。
@@ -39,6 +40,12 @@ description: >-
 5. **严格核实属性层级结构**：
    - 在复杂定义（如 `megastructures`、`planet_classes`、`ship_sizes` 等）中添加字段时，必须核实该字段属于根级属性还是子块属性。
    - 例如：巨构的 `nomad_reactivatable`、`custom_tooltip_with_modifiers`、`overclock_loc_key`、`overclock_cooldown` 均为 `megastructure` 的**顶层属性**，绝不可错误嵌套入 `overclock_types = { ... }` 列表子块内。
+
+6. **严守三分类红线，绝不为迁就原版脚本真实 Bug 而放宽规则**：
+   - 原版全量实跑暴露的报错必须先读取原版脚本上下文与 `script_documentation` 实证核查，再严格归入以下三类之一：
+     - **CWTools 解析器 / 验证引擎漏洞**（修复于 `submodules/cwtools` 并补回归单测）：解析器语法边界限制（如多位数本地化版本号）、宏/条件参数分支 `[[PARAM] ...]` 误报最大基数、合取触发器块 `is_scope_type` 作用域窄化缺失、事件图谱/作用域解析链未读取 CWT 迭代器 `push_scope` 等。
+     - **Stellaris CWT 规则 / 日志缺陷**（修复于 `submodules/cwtools-stellaris-config`）：如 4.6 作用域链接漏配、`scope[x]` 误标为 `<x>`、可选字段缺 `## cardinality = 0..1`、嵌套块作用域契约错误、动态/静态 modifier 漏配等。
+     - **原版 Stellaris 脚本自身真实 Bug**（**保留报错，禁止放宽规则**）：原版缺失 `}` 语法错、拼写错误、废弃建筑/不存在的 trait/贴图引用、跨作用域误调命令（如 `Colony` 调 `Planet`-only 命令、`Ideology` 漏切 scope 调 `add_modifier`）、effect 块误写 `potential`、无条件块重复键，以及 `CW272` 等有意引擎风险警告。
 
 ---
 
@@ -80,8 +87,10 @@ node tools/rules-sync/stellaris-rules-sync.js report --no-open
    - 移除 Trigger：仅当确认原版已完全废弃时移除。
    - 作用域变更：如原版调整了作用域，更新对应词条下的 `Supported Scopes`。
 2. **`submodules/cwtools-stellaris-config/config/logs/modifiers.log`**：
-   - 新增/移除修饰符：更新对应的 Category 分类块。
-3. **`submodules/cwtools-stellaris-config/config/logs/localizations.log`**：
+   - 严格遵循 [引擎文档日志与 CWT 生成边界](../../notes/implemented/process/2026-10-07-engine-doc-log-generated-boundary.md)：凡可由 CWT 类型模式动态生成的 modifier（如 `council_agenda`、`ethos`、`district` 等）必须写入对应 `common/*.cwt` 的 `modifiers` 块；仅将无法动态生成的静态 modifier 逐字核对游戏日志后精准追加至裁剪基线 `modifiers.log`，严禁整量覆盖。
+3. **`submodules/cwtools-stellaris-config/config/logs/scopes.log`**：
+   - 新增作用域或链接时，确保条目位于 `=================` 分隔符内部且无重复分隔符，同时同步核对 `config/links.cwt` 的 `input_scopes` 与 `output_scope`。
+4. **`submodules/cwtools-stellaris-config/config/logs/localizations.log`**：
    - 补充新增的本地化数据提取命令（如 `GetPopsGuidingEthic`）。
 
 ---
@@ -149,7 +158,44 @@ diff.split('\n').forEach(l => {
 
 ---
 
-### 步骤 6：全套验证门禁（Verification Gate）
+### 步骤 6：第三阶段 —— 原版全量实跑校验与三分类归因闭环
+
+完成上述规则同步并清理 `scalar` 后，**必须**对本机真实 Stellaris 原版目录执行端到端全量校验，捕获静态扫描器无法发现的深层规则漏洞与解析器/引擎缺陷（参考实战范例：[2026-11-26-vanilla-4.6-parser-engine-and-cwt-fixes.md](../../notes/implemented/bug-fix/2026-11-26-vanilla-4.6-parser-engine-and-cwt-fixes.md)）：
+
+1. **跑出修复前原版全量诊断基线（CSV）**：
+   > 输出文件必须写入临时/scratch 目录，严禁落入 git 仓库。原版存在自身脚本错误时 `CWToolsCLI` 以退出码 `1` 结束属正常现象。
+   ```powershell
+   dotnet run --project submodules/cwtools/CWToolsCLI/CWToolsCLI.fsproj -c Release -- `
+     --directory "<Stellaris 安装目录>" `
+     --game stl `
+     --rulespath "submodules/cwtools-stellaris-config/config" `
+     --scope vanilla `
+     validate all --reporttype csv --outputfile "<临时目录>/vanilla_before.csv" --languages english
+   ```
+
+2. **优先排查 CWT 自身解析崩溃（雪崩自检）**：
+   - 若 CSV 中出现数千/数万条 `Unknown type referenced <type>` 级联报错，通常说明某个 `.cwt` 文件存在语法错误（`CWT001`）导致整文件规则未能加载（例如在 `sprites.cwt` 中写了带裸前缀键却缺少 `=` 的块）。
+   - 立刻运行 `dotnet fsi src/Main/CwtLanguageSemantics.Tests.fsx` 精确定位并修复损坏的 `.cwt` 文件，再重新采集基线。
+
+3. **聚合分簇与三分类逐项核实**：
+   - 过滤掉低优先噪音（如 `CW100` 缺失本地化键），按**错误码 + 消息模板 + 所在文件**聚合统计以下核心指标：
+     - **非本地化 Error**（排除 `CW100`/`CW101`/`CW225`/`CW226`）；
+     - **`CW274`**（`inline_script` 展开报错，往往由底层字段/作用域/条件分支错误放大而来）；
+     - **`CW268`**（YAML 本地化解析中断，会导致同一文件后续所有行失去校验）；
+     - **非 `CW100` Warning**（重点关注 `CW242` 基数、`CW240` 类型/枚举值、`CW264`/`CW265` 等）。
+   - 按命中频次从高到低逐簇核查，**每簇必须先读原版脚本现场（及本机 `script_documentation` 日志）再定性**：
+     - **确认为解析器/验证引擎漏洞**：在 `submodules/cwtools` 中实施最小声音性修复（如作用域窄化仅限确定合取块、条件宏分支仅豁免 `opts.max`），并在 `CWToolsTests` 中补充覆盖正反路径的回归单测。
+     - **确认为 CWT 规则/日志漏洞**：在 `submodules/cwtools-stellaris-config` 精准修复（重点排查 `scope[x]` vs `<x>`、`links.cwt` 缺失输入作用域、`ordered_*` 等迭代器的可选基数、`subtype` 拆分及嵌套块 `## replace_scope`、动态/静态 modifier 边界）。
+     - **确认为原版脚本自身真实 Bug**：记录归档原因并**保留告警**，严禁靠放宽规则或引入 `scalar` 强行消错。
+
+4. **复跑原版全量校验并做差集审计（Before vs After）**：
+   - 全部修复落地后，重新执行第 1 步导出 `<临时目录>/vanilla_after.csv`，对照 `vanilla_before.csv` 核查：
+     - 统计总诊断数、非本地化 Error、非 `CW100` Warning、`CW274`、`CW268` 的净消减幅度；
+     - **必须检查差集 `after - before` 中的每一条新增诊断**：确认零非预期回归；仅允许因修正作用域契约或修复解析中断后**新暴露的原版真实脚本 Bug** 存在，并逐条核实。
+
+---
+
+### 步骤 7：全套验证门禁（Verification Gate）
 
 1. **规则报告、陈旧字段与 GUI 审计指标验证**：
    ```powershell
@@ -161,24 +207,34 @@ diff.split('\n').forEach(l => {
    - `folders with findings: 0`（所有字段级缺失清零）；
    - `scope contracts missing: 0`；
    - `trigger parameters: ~0` 与 `effect parameters: ~0`（参数级漂移已逐条核对，或确认原版文档滞后）；
-   - `effect: +0 -0 ~0`；
-   - `modifier: +0 -0 ~0`；
+   - `trigger` / `effect` / `scope` 差异均为 `+0 -0 ~0`；
+   - `modifier` 无未处理的真实新增/移除项（已知分类差异需人工核实）；
    - `stale fields: removed_from_engine=0`（并人工复核 `unused_in_vanilla` 中的跨子系统改名项）；
    - `gui: uncovered_types=0 uncovered_props=0` 且 7 个追踪窗口 `(+0 -0)`（变动已核对并更新基线）。
 
-2. **F# 日志与规则加载校验**：
+2. **F# CWT 语义与日志加载校验**：
    ```powershell
+   dotnet fsi src/Main/CwtLanguageSemantics.Tests.fsx
    dotnet fsi src/Main/StellarisConfigLogs.Tests.fsx
    ```
-   确保 `config/logs/trigger_docs.log` 的两处 `=================` 分隔符位置与语法块结构完整，8/8 全部通过。
+   确保全量 `.cwt` 文件零语法/语义诊断，且 `config/logs/trigger_docs.log` / `scopes.log` / `modifiers.log` 的分隔符与裁剪边界检查全部通过。
 
-3. **代码编译、类型安全与规则工具单测**：
+3. **引擎/后端构建与测试门禁（凡改动 `submodules/cwtools` 时必跑）**：
+   ```powershell
+   dotnet test submodules/cwtools/CWToolsTests/CWToolsTests.fsproj -c Release
+   dotnet build src/LSP/ -c Release
+   dotnet build src/Main/ -c Release
+   npm run test:fsx
+   ```
+   确保 `CWToolsTests` 0 失败（含新增回归单测；默认跳过的旧版 vanilla shader 基线测试不计为失败），`LSP` 与 `Main` 0 警告 0 错误，`test:fsx` 全部通过。
+
+4. **TypeScript 编译、类型安全与规则工具单测**：
    ```powershell
    npm run compile
    npm run typecheck:test
    npm run test:rules-sync
    ```
-   确保退出码均为 0，无任何 TypeScript 类型错误或回归失败。
+   确保退出码均为 0，无任何 TypeScript 类型错误或回归失败；同时检查 `git status` 确认仓库内无临时 CSV 或分析脚本残留。
 
-4. **撰写 Agent Note 归档**：
-   根据 `AGENTS.md` 要求，在 `.agents/notes/implemented/feature/` 创建或更新实施记录（使用简体中文），详述背景、设计决策、拒绝方案与验证指标。
+5. **撰写 Agent Note 归档**：
+   根据 `AGENTS.md` 要求，在 `.agents/notes/implemented/feature/`（版本同步）或 `.agents/notes/implemented/bug-fix/`（报错归因与引擎/规则修复）创建或更新简体中文实施记录，详述背景、三分类归因与设计决策、拒绝方案、原版全量对比数据及验证指标。如同时改动了子模块，提交时须先提交子模块再更新主仓库指针。

@@ -1529,7 +1529,7 @@
         }
     },
     "dependencies": {
-        "cwtools-node": "0.4.0",
+        "cwtools-node": "0.4.1",
         "cwtools-shared": "0.6.0",
         "executable": "4.1.1",
         "ignore": "^5.3.2",

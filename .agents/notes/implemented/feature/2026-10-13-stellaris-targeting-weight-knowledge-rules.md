@@ -30,4 +30,4 @@ Status: implemented
 
 - defines 与武器字段的 `###` 走 RulesParser.fs:367-371 的 description 路径，hover/补全立即可见；`shipsize_$_target_weight_mult` 那条 `###` 走 parseModifier → TypeModifier.documentation 支路，需姊妹笔记的 RulesHelpers 接线后才可见（已通）。
 - 技能已被扩展的技能扫描链路实时接受（目录自动刷新）。
-- 未证实项收敛：V1/V6 已解决；V2（target_focus 枚举到引擎 0/1 映射）、V3/V4/V5 仍留待验证，登记于设计文档 §10 与 17 号文 §8。
+- 未证实项收敛：V1/V6 已于 2026-10-13 解决；V2–V5 与 3 处 PDF 转述偏差已于 2026-11-28 基于 Stellaris 4.6.0 一手源码全部闭合与纠正，详见 [2026-11-28-stellaris-4.6-engine-decompilation-audit-and-sync.md](../process/2026-11-28-stellaris-4.6-engine-decompilation-audit-and-sync.md)。

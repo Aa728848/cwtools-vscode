@@ -654,18 +654,20 @@ remain valid.
 
 **Expensive command in a hot block (I)** — a command with high engine cost
 (rule `## cost` metadata: `o(n)_galaxy` / `o(n^2)` / `combat` / `script_eval`)
-appears in a block the engine evaluates frequently: job `weight` / `possible`,
-decision `potential` / `allow`, casus belli `potential`, triggered modifier
-blocks on buildings/districts, `mean_time_to_happen` modifier blocks, faction
-membership triggers (`common/pop_faction_types`), edicts (`common/edicts`),
-special projects/situations, archaeological sites, technology weights, colony
+appears in a block the engine evaluates frequently: job `weight` / `possible` /
+triggered modifiers (`common/pop_jobs`), decision `potential` / `allow`, casus
+belli `potential`, triggered modifier blocks on buildings/districts/zones
+(`common/zones`), `mean_time_to_happen` modifier blocks, faction membership
+triggers (`common/pop_faction_types`), edicts (`common/edicts`), special
+projects/situations, archaeological sites, technology weights, colony
 automation, or uncached `common/game_rules`. Check the command's `## engine`
 note for a cheaper alternative, or move the check to a lower-frequency context.
 
 命令的引擎开销较高（规则 `## cost` 元数据：`o(n)_galaxy` / `o(n^2)` /
 `combat` / `script_eval`），而所在块会被引擎高频求值：岗位 `weight` /
-`possible`、决议 `potential` / `allow`、宣战理由 `potential`、建筑/区段的
-triggered modifier 块、`mean_time_to_happen` 的 modifier 块、派系条件
+`possible` 与 triggered modifier（`common/pop_jobs`）、决议 `potential` /
+`allow`、宣战理由 `potential`、建筑/区划/区域（`common/zones`）的 triggered
+modifier 块、`mean_time_to_happen` 的 modifier 块、派系条件
 （`common/pop_faction_types`）、法令（`common/edicts`）、特殊项目/局势、
 考古遗址、科技权重、星球自动化，或不缓存的 `common/game_rules`。请查看该
 命令的 `## engine` 说明换用更便宜的替代写法，或把检查移到更低频的位置。
@@ -683,27 +685,35 @@ pulse。
 
 ## CW281
 
-**Dynamic name ends with a digit (W)** — a dynamic flag / event-target name
-ends with a digit. Dynamic names are formed as `base + decimal ID` with no
-separator (`name@123`), so a trailing digit can collide: `a1@23` and `a12@3`
-produce the same name. Rename so the base part does not end in a digit.
+**Dynamic name ends with a digit (W)** — a dynamic flag, event-target,
+variable, or point-of-interest name ends with a digit. Since Stellaris 4.6
+variables also share `ProcessDynamicFlag` and the 65,535 `CPdxIntegerFlags`
+table, dynamic names are formed as `base + decimal ID` with no separator
+(`name@123`), so a trailing digit can collide: `a1@23` and `a12@3` produce the
+same name. Rename so the base part does not end in a digit.
 
-动态 flag/事件目标名以数字结尾：动态名是「基础名 + 十进制 ID」无分隔符
-拼接（`name@123`），结尾数字会撞名——`a1@23` 与 `a12@3` 生成同一个名字。
-请改名，让基础名部分不以数字结尾。
+动态 flag/事件目标/变量/POI 名以数字结尾：Stellaris 4.6 起变量名也已并入
+`ProcessDynamicFlag` 与全局 65535 `CPdxIntegerFlags` 表，动态名是「基础名 +
+十进制 ID」无分隔符拼接（`name@123`），结尾数字会撞名——`a1@23` 与 `a12@3`
+生成同一个名字。请改名，让基础名部分不以数字结尾。
 
 ## CW282
 
 **Pop job sync effect in loop (I)** — an effect that synchronously triggers
 the planet pop job re-assignment pipeline (`EnsurePopJobsAreUpToDate`, such as
-`add_building`, `remove_building`, `add_district`, `remove_district`,
-`set_controller`, or `create_pop_group`) appears inside an iteration loop
+`add_building`, `remove_building`, `disable_building`, `ruin_building`,
+`repair_building`, `repair_all_buildings`, `add_holding`, `remove_holding`,
+`add_district`, `remove_district`, `remove_all_districts`, `set_controller`,
+`create_pop_group`, or species rights setters) appears inside an iteration loop
 (`every_owned_planet`, `while`, `for_each_*`). This causes severe frame lag.
 Avoid calling these effects inside frequent loops or batch them outside.
 
-同步重排岗位的 effect 出现在循环体内：`add_building`、`remove_building`、
-`add_district`、`remove_district`、`set_controller`、`create_pop_group`
-等 effect 每次调用都会同步重跑整星球的岗位分配流程（`EnsurePopJobsAreUpToDate`）。
+同步重排岗位的 effect 出现在循环体内：建筑/控股/区划变更（`add_building`、
+`remove_building`、`disable_building`、`ruin_building`、`repair_building`、
+`repair_all_buildings`、`add_holding`、`remove_holding`、`add_district`、
+`remove_district`、`remove_all_districts`）、`set_controller`、
+`create_pop_group` 以及物种权利变更（`set_citizenship_type` 等）每次调用都会
+同步重跑整星球（甚至全帝国殖民地）的岗位分配流程（`EnsurePopJobsAreUpToDate`）。
 在循环内（如 `every_owned_planet`、`while` 等）高频调用会导致严重掉帧。
 
 ## CW283
@@ -782,15 +792,17 @@ inline_script 高复用次数提示：`inline_script` 每个调用点都会完�
 
 ## CW290
 
-**Weapon component accuracy/tracking out of range (W)** — a weapon component
+**Weapon component field out of engine range (W)** — a weapon component
 template's `accuracy` and `tracking` are read by the engine as probabilities in
-the hit-chance formula `p = clamp(accuracy - clamp(target_evasion - tracking, 0,
-1), 0, 1)`; out-of-range values only get logged by the engine ("Accuracy /
-Tracking should be between 0.0 and 1.0"). Keep both fields within [0, 1].
+[0, 1] (`p = clamp(accuracy - clamp(target_evasion - tracking, 0, 1), 0, 1)`),
+and `size_damage_factor` must be non-negative (`>= 0.0`); out-of-range values
+only get logged by the engine ("Accuracy / Tracking should be between 0.0 and
+1.0" / "Size Damage Factor should not be less than 0.0").
 
-武器组件 accuracy/tracking 越界（W）：引擎在命中率公式 `p = clamp(accuracy -
-clamp(目标闪避 - tracking, 0, 1), 0, 1)` 中把这两个字段当概率使用，越界时引擎仅
-在游戏日志中记录报错。请将这两个字段保持在 [0, 1] 区间内。
+武器组件字段越界（W）：引擎将 `accuracy` / `tracking` 作为 [0, 1] 概率读入
+命中率公式，并将 `size_damage_factor` 校验为非负数（`>= 0.0`），越界值仅会
+在游戏日志中记录报错。请保持 `accuracy`/`tracking` 在 [0, 1] 且
+`size_damage_factor >= 0`。
 
 ---
 

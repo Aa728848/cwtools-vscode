@@ -1,22 +1,27 @@
 # 15 静默数据损坏类 bug（与 flag 名字表耗尽同级）
 
-这一篇不是性能问题，而是**不崩溃、不写日志、结果悄悄错掉、还可能写进存档**的正确性 bug。✅ 表示我亲自复核过代码；🎮 表示已在游戏里实测。
+这一篇不是性能问题，而是**不崩溃、不写日志、结果悄悄错掉、还可能写进存档**的正确性 bug。✅ 表示亲自复核过代码；🎮 表示已在游戏里实测。
 - 原点：08-A3 / B8-(6)，全局 flag 名字表耗尽（🎮 已实测）。
 - 控制台测试：`console_tests/silent_corruption_tests.md`。
 
+> **Stellaris 4.6.0（`stellaris_4.6_source.cpp`）复核摘要（2026-11-28）**：
+> - **🔴 C1 影响范围显著扩大（4.6 重大结构变化）**：4.6 中 `CVariables::ReadMember`（L1860472）、`CVariables::SetVariable`（L1860976）与 `CSetVariableEffect` / `CChangeVariableEffect`（继承 `CFlagEffect`，`+0xb8` 为 `uint16`）改用 `CPdxIntegerFlags::CreateFlagIndex`，**变量名键从 `CString` 变为 `uint16`**。虽然提升了变量查找性能，但导致 **flag + 事件目标 + 变量（含动态变量）三者共享同一张上限 65535、永不回收的进程级 `CPdxIntegerFlags` 表**——表满后新建变量名同样静默落入 `0xffff` 并互相覆盖！
+> - **⚠️ C2 / C3 / C4 / C5 / C6 / C8 / C9 在 4.6.0 全部仍未修复**（具体 4.6 行号见各小节补充；C2 中全局 flag 偏移变为 `g_CurrentGameState + 0x290`，新增了 `0x40000000000` (`ideology`) 分支但仍缺 `0x2000` design / `0x1000` bypass 分支）。
+> - **✅ C7（`set_closed_borders` 孤儿关系）复核已修正**：4.5.2（L6494227）与 4.6.0（L6479127）的 `CSetClosedBordersEffect::ExecuteActual` 中均有 `pCVar3->IsValid()`（`+0x58`）和 `plVar4->IsValid()`（`+0x40`）两道校验，不会对无效国家创建孤儿关系。
+
 ## 严重程度总览
 
-| # | bug | 原版能否触发 | 后果 | 进存档 | 状态 |
+| # | bug | 原版能否触发 | 后果 | 进存档 | 4.6.0 状态 |
 |---|---|---|---|---|---|
-| C1 | 全局 flag 名字表 65535 耗尽 | 需要大量动态名，或长时间会话；**tooltip 和渲染也会消耗名字** | 新 flag 静默丢失、事件目标串号、**读档丢 flag**、**POI 被批量删除并永久合并**、可能导致多人不同步 | ✅ 永久 | 🎮 + ✅ |
-| **C2** | **`set_design_flag` 实际写入全局 flag** | **能：原版专家特权** | **停用特权时删掉一个随机设计**；`has_design_flag` 对所有国家的所有设计都为真 | ✅ | ✅ 代码确认，待实测 |
-| C3 | `TPdxRef` 8 位代号回绕，空闲槽 LIFO 复用 | 能：长局、高频生灭的对象 | 旧引用（事件目标、延迟事件作用域、变量里的对象）指向一个不相干的新对象 | ✅（代号随存档保存） | ✅ 机制确认，触发概率待测 |
-| C4 | 读档时 `0xffff` 事件目标无名保存、重复追加 | 依赖 C1 | 无法清除的"幽灵"目标越积越多 | ✅ | ✅ |
-| C5 | `copy_flags_and_variables_from` 写入共享的空对象 | 需 mod 对已失效目标调用 | 所有无效引用共享被污染的 flag 和变量 | 间接 | ✅ 代码确认 |
-| C6 | AI 外交提案依赖线程完成顺序；AI 送礼用系统时间作种子 | 能 | 同一存档同一种子，AI 行为不可复现；如果 AI 在每个客户端上都运行，会导致多人不同步 | — | ✅ 代码确认 |
-| C7 | `set_closed_borders` 对无效目标创建一条指向国家 0xFFFFFFFF 的孤儿关系 | 需脚本传入无效目标 | 存档里残留垃圾数据 | ✅ | 代码确认 |
-| C8 | 读档后 root/from/prev 不再共享同一个作用域 | 能：延迟事件跨存档 | 读档前后事件链行为不一致 | — | 可能 |
-| C9 | `CFixedPoint::RoundTo` 截断为 int32；`change_variable` 溢出 | 极少 | 数值变号 | ✅ | 代码确认 |
+| **C1** | **全局 `CPdxIntegerFlags` 65535 名字表耗尽（4.6 起含全部变量名！）** | 需要大量动态名或长时间会话；**4.6 变量并入后消耗更快**，tooltip/渲染也会消耗 | 新 flag/变量静默丢失或互相覆盖、事件目标串号、**读档丢 flag**、**POI 永久合并**、可能导致多人不同步 | ✅ 永久 | **🔴 仍存在且范围扩大** |
+| **C2** | **`set_design_flag` 实际写入全局 flag** | **能：原版专家特权** | **停用特权时删掉一个随机设计**；`has_design_flag` 对所有国家的所有设计都为真 | ✅ | **⚠️ 仍存在**（L2765083） |
+| C3 | `TPdxRef` 8 位代号回绕，空闲槽 LIFO 复用 | 能：长局、高频生灭的对象 | 旧引用（事件目标、延迟事件作用域、变量里的对象）指向一个不相干的新对象 | ✅（代号随存档保存） | **⚠️ 仍存在**（L644840） |
+| C4 | 读档时 `0xffff` 事件目标无名保存、重复追加 | 依赖 C1 | 无法清除的"幽灵"目标越积越多 | ✅ | **⚠️ 仍存在**（L2771832） |
+| C5 | `copy_flags_and_variables_from` 写入共享的空对象 | 需 mod 对已失效目标调用 | 所有无效引用共享被污染的 flag 和变量 | 间接 | **⚠️ 仍存在**（L6559944） |
+| C6 | AI 外交提案依赖线程完成顺序；AI 送礼用系统时间作种子 | 能 | 同一存档同一种子，AI 行为不可复现；若 AI 多端运行则导致不同步 | — | **⚠️ 仍存在**（L3280895 / L3280233） |
+| C7 | ~~`set_closed_borders` 对无效目标创建孤儿关系~~ | — | 4.5.2/4.6.0 已有双 `IsValid()` 门控保护，不触发 | — | **✅ 已证实有保护**（L6479127） |
+| C8 | 读档后 root/from/prev 不再共享同一个作用域 | 能：延迟事件跨存档 | 读档前后事件链行为不一致 | — | **⚠️ 仍存在**（L2763812） |
+| C9 | `CFixedPoint::RoundTo` 截断为 int32；`change_variable` 溢出 | 极少 | 数值变号 | ✅ | **⚠️ 仍存在**（L8614950） |
 
 ---
 
@@ -117,9 +122,9 @@ deactivate_effect = { target = {
 - `CRandom::GetIntegerForMacro`（7071434–7071470）对"非主线程调用"和"禁用区调用"只写日志，不阻止，全局 `_Random` 也没有加锁。另外有三处把"禁用"标志保存后恢复到了"允许多线程"标志上（`ApplySaveGameFixes` 412008→413228、`GenerateNewGalaxy` 429060→429616、`CIngameLobby::OnGameStart` 742285→742377），属于复制粘贴错误。
 - 如果 AI 在每个客户端上都运行（没有核实），这就是多人不同步的来源；即使不是，同一存档同一种子的行为也不可复现。
 
-## C7 `set_closed_borders` 对无效目标创建孤儿关系
-- `CSetClosedBordersEffect::ExecuteActual`（6033853–6033870）把 `AccessTargetCountryWithErrorLogging` 的结果直接传给 `AccessOrCreateNewRelation`；目标无效时，前者写日志后仍然返回空国家（2472085–2472101）。
-- `AccessOrCreateRelation`（2201041–2201127）只排除"自己"，于是 `new CRelation(owner, 空国家)`，键为 0xFFFFFFFF，并写入边境关闭的标志和日期。留下一条永久的孤儿关系，很可能会被存档；不会串到真实国家。
+## C7 ✅（4.5.2 / 4.6.0 复核修正）`set_closed_borders` 已有双重有效性门控
+- 原 4.5 初审曾怀疑 `CSetClosedBordersEffect::ExecuteActual` 会把空国家直接传给 `AccessOrCreateRelation` 创建孤儿关系。
+- **2026-11-28 源码复核确认**：在 Stellaris 4.5.2（L6494227）与 4.6.0（L6479127）的 `CSetClosedBordersEffect::ExecuteActual` 中，进入关系操作前已存在 `pCVar3->IsValid()`（`+0x58`）与 `plVar4->IsValid()`（`+0x40`）两道有效性检查，任一国家无效即提前返回，**不会创建指向 `0xFFFFFFFF` 的孤儿关系**。
 
 ## C8（可能）读档后 root/from/prev 不再共享
 - `CEventScope::WriteMembers`（2468040–2468090）只在 `this+0x38 == this` 时写事件目标和变量，把 from/root/prev 当成完整的嵌套作用域写出；`ReadMember`（2468100–2468255）为它们各自分配一个**独立的** `CEventScope`。

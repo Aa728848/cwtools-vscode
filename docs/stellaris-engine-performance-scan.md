@@ -1,8 +1,8 @@
 # Stellaris Trigger / Effect 引擎性能扫描清单
 
-> **来源**：Stellaris 4.5 Linux 版反编译结果（Ghidra dump）。
-> **生成工具**：`tools/engine-cost/extract-engine-cost.cjs`（维护与重锚流程见 [tools/engine-cost/README.md](../tools/engine-cost/README.md)）。
-> **快照说明**：本文保留的是 4.5 初始全量静态扫描基线（1,248 条）。后续人工细分补充的 `o(n)_galaxy`、`o(n)_owned`、`script_eval`、`scope_copy` 等精确等级与 `## sync_effect` 标注均直接维护在 `submodules/cwtools-stellaris-config/config/*.cwt` 中；日常开发请以编辑器悬停提示和当前 `.cwt` 规则为准。
+> **来源**：Stellaris 4.5 Linux 版反编译初始全量快照；规则侧已于 **2026-11-28** 基于 **Stellaris 4.6.0**（`stellaris_4.6_source.cpp`）完成重锚。
+> **生成工具**：`tools/engine-cost/extract-engine-cost.cjs` 与 `merge-engine-cost.cjs`（维护与重锚流程见 [tools/engine-cost/README.md](../tools/engine-cost/README.md)）。
+> **快照说明**：本文下方清单保留的是 4.5 初始全量静态扫描基线（1,248 条）。后续人工细分补充的 `o(n)_galaxy`、`o(n)_owned`、`script_eval`、`scope_copy` 等精确等级、`## sync_effect` 标注，以及 **4.6.0 重锚结果**（刷新 1,085 条证据行号、新增采纳 6 条：`has/set/set_timed/remove_ideology_flag` / `change_species` / `remove_system`、升级 2 条：`is_criminal_syndicate` 与 `is_exhibit_active` `o(1) -> o(n)`）均直接维护在 `submodules/cwtools-stellaris-config/config/triggers.cwt` 与 `effects.cwt` 中；日常开发请以编辑器悬停提示和当前 `.cwt` 规则为准。
 
 ## 覆盖率
 

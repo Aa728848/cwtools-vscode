@@ -1,14 +1,15 @@
-**群星伤害结算逻辑——Stellaris 4.5.2 反编译分析**
+**群星伤害结算逻辑——Stellaris 4.5.2 / 4.6.0 反编译分析**
 
-整理日期：2026-10-08。源码核验日期：2026-10-08。
+初版整理与 4.5.2 核验日期：2026-10-08。**Stellaris 4.6.0 源码复核与 `+0x80` 虚槽平反日期：2026-11-28**。
 
-依据：`anti_stellaris` 仓库的 `stellaris_4.5.2_source.cpp`（Ghidra 导出的 **Linux** 4.5.2，9,364,545 行，139,641 个函数块，符号化率 99.9993%）。本文所有 `[Sxx]` 行号均指向该文件。
+依据：`anti_stellaris` 仓库的 `stellaris_4.5.2_source.cpp`（4.5.2 初审基线）与 **`stellaris_4.6_source.cpp`**（Corona Borealis v4.6.0 `5d0adbc59353f1e9b085e0a2c4cb3d1a`，Linux 版 Ghidra 反编译，9,363,893 行，141,524 个函数块）。
 
-> **核验状态（2026-10-08）**：本文全部可核验断言已逐条回源码比对，约 60 项断言**零反驳、零行号错位**；1 处结论被推翻并已改写（见 §9.5）。修订明细见文末[附录 A](#appendix-a)，逐项核验记录见[附录 B](#appendix-b)。
+> **核验状态（2026-11-28，Stellaris 4.6.0 复核）**：
 >
-> **游戏版本**：`D:\Steam\steamapps\common\Stellaris`，`launcher-settings.json` 记 `v4.5.2 (9776) Cygnus`，与 dump 版本一致。
->
-> **配套文件说明**：第 13 节提到的 `stellaris_damage_reference.py` 与 `stellaris_damage_example.json` **未随本文分发**，需要时请按 §13 的伪代码自行复算。`[D01]`–`[D08]` 的配置值已对照游戏安装目录 `common/defines/00_defines.txt`（v4.5.2）逐条核验，值与行号均一致。
+> 1. **核心公式完全未变**：`NCombatRules::CalcDamage`（4.6.0 L2144137～L2144416）的三层分配模型、定点截断（`raw < 1`）、穿透/硬化、减伤与尺寸缩放顺序与 4.5.2 完全一致，§1–§13 的公式与 23 组算例在 4.6.0 全部有效。
+> 2. **§9.5 重大平反（闭合原“待确认”悬案）**：2026-10-08 核验曾误将主目标槽 `+0x68` 与次级目标槽 `+0x80` 当作同一张虚表的两个不同槽位。2026-11-28 以 Itanium ABI 多重继承布局（`CShip` 主虚表在 `+0x00`，`CTargetable` 次虚表在 `+0x20`）、`CShip::TakeDamage` 与 `-0x20` thunk 全集及 `CDamageShipEffect` 实参布局**确证 `+0x80` 即 `CShip::TakeDamage` 本尊**——**溅射、连锁与 `damage_ship` 同样走 `NCombatRules::CalcDamage` 三层分配模型**（但仍不触发吸血）。详见 §9.5 与[附录 C](#appendix-c)。
+> 3. **4.6.0 偏移与行号同步**：§14 defines（行号整体后移，新增 `SHIP_DISENGAGE_INACTIVITY_DAYS = 150`）、§15 武器组件模板偏移（相对 4.5.2 整体左移 `0x58`）、§16 陷阱 #1（`ship_size_damage_factor` ModifierType ID `0x233 -> 0x242`）及 `[S01]`–`[S21]` 源码索引已同步更新至 **4.6.0**；§1–§10 正文夹注的 4.5.2 历史行号可通过 `[Sxx]` 表与附录 C 一一对应到 4.6.0。
+> 4. **配套文件说明**：第 13 节提到的 `stellaris_damage_reference.py` 与 `stellaris_damage_example.json` **未随本文分发**，需要时请按 §13 的伪代码自行复算。`[D01]`–`[D08]` 的配置值已对照本机 `D:\Steam\steamapps\common\Stellaris\common\defines\00_defines.txt`（v4.6.0 `3d1a`）逐条核验。
 
 本文“当前配置”指该 `00_defines.txt` 的数值；公式仍保留符号参数，便于核对其他配置。define 原值以游戏单位表示，例如尺寸上限 100 对应定点原始整数 10000000，不能再把配置中的 100 除以 100000。
 
@@ -37,7 +38,8 @@
 - [15. 武器字段与引擎结构偏移对照](#part15)
 - [16. modder 易踩的语义陷阱](#part16)
 - [附录 A：2026-10-08 源码核验修订清单](#appendix-a)
-- [附录 B：逐项核验记录](#appendix-b)
+- [附录 B：逐项核验记录（4.5.2 基线）](#appendix-b)
+- [附录 C：2026-11-28 Stellaris 4.6.0 复核与 `+0x80` 虚槽平反](#appendix-c)
 <a id="part1"></a>
 
 **1. 核心规则与流程**
@@ -168,7 +170,7 @@ $$
 
 例如基础伤害 100、百分比减伤 20%、固定值减伤 10，得到 70。护盾、装甲、船体不会各自再减一次 10；因穿透、溢出形成的不同路径也不会分别重复减伤。[S01]（2014399～2014418）
 
-令 `M = NDefines::NShip::MAX_DAMAGE_SCALING`，**当前配置 M=100**（`00_defines.txt` 第 1787 行）。严格按源码选择有效尺寸：[D01]
+令 `M = NDefines::NShip::MAX_DAMAGE_SCALING`，**当前配置 M=100**（4.6.0 `00_defines.txt` 第 1873 行，4.5.2 第 1787 行）。严格按源码选择有效尺寸：[D01]
 
 $$
 s_{\mathrm{eff}}=
@@ -494,7 +496,7 @@ result = trunc0((larger % 100000) * smaller / 100000)
 | 导弹 | 当前盾甲；尺寸、两类硬化直接置零 | 均置零 | true | 船体≤0 时设置导弹销毁标记 |
 | 舰载机 | 当前盾甲；尺寸、两类硬化从模板的相邻字段复制 | 均置零 | true | 船体≤0 时设置舰载机销毁标记 |
 
-普通舰船的 `BuildDefenseInfo` 使用舰船尺寸结构 `+0x630` 作为 s；该字段还用于 `SHIP_SIZE_MULTIPLIER` 显示和对应触发器。硬化通过 `GetShipClassArmorHardeningModifier`、`GetShipClassShieldHardeningModifier` 等来源组合。[S05]、[S08]
+普通舰船的 `BuildDefenseInfo` 使用舰船尺寸结构 `+0x668`（4.5.2 为 `+0x630`）作为 s；该字段还用于 `SHIP_SIZE_MULTIPLIER` 显示和对应触发器。硬化通过 `GetShipClassArmorHardeningModifier`、`GetShipClassShieldHardeningModifier` 等来源组合。[S05]、[S08]
 
 **导弹受击，即第 946301 行。** 输入具体为：
 
@@ -538,7 +540,7 @@ $$
 
 **9.2 吞噬。**
 
-若攻击组件非空、组件 `+0x1e1==0` 且武器类型 `+0x12e0==4`，`CalcDamage` 在抽取基础伤害之后、减伤之前设置 `+0x01` 标记并直接返回，六项数值伤害字段仍为 0。[S01]（2014394～2014397）
+若攻击组件非空、组件 `+0x1e1==0` 且武器类型 `+0x1288==4`（4.5.2 为 `+0x12e0==4`），`CalcDamage` 在抽取基础伤害之后、减伤之前设置 `+0x01` 标记并直接返回，六项数值伤害字段仍为 0。[S01]
 
 普通舰船调用方据此触发 `on_ship_engulfed`、设置船体为 0，并继续后续处理；射击端也使用同一标记切换 `EngulfHash` 对应的表现状态。它不需要用普通三层伤害将盾、甲、船体逐层耗尽。[S06]、[S10]
 
@@ -586,32 +588,30 @@ $$
 
 例如第 11 节的双层溢出例中，返回伤害是 70+45+40=155，目标实际耐久损失是 100。若 λ=0.1 且此调用路径启用了恢复，初始恢复预算为 15.5，而不是 10。具体调用路径和修正仍需检查：本次确认的普通直射入口和舰载机射击入口会在对应缓存值>0 时调用该函数，不能因此推广成所有武器无条件恢复。[S10]、[S12]
 
-**9.5 范围、连锁和脚本效果。**
+**9.5 范围、连锁和脚本效果（2026-11-28 4.6.0 源码确证：`+0x80` 即 `CShip::TakeDamage`）。**
 
-直射 `CWeaponComponent::Shoot` 在主目标结算后还会处理范围（溅射）与连锁目标：分别构造新的攻击信息、调用 `CShip::ApplyModifier`（2107819、2107977），再对次级目标施加伤害（2107825、2107982）。这两处**没有**再执行 `DoHitChanceRoll`。[S10]（2107700～2107985）
+直射 `CWeaponComponent::Shoot`（4.6.0 L2233029）在主目标结算后还会处理范围（溅射）与连锁目标：分别构造新的攻击信息、调用 `CShip::ApplyModifier`（4.6.0 L2233342、L2233466），再对次级目标施加伤害（4.6.0 L2233348、L2233471）。这两处**没有**再执行 `DoHitChanceRoll`。[S10]
 
-**次级目标不是通过 `TakeDamage` 结算的。** 这是 2026-10-08 源码核验推翻的旧结论，旧版本文曾写“次级目标按自己的当前防御重新结算”，该说法**不成立**，依据如下。
+**重要平反（2026-11-28）**：2026-10-08 核验曾误将主目标槽 `+0x68` 与次级目标槽 `+0x80` 当作同一张虚表的两个不同槽位，进而误推翻了“次级目标走 `TakeDamage` 三层分配”的结论。4.6.0 源码（Itanium ABI 多重继承布局）已彻底闭合并证实——**`+0x68` 与 `+0x80` 指向的是同一个函数 `CShip::TakeDamage`，只是分别通过次虚表和主虚表派发**：
 
 ```text
-主目标   : (*目标 + 0x68)(返回缓冲区, 目标, 攻击信息, 攻击者信息)   // 2107696
-溅射/连锁 : (*目标 + 0x80)(返回缓冲区, 目标, 攻击信息, 攻击者信息)   // 2107825 / 2107982
-脚本伤害  : (*目标 + 0x80)(返回缓冲区, 目标, 攻击信息, 攻击者信息)   // 6418428（deal_damage 效果）
+主目标（CTargetable* = CShip+0x20）: (*CTargetable + 0x68)(sret, target, attack, attacker) // L2233248 → -0x20 thunk → CShip::TakeDamage
+溅射 / 连锁（CShip* = CShip+0x00） : (*CShip       + 0x80)(sret, ship,   attack, attacker) // L2233348 / L2233471 → CShip::TakeDamage
+damage_ship（CShip* = CShip+0x00） : (*CShip       + 0x80)(sret, ship,   attack, attacker) // CDamageShipEffect L6410170..L6410304 → CShip::TakeDamage
 ```
 
-两者形参完全相同，但**不是同一个函数**：
+完整源码证据链（`stellaris_4.6_source.cpp`）：
 
-1. 次级目标确实是舰船。2107752～2107765 从 `TPdxRef<CShip>::_pDatabase` 按索引取出并校验世代号，失败回退 `TPdxNullObject<CShip>::_pInstance`；动态类型不可能是导弹或舰载机。
-2. 槽 `+0x68` 就是 `CShip::TakeDamage`：其返回值被 2107698 的 `ApplyPostDamageValues` 立即消费，而那是 `CalcDamage` 产出的伤害结果结构。
-3. 一个虚函数在同一虚表中只占**一个**槽，因此 `+0x80` 不可能是 `TakeDamage`。`CShip::TakeDamage` 在全 dump 中只出现 4 次（3817156/3817159 定义、3818254/3818258 thunk），**零直接调用点**，只能经虚表到达。
-4. 能按三层公式重算伤害的只有 `NCombatRules::CalcDamage`，它在全 dump 中只有 4 个真实调用点：946301（`CMissile::TakeDamage`）、1565682（`CStrikeCraft::TakeDamage`）、1578846（武器选目标时的伤害预估）、3817466（`CShip::TakeDamage`）。前三个都不在 `Shoot` 里，第 4 个属于 `+0x68` 那条路径。
+1. **多重继承虚表偏移**：`CShip::~CShip`（L231733–L231735）明确初始化两张虚表——主虚表在 `CShip + 0x00`，`CTargetable` 次虚表在 **`CShip + 0x20`**；`CWeaponComponent::Shoot` 内（L2233482）亦显式对主目标指针做 `param_2 - 0x20` 还原出 `CShip*`。
+2. **全 dump 唯一函数 + `-0x20` thunk**：全部 `CShip::*Damage*` 中仅有一个 `CShip::TakeDamage`（L3858791）及其唯一调整跳板 `non-virtual thunk to CShip::TakeDamage`（L3859652，执行 `TakeDamage(sret, this - 0x20)`），紧随其后的是 `CShip::IsAlive`（L3859668）与 `-0x20` thunk（L3859688）。
+3. **主虚表邻槽完全对齐**：对 `CShip*` 调用 `+0x80` 紧邻 `+0x88`（`IsAlive`）与 `+0x90`（`GetCoordinate`），传递与 `TakeDamage` 完全相同的 4 参 `(SDamageResult*[56B], CShip*, SAttackInfo*, SAttackerInfo*)`。
+4. **`CDamageShipEffect` 实参自证**：`damage_ship`（L6410170）显式在栈上构造标准 `SAttackInfo`（`d_min = val, Δd = 0, m_H = m_A = m_S = 1.0, p_A = p_S = 0, c = 0, +0x40 = 1.0`）与 `SAttackerInfo` 再调用 `(*plVar7 + 0x80)`。
 
-**结论：溅射、连锁与 `deal_damage` 脚本效果共用槽 `+0x80` 的脚本伤害路径，该路径不执行本文 §3～§7 记录的三层分配模型。** 它们的伤害不能用主炮公式外推。
+**最终结论：溅射、连锁与 `damage_ship` 均走 `CShip::TakeDamage` → `NCombatRules::CalcDamage` 三层分配模型，按各自目标的当前护盾、装甲、尺寸与减伤独立结算。**
 
-> **待确认**：`+0x80` 具体对应哪个函数尚未确定。Linux dump 只导出函数、不含 data section（`vftable`/`_ZTV` 全零命中），Windows PE 侧的 CShip 虚表未能正确定位（候选表的主虚表仅 6 个槽，而 Linux 侧为 93 个；且其槽 `+0x68` 指向无 `.pdata` 条目的 16 字节跳板，不可能体量等同于 `TakeDamage`）。定案需要 Linux ELF 本体，读 `.data.rel.ro` 中虚表 `+0x80` 处的 8 字节即可。
-
-> **对 modder 的直接影响**：
-> - 做吸血/回血武器时，溅射、连锁与 `deal_damage` **都不触发** `ApplyPostDamageValues`（该函数在 `Shoot` 内仅 2107698 一处调用，且以主目标的伤害结构为实参）。
-> - 溅射与连锁的伤害区间来自各自的溅射伤害参数，**不来自**武器的 `min_damage`/`max_damage`：2107856～2107857 先写入模板 `+0x1230`/`+0x1238`，随后被逐目标值覆盖（溅射 2107815～2107816，连锁 2107951～2107952、2107967～2107968）。
+> **对 modder 仍然成立的关键差异**：
+> - **不触发吸血**：溅射、连锁与 `damage_ship` 调用完 `+0x80` 后**直接丢弃**返回的 `SDamageResult`（`local_68`），不调用 `ApplyPostDamageValues`（该函数在 `Shoot` 内仅主目标后调用一次）；同时也不触发 `OnHit` / `InjectModifier` / `AddIncomingProjectile`。
+> - **伤害区间来源不同**：溅射与连锁的伤害区间来自各自的溅射/连锁参数（4.6.0 模板 `+0x11c0/+0x11c8` 与 `+0x11d8/+0x11e0`），**不来自**主炮的 `min_damage`/`max_damage`；但三层倍率与穿透复制自武器模板，且会对每个次级目标重新执行 `CShip::ApplyModifier`。
 > - 范围伤害区间、连锁区间、次数、距离、筛选对象均属于组件和射击端逻辑，不是“主目标船体超杀自动流到旁边一艘船”。
 
 命中分支还可以在常规伤害之前执行 `OnHit`，之后注入修正。零数值伤害不保证没有这些效果；而吞噬和其他脚本改血也不能用一个数值伤害上限统一约束。[S10]
@@ -874,119 +874,120 @@ py -3 .\stellaris_damage_reference.py --input .\stellaris_damage_example.json
 
 **14. 源码索引、验证范围与待确认项**
 
-**当前版本 define 对照。**
+**当前版本 define 对照（Stellaris 4.6.0 `common/defines/00_defines.txt`）。**
 
-| 索引 | 完整 define 名称 | 当前值 | 单位与本文用途 | 配置行号 |
+| 索引 | 完整 define 名称 | 当前值 | 单位与本文用途 | 4.6.0 行号 |
 |---|---|---:|---|---:|
-| [D01] | `NShip.MAX_DAMAGE_SCALING` | 100 | 用于伤害缩放的目标尺寸上限 | 1787 |
-| [D02] | `NShip.SHIELD_RECHARGE_TICKS` | 20 | 护盾耗尽后恢复等待的战斗 tick 数 | 1813 |
-| [D03] | `NCombat.SHIP_DISENGAGE_BASE_CHANCE` | 0.75 | 脱战基础系数，仍须后续计算 | 1913 |
-| [D04] | `NCombat.SHIP_DISENGAGE_MAX_CHANCE` | 0.5 | 脱战最终概率比较值的上限，即 50% | 1914 |
-| [D05] | `NCombat.SHIP_DISENGAGE_HEALTH_THRESHOLD` | 0.5 | 通常路径的受击前船体比例阈值，即 50% | 1915 |
-| [D06] | `NCombat.SHIP_DISENGAGE_FRIENDLY_TERRITORY_MULT` | 1.25 | 友方领土脱战概率倍率，即 ×1.25 | 1916 |
-| [D07] | `NShip.SHIP_MAX_EVASION` | 0.9 | 舰船上游闪避上限，即 90% | 1785 |
-| [D08] | `NGameplay.STARBASE_DISABLED_HEALTH_PERCENTAGE` | 0 | 可瘫痪星基地的船体比例阈值；不表示禁用瘫痪 | 1069 |
+| [D01] | `NShip.MAX_DAMAGE_SCALING` | 100 | 用于伤害缩放的目标尺寸上限 | 1873 |
+| [D02] | `NShip.SHIELD_RECHARGE_TICKS` | 20 | 护盾耗尽后恢复等待的战斗 tick 数 | 1899 |
+| [D03] | `NCombat.SHIP_DISENGAGE_BASE_CHANCE` | 0.75 | 脱战基础系数，仍须后续计算 | 1999 |
+| [D04] | `NCombat.SHIP_DISENGAGE_MAX_CHANCE` | 0.5 | 脱战最终概率比较值的上限，即 50% | 2000 |
+| [D05] | `NCombat.SHIP_DISENGAGE_HEALTH_THRESHOLD` | 0.5 | 通常路径的受击前船体比例阈值，即 50% | 2001 |
+| [D06] | `NCombat.SHIP_DISENGAGE_FRIENDLY_TERRITORY_MULT` | 1.25 | 友方领土脱战概率倍率，即 ×1.25 | 2002 |
+| [D07] | `NShip.SHIP_MAX_EVASION` | 0.9 | 舰船上游闪避上限，即 90% | 1871 |
+| [D08] | `NGameplay.STARBASE_DISABLED_HEALTH_PERCENTAGE` | 0 | 可瘫痪星基地的船体比例阈值；不表示禁用瘫痪 | 1097 |
+| [D09] | `NCombat.SHIP_DISENGAGE_INACTIVITY_DAYS`（4.6 新增） | 150 | 战斗中无射程目标且无人瞄准达此天数后强制脱战（≤0 关闭） | 2004 |
 
-> **可复核性补充（2026-10-08）**：上表“配置行号”指游戏安装目录 `common/defines/00_defines.txt`（v4.5.2）的行号，已逐条核验一致。若要用 dump 复核同一个值，可按下表定位它的**注册读取点**（源码只能证明“从配置读取”，默认值读不出来）：
+> **可复核性补充（2026-11-28，Stellaris 4.6.0 dump `stellaris_4.6_source.cpp`）**：上表“4.6.0 行号”指原版 `common/defines/00_defines.txt`（v4.6.0 `3d1a`）的行号。在 4.6.0 dump 中的**注册读取点**与**实际使用点**如下：
 >
-> | define | 注册读取点 | 实际使用点 |
+> | define | 4.6.0 注册读取点 | 4.6.0 实际使用点 |
 > |---|---|---|
-> | `MAX_DAMAGE_SCALING` | 2461878 | 2014425（与 §3 尺寸夹逼同一处） |
-> | `SHIELD_RECHARGE_TICKS` | 2461273 | 3817471 |
-> | `SHIP_DISENGAGE_BASE_CHANCE` | 2423082 | 3817921 |
-> | `SHIP_DISENGAGE_MAX_CHANCE` | 2423103 | 3818075 |
-> | `SHIP_DISENGAGE_HEALTH_THRESHOLD` | 2423124 | 3817820 / 3817822 / 3817838 |
-> | `SHIP_DISENGAGE_FRIENDLY_TERRITORY_MULT` | 2423146 | 3818040 |
-> | `SHIP_MAX_EVASION` | 2460940 | 1337790（另见 5249734） |
-> | `STARBASE_DISABLED_HEALTH_PERCENTAGE` | 2434906 | 1496312 |
+> | `MAX_DAMAGE_SCALING` | 2572967 | 2144220（与 §3 尺寸夹逼同一处） |
+> | `SHIELD_RECHARGE_TICKS` | 2572368 | 3859019 |
+> | `SHIP_DISENGAGE_BASE_CHANCE` | 2534051 | 3859375 |
+> | `SHIP_DISENGAGE_MAX_CHANCE` | 2534072 | 3859464 |
+> | `SHIP_DISENGAGE_HEALTH_THRESHOLD` | 2534093 | 3859287 |
+> | `SHIP_DISENGAGE_FRIENDLY_TERRITORY_MULT` | 2534115 | 3859439 |
+> | `SHIP_MAX_EVASION` | 2572051 | 1490538（另见 5267691） |
+> | `STARBASE_DISABLED_HEALTH_PERCENTAGE` | 2545740 | 1643625 |
+> | `STARBASE_ENABLED_HEALTH_PERCENTAGE` | 2545763 | 1643626 |
 >
-> 相邻的 `STARBASE_ENABLED_HEALTH_PERCENTAGE`（`00_defines.txt` L1070）当前值为 `0.05`，在 1496313 被写入 `+0xe98`。星基地的瘫痪/恢复阈值是 **0% / 5% 成对定义**，本文正文只讨论了瘫痪那一半。
+> 相邻的 `STARBASE_ENABLED_HEALTH_PERCENTAGE`（4.6.0 `00_defines.txt` L1098）当前值为 `0.05`，星基地的瘫痪/恢复阈值是 **0% / 5% 成对定义**。4.6.0 新增的 `SHIP_DISENGAGE_INACTIVITY_DAYS`（L2004）由 `CFleetCombatManager::ForceDisengageInactiveShips`（L3584242）读取并配合 `CShip::RegisterCombatActivity`（L3858542，写 `ship+0xdc4`）执行，不走伤害扣血路径。
 >
-> 此外 `ARMY_DISENGAGE_BASE_CHANCE`（L2022）当前值同为 `0.75`，但走 `ground_combat.cpp`，不在本文公式覆盖范围内——陆军脱战是独立一套系数。
+> 此外 `ARMY_DISENGAGE_BASE_CHANCE`（4.6.0 `00_defines.txt` L2112）当前值同为 `0.75`，走 `ground_combat.cpp`，不在本文公式覆盖范围内。
 
-行号仅对本次文件有效。
+行号仅对对应版本 dump 文件有效。
 <a id="part15"></a>
 
-**15. 武器字段与引擎结构偏移对照**
+**15. 武器字段与引擎结构偏移对照（4.6.0 实证更新）**
 
-本文正文用结构偏移描述攻击信息；mod 作者面对的是 CWT 字段。下表把两者接上，全部经源码坐实（2026-10-08）。
+本文正文用结构偏移描述攻击信息；mod 作者面对的是 CWT 字段。下表把两者接上，已于 2026-11-28 对 4.6.0 `stellaris_4.6_source.cpp` 复核（相对 4.5.2，`CWeaponComponentTemplate` 该段偏移整体**左移 `0x58`**，`SAttackInfo` 内部布局不变）。
 
-武器组件模板 `CWeaponComponentTemplate`（Linux）没有 getter 层——模板到攻击结构是 `Shoot` 里的直接内存拷贝（2107675～2107691，连续 stride-8 装载）。
+武器组件模板 `CWeaponComponentTemplate`（Linux）没有 getter 层——模板到攻击结构是 `Shoot` 里的直接内存拷贝（连续 stride-8 装载）。
 
-| CWT / CSV 字段 | 模板偏移 (Linux) | 模板偏移 (Win) | 攻击结构偏移 | 本文记号 | 状态 |
+| CWT / CSV 字段 | 4.6.0 模板偏移 (Linux) | 4.5.2 模板偏移 (Linux) | 攻击结构偏移 | 本文记号 | 状态 |
 |---|---|---|---|---|---|
-| `min_damage` | `0x11c8` | — | `+0x00` | `d_min` | 确认 |
-| （区间宽度） | `0x11d0` | — | `+0x08` | `Δd` | 确认 |
-| `hull_damage` | `0x11d8` | `0x1228` | `+0x10` | `m_H` | 确认 |
-| `armor_damage` | `0x11e0` | `0x1230` | `+0x18` | `m_A` | 确认 |
-| `shield_damage` | `0x11e8` | `0x1238` | `+0x20` | `m_S` | 确认 |
-| `armor_penetration` | `0x11f0` | `0x1240` | `+0x28` | `p_A` | 确认 |
-| `shield_penetration` | `0x11f8` | `0x1248` | `+0x30` | `p_S` | 确认 |
-| **`size_damage_factor`** | **`0x1200`** | **`0x1250`** | **`+0x38`** | **`c`** | **确认** |
-| `military_power_multiplier` | `0x1208` | `0x1258` | `+0x40` | 本函数不读 | 确认 |
-| （模板自指针） | `0x1210` | — | `+0x48` | 判吞噬/武器类型 | 确认 |
-| `accuracy` | `0x11a8` | — | — | `a` | 确认 |
-| `tracking` | `0x11b0` | `0x1200` | — | `t` | 确认 |
-| `range` / `cooldown` / `min_windup` | `0x1198` / `0x1190` / `0x1180` | — | — | — | 确认 |
-| `missile_speed` / `missile_health` / `missile_evasion` / `missile_armor` / `missile_shield` / `missile_retarget_range` | `0x1298` / `0x12a8` / `0x12a0` / `0x12b0` / `0x12b8` / `0x12c0` | — | — | — | 确认 |
-| `+0x50`～`+0x80` | `0x1218`～`0x1248` | — | `+0x50`～`+0x80` | 语义未命名 | 未确认 |
+| `min_damage` | `0x1170` | `0x11c8` | `+0x00` | `d_min` | 确认 |
+| （区间宽度） | `0x1178` | `0x11d0` | `+0x08` | `Δd` | 确认 |
+| `hull_damage` | `0x1180` | `0x11d8` | `+0x10` | `m_H` | 确认 |
+| `armor_damage` | `0x1188` | `0x11e0` | `+0x18` | `m_A` | 确认 |
+| `shield_damage` | `0x1190` | `0x11e8` | `+0x20` | `m_S` | 确认 |
+| `armor_penetration` | `0x1198` | `0x11f0` | `+0x28` | `p_A` | 确认 |
+| `shield_penetration` | `0x11a0` | `0x11f8` | `+0x30` | `p_S` | 确认 |
+| **`size_damage_factor`** | **`0x11a8`** | **`0x1200`** | **`+0x38`** | **`c`** | **确认** |
+| `military_power_multiplier` | `0x11b0` | `0x1208` | `+0x40` | 本函数不读 | 确认 |
+| （模板自指针） | `0x11b8` | `0x1210` | `+0x48` | 判吞噬/武器类型 | 确认 |
+| `accuracy` | `0x1150` | `0x11a8` | — | `a` | 确认 |
+| `tracking` | `0x1158` | `0x11b0` | — | `t` | 确认 |
+| `range` / `cooldown` / `min_windup` / `max_windup` | `0x1140` / `0x1138` / `0x1128` / `0x1130` | `0x1198` / `0x1190` / `0x1180` / `0x1188` | — | — | 确认 |
+| `missile_speed` / `missile_health` / `missile_evasion` / `missile_armor` / `missile_shield` / `missile_retarget_range` | `0x1240`～`0x1268` | `0x1298`～`0x12c0` | — | — | 确认 |
+| 溅射 / 连锁伤害区间 | `0x11c0`/`0x11c8` 与 `0x11d8`/`0x11e0` | `0x1218`/`0x1220` 与 `0x1230`/`0x1238` | 写入 `+0x00`/`+0x08` | 次级目标伤害区间 | 确认 |
 
-Windows 侧该模板段整体 `+0x50`（tracking/hull/shield/armor/s_pen/a_pen/size_damage_factor 逐条核对通过），跨平台对齐可用于快速定位。
-
-**`size_damage_factor` 的写入者是武器 CSV 解析器**，证据链是引擎自己的硬编码英文串，不依赖任何推断：
+**`size_damage_factor` 与 `accuracy` / `tracking` 的写入与校验都在武器 CSV 解析器**（4.6.0 L3917487～L3917731），校验报错串与 CWTools 规则 `CW290` 完全对应：
 
 ```cpp
-3878034:  FindIndexOfHeader("size_damage_factor", ...);
-3878172:  *(long *)(uVar9 + 0x1200) = CString::GetFixedPoint(...);
-3878215:  "[%s:%i] invalid weapon component template. Size Damage Factor should not be less than 0.0. [%s]"
+3917704:  "... Tracking should be between 0.0 and 1.0 ..."
+3917716:  "... Accuracy should be between 0.0 and 1.0 ..."
+3917728:  "... Size Damage Factor should not be less than 0.0 ..."
 ```
 
-默认值 `0`（模板构造 2101989），而 0 恰好命中 `CalcDamage` 的 `c_raw < 1` 跳过分支——**不填该字段等于完全不参与尺寸缩放**，不是“乘以 1”。
+默认值 `0`，而 `0` 恰好命中 `CalcDamage` 的 `c_raw < 1` 跳过分支——**不填该字段等于完全不参与尺寸缩放**，不是“乘以 1”。
 
-防御侧的目标尺寸是**另一套**：`defense+0x10` = `CShipSize+0x630`（3813661），在 2014424～2014431 被夹逼到 `[1.0, MAX_DAMAGE_SCALING]` 后作除数使用。它是 `ship_size.cpp` 按 token `0x2e4b` 读的普通字段（3899121），**不是修饰器**，dump 中无符号名。
+防御侧的目标尺寸是**另一套**：`defense+0x10` = `CShipSize+0x668`（4.5.2 为 `+0x630`），在 `CalcDamage` 中被夹逼到 `[1.0, MAX_DAMAGE_SCALING]` 后作为尺寸因子参与缩放。
 
 <a id="part16"></a>
 
 **16. modder 易踩的语义陷阱**
 
-以下每条都由源码坐实，且都与 CWT 规则里“一行 `= float`”的写法形成反差。
+以下每条都由 4.6.0 源码复核坐实，且都与 CWT 规则里“一行 `= float`”的写法形成反差。
 
-| # | 陷阱 | 依据 |
+| # | 陷阱 | 依据（4.6.0 源码） |
 |---|---|---|
-| 1 | `ship_size_damage_factor` 修饰器（Ships 类，脚本枚举键 `0x398e`、内部 id `0x233`、默认 1.0）是**加到**武器的 `c` 上，不是相乘 | 3814024～3814025 `param_10[7] = puVar7 + param_10[7]`，`puVar7 = 攻击者 CShipSize.GetModifierValue(0x233)`。全 dump 中 `0x233` **只有这一个读取点** |
+| 1 | `ship_size_damage_factor` 修饰器（4.6.0 内部 ModifierType ID **`0x242`**，4.5.2 为 `0x233`）是**加到**武器的 `c` 上，不是相乘 | `CShip::ApplyModifier` L3856089：`param_1 + 0x38 += GetModifierValue(0x242)` |
 | 2 | `ship_sizes.cwt` 的 `shipsize_$_size_damage_factor` 与 `modifiers.log` 的 `ship_size_damage_factor` 是**同一个**修饰器，不构成第二条路径 | 该行位于 `modifiers = { ... }` 块内 |
-| 3 | `size_damage_factor` **只校验 `>= 0`，没有上界**；`accuracy`/`tracking` 则有 0..1 校验 | 3878204 对比 3878176、3878190 |
-| 4 | 尺寸缩放只放大伤害：`D = D₁·(1 + c·s_eff)`，**不是** `1 + c·(s_eff − 1)` | 2014433、2014447 |
-| 5 | 超过 `MAX_DAMAGE_SCALING`（当前 100）的目标尺寸只是被夹住，**不是伤害总上限** | 2014425～2014430 |
-| 6 | 溅射/连锁/`deal_damage` **不触发吸血**，且不执行三层分配 | 见 §9.5 |
-| 7 | 溅射/连锁的伤害区间来自溅射伤害参数，不来自武器 `min_damage`/`max_damage` | 2107815～2107816、2107951～2107952 |
-| 8 | `ship_size_multiplier` 触发器把尺寸**向上取整到 1.0 倍率**，而 tooltip 显示原值 | 7552201～7552202：`(0 < v && v != (v/100000)*100000) + (v/100000)`。例如 1.5→2.0、1.2→2.0、−1.5→−1.0 |
-| 9 | 护盾恢复延迟判定比较的是**倍率后**的 `D_S` 而非分配量 `Q_S`；`S=0, D_S=0` 时同样成立 | 3817470 `(-1 < S) && (S <= D_S)` |
-| 10 | 星基地瘫痪阈值 `0` **不等于关闭瘫痪**：它表示阈值取最大船体的 0%，此时仍会把船体钳到至少 1 点再 `SetDisabled` | 3817798～3802、1496312 |
+| 3 | `size_damage_factor` **只校验 `>= 0`，没有上界**；`accuracy`/`tracking` 则有 `0..1` 校验（CWTools `CW290` 已同步校验） | 武器 CSV 解析器 L3917704 / L3917716 / L3917728 |
+| 4 | 尺寸缩放只放大伤害：`D = D₁·(1 + c·s_eff)`，**不是** `1 + c·(s_eff − 1)` | `NCombatRules::CalcDamage` L2144137 起 |
+| 5 | 超过 `MAX_DAMAGE_SCALING`（当前 100）的目标尺寸只是被夹住，**不是伤害总上限** | `CalcDamage` L2144220 |
+| 6 | 溅射/连锁/`damage_ship` **同样走 `CShip::TakeDamage` 三层分配**，但**不触发吸血**（不调用 `ApplyPostDamageValues`，也不触发 `OnHit`/`InjectModifier`） | 见 §9.5（2026-11-28 4.6.0 平反） |
+| 7 | 溅射/连锁的伤害区间来自溅射/连锁伤害参数（`+0x11c0/+0x11c8`、`+0x11d8/+0x11e0`），不来自武器 `min_damage`/`max_damage` | `CWeaponComponent::Shoot` L2233342～L2233471 |
+| 8 | `ship_size_multiplier` 触发器把尺寸**向上取整到 1.0 倍率**，而 tooltip 显示原值 | `CShipSizeMultiplierTrigger::GetTriggerValue` L7478776：例如 1.5→2.0、1.2→2.0、−1.5→−1.0 |
+| 9 | 护盾恢复延迟判定比较的是**倍率后**的 `D_S` 而非分配量 `Q_S`；`S=0, D_S=0` 时同样成立 | `CShip::TakeDamage` L3859019 `(-1 < S) && (S <= D_S)` |
+| 10 | 星基地瘫痪阈值 `0` **不等于关闭瘫痪**：它表示阈值取最大船体的 0%，此时仍会把船体钳到至少 1 点再 `SetDisabled` | `CShip::TakeDamage` 与 L1643625 |
 
-| 索引 | 函数或位置 | 相关行号 | 支持的结论 |
+| 索引 | 函数或位置 | 4.6.0 行号（4.5.2 基线） | 支持的结论 |
 |---|---|---|---|
-| [S01] | NCombatRules::CalcDamage | 2014339～2014617 | 输入处理、减伤、缩放、穿透、容量分配、输出下限、吞噬标记 |
-| [S02] | CStatInterval<CFixedPoint>::GetRandom | 1558122～1558151 | 区间下限/宽度结构、1000 档比例、逐步定点乘法 |
-| [S03] | CMissile::TakeDamage | 946226～946356；调用 946301 | 导弹的防御输入、零减伤、扣血和销毁 |
-| [S04] | CStrikeCraft::TakeDamage | 1565622 起，重点 1565671～1565701 | 舰载机防御模板字段、零减伤、扣血和销毁 |
-| [S05] | CShip::BuildDefenseInfo | 3813633～3813708 | 当前盾甲、尺寸、两类硬化的来源 |
-| [S06] | CShip::TakeDamage | 3817156～3818170 | 上游免受伤、减伤输入、扣血、吞噬、瘫痪、击毁、脱战和事件 |
-| [S07] | CShip::ApplyModifier | 3813882～3814234；另见 2013993～2014017 | 伤害、倍率与穿透修正在 CalcDamage 之前形成 |
-| [S08] | SHIP_SIZE_MULTIPLIER 显示 | 3859230～3859233；另见 7552194～7552202 | 尺寸字段 +0x630 的含义 |
-| [S09] | CStrikeCraftComponentTemplate 构造 | 2108935 起，重点 2108994～2108998 | 舰载机模板防御附加字段的初始化 |
-| [S10] | CWeaponComponent::Shoot | 2107430～2108014 | 命中入口、OnHit、主目标、恢复调用、范围和连锁 |
-| [S11] | NCombatRules::ApplyPostDamageValues | 2014836～2014908 | 返回伤害合计形成恢复预算，船体→装甲→护盾顺序 |
-| [S12] | CStrikeCraft::TryShooting 的命中分支 | 1564396～1564445 | 舰载机命中、修正、目标扣血和恢复调用 |
-| [S13] | NCombatRules::DoHitChanceRoll | 2014625～2014644 | 同一随机档位决定闪避、失手、命中 |
-| [S14] | NCombatRules::CalcChanceToHit | 2014669～2014693 | 用于估算的命中率限制顺序 |
-| [S15] | CNoiseRandom::GetInteger | 8603478～8603490；宏包装 7643046 起 | 正常随机整数的非负范围 |
-| [S16] | 减伤信息读取 | 3817399～3817440 | 固定/百分比减伤对应两字段，上游条件性限制 |
-| [S17] | 目标评估中的 CalcDamage 调用 | 1578844～1578854 | false 中点路径与另乘命中率 |
-| [S18] | MAX_DAMAGE_SCALING define 读取 | 2461868～2461880 | 尺寸上限来自配置 |
-| [S19] | 导弹命中目标的入口 | 945327～945388 | 与第 946301 行“导弹受击”区别，命中后再构造攻击 |
-| [S20] | 星基地瘫痪阈值赋值 | 1496312 | `STARBASE_DISABLED_HEALTH_PERCENTAGE` 写入 `+0xe90` |
-| [S21] | 舰船闪避上限应用 | 1337790～1337791 | `SHIP_MAX_EVASION` 用于上游封顶 |
+| [S01] | `NCombatRules::CalcDamage` | **2144137～2144416**（2014339） | 输入处理、减伤、缩放、穿透、容量分配、输出下限、吞噬标记 |
+| [S02] | `CStatInterval<CFixedPoint>::GetRandom` | **1700681**（1558122） | 区间下限/宽度结构、1000 档比例、逐步定点乘法 |
+| [S03] | `CMissile::TakeDamage` / `BuildDefenseInfo` | **1115952** / **1115901**（946226） | 导弹的防御输入、零减伤、扣血和销毁 |
+| [S04] | `CStrikeCraft::TakeDamage` | **1712540**（1565622） | 舰载机防御模板字段、零减伤、扣血和销毁 |
+| [S05] | `CShip::BuildDefenseInfo` | **3855760**（3813633） | 当前盾甲、尺寸（`+0x668`）、两类硬化的来源 |
+| [S06] | `CShip::TakeDamage` / `-0x20` thunk | **3858791** / **3859652**（3817156） | 上游免受伤、减伤输入、扣血、吞噬、瘫痪、击毁、脱战和事件 |
+| [S07] | `CShip::ApplyModifier` | **3855963** / **3856105**（3813882） | 伤害、倍率与穿透修正在 CalcDamage 之前形成，`0x242` 加法 |
+| [S08] | `CShipSizeMultiplierTrigger::GetTriggerValue` | **7478776**（7552194） | 尺寸字段 `+0x668` 的向上取整语义 |
+| [S09] | `CStrikeCraftComponentTemplate` 构造 | （4.5.2: 2108935） | 舰载机模板防御附加字段的初始化 |
+| [S10] | `CWeaponComponent::Shoot` | **2233029**（2107430） | 命中入口、OnHit、主目标 `+0x68`、恢复调用、溅射/连锁 `+0x80` |
+| [S11] | `NCombatRules::ApplyPostDamageValues` | **2144642**（2014836） | 返回伤害合计形成恢复预算，船体→装甲→护盾顺序 |
+| [S12] | `CStrikeCraft::TryShooting` | **1711078**（1564396） | 舰载机命中、修正、目标扣血和恢复调用 |
+| [S13] | `NCombatRules::DoHitChanceRoll` | **2144421**（2014625） | 同一随机档位决定闪避、失手、命中 |
+| [S14] | `NCombatRules::CalcChanceToHit` | **2144467**（2014669） | 用于估算的命中率限制顺序 |
+| [S15] | `CNoiseRandom::GetInteger` | **8619265**（8603478） | 正常随机整数的非负范围 |
+| [S16] | 减伤信息读取（`CShip::TakeDamage` 内） | **3858791** 内（3817399） | 固定/百分比减伤对应两字段，上游条件性限制 |
+| [S17] | 目标评估中的 `CalcDamage` 调用 | **1724367** 内（1578844） | `false` 中点路径与另乘命中率 |
+| [S18] | `MAX_DAMAGE_SCALING` define 读取 | **2572967**（2461878） | 尺寸上限来自配置 |
+| [S19] | 导弹命中目标的入口 | （4.5.2: 945327） | 与导弹受击区别，命中后再构造攻击 |
+| [S20] | 星基地瘫痪/恢复阈值赋值 | **1643625** / **1643626**（1496312） | `STARBASE_DISABLED/ENABLED_HEALTH_PERCENTAGE` 写入 |
+| [S21] | 舰船闪避上限应用 | **1490538** / **5267691**（1337790） | `SHIP_MAX_EVASION` 用于上游封顶 |
+| [S22] | `CDamageShipEffect` / `CShip::~CShip` | **6410170** / **231733** | 4.6 新增：证实 `CShip` 多重继承虚表偏移与 `+0x80` = `TakeDamage` |
 <a id="appendix-a"></a>
 
 **附录 A：2026-10-08 源码核验修订清单**
@@ -1044,4 +1045,19 @@ Windows 侧该模板段整体 `+0x50`（tracking/hull/shield/armor/s_pen/a_pen/s
 - `SDefenseInfo` 的字段写入是 **4 字节索引**（3813707 护盾硬化写 `param_1+6`、3813685 装甲硬化写 `param_1+8`，步长 8 字节）；按 8 字节索引会让结构大到不合理，可据此排除反编译类型噪声的误导。
 - Windows PE 侧定位到的候选虚表（构造函数形态匹配）**不是** CShip 主虚表：其主虚表仅 6 个槽而 Linux 侧为 93 个，且槽 `+0x68` 指向无 `.pdata` 条目的 16 字节跳板。
 
-**仍未闭合**：槽 `+0x80` 的具体函数身份。需 Linux ELF 本体；本机无 ELF（`anti_stellaris/README.md` 已记载本机魔数扫描确认）。
+**原悬案闭合**：2026-10-08 遗留的“槽 `+0x80` 身份”已于 2026-11-28 在 Stellaris 4.6.0 源码复核中彻底闭合，见下方附录 C。
+
+<a id="appendix-c"></a>
+
+**附录 C：2026-11-28 Stellaris 4.6.0 复核与 `+0x80` 虚槽平反**
+
+复核对象：`stellaris_4.6_source.cpp`（Corona Borealis v4.6.0 `5d0adbc59353f1e9b085e0a2c4cb3d1a`）及原版 4.6.0 `common/defines/00_defines.txt`。
+
+| # | 变更项 | 4.6.0 复核结果 |
+|---|---|---|
+| 1 | `NCombatRules::CalcDamage`（L2144137）核心算术与三层分摊 | 与 4.5.2 完全一致，23 组算例零变动 |
+| 2 | §9.5 & 陷阱 #6（槽 `+0x80` 身份） | **平反闭合**：`CShip` 主虚表在 `+0x00`、`CTargetable` 次虚表在 `+0x20`（`CShip::~CShip` L231733）；主目标持 `CTargetable*` 调 `+0x68` → `-0x20` thunk（L3859652）→ `CShip::TakeDamage`（L3858791），溅射/连锁/`damage_ship` 持 `CShip*` 直接调主虚表 `+0x80` → 同一个 `CShip::TakeDamage`。次级目标与 `damage_ship` **同样走三层分配模型**，但仍不触发吸血（不调 `ApplyPostDamageValues`） |
+| 3 | `CWeaponComponentTemplate` Linux 偏移（§15） | 相对 4.5.2 整体**左移 `0x58`**（如 `min_damage` `0x11c8 -> 0x1170`、`size_damage_factor` `0x1200 -> 0x11a8`、武器类型 `0x12e0 -> 0x1288`），`SAttackInfo` 内部偏移未变 |
+| 4 | `CShipSize.size_multiplier` 偏移 | `+0x630 -> +0x668` |
+| 5 | `ship_size_damage_factor` ModifierType ID | `0x233 -> 0x242`（L3856089），仍为加法 `c += modifier` |
+| 6 | defines 与不活跃脱战 | `[D01]`–`[D08]` 数值全部未变，行号后移；新增 `NCombat.SHIP_DISENGAGE_INACTIVITY_DAYS = 150`（L2004，`ForceDisengageInactiveShips` L3584242） |

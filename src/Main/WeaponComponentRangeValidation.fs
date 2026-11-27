@@ -26,8 +26,12 @@ let diagnosticCode = "CW290"
 
 let diagnosticSeverity = Severity.Warning
 
-/// Fields whose value is a probability, not an arbitrary scalar.
+/// Fields whose value is a probability in [0, 1], not an arbitrary scalar.
 let private boundedRatioFields = Set.ofList [ "accuracy"; "tracking" ]
+
+/// Fields the engine validates as non-negative (>= 0.0) in the weapon CSV loader
+/// ("Size Damage Factor should not be less than 0.0").
+let private nonNegativeFields = Set.ofList [ "size_damage_factor" ]
 
 let private minimum = 0M
 let private maximum = 1M
@@ -45,7 +49,10 @@ type ComponentRangeFinding =
 
     member finding.Message =
         let text = finding.Value.ToString(CultureInfo.InvariantCulture)
-        $"Weapon component '{finding.Field}' should be between 0.0 and 1.0, got {text}"
+        if nonNegativeFields.Contains finding.Field then
+            $"Weapon component '{finding.Field}' should not be less than 0.0, got {text}"
+        else
+            $"Weapon component '{finding.Field}' should be between 0.0 and 1.0, got {text}"
 
 /// Only literal numbers are decidable at lint time. `var:x`, `@[...]`, `yes`
 /// and quoted text are resolved by the game or by a later pass, so they stay silent.
@@ -63,9 +70,14 @@ let private isWeaponComponentTemplate (node: Node) =
 let private leavesIn (node: Node) =
     node.Leaves
     |> Seq.choose (fun leaf ->
-        if boundedRatioFields.Contains(leaf.Key.ToLowerInvariant()) then
+        let key = leaf.Key.ToLowerInvariant()
+        if boundedRatioFields.Contains key then
             match tryConstantNumber leaf with
             | Some value when isOutOfRange value -> Some(leaf, value)
+            | _ -> None
+        elif nonNegativeFields.Contains key then
+            match tryConstantNumber leaf with
+            | Some value when value < minimum -> Some(leaf, value)
             | _ -> None
         else
             None)

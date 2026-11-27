@@ -460,7 +460,7 @@ const RULES: DiagnosticRule[] = [
     {
         codes: ['CW281'],
         pattern: /^Dynamic name '(.+)' ends with a digit/,
-        zh: m => `动态名 '${m[1]}' 以数字结尾:动态 flag/事件目标名是「基础名+十进制ID」无分隔符拼接,结尾数字会撞名(a1@23 与 a12@3 生成同一个名字)。`,
+        zh: m => `动态名 '${m[1]}' 以数字结尾:动态 flag/事件目标/变量名是「基础名+十进制ID」无分隔符拼接,结尾数字会撞名(a1@23 与 a12@3 生成同一个名字)。`,
     },
     {
         codes: ['CW282'],
@@ -506,6 +506,11 @@ const RULES: DiagnosticRule[] = [
         codes: ['CW290'],
         pattern: /^Weapon component '(.+)' should be between 0\.0 and 1\.0, got (.+)$/,
         zh: m => `武器组件字段 '${m[1]}' 的取值必须在 0.0 到 1.0 之间(当前为 ${m[2]}):引擎命中率公式把它当作概率夹取,越界值只会在游戏日志中报错。`,
+    },
+    {
+        codes: ['CW290'],
+        pattern: /^Weapon component '(.+)' should not be less than 0\.0, got (.+)$/,
+        zh: m => `武器组件字段 '${m[1]}' 的取值不能小于 0.0(当前为 ${m[2]}):引擎读取武器表时将其校验为非负数,负值会被跳过缩放并在游戏日志中报错。`,
     },
 ];
 

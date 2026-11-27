@@ -112,6 +112,8 @@ harness.Equal
 
 let flagFallback = resolve (fun _ -> None) "has_ship_flag" |> Option.map (fun f -> f.Class)
 harness.Equal "unannotated flag command falls back to the family rule" (Some LinearContainer) flagFallback
+let changeFlagFallback = resolve (fun _ -> None) "change_country_flag" |> Option.map (fun f -> f.Class)
+harness.Equal "unannotated change_*_flag falls back to the family rule" (Some LinearContainer) changeFlagFallback
 
 let ownedFallback = resolve (fun _ -> None) "num_owned_planets" |> Option.map (fun f -> f.Class)
 harness.Equal "unannotated num_owned_ command falls back to the family rule" (Some LinearOwned) ownedFallback

@@ -130,7 +130,7 @@ module HoverPerformance =
     /// one engine implementation whose scope family only selects which flag array
     /// the virtual call returns, so the family-level annotation covers all of them.
     let private familyFallback (name: string) : Fact option =
-        if hasSuffix name "_flag" && (hasPrefix name "has_" || hasPrefix name "set_" || hasPrefix name "remove_") then
+        if hasSuffix name "_flag" && (hasPrefix name "has_" || hasPrefix name "set_" || hasPrefix name "remove_" || hasPrefix name "change_") then
             Some(fromRule name LinearContainer None (Some "shared flag implementation - see ## engine on the annotated command in triggers.cwt / effects.cwt"))
         elif hasPrefix name "num_owned_" then
             Some(fromRule name LinearOwned None (Some "owned-object count - see ## engine on an annotated num_owned_ command"))

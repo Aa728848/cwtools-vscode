@@ -384,9 +384,9 @@ const OPTION_NUMERIC_FIELDS: NumericFieldSpec[] = [
 const OPTION_CHECKBOX_FIELDS: CheckboxFieldSpec[] = [
     { key: 'useRandom', labelEn: 'Apply random factor (engine default: on)', labelZh: '施加随机扰动（引擎默认开启）' },
     { key: 'fleetHasHittable', labelEn: 'Fleet still has a hittable ship', labelZh: '目标舰队仍有可命中的船' },
-    { key: 'targetFocus', labelEn: 'target_focus = spread', labelZh: 'target_focus = spread（不作主目标粘性）' },
+    { key: 'targetFocus', labelEn: 'target_focus = spread (disables Mcur, enables Mrec)', labelZh: 'target_focus = spread（禁用当前粘性 Mcur，启用近期惩罚 Mrec）' },
     { key: 'isCurrentMainTarget', labelEn: 'Is the current main target', labelZh: '是当前主目标' },
-    { key: 'isRecentNonLatest', labelEn: 'In recent-target memory', labelZh: '在最近目标记忆中' },
+    { key: 'isRecentNonLatest', labelEn: 'In recent-target memory (applies under spread)', labelZh: '在最近目标记忆中（仅 spread 生效）' },
 ];
 
 /** 武器数值字段：camelCase 键 + 模板里的 snake_case 键（估算标注按模板键汇报）。 */

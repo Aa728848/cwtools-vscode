@@ -159,6 +159,31 @@ harness.Check "pre-check skips files without component templates" (
 harness.Check "pre-check keeps component template files" (
     mayContainWeaponTemplates "utility_component_template = { key = \"a\" }")
 
+// --- size_damage_factor >= 0 (Stellaris 4.6 CSV loader parity) ---------------
+
+let sizeDamageSample =
+    """
+weapon_component_template = {
+	key = "PROBE_SIZE_NEG"
+	size_damage_factor = -0.5
+}
+
+weapon_component_template = {
+	key = "PROBE_SIZE_OK"
+	size_damage_factor = 0
+}
+
+weapon_component_template = {
+	key = "PROBE_SIZE_HIGH"
+	size_damage_factor = 4.0
+}
+"""
+
+let sizeFindings = findings samplePath sizeDamageSample
+harness.Equal "only negative size_damage_factor is reported" 1 sizeFindings.Length
+harness.Equal "size_damage_factor finding code" "CW290" (List.head sizeFindings).Code
+harness.Check "size_damage_factor message states >= 0.0" ((List.head sizeFindings).Message.Contains "should not be less than 0.0")
+
 // --- broken text ------------------------------------------------------------
 
 harness.Check "unparsable text yields no findings instead of throwing" (

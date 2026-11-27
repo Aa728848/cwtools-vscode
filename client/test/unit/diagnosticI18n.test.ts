@@ -130,6 +130,9 @@ describe('diagnostic i18n enrichment', () => {
 
             const cw290 = zh("Weapon component 'accuracy' should be between 0.0 and 1.0, got 1.5", 'CW290');
             expect(cw290).to.include('accuracy').and.to.include('1.5').and.to.include('概率');
+
+            const cw290Size = zh("Weapon component 'size_damage_factor' should not be less than 0.0, got -0.5", 'CW290');
+            expect(cw290Size).to.include('size_damage_factor').and.to.include('-0.5').and.to.include('0.0');
         });
 
         it('translates brace/parse recovery errors', () => {            expect(zh("Missing '}' for '{' opened at line 12 col 4", 'CW001_MISSING_CLOSE_BRACE'))

@@ -64,6 +64,8 @@ Status: implemented
 - **仍未闭合**：槽 `+0x80` 的具体函数身份。Linux dump 只导出函数不含 data section，Windows PE 侧未能正确定位 CShip 主虚表（候选表主虚表仅 6 槽而 Linux 侧 93 槽，且其槽 `+0x68` 指向无 `.pdata` 条目的 16 字节跳板）。定案需 Linux ELF 本体读 `.data.rel.ro`；本机无 ELF（`anti_stellaris/README.md` 已记载）。因不影响上述可用区间，未阻塞本次归档。
 - 附录 B 记录了**已排除的候选路径**，供后续复核者省时——本次有两次因反编译类型噪声得出错误映射（`param_12`、`defense+0x10`），不记录会重复踩坑。
 
+- **2026-11-28 4.6.0 复核更正（重要）**：上文第 3 节关于“槽 `+0x80` 不是 `TakeDamage`、不走三层分配”的推翻结论**已被平反**——`CShip` 采用多重继承布局（主虚表 `+0x00`，`CTargetable` 次虚表 `+0x20`），主目标 `+0x68` 经 `-0x20` thunk 与次级目标/`damage_ship` 的主虚表 `+0x80` 均指向同一个 `CShip::TakeDamage`（仅不调用 `ApplyPostDamageValues` 故仍不吸血）。详见 [2026-11-28-stellaris-4.6-engine-decompilation-audit-and-sync.md](2026-11-28-stellaris-4.6-engine-decompilation-audit-and-sync.md)。
+
 ## Related
 
 - 同目录 [2026-10-07-engine-doc-log-refresh-and-cost-reanchor.md](2026-10-07-engine-doc-log-refresh-and-cost-reanchor.md) 拥有「反编译证据必须可逐条复核、跨版本不得整体加偏移」的决策，本文继承该纪律。

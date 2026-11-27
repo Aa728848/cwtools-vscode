@@ -26,11 +26,29 @@
 | [12_ai_economy_automation.md](12_ai_economy_automation.md) | AI 殖民评估、宜居度缓存、专业化配对搜索、决议判断、星球自动化、自动设计、建造队列 |
 | [13_daily_subsystems.md](13_daily_subsystems.md) | 宣战理由、舰船日更、特殊项目/局势、考古与裂隙、法令、月更阶段结构、宇宙风暴、灵能光环 |
 | [14_trigger_cost_catalog.md](14_trigger_cost_catalog.md) | **trigger 开销速查表**（约 100 个常用 trigger，按 O(1) / 线性 / 隐藏循环 / 求值脚本分级，附"贵 → 便宜"替换表） |
-| [15_silent_corruption_bugs.md](15_silent_corruption_bugs.md) | ⚠️ **静默数据损坏类 bug**（不是性能问题）：flag 名字表耗尽、`set_design_flag` 写进全局 flag（原版专家特权会删错设计）、TPdxRef 代号回绕、空对象被污染、AI 结果不可复现 |
-| [16_combat_damage_resolution.md](16_combat_damage_resolution.md) | ⚠️ **伤害结算公式**（不是性能问题）：4.5.2 `CalcDamage` 三层分配模型、武器字段 ↔ 结构偏移对照、23 组算例；2026-10-08 已完成逐条源码核验 |
-| [17_ship_targeting_weights.md](17_ship_targeting_weights.md) | ⚠️ **舰船索敌权重公式**（不是性能问题）：4.5.2 两阶段乘法链（尺寸/追踪-闪避/距离/预置权重/残血/无武装/随机）、武器层 ΣD·p 分数、19 项 defines、算例与误区十条；公式转写自 PDF，脚本层与规则层已核，**dump 行号未经独立核验** |
+| [15_silent_corruption_bugs.md](15_silent_corruption_bugs.md) | ⚠️ **静默数据损坏类 bug**（已于 2026-11-28 复核 4.6.0）：4.6 起**变量名并入 65535 `CPdxIntegerFlags` 表**（C1 爆炸半径扩大）、`set_design_flag` 仍写全局 flag（C2）、TPdxRef 代号回绕（C3）、空对象污染（C5）、AI 不可复现（C6）；C7 确认已有 `IsValid()` 保护 |
+| [16_combat_damage_resolution.md](16_combat_damage_resolution.md) | ⚠️ **伤害结算公式**（已于 2026-11-28 复核 4.6.0）：`CalcDamage` 三层分配模型、4.6 武器字段 ↔ 结构偏移对照（整体 `-0x58`）、23 组算例，**并已平反 §9.5 `+0x80` 虚槽 = `CShip::TakeDamage`** |
+| [17_ship_targeting_weights.md](17_ship_targeting_weights.md) | ⚠️ **舰船索敌权重公式**（已于 2026-11-28 完成 4.6.0 一手源码核验）：闭合旧未证实项 V1–V5、纠正 PDF 3 处偏差（`spread`-only `Mrec`、无武装/星基互斥、Stage 1 对称 `Mcur`/`Mrec`）、新增 `SHIP_DISENGAGE_INACTIVITY_DAYS` |
 
 > 注：反编译 dump 索引与提取脚本位于外部反编译工作目录，不随本仓库分发；扩展侧规则成本提取与合并脚本位于 [`tools/engine-cost/`](../../tools/engine-cost/)。
+
+## Stellaris 4.6.0 (`3d1a`) 反编译复核摘要（2026-11-28）
+
+基于 `stellaris_4.6_source.cpp`（Corona Borealis v4.6.0 `5d0adbc59353f1e9b085e0a2c4cb3d1a`，9,363,893 行，141,524 个函数块）对本系列文档与 CWTools 静态规则的前提进行了全量复核。下方 Top 18 及 01–14 正文保留 4.5 原始扫描行号作为历史基线，**4.6.0 的核心复核结论如下**：
+
+1. **五大引擎结构变化**：
+   - **变量表并入 `CPdxIntegerFlags` 65535 表**：`CVariables::SetVariable`（L1860976）与 `ReadMember`（L1860472）改用 `uint16` flag index 做键——加速变量查找的同时，导致 flag + 事件目标 + 变量三者共享 65535 进程级上限（见 [15_silent_corruption_bugs.md](15_silent_corruption_bugs.md) C1）。
+   - **`CGameRules` 槽数扩张**：主表 237 + 次表 14 = **251** 槽（`FUN_00c31220` L474364 / `InitInstance` L474424），与 4.6.0 原版 `00_rules.txt` (245) + `01_gui_rules.txt` (6) 精确相等（4.4.6 为 222 槽）。
+   - **`CEventScope::GetFlags`（L2765083）新增 `ideology` 作用域**（`0x40000000000`，全局 flag 偏移变为 `+0x290`），但仍缺 `design` (`0x2000`) / `bypass` (`0x1000`) 分支（C2 仍存在）。
+   - **战斗新增不活跃强制脱战**：`NCombat.SHIP_DISENGAGE_INACTIVITY_DAYS = 150`（`CFleetCombatManager::ForceDisengageInactiveShips` L3584242 + `CShip::RegisterCombatActivity` L3858542）。
+   - **4.6.0 Linux 首次反编译出 `CEventTarget::GetScope`**（L2775935，3,424 行），证实 22b（每段递归构造/拷贝 `CEventScope`）与 `CW286`/`CW288` 规则前提完全成立。
+2. **Top 18 性能热点全部仍在 4.6.0 成立**：
+   - `#1` `NColonyUpdate::MonthlyUpdate`（L3472609）仍无条件连跑两遍 `UpdatePopJobs`（L3472684/L3472687）；
+   - `#2` `CCountry::InvalidateModifier`（L730910）仍传 `0xffffffff`，并新增 `InvalidateWaystationNetworkModifier`（L730947）；
+   - `#4` `CGalacticDistanceCache::GetDistance`（L2863107）、`#5` `CStarbase::SetOwner`（L1642383 → `CalcBorders` L545282）、`#6` `CTooltipManager::Update`（L5553253）、`#7` `COutlinerListViewBase::InternalUpdate`（L4934501）、`#9` `CheckEvents`（L3793359）、`#11` `CEventScope::Copy`（L2763502）、`#12` `CSaveGameTaskManager::Update`（L1434125）/ `CWriter::WriteString`（L8774872）、`#13` `CGameState::MicroUpdate`（L540988）、`#14` `CColony::DailyUpdateSelfDontReadOthers`（L3385923）、`#15` `ResetFleetPathFindCache`（L3682928，仍是死代码）、`#16` `SetupDatabases`（L173399）/ `CTextLexer::GetTok`（L8762208）、`#17` `SLanguageData::ChangeKeyValuePair`（L8731399）、`#18` `BuildHyperlaneDistances`（L2863469）。
+3. **CWTools 引擎规则校验器（CW279–CW290）前提全部在 4.6.0 依然成立**：
+   - `CW281`（`ProcessDynamicFlag` L1844312 无分隔符拼接，4.6 覆盖全部动态变量）、`CW282`/`CW283`（`CColony::AddBuilding`/`AddDistrict`/`SetController` 与物种权利等同步调 `EnsurePopJobsAreUpToDate` L3368368；`CCreateCountry` L6388654；`CCreatePopGroupEffect` L6624694）、`CW285`（`CMeanTimeToHappen::GetRawFactorNoScopeCopy` L1078930 `factor = 0` 不短路）、`CW286`（`CFixedPointVariableValue::GetValue` L1858230 跨作用域拷贝）、`CW289`（`CreateInlineScriptReader` L8757972 逐点 `ReplaceAll` 重解析）、`CW290`（武器 CSV `Accuracy`/`Tracking` `[0,1]`、`Size Damage Factor >= 0` L3917704–L3917728）。
+4. **CWT 命令成本重锚**：已通过 `tools/engine-cost/extract-engine-cost.cjs` + `merge-engine-cost.cjs --apply` 将 `triggers.cwt` 与 `effects.cwt` 的 `## engine_evidence` 全量重锚至 4.6.0（刷新 1,085 条、新采纳 6 条、升级 2 条：`is_criminal_syndicate` 与 `is_exhibit_active`）。
 
 ## Top 18 汇总（按估计的实际影响排序）
 

@@ -67,7 +67,7 @@ function main() {
     const files = [['trigger', 'triggers.cwt'], ['effect', 'effects.cwt']];
     for (const [kind, file] of files) {
         const full = path.join(rulesDir, file);
-        const lines = fs.readFileSync(full, 'utf8').split('\n');
+        const lines = fs.readFileSync(full, 'utf8').replace(/\r\n/g, '\n').split('\n');
         const out = [];
         let pending = {};       // annotation lines seen since the last alias
         let pendingIdx = {};    // index of each annotation line in `out`

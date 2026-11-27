@@ -95,6 +95,8 @@ interface TargetWeightWeaponOption {
     type?: string;
     source: 'workspace' | 'vanilla';
     useShipMainTarget: boolean;
+    /** 模板显式声明的 target_focus（未写或动态表达式时省略）。 */
+    targetFocus?: 'single' | 'spread';
     targetWeightKeys: string[];
     missingKeys: string[];
     dynamicKeys: string[];
@@ -628,6 +630,7 @@ export class TargetWeightPanel {
             type: entry.componentType,
             source: entry.source,
             useShipMainTarget: entry.useShipMainTarget === true,
+            targetFocus: entry.targetFocus,
             targetWeightKeys: Object.keys(entry.targetWeights).sort((a, b) => a.localeCompare(b)),
             missingKeys: [...entry.missingKeys],
             dynamicKeys: [...entry.dynamicKeys],
@@ -735,6 +738,7 @@ export class TargetWeightPanel {
                 type: entry.componentType,
                 source: entry.source,
                 useShipMainTarget: entry.useShipMainTarget === true,
+                targetFocus: entry.targetFocus,
                 input: this._toWeaponInput(entry),
                 targetableShipSizes: [...entry.targetableShipSizes],
                 targetWeightKeys: Object.keys(entry.targetWeights).sort((a, b) => a.localeCompare(b)),

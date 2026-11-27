@@ -155,4 +155,57 @@ assertTrue "json exposes costs and relations"
 assertTrue "json exposes structured state issues"
     (json.Item("issues").AsArray().Length >= 2)
 
+// ─── Stellaris 4.6 scopes, loop progress and flag/variable state ops ────────
+let v46CostContent = """country_event = {
+    id = v46.1
+    every_owned_pop_group = {
+        every_owned_colony = {
+            every_ideology = {
+                while = {
+                    limit = { check_variable = { which = steps value > 1 } }
+                    divide_variable = { which = steps value = 2 }
+                }
+            }
+        }
+    }
+}
+"""
+let v46CostEntity = parseEntity v46CostContent "events/v46_cost.txt"
+let v46Costs = collectCosts v46CostEntity.rawEntity "events/v46_cost.txt"
+assertTrue "every_owned_pop_group resolves pop_group scope instead of pop"
+    (v46Costs |> List.exists (fun item -> item.name = "every_owned_pop_group" && item.scope = "pop_group" && item.traversalRange = "pop_group"))
+assertTrue "every_owned_colony resolves colony scope"
+    (v46Costs |> List.exists (fun item -> item.name = "every_owned_colony" && item.scope = "colony" && item.traversalRange = "colony"))
+assertTrue "every_ideology resolves ideology scope"
+    (v46Costs |> List.exists (fun item -> item.name = "every_ideology" && item.scope = "ideology" && item.traversalRange = "ideology"))
+assertTrue "divide_variable inside bounded while is recognized as progressing"
+    (v46Costs |> List.exists (fun item -> item.name = "while" && item.amplification = "bounded_or_progressing_loop"))
+
+let v46StateContent = """country_event = {
+    id = v46.2
+    immediate = {
+        export_trigger_value_to_variable = { trigger = num_pops variable = exported_count }
+        multiply_variable = { which = exported_count value = 2 }
+        check_variable = { which = exported_count value > 0 }
+        change_country_flag = { flag = rotating_flag days = 30 }
+        has_country_flag = rotating_flag
+        set_pop_flag = shared_flag
+        has_pop_group_flag = shared_flag
+        set_ideology_flag = ideo_flag
+        has_ideology_flag = ideo_flag
+    }
+}
+"""
+let v46StateEntity = parseEntity v46StateContent "events/v46_state.txt"
+let v46StateIssues = stateIssues "v46.2" "events/v46_state.txt" v46StateEntity.rawEntity
+assertTrue "export_trigger_value_to_variable initializes variable before check_variable"
+    (v46StateIssues |> List.exists (fun item -> item.subject = "exported_count") |> not)
+assertTrue "change_country_flag initializes rotating_flag before read"
+    (v46StateIssues |> List.exists (fun item -> item.subject = "rotating_flag" && item.kind = "use_before_initialization") |> not)
+assertTrue "pop_group flag is isolated from pop flag scope"
+    (v46StateIssues |> List.exists (fun item -> item.subject = "shared_flag" && item.kind = "use_before_initialization"))
+assertTrue "ideology flag tracks as named scope (emits lifecycle_imbalance and satisfies read)"
+    ((v46StateIssues |> List.exists (fun item -> item.subject = "ideo_flag" && item.kind = "lifecycle_imbalance"))
+     && not (v46StateIssues |> List.exists (fun item -> item.subject = "ideo_flag" && item.kind = "use_before_initialization")))
+
 printfn "PdxFlowAnalysis regression tests passed"

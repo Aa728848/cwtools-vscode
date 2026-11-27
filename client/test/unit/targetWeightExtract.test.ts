@@ -27,6 +27,7 @@ import {
     parsePdxBool,
     parsePdxNumber,
     parseScriptedVariables,
+    parseTargetFocus,
     parseWeaponComponentsCsv,
     readTopLevelBlocks,
     resolveLocalisationReferences,
@@ -97,6 +98,7 @@ describe('Targeting field extraction from component_templates', () => {
         expect(lance.armorPenetration).to.equal(0.5);
         expect(lance.sizeDamageFactor).to.equal(0);
         expect(lance.useShipMainTarget).to.equal(false);
+        expect(lance.targetFocus).to.equal('spread');
         expect(lance.targetWeights).to.deep.equal({ corvette: 10, battleship: 2.5 });
         expect(lance.targetableShipSizes).to.deep.equal(['corvette', 'cruiser']);
         expect(lance.dynamicKeys).to.deep.equal([]);
@@ -187,6 +189,22 @@ describe('Targeting field extraction from component_templates', () => {
         expect(parsePdxBool('yes')).to.equal(true);
         expect(parsePdxBool('no')).to.equal(false);
         expect(parsePdxBool('maybe')).to.equal(undefined);
+        expect(parseTargetFocus('single')).to.equal('single');
+        expect(parseTargetFocus('"SPREAD"')).to.equal('spread');
+        expect(parseTargetFocus('$FOCUS$')).to.equal(undefined);
+    });
+
+    it('extracts target_focus directly and marks dynamic target_focus expressions', () => {
+        const entries = extractTargetingFields([
+            'weapon_component_template = { key = "W_SINGLE" min_damage = 10 target_focus = single }',
+            'weapon_component_template = { key = "W_SPREAD" min_damage = 10 target_focus = "SPREAD" }',
+            'weapon_component_template = { key = "W_DYN" min_damage = 10 target_focus = $FOCUS$ }',
+        ].join('\n'));
+        expect(byId(entries, 'W_SINGLE').targetFocus).to.equal('single');
+        expect(byId(entries, 'W_SPREAD').targetFocus).to.equal('spread');
+        const dyn = byId(entries, 'W_DYN');
+        expect(dyn.targetFocus).to.equal(undefined);
+        expect(dyn.dynamicKeys).to.include('target_focus');
     });
 
     it('counts and gates targeting relevance for the dropdown', () => {
@@ -784,6 +802,27 @@ describe('inline_script field expansion', () => {
         expect(entry!.dynamicKeys).to.include('min_damage');
         expect(entry!.dynamicKeys).to.include('accuracy');
         expect(entry!.missingKeys).to.include('min_damage');
+    });
+
+    it('expands target_focus from inline_script while keeping explicit top-level overrides', () => {
+        const file = [
+            'weapon_component_template = {',
+            '    inline_script = { script = focus/base KEY = "F_INHERIT" FOCUS = spread }',
+            '}',
+            'weapon_component_template = {',
+            '    target_focus = single',
+            '    inline_script = { script = focus/base KEY = "F_OVERRIDE" FOCUS = spread }',
+            '}',
+        ].join('\n');
+        const registry = buildInlineScriptRegistry([{
+            source: 'workspace' as const,
+            file: 'focus/base',
+            template: parseInlineScriptTemplate('key = $KEY$\nmin_damage = 10\nmax_damage = 20\ntarget_focus = $FOCUS$'),
+        }]);
+        const entries = extractTargetingFields(file);
+        for (const entry of entries) expandInlineScriptFields(entry, registry, new Map());
+        expect(byId(entries, 'F_INHERIT').targetFocus).to.equal('spread');
+        expect(byId(entries, 'F_OVERRIDE').targetFocus).to.equal('single');
     });
 });
 

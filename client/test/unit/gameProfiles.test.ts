@@ -217,6 +217,19 @@ describe('GameProfile Registry', () => {
         expect(getProfileByLanguageId('stellaris').folders.deprecatedDirs).to.include('localisation_synced');
     });
 
+    it('aligns Stellaris official localisation languages while keeping l_turkish for modern/generic profiles', () => {
+        const stellaris = getProfileByLanguageId('stellaris');
+        expect(stellaris.localisation.supportedLanguageTags).to.have.lengthOf(10);
+        expect(stellaris.localisation.supportedLanguageTags).to.include.members([
+            'l_english', 'l_braz_por', 'l_german', 'l_french', 'l_spanish',
+            'l_polish', 'l_russian', 'l_simp_chinese', 'l_japanese', 'l_korean',
+        ]);
+        expect(stellaris.localisation.supportedLanguageTags).not.to.include('l_turkish');
+        expect(getProfileByLanguageId('vic3').localisation.supportedLanguageTags).to.include('l_turkish');
+        expect(getProfileByLanguageId('eu5').localisation.supportedLanguageTags).to.include('l_turkish');
+        expect(getProfileByLanguageId('paradox').localisation.supportedLanguageTags).to.include('l_turkish');
+    });
+
     it('maps every serialized vanilla cache file back to its game', () => {
         const expected = new Map([
             ['stellaris', 'stl.cwb'], ['hoi4', 'hoi4.cwb'], ['eu4', 'eu4.cwb'],

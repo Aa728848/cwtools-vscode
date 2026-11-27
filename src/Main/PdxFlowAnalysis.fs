@@ -91,16 +91,25 @@ let private traversalWeight =
         "country", 30
         "system", 15
         "planet", 12
+        "colony", 12
+        "sector", 10
+        "federation", 10
         "fleet", 8
-        "ship", 6
-        "pop", 4
-        "army", 4
-        "starbase", 6
+        "species", 8
         "megastructure", 8
+        "ship", 6
+        "starbase", 6
+        "leader", 6
+        "ideology", 6
+        "situation", 6
+        "pop_group", 5
+        "pop_job", 5
         "ambient_object", 5
-        "deposit", 4
         "strategic_region", 5
         "trade_route", 5
+        "pop", 4
+        "army", 4
+        "deposit", 4
         "all", 50
         "any", 30
         "random", 25
@@ -108,13 +117,19 @@ let private traversalWeight =
         "limit", 10
     ]
 
+let private quantifierTraversalKeys =
+    Set.ofList [ "all"; "any"; "random"; "ordered"; "limit" ]
+
 let private scopeOfOperator (name: string) =
     let lower = name.ToLowerInvariant()
     let mutable scope = "any"
+    let mutable bestWeight = -1
     for KeyValue(key, weight) in traversalWeight do
-        if lower.Contains("_" + key) || lower.StartsWith(key + "_") || lower.Contains(key + "_") then
-            if weight >= (if traversalWeight.ContainsKey scope then traversalWeight.[scope] else 0) then
+        if not (quantifierTraversalKeys.Contains key)
+           && (lower.Contains("_" + key) || lower.StartsWith(key + "_") || lower.Contains(key + "_")) then
+            if weight >= bestWeight then
                 scope <- key
+                bestWeight <- weight
     scope
 
 let private frequencyOf (node: Node) =
@@ -160,6 +175,8 @@ let private whileAmplification (node: Node) =
         || keys |> Seq.exists (fun key -> key.StartsWith("num_", StringComparison.Ordinal))
     let hasVisibleProgress =
         keys.Contains "change_variable" || keys.Contains "subtract_variable"
+        || keys.Contains "multiply_variable" || keys.Contains "divide_variable"
+        || keys.Contains "modulo_variable" || keys.Contains "round_variable_to_closest"
         || keys.Contains "set_variable" || keys.Contains "remove_variable"
         || keys.Contains "clear_variable"
     if hasVisibleBound && hasVisibleProgress then "bounded_or_progressing_loop"
@@ -180,9 +197,13 @@ let collectCosts (root: Node) (file: string) =
             let traversal =
                 if isTraversalNode then
                     let mutable best = "any"
+                    let mutable bestWeight = -1
                     for KeyValue(candidate, weight) in traversalWeight do
-                        if key.Contains("_" + candidate) && weight >= (if traversalWeight.ContainsKey best then traversalWeight.[best] else 0) then
+                        if not (quantifierTraversalKeys.Contains candidate)
+                           && key.Contains("_" + candidate)
+                           && weight >= bestWeight then
                             best <- candidate
+                            bestWeight <- weight
                     best
                 else "pulse"
             let amplification =
@@ -399,8 +420,12 @@ let private stateOperation (key: string) =
     let lower = key.ToLowerInvariant()
     if lower.StartsWith("event_target:") || lower.StartsWith("global_event_target:") then Some "read"
     elif lower.StartsWith("save_") && lower.Contains("event_target") then Some "save"
-    elif lower.StartsWith("set_") && (lower.Contains("variable") || lower.EndsWith("_flag")) then Some "set"
-    elif lower.StartsWith("change_") && lower.Contains("variable") then Some "write"
+    elif (lower.StartsWith("set_") && (lower.Contains("variable") || lower.EndsWith("_flag")))
+         || (lower.StartsWith("export_") && lower.EndsWith("_to_variable")) then Some "set"
+    elif (lower.StartsWith("change_") && (lower.Contains("variable") || lower.EndsWith("_flag")))
+         || ((lower.StartsWith("subtract_") || lower.StartsWith("multiply_")
+              || lower.StartsWith("divide_") || lower.StartsWith("modulo_")
+              || lower.StartsWith("round_")) && lower.Contains("variable")) then Some "write"
     elif (lower.StartsWith("remove_") || lower.StartsWith("clear_")) && (lower.Contains("variable") || lower.Contains("flag") || lower.Contains("event_target")) then Some "clear"
     elif (lower.StartsWith("has_") || lower.StartsWith("check_") || lower.StartsWith("is_")) && (lower.Contains("variable") || lower.Contains("flag") || lower.Contains("event_target")) then Some "read"
     else None
@@ -410,10 +435,18 @@ let private stateScope (key: string) =
     if lower.Contains "global_event_target" then "global"
     elif lower.Contains "event_target" then "local_event"
     elif lower.Contains "country" then "country"
+    elif lower.Contains "colony" then "colony"
     elif lower.Contains "planet" then "planet"
+    elif lower.Contains "starbase" then "starbase"
     elif lower.Contains "fleet" then "fleet"
     elif lower.Contains "ship" then "ship"
     elif lower.Contains "system" then "system"
+    elif lower.Contains "sector" then "sector"
+    elif lower.Contains "leader" then "leader"
+    elif lower.Contains "federation" then "federation"
+    elif lower.Contains "ideology" then "ideology"
+    elif lower.Contains "species" then "species"
+    elif lower.Contains "pop_group" then "pop_group"
     elif lower.Contains "pop" then "pop"
     else "current_scope"
 

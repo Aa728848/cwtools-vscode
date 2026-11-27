@@ -112,9 +112,15 @@ const COMMON_SCRIPT_DIRS = ['events', 'common'];
 const COMMON_GUI_DIRS = ['interface', 'gfx'];
 const COMMON_GFX_DIRS = ['gfx'];
 
+// Stellaris 4.6 localisation/languages.yml lists 10 official languages (no l_turkish).
 const STELLARIS_LOC_LANGS = [
 	'l_english', 'l_french', 'l_german', 'l_spanish', 'l_russian',
-	'l_braz_por', 'l_polish', 'l_simp_chinese', 'l_korean', 'l_japanese', 'l_turkish',
+	'l_braz_por', 'l_polish', 'l_simp_chinese', 'l_korean', 'l_japanese',
+];
+
+const MODERN_LOC_LANGS = [
+	...STELLARIS_LOC_LANGS,
+	'l_turkish',
 ];
 
 const STANDARD_LOC_PROFILE: LocalisationProfile = {
@@ -130,7 +136,7 @@ const MODERN_LOC_PROFILE: LocalisationProfile = {
 	fileExtensions: ['yml'],
 	encoding: 'utf8-bom',
 	defaultLanguageTag: 'l_english',
-	supportedLanguageTags: STELLARIS_LOC_LANGS,
+	supportedLanguageTags: MODERN_LOC_LANGS,
 };
 
 const NO_PREVIEWS: PreviewCapabilityProfile = {
@@ -161,6 +167,7 @@ const GENERIC_PROFILE: GameProfile = {
 	localisation: {
 		...STANDARD_LOC_PROFILE,
 		directories: ['localisation', 'localization'],
+		supportedLanguageTags: MODERN_LOC_LANGS,
 	},
 	folders: {
 		scriptDirs: [

@@ -34,6 +34,7 @@ interface WeaponOption {
     type?: string;
     source: 'workspace' | 'vanilla';
     useShipMainTarget: boolean;
+    targetFocus?: 'single' | 'spread';
     targetWeightKeys: string[];
     missingKeys: string[];
     dynamicKeys: string[];
@@ -521,6 +522,7 @@ function appendCheckbox(
     const input = el('input');
     input.type = 'checkbox';
     input.checked = read();
+    input.dataset.key = spec.key;
     label.appendChild(input);
     label.appendChild(el('span', undefined, t(spec.labelEn, spec.labelZh)));
     container.appendChild(label);
@@ -800,6 +802,9 @@ function renderWeaponFacts(): void {
             t('Source', '来源'),
             weapon.source === 'workspace' ? t('workspace', '工作区') : t('vanilla', '原版'),
         ]);
+        if (weapon.targetFocus) {
+            rows.push(['target_focus', weapon.targetFocus]);
+        }
         if (weapon.targetableShipSizes.length > 0) {
             rows.push(['targetable_ship_sizes', weapon.targetableShipSizes.join(', ')]);
         }
@@ -1354,6 +1359,7 @@ function handleWeapon(message: Record<string, unknown>): void {
         type: typeof payload.type === 'string' ? payload.type : undefined,
         source: payload.source === 'vanilla' ? 'vanilla' : 'workspace',
         useShipMainTarget: payload.useShipMainTarget === true,
+        targetFocus: payload.targetFocus === 'single' || payload.targetFocus === 'spread' ? payload.targetFocus : undefined,
         targetWeightKeys: asStringArray(payload.targetWeightKeys),
         targetableShipSizes: asStringArray(payload.targetableShipSizes),
         missingKeys: asStringArray(payload.missingKeys),
@@ -1363,6 +1369,9 @@ function handleWeapon(message: Record<string, unknown>): void {
     };
     weaponInput = { ...currentWeapon.input, targetWeights: { ...currentWeapon.input.targetWeights } };
     weaponUseShipMainTarget = currentWeapon.useShipMainTarget;
+    optionState.targetFocus = currentWeapon.targetFocus === 'spread';
+    const targetFocusCheckbox = optionsBody?.querySelector<HTMLInputElement>('input[type="checkbox"][data-key="targetFocus"]');
+    if (targetFocusCheckbox) targetFocusCheckbox.checked = optionState.targetFocus === true;
     estimatedTemplateKeys = new Set<string>([...currentWeapon.missingKeys, ...currentWeapon.dynamicKeys]);
     csvTemplateKeys = new Set<string>(currentWeapon.csvKeys ?? []);
     targetableShipSizesText = currentWeapon.targetableShipSizes.join(' ');

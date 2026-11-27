@@ -33,7 +33,7 @@ let eventScopeFromKey (key: string) : string option =
         None
 
 let preferredSubjectKeys =
-    Set.ofList [ "which"; "name"; "flag"; "id"; "target"; "technology"; "tech"; "project"; "situation"; "type" ]
+    Set.ofList [ "which"; "variable"; "name"; "flag"; "id"; "target"; "technology"; "tech"; "project"; "situation"; "type" ]
 
 let rawSubjectLeafFromNode (node: Node) : Leaf option =
     node.Leaves

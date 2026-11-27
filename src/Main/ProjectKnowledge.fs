@@ -4,6 +4,8 @@ open System
 open System.Collections.Concurrent
 open System.Collections.Generic
 open System.IO
+open System.Security.Cryptography
+open System.Text
 open System.Text.RegularExpressions
 open FSharp.Data
 open Microsoft.Data.Sqlite
@@ -3424,6 +3426,99 @@ let private obsoleteKnowledgeSchemaError foundVersion =
           Some("currentSchemaVersion", JsonValue.Number(decimal KnowledgeSchemaVersion))
           Some("error", JsonValue.String $"Project knowledge schema V{foundVersion} is obsolete. A full V{KnowledgeSchemaVersion} rebuild is required.") ]
 
+let incrementalFingerprintMetadataKey file =
+    "incremental_facts_sha256:" + normalizeFileKey file
+
+let private canonicalFactText (values: seq<'T>) =
+    values
+    |> Seq.map (fun value -> sprintf "%A" value)
+    |> Seq.sortWith (fun left right -> String.CompareOrdinal(left, right))
+    |> Seq.toArray
+
+let private appendFingerprintValues (values: seq<string>) =
+    use hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256)
+    for value in values do
+        let bytes = Encoding.UTF8.GetBytes value
+        let length = BitConverter.GetBytes bytes.Length
+        if not BitConverter.IsLittleEndian then Array.Reverse length
+        hash.AppendData length
+        hash.AppendData bytes
+    hash.GetHashAndReset() |> BitConverter.ToString |> fun value -> value.Replace("-", "")
+
+let private incrementalFileFingerprint
+    file
+    (freshDefinitions: DefinitionFact list)
+    (freshTopology: TopologyFacts)
+    (eventGraph: EventGraphFacts)
+    (inlineGraph: Main.InlineGraph.InlineGraphFacts)
+    =
+    let sameFile candidate = normalizeFileKey candidate = normalizeFileKey file
+    let definitions =
+        freshDefinitions
+        |> List.filter (fun item ->
+            sameFile item.file
+            || sameFile item.sourceFile
+            || item.templateFile |> Option.exists sameFile
+            || item.invocationFile |> Option.exists sameFile)
+    let topologyFiles = freshTopology.files |> List.filter (fun item -> sameFile item.file)
+    let topologyEdges = freshTopology.edges |> List.filter (fun item -> sameFile item.sourceFile)
+    let groups =
+        [ "file", [| normalizeFileKey file |]
+          "definitions", canonicalFactText definitions
+          "files", canonicalFactText topologyFiles
+          "references", canonicalFactText topologyEdges
+          "eventNodes", canonicalFactText eventGraph.nodes
+          "eventEdges", canonicalFactText eventGraph.edges
+          "eventLogic", canonicalFactText eventGraph.logic
+          "eventState", canonicalFactText eventGraph.stateAccesses
+          "inlineTemplates", canonicalFactText inlineGraph.templates
+          "inlineParameters", canonicalFactText inlineGraph.parameters
+          "inlineInvocations", canonicalFactText inlineGraph.invocations
+          "inlineArguments", canonicalFactText inlineGraph.arguments
+          "inlineExpansions", canonicalFactText inlineGraph.expansions
+          "inlineGeneratedReferences", canonicalFactText inlineGraph.generatedReferences
+          "inlineProblems", canonicalFactText inlineGraph.problems ]
+    groups
+    |> Seq.collect (fun (name, values) ->
+        seq {
+            yield name + ":" + string values.Length
+            yield! values
+        })
+    |> appendFingerprintValues
+
+let incrementalKnowledgeUnchanged
+    (metadata: IReadOnlyDictionary<string, string>)
+    (runtimeValues: (string * string) list)
+    (changedFiles: string list)
+    (fingerprints: IReadOnlyDictionary<string, string>)
+    =
+    let matches (values: IReadOnlyDictionary<string, string>) key expected =
+        match values.TryGetValue key with
+        | true, value -> value = expected
+        | _ -> false
+    (runtimeValues |> List.forall (fun (key, value) -> matches metadata key value))
+    && (changedFiles
+        |> List.forall (fun file ->
+            let key = incrementalFingerprintMetadataKey file
+            match fingerprints.TryGetValue key, metadata.TryGetValue key with
+            | (true, current), (true, previous) -> current = previous
+            | _ -> false))
+
+let private readCompactKnowledgeDomains (connection: SqliteConnection) =
+    use command = connection.CreateCommand()
+    command.CommandText <- "SELECT id, definition_count, workspace_count, vanilla_count, entity_types_json FROM domains ORDER BY id"
+    use reader = command.ExecuteReader()
+    let values = ResizeArray<JsonValue>()
+    while reader.Read() do
+        values.Add(
+            jsonRecord
+                [ Some("id", JsonValue.String(reader.GetString 0))
+                  Some("definitionCount", JsonValue.Number(decimal (reader.GetInt64 1)))
+                  Some("workspaceCount", JsonValue.Number(decimal (reader.GetInt64 2)))
+                  Some("vanillaCount", JsonValue.Number(decimal (reader.GetInt64 3)))
+                  Some("entityTypes", JsonValue.Parse(reader.GetString 4)) ])
+    JsonValue.Array(values.ToArray())
+
 let private tryIncrementalProjectKnowledgeExport
     (shouldCancel: unit -> bool)
     (activeGame: string)
@@ -3534,713 +3629,767 @@ let private tryIncrementalProjectKnowledgeExport
                             values |> Set.ofSeq
                         let eventGraph =
                             collectEventGraphWithKnownIds knownEventIds collectionOptions freshDefinitions freshTopology game
-                        use transaction = connection.BeginTransaction()
-                        executeSql connection (Some transaction) """
-CREATE TEMP TABLE changed_paths(path TEXT PRIMARY KEY);
-CREATE TEMP TABLE affected_symbols(
-  entity_type_key TEXT NOT NULL,
-  symbol_id_key TEXT NOT NULL,
-  entity_type TEXT NOT NULL,
-  symbol_id TEXT NOT NULL,
-  PRIMARY KEY(entity_type_key, symbol_id_key)
-);
-CREATE TEMP TABLE affected_domains(domain TEXT PRIMARY KEY);
-CREATE TEMP TABLE affected_event_ids(event_id TEXT PRIMARY KEY);
-CREATE TEMP TABLE fresh_event_ids(event_id TEXT PRIMARY KEY);
-"""
-                        use changedPathCommand = connection.CreateCommand()
-                        changedPathCommand.Transaction <- transaction
-                        changedPathCommand.CommandText <- "INSERT OR IGNORE INTO changed_paths(path) VALUES ($path)"
-                        prepareCommandParameters changedPathCommand [ "$path", box "" ]
+                        let fingerprints = Dictionary<string, string>()
                         for file in changedFiles do
-                            setPreparedCommandParameters changedPathCommand [ "$path", box file ]
-                            changedPathCommand.ExecuteNonQuery() |> ignore
-
-                        let pathComparison =
-                            if OperatingSystem.IsWindows() then "COLLATE NOCASE" else "COLLATE BINARY"
-                        executeSql connection (Some transaction) $"""
-INSERT OR IGNORE INTO affected_symbols(entity_type_key, symbol_id_key, entity_type, symbol_id)
-SELECT lower(d.entity_type), lower(d.symbol_id), d.entity_type, d.symbol_id
-FROM definitions d JOIN changed_paths c ON d.file_path = c.path {pathComparison};
-INSERT OR IGNORE INTO affected_domains(domain)
-SELECT d.domain FROM definitions d JOIN changed_paths c ON d.file_path = c.path {pathComparison};
-INSERT OR IGNORE INTO affected_domains(domain)
-SELECT f.domain FROM files f JOIN changed_paths c ON f.path = c.path {pathComparison};
-INSERT OR IGNORE INTO affected_domains(domain)
-SELECT r.domain FROM references_graph r JOIN changed_paths c ON r.source_file = c.path {pathComparison};
-INSERT OR IGNORE INTO affected_event_ids(event_id)
-SELECT lower(d.symbol_id)
-FROM definitions d JOIN changed_paths c ON d.file_path = c.path {pathComparison}
-WHERE lower(d.entity_type) = 'event';
-"""
-                        use affectedSymbolCommand = connection.CreateCommand()
-                        affectedSymbolCommand.Transaction <- transaction
-                        affectedSymbolCommand.CommandText <- "INSERT OR IGNORE INTO affected_symbols(entity_type_key, symbol_id_key, entity_type, symbol_id) VALUES ($typeKey, $symbolKey, $type, $symbol)"
-                        prepareCommandParameters affectedSymbolCommand
-                            [ "$typeKey", box ""; "$symbolKey", box ""; "$type", box ""; "$symbol", box "" ]
-                        use affectedDomainCommand = connection.CreateCommand()
-                        affectedDomainCommand.Transaction <- transaction
-                        affectedDomainCommand.CommandText <- "INSERT OR IGNORE INTO affected_domains(domain) VALUES ($domain)"
-                        prepareCommandParameters affectedDomainCommand [ "$domain", box "" ]
-                        use freshEventIdCommand = connection.CreateCommand()
-                        freshEventIdCommand.Transaction <- transaction
-                        freshEventIdCommand.CommandText <- "INSERT OR IGNORE INTO fresh_event_ids(event_id) VALUES ($event)"
-                        prepareCommandParameters freshEventIdCommand [ "$event", box "" ]
-                        for definition in freshDefinitions do
-                            setPreparedCommandParameters affectedSymbolCommand
-                                [ "$typeKey", box (definition.entityType.ToLowerInvariant())
-                                  "$symbolKey", box (definition.id.ToLowerInvariant())
-                                  "$type", box definition.entityType
-                                  "$symbol", box definition.id ]
-                            affectedSymbolCommand.ExecuteNonQuery() |> ignore
-                            setPreparedCommandParameters affectedDomainCommand [ "$domain", box definition.domain ]
-                            affectedDomainCommand.ExecuteNonQuery() |> ignore
-                            if definition.entityType.Equals("event", StringComparison.OrdinalIgnoreCase) then
-                                setPreparedCommandParameters freshEventIdCommand [ "$event", box (definition.id.ToLowerInvariant()) ]
-                                freshEventIdCommand.ExecuteNonQuery() |> ignore
-                        for file in freshTopology.files do
-                            setPreparedCommandParameters affectedDomainCommand [ "$domain", box file.domain ]
-                            affectedDomainCommand.ExecuteNonQuery() |> ignore
-
-                        executeSql connection (Some transaction) $"""
-CREATE TEMP TABLE affected_inline_templates(template_id TEXT PRIMARY KEY COLLATE NOCASE);
-CREATE TEMP TABLE affected_inline_invocations(invocation_id TEXT PRIMARY KEY COLLATE NOCASE);
-"""
-                        use affectedInlineTemplateCommand = connection.CreateCommand()
-                        affectedInlineTemplateCommand.Transaction <- transaction
-                        affectedInlineTemplateCommand.CommandText <- "INSERT OR IGNORE INTO affected_inline_templates(template_id) VALUES ($template)"
-                        prepareCommandParameters affectedInlineTemplateCommand [ "$template", box "" ]
-                        let freshChangedTemplates =
-                            freshInlineGraph.templates
-                            |> List.filter (fun template -> changedFiles |> List.exists (fun file -> normalizeFileKey file = normalizeFileKey template.file))
-                        let freshChangedById = freshChangedTemplates |> Seq.map (fun template -> template.templateId, template) |> dict
-                        use oldInlineTemplateCommand = connection.CreateCommand()
-                        oldInlineTemplateCommand.Transaction <- transaction
-                        oldInlineTemplateCommand.CommandText <- $"SELECT t.template_id, t.content_hash FROM inline_templates t JOIN changed_paths c ON t.file = c.path {pathComparison}"
-                        use oldInlineTemplateReader = oldInlineTemplateCommand.ExecuteReader()
-                        let oldChangedTemplates = ResizeArray<string * string>()
-                        while oldInlineTemplateReader.Read() do
-                            oldChangedTemplates.Add(oldInlineTemplateReader.GetString 0, oldInlineTemplateReader.GetString 1)
-                        oldInlineTemplateReader.Close()
-                        for templateId, oldHash in oldChangedTemplates do
-                            match freshChangedById.TryGetValue templateId with
-                            | true, fresh when String.Equals(oldHash, fresh.contentHash, StringComparison.OrdinalIgnoreCase) -> ()
-                            | _ ->
-                                setPreparedCommandParameters affectedInlineTemplateCommand [ "$template", box templateId ]
-                                affectedInlineTemplateCommand.ExecuteNonQuery() |> ignore
-                        let oldChangedIds = oldChangedTemplates |> Seq.map fst |> HashSet<string>
-                        for template in freshChangedTemplates do
-                            if not (oldChangedIds.Contains template.templateId) then
-                                setPreparedCommandParameters affectedInlineTemplateCommand [ "$template", box template.templateId ]
-                                affectedInlineTemplateCommand.ExecuteNonQuery() |> ignore
-                        executeSql connection (Some transaction) $"""
-WITH RECURSIVE reverse_callers(template_id) AS (
-  SELECT template_id FROM affected_inline_templates
-  UNION
-  SELECT caller.template_id
-  FROM inline_invocations invocation
-  JOIN inline_templates caller ON caller.file = invocation.caller_file {pathComparison}
-  JOIN reverse_callers affected ON lower(invocation.template_id) = lower(affected.template_id)
-)
-INSERT OR IGNORE INTO affected_inline_templates(template_id)
-SELECT template_id FROM reverse_callers;
-INSERT OR IGNORE INTO affected_inline_invocations(invocation_id)
-SELECT invocation.invocation_id
-FROM inline_invocations invocation
-WHERE EXISTS (SELECT 1 FROM changed_paths c WHERE invocation.caller_file = c.path {pathComparison})
-   OR EXISTS (SELECT 1 FROM affected_inline_templates t WHERE lower(t.template_id) = lower(invocation.template_id));
-"""
-
-                        executeSql connection (Some transaction) $"""
-DELETE FROM definition_stacks
-WHERE EXISTS (
-  SELECT 1 FROM affected_symbols a
-  WHERE lower(definition_stacks.entity_type) = a.entity_type_key
-    AND lower(definition_stacks.symbol_id) = a.symbol_id_key
-);
-DELETE FROM unresolved
-WHERE kind = 'definition_resolution'
-  AND EXISTS (
-    SELECT 1 FROM affected_symbols a
-    WHERE lower(coalesce(unresolved.entity_type, '')) = a.entity_type_key
-      AND lower(coalesce(unresolved.symbol_id, '')) = a.symbol_id_key
-  );
-DELETE FROM event_edges
-WHERE EXISTS (SELECT 1 FROM changed_paths c WHERE event_edges.source_file = c.path {pathComparison});
-DELETE FROM event_logic
-WHERE EXISTS (SELECT 1 FROM changed_paths c WHERE event_logic.source_file = c.path {pathComparison});
-DELETE FROM event_nodes
-WHERE EXISTS (SELECT 1 FROM changed_paths c WHERE event_nodes.file_path = c.path {pathComparison});
-DELETE FROM references_graph
-WHERE EXISTS (SELECT 1 FROM changed_paths c WHERE references_graph.source_file = c.path {pathComparison});
-DELETE FROM files
-WHERE EXISTS (SELECT 1 FROM changed_paths c WHERE files.path = c.path {pathComparison});
-DELETE FROM definitions
-WHERE EXISTS (SELECT 1 FROM changed_paths c WHERE definitions.file_path = c.path {pathComparison});
-DELETE FROM inline_problems WHERE invocation_id IN (SELECT invocation_id FROM affected_inline_invocations);
-DELETE FROM inline_generated_references WHERE invocation_id IN (SELECT invocation_id FROM affected_inline_invocations);
-DELETE FROM inline_expansions WHERE invocation_id IN (SELECT invocation_id FROM affected_inline_invocations);
-DELETE FROM inline_arguments WHERE invocation_id IN (SELECT invocation_id FROM affected_inline_invocations);
-DELETE FROM inline_invocations WHERE invocation_id IN (SELECT invocation_id FROM affected_inline_invocations);
-DELETE FROM inline_parameters WHERE template_id IN (SELECT template_id FROM affected_inline_templates);
-DELETE FROM inline_templates WHERE template_id IN (SELECT template_id FROM affected_inline_templates);
-DELETE FROM event_edges
-WHERE lower(target_event_id) IN (
-  SELECT event_id FROM affected_event_ids
-  WHERE event_id NOT IN (SELECT event_id FROM fresh_event_ids)
-);
-"""
-                        use definitionCommand = connection.CreateCommand()
-                        definitionCommand.Transaction <- transaction
-                        definitionCommand.CommandText <- "INSERT INTO definitions(symbol_id, entity_type, file_path, logical_path, line, end_line, origin, validate, overwrite_state, resource_scope, domain, override_path, override_strategy, provenance_kind, source_file, source_line, source_end_line, template_file, template_line, invocation_file, invocation_line, has_real_range, confidence) VALUES ($symbol, $type, $file, $logical, $line, $end, $origin, $validate, $overwrite, $scope, $domain, $overridePath, $overrideStrategy, $provenance, $sourceFile, $sourceLine, $sourceEndLine, $templateFile, $templateLine, $invocationFile, $invocationLine, $hasRealRange, $confidence) RETURNING id"
-                        prepareCommandParameters definitionCommand
-                            [ "$symbol", box ""; "$type", box ""; "$file", box ""; "$logical", box ""; "$line", box 0; "$end", box 0
-                              "$origin", box ""; "$validate", box 0; "$overwrite", box ""; "$scope", box ""; "$domain", box ""
-                              "$overridePath", box ""; "$overrideStrategy", box ""; "$provenance", box ""; "$sourceFile", box ""
-                              "$sourceLine", box 0; "$sourceEndLine", box 0; "$templateFile", box ""; "$templateLine", box 0
-                              "$invocationFile", box ""; "$invocationLine", box 0; "$hasRealRange", box 0; "$confidence", box "" ]
-                        use subtypeCommand = connection.CreateCommand()
-                        subtypeCommand.Transaction <- transaction
-                        subtypeCommand.CommandText <- "INSERT OR IGNORE INTO definition_subtypes(definition_id, subtype) VALUES ($definition, $subtype)"
-                        prepareCommandParameters subtypeCommand [ "$definition", box 0L; "$subtype", box "" ]
-                        for definition in freshDefinitions do
-                            setPreparedCommandParameters definitionCommand
-                                [ "$symbol", box definition.id; "$type", box definition.entityType; "$file", box (normalizePath definition.file)
-                                  "$logical", box (normalizePath definition.logicalPath); "$line", box definition.line; "$end", box definition.endLine
-                                  "$origin", box definition.origin; "$validate", box (if definition.validate then 1 else 0); "$overwrite", box definition.overwrite
-                                  "$scope", box (definition.resourceScope |> Option.toObj); "$domain", box definition.domain
-                                  "$overridePath", box (definition.overridePath |> Option.toObj); "$overrideStrategy", box (definition.overrideStrategy |> Option.toObj)
-                                  "$provenance", box definition.provenanceKind; "$sourceFile", box (normalizePath definition.sourceFile)
-                                  "$sourceLine", box definition.sourceLine; "$sourceEndLine", box definition.sourceEndLine
-                                  "$templateFile", box (definition.templateFile |> Option.toObj); "$templateLine", box (definition.templateLine |> Option.map box |> Option.toObj)
-                                  "$invocationFile", box (definition.invocationFile |> Option.toObj); "$invocationLine", box (definition.invocationLine |> Option.map box |> Option.toObj)
-                                  "$hasRealRange", box (if definition.hasRealRange then 1 else 0); "$confidence", box definition.confidence ]
-                            let definitionId = definitionCommand.ExecuteScalar() :?> int64
-                            for subtype in definition.subtypes do
-                                setPreparedCommandParameters subtypeCommand [ "$definition", box definitionId; "$subtype", box subtype ]
-                                subtypeCommand.ExecuteNonQuery() |> ignore
-
-                        use fileCommand = connection.CreateCommand()
-                        fileCommand.Transaction <- transaction
-                        fileCommand.CommandText <- "INSERT OR REPLACE INTO files(path, logical_path, domain, origin) VALUES ($path, $logical, $domain, $origin)"
-                        prepareCommandParameters fileCommand [ "$path", box ""; "$logical", box ""; "$domain", box ""; "$origin", box "" ]
-                        for item in freshTopology.files do
-                            setPreparedCommandParameters fileCommand
-                                [ "$path", box item.file; "$logical", box item.logicalPath; "$domain", box item.domain; "$origin", box item.origin ]
-                            fileCommand.ExecuteNonQuery() |> ignore
-
-                        use referenceCommand = connection.CreateCommand()
-                        referenceCommand.Transaction <- transaction
-                        referenceCommand.CommandText <- "INSERT INTO references_graph(source_file, source_logical_path, target_id, type_group, line, is_outgoing, reference_type, label, associated_type, domain) VALUES ($file, $logical, $target, $group, $line, $outgoing, $referenceType, $label, $associated, $domain)"
-                        prepareCommandParameters referenceCommand
-                            [ "$file", box ""; "$logical", box ""; "$target", box ""; "$group", box ""; "$line", box 0; "$outgoing", box 0
-                              "$referenceType", box ""; "$label", box ""; "$associated", box ""; "$domain", box "" ]
-                        for reference in freshTopology.edges do
-                            setPreparedCommandParameters referenceCommand
-                                [ "$file", box reference.sourceFile; "$logical", box reference.sourceLogicalPath; "$target", box reference.targetId
-                                  "$group", box reference.typeGroup; "$line", box reference.line; "$outgoing", box (if reference.isOutgoing then 1 else 0)
-                                  "$referenceType", box reference.referenceType; "$label", box (reference.label |> Option.toObj)
-                                  "$associated", box (reference.associatedType |> Option.toObj); "$domain", box reference.domain ]
-                            referenceCommand.ExecuteNonQuery() |> ignore
-
-                        use eventNodeCommand = connection.CreateCommand()
-                        eventNodeCommand.Transaction <- transaction
-                        eventNodeCommand.CommandText <- "INSERT INTO event_nodes(event_id, event_type, title, file_path, logical_path, line, end_line, origin, is_triggered_only, is_hidden, has_mtth, facts_known) VALUES ($id, $type, $title, $file, $logical, $line, $end, $origin, $triggered, $hidden, $mtth, $factsKnown)"
-                        prepareCommandParameters eventNodeCommand
-                            [ "$id", box ""; "$type", box ""; "$title", box ""; "$file", box ""; "$logical", box ""; "$line", box 0
-                              "$end", box 0; "$origin", box ""; "$triggered", box 0; "$hidden", box 0; "$mtth", box 0; "$factsKnown", box 0 ]
-                        for node in eventGraph.nodes do
-                            setPreparedCommandParameters eventNodeCommand
-                                [ "$id", box node.eventId; "$type", box node.eventType; "$title", box (node.title |> Option.toObj)
-                                  "$file", box node.file; "$logical", box node.logicalPath; "$line", box node.line; "$end", box node.endLine
-                                  "$origin", box node.origin; "$triggered", box (if node.isTriggeredOnly then 1 else 0)
-                                  "$hidden", box (if node.isHidden then 1 else 0); "$mtth", box (if node.hasMeanTimeToHappen then 1 else 0)
-                                  "$factsKnown", box (if node.factsKnown then 1 else 0) ]
-                            eventNodeCommand.ExecuteNonQuery() |> ignore
-                        use eventEdgeCommand = connection.CreateCommand()
-                        eventEdgeCommand.Transaction <- transaction
-                        eventEdgeCommand.CommandText <- "INSERT INTO event_edges(source_kind, source_id, target_event_id, edge_type, label, source_file, line, confidence, call_operator, phase, delay, condition_path, scope_map, source_scope, target_scope) VALUES ($kind, $source, $target, $type, $label, $file, $line, $confidence, $callOperator, $phase, $delay, $conditionPath, $scopeMap, $sourceScope, $targetScope)"
-                        prepareCommandParameters eventEdgeCommand
-                            [ "$kind", box ""; "$source", box ""; "$target", box ""; "$type", box ""; "$label", box ""; "$file", box ""
-                              "$line", box 0; "$confidence", box ""; "$callOperator", box ""; "$phase", box ""; "$delay", box ""
-                              "$conditionPath", box ""; "$scopeMap", box ""; "$sourceScope", box ""; "$targetScope", box "" ]
-                        for edge in eventGraph.edges do
-                            setPreparedCommandParameters eventEdgeCommand
-                                [ "$kind", box edge.sourceKind; "$source", box edge.sourceId; "$target", box edge.targetEventId
-                                  "$type", box edge.edgeType; "$label", box (edge.label |> Option.toObj); "$file", box edge.sourceFile
-                                  "$line", box edge.line; "$confidence", box edge.confidence
-                                  "$callOperator", box (edge.callOperator |> Option.toObj); "$phase", box (edge.phase |> Option.toObj)
-                                  "$delay", box (edge.delay |> Option.toObj); "$conditionPath", box (edge.conditionPath |> Option.toObj)
-                                  "$scopeMap", box (edge.scopeMap |> Option.toObj); "$sourceScope", box (edge.sourceScope |> Option.toObj)
-                                  "$targetScope", box (edge.targetScope |> Option.toObj) ]
-                            eventEdgeCommand.ExecuteNonQuery() |> ignore
-                        use eventLogicCommand = connection.CreateCommand()
-                        eventLogicCommand.Transaction <- transaction
-                        eventLogicCommand.CommandText <- "INSERT INTO event_logic(event_id, relation_type, subject, scope, phase, source_file, line, details) VALUES ($event, $type, $subject, $scope, $phase, $file, $line, $details)"
-                        prepareCommandParameters eventLogicCommand
-                            [ "$event", box ""; "$type", box ""; "$subject", box ""; "$scope", box ""; "$phase", box ""; "$file", box ""
-                              "$line", box 0; "$details", box "" ]
-                        for item in eventGraph.logic do
-                            setPreparedCommandParameters eventLogicCommand
-                                [ "$event", box item.eventId; "$type", box item.relationType; "$subject", box item.subject
-                                  "$scope", box (item.scope |> Option.toObj); "$phase", box item.phase; "$file", box item.sourceFile
-                                  "$line", box item.line; "$details", box (item.details |> Option.toObj) ]
-                            eventLogicCommand.ExecuteNonQuery() |> ignore
-                        for item in eventGraph.stateAccesses do
-                            setPreparedCommandParameters eventLogicCommand
-                                [ "$event", box item.eventId; "$type", box item.relationType; "$subject", box item.subject
-                                  "$scope", box (item.scope |> Option.toObj); "$phase", box item.phase; "$file", box item.sourceFile
-                                  "$line", box item.line; "$details", box (item.details |> Option.toObj) ]
-                            eventLogicCommand.ExecuteNonQuery() |> ignore
-
-                        let readAffectedSet tableName columnName =
-                            use command = connection.CreateCommand()
-                            command.Transaction <- transaction
-                            command.CommandText <- sprintf "SELECT %s FROM %s" columnName tableName
-                            use reader = command.ExecuteReader()
-                            let values = HashSet<string>(StringComparer.OrdinalIgnoreCase)
-                            while reader.Read() do values.Add(reader.GetString 0) |> ignore
-                            values
-                        let affectedInlineTemplates = readAffectedSet "affected_inline_templates" "template_id"
-                        let freshTemplateByFile =
-                            freshInlineGraph.templates
-                            |> Seq.map (fun template -> normalizeFileKey template.file, template.templateId)
-                            |> dict
-                        let callerChanged callerFile =
-                            changedFiles |> List.exists (fun file -> normalizeFileKey file = normalizeFileKey callerFile)
-                        let invocationAffected (invocation: InlineGraph.InlineInvocationFact) =
-                            callerChanged invocation.callerFile
-                            || affectedInlineTemplates.Contains invocation.templateId
-                            || match freshTemplateByFile.TryGetValue(normalizeFileKey invocation.callerFile) with
-                               | true, callerTemplate -> affectedInlineTemplates.Contains callerTemplate
-                               | _ -> false
-                        let affectedFreshInvocationIds =
-                            freshInlineGraph.invocations
-                            |> Seq.filter invocationAffected
-                            |> Seq.map _.invocationId
-                            |> HashSet<string>
-
-                        // Refresh only the changed template/caller reverse closure.
-                        // Unrelated inline facts retain their rows and hashes.
-                        use inlineTemplateCommand = connection.CreateCommand()
-                        inlineTemplateCommand.Transaction <- transaction
-                        inlineTemplateCommand.CommandText <- "INSERT OR REPLACE INTO inline_templates(template_id, logical_path, file, line, content_hash) VALUES ($id, $logical, $file, $line, $hash)"
-                        prepareCommandParameters inlineTemplateCommand
-                            [ "$id", box ""; "$logical", box ""; "$file", box ""; "$line", box 0; "$hash", box "" ]
-                        for template in freshInlineGraph.templates |> Seq.filter (fun template -> affectedInlineTemplates.Contains template.templateId) do
-                            setPreparedCommandParameters inlineTemplateCommand
-                                [ "$id", box template.templateId; "$logical", box template.logicalPath; "$file", box template.file
-                                  "$line", box template.line; "$hash", box template.contentHash ]
-                            inlineTemplateCommand.ExecuteNonQuery() |> ignore
-                        use inlineParameterCommand = connection.CreateCommand()
-                        inlineParameterCommand.Transaction <- transaction
-                        inlineParameterCommand.CommandText <- "INSERT OR REPLACE INTO inline_parameters(template_id, name, usage_kind, usage_kinds, inferred_type, required, occurrences) VALUES ($id, $name, $kind, $kinds, $inferred, $required, $occurrences)"
-                        prepareCommandParameters inlineParameterCommand
-                            [ "$id", box ""; "$name", box ""; "$kind", box ""; "$kinds", box ""; "$inferred", box ""; "$required", box 0; "$occurrences", box 0 ]
-                        for parameter in freshInlineGraph.parameters |> Seq.filter (fun parameter -> affectedInlineTemplates.Contains parameter.templateId) do
-                            setPreparedCommandParameters inlineParameterCommand
-                                [ "$id", box parameter.templateId; "$name", box parameter.name; "$kind", box parameter.usageKind
-                                  "$kinds", box (String.concat "|" parameter.usageKinds); "$inferred", box parameter.inferredType
-                                  "$required", box (if parameter.required then 1 else 0); "$occurrences", box parameter.occurrences ]
-                            inlineParameterCommand.ExecuteNonQuery() |> ignore
-                        use inlineInvocationCommand = connection.CreateCommand()
-                        inlineInvocationCommand.Transaction <- transaction
-                        inlineInvocationCommand.CommandText <- "INSERT OR REPLACE INTO inline_invocations(invocation_id, caller_file, caller_line, template_id, enclosing_definition) VALUES ($id, $file, $line, $template, $enclosing)"
-                        prepareCommandParameters inlineInvocationCommand
-                            [ "$id", box ""; "$file", box ""; "$line", box 0; "$template", box ""; "$enclosing", box "" ]
-                        for invocation in freshInlineGraph.invocations |> Seq.filter invocationAffected do
-                            setPreparedCommandParameters inlineInvocationCommand
-                                [ "$id", box invocation.invocationId; "$file", box invocation.callerFile; "$line", box invocation.callerLine
-                                  "$template", box invocation.templateId; "$enclosing", box (invocation.enclosingDefinition |> Option.toObj) ]
-                            inlineInvocationCommand.ExecuteNonQuery() |> ignore
-                        use inlineArgumentCommand = connection.CreateCommand()
-                        inlineArgumentCommand.Transaction <- transaction
-                        inlineArgumentCommand.CommandText <- "INSERT OR REPLACE INTO inline_arguments(invocation_id, name, raw_value, resolved_value, value_kind) VALUES ($id, $name, $raw, $resolved, $kind)"
-                        prepareCommandParameters inlineArgumentCommand
-                            [ "$id", box ""; "$name", box ""; "$raw", box ""; "$resolved", box ""; "$kind", box "" ]
-                        for argument in freshInlineGraph.arguments |> Seq.filter (fun argument -> affectedFreshInvocationIds.Contains argument.invocationId) do
-                            setPreparedCommandParameters inlineArgumentCommand
-                                [ "$id", box argument.invocationId; "$name", box argument.name; "$raw", box argument.rawValue
-                                  "$resolved", box argument.resolvedValue; "$kind", box argument.valueKind ]
-                            inlineArgumentCommand.ExecuteNonQuery() |> ignore
-                        use inlineExpansionCommand = connection.CreateCommand()
-                        inlineExpansionCommand.Transaction <- transaction
-                        inlineExpansionCommand.CommandText <- "INSERT OR REPLACE INTO inline_expansions(invocation_id, expanded_symbol_id, entity_type, template_file, caller_file, template_line, generated_line, confidence) VALUES ($id, $symbol, $type, $templateFile, $callerFile, $templateLine, $generatedLine, $confidence)"
-                        prepareCommandParameters inlineExpansionCommand
-                            [ "$id", box ""; "$symbol", box ""; "$type", box ""; "$templateFile", box ""; "$callerFile", box ""; "$templateLine", box 0; "$generatedLine", box 0; "$confidence", box "" ]
-                        for expansion in freshInlineGraph.expansions |> Seq.filter (fun expansion -> affectedFreshInvocationIds.Contains expansion.invocationId) do
-                            setPreparedCommandParameters inlineExpansionCommand
-                                [ "$id", box expansion.invocationId; "$symbol", box expansion.expandedSymbolId; "$type", box expansion.entityType
-                                  "$templateFile", box expansion.templateFile; "$callerFile", box expansion.callerFile
-                                  "$templateLine", box expansion.templateLine; "$generatedLine", box expansion.generatedLine; "$confidence", box expansion.confidence ]
-                            inlineExpansionCommand.ExecuteNonQuery() |> ignore
-                        use inlineGeneratedReferenceCommand = connection.CreateCommand()
-                        inlineGeneratedReferenceCommand.Transaction <- transaction
-                        inlineGeneratedReferenceCommand.CommandText <- "INSERT OR REPLACE INTO inline_generated_references(invocation_id, reference_kind, expanded_value, template_file, caller_file, template_line, generated_line, confidence) VALUES ($id, $kind, $value, $templateFile, $callerFile, $templateLine, $generatedLine, $confidence)"
-                        prepareCommandParameters inlineGeneratedReferenceCommand
-                            [ "$id", box ""; "$kind", box ""; "$value", box ""; "$templateFile", box ""; "$callerFile", box ""; "$templateLine", box 0; "$generatedLine", box 0; "$confidence", box "" ]
-                        for reference in freshInlineGraph.generatedReferences |> Seq.filter (fun reference -> affectedFreshInvocationIds.Contains reference.invocationId) do
-                            setPreparedCommandParameters inlineGeneratedReferenceCommand
-                                [ "$id", box reference.invocationId; "$kind", box reference.referenceKind; "$value", box reference.expandedValue
-                                  "$templateFile", box reference.templateFile; "$callerFile", box reference.callerFile
-                                  "$templateLine", box reference.templateLine; "$generatedLine", box reference.generatedLine; "$confidence", box reference.confidence ]
-                            inlineGeneratedReferenceCommand.ExecuteNonQuery() |> ignore
-                        use inlineProblemCommand = connection.CreateCommand()
-                        inlineProblemCommand.Transaction <- transaction
-                        inlineProblemCommand.CommandText <- "INSERT OR REPLACE INTO inline_problems(invocation_id, kind, message, line) VALUES ($id, $kind, $message, $line)"
-                        prepareCommandParameters inlineProblemCommand
-                            [ "$id", box ""; "$kind", box ""; "$message", box ""; "$line", box 0 ]
-                        for problem in freshInlineGraph.problems |> Seq.filter (fun problem -> affectedFreshInvocationIds.Contains problem.invocationId) do
-                            setPreparedCommandParameters inlineProblemCommand
-                                [ "$id", box problem.invocationId; "$kind", box problem.kind; "$message", box problem.message; "$line", box problem.line ]
-                            inlineProblemCommand.ExecuteNonQuery() |> ignore
-
-                        let affectedDefinitionRows =
-                            use command = connection.CreateCommand()
-                            command.Transaction <- transaction
-                            command.CommandText <- """
-SELECT d.id, d.entity_type, d.symbol_id, d.overwrite_state, d.override_strategy, d.origin, d.logical_path
-FROM definitions d
-JOIN affected_symbols a
-  ON d.entity_type = a.entity_type_key COLLATE NOCASE
- AND d.symbol_id = a.symbol_id_key COLLATE NOCASE
-ORDER BY lower(d.entity_type), lower(d.symbol_id), d.id
-"""
-                            use reader = command.ExecuteReader()
-                            let rows = ResizeArray<int64 * string * string * string * string option * string * string>()
-                            while reader.Read() do
-                                rows.Add(
-                                    reader.GetInt64 0,
-                                    reader.GetString 1,
-                                    reader.GetString 2,
-                                    reader.GetString 3,
-                                    stringOrNone reader 4,
-                                    reader.GetString 5,
-                                    reader.GetString 6)
-                            rows |> Seq.toList
-                        use stackCommand = connection.CreateCommand()
-                        stackCommand.Transaction <- transaction
-                        stackCommand.CommandText <- "INSERT INTO definition_stacks(entity_type, symbol_id, resolution) VALUES ($type, $symbol, $resolution) RETURNING id"
-                        use candidateCommand = connection.CreateCommand()
-                        candidateCommand.Transaction <- transaction
-                        candidateCommand.CommandText <- "INSERT INTO stack_candidates(stack_id, definition_id, is_active, candidate_order, origin, logical_path, override_strategy) VALUES ($stack, $definition, $active, $order, $origin, $logical, $strategy)"
-                        use unresolvedCommand = connection.CreateCommand()
-                        unresolvedCommand.Transaction <- transaction
-                        unresolvedCommand.CommandText <- "INSERT INTO unresolved(kind, entity_type, symbol_id, resolution, message) VALUES ('definition_resolution', $type, $symbol, $resolution, 'The effective definition requires override-mode or ambiguity review.')"
-                        for _, values in affectedDefinitionRows |> Seq.groupBy (fun (_, entityType, symbolId, _, _, _, _) -> entityType.ToLowerInvariant(), symbolId.ToLowerInvariant()) do
-                            let items = values |> Seq.toList
-                            if items.Length > 1 then
-                                let originRank origin = if origin = "vanilla" then 0 elif origin = "workspace" then 2 else 1
-                                let ordered = items |> List.sortBy (fun (_, _, _, _, _, origin, logical) -> originRank origin, normalizePath logical)
-                                let _, entityType, symbolId, _, _, _, _ = ordered.Head
-                                let active = ordered |> List.filter (fun (_, _, _, overwrite, _, _, _) -> overwrite <> "overwritten")
-                                let strategy = ordered |> List.tryPick (fun (_, _, _, _, value, _, _) -> value |> Option.map (fun mode -> mode.ToUpperInvariant()))
-                                let winnerId, resolution =
-                                    if active.Length = 1 then let id, _, _, _, _, _, _ = active.Head in Some id, "cwtools_single_active"
-                                    else
-                                        match strategy with
-                                        | Some "LIOS" -> let id, _, _, _, _, _, _ = ordered |> List.last in Some id, "last_in_only_served"
-                                        | Some "FIOS" -> let id, _, _, _, _, _, _ = ordered.Head in Some id, "first_in_only_served"
-                                        | Some "NO" -> let id, _, _, _, _, _, _ = ordered.Head in Some id, "no_individual_override"
-                                        | Some "MERGE" -> None, "merged_definitions"
-                                        | Some "DUPL" -> None, "duplicate_definitions"
-                                        | _ -> None, "ambiguous"
-                                setCommandParameters stackCommand [ "$type", box entityType; "$symbol", box symbolId; "$resolution", box resolution ]
-                                let stackId = stackCommand.ExecuteScalar() :?> int64
-                                for index, (definitionId, _, _, _, candidateStrategy, origin, logical) in ordered |> List.indexed do
-                                    setCommandParameters candidateCommand
-                                        [ "$stack", box stackId; "$definition", box definitionId
-                                          "$active", box (if winnerId = Some definitionId then 1 else 0)
-                                          "$order", box index
-                                          "$origin", box origin
-                                          "$logical", box logical
-                                          "$strategy", box (candidateStrategy |> Option.toObj) ]
-                                    candidateCommand.ExecuteNonQuery() |> ignore
-                                if resolution = "ambiguous" then
-                                    setCommandParameters unresolvedCommand
-                                        [ "$type", box entityType; "$symbol", box symbolId; "$resolution", box resolution ]
-                                    unresolvedCommand.ExecuteNonQuery() |> ignore
-
-                        let affectedDomains =
-                            use command = connection.CreateCommand()
-                            command.Transaction <- transaction
-                            command.CommandText <- "SELECT domain FROM affected_domains ORDER BY domain"
-                            use reader = command.ExecuteReader()
-                            let values = ResizeArray<string>()
-                            while reader.Read() do values.Add(reader.GetString 0)
-                            values |> Seq.toList
-                        use deleteDomainCommand = connection.CreateCommand()
-                        deleteDomainCommand.Transaction <- transaction
-                        deleteDomainCommand.CommandText <- "DELETE FROM domains WHERE id = $domain"
-                        use deleteArchetypesCommand = connection.CreateCommand()
-                        deleteArchetypesCommand.Transaction <- transaction
-                        deleteArchetypesCommand.CommandText <- "DELETE FROM archetypes WHERE domain = $domain"
-                        use insertDomainCommand = connection.CreateCommand()
-                        insertDomainCommand.Transaction <- transaction
-                        insertDomainCommand.CommandText <- "INSERT INTO domains(id, definition_count, workspace_count, vanilla_count, entity_types_json, directories_json) VALUES ($id, $count, $workspace, $vanilla, $types, $directories)"
-                        use insertArchetypeCommand = connection.CreateCommand()
-                        insertArchetypeCommand.Transaction <- transaction
-                        insertArchetypeCommand.CommandText <- "INSERT OR IGNORE INTO archetypes(definition_id, domain, origin, rank, role) VALUES ($definition, $domain, $origin, $rank, $role)"
-                        for domain in affectedDomains do
-                            setCommandParameters deleteDomainCommand [ "$domain", box domain ]
-                            deleteDomainCommand.ExecuteNonQuery() |> ignore
-                            setCommandParameters deleteArchetypesCommand [ "$domain", box domain ]
-                            deleteArchetypesCommand.ExecuteNonQuery() |> ignore
-                            let domainDefinitions =
-                                use command = connection.CreateCommand()
-                                command.Transaction <- transaction
-                                command.CommandText <- "SELECT id, entity_type, logical_path, origin FROM definitions WHERE domain = $domain ORDER BY entity_type, symbol_id, origin, file_path, line"
-                                addParameter command "$domain" (box domain)
-                                use reader = command.ExecuteReader()
-                                let rows = ResizeArray<int64 * string * string * string>()
-                                while reader.Read() do
-                                    rows.Add(reader.GetInt64 0, reader.GetString 1, reader.GetString 2, reader.GetString 3)
-                                rows |> Seq.toList
-                            let topologyFileCount =
-                                use command = connection.CreateCommand()
-                                command.Transaction <- transaction
-                                command.CommandText <- "SELECT count(*) FROM files WHERE domain = $domain"
-                                addParameter command "$domain" (box domain)
-                                Convert.ToInt32(command.ExecuteScalar())
-                            if not domainDefinitions.IsEmpty || topologyFileCount > 0 then
-                                let entityTypes =
-                                    domainDefinitions
-                                    |> Seq.map (fun (_, entityType, _, _) -> entityType)
-                                    |> Seq.distinct
-                                    |> Seq.sort
-                                    |> Seq.map JsonValue.String
-                                    |> Seq.toArray
-                                    |> JsonValue.Array
-                                let directories =
-                                    domainDefinitions
-                                    |> Seq.choose (fun (_, _, logicalPath, _) ->
-                                        let directory = Path.GetDirectoryName(normalizePath logicalPath)
-                                        if String.IsNullOrWhiteSpace directory then None else Some(normalizePath directory))
-                                    |> Seq.distinct
-                                    |> Seq.sort
-                                    |> Seq.map JsonValue.String
-                                    |> Seq.toArray
-                                    |> JsonValue.Array
-                                let workspaceCount = domainDefinitions |> List.filter (fun (_, _, _, origin) -> origin = "workspace") |> List.length
-                                let vanillaCount = domainDefinitions |> List.filter (fun (_, _, _, origin) -> origin = "vanilla") |> List.length
-                                setCommandParameters insertDomainCommand
-                                    [ "$id", box domain; "$count", box domainDefinitions.Length; "$workspace", box workspaceCount
-                                      "$vanilla", box vanillaCount; "$types", box (entityTypes.ToString(JsonSaveOptions.DisableFormatting))
-                                      "$directories", box (directories.ToString(JsonSaveOptions.DisableFormatting)) ]
-                                insertDomainCommand.ExecuteNonQuery() |> ignore
-                                let addArchetypes role origin limit =
-                                    domainDefinitions
-                                    |> Seq.filter (fun (_, _, _, itemOrigin) -> itemOrigin = origin)
-                                    |> Seq.groupBy (fun (_, entityType, _, _) -> entityType)
-                                    |> Seq.collect (fun (_, group) -> group |> Seq.truncate 2)
-                                    |> Seq.truncate limit
-                                    |> Seq.iteri (fun rank (definitionId, _, _, _) ->
-                                        setCommandParameters insertArchetypeCommand
-                                            [ "$definition", box definitionId; "$domain", box domain; "$origin", box origin
-                                              "$rank", box rank; "$role", box role ]
-                                        insertArchetypeCommand.ExecuteNonQuery() |> ignore)
-                                addArchetypes "project_pattern" "workspace" 12
-                                addArchetypes "vanilla_archetype" "vanilla" options.archetypesPerDomain
-
-                        let generatedAt = DateTimeOffset.UtcNow
-                        let oldTopologyTruncated =
-                            match metadata.TryGetValue "topology_truncated" with
-                            | true, value -> value.Equals("true", StringComparison.OrdinalIgnoreCase)
+                            fingerprints.[file] <- incrementalFileFingerprint file freshDefinitions freshTopology eventGraph freshInlineGraph
+                        let metadataEquals key expected =
+                            match metadata.TryGetValue key with
+                            | true, value -> value = expected
                             | _ -> false
-                        let warnings = ResizeArray<string>()
-                        if runtime.status <> "ready" then warnings.Add("The knowledge snapshot was exported while CWTools was loading or stale.")
-                        if oldTopologyTruncated || freshTopology.truncated then
-                            warnings.Add("Topology and event relationships are partial because the configured export limits were reached.")
-                        let upsertMetadata key value =
-                            use command = connection.CreateCommand()
-                            command.Transaction <- transaction
-                            command.CommandText <- "INSERT INTO metadata(key, value) VALUES ($key, $value) ON CONFLICT(key) DO UPDATE SET value = excluded.value"
-                            addParameter command "$key" (box key)
-                            addParameter command "$value" (box value)
-                            command.ExecuteNonQuery() |> ignore
-                        upsertMetadata "status" runtime.status
-                        upsertMetadata "game" activeGame
-                        upsertMetadata "generated_at" (generatedAt.ToString("O"))
-                        upsertMetadata "generated_at_unix_ms" (generatedAt.ToUnixTimeMilliseconds().ToString())
-                        upsertMetadata "graph_version" (runtime.graphVersion.ToString())
-                        upsertMetadata "generation_mode" "incremental"
-                        upsertMetadata "validation_in_progress" ((string runtime.validationInProgress).ToLowerInvariant())
-                        upsertMetadata "loading_in_progress" ((string runtime.loadingInProgress).ToLowerInvariant())
-                        upsertMetadata "pending_global_kinds" (JsonValue.Array(runtime.pendingGlobalKinds |> List.map JsonValue.String |> List.toArray).ToString(JsonSaveOptions.DisableFormatting))
-                        upsertMetadata "last_global_refresh_at_unix_ms" (runtime.lastGlobalRefreshAtUnixMs.ToString())
-                        upsertMetadata "topology_truncated" ((string (oldTopologyTruncated || freshTopology.truncated)).ToLowerInvariant())
-                        upsertMetadata "warnings" (JsonValue.Array(warnings |> Seq.map JsonValue.String |> Seq.toArray).ToString(JsonSaveOptions.DisableFormatting))
-                        transaction.Commit()
+                        let runtimeValues =
+                            [ "status", runtime.status
+                              "game", activeGame
+                              "validation_in_progress", (string runtime.validationInProgress).ToLowerInvariant()
+                              "loading_in_progress", (string runtime.loadingInProgress).ToLowerInvariant()
+                              "pending_global_kinds", JsonValue.Array(runtime.pendingGlobalKinds |> List.map JsonValue.String |> List.toArray).ToString(JsonSaveOptions.DisableFormatting)
+                              "last_global_refresh_at_unix_ms", runtime.lastGlobalRefreshAtUnixMs.ToString()
+                              "topology_truncated", (string (metadataEquals "topology_truncated" "true" || freshTopology.truncated)).ToLowerInvariant() ]
+                        let unchanged = incrementalKnowledgeUnchanged metadata runtimeValues changedFiles fingerprints
+                        if unchanged then
+                            let generatedAtUnixMs =
+                                match metadata.TryGetValue "generated_at_unix_ms" with
+                                | true, value ->
+                                    match Int64.TryParse value with
+                                    | true, parsed -> parsed
+                                    | _ -> 0L
+                                | _ -> 0L
+                            let graphVersion =
+                                match metadata.TryGetValue "graph_version" with
+                                | true, value ->
+                                    match Int64.TryParse value with
+                                    | true, parsed -> parsed
+                                    | _ -> runtime.graphVersion
+                                | _ -> runtime.graphVersion
+                            let previousWarnings =
+                                match metadata.TryGetValue "warnings" with
+                                | true, value ->
+                                    try JsonValue.Parse value with _ -> JsonValue.Array [||]
+                                | _ -> JsonValue.Array [||]
+                            Some(
+                                jsonRecord
+                                    [ Some("ok", JsonValue.Boolean true)
+                                      Some("status", JsonValue.String runtime.status)
+                                      Some("source", JsonValue.String "cwtools-project-knowledge-sqlite")
+                                      Some("schemaVersion", JsonValue.Number(decimal KnowledgeSchemaVersion))
+                                      Some("capabilityVersions", capabilityVersionsJson)
+                                      Some("capabilityStatus", capabilityStatusJson)
+                                      Some("game", JsonValue.String activeGame)
+                                      Some("generatedAtUnixMs", JsonValue.Number(decimal generatedAtUnixMs))
+                                      Some("graphVersion", JsonValue.Number(decimal graphVersion))
+                                      Some("completeExport", JsonValue.Boolean options.completeExport)
+                                      Some("projectRoots", jsonStringArray projectRoots)
+                                      Some("databasePath", JsonValue.String(normalizePath target))
+                                      Some("generationMode", JsonValue.String "unchanged")
+                                      Some("domains", readCompactKnowledgeDomains connection)
+                                      Some("baseline", jsonRecord
+                                        [ Some("deterministicOrdering", JsonValue.Boolean true)
+                                          Some("exportDurationMs", JsonValue.Number 0M)
+                                          Some("incrementalDurationMs", JsonValue.Number 0M)
+                                          Some("changedFiles", JsonValue.Number 0M)
+                                          Some("databaseSizeBytes", JsonValue.Number(decimal (FileInfo(target).Length))) ])
+                                      Some("warnings", previousWarnings) ])
+                        else
+                            use transaction = connection.BeginTransaction()
+                            executeSql connection (Some transaction) """
+    CREATE TEMP TABLE changed_paths(path TEXT PRIMARY KEY);
+    CREATE TEMP TABLE affected_symbols(
+      entity_type_key TEXT NOT NULL,
+      symbol_id_key TEXT NOT NULL,
+      entity_type TEXT NOT NULL,
+      symbol_id TEXT NOT NULL,
+      PRIMARY KEY(entity_type_key, symbol_id_key)
+    );
+    CREATE TEMP TABLE affected_domains(domain TEXT PRIMARY KEY);
+    CREATE TEMP TABLE affected_event_ids(event_id TEXT PRIMARY KEY);
+    CREATE TEMP TABLE fresh_event_ids(event_id TEXT PRIMARY KEY);
+    """
+                            use changedPathCommand = connection.CreateCommand()
+                            changedPathCommand.Transaction <- transaction
+                            changedPathCommand.CommandText <- "INSERT OR IGNORE INTO changed_paths(path) VALUES ($path)"
+                            prepareCommandParameters changedPathCommand [ "$path", box "" ]
+                            for file in changedFiles do
+                                setPreparedCommandParameters changedPathCommand [ "$path", box file ]
+                                changedPathCommand.ExecuteNonQuery() |> ignore
 
-                        let scalarCount sql =
-                            use command = connection.CreateCommand()
-                            command.CommandText <- sql
-                            Convert.ToInt32(command.ExecuteScalar())
-                        let groupedCounts sql =
-                            use command = connection.CreateCommand()
-                            command.CommandText <- sql
-                            use reader = command.ExecuteReader()
-                            let values = ResizeArray<string * int>()
-                            while reader.Read() do
-                                values.Add(reader.GetString 0, Convert.ToInt32(reader.GetInt64 1))
-                            values |> Seq.toList
-                        let statsJson counts =
-                            counts
-                            |> List.map (fun (key, count) -> key, JsonValue.Number(decimal count))
-                            |> List.toArray
-                            |> JsonValue.Record
-                        let ratio numerator denominator =
-                            if denominator = 0 then 0.0 else float numerator / float denominator
-                        let definitionCount = scalarCount "SELECT count(*) FROM definitions"
-                        let workspaceDefinitionCount = scalarCount "SELECT count(*) FROM definitions WHERE origin = 'workspace'"
-                        let workspaceDeclaredDefinitionCount = scalarCount "SELECT count(*) FROM definitions WHERE origin = 'workspace' AND provenance_kind = 'declared'"
-                        let workspaceSyntheticDefinitionCount = scalarCount "SELECT count(*) FROM definitions WHERE origin = 'workspace' AND provenance_kind = 'synthetic'"
-                        let dependencyDefinitionCount = scalarCount "SELECT count(*) FROM definitions WHERE origin = 'dependency'"
-                        let vanillaDefinitionCount = scalarCount "SELECT count(*) FROM definitions WHERE origin = 'vanilla'"
-                        let curatedDefinitionCount = scalarCount "SELECT count(*) FROM definitions WHERE origin = 'curated'"
-                        let declaredDefinitionCount = scalarCount "SELECT count(*) FROM definitions WHERE provenance_kind = 'declared'"
-                        let syntheticDefinitionCount = scalarCount "SELECT count(*) FROM definitions WHERE provenance_kind = 'synthetic'"
-                        let derivedDefinitionCount = scalarCount "SELECT count(*) FROM definitions WHERE provenance_kind = 'derived'"
-                        let lineZeroDefinitionCount = scalarCount "SELECT count(*) FROM definitions WHERE line <= 0"
-                        let definitionStackCount = scalarCount "SELECT count(*) FROM definition_stacks"
-                        let topologyFileCount = scalarCount "SELECT count(*) FROM files"
-                        let topologyEdgeCount = scalarCount "SELECT count(*) FROM references_graph"
-                        let eventNodeCount = scalarCount "SELECT count(*) FROM event_nodes"
-                        let eventEdgeCount = scalarCount "SELECT count(*) FROM event_edges"
-                        let eventLogicCount = scalarCount "SELECT count(*) FROM event_logic"
-                        let definitionOriginCounts = groupedCounts "SELECT origin, count(*) FROM definitions GROUP BY origin ORDER BY origin"
-                        let definitionProvenanceCounts = groupedCounts "SELECT provenance_kind, count(*) FROM definitions GROUP BY provenance_kind ORDER BY provenance_kind"
-                        let definitionEntityTypeCounts = groupedCounts "SELECT entity_type, count(*) AS total FROM definitions GROUP BY entity_type ORDER BY lower(entity_type) LIMIT 200"
-                        let topologyEdgeKindCounts = groupedCounts "SELECT type_group, count(*) FROM references_graph GROUP BY type_group ORDER BY type_group"
-                        let labeledTopologyEdgeCount = scalarCount "SELECT count(*) FROM references_graph WHERE trim(coalesce(label, '')) <> ''"
-                        let labeledEventEdgeCount = scalarCount "SELECT count(*) FROM event_edges WHERE trim(coalesce(label, '')) <> ''"
-                        let resolvedEventEdgeCount = scalarCount "SELECT count(*) FROM event_edges WHERE confidence <> 'unresolved'"
-                        let inlineTemplateCount = scalarCount "SELECT count(*) FROM inline_templates"
-                        let inlineInvocationCount = scalarCount "SELECT count(*) FROM inline_invocations"
-                        let inlineExpansionCount = scalarCount "SELECT count(*) FROM inline_expansions"
-                        let incrementalDurationMs = max 0 (int ((DateTimeOffset.UtcNow - incrementalStartedAt).TotalMilliseconds))
-                        let databaseSizeBytes = try FileInfo(target).Length with _ -> 0L
-                        use finalMetadataTransaction = connection.BeginTransaction()
-                        let upsertFinalMetadata key value =
-                            use command = connection.CreateCommand()
-                            command.Transaction <- finalMetadataTransaction
-                            command.CommandText <- "INSERT INTO metadata(key, value) VALUES ($key, $value) ON CONFLICT(key) DO UPDATE SET value = excluded.value"
-                            addParameter command "$key" (box key)
-                            addParameter command "$value" (box value)
-                            command.ExecuteNonQuery() |> ignore
-                        upsertFinalMetadata "definition_count" (string definitionCount)
-                        upsertFinalMetadata "workspace_definition_count" (string workspaceDefinitionCount)
-                        upsertFinalMetadata "workspace_declared_definition_count" (string workspaceDeclaredDefinitionCount)
-                        upsertFinalMetadata "workspace_synthetic_definition_count" (string workspaceSyntheticDefinitionCount)
-                        upsertFinalMetadata "dependency_definition_count" (string dependencyDefinitionCount)
-                        upsertFinalMetadata "vanilla_definition_count" (string vanillaDefinitionCount)
-                        upsertFinalMetadata "curated_definition_count" (string curatedDefinitionCount)
-                        upsertFinalMetadata "declared_definition_count" (string declaredDefinitionCount)
-                        upsertFinalMetadata "synthetic_definition_count" (string syntheticDefinitionCount)
-                        upsertFinalMetadata "derived_definition_count" (string derivedDefinitionCount)
-                        upsertFinalMetadata "line_zero_definition_count" (string lineZeroDefinitionCount)
-                        upsertFinalMetadata "topology_file_count" (string topologyFileCount)
-                        upsertFinalMetadata "topology_edge_count" (string topologyEdgeCount)
-                        upsertFinalMetadata "event_node_count" (string eventNodeCount)
-                        upsertFinalMetadata "event_edge_count" (string eventEdgeCount)
-                        upsertFinalMetadata "event_logic_count" (string eventLogicCount)
-                        upsertFinalMetadata "inline_template_count" (string inlineTemplateCount)
-                        upsertFinalMetadata "inline_invocation_count" (string inlineInvocationCount)
-                        upsertFinalMetadata "inline_expansion_count" (string inlineExpansionCount)
-                        upsertFinalMetadata "last_incremental_duration_ms" (string incrementalDurationMs)
-                        upsertFinalMetadata "database_size_bytes" (string databaseSizeBytes)
-                        finalMetadataTransaction.Commit()
-                        let compactDomains =
-                            use command = connection.CreateCommand()
-                            command.CommandText <- "SELECT id, definition_count, workspace_count, vanilla_count, entity_types_json FROM domains ORDER BY id"
-                            use reader = command.ExecuteReader()
-                            let values = ResizeArray<JsonValue>()
-                            while reader.Read() do
-                                values.Add(
-                                    jsonRecord
-                                        [ Some("id", JsonValue.String(reader.GetString 0))
-                                          Some("definitionCount", JsonValue.Number(decimal (reader.GetInt64 1)))
-                                          Some("workspaceCount", JsonValue.Number(decimal (reader.GetInt64 2)))
-                                          Some("vanillaCount", JsonValue.Number(decimal (reader.GetInt64 3)))
-                                          Some("entityTypes", JsonValue.Parse(reader.GetString 4)) ])
-                            values.ToArray()
-                        Some(
-                            jsonRecord
-                                [ Some("ok", JsonValue.Boolean true)
-                                  Some("status", JsonValue.String runtime.status)
-                                  Some("source", JsonValue.String "cwtools-project-knowledge-sqlite")
-                                  Some("schemaVersion", JsonValue.Number(decimal KnowledgeSchemaVersion))
-                                  Some("capabilityVersions", capabilityVersionsJson)
-                                  Some("capabilityStatus", capabilityStatusJson)
-                                  Some("game", JsonValue.String activeGame)
-                                  Some("generatedAtUnixMs", JsonValue.Number(decimal (generatedAt.ToUnixTimeMilliseconds())))
-                                  Some("graphVersion", JsonValue.Number(decimal runtime.graphVersion))
-                                  Some("completeExport", JsonValue.Boolean options.completeExport)
-                                  Some("projectRoots", jsonStringArray projectRoots)
-                                  Some("databasePath", JsonValue.String(normalizePath target))
-                                  Some("generationMode", JsonValue.String "incremental")
-                                  Some("domains", JsonValue.Array compactDomains)
-                                  Some("baseline", jsonRecord
-                                    [ Some("deterministicOrdering", JsonValue.Boolean true)
-                                      Some("exportDurationMs", JsonValue.Number(decimal incrementalDurationMs))
-                                      Some("incrementalDurationMs", JsonValue.Number(decimal incrementalDurationMs))
-                                      Some("changedFiles", JsonValue.Number(decimal changedFiles.Length))
-                                      Some("databaseSizeBytes", JsonValue.Number(decimal databaseSizeBytes))
-                                      Some("definitions", jsonRecord
-                                        [ Some("total", JsonValue.Number(decimal definitionCount))
-                                          Some("byOrigin", statsJson definitionOriginCounts)
-                                          Some("byProvenanceKind", statsJson definitionProvenanceCounts)
-                                          Some("lineZeroRecords", JsonValue.Number(decimal lineZeroDefinitionCount))
-                                          Some("byEntityType", statsJson definitionEntityTypeCounts) ])
-                                      Some("edges", jsonRecord
-                                        [ Some("total", JsonValue.Number(decimal topologyEdgeCount))
-                                          Some("byKind", statsJson topologyEdgeKindCounts)
-                                          Some("labeledRatio", JsonValue.Float(ratio labeledTopologyEdgeCount topologyEdgeCount)) ])
-                                      Some("eventGraph", jsonRecord
-                                        [ Some("nodes", JsonValue.Number(decimal eventNodeCount))
-                                          Some("edges", JsonValue.Number(decimal eventEdgeCount))
-                                          Some("logicFacts", JsonValue.Number(decimal eventLogicCount))
-                                          Some("edgeLabeledRatio", JsonValue.Float(ratio labeledEventEdgeCount eventEdgeCount))
-                                          Some("edgeResolutionRatio", JsonValue.Float(ratio resolvedEventEdgeCount eventEdgeCount)) ])
-                                      Some("inlineGraph", jsonRecord
-                                        [ Some("templates", JsonValue.Number(decimal inlineTemplateCount))
-                                          Some("invocations", JsonValue.Number(decimal inlineInvocationCount))
-                                          Some("expansions", JsonValue.Number(decimal inlineExpansionCount)) ]) ])
-                                  Some("coverage", jsonRecord
-                                    [ Some("filesConsidered", JsonValue.Number(decimal topologyFileCount))
-                                      Some("filesIndexed", JsonValue.Number(decimal topologyFileCount))
-                                      Some("definitionsConsidered", JsonValue.Number(decimal definitionCount))
-                                      Some("definitionsIndexed", JsonValue.Number(decimal definitionCount))
-                                      Some("edgesConsidered", JsonValue.Number(decimal topologyEdgeCount))
-                                      Some("edgesIndexed", JsonValue.Number(decimal topologyEdgeCount))
-                                      Some("truncated", JsonValue.Boolean(oldTopologyTruncated || freshTopology.truncated))
-                                      Some("staleReasons", jsonStringArray [ if runtime.status <> "ready" then yield "lsp_not_ready" ])
-                                      Some("unsupportedConstructs", jsonStringArray [ if oldTopologyTruncated || freshTopology.truncated then yield "topology_export_limits_reached" ]) ])
-                                  Some("counts", jsonRecord
-                                    [ Some("definitions", JsonValue.Number(decimal definitionCount))
-                                      Some("availableDefinitions", JsonValue.Number(decimal definitionCount))
-                                      Some("workspaceDefinitions", JsonValue.Number(decimal workspaceDefinitionCount))
-                                      Some("workspaceDeclaredDefinitions", JsonValue.Number(decimal workspaceDeclaredDefinitionCount))
-                                      Some("workspaceSyntheticDefinitions", JsonValue.Number(decimal workspaceSyntheticDefinitionCount))
-                                      Some("dependencyDefinitions", JsonValue.Number(decimal dependencyDefinitionCount))
-                                      Some("vanillaDefinitions", JsonValue.Number(decimal vanillaDefinitionCount))
-                                      Some("curatedDefinitions", JsonValue.Number(decimal curatedDefinitionCount))
-                                      Some("declaredDefinitions", JsonValue.Number(decimal declaredDefinitionCount))
-                                      Some("syntheticDefinitions", JsonValue.Number(decimal syntheticDefinitionCount))
-                                      Some("derivedDefinitions", JsonValue.Number(decimal derivedDefinitionCount))
-                                      Some("lineZeroDefinitions", JsonValue.Number(decimal lineZeroDefinitionCount))
-                                      Some("definitionStacks", JsonValue.Number(decimal definitionStackCount))
-                                      Some("topologyFiles", JsonValue.Number(decimal topologyFileCount))
-                                      Some("topologyEdges", JsonValue.Number(decimal topologyEdgeCount))
-                                      Some("eventNodes", JsonValue.Number(decimal eventNodeCount))
-                                      Some("eventEdges", JsonValue.Number(decimal eventEdgeCount))
-                                      Some("eventLogic", JsonValue.Number(decimal eventLogicCount)) ])
-                                  Some("freshness", jsonRecord
-                                    [ Some("validationInProgress", JsonValue.Boolean runtime.validationInProgress)
-                                      Some("loadingInProgress", JsonValue.Boolean runtime.loadingInProgress)
-                                      Some("pendingGlobalKinds", jsonStringArray runtime.pendingGlobalKinds)
-                                      Some("lastGlobalRefreshAtUnixMs", JsonValue.Number(decimal runtime.lastGlobalRefreshAtUnixMs)) ])
-                                  Some("warnings", jsonStringArray warnings) ])
+                            let pathComparison =
+                                if OperatingSystem.IsWindows() then "COLLATE NOCASE" else "COLLATE BINARY"
+                            executeSql connection (Some transaction) $"""
+    INSERT OR IGNORE INTO affected_symbols(entity_type_key, symbol_id_key, entity_type, symbol_id)
+    SELECT lower(d.entity_type), lower(d.symbol_id), d.entity_type, d.symbol_id
+    FROM definitions d JOIN changed_paths c ON d.file_path = c.path {pathComparison};
+    INSERT OR IGNORE INTO affected_domains(domain)
+    SELECT d.domain FROM definitions d JOIN changed_paths c ON d.file_path = c.path {pathComparison};
+    INSERT OR IGNORE INTO affected_domains(domain)
+    SELECT f.domain FROM files f JOIN changed_paths c ON f.path = c.path {pathComparison};
+    INSERT OR IGNORE INTO affected_domains(domain)
+    SELECT r.domain FROM references_graph r JOIN changed_paths c ON r.source_file = c.path {pathComparison};
+    INSERT OR IGNORE INTO affected_event_ids(event_id)
+    SELECT lower(d.symbol_id)
+    FROM definitions d JOIN changed_paths c ON d.file_path = c.path {pathComparison}
+    WHERE lower(d.entity_type) = 'event';
+    """
+                            use affectedSymbolCommand = connection.CreateCommand()
+                            affectedSymbolCommand.Transaction <- transaction
+                            affectedSymbolCommand.CommandText <- "INSERT OR IGNORE INTO affected_symbols(entity_type_key, symbol_id_key, entity_type, symbol_id) VALUES ($typeKey, $symbolKey, $type, $symbol)"
+                            prepareCommandParameters affectedSymbolCommand
+                                [ "$typeKey", box ""; "$symbolKey", box ""; "$type", box ""; "$symbol", box "" ]
+                            use affectedDomainCommand = connection.CreateCommand()
+                            affectedDomainCommand.Transaction <- transaction
+                            affectedDomainCommand.CommandText <- "INSERT OR IGNORE INTO affected_domains(domain) VALUES ($domain)"
+                            prepareCommandParameters affectedDomainCommand [ "$domain", box "" ]
+                            use freshEventIdCommand = connection.CreateCommand()
+                            freshEventIdCommand.Transaction <- transaction
+                            freshEventIdCommand.CommandText <- "INSERT OR IGNORE INTO fresh_event_ids(event_id) VALUES ($event)"
+                            prepareCommandParameters freshEventIdCommand [ "$event", box "" ]
+                            for definition in freshDefinitions do
+                                setPreparedCommandParameters affectedSymbolCommand
+                                    [ "$typeKey", box (definition.entityType.ToLowerInvariant())
+                                      "$symbolKey", box (definition.id.ToLowerInvariant())
+                                      "$type", box definition.entityType
+                                      "$symbol", box definition.id ]
+                                affectedSymbolCommand.ExecuteNonQuery() |> ignore
+                                setPreparedCommandParameters affectedDomainCommand [ "$domain", box definition.domain ]
+                                affectedDomainCommand.ExecuteNonQuery() |> ignore
+                                if definition.entityType.Equals("event", StringComparison.OrdinalIgnoreCase) then
+                                    setPreparedCommandParameters freshEventIdCommand [ "$event", box (definition.id.ToLowerInvariant()) ]
+                                    freshEventIdCommand.ExecuteNonQuery() |> ignore
+                            for file in freshTopology.files do
+                                setPreparedCommandParameters affectedDomainCommand [ "$domain", box file.domain ]
+                                affectedDomainCommand.ExecuteNonQuery() |> ignore
+
+                            executeSql connection (Some transaction) $"""
+    CREATE TEMP TABLE affected_inline_templates(template_id TEXT PRIMARY KEY COLLATE NOCASE);
+    CREATE TEMP TABLE affected_inline_invocations(invocation_id TEXT PRIMARY KEY COLLATE NOCASE);
+    """
+                            use affectedInlineTemplateCommand = connection.CreateCommand()
+                            affectedInlineTemplateCommand.Transaction <- transaction
+                            affectedInlineTemplateCommand.CommandText <- "INSERT OR IGNORE INTO affected_inline_templates(template_id) VALUES ($template)"
+                            prepareCommandParameters affectedInlineTemplateCommand [ "$template", box "" ]
+                            let freshChangedTemplates =
+                                freshInlineGraph.templates
+                                |> List.filter (fun template -> changedFiles |> List.exists (fun file -> normalizeFileKey file = normalizeFileKey template.file))
+                            let freshChangedById = freshChangedTemplates |> Seq.map (fun template -> template.templateId, template) |> dict
+                            use oldInlineTemplateCommand = connection.CreateCommand()
+                            oldInlineTemplateCommand.Transaction <- transaction
+                            oldInlineTemplateCommand.CommandText <- $"SELECT t.template_id, t.content_hash FROM inline_templates t JOIN changed_paths c ON t.file = c.path {pathComparison}"
+                            use oldInlineTemplateReader = oldInlineTemplateCommand.ExecuteReader()
+                            let oldChangedTemplates = ResizeArray<string * string>()
+                            while oldInlineTemplateReader.Read() do
+                                oldChangedTemplates.Add(oldInlineTemplateReader.GetString 0, oldInlineTemplateReader.GetString 1)
+                            oldInlineTemplateReader.Close()
+                            for templateId, oldHash in oldChangedTemplates do
+                                match freshChangedById.TryGetValue templateId with
+                                | true, fresh when String.Equals(oldHash, fresh.contentHash, StringComparison.OrdinalIgnoreCase) -> ()
+                                | _ ->
+                                    setPreparedCommandParameters affectedInlineTemplateCommand [ "$template", box templateId ]
+                                    affectedInlineTemplateCommand.ExecuteNonQuery() |> ignore
+                            let oldChangedIds = oldChangedTemplates |> Seq.map fst |> HashSet<string>
+                            for template in freshChangedTemplates do
+                                if not (oldChangedIds.Contains template.templateId) then
+                                    setPreparedCommandParameters affectedInlineTemplateCommand [ "$template", box template.templateId ]
+                                    affectedInlineTemplateCommand.ExecuteNonQuery() |> ignore
+                            executeSql connection (Some transaction) $"""
+    WITH RECURSIVE reverse_callers(template_id) AS (
+      SELECT template_id FROM affected_inline_templates
+      UNION
+      SELECT caller.template_id
+      FROM inline_invocations invocation
+      JOIN inline_templates caller ON caller.file = invocation.caller_file {pathComparison}
+      JOIN reverse_callers affected ON lower(invocation.template_id) = lower(affected.template_id)
+    )
+    INSERT OR IGNORE INTO affected_inline_templates(template_id)
+    SELECT template_id FROM reverse_callers;
+    INSERT OR IGNORE INTO affected_inline_invocations(invocation_id)
+    SELECT invocation.invocation_id
+    FROM inline_invocations invocation
+    WHERE EXISTS (SELECT 1 FROM changed_paths c WHERE invocation.caller_file = c.path {pathComparison})
+       OR EXISTS (SELECT 1 FROM affected_inline_templates t WHERE lower(t.template_id) = lower(invocation.template_id));
+    """
+
+                            executeSql connection (Some transaction) $"""
+    DELETE FROM definition_stacks
+    WHERE EXISTS (
+      SELECT 1 FROM affected_symbols a
+      WHERE lower(definition_stacks.entity_type) = a.entity_type_key
+        AND lower(definition_stacks.symbol_id) = a.symbol_id_key
+    );
+    DELETE FROM unresolved
+    WHERE kind = 'definition_resolution'
+      AND EXISTS (
+        SELECT 1 FROM affected_symbols a
+        WHERE lower(coalesce(unresolved.entity_type, '')) = a.entity_type_key
+          AND lower(coalesce(unresolved.symbol_id, '')) = a.symbol_id_key
+      );
+    DELETE FROM event_edges
+    WHERE EXISTS (SELECT 1 FROM changed_paths c WHERE event_edges.source_file = c.path {pathComparison});
+    DELETE FROM event_logic
+    WHERE EXISTS (SELECT 1 FROM changed_paths c WHERE event_logic.source_file = c.path {pathComparison});
+    DELETE FROM event_nodes
+    WHERE EXISTS (SELECT 1 FROM changed_paths c WHERE event_nodes.file_path = c.path {pathComparison});
+    DELETE FROM references_graph
+    WHERE EXISTS (SELECT 1 FROM changed_paths c WHERE references_graph.source_file = c.path {pathComparison});
+    DELETE FROM files
+    WHERE EXISTS (SELECT 1 FROM changed_paths c WHERE files.path = c.path {pathComparison});
+    DELETE FROM definitions
+    WHERE EXISTS (SELECT 1 FROM changed_paths c WHERE definitions.file_path = c.path {pathComparison});
+    DELETE FROM inline_problems WHERE invocation_id IN (SELECT invocation_id FROM affected_inline_invocations);
+    DELETE FROM inline_generated_references WHERE invocation_id IN (SELECT invocation_id FROM affected_inline_invocations);
+    DELETE FROM inline_expansions WHERE invocation_id IN (SELECT invocation_id FROM affected_inline_invocations);
+    DELETE FROM inline_arguments WHERE invocation_id IN (SELECT invocation_id FROM affected_inline_invocations);
+    DELETE FROM inline_invocations WHERE invocation_id IN (SELECT invocation_id FROM affected_inline_invocations);
+    DELETE FROM inline_parameters WHERE template_id IN (SELECT template_id FROM affected_inline_templates);
+    DELETE FROM inline_templates WHERE template_id IN (SELECT template_id FROM affected_inline_templates);
+    DELETE FROM event_edges
+    WHERE lower(target_event_id) IN (
+      SELECT event_id FROM affected_event_ids
+      WHERE event_id NOT IN (SELECT event_id FROM fresh_event_ids)
+    );
+    """
+                            use definitionCommand = connection.CreateCommand()
+                            definitionCommand.Transaction <- transaction
+                            definitionCommand.CommandText <- "INSERT INTO definitions(symbol_id, entity_type, file_path, logical_path, line, end_line, origin, validate, overwrite_state, resource_scope, domain, override_path, override_strategy, provenance_kind, source_file, source_line, source_end_line, template_file, template_line, invocation_file, invocation_line, has_real_range, confidence) VALUES ($symbol, $type, $file, $logical, $line, $end, $origin, $validate, $overwrite, $scope, $domain, $overridePath, $overrideStrategy, $provenance, $sourceFile, $sourceLine, $sourceEndLine, $templateFile, $templateLine, $invocationFile, $invocationLine, $hasRealRange, $confidence) RETURNING id"
+                            prepareCommandParameters definitionCommand
+                                [ "$symbol", box ""; "$type", box ""; "$file", box ""; "$logical", box ""; "$line", box 0; "$end", box 0
+                                  "$origin", box ""; "$validate", box 0; "$overwrite", box ""; "$scope", box ""; "$domain", box ""
+                                  "$overridePath", box ""; "$overrideStrategy", box ""; "$provenance", box ""; "$sourceFile", box ""
+                                  "$sourceLine", box 0; "$sourceEndLine", box 0; "$templateFile", box ""; "$templateLine", box 0
+                                  "$invocationFile", box ""; "$invocationLine", box 0; "$hasRealRange", box 0; "$confidence", box "" ]
+                            use subtypeCommand = connection.CreateCommand()
+                            subtypeCommand.Transaction <- transaction
+                            subtypeCommand.CommandText <- "INSERT OR IGNORE INTO definition_subtypes(definition_id, subtype) VALUES ($definition, $subtype)"
+                            prepareCommandParameters subtypeCommand [ "$definition", box 0L; "$subtype", box "" ]
+                            for definition in freshDefinitions do
+                                setPreparedCommandParameters definitionCommand
+                                    [ "$symbol", box definition.id; "$type", box definition.entityType; "$file", box (normalizePath definition.file)
+                                      "$logical", box (normalizePath definition.logicalPath); "$line", box definition.line; "$end", box definition.endLine
+                                      "$origin", box definition.origin; "$validate", box (if definition.validate then 1 else 0); "$overwrite", box definition.overwrite
+                                      "$scope", box (definition.resourceScope |> Option.toObj); "$domain", box definition.domain
+                                      "$overridePath", box (definition.overridePath |> Option.toObj); "$overrideStrategy", box (definition.overrideStrategy |> Option.toObj)
+                                      "$provenance", box definition.provenanceKind; "$sourceFile", box (normalizePath definition.sourceFile)
+                                      "$sourceLine", box definition.sourceLine; "$sourceEndLine", box definition.sourceEndLine
+                                      "$templateFile", box (definition.templateFile |> Option.toObj); "$templateLine", box (definition.templateLine |> Option.map box |> Option.toObj)
+                                      "$invocationFile", box (definition.invocationFile |> Option.toObj); "$invocationLine", box (definition.invocationLine |> Option.map box |> Option.toObj)
+                                      "$hasRealRange", box (if definition.hasRealRange then 1 else 0); "$confidence", box definition.confidence ]
+                                let definitionId = definitionCommand.ExecuteScalar() :?> int64
+                                for subtype in definition.subtypes do
+                                    setPreparedCommandParameters subtypeCommand [ "$definition", box definitionId; "$subtype", box subtype ]
+                                    subtypeCommand.ExecuteNonQuery() |> ignore
+
+                            use fileCommand = connection.CreateCommand()
+                            fileCommand.Transaction <- transaction
+                            fileCommand.CommandText <- "INSERT OR REPLACE INTO files(path, logical_path, domain, origin) VALUES ($path, $logical, $domain, $origin)"
+                            prepareCommandParameters fileCommand [ "$path", box ""; "$logical", box ""; "$domain", box ""; "$origin", box "" ]
+                            for item in freshTopology.files do
+                                setPreparedCommandParameters fileCommand
+                                    [ "$path", box item.file; "$logical", box item.logicalPath; "$domain", box item.domain; "$origin", box item.origin ]
+                                fileCommand.ExecuteNonQuery() |> ignore
+
+                            use referenceCommand = connection.CreateCommand()
+                            referenceCommand.Transaction <- transaction
+                            referenceCommand.CommandText <- "INSERT INTO references_graph(source_file, source_logical_path, target_id, type_group, line, is_outgoing, reference_type, label, associated_type, domain) VALUES ($file, $logical, $target, $group, $line, $outgoing, $referenceType, $label, $associated, $domain)"
+                            prepareCommandParameters referenceCommand
+                                [ "$file", box ""; "$logical", box ""; "$target", box ""; "$group", box ""; "$line", box 0; "$outgoing", box 0
+                                  "$referenceType", box ""; "$label", box ""; "$associated", box ""; "$domain", box "" ]
+                            for reference in freshTopology.edges do
+                                setPreparedCommandParameters referenceCommand
+                                    [ "$file", box reference.sourceFile; "$logical", box reference.sourceLogicalPath; "$target", box reference.targetId
+                                      "$group", box reference.typeGroup; "$line", box reference.line; "$outgoing", box (if reference.isOutgoing then 1 else 0)
+                                      "$referenceType", box reference.referenceType; "$label", box (reference.label |> Option.toObj)
+                                      "$associated", box (reference.associatedType |> Option.toObj); "$domain", box reference.domain ]
+                                referenceCommand.ExecuteNonQuery() |> ignore
+
+                            use eventNodeCommand = connection.CreateCommand()
+                            eventNodeCommand.Transaction <- transaction
+                            eventNodeCommand.CommandText <- "INSERT INTO event_nodes(event_id, event_type, title, file_path, logical_path, line, end_line, origin, is_triggered_only, is_hidden, has_mtth, facts_known) VALUES ($id, $type, $title, $file, $logical, $line, $end, $origin, $triggered, $hidden, $mtth, $factsKnown)"
+                            prepareCommandParameters eventNodeCommand
+                                [ "$id", box ""; "$type", box ""; "$title", box ""; "$file", box ""; "$logical", box ""; "$line", box 0
+                                  "$end", box 0; "$origin", box ""; "$triggered", box 0; "$hidden", box 0; "$mtth", box 0; "$factsKnown", box 0 ]
+                            for node in eventGraph.nodes do
+                                setPreparedCommandParameters eventNodeCommand
+                                    [ "$id", box node.eventId; "$type", box node.eventType; "$title", box (node.title |> Option.toObj)
+                                      "$file", box node.file; "$logical", box node.logicalPath; "$line", box node.line; "$end", box node.endLine
+                                      "$origin", box node.origin; "$triggered", box (if node.isTriggeredOnly then 1 else 0)
+                                      "$hidden", box (if node.isHidden then 1 else 0); "$mtth", box (if node.hasMeanTimeToHappen then 1 else 0)
+                                      "$factsKnown", box (if node.factsKnown then 1 else 0) ]
+                                eventNodeCommand.ExecuteNonQuery() |> ignore
+                            use eventEdgeCommand = connection.CreateCommand()
+                            eventEdgeCommand.Transaction <- transaction
+                            eventEdgeCommand.CommandText <- "INSERT INTO event_edges(source_kind, source_id, target_event_id, edge_type, label, source_file, line, confidence, call_operator, phase, delay, condition_path, scope_map, source_scope, target_scope) VALUES ($kind, $source, $target, $type, $label, $file, $line, $confidence, $callOperator, $phase, $delay, $conditionPath, $scopeMap, $sourceScope, $targetScope)"
+                            prepareCommandParameters eventEdgeCommand
+                                [ "$kind", box ""; "$source", box ""; "$target", box ""; "$type", box ""; "$label", box ""; "$file", box ""
+                                  "$line", box 0; "$confidence", box ""; "$callOperator", box ""; "$phase", box ""; "$delay", box ""
+                                  "$conditionPath", box ""; "$scopeMap", box ""; "$sourceScope", box ""; "$targetScope", box "" ]
+                            for edge in eventGraph.edges do
+                                setPreparedCommandParameters eventEdgeCommand
+                                    [ "$kind", box edge.sourceKind; "$source", box edge.sourceId; "$target", box edge.targetEventId
+                                      "$type", box edge.edgeType; "$label", box (edge.label |> Option.toObj); "$file", box edge.sourceFile
+                                      "$line", box edge.line; "$confidence", box edge.confidence
+                                      "$callOperator", box (edge.callOperator |> Option.toObj); "$phase", box (edge.phase |> Option.toObj)
+                                      "$delay", box (edge.delay |> Option.toObj); "$conditionPath", box (edge.conditionPath |> Option.toObj)
+                                      "$scopeMap", box (edge.scopeMap |> Option.toObj); "$sourceScope", box (edge.sourceScope |> Option.toObj)
+                                      "$targetScope", box (edge.targetScope |> Option.toObj) ]
+                                eventEdgeCommand.ExecuteNonQuery() |> ignore
+                            use eventLogicCommand = connection.CreateCommand()
+                            eventLogicCommand.Transaction <- transaction
+                            eventLogicCommand.CommandText <- "INSERT INTO event_logic(event_id, relation_type, subject, scope, phase, source_file, line, details) VALUES ($event, $type, $subject, $scope, $phase, $file, $line, $details)"
+                            prepareCommandParameters eventLogicCommand
+                                [ "$event", box ""; "$type", box ""; "$subject", box ""; "$scope", box ""; "$phase", box ""; "$file", box ""
+                                  "$line", box 0; "$details", box "" ]
+                            for item in eventGraph.logic do
+                                setPreparedCommandParameters eventLogicCommand
+                                    [ "$event", box item.eventId; "$type", box item.relationType; "$subject", box item.subject
+                                      "$scope", box (item.scope |> Option.toObj); "$phase", box item.phase; "$file", box item.sourceFile
+                                      "$line", box item.line; "$details", box (item.details |> Option.toObj) ]
+                                eventLogicCommand.ExecuteNonQuery() |> ignore
+                            for item in eventGraph.stateAccesses do
+                                setPreparedCommandParameters eventLogicCommand
+                                    [ "$event", box item.eventId; "$type", box item.relationType; "$subject", box item.subject
+                                      "$scope", box (item.scope |> Option.toObj); "$phase", box item.phase; "$file", box item.sourceFile
+                                      "$line", box item.line; "$details", box (item.details |> Option.toObj) ]
+                                eventLogicCommand.ExecuteNonQuery() |> ignore
+
+                            let readAffectedSet tableName columnName =
+                                use command = connection.CreateCommand()
+                                command.Transaction <- transaction
+                                command.CommandText <- sprintf "SELECT %s FROM %s" columnName tableName
+                                use reader = command.ExecuteReader()
+                                let values = HashSet<string>(StringComparer.OrdinalIgnoreCase)
+                                while reader.Read() do values.Add(reader.GetString 0) |> ignore
+                                values
+                            let affectedInlineTemplates = readAffectedSet "affected_inline_templates" "template_id"
+                            let freshTemplateByFile =
+                                freshInlineGraph.templates
+                                |> Seq.map (fun template -> normalizeFileKey template.file, template.templateId)
+                                |> dict
+                            let callerChanged callerFile =
+                                changedFiles |> List.exists (fun file -> normalizeFileKey file = normalizeFileKey callerFile)
+                            let invocationAffected (invocation: InlineGraph.InlineInvocationFact) =
+                                callerChanged invocation.callerFile
+                                || affectedInlineTemplates.Contains invocation.templateId
+                                || match freshTemplateByFile.TryGetValue(normalizeFileKey invocation.callerFile) with
+                                   | true, callerTemplate -> affectedInlineTemplates.Contains callerTemplate
+                                   | _ -> false
+                            let affectedFreshInvocationIds =
+                                freshInlineGraph.invocations
+                                |> Seq.filter invocationAffected
+                                |> Seq.map _.invocationId
+                                |> HashSet<string>
+
+                            // Refresh only the changed template/caller reverse closure.
+                            // Unrelated inline facts retain their rows and hashes.
+                            use inlineTemplateCommand = connection.CreateCommand()
+                            inlineTemplateCommand.Transaction <- transaction
+                            inlineTemplateCommand.CommandText <- "INSERT OR REPLACE INTO inline_templates(template_id, logical_path, file, line, content_hash) VALUES ($id, $logical, $file, $line, $hash)"
+                            prepareCommandParameters inlineTemplateCommand
+                                [ "$id", box ""; "$logical", box ""; "$file", box ""; "$line", box 0; "$hash", box "" ]
+                            for template in freshInlineGraph.templates |> Seq.filter (fun template -> affectedInlineTemplates.Contains template.templateId) do
+                                setPreparedCommandParameters inlineTemplateCommand
+                                    [ "$id", box template.templateId; "$logical", box template.logicalPath; "$file", box template.file
+                                      "$line", box template.line; "$hash", box template.contentHash ]
+                                inlineTemplateCommand.ExecuteNonQuery() |> ignore
+                            use inlineParameterCommand = connection.CreateCommand()
+                            inlineParameterCommand.Transaction <- transaction
+                            inlineParameterCommand.CommandText <- "INSERT OR REPLACE INTO inline_parameters(template_id, name, usage_kind, usage_kinds, inferred_type, required, occurrences) VALUES ($id, $name, $kind, $kinds, $inferred, $required, $occurrences)"
+                            prepareCommandParameters inlineParameterCommand
+                                [ "$id", box ""; "$name", box ""; "$kind", box ""; "$kinds", box ""; "$inferred", box ""; "$required", box 0; "$occurrences", box 0 ]
+                            for parameter in freshInlineGraph.parameters |> Seq.filter (fun parameter -> affectedInlineTemplates.Contains parameter.templateId) do
+                                setPreparedCommandParameters inlineParameterCommand
+                                    [ "$id", box parameter.templateId; "$name", box parameter.name; "$kind", box parameter.usageKind
+                                      "$kinds", box (String.concat "|" parameter.usageKinds); "$inferred", box parameter.inferredType
+                                      "$required", box (if parameter.required then 1 else 0); "$occurrences", box parameter.occurrences ]
+                                inlineParameterCommand.ExecuteNonQuery() |> ignore
+                            use inlineInvocationCommand = connection.CreateCommand()
+                            inlineInvocationCommand.Transaction <- transaction
+                            inlineInvocationCommand.CommandText <- "INSERT OR REPLACE INTO inline_invocations(invocation_id, caller_file, caller_line, template_id, enclosing_definition) VALUES ($id, $file, $line, $template, $enclosing)"
+                            prepareCommandParameters inlineInvocationCommand
+                                [ "$id", box ""; "$file", box ""; "$line", box 0; "$template", box ""; "$enclosing", box "" ]
+                            for invocation in freshInlineGraph.invocations |> Seq.filter invocationAffected do
+                                setPreparedCommandParameters inlineInvocationCommand
+                                    [ "$id", box invocation.invocationId; "$file", box invocation.callerFile; "$line", box invocation.callerLine
+                                      "$template", box invocation.templateId; "$enclosing", box (invocation.enclosingDefinition |> Option.toObj) ]
+                                inlineInvocationCommand.ExecuteNonQuery() |> ignore
+                            use inlineArgumentCommand = connection.CreateCommand()
+                            inlineArgumentCommand.Transaction <- transaction
+                            inlineArgumentCommand.CommandText <- "INSERT OR REPLACE INTO inline_arguments(invocation_id, name, raw_value, resolved_value, value_kind) VALUES ($id, $name, $raw, $resolved, $kind)"
+                            prepareCommandParameters inlineArgumentCommand
+                                [ "$id", box ""; "$name", box ""; "$raw", box ""; "$resolved", box ""; "$kind", box "" ]
+                            for argument in freshInlineGraph.arguments |> Seq.filter (fun argument -> affectedFreshInvocationIds.Contains argument.invocationId) do
+                                setPreparedCommandParameters inlineArgumentCommand
+                                    [ "$id", box argument.invocationId; "$name", box argument.name; "$raw", box argument.rawValue
+                                      "$resolved", box argument.resolvedValue; "$kind", box argument.valueKind ]
+                                inlineArgumentCommand.ExecuteNonQuery() |> ignore
+                            use inlineExpansionCommand = connection.CreateCommand()
+                            inlineExpansionCommand.Transaction <- transaction
+                            inlineExpansionCommand.CommandText <- "INSERT OR REPLACE INTO inline_expansions(invocation_id, expanded_symbol_id, entity_type, template_file, caller_file, template_line, generated_line, confidence) VALUES ($id, $symbol, $type, $templateFile, $callerFile, $templateLine, $generatedLine, $confidence)"
+                            prepareCommandParameters inlineExpansionCommand
+                                [ "$id", box ""; "$symbol", box ""; "$type", box ""; "$templateFile", box ""; "$callerFile", box ""; "$templateLine", box 0; "$generatedLine", box 0; "$confidence", box "" ]
+                            for expansion in freshInlineGraph.expansions |> Seq.filter (fun expansion -> affectedFreshInvocationIds.Contains expansion.invocationId) do
+                                setPreparedCommandParameters inlineExpansionCommand
+                                    [ "$id", box expansion.invocationId; "$symbol", box expansion.expandedSymbolId; "$type", box expansion.entityType
+                                      "$templateFile", box expansion.templateFile; "$callerFile", box expansion.callerFile
+                                      "$templateLine", box expansion.templateLine; "$generatedLine", box expansion.generatedLine; "$confidence", box expansion.confidence ]
+                                inlineExpansionCommand.ExecuteNonQuery() |> ignore
+                            use inlineGeneratedReferenceCommand = connection.CreateCommand()
+                            inlineGeneratedReferenceCommand.Transaction <- transaction
+                            inlineGeneratedReferenceCommand.CommandText <- "INSERT OR REPLACE INTO inline_generated_references(invocation_id, reference_kind, expanded_value, template_file, caller_file, template_line, generated_line, confidence) VALUES ($id, $kind, $value, $templateFile, $callerFile, $templateLine, $generatedLine, $confidence)"
+                            prepareCommandParameters inlineGeneratedReferenceCommand
+                                [ "$id", box ""; "$kind", box ""; "$value", box ""; "$templateFile", box ""; "$callerFile", box ""; "$templateLine", box 0; "$generatedLine", box 0; "$confidence", box "" ]
+                            for reference in freshInlineGraph.generatedReferences |> Seq.filter (fun reference -> affectedFreshInvocationIds.Contains reference.invocationId) do
+                                setPreparedCommandParameters inlineGeneratedReferenceCommand
+                                    [ "$id", box reference.invocationId; "$kind", box reference.referenceKind; "$value", box reference.expandedValue
+                                      "$templateFile", box reference.templateFile; "$callerFile", box reference.callerFile
+                                      "$templateLine", box reference.templateLine; "$generatedLine", box reference.generatedLine; "$confidence", box reference.confidence ]
+                                inlineGeneratedReferenceCommand.ExecuteNonQuery() |> ignore
+                            use inlineProblemCommand = connection.CreateCommand()
+                            inlineProblemCommand.Transaction <- transaction
+                            inlineProblemCommand.CommandText <- "INSERT OR REPLACE INTO inline_problems(invocation_id, kind, message, line) VALUES ($id, $kind, $message, $line)"
+                            prepareCommandParameters inlineProblemCommand
+                                [ "$id", box ""; "$kind", box ""; "$message", box ""; "$line", box 0 ]
+                            for problem in freshInlineGraph.problems |> Seq.filter (fun problem -> affectedFreshInvocationIds.Contains problem.invocationId) do
+                                setPreparedCommandParameters inlineProblemCommand
+                                    [ "$id", box problem.invocationId; "$kind", box problem.kind; "$message", box problem.message; "$line", box problem.line ]
+                                inlineProblemCommand.ExecuteNonQuery() |> ignore
+
+                            let affectedDefinitionRows =
+                                use command = connection.CreateCommand()
+                                command.Transaction <- transaction
+                                command.CommandText <- """
+    SELECT d.id, d.entity_type, d.symbol_id, d.overwrite_state, d.override_strategy, d.origin, d.logical_path
+    FROM definitions d
+    JOIN affected_symbols a
+      ON d.entity_type = a.entity_type_key COLLATE NOCASE
+     AND d.symbol_id = a.symbol_id_key COLLATE NOCASE
+    ORDER BY lower(d.entity_type), lower(d.symbol_id), d.id
+    """
+                                use reader = command.ExecuteReader()
+                                let rows = ResizeArray<int64 * string * string * string * string option * string * string>()
+                                while reader.Read() do
+                                    rows.Add(
+                                        reader.GetInt64 0,
+                                        reader.GetString 1,
+                                        reader.GetString 2,
+                                        reader.GetString 3,
+                                        stringOrNone reader 4,
+                                        reader.GetString 5,
+                                        reader.GetString 6)
+                                rows |> Seq.toList
+                            use stackCommand = connection.CreateCommand()
+                            stackCommand.Transaction <- transaction
+                            stackCommand.CommandText <- "INSERT INTO definition_stacks(entity_type, symbol_id, resolution) VALUES ($type, $symbol, $resolution) RETURNING id"
+                            use candidateCommand = connection.CreateCommand()
+                            candidateCommand.Transaction <- transaction
+                            candidateCommand.CommandText <- "INSERT INTO stack_candidates(stack_id, definition_id, is_active, candidate_order, origin, logical_path, override_strategy) VALUES ($stack, $definition, $active, $order, $origin, $logical, $strategy)"
+                            use unresolvedCommand = connection.CreateCommand()
+                            unresolvedCommand.Transaction <- transaction
+                            unresolvedCommand.CommandText <- "INSERT INTO unresolved(kind, entity_type, symbol_id, resolution, message) VALUES ('definition_resolution', $type, $symbol, $resolution, 'The effective definition requires override-mode or ambiguity review.')"
+                            for _, values in affectedDefinitionRows |> Seq.groupBy (fun (_, entityType, symbolId, _, _, _, _) -> entityType.ToLowerInvariant(), symbolId.ToLowerInvariant()) do
+                                let items = values |> Seq.toList
+                                if items.Length > 1 then
+                                    let originRank origin = if origin = "vanilla" then 0 elif origin = "workspace" then 2 else 1
+                                    let ordered = items |> List.sortBy (fun (_, _, _, _, _, origin, logical) -> originRank origin, normalizePath logical)
+                                    let _, entityType, symbolId, _, _, _, _ = ordered.Head
+                                    let active = ordered |> List.filter (fun (_, _, _, overwrite, _, _, _) -> overwrite <> "overwritten")
+                                    let strategy = ordered |> List.tryPick (fun (_, _, _, _, value, _, _) -> value |> Option.map (fun mode -> mode.ToUpperInvariant()))
+                                    let winnerId, resolution =
+                                        if active.Length = 1 then let id, _, _, _, _, _, _ = active.Head in Some id, "cwtools_single_active"
+                                        else
+                                            match strategy with
+                                            | Some "LIOS" -> let id, _, _, _, _, _, _ = ordered |> List.last in Some id, "last_in_only_served"
+                                            | Some "FIOS" -> let id, _, _, _, _, _, _ = ordered.Head in Some id, "first_in_only_served"
+                                            | Some "NO" -> let id, _, _, _, _, _, _ = ordered.Head in Some id, "no_individual_override"
+                                            | Some "MERGE" -> None, "merged_definitions"
+                                            | Some "DUPL" -> None, "duplicate_definitions"
+                                            | _ -> None, "ambiguous"
+                                    setCommandParameters stackCommand [ "$type", box entityType; "$symbol", box symbolId; "$resolution", box resolution ]
+                                    let stackId = stackCommand.ExecuteScalar() :?> int64
+                                    for index, (definitionId, _, _, _, candidateStrategy, origin, logical) in ordered |> List.indexed do
+                                        setCommandParameters candidateCommand
+                                            [ "$stack", box stackId; "$definition", box definitionId
+                                              "$active", box (if winnerId = Some definitionId then 1 else 0)
+                                              "$order", box index
+                                              "$origin", box origin
+                                              "$logical", box logical
+                                              "$strategy", box (candidateStrategy |> Option.toObj) ]
+                                        candidateCommand.ExecuteNonQuery() |> ignore
+                                    if resolution = "ambiguous" then
+                                        setCommandParameters unresolvedCommand
+                                            [ "$type", box entityType; "$symbol", box symbolId; "$resolution", box resolution ]
+                                        unresolvedCommand.ExecuteNonQuery() |> ignore
+
+                            let affectedDomains =
+                                use command = connection.CreateCommand()
+                                command.Transaction <- transaction
+                                command.CommandText <- "SELECT domain FROM affected_domains ORDER BY domain"
+                                use reader = command.ExecuteReader()
+                                let values = ResizeArray<string>()
+                                while reader.Read() do values.Add(reader.GetString 0)
+                                values |> Seq.toList
+                            use deleteDomainCommand = connection.CreateCommand()
+                            deleteDomainCommand.Transaction <- transaction
+                            deleteDomainCommand.CommandText <- "DELETE FROM domains WHERE id = $domain"
+                            use deleteArchetypesCommand = connection.CreateCommand()
+                            deleteArchetypesCommand.Transaction <- transaction
+                            deleteArchetypesCommand.CommandText <- "DELETE FROM archetypes WHERE domain = $domain"
+                            use insertDomainCommand = connection.CreateCommand()
+                            insertDomainCommand.Transaction <- transaction
+                            insertDomainCommand.CommandText <- "INSERT INTO domains(id, definition_count, workspace_count, vanilla_count, entity_types_json, directories_json) VALUES ($id, $count, $workspace, $vanilla, $types, $directories)"
+                            use insertArchetypeCommand = connection.CreateCommand()
+                            insertArchetypeCommand.Transaction <- transaction
+                            insertArchetypeCommand.CommandText <- "INSERT OR IGNORE INTO archetypes(definition_id, domain, origin, rank, role) VALUES ($definition, $domain, $origin, $rank, $role)"
+                            for domain in affectedDomains do
+                                setCommandParameters deleteDomainCommand [ "$domain", box domain ]
+                                deleteDomainCommand.ExecuteNonQuery() |> ignore
+                                setCommandParameters deleteArchetypesCommand [ "$domain", box domain ]
+                                deleteArchetypesCommand.ExecuteNonQuery() |> ignore
+                                let domainDefinitions =
+                                    use command = connection.CreateCommand()
+                                    command.Transaction <- transaction
+                                    command.CommandText <- "SELECT id, entity_type, logical_path, origin FROM definitions WHERE domain = $domain ORDER BY entity_type, symbol_id, origin, file_path, line"
+                                    addParameter command "$domain" (box domain)
+                                    use reader = command.ExecuteReader()
+                                    let rows = ResizeArray<int64 * string * string * string>()
+                                    while reader.Read() do
+                                        rows.Add(reader.GetInt64 0, reader.GetString 1, reader.GetString 2, reader.GetString 3)
+                                    rows |> Seq.toList
+                                let topologyFileCount =
+                                    use command = connection.CreateCommand()
+                                    command.Transaction <- transaction
+                                    command.CommandText <- "SELECT count(*) FROM files WHERE domain = $domain"
+                                    addParameter command "$domain" (box domain)
+                                    Convert.ToInt32(command.ExecuteScalar())
+                                if not domainDefinitions.IsEmpty || topologyFileCount > 0 then
+                                    let entityTypes =
+                                        domainDefinitions
+                                        |> Seq.map (fun (_, entityType, _, _) -> entityType)
+                                        |> Seq.distinct
+                                        |> Seq.sort
+                                        |> Seq.map JsonValue.String
+                                        |> Seq.toArray
+                                        |> JsonValue.Array
+                                    let directories =
+                                        domainDefinitions
+                                        |> Seq.choose (fun (_, _, logicalPath, _) ->
+                                            let directory = Path.GetDirectoryName(normalizePath logicalPath)
+                                            if String.IsNullOrWhiteSpace directory then None else Some(normalizePath directory))
+                                        |> Seq.distinct
+                                        |> Seq.sort
+                                        |> Seq.map JsonValue.String
+                                        |> Seq.toArray
+                                        |> JsonValue.Array
+                                    let workspaceCount = domainDefinitions |> List.filter (fun (_, _, _, origin) -> origin = "workspace") |> List.length
+                                    let vanillaCount = domainDefinitions |> List.filter (fun (_, _, _, origin) -> origin = "vanilla") |> List.length
+                                    setCommandParameters insertDomainCommand
+                                        [ "$id", box domain; "$count", box domainDefinitions.Length; "$workspace", box workspaceCount
+                                          "$vanilla", box vanillaCount; "$types", box (entityTypes.ToString(JsonSaveOptions.DisableFormatting))
+                                          "$directories", box (directories.ToString(JsonSaveOptions.DisableFormatting)) ]
+                                    insertDomainCommand.ExecuteNonQuery() |> ignore
+                                    let addArchetypes role origin limit =
+                                        domainDefinitions
+                                        |> Seq.filter (fun (_, _, _, itemOrigin) -> itemOrigin = origin)
+                                        |> Seq.groupBy (fun (_, entityType, _, _) -> entityType)
+                                        |> Seq.collect (fun (_, group) -> group |> Seq.truncate 2)
+                                        |> Seq.truncate limit
+                                        |> Seq.iteri (fun rank (definitionId, _, _, _) ->
+                                            setCommandParameters insertArchetypeCommand
+                                                [ "$definition", box definitionId; "$domain", box domain; "$origin", box origin
+                                                  "$rank", box rank; "$role", box role ]
+                                            insertArchetypeCommand.ExecuteNonQuery() |> ignore)
+                                    addArchetypes "project_pattern" "workspace" 12
+                                    addArchetypes "vanilla_archetype" "vanilla" options.archetypesPerDomain
+
+                            let generatedAt = DateTimeOffset.UtcNow
+                            let oldTopologyTruncated =
+                                match metadata.TryGetValue "topology_truncated" with
+                                | true, value -> value.Equals("true", StringComparison.OrdinalIgnoreCase)
+                                | _ -> false
+                            let warnings = ResizeArray<string>()
+                            if runtime.status <> "ready" then warnings.Add("The knowledge snapshot was exported while CWTools was loading or stale.")
+                            if oldTopologyTruncated || freshTopology.truncated then
+                                warnings.Add("Topology and event relationships are partial because the configured export limits were reached.")
+                            let upsertMetadata key value =
+                                use command = connection.CreateCommand()
+                                command.Transaction <- transaction
+                                command.CommandText <- "INSERT INTO metadata(key, value) VALUES ($key, $value) ON CONFLICT(key) DO UPDATE SET value = excluded.value"
+                                addParameter command "$key" (box key)
+                                addParameter command "$value" (box value)
+                                command.ExecuteNonQuery() |> ignore
+                            upsertMetadata "status" runtime.status
+                            upsertMetadata "game" activeGame
+                            upsertMetadata "generated_at" (generatedAt.ToString("O"))
+                            upsertMetadata "generated_at_unix_ms" (generatedAt.ToUnixTimeMilliseconds().ToString())
+                            upsertMetadata "graph_version" (runtime.graphVersion.ToString())
+                            upsertMetadata "generation_mode" "incremental"
+                            upsertMetadata "validation_in_progress" ((string runtime.validationInProgress).ToLowerInvariant())
+                            upsertMetadata "loading_in_progress" ((string runtime.loadingInProgress).ToLowerInvariant())
+                            upsertMetadata "pending_global_kinds" (JsonValue.Array(runtime.pendingGlobalKinds |> List.map JsonValue.String |> List.toArray).ToString(JsonSaveOptions.DisableFormatting))
+                            upsertMetadata "last_global_refresh_at_unix_ms" (runtime.lastGlobalRefreshAtUnixMs.ToString())
+                            upsertMetadata "topology_truncated" ((string (oldTopologyTruncated || freshTopology.truncated)).ToLowerInvariant())
+                            upsertMetadata "warnings" (JsonValue.Array(warnings |> Seq.map JsonValue.String |> Seq.toArray).ToString(JsonSaveOptions.DisableFormatting))
+
+                            let scalarCount sql =
+                                use command = connection.CreateCommand()
+                                command.Transaction <- transaction
+                                command.CommandText <- sql
+                                Convert.ToInt32(command.ExecuteScalar())
+                            let groupedCounts sql =
+                                use command = connection.CreateCommand()
+                                command.Transaction <- transaction
+                                command.CommandText <- sql
+                                use reader = command.ExecuteReader()
+                                let values = ResizeArray<string * int>()
+                                while reader.Read() do
+                                    values.Add(reader.GetString 0, Convert.ToInt32(reader.GetInt64 1))
+                                values |> Seq.toList
+                            let statsJson counts =
+                                counts
+                                |> List.map (fun (key, count) -> key, JsonValue.Number(decimal count))
+                                |> List.toArray
+                                |> JsonValue.Record
+                            let ratio numerator denominator =
+                                if denominator = 0 then 0.0 else float numerator / float denominator
+                            let definitionCount = scalarCount "SELECT count(*) FROM definitions"
+                            let workspaceDefinitionCount = scalarCount "SELECT count(*) FROM definitions WHERE origin = 'workspace'"
+                            let workspaceDeclaredDefinitionCount = scalarCount "SELECT count(*) FROM definitions WHERE origin = 'workspace' AND provenance_kind = 'declared'"
+                            let workspaceSyntheticDefinitionCount = scalarCount "SELECT count(*) FROM definitions WHERE origin = 'workspace' AND provenance_kind = 'synthetic'"
+                            let dependencyDefinitionCount = scalarCount "SELECT count(*) FROM definitions WHERE origin = 'dependency'"
+                            let vanillaDefinitionCount = scalarCount "SELECT count(*) FROM definitions WHERE origin = 'vanilla'"
+                            let curatedDefinitionCount = scalarCount "SELECT count(*) FROM definitions WHERE origin = 'curated'"
+                            let declaredDefinitionCount = scalarCount "SELECT count(*) FROM definitions WHERE provenance_kind = 'declared'"
+                            let syntheticDefinitionCount = scalarCount "SELECT count(*) FROM definitions WHERE provenance_kind = 'synthetic'"
+                            let derivedDefinitionCount = scalarCount "SELECT count(*) FROM definitions WHERE provenance_kind = 'derived'"
+                            let lineZeroDefinitionCount = scalarCount "SELECT count(*) FROM definitions WHERE line <= 0"
+                            let definitionStackCount = scalarCount "SELECT count(*) FROM definition_stacks"
+                            let topologyFileCount = scalarCount "SELECT count(*) FROM files"
+                            let topologyEdgeCount = scalarCount "SELECT count(*) FROM references_graph"
+                            let eventNodeCount = scalarCount "SELECT count(*) FROM event_nodes"
+                            let eventEdgeCount = scalarCount "SELECT count(*) FROM event_edges"
+                            let eventLogicCount = scalarCount "SELECT count(*) FROM event_logic"
+                            let definitionOriginCounts = groupedCounts "SELECT origin, count(*) FROM definitions GROUP BY origin ORDER BY origin"
+                            let definitionProvenanceCounts = groupedCounts "SELECT provenance_kind, count(*) FROM definitions GROUP BY provenance_kind ORDER BY provenance_kind"
+                            let definitionEntityTypeCounts = groupedCounts "SELECT entity_type, count(*) AS total FROM definitions GROUP BY entity_type ORDER BY lower(entity_type) LIMIT 200"
+                            let topologyEdgeKindCounts = groupedCounts "SELECT type_group, count(*) FROM references_graph GROUP BY type_group ORDER BY type_group"
+                            let labeledTopologyEdgeCount = scalarCount "SELECT count(*) FROM references_graph WHERE trim(coalesce(label, '')) <> ''"
+                            let labeledEventEdgeCount = scalarCount "SELECT count(*) FROM event_edges WHERE trim(coalesce(label, '')) <> ''"
+                            let resolvedEventEdgeCount = scalarCount "SELECT count(*) FROM event_edges WHERE confidence <> 'unresolved'"
+                            let inlineTemplateCount = scalarCount "SELECT count(*) FROM inline_templates"
+                            let inlineInvocationCount = scalarCount "SELECT count(*) FROM inline_invocations"
+                            let inlineExpansionCount = scalarCount "SELECT count(*) FROM inline_expansions"
+                            let incrementalDurationMs = max 0 (int ((DateTimeOffset.UtcNow - incrementalStartedAt).TotalMilliseconds))
+                            let databaseSizeBytes = try FileInfo(target).Length with _ -> 0L
+                            let upsertFinalMetadata = upsertMetadata
+                            upsertFinalMetadata "definition_count" (string definitionCount)
+                            upsertFinalMetadata "workspace_definition_count" (string workspaceDefinitionCount)
+                            upsertFinalMetadata "workspace_declared_definition_count" (string workspaceDeclaredDefinitionCount)
+                            upsertFinalMetadata "workspace_synthetic_definition_count" (string workspaceSyntheticDefinitionCount)
+                            upsertFinalMetadata "dependency_definition_count" (string dependencyDefinitionCount)
+                            upsertFinalMetadata "vanilla_definition_count" (string vanillaDefinitionCount)
+                            upsertFinalMetadata "curated_definition_count" (string curatedDefinitionCount)
+                            upsertFinalMetadata "declared_definition_count" (string declaredDefinitionCount)
+                            upsertFinalMetadata "synthetic_definition_count" (string syntheticDefinitionCount)
+                            upsertFinalMetadata "derived_definition_count" (string derivedDefinitionCount)
+                            upsertFinalMetadata "line_zero_definition_count" (string lineZeroDefinitionCount)
+                            upsertFinalMetadata "topology_file_count" (string topologyFileCount)
+                            upsertFinalMetadata "topology_edge_count" (string topologyEdgeCount)
+                            upsertFinalMetadata "event_node_count" (string eventNodeCount)
+                            upsertFinalMetadata "event_edge_count" (string eventEdgeCount)
+                            upsertFinalMetadata "event_logic_count" (string eventLogicCount)
+                            upsertFinalMetadata "inline_template_count" (string inlineTemplateCount)
+                            upsertFinalMetadata "inline_invocation_count" (string inlineInvocationCount)
+                            upsertFinalMetadata "inline_expansion_count" (string inlineExpansionCount)
+                            for file in changedFiles do
+                                upsertMetadata (incrementalFingerprintMetadataKey file) fingerprints.[file]
+                            transaction.Commit()
+                            let compactDomains =
+                                use command = connection.CreateCommand()
+                                command.CommandText <- "SELECT id, definition_count, workspace_count, vanilla_count, entity_types_json FROM domains ORDER BY id"
+                                use reader = command.ExecuteReader()
+                                let values = ResizeArray<JsonValue>()
+                                while reader.Read() do
+                                    values.Add(
+                                        jsonRecord
+                                            [ Some("id", JsonValue.String(reader.GetString 0))
+                                              Some("definitionCount", JsonValue.Number(decimal (reader.GetInt64 1)))
+                                              Some("workspaceCount", JsonValue.Number(decimal (reader.GetInt64 2)))
+                                              Some("vanillaCount", JsonValue.Number(decimal (reader.GetInt64 3)))
+                                              Some("entityTypes", JsonValue.Parse(reader.GetString 4)) ])
+                                values.ToArray()
+                            Some(
+                                jsonRecord
+                                    [ Some("ok", JsonValue.Boolean true)
+                                      Some("status", JsonValue.String runtime.status)
+                                      Some("source", JsonValue.String "cwtools-project-knowledge-sqlite")
+                                      Some("schemaVersion", JsonValue.Number(decimal KnowledgeSchemaVersion))
+                                      Some("capabilityVersions", capabilityVersionsJson)
+                                      Some("capabilityStatus", capabilityStatusJson)
+                                      Some("game", JsonValue.String activeGame)
+                                      Some("generatedAtUnixMs", JsonValue.Number(decimal (generatedAt.ToUnixTimeMilliseconds())))
+                                      Some("graphVersion", JsonValue.Number(decimal runtime.graphVersion))
+                                      Some("completeExport", JsonValue.Boolean options.completeExport)
+                                      Some("projectRoots", jsonStringArray projectRoots)
+                                      Some("databasePath", JsonValue.String(normalizePath target))
+                                      Some("generationMode", JsonValue.String "incremental")
+                                      Some("domains", JsonValue.Array compactDomains)
+                                      Some("baseline", jsonRecord
+                                        [ Some("deterministicOrdering", JsonValue.Boolean true)
+                                          Some("exportDurationMs", JsonValue.Number(decimal incrementalDurationMs))
+                                          Some("incrementalDurationMs", JsonValue.Number(decimal incrementalDurationMs))
+                                          Some("changedFiles", JsonValue.Number(decimal changedFiles.Length))
+                                          Some("databaseSizeBytes", JsonValue.Number(decimal databaseSizeBytes))
+                                          Some("definitions", jsonRecord
+                                            [ Some("total", JsonValue.Number(decimal definitionCount))
+                                              Some("byOrigin", statsJson definitionOriginCounts)
+                                              Some("byProvenanceKind", statsJson definitionProvenanceCounts)
+                                              Some("lineZeroRecords", JsonValue.Number(decimal lineZeroDefinitionCount))
+                                              Some("byEntityType", statsJson definitionEntityTypeCounts) ])
+                                          Some("edges", jsonRecord
+                                            [ Some("total", JsonValue.Number(decimal topologyEdgeCount))
+                                              Some("byKind", statsJson topologyEdgeKindCounts)
+                                              Some("labeledRatio", JsonValue.Float(ratio labeledTopologyEdgeCount topologyEdgeCount)) ])
+                                          Some("eventGraph", jsonRecord
+                                            [ Some("nodes", JsonValue.Number(decimal eventNodeCount))
+                                              Some("edges", JsonValue.Number(decimal eventEdgeCount))
+                                              Some("logicFacts", JsonValue.Number(decimal eventLogicCount))
+                                              Some("edgeLabeledRatio", JsonValue.Float(ratio labeledEventEdgeCount eventEdgeCount))
+                                              Some("edgeResolutionRatio", JsonValue.Float(ratio resolvedEventEdgeCount eventEdgeCount)) ])
+                                          Some("inlineGraph", jsonRecord
+                                            [ Some("templates", JsonValue.Number(decimal inlineTemplateCount))
+                                              Some("invocations", JsonValue.Number(decimal inlineInvocationCount))
+                                              Some("expansions", JsonValue.Number(decimal inlineExpansionCount)) ]) ])
+                                      Some("coverage", jsonRecord
+                                        [ Some("filesConsidered", JsonValue.Number(decimal topologyFileCount))
+                                          Some("filesIndexed", JsonValue.Number(decimal topologyFileCount))
+                                          Some("definitionsConsidered", JsonValue.Number(decimal definitionCount))
+                                          Some("definitionsIndexed", JsonValue.Number(decimal definitionCount))
+                                          Some("edgesConsidered", JsonValue.Number(decimal topologyEdgeCount))
+                                          Some("edgesIndexed", JsonValue.Number(decimal topologyEdgeCount))
+                                          Some("truncated", JsonValue.Boolean(oldTopologyTruncated || freshTopology.truncated))
+                                          Some("staleReasons", jsonStringArray [ if runtime.status <> "ready" then yield "lsp_not_ready" ])
+                                          Some("unsupportedConstructs", jsonStringArray [ if oldTopologyTruncated || freshTopology.truncated then yield "topology_export_limits_reached" ]) ])
+                                      Some("counts", jsonRecord
+                                        [ Some("definitions", JsonValue.Number(decimal definitionCount))
+                                          Some("availableDefinitions", JsonValue.Number(decimal definitionCount))
+                                          Some("workspaceDefinitions", JsonValue.Number(decimal workspaceDefinitionCount))
+                                          Some("workspaceDeclaredDefinitions", JsonValue.Number(decimal workspaceDeclaredDefinitionCount))
+                                          Some("workspaceSyntheticDefinitions", JsonValue.Number(decimal workspaceSyntheticDefinitionCount))
+                                          Some("dependencyDefinitions", JsonValue.Number(decimal dependencyDefinitionCount))
+                                          Some("vanillaDefinitions", JsonValue.Number(decimal vanillaDefinitionCount))
+                                          Some("curatedDefinitions", JsonValue.Number(decimal curatedDefinitionCount))
+                                          Some("declaredDefinitions", JsonValue.Number(decimal declaredDefinitionCount))
+                                          Some("syntheticDefinitions", JsonValue.Number(decimal syntheticDefinitionCount))
+                                          Some("derivedDefinitions", JsonValue.Number(decimal derivedDefinitionCount))
+                                          Some("lineZeroDefinitions", JsonValue.Number(decimal lineZeroDefinitionCount))
+                                          Some("definitionStacks", JsonValue.Number(decimal definitionStackCount))
+                                          Some("topologyFiles", JsonValue.Number(decimal topologyFileCount))
+                                          Some("topologyEdges", JsonValue.Number(decimal topologyEdgeCount))
+                                          Some("eventNodes", JsonValue.Number(decimal eventNodeCount))
+                                          Some("eventEdges", JsonValue.Number(decimal eventEdgeCount))
+                                          Some("eventLogic", JsonValue.Number(decimal eventLogicCount)) ])
+                                      Some("freshness", jsonRecord
+                                        [ Some("validationInProgress", JsonValue.Boolean runtime.validationInProgress)
+                                          Some("loadingInProgress", JsonValue.Boolean runtime.loadingInProgress)
+                                          Some("pendingGlobalKinds", jsonStringArray runtime.pendingGlobalKinds)
+                                          Some("lastGlobalRefreshAtUnixMs", JsonValue.Number(decimal runtime.lastGlobalRefreshAtUnixMs)) ])
+                                      Some("warnings", jsonStringArray warnings) ])
 
 let exportProjectKnowledgeCancellable shouldCancel (activeGame: string) (projectRoots: string list) (rawOptions: ExportOptions) (runtime: RuntimeMetadata) (game: IGame<'T>) =
     let run () =

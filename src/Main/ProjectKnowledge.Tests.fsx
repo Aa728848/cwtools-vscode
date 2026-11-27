@@ -52,6 +52,34 @@ assertTrue "complete export does not truncate event state facts"
 assertTrue "full manifest eventLogic includes relation and state-access rows"
     (projectKnowledgeSource.Contains("eventGraph.logic.Length + eventGraph.stateAccesses.Length", StringComparison.Ordinal))
 
+let unchangedMetadata = System.Collections.Generic.Dictionary<string, string>()
+let unchangedFingerprints = System.Collections.Generic.Dictionary<string, string>()
+let fingerprintKey = incrementalFingerprintMetadataKey "events/a.txt"
+unchangedMetadata.["status"] <- "ready"
+unchangedFingerprints.[fingerprintKey] <- "facts-v1"
+let unchangedFiles = [ "events/a.txt" ]
+let readyRuntime = [ "status", "ready" ]
+assertFalse "incremental export establishes a missing fingerprint baseline before skipping"
+    (incrementalKnowledgeUnchanged (unchangedMetadata :> Collections.Generic.IReadOnlyDictionary<_, _>) readyRuntime unchangedFiles (unchangedFingerprints :> Collections.Generic.IReadOnlyDictionary<_, _>))
+unchangedMetadata.[fingerprintKey] <- "facts-v1"
+assertTrue "identical runtime and knowledge facts skip the incremental write"
+    (incrementalKnowledgeUnchanged (unchangedMetadata :> Collections.Generic.IReadOnlyDictionary<_, _>) readyRuntime unchangedFiles (unchangedFingerprints :> Collections.Generic.IReadOnlyDictionary<_, _>))
+assertFalse "a runtime transition still refreshes metadata"
+    (incrementalKnowledgeUnchanged (unchangedMetadata :> Collections.Generic.IReadOnlyDictionary<_, _>) [ "status", "loading" ] unchangedFiles (unchangedFingerprints :> Collections.Generic.IReadOnlyDictionary<_, _>))
+unchangedFingerprints.[fingerprintKey] <- "facts-v2"
+assertFalse "changed knowledge facts cannot be skipped"
+    (incrementalKnowledgeUnchanged (unchangedMetadata :> Collections.Generic.IReadOnlyDictionary<_, _>) readyRuntime unchangedFiles (unchangedFingerprints :> Collections.Generic.IReadOnlyDictionary<_, _>))
+
+let incrementalWriterStart = projectKnowledgeSource.IndexOf("let private tryIncrementalProjectKnowledgeExport", StringComparison.Ordinal)
+let incrementalWriterEnd = projectKnowledgeSource.IndexOf("let exportProjectKnowledgeCancellable", incrementalWriterStart, StringComparison.Ordinal)
+let incrementalWriter = projectKnowledgeSource.Substring(incrementalWriterStart, incrementalWriterEnd - incrementalWriterStart)
+assertTrue "incremental export commits data, statistics, and fingerprints in one transaction"
+    (Regex.Matches(incrementalWriter, Regex.Escape("transaction.Commit()")).Count = 1
+     && not (incrementalWriter.Contains("finalMetadataTransaction", StringComparison.Ordinal)))
+assertFalse "volatile timing and database size diagnostics are not persisted on every save"
+    (incrementalWriter.Contains("upsertFinalMetadata \"last_incremental_duration_ms\"", StringComparison.Ordinal)
+     || incrementalWriter.Contains("upsertFinalMetadata \"database_size_bytes\"", StringComparison.Ordinal))
+
 let outgoingSource, outgoingTarget = orientTypedReference "samplemod_legacy.38" "samplemod_legacy.39" true
 let incomingSource, incomingTarget = orientTypedReference "container_event" "referenced_event" false
 assertTrue "outgoing typed reference preserves source-to-target direction" (outgoingSource = "samplemod_legacy.38" && outgoingTarget = "samplemod_legacy.39")

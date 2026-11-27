@@ -1,5 +1,22 @@
 # Changelog
 
+## [3.3.1] - 2026-11-27
+
+### 性能优化 / Performance
+
+- **[优化] 手动保存不再无谓写入知识库（Manual saves no longer rewrite unchanged project knowledge）**：
+  - 保存后先按内容哈希去重，原样保存或仅改格式不再触发知识库刷新。
+  - 内容变化时在写库前比较知识事实指纹，定义、引用、事件图与内联图都未变化时直接返回 `unchanged`，不提交事务、不更新时间戳。
+  - 有效增量更新合并为单次 SQLite 事务；耗时与数据库大小改为返回诊断，不再每次落库。
+  - 保存事件改为 1500ms 尾沿去抖加 10s 最大等待，连续编辑期间合并刷新，同时保留图级文件必须全量刷新的规则。
+  - English: [Optimization] Manual saves no longer rewrite unchanged project knowledge. Saves are deduplicated by content hash, so a no-op save or a formatting-only edit no longer triggers a refresh. When content does change, knowledge-fact fingerprints for definitions, references, event graph and inline graph are compared before any write; an unchanged result returns `unchanged` without committing a transaction or updating timestamps. Effective incremental updates now commit in a single SQLite transaction, while duration and database size became returned diagnostics instead of per-save rows. Save events use a 1500 ms trailing debounce plus a 10 s maximum wait so continuous editing coalesces, while graph-wide files still force a full rebuild.
+
+### 依赖更新 / Dependencies
+
+- **[说明] 内置运行时依赖升级（Bundled runtime dependencies upgraded）**：
+  - 内置 `cwtools-shared` 0.7.0 与 `cwtools-node` 0.4.2，对应独立发布版本为 `cwtools-shared@0.7.0`、`cwtools-node@0.4.2`、`cwtools-mcp@0.6.2` 与 `dsh-cwtools@0.4.0`。
+  - English: [Note] This release bundles `cwtools-shared` 0.7.0 and `cwtools-node` 0.4.2; the matching standalone releases are `cwtools-shared@0.7.0`, `cwtools-node@0.4.2`, `cwtools-mcp@0.6.2` and `dsh-cwtools@0.4.0`.
+
 ## [3.3.0] - 2026-11-26
 
 ### 重新打包：更新内置运行时依赖 / Repackaged with Updated Runtime Dependencies

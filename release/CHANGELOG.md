@@ -1,5 +1,43 @@
 # Changelog
 
+## [3.4.0] - 2026-11-28
+
+### Stellaris 4.6 引擎规则与校验同步 / Stellaris 4.6 Engine Rules & Validation Sync
+
+- **[特性] 全量对齐 Stellaris 4.6.0（Corona Borealis）CWT 规则与引擎成本标注（Full Stellaris 4.6.0 CWT rules and engine cost annotations）**：
+  - 基于 Stellaris 4.6.0 反编译源码全量重锚 1,100 条触发器/效果成本标注，补齐 52 条新增 Ideology（意识形态）命令及 3 条同编译单元命令、15 条同步触发岗位重算的 `sync_effect = pop_jobs` 效果、双批处理开关（`set_reach_update_batch` / `set_spawn_system_batch`）与 4 条资源导出模板。
+  - `modifier_categories.cwt` 补齐 `Stations`、`Ship Components`、`Cosmic Storm Influence Field`、`Galactic Community`，完整覆盖 4.6 引擎全部 34 个修正类别；`defines.cwt` 补充 4.6 新增的 `SHIP_DISENGAGE_INACTIVITY_DAYS` 说明。
+  - English: [Feature] Synchronized CWT rules and engine cost annotations with Stellaris 4.6.0 (Corona Borealis): re-anchored 1,100 evidence lines, added 52 Ideology commands plus 3 companion commands, 15 `sync_effect = pop_jobs` effects, dual `refresh_batch` toggles (`set_reach_update_batch` / `set_spawn_system_batch`), 4 resource export templates, and all 4 missing modifier categories (covering all 34 engine categories), along with `SHIP_DISENGAGE_INACTIVITY_DAYS` documentation in `defines.cwt`.
+
+- **[特性] 性能提示与脚本反模式校验全面适配 4.6（Engine performance hints and anti-pattern validators updated for 4.6）**：
+  - `CW279` / `CW288` 热路径补齐 `common/pop_jobs/` 与 `common/zones/`，并纳入 4.6 可空作用域 `ideology`。
+  - 因 4.6 变量键并入全局 65535 `CPdxIntegerFlags` 池，`CW281` 扩展检测动态数字后缀变量、POI、定时/关系 flag 与 `set_saved_date`。
+  - `CW284` / `CW286` / `CW287` 扩展支持 `pop_job`、`colony`、`overlord`、`controller`、`starbase`、`sector`、`federation`、`ideology`；`CW290` 新增武器 `size_damage_factor >= 0` 非负校验；`CW120` 预触发建议扩展至 4.6 全部 10 种事件类型及 `pop_jobs` 的 `is_robotic`；`validateShipDesigns` 纳入全部 5 个 4.6 内置 `DEFAULT_*` 区段模板。
+  - 同步更新中英双语诊断提示、悬停性能提示（补齐 `change_*_flag`）与诊断代码文档。
+  - English: [Feature] Updated engine performance and anti-pattern validators for 4.6: added `common/pop_jobs/` and `common/zones/` hot contexts plus nullable `ideology` for `CW279`/`CW288`; expanded `CW281` to cover dynamic variable names (now sharing the 65,535 global flag pool in 4.6), POIs, timed flags and `set_saved_date`; extended `CW284`/`CW286`/`CW287` scope coverage; added `size_damage_factor >= 0` validation to `CW290`; expanded `CW120` pre-triggers across all 10 Stellaris 4.6 event types and `pop_jobs` `is_robotic`; and added all 5 vanilla 4.6 `DEFAULT_*` ship section templates to ship design validation, together with bilingual diagnostics and `change_*_flag` hover hints.
+
+### 索敌权重分析与预览 / Targeting Weight Analysis & Preview
+
+- **[修复] 索敌计算模型修正三处行为偏差并支持 `target_focus` 自动联动（Fix three targeting-model discrepancies and auto-sync `target_focus` in preview）**：
+  - 对照 4.6.0 源码修正共享计算器与面板逻辑：`Mrec (0.3)` 仅在 `target_focus = spread` 或困惑时对全部记忆项生效；舰船阶段无武装（`×0.005`）与星基（`×0.75`）降权为 `if / else if` 互斥分支；舰船阶段对称施加 `Mcur` / `Mrec`。
+  - 武器索敌提取器新增 `target_focus`（含 `inline_script` 展开）解析；索敌预览面板选中武器时自动联动勾选 `target_focus = spread` 并在模板事实卡展示显式 `target_focus`。
+  - English: [Fix] Aligned the shared targeting-weight calculator and preview panel with Stellaris 4.6.0 source: `Mrec (0.3)` now applies only under `target_focus = spread` (or confused) to all remembered targets; Stage 1 unarmed (`×0.005`) and starbase (`×0.75`) penalties are mutually exclusive `if / else if` branches; and Stage 1 applies `Mcur`/`Mrec` symmetrically. The extractor now reads `target_focus` directly and through `inline_script`, and the preview panel auto-syncs the `target_focus = spread` toggle and displays declared `target_focus` facts.
+
+### 解析、数据流分析与本地化修复 / Parsing, Flow Analysis & Localisation Fixes
+
+- **[修复] 核心回退常量、事件链扫描、`calc_true_if` 作用域推断与 PDX 数据流分析修复（Core fallbacks, event chains, `calc_true_if` scope inference, and PDX flow analysis fixes）**：
+  - `STLConstants` 补充 `Background Colony` / `Ideology` 默认作用域与 12 个 4.x/4.6 默认修正类别；事件链引用扫描从 6 种扩充至 4.6 全部 21 种 `*_event`。
+  - `STLProcess` 支持穿透 `calc_true_if` 递归推断脚本触发器作用域，并豁免内置 `amount` 字段避免严格模式清空推断结果。
+  - `PdxFlowAnalysis` 补充 4.6 遍历/状态作用域、`export_*_to_variable`（同步优先提取 `variable` 字段）、`change_*_flag` 与算术变量循环进度，并修复低权重实体遍历因默认 `"any"` 初值权重过高而始终退化为 `"any"` 的缺陷。
+  - `gameProfiles` 将 Stellaris 本地化支持语言表精确对齐至 4.6 官方 10 种语言（移除 Stellaris 不支持的 `l_turkish`，保留给现代/通用 Paradox 游戏）。
+  - English: [Fix] Added `Background Colony`/`Ideology` default scopes and 12 missing 4.x/4.6 default modifier categories to `STLConstants`; expanded event-chain scanning from 6 to all 21 Stellaris 4.6 `*_event` calls; added `calc_true_if` recursive scope inference (exempting its built-in `amount` key in strict mode); updated `PdxFlowAnalysis` with 4.6 scopes, `export_*_to_variable` (`variable` subject priority), `change_*_flag`, arithmetic loop-progress ops, and fixed low-weight entity traversals collapsing to `"any"`; and aligned Stellaris localisation language tags with the 10 official 4.6 languages while keeping `l_turkish` for modern/generic profiles.
+
+### 文档与知识库 / Documentation & Knowledge Base
+
+- **[文档] 同步引擎参考文档、索敌技能与 Shader 契约至 Stellaris 4.6.0（Sync engine docs, targeting skill, and shader contracts to 4.6.0）**：
+  - 更新伤害结算文档（平反 §9.5 `+0x80` 虚槽走 `CShip::TakeDamage` 三层分配并更新 4.6 偏移）、静默数据损坏清单（记录 4.6 变量并入 65535 全局 flag 表）与索敌权重一手核验文档/技能，并对齐 Shader 渲染契约版本元数据。
+  - English: [Docs] Updated combat damage resolution (rehabilitating the §9.5 `+0x80` vtable slot into `CShip::TakeDamage` and refreshing 4.6 offsets), silent corruption catalog (documenting variables sharing the 65,535 global flag pool in 4.6), ship targeting weights specification/skill, and shader renderer contract metadata to Stellaris 4.6.0.
+
 ## [3.3.1] - 2026-11-27
 
 ### 性能优化 / Performance
